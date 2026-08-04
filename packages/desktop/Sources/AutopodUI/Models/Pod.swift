@@ -249,6 +249,7 @@ public struct ValidationChecks: Sendable {
     public let sastOutput: String?
     public let reviewIssues: [String]?
     public let reviewFindings: [ValidationFindingResponse]?
+    public let reviewCouncil: ReviewCouncil?
     public let dismissedFindingIds: Set<String>
     public let reviewReasoning: String?
     public let reviewSkipReason: String?
@@ -274,7 +275,7 @@ public struct ValidationChecks: Sendable {
         tests: Bool? = nil, lint: Bool? = nil, sast: Bool? = nil, review: Bool? = nil,
         setupOutput: String? = nil, buildOutput: String? = nil, testOutput: String? = nil,
         lintOutput: String? = nil, sastOutput: String? = nil,
-        reviewIssues: [String]? = nil, reviewFindings: [ValidationFindingResponse]? = nil,
+        reviewIssues: [String]? = nil, reviewFindings: [ValidationFindingResponse]? = nil, reviewCouncil: ReviewCouncil? = nil,
         dismissedFindingIds: Set<String> = [],
         reviewReasoning: String? = nil,
         reviewSkipReason: String? = nil,
@@ -298,6 +299,7 @@ public struct ValidationChecks: Sendable {
         self.buildOutput = buildOutput; self.testOutput = testOutput
         self.lintOutput = lintOutput; self.sastOutput = sastOutput
         self.reviewIssues = reviewIssues; self.reviewFindings = reviewFindings
+        self.reviewCouncil = reviewCouncil
         self.dismissedFindingIds = dismissedFindingIds
         self.reviewReasoning = reviewReasoning
         self.reviewSkipReason = reviewSkipReason
@@ -376,12 +378,14 @@ public struct ReviewPhaseDetail: Sendable {
     public let issues: [String]
     public let requirementsCheck: [RequirementCheckDetail]?
     public let screenshots: [ScreenshotRef]
+    public let council: ReviewCouncil?
     public init(
         status: String, reasoning: String, issues: [String],
-        requirementsCheck: [RequirementCheckDetail]?, screenshots: [ScreenshotRef]
+        requirementsCheck: [RequirementCheckDetail]?, screenshots: [ScreenshotRef], council: ReviewCouncil? = nil
     ) {
         self.status = status; self.reasoning = reasoning; self.issues = issues
         self.requirementsCheck = requirementsCheck; self.screenshots = screenshots
+        self.council = council
     }
 }
 
@@ -554,7 +558,8 @@ public struct ValidationProgress: Sendable {
                     requirementsCheck: r.requirementsCheck?.map { rc in
                         RequirementCheckDetail(criterion: rc.criterion, met: rc.met, note: rc.note)
                     },
-                    screenshots: r.screenshots.compactMap { resolveScreenshot($0) }
+                    screenshots: r.screenshots.compactMap { resolveScreenshot($0) },
+                    council: reviewCouncil(from: r)
                 )
             }
         case .advisory:

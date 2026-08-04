@@ -24,6 +24,47 @@ public func validationHistoryShouldRefreshAfterAdvisory(
   return progress?.advisory.status != .running
 }
 
+/// Maps the immutable review snapshot belonging to one stored validation attempt.
+public func validationHistoryReviewCouncil(_ response: ValidationResponse) -> ReviewCouncil? {
+  reviewCouncil(from: response.taskReview)
+}
+
+/// The immutable inputs rendered by ValidationTab's established legacy Review branch.
+/// Keeping this selection outside the view makes the no-council compatibility path testable.
+public struct LegacyReviewPresentation: Sendable, Equatable {
+  public let reasoning: String?
+  public let issues: [String]
+
+  public var showsReasoning: Bool { issues.isEmpty && !(reasoning ?? "").isEmpty }
+  public var showsFindings: Bool { !issues.isEmpty }
+}
+
+public func legacyReviewPresentation(
+  council: ReviewCouncil?,
+  issues: [String],
+  fallbackFindings: [ValidationFindingResponse],
+  reasoning: String?
+) -> LegacyReviewPresentation? {
+  guard council == nil else { return nil }
+  return LegacyReviewPresentation(
+    reasoning: reasoning,
+    issues: issues.isEmpty ? fallbackFindings.map(\.description) : issues
+  )
+}
+
+/// Retain a completed streamed council until the persisted validation snapshot catches up.
+public func validationShouldDisplayLiveProgress(
+  podStatus: PodStatus,
+  progress: ValidationProgress,
+  hasPersistedReviewCouncil: Bool
+) -> Bool {
+  guard !hasPersistedReviewCouncil else { return false }
+  return podStatus == .validating
+    || progress.hasRunningPhase
+    || progress.advisoryDetail != nil
+    || progress.reviewDetail?.council != nil
+}
+
 /// Validation tab — shows live per-phase progress chips + a detail panel for the selected phase.
 ///
 /// Data priority:
@@ -91,7 +132,11 @@ public struct ValidationTab: View {
 
   private var progress: ValidationProgress? {
     guard let liveProgress else { return nil }
-    if pod.status == .validating || liveProgress.hasRunningPhase || liveProgress.advisoryDetail != nil {
+    if validationShouldDisplayLiveProgress(
+      podStatus: pod.status,
+      progress: liveProgress,
+      hasPersistedReviewCouncil: checks?.reviewCouncil != nil
+    ) {
       return liveProgress
     }
     return nil
@@ -103,6 +148,10 @@ public struct ValidationTab: View {
 
   private var displayedAdvisoryQa: AdvisoryQaDetail? {
     displayedChecks?.advisoryQa ?? liveProgress?.advisoryDetail
+  }
+
+  private var displayedReviewCouncil: ReviewCouncil? {
+    progress?.reviewDetail?.council ?? displayedChecks?.reviewCouncil
   }
 
   private var selectedHistory: StoredValidationResponse? {
@@ -249,6 +298,7 @@ public struct ValidationTab: View {
       lintOutput: lintOutput,
       sastOutput: sastOutput,
       reviewIssues: response.taskReview?.issues,
+      reviewCouncil: validationHistoryReviewCouncil(response),
       reviewReasoning: response.taskReview?.reasoning,
       reviewSkipReason: response.reviewSkipReason,
       reviewSkipKind: response.reviewSkipKind,
@@ -389,6 +439,10 @@ public struct ValidationTab: View {
   }
 
   private func phaseState(_ phase: ValidationPhase) -> ValidationPhaseState {
+    if phase == .review, displayedReviewCouncil?.infrastructureUnavailable == true,
+       progress?.review.status != .running {
+      return ValidationPhaseState(status: .skipped)
+    }
     progress?.state(for: phase) ?? ValidationPhaseState(status: phaseStatus(phase))
   }
 
@@ -407,6 +461,11 @@ public struct ValidationTab: View {
         if p.advisory.status == .running { return "running…" }
         if let advisory = displayedAdvisoryQa {
           return advisoryChipSubLabel(advisory)
+        }
+        return nil
+      case .review:
+        if displayedReviewCouncil?.infrastructureUnavailable == true {
+          return "infrastructure unavailable"
         }
         return nil
       default:
@@ -428,6 +487,9 @@ public struct ValidationTab: View {
           return advisoryChipSubLabel(advisory)
         }
         return nil
+      case .review:
+        return displayedReviewCouncil?.infrastructureUnavailable == true
+          ? "infrastructure unavailable" : nil
       case .setup:
         return nil
       default:
@@ -792,7 +854,10 @@ public struct ValidationTab: View {
     let passedFacts = factChecks.filter(\.passed).count
     let failedFacts = factChecks.filter { !$0.passed }.count
     let totalFacts = contract?.requiredFacts.count ?? factChecks.count
-    let reviewIssueCount = progress?.reviewDetail?.issues.count ?? displayedChecks?.reviewIssues?.count ?? 0
+    let reviewIssueCount = progress?.reviewDetail?.council?.activeCount
+      ?? displayedChecks?.reviewCouncil?.activeCount
+      ?? progress?.reviewDetail?.issues.count
+      ?? displayedChecks?.reviewIssues?.count ?? 0
 
     VStack(alignment: .leading, spacing: 12) {
       HStack(alignment: .top, spacing: 12) {
@@ -1733,19 +1798,61 @@ public struct ValidationTab: View {
     let skipKind: String? = displayedChecks?.reviewSkipKind
     let reqs: [RequirementCheckDetail]? = detail?.requirementsCheck ?? displayedChecks?.requirementsCheck
     let screenshots: [ScreenshotRef] = detail?.screenshots ?? displayedChecks?.taskReviewScreenshots ?? []
-    let issueTexts = issues.isEmpty
-      ? displayedChecks?.reviewFindings?.map(\.description) ?? []
-      : issues
-    let findingItems = reviewFindingItems(from: issueTexts)
+    let council = displayedReviewCouncil
+    let broadReviewIssues = distinctBroadReviewIssues(issues, council: council)
+    let legacyPresentation = legacyReviewPresentation(
+      council: council,
+      issues: issues,
+      fallbackFindings: displayedChecks?.reviewFindings ?? [],
+      reasoning: reasoning
+    )
+    let findingItems = reviewFindingItems(from: legacyPresentation?.issues ?? [])
 
     VStack(alignment: .leading, spacing: 12) {
       phaseStatusRow(
-        status: status,
+        status: council?.infrastructureUnavailable == true ? .skipped : status,
         passLabel: detail?.status == "uncertain" ? "Review uncertain — treated as pass" : "AI review passed",
         failLabel: "Review flagged issues",
-        skipLabel: reviewSkipLabel(kind: skipKind, reason: skipReason)
+        skipLabel: council?.infrastructureUnavailable == true
+          ? "Review Council infrastructure unavailable"
+          : reviewSkipLabel(kind: skipKind, reason: skipReason)
       )
-      if findingItems.isEmpty, let reasoning, !reasoning.isEmpty {
+      if let council {
+        ReviewCouncilView(
+          council: council,
+          dismissedIds: dismissedFindingIds.union(displayedChecks?.dismissedFindingIds ?? []),
+          availableFindings: displayedChecks?.reviewFindings ?? []
+        ) { _, overrideFinding in
+          // Backend overrides are keyed by canonical semantic ID, never candidate source IDs.
+          overrideAction = "dismiss"; overrideReason = ""; overrideGuidance = ""
+          overridePopoverFindingId = overrideFinding.id
+        }
+        .id(council.id)
+        .popover(isPresented: Binding(
+          get: { overridePopoverFindingId != nil },
+          set: { if !$0 { overridePopoverFindingId = nil } }
+        )) {
+          if let id = overridePopoverFindingId {
+            overridePopover(
+              findingId: id,
+              description: displayedChecks?.reviewFindings?.first(where: { $0.id == id })?.description
+                ?? council.findings.first(where: { $0.id == id })?.claim ?? id
+            )
+          }
+        }
+        if !broadReviewIssues.isEmpty || !(reasoning ?? "").isEmpty {
+          DisclosureGroup("Initial broad review") {
+            if let reasoning, !reasoning.isEmpty {
+              Text(reasoning).font(.caption).foregroundStyle(.secondary).textSelection(.enabled)
+            }
+            ForEach(Array(broadReviewIssues.enumerated()), id: \.offset) { _, issue in
+              Text(issue).font(.caption).textSelection(.enabled)
+            }
+          }
+          .font(.caption)
+        }
+      } else {
+      if legacyPresentation?.showsReasoning == true, let reasoning = legacyPresentation?.reasoning {
         Text(reasoning)
           .font(.caption)
           .foregroundStyle(.secondary)
@@ -1760,6 +1867,7 @@ public struct ValidationTab: View {
             reviewFindingRow(item)
           }
         }
+      }
       }
       if let reqs, !reqs.isEmpty {
         VStack(alignment: .leading, spacing: 6) {

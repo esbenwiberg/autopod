@@ -233,6 +233,8 @@ export interface ReviewAxisRun {
   axis: ReviewAxis;
   status: 'completed' | 'unavailable';
   attempts: number;
+  /** Elapsed time across all attempts for this isolated axis. Optional for frozen historical batches. */
+  durationMs?: number;
   error?: string;
 }
 

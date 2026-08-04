@@ -164,6 +164,7 @@ export async function runReviewBatch(
     while (next < REVIEW_AXES.length) {
       const axis = REVIEW_AXES[next++];
       let lastError: string | undefined;
+      const axisStarted = Date.now();
       for (let attempt = 1; attempt <= 2; attempt++) {
         try {
           if (options.readHead && (await options.readHead()) !== options.packet.reviewedHead)
@@ -176,13 +177,24 @@ export async function runReviewBatch(
           candidates.push(
             ...parseCandidates(result.stdout.slice(0, 1_000_000), axis, options.packet.diff),
           );
-          runs.push({ axis, status: 'completed', attempts: attempt });
+          runs.push({
+            axis,
+            status: 'completed',
+            attempts: attempt,
+            durationMs: Date.now() - axisStarted,
+          });
           lastError = undefined;
           break;
         } catch (error) {
           lastError = error instanceof Error ? error.message : String(error);
           if (attempt === 2)
-            runs.push({ axis, status: 'unavailable', attempts: attempt, error: lastError });
+            runs.push({
+              axis,
+              status: 'unavailable',
+              attempts: attempt,
+              durationMs: Date.now() - axisStarted,
+              error: lastError,
+            });
         }
       }
     }

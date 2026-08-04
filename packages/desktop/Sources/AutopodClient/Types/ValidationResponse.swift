@@ -233,6 +233,87 @@ public struct TaskReviewResponse: Codable, Sendable {
   public let screenshots: [ScreenshotRefResponse]
   public let diff: String
   public let requirementsCheck: [RequirementsCheckResponse]?
+  public let tokenUsage: ReviewTokenUsageResponse?
+  public let reviewBatch: ReviewBatchResponse?
+  public let firstGateOverflow: FirstGateOverflowResponse?
+  public let firstGateFindings: [InitialReviewFindingResponse]?
+}
+
+public struct ReviewTokenUsageResponse: Codable, Sendable {
+  public let inputTokens: Int
+  public let outputTokens: Int
+  public let cachedInputTokens: Int?
+  public let cacheCreationInputTokens: Int?
+  public let costUsd: Double?
+}
+
+public struct FirstGateOverflowResponse: Codable, Sendable {
+  public let reportedCount: Int
+  public let retainedFindingCount: Int
+}
+
+public struct InitialReviewFindingResponse: Codable, Sendable {
+  public let id: String
+  public let source: String
+  public let issue: String
+}
+
+public struct StructuredReviewFindingResponse: Codable, Sendable {
+  public let id: String
+  public let axis: String
+  public let severity: String
+  public let path: String
+  public let line: Int?
+  public let symbol: String?
+  public let claim: String
+  public let evidence: String
+  public let remediation: String
+  public let confidence: Double
+  public let state: String?
+}
+
+public enum ReviewFindingCandidateResponse: Sendable {
+  case structured(StructuredReviewFindingResponse)
+  case initial(InitialReviewFindingResponse)
+}
+
+extension ReviewFindingCandidateResponse: Codable {
+  public init(from decoder: any Decoder) throws {
+    let container = try decoder.container(keyedBy: CandidateCodingKeys.self)
+    if try container.decodeIfPresent(String.self, forKey: .source) == "initial-review" {
+      self = .initial(try InitialReviewFindingResponse(from: decoder))
+    } else {
+      self = .structured(try StructuredReviewFindingResponse(from: decoder))
+    }
+  }
+  public func encode(to encoder: any Encoder) throws {
+    switch self { case .structured(let value): try value.encode(to: encoder); case .initial(let value): try value.encode(to: encoder) }
+  }
+  private enum CandidateCodingKeys: String, CodingKey { case source }
+}
+
+public struct ReviewAxisRunResponse: Codable, Sendable {
+  public let axis: String
+  public let status: String
+  public let attempts: Int
+  public let durationMs: Int?
+  public let error: String?
+}
+public struct ReviewSynthesisRejectionResponse: Codable, Sendable { public let sourceIds: [String]; public let reason: String }
+public struct ReviewSynthesisMergeResponse: Codable, Sendable { public let finding: StructuredReviewFindingResponse; public let sourceIds: [String] }
+public struct ReviewFindingLedgerEntryResponse: Codable, Sendable {
+  public let semanticId: String; public let finding: ReviewFindingCandidateResponse; public let state: String
+  public let priorSourceIds: [String]; public let currentSourceIds: [String]; public let closureEvidence: String?
+}
+public struct ReviewRepairDeltaResponse: Codable, Sendable { public let status: String; public let fromHead: String; public let toHead: String; public let diffHash: String?; public let reason: String? }
+public struct ReviewClosureDecisionResponse: Codable, Sendable { public let semanticId: String; public let fixed: Bool; public let evidence: String? }
+public struct ReviewClosureVerificationResponse: Codable, Sendable { public let status: String; public let decisions: [ReviewClosureDecisionResponse]; public let reason: String? }
+public struct ReviewBatchResponse: Codable, Sendable {
+  public let id: String; public let diffHash: String; public let reviewedHead: String; public let promptVersion: String; public let schemaVersion: String; public let model: String
+  public let axes: [ReviewAxisRunResponse]; public let candidates: [ReviewFindingCandidateResponse]; public let initialFindings: [InitialReviewFindingResponse]
+  public let accepted: [ReviewFindingCandidateResponse]; public let rejected: [ReviewSynthesisRejectionResponse]; public let merged: [ReviewSynthesisMergeResponse]
+  public let synthesis: String; public let durationMs: Int; public let infrastructureUnavailable: Bool?; public let tokenUsage: ReviewTokenUsageResponse?
+  public let ledger: [ReviewFindingLedgerEntryResponse]?; public let repairDelta: ReviewRepairDeltaResponse?; public let closureVerification: ReviewClosureVerificationResponse?; public let firstGateOverflow: FirstGateOverflowResponse?
 }
 
 public struct RequirementsCheckResponse: Codable, Sendable {

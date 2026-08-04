@@ -906,6 +906,14 @@ import AutopodUI
   #expect(review.screenshots.isEmpty)
 }
 
+@Test func podMapperPropagatesCurrentReviewCouncil() throws {
+  let sessionJson = """
+  {"id":"lonely-panther","profileName":"autopod-self","task":"Gate 3","status":"complete","model":"m","runtime":"codex","executionTarget":"local","branch":"feat/council","containerId":null,"worktreePath":null,"validationAttempts":1,"maxValidationAttempts":3,"lastValidationResult":{"podId":"lonely-panther","attempt":1,"timestamp":"2026-08-04T00:00:00Z","smoke":{"status":"pass","build":{"status":"pass","output":"","duration":1},"health":{"status":"pass","url":"http://x","responseCode":200,"duration":1},"pages":[]},"taskReview":{"status":"pass","reasoning":"x","issues":[],"model":"m","screenshots":[],"diff":"","reviewBatch":{"id":"current-packet","diffHash":"d","reviewedHead":"h","promptVersion":"p","schemaVersion":"s","model":"m","axes":[],"candidates":[],"initialFindings":[],"accepted":[],"rejected":[],"merged":[],"synthesis":"model","durationMs":1}},"overall":"pass","duration":2},"pendingEscalation":null,"escalationCount":0,"skipValidation":false,"createdAt":"2026-08-04T00:00:00Z","startedAt":"2026-08-04T00:00:00Z","completedAt":"2026-08-04T00:01:00Z","updatedAt":"2026-08-04T00:01:00Z","userId":"u","filesChanged":1,"linesAdded":1,"linesRemoved":0,"previewUrl":null,"prUrl":null,"plan":null,"progress":null,"claudeSessionId":null,"outputMode":"pr","options":{"agentMode":"auto","output":"pr","validate":true},"baseBranch":"main","recoveryWorktreePath":null,"lastHeartbeatAt":null,"inputTokens":0,"outputTokens":0,"costUsd":0,"commitCount":1,"lastCommitAt":null}
+  """.data(using: .utf8)!
+  let response = try JSONDecoder().decode(SessionResponse.self, from: sessionJson)
+  #expect(PodMapper.map(response).validationChecks?.reviewCouncil?.id == "current-packet")
+}
+
 /// Mapper URL resolution: the daemon's relative URL is resolved against the provided base URL.
 @Test func mapperResolvesScreenshotURL() throws {
   let sessionJson = """
