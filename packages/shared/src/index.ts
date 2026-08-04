@@ -537,6 +537,7 @@ export type { BriefFrontmatter, ParsedBrief, BriefFile } from './series/parse-br
 export {
   parseBriefFrontmatter,
   numericPrefix,
+  orderSeriesBriefs,
   parseBriefs,
 } from './series/parse-briefs.js';
 

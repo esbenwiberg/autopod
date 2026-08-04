@@ -751,14 +751,20 @@ export class AutopodClient {
     response: Awaited<ReturnType<typeof fetch>>,
     path: string,
   ): Promise<never> {
-    let errorBody: { message?: string; code?: string; from?: PodStatus; to?: PodStatus } = {};
+    let errorBody: {
+      error?: string;
+      message?: string;
+      code?: string;
+      from?: PodStatus;
+      to?: PodStatus;
+    } = {};
     try {
       errorBody = (await response.json()) as typeof errorBody;
     } catch {
       // response body wasn't JSON
     }
 
-    const message = errorBody.message ?? `HTTP ${response.status} on ${path}`;
+    const message = errorBody.message ?? errorBody.error ?? `HTTP ${response.status} on ${path}`;
 
     switch (response.status) {
       case 401:

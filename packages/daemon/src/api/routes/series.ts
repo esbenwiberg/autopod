@@ -6,6 +6,7 @@ import {
   type SpecFile,
   generateId,
   numericPrefix,
+  orderSeriesBriefs,
   parseBriefs,
 } from '@autopod/shared';
 import type { FastifyInstance } from 'fastify';
@@ -270,41 +271,6 @@ function parseSingleBrief(
   return brief;
 }
 
-function validateSeriesDependencyGraph(briefs: ParsedBrief[]): void {
-  const allTitles = new Set<string>();
-  for (const brief of briefs) {
-    if (allTitles.has(brief.title)) {
-      throw new AutopodError(
-        `Duplicate brief title in series: "${brief.title}"`,
-        'DUPLICATE_SERIES_BRIEF_TITLE',
-        400,
-      );
-    }
-    allTitles.add(brief.title);
-  }
-
-  const seenTitles = new Set<string>();
-  for (const brief of briefs) {
-    for (const dep of brief.dependsOn) {
-      if (!allTitles.has(dep)) {
-        throw new AutopodError(
-          `Brief "${brief.title}" depends on unknown brief "${dep}"`,
-          'UNKNOWN_SERIES_DEPENDENCY',
-          400,
-        );
-      }
-      if (!seenTitles.has(dep)) {
-        throw new AutopodError(
-          `Brief "${brief.title}" depends on "${dep}", but dependencies must appear earlier in the series order`,
-          'SERIES_DEPENDENCY_ORDER',
-          400,
-        );
-      }
-    }
-    seenTitles.add(brief.title);
-  }
-}
-
 export function seriesRoutes(
   app: FastifyInstance,
   podManager: PodManager,
@@ -317,7 +283,12 @@ export function seriesRoutes(
 
     if (!body.seriesName || !body.briefs || body.briefs.length === 0 || !body.profile) {
       reply.status(400);
-      return { error: 'seriesName, briefs, and profile are required' };
+      return {
+        error: 'INVALID_SERIES_REQUEST',
+        code: 'INVALID_SERIES_REQUEST',
+        message:
+          'Series creation rejected: seriesName, at least one brief, and profile are required.',
+      };
     }
 
     const rawSlug = body.seriesName
@@ -329,19 +300,19 @@ export function seriesRoutes(
     const prMode = body.prMode ?? 'single';
     const userId = request.user.oid;
 
+    let orderedBriefs: ParsedBrief[];
     try {
-      validateSeriesDependencyGraph(body.briefs);
+      orderedBriefs = orderSeriesBriefs(body.briefs);
     } catch (err) {
       if (err instanceof AutopodError) {
         reply.status(err.statusCode ?? 400);
-        return { error: err.message, code: err.code };
+        return { error: err.code, code: err.code, message: err.message };
       }
       throw err;
     }
 
-    // Resolve brief title → pod ID in creation order (topological).
-    // Briefs must be ordered such that each brief's dependsOn references only
-    // earlier briefs (numeric-prefix ordering from ap series create guarantees this).
+    // Resolve brief title → pod ID after shared validation has topologically
+    // ordered every dependency before its children.
     const titleToId = new Map<string, string>();
     const created: Array<{ title: string; pod: ReturnType<(typeof podManager)['createSession']> }> =
       [];
@@ -350,10 +321,10 @@ export function seriesRoutes(
     // on one branch and the final pod opens a single PR.
     let singleModeBranch: string | undefined;
 
-    for (let i = 0; i < body.briefs.length; i++) {
-      const brief = body.briefs[i];
+    for (let i = 0; i < orderedBriefs.length; i++) {
+      const brief = orderedBriefs[i];
       if (!brief) continue;
-      const isLast = i === body.briefs.length - 1;
+      const isLast = i === orderedBriefs.length - 1;
 
       // Resolve all parent titles to pod IDs — enables fan-in (a pod can wait
       // on multiple parents). The graph was preflighted above, so every title
@@ -424,7 +395,7 @@ export function seriesRoutes(
       } catch (err) {
         if (err instanceof AutopodError) {
           reply.status(err.statusCode ?? 400);
-          return { error: err.message };
+          return { error: err.code, code: err.code, message: err.message };
         }
         throw err;
       }

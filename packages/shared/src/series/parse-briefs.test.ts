@@ -18,6 +18,16 @@ describe('parseBriefFrontmatter', () => {
 });
 
 describe('parseBriefs', () => {
+  function contract(title: string, dependsOn: string[]): string {
+    return `contract_version: 1
+title: ${JSON.stringify(title)}
+depends_on: ${JSON.stringify(dependsOn)}
+scenarios: []
+required_facts: []
+human_review: []
+`;
+  }
+
   it('derives title from filename when no frontmatter title', () => {
     const briefs = parseBriefs([{ filename: '01-my-feature.md', content: 'Body text' }]);
     expect(briefs[0]?.title).toBe('my-feature');
@@ -96,10 +106,79 @@ required_facts:
     command: npx pnpm --filter @autopod/shared test -- contract.test.ts
 human_review: []
 `;
-    const briefs = parseBriefs([{ filename: '01-task.md', content, contractContent }]);
-    expect(briefs[0]?.title).toBe('Contract title');
-    expect(briefs[0]?.dependsOn).toEqual(['00-base']);
-    expect(briefs[0]?.contract?.requiredFacts[0]?.id).toBe('fact-behavior');
+    const briefs = parseBriefs([
+      {
+        filename: '00-base',
+        content: 'Build the base',
+        contractContent: contract('Base title', []),
+      },
+      { filename: '01-task.md', content, contractContent },
+    ]);
+    expect(briefs[1]?.title).toBe('Contract title');
+    expect(briefs[1]?.dependsOn).toEqual(['Base title']);
+    expect(briefs[1]?.contract?.requiredFacts[0]?.id).toBe('fact-behavior');
+  });
+
+  it('topologically orders unnumbered contract brief folders', () => {
+    const briefs = parseBriefs([
+      {
+        filename: 'azure-container-app-logs',
+        content: 'Add Azure logs.',
+        contractContent: contract('Add Azure logs', ['capability-core']),
+      },
+      {
+        filename: 'capability-core',
+        content: 'Add the capability core.',
+        contractContent: contract('Add capability core', []),
+      },
+      {
+        filename: 'github-repository-access',
+        content: 'Add GitHub access.',
+        contractContent: contract('Add GitHub access', ['capability-core']),
+      },
+    ]);
+
+    expect(briefs.map(({ title }) => title)).toEqual([
+      'Add capability core',
+      'Add Azure logs',
+      'Add GitHub access',
+    ]);
+    expect(briefs.map(({ dependsOn }) => dependsOn)).toEqual([
+      [],
+      ['Add capability core'],
+      ['Add capability core'],
+    ]);
+  });
+
+  it('rejects unknown contract dependencies with an actionable message', () => {
+    expect(() =>
+      parseBriefs([
+        {
+          filename: 'api',
+          content: 'Add the API.',
+          contractContent: contract('Add API', ['missing-core']),
+        },
+      ]),
+    ).toThrow(
+      'Brief "Add API" (folder "api") depends on unknown brief folder "missing-core". ' +
+        'Use a depends_on value that exactly matches a sibling brief folder.',
+    );
+  });
+
+  it('rejects dependency cycles with the involved folders named', () => {
+    expect(() =>
+      parseBriefs([
+        { filename: 'api', content: 'Add API.', contractContent: contract('Add API', ['core']) },
+        {
+          filename: 'core',
+          content: 'Add core.',
+          contractContent: contract('Add core', ['api']),
+        },
+      ]),
+    ).toThrow(
+      'Series dependency cycle detected among folders: "api", "core". ' +
+        'Remove at least one depends_on edge so every brief has an acyclic path from a root.',
+    );
   });
 
   it('rejects contract fields that are too long for pod creation', () => {

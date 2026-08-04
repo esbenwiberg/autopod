@@ -1,5 +1,6 @@
 import { parseDocument as parseYamlDocument } from 'yaml';
 import { parseSpecContract } from '../contract.js';
+import { AutopodError } from '../errors.js';
 import type { SpecContract } from '../types/contract.js';
 
 /**
@@ -64,6 +65,107 @@ export interface BriefFile {
   contractContent?: string;
 }
 
+function stableTopologicalOrder<T>(
+  values: T[],
+  keyOf: (value: T) => string,
+  dependenciesOf: (value: T) => string[],
+): { ordered: T[]; remainingKeys: string[] } {
+  const indexByKey = new Map(values.map((value, index) => [keyOf(value), index]));
+  const indegree = new Map<string, number>();
+  const dependents = new Map<string, string[]>();
+
+  for (const value of values) {
+    const key = keyOf(value);
+    const dependencies = Array.from(new Set(dependenciesOf(value)));
+    indegree.set(key, dependencies.length);
+    for (const dependency of dependencies) {
+      const children = dependents.get(dependency) ?? [];
+      children.push(key);
+      dependents.set(dependency, children);
+    }
+  }
+
+  const ready = values
+    .filter((value) => indegree.get(keyOf(value)) === 0)
+    .map(keyOf)
+    .sort((a, b) => (indexByKey.get(a) ?? 0) - (indexByKey.get(b) ?? 0));
+  const ordered: T[] = [];
+  const orderedKeys = new Set<string>();
+  const byKey = new Map(values.map((value) => [keyOf(value), value]));
+
+  while (ready.length > 0) {
+    const key = ready.shift();
+    if (!key) continue;
+    const value = byKey.get(key);
+    if (value) {
+      ordered.push(value);
+      orderedKeys.add(key);
+    }
+
+    for (const child of dependents.get(key) ?? []) {
+      const next = (indegree.get(child) ?? 0) - 1;
+      indegree.set(child, next);
+      if (next === 0) {
+        ready.push(child);
+        ready.sort((a, b) => (indexByKey.get(a) ?? 0) - (indexByKey.get(b) ?? 0));
+      }
+    }
+  }
+
+  return {
+    ordered,
+    remainingKeys: values.map(keyOf).filter((key) => !orderedKeys.has(key)),
+  };
+}
+
+/**
+ * Validate and topologically order parsed briefs received by the daemon.
+ * Stable input ordering is preserved between independent roots and siblings.
+ */
+export function orderSeriesBriefs(briefs: ParsedBrief[]): ParsedBrief[] {
+  const byTitle = new Map<string, ParsedBrief>();
+  for (const brief of briefs) {
+    if (byTitle.has(brief.title)) {
+      throw new AutopodError(
+        `Series contains duplicate brief title "${brief.title}". Brief titles must be unique so each dependency identifies exactly one parent.`,
+        'DUPLICATE_SERIES_BRIEF_TITLE',
+        400,
+      );
+    }
+    byTitle.set(brief.title, brief);
+  }
+
+  for (const brief of briefs) {
+    for (const dependency of brief.dependsOn) {
+      if (!byTitle.has(dependency)) {
+        throw new AutopodError(
+          `Brief "${brief.title}" depends on unknown brief "${dependency}". Add that brief to the series or correct the dependsOn/depends_on reference.`,
+          'UNKNOWN_SERIES_DEPENDENCY',
+          400,
+        );
+      }
+    }
+  }
+
+  const { ordered, remainingKeys } = stableTopologicalOrder(
+    briefs,
+    (brief) => brief.title,
+    (brief) => brief.dependsOn,
+  );
+  if (remainingKeys.length > 0) {
+    throw new AutopodError(
+      `Series dependency cycle detected among briefs: ${remainingKeys
+        .map((title) => `"${title}"`)
+        .join(
+          ', ',
+        )}. Remove at least one dependency edge so every brief has an acyclic path from a root.`,
+      'SERIES_DEPENDENCY_CYCLE',
+      400,
+    );
+  }
+  return ordered;
+}
+
 /**
  * Extract YAML frontmatter + body from a markdown string. Returns an empty
  * frontmatter object if no `---` fence is found.
@@ -117,8 +219,8 @@ function normalizePathList(raw: unknown): string[] | undefined {
  * — those are sent to the daemon as separate fields and rendered as labeled
  * sections in the agent's CLAUDE.md by `system-instructions-generator.ts`.
  *
- * @param files Brief files, ALREADY sorted in the desired topological order
- *              (typically by `numericPrefix`).
+ * @param files Brief files in any stable discovery order. Contract/frontmatter
+ *              dependencies are validated and topologically sorted here.
  * @param loadContextFile Optional resolver for per-brief `context_files`
  *                        frontmatter — returns the file content as a string,
  *                        or '' if not found. Daemons should restrict path
@@ -132,29 +234,69 @@ export function parseBriefs(
   // Pre-parse every file once so dependency resolution can look up titles
   // without re-reading anything.
   type Pre = {
+    filename: string;
+    dependencyKey: string;
     frontmatter: BriefFrontmatter;
     body: string;
     title: string;
     contract?: SpecContract;
+    dependencyFolders: string[];
   };
   const pre = new Map<string, Pre>();
-  for (const f of files) {
+  for (const [index, f] of files.entries()) {
     const { frontmatter, body } = parseBriefFrontmatter(f.content);
     const contract = f.contractContent ? parseSpecContract(f.contractContent) : undefined;
     const title =
       contract?.title ?? frontmatter.title ?? f.filename.replace(/^\d+-/, '').replace(/\.md$/, '');
-    pre.set(f.filename, { frontmatter, body, title, contract });
+    const dependencyKey = f.filename.replace(/\.md$/, '');
+    const hasExplicitDependencies = contract !== undefined || frontmatter.depends_on !== undefined;
+    const dependencyFolders = hasExplicitDependencies
+      ? Array.from(new Set(contract?.dependsOn ?? frontmatter.depends_on ?? []))
+      : index > 0
+        ? [files[index - 1]?.filename.replace(/\.md$/, '') ?? '']
+        : [];
+    pre.set(dependencyKey, {
+      filename: f.filename,
+      dependencyKey,
+      frontmatter,
+      body,
+      title,
+      contract,
+      dependencyFolders: dependencyFolders.filter(Boolean),
+    });
   }
 
-  return files.map((f, i) => {
-    const entry = pre.get(f.filename);
-    if (!entry) {
-      return {
-        title: f.filename,
-        task: '',
-        dependsOn: [],
-      };
+  for (const entry of pre.values()) {
+    for (const dependency of entry.dependencyFolders) {
+      if (!pre.has(dependency)) {
+        throw new AutopodError(
+          `Brief "${entry.title}" (folder "${entry.filename}") depends on unknown brief folder ` +
+            `"${dependency}". Use a depends_on value that exactly matches a sibling brief folder.`,
+          'UNKNOWN_SERIES_DEPENDENCY',
+          400,
+        );
+      }
     }
+  }
+
+  const { ordered, remainingKeys } = stableTopologicalOrder(
+    Array.from(pre.values()),
+    (entry) => entry.dependencyKey,
+    (entry) => entry.dependencyFolders,
+  );
+  if (remainingKeys.length > 0) {
+    throw new AutopodError(
+      `Series dependency cycle detected among folders: ${remainingKeys
+        .map((folder) => `"${folder}"`)
+        .join(
+          ', ',
+        )}. Remove at least one depends_on edge so every brief has an acyclic path from a root.`,
+      'SERIES_DEPENDENCY_CYCLE',
+      400,
+    );
+  }
+
+  return ordered.map((entry) => {
     const { frontmatter, body, title, contract } = entry;
 
     // Per-brief `context_files` are optional supplementary reads — load each
@@ -169,22 +311,9 @@ export function parseBriefs(
     }
     const task = contextParts.length > 0 ? `${contextParts.join('\n\n')}\n\n---\n\n${body}` : body;
 
-    // Resolve explicit `depends_on` values to brief titles.
-    const explicitDeps = (contract?.dependsOn ?? frontmatter.depends_on ?? []).map((dep) => {
-      const depFile = files.find((x) => x.filename.startsWith(dep) || x.filename === `${dep}.md`);
-      return depFile ? (pre.get(depFile.filename)?.title ?? dep) : dep;
-    });
-
-    // If no explicit deps and not the first brief, implicit linear chain:
-    // depend on the immediately preceding brief.
-    const dependsOn =
-      explicitDeps.length > 0 || i === 0
-        ? explicitDeps
-        : (() => {
-            const prevFile = files[i - 1];
-            const prevTitle = prevFile ? (pre.get(prevFile.filename)?.title ?? '') : '';
-            return prevTitle ? [prevTitle] : [];
-          })();
+    const dependsOn = entry.dependencyFolders.map(
+      (dependency) => pre.get(dependency)?.title ?? dependency,
+    );
 
     // Accept either snake_case or camelCase spellings; snake_case wins when both
     // are set. Normalize to camelCase for the ParsedBrief.

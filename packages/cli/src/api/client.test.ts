@@ -420,6 +420,27 @@ describe('AutopodClient', () => {
       await expect(client.listSessions()).rejects.toThrow(AutopodError);
     });
 
+    it('preserves daemon error fields for agent-readable series rejections', async () => {
+      mockFetch.mockResolvedValueOnce(
+        errorResponse(400, {
+          error: 'Brief "API" depends on unknown brief "core". Check depends_on.',
+          code: 'UNKNOWN_SERIES_DEPENDENCY',
+        }),
+      );
+
+      const rejection = client.createSeries({
+        seriesName: 'broken-series',
+        profile: 'test',
+        briefs: [{ title: 'API', task: 'Add API.', dependsOn: ['core'] }],
+      });
+
+      await expect(rejection).rejects.toMatchObject({
+        message: 'Brief "API" depends on unknown brief "core". Check depends_on.',
+        code: 'UNKNOWN_SERIES_DEPENDENCY',
+        statusCode: 400,
+      });
+    });
+
     it('maps network error to DaemonUnreachableError', async () => {
       mockFetch.mockRejectedValueOnce(new Error('ECONNREFUSED'));
       await expect(client.checkHealth()).rejects.toThrow(DaemonUnreachableError);

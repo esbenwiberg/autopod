@@ -73,4 +73,32 @@ describe('spec command', () => {
 
     expect(logSpy).toHaveBeenCalledWith('Spec OK: 1 brief, 1 facts');
   });
+
+  it('rejects an unknown series dependency locally with repair guidance', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'autopod-spec-'));
+    created.push(root);
+    const briefDir = join(root, 'briefs', 'api');
+    mkdirSync(briefDir, { recursive: true });
+    writeFileSync(join(briefDir, 'brief.md'), '## Task\nBuild the API.');
+    writeFileSync(
+      join(briefDir, 'contract.yaml'),
+      contractYaml.replace('depends_on: []', 'depends_on: [missing-core]'),
+    );
+
+    const program = new Command();
+    program.exitOverride();
+    registerSpecCommands(program);
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    vi.spyOn(process, 'exit').mockImplementation((() => {
+      throw new Error('process.exit(1)');
+    }) as never);
+
+    await expect(program.parseAsync(['node', 'ap', 'spec', 'check', root])).rejects.toThrow(
+      'process.exit(1)',
+    );
+    expect(errorSpy).toHaveBeenCalledWith(
+      'Spec check failed: Brief "Check spec parser" (folder "api") depends on unknown brief ' +
+        'folder "missing-core". Use a depends_on value that exactly matches a sibling brief folder.',
+    );
+  });
 });

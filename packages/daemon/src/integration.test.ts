@@ -1381,12 +1381,14 @@ describe('Integration', () => {
       expect(res.statusCode).toBe(400);
       expect(res.json()).toMatchObject({
         code: 'UNKNOWN_SERIES_DEPENDENCY',
-        error: 'Brief "03-merge" depends on unknown brief "02-missing"',
+        error: 'UNKNOWN_SERIES_DEPENDENCY',
+        message:
+          'Brief "03-merge" depends on unknown brief "02-missing". Add that brief to the series or correct the dependsOn/depends_on reference.',
       });
       expect(podRepo.list().filter((pod) => pod.seriesName === 'bad-diamond')).toEqual([]);
     });
 
-    it('POST /pods/series rejects dependencies that point forward in the order', async () => {
+    it('POST /pods/series topologically orders dependencies that arrive before their parents', async () => {
       const res = await app.inject({
         method: 'POST',
         url: '/pods/series',
@@ -1402,13 +1404,12 @@ describe('Integration', () => {
         },
       });
 
-      expect(res.statusCode).toBe(400);
-      expect(res.json()).toMatchObject({
-        code: 'SERIES_DEPENDENCY_ORDER',
-        error:
-          'Brief "02-child" depends on "01-parent", but dependencies must appear earlier in the series order',
-      });
-      expect(podRepo.list().filter((pod) => pod.seriesName === 'forward-dep')).toEqual([]);
+      expect(res.statusCode).toBe(201);
+      const [parent, child] = res.json().pods;
+      expect(parent.briefTitle).toBe('01-parent');
+      expect(parent.dependsOnPodIds).toEqual([]);
+      expect(child.briefTitle).toBe('02-child');
+      expect(child.dependsOnPodIds).toEqual([parent.id]);
     });
 
     it('POST /pods/series chains single-mode siblings so they serialize on the shared branch', async () => {
