@@ -43,7 +43,7 @@ export const reviewAxisOutputContract: ReviewerOutputContract = {
           additionalProperties: false,
           required: ['severity', 'path', 'claim', 'evidence', 'remediation', 'confidence'],
           properties: {
-            severity: { enum: ['MEDIUM', 'HIGH', 'CRITICAL'] },
+            severity: { type: 'string', enum: ['MEDIUM', 'HIGH', 'CRITICAL'] },
             path: { type: 'string', minLength: 1, maxLength: 1024 },
             line: { type: 'integer', minimum: 1 },
             symbol: { type: 'string', minLength: 1, maxLength: 512 },
@@ -84,9 +84,7 @@ function unwrapJson(input: string): string {
   const trimmed = input.trim();
   const fence = trimmed.match(/^```(?:json)?\s*\n([\s\S]*?)\n```$/i);
   if (fence) return fence[1] ?? '';
-  const first = trimmed.indexOf('{');
-  const last = trimmed.lastIndexOf('}');
-  return first >= 0 && last > first ? trimmed.slice(first, last + 1) : trimmed;
+  return trimmed;
 }
 
 function unwrapEnvelope(value: unknown): unknown {

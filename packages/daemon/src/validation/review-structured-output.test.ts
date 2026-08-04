@@ -46,4 +46,10 @@ describe('parseAxisResponse', () => {
       ReviewStructuredOutputError,
     );
   });
+
+  it('rejects arbitrary prose around JSON rather than extracting a substring', () => {
+    expect(() => parse(`model preface ${JSON.stringify({ findings: [finding] })}`)).toThrow(
+      ReviewStructuredOutputError,
+    );
+  });
 });
