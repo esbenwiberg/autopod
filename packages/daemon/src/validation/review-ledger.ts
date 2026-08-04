@@ -11,13 +11,20 @@ import { structuredFindingId } from './finding-fingerprint.js';
 const MAX_CLOSURE_FINDINGS = 100;
 const MAX_CLOSURE_SOURCE_IDS = 16;
 const MAX_CLOSURE_PRIOR_BYTES = 40_000;
-const MAX_CLOSURE_FIELD_BYTES = 2_000;
+const MAX_CLOSURE_FIELD_BYTES = 4_000;
 const MAX_CLOSURE_ID_BYTES = 256;
 
 function boundedIdentifier(value: string): string {
-  const sanitized = sanitize(value, getPresetConfig('strict'));
-  return sanitized === value && Buffer.byteLength(sanitized, 'utf8') <= MAX_CLOSURE_ID_BYTES
-    ? sanitized
+  // IDs are protocol keys, not prose. Sanitizing an otherwise valid semantic
+  // ID can rewrite it when it happens to resemble a secret, disconnecting it
+  // from the immutable ledger entry it is meant to address. Accept only the
+  // deliberately narrow identifier alphabet; replace every other value with a
+  // deterministic opaque ID rather than retaining untrusted text.
+  const safeInternalId = /^(?:initial-|review:|review-source:|fact:|req:)[a-f0-9]{12,16}$/.test(
+    value,
+  );
+  return Buffer.byteLength(value, 'utf8') <= MAX_CLOSURE_ID_BYTES && safeInternalId
+    ? value
     : `bounded-${createHash('sha256').update(value).digest('hex')}`;
 }
 

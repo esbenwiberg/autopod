@@ -2717,7 +2717,13 @@ human_review: []
         reviewDepth: 'deep',
         validationSuite: 'deterministic',
         worktreePath,
-        diff: changedDiff,
+        diff: `diff --git a/a.ts b/a.ts
+--- a/a.ts
++++ b/a.ts
+@@ -1 +1 @@
+-old
++new
+`,
       }),
     );
     expect(result.taskReview?.firstGateOverflow).toEqual({

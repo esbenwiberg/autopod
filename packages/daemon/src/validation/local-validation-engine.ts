@@ -115,11 +115,23 @@ async function readRepairDelta(
 
 function boundedReviewPacketText(value: unknown, limit = 40_000): string {
   const config = getPresetConfig('strict');
-  return sanitize(JSON.stringify(sanitizeDeep(value, config)) ?? 'null', config).slice(0, limit);
+  return boundedReviewPacketString(JSON.stringify(sanitizeDeep(value, config)) ?? 'null', limit);
 }
 
 function boundedReviewPacketString(value: string, limit: number): string {
-  return sanitize(value, getPresetConfig('strict')).slice(0, limit);
+  const sanitized = sanitize(value, getPresetConfig('strict'));
+  if (Buffer.byteLength(sanitized, 'utf8') <= limit) return sanitized;
+  let lower = 0;
+  let upper = sanitized.length;
+  while (lower < upper) {
+    const midpoint = Math.ceil((lower + upper) / 2);
+    if (Buffer.byteLength(sanitized.slice(0, midpoint), 'utf8') <= limit) lower = midpoint;
+    else upper = midpoint - 1;
+  }
+  // Do not return a dangling UTF-16 surrogate if the byte boundary bisected a
+  // code point. This only operates on a field, never a serialized record or ID.
+  const end = lower > 0 && /[\uD800-\uDBFF]/.test(sanitized[lower - 1] ?? '') ? lower - 1 : lower;
+  return sanitized.slice(0, end);
 }
 
 const MAX_INITIAL_REVIEW_FINDINGS = 100;
@@ -158,7 +170,7 @@ export function initialBroadFindings(review: TaskReviewResult) {
     const id = initialBroadFindingId(issue);
     if (seen.has(id)) continue;
     const remaining = MAX_INITIAL_REVIEW_BYTES - bytes;
-    const boundedIssue = sanitizedIssue.slice(0, remaining);
+    const boundedIssue = boundedReviewPacketString(sanitizedIssue, remaining);
     if (!boundedIssue) break;
     seen.add(id);
     findings.push({
@@ -167,7 +179,7 @@ export function initialBroadFindings(review: TaskReviewResult) {
       source: 'initial-review' as const,
       issue: boundedIssue,
     });
-    bytes += boundedIssue.length;
+    bytes += Buffer.byteLength(boundedIssue, 'utf8');
   }
   return findings;
 }
