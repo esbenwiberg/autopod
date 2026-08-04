@@ -201,6 +201,7 @@ export interface ParsedReviewLike {
   reasoning: string;
   issues: string[];
   firstGateOverflow?: { reportedCount: number; retainedFindingCount: number };
+  firstGateFindings?: Array<{ id: string; source: 'initial-review'; issue: string }>;
   requirementsCheck?: Array<{ criterion: string; met: boolean; note?: string }>;
   deviationsAssessment?: {
     disclosedDeviations: Array<{
@@ -244,9 +245,17 @@ export function applyDiffFilterToParsed<T extends ParsedReviewLike>(
   const shouldFlipStatus =
     parsed.status === 'fail' && filtered.issues.length === 0 && reqsAllMet && noUndisclosed;
 
+  const keptIssues = new Set(filtered.issues);
   return {
     ...parsed,
     issues: filtered.issues,
+    ...(parsed.firstGateFindings
+      ? {
+          firstGateFindings: parsed.firstGateFindings.filter((finding) =>
+            keptIssues.has(finding.issue),
+          ),
+        }
+      : {}),
     status: shouldFlipStatus ? 'pass' : parsed.status,
     reasoning: shouldFlipStatus
       ? `${parsed.reasoning} [auto-pass: all flagged findings cited code outside the diff and were discarded]`

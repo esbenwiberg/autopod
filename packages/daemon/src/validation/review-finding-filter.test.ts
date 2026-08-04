@@ -222,11 +222,26 @@ describe('applyDiffFilterToParsed', () => {
         '[HIGH] Frameworks/PF.Graph/GraphRequests.cs:110 broken',
         '[MEDIUM] package-lock.json SHA-1 downgrade',
       ],
+      firstGateFindings: [
+        {
+          id: 'initial-aaaaaaaaaaaaaaaa',
+          source: 'initial-review',
+          issue: '[HIGH] Frameworks/PF.Graph/GraphRequests.cs:110 broken',
+        },
+        {
+          id: 'initial-bbbbbbbbbbbbbbbb',
+          source: 'initial-review',
+          issue: '[MEDIUM] package-lock.json SHA-1 downgrade',
+        },
+      ],
     };
     const log = freshLog();
     // biome-ignore lint/suspicious/noExplicitAny: test logger shim
     const result = applyDiffFilterToParsed(parsed, DIFF_TWO_FILES, log as any, 3);
     expect(result?.issues).toEqual(['[MEDIUM] package-lock.json SHA-1 downgrade']);
+    expect(result?.firstGateFindings?.map((finding) => finding.id)).toEqual([
+      'initial-bbbbbbbbbbbbbbbb',
+    ]);
     expect(result?.status).toBe('fail');
     expect(log.warn).toHaveBeenCalledWith(
       expect.objectContaining({ tier: 3, droppedCount: 1 }),

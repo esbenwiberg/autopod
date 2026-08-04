@@ -195,6 +195,8 @@ export interface TaskReviewResult {
   reviewBatch?: ReviewBatchResult;
   /** Structured first-gate overflow state; never inferred from model issue text. */
   firstGateOverflow?: { reportedCount: number; retainedFindingCount: number };
+  /** Canonical identities paired with bounded first-gate issue text. */
+  firstGateFindings?: InitialReviewFinding[];
 }
 
 export type ReviewAxis =

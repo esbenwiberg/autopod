@@ -991,6 +991,17 @@ describe('parseReviewJson — issues normalization', () => {
     expect(parsed?.issues).toEqual(['duplicate A', 'distinct B']);
     expect(parsed?.firstGateOverflow).toBeUndefined();
   });
+
+  it('preserves distinct canonical IDs when bounded issue text is identical', () => {
+    const prefix = 'shared semantic prefix '.padEnd(32_000, 'x');
+    const parsed = parseReviewJson(baseShape([`${prefix} A`, `${prefix} B`]));
+    expect(parsed?.issues[0]).toBe(parsed?.issues[1]);
+    expect(parsed?.firstGateFindings?.map((finding) => finding.id)).toHaveLength(2);
+    expect(new Set(parsed?.firstGateFindings?.map((finding) => finding.id)).size).toBe(2);
+    expect(initialBroadFindings(parsed as never).map((finding) => finding.id)).toEqual(
+      parsed?.firstGateFindings?.map((finding) => finding.id),
+    );
+  });
 });
 
 describe('validate() — hasWebUi gating', () => {
