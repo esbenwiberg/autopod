@@ -1500,6 +1500,66 @@ describe('validate() — hasWebUi gating', () => {
     expect(history.getLatestReviewBatchBefore('ledger-lifecycle', 5)?.id).toBe(
       four.taskReview?.reviewBatch?.id,
     );
+
+    // Exercise backward compatibility through the same production repository
+    // seam: an old persisted packet has accepted findings but predates ledger.
+    db.prepare(
+      `INSERT INTO pods (id, profile_name, task, model, runtime, branch, user_id)
+       VALUES ('legacy-ledger-lifecycle', 'test-profile', 'legacy task', 'model', 'claude', 'main', 'user-1')`,
+    ).run();
+    const legacyBatch = {
+      id: 'legacy-no-ledger',
+      diffHash: 'legacy-diff',
+      reviewedHead: 'unavailable',
+      promptVersion: 'legacy-prompt',
+      schemaVersion: 'legacy-schema',
+      model: 'legacy-model',
+      axes: [],
+      candidates: [],
+      initialFindings: [],
+      accepted: [{ id: 'legacy-A', source: 'initial-review' as const, issue: 'legacy A' }],
+      rejected: [],
+      merged: [],
+      synthesis: 'model' as const,
+      durationMs: 1,
+    };
+    history.insert('legacy-ledger-lifecycle', 1, {
+      ...one,
+      podId: 'legacy-ledger-lifecycle',
+      taskReview: {
+        ...one.taskReview!,
+        status: 'fail',
+        issues: ['legacy A'],
+        reviewBatch: legacyBatch,
+      },
+    });
+    const hydratedLegacy = history.getLatestReviewBatchBefore('legacy-ledger-lifecycle', 2);
+    expect(hydratedLegacy?.accepted).toEqual(legacyBatch.accepted);
+    expect(hydratedLegacy).not.toHaveProperty('ledger');
+    const legacySeeded = await engine.validate(
+      baseConfig({
+        ...common,
+        attempt: 2,
+        priorReviewBatch: hydratedLegacy,
+      }),
+    );
+    history.insert('legacy-ledger-lifecycle', 2, {
+      ...legacySeeded,
+      podId: 'legacy-ledger-lifecycle',
+    });
+    expect(legacySeeded.taskReview?.reviewBatch?.ledger).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          state: 'open',
+          finding: expect.objectContaining({ source: 'initial-review', issue: 'legacy A' }),
+        }),
+      ]),
+    );
+    expect(legacySeeded.taskReview?.issues).toContain('legacy A');
+    expect(legacySeeded.taskReview?.status).toBe('fail');
+    expect(
+      history.getForSession('legacy-ledger-lifecycle')[1]?.result.taskReview?.reviewBatch?.ledger,
+    ).toEqual(legacySeeded.taskReview?.reviewBatch?.ledger);
     await fs.rm(repoPath, { recursive: true, force: true });
   });
 
