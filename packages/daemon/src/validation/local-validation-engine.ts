@@ -142,6 +142,10 @@ const MAX_INITIAL_REVIEW_FINDINGS = 100;
 const MAX_INITIAL_REVIEW_BYTES = 200_000;
 const MAX_INITIAL_SEMANTIC_BYTES = 32_000;
 const MAX_PERSISTED_FIRST_GATE_FINDINGS = 4_096;
+// Bound work on adversarial arrays separately from the supported unique-finding
+// capacity. Entries beyond this scan window are never treated as reviewed: the
+// packet receives the same durable, blocking overflow provenance.
+const MAX_FIRST_GATE_INPUT_ENTRIES = MAX_PERSISTED_FIRST_GATE_FINDINGS * 2;
 // Retain at most this many durable first-gate entries. Any excess becomes one
 // deterministic blocking overflow marker rather than unbounded model output.
 const MAX_TASK_REVIEW_ISSUES = 4_096;
@@ -3780,13 +3784,11 @@ export function pickCachedPreSubmit(
     linesRemoved: scope.linesRemoved,
     startCommitSha: config.startCommitSha ?? null,
   });
-  if (!decision.reusable || !cache || cache.issues.length > MAX_TASK_REVIEW_ISSUES) return null;
+  if (!decision.reusable || !cache) return null;
   return {
     status: 'pass',
     reasoning: cache.reasoning,
-    issues: cache.issues
-      .map((issue) => boundedReviewPacketString(issue, MAX_INITIAL_SEMANTIC_BYTES))
-      .slice(0, MAX_TASK_REVIEW_ISSUES),
+    issues: cache.issues,
   };
 }
 
@@ -3871,15 +3873,14 @@ export function parseReviewJson(raw: string): {
       filterIssue: string;
     }> = [];
     const seenFindingIds = new Set<string>();
-    const findingIdByIssue = new Map<string, string>();
-    for (const rawIssue of parsed.issues as unknown[]) {
+    const inputOverflowed = parsed.issues.length > MAX_FIRST_GATE_INPUT_ENTRIES;
+    for (const rawIssue of (parsed.issues as unknown[]).slice(0, MAX_FIRST_GATE_INPUT_ENTRIES)) {
       const issue = normalizeReviewIssue(rawIssue);
       if (issue === null) continue;
       // Count supported first-gate findings by semantic identity, not raw
       // model entries. Repeated wording must not consume the addressable cap
       // and hide a distinct finding that appears later in the response.
-      const findingId = findingIdByIssue.get(issue) ?? initialBroadFindingId(issue);
-      findingIdByIssue.set(issue, findingId);
+      const findingId = initialBroadFindingId(issue);
       if (seenFindingIds.has(findingId)) continue;
       seenFindingIds.add(findingId);
       if (normalizedIssues.length < MAX_TASK_REVIEW_ISSUES) {
@@ -3893,10 +3894,13 @@ export function parseReviewJson(raw: string): {
         });
       }
     }
-    const overflowed = seenFindingIds.size > MAX_TASK_REVIEW_ISSUES;
+    const overflowed = inputOverflowed || seenFindingIds.size > MAX_TASK_REVIEW_ISSUES;
+    const reportedCount = inputOverflowed
+      ? Math.max(MAX_TASK_REVIEW_ISSUES + 1, seenFindingIds.size)
+      : seenFindingIds.size;
     if (overflowed) {
       normalizedIssues.push(
-        `${FIRST_GATE_OVERFLOW_PREFIX} Reviewer returned ${seenFindingIds.size} unique valid issues; the first ${MAX_TASK_REVIEW_ISSUES} are independently addressable and this bounded marker remains blocking until a fresh complete first gate succeeds.`,
+        `${FIRST_GATE_OVERFLOW_PREFIX} Reviewer output exceeded the supported bounded input or finding capacity; ${Math.min(seenFindingIds.size, MAX_TASK_REVIEW_ISSUES)} findings are independently addressable and this marker remains blocking until a fresh complete first gate succeeds.`,
       );
     }
     // If the model returned issues but every retained issue was un-renderable,
@@ -3914,7 +3918,7 @@ export function parseReviewJson(raw: string): {
       ...(overflowed
         ? {
             firstGateOverflow: {
-              reportedCount: seenFindingIds.size,
+              reportedCount,
               retainedFindingCount: MAX_TASK_REVIEW_ISSUES,
             },
           }

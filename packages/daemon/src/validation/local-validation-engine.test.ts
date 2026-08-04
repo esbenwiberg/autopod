@@ -992,6 +992,24 @@ describe('parseReviewJson — issues normalization', () => {
     expect(parsed?.firstGateOverflow).toBeUndefined();
   });
 
+  it('fails closed without scanning an unbounded first-gate issue array', () => {
+    const parsed = parseReviewJson(
+      baseShape([
+        ...Array.from({ length: 8_192 }, () => 'duplicate A'),
+        'unscanned distinct blocker',
+      ]),
+    );
+    expect(parsed?.status).toBe('fail');
+    expect(parsed?.issues).toEqual([
+      'duplicate A',
+      expect.stringContaining('[REVIEW OVERFLOW]'),
+    ]);
+    expect(parsed?.firstGateOverflow).toEqual({
+      reportedCount: 4_097,
+      retainedFindingCount: 4_096,
+    });
+  });
+
   it('preserves distinct canonical IDs when bounded issue text is identical', () => {
     const prefix = `shared semantic prefix ${'🦊'.repeat(8_000)}`;
     const parsed = parseReviewJson(baseShape([`${prefix} A`, `${prefix} B`]));
