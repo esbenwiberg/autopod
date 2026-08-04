@@ -1523,11 +1523,12 @@ describe('validate() — hasWebUi gating', () => {
       synthesis: 'model' as const,
       durationMs: 1,
     };
+    if (!one.taskReview) throw new Error('attempt one must produce task review history');
     history.insert('legacy-ledger-lifecycle', 1, {
       ...one,
       podId: 'legacy-ledger-lifecycle',
       taskReview: {
-        ...one.taskReview!,
+        ...one.taskReview,
         status: 'fail',
         issues: ['legacy A'],
         reviewBatch: legacyBatch,
