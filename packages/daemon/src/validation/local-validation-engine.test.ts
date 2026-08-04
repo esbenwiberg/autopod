@@ -993,7 +993,7 @@ describe('parseReviewJson — issues normalization', () => {
   });
 
   it('preserves distinct canonical IDs when bounded issue text is identical', () => {
-    const prefix = 'shared semantic prefix '.padEnd(32_000, 'x');
+    const prefix = `shared semantic prefix ${'🦊'.repeat(8_000)}`;
     const parsed = parseReviewJson(baseShape([`${prefix} A`, `${prefix} B`]));
     expect(parsed?.issues[0]).toBe(parsed?.issues[1]);
     expect(parsed?.firstGateFindings?.map((finding) => finding.id)).toHaveLength(2);
@@ -1129,14 +1129,14 @@ describe('validate() — hasWebUi gating', () => {
   });
 
   it('keeps distinct identities when long findings share bounded display text', () => {
-    const prefix = 'shared semantic prefix '.padEnd(32_000, 'x');
+    const prefix = `shared semantic prefix ${'🦊'.repeat(8_000)}`;
     const findings = initialBroadFindings({ issues: [`${prefix} A`, `${prefix} B`] } as never);
     expect(findings[0]?.issue).toBe(findings[1]?.issue);
     expect(findings[0]?.id).not.toBe(findings[1]?.id);
   });
 
   it('carries distinct long first-gate IDs through the production review ledger', async () => {
-    const prefix = 'shared semantic prefix '.padEnd(32_000, 'x');
+    const prefix = `shared semantic prefix ${'🦊'.repeat(8_000)}`;
     vi.mocked(runClaudeCli).mockResolvedValue({
       stdout: JSON.stringify({
         status: 'fail',
