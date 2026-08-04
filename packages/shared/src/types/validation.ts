@@ -236,6 +236,22 @@ export interface ReviewAxisRun {
   /** Elapsed time across all attempts for this isolated axis. Optional for frozen historical batches. */
   durationMs?: number;
   error?: string;
+  /** Typed, bounded failure detail for new review batches. */
+  failure?: ReviewFailure;
+}
+
+export type ReviewFailureKind =
+  | 'invalid-response'
+  | 'timeout'
+  | 'provider-unavailable'
+  | 'runner-failed'
+  | 'head-changed';
+
+export interface ReviewFailure {
+  kind: ReviewFailureKind;
+  code: string;
+  message: string;
+  retryable: boolean;
 }
 
 export interface ReviewBatchResult {

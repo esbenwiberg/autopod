@@ -776,7 +776,7 @@ export function createLocalValidationEngine(
               packet,
               model: config.reviewerModel ?? 'auto',
               readHead: () => readReviewHead(config.worktreePath, reviewedHead),
-              execute: async (prompt) =>
+              execute: async (prompt, _label, outputContract) =>
                 runContainerReviewer({
                   podId: config.podId,
                   containerId: config.containerId,
@@ -790,6 +790,7 @@ export function createLocalValidationEngine(
                   ...(config.reviewerExecEnv ? { env: config.reviewerExecEnv } : {}),
                   timeout: config.reviewTimeout ?? 300_000,
                   logger: log,
+                  outputContract,
                 }),
               synthesize: async (prompt) =>
                 runContainerReviewer({

@@ -3,12 +3,19 @@ import type {
   InitialReviewFinding,
   ReviewAxis,
   ReviewBatchResult,
+  ReviewFailure,
   ReviewFindingCandidate,
   StructuredReviewFinding,
   TaskReviewResult,
 } from '@autopod/shared';
 import { structuredFindingSourceId } from './finding-fingerprint.js';
 import { filterOutOfDiffFindings } from './review-finding-filter.js';
+import {
+  REVIEW_VALIDATION_CODE,
+  ReviewStructuredOutputError,
+  parseAxisResponse,
+  reviewAxisOutputContract,
+} from './review-structured-output.js';
 import { parseSynthesis, reviewSynthesisPrompt } from './review-synthesizer.js';
 
 export const REVIEW_AXES: ReviewAxis[] = [
@@ -40,6 +47,7 @@ export interface ReviewBatchRunnerOptions {
   execute: (
     prompt: string,
     label: string,
+    outputContract?: typeof reviewAxisOutputContract,
   ) => Promise<{ stdout: string; tokenUsage?: TaskReviewResult['tokenUsage'] }>;
   synthesize?: (
     prompt: string,
@@ -56,7 +64,7 @@ export function createFrozenReviewPacket(
   return { ...input, diffHash, id: `review-batch-${diffHash.slice(0, 12)}-${randomUUID()}` };
 }
 
-function axisPrompt(packet: FrozenReviewPacket, axis: ReviewAxis): string {
+function axisPrompt(packet: FrozenReviewPacket, axis: ReviewAxis, correctionCode?: string): string {
   const concerns: Record<ReviewAxis, string> = {
     contract_completeness:
       'Check every stated contract requirement, boundary, and completeness gap.',
@@ -78,7 +86,7 @@ Initial broad-review inputs: ${JSON.stringify(packet.initialFindings)}
 Validation: ${packet.validationSummary ?? ''}\nFacts: ${packet.factSummary ?? ''}
 Context: ${packet.context}
 Diff:
-${packet.diff}`;
+${packet.diff}${correctionCode ? `\nCorrection required: return only a response satisfying validation code ${correctionCode}.` : ''}`;
 }
 
 function parseCandidates(
@@ -86,45 +94,11 @@ function parseCandidates(
   axis: ReviewAxis,
   diff: string,
 ): StructuredReviewFinding[] {
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(stdout);
-  } catch {
-    throw new Error('unparseable reviewer response');
-  }
-  const raw =
-    parsed &&
-    typeof parsed === 'object' &&
-    Array.isArray((parsed as { findings?: unknown[] }).findings)
-      ? (parsed as { findings: unknown[] }).findings
-      : [];
-  const candidates: StructuredReviewFinding[] = [];
-  for (const value of raw) {
-    if (!value || typeof value !== 'object') continue;
-    const f = value as Record<string, unknown>;
-    if (
-      !['MEDIUM', 'HIGH', 'CRITICAL'].includes(String(f.severity)) ||
-      !f.path ||
-      !f.claim ||
-      !f.evidence ||
-      !f.remediation
-    )
-      continue;
-    const finding: StructuredReviewFinding = {
-      id: '',
-      axis,
-      severity: f.severity as StructuredReviewFinding['severity'],
-      path: String(f.path),
-      ...(typeof f.line === 'number' && { line: f.line }),
-      ...(typeof f.symbol === 'string' && { symbol: f.symbol }),
-      claim: String(f.claim),
-      evidence: String(f.evidence),
-      remediation: String(f.remediation),
-      confidence: typeof f.confidence === 'number' ? Math.max(0, Math.min(1, f.confidence)) : 0.5,
-    };
-    finding.id = structuredFindingSourceId(finding);
-    candidates.push(finding);
-  }
+  const candidates = parseAxisResponse(stdout, axis).map((finding) => {
+    const result = { ...finding };
+    result.id = structuredFindingSourceId(result);
+    return result;
+  });
   const allowed = new Set(
     filterOutOfDiffFindings(
       candidates.map((f) => `${f.path}: ${f.claim}`),
@@ -132,6 +106,44 @@ function parseCandidates(
     ).issues,
   );
   return candidates.filter((f) => allowed.has(`${f.path}: ${f.claim}`));
+}
+
+function failureFor(error: unknown): ReviewFailure {
+  if (error instanceof ReviewStructuredOutputError)
+    return {
+      kind: 'invalid-response',
+      code: REVIEW_VALIDATION_CODE,
+      message: error.message,
+      retryable: true,
+    };
+  const message = error instanceof Error ? error.message : String(error);
+  if (/reviewed HEAD changed/i.test(message))
+    return {
+      kind: 'head-changed',
+      code: 'REVIEW_HEAD_CHANGED',
+      message: 'Reviewed HEAD changed during frozen batch',
+      retryable: false,
+    };
+  if (/timed? out|timeout/i.test(message))
+    return {
+      kind: 'timeout',
+      code: 'REVIEW_TIMEOUT',
+      message: 'Reviewer timed out',
+      retryable: true,
+    };
+  if (/auth|credential|provider|model.*unavailable|offline/i.test(message))
+    return {
+      kind: 'provider-unavailable',
+      code: 'REVIEW_PROVIDER_UNAVAILABLE',
+      message: 'Reviewer provider is unavailable',
+      retryable: true,
+    };
+  return {
+    kind: 'runner-failed',
+    code: 'REVIEW_RUNNER_FAILED',
+    message: 'Reviewer runner failed',
+    retryable: true,
+  };
 }
 
 function dedupe<T extends ReviewFindingCandidate>(findings: T[]): T[] {
@@ -164,19 +176,23 @@ export async function runReviewBatch(
     while (next < REVIEW_AXES.length) {
       const axis = REVIEW_AXES[next++];
       let lastError: string | undefined;
+      let failure: ReviewFailure | undefined;
       const axisStarted = Date.now();
       for (let attempt = 1; attempt <= 2; attempt++) {
         try {
           if (options.readHead && (await options.readHead()) !== options.packet.reviewedHead)
             throw new Error('reviewed HEAD changed during frozen batch');
           const result = await options.execute(
-            axisPrompt(options.packet, axis),
+            axisPrompt(
+              options.packet,
+              axis,
+              failure?.kind === 'invalid-response' ? REVIEW_VALIDATION_CODE : undefined,
+            ),
             `${options.packet.id}-${axis}-${attempt}`,
+            reviewAxisOutputContract,
           );
           tokenUsage.push(result.tokenUsage);
-          candidates.push(
-            ...parseCandidates(result.stdout.slice(0, 1_000_000), axis, options.packet.diff),
-          );
+          candidates.push(...parseCandidates(result.stdout, axis, options.packet.diff));
           runs.push({
             axis,
             status: 'completed',
@@ -186,7 +202,8 @@ export async function runReviewBatch(
           lastError = undefined;
           break;
         } catch (error) {
-          lastError = error instanceof Error ? error.message : String(error);
+          failure = failureFor(error);
+          lastError = failure.message;
           if (attempt === 2)
             runs.push({
               axis,
@@ -194,6 +211,7 @@ export async function runReviewBatch(
               attempts: attempt,
               durationMs: Date.now() - axisStarted,
               error: lastError,
+              failure,
             });
         }
       }

@@ -54,7 +54,7 @@ describe('runCodexReview', () => {
     expect(harness.writes).toHaveLength(1);
     expect(harness.writes[0]?.containerId).toBe('container-1');
     expect(harness.writes[0]?.content).toBe('review prompt');
-    expect(harness.execs).toHaveLength(1);
+    expect(harness.execs).toHaveLength(2);
 
     const exec = harness.execs[0];
     expect(exec?.command[0]).toBe('sh');
@@ -69,6 +69,22 @@ describe('runCodexReview', () => {
     expect(script).toContain("< '/tmp/autopod-codex-review-pod_1-2-");
     expect(script).toContain("> '/tmp/autopod-codex-review-pod_1-2-");
     expect(script).toContain("cat '/tmp/autopod-codex-review-pod_1-2-");
+  });
+
+  it('uses Codex native output schema files when an output contract is supplied', async () => {
+    const harness = createHarness();
+    await runCodexReview({
+      podId: 'pod-1',
+      containerId: 'container-1',
+      containerManager: harness.manager,
+      model: 'auto',
+      prompt: 'review',
+      timeout: 1234,
+      outputContract: { name: 'review-axis-v1', jsonSchema: '{"type":"object"}' },
+    });
+    expect(harness.writes).toHaveLength(2);
+    expect(harness.writes[1]?.path).toContain('.schema.json');
+    expect(harness.execs[0]?.command[2]).toContain('--output-schema');
   });
 
   it('captures token usage from the Codex JSONL log', async () => {

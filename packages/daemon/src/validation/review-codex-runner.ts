@@ -6,6 +6,7 @@ import type {
   ExecResult,
   StreamingExecResult,
 } from '../interfaces/container-manager.js';
+import type { ReviewerOutputContract } from './review-structured-output.js';
 
 export type CodexReviewErrorKind = 'non-zero-exit' | 'timeout' | 'exec-error';
 
@@ -38,6 +39,7 @@ export interface CodexReviewConfig {
   prompt: string;
   env?: Record<string, string>;
   timeout: number;
+  outputContract?: ReviewerOutputContract;
 }
 
 export interface CodexReviewTokenUsage {
@@ -61,8 +63,15 @@ export async function runCodexReview(
   const promptPath = `/tmp/autopod-codex-review-${suffix}.prompt`;
   const outputPath = `/tmp/autopod-codex-review-${suffix}.out`;
   const logPath = `/tmp/autopod-codex-review-${suffix}.log`;
+  const schemaPath = `/tmp/autopod-codex-review-${suffix}.schema.json`;
 
   await config.containerManager.writeFile(config.containerId, promptPath, config.prompt);
+  if (config.outputContract)
+    await config.containerManager.writeFile(
+      config.containerId,
+      schemaPath,
+      config.outputContract.jsonSchema,
+    );
 
   const modelArgs =
     config.model && config.model !== 'auto' ? ` --model ${shellQuote(config.model)}` : '';
@@ -74,6 +83,7 @@ export async function runCodexReview(
     '--json',
     '--output-last-message',
     shellQuote(outputPath),
+    ...(config.outputContract ? [`--output-schema ${shellQuote(schemaPath)}`] : []),
     modelArgs.trim(),
     '-',
     `< ${shellQuote(promptPath)}`,
@@ -152,6 +162,16 @@ export async function runCodexReview(
       message: `codex review ${kind === 'timeout' ? 'timed out' : 'failed'}: ${message}`,
       cause: err,
     });
+  } finally {
+    try {
+      await config.containerManager.execInContainer(
+        config.containerId,
+        ['rm', '-f', promptPath, outputPath, logPath, schemaPath],
+        { timeout: 5_000 },
+      );
+    } catch {
+      // Best-effort cleanup after review completion or cancellation.
+    }
   }
 }
 

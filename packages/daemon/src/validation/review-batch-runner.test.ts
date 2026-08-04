@@ -129,6 +129,60 @@ describe('runReviewBatch', () => {
     });
   });
 
+  it('retries malformed output with a stable code without echoing model output', async () => {
+    const prompts: string[] = [];
+    let first = true;
+    const batch = await runReviewBatch({
+      packet: packet(),
+      model: 'test',
+      execute: async (prompt, label) => {
+        if (label.includes('security_authority') && first) {
+          first = false;
+          prompts.push(prompt);
+          return { stdout: '{malformed secret output' };
+        }
+        if (label.includes('security_authority')) prompts.push(prompt);
+        return { stdout: response };
+      },
+    });
+    expect(batch.axes.find((axis) => axis.axis === 'security_authority')).toMatchObject({
+      status: 'completed',
+      attempts: 2,
+    });
+    expect(prompts[1]).toContain('REVIEW_AXIS_RESPONSE_INVALID');
+    expect(prompts[1]).not.toContain('malformed secret output');
+  });
+
+  it('records invalid response as a typed blocking axis failure', async () => {
+    const batch = await runReviewBatch({
+      packet: packet(),
+      model: 'test',
+      execute: async () => ({ stdout: '{bad' }),
+    });
+    expect(batch.axes[0]).toMatchObject({
+      status: 'unavailable',
+      attempts: 2,
+      failure: { kind: 'invalid-response', code: 'REVIEW_AXIS_RESPONSE_INVALID' },
+    });
+    expect(batch.infrastructureUnavailable).toBe(true);
+  });
+
+  it.each([
+    ['timed out', 'timeout'],
+    ['provider authentication unavailable', 'provider-unavailable'],
+    ['runner exploded', 'runner-failed'],
+    ['reviewed HEAD changed during frozen batch', 'head-changed'],
+  ] as const)('classifies %s as %s', async (message, kind) => {
+    const batch = await runReviewBatch({
+      packet: packet(),
+      model: 'test',
+      execute: async () => {
+        throw new Error(message);
+      },
+    });
+    expect(batch.axes[0]?.failure?.kind).toBe(kind);
+  });
+
   it('retains distinct cross-axis sources for the same semantic finding', async () => {
     const batch = await runReviewBatch({
       packet: packet(),

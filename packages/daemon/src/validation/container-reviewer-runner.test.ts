@@ -160,6 +160,28 @@ describe('runContainerReviewer', () => {
     expect(mockRunCodexReview).not.toHaveBeenCalled();
   });
 
+  it('uses Claude native JSON schema files when an output contract is supplied', async () => {
+    const cm = containerManager({
+      stdout: JSON.stringify({ result: 'ok' }),
+      stderr: '',
+      exitCode: 0,
+    });
+    await runContainerReviewer({
+      podId: 'sess-1',
+      containerId: 'container-abc',
+      containerManager: cm,
+      profile: profile({ modelProvider: 'max' }),
+      model: 'sonnet',
+      prompt: 'review',
+      timeout: 60_000,
+      outputContract: { name: 'review-axis-v1', jsonSchema: '{"type":"object"}' },
+    });
+    expect(cm.writeFile).toHaveBeenCalledTimes(2);
+    expect((cm.execStreaming as ReturnType<typeof vi.fn>).mock.calls[0]?.[1][2]).toContain(
+      '--json-schema',
+    );
+  });
+
   it('runs Codex CLI in the live pod container for OpenAI-surface profiles', async () => {
     mockRunCodexReview.mockResolvedValueOnce({ stdout: 'codex output' });
     const cm = containerManager();
