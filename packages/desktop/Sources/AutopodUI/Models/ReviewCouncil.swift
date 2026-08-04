@@ -10,6 +10,10 @@ public struct ReviewCouncil: Sendable {
     public let id: String; public let axis: String?; public let severity: String?; public let claim: String
     public let evidence: String?; public let remediation: String?; public let path: String?; public let line: Int?; public let symbol: String?
     public let lifecycle: String; public let sourceIds: [String]; public let closureEvidence: String?
+    public var legacyIssue: String {
+      guard let severity, let path else { return claim }
+      return "[\(severity)] \(path)\(line.map { ":\($0)" } ?? "") — \(claim)"
+    }
   }
   public let id: String; public let diffHash: String; public let reviewedHead: String; public let promptVersion: String; public let schemaVersion: String; public let model: String
   public let axes: [ReviewAxisRunResponse]; public let synthesis: String; public let durationMs: Int; public let tokenUsage: ReviewTokenUsageResponse?
@@ -76,6 +80,6 @@ public func reviewPresentationMode(council: ReviewCouncil?) -> ReviewPresentatio
 
 public func distinctBroadReviewIssues(_ issues: [String], council: ReviewCouncil?) -> [String] {
   guard let council else { return issues }
-  let canonicalClaims = Set(council.findings.map(\.claim))
-  return issues.filter { !canonicalClaims.contains($0) }
+  let canonicalIssues = Set(council.findings.flatMap { [$0.claim, $0.legacyIssue] })
+  return issues.filter { !canonicalIssues.contains($0) }
 }
