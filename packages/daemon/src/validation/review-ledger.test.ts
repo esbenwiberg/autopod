@@ -4,6 +4,7 @@ import { structuredFindingId } from './finding-fingerprint.js';
 import {
   activeLedgerEntries,
   activeLedgerFindings,
+  boundedClosureRepairDelta,
   closurePrompt,
   closureVerificationChunks,
   parseClosureVerification,
@@ -259,5 +260,28 @@ describe('reconcileReviewLedger', () => {
     expect(parseClosureVerification(`${response}${' '.repeat(800_000)}`, prior).status).toBe(
       'invalid',
     );
+  });
+
+  it('validates evidence against the exact frozen delta supplied to the prompt', () => {
+    const prior = reconcileReviewLedger(undefined, [finding('A')], undefined);
+    const rawDelta = `+ trusted visible repair abcdefghijklmnop\n${'🦊'.repeat(250_000)}\n+ outside frozen repair abcdefghijklmnop`;
+    const frozenDelta = boundedClosureRepairDelta(rawDelta);
+    expect(Buffer.byteLength(frozenDelta, 'utf8')).toBeLessThanOrEqual(1_000_000);
+    expect(frozenDelta).not.toContain('+ outside frozen repair');
+    expect(
+      parseClosureVerification(
+        JSON.stringify({
+          decisions: [
+            {
+              semanticId: semantic('A'),
+              fixed: true,
+              evidence: '+ outside frozen repair abcdefghijklmnop',
+            },
+          ],
+        }),
+        prior,
+        frozenDelta,
+      ).status,
+    ).toBe('invalid');
   });
 });

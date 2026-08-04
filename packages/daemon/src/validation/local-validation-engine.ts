@@ -50,6 +50,7 @@ import { applyDiffFilterToParsed } from './review-finding-filter.js';
 import {
   activeLedgerEntries,
   activeLedgerFindings,
+  boundedClosureRepairDelta,
   closurePrompt,
   closureVerificationChunks,
   parseClosureVerification,
@@ -815,6 +816,7 @@ export function createLocalValidationEngine(
               } else {
                 try {
                   const decisions = [];
+                  const frozenClosureDelta = boundedClosureRepairDelta(repair.diff ?? frozenDiff);
                   for (const chunk of closureVerificationChunks(priorActive)) {
                     const response = await runContainerReviewer({
                       podId: config.podId,
@@ -825,7 +827,7 @@ export function createLocalValidationEngine(
                         providerCredentials: config.reviewerProviderCredentials ?? null,
                       },
                       model: config.reviewerModel ?? 'auto',
-                      prompt: closurePrompt(chunk, repair.diff ?? frozenDiff),
+                      prompt: closurePrompt(chunk, frozenClosureDelta),
                       ...(config.reviewerExecEnv ? { env: config.reviewerExecEnv } : {}),
                       timeout: config.reviewTimeout ?? 300_000,
                       logger: log,
@@ -835,7 +837,11 @@ export function createLocalValidationEngine(
                       closureTokenUsage,
                       response.tokenUsage,
                     );
-                    const parsed = parseClosureVerification(response.stdout, chunk, repair.diff);
+                    const parsed = parseClosureVerification(
+                      response.stdout,
+                      chunk,
+                      frozenClosureDelta,
+                    );
                     if (parsed.status !== 'completed') {
                       closure = parsed;
                       break;
