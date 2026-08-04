@@ -37,6 +37,39 @@ import Testing
   #expect(council.canonicalDismissFinding(for: displayed, in: [legacy, ambiguous]) == nil)
 }
 
+@Test func reviewPresentationPreservesFailedHistoryVerdictWhenCouncilIsUnavailable() throws {
+  let data = """
+  {"status":"fail","reasoning":"blocked","issues":[],"model":"m","screenshots":[],"diff":"","reviewBatch":{"id":"history-packet","diffHash":"d","reviewedHead":"h","promptVersion":"p","schemaVersion":"s","model":"m","axes":[{"axis":"security_authority","status":"unavailable","attempts":2,"error":"Network unavailable"}],"candidates":[],"initialFindings":[],"accepted":[],"rejected":[],"merged":[],"synthesis":"model","durationMs":1,"infrastructureUnavailable":true,"ledger":[{"semanticId":"review:active","finding":{"id":"active","axis":"contract_completeness","severity":"MEDIUM","path":"a.swift","claim":"still blocked","evidence":"e","remediation":"r","confidence":1},"state":"new","priorSourceIds":[],"currentSourceIds":["active"]}]}}
+  """.data(using: .utf8)!
+  let review = try JSONDecoder().decode(TaskReviewResponse.self, from: data)
+  let council = try #require(reviewCouncil(from: review))
+
+  let checks = ValidationChecks(smoke: true, review: false, reviewCouncil: council)
+  let presentation = reviewPhasePresentation(progress: nil, checks: checks, council: council)
+  #expect(presentation.status == .failed)
+  #expect(presentation.councilUnavailableReason == "infrastructure unavailable")
+  #expect(council.findings(filter: .open).map(\.id) == ["review:active"])
+}
+
+@Test func reviewPresentationPreservesSkippedAndPassedVerdicts() {
+  let skipped = reviewPhasePresentation(
+    progress: nil,
+    checks: ValidationChecks(smoke: true, review: nil),
+    council: nil
+  )
+  #expect(skipped.status == .skipped)
+
+  let batch = ReviewBatchResponse(id: "p", diffHash: "d", reviewedHead: "h", promptVersion: "p", schemaVersion: "s", model: "m", axes: [], candidates: [], initialFindings: [], accepted: [], rejected: [], merged: [], synthesis: "model", durationMs: 1, infrastructureUnavailable: true, tokenUsage: nil, ledger: nil, repairDelta: nil, closureVerification: nil, firstGateOverflow: nil)
+  let council = ReviewCouncil(batch)
+  let presentation = reviewPhasePresentation(
+    progress: nil,
+    checks: ValidationChecks(smoke: true, review: true, reviewCouncil: council),
+    council: council
+  )
+  #expect(presentation.status == .passed)
+  #expect(presentation.councilUnavailableReason == "infrastructure unavailable")
+}
+
 @Test func reviewCouncilFallsBackToBatchTokenUsage() throws {
   let usage = ReviewTokenUsageResponse(inputTokens: 7, outputTokens: 3, cachedInputTokens: 2, cacheCreationInputTokens: nil, costUsd: 0.01)
   let batch = ReviewBatchResponse(id: "p", diffHash: "d", reviewedHead: "h", promptVersion: "p", schemaVersion: "s", model: "m", axes: [], candidates: [], initialFindings: [], accepted: [], rejected: [], merged: [], synthesis: "model", durationMs: 1, infrastructureUnavailable: nil, tokenUsage: usage, ledger: nil, repairDelta: nil, closureVerification: nil, firstGateOverflow: nil)
