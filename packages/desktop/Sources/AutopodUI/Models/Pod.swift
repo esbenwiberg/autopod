@@ -559,7 +559,7 @@ public struct ValidationProgress: Sendable {
                         RequirementCheckDetail(criterion: rc.criterion, met: rc.met, note: rc.note)
                     },
                     screenshots: r.screenshots.compactMap { resolveScreenshot($0) },
-                    council: r.reviewBatch.map { ReviewCouncil($0, overflow: r.firstGateOverflow) }
+                    council: reviewCouncil(from: r)
                 )
             }
         case .advisory:

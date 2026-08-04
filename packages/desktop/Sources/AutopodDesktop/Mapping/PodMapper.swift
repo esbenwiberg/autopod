@@ -298,7 +298,7 @@ public enum PodMapper {
         sastOutput: sastOutput,
         reviewIssues: v.taskReview?.issues,
         reviewFindings: response.lastValidationFindings,
-        reviewCouncil: v.taskReview?.reviewBatch.map { ReviewCouncil($0, overflow: v.taskReview?.firstGateOverflow) },
+        reviewCouncil: reviewCouncil(from: v.taskReview),
         dismissedFindingIds: dismissedFindingIds,
         reviewReasoning: v.taskReview?.reasoning,
         reviewSkipReason: v.reviewSkipReason,

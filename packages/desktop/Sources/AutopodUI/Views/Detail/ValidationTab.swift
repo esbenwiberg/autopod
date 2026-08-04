@@ -24,6 +24,11 @@ public func validationHistoryShouldRefreshAfterAdvisory(
   return progress?.advisory.status != .running
 }
 
+/// Maps the immutable review snapshot belonging to one stored validation attempt.
+public func validationHistoryReviewCouncil(_ response: ValidationResponse) -> ReviewCouncil? {
+  reviewCouncil(from: response.taskReview)
+}
+
 /// Validation tab — shows live per-phase progress chips + a detail panel for the selected phase.
 ///
 /// Data priority:
@@ -249,7 +254,7 @@ public struct ValidationTab: View {
       lintOutput: lintOutput,
       sastOutput: sastOutput,
       reviewIssues: response.taskReview?.issues,
-      reviewCouncil: response.taskReview?.reviewBatch.map { ReviewCouncil($0, overflow: response.taskReview?.firstGateOverflow) },
+      reviewCouncil: validationHistoryReviewCouncil(response),
       reviewReasoning: response.taskReview?.reasoning,
       reviewSkipReason: response.reviewSkipReason,
       reviewSkipKind: response.reviewSkipKind,

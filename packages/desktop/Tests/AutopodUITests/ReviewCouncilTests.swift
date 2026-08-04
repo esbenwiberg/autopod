@@ -5,7 +5,7 @@ import Testing
 
 @Test func reviewCouncilDecodesAndPresentsLedgerLifecycle() throws {
   let data = """
-  {"status":"fail","reasoning":"broad","issues":["legacy"],"model":"m","screenshots":[],"diff":"","tokenUsage":{"inputTokens":12,"outputTokens":4,"costUsd":0.03},"firstGateOverflow":{"reportedCount":9,"retainedFindingCount":2},"reviewBatch":{"id":"packet","diffHash":"abcdef123456","reviewedHead":"head","promptVersion":"p2","schemaVersion":"s2","model":"m","axes":[{"axis":"security_authority","status":"unavailable","attempts":2,"error":"Network unavailable"},{"axis":"contract_completeness","status":"completed","attempts":1}],"candidates":[{"id":"initial-1","source":"initial-review","issue":"raw"},{"id":"s1","axis":"security_authority","severity":"HIGH","path":"a.swift","line":4,"symbol":"run","claim":"same text","evidence":"proof","remediation":"fix","confidence":0.9}],"initialFindings":[{"id":"initial-1","source":"initial-review","issue":"raw"}],"accepted":[{"id":"s1","axis":"security_authority","severity":"HIGH","path":"a.swift","claim":"same text","evidence":"proof","remediation":"fix","confidence":0.9}],"rejected":[{"sourceIds":["x"],"reason":"duplicate"}],"merged":[{"finding":{"id":"s2","axis":"tests_integration","severity":"MEDIUM","path":"b.swift","claim":"merged","evidence":"e","remediation":"r","confidence":0.5},"sourceIds":["a","b"]}],"synthesis":"model","durationMs":1200,"ledger":[{"semanticId":"review:one","finding":{"id":"s1","axis":"security_authority","severity":"HIGH","path":"a.swift","claim":"same text","evidence":"proof","remediation":"fix","confidence":0.9},"state":"new","priorSourceIds":[],"currentSourceIds":["s1"]},{"semanticId":"review:two","finding":{"id":"initial-1","source":"initial-review","issue":"raw"},"state":"fixed","priorSourceIds":["initial-1"],"currentSourceIds":[],"closureEvidence":"verified"}],"repairDelta":{"status":"available","fromHead":"a","toHead":"b","diffHash":"d"},"closureVerification":{"status":"completed","decisions":[{"semanticId":"review:two","fixed":true,"evidence":"verified"}]}}}
+  {"status":"fail","reasoning":"broad","issues":["legacy"],"model":"m","screenshots":[],"diff":"","tokenUsage":{"inputTokens":12,"outputTokens":4,"costUsd":0.03},"firstGateOverflow":{"reportedCount":9,"retainedFindingCount":2},"reviewBatch":{"id":"packet","diffHash":"abcdef123456","reviewedHead":"head","promptVersion":"p2","schemaVersion":"s2","model":"m","axes":[{"axis":"security_authority","status":"unavailable","attempts":2,"error":"Network unavailable"},{"axis":"contract_completeness","status":"completed","attempts":1}],"candidates":[{"id":"initial-1","source":"initial-review","issue":"raw"},{"id":"s1","axis":"security_authority","severity":"HIGH","path":"a.swift","line":4,"symbol":"run","claim":"same text","evidence":"proof","remediation":"fix","confidence":0.9}],"initialFindings":[{"id":"initial-1","source":"initial-review","issue":"raw"}],"accepted":[{"id":"s1","axis":"security_authority","severity":"HIGH","path":"a.swift","claim":"same text","evidence":"proof","remediation":"fix","confidence":0.9}],"rejected":[{"sourceIds":["x"],"reason":"duplicate"}],"merged":[{"finding":{"id":"s2","axis":"tests_integration","severity":"MEDIUM","path":"b.swift","claim":"merged","evidence":"e","remediation":"r","confidence":0.5},"sourceIds":["a","b"]}],"synthesis":"model","durationMs":1200,"tokenUsage":{"inputTokens":10,"outputTokens":5,"cachedInputTokens":2,"cacheCreationInputTokens":1,"costUsd":0.02},"ledger":[{"semanticId":"review:one","finding":{"id":"s1","axis":"security_authority","severity":"HIGH","path":"a.swift","claim":"same text","evidence":"proof","remediation":"fix","confidence":0.9},"state":"new","priorSourceIds":[],"currentSourceIds":["s1"]},{"semanticId":"review:two","finding":{"id":"initial-1","source":"initial-review","issue":"raw"},"state":"fixed","priorSourceIds":["initial-1"],"currentSourceIds":[],"closureEvidence":"verified"}],"repairDelta":{"status":"available","fromHead":"a","toHead":"b","diffHash":"d"},"closureVerification":{"status":"completed","decisions":[{"semanticId":"review:two","fixed":true,"evidence":"verified"}]}}}
   """.data(using: .utf8)!
   let review = try JSONDecoder().decode(TaskReviewResponse.self, from: data)
   let council = try #require(review.reviewBatch.map(ReviewCouncil.init))
@@ -13,6 +13,12 @@ import Testing
   #expect(council.findings(filter: "open").map(\.id) == ["review:one"])
   #expect(council.findings(filter: "fixed").first?.closureEvidence == "verified")
   #expect(council.overflow?.reportedCount == 9)
+  #expect(review.reviewBatch?.candidates.count == 2)
+  #expect(council.rejected.first?.sourceIds == ["x"])
+  #expect(council.merged.first?.sourceIds == ["a", "b"])
+  #expect(council.repairDelta?.diffHash == "d")
+  #expect(council.closureVerification?.decisions.first?.fixed == true)
+  #expect(council.tokenUsage?.cachedInputTokens == 2)
 }
 
 @Test func reviewCouncilFallsBackToAcceptedFindingsWithoutLedger() throws {
@@ -26,4 +32,61 @@ import Testing
 @Test func legacyReviewDecodesWithoutCouncil() throws {
   let data = """{"status":"pass","reasoning":"ok","issues":[],"model":"m","screenshots":[],"diff":""}""".data(using: .utf8)!
   #expect(try JSONDecoder().decode(TaskReviewResponse.self, from: data).reviewBatch == nil)
+  #expect(reviewCouncil(from: try JSONDecoder().decode(TaskReviewResponse.self, from: data)) == nil)
+  #expect(reviewPresentationMode(council: nil) == .legacy)
+}
+
+@Test func deterministicUnavailableBatchDecodesSafely() throws {
+  let data = """
+  {"status":"uncertain","reasoning":"infra","issues":[],"model":"m","screenshots":[],"diff":"","reviewBatch":{"id":"p","diffHash":"d","reviewedHead":"h","promptVersion":"p","schemaVersion":"s","model":"m","axes":[{"axis":"contract_completeness","status":"unavailable","attempts":3,"error":"Council runner unavailable"}],"candidates":[],"initialFindings":[],"accepted":[],"rejected":[],"merged":[],"synthesis":"deterministic-fallback","durationMs":42,"infrastructureUnavailable":true}}
+  """.data(using: .utf8)!
+  let review = try JSONDecoder().decode(TaskReviewResponse.self, from: data)
+  let council = try #require(reviewCouncil(from: review))
+  #expect(council.synthesis == "deterministic-fallback")
+  #expect(council.infrastructureUnavailable)
+  #expect(council.axes.first?.error == "Council runner unavailable")
+}
+
+@Test func lifecycleCountsGroupingSortingAndCanonicalDismissal() throws {
+  func structured(_ id: String, _ axis: String, _ severity: String, claim: String = "duplicate") -> ReviewFindingCandidateResponse {
+    .structured(StructuredReviewFindingResponse(id: id, axis: axis, severity: severity, path: "x.swift", line: 3, symbol: "run", claim: claim, evidence: "e", remediation: "r", confidence: 1, state: nil))
+  }
+  let entries = [
+    ReviewFindingLedgerEntryResponse(semanticId: "review:z", finding: structured("z", "security_authority", "MEDIUM"), state: "open", priorSourceIds: [], currentSourceIds: ["z"], closureEvidence: nil),
+    ReviewFindingLedgerEntryResponse(semanticId: "review:a", finding: structured("a", "contract_completeness", "CRITICAL"), state: "new", priorSourceIds: [], currentSourceIds: ["a"], closureEvidence: nil),
+    ReviewFindingLedgerEntryResponse(semanticId: "review:b", finding: structured("b", "contract_completeness", "HIGH"), state: "regressed", priorSourceIds: ["old"], currentSourceIds: ["b"], closureEvidence: nil),
+    ReviewFindingLedgerEntryResponse(semanticId: "review:c", finding: .initial(InitialReviewFindingResponse(id: "i", source: "initial-review", issue: "raw")), state: "fixed", priorSourceIds: ["i"], currentSourceIds: [], closureEvidence: "bounded"),
+  ]
+  let batch = ReviewBatchResponse(id: "p", diffHash: "d", reviewedHead: "h", promptVersion: "p", schemaVersion: "s", model: "m", axes: [], candidates: [], initialFindings: [], accepted: [], rejected: [.init(sourceIds: ["r"], reason: "noise")], merged: [], synthesis: "model", durationMs: 1, infrastructureUnavailable: nil, tokenUsage: nil, ledger: entries, repairDelta: nil, closureVerification: nil, firstGateOverflow: nil)
+  let council = ReviewCouncil(batch)
+  #expect(council.lifecycleCounts[.open] == 2)
+  #expect(council.lifecycleCounts[.fixed] == 1)
+  #expect(council.lifecycleCounts[.regressed] == 1)
+  #expect(council.lifecycleCounts[.rejected] == 1)
+  #expect(council.findings(filter: .all).map(\.id) == ["review:a", "review:b", "review:z", "review:c"])
+  #expect(council.groups(filter: .all).map(\.axis) == ["contract_completeness", "security_authority", nil])
+  let available = [
+    ValidationFindingResponse(id: "review:a", source: "task_review", description: "duplicate", reasoning: nil),
+    ValidationFindingResponse(id: "review:z", source: "task_review", description: "duplicate", reasoning: nil),
+  ]
+  #expect(council.canonicalDismissFinding(for: "review:z", in: available)?.id == "review:z")
+  #expect(reviewPresentationMode(council: council) == .council)
+}
+
+@Test func overflowDisablesCanonicalDismissalAndTopLevelWins() throws {
+  let data = """
+  {"status":"fail","reasoning":"x","issues":[],"model":"m","screenshots":[],"diff":"","firstGateOverflow":{"reportedCount":8,"retainedFindingCount":3},"reviewBatch":{"id":"p","diffHash":"d","reviewedHead":"h","promptVersion":"p","schemaVersion":"s","model":"m","axes":[],"candidates":[],"initialFindings":[],"accepted":[],"rejected":[],"merged":[],"synthesis":"model","durationMs":1}}
+  """.data(using: .utf8)!
+  let council = try #require(reviewCouncil(from: JSONDecoder().decode(TaskReviewResponse.self, from: data)))
+  let finding = ValidationFindingResponse(id: "review:a", source: "task_review", description: "x", reasoning: nil)
+  #expect(council.overflow?.reportedCount == 8)
+  #expect(council.canonicalDismissFinding(for: "review:a", in: [finding]) == nil)
+}
+
+@Test func historicalAttemptUsesItsOwnFrozenCouncilSnapshot() throws {
+  let data = """
+  {"podId":"lonely-panther","attempt":1,"timestamp":"2026-08-04T00:00:00Z","smoke":{"status":"pass","build":{"status":"pass","output":"","duration":1},"health":{"status":"pass","url":"http://x","responseCode":200,"duration":1},"pages":[]},"taskReview":{"status":"pass","reasoning":"x","issues":[],"model":"m","screenshots":[],"diff":"","reviewBatch":{"id":"attempt-one","diffHash":"d","reviewedHead":"h","promptVersion":"p","schemaVersion":"s","model":"m","axes":[],"candidates":[],"initialFindings":[],"accepted":[],"rejected":[],"merged":[],"synthesis":"model","durationMs":1}},"overall":"pass","duration":2}
+  """.data(using: .utf8)!
+  let response = try JSONDecoder().decode(ValidationResponse.self, from: data)
+  #expect(validationHistoryReviewCouncil(response)?.id == "attempt-one")
 }
