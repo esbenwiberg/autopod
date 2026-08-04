@@ -119,19 +119,22 @@ function boundedReviewPacketText(value: unknown, limit = 40_000): string {
 }
 
 function boundedReviewPacketString(value: string, limit: number): string {
-  const sanitized = sanitize(value, getPresetConfig('strict'));
-  if (Buffer.byteLength(sanitized, 'utf8') <= limit) return sanitized;
+  return truncateUtf8(sanitize(value, getPresetConfig('strict')), limit);
+}
+
+function truncateUtf8(value: string, limit: number): string {
+  if (Buffer.byteLength(value, 'utf8') <= limit) return value;
   let lower = 0;
-  let upper = sanitized.length;
+  let upper = value.length;
   while (lower < upper) {
     const midpoint = Math.ceil((lower + upper) / 2);
-    if (Buffer.byteLength(sanitized.slice(0, midpoint), 'utf8') <= limit) lower = midpoint;
+    if (Buffer.byteLength(value.slice(0, midpoint), 'utf8') <= limit) lower = midpoint;
     else upper = midpoint - 1;
   }
   // Do not return a dangling UTF-16 surrogate if the byte boundary bisected a
   // code point. This only operates on a field, never a serialized record or ID.
-  const end = lower > 0 && /[\uD800-\uDBFF]/.test(sanitized[lower - 1] ?? '') ? lower - 1 : lower;
-  return sanitized.slice(0, end);
+  const end = lower > 0 && /[\uD800-\uDBFF]/.test(value[lower - 1] ?? '') ? lower - 1 : lower;
+  return value.slice(0, end);
 }
 
 const MAX_INITIAL_REVIEW_FINDINGS = 100;
@@ -152,7 +155,11 @@ function initialBroadFindingId(issue: string): string {
   // consumed by preceding findings. Never derive semantic identity from text
   // after aggregate packet truncation. Keep the established normalization so
   // existing initial-review override and ledger identities continue to match.
-  const normalized = sanitize(issue, getPresetConfig('strict'))
+  // Identity is a one-way digest and never persists model text, so it can use
+  // the complete original issue without routing large or sensitive content
+  // through the expensive text sanitizer. The separately persisted display
+  // field is always structurally sanitized and byte-bounded below.
+  const normalized = issue
     .toLowerCase()
     .replace(/[^a-z0-9\s]/g, '')
     .replace(/\s+/g, ' ')
@@ -170,7 +177,7 @@ export function initialBroadFindings(review: TaskReviewResult) {
     const id = initialBroadFindingId(issue);
     if (seen.has(id)) continue;
     const remaining = MAX_INITIAL_REVIEW_BYTES - bytes;
-    const boundedIssue = boundedReviewPacketString(sanitizedIssue, remaining);
+    const boundedIssue = truncateUtf8(sanitizedIssue, remaining);
     if (!boundedIssue) break;
     seen.add(id);
     findings.push({
@@ -3827,19 +3834,26 @@ export function parseReviewJson(raw: string): {
     const deviationsAssessment = parseDeviationsAssessment(parsed.deviationsAssessment);
 
     const normalizedIssues: string[] = [];
-    let validIssueCount = 0;
+    const seenFindingIds = new Set<string>();
+    const findingIdByIssue = new Map<string, string>();
     for (const rawIssue of parsed.issues as unknown[]) {
       const issue = normalizeReviewIssue(rawIssue);
       if (issue === null) continue;
-      validIssueCount++;
+      // Count supported first-gate findings by semantic identity, not raw
+      // model entries. Repeated wording must not consume the addressable cap
+      // and hide a distinct finding that appears later in the response.
+      const findingId = findingIdByIssue.get(issue) ?? initialBroadFindingId(issue);
+      findingIdByIssue.set(issue, findingId);
+      if (seenFindingIds.has(findingId)) continue;
+      seenFindingIds.add(findingId);
       if (normalizedIssues.length < MAX_TASK_REVIEW_ISSUES) {
         normalizedIssues.push(boundedReviewPacketString(issue, MAX_INITIAL_SEMANTIC_BYTES));
       }
     }
-    const overflowed = validIssueCount > MAX_TASK_REVIEW_ISSUES;
+    const overflowed = seenFindingIds.size > MAX_TASK_REVIEW_ISSUES;
     if (overflowed) {
       normalizedIssues.push(
-        `${FIRST_GATE_OVERFLOW_PREFIX} Reviewer returned ${validIssueCount} valid issues; the first ${MAX_TASK_REVIEW_ISSUES} are independently addressable and this bounded marker remains blocking until a fresh complete first gate succeeds.`,
+        `${FIRST_GATE_OVERFLOW_PREFIX} Reviewer returned ${seenFindingIds.size} unique valid issues; the first ${MAX_TASK_REVIEW_ISSUES} are independently addressable and this bounded marker remains blocking until a fresh complete first gate succeeds.`,
       );
     }
     // If the model returned issues but every retained issue was un-renderable,
@@ -3856,7 +3870,7 @@ export function parseReviewJson(raw: string): {
       ...(overflowed
         ? {
             firstGateOverflow: {
-              reportedCount: validIssueCount,
+              reportedCount: seenFindingIds.size,
               retainedFindingCount: MAX_TASK_REVIEW_ISSUES,
             },
           }

@@ -983,6 +983,14 @@ describe('parseReviewJson — issues normalization', () => {
     expect(parsed?.issues).toEqual(['valid A', 'valid B']);
     expect(parsed?.firstGateOverflow).toBeUndefined();
   });
+
+  it('does not let duplicate first-gate entries consume distinct finding capacity', () => {
+    const parsed = parseReviewJson(
+      baseShape([...Array.from({ length: 4_096 }, () => 'duplicate A'), 'distinct B']),
+    );
+    expect(parsed?.issues).toEqual(['duplicate A', 'distinct B']);
+    expect(parsed?.firstGateOverflow).toBeUndefined();
+  });
 });
 
 describe('validate() — hasWebUi gating', () => {
