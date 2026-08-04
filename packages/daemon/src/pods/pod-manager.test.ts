@@ -865,6 +865,70 @@ function createTestContext(
 }
 
 describe('PodManager', () => {
+  describe('verified sandbox checkpoint lifecycle', () => {
+    it('does not recursively extract sandbox source when checkpoint proof is unavailable', async () => {
+      const ctx = createTestContext(undefined, {
+        executionTarget: 'sandbox',
+        warmImageTag: 'registry.azurecr.io/test:latest',
+      });
+      const manager = createPodManager(ctx.deps);
+      const pod = manager.createSession(
+        { profileName: 'test-profile', task: 'checkpoint' },
+        'user-1',
+      );
+      ctx.podRepo.update(pod.id, {
+        status: 'failed',
+        containerId: 'ctr-1',
+        worktreePath: '/tmp/wt',
+        worktreeCompromised: true,
+      });
+      const result = await manager.recoverWorktree(pod.id);
+      expect(result.recovered).toBe(false);
+      expect(result.checkpoint?.promoted).toBe(false);
+      expect(ctx.containerManager.extractDirectoryFromContainer).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('partial checkpoint proof never recovers', () => {
+    it('keeps the compromised flag when a checkpoint cannot be materialized', async () => {
+      const ctx = createTestContext(undefined, {
+        executionTarget: 'sandbox',
+        warmImageTag: 'registry.azurecr.io/test:latest',
+      });
+      const manager = createPodManager(ctx.deps);
+      const pod = manager.createSession(
+        { profileName: 'test-profile', task: 'checkpoint' },
+        'user-1',
+      );
+      ctx.podRepo.update(pod.id, {
+        status: 'failed',
+        containerId: 'ctr-1',
+        worktreePath: '/tmp/wt',
+        worktreeCompromised: true,
+      });
+      await manager.recoverWorktree(pod.id);
+      expect(manager.getSession(pod.id).worktreeCompromised).toBe(true);
+    });
+  });
+
+  describe('local workspace sync', () => {
+    it('retains the existing Docker recovery path', async () => {
+      const ctx = createTestContext();
+      const manager = createPodManager(ctx.deps);
+      const pod = manager.createSession(
+        { profileName: 'test-profile', task: 'local recovery' },
+        'user-1',
+      );
+      ctx.podRepo.update(pod.id, {
+        status: 'failed',
+        containerId: 'ctr-1',
+        worktreePath: '/tmp/wt',
+        worktreeCompromised: true,
+      });
+      await manager.recoverWorktree(pod.id);
+      expect(ctx.containerManager.extractDirectoryFromContainer).toHaveBeenCalled();
+    });
+  });
   it('quiesces a paused Codex run before allowing resume', async () => {
     const ctx = createTestContext(undefined, { defaultRuntime: 'codex' });
     const attempts = createProviderAttemptRepository(ctx.db);

@@ -156,6 +156,10 @@ import { graftHostTreeOntoBase } from '../worktrees/graft-reconcile.js';
 import { DeletionGuardError, GitCredentialError } from '../worktrees/local-worktree-manager.js';
 import { MergeQueue } from '../worktrees/merge-queue.js';
 import { transferCommitToContainer } from '../worktrees/sandbox-reconcile.js';
+import {
+  type WorkspaceCheckpointResult,
+  checkpointSandboxWorkspace,
+} from '../worktrees/sandbox-workspace-checkpoint.js';
 import { agentToolingCachePaths } from './agent-tooling-cache-paths.js';
 import { buildCorrectionMessage } from './correction-context.js';
 import type { EscalationRepository } from './escalation-repository.js';
@@ -1650,6 +1654,7 @@ export interface PodManager {
     recovered: boolean;
     message: string;
     blockers?: Array<{ status: string; path: string }>;
+    checkpoint?: WorkspaceCheckpointResult;
   }>;
 }
 
@@ -3268,6 +3273,9 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
   const validationAbortControllers = new Map<string, AbortController>();
   /** Slow operator recovery is detached from HTTP and coalesced per pod. */
   const attemptExtensionRuns = new Map<string, Promise<void>>();
+  // Completion, explicit recovery, and destructive-boundary preservation can race.
+  // One immutable checkpoint per pod makes duplicate requests observationally identical.
+  const sandboxCheckpointRuns = new Map<string, Promise<WorkspaceCheckpointResult>>();
   const infrastructureResumeRuns = new Map<string, Promise<void>>();
   const pauseIntents = new Map<string, symbol>();
   const activeAgentRuns = new Map<string, { token: symbol; settled: Promise<void> }>();
@@ -4741,6 +4749,14 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         await cm.start(pod.containerId);
       }
     }
+    if (pod.executionTarget === 'sandbox') {
+      const checkpoint = await checkpointSandboxWorkspaceForPod(pod);
+      if (!checkpoint.promoted || !checkpoint.materialized || !checkpoint.lineageVerified) {
+        throw new Error(checkpoint.error?.message ?? 'sandbox checkpoint was not fully verified');
+      }
+      emitActivityStatus(pod.id, `Verified workspace checkpoint before ${reason}.`);
+      return;
+    }
     const result = await syncWorkspaceBack(
       pod.containerId,
       pod.worktreePath,
@@ -4759,6 +4775,42 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
       'Workspace preserved before recovery boundary',
     );
     emitActivityStatus(pod.id, `Workspace preserved before ${reason}.`);
+  }
+
+  async function checkpointSandboxWorkspaceForPod(pod: Pod): Promise<WorkspaceCheckpointResult> {
+    if (!pod.containerId || !pod.worktreePath) {
+      return {
+        sequence: 0,
+        sourceHead: '',
+        sourceTree: '',
+        snapshotCommit: '',
+        snapshotTree: '',
+        transferVerified: false,
+        bundleVerified: false,
+        hostImported: false,
+        lineageVerified: false,
+        promoted: false,
+        materialized: false,
+        quarantineRef: '',
+        error: {
+          phase: 'capture',
+          code: 'NO_WORKSPACE',
+          retryable: false,
+          message: 'Sandbox pod has no container or Git worktree',
+        },
+      };
+    }
+    const existing = sandboxCheckpointRuns.get(pod.id);
+    if (existing) return existing;
+    const run = checkpointSandboxWorkspace({
+      containerManager: containerManagerFactory.get('sandbox'),
+      containerId: pod.containerId,
+      podId: pod.id,
+      worktreePath: pod.worktreePath,
+      sequence: Date.now(),
+    }).finally(() => sandboxCheckpointRuns.delete(pod.id));
+    sandboxCheckpointRuns.set(pod.id, run);
+    return run;
   }
 
   async function preserveSandboxAfterAgentFailure(podId: string, reason: string): Promise<void> {
@@ -9813,9 +9865,30 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
       }
 
       // Sync workspace back to host worktree before any host-side git reads
+      // Sandboxes are deliberately different: a verified Git checkpoint is the
+      // source-delivery authority. Never mirror /workspace into the host tree.
+      if (pod.executionTarget === 'sandbox' && pod.containerId && pod.worktreePath) {
+        emitActivityStatus(podId, 'Capturing verified sandbox workspace checkpoint…');
+        const checkpoint = await checkpointSandboxWorkspaceForPod(pod);
+        if (!checkpoint.promoted || !checkpoint.materialized || !checkpoint.lineageVerified) {
+          emitActivityStatus(
+            podId,
+            'Checkpoint transfer unavailable; retaining sandbox for retry.',
+          );
+          parkOnWorktreeSyncFailure(
+            podId,
+            `Verified sandbox checkpoint failed: ${checkpoint.error?.message ?? 'incomplete proof'}`,
+          );
+          return;
+        }
+        emitActivityStatus(
+          podId,
+          `Verified sandbox checkpoint ${checkpoint.snapshotTree.slice(0, 12)} materialized.`,
+        );
+      }
       let syncSucceeded = true;
       let agentCommitsPushed = true;
-      if (pod.containerId && pod.worktreePath) {
+      if (pod.executionTarget !== 'sandbox' && pod.containerId && pod.worktreePath) {
         try {
           const cm = containerManagerFactory.get(pod.executionTarget);
           const result = await syncWorkspaceBack(
@@ -9853,7 +9926,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         );
         return;
       }
-      if (pod.worktreePath) {
+      if (pod.executionTarget !== 'sandbox' && pod.worktreePath) {
         const profileForCommit = profileStore.get(pod.profileName);
         try {
           const committed = await worktreeManager.commitPendingChangesWithGeneratedMessage(
@@ -15227,6 +15300,26 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         return {
           recovered: false,
           message: 'Pod has no worktree — manual extraction needed',
+        };
+      }
+
+      if (pod.executionTarget === 'sandbox') {
+        const checkpoint = await checkpointSandboxWorkspaceForPod(pod);
+        const recovered =
+          checkpoint.lineageVerified && checkpoint.promoted && checkpoint.materialized;
+        if (!recovered) {
+          return {
+            recovered: false,
+            message: `Verified checkpoint recovery incomplete: ${checkpoint.error?.message ?? 'proof missing'}`,
+            checkpoint,
+          };
+        }
+        podRepo.update(podId, { worktreeCompromised: false, preSubmitReview: null });
+        emitActivityStatus(podId, 'Verified checkpoint recovered and materialized the worktree.');
+        return {
+          recovered: true,
+          message: 'Verified checkpoint recovered and materialized',
+          checkpoint,
         };
       }
 
