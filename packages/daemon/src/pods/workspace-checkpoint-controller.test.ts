@@ -118,6 +118,40 @@ describe('WorkspaceCheckpointController interval and durability lease', () => {
 });
 
 describe('WorkspaceCheckpointController checkpoint chaos matrix', () => {
+  it('continues a pod checkpoint sequence after a daemon restart', async () => {
+    const persisted: CheckpointRecord = {
+      podId: 'pod',
+      sequence: 48,
+      fingerprint,
+      result: success(48),
+      verifiedAt: new Date(90_000).toISOString(),
+      attempts: 1,
+      error: undefined,
+    };
+    const saved: CheckpointRecord[] = [];
+    const checkpoint = vi.fn(async (_pod: string, _reason: string, sequence: number) =>
+      success(sequence),
+    );
+    const controller = new WorkspaceCheckpointController({
+      observe: async () => fingerprint,
+      checkpoint,
+      records: {
+        save: async (record) => {
+          saved.push(record);
+        },
+        latest: async () => persisted,
+        latestVerified: async () => persisted,
+        incomplete: async () => [],
+      },
+      now: () => 100_000,
+    });
+
+    await controller.request('pod', 'completion');
+
+    expect(checkpoint).toHaveBeenCalledWith('pod', 'completion', 49);
+    expect(saved.map((record) => record.sequence)).toEqual([49]);
+  });
+
   it('retries only typed retryable failures and never reports an unverified result as checkpointed', async () => {
     const h = harness();
     h.checkpoint.mockResolvedValueOnce({
