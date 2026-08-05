@@ -74,7 +74,7 @@ export class WorkspaceCheckpointController {
   private readonly lastAttemptAt = new Map<string, number>();
   private active = 0;
   private readonly waiters: Array<() => void> = [];
-  private sequence = 0;
+  private readonly sequenceByPod = new Map<string, number>();
   private readonly now: () => number;
   private readonly random: () => number;
   private readonly sleep: (ms: number) => Promise<void>;
@@ -190,6 +190,14 @@ export class WorkspaceCheckpointController {
     else this.active--;
   }
 
+  private async nextSequence(podId: string): Promise<number> {
+    const current = this.sequenceByPod.get(podId);
+    const previous = current ?? (await this.deps.records.latest(podId))?.sequence ?? 0;
+    const next = previous + 1;
+    this.sequenceByPod.set(podId, next);
+    return next;
+  }
+
   private async execute(
     podId: string,
     reason: CheckpointReason,
@@ -204,7 +212,7 @@ export class WorkspaceCheckpointController {
     try {
       while (shouldRetry) {
         attempts++;
-        result = await this.deps.checkpoint(podId, reason, ++this.sequence);
+        result = await this.deps.checkpoint(podId, reason, await this.nextSequence(podId));
         shouldRetry = !!result.error?.retryable && attempts <= this.retryDelaysMs.length;
         if (!shouldRetry) break;
         const base = this.retryDelaysMs[attempts - 1] ?? 0;

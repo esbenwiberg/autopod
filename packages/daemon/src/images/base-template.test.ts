@@ -81,6 +81,23 @@ describe('Playwright base image templates', () => {
   );
 });
 
+describe('tmux toolchain', () => {
+  it('pins and verifies tmux 3.7 in the Pilot base image', async () => {
+    const dockerfile = await readBaseTemplate('Dockerfile.node22-pw');
+
+    expect(dockerfile).toContain('ARG TMUX_VERSION=3.7');
+    expect(dockerfile).toContain(
+      'ARG TMUX_SHA256=2344f191501b8a73eb71dd6c5fd5dcf8c765f5066f34ab46f04b3013dc7bc1a5',
+    );
+    expect(dockerfile).toContain(
+      'https://github.com/tmux/tmux/releases/download/${TMUX_VERSION}/tmux-${TMUX_VERSION}.tar.gz',
+    );
+    expect(dockerfile).toContain('sha256sum -c');
+    expect(dockerfile).toContain('./configure --prefix=/usr/local');
+    expect(dockerfile).toContain('tmux -V | grep -Fx "tmux ${TMUX_VERSION}"');
+  });
+});
+
 describe('PostgreSQL base image templates', () => {
   it('configures node22-pw-pg without a volatile runtime socket directory', async () => {
     const dockerfile = await readBaseTemplate('Dockerfile.node22-pw-pg');
