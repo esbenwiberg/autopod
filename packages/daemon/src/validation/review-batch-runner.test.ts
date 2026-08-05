@@ -113,7 +113,7 @@ describe('runReviewBatch', () => {
     const batch = await runReviewBatch({
       packet: packet(),
       model: 'test',
-      execute: async (_prompt, label) => {
+      execute: async (prompt, label) => {
         if (label.includes('security_authority')) {
           calls++;
           throw new Error('offline');
@@ -181,6 +181,29 @@ describe('runReviewBatch', () => {
       },
     });
     expect(batch.axes[0]?.failure?.kind).toBe(kind);
+  });
+
+  it('does not retry an axis when prior runner termination is unconfirmed', async () => {
+    let calls = 0;
+    const batch = await runReviewBatch({
+      packet: packet(),
+      model: 'test',
+      execute: async (_prompt, label) => {
+        if (!label.includes('contract_completeness')) return { stdout: response };
+        calls++;
+        throw new Error('remote reviewer exit was not observed after kill');
+      },
+    });
+    expect(calls).toBe(1);
+    expect(batch.axes[0]).toMatchObject({
+      status: 'unavailable',
+      attempts: 1,
+      failure: {
+        kind: 'runner-failed',
+        code: 'REVIEW_RUNNER_TERMINATION_UNCONFIRMED',
+        retryable: false,
+      },
+    });
   });
 
   it('shares one deadline across axis calls and skips synthesis after an unavailable axis', async () => {

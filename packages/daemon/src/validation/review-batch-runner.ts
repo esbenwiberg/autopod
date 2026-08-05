@@ -142,6 +142,13 @@ function failureFor(error: unknown): ReviewFailure {
       message: 'Reviewer timed out',
       retryable: true,
     };
+  if (/exit was not observed after kill|kill did not complete/i.test(message))
+    return {
+      kind: 'runner-failed',
+      code: 'REVIEW_RUNNER_TERMINATION_UNCONFIRMED',
+      message: 'Reviewer termination could not be confirmed',
+      retryable: false,
+    };
   if (/auth|credential|provider|model.*unavailable|offline/i.test(message))
     return {
       kind: 'provider-unavailable',
@@ -235,7 +242,7 @@ export async function runReviewBatch(
         } catch (error) {
           failure = failureFor(error);
           lastError = failure.message;
-          if (attempt === 2)
+          if (attempt === 2 || !failure.retryable)
             runs.push({
               axis,
               status: 'unavailable',
@@ -244,13 +251,14 @@ export async function runReviewBatch(
               error: lastError,
               failure,
             });
-          if (attempt === 2)
+          if (attempt === 2 || !failure.retryable)
             options.onProgress?.({
               axis,
               attempt,
               status: 'unavailable',
               elapsedMs: Date.now() - started,
             });
+          if (!failure.retryable) break;
         }
       }
     }
