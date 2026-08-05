@@ -880,6 +880,28 @@ function createTestContext(
 
 describe('PodManager', () => {
   describe('verified sandbox checkpoint lifecycle', () => {
+    it('resumes a stopped sandbox before checkpoint recovery', async () => {
+      const ctx = createTestContext(undefined, {
+        executionTarget: 'sandbox',
+        warmImageTag: 'registry.azurecr.io/test:latest',
+      });
+      vi.mocked(ctx.containerManager.getStatus).mockResolvedValue('stopped');
+      const manager = createPodManager(ctx.deps);
+      const pod = manager.createSession(
+        { profileName: 'test-profile', task: 'checkpoint' },
+        'user-1',
+      );
+      ctx.podRepo.update(pod.id, {
+        status: 'failed',
+        containerId: 'ctr-1',
+        worktreePath: '/tmp/wt',
+        worktreeCompromised: true,
+      });
+
+      await expect(manager.recoverWorktree(pod.id)).resolves.toMatchObject({ recovered: true });
+      expect(ctx.containerManager.start).toHaveBeenCalledWith('ctr-1');
+    });
+
     it('does not recursively extract sandbox source when checkpoint proof is unavailable', async () => {
       const ctx = createTestContext(undefined, {
         executionTarget: 'sandbox',

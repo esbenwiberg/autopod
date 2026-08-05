@@ -15343,6 +15343,13 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
       }
 
       if (pod.executionTarget === 'sandbox') {
+        if (pod.containerId) {
+          const cm = containerManagerFactory.get('sandbox');
+          if ((await cm.getStatus(pod.containerId)) === 'stopped') {
+            await cm.start(pod.containerId);
+            emitActivityStatus(podId, 'Resumed retained sandbox for checkpoint recovery.');
+          }
+        }
         const checkpoint = await checkpointSandboxWorkspaceForPod(pod);
         const recovered =
           checkpoint.lineageVerified && checkpoint.promoted && checkpoint.materialized;
