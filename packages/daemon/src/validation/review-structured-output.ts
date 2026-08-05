@@ -67,6 +67,13 @@ export class ReviewStructuredOutputError extends Error {
 }
 
 export function parseAxisResponse(stdout: string, axis: ReviewAxis): StructuredReviewFinding[] {
+  const parsed = axisResponseSchema.safeParse(parseReviewStructuredJson(stdout));
+  if (!parsed.success) throw new ReviewStructuredOutputError();
+  return parsed.data.findings.map((finding) => ({ ...finding, axis, id: '' }));
+}
+
+/** Shared transport-only parser for every frozen review protocol response. */
+export function parseReviewStructuredJson(stdout: string): unknown {
   if (Buffer.byteLength(stdout, 'utf8') > MAX_REVIEW_RESPONSE_BYTES)
     throw new ReviewStructuredOutputError();
   let value: unknown;
@@ -75,9 +82,7 @@ export function parseAxisResponse(stdout: string, axis: ReviewAxis): StructuredR
   } catch {
     throw new ReviewStructuredOutputError();
   }
-  const parsed = axisResponseSchema.safeParse(unwrapEnvelope(value));
-  if (!parsed.success) throw new ReviewStructuredOutputError();
-  return parsed.data.findings.map((finding) => ({ ...finding, axis, id: '' }));
+  return unwrapEnvelope(value);
 }
 
 function unwrapJson(input: string): string {

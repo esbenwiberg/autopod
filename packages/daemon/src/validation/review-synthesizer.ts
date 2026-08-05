@@ -5,6 +5,7 @@ import type {
   TaskReviewResult,
 } from '@autopod/shared';
 import { structuredFindingSourceId } from './finding-fingerprint.js';
+import { parseReviewStructuredJson } from './review-structured-output.js';
 
 export interface SynthesisDecision {
   action: 'accept' | 'reject' | 'merge';
@@ -32,6 +33,29 @@ function supportedMerge(
   finding: StructuredReviewFinding,
   sources: StructuredReviewFinding[],
 ): boolean {
+  const allowedKeys = new Set([
+    'id',
+    'axis',
+    'severity',
+    'path',
+    'line',
+    'symbol',
+    'claim',
+    'evidence',
+    'remediation',
+    'confidence',
+  ]);
+  if (
+    Object.keys(finding).some((key) => !allowedKeys.has(key)) ||
+    typeof finding.id !== 'string' ||
+    typeof finding.axis !== 'string' ||
+    typeof finding.path !== 'string' ||
+    typeof finding.claim !== 'string' ||
+    typeof finding.evidence !== 'string' ||
+    typeof finding.remediation !== 'string' ||
+    typeof finding.confidence !== 'number'
+  )
+    return false;
   const fields: Array<keyof StructuredReviewFinding> = [
     'axis',
     'severity',
@@ -53,7 +77,7 @@ export function parseSynthesis(
   stdout: string,
   candidates: ReviewFindingCandidate[],
 ): SynthesisResult {
-  const parsed: unknown = JSON.parse(stdout);
+  const parsed = parseReviewStructuredJson(stdout);
   if (
     !parsed ||
     typeof parsed !== 'object' ||
@@ -68,6 +92,12 @@ export function parseSynthesis(
   for (const raw of (parsed as { decisions: unknown[] }).decisions) {
     if (!raw || typeof raw !== 'object') throw new Error('invalid synthesis decision');
     const decision = raw as Record<string, unknown>;
+    if (
+      Object.keys(decision).some(
+        (key) => !['action', 'sourceIds', 'reason', 'finding'].includes(key),
+      )
+    )
+      throw new Error('invalid synthesis decision');
     const sourceIds = Array.isArray(decision.sourceIds) ? decision.sourceIds.map(String) : [];
     if (!sourceIds.length || sourceIds.some((id) => !byId.has(id) || used.has(id)))
       throw new Error('invalid synthesis source IDs');
