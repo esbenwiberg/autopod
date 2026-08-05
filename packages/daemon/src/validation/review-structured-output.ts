@@ -24,7 +24,7 @@ export const axisResponseSchema = z
   .strict();
 
 export interface ReviewerOutputContract {
-  name: 'review-axis-v1';
+  name: string;
   jsonSchema: string;
 }
 
@@ -51,6 +51,33 @@ export const reviewAxisOutputContract: ReviewerOutputContract = {
             evidence: { type: 'string', minLength: 1, maxLength: 8000 },
             remediation: { type: 'string', minLength: 1, maxLength: 4000 },
             confidence: { type: 'number', minimum: 0, maximum: 1 },
+          },
+        },
+      },
+    },
+  }),
+};
+
+/** Provider-native guard for synthesis; local source-backed validation remains authoritative. */
+export const reviewSynthesisOutputContract: ReviewerOutputContract = {
+  name: 'review-synthesis-v1',
+  jsonSchema: JSON.stringify({
+    type: 'object',
+    additionalProperties: false,
+    required: ['decisions'],
+    properties: {
+      decisions: {
+        type: 'array',
+        maxItems: 600,
+        items: {
+          type: 'object',
+          additionalProperties: false,
+          required: ['action', 'sourceIds'],
+          properties: {
+            action: { type: 'string', enum: ['accept', 'reject', 'merge'] },
+            sourceIds: { type: 'array', minItems: 1, maxItems: 101, items: { type: 'string' } },
+            reason: { type: 'string', minLength: 1, maxLength: 4000 },
+            finding: { type: 'object' },
           },
         },
       },

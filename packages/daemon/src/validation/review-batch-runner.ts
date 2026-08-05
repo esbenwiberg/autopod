@@ -16,6 +16,7 @@ import {
   type ReviewerOutputContract,
   parseAxisResponse,
   reviewAxisOutputContract,
+  reviewSynthesisOutputContract,
 } from './review-structured-output.js';
 import { parseSynthesis, reviewSynthesisPrompt } from './review-synthesizer.js';
 
@@ -225,6 +226,8 @@ export async function runReviewBatch(
             timeoutMs,
             reviewAxisOutputContract,
           );
+          if (options.readHead && (await options.readHead()) !== options.packet.reviewedHead)
+            throw new Error('reviewed HEAD changed during frozen batch');
           tokenUsage.push(result.tokenUsage);
           candidates.push(...parseCandidates(result.stdout, axis, options.packet.diff));
           runs.push({
@@ -278,6 +281,7 @@ export async function runReviewBatch(
   // potentially reassuring synthesis verdict. Five 300s axes with retries can
   // otherwise stretch a nominal 300s review into roughly 20 minutes.
   let synthesisInvalid = false;
+  let synthesisHeadChanged = false;
   if (options.synthesize && !runs.some((run) => run.status === 'unavailable') && remaining() > 0) {
     const basePrompt = reviewSynthesisPrompt(allCandidates);
     if (basePrompt.length <= 1_000_000) {
@@ -289,13 +293,20 @@ export async function runReviewBatch(
             `${basePrompt}${attempt === 2 ? '\nCorrection required: return only a response satisfying validation code REVIEW_SYNTHESIS_RESPONSE_INVALID.' : ''}`,
             `${options.packet.id}-synthesis-${attempt}`,
             remaining(),
+            reviewSynthesisOutputContract,
           );
+          if (options.readHead && (await options.readHead()) !== options.packet.reviewedHead)
+            throw new Error('reviewed HEAD changed during frozen batch');
           tokenUsage.push(result.tokenUsage);
           synthesized = parseSynthesis(result.stdout.slice(0, 1_000_000), allCandidates);
           synthesis = 'model';
           break;
-        } catch {
-          synthesisInvalid = true;
+        } catch (error) {
+          synthesisHeadChanged ||= /reviewed HEAD changed/i.test(
+            error instanceof Error ? error.message : String(error),
+          );
+          synthesisInvalid ||= !synthesisHeadChanged;
+          if (synthesisHeadChanged) break;
         }
       }
     } else synthesisInvalid = true;
@@ -315,6 +326,7 @@ export async function runReviewBatch(
     degradationReasons.push('REQUIRED_AXIS_UNAVAILABLE');
   if (synthesis !== 'model')
     degradationReasons.push(synthesisInvalid ? 'SYNTHESIS_INVALID' : 'SYNTHESIS_UNAVAILABLE');
+  if (synthesisHeadChanged) degradationReasons.push('REVIEWED_HEAD_CHANGED');
   if (options.packet.initialFindings.some((finding) => !canonicalInitialIds.has(finding.id)))
     degradationReasons.push('INITIAL_FINDING_UNMATCHED');
   const quality = degradationReasons.length === 0 ? 'healthy' : 'degraded';
