@@ -59,6 +59,7 @@ import {
   createValidationRepository,
 } from './pods/index.js';
 import { createSessionBridge } from './pods/pod-bridge-impl.js';
+import { SandboxTerminalReaper } from './pods/sandbox-terminal-reaper.js';
 import { ScreenshotRetention } from './pods/screenshot-retention.js';
 import { createScreenshotStore, resolveDataDir } from './pods/screenshot-store.js';
 import { createTokenTelemetryRepair } from './pods/token-telemetry-repair.js';
@@ -106,6 +107,10 @@ const HOST = process.env.HOST ?? '127.0.0.1';
 const MCP_BASE_URL = resolveMcpBaseUrl();
 const DB_PATH = process.env.DB_PATH ?? './autopod.db';
 const MAX_CONCURRENCY = Number.parseInt(process.env.MAX_CONCURRENCY ?? '3', 10);
+const SANDBOX_TERMINAL_REAPER_INTERVAL_MS = parsePositiveInterval(
+  process.env.SANDBOX_TERMINAL_REAPER_INTERVAL_MS,
+  5 * 60 * 1000,
+);
 const TEAMS_WEBHOOK_URL = process.env.TEAMS_WEBHOOK_URL;
 const ACR_REGISTRY_URL = process.env.ACR_REGISTRY_URL;
 const ENTRA_TENANT_ID = process.env.ENTRA_TENANT_ID ?? process.env.AUTOPOD_TENANT_ID;
@@ -123,6 +128,15 @@ function resolveMcpBaseUrl(): string {
   }
 
   return `http://${process.env.AUTOPOD_CONTAINER_HOST ?? 'host.docker.internal'}:${PORT}`;
+}
+
+function parsePositiveInterval(value: string | undefined, fallback: number): number {
+  if (!value) return fallback;
+  const parsed = Number(value);
+  if (Number.isFinite(parsed) && parsed >= 1_000 && parsed <= 24 * 60 * 60 * 1000) {
+    return parsed;
+  }
+  return fallback;
 }
 
 // Fields to redact from all log records — covers common credential field names.
@@ -1038,6 +1052,23 @@ const app = await createServer({
   securityMlEnabled,
 });
 
+const sandboxTerminalReaper = sandboxContainerManager
+  ? new SandboxTerminalReaper({
+      podRepo,
+      sandboxContainerManager,
+      preserveWorkspace: (id) => podManager.preserveWorkspace(id, 'terminal sandbox reaping'),
+      logger: logger.child({ component: 'sandbox-terminal-reaper' }),
+    })
+  : null;
+const sandboxTerminalReaperTimer = sandboxTerminalReaper
+  ? setInterval(() => {
+      void sandboxTerminalReaper.runSweep().catch((err) => {
+        logger.error({ err }, 'Periodic terminal sandbox reaping failed');
+      });
+    }, SANDBOX_TERMINAL_REAPER_INTERVAL_MS)
+  : null;
+sandboxTerminalReaperTimer?.unref();
+
 // Start listening
 try {
   await app.listen({ port: PORT, host: HOST });
@@ -1090,6 +1121,9 @@ if (sandboxContainerManager) {
     logger,
   }).catch((err) => {
     logger.error({ err }, 'Sandbox pod reconciliation failed');
+  });
+  void sandboxTerminalReaper?.runSweep().catch((err) => {
+    logger.error({ err }, 'Startup terminal sandbox reaping failed');
   });
 }
 
@@ -1182,6 +1216,7 @@ async function shutdown(signal: string) {
   // Stop perf-mark cleaner
   clearInterval(perfClearTimer);
   clearInterval(systemSandboxReaper);
+  if (sandboxTerminalReaperTimer) clearInterval(sandboxTerminalReaperTimer);
 
   // Stop the stuck-pod watchdog and sleep detector
   podManager.stopStuckPodWatchdog();

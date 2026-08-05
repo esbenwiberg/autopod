@@ -41,6 +41,8 @@ export interface CreateSandboxOptions {
   image: string;
   tier: SandboxResourceTier;
   egressPolicy: SandboxEgressPolicy;
+  /** Autopod pod that owns this sandbox, used for Azure-side diagnosis. */
+  podId: string;
   /** Environment for the sandbox's main process. */
   env?: Record<string, string>;
 }

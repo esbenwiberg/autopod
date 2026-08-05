@@ -13858,6 +13858,64 @@ describe('worker startup diagnostics', () => {
     expect(failed.failureReason).not.toContain('ghp_1234567890');
   });
 
+  it('destroys a failed sandbox only after its workspace checkpoint succeeds', async () => {
+    const runtime = createMockRuntime();
+    vi.mocked(runtime.spawn).mockImplementation(async function* () {
+      yield {
+        type: 'error',
+        timestamp: new Date().toISOString(),
+        message: 'agent failed',
+        fatal: true,
+      };
+    });
+    const ctx = createTestContext(undefined, {
+      executionTarget: 'sandbox',
+      warmImageTag: 'registry.azurecr.io/autopod/test-profile:latest',
+    });
+    ctx.deps.runtimeRegistry = createMockRuntimeRegistry(runtime);
+    const manager = createPodManager(ctx.deps);
+    const pod = manager.createSession(
+      { profileName: 'test-profile', task: 'Build widget', skipValidation: true },
+      'user-1',
+    );
+
+    await manager.processPod(pod.id);
+
+    expect(ctx.deps.sandboxWorkspaceCheckpoint).toHaveBeenCalled();
+    expect(ctx.containerManager.kill).toHaveBeenCalledWith('container-123');
+    expect(manager.getSession(pod.id).containerId).toBeNull();
+  });
+
+  it('retains a failed sandbox when its workspace checkpoint fails', async () => {
+    const runtime = createMockRuntime();
+    vi.mocked(runtime.spawn).mockImplementation(async function* () {
+      yield {
+        type: 'error',
+        timestamp: new Date().toISOString(),
+        message: 'agent failed',
+        fatal: true,
+      };
+    });
+    const ctx = createTestContext(undefined, {
+      executionTarget: 'sandbox',
+      warmImageTag: 'registry.azurecr.io/autopod/test-profile:latest',
+    });
+    ctx.deps.runtimeRegistry = createMockRuntimeRegistry(runtime);
+    ctx.deps.sandboxWorkspaceCheckpoint = vi.fn(async () => {
+      throw new Error('host worktree unavailable');
+    });
+    const manager = createPodManager(ctx.deps);
+    const pod = manager.createSession(
+      { profileName: 'test-profile', task: 'Build widget', skipValidation: true },
+      'user-1',
+    );
+
+    await manager.processPod(pod.id);
+
+    expect(ctx.containerManager.kill).not.toHaveBeenCalledWith('container-123');
+    expect(manager.getSession(pod.id).containerId).toBe('container-123');
+  });
+
   it('preserves a failed sandbox workspace on recovery request', async () => {
     mockExecFileSuccess();
     const ctx = createTestContext(undefined, {

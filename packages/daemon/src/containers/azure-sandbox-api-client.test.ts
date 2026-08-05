@@ -153,6 +153,7 @@ describe('AzureSandboxApiClient', () => {
     const id = await client.createSandbox({
       image: 'mcr.microsoft.com/cbl-mariner/base/core:2.0',
       tier: 'L',
+      podId: 'pod-1',
       env: { POD_ID: 'pod-1' },
       egressPolicy: {
         defaultAction: 'Deny',
@@ -178,6 +179,7 @@ describe('AzureSandboxApiClient', () => {
       sourcesRef: { diskImage: { id: 'disk-1' } },
       resources: { cpu: '2000m', memory: '4096Mi', disk: '40Gi' },
       environment: { POD_ID: 'pod-1' },
+      labels: { purpose: 'autopod-sandbox', managedBy: 'autopod', podId: 'pod-1' },
       egressPolicy: {
         defaultAction: 'Deny',
         hostRules: [{ pattern: 'api.github.com', action: 'Allow' }],
