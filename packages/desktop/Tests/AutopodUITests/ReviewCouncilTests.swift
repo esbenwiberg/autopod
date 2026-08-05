@@ -26,7 +26,7 @@ import Testing
 
 @Test func reviewCouncilFallsBackToAcceptedFindingsWithoutLedger() throws {
   let finding = StructuredReviewFindingResponse(id: "semantic", axis: "tests_integration", severity: "MEDIUM", path: "x", line: nil, symbol: nil, claim: "claim", evidence: "e", remediation: "r", confidence: 1, state: nil)
-  let batch = ReviewBatchResponse(id: "p", diffHash: "d", reviewedHead: "h", promptVersion: "p", schemaVersion: "s", model: "m", axes: [], candidates: [.structured(finding)], initialFindings: [], accepted: [.structured(finding)], rejected: [], merged: [], synthesis: "deterministic-fallback", durationMs: 1, infrastructureUnavailable: true, tokenUsage: nil, ledger: nil, repairDelta: nil, closureVerification: nil, firstGateOverflow: nil)
+  let batch = ReviewBatchResponse(id: "p", diffHash: "d", reviewedHead: "h", promptVersion: "p", schemaVersion: "s", model: "m", axes: [], candidates: [.structured(finding)], initialFindings: [], accepted: [.structured(finding)], rejected: [], merged: [], synthesis: "deterministic-fallback", durationMs: 1, infrastructureUnavailable: true, tokenUsage: nil, quality: nil, degradationReasons: nil, ledger: nil, repairDelta: nil, closureVerification: nil, firstGateOverflow: nil)
   let council = ReviewCouncil(batch)
   #expect(council.findings(filter: "open").map(\.id) == ["semantic"])
   #expect(council.infrastructureUnavailable)
@@ -59,7 +59,7 @@ import Testing
   )
   #expect(skipped.status == .skipped)
 
-  let batch = ReviewBatchResponse(id: "p", diffHash: "d", reviewedHead: "h", promptVersion: "p", schemaVersion: "s", model: "m", axes: [], candidates: [], initialFindings: [], accepted: [], rejected: [], merged: [], synthesis: "model", durationMs: 1, infrastructureUnavailable: true, tokenUsage: nil, ledger: nil, repairDelta: nil, closureVerification: nil, firstGateOverflow: nil)
+  let batch = ReviewBatchResponse(id: "p", diffHash: "d", reviewedHead: "h", promptVersion: "p", schemaVersion: "s", model: "m", axes: [], candidates: [], initialFindings: [], accepted: [], rejected: [], merged: [], synthesis: "model", durationMs: 1, infrastructureUnavailable: true, tokenUsage: nil, quality: nil, degradationReasons: nil, ledger: nil, repairDelta: nil, closureVerification: nil, firstGateOverflow: nil)
   let council = ReviewCouncil(batch)
   let presentation = reviewPhasePresentation(
     progress: nil,
@@ -72,7 +72,7 @@ import Testing
 
 @Test func reviewCouncilFallsBackToBatchTokenUsage() throws {
   let usage = ReviewTokenUsageResponse(inputTokens: 7, outputTokens: 3, cachedInputTokens: 2, cacheCreationInputTokens: nil, costUsd: 0.01)
-  let batch = ReviewBatchResponse(id: "p", diffHash: "d", reviewedHead: "h", promptVersion: "p", schemaVersion: "s", model: "m", axes: [], candidates: [], initialFindings: [], accepted: [], rejected: [], merged: [], synthesis: "model", durationMs: 1, infrastructureUnavailable: nil, tokenUsage: usage, ledger: nil, repairDelta: nil, closureVerification: nil, firstGateOverflow: nil)
+  let batch = ReviewBatchResponse(id: "p", diffHash: "d", reviewedHead: "h", promptVersion: "p", schemaVersion: "s", model: "m", axes: [], candidates: [], initialFindings: [], accepted: [], rejected: [], merged: [], synthesis: "model", durationMs: 1, infrastructureUnavailable: nil, tokenUsage: usage, quality: nil, degradationReasons: nil, ledger: nil, repairDelta: nil, closureVerification: nil, firstGateOverflow: nil)
   let council = ReviewCouncil(batch)
   #expect(council.tokenUsage?.inputTokens == 7)
   #expect(council.tokenUsage?.cachedInputTokens == 2)
@@ -98,7 +98,7 @@ import Testing
 
   let explicitPresentation = legacyReviewPresentation(council: nil, issues: ["saved legacy issue"], fallbackFindings: fallback, reasoning: nil)
   #expect(explicitPresentation?.issues == ["saved legacy issue"])
-  #expect(legacyReviewPresentation(council: ReviewCouncil(ReviewBatchResponse(id: "p", diffHash: "d", reviewedHead: "h", promptVersion: "p", schemaVersion: "s", model: "m", axes: [], candidates: [], initialFindings: [], accepted: [], rejected: [], merged: [], synthesis: "model", durationMs: 1, infrastructureUnavailable: nil, tokenUsage: nil, ledger: nil, repairDelta: nil, closureVerification: nil, firstGateOverflow: nil)), issues: [], fallbackFindings: fallback, reasoning: "legacy") == nil)
+  #expect(legacyReviewPresentation(council: ReviewCouncil(ReviewBatchResponse(id: "p", diffHash: "d", reviewedHead: "h", promptVersion: "p", schemaVersion: "s", model: "m", axes: [], candidates: [], initialFindings: [], accepted: [], rejected: [], merged: [], synthesis: "model", durationMs: 1, infrastructureUnavailable: nil, tokenUsage: nil, quality: nil, degradationReasons: nil, ledger: nil, repairDelta: nil, closureVerification: nil, firstGateOverflow: nil)), issues: [], fallbackFindings: fallback, reasoning: "legacy") == nil)
 }
 
 @Test func deterministicUnavailableBatchDecodesSafely() throws {
@@ -117,12 +117,12 @@ import Testing
     .structured(StructuredReviewFindingResponse(id: id, axis: axis, severity: severity, path: "x.swift", line: 3, symbol: "run", claim: claim, evidence: "e", remediation: "r", confidence: 1, state: nil))
   }
   let entries = [
-    ReviewFindingLedgerEntryResponse(semanticId: "review:z", finding: structured("z", "security_authority", "MEDIUM"), state: "open", priorSourceIds: [], currentSourceIds: ["z"], closureEvidence: nil),
-    ReviewFindingLedgerEntryResponse(semanticId: "review:a", finding: structured("a", "contract_completeness", "CRITICAL"), state: "new", priorSourceIds: [], currentSourceIds: ["a"], closureEvidence: nil),
-    ReviewFindingLedgerEntryResponse(semanticId: "review:b", finding: structured("b", "contract_completeness", "HIGH"), state: "regressed", priorSourceIds: ["old"], currentSourceIds: ["b"], closureEvidence: nil),
-    ReviewFindingLedgerEntryResponse(semanticId: "review:c", finding: .initial(InitialReviewFindingResponse(id: "i", source: "initial-review", issue: "raw")), state: "fixed", priorSourceIds: ["i"], currentSourceIds: [], closureEvidence: "bounded"),
+    ReviewFindingLedgerEntryResponse(semanticId: "review:z", finding: structured("z", "security_authority", "MEDIUM"), state: "open", priorSourceIds: [], currentSourceIds: ["z"], closureEvidence: nil, resolution: nil),
+    ReviewFindingLedgerEntryResponse(semanticId: "review:a", finding: structured("a", "contract_completeness", "CRITICAL"), state: "new", priorSourceIds: [], currentSourceIds: ["a"], closureEvidence: nil, resolution: nil),
+    ReviewFindingLedgerEntryResponse(semanticId: "review:b", finding: structured("b", "contract_completeness", "HIGH"), state: "regressed", priorSourceIds: ["old"], currentSourceIds: ["b"], closureEvidence: nil, resolution: nil),
+    ReviewFindingLedgerEntryResponse(semanticId: "review:c", finding: .initial(InitialReviewFindingResponse(id: "i", source: "initial-review", issue: "raw")), state: "fixed", priorSourceIds: ["i"], currentSourceIds: [], closureEvidence: "bounded", resolution: nil),
   ]
-  let batch = ReviewBatchResponse(id: "p", diffHash: "d", reviewedHead: "h", promptVersion: "p", schemaVersion: "s", model: "m", axes: [], candidates: [], initialFindings: [], accepted: [], rejected: [.init(sourceIds: ["r"], reason: "noise")], merged: [], synthesis: "model", durationMs: 1, infrastructureUnavailable: nil, tokenUsage: nil, ledger: entries, repairDelta: nil, closureVerification: nil, firstGateOverflow: nil)
+  let batch = ReviewBatchResponse(id: "p", diffHash: "d", reviewedHead: "h", promptVersion: "p", schemaVersion: "s", model: "m", axes: [], candidates: [], initialFindings: [], accepted: [], rejected: [.init(sourceIds: ["r"], reason: "noise")], merged: [], synthesis: "model", durationMs: 1, infrastructureUnavailable: nil, tokenUsage: nil, quality: nil, degradationReasons: nil, ledger: entries, repairDelta: nil, closureVerification: nil, firstGateOverflow: nil)
   let council = ReviewCouncil(batch)
   #expect(council.lifecycleCounts[.open] == 2)
   #expect(council.lifecycleCounts[.fixed] == 1)
@@ -141,6 +141,29 @@ import Testing
   #expect(reviewPresentationMode(council: council) == .council)
   #expect(distinctBroadReviewIssues(["duplicate", "[MEDIUM] x.swift:3 — duplicate", "broad context"], council: council) == ["broad context"])
   #expect(distinctBroadReviewIssues(["duplicate"], council: nil) == ["duplicate"])
+}
+
+@Test func healthyCouncilShowsOnlyCanonicalStructuredFindings() throws {
+  let data = """
+  {"id":"p","diffHash":"d","reviewedHead":"h","promptVersion":"p","schemaVersion":"s","model":"m","axes":[],"candidates":[],"initialFindings":[{"id":"initial","source":"initial-review","issue":"raw blocker"}],"accepted":[],"rejected":[],"merged":[],"synthesis":"model","durationMs":1,"quality":"healthy","ledger":[{"semanticId":"review:canonical","finding":{"id":"structured","axis":"security_authority","severity":"HIGH","path":"a.swift","claim":"canonical","evidence":"proof","remediation":"fix","confidence":1},"state":"open","priorSourceIds":["initial"],"currentSourceIds":["initial","structured"]}]}
+  """.data(using: .utf8)!
+  let council = ReviewCouncil(try JSONDecoder().decode(ReviewBatchResponse.self, from: data))
+  #expect(council.isHealthy)
+  #expect(!council.showsLegacyBroadReview)
+  #expect(council.findings.map(\.claim) == ["canonical"])
+  #expect(council.fallbackFindings.isEmpty)
+}
+
+@Test func degradedCouncilPreservesFallbackFailuresAndFixedResolution() throws {
+  let data = """
+  {"id":"p","diffHash":"d","reviewedHead":"h","promptVersion":"p","schemaVersion":"s","model":"m","axes":[{"axis":"security_authority","status":"unavailable","attempts":2,"failure":{"kind":"invalid-response","code":"REVIEW_SCHEMA_INVALID","message":"Response did not match the contract","retryable":true}}],"candidates":[],"initialFindings":[{"id":"initial","source":"initial-review","issue":"raw blocker"}],"accepted":[],"rejected":[],"merged":[],"synthesis":"unavailable","durationMs":1,"quality":"degraded","degradationReasons":["REQUIRED_AXIS_UNAVAILABLE","INITIAL_FINDING_UNMATCHED"],"ledger":[{"semanticId":"review:fixed","finding":{"id":"structured","axis":"security_authority","severity":"HIGH","path":"a.swift","claim":"repaired","evidence":"proof","remediation":"fix","confidence":1},"state":"fixed","priorSourceIds":[],"currentSourceIds":[],"resolution":{"reviewedHead":"abcdef123","repairDiffHash":"d","evidence":"a.swift contains the guarded branch"}}]}
+  """.data(using: .utf8)!
+  let council = ReviewCouncil(try JSONDecoder().decode(ReviewBatchResponse.self, from: data))
+  #expect(council.isDegraded)
+  #expect(council.fallbackFindings.map(\.claim) == ["raw blocker"])
+  #expect(council.axes.first?.failure?.kind == "invalid-response")
+  #expect(council.findings(filter: .fixed).first?.resolution?.reviewedHead == "abcdef123")
+  #expect(council.lifecycleCounts[.all] == 2)
 }
 
 @Test func overflowKeepsRetainedFindingDismissalAndTopLevelWins() throws {

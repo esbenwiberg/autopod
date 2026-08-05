@@ -1887,7 +1887,7 @@ public struct ValidationTab: View {
             )
           }
         }
-        if !broadReviewIssues.isEmpty || !(reasoning ?? "").isEmpty {
+        if council.showsLegacyBroadReview && (!broadReviewIssues.isEmpty || !(reasoning ?? "").isEmpty) {
           DisclosureGroup("Initial broad review") {
             if let reasoning, !reasoning.isEmpty {
               Text(reasoning).font(.caption).foregroundStyle(.secondary).textSelection(.enabled)
