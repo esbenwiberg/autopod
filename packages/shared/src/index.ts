@@ -245,6 +245,8 @@ export type {
   InitialReviewFinding,
   ReviewFindingCandidate,
   ReviewAxisRun,
+  ReviewFailure,
+  ReviewFailureKind,
   ReviewBatchResult,
   ReviewFindingLedgerEntry,
   ReviewRepairDelta,

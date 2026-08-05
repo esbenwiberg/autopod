@@ -5,6 +5,7 @@ import type { Logger } from 'pino';
 import type { ContainerManager } from '../interfaces/container-manager.js';
 import { parseClaudeCliStdout } from '../runtimes/run-claude-cli.js';
 import { type CodexReviewTokenUsage, runCodexReview } from './review-codex-runner.js';
+import type { ReviewerOutputContract } from './review-structured-output.js';
 
 export class ContainerReviewerUnavailableError extends Error {
   readonly kind: 'timeout' | 'termination-failed' | 'non-zero-exit' | 'exec-error';
@@ -35,6 +36,8 @@ export interface ContainerReviewerRunnerConfig {
   env?: Record<string, string>;
   timeout: number;
   logger?: Logger;
+  /** Optional provider-native JSON Schema contract; callers still validate output locally. */
+  outputContract?: ReviewerOutputContract;
 }
 
 const SHIM_PATH = '/run/autopod/agent-shim.sh';
@@ -74,6 +77,7 @@ export async function runContainerReviewer(
       prompt: config.prompt,
       env: config.env,
       timeout: config.timeout,
+      outputContract: config.outputContract,
     });
   }
 
@@ -108,7 +112,6 @@ async function runClaudeContainerReview(
   const promptPath = `/tmp/autopod-claude-review-${suffix}.prompt`;
   const outputPath = `/tmp/autopod-claude-review-${suffix}.out`;
   const logPath = `/tmp/autopod-claude-review-${suffix}.log`;
-
   await config.containerManager.writeFile(config.containerId, promptPath, config.prompt);
 
   const modelArgs =
@@ -117,6 +120,9 @@ async function runClaudeContainerReview(
     `sh ${shellQuote(SHIM_PATH)} claude -p`,
     modelArgs.trim(),
     '--output-format json',
+    ...(config.outputContract
+      ? [`--json-schema ${shellQuote(config.outputContract.jsonSchema)}`]
+      : []),
     `< ${shellQuote(promptPath)}`,
     `> ${shellQuote(outputPath)} 2> ${shellQuote(logPath)}`,
   ]

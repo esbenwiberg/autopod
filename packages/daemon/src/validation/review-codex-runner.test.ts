@@ -1,5 +1,5 @@
 import { Readable } from 'node:stream';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import type {
   ContainerManager,
   ExecOptions,
@@ -54,7 +54,7 @@ describe('runCodexReview', () => {
     expect(harness.writes).toHaveLength(1);
     expect(harness.writes[0]?.containerId).toBe('container-1');
     expect(harness.writes[0]?.content).toBe('review prompt');
-    expect(harness.execs).toHaveLength(1);
+    expect(harness.execs).toHaveLength(2);
 
     const exec = harness.execs[0];
     expect(exec?.command[0]).toBe('sh');
@@ -69,6 +69,22 @@ describe('runCodexReview', () => {
     expect(script).toContain("< '/tmp/autopod-codex-review-pod_1-2-");
     expect(script).toContain("> '/tmp/autopod-codex-review-pod_1-2-");
     expect(script).toContain("cat '/tmp/autopod-codex-review-pod_1-2-");
+  });
+
+  it('uses Codex native output schema files when an output contract is supplied', async () => {
+    const harness = createHarness();
+    await runCodexReview({
+      podId: 'pod-1',
+      containerId: 'container-1',
+      containerManager: harness.manager,
+      model: 'auto',
+      prompt: 'review',
+      timeout: 1234,
+      outputContract: { name: 'review-axis-v1', jsonSchema: '{"type":"object"}' },
+    });
+    expect(harness.writes).toHaveLength(2);
+    expect(harness.writes[1]?.path).toContain('.schema.json');
+    expect(harness.execs[0]?.command[2]).toContain('--output-schema');
   });
 
   it('captures token usage from the Codex JSONL log', async () => {
@@ -211,6 +227,56 @@ describe('runCodexReview', () => {
     });
 
     expect(result.stdout).toBe('{"status":"pass"}');
+  });
+
+  it('waits for bounded process-exit confirmation after a streaming timeout', async () => {
+    vi.useFakeTimers();
+    try {
+      let confirmExit: ((code: number) => void) | undefined;
+      const exitCode = new Promise<number>((resolve) => {
+        confirmExit = resolve;
+      });
+      const kill = vi.fn().mockResolvedValue(undefined);
+      const manager = {
+        supportsStreamingExec: true,
+        writeFile: async () => {},
+        readFile: async () => '',
+        execInContainer: async () => ({ stdout: '', stderr: '', exitCode: 0 }),
+        execStreaming: async () => ({
+          stdout: Readable.from([]),
+          stderr: Readable.from([]),
+          exitCode,
+          kill,
+        }),
+      } as unknown as ContainerManager;
+
+      const review = runCodexReview({
+        podId: 'sandbox-pod',
+        containerId: 'sandbox-1',
+        containerManager: manager,
+        model: 'gpt-5',
+        prompt: 'review prompt',
+        timeout: 100,
+      });
+      await vi.advanceTimersByTimeAsync(100);
+      expect(kill).toHaveBeenCalledOnce();
+      let settled = false;
+      void review.then(
+        () => {
+          settled = true;
+        },
+        () => {
+          settled = true;
+        },
+      );
+      await Promise.resolve();
+      expect(settled).toBe(false);
+
+      confirmExit?.(137);
+      await expect(review).rejects.toMatchObject({ kind: 'timeout' });
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('throws a CodexReviewError when the in-container review command fails', async () => {

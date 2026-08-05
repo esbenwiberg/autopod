@@ -6,6 +6,7 @@ import type {
   ExecResult,
   StreamingExecResult,
 } from '../interfaces/container-manager.js';
+import type { ReviewerOutputContract } from './review-structured-output.js';
 
 export type CodexReviewErrorKind = 'non-zero-exit' | 'timeout' | 'exec-error';
 
@@ -38,6 +39,7 @@ export interface CodexReviewConfig {
   prompt: string;
   env?: Record<string, string>;
   timeout: number;
+  outputContract?: ReviewerOutputContract;
 }
 
 export interface CodexReviewTokenUsage {
@@ -48,6 +50,7 @@ export interface CodexReviewTokenUsage {
 }
 
 const SHIM_PATH = '/run/autopod/agent-shim.sh';
+const TERMINATION_CONFIRM_TIMEOUT_MS = 5_000;
 
 /**
  * Runs the Codex CLI inside the pod container, so review auth follows the same
@@ -61,39 +64,47 @@ export async function runCodexReview(
   const promptPath = `/tmp/autopod-codex-review-${suffix}.prompt`;
   const outputPath = `/tmp/autopod-codex-review-${suffix}.out`;
   const logPath = `/tmp/autopod-codex-review-${suffix}.log`;
-
-  await config.containerManager.writeFile(config.containerId, promptPath, config.prompt);
-
-  const modelArgs =
-    config.model && config.model !== 'auto' ? ` --model ${shellQuote(config.model)}` : '';
-  const codexCommand = [
-    `sh ${shellQuote(SHIM_PATH)} codex exec`,
-    '--cd /workspace',
-    '--sandbox read-only',
-    '--skip-git-repo-check',
-    '--json',
-    '--output-last-message',
-    shellQuote(outputPath),
-    modelArgs.trim(),
-    '-',
-    `< ${shellQuote(promptPath)}`,
-    `> ${shellQuote(logPath)} 2>&1`,
-  ]
-    .filter(Boolean)
-    .join(' ');
-  const command = [
-    `rm -f ${shellQuote(outputPath)} ${shellQuote(logPath)}`,
-    codexCommand,
-    'status=$?',
-    'if [ "$status" -ne 0 ]; then',
-    '  echo "codex review failed (exit $status)"',
-    `  tail -c 4000 ${shellQuote(logPath)} 2>/dev/null || true`,
-    '  exit "$status"',
-    'fi',
-    `cat ${shellQuote(outputPath)}`,
-  ].join('\n');
+  const schemaPath = `/tmp/autopod-codex-review-${suffix}.schema.json`;
 
   try {
+    await config.containerManager.writeFile(config.containerId, promptPath, config.prompt);
+    if (config.outputContract)
+      await config.containerManager.writeFile(
+        config.containerId,
+        schemaPath,
+        config.outputContract.jsonSchema,
+      );
+
+    const modelArgs =
+      config.model && config.model !== 'auto' ? ` --model ${shellQuote(config.model)}` : '';
+    const codexCommand = [
+      `sh ${shellQuote(SHIM_PATH)} codex exec`,
+      '--cd /workspace',
+      '--sandbox read-only',
+      '--skip-git-repo-check',
+      '--json',
+      '--output-last-message',
+      shellQuote(outputPath),
+      ...(config.outputContract ? [`--output-schema ${shellQuote(schemaPath)}`] : []),
+      modelArgs.trim(),
+      '-',
+      `< ${shellQuote(promptPath)}`,
+      `> ${shellQuote(logPath)} 2>&1`,
+    ]
+      .filter(Boolean)
+      .join(' ');
+    const command = [
+      `rm -f ${shellQuote(outputPath)} ${shellQuote(logPath)}`,
+      codexCommand,
+      'status=$?',
+      'if [ "$status" -ne 0 ]; then',
+      '  echo "codex review failed (exit $status)"',
+      `  tail -c 4000 ${shellQuote(logPath)} 2>/dev/null || true`,
+      '  exit "$status"',
+      'fi',
+      `cat ${shellQuote(outputPath)}`,
+    ].join('\n');
+
     const options: ExecOptions = {
       cwd: '/workspace',
       ...(config.env ? { env: config.env } : {}),
@@ -152,6 +163,16 @@ export async function runCodexReview(
       message: `codex review ${kind === 'timeout' ? 'timed out' : 'failed'}: ${message}`,
       cause: err,
     });
+  } finally {
+    try {
+      await config.containerManager.execInContainer(
+        config.containerId,
+        ['rm', '-f', promptPath, outputPath, logPath, schemaPath],
+        { timeout: 5_000 },
+      );
+    } catch {
+      // Best-effort cleanup after review completion or cancellation.
+    }
   }
 }
 
@@ -204,11 +225,25 @@ async function collectStreamingExec(
   try {
     const outcome = await Promise.race([completed, timedOut]);
     if (outcome === 'timeout') {
-      // Do not start a retry until the remote exec has received termination.
-      await handle.kill();
+      // Do not start a retry until the remote exec has actually exited. A
+      // successful kill request only acknowledges delivery, not termination.
+      await confirmTermination(handle.kill(), 'remote reviewer kill did not complete');
+      await confirmTermination(handle.exitCode, 'remote reviewer exit was not observed after kill');
       throw new Error(`container review timed out after ${timeout}ms`);
     }
     return outcome;
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
+async function confirmTermination(signal: Promise<unknown>, message: string): Promise<void> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const unconfirmed = new Promise<never>((_resolve, reject) => {
+    timer = setTimeout(() => reject(new Error(message)), TERMINATION_CONFIRM_TIMEOUT_MS);
+  });
+  try {
+    await Promise.race([signal, unconfirmed]);
   } finally {
     if (timer) clearTimeout(timer);
   }

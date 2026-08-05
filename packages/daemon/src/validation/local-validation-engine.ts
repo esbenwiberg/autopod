@@ -795,7 +795,7 @@ export function createLocalValidationEngine(
                   'Frozen review council progress',
                 );
               },
-              execute: async (prompt, _label, timeoutMs) =>
+              execute: async (prompt, _label, timeoutMs, outputContract) =>
                 runContainerReviewer({
                   podId: config.podId,
                   containerId: config.containerId,
@@ -809,6 +809,7 @@ export function createLocalValidationEngine(
                   ...(config.reviewerExecEnv ? { env: config.reviewerExecEnv } : {}),
                   timeout: timeoutMs,
                   logger: log,
+                  outputContract,
                 }),
               synthesize: async (prompt, _label, timeoutMs) =>
                 runContainerReviewer({
