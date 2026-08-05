@@ -80,6 +80,38 @@ describe('SandboxTerminalReaper', () => {
     expect(complete.containerId).toBeNull();
   });
 
+  it('retains container IDs after a deletion timeout and permits a later retry', async () => {
+    vi.useFakeTimers();
+    try {
+      const complete = pod('complete');
+      const deps = build([complete]);
+      let release!: () => void;
+      deps.sandboxContainerManager.kill.mockImplementationOnce(
+        () =>
+          new Promise<void>((resolve) => {
+            release = resolve;
+          }),
+      );
+      const reaper = new SandboxTerminalReaper({
+        podRepo: deps.podRepo,
+        sandboxContainerManager: deps.sandboxContainerManager,
+        preserveWorkspace: deps.preserveWorkspace,
+        logger,
+        deletionTimeoutMs: 1_000,
+      });
+      const first = reaper.runSweep();
+      await vi.advanceTimersByTimeAsync(1_000);
+      await first;
+      expect(complete.containerId).toBe('sandbox-pod-1');
+      release();
+      await reaper.runSweep();
+      expect(deps.sandboxContainerManager.kill).toHaveBeenCalledTimes(2);
+      expect(complete.containerId).toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('does not overlap sweeps', async () => {
     const complete = pod('complete');
     const deps = build([complete]);

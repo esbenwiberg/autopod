@@ -8,6 +8,7 @@ export interface SandboxTerminalReaperDependencies {
   /** Must throw unless the failed sandbox's workspace is safely on the host. */
   preserveWorkspace: (podId: string) => Promise<void>;
   logger: Logger;
+  deletionTimeoutMs?: number;
 }
 
 /**
@@ -60,7 +61,14 @@ export class SandboxTerminalReaper {
       }
     }
     try {
-      await this.deps.sandboxContainerManager.kill(containerId);
+      const deleted = await this.destroyWithinDeadline(containerId);
+      if (!deleted) {
+        this.deps.logger.warn(
+          { podId: pod.id, containerId },
+          'Terminal sandbox deletion timed out; retaining container ID for retry',
+        );
+        return;
+      }
       // Avoid clearing a newly assigned container if an operator revived the pod mid-sweep.
       const current = this.deps.podRepo.getOrThrow(pod.id);
       if (current.containerId === containerId && current.executionTarget === 'sandbox') {
@@ -73,5 +81,21 @@ export class SandboxTerminalReaper {
         'Terminal sandbox deletion failed; retaining container ID for retry',
       );
     }
+  }
+
+  private async destroyWithinDeadline(containerId: string): Promise<boolean> {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const deletion = this.deps.sandboxContainerManager
+      .kill(containerId)
+      .then(() => true)
+      .finally(() => {
+        if (timer) clearTimeout(timer);
+      });
+    return Promise.race([
+      deletion,
+      new Promise<false>((resolve) => {
+        timer = setTimeout(() => resolve(false), this.deps.deletionTimeoutMs ?? 15_000);
+      }),
+    ]);
   }
 }
