@@ -1193,6 +1193,18 @@ public struct RecoverWorktreeResponse: Codable, Sendable {
   public let recovered: Bool
   public let message: String
   public let blockers: [RecoverWorktreeBlocker]?
+  /// Present on newer daemons. Optional keeps older daemon responses decodable.
+  public let checkpoint: RecoverWorktreeCheckpoint?
+}
+
+public struct RecoverWorktreeCheckpoint: Codable, Sendable {
+  public let sequence: Int
+  public let snapshotCommit: String
+  public let snapshotTree: String
+  public let lineageVerified: Bool
+  public let promoted: Bool
+  public let materialized: Bool
+  public let quarantineRef: String
 }
 
 public struct RecoverWorktreeBlocker: Codable, Sendable {

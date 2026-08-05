@@ -3220,3 +3220,41 @@ describe('POST /pods/:podId/continue-provider', () => {
     expect(continueProvider).not.toHaveBeenCalled();
   });
 });
+
+describe('verified checkpoint recovery response', () => {
+  it('preserves the legacy recovered field and returns optional proof details', async () => {
+    const app = Fastify({ logger: false });
+    const recoverWorktree = vi.fn(async () => ({
+      recovered: false,
+      message: 'Verified checkpoint recovery incomplete',
+      checkpoint: {
+        sequence: 4,
+        snapshotCommit: 'a'.repeat(40),
+        snapshotTree: 'b'.repeat(40),
+        lineageVerified: true,
+        promoted: false,
+        materialized: false,
+        quarantineRef: 'refs/autopod-quarantine/pod/4',
+      },
+    }));
+    podRoutes(
+      app,
+      { recoverWorktree } as unknown as ReturnType<typeof createPodManager>,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+    );
+    await app.ready();
+    const response = await app.inject({ method: 'POST', url: '/pods/pod/recover-worktree' });
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toMatchObject({
+      recovered: false,
+      checkpoint: { lineageVerified: true, promoted: false },
+    });
+    await app.close();
+  });
+});

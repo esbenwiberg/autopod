@@ -14,6 +14,7 @@ import {
 } from './local-reconciler.js';
 import type { PodRepository } from './pod-repository.js';
 import { createValidationRepository } from './validation-repository.js';
+import { WorkspaceCheckpointController } from './workspace-checkpoint-controller.js';
 
 // Mock fs/promises to control worktree existence checks
 vi.mock('node:fs/promises', () => ({
@@ -133,6 +134,51 @@ function makeFailingValidationResult(podId: string, attempt = 1): ValidationResu
 }
 
 describe('reconcileLocalSessions', () => {
+  it('checkpoint phase restart reconciliation materializes host-imported proof without sandbox access', async () => {
+    const result = {
+      sequence: 1,
+      sourceHead: 'a',
+      sourceTree: 'b',
+      snapshotCommit: 'c',
+      snapshotTree: 'd',
+      transferVerified: true,
+      bundleVerified: true,
+      hostImported: true,
+      lineageVerified: true,
+      promoted: false,
+      materialized: false,
+      quarantineRef: 'refs/autopod-quarantine/pod/1',
+    };
+    const record = {
+      podId: 'pod',
+      sequence: 1,
+      fingerprint: { head: 'a', tree: 'b', dirty: true },
+      result,
+      verifiedAt: null,
+      attempts: 1,
+      error: undefined,
+    };
+    const save = vi.fn(async () => {});
+    const materializeImported = vi.fn(async () => ({
+      ...result,
+      promoted: true,
+      materialized: true,
+    }));
+    const controller = new WorkspaceCheckpointController({
+      observe: async () => record.fingerprint,
+      checkpoint: async () => result,
+      records: {
+        save,
+        latest: async () => null,
+        latestVerified: async () => null,
+        incomplete: async () => [record],
+      },
+      materializeImported,
+    });
+    await controller.reconcileIncomplete();
+    expect(materializeImported).toHaveBeenCalledWith(record);
+    expect(save).toHaveBeenCalledWith(expect.objectContaining({ verifiedAt: expect.any(String) }));
+  });
   it('recovers pod with surviving worktree', async () => {
     const { deps, podRepo, enqueuedSessions, containerManager, cleanupPodResources } =
       createReconcilerDeps();
