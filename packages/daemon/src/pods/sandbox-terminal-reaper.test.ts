@@ -18,17 +18,30 @@ function pod(status: Pod['status'], id = 'pod-1'): Pod {
 
 function build(pods: Pod[]) {
   const podRepo = {
-    list: vi.fn(({ status }: { status: Pod['status'] }) => pods.filter((pod) => pod.status === status)),
+    list: vi.fn(({ status }: { status: Pod['status'] }) =>
+      pods.filter((pod) => pod.status === status),
+    ),
     getOrThrow: vi.fn((id: string) => pods.find((pod) => pod.id === id) as Pod),
-    update: vi.fn((id: string, changes: Partial<Pod>) => Object.assign(pods.find((pod) => pod.id === id)!, changes)),
+    update: vi.fn((id: string, changes: Partial<Pod>) => {
+      const matchingPod = pods.find((pod) => pod.id === id);
+      if (!matchingPod) throw new Error(`pod ${id} missing`);
+      Object.assign(matchingPod, changes);
+    }),
   } as unknown as PodRepository;
-  const sandboxContainerManager = { kill: vi.fn(async () => {}) } as unknown as SandboxContainerManager;
+  const sandboxContainerManager = {
+    kill: vi.fn(async () => {}),
+  } as unknown as SandboxContainerManager;
   const preserveWorkspace = vi.fn(async () => {});
   return {
     podRepo,
     sandboxContainerManager,
     preserveWorkspace,
-    reaper: new SandboxTerminalReaper({ podRepo, sandboxContainerManager, preserveWorkspace, logger }),
+    reaper: new SandboxTerminalReaper({
+      podRepo,
+      sandboxContainerManager,
+      preserveWorkspace,
+      logger,
+    }),
   };
 }
 
@@ -72,7 +85,10 @@ describe('SandboxTerminalReaper', () => {
     const deps = build([complete]);
     let release!: () => void;
     deps.sandboxContainerManager.kill.mockImplementationOnce(
-      () => new Promise<void>((resolve) => (release = resolve)),
+      () =>
+        new Promise<void>((resolve) => {
+          release = resolve;
+        }),
     );
     const first = deps.reaper.runSweep();
     await Promise.resolve();

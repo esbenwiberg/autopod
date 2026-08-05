@@ -59,8 +59,8 @@ import {
   createValidationRepository,
 } from './pods/index.js';
 import { createSessionBridge } from './pods/pod-bridge-impl.js';
-import { ScreenshotRetention } from './pods/screenshot-retention.js';
 import { SandboxTerminalReaper } from './pods/sandbox-terminal-reaper.js';
+import { ScreenshotRetention } from './pods/screenshot-retention.js';
 import { createScreenshotStore, resolveDataDir } from './pods/screenshot-store.js';
 import { createTokenTelemetryRepair } from './pods/token-telemetry-repair.js';
 import { WorkspaceCheckpointController } from './pods/workspace-checkpoint-controller.js';
