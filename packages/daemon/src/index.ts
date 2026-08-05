@@ -720,12 +720,12 @@ const workspaceCheckpointController = new WorkspaceCheckpointController({
         [
           'sh',
           '-ceu',
-          'git rev-parse HEAD; git rev-parse HEAD^{tree}; test -n "$(git status --porcelain)" && echo dirty || echo clean',
+          'git rev-parse HEAD; git status --porcelain=v1 -uall | git hash-object --stdin; test -n "$(git status --porcelain=v1 -uall)" && echo dirty || echo clean',
         ],
         { cwd: '/workspace', timeout: 5_000 },
       );
-    const [head = '', tree = '', state = 'clean'] = output.stdout.trim().split('\n');
-    return { head, tree, dirty: state === 'dirty' };
+    const [head = '', fingerprint = '', state = 'clean'] = output.stdout.trim().split('\n');
+    return { head, tree: fingerprint, dirty: state === 'dirty' };
   },
   checkpoint: async (podId, _reason, sequence) => {
     const pod = podRepo.getOrThrow(podId);
