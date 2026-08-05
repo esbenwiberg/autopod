@@ -9,7 +9,7 @@ public struct ReviewCouncil: Sendable {
   public struct Finding: Identifiable, Sendable {
     public let id: String; public let axis: String?; public let severity: String?; public let claim: String
     public let evidence: String?; public let remediation: String?; public let path: String?; public let line: Int?; public let symbol: String?
-    public let lifecycle: String; public let sourceIds: [String]; public let closureEvidence: String?
+    public let lifecycle: String; public let sourceIds: [String]; public let closureEvidence: String?; public let resolution: ReviewFindingResolutionResponse?; public let isFirstGateFallback: Bool
     public var legacyIssue: String {
       guard let severity, let path else { return claim }
       return "[\(severity)] \(path)\(line.map { ":\($0)" } ?? "") — \(claim)"
@@ -18,6 +18,7 @@ public struct ReviewCouncil: Sendable {
   public let id: String; public let diffHash: String; public let reviewedHead: String; public let promptVersion: String; public let schemaVersion: String; public let model: String
   public let axes: [ReviewAxisRunResponse]; public let synthesis: String; public let durationMs: Int; public let tokenUsage: ReviewTokenUsageResponse?
   public let infrastructureUnavailable: Bool; public let overflow: FirstGateOverflowResponse?; public let findings: [Finding]
+  public let quality: String?; public let degradationReasons: [String]
   public let hasLedger: Bool
   public let initialFindings: [InitialReviewFindingResponse]; public let rejected: [ReviewSynthesisRejectionResponse]; public let merged: [ReviewSynthesisMergeResponse]
   public let acceptedCount: Int
@@ -29,14 +30,29 @@ public struct ReviewCouncil: Sendable {
     tokenUsage taskTokenUsage: ReviewTokenUsageResponse? = nil
   ) {
     id = batch.id; diffHash = batch.diffHash; reviewedHead = batch.reviewedHead; promptVersion = batch.promptVersion; schemaVersion = batch.schemaVersion; model = batch.model
-    axes = batch.axes; synthesis = batch.synthesis; durationMs = batch.durationMs; tokenUsage = taskTokenUsage ?? batch.tokenUsage; infrastructureUnavailable = batch.infrastructureUnavailable ?? false
+    axes = batch.axes; synthesis = batch.synthesis; durationMs = batch.durationMs; tokenUsage = taskTokenUsage ?? batch.tokenUsage; infrastructureUnavailable = batch.infrastructureUnavailable ?? false; quality = batch.quality; degradationReasons = batch.degradationReasons ?? []
     overflow = taskOverflow ?? batch.firstGateOverflow; hasLedger = batch.ledger != nil; initialFindings = batch.initialFindings; rejected = batch.rejected; merged = batch.merged; acceptedCount = batch.accepted.count; repairDelta = batch.repairDelta; closureVerification = batch.closureVerification
-    let records = batch.ledger.map { $0.map { ($0.semanticId, $0.finding, $0.state, $0.currentSourceIds, $0.closureEvidence) } }
-      ?? batch.accepted.map { (Self.candidateId($0), $0, "open", [Self.candidateId($0)], nil) }
-    findings = records.map { semanticId, candidate, state, sourceIds, closureEvidence in
+    var records = batch.ledger.map { $0.map { ($0.semanticId, $0.finding, $0.state, $0.currentSourceIds, $0.closureEvidence, $0.resolution) } }
+      ?? batch.accepted.map { (Self.candidateId($0), $0, "open", [Self.candidateId($0)], nil, nil) }
+    if quality != "healthy" {
+      let representedSourceIds = Set(
+        records.flatMap(\.3)
+          + (batch.ledger ?? []).flatMap { $0.currentSourceIds + $0.priorSourceIds }
+          + batch.merged.flatMap(\.sourceIds)
+      )
+      let visibleInitialIds = Set(records.compactMap { record -> String? in
+        if case .initial(let item) = record.1 { return item.id }
+        return nil
+      }).union(representedSourceIds)
+      records += batch.initialFindings.filter { !visibleInitialIds.contains($0.id) }
+        .map { ($0.id, .initial($0), "open", [$0.id], nil, nil) }
+    } else {
+      records.removeAll { if case .initial = $0.1 { return true }; return false }
+    }
+    findings = records.map { semanticId, candidate, state, sourceIds, closureEvidence, resolution in
       switch candidate {
-      case .initial(let item): return Finding(id: semanticId, axis: nil, severity: nil, claim: item.issue, evidence: nil, remediation: nil, path: nil, line: nil, symbol: nil, lifecycle: state, sourceIds: sourceIds, closureEvidence: closureEvidence)
-      case .structured(let item): return Finding(id: semanticId, axis: item.axis, severity: item.severity, claim: item.claim, evidence: item.evidence, remediation: item.remediation, path: item.path, line: item.line, symbol: item.symbol, lifecycle: state, sourceIds: sourceIds, closureEvidence: closureEvidence)
+      case .initial(let item): return Finding(id: semanticId, axis: nil, severity: nil, claim: item.issue, evidence: nil, remediation: nil, path: nil, line: nil, symbol: nil, lifecycle: state, sourceIds: sourceIds, closureEvidence: closureEvidence, resolution: resolution, isFirstGateFallback: quality != "healthy")
+      case .structured(let item): return Finding(id: semanticId, axis: item.axis, severity: item.severity, claim: item.claim, evidence: item.evidence, remediation: item.remediation, path: item.path, line: item.line, symbol: item.symbol, lifecycle: state, sourceIds: sourceIds, closureEvidence: closureEvidence, resolution: resolution, isFirstGateFallback: false)
       }
     }
   }
@@ -47,6 +63,10 @@ public struct ReviewCouncil: Sendable {
     }
   }
   public var activeCount: Int { findings.filter { $0.lifecycle == "new" || $0.lifecycle == "open" || $0.lifecycle == "regressed" }.count }
+  public var isHealthy: Bool { quality == "healthy" }
+  public var isDegraded: Bool { quality == "degraded" }
+  public var showsLegacyBroadReview: Bool { quality == nil }
+  public var fallbackFindings: [Finding] { findings.filter(\.isFirstGateFallback) }
   public var lifecycleCounts: [Filter: Int] {
     [.open: findings(filter: .open).count, .fixed: findings(filter: .fixed).count,
      .regressed: findings(filter: .regressed).count, .rejected: rejected.count,
@@ -69,6 +89,13 @@ public struct ReviewCouncil: Sendable {
     let axes: [String?] = ["contract_completeness", "security_authority", "lifecycle_reliability", "persistence_reproducibility", "tests_integration", nil]
     return axes.compactMap { axis in
       let matches = sorted.filter { $0.axis == axis }
+      return matches.isEmpty ? nil : Group(axis: axis, findings: matches)
+    }
+  }
+  public func groups(findings items: [Finding]) -> [Group] {
+    let axes: [String?] = ["contract_completeness", "security_authority", "lifecycle_reliability", "persistence_reproducibility", "tests_integration", nil]
+    return axes.compactMap { axis in
+      let matches = items.filter { $0.axis == axis }
       return matches.isEmpty ? nil : Group(axis: axis, findings: matches)
     }
   }

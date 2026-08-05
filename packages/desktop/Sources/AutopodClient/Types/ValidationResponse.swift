@@ -298,13 +298,21 @@ public struct ReviewAxisRunResponse: Codable, Sendable {
   public let attempts: Int
   public let durationMs: Int?
   public let error: String?
+  public let failure: ReviewFailureResponse?
+}
+public struct ReviewFailureResponse: Codable, Sendable {
+  public let kind: String
+  public let code: String
+  public let message: String
+  public let retryable: Bool
 }
 public struct ReviewSynthesisRejectionResponse: Codable, Sendable { public let sourceIds: [String]; public let reason: String }
 public struct ReviewSynthesisMergeResponse: Codable, Sendable { public let finding: StructuredReviewFindingResponse; public let sourceIds: [String] }
 public struct ReviewFindingLedgerEntryResponse: Codable, Sendable {
   public let semanticId: String; public let finding: ReviewFindingCandidateResponse; public let state: String
-  public let priorSourceIds: [String]; public let currentSourceIds: [String]; public let closureEvidence: String?
+  public let priorSourceIds: [String]; public let currentSourceIds: [String]; public let closureEvidence: String?; public let resolution: ReviewFindingResolutionResponse?
 }
+public struct ReviewFindingResolutionResponse: Codable, Sendable { public let reviewedHead: String; public let repairDiffHash: String?; public let evidence: String }
 public struct ReviewRepairDeltaResponse: Codable, Sendable { public let status: String; public let fromHead: String; public let toHead: String; public let diffHash: String?; public let reason: String? }
 public struct ReviewClosureDecisionResponse: Codable, Sendable { public let semanticId: String; public let fixed: Bool; public let evidence: String? }
 public struct ReviewClosureVerificationResponse: Codable, Sendable { public let status: String; public let decisions: [ReviewClosureDecisionResponse]; public let reason: String? }
@@ -313,6 +321,7 @@ public struct ReviewBatchResponse: Codable, Sendable {
   public let axes: [ReviewAxisRunResponse]; public let candidates: [ReviewFindingCandidateResponse]; public let initialFindings: [InitialReviewFindingResponse]
   public let accepted: [ReviewFindingCandidateResponse]; public let rejected: [ReviewSynthesisRejectionResponse]; public let merged: [ReviewSynthesisMergeResponse]
   public let synthesis: String; public let durationMs: Int; public let infrastructureUnavailable: Bool?; public let tokenUsage: ReviewTokenUsageResponse?
+  public let quality: String?; public let degradationReasons: [String]?
   public let ledger: [ReviewFindingLedgerEntryResponse]?; public let repairDelta: ReviewRepairDeltaResponse?; public let closureVerification: ReviewClosureVerificationResponse?; public let firstGateOverflow: FirstGateOverflowResponse?
 }
 
