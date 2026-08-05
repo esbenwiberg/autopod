@@ -61,6 +61,7 @@ export async function checkpointSandboxWorkspace(
 ): Promise<WorkspaceCheckpointResult> {
   const { containerManager: cm, containerId, podId, worktreePath, sequence } = args;
   const token = podId.replace(/[^A-Za-z0-9_-]/g, '_');
+  const checkpointRef = `refs/autopod-checkpoints/${token}`;
   const remoteBundle = `/tmp/.autopod-checkpoint-${token}-${sequence}.bundle`;
   const remoteMeta = `${remoteBundle}.meta`;
   try {
@@ -80,8 +81,9 @@ export async function checkpointSandboxWorkspace(
           'GIT_INDEX_FILE=$idx git -c core.hooksPath=/dev/null add -A -- .',
           'snapshot_tree=$(GIT_INDEX_FILE=$idx git write-tree)',
           "snapshot=$(printf 'autopod sandbox checkpoint\\n' | GIT_AUTHOR_NAME=Autopod GIT_AUTHOR_EMAIL=autopod@localhost GIT_COMMITTER_NAME=Autopod GIT_COMMITTER_EMAIL=autopod@localhost git commit-tree $snapshot_tree -p $head)",
-          `git update-ref refs/autopod-checkpoints/${token} "$snapshot"`,
-          `git bundle create ${remoteBundle} "$snapshot"`,
+          `git update-ref ${checkpointRef} "$snapshot"`,
+          // Bundles must advertise a named ref; a raw commit ID produces an empty bundle.
+          `git bundle create ${remoteBundle} ${checkpointRef}`,
           `printf '%s\\n%s\\n%s\\n%s\\n' "$head" "$tree" "$snapshot" "$snapshot_tree" > ${remoteMeta}`,
         ].join('; '),
       ],
@@ -108,7 +110,7 @@ export async function checkpointSandboxWorkspace(
       const bare = path.resolve(worktreePath, common);
       await execFileAsync('git', ['bundle', 'verify', bundlePath], { cwd: bare });
       const quarantineRef = `refs/autopod-quarantine/${token}/${sequence}`;
-      await execFileAsync('git', ['fetch', bundlePath, `${snapshotCommit}:${quarantineRef}`], {
+      await execFileAsync('git', ['fetch', bundlePath, `${checkpointRef}:${quarantineRef}`], {
         cwd: bare,
       });
       const importedTree = (
