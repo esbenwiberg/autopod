@@ -21,6 +21,8 @@ const BASE_IMAGE_NAMES: Record<StackTemplate, string> = {
   node22: 'autopod-node22',
   'node22-pw': 'autopod-node22-pw',
   'node22-pw-pg': 'autopod-node22-pw-pg',
+  node24: 'autopod-node24',
+  'node24-pw': 'autopod-node24-pw',
   dotnet9: 'autopod-dotnet9',
   dotnet10: 'autopod-dotnet10',
   'dotnet10-go': 'autopod-dotnet10-go',
@@ -398,6 +400,8 @@ function serenaWarmupLanguage(template: StackTemplate | null): 'csharp' | 'types
     template === 'node22' ||
     template === 'node22-pw' ||
     template === 'node22-pw-pg' ||
+    template === 'node24' ||
+    template === 'node24-pw' ||
     template === 'python-node' ||
     template === 'python-node-pg'
   ) {

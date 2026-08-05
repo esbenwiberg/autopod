@@ -82,8 +82,9 @@ function resolveSmokeScreenshotPath(
  * Playwright screenshots are accepted only under the allowed host screenshot
  * directory provided by the caller.
  *
- * The `.autopod/screenshots/` directory is left in place — it is committed
- * to the feature branch so GitHub PR reviewers can see screenshots.
+ * The `.autopod/screenshots/` directory is left in place — `screenshot-artifacts.ts`
+ * publishes it to a dedicated ref so GitHub PR reviewers can see the images
+ * without the reviewed branch carrying them.
  */
 export async function collectScreenshots(
   worktreePath: string,

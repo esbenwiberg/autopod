@@ -966,6 +966,43 @@ human_review: []
     });
   });
 
+  describe('resource ceiling', () => {
+    it('states the sandbox ceiling and flags the clamp when the profile asks for more', () => {
+      const md = generateSystemInstructions(
+        // 10 GB is the daemon default, and every published sandbox tier is smaller,
+        // so this is the path an unconfigured sandbox profile actually takes.
+        makeProfile({ executionTarget: 'sandbox', containerMemoryGb: 10 }),
+        makeSession({ executionTarget: 'sandbox' }),
+        'http://localhost:8080/mcp/x',
+      );
+      expect(md).toContain('### Resources');
+      expect(md).toContain('Container memory limit: **4 GB**');
+      expect(md).toContain('largest tier this execution target offers');
+      expect(md).toContain('The profile asked for 10 GB');
+      expect(md).toContain('Array buffer allocation failed');
+    });
+
+    it('states the requested ceiling on docker without a clamp warning', () => {
+      const md = generateSystemInstructions(
+        makeProfile({ executionTarget: 'local', containerMemoryGb: 10 }),
+        makeSession({ executionTarget: 'local' }),
+        'http://localhost:8080/mcp/x',
+      );
+      expect(md).toContain('Container memory limit: **10 GB**');
+      expect(md).not.toContain('largest tier this execution target offers');
+      expect(md).not.toContain('Do not trust the profile');
+    });
+
+    it('omits the section when docker imposes no limit', () => {
+      const md = generateSystemInstructions(
+        makeProfile({ executionTarget: 'local', containerMemoryGb: 0 }),
+        makeSession({ executionTarget: 'local' }),
+        'http://localhost:8080/mcp/x',
+      );
+      expect(md).not.toContain('### Resources');
+    });
+  });
+
   describe('relevant memory', () => {
     function makeMemory(overrides: Partial<MemoryEntry>): MemoryEntry {
       return {

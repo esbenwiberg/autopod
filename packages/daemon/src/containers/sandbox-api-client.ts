@@ -208,7 +208,7 @@ export interface SandboxApiClient {
 // ---------------------------------------------------------------------------
 
 /** Published memory ceiling per tier, in bytes. */
-const TIER_MEMORY_BYTES: Record<SandboxResourceTier, number> = {
+export const SANDBOX_TIER_MEMORY_BYTES: Record<SandboxResourceTier, number> = {
   XS: 512 * 1024 * 1024, // 0.5 GB
   S: 1024 * 1024 * 1024, // 1 GB
   M: 2 * 1024 * 1024 * 1024, // 2 GB
@@ -216,6 +216,13 @@ const TIER_MEMORY_BYTES: Record<SandboxResourceTier, number> = {
 };
 
 const TIER_ORDER: readonly SandboxResourceTier[] = ['XS', 'S', 'M', 'L'];
+
+/**
+ * Hard platform ceiling for a sandbox pod: the largest published tier. Nothing a
+ * profile asks for can exceed this — `pickSandboxTier` clamps to `L` — so tooling
+ * that needs more RAM than this cannot run on the sandbox target at all.
+ */
+export const MAX_SANDBOX_MEMORY_BYTES = SANDBOX_TIER_MEMORY_BYTES.L;
 
 /**
  * Pick the smallest tier whose memory ceiling satisfies `memoryBytes`. Falls back
@@ -228,7 +235,7 @@ export function pickSandboxTier(
 ): SandboxResourceTier {
   if (!memoryBytes || memoryBytes <= 0) return defaultTier;
   for (const tier of TIER_ORDER) {
-    if (TIER_MEMORY_BYTES[tier] >= memoryBytes) return tier;
+    if (SANDBOX_TIER_MEMORY_BYTES[tier] >= memoryBytes) return tier;
   }
   return 'L';
 }

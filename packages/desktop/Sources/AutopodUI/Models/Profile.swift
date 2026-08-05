@@ -524,6 +524,7 @@ public struct SecurityScanPolicy: Sendable, Equatable {
 
 public enum StackTemplate: String, CaseIterable, Sendable {
     case node22, node22Pw = "node22-pw", node22PwPg = "node22-pw-pg",
+         node24, node24Pw = "node24-pw",
          dotnet9, dotnet10, dotnet10Go = "dotnet10-go",
          python312, pythonNode = "python-node", pythonNodePg = "python-node-pg",
          go124, go124Pw = "go124-pw", custom
@@ -533,6 +534,8 @@ public enum StackTemplate: String, CaseIterable, Sendable {
         case .node22:       "Node 22"
         case .node22Pw:     "Node 22 + Playwright"
         case .node22PwPg:   "Node 22 + Playwright + PostgreSQL 17"
+        case .node24:       "Node 24"
+        case .node24Pw:     "Node 24 + Playwright"
         case .dotnet9:      ".NET 9"
         case .dotnet10:     ".NET 10"
         case .dotnet10Go:   ".NET 10 + Go"

@@ -1826,6 +1826,22 @@ public struct ProfileEditorView: View {
 
     // MARK: - Container (was Infrastructure)
 
+    /// Daemon default when `containerMemoryGb` is unset — mirrors
+    /// `DEFAULT_CONTAINER_MEMORY_GB` in @autopod/shared.
+    static let defaultContainerMemoryGb = 10
+    /// Largest Azure Sandboxes tier — mirrors `MAX_SANDBOX_MEMORY_BYTES` in the daemon.
+    static let maxSandboxMemoryGb = 4
+
+    /// Non-nil when a sandbox-targeted profile will get less RAM than its setting implies.
+    private var sandboxMemoryClampNotice: String? {
+        let ceiling = Self.maxSandboxMemoryGb
+        guard let requested = profile.containerMemoryGb else {
+            return "Unset means the daemon asks for \(Self.defaultContainerMemoryGb) GB, but this target's largest tier is \(ceiling) GB — pods get \(ceiling) GB. Use Local (Docker) for memory-hungry toolchains."
+        }
+        guard requested > Double(ceiling) else { return nil }
+        return "\(Int(requested)) GB exceeds this target's largest tier — pods get \(ceiling) GB. Use Local (Docker) if the build or checks need more."
+    }
+
     @ViewBuilder
     private var containerFields: some View {
         HStack(spacing: 24) {
@@ -1838,7 +1854,7 @@ public struct ProfileEditorView: View {
                 .labelsHidden()
                 .frame(width: 240)
             }
-            fieldRow("Memory Limit", help: "Container RAM cap in GB. Leave empty to use host or cloud defaults.") {
+            fieldRow("Memory Limit", help: "Container RAM cap in GB. Empty means the daemon default (\(Self.defaultContainerMemoryGb) GB). Docker honours the value as-is; Azure Sandboxes maps it to the nearest published tier and caps at \(Self.maxSandboxMemoryGb) GB, so anything larger is clamped.") {
                 HStack(spacing: 4) {
                     TextField("—", value: Binding(
                         get: { profile.containerMemoryGb ?? 0 },
@@ -1851,6 +1867,15 @@ public struct ProfileEditorView: View {
                         .foregroundStyle(.secondary)
                 }
             }
+        }
+
+        // The sandbox target's largest tier is well below the daemon default, so an
+        // empty or generous value quietly becomes 4 GB. Say it here, where the number
+        // is typed — otherwise it only surfaces as an allocation failure mid-pod.
+        if profile.executionTarget == .sandbox, let clampNotice = sandboxMemoryClampNotice {
+            Label(clampNotice, systemImage: "exclamationmark.triangle")
+                .font(.caption)
+                .foregroundStyle(.orange)
         }
 
         // Warm image

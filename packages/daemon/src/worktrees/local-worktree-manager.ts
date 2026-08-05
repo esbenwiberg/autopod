@@ -13,6 +13,7 @@ import type {
   EnsureRemoteBranchConfig,
   EnsureRemoteBranchResult,
   MergeBranchConfig,
+  PushArtifactBranchConfig,
   RebaseOntoBaseConfig,
   RebaseOntoBaseResult,
   RestoreFromHeadOptions,
@@ -118,9 +119,15 @@ function git(
     maxBuffer?: number;
     credential?: GitCredential;
     credentialUrl?: string;
+    /**
+     * Extra env for this invocation (e.g. `GIT_INDEX_FILE`, author identity).
+     * Must not set `GIT_CONFIG_*` — those slots are owned by the ambient-credential
+     * and explicit-credential blocks below, which assume fixed indices.
+     */
+    env?: Record<string, string>;
   } = {},
 ) {
-  const { credential, credentialUrl, ...execOptions } = options;
+  const { credential, credentialUrl, env: extraEnv, ...execOptions } = options;
   let credentialEnv: Record<string, string> = {};
   if (credential) {
     if (!credentialUrl) {
@@ -136,9 +143,21 @@ function git(
   }
   return execFileAsync('git', args, {
     ...execOptions,
-    env: { ...GIT_ENV, ...GIT_NO_AMBIENT_CREDS_ENV, ...credentialEnv },
+    env: { ...GIT_ENV, ...extraEnv, ...GIT_NO_AMBIENT_CREDS_ENV, ...credentialEnv },
   });
 }
+
+/**
+ * Identity for daemon-authored artifact commits. Passed as env so `commit-tree`
+ * never depends on host git config — the daemon may run as a user with none
+ * (container, launchd), and a missing identity would fail the commit.
+ */
+const ARTIFACT_COMMIT_IDENTITY: Record<string, string> = {
+  GIT_AUTHOR_NAME: 'Autopod',
+  GIT_AUTHOR_EMAIL: 'autopod@autopod.local',
+  GIT_COMMITTER_NAME: 'Autopod',
+  GIT_COMMITTER_EMAIL: 'autopod@autopod.local',
+};
 
 /**
  * Thrown when a git remote operation fails because the daemon either has no
@@ -902,6 +921,75 @@ export class LocalWorktreeManager implements WorktreeManager {
       this.logger.info({ worktreePath, fileCount: paths.length }, 'Committed files');
     } catch (err) {
       this.logger.warn({ err, worktreePath }, 'Failed to commit files');
+    }
+  }
+
+  /**
+   * Publish daemon-generated artifacts (validation screenshots) to their own ref.
+   *
+   * Committing them onto the pod's branch injects a file the agent never wrote
+   * into the reviewed change, which breaks repo-level provenance and
+   * changed-files gates (a capsule-gated repo rejected every pod for exactly
+   * this reason). The tree is assembled in a throwaway index and committed
+   * parentless, so the pod's branch, index and HEAD are never touched and the
+   * ref carries no repo history.
+   *
+   * Artifact refs are not garbage-collected: a merged PR keeps rendering its
+   * screenshots. They are namespaced (`autopod/screenshots/*`) so an operator can
+   * prune them wholesale when the branch list gets noisy.
+   */
+  async pushArtifactBranch(config: PushArtifactBranchConfig): Promise<boolean> {
+    const { worktreePath, paths, branch, commitMessage, pat } = config;
+    if (paths.length === 0) return false;
+
+    let tmpDir: string | null = null;
+    try {
+      // Resolve auth first — a missing credential should fail before any work.
+      const remote = await this.getAuthenticatedRemote(worktreePath, pat);
+
+      tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'autopod-artifact-'));
+      const env = { GIT_INDEX_FILE: path.join(tmpDir, 'index') };
+
+      await git(['read-tree', '--empty'], { cwd: worktreePath, env });
+      // --force: the daemon may have added these paths to the worktree excludes
+      // precisely to keep them out of the agent's commits.
+      await git(['add', '--force', '--', ...paths], { cwd: worktreePath, env });
+
+      const { stdout: staged } = await git(['ls-files'], { cwd: worktreePath, env });
+      if (staged.trim().length === 0) {
+        // Nothing was collected — publishing an empty ref would only produce
+        // PR links that 404.
+        return false;
+      }
+
+      const { stdout: treeSha } = await git(['write-tree'], { cwd: worktreePath, env });
+      const { stdout: commitSha } = await git(
+        ['commit-tree', treeSha.trim(), '-m', commitMessage],
+        { cwd: worktreePath, env: { ...env, ...ARTIFACT_COMMIT_IDENTITY } },
+      );
+
+      // Force: a revalidation replaces this pod's screenshots in place.
+      await git(
+        ['push', '--no-verify', '--force', remote.url, `${commitSha.trim()}:refs/heads/${branch}`],
+        {
+          cwd: worktreePath,
+          credential: remote.credential,
+          credentialUrl: remote.url,
+          env,
+        },
+      );
+      this.logger.info({ worktreePath, branch }, 'Pushed artifact branch');
+      return true;
+    } catch (err) {
+      // Non-fatal: screenshots are a review convenience, never a gate. The
+      // caller drops the PR-body section rather than emitting dead links.
+      this.logger.warn(
+        { err: sanitizeGitError(err), worktreePath, branch },
+        'Failed to push artifact branch — screenshots will be omitted from the PR body',
+      );
+      return false;
+    } finally {
+      if (tmpDir) await fs.rm(tmpDir, { recursive: true, force: true }).catch(() => {});
     }
   }
 

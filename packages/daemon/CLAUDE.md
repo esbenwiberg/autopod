@@ -250,6 +250,24 @@ whether to retry or proceed to `validated`. Advisory results are merged into
 validation history and Readiness Review; blocking retries are driven by the
 required validation phases.
 
+### Screenshot artifacts
+
+Validation screenshots are **never committed to the pod's branch**. They go to a
+dedicated ref, `autopod/screenshots/<podId>`, via
+`validation/screenshot-artifacts.ts` → `WorktreeManager.pushArtifactBranch()`,
+and the PR body embeds raw URLs against that ref. Committing them onto the
+branch injects a file the agent never wrote into the reviewed change, which
+fails repo-level provenance and changed-files gates (a capsule-gated repo
+rejected every pod on the trailing `chore: add validation screenshots` commit).
+
+- The tree is built in a throwaway `GIT_INDEX_FILE` and committed parentless, so
+  the pod's branch, index and HEAD are untouched.
+- The push is non-fatal. On failure the PR body drops its Screenshots section
+  rather than emitting links to a ref that does not exist.
+- ADO pods skip it entirely — `AdoPrManager` uploads PR attachments instead.
+- Artifact refs are **not** garbage-collected, so a merged PR keeps rendering its
+  screenshots. Prune the namespace when the branch list gets noisy.
+
 ## Profiles (`src/profiles/`)
 
 - `profile-store.ts` — CRUD backed by SQLite; credentials encrypted with AES-256 before storage
