@@ -94,6 +94,7 @@ describe('parseSynthesis', () => {
     for (const response of [
       '{bad',
       JSON.stringify({ decisions: [{ action: 'accept', sourceIds: ['invented'], finding: a }] }),
+      JSON.stringify({ decisions: [{ action: 'accept', sourceIds: ['a', 'a'], finding: a }] }),
       JSON.stringify({
         decisions: [{ action: 'accept', sourceIds: ['a'], finding: { ...a, claim: 'invented' } }],
       }),

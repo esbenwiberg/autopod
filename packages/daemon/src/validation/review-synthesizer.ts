@@ -99,7 +99,11 @@ export function parseSynthesis(
     )
       throw new Error('invalid synthesis decision');
     const sourceIds = Array.isArray(decision.sourceIds) ? decision.sourceIds.map(String) : [];
-    if (!sourceIds.length || sourceIds.some((id) => !byId.has(id) || used.has(id)))
+    if (
+      !sourceIds.length ||
+      new Set(sourceIds).size !== sourceIds.length ||
+      sourceIds.some((id) => !byId.has(id) || used.has(id))
+    )
       throw new Error('invalid synthesis source IDs');
     const sources = sourceIds
       .map((id) => byId.get(id))

@@ -913,8 +913,12 @@ export function createLocalValidationEngine(
                 : config.priorReviewBatch?.firstGateOverflow);
             const canonicalSources = new Map<string, string[]>();
             for (const finding of batch.accepted) canonicalSources.set(finding.id, [finding.id]);
-            for (const merge of batch.merged)
-              canonicalSources.set(merge.finding.id, merge.sourceIds);
+            for (const merge of batch.merged) {
+              const existing = canonicalSources.get(merge.finding.id) ?? [];
+              canonicalSources.set(merge.finding.id, [
+                ...new Set([...existing, ...merge.sourceIds]),
+              ]);
+            }
             const representedInitialIds = new Set(
               batch.merged.flatMap((merge) =>
                 merge.sourceIds.filter((id) =>
