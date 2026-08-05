@@ -1,5 +1,5 @@
 import { Readable } from 'node:stream';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import type {
   ContainerManager,
   ExecOptions,
@@ -227,6 +227,56 @@ describe('runCodexReview', () => {
     });
 
     expect(result.stdout).toBe('{"status":"pass"}');
+  });
+
+  it('waits for bounded process-exit confirmation after a streaming timeout', async () => {
+    vi.useFakeTimers();
+    try {
+      let confirmExit: ((code: number) => void) | undefined;
+      const exitCode = new Promise<number>((resolve) => {
+        confirmExit = resolve;
+      });
+      const kill = vi.fn().mockResolvedValue(undefined);
+      const manager = {
+        supportsStreamingExec: true,
+        writeFile: async () => {},
+        readFile: async () => '',
+        execInContainer: async () => ({ stdout: '', stderr: '', exitCode: 0 }),
+        execStreaming: async () => ({
+          stdout: Readable.from([]),
+          stderr: Readable.from([]),
+          exitCode,
+          kill,
+        }),
+      } as unknown as ContainerManager;
+
+      const review = runCodexReview({
+        podId: 'sandbox-pod',
+        containerId: 'sandbox-1',
+        containerManager: manager,
+        model: 'gpt-5',
+        prompt: 'review prompt',
+        timeout: 100,
+      });
+      await vi.advanceTimersByTimeAsync(100);
+      expect(kill).toHaveBeenCalledOnce();
+      let settled = false;
+      void review.then(
+        () => {
+          settled = true;
+        },
+        () => {
+          settled = true;
+        },
+      );
+      await Promise.resolve();
+      expect(settled).toBe(false);
+
+      confirmExit?.(137);
+      await expect(review).rejects.toMatchObject({ kind: 'timeout' });
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('throws a CodexReviewError when the in-container review command fails', async () => {

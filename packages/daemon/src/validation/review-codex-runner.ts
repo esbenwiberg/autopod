@@ -50,6 +50,7 @@ export interface CodexReviewTokenUsage {
 }
 
 const SHIM_PATH = '/run/autopod/agent-shim.sh';
+const TERMINATION_CONFIRM_TIMEOUT_MS = 5_000;
 
 /**
  * Runs the Codex CLI inside the pod container, so review auth follows the same
@@ -224,11 +225,25 @@ async function collectStreamingExec(
   try {
     const outcome = await Promise.race([completed, timedOut]);
     if (outcome === 'timeout') {
-      // Do not start a retry until the remote exec has received termination.
-      await handle.kill();
+      // Do not start a retry until the remote exec has actually exited. A
+      // successful kill request only acknowledges delivery, not termination.
+      await confirmTermination(handle.kill(), 'remote reviewer kill did not complete');
+      await confirmTermination(handle.exitCode, 'remote reviewer exit was not observed after kill');
       throw new Error(`container review timed out after ${timeout}ms`);
     }
     return outcome;
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
+async function confirmTermination(signal: Promise<unknown>, message: string): Promise<void> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const unconfirmed = new Promise<never>((_resolve, reject) => {
+    timer = setTimeout(() => reject(new Error(message)), TERMINATION_CONFIRM_TIMEOUT_MS);
+  });
+  try {
+    await Promise.race([signal, unconfirmed]);
   } finally {
     if (timer) clearTimeout(timer);
   }
