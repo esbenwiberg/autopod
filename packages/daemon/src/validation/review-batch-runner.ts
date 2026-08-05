@@ -12,8 +12,8 @@ import { structuredFindingSourceId } from './finding-fingerprint.js';
 import { filterOutOfDiffFindings } from './review-finding-filter.js';
 import {
   REVIEW_VALIDATION_CODE,
-  type ReviewerOutputContract,
   ReviewStructuredOutputError,
+  type ReviewerOutputContract,
   parseAxisResponse,
   reviewAxisOutputContract,
 } from './review-structured-output.js';
@@ -300,14 +300,19 @@ export async function runReviewBatch(
       }
     } else synthesisInvalid = true;
   }
-  const canonicalAccepted = dedupe(synthesized.accepted.filter((finding) => !('source' in finding)));
+  const canonicalAccepted = dedupe(
+    synthesized.accepted.filter((finding) => !('source' in finding)),
+  );
   const canonicalInitialIds = new Set(
     synthesized.merged.flatMap((merge) =>
-      merge.sourceIds.filter((id) => options.packet.initialFindings.some((finding) => finding.id === id)),
+      merge.sourceIds.filter((id) =>
+        options.packet.initialFindings.some((finding) => finding.id === id),
+      ),
     ),
   );
   const degradationReasons: string[] = [];
-  if (runs.some((run) => run.status === 'unavailable')) degradationReasons.push('REQUIRED_AXIS_UNAVAILABLE');
+  if (runs.some((run) => run.status === 'unavailable'))
+    degradationReasons.push('REQUIRED_AXIS_UNAVAILABLE');
   if (synthesis !== 'model')
     degradationReasons.push(synthesisInvalid ? 'SYNTHESIS_INVALID' : 'SYNTHESIS_UNAVAILABLE');
   if (options.packet.initialFindings.some((finding) => !canonicalInitialIds.has(finding.id)))

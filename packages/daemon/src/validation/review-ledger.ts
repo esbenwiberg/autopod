@@ -227,7 +227,9 @@ export function reconcileReviewLedger(
       : [],
   );
   const out: ReviewFindingLedgerEntry[] = [];
-  const migrateByProvenance = (now: { sourceIds: string[] }): ReviewFindingLedgerEntry | undefined => {
+  const migrateByProvenance = (now: { sourceIds: string[] }):
+    | ReviewFindingLedgerEntry
+    | undefined => {
     const matches = prior.filter((entry) => {
       const known = new Set([...entry.priorSourceIds, ...entry.currentSourceIds]);
       return now.sourceIds.some((id) => known.has(id));
@@ -291,13 +293,19 @@ export function reconcileReviewLedger(
     if (migrated) {
       // The prior entry has already been emitted only when it had an exact
       // semantic match. A provenance migration replaces that raw identity.
-      const { resolution: _resolution, closureEvidence: _closureEvidence, ...activeEntry } = migrated;
+      const {
+        resolution: _resolution,
+        closureEvidence: _closureEvidence,
+        ...activeEntry
+      } = migrated;
       out.push({
         ...activeEntry,
         semanticId: id,
         finding: currentFinding.finding,
         state: migrated.state === 'fixed' ? 'regressed' : 'open',
-        priorSourceIds: [...new Set([...migrated.priorSourceIds, ...migrated.currentSourceIds])].sort(),
+        priorSourceIds: [
+          ...new Set([...migrated.priorSourceIds, ...migrated.currentSourceIds]),
+        ].sort(),
         currentSourceIds: [...new Set(currentFinding.sourceIds)].sort(),
       });
       continue;

@@ -916,7 +916,9 @@ export function createLocalValidationEngine(
               canonicalSources.set(merge.finding.id, merge.sourceIds);
             const representedInitialIds = new Set(
               batch.merged.flatMap((merge) =>
-                merge.sourceIds.filter((id) => batch.initialFindings.some((finding) => finding.id === id)),
+                merge.sourceIds.filter((id) =>
+                  batch.initialFindings.some((finding) => finding.id === id),
+                ),
               ),
             );
             const ledgerCurrent = [
@@ -930,12 +932,10 @@ export function createLocalValidationEngine(
                     .map((finding) => ({ finding, sourceIds: [finding.id] }))
                 : []),
             ];
-            const ledger = reconcileReviewLedger(
-              config.priorReviewBatch,
-              ledgerCurrent,
-              closure,
-              { reviewedHead, ...(repair.diffHash ? { repairDiffHash: repair.diffHash } : {}) },
-            );
+            const ledger = reconcileReviewLedger(config.priorReviewBatch, ledgerCurrent, closure, {
+              reviewedHead,
+              ...(repair.diffHash ? { repairDiffHash: repair.diffHash } : {}),
+            });
             batch.ledger = ledger;
             if (firstGateOverflow) batch.firstGateOverflow = firstGateOverflow;
             batch.repairDelta = {
@@ -973,9 +973,10 @@ export function createLocalValidationEngine(
                 closure?.status === 'unavailable'
                   ? 'fail'
                   : 'pass',
-              reasoning: batch.quality === 'degraded'
-                ? `Frozen review council degraded: ${(batch.degradationReasons ?? []).join(', ') || 'required validation failed'}.`
-                : taskReview.reasoning,
+              reasoning:
+                batch.quality === 'degraded'
+                  ? `Frozen review council degraded: ${(batch.degradationReasons ?? []).join(', ') || 'required validation failed'}.`
+                  : taskReview.reasoning,
               issues,
               reviewBatch: batch,
               tokenUsage: combineReviewTokenUsage(

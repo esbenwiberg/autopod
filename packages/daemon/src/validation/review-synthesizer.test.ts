@@ -81,9 +81,7 @@ describe('parseSynthesis', () => {
     };
     const result = parseSynthesis(
       JSON.stringify({
-        decisions: [
-          { action: 'merge', sourceIds: ['initial', 'structured'], finding: structured },
-        ],
+        decisions: [{ action: 'merge', sourceIds: ['initial', 'structured'], finding: structured }],
       }),
       [initial, structured],
     );

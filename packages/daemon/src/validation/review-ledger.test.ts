@@ -183,7 +183,11 @@ describe('reconcileReviewLedger', () => {
   });
 
   it('migrates one raw first-gate identity to canonical structured provenance', () => {
-    const raw = { id: 'initial-aaaaaaaaaaaa', source: 'initial-review' as const, issue: 'missing guard' };
+    const raw = {
+      id: 'initial-aaaaaaaaaaaa',
+      source: 'initial-review' as const,
+      issue: 'missing guard',
+    };
     const prior = reconcileReviewLedger(undefined, [raw], undefined);
     const canonical = finding('canonical');
     const next = reconcileReviewLedger(
@@ -192,11 +196,11 @@ describe('reconcileReviewLedger', () => {
       undefined,
     );
     expect(next).toHaveLength(1);
-    expect(next[0]).toMatchObject({ state: 'open' });
-    expect('source' in next[0]!.finding ? next[0]!.finding.issue : next[0]!.finding.claim).toBe(
-      'canonical',
-    );
-    expect(next[0]?.currentSourceIds).toContain(raw.id);
+    const entry = next[0];
+    if (!entry) throw new Error('expected reconciled entry');
+    expect(entry).toMatchObject({ state: 'open' });
+    expect('source' in entry.finding ? entry.finding.issue : entry.finding.claim).toBe('canonical');
+    expect(entry.currentSourceIds).toContain(raw.id);
   });
 
   it('does not migrate canonical provenance when overlap is ambiguous', () => {
@@ -209,7 +213,9 @@ describe('reconcileReviewLedger', () => {
       ],
       undefined,
     );
-    prior[1]!.currentSourceIds = [source];
+    const overlapping = prior[1];
+    if (!overlapping) throw new Error('expected second raw entry');
+    overlapping.currentSourceIds = [source];
     const next = reconcileReviewLedger(
       { ...batch([]), ledger: prior },
       [{ finding: finding('canonical'), sourceIds: [source, 'canonical'] }],
@@ -223,7 +229,12 @@ describe('reconcileReviewLedger', () => {
     const fixed = reconcileReviewLedger(
       { ...batch([]), ledger: prior },
       [],
-      { status: 'completed', decisions: [{ semanticId: semantic('A'), fixed: true, evidence: '+ exact frozen repair evidence' }] },
+      {
+        status: 'completed',
+        decisions: [
+          { semanticId: semantic('A'), fixed: true, evidence: '+ exact frozen repair evidence' },
+        ],
+      },
       { reviewedHead: 'abc1234', repairDiffHash: 'repairhash' },
     );
     expect(fixed[0]?.resolution).toEqual({
@@ -231,7 +242,11 @@ describe('reconcileReviewLedger', () => {
       repairDiffHash: 'repairhash',
       evidence: '+ exact frozen repair evidence',
     });
-    const regressed = reconcileReviewLedger({ ...batch([]), ledger: fixed }, [finding('A')], undefined);
+    const regressed = reconcileReviewLedger(
+      { ...batch([]), ledger: fixed },
+      [finding('A')],
+      undefined,
+    );
     expect(regressed[0]).toMatchObject({ state: 'regressed' });
     expect(regressed[0]?.resolution).toBeUndefined();
   });

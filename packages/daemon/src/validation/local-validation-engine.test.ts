@@ -1130,7 +1130,10 @@ describe('validate() — hasWebUi gating', () => {
     ).toBe(true);
     expect(result.taskReview?.reviewBatch).toMatchObject({
       quality: 'degraded',
-      degradationReasons: expect.arrayContaining(['SYNTHESIS_INVALID', 'INITIAL_FINDING_UNMATCHED']),
+      degradationReasons: expect.arrayContaining([
+        'SYNTHESIS_INVALID',
+        'INITIAL_FINDING_UNMATCHED',
+      ]),
     });
     expect(result.taskReview?.tokenUsage).toMatchObject({ inputTokens: 170, outputTokens: 34 });
   });
