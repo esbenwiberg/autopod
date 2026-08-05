@@ -7370,6 +7370,8 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         // Detect recovery mode before any provisioning work
         const isRecovery = !!pod.recoveryWorktreePath;
         const isRework = isRecovery && !!pod.reworkReason;
+        const isFreshContainerValidationOnly =
+          isRecovery && pod.skipAgent && pod.status === 'queued';
 
         // Fresh provisioning gets a fresh worktree, so any prior deletion-guard
         // trip is moot. (Recovery reuses the existing worktree — leave the flag
@@ -9047,14 +9049,21 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           }
         }
 
-        // skipAgent escape hatch: operator promoted an interactive pod with
-        // `--skip-agent` — the human's work is final. Container is up so
-        // validation/artifact extraction inside `handleCompletion` can run;
-        // we just bypass the runtime spawn entirely.
+        // skipAgent bypasses the runtime spawn. A queued recovery originates
+        // from Resume's fresh-container validation-only path and must enter
+        // validation directly; a handoff originates from `--skip-agent` and
+        // still uses handleCompletion to evaluate and deliver the human work.
         // Clear the one-shot flag *before* handing off so a future failed →
         // resume cycle re-runs the agent normally.
         if (pod.skipAgent) {
           podRepo.update(podId, { skipAgent: false });
+          if (isFreshContainerValidationOnly) {
+            emitStatus('Skipping agent — running validation only…');
+            logger.info({ podId }, 'skipAgent: fresh-container recovery entering validation');
+            visibleFailurePhase = 'validation';
+            await this.triggerValidation(podId);
+            return;
+          }
           emitStatus('Skipping agent — going straight to completion…');
           logger.info(
             { podId, output: pod.options.output },
