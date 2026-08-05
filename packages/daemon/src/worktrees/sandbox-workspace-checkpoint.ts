@@ -8,6 +8,50 @@ import type { ContainerManager } from '../interfaces/container-manager.js';
 
 const execFileAsync = promisify(execFile);
 
+const CHECKPOINT_SUBJECT = 'autopod sandbox checkpoint';
+const CHECKPOINT_ACTOR = 'Autopod';
+const CHECKPOINT_EMAIL = 'autopod@localhost';
+
+async function peelDaemonNoopCheckpoints(bare: string, tip: string): Promise<string> {
+  let current = tip;
+  for (let depth = 0; depth < 64; depth++) {
+    const metadata = (
+      await execFileAsync(
+        'git',
+        ['show', '-s', '--format=%s%x00%an%x00%ae%x00%cn%x00%ce', current],
+        { cwd: bare },
+      )
+    ).stdout
+      .trim()
+      .split('\0');
+    if (
+      metadata.length !== 5 ||
+      metadata[0] !== CHECKPOINT_SUBJECT ||
+      metadata[1] !== CHECKPOINT_ACTOR ||
+      metadata[2] !== CHECKPOINT_EMAIL ||
+      metadata[3] !== CHECKPOINT_ACTOR ||
+      metadata[4] !== CHECKPOINT_EMAIL
+    ) {
+      break;
+    }
+
+    const lineage = (
+      await execFileAsync('git', ['rev-list', '--parents', '-n', '1', current], { cwd: bare })
+    ).stdout
+      .trim()
+      .split(/\s+/);
+    if (lineage.length !== 2 || !lineage[1]) break;
+    const parent = lineage[1];
+    const [currentTree, parentTree] = await Promise.all([
+      execFileAsync('git', ['rev-parse', `${current}^{tree}`], { cwd: bare }),
+      execFileAsync('git', ['rev-parse', `${parent}^{tree}`], { cwd: bare }),
+    ]);
+    if (currentTree.stdout.trim() !== parentTree.stdout.trim()) break;
+    current = parent;
+  }
+  return current;
+}
+
 /** Proof returned by sandbox source delivery.  Do not collapse this to a success boolean. */
 export interface WorkspaceCheckpointResult {
   sequence: number;
@@ -139,11 +183,14 @@ export async function checkpointSandboxWorkspace(
         await execFileAsync('git', ['rev-parse', `refs/heads/${branch}`], { cwd: bare })
       ).stdout.trim();
       // The isolated sandbox normally advances beyond the host branch while the
-      // agent works. Accept only a verified fast-forward from the current host
-      // tip into that imported history; divergent host work still wins.
+      // agent works. A prior capture can leave a daemon-authored, tree-identical
+      // checkpoint as the host tip while the live sandbox advances from its
+      // parent. Peel only that exact no-op identity; arbitrary empty commits and
+      // every content-bearing host commit remain divergence barriers.
+      const expectedLineageBase = await peelDaemonNoopCheckpoints(bare, expected);
       const fastForward = await execFileAsync(
         'git',
-        ['merge-base', '--is-ancestor', expected, sourceHead],
+        ['merge-base', '--is-ancestor', expectedLineageBase, sourceHead],
         { cwd: bare },
       ).then(
         () => true,

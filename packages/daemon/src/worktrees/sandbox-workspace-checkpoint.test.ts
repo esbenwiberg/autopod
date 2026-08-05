@@ -23,6 +23,34 @@ async function git(cwd: string, args: string[]): Promise<void> {
   await execFileAsync('git', args, { cwd, env: gitEnv });
 }
 
+function createSandboxContainerManager(sandbox: string) {
+  const containerManager = createMockContainerManager();
+  containerManager.execInContainer = vi.fn(async (_containerId, command) => {
+    const executable = command[0];
+    const args = command.slice(1);
+    if (!executable || !args[1]) {
+      return { stdout: '', stderr: 'invalid test command', exitCode: 64 };
+    }
+    args[1] = args[1].replace('cd /workspace', `cd ${sandbox}`);
+    try {
+      const result = await execFileAsync(executable, args, { env: gitEnv });
+      return { stdout: result.stdout, stderr: result.stderr, exitCode: 0 };
+    } catch (err) {
+      const failure = err as { stdout?: string; stderr?: string; code?: number };
+      return {
+        stdout: failure.stdout ?? '',
+        stderr: failure.stderr ?? (err instanceof Error ? err.message : String(err)),
+        exitCode: typeof failure.code === 'number' ? failure.code : 1,
+      };
+    }
+  });
+  containerManager.readFile = vi.fn(async (_containerId, remotePath) =>
+    readFile(remotePath, 'utf8'),
+  );
+  containerManager.readFileBinary = vi.fn(async (_containerId, remotePath) => readFile(remotePath));
+  return containerManager;
+}
+
 describe('checkpointSandboxWorkspace', () => {
   let tmpRoot: string;
 
@@ -52,32 +80,7 @@ describe('checkpointSandboxWorkspace', () => {
     await git(sandbox, ['commit', '-m', 'agent commit']);
     await writeFile(path.join(sandbox, 'new.txt'), 'new sandbox file\n');
 
-    const containerManager = createMockContainerManager();
-    containerManager.execInContainer = vi.fn(async (_containerId, command) => {
-      const executable = command[0];
-      const args = command.slice(1);
-      if (!executable || !args[1]) {
-        return { stdout: '', stderr: 'invalid test command', exitCode: 64 };
-      }
-      args[1] = args[1].replace('cd /workspace', `cd ${sandbox}`);
-      try {
-        const result = await execFileAsync(executable, args, { env: gitEnv });
-        return { stdout: result.stdout, stderr: result.stderr, exitCode: 0 };
-      } catch (err) {
-        const failure = err as { stdout?: string; stderr?: string; code?: number };
-        return {
-          stdout: failure.stdout ?? '',
-          stderr: failure.stderr ?? (err instanceof Error ? err.message : String(err)),
-          exitCode: typeof failure.code === 'number' ? failure.code : 1,
-        };
-      }
-    });
-    containerManager.readFile = vi.fn(async (_containerId, remotePath) =>
-      readFile(remotePath, 'utf8'),
-    );
-    containerManager.readFileBinary = vi.fn(async (_containerId, remotePath) =>
-      readFile(remotePath),
-    );
+    const containerManager = createSandboxContainerManager(sandbox);
 
     const result = await checkpointSandboxWorkspace({
       containerManager,
@@ -100,5 +103,86 @@ describe('checkpointSandboxWorkspace', () => {
       'changed in sandbox\n',
     );
     await expect(readFile(path.join(host, 'new.txt'), 'utf8')).resolves.toBe('new sandbox file\n');
+  });
+
+  it('replaces a daemon-authored no-op checkpoint when the sandbox advances from its parent', async () => {
+    const seed = path.join(tmpRoot, 'seed');
+    const host = path.join(tmpRoot, 'host');
+    const sandbox = path.join(tmpRoot, 'sandbox');
+    await git(tmpRoot, ['init', '--initial-branch=main', seed]);
+    await writeFile(path.join(seed, 'tracked.txt'), 'base\n');
+    await git(seed, ['add', '.']);
+    await git(seed, ['commit', '-m', 'base']);
+    await git(tmpRoot, ['clone', '--no-hardlinks', seed, host]);
+    await git(tmpRoot, ['clone', '--no-hardlinks', seed, sandbox]);
+
+    await execFileAsync('git', ['commit', '--allow-empty', '-m', 'autopod sandbox checkpoint'], {
+      cwd: host,
+      env: {
+        ...gitEnv,
+        GIT_AUTHOR_NAME: 'Autopod',
+        GIT_AUTHOR_EMAIL: 'autopod@localhost',
+        GIT_COMMITTER_NAME: 'Autopod',
+        GIT_COMMITTER_EMAIL: 'autopod@localhost',
+      },
+    });
+    await writeFile(path.join(sandbox, 'tracked.txt'), 'agent correction\n');
+    await git(sandbox, ['add', 'tracked.txt']);
+    await git(sandbox, ['commit', '-m', 'agent correction']);
+
+    const containerManager = createSandboxContainerManager(sandbox);
+
+    const result = await checkpointSandboxWorkspace({
+      containerManager,
+      containerId: 'sandbox-1',
+      podId: path.basename(tmpRoot),
+      worktreePath: host,
+      sequence: 1,
+    });
+
+    expect(result.error).toBeUndefined();
+    expect(result).toMatchObject({
+      lineageVerified: true,
+      promoted: true,
+      materialized: true,
+    });
+    await expect(readFile(path.join(host, 'tracked.txt'), 'utf8')).resolves.toBe(
+      'agent correction\n',
+    );
+  });
+
+  it('retains an operator-authored empty commit as a divergence barrier', async () => {
+    const seed = path.join(tmpRoot, 'seed');
+    const host = path.join(tmpRoot, 'host');
+    const sandbox = path.join(tmpRoot, 'sandbox');
+    await git(tmpRoot, ['init', '--initial-branch=main', seed]);
+    await writeFile(path.join(seed, 'tracked.txt'), 'base\n');
+    await git(seed, ['add', '.']);
+    await git(seed, ['commit', '-m', 'base']);
+    await git(tmpRoot, ['clone', '--no-hardlinks', seed, host]);
+    await git(tmpRoot, ['clone', '--no-hardlinks', seed, sandbox]);
+
+    await git(host, ['commit', '--allow-empty', '-m', 'autopod sandbox checkpoint']);
+    await writeFile(path.join(sandbox, 'tracked.txt'), 'agent correction\n');
+    await git(sandbox, ['add', 'tracked.txt']);
+    await git(sandbox, ['commit', '-m', 'agent correction']);
+
+    const result = await checkpointSandboxWorkspace({
+      containerManager: createSandboxContainerManager(sandbox),
+      containerId: 'sandbox-1',
+      podId: path.basename(tmpRoot),
+      worktreePath: host,
+      sequence: 1,
+    });
+
+    expect(result).toMatchObject({
+      promoted: false,
+      materialized: false,
+      error: {
+        phase: 'promotion',
+        code: 'LINEAGE_CONFLICT',
+      },
+    });
+    await expect(readFile(path.join(host, 'tracked.txt'), 'utf8')).resolves.toBe('base\n');
   });
 });
