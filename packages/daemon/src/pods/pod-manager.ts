@@ -222,6 +222,7 @@ import {
 } from './state-machine.js';
 import { generateSystemInstructions } from './system-instructions-generator.js';
 import type { ValidationRepository } from './validation-repository.js';
+import type { WorkspaceCheckpointController } from './workspace-checkpoint-controller.js';
 import {
   buildBashrcHintBlock,
   buildWorkspaceToolsDoc,
@@ -1392,6 +1393,7 @@ export interface PodManagerDependencies {
   sandboxWorkspaceCheckpoint?: (
     args: SandboxWorkspaceCheckpointArgs,
   ) => Promise<WorkspaceCheckpointResult>;
+  workspaceCheckpointController?: WorkspaceCheckpointController;
   /** Bounded run-level retries for typed validation infrastructure failures. */
   validationInfrastructureRetryBackoffMs?: readonly number[];
   /** Safety events repository for writing per-pattern detection rows. */
@@ -4261,6 +4263,15 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         const commitCount = Number.parseInt(countResult.stdout.trim(), 10) || 0;
         const lastCommitAt = timeResult.exitCode === 0 ? timeResult.stdout.trim() : null;
         podRepo.update(podId, { commitCount, lastCommitAt });
+        if (pod.executionTarget === 'sandbox') {
+          const decision = await deps.workspaceCheckpointController?.poll(podId);
+          if (decision?.degraded) {
+            emitActivityStatus(
+              podId,
+              'Durability degraded — retaining sandbox until checkpoint succeeds.',
+            );
+          }
+        }
       } catch {
         // Silently skip — container may be busy or gone
         logger.debug({ podId }, 'Commit polling failed, skipping cycle');
@@ -4807,6 +4818,10 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
     }
     const existing = sandboxCheckpointRuns.get(pod.id);
     if (existing) return existing;
+    if (deps.workspaceCheckpointController) {
+      const decision = await deps.workspaceCheckpointController.request(pod.id, 'completion');
+      if (decision.result) return decision.result;
+    }
     const run = (deps.sandboxWorkspaceCheckpoint ?? checkpointSandboxWorkspace)({
       containerManager: containerManagerFactory.get('sandbox'),
       containerId: pod.containerId,

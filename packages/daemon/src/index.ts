@@ -62,6 +62,8 @@ import { createSessionBridge } from './pods/pod-bridge-impl.js';
 import { ScreenshotRetention } from './pods/screenshot-retention.js';
 import { createScreenshotStore, resolveDataDir } from './pods/screenshot-store.js';
 import { createTokenTelemetryRepair } from './pods/token-telemetry-repair.js';
+import { WorkspaceCheckpointController } from './pods/workspace-checkpoint-controller.js';
+import { createWorkspaceCheckpointRepository } from './pods/workspace-checkpoint-repository.js';
 import { PodsitterActionExecutor } from './podsitter/action-executor.js';
 import { createDaemonPodsitterEvidenceProvider } from './podsitter/daemon-evidence-provider.js';
 import { createPodsitterRepository } from './podsitter/podsitter-repository.js';
@@ -91,6 +93,7 @@ import { createLocalValidationEngine } from './validation/local-validation-engin
 import { AdoPrManager, parseAdoRepoUrl } from './worktrees/ado-pr-manager.js';
 import { LocalWorktreeManager } from './worktrees/local-worktree-manager.js';
 import { GhPrManager } from './worktrees/pr-manager.js';
+import { checkpointSandboxWorkspace } from './worktrees/sandbox-workspace-checkpoint.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -705,6 +708,40 @@ function prManagerFactory(
 // Pending MCP ask_human requests — created before podManager so both can share the map
 const pendingRequestsByPod = new Map<string, PendingRequests>();
 let preCleanupMemoryExtraction: (podId: string) => Promise<void> = async () => {};
+const workspaceCheckpointController = new WorkspaceCheckpointController({
+  records: createWorkspaceCheckpointRepository(db),
+  observe: async (podId) => {
+    const pod = podRepo.getOrThrow(podId);
+    if (!pod.containerId) throw new Error('sandbox workspace is unavailable');
+    const output = await containerManagerFactory
+      .get('sandbox')
+      .execInContainer(
+        pod.containerId,
+        [
+          'sh',
+          '-ceu',
+          'git rev-parse HEAD; git rev-parse HEAD^{tree}; test -n "$(git status --porcelain)" && echo dirty || echo clean',
+        ],
+        { cwd: '/workspace', timeout: 5_000 },
+      );
+    const [head = '', tree = '', state = 'clean'] = output.stdout.trim().split('\n');
+    return { head, tree, dirty: state === 'dirty' };
+  },
+  checkpoint: async (podId, _reason, sequence) => {
+    const pod = podRepo.getOrThrow(podId);
+    if (!pod.containerId || !pod.worktreePath) throw new Error('sandbox workspace is unavailable');
+    return checkpointSandboxWorkspace({
+      containerManager: containerManagerFactory.get('sandbox'),
+      containerId: pod.containerId,
+      podId,
+      worktreePath: pod.worktreePath,
+      sequence,
+    });
+  },
+  emit: (event) => logger.info({ checkpoint: event }, 'Sandbox workspace checkpoint'),
+  onDurabilityDegraded: (podId, ageMs) =>
+    logger.error({ podId, ageMs }, 'Sandbox durability degraded'),
+});
 
 podManager = createPodManager({
   podRepo,
@@ -751,6 +788,7 @@ podManager = createPodManager({
   screenshotStore,
   hostScreenshotDir: (podId) => hostBrowserRunner.screenshotDir(podId),
   safetyEventsRepo,
+  workspaceCheckpointController,
   logger,
 });
 
@@ -1041,6 +1079,7 @@ warmImageMaintenanceJob?.start();
 // Reconcile sandbox pods after startup (non-blocking — errors are logged, not fatal)
 if (sandboxContainerManager) {
   const { reconcileSandboxSessions } = await import('./pods/reconciler.js');
+  await workspaceCheckpointController.reconcileIncomplete();
   reconcileSandboxSessions({
     podRepo,
     eventBus,
