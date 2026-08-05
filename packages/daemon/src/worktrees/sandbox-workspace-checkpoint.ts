@@ -138,11 +138,20 @@ export async function checkpointSandboxWorkspace(
       const expected = (
         await execFileAsync('git', ['rev-parse', `refs/heads/${branch}`], { cwd: bare })
       ).stdout.trim();
-      // A checkpoint is parented to the sandbox source HEAD.  Do not overwrite
-      // host work that advanced independently while the bundle was in flight.
-      if (expected !== sourceHead) {
+      // The isolated sandbox normally advances beyond the host branch while the
+      // agent works. Accept only a verified fast-forward from the current host
+      // tip into that imported history; divergent host work still wins.
+      const fastForward = await execFileAsync(
+        'git',
+        ['merge-base', '--is-ancestor', expected, sourceHead],
+        { cwd: bare },
+      ).then(
+        () => true,
+        () => false,
+      );
+      if (!fastForward) {
         return {
-          ...empty(sequence, 'feature branch moved since checkpoint capture', 'promotion'),
+          ...empty(sequence, 'feature branch diverged from checkpoint source', 'promotion'),
           sourceHead,
           sourceTree,
           snapshotCommit,
@@ -156,7 +165,7 @@ export async function checkpointSandboxWorkspace(
             phase: 'promotion',
             code: 'LINEAGE_CONFLICT',
             retryable: false,
-            message: 'feature branch moved since checkpoint capture',
+            message: 'feature branch diverged from checkpoint source',
           },
         };
       }
@@ -180,12 +189,12 @@ export async function checkpointSandboxWorkspace(
           // worktree matches. Guard the rollback so concurrent host work wins.
           await execFileAsync(
             'git',
-            ['update-ref', `refs/heads/${branch}`, sourceHead, snapshotCommit],
+            ['update-ref', `refs/heads/${branch}`, expected, snapshotCommit],
             {
               cwd: bare,
             },
           );
-          await execFileAsync('git', ['reset', '--hard', sourceHead], { cwd: worktreePath });
+          await execFileAsync('git', ['reset', '--hard', expected], { cwd: worktreePath });
           return {
             ...empty(sequence, 'host materialization verification failed', 'materialize'),
             sourceHead,
@@ -218,7 +227,7 @@ export async function checkpointSandboxWorkspace(
         // If reset itself fails, return the branch only if it is still ours.
         await execFileAsync(
           'git',
-          ['update-ref', `refs/heads/${branch}`, sourceHead, snapshotCommit],
+          ['update-ref', `refs/heads/${branch}`, expected, snapshotCommit],
           {
             cwd: bare,
           },

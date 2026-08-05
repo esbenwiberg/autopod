@@ -48,6 +48,8 @@ describe('checkpointSandboxWorkspace', () => {
     await git(tmpRoot, ['clone', '--no-hardlinks', seed, host]);
     await git(tmpRoot, ['clone', '--no-hardlinks', seed, sandbox]);
     await writeFile(path.join(sandbox, 'tracked.txt'), 'changed in sandbox\n');
+    await git(sandbox, ['add', 'tracked.txt']);
+    await git(sandbox, ['commit', '-m', 'agent commit']);
     await writeFile(path.join(sandbox, 'new.txt'), 'new sandbox file\n');
 
     const containerManager = createMockContainerManager();
