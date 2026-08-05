@@ -8065,6 +8065,53 @@ describe('PodManager', () => {
       }
     });
 
+    it('parks a non-null frozen council infrastructure failure without rework or hoist', async () => {
+      const councilFailure = reviewInfrastructureFailureResult('review-failed', {
+        taskReview: {
+          status: 'fail',
+          reasoning: 'Frozen review council unavailable',
+          issues: [],
+          model: 'test',
+          screenshots: [],
+          diff: '+changed',
+          reviewBatch: {
+            id: 'batch',
+            diffHash: 'hash',
+            reviewedHead: 'head',
+            promptVersion: 'v1',
+            schemaVersion: 'v1',
+            model: 'test',
+            axes: [],
+            candidates: [],
+            initialFindings: [],
+            accepted: [],
+            rejected: [],
+            merged: [],
+            synthesis: 'deterministic-fallback',
+            durationMs: 1,
+            infrastructureUnavailable: true,
+          },
+        },
+      });
+      const ctx = createTestContext(councilFailure);
+      const manager = createPodManager(ctx.deps);
+      const pod = manager.createSession(
+        { profileName: 'test-profile', task: 'Add feature' },
+        'user-1',
+      );
+      ctx.podRepo.update(pod.id, {
+        status: 'running',
+        containerId: 'ctr-1',
+        validationAttempts: 1,
+      });
+
+      await manager.triggerValidation(pod.id);
+
+      expect(manager.getSession(pod.id).status).toBe('review_required');
+      expect(ctx.runtime.resume).not.toHaveBeenCalled();
+      expect(ctx.validationEngine.validate).toHaveBeenCalledTimes(1);
+    });
+
     it('does not retry deterministic reviewer invalid-request failures', async () => {
       const ctx = createTestContext(
         reviewInfrastructureFailureResult('review-failed', {

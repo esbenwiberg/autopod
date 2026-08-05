@@ -47,12 +47,23 @@ export interface ReviewBatchRunnerOptions {
   execute: (
     prompt: string,
     label: string,
+    timeoutMs: number,
     outputContract?: typeof reviewAxisOutputContract,
   ) => Promise<{ stdout: string; tokenUsage?: TaskReviewResult['tokenUsage'] }>;
   synthesize?: (
     prompt: string,
     label: string,
+    timeoutMs: number,
   ) => Promise<{ stdout: string; tokenUsage?: TaskReviewResult['tokenUsage'] }>;
+  /** One wall-clock budget for axes, retries, and synthesis. */
+  timeoutMs?: number;
+  /** Safe status messages; never includes prompts or provider output. */
+  onProgress?: (event: {
+    axis: ReviewAxis;
+    attempt: number;
+    status: 'started' | 'completed' | 'unavailable';
+    elapsedMs: number;
+  }) => void;
   /** Read HEAD immediately before each call; prevents a batch from mixing commits. */
   readHead?: () => Promise<string>;
 }
@@ -171,6 +182,8 @@ export async function runReviewBatch(
   const runs: ReviewBatchResult['axes'] = [];
   const candidates: StructuredReviewFinding[] = [];
   const tokenUsage: Array<TaskReviewResult['tokenUsage']> = [];
+  const deadline = started + (options.timeoutMs ?? 300_000);
+  const remaining = () => Math.max(0, deadline - Date.now());
   let next = 0;
   const worker = async () => {
     while (next < REVIEW_AXES.length) {
@@ -180,8 +193,19 @@ export async function runReviewBatch(
       const axisStarted = Date.now();
       for (let attempt = 1; attempt <= 2; attempt++) {
         try {
+          if (remaining() <= 0) throw new Error('frozen review council deadline exceeded');
+          options.onProgress?.({
+            axis,
+            attempt,
+            status: 'started',
+            elapsedMs: Date.now() - started,
+          });
           if (options.readHead && (await options.readHead()) !== options.packet.reviewedHead)
             throw new Error('reviewed HEAD changed during frozen batch');
+          // Head validation can itself consume wall-clock budget. Recompute
+          // immediately before the remotely timed reviewer call.
+          const timeoutMs = remaining();
+          if (timeoutMs <= 0) throw new Error('frozen review council deadline exceeded');
           const result = await options.execute(
             axisPrompt(
               options.packet,
@@ -189,6 +213,7 @@ export async function runReviewBatch(
               failure?.kind === 'invalid-response' ? REVIEW_VALIDATION_CODE : undefined,
             ),
             `${options.packet.id}-${axis}-${attempt}`,
+            timeoutMs,
             reviewAxisOutputContract,
           );
           tokenUsage.push(result.tokenUsage);
@@ -198,6 +223,12 @@ export async function runReviewBatch(
             status: 'completed',
             attempts: attempt,
             durationMs: Date.now() - axisStarted,
+          });
+          options.onProgress?.({
+            axis,
+            attempt,
+            status: 'completed',
+            elapsedMs: Date.now() - started,
           });
           lastError = undefined;
           break;
@@ -213,6 +244,13 @@ export async function runReviewBatch(
               error: lastError,
               failure,
             });
+          if (attempt === 2)
+            options.onProgress?.({
+              axis,
+              attempt,
+              status: 'unavailable',
+              elapsedMs: Date.now() - started,
+            });
         }
       }
     }
@@ -226,11 +264,18 @@ export async function runReviewBatch(
     rejected: [] as ReviewBatchResult['rejected'],
     merged: [] as ReviewBatchResult['merged'],
   };
-  if (options.synthesize) {
+  // A missing required axis is infrastructure failure, not an input for a
+  // potentially reassuring synthesis verdict. Five 300s axes with retries can
+  // otherwise stretch a nominal 300s review into roughly 20 minutes.
+  if (options.synthesize && !runs.some((run) => run.status === 'unavailable') && remaining() > 0) {
     try {
       const prompt = reviewSynthesisPrompt(allCandidates);
       if (prompt.length > 1_000_000) throw new Error('synthesis prompt exceeds bounded input');
-      const result = await options.synthesize(prompt, `${options.packet.id}-synthesis`);
+      const result = await options.synthesize(
+        prompt,
+        `${options.packet.id}-synthesis`,
+        remaining(),
+      );
       tokenUsage.push(result.tokenUsage);
       synthesized = parseSynthesis(result.stdout.slice(0, 1_000_000), allCandidates);
       synthesis = 'model';

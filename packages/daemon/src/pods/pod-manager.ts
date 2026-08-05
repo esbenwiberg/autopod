@@ -896,8 +896,13 @@ function validationInfrastructureFailureLabel(result: ValidationResult): string 
 }
 
 function isReviewInfrastructureOnlyFailure(result: ValidationResult): boolean {
-  if (result.taskReview !== null) return false;
-  if (result.reviewSkipKind !== 'review-timeout' && result.reviewSkipKind !== 'review-failed') {
+  const councilUnavailable = result.taskReview?.reviewBatch?.infrastructureUnavailable === true;
+  if (!councilUnavailable && result.taskReview !== null) return false;
+  if (
+    !councilUnavailable &&
+    result.reviewSkipKind !== 'review-timeout' &&
+    result.reviewSkipKind !== 'review-failed'
+  ) {
     return false;
   }
   if (result.smoke.build.status !== 'pass') return false;
@@ -916,6 +921,9 @@ function isReviewInfrastructureOnlyFailure(result: ValidationResult): boolean {
 }
 
 function reviewInfrastructureFailureLabel(result: ValidationResult): string {
+  if (result.taskReview?.reviewBatch?.infrastructureUnavailable) {
+    return 'Frozen review council infrastructure failure';
+  }
   return result.reviewSkipKind === 'review-timeout'
     ? 'Review infrastructure timeout'
     : 'Review infrastructure failure';
@@ -12197,7 +12205,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           result,
         });
 
-        const s2 = podRepo.getOrThrow(podId);
+        let s2 = podRepo.getOrThrow(podId);
 
         // Pod may have been killed while validation was running — bail out
         if (isTerminalState(s2.status) || s2.status === 'killing') {
@@ -12277,21 +12285,74 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
                 `${recurring.length} recurring finding(s) detected — auto-hoisting to deeper review tier`,
               );
 
-              // Auto-hoist: re-run task review at Tier 2+ (deep) to get a second opinion.
-              // Only re-runs the AI review, not build/health/smoke (those are objective).
+              // Auto-hoist: re-run only a fresh deep task review. Deterministic
+              // evidence is already durable for this exact attempt; re-running it
+              // makes a review-only second opinion unexpectedly execute the suite.
               let hoistedResult: typeof effectiveResult | null = null;
               try {
-                hoistedResult = await validationEngine.validate(
-                  { ...validationConfig, reviewDepth: 'deep' },
+                const reviewOnly = await validationEngine.validate(
+                  {
+                    ...validationConfig,
+                    reviewDepth: 'deep',
+                    reviewOnly: true,
+                    preSubmitReview: null,
+                    skipPhases: [
+                      'setup',
+                      'lint',
+                      'sast',
+                      'build',
+                      'test',
+                      'health',
+                      'pages',
+                      'facts',
+                    ],
+                  },
                   (phase) => emitActivityStatus(podId, phase),
                   validationController.signal,
                   buildPhaseEventCallbacks(podId),
                 );
+                const deterministicFailures = failedValidationPhases(effectiveResult).filter(
+                  (phase) => phase !== 'review',
+                );
+                hoistedResult = {
+                  ...effectiveResult,
+                  taskReview: reviewOnly.taskReview,
+                  reviewSkipReason: reviewOnly.reviewSkipReason,
+                  reviewSkipKind: reviewOnly.reviewSkipKind,
+                  reviewTokenUsage: reviewOnly.reviewTokenUsage,
+                  duration: effectiveResult.duration + reviewOnly.duration,
+                  overall:
+                    deterministicFailures.length === 0 && reviewOnly.taskReview?.status === 'pass'
+                      ? 'pass'
+                      : 'fail',
+                };
                 if (s2.validationOverrides && s2.validationOverrides.length > 0) {
                   hoistedResult = applyOverrides(hoistedResult, s2.validationOverrides);
                 }
+                // Persist the second opinion even when it remains blocking.
+                podRepo.update(podId, { lastValidationResult: hoistedResult });
+                // The first pass for this attempt is already recorded. Replace
+                // it so prior-batch lookup remains deterministic by attempt.
+                validationRepo?.updateResult(podId, attempt, hoistedResult);
               } catch (err) {
                 logger.warn({ err, podId }, 'Auto-hoist deeper review failed');
+              }
+
+              // The review call is asynchronous: honor a concurrent kill or
+              // skip-validation update instead of continuing with stale s2.
+              s2 = podRepo.getOrThrow(podId);
+              if (isTerminalState(s2.status) || s2.status === 'killing') return;
+              if (
+                hoistedResult &&
+                isReviewInfrastructureOnlyFailure(hoistedResult) &&
+                !s2.skipValidation
+              ) {
+                emitActivityStatus(
+                  podId,
+                  `${reviewInfrastructureFailureLabel(hoistedResult)} during deeper review — moving to review required`,
+                );
+                await parkOnReviewInfrastructureFailure(s2);
+                return;
               }
 
               if (hoistedResult && hoistedResult.overall === 'pass') {
@@ -12299,9 +12360,6 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
                 effectiveResult = hoistedResult;
                 emitActivityStatus(podId, 'Deeper review tier passed — overriding Tier 1 result');
                 logger.info({ podId }, 'Auto-hoist resolved recurring findings');
-                // Update stored result with the hoisted one
-                podRepo.update(podId, { lastValidationResult: hoistedResult });
-                validationRepo?.insert(podId, attempt, hoistedResult);
               } else {
                 // Deeper review still flags same findings — escalate to human
                 const hoistedFindings = hoistedResult

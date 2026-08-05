@@ -183,6 +183,28 @@ describe('runReviewBatch', () => {
     expect(batch.axes[0]?.failure?.kind).toBe(kind);
   });
 
+  it('shares one deadline across axis calls and skips synthesis after an unavailable axis', async () => {
+    const timeouts: number[] = [];
+    let synthesized = false;
+    const batch = await runReviewBatch({
+      packet: packet(),
+      model: 'test',
+      timeoutMs: 1,
+      execute: async (_prompt, label, timeoutMs) => {
+        timeouts.push(timeoutMs);
+        if (label.includes('contract_completeness')) throw new Error('reviewer unavailable');
+        return { stdout: response };
+      },
+      synthesize: async () => {
+        synthesized = true;
+        return { stdout: '{"decisions":[]}' };
+      },
+    });
+    expect(timeouts.every((timeout) => timeout <= 1)).toBe(true);
+    expect(batch.infrastructureUnavailable).toBe(true);
+    expect(synthesized).toBe(false);
+  });
+
   it('retains distinct cross-axis sources for the same semantic finding', async () => {
     const batch = await runReviewBatch({
       packet: packet(),

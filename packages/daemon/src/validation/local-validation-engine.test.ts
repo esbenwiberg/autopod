@@ -2617,6 +2617,29 @@ human_review: []
     expect(result.overall).toBe('pass');
   });
 
+  it('runs a review-only second opinion without executing deterministic phases', async () => {
+    vi.mocked(runClaudeCli).mockResolvedValueOnce({
+      stdout: JSON.stringify({ status: 'pass', reasoning: 'fresh review', issues: [] }),
+    });
+    const cm = stubContainerManager();
+    const started: string[] = [];
+    const result = await createLocalValidationEngine(cm).validate(
+      baseConfig({
+        diff: '+const changed = true;',
+        reviewerModel: 'claude-sonnet-4-6',
+        reviewOnly: true,
+        skipPhases: ['setup', 'lint', 'sast', 'build', 'test', 'health', 'pages', 'facts'],
+      }),
+      undefined,
+      undefined,
+      { onPhaseStarted: (phase) => started.push(phase) },
+    );
+
+    expect(started).toEqual(['review']);
+    expect(cm.execInContainer).not.toHaveBeenCalled();
+    expect(result.taskReview?.status).toBe('pass');
+  });
+
   it('retries only Review after reviewer infrastructure failure', async () => {
     const reviewPass = JSON.stringify({
       status: 'pass',
