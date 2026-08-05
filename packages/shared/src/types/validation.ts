@@ -271,6 +271,10 @@ export interface ReviewBatchResult {
   synthesis: 'model' | 'deterministic-fallback' | 'unavailable';
   durationMs: number;
   infrastructureUnavailable?: boolean;
+  /** Explicit authority for new batches; absent batches retain conservative legacy handling. */
+  quality?: 'healthy' | 'degraded';
+  /** Stable, bounded machine-readable explanations for a degraded council. */
+  degradationReasons?: string[];
   tokenUsage?: TaskReviewResult['tokenUsage'];
   /** Cross-attempt finding history. Optional so historical validation JSON stays readable. */
   ledger?: ReviewFindingLedgerEntry[];
@@ -289,6 +293,14 @@ export interface ReviewFindingLedgerEntry {
   priorSourceIds: string[];
   currentSourceIds: string[];
   closureEvidence?: string;
+  /** Durable proof for a verified fixed finding. Cleared when it regresses. */
+  resolution?: ReviewFindingResolution;
+}
+
+export interface ReviewFindingResolution {
+  reviewedHead: string;
+  repairDiffHash?: string;
+  evidence: string;
 }
 
 export interface ReviewRepairDelta {

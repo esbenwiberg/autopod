@@ -1,4 +1,4 @@
-import type { StructuredReviewFinding } from '@autopod/shared';
+import type { InitialReviewFinding, StructuredReviewFinding } from '@autopod/shared';
 import { describe, expect, it } from 'vitest';
 import { structuredFindingSourceId } from './finding-fingerprint.js';
 import { parseSynthesis } from './review-synthesizer.js';
@@ -70,6 +70,25 @@ describe('parseSynthesis', () => {
       [a],
     );
     expect(result.accepted).toEqual([a]);
+  });
+
+  it('permits initial provenance only through a structured canonical merge', () => {
+    const structured = finding('structured');
+    const initial: InitialReviewFinding = {
+      id: 'initial',
+      source: 'initial-review',
+      issue: 'broad description of the same missing guard',
+    };
+    const result = parseSynthesis(
+      JSON.stringify({
+        decisions: [
+          { action: 'merge', sourceIds: ['initial', 'structured'], finding: structured },
+        ],
+      }),
+      [initial, structured],
+    );
+    expect(result.accepted).toEqual([{ ...structured, id: structuredFindingSourceId(structured) }]);
+    expect(result.merged[0]?.sourceIds).toEqual(['initial', 'structured']);
   });
 
   it('rejects invented IDs, altered claims, paths, severities, and malformed output', () => {

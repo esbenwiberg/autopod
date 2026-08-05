@@ -39,8 +39,13 @@ function supportedMerge(
     'claim',
     'evidence',
     'remediation',
+    'confidence',
   ];
-  return fields.every((field) => sources.some((source) => source[field] === finding[field]));
+  return (
+    fields.every((field) => sources.some((source) => source[field] === finding[field])) &&
+    (finding.line === undefined || sources.some((source) => source.line === finding.line)) &&
+    (finding.symbol === undefined || sources.some((source) => source.symbol === finding.symbol))
+  );
 }
 
 /** Validates that synthesis is purely a source-backed consolidation, never a new review. */
@@ -93,7 +98,7 @@ export function parseSynthesis(
         !mergedFinding ||
         typeof mergedFinding !== 'object' ||
         'source' in mergedFinding ||
-        structuredSources.length !== sources.length ||
+        structuredSources.length === 0 ||
         !supportedMerge(mergedFinding as StructuredReviewFinding, structuredSources)
       )
         throw new Error('unsupported merged finding');
