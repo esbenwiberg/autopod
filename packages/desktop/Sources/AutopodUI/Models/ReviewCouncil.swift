@@ -35,10 +35,11 @@ public struct ReviewCouncil: Sendable {
     var records = batch.ledger.map { $0.map { ($0.semanticId, $0.finding, $0.state, $0.currentSourceIds, $0.closureEvidence, $0.resolution) } }
       ?? batch.accepted.map { (Self.candidateId($0), $0, "open", [Self.candidateId($0)], nil, nil) }
     if quality != "healthy" {
+      let representedSourceIds = Set(records.flatMap(\.3) + batch.merged.flatMap(\.sourceIds))
       let visibleInitialIds = Set(records.compactMap { record -> String? in
         if case .initial(let item) = record.1 { return item.id }
         return nil
-      })
+      }).union(representedSourceIds)
       records += batch.initialFindings.filter { !visibleInitialIds.contains($0.id) }
         .map { ($0.id, .initial($0), "open", [$0.id], nil, nil) }
     } else {
