@@ -811,7 +811,7 @@ export function createLocalValidationEngine(
                   logger: log,
                   outputContract,
                 }),
-              synthesize: async (prompt, _label, timeoutMs) =>
+              synthesize: async (prompt, _label, timeoutMs, outputContract) =>
                 runContainerReviewer({
                   podId: config.podId,
                   containerId: config.containerId,
@@ -825,6 +825,7 @@ export function createLocalValidationEngine(
                   ...(config.reviewerExecEnv ? { env: config.reviewerExecEnv } : {}),
                   timeout: timeoutMs,
                   logger: log,
+                  outputContract,
                 }),
             });
             const repair = await readRepairDelta(
@@ -900,10 +901,9 @@ export function createLocalValidationEngine(
                 };
               }
             }
-            // First-gate findings remain blocking even if the synthesizer rejects
-            // them, so retain them in the durable history as well as accepted
-            // council findings. Otherwise a rejected first-gate finding could
-            // disappear before a later repair attempt can close or regress it.
+            // Canonical structured records are authoritative. First-gate inputs
+            // become provenance when safely merged; only unmatched inputs remain
+            // independent fail-closed fallback blockers in a degraded council.
             // A genuinely clean, complete first gate supersedes historical
             // overflow. Any other result carries the bounded blocker forward.
             const firstGateOverflow =
@@ -911,15 +911,36 @@ export function createLocalValidationEngine(
               (taskReview.status === 'pass' && taskReview.issues.length === 0
                 ? undefined
                 : config.priorReviewBatch?.firstGateOverflow);
-            const ledgerCurrent = new Map<string, ReviewFindingCandidate>();
-            for (const finding of [...initialBroadLedgerFindings(taskReview), ...batch.accepted]) {
-              ledgerCurrent.set(finding.id, finding);
+            const canonicalSources = new Map<string, string[]>();
+            for (const finding of batch.accepted) canonicalSources.set(finding.id, [finding.id]);
+            for (const merge of batch.merged) {
+              const existing = canonicalSources.get(merge.finding.id) ?? [];
+              canonicalSources.set(merge.finding.id, [
+                ...new Set([...existing, ...merge.sourceIds]),
+              ]);
             }
-            const ledger = reconcileReviewLedger(
-              config.priorReviewBatch,
-              [...ledgerCurrent.values()],
-              closure,
+            const representedInitialIds = new Set(
+              batch.merged.flatMap((merge) =>
+                merge.sourceIds.filter((id) =>
+                  batch.initialFindings.some((finding) => finding.id === id),
+                ),
+              ),
             );
+            const ledgerCurrent = [
+              ...batch.accepted.map((finding) => ({
+                finding,
+                sourceIds: canonicalSources.get(finding.id) ?? [finding.id],
+              })),
+              ...(batch.quality === 'degraded'
+                ? initialBroadLedgerFindings(taskReview)
+                    .filter((finding) => !representedInitialIds.has(finding.id))
+                    .map((finding) => ({ finding, sourceIds: [finding.id] }))
+                : []),
+            ];
+            const ledger = reconcileReviewLedger(config.priorReviewBatch, ledgerCurrent, closure, {
+              reviewedHead,
+              ...(repair.diffHash ? { repairDiffHash: repair.diffHash } : {}),
+            });
             batch.ledger = ledger;
             if (firstGateOverflow) batch.firstGateOverflow = firstGateOverflow;
             batch.repairDelta = {
@@ -950,16 +971,17 @@ export function createLocalValidationEngine(
               ...taskReview,
               status:
                 taskReview.status === 'fail' ||
-                batch.infrastructureUnavailable ||
+                batch.quality === 'degraded' ||
                 batch.firstGateOverflow !== undefined ||
                 issues.length > 0 ||
                 closure?.status === 'invalid' ||
                 closure?.status === 'unavailable'
                   ? 'fail'
                   : 'pass',
-              reasoning: batch.infrastructureUnavailable
-                ? 'Frozen review council unavailable: one or more required axes failed.'
-                : taskReview.reasoning,
+              reasoning:
+                batch.quality === 'degraded'
+                  ? `Frozen review council degraded: ${(batch.degradationReasons ?? []).join(', ') || 'required validation failed'}.`
+                  : taskReview.reasoning,
               issues,
               reviewBatch: batch,
               tokenUsage: combineReviewTokenUsage(

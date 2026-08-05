@@ -239,7 +239,7 @@ describe('runReviewBatch', () => {
     expect(batch.accepted).toHaveLength(5);
   });
 
-  it('keeps the initial broad-review blocker when synthesis fails', async () => {
+  it('degrades and leaves the initial broad-review blocker for ledger fallback when synthesis fails', async () => {
     const initial = {
       id: 'broad-1',
       source: 'initial-review' as const,
@@ -252,7 +252,10 @@ describe('runReviewBatch', () => {
       synthesize: async () => ({ stdout: '{malformed' }),
     });
     expect(batch.synthesis).toBe('deterministic-fallback');
-    expect(batch.accepted.map((finding) => finding.id)).toContain('broad-1');
+    expect(batch.quality).toBe('degraded');
+    expect(batch.degradationReasons).toContain('SYNTHESIS_INVALID');
+    expect(batch.degradationReasons).toContain('INITIAL_FINDING_UNMATCHED');
+    expect(batch.accepted.every((finding) => !('source' in finding))).toBe(true);
   });
 
   it('persists source-backed model accept and reject decisions', async () => {
@@ -286,7 +289,8 @@ describe('runReviewBatch', () => {
       }),
     });
     expect(batch.synthesis).toBe('model');
-    expect(batch.accepted).toEqual([initial]);
+    expect(batch.quality).toBe('degraded');
+    expect(batch.accepted).toEqual([]);
     expect(batch.rejected).toEqual([
       {
         sourceIds: [candidateId],

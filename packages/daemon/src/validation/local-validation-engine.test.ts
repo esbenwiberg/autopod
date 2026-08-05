@@ -1097,7 +1097,7 @@ describe('validate() — hasWebUi gating', () => {
     }));
   }
 
-  it('keeps a failed first gate failed and counts axis plus synthesis usage once', async () => {
+  it('review council keeps a failed first gate fail-closed and retries invalid synthesis', async () => {
     vi.mocked(runClaudeCli).mockResolvedValue({
       stdout: JSON.stringify({ status: 'fail', reasoning: 'blocked', issues: ['real blocker'] }),
       tokenUsage: { inputTokens: 100, outputTokens: 20 },
@@ -1122,13 +1122,20 @@ describe('validate() — hasWebUi gating', () => {
     });
     expect(result.taskReview?.reviewBatch?.initialFindings[0]).not.toHaveProperty('path');
     expect(result.taskReview?.reviewBatch?.initialFindings[0]).not.toHaveProperty('severity');
-    expect(runContainerReviewer).toHaveBeenCalledTimes(6);
+    expect(runContainerReviewer).toHaveBeenCalledTimes(7);
     expect(
       vi
         .mocked(runContainerReviewer)
         .mock.calls.every(([config]) => !config.prompt.includes('ghp_')),
     ).toBe(true);
-    expect(result.taskReview?.tokenUsage).toMatchObject({ inputTokens: 160, outputTokens: 32 });
+    expect(result.taskReview?.reviewBatch).toMatchObject({
+      quality: 'degraded',
+      degradationReasons: expect.arrayContaining([
+        'SYNTHESIS_INVALID',
+        'INITIAL_FINDING_UNMATCHED',
+      ]),
+    });
+    expect(result.taskReview?.tokenUsage).toMatchObject({ inputTokens: 170, outputTokens: 34 });
   });
 
   it('keeps initial semantic IDs stable when aggregate truncation changes stored text', () => {
@@ -1266,7 +1273,7 @@ describe('validate() — hasWebUi gating', () => {
       }),
     );
     expect(deep.taskReview?.reviewBatch).toBeDefined();
-    expect(runContainerReviewer).toHaveBeenCalledTimes(6);
+    expect(runContainerReviewer).toHaveBeenCalledTimes(7);
 
     vi.mocked(runContainerReviewer).mockClear();
     const standard = await engine.validate(
@@ -1332,7 +1339,7 @@ describe('validate() — hasWebUi gating', () => {
         priorReviewBatch,
       }),
     );
-    expect(runContainerReviewer).toHaveBeenCalledTimes(6);
+    expect(runContainerReviewer).toHaveBeenCalledTimes(7);
     expect(result.taskReview?.reviewBatch?.repairDelta?.status).toBe('unavailable');
     expect(result.taskReview?.reviewBatch?.closureVerification?.status).toBe('unavailable');
     expect(result.taskReview?.reviewBatch?.ledger?.[0]?.state).toBe('open');
@@ -1465,7 +1472,7 @@ describe('validate() — hasWebUi gating', () => {
       'initial-3e23e8160039594a': 'open',
       'initial-2e7d2c03a9507ae2': 'new',
     });
-    expect(two.taskReview?.tokenUsage?.inputTokens).toBe(67);
+    expect(two.taskReview?.tokenUsage?.inputTokens).toBe(77);
 
     await fs.appendFile(path.join(repoPath, 'repair.txt'), 'clean gate follow-up\n');
     await git('add', 'repair.txt');

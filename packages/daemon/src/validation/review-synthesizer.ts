@@ -5,6 +5,7 @@ import type {
   TaskReviewResult,
 } from '@autopod/shared';
 import { structuredFindingSourceId } from './finding-fingerprint.js';
+import { parseReviewStructuredJson } from './review-structured-output.js';
 
 export interface SynthesisDecision {
   action: 'accept' | 'reject' | 'merge';
@@ -32,6 +33,29 @@ function supportedMerge(
   finding: StructuredReviewFinding,
   sources: StructuredReviewFinding[],
 ): boolean {
+  const allowedKeys = new Set([
+    'id',
+    'axis',
+    'severity',
+    'path',
+    'line',
+    'symbol',
+    'claim',
+    'evidence',
+    'remediation',
+    'confidence',
+  ]);
+  if (
+    Object.keys(finding).some((key) => !allowedKeys.has(key)) ||
+    typeof finding.id !== 'string' ||
+    typeof finding.axis !== 'string' ||
+    typeof finding.path !== 'string' ||
+    typeof finding.claim !== 'string' ||
+    typeof finding.evidence !== 'string' ||
+    typeof finding.remediation !== 'string' ||
+    typeof finding.confidence !== 'number'
+  )
+    return false;
   const fields: Array<keyof StructuredReviewFinding> = [
     'axis',
     'severity',
@@ -39,8 +63,13 @@ function supportedMerge(
     'claim',
     'evidence',
     'remediation',
+    'confidence',
   ];
-  return fields.every((field) => sources.some((source) => source[field] === finding[field]));
+  return (
+    fields.every((field) => sources.some((source) => source[field] === finding[field])) &&
+    (finding.line === undefined || sources.some((source) => source.line === finding.line)) &&
+    (finding.symbol === undefined || sources.some((source) => source.symbol === finding.symbol))
+  );
 }
 
 /** Validates that synthesis is purely a source-backed consolidation, never a new review. */
@@ -48,7 +77,7 @@ export function parseSynthesis(
   stdout: string,
   candidates: ReviewFindingCandidate[],
 ): SynthesisResult {
-  const parsed: unknown = JSON.parse(stdout);
+  const parsed = parseReviewStructuredJson(stdout);
   if (
     !parsed ||
     typeof parsed !== 'object' ||
@@ -63,8 +92,18 @@ export function parseSynthesis(
   for (const raw of (parsed as { decisions: unknown[] }).decisions) {
     if (!raw || typeof raw !== 'object') throw new Error('invalid synthesis decision');
     const decision = raw as Record<string, unknown>;
+    if (
+      Object.keys(decision).some(
+        (key) => !['action', 'sourceIds', 'reason', 'finding'].includes(key),
+      )
+    )
+      throw new Error('invalid synthesis decision');
     const sourceIds = Array.isArray(decision.sourceIds) ? decision.sourceIds.map(String) : [];
-    if (!sourceIds.length || sourceIds.some((id) => !byId.has(id) || used.has(id)))
+    if (
+      !sourceIds.length ||
+      new Set(sourceIds).size !== sourceIds.length ||
+      sourceIds.some((id) => !byId.has(id) || used.has(id))
+    )
       throw new Error('invalid synthesis source IDs');
     const sources = sourceIds
       .map((id) => byId.get(id))
@@ -93,7 +132,7 @@ export function parseSynthesis(
         !mergedFinding ||
         typeof mergedFinding !== 'object' ||
         'source' in mergedFinding ||
-        structuredSources.length !== sources.length ||
+        structuredSources.length === 0 ||
         !supportedMerge(mergedFinding as StructuredReviewFinding, structuredSources)
       )
         throw new Error('unsupported merged finding');

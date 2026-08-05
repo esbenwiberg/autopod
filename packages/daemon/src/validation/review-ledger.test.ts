@@ -181,6 +181,75 @@ describe('reconcileReviewLedger', () => {
     });
     expect(states(three)).toEqual({ A: 'regressed', B: 'fixed', C: 'fixed' });
   });
+
+  it('migrates one raw first-gate identity to canonical structured provenance', () => {
+    const raw = {
+      id: 'initial-aaaaaaaaaaaa',
+      source: 'initial-review' as const,
+      issue: 'missing guard',
+    };
+    const prior = reconcileReviewLedger(undefined, [raw], undefined);
+    const canonical = finding('canonical');
+    const next = reconcileReviewLedger(
+      { ...batch([]), ledger: prior },
+      [{ finding: canonical, sourceIds: [raw.id, canonical.id] }],
+      undefined,
+    );
+    expect(next).toHaveLength(1);
+    const entry = next[0];
+    if (!entry) throw new Error('expected reconciled entry');
+    expect(entry).toMatchObject({ state: 'open' });
+    expect('source' in entry.finding ? entry.finding.issue : entry.finding.claim).toBe('canonical');
+    expect(entry.currentSourceIds).toContain(raw.id);
+  });
+
+  it('does not migrate canonical provenance when overlap is ambiguous', () => {
+    const source = 'initial-aaaaaaaaaaaa';
+    const prior = reconcileReviewLedger(
+      undefined,
+      [
+        { id: source, source: 'initial-review' as const, issue: 'one' },
+        { id: 'initial-bbbbbbbbbbbb', source: 'initial-review' as const, issue: 'two' },
+      ],
+      undefined,
+    );
+    const overlapping = prior[1];
+    if (!overlapping) throw new Error('expected second raw entry');
+    overlapping.currentSourceIds = [source];
+    const next = reconcileReviewLedger(
+      { ...batch([]), ledger: prior },
+      [{ finding: finding('canonical'), sourceIds: [source, 'canonical'] }],
+      undefined,
+    );
+    expect(next).toHaveLength(3);
+  });
+
+  it('stores durable fixed proof and clears it when the finding regresses', () => {
+    const prior = reconcileReviewLedger(undefined, [finding('A')], undefined);
+    const fixed = reconcileReviewLedger(
+      { ...batch([]), ledger: prior },
+      [],
+      {
+        status: 'completed',
+        decisions: [
+          { semanticId: semantic('A'), fixed: true, evidence: '+ exact frozen repair evidence' },
+        ],
+      },
+      { reviewedHead: 'abc1234', repairDiffHash: 'repairhash' },
+    );
+    expect(fixed[0]?.resolution).toEqual({
+      reviewedHead: 'abc1234',
+      repairDiffHash: 'repairhash',
+      evidence: '+ exact frozen repair evidence',
+    });
+    const regressed = reconcileReviewLedger(
+      { ...batch([]), ledger: fixed },
+      [finding('A')],
+      undefined,
+    );
+    expect(regressed[0]).toMatchObject({ state: 'regressed' });
+    expect(regressed[0]?.resolution).toBeUndefined();
+  });
   it('fails closed for absent closure evidence and seeds historical packets open', () => {
     const prior = batch([finding('A')]);
     const reconciled = reconcileReviewLedger(prior, [], undefined);

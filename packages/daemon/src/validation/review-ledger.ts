@@ -58,6 +58,17 @@ function boundedLedgerEntry(entry: ReviewFindingLedgerEntry): ReviewFindingLedge
     ...(entry.closureEvidence
       ? { closureEvidence: boundedField(entry.closureEvidence, 8_000) }
       : {}),
+    ...(entry.resolution
+      ? {
+          resolution: {
+            reviewedHead: boundedField(entry.resolution.reviewedHead, 256),
+            ...(entry.resolution.repairDiffHash
+              ? { repairDiffHash: boundedField(entry.resolution.repairDiffHash, 256) }
+              : {}),
+            evidence: boundedField(entry.resolution.evidence, 8_000),
+          },
+        }
+      : {}),
   };
 }
 
@@ -148,6 +159,17 @@ function sourceIds(finding: ReviewFindingCandidate): string[] {
   return [boundedIdentifier(finding.id)];
 }
 
+export interface ReviewLedgerInput {
+  finding: ReviewFindingCandidate;
+  /** Complete canonical provenance, including merged first-gate source IDs. */
+  sourceIds: string[];
+}
+
+export interface ReviewResolutionContext {
+  reviewedHead: string;
+  repairDiffHash?: string;
+}
+
 function semanticId(finding: ReviewFindingCandidate): string {
   return boundedIdentifier('source' in finding ? finding.id : structuredFindingId(finding));
 }
@@ -185,16 +207,19 @@ export function activeLedgerEntries(
  */
 export function reconcileReviewLedger(
   priorBatch: ReviewBatchResult | undefined,
-  current: ReviewFindingCandidate[],
+  current: Array<ReviewFindingCandidate | ReviewLedgerInput>,
   closure: ReviewClosureVerification | undefined,
+  resolutionContext?: ReviewResolutionContext,
 ): ReviewFindingLedgerEntry[] {
   const prior = seedReviewLedger(priorBatch);
   const currentById = new Map<string, { finding: ReviewFindingCandidate; sourceIds: string[] }>();
-  for (const finding of current) {
+  for (const input of current) {
+    const finding = 'finding' in input ? input.finding : input;
     const id = semanticId(finding);
     const existing = currentById.get(id);
-    if (existing) existing.sourceIds.push(finding.id);
-    else currentById.set(id, { finding, sourceIds: sourceIds(finding) });
+    const inputSourceIds = 'finding' in input ? input.sourceIds : sourceIds(finding);
+    if (existing) existing.sourceIds.push(...inputSourceIds);
+    else currentById.set(id, { finding, sourceIds: inputSourceIds });
   }
   const decisions = new Map(
     closure?.status === 'completed'
@@ -202,11 +227,29 @@ export function reconcileReviewLedger(
       : [],
   );
   const out: ReviewFindingLedgerEntry[] = [];
+  const migrateByProvenance = (now: { sourceIds: string[] }):
+    | ReviewFindingLedgerEntry
+    | undefined => {
+    const matches = prior.filter((entry) => {
+      const known = new Set([...entry.priorSourceIds, ...entry.currentSourceIds]);
+      return now.sourceIds.some((id) => known.has(id));
+    });
+    // A shared source can only migrate a single lifecycle entry. Ambiguity is
+    // deliberately left as separate active records rather than guessed.
+    return matches.length === 1 ? matches[0] : undefined;
+  };
+  const migratedPriorIds = new Set(
+    [...currentById.values()]
+      .map(migrateByProvenance)
+      .filter((entry): entry is ReviewFindingLedgerEntry => entry !== undefined)
+      .map((entry) => entry.semanticId),
+  );
   for (const entry of prior) {
     const now = currentById.get(entry.semanticId);
     if (now) {
+      const { resolution: _resolution, closureEvidence: _closureEvidence, ...activeEntry } = entry;
       out.push({
-        ...entry,
+        ...activeEntry,
         finding: now.finding,
         state: entry.state === 'fixed' ? 'regressed' : 'open',
         priorSourceIds: entry.currentSourceIds,
@@ -215,6 +258,7 @@ export function reconcileReviewLedger(
       currentById.delete(entry.semanticId);
       continue;
     }
+    if (migratedPriorIds.has(entry.semanticId)) continue;
     if (entry.state === 'fixed') {
       out.push(entry);
       continue;
@@ -226,10 +270,46 @@ export function reconcileReviewLedger(
       state: fixed ? 'fixed' : 'open',
       priorSourceIds: entry.currentSourceIds,
       currentSourceIds: [],
-      ...(fixed ? { closureEvidence: decision.evidence?.slice(0, 8_000) } : {}),
+      ...(fixed
+        ? {
+            closureEvidence: decision.evidence?.slice(0, 8_000),
+            ...(resolutionContext
+              ? {
+                  resolution: {
+                    reviewedHead: resolutionContext.reviewedHead,
+                    ...(resolutionContext.repairDiffHash
+                      ? { repairDiffHash: resolutionContext.repairDiffHash }
+                      : {}),
+                    evidence: decision.evidence?.slice(0, 8_000) ?? '',
+                  },
+                }
+              : {}),
+          }
+        : {}),
     });
   }
   for (const [id, currentFinding] of currentById) {
+    const migrated = migrateByProvenance(currentFinding);
+    if (migrated) {
+      // The prior entry has already been emitted only when it had an exact
+      // semantic match. A provenance migration replaces that raw identity.
+      const {
+        resolution: _resolution,
+        closureEvidence: _closureEvidence,
+        ...activeEntry
+      } = migrated;
+      out.push({
+        ...activeEntry,
+        semanticId: id,
+        finding: currentFinding.finding,
+        state: migrated.state === 'fixed' ? 'regressed' : 'open',
+        priorSourceIds: [
+          ...new Set([...migrated.priorSourceIds, ...migrated.currentSourceIds]),
+        ].sort(),
+        currentSourceIds: [...new Set(currentFinding.sourceIds)].sort(),
+      });
+      continue;
+    }
     out.push({
       semanticId: id,
       finding: currentFinding.finding,

@@ -13,8 +13,10 @@ import { filterOutOfDiffFindings } from './review-finding-filter.js';
 import {
   REVIEW_VALIDATION_CODE,
   ReviewStructuredOutputError,
+  type ReviewerOutputContract,
   parseAxisResponse,
   reviewAxisOutputContract,
+  reviewSynthesisOutputContract,
 } from './review-structured-output.js';
 import { parseSynthesis, reviewSynthesisPrompt } from './review-synthesizer.js';
 
@@ -48,12 +50,13 @@ export interface ReviewBatchRunnerOptions {
     prompt: string,
     label: string,
     timeoutMs: number,
-    outputContract?: typeof reviewAxisOutputContract,
+    outputContract?: ReviewerOutputContract,
   ) => Promise<{ stdout: string; tokenUsage?: TaskReviewResult['tokenUsage'] }>;
   synthesize?: (
     prompt: string,
     label: string,
     timeoutMs: number,
+    outputContract?: ReviewerOutputContract,
   ) => Promise<{ stdout: string; tokenUsage?: TaskReviewResult['tokenUsage'] }>;
   /** One wall-clock budget for axes, retries, and synthesis. */
   timeoutMs?: number;
@@ -223,6 +226,8 @@ export async function runReviewBatch(
             timeoutMs,
             reviewAxisOutputContract,
           );
+          if (options.readHead && (await options.readHead()) !== options.packet.reviewedHead)
+            throw new Error('reviewed HEAD changed during frozen batch');
           tokenUsage.push(result.tokenUsage);
           candidates.push(...parseCandidates(result.stdout, axis, options.packet.diff));
           runs.push({
@@ -268,29 +273,63 @@ export async function runReviewBatch(
   const allCandidates = dedupe([...options.packet.initialFindings, ...accepted]);
   let synthesis: ReviewBatchResult['synthesis'] = 'deterministic-fallback';
   let synthesized = {
-    accepted: allCandidates,
+    accepted: accepted,
     rejected: [] as ReviewBatchResult['rejected'],
     merged: [] as ReviewBatchResult['merged'],
   };
   // A missing required axis is infrastructure failure, not an input for a
   // potentially reassuring synthesis verdict. Five 300s axes with retries can
   // otherwise stretch a nominal 300s review into roughly 20 minutes.
+  let synthesisInvalid = false;
+  let synthesisHeadChanged = false;
   if (options.synthesize && !runs.some((run) => run.status === 'unavailable') && remaining() > 0) {
-    try {
-      const prompt = reviewSynthesisPrompt(allCandidates);
-      if (prompt.length > 1_000_000) throw new Error('synthesis prompt exceeds bounded input');
-      const result = await options.synthesize(
-        prompt,
-        `${options.packet.id}-synthesis`,
-        remaining(),
-      );
-      tokenUsage.push(result.tokenUsage);
-      synthesized = parseSynthesis(result.stdout.slice(0, 1_000_000), allCandidates);
-      synthesis = 'model';
-    } catch {
-      synthesis = 'deterministic-fallback';
-    }
+    const basePrompt = reviewSynthesisPrompt(allCandidates);
+    if (basePrompt.length <= 1_000_000) {
+      for (let attempt = 1; attempt <= 2; attempt++) {
+        try {
+          if (options.readHead && (await options.readHead()) !== options.packet.reviewedHead)
+            throw new Error('reviewed HEAD changed during frozen batch');
+          const result = await options.synthesize(
+            `${basePrompt}${attempt === 2 ? '\nCorrection required: return only a response satisfying validation code REVIEW_SYNTHESIS_RESPONSE_INVALID.' : ''}`,
+            `${options.packet.id}-synthesis-${attempt}`,
+            remaining(),
+            reviewSynthesisOutputContract,
+          );
+          if (options.readHead && (await options.readHead()) !== options.packet.reviewedHead)
+            throw new Error('reviewed HEAD changed during frozen batch');
+          tokenUsage.push(result.tokenUsage);
+          synthesized = parseSynthesis(result.stdout.slice(0, 1_000_000), allCandidates);
+          synthesis = 'model';
+          break;
+        } catch (error) {
+          synthesisHeadChanged ||= /reviewed HEAD changed/i.test(
+            error instanceof Error ? error.message : String(error),
+          );
+          synthesisInvalid ||= !synthesisHeadChanged;
+          if (synthesisHeadChanged) break;
+        }
+      }
+    } else synthesisInvalid = true;
   }
+  const canonicalAccepted = dedupe(
+    synthesized.accepted.filter((finding) => !('source' in finding)),
+  );
+  const canonicalInitialIds = new Set(
+    synthesized.merged.flatMap((merge) =>
+      merge.sourceIds.filter((id) =>
+        options.packet.initialFindings.some((finding) => finding.id === id),
+      ),
+    ),
+  );
+  const degradationReasons: string[] = [];
+  if (runs.some((run) => run.status === 'unavailable'))
+    degradationReasons.push('REQUIRED_AXIS_UNAVAILABLE');
+  if (synthesis !== 'model')
+    degradationReasons.push(synthesisInvalid ? 'SYNTHESIS_INVALID' : 'SYNTHESIS_UNAVAILABLE');
+  if (synthesisHeadChanged) degradationReasons.push('REVIEWED_HEAD_CHANGED');
+  if (options.packet.initialFindings.some((finding) => !canonicalInitialIds.has(finding.id)))
+    degradationReasons.push('INITIAL_FINDING_UNMATCHED');
+  const quality = degradationReasons.length === 0 ? 'healthy' : 'degraded';
   return {
     id: options.packet.id,
     diffHash: options.packet.diffHash,
@@ -301,12 +340,14 @@ export async function runReviewBatch(
     axes: runs.sort((a, b) => REVIEW_AXES.indexOf(a.axis) - REVIEW_AXES.indexOf(b.axis)),
     candidates: allCandidates,
     initialFindings: options.packet.initialFindings,
-    accepted: dedupe(synthesized.accepted),
+    accepted: canonicalAccepted,
     rejected: synthesized.rejected,
     merged: synthesized.merged,
     synthesis,
     durationMs: Date.now() - started,
     infrastructureUnavailable: runs.some((r) => r.status === 'unavailable'),
+    quality,
+    ...(degradationReasons.length ? { degradationReasons } : {}),
     tokenUsage: usage(tokenUsage),
   };
 }

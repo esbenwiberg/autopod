@@ -24,7 +24,7 @@ export const axisResponseSchema = z
   .strict();
 
 export interface ReviewerOutputContract {
-  name: 'review-axis-v1';
+  name: string;
   jsonSchema: string;
 }
 
@@ -58,6 +58,33 @@ export const reviewAxisOutputContract: ReviewerOutputContract = {
   }),
 };
 
+/** Provider-native guard for synthesis; local source-backed validation remains authoritative. */
+export const reviewSynthesisOutputContract: ReviewerOutputContract = {
+  name: 'review-synthesis-v1',
+  jsonSchema: JSON.stringify({
+    type: 'object',
+    additionalProperties: false,
+    required: ['decisions'],
+    properties: {
+      decisions: {
+        type: 'array',
+        maxItems: 600,
+        items: {
+          type: 'object',
+          additionalProperties: false,
+          required: ['action', 'sourceIds'],
+          properties: {
+            action: { type: 'string', enum: ['accept', 'reject', 'merge'] },
+            sourceIds: { type: 'array', minItems: 1, maxItems: 101, items: { type: 'string' } },
+            reason: { type: 'string', minLength: 1, maxLength: 4000 },
+            finding: { type: 'object' },
+          },
+        },
+      },
+    },
+  }),
+};
+
 export class ReviewStructuredOutputError extends Error {
   readonly code = REVIEW_VALIDATION_CODE;
   constructor() {
@@ -67,6 +94,13 @@ export class ReviewStructuredOutputError extends Error {
 }
 
 export function parseAxisResponse(stdout: string, axis: ReviewAxis): StructuredReviewFinding[] {
+  const parsed = axisResponseSchema.safeParse(parseReviewStructuredJson(stdout));
+  if (!parsed.success) throw new ReviewStructuredOutputError();
+  return parsed.data.findings.map((finding) => ({ ...finding, axis, id: '' }));
+}
+
+/** Shared transport-only parser for every frozen review protocol response. */
+export function parseReviewStructuredJson(stdout: string): unknown {
   if (Buffer.byteLength(stdout, 'utf8') > MAX_REVIEW_RESPONSE_BYTES)
     throw new ReviewStructuredOutputError();
   let value: unknown;
@@ -75,9 +109,7 @@ export function parseAxisResponse(stdout: string, axis: ReviewAxis): StructuredR
   } catch {
     throw new ReviewStructuredOutputError();
   }
-  const parsed = axisResponseSchema.safeParse(unwrapEnvelope(value));
-  if (!parsed.success) throw new ReviewStructuredOutputError();
-  return parsed.data.findings.map((finding) => ({ ...finding, axis, id: '' }));
+  return unwrapEnvelope(value);
 }
 
 function unwrapJson(input: string): string {
