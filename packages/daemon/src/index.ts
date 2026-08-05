@@ -132,7 +132,7 @@ function resolveMcpBaseUrl(): string {
 
 function parsePositiveInterval(value: string | undefined, fallback: number): number {
   if (!value) return fallback;
-  const parsed = Number.parseInt(value, 10);
+  const parsed = Number(value);
   if (Number.isFinite(parsed) && parsed >= 1_000 && parsed <= 24 * 60 * 60 * 1000) {
     return parsed;
   }
