@@ -63,6 +63,7 @@ CODEX_CLI_NPM_PACKAGE="${CODEX_CLI_NPM_PACKAGE:-@openai/codex}"
 # Any non-terminal pod can retain work or await an operator decision. Never restart
 # the daemon around one unless the operator explicitly passes --force.
 NONTERMINAL="queued provisioning running awaiting_input paused validating validated review_required approved merging merge_pending killing"
+NONTERMINAL_QUERY="${NONTERMINAL// /,}"
 
 # ---- args -----------------------------------------------------------------
 TARGET_REF=""
@@ -186,7 +187,7 @@ TOKEN="$(ap token 2>/dev/null || true)"
 DAEMON="$(grep -E '^daemon:' "$HOME/.autopod/config.yaml" | awk '{print $2}')"
 DRAIN_RESPONSE=""
 if [ -n "$TOKEN" ] && [ -n "$DAEMON" ]; then
-  ACTIVE="$(curl -sS --max-time 10 "$DAEMON/pods" -H "Authorization: Bearer $TOKEN" 2>/dev/null \
+  ACTIVE="$(curl -sS --max-time 10 "$DAEMON/pods?status=$NONTERMINAL_QUERY&compact=true" -H "Authorization: Bearer $TOKEN" 2>/dev/null \
     | NONTERMINAL="$NONTERMINAL" python3 -c '
 import sys, json, os
 nt = set(os.environ["NONTERMINAL"].split())
@@ -245,7 +246,7 @@ if echo "$DRAIN_RESPONSE" | grep -q '"expiresAt"'; then
   trap release_hosted_deploy_drain EXIT
   note "hosted deployment drain active"
 
-  ACTIVE_AFTER_DRAIN="$(curl -sS --max-time 10 "$DAEMON/pods" -H "Authorization: Bearer $TOKEN" 2>/dev/null \
+  ACTIVE_AFTER_DRAIN="$(curl -sS --max-time 10 "$DAEMON/pods?status=$NONTERMINAL_QUERY&compact=true" -H "Authorization: Bearer $TOKEN" 2>/dev/null \
     | NONTERMINAL="$NONTERMINAL" python3 -c '
 import sys, json, os
 nt = set(os.environ["NONTERMINAL"].split())
