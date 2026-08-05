@@ -175,6 +175,15 @@ import Testing
   #expect(council.findings.map(\.claim) == ["canonical"])
 }
 
+@Test func degradedCouncilDoesNotRestoreFixedFirstGateFinding() throws {
+  let data = """
+  {"id":"p","diffHash":"d","reviewedHead":"h","promptVersion":"p","schemaVersion":"s","model":"m","axes":[],"candidates":[],"initialFindings":[{"id":"initial","source":"initial-review","issue":"fixed raw blocker"}],"accepted":[],"rejected":[],"merged":[],"synthesis":"model","durationMs":1,"quality":"degraded","ledger":[{"semanticId":"review:fixed","finding":{"id":"structured","axis":"security_authority","severity":"HIGH","path":"a.swift","claim":"repaired","evidence":"proof","remediation":"fix","confidence":1},"state":"fixed","priorSourceIds":["initial"],"currentSourceIds":[]}]}
+  """.data(using: .utf8)!
+  let council = ReviewCouncil(try JSONDecoder().decode(ReviewBatchResponse.self, from: data))
+  #expect(council.fallbackFindings.isEmpty)
+  #expect(council.activeCount == 0)
+}
+
 @Test func overflowKeepsRetainedFindingDismissalAndTopLevelWins() throws {
   let data = """
   {"status":"fail","reasoning":"x","issues":[],"model":"m","screenshots":[],"diff":"","firstGateOverflow":{"reportedCount":8,"retainedFindingCount":3},"reviewBatch":{"id":"p","diffHash":"d","reviewedHead":"h","promptVersion":"p","schemaVersion":"s","model":"m","axes":[],"candidates":[],"initialFindings":[],"accepted":[],"rejected":[],"merged":[],"synthesis":"model","durationMs":1}}
