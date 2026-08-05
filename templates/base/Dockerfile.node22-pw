@@ -10,11 +10,26 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     iptables haproxy socat \
     sqlite3 \
     ripgrep \
-    tmux \
-    python3 build-essential \
+    python3 build-essential bison libevent-dev libncurses-dev pkg-config \
     && sed -i '/en_US.UTF-8/s/^# //g' /etc/locale.gen \
     && locale-gen \
     && rm -rf /var/lib/apt/lists/*
+
+# Pilot exercises client-key injection added in tmux 3.7. Debian's unpinned
+# package is older, so build the exact upstream release and verify its archive
+# and installed version instead of silently accepting the distro toolchain.
+ARG TMUX_VERSION=3.7
+ARG TMUX_SHA256=2344f191501b8a73eb71dd6c5fd5dcf8c765f5066f34ab46f04b3013dc7bc1a5
+RUN set -eux; \
+    curl -fsSL "https://github.com/tmux/tmux/releases/download/${TMUX_VERSION}/tmux-${TMUX_VERSION}.tar.gz" -o /tmp/tmux.tar.gz; \
+    echo "${TMUX_SHA256}  /tmp/tmux.tar.gz" | sha256sum -c -; \
+    tar -xzf /tmp/tmux.tar.gz -C /tmp; \
+    cd "/tmp/tmux-${TMUX_VERSION}"; \
+    ./configure --prefix=/usr/local; \
+    make -j"$(nproc)"; \
+    make install; \
+    tmux -V | grep -Fx "tmux ${TMUX_VERSION}"; \
+    rm -rf /tmp/tmux.tar.gz "/tmp/tmux-${TMUX_VERSION}"
 
 # Glow — terminal markdown viewer from Charm
 RUN mkdir -p /etc/apt/keyrings \
