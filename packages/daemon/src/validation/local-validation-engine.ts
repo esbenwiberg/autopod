@@ -364,7 +364,7 @@ export function createLocalValidationEngine(
         // See `resetWorktreeToHead` for the full failure-mode rationale.
         checkAbort();
         try {
-          await resetWorktreeToHead(containerManager, config, log);
+          if (!config.reviewOnly) await resetWorktreeToHead(containerManager, config, log);
         } catch (err) {
           const resetInfrastructureFailure = classifyValidationInfrastructureFailure('setup', err);
           if (!resetInfrastructureFailure) throw err;
@@ -616,13 +616,14 @@ export function createLocalValidationEngine(
         // 'skip' counts as pass (legit skips: no test command, no smoke pages,
         // no web UI, profile-level skipPhases).
         const tier1Pass =
-          !infrastructureFailure &&
-          lintResult.status !== 'fail' &&
-          sastResult.status !== 'fail' &&
-          buildResult.status === 'pass' &&
-          testResult.status !== 'fail' &&
-          healthResult.status !== 'fail' &&
-          pagesStatus !== 'fail';
+          config.reviewOnly ||
+          (!infrastructureFailure &&
+            lintResult.status !== 'fail' &&
+            sastResult.status !== 'fail' &&
+            buildResult.status === 'pass' &&
+            testResult.status !== 'fail' &&
+            healthResult.status !== 'fail' &&
+            pagesStatus !== 'fail');
 
         // ── Phase 7: Required Facts ────────────────────────────────────
         // Contract facts are the post-merge survival layer: concrete artifacts
@@ -772,11 +773,29 @@ export function createLocalValidationEngine(
               promptVersion: 'review-council-v1',
               schemaVersion: 'structured-finding-v2',
             });
+            const councilDeadline = Date.now() + (config.reviewTimeout ?? 300_000);
             const batch = await runReviewBatch({
               packet,
               model: config.reviewerModel ?? 'auto',
               readHead: () => readReviewHead(config.worktreePath, reviewedHead),
-              execute: async (prompt) =>
+              timeoutMs: config.reviewTimeout ?? 300_000,
+              onProgress: ({ axis, attempt, status, elapsedMs }) => {
+                const elapsedSeconds = Math.ceil(elapsedMs / 1_000);
+                if (status === 'started') {
+                  onProgress?.(
+                    `Frozen review council: ${axis} attempt ${attempt} started (${elapsedSeconds}s elapsed)`,
+                  );
+                } else {
+                  onProgress?.(
+                    `Frozen review council: ${axis} attempt ${attempt} ${status} (${elapsedSeconds}s elapsed)`,
+                  );
+                }
+                log?.info(
+                  { podId: config.podId, axis, attempt, status, elapsedMs },
+                  'Frozen review council progress',
+                );
+              },
+              execute: async (prompt, _label, timeoutMs) =>
                 runContainerReviewer({
                   podId: config.podId,
                   containerId: config.containerId,
@@ -788,10 +807,10 @@ export function createLocalValidationEngine(
                   model: config.reviewerModel ?? 'auto',
                   prompt,
                   ...(config.reviewerExecEnv ? { env: config.reviewerExecEnv } : {}),
-                  timeout: config.reviewTimeout ?? 300_000,
+                  timeout: timeoutMs,
                   logger: log,
                 }),
-              synthesize: async (prompt) =>
+              synthesize: async (prompt, _label, timeoutMs) =>
                 runContainerReviewer({
                   podId: config.podId,
                   containerId: config.containerId,
@@ -803,7 +822,7 @@ export function createLocalValidationEngine(
                   model: config.reviewerModel ?? 'auto',
                   prompt,
                   ...(config.reviewerExecEnv ? { env: config.reviewerExecEnv } : {}),
-                  timeout: config.reviewTimeout ?? 300_000,
+                  timeout: timeoutMs,
                   logger: log,
                 }),
             });
@@ -814,7 +833,7 @@ export function createLocalValidationEngine(
             );
             let closure = undefined;
             let closureTokenUsage: TaskReviewResult['tokenUsage'];
-            if (priorActive.length > 0) {
+            if (priorActive.length > 0 && !batch.infrastructureUnavailable) {
               if (repair.status !== 'available') {
                 closure = { status: 'unavailable' as const, decisions: [], reason: repair.reason };
               } else {
@@ -822,6 +841,12 @@ export function createLocalValidationEngine(
                   const decisions = [];
                   const frozenClosureDelta = boundedClosureRepairDelta(repair.diff ?? frozenDiff);
                   for (const chunk of closureVerificationChunks(priorActive)) {
+                    const closureTimeout = councilDeadline - Date.now();
+                    if (closureTimeout <= 0) {
+                      throw new Error(
+                        'frozen review council deadline exceeded before closure verification',
+                      );
+                    }
                     const response = await runContainerReviewer({
                       podId: config.podId,
                       containerId: config.containerId,
@@ -833,7 +858,9 @@ export function createLocalValidationEngine(
                       model: config.reviewerModel ?? 'auto',
                       prompt: closurePrompt(chunk, frozenClosureDelta),
                       ...(config.reviewerExecEnv ? { env: config.reviewerExecEnv } : {}),
-                      timeout: config.reviewTimeout ?? 300_000,
+                      // The council deadline covers closure verification too;
+                      // container timeout termination happens before retrying.
+                      timeout: closureTimeout,
                       logger: log,
                     });
                     closureTokenUsage = combineReviewTokenUsage(
@@ -863,6 +890,13 @@ export function createLocalValidationEngine(
                         : 'closure reviewer unavailable',
                   };
                 }
+              }
+              if (priorActive.length > 0 && batch.infrastructureUnavailable) {
+                closure = {
+                  status: 'unavailable' as const,
+                  decisions: [],
+                  reason: 'Skipped because a required frozen review axis was unavailable',
+                };
               }
             }
             // First-gate findings remain blocking even if the synthesizer rejects
@@ -3598,6 +3632,7 @@ async function runTaskReview(
 function isReviewInfrastructureFailure(
   reviewRun: Awaited<ReturnType<typeof runTaskReview>>,
 ): boolean {
+  if (reviewRun.result?.reviewBatch?.infrastructureUnavailable) return true;
   if (reviewRun.result !== null || !reviewRun.skipReason) return false;
   return (
     reviewRun.skipReason.startsWith('Review timed out:') ||
