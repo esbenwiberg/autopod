@@ -168,6 +168,7 @@ export class SandboxContainerManager implements ContainerManager {
       tier,
       egressPolicy,
       env: config.env,
+      podId: config.podId,
     });
     this.egressPolicies.set(sandboxId, egressPolicy);
 

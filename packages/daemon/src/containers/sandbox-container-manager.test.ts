@@ -393,6 +393,7 @@ describe('SandboxContainerManager', () => {
       expect(client.created).toHaveLength(1);
       expect(client.created[0]?.image).toBe('ewiacr.azurecr.io/autopod-node22:latest');
       expect(client.created[0]?.env).toEqual({});
+      expect(client.created[0]?.podId).toBe('pod-1');
     });
 
     it('rejects local-only warm image tags before calling Azure', async () => {

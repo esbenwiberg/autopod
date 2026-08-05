@@ -2957,24 +2957,30 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
     const cm = containerManagerFactory.get(pod.executionTarget);
     const op = mode === 'kill' ? cm.kill(pod.containerId) : cm.stop(pod.containerId);
     let timer: ReturnType<typeof setTimeout> | undefined;
-    await Promise.race([
+    const deleted = await Promise.race([
       op
-        .catch((err) =>
-          logger.warn({ err, podId: pod.id, label, mode }, `${label}: container ${mode} failed`),
-        )
+        .then(() => true)
+        .catch((err) => {
+          logger.warn({ err, podId: pod.id, label, mode }, `${label}: container ${mode} failed`);
+          return false;
+        })
         .finally(() => {
           if (timer) clearTimeout(timer);
         }),
-      new Promise<void>((resolve) => {
+      new Promise<boolean>((resolve) => {
         timer = setTimeout(() => {
           logger.warn(
             { podId: pod.id, label, mode, timeoutMs: CONTAINER_CLEANUP_TIMEOUT_MS },
             `${label}: container ${mode} timed out — proceeding without waiting`,
           );
-          resolve();
+          resolve(false);
         }, CONTAINER_CLEANUP_TIMEOUT_MS);
       }),
     ]);
+    if (mode === 'kill' && deleted && pod.executionTarget === 'sandbox') {
+      const current = podRepo.getOrThrow(pod.id);
+      if (current.containerId === pod.containerId) podRepo.update(pod.id, { containerId: null });
+    }
     if (mode === 'kill') {
       forgetMaxCredentialLineage(pod.id);
     }
@@ -4838,6 +4844,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
     if (pod.executionTarget !== 'sandbox' || !pod.containerId || !pod.worktreePath) return;
     try {
       await preservePodWorkspace(pod, reason);
+      await cleanupContainer(pod, 'agent-failure-preserved');
     } catch (preserveErr) {
       emitActivityStatus(
         podId,

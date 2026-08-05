@@ -1028,7 +1028,7 @@ export class AzureSandboxApiClient implements SandboxApiClient {
           },
           environment: options.env ?? {},
           egressPolicy: toWireEgressPolicy(options.egressPolicy),
-          labels: { purpose: 'autopod-sandbox' },
+          labels: { purpose: 'autopod-sandbox', managedBy: 'autopod', podId: options.podId },
         },
         timeoutMs: CREATE_REQUEST_TIMEOUT_MS,
       },
