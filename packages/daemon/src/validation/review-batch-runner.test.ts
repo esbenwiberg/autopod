@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
 import { structuredFindingSourceId } from './finding-fingerprint.js';
 import { createFrozenReviewPacket, runReviewBatch } from './review-batch-runner.js';
+import { CodexReviewError } from './review-codex-runner.js';
 
 const packet = () =>
   createFrozenReviewPacket({
@@ -203,6 +204,50 @@ describe('runReviewBatch', () => {
         code: 'REVIEW_RUNNER_TERMINATION_UNCONFIRMED',
         retryable: false,
       },
+    });
+  });
+
+  it('does not retry provider schema rejection', async () => {
+    let calls = 0;
+    const batch = await runReviewBatch({
+      packet: packet(),
+      model: 'test',
+      execute: async (_prompt, label) => {
+        if (!label.includes('contract_completeness')) return { stdout: response };
+        calls++;
+        throw new CodexReviewError({
+          kind: 'schema-invalid',
+          message: 'codex review rejected the configured output schema',
+          stderr: 'invalid_json_schema',
+        });
+      },
+    });
+    expect(calls).toBe(1);
+    expect(batch.axes[0]).toMatchObject({
+      status: 'unavailable',
+      attempts: 1,
+      error: 'Reviewer output schema is invalid for the configured provider',
+      failure: {
+        code: 'REVIEW_SCHEMA_INVALID',
+        retryable: false,
+      },
+    });
+  });
+
+  it('uses typed runner failures before message fallback', async () => {
+    const batch = await runReviewBatch({
+      packet: packet(),
+      model: 'test',
+      execute: async () => {
+        throw new CodexReviewError({
+          kind: 'non-zero-exit',
+          message: 'codex review failed: timeout word from provider output',
+        });
+      },
+    });
+    expect(batch.axes[0]?.failure).toMatchObject({
+      kind: 'runner-failed',
+      code: 'REVIEW_RUNNER_FAILED',
     });
   });
 

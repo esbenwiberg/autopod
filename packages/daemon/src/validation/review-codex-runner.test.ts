@@ -7,6 +7,7 @@ import type {
   StreamingExecResult,
 } from '../interfaces/container-manager.js';
 import { runCodexReview } from './review-codex-runner.js';
+import { reviewAxisOutputContract } from './review-structured-output.js';
 
 interface CapturedExec {
   command: string[];
@@ -80,10 +81,11 @@ describe('runCodexReview', () => {
       model: 'auto',
       prompt: 'review',
       timeout: 1234,
-      outputContract: { name: 'review-axis-v1', jsonSchema: '{"type":"object"}' },
+      outputContract: reviewAxisOutputContract,
     });
     expect(harness.writes).toHaveLength(2);
     expect(harness.writes[1]?.path).toContain('.schema.json');
+    expect(harness.writes[1]?.content).toBe(reviewAxisOutputContract.jsonSchema);
     expect(harness.execs[0]?.command[2]).toContain('--output-schema');
   });
 

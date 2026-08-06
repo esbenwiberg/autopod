@@ -3,6 +3,8 @@ import {
   MAX_REVIEW_RESPONSE_BYTES,
   ReviewStructuredOutputError,
   parseAxisResponse,
+  reviewAxisOutputContract,
+  reviewSynthesisOutputContract,
 } from './review-structured-output.js';
 
 const finding = {
@@ -52,5 +54,36 @@ describe('parseAxisResponse', () => {
     expect(() => parse(`model preface ${JSON.stringify({ findings: [finding] })}`)).toThrow(
       ReviewStructuredOutputError,
     );
+  });
+
+  it('normalizes only nullable optional finding fields', () => {
+    expect(parse({ findings: [{ ...finding, line: null, symbol: null }] })).toEqual([
+      { ...finding, line: undefined, symbol: undefined, axis: 'security_authority', id: '' },
+    ]);
+    expect(() => parse({ findings: [{ ...finding, line: null, symbol: 4 }] })).toThrow(
+      ReviewStructuredOutputError,
+    );
+    expect(() => parse({ findings: [{ ...finding, line: '4' }] })).toThrow(
+      ReviewStructuredOutputError,
+    );
+  });
+
+  it('uses strict provider schemas with every declared property required', () => {
+    const assertStrictObjects = (value: unknown) => {
+      if (!value || typeof value !== 'object') return;
+      const schema = value as Record<string, unknown>;
+      if (schema.properties && typeof schema.properties === 'object') {
+        expect(schema.additionalProperties).toBe(false);
+        expect(new Set(schema.required as string[])).toEqual(
+          new Set(Object.keys(schema.properties as Record<string, unknown>)),
+        );
+      }
+      for (const child of Object.values(schema)) {
+        if (Array.isArray(child)) child.forEach(assertStrictObjects);
+        else assertStrictObjects(child);
+      }
+    };
+    assertStrictObjects(JSON.parse(reviewAxisOutputContract.jsonSchema));
+    assertStrictObjects(JSON.parse(reviewSynthesisOutputContract.jsonSchema));
   });
 });

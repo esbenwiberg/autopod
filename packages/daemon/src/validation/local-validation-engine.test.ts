@@ -1138,6 +1138,70 @@ describe('validate() — hasWebUi gating', () => {
     expect(result.taskReview?.tokenUsage).toMatchObject({ inputTokens: 170, outputTokens: 34 });
   });
 
+  it('completes provider-neutral five-axis council and synthesis', async () => {
+    vi.mocked(runClaudeCli).mockResolvedValue({
+      stdout: JSON.stringify({ status: 'fail', reasoning: 'blocked', issues: ['real blocker'] }),
+    });
+    vi.mocked(runContainerReviewer).mockImplementation(async ({ prompt }) => {
+      if (prompt.includes('contract_completeness reviewer'))
+        return {
+          stdout: JSON.stringify({
+            findings: [
+              {
+                severity: 'HIGH',
+                path: 'a.ts',
+                line: null,
+                symbol: null,
+                claim: 'missing authorization',
+                evidence: 'route changed without a guard',
+                remediation: 'add a guard',
+                confidence: 0.9,
+              },
+            ],
+          }),
+          tokenUsage: { inputTokens: 1, outputTokens: 1 },
+        };
+      if (!prompt.includes('synthesizer'))
+        return {
+          stdout: JSON.stringify({ findings: [] }),
+          tokenUsage: { inputTokens: 1, outputTokens: 1 },
+        };
+      const candidates = JSON.parse(prompt.slice(prompt.indexOf('Candidates:\n') + 12));
+      const initial = candidates.find((candidate: { source?: string }) => candidate.source);
+      const structured = candidates.find((candidate: { axis?: string }) => candidate.axis);
+      return {
+        stdout: JSON.stringify({
+          decisions: [
+            {
+              action: 'merge',
+              sourceIds: [initial.id, structured.id],
+              reason: null,
+              finding: { ...structured, line: null, symbol: null },
+            },
+          ],
+        }),
+        tokenUsage: { inputTokens: 1, outputTokens: 1 },
+      };
+    });
+    const result = await createLocalValidationEngine(stubContainerManager()).validate(
+      baseConfig({
+        reviewerModel: 'claude-sonnet-4-6',
+        diff: changedDiff,
+        validationSuite: 'full',
+        startCommand: '',
+        smokePages: [],
+      }),
+    );
+    expect(result.taskReview?.reviewBatch).toMatchObject({
+      synthesis: 'model',
+      quality: 'healthy',
+    });
+    expect(result.taskReview?.reviewBatch?.axes).toHaveLength(5);
+    expect(result.taskReview?.reviewBatch?.axes.every((axis) => axis.status === 'completed')).toBe(
+      true,
+    );
+  });
+
   it('keeps initial semantic IDs stable when aggregate truncation changes stored text', () => {
     const target = `target blocker ${'x'.repeat(200)}`;
     const prefix = [

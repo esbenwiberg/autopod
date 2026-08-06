@@ -72,6 +72,32 @@ describe('parseSynthesis', () => {
     expect(result.accepted).toEqual([a]);
   });
 
+  it('normalizes provider nullable synthesis without weakening provenance', () => {
+    const a = finding('a');
+    const result = parseSynthesis(
+      JSON.stringify({
+        decisions: [
+          {
+            action: 'accept',
+            sourceIds: ['a'],
+            reason: null,
+            finding: { ...a, line: null, symbol: null },
+          },
+        ],
+      }),
+      [a],
+    );
+    expect(result.accepted).toEqual([a]);
+    expect(() =>
+      parseSynthesis(
+        JSON.stringify({
+          decisions: [{ action: 'accept', sourceIds: ['a'], reason: null, finding: null }],
+        }),
+        [a],
+      ),
+    ).toThrow('unsupported accepted finding');
+  });
+
   it('permits initial provenance only through a structured canonical merge', () => {
     const structured = finding('structured');
     const initial: InitialReviewFinding = {

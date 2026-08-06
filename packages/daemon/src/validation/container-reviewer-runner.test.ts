@@ -8,6 +8,7 @@ import {
   runContainerReviewer,
 } from './container-reviewer-runner.js';
 import { runCodexReview } from './review-codex-runner.js';
+import { reviewSynthesisOutputContract } from './review-structured-output.js';
 
 vi.mock('./review-codex-runner.js', () => ({
   runCodexReview: vi.fn(),
@@ -174,11 +175,14 @@ describe('runContainerReviewer', () => {
       model: 'sonnet',
       prompt: 'review',
       timeout: 60_000,
-      outputContract: { name: 'review-axis-v1', jsonSchema: '{"type":"object"}' },
+      outputContract: reviewSynthesisOutputContract,
     });
     expect(cm.writeFile).toHaveBeenCalledTimes(1);
     expect((cm.execStreaming as ReturnType<typeof vi.fn>).mock.calls[0]?.[1][2]).toContain(
       '--json-schema',
+    );
+    expect((cm.execStreaming as ReturnType<typeof vi.fn>).mock.calls[0]?.[1][2]).toContain(
+      reviewSynthesisOutputContract.jsonSchema,
     );
   });
 

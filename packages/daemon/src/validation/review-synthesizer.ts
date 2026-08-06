@@ -5,7 +5,10 @@ import type {
   TaskReviewResult,
 } from '@autopod/shared';
 import { structuredFindingSourceId } from './finding-fingerprint.js';
-import { parseReviewStructuredJson } from './review-structured-output.js';
+import {
+  normalizeProviderNullableFinding,
+  parseReviewStructuredJson,
+} from './review-structured-output.js';
 
 export interface SynthesisDecision {
   action: 'accept' | 'reject' | 'merge';
@@ -91,13 +94,18 @@ export function parseSynthesis(
   const used = new Set<string>();
   for (const raw of (parsed as { decisions: unknown[] }).decisions) {
     if (!raw || typeof raw !== 'object') throw new Error('invalid synthesis decision');
-    const decision = raw as Record<string, unknown>;
+    const rawDecision = raw as Record<string, unknown>;
     if (
-      Object.keys(decision).some(
+      Object.keys(rawDecision).some(
         (key) => !['action', 'sourceIds', 'reason', 'finding'].includes(key),
       )
     )
       throw new Error('invalid synthesis decision');
+    const { reason, finding, ...decision } = rawDecision;
+    if (reason !== null) decision.reason = reason;
+    if (finding !== null)
+      decision.finding =
+        finding === undefined ? undefined : normalizeProviderNullableFinding(finding);
     const sourceIds = Array.isArray(decision.sourceIds) ? decision.sourceIds.map(String) : [];
     if (
       !sourceIds.length ||
