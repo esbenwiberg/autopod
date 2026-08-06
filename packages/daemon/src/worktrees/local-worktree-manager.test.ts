@@ -412,6 +412,43 @@ describe('LocalWorktreeManager', () => {
     });
   });
 
+  describe('classifyCanonicalDiff', () => {
+    it('returns canonical changed stats only after proving the materialized host snapshot', async () => {
+      setupExecFileMock({
+        'rev-parse base123^{commit}': { stdout: 'base123\n' },
+        'rev-parse HEAD^{tree}': { stdout: 'tree123\n' },
+        'rev-parse HEAD': { stdout: 'head123\n' },
+        'diff --stat base123 HEAD': { stdout: ' 1 file changed, 2 insertions(+)' },
+      });
+
+      await expect(
+        manager.classifyCanonicalDiff('/tmp/worktree/sess', 'base123', 'head123', 'tree123'),
+      ).resolves.toEqual({
+        outcome: 'changed',
+        stats: { filesChanged: 1, linesAdded: 2, linesRemoved: 0 },
+        hostHead: 'head123',
+        hostTree: 'tree123',
+      });
+    });
+
+    it('fails closed when the materialized host snapshot does not match the checkpoint', async () => {
+      setupExecFileMock({
+        'rev-parse base123^{commit}': { stdout: 'base123\n' },
+        'rev-parse HEAD^{tree}': { stdout: 'other-tree\n' },
+        'rev-parse HEAD': { stdout: 'other-head\n' },
+      });
+
+      await expect(
+        manager.classifyCanonicalDiff('/tmp/worktree/sess', 'base123', 'head123', 'tree123'),
+      ).resolves.toEqual({
+        outcome: 'unavailable',
+        code: 'HOST_PROOF_MISMATCH',
+        hostHead: 'other-head',
+        hostTree: 'other-tree',
+      });
+    });
+  });
+
   // -------------------------------------------------------------------------
   // getDiff
   // -------------------------------------------------------------------------
