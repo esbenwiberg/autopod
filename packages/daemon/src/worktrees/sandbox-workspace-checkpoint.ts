@@ -52,6 +52,62 @@ async function peelDaemonNoopCheckpoints(bare: string, tip: string): Promise<str
   return current;
 }
 
+async function checkpointLineageBase(
+  bare: string,
+  expected: string,
+  podToken: string,
+): Promise<string> {
+  const noOpBase = await peelDaemonNoopCheckpoints(bare, expected);
+  if (noOpBase !== expected) return noOpBase;
+
+  // A verified periodic checkpoint can contain real uncommitted work. The live
+  // sandbox keeps its own HEAD, so its next snapshot is a sibling of that host
+  // checkpoint rather than a descendant. Supersede only an exact commit already
+  // retained under this pod's host-owned quarantine namespace; lookalike commits
+  // and checkpoints imported for another pod remain divergence barriers.
+  const quarantineRef = (
+    await execFileAsync(
+      'git',
+      [
+        'for-each-ref',
+        '--format=%(refname)',
+        '--points-at',
+        expected,
+        `refs/autopod-quarantine/${podToken}/`,
+      ],
+      { cwd: bare },
+    )
+  ).stdout.trim();
+  if (!quarantineRef) return expected;
+
+  const metadata = (
+    await execFileAsync(
+      'git',
+      ['show', '-s', '--format=%s%x00%an%x00%ae%x00%cn%x00%ce', expected],
+      { cwd: bare },
+    )
+  ).stdout
+    .trim()
+    .split('\0');
+  if (
+    metadata.length !== 5 ||
+    metadata[0] !== CHECKPOINT_SUBJECT ||
+    metadata[1] !== CHECKPOINT_ACTOR ||
+    metadata[2] !== CHECKPOINT_EMAIL ||
+    metadata[3] !== CHECKPOINT_ACTOR ||
+    metadata[4] !== CHECKPOINT_EMAIL
+  ) {
+    return expected;
+  }
+
+  const lineage = (
+    await execFileAsync('git', ['rev-list', '--parents', '-n', '1', expected], { cwd: bare })
+  ).stdout
+    .trim()
+    .split(/\s+/);
+  return lineage.length === 2 && lineage[1] ? lineage[1] : expected;
+}
+
 /** Proof returned by sandbox source delivery.  Do not collapse this to a success boolean. */
 export interface WorkspaceCheckpointResult {
   sequence: number;
@@ -183,11 +239,11 @@ export async function checkpointSandboxWorkspace(
         await execFileAsync('git', ['rev-parse', `refs/heads/${branch}`], { cwd: bare })
       ).stdout.trim();
       // The isolated sandbox normally advances beyond the host branch while the
-      // agent works. A prior capture can leave a daemon-authored, tree-identical
-      // checkpoint as the host tip while the live sandbox advances from its
-      // parent. Peel only that exact no-op identity; arbitrary empty commits and
-      // every content-bearing host commit remain divergence barriers.
-      const expectedLineageBase = await peelDaemonNoopCheckpoints(bare, expected);
+      // agent works. A prior capture can leave a daemon checkpoint as the host
+      // tip while the live sandbox advances independently from its parent. Peel
+      // only a safe no-op or an exact prior quarantine commit for this pod;
+      // arbitrary host commits remain divergence barriers.
+      const expectedLineageBase = await checkpointLineageBase(bare, expected, token);
       const fastForward = await execFileAsync(
         'git',
         ['merge-base', '--is-ancestor', expectedLineageBase, sourceHead],

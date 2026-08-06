@@ -38,7 +38,31 @@ import {
   sandboxEgressRefreshPayload,
 } from './sandbox-container-manager.js';
 
+const archiveRace = vi.hoisted(() => ({ path: null as string | null, failuresRemaining: 0 }));
+
+vi.mock('node:fs', async () => {
+  const actual = await vi.importActual<typeof import('node:fs')>('node:fs');
+  return {
+    ...actual,
+    lstatSync(path: Parameters<typeof actual.lstatSync>[0]) {
+      if (archiveRace.path === String(path) && archiveRace.failuresRemaining > 0) {
+        archiveRace.failuresRemaining--;
+        actual.rmSync(path, { force: true });
+        throw Object.assign(new Error(`ENOENT: no such file or directory, lstat '${path}'`), {
+          code: 'ENOENT',
+        });
+      }
+      return actual.lstatSync(path);
+    },
+  };
+});
+
 const logger = pino({ level: 'silent' });
+
+afterEach(() => {
+  archiveRace.path = null;
+  archiveRace.failuresRemaining = 0;
+});
 
 interface FakeSandbox {
   status: SandboxStatus;
@@ -496,6 +520,31 @@ describe('SandboxContainerManager', () => {
         expect(files?.has('/mnt/worktree/node_modules/left-pad.js')).toBe(false);
         expect(client.mkdirCalls).toEqual([]);
         expect(client.execCalls).toHaveLength(1);
+      } finally {
+        rmSync(hostDir, { recursive: true, force: true });
+      }
+    });
+
+    it('retries a volume archive when a live Git pack entry disappears during traversal', async () => {
+      const hostDir = mkdtempSync(join(tmpdir(), 'sandbox-upload-race-'));
+      try {
+        const volatilePack = join(hostDir, 'pack-volatile.rev');
+        writeFileSync(join(hostDir, 'stable.pack'), 'stable');
+        writeFileSync(volatilePack, 'repacked away');
+        archiveRace.path = volatilePack;
+        archiveRace.failuresRemaining = 1;
+
+        const client = new FakeSandboxApiClient();
+        const id = await new SandboxContainerManager(client, logger).spawn({
+          ...baseConfig,
+          volumes: [{ host: hostDir, container: '/bare.git' }],
+        });
+
+        expect(archiveRace.failuresRemaining).toBe(0);
+        expect(client.sandboxes.get(id)?.files.get('/bare.git/stable.pack')?.toString()).toBe(
+          'stable',
+        );
+        expect(client.sandboxes.get(id)?.files.has('/bare.git/pack-volatile.rev')).toBe(false);
       } finally {
         rmSync(hostDir, { recursive: true, force: true });
       }
