@@ -59,9 +59,11 @@ describe('checkpointSandboxWorkspace', () => {
   });
 
   afterEach(async () => {
-    const checkpointPath = `/tmp/.autopod-checkpoint-${path.basename(tmpRoot)}-1.bundle`;
-    await rm(checkpointPath, { force: true });
-    await rm(`${checkpointPath}.meta`, { force: true });
+    for (const sequence of [1, 2]) {
+      const checkpointPath = `/tmp/.autopod-checkpoint-${path.basename(tmpRoot)}-${sequence}.bundle`;
+      await rm(checkpointPath, { force: true });
+      await rm(`${checkpointPath}.meta`, { force: true });
+    }
     await rm(tmpRoot, { recursive: true, force: true });
   });
 
@@ -151,6 +153,50 @@ describe('checkpointSandboxWorkspace', () => {
     );
   });
 
+  it('supersedes a prior content-bearing checkpoint from the same sandbox lineage', async () => {
+    const seed = path.join(tmpRoot, 'seed');
+    const host = path.join(tmpRoot, 'host');
+    const sandbox = path.join(tmpRoot, 'sandbox');
+    await git(tmpRoot, ['init', '--initial-branch=main', seed]);
+    await writeFile(path.join(seed, 'tracked.txt'), 'base\n');
+    await git(seed, ['add', '.']);
+    await git(seed, ['commit', '-m', 'base']);
+    await git(tmpRoot, ['clone', '--no-hardlinks', seed, host]);
+    await git(tmpRoot, ['clone', '--no-hardlinks', seed, sandbox]);
+
+    await writeFile(path.join(sandbox, 'tracked.txt'), 'checkpoint one\n');
+    const containerManager = createSandboxContainerManager(sandbox);
+    const first = await checkpointSandboxWorkspace({
+      containerManager,
+      containerId: 'sandbox-1',
+      podId: path.basename(tmpRoot),
+      worktreePath: host,
+      sequence: 1,
+    });
+    expect(first).toMatchObject({ promoted: true, materialized: true });
+
+    await git(sandbox, ['add', 'tracked.txt']);
+    await git(sandbox, ['commit', '-m', 'agent commit']);
+    await writeFile(path.join(sandbox, 'tracked.txt'), 'checkpoint two\n');
+    const second = await checkpointSandboxWorkspace({
+      containerManager,
+      containerId: 'sandbox-1',
+      podId: path.basename(tmpRoot),
+      worktreePath: host,
+      sequence: 2,
+    });
+
+    expect(second.error).toBeUndefined();
+    expect(second).toMatchObject({
+      lineageVerified: true,
+      promoted: true,
+      materialized: true,
+    });
+    await expect(readFile(path.join(host, 'tracked.txt'), 'utf8')).resolves.toBe(
+      'checkpoint two\n',
+    );
+  });
+
   it('retains an operator-authored empty commit as a divergence barrier', async () => {
     const seed = path.join(tmpRoot, 'seed');
     const host = path.join(tmpRoot, 'host');
@@ -184,5 +230,48 @@ describe('checkpointSandboxWorkspace', () => {
       },
     });
     await expect(readFile(path.join(host, 'tracked.txt'), 'utf8')).resolves.toBe('base\n');
+  });
+
+  it('retains a content-bearing checkpoint lookalike outside the pod quarantine', async () => {
+    const seed = path.join(tmpRoot, 'seed');
+    const host = path.join(tmpRoot, 'host');
+    const sandbox = path.join(tmpRoot, 'sandbox');
+    await git(tmpRoot, ['init', '--initial-branch=main', seed]);
+    await writeFile(path.join(seed, 'tracked.txt'), 'base\n');
+    await git(seed, ['add', '.']);
+    await git(seed, ['commit', '-m', 'base']);
+    await git(tmpRoot, ['clone', '--no-hardlinks', seed, host]);
+    await git(tmpRoot, ['clone', '--no-hardlinks', seed, sandbox]);
+
+    await writeFile(path.join(host, 'tracked.txt'), 'host change\n');
+    await git(host, ['add', 'tracked.txt']);
+    await execFileAsync('git', ['commit', '-m', 'autopod sandbox checkpoint'], {
+      cwd: host,
+      env: {
+        ...gitEnv,
+        GIT_AUTHOR_NAME: 'Autopod',
+        GIT_AUTHOR_EMAIL: 'autopod@localhost',
+        GIT_COMMITTER_NAME: 'Autopod',
+        GIT_COMMITTER_EMAIL: 'autopod@localhost',
+      },
+    });
+    await writeFile(path.join(sandbox, 'tracked.txt'), 'sandbox change\n');
+    await git(sandbox, ['add', 'tracked.txt']);
+    await git(sandbox, ['commit', '-m', 'agent commit']);
+
+    const result = await checkpointSandboxWorkspace({
+      containerManager: createSandboxContainerManager(sandbox),
+      containerId: 'sandbox-1',
+      podId: path.basename(tmpRoot),
+      worktreePath: host,
+      sequence: 1,
+    });
+
+    expect(result).toMatchObject({
+      promoted: false,
+      materialized: false,
+      error: { code: 'LINEAGE_CONFLICT' },
+    });
+    await expect(readFile(path.join(host, 'tracked.txt'), 'utf8')).resolves.toBe('host change\n');
   });
 });

@@ -46,6 +46,7 @@ export interface SandboxContainerManagerOptions {
 
 const SANDBOX_VOLUME_EXTRACT_TIMEOUT_MS = 5 * 60 * 1000;
 const SANDBOX_VOLUME_UPLOAD_CHUNK_BYTES = 64 * 1024 * 1024;
+const SANDBOX_VOLUME_ARCHIVE_ATTEMPTS = 3;
 const SANDBOX_ARCHIVE_UID = 1000;
 const SANDBOX_ARCHIVE_GID = 1000;
 
@@ -483,7 +484,7 @@ export class SandboxContainerManager implements ContainerManager {
     const stat = lstatSync(hostPath);
     if (stat.isDirectory()) {
       const startedAt = Date.now();
-      const archive = await createSandboxVolumeArchive(hostPath);
+      const archive = await this.createVolumeArchive(hostPath);
       const safeSandboxId = sandboxId.replace(/[^A-Za-z0-9_-]/g, '-');
       const archivePath = `/tmp/.autopod-volume-${safeSandboxId}-${volumeIndex}.tar.gz`;
       const archiveParts: string[] = [];
@@ -551,6 +552,26 @@ export class SandboxContainerManager implements ContainerManager {
     }
     if (stat.isFile()) {
       await this.client.writeFile(sandboxId, containerPath, await readFile(hostPath));
+    }
+  }
+
+  private async createVolumeArchive(hostPath: string): Promise<SandboxVolumeArchive> {
+    for (let attempt = 1; ; attempt++) {
+      try {
+        return await createSandboxVolumeArchive(hostPath);
+      } catch (err) {
+        const code = (err as NodeJS.ErrnoException).code;
+        if (
+          attempt >= SANDBOX_VOLUME_ARCHIVE_ATTEMPTS ||
+          (code !== 'ENOENT' && code !== 'ESTALE')
+        ) {
+          throw err;
+        }
+        this.logger.warn(
+          { hostPath, attempt, code },
+          'Sandbox volume changed during archive traversal; retrying from scratch',
+        );
+      }
     }
   }
 
@@ -640,13 +661,19 @@ async function createSandboxVolumeArchive(rootPath: string): Promise<SandboxVolu
     }
   }
 
-  for (const entry of readdirSync(rootPath).sort()) {
-    if (shouldSkipUploadedVolumeEntry(entry)) continue;
-    await addPath(join(rootPath, entry), entry);
+  try {
+    for (const entry of readdirSync(rootPath).sort()) {
+      if (shouldSkipUploadedVolumeEntry(entry)) continue;
+      await addPath(join(rootPath, entry), entry);
+    }
+    pack.finalize();
+    return { content: await compressed, entries };
+  } catch (err) {
+    pack.destroy(err instanceof Error ? err : new Error(String(err)));
+    gzip.destroy();
+    await compressed.catch(() => {});
+    throw err;
   }
-  pack.finalize();
-
-  return { content: await compressed, entries };
 }
 
 function addTarEntry(pack: TarPack, headers: TarHeaders, content?: Buffer): Promise<void> {
