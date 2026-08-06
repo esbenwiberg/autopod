@@ -58,6 +58,8 @@ describe('SandboxTerminalReaper', () => {
 
   it('preserves failed work before deletion and retains it when preservation fails', async () => {
     const failed = pod('failed');
+    failed.worktreeCompromised = true;
+    failed.preSubmitReview = { status: 'pass' } as Pod['preSubmitReview'];
     const deps = build([failed]);
     deps.preserveWorkspace.mockRejectedValueOnce(new Error('host worktree unavailable'));
     await deps.reaper.runSweep();
@@ -67,6 +69,8 @@ describe('SandboxTerminalReaper', () => {
     expect(deps.preserveWorkspace).toHaveBeenCalledTimes(2);
     expect(deps.sandboxContainerManager.kill).toHaveBeenCalledWith('sandbox-pod-1');
     expect(failed.containerId).toBeNull();
+    expect(failed.worktreeCompromised).toBe(false);
+    expect(failed.preSubmitReview).toBeNull();
   });
 
   it('retains container IDs on deletion errors and retries later', async () => {

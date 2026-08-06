@@ -72,7 +72,12 @@ export class SandboxTerminalReaper {
       // Avoid clearing a newly assigned container if an operator revived the pod mid-sweep.
       const current = this.deps.podRepo.getOrThrow(pod.id);
       if (current.containerId === containerId && current.executionTarget === 'sandbox') {
-        this.deps.podRepo.update(pod.id, { containerId: null });
+        this.deps.podRepo.update(
+          pod.id,
+          current.status === 'failed'
+            ? { containerId: null, worktreeCompromised: false, preSubmitReview: null }
+            : { containerId: null },
+        );
       }
       this.deps.logger.info({ podId: pod.id, containerId }, 'Terminal sandbox deletion confirmed');
     } catch (err) {
