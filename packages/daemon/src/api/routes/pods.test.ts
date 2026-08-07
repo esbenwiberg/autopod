@@ -247,6 +247,78 @@ describe('GET /pods/:podId provider-attempt projection', () => {
     });
   });
 
+  it('codex process health availability', async () => {
+    insertPod(db, { id: 'codex-structured-quality', status: 'complete' });
+    db.prepare("UPDATE pods SET runtime = 'codex', model = 'gpt-5.6-sol' WHERE id = ?").run(
+      'codex-structured-quality',
+    );
+    const eventRepo = createEventRepository(db);
+    eventRepo.insert({
+      type: 'pod.agent_activity',
+      timestamp: '2026-04-23T12:00:00.000Z',
+      podId: 'codex-structured-quality',
+      event: {
+        type: 'tool_use',
+        timestamp: '2026-04-23T12:00:00.000Z',
+        tool: 'Bash',
+        input: {
+          command: '/bin/bash -lc sed -n 1,80p src/app.ts',
+          argv: ['/bin/bash', '-lc', 'sed -n 1,80p src/app.ts'],
+          cwd: '/workspace',
+        },
+      },
+    });
+    eventRepo.insert({
+      type: 'pod.agent_activity',
+      timestamp: '2026-04-23T12:01:00.000Z',
+      podId: 'codex-structured-quality',
+      event: {
+        type: 'file_change',
+        timestamp: '2026-04-23T12:01:00.000Z',
+        path: 'src/app.ts',
+        action: 'modify',
+      },
+    });
+
+    const response = await app.inject({
+      method: 'GET',
+      url: '/pods/codex-structured-quality/quality',
+    });
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toMatchObject({
+      inspectionAvailability: 'available',
+      readCount: 1,
+      editsWithoutPriorRead: 0,
+    });
+  });
+
+  it('historical ambiguity remains unavailable', async () => {
+    insertPod(db, { id: 'historical-flattened-quality', status: 'complete' });
+    const eventRepo = createEventRepository(db);
+    eventRepo.insert({
+      type: 'pod.agent_activity',
+      timestamp: '2026-04-23T12:00:00.000Z',
+      podId: 'historical-flattened-quality',
+      event: {
+        type: 'tool_use',
+        timestamp: '2026-04-23T12:00:00.000Z',
+        tool: 'Bash',
+        input: { command: '/bin/bash -lc sed -n 1,80p src/app.ts' },
+      },
+    });
+
+    const response = await app.inject({
+      method: 'GET',
+      url: '/pods/historical-flattened-quality/quality',
+    });
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toMatchObject({
+      inspectionAvailability: 'unavailable',
+      inspectionUnavailableReason: 'ambiguous_inspection',
+      readCount: null,
+    });
+  });
+
   it('provider-attempt keeps legacy compatibility fields when no ledger exists', async () => {
     insertPod(db, { id: 'legacy-provider-attempt-pod' });
     db.prepare(`

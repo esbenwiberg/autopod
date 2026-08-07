@@ -66,9 +66,11 @@ export function normalizeQualityActivityEvidence(event: AgentEvent): QualityActi
   }
 
   const command = stringInput(event, 'command');
-  if (!command) return { activities: [], ambiguousInspection: false };
   const cwd = stringInput(event, 'cwd') ?? WORKSPACE_ROOT;
-  const shellEvidence = inspectedShellEvidence(command, cwd);
+  const argvEvidence = structuredShellEvidence(event, cwd);
+  const shellEvidence =
+    argvEvidence ??
+    (command ? inspectedShellEvidence(command, cwd) : { paths: [], ambiguous: false });
   return {
     activities: shellEvidence.paths.map((path) => ({
       kind: 'inspection',
@@ -78,6 +80,25 @@ export function normalizeQualityActivityEvidence(event: AgentEvent): QualityActi
     })),
     ambiguousInspection: shellEvidence.ambiguous,
   };
+}
+
+/**
+ * Only an argv array can prove that a shell script was supplied as one `-lc`
+ * argument. Never try to recover that boundary from the display command.
+ */
+function structuredShellEvidence(
+  event: AgentToolUseEvent,
+  cwd: string,
+): { paths: string[]; ambiguous: boolean } | null {
+  const argv = stringArrayInput(event, 'argv');
+  if (argv === null) return null;
+  const [program, flag, script, ...rest] = argv;
+  const isShell =
+    program === 'bash' || program === '/bin/bash' || program === 'sh' || program === '/bin/sh';
+  if (isShell && flag === '-lc' && typeof script === 'string' && rest.length === 0) {
+    return inspectedShellEvidence(script, cwd);
+  }
+  return { paths: [], ambiguous: argv.some((argument) => looksLikeInspection(argument)) };
 }
 
 export function canonicalRepositoryPath(
@@ -143,6 +164,13 @@ function normalizeNativeTool(
       ...(callId && { callId }),
     },
   ];
+}
+
+function stringArrayInput(event: AgentToolUseEvent, key: string): string[] | null {
+  const value = event.input[key];
+  return Array.isArray(value) && value.every((item): item is string => typeof item === 'string')
+    ? value
+    : null;
 }
 
 function inspectedShellEvidence(

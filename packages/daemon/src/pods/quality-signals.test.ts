@@ -296,6 +296,17 @@ describe('computeQualitySignals', () => {
     expect(signals.editsWithoutPriorRead).toBe(0);
   });
 
+  it('runtime quality availability matrix', () => {
+    podRepo.insert(basePod({ runtime: 'claude' }));
+    eventRepo.insert(readTool('src/a.ts'));
+    eventRepo.insert(fileChange('src/a.ts', 'modify'));
+    expect(computeQualitySignals(POD_ID, deps)).toMatchObject({
+      inspectionAvailability: 'available',
+      readCount: 1,
+      editsWithoutPriorRead: 0,
+    });
+  });
+
   it('marks ambiguous shell inspection unavailable even without a mutation', () => {
     podRepo.insert(basePod({ runtime: 'codex' }));
     eventRepo.insert(toolUse('Bash', { command: 'cat src/a.ts | wc -l' }));

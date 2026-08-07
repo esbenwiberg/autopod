@@ -13,6 +13,13 @@ const bash = (command: string, cwd = '/workspace'): AgentEvent => ({
   input: { call_id: 'call-1', command, cwd },
 });
 
+const bashArgv = (argv: string[], cwd = '/workspace'): AgentEvent => ({
+  type: 'tool_use',
+  timestamp: '2026-01-01T00:00:00.000Z',
+  tool: 'Bash',
+  input: { call_id: 'argv-call', command: argv.join(' '), argv, cwd },
+});
+
 describe('normalizeQualityActivity', () => {
   it.each([
     ['cat packages/daemon/src/index.ts', ['packages/daemon/src/index.ts']],
@@ -97,6 +104,29 @@ describe('normalizeQualityActivity', () => {
     ]);
   });
 
+  it('structured-wrapper-inspection-is-measured', () => {
+    expect(
+      normalizeQualityActivity(bashArgv(['/bin/bash', '-lc', 'sed -n 1,40p src/app.ts'])),
+    ).toEqual([
+      {
+        kind: 'inspection',
+        path: 'src/app.ts',
+        source: 'shell-command',
+        callId: 'argv-call',
+      },
+    ]);
+    expect(
+      normalizeQualityActivity(bashArgv(['sh', '-lc', 'cat app.ts'], '/workspace/packages/web')),
+    ).toEqual([
+      {
+        kind: 'inspection',
+        path: 'packages/web/app.ts',
+        source: 'shell-command',
+        callId: 'argv-call',
+      },
+    ]);
+  });
+
   it('ambiguous-inspection-is-unavailable', () => {
     const evidence = normalizeQualityActivityEvidence(bash('cat src/app.ts | wc -l'));
     expect(evidence.activities).toEqual([]);
@@ -107,6 +137,18 @@ describe('normalizeQualityActivity', () => {
     );
     expect(flattenedWrapper.activities).toEqual([]);
     expect(flattenedWrapper.ambiguousInspection).toBe(true);
+  });
+
+  it('unsafe-or-flattened-command-remains-unavailable', () => {
+    expect(normalizeQualityActivityEvidence(bash('/bin/bash -lc sed -n 1,40p src/app.ts'))).toEqual(
+      { activities: [], ambiguousInspection: true },
+    );
+    expect(
+      normalizeQualityActivityEvidence(bashArgv(['bash', '-lc', 'cat src/app.ts | wc -l'])),
+    ).toEqual({ activities: [], ambiguousInspection: true });
+    expect(
+      normalizeQualityActivityEvidence(bashArgv(['bash', '-lc', 'sed -i s/a/b/ src/app.ts'])),
+    ).toEqual({ activities: [], ambiguousInspection: true });
   });
 
   it('does not make unrelated compound commands ambiguous', () => {
