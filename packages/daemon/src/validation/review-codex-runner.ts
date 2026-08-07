@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { computeCostWithCache } from '@autopod/shared';
+import type { Logger } from 'pino';
 import type {
   ContainerManager,
   ExecOptions,
@@ -8,7 +9,14 @@ import type {
 } from '../interfaces/container-manager.js';
 import type { ReviewerOutputContract } from './review-structured-output.js';
 
-export type CodexReviewErrorKind = 'non-zero-exit' | 'timeout' | 'exec-error';
+export type CodexReviewErrorKind =
+  | 'non-zero-exit'
+  | 'schema-invalid'
+  | 'authentication-failed'
+  | 'provider-unavailable'
+  | 'termination-failed'
+  | 'timeout'
+  | 'exec-error';
 
 export class CodexReviewError extends Error {
   readonly kind: CodexReviewErrorKind;
@@ -40,6 +48,7 @@ export interface CodexReviewConfig {
   env?: Record<string, string>;
   timeout: number;
   outputContract?: ReviewerOutputContract;
+  logger?: Logger;
 }
 
 export interface CodexReviewTokenUsage {
@@ -120,11 +129,34 @@ export async function runCodexReview(
     if (result.exitCode !== 0) {
       const output = result.stdout || result.stderr;
       const timedOut = /timed? out|timeout/i.test(output);
+      const schemaInvalid =
+        /invalid_json_schema|json schema.*(?:invalid|rejected)|schema.*(?:invalid|rejected)/i.test(
+          output,
+        );
+      const authenticationFailed = /auth|credential|unauthorized|forbidden/i.test(output);
+      const providerUnavailable = /provider|model.*unavailable|offline|service unavailable/i.test(
+        output,
+      );
+      if (schemaInvalid)
+        config.logger?.warn(
+          { reviewerDiagnostic: 'INVALID_OUTPUT_SCHEMA', exitCode: result.exitCode },
+          'codex reviewer rejected output schema',
+        );
       throw new CodexReviewError({
-        kind: timedOut ? 'timeout' : 'non-zero-exit',
-        message: timedOut
-          ? `codex review timed out: ${output}`
-          : `codex review failed (exit=${result.exitCode}): ${output}`,
+        kind: schemaInvalid
+          ? 'schema-invalid'
+          : timedOut
+            ? 'timeout'
+            : authenticationFailed
+              ? 'authentication-failed'
+              : providerUnavailable
+                ? 'provider-unavailable'
+                : 'non-zero-exit',
+        message: schemaInvalid
+          ? 'codex review rejected the configured output schema'
+          : timedOut
+            ? `codex review timed out: ${output}`
+            : `codex review failed (exit=${result.exitCode}): ${output}`,
         exitCode: result.exitCode,
         stderr: result.stderr,
       });
@@ -157,7 +189,12 @@ export async function runCodexReview(
   } catch (err) {
     if (err instanceof CodexReviewError) throw err;
     const message = err instanceof Error ? err.message : String(err);
-    const kind = /timed? out|timeout/i.test(message) ? 'timeout' : 'exec-error';
+    const kind: CodexReviewErrorKind =
+      /exit was not observed after kill|kill did not complete/i.test(message)
+        ? 'termination-failed'
+        : /timed? out|timeout/i.test(message)
+          ? 'timeout'
+          : 'exec-error';
     throw new CodexReviewError({
       kind,
       message: `codex review ${kind === 'timeout' ? 'timed out' : 'failed'}: ${message}`,
