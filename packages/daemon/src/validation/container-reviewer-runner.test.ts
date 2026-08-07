@@ -8,7 +8,7 @@ import {
   runContainerReviewer,
 } from './container-reviewer-runner.js';
 import { runCodexReview } from './review-codex-runner.js';
-import { reviewSynthesisOutputContract } from './review-structured-output.js';
+import { reviewAxisOutputContract } from './review-structured-output.js';
 
 vi.mock('./review-codex-runner.js', () => ({
   runCodexReview: vi.fn(),
@@ -175,15 +175,63 @@ describe('runContainerReviewer', () => {
       model: 'sonnet',
       prompt: 'review',
       timeout: 60_000,
-      outputContract: reviewSynthesisOutputContract,
+      outputContract: { name: 'review-axis-v1', jsonSchema: '{"type":"object"}' },
     });
     expect(cm.writeFile).toHaveBeenCalledTimes(1);
     expect((cm.execStreaming as ReturnType<typeof vi.fn>).mock.calls[0]?.[1][2]).toContain(
       '--json-schema',
     );
-    expect((cm.execStreaming as ReturnType<typeof vi.fn>).mock.calls[0]?.[1][2]).toContain(
-      reviewSynthesisOutputContract.jsonSchema,
+  });
+
+  it('passes provider-compatible inline schema to Claude', async () => {
+    const cm = containerManager({
+      stdout: JSON.stringify({ result: '{"findings":[]}' }),
+      stderr: '',
+      exitCode: 0,
+    });
+    await runContainerReviewer({
+      podId: 'sess-1',
+      containerId: 'container-abc',
+      containerManager: cm,
+      profile: profile({ modelProvider: 'max' }),
+      model: 'sonnet',
+      prompt: 'review',
+      timeout: 60_000,
+      outputContract: reviewAxisOutputContract,
+    });
+    const command = (cm.execStreaming as ReturnType<typeof vi.fn>).mock.calls[0]?.[1][2];
+    expect(command).toContain(`--json-schema '${reviewAxisOutputContract.jsonSchema}'`);
+    expect(cm.writeFile).toHaveBeenCalledTimes(1);
+  });
+
+  it('classifies Claude output-schema rejection without retaining raw diagnostics', async () => {
+    const cm = containerManager({
+      stdout: 'invalid_json_schema private provider diagnostic',
+      stderr: '',
+      exitCode: 1,
+    });
+    const warn = vi.fn();
+    await expect(
+      runContainerReviewer({
+        podId: 'sess-1',
+        containerId: 'container-abc',
+        containerManager: cm,
+        profile: profile({ modelProvider: 'max' }),
+        model: 'sonnet',
+        prompt: 'review',
+        timeout: 60_000,
+        outputContract: reviewAxisOutputContract,
+        logger: { info: vi.fn(), warn } as never,
+      }),
+    ).rejects.toMatchObject({
+      kind: 'schema-invalid',
+      message: 'Container reviewer rejected the configured output schema',
+    });
+    expect(warn).toHaveBeenCalledWith(
+      { reviewerDiagnostic: 'INVALID_OUTPUT_SCHEMA', exitCode: 1 },
+      'claude reviewer rejected output schema',
     );
+    expect(JSON.stringify(warn.mock.calls)).not.toContain('private provider diagnostic');
   });
 
   it('runs Codex CLI in the live pod container for OpenAI-surface profiles', async () => {

@@ -10,26 +10,17 @@ const findingSchema = z
   .object({
     severity: z.enum(['MEDIUM', 'HIGH', 'CRITICAL']),
     path: bounded(1_024),
-    line: z.number().int().positive().optional(),
-    symbol: bounded(512).optional(),
+    line: z.preprocess(
+      (value) => (value === null ? undefined : value),
+      z.number().int().positive().optional(),
+    ),
+    symbol: z.preprocess((value) => (value === null ? undefined : value), bounded(512).optional()),
     claim: bounded(4_000),
     evidence: bounded(8_000),
     remediation: bounded(4_000),
     confidence: z.number().finite().min(0).max(1),
   })
   .strict();
-
-function normalizeNullableFindingFields(value: unknown): unknown {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) return value;
-  const { line, symbol, ...finding } = value as Record<string, unknown>;
-  // Provider schemas represent these domain-optional fields as required nullable
-  // fields. Do not coerce missing or otherwise invalid values.
-  return {
-    ...finding,
-    ...(line !== null && line !== undefined ? { line } : {}),
-    ...(symbol !== null && symbol !== undefined ? { symbol } : {}),
-  };
-}
 
 export const axisResponseSchema = z
   .object({ findings: z.array(findingSchema).max(MAX_AXIS_FINDINGS) })
@@ -39,6 +30,63 @@ export interface ReviewerOutputContract {
   name: string;
   jsonSchema: string;
 }
+
+const nullableJsonSchema = (schema: Record<string, unknown>) => ({
+  anyOf: [schema, { type: 'null' }],
+});
+
+const axisFindingProperties = {
+  severity: { type: 'string', enum: ['MEDIUM', 'HIGH', 'CRITICAL'] },
+  path: { type: 'string', minLength: 1, maxLength: 1024 },
+  line: nullableJsonSchema({ type: 'integer', minimum: 1 }),
+  symbol: nullableJsonSchema({ type: 'string', minLength: 1, maxLength: 512 }),
+  claim: { type: 'string', minLength: 1, maxLength: 4000 },
+  evidence: { type: 'string', minLength: 1, maxLength: 8000 },
+  remediation: { type: 'string', minLength: 1, maxLength: 4000 },
+  confidence: { type: 'number', minimum: 0, maximum: 1 },
+};
+
+const structuredSynthesisFindingSchema = {
+  type: 'object',
+  additionalProperties: false,
+  required: [
+    'id',
+    'axis',
+    'severity',
+    'path',
+    'line',
+    'symbol',
+    'claim',
+    'evidence',
+    'remediation',
+    'confidence',
+  ],
+  properties: {
+    id: { type: 'string', minLength: 1, maxLength: 1024 },
+    axis: {
+      type: 'string',
+      enum: [
+        'contract_completeness',
+        'security_authority',
+        'lifecycle_reliability',
+        'persistence_reproducibility',
+        'tests_integration',
+      ],
+    },
+    ...axisFindingProperties,
+  },
+};
+
+const initialSynthesisFindingSchema = {
+  type: 'object',
+  additionalProperties: false,
+  required: ['id', 'source', 'issue'],
+  properties: {
+    id: { type: 'string', minLength: 1, maxLength: 1024 },
+    source: { type: 'string', enum: ['initial-review'] },
+    issue: { type: 'string', minLength: 1, maxLength: 8000 },
+  },
+};
 
 export const reviewAxisOutputContract: ReviewerOutputContract = {
   name: 'review-axis-v1',
@@ -53,26 +101,8 @@ export const reviewAxisOutputContract: ReviewerOutputContract = {
         items: {
           type: 'object',
           additionalProperties: false,
-          required: [
-            'severity',
-            'path',
-            'line',
-            'symbol',
-            'claim',
-            'evidence',
-            'remediation',
-            'confidence',
-          ],
-          properties: {
-            severity: { type: 'string', enum: ['MEDIUM', 'HIGH', 'CRITICAL'] },
-            path: { type: 'string', minLength: 1, maxLength: 1024 },
-            line: { type: ['integer', 'null'], minimum: 1 },
-            symbol: { type: ['string', 'null'], minLength: 1, maxLength: 512 },
-            claim: { type: 'string', minLength: 1, maxLength: 4000 },
-            evidence: { type: 'string', minLength: 1, maxLength: 8000 },
-            remediation: { type: 'string', minLength: 1, maxLength: 4000 },
-            confidence: { type: 'number', minimum: 0, maximum: 1 },
-          },
+          required: Object.keys(axisFindingProperties),
+          properties: axisFindingProperties,
         },
       },
     },
@@ -96,58 +126,18 @@ export const reviewSynthesisOutputContract: ReviewerOutputContract = {
           required: ['action', 'sourceIds', 'reason', 'finding'],
           properties: {
             action: { type: 'string', enum: ['accept', 'reject', 'merge'] },
-            sourceIds: { type: 'array', minItems: 1, maxItems: 101, items: { type: 'string' } },
-            reason: { type: ['string', 'null'], minLength: 1, maxLength: 4000 },
+            sourceIds: {
+              type: 'array',
+              minItems: 1,
+              maxItems: 101,
+              items: { type: 'string', minLength: 1, maxLength: 1024 },
+            },
+            reason: nullableJsonSchema({ type: 'string', minLength: 1, maxLength: 4000 }),
             finding: {
               anyOf: [
+                initialSynthesisFindingSchema,
+                structuredSynthesisFindingSchema,
                 { type: 'null' },
-                {
-                  type: 'object',
-                  additionalProperties: false,
-                  required: ['id', 'source', 'issue'],
-                  properties: {
-                    id: { type: 'string' },
-                    source: { type: 'string', enum: ['initial-review'] },
-                    issue: { type: 'string' },
-                  },
-                },
-                {
-                  type: 'object',
-                  additionalProperties: false,
-                  required: [
-                    'id',
-                    'axis',
-                    'severity',
-                    'path',
-                    'line',
-                    'symbol',
-                    'claim',
-                    'evidence',
-                    'remediation',
-                    'confidence',
-                  ],
-                  properties: {
-                    id: { type: 'string' },
-                    axis: {
-                      type: 'string',
-                      enum: [
-                        'contract_completeness',
-                        'security_authority',
-                        'lifecycle_reliability',
-                        'persistence_reproducibility',
-                        'tests_integration',
-                      ],
-                    },
-                    severity: { type: 'string', enum: ['MEDIUM', 'HIGH', 'CRITICAL'] },
-                    path: { type: 'string', minLength: 1, maxLength: 1024 },
-                    line: { type: ['integer', 'null'], minimum: 1 },
-                    symbol: { type: ['string', 'null'], minLength: 1, maxLength: 512 },
-                    claim: { type: 'string', minLength: 1, maxLength: 4000 },
-                    evidence: { type: 'string', minLength: 1, maxLength: 8000 },
-                    remediation: { type: 'string', minLength: 1, maxLength: 4000 },
-                    confidence: { type: 'number', minimum: 0, maximum: 1 },
-                  },
-                },
               ],
             },
           },
@@ -166,22 +156,15 @@ export class ReviewStructuredOutputError extends Error {
 }
 
 export function parseAxisResponse(stdout: string, axis: ReviewAxis): StructuredReviewFinding[] {
-  const value = parseReviewStructuredJson(stdout);
-  const normalized =
-    value && typeof value === 'object' && Array.isArray((value as { findings?: unknown }).findings)
-      ? {
-          ...(value as Record<string, unknown>),
-          findings: (value as { findings: unknown[] }).findings.map(normalizeNullableFindingFields),
-        }
-      : value;
-  const parsed = axisResponseSchema.safeParse(normalized);
+  const parsed = axisResponseSchema.safeParse(parseReviewStructuredJson(stdout));
   if (!parsed.success) throw new ReviewStructuredOutputError();
-  return parsed.data.findings.map((finding) => ({ ...finding, axis, id: '' }));
-}
-
-/** Converts only provider-required null transport fields back to domain optionality. */
-export function normalizeProviderNullableFinding(value: unknown): unknown {
-  return normalizeNullableFindingFields(value);
+  return parsed.data.findings.map(({ line, symbol, ...finding }) => ({
+    ...finding,
+    ...(line !== undefined && { line }),
+    ...(symbol !== undefined && { symbol }),
+    axis,
+    id: '',
+  }));
 }
 
 /** Shared transport-only parser for every frozen review protocol response. */

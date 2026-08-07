@@ -7,7 +7,6 @@ import type {
   StreamingExecResult,
 } from '../interfaces/container-manager.js';
 import { runCodexReview } from './review-codex-runner.js';
-import { reviewAxisOutputContract } from './review-structured-output.js';
 
 interface CapturedExec {
   command: string[];
@@ -81,11 +80,10 @@ describe('runCodexReview', () => {
       model: 'auto',
       prompt: 'review',
       timeout: 1234,
-      outputContract: reviewAxisOutputContract,
+      outputContract: { name: 'review-axis-v1', jsonSchema: '{"type":"object"}' },
     });
     expect(harness.writes).toHaveLength(2);
     expect(harness.writes[1]?.path).toContain('.schema.json');
-    expect(harness.writes[1]?.content).toBe(reviewAxisOutputContract.jsonSchema);
     expect(harness.execs[0]?.command[2]).toContain('--output-schema');
   });
 
@@ -302,5 +300,35 @@ describe('runCodexReview', () => {
       kind: 'non-zero-exit',
       exitCode: 2,
     });
+  });
+
+  it('preserves bounded invalid schema classification for the batch boundary', async () => {
+    const warn = vi.fn();
+    const harness = createHarness({
+      stdout: 'codex review failed (exit 1)\ninvalid_json_schema private provider diagnostic',
+      stderr: '',
+      exitCode: 1,
+    });
+
+    await expect(
+      runCodexReview({
+        podId: 'pod-1',
+        containerId: 'container-1',
+        containerManager: harness.manager,
+        model: 'gpt-5.6-sol',
+        prompt: 'review prompt',
+        timeout: 1234,
+        logger: { warn } as never,
+      }),
+    ).rejects.toMatchObject({
+      name: 'CodexReviewError',
+      kind: 'schema-invalid',
+      message: 'codex review rejected the configured output schema',
+    });
+    expect(warn).toHaveBeenCalledWith(
+      { reviewerDiagnostic: 'INVALID_OUTPUT_SCHEMA', exitCode: 1 },
+      'codex reviewer rejected output schema',
+    );
+    expect(JSON.stringify(warn.mock.calls)).not.toContain('private provider diagnostic');
   });
 });

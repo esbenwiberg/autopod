@@ -207,48 +207,59 @@ describe('runReviewBatch', () => {
     });
   });
 
-  it('does not retry provider schema rejection', async () => {
+  it('marks an invalid provider schema non-retryable without persisting raw diagnostics', async () => {
     let calls = 0;
     const batch = await runReviewBatch({
       packet: packet(),
       model: 'test',
-      execute: async (_prompt, label) => {
-        if (!label.includes('contract_completeness')) return { stdout: response };
+      execute: async () => {
         calls++;
         throw new CodexReviewError({
           kind: 'schema-invalid',
           message: 'codex review rejected the configured output schema',
-          stderr: 'invalid_json_schema',
+          stderr: 'private provider diagnostic payload',
         });
       },
     });
-    expect(calls).toBe(1);
-    expect(batch.axes[0]).toMatchObject({
-      status: 'unavailable',
-      attempts: 1,
-      error: 'Reviewer output schema is invalid for the configured provider',
-      failure: {
-        code: 'REVIEW_SCHEMA_INVALID',
-        retryable: false,
-      },
-    });
+    expect(calls).toBe(5);
+    expect(batch.axes).toHaveLength(5);
+    expect(batch.axes).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          status: 'unavailable',
+          attempts: 1,
+          error: 'Reviewer output schema is invalid for the configured provider',
+          failure: {
+            kind: 'runner-failed',
+            code: 'REVIEW_SCHEMA_INVALID',
+            message: 'Reviewer output schema is invalid for the configured provider',
+            retryable: false,
+          },
+        }),
+      ]),
+    );
+    expect(JSON.stringify(batch)).not.toContain('private provider diagnostic payload');
   });
 
-  it('uses typed runner failures before message fallback', async () => {
+  it('does not retry a permanent synthesis schema rejection', async () => {
+    let synthesisCalls = 0;
     const batch = await runReviewBatch({
       packet: packet(),
       model: 'test',
-      execute: async () => {
+      execute: async () => ({ stdout: '{"findings":[]}' }),
+      synthesize: async () => {
+        synthesisCalls++;
         throw new CodexReviewError({
-          kind: 'non-zero-exit',
-          message: 'codex review failed: timeout word from provider output',
+          kind: 'schema-invalid',
+          message: 'codex review rejected the configured output schema',
+          stderr: 'private synthesis diagnostic payload',
         });
       },
     });
-    expect(batch.axes[0]?.failure).toMatchObject({
-      kind: 'runner-failed',
-      code: 'REVIEW_RUNNER_FAILED',
-    });
+    expect(synthesisCalls).toBe(1);
+    expect(batch.synthesis).toBe('deterministic-fallback');
+    expect(batch.degradationReasons).toContain('SYNTHESIS_INVALID');
+    expect(JSON.stringify(batch)).not.toContain('private synthesis diagnostic payload');
   });
 
   it('shares one deadline across axis calls and skips synthesis after an unavailable axis', async () => {

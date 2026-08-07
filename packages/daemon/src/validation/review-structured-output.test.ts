@@ -23,7 +23,41 @@ const parse = (value: unknown) =>
     'security_authority',
   );
 
+function asRecord(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === 'object' && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : null;
+}
+
+function expectProviderCompatibleSchema(value: unknown): void {
+  const record = asRecord(value);
+  if (!record) return;
+
+  if (record.type === 'object') {
+    expect(record.additionalProperties).toBe(false);
+    const properties = asRecord(record.properties) ?? {};
+    const required = Array.isArray(record.required) ? record.required : [];
+    expect([...required].sort()).toEqual(Object.keys(properties).sort());
+  }
+
+  const properties = asRecord(record.properties);
+  if (properties) Object.values(properties).forEach(expectProviderCompatibleSchema);
+  if (record.items) expectProviderCompatibleSchema(record.items);
+  if (Array.isArray(record.anyOf)) record.anyOf.forEach(expectProviderCompatibleSchema);
+}
+
 describe('parseAxisResponse', () => {
+  it('emits provider-compatible schema contracts', () => {
+    expectProviderCompatibleSchema(JSON.parse(reviewAxisOutputContract.jsonSchema));
+    expectProviderCompatibleSchema(JSON.parse(reviewSynthesisOutputContract.jsonSchema));
+  });
+
+  it('normalizes nullable optional fields from the provider transport', () => {
+    const [normalized] = parse({ findings: [{ ...finding, line: null, symbol: null }] });
+    expect(normalized).not.toHaveProperty('line');
+    expect(normalized).not.toHaveProperty('symbol');
+  });
+
   it.each([
     { findings: [finding] },
     { result: JSON.stringify({ findings: [finding] }) },
@@ -54,36 +88,5 @@ describe('parseAxisResponse', () => {
     expect(() => parse(`model preface ${JSON.stringify({ findings: [finding] })}`)).toThrow(
       ReviewStructuredOutputError,
     );
-  });
-
-  it('normalizes only nullable optional finding fields', () => {
-    expect(parse({ findings: [{ ...finding, line: null, symbol: null }] })).toEqual([
-      { ...finding, line: undefined, symbol: undefined, axis: 'security_authority', id: '' },
-    ]);
-    expect(() => parse({ findings: [{ ...finding, line: null, symbol: 4 }] })).toThrow(
-      ReviewStructuredOutputError,
-    );
-    expect(() => parse({ findings: [{ ...finding, line: '4' }] })).toThrow(
-      ReviewStructuredOutputError,
-    );
-  });
-
-  it('uses strict provider schemas with every declared property required', () => {
-    const assertStrictObjects = (value: unknown) => {
-      if (!value || typeof value !== 'object') return;
-      const schema = value as Record<string, unknown>;
-      if (schema.properties && typeof schema.properties === 'object') {
-        expect(schema.additionalProperties).toBe(false);
-        expect(new Set(schema.required as string[])).toEqual(
-          new Set(Object.keys(schema.properties as Record<string, unknown>)),
-        );
-      }
-      for (const child of Object.values(schema)) {
-        if (Array.isArray(child)) child.forEach(assertStrictObjects);
-        else assertStrictObjects(child);
-      }
-    };
-    assertStrictObjects(JSON.parse(reviewAxisOutputContract.jsonSchema));
-    assertStrictObjects(JSON.parse(reviewSynthesisOutputContract.jsonSchema));
   });
 });

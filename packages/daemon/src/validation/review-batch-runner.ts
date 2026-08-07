@@ -343,11 +343,10 @@ export async function runReviewBatch(
           synthesis = 'model';
           break;
         } catch (error) {
-          synthesisHeadChanged ||= /reviewed HEAD changed/i.test(
-            error instanceof Error ? error.message : String(error),
-          );
+          const failure = failureFor(error);
+          synthesisHeadChanged ||= failure.kind === 'head-changed';
           synthesisInvalid ||= !synthesisHeadChanged;
-          if (synthesisHeadChanged) break;
+          if (synthesisHeadChanged || !failure.retryable) break;
         }
       }
     } else synthesisInvalid = true;

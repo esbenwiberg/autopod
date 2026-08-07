@@ -80,6 +80,21 @@ export interface DiffStats {
   linesRemoved: number;
 }
 
+/** A fail-closed canonical comparison for source-delivery finalization. */
+export type CanonicalDiffClassification =
+  | {
+      outcome: 'changed' | 'unchanged';
+      stats: DiffStats;
+      hostHead: string;
+      hostTree: string;
+    }
+  | {
+      outcome: 'unavailable';
+      code: 'BASE_UNAVAILABLE' | 'HOST_PROOF_MISMATCH' | 'GIT_FAILURE';
+      hostHead?: string;
+      hostTree?: string;
+    };
+
 export interface BranchDiffConfig {
   repoUrl: string;
   branch: string;
@@ -160,6 +175,16 @@ export interface WorktreeManager {
   ensureExcludes?(worktreePath: string, entries: string[]): Promise<void>;
   cleanup(worktreePath: string): Promise<void>;
   getDiffStats(worktreePath: string, baseBranch?: string, sinceCommit?: string): Promise<DiffStats>;
+  /**
+   * Strict canonical delta and host proof for a verified sandbox checkpoint.
+   * Unlike getDiffStats(), this must never return fail-soft zeroes.
+   */
+  classifyCanonicalDiff(
+    worktreePath: string,
+    baseCommit: string,
+    expectedHead: string,
+    expectedTree: string,
+  ): Promise<CanonicalDiffClassification>;
   /**
    * Strictly answer whether the current worktree differs from a base branch.
    * Unlike getDiffStats(), this should throw on git/resolve errors so callers

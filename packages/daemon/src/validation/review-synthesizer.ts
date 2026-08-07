@@ -5,10 +5,7 @@ import type {
   TaskReviewResult,
 } from '@autopod/shared';
 import { structuredFindingSourceId } from './finding-fingerprint.js';
-import {
-  normalizeProviderNullableFinding,
-  parseReviewStructuredJson,
-} from './review-structured-output.js';
+import { parseReviewStructuredJson } from './review-structured-output.js';
 
 export interface SynthesisDecision {
   action: 'accept' | 'reject' | 'merge';
@@ -25,7 +22,7 @@ export interface SynthesisResult {
 
 export function reviewSynthesisPrompt(candidates: ReviewFindingCandidate[]): string {
   return `You are a review-finding synthesizer. Return JSON only: {"decisions":[{"action":"accept|reject|merge","sourceIds":["finding id"],"reason":"brief reason","finding":{...}}]}.
-Use only the candidate findings below. Every decision must cite one or more sourceIds. An accepted finding must exactly equal its one source; a merged finding may only use field values already present in one of its sources. Never invent a claim, path, severity, evidence, or remediation.\nCandidates:\n${JSON.stringify(candidates)}`;
+Use only the candidate findings below. Every decision must cite one or more sourceIds. An accepted finding must exactly equal its one source; a merged finding may only use field values already present in one of its sources. Never invent a claim, path, severity, evidence, or remediation. Use null for an inapplicable reason or finding and for an absent line or symbol.\nCandidates:\n${JSON.stringify(candidates)}`;
 }
 
 function equalFinding(a: ReviewFindingCandidate, b: ReviewFindingCandidate): boolean {
@@ -75,6 +72,31 @@ function supportedMerge(
   );
 }
 
+function normalizeSynthesisDecision(raw: Record<string, unknown>): Record<string, unknown> {
+  const { reason, finding: rawFinding, ...fields } = raw;
+  const decision: Record<string, unknown> = {
+    ...fields,
+    ...(reason !== null && reason !== undefined && { reason }),
+  };
+  if (rawFinding === null || rawFinding === undefined) return decision;
+  if (typeof rawFinding !== 'object' || Array.isArray(rawFinding)) {
+    decision.finding = rawFinding;
+    return decision;
+  }
+
+  const finding = rawFinding as Record<string, unknown>;
+  if ('source' in finding) decision.finding = { ...finding };
+  else {
+    const { line, symbol, ...findingFields } = finding;
+    decision.finding = {
+      ...findingFields,
+      ...(line !== null && line !== undefined && { line }),
+      ...(symbol !== null && symbol !== undefined && { symbol }),
+    };
+  }
+  return decision;
+}
+
 /** Validates that synthesis is purely a source-backed consolidation, never a new review. */
 export function parseSynthesis(
   stdout: string,
@@ -94,18 +116,13 @@ export function parseSynthesis(
   const used = new Set<string>();
   for (const raw of (parsed as { decisions: unknown[] }).decisions) {
     if (!raw || typeof raw !== 'object') throw new Error('invalid synthesis decision');
-    const rawDecision = raw as Record<string, unknown>;
+    const decision = normalizeSynthesisDecision(raw as Record<string, unknown>);
     if (
-      Object.keys(rawDecision).some(
+      Object.keys(decision).some(
         (key) => !['action', 'sourceIds', 'reason', 'finding'].includes(key),
       )
     )
       throw new Error('invalid synthesis decision');
-    const { reason, finding, ...decision } = rawDecision;
-    if (reason !== null) decision.reason = reason;
-    if (finding !== null)
-      decision.finding =
-        finding === undefined ? undefined : normalizeProviderNullableFinding(finding);
     const sourceIds = Array.isArray(decision.sourceIds) ? decision.sourceIds.map(String) : [];
     if (
       !sourceIds.length ||

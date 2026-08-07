@@ -14,6 +14,7 @@ export type CodexReviewErrorKind =
   | 'schema-invalid'
   | 'authentication-failed'
   | 'provider-unavailable'
+  | 'termination-failed'
   | 'timeout'
   | 'exec-error';
 
@@ -128,14 +129,14 @@ export async function runCodexReview(
     if (result.exitCode !== 0) {
       const output = result.stdout || result.stderr;
       const timedOut = /timed? out|timeout/i.test(output);
-      const authenticationFailed = /auth|credential|unauthorized|forbidden/i.test(output);
-      const providerUnavailable = /provider|model.*unavailable|offline|service unavailable/i.test(
-        output,
-      );
       const schemaInvalid =
         /invalid_json_schema|json schema.*(?:invalid|rejected)|schema.*(?:invalid|rejected)/i.test(
           output,
         );
+      const authenticationFailed = /auth|credential|unauthorized|forbidden/i.test(output);
+      const providerUnavailable = /provider|model.*unavailable|offline|service unavailable/i.test(
+        output,
+      );
       if (schemaInvalid)
         config.logger?.warn(
           { reviewerDiagnostic: 'INVALID_OUTPUT_SCHEMA', exitCode: result.exitCode },
@@ -188,7 +189,12 @@ export async function runCodexReview(
   } catch (err) {
     if (err instanceof CodexReviewError) throw err;
     const message = err instanceof Error ? err.message : String(err);
-    const kind = /timed? out|timeout/i.test(message) ? 'timeout' : 'exec-error';
+    const kind: CodexReviewErrorKind =
+      /exit was not observed after kill|kill did not complete/i.test(message)
+        ? 'termination-failed'
+        : /timed? out|timeout/i.test(message)
+          ? 'timeout'
+          : 'exec-error';
     throw new CodexReviewError({
       kind,
       message: `codex review ${kind === 'timeout' ? 'timed out' : 'failed'}: ${message}`,
