@@ -115,6 +115,14 @@ describe('normalizeQualityActivity', () => {
         callId: 'argv-call',
       },
     ]);
+    expect(normalizeQualityActivity(bashArgv(['sed', '-n', '1,40p', 'src/direct.ts']))).toEqual([
+      {
+        kind: 'inspection',
+        path: 'src/direct.ts',
+        source: 'shell-command',
+        callId: 'argv-call',
+      },
+    ]);
     expect(
       normalizeQualityActivity(bashArgv(['sh', '-lc', 'cat app.ts'], '/workspace/packages/web')),
     ).toEqual([

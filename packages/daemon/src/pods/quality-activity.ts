@@ -98,7 +98,20 @@ function structuredShellEvidence(
   if (isShell && flag === '-lc' && typeof script === 'string' && rest.length === 0) {
     return inspectedShellEvidence(script, cwd);
   }
-  return { paths: [], ambiguous: argv.some((argument) => looksLikeInspection(argument)) };
+  return inspectedArgvEvidence(argv, cwd);
+}
+
+function inspectedArgvEvidence(
+  argv: string[],
+  cwd: string,
+): { paths: string[]; ambiguous: boolean } {
+  const evidence = inspectedTokensEvidence(argv, cwd);
+  if (evidence.paths.length > 0 || evidence.ambiguous) return evidence;
+  return {
+    paths: [],
+    ambiguous:
+      argv.some((argument) => looksLikeInspection(argument)) || isInspectionProgram(argv[0]),
+  };
 }
 
 export function canonicalRepositoryPath(
@@ -197,10 +210,16 @@ function inspectedShellEvidence(
 
   const unwrapped = unwrapBashLoginCommand(tokens);
   if (unwrapped !== null) return inspectedShellEvidence(unwrapped, cwd);
-  if (tokens.length < 2) {
-    return { paths: [], ambiguous: looksLikeInspection(command) };
-  }
+  const evidence = inspectedTokensEvidence(tokens, cwd);
+  if (evidence.paths.length > 0 || evidence.ambiguous) return evidence;
+  return { paths: [], ambiguous: looksLikeInspection(command) };
+}
 
+function inspectedTokensEvidence(
+  tokens: string[],
+  cwd: string,
+): { paths: string[]; ambiguous: boolean } {
+  if (tokens.length < 2) return { paths: [], ambiguous: false };
   const [program, ...args] = tokens;
   let operands: string[];
 
@@ -223,16 +242,20 @@ function inspectedShellEvidence(
       operands = ripgrepOperands(args);
       break;
     default:
-      return { paths: [], ambiguous: looksLikeInspection(command) };
+      return { paths: [], ambiguous: false };
   }
 
   if (operands.length === 0 || operands.some((operand) => operand === '-')) {
-    return { paths: [], ambiguous: looksLikeInspection(command) };
+    return { paths: [], ambiguous: isInspectionProgram(program) };
   }
   const paths = operands.map((operand) => canonicalRepositoryPath(operand, cwd));
   return paths.every((path): path is string => path !== null)
     ? { paths: [...new Set(paths)], ambiguous: false }
     : { paths: [], ambiguous: true };
+}
+
+function isInspectionProgram(program: string | undefined): boolean {
+  return ['cat', 'head', 'tail', 'sed', 'rg', 'grep'].includes(program ?? '');
 }
 
 function unwrapBashLoginCommand(tokens: string[]): string | null {
