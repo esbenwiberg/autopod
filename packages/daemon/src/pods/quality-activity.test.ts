@@ -144,6 +144,16 @@ describe('normalizeQualityActivity', () => {
     expect(
       normalizeQualityActivityEvidence(bashArgv(['bash', '-lc', 'cat', 'src/app.ts'])),
     ).toEqual({ activities: [], ambiguousInspection: true });
+    expect(normalizeQualityActivityEvidence(bashArgv(['bash']))).toEqual({
+      activities: [],
+      ambiguousInspection: true,
+    });
+    expect(
+      normalizeQualityActivityEvidence(bashArgv(['bash', '-lc', 'echo $(cat src/app.ts)'])),
+    ).toEqual({ activities: [], ambiguousInspection: true });
+    expect(
+      normalizeQualityActivityEvidence(bashArgv(['sh', '-lc', 'echo `cat src/app.ts`'])),
+    ).toEqual({ activities: [], ambiguousInspection: true });
     expect(
       normalizeQualityActivityEvidence({
         ...bash('cat src/app.ts'),

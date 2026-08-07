@@ -93,18 +93,18 @@ function structuredShellEvidence(
   if (!Object.hasOwn(event.input, 'argv')) return null;
   const argv = stringArrayInput(event, 'argv');
   if (argv === null) {
-    const command = stringInput(event, 'command');
-    return { paths: [], ambiguous: command !== undefined && looksLikeInspection(command) };
+    return { paths: [], ambiguous: true };
   }
+  if (argv.length === 0) return { paths: [], ambiguous: true };
   const [program, flag, script, ...rest] = argv;
   const isShell =
     program === 'bash' || program === '/bin/bash' || program === 'sh' || program === '/bin/sh';
   if (isShell && flag === '-lc' && typeof script === 'string' && rest.length === 0) {
-    return inspectedShellEvidence(script, cwd);
+    return inspectedShellEvidence(script, cwd, true);
   }
   // A shell invocation with any other argv shape cannot prove where its script
   // begins or whether it is read-only. Do not fall back to its display command.
-  if (isShell) return { paths: [], ambiguous: argv.length > 1 };
+  if (isShell) return { paths: [], ambiguous: true };
   return inspectedArgvEvidence(argv, cwd);
 }
 
@@ -207,16 +207,19 @@ function stringArrayInput(event: AgentToolUseEvent, key: string): string[] | nul
 function inspectedShellEvidence(
   command: string,
   cwd: string,
+  structuredWrapper = false,
 ): { paths: string[]; ambiguous: boolean } {
   if (hasUnsafeShellExpansion(command)) {
-    return { paths: [], ambiguous: looksLikeInspection(command) };
+    return { paths: [], ambiguous: structuredWrapper || looksLikeInspection(command) };
   }
   const compound = splitReadOnlyCompound(command);
   if (compound !== null) {
-    if (compound.length === 0) return { paths: [], ambiguous: looksLikeInspection(command) };
-    const parts = compound.map((part) => inspectedShellEvidence(part, cwd));
+    if (compound.length === 0) {
+      return { paths: [], ambiguous: structuredWrapper || looksLikeInspection(command) };
+    }
+    const parts = compound.map((part) => inspectedShellEvidence(part, cwd, structuredWrapper));
     if (parts.some((part) => part.ambiguous || part.paths.length === 0)) {
-      return { paths: [], ambiguous: looksLikeInspection(command) };
+      return { paths: [], ambiguous: structuredWrapper || looksLikeInspection(command) };
     }
     return {
       paths: [...new Set(parts.flatMap((part) => part.paths))],
@@ -226,7 +229,7 @@ function inspectedShellEvidence(
 
   const tokens = tokenizeShell(command);
   if (!tokens) {
-    return { paths: [], ambiguous: looksLikeInspection(command) };
+    return { paths: [], ambiguous: structuredWrapper || looksLikeInspection(command) };
   }
 
   const evidence = inspectedTokensEvidence(tokens, cwd);
