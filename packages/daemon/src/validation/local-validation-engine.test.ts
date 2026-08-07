@@ -1097,6 +1097,44 @@ describe('validate() — hasWebUi gating', () => {
     }));
   }
 
+  it('provider-compatible council completes five axes and synthesis', async () => {
+    vi.mocked(runCodexReview).mockResolvedValue({
+      stdout: JSON.stringify({ status: 'pass', reasoning: 'clean', issues: [] }),
+      tokenUsage: { inputTokens: 100, outputTokens: 20 },
+    });
+    vi.mocked(runContainerReviewer).mockImplementation(async ({ prompt, outputContract }) => {
+      expect(outputContract).toBeDefined();
+      return {
+        stdout: prompt.includes('synthesizer')
+          ? JSON.stringify({ decisions: [] })
+          : JSON.stringify({ findings: [] }),
+        tokenUsage: { inputTokens: 10, outputTokens: 2 },
+      };
+    });
+
+    const result = await createLocalValidationEngine(stubContainerManager()).validate(
+      baseConfig({
+        reviewerModel: 'gpt-5.6-sol',
+        reviewerProvider: 'openai',
+        diff: changedDiff,
+        validationSuite: 'full',
+        reviewDepth: 'deep',
+        startCommand: '',
+        smokePages: [],
+      }),
+    );
+
+    expect(runContainerReviewer).toHaveBeenCalledTimes(6);
+    expect(result.taskReview?.reviewBatch).toMatchObject({
+      quality: 'healthy',
+      synthesis: 'model',
+      axes: expect.arrayContaining([expect.objectContaining({ status: 'completed', attempts: 1 })]),
+    });
+    expect(result.taskReview?.reviewBatch?.axes).toHaveLength(5);
+    expect(result.taskReview?.reviewBatch?.degradationReasons).toBeUndefined();
+    expect(result.taskReview?.tokenUsage).toMatchObject({ inputTokens: 160, outputTokens: 32 });
+  });
+
   it('review council keeps a failed first gate fail-closed and retries invalid synthesis', async () => {
     vi.mocked(runClaudeCli).mockResolvedValue({
       stdout: JSON.stringify({ status: 'fail', reasoning: 'blocked', issues: ['real blocker'] }),

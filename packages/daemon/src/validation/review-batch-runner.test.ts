@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
 import { structuredFindingSourceId } from './finding-fingerprint.js';
 import { createFrozenReviewPacket, runReviewBatch } from './review-batch-runner.js';
+import { CodexReviewError } from './review-codex-runner.js';
 
 const packet = () =>
   createFrozenReviewPacket({
@@ -204,6 +205,61 @@ describe('runReviewBatch', () => {
         retryable: false,
       },
     });
+  });
+
+  it('marks an invalid provider schema non-retryable without persisting raw diagnostics', async () => {
+    let calls = 0;
+    const batch = await runReviewBatch({
+      packet: packet(),
+      model: 'test',
+      execute: async () => {
+        calls++;
+        throw new CodexReviewError({
+          kind: 'schema-invalid',
+          message: 'codex review rejected the configured output schema',
+          stderr: 'private provider diagnostic payload',
+        });
+      },
+    });
+    expect(calls).toBe(5);
+    expect(batch.axes).toHaveLength(5);
+    expect(batch.axes).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          status: 'unavailable',
+          attempts: 1,
+          error: 'Reviewer output schema is invalid for the configured provider',
+          failure: {
+            kind: 'runner-failed',
+            code: 'REVIEW_SCHEMA_INVALID',
+            message: 'Reviewer output schema is invalid for the configured provider',
+            retryable: false,
+          },
+        }),
+      ]),
+    );
+    expect(JSON.stringify(batch)).not.toContain('private provider diagnostic payload');
+  });
+
+  it('does not retry a permanent synthesis schema rejection', async () => {
+    let synthesisCalls = 0;
+    const batch = await runReviewBatch({
+      packet: packet(),
+      model: 'test',
+      execute: async () => ({ stdout: '{"findings":[]}' }),
+      synthesize: async () => {
+        synthesisCalls++;
+        throw new CodexReviewError({
+          kind: 'schema-invalid',
+          message: 'codex review rejected the configured output schema',
+          stderr: 'private synthesis diagnostic payload',
+        });
+      },
+    });
+    expect(synthesisCalls).toBe(1);
+    expect(batch.synthesis).toBe('deterministic-fallback');
+    expect(batch.degradationReasons).toContain('SYNTHESIS_INVALID');
+    expect(JSON.stringify(batch)).not.toContain('private synthesis diagnostic payload');
   });
 
   it('shares one deadline across axis calls and skips synthesis after an unavailable axis', async () => {

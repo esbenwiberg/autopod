@@ -10,8 +10,11 @@ const findingSchema = z
   .object({
     severity: z.enum(['MEDIUM', 'HIGH', 'CRITICAL']),
     path: bounded(1_024),
-    line: z.number().int().positive().optional(),
-    symbol: bounded(512).optional(),
+    line: z.preprocess(
+      (value) => (value === null ? undefined : value),
+      z.number().int().positive().optional(),
+    ),
+    symbol: z.preprocess((value) => (value === null ? undefined : value), bounded(512).optional()),
     claim: bounded(4_000),
     evidence: bounded(8_000),
     remediation: bounded(4_000),
@@ -28,6 +31,63 @@ export interface ReviewerOutputContract {
   jsonSchema: string;
 }
 
+const nullableJsonSchema = (schema: Record<string, unknown>) => ({
+  anyOf: [schema, { type: 'null' }],
+});
+
+const axisFindingProperties = {
+  severity: { type: 'string', enum: ['MEDIUM', 'HIGH', 'CRITICAL'] },
+  path: { type: 'string', minLength: 1, maxLength: 1024 },
+  line: nullableJsonSchema({ type: 'integer', minimum: 1 }),
+  symbol: nullableJsonSchema({ type: 'string', minLength: 1, maxLength: 512 }),
+  claim: { type: 'string', minLength: 1, maxLength: 4000 },
+  evidence: { type: 'string', minLength: 1, maxLength: 8000 },
+  remediation: { type: 'string', minLength: 1, maxLength: 4000 },
+  confidence: { type: 'number', minimum: 0, maximum: 1 },
+};
+
+const structuredSynthesisFindingSchema = {
+  type: 'object',
+  additionalProperties: false,
+  required: [
+    'id',
+    'axis',
+    'severity',
+    'path',
+    'line',
+    'symbol',
+    'claim',
+    'evidence',
+    'remediation',
+    'confidence',
+  ],
+  properties: {
+    id: { type: 'string', minLength: 1, maxLength: 1024 },
+    axis: {
+      type: 'string',
+      enum: [
+        'contract_completeness',
+        'security_authority',
+        'lifecycle_reliability',
+        'persistence_reproducibility',
+        'tests_integration',
+      ],
+    },
+    ...axisFindingProperties,
+  },
+};
+
+const initialSynthesisFindingSchema = {
+  type: 'object',
+  additionalProperties: false,
+  required: ['id', 'source', 'issue'],
+  properties: {
+    id: { type: 'string', minLength: 1, maxLength: 1024 },
+    source: { type: 'string', enum: ['initial-review'] },
+    issue: { type: 'string', minLength: 1, maxLength: 8000 },
+  },
+};
+
 export const reviewAxisOutputContract: ReviewerOutputContract = {
   name: 'review-axis-v1',
   jsonSchema: JSON.stringify({
@@ -41,17 +101,8 @@ export const reviewAxisOutputContract: ReviewerOutputContract = {
         items: {
           type: 'object',
           additionalProperties: false,
-          required: ['severity', 'path', 'claim', 'evidence', 'remediation', 'confidence'],
-          properties: {
-            severity: { type: 'string', enum: ['MEDIUM', 'HIGH', 'CRITICAL'] },
-            path: { type: 'string', minLength: 1, maxLength: 1024 },
-            line: { type: 'integer', minimum: 1 },
-            symbol: { type: 'string', minLength: 1, maxLength: 512 },
-            claim: { type: 'string', minLength: 1, maxLength: 4000 },
-            evidence: { type: 'string', minLength: 1, maxLength: 8000 },
-            remediation: { type: 'string', minLength: 1, maxLength: 4000 },
-            confidence: { type: 'number', minimum: 0, maximum: 1 },
-          },
+          required: Object.keys(axisFindingProperties),
+          properties: axisFindingProperties,
         },
       },
     },
@@ -72,12 +123,23 @@ export const reviewSynthesisOutputContract: ReviewerOutputContract = {
         items: {
           type: 'object',
           additionalProperties: false,
-          required: ['action', 'sourceIds'],
+          required: ['action', 'sourceIds', 'reason', 'finding'],
           properties: {
             action: { type: 'string', enum: ['accept', 'reject', 'merge'] },
-            sourceIds: { type: 'array', minItems: 1, maxItems: 101, items: { type: 'string' } },
-            reason: { type: 'string', minLength: 1, maxLength: 4000 },
-            finding: { type: 'object' },
+            sourceIds: {
+              type: 'array',
+              minItems: 1,
+              maxItems: 101,
+              items: { type: 'string', minLength: 1, maxLength: 1024 },
+            },
+            reason: nullableJsonSchema({ type: 'string', minLength: 1, maxLength: 4000 }),
+            finding: {
+              anyOf: [
+                initialSynthesisFindingSchema,
+                structuredSynthesisFindingSchema,
+                { type: 'null' },
+              ],
+            },
           },
         },
       },
@@ -96,7 +158,13 @@ export class ReviewStructuredOutputError extends Error {
 export function parseAxisResponse(stdout: string, axis: ReviewAxis): StructuredReviewFinding[] {
   const parsed = axisResponseSchema.safeParse(parseReviewStructuredJson(stdout));
   if (!parsed.success) throw new ReviewStructuredOutputError();
-  return parsed.data.findings.map((finding) => ({ ...finding, axis, id: '' }));
+  return parsed.data.findings.map(({ line, symbol, ...finding }) => ({
+    ...finding,
+    ...(line !== undefined && { line }),
+    ...(symbol !== undefined && { symbol }),
+    axis,
+    id: '',
+  }));
 }
 
 /** Shared transport-only parser for every frozen review protocol response. */

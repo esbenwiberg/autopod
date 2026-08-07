@@ -3,6 +3,8 @@ import {
   MAX_REVIEW_RESPONSE_BYTES,
   ReviewStructuredOutputError,
   parseAxisResponse,
+  reviewAxisOutputContract,
+  reviewSynthesisOutputContract,
 } from './review-structured-output.js';
 
 const finding = {
@@ -21,7 +23,41 @@ const parse = (value: unknown) =>
     'security_authority',
   );
 
+function asRecord(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === 'object' && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : null;
+}
+
+function expectProviderCompatibleSchema(value: unknown): void {
+  const record = asRecord(value);
+  if (!record) return;
+
+  if (record.type === 'object') {
+    expect(record.additionalProperties).toBe(false);
+    const properties = asRecord(record.properties) ?? {};
+    const required = Array.isArray(record.required) ? record.required : [];
+    expect([...required].sort()).toEqual(Object.keys(properties).sort());
+  }
+
+  const properties = asRecord(record.properties);
+  if (properties) Object.values(properties).forEach(expectProviderCompatibleSchema);
+  if (record.items) expectProviderCompatibleSchema(record.items);
+  if (Array.isArray(record.anyOf)) record.anyOf.forEach(expectProviderCompatibleSchema);
+}
+
 describe('parseAxisResponse', () => {
+  it('emits provider-compatible schema contracts', () => {
+    expectProviderCompatibleSchema(JSON.parse(reviewAxisOutputContract.jsonSchema));
+    expectProviderCompatibleSchema(JSON.parse(reviewSynthesisOutputContract.jsonSchema));
+  });
+
+  it('normalizes nullable optional fields from the provider transport', () => {
+    const [normalized] = parse({ findings: [{ ...finding, line: null, symbol: null }] });
+    expect(normalized).not.toHaveProperty('line');
+    expect(normalized).not.toHaveProperty('symbol');
+  });
+
   it.each([
     { findings: [finding] },
     { result: JSON.stringify({ findings: [finding] }) },

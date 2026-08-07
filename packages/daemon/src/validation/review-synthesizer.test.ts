@@ -15,6 +15,24 @@ const finding = (id: string, claim = 'missing guard'): StructuredReviewFinding =
 });
 
 describe('parseSynthesis', () => {
+  it('normalizes nullable transport without weakening provenance', () => {
+    const a = finding('a');
+    const result = parseSynthesis(
+      JSON.stringify({
+        decisions: [
+          {
+            action: 'accept',
+            sourceIds: ['a'],
+            reason: null,
+            finding: { ...a, line: null, symbol: null },
+          },
+        ],
+      }),
+      [a],
+    );
+    expect(result.accepted).toEqual([a]);
+  });
+
   it('persists source-backed accepted, rejected, and merged decisions', () => {
     const a = finding('a');
     const b = finding('b');

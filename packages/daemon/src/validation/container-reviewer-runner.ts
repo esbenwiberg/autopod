@@ -8,14 +8,28 @@ import { type CodexReviewTokenUsage, runCodexReview } from './review-codex-runne
 import type { ReviewerOutputContract } from './review-structured-output.js';
 
 export class ContainerReviewerUnavailableError extends Error {
-  readonly kind: 'timeout' | 'termination-failed' | 'non-zero-exit' | 'exec-error';
+  readonly kind:
+    | 'timeout'
+    | 'termination-failed'
+    | 'non-zero-exit'
+    | 'schema-invalid'
+    | 'authentication-failed'
+    | 'provider-unavailable'
+    | 'exec-error';
   readonly stderr: string;
 
   constructor(
     message: string,
     options?: {
       cause?: unknown;
-      kind?: 'timeout' | 'termination-failed' | 'non-zero-exit' | 'exec-error';
+      kind?:
+        | 'timeout'
+        | 'termination-failed'
+        | 'non-zero-exit'
+        | 'schema-invalid'
+        | 'authentication-failed'
+        | 'provider-unavailable'
+        | 'exec-error';
       stderr?: string;
     },
   ) {
@@ -78,6 +92,7 @@ export async function runContainerReviewer(
       env: config.env,
       timeout: config.timeout,
       outputContract: config.outputContract,
+      logger: config.logger,
     });
   }
 
@@ -160,10 +175,32 @@ async function runClaudeContainerReview(
     const result = await collectCancellableReview(handle, config.timeout);
 
     if (result.exitCode !== 0) {
+      const diagnostic = result.stdout || result.stderr;
+      const schemaInvalid =
+        /invalid_json_schema|json schema.*(?:invalid|rejected)|schema.*(?:invalid|rejected)/i.test(
+          diagnostic,
+        );
+      const authenticationFailed = /auth|credential|unauthorized|forbidden/i.test(diagnostic);
+      const providerUnavailable = /provider|model.*unavailable|offline|service unavailable/i.test(
+        diagnostic,
+      );
+      if (schemaInvalid)
+        config.logger?.warn(
+          { reviewerDiagnostic: 'INVALID_OUTPUT_SCHEMA', exitCode: result.exitCode },
+          'claude reviewer rejected output schema',
+        );
       throw new ContainerReviewerUnavailableError(
-        `Container reviewer unavailable: claude CLI failed in pod container (exit=${result.exitCode}): ${result.stdout || result.stderr}`,
+        schemaInvalid
+          ? 'Container reviewer rejected the configured output schema'
+          : `Container reviewer unavailable: claude CLI failed in pod container (exit=${result.exitCode}): ${diagnostic}`,
         {
-          kind: 'non-zero-exit',
+          kind: schemaInvalid
+            ? 'schema-invalid'
+            : authenticationFailed
+              ? 'authentication-failed'
+              : providerUnavailable
+                ? 'provider-unavailable'
+                : 'non-zero-exit',
           stderr: result.stderr,
         },
       );

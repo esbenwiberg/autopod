@@ -8,7 +8,9 @@ import type {
   StructuredReviewFinding,
   TaskReviewResult,
 } from '@autopod/shared';
+import { ContainerReviewerUnavailableError } from './container-reviewer-runner.js';
 import { structuredFindingSourceId } from './finding-fingerprint.js';
+import { CodexReviewError } from './review-codex-runner.js';
 import { filterOutOfDiffFindings } from './review-finding-filter.js';
 import {
   REVIEW_VALIDATION_CODE,
@@ -130,6 +132,45 @@ function failureFor(error: unknown): ReviewFailure {
       message: error.message,
       retryable: true,
     };
+  if (
+    (error instanceof CodexReviewError && error.kind === 'schema-invalid') ||
+    (error instanceof ContainerReviewerUnavailableError && error.kind === 'schema-invalid')
+  )
+    return {
+      kind: 'runner-failed',
+      code: 'REVIEW_SCHEMA_INVALID',
+      message: 'Reviewer output schema is invalid for the configured provider',
+      retryable: false,
+    };
+  if (error instanceof CodexReviewError || error instanceof ContainerReviewerUnavailableError) {
+    if (error.kind === 'timeout')
+      return {
+        kind: 'timeout',
+        code: 'REVIEW_TIMEOUT',
+        message: 'Reviewer timed out',
+        retryable: true,
+      };
+    if (error.kind === 'termination-failed')
+      return {
+        kind: 'runner-failed',
+        code: 'REVIEW_RUNNER_TERMINATION_UNCONFIRMED',
+        message: 'Reviewer termination could not be confirmed',
+        retryable: false,
+      };
+    if (error.kind === 'authentication-failed' || error.kind === 'provider-unavailable')
+      return {
+        kind: 'provider-unavailable',
+        code: 'REVIEW_PROVIDER_UNAVAILABLE',
+        message: 'Reviewer provider is unavailable',
+        retryable: true,
+      };
+    return {
+      kind: 'runner-failed',
+      code: 'REVIEW_RUNNER_FAILED',
+      message: 'Reviewer runner failed',
+      retryable: true,
+    };
+  }
   const message = error instanceof Error ? error.message : String(error);
   if (/reviewed HEAD changed/i.test(message))
     return {
@@ -302,11 +343,10 @@ export async function runReviewBatch(
           synthesis = 'model';
           break;
         } catch (error) {
-          synthesisHeadChanged ||= /reviewed HEAD changed/i.test(
-            error instanceof Error ? error.message : String(error),
-          );
+          const failure = failureFor(error);
+          synthesisHeadChanged ||= failure.kind === 'head-changed';
           synthesisInvalid ||= !synthesisHeadChanged;
-          if (synthesisHeadChanged) break;
+          if (synthesisHeadChanged || !failure.retryable) break;
         }
       }
     } else synthesisInvalid = true;
