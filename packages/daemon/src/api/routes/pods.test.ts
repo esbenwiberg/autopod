@@ -24,9 +24,11 @@ import {
 import { createMemoryRepository } from '../../pods/memory-repository.js';
 import { createMemoryUsageRepository } from '../../pods/memory-usage-repository.js';
 import { createNudgeRepository } from '../../pods/nudge-repository.js';
-import { createQualityScoreRepository } from '../../pods/quality-score-repository.js';
-import { QUALITY_SCORE_ALGORITHM_VERSION } from '../../pods/quality-score-repository.js';
 import { createQualityScoreRecorder } from '../../pods/quality-score-recorder.js';
+import {
+  QUALITY_SCORE_ALGORITHM_VERSION,
+  createQualityScoreRepository,
+} from '../../pods/quality-score-repository.js';
 import { createProfileStore } from '../../profiles/index.js';
 import { CodexStreamParser } from '../../runtimes/codex-stream-parser.js';
 import { createSafetyEventsRepository } from '../../safety/safety-events-repository.js';
@@ -280,12 +282,12 @@ describe('GET /pods/:podId provider-attempt projection', () => {
       },
       'codex-structured-quality',
     );
-    expect(inspection).not.toBeNull();
+    if (!inspection) throw new Error('Codex inspection event was not parsed');
     eventRepo.insert({
       type: 'pod.agent_activity',
       timestamp: '2026-04-23T12:00:00.000Z',
       podId: 'codex-structured-quality',
-      event: inspection!,
+      event: inspection,
     });
     eventRepo.insert({
       type: 'pod.agent_activity',

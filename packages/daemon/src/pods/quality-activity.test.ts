@@ -182,9 +182,10 @@ describe('normalizeQualityActivity', () => {
       activities: [],
       ambiguousInspection: true,
     });
-    expect(
-      normalizeQualityActivityEvidence(bashArgv(['sh', '-lc', 'cat src/*.ts'])),
-    ).toEqual({ activities: [], ambiguousInspection: true });
+    expect(normalizeQualityActivityEvidence(bashArgv(['sh', '-lc', 'cat src/*.ts']))).toEqual({
+      activities: [],
+      ambiguousInspection: true,
+    });
   });
 
   it('does not make unrelated compound commands ambiguous', () => {
@@ -204,9 +205,17 @@ describe('normalizeQualityActivity', () => {
   });
 
   it('uses workdir when cwd is absent', () => {
-    const event = bashArgv(['bash', '-lc', 'cat app.ts'], '/workspace');
-    event.input = { ...event.input, workdir: '/workspace/packages/web' };
-    delete event.input.cwd;
+    const event: AgentEvent = {
+      type: 'tool_use',
+      timestamp: '2026-01-01T00:00:00.000Z',
+      tool: 'Bash',
+      input: {
+        call_id: 'workdir-call',
+        command: 'bash -lc cat app.ts',
+        argv: ['bash', '-lc', 'cat app.ts'],
+        workdir: '/workspace/packages/web',
+      },
+    };
     expect(normalizeQualityActivity(event)).toMatchObject([{ path: 'packages/web/app.ts' }]);
   });
 
