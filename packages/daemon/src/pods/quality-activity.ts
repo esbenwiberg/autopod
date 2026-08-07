@@ -66,7 +66,7 @@ export function normalizeQualityActivityEvidence(event: AgentEvent): QualityActi
   }
 
   const command = stringInput(event, 'command');
-  const cwd = stringInput(event, 'cwd') ?? WORKSPACE_ROOT;
+  const cwd = stringInput(event, 'cwd') ?? stringInput(event, 'workdir') ?? WORKSPACE_ROOT;
   const argvEvidence = structuredShellEvidence(event, cwd);
   const shellEvidence =
     argvEvidence ??
@@ -102,6 +102,9 @@ function structuredShellEvidence(
   if (isShell && flag === '-lc' && typeof script === 'string' && rest.length === 0) {
     return inspectedShellEvidence(script, cwd);
   }
+  // A shell invocation with any other argv shape cannot prove where its script
+  // begins or whether it is read-only. Do not fall back to its display command.
+  if (isShell) return { paths: [], ambiguous: argv.length > 1 };
   return inspectedArgvEvidence(argv, cwd);
 }
 
@@ -112,6 +115,10 @@ function inspectedArgvEvidence(
   if (argv.some(hasShellMeta)) {
     return { paths: [], ambiguous: isInspectionProgram(argv[0]) };
   }
+  // Only the explicit shell wrappers above are supported absolute executables.
+  // Treat every other absolute program as unresolved rather than silently
+  // counting a zero-read session as complete evidence.
+  if (argv[0]?.startsWith('/')) return { paths: [], ambiguous: true };
   const evidence = inspectedTokensEvidence(argv, cwd);
   if (evidence.paths.length > 0 || evidence.ambiguous) return evidence;
   return {
@@ -201,6 +208,9 @@ function inspectedShellEvidence(
   command: string,
   cwd: string,
 ): { paths: string[]; ambiguous: boolean } {
+  if (hasUnsafeShellExpansion(command)) {
+    return { paths: [], ambiguous: looksLikeInspection(command) };
+  }
   const compound = splitReadOnlyCompound(command);
   if (compound !== null) {
     if (compound.length === 0) return { paths: [], ambiguous: looksLikeInspection(command) };
@@ -224,6 +234,10 @@ function inspectedShellEvidence(
   const evidence = inspectedTokensEvidence(tokens, cwd);
   if (evidence.paths.length > 0 || evidence.ambiguous) return evidence;
   return { paths: [], ambiguous: looksLikeInspection(command) };
+}
+
+function hasUnsafeShellExpansion(command: string): boolean {
+  return [...command].some((character) => ['*', '?', '[', ']', '~'].includes(character));
 }
 
 function inspectedTokensEvidence(

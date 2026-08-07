@@ -162,6 +162,9 @@ describe('normalizeQualityActivity', () => {
       normalizeQualityActivityEvidence(bashArgv(['bash', '-lc', 'sed -i s/a/b/ src/app.ts'])),
     ).toEqual({ activities: [], ambiguousInspection: true });
     expect(
+      normalizeQualityActivityEvidence(bashArgv(['bash', '-lc', 'cat', 'src/app.ts'])),
+    ).toEqual({ activities: [], ambiguousInspection: true });
+    expect(
       normalizeQualityActivityEvidence({
         ...bash('cat src/app.ts'),
         input: { command: 'cat src/app.ts', argv: ['cat', 42] },
@@ -175,6 +178,13 @@ describe('normalizeQualityActivity', () => {
       activities: [],
       ambiguousInspection: true,
     });
+    expect(normalizeQualityActivityEvidence(bashArgv(['/usr/bin/cat', 'src/app.ts']))).toEqual({
+      activities: [],
+      ambiguousInspection: true,
+    });
+    expect(
+      normalizeQualityActivityEvidence(bashArgv(['sh', '-lc', 'cat src/*.ts'])),
+    ).toEqual({ activities: [], ambiguousInspection: true });
   });
 
   it('does not make unrelated compound commands ambiguous', () => {
@@ -191,6 +201,13 @@ describe('normalizeQualityActivity', () => {
         callId: 'call-1',
       },
     ]);
+  });
+
+  it('uses workdir when cwd is absent', () => {
+    const event = bashArgv(['bash', '-lc', 'cat app.ts'], '/workspace');
+    event.input = { ...event.input, workdir: '/workspace/packages/web' };
+    delete event.input.cwd;
+    expect(normalizeQualityActivity(event)).toMatchObject([{ path: 'packages/web/app.ts' }]);
   });
 
   it('normalizes native lowercase read, edit, and write tools', () => {
