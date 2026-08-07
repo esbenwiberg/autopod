@@ -143,6 +143,10 @@ describe('normalizeQualityActivity', () => {
     expect(normalizeQualityActivityEvidence(bash('/bin/bash -lc sed -n 1,40p src/app.ts'))).toEqual(
       { activities: [], ambiguousInspection: true },
     );
+    expect(normalizeQualityActivityEvidence(bash('sh -lc cat src/app.ts'))).toEqual({
+      activities: [],
+      ambiguousInspection: true,
+    });
     expect(
       normalizeQualityActivityEvidence(bashArgv(['bash', '-lc', 'cat src/app.ts | wc -l'])),
     ).toEqual({ activities: [], ambiguousInspection: true });

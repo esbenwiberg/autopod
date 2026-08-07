@@ -24,8 +24,8 @@ export interface QualityActivityEvidence {
 
 const WORKSPACE_ROOT = '/workspace';
 const INSPECTION_AFTER_CONTROL = /(?:^|&&|\|\||[;|])\s*(?:cat|head|tail|sed|rg|grep)(?:\s|$)/;
-const BASH_LOGIN_INSPECTION =
-  /^(?:\/bin\/)?bash\s+-lc\s+['"]?\s*(?:cat|head|tail|sed|rg|grep)(?:\s|$)/;
+const SHELL_LOGIN_INSPECTION =
+  /^(?:\/bin\/)?(?:bash|sh)\s+-lc\s+['"]?\s*(?:cat|head|tail|sed|rg|grep)(?:\s|$)/;
 const EXPANDING_DOUBLE_QUOTE_META = new Set(['$', '`', '\n', '\r']);
 const SHELL_META = new Set([
   ';',
@@ -243,7 +243,7 @@ function unwrapBashLoginCommand(tokens: string[]): string | null {
 }
 
 function looksLikeInspection(command: string): boolean {
-  return INSPECTION_AFTER_CONTROL.test(command) || BASH_LOGIN_INSPECTION.test(command);
+  return INSPECTION_AFTER_CONTROL.test(command) || SHELL_LOGIN_INSPECTION.test(command);
 }
 
 /** Split only simple `&&`/`;` sequences; every segment must later prove read-only. */
