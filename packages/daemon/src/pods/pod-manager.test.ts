@@ -346,6 +346,14 @@ function createMockWorktreeManager(): WorktreeManager {
     cleanup: vi.fn(async () => {}),
     ensureExcludes: vi.fn(async () => {}),
     getDiffStats: vi.fn(async () => ({ filesChanged: 3, linesAdded: 50, linesRemoved: 10 })),
+    classifyCanonicalDiff: vi.fn(
+      async (_worktreePath, _baseCommit, expectedHead, expectedTree) => ({
+        outcome: 'changed' as const,
+        stats: { filesChanged: 3, linesAdded: 50, linesRemoved: 10 },
+        hostHead: expectedHead,
+        hostTree: expectedTree,
+      }),
+    ),
     hasChangesAgainstBase: vi.fn(async () => true),
     getDiff: vi.fn(async () => 'diff --git a/file.ts b/file.ts\n+added line'),
     mergeBranch: vi.fn(async () => {}),
@@ -5101,6 +5109,135 @@ describe('PodManager', () => {
           finalStatus: 'complete',
           summary: expect.objectContaining({ filesChanged: 0 }),
         }),
+      );
+    });
+
+    it('classifies sandbox checkpoint committed uncommitted mixed and net-zero completion', async () => {
+      for (const outcome of ['changed', 'changed', 'changed', 'unchanged'] as const) {
+        const ctx = createTestContext(undefined, {
+          executionTarget: 'sandbox',
+          warmImageTag: 'registry.azurecr.io/test:latest',
+        });
+        (ctx.worktreeManager.classifyCanonicalDiff as ReturnType<typeof vi.fn>).mockResolvedValue(
+          outcome === 'changed'
+            ? {
+                outcome,
+                stats: { filesChanged: 2, linesAdded: 4, linesRemoved: 1 },
+                hostHead: 'c'.repeat(40),
+                hostTree: 'd'.repeat(40),
+              }
+            : {
+                outcome,
+                stats: { filesChanged: 0, linesAdded: 0, linesRemoved: 0 },
+                hostHead: 'c'.repeat(40),
+                hostTree: 'd'.repeat(40),
+              },
+        );
+        const manager = createPodManager(ctx.deps);
+        const pod = manager.createSession(
+          { profileName: 'test-profile', task: `sandbox ${outcome}`, skipValidation: false },
+          'user-1',
+        );
+        await manager.processPod(pod.id);
+        if (outcome === 'changed') {
+          expect(ctx.worktreeManager.classifyCanonicalDiff).toHaveBeenCalled();
+          expect(ctx.validationEngine.validate).toHaveBeenCalled();
+        } else {
+          expect(manager.getSession(pod.id).status).toBe('complete');
+          expect(ctx.validationEngine.validate).not.toHaveBeenCalled();
+        }
+      }
+    });
+
+    it('sandbox finalization retains recovery state when canonical change proof is unavailable', async () => {
+      const ctx = createTestContext(undefined, {
+        executionTarget: 'sandbox',
+        warmImageTag: 'registry.azurecr.io/test:latest',
+      });
+      (ctx.worktreeManager.classifyCanonicalDiff as ReturnType<typeof vi.fn>).mockResolvedValue({
+        outcome: 'unavailable',
+        code: 'HOST_PROOF_MISMATCH',
+        hostHead: 'bad-head',
+        hostTree: 'bad-tree',
+      });
+      const manager = createPodManager(ctx.deps);
+      const pod = manager.createSession(
+        { profileName: 'test-profile', task: 'proof', skipValidation: false },
+        'user-1',
+      );
+      await manager.processPod(pod.id);
+      const completed = manager.getSession(pod.id);
+      expect(completed.status).toBe('failed');
+      expect(completed.worktreeCompromised).toBe(true);
+      expect(ctx.validationEngine.validate).not.toHaveBeenCalled();
+      expect(ctx.containerManager.kill).not.toHaveBeenCalled();
+    });
+
+    it('sandbox finalization keeps start commit scope separate from PR base and fork semantics', async () => {
+      const ctx = createTestContext(undefined, {
+        executionTarget: 'sandbox',
+        warmImageTag: 'registry.azurecr.io/test:latest',
+      });
+      const manager = createPodManager(ctx.deps);
+      const pod = manager.createSession(
+        {
+          profileName: 'test-profile',
+          task: 'fork proof',
+          baseBranch: 'release',
+          skipValidation: false,
+        },
+        'user-1',
+      );
+      await manager.processPod(pod.id);
+      expect(ctx.worktreeManager.classifyCanonicalDiff).toHaveBeenCalledWith(
+        '/tmp/worktree/abc',
+        expect.any(String),
+        'c'.repeat(40),
+        'd'.repeat(40),
+      );
+      expect(ctx.validationEngine.validate).toHaveBeenCalled();
+    });
+
+    it('preserves local completion and canonical exclusion behavior', async () => {
+      const ctx = createTestContext();
+      (ctx.worktreeManager.getDiffStats as ReturnType<typeof vi.fn>).mockResolvedValue({
+        filesChanged: 0,
+        linesAdded: 0,
+        linesRemoved: 0,
+      });
+      const manager = createPodManager(ctx.deps);
+      const pod = manager.createSession(
+        { profileName: 'test-profile', task: 'local no-op' },
+        'user-1',
+      );
+      await manager.processPod(pod.id);
+      expect(manager.getSession(pod.id).status).toBe('complete');
+      expect(ctx.worktreeManager.classifyCanonicalDiff).not.toHaveBeenCalled();
+    });
+
+    it('records bounded sandbox finalization proof and decision telemetry', async () => {
+      const ctx = createTestContext(undefined, {
+        executionTarget: 'sandbox',
+        warmImageTag: 'registry.azurecr.io/test:latest',
+      });
+      const info = vi.fn();
+      ctx.deps.logger = { ...logger, info } as typeof logger;
+      const manager = createPodManager(ctx.deps);
+      const pod = manager.createSession(
+        { profileName: 'test-profile', task: 'telemetry', skipValidation: false },
+        'user-1',
+      );
+      await manager.processPod(pod.id);
+      expect(info).toHaveBeenCalledWith(
+        expect.objectContaining({
+          podId: pod.id,
+          checkpointSequence: expect.any(Number),
+          outcome: 'changed',
+          checkpointCommit: 'c'.repeat(12),
+          hostHead: 'c'.repeat(12),
+          lifecycleDecision: 'validate',
+        }),
+        'Sandbox finalization proof and decision',
       );
     });
 
@@ -10601,6 +10738,22 @@ describe('PodManager', () => {
       }
       return { manager, pod };
     }
+
+    it('retry PR preserves an affected materialized sandbox branch without claiming validation', async () => {
+      const ctx = createTestContext();
+      const { manager, pod } = await setupCompletePodForRetry(ctx);
+      ctx.podRepo.update(pod.id, { filesChanged: 0, lastValidationResult: null });
+
+      await manager.retryCreatePr(pod.id);
+
+      expect(ctx.worktreeManager.mergeBranch).toHaveBeenCalledWith(
+        expect.objectContaining({ targetBranch: pod.branch, maxDeletions: 0 }),
+      );
+      expect(ctx.prManager.createPr).toHaveBeenCalledWith(
+        expect.objectContaining({ branch: pod.branch }),
+      );
+      expect(manager.getSession(pod.id).lastValidationResult).toBeNull();
+    });
 
     it('flags worktreeCompromised and emits event when mergeBranch hits the guard', async () => {
       const ctx = createTestContext();

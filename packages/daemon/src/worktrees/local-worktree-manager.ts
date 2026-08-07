@@ -8,6 +8,7 @@ import { type DaemonGitHubAuth, DaemonGitHubAuthError } from '../github/daemon-g
 import type {
   BranchDiffConfig,
   BranchFolderContents,
+  CanonicalDiffClassification,
   CommitPendingChangesOptions,
   DiffStats,
   EnsureRemoteBranchConfig,
@@ -678,6 +679,49 @@ export class LocalWorktreeManager implements WorktreeManager {
     } catch (err) {
       this.logger.error({ err, worktreePath }, 'getDiffStats failed — returning zeros');
       return { filesChanged: 0, linesAdded: 0, linesRemoved: 0 };
+    }
+  }
+
+  async classifyCanonicalDiff(
+    worktreePath: string,
+    baseCommit: string,
+    expectedHead: string,
+    expectedTree: string,
+  ): Promise<CanonicalDiffClassification> {
+    let hostHead: string | undefined;
+    let hostTree: string | undefined;
+    try {
+      const baseResult = await git(['rev-parse', `${baseCommit}^{commit}`], { cwd: worktreePath });
+      if (!baseResult.stdout.trim()) return { outcome: 'unavailable', code: 'BASE_UNAVAILABLE' };
+    } catch {
+      return { outcome: 'unavailable', code: 'BASE_UNAVAILABLE' };
+    }
+
+    try {
+      const [headResult, treeResult] = await Promise.all([
+        git(['rev-parse', 'HEAD'], { cwd: worktreePath }),
+        git(['rev-parse', 'HEAD^{tree}'], { cwd: worktreePath }),
+      ]);
+      hostHead = headResult.stdout.trim();
+      hostTree = treeResult.stdout.trim();
+    } catch {
+      return { outcome: 'unavailable', code: 'GIT_FAILURE' };
+    }
+
+    if (hostHead !== expectedHead || hostTree !== expectedTree) {
+      return { outcome: 'unavailable', code: 'HOST_PROOF_MISMATCH', hostHead, hostTree };
+    }
+
+    try {
+      const stats = await this.getNormalizedDiffStats(worktreePath, [baseCommit, 'HEAD']);
+      return {
+        outcome: stats.filesChanged > 0 ? 'changed' : 'unchanged',
+        stats,
+        hostHead,
+        hostTree,
+      };
+    } catch {
+      return { outcome: 'unavailable', code: 'GIT_FAILURE', hostHead, hostTree };
     }
   }
 

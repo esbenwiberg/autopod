@@ -175,6 +175,14 @@ export function createMockWorktreeManager(): WorktreeManager {
     })),
     cleanup: vi.fn(async () => {}),
     getDiffStats: vi.fn(async () => ({ filesChanged: 3, linesAdded: 50, linesRemoved: 10 })),
+    classifyCanonicalDiff: vi.fn(
+      async (_worktreePath, _baseCommit, expectedHead, expectedTree) => ({
+        outcome: 'changed' as const,
+        stats: { filesChanged: 3, linesAdded: 50, linesRemoved: 10 },
+        hostHead: expectedHead,
+        hostTree: expectedTree,
+      }),
+    ),
     hasChangesAgainstBase: vi.fn(async () => true),
     getDiff: vi.fn(async () => 'diff --git a/file.ts b/file.ts\n+added line'),
     mergeBranch: vi.fn(async () => {}),

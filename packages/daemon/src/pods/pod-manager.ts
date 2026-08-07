@@ -9903,6 +9903,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
       // Sync workspace back to host worktree before any host-side git reads
       // Sandboxes are deliberately different: a verified Git checkpoint is the
       // source-delivery authority. Never mirror /workspace into the host tree.
+      let sandboxCheckpoint: WorkspaceCheckpointResult | undefined;
       if (pod.executionTarget === 'sandbox' && pod.containerId && pod.worktreePath) {
         emitActivityStatus(podId, 'Capturing verified sandbox workspace checkpoint…');
         const checkpoint = await checkpointSandboxWorkspaceForPod(pod);
@@ -9921,6 +9922,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           podId,
           `Verified sandbox checkpoint ${checkpoint.snapshotTree.slice(0, 12)} materialized.`,
         );
+        sandboxCheckpoint = checkpoint;
       }
       let syncSucceeded = true;
       let agentCommitsPushed = true;
@@ -9962,7 +9964,70 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         );
         return;
       }
-      if (pod.executionTarget !== 'sandbox' && pod.worktreePath) {
+      let sandboxCanonicalOutcome: 'changed' | 'unchanged' | 'unavailable' | undefined;
+      let sandboxHostProof: { head: string; tree: string } | undefined;
+      if (pod.executionTarget === 'sandbox') {
+        if (!pod.worktreePath || !pod.startCommitSha || !sandboxCheckpoint) {
+          sandboxCanonicalOutcome = 'unavailable';
+          logger.info(
+            {
+              podId,
+              attempt: pod.validationAttempts,
+              checkpointSequence: sandboxCheckpoint?.sequence ?? null,
+              baseCommit: pod.startCommitSha?.slice(0, 12) ?? null,
+              branch: pod.branch,
+              outcome: sandboxCanonicalOutcome,
+              code: !pod.startCommitSha ? 'BASE_UNAVAILABLE' : 'CHECKPOINT_UNAVAILABLE',
+              lifecycleDecision: 'park_failed',
+              cleanupSelected: false,
+              validationSelected: false,
+              prEligible: false,
+            },
+            'Sandbox finalization proof and decision',
+          );
+          parkOnWorktreeSyncFailure(
+            podId,
+            'Sandbox finalization proof is unavailable before change classification.',
+          );
+          return;
+        }
+        const classification = await worktreeManager.classifyCanonicalDiff(
+          pod.worktreePath,
+          pod.startCommitSha,
+          sandboxCheckpoint.snapshotCommit,
+          sandboxCheckpoint.snapshotTree,
+        );
+        sandboxCanonicalOutcome = classification.outcome;
+        if (classification.outcome === 'unavailable') {
+          logger.info(
+            {
+              podId,
+              attempt: pod.validationAttempts,
+              checkpointSequence: sandboxCheckpoint.sequence,
+              baseCommit: pod.startCommitSha.slice(0, 12),
+              branch: pod.branch,
+              checkpointCommit: sandboxCheckpoint.snapshotCommit.slice(0, 12),
+              checkpointTree: sandboxCheckpoint.snapshotTree.slice(0, 12),
+              hostHead: classification.hostHead?.slice(0, 12) ?? null,
+              hostTree: classification.hostTree?.slice(0, 12) ?? null,
+              outcome: classification.outcome,
+              code: classification.code,
+              lifecycleDecision: 'park_failed',
+              cleanupSelected: false,
+              validationSelected: false,
+              prEligible: false,
+            },
+            'Sandbox finalization proof and decision',
+          );
+          parkOnWorktreeSyncFailure(
+            podId,
+            `Sandbox finalization proof unavailable (${classification.code}).`,
+          );
+          return;
+        }
+        podRepo.update(podId, classification.stats);
+        sandboxHostProof = { head: classification.hostHead, tree: classification.hostTree };
+      } else if (pod.worktreePath) {
         const profileForCommit = profileStore.get(pod.profileName);
         try {
           const committed = await worktreeManager.commitPendingChangesWithGeneratedMessage(
@@ -10055,7 +10120,10 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
       // the parent branch's changes need validation even when the forked agent adds nothing.
       const refreshed = podRepo.getOrThrow(podId);
       const profile2 = profileStore.get(refreshed.profileName);
-      const noChanges = Boolean(pod.worktreePath) && refreshed.filesChanged === 0;
+      const noChanges =
+        pod.executionTarget === 'sandbox'
+          ? sandboxCanonicalOutcome === 'unchanged'
+          : Boolean(pod.worktreePath) && refreshed.filesChanged === 0;
       const isForkSession =
         Boolean(refreshed.linkedPodId) ||
         (refreshed.baseBranch != null && refreshed.baseBranch !== profile2.defaultBranch);
@@ -10063,6 +10131,40 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
       const noChangesAfterRework =
         noChanges && refreshed.lastCorrectionMessage?.startsWith(REWORK_IN_PROGRESS_PREFIX);
       const validationDisabled = isPodValidationDisabled(refreshed);
+      // A sandbox checkpoint is source-delivery authority. A non-empty
+      // canonical snapshot must always receive blocking validation; the
+      // skip-validation preference cannot turn verified deliverable work into
+      // an unvalidated terminal result.
+      const forceSandboxValidation =
+        refreshed.executionTarget === 'sandbox' && sandboxCanonicalOutcome === 'changed';
+      if (pod.executionTarget === 'sandbox' && sandboxCheckpoint && sandboxCanonicalOutcome) {
+        logger.info(
+          {
+            podId,
+            attempt: refreshed.validationAttempts,
+            checkpointSequence: sandboxCheckpoint.sequence,
+            baseCommit: refreshed.startCommitSha?.slice(0, 12) ?? null,
+            branch: refreshed.branch,
+            checkpointCommit: sandboxCheckpoint.snapshotCommit.slice(0, 12),
+            checkpointTree: sandboxCheckpoint.snapshotTree.slice(0, 12),
+            hostHead: sandboxHostProof?.head.slice(0, 12) ?? null,
+            hostTree: sandboxHostProof?.tree.slice(0, 12) ?? null,
+            outcome: sandboxCanonicalOutcome,
+            stats: {
+              filesChanged: refreshed.filesChanged,
+              linesAdded: refreshed.linesAdded,
+              linesRemoved: refreshed.linesRemoved,
+            },
+            predicateFlags: { noChanges, isForkSession, isScheduledSession, validationDisabled },
+            lifecycleDecision:
+              noChanges && !isForkSession && !validationDisabled ? 'complete' : 'validate',
+            cleanupSelected: noChanges && !isForkSession && !validationDisabled,
+            validationSelected: forceSandboxValidation || !noChanges || isForkSession,
+            prEligible: forceSandboxValidation || !noChanges || isForkSession,
+          },
+          'Sandbox finalization proof and decision',
+        );
+      }
       if (noChangesAfterRework && !validationDisabled && !isForkSession && !isScheduledSession) {
         const message = 'Rework produced no file changes.';
         logger.info({ podId }, 'Failing pod because rework produced no file changes');
@@ -10086,7 +10188,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         return;
       }
 
-      if (validationDisabled || (noChanges && !isForkSession)) {
+      if ((!forceSandboxValidation && validationDisabled) || (noChanges && !isForkSession)) {
         if (noChanges) {
           logger.info({ podId }, 'Skipping validation — no files changed');
           emitActivityStatus(podId, 'No files changed — skipping validation');
