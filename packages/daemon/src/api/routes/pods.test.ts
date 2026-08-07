@@ -79,6 +79,7 @@ function createTestDb(): Database.Database {
 describe('GET /pods/:podId provider-attempt projection', () => {
   let db: Database.Database;
   let app: FastifyInstance;
+  let qualityScoreRepo: ReturnType<typeof createQualityScoreRepository>;
 
   beforeEach(async () => {
     db = createTestDb();
@@ -96,6 +97,7 @@ describe('GET /pods/:podId provider-attempt projection', () => {
     const podRepo = createPodRepository(db);
     const eventRepo = createEventRepository(db);
     const escalationRepo = createEscalationRepository(db);
+    qualityScoreRepo = createQualityScoreRepository(db);
     const podManager = {
       getSession: (podId: string) => podRepo.getOrThrow(podId),
       listSessions: () => [],
@@ -108,7 +110,7 @@ describe('GET /pods/:podId provider-attempt projection', () => {
       undefined,
       podRepo,
       escalationRepo,
-      undefined,
+      qualityScoreRepo,
       undefined,
       db,
     );
@@ -268,6 +270,33 @@ describe('GET /pods/:podId provider-attempt projection', () => {
         },
       },
     });
+    qualityScoreRepo.insert({
+      podId: 'codex-structured-quality',
+      score: 75,
+      algorithmVersion: QUALITY_SCORE_ALGORITHM_VERSION,
+      inspectionAvailability: 'available',
+      inspectionUnavailableReason: null,
+      ambiguousInspectionCount: 0,
+      readCount: 1,
+      editCount: 1,
+      modifiedFileCount: 1,
+      readEditRatio: 1,
+      editsWithoutPriorRead: 0,
+      userInterrupts: 0,
+      editChurnCount: 0,
+      tellsCount: 0,
+      prFixAttempts: 0,
+      validationPassed: null,
+      inputTokens: 0,
+      outputTokens: 0,
+      costUsd: 0,
+      runtime: 'codex',
+      profileName: 'test-profile',
+      model: 'gpt-5.6-sol',
+      finalStatus: 'complete',
+      completedAt: '2026-04-23T12:02:00.000Z',
+      computedAt: '2026-04-23T12:02:00.000Z',
+    });
     eventRepo.insert({
       type: 'pod.agent_activity',
       timestamp: '2026-04-23T12:01:00.000Z',
@@ -289,6 +318,7 @@ describe('GET /pods/:podId provider-attempt projection', () => {
       inspectionAvailability: 'available',
       readCount: 1,
       editsWithoutPriorRead: 0,
+      score: 75,
     });
   });
 

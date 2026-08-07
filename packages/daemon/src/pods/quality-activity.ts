@@ -90,8 +90,12 @@ function structuredShellEvidence(
   event: AgentToolUseEvent,
   cwd: string,
 ): { paths: string[]; ambiguous: boolean } | null {
+  if (!Object.hasOwn(event.input, 'argv')) return null;
   const argv = stringArrayInput(event, 'argv');
-  if (argv === null) return null;
+  if (argv === null) {
+    const command = stringInput(event, 'command');
+    return { paths: [], ambiguous: command !== undefined && looksLikeInspection(command) };
+  }
   const [program, flag, script, ...rest] = argv;
   const isShell =
     program === 'bash' || program === '/bin/bash' || program === 'sh' || program === '/bin/sh';
@@ -105,6 +109,9 @@ function inspectedArgvEvidence(
   argv: string[],
   cwd: string,
 ): { paths: string[]; ambiguous: boolean } {
+  if (argv.some(hasShellMeta)) {
+    return { paths: [], ambiguous: isInspectionProgram(argv[0]) };
+  }
   const evidence = inspectedTokensEvidence(argv, cwd);
   if (evidence.paths.length > 0 || evidence.ambiguous) return evidence;
   return {
@@ -112,6 +119,10 @@ function inspectedArgvEvidence(
     ambiguous:
       argv.some((argument) => looksLikeInspection(argument)) || isInspectionProgram(argv[0]),
   };
+}
+
+function hasShellMeta(argument: string): boolean {
+  return [...argument].some((character) => SHELL_META.has(character));
 }
 
 export function canonicalRepositoryPath(

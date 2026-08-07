@@ -159,7 +159,7 @@ describe('CodexStreamParser', () => {
               id: 'public-call',
               type: 'command_execution',
               command: ['/bin/bash', '-lc', 'sed -n 1,80p src/app.ts'],
-              cwd: '/workspace',
+              workdir: '/workspace/packages/daemon',
             },
           }),
         ]),
@@ -177,7 +177,8 @@ describe('CodexStreamParser', () => {
             call_id: 'public-call',
             command: '/bin/bash -lc sed -n 1,80p src/app.ts',
             argv: ['/bin/bash', '-lc', 'sed -n 1,80p src/app.ts'],
-            cwd: '/workspace',
+            workdir: '/workspace/packages/daemon',
+            cwd: '/workspace/packages/daemon',
           },
         },
       ]);
@@ -204,6 +205,28 @@ describe('CodexStreamParser', () => {
           call_id: 'rollout-call',
           command: 'sh -lc cat src/app.ts',
           argv: ['sh', '-lc', 'cat src/app.ts'],
+          workdir: '/workspace/packages/daemon',
+          cwd: '/workspace/packages/daemon',
+        },
+      });
+
+      expect(
+        CodexStreamParser.mapEvent(
+          {
+            id: 's',
+            msg: {
+              type: 'exec_command_begin',
+              call_id: 'legacy-call',
+              command: ['cat', 'src/app.ts'],
+              workdir: '/workspace/packages/daemon',
+            },
+          },
+          'pod-1',
+        ),
+      ).toMatchObject({
+        input: {
+          call_id: 'legacy-call',
+          argv: ['cat', 'src/app.ts'],
           workdir: '/workspace/packages/daemon',
           cwd: '/workspace/packages/daemon',
         },

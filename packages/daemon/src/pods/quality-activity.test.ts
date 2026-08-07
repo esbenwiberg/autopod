@@ -161,6 +161,20 @@ describe('normalizeQualityActivity', () => {
     expect(
       normalizeQualityActivityEvidence(bashArgv(['bash', '-lc', 'sed -i s/a/b/ src/app.ts'])),
     ).toEqual({ activities: [], ambiguousInspection: true });
+    expect(
+      normalizeQualityActivityEvidence({
+        ...bash('cat src/app.ts'),
+        input: { command: 'cat src/app.ts', argv: ['cat', 42] },
+      } as AgentEvent),
+    ).toEqual({ activities: [], ambiguousInspection: true });
+    expect(normalizeQualityActivityEvidence(bashArgv(['cat', 'src/*.ts']))).toEqual({
+      activities: [],
+      ambiguousInspection: true,
+    });
+    expect(normalizeQualityActivityEvidence(bashArgv(['cat', 'src/$(touch owned)']))).toEqual({
+      activities: [],
+      ambiguousInspection: true,
+    });
   });
 
   it('does not make unrelated compound commands ambiguous', () => {

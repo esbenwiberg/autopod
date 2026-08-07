@@ -288,7 +288,11 @@ function publicItemEvents(
               input: {
                 call_id: callId,
                 ...command,
+                ...(typeof item.workdir === 'string' ? { workdir: item.workdir } : {}),
                 ...(typeof item.cwd === 'string' ? { cwd: item.cwd } : {}),
+                ...(typeof item.cwd !== 'string' && typeof item.workdir === 'string'
+                  ? { cwd: item.workdir }
+                  : {}),
               },
             },
           ]
@@ -468,7 +472,9 @@ function mapEvent(event: CodexEnvelope, podId: string, logger?: Logger): CodexPa
         call_id: msg.call_id,
         ...commandInput(msg.command),
       };
+      if (typeof msg.workdir === 'string') input.workdir = msg.workdir;
       if (typeof msg.cwd === 'string') input.cwd = msg.cwd;
+      else if (typeof msg.workdir === 'string') input.cwd = msg.workdir;
       return { type: 'tool_use', timestamp: ts, tool: 'Bash', input };
     }
 
