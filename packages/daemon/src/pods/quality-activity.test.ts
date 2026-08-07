@@ -64,30 +64,7 @@ describe('normalizeQualityActivity', () => {
     expect(normalizeQualityActivity(bash(command))).toEqual([]);
   });
 
-  it('wrapped-inspection-is-measured', () => {
-    expect(
-      normalizeQualityActivityEvidence(bash("/bin/bash -lc 'sed -n 1,40p src/app.ts'")),
-    ).toEqual({
-      activities: [
-        {
-          kind: 'inspection',
-          path: 'src/app.ts',
-          source: 'shell-command',
-          callId: 'call-1',
-        },
-      ],
-      ambiguousInspection: false,
-    });
-    expect(normalizeQualityActivity(bash(`/bin/bash -lc "rg -n 'foo|bar' src/search.ts"`))).toEqual(
-      [
-        {
-          kind: 'inspection',
-          path: 'src/search.ts',
-          source: 'shell-command',
-          callId: 'call-1',
-        },
-      ],
-    );
+  it('read-only compound inspections are measured', () => {
     expect(normalizeQualityActivity(bash('cat src/a.ts && sed -n 1,20p src/b.ts'))).toEqual([
       {
         kind: 'inspection',
@@ -145,6 +122,9 @@ describe('normalizeQualityActivity', () => {
     );
     expect(flattenedWrapper.activities).toEqual([]);
     expect(flattenedWrapper.ambiguousInspection).toBe(true);
+    expect(
+      normalizeQualityActivityEvidence(bash("/bin/bash -lc 'sed -n 1,40p src/app.ts'")),
+    ).toEqual({ activities: [], ambiguousInspection: true });
   });
 
   it('unsafe-or-flattened-command-remains-unavailable', () => {

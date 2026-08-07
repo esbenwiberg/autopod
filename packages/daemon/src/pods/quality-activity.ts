@@ -229,8 +229,6 @@ function inspectedShellEvidence(
     return { paths: [], ambiguous: looksLikeInspection(command) };
   }
 
-  const unwrapped = unwrapBashLoginCommand(tokens);
-  if (unwrapped !== null) return inspectedShellEvidence(unwrapped, cwd);
   const evidence = inspectedTokensEvidence(tokens, cwd);
   if (evidence.paths.length > 0 || evidence.ambiguous) return evidence;
   return { paths: [], ambiguous: looksLikeInspection(command) };
@@ -281,13 +279,6 @@ function inspectedTokensEvidence(
 
 function isInspectionProgram(program: string | undefined): boolean {
   return ['cat', 'head', 'tail', 'sed', 'rg', 'grep'].includes(program ?? '');
-}
-
-function unwrapBashLoginCommand(tokens: string[]): string | null {
-  const [program, flag, nested, ...rest] = tokens;
-  if ((program !== '/bin/bash' && program !== 'bash') || flag !== '-lc') return null;
-  if (!nested || rest.length > 0) return null;
-  return nested;
 }
 
 function looksLikeInspection(command: string): boolean {
