@@ -26,7 +26,9 @@ import { createMemoryUsageRepository } from '../../pods/memory-usage-repository.
 import { createNudgeRepository } from '../../pods/nudge-repository.js';
 import { createQualityScoreRepository } from '../../pods/quality-score-repository.js';
 import { QUALITY_SCORE_ALGORITHM_VERSION } from '../../pods/quality-score-repository.js';
+import { createQualityScoreRecorder } from '../../pods/quality-score-recorder.js';
 import { createProfileStore } from '../../profiles/index.js';
+import { CodexStreamParser } from '../../runtimes/codex-stream-parser.js';
 import { createSafetyEventsRepository } from '../../safety/safety-events-repository.js';
 import { podRoutes } from './pods.js';
 
@@ -255,47 +257,35 @@ describe('GET /pods/:podId provider-attempt projection', () => {
       'codex-structured-quality',
     );
     const eventRepo = createEventRepository(db);
+    const podRepo = createPodRepository(db);
+    const escalationRepo = createEscalationRepository(db);
+    const eventBus = createEventBus(eventRepo, logger);
+    const recorder = createQualityScoreRecorder({
+      eventBus,
+      podRepo,
+      eventRepo,
+      escalationRepo,
+      qualityScoreRepo,
+      logger,
+    });
+    const inspection = CodexStreamParser.mapEvent(
+      {
+        id: 'codex-inspection',
+        msg: {
+          type: 'exec_command_begin',
+          call_id: 'codex-read-1',
+          command: ['/bin/bash', '-lc', 'sed -n 1,80p src/app.ts'],
+          workdir: '/workspace',
+        },
+      },
+      'codex-structured-quality',
+    );
+    expect(inspection).not.toBeNull();
     eventRepo.insert({
       type: 'pod.agent_activity',
       timestamp: '2026-04-23T12:00:00.000Z',
       podId: 'codex-structured-quality',
-      event: {
-        type: 'tool_use',
-        timestamp: '2026-04-23T12:00:00.000Z',
-        tool: 'Bash',
-        input: {
-          command: '/bin/bash -lc sed -n 1,80p src/app.ts',
-          argv: ['/bin/bash', '-lc', 'sed -n 1,80p src/app.ts'],
-          cwd: '/workspace',
-        },
-      },
-    });
-    qualityScoreRepo.insert({
-      podId: 'codex-structured-quality',
-      score: 75,
-      algorithmVersion: QUALITY_SCORE_ALGORITHM_VERSION,
-      inspectionAvailability: 'available',
-      inspectionUnavailableReason: null,
-      ambiguousInspectionCount: 0,
-      readCount: 1,
-      editCount: 1,
-      modifiedFileCount: 1,
-      readEditRatio: 1,
-      editsWithoutPriorRead: 0,
-      userInterrupts: 0,
-      editChurnCount: 0,
-      tellsCount: 0,
-      prFixAttempts: 0,
-      validationPassed: null,
-      inputTokens: 0,
-      outputTokens: 0,
-      costUsd: 0,
-      runtime: 'codex',
-      profileName: 'test-profile',
-      model: 'gpt-5.6-sol',
-      finalStatus: 'complete',
-      completedAt: '2026-04-23T12:02:00.000Z',
-      computedAt: '2026-04-23T12:02:00.000Z',
+      event: inspection!,
     });
     eventRepo.insert({
       type: 'pod.agent_activity',
@@ -308,6 +298,30 @@ describe('GET /pods/:podId provider-attempt projection', () => {
         action: 'modify',
       },
     });
+    recorder.start();
+    eventBus.emit({
+      type: 'pod.completed',
+      timestamp: '2026-04-23T12:02:00.000Z',
+      podId: 'codex-structured-quality',
+      finalStatus: 'complete',
+      summary: {
+        id: 'codex-structured-quality',
+        profileName: 'test-profile',
+        task: 'redacted',
+        status: 'complete',
+        model: 'gpt-5.6-sol',
+        runtime: 'codex',
+        duration: 120000,
+        filesChanged: 1,
+        createdAt: '2026-04-23T12:00:00.000Z',
+      },
+    });
+    const persisted = qualityScoreRepo.get('codex-structured-quality');
+    expect(persisted).toMatchObject({
+      algorithmVersion: QUALITY_SCORE_ALGORITHM_VERSION,
+      inspectionAvailability: 'available',
+      score: expect.any(Number),
+    });
 
     const response = await app.inject({
       method: 'GET',
@@ -318,7 +332,7 @@ describe('GET /pods/:podId provider-attempt projection', () => {
       inspectionAvailability: 'available',
       readCount: 1,
       editsWithoutPriorRead: 0,
-      score: 75,
+      score: persisted?.score,
     });
   });
 
