@@ -9244,7 +9244,12 @@ describe('PodManager', () => {
         { profileName: 'test-profile', task: 'Address review feedback' },
         'user-1',
       );
-      ctx.podRepo.update(pod.id, { status: 'running', containerId: 'ctr-1' });
+      ctx.podRepo.update(pod.id, {
+        status: 'running',
+        containerId: 'ctr-1',
+        worktreePath: '/tmp/worktree/abc',
+        startCommitSha: 'abc1234567890abcdef1234567890abcdef1234',
+      });
 
       await manager.triggerValidation(pod.id);
 
