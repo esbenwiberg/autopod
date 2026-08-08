@@ -48,9 +48,9 @@ public func reviewPhasePresentation(
     status = progress.review.status
   } else {
     status = switch checks?.review {
-    case true: .passed
-    case false: .failed
-    case nil: .skipped
+    case .some(true): .passed
+    case .some(false): .failed
+    case .none: .skipped
     }
   }
   return ReviewPhasePresentation(
