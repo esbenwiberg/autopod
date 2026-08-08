@@ -12513,6 +12513,11 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
               // evidence is already durable for this exact attempt; re-running it
               // makes a review-only second opinion unexpectedly execute the suite.
               let hoistedResult: typeof effectiveResult | null = null;
+              let hoistError: unknown;
+              let confirmedRecurring: ValidationFinding[] = [];
+              const recurringIds = new Set(recurring.map((finding) => finding.id));
+              const candidateFindingIds = [...recurringIds].sort();
+              const originalReviewBatchId = effectiveResult.taskReview?.reviewBatch?.id;
               try {
                 const reviewOnly = await validationEngine.validate(
                   {
@@ -12520,6 +12525,11 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
                     reviewDepth: 'deep',
                     reviewOnly: true,
                     preSubmitReview: null,
+                    // This is an independent adjudication of the current bytes,
+                    // not another ledger-reconciliation pass. Reusing the prior
+                    // batch here can carry the same historical finding into both
+                    // opinions without either reviewer rediscovering the defect.
+                    priorReviewBatch: undefined,
                     skipPhases: [
                       'setup',
                       'lint',
@@ -12535,12 +12545,37 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
                   validationController.signal,
                   buildPhaseEventCallbacks(podId),
                 );
+                const independentFindings = extractFindings(reviewOnly);
+                confirmedRecurring = independentFindings.filter((finding) =>
+                  recurringIds.has(finding.id),
+                );
+                const adjudicationReviewBatch = reviewOnly.taskReview?.reviewBatch;
+                const adjudicatedTaskReview = reviewOnly.taskReview
+                  ? {
+                      ...reviewOnly.taskReview,
+                      ...(adjudicationReviewBatch
+                        ? {
+                            reviewBatch: {
+                              ...adjudicationReviewBatch,
+                              adjudication: {
+                                kind: 'recurrence-hoist' as const,
+                                ...(originalReviewBatchId ? { originalReviewBatchId } : {}),
+                                candidateFindingIds,
+                                confirmedFindingIds: confirmedRecurring
+                                  .map((finding) => finding.id)
+                                  .sort(),
+                              },
+                            },
+                          }
+                        : {}),
+                    }
+                  : null;
                 const deterministicFailures = failedValidationPhases(effectiveResult).filter(
                   (phase) => phase !== 'review',
                 );
                 hoistedResult = {
                   ...effectiveResult,
-                  taskReview: reviewOnly.taskReview,
+                  taskReview: adjudicatedTaskReview,
                   reviewSkipReason: reviewOnly.reviewSkipReason,
                   reviewSkipKind: reviewOnly.reviewSkipKind,
                   reviewTokenUsage: reviewOnly.reviewTokenUsage,
@@ -12559,6 +12594,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
                 // it so prior-batch lookup remains deterministic by attempt.
                 validationRepo?.updateResult(podId, attempt, hoistedResult);
               } catch (err) {
+                hoistError = err;
                 logger.warn({ err, podId }, 'Auto-hoist deeper review failed');
               }
 
@@ -12566,6 +12602,14 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
               // skip-validation update instead of continuing with stale s2.
               s2 = podRepo.getOrThrow(podId);
               if (isTerminalState(s2.status) || s2.status === 'killing') return;
+              if (hoistError && !s2.skipValidation) {
+                emitActivityStatus(
+                  podId,
+                  'Independent recurring-finding review failed — moving to review required',
+                );
+                transition(s2, 'review_required');
+                return;
+              }
               if (
                 hoistedResult &&
                 isReviewInfrastructureOnlyFailure(hoistedResult) &&
@@ -12585,17 +12629,15 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
                 emitActivityStatus(podId, 'Deeper review tier passed — overriding Tier 1 result');
                 logger.info({ podId }, 'Auto-hoist resolved recurring findings');
               } else {
-                // Deeper review still flags same findings — escalate to human
-                const hoistedFindings = hoistedResult
-                  ? extractFindings(hoistedResult)
-                  : currentFindings;
-                const stillRecurring = detectRecurringFindings(hoistedFindings, previousFindings);
-
-                if (stillRecurring.length > 0) {
+                // Escalate only candidates independently reproduced by the deep
+                // review. New findings continue through ordinary correction.
+                if (confirmedRecurring.length > 0) {
                   emitActivityStatus(
                     podId,
-                    `Deeper review still flagged ${stillRecurring.length} recurring finding(s) — escalating to human`,
+                    `Deeper review still flagged ${confirmedRecurring.length} recurring finding(s) — escalating to human`,
                   );
+
+                  const adjudicationBatch = hoistedResult?.taskReview?.reviewBatch;
 
                   const escalation: EscalationRequest = {
                     id: generateId(12),
@@ -12603,9 +12645,23 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
                     type: 'validation_override',
                     timestamp: new Date().toISOString(),
                     payload: {
-                      findings: stillRecurring,
+                      findings: confirmedRecurring,
                       attempt,
                       maxAttempts: s2.maxValidationAttempts,
+                      adjudication: {
+                        ...(adjudicationBatch?.reviewedHead
+                          ? { reviewedHead: adjudicationBatch.reviewedHead }
+                          : {}),
+                        ...(adjudicationBatch?.diffHash
+                          ? { diffHash: adjudicationBatch.diffHash }
+                          : {}),
+                        ...(originalReviewBatchId ? { originalReviewBatchId } : {}),
+                        ...(adjudicationBatch?.id
+                          ? { adjudicationReviewBatchId: adjudicationBatch.id }
+                          : {}),
+                        candidateFindingIds,
+                        confirmedFindingIds: confirmedRecurring.map((finding) => finding.id).sort(),
+                      },
                     },
                     response: null,
                   };
@@ -12618,12 +12674,19 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
                   transition(s2, 'awaiting_input');
 
                   logger.info(
-                    { podId, escalationId: escalation.id, findingCount: stillRecurring.length },
+                    {
+                      podId,
+                      escalationId: escalation.id,
+                      findingCount: confirmedRecurring.length,
+                    },
                     'Validation override escalation created — waiting for human',
                   );
                   return; // Wait for human response via sendMessage()
                 }
-                // No recurring after hoist — fall through to normal retry/fail path
+                // The independent review may replace stale candidates with new
+                // actionable findings. Use that adjudicated result for ordinary
+                // correction instead of sending the stale first-pass payload.
+                if (hoistedResult) effectiveResult = hoistedResult;
               }
             }
           }

@@ -10,6 +10,7 @@ import type {
   ProviderCredentials,
   ReadinessReview,
   ReadinessStatus,
+  ReviewBatchResult,
   Runtime,
   RuntimeType,
   StackTemplate,
@@ -424,6 +425,65 @@ function makeValidationResult(overrides: Partial<ValidationResult> = {}): Valida
     duration: 5000,
     ...overrides,
   };
+}
+
+function makeTestReviewBatch(
+  id: string,
+  issue: string,
+  semanticId: string,
+  current: boolean,
+): ReviewBatchResult {
+  const finding = { id: `${id}-source`, source: 'initial-review' as const, issue };
+  return {
+    id,
+    diffHash: `${id}-diff`,
+    reviewedHead: id.padEnd(40, '0').slice(0, 40),
+    promptVersion: 'review-council-v1',
+    schemaVersion: 'structured-finding-v2',
+    model: 'reviewer',
+    axes: [],
+    candidates: [finding],
+    initialFindings: [finding],
+    accepted: [finding],
+    rejected: [],
+    merged: [],
+    synthesis: 'model',
+    durationMs: 1,
+    quality: 'healthy',
+    ledger: [
+      {
+        semanticId,
+        finding,
+        state: 'open',
+        priorSourceIds: [`${id}-prior`],
+        currentSourceIds: current ? [finding.id] : [],
+      },
+    ],
+  };
+}
+
+function makeCouncilReviewFailure(
+  podId: string,
+  attempt: number,
+  batchId: string,
+  issue: string,
+  semanticId: string,
+  current: boolean,
+): ValidationResult {
+  return makeValidationResult({
+    podId,
+    attempt,
+    overall: 'fail',
+    taskReview: {
+      status: 'fail',
+      reasoning: 'Review found an issue',
+      issues: [issue],
+      model: 'reviewer',
+      screenshots: [],
+      diff: '+change',
+      reviewBatch: makeTestReviewBatch(batchId, issue, semanticId, current),
+    },
+  });
 }
 
 function makeReadinessReview(status: ReadinessStatus, summary?: string): ReadinessReview {
@@ -9205,6 +9265,322 @@ describe('PodManager', () => {
       const result = manager.getSession(pod.id);
       expect(result.status).toBe('review_required');
       expect(result.validationAttempts).toBe(3);
+    });
+
+    it('runs recurring-finding auto-hoist without the prior review ledger', async () => {
+      const ctx = createTestContext();
+      const manager = createPodManager(ctx.deps);
+      const pod = manager.createSession(
+        { profileName: 'test-profile', task: 'Fix stale review feedback' },
+        'user-1',
+      );
+      const finding = {
+        id: 'initial-stale-finding',
+        source: 'initial-review' as const,
+        issue: 'A stale finding',
+      };
+      const reviewBatch = (id: string, reviewedHead: string, currentSourceIds: string[]) => ({
+        id,
+        diffHash: `${id}-diff`,
+        reviewedHead,
+        promptVersion: 'review-council-v1',
+        schemaVersion: 'structured-finding-v2',
+        model: 'reviewer',
+        axes: [],
+        candidates: [finding],
+        initialFindings: [finding],
+        accepted: [finding],
+        rejected: [],
+        merged: [],
+        synthesis: 'model' as const,
+        durationMs: 1,
+        quality: 'healthy' as const,
+        ledger: [
+          {
+            semanticId: 'review:stale-finding',
+            finding,
+            state: 'open' as const,
+            priorSourceIds: ['initial-stale-finding'],
+            currentSourceIds,
+          },
+        ],
+      });
+      const failedReview = (attempt: number, batchId: string, currentSourceIds: string[]) =>
+        makeValidationResult({
+          podId: pod.id,
+          attempt,
+          overall: 'fail',
+          taskReview: {
+            status: 'fail',
+            reasoning: 'Historical ledger entry remains open',
+            issues: ['A stale finding'],
+            model: 'reviewer',
+            screenshots: [],
+            diff: '+change',
+            reviewBatch: reviewBatch(batchId, `${attempt}`.repeat(40), currentSourceIds),
+          },
+        });
+
+      ctx.validationRepo.insert(pod.id, 1, failedReview(1, 'attempt-1', ['initial-stale-finding']));
+      ctx.podRepo.update(pod.id, {
+        status: 'running',
+        containerId: 'ctr-1',
+        worktreePath: '/tmp/worktree/abc',
+        validationAttempts: 1,
+      });
+      vi.mocked(ctx.validationEngine.validate).mockImplementation(async (config) => {
+        if (!config.reviewOnly) return failedReview(2, 'attempt-2', []);
+        if (config.priorReviewBatch) return failedReview(2, 'deep-contaminated', []);
+        return makeValidationResult({
+          podId: pod.id,
+          attempt: 2,
+          overall: 'pass',
+          taskReview: {
+            status: 'pass',
+            reasoning: 'Independent deep review found no issue',
+            issues: [],
+            model: 'reviewer',
+            screenshots: [],
+            diff: '+change',
+            reviewBatch: {
+              ...reviewBatch('deep-independent', '2'.repeat(40), []),
+              candidates: [],
+              initialFindings: [],
+              accepted: [],
+              ledger: [],
+            },
+          },
+        });
+      });
+
+      await manager.triggerValidation(pod.id);
+
+      const deepConfig = vi.mocked(ctx.validationEngine.validate).mock.calls[1]?.[0];
+      expect(deepConfig).toMatchObject({ reviewOnly: true, reviewDepth: 'deep' });
+      expect(deepConfig?.priorReviewBatch).toBeUndefined();
+      expect(manager.getSession(pod.id).status).toBe('validated');
+      expect(manager.getSession(pod.id).pendingEscalation).toBeNull();
+      expect(
+        manager.getSession(pod.id).lastValidationResult?.taskReview?.reviewBatch?.adjudication,
+      ).toEqual({
+        kind: 'recurrence-hoist',
+        originalReviewBatchId: 'attempt-2',
+        candidateFindingIds: ['review:stale-finding'],
+        confirmedFindingIds: [],
+      });
+    });
+
+    it('escalates only recurring findings independently confirmed by deep review', async () => {
+      const ctx = createTestContext();
+      const manager = createPodManager(ctx.deps);
+      const pod = manager.createSession(
+        { profileName: 'test-profile', task: 'Fix confirmed review feedback' },
+        'user-1',
+      );
+      const issue = 'A confirmed finding';
+      const semanticId = 'review:confirmed-finding';
+      ctx.validationRepo.insert(
+        pod.id,
+        1,
+        makeCouncilReviewFailure(pod.id, 1, 'prior-batch', issue, semanticId, true),
+      );
+      ctx.podRepo.update(pod.id, {
+        status: 'running',
+        containerId: 'ctr-1',
+        worktreePath: '/tmp/worktree/abc',
+        validationAttempts: 1,
+      });
+      vi.mocked(ctx.validationEngine.validate)
+        .mockResolvedValueOnce(
+          makeCouncilReviewFailure(pod.id, 2, 'current-batch', issue, semanticId, false),
+        )
+        .mockResolvedValueOnce(
+          makeCouncilReviewFailure(pod.id, 2, 'deep-batch', issue, semanticId, true),
+        );
+
+      await manager.triggerValidation(pod.id);
+
+      const result = manager.getSession(pod.id);
+      expect(result.status).toBe('awaiting_input');
+      expect(result.pendingEscalation?.type).toBe('validation_override');
+      expect(result.pendingEscalation?.payload).toMatchObject({
+        findings: [
+          {
+            id: semanticId,
+            description: issue,
+            provenance: 'current',
+            reviewedHead: 'deep-batch'.padEnd(40, '0'),
+            diffHash: 'deep-batch-diff',
+          },
+        ],
+        adjudication: {
+          reviewedHead: 'deep-batch'.padEnd(40, '0'),
+          diffHash: 'deep-batch-diff',
+          originalReviewBatchId: 'current-batch',
+          adjudicationReviewBatchId: 'deep-batch',
+          candidateFindingIds: [semanticId],
+          confirmedFindingIds: [semanticId],
+        },
+      });
+      expect(ctx.runtime.resume).not.toHaveBeenCalled();
+    });
+
+    it('sends only new deep-review findings through ordinary correction', async () => {
+      const ctx = createTestContext();
+      const manager = createPodManager(ctx.deps);
+      const pod = manager.createSession(
+        { profileName: 'test-profile', task: 'Fix newly discovered review feedback' },
+        'user-1',
+      );
+      const staleIssue = 'A stale finding';
+      const staleId = 'review:stale-finding';
+      const newIssue = 'A newly discovered finding';
+      const newId = 'review:new-finding';
+      ctx.validationRepo.insert(
+        pod.id,
+        1,
+        makeCouncilReviewFailure(pod.id, 1, 'prior-batch', staleIssue, staleId, true),
+      );
+      ctx.podRepo.update(pod.id, {
+        status: 'running',
+        containerId: 'ctr-1',
+        worktreePath: '/tmp/worktree/abc',
+        validationAttempts: 1,
+      });
+      vi.mocked(ctx.validationEngine.validate)
+        .mockResolvedValueOnce(
+          makeCouncilReviewFailure(pod.id, 2, 'current-batch', staleIssue, staleId, false),
+        )
+        .mockResolvedValueOnce(
+          makeCouncilReviewFailure(pod.id, 2, 'deep-batch', newIssue, newId, true),
+        )
+        .mockResolvedValueOnce(makeValidationResult({ podId: pod.id, attempt: 3 }));
+      vi.mocked(ctx.runtime.resume).mockImplementation(async function* () {
+        yield {
+          type: 'complete',
+          timestamp: new Date().toISOString(),
+          result: 'Applied the new review feedback',
+        };
+      });
+
+      await manager.triggerValidation(pod.id);
+
+      const correction = vi.mocked(ctx.runtime.resume).mock.calls[0]?.[1];
+      expect(correction).toContain(newIssue);
+      expect(correction).not.toContain(staleIssue);
+      expect(manager.getSession(pod.id).status).toBe('validated');
+      expect(manager.getSession(pod.id).pendingEscalation).toBeNull();
+    });
+
+    it('keeps deterministic failures blocking when independent review passes', async () => {
+      const ctx = createTestContext();
+      const manager = createPodManager(ctx.deps);
+      const pod = manager.createSession(
+        { profileName: 'test-profile', task: 'Fix deterministic validation failure' },
+        'user-1',
+      );
+      const issue = 'A stale review finding';
+      const semanticId = 'review:stale-deterministic-finding';
+      ctx.validationRepo.insert(
+        pod.id,
+        1,
+        makeCouncilReviewFailure(pod.id, 1, 'prior-batch', issue, semanticId, true),
+      );
+      ctx.podRepo.update(pod.id, {
+        status: 'running',
+        containerId: 'ctr-1',
+        worktreePath: '/tmp/worktree/abc',
+        validationAttempts: 1,
+      });
+
+      const deterministicFailure = makeCouncilReviewFailure(
+        pod.id,
+        2,
+        'current-batch',
+        issue,
+        semanticId,
+        false,
+      );
+      deterministicFailure.smoke = {
+        ...deterministicFailure.smoke,
+        status: 'fail',
+        build: {
+          status: 'fail',
+          output: 'TypeScript compile error remains',
+          duration: 100,
+        },
+      };
+      vi.mocked(ctx.validationEngine.validate)
+        .mockResolvedValueOnce(deterministicFailure)
+        .mockResolvedValueOnce(
+          makeValidationResult({
+            podId: pod.id,
+            attempt: 2,
+            taskReview: {
+              status: 'pass',
+              reasoning: 'Independent review found no review issue',
+              issues: [],
+              model: 'reviewer',
+              screenshots: [],
+              diff: '+change',
+              reviewBatch: {
+                ...makeTestReviewBatch('deep-batch', issue, semanticId, false),
+                candidates: [],
+                initialFindings: [],
+                accepted: [],
+                ledger: [],
+              },
+            },
+          }),
+        )
+        .mockResolvedValueOnce(makeValidationResult({ podId: pod.id, attempt: 3 }));
+      vi.mocked(ctx.runtime.resume).mockImplementation(async function* () {
+        yield {
+          type: 'complete',
+          timestamp: new Date().toISOString(),
+          result: 'Fixed deterministic validation failure',
+        };
+      });
+
+      await manager.triggerValidation(pod.id);
+
+      const correction = vi.mocked(ctx.runtime.resume).mock.calls[0]?.[1];
+      expect(correction).toContain('TypeScript compile error remains');
+      expect(correction).not.toContain(issue);
+      expect(manager.getSession(pod.id).status).toBe('validated');
+    });
+
+    it('parks for human review when independent recurrence adjudication fails', async () => {
+      const ctx = createTestContext();
+      const manager = createPodManager(ctx.deps);
+      const pod = manager.createSession(
+        { profileName: 'test-profile', task: 'Handle unavailable recurrence adjudication' },
+        'user-1',
+      );
+      const issue = 'A recurring review finding';
+      const semanticId = 'review:adjudication-failure';
+      ctx.validationRepo.insert(
+        pod.id,
+        1,
+        makeCouncilReviewFailure(pod.id, 1, 'prior-batch', issue, semanticId, true),
+      );
+      ctx.podRepo.update(pod.id, {
+        status: 'running',
+        containerId: 'ctr-1',
+        worktreePath: '/tmp/worktree/abc',
+        validationAttempts: 1,
+      });
+      vi.mocked(ctx.validationEngine.validate)
+        .mockResolvedValueOnce(
+          makeCouncilReviewFailure(pod.id, 2, 'current-batch', issue, semanticId, false),
+        )
+        .mockRejectedValueOnce(new Error('Independent reviewer unavailable'));
+
+      await manager.triggerValidation(pod.id);
+
+      expect(manager.getSession(pod.id).status).toBe('review_required');
+      expect(manager.getSession(pod.id).pendingEscalation).toBeNull();
+      expect(ctx.runtime.resume).not.toHaveBeenCalled();
     });
 
     it('retries a transient sandbox timeout before abandoning validation-feedback resume', async () => {

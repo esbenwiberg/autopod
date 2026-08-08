@@ -58,6 +58,7 @@ export function extractFindings(result: ValidationResult): ValidationFinding[] {
           source: 'fact_validation',
           description: `${check.factId}: ${check.command}`,
           reasoning: check.reasoning,
+          provenance: 'current',
         });
       }
     }
@@ -89,6 +90,13 @@ export function extractFindings(result: ValidationResult): ValidationFinding[] {
             id: entry.semanticId,
             source: 'task_review',
             description: issue,
+            provenance: entry.currentSourceIds.length > 0 ? 'current' : 'carried',
+            ...(result.taskReview.reviewBatch
+              ? {
+                  reviewedHead: result.taskReview.reviewBatch.reviewedHead,
+                  diffHash: result.taskReview.reviewBatch.diffHash,
+                }
+              : {}),
           });
         }
       } else {
@@ -96,6 +104,13 @@ export function extractFindings(result: ValidationResult): ValidationFinding[] {
           id: findingId('task_review', issue),
           source: 'task_review',
           description: issue,
+          provenance: 'current',
+          ...(result.taskReview.reviewBatch
+            ? {
+                reviewedHead: result.taskReview.reviewBatch.reviewedHead,
+                diffHash: result.taskReview.reviewBatch.diffHash,
+              }
+            : {}),
         });
       }
     }
@@ -110,6 +125,13 @@ export function extractFindings(result: ValidationResult): ValidationFinding[] {
           source: 'requirements_check',
           description: item.criterion,
           reasoning: item.note,
+          provenance: 'human_requirement',
+          ...(result.taskReview.reviewBatch
+            ? {
+                reviewedHead: result.taskReview.reviewBatch.reviewedHead,
+                diffHash: result.taskReview.reviewBatch.diffHash,
+              }
+            : {}),
         });
       }
     }

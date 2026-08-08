@@ -400,6 +400,16 @@ public struct EscalationPayload: Codable, Sendable {
   public let findings: [ValidationFindingResponse]?
   public let attempt: Int?
   public let maxAttempts: Int?
+  public let adjudication: ValidationAdjudicationResponse?
+}
+
+public struct ValidationAdjudicationResponse: Codable, Sendable {
+  public let reviewedHead: String?
+  public let diffHash: String?
+  public let originalReviewBatchId: String?
+  public let adjudicationReviewBatchId: String?
+  public let candidateFindingIds: [String]
+  public let confirmedFindingIds: [String]
 }
 
 public struct EscalationReply: Codable, Sendable {

@@ -18,6 +18,27 @@ public struct ValidationFindingResponse: Codable, Sendable {
   public let source: String  // "fact_validation" | "task_review" | "requirements_check"
   public let description: String
   public let reasoning: String?
+  public let provenance: String?  // "current" | "carried" | "human_requirement"
+  public let reviewedHead: String?
+  public let diffHash: String?
+
+  public init(
+    id: String,
+    source: String,
+    description: String,
+    reasoning: String?,
+    provenance: String? = nil,
+    reviewedHead: String? = nil,
+    diffHash: String? = nil
+  ) {
+    self.id = id
+    self.source = source
+    self.description = description
+    self.reasoning = reasoning
+    self.provenance = provenance
+    self.reviewedHead = reviewedHead
+    self.diffHash = diffHash
+  }
 }
 
 // MARK: - Screenshot reference (replaces base64 inline images)

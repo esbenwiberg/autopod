@@ -158,19 +158,40 @@ public enum PodMapper {
       // this the pod sits in awaiting_input with no UI to respond.
       if esc.type == "validation_override" {
         let findings = esc.payload.findings ?? []
+        let counts = Dictionary(grouping: findings) { finding in
+          finding.provenance ?? "current"
+        }.mapValues(\.count)
+        let countSummary = [
+          counts["current"].map { "\($0) current" },
+          counts["carried"].map { "\($0) historical" },
+          counts["human_requirement"].map { "\($0) human-review" },
+        ].compactMap { $0 }.joined(separator: ", ")
         let header: String = {
           if let attempt = esc.payload.attempt, let max = esc.payload.maxAttempts {
-            return "Validation found \(findings.count) recurring finding(s) after \(attempt)/\(max) attempts."
+            return "Validation needs a human decision after \(attempt)/\(max) attempts: \(countSummary)."
           }
-          return "Validation found \(findings.count) recurring finding(s)."
+          return "Validation needs a human decision: \(countSummary)."
         }()
         let body = findings.isEmpty
           ? ""
           : "\n\n" + findings.enumerated()
-              .map { "\($0.offset + 1). \($0.element.description)" }
+              .map {
+                let label = switch $0.element.provenance {
+                case "carried": "Historical — awaiting closure"
+                case "human_requirement": "Human review"
+                default: "Current — independently confirmed"
+                }
+                return "\($0.offset + 1). [\(label)] \($0.element.description)"
+              }
               .joined(separator: "\n")
+        let provenance: String = {
+          guard let adjudication = esc.payload.adjudication else { return "" }
+          let head = adjudication.reviewedHead.map { String($0.prefix(7)) } ?? "unknown"
+          let diff = adjudication.diffHash.map { String($0.prefix(12)) } ?? "unknown"
+          return "\n\nIndependent review: HEAD \(head) · diff \(diff)."
+        }()
         let hint = "\n\nReply `dismiss` to override all, `dismiss 1,3` for specific items, or any other text as guidance for the agent."
-        return header + body + hint
+        return header + body + provenance + hint
       }
       if esc.type == "request_credential" {
         if let reason = esc.payload.reason?.trimmingCharacters(in: .whitespacesAndNewlines),
