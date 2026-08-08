@@ -30,8 +30,9 @@ struct ReviewCouncilView: View {
     LazyVGrid(columns: [GridItem(.adaptive(minimum: 145), spacing: 8)], spacing: 8) { ForEach(council.axes, id: \.axis) { axis in axisCard(axis) } }
   }.padding(12).background(Color(nsColor: .controlBackgroundColor), in: RoundedRectangle(cornerRadius: 10)) }
 
-  private func axisCard(_ axis: ReviewAxisRunResponse) -> some View { VStack(alignment: .leading, spacing: 3) {
+  private func axisCard(_ axis: ReviewAxisRunResponse) -> some View {
     let failed = axis.status != "completed"
+    return VStack(alignment: .leading, spacing: 3) {
     Label(axisNames[axis.axis] ?? axis.axis, systemImage: failed ? "exclamationmark.triangle.fill" : "checkmark.circle.fill").font(.caption.weight(.semibold)).foregroundStyle(failed ? .orange : .green)
     Text(failed ? axisFailureCopy(axis) : "Completed").font(.caption2).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
     if failed, let detail = axis.failure?.message ?? axis.error { Text(detail).font(.caption2).foregroundStyle(.secondary).lineLimit(3) }

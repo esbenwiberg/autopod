@@ -1,6 +1,7 @@
 import Testing
 @testable import AutopodUI
 
+@MainActor
 @Test func sessionProcessHealthMapsUnavailableReasonsToNeutralText() {
     #expect(SessionQualityCard.unavailableReasonDescription("no_activity") == "No quality-relevant activity was retained for this session.")
     #expect(SessionQualityCard.unavailableReasonDescription("ambiguous_inspection") == "An inspection command could not be verified safely.")

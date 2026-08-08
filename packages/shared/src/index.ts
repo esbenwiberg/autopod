@@ -248,6 +248,7 @@ export type {
   ReviewFailure,
   ReviewFailureKind,
   ReviewBatchResult,
+  ReviewAdjudication,
   ReviewFindingLedgerEntry,
   ReviewRepairDelta,
   ReviewClosureVerification,

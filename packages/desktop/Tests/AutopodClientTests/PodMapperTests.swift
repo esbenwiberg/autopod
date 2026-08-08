@@ -625,6 +625,83 @@ import AutopodUI
   #expect(pod.escalationQuestion == "Which auth provider?")
 }
 
+@Test func mapsValidationOverrideFindingProvenance() throws {
+  let json = """
+  {
+    "id": "validation-review",
+    "profileName": "webapp",
+    "task": "Fix validation",
+    "status": "awaiting_input",
+    "model": "terra",
+    "runtime": "codex",
+    "executionTarget": "sandbox",
+    "branch": "agent/fix-validation",
+    "containerId": null,
+    "worktreePath": null,
+    "validationAttempts": 2,
+    "maxValidationAttempts": 3,
+    "lastValidationResult": null,
+    "pendingEscalation": {
+      "id": "esc-validation",
+      "podId": "validation-review",
+      "type": "validation_override",
+      "timestamp": "2026-08-08T09:00:00Z",
+      "payload": {
+        "attempt": 2,
+        "maxAttempts": 3,
+        "findings": [
+          {"id":"review:current","source":"task_review","description":"Current defect","provenance":"current","reviewedHead":"abcdef123456","diffHash":"1234567890abcdef"},
+          {"id":"review:carried","source":"task_review","description":"Old unresolved defect","provenance":"carried"},
+          {"id":"req:human","source":"requirements_check","description":"Verify on macOS","provenance":"human_requirement"}
+        ],
+        "adjudication": {
+          "reviewedHead": "abcdef123456",
+          "diffHash": "1234567890abcdef",
+          "candidateFindingIds": ["review:current", "review:carried"],
+          "confirmedFindingIds": ["review:current"]
+        }
+      },
+      "response": null
+    },
+    "escalationCount": 1,
+    "skipValidation": false,
+    "createdAt": "2026-08-08T08:00:00Z",
+    "startedAt": "2026-08-08T08:00:00Z",
+    "completedAt": null,
+    "updatedAt": "2026-08-08T09:00:00Z",
+    "userId": "user-1",
+    "filesChanged": 2,
+    "linesAdded": 20,
+    "linesRemoved": 4,
+    "previewUrl": null,
+    "prUrl": null,
+    "plan": null,
+    "progress": null,
+    "claudeSessionId": null,
+    "outputMode": "pr",
+    "options": {"agentMode":"auto","output":"pr","validate":true,"promotable":false},
+    "baseBranch": "main",
+    "recoveryWorktreePath": null,
+    "lastHeartbeatAt": null,
+    "inputTokens": 0,
+    "outputTokens": 0,
+    "costUsd": 0,
+    "commitCount": 1,
+    "lastCommitAt": null
+  }
+  """.data(using: .utf8)!
+
+  let response = try JSONDecoder().decode(SessionResponse.self, from: json)
+  let pod = PodMapper.map(response)
+  let message = try #require(pod.escalationQuestion)
+
+  #expect(message.contains("1 current, 1 historical, 1 human-review"))
+  #expect(message.contains("[Current — independently confirmed] Current defect"))
+  #expect(message.contains("[Historical — awaiting closure] Old unresolved defect"))
+  #expect(message.contains("[Human review] Verify on macOS"))
+  #expect(message.contains("HEAD abcdef1 · diff 1234567890ab"))
+}
+
 @Test func mapsRequestCredentialEscalationReason() throws {
   let json = """
   {

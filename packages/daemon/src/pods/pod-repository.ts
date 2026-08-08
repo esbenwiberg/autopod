@@ -940,9 +940,11 @@ export function createPodRepository(db: Database.Database): PodRepository {
         )
         .run(new Date().toISOString(), id);
       if (result.changes === 0) throw new PodNotFoundError(id);
-      return (db.prepare('SELECT lifecycle_generation FROM pods WHERE id = ?').get(id) as {
-        lifecycle_generation: number;
-      }).lifecycle_generation;
+      return (
+        db.prepare('SELECT lifecycle_generation FROM pods WHERE id = ?').get(id) as {
+          lifecycle_generation: number;
+        }
+      ).lifecycle_generation;
     },
 
     list(filters?: PodFilters): Pod[] {

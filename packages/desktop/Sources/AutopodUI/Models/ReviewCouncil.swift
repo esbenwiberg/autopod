@@ -34,7 +34,7 @@ public struct ReviewCouncil: Sendable {
     overflow = taskOverflow ?? batch.firstGateOverflow; hasLedger = batch.ledger != nil; initialFindings = batch.initialFindings; rejected = batch.rejected; merged = batch.merged; acceptedCount = batch.accepted.count; repairDelta = batch.repairDelta; closureVerification = batch.closureVerification
     var records = batch.ledger.map { $0.map { ($0.semanticId, $0.finding, $0.state, $0.currentSourceIds, $0.closureEvidence, $0.resolution) } }
       ?? batch.accepted.map { (Self.candidateId($0), $0, "open", [Self.candidateId($0)], nil, nil) }
-    if quality != "healthy" {
+    if batch.quality != "healthy" {
       let representedSourceIds = Set(
         records.flatMap(\.3)
           + (batch.ledger ?? []).flatMap { $0.currentSourceIds + $0.priorSourceIds }
@@ -51,7 +51,7 @@ public struct ReviewCouncil: Sendable {
     }
     findings = records.map { semanticId, candidate, state, sourceIds, closureEvidence, resolution in
       switch candidate {
-      case .initial(let item): return Finding(id: semanticId, axis: nil, severity: nil, claim: item.issue, evidence: nil, remediation: nil, path: nil, line: nil, symbol: nil, lifecycle: state, sourceIds: sourceIds, closureEvidence: closureEvidence, resolution: resolution, isFirstGateFallback: quality != "healthy")
+      case .initial(let item): return Finding(id: semanticId, axis: nil, severity: nil, claim: item.issue, evidence: nil, remediation: nil, path: nil, line: nil, symbol: nil, lifecycle: state, sourceIds: sourceIds, closureEvidence: closureEvidence, resolution: resolution, isFirstGateFallback: batch.quality != "healthy")
       case .structured(let item): return Finding(id: semanticId, axis: item.axis, severity: item.severity, claim: item.claim, evidence: item.evidence, remediation: item.remediation, path: item.path, line: item.line, symbol: item.symbol, lifecycle: state, sourceIds: sourceIds, closureEvidence: closureEvidence, resolution: resolution, isFirstGateFallback: false)
       }
     }

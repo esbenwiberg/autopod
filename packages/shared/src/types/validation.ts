@@ -284,6 +284,15 @@ export interface ReviewBatchResult {
   closureVerification?: ReviewClosureVerification;
   /** Bounded marker that the first gate reported findings beyond the retained identity cap. */
   firstGateOverflow?: { reportedCount: number; retainedFindingCount: number };
+  /** Independent second-opinion provenance for recurring-finding adjudication. */
+  adjudication?: ReviewAdjudication;
+}
+
+export interface ReviewAdjudication {
+  kind: 'recurrence-hoist';
+  originalReviewBatchId?: string;
+  candidateFindingIds: string[];
+  confirmedFindingIds: string[];
 }
 
 export interface ReviewFindingLedgerEntry {
@@ -355,6 +364,11 @@ export interface ValidationFinding {
   description: string;
   /** Reviewer or validator reasoning */
   reasoning?: string;
+  /** Whether this finding was observed now, carried from history, or requires human judgment. */
+  provenance?: 'current' | 'carried' | 'human_requirement';
+  /** Immutable review identity when the finding came from an AI review packet. */
+  reviewedHead?: string;
+  diffHash?: string;
 }
 
 /** A human decision to dismiss or provide guidance for a recurring validation finding. */

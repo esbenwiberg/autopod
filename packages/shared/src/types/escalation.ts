@@ -51,6 +51,14 @@ export interface ValidationOverridePayload {
   findings: import('./validation.js').ValidationFinding[];
   attempt: number;
   maxAttempts: number;
+  adjudication?: {
+    reviewedHead?: string;
+    diffHash?: string;
+    originalReviewBatchId?: string;
+    adjudicationReviewBatchId?: string;
+    candidateFindingIds: string[];
+    confirmedFindingIds: string[];
+  };
 }
 
 export interface RequestCredentialPayload {

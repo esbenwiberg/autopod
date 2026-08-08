@@ -202,8 +202,8 @@ describe('extractFindings', () => {
               semanticId: 'review:canonical-a',
               finding: structured,
               state: 'open',
-              priorSourceIds: [],
-              currentSourceIds: ['source-a'],
+              priorSourceIds: ['source-a'],
+              currentSourceIds: [],
             },
             {
               semanticId: 'review:canonical-b',
@@ -218,8 +218,22 @@ describe('extractFindings', () => {
     });
 
     expect(extractFindings(result)).toEqual([
-      { id: 'review:canonical-a', source: 'task_review', description: issue },
-      { id: 'review:canonical-b', source: 'task_review', description: issue },
+      {
+        id: 'review:canonical-a',
+        source: 'task_review',
+        description: issue,
+        provenance: 'carried',
+        reviewedHead: 'head',
+        diffHash: 'diff',
+      },
+      {
+        id: 'review:canonical-b',
+        source: 'task_review',
+        description: issue,
+        provenance: 'current',
+        reviewedHead: 'head',
+        diffHash: 'diff',
+      },
     ]);
   });
 
@@ -259,6 +273,7 @@ describe('extractFindings', () => {
     expect(findings[0]?.source).toBe('requirements_check');
     expect(findings[0]?.description).toBe('Adds logout button');
     expect(findings[0]?.reasoning).toBe('Not found in diff');
+    expect(findings[0]?.provenance).toBe('human_requirement');
   });
 
   it('extracts from all sources when all have failures', () => {
