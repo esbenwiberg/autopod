@@ -24,9 +24,13 @@ import {
 import { createMemoryRepository } from '../../pods/memory-repository.js';
 import { createMemoryUsageRepository } from '../../pods/memory-usage-repository.js';
 import { createNudgeRepository } from '../../pods/nudge-repository.js';
-import { createQualityScoreRepository } from '../../pods/quality-score-repository.js';
-import { QUALITY_SCORE_ALGORITHM_VERSION } from '../../pods/quality-score-repository.js';
+import { createQualityScoreRecorder } from '../../pods/quality-score-recorder.js';
+import {
+  QUALITY_SCORE_ALGORITHM_VERSION,
+  createQualityScoreRepository,
+} from '../../pods/quality-score-repository.js';
 import { createProfileStore } from '../../profiles/index.js';
+import { CodexStreamParser } from '../../runtimes/codex-stream-parser.js';
 import { createSafetyEventsRepository } from '../../safety/safety-events-repository.js';
 import { podRoutes } from './pods.js';
 
@@ -79,6 +83,7 @@ function createTestDb(): Database.Database {
 describe('GET /pods/:podId provider-attempt projection', () => {
   let db: Database.Database;
   let app: FastifyInstance;
+  let qualityScoreRepo: ReturnType<typeof createQualityScoreRepository>;
 
   beforeEach(async () => {
     db = createTestDb();
@@ -96,6 +101,7 @@ describe('GET /pods/:podId provider-attempt projection', () => {
     const podRepo = createPodRepository(db);
     const eventRepo = createEventRepository(db);
     const escalationRepo = createEscalationRepository(db);
+    qualityScoreRepo = createQualityScoreRepository(db);
     const podManager = {
       getSession: (podId: string) => podRepo.getOrThrow(podId),
       listSessions: () => [],
@@ -108,7 +114,7 @@ describe('GET /pods/:podId provider-attempt projection', () => {
       undefined,
       podRepo,
       escalationRepo,
-      undefined,
+      qualityScoreRepo,
       undefined,
       db,
     );
@@ -244,6 +250,118 @@ describe('GET /pods/:podId provider-attempt projection', () => {
       readEditRatio: null,
       editsWithoutPriorRead: null,
       tokens: { input: 300, output: 75, costUsd: 2.25 },
+    });
+  });
+
+  it('codex process health availability', async () => {
+    insertPod(db, { id: 'codex-structured-quality', status: 'complete' });
+    db.prepare("UPDATE pods SET runtime = 'codex', model = 'gpt-5.6-sol' WHERE id = ?").run(
+      'codex-structured-quality',
+    );
+    const eventRepo = createEventRepository(db);
+    const podRepo = createPodRepository(db);
+    const escalationRepo = createEscalationRepository(db);
+    const eventBus = createEventBus(eventRepo, logger);
+    const recorder = createQualityScoreRecorder({
+      eventBus,
+      podRepo,
+      eventRepo,
+      escalationRepo,
+      qualityScoreRepo,
+      logger,
+    });
+    const inspection = CodexStreamParser.mapEvent(
+      {
+        id: 'codex-inspection',
+        msg: {
+          type: 'exec_command_begin',
+          call_id: 'codex-read-1',
+          command: ['/bin/bash', '-lc', 'sed -n 1,80p src/app.ts'],
+          workdir: '/workspace',
+        },
+      },
+      'codex-structured-quality',
+    );
+    if (!inspection) throw new Error('Codex inspection event was not parsed');
+    eventRepo.insert({
+      type: 'pod.agent_activity',
+      timestamp: '2026-04-23T12:00:00.000Z',
+      podId: 'codex-structured-quality',
+      event: inspection,
+    });
+    eventRepo.insert({
+      type: 'pod.agent_activity',
+      timestamp: '2026-04-23T12:01:00.000Z',
+      podId: 'codex-structured-quality',
+      event: {
+        type: 'file_change',
+        timestamp: '2026-04-23T12:01:00.000Z',
+        path: 'src/app.ts',
+        action: 'modify',
+      },
+    });
+    recorder.start();
+    eventBus.emit({
+      type: 'pod.completed',
+      timestamp: '2026-04-23T12:02:00.000Z',
+      podId: 'codex-structured-quality',
+      finalStatus: 'complete',
+      summary: {
+        id: 'codex-structured-quality',
+        profileName: 'test-profile',
+        task: 'redacted',
+        status: 'complete',
+        model: 'gpt-5.6-sol',
+        runtime: 'codex',
+        duration: 120000,
+        filesChanged: 1,
+        createdAt: '2026-04-23T12:00:00.000Z',
+      },
+    });
+    const persisted = qualityScoreRepo.get('codex-structured-quality');
+    expect(persisted).toMatchObject({
+      algorithmVersion: QUALITY_SCORE_ALGORITHM_VERSION,
+      inspectionAvailability: 'available',
+      score: expect.any(Number),
+    });
+
+    const response = await app.inject({
+      method: 'GET',
+      url: '/pods/codex-structured-quality/quality',
+    });
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toMatchObject({
+      inspectionAvailability: 'available',
+      readCount: 1,
+      editsWithoutPriorRead: 0,
+      score: persisted?.score,
+    });
+  });
+
+  it('historical ambiguity remains unavailable', async () => {
+    insertPod(db, { id: 'historical-flattened-quality', status: 'complete' });
+    const eventRepo = createEventRepository(db);
+    eventRepo.insert({
+      type: 'pod.agent_activity',
+      timestamp: '2026-04-23T12:00:00.000Z',
+      podId: 'historical-flattened-quality',
+      event: {
+        type: 'tool_use',
+        timestamp: '2026-04-23T12:00:00.000Z',
+        tool: 'Bash',
+        input: { command: '/bin/bash -lc sed -n 1,80p src/app.ts' },
+      },
+    });
+
+    const response = await app.inject({
+      method: 'GET',
+      url: '/pods/historical-flattened-quality/quality',
+    });
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toMatchObject({
+      inspectionAvailability: 'unavailable',
+      inspectionUnavailableReason: 'ambiguous_inspection',
+      readCount: null,
     });
   });
 

@@ -29,7 +29,7 @@ public struct SessionQualityCard: View {
                     Text("Unavailable")
                         .font(.caption.weight(.medium))
                         .foregroundStyle(.secondary)
-                        .help(signals.inspectionUnavailableReason ?? "Inspection telemetry unavailable")
+                        .help(Self.unavailableReasonDescription(signals.inspectionUnavailableReason))
                 }
                 if signals.inspectionAvailability == .available {
                     Text(signals.grade.capitalized)
@@ -42,6 +42,12 @@ public struct SessionQualityCard: View {
             Text("The score uses inspection discipline, blind-modification rate, tells, human interruptions, and churn. Validation and PR fixes are shown only as outcome context.")
                 .font(.caption2)
                 .foregroundStyle(.tertiary)
+
+            if signals.inspectionAvailability == .unavailable {
+                Text(Self.unavailableReasonDescription(signals.inspectionUnavailableReason))
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
 
             LazyVGrid(
                 columns: [GridItem(.adaptive(minimum: 156), spacing: 12)],
@@ -125,6 +131,23 @@ public struct SessionQualityCard: View {
         case "yellow": return .yellow
         case "red": return .red
         default: return .gray
+        }
+    }
+
+    static func unavailableReasonDescription(_ reason: String?) -> String {
+        switch reason {
+        case "no_activity":
+            return "No quality-relevant activity was retained for this session."
+        case "ambiguous_inspection":
+            return "An inspection command could not be verified safely."
+        case "unresolved_write":
+            return "Native write activity could not be resolved safely."
+        case "mixed_pi_runtime":
+            return "Mixed Pi and non-Pi runtime evidence is unavailable."
+        case "historical_pi":
+            return "Historical Pi activity does not retain compatible evidence."
+        default:
+            return "Inspection telemetry is unavailable for this session."
         }
     }
 

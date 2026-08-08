@@ -18,6 +18,7 @@ import { type NewPod, createPodRepository } from './pod-repository.js';
 import type { PodRepository } from './pod-repository.js';
 import { createProviderAttemptRepository } from './provider-attempt-repository.js';
 import { createQualityScoreRepository } from './quality-score-repository.js';
+import { isQualityScoreEligible } from './quality-score.js';
 import { computeQualitySignals } from './quality-signals.js';
 import { createValidationRepository } from './validation-repository.js';
 import type { ValidationRepository } from './validation-repository.js';
@@ -294,6 +295,81 @@ describe('computeQualitySignals', () => {
     expect(signals.readCount).toBe(1);
     expect(signals.editCount).toBe(1);
     expect(signals.editsWithoutPriorRead).toBe(0);
+  });
+
+  it('runtime quality availability matrix', () => {
+    podRepo.insert(basePod({ runtime: 'claude' }));
+    eventRepo.insert(readTool('src/a.ts'));
+    eventRepo.insert(fileChange('src/a.ts', 'modify'));
+    const claudeSignals = computeQualitySignals(POD_ID, deps);
+    expect(claudeSignals).toMatchObject({
+      inspectionAvailability: 'available',
+      readCount: 1,
+      editsWithoutPriorRead: 0,
+    });
+
+    db.close();
+    db = createTestDb();
+    insertTestProfile(db);
+    podRepo = createPodRepository(db);
+    eventRepo = createEventRepository(db);
+    escalationRepo = createEscalationRepository(db);
+    deps = { podRepo, eventRepo, escalationRepo };
+    podRepo.insert(basePod({ runtime: 'pi' }));
+    eventRepo.insert(toolUse('read', { path: 'src/a.ts' }));
+    eventRepo.insert(toolUse('edit', { path: 'src/a.ts', call_id: 'edit-1' }));
+    eventRepo.insert(fileChange('src/a.ts', 'modify'));
+    const piSignals = computeQualitySignals(POD_ID, deps);
+    expect(piSignals).toMatchObject({
+      inspectionAvailability: 'available',
+      readCount: 1,
+      editCount: 1,
+      editsWithoutPriorRead: 0,
+    });
+    expect(
+      isQualityScoreEligible({
+        signals: piSignals,
+        hasPiAttempt: true,
+        hasNonPiAttempt: true,
+      }),
+    ).toBe(false);
+    expect(
+      isQualityScoreEligible({
+        signals: piSignals,
+        hasPiAttempt: true,
+        hasNonPiAttempt: false,
+        historical: true,
+      }),
+    ).toBe(false);
+
+    db.close();
+    db = createTestDb();
+    insertTestProfile(db);
+    podRepo = createPodRepository(db);
+    eventRepo = createEventRepository(db);
+    escalationRepo = createEscalationRepository(db);
+    deps = { podRepo, eventRepo, escalationRepo };
+    podRepo.insert(basePod({ runtime: 'pi' }));
+    eventRepo.insert(toolUse('write', { path: 'src/a.ts' }));
+    expect(computeQualitySignals(POD_ID, deps)).toMatchObject({
+      inspectionAvailability: 'unavailable',
+      inspectionUnavailableReason: 'unresolved_write',
+      readCount: null,
+    });
+
+    db.close();
+    db = createTestDb();
+    insertTestProfile(db);
+    podRepo = createPodRepository(db);
+    eventRepo = createEventRepository(db);
+    escalationRepo = createEscalationRepository(db);
+    deps = { podRepo, eventRepo, escalationRepo };
+    podRepo.insert(basePod({ runtime: 'copilot' }));
+    expect(computeQualitySignals(POD_ID, deps)).toMatchObject({
+      inspectionAvailability: 'unavailable',
+      inspectionUnavailableReason: 'no_activity',
+      readCount: null,
+    });
   });
 
   it('marks ambiguous shell inspection unavailable even without a mutation', () => {

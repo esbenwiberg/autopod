@@ -24,8 +24,8 @@ export interface QualityActivityEvidence {
 
 const WORKSPACE_ROOT = '/workspace';
 const INSPECTION_AFTER_CONTROL = /(?:^|&&|\|\||[;|])\s*(?:cat|head|tail|sed|rg|grep)(?:\s|$)/;
-const BASH_LOGIN_INSPECTION =
-  /^(?:\/bin\/)?bash\s+-lc\s+['"]?\s*(?:cat|head|tail|sed|rg|grep)(?:\s|$)/;
+const SHELL_LOGIN_INSPECTION =
+  /^(?:\/bin\/)?(?:bash|sh)\s+-lc\s+['"]?\s*(?:cat|head|tail|sed|rg|grep)(?:\s|$)/;
 const EXPANDING_DOUBLE_QUOTE_META = new Set(['$', '`', '\n', '\r']);
 const SHELL_META = new Set([
   ';',
@@ -66,9 +66,11 @@ export function normalizeQualityActivityEvidence(event: AgentEvent): QualityActi
   }
 
   const command = stringInput(event, 'command');
-  if (!command) return { activities: [], ambiguousInspection: false };
-  const cwd = stringInput(event, 'cwd') ?? WORKSPACE_ROOT;
-  const shellEvidence = inspectedShellEvidence(command, cwd);
+  const cwd = stringInput(event, 'cwd') ?? stringInput(event, 'workdir') ?? WORKSPACE_ROOT;
+  const argvEvidence = structuredShellEvidence(event, cwd);
+  const shellEvidence =
+    argvEvidence ??
+    (command ? inspectedShellEvidence(command, cwd) : { paths: [], ambiguous: false });
   return {
     activities: shellEvidence.paths.map((path) => ({
       kind: 'inspection',
@@ -78,6 +80,56 @@ export function normalizeQualityActivityEvidence(event: AgentEvent): QualityActi
     })),
     ambiguousInspection: shellEvidence.ambiguous,
   };
+}
+
+/**
+ * Only an argv array can prove that a shell script was supplied as one `-lc`
+ * argument. Never try to recover that boundary from the display command.
+ */
+function structuredShellEvidence(
+  event: AgentToolUseEvent,
+  cwd: string,
+): { paths: string[]; ambiguous: boolean } | null {
+  if (!Object.hasOwn(event.input, 'argv')) return null;
+  const argv = stringArrayInput(event, 'argv');
+  if (argv === null) {
+    return { paths: [], ambiguous: true };
+  }
+  if (argv.length === 0) return { paths: [], ambiguous: true };
+  const [program, flag, script, ...rest] = argv;
+  const isShell =
+    program === 'bash' || program === '/bin/bash' || program === 'sh' || program === '/bin/sh';
+  if (isShell && flag === '-lc' && typeof script === 'string' && rest.length === 0) {
+    return inspectedShellEvidence(script, cwd, true);
+  }
+  // A shell invocation with any other argv shape cannot prove where its script
+  // begins or whether it is read-only. Do not fall back to its display command.
+  if (isShell) return { paths: [], ambiguous: true };
+  return inspectedArgvEvidence(argv, cwd);
+}
+
+function inspectedArgvEvidence(
+  argv: string[],
+  cwd: string,
+): { paths: string[]; ambiguous: boolean } {
+  if (argv.some(hasShellMeta)) {
+    return { paths: [], ambiguous: isInspectionProgram(argv[0]) };
+  }
+  // Only the explicit shell wrappers above are supported absolute executables.
+  // Treat every other absolute program as unresolved rather than silently
+  // counting a zero-read session as complete evidence.
+  if (argv[0]?.startsWith('/')) return { paths: [], ambiguous: true };
+  const evidence = inspectedTokensEvidence(argv, cwd);
+  if (evidence.paths.length > 0 || evidence.ambiguous) return evidence;
+  return {
+    paths: [],
+    ambiguous:
+      argv.some((argument) => looksLikeInspection(argument)) || isInspectionProgram(argv[0]),
+  };
+}
+
+function hasShellMeta(argument: string): boolean {
+  return [...argument].some((character) => SHELL_META.has(character));
 }
 
 export function canonicalRepositoryPath(
@@ -145,16 +197,29 @@ function normalizeNativeTool(
   ];
 }
 
+function stringArrayInput(event: AgentToolUseEvent, key: string): string[] | null {
+  const value = event.input[key];
+  return Array.isArray(value) && value.every((item): item is string => typeof item === 'string')
+    ? value
+    : null;
+}
+
 function inspectedShellEvidence(
   command: string,
   cwd: string,
+  structuredWrapper = false,
 ): { paths: string[]; ambiguous: boolean } {
+  if (hasUnsafeShellExpansion(command)) {
+    return { paths: [], ambiguous: structuredWrapper || looksLikeInspection(command) };
+  }
   const compound = splitReadOnlyCompound(command);
   if (compound !== null) {
-    if (compound.length === 0) return { paths: [], ambiguous: looksLikeInspection(command) };
-    const parts = compound.map((part) => inspectedShellEvidence(part, cwd));
+    if (compound.length === 0) {
+      return { paths: [], ambiguous: structuredWrapper || looksLikeInspection(command) };
+    }
+    const parts = compound.map((part) => inspectedShellEvidence(part, cwd, structuredWrapper));
     if (parts.some((part) => part.ambiguous || part.paths.length === 0)) {
-      return { paths: [], ambiguous: looksLikeInspection(command) };
+      return { paths: [], ambiguous: structuredWrapper || looksLikeInspection(command) };
     }
     return {
       paths: [...new Set(parts.flatMap((part) => part.paths))],
@@ -164,15 +229,23 @@ function inspectedShellEvidence(
 
   const tokens = tokenizeShell(command);
   if (!tokens) {
-    return { paths: [], ambiguous: looksLikeInspection(command) };
+    return { paths: [], ambiguous: structuredWrapper || looksLikeInspection(command) };
   }
 
-  const unwrapped = unwrapBashLoginCommand(tokens);
-  if (unwrapped !== null) return inspectedShellEvidence(unwrapped, cwd);
-  if (tokens.length < 2) {
-    return { paths: [], ambiguous: looksLikeInspection(command) };
-  }
+  const evidence = inspectedTokensEvidence(tokens, cwd);
+  if (evidence.paths.length > 0 || evidence.ambiguous) return evidence;
+  return { paths: [], ambiguous: looksLikeInspection(command) };
+}
 
+function hasUnsafeShellExpansion(command: string): boolean {
+  return [...command].some((character) => ['*', '?', '[', ']', '~'].includes(character));
+}
+
+function inspectedTokensEvidence(
+  tokens: string[],
+  cwd: string,
+): { paths: string[]; ambiguous: boolean } {
+  if (tokens.length < 2) return { paths: [], ambiguous: false };
   const [program, ...args] = tokens;
   let operands: string[];
 
@@ -195,11 +268,11 @@ function inspectedShellEvidence(
       operands = ripgrepOperands(args);
       break;
     default:
-      return { paths: [], ambiguous: looksLikeInspection(command) };
+      return { paths: [], ambiguous: false };
   }
 
   if (operands.length === 0 || operands.some((operand) => operand === '-')) {
-    return { paths: [], ambiguous: looksLikeInspection(command) };
+    return { paths: [], ambiguous: isInspectionProgram(program) };
   }
   const paths = operands.map((operand) => canonicalRepositoryPath(operand, cwd));
   return paths.every((path): path is string => path !== null)
@@ -207,15 +280,12 @@ function inspectedShellEvidence(
     : { paths: [], ambiguous: true };
 }
 
-function unwrapBashLoginCommand(tokens: string[]): string | null {
-  const [program, flag, nested, ...rest] = tokens;
-  if ((program !== '/bin/bash' && program !== 'bash') || flag !== '-lc') return null;
-  if (!nested || rest.length > 0) return null;
-  return nested;
+function isInspectionProgram(program: string | undefined): boolean {
+  return ['cat', 'head', 'tail', 'sed', 'rg', 'grep'].includes(program ?? '');
 }
 
 function looksLikeInspection(command: string): boolean {
-  return INSPECTION_AFTER_CONTROL.test(command) || BASH_LOGIN_INSPECTION.test(command);
+  return INSPECTION_AFTER_CONTROL.test(command) || SHELL_LOGIN_INSPECTION.test(command);
 }
 
 /** Split only simple `&&`/`;` sequences; every segment must later prove read-only. */
