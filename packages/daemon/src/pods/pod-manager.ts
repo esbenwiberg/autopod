@@ -9335,7 +9335,10 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         });
 
         if (!ownsLifecycle(podId, lifecycleGeneration, containerId)) {
-          logger.info({ podId, containerId, generation: lifecycleGeneration }, 'Discarded stale agent continuation');
+          logger.info(
+            { podId, containerId, generation: lifecycleGeneration },
+            'Discarded stale agent continuation',
+          );
           return;
         }
 
@@ -9355,7 +9358,10 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         }
       } catch (err) {
         if (!ownsLifecycle(podId, lifecycleGeneration, null)) {
-          logger.info({ podId, generation: lifecycleGeneration }, 'Discarded stale lifecycle error');
+          logger.info(
+            { podId, generation: lifecycleGeneration },
+            'Discarded stale lifecycle error',
+          );
           return;
         }
         logger.error({ err, podId }, 'Pod processing error');
@@ -9515,10 +9521,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
       let terminalClassification: ProviderFailureClassification | null = null;
       try {
         for await (const event of events) {
-          if (
-            lifecycle &&
-            !ownsLifecycle(podId, lifecycle.generation, lifecycle.containerId)
-          ) {
+          if (lifecycle && !ownsLifecycle(podId, lifecycle.generation, lifecycle.containerId)) {
             logger.info(
               { podId, containerId: lifecycle.containerId, generation: lifecycle.generation },
               'Stopped processing stale lifecycle agent events',

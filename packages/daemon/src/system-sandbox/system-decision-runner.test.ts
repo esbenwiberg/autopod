@@ -302,9 +302,9 @@ describe('SystemDecisionRunner', () => {
 
     const repaired = harness({ outputs: ['not json', JSON.stringify(decision)] });
     await expect(repaired.runner.run(input)).resolves.toMatchObject({ ok: true, decision });
-    const promptWrites = vi.mocked(repaired.manager.writeFile).mock.calls.filter(
-      ([, path]) => String(path).includes('prompt'),
-    );
+    const promptWrites = vi
+      .mocked(repaired.manager.writeFile)
+      .mock.calls.filter(([, path]) => String(path).includes('prompt'));
     expect(promptWrites).toHaveLength(2);
     expect(String(promptWrites[1]?.[2])).toContain('single\nbounded repair attempt');
   });

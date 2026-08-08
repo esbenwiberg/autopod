@@ -9,6 +9,7 @@ import { AutopodError, PROVIDER_CATALOG } from '@autopod/shared';
 import type { Logger } from 'pino';
 import type { DockerNetworkManager } from '../containers/docker-network-manager.js';
 import type { ContainerManager } from '../interfaces/container-manager.js';
+import { buildPodsitterDecisionRepairPrompt } from '../podsitter/evidence-builder.js';
 import type { PodsitterRepository } from '../podsitter/podsitter-repository.js';
 import type { ProviderAccountStore } from '../provider-accounts/index.js';
 import { persistProviderAccountCredentials } from '../providers/credential-persistence.js';
@@ -19,7 +20,6 @@ import {
   sanitizeProviderMessage,
 } from '../runtimes/provider-error-classifier.js';
 import { DecisionOutputError, parseSystemDecisionOutput } from './decision-output.js';
-import { buildPodsitterDecisionRepairPrompt } from '../podsitter/evidence-builder.js';
 import {
   SYSTEM_CREDENTIAL_SHIM,
   SYSTEM_CREDENTIAL_SHIM_PATH,
