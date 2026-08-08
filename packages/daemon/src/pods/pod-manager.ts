@@ -2933,8 +2933,9 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
       { podId: pod.id, containerId: targetContainerId, generation: pod.lifecycleGeneration },
       'Cleaning lifecycle container by captured identity',
     );
-    await stopSandboxPreviewProxy(pod.id);
-    if (mode === 'kill' && deps.beforeContainerCleanup) {
+    const ownsSharedResources = ownsLifecycle(pod.id, pod.lifecycleGeneration, targetContainerId);
+    if (ownsSharedResources) await stopSandboxPreviewProxy(pod.id);
+    if (ownsSharedResources && mode === 'kill' && deps.beforeContainerCleanup) {
       let extractionTimer: ReturnType<typeof setTimeout> | undefined;
       await Promise.race([
         deps
@@ -2958,7 +2959,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
     }
     // Stop denial receiver before killing/stopping the container so the
     // long-running socat exec gets a clean shutdown signal.
-    await stopHaproxyDenyReceiver(pod.id);
+    if (ownsSharedResources) await stopHaproxyDenyReceiver(pod.id);
     const cm = containerManagerFactory.get(pod.executionTarget);
     const op = mode === 'kill' ? cm.kill(targetContainerId) : cm.stop(targetContainerId);
     let timer: ReturnType<typeof setTimeout> | undefined;
@@ -2991,7 +2992,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         podRepo.update(pod.id, { containerId: null });
       }
     }
-    if (mode === 'kill') {
+    if (mode === 'kill' && ownsSharedResources) {
       forgetMaxCredentialLineage(pod.id);
     }
   }
@@ -9328,7 +9329,10 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         }
 
         visibleFailurePhase = 'agent';
-        const outcome = await this.consumeAgentEvents(podId, events, startingAttempt);
+        const outcome = await this.consumeAgentEvents(podId, events, startingAttempt, {
+          generation: lifecycleGeneration,
+          containerId,
+        });
 
         if (!ownsLifecycle(podId, lifecycleGeneration, containerId)) {
           logger.info({ podId, containerId, generation: lifecycleGeneration }, 'Discarded stale agent continuation');
@@ -9476,6 +9480,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
       podId: string,
       events: AsyncIterable<AgentEvent>,
       attempt = 0,
+      lifecycle?: { generation: number; containerId: string | null },
     ): Promise<AgentRunOutcome> {
       const runToken = Symbol(podId);
       let resolveRunSettled: () => void = () => {};
@@ -9510,6 +9515,16 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
       let terminalClassification: ProviderFailureClassification | null = null;
       try {
         for await (const event of events) {
+          if (
+            lifecycle &&
+            !ownsLifecycle(podId, lifecycle.generation, lifecycle.containerId)
+          ) {
+            logger.info(
+              { podId, containerId: lifecycle.containerId, generation: lifecycle.generation },
+              'Stopped processing stale lifecycle agent events',
+            );
+            return 'stopped';
+          }
           if (pauseIntents.has(podId)) {
             outcome = 'paused';
             continue;
