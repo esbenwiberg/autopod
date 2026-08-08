@@ -96,6 +96,49 @@ describe('continue-provider command', () => {
   });
 });
 
+describe('ls command', () => {
+  let program: Command;
+  let mockClient: AutopodClient;
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    program = new Command();
+    program.exitOverride();
+    mockClient = createMockClient();
+    registerPodCommands(program, () => mockClient);
+  });
+
+  it('ls since forwards a duration filter as an ISO timestamp', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-02-08T00:00:00.000Z'));
+    try {
+      await program.parseAsync(['node', 'ap', 'ls', '--since', '7d']);
+      expect(mockClient.listSessions).toHaveBeenCalledWith({
+        status: undefined,
+        profile: undefined,
+        limit: undefined,
+        since: '2026-02-01T00:00:00.000Z',
+      });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('rejects unsupported status before listing pods', async () => {
+    await expect(program.parseAsync(['node', 'ap', 'ls', '--status', 'blocked'])).rejects.toThrow(
+      /Unsupported pod status: blocked.*Supported statuses:/,
+    );
+    expect(mockClient.listSessions).not.toHaveBeenCalled();
+  });
+
+  it('rejects malformed ISO since values before listing pods', async () => {
+    await expect(program.parseAsync(['node', 'ap', 'ls', '--since', '2026-02-30'])).rejects.toThrow(
+      /since must be a duration/,
+    );
+    expect(mockClient.listSessions).not.toHaveBeenCalled();
+  });
+});
+
 describe('update-from-base command', () => {
   let program: Command;
   let mockClient: AutopodClient;

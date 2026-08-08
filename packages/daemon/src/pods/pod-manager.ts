@@ -1540,6 +1540,7 @@ export interface PodManager {
     status?: PodStatus | PodStatus[];
     userId?: string;
     limit?: number;
+    since?: string;
     before?: { createdAt: string; id: string };
   }): Pod[];
   getSessionStats(filters?: { profileName?: string }): PodStats;

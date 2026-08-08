@@ -110,6 +110,7 @@ export interface PodFilters {
   status?: PodStatus | PodStatus[];
   userId?: string;
   limit?: number;
+  since?: string;
   before?: {
     createdAt: string;
     id: string;
@@ -967,6 +968,10 @@ export function createPodRepository(db: Database.Database): PodRepository {
       if (filters?.userId !== undefined) {
         whereClauses.push('user_id = @userId');
         params.userId = filters.userId;
+      }
+      if (filters?.since !== undefined) {
+        whereClauses.push('created_at >= @since');
+        params.since = filters.since;
       }
       if (filters?.before !== undefined) {
         whereClauses.push(

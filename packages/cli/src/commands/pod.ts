@@ -11,7 +11,12 @@ import type {
   SystemEvent,
   ValidationSuite,
 } from '@autopod/shared';
-import { VALIDATION_SUITES, isValidationSuite, parseBriefs } from '@autopod/shared';
+import {
+  VALIDATION_SUITES,
+  isValidationSuite,
+  parseBriefs,
+  podStatusSchema,
+} from '@autopod/shared';
 import chalk from 'chalk';
 import type { Command } from 'commander';
 import type { AutopodClient } from '../api/client.js';
@@ -54,6 +59,55 @@ const executionTargetHelp = 'Execution target: local | sandbox';
 function truncate(str: string, max: number): string {
   if (str.length <= max) return str;
   return `${str.slice(0, max - 1)}…`;
+}
+
+const DURATION_SHORTHAND = /^(\d+)([dw])$/i;
+const SUPPORTED_POD_STATUSES = podStatusSchema.options;
+
+function parseIsoDateTime(value: string): Date | null {
+  const match = /^(\d{4})-(\d{2})-(\d{2})(?:T|$)/.exec(value);
+  if (!match) return null;
+  const year = Number.parseInt(match[1] ?? '', 10);
+  const month = Number.parseInt(match[2] ?? '', 10);
+  const day = Number.parseInt(match[3] ?? '', 10);
+  const calendarDate = new Date(Date.UTC(year, month - 1, day));
+  if (
+    calendarDate.getUTCFullYear() !== year ||
+    calendarDate.getUTCMonth() !== month - 1 ||
+    calendarDate.getUTCDate() !== day
+  ) {
+    return null;
+  }
+  const timestamp = new Date(value);
+  return Number.isNaN(timestamp.getTime()) ? null : timestamp;
+}
+
+function parseSince(value: string): string {
+  const shorthand = DURATION_SHORTHAND.exec(value);
+  if (shorthand) {
+    const amount = Number.parseInt(shorthand[1] ?? '', 10);
+    const unit = shorthand[2]?.toLowerCase();
+    const milliseconds =
+      unit === 'w' ? amount * 7 * 24 * 60 * 60 * 1000 : amount * 24 * 60 * 60 * 1000;
+    return new Date(Date.now() - milliseconds).toISOString();
+  }
+
+  const timestamp = parseIsoDateTime(value);
+  if (!timestamp) {
+    throw new Error('since must be a duration like 7d or 2w, or an ISO date/time');
+  }
+  return timestamp.toISOString();
+}
+
+function validatePodStatuses(status?: string): void {
+  const invalidStatus = status
+    ?.split(',')
+    .find((value) => !podStatusSchema.safeParse(value).success);
+  if (invalidStatus !== undefined) {
+    throw new Error(
+      `Unsupported pod status: ${invalidStatus}. Supported statuses: ${SUPPORTED_POD_STATUSES.join(', ')}`,
+    );
+  }
 }
 
 function parseValidationSuite(value: string | undefined): ValidationSuite | undefined {
@@ -419,6 +473,7 @@ export function registerPodCommands(program: Command, getClient: () => AutopodCl
     .description('List pods')
     .option('-s, --status <status>', 'Filter by status')
     .option('-p, --profile <profile>', 'Filter by profile')
+    .option('--since <duration>', 'Filter by created time (for example: 7d, 2w, or ISO timestamp)')
     .option('-l, --limit <number>', 'Limit the number of newest pods', (value) => {
       if (!/^[1-9]\d*$/.test(value)) throw new Error('limit must be a positive integer');
       return Number.parseInt(value, 10);
@@ -430,11 +485,14 @@ export function registerPodCommands(program: Command, getClient: () => AutopodCl
         status?: string;
         profile?: string;
         limit?: number;
+        since?: string;
         compact?: boolean;
         json?: boolean;
       }) => {
+        validatePodStatuses(opts.status);
+        const since = opts.since === undefined ? undefined : parseSince(opts.since);
         const client = getClient();
-        const filters = { status: opts.status, profile: opts.profile, limit: opts.limit };
+        const filters = { status: opts.status, profile: opts.profile, limit: opts.limit, since };
         if (opts.compact) {
           const pods = await withSpinner('Fetching pods...', () =>
             client.listSessions({ ...filters, compact: true }),

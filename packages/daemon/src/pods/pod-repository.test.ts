@@ -581,6 +581,33 @@ describe('PodRepository', () => {
       ]);
     });
 
+    it('filters by since before ordering and pagination', () => {
+      for (const id of ['old', 'newer', 'newest']) {
+        repo.insert({ ...validSession, id });
+      }
+      db.prepare("UPDATE pods SET created_at = '2026-01-01T00:00:00.000Z' WHERE id = 'old'").run();
+      db.prepare(
+        "UPDATE pods SET created_at = '2026-01-02T00:00:00.000Z' WHERE id = 'newer'",
+      ).run();
+      db.prepare(
+        "UPDATE pods SET created_at = '2026-01-03T00:00:00.000Z' WHERE id = 'newest'",
+      ).run();
+
+      const first = repo.list({ since: '2026-01-02T00:00:00.000Z', limit: 1 });
+      expect(first.map((pod) => pod.id)).toEqual(['newest']);
+      const last = first[0];
+      if (!last) throw new Error('Expected the first filtered page');
+      expect(
+        repo
+          .list({
+            since: '2026-01-02T00:00:00.000Z',
+            limit: 1,
+            before: { createdAt: last.createdAt, id: last.id },
+          })
+          .map((pod) => pod.id),
+      ).toEqual(['newer']);
+    });
+
     it('should filter by profileName', () => {
       db.prepare(
         `INSERT INTO profiles (name, repo_url, build_command, start_command)
