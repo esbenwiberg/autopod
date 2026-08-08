@@ -127,7 +127,6 @@ export interface PodUpdates {
   runtime?: string;
   providerAccountIdSnapshot?: string | null;
   providerIdSnapshot?: string | null;
-  lifecycleGeneration?: number;
   containerId?: string | null;
   worktreePath?: string | null;
   validationAttempts?: number;
@@ -218,6 +217,7 @@ export interface PodRepository {
   insert(pod: NewPod): void;
   getOrThrow(id: string): Pod;
   update(id: string, changes: PodUpdates): void;
+  incrementLifecycleGeneration(id: string): number;
   delete(id: string): void;
   list(filters?: PodFilters): Pod[];
   /** All pods whose status is not terminal (`complete` / `killed`). */
@@ -580,10 +580,6 @@ export function createPodRepository(db: Database.Database): PodRepository {
         setClauses.push('provider_id_snapshot = @providerIdSnapshot');
         params.providerIdSnapshot = changes.providerIdSnapshot;
       }
-      if (changes.lifecycleGeneration !== undefined) {
-        setClauses.push('lifecycle_generation = @lifecycleGeneration');
-        params.lifecycleGeneration = changes.lifecycleGeneration;
-      }
       if (changes.containerId !== undefined) {
         setClauses.push('container_id = @containerId');
         params.containerId = changes.containerId;
@@ -935,6 +931,18 @@ export function createPodRepository(db: Database.Database): PodRepository {
         .run(params);
 
       if (result.changes === 0) throw new PodNotFoundError(id);
+    },
+
+    incrementLifecycleGeneration(id: string): number {
+      const result = db
+        .prepare(
+          'UPDATE pods SET lifecycle_generation = lifecycle_generation + 1, updated_at = ? WHERE id = ?',
+        )
+        .run(new Date().toISOString(), id);
+      if (result.changes === 0) throw new PodNotFoundError(id);
+      return (db.prepare('SELECT lifecycle_generation FROM pods WHERE id = ?').get(id) as {
+        lifecycle_generation: number;
+      }).lifecycle_generation;
     },
 
     list(filters?: PodFilters): Pod[] {

@@ -11959,7 +11959,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         emitActivityStatus(podId, 'Re-provisioning pod with fresh container…');
 
         // Fence stale validation and agent cleanup before awaiting any teardown.
-        podRepo.update(podId, { lifecycleGeneration: lifecycleGeneration + 1 });
+        podRepo.incrementLifecycleGeneration(podId);
         validationAbortControllers.get(podId)?.abort();
 
         if (
