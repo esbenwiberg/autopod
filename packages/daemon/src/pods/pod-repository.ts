@@ -127,6 +127,7 @@ export interface PodUpdates {
   runtime?: string;
   providerAccountIdSnapshot?: string | null;
   providerIdSnapshot?: string | null;
+  lifecycleGeneration?: number;
   containerId?: string | null;
   worktreePath?: string | null;
   validationAttempts?: number;
@@ -307,6 +308,7 @@ function rowToSession(row: Record<string, unknown>): Pod {
     providerIdSnapshot: (row.provider_id_snapshot as string) ?? null,
     executionTarget: (row.execution_target as Pod['executionTarget']) ?? 'local',
     branch: row.branch as string,
+    lifecycleGeneration: (row.lifecycle_generation as number) ?? 1,
     containerId: (row.container_id as string) ?? null,
     worktreePath: (row.worktree_path as string) ?? null,
     validationAttempts: row.validation_attempts as number,
@@ -577,6 +579,10 @@ export function createPodRepository(db: Database.Database): PodRepository {
       if (changes.providerIdSnapshot !== undefined) {
         setClauses.push('provider_id_snapshot = @providerIdSnapshot');
         params.providerIdSnapshot = changes.providerIdSnapshot;
+      }
+      if (changes.lifecycleGeneration !== undefined) {
+        setClauses.push('lifecycle_generation = @lifecycleGeneration');
+        params.lifecycleGeneration = changes.lifecycleGeneration;
       }
       if (changes.containerId !== undefined) {
         setClauses.push('container_id = @containerId');

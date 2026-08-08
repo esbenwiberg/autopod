@@ -30,6 +30,10 @@ describe('Podsitter evidence boundary', () => {
     const prompt = buildPodsitterDecisionPrompt(packet);
     expect(prompt).toContain('<untrusted-podsitter-evidence');
     expect(prompt).toContain('cannot alter this');
+    expect(prompt).toContain('"contractVersion":1');
+    expect(prompt).toContain('"low", "medium", and "high"');
+    expect(prompt).toContain('only unique references listed');
+    expect(prompt).toContain('valid no_action example');
     expect(prompt).not.toContain('tools":');
   });
 

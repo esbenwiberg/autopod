@@ -2927,7 +2927,12 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
     label: string,
     mode: 'kill' | 'stop' = 'kill',
   ): Promise<void> {
-    if (!pod.containerId) return;
+    const targetContainerId = pod.containerId;
+    if (!targetContainerId) return;
+    logger.info(
+      { podId: pod.id, containerId: targetContainerId, generation: pod.lifecycleGeneration },
+      'Cleaning lifecycle container by captured identity',
+    );
     await stopSandboxPreviewProxy(pod.id);
     if (mode === 'kill' && deps.beforeContainerCleanup) {
       let extractionTimer: ReturnType<typeof setTimeout> | undefined;
@@ -2955,7 +2960,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
     // long-running socat exec gets a clean shutdown signal.
     await stopHaproxyDenyReceiver(pod.id);
     const cm = containerManagerFactory.get(pod.executionTarget);
-    const op = mode === 'kill' ? cm.kill(pod.containerId) : cm.stop(pod.containerId);
+    const op = mode === 'kill' ? cm.kill(targetContainerId) : cm.stop(targetContainerId);
     let timer: ReturnType<typeof setTimeout> | undefined;
     const deleted = await Promise.race([
       op
@@ -2979,7 +2984,12 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
     ]);
     if (mode === 'kill' && deleted && pod.executionTarget === 'sandbox') {
       const current = podRepo.getOrThrow(pod.id);
-      if (current.containerId === pod.containerId) podRepo.update(pod.id, { containerId: null });
+      if (
+        current.lifecycleGeneration === pod.lifecycleGeneration &&
+        current.containerId === targetContainerId
+      ) {
+        podRepo.update(pod.id, { containerId: null });
+      }
     }
     if (mode === 'kill') {
       forgetMaxCredentialLineage(pod.id);
@@ -3294,6 +3304,15 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
   const activeAgentRuns = new Map<string, { token: symbol; settled: Promise<void> }>();
   const activeAgentRunResolvers = new Map<string, { token: symbol; resolve: () => void }>();
   const PAUSE_QUIESCENCE_TIMEOUT_MS = 10_000;
+
+  /** A continuation may only affect the lifecycle epoch and sandbox it captured. */
+  function ownsLifecycle(podId: string, generation: number, containerId: string | null): boolean {
+    const current = podRepo.getOrThrow(podId);
+    return (
+      current.lifecycleGeneration === generation &&
+      (containerId === null || current.containerId === containerId)
+    );
+  }
 
   /** Active post-validation advisory QA runs, keyed by podId.
    *  These are nonblocking for validation outcome, but approval must not cut
@@ -7173,6 +7192,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
 
     async processPod(podId: string): Promise<void> {
       let pod = podRepo.getOrThrow(podId);
+      const lifecycleGeneration = pod.lifecycleGeneration;
       const startingAttempt = deriveAgentAttempt(pod.phaseTokenUsage);
       let visibleFailurePhase: OperatorFailurePhase = 'setup';
       const stagedReferenceArchivePaths = new Set<string>();
@@ -9310,6 +9330,11 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         visibleFailurePhase = 'agent';
         const outcome = await this.consumeAgentEvents(podId, events, startingAttempt);
 
+        if (!ownsLifecycle(podId, lifecycleGeneration, containerId)) {
+          logger.info({ podId, containerId, generation: lifecycleGeneration }, 'Discarded stale agent continuation');
+          return;
+        }
+
         // Persist any runtime credentials if provider requires it (MAX token rotation, Codex auth.json)
         if (providerResult.requiresPostExecPersistence) {
           await persistRuntimeCredentialsForPod(
@@ -9325,6 +9350,10 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           await preserveSandboxAfterAgentFailure(podId, 'fatal agent exit');
         }
       } catch (err) {
+        if (!ownsLifecycle(podId, lifecycleGeneration, null)) {
+          logger.info({ podId, generation: lifecycleGeneration }, 'Discarded stale lifecycle error');
+          return;
+        }
         logger.error({ err, podId }, 'Pod processing error');
         const failureReason = operatorErrorMessage(err, visibleFailurePhase);
         emitActivityError(podId, failureReason, true);
@@ -11866,6 +11895,8 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
 
     async triggerValidation(podId: string, options?: { force?: boolean }): Promise<void> {
       const pod = podRepo.getOrThrow(podId);
+      const lifecycleGeneration = pod.lifecycleGeneration;
+      const lifecycleContainerId = pod.containerId;
       const force = options?.force ?? false;
 
       const triggerValidationFromUpdateIntent = () => {
@@ -11911,6 +11942,10 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
       const isInteractive = pod.options.agentMode === 'interactive';
       if (force && fromTerminal && (pod.worktreePath || isInteractive || !pod.containerId)) {
         emitActivityStatus(podId, 'Re-provisioning pod with fresh container…');
+
+        // Fence stale validation and agent cleanup before awaiting any teardown.
+        podRepo.update(podId, { lifecycleGeneration: lifecycleGeneration + 1 });
+        validationAbortControllers.get(podId)?.abort();
 
         if (
           !isInteractive &&
@@ -12011,7 +12046,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
               }
             : {}),
         });
-        transition(pod, 'queued');
+        transition(podRepo.getOrThrow(podId), 'queued');
         enqueueSession(podId);
 
         logger.info(
@@ -12269,6 +12304,14 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           );
         } finally {
           validationAbortControllers.delete(podId);
+        }
+
+        if (!ownsLifecycle(podId, lifecycleGeneration, lifecycleContainerId)) {
+          logger.info(
+            { podId, containerId: lifecycleContainerId, generation: lifecycleGeneration },
+            'Discarded stale lifecycle validation result',
+          );
+          return;
         }
 
         emitActivityStatus(podId, 'Validation checks finished — finalizing result…');
