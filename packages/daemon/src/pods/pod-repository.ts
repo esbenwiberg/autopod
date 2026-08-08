@@ -217,6 +217,7 @@ export interface PodRepository {
   insert(pod: NewPod): void;
   getOrThrow(id: string): Pod;
   update(id: string, changes: PodUpdates): void;
+  incrementLifecycleGeneration(id: string): number;
   delete(id: string): void;
   list(filters?: PodFilters): Pod[];
   /** All pods whose status is not terminal (`complete` / `killed`). */
@@ -307,6 +308,7 @@ function rowToSession(row: Record<string, unknown>): Pod {
     providerIdSnapshot: (row.provider_id_snapshot as string) ?? null,
     executionTarget: (row.execution_target as Pod['executionTarget']) ?? 'local',
     branch: row.branch as string,
+    lifecycleGeneration: (row.lifecycle_generation as number) ?? 1,
     containerId: (row.container_id as string) ?? null,
     worktreePath: (row.worktree_path as string) ?? null,
     validationAttempts: row.validation_attempts as number,
@@ -929,6 +931,18 @@ export function createPodRepository(db: Database.Database): PodRepository {
         .run(params);
 
       if (result.changes === 0) throw new PodNotFoundError(id);
+    },
+
+    incrementLifecycleGeneration(id: string): number {
+      const result = db
+        .prepare(
+          'UPDATE pods SET lifecycle_generation = lifecycle_generation + 1, updated_at = ? WHERE id = ?',
+        )
+        .run(new Date().toISOString(), id);
+      if (result.changes === 0) throw new PodNotFoundError(id);
+      return (db.prepare('SELECT lifecycle_generation FROM pods WHERE id = ?').get(id) as {
+        lifecycle_generation: number;
+      }).lifecycle_generation;
     },
 
     list(filters?: PodFilters): Pod[] {
