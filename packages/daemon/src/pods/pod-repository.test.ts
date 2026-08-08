@@ -504,6 +504,14 @@ describe('PodRepository', () => {
       expect(repo.getOrThrow('sess-001').reworkCount).toBe(3);
     });
 
+    it('defaults and round-trips immutable lifecycle generation', () => {
+      repo.insert(validSession);
+      expect(repo.getOrThrow('sess-001').lifecycleGeneration).toBe(1);
+      expect(repo.incrementLifecycleGeneration('sess-001')).toBe(2);
+      expect(repo.incrementLifecycleGeneration('sess-001')).toBe(3);
+      expect(repo.getOrThrow('sess-001').lifecycleGeneration).toBe(3);
+    });
+
     it('round-trips handoffInstructions and handoffContext', () => {
       repo.insert(validSession);
       expect(repo.getOrThrow('sess-001').handoffInstructions).toBe(null);

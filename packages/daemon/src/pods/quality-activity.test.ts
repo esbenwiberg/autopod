@@ -13,6 +13,13 @@ const bash = (command: string, cwd = '/workspace'): AgentEvent => ({
   input: { call_id: 'call-1', command, cwd },
 });
 
+const bashArgv = (argv: string[], cwd = '/workspace'): AgentEvent => ({
+  type: 'tool_use',
+  timestamp: '2026-01-01T00:00:00.000Z',
+  tool: 'Bash',
+  input: { call_id: 'argv-call', command: argv.join(' '), argv, cwd },
+});
+
 describe('normalizeQualityActivity', () => {
   it.each([
     ['cat packages/daemon/src/index.ts', ['packages/daemon/src/index.ts']],
@@ -57,30 +64,7 @@ describe('normalizeQualityActivity', () => {
     expect(normalizeQualityActivity(bash(command))).toEqual([]);
   });
 
-  it('wrapped-inspection-is-measured', () => {
-    expect(
-      normalizeQualityActivityEvidence(bash("/bin/bash -lc 'sed -n 1,40p src/app.ts'")),
-    ).toEqual({
-      activities: [
-        {
-          kind: 'inspection',
-          path: 'src/app.ts',
-          source: 'shell-command',
-          callId: 'call-1',
-        },
-      ],
-      ambiguousInspection: false,
-    });
-    expect(normalizeQualityActivity(bash(`/bin/bash -lc "rg -n 'foo|bar' src/search.ts"`))).toEqual(
-      [
-        {
-          kind: 'inspection',
-          path: 'src/search.ts',
-          source: 'shell-command',
-          callId: 'call-1',
-        },
-      ],
-    );
+  it('read-only compound inspections are measured', () => {
     expect(normalizeQualityActivity(bash('cat src/a.ts && sed -n 1,20p src/b.ts'))).toEqual([
       {
         kind: 'inspection',
@@ -97,6 +81,37 @@ describe('normalizeQualityActivity', () => {
     ]);
   });
 
+  it('structured-wrapper-inspection-is-measured', () => {
+    expect(
+      normalizeQualityActivity(bashArgv(['/bin/bash', '-lc', 'sed -n 1,40p src/app.ts'])),
+    ).toEqual([
+      {
+        kind: 'inspection',
+        path: 'src/app.ts',
+        source: 'shell-command',
+        callId: 'argv-call',
+      },
+    ]);
+    expect(normalizeQualityActivity(bashArgv(['sed', '-n', '1,40p', 'src/direct.ts']))).toEqual([
+      {
+        kind: 'inspection',
+        path: 'src/direct.ts',
+        source: 'shell-command',
+        callId: 'argv-call',
+      },
+    ]);
+    expect(
+      normalizeQualityActivity(bashArgv(['sh', '-lc', 'cat app.ts'], '/workspace/packages/web')),
+    ).toEqual([
+      {
+        kind: 'inspection',
+        path: 'packages/web/app.ts',
+        source: 'shell-command',
+        callId: 'argv-call',
+      },
+    ]);
+  });
+
   it('ambiguous-inspection-is-unavailable', () => {
     const evidence = normalizeQualityActivityEvidence(bash('cat src/app.ts | wc -l'));
     expect(evidence.activities).toEqual([]);
@@ -107,6 +122,60 @@ describe('normalizeQualityActivity', () => {
     );
     expect(flattenedWrapper.activities).toEqual([]);
     expect(flattenedWrapper.ambiguousInspection).toBe(true);
+    expect(
+      normalizeQualityActivityEvidence(bash("/bin/bash -lc 'sed -n 1,40p src/app.ts'")),
+    ).toEqual({ activities: [], ambiguousInspection: true });
+  });
+
+  it('unsafe-or-flattened-command-remains-unavailable', () => {
+    expect(normalizeQualityActivityEvidence(bash('/bin/bash -lc sed -n 1,40p src/app.ts'))).toEqual(
+      { activities: [], ambiguousInspection: true },
+    );
+    expect(normalizeQualityActivityEvidence(bash('sh -lc cat src/app.ts'))).toEqual({
+      activities: [],
+      ambiguousInspection: true,
+    });
+    expect(
+      normalizeQualityActivityEvidence(bashArgv(['bash', '-lc', 'cat src/app.ts | wc -l'])),
+    ).toEqual({ activities: [], ambiguousInspection: true });
+    expect(
+      normalizeQualityActivityEvidence(bashArgv(['bash', '-lc', 'sed -i s/a/b/ src/app.ts'])),
+    ).toEqual({ activities: [], ambiguousInspection: true });
+    expect(
+      normalizeQualityActivityEvidence(bashArgv(['bash', '-lc', 'cat', 'src/app.ts'])),
+    ).toEqual({ activities: [], ambiguousInspection: true });
+    expect(normalizeQualityActivityEvidence(bashArgv(['bash']))).toEqual({
+      activities: [],
+      ambiguousInspection: true,
+    });
+    expect(
+      normalizeQualityActivityEvidence(bashArgv(['bash', '-lc', 'echo $(cat src/app.ts)'])),
+    ).toEqual({ activities: [], ambiguousInspection: true });
+    expect(
+      normalizeQualityActivityEvidence(bashArgv(['sh', '-lc', 'echo `cat src/app.ts`'])),
+    ).toEqual({ activities: [], ambiguousInspection: true });
+    expect(
+      normalizeQualityActivityEvidence({
+        ...bash('cat src/app.ts'),
+        input: { command: 'cat src/app.ts', argv: ['cat', 42] },
+      } as AgentEvent),
+    ).toEqual({ activities: [], ambiguousInspection: true });
+    expect(normalizeQualityActivityEvidence(bashArgv(['cat', 'src/*.ts']))).toEqual({
+      activities: [],
+      ambiguousInspection: true,
+    });
+    expect(normalizeQualityActivityEvidence(bashArgv(['cat', 'src/$(touch owned)']))).toEqual({
+      activities: [],
+      ambiguousInspection: true,
+    });
+    expect(normalizeQualityActivityEvidence(bashArgv(['/usr/bin/cat', 'src/app.ts']))).toEqual({
+      activities: [],
+      ambiguousInspection: true,
+    });
+    expect(normalizeQualityActivityEvidence(bashArgv(['sh', '-lc', 'cat src/*.ts']))).toEqual({
+      activities: [],
+      ambiguousInspection: true,
+    });
   });
 
   it('does not make unrelated compound commands ambiguous', () => {
@@ -123,6 +192,21 @@ describe('normalizeQualityActivity', () => {
         callId: 'call-1',
       },
     ]);
+  });
+
+  it('uses workdir when cwd is absent', () => {
+    const event: AgentEvent = {
+      type: 'tool_use',
+      timestamp: '2026-01-01T00:00:00.000Z',
+      tool: 'Bash',
+      input: {
+        call_id: 'workdir-call',
+        command: 'bash -lc cat app.ts',
+        argv: ['bash', '-lc', 'cat app.ts'],
+        workdir: '/workspace/packages/web',
+      },
+    };
+    expect(normalizeQualityActivity(event)).toMatchObject([{ path: 'packages/web/app.ts' }]);
   });
 
   it('normalizes native lowercase read, edit, and write tools', () => {

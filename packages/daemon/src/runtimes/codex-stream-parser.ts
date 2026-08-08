@@ -119,6 +119,19 @@ function commandToString(cmd: unknown): string {
   return '';
 }
 
+/**
+ * Retain argv separately from the human-readable command.  The latter is
+ * intentionally lossy for arrays, so quality consumers must never need to
+ * reconstruct shell argument boundaries from it.
+ */
+function commandInput(command: unknown): Record<string, unknown> {
+  const displayCommand = commandToString(command);
+  const input: Record<string, unknown> = {};
+  if (displayCommand) input.command = displayCommand;
+  if (Array.isArray(command)) input.argv = command;
+  return input;
+}
+
 function parseJsonObject(raw: unknown): Record<string, unknown> | null {
   if (raw && typeof raw === 'object' && !Array.isArray(raw)) {
     return raw as Record<string, unknown>;
@@ -265,9 +278,24 @@ function publicItemEvents(
 
   if (itemType === 'command_execution') {
     if (!completed) {
-      const command = commandToString(item.command);
-      return command
-        ? [{ type: 'tool_use', timestamp, tool: 'Bash', input: { call_id: callId, command } }]
+      const command = commandInput(item.command);
+      return Object.keys(command).length > 0
+        ? [
+            {
+              type: 'tool_use',
+              timestamp,
+              tool: 'Bash',
+              input: {
+                call_id: callId,
+                ...command,
+                ...(typeof item.workdir === 'string' ? { workdir: item.workdir } : {}),
+                ...(typeof item.cwd === 'string' ? { cwd: item.cwd } : {}),
+                ...(typeof item.cwd !== 'string' && typeof item.workdir === 'string'
+                  ? { cwd: item.workdir }
+                  : {}),
+              },
+            },
+          ]
         : [];
     }
     const output = typeof item.aggregated_output === 'string' ? item.aggregated_output : '';
@@ -359,8 +387,8 @@ function mapFunctionCall(msg: { [key: string]: unknown }, ts: string): AgentEven
   }
 
   if (name === 'exec_command') {
-    const command = typeof input.cmd === 'string' ? input.cmd : commandToString(input.command);
-    if (command) input.command = command;
+    const rawCommand = input.cmd ?? input.command;
+    Object.assign(input, commandInput(rawCommand));
     if (typeof input.workdir === 'string' && typeof input.cwd !== 'string') {
       input.cwd = input.workdir;
     }
@@ -440,12 +468,13 @@ function mapEvent(event: CodexEnvelope, podId: string, logger?: Logger): CodexPa
     }
 
     case 'exec_command_begin': {
-      const command = commandToString(msg.command);
       const input: Record<string, unknown> = {
         call_id: msg.call_id,
-        command,
+        ...commandInput(msg.command),
       };
+      if (typeof msg.workdir === 'string') input.workdir = msg.workdir;
       if (typeof msg.cwd === 'string') input.cwd = msg.cwd;
+      else if (typeof msg.workdir === 'string') input.cwd = msg.workdir;
       return { type: 'tool_use', timestamp: ts, tool: 'Bash', input };
     }
 

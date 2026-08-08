@@ -19,6 +19,7 @@ import {
   sanitizeProviderMessage,
 } from '../runtimes/provider-error-classifier.js';
 import { DecisionOutputError, parseSystemDecisionOutput } from './decision-output.js';
+import { buildPodsitterDecisionRepairPrompt } from '../podsitter/evidence-builder.js';
 import {
   SYSTEM_CREDENTIAL_SHIM,
   SYSTEM_CREDENTIAL_SHIM_PATH,
@@ -189,7 +190,7 @@ export class SystemDecisionRunner {
           };
         } catch (error) {
           if (!(error instanceof DecisionOutputError)) throw error;
-          const repairPrompt = `${input.prompt}\n\nYour previous response failed strict schema validation: ${error.message}. Return only one corrected JSON decision.`;
+          const repairPrompt = buildPodsitterDecisionRepairPrompt(input.prompt, error.message);
           await withinDeadline(
             manager.writeFile(containerId, invocation.promptPath, repairPrompt),
             deadline,
@@ -215,7 +216,7 @@ export class SystemDecisionRunner {
             } catch (repairError) {
               const message =
                 repairError instanceof Error ? repairError.message : 'Invalid repaired decision';
-              result = failureResult('model_output', message);
+              result = failureResult('model_output', message, 'clean', 'MODEL_OUTPUT_INVALID');
               failureCode = 'MODEL_OUTPUT_INVALID';
             }
           }
@@ -619,8 +620,11 @@ function failureResult(
     ok: false,
     kind,
     failure: {
-      category: 'unknown',
-      definitive: false,
+      // Invalid model output is a terminal contract failure, not an unknown
+      // provider condition. Keeping it distinct prevents a failed schema repair
+      // from being degraded into provider availability state.
+      category: kind === 'model_output' ? 'permanent' : 'unknown',
+      definitive: kind === 'model_output',
       sanitizedMessage: sanitizeProviderMessage(message),
       retryAfter: null,
       ...(code ? { code } : {}),

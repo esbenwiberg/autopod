@@ -694,6 +694,30 @@ describe('PodsitterService', () => {
     expect(harness.repository.listPendingAttention()).toHaveLength(0);
   });
 
+  it('persists MODEL_OUTPUT_INVALID without treating it as an unknown provider outage', async () => {
+    const harness = setup();
+    const run = vi.fn(async () => ({
+      ok: false as const,
+      kind: 'model_output' as const,
+      failure: {
+        category: 'permanent' as const,
+        definitive: true,
+        sanitizedMessage: 'Decision schema repair was exhausted',
+        retryAfter: null,
+        code: 'MODEL_OUTPUT_INVALID',
+      },
+      cleanup: 'clean' as const,
+    }));
+
+    await service(harness, run).reconcile();
+
+    expect(harness.repository.listDecisions().items[0]).toMatchObject({
+      outcome: 'failed',
+      failureCode: 'MODEL_OUTPUT_INVALID',
+    });
+    expect(harness.repository.getProviderState('sitter-account')?.status).toBe('unavailable');
+  });
+
   it('supersedes durable attention when the pod no longer needs intervention', async () => {
     const harness = setup();
     harness.repository.recordAttention({

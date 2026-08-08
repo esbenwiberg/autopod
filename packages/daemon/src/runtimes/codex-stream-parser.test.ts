@@ -141,7 +141,95 @@ describe('CodexStreamParser', () => {
         type: 'tool_use',
         timestamp: expect.any(String),
         tool: 'Bash',
-        input: { call_id: 'call-1', command: 'npm test', cwd: '/workspace' },
+        input: {
+          call_id: 'call-1',
+          command: 'npm test',
+          argv: ['npm', 'test'],
+          cwd: '/workspace',
+        },
+      });
+    });
+
+    it('codex-structured-command-is-retained', async () => {
+      const publicEvents: AgentEvent[] = [];
+      for await (const event of CodexStreamParser.parse(
+        createMockStream([
+          envelope('item.started', {
+            item: {
+              id: 'public-call',
+              type: 'command_execution',
+              command: ['/bin/bash', '-lc', 'sed -n 1,80p src/app.ts'],
+              workdir: '/workspace/packages/daemon',
+            },
+          }),
+        ]),
+        'pod-1',
+        logger,
+      )) {
+        publicEvents.push(event);
+      }
+      expect(publicEvents).toEqual([
+        {
+          type: 'tool_use',
+          timestamp: expect.any(String),
+          tool: 'Bash',
+          input: {
+            call_id: 'public-call',
+            command: '/bin/bash -lc sed -n 1,80p src/app.ts',
+            argv: ['/bin/bash', '-lc', 'sed -n 1,80p src/app.ts'],
+            workdir: '/workspace/packages/daemon',
+            cwd: '/workspace/packages/daemon',
+          },
+        },
+      ]);
+
+      const rolloutEvent = CodexStreamParser.mapEvent(
+        {
+          id: 's',
+          msg: {
+            type: 'function_call',
+            call_id: 'rollout-call',
+            name: 'exec_command',
+            arguments: JSON.stringify({
+              cmd: ['sh', '-lc', 'cat src/app.ts'],
+              workdir: '/workspace/packages/daemon',
+            }),
+          },
+        },
+        'pod-1',
+      );
+      expect(rolloutEvent).toMatchObject({
+        type: 'tool_use',
+        tool: 'Bash',
+        input: {
+          call_id: 'rollout-call',
+          command: 'sh -lc cat src/app.ts',
+          argv: ['sh', '-lc', 'cat src/app.ts'],
+          workdir: '/workspace/packages/daemon',
+          cwd: '/workspace/packages/daemon',
+        },
+      });
+
+      expect(
+        CodexStreamParser.mapEvent(
+          {
+            id: 's',
+            msg: {
+              type: 'exec_command_begin',
+              call_id: 'legacy-call',
+              command: ['cat', 'src/app.ts'],
+              workdir: '/workspace/packages/daemon',
+            },
+          },
+          'pod-1',
+        ),
+      ).toMatchObject({
+        input: {
+          call_id: 'legacy-call',
+          argv: ['cat', 'src/app.ts'],
+          workdir: '/workspace/packages/daemon',
+          cwd: '/workspace/packages/daemon',
+        },
       });
     });
 

@@ -50,12 +50,12 @@ function editEvent(path: string): AgentActivityEvent {
   return { type: 'pod.agent_activity', timestamp: event.timestamp, podId: POD_ID, event };
 }
 
-function codexInspectionEvent(command: string): AgentActivityEvent {
+function codexInspectionEvent(command: string, argv?: string[]): AgentActivityEvent {
   const event: AgentToolUseEvent = {
     type: 'tool_use',
     timestamp: new Date().toISOString(),
     tool: 'Bash',
-    input: { command },
+    input: { command, ...(argv ? { argv } : {}) },
   };
   return { type: 'pod.agent_activity', timestamp: event.timestamp, podId: POD_ID, event };
 }
@@ -127,6 +127,81 @@ describe('QualityScoreRecorder', () => {
     expect(persisted?.inspectionAvailability).toBe('available');
     // V3 saturates inspection discipline at 3 and excludes completion outcomes.
     expect(persisted?.score).toBe(100);
+  });
+
+  it('codex-complete-evidence-produces-score', () => {
+    ctx.podRepo.insert(basePod({ runtime: 'codex', model: 'gpt-5.6-sol' }));
+    ctx.eventRepo.insert(
+      codexInspectionEvent('/bin/bash -lc sed -n 1,80p src/app.ts', [
+        '/bin/bash',
+        '-lc',
+        'sed -n 1,80p src/app.ts',
+      ]),
+    );
+    ctx.eventRepo.insert(editEvent('/workspace/src/app.ts'));
+
+    ctx.recorder.start();
+    ctx.eventBus.emit({
+      type: 'pod.completed',
+      timestamp: '2026-04-23T12:00:00.000Z',
+      podId: POD_ID,
+      finalStatus: 'complete',
+      summary: {
+        id: POD_ID,
+        profileName: 'test-profile',
+        task: 'do the thing',
+        status: 'complete',
+        model: 'gpt-5.6-sol',
+        runtime: 'codex',
+        duration: 1000,
+        filesChanged: 1,
+        createdAt: '2026-04-23T11:50:00.000Z',
+      },
+    });
+
+    expect(ctx.qualityScoreRepo.get(POD_ID)).toMatchObject({
+      algorithmVersion: QUALITY_SCORE_ALGORITHM_VERSION,
+      inspectionAvailability: 'available',
+      readCount: 1,
+      readEditRatio: 1,
+      editsWithoutPriorRead: 0,
+    });
+    expect(ctx.qualityScoreRepo.get(POD_ID)?.score).toEqual(expect.any(Number));
+  });
+
+  it('independent-metrics-survive-ambiguity', () => {
+    ctx.podRepo.insert(basePod({ runtime: 'codex' }));
+    ctx.podRepo.update(POD_ID, { inputTokens: 120, outputTokens: 30, costUsd: 0.25 });
+    ctx.eventRepo.insert(codexInspectionEvent('cat src/app.ts | wc -l'));
+    ctx.eventRepo.insert(editEvent('src/app.ts'));
+
+    ctx.recorder.start();
+    ctx.eventBus.emit({
+      type: 'pod.completed',
+      timestamp: '2026-04-23T12:00:00.000Z',
+      podId: POD_ID,
+      finalStatus: 'complete',
+      summary: {
+        id: POD_ID,
+        profileName: 'test-profile',
+        task: 'do the thing',
+        status: 'complete',
+        model: 'gpt-5',
+        runtime: 'codex',
+        duration: 1000,
+        filesChanged: 1,
+        createdAt: '2026-04-23T11:50:00.000Z',
+      },
+    });
+
+    expect(ctx.qualityScoreRepo.get(POD_ID)).toMatchObject({
+      score: null,
+      inspectionAvailability: 'unavailable',
+      inspectionUnavailableReason: 'ambiguous_inspection',
+      inputTokens: 120,
+      outputTokens: 30,
+      editChurnCount: 0,
+    });
   });
 
   it('refreshes readiness after the pod.completed score row is persisted', () => {

@@ -167,6 +167,8 @@ export interface Pod {
   providerIdSnapshot: string | null;
   executionTarget: ExecutionTarget;
   branch: string;
+  /** Monotonically increasing ownership epoch for async lifecycle continuations. */
+  lifecycleGeneration: number;
   containerId: string | null;
   worktreePath: string | null;
   validationAttempts: number;

@@ -21,6 +21,7 @@ const decision: PodsitterDecision = {
 function harness(
   options: {
     output?: string;
+    outputs?: string[];
     exitCode?: number;
     killFails?: boolean;
     spawnFailsAfterCreate?: boolean;
@@ -35,6 +36,7 @@ function harness(
 ) {
   const spawns: ContainerSpawnConfig[] = [];
   const fileOwners = new Map<string, string>();
+  let inferenceCount = 0;
   const manager = {
     spawn: vi.fn(async (config: ContainerSpawnConfig) => {
       spawns.push(config);
@@ -76,7 +78,7 @@ function harness(
         return { stdout: '', stderr: 'permission denied', exitCode: 126 };
       }
       return {
-        stdout: options.output ?? JSON.stringify(decision),
+        stdout: options.outputs?.[inferenceCount++] ?? options.output ?? JSON.stringify(decision),
         stderr: '',
         exitCode: options.exitCode ?? 0,
       };
@@ -291,6 +293,32 @@ describe('SystemDecisionRunner', () => {
     expect(leaked.repository.closeSandboxRun).toHaveBeenCalledWith(
       'system-decision-1',
       expect.objectContaining({ outcome: 'leaked', cleanupState: 'retryable' }),
+    );
+  });
+
+  it('accepts a valid first decision and performs exactly one bounded repair on invalid output', async () => {
+    const first = harness();
+    await expect(first.runner.run(input)).resolves.toMatchObject({ ok: true, decision });
+
+    const repaired = harness({ outputs: ['not json', JSON.stringify(decision)] });
+    await expect(repaired.runner.run(input)).resolves.toMatchObject({ ok: true, decision });
+    const promptWrites = vi.mocked(repaired.manager.writeFile).mock.calls.filter(
+      ([, path]) => String(path).includes('prompt'),
+    );
+    expect(promptWrites).toHaveLength(2);
+    expect(String(promptWrites[1]?.[2])).toContain('single\nbounded repair attempt');
+  });
+
+  it('fails closed with MODEL_OUTPUT_INVALID after the single repair is exhausted', async () => {
+    const exhausted = harness({ outputs: ['not json', 'still not json'] });
+    await expect(exhausted.runner.run(input)).resolves.toMatchObject({
+      ok: false,
+      kind: 'model_output',
+      failure: { code: 'MODEL_OUTPUT_INVALID', category: 'permanent' },
+    });
+    expect(exhausted.repository.closeSandboxRun).toHaveBeenCalledWith(
+      'system-decision-1',
+      expect.objectContaining({ failureCode: 'MODEL_OUTPUT_INVALID' }),
     );
   });
 
