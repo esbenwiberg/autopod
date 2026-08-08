@@ -624,7 +624,7 @@ function failureResult(
       // provider condition. Keeping it distinct prevents a failed schema repair
       // from being degraded into provider availability state.
       category: kind === 'model_output' ? 'permanent' : 'unknown',
-      definitive: false,
+      definitive: kind === 'model_output',
       sanitizedMessage: sanitizeProviderMessage(message),
       retryAfter: null,
       ...(code ? { code } : {}),
