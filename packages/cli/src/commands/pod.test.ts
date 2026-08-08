@@ -130,6 +130,13 @@ describe('ls command', () => {
     );
     expect(mockClient.listSessions).not.toHaveBeenCalled();
   });
+
+  it('rejects malformed ISO since values before listing pods', async () => {
+    await expect(program.parseAsync(['node', 'ap', 'ls', '--since', '2026-02-30'])).rejects.toThrow(
+      /since must be a duration/,
+    );
+    expect(mockClient.listSessions).not.toHaveBeenCalled();
+  });
 });
 
 describe('update-from-base command', () => {

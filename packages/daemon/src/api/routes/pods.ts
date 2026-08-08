@@ -111,7 +111,19 @@ function decodePodListCursor(raw: string): PodListCursor | null {
 
 function parseSinceQueryParam(value: string | undefined): string | null | undefined {
   if (value === undefined) return undefined;
-  if (!/^\d{4}-\d{2}-\d{2}(?:T|$)/.test(value)) return null;
+  const match = /^(\d{4})-(\d{2})-(\d{2})(?:T|$)/.exec(value);
+  if (!match) return null;
+  const year = Number.parseInt(match[1] ?? '', 10);
+  const month = Number.parseInt(match[2] ?? '', 10);
+  const day = Number.parseInt(match[3] ?? '', 10);
+  const calendarDate = new Date(Date.UTC(year, month - 1, day));
+  if (
+    calendarDate.getUTCFullYear() !== year ||
+    calendarDate.getUTCMonth() !== month - 1 ||
+    calendarDate.getUTCDate() !== day
+  ) {
+    return null;
+  }
   const timestamp = new Date(value);
   return Number.isNaN(timestamp.getTime()) ? null : timestamp.toISOString();
 }

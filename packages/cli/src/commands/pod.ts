@@ -64,6 +64,24 @@ function truncate(str: string, max: number): string {
 const DURATION_SHORTHAND = /^(\d+)([dw])$/i;
 const SUPPORTED_POD_STATUSES = podStatusSchema.options;
 
+function parseIsoDateTime(value: string): Date | null {
+  const match = /^(\d{4})-(\d{2})-(\d{2})(?:T|$)/.exec(value);
+  if (!match) return null;
+  const year = Number.parseInt(match[1] ?? '', 10);
+  const month = Number.parseInt(match[2] ?? '', 10);
+  const day = Number.parseInt(match[3] ?? '', 10);
+  const calendarDate = new Date(Date.UTC(year, month - 1, day));
+  if (
+    calendarDate.getUTCFullYear() !== year ||
+    calendarDate.getUTCMonth() !== month - 1 ||
+    calendarDate.getUTCDate() !== day
+  ) {
+    return null;
+  }
+  const timestamp = new Date(value);
+  return Number.isNaN(timestamp.getTime()) ? null : timestamp;
+}
+
 function parseSince(value: string): string {
   const shorthand = DURATION_SHORTHAND.exec(value);
   if (shorthand) {
@@ -74,8 +92,8 @@ function parseSince(value: string): string {
     return new Date(Date.now() - milliseconds).toISOString();
   }
 
-  const timestamp = new Date(value);
-  if (!/^\d{4}-\d{2}-\d{2}(?:T|$)/.test(value) || Number.isNaN(timestamp.getTime())) {
+  const timestamp = parseIsoDateTime(value);
+  if (!timestamp) {
     throw new Error('since must be a duration like 7d or 2w, or an ISO date/time');
   }
   return timestamp.toISOString();

@@ -598,15 +598,18 @@ describe('Extended Route Tests', () => {
       expect(res.json().error).toContain('limit');
     });
 
-    it('rejects malformed since with a dedicated error code', async () => {
-      const res = await app.inject({
-        method: 'GET',
-        url: '/pods?since=last-week',
-        headers: authHeaders,
-      });
-      expect(res.statusCode).toBe(400);
-      expect(res.json()).toMatchObject({ code: 'invalid_since' });
-    });
+    it.each(['last-week', '2026-02-30'])(
+      'rejects malformed since %s with a dedicated error code',
+      async (since) => {
+        const res = await app.inject({
+          method: 'GET',
+          url: `/pods?since=${since}`,
+          headers: authHeaders,
+        });
+        expect(res.statusCode).toBe(400);
+        expect(res.json()).toMatchObject({ code: 'invalid_since' });
+      },
+    );
   });
 
   // -------------------------------------------------------------------------
