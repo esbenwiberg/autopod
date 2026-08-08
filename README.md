@@ -451,6 +451,8 @@ ap run <profile> "<task>" --ref-from-profile docs-repo
 # Monitor
 ap ls                                       # List pods
 ap ls --status running                      # Filter by status
+ap ls --status failed,review_required,complete,killed --since 7d # Recent terminal pods
+ap ls --since 2026-01-01T00:00:00Z          # Pods created since an ISO timestamp
 ap ls --json                                # JSON output (for scripting)
 ap status <id>                              # Full pod details
 ap logs <id>                                # Stream agent activity

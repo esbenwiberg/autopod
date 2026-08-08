@@ -359,6 +359,74 @@ describe('Extended Route Tests', () => {
       expect(res.statusCode).toBe(200);
     });
 
+    it('filters pods created since an ISO timestamp', async () => {
+      const ids: string[] = [];
+      for (const task of ['old', 'recent']) {
+        const created = await app.inject({
+          method: 'POST',
+          url: '/pods',
+          headers: authHeaders,
+          payload: { profileName: 'test-app', task },
+        });
+        expect(created.statusCode).toBe(201);
+        ids.push(created.json<{ id: string }>().id);
+      }
+      db.prepare("UPDATE pods SET created_at = '2026-01-01T00:00:00.000Z' WHERE id = ?").run(
+        ids[0],
+      );
+      db.prepare("UPDATE pods SET created_at = '2026-01-03T00:00:00.000Z' WHERE id = ?").run(
+        ids[1],
+      );
+
+      const res = await app.inject({
+        method: 'GET',
+        url: '/pods?since=2026-01-02T00:00:00.000Z',
+        headers: authHeaders,
+      });
+      expect(res.statusCode).toBe(200);
+      expect(res.json<{ id: string }[]>().map((pod) => pod.id)).toEqual([ids[1]]);
+    });
+
+    it('supports recent terminal status queries', async () => {
+      const pods: Array<{ id: string; status: string }> = [];
+      for (const [task, status] of [
+        ['old failed', 'failed'],
+        ['recent failed', 'failed'],
+        ['recent review', 'review_required'],
+        ['recent complete', 'complete'],
+        ['recent killed', 'killed'],
+        ['recent running', 'running'],
+      ]) {
+        const created = await app.inject({
+          method: 'POST',
+          url: '/pods',
+          headers: authHeaders,
+          payload: { profileName: 'test-app', task },
+        });
+        pods.push({ id: created.json<{ id: string }>().id, status });
+      }
+      for (const [index, pod] of pods.entries()) {
+        db.prepare('UPDATE pods SET status = ?, created_at = ? WHERE id = ?').run(
+          pod.status,
+          index === 0 ? '2026-01-01T00:00:00.000Z' : `2026-01-03T00:00:0${index}.000Z`,
+          pod.id,
+        );
+      }
+
+      const res = await app.inject({
+        method: 'GET',
+        url: '/pods?status=failed,review_required,complete,killed&since=2026-01-02T00:00:00.000Z',
+        headers: authHeaders,
+      });
+      expect(res.statusCode).toBe(200);
+      expect(res.json<{ status: string }[]>().map((pod) => pod.status)).toEqual([
+        'killed',
+        'complete',
+        'review_required',
+        'failed',
+      ]);
+    });
+
     it('supports bounded multi-status compact discovery', async () => {
       const hugeTask = `Compact title\n${'x'.repeat(50_000)}`;
       const createdPods: Array<{ id: string; task: string; status: string; createdAt: string }> =
@@ -479,6 +547,35 @@ describe('Extended Route Tests', () => {
       expect(new Set(seen.map((pod) => pod.id)).size).toBe(ids.length);
     });
 
+    it('applies since before compact pagination', async () => {
+      const ids: string[] = [];
+      for (const task of ['old', 'recent-one', 'recent-two']) {
+        const created = await app.inject({
+          method: 'POST',
+          url: '/pods',
+          headers: authHeaders,
+          payload: { profileName: 'test-app', task },
+        });
+        ids.push(created.json<{ id: string }>().id);
+      }
+      for (const [index, id] of ids.entries()) {
+        db.prepare('UPDATE pods SET created_at = ? WHERE id = ?').run(
+          index === 0 ? '2026-01-01T00:00:00.000Z' : `2026-01-03T00:00:0${index}.000Z`,
+          id,
+        );
+      }
+
+      const res = await app.inject({
+        method: 'GET',
+        url: '/pods?compact=true&page=true&limit=1&since=2026-01-02T00:00:00.000Z',
+        headers: authHeaders,
+      });
+      expect(res.statusCode).toBe(200);
+      const page = res.json<{ pods: Array<{ id: string }>; nextCursor: string | null }>();
+      expect(page.pods.map((pod) => pod.id)).toEqual([ids[2]]);
+      expect(page.nextCursor).not.toBeNull();
+    });
+
     it.each([
       '/pods?compact=true&page=true&cursor=not-json',
       `/pods?compact=true&page=true&cursor=${Buffer.from(
@@ -499,6 +596,16 @@ describe('Extended Route Tests', () => {
       });
       expect(res.statusCode).toBe(400);
       expect(res.json().error).toContain('limit');
+    });
+
+    it('rejects malformed since with a dedicated error code', async () => {
+      const res = await app.inject({
+        method: 'GET',
+        url: '/pods?since=last-week',
+        headers: authHeaders,
+      });
+      expect(res.statusCode).toBe(400);
+      expect(res.json()).toMatchObject({ code: 'invalid_since' });
     });
   });
 

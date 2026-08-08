@@ -101,6 +101,17 @@ describe('AutopodClient', () => {
         expect.objectContaining({ method: 'GET' }),
       );
     });
+
+    it('encodes since in the pod list query params', async () => {
+      mockFetch.mockResolvedValueOnce(jsonResponse([]));
+
+      await client.listSessions({ since: '2026-01-01T00:00:00.000Z' });
+
+      expect(mockFetch).toHaveBeenCalledWith(
+        'http://localhost:3100/pods?since=2026-01-01T00%3A00%3A00.000Z',
+        expect.objectContaining({ method: 'GET' }),
+      );
+    });
   });
 
   describe('getSession', () => {

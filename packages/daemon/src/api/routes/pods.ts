@@ -109,6 +109,13 @@ function decodePodListCursor(raw: string): PodListCursor | null {
   }
 }
 
+function parseSinceQueryParam(value: string | undefined): string | null | undefined {
+  if (value === undefined) return undefined;
+  if (!/^\d{4}-\d{2}-\d{2}(?:T|$)/.test(value)) return null;
+  const timestamp = new Date(value);
+  return Number.isNaN(timestamp.getTime()) ? null : timestamp.toISOString();
+}
+
 function compactText(value: string | null | undefined, maxChars = COMPACT_SUMMARY_MAX_CHARS) {
   return value === null || value === undefined ? null : value.slice(0, maxChars);
 }
@@ -534,6 +541,7 @@ export function podRoutes(
       compact?: string;
       page?: string;
       cursor?: string;
+      since?: string;
     };
     const limit = parsePositiveIntegerQueryParam(query.limit);
     if (limit === null) {
@@ -546,6 +554,11 @@ export function podRoutes(
         error: `limit must be at most ${MAX_POD_LIST_LIMIT}`,
         code: 'limit_too_large',
       };
+    }
+    const since = parseSinceQueryParam(query.since);
+    if (since === null) {
+      reply.status(400);
+      return { error: 'since must be an ISO date/time', code: 'invalid_since' };
     }
     const paginated = query.page === 'true' || query.cursor !== undefined;
     if (paginated && query.compact !== 'true') {
@@ -574,6 +587,7 @@ export function podRoutes(
       status: statuses,
       userId: query.userId,
       limit: paginated ? paginatedLimit + 1 : limit,
+      since,
       before: cursor ?? undefined,
     });
     if (query.compact === 'true') {

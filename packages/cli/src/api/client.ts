@@ -175,24 +175,28 @@ export class AutopodClient {
     status?: string;
     profile?: string;
     limit?: number;
+    since?: string;
     compact?: false;
   }): Promise<Pod[]>;
   async listSessions(filters: {
     status?: string;
     profile?: string;
     limit?: number;
+    since?: string;
     compact: true;
   }): Promise<CompactPod[]>;
   async listSessions(filters?: {
     status?: string;
     profile?: string;
     limit?: number;
+    since?: string;
     compact?: boolean;
   }): Promise<Pod[] | CompactPod[]> {
     const params = new URLSearchParams();
     if (filters?.status) params.set('status', filters.status);
     if (filters?.profile) params.set('profile', filters.profile);
     if (filters?.limit !== undefined) params.set('limit', String(filters.limit));
+    if (filters?.since) params.set('since', filters.since);
     if (filters?.compact) params.set('compact', 'true');
     const qs = params.toString();
     return this.request<Pod[] | CompactPod[]>('GET', `/pods${qs ? `?${qs}` : ''}`);
