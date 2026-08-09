@@ -81,8 +81,10 @@ export class ImageBuilder {
       const nugetEnv = buildNuGetCredentialEnv(profile.privateRegistries, options.registryPat);
       Object.assign(buildArgs, nugetEnv);
     }
+    const registryConfig = this.acr ? await this.acr.getBuildRegistryConfig() : undefined;
     await this.buildFromDockerfile(dockerfile, localTag, buildArgs, {
       platform: this.acr ? 'linux/amd64' : undefined,
+      registryConfig,
     });
     const buildDuration = (Date.now() - startTime) / 1000;
 
@@ -158,7 +160,7 @@ export class ImageBuilder {
     dockerfileContent: string,
     tag: string,
     buildArgs: Record<string, string> = {},
-    options: { platform?: string } = {},
+    options: { platform?: string; registryConfig?: Dockerode.RegistryConfig } = {},
   ): Promise<void> {
     // Create an in-memory tar archive containing just the Dockerfile
     const pack = tarPack();
@@ -169,6 +171,7 @@ export class ImageBuilder {
       t: tag,
       buildargs: Object.keys(buildArgs).length > 0 ? buildArgs : undefined,
       platform: options.platform,
+      registryconfig: options.registryConfig,
     });
 
     // Wait for build to complete

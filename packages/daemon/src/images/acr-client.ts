@@ -103,6 +103,17 @@ export class AcrClient {
     return pinned;
   }
 
+  /** Credentials for Docker's X-Registry-Config build header. */
+  async getBuildRegistryConfig(): Promise<Dockerode.RegistryConfig> {
+    const refreshToken = await this.getRegistryRefreshToken();
+    return {
+      [this.config.registryUrl]: {
+        username: ACR_DOCKER_USERNAME,
+        password: refreshToken,
+      },
+    };
+  }
+
   /** Whether this ACR client owns the fully-qualified image reference. */
   canPull(tag: string): boolean {
     return tag.startsWith(`${this.config.registryUrl}/`);

@@ -139,6 +139,18 @@ describe('AcrClient', () => {
     );
   });
 
+  it('returns ACR credentials in Docker build registry-config shape', async () => {
+    const mockDocker = createMockDocker();
+    const client = new AcrClient({ registryUrl: 'myregistry.azurecr.io' }, mockDocker);
+
+    await expect(client.getBuildRegistryConfig()).resolves.toEqual({
+      'myregistry.azurecr.io': {
+        username: '00000000-0000-0000-0000-000000000000',
+        password: 'mock-refresh-token',
+      },
+    });
+  });
+
   it('reports whether it can pull a fully qualified image reference', () => {
     const mockDocker = createMockDocker();
     const client = new AcrClient({ registryUrl: 'myregistry.azurecr.io' }, mockDocker);

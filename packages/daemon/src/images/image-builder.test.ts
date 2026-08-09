@@ -93,6 +93,12 @@ function createMockDeps() {
     pullPinned: vi.fn(
       async (tag: string) => `ewiacr.azurecr.io/${tag.replace(/:latest$/, '@sha256:base-digest')}`,
     ),
+    getBuildRegistryConfig: vi.fn().mockResolvedValue({
+      'ewiacr.azurecr.io': {
+        username: '00000000-0000-0000-0000-000000000000',
+        password: 'refresh-token',
+      },
+    }),
     exists: vi.fn().mockResolvedValue(true),
     resolveTag: vi.fn((tag: string) => `ewiacr.azurecr.io/${tag}`),
   } as unknown as AcrClient;
@@ -210,6 +216,30 @@ describe('ImageBuilder', () => {
     expect(mockDocker.buildImage).toHaveBeenCalledWith(
       expect.anything(),
       expect.objectContaining({ platform: 'linux/amd64' }),
+    );
+  });
+
+  it('passes ACR credentials to Docker builds that use a private base image', async () => {
+    const { mockDocker, mockAcr, mockProfileStore } = createMockDeps();
+    const builder = new ImageBuilder({
+      docker: mockDocker,
+      acr: mockAcr,
+      profileStore: mockProfileStore,
+    });
+
+    await builder.buildWarmImage(mockProfile());
+
+    expect(mockAcr.getBuildRegistryConfig).toHaveBeenCalledOnce();
+    expect(mockDocker.buildImage).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        registryconfig: {
+          'ewiacr.azurecr.io': {
+            username: '00000000-0000-0000-0000-000000000000',
+            password: 'refresh-token',
+          },
+        },
+      }),
     );
   });
 
