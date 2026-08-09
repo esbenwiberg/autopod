@@ -193,4 +193,31 @@ required_facts:
     expect(result.diagnostics).toEqual([]);
     expect(result.briefs?.length).toBeGreaterThan(0);
   });
+
+  it('detects a dependency cycle even when a title is independently invalid', () => {
+    const root = mkdtempSync(join(tmpdir(), 'autopod-spec-'));
+    created.push(root);
+    for (const [folder, dependency, title] of [
+      ['01-a', '02-b', '   '],
+      ['02-b', '01-a', 'Valid title'],
+    ]) {
+      const briefDir = join(root, 'briefs', folder);
+      mkdirSync(briefDir, { recursive: true });
+      writeFileSync(join(briefDir, 'brief.md'), '## Task\nCycle.');
+      writeFileSync(
+        join(briefDir, 'contract.yaml'),
+        `contract_version: 1
+title: "${title}"
+depends_on: [${dependency}]
+scenarios: []
+required_facts: []
+`,
+      );
+    }
+
+    const result = preflightSeriesFolder(root);
+    expect(result.diagnostics.map((diagnostic) => diagnostic.code)).toEqual(
+      expect.arrayContaining(['CONTRACT_STRUCTURE_INVALID', 'SERIES_DEPENDENCY_CYCLE']),
+    );
+  });
 });

@@ -82,10 +82,9 @@ function inspectGraph(records: DiscoveredBrief[], source: string): ContractDiagn
     }
   }
 
-  const usable = records.filter((record) => record.title);
-  const indegree = new Map(usable.map((record) => [record.name, 0]));
+  const indegree = new Map(records.map((record) => [record.name, 0]));
   const children = new Map<string, string[]>();
-  for (const record of usable) {
+  for (const record of records) {
     for (const dependency of record.dependsOn) {
       if (!indegree.has(dependency)) continue;
       indegree.set(record.name, (indegree.get(record.name) ?? 0) + 1);
