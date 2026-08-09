@@ -1,37 +1,12 @@
-import { existsSync, lstatSync, readFileSync, readdirSync, realpathSync, statSync } from 'node:fs';
-import { basename, extname, isAbsolute, join, relative, resolve } from 'node:path';
-import { type SpecFile, numericPrefix, parseBriefs } from '@autopod/shared';
+import { lstatSync, readFileSync, readdirSync, realpathSync } from 'node:fs';
+import { basename, isAbsolute, join, relative, resolve } from 'node:path';
+import { type SpecFile, parseBriefs } from '@autopod/shared';
 import chalk from 'chalk';
 import type { Command } from 'commander';
 import type { AutopodClient } from '../api/client.js';
 import { formatStatus } from '../output/colors.js';
 import { withSpinner } from '../output/spinner.js';
-
-/**
- * Resolve the spec layout for a folder argument. The user may point either
- * at the spec root (`specs/<feature>/`, containing `briefs/`) or at the
- * briefs folder itself (`specs/<feature>/briefs/`). Returns the resolved
- * spec root and briefs folder so the caller can read shared docs from the
- * root and brief files from the briefs folder.
- */
-function resolveSpecLayout(folderArg: string): { specRoot: string; briefsDir: string } {
-  const abs = resolve(folderArg);
-  const folderName = basename(abs);
-
-  // Case A: user pointed at `briefs/` — spec root is the parent.
-  if (folderName === 'briefs') {
-    return { specRoot: resolve(abs, '..'), briefsDir: abs };
-  }
-
-  // Case B: user pointed at the spec root — briefs/ is a subfolder.
-  const briefsSubdir = join(abs, 'briefs');
-  if (existsSync(briefsSubdir) && statSync(briefsSubdir).isDirectory()) {
-    return { specRoot: abs, briefsDir: briefsSubdir };
-  }
-
-  // Case C: flat layout — same folder for both. Used by ad-hoc one-off briefs.
-  return { specRoot: abs, briefsDir: abs };
-}
+import { preflightSeriesFolder } from './spec-preflight.js';
 
 /** Infer series name from a spec root folder path. */
 function inferSeriesName(specRoot: string): string {
@@ -84,19 +59,6 @@ function collectSpecFiles(specRoot: string): SpecFile[] {
   return files;
 }
 
-function resolveContractPath(specRoot: string): string {
-  const yamlPath = join(specRoot, 'contract.yaml');
-  const ymlPath = join(specRoot, 'contract.yml');
-  const hasYaml = existsSync(yamlPath);
-  const hasYml = existsSync(ymlPath);
-  if (hasYaml && hasYml) {
-    throw new Error(`both contract.yaml and contract.yml found in ${specRoot}`);
-  }
-  if (hasYaml) return yamlPath;
-  if (hasYml) return ymlPath;
-  throw new Error(`contract not found: ${yamlPath} or ${ymlPath}`);
-}
-
 export function registerSeriesCommands(program: Command, getClient: () => AutopodClient): void {
   const series = program.command('series').description('Manage series of pods');
 
@@ -138,44 +100,20 @@ export function registerSeriesCommands(program: Command, getClient: () => Autopo
           specContext?: boolean;
         },
       ) => {
-        const client = getClient();
-        const { specRoot, briefsDir } = resolveSpecLayout(folder);
-
-        // Read contract-based brief folders sorted by numeric prefix. Fall back to
-        // flat markdown files only so the parser can emit its hard-cutover error.
-        let briefFiles: Array<{ filename: string; content: string; contractContent?: string }>;
-        try {
-          const entries = readdirSync(briefsDir);
-          const briefDirs = entries
-            .filter((f) => {
-              const full = join(briefsDir, f);
-              return statSync(full).isDirectory() && existsSync(join(full, 'brief.md'));
-            })
-            .sort((a, b) => numericPrefix(a) - numericPrefix(b));
-          if (briefDirs.length > 0) {
-            briefFiles = briefDirs.map((dirname) => ({
-              filename: dirname,
-              content: readFileSync(join(briefsDir, dirname, 'brief.md'), 'utf-8'),
-              contractContent: readFileSync(resolveContractPath(join(briefsDir, dirname)), 'utf-8'),
-            }));
-          } else {
-            briefFiles = entries
-              .filter((f) => extname(f) === '.md')
-              .sort((a, b) => numericPrefix(a) - numericPrefix(b))
-              .map((filename) => ({
-                filename,
-                content: readFileSync(join(briefsDir, filename), 'utf-8'),
-              }));
-          }
-        } catch {
-          console.error(chalk.red(`Cannot read briefs folder: ${briefsDir}`));
+        // Local canonical preflight runs before client construction, credentials, or dispatch.
+        const preflight = preflightSeriesFolder(folder);
+        if (preflight.diagnostics.length > 0) {
+          console.error(
+            chalk.red(
+              `Spec preflight failed:\n${preflight.diagnostics
+                .map((d) => `- ${d.source ?? ''} ${d.path}: ${d.message} Hint: ${d.hint}`)
+                .join('\n')}`,
+            ),
+          );
           process.exit(1);
         }
-
-        if (briefFiles.length === 0) {
-          console.error(chalk.red(`No contract brief folders found in ${briefsDir}`));
-          process.exit(1);
-        }
+        const { specRoot } = preflight;
+        const briefFiles = preflight.briefFiles;
 
         // Shared spec docs live at the spec root (parent of briefs/).
         const seriesDescription = readMaybe(specRoot, 'purpose.md');
@@ -191,6 +129,7 @@ export function registerSeriesCommands(program: Command, getClient: () => Autopo
         // the spec root so a brief can pull in `decisions/...` or files at
         // the repo root via relative paths from there.
         const briefs = parseBriefs(briefFiles, (path) => readMaybe(specRoot, path));
+        const client = getClient();
 
         console.log(
           chalk.cyan(`\nCreating series "${seriesName}" with ${briefs.length} pods...\n`),

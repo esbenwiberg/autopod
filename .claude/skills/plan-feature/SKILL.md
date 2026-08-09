@@ -942,6 +942,7 @@ distinct files and the next pod reads each parent it depends on.
 
 When this skill finishes, the output must be complete enough that:
 
+- `ap spec check specs/<feature>/ --json` has been rerun after all repairs and returns `"valid": true`; repair every diagnostic before dispatch.
 - `ap series create specs/<feature>/` runs with zero clarifying questions.
 - Each pod agent executes its brief without asking the user anything.
 - A reviewer reading only `purpose.md` plus one brief understands what

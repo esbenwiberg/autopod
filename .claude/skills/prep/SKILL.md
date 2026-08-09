@@ -364,6 +364,7 @@ wrap-up step. Required facts remain about observable outcomes only.
 
 When this skill finishes, the output must be complete enough that:
 
+- `ap spec check specs/<task>/ --json` has been rerun after all repairs and returns `"valid": true`; repair every diagnostic before dispatch.
 - `ap pod create specs/<task>/brief.md` runs without clarifying questions.
 - The pod agent executes the brief without asking the user anything.
 - A reviewer reading only the brief understands what's being changed and why.

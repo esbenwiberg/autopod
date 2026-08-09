@@ -70,6 +70,7 @@ function createMockClient() {
 describe('series commands', () => {
   let program: Command;
   let mockClient: AutopodClient;
+  let getClient: ReturnType<typeof vi.fn>;
   const createdDirs: string[] = [];
 
   beforeEach(() => {
@@ -77,7 +78,8 @@ describe('series commands', () => {
     program = new Command();
     program.exitOverride();
     mockClient = createMockClient();
-    registerSeriesCommands(program, () => mockClient);
+    getClient = vi.fn(() => mockClient);
+    registerSeriesCommands(program, getClient);
   });
 
   afterEach(() => {
@@ -181,5 +183,24 @@ describe('series commands', () => {
       .calls[0][0] as Record<string, unknown>;
     expect(call.specFiles).toBeUndefined();
     expect(call.specContextFiles).toBeUndefined();
+  });
+
+  it('does not construct a client or dispatch when canonical preflight fails', async () => {
+    const specRoot = createSeriesSpecFolder();
+    createdDirs.push(specRoot);
+    writeFileSync(
+      join(specRoot, 'briefs', '01-first', 'contract.yaml'),
+      contractYaml.replace('change: create', 'change: delete'),
+    );
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    vi.spyOn(process, 'exit').mockImplementation((() => {
+      throw new Error('process.exit(1)');
+    }) as never);
+
+    await expect(
+      program.parseAsync(['node', 'ap', 'series', 'create', specRoot, '--profile', 'test']),
+    ).rejects.toThrow('process.exit(1)');
+    expect(getClient).not.toHaveBeenCalled();
+    expect(mockClient.createSeries).not.toHaveBeenCalled();
   });
 });

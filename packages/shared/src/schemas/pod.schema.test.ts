@@ -3,6 +3,49 @@ import { MAX_HANDOFF_INSTRUCTIONS_LENGTH } from '../constants.js';
 import { createPodRequestSchema, podResponseSchema } from './pod.schema.js';
 
 describe('createPodRequestSchema', () => {
+  it('uses canonical semantic contract validation while preserving v1 empty scenarios', () => {
+    const valid = {
+      contractVersion: 1 as const,
+      title: '  Empty contract  ',
+      dependsOn: [],
+      scenarios: [],
+      requiredFacts: [],
+      humanReview: [],
+    };
+    expect(
+      createPodRequestSchema.parse({ profileName: 'primary', task: 'task', contract: valid })
+        .contract?.title,
+    ).toBe('Empty contract');
+
+    const invalid = {
+      ...valid,
+      // biome-ignore lint/suspicious/noThenProperty: contract scenarios use Given/When/Then.
+      scenarios: [{ id: 'known', given: ['a'], when: ['b'], then: ['c'] }],
+      requiredFacts: [
+        {
+          id: 'bad',
+          proves: ['missing'],
+          kind: 'unit-test',
+          artifact: { path: 'test.ts', change: 'touch' },
+          command: 'npm test',
+        },
+      ],
+    };
+    const result = createPodRequestSchema.safeParse({
+      profileName: 'primary',
+      task: 'task',
+      contract: invalid,
+    });
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.error.issues.map((issue) => issue.message).join('\n')).toContain(
+        'CONTRACT_UNKNOWN_SCENARIO',
+      );
+      expect(result.error.issues.map((issue) => issue.message).join('\n')).toContain(
+        'CONTRACT_GENERIC_COMMAND',
+      );
+    }
+  });
   it('rejects short Claude aliases in create-pod model overrides', () => {
     for (const model of ['opus', 'sonnet', 'haiku']) {
       const result = createPodRequestSchema.safeParse({

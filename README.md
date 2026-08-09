@@ -491,6 +491,7 @@ ap stats                                    # Aggregate counts by status, avg du
 
 ```bash
 ap spec check specs/my-feature              # Validate a spec folder locally
+ap spec check specs/my-feature --json       # Versioned, credential-free diagnostics
 ap pod create <profile> --spec specs/task   # Create one pod from brief.md + contract.yaml
                                              # Spec files are available at /autopod/spec
 ap pod create <profile> --spec specs/task --include-specs
@@ -599,7 +600,7 @@ Add `/auth/login` and `/auth/callback` endpoints per the spec.
 contract_version: 1
 title: "Implement OAuth routes"
 depends_on:
-  - "Schema migration"
+  - "01-schema"
 scenarios:
   - id: oauth-routes
     given:
@@ -618,6 +619,34 @@ required_facts:
     command: "npx pnpm --filter @autopod/daemon test -- oauth-routes"
 human_review: []
 ```
+
+Run `ap spec check <folder> --json` before dispatch and repair every diagnostic
+until it returns `"valid": true`. The stable response has
+`diagnosticsVersion: 1`, `contractVersion: 1`, `valid`, and a `diagnostics`
+array; each diagnostic includes a stable code, source file, field path,
+message, and repair hint (plus line/column for YAML document errors when
+available). This command is local: it does not load profiles, credentials, or
+the daemon. `ap series create` runs the same preflight before creating a client.
+
+Contract v1 accepts an empty `scenarios` list and an empty `required_facts`
+list. `depends_on` and `human_review` are optional. Titles are limited to 200
+characters; dependency, scenario, fact, review IDs and scenario references to
+128; artifact paths to 500; commands to 1000; review criterion/reason to 500.
+Scenario IDs, required-fact IDs, and human-review IDs must each be unique.
+Every Given/When/Then list, fact `proves` list, and review `covers` list must be
+non-empty. References must name declared scenario IDs, and every scenario must
+be covered by a fact or human review. Fact kinds are `unit-test`,
+`integration-test`, `contract-test`, `browser-test`, `typecheck`, `lint-rule`,
+`smoke-script`, and `custom-command`; artifact changes are `create`, `update`,
+and `touch`.
+
+Required-fact commands must be executable and scenario-specific: generic
+package-manager `test`, `build`, or `lint` commands and
+`validate_in_browser` MCP syntax are rejected. Reusing the same broad command
+across facts is rejected unless it is narrowed with `--grep`, `-g`, or
+`--testNamePattern`. `artifact.change: touch` imposes no diff requirement, but
+the artifact must still exist and the fact command must succeed. A copyable
+valid scaffold lives at `templates/series-contract-v1/`.
 
 Add `purpose.md` and `design.md` at the spec root for context injected into every pod's CLAUDE.md. The full spec folder is also mounted read-only at `/autopod/spec`, while series handovers live at `/autopod/artifacts/handovers`. Brief frontmatter `acceptance_criteria` and markdown `## Acceptance Criteria` sections are no longer accepted for runnable specs; use `contract.yaml` scenarios, required facts, and human review items instead.
 
