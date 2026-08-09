@@ -98,6 +98,23 @@ describe('tmux toolchain', () => {
   });
 });
 
+describe('Deno toolchain', () => {
+  it('pins and verifies Deno 2 in the Luumi base image', async () => {
+    const dockerfile = await readBaseTemplate('Dockerfile.node22-pw');
+
+    expect(dockerfile).toContain('ARG DENO_VERSION=2.9.5');
+    expect(dockerfile).toContain(
+      'ARG DENO_SHA256=8b010a3b1a4a0188a67cdb8a7a27348b2a501af78aec7fc74f2ace167368d530',
+    );
+    expect(dockerfile).toContain(
+      'https://github.com/denoland/deno/releases/download/v${DENO_VERSION}/deno-x86_64-unknown-linux-gnu.zip',
+    );
+    expect(dockerfile).toContain('echo "${DENO_SHA256}  /tmp/deno.zip" | sha256sum -c -');
+    expect(dockerfile).toContain('unzip -q /tmp/deno.zip -d /usr/local/bin');
+    expect(dockerfile).toContain('deno --version | grep -F "deno ${DENO_VERSION}"');
+  });
+});
+
 describe('PostgreSQL base image templates', () => {
   it('configures node22-pw-pg without a volatile runtime socket directory', async () => {
     const dockerfile = await readBaseTemplate('Dockerfile.node22-pw-pg');

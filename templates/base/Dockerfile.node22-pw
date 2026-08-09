@@ -10,6 +10,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     iptables haproxy socat \
     sqlite3 \
     ripgrep \
+    unzip \
     python3 build-essential bison libevent-dev libncurses-dev pkg-config \
     && sed -i '/en_US.UTF-8/s/^# //g' /etc/locale.gen \
     && locale-gen \
@@ -30,6 +31,19 @@ RUN set -eux; \
     make install; \
     tmux -V | grep -Fx "tmux ${TMUX_VERSION}"; \
     rm -rf /tmp/tmux.tar.gz "/tmp/tmux-${TMUX_VERSION}"
+
+# Deno 2 — Luumi's Supabase Edge Functions and contract tests run on Deno.
+# Install the exact upstream linux/amd64 binary and verify both its archive and
+# runtime version so warm images cannot silently drift to a different release.
+ARG DENO_VERSION=2.9.5
+ARG DENO_SHA256=8b010a3b1a4a0188a67cdb8a7a27348b2a501af78aec7fc74f2ace167368d530
+RUN set -eux; \
+    curl -fsSL "https://github.com/denoland/deno/releases/download/v${DENO_VERSION}/deno-x86_64-unknown-linux-gnu.zip" -o /tmp/deno.zip; \
+    echo "${DENO_SHA256}  /tmp/deno.zip" | sha256sum -c -; \
+    unzip -q /tmp/deno.zip -d /usr/local/bin; \
+    chmod 0755 /usr/local/bin/deno; \
+    deno --version | grep -F "deno ${DENO_VERSION}"; \
+    rm -f /tmp/deno.zip
 
 # Glow — terminal markdown viewer from Charm
 RUN mkdir -p /etc/apt/keyrings \
