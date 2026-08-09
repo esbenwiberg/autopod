@@ -198,6 +198,9 @@ human_review: []
 Use the same contract semantics as `/prep`: proof data belongs in
 `contract.yaml`; diagnosis and rationale belong in `bug.md`.
 
+Before handing off a promoted runnable spec, repair every diagnostic and rerun
+`ap spec check specs/<slug>/ --json`; dispatch only when it returns `"valid": true`.
+
 ## Handoff
 
 After writing, say where the investigation lives and what the next execution

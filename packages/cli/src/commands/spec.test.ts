@@ -1,9 +1,10 @@
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 import { Command } from 'commander';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { registerSpecCommands } from './spec.js';
+import { preflightSeriesFolder } from './spec-preflight.js';
 
 const contractYaml = `contract_version: 1
 title: "Check spec parser"
@@ -98,5 +99,100 @@ describe('spec command', () => {
     );
     expect(errorSpy.mock.calls[0]?.[0]).toContain('Spec check failed:');
     expect(errorSpy.mock.calls[0]?.[0]).toContain('missing-core');
+  });
+
+  it('emits every Luumi regression diagnostic in the versioned JSON envelope', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'autopod-spec-'));
+    created.push(root);
+    const briefDir = join(root, 'briefs', '01-invalid');
+    mkdirSync(briefDir, { recursive: true });
+    writeFileSync(join(briefDir, 'brief.md'), '## Task\nInvalid contract.');
+    writeFileSync(
+      join(briefDir, 'contract.yaml'),
+      `contract_version: 1
+title: Invalid
+depends_on: [missing-brief]
+scenarios:
+  - id: known
+    given: [state]
+    when: [action]
+    then: [result]
+required_facts:
+  - id: invalid-change
+    proves: []
+    kind: unit-test
+    artifact: { path: test.ts, change: delete }
+    command: npx pnpm test -- test.ts
+  - id: long-reference
+    proves: [${'x'.repeat(129)}]
+    kind: unit-test
+    artifact: { path: long.ts, change: create }
+    command: npx pnpm test -- long.ts --grep long
+  - id: unknown-reference
+    proves: [missing]
+    kind: unit-test
+    artifact: { path: unknown.ts, change: create }
+    command: npx pnpm test -- unknown.ts --grep missing
+`,
+    );
+    const program = new Command();
+    program.exitOverride();
+    registerSpecCommands(program);
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    vi.spyOn(process, 'exit').mockImplementation((() => {
+      throw new Error('process.exit(1)');
+    }) as never);
+
+    await expect(
+      program.parseAsync(['node', 'ap', 'spec', 'check', root, '--json']),
+    ).rejects.toThrow('process.exit(1)');
+    const envelope = JSON.parse(String(logSpy.mock.calls[0]?.[0]));
+    expect(envelope).toMatchObject({ diagnosticsVersion: 1, contractVersion: 1, valid: false });
+    expect(envelope.diagnostics.map((item: { code: string }) => item.code)).toEqual(
+      expect.arrayContaining([
+        'CONTRACT_ARTIFACT_CHANGE_INVALID',
+        'CONTRACT_PROVES_EMPTY',
+        'CONTRACT_PROVES_ENTRY_TOO_LONG',
+        'CONTRACT_UNKNOWN_SCENARIO',
+        'SERIES_UNKNOWN_DEPENDENCY',
+      ]),
+    );
+    expect(
+      envelope.diagnostics.every(
+        (item: { source?: string; path?: string; message?: string; hint?: string }) =>
+          item.source && item.path && item.message && item.hint,
+      ),
+    ).toBe(true);
+  });
+
+  it('preflights the tracked canonical scaffold', async () => {
+    const program = new Command();
+    program.exitOverride();
+    registerSpecCommands(program);
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+
+    await program.parseAsync([
+      'node',
+      'ap',
+      'spec',
+      'check',
+      resolve(process.cwd(), '../../templates/series-contract-v1'),
+      '--json',
+    ]);
+
+    expect(JSON.parse(String(logSpy.mock.calls[0]?.[0]))).toMatchObject({
+      diagnosticsVersion: 1,
+      contractVersion: 1,
+      valid: true,
+      diagnostics: [],
+    });
+  });
+
+  it('continues to preflight an existing tracked contract series', () => {
+    const result = preflightSeriesFolder(
+      resolve(process.cwd(), '../../specs/advisory-browser-qa'),
+    );
+    expect(result.diagnostics).toEqual([]);
+    expect(result.briefs?.length).toBeGreaterThan(0);
   });
 });

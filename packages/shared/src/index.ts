@@ -15,7 +15,11 @@ export {
   specContractV1Schema,
   validateSpecContract,
 } from './contract.js';
-export type { ContractDiagnostic, ContractDiagnosticEnvelope } from './contract.js';
+export type {
+  ContractDiagnostic,
+  ContractDiagnosticEnvelope,
+  ContractInspection,
+} from './contract.js';
 export { buildEvidenceDocument, renderEvidenceYaml } from './evidence.js';
 
 export type {
@@ -548,6 +552,7 @@ export type { BriefFrontmatter, ParsedBrief, BriefFile } from './series/parse-br
 export {
   parseBriefFrontmatter,
   numericPrefix,
+  inspectSeriesBriefGraph,
   orderSeriesBriefs,
   parseBriefs,
 } from './series/parse-briefs.js';

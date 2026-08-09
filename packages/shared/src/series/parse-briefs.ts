@@ -1,5 +1,6 @@
 import { parseDocument as parseYamlDocument } from 'yaml';
 import { parseSpecContract } from '../contract.js';
+import type { ContractDiagnostic } from '../contract.js';
 import { AutopodError } from '../errors.js';
 import type { SpecContract } from '../types/contract.js';
 
@@ -164,6 +165,75 @@ export function orderSeriesBriefs(briefs: ParsedBrief[]): ParsedBrief[] {
     );
   }
   return ordered;
+}
+
+/** Aggregate every independently detectable dependency-graph issue for wire requests. */
+export function inspectSeriesBriefGraph(
+  briefs: ParsedBrief[],
+  source = 'briefs',
+): ContractDiagnostic[] {
+  const diagnostics: ContractDiagnostic[] = [];
+  const titleCounts = new Map<string, number>();
+  for (const brief of briefs) {
+    titleCounts.set(brief.title, (titleCounts.get(brief.title) ?? 0) + 1);
+  }
+  briefs.forEach((brief, index) => {
+    if ((titleCounts.get(brief.title) ?? 0) > 1) {
+      diagnostics.push({
+        code: 'SERIES_DUPLICATE_TITLE',
+        source,
+        path: `[${index}].title`,
+        message: `Brief title "${brief.title}" is duplicated.`,
+        hint: 'Give every brief a unique title.',
+      });
+    }
+    brief.dependsOn.forEach((dependency, dependencyIndex) => {
+      if (!titleCounts.has(dependency)) {
+        diagnostics.push({
+          code: 'SERIES_UNKNOWN_DEPENDENCY',
+          source,
+          path: `[${index}].dependsOn[${dependencyIndex}]`,
+          message: `Brief "${brief.title}" depends on unknown brief "${dependency}".`,
+          hint: 'Reference the title of a submitted sibling brief.',
+        });
+      }
+    });
+  });
+
+  const uniqueBriefs = briefs.filter((brief) => titleCounts.get(brief.title) === 1);
+  const known = new Set(uniqueBriefs.map((brief) => brief.title));
+  const indegree = new Map(uniqueBriefs.map((brief) => [brief.title, 0]));
+  const children = new Map<string, string[]>();
+  for (const brief of uniqueBriefs) {
+    for (const dependency of new Set(brief.dependsOn)) {
+      if (!known.has(dependency)) continue;
+      indegree.set(brief.title, (indegree.get(brief.title) ?? 0) + 1);
+      children.set(dependency, [...(children.get(dependency) ?? []), brief.title]);
+    }
+  }
+  const ready = [...indegree].filter(([, count]) => count === 0).map(([title]) => title);
+  const visited = new Set<string>();
+  while (ready.length > 0) {
+    const title = ready.shift();
+    if (!title) continue;
+    visited.add(title);
+    for (const child of children.get(title) ?? []) {
+      const next = (indegree.get(child) ?? 0) - 1;
+      indegree.set(child, next);
+      if (next === 0) ready.push(child);
+    }
+  }
+  const cycle = [...indegree.keys()].filter((title) => !visited.has(title));
+  if (cycle.length > 0) {
+    diagnostics.push({
+      code: 'SERIES_DEPENDENCY_CYCLE',
+      source,
+      path: 'dependsOn',
+      message: `Dependency cycle detected among briefs: ${cycle.join(', ')}.`,
+      hint: 'Remove at least one dependency edge so the graph is acyclic.',
+    });
+  }
+  return diagnostics;
 }
 
 /**

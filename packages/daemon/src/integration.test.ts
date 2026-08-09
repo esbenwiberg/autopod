@@ -1380,12 +1380,71 @@ describe('Integration', () => {
 
       expect(res.statusCode).toBe(400);
       expect(res.json()).toMatchObject({
-        code: 'UNKNOWN_SERIES_DEPENDENCY',
-        error: 'UNKNOWN_SERIES_DEPENDENCY',
-        message:
-          'Brief "03-merge" depends on unknown brief "02-missing". Add that brief to the series or correct the dependsOn/depends_on reference.',
+        code: 'SERIES_PREFLIGHT_FAILED',
+        error: 'SERIES_PREFLIGHT_FAILED',
+        diagnosticsVersion: 1,
+        valid: false,
+        diagnostics: [
+          expect.objectContaining({
+            code: 'SERIES_UNKNOWN_DEPENDENCY',
+            path: '[2].dependsOn[1]',
+          }),
+        ],
       });
       expect(podRepo.list().filter((pod) => pod.seriesName === 'bad-diamond')).toEqual([]);
+    });
+
+    it('POST /pods/series aggregates contract errors and creates no partial pods', async () => {
+      const res = await app.inject({
+        method: 'POST',
+        url: '/pods/series',
+        headers: { authorization: 'Bearer test-token' },
+        payload: {
+          seriesName: 'invalid-contracts',
+          profile: 'test-app',
+          briefs: [
+            {
+              title: 'Invalid one',
+              task: 'Must not dispatch',
+              dependsOn: ['Missing title'],
+              contract: {
+                contractVersion: 1,
+                title: 'Invalid contract',
+                dependsOn: [],
+                // biome-ignore lint/suspicious/noThenProperty: contract scenarios use Given/When/Then.
+                scenarios: [{ id: 'known', given: ['state'], when: ['action'], then: ['result'] }],
+                requiredFacts: [
+                  {
+                    id: 'bad-reference',
+                    proves: ['missing'],
+                    kind: 'unit-test',
+                    artifact: { path: 'test.ts', change: 'touch' },
+                    command: 'npm test',
+                  },
+                ],
+                humanReview: [],
+              },
+            },
+          ],
+        },
+      });
+
+      expect(res.statusCode).toBe(400);
+      const body = res.json();
+      expect(body).toMatchObject({
+        code: 'SERIES_PREFLIGHT_FAILED',
+        diagnosticsVersion: 1,
+        valid: false,
+        contractVersion: 1,
+      });
+      expect(body.diagnostics.map((item: { code: string }) => item.code)).toEqual(
+        expect.arrayContaining([
+          'CONTRACT_UNKNOWN_SCENARIO',
+          'CONTRACT_GENERIC_COMMAND',
+          'SERIES_UNKNOWN_DEPENDENCY',
+        ]),
+      );
+      expect(podRepo.list().filter((pod) => pod.seriesName === 'invalid-contracts')).toEqual([]);
     });
 
     it('POST /pods/series topologically orders dependencies that arrive before their parents', async () => {

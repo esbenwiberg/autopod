@@ -1,7 +1,5 @@
 import chalk from 'chalk';
 import type { Command } from 'commander';
-import { existsSync } from 'node:fs';
-import { join } from 'node:path';
 import { preflightEnvelope, preflightSeriesFolder } from './spec-preflight.js';
 
 export function registerSpecCommands(program: Command): void {
@@ -12,10 +10,38 @@ export function registerSpecCommands(program: Command): void {
     .description('Parse-check a /prep folder, /plan-feature folder, or investigation contract')
     .option('--json', 'Print versioned machine-readable diagnostics')
     .action((folder: string, opts: { json?: boolean }) => {
-      const result=preflightSeriesFolder(folder); const envelope=preflightEnvelope(result);
+      const result = preflightSeriesFolder(folder);
+      const envelope = preflightEnvelope(result);
       if (opts.json) console.log(JSON.stringify(envelope));
-      else if (envelope.valid) { const facts=result.briefs?.reduce((n,b)=>n+(b.contract?.requiredFacts.length??0),0)??0; const noun=existsSync(join(result.briefsDir, 'brief.md'))?'brief':'briefs'; console.log(chalk.green(`Spec OK: ${result.briefFiles.length} ${noun}, ${facts} facts`)); }
-      else console.error(chalk.red(`Spec check failed:\n${envelope.diagnostics.map(d=>`- ${d.source ?? ''} ${d.path}: ${d.message} Hint: ${d.hint}`).join('\n')}`));
+      else if (envelope.valid) {
+        if (result.standaloneContract) {
+          console.log(
+            chalk.green(
+              `Spec OK: contract, ${result.standaloneContract.requiredFacts.length} facts`,
+            ),
+          );
+        } else {
+          const facts =
+            result.briefs?.reduce(
+              (count, brief) => count + (brief.contract?.requiredFacts.length ?? 0),
+              0,
+            ) ?? 0;
+          const noun = result.specRoot === result.briefsDir ? 'brief' : 'briefs';
+          console.log(chalk.green(`Spec OK: ${result.briefFiles.length} ${noun}, ${facts} facts`));
+        }
+      } else {
+        console.error(
+          chalk.red(
+            `Spec check failed:\n${envelope.diagnostics
+              .map(
+                (diagnostic) =>
+                  `- [${diagnostic.code}] ${diagnostic.source ?? ''} ${diagnostic.path}: ` +
+                  `${diagnostic.message} Hint: ${diagnostic.hint}`,
+              )
+              .join('\n')}`,
+          ),
+        );
+      }
       if (!envelope.valid) process.exit(1);
     });
 }

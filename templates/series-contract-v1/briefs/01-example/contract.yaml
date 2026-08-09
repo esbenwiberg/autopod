@@ -1,0 +1,21 @@
+contract_version: 1
+title: "Implement example behavior"
+depends_on: []
+scenarios:
+  - id: example-behavior
+    given:
+      - "the example input is available"
+    when:
+      - "the example behavior runs"
+    then:
+      - "the expected result is returned"
+required_facts:
+  - id: fact-example-behavior
+    proves:
+      - example-behavior
+    kind: unit-test
+    artifact:
+      path: "packages/example/src/example.test.ts"
+      change: create
+    command: "npx pnpm --filter @autopod/example test -- example.test.ts"
+human_review: []

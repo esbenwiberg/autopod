@@ -5,6 +5,7 @@ import {
   type SpecContract,
   type SpecFile,
   generateId,
+  inspectSeriesBriefGraph,
   inspectSpecContract,
   numericPrefix,
   orderSeriesBriefs,
@@ -303,12 +304,13 @@ export function seriesRoutes(
 
     // Validate all submitted contracts before ordering or creating a single pod.
     // This is intentionally defensive: direct API callers do not pass through CLI preflight.
-    const contractDiagnostics = body.briefs.flatMap((brief, index) =>
+    const preflightDiagnostics = body.briefs.flatMap((brief, index) =>
       brief.contract
         ? inspectSpecContract(brief.contract, `briefs[${index}].contract`).diagnostics
         : [],
     );
-    if (contractDiagnostics.length > 0) {
+    preflightDiagnostics.push(...inspectSeriesBriefGraph(body.briefs));
+    if (preflightDiagnostics.length > 0) {
       reply.status(400);
       return {
         error: 'SERIES_PREFLIGHT_FAILED',
@@ -316,7 +318,7 @@ export function seriesRoutes(
         diagnosticsVersion: 1,
         valid: false,
         contractVersion: 1,
-        diagnostics: contractDiagnostics,
+        diagnostics: preflightDiagnostics,
       };
     }
 

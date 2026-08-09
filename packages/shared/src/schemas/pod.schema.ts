@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { MAX_HANDOFF_INSTRUCTIONS_LENGTH } from '../constants.js';
-import { specContractV1Schema } from '../contract.js';
+import { inspectSpecContract, specContractV1Schema } from '../contract.js';
 import { partialPodOptionsSchema } from './action-definition.schema.js';
 import { withCanonicalModelIdPolicy } from './model.schema.js';
 
@@ -23,7 +23,6 @@ const specFileSchema = z.object({
     .refine((s) => !s.split('/').includes('..'), 'Spec file path cannot escape the repo'),
   content: z.string().max(1_000_000),
 });
-
 
 const forbiddenReadinessRawEvidenceFields = new Set([
   'logs',
@@ -66,7 +65,19 @@ function rejectForbiddenReadinessRawEvidence(
   }
 }
 
-export const specContractSchema = specContractV1Schema;
+export const specContractSchema = specContractV1Schema.superRefine((contract, ctx) => {
+  for (const diagnostic of inspectSpecContract(contract).diagnostics) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: diagnostic.path
+        .replace(/\[(\d+)\]/g, '.$1')
+        .split('.')
+        .filter(Boolean)
+        .map((part) => (/^\d+$/.test(part) ? Number(part) : part)),
+      message: `[${diagnostic.code}] ${diagnostic.message} Hint: ${diagnostic.hint}`,
+    });
+  }
+});
 
 export const createPodRequestSchema = z
   .object({
