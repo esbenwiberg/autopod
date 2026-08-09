@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { MAX_HANDOFF_INSTRUCTIONS_LENGTH } from '../constants.js';
+import { specContractV1Schema } from '../contract.js';
 import { partialPodOptionsSchema } from './action-definition.schema.js';
 import { withCanonicalModelIdPolicy } from './model.schema.js';
 
@@ -23,41 +24,6 @@ const specFileSchema = z.object({
   content: z.string().max(1_000_000),
 });
 
-const contractScenarioFields: Record<string, z.ZodTypeAny> = {
-  id: z.string().min(1).max(128),
-  given: z.array(z.string().min(1)).min(1),
-  when: z.array(z.string().min(1)).min(1),
-};
-const scenarioThenKey = 'then';
-contractScenarioFields[scenarioThenKey] = z.array(z.string().min(1)).min(1);
-const contractScenarioSchema = z.object(contractScenarioFields);
-
-const requiredFactSchema = z.object({
-  id: z.string().min(1).max(128),
-  proves: z.array(z.string().min(1).max(128)).min(1),
-  kind: z.enum([
-    'unit-test',
-    'integration-test',
-    'contract-test',
-    'browser-test',
-    'typecheck',
-    'lint-rule',
-    'smoke-script',
-    'custom-command',
-  ]),
-  artifact: z.object({
-    path: z.string().min(1).max(500),
-    change: z.enum(['create', 'update', 'touch']),
-  }),
-  command: z.string().min(1).max(1000),
-});
-
-const humanReviewSchema = z.object({
-  id: z.string().min(1).max(128),
-  covers: z.array(z.string().min(1).max(128)).min(1),
-  criterion: z.string().min(1).max(500),
-  reason: z.string().min(1).max(500),
-});
 
 const forbiddenReadinessRawEvidenceFields = new Set([
   'logs',
@@ -100,14 +66,7 @@ function rejectForbiddenReadinessRawEvidence(
   }
 }
 
-export const specContractSchema = z.object({
-  contractVersion: z.literal(1),
-  title: z.string().min(1).max(200),
-  dependsOn: z.array(z.string().min(1).max(128)),
-  scenarios: z.array(contractScenarioSchema).min(1),
-  requiredFacts: z.array(requiredFactSchema),
-  humanReview: z.array(humanReviewSchema),
-});
+export const specContractSchema = specContractV1Schema;
 
 export const createPodRequestSchema = z
   .object({

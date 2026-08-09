@@ -6,6 +6,7 @@ import type { Command } from 'commander';
 import type { AutopodClient } from '../api/client.js';
 import { formatStatus } from '../output/colors.js';
 import { withSpinner } from '../output/spinner.js';
+import { preflightSeriesFolder } from './spec-preflight.js';
 
 /**
  * Resolve the spec layout for a folder argument. The user may point either
@@ -138,8 +139,20 @@ export function registerSeriesCommands(program: Command, getClient: () => Autopo
           specContext?: boolean;
         },
       ) => {
-        const client = getClient();
         const { specRoot, briefsDir } = resolveSpecLayout(folder);
+        // Local canonical preflight runs before client construction, credentials, or dispatch.
+        const preflight = preflightSeriesFolder(folder);
+        if (preflight.diagnostics.length > 0) {
+          console.error(
+            chalk.red(
+              `Spec preflight failed:\n${preflight.diagnostics
+                .map((d) => `- ${d.source ?? ''} ${d.path}: ${d.message} Hint: ${d.hint}`)
+                .join('\n')}`,
+            ),
+          );
+          process.exit(1);
+        }
+        const client = getClient();
 
         // Read contract-based brief folders sorted by numeric prefix. Fall back to
         // flat markdown files only so the parser can emit its hard-cutover error.

@@ -1,75 +1,6 @@
-import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
-import { basename, join, resolve } from 'node:path';
-import { type BriefFile, numericPrefix, parseBriefs, parseSpecContract } from '@autopod/shared';
 import chalk from 'chalk';
 import type { Command } from 'commander';
-
-function isDirectory(path: string): boolean {
-  try {
-    return statSync(path).isDirectory();
-  } catch {
-    return false;
-  }
-}
-
-function resolveContractPath(dir: string): string {
-  const yamlPath = join(dir, 'contract.yaml');
-  const ymlPath = join(dir, 'contract.yml');
-  const hasYaml = existsSync(yamlPath);
-  const hasYml = existsSync(ymlPath);
-  if (hasYaml && hasYml) {
-    throw new Error(`both contract.yaml and contract.yml found in ${dir}`);
-  }
-  if (hasYaml) return yamlPath;
-  if (hasYml) return ymlPath;
-  throw new Error(`contract.yaml or contract.yml not found in ${dir}`);
-}
-
-function readContract(path: string): string {
-  return readFileSync(path, 'utf-8');
-}
-
-function parseContractAt(path: string): void {
-  try {
-    parseSpecContract(readContract(path));
-  } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
-    throw new Error(`${path}: ${message}`);
-  }
-}
-
-function readSeriesBriefFiles(folderPath: string): BriefFile[] {
-  const root = resolve(folderPath);
-  const briefsDir =
-    basename(root) === 'briefs'
-      ? root
-      : isDirectory(join(root, 'briefs'))
-        ? join(root, 'briefs')
-        : root;
-
-  const entries = readdirSync(briefsDir);
-  const briefDirs = entries
-    .filter(
-      (entry) =>
-        isDirectory(join(briefsDir, entry)) && existsSync(join(briefsDir, entry, 'brief.md')),
-    )
-    .sort((a, b) => numericPrefix(a) - numericPrefix(b));
-
-  if (briefDirs.length === 0) {
-    throw new Error(`No contract brief folders found in ${briefsDir}`);
-  }
-
-  return briefDirs.map((dirname) => {
-    const dir = join(briefsDir, dirname);
-    const contractPath = resolveContractPath(dir);
-    parseContractAt(contractPath);
-    return {
-      filename: dirname,
-      content: readFileSync(join(dir, 'brief.md'), 'utf-8'),
-      contractContent: readContract(contractPath),
-    };
-  });
-}
+import { preflightEnvelope, preflightSeriesFolder } from './spec-preflight.js';
 
 export function registerSpecCommands(program: Command): void {
   const spec = program.command('spec').description('Validate Autopod spec artifacts');
@@ -77,61 +8,12 @@ export function registerSpecCommands(program: Command): void {
   spec
     .command('check <folder>')
     .description('Parse-check a /prep folder, /plan-feature folder, or investigation contract')
-    .action((folder: string) => {
-      const root = resolve(folder);
-      if (!isDirectory(root)) {
-        console.error(chalk.red(`Not a directory: ${root}`));
-        process.exit(1);
-      }
-
-      try {
-        const directBriefPath = join(root, 'brief.md');
-        let directContractPath = '';
-        let directContractError: Error | null = null;
-        try {
-          directContractPath = resolveContractPath(root);
-        } catch (err) {
-          directContractError = err instanceof Error ? err : new Error(String(err));
-        }
-        const hasDirectBrief = existsSync(directBriefPath);
-        const hasDirectContract = directContractPath !== '';
-
-        if (hasDirectBrief && hasDirectContract) {
-          const [brief] = parseBriefs([
-            {
-              filename: basename(root),
-              content: readFileSync(directBriefPath, 'utf-8'),
-              contractContent: readContract(directContractPath),
-            },
-          ]);
-          if (!brief?.contract) {
-            throw new Error(`contract could not be parsed: ${directContractPath}`);
-          }
-          console.log(
-            chalk.green(`Spec OK: 1 brief, ${brief.contract.requiredFacts.length} facts`),
-          );
-          return;
-        }
-
-        if (hasDirectContract) {
-          parseContractAt(directContractPath);
-          console.log(chalk.green(`Spec OK: ${basename(directContractPath)}`));
-          return;
-        }
-        if (hasDirectBrief && directContractError) {
-          throw directContractError;
-        }
-
-        const briefs = parseBriefs(readSeriesBriefFiles(root));
-        const factCount = briefs.reduce(
-          (count, brief) => count + (brief.contract?.requiredFacts.length ?? 0),
-          0,
-        );
-        console.log(chalk.green(`Spec OK: ${briefs.length} briefs, ${factCount} facts`));
-      } catch (err) {
-        const message = err instanceof Error ? err.message : String(err);
-        console.error(chalk.red(`Spec check failed: ${message}`));
-        process.exit(1);
-      }
+    .option('--json', 'Print versioned machine-readable diagnostics')
+    .action((folder: string, opts: { json?: boolean }) => {
+      const result=preflightSeriesFolder(folder); const envelope=preflightEnvelope(result);
+      if (opts.json) console.log(JSON.stringify(envelope));
+      else if (envelope.valid) { const facts=result.briefs?.reduce((n,b)=>n+(b.contract?.requiredFacts.length??0),0)??0; console.log(chalk.green(`Spec OK: ${result.briefFiles.length} briefs, ${facts} facts`)); }
+      else console.error(chalk.red(`Spec check failed:\n${envelope.diagnostics.map(d=>`- ${d.source ?? ''} ${d.path}: ${d.message} Hint: ${d.hint}`).join('\n')}`));
+      if (!envelope.valid) process.exit(1);
     });
 }

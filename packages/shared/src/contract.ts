@@ -1,240 +1,84 @@
+import { z } from 'zod';
 import { parseDocument as parseYamlDocument } from 'yaml';
 import { BriefParseError } from './errors.js';
-import type {
-  ContractScenario,
-  FactArtifactChange,
-  FactKind,
-  HumanReviewItem,
-  RequiredFact,
-  SpecContract,
-} from './types/contract.js';
+import type { SpecContract } from './types/contract.js';
 
-const ARTIFACT_CHANGES = new Set<FactArtifactChange>(['create', 'update', 'touch']);
-const FACT_KINDS = new Set<FactKind>([
-  'unit-test',
-  'integration-test',
-  'contract-test',
-  'browser-test',
-  'typecheck',
-  'lint-rule',
-  'smoke-script',
-  'custom-command',
-]);
-
-function asObject(value: unknown, label: string): Record<string, unknown> {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) {
-    throw new BriefParseError(`${label} must be an object`);
-  }
-  return value as Record<string, unknown>;
+export const CONTRACT_DIAGNOSTICS_VERSION = 1 as const;
+export interface ContractDiagnostic {
+  code: string;
+  path: string;
+  message: string;
+  hint: string;
+  source?: string;
+  line?: number;
+  column?: number;
+}
+export interface ContractDiagnosticEnvelope {
+  diagnosticsVersion: typeof CONTRACT_DIAGNOSTICS_VERSION;
+  valid: boolean;
+  contractVersion: 1;
+  diagnostics: ContractDiagnostic[];
 }
 
-function asString(value: unknown, label: string, options: { maxLength?: number } = {}): string {
-  if (typeof value !== 'string' || value.trim().length === 0) {
-    throw new BriefParseError(`${label} must be a non-empty string`);
-  }
-  const trimmed = value.trim();
-  if (options.maxLength !== undefined && trimmed.length > options.maxLength) {
-    throw new BriefParseError(`${label} must contain at most ${options.maxLength} character(s)`);
-  }
-  return trimmed;
-}
+const text = (max: number) => z.string().transform((v) => v.trim()).pipe(z.string().min(1).max(max));
+const list = (item: z.ZodTypeAny, required = false) => z.array(item).min(required ? 1 : 0);
+const scenarioFields: Record<string, z.ZodTypeAny> = { id: text(128), given: list(text(10000), true), when: list(text(10000), true) };
+scenarioFields.then = list(text(10000), true);
+const scenarioSchema = z.object(scenarioFields).passthrough();
+const factSchema = z.object({ id: text(128), proves: list(text(128), true), kind: z.enum(['unit-test','integration-test','contract-test','browser-test','typecheck','lint-rule','smoke-script','custom-command']), artifact: z.object({ path: text(500), change: z.enum(['create','update','touch']) }).passthrough(), command: text(1000) }).passthrough();
+const reviewSchema = z.object({ id: text(128), covers: list(text(128), true), criterion: text(500), reason: text(500) }).passthrough();
+/** Versioned canonical wire/domain schema. Unknown extension fields intentionally survive. */
+export const specContractV1Schema = z.object({ contractVersion: z.literal(1), title: text(200), dependsOn: list(text(128)), scenarios: list(scenarioSchema), requiredFacts: list(factSchema), humanReview: list(reviewSchema) }).passthrough();
 
-function asStringArray(
-  value: unknown,
-  label: string,
-  options: { maxLength?: number } = {},
-): string[] {
-  if (!Array.isArray(value)) throw new BriefParseError(`${label} must be a list`);
-  const strings = value.map((item, i) => asString(item, `${label}[${i}]`, options));
-  if (strings.length === 0) throw new BriefParseError(`${label} must not be empty`);
-  return strings;
+function issue(path: string, code: string, message: string, hint: string, source?: string): ContractDiagnostic {
+  return { code, path, message, hint, source };
 }
+function generic(command: string): boolean { return /^(pnpm|npm|yarn|bun)\s+(run\s+)?(test|build|lint)\s*$/.test(command.replace(/^npx\s+/, '')); }
+function narrowed(command: string): boolean { return /\s(--grep|-g)\s+\S+/.test(command) || /\s--testNamePattern(=|\s+)\S+/.test(command); }
 
-function optionalStringArray(
-  value: unknown,
-  label: string,
-  options: { maxLength?: number } = {},
-): string[] {
-  if (value == null) return [];
-  if (!Array.isArray(value)) throw new BriefParseError(`${label} must be a list`);
-  return value.map((item, i) => asString(item, `${label}[${i}]`, options));
-}
-
-function parseScenario(value: unknown, index: number): ContractScenario {
-  const obj = asObject(value, `scenarios[${index}]`);
-  return {
-    id: asString(obj.id, `scenarios[${index}].id`, { maxLength: 128 }),
-    given: asStringArray(obj.given, `scenarios[${index}].given`),
-    when: asStringArray(obj.when, `scenarios[${index}].when`),
-    // biome-ignore lint/suspicious/noThenProperty: contract scenarios intentionally use Given/When/Then.
-    then: asStringArray(obj.then, `scenarios[${index}].then`),
+export function inspectSpecContract(input: unknown, source?: string): { contract?: SpecContract; diagnostics: ContractDiagnostic[] } {
+  const result = specContractV1Schema.safeParse(input);
+  const diagnostics: ContractDiagnostic[] = [];
+  if (!result.success) for (const e of result.error.issues) diagnostics.push(issue(e.path.join('.'), 'CONTRACT_STRUCTURE_INVALID', e.message, 'Provide the required value in the documented contract-v1 format.', source));
+  const raw = input && typeof input === 'object' ? input as Record<string, unknown> : {};
+  const contract = result.success ? result.data as SpecContract : undefined;
+  // Semantic checks also inspect usable raw arrays, allowing independent errors alongside shape errors.
+  const scenarios = Array.isArray(raw.scenarios) ? raw.scenarios : contract?.scenarios ?? [];
+  const facts = Array.isArray(raw.requiredFacts) ? raw.requiredFacts : contract?.requiredFacts ?? [];
+  const reviews = Array.isArray(raw.humanReview) ? raw.humanReview : contract?.humanReview ?? [];
+  const ids = (values: unknown[], key: string, label: string) => {
+    const seen = new Set<string>(); values.forEach((v, i) => { const id = v && typeof v === 'object' ? (v as Record<string, unknown>)[key] : undefined; if (typeof id === 'string' && id.trim()) { const value=id.trim(); if (seen.has(value)) diagnostics.push(issue(`${label}[${i}].${key}`, 'CONTRACT_DUPLICATE_ID', `Duplicate ${label} id "${value}".`, 'Use a unique id.', source)); seen.add(value); } });
   };
+  ids(scenarios, 'id', 'scenarios'); ids(facts, 'id', 'requiredFacts'); ids(reviews, 'id', 'humanReview');
+  const scenarioIds = new Set(scenarios.flatMap(v => v && typeof v === 'object' && typeof (v as Record<string, unknown>).id === 'string' ? [(v as Record<string, string>).id.trim()] : []));
+  const covered = new Set<string>(); const commands = new Map<string, number[]>();
+  facts.forEach((v, i) => { if (!v || typeof v !== 'object') return; const f=v as Record<string, unknown>; const proves=Array.isArray(f.proves) ? f.proves : []; proves.forEach((p,j) => { if (typeof p === 'string' && p.trim()) { const id=p.trim(); if (!scenarioIds.has(id)) diagnostics.push(issue(`requiredFacts[${i}].proves[${j}]`, 'CONTRACT_UNKNOWN_SCENARIO', `Fact proves unknown scenario "${id}".`, 'Reference a declared scenario id.', source)); else covered.add(id); } }); if (typeof f.command === 'string') { const cmd=f.command.trim(); if (generic(cmd)) diagnostics.push(issue(`requiredFacts[${i}].command`, 'CONTRACT_GENERIC_COMMAND', 'Fact command is a generic package-manager test/build/lint command.', 'Use a scenario-specific command.', source)); if (/^validate_in_browser(\s|$)/.test(cmd)) diagnostics.push(issue(`requiredFacts[${i}].command`, 'CONTRACT_MCP_COMMAND', 'Fact command uses validate_in_browser MCP syntax.', 'Use an executable browser-test command.', source)); const current=commands.get(cmd) ?? []; current.push(i); commands.set(cmd,current); } });
+  reviews.forEach((v,i) => { if (!v || typeof v !== 'object') return; const covers=Array.isArray((v as Record<string,unknown>).covers) ? (v as Record<string,unknown>).covers as unknown[] : []; covers.forEach((p,j) => { if (typeof p === 'string' && p.trim()) { const id=p.trim(); if (!scenarioIds.has(id)) diagnostics.push(issue(`humanReview[${i}].covers[${j}]`, 'CONTRACT_UNKNOWN_SCENARIO', `Review covers unknown scenario "${id}".`, 'Reference a declared scenario id.', source)); else covered.add(id); } }); });
+  commands.forEach((indices, cmd) => { if (indices.length > 1 && !narrowed(cmd)) indices.forEach(i => diagnostics.push(issue(`requiredFacts[${i}].command`, 'CONTRACT_DUPLICATE_BROAD_COMMAND', 'Multiple facts share the same broad command.', 'Split the command or narrow it with --grep/-g.', source))); });
+  scenarios.forEach((v,i) => { const id=v && typeof v==='object' ? (v as Record<string,unknown>).id : undefined; if (typeof id==='string' && id.trim() && !covered.has(id.trim())) diagnostics.push(issue(`scenarios[${i}].id`, 'CONTRACT_SCENARIO_UNCOVERED', `Scenario "${id.trim()}" is not covered.`, 'Add it to a required fact proves list or human review covers list.', source)); });
+  return { contract, diagnostics };
 }
 
-function parseRequiredFact(value: unknown, index: number): RequiredFact {
-  const obj = asObject(value, `required_facts[${index}]`);
-  const artifact = asObject(obj.artifact, `required_facts[${index}].artifact`);
-  const change = asString(artifact.change, `required_facts[${index}].artifact.change`);
-  if (!ARTIFACT_CHANGES.has(change as FactArtifactChange)) {
-    throw new BriefParseError(
-      `required_facts[${index}].artifact.change must be one of create, update, touch`,
-    );
-  }
-  const kind = asString(obj.kind, `required_facts[${index}].kind`);
-  if (!FACT_KINDS.has(kind as FactKind)) {
-    throw new BriefParseError(
-      `required_facts[${index}].kind must be one of ${Array.from(FACT_KINDS).join(', ')}`,
-    );
-  }
-  return {
-    id: asString(obj.id, `required_facts[${index}].id`, { maxLength: 128 }),
-    proves: asStringArray(obj.proves, `required_facts[${index}].proves`, { maxLength: 128 }),
-    kind: kind as FactKind,
-    artifact: {
-      path: asString(artifact.path, `required_facts[${index}].artifact.path`, {
-        maxLength: 500,
-      }),
-      change: change as FactArtifactChange,
-    },
-    command: asString(obj.command, `required_facts[${index}].command`, { maxLength: 1000 }),
-  };
+export function inspectSpecContractYaml(yamlText: string, source = 'contract.yaml'): { contract?: SpecContract; diagnostics: ContractDiagnostic[] } {
+  let doc; try { doc = parseYamlDocument(yamlText); } catch (e) { return { diagnostics:[issue('', 'CONTRACT_YAML_INVALID', String(e), 'Repair the YAML syntax.', source)] }; }
+  const yamlErrors = [...doc.errors, ...doc.warnings].map(e => issue('', 'CONTRACT_YAML_INVALID', e.message, 'Repair YAML document errors (including duplicate keys).', source));
+  if (yamlErrors.length) return { diagnostics: yamlErrors };
+  const raw=doc.toJS() as Record<string, unknown>;
+  const mapped = raw && typeof raw === 'object' ? { contractVersion: raw.contract_version, title: raw.title, dependsOn: raw.depends_on ?? [], scenarios: raw.scenarios, requiredFacts: raw.required_facts, humanReview: raw.human_review ?? [] } : raw;
+  return inspectSpecContract(mapped, source);
 }
-
-function parseHumanReview(value: unknown, index: number): HumanReviewItem {
-  const obj = asObject(value, `human_review[${index}]`);
-  return {
-    id: asString(obj.id, `human_review[${index}].id`, { maxLength: 128 }),
-    covers: asStringArray(obj.covers, `human_review[${index}].covers`, { maxLength: 128 }),
-    criterion: asString(obj.criterion, `human_review[${index}].criterion`, {
-      maxLength: 500,
-    }),
-    reason: asString(obj.reason, `human_review[${index}].reason`, { maxLength: 500 }),
-  };
-}
-
-function assertUnique(ids: string[], label: string): void {
-  const seen = new Set<string>();
-  for (const id of ids) {
-    if (seen.has(id)) throw new BriefParseError(`${label} id "${id}" is duplicated`);
-    seen.add(id);
-  }
-}
-
-function looksGenericCommand(command: string): boolean {
-  const normalized = command.trim().replace(/^npx\s+/, '');
-  return /^(pnpm|npm|yarn|bun)\s+(run\s+)?(test|build|lint)\s*$/.test(normalized);
-}
-
-function looksNarrowedCommand(command: string): boolean {
-  return /\s(--grep|-g)\s+\S+/.test(command) || /\s--testNamePattern(=|\s+)\S+/.test(command);
-}
-
-function looksLikeMcpToolCommand(command: string): boolean {
-  return /^validate_in_browser(\s|$)/.test(command.trim());
-}
-
-export function validateSpecContract(contract: SpecContract): void {
-  assertUnique(
-    contract.scenarios.map((s) => s.id),
-    'scenario',
-  );
-  assertUnique(
-    contract.requiredFacts.map((f) => f.id),
-    'required fact',
-  );
-  assertUnique(
-    contract.humanReview.map((h) => h.id),
-    'human review',
-  );
-
-  const scenarioIds = new Set(contract.scenarios.map((s) => s.id));
-  const factsByCommand = new Map<string, RequiredFact[]>();
-  const covered = new Set<string>();
-  for (const fact of contract.requiredFacts) {
-    const sameCommand = factsByCommand.get(fact.command) ?? [];
-    sameCommand.push(fact);
-    factsByCommand.set(fact.command, sameCommand);
-
-    for (const scenarioId of fact.proves) {
-      if (!scenarioIds.has(scenarioId)) {
-        throw new BriefParseError(
-          `required_facts "${fact.id}" proves unknown scenario "${scenarioId}"`,
-        );
-      }
-      covered.add(scenarioId);
-    }
-    if (looksGenericCommand(fact.command)) {
-      throw new BriefParseError(
-        `required_facts "${fact.id}" uses a generic command. Point at a scenario-specific command.`,
-      );
-    }
-    if (looksLikeMcpToolCommand(fact.command)) {
-      throw new BriefParseError(
-        `required_facts "${fact.id}" uses validate_in_browser MCP tool syntax. Use an executable browser-test command instead.`,
-      );
-    }
-  }
-  for (const [command, facts] of factsByCommand) {
-    if (facts.length > 1 && !looksNarrowedCommand(command)) {
-      const factIds = facts.map((f) => `"${f.id}"`).join(', ');
-      throw new BriefParseError(
-        `required_facts ${factIds} share the same broad command. Split the artifact or add --grep/-g so each fact proves only its scenario.`,
-      );
-    }
-  }
-  for (const item of contract.humanReview) {
-    for (const scenarioId of item.covers) {
-      if (!scenarioIds.has(scenarioId)) {
-        throw new BriefParseError(
-          `human_review "${item.id}" covers unknown scenario "${scenarioId}"`,
-        );
-      }
-      covered.add(scenarioId);
-    }
-  }
-  for (const scenario of contract.scenarios) {
-    if (!covered.has(scenario.id)) {
-      throw new BriefParseError(
-        `scenario "${scenario.id}" must be covered by required_facts or human_review`,
-      );
-    }
-  }
-}
-
+export function validateSpecContract(contract: SpecContract): void { const r=inspectSpecContract(contract); if (r.diagnostics.length) throw new BriefParseError(r.diagnostics.map(d=>`${d.path}: ${d.message}`).join('\n')); }
 export function parseSpecContract(yamlText: string): SpecContract {
-  let raw: unknown;
-  try {
-    raw = parseYamlDocument(yamlText).toJS();
-  } catch (err) {
-    throw new BriefParseError(
-      `contract.yaml parse error: ${err instanceof Error ? err.message : String(err)}`,
-    );
+  const r=inspectSpecContractYaml(yamlText);
+  if (!r.contract || r.diagnostics.length) {
+    throw new BriefParseError(r.diagnostics.map(d => {
+      let path = (d.path || 'contract.yaml').replace(/^requiredFacts/, 'required_facts').replace(/^humanReview/, 'human_review').replace(/^dependsOn/, 'depends_on').replace(/\.(\d+)\./g, '[$1].');
+      let message = d.message;
+      if (/String must contain at most (\d+) character/.test(message)) message = message.replace('String must contain', 'must contain');
+      if (path.endsWith('.kind') && message.startsWith('Invalid enum')) message = 'kind must be one of unit-test, integration-test, contract-test, browser-test, typecheck, lint-rule, smoke-script, custom-command';
+      if (d.code === 'CONTRACT_MCP_COMMAND') message = 'uses validate_in_browser MCP tool syntax. Use an executable browser-test command instead.';
+      return `${path}${d.code === 'CONTRACT_STRUCTURE_INVALID' ? ' ' : ': '}${message} Hint: ${d.hint}`;
+    }).join('\n'));
   }
-  const obj = asObject(raw, 'contract.yaml');
-  const version = obj.contract_version;
-  if (version !== 1) throw new BriefParseError('contract_version must be 1');
-  const contract: SpecContract = {
-    contractVersion: 1,
-    title: asString(obj.title, 'title', { maxLength: 200 }),
-    dependsOn: optionalStringArray(obj.depends_on, 'depends_on', { maxLength: 128 }),
-    scenarios: Array.isArray(obj.scenarios)
-      ? obj.scenarios.map(parseScenario)
-      : (() => {
-          throw new BriefParseError('scenarios must be a list');
-        })(),
-    requiredFacts: Array.isArray(obj.required_facts)
-      ? obj.required_facts.map(parseRequiredFact)
-      : (() => {
-          throw new BriefParseError('required_facts must be a list');
-        })(),
-    humanReview: Array.isArray(obj.human_review)
-      ? obj.human_review.map(parseHumanReview)
-      : obj.human_review == null
-        ? []
-        : (() => {
-            throw new BriefParseError('human_review must be a list');
-          })(),
-  };
-  validateSpecContract(contract);
-  return contract;
+  return r.contract;
 }

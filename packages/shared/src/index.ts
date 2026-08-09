@@ -7,7 +7,15 @@ export type {
   RequiredFact,
   SpecContract,
 } from './types/contract.js';
-export { parseSpecContract, validateSpecContract } from './contract.js';
+export {
+  CONTRACT_DIAGNOSTICS_VERSION,
+  inspectSpecContract,
+  inspectSpecContractYaml,
+  parseSpecContract,
+  specContractV1Schema,
+  validateSpecContract,
+} from './contract.js';
+export type { ContractDiagnostic, ContractDiagnosticEnvelope } from './contract.js';
 export { buildEvidenceDocument, renderEvidenceYaml } from './evidence.js';
 
 export type {

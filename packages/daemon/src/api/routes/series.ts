@@ -5,6 +5,7 @@ import {
   type SpecContract,
   type SpecFile,
   generateId,
+  inspectSpecContract,
   numericPrefix,
   orderSeriesBriefs,
   parseBriefs,
@@ -299,6 +300,25 @@ export function seriesRoutes(
     const seriesId = rawSlug || generateId(12);
     const prMode = body.prMode ?? 'single';
     const userId = request.user.oid;
+
+    // Validate all submitted contracts before ordering or creating a single pod.
+    // This is intentionally defensive: direct API callers do not pass through CLI preflight.
+    const contractDiagnostics = body.briefs.flatMap((brief, index) =>
+      brief.contract
+        ? inspectSpecContract(brief.contract, `briefs[${index}].contract`).diagnostics
+        : [],
+    );
+    if (contractDiagnostics.length > 0) {
+      reply.status(400);
+      return {
+        error: 'SERIES_PREFLIGHT_FAILED',
+        code: 'SERIES_PREFLIGHT_FAILED',
+        diagnosticsVersion: 1,
+        valid: false,
+        contractVersion: 1,
+        diagnostics: contractDiagnostics,
+      };
+    }
 
     let orderedBriefs: ParsedBrief[];
     try {
