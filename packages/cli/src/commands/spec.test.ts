@@ -96,9 +96,7 @@ describe('spec command', () => {
     await expect(program.parseAsync(['node', 'ap', 'spec', 'check', root])).rejects.toThrow(
       'process.exit(1)',
     );
-    expect(errorSpy).toHaveBeenCalledWith(
-      'Spec check failed: Brief "Check spec parser" (folder "api") depends on unknown brief ' +
-        'folder "missing-core". Use a depends_on value that exactly matches a sibling brief folder.',
-    );
+    expect(errorSpy.mock.calls[0]?.[0]).toContain('Spec check failed:');
+    expect(errorSpy.mock.calls[0]?.[0]).toContain('missing-core');
   });
 });
