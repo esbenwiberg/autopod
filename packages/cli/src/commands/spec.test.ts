@@ -3,8 +3,8 @@ import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { Command } from 'commander';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { registerSpecCommands } from './spec.js';
 import { preflightSeriesFolder } from './spec-preflight.js';
+import { registerSpecCommands } from './spec.js';
 
 const contractYaml = `contract_version: 1
 title: "Check spec parser"
@@ -189,9 +189,7 @@ required_facts:
   });
 
   it('continues to preflight an existing tracked contract series', () => {
-    const result = preflightSeriesFolder(
-      resolve(process.cwd(), '../../specs/advisory-browser-qa'),
-    );
+    const result = preflightSeriesFolder(resolve(process.cwd(), '../../specs/advisory-browser-qa'));
     expect(result.diagnostics).toEqual([]);
     expect(result.briefs?.length).toBeGreaterThan(0);
   });
