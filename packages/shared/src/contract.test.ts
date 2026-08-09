@@ -1,7 +1,37 @@
 import { describe, expect, it } from 'vitest';
-import { parseSpecContract } from './contract.js';
+import { inspectSpecContractYaml, parseSpecContract } from './contract.js';
 
 describe('parseSpecContract fact kinds', () => {
+  it('aggregates independent Luumi contract diagnostics', () => {
+    const result = inspectSpecContractYaml(`contract_version: 1
+title: Luumi
+scenarios:
+  - id: known
+    given: [a]
+    when: [b]
+    then: [c]
+required_facts:
+  - id: broken
+    proves: []
+    kind: unit-test
+    artifact: { path: test.ts, change: delete }
+    command: npx pnpm --filter shared test -- contract.test.ts
+  - id: too-long
+    proves: [${'x'.repeat(129)}]
+    kind: unit-test
+    artifact: { path: other.ts, change: create }
+    command: npx pnpm --filter shared test -- contract.test.ts --grep known
+  - id: unknown
+    proves: [missing]
+    kind: unit-test
+    artifact: { path: another.ts, change: create }
+    command: npx pnpm --filter shared test -- contract.test.ts --grep missing
+`);
+    expect(result.diagnostics.length).toBeGreaterThanOrEqual(4);
+    expect(result.diagnostics.map((d) => d.path)).toEqual(
+      expect.arrayContaining(['requiredFacts.0.artifact.change', 'requiredFacts.0.proves']),
+    );
+  });
   it('accepts browser-test as a durable fact kind', () => {
     const contract = parseSpecContract(`contract_version: 1
 title: Browser proof
