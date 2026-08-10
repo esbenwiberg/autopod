@@ -20,9 +20,9 @@
 #
 #   --target <sha|ref>   Commit/ref to deploy (default: origin/main HEAD).
 #   --yes                Skip the confirm-before-swap prompt (CI / unattended).
-#   --force              Override ordinary preflight guards and, when an older daemon
-#                        cannot serve the drain endpoint, audibly bootstrap this feature.
-#                        The immediate VM-database active-pod gate still cannot be bypassed.
+#   --force              Explicitly restart despite active restart-blocking pods and,
+#                        when an older daemon cannot serve the drain endpoint, audibly
+#                        bootstrap this feature. All non-pod safety gates still apply.
 #   --full               Force clean clone + full `pnpm install` (no node_modules
 #                        reuse). Auto-selected when deps changed or live sha is
 #                        not present locally.
@@ -59,11 +59,12 @@ SERVICE_USER="ewi"
 SYSTEMD_PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
 CLAUDE_CLI_NPM_PACKAGE="${CLAUDE_CLI_NPM_PACKAGE:-@anthropic-ai/claude-code}"
 CODEX_CLI_NPM_PACKAGE="${CODEX_CLI_NPM_PACKAGE:-@openai/codex}"
-# Non-terminal pod statuses == "active"; we refuse to restart on top of these.
-# Any non-terminal pod can retain work or await an operator decision. Never restart
-# the daemon around one unless the operator explicitly passes --force.
-NONTERMINAL="queued provisioning running awaiting_input paused validating validated review_required approved merging merge_pending killing"
-NONTERMINAL_QUERY="${NONTERMINAL// /,}"
+# Pods in these states may own live work or be mid-transition. Queued pods have
+# no running workload and intentionally survive daemon restarts, so they do not
+# block deployment. Explicit --force is operator authorization to restart even
+# when a restart-blocking pod remains active.
+RESTART_BLOCKING="provisioning running awaiting_input paused validating validated review_required approved merging merge_pending killing"
+RESTART_BLOCKING_QUERY="${RESTART_BLOCKING// /,}"
 
 # ---- args -----------------------------------------------------------------
 TARGET_REF=""
@@ -181,16 +182,16 @@ else
   note "full mode: clean clone of $TARGET_SHA + pnpm install on the VM"
 fi
 
-# ---- preflight: active pods ----------------------------------------------
-note "checking for active pods"
+# ---- preflight: restart-blocking pods ------------------------------------
+note "checking for restart-blocking pods"
 TOKEN="$(ap token 2>/dev/null || true)"
 DAEMON="$(grep -E '^daemon:' "$HOME/.autopod/config.yaml" | awk '{print $2}')"
 DRAIN_RESPONSE=""
 if [ -n "$TOKEN" ] && [ -n "$DAEMON" ]; then
-  ACTIVE="$(curl -sS --max-time 10 "$DAEMON/pods?status=$NONTERMINAL_QUERY&compact=true" -H "Authorization: Bearer $TOKEN" 2>/dev/null \
-    | NONTERMINAL="$NONTERMINAL" python3 -c '
+  ACTIVE="$(curl -sS --max-time 10 "$DAEMON/pods?status=$RESTART_BLOCKING_QUERY&compact=true" -H "Authorization: Bearer $TOKEN" 2>/dev/null \
+    | RESTART_BLOCKING="$RESTART_BLOCKING" python3 -c '
 import sys, json, os
-nt = set(os.environ["NONTERMINAL"].split())
+nt = set(os.environ["RESTART_BLOCKING"].split())
 try:
     d = json.load(sys.stdin)
 except Exception:
@@ -198,9 +199,12 @@ except Exception:
 pods = d if isinstance(d, list) else d.get("pods", d.get("items", []))
 print(sum(1 for p in pods if isinstance(p, dict) and p.get("status") in nt))
 ' 2>/dev/null || echo '?')"
-  note "active (non-terminal) pods: $ACTIVE"
-  if [ "$ACTIVE" != "0" ] && [ "$ACTIVE" != "?" ] && [ "$FORCE" -eq 0 ]; then
-    die "$ACTIVE active pod(s) — restart would interrupt them (use --force to override)"
+  note "active (restart-blocking) pods: $ACTIVE"
+  if [ "$ACTIVE" != "0" ] && [ "$ACTIVE" != "?" ]; then
+    if [ "$FORCE" -eq 0 ]; then
+      die "$ACTIVE restart-blocking pod(s) — restart would interrupt them (use --force to override)"
+    fi
+    note "FORCE: proceeding with $ACTIVE restart-blocking pod(s) active at preflight"
   fi
   [ "$ACTIVE" = "?" ] && note "WARN: could not parse pod list; proceeding (verify manually)"
 else
@@ -208,12 +212,15 @@ else
   ACTIVE_RAW="$(remote "
 set -eu
 cd $CURRENT_LINK/packages/daemon
-sudo -u ewi -H env NONTERMINAL='$NONTERMINAL' node -e \"const Database = require('better-sqlite3'); const db = new Database('/data/autopod/autopod.db', { readonly: true }); const statuses = process.env.NONTERMINAL.split(/\\\\s+/).filter(Boolean); const placeholders = statuses.map(() => '?').join(','); const row = db.prepare('select count(*) as n from pods where status in (' + placeholders + ')').get(...statuses); console.log(row.n);\"
+sudo -u ewi -H env RESTART_BLOCKING='$RESTART_BLOCKING' node -e \"const Database = require('better-sqlite3'); const db = new Database('/data/autopod/autopod.db', { readonly: true }); const statuses = process.env.RESTART_BLOCKING.split(/\\\\s+/).filter(Boolean); const placeholders = statuses.map(() => '?').join(','); const row = db.prepare('select count(*) as n from pods where status in (' + placeholders + ')').get(...statuses); console.log(row.n);\"
 " 2>/dev/null || true)"
   ACTIVE="$(printf '%s\n' "$ACTIVE_RAW" | awk '/^[0-9]+$/ { value = $0 } END { if (value != "") print value; else print "?" }')"
-  note "active (non-terminal) pods from VM DB: $ACTIVE"
-  if [ "$ACTIVE" != "0" ] && [ "$ACTIVE" != "?" ] && [ "$FORCE" -eq 0 ]; then
-    die "$ACTIVE active pod(s) — restart would interrupt them (use --force to override)"
+  note "active (restart-blocking) pods from VM DB: $ACTIVE"
+  if [ "$ACTIVE" != "0" ] && [ "$ACTIVE" != "?" ]; then
+    if [ "$FORCE" -eq 0 ]; then
+      die "$ACTIVE restart-blocking pod(s) — restart would interrupt them (use --force to override)"
+    fi
+    note "FORCE: proceeding with $ACTIVE restart-blocking pod(s) active at preflight"
   fi
   if [ "$ACTIVE" = "?" ] && [ "$FORCE" -eq 0 ]; then
     die "could not determine active pods from API or VM DB (use --force only after manual verification)"
@@ -246,10 +253,10 @@ if echo "$DRAIN_RESPONSE" | grep -q '"expiresAt"'; then
   trap release_hosted_deploy_drain EXIT
   note "hosted deployment drain active"
 
-  ACTIVE_AFTER_DRAIN="$(curl -sS --max-time 10 "$DAEMON/pods?status=$NONTERMINAL_QUERY&compact=true" -H "Authorization: Bearer $TOKEN" 2>/dev/null \
-    | NONTERMINAL="$NONTERMINAL" python3 -c '
+  ACTIVE_AFTER_DRAIN="$(curl -sS --max-time 10 "$DAEMON/pods?status=$RESTART_BLOCKING_QUERY&compact=true" -H "Authorization: Bearer $TOKEN" 2>/dev/null \
+    | RESTART_BLOCKING="$RESTART_BLOCKING" python3 -c '
 import sys, json, os
-nt = set(os.environ["NONTERMINAL"].split())
+nt = set(os.environ["RESTART_BLOCKING"].split())
 try:
     d = json.load(sys.stdin)
 except Exception:
@@ -257,7 +264,12 @@ except Exception:
 pods = d if isinstance(d, list) else d.get("pods", d.get("items", []))
 print(sum(1 for p in pods if isinstance(p, dict) and p.get("status") in nt))
 ' 2>/dev/null || echo '?')"
-  [ "$ACTIVE_AFTER_DRAIN" = "0" ] || die "${ACTIVE_AFTER_DRAIN} active pod(s) remain after drain activation — refusing deployment"
+  if [ "$ACTIVE_AFTER_DRAIN" != "0" ]; then
+    if [ "$FORCE" -eq 0 ]; then
+      die "${ACTIVE_AFTER_DRAIN} restart-blocking pod(s) remain after drain activation — refusing deployment"
+    fi
+    note "FORCE: $ACTIVE_AFTER_DRAIN restart-blocking pod(s) still active after drain"
+  fi
 elif [ "$FORCE" -eq 1 ]; then
   note "FORCE BOOTSTRAP: drain endpoint unavailable or rejected; final VM-database active-pod gate remains mandatory"
 else
@@ -477,7 +489,7 @@ if tr '\n' ' ' < \"\$NEW\" | grep -qF -- '$VERIFY_STRING'; then echo VERIFY_OK; 
   note "bundle verify OK"
 fi
 
-# ---- final active-pod gate + atomic swap ----------------------------------
+# ---- final restart-blocking-pod gate + atomic swap ------------------------
 # The drain blocks new admission for ordinary deployments. The forced bootstrap
 # path still gets this last check, but cannot provide the same admission guarantee.
 # Query SQLite on the VM rather than relying on an access token that may have
@@ -488,8 +500,15 @@ if ! SWAP_OUT="$(remote "
 set -eu
 cd $CURRENT_LINK/packages/daemon
 PREV=\$(readlink $CURRENT_LINK)
-FINAL_ACTIVE=\$(sudo -u ewi -H env NONTERMINAL='$NONTERMINAL' node -e \"const Database = require('better-sqlite3'); const db = new Database('/data/autopod/autopod.db', { readonly: true }); const statuses = process.env.NONTERMINAL.split(/\\\\s+/).filter(Boolean); const placeholders = statuses.map(() => '?').join(','); const row = db.prepare('select count(*) as n from pods where status in (' + placeholders + ')').get(...statuses); console.log(row.n);\")
-[ \"\$FINAL_ACTIVE\" = 0 ] || { echo \"\$FINAL_ACTIVE active pod(s) at final restart gate — refusing deployment\"; exit 1; }
+FORCE=$FORCE
+FINAL_ACTIVE=\$(sudo -u ewi -H env RESTART_BLOCKING='$RESTART_BLOCKING' node -e \"const Database = require('better-sqlite3'); const db = new Database('/data/autopod/autopod.db', { readonly: true }); const statuses = process.env.RESTART_BLOCKING.split(/\\\\s+/).filter(Boolean); const placeholders = statuses.map(() => '?').join(','); const row = db.prepare('select count(*) as n from pods where status in (' + placeholders + ')').get(...statuses); console.log(row.n);\")
+if [ \"\$FINAL_ACTIVE\" != 0 ]; then
+  if [ \"\$FORCE\" != 1 ]; then
+    echo \"\$FINAL_ACTIVE active pod(s) at final restart gate — refusing deployment\"
+    exit 1
+  fi
+  echo \"FORCE: restarting with \$FINAL_ACTIVE active pod(s) at final gate\"
+fi
 ln -sfn $NEW $CURRENT_LINK
 systemctl restart $SERVICE
 echo \"prev: \$PREV\"
