@@ -9617,7 +9617,10 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
             'Failed to persist rotated credentials after pod error — proceeding',
           );
         }
-        if (visibleFailurePhase === 'agent') {
+        if (
+          visibleFailurePhase === 'agent' &&
+          !(err instanceof SandboxInfrastructureError && !runtimeEventObserved)
+        ) {
           await preserveSandboxAfterAgentFailure(podId, 'agent processing error');
         }
         const attemptHistory = deps.providerAttemptRepo?.list(podId) ?? [];
