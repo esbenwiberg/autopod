@@ -238,6 +238,25 @@ export interface PodRepository {
   listTerminalPodsCompletedBefore(cutoffIso: string): Pod[];
 }
 
+const SAFE_AZURE_DIAGNOSTIC_HEADERS = new Set([
+  'x-ms-request-id',
+  'x-ms-correlation-request-id',
+  'request-id',
+  'traceparent',
+  'retry-after',
+]);
+
+function serializeInfrastructureFailure(failure: PodInfrastructureFailure): string {
+  const diagnostics = Object.fromEntries(
+    Object.entries(failure.diagnostics)
+      .filter(
+        ([name, value]) => SAFE_AZURE_DIAGNOSTIC_HEADERS.has(name) && typeof value === 'string',
+      )
+      .map(([name, value]) => [name, value.trim().slice(0, 256)]),
+  );
+  return JSON.stringify({ ...failure, diagnostics });
+}
+
 /**
  * Parse the depends_on_pod_ids JSON array column, falling back to the legacy
  * single-value depends_on_pod_id column for rows that predate migration 048.
@@ -640,10 +659,16 @@ export function createPodRepository(db: Database.Database): PodRepository {
         setClauses.push('infrastructure_failure = @infrastructureFailure');
         params.infrastructureFailure =
           changes.infrastructureFailure !== null
-            ? JSON.stringify(changes.infrastructureFailure)
+            ? serializeInfrastructureFailure(changes.infrastructureFailure)
             : null;
       }
       if (changes.infrastructureRecoveryCount !== undefined) {
+        if (
+          !Number.isInteger(changes.infrastructureRecoveryCount) ||
+          changes.infrastructureRecoveryCount < 0
+        ) {
+          throw new RangeError('infrastructureRecoveryCount must be a non-negative integer');
+        }
         setClauses.push('infrastructure_recovery_count = @infrastructureRecoveryCount');
         params.infrastructureRecoveryCount = changes.infrastructureRecoveryCount;
       }

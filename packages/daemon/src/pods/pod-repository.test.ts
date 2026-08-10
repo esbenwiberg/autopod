@@ -346,6 +346,8 @@ describe('PodRepository', () => {
           retryNotBefore: null,
         },
       ];
+      const scheduledFailure = failures[0];
+      if (!scheduledFailure) throw new Error('missing scheduled infrastructure failure fixture');
 
       for (const [index, infrastructureFailure] of failures.entries()) {
         repo.update(validSession.id, {
@@ -357,6 +359,23 @@ describe('PodRepository', () => {
           infrastructureRecoveryCount: index + 1,
         });
       }
+
+      repo.update(validSession.id, {
+        infrastructureFailure: {
+          ...scheduledFailure,
+          diagnostics: {
+            'x-ms-request-id': 'request-safe',
+            authorization: 'secret-that-must-not-persist',
+          },
+        },
+      });
+      expect(repo.getOrThrow(validSession.id).infrastructureFailure?.diagnostics).toEqual({
+        'x-ms-request-id': 'request-safe',
+      });
+
+      expect(() => repo.update(validSession.id, { infrastructureRecoveryCount: -1 })).toThrow(
+        'infrastructureRecoveryCount must be a non-negative integer',
+      );
     });
 
     it('should update status', () => {
