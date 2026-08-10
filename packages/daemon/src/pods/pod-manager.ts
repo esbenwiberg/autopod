@@ -2237,8 +2237,13 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
       podId,
       'Azure sandbox was unavailable before agent execution; retrying once with a fresh sandbox.',
     );
-    if (deps.requeueSessionAfterCurrent) deps.requeueSessionAfterCurrent(podId);
-    else deps.enqueueSession(podId);
+    if (deps.requeueSessionAfterCurrent) {
+      deps.requeueSessionAfterCurrent(podId);
+    } else {
+      // Compatibility for injected test/legacy managers: defer until this active
+      // processPod call has unwound, matching PodQueue.requeueAfterCurrent().
+      setImmediate(() => deps.enqueueSession(podId));
+    }
     return true;
   }
 
@@ -9587,6 +9592,12 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
             visibleFailurePhase,
           );
           if (recovered) return;
+          if (
+            !runtimeEventObserved &&
+            !hasDurableAgentExecutionEvidence(podRepo.getOrThrow(podId))
+          ) {
+            closeProviderAttempt(podId, 'aborted');
+          }
         }
         logger.error({ err, podId }, 'Pod processing error');
         const failureReason = operatorErrorMessage(err, visibleFailurePhase);
@@ -12277,11 +12288,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           preSubmitReview: null,
           completedAt: null,
           failureReason: null,
-          infrastructureFailure: {
-            ...pod.infrastructureFailure,
-            recoveryDisposition: 'automatic_retry_scheduled',
-            retryNotBefore: null,
-          },
+          infrastructureFailure: null,
           infrastructureRecoveryCount: 0,
           ...(failedBeforeAgentWork
             ? {
