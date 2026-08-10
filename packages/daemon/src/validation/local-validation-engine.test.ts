@@ -2477,6 +2477,52 @@ describe('validate() — facts + review gate', () => {
     expect(result.overall).toBe('fail');
   });
 
+  it('classifies an OOM-killed test command as infrastructure instead of agent rework', async () => {
+    const base = stubContainerManager();
+    const execInContainer = vi.fn(async (_containerId: string, command: string[]) => {
+      const shell = command[2] ?? '';
+      if (shell.includes('oom-test')) {
+        return { stdout: 'many passing suites\nKilled\n', stderr: '', exitCode: 137 };
+      }
+      return { stdout: '', stderr: '', exitCode: 0 };
+    });
+    const engine = createLocalValidationEngine({ ...base, execInContainer } as ContainerManager);
+
+    const result = await engine.validate(baseConfig({ testCommand: 'oom-test' }));
+
+    expect(result.test?.status).toBe('skip');
+    expect(result.infrastructureFailure).toMatchObject({
+      phase: 'test',
+      code: 'CONTAINER_OOM',
+      retryable: false,
+    });
+    expect(result.overall).toBe('fail');
+    expect(result.reviewSkipReason).toMatch(/validation infrastructure failed/i);
+  });
+
+  it('classifies an OOM-killed build command as infrastructure instead of agent rework', async () => {
+    const base = stubContainerManager();
+    const execInContainer = vi.fn(async (_containerId: string, command: string[]) => {
+      const shell = command[2] ?? '';
+      if (shell.includes('oom-build')) {
+        return { stdout: 'bundling application\nKilled\n', stderr: '', exitCode: 137 };
+      }
+      return { stdout: '', stderr: '', exitCode: 0 };
+    });
+    const engine = createLocalValidationEngine({ ...base, execInContainer } as ContainerManager);
+
+    const result = await engine.validate(baseConfig({ buildCommand: 'oom-build' }));
+
+    expect(result.smoke.build.status).toBe('fail');
+    expect(result.infrastructureFailure).toMatchObject({
+      phase: 'build',
+      code: 'CONTAINER_OOM',
+      retryable: false,
+    });
+    expect(result.overall).toBe('fail');
+    expect(result.reviewSkipReason).toMatch(/validation infrastructure failed/i);
+  });
+
   it('classifies typed sandbox transport failures by validation phase', async () => {
     const cases: Array<{
       phase: 'setup' | 'lint' | 'sast' | 'build' | 'test';
