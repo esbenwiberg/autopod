@@ -33,6 +33,10 @@ symlink swap → restart → post-verify (local + external health) → print rol
 browser validation is ready, and health is green, so a failed run leaves
 `current` untouched.
 
+Local post-restart health is retried for up to roughly one minute. A busy host
+can take longer than a fixed sleep to bind port 3100; only exhaustion of the
+bounded retry window is a deployment failure.
+
 ## Judgment the script can't make for you
 
 - **Queued pods do not block restarts.** They own no running workload and remain
