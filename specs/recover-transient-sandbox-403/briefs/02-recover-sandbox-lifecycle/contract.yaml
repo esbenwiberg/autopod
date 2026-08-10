@@ -1,0 +1,81 @@
+contract_version: 1
+title: "Recover one safe transient sandbox lifecycle failure"
+depends_on:
+  - 01-classify-persist-sandbox-infrastructure
+scenarios:
+  - id: eligible-failure-gets-one-fresh-sandbox
+    given:
+      - "a sandbox pod exhausts empty data-plane 403 retries before the runtime yields any agent event"
+      - "no native session, provider accounting, task summary, validation, PR, or compromised worktree indicates agent execution"
+      - "the old sandbox deletion is confirmed"
+    when:
+      - "the daemon handles the typed infrastructure failure"
+    then:
+      - "the never-started provider attempt closes as aborted"
+      - "the lifecycle generation advances and exactly one automatic recovery is persisted"
+      - "the pod waits until the durable 30-second retry time and provisions one different sandbox from the safe host worktree"
+      - "if that sandbox repeats the failure, the pod fails as automatic retry exhausted without provisioning a third sandbox"
+  - id: unsafe-or-unclean-failure-does-not-auto-recover
+    given:
+      - "the runtime yielded an agent event, durable state indicates possible agent work, or deletion of the old sandbox cannot be proven"
+    when:
+      - "an exhausted empty data-plane 403 reaches pod lifecycle handling"
+    then:
+      - "the daemon does not automatically provision another sandbox"
+      - "uncertain cleanup retains the exact old sandbox ID"
+      - "the pod records why automatic execution was refused and remains human-gated"
+  - id: explicit-resume-restarts-original-agent
+    given:
+      - "a failed pod exhausted its automatic retry before any agent execution and its host worktree remains safe"
+    when:
+      - "the operator selects Resume"
+    then:
+      - "the infrastructure failure and automatic budget reset for the new user-initiated run"
+      - "the pod queues a fresh sandbox and invokes the runtime with the literal original task"
+      - "validation-only recovery does not run before the agent"
+  - id: infrastructure-readiness-is-not-code-risk
+    given:
+      - "one failed pod has a current pre-agent Azure infrastructure failure and no validation"
+      - "another ordinary decision-state pod has no validation and no infrastructure failure"
+    when:
+      - "readiness is derived for both pods"
+    then:
+      - "the infrastructure pod reports validation unavailable with needs_review severity and no validation-unknown finding"
+      - "the ordinary pod remains risky with validation-unknown"
+      - "unrelated risky findings still dominate either pod's top-level readiness"
+  - id: ordinary-failure-paths-remain-unchanged
+    given:
+      - "a pod fails with a deterministic RBAC error, ordinary agent error, validation infrastructure failure, or post-validation delivery failure"
+    when:
+      - "the daemon handles automatic recovery or explicit Resume"
+    then:
+      - "the new sandbox retry-agent path is not selected"
+      - "the existing failure, Resume, Rework, or validation-infrastructure behavior remains in force"
+required_facts:
+  - id: fact-one-fresh-sandbox-and-safety-gates
+    proves:
+      - eligible-failure-gets-one-fresh-sandbox
+      - unsafe-or-unclean-failure-does-not-auto-recover
+      - ordinary-failure-paths-remain-unchanged
+    kind: integration-test
+    artifact:
+      path: packages/daemon/src/pods/pod-manager.test.ts
+      change: update
+    command: npx pnpm --filter @autopod/daemon test -- pod-manager.test.ts -t "auto-recovers exactly one pre-agent transient sandbox failure and fails closed on unsafe evidence"
+  - id: fact-explicit-resume-runs-original-task
+    proves:
+      - explicit-resume-restarts-original-agent
+    kind: integration-test
+    artifact:
+      path: packages/daemon/src/pods/pod-manager.test.ts
+      change: update
+    command: npx pnpm --filter @autopod/daemon test -- pod-manager.test.ts -t "Resume reruns the original agent after exhausted pre-agent sandbox infrastructure"
+  - id: fact-readiness-distinguishes-infrastructure
+    proves:
+      - infrastructure-readiness-is-not-code-risk
+    kind: unit-test
+    artifact:
+      path: packages/daemon/src/pods/readiness-review.test.ts
+      change: update
+    command: npx pnpm --filter @autopod/daemon test -- readiness-review.test.ts -t "distinguishes Azure infrastructure unavailability from unknown validation"
+human_review: []
