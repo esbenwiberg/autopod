@@ -230,6 +230,70 @@ describe('runMigrations — migration 122 (failure reason repair)', () => {
   });
 });
 
+describe('runMigrations — validation cycle sequence', () => {
+  it('backfills immutable chronological identity without collapsing reset attempts', () => {
+    const preSequenceDir = fs.mkdtempSync(path.join(os.tmpdir(), 'migrate-pre-sequence-'));
+    try {
+      for (const file of fs.readdirSync(MIGRATIONS_DIR)) {
+        const version = Number.parseInt(file.split('_', 1)[0] ?? '', 10);
+        if (file.endsWith('.sql') && version <= 138) {
+          fs.copyFileSync(path.join(MIGRATIONS_DIR, file), path.join(preSequenceDir, file));
+        }
+      }
+
+      const db = new Database(':memory:');
+      runMigrations(db, preSequenceDir, logger);
+      db.prepare(
+        `INSERT INTO profiles (
+          name, repo_url, default_branch, template, build_command, start_command,
+          health_path, health_timeout, validation_pages, max_validation_attempts,
+          default_model, default_runtime, escalation_config
+        ) VALUES (
+          'sequence-profile', 'https://example.invalid/repo', 'main', 'node22', '', '',
+          '/', 120, '[]', 3, 'model', 'claude', '{}'
+        )`,
+      ).run();
+      db.prepare(
+        `INSERT INTO pods (id, profile_name, task, model, runtime, branch, user_id)
+         VALUES ('sequence-pod', 'sequence-profile', 'task', 'model', 'claude', 'main', 'user')`,
+      ).run();
+      const insert = db.prepare(
+        `INSERT INTO validations (id, pod_id, attempt, result, created_at)
+         VALUES (?, 'sequence-pod', ?, '{}', '2026-08-10 08:00:00')`,
+      );
+      insert.run('validation-a', 1);
+      insert.run('validation-b', 2);
+      insert.run('validation-c', 1);
+
+      runMigrations(db, MIGRATIONS_DIR, logger);
+
+      const rows = db
+        .prepare(
+          `SELECT id, attempt, sequence, cycle
+           FROM validations
+           WHERE pod_id = 'sequence-pod'
+           ORDER BY sequence`,
+        )
+        .all() as Array<{ id: string; attempt: number; sequence: number; cycle: number }>;
+      expect(rows).toEqual([
+        { id: 'validation-a', attempt: 1, sequence: 1, cycle: 0 },
+        { id: 'validation-b', attempt: 2, sequence: 2, cycle: 0 },
+        { id: 'validation-c', attempt: 1, sequence: 3, cycle: 1 },
+      ]);
+      expect(() =>
+        db
+          .prepare(
+            `INSERT INTO validations (id, pod_id, attempt, sequence, cycle, result)
+           VALUES ('validation-duplicate', 'sequence-pod', 2, 3, 1, '{}')`,
+          )
+          .run(),
+      ).toThrow(/UNIQUE constraint failed/);
+    } finally {
+      fs.rmSync(preSequenceDir, { recursive: true, force: true });
+    }
+  });
+});
+
 // ── Migration 091 — drop screenshot blobs ────────────────────────────────────
 
 /** The SQL for migration 091 — located in the real migrations directory. */

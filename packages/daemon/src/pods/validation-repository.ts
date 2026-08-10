@@ -6,16 +6,20 @@ export interface StoredValidation {
   id: string;
   podId: string;
   attempt: number;
+  /** Immutable, pod-local history identity. Unlike attempt, this never resets. */
+  sequence: number;
+  /** Operator-visible retry/rework generation inferred when attempt restarts. */
+  cycle: number;
   result: ValidationResult;
   createdAt: string;
 }
 
 export interface ValidationRepository {
-  insert(podId: string, attempt: number, result: ValidationResult): void;
-  updateResult(podId: string, attempt: number, result: ValidationResult): boolean;
+  insert(podId: string, attempt: number, result: ValidationResult): StoredValidation;
+  updateResult(validationId: string, result: ValidationResult): boolean;
   getForSession(podId: string): StoredValidation[];
-  getLatestBefore(podId: string, attempt: number): StoredValidation | null;
-  getLatestReviewBatchBefore(podId: string, attempt: number): ReviewBatchResult | undefined;
+  getLatest(podId: string): StoredValidation | null;
+  getLatestReviewBatch(podId: string): ReviewBatchResult | undefined;
 }
 
 function rowToStoredValidation(row: Record<string, unknown>): StoredValidation {
@@ -23,6 +27,8 @@ function rowToStoredValidation(row: Record<string, unknown>): StoredValidation {
     id: row.id as string,
     podId: row.pod_id as string,
     attempt: row.attempt as number,
+    sequence: row.sequence as number,
+    cycle: row.cycle as number,
     result: JSON.parse(row.result as string) as ValidationResult,
     createdAt: row.created_at as string,
   };
@@ -30,28 +36,48 @@ function rowToStoredValidation(row: Record<string, unknown>): StoredValidation {
 
 export function createValidationRepository(db: Database.Database): ValidationRepository {
   return {
-    insert(podId: string, attempt: number, result: ValidationResult): void {
-      db.prepare(
-        `INSERT INTO validations (id, pod_id, attempt, result)
-         VALUES (@id, @podId, @attempt, @result)`,
-      ).run({
-        id: generateId(),
-        podId,
-        attempt,
-        result: JSON.stringify(result),
-      });
+    insert(podId: string, attempt: number, result: ValidationResult): StoredValidation {
+      return db.transaction(() => {
+        const latest = db
+          .prepare(
+            `SELECT attempt, sequence, cycle
+             FROM validations
+             WHERE pod_id = ?
+             ORDER BY sequence DESC
+             LIMIT 1`,
+          )
+          .get(podId) as { attempt: number; sequence: number; cycle: number } | undefined;
+        const id = generateId();
+        const sequence = (latest?.sequence ?? 0) + 1;
+        const cycle = latest ? latest.cycle + (attempt <= latest.attempt ? 1 : 0) : 0;
+        db.prepare(
+          `INSERT INTO validations (id, pod_id, attempt, sequence, cycle, result)
+           VALUES (@id, @podId, @attempt, @sequence, @cycle, @result)`,
+        ).run({
+          id,
+          podId,
+          attempt,
+          sequence,
+          cycle,
+          result: JSON.stringify(result),
+        });
+        const inserted = db.prepare('SELECT * FROM validations WHERE id = ?').get(id) as
+          | Record<string, unknown>
+          | undefined;
+        if (!inserted) throw new Error(`Validation history insert ${id} could not be read back`);
+        return rowToStoredValidation(inserted);
+      })();
     },
 
-    updateResult(podId: string, attempt: number, result: ValidationResult): boolean {
+    updateResult(validationId: string, result: ValidationResult): boolean {
       const info = db
         .prepare(
           `UPDATE validations
            SET result = @result
-           WHERE pod_id = @podId AND attempt = @attempt`,
+           WHERE id = @validationId`,
         )
         .run({
-          podId,
-          attempt,
+          validationId,
           result: JSON.stringify(result),
         });
       return info.changes > 0;
@@ -59,24 +85,22 @@ export function createValidationRepository(db: Database.Database): ValidationRep
 
     getForSession(podId: string): StoredValidation[] {
       const rows = db
-        .prepare('SELECT * FROM validations WHERE pod_id = ? ORDER BY attempt ASC')
+        .prepare('SELECT * FROM validations WHERE pod_id = ? ORDER BY sequence ASC')
         .all(podId) as Record<string, unknown>[];
       return rows.map(rowToStoredValidation);
     },
 
-    getLatestBefore(podId: string, attempt: number): StoredValidation | null {
+    getLatest(podId: string): StoredValidation | null {
       const row = db
-        .prepare(
-          'SELECT * FROM validations WHERE pod_id = ? AND attempt < ? ORDER BY attempt DESC LIMIT 1',
-        )
-        .get(podId, attempt) as Record<string, unknown> | undefined;
+        .prepare('SELECT * FROM validations WHERE pod_id = ? ORDER BY sequence DESC LIMIT 1')
+        .get(podId) as Record<string, unknown> | undefined;
       return row ? rowToStoredValidation(row) : null;
     },
 
-    getLatestReviewBatchBefore(podId: string, attempt: number): ReviewBatchResult | undefined {
+    getLatestReviewBatch(podId: string): ReviewBatchResult | undefined {
       const rows = db
-        .prepare('SELECT * FROM validations WHERE pod_id = ? AND attempt < ? ORDER BY attempt DESC')
-        .all(podId, attempt) as Record<string, unknown>[];
+        .prepare('SELECT * FROM validations WHERE pod_id = ? ORDER BY sequence DESC')
+        .all(podId) as Record<string, unknown>[];
       for (const row of rows) {
         const batch = rowToStoredValidation(row).result.taskReview?.reviewBatch;
         if (batch) return batch;

@@ -74,12 +74,13 @@ function insertValidation(
   attempt = 0,
 ): void {
   db.prepare(`
-    INSERT INTO validations (id, pod_id, attempt, result)
-    VALUES (@id, @podId, @attempt, @result)
+    INSERT INTO validations (id, pod_id, attempt, sequence, result)
+    VALUES (@id, @podId, @attempt, @sequence, @result)
   `).run({
     id: `val-${podId}-${attempt}`,
     podId,
     attempt,
+    sequence: attempt + 1,
     result: JSON.stringify(result),
   });
 }

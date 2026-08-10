@@ -9356,7 +9356,11 @@ describe('PodManager', () => {
       await manager.triggerValidation(pod.id);
 
       const deepConfig = vi.mocked(ctx.validationEngine.validate).mock.calls[1]?.[0];
-      expect(deepConfig).toMatchObject({ reviewOnly: true, reviewDepth: 'deep' });
+      expect(deepConfig).toMatchObject({
+        reviewOnly: true,
+        reviewDepth: 'deep',
+        councilOnly: true,
+      });
       expect(deepConfig?.priorReviewBatch).toBeUndefined();
       expect(manager.getSession(pod.id).status).toBe('validated');
       expect(manager.getSession(pod.id).pendingEscalation).toBeNull();
@@ -9425,7 +9429,7 @@ describe('PodManager', () => {
       expect(ctx.runtime.resume).not.toHaveBeenCalled();
     });
 
-    it('sends only new deep-review findings through ordinary correction', async () => {
+    it('does not let an independent council introduce a new correction-cycle veto', async () => {
       const ctx = createTestContext();
       const manager = createPodManager(ctx.deps);
       const pod = manager.createSession(
@@ -9436,6 +9440,8 @@ describe('PodManager', () => {
       const staleId = 'review:stale-finding';
       const newIssue = 'A newly discovered finding';
       const newId = 'review:new-finding';
+      const unrelatedIssue = 'A finding seen only by the second opinion';
+      const unrelatedId = 'review:second-opinion-only';
       ctx.validationRepo.insert(
         pod.id,
         1,
@@ -9449,10 +9455,10 @@ describe('PodManager', () => {
       });
       vi.mocked(ctx.validationEngine.validate)
         .mockResolvedValueOnce(
-          makeCouncilReviewFailure(pod.id, 2, 'current-batch', staleIssue, staleId, false),
+          makeCouncilReviewFailure(pod.id, 2, 'current-batch', newIssue, newId, true),
         )
         .mockResolvedValueOnce(
-          makeCouncilReviewFailure(pod.id, 2, 'deep-batch', newIssue, newId, true),
+          makeCouncilReviewFailure(pod.id, 2, 'deep-batch', unrelatedIssue, unrelatedId, true),
         )
         .mockResolvedValueOnce(makeValidationResult({ podId: pod.id, attempt: 3 }));
       vi.mocked(ctx.runtime.resume).mockImplementation(async function* () {
@@ -9465,11 +9471,103 @@ describe('PodManager', () => {
 
       await manager.triggerValidation(pod.id);
 
-      const correction = vi.mocked(ctx.runtime.resume).mock.calls[0]?.[1];
-      expect(correction).toContain(newIssue);
-      expect(correction).not.toContain(staleIssue);
+      expect(ctx.runtime.resume).not.toHaveBeenCalled();
       expect(manager.getSession(pod.id).status).toBe('validated');
       expect(manager.getSession(pod.id).pendingEscalation).toBeNull();
+      expect(manager.getSession(pod.id).lastValidationResult?.taskReview?.issues).toEqual([]);
+    });
+
+    it('requires independent confirmation before a new retry finding blocks correction', async () => {
+      const ctx = createTestContext();
+      const manager = createPodManager(ctx.deps);
+      const pod = manager.createSession(
+        { profileName: 'test-profile', task: 'Confirm newly discovered review feedback' },
+        'user-1',
+      );
+      const priorIssue = 'An earlier repaired finding';
+      const priorId = 'review:earlier-finding';
+      const newIssue = 'A genuinely new repair defect';
+      const newId = 'review:new-repair-defect';
+      ctx.validationRepo.insert(
+        pod.id,
+        1,
+        makeCouncilReviewFailure(pod.id, 1, 'prior-batch', priorIssue, priorId, true),
+      );
+      ctx.podRepo.update(pod.id, {
+        status: 'running',
+        containerId: 'ctr-1',
+        worktreePath: '/tmp/worktree/abc',
+        validationAttempts: 1,
+      });
+      vi.mocked(ctx.validationEngine.validate)
+        .mockResolvedValueOnce(
+          makeCouncilReviewFailure(pod.id, 2, 'current-batch', newIssue, newId, true),
+        )
+        .mockResolvedValueOnce(
+          makeCouncilReviewFailure(pod.id, 2, 'independent-batch', newIssue, newId, true),
+        )
+        .mockResolvedValueOnce(makeValidationResult({ podId: pod.id, attempt: 3 }));
+      vi.mocked(ctx.runtime.resume).mockImplementation(async function* () {
+        yield {
+          type: 'complete',
+          timestamp: new Date().toISOString(),
+          result: 'Applied the independently confirmed feedback',
+        };
+      });
+
+      await manager.triggerValidation(pod.id);
+
+      const correction = vi.mocked(ctx.runtime.resume).mock.calls[0]?.[1];
+      expect(correction).toContain(newIssue);
+      expect(correction).not.toContain(priorIssue);
+      expect(manager.getSession(pod.id).status).toBe('validated');
+      expect(
+        ctx.validationRepo.getForSession(pod.id)[1]?.result.taskReview?.reviewBatch?.adjudication,
+      ).toMatchObject({
+        candidateFindingIds: [newId],
+        confirmedFindingIds: [newId],
+      });
+    });
+
+    it('keeps validation review cycle continuity when display attempts reset', async () => {
+      const ctx = createTestContext();
+      const manager = createPodManager(ctx.deps);
+      const pod = manager.createSession(
+        { profileName: 'test-profile', task: 'Validate after a reset cycle' },
+        'user-1',
+      );
+      const priorIssue = 'Prior canonical blocker';
+      const priorId = 'review:prior-canonical-blocker';
+      ctx.validationRepo.insert(
+        pod.id,
+        1,
+        makeCouncilReviewFailure(pod.id, 1, 'cycle-zero-attempt-one', priorIssue, priorId, true),
+      );
+      ctx.validationRepo.insert(
+        pod.id,
+        2,
+        makeCouncilReviewFailure(pod.id, 2, 'cycle-zero-attempt-two', priorIssue, priorId, true),
+      );
+      ctx.podRepo.update(pod.id, {
+        status: 'running',
+        containerId: 'ctr-1',
+        worktreePath: '/tmp/worktree/abc',
+        validationAttempts: 0,
+      });
+      vi.mocked(ctx.validationEngine.validate).mockResolvedValue(
+        makeValidationResult({ podId: pod.id, attempt: 1 }),
+      );
+
+      await manager.triggerValidation(pod.id);
+
+      const config = vi.mocked(ctx.validationEngine.validate).mock.calls[0]?.[0];
+      expect(config?.attempt).toBe(1);
+      expect(config?.priorReviewBatch?.id).toBe('cycle-zero-attempt-two');
+      expect(ctx.validationRepo.getForSession(pod.id).map((row) => row.attempt)).toEqual([1, 2, 1]);
+      expect(ctx.validationRepo.getForSession(pod.id).map((row) => row.sequence)).toEqual([
+        1, 2, 3,
+      ]);
+      expect(ctx.validationRepo.getForSession(pod.id).map((row) => row.cycle)).toEqual([0, 0, 1]);
     });
 
     it('keeps deterministic failures blocking when independent review passes', async () => {

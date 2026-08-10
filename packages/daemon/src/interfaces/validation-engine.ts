@@ -124,6 +124,8 @@ export interface ValidationEngineConfig {
   skipPhases?: ValidationPhase[];
   /** Most recent completed review batch for this pod, never the in-progress attempt. */
   priorReviewBatch?: ReviewBatchResult;
+  /** Skip the broad discovery reviewer and use only a fresh frozen council. */
+  councilOnly?: boolean;
   /** Run a fresh AI review while preserving deterministic evidence from the caller. */
   reviewOnly?: boolean;
 }
