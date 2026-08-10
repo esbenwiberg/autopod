@@ -8,6 +8,7 @@ import type {
   PhaseTokenUsage,
   PimGroupConfig,
   Pod,
+  PodInfrastructureFailure,
   PodOptions,
   PodStatus,
   PreSubmitReviewSnapshot,
@@ -139,6 +140,8 @@ export interface PodUpdates {
   startedAt?: string | null;
   completedAt?: string | null;
   failureReason?: string | null;
+  infrastructureFailure?: PodInfrastructureFailure | null;
+  infrastructureRecoveryCount?: number;
   filesChanged?: number;
   linesAdded?: number;
   linesRemoved?: number;
@@ -338,6 +341,10 @@ function rowToSession(row: Record<string, unknown>): Pod {
     startedAt: (row.started_at as string) ?? null,
     completedAt: (row.completed_at as string) ?? null,
     failureReason: (row.failure_reason as string) ?? null,
+    infrastructureFailure: row.infrastructure_failure
+      ? (JSON.parse(row.infrastructure_failure as string) as PodInfrastructureFailure)
+      : null,
+    infrastructureRecoveryCount: (row.infrastructure_recovery_count as number) ?? 0,
     updatedAt: row.updated_at as string,
     userId: row.user_id as string,
     creatorEmail: (row.creator_email as string) ?? null,
@@ -628,6 +635,17 @@ export function createPodRepository(db: Database.Database): PodRepository {
       if (changes.failureReason !== undefined) {
         setClauses.push('failure_reason = @failureReason');
         params.failureReason = changes.failureReason;
+      }
+      if (changes.infrastructureFailure !== undefined) {
+        setClauses.push('infrastructure_failure = @infrastructureFailure');
+        params.infrastructureFailure =
+          changes.infrastructureFailure !== null
+            ? JSON.stringify(changes.infrastructureFailure)
+            : null;
+      }
+      if (changes.infrastructureRecoveryCount !== undefined) {
+        setClauses.push('infrastructure_recovery_count = @infrastructureRecoveryCount');
+        params.infrastructureRecoveryCount = changes.infrastructureRecoveryCount;
       }
       if (changes.filesChanged !== undefined) {
         setClauses.push('files_changed = @filesChanged');

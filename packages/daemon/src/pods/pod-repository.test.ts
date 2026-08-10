@@ -1,6 +1,10 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { PodNotFoundError, type ReadinessReview } from '@autopod/shared';
+import {
+  type PodInfrastructureFailure,
+  PodNotFoundError,
+  type ReadinessReview,
+} from '@autopod/shared';
 import Database from 'better-sqlite3';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { type NewPod, type PodRepository, createPodRepository } from './pod-repository.js';
@@ -288,6 +292,73 @@ describe('PodRepository', () => {
   });
 
   describe('update', () => {
+    it('round-trips sandbox infrastructure recovery state with legacy defaults', () => {
+      repo.insert(validSession);
+
+      expect(repo.getOrThrow(validSession.id)).toMatchObject({
+        infrastructureFailure: null,
+        infrastructureRecoveryCount: 0,
+      });
+
+      const failures: PodInfrastructureFailure[] = [
+        {
+          source: 'azure-sandbox',
+          code: 'AZURE_SANDBOX_TRANSIENT_FORBIDDEN',
+          phase: 'setup',
+          statusCode: 403,
+          diagnostics: { 'x-ms-request-id': 'request-scheduled' },
+          safeAgentRestart: true,
+          recoveryDisposition: 'automatic_retry_scheduled',
+          occurredAt: '2026-08-10T12:00:00.000Z',
+          retryNotBefore: '2026-08-10T12:00:30.000Z',
+        },
+        {
+          source: 'azure-sandbox',
+          code: 'AZURE_SANDBOX_TRANSIENT_FORBIDDEN',
+          phase: 'agent',
+          statusCode: 403,
+          diagnostics: { 'x-ms-request-id': 'request-exhausted' },
+          safeAgentRestart: true,
+          recoveryDisposition: 'automatic_retry_exhausted',
+          occurredAt: '2026-08-10T12:01:00.000Z',
+          retryNotBefore: null,
+        },
+        {
+          source: 'azure-sandbox',
+          code: 'AZURE_SANDBOX_TRANSIENT_FORBIDDEN',
+          phase: 'agent',
+          statusCode: 403,
+          diagnostics: { traceparent: '00-ambiguous' },
+          safeAgentRestart: false,
+          recoveryDisposition: 'agent_execution_ambiguous',
+          occurredAt: '2026-08-10T12:02:00.000Z',
+          retryNotBefore: null,
+        },
+        {
+          source: 'azure-sandbox',
+          code: 'AZURE_SANDBOX_TRANSIENT_FORBIDDEN',
+          phase: 'setup',
+          statusCode: 403,
+          diagnostics: { 'x-ms-correlation-request-id': 'cleanup-unconfirmed' },
+          safeAgentRestart: false,
+          recoveryDisposition: 'sandbox_cleanup_unconfirmed',
+          occurredAt: '2026-08-10T12:03:00.000Z',
+          retryNotBefore: null,
+        },
+      ];
+
+      for (const [index, infrastructureFailure] of failures.entries()) {
+        repo.update(validSession.id, {
+          infrastructureFailure,
+          infrastructureRecoveryCount: index + 1,
+        });
+        expect(repo.getOrThrow(validSession.id)).toMatchObject({
+          infrastructureFailure,
+          infrastructureRecoveryCount: index + 1,
+        });
+      }
+    });
+
     it('should update status', () => {
       repo.insert(validSession);
       repo.update('sess-001', { status: 'running' });

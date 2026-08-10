@@ -92,6 +92,24 @@ export interface PodCostBreakdownResponse {
   segments: PodCostSegment[];
 }
 
+/** Current recoverable infrastructure incident affecting this pod, if any. */
+export interface PodInfrastructureFailure {
+  source: 'azure-sandbox';
+  code: 'AZURE_SANDBOX_TRANSIENT_FORBIDDEN';
+  phase: 'setup' | 'agent';
+  statusCode: number;
+  /** Bounded, allowlisted Azure response diagnostics only. */
+  diagnostics: Record<string, string>;
+  safeAgentRestart: boolean;
+  recoveryDisposition:
+    | 'automatic_retry_scheduled'
+    | 'automatic_retry_exhausted'
+    | 'agent_execution_ambiguous'
+    | 'sandbox_cleanup_unconfirmed';
+  occurredAt: string;
+  retryNotBefore: string | null;
+}
+
 export type ProviderAttemptOutcome = 'completed' | 'failed' | 'aborted' | 'quota_exhausted';
 
 /**
@@ -187,6 +205,10 @@ export interface Pod {
   completedAt: string | null;
   /** Sanitized durable explanation for the latest terminal failure. */
   failureReason: string | null;
+  /** Current machine-readable infrastructure failure, separate from validation results. */
+  infrastructureFailure: PodInfrastructureFailure | null;
+  /** Number of automatic fresh-sandbox recoveries consumed for the current run. */
+  infrastructureRecoveryCount: number;
   updatedAt: string;
   userId: string;
   /**
