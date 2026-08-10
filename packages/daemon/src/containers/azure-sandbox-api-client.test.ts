@@ -447,6 +447,17 @@ describe('AzureSandboxApiClient', () => {
     });
   });
 
+  it('rejects buffered exec responses that omit the exit code', async () => {
+    const { client } = makeClient([
+      { status: 200, body: { stdout: 'partial output', stderr: '' } },
+    ]);
+
+    await expect(client.exec('sbx-1', ['npm', 'test'])).rejects.toMatchObject({
+      code: 'AZURE_SANDBOX_EXEC_INVALID_RESPONSE',
+      statusCode: 502,
+    });
+  });
+
   it('stages a wrapper script then streams stdout/stderr and exit code over the exec WebSocket', async () => {
     const { client, sockets, wsUrls, wsHeaders, requests } = makeStreamingClient((socket) => {
       socket.onopen?.({});

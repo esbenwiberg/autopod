@@ -1476,11 +1476,12 @@ async function runBuild(
   // bug. Common cause on Docker Desktop: the Linux VM's memory ceiling is
   // smaller than the container's requested limit, so the per-container cgroup
   // limit is fake headroom.
-  const looksOomKilled = result.exitCode === 137 || /(^|\n)Killed\s*$/.test(rawOutput.slice(-200));
+  const looksOomKilled = isOomKilled(result.exitCode, rawOutput);
   let output = rawOutput;
+  let infrastructureFailure: ValidationInfrastructureFailure | undefined;
   if (status === 'fail' && looksOomKilled) {
-    const hint =
-      'Build appears to have been OOM-killed (exit 137 / "Killed"). Raise the Docker Desktop VM memory (Settings → Resources), reduce concurrent pods, or increase profile.containerMemoryGb.';
+    infrastructureFailure = containerOomFailure('build');
+    const hint = infrastructureFailure.message;
     output = `${hint}\n\n--- build output ---\n${rawOutput}`;
     log?.warn(
       { exitCode: result.exitCode, duration },
@@ -1503,6 +1504,7 @@ async function runBuild(
     output: output.slice(0, 50_000), // Cap output size
     duration,
     warningCount,
+    infrastructureFailure,
   };
 }
 
@@ -1563,6 +1565,24 @@ async function runTests(
   }
 
   const duration = Date.now() - testStart;
+  const rawOutput = `${result.stdout}\n${result.stderr}`.trim();
+  if (result.exitCode !== 0 && isOomKilled(result.exitCode, rawOutput)) {
+    const infrastructureFailure = containerOomFailure('test');
+    log?.warn(
+      { exitCode: result.exitCode, duration, infrastructureFailure },
+      'tests could not complete — container OOM-killed',
+    );
+    return {
+      status: 'skip',
+      duration,
+      stdout: `${infrastructureFailure.message}\n\n--- test output ---\n${rawOutput}`.slice(
+        0,
+        50_000,
+      ),
+      stderr: '',
+      infrastructureFailure,
+    };
+  }
   const status = result.exitCode === 0 ? ('pass' as const) : ('fail' as const);
 
   if (status === 'fail') {
@@ -1576,6 +1596,22 @@ async function runTests(
     duration,
     stdout: result.stdout.slice(0, 50_000),
     stderr: result.stderr.slice(0, 50_000),
+  };
+}
+
+function isOomKilled(exitCode: number, output: string): boolean {
+  return exitCode === 137 || /(^|\n)Killed\s*$/.test(output.slice(-200));
+}
+
+function containerOomFailure(
+  phase: ValidationInfrastructureFailure['phase'],
+): ValidationInfrastructureFailure {
+  return {
+    phase,
+    code: 'CONTAINER_OOM',
+    message:
+      'Validation was OOM-killed (exit 137 / "Killed") after exhausting the container memory ceiling. Retry only after changing the runner or execution resources; repository rework is not indicated.',
+    retryable: false,
   };
 }
 

@@ -291,10 +291,18 @@ export class AzureSandboxApiClient implements SandboxApiClient {
       `${this.sandboxPath(sandboxId)}/executeShellCommand`,
       { json: body, timeoutMs: options?.timeoutMs },
     );
+    const rawExitCode = response.exitCode ?? response.exit_code;
+    if (rawExitCode === undefined || !Number.isInteger(rawExitCode)) {
+      throw new AutopodError(
+        `Azure Sandboxes exec on ${sandboxId} completed without a valid exit code`,
+        'AZURE_SANDBOX_EXEC_INVALID_RESPONSE',
+        502,
+      );
+    }
     return {
       stdout: String(response.stdout ?? response.output ?? ''),
       stderr: String(response.stderr ?? ''),
-      exitCode: Number(response.exitCode ?? response.exit_code ?? 0),
+      exitCode: rawExitCode,
     };
   }
 
