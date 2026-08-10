@@ -56,6 +56,7 @@ describe('ValidationRepository', () => {
        VALUES ('sess-ledger', 'test-profile', 'test task', 'opus', 'claude', 'main', 'user-1')`,
     ).run();
     const repo = createValidationRepository(db);
+    expect(repo.getLatestReviewBatch('sess-ledger')).toBeUndefined();
     const reviewed = makeResult('sess-ledger', 1);
     reviewed.taskReview = {
       status: 'fail',
@@ -84,8 +85,25 @@ describe('ValidationRepository', () => {
     repo.insert('sess-ledger', 1, reviewed);
     repo.insert('sess-ledger', 2, makeResult('sess-ledger', 2));
 
-    expect(repo.getLatestReviewBatchBefore('sess-ledger', 3)?.id).toBe('batch-1');
-    expect(repo.getLatestReviewBatchBefore('sess-ledger', 1)).toBeUndefined();
+    expect(repo.getLatestReviewBatch('sess-ledger')?.id).toBe('batch-1');
+  });
+
+  it('keeps reset attempts in immutable chronological order', () => {
+    const db = setupDb();
+    db.prepare(
+      `INSERT INTO pods (id, profile_name, task, model, runtime, branch, user_id)
+       VALUES ('sess-reset', 'test-profile', 'test task', 'opus', 'claude', 'main', 'user-1')`,
+    ).run();
+    const repo = createValidationRepository(db);
+
+    repo.insert('sess-reset', 1, makeResult('sess-reset', 1));
+    repo.insert('sess-reset', 2, makeResult('sess-reset', 2));
+    repo.insert('sess-reset', 1, makeResult('sess-reset', 1));
+
+    const history = repo.getForSession('sess-reset');
+    expect(history.map(({ attempt }) => attempt)).toEqual([1, 2, 1]);
+    expect(history.map(({ sequence }) => sequence)).toEqual([1, 2, 3]);
+    expect(history.map(({ cycle }) => cycle)).toEqual([0, 0, 1]);
   });
 
   it('should insert and retrieve validation attempts', () => {
@@ -138,7 +156,7 @@ describe('ValidationRepository', () => {
     expect(stored?.result.smoke.pages[0]?.screenshotPath).toBe('/screenshots/root.png');
   });
 
-  it('updates only the requested pod and attempt result', () => {
+  it('updates only the requested immutable validation row', () => {
     const db = setupDb();
 
     db.prepare(
@@ -153,6 +171,7 @@ describe('ValidationRepository', () => {
     const repo = createValidationRepository(db);
     repo.insert('sess-2', 1, makeResult('sess-2', 1));
     repo.insert('sess-2', 2, makeResult('sess-2', 2));
+    const requested = repo.insert('sess-2', 1, makeResult('sess-2', 1));
     repo.insert('sess-other', 1, makeResult('sess-other', 1));
 
     const advisoryRef: ScreenshotRef = {
@@ -161,7 +180,7 @@ describe('ValidationRepository', () => {
       filename: 'advisory-0.png',
       relativePath: 'screenshots/sess-2/advisory/advisory-0.png',
     };
-    const updated = makeResult('sess-2', 2);
+    const updated = makeResult('sess-2', 1);
     updated.advisoryBrowserQa = {
       status: 'fail',
       reasoning: 'Advisory issue only.',
@@ -179,14 +198,15 @@ describe('ValidationRepository', () => {
       durationMs: 1234,
     };
 
-    expect(repo.updateResult('sess-2', 2, updated)).toBe(true);
-    expect(repo.updateResult('sess-missing', 2, updated)).toBe(false);
+    expect(repo.updateResult(requested.id, updated)).toBe(true);
+    expect(repo.updateResult('validation-missing', updated)).toBe(false);
 
     const history = repo.getForSession('sess-2');
-    expect(history).toHaveLength(2);
+    expect(history).toHaveLength(3);
     expect(history[0]?.result.advisoryBrowserQa).toBeUndefined();
-    expect(history[1]?.result.advisoryBrowserQa?.reasoning).toBe('Advisory issue only.');
-    expect(history[1]?.result.advisoryBrowserQa?.screenshots[0]?.source).toBe('advisory');
+    expect(history[1]?.result.advisoryBrowserQa).toBeUndefined();
+    expect(history[2]?.result.advisoryBrowserQa?.reasoning).toBe('Advisory issue only.');
+    expect(history[2]?.result.advisoryBrowserQa?.screenshots[0]?.source).toBe('advisory');
 
     const otherHistory = repo.getForSession('sess-other');
     expect(otherHistory).toHaveLength(1);

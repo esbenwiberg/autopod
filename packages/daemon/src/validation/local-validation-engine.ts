@@ -708,8 +708,26 @@ export function createLocalValidationEngine(
             }
           }
 
-          let reviewRun = await runTaskReview(containerManager, config, log, reviewContext);
-          if (isReviewInfrastructureFailure(reviewRun)) {
+          const priorActive = activeLedgerEntries(config.priorReviewBatch);
+          // The broad stochastic reviewer is a discovery gate for the first full
+          // review only. Once a canonical batch exists, later attempts go directly
+          // to the frozen council and ledger closure on the current HEAD.
+          const useCanonicalCouncil =
+            config.validationSuite === 'full' &&
+            (config.priorReviewBatch !== undefined || config.councilOnly === true);
+          let reviewRun = useCanonicalCouncil
+            ? {
+                result: {
+                  status: 'pass' as const,
+                  reasoning: 'Running canonical frozen council and prior-finding closure.',
+                  issues: [],
+                  model: config.reviewerModel ?? 'auto',
+                  screenshots: [],
+                  diff: config.diff,
+                },
+              }
+            : await runTaskReview(containerManager, config, log, reviewContext);
+          if (!useCanonicalCouncil && isReviewInfrastructureFailure(reviewRun)) {
             log?.warn(
               {
                 podId: config.podId,
@@ -737,16 +755,9 @@ export function createLocalValidationEngine(
           taskReview = reviewRun.result;
           reviewTokenUsage = reviewRun.tokenUsage;
           reviewSkipReason = reviewRun.skipReason;
-          const priorActive = activeLedgerEntries(config.priorReviewBatch);
-          // A normal full-suite review remains the first gate. Unresolved council
-          // findings also require a council run so a later repair can be proven.
-          if (
-            taskReview &&
-            config.validationSuite === 'full' &&
-            (taskReview.status === 'fail' ||
-              config.reviewDepth === 'deep' ||
-              priorActive.length > 0)
-          ) {
+          // Every full-suite review ends with one canonical frozen council. On
+          // retries this is the first and only stochastic review authority.
+          if (taskReview && config.validationSuite === 'full') {
             const reviewedHead = await readReviewHead(config.worktreePath, config.startCommitSha);
             const frozenDiff = boundedReviewPacketString(config.diff, 1_000_000);
             const packet = createFrozenReviewPacket({
@@ -919,13 +930,15 @@ export function createLocalValidationEngine(
                 ...new Set([...existing, ...merge.sourceIds]),
               ]);
             }
-            const representedInitialIds = new Set(
-              batch.merged.flatMap((merge) =>
-                merge.sourceIds.filter((id) =>
-                  batch.initialFindings.some((finding) => finding.id === id),
-                ),
+            const initialIds = new Set(batch.initialFindings.map((finding) => finding.id));
+            const representedInitialIds = new Set([
+              ...batch.merged.flatMap((merge) =>
+                merge.sourceIds.filter((id) => initialIds.has(id)),
               ),
-            );
+              ...batch.rejected.flatMap((rejection) =>
+                rejection.sourceIds.filter((id) => initialIds.has(id)),
+              ),
+            ]);
             const ledgerCurrent = [
               ...batch.accepted.map((finding) => ({
                 finding,
@@ -951,16 +964,16 @@ export function createLocalValidationEngine(
               ...(repair.reason ? { reason: repair.reason } : {}),
             };
             if (closure) batch.closureVerification = closure;
-            // The council consolidates additional evidence; it never erases a
-            // blocking first-gate verdict merely because no axis reproduced it.
+            // A healthy council is authoritative: it may reject a broad discovery
+            // finding that no frozen-head axis can support. Degraded council runs
+            // remain fail-closed and preserve unmatched discovery findings above.
             const ledgerIssues = activeLedgerFindings(ledger).map((finding) =>
               'source' in finding
                 ? finding.issue
                 : `[${finding.severity}] ${finding.path}${finding.line ? `:${finding.line}` : ''} — ${finding.claim}`,
             );
             // Once the council runs, its canonical active ledger is the sole
-            // flattened issue source. The immutable first-gate status still
-            // fails the attempt even when its bounded packet omitted an issue.
+            // flattened issue and verdict source.
             const issues = [
               ...new Set([
                 ...ledgerIssues,
@@ -970,7 +983,6 @@ export function createLocalValidationEngine(
             taskReview = {
               ...taskReview,
               status:
-                taskReview.status === 'fail' ||
                 batch.quality === 'degraded' ||
                 batch.firstGateOverflow !== undefined ||
                 issues.length > 0 ||

@@ -354,13 +354,13 @@ export async function runReviewBatch(
   const canonicalAccepted = dedupe(
     synthesized.accepted.filter((finding) => !('source' in finding)),
   );
-  const canonicalInitialIds = new Set(
-    synthesized.merged.flatMap((merge) =>
-      merge.sourceIds.filter((id) =>
-        options.packet.initialFindings.some((finding) => finding.id === id),
-      ),
+  const initialIds = new Set(options.packet.initialFindings.map((finding) => finding.id));
+  const canonicalInitialIds = new Set([
+    ...synthesized.merged.flatMap((merge) => merge.sourceIds.filter((id) => initialIds.has(id))),
+    ...synthesized.rejected.flatMap((rejection) =>
+      rejection.sourceIds.filter((id) => initialIds.has(id)),
     ),
-  );
+  ]);
   const degradationReasons: string[] = [];
   if (runs.some((run) => run.status === 'unavailable'))
     degradationReasons.push('REQUIRED_AXIS_UNAVAILABLE');

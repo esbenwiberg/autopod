@@ -1135,12 +1135,28 @@ describe('validate() — hasWebUi gating', () => {
     expect(result.taskReview?.tokenUsage).toMatchObject({ inputTokens: 160, outputTokens: 32 });
   });
 
-  it('review council keeps a failed first gate fail-closed and retries invalid synthesis', async () => {
+  it('lets a healthy council reject a broad first-gate finding on the frozen head', async () => {
+    const issue = 'broad finding not reproduced by any council axis';
+    const initialId = initialBroadFindings({ issues: [issue] } as never)[0]?.id;
+    if (!initialId) throw new Error('expected initial finding identity');
     vi.mocked(runClaudeCli).mockResolvedValue({
-      stdout: JSON.stringify({ status: 'fail', reasoning: 'blocked', issues: ['real blocker'] }),
+      stdout: JSON.stringify({ status: 'fail', reasoning: 'blocked', issues: [issue] }),
       tokenUsage: { inputTokens: 100, outputTokens: 20 },
     });
-    mockCouncil();
+    vi.mocked(runContainerReviewer).mockImplementation(async ({ prompt }) => ({
+      stdout: prompt.includes('synthesizer')
+        ? JSON.stringify({
+            decisions: [
+              {
+                action: 'reject',
+                sourceIds: [initialId],
+                reason: 'No frozen-head council axis reproduced the claim.',
+              },
+            ],
+          })
+        : JSON.stringify({ findings: [] }),
+      tokenUsage: { inputTokens: 10, outputTokens: 2 },
+    }));
     const result = await createLocalValidationEngine(stubContainerManager()).validate(
       baseConfig({
         reviewerModel: 'claude-sonnet-4-6',
@@ -1151,29 +1167,27 @@ describe('validate() — hasWebUi gating', () => {
         task: `test task ${['gh', 'p_', 'abcdefghijklmnopqrstuvwxyz1234567890'].join('')}`,
       }),
     );
-    expect(result.taskReview?.status).toBe('fail');
-    expect(result.taskReview?.issues).toContain('real blocker');
+    expect(result.taskReview?.status).toBe('pass');
+    expect(result.taskReview?.issues).toEqual([]);
     expect(result.taskReview?.reviewBatch?.initialFindings).toHaveLength(1);
     expect(result.taskReview?.reviewBatch?.initialFindings[0]).toMatchObject({
       source: 'initial-review',
-      issue: 'real blocker',
+      issue,
     });
     expect(result.taskReview?.reviewBatch?.initialFindings[0]).not.toHaveProperty('path');
     expect(result.taskReview?.reviewBatch?.initialFindings[0]).not.toHaveProperty('severity');
-    expect(runContainerReviewer).toHaveBeenCalledTimes(7);
+    expect(runContainerReviewer).toHaveBeenCalledTimes(6);
     expect(
       vi
         .mocked(runContainerReviewer)
         .mock.calls.every(([config]) => !config.prompt.includes('ghp_')),
     ).toBe(true);
     expect(result.taskReview?.reviewBatch).toMatchObject({
-      quality: 'degraded',
-      degradationReasons: expect.arrayContaining([
-        'SYNTHESIS_INVALID',
-        'INITIAL_FINDING_UNMATCHED',
-      ]),
+      quality: 'healthy',
+      rejected: [expect.objectContaining({ sourceIds: [initialId] })],
     });
-    expect(result.taskReview?.tokenUsage).toMatchObject({ inputTokens: 170, outputTokens: 34 });
+    expect(result.taskReview?.reviewBatch?.degradationReasons).toBeUndefined();
+    expect(result.taskReview?.tokenUsage).toMatchObject({ inputTokens: 160, outputTokens: 32 });
   });
 
   it('keeps initial semantic IDs stable when aggregate truncation changes stored text', () => {
@@ -1294,7 +1308,7 @@ describe('validate() — hasWebUi gating', () => {
     }
   });
 
-  it('runs only deep full reviews through the council after a clean first gate', async () => {
+  it('runs every first full review through the council after the broad discovery gate', async () => {
     vi.mocked(runClaudeCli).mockResolvedValue({
       stdout: JSON.stringify({ status: 'pass', reasoning: 'clean', issues: [] }),
     });
@@ -1324,8 +1338,8 @@ describe('validate() — hasWebUi gating', () => {
         smokePages: [],
       }),
     );
-    expect(standard.taskReview?.reviewBatch).toBeUndefined();
-    expect(runContainerReviewer).not.toHaveBeenCalled();
+    expect(standard.taskReview?.reviewBatch).toBeDefined();
+    expect(runContainerReviewer).toHaveBeenCalledTimes(7);
 
     vi.mocked(runContainerReviewer).mockClear();
     vi.mocked(runClaudeCli).mockResolvedValue({
@@ -1377,6 +1391,7 @@ describe('validate() — hasWebUi gating', () => {
         priorReviewBatch,
       }),
     );
+    expect(runClaudeCli).not.toHaveBeenCalled();
     expect(runContainerReviewer).toHaveBeenCalledTimes(7);
     expect(result.taskReview?.reviewBatch?.repairDelta?.status).toBe('unavailable');
     expect(result.taskReview?.reviewBatch?.closureVerification?.status).toBe('unavailable');
@@ -1384,7 +1399,7 @@ describe('validate() — hasWebUi gating', () => {
     expect(result.overall).toBe('fail');
   });
 
-  it('persists the A/B/C lifecycle through three engine attempts with committed repair deltas', async () => {
+  it('preserves canonical council retry authority through an A/B repair lifecycle', async () => {
     const repoPath = await fs.mkdtemp(path.join(os.tmpdir(), 'autopod-review-ledger-'));
     const git = (...args: string[]) => promisify(execFile)('git', args, { cwd: repoPath });
     await git('init');
@@ -1394,6 +1409,7 @@ describe('validate() — hasWebUi gating', () => {
     await git('add', 'repair.txt');
     await git('commit', '-m', 'base');
     let closureAttempt = 0;
+    let synthesisAttempt = 0;
     vi.mocked(runContainerReviewer).mockImplementation(async ({ prompt }) => ({
       stdout: prompt.includes('closure verifier')
         ? (() => {
@@ -1416,11 +1432,13 @@ describe('validate() — hasWebUi gating', () => {
             });
           })()
         : prompt.includes('synthesizer')
-          ? '{malformed'
+          ? ++synthesisAttempt <= 2
+            ? '{malformed'
+            : JSON.stringify({ decisions: [] })
           : JSON.stringify({ findings: [] }),
       tokenUsage: { inputTokens: prompt.includes('closure verifier') ? 7 : 10, outputTokens: 2 },
     }));
-    const attempts = [['A', 'B'], ['B', 'C'], ['A'], []];
+    const attempts = [['A', 'B']];
     vi.mocked(runClaudeCli).mockImplementation(async () => {
       const issues = attempts.shift() ?? [];
       return {
@@ -1459,7 +1477,7 @@ describe('validate() — hasWebUi gating', () => {
       baseConfig({
         ...common,
         attempt: 2,
-        priorReviewBatch: history.getLatestReviewBatchBefore('ledger-lifecycle', 2),
+        priorReviewBatch: history.getLatestReviewBatch('ledger-lifecycle'),
       }),
     );
     history.insert('ledger-lifecycle', 2, { ...two, podId: 'ledger-lifecycle' });
@@ -1477,7 +1495,7 @@ describe('validate() — hasWebUi gating', () => {
       baseConfig({
         ...common,
         attempt: 3,
-        priorReviewBatch: history.getLatestReviewBatchBefore('ledger-lifecycle', 3),
+        priorReviewBatch: history.getLatestReviewBatch('ledger-lifecycle'),
       }),
     );
     history.insert('ledger-lifecycle', 3, { ...three, podId: 'ledger-lifecycle' });
@@ -1493,24 +1511,21 @@ describe('validate() — hasWebUi gating', () => {
     expect(states(two)).toEqual({
       'initial-ca978112ca1bbdca': 'fixed',
       'initial-3e23e8160039594a': 'open',
-      'initial-2e7d2c03a9507ae2': 'new',
     });
     expect(states(three)).toEqual({
-      'initial-ca978112ca1bbdca': 'regressed',
+      'initial-ca978112ca1bbdca': 'fixed',
       'initial-3e23e8160039594a': 'fixed',
-      'initial-2e7d2c03a9507ae2': 'fixed',
     });
     // The engine's flattened feedback remains active-only while each prior
     // packet retains immutable fixed/regressed history for later attempts.
-    expect(two.taskReview?.issues).toEqual(expect.arrayContaining(['B', 'C']));
+    expect(two.taskReview?.issues).toEqual(['B']);
     expect(two.taskReview?.issues).not.toContain('A');
-    expect(three.taskReview?.issues).toEqual(['A']);
+    expect(three.taskReview?.issues).toEqual([]);
     expect(states(two)).toEqual({
       'initial-ca978112ca1bbdca': 'fixed',
       'initial-3e23e8160039594a': 'open',
-      'initial-2e7d2c03a9507ae2': 'new',
     });
-    expect(two.taskReview?.tokenUsage?.inputTokens).toBe(77);
+    expect(two.taskReview?.tokenUsage?.inputTokens).toBe(67);
 
     await fs.appendFile(path.join(repoPath, 'repair.txt'), 'clean gate follow-up\n');
     await git('add', 'repair.txt');
@@ -1519,14 +1534,15 @@ describe('validate() — hasWebUi gating', () => {
       baseConfig({
         ...common,
         attempt: 4,
-        priorReviewBatch: history.getLatestReviewBatchBefore('ledger-lifecycle', 4),
+        priorReviewBatch: history.getLatestReviewBatch('ledger-lifecycle'),
       }),
     );
     history.insert('ledger-lifecycle', 4, { ...four, podId: 'ledger-lifecycle' });
-    expect(closureAttempt).toBe(3);
-    expect(four.taskReview?.reviewBatch?.closureVerification?.status).toBe('completed');
-    expect(four.taskReview?.issues).toEqual(['A']);
-    expect(four.taskReview?.status).toBe('fail');
+    expect(closureAttempt).toBe(2);
+    expect(four.taskReview?.reviewBatch?.closureVerification).toBeUndefined();
+    expect(four.taskReview?.issues).toEqual([]);
+    expect(four.taskReview?.status).toBe('pass');
+    expect(runClaudeCli).toHaveBeenCalledTimes(1);
 
     // Persist the production-engine outputs through the real validation-history
     // seam. Each stored attempt must keep its own immutable ledger snapshot.
@@ -1542,7 +1558,7 @@ describe('validate() — hasWebUi gating', () => {
     expect(persistedStates(0)).toEqual(states(one));
     expect(persistedStates(1)).toEqual(states(two));
     expect(persistedStates(2)).toEqual(states(three));
-    expect(history.getLatestReviewBatchBefore('ledger-lifecycle', 5)?.id).toBe(
+    expect(history.getLatestReviewBatch('ledger-lifecycle')?.id).toBe(
       four.taskReview?.reviewBatch?.id,
     );
 
@@ -1579,7 +1595,7 @@ describe('validate() — hasWebUi gating', () => {
         reviewBatch: legacyBatch,
       },
     });
-    const hydratedLegacy = history.getLatestReviewBatchBefore('legacy-ledger-lifecycle', 2);
+    const hydratedLegacy = history.getLatestReviewBatch('legacy-ledger-lifecycle');
     expect(hydratedLegacy?.accepted).toEqual(legacyBatch.accepted);
     expect(hydratedLegacy).not.toHaveProperty('ledger');
     const legacySeeded = await engine.validate(

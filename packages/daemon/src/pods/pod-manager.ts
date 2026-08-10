@@ -40,6 +40,7 @@ import type {
   ReadinessStatus,
   ReasoningEffort,
   RequestCredentialPayload,
+  ReviewBatchResult,
   ReviewFeedbackResponseItem,
   Runtime,
   SastResult,
@@ -144,6 +145,7 @@ import type { PiRuntime } from '../runtimes/pi-runtime.js';
 import { detectRecurringFindings, extractFindings } from '../validation/finding-fingerprint.js';
 import { applyOverrides } from '../validation/override-applicator.js';
 import { parseDiffFilePaths } from '../validation/review-context-builder.js';
+import { addTokenUsage } from '../validation/review-synthesizer.js';
 import { publishScreenshotArtifacts } from '../validation/screenshot-artifacts.js';
 import {
   buildGitHubImageUrl,
@@ -6113,6 +6115,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
     podId: string,
     validationConfig: Parameters<ValidationEngine['validate']>[0],
     blockingResult: ValidationResult,
+    validationId: string | undefined,
   ): Promise<ValidationResult> {
     if (!validationEngine.runAdvisoryBrowserQa) {
       return blockingResult;
@@ -6132,9 +6135,12 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         ...blockingResult,
         advisoryBrowserQa: advisoryResult,
       };
-      validationRepo?.updateResult(podId, blockingResult.attempt, storedResult);
+      if (validationId) validationRepo?.updateResult(validationId, storedResult);
 
       const currentResult = current.lastValidationResult ?? blockingResult;
+      if (validationId && validationRepo?.getLatest(podId)?.id !== validationId) {
+        return storedResult;
+      }
       if (currentResult.attempt !== blockingResult.attempt) {
         return storedResult;
       }
@@ -6213,9 +6219,12 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
       // Always persist the advisory result into validation history regardless of
       // whether a newer validation attempt has superseded the live lastValidationResult.
       const storedResult = { ...blockingResult, advisoryBrowserQa: advisoryResult };
-      validationRepo?.updateResult(podId, blockingResult.attempt, storedResult);
+      if (validationId) validationRepo?.updateResult(validationId, storedResult);
 
       const currentResult = current.lastValidationResult ?? blockingResult;
+      if (validationId && validationRepo?.getLatest(podId)?.id !== validationId) {
+        return storedResult;
+      }
       if (currentResult.attempt !== blockingResult.attempt) {
         return storedResult;
       }
@@ -12255,6 +12264,11 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           getEffectiveReviewerConfig(pod);
         const reviewerExecEnv = await buildReviewerExecEnv(pod);
 
+        // Attempt is a resettable per-cycle budget. Capture chronological history
+        // before this run so rework attempt 1 still closes the prior council ledger.
+        const previousValidation = validationRepo?.getLatest(podId) ?? null;
+        const priorReviewBatch = validationRepo?.getLatestReviewBatch(podId);
+
         // Flush any pending overrides enqueued via API and merge into pod overrides
         const pendingOverrides = deps.pendingOverrideRepo?.flush(podId) ?? [];
         let currentOverrides = pod.validationOverrides ?? [];
@@ -12308,7 +12322,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           extraExecEnv: validationExecEnv,
           preSubmitReview: pod.preSubmitReview ?? undefined,
           skipPhases: getPodValidationSkipPhases(profile, s1),
-          priorReviewBatch: validationRepo?.getLatestReviewBatchBefore(podId, attempt),
+          priorReviewBatch,
         };
 
         let result: Awaited<ReturnType<typeof validationEngine.validate>>;
@@ -12482,7 +12496,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         }
 
         // Persist every attempt to validation history
-        validationRepo?.insert(podId, attempt, result);
+        const validationRecord = validationRepo?.insert(podId, attempt, result);
 
         eventBus.emit({
           type: 'pod.validation_completed',
@@ -12549,36 +12563,50 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           return;
         }
 
-        // Detect recurring findings and auto-hoist / escalate to human
-        if (effectiveResult.overall === 'fail' && attempt >= 2) {
-          const previousValidations = validationRepo?.getForSession(podId);
-          const previousResult = previousValidations
-            ?.filter((v) => v.attempt < attempt)
-            ?.sort((a, b) => b.attempt - a.attempt)?.[0]?.result;
+        // Retry-cycle review findings need an independent council on the same
+        // frozen bytes before they can trigger another correction or escalation.
+        if (effectiveResult.overall === 'fail' && previousValidation) {
+          const previousResult = previousValidation.result;
 
           if (previousResult) {
             const currentFindings = extractFindings(effectiveResult);
             const previousFindings = extractFindings(previousResult);
-            const recurring = detectRecurringFindings(currentFindings, previousFindings);
+            const reviewCandidates = currentFindings.filter(
+              (finding) => finding.source === 'task_review',
+            );
+            const recurring = detectRecurringFindings(reviewCandidates, previousFindings);
+            const retryBatchHealthy =
+              effectiveResult.taskReview?.reviewBatch?.quality === 'healthy';
+            const closureStatus =
+              effectiveResult.taskReview?.reviewBatch?.closureVerification?.status;
+            const closureConclusive = closureStatus === undefined || closureStatus === 'completed';
 
-            if (recurring.length > 0) {
+            if (reviewCandidates.length > 0 && retryBatchHealthy && closureConclusive) {
               logger.info(
-                { podId, recurringCount: recurring.length, attempt },
-                'Recurring validation findings detected',
+                {
+                  podId,
+                  candidateCount: reviewCandidates.length,
+                  recurringCount: recurring.length,
+                  attempt,
+                },
+                'Retry validation findings require independent confirmation',
               );
               emitActivityStatus(
                 podId,
-                `${recurring.length} recurring finding(s) detected — auto-hoisting to deeper review tier`,
+                `${reviewCandidates.length} retry finding(s) detected — confirming with an independent council`,
               );
 
-              // Auto-hoist: re-run only a fresh deep task review. Deterministic
-              // evidence is already durable for this exact attempt; re-running it
-              // makes a review-only second opinion unexpectedly execute the suite.
+              // Re-run only a fresh council. Deterministic evidence is already
+              // durable for this exact attempt; a second opinion must not execute
+              // the suite or revive the broad discovery reviewer.
               let hoistedResult: typeof effectiveResult | null = null;
               let hoistError: unknown;
               let confirmedRecurring: ValidationFinding[] = [];
+              let confirmedNew: ValidationFinding[] = [];
+              let adjudicationReviewBatch: ReviewBatchResult | undefined;
               const recurringIds = new Set(recurring.map((finding) => finding.id));
-              const candidateFindingIds = [...recurringIds].sort();
+              const candidateIds = new Set(reviewCandidates.map((finding) => finding.id));
+              const candidateFindingIds = [...candidateIds].sort();
               const originalReviewBatchId = effectiveResult.taskReview?.reviewBatch?.id;
               try {
                 const reviewOnly = await validationEngine.validate(
@@ -12586,6 +12614,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
                     ...validationConfig,
                     reviewDepth: 'deep',
                     reviewOnly: true,
+                    councilOnly: true,
                     preSubmitReview: null,
                     // This is an independent adjudication of the current bytes,
                     // not another ledger-reconciliation pass. Reusing the prior
@@ -12607,25 +12636,56 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
                   validationController.signal,
                   buildPhaseEventCallbacks(podId),
                 );
+                if (
+                  isReviewInfrastructureOnlyFailure(reviewOnly) ||
+                  reviewOnly.taskReview?.reviewBatch?.quality !== 'healthy'
+                ) {
+                  throw new Error('Independent retry-finding council did not complete healthily');
+                }
                 const independentFindings = extractFindings(reviewOnly);
-                confirmedRecurring = independentFindings.filter((finding) =>
-                  recurringIds.has(finding.id),
+                const confirmed = independentFindings.filter((finding) =>
+                  candidateIds.has(finding.id),
                 );
-                const adjudicationReviewBatch = reviewOnly.taskReview?.reviewBatch;
-                const adjudicatedTaskReview = reviewOnly.taskReview
+                const confirmedIds = new Set(confirmed.map((finding) => finding.id));
+                confirmedRecurring = confirmed.filter((finding) => recurringIds.has(finding.id));
+                confirmedNew = confirmed.filter((finding) => !recurringIds.has(finding.id));
+                adjudicationReviewBatch = reviewOnly.taskReview?.reviewBatch;
+                const primaryTaskReview = effectiveResult.taskReview;
+                const hasUnmetRequirements =
+                  primaryTaskReview?.requirementsCheck?.some((item) => !item.met) ?? false;
+                const combinedReviewUsage = addTokenUsage(
+                  primaryTaskReview?.tokenUsage,
+                  reviewOnly.taskReview?.tokenUsage,
+                );
+                const adjudicatedTaskReview = primaryTaskReview
                   ? {
-                      ...reviewOnly.taskReview,
-                      ...(adjudicationReviewBatch
+                      ...primaryTaskReview,
+                      status:
+                        confirmed.length > 0 || hasUnmetRequirements
+                          ? ('fail' as const)
+                          : ('pass' as const),
+                      reasoning:
+                        confirmed.length > 0
+                          ? `Independent council confirmed ${confirmed.length} retry finding(s).`
+                          : 'Independent council did not reproduce any retry finding.',
+                      issues: reviewCandidates
+                        .filter((finding) => confirmedIds.has(finding.id))
+                        .map((finding) => finding.description),
+                      ...(combinedReviewUsage ? { tokenUsage: combinedReviewUsage } : {}),
+                      ...(primaryTaskReview.reviewBatch
                         ? {
                             reviewBatch: {
-                              ...adjudicationReviewBatch,
+                              ...primaryTaskReview.reviewBatch,
+                              ledger: primaryTaskReview.reviewBatch.ledger?.filter(
+                                (entry) =>
+                                  !candidateIds.has(entry.semanticId) ||
+                                  confirmedIds.has(entry.semanticId),
+                              ),
                               adjudication: {
                                 kind: 'recurrence-hoist' as const,
                                 ...(originalReviewBatchId ? { originalReviewBatchId } : {}),
                                 candidateFindingIds,
-                                confirmedFindingIds: confirmedRecurring
-                                  .map((finding) => finding.id)
-                                  .sort(),
+                                confirmedFindingIds: [...confirmedIds].sort(),
                               },
                             },
                           }
@@ -12640,10 +12700,10 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
                   taskReview: adjudicatedTaskReview,
                   reviewSkipReason: reviewOnly.reviewSkipReason,
                   reviewSkipKind: reviewOnly.reviewSkipKind,
-                  reviewTokenUsage: reviewOnly.reviewTokenUsage,
+                  reviewTokenUsage: combinedReviewUsage,
                   duration: effectiveResult.duration + reviewOnly.duration,
                   overall:
-                    deterministicFailures.length === 0 && reviewOnly.taskReview?.status === 'pass'
+                    deterministicFailures.length === 0 && adjudicatedTaskReview?.status === 'pass'
                       ? 'pass'
                       : 'fail',
                 };
@@ -12653,8 +12713,10 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
                 // Persist the second opinion even when it remains blocking.
                 podRepo.update(podId, { lastValidationResult: hoistedResult });
                 // The first pass for this attempt is already recorded. Replace
-                // it so prior-batch lookup remains deterministic by attempt.
-                validationRepo?.updateResult(podId, attempt, hoistedResult);
+                // exactly that immutable history row with its adjudicated result.
+                if (validationRecord) {
+                  validationRepo?.updateResult(validationRecord.id, hoistedResult);
+                }
               } catch (err) {
                 hoistError = err;
                 logger.warn({ err, podId }, 'Auto-hoist deeper review failed');
@@ -12667,7 +12729,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
               if (hoistError && !s2.skipValidation) {
                 emitActivityStatus(
                   podId,
-                  'Independent recurring-finding review failed — moving to review required',
+                  'Independent retry-finding review failed — moving to review required',
                 );
                 transition(s2, 'review_required');
                 return;
@@ -12686,20 +12748,20 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
               }
 
               if (hoistedResult && hoistedResult.overall === 'pass') {
-                // Deeper review resolved the false positives — use the hoisted result
+                // Independent review did not reproduce the candidates.
                 effectiveResult = hoistedResult;
-                emitActivityStatus(podId, 'Deeper review tier passed — overriding Tier 1 result');
-                logger.info({ podId }, 'Auto-hoist resolved recurring findings');
+                emitActivityStatus(podId, 'Independent council cleared retry findings');
+                logger.info({ podId }, 'Independent council cleared retry findings');
               } else {
-                // Escalate only candidates independently reproduced by the deep
-                // review. New findings continue through ordinary correction.
+                // Recurring findings need a human decision; confirmed new
+                // findings continue through ordinary correction.
                 if (confirmedRecurring.length > 0) {
                   emitActivityStatus(
                     podId,
                     `Deeper review still flagged ${confirmedRecurring.length} recurring finding(s) — escalating to human`,
                   );
 
-                  const adjudicationBatch = hoistedResult?.taskReview?.reviewBatch;
+                  const adjudicationBatch = adjudicationReviewBatch;
 
                   const escalation: EscalationRequest = {
                     id: generateId(12),
@@ -12745,14 +12807,24 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
                   );
                   return; // Wait for human response via sendMessage()
                 }
-                // The independent review may replace stale candidates with new
-                // actionable findings. Use that adjudicated result for ordinary
-                // correction instead of sending the stale first-pass payload.
+                if (confirmedNew.length > 0) {
+                  emitActivityStatus(
+                    podId,
+                    `Independent council confirmed ${confirmedNew.length} new retry finding(s)`,
+                  );
+                }
+                // Only primary retry findings reproduced by the independent
+                // council remain actionable. Findings first seen by the second
+                // opinion are evidence, never a fresh correction-cycle veto.
                 if (hoistedResult) effectiveResult = hoistedResult;
               }
             }
           }
         }
+
+        // Downstream persistence, PR metadata, and advisory QA must all use the
+        // independently adjudicated result rather than the pre-adjudication pass.
+        result = effectiveResult;
 
         // Skip-validation may have been toggled while this run was in flight — bypass result.
         if (s2.skipValidation) {
@@ -13017,7 +13089,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
               validationConfig.advisoryBrowserQaEnabled && !!validationEngine.runAdvisoryBrowserQa,
           });
           maybeTriggerDependents(validatedPod);
-          await runAdvisoryAfterValidation(podId, validationConfig, result);
+          await runAdvisoryAfterValidation(podId, validationConfig, result, validationRecord?.id);
           const postAdvisoryPod = podRepo.getOrThrow(podId);
           if (isTerminalState(postAdvisoryPod.status) || postAdvisoryPod.status === 'killing') {
             return;
@@ -13400,6 +13472,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         const { profile: reviewerProfile, credentials: reviewerProviderCredentials } =
           getEffectiveReviewerConfig(pod);
         const reviewerExecEnv = await buildReviewerExecEnv(pod);
+        const priorReviewBatch = validationRepo?.getLatestReviewBatch(podId);
         const validationConfig = {
           podId,
           containerId: pod.containerId,
@@ -13440,6 +13513,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           advisoryBrowserQaEnabled: pod.options.advisoryBrowserQaEnabled ?? false,
           preSubmitReview: pod.preSubmitReview ?? undefined,
           skipPhases: getPodValidationSkipPhases(profile, pod),
+          priorReviewBatch,
         };
 
         let result: Awaited<ReturnType<typeof validationEngine.validate>>;
@@ -13482,7 +13556,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           });
         }
 
-        validationRepo?.insert(podId, attempt, result);
+        const validationRecord = validationRepo?.insert(podId, attempt, result);
 
         eventBus.emit({
           type: 'pod.validation_completed',
@@ -13637,7 +13711,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
               validationConfig.advisoryBrowserQaEnabled && !!validationEngine.runAdvisoryBrowserQa,
           });
           maybeTriggerDependents(revalidatedPod);
-          await runAdvisoryAfterValidation(podId, validationConfig, result);
+          await runAdvisoryAfterValidation(podId, validationConfig, result, validationRecord?.id);
           const postAdvisoryPod = podRepo.getOrThrow(podId);
           if (isTerminalState(postAdvisoryPod.status) || postAdvisoryPod.status === 'killing') {
             return { newCommits, result: 'pass' };
