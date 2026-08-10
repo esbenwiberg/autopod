@@ -89,6 +89,7 @@ import {
   type HaproxyDenyStreamHandle,
   streamHaproxyDenials,
 } from '../containers/haproxy-deny-stream.js';
+import { SandboxInfrastructureError } from '../containers/sandbox-api-client.js';
 import { sandboxEgressRefreshPayload } from '../containers/sandbox-container-manager.js';
 import type { SidecarManager } from '../containers/sidecar-manager.js';
 import {
@@ -1398,6 +1399,8 @@ export interface PodManagerDependencies {
   workspaceCheckpointController?: WorkspaceCheckpointController;
   /** Bounded run-level retries for typed validation infrastructure failures. */
   validationInfrastructureRetryBackoffMs?: readonly number[];
+  /** Test seam for the durable fresh-sandbox recovery cooldown. */
+  sandboxInfrastructureRecoveryDelay?: (delayMs: number) => Promise<void>;
   /** Safety events repository for writing per-pattern detection rows. */
   safetyEventsRepo?: import('../safety/safety-events-repository.js').SafetyEventsRepository;
   /** Persisted behavioural quality scores used by Readiness Review when available. */
@@ -1610,7 +1613,7 @@ export interface PodManager {
    * failed on infra. Throws when the pod isn't in a recoverable state.
    */
   resumePod(podId: string): Promise<{
-    action: 'retry-pr' | 'revalidate' | 'retry-fix-delivery';
+    action: 'retry-pr' | 'revalidate' | 'retry-fix-delivery' | 'retry-agent';
   }>;
   /**
    * Continue a provider-limit pause, or explicitly recover a failed pod on the
@@ -2076,6 +2079,167 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
       costUsd: active.costUsd,
       handoffReference,
     });
+  }
+
+  function hasDurableAgentExecutionEvidence(pod: Pod): boolean {
+    if (
+      pod.worktreeCompromised ||
+      pod.claudeSessionId !== null ||
+      pod.codexSessionId !== null ||
+      pod.piSessionId !== null ||
+      pod.inputTokens > 0 ||
+      pod.outputTokens > 0 ||
+      pod.costUsd > 0 ||
+      pod.taskSummary !== null ||
+      pod.lastValidationResult !== null ||
+      pod.prUrl !== null ||
+      hasLatestPersistedAgentTerminalEventComplete(deps.eventRepo, pod.id)
+    ) {
+      return true;
+    }
+    return (deps.providerAttemptRepo?.list(pod.id) ?? []).some(
+      (attempt) =>
+        attempt.nativeSessionId !== null ||
+        attempt.inputTokens > 0 ||
+        attempt.outputTokens > 0 ||
+        attempt.costUsd > 0,
+    );
+  }
+
+  function sandboxInfrastructureFailure(
+    error: SandboxInfrastructureError,
+    phase: 'setup' | 'agent',
+    safeAgentRestart: boolean,
+    recoveryDisposition:
+      | 'automatic_retry_scheduled'
+      | 'automatic_retry_exhausted'
+      | 'agent_execution_ambiguous'
+      | 'sandbox_cleanup_unconfirmed',
+    retryNotBefore: string | null,
+  ): Pod['infrastructureFailure'] {
+    return {
+      source: error.source,
+      code: error.code,
+      phase,
+      statusCode: error.statusCode,
+      diagnostics: error.diagnostics,
+      safeAgentRestart,
+      recoveryDisposition,
+      occurredAt: new Date().toISOString(),
+      retryNotBefore,
+    };
+  }
+
+  async function tryRecoverTransientSandboxFailure(
+    podId: string,
+    capturedPod: Pod,
+    runtimeEventObserved: boolean,
+    error: SandboxInfrastructureError,
+    phase: OperatorFailurePhase,
+  ): Promise<boolean> {
+    if (
+      capturedPod.executionTarget !== 'sandbox' ||
+      (phase !== 'setup' && phase !== 'agent') ||
+      !ownsLifecycle(podId, capturedPod.lifecycleGeneration, null)
+    ) {
+      return false;
+    }
+
+    const durableEvidence = hasDurableAgentExecutionEvidence(capturedPod);
+    if (runtimeEventObserved || durableEvidence) {
+      podRepo.update(podId, {
+        infrastructureFailure: sandboxInfrastructureFailure(
+          error,
+          phase,
+          false,
+          'agent_execution_ambiguous',
+          null,
+        ),
+      });
+      return false;
+    }
+    if (capturedPod.infrastructureRecoveryCount >= 1) {
+      podRepo.update(podId, {
+        infrastructureFailure: sandboxInfrastructureFailure(
+          error,
+          phase,
+          true,
+          'automatic_retry_exhausted',
+          null,
+        ),
+      });
+      return false;
+    }
+
+    // Fence every stale lifecycle continuation before touching the sandbox identity.
+    const recoveryGeneration = podRepo.incrementLifecycleGeneration(podId);
+    const oldContainerId = capturedPod.containerId;
+    let deleted = oldContainerId === null;
+    if (oldContainerId) {
+      try {
+        await containerManagerFactory.get('sandbox').kill(oldContainerId);
+        deleted = true;
+      } catch (cleanupError) {
+        logger.warn(
+          { err: cleanupError, podId, containerId: oldContainerId },
+          'Fresh sandbox recovery could not prove old sandbox deletion',
+        );
+      }
+    }
+    const current = podRepo.getOrThrow(podId);
+    if (
+      current.lifecycleGeneration !== recoveryGeneration ||
+      current.containerId !== oldContainerId
+    ) {
+      return true;
+    }
+    if (!deleted) {
+      podRepo.update(podId, {
+        infrastructureFailure: sandboxInfrastructureFailure(
+          error,
+          phase,
+          false,
+          'sandbox_cleanup_unconfirmed',
+          null,
+        ),
+      });
+      return false;
+    }
+
+    const retryNotBefore = new Date(Date.now() + 30_000).toISOString();
+    closeProviderAttempt(podId, 'aborted');
+    await killSidecarsForPod(podId);
+    await destroyPodNetwork(podId);
+    const afterCleanup = podRepo.getOrThrow(podId);
+    if (
+      afterCleanup.lifecycleGeneration !== recoveryGeneration ||
+      afterCleanup.containerId !== oldContainerId
+    ) {
+      return true;
+    }
+    podRepo.update(podId, {
+      containerId: null,
+      recoveryWorktreePath: afterCleanup.worktreePath,
+      infrastructureRecoveryCount: 1,
+      infrastructureFailure: sandboxInfrastructureFailure(
+        error,
+        phase,
+        true,
+        'automatic_retry_scheduled',
+        retryNotBefore,
+      ),
+      failureReason: null,
+      completedAt: null,
+    });
+    const queued = podRepo.getOrThrow(podId);
+    if (queued.status !== 'queued') podRepo.update(podId, { status: 'queued' });
+    emitActivityStatus(
+      podId,
+      'Azure sandbox was unavailable before agent execution; retrying once with a fresh sandbox.',
+    );
+    if (deps.requeueSessionAfterCurrent) deps.requeueSessionAfterCurrent(podId);
+    else deps.enqueueSession(podId);
+    return true;
   }
 
   function isCompatibleTarget(
@@ -7206,6 +7370,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
       const lifecycleGeneration = pod.lifecycleGeneration;
       const startingAttempt = deriveAgentAttempt(pod.phaseTokenUsage);
       let visibleFailurePhase: OperatorFailurePhase = 'setup';
+      let runtimeEventObserved = false;
       const stagedReferenceArchivePaths = new Set<string>();
 
       // Defense-in-depth: processPod must only run for pods in queued/handoff state.
@@ -7224,6 +7389,20 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
       }
 
       try {
+        const retryNotBefore = pod.infrastructureFailure?.retryNotBefore;
+        if (
+          pod.infrastructureFailure?.recoveryDisposition === 'automatic_retry_scheduled' &&
+          retryNotBefore
+        ) {
+          const delayMs = Math.max(0, new Date(retryNotBefore).getTime() - Date.now());
+          if (delayMs > 0) {
+            emitStatus('Waiting for Azure sandbox recovery cooldown…');
+            await (deps.sandboxInfrastructureRecoveryDelay ?? sleep)(delayMs);
+          }
+          if (!ownsLifecycle(podId, lifecycleGeneration, null)) return;
+          pod = podRepo.getOrThrow(podId);
+          if (pod.status !== 'queued') return;
+        }
         // Fetched inside the try so a missing profile (or broken extends chain) is caught
         // and transitions the pod to 'failed' instead of orphaning it as 'queued' forever —
         // the queue's finally block frees activeIds, and without a status update nothing
@@ -7400,6 +7579,8 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
 
         // Detect recovery mode before any provisioning work
         const isRecovery = !!pod.recoveryWorktreePath;
+        const isInfrastructureRecovery =
+          pod.infrastructureFailure?.recoveryDisposition === 'automatic_retry_scheduled';
         const isRework = isRecovery && !!pod.reworkReason;
         const isFreshContainerValidationOnly =
           isRecovery && pod.skipAgent && pod.status === 'queued';
@@ -9107,6 +9288,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
 
         if (
           isRecovery &&
+          !isInfrastructureRecovery &&
           !isRework &&
           hasLatestPersistedAgentTerminalEventComplete(deps.eventRepo, podId)
         ) {
@@ -9197,7 +9379,12 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
             reworkReason: null,
             lastCorrectionMessage: `${REWORK_IN_PROGRESS_PREFIX} ${pod.reworkReason}`,
           });
-        } else if (isRecovery && pod.runtime === 'claude' && pod.claudeSessionId) {
+        } else if (
+          isRecovery &&
+          !isInfrastructureRecovery &&
+          pod.runtime === 'claude' &&
+          pod.claudeSessionId
+        ) {
           // Crash recovery: attempt Claude --resume with persisted pod ID
           if (
             activeProviderAttemptBeforeStart?.nativeSessionId &&
@@ -9270,7 +9457,12 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
               });
             }
           })();
-        } else if (isRecovery && pod.runtime === 'codex' && pod.codexSessionId) {
+        } else if (
+          isRecovery &&
+          !isInfrastructureRecovery &&
+          pod.runtime === 'codex' &&
+          pod.codexSessionId
+        ) {
           // Codex crash recovery: continue the existing session
           if (
             activeProviderAttemptBeforeStart?.nativeSessionId &&
@@ -9285,7 +9477,12 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           // biome-ignore lint/style/noNonNullAssertion: worktreePath is non-null for recovery pods
           const codexContinuationPrompt = await buildContinuationPrompt(pod, worktreePath!);
           events = runtime.resume(podId, codexContinuationPrompt, containerId, secretEnv);
-        } else if (isRecovery && pod.runtime === 'pi' && pod.piSessionId) {
+        } else if (
+          isRecovery &&
+          !isInfrastructureRecovery &&
+          pod.runtime === 'pi' &&
+          pod.piSessionId
+        ) {
           if (
             activeProviderAttemptBeforeStart?.nativeSessionId &&
             activeProviderAttemptBeforeStart.nativeSessionId !== pod.piSessionId
@@ -9297,7 +9494,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           // biome-ignore lint/style/noNonNullAssertion: recovery pods have a worktree
           const piContinuationPrompt = await buildContinuationPrompt(pod, worktreePath!);
           events = runtime.resume(podId, piContinuationPrompt, containerId, secretEnv);
-        } else if (isRecovery) {
+        } else if (isRecovery && !isInfrastructureRecovery) {
           // Non-Claude/Codex runtime or no session ID — fresh spawn with recovery context
           rotateProviderAttemptForFreshSegment(pod, profile, hadActiveProviderAttempt);
           // biome-ignore lint/style/noNonNullAssertion: worktreePath is non-null for recovery pods
@@ -9339,7 +9536,14 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         }
 
         visibleFailurePhase = 'agent';
-        const outcome = await this.consumeAgentEvents(podId, events, startingAttempt, {
+        const observedEvents = (async function* () {
+          for await (const event of events) {
+            if (!runtimeEventObserved) podRepo.update(podId, { infrastructureFailure: null });
+            runtimeEventObserved = true;
+            yield event;
+          }
+        })();
+        const outcome = await this.consumeAgentEvents(podId, observedEvents, startingAttempt, {
           generation: lifecycleGeneration,
           containerId,
         });
@@ -9373,6 +9577,16 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
             'Discarded stale lifecycle error',
           );
           return;
+        }
+        if (err instanceof SandboxInfrastructureError) {
+          const recovered = await tryRecoverTransientSandboxFailure(
+            podId,
+            podRepo.getOrThrow(podId),
+            runtimeEventObserved,
+            err,
+            visibleFailurePhase,
+          );
+          if (recovered) return;
         }
         logger.error({ err, podId }, 'Pod processing error');
         const failureReason = operatorErrorMessage(err, visibleFailurePhase);
@@ -12063,6 +12277,12 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           preSubmitReview: null,
           completedAt: null,
           failureReason: null,
+          infrastructureFailure: {
+            ...pod.infrastructureFailure,
+            recoveryDisposition: 'automatic_retry_scheduled',
+            retryNotBefore: null,
+          },
+          infrastructureRecoveryCount: 0,
           ...(failedBeforeAgentWork
             ? {
                 filesChanged: 0,
@@ -15048,7 +15268,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
 
     async resumePod(
       podId: string,
-    ): Promise<{ action: 'retry-pr' | 'revalidate' | 'retry-fix-delivery' }> {
+    ): Promise<{ action: 'retry-pr' | 'revalidate' | 'retry-fix-delivery' | 'retry-agent' }> {
       const pod = podRepo.getOrThrow(podId);
       if (isRetryableFixDeliveryFailure(pod)) {
         if (!pod.worktreePath) {
@@ -15099,6 +15319,63 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           'WORKTREE_COMPROMISED',
           409,
         );
+      }
+
+      const isSafeSandboxInfrastructureResume =
+        pod.status === 'failed' &&
+        pod.executionTarget === 'sandbox' &&
+        pod.infrastructureFailure?.source === 'azure-sandbox' &&
+        pod.infrastructureFailure.code === 'AZURE_SANDBOX_TRANSIENT_FORBIDDEN' &&
+        pod.infrastructureFailure.safeAgentRestart &&
+        pod.lastValidationResult === null &&
+        pod.taskSummary === null &&
+        pod.prUrl === null &&
+        !hasDurableAgentExecutionEvidence(pod);
+      if (isSafeSandboxInfrastructureResume) {
+        const generation = podRepo.incrementLifecycleGeneration(podId);
+        const oldContainerId = pod.containerId;
+        if (oldContainerId) {
+          try {
+            await containerManagerFactory.get('sandbox').kill(oldContainerId);
+          } catch (err) {
+            throw new AutopodError(
+              `Cannot prove old Azure sandbox deletion before Resume: ${err instanceof Error ? err.message : String(err)}`,
+              'SANDBOX_CLEANUP_UNCONFIRMED',
+              409,
+            );
+          }
+        }
+        const current = podRepo.getOrThrow(podId);
+        if (current.lifecycleGeneration !== generation || current.containerId !== oldContainerId) {
+          throw new AutopodError(
+            'Resume was superseded by another lifecycle operation',
+            'INVALID_STATE',
+            409,
+          );
+        }
+        podRepo.update(podId, {
+          status: 'queued',
+          containerId: null,
+          recoveryWorktreePath: current.worktreePath,
+          claudeSessionId: null,
+          codexSessionId: null,
+          piSessionId: null,
+          infrastructureFailure: {
+            ...pod.infrastructureFailure,
+            recoveryDisposition: 'automatic_retry_scheduled',
+            retryNotBefore: null,
+          },
+          infrastructureRecoveryCount: 0,
+          failureReason: null,
+          completedAt: null,
+          skipAgent: false,
+        });
+        emitActivityStatus(
+          podId,
+          'Resume accepted — restarting the original agent task in a fresh Azure sandbox.',
+        );
+        enqueueSession(podId);
+        return { action: 'retry-agent' };
       }
 
       if (isInfrastructureReviewResume) {

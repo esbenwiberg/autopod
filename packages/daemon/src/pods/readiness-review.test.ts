@@ -186,6 +186,44 @@ function review(overrides: Partial<ReadinessInputs> = {}): ReadinessReview {
 }
 
 describe('deriveReadinessReview', () => {
+  it('distinguishes Azure infrastructure unavailability from unknown validation', () => {
+    const infrastructurePod = pod({
+      status: 'failed',
+      executionTarget: 'sandbox',
+      prUrl: null,
+      infrastructureFailure: {
+        source: 'azure-sandbox',
+        code: 'AZURE_SANDBOX_TRANSIENT_FORBIDDEN',
+        phase: 'setup',
+        statusCode: 403,
+        diagnostics: {},
+        safeAgentRestart: true,
+        recoveryDisposition: 'automatic_retry_exhausted',
+        occurredAt: NOW,
+        retryNotBefore: null,
+      },
+    });
+    const infrastructure = deriveReadinessReview({
+      pod: infrastructurePod,
+      latestValidation: null,
+    });
+    const ordinary = deriveReadinessReview({
+      pod: pod({ status: 'failed', prUrl: null, infrastructureFailure: null }),
+      latestValidation: null,
+    });
+
+    expect(infrastructure.status).toBe('needs_review');
+    expect(infrastructure.findings).toEqual(
+      expect.arrayContaining([expect.objectContaining({ id: 'azure-infrastructure-unavailable' })]),
+    );
+    expect(infrastructure.findings).not.toEqual(
+      expect.arrayContaining([expect.objectContaining({ id: 'validation-unknown' })]),
+    );
+    expect(ordinary.status).toBe('risky');
+    expect(ordinary.findings).toEqual(
+      expect.arrayContaining([expect.objectContaining({ id: 'validation-unknown' })]),
+    );
+  });
   it('marks a clean pod ready', () => {
     const result = review();
 
