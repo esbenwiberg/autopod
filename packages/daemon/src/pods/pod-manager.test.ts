@@ -12841,6 +12841,37 @@ describe('PodManager', () => {
       expect(syncOrder).toBeLessThan(validateOrder as number);
     });
 
+    it('Path 2: passes profile build env and diff context into forced revalidation', async () => {
+      const ctx = createTestContext();
+      const profile = ctx.profileStore.get('test-profile');
+      vi.mocked(ctx.profileStore.get).mockReturnValue({
+        ...profile,
+        buildEnv: {
+          VITE_SUPABASE_URL: 'http://127.0.0.1:54321',
+          VITE_SUPABASE_ANON_KEY: 'public-test-key',
+        },
+      });
+      const { manager, pod } = setupFailedPod(ctx, {
+        validationOverall: 'fail',
+        prUrl: null,
+      });
+      ctx.podRepo.update(pod.id, { startCommitSha: 'parent-tip-sha' });
+
+      await manager.revalidateSession(pod.id, { force: true });
+
+      const validateConfig = vi.mocked(ctx.validationEngine.validate).mock.calls[0]?.[0];
+      expect(validateConfig?.extraExecEnv).toMatchObject({
+        VITE_SUPABASE_URL: 'http://127.0.0.1:54321',
+        VITE_SUPABASE_ANON_KEY: 'public-test-key',
+        AUTOPOD_POD_ID: pod.id,
+        AUTOPOD_HEAD_BRANCH: pod.branch,
+        AUTOPOD_BASE_BRANCH: 'main',
+        AUTOPOD_PR_BASE_REF: 'origin/main',
+        AUTOPOD_VALIDATION_BASE_REF: 'parent-tip-sha',
+        AUTOPOD_START_COMMIT_SHA: 'parent-tip-sha',
+      });
+    });
+
     it('Path 2: retries review infrastructure failures during forced revalidation', async () => {
       const ctx = createTestContext();
       ctx.deps.reviewInfrastructureRetryBackoffMs = [0];

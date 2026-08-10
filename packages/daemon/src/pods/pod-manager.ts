@@ -13677,6 +13677,19 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         }
 
         const revalDefaultBranch = pod.baseBranch ?? profile.defaultBranch ?? 'main';
+        const revalidationExecEnv = {
+          ...(buildValidationExecEnv(
+            profile.privateRegistries,
+            profile.registryPat ?? profile.adoPat ?? null,
+            profile.buildEnv,
+          ) ?? {}),
+          ...buildValidationContextEnv({
+            podId,
+            headBranch: pod.branch,
+            baseBranch: revalDefaultBranch,
+            startCommitSha: pod.startCommitSha,
+          }),
+        };
         const [diff, commitLog] = pod.worktreePath
           ? await Promise.all([
               worktreeManager.getDiff(
@@ -13744,6 +13757,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           preSubmitReview: pod.preSubmitReview ?? undefined,
           skipPhases: getPodValidationSkipPhases(profile, pod),
           priorReviewBatch,
+          extraExecEnv: revalidationExecEnv,
         };
 
         let result: Awaited<ReturnType<typeof validationEngine.validate>>;
