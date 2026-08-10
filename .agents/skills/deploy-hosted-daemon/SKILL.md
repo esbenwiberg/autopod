@@ -35,10 +35,13 @@ browser validation is ready, and health is green, so a failed run leaves
 
 ## Judgment the script can't make for you
 
-- **Restart only at 0 active pods.** The script aborts if non-terminal pods
-  exist. Do **not** reach for `--force` just to push through — you'd kill a live
-  pod's daemon mid-run. Wait, or confirm with the user that the running pods are
-  expendable.
+- **Queued pods do not block restarts.** They own no running workload and remain
+  queued across a daemon restart. Provisioning, running, validating, paused, and
+  other mid-lifecycle states do block ordinary deploys.
+- **`--force` means explicit interruption authority.** Use it only after the
+  user explicitly approves restarting despite the exact restart-blocking pods.
+  It bypasses the pod-count gates with loud warnings; build, reviewer/browser
+  prewarm, bundle verification, service health, and rollback gates still apply.
 - **Deps changed = different deploy.** If `package.json`/`pnpm-lock.yaml` moved
   between live and target, the node_modules-reuse shortcut is invalid. The script
   auto-detects this and switches to `--full` (clean clone + `pnpm install`). Trust
