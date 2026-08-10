@@ -41,6 +41,7 @@ vi.mock('../providers/memory-reviewer.js', () => ({
 
 import { execFile } from 'node:child_process';
 import { setTimeout as sleep } from 'node:timers/promises';
+import { SandboxInfrastructureError } from '../containers/sandbox-api-client.js';
 
 const mockedExecFile = vi.mocked(execFile);
 import type {
@@ -947,6 +948,97 @@ function createTestContext(
 }
 
 describe('PodManager', () => {
+  it('auto-recovers exactly one pre-agent transient sandbox failure and fails closed on unsafe evidence', async () => {
+    const ctx = createTestContext(undefined, {
+      executionTarget: 'sandbox',
+      warmImageTag: 'example.azurecr.io/autopod/test-profile:latest',
+    });
+    ctx.deps.requeueSessionAfterCurrent = vi.fn();
+    ctx.deps.sandboxInfrastructureRecoveryDelay = vi.fn(async () => {});
+    // biome-ignore lint/correctness/useYield: models an iterator that throws before its first event
+    vi.mocked(ctx.runtime.spawn).mockImplementation(async function* () {
+      throw new SandboxInfrastructureError(403, { 'x-ms-request-id': 'safe-request-id' });
+    });
+    const manager = createPodManager(ctx.deps);
+    const created = manager.createSession(
+      { profileName: 'test-profile', task: 'recover once' },
+      'user-1',
+    );
+
+    await manager.processPod(created.id);
+
+    expect(ctx.podRepo.getOrThrow(created.id)).toMatchObject({
+      status: 'queued',
+      containerId: null,
+      infrastructureRecoveryCount: 1,
+      infrastructureFailure: expect.objectContaining({
+        recoveryDisposition: 'automatic_retry_scheduled',
+        safeAgentRestart: true,
+      }),
+    });
+    expect(ctx.deps.requeueSessionAfterCurrent).toHaveBeenCalledWith(created.id);
+
+    await manager.processPod(created.id);
+
+    expect(ctx.containerManager.spawn).toHaveBeenCalledTimes(2);
+    expect(vi.mocked(ctx.runtime.spawn).mock.calls[1]?.[0]).toMatchObject({ task: 'recover once' });
+    expect(ctx.podRepo.getOrThrow(created.id)).toMatchObject({
+      status: 'failed',
+      infrastructureRecoveryCount: 1,
+      infrastructureFailure: expect.objectContaining({
+        recoveryDisposition: 'automatic_retry_exhausted',
+      }),
+    });
+  });
+
+  it('Resume reruns the original agent after exhausted pre-agent sandbox infrastructure', async () => {
+    const ctx = createTestContext(undefined, {
+      executionTarget: 'sandbox',
+      warmImageTag: 'example.azurecr.io/autopod/test-profile:latest',
+    });
+    const manager = createPodManager(ctx.deps);
+    const created = manager.createSession(
+      { profileName: 'test-profile', task: 'literal original task' },
+      'user-1',
+    );
+    ctx.podRepo.update(created.id, {
+      status: 'failed',
+      worktreePath: '/tmp/safe-worktree',
+      infrastructureRecoveryCount: 1,
+      infrastructureFailure: {
+        source: 'azure-sandbox',
+        code: 'AZURE_SANDBOX_TRANSIENT_FORBIDDEN',
+        phase: 'agent',
+        statusCode: 403,
+        diagnostics: {},
+        safeAgentRestart: true,
+        recoveryDisposition: 'automatic_retry_exhausted',
+        occurredAt: '2026-08-10T00:00:00.000Z',
+        retryNotBefore: null,
+      },
+    });
+
+    await expect(manager.resumePod(created.id)).resolves.toEqual({ action: 'retry-agent' });
+    expect(ctx.enqueuedSessions).toContain(created.id);
+    expect(ctx.podRepo.getOrThrow(created.id)).toMatchObject({
+      status: 'queued',
+      infrastructureFailure: expect.objectContaining({
+        recoveryDisposition: 'automatic_retry_scheduled',
+      }),
+      infrastructureRecoveryCount: 0,
+      recoveryWorktreePath: '/tmp/safe-worktree',
+      skipAgent: false,
+    });
+
+    // biome-ignore lint/correctness/useYield: models a second pre-agent transport failure
+    vi.mocked(ctx.runtime.spawn).mockImplementation(async function* () {
+      throw new SandboxInfrastructureError(403, {});
+    });
+    await manager.processPod(created.id);
+    expect(vi.mocked(ctx.runtime.spawn).mock.calls[0]?.[0]).toMatchObject({
+      task: 'literal original task',
+    });
+  });
   describe('verified sandbox checkpoint lifecycle', () => {
     it('resumes a stopped sandbox before checkpoint recovery', async () => {
       const ctx = createTestContext(undefined, {

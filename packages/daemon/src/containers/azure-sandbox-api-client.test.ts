@@ -1,8 +1,9 @@
 import { createHash } from 'node:crypto';
+import { AutopodError } from '@autopod/shared';
 import pino from 'pino';
 import { describe, expect, it, vi } from 'vitest';
 import { AzureSandboxApiClient, type WebSocketLike } from './azure-sandbox-api-client.js';
-import type { SandboxExecChunk } from './sandbox-api-client.js';
+import { type SandboxExecChunk, SandboxInfrastructureError } from './sandbox-api-client.js';
 
 const logger = pino({ level: 'silent' });
 
@@ -845,11 +846,15 @@ describe('AzureSandboxApiClient', () => {
       retry: { maxDelayMs: 0 },
     });
 
-    await expect(client.exec('sbx-1', ['true'])).rejects.toThrow(/RBAC denied/);
+    const error = await client.exec('sbx-1', ['true']).catch((cause: unknown) => cause);
+
+    expect(error).toBeInstanceOf(AutopodError);
+    expect(error).toMatchObject({ code: 'AZURE_SANDBOX_HTTP_ERROR', statusCode: 403 });
+    expect(error).not.toBeInstanceOf(SandboxInfrastructureError);
     expect(requests).toHaveLength(1);
   });
 
-  it('retains safe diagnostics after exhausting the empty data-plane 403 retry budget', async () => {
+  it('classifies exhausted empty data-plane 403 as retryable sandbox infrastructure', async () => {
     const { client, requests } = makeClient(
       [
         { status: 403, rawText: '' },
@@ -867,17 +872,20 @@ describe('AzureSandboxApiClient', () => {
       { retry: { maxAttempts: 3, maxDelayMs: 0 } },
     );
 
-    let message = '';
-    try {
-      await client.exec('sbx-1', ['true']);
-    } catch (error) {
-      message = error instanceof Error ? error.message : String(error);
-    }
+    const error = await client.exec('sbx-1', ['true']).catch((cause: unknown) => cause);
 
     expect(requests).toHaveLength(3);
-    expect(message).toContain('request-final');
-    expect(message).toContain('correlation-final');
-    expect(message).not.toContain('secret-that-must-not-appear');
+    expect(error).toBeInstanceOf(SandboxInfrastructureError);
+    expect(error).toMatchObject({
+      code: 'AZURE_SANDBOX_TRANSIENT_FORBIDDEN',
+      retryable: true,
+      statusCode: 403,
+      diagnostics: {
+        'x-ms-request-id': 'request-final',
+        'x-ms-correlation-request-id': 'correlation-final',
+      },
+    });
+    expect(JSON.stringify(error)).not.toContain('secret-that-must-not-appear');
   });
 
   it('honors a data-plane 429 (retryAfterSeconds) and retries the request', async () => {

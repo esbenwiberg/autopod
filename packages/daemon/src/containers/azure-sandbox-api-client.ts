@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 import { AutopodError, CONTAINER_HOME_DIR, CONTAINER_USER } from '@autopod/shared';
 import { DefaultAzureCredential } from '@azure/identity';
 import type { Logger } from 'pino';
+import { SandboxInfrastructureError } from './sandbox-api-client.js';
 import type {
   CreateSandboxOptions,
   SandboxApiClient,
@@ -1226,6 +1227,17 @@ export class AzureSandboxApiClient implements SandboxApiClient {
         );
         await sleep(waitMs);
         continue;
+      }
+
+      if (
+        plane === 'data' &&
+        response.status === 403 &&
+        (await response.clone().text()).trim() === ''
+      ) {
+        throw new SandboxInfrastructureError(
+          response.status,
+          safeAzureResponseDiagnostics(response),
+        );
       }
 
       // File sync reads fan out to one data-plane GET per directory entry. Azure's

@@ -319,6 +319,29 @@ function validationArea(inputs: ReadinessInputs): {
       }),
     ]);
   }
+  const infrastructureUnavailable =
+    latestValidation === null &&
+    pod.infrastructureFailure?.source === 'azure-sandbox' &&
+    pod.infrastructureFailure.code === 'AZURE_SANDBOX_TRANSIENT_FORBIDDEN' &&
+    (pod.infrastructureFailure.phase === 'setup' || pod.infrastructureFailure.phase === 'agent');
+  if (infrastructureUnavailable) {
+    return area(
+      'validation',
+      'needs_review',
+      'Validation was unavailable because Azure sandbox infrastructure failed.',
+      [
+        finding({
+          id: 'azure-infrastructure-unavailable',
+          area: 'validation',
+          severity: 'warning',
+          title: 'Azure sandbox infrastructure unavailable',
+          detail:
+            'The worker did not reach validation because Azure Sandboxes rejected a pre-agent data-plane request. This does not indicate code risk.',
+          sourceRefs: refs,
+        }),
+      ],
+    );
+  }
   if (!latestValidation) {
     return area('validation', 'risky', 'No blocking validation result is available.', [
       finding({

@@ -1,0 +1,48 @@
+contract_version: 1
+title: "Classify and persist transient sandbox infrastructure failures"
+depends_on: []
+scenarios:
+  - id: exhausted-empty-403-is-typed
+    given:
+      - "an Azure Sandbox data-plane operation receives an empty HTTP 403 on every configured transport attempt"
+    when:
+      - "the final transport attempt is exhausted"
+    then:
+      - "the adapter throws a retryable sandbox infrastructure error with stable code AZURE_SANDBOX_TRANSIENT_FORBIDDEN"
+      - "the error retains the final allowlisted Azure request diagnostics"
+      - "authorization and other unapproved headers are absent"
+  - id: deterministic-403-remains-deterministic
+    given:
+      - "an Azure Sandbox response is an ARM-plane 403 or has a non-empty RBAC denial body"
+    when:
+      - "the adapter handles the response"
+    then:
+      - "the response is not classified as transient sandbox infrastructure"
+      - "the existing deterministic HTTP failure semantics are preserved without extra retries"
+  - id: infrastructure-recovery-state-roundtrips
+    given:
+      - "a legacy pod row or a pod with structured sandbox infrastructure recovery state"
+    when:
+      - "the daemon reads, updates, and reloads the pod"
+    then:
+      - "legacy rows expose no current infrastructure failure and a zero automatic-recovery count"
+      - "the structured source, phase, diagnostics, safety evidence, disposition, cooldown, and count round-trip exactly"
+required_facts:
+  - id: fact-sandbox-403-classification
+    proves:
+      - exhausted-empty-403-is-typed
+      - deterministic-403-remains-deterministic
+    kind: unit-test
+    artifact:
+      path: packages/daemon/src/containers/azure-sandbox-api-client.test.ts
+      change: update
+    command: npx pnpm --filter @autopod/daemon test -- azure-sandbox-api-client.test.ts -t "classifies exhausted empty data-plane 403 as retryable sandbox infrastructure"
+  - id: fact-infrastructure-recovery-persistence
+    proves:
+      - infrastructure-recovery-state-roundtrips
+    kind: integration-test
+    artifact:
+      path: packages/daemon/src/pods/pod-repository.test.ts
+      change: update
+    command: npx pnpm --filter @autopod/daemon test -- pod-repository.test.ts -t "round-trips sandbox infrastructure recovery state with legacy defaults"
+human_review: []

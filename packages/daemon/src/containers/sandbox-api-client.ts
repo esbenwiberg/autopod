@@ -141,6 +141,26 @@ export interface SandboxSnapshot {
 
 export type SandboxStatus = 'running' | 'stopped' | 'deleted' | 'unknown';
 
+/**
+ * A sandbox data-plane failure that is safe to recover by starting a fresh
+ * sandbox. This deliberately carries only allowlisted response diagnostics.
+ */
+export class SandboxInfrastructureError extends Error {
+  readonly code = 'AZURE_SANDBOX_TRANSIENT_FORBIDDEN';
+  readonly retryable = true;
+  readonly source = 'azure-sandbox';
+
+  constructor(
+    readonly statusCode: number,
+    readonly diagnostics: Record<string, string>,
+  ) {
+    super(
+      `Azure Sandboxes data plane returned an empty ${statusCode} after exhausting the transport retry budget`,
+    );
+    this.name = 'SandboxInfrastructureError';
+  }
+}
+
 export interface SandboxApiClient {
   /** Provision a sandbox from an OCI image with an initial egress policy. Returns its id. */
   createSandbox(options: CreateSandboxOptions): Promise<string>;

@@ -32,6 +32,7 @@ export type {
   ProviderAttemptOutcome,
   PodStatus,
   Pod,
+  PodInfrastructureFailure,
   CreatePodRequest,
   PodSummary,
   CompactPod,
