@@ -4042,6 +4042,28 @@ describe('runHealthCheck — supervisor spawn', () => {
     expect(killCalls).toHaveLength(0);
   });
 
+  it('passes validation exec env to the supervised start command', async () => {
+    const execInContainer = vi.fn(async () => ({ stdout: '', stderr: '', exitCode: 0 }));
+    const cm = { execInContainer } as unknown as ContainerManager;
+    const extraExecEnv = {
+      VITE_SUPABASE_URL: 'http://127.0.0.1:54321',
+      VITE_SUPABASE_ANON_KEY: 'public-test-key',
+    };
+
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({ status: 200, text: () => Promise.resolve('ok') }),
+    );
+
+    await runHealthCheck(cm, makeConfig({ extraExecEnv }));
+
+    expect(execInContainer).toHaveBeenCalledWith(
+      'c-hc',
+      expect.arrayContaining(['sh', '-c']),
+      expect.objectContaining({ cwd: '/workspace', env: extraExecEnv }),
+    );
+  });
+
   it('probes containerBaseUrl through container exec in container probe mode', async () => {
     const execCalls: string[] = [];
     const cm = {

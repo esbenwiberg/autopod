@@ -2748,7 +2748,10 @@ export async function runHealthCheck(
     .execInContainer(
       config.containerId,
       ['sh', '-c', buildSupervisorCommand(config.startCommand)],
-      { cwd: startCwd },
+      {
+        cwd: startCwd,
+        ...(config.extraExecEnv ? { env: config.extraExecEnv } : {}),
+      },
     )
     .catch((err) => {
       log?.warn(
