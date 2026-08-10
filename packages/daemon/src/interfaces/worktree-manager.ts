@@ -112,6 +112,8 @@ export interface RebaseOntoBaseConfig {
 }
 
 export interface RebaseOntoBaseResult {
+  /** Exact fetched origin/<baseBranch> tip used to determine/replay the rebase. */
+  baseCommitSha?: string;
   /** True when origin/<baseBranch> is already an ancestor of HEAD; no rebase performed. */
   alreadyUpToDate: boolean;
   /** True when a rebase replayed cleanly (or was unnecessary). False on conflict. */

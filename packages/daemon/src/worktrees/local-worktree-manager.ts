@@ -1448,6 +1448,10 @@ export class LocalWorktreeManager implements WorktreeManager {
     }
 
     const baseRef = `refs/remotes/origin/${baseBranch}`;
+    const { stdout: baseCommitStdout } = await git(['rev-parse', '--verify', baseRef], {
+      cwd: worktreePath,
+    });
+    const baseCommitSha = baseCommitStdout.trim();
 
     // Fast-forward check: if origin/<base> is already an ancestor of HEAD, the
     // branch is up to date — skip the rebase entirely.
@@ -1457,7 +1461,7 @@ export class LocalWorktreeManager implements WorktreeManager {
         { worktreePath, baseBranch },
         'rebaseOntoBase: branch already includes base tip — no rebase needed',
       );
-      return { alreadyUpToDate: true, rebased: true, conflicts: [] };
+      return { baseCommitSha, alreadyUpToDate: true, rebased: true, conflicts: [] };
     } catch {
       // Non-zero exit means base has commits not in HEAD — proceed with rebase.
     }
@@ -1469,7 +1473,7 @@ export class LocalWorktreeManager implements WorktreeManager {
 
     try {
       await git(['rebase', baseRef], { cwd: worktreePath });
-      return { alreadyUpToDate: false, rebased: true, conflicts: [] };
+      return { baseCommitSha, alreadyUpToDate: false, rebased: true, conflicts: [] };
     } catch (rebaseErr) {
       // Conflict (or other failure). Capture conflicting files, then abort so
       // the worktree is restored to its pre-rebase state. We never leave a
@@ -1495,7 +1499,7 @@ export class LocalWorktreeManager implements WorktreeManager {
         { err: sanitizeGitError(rebaseErr), worktreePath },
         'rebaseOntoBase: underlying rebase error',
       );
-      return { alreadyUpToDate: false, rebased: false, conflicts };
+      return { baseCommitSha, alreadyUpToDate: false, rebased: false, conflicts };
     }
   }
 

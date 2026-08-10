@@ -2296,6 +2296,7 @@ describe('LocalWorktreeManager.rebaseOntoBase', () => {
       if (cmd.startsWith('remote get-url origin'))
         return { stdout: 'https://github.com/o/r.git\n' };
       if (cmd.startsWith('fetch ')) return { stdout: '' };
+      if (cmd === 'rev-parse --verify refs/remotes/origin/main') return { stdout: 'base-sha\n' };
       if (cmd.startsWith('merge-base --is-ancestor')) return { stdout: '' };
       // Reject anything else so an unexpected git call is loud
       return { error: new Error(`unexpected git ${cmd}`) };
@@ -2306,7 +2307,12 @@ describe('LocalWorktreeManager.rebaseOntoBase', () => {
       baseBranch: 'main',
     });
 
-    expect(result).toEqual({ alreadyUpToDate: true, rebased: true, conflicts: [] });
+    expect(result).toEqual({
+      baseCommitSha: 'base-sha',
+      alreadyUpToDate: true,
+      rebased: true,
+      conflicts: [],
+    });
   });
 
   it('returns rebased=true after a clean rebase', async () => {
@@ -2315,6 +2321,7 @@ describe('LocalWorktreeManager.rebaseOntoBase', () => {
       if (cmd.startsWith('remote get-url origin'))
         return { stdout: 'https://github.com/o/r.git\n' };
       if (cmd.startsWith('fetch ')) return { stdout: '' };
+      if (cmd === 'rev-parse --verify refs/remotes/origin/main') return { stdout: 'base-sha\n' };
       if (cmd.startsWith('merge-base --is-ancestor'))
         return { error: new Error('not an ancestor') };
       if (cmd.startsWith('rebase ')) return { stdout: '' };
@@ -2326,7 +2333,12 @@ describe('LocalWorktreeManager.rebaseOntoBase', () => {
       baseBranch: 'main',
     });
 
-    expect(result).toEqual({ alreadyUpToDate: false, rebased: true, conflicts: [] });
+    expect(result).toEqual({
+      baseCommitSha: 'base-sha',
+      alreadyUpToDate: false,
+      rebased: true,
+      conflicts: [],
+    });
   });
 
   it('aborts and returns conflicts when the rebase fails', async () => {
@@ -2336,6 +2348,7 @@ describe('LocalWorktreeManager.rebaseOntoBase', () => {
       if (cmd.startsWith('remote get-url origin'))
         return { stdout: 'https://github.com/o/r.git\n' };
       if (cmd.startsWith('fetch ')) return { stdout: '' };
+      if (cmd === 'rev-parse --verify refs/remotes/origin/main') return { stdout: 'base-sha\n' };
       if (cmd.startsWith('merge-base --is-ancestor'))
         return { error: new Error('not an ancestor') };
       if (cmd === 'rebase refs/remotes/origin/main')

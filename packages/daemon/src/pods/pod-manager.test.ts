@@ -14837,16 +14837,19 @@ describe('updateFromBase', () => {
   it('alreadyUpToDate returns already_up_to_date and does not start validation', async () => {
     const ctx = createTestContext();
     vi.mocked(ctx.worktreeManager.rebaseOntoBase).mockResolvedValue({
+      baseCommitSha: 'latest-base-sha',
       alreadyUpToDate: true,
       rebased: true,
       conflicts: [],
     });
     const { manager, pod } = setupParkedPod(ctx, 'failed');
+    ctx.podRepo.update(pod.id, { startCommitSha: 'stale-base-sha' });
     const triggerSpy = vi.spyOn(manager, 'triggerValidation').mockResolvedValue(undefined);
 
     const result = await manager.updateFromBase(pod.id);
 
     expect(result).toEqual({ ok: true, action: 'already_up_to_date', baseBranch: 'main' });
+    expect(manager.getSession(pod.id).startCommitSha).toBe('latest-base-sha');
     await new Promise((r) => setImmediate(r));
     expect(triggerSpy).not.toHaveBeenCalled();
   });
@@ -14877,6 +14880,7 @@ describe('updateFromBase', () => {
   it('clean rebase resets validationAttempts to 0 so follow-up starts as attempt 1', async () => {
     const ctx = createTestContext();
     vi.mocked(ctx.worktreeManager.rebaseOntoBase).mockResolvedValue({
+      baseCommitSha: 'latest-base-sha',
       alreadyUpToDate: false,
       rebased: true,
       conflicts: [],
@@ -14888,6 +14892,7 @@ describe('updateFromBase', () => {
     await manager.updateFromBase(pod.id);
 
     expect(manager.getSession(pod.id).validationAttempts).toBe(0);
+    expect(manager.getSession(pod.id).startCommitSha).toBe('latest-base-sha');
   });
 
   it('next pushBranch after clean rebase uses { force: true }, then clears the allowance', async () => {

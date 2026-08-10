@@ -14907,8 +14907,12 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         baseBranch,
         pat: await resolveGitCredential(profile),
       });
+      const rebasedBaseCommitSha = rebaseResult.baseCommitSha?.trim() || null;
 
       if (rebaseResult.alreadyUpToDate) {
+        if (rebasedBaseCommitSha && rebasedBaseCommitSha !== pod.startCommitSha) {
+          podRepo.update(podId, { startCommitSha: rebasedBaseCommitSha });
+        }
         emitActivityStatus(podId, `Branch already up to date with '${baseBranch}'`);
         return { ok: true, action: 'already_up_to_date', baseBranch };
       }
@@ -14924,7 +14928,10 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
       // Clean rebase: mark for force-with-lease, reset attempts, start validation async.
       emitActivityStatus(podId, `Rebased onto '${baseBranch}' — starting validation…`);
       forceWithLeaseAllowances.add(podId);
-      podRepo.update(podId, { validationAttempts: 0 });
+      podRepo.update(podId, {
+        validationAttempts: 0,
+        ...(rebasedBaseCommitSha ? { startCommitSha: rebasedBaseCommitSha } : {}),
+      });
       setImmediate(() => {
         this.triggerValidation(podId).catch((e: unknown) =>
           logger.error({ err: e, podId }, 'update-from-base follow-up validation failed'),
