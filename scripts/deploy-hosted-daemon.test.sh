@@ -28,6 +28,12 @@ cat >"$tmp/bin/curl" <<'EOF'
 case "$*" in
   *'/pods'*) echo "${DEPLOY_TEST_PODS_JSON:-[]}" ;;
   *'hosted-deploy-drain'*) echo '{"active":{"expiresAt":"2099-01-01T00:00:00.000Z"}}' ;;
+  *'127.0.0.1:3100/health'*)
+    count=$(cat "$DEPLOY_TEST_HEALTH_COUNT" 2>/dev/null || echo 0)
+    count=$((count + 1)); echo "$count" >"$DEPLOY_TEST_HEALTH_COUNT"
+    if [ "$count" -le "${DEPLOY_TEST_HEALTH_FAILURES:-0}" ]; then exit 7; fi
+    echo '{"status":"ok"}'
+    ;;
   *) echo 200 ;;
 esac
 EOF
@@ -81,12 +87,14 @@ run_deploy() {
     AUTOPOD_DEPLOY_RELEASES="$tmp/releases" AUTOPOD_DEPLOY_CURRENT_LINK="$tmp/current" \
     DEPLOY_TEST_PODS_JSON="${DEPLOY_TEST_PODS_JSON:-[]}" \
     DEPLOY_TEST_FINAL_ACTIVE="${DEPLOY_TEST_FINAL_ACTIVE:-0}" \
+    DEPLOY_TEST_HEALTH_COUNT="$tmp/health-count" \
+    DEPLOY_TEST_HEALTH_FAILURES="${DEPLOY_TEST_HEALTH_FAILURES:-0}" \
     bash "$script" --target cafebabe --yes --skip-playwright-prewarm "$@"
 }
 
 reset_fixture() {
   ln -sfn "$tmp/releases/deadbeef" "$tmp/current"
-  rm -f "$tmp/restarted" "$tmp/az-count"
+  rm -f "$tmp/restarted" "$tmp/az-count" "$tmp/health-count"
 }
 
 # The first API snapshot is empty, but the atomic VM gate sees one pod just
@@ -103,8 +111,11 @@ grep -qF '1 active pod(s) at final restart gate — refusing deployment' "$tmp/o
 # Queued work has no running workload to interrupt. It must remain queued and
 # must not block an ordinary daemon restart.
 reset_fixture
-DEPLOY_TEST_PODS_JSON='[{"id":"queued-pod","status":"queued"}]' \
-  run_deploy >"$tmp/queued-out" 2>&1
+if ! DEPLOY_TEST_PODS_JSON='[{"id":"queued-pod","status":"queued"}]' \
+  run_deploy >"$tmp/queued-out" 2>&1; then
+  cat "$tmp/queued-out" >&2
+  exit 1
+fi
 grep -qF 'active (restart-blocking) pods: 0' "$tmp/queued-out"
 grep -qF 'DEPLOYED deadbeef -> cafebabe' "$tmp/queued-out"
 [ -e "$tmp/restarted" ]
@@ -112,9 +123,22 @@ grep -qF 'DEPLOYED deadbeef -> cafebabe' "$tmp/queued-out"
 # --force is explicit operator authorization to restart even when genuinely
 # running work remains. It must warn at both snapshots and at the atomic gate.
 reset_fixture
-DEPLOY_TEST_PODS_JSON='[{"id":"running-pod","status":"running"}]' \
-  DEPLOY_TEST_FINAL_ACTIVE=1 run_deploy --force >"$tmp/force-out" 2>&1
+if ! DEPLOY_TEST_PODS_JSON='[{"id":"running-pod","status":"running"}]' \
+  DEPLOY_TEST_FINAL_ACTIVE=1 run_deploy --force >"$tmp/force-out" 2>&1; then
+  cat "$tmp/force-out" >&2
+  exit 1
+fi
 grep -qF 'FORCE: 1 restart-blocking pod(s) still active after drain' "$tmp/force-out"
 grep -qF 'FORCE: restarting with 1 active pod(s) at final gate' "$tmp/force-out"
 grep -qF 'DEPLOYED deadbeef -> cafebabe' "$tmp/force-out"
 [ -e "$tmp/restarted" ]
+
+# Startup can legitimately take longer than one fixed sleep. The local health
+# gate must retry boundedly before declaring the new release unhealthy.
+reset_fixture
+if ! DEPLOY_TEST_HEALTH_FAILURES=2 run_deploy >"$tmp/health-retry-out" 2>&1; then
+  cat "$tmp/health-retry-out" >&2
+  exit 1
+fi
+[ "$(cat "$tmp/health-count")" = 3 ]
+grep -qF 'DEPLOYED deadbeef -> cafebabe' "$tmp/health-retry-out"

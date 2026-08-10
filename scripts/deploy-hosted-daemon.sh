@@ -122,12 +122,25 @@ prev=\$(readlink $CURRENT_LINK)
 ln -sfn $RELEASES/$ROLLBACK_SHA $CURRENT_LINK
 echo \"current: \$prev -> \$(readlink $CURRENT_LINK)\"
 systemctl restart $SERVICE
-sleep 6
+wait_for_local_health() {
+  attempt=1
+  while [ \"\$attempt\" -le 12 ]; do
+    if curl -sS --max-time 8 http://127.0.0.1:3100/health; then
+      echo
+      echo \"LOCAL_HEALTH_OK attempt=\$attempt\"
+      return 0
+    fi
+    [ \"\$attempt\" -lt 12 ] && sleep 5
+    attempt=\$((attempt + 1))
+  done
+  return 1
+}
 echo \"active: \$(systemctl is-active $SERVICE)\"
-curl -sS --max-time 8 http://127.0.0.1:3100/health || echo HEALTH_FAIL
+wait_for_local_health || echo HEALTH_FAIL
 ")"
   echo "$out"
   echo "$out" | grep -q MISSING_RELEASE && die "release $ROLLBACK_SHA not on VM"
+  echo "$out" | grep -q HEALTH_FAIL && die "local /health failed post-rollback"
   curl -sS --max-time 10 "$HEALTH_URL" >/dev/null && note "external HTTPS health OK" || die "external health FAILED post-rollback"
   note "rollback done"
   exit 0
@@ -513,10 +526,22 @@ ln -sfn $NEW $CURRENT_LINK
 systemctl restart $SERVICE
 echo \"prev: \$PREV\"
 echo \"now:  \$(readlink $CURRENT_LINK)\"
-sleep 6
+wait_for_local_health() {
+  attempt=1
+  while [ \"\$attempt\" -le 12 ]; do
+    if curl -sS --max-time 8 http://127.0.0.1:3100/health; then
+      echo
+      echo \"LOCAL_HEALTH_OK attempt=\$attempt\"
+      return 0
+    fi
+    [ \"\$attempt\" -lt 12 ] && sleep 5
+    attempt=\$((attempt + 1))
+  done
+  return 1
+}
 echo \"active: \$(systemctl is-active $SERVICE)\"
 echo \"running on: \$(ps -o args= -C node | grep -o '$RELEASES/[^/]*' | head -1)\"
-curl -sS --max-time 8 http://127.0.0.1:3100/health || echo HEALTH_FAIL
+wait_for_local_health || echo HEALTH_FAIL
 echo '--- journal tail ---'
 journalctl -u $SERVICE -n 12 --no-pager 2>&1 | tail -12
 ")"; then
