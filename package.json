@@ -4,7 +4,7 @@
   "packageManager": "pnpm@9.15.4",
   "scripts": {
     "build": "node scripts/run-turbo.mjs build",
-    "test": "node scripts/run-turbo.mjs test && bash scripts/deploy-hosted-daemon.test.sh",
+    "test": "node scripts/run-turbo.mjs test && bash scripts/deploy-hosted-daemon.test.sh && bash scripts/cleanup-hosted-daemon.test.sh",
     "typecheck": "node scripts/run-turbo.mjs typecheck",
     "lint": "biome check .",
     "format:check": "biome format .",
