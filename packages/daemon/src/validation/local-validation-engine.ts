@@ -35,6 +35,7 @@ import { buildSupervisorCommand } from '../pods/preview-supervisor.js';
 import { wrapValidationExecCommand } from '../pods/registry-injector.js';
 import { createProviderAnthropicClient } from '../providers/llm-client.js';
 import { ClaudeCliError, runClaudeCli } from '../runtimes/run-claude-cli.js';
+import { resolveSandboxCheckpointSourceHead } from '../worktrees/sandbox-workspace-checkpoint.js';
 import { runAdvisoryBrowserQa } from './advisory-browser-qa-runner.js';
 import {
   ContainerReviewerUnavailableError,
@@ -75,6 +76,7 @@ async function readReviewHead(
 
 async function readRepairDelta(
   worktreePath: string | undefined,
+  podId: string,
   fromHead: string,
   toHead: string,
 ): Promise<{
@@ -88,9 +90,33 @@ async function readRepairDelta(
   if (!worktreePath || fromHead === 'unavailable' || toHead === 'unavailable')
     return { status: 'unavailable', fromHead, toHead, reason: 'reviewed heads unavailable' };
   try {
-    await execFileAsync('git', ['merge-base', '--is-ancestor', fromHead, toHead], {
-      cwd: worktreePath,
-    });
+    const directlyRelated = await execFileAsync(
+      'git',
+      ['merge-base', '--is-ancestor', fromHead, toHead],
+      { cwd: worktreePath },
+    ).then(
+      () => true,
+      () => false,
+    );
+    if (!directlyRelated) {
+      const [fromCheckpointSource, toCheckpointSource] = await Promise.all([
+        resolveSandboxCheckpointSourceHead(worktreePath, podId, fromHead),
+        resolveSandboxCheckpointSourceHead(worktreePath, podId, toHead),
+      ]);
+      if (!fromCheckpointSource && !toCheckpointSource) {
+        throw new Error('reviewed heads are unrelated and not verified sandbox checkpoints');
+      }
+      await execFileAsync(
+        'git',
+        [
+          'merge-base',
+          '--is-ancestor',
+          fromCheckpointSource ?? fromHead,
+          toCheckpointSource ?? toHead,
+        ],
+        { cwd: worktreePath },
+      );
+    }
     const { stdout } = await execFileAsync(
       'git',
       ['diff', '--no-ext-diff', '--no-textconv', `${fromHead}..${toHead}`],
@@ -841,6 +867,7 @@ export function createLocalValidationEngine(
             });
             const repair = await readRepairDelta(
               config.worktreePath,
+              config.podId,
               config.priorReviewBatch?.reviewedHead ?? 'unavailable',
               reviewedHead,
             );
