@@ -907,9 +907,12 @@ function validationInfrastructureFailureLabel(result: ValidationResult): string 
 
 function isReviewInfrastructureOnlyFailure(result: ValidationResult): boolean {
   const councilUnavailable = result.taskReview?.reviewBatch?.infrastructureUnavailable === true;
-  if (!councilUnavailable && result.taskReview !== null) return false;
+  const closureStatus = result.taskReview?.reviewBatch?.closureVerification?.status;
+  const closureUnavailable = closureStatus === 'unavailable' || closureStatus === 'invalid';
+  if (!councilUnavailable && !closureUnavailable && result.taskReview !== null) return false;
   if (
     !councilUnavailable &&
+    !closureUnavailable &&
     result.reviewSkipKind !== 'review-timeout' &&
     result.reviewSkipKind !== 'review-failed'
   ) {
@@ -933,6 +936,10 @@ function isReviewInfrastructureOnlyFailure(result: ValidationResult): boolean {
 function reviewInfrastructureFailureLabel(result: ValidationResult): string {
   if (result.taskReview?.reviewBatch?.infrastructureUnavailable) {
     return 'Frozen review council infrastructure failure';
+  }
+  const closureStatus = result.taskReview?.reviewBatch?.closureVerification?.status;
+  if (closureStatus === 'unavailable' || closureStatus === 'invalid') {
+    return 'Review finding closure infrastructure failure';
   }
   return result.reviewSkipKind === 'review-timeout'
     ? 'Review infrastructure timeout'
