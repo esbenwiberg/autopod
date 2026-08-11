@@ -7,7 +7,7 @@ import AutopodUI
 @Suite(.serialized)
 struct PodStoreFleetTests {
 @MainActor
-@Test func podStoreLoadsEveryCompactPageWithoutDetailRequests() async throws {
+@Test func podStoreLoadsEveryCompactPageAndRemovesPodsMissingFromTheFleet() async throws {
   let recorder = FleetRequestRecorder()
   let mode = FleetMode()
   let configuration = URLSessionConfiguration.ephemeral
@@ -50,7 +50,7 @@ struct PodStoreFleetTests {
   )
   await store.loadSessions()
 
-  #expect(store.pods.map(\.id) == ["websocket-pod", "newer-pod", "older-pod"])
+  #expect(store.pods.map(\.id) == ["newer-pod", "older-pod"])
   let compactPod = store.pods.first(where: { $0.id == "newer-pod" })
   #expect(compactPod?.inputTokens == 1_200)
   #expect(compactPod?.outputTokens == 34)
@@ -67,6 +67,52 @@ struct PodStoreFleetTests {
   // A later REST traversal is authoritative; the local event marker only protects
   // against responses that were already in flight when the event arrived.
   #expect(store.pods.first(where: { $0.id == "newer-pod" })?.status == .complete)
+}
+
+@MainActor
+@Test func podStoreKeepsPodInsertedWhileCompactRefreshIsInFlight() async throws {
+  let gate = FleetResponseGate()
+  let configuration = URLSessionConfiguration.ephemeral
+  configuration.protocolClasses = [FleetURLProtocol.self]
+  FleetURLProtocol.handler = { request in
+    if request.url?.path == "/pods/scores" {
+      return SelfResponse.json("[]", for: request)
+    }
+    await gate.holdResponse()
+    return SelfResponse.json(compactPage(id: "server-pod", hasNext: false), for: request)
+  }
+  defer { FleetURLProtocol.handler = nil }
+
+  let api = DaemonAPI(
+    baseURL: URL(string: "https://daemon.example.com")!,
+    token: "token",
+    session: URLSession(configuration: configuration)
+  )
+  let store = PodStore()
+  store.configure(api: api)
+
+  let loading = Task { @MainActor in
+    await store.loadSessions()
+  }
+  await gate.waitUntilStarted()
+  store.upsertSession(
+    Pod(
+      id: "websocket-pod",
+      status: .running,
+      branch: "autopod/websocket-pod",
+      profileName: "test",
+      model: "sonnet",
+      startedAt: Date(),
+      updatedAt: Date()
+    )
+  )
+  await gate.release()
+  await loading.value
+
+  #expect(store.pods.map(\.id) == ["websocket-pod", "server-pod"])
+
+  await store.loadSessions()
+  #expect(store.pods.map(\.id) == ["server-pod"])
 }
 
 @MainActor
@@ -211,6 +257,24 @@ private actor FleetRequestRecorder {
 private actor FleetMode {
   private(set) var isNewer = false
   func advance() { isNewer = true }
+}
+
+private actor FleetResponseGate {
+  private var started = false
+  private var released = false
+
+  func holdResponse() async {
+    started = true
+    while !released { await Task.yield() }
+  }
+
+  func waitUntilStarted() async {
+    while !started { await Task.yield() }
+  }
+
+  func release() {
+    released = true
+  }
 }
 
 private final class FleetURLProtocol: URLProtocol, @unchecked Sendable {

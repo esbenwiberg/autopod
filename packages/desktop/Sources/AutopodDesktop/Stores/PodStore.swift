@@ -58,9 +58,23 @@ public final class PodStore {
   private var hydratedPodIds = Set<String>()
   private var hydratingPodIds = Set<String>()
   private var statusRevisions: [String: Int] = [:]
+  private var fleetMembershipRevision = 0
+  private var insertionRevisions: [String: Int] = [:]
 
   public func configure(api: DaemonAPI) {
     self.api = api
+  }
+
+  private func recordInsertion(_ podId: String) {
+    fleetMembershipRevision += 1
+    insertionRevisions[podId] = fleetMembershipRevision
+  }
+
+  private func forgetPodState(_ podId: String) {
+    hydratedPodIds.remove(podId)
+    hydratingPodIds.remove(podId)
+    statusRevisions.removeValue(forKey: podId)
+    insertionRevisions.removeValue(forKey: podId)
   }
 
   private func shouldPreserveValidationProgress(
@@ -144,6 +158,7 @@ public final class PodStore {
     isLoading = true
     error = nil
     let statusRevisionSnapshot = statusRevisions
+    let fleetMembershipSnapshot = fleetMembershipRevision
     do {
       let responses = try await api.listAllCompactPods()
       let fresh = PodMapper.map(responses, baseURL: api.baseURL)
@@ -158,7 +173,14 @@ public final class PodStore {
       )
       hydratedPodIds.subtract(staleHydratedIds)
       let discoveredIds = Set(fresh.map(\.id))
-      let retained = pods.filter { !discoveredIds.contains($0.id) }
+      let retained = pods.filter {
+        !discoveredIds.contains($0.id)
+          && insertionRevisions[$0.id, default: 0] > fleetMembershipSnapshot
+      }
+      let retainedIds = Set(retained.map(\.id))
+      let removedIds = Set(currentById.keys)
+        .subtracting(discoveredIds)
+        .subtracting(retainedIds)
       let merged = fresh.map { pod in
         if hydratedPodIds.contains(pod.id), let current = currentById[pod.id] {
           return mergeCompactPod(
@@ -181,6 +203,11 @@ public final class PodStore {
       // Pods created over WebSocket after page one sit outside the keyset snapshot.
       // Keep them visible until a later discovery traversal includes them.
       pods = retained + merged
+      for id in discoveredIds { insertionRevisions.removeValue(forKey: id) }
+      for id in removedIds { forgetPodState(id) }
+      if let selectedSessionId, removedIds.contains(selectedSessionId) {
+        self.selectedSessionId = nil
+      }
       if let selectedSessionId, staleHydratedIds.contains(selectedSessionId) {
         await hydrateSessionIfNeeded(selectedSessionId)
       }
@@ -229,6 +256,7 @@ public final class PodStore {
         }
         pods[index] = updated
       } else {
+        recordInsertion(id)
         pods.append(updated)
       }
       hydratedPodIds.insert(id)
@@ -259,6 +287,7 @@ public final class PodStore {
       // Upsert any pods in the response that aren't yet in our local store.
       for pod in PodMapper.map(response.pods) {
         if !pods.contains(where: { $0.id == pod.id }) {
+          recordInsertion(pod.id)
           pods.append(pod)
         }
       }
@@ -302,15 +331,14 @@ public final class PodStore {
     if let index = pods.firstIndex(where: { $0.id == pod.id }) {
       pods[index] = pod
     } else {
+      recordInsertion(pod.id)
       pods.insert(pod, at: 0)
     }
   }
 
   public func removeSession(_ id: String) {
     pods.removeAll { $0.id == id }
-    hydratedPodIds.remove(id)
-    hydratingPodIds.remove(id)
-    statusRevisions.removeValue(forKey: id)
+    forgetPodState(id)
     if selectedSessionId == id {
       selectedSessionId = nil
     }
@@ -319,6 +347,7 @@ public final class PodStore {
   public func removeSeriesPods(_ seriesId: String) {
     let removedIds = pods.filter { $0.seriesId == seriesId }.map(\.id)
     pods.removeAll { $0.seriesId == seriesId }
+    for id in removedIds { forgetPodState(id) }
     if let selected = selectedSessionId, removedIds.contains(selected) {
       selectedSessionId = nil
     }

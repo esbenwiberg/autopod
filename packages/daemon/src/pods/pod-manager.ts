@@ -1401,6 +1401,8 @@ export interface PodManagerDependencies {
   validationInfrastructureRetryBackoffMs?: readonly number[];
   /** Test seam for the durable fresh-sandbox recovery cooldown. */
   sandboxInfrastructureRecoveryDelay?: (delayMs: number) => Promise<void>;
+  /** Test seam for bounding best-effort sandbox runtime-session extraction. */
+  sandboxRuntimeSessionSyncTimeoutMs?: number;
   /** Safety events repository for writing per-pattern detection rows. */
   safetyEventsRepo?: import('../safety/safety-events-repository.js').SafetyEventsRepository;
   /** Persisted behavioural quality scores used by Readiness Review when available. */
@@ -2796,18 +2798,29 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           : null;
     if (!statePaths) return;
 
+    let timer: ReturnType<typeof setTimeout> | undefined;
     try {
       const cm = containerManagerFactory.get(pod.executionTarget);
-      await cm.extractDirectoryFromContainer(
-        pod.containerId,
-        statePaths.container,
-        statePaths.host,
-      );
+      const timeoutMs = deps.sandboxRuntimeSessionSyncTimeoutMs ?? 30_000;
+      await Promise.race([
+        cm.extractDirectoryFromContainer(pod.containerId, statePaths.container, statePaths.host),
+        new Promise<never>((_resolve, reject) => {
+          timer = setTimeout(
+            () =>
+              reject(
+                new Error(`Sandbox runtime session state sync timed out after ${timeoutMs}ms`),
+              ),
+            timeoutMs,
+          );
+        }),
+      ]);
     } catch (err) {
       logger.warn(
         { err, podId, runtime: pod.runtime },
         'Failed to sync sandbox runtime session state — future recovery may restart fresh',
       );
+    } finally {
+      if (timer) clearTimeout(timer);
     }
   }
 

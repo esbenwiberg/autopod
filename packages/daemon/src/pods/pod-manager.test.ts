@@ -3288,6 +3288,57 @@ describe('PodManager', () => {
         'Failed to sync sandbox runtime session state — future recovery may restart fresh',
       );
     });
+
+    it('does not strand a completed run when sandbox session state sync never settles', async () => {
+      vi.useFakeTimers();
+      const blockedSync = deferred<void>();
+      try {
+        const ctx = createTestContext(undefined, {
+          defaultRuntime: 'codex',
+          executionTarget: 'sandbox',
+          warmImageTag: 'example.azurecr.io/autopod/test-profile:latest',
+        });
+        ctx.deps.sandboxRuntimeSessionSyncTimeoutMs = 25;
+        vi.mocked(ctx.containerManager.extractDirectoryFromContainer).mockReturnValueOnce(
+          blockedSync.promise,
+        );
+        const manager = createPodManager(ctx.deps);
+        const pod = manager.createSession(
+          {
+            profileName: 'test-profile',
+            task: 'Complete despite blocked session sync',
+            skipValidation: true,
+          },
+          'user-1',
+        );
+        ctx.podRepo.update(pod.id, { status: 'running', containerId: 'sandbox-123' });
+
+        const consuming = manager.consumeAgentEvents(
+          pod.id,
+          (async function* () {
+            yield {
+              type: 'complete',
+              timestamp: '2026-08-11T09:00:00.000Z',
+              result: 'done',
+            } as const;
+          })(),
+        );
+        let outcome: string | undefined;
+        void consuming.then((value) => {
+          outcome = value;
+        });
+
+        await vi.advanceTimersByTimeAsync(25);
+        await Promise.resolve();
+        expect(outcome).toBe('completed');
+
+        blockedSync.resolve();
+        await consuming;
+      } finally {
+        blockedSync.resolve();
+        vi.useRealTimers();
+      }
+    });
   });
 
   describe('createSession', () => {
