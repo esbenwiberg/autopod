@@ -60,6 +60,14 @@ async function checkpointLineageBase(
   const noOpBase = await peelDaemonNoopCheckpoints(bare, expected);
   if (noOpBase !== expected) return noOpBase;
 
+  return (await quarantinedCheckpointSourceHead(bare, expected, podToken)) ?? expected;
+}
+
+async function quarantinedCheckpointSourceHead(
+  bare: string,
+  checkpoint: string,
+  podToken: string,
+): Promise<string | null> {
   // A verified periodic checkpoint can contain real uncommitted work. The live
   // sandbox keeps its own HEAD, so its next snapshot is a sibling of that host
   // checkpoint rather than a descendant. Supersede only an exact commit already
@@ -72,18 +80,18 @@ async function checkpointLineageBase(
         'for-each-ref',
         '--format=%(refname)',
         '--points-at',
-        expected,
+        checkpoint,
         `refs/autopod-quarantine/${podToken}/`,
       ],
       { cwd: bare },
     )
   ).stdout.trim();
-  if (!quarantineRef) return expected;
+  if (!quarantineRef) return null;
 
   const metadata = (
     await execFileAsync(
       'git',
-      ['show', '-s', '--format=%s%x00%an%x00%ae%x00%cn%x00%ce', expected],
+      ['show', '-s', '--format=%s%x00%an%x00%ae%x00%cn%x00%ce', checkpoint],
       { cwd: bare },
     )
   ).stdout
@@ -97,15 +105,33 @@ async function checkpointLineageBase(
     metadata[3] !== CHECKPOINT_ACTOR ||
     metadata[4] !== CHECKPOINT_EMAIL
   ) {
-    return expected;
+    return null;
   }
 
   const lineage = (
-    await execFileAsync('git', ['rev-list', '--parents', '-n', '1', expected], { cwd: bare })
+    await execFileAsync('git', ['rev-list', '--parents', '-n', '1', checkpoint], { cwd: bare })
   ).stdout
     .trim()
     .split(/\s+/);
-  return lineage.length === 2 && lineage[1] ? lineage[1] : expected;
+  return lineage.length === 2 && lineage[1] ? lineage[1] : null;
+}
+
+/**
+ * Resolve the live sandbox source commit behind an exact host-owned checkpoint.
+ * Merely matching the checkpoint author/subject is insufficient: the commit must
+ * still be retained under this pod's quarantine namespace.
+ */
+export async function resolveSandboxCheckpointSourceHead(
+  worktreePath: string,
+  podId: string,
+  checkpoint: string,
+): Promise<string | null> {
+  const token = podId.replace(/[^A-Za-z0-9_-]/g, '_');
+  const common = (
+    await execFileAsync('git', ['rev-parse', '--git-common-dir'], { cwd: worktreePath })
+  ).stdout.trim();
+  const bare = path.resolve(worktreePath, common);
+  return quarantinedCheckpointSourceHead(bare, checkpoint, token);
 }
 
 /** Proof returned by sandbox source delivery.  Do not collapse this to a success boolean. */

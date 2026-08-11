@@ -1399,6 +1399,116 @@ describe('validate() — hasWebUi gating', () => {
     expect(result.overall).toBe('fail');
   });
 
+  it('closes prior findings across verified sibling sandbox checkpoints', async () => {
+    const repoPath = await fs.mkdtemp(path.join(os.tmpdir(), 'autopod-review-checkpoints-'));
+    const podId = 'sandbox-review-ledger';
+    const git = (...args: string[]) => promisify(execFile)('git', args, { cwd: repoPath });
+    const checkpoint = async (sourceHead: string, sequence: number): Promise<string> => {
+      const tree = (await git('rev-parse', `${sourceHead}^{tree}`)).stdout.trim();
+      const created = await promisify(execFile)(
+        'git',
+        ['commit-tree', tree, '-p', sourceHead, '-m', 'autopod sandbox checkpoint'],
+        {
+          cwd: repoPath,
+          env: {
+            ...process.env,
+            GIT_AUTHOR_NAME: 'Autopod',
+            GIT_AUTHOR_EMAIL: 'autopod@localhost',
+            GIT_COMMITTER_NAME: 'Autopod',
+            GIT_COMMITTER_EMAIL: 'autopod@localhost',
+          },
+        },
+      );
+      const snapshot = created.stdout.trim();
+      await git('update-ref', `refs/autopod-quarantine/${podId}/${sequence}`, snapshot);
+      return snapshot;
+    };
+
+    try {
+      await git('init');
+      await git('config', 'user.email', 'test@example.invalid');
+      await git('config', 'user.name', 'Autopod Test');
+      await fs.writeFile(path.join(repoPath, 'repair.txt'), 'broken\n');
+      await git('add', 'repair.txt');
+      await git('commit', '-m', 'initial agent work');
+      const sourceA = (await git('rev-parse', 'HEAD')).stdout.trim();
+      const snapshotA = await checkpoint(sourceA, 1);
+
+      await fs.writeFile(path.join(repoPath, 'repair.txt'), 'fixed marker abcdefghijklmnop\n');
+      await git('add', 'repair.txt');
+      await git('commit', '-m', 'repair finding');
+      const sourceB = (await git('rev-parse', 'HEAD')).stdout.trim();
+      const snapshotB = await checkpoint(sourceB, 2);
+      await git('reset', '--hard', snapshotB);
+
+      vi.mocked(runContainerReviewer).mockImplementation(async ({ prompt }) => ({
+        stdout: prompt.includes('closure verifier')
+          ? (() => {
+              const records = JSON.parse(
+                prompt.match(/Known findings: (.*)\nRepair delta:/s)?.[1] ?? '[]',
+              ) as Array<{ semanticId: string }>;
+              return JSON.stringify({
+                decisions: records.map((record) => ({
+                  semanticId: record.semanticId,
+                  fixed: true,
+                  evidence: '+fixed marker abcdefghijklmnop',
+                })),
+              });
+            })()
+          : prompt.includes('synthesizer')
+            ? JSON.stringify({ decisions: [] })
+            : JSON.stringify({ findings: [] }),
+        tokenUsage: { inputTokens: 10, outputTokens: 2 },
+      }));
+
+      const priorReviewBatch = {
+        id: 'prior-checkpoint-review',
+        diffHash: 'prior-diff',
+        reviewedHead: snapshotA,
+        promptVersion: 'review-council-v1',
+        schemaVersion: 'structured-finding-v2',
+        model: 'm',
+        axes: [],
+        candidates: [],
+        initialFindings: [],
+        accepted: [{ id: 'initial-a', source: 'initial-review' as const, issue: 'A' }],
+        rejected: [],
+        merged: [],
+        synthesis: 'model' as const,
+        durationMs: 1,
+      };
+      const result = await createLocalValidationEngine(stubContainerManager()).validate(
+        baseConfig({
+          podId,
+          reviewerModel: 'claude-sonnet-4-6',
+          diff: changedDiff,
+          validationSuite: 'full',
+          startCommand: '',
+          smokePages: [],
+          worktreePath: repoPath,
+          priorReviewBatch,
+          attempt: 2,
+        }),
+      );
+
+      expect(
+        result.taskReview?.reviewBatch?.repairDelta,
+        result.taskReview?.reviewBatch?.repairDelta?.reason,
+      ).toMatchObject({ status: 'available', fromHead: snapshotA, toHead: snapshotB });
+      expect(result.taskReview?.reviewBatch?.closureVerification?.status).toBe('completed');
+      expect(result.taskReview?.reviewBatch?.ledger).toEqual([
+        expect.objectContaining({
+          state: 'fixed',
+          finding: expect.objectContaining({ issue: 'A' }),
+        }),
+      ]);
+      expect(result.taskReview?.issues).toEqual([]);
+      expect(result.overall).toBe('pass');
+    } finally {
+      await fs.rm(repoPath, { recursive: true, force: true });
+    }
+  });
+
   it('preserves canonical council retry authority through an A/B repair lifecycle', async () => {
     const repoPath = await fs.mkdtemp(path.join(os.tmpdir(), 'autopod-review-ledger-'));
     const git = (...args: string[]) => promisify(execFile)('git', args, { cwd: repoPath });

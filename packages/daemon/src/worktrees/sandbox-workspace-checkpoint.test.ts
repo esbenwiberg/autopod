@@ -5,7 +5,10 @@ import path from 'node:path';
 import { promisify } from 'node:util';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createMockContainerManager } from '../test-utils/mock-helpers.js';
-import { checkpointSandboxWorkspace } from './sandbox-workspace-checkpoint.js';
+import {
+  checkpointSandboxWorkspace,
+  resolveSandboxCheckpointSourceHead,
+} from './sandbox-workspace-checkpoint.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -101,6 +104,12 @@ describe('checkpointSandboxWorkspace', () => {
       promoted: true,
       materialized: true,
     });
+    await expect(
+      resolveSandboxCheckpointSourceHead(host, path.basename(tmpRoot), result.snapshotCommit),
+    ).resolves.toBe(result.sourceHead);
+    await expect(
+      resolveSandboxCheckpointSourceHead(host, 'different-pod', result.snapshotCommit),
+    ).resolves.toBeNull();
     await expect(readFile(path.join(host, 'tracked.txt'), 'utf8')).resolves.toBe(
       'changed in sandbox\n',
     );
@@ -336,6 +345,12 @@ describe('checkpointSandboxWorkspace', () => {
         GIT_COMMITTER_EMAIL: 'autopod@localhost',
       },
     });
+    const lookalike = (
+      await execFileAsync('git', ['rev-parse', 'HEAD'], { cwd: host, env: gitEnv })
+    ).stdout.trim();
+    await expect(
+      resolveSandboxCheckpointSourceHead(host, path.basename(tmpRoot), lookalike),
+    ).resolves.toBeNull();
     await writeFile(path.join(sandbox, 'tracked.txt'), 'sandbox change\n');
     await git(sandbox, ['add', 'tracked.txt']);
     await git(sandbox, ['commit', '-m', 'agent commit']);
