@@ -1505,7 +1505,10 @@ export interface PodManager {
     targetOutput: 'pr' | 'branch' | 'artifact' | 'none',
     options?: { instructions?: string; skipAgent?: boolean },
   ): Promise<void>;
-  triggerValidation(podId: string, options?: { force?: boolean }): Promise<void>;
+  triggerValidation(
+    podId: string,
+    options?: { force?: boolean; validationOnly?: boolean },
+  ): Promise<void>;
   /** Pull latest from remote branch and re-run validation without agent rework on failure.
    *  Used after human fixes via a linked workspace pod.
    *  Pass `{ force: true }` to skip the no-new-commits early-exit — used by Resume
@@ -9291,7 +9294,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
             emitStatus('Skipping agent — running validation only…');
             logger.info({ podId }, 'skipAgent: fresh-container recovery entering validation');
             visibleFailurePhase = 'validation';
-            await this.triggerValidation(podId);
+            await this.triggerValidation(podId, { validationOnly: true });
             return;
           }
           emitStatus('Skipping agent — going straight to completion…');
@@ -12162,7 +12165,10 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
       await destroyPodNetwork(podId, true);
     },
 
-    async triggerValidation(podId: string, options?: { force?: boolean }): Promise<void> {
+    async triggerValidation(
+      podId: string,
+      options?: { force?: boolean; validationOnly?: boolean },
+    ): Promise<void> {
       const pod = podRepo.getOrThrow(podId);
       const lifecycleGeneration = pod.lifecycleGeneration;
       const lifecycleContainerId = pod.containerId;
@@ -13372,6 +13378,15 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           }
         } else if (force || attempt < s2.maxValidationAttempts) {
           if (tryConsumeUpdateIntent()) return;
+
+          if (options?.validationOnly) {
+            emitActivityStatus(
+              podId,
+              'Validation-only resume failed — agent rework was not started',
+            );
+            transition(s2, 'failed');
+            return;
+          }
 
           emitActivityStatus(
             podId,

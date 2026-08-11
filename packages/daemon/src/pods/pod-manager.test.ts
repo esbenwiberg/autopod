@@ -6427,6 +6427,37 @@ describe('PodManager', () => {
         expect(updated.prUrl).toBe('https://github.com/org/repo/pull/42');
       });
 
+      it('does not resume an absent agent when fresh-container validation-only recovery fails', async () => {
+        const ctx = createTestContext({ overall: 'fail' });
+        setupExecFileMock();
+        vi.mocked(ctx.worktreeManager.getDiffStats).mockResolvedValue({
+          filesChanged: 1,
+          linesAdded: 1,
+          linesRemoved: 0,
+        });
+
+        const manager = createPodManager(ctx.deps);
+        const pod = manager.createSession(
+          { profileName: 'test-profile', task: 'Validate recovered commits' },
+          'user-1',
+        );
+        ctx.podRepo.update(pod.id, {
+          recoveryWorktreePath: '/tmp/worktree/existing',
+          skipAgent: true,
+          lastValidationResult: null,
+        });
+
+        await manager.processPod(pod.id);
+
+        const updated = manager.getSession(pod.id);
+        expect(ctx.runtime.spawn).not.toHaveBeenCalled();
+        expect(ctx.runtime.resume).not.toHaveBeenCalled();
+        expect(ctx.validationEngine.validate).toHaveBeenCalledOnce();
+        expect(updated.lastValidationResult?.overall).toBe('fail');
+        expect(updated.status).toBe('failed');
+        expect(updated.skipAgent).toBe(false);
+      });
+
       it('uses runtime.resume for Claude with claudeSessionId', async () => {
         const runtime = createMockRuntime();
         // Add setClaudeSessionId to make it duck-type as ClaudeRuntime
