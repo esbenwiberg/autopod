@@ -7450,6 +7450,35 @@ describe('PodManager', () => {
       expect(result.status).toBe('validated');
     });
 
+    it('passes the sandbox execution target into initial validation', async () => {
+      const ctx = createTestContext(
+        { overall: 'pass' },
+        {
+          executionTarget: 'sandbox',
+          warmImageTag: 'registry.azurecr.io/autopod/test:latest',
+        },
+      );
+      const manager = createPodManager(ctx.deps);
+      const pod = manager.createSession(
+        { profileName: 'test-profile', task: 'Add feature' },
+        'user-1',
+      );
+      ctx.podRepo.update(pod.id, {
+        status: 'running',
+        containerId: 'sandbox-1',
+        worktreePath: '/tmp/wt',
+      });
+
+      await manager.triggerValidation(pod.id);
+
+      expect(ctx.validationEngine.validate).toHaveBeenCalledWith(
+        expect.objectContaining({ executionTarget: 'sandbox' }),
+        expect.any(Function),
+        expect.any(AbortSignal),
+        expect.any(Object),
+      );
+    });
+
     it('surfaces ordered post-review finalization, sync, shutdown, and auto-approval work', async () => {
       const ctx = createTestContext({ overall: 'pass' });
       vi.mocked(ctx.validationEngine.validate).mockImplementationOnce(
@@ -13004,6 +13033,12 @@ describe('PodManager', () => {
       expect(syncOrder).toBeDefined();
       expect(validateOrder).toBeDefined();
       expect(syncOrder).toBeLessThan(validateOrder as number);
+      expect(ctx.validationEngine.validate).toHaveBeenCalledWith(
+        expect.objectContaining({ executionTarget: 'local' }),
+        expect.any(Function),
+        expect.any(AbortSignal),
+        expect.any(Object),
+      );
     });
 
     it('Path 2: passes profile build env and diff context into forced revalidation', async () => {

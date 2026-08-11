@@ -1,5 +1,6 @@
 import type {
   AdvisoryBrowserQaResult,
+  ExecutionTarget,
   ModelProvider,
   PreSubmitReviewSnapshot,
   ProviderCredentials,
@@ -15,6 +16,8 @@ import type {
 export interface ValidationEngineConfig {
   podId: string;
   containerId: string;
+  /** Execution backend used to distinguish sandbox resource ceilings from local runner failures. */
+  executionTarget?: ExecutionTarget;
   previewUrl: string;
   /** URL reachable from inside the container (e.g. http://127.0.0.1:3000).
    *  Used by Playwright scripts that run in-container. Falls back to previewUrl. */

@@ -2633,6 +2633,122 @@ describe('validate() — facts + review gate', () => {
     expect(result.reviewSkipReason).toMatch(/validation infrastructure failed/i);
   });
 
+  const sandboxMemorySignatures = [
+    'RangeError: Array buffer allocation failed',
+    'FATAL ERROR: Reached heap limit Allocation failed - JavaScript heap out of memory',
+    'memory allocation of 6442450944 bytes failed',
+  ];
+
+  const sandboxMemoryPhases = ['setup', 'lint', 'sast', 'build', 'test', 'facts'] as const;
+
+  function sandboxMemoryConfig(
+    phase: (typeof sandboxMemoryPhases)[number],
+    executionTarget: 'local' | 'sandbox' = 'sandbox',
+  ): ValidationEngineConfig {
+    const marker = 'sandbox-memory-command';
+    const common = baseConfig({ executionTarget });
+
+    if (phase === 'setup') return { ...common, validationSetupCommand: marker };
+    if (phase === 'lint') return { ...common, lintCommand: marker };
+    if (phase === 'sast') return { ...common, sastCommand: marker };
+    if (phase === 'build') return { ...common, buildCommand: marker };
+    if (phase === 'test') return { ...common, testCommand: marker };
+
+    return {
+      ...common,
+      diff: 'diff --git a/src/fact.ts b/src/fact.ts\n--- a/src/fact.ts\n+++ b/src/fact.ts\n+changed',
+      contract: parseSpecContract(`contract_version: 1
+title: Sandbox memory fact
+depends_on: []
+scenarios:
+  - id: behavior
+    given: ["state"]
+    when: ["validated"]
+    then: ["works"]
+required_facts:
+  - id: fact-sandbox-memory
+    proves: [behavior]
+    kind: unit-test
+    artifact:
+      path: src/fact.ts
+      change: update
+    command: ${marker}
+human_review: []
+`),
+    };
+  }
+
+  function sandboxMemoryContainer(output: string, exitCode = 1): ContainerManager {
+    const base = stubContainerManager();
+    const execInContainer = vi.fn(async (_containerId: string, command: string[]) => {
+      const shell = command[2] ?? '';
+      if (shell.includes('sandbox-memory-command')) {
+        return { stdout: '', stderr: output, exitCode };
+      }
+      if (shell.includes('sha256sum')) {
+        return { stdout: 'abc123\n', stderr: '', exitCode: 0 };
+      }
+      return { stdout: '', stderr: '', exitCode: 0 };
+    });
+    return { ...base, execInContainer } as ContainerManager;
+  }
+
+  it.each(
+    sandboxMemoryPhases.flatMap((phase) =>
+      sandboxMemorySignatures.map((signature) => ({ phase, signature })),
+    ),
+  )(
+    'classifies $phase fatal sandbox memory output as infrastructure: $signature',
+    async ({ phase, signature }) => {
+      const engine = createLocalValidationEngine(sandboxMemoryContainer(signature));
+
+      const result = await engine.validate(sandboxMemoryConfig(phase));
+
+      expect(result.infrastructureFailure).toMatchObject({
+        phase,
+        code: 'SANDBOX_MEMORY_EXHAUSTED',
+        retryable: false,
+      });
+      expect(result.overall).toBe('fail');
+      expect(result.reviewSkipReason).toMatch(/validation infrastructure failed/i);
+    },
+  );
+
+  it.each(sandboxMemorySignatures)(
+    'keeps fatal memory output as an ordinary failure for local containers: %s',
+    async (signature) => {
+      const engine = createLocalValidationEngine(sandboxMemoryContainer(signature));
+
+      const result = await engine.validate(sandboxMemoryConfig('lint', 'local'));
+
+      expect(result.infrastructureFailure).toBeUndefined();
+      expect(result.lint?.status).toBe('fail');
+    },
+  );
+
+  it.each(['ENOMEM', 'tool reported out of memory while testing its error handling'])(
+    'does not classify ambiguous sandbox memory wording as infrastructure: %s',
+    async (output) => {
+      const engine = createLocalValidationEngine(sandboxMemoryContainer(output));
+
+      const result = await engine.validate(sandboxMemoryConfig('lint'));
+
+      expect(result.infrastructureFailure).toBeUndefined();
+      expect(result.lint?.status).toBe('fail');
+    },
+  );
+
+  it('does not classify fatal memory text from a successful sandbox command', async () => {
+    const engine = createLocalValidationEngine(
+      sandboxMemoryContainer(sandboxMemorySignatures[0] ?? '', 0),
+    );
+
+    const result = await engine.validate(sandboxMemoryConfig('lint'));
+
+    expect(result.infrastructureFailure).toBeUndefined();
+    expect(result.lint?.status).toBe('pass');
+  });
+
   it('classifies typed sandbox transport failures by validation phase', async () => {
     const cases: Array<{
       phase: 'setup' | 'lint' | 'sast' | 'build' | 'test';

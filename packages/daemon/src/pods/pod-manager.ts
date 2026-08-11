@@ -12536,6 +12536,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         const validationConfig = {
           podId,
           containerId: pod.containerId,
+          executionTarget: pod.executionTarget,
           previewUrl: pod.previewUrl ?? `http://127.0.0.1:${CONTAINER_APP_PORT}`,
           containerBaseUrl: `http://127.0.0.1:${CONTAINER_APP_PORT}`,
           webProbeMode:
@@ -13754,6 +13755,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         const validationConfig = {
           podId,
           containerId: pod.containerId,
+          executionTarget: pod.executionTarget,
           previewUrl: pod.previewUrl ?? `http://127.0.0.1:${CONTAINER_APP_PORT}`,
           containerBaseUrl: `http://127.0.0.1:${CONTAINER_APP_PORT}`,
           webProbeMode:

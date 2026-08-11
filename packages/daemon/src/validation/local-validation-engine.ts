@@ -392,7 +392,11 @@ export function createLocalValidationEngine(
         try {
           if (!config.reviewOnly) await resetWorktreeToHead(containerManager, config, log);
         } catch (err) {
-          const resetInfrastructureFailure = classifyValidationInfrastructureFailure('setup', err);
+          const resetInfrastructureFailure = classifyValidationInfrastructureFailure(
+            'setup',
+            err,
+            config.executionTarget,
+          );
           if (!resetInfrastructureFailure) throw err;
           const setupResult = {
             status: 'skip' as const,
@@ -436,6 +440,7 @@ export function createLocalValidationEngine(
             const setupInfrastructureFailure = classifyValidationInfrastructureFailure(
               'setup',
               err,
+              config.executionTarget,
             );
             if (setupInfrastructureFailure) {
               setupResult = {
@@ -457,6 +462,28 @@ export function createLocalValidationEngine(
             return makeSetupFailedResult(config, startTime, setupResult);
           }
           const setupDuration = Date.now() - setupStart;
+          const setupInfrastructureFailure = classifyCommandResourceFailure(
+            'setup',
+            setupExecResult,
+            config.executionTarget,
+          );
+          if (setupInfrastructureFailure) {
+            const rawOutput = [setupExecResult.stdout, setupExecResult.stderr]
+              .filter(Boolean)
+              .join('\n');
+            setupResult = {
+              status: 'skip',
+              output: `${setupInfrastructureFailure.message}\n\n--- setup output ---\n${rawOutput}`,
+              duration: setupDuration,
+            };
+            callbacks?.onPhaseCompleted?.('setup', 'skip', setupResult);
+            return makeSetupFailedResult(
+              config,
+              startTime,
+              setupResult,
+              setupInfrastructureFailure,
+            );
+          }
           if (setupExecResult.exitCode !== 0) {
             setupResult = {
               status: 'fail',
@@ -676,6 +703,7 @@ export function createLocalValidationEngine(
               const factsInfrastructureFailure = classifyValidationInfrastructureFailure(
                 'facts',
                 err,
+                config.executionTarget,
               );
               if (!factsInfrastructureFailure) throw err;
               infrastructureFailure = factsInfrastructureFailure;
@@ -1469,7 +1497,11 @@ async function runBuild(
     const duration = Date.now() - buildStart;
     const partial = (err as { partialOutput?: string })?.partialOutput ?? '';
     const message = err instanceof Error ? err.message : String(err);
-    const infrastructureFailure = classifyValidationInfrastructureFailure('build', err);
+    const infrastructureFailure = classifyValidationInfrastructureFailure(
+      'build',
+      err,
+      config.executionTarget,
+    );
     if (infrastructureFailure) {
       log?.warn(
         { err, duration, infrastructureFailure },
@@ -1503,16 +1535,20 @@ async function runBuild(
   // bug. Common cause on Docker Desktop: the Linux VM's memory ceiling is
   // smaller than the container's requested limit, so the per-container cgroup
   // limit is fake headroom.
-  const looksOomKilled = isOomKilled(result.exitCode, rawOutput);
+  const commandInfrastructureFailure = classifyCommandResourceFailure(
+    'build',
+    result,
+    config.executionTarget,
+  );
   let output = rawOutput;
   let infrastructureFailure: ValidationInfrastructureFailure | undefined;
-  if (status === 'fail' && looksOomKilled) {
-    infrastructureFailure = containerOomFailure('build');
+  if (status === 'fail' && commandInfrastructureFailure) {
+    infrastructureFailure = commandInfrastructureFailure;
     const hint = infrastructureFailure.message;
     output = `${hint}\n\n--- build output ---\n${rawOutput}`;
     log?.warn(
-      { exitCode: result.exitCode, duration },
-      'build failed — OOM-killed (exit 137 / Killed)',
+      { exitCode: result.exitCode, duration, infrastructureFailure },
+      'build failed because validation resources were exhausted',
     );
   } else if (status === 'fail') {
     log?.warn({ exitCode: result.exitCode, duration }, 'build failed');
@@ -1566,7 +1602,11 @@ async function runTests(
     const duration = Date.now() - testStart;
     const partial = (err as { partialOutput?: string })?.partialOutput ?? '';
     const message = err instanceof Error ? err.message : String(err);
-    const infrastructureFailure = classifyValidationInfrastructureFailure('test', err);
+    const infrastructureFailure = classifyValidationInfrastructureFailure(
+      'test',
+      err,
+      config.executionTarget,
+    );
     if (infrastructureFailure) {
       log?.warn(
         { err, duration, infrastructureFailure },
@@ -1593,11 +1633,16 @@ async function runTests(
 
   const duration = Date.now() - testStart;
   const rawOutput = `${result.stdout}\n${result.stderr}`.trim();
-  if (result.exitCode !== 0 && isOomKilled(result.exitCode, rawOutput)) {
-    const infrastructureFailure = containerOomFailure('test');
+  const commandInfrastructureFailure = classifyCommandResourceFailure(
+    'test',
+    result,
+    config.executionTarget,
+  );
+  if (commandInfrastructureFailure) {
+    const infrastructureFailure = commandInfrastructureFailure;
     log?.warn(
       { exitCode: result.exitCode, duration, infrastructureFailure },
-      'tests could not complete — container OOM-killed',
+      'tests could not complete because validation resources were exhausted',
     );
     return {
       status: 'skip',
@@ -1630,6 +1675,28 @@ function isOomKilled(exitCode: number, output: string): boolean {
   return exitCode === 137 || /(^|\n)Killed\s*$/.test(output.slice(-200));
 }
 
+function hasFatalSandboxMemorySignature(output: string): boolean {
+  return (
+    /RangeError:\s*Array buffer allocation failed/i.test(output) ||
+    /FATAL ERROR:.*JavaScript heap out of memory/i.test(output) ||
+    /memory allocation of \d+ bytes failed/i.test(output)
+  );
+}
+
+function classifyCommandResourceFailure(
+  phase: ValidationInfrastructureFailure['phase'],
+  result: { stdout: string; stderr: string; exitCode: number },
+  executionTarget: ValidationEngineConfig['executionTarget'],
+): ValidationInfrastructureFailure | null {
+  if (result.exitCode === 0) return null;
+
+  const output = [result.stdout, result.stderr].filter(Boolean).join('\n');
+  if (isOomKilled(result.exitCode, output)) return containerOomFailure(phase);
+  if (executionTarget !== 'sandbox' || !hasFatalSandboxMemorySignature(output)) return null;
+
+  return sandboxMemoryExhaustedFailure(phase);
+}
+
 function containerOomFailure(
   phase: ValidationInfrastructureFailure['phase'],
 ): ValidationInfrastructureFailure {
@@ -1640,6 +1707,25 @@ function containerOomFailure(
       'Validation was OOM-killed (exit 137 / "Killed") after exhausting the container memory ceiling. Retry only after changing the runner or execution resources; repository rework is not indicated.',
     retryable: false,
   };
+}
+
+function sandboxMemoryExhaustedFailure(
+  phase: ValidationInfrastructureFailure['phase'],
+): ValidationInfrastructureFailure {
+  return {
+    phase,
+    code: 'SANDBOX_MEMORY_EXHAUSTED',
+    message:
+      'Validation hit a fatal native allocation error under the Azure Sandbox memory ceiling. Retry only after changing the tool or execution target; repository rework is not indicated.',
+    retryable: false,
+  };
+}
+
+class ValidationCommandInfrastructureError extends Error {
+  constructor(readonly failure: ValidationInfrastructureFailure) {
+    super(failure.message);
+    this.name = 'ValidationCommandInfrastructureError';
+  }
 }
 
 function validationInfrastructureOutput(error: unknown, partial = ''): string {
@@ -1653,7 +1739,18 @@ function validationInfrastructureOutput(error: unknown, partial = ''): string {
 function classifyValidationInfrastructureFailure(
   phase: ValidationInfrastructureFailure['phase'],
   error: unknown,
+  executionTarget?: ValidationEngineConfig['executionTarget'],
 ): ValidationInfrastructureFailure | null {
+  if (error instanceof ValidationCommandInfrastructureError) return error.failure;
+
+  if (executionTarget === 'sandbox') {
+    const message = error instanceof Error ? error.message : String(error);
+    const partial = (error as { partialOutput?: string })?.partialOutput ?? '';
+    if (hasFatalSandboxMemorySignature(`${message}\n${partial}`)) {
+      return sandboxMemoryExhaustedFailure(phase);
+    }
+  }
+
   if (!(error instanceof AutopodError) || !error.code.startsWith('AZURE_SANDBOX_')) return null;
 
   const emptyForbidden =
@@ -1733,6 +1830,14 @@ async function runFactValidation(
           ['sh', '-c', replacement.command],
           { cwd },
         );
+        const replacementInfrastructureFailure = classifyCommandResourceFailure(
+          'facts',
+          replacementCmd,
+          config.executionTarget,
+        );
+        if (replacementInfrastructureFailure) {
+          throw new ValidationCommandInfrastructureError(replacementInfrastructureFailure);
+        }
         const replacementPass =
           replacementExists && replacementChanged && replacementCmd.exitCode === 0;
         results.push({
@@ -1840,7 +1945,7 @@ async function runFactValidation(
         );
       }
     } catch (err) {
-      if (classifyValidationInfrastructureFailure('facts', err)) throw err;
+      if (classifyValidationInfrastructureFailure('facts', err, config.executionTarget)) throw err;
       const partial = (err as { partialOutput?: string })?.partialOutput;
       commandError = err instanceof Error ? err.message : String(err);
       commandResult = {
@@ -1850,6 +1955,17 @@ async function runFactValidation(
       };
     }
     const durationMs = Date.now() - commandStart;
+
+    if (fact.kind !== 'browser-test') {
+      const commandInfrastructureFailure = classifyCommandResourceFailure(
+        'facts',
+        commandResult,
+        config.executionTarget,
+      );
+      if (commandInfrastructureFailure) {
+        throw new ValidationCommandInfrastructureError(commandInfrastructureFailure);
+      }
+    }
 
     const commandPassed = commandResult.exitCode === 0;
     const attachments =
@@ -2536,7 +2652,11 @@ async function runLint(
     const duration = Date.now() - lintStart;
     const partial = (err as { partialOutput?: string })?.partialOutput ?? '';
     const message = err instanceof Error ? err.message : String(err);
-    const infrastructureFailure = classifyValidationInfrastructureFailure('lint', err);
+    const infrastructureFailure = classifyValidationInfrastructureFailure(
+      'lint',
+      err,
+      config.executionTarget,
+    );
     if (infrastructureFailure) {
       log?.warn(
         { err, duration, infrastructureFailure },
@@ -2559,6 +2679,28 @@ async function runLint(
   }
 
   const duration = Date.now() - lintStart;
+  const combined = [result.stdout, result.stderr].filter(Boolean).join('\n');
+  const infrastructureFailure = classifyCommandResourceFailure(
+    'lint',
+    result,
+    config.executionTarget,
+  );
+  if (infrastructureFailure) {
+    log?.warn(
+      { exitCode: result.exitCode, duration, infrastructureFailure },
+      'lint could not complete because validation resources were exhausted',
+    );
+    return {
+      status: 'skip' as const,
+      output: `${infrastructureFailure.message}\n\n--- lint output ---\n${combined}`.slice(
+        0,
+        50_000,
+      ),
+      duration,
+      infrastructureFailure,
+    };
+  }
+
   const status = result.exitCode === 0 ? ('pass' as const) : ('fail' as const);
 
   if (status === 'fail') {
@@ -2567,7 +2709,6 @@ async function runLint(
     log?.info({ duration }, 'lint passed');
   }
 
-  const combined = [result.stdout, result.stderr].filter(Boolean).join('\n');
   return { status, output: combined.slice(0, 50_000), duration };
 }
 
@@ -2602,7 +2743,11 @@ async function runSast(
     const duration = Date.now() - sastStart;
     const partial = (err as { partialOutput?: string })?.partialOutput ?? '';
     const message = err instanceof Error ? err.message : String(err);
-    const infrastructureFailure = classifyValidationInfrastructureFailure('sast', err);
+    const infrastructureFailure = classifyValidationInfrastructureFailure(
+      'sast',
+      err,
+      config.executionTarget,
+    );
     if (infrastructureFailure) {
       log?.warn(
         { err, duration, infrastructureFailure },
@@ -2625,6 +2770,28 @@ async function runSast(
   }
 
   const duration = Date.now() - sastStart;
+  const combined = [result.stdout, result.stderr].filter(Boolean).join('\n');
+  const infrastructureFailure = classifyCommandResourceFailure(
+    'sast',
+    result,
+    config.executionTarget,
+  );
+  if (infrastructureFailure) {
+    log?.warn(
+      { exitCode: result.exitCode, duration, infrastructureFailure },
+      'SAST could not complete because validation resources were exhausted',
+    );
+    return {
+      status: 'skip' as const,
+      output: `${infrastructureFailure.message}\n\n--- SAST output ---\n${combined}`.slice(
+        0,
+        50_000,
+      ),
+      duration,
+      infrastructureFailure,
+    };
+  }
+
   const status = result.exitCode === 0 ? ('pass' as const) : ('fail' as const);
 
   if (status === 'fail') {
@@ -2633,7 +2800,6 @@ async function runSast(
     log?.info({ duration }, 'SAST passed');
   }
 
-  const combined = [result.stdout, result.stderr].filter(Boolean).join('\n');
   return { status, output: combined.slice(0, 50_000), duration };
 }
 
