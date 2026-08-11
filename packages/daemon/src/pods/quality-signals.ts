@@ -148,9 +148,14 @@ export function computeQualitySignals(podId: string, deps: QualitySignalsDeps): 
 
   const userInterrupts = deps.escalationRepo.countBySessionAndTypes(podId, HUMAN_INTERRUPT_TYPES);
   const modifiedFileCount = fileModifyCounts.size;
+  const hasVerifiedInspection = correlatedActivities.some(
+    (activity) => activity.kind === 'inspection',
+  );
+  // Ambiguous shell activity remains diagnostic, but it must not erase independent reads and
+  // resolved file changes. Keep failing closed when ambiguity is the only inspection evidence.
   const inspectionUnavailableReason = !inspectionEvidenceComplete
     ? 'unresolved_write'
-    : ambiguousInspectionCount > 0
+    : ambiguousInspectionCount > 0 && !hasVerifiedInspection
       ? 'ambiguous_inspection'
       : correlatedActivities.length === 0
         ? 'no_activity'
