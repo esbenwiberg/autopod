@@ -7450,6 +7450,35 @@ describe('PodManager', () => {
       expect(result.status).toBe('validated');
     });
 
+    it('passes the sandbox execution target into initial validation', async () => {
+      const ctx = createTestContext(
+        { overall: 'pass' },
+        {
+          executionTarget: 'sandbox',
+          warmImageTag: 'registry.azurecr.io/autopod/test:latest',
+        },
+      );
+      const manager = createPodManager(ctx.deps);
+      const pod = manager.createSession(
+        { profileName: 'test-profile', task: 'Add feature' },
+        'user-1',
+      );
+      ctx.podRepo.update(pod.id, {
+        status: 'running',
+        containerId: 'sandbox-1',
+        worktreePath: '/tmp/wt',
+      });
+
+      await manager.triggerValidation(pod.id);
+
+      expect(ctx.validationEngine.validate).toHaveBeenCalledWith(
+        expect.objectContaining({ executionTarget: 'sandbox' }),
+        expect.any(Function),
+        expect.any(AbortSignal),
+        expect.any(Object),
+      );
+    });
+
     it('surfaces ordered post-review finalization, sync, shutdown, and auto-approval work', async () => {
       const ctx = createTestContext({ overall: 'pass' });
       vi.mocked(ctx.validationEngine.validate).mockImplementationOnce(
@@ -8652,6 +8681,89 @@ describe('PodManager', () => {
       expect(manager.getSession(pod.id).status).toBe('review_required');
       expect(ctx.runtime.resume).not.toHaveBeenCalled();
       expect(ctx.validationEngine.validate).toHaveBeenCalledTimes(1);
+    });
+
+    it('parks unavailable prior-finding closure without sending stale findings to rework', async () => {
+      const closureFailure = reviewInfrastructureFailureResult('review-failed', {
+        reviewSkipKind: undefined,
+        reviewSkipReason: undefined,
+        taskReview: {
+          status: 'fail',
+          reasoning: 'Running canonical frozen council and prior-finding closure.',
+          issues: ['A carried prior finding'],
+          model: 'test',
+          screenshots: [],
+          diff: '+changed',
+          reviewBatch: {
+            id: 'batch-with-unavailable-closure',
+            diffHash: 'hash',
+            reviewedHead: 'checkpoint-b',
+            promptVersion: 'v1',
+            schemaVersion: 'v1',
+            model: 'test',
+            axes: [],
+            candidates: [],
+            initialFindings: [],
+            accepted: [],
+            rejected: [],
+            merged: [],
+            synthesis: 'model',
+            durationMs: 1,
+            quality: 'healthy',
+            repairDelta: {
+              status: 'unavailable',
+              fromHead: 'checkpoint-a',
+              toHead: 'checkpoint-b',
+              reason: 'reviewed heads are unrelated',
+            },
+            closureVerification: {
+              status: 'unavailable',
+              decisions: [],
+              reason: 'reviewed heads are unrelated',
+            },
+            ledger: [
+              {
+                semanticId: 'initial-a',
+                finding: {
+                  id: 'initial-a',
+                  source: 'initial-review',
+                  issue: 'A carried prior finding',
+                },
+                state: 'open',
+                priorSourceIds: ['initial-a'],
+                currentSourceIds: [],
+              },
+            ],
+          },
+        },
+      });
+      const ctx = createTestContext(closureFailure);
+      const manager = createPodManager(ctx.deps);
+      const pod = manager.createSession(
+        { profileName: 'test-profile', task: 'Add feature' },
+        'user-1',
+      );
+      ctx.podRepo.update(pod.id, {
+        status: 'running',
+        containerId: 'ctr-1',
+        worktreePath: '/tmp/wt',
+        validationAttempts: 1,
+      });
+
+      await manager.triggerValidation(pod.id);
+
+      expect(ctx.validationEngine.validate).toHaveBeenCalledTimes(1);
+      expect(ctx.runtime.resume).not.toHaveBeenCalled();
+      expect(manager.getSession(pod.id).status).toBe('review_required');
+      const messages = ctx.eventRepo
+        .getForSession(pod.id, { type: 'pod.agent_activity' })
+        .map((event) => {
+          const payload = event.payload as { event?: { message?: unknown } };
+          return payload.event?.message;
+        });
+      expect(messages).toContain(
+        'Review finding closure infrastructure failure after one Review retry — needs human review',
+      );
     });
 
     it('does not retry deterministic reviewer invalid-request failures', async () => {
@@ -12921,6 +13033,12 @@ describe('PodManager', () => {
       expect(syncOrder).toBeDefined();
       expect(validateOrder).toBeDefined();
       expect(syncOrder).toBeLessThan(validateOrder as number);
+      expect(ctx.validationEngine.validate).toHaveBeenCalledWith(
+        expect.objectContaining({ executionTarget: 'local' }),
+        expect.any(Function),
+        expect.any(AbortSignal),
+        expect.any(Object),
+      );
     });
 
     it('Path 2: passes profile build env and diff context into forced revalidation', async () => {

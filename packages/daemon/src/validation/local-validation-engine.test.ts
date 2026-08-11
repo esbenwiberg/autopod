@@ -1399,6 +1399,116 @@ describe('validate() — hasWebUi gating', () => {
     expect(result.overall).toBe('fail');
   });
 
+  it('closes prior findings across verified sibling sandbox checkpoints', async () => {
+    const repoPath = await fs.mkdtemp(path.join(os.tmpdir(), 'autopod-review-checkpoints-'));
+    const podId = 'sandbox-review-ledger';
+    const git = (...args: string[]) => promisify(execFile)('git', args, { cwd: repoPath });
+    const checkpoint = async (sourceHead: string, sequence: number): Promise<string> => {
+      const tree = (await git('rev-parse', `${sourceHead}^{tree}`)).stdout.trim();
+      const created = await promisify(execFile)(
+        'git',
+        ['commit-tree', tree, '-p', sourceHead, '-m', 'autopod sandbox checkpoint'],
+        {
+          cwd: repoPath,
+          env: {
+            ...process.env,
+            GIT_AUTHOR_NAME: 'Autopod',
+            GIT_AUTHOR_EMAIL: 'autopod@localhost',
+            GIT_COMMITTER_NAME: 'Autopod',
+            GIT_COMMITTER_EMAIL: 'autopod@localhost',
+          },
+        },
+      );
+      const snapshot = created.stdout.trim();
+      await git('update-ref', `refs/autopod-quarantine/${podId}/${sequence}`, snapshot);
+      return snapshot;
+    };
+
+    try {
+      await git('init');
+      await git('config', 'user.email', 'test@example.invalid');
+      await git('config', 'user.name', 'Autopod Test');
+      await fs.writeFile(path.join(repoPath, 'repair.txt'), 'broken\n');
+      await git('add', 'repair.txt');
+      await git('commit', '-m', 'initial agent work');
+      const sourceA = (await git('rev-parse', 'HEAD')).stdout.trim();
+      const snapshotA = await checkpoint(sourceA, 1);
+
+      await fs.writeFile(path.join(repoPath, 'repair.txt'), 'fixed marker abcdefghijklmnop\n');
+      await git('add', 'repair.txt');
+      await git('commit', '-m', 'repair finding');
+      const sourceB = (await git('rev-parse', 'HEAD')).stdout.trim();
+      const snapshotB = await checkpoint(sourceB, 2);
+      await git('reset', '--hard', snapshotB);
+
+      vi.mocked(runContainerReviewer).mockImplementation(async ({ prompt }) => ({
+        stdout: prompt.includes('closure verifier')
+          ? (() => {
+              const records = JSON.parse(
+                prompt.match(/Known findings: (.*)\nRepair delta:/s)?.[1] ?? '[]',
+              ) as Array<{ semanticId: string }>;
+              return JSON.stringify({
+                decisions: records.map((record) => ({
+                  semanticId: record.semanticId,
+                  fixed: true,
+                  evidence: '+fixed marker abcdefghijklmnop',
+                })),
+              });
+            })()
+          : prompt.includes('synthesizer')
+            ? JSON.stringify({ decisions: [] })
+            : JSON.stringify({ findings: [] }),
+        tokenUsage: { inputTokens: 10, outputTokens: 2 },
+      }));
+
+      const priorReviewBatch = {
+        id: 'prior-checkpoint-review',
+        diffHash: 'prior-diff',
+        reviewedHead: snapshotA,
+        promptVersion: 'review-council-v1',
+        schemaVersion: 'structured-finding-v2',
+        model: 'm',
+        axes: [],
+        candidates: [],
+        initialFindings: [],
+        accepted: [{ id: 'initial-a', source: 'initial-review' as const, issue: 'A' }],
+        rejected: [],
+        merged: [],
+        synthesis: 'model' as const,
+        durationMs: 1,
+      };
+      const result = await createLocalValidationEngine(stubContainerManager()).validate(
+        baseConfig({
+          podId,
+          reviewerModel: 'claude-sonnet-4-6',
+          diff: changedDiff,
+          validationSuite: 'full',
+          startCommand: '',
+          smokePages: [],
+          worktreePath: repoPath,
+          priorReviewBatch,
+          attempt: 2,
+        }),
+      );
+
+      expect(
+        result.taskReview?.reviewBatch?.repairDelta,
+        result.taskReview?.reviewBatch?.repairDelta?.reason,
+      ).toMatchObject({ status: 'available', fromHead: snapshotA, toHead: snapshotB });
+      expect(result.taskReview?.reviewBatch?.closureVerification?.status).toBe('completed');
+      expect(result.taskReview?.reviewBatch?.ledger).toEqual([
+        expect.objectContaining({
+          state: 'fixed',
+          finding: expect.objectContaining({ issue: 'A' }),
+        }),
+      ]);
+      expect(result.taskReview?.issues).toEqual([]);
+      expect(result.overall).toBe('pass');
+    } finally {
+      await fs.rm(repoPath, { recursive: true, force: true });
+    }
+  });
+
   it('preserves canonical council retry authority through an A/B repair lifecycle', async () => {
     const repoPath = await fs.mkdtemp(path.join(os.tmpdir(), 'autopod-review-ledger-'));
     const git = (...args: string[]) => promisify(execFile)('git', args, { cwd: repoPath });
@@ -2521,6 +2631,122 @@ describe('validate() — facts + review gate', () => {
     });
     expect(result.overall).toBe('fail');
     expect(result.reviewSkipReason).toMatch(/validation infrastructure failed/i);
+  });
+
+  const sandboxMemorySignatures = [
+    'RangeError: Array buffer allocation failed',
+    'FATAL ERROR: Reached heap limit Allocation failed - JavaScript heap out of memory',
+    'memory allocation of 6442450944 bytes failed',
+  ];
+
+  const sandboxMemoryPhases = ['setup', 'lint', 'sast', 'build', 'test', 'facts'] as const;
+
+  function sandboxMemoryConfig(
+    phase: (typeof sandboxMemoryPhases)[number],
+    executionTarget: 'local' | 'sandbox' = 'sandbox',
+  ): ValidationEngineConfig {
+    const marker = 'sandbox-memory-command';
+    const common = baseConfig({ executionTarget });
+
+    if (phase === 'setup') return { ...common, validationSetupCommand: marker };
+    if (phase === 'lint') return { ...common, lintCommand: marker };
+    if (phase === 'sast') return { ...common, sastCommand: marker };
+    if (phase === 'build') return { ...common, buildCommand: marker };
+    if (phase === 'test') return { ...common, testCommand: marker };
+
+    return {
+      ...common,
+      diff: 'diff --git a/src/fact.ts b/src/fact.ts\n--- a/src/fact.ts\n+++ b/src/fact.ts\n+changed',
+      contract: parseSpecContract(`contract_version: 1
+title: Sandbox memory fact
+depends_on: []
+scenarios:
+  - id: behavior
+    given: ["state"]
+    when: ["validated"]
+    then: ["works"]
+required_facts:
+  - id: fact-sandbox-memory
+    proves: [behavior]
+    kind: unit-test
+    artifact:
+      path: src/fact.ts
+      change: update
+    command: ${marker}
+human_review: []
+`),
+    };
+  }
+
+  function sandboxMemoryContainer(output: string, exitCode = 1): ContainerManager {
+    const base = stubContainerManager();
+    const execInContainer = vi.fn(async (_containerId: string, command: string[]) => {
+      const shell = command[2] ?? '';
+      if (shell.includes('sandbox-memory-command')) {
+        return { stdout: '', stderr: output, exitCode };
+      }
+      if (shell.includes('sha256sum')) {
+        return { stdout: 'abc123\n', stderr: '', exitCode: 0 };
+      }
+      return { stdout: '', stderr: '', exitCode: 0 };
+    });
+    return { ...base, execInContainer } as ContainerManager;
+  }
+
+  it.each(
+    sandboxMemoryPhases.flatMap((phase) =>
+      sandboxMemorySignatures.map((signature) => ({ phase, signature })),
+    ),
+  )(
+    'classifies $phase fatal sandbox memory output as infrastructure: $signature',
+    async ({ phase, signature }) => {
+      const engine = createLocalValidationEngine(sandboxMemoryContainer(signature));
+
+      const result = await engine.validate(sandboxMemoryConfig(phase));
+
+      expect(result.infrastructureFailure).toMatchObject({
+        phase,
+        code: 'SANDBOX_MEMORY_EXHAUSTED',
+        retryable: false,
+      });
+      expect(result.overall).toBe('fail');
+      expect(result.reviewSkipReason).toMatch(/validation infrastructure failed/i);
+    },
+  );
+
+  it.each(sandboxMemorySignatures)(
+    'keeps fatal memory output as an ordinary failure for local containers: %s',
+    async (signature) => {
+      const engine = createLocalValidationEngine(sandboxMemoryContainer(signature));
+
+      const result = await engine.validate(sandboxMemoryConfig('lint', 'local'));
+
+      expect(result.infrastructureFailure).toBeUndefined();
+      expect(result.lint?.status).toBe('fail');
+    },
+  );
+
+  it.each(['ENOMEM', 'tool reported out of memory while testing its error handling'])(
+    'does not classify ambiguous sandbox memory wording as infrastructure: %s',
+    async (output) => {
+      const engine = createLocalValidationEngine(sandboxMemoryContainer(output));
+
+      const result = await engine.validate(sandboxMemoryConfig('lint'));
+
+      expect(result.infrastructureFailure).toBeUndefined();
+      expect(result.lint?.status).toBe('fail');
+    },
+  );
+
+  it('does not classify fatal memory text from a successful sandbox command', async () => {
+    const engine = createLocalValidationEngine(
+      sandboxMemoryContainer(sandboxMemorySignatures[0] ?? '', 0),
+    );
+
+    const result = await engine.validate(sandboxMemoryConfig('lint'));
+
+    expect(result.infrastructureFailure).toBeUndefined();
+    expect(result.lint?.status).toBe('pass');
   });
 
   it('classifies typed sandbox transport failures by validation phase', async () => {

@@ -384,6 +384,41 @@ describe('computeQualitySignals', () => {
     expect(signals.readCount).toBeNull();
   });
 
+  it('keeps verified Codex reads and blind-edit evidence when another command is ambiguous', () => {
+    podRepo.insert(basePod({ runtime: 'codex' }));
+    eventRepo.insert(
+      toolUse('Bash', {
+        command: "/bin/bash -lc sed -n '1,80p' src/a.ts",
+        argv: ['/bin/bash', '-lc', "sed -n '1,80p' src/a.ts"],
+        cwd: '/workspace',
+      }),
+    );
+    eventRepo.insert(
+      toolUse('Bash', {
+        command:
+          "/bin/bash -lc 'npm test >/tmp/web-tests.log 2>&1; code=$?; tail -80 /tmp/web-tests.log; exit $code'",
+        argv: [
+          '/bin/bash',
+          '-lc',
+          'npm test >/tmp/web-tests.log 2>&1; code=$?; tail -80 /tmp/web-tests.log; exit $code',
+        ],
+        cwd: '/workspace',
+      }),
+    );
+    eventRepo.insert(fileChange('/workspace/src/a.ts', 'modify'));
+    eventRepo.insert(fileChange('/workspace/src/b.ts', 'modify'));
+
+    const signals = computeQualitySignals(POD_ID, deps);
+
+    expect(signals.inspectionAvailability).toBe('available');
+    expect(signals.inspectionUnavailableReason).toBeNull();
+    expect(signals.ambiguousInspectionCount).toBe(1);
+    expect(signals.readCount).toBe(1);
+    expect(signals.editCount).toBe(2);
+    expect(signals.readEditRatio).toBe(0.5);
+    expect(signals.editsWithoutPriorRead).toBe(1);
+  });
+
   it('counts repeated modifications to one unread file as one blind edit', () => {
     podRepo.insert(basePod({ runtime: 'codex' }));
     eventRepo.insert(fileChange('src/a.ts', 'modify'));
