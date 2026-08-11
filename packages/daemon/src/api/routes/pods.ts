@@ -413,6 +413,11 @@ export function podRoutes(
   const hostedDeployDrainSchema = z.object({
     ttlSeconds: z.number().int().min(60).max(3_600).default(1_800),
   });
+  const revalidateRequestSchema = z
+    .object({
+      force: z.boolean({ error: 'Force revalidation flag must be a boolean' }).optional(),
+    })
+    .strict();
 
   // These endpoints are intentionally daemon-authenticated rather than VM-authenticated:
   // the deploy script holds the same user token as its active-pod preflight and leaves an
@@ -997,7 +1002,11 @@ export function podRoutes(
   // POST /pods/:podId/revalidate — pull latest + validate only (no agent rework)
   app.post('/pods/:podId/revalidate', async (request) => {
     const { podId } = request.params as { podId: string };
-    const result = await podManager.revalidateSession(podId);
+    const { force } = revalidateRequestSchema.parse(request.body ?? {});
+    const result = await podManager.revalidateSession(
+      podId,
+      force === undefined ? undefined : { force },
+    );
     return result;
   });
 

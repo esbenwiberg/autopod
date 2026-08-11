@@ -80,6 +80,46 @@ function createTestDb(): Database.Database {
   return db;
 }
 
+describe('POST /pods/:podId/revalidate', () => {
+  let app: FastifyInstance;
+  const revalidateSession = vi.fn().mockResolvedValue({ newCommits: false, result: 'fail' });
+
+  beforeEach(async () => {
+    revalidateSession.mockClear();
+    app = Fastify({ logger: false });
+    const podManager = {
+      revalidateSession,
+    } as unknown as ReturnType<typeof createPodManager>;
+    podRoutes(app, podManager);
+    await app.ready();
+  });
+
+  afterEach(async () => {
+    await app.close();
+  });
+
+  it('forwards an explicit validation-only force request', async () => {
+    const response = await app.inject({
+      method: 'POST',
+      url: '/pods/tender-mink/revalidate',
+      payload: { force: true },
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(revalidateSession).toHaveBeenCalledWith('tender-mink', { force: true });
+  });
+
+  it('preserves the existing body-less revalidation contract', async () => {
+    const response = await app.inject({
+      method: 'POST',
+      url: '/pods/tender-mink/revalidate',
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(revalidateSession).toHaveBeenCalledWith('tender-mink', undefined);
+  });
+});
+
 describe('GET /pods/:podId provider-attempt projection', () => {
   let db: Database.Database;
   let app: FastifyInstance;
