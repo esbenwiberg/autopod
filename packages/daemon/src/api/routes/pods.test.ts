@@ -83,6 +83,7 @@ function createTestDb(): Database.Database {
 describe('GET /pods/:podId provider-attempt projection', () => {
   let db: Database.Database;
   let app: FastifyInstance;
+  let eventRepo: ReturnType<typeof createEventRepository>;
   let qualityScoreRepo: ReturnType<typeof createQualityScoreRepository>;
 
   beforeEach(async () => {
@@ -99,12 +100,12 @@ describe('GET /pods/:podId provider-attempt projection', () => {
     `).run();
     app = Fastify({ logger: false });
     const podRepo = createPodRepository(db);
-    const eventRepo = createEventRepository(db);
+    eventRepo = createEventRepository(db);
     const escalationRepo = createEscalationRepository(db);
     qualityScoreRepo = createQualityScoreRepository(db);
     const podManager = {
       getSession: (podId: string) => podRepo.getOrThrow(podId),
-      listSessions: () => [],
+      listSessions: () => podRepo.list(),
       getSessionStats: () => ({}),
     } as unknown as ReturnType<typeof createPodManager>;
     podRoutes(
@@ -197,6 +198,63 @@ describe('GET /pods/:podId provider-attempt projection', () => {
       outputTokens: 30,
       costUsd: 1.7,
     });
+  });
+
+  it('hydrates the latest active review snapshot and compact summary', async () => {
+    insertPod(db, { id: 'live-review-pod', status: 'validating', completedAt: undefined });
+    db.prepare('UPDATE pods SET validation_attempts = 1 WHERE id = ?').run('live-review-pod');
+    const progress = {
+      attempt: 1,
+      startedAt: '2026-08-11T16:46:52.000Z',
+      updatedAt: '2026-08-11T16:48:14.000Z',
+      elapsedMs: 82_000,
+      guardrailMs: 300_000,
+      stage: 'axes' as const,
+      axes: [
+        { axis: 'contract_completeness' as const, status: 'completed' as const, attempt: 1 },
+        { axis: 'security_authority' as const, status: 'completed' as const, attempt: 1 },
+        { axis: 'lifecycle_reliability' as const, status: 'completed' as const, attempt: 1 },
+        {
+          axis: 'persistence_reproducibility' as const,
+          status: 'running' as const,
+          attempt: 1,
+        },
+        { axis: 'tests_integration' as const, status: 'queued' as const, attempt: 0 },
+      ],
+    };
+    eventRepo.insert({
+      type: 'pod.review_progress',
+      timestamp: progress.updatedAt,
+      podId: 'live-review-pod',
+      progress,
+    });
+
+    const detail = await app.inject({ method: 'GET', url: '/pods/live-review-pod' });
+    expect(detail.statusCode).toBe(200);
+    expect(detail.json().reviewProgress).toMatchObject({
+      stage: 'axes',
+      elapsedMs: 82_000,
+      axes: expect.arrayContaining([
+        expect.objectContaining({ axis: 'persistence_reproducibility', status: 'running' }),
+      ]),
+    });
+
+    const compact = await app.inject({ method: 'GET', url: '/pods?compact=true' });
+    expect(compact.statusCode).toBe(200);
+    expect(compact.json()[0].progressSummary).toBe(
+      'Review council: 3/5 settled · 82s / 5m guardrail',
+    );
+
+    eventRepo.insert({
+      type: 'pod.validation_phase_completed',
+      timestamp: '2026-08-11T16:48:15.000Z',
+      podId: 'live-review-pod',
+      phase: 'review',
+      phaseStatus: 'pass',
+      reviewResult: null,
+    });
+    const completed = await app.inject({ method: 'GET', url: '/pods/live-review-pod' });
+    expect(completed.json().reviewProgress).toBeNull();
   });
 
   it('provider-attempt quality route replaces stale pod accounting with attempt totals', async () => {

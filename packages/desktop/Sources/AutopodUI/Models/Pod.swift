@@ -389,6 +389,129 @@ public struct ReviewPhaseDetail: Sendable {
     }
 }
 
+public enum LiveReviewStage: String, Sendable, Equatable {
+    case axes
+    case synthesis
+    case closure
+    case finalizing
+
+    public var displayName: String {
+        switch self {
+        case .axes: "Review council"
+        case .synthesis: "Synthesizing findings"
+        case .closure: "Verifying prior findings"
+        case .finalizing: "Finalizing review"
+        }
+    }
+}
+
+public enum LiveReviewAxisStatus: String, Sendable, Equatable {
+    case queued
+    case running
+    case completed
+    case unavailable
+}
+
+public struct LiveReviewAxis: Identifiable, Sendable, Equatable {
+    public var id: String { axis }
+    public let axis: String
+    public let status: LiveReviewAxisStatus
+    public let attempt: Int
+    public let durationMs: Int?
+    public let failureKind: String?
+
+    public init(
+        axis: String,
+        status: LiveReviewAxisStatus,
+        attempt: Int,
+        durationMs: Int? = nil,
+        failureKind: String? = nil
+    ) {
+        self.axis = axis
+        self.status = status
+        self.attempt = attempt
+        self.durationMs = durationMs
+        self.failureKind = failureKind
+    }
+
+    public var displayName: String {
+        switch axis {
+        case "contract_completeness": "Contract"
+        case "security_authority": "Security"
+        case "lifecycle_reliability": "Reliability"
+        case "persistence_reproducibility": "Persistence"
+        case "tests_integration": "Tests"
+        default: axis.replacingOccurrences(of: "_", with: " ").capitalized
+        }
+    }
+}
+
+public struct LiveReviewProgress: Sendable, Equatable {
+    public let attempt: Int
+    public let startedAt: Date
+    public let updatedAt: Date
+    public let elapsedMs: Int
+    public let guardrailMs: Int
+    public let stage: LiveReviewStage
+    public let axes: [LiveReviewAxis]
+
+    public init(
+        attempt: Int,
+        startedAt: Date,
+        updatedAt: Date,
+        elapsedMs: Int,
+        guardrailMs: Int,
+        stage: LiveReviewStage,
+        axes: [LiveReviewAxis]
+    ) {
+        self.attempt = attempt
+        self.startedAt = startedAt
+        self.updatedAt = updatedAt
+        self.elapsedMs = elapsedMs
+        self.guardrailMs = guardrailMs
+        self.stage = stage
+        self.axes = axes
+    }
+
+    public var settledCount: Int {
+        axes.count { $0.status == .completed || $0.status == .unavailable }
+    }
+
+    public var completedCount: Int { axes.count { $0.status == .completed } }
+    public var runningCount: Int { axes.count { $0.status == .running } }
+    public var unavailableCount: Int { axes.count { $0.status == .unavailable } }
+
+    public func currentElapsedMs(at date: Date = Date()) -> Int {
+        max(elapsedMs, Int(date.timeIntervalSince(startedAt) * 1_000))
+    }
+
+    public func timeLabel(at date: Date = Date()) -> String {
+        "\(Self.duration(currentElapsedMs(at: date))) / \(Self.duration(guardrailMs)) guardrail"
+    }
+
+    public func summary(at date: Date = Date()) -> String {
+        "\(stage.displayName) · \(settledCount)/\(axes.count) settled · \(timeLabel(at: date))"
+    }
+
+    public var activityDetail: String {
+        axes.map { axis in
+            var state = axis.status.rawValue
+            if axis.status == .running, axis.attempt > 0 { state += " · attempt \(axis.attempt)" }
+            if axis.status == .unavailable { state += " · \(axis.attempt) attempts" }
+            if let duration = axis.durationMs { state += " · \(Self.duration(duration))" }
+            return "\(axis.displayName): \(state)"
+        }.joined(separator: "\n")
+    }
+
+    private static func duration(_ milliseconds: Int) -> String {
+        let seconds = max(0, milliseconds / 1_000)
+        if seconds < 60 { return "\(seconds)s" }
+        let minutes = seconds / 60
+        let remainder = seconds % 60
+        return remainder == 0 ? "\(minutes)m" : "\(minutes)m \(remainder)s"
+    }
+}
+
 /// Live per-phase state built up as `pod.validation_phase_*` events arrive.
 public struct ValidationProgress: Sendable {
     public var attempt: Int
@@ -416,6 +539,7 @@ public struct ValidationProgress: Sendable {
     public var factChecks: [FactCheckDetail]?
     public var reviewDetail: ReviewPhaseDetail?
     public var advisoryDetail: AdvisoryQaDetail?
+    public var reviewProgress: LiveReviewProgress?
 
     // Counts for chip sub-labels
     public var pageCount: Int
@@ -552,6 +676,7 @@ public struct ValidationProgress: Sendable {
             }
         case .review:
             review = ValidationPhaseState(status: ps)
+            reviewProgress = nil
             if let r = result.reviewResult {
                 reviewDetail = ReviewPhaseDetail(
                     status: r.status, reasoning: r.reasoning, issues: r.issues,

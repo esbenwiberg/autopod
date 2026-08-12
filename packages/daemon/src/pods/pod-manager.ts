@@ -42,6 +42,7 @@ import type {
   RequestCredentialPayload,
   ReviewBatchResult,
   ReviewFeedbackResponseItem,
+  ReviewProgressSnapshot,
   Runtime,
   SastResult,
   ScanFinding,
@@ -6299,6 +6300,14 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
             advisoryResult: phaseResult as ValidationResult['advisoryBrowserQa'],
           });
         }
+      },
+      onReviewProgress: (progress: ReviewProgressSnapshot) => {
+        eventBus.emit({
+          type: 'pod.review_progress',
+          timestamp: progress.updatedAt,
+          podId,
+          progress,
+        });
       },
     };
   }

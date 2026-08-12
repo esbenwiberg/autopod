@@ -5,6 +5,7 @@ import type {
   PreSubmitReviewSnapshot,
   ProviderCredentials,
   ReviewBatchResult,
+  ReviewProgressSnapshot,
   SpecContract,
   TaskSummary,
   ValidationOverride,
@@ -140,6 +141,7 @@ export interface ValidationPhaseCallbacks {
     status: 'pass' | 'fail' | 'skip' | 'pending_human',
     result: unknown,
   ) => void;
+  onReviewProgress?: (progress: ReviewProgressSnapshot) => void;
 }
 
 export interface ValidationEngine {

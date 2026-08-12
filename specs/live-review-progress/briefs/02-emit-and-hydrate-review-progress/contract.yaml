@@ -1,0 +1,48 @@
+contract_version: 1
+title: "Emit and hydrate review progress"
+depends_on: [01-live-review-progress-contract]
+scenarios:
+  - id: engine-snapshots
+    given:
+      - "a full-suite review with five ordered axes and a configured review guardrail"
+    when:
+      - "the review advances through axes, synthesis, optional closure, and finalization"
+    then:
+      - "the engine emits independently renderable full snapshots without changing the final review verdict"
+  - id: persisted-review-progress
+    given:
+      - "a validation engine review-progress snapshot"
+    when:
+      - "pod validation callbacks receive it"
+    then:
+      - "a typed pod.review_progress event is persisted and broadcast through the existing event bus"
+  - id: hydrate-active-snapshot
+    given:
+      - "a validating pod with persisted review-progress events"
+    when:
+      - "the pod detail or compact fleet API hydrates the pod"
+    then:
+      - "detail includes the latest active snapshot and compact output contains truthful settled and guardrail copy"
+required_facts:
+  - id: fact-engine-snapshots
+    proves: [engine-snapshots]
+    kind: integration-test
+    artifact:
+      path: packages/daemon/src/validation/local-validation-engine.test.ts
+      change: update
+    command: npx pnpm --filter @autopod/daemon test -- local-validation-engine.test.ts
+  - id: fact-persisted-review-progress
+    proves: [persisted-review-progress]
+    kind: contract-test
+    artifact:
+      path: packages/daemon/src/pods/pod-manager.test.ts
+      change: update
+    command: npx pnpm --filter @autopod/daemon test -- pod-manager.test.ts
+  - id: fact-hydrate-active-snapshot
+    proves: [hydrate-active-snapshot]
+    kind: integration-test
+    artifact:
+      path: packages/daemon/src/api/routes/pods.test.ts
+      change: update
+    command: npx pnpm --filter @autopod/daemon test -- pods.test.ts
+human_review: []

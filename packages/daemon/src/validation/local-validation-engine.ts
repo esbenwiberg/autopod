@@ -11,6 +11,8 @@ import type {
   HealthResult,
   PageResult,
   ReviewFindingCandidate,
+  ReviewProgressAxis,
+  ReviewProgressSnapshot,
   TaskReviewResult,
   ValidationInfrastructureFailure,
   ValidationOverride,
@@ -839,24 +841,69 @@ export function createLocalValidationEngine(
               schemaVersion: 'structured-finding-v2',
             });
             const councilDeadline = Date.now() + (config.reviewTimeout ?? 300_000);
+            const reviewProgressStartedAt = new Date().toISOString();
+            const reviewProgressStartedMs = Date.now();
+            const reviewGuardrailMs = config.reviewTimeout ?? 300_000;
+            const reviewProgressAxes: ReviewProgressAxis[] = [
+              'contract_completeness',
+              'security_authority',
+              'lifecycle_reliability',
+              'persistence_reproducibility',
+              'tests_integration',
+            ].map((axis) => ({
+              axis,
+              status: 'queued',
+              attempt: 0,
+            }));
+            const emitReviewProgress = (stage: ReviewProgressSnapshot['stage']) => {
+              const now = new Date();
+              callbacks?.onReviewProgress?.({
+                attempt: config.attempt,
+                startedAt: reviewProgressStartedAt,
+                updatedAt: now.toISOString(),
+                elapsedMs: now.getTime() - reviewProgressStartedMs,
+                guardrailMs: reviewGuardrailMs,
+                stage,
+                axes: reviewProgressAxes.map((axis) => ({ ...axis })),
+              });
+            };
             const batch = await runReviewBatch({
               packet,
               model: config.reviewerModel ?? 'auto',
               readHead: () => readReviewHead(config.worktreePath, reviewedHead),
               timeoutMs: config.reviewTimeout ?? 300_000,
-              onProgress: ({ axis, attempt, status, elapsedMs }) => {
+              onProgress: ({
+                stage,
+                axis,
+                attempt,
+                status,
+                elapsedMs,
+                durationMs,
+                failureKind,
+              }) => {
+                if (stage === 'axes' && axis) {
+                  const current = reviewProgressAxes.find((candidate) => candidate.axis === axis);
+                  if (current) {
+                    current.attempt = attempt;
+                    current.status = status === 'started' ? 'running' : status;
+                    if (durationMs !== undefined) current.durationMs = durationMs;
+                    if (failureKind !== undefined) current.failureKind = failureKind;
+                  }
+                }
+                emitReviewProgress(stage);
                 const elapsedSeconds = Math.ceil(elapsedMs / 1_000);
+                const progressSubject = axis ?? stage;
                 if (status === 'started') {
                   onProgress?.(
-                    `Frozen review council: ${axis} attempt ${attempt} started (${elapsedSeconds}s elapsed)`,
+                    `Frozen review council: ${progressSubject} attempt ${attempt} started (${elapsedSeconds}s elapsed)`,
                   );
                 } else {
                   onProgress?.(
-                    `Frozen review council: ${axis} attempt ${attempt} ${status} (${elapsedSeconds}s elapsed)`,
+                    `Frozen review council: ${progressSubject} attempt ${attempt} ${status} (${elapsedSeconds}s elapsed)`,
                   );
                 }
                 log?.info(
-                  { podId: config.podId, axis, attempt, status, elapsedMs },
+                  { podId: config.podId, stage, axis, attempt, status, elapsedMs },
                   'Frozen review council progress',
                 );
               },
@@ -893,6 +940,7 @@ export function createLocalValidationEngine(
                   outputContract,
                 }),
             });
+            emitReviewProgress(priorActive.length > 0 ? 'closure' : 'finalizing');
             const repair = await readRepairDelta(
               config.worktreePath,
               config.podId,
@@ -1019,6 +1067,7 @@ export function createLocalValidationEngine(
               ...(repair.reason ? { reason: repair.reason } : {}),
             };
             if (closure) batch.closureVerification = closure;
+            emitReviewProgress('finalizing');
             // A healthy council is authoritative: it may reject a broad discovery
             // finding that no frozen-head axis can support. Degraded council runs
             // remain fail-closed and preserve unmatched discovery findings above.

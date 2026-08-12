@@ -1,0 +1,46 @@
+contract_version: 1
+title: "Render structured live review progress"
+depends_on: [03-desktop-review-progress-state]
+scenarios:
+  - id: compact-validating-card
+    given:
+      - "a validating pod with a live review-progress snapshot"
+    when:
+      - "the pod card renders"
+    then:
+      - "it shows compact stage, settled, unavailable, elapsed, and guardrail copy"
+  - id: live-review-panel
+    given:
+      - "a running Review phase with five ordered axis states"
+    when:
+      - "Validation Review is selected"
+    then:
+      - "the panel shows human names, attempts, truthful terminal warnings, and the current post-axis stage"
+  - id: grouped-review-activity
+    given:
+      - "multiple projected review-progress activity events"
+    when:
+      - "the overview activity feed renders"
+    then:
+      - "one latest council row is shown with expandable full safe snapshot evidence"
+required_facts:
+  - id: fact-review-progress-surfaces
+    proves: [compact-validating-card, live-review-panel, grouped-review-activity]
+    kind: custom-command
+    artifact:
+      path: packages/desktop/Tests/review-progress-contract.mjs
+      change: update
+    command: node packages/desktop/Tests/review-progress-contract.mjs
+human_review:
+  - id: review-validating-card-layout
+    covers: [compact-validating-card]
+    criterion: "The validating card remains compact and matches the approved normal and narrow-width wireframe."
+    reason: "Native SwiftUI visual rendering has no Linux browser harness."
+  - id: review-live-panel-layout
+    covers: [live-review-panel]
+    criterion: "The live Review panel is legible, names all five axes, and distinguishes unavailable from completed."
+    reason: "Native SwiftUI visual rendering has no Linux browser harness."
+  - id: review-grouped-activity-layout
+    covers: [grouped-review-activity]
+    criterion: "The overview shows one council row and its disclosure exposes complete safe axis evidence."
+    reason: "Native SwiftUI visual rendering has no Linux browser harness."

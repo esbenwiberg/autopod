@@ -5,6 +5,7 @@ import {
   type FirewallDeniedEvent,
   type OperatorActor,
   type PodStatus,
+  type ReviewProgressSnapshot,
   collectPiiPatternNames,
   createPodRequestSchema,
   podStatusSchema,
@@ -135,7 +136,9 @@ function compactText(value: string | null | undefined, maxChars = COMPACT_SUMMAR
 function compactPod(
   pod: ReturnType<PodManager['getSession']>,
   request: FastifyRequest,
+  eventRepo?: EventRepository,
 ): CompactPod {
+  const reviewProgress = latestActiveReviewProgress(pod, eventRepo);
   const title = compactText(
     pod.briefTitle ?? pod.task.split('\n', 1)[0] ?? pod.id,
     COMPACT_TITLE_MAX_CHARS,
@@ -169,9 +172,11 @@ function compactPod(
     mergeBlockReason: compactText(pod.mergeBlockReason),
     lastCorrectionMessage: compactText(pod.lastCorrectionMessage),
     pendingEscalationSummary: compactText(pod.pendingEscalation?.question),
-    progressSummary: pod.progress
-      ? `${pod.progress.phase}: ${pod.progress.description}`.slice(0, 240)
-      : null,
+    progressSummary: reviewProgress
+      ? reviewProgressSummary(reviewProgress)
+      : pod.progress
+        ? `${pod.progress.phase}: ${pod.progress.description}`.slice(0, 240)
+        : null,
     inputTokens: pod.inputTokens,
     outputTokens: pod.outputTokens,
     costUsd: pod.costUsd,
@@ -204,6 +209,7 @@ function serializePodForRequest(
   pod: ReturnType<PodManager['getSession']>,
   request: FastifyRequest,
   providerAttemptRepo?: ProviderAttemptRepository,
+  eventRepo?: EventRepository,
 ): unknown {
   const attempts = providerAttemptRepo?.list(pod.id) ?? [];
   const latestAttempt = attempts.at(-1);
@@ -220,10 +226,38 @@ function serializePodForRequest(
     : pod;
   const wire = serializePodForWire(projectedPod) as Record<string, unknown>;
   wire.providerAttempts = attempts;
+  wire.reviewProgress = latestActiveReviewProgress(pod, eventRepo);
   if (typeof wire.previewUrl === 'string') {
     wire.previewUrl = rewritePreviewUrlForRequest(pod.id, wire.previewUrl, request);
   }
   return wire;
+}
+
+function latestActiveReviewProgress(
+  pod: ReturnType<PodManager['getSession']>,
+  eventRepo?: EventRepository,
+): ReviewProgressSnapshot | null {
+  if (!eventRepo || pod.status !== 'validating') return null;
+  const stored = eventRepo
+    .getForSession(pod.id, {
+      types: ['pod.review_progress', 'pod.validation_phase_completed'],
+      latest: 1,
+    })
+    .at(-1);
+  if (!stored || stored.payload.type !== 'pod.review_progress') return null;
+  return stored.payload.progress.attempt === pod.validationAttempts
+    ? stored.payload.progress
+    : null;
+}
+
+function reviewProgressSummary(progress: ReviewProgressSnapshot): string {
+  const settled = progress.axes.filter(
+    (axis) => axis.status === 'completed' || axis.status === 'unavailable',
+  ).length;
+  const elapsed = Math.max(0, Math.ceil(progress.elapsedMs / 1_000));
+  const guardrail = Math.max(1, Math.ceil(progress.guardrailMs / 60_000));
+  const stage = progress.stage === 'axes' ? 'Review council' : `Review ${progress.stage}`;
+  return `${stage}: ${settled}/${progress.axes.length} settled · ${elapsed}s / ${guardrail}m guardrail`;
 }
 
 const PREVIEW_PROXY_HOP_BY_HOP_HEADERS = new Set([
@@ -532,7 +566,7 @@ export function podRoutes(
         name: request.user.name,
       });
       reply.status(201);
-      return serializePodForRequest(pod, request, providerAttemptRepo);
+      return serializePodForRequest(pod, request, providerAttemptRepo, eventRepo);
     } catch (err) {
       if (err instanceof AutopodError) {
         reply.status(err.statusCode ?? 400);
@@ -603,18 +637,18 @@ export function podRoutes(
       before: cursor ?? undefined,
     });
     if (query.compact === 'true') {
-      if (!paginated) return pods.map((pod) => compactPod(pod, request));
+      if (!paginated) return pods.map((pod) => compactPod(pod, request, eventRepo));
       const hasMore = pods.length > paginatedLimit;
       const records = hasMore ? pods.slice(0, paginatedLimit) : pods;
       const last = records.at(-1);
       const response: CompactPodPage = {
-        pods: records.map((pod) => compactPod(pod, request)),
+        pods: records.map((pod) => compactPod(pod, request, eventRepo)),
         nextCursor:
           hasMore && last ? encodePodListCursor({ createdAt: last.createdAt, id: last.id }) : null,
       };
       return response;
     }
-    return pods.map((pod) => serializePodForRequest(pod, request, providerAttemptRepo));
+    return pods.map((pod) => serializePodForRequest(pod, request, providerAttemptRepo, eventRepo));
   });
 
   // GET /pods/stats — pod counts grouped by status
@@ -628,7 +662,12 @@ export function podRoutes(
   // GET /pods/:podId — get pod
   app.get('/pods/:podId', async (request) => {
     const { podId } = request.params as { podId: string };
-    return serializePodForRequest(podManager.getSession(podId), request, providerAttemptRepo);
+    return serializePodForRequest(
+      podManager.getSession(podId),
+      request,
+      providerAttemptRepo,
+      eventRepo,
+    );
   });
 
   // POST /pods/:podId/message — send message

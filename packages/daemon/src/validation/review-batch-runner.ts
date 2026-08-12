@@ -64,10 +64,13 @@ export interface ReviewBatchRunnerOptions {
   timeoutMs?: number;
   /** Safe status messages; never includes prompts or provider output. */
   onProgress?: (event: {
-    axis: ReviewAxis;
+    stage: 'axes' | 'synthesis';
+    axis?: ReviewAxis;
     attempt: number;
     status: 'started' | 'completed' | 'unavailable';
     elapsedMs: number;
+    durationMs?: number;
+    failureKind?: ReviewFailure['kind'];
   }) => void;
   /** Read HEAD immediately before each call; prevents a batch from mixing commits. */
   readHead?: () => Promise<string>;
@@ -246,6 +249,7 @@ export async function runReviewBatch(
         try {
           if (remaining() <= 0) throw new Error('frozen review council deadline exceeded');
           options.onProgress?.({
+            stage: 'axes',
             axis,
             attempt,
             status: 'started',
@@ -278,10 +282,12 @@ export async function runReviewBatch(
             durationMs: Date.now() - axisStarted,
           });
           options.onProgress?.({
+            stage: 'axes',
             axis,
             attempt,
             status: 'completed',
             elapsedMs: Date.now() - started,
+            durationMs: Date.now() - axisStarted,
           });
           lastError = undefined;
           break;
@@ -299,10 +305,13 @@ export async function runReviewBatch(
             });
           if (attempt === 2 || !failure.retryable)
             options.onProgress?.({
+              stage: 'axes',
               axis,
               attempt,
               status: 'unavailable',
               elapsedMs: Date.now() - started,
+              durationMs: Date.now() - axisStarted,
+              failureKind: failure.kind,
             });
           if (!failure.retryable) break;
         }
@@ -328,6 +337,12 @@ export async function runReviewBatch(
     if (basePrompt.length <= 1_000_000) {
       for (let attempt = 1; attempt <= 2; attempt++) {
         try {
+          options.onProgress?.({
+            stage: 'synthesis',
+            attempt,
+            status: 'started',
+            elapsedMs: Date.now() - started,
+          });
           if (options.readHead && (await options.readHead()) !== options.packet.reviewedHead)
             throw new Error('reviewed HEAD changed during frozen batch');
           const result = await options.synthesize(
@@ -341,11 +356,26 @@ export async function runReviewBatch(
           tokenUsage.push(result.tokenUsage);
           synthesized = parseSynthesis(result.stdout.slice(0, 1_000_000), allCandidates);
           synthesis = 'model';
+          options.onProgress?.({
+            stage: 'synthesis',
+            attempt,
+            status: 'completed',
+            elapsedMs: Date.now() - started,
+          });
           break;
         } catch (error) {
           const failure = failureFor(error);
           synthesisHeadChanged ||= failure.kind === 'head-changed';
           synthesisInvalid ||= !synthesisHeadChanged;
+          if (attempt === 2 || synthesisHeadChanged || !failure.retryable) {
+            options.onProgress?.({
+              stage: 'synthesis',
+              attempt,
+              status: 'unavailable',
+              elapsedMs: Date.now() - started,
+              failureKind: failure.kind,
+            });
+          }
           if (synthesisHeadChanged || !failure.retryable) break;
         }
       }

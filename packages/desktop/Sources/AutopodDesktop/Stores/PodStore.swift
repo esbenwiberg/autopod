@@ -108,7 +108,13 @@ public final class PodStore {
       merged.updatedAt = current.updatedAt
     }
     if shouldPreserveValidationProgress(current.validationProgress, for: merged) {
-      merged.validationProgress = current.validationProgress
+      var preserved = current.validationProgress
+      if let incomingReview = incoming.validationProgress?.reviewProgress,
+         (preserved?.reviewProgress?.updatedAt ?? .distantPast) < incomingReview.updatedAt {
+        preserved?.reviewProgress = incomingReview
+        preserved?.markStarted(.review)
+      }
+      merged.validationProgress = preserved
     }
     return merged
   }
@@ -408,6 +414,20 @@ public final class PodStore {
     pods[index].validationProgress?.markCompleted(phase, result: result) { dto in
       PodMapper.mapScreenshotRef(dto, baseURL: baseURL)
     }
+  }
+
+  public func applyReviewProgress(_ podId: String, progress: LiveReviewProgress) {
+    guard let index = pods.firstIndex(where: { $0.id == podId }) else { return }
+    if pods[index].validationProgress == nil {
+      pods[index].validationProgress = ValidationProgress.initial(attempt: progress.attempt)
+    }
+    if let current = pods[index].validationProgress?.reviewProgress,
+       current.updatedAt > progress.updatedAt {
+      return
+    }
+    pods[index].validationProgress?.reviewProgress = progress
+    pods[index].validationProgress?.markStarted(.review)
+    pods[index].latestActivity = progress.summary()
   }
 
   public func setPrUrl(_ podId: String, url: URL) {

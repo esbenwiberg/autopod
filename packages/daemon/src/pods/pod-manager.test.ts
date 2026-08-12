@@ -7450,6 +7450,50 @@ describe('PodManager', () => {
       expect(result.status).toBe('validated');
     });
 
+    it('persists and broadcasts typed live review progress', async () => {
+      const ctx = createTestContext({ overall: 'pass' });
+      vi.mocked(ctx.validationEngine.validate).mockImplementationOnce(
+        async (config, _onProgress, _signal, callbacks) => {
+          callbacks?.onReviewProgress?.({
+            attempt: config.attempt,
+            startedAt: '2026-08-11T16:46:52.000Z',
+            updatedAt: '2026-08-11T16:47:37.000Z',
+            elapsedMs: 45_000,
+            guardrailMs: 300_000,
+            stage: 'axes',
+            axes: [
+              { axis: 'contract_completeness', status: 'completed', attempt: 1 },
+              { axis: 'security_authority', status: 'running', attempt: 1 },
+              { axis: 'lifecycle_reliability', status: 'queued', attempt: 0 },
+              { axis: 'persistence_reproducibility', status: 'queued', attempt: 0 },
+              { axis: 'tests_integration', status: 'queued', attempt: 0 },
+            ],
+          });
+          return makeValidationResult({ validationSuite: config.validationSuite });
+        },
+      );
+      const manager = createPodManager(ctx.deps);
+      const pod = manager.createSession(
+        { profileName: 'test-profile', task: 'Add feature' },
+        'user-1',
+      );
+      ctx.podRepo.update(pod.id, {
+        status: 'running',
+        containerId: 'ctr-1',
+        worktreePath: '/tmp/wt',
+      });
+
+      await manager.triggerValidation(pod.id);
+
+      const stored = ctx.eventRepo.getForSession(pod.id, { type: 'pod.review_progress' });
+      expect(stored).toHaveLength(1);
+      expect(stored[0]?.payload).toMatchObject({
+        type: 'pod.review_progress',
+        podId: pod.id,
+        progress: { stage: 'axes', elapsedMs: 45_000 },
+      });
+    });
+
     it('passes the sandbox execution target into initial validation', async () => {
       const ctx = createTestContext(
         { overall: 'pass' },

@@ -3,6 +3,37 @@ import Testing
 @testable import AutopodClient
 @testable import AutopodUI
 
+@Test func reviewCouncilActivityCollapsesToLatestSnapshotOnly() {
+  let events = [
+    AgentEvent(
+      id: 1,
+      timestamp: Date(timeIntervalSince1970: 1),
+      type: .progress,
+      summary: "Review council · 1/5 settled",
+      toolName: "review_council"
+    ),
+    AgentEvent(
+      id: 2,
+      timestamp: Date(timeIntervalSince1970: 2),
+      type: .fileChange,
+      summary: "Updated source"
+    ),
+    AgentEvent(
+      id: 3,
+      timestamp: Date(timeIntervalSince1970: 3),
+      type: .progress,
+      summary: "Review council · 3/5 settled",
+      detail: "Contract: completed",
+      toolName: "review_council"
+    ),
+  ]
+
+  let grouped = groupReviewCouncilActivity(events)
+
+  #expect(grouped.map(\.id) == [2, 3])
+  #expect(grouped.last?.detail == "Contract: completed")
+}
+
 @Test func reviewCouncilDecodesAndPresentsLedgerLifecycle() throws {
   let data = """
   {"status":"fail","reasoning":"broad","issues":["legacy"],"model":"m","screenshots":[],"diff":"","tokenUsage":{"inputTokens":12,"outputTokens":4,"costUsd":0.03},"firstGateOverflow":{"reportedCount":9,"retainedFindingCount":2},"reviewBatch":{"id":"packet","diffHash":"abcdef123456","reviewedHead":"head","promptVersion":"p2","schemaVersion":"s2","model":"m","axes":[{"axis":"security_authority","status":"unavailable","attempts":2,"durationMs":400,"error":"Network unavailable"},{"axis":"contract_completeness","status":"completed","attempts":1,"durationMs":200}],"candidates":[{"id":"initial-1","source":"initial-review","issue":"raw"},{"id":"s1","axis":"security_authority","severity":"HIGH","path":"a.swift","line":4,"symbol":"run","claim":"same text","evidence":"proof","remediation":"fix","confidence":0.9}],"initialFindings":[{"id":"initial-1","source":"initial-review","issue":"raw"}],"accepted":[{"id":"s1","axis":"security_authority","severity":"HIGH","path":"a.swift","claim":"same text","evidence":"proof","remediation":"fix","confidence":0.9}],"rejected":[{"sourceIds":["x"],"reason":"duplicate"}],"merged":[{"finding":{"id":"s2","axis":"tests_integration","severity":"MEDIUM","path":"b.swift","claim":"merged","evidence":"e","remediation":"r","confidence":0.5},"sourceIds":["a","b"]}],"synthesis":"model","durationMs":1200,"tokenUsage":{"inputTokens":10,"outputTokens":5,"cachedInputTokens":2,"cacheCreationInputTokens":1,"costUsd":0.02},"ledger":[{"semanticId":"review:one","finding":{"id":"s1","axis":"security_authority","severity":"HIGH","path":"a.swift","claim":"same text","evidence":"proof","remediation":"fix","confidence":0.9},"state":"new","priorSourceIds":[],"currentSourceIds":["s1"]},{"semanticId":"review:two","finding":{"id":"initial-1","source":"initial-review","issue":"raw"},"state":"fixed","priorSourceIds":["initial-1"],"currentSourceIds":[],"closureEvidence":"verified"}],"repairDelta":{"status":"available","fromHead":"a","toHead":"b","diffHash":"d"},"closureVerification":{"status":"completed","decisions":[{"semanticId":"review:two","fixed":true,"evidence":"verified"}]}}}

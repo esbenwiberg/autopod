@@ -130,6 +130,40 @@ describe('runReviewBatch', () => {
     });
   });
 
+  it('reports safe ordered axis and synthesis transitions', async () => {
+    const progress: Array<{
+      stage: 'axes' | 'synthesis';
+      axis?: string;
+      attempt: number;
+      status: string;
+    }> = [];
+    await runReviewBatch({
+      packet: packet(),
+      model: 'test',
+      execute: async () => ({ stdout: '{"findings":[]}' }),
+      synthesize: async () => ({ stdout: '{"decisions":[]}' }),
+      onProgress: (event) => progress.push(event),
+    });
+
+    expect(
+      progress.filter((event) => event.stage === 'axes' && event.status === 'started'),
+    ).toHaveLength(5);
+    expect(
+      progress.filter((event) => event.stage === 'axes' && event.status === 'completed'),
+    ).toHaveLength(5);
+    const firstSynthesis = progress.findIndex((event) => event.stage === 'synthesis');
+    const finalAxis = progress.reduce(
+      (index, event, current) => (event.stage === 'axes' ? current : index),
+      -1,
+    );
+    expect(firstSynthesis).toBeGreaterThan(finalAxis);
+    expect(progress.slice(firstSynthesis)).toEqual([
+      expect.objectContaining({ stage: 'synthesis', attempt: 1, status: 'started' }),
+      expect.objectContaining({ stage: 'synthesis', attempt: 1, status: 'completed' }),
+    ]);
+    expect(JSON.stringify(progress)).not.toContain('findings');
+  });
+
   it('retries malformed output with a stable code without echoing model output', async () => {
     const prompts: string[] = [];
     let first = true;

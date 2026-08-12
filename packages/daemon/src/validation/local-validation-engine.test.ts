@@ -1112,6 +1112,11 @@ describe('validate() — hasWebUi gating', () => {
       };
     });
 
+    const progress: NonNullable<ValidationPhaseCallbacks['onReviewProgress']> extends (
+      value: infer T,
+    ) => void
+      ? T[]
+      : never = [];
     const result = await createLocalValidationEngine(stubContainerManager()).validate(
       baseConfig({
         reviewerModel: 'gpt-5.6-sol',
@@ -1122,6 +1127,9 @@ describe('validate() — hasWebUi gating', () => {
         startCommand: '',
         smokePages: [],
       }),
+      undefined,
+      undefined,
+      { onReviewProgress: (snapshot) => progress.push(snapshot) },
     );
 
     expect(runContainerReviewer).toHaveBeenCalledTimes(6);
@@ -1133,6 +1141,11 @@ describe('validate() — hasWebUi gating', () => {
     expect(result.taskReview?.reviewBatch?.axes).toHaveLength(5);
     expect(result.taskReview?.reviewBatch?.degradationReasons).toBeUndefined();
     expect(result.taskReview?.tokenUsage).toMatchObject({ inputTokens: 160, outputTokens: 32 });
+    expect(progress[0]).toMatchObject({ stage: 'axes', attempt: 1, guardrailMs: 300_000 });
+    expect(progress[0]?.axes).toHaveLength(5);
+    expect(progress.some((snapshot) => snapshot.stage === 'synthesis')).toBe(true);
+    expect(progress.at(-1)?.stage).toBe('finalizing');
+    expect(progress.at(-1)?.axes.every((axis) => axis.status === 'completed')).toBe(true);
   });
 
   it('lets a healthy council reject a broad first-gate finding on the frozen head', async () => {
@@ -1380,6 +1393,7 @@ describe('validate() — hasWebUi gating', () => {
       synthesis: 'model' as const,
       durationMs: 1,
     };
+    const stages: string[] = [];
     const result = await createLocalValidationEngine(stubContainerManager()).validate(
       baseConfig({
         reviewerModel: 'claude-sonnet-4-6',
@@ -1390,6 +1404,9 @@ describe('validate() — hasWebUi gating', () => {
         smokePages: [],
         priorReviewBatch,
       }),
+      undefined,
+      undefined,
+      { onReviewProgress: (snapshot) => stages.push(snapshot.stage) },
     );
     expect(runClaudeCli).not.toHaveBeenCalled();
     expect(runContainerReviewer).toHaveBeenCalledTimes(7);
@@ -1397,6 +1414,8 @@ describe('validate() — hasWebUi gating', () => {
     expect(result.taskReview?.reviewBatch?.closureVerification?.status).toBe('unavailable');
     expect(result.taskReview?.reviewBatch?.ledger?.[0]?.state).toBe('open');
     expect(result.overall).toBe('fail');
+    expect(stages).toContain('closure');
+    expect(stages.at(-1)).toBe('finalizing');
   });
 
   it('closes prior findings across verified sibling sandbox checkpoints', async () => {

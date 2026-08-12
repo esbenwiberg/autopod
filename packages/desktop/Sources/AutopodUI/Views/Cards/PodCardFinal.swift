@@ -998,6 +998,33 @@ public struct SessionCardFinal: View {
                         .font(.caption2)
                         .foregroundStyle(.secondary)
                 }
+                if let review = pod.validationProgress?.reviewProgress {
+                    TimelineView(.periodic(from: .now, by: 1)) { context in
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("\(review.stage.displayName) · \(review.settledCount)/\(review.axes.count) settled")
+                                .font(.caption.weight(.medium))
+                                .foregroundStyle(.primary)
+                                .lineLimit(1)
+                            let state = [
+                                review.runningCount > 0 ? "\(review.runningCount) running" : nil,
+                                review.unavailableCount > 0
+                                    ? "\(review.unavailableCount) unavailable" : nil,
+                                review.timeLabel(at: context.date),
+                            ].compactMap { $0 }.joined(separator: " · ")
+                            Text(state)
+                                .font(.caption2)
+                                .foregroundStyle(review.unavailableCount > 0 ? .orange : .secondary)
+                                .lineLimit(2)
+                        }
+                        .accessibilityElement(children: .combine)
+                    }
+                } else if let activity = pod.latestActivity,
+                          activity.hasPrefix("Review ") {
+                    Text(activity)
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(2)
+                }
                 if pod.containerUrl != nil {
                     Button {
                         if let url = pod.containerUrl { NSWorkspace.shared.open(url) }

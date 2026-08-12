@@ -503,6 +503,9 @@ public struct ValidationTab: View {
         }
         return nil
       case .review:
+        if let liveReview = p.reviewProgress {
+          return "\(liveReview.settledCount)/\(liveReview.axes.count) settled"
+        }
         return reviewPhasePresentation(
           progress: progress,
           checks: displayedChecks,
@@ -1856,6 +1859,9 @@ public struct ValidationTab: View {
     let findingItems = reviewFindingItems(from: legacyPresentation?.issues ?? [])
 
     VStack(alignment: .leading, spacing: 12) {
+      if let liveReview = progress?.reviewProgress {
+        LiveReviewProgressView(progress: liveReview)
+      } else {
       phaseStatusRow(
         status: presentation.status,
         passLabel: detail?.status == "uncertain" ? "Review uncertain — treated as pass" : "AI review passed",
@@ -1950,6 +1956,7 @@ public struct ValidationTab: View {
       correctionMessageBlock
       if let verdict = pod.preSubmitReview {
         preSubmitReviewDisclosure(verdict)
+      }
       }
     }
   }

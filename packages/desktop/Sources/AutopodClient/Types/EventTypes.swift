@@ -40,6 +40,9 @@ public struct RawSystemEvent: Codable, Sendable {
   public let reviewResult: TaskReviewResponse?
   public let advisoryResult: AdvisoryBrowserQaResponse?
 
+  // pod.review_progress
+  public let progress: ReviewProgressResponse?
+
   // pod.escalation_created
   public let escalation: EscalationResponse?
 
@@ -140,6 +143,7 @@ public enum SystemEvent: Sendable {
   case validationCompleted(podId: String, result: ValidationResponse)
   case validationPhaseStarted(podId: String, phase: ValidationPhase)
   case validationPhaseCompleted(podId: String, phase: ValidationPhase, result: ValidationPhaseResult)
+  case reviewProgress(podId: String, progress: ReviewProgressResponse)
   case escalationCreated(podId: String, escalation: EscalationResponse)
   case escalationResolved(podId: String, escalationId: String)
   case sessionCompleted(podId: String, finalStatus: String, summary: SessionSummaryResponse)
@@ -185,6 +189,10 @@ public enum SystemEvent: Sendable {
       guard let id = raw.podId, let phaseStr = raw.phase,
             let phase = ValidationPhase(rawValue: phaseStr) else { return nil }
       return .validationPhaseCompleted(podId: id, phase: phase, result: ValidationPhaseResult(from: raw))
+
+    case "pod.review_progress":
+      guard let id = raw.podId, let progress = raw.progress else { return nil }
+      return .reviewProgress(podId: id, progress: progress)
 
     case "pod.escalation_created":
       guard let id = raw.podId, let escalation = raw.escalation else { return nil }

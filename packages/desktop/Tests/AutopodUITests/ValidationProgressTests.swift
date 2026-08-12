@@ -92,3 +92,32 @@ import Testing
   #expect(validationShouldDisplayLiveProgress(podStatus: .complete, progress: progress, hasPersistedReviewCouncil: false))
   #expect(!validationShouldDisplayLiveProgress(podStatus: .complete, progress: progress, hasPersistedReviewCouncil: true))
 }
+
+@Test func liveReviewProgressUsesSettledNotCompletedForUnavailableAxes() {
+  let started = Date(timeIntervalSince1970: 1_000)
+  let progress = LiveReviewProgress(
+    attempt: 1,
+    startedAt: started,
+    updatedAt: started.addingTimeInterval(82),
+    elapsedMs: 82_000,
+    guardrailMs: 300_000,
+    stage: .axes,
+    axes: [
+      LiveReviewAxis(axis: "contract_completeness", status: .completed, attempt: 1),
+      LiveReviewAxis(axis: "security_authority", status: .unavailable, attempt: 2),
+      LiveReviewAxis(axis: "lifecycle_reliability", status: .completed, attempt: 1),
+      LiveReviewAxis(axis: "persistence_reproducibility", status: .running, attempt: 1),
+      LiveReviewAxis(axis: "tests_integration", status: .queued, attempt: 0),
+    ]
+  )
+  let presentation = liveReviewProgressPresentation(
+    progress,
+    at: started.addingTimeInterval(82)
+  )
+
+  #expect(progress.settledCount == 3)
+  #expect(progress.completedCount == 2)
+  #expect(presentation.headline == "3/5 settled")
+  #expect(presentation.timing == "1m 22s / 5m guardrail")
+  #expect(!presentation.headline.contains("complete"))
+}

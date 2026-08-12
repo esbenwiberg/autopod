@@ -23,7 +23,7 @@ public struct ActivityFeedList: View {
     @State private var expandedEventId: Int?
 
     private var visibleEvents: [AgentEvent] {
-        Array(events.filter { $0.type.isOverviewWorthy }.suffix(maxCount))
+        Array(groupReviewCouncilActivity(events.filter { $0.type.isOverviewWorthy }).suffix(maxCount))
     }
 
     public var body: some View {
@@ -97,6 +97,14 @@ public struct ActivityFeedList: View {
                 .clipShape(RoundedRectangle(cornerRadius: 8))
             }
         }
+    }
+}
+
+public func groupReviewCouncilActivity(_ events: [AgentEvent]) -> [AgentEvent] {
+    guard let latestReviewIndex = events.lastIndex(where: { $0.toolName == "review_council" })
+    else { return events }
+    return events.enumerated().compactMap { index, event in
+        event.toolName != "review_council" || index == latestReviewIndex ? event : nil
     }
 }
 

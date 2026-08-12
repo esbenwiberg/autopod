@@ -1,0 +1,24 @@
+contract_version: 1
+title: "Carry review progress into desktop state"
+depends_on: [02-emit-and-hydrate-review-progress]
+scenarios:
+  - id: desktop-progress-state
+    given:
+      - "live event and REST hydration payloads that use the same review-progress snapshot contract"
+    when:
+      - "the desktop decodes and applies them"
+    then:
+      - "one ordered domain model preserves the newest snapshot and exposes safe grouped activity evidence"
+required_facts:
+  - id: fact-desktop-progress-contract
+    proves: [desktop-progress-state]
+    kind: custom-command
+    artifact:
+      path: packages/desktop/Tests/review-progress-contract.mjs
+      change: create
+    command: node packages/desktop/Tests/review-progress-contract.mjs
+human_review:
+  - id: review-native-state-tests
+    covers: [desktop-progress-state]
+    criterion: "Focused Swift tests compile and pass for DTO decoding, freshness ordering, and PodStore application."
+    reason: "The macOS Swift package cannot be an Autopod Linux required fact under convention-001."

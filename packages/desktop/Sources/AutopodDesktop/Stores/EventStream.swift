@@ -244,6 +244,21 @@ public final class EventStream {
     case .validationPhaseCompleted(let podId, let phase, let result):
       podStore.markValidationPhaseCompleted(podId, phase: phase, result: result)
 
+    case .reviewProgress(let podId, let response):
+      guard let progress = PodMapper.mapReviewProgress(response) else { return }
+      podStore.applyReviewProgress(podId, progress: progress)
+      let activity = AgentEvent(
+        id: raw._eventId ?? nextLocalEventId(),
+        timestamp: progress.updatedAt,
+        type: .progress,
+        summary: progress.summary(at: progress.updatedAt),
+        detail: progress.activityDetail,
+        toolName: "review_council"
+      )
+      pendingGlobalEvents.append(activity)
+      pendingSessionEvents.append((podId, activity))
+      scheduleFlush()
+
     case .validationCompleted(let podId, let result):
       let passed = result.overall == "pass"
       let checks = ValidationChecks(

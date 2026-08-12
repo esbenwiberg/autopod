@@ -247,6 +247,34 @@ export type ReviewFailureKind =
   | 'runner-failed'
   | 'head-changed';
 
+export type ReviewProgressStage = 'axes' | 'synthesis' | 'closure' | 'finalizing';
+
+export type ReviewProgressAxisStatus = 'queued' | 'running' | 'completed' | 'unavailable';
+
+/** Safe operational state for one required frozen-review axis. */
+export interface ReviewProgressAxis {
+  axis: ReviewAxis;
+  status: ReviewProgressAxisStatus;
+  attempt: number;
+  durationMs?: number;
+  failureKind?: ReviewFailureKind;
+}
+
+/**
+ * Independently renderable progress for the currently running Review phase.
+ * This is operational telemetry only: it carries no prompts, provider output,
+ * findings, or review authority.
+ */
+export interface ReviewProgressSnapshot {
+  attempt: number;
+  startedAt: string;
+  updatedAt: string;
+  elapsedMs: number;
+  guardrailMs: number;
+  stage: ReviewProgressStage;
+  axes: ReviewProgressAxis[];
+}
+
 export interface ReviewFailure {
   kind: ReviewFailureKind;
   code: string;

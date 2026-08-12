@@ -487,7 +487,36 @@ public enum PodMapper {
         createdAt: Date(timeIntervalSince1970: Double(msg.createdAt) / 1000)
       )
     }
+    if let reviewProgress = mapReviewProgress(response.reviewProgress) {
+      var validationProgress = result.validationProgress
+        ?? ValidationProgress.initial(attempt: reviewProgress.attempt)
+      validationProgress.reviewProgress = reviewProgress
+      validationProgress.markStarted(.review)
+      result.validationProgress = validationProgress
+    }
     return result
+  }
+
+  static func mapReviewProgress(_ response: ReviewProgressResponse?) -> LiveReviewProgress? {
+    guard let response, let stage = LiveReviewStage(rawValue: response.stage) else { return nil }
+    return LiveReviewProgress(
+      attempt: response.attempt,
+      startedAt: parseDate(response.startedAt),
+      updatedAt: parseDate(response.updatedAt),
+      elapsedMs: response.elapsedMs,
+      guardrailMs: response.guardrailMs,
+      stage: stage,
+      axes: response.axes.compactMap { axis in
+        guard let status = LiveReviewAxisStatus(rawValue: axis.status) else { return nil }
+        return LiveReviewAxis(
+          axis: axis.axis,
+          status: status,
+          attempt: axis.attempt,
+          durationMs: axis.durationMs,
+          failureKind: axis.failureKind
+        )
+      }
+    )
   }
 
   static func mapPreSubmitReview(_ snapshot: PreSubmitReviewSnapshotResponse?)

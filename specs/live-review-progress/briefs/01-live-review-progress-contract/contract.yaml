@@ -1,0 +1,20 @@
+contract_version: 1
+title: "Define live review progress contract"
+depends_on: []
+scenarios:
+  - id: runner-progress-transitions
+    given:
+      - "a frozen five-axis review batch with the existing shared deadline and retry policy"
+    when:
+      - "axes run, retry, settle, and the batch enters synthesis"
+    then:
+      - "safe ordered progress transitions identify axis attempts, terminal outcomes, and synthesis without changing execution semantics"
+required_facts:
+  - id: fact-runner-progress-transitions
+    proves: [runner-progress-transitions]
+    kind: unit-test
+    artifact:
+      path: packages/daemon/src/validation/review-batch-runner.test.ts
+      change: update
+    command: npx pnpm --filter @autopod/daemon test -- review-batch-runner.test.ts
+human_review: []

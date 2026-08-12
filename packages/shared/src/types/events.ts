@@ -16,6 +16,7 @@ import type {
   HealthResult,
   LintResult,
   PageResult,
+  ReviewProgressSnapshot,
   SastResult,
   SetupResult,
   TaskReviewResult,
@@ -43,6 +44,7 @@ export type SystemEvent =
   | ValidationCompletedEvent
   | ValidationPhaseStartedEvent
   | ValidationPhaseCompletedEvent
+  | ReviewProgressEvent
   | EscalationCreatedEvent
   | EscalationResolvedEvent
   | PodCompletedEvent
@@ -224,6 +226,13 @@ export interface ValidationPhaseCompletedEvent {
   factResult?: FactValidationResult | null;
   reviewResult?: TaskReviewResult | null;
   advisoryResult?: AdvisoryBrowserQaResult | null;
+}
+
+export interface ReviewProgressEvent {
+  type: 'pod.review_progress';
+  timestamp: string;
+  podId: string;
+  progress: ReviewProgressSnapshot;
 }
 
 export interface EscalationCreatedEvent {
