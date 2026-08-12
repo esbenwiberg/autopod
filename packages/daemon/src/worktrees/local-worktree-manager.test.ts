@@ -450,6 +450,53 @@ describe('LocalWorktreeManager', () => {
   });
 
   // -------------------------------------------------------------------------
+  // getChangedPathsAgainstBase
+  // -------------------------------------------------------------------------
+
+  describe('getChangedPathsAgainstBase', () => {
+    it('returns net paths against origin base before considering a stale local base', async () => {
+      const calls: string[][] = [];
+      execFileMock.mockImplementation(
+        (_file: string, args: string[], arg3: unknown, arg4?: unknown) => {
+          const cb = resolveCallback(arg3, arg4);
+          calls.push([...args]);
+          if (args[0] === 'merge-base' && args[2] === 'origin/main') {
+            cb(null, { stdout: 'remote-base\n', stderr: '' });
+          } else if (args[0] === 'diff') {
+            cb(null, { stdout: 'src/theme.ts\0.husky/pre-commit\0', stderr: '' });
+          } else {
+            cb(new Error('unexpected git command'), '', '');
+          }
+          return {} as ChildProcess;
+        },
+      );
+
+      await expect(
+        manager.getChangedPathsAgainstBase('/tmp/worktree/sess', 'main'),
+      ).resolves.toEqual(['src/theme.ts', '.husky/pre-commit']);
+      expect(calls[0]).toEqual(['merge-base', 'HEAD', 'origin/main']);
+      expect(calls.some((args) => args[0] === 'merge-base' && args[2] === 'main')).toBe(false);
+      expect(calls.find((args) => args[0] === 'diff')).toEqual(
+        expect.arrayContaining(['diff', '--name-only', '-z', 'remote-base']),
+      );
+    });
+
+    it('fails closed when neither base ref can be resolved', async () => {
+      execFileMock.mockImplementation(
+        (_file: string, _args: string[], arg3: unknown, arg4?: unknown) => {
+          const cb = resolveCallback(arg3, arg4);
+          cb(new Error('missing ref'), '', '');
+          return {} as ChildProcess;
+        },
+      );
+
+      await expect(
+        manager.getChangedPathsAgainstBase('/tmp/worktree/sess', 'main'),
+      ).rejects.toThrow("Could not resolve merge-base for 'main'");
+    });
+  });
+
+  // -------------------------------------------------------------------------
   // getDiff
   // -------------------------------------------------------------------------
 

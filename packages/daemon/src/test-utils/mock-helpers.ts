@@ -184,6 +184,7 @@ export function createMockWorktreeManager(): WorktreeManager {
       }),
     ),
     hasChangesAgainstBase: vi.fn(async () => true),
+    getChangedPathsAgainstBase: vi.fn(async () => ['file.ts']),
     getDiff: vi.fn(async () => 'diff --git a/file.ts b/file.ts\n+added line'),
     mergeBranch: vi.fn(async () => {}),
     commitFiles: vi.fn(async () => {}),

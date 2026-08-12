@@ -193,6 +193,11 @@ export interface WorktreeManager {
    * can choose the conservative path when emptiness is uncertain.
    */
   hasChangesAgainstBase?(worktreePath: string, baseBranch: string): Promise<boolean>;
+  /**
+   * Return the net changed paths against the current base branch.
+   * This is strict because safety gates must not treat an unresolved base as an empty change set.
+   */
+  getChangedPathsAgainstBase?(worktreePath: string, baseBranch: string): Promise<string[]>;
   mergeBranch(config: MergeBranchConfig): Promise<void>;
   /** Get raw diff between current HEAD and a base branch (or a specific commit). */
   getDiff(

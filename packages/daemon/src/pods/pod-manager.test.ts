@@ -357,6 +357,7 @@ function createMockWorktreeManager(): WorktreeManager {
       }),
     ),
     hasChangesAgainstBase: vi.fn(async () => true),
+    getChangedPathsAgainstBase: vi.fn(async () => ['file.ts']),
     getDiff: vi.fn(async () => 'diff --git a/file.ts b/file.ts\n+added line'),
     mergeBranch: vi.fn(async () => {}),
     commitFiles: vi.fn(async () => {}),
@@ -12388,7 +12389,7 @@ describe('PodManager', () => {
 
     it('fails validation before review when protected operational files changed out of scope', async () => {
       const ctx = createTestContext({ overall: 'pass' });
-      (ctx.worktreeManager.getDiff as ReturnType<typeof vi.fn>).mockResolvedValueOnce(
+      (ctx.worktreeManager.getDiff as ReturnType<typeof vi.fn>).mockResolvedValue(
         'diff --git a/.husky/pre-commit b/.husky/pre-commit\n' +
           '--- a/.husky/pre-commit\n' +
           '+++ b/.husky/pre-commit\n' +
@@ -12396,6 +12397,9 @@ describe('PodManager', () => {
           '-old\n' +
           '+new\n',
       );
+      (
+        ctx.worktreeManager.getChangedPathsAgainstBase as ReturnType<typeof vi.fn>
+      ).mockResolvedValue(['.husky/pre-commit']);
 
       const manager = createPodManager(ctx.deps);
       const pod = manager.createSession(
@@ -12412,7 +12416,59 @@ describe('PodManager', () => {
 
       const result = manager.getSession(pod.id);
       expect(result.status).toBe('failed');
+      expect(result.failureReason).toContain(
+        'Protected operational files changed without explicit task scope: .husky/pre-commit',
+      );
+      const messages = ctx.eventRepo
+        .getForSession(pod.id, { type: 'pod.agent_activity' })
+        .map((event) => {
+          const payload = event.payload as { event?: { message?: unknown } };
+          return payload.event?.message;
+        });
+      expect(messages).toContain(
+        'Validation failed before checks could complete: Protected operational files changed without explicit task scope: .husky/pre-commit. Revert these hook/agent-config changes or disclose explicit scope for them before validation.',
+      );
       expect(ctx.validationEngine.validate).not.toHaveBeenCalled();
+    });
+
+    it('does not attribute protected operational changes inherited from the base to the pod', async () => {
+      const ctx = createTestContext({ overall: 'pass' });
+      const inheritedDiff =
+        'diff --git a/.husky/pre-commit b/.husky/pre-commit\n' +
+        '--- a/.husky/pre-commit\n' +
+        '+++ b/.husky/pre-commit\n' +
+        '@@ -1 +1 @@\n' +
+        '-old\n' +
+        '+new\n' +
+        'diff --git a/src/theme.ts b/src/theme.ts\n' +
+        '--- a/src/theme.ts\n' +
+        '+++ b/src/theme.ts\n' +
+        '@@ -1 +1 @@\n' +
+        '-light\n' +
+        '+dark\n';
+      (ctx.worktreeManager.getDiff as ReturnType<typeof vi.fn>).mockResolvedValueOnce(
+        inheritedDiff,
+      );
+      (
+        ctx.worktreeManager.getChangedPathsAgainstBase as ReturnType<typeof vi.fn>
+      ).mockResolvedValueOnce(['src/theme.ts']);
+
+      const manager = createPodManager(ctx.deps);
+      const pod = manager.createSession(
+        { profileName: 'test-profile', task: 'Add accessible theme roles' },
+        'user-1',
+      );
+      ctx.podRepo.update(pod.id, {
+        status: 'running',
+        containerId: 'ctr-1',
+        worktreePath: '/tmp/wt',
+        startCommitSha: 'stale-start-sha',
+      });
+
+      await manager.triggerValidation(pod.id);
+
+      expect(ctx.validationEngine.validate).toHaveBeenCalledOnce();
+      expect(manager.getSession(pod.id).status).toBe('validated');
     });
 
     it('stops worker completion before validation when auto-commit hits the deletion guard', async () => {

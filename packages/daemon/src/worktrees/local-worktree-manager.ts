@@ -742,6 +742,25 @@ export class LocalWorktreeManager implements WorktreeManager {
     }
   }
 
+  async getChangedPathsAgainstBase(worktreePath: string, baseBranch: string): Promise<string[]> {
+    // Prefer origin/<base> so a long-lived pod does not claim newly-integrated base commits
+    // as its own work merely because the local base ref is stale.
+    const base = await this.resolveMergeBase(worktreePath, baseBranch, true);
+    if (!base) {
+      throw new Error(`Could not resolve merge-base for '${baseBranch}'`);
+    }
+
+    try {
+      const { stdout } = await git(['diff', '--name-only', '-z', base, ...DIFF_EXCLUDE_PATHSPECS], {
+        cwd: worktreePath,
+        maxBuffer: 10 * 1024 * 1024,
+      });
+      return stdout.split('\0').filter(Boolean);
+    } catch (err) {
+      throw sanitizeGitError(err);
+    }
+  }
+
   async getDiff(
     worktreePath: string,
     baseBranch: string,
@@ -1833,8 +1852,12 @@ export class LocalWorktreeManager implements WorktreeManager {
   private async resolveMergeBase(
     worktreePath: string,
     baseBranch: string,
+    preferRemote = false,
   ): Promise<string | undefined> {
-    for (const ref of [baseBranch, `origin/${baseBranch}`]) {
+    const refs = preferRemote
+      ? [`origin/${baseBranch}`, baseBranch]
+      : [baseBranch, `origin/${baseBranch}`];
+    for (const ref of refs) {
       try {
         const { stdout } = await git(['merge-base', 'HEAD', ref], {
           cwd: worktreePath,

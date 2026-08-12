@@ -6202,8 +6202,8 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
     ].some((needle) => haystack.includes(needle));
   }
 
-  function assertProtectedOperationalPathsInScope(pod: Pod, diff: string): void {
-    const changed = parseDiffFilePaths(diff).filter((p) => protectedOperationalPathReason(p));
+  function assertProtectedOperationalPathsInScope(pod: Pod, changedPaths: string[]): void {
+    const changed = changedPaths.filter((p) => protectedOperationalPathReason(p));
     if (changed.length === 0 || podExplicitlyScopesOperationalPaths(pod)) return;
     throw new AutopodError(
       `Protected operational files changed without explicit task scope: ${changed.join(', ')}. Revert these hook/agent-config changes or disclose explicit scope for them before validation.`,
@@ -12518,7 +12518,14 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
               ),
             ])
           : ['', ''];
-        assertProtectedOperationalPathsInScope(pod, diff);
+        const changedPathsAgainstBase =
+          pod.worktreePath && worktreeManager.getChangedPathsAgainstBase
+            ? await worktreeManager.getChangedPathsAgainstBase(
+                pod.worktreePath,
+                validationDefaultBranch,
+              )
+            : parseDiffFilePaths(diff);
+        assertProtectedOperationalPathsInScope(pod, changedPathsAgainstBase);
 
         // Try to load a repo-specific code-review skill from the worktree
         const codeReviewSkill = pod.worktreePath
@@ -13526,7 +13533,12 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         // Pod is still `validating`; runUpdateFromBaseAfterAbort handles status transitions.
         if (tryConsumeUpdateIntent()) return;
 
-        transition(s2, 'failed');
+        const failureReason = sanitizeFailureReason(
+          err,
+          'Validation failed before checks could complete',
+        );
+        emitActivityError(podId, failureReason);
+        transition(s2, 'failed', { failureReason });
 
         // Stop the container (not remove) so it can be restarted for preview
         if (s2.containerId) {
@@ -13751,7 +13763,11 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
               ),
             ])
           : ['', ''];
-        assertProtectedOperationalPathsInScope(pod, diff);
+        const changedPathsAgainstBase =
+          pod.worktreePath && worktreeManager.getChangedPathsAgainstBase
+            ? await worktreeManager.getChangedPathsAgainstBase(pod.worktreePath, revalDefaultBranch)
+            : parseDiffFilePaths(diff);
+        assertProtectedOperationalPathsInScope(pod, changedPathsAgainstBase);
 
         const codeReviewSkill = pod.worktreePath
           ? await loadCodeReviewSkill(pod.worktreePath, logger)
@@ -14078,7 +14094,12 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
       } catch (err) {
         logger.error({ err, podId }, 'Revalidation error');
         const s2 = podRepo.getOrThrow(podId);
-        transition(s2, 'failed');
+        const failureReason = sanitizeFailureReason(
+          err,
+          'Validation failed before checks could complete',
+        );
+        emitActivityError(podId, failureReason);
+        transition(s2, 'failed', { failureReason });
         return { newCommits, result: 'fail' };
       }
     },
