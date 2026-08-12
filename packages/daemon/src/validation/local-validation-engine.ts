@@ -1056,6 +1056,10 @@ export function createLocalValidationEngine(
             const ledger = reconcileReviewLedger(config.priorReviewBatch, ledgerCurrent, closure, {
               reviewedHead,
               ...(repair.diffHash ? { repairDiffHash: repair.diffHash } : {}),
+              // Once a pod is repairing a canonical finding set, later council
+              // sampling may close or regress those identities but cannot grow
+              // the contract with unrelated findings discovered stochastically.
+              freezeFindingSet: priorActive.length > 0,
             });
             batch.ledger = ledger;
             if (firstGateOverflow) batch.firstGateOverflow = firstGateOverflow;

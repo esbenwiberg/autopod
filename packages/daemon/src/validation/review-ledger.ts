@@ -168,6 +168,12 @@ export interface ReviewLedgerInput {
 export interface ReviewResolutionContext {
   reviewedHead: string;
   repairDiffHash?: string;
+  /**
+   * Repair retries operate on the finding set frozen by the first canonical
+   * review. A stochastic follow-up council may re-observe those findings, but
+   * it must not expand the repair contract with unrelated new identities.
+   */
+  freezeFindingSet?: boolean;
 }
 
 function semanticId(finding: ReviewFindingCandidate): string {
@@ -310,6 +316,7 @@ export function reconcileReviewLedger(
       });
       continue;
     }
+    if (resolutionContext?.freezeFindingSet) continue;
     out.push({
       semanticId: id,
       finding: currentFinding.finding,
@@ -319,6 +326,23 @@ export function reconcileReviewLedger(
     });
   }
   return out.sort((a, b) => a.semanticId.localeCompare(b.semanticId)).map(boundedLedgerEntry);
+}
+
+function normalizedRepairEvidence(value: string, repairDelta: boolean): string {
+  const lines = value.split(/\r?\n/).flatMap((line) => {
+    if (!repairDelta) return [line.replace(/^\+(?!\+\+)/, '')];
+    if (line.startsWith('+++') || line.startsWith('---') || line.startsWith('@@')) return [];
+    if (line.startsWith('-')) return [];
+    return [line.replace(/^[+ ]/, '')];
+  });
+  return lines.join('\n').replace(/\s+/g, ' ').trim();
+}
+
+function evidenceExistsInRepairDelta(evidence: string, repairDelta: string): boolean {
+  const trimmed = evidence.trim();
+  const normalizedEvidence = normalizedRepairEvidence(trimmed, false);
+  if (normalizedEvidence.length < 16) return false;
+  return normalizedRepairEvidence(repairDelta, true).includes(normalizedEvidence);
 }
 
 export function activeLedgerFindings(ledger: ReviewFindingLedgerEntry[]): ReviewFindingCandidate[] {
@@ -369,7 +393,10 @@ export function parseClosureVerification(
         // The engine supplies the bounded frozen repair delta. A fixed verdict is
         // valid only when its persisted proof is a direct source reference into
         // those immutable bytes, never an unsupported model assertion.
-        if (frozenEvidence !== undefined && !frozenEvidence.includes(d.evidence.trim()))
+        if (
+          frozenEvidence !== undefined &&
+          !evidenceExistsInRepairDelta(d.evidence, frozenEvidence)
+        )
           throw new Error('closure evidence is not present in frozen repair delta');
       }
       const safeEvidence =

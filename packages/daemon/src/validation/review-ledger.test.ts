@@ -182,6 +182,24 @@ describe('reconcileReviewLedger', () => {
     expect(states(three)).toEqual({ A: 'regressed', B: 'fixed', C: 'fixed' });
   });
 
+  it('freezes the repair finding set instead of accumulating unrelated retry findings', () => {
+    const prior = reconcileReviewLedger(undefined, [finding('A'), finding('B')], undefined);
+    const repaired = reconcileReviewLedger(
+      { ...batch([]), ledger: prior },
+      [finding('B'), finding('new stochastic finding')],
+      {
+        status: 'completed',
+        decisions: [
+          { semanticId: semantic('A'), fixed: true, evidence: '+ repaired A deterministically' },
+        ],
+      },
+      { reviewedHead: 'repair-head', freezeFindingSet: true },
+    );
+
+    expect(states(repaired)).toEqual({ A: 'fixed', B: 'open' });
+    expect(repaired.map((entry) => entry.finding.id)).not.toContain('new stochastic finding');
+  });
+
   it('migrates one raw first-gate identity to canonical structured provenance', () => {
     const raw = {
       id: 'initial-aaaaaaaaaaaa',
@@ -282,6 +300,44 @@ describe('reconcileReviewLedger', () => {
         }),
         prior,
         '+ actual repair excerpt',
+      ).status,
+    ).toBe('invalid');
+  });
+
+  it('accepts added-line closure evidence despite harmless diff markers and whitespace', () => {
+    const prior = reconcileReviewLedger(undefined, [finding('A')], undefined);
+    expect(
+      parseClosureVerification(
+        JSON.stringify({
+          decisions: [
+            {
+              semanticId: semantic('A'),
+              fixed: true,
+              evidence: 'const repaired = true;   // stable proof',
+            },
+          ],
+        }),
+        prior,
+        '@@ -1 +1 @@\n-const repaired = false;\n+const repaired = true; // stable proof\n',
+      ).status,
+    ).toBe('completed');
+  });
+
+  it('does not accept closure evidence that appears only on a removed line', () => {
+    const prior = reconcileReviewLedger(undefined, [finding('A')], undefined);
+    expect(
+      parseClosureVerification(
+        JSON.stringify({
+          decisions: [
+            {
+              semanticId: semantic('A'),
+              fixed: true,
+              evidence: 'const vulnerable = true;',
+            },
+          ],
+        }),
+        prior,
+        '@@ -1 +1 @@\n-const vulnerable = true;\n+const vulnerable = false;\n',
       ).status,
     ).toBe('invalid');
   });
