@@ -5564,7 +5564,11 @@ describe('PodManager', () => {
       );
       expect(ctx.containerManager.execInContainer).toHaveBeenCalledWith(
         'container-123',
-        ['sh', '-c', 'install -o autopod -g autopod -m 0600 /dev/null /run/autopod/agent.pid'],
+        [
+          'sh',
+          '-c',
+          'install -d -o root -g root -m 0755 /run/autopod && install -o autopod -g autopod -m 0600 /dev/null /run/autopod/agent.pid',
+        ],
         { timeout: 5_000, user: 'root' },
       );
       const repairCall = ctx.containerManager.execInContainer.mock.calls.find(
@@ -5574,6 +5578,44 @@ describe('PodManager', () => {
       expect(repairCall?.[1][2]).toContain(
         "chown -R autopod:autopod '/home/autopod/.claude' '/home/autopod/.autopod'",
       );
+    });
+
+    it('fails sandbox setup when the runtime directory and PID file cannot be armed', async () => {
+      const ctx = createTestContext(undefined, {
+        executionTarget: 'sandbox',
+        warmImageTag: 'example.azurecr.io/autopod/test:latest',
+      });
+      vi.mocked(ctx.containerManager.execInContainer).mockImplementation(
+        async (_containerId, command) => {
+          if (command.join(' ').includes('install -d -o root -g root -m 0755 /run/autopod')) {
+            return {
+              stdout: '',
+              stderr: 'install: cannot create directory /run/autopod',
+              exitCode: 1,
+            };
+          }
+          return { stdout: '', stderr: '', exitCode: 0 };
+        },
+      );
+      const manager = createPodManager(ctx.deps);
+      const pod = manager.createSession(
+        {
+          profileName: 'test-profile',
+          task: 'Reject unsafe sandbox startup',
+          skipValidation: true,
+        },
+        'user-1',
+      );
+
+      await manager.processPod(pod.id);
+
+      expect(manager.getSession(pod.id)).toMatchObject({
+        status: 'failed',
+        failureReason: expect.stringContaining(
+          'Failed to arm sandbox agent PID recovery: install: cannot create directory /run/autopod',
+        ),
+      });
+      expect(ctx.runtime.spawn).not.toHaveBeenCalled();
     });
 
     it('emits pod activity when memory ranking uses deterministic fallback', async () => {

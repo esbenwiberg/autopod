@@ -9116,13 +9116,17 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         const shimMode = pod.executionTarget === 'sandbox' ? '0555' : '0500';
         // These are referenced by *_FILE env vars in secretEnv — the exec shim reads
         // them and sets the real env var before starting the agent process.
-        await containerManager.execInContainer(containerId, ['mkdir', '-p', '/run/autopod'], {
-          timeout: 5_000,
-        });
         if (pod.executionTarget === 'sandbox') {
           const pidFile = await containerManager.execInContainer(
             containerId,
-            ['sh', '-c', 'install -o autopod -g autopod -m 0600 /dev/null /run/autopod/agent.pid'],
+            [
+              'sh',
+              '-c',
+              [
+                'install -d -o root -g root -m 0755 /run/autopod',
+                'install -o autopod -g autopod -m 0600 /dev/null /run/autopod/agent.pid',
+              ].join(' && '),
+            ],
             { timeout: 5_000, user: 'root' },
           );
           if (pidFile.exitCode !== 0) {
@@ -9130,6 +9134,10 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
               `Failed to arm sandbox agent PID recovery: ${pidFile.stderr || pidFile.stdout}`,
             );
           }
+        } else {
+          await containerManager.execInContainer(containerId, ['mkdir', '-p', '/run/autopod'], {
+            timeout: 5_000,
+          });
         }
         for (const sf of providerResult.secretFiles) {
           await containerManager.writeFile(containerId, sf.path, sf.content);
