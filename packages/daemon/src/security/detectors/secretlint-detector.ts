@@ -2,9 +2,12 @@ import { createHash } from 'node:crypto';
 import path from 'node:path';
 import type { ScanFinding, ScanSeverity } from '@autopod/shared';
 import { lintSource } from '@secretlint/core';
+import { secretLintProfiler } from '@secretlint/profiler';
 import { creator as recommendPresetCreator } from '@secretlint/secretlint-rule-preset-recommend';
 import type { ScanFile } from '../file-walker.js';
 import type { BaselineFinding, Detector } from './detector.js';
+
+let secretlintScanTail: Promise<void> = Promise.resolve();
 
 /**
  * Secretlint-backed detector. Uses the official `@secretlint/core` runner
@@ -38,19 +41,21 @@ export function createSecretlintDetector(): Detector {
 
   async function scanWithBaselineIdentity(file: ScanFile): Promise<BaselineFinding[] | null> {
     try {
-      const result = await lintSource({
-        source: {
-          content: file.content,
-          filePath: file.path,
-          ext: path.extname(file.path),
-          contentType: 'text',
-        },
-        options: {
-          config,
-          // We mask snippets ourselves to keep redaction policy in our hands.
-          maskSecrets: false,
-        },
-      });
+      const result = await runSecretlintScan(() =>
+        lintSource({
+          source: {
+            content: file.content,
+            filePath: file.path,
+            ext: path.extname(file.path),
+            contentType: 'text',
+          },
+          options: {
+            config,
+            // We mask snippets ourselves to keep redaction policy in our hands.
+            maskSecrets: false,
+          },
+        }),
+      );
 
       const findings: BaselineFinding[] = [];
       for (const msg of result.messages) {
@@ -84,6 +89,45 @@ export function createSecretlintDetector(): Detector {
     },
     scanWithBaselineIdentity,
   };
+}
+
+function runSecretlintScan<T>(scan: () => Promise<T>): Promise<T> {
+  const result = secretlintScanTail.then(
+    () => scanWithProfilerCleanup(scan),
+    () => scanWithProfilerCleanup(scan),
+  );
+  secretlintScanTail = result.then(
+    () => undefined,
+    () => undefined,
+  );
+  return result;
+}
+
+async function scanWithProfilerCleanup<T>(scan: () => Promise<T>): Promise<T> {
+  try {
+    return await scan();
+  } finally {
+    // Secretlint resolves lintSource before its PerformanceObserver has created
+    // every deferred measure. Wait for the observer, flush its promises, then
+    // wait once more for the resulting measure observations.
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    const retainedEntries = await secretLintProfiler.getEntries();
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    const retainedMeasures = await secretLintProfiler.getMeasures();
+
+    // The profiler is a process singleton and retains every observed mark and
+    // measure indefinitely. Release its private references, and remove only
+    // Secretlint's own global User Timing entries. Other dependencies keep full
+    // ownership of their marks and measures.
+    for (const entry of performance.getEntriesByType('mark')) {
+      if (entry.name.startsWith('@core>')) performance.clearMarks(entry.name);
+    }
+    for (const entry of performance.getEntriesByType('measure')) {
+      if (entry.name.startsWith('@core>')) performance.clearMeasures(entry.name);
+    }
+    retainedEntries.length = 0;
+    retainedMeasures.length = 0;
+  }
 }
 
 function occurrenceIdentity(

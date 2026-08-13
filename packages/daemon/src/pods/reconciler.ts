@@ -1,3 +1,4 @@
+import { access } from 'node:fs/promises';
 import type { Pod } from '@autopod/shared';
 import type { Logger } from 'pino';
 import type { SandboxContainerManager } from '../containers/sandbox-container-manager.js';
@@ -11,8 +12,11 @@ export interface ReconcilerDependencies {
   preserveWorkspace: (podId: string) => Promise<void>;
   quiesceSandboxAgent: (podId: string) => Promise<void>;
   suspendSandbox: (podId: string) => Promise<void>;
+  enqueueSession: (podId: string) => void;
   logger: Logger;
 }
+
+const MAX_RESTART_RECOVERIES = 3;
 
 /**
  * Reconciles sandbox pods on daemon restart.
@@ -26,9 +30,15 @@ export async function reconcileSandboxSessions(deps: ReconcilerDependencies): Pr
   // Paused and awaiting-input pods can still contain workspace state that never
   // reached the host before an earlier crash. Include them so deploying this
   // recovery fix preserves already-parked sandboxes as well as newly interrupted runs.
-  const candidateStatuses = ['running', 'awaiting_input', 'paused'] as const;
+  const candidateStatuses = ['provisioning', 'running', 'awaiting_input', 'paused'] as const;
   const sandboxSessions = candidateStatuses.flatMap((status) =>
-    podRepo.list({ status }).filter((pod) => pod.executionTarget === 'sandbox' && pod.containerId),
+    podRepo
+      .list({ status })
+      .filter(
+        (pod) =>
+          pod.executionTarget === 'sandbox' &&
+          (pod.status === 'provisioning' || Boolean(pod.containerId)),
+      ),
   );
 
   if (sandboxSessions.length === 0) {
@@ -53,6 +63,10 @@ export async function reconcileSandboxSessions(deps: ReconcilerDependencies): Pr
 
 async function reconcileSession(pod: Pod, deps: ReconcilerDependencies): Promise<void> {
   const { sandboxContainerManager, podRepo, eventBus, logger } = deps;
+  if (pod.status === 'provisioning') {
+    await recoverInterruptedProvisioning(pod, deps);
+    return;
+  }
   if (!pod.containerId) return;
   const containerId = pod.containerId;
 
@@ -92,6 +106,84 @@ async function reconcileSession(pod: Pod, deps: ReconcilerDependencies): Promise
       break;
     }
   }
+}
+
+async function recoverInterruptedProvisioning(
+  pod: Pod,
+  deps: ReconcilerDependencies,
+): Promise<void> {
+  const { podRepo, eventBus, enqueueSession, logger } = deps;
+  const nextRecoveryCount = (pod.recoveryCount ?? 0) + 1;
+  if (nextRecoveryCount > MAX_RESTART_RECOVERIES) {
+    const reason = `Sandbox provisioning exceeded the restart recovery limit of ${MAX_RESTART_RECOVERIES}; operator intervention is required.`;
+    podRepo.update(pod.id, {
+      status: 'failed',
+      containerId: null,
+      completedAt: new Date().toISOString(),
+      failureReason: reason,
+      lastCorrectionMessage: reason,
+    });
+    emitStatusChanged(pod.id, pod.status, 'failed', eventBus);
+    logger.warn(
+      { podId: pod.id, recoveryCount: pod.recoveryCount },
+      'Interrupted sandbox provisioning exceeded restart recovery limit',
+    );
+    return;
+  }
+
+  // `processPod()` does not transition provisioning -> running until setup is
+  // complete and just before the agent starts. A pod interrupted here therefore
+  // has no agent-authored changes to replay. Preserve a recorded host worktree
+  // when it still exists; otherwise restart setup from the pod's original ref.
+  let survivingWorktreePath: string | null = null;
+  if (pod.worktreePath) {
+    try {
+      await access(pod.worktreePath);
+      survivingWorktreePath = pod.worktreePath;
+    } catch {
+      logger.warn(
+        { podId: pod.id, worktreePath: pod.worktreePath },
+        'Interrupted sandbox provisioning worktree is unavailable; restarting setup',
+      );
+    }
+  }
+
+  const reason = survivingWorktreePath
+    ? 'Sandbox provisioning was interrupted by a daemon restart; resuming setup with the surviving worktree.'
+    : 'Sandbox provisioning was interrupted by a daemon restart before a recoverable worktree was recorded; restarting setup from the original ref.';
+  podRepo.update(pod.id, {
+    status: 'queued',
+    containerId: null,
+    worktreePath: survivingWorktreePath,
+    recoveryWorktreePath: survivingWorktreePath,
+    recoveryCount: nextRecoveryCount,
+    validationAttempts: 0,
+    lastRecoveryTrigger: 'restart',
+    completedAt: null,
+    failureReason: null,
+    lastCorrectionMessage: reason,
+  });
+  emitStatusChanged(pod.id, pod.status, 'queued', eventBus);
+  enqueueSession(pod.id);
+  logger.info(
+    { podId: pod.id, worktreePath: survivingWorktreePath, recoveryCount: nextRecoveryCount },
+    'Interrupted sandbox provisioning re-queued after daemon restart',
+  );
+}
+
+function emitStatusChanged(
+  podId: string,
+  previousStatus: Pod['status'],
+  newStatus: Pod['status'],
+  eventBus: EventBus,
+): void {
+  eventBus.emit({
+    type: 'pod.status_changed',
+    timestamp: new Date().toISOString(),
+    podId,
+    previousStatus,
+    newStatus,
+  });
 }
 
 function parkSession(

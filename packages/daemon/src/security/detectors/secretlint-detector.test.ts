@@ -1,3 +1,4 @@
+import { secretLintProfiler } from '@secretlint/profiler';
 import { describe, expect, it } from 'vitest';
 import { createSecretlintDetector } from './secretlint-detector.js';
 
@@ -62,5 +63,44 @@ describe('secretlint-detector', () => {
     await expect(detector.scan({ path: 'empty.ts', content: '', sizeBytes: 0 })).resolves.toEqual(
       [],
     );
+  });
+
+  it('does not retain profiler entries across repeated scans', async () => {
+    const beforeEntries = (await secretLintProfiler.getEntries()).length;
+    const beforeMeasures = (await secretLintProfiler.getMeasures()).length;
+    const beforeMarks = performance
+      .getEntriesByType('mark')
+      .filter((entry) => entry.name.startsWith('@core>')).length;
+    const beforeGlobalMeasures = performance
+      .getEntriesByType('measure')
+      .filter((entry) => entry.name.startsWith('@core>')).length;
+    const foreignMark = 'autopod-test-owned-mark';
+    performance.mark(foreignMark);
+
+    await Promise.all(
+      Array.from({ length: 100 }, (_, index) =>
+        detector.scan({
+          path: `src/clean-${index}.ts`,
+          content: 'export const clean = true;',
+          sizeBytes: 26,
+        }),
+      ),
+    );
+    await new Promise<void>((resolve) => setImmediate(resolve));
+
+    const retainedEntries = (await secretLintProfiler.getEntries()).length - beforeEntries;
+    const retainedMeasures = (await secretLintProfiler.getMeasures()).length - beforeMeasures;
+    const retainedMarks =
+      performance.getEntriesByType('mark').filter((entry) => entry.name.startsWith('@core>'))
+        .length - beforeMarks;
+    const retainedGlobalMeasures =
+      performance.getEntriesByType('measure').filter((entry) => entry.name.startsWith('@core>'))
+        .length - beforeGlobalMeasures;
+    expect(retainedEntries).toBeLessThan(100);
+    expect(retainedMeasures).toBeLessThan(100);
+    expect(retainedMarks).toBeLessThan(100);
+    expect(retainedGlobalMeasures).toBeLessThan(100);
+    expect(performance.getEntriesByName(foreignMark, 'mark')).toHaveLength(1);
+    performance.clearMarks(foreignMark);
   });
 });

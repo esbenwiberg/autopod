@@ -662,9 +662,13 @@ fi
 
 # Persist the worker PID so daemon restart recovery can terminate the orphaned
 # streaming process before resuming the durable CLI session in this sandbox.
-if mkdir -p /run/autopod 2>/dev/null; then
-  printf '%s\n' "$$" > /run/autopod/agent.pid 2>/dev/null || true
-fi
+# Provisioning creates this one user-owned control file. Failure means restart
+# recovery cannot safely quiesce the worker, so do not hide it and start anyway.
+pid_path="\${AUTOPOD_AGENT_PID_PATH:-/run/autopod/agent.pid}"
+printf '%s\n' "$$" > "$pid_path" || {
+  echo 'Autopod could not record the agent PID for restart recovery' >&2
+  exit 1
+}
 
 _read_file_var() {
   local var_name="$1" file_var="\${1}_FILE"
@@ -9115,6 +9119,18 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         await containerManager.execInContainer(containerId, ['mkdir', '-p', '/run/autopod'], {
           timeout: 5_000,
         });
+        if (pod.executionTarget === 'sandbox') {
+          const pidFile = await containerManager.execInContainer(
+            containerId,
+            ['sh', '-c', 'install -o autopod -g autopod -m 0600 /dev/null /run/autopod/agent.pid'],
+            { timeout: 5_000, user: 'root' },
+          );
+          if (pidFile.exitCode !== 0) {
+            throw new Error(
+              `Failed to arm sandbox agent PID recovery: ${pidFile.stderr || pidFile.stdout}`,
+            );
+          }
+        }
         for (const sf of providerResult.secretFiles) {
           await containerManager.writeFile(containerId, sf.path, sf.content);
           await containerManager.execInContainer(containerId, ['chmod', secretFileMode, sf.path], {
@@ -9878,6 +9894,17 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           } else if (event.type === 'status' && event.sessionId) {
             // Persist session ID to DB for pause/resume survival across daemon restarts
             const sessionPod = podRepo.getOrThrow(podId);
+            const activeAttemptBeforeSessionUpdate = deps.providerAttemptRepo?.getActive(podId);
+            if (
+              activeAttemptBeforeSessionUpdate?.nativeSessionId &&
+              activeAttemptBeforeSessionUpdate.nativeSessionId !== event.sessionId
+            ) {
+              // Provider-attempt identity is append-and-close only. A recovered
+              // runtime can accept the requested resume yet report a replacement
+              // native session. Close the old segment before recording the new ID
+              // instead of attempting to rewrite historical execution identity.
+              rotateProviderAttemptForFreshSegment(sessionPod, attemptProfile, true);
+            }
             const sessionUpdate: PodUpdates = {};
             if (sessionPod.runtime === 'claude') sessionUpdate.claudeSessionId = event.sessionId;
             else if (sessionPod.runtime === 'codex') sessionUpdate.codexSessionId = event.sessionId;

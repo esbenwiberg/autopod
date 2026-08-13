@@ -32,8 +32,8 @@ describe('AGENT_SHIM_SCRIPT — rendered output', () => {
   });
 
   it('records the agent PID for daemon-restart recovery', () => {
-    expect(AGENT_SHIM_SCRIPT).toContain('> /run/autopod/agent.pid');
-    expect(AGENT_SHIM_SCRIPT.indexOf('> /run/autopod/agent.pid')).toBeLessThan(
+    expect(AGENT_SHIM_SCRIPT).toContain('AUTOPOD_AGENT_PID_PATH');
+    expect(AGENT_SHIM_SCRIPT.indexOf('printf')).toBeLessThan(
       AGENT_SHIM_SCRIPT.indexOf('exec "$@"'),
     );
   });
@@ -43,11 +43,13 @@ describe('AGENT_SHIM_SCRIPT — runtime behaviour', () => {
   let workDir: string;
   let shimPath: string;
   let credPath: string;
+  let pidPath: string;
 
   beforeEach(() => {
     workDir = mkdtempSync(join(tmpdir(), 'autopod-shim-'));
     shimPath = join(workDir, 'agent-shim.sh');
     credPath = join(workDir, 'anthropic.key');
+    pidPath = join(workDir, 'agent.pid');
     writeFileSync(shimPath, AGENT_SHIM_SCRIPT, { mode: 0o500 });
     writeFileSync(credPath, 'sk-test-secret-value');
   });
@@ -66,7 +68,11 @@ describe('AGENT_SHIM_SCRIPT — runtime behaviour', () => {
         'printf "%s\\n%s\\n" "${ANTHROPIC_API_KEY}" "${ANTHROPIC_API_KEY_FILE:-unset}"',
       ],
       {
-        env: { ...process.env, ANTHROPIC_API_KEY_FILE: credPath },
+        env: {
+          ...process.env,
+          ANTHROPIC_API_KEY_FILE: credPath,
+          AUTOPOD_AGENT_PID_PATH: pidPath,
+        },
         encoding: 'utf8',
       },
     );
@@ -79,8 +85,29 @@ describe('AGENT_SHIM_SCRIPT — runtime behaviour', () => {
     const stdout = execFileSync(
       'sh',
       [shimPath, 'sh', '-c', 'printf "%s\\n" "${ANTHROPIC_API_KEY:-empty}"'],
-      { env: { ...process.env }, encoding: 'utf8' },
+      { env: { ...process.env, AUTOPOD_AGENT_PID_PATH: pidPath }, encoding: 'utf8' },
     );
     expect(stdout.trim()).toBe('empty');
+  });
+
+  it('records the agent PID as the runtime user before exec', () => {
+    const stdout = execFileSync('sh', [shimPath, 'sh', '-c', 'cat "$AUTOPOD_AGENT_PID_PATH"'], {
+      env: { ...process.env, AUTOPOD_AGENT_PID_PATH: pidPath },
+      encoding: 'utf8',
+    });
+
+    expect(Number(stdout.trim())).toBeGreaterThan(0);
+  });
+
+  it('makes PID-write failure observable', () => {
+    expect(() =>
+      execFileSync('sh', [shimPath, 'true'], {
+        env: {
+          ...process.env,
+          AUTOPOD_AGENT_PID_PATH: join(workDir, 'missing', 'agent.pid'),
+        },
+        stdio: 'pipe',
+      }),
+    ).toThrow();
   });
 });

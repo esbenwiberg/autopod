@@ -36,6 +36,7 @@
     "@huggingface/transformers": "^4.2.0",
     "@modelcontextprotocol/sdk": "^1.29.0",
     "@secretlint/core": "^12.2.0",
+    "@secretlint/profiler": "12.2.0",
     "@secretlint/secretlint-rule-preset-recommend": "^12.2.0",
     "better-sqlite3": "^11.7.0",
     "cron-parser": "^4.9.0",

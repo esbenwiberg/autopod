@@ -128,6 +128,9 @@ importers:
       '@secretlint/core':
         specifier: ^12.2.0
         version: 12.2.0
+      '@secretlint/profiler':
+        specifier: 12.2.0
+        version: 12.2.0
       '@secretlint/secretlint-rule-preset-recommend':
         specifier: ^12.2.0
         version: 12.2.0

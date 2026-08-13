@@ -348,10 +348,7 @@ describe('computeThroughputAnalytics', () => {
   // ── Cohort truncation ───────────────────────────────────────────────────────
 
   it('cohort is capped at 5000 and cohortTruncated=true when >5000 pods', () => {
-    // Insert 5001 complete pods
-    for (let i = 0; i < 5001; i++) {
-      const offset = Math.floor(i / 100); // spread across days to avoid identical timestamps
-      db.prepare(`
+    const insertCompletePod = db.prepare(`
         INSERT INTO pods (
           id, profile_name, task, status, model, runtime, execution_target, branch,
           user_id, max_validation_attempts, skip_validation,
@@ -363,11 +360,17 @@ describe('computeThroughputAnalytics', () => {
           'pr', 'auto', 'pr', 1, 0,
           @completedAt, @completedAt, 0
         )
-      `).run({
-        id: `trunc-pod-${i}`,
-        completedAt: new Date(Date.now() - offset * 600_000 - i * 1000).toISOString(),
-      });
-    }
+      `);
+    const insertCohort = db.transaction(() => {
+      for (let i = 0; i < 5001; i++) {
+        const offset = Math.floor(i / 100); // spread across days to avoid identical timestamps
+        insertCompletePod.run({
+          id: `trunc-pod-${i}`,
+          completedAt: new Date(Date.now() - offset * 600_000 - i * 1000).toISOString(),
+        });
+      }
+    });
+    insertCohort();
 
     const result = computeThroughputAnalytics(db, 90);
 

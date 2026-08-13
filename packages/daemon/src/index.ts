@@ -37,6 +37,7 @@ import {
   createTeamsAdapter,
 } from './notifications/index.js';
 import type { NotificationConfig } from './notifications/index.js';
+import { clearUnusedResourceTimings } from './performance-cleanup.js';
 import {
   createEscalationRepository,
   createEventBus,
@@ -188,8 +189,7 @@ const githubAuth = new GhCliDaemonGitHubAuth();
 // emits MaxPerformanceEntryBufferExceededWarning. We don't read these entries,
 // so it's safe to clear them periodically.
 const perfClearTimer = setInterval(() => {
-  performance.clearMarks();
-  performance.clearMeasures();
+  clearUnusedResourceTimings();
 }, 60_000);
 perfClearTimer.unref();
 
@@ -1118,6 +1118,7 @@ if (sandboxContainerManager) {
     preserveWorkspace: (id) => podManager.preserveWorkspace(id, 'daemon restart'),
     quiesceSandboxAgent: (id) => podManager.quiesceSandboxAgent(id),
     suspendSandbox: (id) => podManager.suspendSandboxForRecovery(id),
+    enqueueSession: (id) => podQueue.enqueue(id),
     logger,
   }).catch((err) => {
     logger.error({ err }, 'Sandbox pod reconciliation failed');

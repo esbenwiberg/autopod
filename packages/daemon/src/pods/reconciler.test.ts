@@ -1,3 +1,6 @@
+import { mkdtemp, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
 import type { Pod } from '@autopod/shared';
 import pino from 'pino';
 import { describe, expect, it, vi } from 'vitest';
@@ -25,8 +28,11 @@ function makePod(overrides: Partial<Pod> = {}): Pod {
   } as Pod;
 }
 
-function buildDeps(status: 'running' | 'stopped' | 'deleted' | 'unknown') {
-  const pod = makePod();
+function buildDeps(
+  status: 'running' | 'stopped' | 'deleted' | 'unknown',
+  overrides: Partial<Pod> = {},
+) {
+  const pod = makePod(overrides);
   const updates: Array<Partial<Pod>> = [];
   const podRepo = {
     list: vi.fn(({ status }: { status: Pod['status'] }) => (pod.status === status ? [pod] : [])),
@@ -45,6 +51,7 @@ function buildDeps(status: 'running' | 'stopped' | 'deleted' | 'unknown') {
   const preserveWorkspace = vi.fn(async () => {});
   const quiesceSandboxAgent = vi.fn(async () => {});
   const suspendSandbox = vi.fn(async () => {});
+  const enqueueSession = vi.fn((_podId: string) => {});
 
   return {
     pod,
@@ -55,10 +62,90 @@ function buildDeps(status: 'running' | 'stopped' | 'deleted' | 'unknown') {
     preserveWorkspace,
     quiesceSandboxAgent,
     suspendSandbox,
+    enqueueSession,
   };
 }
 
 describe('reconcileSandboxSessions', () => {
+  it('re-queues interrupted provisioning once with its surviving worktree', async () => {
+    const worktreePath = await mkdtemp(path.join(tmpdir(), 'autopod-reconcile-'));
+    const deps = buildDeps('unknown', {
+      status: 'provisioning',
+      containerId: null,
+      worktreePath,
+      recoveryWorktreePath: null,
+      recoveryCount: 0,
+    });
+
+    try {
+      await reconcileSandboxSessions({ ...deps, logger });
+      await reconcileSandboxSessions({ ...deps, logger });
+
+      expect(deps.updates).toContainEqual(
+        expect.objectContaining({
+          status: 'queued',
+          containerId: null,
+          worktreePath,
+          recoveryWorktreePath: worktreePath,
+          recoveryCount: 1,
+          lastRecoveryTrigger: 'restart',
+        }),
+      );
+      expect(deps.enqueueSession).toHaveBeenCalledTimes(1);
+      expect(deps.enqueueSession).toHaveBeenCalledWith('pod-1');
+      expect(deps.sandboxContainerManager.getStatus).not.toHaveBeenCalled();
+    } finally {
+      await rm(worktreePath, { recursive: true, force: true });
+    }
+  });
+
+  it('safely restarts provisioning when the daemon crashed before recording a worktree', async () => {
+    const deps = buildDeps('unknown', {
+      status: 'provisioning',
+      containerId: null,
+      worktreePath: null,
+      recoveryWorktreePath: null,
+      recoveryCount: 1,
+      skipAgent: true,
+    });
+
+    await reconcileSandboxSessions({ ...deps, logger });
+
+    expect(deps.updates).toContainEqual(
+      expect.objectContaining({
+        status: 'queued',
+        containerId: null,
+        worktreePath: null,
+        recoveryWorktreePath: null,
+        recoveryCount: 2,
+        lastRecoveryTrigger: 'restart',
+      }),
+    );
+    expect(deps.pod.skipAgent).toBe(true);
+    expect(deps.enqueueSession).toHaveBeenCalledOnce();
+    expect(deps.sandboxContainerManager.getStatus).not.toHaveBeenCalled();
+  });
+
+  it('fails interrupted provisioning after the bounded restart-recovery cap', async () => {
+    const deps = buildDeps('unknown', {
+      status: 'provisioning',
+      containerId: null,
+      worktreePath: null,
+      recoveryWorktreePath: null,
+      recoveryCount: 3,
+    });
+
+    await reconcileSandboxSessions({ ...deps, logger });
+
+    expect(deps.updates).toContainEqual(
+      expect.objectContaining({
+        status: 'failed',
+        failureReason: expect.stringContaining('recovery limit'),
+      }),
+    );
+    expect(deps.enqueueSession).not.toHaveBeenCalled();
+  });
+
   it('quiesces, preserves, and suspends a still-running sandbox before parking it', async () => {
     const deps = buildDeps('running');
 

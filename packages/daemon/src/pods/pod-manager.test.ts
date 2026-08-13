@@ -5527,7 +5527,7 @@ describe('PodManager', () => {
       expect(reviewer.generateText).toHaveBeenCalledTimes(1);
     });
 
-    it('uses owner-neutral agent shim modes for sandbox pods', async () => {
+    it('provisions a writable sandbox agent PID file while preserving private runtime files', async () => {
       const ctx = createTestContext(undefined, {
         executionTarget: 'sandbox',
         warmImageTag: 'example.azurecr.io/autopod/test:latest',
@@ -5561,6 +5561,11 @@ describe('PodManager', () => {
         'container-123',
         ['chmod', '0555', AGENT_SHIM_PATH],
         { timeout: 5_000 },
+      );
+      expect(ctx.containerManager.execInContainer).toHaveBeenCalledWith(
+        'container-123',
+        ['sh', '-c', 'install -o autopod -g autopod -m 0600 /dev/null /run/autopod/agent.pid'],
+        { timeout: 5_000, user: 'root' },
       );
       const repairCall = ctx.containerManager.execInContainer.mock.calls.find(
         ([, command, options]) => command[0] === 'sh' && options?.user === 'root',
@@ -7018,7 +7023,7 @@ describe('PodManager', () => {
         ]);
       });
 
-      it('keeps a session-bound attempt for true same-session Claude recovery', async () => {
+      it('keeps the same runtime session identity after recovery', async () => {
         const runtime = createMockRuntime();
         (runtime as Record<string, unknown>).setClaudeSessionId = vi.fn();
         runtime.resume = vi.fn(async function* (): AsyncGenerator<AgentEvent> {
@@ -7077,6 +7082,88 @@ describe('PodManager', () => {
           outputTokens: 5,
           costUsd: 0.4,
         });
+      });
+
+      it('rotates a different runtime session identity after recovery', async () => {
+        const runtime = createMockRuntime();
+        (runtime as Record<string, unknown>).setClaudeSessionId = vi.fn();
+        runtime.resume = vi.fn(async function* (): AsyncGenerator<AgentEvent> {
+          yield {
+            type: 'status',
+            timestamp: '2026-07-28T11:15:00.000Z',
+            message: 'provider started a replacement session',
+            sessionId: 'claude-session-b',
+          };
+          yield {
+            type: 'complete',
+            timestamp: '2026-07-28T11:16:00.000Z',
+            result: 'done',
+            totalInputTokens: 7,
+            totalOutputTokens: 3,
+            costUsd: 0.2,
+          };
+        });
+        const ctx = createTestContext();
+        const attempts = createProviderAttemptRepository(ctx.db);
+        ctx.deps.providerAttemptRepo = attempts;
+        ctx.deps.runtimeRegistry = createMockRuntimeRegistry(runtime);
+        const manager = createPodManager(ctx.deps);
+        const pod = manager.createSession(
+          { profileName: 'test-profile', task: 'Resume the work', skipValidation: true },
+          'user-1',
+        );
+        const snapshot = { name: 'test-profile' };
+        attempts.open({
+          podId: pod.id,
+          provider: 'anthropic',
+          providerAccountId: null,
+          runtime: 'claude',
+          model: pod.model,
+          profileReference: testProfileReference(pod.id, snapshot),
+          profileSnapshot: snapshot,
+        });
+        attempts.updateActive(pod.id, {
+          nativeSessionId: 'claude-session-a',
+          inputTokens: 11,
+          outputTokens: 5,
+          costUsd: 0.4,
+        });
+        ctx.podRepo.update(pod.id, {
+          recoveryWorktreePath: '/tmp/worktree/existing',
+          claudeSessionId: 'claude-session-a',
+          inputTokens: 11,
+          outputTokens: 5,
+          costUsd: 0.4,
+        });
+
+        await manager.processPod(pod.id);
+
+        expect(runtime.resume).toHaveBeenCalled();
+        expect(manager.getSession(pod.id).status).toBe('validated');
+        expect(attempts.list(pod.id)).toMatchObject([
+          {
+            ordinal: 1,
+            nativeSessionId: 'claude-session-a',
+            outcome: 'aborted',
+            inputTokens: 11,
+            outputTokens: 5,
+            costUsd: 0.4,
+          },
+          {
+            ordinal: 2,
+            nativeSessionId: 'claude-session-b',
+            outcome: 'completed',
+            inputTokens: 7,
+            outputTokens: 3,
+            costUsd: 0.2,
+          },
+        ]);
+        expect(manager.getSession(pod.id)).toMatchObject({
+          claudeSessionId: 'claude-session-b',
+          inputTokens: 18,
+          outputTokens: 8,
+        });
+        expect(manager.getSession(pod.id).costUsd).toBeCloseTo(0.6);
       });
 
       it('rotates before Claude resumes a different persisted session', async () => {

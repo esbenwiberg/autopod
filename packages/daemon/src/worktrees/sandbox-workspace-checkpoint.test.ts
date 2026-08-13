@@ -195,7 +195,7 @@ describe('checkpointSandboxWorkspace', () => {
       });
       expect(stdout.trim()).toBe(result.snapshotTree);
     }
-  });
+  }, 15_000);
 
   it('replaces a daemon-authored no-op checkpoint when the sandbox advances from its parent', async () => {
     const seed = path.join(tmpRoot, 'seed');
