@@ -6475,6 +6475,107 @@ describe('PodManager', () => {
         expect(updated.prUrl).toBe('https://github.com/org/repo/pull/42');
       });
 
+      it('auto-recovers validation-only provisioning infrastructure without treating prior agent evidence as ambiguous', async () => {
+        const ctx = createTestContext(undefined, {
+          executionTarget: 'sandbox',
+          warmImageTag: 'example.azurecr.io/autopod/test-profile:latest',
+        });
+        setupExecFileMock();
+        ctx.deps.requeueSessionAfterCurrent = vi.fn();
+        ctx.deps.sandboxInfrastructureRecoveryDelay = vi.fn(async () => {});
+        vi.mocked(ctx.containerManager.spawn).mockRejectedValueOnce(
+          new SandboxInfrastructureError(403, { 'x-ms-request-id': 'validation-only-403' }),
+        );
+
+        const manager = createPodManager(ctx.deps);
+        const pod = manager.createSession(
+          { profileName: 'test-profile', task: 'Validate preserved agent work' },
+          'user-1',
+        );
+        ctx.podRepo.update(pod.id, {
+          worktreePath: '/tmp/worktree/existing',
+          recoveryWorktreePath: '/tmp/worktree/existing',
+          skipAgent: true,
+          codexSessionId: 'prior-completed-agent-session',
+          lastValidationResult: null,
+        });
+
+        await manager.processPod(pod.id);
+
+        expect(ctx.runtime.spawn).not.toHaveBeenCalled();
+        expect(ctx.runtime.resume).not.toHaveBeenCalled();
+        expect(ctx.podRepo.getOrThrow(pod.id)).toMatchObject({
+          status: 'queued',
+          containerId: null,
+          recoveryWorktreePath: '/tmp/worktree/existing',
+          skipAgent: true,
+          infrastructureRecoveryCount: 1,
+          infrastructureFailure: expect.objectContaining({
+            recoveryDisposition: 'automatic_retry_scheduled',
+            safeAgentRestart: true,
+          }),
+        });
+        expect(ctx.deps.requeueSessionAfterCurrent).toHaveBeenCalledWith(pod.id);
+
+        vi.mocked(ctx.containerManager.spawn).mockRejectedValueOnce(
+          new SandboxInfrastructureError(403, {
+            'x-ms-request-id': 'validation-only-final-403',
+          }),
+        );
+        await manager.processPod(pod.id);
+
+        expect(ctx.podRepo.getOrThrow(pod.id)).toMatchObject({
+          status: 'failed',
+          recoveryWorktreePath: null,
+          skipAgent: true,
+          infrastructureRecoveryCount: 1,
+          infrastructureFailure: expect.objectContaining({
+            recoveryDisposition: 'automatic_retry_exhausted',
+            safeAgentRestart: true,
+          }),
+        });
+      });
+
+      it('Resume preserves validation-only mode after its automatic infrastructure retry is exhausted', async () => {
+        const ctx = createTestContext(undefined, {
+          executionTarget: 'sandbox',
+          warmImageTag: 'example.azurecr.io/autopod/test-profile:latest',
+        });
+        const manager = createPodManager(ctx.deps);
+        const pod = manager.createSession(
+          { profileName: 'test-profile', task: 'Validate preserved agent work' },
+          'user-1',
+        );
+        ctx.podRepo.update(pod.id, {
+          status: 'failed',
+          worktreePath: '/tmp/worktree/existing',
+          recoveryWorktreePath: '/tmp/worktree/existing',
+          skipAgent: true,
+          codexSessionId: 'prior-completed-agent-session',
+          infrastructureRecoveryCount: 1,
+          infrastructureFailure: {
+            source: 'azure-sandbox',
+            code: 'AZURE_SANDBOX_TRANSIENT_FORBIDDEN',
+            phase: 'setup',
+            statusCode: 403,
+            diagnostics: { 'x-ms-request-id': 'validation-only-final-403' },
+            safeAgentRestart: true,
+            recoveryDisposition: 'automatic_retry_exhausted',
+            occurredAt: '2026-08-13T00:00:00.000Z',
+            retryNotBefore: null,
+          },
+        });
+
+        await expect(manager.resumePod(pod.id)).resolves.toEqual({ action: 'retry-agent' });
+        expect(ctx.podRepo.getOrThrow(pod.id)).toMatchObject({
+          status: 'queued',
+          recoveryWorktreePath: '/tmp/worktree/existing',
+          skipAgent: true,
+          infrastructureRecoveryCount: 0,
+        });
+        expect(ctx.enqueuedSessions).toContain(pod.id);
+      });
+
       it('does not resume an absent agent when fresh-container validation-only recovery fails', async () => {
         const ctx = createTestContext({ overall: 'fail' });
         setupExecFileMock();

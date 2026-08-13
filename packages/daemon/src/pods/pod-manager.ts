@@ -2162,8 +2162,14 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
       return false;
     }
 
+    const validationOnlyRecovery = capturedPod.skipAgent;
     const durableEvidence = hasDurableAgentExecutionEvidence(capturedPod);
-    if (runtimeEventObserved || durableEvidence) {
+    // A fresh-container validation-only run deliberately carries the completed
+    // agent's durable evidence forward. That evidence is not ambiguous for this
+    // lifecycle: skipAgent fences processPod from starting or resuming an agent.
+    // Treat a setup failure here like any other pre-agent transport failure and
+    // preserve skipAgent across the fresh-sandbox retry.
+    if (!validationOnlyRecovery && (runtimeEventObserved || durableEvidence)) {
       podRepo.update(podId, {
         infrastructureFailure: sandboxInfrastructureFailure(
           error,
@@ -15454,16 +15460,22 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         );
       }
 
-      const isSafeSandboxInfrastructureResume =
+      const isAzureSandboxInfrastructureFailure =
         pod.status === 'failed' &&
         pod.executionTarget === 'sandbox' &&
         pod.infrastructureFailure?.source === 'azure-sandbox' &&
         pod.infrastructureFailure.code === 'AZURE_SANDBOX_TRANSIENT_FORBIDDEN' &&
-        pod.infrastructureFailure.safeAgentRestart &&
+        pod.infrastructureFailure.safeAgentRestart;
+      const isSafeValidationOnlyInfrastructureResume =
+        isAzureSandboxInfrastructureFailure && pod.skipAgent && pod.worktreePath !== null;
+      const isSafeAgentInfrastructureResume =
+        isAzureSandboxInfrastructureFailure &&
         pod.lastValidationResult === null &&
         pod.taskSummary === null &&
         pod.prUrl === null &&
         !hasDurableAgentExecutionEvidence(pod);
+      const isSafeSandboxInfrastructureResume =
+        isSafeValidationOnlyInfrastructureResume || isSafeAgentInfrastructureResume;
       if (isSafeSandboxInfrastructureResume) {
         const generation = podRepo.incrementLifecycleGeneration(podId);
         const oldContainerId = pod.containerId;
@@ -15501,11 +15513,13 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           infrastructureRecoveryCount: 0,
           failureReason: null,
           completedAt: null,
-          skipAgent: false,
+          skipAgent: isSafeValidationOnlyInfrastructureResume,
         });
         emitActivityStatus(
           podId,
-          'Resume accepted — restarting the original agent task in a fresh Azure sandbox.',
+          isSafeValidationOnlyInfrastructureResume
+            ? 'Resume accepted — retrying validation only in a fresh Azure sandbox.'
+            : 'Resume accepted — restarting the original agent task in a fresh Azure sandbox.',
         );
         enqueueSession(podId);
         return { action: 'retry-agent' };
