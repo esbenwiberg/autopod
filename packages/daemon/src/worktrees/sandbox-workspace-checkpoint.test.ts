@@ -7,6 +7,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createMockContainerManager } from '../test-utils/mock-helpers.js';
 import {
   checkpointSandboxWorkspace,
+  recoverDivergedSandboxWorkspace,
   resolveSandboxCheckpointSourceHead,
 } from './sandbox-workspace-checkpoint.js';
 
@@ -320,6 +321,59 @@ describe('checkpointSandboxWorkspace', () => {
       },
     });
     await expect(readFile(path.join(host, 'tracked.txt'), 'utf8')).resolves.toBe('base\n');
+  });
+
+  it('explicitly recovers a lineage conflict while preserving the previous host tip', async () => {
+    const seed = path.join(tmpRoot, 'seed');
+    const host = path.join(tmpRoot, 'host');
+    const sandbox = path.join(tmpRoot, 'sandbox');
+    const podId = path.basename(tmpRoot);
+    await git(tmpRoot, ['init', '--initial-branch=main', seed]);
+    await writeFile(path.join(seed, 'tracked.txt'), 'base\n');
+    await git(seed, ['add', '.']);
+    await git(seed, ['commit', '-m', 'base']);
+    await git(tmpRoot, ['clone', '--no-hardlinks', seed, host]);
+    await git(tmpRoot, ['clone', '--no-hardlinks', seed, sandbox]);
+
+    await writeFile(path.join(host, 'tracked.txt'), 'host branch change\n');
+    await git(host, ['add', 'tracked.txt']);
+    await git(host, ['commit', '-m', 'host branch change']);
+    const hostTip = (
+      await execFileAsync('git', ['rev-parse', 'HEAD'], { cwd: host, env: gitEnv })
+    ).stdout.trim();
+    await writeFile(path.join(sandbox, 'tracked.txt'), 'sandbox agent change\n');
+    await git(sandbox, ['add', 'tracked.txt']);
+    await git(sandbox, ['commit', '-m', 'sandbox agent change']);
+
+    const checkpoint = await checkpointSandboxWorkspace({
+      containerManager: createSandboxContainerManager(sandbox),
+      containerId: 'sandbox-1',
+      podId,
+      worktreePath: host,
+      sequence: 7,
+    });
+    expect(checkpoint).toMatchObject({
+      hostImported: true,
+      lineageVerified: true,
+      promoted: false,
+      error: { code: 'LINEAGE_CONFLICT' },
+    });
+
+    const recovered = await recoverDivergedSandboxWorkspace(host, podId, checkpoint);
+
+    expect(recovered.error).toBeUndefined();
+    expect(recovered).toMatchObject({ promoted: true, materialized: true });
+    await expect(readFile(path.join(host, 'tracked.txt'), 'utf8')).resolves.toBe(
+      'sandbox agent change\n',
+    );
+    const token = podId.replace(/[^A-Za-z0-9_-]/g, '_');
+    const preservedHostTip = (
+      await execFileAsync('git', ['rev-parse', `refs/autopod-recovery/${token}/7/host-tip`], {
+        cwd: host,
+        env: gitEnv,
+      })
+    ).stdout.trim();
+    expect(preservedHostTip).toBe(hostTip);
   });
 
   it('retains a content-bearing checkpoint lookalike outside the pod quarantine', async () => {

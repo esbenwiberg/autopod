@@ -124,6 +124,11 @@ export class WorkspaceCheckpointController {
     return age <= this.durabilityLeaseMs;
   }
 
+  /** Read the latest retained proof for explicit operator recovery. */
+  async latest(podId: string): Promise<CheckpointRecord | null> {
+    return this.deps.records.latest(podId);
+  }
+
   /** Startup-safe reconciliation: only materialize already host-imported proof. */
   async reconcileIncomplete(): Promise<void> {
     for (const record of await this.deps.records.incomplete()) {

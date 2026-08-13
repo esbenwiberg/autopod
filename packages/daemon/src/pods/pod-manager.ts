@@ -164,6 +164,7 @@ import {
   type SandboxWorkspaceCheckpointArgs,
   type WorkspaceCheckpointResult,
   checkpointSandboxWorkspace,
+  recoverDivergedSandboxWorkspace,
 } from '../worktrees/sandbox-workspace-checkpoint.js';
 import { agentToolingCachePaths } from './agent-tooling-cache-paths.js';
 import { buildCorrectionMessage } from './correction-context.js';
@@ -1408,6 +1409,8 @@ export interface PodManagerDependencies {
   sandboxWorkspaceCheckpoint?: (
     args: SandboxWorkspaceCheckpointArgs,
   ) => Promise<WorkspaceCheckpointResult>;
+  /** Test seam for explicit promotion of already imported sandbox conflict proof. */
+  recoverDivergedSandboxWorkspace?: typeof recoverDivergedSandboxWorkspace;
   workspaceCheckpointController?: WorkspaceCheckpointController;
   /** Bounded run-level retries for typed validation infrastructure failures. */
   validationInfrastructureRetryBackoffMs?: readonly number[];
@@ -5025,7 +5028,10 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
     emitActivityStatus(pod.id, `Workspace preserved before ${reason}.`);
   }
 
-  async function checkpointSandboxWorkspaceForPod(pod: Pod): Promise<WorkspaceCheckpointResult> {
+  async function checkpointSandboxWorkspaceForPod(
+    pod: Pod,
+    bypassController = false,
+  ): Promise<WorkspaceCheckpointResult> {
     if (!pod.containerId || !pod.worktreePath) {
       return {
         sequence: 0,
@@ -5050,7 +5056,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
     }
     const existing = sandboxCheckpointRuns.get(pod.id);
     if (existing) return existing;
-    if (deps.workspaceCheckpointController) {
+    if (deps.workspaceCheckpointController && !bypassController) {
       const decision = await deps.workspaceCheckpointController.request(pod.id, 'completion');
       if (decision.result) return decision.result;
     }
@@ -16084,7 +16090,21 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
             emitActivityStatus(podId, 'Resumed retained sandbox for checkpoint recovery.');
           }
         }
-        const checkpoint = await checkpointSandboxWorkspaceForPod(pod);
+        const recoverImported =
+          deps.recoverDivergedSandboxWorkspace ?? recoverDivergedSandboxWorkspace;
+        const retained = await deps.workspaceCheckpointController?.latest(pod.id).catch((err) => {
+          logger.warn({ err, podId }, 'Could not read retained workspace checkpoint proof');
+          return null;
+        });
+        let checkpoint =
+          retained?.result.error?.code === 'LINEAGE_CONFLICT' &&
+          retained.result.hostImported &&
+          retained.result.lineageVerified
+            ? await recoverImported(pod.worktreePath, pod.id, retained.result)
+            : await checkpointSandboxWorkspaceForPod(pod, true);
+        if (checkpoint.error?.code === 'LINEAGE_CONFLICT') {
+          checkpoint = await recoverImported(pod.worktreePath, pod.id, checkpoint);
+        }
         const recovered =
           checkpoint.lineageVerified && checkpoint.promoted && checkpoint.materialized;
         if (!recovered) {

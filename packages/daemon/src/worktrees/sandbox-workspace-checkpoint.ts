@@ -170,6 +170,134 @@ function empty(sequence: number, message: string, phase = 'capture'): WorkspaceC
 }
 
 /**
+ * Complete an operator-requested recovery after normal checkpoint promotion stopped at a
+ * lineage conflict. The current host branch tip is retained under a pod-owned recovery ref
+ * before the verified sandbox snapshot is promoted, so neither side of the divergence is lost.
+ */
+export async function recoverDivergedSandboxWorkspace(
+  worktreePath: string,
+  podId: string,
+  checkpoint: WorkspaceCheckpointResult,
+): Promise<WorkspaceCheckpointResult> {
+  const token = podId.replace(/[^A-Za-z0-9_-]/g, '_');
+  if (
+    checkpoint.error?.code !== 'LINEAGE_CONFLICT' ||
+    !checkpoint.hostImported ||
+    !checkpoint.lineageVerified ||
+    !checkpoint.snapshotCommit ||
+    !checkpoint.snapshotTree ||
+    !checkpoint.quarantineRef ||
+    !checkpoint.quarantineRef.startsWith(`refs/autopod-quarantine/${token}/`)
+  ) {
+    return {
+      ...checkpoint,
+      promoted: false,
+      materialized: false,
+      error: {
+        phase: 'recovery',
+        code: 'RECOVERY_NOT_ALLOWED',
+        retryable: false,
+        message: 'checkpoint does not contain verified imported lineage-conflict proof',
+      },
+    };
+  }
+
+  const recoveryRef = `refs/autopod-recovery/${token}/${checkpoint.sequence}/host-tip`;
+  const zeroCommit = '0'.repeat(40);
+  let branch = '';
+  let expected = '';
+  let branchPromoted = false;
+  try {
+    const common = (
+      await execFileAsync('git', ['rev-parse', '--git-common-dir'], { cwd: worktreePath })
+    ).stdout.trim();
+    const bare = path.resolve(worktreePath, common);
+    branch = (
+      await execFileAsync('git', ['symbolic-ref', '--short', 'HEAD'], { cwd: worktreePath })
+    ).stdout.trim();
+    expected = (
+      await execFileAsync('git', ['rev-parse', `refs/heads/${branch}`], { cwd: bare })
+    ).stdout.trim();
+    const hostStatus = (
+      await execFileAsync('git', ['status', '--porcelain'], { cwd: worktreePath })
+    ).stdout.trim();
+    if (hostStatus) {
+      throw new Error('host worktree contains changes outside the preserved branch tip');
+    }
+    const imported = (
+      await execFileAsync('git', ['rev-parse', checkpoint.quarantineRef], { cwd: bare })
+    ).stdout.trim();
+    if (imported !== checkpoint.snapshotCommit) {
+      throw new Error('quarantine ref no longer identifies the verified sandbox snapshot');
+    }
+
+    const existingRecoveryTip = await execFileAsync('git', ['rev-parse', recoveryRef], {
+      cwd: bare,
+    }).then(
+      (result) => result.stdout.trim(),
+      () => null,
+    );
+    if (existingRecoveryTip && existingRecoveryTip !== expected) {
+      throw new Error('recovery ref already protects a different host branch tip');
+    }
+    if (!existingRecoveryTip) {
+      await execFileAsync('git', ['update-ref', recoveryRef, expected, zeroCommit], { cwd: bare });
+    }
+
+    await execFileAsync(
+      'git',
+      ['update-ref', `refs/heads/${branch}`, checkpoint.snapshotCommit, expected],
+      { cwd: bare },
+    );
+    branchPromoted = true;
+    await execFileAsync('git', ['reset', '--hard', checkpoint.snapshotCommit], {
+      cwd: worktreePath,
+    });
+    const [finalHead, finalTree, finalStatus] = await Promise.all([
+      execFileAsync('git', ['rev-parse', 'HEAD'], { cwd: worktreePath }),
+      execFileAsync('git', ['rev-parse', 'HEAD^{tree}'], { cwd: worktreePath }),
+      execFileAsync('git', ['status', '--porcelain'], { cwd: worktreePath }),
+    ]);
+    if (
+      finalHead.stdout.trim() !== checkpoint.snapshotCommit ||
+      finalTree.stdout.trim() !== checkpoint.snapshotTree ||
+      finalStatus.stdout.trim() !== ''
+    ) {
+      throw new Error('recovered host materialization did not match the verified snapshot');
+    }
+    return { ...checkpoint, promoted: true, materialized: true, error: undefined };
+  } catch (err) {
+    if (branchPromoted && branch && expected) {
+      const common = await execFileAsync('git', ['rev-parse', '--git-common-dir'], {
+        cwd: worktreePath,
+      }).catch(() => null);
+      if (common) {
+        const bare = path.resolve(worktreePath, common.stdout.trim());
+        await execFileAsync(
+          'git',
+          ['update-ref', `refs/heads/${branch}`, expected, checkpoint.snapshotCommit],
+          { cwd: bare },
+        ).catch(() => {});
+        await execFileAsync('git', ['reset', '--hard', expected], { cwd: worktreePath }).catch(
+          () => {},
+        );
+      }
+    }
+    return {
+      ...checkpoint,
+      promoted: false,
+      materialized: false,
+      error: {
+        phase: 'recovery',
+        code: 'RECOVERY_MATERIALIZATION_FAILED',
+        retryable: false,
+        message: err instanceof Error ? err.message : String(err),
+      },
+    };
+  }
+}
+
+/**
  * Capture a sandbox workspace using a private Git index, then import it into a
  * quarantine ref before atomically updating the linked worktree branch. The
  * sandbox bundle is the only source bytes read by this routine.

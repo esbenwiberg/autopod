@@ -57,6 +57,7 @@ import { createProviderAccountStore } from '../provider-accounts/index.js';
 import { createProfileMemoryReviewer } from '../providers/memory-reviewer.js';
 import { ResumeSessionNotFoundError } from '../runtimes/claude-runtime.js';
 import { DeletionGuardError } from '../worktrees/local-worktree-manager.js';
+import type { WorkspaceCheckpointResult } from '../worktrees/sandbox-workspace-checkpoint.js';
 import { createEscalationRepository } from './escalation-repository.js';
 import type { EscalationRepository } from './escalation-repository.js';
 import { createEventBus } from './event-bus.js';
@@ -1041,6 +1042,102 @@ describe('PodManager', () => {
     });
   });
   describe('verified sandbox checkpoint lifecycle', () => {
+    it('bypasses periodic checkpoint observation during explicit worktree recovery', async () => {
+      const ctx = createTestContext(undefined, {
+        executionTarget: 'sandbox',
+        warmImageTag: 'registry.azurecr.io/test:latest',
+      });
+      const request = vi.fn().mockRejectedValue(new Error('sandbox fingerprint unavailable'));
+      ctx.deps.workspaceCheckpointController = {
+        latest: vi.fn(async () => null),
+        request,
+      } as unknown as NonNullable<PodManagerDependencies['workspaceCheckpointController']>;
+      ctx.deps.sandboxWorkspaceCheckpoint = vi.fn(async () => ({
+        sequence: 1,
+        sourceHead: 'a'.repeat(40),
+        sourceTree: 'b'.repeat(40),
+        snapshotCommit: 'c'.repeat(40),
+        snapshotTree: 'd'.repeat(40),
+        transferVerified: true,
+        bundleVerified: true,
+        hostImported: true,
+        lineageVerified: true,
+        promoted: true,
+        materialized: true,
+        quarantineRef: 'refs/autopod-quarantine/test/1',
+      }));
+      const manager = createPodManager(ctx.deps);
+      const pod = manager.createSession(
+        { profileName: 'test-profile', task: 'checkpoint' },
+        'user-1',
+      );
+      ctx.podRepo.update(pod.id, {
+        status: 'failed',
+        containerId: 'ctr-1',
+        worktreePath: '/tmp/wt',
+        worktreeCompromised: true,
+      });
+
+      await expect(manager.recoverWorktree(pod.id)).resolves.toMatchObject({ recovered: true });
+      expect(request).not.toHaveBeenCalled();
+    });
+
+    it('materializes retained imported conflict proof without reading the sandbox again', async () => {
+      const ctx = createTestContext(undefined, {
+        executionTarget: 'sandbox',
+        warmImageTag: 'registry.azurecr.io/test:latest',
+      });
+      const retained = {
+        sequence: 7,
+        sourceHead: 'a'.repeat(40),
+        sourceTree: 'b'.repeat(40),
+        snapshotCommit: 'c'.repeat(40),
+        snapshotTree: 'd'.repeat(40),
+        transferVerified: true,
+        bundleVerified: true,
+        hostImported: true,
+        lineageVerified: true,
+        promoted: false,
+        materialized: false,
+        quarantineRef: 'refs/autopod-quarantine/test/7',
+        error: {
+          phase: 'promotion',
+          code: 'LINEAGE_CONFLICT',
+          retryable: false,
+          message: 'feature branch diverged from checkpoint source',
+        },
+      } satisfies WorkspaceCheckpointResult;
+      ctx.deps.workspaceCheckpointController = {
+        latest: vi.fn(async () => ({ result: retained })),
+        request: vi.fn().mockRejectedValue(new Error('sandbox must not be observed')),
+      } as unknown as NonNullable<PodManagerDependencies['workspaceCheckpointController']>;
+      ctx.deps.sandboxWorkspaceCheckpoint = vi.fn(async () => {
+        throw new Error('sandbox must not be captured');
+      });
+      const recoverImported = vi.fn(async () => ({
+        ...retained,
+        promoted: true,
+        materialized: true,
+        error: undefined,
+      }));
+      Object.assign(ctx.deps, { recoverDivergedSandboxWorkspace: recoverImported });
+      const manager = createPodManager(ctx.deps);
+      const pod = manager.createSession(
+        { profileName: 'test-profile', task: 'checkpoint' },
+        'user-1',
+      );
+      ctx.podRepo.update(pod.id, {
+        status: 'failed',
+        containerId: 'ctr-1',
+        worktreePath: '/tmp/wt',
+        worktreeCompromised: true,
+      });
+
+      await expect(manager.recoverWorktree(pod.id)).resolves.toMatchObject({ recovered: true });
+      expect(recoverImported).toHaveBeenCalledWith('/tmp/wt', pod.id, retained);
+      expect(ctx.deps.sandboxWorkspaceCheckpoint).not.toHaveBeenCalled();
+    });
+
     it('resumes a stopped sandbox before checkpoint recovery', async () => {
       const ctx = createTestContext(undefined, {
         executionTarget: 'sandbox',
