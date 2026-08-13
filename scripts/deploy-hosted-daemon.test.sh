@@ -52,7 +52,13 @@ case "$remote_script" in
   *'echo live:'*) printf 'live:deadbeef\nactive\n' ;;
   *'BUILD DONE'*) echo 'BUILD DONE' ;;
   *'REVIEWER_CLI_PREWARM_OK'*) echo 'REVIEWER_CLI_PREWARM_OK' ;;
-  *'FINAL_ACTIVE='*) sh -c "$remote_script" ;;
+  *'FINAL_ACTIVE='*)
+    if [ "${DEPLOY_TEST_TRUNCATE_REMOTE:-0}" = 1 ]; then
+      sh -c "$remote_script" | tail -c 512
+    else
+      sh -c "$remote_script"
+    fi
+    ;;
   *'keep_set='*) echo 'keep (protected): cafebabe' ;;
   *) echo "unexpected VM command $count" >&2; exit 1 ;;
 esac
@@ -77,6 +83,13 @@ echo "$AUTOPOD_DEPLOY_RELEASES/cafebabe/packages/daemon/dist/index.js"
 EOF
 cat >"$tmp/bin/journalctl" <<'EOF'
 #!/usr/bin/env bash
+if [ "${DEPLOY_TEST_TRUNCATE_REMOTE:-0}" = 1 ]; then
+  i=0
+  while [ "$i" -lt 100 ]; do
+    echo 'long hosted journal entry that pushes earlier service state out of Azure Run Command output'
+    i=$((i + 1))
+  done
+fi
 exit 0
 EOF
 chmod +x "$tmp/bin"/*
@@ -89,6 +102,7 @@ run_deploy() {
     DEPLOY_TEST_FINAL_ACTIVE="${DEPLOY_TEST_FINAL_ACTIVE:-0}" \
     DEPLOY_TEST_HEALTH_COUNT="$tmp/health-count" \
     DEPLOY_TEST_HEALTH_FAILURES="${DEPLOY_TEST_HEALTH_FAILURES:-0}" \
+    DEPLOY_TEST_TRUNCATE_REMOTE="${DEPLOY_TEST_TRUNCATE_REMOTE:-0}" \
     bash "$script" --target cafebabe --yes --skip-playwright-prewarm "$@"
 }
 
@@ -142,3 +156,14 @@ if ! DEPLOY_TEST_HEALTH_FAILURES=2 run_deploy >"$tmp/health-retry-out" 2>&1; the
 fi
 [ "$(cat "$tmp/health-count")" = 3 ]
 grep -qF 'DEPLOYED deadbeef -> cafebabe' "$tmp/health-retry-out"
+
+# Azure Run Command returns only a bounded output tail. Long journal lines must
+# not push the authoritative service/health sentinels out of the returned text.
+reset_fixture
+if ! DEPLOY_TEST_TRUNCATE_REMOTE=1 run_deploy >"$tmp/truncated-out" 2>&1; then
+  cat "$tmp/truncated-out" >&2
+  exit 1
+fi
+grep -qF 'SERVICE_ACTIVE_OK' "$tmp/truncated-out"
+grep -qF 'LOCAL_HEALTH_FINAL_OK' "$tmp/truncated-out"
+grep -qF 'DEPLOYED deadbeef -> cafebabe' "$tmp/truncated-out"

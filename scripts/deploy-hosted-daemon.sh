@@ -541,9 +541,14 @@ wait_for_local_health() {
 }
 echo \"active: \$(systemctl is-active $SERVICE)\"
 echo \"running on: \$(ps -o args= -C node | grep -o '$RELEASES/[^/]*' | head -1)\"
-wait_for_local_health || echo HEALTH_FAIL
+health_result=ok
+wait_for_local_health || health_result=fail
 echo '--- journal tail ---'
 journalctl -u $SERVICE -n 12 --no-pager 2>&1 | tail -12
+service_state=\$(systemctl is-active $SERVICE)
+echo \"FINAL_SERVICE_STATE: \$service_state\"
+if [ \"\$service_state\" = active ]; then echo SERVICE_ACTIVE_OK; else echo SERVICE_ACTIVE_FAIL; fi
+if [ \"\$health_result\" = ok ]; then echo LOCAL_HEALTH_FINAL_OK; else echo HEALTH_FAIL; fi
 ")"; then
   echo "$SWAP_OUT"
   die "remote final gate or restart failed — symlink may be unchanged; inspect output above"
@@ -551,8 +556,8 @@ fi
 echo "$SWAP_OUT"
 
 # ---- post-verify ----------------------------------------------------------
-echo "$SWAP_OUT" | grep -q "active: active" || die "service not active after restart — ROLL BACK: scripts/deploy-hosted-daemon.sh --rollback $LIVE_SHA"
-echo "$SWAP_OUT" | grep -q "HEALTH_FAIL" && die "local /health failed — ROLL BACK: scripts/deploy-hosted-daemon.sh --rollback $LIVE_SHA"
+echo "$SWAP_OUT" | grep -q "SERVICE_ACTIVE_OK" || die "service not active after restart — ROLL BACK: scripts/deploy-hosted-daemon.sh --rollback $LIVE_SHA"
+echo "$SWAP_OUT" | grep -q "LOCAL_HEALTH_FINAL_OK" || die "local /health failed — ROLL BACK: scripts/deploy-hosted-daemon.sh --rollback $LIVE_SHA"
 
 note "checking external HTTPS health"
 HTTP_CODE="$(curl -sS -o /dev/null -w '%{http_code}' --max-time 12 "$HEALTH_URL" || echo 000)"
