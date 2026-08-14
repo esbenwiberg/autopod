@@ -34,6 +34,7 @@ public func validationHistoryReviewCouncil(_ response: ValidationResponse) -> Re
 public struct ReviewPhasePresentation: Sendable, Equatable {
   public let status: PhaseStatus
   public let councilUnavailableReason: String?
+  public let failureLabel: String
 }
 
 public func reviewPhasePresentation(
@@ -53,11 +54,38 @@ public func reviewPhasePresentation(
     case .none: .skipped
     }
   }
+  let failureLabel: String
+  switch checks?.reviewSkipKind {
+  case "review-timeout": failureLabel = "Review timed out"
+  case "review-failed": failureLabel = "Review infrastructure failed"
+  default:
+    failureLabel = checks?.infrastructureFailure?.phase == ValidationPhase.review.rawValue
+      ? "Review infrastructure failed"
+      : "Review flagged issues"
+  }
   return ReviewPhasePresentation(
     status: status,
     councilUnavailableReason: council?.infrastructureUnavailable == true
-      ? "infrastructure unavailable" : nil
+      ? "infrastructure unavailable" : nil,
+    failureLabel: failureLabel
   )
+}
+
+func reviewInfrastructureSummaryCopy(for skipKind: String?) -> (title: String, subtitle: String)? {
+  switch skipKind {
+  case "review-timeout":
+    return (
+      "Review infrastructure needs attention",
+      "The reviewer timed out before producing a verdict."
+    )
+  case "review-failed":
+    return (
+      "Review infrastructure needs attention",
+      "The reviewer failed before producing a verdict."
+    )
+  default:
+    return nil
+  }
 }
 
 /// The immutable inputs rendered by ValidationTab's established legacy Review branch.
@@ -956,6 +984,9 @@ public struct ValidationTab: View {
     if displayedChecks?.infrastructureFailure != nil {
       return "Validation infrastructure needs attention"
     }
+    if let reviewInfrastructureSummary {
+      return reviewInfrastructureSummary.title
+    }
     if let failed = displayedPhases.first(where: { phaseStatus($0) == .failed }) {
       return "\(failed.displayName) needs attention"
     }
@@ -987,6 +1018,10 @@ public struct ValidationTab: View {
       return ["\(phase) could not run because validation infrastructure failed.", contractSummary]
         .compactMap { $0 }.joined(separator: " ")
     }
+    if let reviewInfrastructureSummary {
+      return [reviewInfrastructureSummary.subtitle, contractSummary]
+        .compactMap { $0 }.joined(separator: " ")
+    }
     if let failed = displayedPhases.first(where: { phaseStatus($0) == .failed }) {
       return [failed.displayName + " failed.", contractSummary].compactMap { $0 }.joined(separator: " ")
     }
@@ -997,6 +1032,10 @@ public struct ValidationTab: View {
       return [active.displayName + " is currently running.", contractSummary].compactMap { $0 }.joined(separator: " ")
     }
     return contractSummary ?? "Build, checks, facts, and review results are shown below."
+  }
+
+  private var reviewInfrastructureSummary: (title: String, subtitle: String)? {
+    reviewInfrastructureSummaryCopy(for: displayedChecks?.reviewSkipKind)
   }
 
   private var validationSummaryIcon: String {
@@ -1865,7 +1904,7 @@ public struct ValidationTab: View {
       phaseStatusRow(
         status: presentation.status,
         passLabel: detail?.status == "uncertain" ? "Review uncertain — treated as pass" : "AI review passed",
-        failLabel: "Review flagged issues",
+        failLabel: presentation.failureLabel,
         skipLabel: presentation.councilUnavailableReason != nil
           ? "Review Council infrastructure unavailable"
           : reviewSkipLabel(kind: skipKind, reason: skipReason)

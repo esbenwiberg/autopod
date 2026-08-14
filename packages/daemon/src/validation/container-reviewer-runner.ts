@@ -134,6 +134,9 @@ async function runClaudeContainerReview(
   const claudeCommand = [
     `sh ${shellQuote(SHIM_PATH)} claude -p`,
     modelArgs.trim(),
+    "--tools ''",
+    '--disable-slash-commands',
+    '--no-session-persistence',
     '--output-format json',
     ...(config.outputContract
       ? [`--json-schema ${shellQuote(config.outputContract.jsonSchema)}`]
@@ -270,8 +273,10 @@ async function collectCancellableReview(
   );
 
   let timer: ReturnType<typeof setTimeout> | undefined;
+  let timeoutTriggered = false;
   const timedOut = new Promise<never>((_resolve, reject) => {
     timer = setTimeout(() => {
+      timeoutTriggered = true;
       void (async () => {
         try {
           await handle.kill();
@@ -306,7 +311,12 @@ async function collectCancellableReview(
   });
 
   try {
-    return await Promise.race([completed, timedOut]);
+    const result = await Promise.race([completed, timedOut]);
+    // Killing the remote process can resolve its streams and exit code before
+    // kill() returns. Once the deadline initiated that kill, wait for the
+    // timeout path so the forced exit cannot win the race as a generic CLI error.
+    if (timeoutTriggered) return await timedOut;
+    return result;
   } finally {
     if (timer) clearTimeout(timer);
   }

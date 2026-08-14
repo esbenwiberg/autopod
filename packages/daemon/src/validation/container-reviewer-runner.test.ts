@@ -153,6 +153,15 @@ describe('runContainerReviewer', () => {
     expect((cm.execStreaming as ReturnType<typeof vi.fn>).mock.calls[0]?.[1][2]).toContain(
       '--output-format json',
     );
+    expect((cm.execStreaming as ReturnType<typeof vi.fn>).mock.calls[0]?.[1][2]).toContain(
+      "--tools ''",
+    );
+    expect((cm.execStreaming as ReturnType<typeof vi.fn>).mock.calls[0]?.[1][2]).toContain(
+      '--disable-slash-commands',
+    );
+    expect((cm.execStreaming as ReturnType<typeof vi.fn>).mock.calls[0]?.[1][2]).toContain(
+      '--no-session-persistence',
+    );
     expect(cm.execInContainer).not.toHaveBeenCalledWith(
       'container-abc',
       ['sh', '-c', expect.any(String)],
@@ -405,6 +414,51 @@ describe('runContainerReviewer', () => {
         kind: 'termination-failed',
         message: expect.stringContaining('remote termination could not be confirmed'),
       });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('classifies deadline-triggered process exit as a timeout', async () => {
+    vi.useFakeTimers();
+    try {
+      const stdout = new PassThrough();
+      const stderr = new PassThrough();
+      let confirmExit: ((code: number) => void) | undefined;
+      let finishKill: (() => void) | undefined;
+      const exitCode = new Promise<number>((resolve) => {
+        confirmExit = resolve;
+      });
+      const kill = vi.fn().mockImplementation(async () => {
+        stdout.end();
+        stderr.end('setsid: child 120966 did not exit normally: Success');
+        confirmExit?.(15);
+        await new Promise<void>((resolve) => {
+          finishKill = resolve;
+        });
+      });
+      const cm = containerManager();
+      vi.mocked(cm.execStreaming).mockResolvedValue({ stdout, stderr, exitCode, kill });
+
+      const review = runContainerReviewer({
+        podId: 'emotional-tahr',
+        containerId: 'container-abc',
+        containerManager: cm,
+        profile: profile({ modelProvider: 'max' }),
+        model: 'sonnet',
+        prompt: 'Review',
+        timeout: 300_000,
+      }).catch((failure: unknown) => failure);
+
+      await vi.advanceTimersByTimeAsync(300_000);
+      await Promise.resolve();
+      finishKill?.();
+
+      await expect(review).resolves.toMatchObject({
+        kind: 'timeout',
+        message: expect.stringContaining('timed out after 300000ms'),
+      });
+      expect(kill).toHaveBeenCalledOnce();
     } finally {
       vi.useRealTimers();
     }

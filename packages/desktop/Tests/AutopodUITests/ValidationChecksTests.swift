@@ -67,3 +67,30 @@ import Testing
   #expect(disabled.review == nil)
   #expect(disabled.allPassed == true)
 }
+
+@Test func reviewFailureLabelDistinguishesInfrastructureFromFindings() {
+  let failedInfrastructure = reviewPhasePresentation(
+    progress: nil,
+    checks: ValidationChecks(smoke: true, review: nil, reviewSkipKind: "review-failed"),
+    council: nil
+  )
+  let timedOutInfrastructure = reviewPhasePresentation(
+    progress: nil,
+    checks: ValidationChecks(smoke: true, review: nil, reviewSkipKind: "review-timeout"),
+    council: nil
+  )
+  let findings = reviewPhasePresentation(
+    progress: nil,
+    checks: ValidationChecks(smoke: true, review: false),
+    council: nil
+  )
+
+  #expect(failedInfrastructure.failureLabel == "Review infrastructure failed")
+  #expect(timedOutInfrastructure.failureLabel == "Review timed out")
+  #expect(findings.failureLabel == "Review flagged issues")
+
+  let timeoutSummary = reviewInfrastructureSummaryCopy(for: "review-timeout")
+  #expect(timeoutSummary?.title == "Review infrastructure needs attention")
+  #expect(timeoutSummary?.subtitle == "The reviewer timed out before producing a verdict.")
+  #expect(reviewInfrastructureSummaryCopy(for: nil) == nil)
+}
