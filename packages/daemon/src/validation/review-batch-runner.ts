@@ -71,7 +71,7 @@ export interface ReviewBatchRunnerOptions {
     timeoutMs: number,
     outputContract?: ReviewerOutputContract,
   ) => Promise<{ stdout: string; tokenUsage?: TaskReviewResult['tokenUsage'] }>;
-  /** One wall-clock budget for axes, retries, and synthesis. */
+  /** One wall-clock budget per council phase: axes, then synthesis. */
   timeoutMs?: number;
   /** Safe status messages; never includes prompts or provider output. */
   onProgress?: (event: {
@@ -330,6 +330,10 @@ export async function runReviewBatch(
     }
   };
   await Promise.all(Array.from({ length: 3 }, worker));
+  // Axis discovery and synthesis are distinct reviewer phases. A slow final
+  // axis must not leave synthesis with only the scraps of the axes deadline.
+  const synthesisDeadline = Date.now() + (options.timeoutMs ?? 300_000);
+  const synthesisRemaining = () => Math.max(0, synthesisDeadline - Date.now());
   const accepted = dedupe(candidates);
   const allCandidates = dedupe([...options.packet.initialFindings, ...accepted]);
   let synthesis: ReviewBatchResult['synthesis'] = 'deterministic-fallback';
@@ -343,11 +347,17 @@ export async function runReviewBatch(
   // otherwise stretch a nominal 300s review into roughly 20 minutes.
   let synthesisInvalid = false;
   let synthesisHeadChanged = false;
-  if (options.synthesize && !runs.some((run) => run.status === 'unavailable') && remaining() > 0) {
+  if (
+    options.synthesize &&
+    !runs.some((run) => run.status === 'unavailable') &&
+    synthesisRemaining() > 0
+  ) {
     const basePrompt = reviewSynthesisPrompt(allCandidates);
     if (basePrompt.length <= 1_000_000) {
       for (let attempt = 1; attempt <= 2; attempt++) {
         try {
+          if (synthesisRemaining() <= 0)
+            throw new Error('frozen review synthesis deadline exceeded');
           options.onProgress?.({
             stage: 'synthesis',
             attempt,
@@ -359,7 +369,7 @@ export async function runReviewBatch(
           const result = await options.synthesize(
             `${basePrompt}${attempt === 2 ? '\nCorrection required: return only a response satisfying validation code REVIEW_SYNTHESIS_RESPONSE_INVALID.' : ''}`,
             `${options.packet.id}-synthesis-${attempt}`,
-            remaining(),
+            synthesisRemaining(),
             reviewSynthesisOutputContract,
           );
           if (options.readHead && (await options.readHead()) !== options.packet.reviewedHead)

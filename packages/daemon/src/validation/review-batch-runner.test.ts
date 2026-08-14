@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { structuredFindingSourceId } from './finding-fingerprint.js';
 import { createFrozenReviewPacket, runReviewBatch } from './review-batch-runner.js';
 import { CodexReviewError } from './review-codex-runner.js';
@@ -331,6 +331,33 @@ describe('runReviewBatch', () => {
     expect(timeouts.every((timeout) => timeout <= 1)).toBe(true);
     expect(batch.infrastructureUnavailable).toBe(true);
     expect(synthesized).toBe(false);
+  });
+
+  it('gives synthesis a fresh deadline after completed axes consume their budget', async () => {
+    let now = 0;
+    const nowSpy = vi.spyOn(Date, 'now').mockImplementation(() => now);
+    let synthesisTimeout = 0;
+    try {
+      const batch = await runReviewBatch({
+        packet: packet(),
+        model: 'test',
+        timeoutMs: 5,
+        execute: async () => {
+          now++;
+          return { stdout: '{"findings":[]}' };
+        },
+        synthesize: async (_prompt, _label, timeoutMs) => {
+          synthesisTimeout = timeoutMs;
+          return { stdout: '{"decisions":[]}' };
+        },
+      });
+
+      expect(batch.axes.every((axis) => axis.status === 'completed')).toBe(true);
+      expect(batch.synthesis).toBe('model');
+      expect(synthesisTimeout).toBe(5);
+    } finally {
+      nowSpy.mockRestore();
+    }
   });
 
   it('retains distinct cross-axis sources for the same semantic finding', async () => {

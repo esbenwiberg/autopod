@@ -843,7 +843,9 @@ export function createLocalValidationEngine(
             const councilTimeoutMs = config.reviewTimeout ?? 300_000;
             const reviewProgressStartedAt = new Date().toISOString();
             const reviewProgressStartedMs = Date.now();
-            const reviewGuardrailMs = councilTimeoutMs * (priorActive.length > 0 ? 2 : 1);
+            // Axes, synthesis, and (for repair runs) closure each have an
+            // independent bounded reviewer phase.
+            const reviewGuardrailMs = councilTimeoutMs * (priorActive.length > 0 ? 3 : 2);
             const reviewProgressAxes: ReviewProgressAxis[] = [
               'contract_completeness',
               'security_authority',

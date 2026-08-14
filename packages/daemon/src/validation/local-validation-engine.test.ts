@@ -1141,7 +1141,7 @@ describe('validate() — hasWebUi gating', () => {
     expect(result.taskReview?.reviewBatch?.axes).toHaveLength(5);
     expect(result.taskReview?.reviewBatch?.degradationReasons).toBeUndefined();
     expect(result.taskReview?.tokenUsage).toMatchObject({ inputTokens: 160, outputTokens: 32 });
-    expect(progress[0]).toMatchObject({ stage: 'axes', attempt: 1, guardrailMs: 300_000 });
+    expect(progress[0]).toMatchObject({ stage: 'axes', attempt: 1, guardrailMs: 600_000 });
     expect(progress[0]?.axes).toHaveLength(5);
     expect(progress.some((snapshot) => snapshot.stage === 'synthesis')).toBe(true);
     expect(progress.at(-1)?.stage).toBe('finalizing');
