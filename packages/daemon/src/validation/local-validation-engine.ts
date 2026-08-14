@@ -840,10 +840,10 @@ export function createLocalValidationEngine(
               promptVersion: 'review-council-v1',
               schemaVersion: 'structured-finding-v2',
             });
-            const councilDeadline = Date.now() + (config.reviewTimeout ?? 300_000);
+            const councilTimeoutMs = config.reviewTimeout ?? 300_000;
             const reviewProgressStartedAt = new Date().toISOString();
             const reviewProgressStartedMs = Date.now();
-            const reviewGuardrailMs = config.reviewTimeout ?? 300_000;
+            const reviewGuardrailMs = councilTimeoutMs * (priorActive.length > 0 ? 2 : 1);
             const reviewProgressAxes: ReviewProgressAxis[] = [
               'contract_completeness',
               'security_authority',
@@ -871,7 +871,7 @@ export function createLocalValidationEngine(
               packet,
               model: config.reviewerModel ?? 'auto',
               readHead: () => readReviewHead(config.worktreePath, reviewedHead),
-              timeoutMs: config.reviewTimeout ?? 300_000,
+              timeoutMs: councilTimeoutMs,
               onProgress: ({
                 stage,
                 axis,
@@ -962,8 +962,12 @@ export function createLocalValidationEngine(
                 try {
                   const decisions = [];
                   const frozenClosureDelta = boundedClosureRepairDelta(repair.diff ?? frozenDiff);
+                  // Axis discovery/synthesis and prior-finding closure are distinct
+                  // reviewer phases. Closure must not inherit an already-spent council
+                  // deadline or repaired findings can remain open without adjudication.
+                  const closureDeadline = Date.now() + councilTimeoutMs;
                   for (const chunk of closureVerificationChunks(priorActive)) {
-                    const closureTimeout = councilDeadline - Date.now();
+                    const closureTimeout = closureDeadline - Date.now();
                     if (closureTimeout <= 0) {
                       throw new Error(
                         'frozen review council deadline exceeded before closure verification',
@@ -980,8 +984,8 @@ export function createLocalValidationEngine(
                       model: config.reviewerModel ?? 'auto',
                       prompt: closurePrompt(chunk, frozenClosureDelta),
                       ...(config.reviewerExecEnv ? { env: config.reviewerExecEnv } : {}),
-                      // The council deadline covers closure verification too;
-                      // container timeout termination happens before retrying.
+                      // Closure has its own bounded deadline; container timeout
+                      // termination still happens before retrying.
                       timeout: closureTimeout,
                       logger: log,
                     });

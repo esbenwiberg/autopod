@@ -1473,6 +1473,9 @@ describe('validate() — hasWebUi gating', () => {
   it('closes prior findings across verified sibling sandbox checkpoints', async () => {
     const repoPath = await fs.mkdtemp(path.join(os.tmpdir(), 'autopod-review-checkpoints-'));
     const podId = 'sandbox-review-ledger';
+    let reviewNow = 1_000_000;
+    const nowSpy = vi.spyOn(Date, 'now').mockImplementation(() => reviewNow);
+    let closureTimeout: number | undefined;
     const git = (...args: string[]) => promisify(execFile)('git', args, { cwd: repoPath });
     const checkpoint = async (sourceHead: string, sequence: number): Promise<string> => {
       const tree = (await git('rev-parse', `${sourceHead}^{tree}`)).stdout.trim();
@@ -1512,25 +1515,34 @@ describe('validate() — hasWebUi gating', () => {
       const snapshotB = await checkpoint(sourceB, 2);
       await git('reset', '--hard', snapshotB);
 
-      vi.mocked(runContainerReviewer).mockImplementation(async ({ prompt }) => ({
-        stdout: prompt.includes('closure verifier')
-          ? (() => {
-              const records = JSON.parse(
-                prompt.match(/Known findings: (.*)\nRepair delta:/s)?.[1] ?? '[]',
-              ) as Array<{ semanticId: string }>;
-              return JSON.stringify({
-                decisions: records.map((record) => ({
-                  semanticId: record.semanticId,
-                  fixed: true,
-                  evidence: '+fixed marker abcdefghijklmnop',
-                })),
-              });
-            })()
-          : prompt.includes('synthesizer')
-            ? JSON.stringify({ decisions: [] })
-            : JSON.stringify({ findings: [] }),
-        tokenUsage: { inputTokens: 10, outputTokens: 2 },
-      }));
+      vi.mocked(runContainerReviewer).mockImplementation(async ({ prompt, timeout }) => {
+        if (prompt.includes('closure verifier')) {
+          closureTimeout = timeout;
+        } else if (prompt.includes('synthesizer')) {
+          reviewNow += 60;
+        } else {
+          reviewNow += 10;
+        }
+        return {
+          stdout: prompt.includes('closure verifier')
+            ? (() => {
+                const records = JSON.parse(
+                  prompt.match(/Known findings: (.*)\nRepair delta:/s)?.[1] ?? '[]',
+                ) as Array<{ semanticId: string }>;
+                return JSON.stringify({
+                  decisions: records.map((record) => ({
+                    semanticId: record.semanticId,
+                    fixed: true,
+                    evidence: '+fixed marker abcdefghijklmnop',
+                  })),
+                });
+              })()
+            : prompt.includes('synthesizer')
+              ? JSON.stringify({ decisions: [] })
+              : JSON.stringify({ findings: [] }),
+          tokenUsage: { inputTokens: 10, outputTokens: 2 },
+        };
+      });
 
       const priorReviewBatch = {
         id: 'prior-checkpoint-review',
@@ -1559,6 +1571,7 @@ describe('validate() — hasWebUi gating', () => {
           worktreePath: repoPath,
           priorReviewBatch,
           attempt: 2,
+          reviewTimeout: 100,
         }),
       );
 
@@ -1567,6 +1580,7 @@ describe('validate() — hasWebUi gating', () => {
         result.taskReview?.reviewBatch?.repairDelta?.reason,
       ).toMatchObject({ status: 'available', fromHead: snapshotA, toHead: snapshotB });
       expect(result.taskReview?.reviewBatch?.closureVerification?.status).toBe('completed');
+      expect(closureTimeout).toBe(100);
       expect(result.taskReview?.reviewBatch?.ledger).toEqual([
         expect.objectContaining({
           state: 'fixed',
@@ -1576,6 +1590,7 @@ describe('validate() — hasWebUi gating', () => {
       expect(result.taskReview?.issues).toEqual([]);
       expect(result.overall).toBe('pass');
     } finally {
+      nowSpy.mockRestore();
       await fs.rm(repoPath, { recursive: true, force: true });
     }
   });
