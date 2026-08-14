@@ -1418,6 +1418,58 @@ describe('validate() — hasWebUi gating', () => {
     expect(stages.at(-1)).toBe('finalizing');
   });
 
+  it('records unavailable closure when a required council axis fails during repair', async () => {
+    vi.mocked(runContainerReviewer).mockImplementation(async ({ prompt }) => {
+      if (prompt.includes('tests_integration reviewer')) {
+        throw new Error('Reviewer runner failed');
+      }
+      return {
+        stdout: prompt.includes('synthesizer')
+          ? JSON.stringify({ decisions: [] })
+          : JSON.stringify({ findings: [] }),
+        tokenUsage: { inputTokens: 10, outputTokens: 2 },
+      };
+    });
+    const priorReviewBatch = {
+      id: 'prior-degraded-repair',
+      diffHash: 'd',
+      reviewedHead: 'prior-head',
+      promptVersion: 'p',
+      schemaVersion: 's',
+      model: 'm',
+      axes: [],
+      candidates: [],
+      initialFindings: [],
+      accepted: [{ id: 'initial-a', source: 'initial-review' as const, issue: 'A' }],
+      rejected: [],
+      merged: [],
+      synthesis: 'model' as const,
+      durationMs: 1,
+    };
+
+    const result = await createLocalValidationEngine(stubContainerManager()).validate(
+      baseConfig({
+        reviewerModel: 'claude-sonnet-4-6',
+        diff: changedDiff,
+        validationSuite: 'full',
+        startCommand: '',
+        smokePages: [],
+        priorReviewBatch,
+      }),
+    );
+
+    expect(result.taskReview?.reviewBatch).toMatchObject({
+      infrastructureUnavailable: true,
+      closureVerification: {
+        status: 'unavailable',
+        decisions: [],
+        reason: 'Skipped because a required frozen review axis was unavailable',
+      },
+    });
+    expect(result.taskReview?.reviewBatch?.ledger?.[0]?.state).toBe('open');
+    expect(result.overall).toBe('fail');
+  });
+
   it('closes prior findings across verified sibling sandbox checkpoints', async () => {
     const repoPath = await fs.mkdtemp(path.join(os.tmpdir(), 'autopod-review-checkpoints-'));
     const podId = 'sandbox-review-ledger';

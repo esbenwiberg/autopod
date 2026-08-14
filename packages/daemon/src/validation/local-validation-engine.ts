@@ -949,8 +949,14 @@ export function createLocalValidationEngine(
             );
             let closure = undefined;
             let closureTokenUsage: TaskReviewResult['tokenUsage'];
-            if (priorActive.length > 0 && !batch.infrastructureUnavailable) {
-              if (repair.status !== 'available') {
+            if (priorActive.length > 0) {
+              if (batch.infrastructureUnavailable) {
+                closure = {
+                  status: 'unavailable' as const,
+                  decisions: [],
+                  reason: 'Skipped because a required frozen review axis was unavailable',
+                };
+              } else if (repair.status !== 'available') {
                 closure = { status: 'unavailable' as const, decisions: [], reason: repair.reason };
               } else {
                 try {
@@ -1006,13 +1012,6 @@ export function createLocalValidationEngine(
                         : 'closure reviewer unavailable',
                   };
                 }
-              }
-              if (priorActive.length > 0 && batch.infrastructureUnavailable) {
-                closure = {
-                  status: 'unavailable' as const,
-                  decisions: [],
-                  reason: 'Skipped because a required frozen review axis was unavailable',
-                };
               }
             }
             // Canonical structured records are authoritative. First-gate inputs
