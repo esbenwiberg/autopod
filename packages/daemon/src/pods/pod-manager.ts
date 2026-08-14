@@ -14785,9 +14785,9 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
 
     async applyOverridesInstant(podId: string): Promise<{ advanced: boolean }> {
       const pod = podRepo.getOrThrow(podId);
-      if (pod.status !== 'review_required') {
+      if (pod.status !== 'review_required' && pod.status !== 'failed') {
         throw new AutopodError(
-          `Cannot apply overrides instantly for pod ${podId} in status ${pod.status} — only review_required pods`,
+          `Cannot apply overrides instantly for pod ${podId} in status ${pod.status} — only failed or review_required pods`,
           'INVALID_STATE',
           409,
         );
@@ -15408,9 +15408,9 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
 
     async retryCreatePr(podId: string): Promise<void> {
       const pod = podRepo.getOrThrow(podId);
-      if (pod.status !== 'complete') {
+      if (pod.status !== 'complete' && pod.status !== 'validated') {
         throw new AutopodError(
-          `Cannot retry PR creation for ${podId} in status ${pod.status} — only complete pods`,
+          `Cannot retry PR creation for ${podId} in status ${pod.status} — only validated or complete pods`,
           'INVALID_STATE',
           409,
         );

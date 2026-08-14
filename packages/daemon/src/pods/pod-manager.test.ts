@@ -66,6 +66,7 @@ import type { EventRepository } from './event-repository.js';
 import { createFixFeedbackRepository } from './fix-feedback-repository.js';
 import { createMemoryRepository } from './memory-repository.js';
 import { createMemoryUsageRepository } from './memory-usage-repository.js';
+import { createPendingOverrideRepository } from './pending-override-repository.js';
 import {
   AGENT_ENV_PATH,
   AGENT_SHIM_PATH,
@@ -725,6 +726,7 @@ interface TestContext {
   runtime: Runtime;
   enqueuedSessions: string[];
   fixFeedbackRepo: ReturnType<typeof createFixFeedbackRepository>;
+  pendingOverrideRepo: ReturnType<typeof createPendingOverrideRepository>;
   deps: PodManagerDependencies;
 }
 
@@ -739,6 +741,7 @@ function createTestContext(
   const eventRepo = createEventRepository(db);
   const escalationRepo = createEscalationRepository(db);
   const fixFeedbackRepo = createFixFeedbackRepository(db);
+  const pendingOverrideRepo = createPendingOverrideRepository(db);
   const eventBus = createEventBus(eventRepo, logger);
 
   // ProfileStore mock that reads from DB
@@ -892,6 +895,7 @@ function createTestContext(
     podRepo,
     escalationRepo,
     fixFeedbackRepo,
+    pendingOverrideRepo,
     eventRepo,
     profileStore,
     githubAuth: {
@@ -944,11 +948,52 @@ function createTestContext(
     runtime,
     enqueuedSessions,
     fixFeedbackRepo,
+    pendingOverrideRepo,
     deps,
   };
 }
 
 describe('PodManager', () => {
+  it('applies audited finding overrides instantly when a healthy review parked as failed', async () => {
+    const ctx = createTestContext();
+    const manager = createPodManager(ctx.deps);
+    const pod = manager.createSession(
+      { profileName: 'test-profile', task: 'Resolve a reviewed finding' },
+      'user-1',
+    );
+    const issue = 'The reviewer finding is fixed in the current diff.';
+    const semanticId = 'review:fixed-finding';
+    ctx.podRepo.update(pod.id, {
+      status: 'failed',
+      lastValidationResult: makeCouncilReviewFailure(
+        pod.id,
+        1,
+        'review-batch',
+        issue,
+        semanticId,
+        true,
+      ),
+    });
+    ctx.pendingOverrideRepo.enqueue(pod.id, {
+      findingId: semanticId,
+      description: issue,
+      action: 'dismiss',
+      reason: 'Verified against the current diff and focused tests.',
+    });
+
+    await expect(manager.applyOverridesInstant(pod.id)).resolves.toEqual({ advanced: true });
+
+    expect(manager.getSession(pod.id)).toMatchObject({
+      status: 'validated',
+      lastValidationResult: {
+        overall: 'pass',
+        taskReview: { status: 'pass', issues: [] },
+      },
+      validationOverrides: [expect.objectContaining({ findingId: semanticId })],
+    });
+    expect(ctx.pendingOverrideRepo.list(pod.id)).toEqual([]);
+  });
+
   it('auto-recovers exactly one pre-agent transient sandbox failure and fails closed on unsafe evidence', async () => {
     const ctx = createTestContext(undefined, {
       executionTarget: 'sandbox',
@@ -11882,6 +11927,29 @@ describe('PodManager', () => {
         expect.objectContaining({ branch: pod.branch }),
       );
       expect(manager.getSession(pod.id).lastValidationResult).toBeNull();
+    });
+
+    it('creates a PR from a validated pod after findings are resolved by operator override', async () => {
+      const ctx = createTestContext();
+      const manager = createPodManager(ctx.deps);
+      const pod = manager.createSession(
+        { profileName: 'test-profile', task: 'Do a thing' },
+        'user-1',
+      );
+      ctx.podRepo.update(pod.id, {
+        status: 'validated',
+        worktreePath: '/tmp/worktree/abc',
+      });
+
+      await manager.retryCreatePr(pod.id);
+
+      expect(ctx.prManager.createPr).toHaveBeenCalledWith(
+        expect.objectContaining({ branch: pod.branch, baseBranch: 'main' }),
+      );
+      expect(manager.getSession(pod.id)).toMatchObject({
+        status: 'validated',
+        prUrl: 'https://github.com/org/repo/pull/42',
+      });
     });
 
     it('flags worktreeCompromised and emits event when mergeBranch hits the guard', async () => {

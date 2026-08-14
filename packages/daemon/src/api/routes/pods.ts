@@ -1632,7 +1632,7 @@ export function podRoutes(
       } catch {
         // Pod may have transitioned between check and nudge — not fatal
       }
-    } else if (pod.status === 'review_required') {
+    } else if (pod.status === 'review_required' || pod.status === 'failed') {
       // Instantly re-evaluate the cached validation result with the new override applied.
       // Avoids a full re-run when only subjective review findings need dismissing.
       podManager.applyOverridesInstant(podId).catch((err: unknown) => {
