@@ -2,6 +2,7 @@ import { execFile } from 'node:child_process';
 import fs from 'node:fs/promises';
 import { promisify } from 'node:util';
 import type { Logger } from 'pino';
+import { SandboxInfrastructureError } from '../containers/sandbox-api-client.js';
 import type { ContainerManager } from '../interfaces/container-manager.js';
 import type { WorktreeManager } from '../interfaces/worktree-manager.js';
 import {
@@ -35,6 +36,8 @@ export interface ComputePodDiffOpts {
   worktreeManager?: WorktreeManager;
   maxLength?: number;
   logger?: Logger;
+  /** Preserve typed sandbox transport failures for callers that implement a circuit breaker. */
+  propagateSandboxInfrastructureErrors?: boolean;
 }
 
 export interface PodDiffResult {
@@ -91,7 +94,15 @@ export interface PodCommitDiffsResult {
  * and the desktop diff view see the same bytes.
  */
 export async function computePodDiff(opts: ComputePodDiffOpts): Promise<PodDiffResult> {
-  const { pod, defaultBranch, containerManager, worktreeManager, maxLength, logger } = opts;
+  const {
+    pod,
+    defaultBranch,
+    containerManager,
+    worktreeManager,
+    maxLength,
+    logger,
+    propagateSandboxInfrastructureErrors,
+  } = opts;
 
   if (pod.containerId && containerManager) {
     const containerDiff = await tryContainerDiff(
@@ -100,6 +111,7 @@ export async function computePodDiff(opts: ComputePodDiffOpts): Promise<PodDiffR
       pod.startCommitSha,
       defaultBranch,
       logger,
+      propagateSandboxInfrastructureErrors,
     );
     if (containerDiff !== null) {
       return {
@@ -169,10 +181,15 @@ export async function computePodUncommittedDiff(
 export async function computePodUntrackedPreview(
   opts: ComputePodDiffOpts,
 ): Promise<PodUntrackedPreviewResult> {
-  const { pod, containerManager, logger } = opts;
+  const { pod, containerManager, logger, propagateSandboxInfrastructureErrors } = opts;
 
   if (pod.containerId && containerManager) {
-    const files = await tryContainerUntrackedPreview(containerManager, pod.containerId, logger);
+    const files = await tryContainerUntrackedPreview(
+      containerManager,
+      pod.containerId,
+      logger,
+      propagateSandboxInfrastructureErrors,
+    );
     if (files !== null) return { files, source: 'container' };
   }
 
@@ -226,9 +243,16 @@ async function tryContainerDiff(
   startCommitSha: string | null,
   defaultBranch: string,
   logger?: Logger,
+  propagateSandboxInfrastructureErrors = false,
 ): Promise<string | null> {
   try {
-    const base = await resolveContainerBase(cm, containerId, startCommitSha, defaultBranch);
+    const base = await resolveContainerBase(
+      cm,
+      containerId,
+      startCommitSha,
+      defaultBranch,
+      propagateSandboxInfrastructureErrors,
+    );
     if (!base) return null;
 
     // Single-ref `git diff <base>` folds committed + uncommitted into one net
@@ -249,6 +273,9 @@ async function tryContainerDiff(
     }
     return result.stdout;
   } catch (err) {
+    if (propagateSandboxInfrastructureErrors && err instanceof SandboxInfrastructureError) {
+      throw err;
+    }
     logger?.warn({ err }, 'computePodDiff: in-container git diff threw');
     return null;
   }
@@ -259,6 +286,7 @@ async function resolveContainerBase(
   containerId: string,
   startCommitSha: string | null,
   defaultBranch: string,
+  propagateSandboxInfrastructureErrors = false,
 ): Promise<string | undefined> {
   if (startCommitSha) return startCommitSha;
   for (const ref of [defaultBranch, `origin/${defaultBranch}`]) {
@@ -270,7 +298,10 @@ async function resolveContainerBase(
       if (result.exitCode === 0 && result.stdout.trim()) {
         return result.stdout.trim();
       }
-    } catch {
+    } catch (error) {
+      if (propagateSandboxInfrastructureErrors && error instanceof SandboxInfrastructureError) {
+        throw error;
+      }
       // Try next ref form
     }
   }
@@ -316,9 +347,13 @@ async function tryContainerUntrackedPreview(
   cm: ContainerManager,
   containerId: string,
   logger?: Logger,
+  propagateSandboxInfrastructureErrors = false,
 ): Promise<PodDiffPreviewFile[] | null> {
   const listed = await tryContainerGit(cm, containerId, untrackedListArgs(), 15_000).catch(
     (err) => {
+      if (propagateSandboxInfrastructureErrors && err instanceof SandboxInfrastructureError) {
+        throw err;
+      }
       logger?.warn({ err }, 'computePodUntrackedPreview: in-container ls-files threw');
       return null;
     },
@@ -335,7 +370,12 @@ async function tryContainerUntrackedPreview(
         cwd: WORKSPACE_DIR,
         timeout: 5_000,
       })
-      .catch(() => null);
+      .catch((error) => {
+        if (propagateSandboxInfrastructureErrors && error instanceof SandboxInfrastructureError) {
+          throw error;
+        }
+        return null;
+      });
     const size = Number.parseInt(sizeResult?.stdout.trim() ?? '', 10);
     const file = await buildUntrackedPreviewFile(
       filePath,
@@ -349,6 +389,7 @@ async function tryContainerUntrackedPreview(
         return diff.exitCode === 0 || diff.exitCode === 1 ? diff.stdout : '';
       },
       totalBytes,
+      propagateSandboxInfrastructureErrors,
     );
     totalBytes += file.diff.length;
     files.push(file);
@@ -406,6 +447,7 @@ async function buildUntrackedPreviewFile(
   size: number | undefined,
   readDiff: () => Promise<string>,
   currentTotalBytes: number,
+  propagateSandboxInfrastructureErrors = false,
 ): Promise<PodDiffPreviewFile> {
   if (size !== undefined && size > MAX_PREVIEW_FILE_BYTES) {
     return omittedPreviewFile(
@@ -422,7 +464,12 @@ async function buildUntrackedPreviewFile(
     );
   }
 
-  const rawDiff = await readDiff().catch(() => '');
+  const rawDiff = await readDiff().catch((error) => {
+    if (propagateSandboxInfrastructureErrors && error instanceof SandboxInfrastructureError) {
+      throw error;
+    }
+    return '';
+  });
   const binary = rawDiff.includes('Binary files ');
   const diff =
     rawDiff.trim().length > 0

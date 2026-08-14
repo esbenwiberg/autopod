@@ -126,6 +126,8 @@ export function createPodsitterService(deps: PodsitterServiceDependencies): Pods
   let chain = Promise.resolve();
   let stopped = true;
   let activationObservation: string | null = null;
+  let automaticReconcileScheduled = false;
+  let automaticReconcilePending = false;
 
   const serialize = <T>(work: () => Promise<T>): Promise<T> => {
     const result = chain.then(work, work);
@@ -134,6 +136,31 @@ export function createPodsitterService(deps: PodsitterServiceDependencies): Pods
       () => undefined,
     );
     return result;
+  };
+
+  const scheduleAutomaticReconcile = (): void => {
+    if (stopped) return;
+    if (automaticReconcileScheduled) {
+      automaticReconcilePending = true;
+      return;
+    }
+    automaticReconcileScheduled = true;
+    void serialize(async () => {
+      try {
+        while (!stopped) {
+          automaticReconcilePending = false;
+          try {
+            await reconcileInternal();
+          } catch (error) {
+            deps.logger.warn({ err: error }, 'Automatic Podsitter reconciliation failed');
+          }
+          if (!automaticReconcilePending) break;
+        }
+      } finally {
+        automaticReconcileScheduled = false;
+        automaticReconcilePending = false;
+      }
+    });
   };
 
   function emit(event: SystemEvent): void {
@@ -651,12 +678,9 @@ export function createPodsitterService(deps: PodsitterServiceDependencies): Pods
       if (!stopped) return;
       stopped = false;
       unsubscribe = deps.eventBus.subscribe((event) => {
-        if (relevantEvent(event)) void serialize(() => reconcileInternal());
+        if (relevantEvent(event)) scheduleAutomaticReconcile();
       });
-      timer = setInterval(
-        () => void serialize(() => reconcileInternal()),
-        deps.sweepIntervalMs ?? DEFAULT_SWEEP_MS,
-      );
+      timer = setInterval(scheduleAutomaticReconcile, deps.sweepIntervalMs ?? DEFAULT_SWEEP_MS);
       await serialize(async () => {
         if (deps.reapLeakedSandboxes) {
           await deps.reapLeakedSandboxes();

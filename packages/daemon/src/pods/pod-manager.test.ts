@@ -992,6 +992,44 @@ describe('PodManager', () => {
     });
   });
 
+  it('preserves sandbox infrastructure errors from ownership repair for automatic recovery', async () => {
+    const ctx = createTestContext(undefined, {
+      executionTarget: 'sandbox',
+      warmImageTag: 'example.azurecr.io/autopod/test-profile:latest',
+    });
+    ctx.deps.requeueSessionAfterCurrent = vi.fn();
+    ctx.deps.sandboxInfrastructureRecoveryDelay = vi.fn(async () => {});
+    vi.mocked(ctx.containerManager.execInContainer).mockImplementation(
+      async (_containerId, command) => {
+        if (command.join(' ').includes('chown -R autopod:autopod')) {
+          throw new SandboxInfrastructureError(403, {
+            'x-ms-request-id': 'ownership-repair-403',
+          });
+        }
+        return { stdout: '', stderr: '', exitCode: 0 };
+      },
+    );
+    const manager = createPodManager(ctx.deps);
+    const created = manager.createSession(
+      { profileName: 'test-profile', task: 'recover ownership setup' },
+      'user-1',
+    );
+
+    await manager.processPod(created.id);
+
+    expect(ctx.podRepo.getOrThrow(created.id)).toMatchObject({
+      status: 'queued',
+      containerId: null,
+      infrastructureRecoveryCount: 1,
+      infrastructureFailure: expect.objectContaining({
+        code: 'AZURE_SANDBOX_TRANSIENT_FORBIDDEN',
+        recoveryDisposition: 'automatic_retry_scheduled',
+        safeAgentRestart: true,
+      }),
+    });
+    expect(ctx.deps.requeueSessionAfterCurrent).toHaveBeenCalledWith(created.id);
+  });
+
   it('Resume reruns the original agent after exhausted pre-agent sandbox infrastructure', async () => {
     const ctx = createTestContext(undefined, {
       executionTarget: 'sandbox',

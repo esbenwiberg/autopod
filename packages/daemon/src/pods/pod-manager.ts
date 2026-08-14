@@ -725,6 +725,10 @@ async function repairSandboxAgentHomeOwnership(
     });
   } catch (err) {
     const detail = err instanceof Error ? err.message : String(err);
+    if (err instanceof SandboxInfrastructureError) {
+      err.message = `Sandbox startup could not repair agent home ownership: ${detail}`;
+      throw err;
+    }
     throw new Error(`Sandbox startup could not repair agent home ownership: ${detail}`);
   }
 

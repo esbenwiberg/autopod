@@ -1,5 +1,6 @@
 import type { Pod, PodStatus, PodsitterConfiguration } from '@autopod/shared';
 import type { Logger } from 'pino';
+import { SandboxInfrastructureError } from '../containers/sandbox-api-client.js';
 import type { WorktreeManager } from '../interfaces/worktree-manager.js';
 import type { EscalationRepository } from '../pods/escalation-repository.js';
 import type { EventRepository } from '../pods/event-repository.js';
@@ -24,6 +25,36 @@ const STALE_MS = 15 * 60_000;
 const MAX_DIFF_BYTES = 24_000;
 const MAX_TOUCHED_FILES = 8;
 const MAX_FILE_EXCERPT_BYTES = 1_200;
+const MAX_CANDIDATE_CONCURRENCY = 4;
+
+interface DiffEvidence {
+  diff: string;
+  source: string;
+  unavailable: boolean;
+}
+
+interface EvidenceCycle {
+  sandboxCircuitOpen: boolean;
+}
+
+async function mapWithConcurrency<T, R>(
+  items: T[],
+  concurrency: number,
+  mapper: (item: T) => Promise<R>,
+): Promise<R[]> {
+  const results = new Array<R>(items.length);
+  let nextIndex = 0;
+  const workers = Array.from({ length: Math.min(concurrency, items.length) }, async () => {
+    while (nextIndex < items.length) {
+      const index = nextIndex;
+      nextIndex += 1;
+      const item = items[index];
+      if (item !== undefined) results[index] = await mapper(item);
+    }
+  });
+  await Promise.all(workers);
+  return results;
+}
 
 function boundUtf8(value: string, maxBytes: number): string {
   if (Buffer.byteLength(value, 'utf8') <= maxBytes) return value;
@@ -73,9 +104,23 @@ export function createDaemonPodsitterEvidenceProvider(deps: {
   worktreeManager: WorktreeManager;
   logger: Logger;
 }): PodsitterEvidenceProvider {
-  async function readDiff(
-    pod: Pod,
-  ): Promise<{ diff: string; source: string; unavailable: boolean }> {
+  const diffCache = new Map<string, { key: string; evidence: DiffEvidence }>();
+
+  function diffCacheKey(pod: Pod, defaultBranch: string): string {
+    return JSON.stringify({
+      status: pod.status,
+      containerId: pod.containerId,
+      worktreePath: pod.worktreePath,
+      startCommitSha: pod.startCommitSha,
+      branch: pod.branch,
+      defaultBranch,
+      lifecycleGeneration: pod.lifecycleGeneration,
+      updatedAt: pod.updatedAt,
+      lastActivityAt: pod.lastActivityAt,
+    });
+  }
+
+  async function readDiff(pod: Pod, cycle: EvidenceCycle): Promise<DiffEvidence> {
     const profile = (() => {
       try {
         return deps.profileStore.get(pod.profileName);
@@ -84,32 +129,51 @@ export function createDaemonPodsitterEvidenceProvider(deps: {
       }
     })();
     const defaultBranch = pod.baseBranch ?? profile?.defaultBranch ?? 'main';
-    const containerManager = pod.containerId
-      ? deps.containerManagerFactory.get(pod.executionTarget)
-      : undefined;
-    try {
-      const podSlice = {
-        containerId: pod.containerId ?? null,
-        worktreePath: pod.worktreePath ?? null,
-        startCommitSha: pod.startCommitSha ?? null,
-      };
-      const [tracked, untracked] = await Promise.all([
-        computePodDiff({
-          pod: podSlice,
-          defaultBranch,
-          containerManager,
-          worktreeManager: deps.worktreeManager,
-          maxLength: MAX_DIFF_BYTES,
-          logger: deps.logger,
-        }),
-        computePodUntrackedPreview({
-          pod: podSlice,
-          defaultBranch,
-          containerManager,
-          worktreeManager: deps.worktreeManager,
-          logger: deps.logger,
-        }),
-      ]);
+    const cacheKey = diffCacheKey(pod, defaultBranch);
+    const cached = diffCache.get(pod.id);
+    if (cached?.key === cacheKey) return cached.evidence;
+
+    let containerManager =
+      pod.containerId && !(pod.executionTarget === 'sandbox' && cycle.sandboxCircuitOpen)
+        ? deps.containerManagerFactory.get(pod.executionTarget)
+        : undefined;
+    if (pod.executionTarget === 'sandbox' && pod.containerId && containerManager) {
+      try {
+        const status = await containerManager.getStatus(pod.containerId);
+        if (status !== 'running') containerManager = undefined;
+      } catch (error) {
+        if (error instanceof SandboxInfrastructureError) cycle.sandboxCircuitOpen = true;
+        deps.logger.warn(
+          { err: error, podId: pod.id, containerId: pod.containerId },
+          'Podsitter sandbox status unavailable; using host evidence',
+        );
+        containerManager = undefined;
+      }
+    }
+
+    const podSlice = {
+      containerId: pod.containerId ?? null,
+      worktreePath: pod.worktreePath ?? null,
+      startCommitSha: pod.startCommitSha ?? null,
+    };
+    const collect = async (manager: typeof containerManager): Promise<DiffEvidence> => {
+      const tracked = await computePodDiff({
+        pod: podSlice,
+        defaultBranch,
+        containerManager: manager,
+        worktreeManager: deps.worktreeManager,
+        maxLength: MAX_DIFF_BYTES,
+        logger: deps.logger,
+        propagateSandboxInfrastructureErrors: pod.executionTarget === 'sandbox',
+      });
+      const untracked = await computePodUntrackedPreview({
+        pod: podSlice,
+        defaultBranch,
+        containerManager: manager,
+        worktreeManager: deps.worktreeManager,
+        logger: deps.logger,
+        propagateSandboxInfrastructureErrors: pod.executionTarget === 'sandbox',
+      });
       let diff = [tracked.diff, ...untracked.files.map((file) => file.diff)]
         .filter(Boolean)
         .join('\n');
@@ -129,7 +193,23 @@ export function createDaemonPodsitterEvidenceProvider(deps: {
         source,
         unavailable: source === 'none',
       };
+    };
+
+    try {
+      const evidence = await collect(containerManager);
+      if (!evidence.unavailable) diffCache.set(pod.id, { key: cacheKey, evidence });
+      return evidence;
     } catch (error) {
+      if (error instanceof SandboxInfrastructureError) {
+        cycle.sandboxCircuitOpen = true;
+        deps.logger.warn(
+          { err: error, podId: pod.id, containerId: pod.containerId },
+          'Podsitter sandbox evidence hit infrastructure failure; opening cycle circuit',
+        );
+        const fallback = await collect(undefined);
+        if (!fallback.unavailable) diffCache.set(pod.id, { key: cacheKey, evidence: fallback });
+        return fallback;
+      }
       deps.logger.warn({ err: error, podId: pod.id }, 'Podsitter diff evidence unavailable');
       return { diff: '', source: 'none', unavailable: true };
     }
@@ -139,6 +219,7 @@ export function createDaemonPodsitterEvidenceProvider(deps: {
     podId: string,
     now: Date,
     configuration: PodsitterConfiguration | null,
+    cycle: EvidenceCycle,
   ): Promise<PodsitterCandidate | null> {
     let pod: Pod;
     try {
@@ -160,7 +241,7 @@ export function createDaemonPodsitterEvidenceProvider(deps: {
     const validationHistory = deps.podManager.getValidationHistory(pod.id);
     const providerAttempts = deps.providerAttemptRepo.list(pod.id);
     const recentEvents = deps.eventRepo.getForSession(pod.id, { latest: 30 });
-    const diff = await readDiff(pod);
+    const diff = await readDiff(pod, cycle);
     const excerpts = touchedFileExcerpts(diff.diff);
     const seriesGraph = pod.seriesId
       ? deps.podManager
@@ -266,13 +347,19 @@ export function createDaemonPodsitterEvidenceProvider(deps: {
 
   return {
     async listCandidates(now, configuration) {
-      const candidates = await Promise.all(
-        deps.podManager.listSessions().map((pod) => buildCandidate(pod.id, now, configuration)),
+      const pods = deps.podManager.listSessions();
+      const currentPodIds = new Set(pods.map((pod) => pod.id));
+      for (const podId of diffCache.keys()) {
+        if (!currentPodIds.has(podId)) diffCache.delete(podId);
+      }
+      const cycle: EvidenceCycle = { sandboxCircuitOpen: false };
+      const candidates = await mapWithConcurrency(pods, MAX_CANDIDATE_CONCURRENCY, (pod) =>
+        buildCandidate(pod.id, now, configuration, cycle),
       );
       return candidates.filter((candidate): candidate is PodsitterCandidate => candidate !== null);
     },
     async getCandidate(podId, now, configuration) {
-      return buildCandidate(podId, now, configuration);
+      return buildCandidate(podId, now, configuration, { sandboxCircuitOpen: false });
     },
   };
 }

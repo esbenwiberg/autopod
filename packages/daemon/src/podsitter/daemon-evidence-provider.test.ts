@@ -1,5 +1,7 @@
 import type { Pod, Profile } from '@autopod/shared';
 import { describe, expect, it, vi } from 'vitest';
+import { SandboxInfrastructureError } from '../containers/sandbox-api-client.js';
+import type { ContainerManager } from '../interfaces/container-manager.js';
 import type { WorktreeManager } from '../interfaces/worktree-manager.js';
 import type { EscalationRepository } from '../pods/escalation-repository.js';
 import type { EventRepository } from '../pods/event-repository.js';
@@ -28,7 +30,7 @@ function makePod(overrides: Partial<Pod> = {}): Pod {
   } as Pod;
 }
 
-function harness(initialPod: Pod, diff: string) {
+function harness(initialPod: Pod, diff: string, containerManager?: ContainerManager) {
   let pod = initialPod;
   const podManager = {
     getSession: vi.fn(() => pod),
@@ -55,7 +57,9 @@ function harness(initialPod: Pod, diff: string) {
     repository: {
       listDecisions: vi.fn(() => ({ items: [], total: 0 })),
     } as unknown as PodsitterRepository,
-    containerManagerFactory: { get: vi.fn() } as unknown as ContainerManagerFactory,
+    containerManagerFactory: {
+      get: vi.fn(() => containerManager),
+    } as unknown as ContainerManagerFactory,
     profileStore: {
       get: vi.fn(
         () =>
@@ -121,5 +125,161 @@ index 111..222 100644
     const after = await harnessValue.provider.getCandidate('pod-1', new Date(), null as never);
     expect(after?.deterministicApproval).toBe(false);
     expect(after?.signature).not.toBe(before?.signature);
+  });
+
+  it('uses host evidence without executing in a stopped sandbox', async () => {
+    const containerManager = {
+      getStatus: vi.fn(async () => 'stopped' as const),
+      execInContainer: vi.fn(async () => ({ stdout: '', stderr: '', exitCode: 0 })),
+    } as unknown as ContainerManager;
+    const { provider } = harness(
+      makePod({
+        executionTarget: 'sandbox',
+        containerId: 'sandbox-stopped',
+        startCommitSha: 'a'.repeat(40),
+      }),
+      'host diff',
+      containerManager,
+    );
+
+    const candidate = await provider.getCandidate('pod-1', new Date(), null as never);
+
+    expect(containerManager.getStatus).toHaveBeenCalledOnce();
+    expect(containerManager.execInContainer).not.toHaveBeenCalled();
+    expect(sectionContent(candidate, 'diff:bounded')?.content).toMatchObject({
+      source: 'worktree',
+      diff: 'host diff',
+    });
+  });
+
+  it('serializes and reuses unchanged live sandbox evidence', async () => {
+    let active = 0;
+    let maxActive = 0;
+    const execInContainer = vi.fn(async (_containerId: string, command: string[]) => {
+      active += 1;
+      maxActive = Math.max(maxActive, active);
+      await new Promise((resolve) => setImmediate(resolve));
+      active -= 1;
+      if (command.includes('ls-files')) return { stdout: '', stderr: '', exitCode: 0 };
+      return { stdout: 'container diff', stderr: '', exitCode: 0 };
+    });
+    const containerManager = {
+      getStatus: vi.fn(async () => 'running' as const),
+      execInContainer,
+    } as unknown as ContainerManager;
+    const pod = makePod({
+      executionTarget: 'sandbox',
+      containerId: 'sandbox-running',
+      startCommitSha: 'a'.repeat(40),
+    });
+    const { provider } = harness(pod, '', containerManager);
+
+    await provider.getCandidate('pod-1', new Date(), null as never);
+    const callsAfterFirstRead = execInContainer.mock.calls.length;
+    await provider.getCandidate('pod-1', new Date(), null as never);
+
+    expect(maxActive).toBe(1);
+    expect(callsAfterFirstRead).toBeGreaterThan(0);
+    expect(execInContainer).toHaveBeenCalledTimes(callsAfterFirstRead);
+    expect(containerManager.getStatus).toHaveBeenCalledOnce();
+  });
+
+  it('bounds candidate evidence collection concurrency', async () => {
+    const pods = Array.from({ length: 10 }, (_, index) =>
+      makePod({
+        id: `pod-${index}`,
+        worktreePath: `/worktree/${index}`,
+        containerId: null,
+      }),
+    );
+    let active = 0;
+    let maxActive = 0;
+    const worktreeManager = {
+      getDiff: vi.fn(async () => {
+        active += 1;
+        maxActive = Math.max(maxActive, active);
+        await new Promise((resolve) => setImmediate(resolve));
+        active -= 1;
+        return '';
+      }),
+    } as unknown as WorktreeManager;
+    const provider = createDaemonPodsitterEvidenceProvider({
+      podManager: {
+        getSession: vi.fn((podId: string) => pods.find((pod) => pod.id === podId) as Pod),
+        listSessions: vi.fn(() => pods),
+        getValidationHistory: vi.fn(() => []),
+      } as unknown as PodManager,
+      eventRepo: { getForSession: vi.fn(() => []) } as unknown as EventRepository,
+      escalationRepo: { listBySession: vi.fn(() => []) } as unknown as EscalationRepository,
+      providerAttemptRepo: { list: vi.fn(() => []) } as unknown as ProviderAttemptRepository,
+      repository: {
+        listDecisions: vi.fn(() => ({ items: [], total: 0 })),
+      } as unknown as PodsitterRepository,
+      containerManagerFactory: { get: vi.fn() } as unknown as ContainerManagerFactory,
+      profileStore: {
+        get: vi.fn(() => ({ name: 'default', defaultBranch: 'main' }) as Profile),
+      } as unknown as ProfileStore,
+      worktreeManager,
+      logger,
+    });
+
+    await provider.listCandidates(new Date(), null);
+
+    expect(maxActive).toBeGreaterThan(1);
+    expect(maxActive).toBeLessThanOrEqual(4);
+  });
+
+  it('stops starting sandbox evidence after an infrastructure error in the cycle', async () => {
+    const pods = Array.from({ length: 8 }, (_, index) =>
+      makePod({
+        id: `pod-${index}`,
+        executionTarget: 'sandbox',
+        containerId: `sandbox-${index}`,
+        worktreePath: `/worktree/${index}`,
+        startCommitSha: 'a'.repeat(40),
+      }),
+    );
+    const attemptedSandboxes = new Set<string>();
+    const containerManager = {
+      getStatus: vi.fn(async () => 'running' as const),
+      execInContainer: vi.fn(async (containerId: string, command: string[]) => {
+        attemptedSandboxes.add(containerId);
+        if (containerId === 'sandbox-0') {
+          throw new SandboxInfrastructureError(403, { 'x-ms-request-id': 'podsitter-403' });
+        }
+        await new Promise((resolve) => setImmediate(resolve));
+        if (command.includes('ls-files')) return { stdout: '', stderr: '', exitCode: 0 };
+        return { stdout: '', stderr: '', exitCode: 0 };
+      }),
+    } as unknown as ContainerManager;
+    const provider = createDaemonPodsitterEvidenceProvider({
+      podManager: {
+        getSession: vi.fn((podId: string) => pods.find((pod) => pod.id === podId) as Pod),
+        listSessions: vi.fn(() => pods),
+        getValidationHistory: vi.fn(() => []),
+      } as unknown as PodManager,
+      eventRepo: { getForSession: vi.fn(() => []) } as unknown as EventRepository,
+      escalationRepo: { listBySession: vi.fn(() => []) } as unknown as EscalationRepository,
+      providerAttemptRepo: { list: vi.fn(() => []) } as unknown as ProviderAttemptRepository,
+      repository: {
+        listDecisions: vi.fn(() => ({ items: [], total: 0 })),
+      } as unknown as PodsitterRepository,
+      containerManagerFactory: {
+        get: vi.fn(() => containerManager),
+      } as unknown as ContainerManagerFactory,
+      profileStore: {
+        get: vi.fn(() => ({ name: 'default', defaultBranch: 'main' }) as Profile),
+      } as unknown as ProfileStore,
+      worktreeManager: {
+        getDiff: vi.fn(async () => ''),
+      } as unknown as WorktreeManager,
+      logger,
+    });
+
+    await provider.listCandidates(new Date(), null);
+
+    expect(attemptedSandboxes).toContain('sandbox-0');
+    expect([...attemptedSandboxes]).not.toContain('sandbox-4');
+    expect([...attemptedSandboxes]).not.toContain('sandbox-7');
   });
 });

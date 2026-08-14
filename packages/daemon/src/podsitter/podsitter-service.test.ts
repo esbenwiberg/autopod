@@ -12,6 +12,14 @@ import { createPodsitterService } from './podsitter-service.js';
 
 const NOW = new Date('2026-07-30T12:00:00.000Z');
 
+function deferred<T>() {
+  let resolve!: (value: T | PromiseLike<T>) => void;
+  const promise = new Promise<T>((res) => {
+    resolve = res;
+  });
+  return { promise, resolve };
+}
+
 function setup() {
   const db = createTestDb();
   insertTestProfile(db);
@@ -153,6 +161,38 @@ describe('PodsitterService', () => {
     expect(harness.evidenceProvider.listCandidates).toHaveBeenCalledTimes(1);
     expect(harness.repository.listPendingAttention()).toHaveLength(1);
     expect(run).not.toHaveBeenCalled();
+  });
+
+  it('coalesces reconciliation event bursts into one trailing scan', async () => {
+    const harness = setup();
+    harness.evidenceProvider.listCandidates.mockResolvedValue([]);
+    const sitter = service(harness, vi.fn());
+    await sitter.start();
+    harness.evidenceProvider.listCandidates.mockClear();
+
+    const firstScan = deferred<[]>();
+    harness.evidenceProvider.listCandidates
+      .mockReturnValueOnce(firstScan.promise)
+      .mockResolvedValue([]);
+    const event = {
+      type: 'pod.status_changed' as const,
+      timestamp: NOW.toISOString(),
+      podId: 'pod-1',
+      previousStatus: 'queued' as const,
+      newStatus: 'provisioning' as const,
+    };
+
+    harness.eventBus.emit(event);
+    await vi.waitFor(() => expect(harness.evidenceProvider.listCandidates).toHaveBeenCalledOnce());
+    for (let index = 0; index < 6; index += 1) harness.eventBus.emit(event);
+    firstScan.resolve([]);
+
+    await vi.waitFor(() =>
+      expect(harness.evidenceProvider.listCandidates).toHaveBeenCalledTimes(2),
+    );
+    await new Promise((resolve) => setImmediate(resolve));
+    expect(harness.evidenceProvider.listCandidates).toHaveBeenCalledTimes(2);
+    await sitter.stop();
   });
 
   it('executes one current authorized decision', async () => {
