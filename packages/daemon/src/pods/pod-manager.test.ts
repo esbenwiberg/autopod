@@ -13334,6 +13334,92 @@ describe('PodManager', () => {
       expect(ctx.runtime.resume).not.toHaveBeenCalled();
     });
 
+    it('Path 2: human validation waiver overrides a failed Resume revalidation', async () => {
+      const failedResult = makeValidationResult({
+        overall: 'fail',
+        smoke: {
+          status: 'fail',
+          build: { status: 'skip', output: '', duration: 0 },
+          health: {
+            status: 'fail',
+            url: 'http://localhost:3000/health',
+            responseCode: null,
+            duration: 0,
+          },
+          pages: [],
+        },
+      });
+      const ctx = createTestContext(failedResult);
+      const { manager, pod } = setupFailedPod(ctx, {
+        validationOverall: 'fail',
+        prUrl: null,
+      });
+      const skipActor = {
+        type: 'human' as const,
+        userId: 'operator-1',
+        displayName: 'Operator One',
+      };
+      ctx.podRepo.update(pod.id, {
+        skipValidation: true,
+        skipValidationActor: skipActor,
+        failureReason: 'Agent failed: Claude process exited with code 137',
+      });
+
+      const result = await manager.resumePod(pod.id);
+
+      expect(result).toEqual({ action: 'revalidate' });
+      const refreshed = manager.getSession(pod.id);
+      expect(refreshed.status).toBe('validated');
+      expect(refreshed.failureReason).toBeNull();
+      expect(refreshed.validationWaiver).toMatchObject({
+        waivedBy: 'Operator One',
+        actor: skipActor,
+        reason: 'Validation skipped by operator',
+        attempt: 1,
+      });
+      expect(ctx.runtime.spawn).not.toHaveBeenCalled();
+      expect(ctx.runtime.resume).not.toHaveBeenCalled();
+      expect(
+        ctx.eventRepo.getForSession(pod.id, { type: 'pod.agent_activity' }).some((stored) => {
+          const payload = stored.payload as { event?: { message?: unknown } };
+          return String(payload.event?.message).startsWith('Validation waived by Operator One');
+        }),
+      ).toBe(true);
+    });
+
+    it('Path 2: failed revalidation replaces the stale agent failure reason', async () => {
+      const failedResult = makeValidationResult({
+        overall: 'fail',
+        smoke: {
+          status: 'fail',
+          build: { status: 'pass', output: '', duration: 100 },
+          health: {
+            status: 'fail',
+            url: 'http://localhost:3000/health',
+            responseCode: null,
+            duration: 0,
+          },
+          pages: [],
+        },
+      });
+      const ctx = createTestContext(failedResult);
+      const { manager, pod } = setupFailedPod(ctx, {
+        validationOverall: 'fail',
+        prUrl: null,
+      });
+      ctx.podRepo.update(pod.id, {
+        failureReason: 'Agent failed: Claude process exited with code 137',
+      });
+
+      await manager.resumePod(pod.id);
+
+      const refreshed = manager.getSession(pod.id);
+      expect(refreshed.status).toBe('failed');
+      expect(refreshed.failureReason).toContain('Revalidation failed');
+      expect(refreshed.failureReason).toContain('health: fail');
+      expect(refreshed.failureReason).not.toContain('Claude process exited');
+    });
+
     it('Path 2: existing PR + failed validation → revalidates (no second PR)', async () => {
       const ctx = createTestContext();
       const { manager, pod } = setupFailedPod(ctx, {

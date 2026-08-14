@@ -6728,6 +6728,34 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
     return podRepo.getOrThrow(pod.id);
   }
 
+  function applySkipValidationDecision(pod: Pod, result: ValidationResult): Pod | null {
+    if (!pod.skipValidation) return null;
+
+    const skipActor = pod.skipValidationActor ?? {
+      type: 'automation' as const,
+      id: 'legacy-skip-validation',
+    };
+    const validationWaiver =
+      result.overall === 'fail'
+        ? buildValidationWaiver(result, 'Validation skipped by operator', skipActor)
+        : null;
+    emitActivityStatus(
+      pod.id,
+      validationWaiver
+        ? `Validation waived by ${actorLabel(skipActor)} — failed phases: ${validationWaiver.failedPhases.join(', ') || 'unknown'}`
+        : `Validation skipped by ${actorLabel(skipActor)} — marking as validated`,
+    );
+    logger.info(
+      { podId: pod.id, attempt: result.attempt, validationWaiver },
+      'skip_validation set — bypassing result',
+    );
+    pendingUpdateFromBaseIntents.delete(pod.id);
+    return transition(pod, 'validated', {
+      failureReason: null,
+      validationWaiver,
+    });
+  }
+
   function emitPodCompletedEvent(pod: Pod, filesChanged = pod.filesChanged): void {
     eventBus.emit({
       type: 'pod.completed',
@@ -13145,32 +13173,9 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         result = effectiveResult;
 
         // Skip-validation may have been toggled while this run was in flight — bypass result.
-        if (s2.skipValidation) {
-          const skipActor = s2.skipValidationActor ?? {
-            type: 'automation' as const,
-            id: 'legacy-skip-validation',
-          };
-          const validationWaiver =
-            result.overall === 'fail'
-              ? buildValidationWaiver(result, 'Validation skipped by operator', skipActor)
-              : null;
-          emitActivityStatus(
-            podId,
-            validationWaiver
-              ? `Validation waived by ${actorLabel(skipActor)} — failed phases: ${validationWaiver.failedPhases.join(', ') || 'unknown'}`
-              : `Validation skipped by ${actorLabel(skipActor)} — marking as validated`,
-          );
-          logger.info(
-            { podId, attempt, validationWaiver },
-            'skip_validation set mid-run — bypassing result',
-          );
-          pendingUpdateFromBaseIntents.delete(podId);
-          const validatedPod = transition(
-            s2,
-            'validated',
-            validationWaiver ? { validationWaiver } : undefined,
-          );
-          maybeTriggerDependents(validatedPod);
+        const skipValidatedPod = applySkipValidationDecision(s2, result);
+        if (skipValidatedPod) {
+          maybeTriggerDependents(skipValidatedPod);
           return;
         }
 
@@ -13629,6 +13634,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           recoveryWorktreePath: revalidationWorktreePath,
           skipAgent: true,
           lastValidationResult: null,
+          failureReason: null,
         });
         transition(podRepo.getOrThrow(podId), 'queued');
         enqueueSession(podId);
@@ -13687,7 +13693,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           'Resume: container missing — re-provisioning for validation only',
         );
       }
-      transition(pod, 'validating');
+      transition(pod, 'validating', { failureReason: null });
 
       // Re-run validation (force=true restarts container, but we don't want agent retry on failure)
       const attempt = 1;
@@ -13922,6 +13928,21 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           return { newCommits, result: 'fail' };
         }
 
+        const skipValidatedPod = applySkipValidationDecision(s2, result);
+        if (skipValidatedPod) {
+          maybeTriggerDependents(skipValidatedPod);
+          if (skipValidatedPod.containerId) {
+            try {
+              emitActivityStatus(podId, 'Stopping post-validation container…');
+              const cm2 = containerManagerFactory.get(skipValidatedPod.executionTarget);
+              await cm2.stop(skipValidatedPod.containerId);
+            } catch (err) {
+              logger.warn({ err, podId }, 'Failed to stop container after waived revalidation');
+            }
+          }
+          return { newCommits, result: 'pass' };
+        }
+
         if (isValidationInfrastructureOnlyFailure(result)) {
           await parkOnValidationInfrastructureFailure(s2, result);
           return { newCommits, result: 'fail' };
@@ -14123,7 +14144,9 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           }
         }
         emitActivityStatus(podId, 'Revalidation failed — human fix did not resolve all issues');
-        transition(s2, 'failed');
+        transition(s2, 'failed', {
+          failureReason: `Revalidation failed — ${summarizeValidationPhases(result)}`,
+        });
 
         if (s2.containerId) {
           try {
