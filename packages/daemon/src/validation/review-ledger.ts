@@ -377,7 +377,12 @@ export function parseClosureVerification(
   try {
     if (Buffer.byteLength(stdout, 'utf8') > MAX_CLOSURE_RESPONSE_BYTES)
       throw new Error('closure response exceeds bounded output size');
-    const parsed: unknown = JSON.parse(stdout);
+    const trimmed = stdout.trim();
+    const fenced = trimmed.match(/^```(?:json)?[\t ]*\r?\n([\s\S]*?)\r?\n```$/i);
+    // Some reviewer CLIs wrap otherwise valid JSON in one markdown fence even
+    // when explicitly asked for JSON only. Accept that exact bounded envelope,
+    // but keep failing closed for trailing prose or multiple records.
+    const parsed: unknown = JSON.parse(fenced?.[1] ?? stdout);
     const raw =
       parsed && typeof parsed === 'object' ? (parsed as { decisions?: unknown }).decisions : null;
     if (!Array.isArray(raw)) throw new Error('missing decisions');

@@ -387,6 +387,20 @@ describe('reconcileReviewLedger', () => {
     );
   });
 
+  it('accepts one bounded JSON markdown fence from the closure reviewer', () => {
+    const prior = reconcileReviewLedger(undefined, [finding('A')], undefined);
+    const response = JSON.stringify({
+      decisions: [{ semanticId: semantic('A'), fixed: false }],
+    });
+
+    expect(parseClosureVerification(`\`\`\`json\n${response}\n\`\`\``, prior).status).toBe(
+      'completed',
+    );
+    expect(
+      parseClosureVerification(`\`\`\`json\n${response}\n\`\`\`\nextra prose`, prior).status,
+    ).toBe('invalid');
+  });
+
   it('validates evidence against the exact frozen delta supplied to the prompt', () => {
     const prior = reconcileReviewLedger(undefined, [finding('A')], undefined);
     const rawDelta = `+ trusted visible repair abcdefghijklmnop\n${'🦊'.repeat(250_000)}\n+ outside frozen repair abcdefghijklmnop`;
