@@ -59,6 +59,7 @@ import {
   parseClosureVerification,
   reconcileReviewLedger,
 } from './review-ledger.js';
+import { reviewClosureOutputContract } from './review-structured-output.js';
 import { runToolUseReview } from './review-tool-runner.js';
 
 const execFileAsync = promisify(execFile);
@@ -969,43 +970,51 @@ export function createLocalValidationEngine(
                   // deadline or repaired findings can remain open without adjudication.
                   const closureDeadline = Date.now() + councilTimeoutMs;
                   for (const chunk of closureVerificationChunks(priorActive)) {
-                    const closureTimeout = closureDeadline - Date.now();
-                    if (closureTimeout <= 0) {
-                      throw new Error(
-                        'frozen review council deadline exceeded before closure verification',
+                    for (let closureAttempt = 1; closureAttempt <= 2; closureAttempt++) {
+                      const closureTimeout = closureDeadline - Date.now();
+                      if (closureTimeout <= 0) {
+                        throw new Error(
+                          'frozen review council deadline exceeded before closure verification',
+                        );
+                      }
+                      const response = await runContainerReviewer({
+                        podId: config.podId,
+                        containerId: config.containerId,
+                        containerManager,
+                        profile: {
+                          modelProvider: config.reviewerProvider ?? 'anthropic',
+                          providerCredentials: config.reviewerProviderCredentials ?? null,
+                        },
+                        model: config.reviewerModel ?? 'auto',
+                        prompt: `${closurePrompt(chunk, frozenClosureDelta)}${
+                          closureAttempt === 2
+                            ? '\nCorrection required: return only JSON satisfying the supplied closure response schema.'
+                            : ''
+                        }`,
+                        ...(config.reviewerExecEnv ? { env: config.reviewerExecEnv } : {}),
+                        // Closure has its own bounded deadline; container timeout
+                        // termination still happens before retrying.
+                        timeout: closureTimeout,
+                        logger: log,
+                        outputContract: reviewClosureOutputContract,
+                      });
+                      closureTokenUsage = combineReviewTokenUsage(
+                        config.reviewerModel ?? 'auto',
+                        closureTokenUsage,
+                        response.tokenUsage,
                       );
+                      const parsed = parseClosureVerification(
+                        response.stdout,
+                        chunk,
+                        frozenClosureDelta,
+                      );
+                      if (parsed.status === 'completed') {
+                        decisions.push(...parsed.decisions);
+                        break;
+                      }
+                      if (closureAttempt === 2 || parsed.status !== 'invalid') closure = parsed;
                     }
-                    const response = await runContainerReviewer({
-                      podId: config.podId,
-                      containerId: config.containerId,
-                      containerManager,
-                      profile: {
-                        modelProvider: config.reviewerProvider ?? 'anthropic',
-                        providerCredentials: config.reviewerProviderCredentials ?? null,
-                      },
-                      model: config.reviewerModel ?? 'auto',
-                      prompt: closurePrompt(chunk, frozenClosureDelta),
-                      ...(config.reviewerExecEnv ? { env: config.reviewerExecEnv } : {}),
-                      // Closure has its own bounded deadline; container timeout
-                      // termination still happens before retrying.
-                      timeout: closureTimeout,
-                      logger: log,
-                    });
-                    closureTokenUsage = combineReviewTokenUsage(
-                      config.reviewerModel ?? 'auto',
-                      closureTokenUsage,
-                      response.tokenUsage,
-                    );
-                    const parsed = parseClosureVerification(
-                      response.stdout,
-                      chunk,
-                      frozenClosureDelta,
-                    );
-                    if (parsed.status !== 'completed') {
-                      closure = parsed;
-                      break;
-                    }
-                    decisions.push(...parsed.decisions);
+                    if (closure) break;
                   }
                   closure ??= { status: 'completed' as const, decisions };
                 } catch (error) {

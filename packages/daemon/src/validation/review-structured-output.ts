@@ -147,6 +147,32 @@ export const reviewSynthesisOutputContract: ReviewerOutputContract = {
   }),
 };
 
+/** Provider-native shape guard for prior-finding closure decisions. */
+export const reviewClosureOutputContract: ReviewerOutputContract = {
+  name: 'review-closure-v1',
+  jsonSchema: JSON.stringify({
+    type: 'object',
+    additionalProperties: false,
+    required: ['decisions'],
+    properties: {
+      decisions: {
+        type: 'array',
+        maxItems: 100,
+        items: {
+          type: 'object',
+          additionalProperties: false,
+          required: ['semanticId', 'fixed', 'evidence'],
+          properties: {
+            semanticId: { type: 'string', minLength: 1, maxLength: 256 },
+            fixed: { type: 'boolean' },
+            evidence: nullableJsonSchema({ type: 'string', maxLength: 8000 }),
+          },
+        },
+      },
+    },
+  }),
+};
+
 export class ReviewStructuredOutputError extends Error {
   readonly code = REVIEW_VALIDATION_CODE;
   constructor() {
