@@ -30,6 +30,17 @@ export const REVIEW_AXES: ReviewAxis[] = [
   'tests_integration',
 ];
 
+// Start the historically longest axis immediately. With three workers and one
+// shared guardrail, leaving tests_integration until the second wave can consume
+// nearly the entire batch budget before synthesis and finding closure begin.
+const REVIEW_EXECUTION_ORDER: ReviewAxis[] = [
+  'tests_integration',
+  'contract_completeness',
+  'lifecycle_reliability',
+  'security_authority',
+  'persistence_reproducibility',
+];
+
 export interface FrozenReviewPacket {
   id: string;
   diff: string;
@@ -240,8 +251,8 @@ export async function runReviewBatch(
   const remaining = () => Math.max(0, deadline - Date.now());
   let next = 0;
   const worker = async () => {
-    while (next < REVIEW_AXES.length) {
-      const axis = REVIEW_AXES[next++];
+    while (next < REVIEW_EXECUTION_ORDER.length) {
+      const axis = REVIEW_EXECUTION_ORDER[next++];
       let lastError: string | undefined;
       let failure: ReviewFailure | undefined;
       const axisStarted = Date.now();

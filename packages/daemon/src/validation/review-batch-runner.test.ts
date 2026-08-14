@@ -109,6 +109,21 @@ describe('runReviewBatch', () => {
     expect(batch.axes.every((axis) => axis.durationMs !== undefined)).toBe(true);
   });
 
+  it('starts the integration axis in the first worker wave to preserve closure budget', async () => {
+    const started: string[] = [];
+    await runReviewBatch({
+      packet: packet(),
+      model: 'test',
+      execute: async (_prompt, label) => {
+        started.push(label);
+        await Promise.resolve();
+        return { stdout: '{"findings":[]}' };
+      },
+    });
+
+    expect(started.slice(0, 3).some((label) => label.includes('tests_integration'))).toBe(true);
+  });
+
   it('retries one failed axis and fails closed when it remains unavailable', async () => {
     let calls = 0;
     const batch = await runReviewBatch({
