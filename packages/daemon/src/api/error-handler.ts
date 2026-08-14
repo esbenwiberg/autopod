@@ -33,6 +33,14 @@ export function errorHandler(
     return;
   }
 
+  if (error.statusCode === 429) {
+    reply.status(429).send({
+      error: 'RATE_LIMITED',
+      message: 'Too many requests; retry later',
+    });
+    return;
+  }
+
   // Never leak stack traces
   request.log.error(error, 'Unhandled error');
   reply.status(500).send({

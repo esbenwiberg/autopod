@@ -44,6 +44,7 @@ import {
 import { computeThroughputAnalytics } from '../../pods/throughput-aggregator.js';
 import type { ValidationRepository } from '../../pods/validation-repository.js';
 import type { SafetyEventsRepository } from '../../safety/safety-events-repository.js';
+import { CONTROL_PLANE_RATE_LIMIT_MAX, rateLimitIdentity } from '../plugins/rate-limit.js';
 import { resolvePublicPreviewOrigin, rewritePreviewUrlForBrowser } from '../preview-url.js';
 import { serializePodForWire, serializeValidationResult } from '../wire-serializers.js';
 
@@ -273,6 +274,7 @@ const PREVIEW_PROXY_HOP_BY_HOP_HEADERS = new Set([
   'upgrade',
 ]);
 const PREVIEW_POD_COOKIE = 'autopod_preview_pod';
+const PREVIEW_RATE_LIMIT_MAX = 5_000;
 
 function proxyBasePath(podId: string): string {
   return `/pods/${encodeURIComponent(podId)}/preview/proxy`;
@@ -336,8 +338,24 @@ function previewCookie(podId: string): string {
 }
 
 function previewPodIdFromRequest(request: FastifyRequest): string | null {
-  return previewPodIdFromReferer(request) ?? previewPodIdFromCookie(request);
+  const pathname = new URL(request.url, 'http://autopod.local').pathname;
+  return (
+    previewPodIdFromPath(pathname) ??
+    previewPodIdFromReferer(request) ??
+    previewPodIdFromCookie(request)
+  );
 }
+
+const PREVIEW_RATE_LIMIT = {
+  max: (request: FastifyRequest) =>
+    previewPodIdFromRequest(request) ? PREVIEW_RATE_LIMIT_MAX : CONTROL_PLANE_RATE_LIMIT_MAX,
+  timeWindow: '1 minute',
+  groupId: 'preview-proxy',
+  keyGenerator: (request: FastifyRequest) => {
+    const podId = previewPodIdFromRequest(request) ?? 'none';
+    return `${rateLimitIdentity(request)}:pod:${podId}`;
+  },
+};
 
 function previewPodIdFromReferer(request: FastifyRequest): string | null {
   const referer =
@@ -1476,12 +1494,20 @@ export function podRoutes(
   // and hosted VM dynamic preview ports are not internet-reachable, so browser
   // traffic comes through the daemon's normal HTTPS origin and is forwarded
   // internally to the pod preview server.
-  app.all('/pods/:podId/preview/proxy', { config: { auth: false } }, proxyPreviewRequest);
-  app.all('/pods/:podId/preview/proxy/*', { config: { auth: false } }, proxyPreviewRequest);
+  app.all(
+    '/pods/:podId/preview/proxy',
+    { config: { auth: false, rateLimit: PREVIEW_RATE_LIMIT } },
+    proxyPreviewRequest,
+  );
+  app.all(
+    '/pods/:podId/preview/proxy/*',
+    { config: { auth: false, rateLimit: PREVIEW_RATE_LIMIT } },
+    proxyPreviewRequest,
+  );
   app.route({
     method: ['GET', 'HEAD', 'POST', 'PUT', 'PATCH', 'DELETE'],
     url: '/*',
-    config: { auth: false },
+    config: { auth: false, rateLimit: PREVIEW_RATE_LIMIT },
     handler: proxyPreviewFallbackRequest,
   });
 

@@ -1,0 +1,111 @@
+contract_version: 1
+title: "Prevent Secretlint daemon crashes and recover interrupted Sandbox pods safely"
+depends_on: []
+scenarios:
+  - id: performance-cleanup-does-not-delete-user-timing
+    given:
+      - "the daemon periodic performance cleanup runs while Secretlint has an in-flight profiled scan"
+      - "fetch Resource Timing entries may have accumulated"
+    when:
+      - "the cleanup helper discards unused performance data"
+    then:
+      - "only Resource Timing entries are cleared"
+      - "third-party User Timing marks and measures remain available to their owner"
+      - "the Secretlint scan and its deferred profiler measurement complete without an uncaught missing-mark exception"
+  - id: sandbox-agent-pid-is-writable-and-private
+    given:
+      - "the Sandbox file API materializes runtime uploads as root-owned files"
+      - "the agent shim executes as the non-root autopod user"
+    when:
+      - "Sandbox provisioning prepares /run/autopod and starts the agent shim"
+    then:
+      - "the shim records its process ID in /run/autopod/agent.pid"
+      - "the PID file is writable by the agent user"
+      - "credential files and the /run/autopod directory are not made broadly writable"
+      - "daemon restart quiescence can read the recorded worker PID"
+  - id: interrupted-provisioning-is-reconciled
+    given:
+      - "a Sandbox pod is durably provisioning when the daemon exits"
+      - "the pod has no persisted container ID"
+      - "its host worktree or safe fresh-provisioning state is still available"
+    when:
+      - "Sandbox startup reconciliation runs"
+    then:
+      - "the pod does not remain indefinitely in provisioning"
+      - "the incomplete container binding is cleared"
+      - "the pod is re-enqueued exactly once through a bounded recovery path that preserves durable work"
+      - "repeated reconciliation is idempotent"
+  - id: unrecoverable-provisioning-is-explicit
+    given:
+      - "a Sandbox pod is durably provisioning with no container ID"
+      - "neither a durable worktree nor a safe fresh-provisioning path can be established"
+    when:
+      - "Sandbox startup reconciliation classifies the pod"
+    then:
+      - "the pod is parked or failed with an operator-visible recovery reason"
+      - "the pod does not remain non-terminal and inert"
+      - "no paid agent attempt is started blindly"
+  - id: resumed-runtime-identity-rotates-attempt
+    given:
+      - "a daemon restart leaves an active append-only provider attempt with a native session identity"
+      - "the recovered runtime emits a different native session identity"
+    when:
+      - "the daemon consumes the first recovered runtime event"
+    then:
+      - "the old attempt is closed as aborted without rewriting its identity or accounting"
+      - "a new attempt is appended before the new identity, token, or cost data is recorded"
+      - "the pod continues without an append/close-only database error"
+  - id: true-same-session-resume-keeps-attempt
+    given:
+      - "a daemon restart leaves an active provider attempt"
+      - "the recovered runtime emits the same native session identity"
+    when:
+      - "the daemon consumes recovered runtime events"
+    then:
+      - "the existing attempt remains active until normal completion"
+      - "no empty or duplicate provider attempt is manufactured"
+      - "token and cost accounting remains attached to the durable session"
+required_facts:
+  - id: fact-performance-cleanup-secretlint-race
+    proves:
+      - performance-cleanup-does-not-delete-user-timing
+    kind: integration-test
+    artifact:
+      path: packages/daemon/src/performance-cleanup.test.ts
+      change: create
+    command: npx pnpm --filter @autopod/daemon test -- src/performance-cleanup.test.ts
+  - id: fact-sandbox-pid-provisioning
+    proves:
+      - sandbox-agent-pid-is-writable-and-private
+    kind: unit-test
+    artifact:
+      path: packages/daemon/src/pods/pod-manager.test.ts
+      change: update
+    command: npx pnpm --filter @autopod/daemon test -- src/pods/pod-manager.test.ts -t "provisions a writable sandbox agent PID file"
+  - id: fact-agent-shim-records-pid
+    proves:
+      - sandbox-agent-pid-is-writable-and-private
+    kind: integration-test
+    artifact:
+      path: packages/daemon/src/pods/agent-shim.test.ts
+      change: update
+    command: npx pnpm --filter @autopod/daemon test -- src/pods/agent-shim.test.ts -t "records the agent PID as the runtime user"
+  - id: fact-provisioning-recovery
+    proves:
+      - interrupted-provisioning-is-reconciled
+      - unrecoverable-provisioning-is-explicit
+    kind: unit-test
+    artifact:
+      path: packages/daemon/src/pods/reconciler.test.ts
+      change: update
+    command: npx pnpm --filter @autopod/daemon test -- src/pods/reconciler.test.ts -t "provisioning"
+  - id: fact-provider-attempt-runtime-identity
+    proves:
+      - resumed-runtime-identity-rotates-attempt
+      - true-same-session-resume-keeps-attempt
+    kind: integration-test
+    artifact:
+      path: packages/daemon/src/pods/pod-manager.test.ts
+      change: update
+    command: npx pnpm --filter @autopod/daemon test -- src/pods/pod-manager.test.ts -t "runtime session identity after recovery"
+human_review: []

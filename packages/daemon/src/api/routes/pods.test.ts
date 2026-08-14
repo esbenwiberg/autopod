@@ -2621,6 +2621,53 @@ describe('GET /pods/:podId/preview/status', () => {
     );
   });
 
+  it('keeps large preview module graphs outside the control-plane rate-limit budget', async () => {
+    mockPreviewStatus.mockResolvedValue({
+      running: true,
+      reachable: true,
+      restartCount: 0,
+      lastError: null,
+      previewUrl: 'http://127.0.0.1:15000',
+    });
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockImplementation(
+        async () =>
+          new Response('module', {
+            status: 200,
+            headers: { 'content-type': 'application/javascript' },
+          }),
+      ),
+    );
+
+    let previewResponse: Awaited<ReturnType<typeof app.inject>> | undefined;
+    for (let index = 0; index < 501; index += 1) {
+      previewResponse = await app.inject({
+        method: 'GET',
+        url: `/src/module-${index}.tsx`,
+        remoteAddress: '203.0.113.10',
+        headers: {
+          referer: 'https://autopod.example.com/pods/pod-abc/preview/proxy/',
+        },
+      });
+      if (previewResponse.statusCode !== 200) break;
+    }
+
+    expect(previewResponse?.statusCode).toBe(200);
+
+    let nonPreviewResponse: Awaited<ReturnType<typeof app.inject>> | undefined;
+    for (let index = 0; index < 501; index += 1) {
+      nonPreviewResponse = await app.inject({
+        method: 'GET',
+        url: `/not-a-preview-${index}`,
+        remoteAddress: '203.0.113.10',
+      });
+    }
+
+    expect(nonPreviewResponse?.statusCode).toBe(429);
+    expect(nonPreviewResponse?.json()).toMatchObject({ error: 'RATE_LIMITED' });
+  });
+
   it('rewrites upstream preview redirects back through the daemon proxy', async () => {
     mockPreviewStatus.mockResolvedValue({
       running: true,
