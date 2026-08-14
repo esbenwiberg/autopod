@@ -15458,9 +15458,12 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         return { action: 'retry-fix-delivery' };
       }
 
+      const lastValidationResult = pod.lastValidationResult;
       const isInfrastructureReviewResume =
         pod.status === 'review_required' &&
-        pod.lastValidationResult?.infrastructureFailure !== undefined;
+        lastValidationResult !== null &&
+        (lastValidationResult.infrastructureFailure !== undefined ||
+          isReviewInfrastructureOnlyFailure(lastValidationResult));
       if (pod.status !== 'failed' && !isInfrastructureReviewResume) {
         throw new AutopodError(
           `Cannot resume pod ${podId} in status ${pod.status} — only failed or infrastructure-blocked review_required pods can be resumed`,

@@ -9403,6 +9403,57 @@ describe('PodManager', () => {
       expect(manager.getSession(pod.id).maxValidationAttempts).toBe(3);
     });
 
+    it('resumes a review-council-infrastructure-blocked pod with validation only', async () => {
+      const ctx = createTestContext();
+      const pullGate = deferred<{ newCommits: boolean }>();
+      vi.mocked(ctx.worktreeManager.pullBranch).mockReturnValue(pullGate.promise);
+      const manager = createPodManager(ctx.deps);
+      const pod = manager.createSession(
+        { profileName: 'test-profile', task: 'Add feature' },
+        'user-1',
+      );
+      ctx.podRepo.update(pod.id, {
+        status: 'review_required',
+        containerId: 'ctr-1',
+        worktreePath: '/tmp/wt',
+        validationAttempts: 1,
+        lastValidationResult: reviewInfrastructureFailureResult('review-failed', {
+          taskReview: {
+            status: 'fail',
+            reasoning: 'Frozen review council unavailable',
+            issues: ['A carried prior finding'],
+            model: 'test',
+            screenshots: [],
+            diff: '+changed',
+            reviewBatch: {
+              id: 'degraded-repair',
+              diffHash: 'hash',
+              reviewedHead: 'head',
+              promptVersion: 'v1',
+              schemaVersion: 'v1',
+              model: 'test',
+              axes: [],
+              candidates: [],
+              initialFindings: [],
+              accepted: [],
+              rejected: [],
+              merged: [],
+              synthesis: 'deterministic-fallback',
+              durationMs: 1,
+              infrastructureUnavailable: true,
+            },
+          },
+        }),
+      });
+
+      await expect(manager.resumePod(pod.id)).resolves.toEqual({ action: 'revalidate' });
+      expect(ctx.worktreeManager.pullBranch).toHaveBeenCalledTimes(1);
+
+      pullGate.resolve({ newCommits: false });
+      await waitForAssertion(() => expect(manager.getSession(pod.id).status).toBe('validated'));
+      expect(ctx.runtime.resume).not.toHaveBeenCalled();
+    });
+
     it('ordinary validation failure still reworks the agent and consumes attempts', async () => {
       const ctx = createTestContext();
       vi.mocked(ctx.validationEngine.validate).mockResolvedValue(
