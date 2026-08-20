@@ -149,6 +149,32 @@ async function reconcileSession(
       logger.debug({ podId: pod.id }, 'Queued series dep — leaving for rehydrateDependentSessions');
       return;
     }
+    const retryNotBefore =
+      pod.infrastructureFailure?.source === 'git-fetch'
+        ? new Date(pod.infrastructureFailure.retryNotBefore).getTime()
+        : null;
+    if (retryNotBefore && retryNotBefore > Date.now()) {
+      const remaining = retryNotBefore - Date.now();
+      const timer = setTimeout(() => {
+        let current: Pod;
+        try {
+          current = podRepo.getOrThrow(pod.id);
+        } catch {
+          return;
+        }
+        if (
+          current?.status === 'queued' &&
+          current.infrastructureFailure?.source === 'git-fetch' &&
+          current.infrastructureFailure.retryNotBefore === pod.infrastructureFailure?.retryNotBefore
+        ) {
+          enqueueSession(pod.id);
+        }
+      }, remaining);
+      timer.unref();
+      result.recovered.push(pod.id);
+      logger.info({ podId: pod.id, remaining }, 'Queued host-fetch retry rehydrated after restart');
+      return;
+    }
     enqueueSession(pod.id);
     result.recovered.push(pod.id);
     logger.info({ podId: pod.id }, 'Queued pod re-enqueued after daemon restart');

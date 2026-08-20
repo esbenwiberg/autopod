@@ -157,7 +157,12 @@ import {
 import { buildValidationContextEnv } from '../validation/validation-context-env.js';
 import { pushCommitsToBareViaStagingRef } from '../worktrees/bare-push.js';
 import { graftHostTreeOntoBase } from '../worktrees/graft-reconcile.js';
-import { DeletionGuardError, GitCredentialError } from '../worktrees/local-worktree-manager.js';
+import {
+  DeletionGuardError,
+  GitCredentialError,
+  GitMissingRemoteBranchError,
+  GitTransientFetchError,
+} from '../worktrees/local-worktree-manager.js';
 import { MergeQueue } from '../worktrees/merge-queue.js';
 import { transferCommitToContainer } from '../worktrees/sandbox-reconcile.js';
 import {
@@ -1895,6 +1900,57 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
     safetyEventsRepo,
     qualityScoreRepo,
   } = deps;
+  const hostFetchRetryTimers = new Map<string, ReturnType<typeof setTimeout>>();
+
+  function scheduleHostFetchRetry(pod: Pod, error: GitTransientFetchError): void {
+    const previous = pod.infrastructureFailure;
+    const attemptCount =
+      previous?.source === 'git-fetch' &&
+      previous.branch === error.branch &&
+      previous.purpose === error.purpose
+        ? previous.attemptCount + 1
+        : 1;
+    const delayMs = attemptCount === 1 ? 30_000 : attemptCount === 2 ? 120_000 : 300_000;
+    const retryNotBefore = new Date(Date.now() + delayMs).toISOString();
+    podRepo.update(pod.id, {
+      infrastructureFailure: {
+        source: 'git-fetch',
+        code: 'GIT_FETCH_TRANSIENT',
+        branch: error.branch,
+        purpose: error.purpose,
+        diagnostics: error.diagnostics,
+        attemptCount,
+        occurredAt: new Date().toISOString(),
+        recoveryDisposition: 'automatic_retry_scheduled',
+        retryNotBefore,
+      },
+      failureReason: null,
+    });
+    const existing = hostFetchRetryTimers.get(pod.id);
+    if (existing) clearTimeout(existing);
+    const timer = setTimeout(() => {
+      hostFetchRetryTimers.delete(pod.id);
+      let current: Pod;
+      try {
+        current = podRepo.getOrThrow(pod.id);
+      } catch {
+        return;
+      }
+      if (
+        current?.status === 'queued' &&
+        current.infrastructureFailure?.source === 'git-fetch' &&
+        current.infrastructureFailure.retryNotBefore === retryNotBefore
+      ) {
+        enqueueSession(pod.id);
+      }
+    }, delayMs);
+    timer.unref();
+    hostFetchRetryTimers.set(pod.id, timer);
+    emitActivityStatus(
+      pod.id,
+      `Remote ${error.purpose} branch fetch failed; retrying automatically.`,
+    );
+  }
   function providerForAttempt(pod: Pod, profile: Profile): ProviderAccountProvider {
     if (pod.providerIdSnapshot) return pod.providerIdSnapshot;
     if (pod.providerAccountIdSnapshot && providerAccountStore) {
@@ -7470,7 +7526,8 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
       try {
         const retryNotBefore = pod.infrastructureFailure?.retryNotBefore;
         if (
-          pod.infrastructureFailure?.recoveryDisposition === 'automatic_retry_scheduled' &&
+          pod.infrastructureFailure?.source === 'azure-sandbox' &&
+          pod.infrastructureFailure.recoveryDisposition === 'automatic_retry_scheduled' &&
           retryNotBefore
         ) {
           const delayMs = Math.max(0, new Date(retryNotBefore).getTime() - Date.now());
@@ -7659,7 +7716,8 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         // Detect recovery mode before any provisioning work
         const isRecovery = !!pod.recoveryWorktreePath;
         const isInfrastructureRecovery =
-          pod.infrastructureFailure?.recoveryDisposition === 'automatic_retry_scheduled';
+          pod.infrastructureFailure?.source === 'azure-sandbox' &&
+          pod.infrastructureFailure.recoveryDisposition === 'automatic_retry_scheduled';
         const isRework = isRecovery && !!pod.reworkReason;
         const isFreshContainerValidationOnly =
           isRecovery && pod.skipAgent && pod.status === 'queued';
@@ -7692,22 +7750,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
               }
             : {}),
         });
-
-        // Transition only after the complete provider tuple has passed preflight.
-        pod = transition(pod, 'provisioning', provisioningUpdates);
         assertSandboxAgentStreamingExecSupported(profile, pod.executionTarget, pod.options);
-
-        // Snapshot the resolved profile at pod start time for auditability
-        podRepo.update(podId, { profileSnapshot: profile });
-
-        // Snapshot the resolved network policy once at first provisioning (ADR-020).
-        // Guard prevents overwriting on recovery/resume — the original policy is the snapshot.
-        if (!pod.networkPolicyResolved) {
-          const resolvedNetworkPolicy = profile.networkPolicy?.enabled
-            ? (profile.networkPolicy.mode ?? 'restricted')
-            : 'allow-all';
-          podRepo.update(podId, { networkPolicyResolved: resolvedNetworkPolicy });
-        }
 
         // Worktree is optional — artifact-mode profiles may have no repoUrl.
         let worktreePath: string | null = null;
@@ -7768,6 +7811,12 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
             });
             worktreePath = result.worktreePath;
             bareRepoPath = result.bareRepoPath;
+            if (pod.infrastructureFailure?.source === 'git-fetch') {
+              // Only clear the incident after create has fetched every required
+              // remote ref and materialized the worktree successfully.
+              podRepo.update(podId, { infrastructureFailure: null });
+              pod = podRepo.getOrThrow(podId);
+            }
             const materializedStartSha = await materializeSpecFiles(
               worktreePath,
               pod.specFiles,
@@ -7804,6 +7853,18 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
               }
             }
           }
+        }
+
+        // A fresh repository must be materialized from authenticated remote refs
+        // before entering provisioning. Recovery pods intentionally retain their
+        // surviving worktree semantics and do not pass through this gate.
+        pod = transition(podRepo.getOrThrow(podId), 'provisioning', provisioningUpdates);
+        podRepo.update(podId, { profileSnapshot: profile });
+        if (!pod.networkPolicyResolved) {
+          const resolvedNetworkPolicy = profile.networkPolicy?.enabled
+            ? (profile.networkPolicy.mode ?? 'restricted')
+            : 'allow-all';
+          podRepo.update(podId, { networkPolicyResolved: resolvedNetworkPolicy });
         }
 
         // Security scan: inspect cloned worktree for secrets / PII / prompt
@@ -9693,6 +9754,49 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
             closeProviderAttempt(podId, 'aborted');
           }
         }
+        if (err instanceof GitTransientFetchError) {
+          const current = podRepo.getOrThrow(podId);
+          if (current.status === 'queued') scheduleHostFetchRetry(current, err);
+          return;
+        }
+        if (err instanceof GitMissingRemoteBranchError) {
+          const current = podRepo.getOrThrow(podId);
+          const message = `Required remote ${err.purpose} branch "${err.branch}" is missing.`;
+          emitActivityError(podId, message, true);
+          if (current.status === 'queued')
+            transition(current, 'failed', { failureReason: message });
+          return;
+        }
+        if (err instanceof GitCredentialError && (err.op === 'fetch' || err.op === 'clone')) {
+          const current = podRepo.getOrThrow(podId);
+          if (current.status === 'queued') {
+            const escalation: EscalationRequest = {
+              id: generateId(12),
+              podId,
+              type: 'request_credential',
+              timestamp: new Date().toISOString(),
+              payload: {
+                service: err.service,
+                reason:
+                  err.service === 'github'
+                    ? 'The daemon could not fetch the required remote branch. Authenticate the daemon GitHub account with gh auth login, then resume this pod.'
+                    : `The daemon could not fetch the required remote branch. Update profile '${current.profileName}' with an ADO PAT that can read the repository, then resume this pod.`,
+                source: 'host_fetch',
+              },
+              response: null,
+            };
+            escalationRepo.insert(escalation);
+            transition(current, 'awaiting_input', {
+              pendingEscalation: escalation,
+              escalationCount: current.escalationCount + 1,
+            });
+            emitActivityStatus(
+              podId,
+              'Remote fetch needs repaired host credentials before provisioning.',
+            );
+            return;
+          }
+        }
         logger.error({ err, podId }, 'Pod processing error');
         const failureReason = operatorErrorMessage(err, visibleFailurePhase);
         emitActivityError(podId, failureReason, true);
@@ -10659,6 +10763,36 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
       // ── Credential injection ──────────────────────────────────────────
       if (pod.pendingEscalation?.type === 'request_credential') {
         const payload = pod.pendingEscalation.payload as RequestCredentialPayload;
+
+        // Pre-provision host fetch failure: re-resolve the daemon-side credential
+        // and queue the same pod. The next queue pass begins with a fresh remote
+        // fetch; no container credential injection or agent resume is involved.
+        if (payload.source === 'host_fetch') {
+          const profile = profileStore.get(pod.profileName);
+          const credential = await resolveGitCredential(profile);
+          if (!credential) {
+            throw new AutopodError(
+              payload.service === 'github'
+                ? 'Daemon GitHub authentication is still unavailable. Run gh auth login as the daemon service account and try again.'
+                : `Profile '${pod.profileName}' still has no ADO PAT with repository read access.`,
+              'MISSING_CREDENTIAL',
+              400,
+            );
+          }
+          escalationRepo.update(pod.pendingEscalation.id, {
+            respondedAt: new Date().toISOString(),
+            respondedBy: legacyRespondedBy(actor),
+            actor,
+            response: 'credential_repaired',
+          });
+          transition(pod, 'queued', { pendingEscalation: null });
+          emitActivityStatus(
+            podId,
+            'Host credentials updated — fetching required remote refs again…',
+          );
+          enqueueSession(podId);
+          return;
+        }
 
         // Daemon-side push failure: skip container injection (no agent waiting)
         // and retry the post-validation push from the host with the freshly

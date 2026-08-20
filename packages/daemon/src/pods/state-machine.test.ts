@@ -25,6 +25,15 @@ describe('state-machine', () => {
       expect(() => validateTransition('s1', 'killing', 'killed')).not.toThrow();
     });
 
+    it('allows strict remote fetch gate transitions', () => {
+      expect(() => validateTransition('s1', 'queued', 'failed')).not.toThrow();
+      expect(() => validateTransition('s1', 'queued', 'awaiting_input')).not.toThrow();
+      expect(() => validateTransition('s1', 'awaiting_input', 'queued')).not.toThrow();
+      expect(() => validateTransition('s1', 'queued', 'running')).toThrow(
+        InvalidStateTransitionError,
+      );
+    });
+
     it('allows killing from killable states', () => {
       expect(() => validateTransition('s1', 'queued', 'killing')).not.toThrow();
       expect(() => validateTransition('s1', 'provisioning', 'killing')).not.toThrow();

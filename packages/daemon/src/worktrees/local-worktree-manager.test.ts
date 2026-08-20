@@ -5,6 +5,8 @@ import type { DaemonGitHubAuth } from '../github/daemon-github-auth.js';
 import {
   DeletionGuardError,
   GitCredentialError,
+  GitMissingRemoteBranchError,
+  GitTransientFetchError,
   LocalWorktreeManager,
   classifyGitError,
   truncateDiffAtFileBoundary,
@@ -2041,7 +2043,7 @@ describe('LocalWorktreeManager', () => {
       expect(setUrlCmd).not.toContain('daemon-gh-token');
     });
 
-    it('falls back to local baseBranch ref when remote fetch fails (fork scenario)', async () => {
+    it('never falls back to a local branch when a required remote fetch fails', async () => {
       execFileMock.mockImplementation(
         (_file: string, args: string[], arg3: unknown, arg4?: unknown) => {
           const cb = resolveCallback(arg3, arg4);
@@ -2061,18 +2063,19 @@ describe('LocalWorktreeManager', () => {
         },
       );
 
-      const result = await manager.create({
-        repoUrl: 'https://github.com/org/repo.git',
-        branch: 'autopod/forked-pod',
-        baseBranch: 'autopod/parent-branch',
-      });
+      await expect(
+        manager.create({
+          repoUrl: 'https://github.com/org/repo.git',
+          branch: 'autopod/forked-pod',
+          baseBranch: 'autopod/parent-branch',
+        }),
+      ).rejects.toBeInstanceOf(GitMissingRemoteBranchError);
 
       const cmds = execFileMock.mock.calls.map((c: string[][]) => c[1]?.join(' ') ?? '');
-      const worktreeAddCmd = cmds.find((c: string) => c.includes('worktree add'));
-      expect(worktreeAddCmd).toBeDefined();
-      // Should use the local ref, not refs/remotes/origin/...
-      expect(worktreeAddCmd).toContain('refs/heads/autopod/parent-branch');
-      expect(result.worktreePath).toContain('autopod_forked-pod');
+      expect(
+        cmds.some((c: string) => c.includes('rev-parse --verify refs/heads/autopod/parent-branch')),
+      ).toBe(false);
+      expect(cmds.some((c: string) => c.includes('worktree add'))).toBe(false);
     });
 
     it('fetches the base branch only into its remote-tracking ref', async () => {
@@ -2095,6 +2098,43 @@ describe('LocalWorktreeManager', () => {
         'https://github.com/org/repo.git',
         '+refs/heads/main:refs/remotes/origin/main',
       ]);
+    });
+
+    it('fetches distinct base and start branches into remote-tracking refs', async () => {
+      setupExecFileMock({
+        'rev-parse --git-dir': { stdout: '.\n' },
+        'rev-parse --git-path info/exclude': { stdout: '.git/info/exclude\n' },
+        'rev-parse HEAD': { stdout: `${'a'.repeat(40)}\n` },
+        '+refs/heads/feat/from-stack:refs/remotes/origin/feat/from-stack': {
+          error: new Error("fatal: couldn't find remote ref"),
+        },
+      });
+
+      const result = await manager.create({
+        repoUrl: 'https://github.com/org/repo.git',
+        branch: 'feat/from-stack',
+        baseBranch: 'main',
+        startBranch: 'stack/start',
+      });
+
+      const fetches = execFileMock.mock.calls
+        .map((call: string[][]) => call[1] ?? [])
+        .filter((args: string[]) => args[0] === 'fetch');
+      expect(fetches).toContainEqual([
+        'fetch',
+        'https://github.com/org/repo.git',
+        '+refs/heads/main:refs/remotes/origin/main',
+      ]);
+      expect(fetches).toContainEqual([
+        'fetch',
+        'https://github.com/org/repo.git',
+        '+refs/heads/stack/start:refs/remotes/origin/stack/start',
+      ]);
+      expect(result.startCommitSha).toBe('a'.repeat(40));
+      const worktreeAdd = execFileMock.mock.calls
+        .map((call: string[][]) => call[1] ?? [])
+        .find((args: string[]) => args[0] === 'worktree' && args[1] === 'add');
+      expect(worktreeAdd).toContain('refs/remotes/origin/stack/start');
     });
 
     it('appends .mcp.json to per-worktree info/exclude after worktree add', async () => {
@@ -2183,7 +2223,7 @@ describe('LocalWorktreeManager', () => {
           branch: 'autopod/new-pod',
           baseBranch: 'gone-branch',
         }),
-      ).rejects.toThrow('baseBranch "gone-branch" not found on remote or locally');
+      ).rejects.toThrow('Required base branch "gone-branch" does not exist on the remote');
     });
 
     it('throws when a distinct startBranch is unresolvable — no fallback to base/default', async () => {
@@ -2213,7 +2253,7 @@ describe('LocalWorktreeManager', () => {
           baseBranch: 'main',
           startBranch: 'pi/gone',
         }),
-      ).rejects.toThrow('startBranch "pi/gone" not found on remote or locally');
+      ).rejects.toThrow('Required start branch "pi/gone" does not exist on the remote');
     });
 
     it('does not retain a legacy GitHub profile PAT in the ADO credential cache', async () => {
@@ -2452,6 +2492,26 @@ describe('truncateDiffAtFileBoundary', () => {
   it('instructs reviewer to use read_file tools', () => {
     const result = truncateDiffAtFileBoundary(h1 + h2, h1.length + 5);
     expect(result).toContain('read_file');
+  });
+});
+
+describe('required remote fetch failures', () => {
+  it('classifies required remote fetch failures', () => {
+    const credential = classifyGitError(
+      Object.assign(new Error('fatal: Authentication failed'), {
+        stderr: 'fatal: Authentication failed',
+      }),
+      'fetch',
+    );
+    expect(credential).toBeInstanceOf(GitCredentialError);
+    expect(new GitMissingRemoteBranchError('missing', 'start')).toMatchObject({
+      branch: 'missing',
+      purpose: 'start',
+    });
+    expect(new GitTransientFetchError('main', 'base', 'connection reset')).toMatchObject({
+      branch: 'main',
+      purpose: 'base',
+    });
   });
 });
 

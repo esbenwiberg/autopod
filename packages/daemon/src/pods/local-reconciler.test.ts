@@ -134,6 +134,67 @@ function makeFailingValidationResult(podId: string, attempt = 1): ValidationResu
 }
 
 describe('reconcileLocalSessions', () => {
+  it('rehydrates a queued host fetch retry without consuming capacity before retryNotBefore', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-08-20T12:00:00.000Z'));
+    try {
+      const { deps, podRepo, enqueuedSessions } = createReconcilerDeps();
+      for (const id of ['future-fetch', 'overdue-fetch', 'killed-fetch']) {
+        podRepo.insert({
+          id,
+          profileName: 'test-profile',
+          task: 'Fetch refs',
+          status: 'queued',
+          model: 'opus',
+          runtime: 'claude',
+          executionTarget: 'local',
+          branch: `autopod/${id}`,
+          userId: 'user-1',
+          maxValidationAttempts: 3,
+          skipValidation: false,
+          outputMode: 'pr',
+          baseBranch: null,
+        });
+      }
+      const incident = (retryNotBefore: string, attemptCount: number) => ({
+        source: 'git-fetch' as const,
+        code: 'GIT_FETCH_TRANSIENT' as const,
+        branch: 'main',
+        purpose: 'base' as const,
+        diagnostics: 'connection reset',
+        attemptCount,
+        occurredAt: '2026-08-20T11:59:00.000Z',
+        recoveryDisposition: 'automatic_retry_scheduled' as const,
+        retryNotBefore,
+      });
+      podRepo.update('future-fetch', {
+        infrastructureFailure: incident('2026-08-20T12:00:30.000Z', 2),
+      });
+      podRepo.update('overdue-fetch', {
+        infrastructureFailure: incident('2026-08-20T11:59:59.000Z', 3),
+      });
+      podRepo.update('killed-fetch', {
+        infrastructureFailure: incident('2026-08-20T12:01:00.000Z', 4),
+      });
+
+      await reconcileLocalSessions(deps);
+      expect(enqueuedSessions).toEqual(['overdue-fetch']);
+      expect(podRepo.getOrThrow('future-fetch').infrastructureFailure).toMatchObject({
+        attemptCount: 2,
+      });
+      await vi.advanceTimersByTimeAsync(29_999);
+      expect(enqueuedSessions).toEqual(['overdue-fetch']);
+      await vi.advanceTimersByTimeAsync(1);
+      expect(enqueuedSessions).toEqual(['overdue-fetch', 'future-fetch']);
+
+      podRepo.update('killed-fetch', { status: 'killing' });
+      await vi.advanceTimersByTimeAsync(30_000);
+      expect(enqueuedSessions).not.toContain('killed-fetch');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('checkpoint phase restart reconciliation materializes host-imported proof without sandbox access', async () => {
     const result = {
       sequence: 1,
