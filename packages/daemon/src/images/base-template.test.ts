@@ -116,6 +116,7 @@ describe('PostgreSQL base image templates', () => {
     expect(dockerfile).toContain('ENV PGHOST=127.0.0.1');
     expect(dockerfile).toContain('ENV PGPORT=5433');
     expect(dockerfile).toContain('for binary in pg_ctl postgres');
+    expect(dockerfile).toMatch(/\n\s+jq \\\n/);
     expect(dockerfile).not.toContain('pip install');
   });
 

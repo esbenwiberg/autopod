@@ -12,6 +12,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     locales \
     iptables haproxy socat \
     sqlite3 \
+    jq \
     ripgrep \
     tmux \
     python3 build-essential \
