@@ -7800,6 +7800,12 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
             });
             worktreePath = result.worktreePath;
             bareRepoPath = result.bareRepoPath;
+            if (pod.infrastructureFailure?.source === 'git-fetch') {
+              // Only clear the incident after create has fetched every required
+              // remote ref and materialized the worktree successfully.
+              podRepo.update(podId, { infrastructureFailure: null });
+              pod = podRepo.getOrThrow(podId);
+            }
             const materializedStartSha = await materializeSpecFiles(
               worktreePath,
               pod.specFiles,
