@@ -13596,6 +13596,47 @@ describe('PodManager', () => {
       expect(ctx.runtime.resume).not.toHaveBeenCalled();
     });
 
+    it('Path 2: empty-403 during forced sandbox revalidation replaces the stale sandbox', async () => {
+      const infrastructureResult = makeValidationResult({
+        overall: 'fail',
+        setup: {
+          status: 'skip',
+          output: 'Validation infrastructure failure: Azure Sandboxes empty 403',
+          duration: 10,
+        },
+        infrastructureFailure: {
+          phase: 'setup',
+          code: 'AZURE_SANDBOX_TRANSIENT_FORBIDDEN',
+          statusCode: 403,
+          message:
+            'Azure Sandboxes data plane returned an empty 403 after exhausting the transport retry budget',
+          retryable: true,
+        },
+      });
+      const ctx = createTestContext(infrastructureResult, {
+        executionTarget: 'sandbox',
+        warmImageTag: 'example.azurecr.io/autopod/test-profile:latest',
+      });
+      ctx.deps.validationInfrastructureRetryBackoffMs = [];
+      const { manager, pod } = setupFailedPod(ctx, { validationOverall: 'fail' });
+
+      const result = await manager.revalidateSession(pod.id, { force: true });
+
+      expect(result).toEqual({ newCommits: false, result: 'fail' });
+      expect(ctx.containerManager.kill).toHaveBeenCalledWith('container-xyz');
+      expect(manager.getSession(pod.id)).toMatchObject({
+        status: 'queued',
+        containerId: null,
+        recoveryWorktreePath: '/tmp/worktree/abc',
+        skipAgent: true,
+        validationAttempts: 0,
+        lastValidationResult: null,
+      });
+      expect(ctx.enqueuedSessions).toEqual([pod.id, pod.id]);
+      expect(ctx.runtime.spawn).not.toHaveBeenCalled();
+      expect(ctx.runtime.resume).not.toHaveBeenCalled();
+    });
+
     it('Path 2: forced revalidation syncs container workspace before host-side validation', async () => {
       const ctx = createTestContext();
       const { manager, pod } = setupFailedPod(ctx, {

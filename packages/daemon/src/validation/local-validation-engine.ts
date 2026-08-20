@@ -27,6 +27,7 @@ import {
 } from '@autopod/shared';
 import { generateValidationScript, parsePageResults } from '@autopod/validator';
 import type { Logger } from 'pino';
+import { SandboxInfrastructureError } from '../containers/sandbox-api-client.js';
 import type { ContainerManager } from '../interfaces/container-manager.js';
 import type {
   ValidationEngine,
@@ -1809,6 +1810,16 @@ function classifyValidationInfrastructureFailure(
   executionTarget?: ValidationEngineConfig['executionTarget'],
 ): ValidationInfrastructureFailure | null {
   if (error instanceof ValidationCommandInfrastructureError) return error.failure;
+
+  if (error instanceof SandboxInfrastructureError) {
+    return {
+      phase,
+      code: error.code,
+      statusCode: error.statusCode,
+      message: error.message,
+      retryable: error.retryable,
+    };
+  }
 
   if (executionTarget === 'sandbox') {
     const message = error instanceof Error ? error.message : String(error);

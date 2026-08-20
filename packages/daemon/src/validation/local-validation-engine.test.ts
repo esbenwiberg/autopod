@@ -5,6 +5,7 @@ import path from 'node:path';
 import { promisify } from 'node:util';
 import { AutopodError, parseSpecContract } from '@autopod/shared';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { SandboxInfrastructureError } from '../containers/sandbox-api-client.js';
 import type { ContainerManager } from '../interfaces/container-manager.js';
 import type {
   ValidationEngineConfig,
@@ -3006,6 +3007,36 @@ human_review: []
     expect(pagesResult.infrastructureFailure).toMatchObject({ phase: 'pages', retryable: true });
     expect(pagesResult.smoke.pages).toEqual([]);
     expect(pagesResult.overall).toBe('fail');
+  });
+
+  it('classifies the real empty-403 sandbox error as retryable validation infrastructure', async () => {
+    const base = stubContainerManager();
+    const execInContainer = vi.fn(async (_containerId: string, command: string[]) => {
+      const shell = command[2] ?? '';
+      if (shell.includes('infra-setup')) {
+        throw new SandboxInfrastructureError(403, {
+          'x-ms-request-id': 'validation-empty-403',
+        });
+      }
+      return { stdout: '', stderr: '', exitCode: 0 };
+    });
+    const engine = createLocalValidationEngine({ ...base, execInContainer } as ContainerManager);
+
+    const result = await engine.validate(
+      baseConfig({
+        executionTarget: 'sandbox',
+        validationSetupCommand: 'infra-setup',
+      }),
+    );
+
+    expect(result.setup?.status).toBe('skip');
+    expect(result.infrastructureFailure).toMatchObject({
+      phase: 'setup',
+      code: 'AZURE_SANDBOX_TRANSIENT_FORBIDDEN',
+      statusCode: 403,
+      retryable: true,
+    });
+    expect(result.overall).toBe('fail');
   });
 
   it('does not mark a non-empty deterministic sandbox 403 as retryable', async () => {

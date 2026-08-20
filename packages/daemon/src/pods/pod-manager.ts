@@ -14087,6 +14087,31 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         }
 
         if (isValidationInfrastructureOnlyFailure(result)) {
+          const replaceStaleSandbox =
+            force &&
+            s2.executionTarget === 'sandbox' &&
+            s2.containerId !== null &&
+            result.infrastructureFailure?.code === 'AZURE_SANDBOX_TRANSIENT_FORBIDDEN' &&
+            result.infrastructureFailure.statusCode === 403 &&
+            result.infrastructureFailure.retryable;
+          if (replaceStaleSandbox) {
+            emitActivityStatus(
+              podId,
+              'Resume: stale Azure sandbox exhausted its transport retries — replacing it for validation only',
+            );
+            try {
+              await containerManagerFactory.get('sandbox').kill(s2.containerId);
+              transition(podRepo.getOrThrow(podId), 'failed');
+              return requeueValidationOnly(
+                'Resume: stale Azure sandbox removed — re-provisioning fresh for validation only',
+              );
+            } catch (err) {
+              logger.warn(
+                { err, podId, containerId: s2.containerId },
+                'Could not prove stale Azure sandbox deletion — parking validation recovery',
+              );
+            }
+          }
           await parkOnValidationInfrastructureFailure(s2, result);
           return { newCommits, result: 'fail' };
         }
