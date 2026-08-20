@@ -13637,6 +13637,43 @@ describe('PodManager', () => {
       expect(ctx.runtime.resume).not.toHaveBeenCalled();
     });
 
+    it('Path 2: newer warm image replaces the old sandbox before validation-only Resume', async () => {
+      const ctx = createTestContext(undefined, {
+        executionTarget: 'sandbox',
+        warmImageTag: 'example.azurecr.io/autopod/test-profile:latest',
+        warmImageBuiltAt: '2026-08-20T10:00:00.000Z',
+      });
+      const { manager, pod } = setupFailedPod(ctx, { validationOverall: 'fail' });
+      const originalProfile = ctx.profileStore.get('test-profile');
+      ctx.podRepo.update(pod.id, {
+        profileSnapshot: {
+          ...originalProfile,
+          warmImageBuiltAt: '2026-08-20T10:00:00.000Z',
+        },
+      });
+      vi.mocked(ctx.profileStore.get).mockReturnValue({
+        ...originalProfile,
+        warmImageBuiltAt: '2026-08-20T11:00:00.000Z',
+      });
+
+      const result = await manager.resumePod(pod.id);
+
+      expect(result).toEqual({ action: 'revalidate' });
+      expect(ctx.containerManager.kill).toHaveBeenCalledWith('container-xyz');
+      expect(manager.getSession(pod.id)).toMatchObject({
+        status: 'queued',
+        containerId: null,
+        recoveryWorktreePath: '/tmp/worktree/abc',
+        skipAgent: true,
+        validationAttempts: 0,
+        lastValidationResult: null,
+      });
+      expect(ctx.enqueuedSessions).toEqual([pod.id, pod.id]);
+      expect(ctx.validationEngine.validate).not.toHaveBeenCalled();
+      expect(ctx.runtime.spawn).not.toHaveBeenCalled();
+      expect(ctx.runtime.resume).not.toHaveBeenCalled();
+    });
+
     it('Path 2: forced revalidation syncs container workspace before host-side validation', async () => {
       const ctx = createTestContext();
       const { manager, pod } = setupFailedPod(ctx, {

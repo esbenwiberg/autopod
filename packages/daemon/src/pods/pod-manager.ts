@@ -15658,6 +15658,64 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         );
       }
 
+      const currentProfile = profileStore.get(pod.profileName);
+      const snapshotWarmBuiltAt = pod.profileSnapshot?.warmImageBuiltAt;
+      const currentWarmBuiltAt = currentProfile.warmImageBuiltAt;
+      const hasNewerBoundWarmImage =
+        pod.status === 'failed' &&
+        pod.executionTarget === 'sandbox' &&
+        pod.containerId !== null &&
+        pod.profileSnapshot?.warmImageTag !== null &&
+        pod.profileSnapshot?.warmImageTag === currentProfile.warmImageTag &&
+        snapshotWarmBuiltAt !== null &&
+        currentWarmBuiltAt !== null &&
+        Date.parse(currentWarmBuiltAt) > Date.parse(snapshotWarmBuiltAt);
+      if (hasNewerBoundWarmImage) {
+        const generation = podRepo.incrementLifecycleGeneration(podId);
+        const oldContainerId = pod.containerId;
+        try {
+          await containerManagerFactory.get('sandbox').kill(oldContainerId);
+        } catch (err) {
+          throw new AutopodError(
+            `Cannot prove old Azure sandbox deletion before warm-image Resume: ${err instanceof Error ? err.message : String(err)}`,
+            'SANDBOX_CLEANUP_UNCONFIRMED',
+            409,
+          );
+        }
+        const current = podRepo.getOrThrow(podId);
+        if (current.lifecycleGeneration !== generation || current.containerId !== oldContainerId) {
+          throw new AutopodError(
+            'Resume was superseded by another lifecycle operation',
+            'INVALID_STATE',
+            409,
+          );
+        }
+        podRepo.update(podId, {
+          containerId: null,
+          recoveryWorktreePath: current.worktreePath,
+          skipAgent: true,
+          validationAttempts: 0,
+          lastValidationResult: null,
+          failureReason: null,
+          infrastructureFailure: null,
+          infrastructureRecoveryCount: 0,
+          profileSnapshot: current.profileSnapshot
+            ? {
+                ...current.profileSnapshot,
+                warmImageTag: currentProfile.warmImageTag,
+                warmImageBuiltAt: currentProfile.warmImageBuiltAt,
+              }
+            : null,
+        });
+        transition(podRepo.getOrThrow(podId), 'queued');
+        emitActivityStatus(
+          podId,
+          'Resume accepted — replacing the old sandbox with the newer warm image for validation only.',
+        );
+        enqueueSession(podId);
+        return { action: 'revalidate' };
+      }
+
       const isAzureSandboxInfrastructureFailure =
         pod.status === 'failed' &&
         pod.executionTarget === 'sandbox' &&
