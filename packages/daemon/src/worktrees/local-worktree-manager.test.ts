@@ -2073,9 +2073,7 @@ describe('LocalWorktreeManager', () => {
 
       const cmds = execFileMock.mock.calls.map((c: string[][]) => c[1]?.join(' ') ?? '');
       expect(
-        cmds.some((c: string) =>
-          c.includes('rev-parse --verify refs/heads/autopod/parent-branch'),
-        ),
+        cmds.some((c: string) => c.includes('rev-parse --verify refs/heads/autopod/parent-branch')),
       ).toBe(false);
       expect(cmds.some((c: string) => c.includes('worktree add'))).toBe(false);
     });
@@ -2100,6 +2098,43 @@ describe('LocalWorktreeManager', () => {
         'https://github.com/org/repo.git',
         '+refs/heads/main:refs/remotes/origin/main',
       ]);
+    });
+
+    it('fetches distinct base and start branches into remote-tracking refs', async () => {
+      setupExecFileMock({
+        'rev-parse --git-dir': { stdout: '.\n' },
+        'rev-parse --git-path info/exclude': { stdout: '.git/info/exclude\n' },
+        'rev-parse HEAD': { stdout: `${'a'.repeat(40)}\n` },
+        '+refs/heads/feat/from-stack:refs/remotes/origin/feat/from-stack': {
+          error: new Error("fatal: couldn't find remote ref"),
+        },
+      });
+
+      const result = await manager.create({
+        repoUrl: 'https://github.com/org/repo.git',
+        branch: 'feat/from-stack',
+        baseBranch: 'main',
+        startBranch: 'stack/start',
+      });
+
+      const fetches = execFileMock.mock.calls
+        .map((call: string[][]) => call[1] ?? [])
+        .filter((args: string[]) => args[0] === 'fetch');
+      expect(fetches).toContainEqual([
+        'fetch',
+        'https://github.com/org/repo.git',
+        '+refs/heads/main:refs/remotes/origin/main',
+      ]);
+      expect(fetches).toContainEqual([
+        'fetch',
+        'https://github.com/org/repo.git',
+        '+refs/heads/stack/start:refs/remotes/origin/stack/start',
+      ]);
+      expect(result.startCommitSha).toBe('a'.repeat(40));
+      const worktreeAdd = execFileMock.mock.calls
+        .map((call: string[][]) => call[1] ?? [])
+        .find((args: string[]) => args[0] === 'worktree' && args[1] === 'add');
+      expect(worktreeAdd).toContain('refs/remotes/origin/stack/start');
     });
 
     it('appends .mcp.json to per-worktree info/exclude after worktree add', async () => {

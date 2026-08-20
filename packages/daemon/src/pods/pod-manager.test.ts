@@ -56,7 +56,12 @@ import type { ProviderAccountStore } from '../provider-accounts/index.js';
 import { createProviderAccountStore } from '../provider-accounts/index.js';
 import { createProfileMemoryReviewer } from '../providers/memory-reviewer.js';
 import { ResumeSessionNotFoundError } from '../runtimes/claude-runtime.js';
-import { DeletionGuardError } from '../worktrees/local-worktree-manager.js';
+import {
+  DeletionGuardError,
+  GitCredentialError,
+  GitMissingRemoteBranchError,
+  GitTransientFetchError,
+} from '../worktrees/local-worktree-manager.js';
 import { createEscalationRepository } from './escalation-repository.js';
 import type { EscalationRepository } from './escalation-repository.js';
 import { createEventBus } from './event-bus.js';
@@ -1752,6 +1757,9 @@ describe('PodManager', () => {
       'user-1',
     );
     ctx.podRepo.update(pod.id, {
+      // consumeAgentEvents normally runs after processPod has entered provisioning.
+      // Set that state explicitly so this direct unit test is independent of queue timing.
+      status: 'provisioning',
       inputTokens: 5,
       outputTokens: 1,
       costUsd: 0.05,
@@ -1820,7 +1828,7 @@ describe('PodManager', () => {
     expect(attempts.list(pod.id).map(({ ordinal, outcome }) => ({ ordinal, outcome }))).toEqual([
       { ordinal: 1, outcome: 'completed' },
       { ordinal: 2, outcome: 'completed' },
-      { ordinal: 3, outcome: 'failed' },
+      { ordinal: 3, outcome: 'quota_exhausted' },
       { ordinal: 4, outcome: 'aborted' },
       { ordinal: 5, outcome: 'aborted' },
     ]);
@@ -5290,7 +5298,7 @@ describe('PodManager', () => {
       linkProfileToProviderAccount(ctx.db, 'test-profile', secondId);
       await manager.processPod(pod.id);
 
-      expect(manager.getSession(pod.id).status).toBe('killed');
+      expect(manager.getSession(pod.id).status).toBe('failed');
       expect(manager.getSession(pod.id).failureReason).toContain(
         'Selected provider account changed after pod creation',
       );
@@ -16011,5 +16019,152 @@ describe('updateFromBase', () => {
       code: 'WORKTREE_COMPROMISED',
       statusCode: 409,
     });
+  });
+
+  it('retries transient host fetch failures without holding queue capacity', async () => {
+    vi.useFakeTimers();
+    try {
+      const ctx = createTestContext();
+      const manager = createPodManager(ctx.deps);
+      const pod = manager.createSession(
+        { profileName: 'test-profile', task: 'Fetch fresh refs' },
+        'user-1',
+      );
+      const create = vi.mocked(ctx.worktreeManager.create);
+      for (const [index, expectedDelay] of [30_000, 120_000, 300_000, 300_000].entries()) {
+        create.mockRejectedValueOnce(
+          new GitTransientFetchError('main', 'base', `transport-${index + 1}`),
+        );
+        const before = Date.now();
+        await manager.processPod(pod.id);
+        const waiting = ctx.podRepo.getOrThrow(pod.id);
+        expect(waiting.status).toBe('queued');
+        expect(waiting.infrastructureFailure).toMatchObject({
+          source: 'git-fetch',
+          attemptCount: index + 1,
+          branch: 'main',
+          purpose: 'base',
+        });
+        expect(
+          new Date(waiting.infrastructureFailure?.retryNotBefore ?? 0).getTime() - before,
+        ).toBe(expectedDelay);
+        expect(ctx.containerManager.spawn).not.toHaveBeenCalled();
+        expect(ctx.runtime.spawn).not.toHaveBeenCalled();
+        await vi.advanceTimersByTimeAsync(expectedDelay);
+      }
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('parks and resumes the same pod for host_fetch credential repair', async () => {
+    const ctx = createTestContext();
+    const manager = createPodManager(ctx.deps);
+    const pod = manager.createSession(
+      { profileName: 'test-profile', task: 'Fetch with repaired auth' },
+      'user-1',
+    );
+    vi.mocked(ctx.worktreeManager.create).mockRejectedValueOnce(
+      new GitCredentialError('fetch rejected', 'github', 'fetch', 'Authentication failed'),
+    );
+
+    await manager.processPod(pod.id);
+    const parked = ctx.podRepo.getOrThrow(pod.id);
+    expect(parked.status).toBe('awaiting_input');
+    expect(parked.pendingEscalation?.payload).toMatchObject({
+      service: 'github',
+      source: 'host_fetch',
+    });
+    expect(ctx.containerManager.spawn).not.toHaveBeenCalled();
+    expect(ctx.runtime.spawn).not.toHaveBeenCalled();
+
+    vi.mocked(ctx.deps.githubAuth?.resolveCredential).mockRejectedValueOnce(
+      new Error('authentication still unavailable'),
+    );
+    await expect(manager.sendMessage(pod.id, 'not repaired yet')).rejects.toThrow(
+      'authentication still unavailable',
+    );
+    expect(ctx.podRepo.getOrThrow(pod.id)).toMatchObject({
+      status: 'awaiting_input',
+      pendingEscalation: { id: parked.pendingEscalation?.id },
+    });
+
+    await manager.sendMessage(pod.id, 'credential repaired');
+    expect(ctx.podRepo.getOrThrow(pod.id).status).toBe('queued');
+    expect(ctx.enqueuedSessions).toContain(pod.id);
+    expect(ctx.containerManager.writeFile).not.toHaveBeenCalled();
+
+    vi.mocked(ctx.worktreeManager.create).mockRejectedValueOnce(
+      new GitMissingRemoteBranchError('main', 'base'),
+    );
+    await manager.processPod(pod.id);
+    expect(ctx.worktreeManager.create).toHaveBeenCalledTimes(2);
+    expect(ctx.podRepo.getOrThrow(pod.id).id).toBe(pod.id);
+  });
+
+  it('clears a successful host fetch incident and resets a later incident', async () => {
+    const ctx = createTestContext();
+    const manager = createPodManager(ctx.deps);
+    const pod = manager.createSession(
+      { profileName: 'test-profile', task: 'Reset fetch incident' },
+      'user-1',
+    );
+    ctx.podRepo.update(pod.id, {
+      infrastructureFailure: {
+        source: 'git-fetch',
+        code: 'GIT_FETCH_TRANSIENT',
+        branch: 'main',
+        purpose: 'base',
+        diagnostics: 'old timeout',
+        attemptCount: 4,
+        occurredAt: new Date().toISOString(),
+        recoveryDisposition: 'automatic_retry_scheduled',
+        retryNotBefore: new Date(Date.now() - 1).toISOString(),
+      },
+    });
+    vi.mocked(ctx.worktreeManager.create).mockResolvedValueOnce({
+      worktreePath: '/tmp/worktree/fresh',
+      bareRepoPath: '/tmp/bare/fresh.git',
+      startCommitSha: 'f'.repeat(40),
+    });
+    vi.mocked(ctx.containerManager.spawn).mockRejectedValueOnce(
+      new Error('stop after fetch proof'),
+    );
+
+    await manager.processPod(pod.id);
+    expect(ctx.podRepo.getOrThrow(pod.id)).toMatchObject({
+      startCommitSha: 'f'.repeat(40),
+      infrastructureFailure: null,
+    });
+
+    ctx.podRepo.update(pod.id, { status: 'queued' });
+    vi.mocked(ctx.worktreeManager.create).mockRejectedValueOnce(
+      new GitTransientFetchError('main', 'base', 'independent timeout'),
+    );
+    await manager.processPod(pod.id);
+    expect(ctx.podRepo.getOrThrow(pod.id).infrastructureFailure).toMatchObject({
+      source: 'git-fetch',
+      attemptCount: 1,
+    });
+  });
+
+  it('fails a queued pod immediately when a required remote branch is missing', async () => {
+    const ctx = createTestContext();
+    const manager = createPodManager(ctx.deps);
+    const pod = manager.createSession(
+      { profileName: 'test-profile', task: 'Fetch missing start', startBranch: 'stack/missing' },
+      'user-1',
+    );
+    vi.mocked(ctx.worktreeManager.create).mockRejectedValueOnce(
+      new GitMissingRemoteBranchError('stack/missing', 'start'),
+    );
+
+    await manager.processPod(pod.id);
+    const failed = ctx.podRepo.getOrThrow(pod.id);
+    expect(failed.status).toBe('failed');
+    expect(failed.failureReason).toContain('start branch "stack/missing"');
+    expect(failed.pendingEscalation).toBeNull();
+    expect(ctx.containerManager.spawn).not.toHaveBeenCalled();
+    expect(ctx.runtime.spawn).not.toHaveBeenCalled();
   });
 });

@@ -155,8 +155,13 @@ async function reconcileSession(
         : null;
     if (retryNotBefore && retryNotBefore > Date.now()) {
       const remaining = retryNotBefore - Date.now();
-      setTimeout(() => {
-        const current = podRepo.get(pod.id);
+      const timer = setTimeout(() => {
+        let current: Pod;
+        try {
+          current = podRepo.getOrThrow(pod.id);
+        } catch {
+          return;
+        }
         if (
           current?.status === 'queued' &&
           current.infrastructureFailure?.source === 'git-fetch' &&
@@ -165,6 +170,7 @@ async function reconcileSession(
           enqueueSession(pod.id);
         }
       }, remaining);
+      timer.unref();
       result.recovered.push(pod.id);
       logger.info({ podId: pod.id, remaining }, 'Queued host-fetch retry rehydrated after restart');
       return;

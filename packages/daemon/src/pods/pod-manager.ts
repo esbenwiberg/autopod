@@ -1905,7 +1905,9 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
   function scheduleHostFetchRetry(pod: Pod, error: GitTransientFetchError): void {
     const previous = pod.infrastructureFailure;
     const attemptCount =
-      previous?.source === 'git-fetch' && previous.branch === error.branch && previous.purpose === error.purpose
+      previous?.source === 'git-fetch' &&
+      previous.branch === error.branch &&
+      previous.purpose === error.purpose
         ? previous.attemptCount + 1
         : 1;
     const delayMs = attemptCount === 1 ? 30_000 : attemptCount === 2 ? 120_000 : 300_000;
@@ -1926,21 +1928,28 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
     });
     const existing = hostFetchRetryTimers.get(pod.id);
     if (existing) clearTimeout(existing);
-    hostFetchRetryTimers.set(
+    const timer = setTimeout(() => {
+      hostFetchRetryTimers.delete(pod.id);
+      let current: Pod;
+      try {
+        current = podRepo.getOrThrow(pod.id);
+      } catch {
+        return;
+      }
+      if (
+        current?.status === 'queued' &&
+        current.infrastructureFailure?.source === 'git-fetch' &&
+        current.infrastructureFailure.retryNotBefore === retryNotBefore
+      ) {
+        enqueueSession(pod.id);
+      }
+    }, delayMs);
+    timer.unref();
+    hostFetchRetryTimers.set(pod.id, timer);
+    emitActivityStatus(
       pod.id,
-      setTimeout(() => {
-        hostFetchRetryTimers.delete(pod.id);
-        const current = podRepo.get(pod.id);
-        if (
-          current?.status === 'queued' &&
-          current.infrastructureFailure?.source === 'git-fetch' &&
-          current.infrastructureFailure.retryNotBefore === retryNotBefore
-        ) {
-          enqueueSession(pod.id);
-        }
-      }, delayMs),
+      `Remote ${error.purpose} branch fetch failed; retrying automatically.`,
     );
-    emitActivityStatus(pod.id, `Remote ${error.purpose} branch fetch failed; retrying automatically.`);
   }
   function providerForAttempt(pod: Pod, profile: Profile): ProviderAccountProvider {
     if (pod.providerIdSnapshot) return pod.providerIdSnapshot;
@@ -7707,7 +7716,8 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         // Detect recovery mode before any provisioning work
         const isRecovery = !!pod.recoveryWorktreePath;
         const isInfrastructureRecovery =
-          pod.infrastructureFailure?.recoveryDisposition === 'automatic_retry_scheduled';
+          pod.infrastructureFailure?.source === 'azure-sandbox' &&
+          pod.infrastructureFailure.recoveryDisposition === 'automatic_retry_scheduled';
         const isRework = isRecovery && !!pod.reworkReason;
         const isFreshContainerValidationOnly =
           isRecovery && pod.skipAgent && pod.status === 'queued';
@@ -7740,6 +7750,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
               }
             : {}),
         });
+        assertSandboxAgentStreamingExecSupported(profile, pod.executionTarget, pod.options);
 
         // Worktree is optional — artifact-mode profiles may have no repoUrl.
         let worktreePath: string | null = null;
@@ -7848,7 +7859,6 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         // before entering provisioning. Recovery pods intentionally retain their
         // surviving worktree semantics and do not pass through this gate.
         pod = transition(podRepo.getOrThrow(podId), 'provisioning', provisioningUpdates);
-        assertSandboxAgentStreamingExecSupported(profile, pod.executionTarget, pod.options);
         podRepo.update(podId, { profileSnapshot: profile });
         if (!pod.networkPolicyResolved) {
           const resolvedNetworkPolicy = profile.networkPolicy?.enabled
@@ -9753,7 +9763,8 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           const current = podRepo.getOrThrow(podId);
           const message = `Required remote ${err.purpose} branch "${err.branch}" is missing.`;
           emitActivityError(podId, message, true);
-          if (current.status === 'queued') transition(current, 'failed', { failureReason: message });
+          if (current.status === 'queued')
+            transition(current, 'failed', { failureReason: message });
           return;
         }
         if (err instanceof GitCredentialError && (err.op === 'fetch' || err.op === 'clone')) {
@@ -9779,7 +9790,10 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
               pendingEscalation: escalation,
               escalationCount: current.escalationCount + 1,
             });
-            emitActivityStatus(podId, 'Remote fetch needs repaired host credentials before provisioning.');
+            emitActivityStatus(
+              podId,
+              'Remote fetch needs repaired host credentials before provisioning.',
+            );
             return;
           }
         }
@@ -10772,7 +10786,10 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
             response: 'credential_repaired',
           });
           transition(pod, 'queued', { pendingEscalation: null });
-          emitActivityStatus(podId, `Host credentials updated — fetching required remote refs again…`);
+          emitActivityStatus(
+            podId,
+            'Host credentials updated — fetching required remote refs again…',
+          );
           enqueueSession(podId);
           return;
         }

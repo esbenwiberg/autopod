@@ -430,7 +430,18 @@ export class LocalWorktreeManager implements WorktreeManager {
     const startBranch = config.startBranch ?? baseBranch;
     const cacheKey = this.sanitizeRepoUrl(repoUrl);
     const bareRepoPath = path.join(this.cacheDir, `${cacheKey}.git`);
-    const remote = await this.getAuthenticatedRemoteForRepo(repoUrl, bareRepoPath, pat);
+    let remote: AuthenticatedRemote;
+    try {
+      remote = await this.getAuthenticatedRemoteForRepo(repoUrl, bareRepoPath, pat);
+    } catch (err) {
+      if (err instanceof DaemonGitHubAuthError) {
+        if (err.code === 'GH_TIMEOUT') {
+          throw new GitTransientFetchError(baseBranch, 'base', err.message.slice(0, 500));
+        }
+        throw new GitCredentialError(err.message, 'github', 'fetch', err.message.slice(0, 500));
+      }
+      throw err;
+    }
 
     await fs.mkdir(this.cacheDir, { recursive: true });
     await fs.mkdir(this.worktreeDir, { recursive: true });
@@ -1914,18 +1925,18 @@ export class LocalWorktreeManager implements WorktreeManager {
     purpose: 'base' | 'start',
     op: 'clone' | 'fetch',
   ): Error {
-      const sanitized = sanitizeGitError(fetchErr);
-      const classified = classifyGitError(sanitized, op);
-      if (classified instanceof GitCredentialError) return classified;
-      const detail = classified instanceof Error ? classified.message : String(classified);
-      this.logger.debug(
-        { err: sanitized, branch },
-        `${purpose} branch: required remote fetch failed`,
-      );
-      if (/could(?:n't| not) find remote ref|remote ref .* not found/i.test(detail)) {
-        return new GitMissingRemoteBranchError(branch, purpose);
-      }
-      return new GitTransientFetchError(branch, purpose, detail.slice(0, 500));
+    const sanitized = sanitizeGitError(fetchErr);
+    const classified = classifyGitError(sanitized, op);
+    if (classified instanceof GitCredentialError) return classified;
+    const detail = classified instanceof Error ? classified.message : String(classified);
+    this.logger.debug(
+      { err: sanitized, branch },
+      `${purpose} branch: required remote fetch failed`,
+    );
+    if (/could(?:n't| not) find remote ref|remote ref .* not found/i.test(detail)) {
+      return new GitMissingRemoteBranchError(branch, purpose);
+    }
+    return new GitTransientFetchError(branch, purpose, detail.slice(0, 500));
   }
 
   private async getAuthenticatedRemote(

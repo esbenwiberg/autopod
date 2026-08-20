@@ -120,24 +120,57 @@ describe('LocalWorktreeManager real Git regressions', () => {
     expect(await git(worktree, ['rev-parse', 'refs/remotes/origin/feature'])).toBe(staleTrackedOid);
   });
 
-  it('starts from fresh origin/main while stale local main is linked elsewhere', async () => {
+  it('materializes exact fresh remote base and start SHAs despite stale local heads', async () => {
     await manager.create({
       repoUrl: 'https://github.com/org/repo.git',
       branch: 'main',
       baseBranch: 'main',
       sessionId: 'linked-main',
     });
-    const freshOid = await commitFile(seed, 'fresh.txt', 'fresh\n', 'fresh main');
-    await git(seed, ['push', 'origin', 'main']);
-
-    const result = await manager.create({
+    await git(seed, ['checkout', '-b', 'stack-start']);
+    await commitFile(seed, 'start.txt', 'old start\n', 'old start');
+    await git(seed, ['push', 'origin', 'stack-start']);
+    await manager.create({
       repoUrl: 'https://github.com/org/repo.git',
-      branch: 'new-pod',
+      branch: 'stack-start',
       baseBranch: 'main',
-      sessionId: 'new-pod',
+      startBranch: 'stack-start',
+      sessionId: 'linked-start',
     });
 
-    expect(await git(result.worktreePath, ['rev-parse', 'HEAD'])).toBe(freshOid);
-    expect(await git(result.worktreePath, ['rev-parse', 'refs/heads/main'])).not.toBe(freshOid);
+    await git(seed, ['checkout', 'main']);
+    const freshMainOid = await commitFile(seed, 'fresh.txt', 'fresh\n', 'fresh main');
+    await git(seed, ['push', 'origin', 'main']);
+    await git(seed, ['checkout', 'stack-start']);
+    const freshStartOid = await commitFile(seed, 'start.txt', 'fresh start\n', 'fresh start');
+    await git(seed, ['push', 'origin', 'stack-start']);
+
+    const mainResult = await manager.create({
+      repoUrl: 'https://github.com/org/repo.git',
+      branch: 'fresh-main-pod',
+      baseBranch: 'main',
+      sessionId: 'fresh-main-pod',
+    });
+    expect(mainResult.startCommitSha).toBe(freshMainOid);
+    expect(await git(mainResult.worktreePath, ['rev-parse', 'HEAD'])).toBe(freshMainOid);
+    expect(await git(mainResult.worktreePath, ['rev-parse', 'refs/heads/main'])).not.toBe(
+      freshMainOid,
+    );
+
+    const startResult = await manager.create({
+      repoUrl: 'https://github.com/org/repo.git',
+      branch: 'fresh-start-pod',
+      baseBranch: 'main',
+      startBranch: 'stack-start',
+      sessionId: 'fresh-start-pod',
+    });
+    expect(startResult.startCommitSha).toBe(freshStartOid);
+    expect(await git(startResult.worktreePath, ['rev-parse', 'HEAD'])).toBe(freshStartOid);
+    expect(await git(startResult.worktreePath, ['rev-parse', 'refs/remotes/origin/main'])).toBe(
+      freshMainOid,
+    );
+    expect(await git(startResult.worktreePath, ['rev-parse', 'refs/heads/stack-start'])).not.toBe(
+      freshStartOid,
+    );
   });
 });
