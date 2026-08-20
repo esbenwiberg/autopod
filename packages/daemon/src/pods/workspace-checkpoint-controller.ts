@@ -1,6 +1,6 @@
 import type { WorkspaceCheckpointResult } from '../worktrees/sandbox-workspace-checkpoint.js';
 
-export type CheckpointReason = 'interval' | 'completion' | 'destructive' | 'reconcile';
+export type CheckpointReason = 'interval' | 'completion' | 'destructive' | 'reconcile' | 'recovery';
 
 export interface WorkspaceFingerprint {
   head: string;

@@ -115,6 +115,14 @@ describe('WorkspaceCheckpointController interval and durability lease', () => {
     await Promise.all([first, second]);
     expect(peak).toBe(1);
   });
+
+  it('carries explicit recovery reason to the checkpoint transport', async () => {
+    const h = harness();
+
+    await h.controller.request('pod', 'recovery');
+
+    expect(h.checkpoint).toHaveBeenCalledWith('pod', 'recovery', expect.any(Number));
+  });
 });
 
 describe('WorkspaceCheckpointController checkpoint chaos matrix', () => {

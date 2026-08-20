@@ -12,6 +12,15 @@ const CHECKPOINT_SUBJECT = 'autopod sandbox checkpoint';
 const CHECKPOINT_ACTOR = 'Autopod';
 const CHECKPOINT_EMAIL = 'autopod@localhost';
 
+async function isAncestor(bare: string, ancestor: string, descendant: string): Promise<boolean> {
+  return execFileAsync('git', ['merge-base', '--is-ancestor', ancestor, descendant], {
+    cwd: bare,
+  }).then(
+    () => true,
+    () => false,
+  );
+}
+
 async function peelDaemonNoopCheckpoints(bare: string, tip: string): Promise<string> {
   let current = tip;
   for (let depth = 0; depth < 64; depth++) {
@@ -180,6 +189,11 @@ export interface SandboxWorkspaceCheckpointArgs {
   podId: string;
   worktreePath: string;
   sequence: number;
+  /**
+   * Explicit recovery authority for a same-pod history rewrite. Automatic
+   * checkpoints must leave this unset so ordinary divergence remains blocked.
+   */
+  recoveryBaseCommit?: string;
 }
 
 export async function checkpointSandboxWorkspace(
@@ -270,15 +284,16 @@ export async function checkpointSandboxWorkspace(
       // only a safe no-op or an exact prior quarantine commit for this pod;
       // arbitrary host commits remain divergence barriers.
       const expectedLineageBase = await checkpointLineageBase(bare, expected, token);
-      const fastForward = await execFileAsync(
-        'git',
-        ['merge-base', '--is-ancestor', expectedLineageBase, sourceHead],
-        { cwd: bare },
-      ).then(
-        () => true,
-        () => false,
-      );
-      if (!fastForward) {
+      const fastForward = await isAncestor(bare, expectedLineageBase, sourceHead);
+      const priorCheckpointSource = args.recoveryBaseCommit
+        ? await quarantinedCheckpointSourceHead(bare, expected, token)
+        : null;
+      const recoveryRewriteAllowed =
+        !!args.recoveryBaseCommit &&
+        !!priorCheckpointSource &&
+        (await isAncestor(bare, args.recoveryBaseCommit, priorCheckpointSource)) &&
+        (await isAncestor(bare, args.recoveryBaseCommit, sourceHead));
+      if (!fastForward && !recoveryRewriteAllowed) {
         return {
           ...empty(sequence, 'feature branch diverged from checkpoint source', 'promotion'),
           sourceHead,

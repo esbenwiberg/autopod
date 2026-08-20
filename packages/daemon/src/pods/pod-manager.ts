@@ -231,7 +231,10 @@ import {
 } from './state-machine.js';
 import { generateSystemInstructions } from './system-instructions-generator.js';
 import type { ValidationRepository } from './validation-repository.js';
-import type { WorkspaceCheckpointController } from './workspace-checkpoint-controller.js';
+import type {
+  CheckpointReason,
+  WorkspaceCheckpointController,
+} from './workspace-checkpoint-controller.js';
 import {
   buildBashrcHintBlock,
   buildWorkspaceToolsDoc,
@@ -5085,7 +5088,10 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
     emitActivityStatus(pod.id, `Workspace preserved before ${reason}.`);
   }
 
-  async function checkpointSandboxWorkspaceForPod(pod: Pod): Promise<WorkspaceCheckpointResult> {
+  async function checkpointSandboxWorkspaceForPod(
+    pod: Pod,
+    reason: Exclude<CheckpointReason, 'interval'> = 'completion',
+  ): Promise<WorkspaceCheckpointResult> {
     if (!pod.containerId || !pod.worktreePath) {
       return {
         sequence: 0,
@@ -5111,7 +5117,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
     const existing = sandboxCheckpointRuns.get(pod.id);
     if (existing) return existing;
     if (deps.workspaceCheckpointController) {
-      const decision = await deps.workspaceCheckpointController.request(pod.id, 'completion');
+      const decision = await deps.workspaceCheckpointController.request(pod.id, reason);
       if (decision.result) return decision.result;
     }
     const run = (deps.sandboxWorkspaceCheckpoint ?? checkpointSandboxWorkspace)({
@@ -5120,6 +5126,9 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
       podId: pod.id,
       worktreePath: pod.worktreePath,
       sequence: Date.now(),
+      ...(reason === 'recovery' && pod.startCommitSha
+        ? { recoveryBaseCommit: pod.startCommitSha }
+        : {}),
     }).finally(() => sandboxCheckpointRuns.delete(pod.id));
     sandboxCheckpointRuns.set(pod.id, run);
     return run;
@@ -16248,7 +16257,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
             emitActivityStatus(podId, 'Resumed retained sandbox for checkpoint recovery.');
           }
         }
-        const checkpoint = await checkpointSandboxWorkspaceForPod(pod);
+        const checkpoint = await checkpointSandboxWorkspaceForPod(pod, 'recovery');
         const recovered =
           checkpoint.lineageVerified && checkpoint.promoted && checkpoint.materialized;
         if (!recovered) {

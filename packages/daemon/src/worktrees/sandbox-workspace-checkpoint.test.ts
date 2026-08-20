@@ -62,7 +62,7 @@ describe('checkpointSandboxWorkspace', () => {
   });
 
   afterEach(async () => {
-    for (const sequence of [1, 2]) {
+    for (const sequence of [1, 2, 3]) {
       const checkpointPath = `/tmp/.autopod-checkpoint-${path.basename(tmpRoot)}-${sequence}.bundle`;
       await rm(checkpointPath, { force: true });
       await rm(`${checkpointPath}.meta`, { force: true });
@@ -284,6 +284,71 @@ describe('checkpointSandboxWorkspace', () => {
     });
     await expect(readFile(path.join(host, 'tracked.txt'), 'utf8')).resolves.toBe(
       'checkpoint two\n',
+    );
+  });
+
+  it('explicitly recovers a rewritten same-pod history from the recorded start commit', async () => {
+    const seed = path.join(tmpRoot, 'seed');
+    const host = path.join(tmpRoot, 'host');
+    const sandbox = path.join(tmpRoot, 'sandbox');
+    await git(tmpRoot, ['init', '--initial-branch=main', seed]);
+    await writeFile(path.join(seed, 'tracked.txt'), 'base\n');
+    await git(seed, ['add', '.']);
+    await git(seed, ['commit', '-m', 'base']);
+    const startCommit = (
+      await execFileAsync('git', ['rev-parse', 'HEAD'], { cwd: seed, env: gitEnv })
+    ).stdout.trim();
+    await git(tmpRoot, ['clone', '--no-hardlinks', seed, host]);
+    await git(tmpRoot, ['clone', '--no-hardlinks', seed, sandbox]);
+
+    await writeFile(path.join(sandbox, 'tracked.txt'), 'original history\n');
+    await git(sandbox, ['add', 'tracked.txt']);
+    await git(sandbox, ['commit', '-m', 'original agent commit']);
+    const containerManager = createSandboxContainerManager(sandbox);
+    const first = await checkpointSandboxWorkspace({
+      containerManager,
+      containerId: 'sandbox-1',
+      podId: path.basename(tmpRoot),
+      worktreePath: host,
+      sequence: 1,
+    });
+    expect(first).toMatchObject({ promoted: true, materialized: true });
+
+    await git(sandbox, ['reset', '--hard', startCommit]);
+    await writeFile(path.join(sandbox, 'tracked.txt'), 'clean replacement history\n');
+    await git(sandbox, ['add', 'tracked.txt']);
+    await git(sandbox, ['commit', '-m', 'replacement agent commit']);
+    const replacementCommit = (
+      await execFileAsync('git', ['rev-parse', 'HEAD'], { cwd: sandbox, env: gitEnv })
+    ).stdout.trim();
+    const rejected = await checkpointSandboxWorkspace({
+      containerManager,
+      containerId: 'sandbox-1',
+      podId: path.basename(tmpRoot),
+      worktreePath: host,
+      sequence: 2,
+      recoveryBaseCommit: replacementCommit,
+    });
+    expect(rejected.error).toMatchObject({ code: 'LINEAGE_CONFLICT' });
+
+    const recoveryArgs = {
+      containerManager,
+      containerId: 'sandbox-1',
+      podId: path.basename(tmpRoot),
+      worktreePath: host,
+      sequence: 3,
+      recoveryBaseCommit: startCommit,
+    };
+    const recovered = await checkpointSandboxWorkspace(recoveryArgs);
+
+    expect(recovered.error).toBeUndefined();
+    expect(recovered).toMatchObject({
+      lineageVerified: true,
+      promoted: true,
+      materialized: true,
+    });
+    await expect(readFile(path.join(host, 'tracked.txt'), 'utf8')).resolves.toBe(
+      'clean replacement history\n',
     );
   });
 

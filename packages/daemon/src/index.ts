@@ -741,7 +741,7 @@ const workspaceCheckpointController = new WorkspaceCheckpointController({
     const [head = '', fingerprint = '', state = 'clean'] = output.stdout.trim().split('\n');
     return { head, tree: fingerprint, dirty: state === 'dirty' };
   },
-  checkpoint: async (podId, _reason, sequence) => {
+  checkpoint: async (podId, reason, sequence) => {
     const pod = podRepo.getOrThrow(podId);
     if (!pod.containerId || !pod.worktreePath) throw new Error('sandbox workspace is unavailable');
     return checkpointSandboxWorkspace({
@@ -750,6 +750,9 @@ const workspaceCheckpointController = new WorkspaceCheckpointController({
       podId,
       worktreePath: pod.worktreePath,
       sequence,
+      ...(reason === 'recovery' && pod.startCommitSha
+        ? { recoveryBaseCommit: pod.startCommitSha }
+        : {}),
     });
   },
   emit: (event) => logger.info({ checkpoint: event }, 'Sandbox workspace checkpoint'),

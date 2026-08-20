@@ -1145,10 +1145,14 @@ describe('PodManager', () => {
         containerId: 'ctr-1',
         worktreePath: '/tmp/wt',
         worktreeCompromised: true,
+        startCommitSha: 'a'.repeat(40),
       });
 
       await expect(manager.recoverWorktree(pod.id)).resolves.toMatchObject({ recovered: true });
       expect(ctx.containerManager.start).toHaveBeenCalledWith('ctr-1');
+      expect(ctx.deps.sandboxWorkspaceCheckpoint).toHaveBeenCalledWith(
+        expect.objectContaining({ recoveryBaseCommit: 'a'.repeat(40) }),
+      );
     });
 
     it('does not recursively extract sandbox source when checkpoint proof is unavailable', async () => {
