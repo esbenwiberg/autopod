@@ -6,6 +6,7 @@ import {
   DeletionGuardError,
   GitCredentialError,
   GitMissingRemoteBranchError,
+  GitTransientFetchError,
   LocalWorktreeManager,
   classifyGitError,
   truncateDiffAtFileBoundary,
@@ -2187,7 +2188,7 @@ describe('LocalWorktreeManager', () => {
           branch: 'autopod/new-pod',
           baseBranch: 'gone-branch',
         }),
-      ).rejects.toThrow('baseBranch "gone-branch" not found on remote or locally');
+      ).rejects.toThrow('Required base branch "gone-branch" does not exist on the remote');
     });
 
     it('throws when a distinct startBranch is unresolvable — no fallback to base/default', async () => {
@@ -2217,7 +2218,7 @@ describe('LocalWorktreeManager', () => {
           baseBranch: 'main',
           startBranch: 'pi/gone',
         }),
-      ).rejects.toThrow('startBranch "pi/gone" not found on remote or locally');
+      ).rejects.toThrow('Required start branch "pi/gone" does not exist on the remote');
     });
 
     it('does not retain a legacy GitHub profile PAT in the ADO credential cache', async () => {
@@ -2456,6 +2457,26 @@ describe('truncateDiffAtFileBoundary', () => {
   it('instructs reviewer to use read_file tools', () => {
     const result = truncateDiffAtFileBoundary(h1 + h2, h1.length + 5);
     expect(result).toContain('read_file');
+  });
+});
+
+describe('required remote fetch failures', () => {
+  it('classifies required remote fetch failures', () => {
+    const credential = classifyGitError(
+      Object.assign(new Error('fatal: Authentication failed'), {
+        stderr: 'fatal: Authentication failed',
+      }),
+      'fetch',
+    );
+    expect(credential).toBeInstanceOf(GitCredentialError);
+    expect(new GitMissingRemoteBranchError('missing', 'start')).toMatchObject({
+      branch: 'missing',
+      purpose: 'start',
+    });
+    expect(new GitTransientFetchError('main', 'base', 'connection reset')).toMatchObject({
+      branch: 'main',
+      purpose: 'base',
+    });
   });
 });
 
