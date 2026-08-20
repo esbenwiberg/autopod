@@ -183,6 +183,32 @@ export class GitCredentialError extends Error {
   }
 }
 
+/** A required remote branch was explicitly reported absent by the provider. */
+export class GitMissingRemoteBranchError extends Error {
+  readonly branch: string;
+  readonly purpose: 'base' | 'start';
+  constructor(branch: string, purpose: 'base' | 'start') {
+    super(`Required ${purpose} branch "${branch}" does not exist on the remote`);
+    this.name = 'GitMissingRemoteBranchError';
+    this.branch = branch;
+    this.purpose = purpose;
+  }
+}
+
+/** A required authenticated fetch failed for a retryable host/transport reason. */
+export class GitTransientFetchError extends Error {
+  readonly branch: string;
+  readonly purpose: 'base' | 'start';
+  readonly diagnostics: string;
+  constructor(branch: string, purpose: 'base' | 'start', diagnostics: string) {
+    super(`Required ${purpose} branch "${branch}" could not be fetched from the remote`);
+    this.name = 'GitTransientFetchError';
+    this.branch = branch;
+    this.purpose = purpose;
+    this.diagnostics = diagnostics;
+  }
+}
+
 /**
  * Heuristic match for credential-class git failures. Covers the wording
  * across HTTPS/SSH, GitHub, ADO, and BitBucket: missing token, wrong token,
@@ -442,19 +468,14 @@ export class LocalWorktreeManager implements WorktreeManager {
       // Use auth URL directly so the credential is never persisted in git config.
       this.logger.info({ bareRepoPath }, 'Fetching latest into bare repo');
       // Explicit refspec per CLAUDE.md — wildcard fetches fail on Azure File Share.
-      // Fetch baseBranch from remote. If the branch hasn't been pushed yet (e.g. forking
-      // a pod that failed before pushing), fall back to the local ref in the bare repo.
+      // Required base/start refs are remote-only. A stale bare-cache head must never
+      // satisfy a new pod: fetch and worktree creation remain under one repo lock.
       const baseBranchRef = await this.fetchBranchRef({
         remote,
         bareRepoPath,
         branch: baseBranch,
-        purpose: 'create baseBranch',
-      }).catch((err) => {
-        throw new Error(
-          `baseBranch "${baseBranch}" not found on remote or locally in ${bareRepoPath}: ${
-            err instanceof Error ? err.message : String(err)
-          }`,
-        );
+        purpose: 'base',
+        branchPurpose: 'base',
       });
       const startBranchRef =
         startBranch === baseBranch
@@ -463,13 +484,8 @@ export class LocalWorktreeManager implements WorktreeManager {
               remote,
               bareRepoPath,
               branch: startBranch,
-              purpose: 'create startBranch',
-            }).catch((err) => {
-              throw new Error(
-                `startBranch "${startBranch}" not found on remote or locally in ${bareRepoPath}: ${
-                  err instanceof Error ? err.message : String(err)
-                }`,
-              );
+              purpose: 'start',
+              branchPurpose: 'start',
             });
 
       // If the requested branch already exists on the remote, fetch it and use it
@@ -1877,8 +1893,9 @@ export class LocalWorktreeManager implements WorktreeManager {
     bareRepoPath: string;
     branch: string;
     purpose: string;
+    branchPurpose?: 'base' | 'start';
   }): Promise<string> {
-    const { remote, bareRepoPath, branch, purpose } = params;
+    const { remote, bareRepoPath, branch, purpose, branchPurpose = 'base' } = params;
     try {
       await git(['fetch', remote.url, `+refs/heads/${branch}:refs/remotes/origin/${branch}`], {
         cwd: bareRepoPath,
@@ -1887,18 +1904,18 @@ export class LocalWorktreeManager implements WorktreeManager {
       });
       return `refs/remotes/origin/${branch}`;
     } catch (fetchErr) {
+      const sanitized = sanitizeGitError(fetchErr);
+      const classified = classifyGitError(sanitized, 'fetch');
+      if (classified instanceof GitCredentialError) throw classified;
+      const detail = classified instanceof Error ? classified.message : String(classified);
       this.logger.debug(
-        { err: sanitizeGitError(fetchErr), branch },
-        `${purpose}: remote fetch failed`,
+        { err: sanitized, branch },
+        `${purpose} branch: required remote fetch failed`,
       );
-      try {
-        await git(['rev-parse', '--verify', `refs/heads/${branch}`], {
-          cwd: bareRepoPath,
-        });
-        return `refs/heads/${branch}`;
-      } catch {
-        throw new Error(`Branch "${branch}" not found on remote or locally`);
+      if (/could(?:n't| not) find remote ref|remote ref .* not found/i.test(detail)) {
+        throw new GitMissingRemoteBranchError(branch, branchPurpose);
       }
+      throw new GitTransientFetchError(branch, branchPurpose, detail.slice(0, 500));
     }
   }
 

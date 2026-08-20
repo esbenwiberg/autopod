@@ -101,7 +101,7 @@ export const CONTAINER_HOME_DIR = '/home/autopod';
 export const AUTOPOD_INSTRUCTIONS_PATH = '/home/autopod/.autopod/system-instructions.md';
 
 export const VALID_STATUS_TRANSITIONS: Record<PodStatus, PodStatus[]> = {
-  queued: ['provisioning', 'killing'],
+  queued: ['provisioning', 'awaiting_input', 'failed', 'killing'],
   provisioning: ['running', 'paused', 'killing', 'failed'],
   running: ['awaiting_input', 'validating', 'paused', 'handoff', 'killing', 'complete', 'failed'],
   // `validating` covers the case where the daemon parked the pod after a
@@ -111,7 +111,7 @@ export const VALID_STATUS_TRANSITIONS: Record<PodStatus, PodStatus[]> = {
   // `validated` is the human-override path: setSkipValidation/forceApprove on
   // a pod parked here (e.g. on a validation_override escalation) jumps straight
   // to validated without re-running the agent or validation.
-  awaiting_input: ['running', 'validating', 'validated', 'killing', 'failed'],
+  awaiting_input: ['queued', 'running', 'validating', 'validated', 'killing', 'failed'],
   paused: ['queued', 'running', 'killing', 'failed'],
   validating: ['validated', 'running', 'failed', 'review_required', 'killing', 'awaiting_input'],
   // `awaiting_input` covers post-validation delivery failures (for example a

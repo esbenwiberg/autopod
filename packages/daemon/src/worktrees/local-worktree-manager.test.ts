@@ -5,6 +5,7 @@ import type { DaemonGitHubAuth } from '../github/daemon-github-auth.js';
 import {
   DeletionGuardError,
   GitCredentialError,
+  GitMissingRemoteBranchError,
   LocalWorktreeManager,
   classifyGitError,
   truncateDiffAtFileBoundary,
@@ -2041,7 +2042,7 @@ describe('LocalWorktreeManager', () => {
       expect(setUrlCmd).not.toContain('daemon-gh-token');
     });
 
-    it('falls back to local baseBranch ref when remote fetch fails (fork scenario)', async () => {
+    it('never falls back to a local branch when a required remote fetch fails', async () => {
       execFileMock.mockImplementation(
         (_file: string, args: string[], arg3: unknown, arg4?: unknown) => {
           const cb = resolveCallback(arg3, arg4);
@@ -2061,18 +2062,21 @@ describe('LocalWorktreeManager', () => {
         },
       );
 
-      const result = await manager.create({
-        repoUrl: 'https://github.com/org/repo.git',
-        branch: 'autopod/forked-pod',
-        baseBranch: 'autopod/parent-branch',
-      });
+      await expect(
+        manager.create({
+          repoUrl: 'https://github.com/org/repo.git',
+          branch: 'autopod/forked-pod',
+          baseBranch: 'autopod/parent-branch',
+        }),
+      ).rejects.toBeInstanceOf(GitMissingRemoteBranchError);
 
       const cmds = execFileMock.mock.calls.map((c: string[][]) => c[1]?.join(' ') ?? '');
-      const worktreeAddCmd = cmds.find((c: string) => c.includes('worktree add'));
-      expect(worktreeAddCmd).toBeDefined();
-      // Should use the local ref, not refs/remotes/origin/...
-      expect(worktreeAddCmd).toContain('refs/heads/autopod/parent-branch');
-      expect(result.worktreePath).toContain('autopod_forked-pod');
+      expect(
+        cmds.some((c: string) =>
+          c.includes('rev-parse --verify refs/heads/autopod/parent-branch'),
+        ),
+      ).toBe(false);
+      expect(cmds.some((c: string) => c.includes('worktree add'))).toBe(false);
     });
 
     it('fetches the base branch only into its remote-tracking ref', async () => {

@@ -93,7 +93,7 @@ export interface PodCostBreakdownResponse {
 }
 
 /** Current recoverable infrastructure incident affecting this pod, if any. */
-export interface PodInfrastructureFailure {
+export interface AzureSandboxInfrastructureFailure {
   source: 'azure-sandbox';
   code: 'AZURE_SANDBOX_TRANSIENT_FORBIDDEN';
   phase: 'setup' | 'agent';
@@ -109,6 +109,23 @@ export interface PodInfrastructureFailure {
   occurredAt: string;
   retryNotBefore: string | null;
 }
+
+/** Durable pre-provision fetch incident. This never represents agent execution. */
+export interface GitFetchInfrastructureFailure {
+  source: 'git-fetch';
+  code: 'GIT_FETCH_TRANSIENT';
+  branch: string;
+  purpose: 'base' | 'start';
+  diagnostics: string;
+  attemptCount: number;
+  recoveryDisposition: 'automatic_retry_scheduled';
+  occurredAt: string;
+  retryNotBefore: string;
+}
+
+export type PodInfrastructureFailure =
+  | AzureSandboxInfrastructureFailure
+  | GitFetchInfrastructureFailure;
 
 export type ProviderAttemptOutcome = 'completed' | 'failed' | 'aborted' | 'quota_exhausted';
 

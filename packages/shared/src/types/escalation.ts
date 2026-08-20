@@ -75,7 +75,7 @@ export interface RequestCredentialPayload {
    *    re-reads the profile's PAT and retries the push; nothing is written
    *    into the container.
    */
-  source?: 'agent' | 'host_push';
+  source?: 'agent' | 'host_push' | 'host_fetch';
 }
 
 export interface EscalationResponse {
