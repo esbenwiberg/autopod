@@ -456,7 +456,7 @@ export class LocalWorktreeManager implements WorktreeManager {
             credentialUrl: remote.url,
           });
         } catch (err) {
-          throw sanitizeGitError(err);
+          throw this.requiredRemoteFetchFailure(err, baseBranch, 'base', 'clone');
         }
         await git(['remote', 'set-url', 'origin', repoUrl], {
           cwd: bareRepoPath,
@@ -1904,19 +1904,28 @@ export class LocalWorktreeManager implements WorktreeManager {
       });
       return `refs/remotes/origin/${branch}`;
     } catch (fetchErr) {
+      throw this.requiredRemoteFetchFailure(fetchErr, branch, branchPurpose, 'fetch');
+    }
+  }
+
+  private requiredRemoteFetchFailure(
+    fetchErr: unknown,
+    branch: string,
+    purpose: 'base' | 'start',
+    op: 'clone' | 'fetch',
+  ): Error {
       const sanitized = sanitizeGitError(fetchErr);
-      const classified = classifyGitError(sanitized, 'fetch');
-      if (classified instanceof GitCredentialError) throw classified;
+      const classified = classifyGitError(sanitized, op);
+      if (classified instanceof GitCredentialError) return classified;
       const detail = classified instanceof Error ? classified.message : String(classified);
       this.logger.debug(
         { err: sanitized, branch },
         `${purpose} branch: required remote fetch failed`,
       );
       if (/could(?:n't| not) find remote ref|remote ref .* not found/i.test(detail)) {
-        throw new GitMissingRemoteBranchError(branch, branchPurpose);
+        return new GitMissingRemoteBranchError(branch, purpose);
       }
-      throw new GitTransientFetchError(branch, branchPurpose, detail.slice(0, 500));
-    }
+      return new GitTransientFetchError(branch, purpose, detail.slice(0, 500));
   }
 
   private async getAuthenticatedRemote(

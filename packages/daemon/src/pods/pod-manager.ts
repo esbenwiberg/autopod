@@ -9756,7 +9756,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           if (current.status === 'queued') transition(current, 'failed', { failureReason: message });
           return;
         }
-        if (err instanceof GitCredentialError && err.op === 'fetch') {
+        if (err instanceof GitCredentialError && (err.op === 'fetch' || err.op === 'clone')) {
           const current = podRepo.getOrThrow(podId);
           if (current.status === 'queued') {
             const escalation: EscalationRequest = {

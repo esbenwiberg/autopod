@@ -247,6 +247,9 @@ const SAFE_AZURE_DIAGNOSTIC_HEADERS = new Set([
 ]);
 
 function serializeInfrastructureFailure(failure: PodInfrastructureFailure): string {
+  if (failure.source === 'git-fetch') {
+    return JSON.stringify({ ...failure, diagnostics: failure.diagnostics.slice(0, 500) });
+  }
   const diagnostics = Object.fromEntries(
     Object.entries(failure.diagnostics)
       .filter(
