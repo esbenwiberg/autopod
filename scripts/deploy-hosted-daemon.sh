@@ -495,8 +495,8 @@ fi
 if [ -n "$VERIFY_STRING" ]; then
   note "verifying built bundle contains: $VERIFY_STRING"
   VOUT="$(remote "
-NEW=$NEW/packages/daemon/dist/index.js
-if tr '\n' ' ' < \"\$NEW\" | grep -qF -- '$VERIFY_STRING'; then echo VERIFY_OK; else echo VERIFY_MISSING; fi
+DIST=$NEW/packages/daemon/dist
+if find \"\$DIST\" -type f -name '*.js' -exec cat {} + | tr '\n' ' ' | grep -qF -- '$VERIFY_STRING'; then echo VERIFY_OK; else echo VERIFY_MISSING; fi
 ")"
   echo "$VOUT" | grep -q VERIFY_OK || die "expected string NOT in built bundle — refusing swap. Rollback unaffected (current still $LIVE_SHA)."
   note "bundle verify OK"

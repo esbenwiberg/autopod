@@ -7,6 +7,9 @@ tmp="$(mktemp -d)"
 trap 'rm -rf "$tmp"' EXIT
 mkdir -p "$tmp/bin" "$tmp/home/.autopod"
 mkdir -p "$tmp/releases/deadbeef/packages/daemon"
+mkdir -p "$tmp/releases/cafebabe/packages/daemon/dist"
+printf 'entry bundle\n' >"$tmp/releases/cafebabe/packages/daemon/dist/index.js"
+printf 'chunk-only semantic gate\n' >"$tmp/releases/cafebabe/packages/daemon/dist/runtime-chunk.js"
 ln -s "$tmp/releases/deadbeef" "$tmp/current"
 printf 'daemon: https://daemon.example\n' >"$tmp/home/.autopod/config.yaml"
 
@@ -52,6 +55,7 @@ case "$remote_script" in
   *'echo live:'*) printf 'live:deadbeef\nactive\n' ;;
   *'BUILD DONE'*) echo 'BUILD DONE' ;;
   *'REVIEWER_CLI_PREWARM_OK'*) echo 'REVIEWER_CLI_PREWARM_OK' ;;
+  *'VERIFY_OK'*) sh -c "$remote_script" ;;
   *'FINAL_ACTIVE='*)
     if [ "${DEPLOY_TEST_TRUNCATE_REMOTE:-0}" = 1 ]; then
       sh -c "$remote_script" | tail -c 512
@@ -110,6 +114,23 @@ reset_fixture() {
   ln -sfn "$tmp/releases/deadbeef" "$tmp/current"
   rm -f "$tmp/restarted" "$tmp/az-count" "$tmp/health-count"
 }
+
+# Semantic verification must inspect emitted chunks, not only dist/index.js.
+reset_fixture
+if ! run_deploy --verify-string 'chunk-only semantic gate' >"$tmp/chunk-verify-out" 2>&1; then
+  cat "$tmp/chunk-verify-out" >&2
+  exit 1
+fi
+grep -qF 'bundle verify OK' "$tmp/chunk-verify-out"
+grep -qF 'DEPLOYED deadbeef -> cafebabe' "$tmp/chunk-verify-out"
+
+reset_fixture
+if run_deploy --verify-string 'missing semantic gate' >"$tmp/missing-verify-out" 2>&1; then
+  echo 'deployment unexpectedly passed a missing semantic gate' >&2
+  exit 1
+fi
+grep -qF 'expected string NOT in built bundle' "$tmp/missing-verify-out"
+[ ! -e "$tmp/restarted" ]
 
 # The first API snapshot is empty, but the atomic VM gate sees one pod just
 # before restart. The same remote script must refuse before systemctl executes.
