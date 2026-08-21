@@ -26,6 +26,7 @@ import type {
   TerminalSessionOptions,
 } from '../interfaces/container-manager.js';
 import { AzureSandboxApiClient } from './azure-sandbox-api-client.js';
+import { SandboxInfrastructureError } from './sandbox-api-client.js';
 import type { SandboxPortAuth } from './sandbox-api-client.js';
 import {
   SANDBOX_TIER_MEMORY_BYTES,
@@ -426,6 +427,7 @@ export class SandboxContainerManager implements ContainerManager {
           if (chunk.exitCode != null) code = chunk.exitCode;
         }
       } catch (err) {
+        if (err instanceof SandboxInfrastructureError) throw err;
         // kill() may already have finalized the public streams while remote
         // cancellation was still unwinding the async iterator. Never write a
         // cancellation diagnostic after EOF — the rejected kill promise carries

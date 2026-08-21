@@ -18,6 +18,7 @@ import { extract as tarExtract } from 'tar-stream';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ContainerSpawnConfig } from '../interfaces/container-manager.js';
 import { AzureSandboxApiClient } from './azure-sandbox-api-client.js';
+import { SandboxInfrastructureError } from './sandbox-api-client.js';
 import type {
   CreateSandboxOptions,
   SandboxApiClient,
@@ -360,6 +361,13 @@ class RejectingCancellationStreamingFakeClient extends FakeSandboxApiClient {
     yield { stdout: 'started' };
     await cancelled;
     throw new Error('sandbox stream closed during rejected cancellation');
+  }
+}
+
+class InfrastructureFailingStreamingFakeClient extends FakeSandboxApiClient {
+  // biome-ignore lint/correctness/useYield: models a stream that fails before its first chunk
+  async *execStream(): AsyncIterable<SandboxExecChunk> {
+    throw new SandboxInfrastructureError(403, { 'x-ms-request-id': 'stream-403' });
   }
 }
 
@@ -832,6 +840,19 @@ describe('SandboxContainerManager', () => {
       expect(out).toBe('chunk-1 chunk-2');
       expect(err).toBe('warn');
       expect(code).toBe(7);
+    });
+
+    it('preserves typed sandbox infrastructure failures from native streams', async () => {
+      const client = new InfrastructureFailingStreamingFakeClient();
+      const mgr = new SandboxContainerManager(client, logger);
+      const id = await mgr.spawn(baseConfig);
+      const stream = await mgr.execStreaming(id, ['claude', '-p', 'task']);
+
+      await expect(stream.exitCode).rejects.toMatchObject({
+        name: 'SandboxInfrastructureError',
+        statusCode: 403,
+        diagnostics: { 'x-ms-request-id': 'stream-403' },
+      });
     });
 
     it('execStreaming exposes writable stdin for native streams', async () => {
