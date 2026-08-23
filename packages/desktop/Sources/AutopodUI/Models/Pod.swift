@@ -747,9 +747,57 @@ public struct AttemptInfo: Sendable {
     public let current: Int
     public let max: Int
     public let reworkCount: Int
-    public init(current: Int, max: Int, reworkCount: Int = 0) {
-        self.current = current; self.max = max; self.reworkCount = reworkCount
+    public let workerExecution: WorkerExecutionSummary?
+    public init(
+        current: Int,
+        max: Int,
+        reworkCount: Int = 0,
+        workerExecution: WorkerExecutionSummary? = nil
+    ) {
+        self.current = current
+        self.max = max
+        self.reworkCount = reworkCount
+        self.workerExecution = workerExecution
     }
+}
+
+public struct WorkerExecutionSummary: Sendable, Equatable {
+    public let totalRuns: Int
+    public let completed: Int
+    public let didNotStart: Int
+    public let interrupted: Int
+    public let active: Int
+
+    public init(
+        totalRuns: Int,
+        completed: Int,
+        didNotStart: Int,
+        interrupted: Int,
+        active: Int
+    ) {
+        self.totalRuns = totalRuns
+        self.completed = completed
+        self.didNotStart = didNotStart
+        self.interrupted = interrupted
+        self.active = active
+    }
+}
+
+func validationAttemptLabel(_ attempts: AttemptInfo) -> String {
+    if attempts.reworkCount > 0 {
+        return "Rework cycle \(attempts.reworkCount) — Validation \(attempts.current) of \(attempts.max)"
+    }
+    return "Validation \(attempts.current) of \(attempts.max)"
+}
+
+func workerExecutionLabel(_ summary: WorkerExecutionSummary?) -> String? {
+    guard let summary, summary.totalRuns > 0 else { return nil }
+    var parts: [String] = []
+    if summary.completed > 0 { parts.append("\(summary.completed) completed") }
+    if summary.didNotStart > 0 { parts.append("\(summary.didNotStart) did not start") }
+    if summary.interrupted > 0 { parts.append("\(summary.interrupted) interrupted") }
+    if summary.active > 0 { parts.append("\(summary.active) active") }
+    return "Workers: \(parts.joined(separator: " · "))"
 }
 
 public struct DeviationItem: Sendable {

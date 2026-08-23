@@ -99,6 +99,13 @@ describe('tmux toolchain', () => {
 });
 
 describe('PostgreSQL base image templates', () => {
+  it('includes the jq prerequisite required by Scruffy validation', async () => {
+    const dockerfile = await readBaseTemplate('Dockerfile.node22-pw-pg');
+
+    expect(dockerfile).toMatch(/\n\s+jq \\\n/);
+    expect(dockerfile).toContain('command -v jq');
+  });
+
   it('configures node22-pw-pg without a volatile runtime socket directory', async () => {
     const dockerfile = await readBaseTemplate('Dockerfile.node22-pw-pg');
     const initdbWrapper = await readBaseTemplate('node22-pw-pg-initdb.sh');

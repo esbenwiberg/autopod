@@ -29,6 +29,43 @@ public func validationHistoryReviewCouncil(_ response: ValidationResponse) -> Re
   reviewCouncil(from: response.taskReview)
 }
 
+func selectedValidationHistory(
+  key: String,
+  in history: [StoredValidationResponse]
+) -> StoredValidationResponse? {
+  guard key != "current" else { return nil }
+  return history.first { $0.id == key }
+}
+
+func sortedValidationHistory(
+  _ history: [StoredValidationResponse]
+) -> [StoredValidationResponse] {
+  history.sorted { lhs, rhs in
+    switch (lhs.sequence, rhs.sequence) {
+    case let (left?, right?) where left != right:
+      return left > right
+    case (.some, .none):
+      return true
+    case (.none, .some):
+      return false
+    default:
+      if lhs.createdAt != rhs.createdAt { return lhs.createdAt > rhs.createdAt }
+      return lhs.id > rhs.id
+    }
+  }
+}
+
+func validationHistoryLabel(_ item: StoredValidationResponse) -> String {
+  let attemptResult = "Attempt \(item.attempt) · \(item.result.overall)"
+  if let sequence = item.sequence, let cycle = item.cycle {
+    return "Run \(sequence) · Cycle \(cycle + 1) · \(attemptResult)"
+  }
+  if let sequence = item.sequence {
+    return "Run \(sequence) · \(attemptResult)"
+  }
+  return "Run …\(item.id.suffix(8)) · \(attemptResult)"
+}
+
 /// The Review verdict and Council availability are separate signals: unavailable axes must not
 /// downgrade a completed failed review to skipped.
 public struct ReviewPhasePresentation: Sendable, Equatable {
@@ -214,15 +251,11 @@ public struct ValidationTab: View {
   }
 
   private var selectedHistory: StoredValidationResponse? {
-    guard let attempt = Int(selectedHistoryKey) else { return nil }
-    return validationHistory.first { $0.attempt == attempt }
+    selectedValidationHistory(key: selectedHistoryKey, in: validationHistory)
   }
 
   private var sortedValidationHistory: [StoredValidationResponse] {
-    validationHistory.sorted { lhs, rhs in
-      if lhs.attempt != rhs.attempt { return lhs.attempt > rhs.attempt }
-      return lhs.createdAt > rhs.createdAt
-    }
+    AutopodUI.sortedValidationHistory(validationHistory)
   }
 
   private func fetchValidationHistory() async {
@@ -640,13 +673,18 @@ public struct ValidationTab: View {
     HStack(spacing: 12) {
       HStack(spacing: 12) {
         if let attempts = pod.attempts {
-          let attemptLabel = attempts.reworkCount > 0
-            ? "Rework \(attempts.reworkCount) — Attempt \(attempts.current) of \(attempts.max)"
-            : "Attempt \(attempts.current) of \(attempts.max)"
-          Text(attemptLabel)
-            .font(.caption)
-            .foregroundStyle(.secondary)
-            .lineLimit(1)
+          VStack(alignment: .leading, spacing: 2) {
+            Text(validationAttemptLabel(attempts))
+              .font(.caption)
+              .foregroundStyle(.secondary)
+              .lineLimit(1)
+            if let workerLabel = workerExecutionLabel(attempts.workerExecution) {
+              Text(workerLabel)
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+            }
+          }
         } else if let p = progress {
           Text("Attempt \(p.attempt)")
             .font(.caption)
@@ -816,12 +854,12 @@ public struct ValidationTab: View {
         }
         Divider()
         ForEach(sortedValidationHistory) { item in
-          let key = String(item.attempt)
+          let key = item.id
           Button {
             selectedHistoryKey = key
           } label: {
             validationHistoryMenuItem(
-              "Attempt \(item.attempt) · \(item.result.overall)",
+              validationHistoryLabel(item),
               selected: selectedHistoryKey == key
             )
           }
@@ -853,7 +891,7 @@ public struct ValidationTab: View {
 
   private var selectedValidationHistoryLabel: String {
     guard let selectedHistory else { return "Attempt: Current" }
-    return "Attempt \(selectedHistory.attempt) · \(selectedHistory.result.overall)"
+    return validationHistoryLabel(selectedHistory)
   }
 
   private func validationHistoryMenuItem(_ title: String, selected: Bool) -> some View {

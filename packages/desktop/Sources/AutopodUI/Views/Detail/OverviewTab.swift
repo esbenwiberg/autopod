@@ -1086,7 +1086,7 @@ struct OverviewTab: View {
                     .foregroundStyle(accentColor)
             }
             if let a = pod.attempts {
-                Text(a.reworkCount > 0 ? "Rework \(a.reworkCount) — Attempt \(a.current) of \(a.max)" : "Attempt \(a.current) of \(a.max)")
+                Text(validationAttemptLabel(a))
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }

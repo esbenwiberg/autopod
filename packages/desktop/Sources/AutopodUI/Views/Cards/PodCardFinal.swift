@@ -883,7 +883,7 @@ public struct SessionCardFinal: View {
                         .foregroundStyle(.orange)
                 }
                 if let a = pod.attempts {
-                    Text(a.reworkCount > 0 ? "Rework \(a.reworkCount) — Attempt \(a.current) of \(a.max)" : "Attempt \(a.current) of \(a.max)")
+                    Text(validationAttemptLabel(a))
                         .font(.caption2)
                         .foregroundStyle(.secondary)
                 }
@@ -946,7 +946,7 @@ public struct SessionCardFinal: View {
                     }
                 }
                 if let a = pod.attempts {
-                    Text(a.reworkCount > 0 ? "Rework \(a.reworkCount) — Attempt \(a.current) of \(a.max)" : "Attempt \(a.current) of \(a.max)")
+                    Text(validationAttemptLabel(a))
                         .font(.caption2)
                         .foregroundStyle(.secondary)
                 }
@@ -994,7 +994,7 @@ public struct SessionCardFinal: View {
         case .validating:
             VStack(alignment: .leading, spacing: 6) {
                 if let a = pod.attempts {
-                    Text(a.reworkCount > 0 ? "Rework \(a.reworkCount) — Attempt \(a.current) of \(a.max)" : "Attempt \(a.current) of \(a.max)")
+                    Text(validationAttemptLabel(a))
                         .font(.caption2)
                         .foregroundStyle(.secondary)
                 }

@@ -1425,6 +1425,56 @@ private let minimalSessionJson = """
   #expect(pod.hasWebUi == false)
 }
 
+@Test func mapsReworkCyclesSeparatelyFromWorkerExecution() throws {
+  let providerAttempts = #"""
+  , "reworkCount": 6,
+  "providerAttempts": [
+    {
+      "podId": "web-ui-pod", "ordinal": 1, "provider": "max",
+      "providerAccountId": "anth-pro", "runtime": "claude", "model": "opus",
+      "profileReference": "pod:web-ui-pod@profile-snapshot#one",
+      "nativeSessionId": "session-1", "startedAt": "2026-04-01T09:00:01Z",
+      "endedAt": "2026-04-01T09:10:00Z", "outcome": "completed",
+      "classification": null, "inputTokens": 100, "outputTokens": 20,
+      "costUsd": 1.2, "preSubmitReviewRuns": 1, "handoffReference": null
+    },
+    {
+      "podId": "web-ui-pod", "ordinal": 2, "provider": "max",
+      "providerAccountId": "anth-pro", "runtime": "claude", "model": "opus",
+      "profileReference": "pod:web-ui-pod@profile-snapshot#two",
+      "nativeSessionId": null, "startedAt": "2026-04-01T09:11:00Z",
+      "endedAt": "2026-04-01T09:11:30Z", "outcome": "failed",
+      "classification": { "category": "unknown", "definitive": false,
+        "sanitizedMessage": "Azure Sandbox empty 403", "retryAfter": null },
+      "inputTokens": 0, "outputTokens": 0, "costUsd": 0,
+      "preSubmitReviewRuns": 0, "handoffReference": null
+    },
+    {
+      "podId": "web-ui-pod", "ordinal": 3, "provider": "max",
+      "providerAccountId": "anth-pro", "runtime": "claude", "model": "opus",
+      "profileReference": "pod:web-ui-pod@profile-snapshot#three",
+      "nativeSessionId": "session-3", "startedAt": "2026-04-01T09:12:00Z",
+      "endedAt": "2026-04-01T09:15:00Z", "outcome": "failed",
+      "classification": { "category": "unknown", "definitive": false,
+        "sanitizedMessage": "stream closed", "retryAfter": null },
+      "inputTokens": 0, "outputTokens": 0, "costUsd": 0,
+      "preSubmitReviewRuns": 1, "handoffReference": null
+    }
+  ]
+  """#
+  let json = (minimalSessionJson + providerAttempts + " }").data(using: .utf8)!
+
+  let response = try JSONDecoder().decode(SessionResponse.self, from: json)
+  let attempts = try #require(PodMapper.map(response).attempts)
+  let workers = try #require(attempts.workerExecution)
+
+  #expect(attempts.reworkCount == 6)
+  #expect(workers.totalRuns == 3)
+  #expect(workers.completed == 1)
+  #expect(workers.didNotStart == 1)
+  #expect(workers.interrupted == 1)
+}
+
 @Test func mapsPersistedFailureReasonAfterRefreshWithoutValidation() throws {
   let json = (minimalSessionJson
     .replacingOccurrences(of: #""status": "running""#, with: #""status": "failed""#)

@@ -12,11 +12,13 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     locales \
     iptables haproxy socat \
     sqlite3 \
+    jq \
     ripgrep \
     tmux \
     python3 build-essential \
     && sed -i '/en_US.UTF-8/s/^# //g' /etc/locale.gen \
     && locale-gen \
+    && command -v jq \
     && rm -rf /var/lib/apt/lists/*
 
 # Pin PostgreSQL 17 through the official PGDG repository rather than inheriting

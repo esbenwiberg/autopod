@@ -96,6 +96,10 @@ public struct StoredValidationResponse: Codable, Sendable, Identifiable {
   public let id: String
   public let podId: String
   public let attempt: Int
+  /// Immutable, pod-local history identity. Optional for compatibility with older daemons.
+  public let sequence: Int?
+  /// Zero-based reset cycle for the display attempt counter.
+  public let cycle: Int?
   public let result: ValidationResponse
   public let createdAt: String
 }

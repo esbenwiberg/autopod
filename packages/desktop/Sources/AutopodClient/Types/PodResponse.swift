@@ -116,6 +116,17 @@ public struct PodConfigRequest: Codable, Sendable {
 
 // MARK: - Pod response (mirrors packages/shared/src/types/pod.ts)
 
+public struct ProviderAttemptResponse: Codable, Sendable {
+  public let ordinal: Int
+  public let nativeSessionId: String?
+  public let startedAt: String
+  public let endedAt: String?
+  public let outcome: String?
+  public let inputTokens: Int
+  public let outputTokens: Int
+  public let preSubmitReviewRuns: Int
+}
+
 public struct SessionResponse: Codable, Sendable {
   public let id: String
   public let profileName: String
@@ -201,6 +212,8 @@ public struct SessionResponse: Codable, Sendable {
   public let referenceRepos: [ReferenceRepoSummary]?
   /// Number of times this pod has been reworked (never resets). Zero for the original run.
   public let reworkCount: Int?
+  /// Provider-run ledger used to distinguish requested rework cycles from worker execution.
+  public let providerAttempts: [ProviderAttemptResponse]?
   /// Cached verdict from the agent's `pre_submit_review` MCP tool call.
   /// Surfaced in the pod detail view so reviewers can see what the critic
   /// flagged before the daemon's full validation runs.
@@ -230,6 +243,7 @@ public struct SessionResponse: Codable, Sendable {
   private enum CodingKeys: String, CodingKey {
     case id, profileName, task, status, model, runtime, executionTarget, branch
     case containerId, worktreePath, validationAttempts, maxValidationAttempts, reworkCount
+    case providerAttempts
     case lastValidationResult, validationWaiver, lastValidationFindings, pendingEscalation, escalationCount, skipValidation
     case createdAt, startedAt, runningAt, completedAt, failureReason, updatedAt, userId
     case filesChanged, linesAdded, linesRemoved, previewUrl, hasWebUi, prUrl

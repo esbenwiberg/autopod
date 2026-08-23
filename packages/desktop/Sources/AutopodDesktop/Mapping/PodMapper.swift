@@ -369,10 +369,42 @@ public enum PodMapper {
     let attempts: AttemptInfo? = {
       let rework = response.reworkCount ?? 0
       guard response.validationAttempts > 0 || rework > 0 else { return nil }
+      let workerExecution = response.providerAttempts.flatMap { providerAttempts in
+        guard !providerAttempts.isEmpty else { return nil as WorkerExecutionSummary? }
+        var completed = 0
+        var didNotStart = 0
+        var interrupted = 0
+        var active = 0
+
+        for attempt in providerAttempts {
+          if attempt.outcome == "completed" {
+            completed += 1
+          } else if attempt.outcome == nil {
+            active += 1
+          } else if attempt.outcome == "failed",
+                    attempt.nativeSessionId == nil,
+                    attempt.inputTokens == 0,
+                    attempt.outputTokens == 0,
+                    attempt.preSubmitReviewRuns == 0 {
+            didNotStart += 1
+          } else {
+            interrupted += 1
+          }
+        }
+
+        return WorkerExecutionSummary(
+          totalRuns: providerAttempts.count,
+          completed: completed,
+          didNotStart: didNotStart,
+          interrupted: interrupted,
+          active: active
+        )
+      }
       return AttemptInfo(
         current: response.validationAttempts,
         max: response.maxValidationAttempts,
-        reworkCount: rework
+        reworkCount: rework,
+        workerExecution: workerExecution
       )
     }()
 
