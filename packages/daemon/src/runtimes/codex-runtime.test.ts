@@ -2493,6 +2493,7 @@ describe('CodexRuntime', () => {
       mcpServers: SpawnConfig['mcpServers'],
       executionTarget?: SpawnConfig['executionTarget'],
       reasoningEffort?: SpawnConfig['reasoningEffort'],
+      env?: SpawnConfig['env'],
     ) => Promise<void>;
 
     function callWriteMcpConfig(runtime: CodexRuntime): WriteMcp {
@@ -2587,6 +2588,42 @@ describe('CodexRuntime', () => {
         ],
         { timeout: 30_000, user: 'root' },
       );
+    });
+
+    it('uses HTTP streaming for ChatGPT-authenticated Codex in sandbox', async () => {
+      const handle = createMockHandle();
+      const cm = createMockContainerManager(handle);
+      const runtime = new CodexRuntime(logger, cm, createMockPodRepo());
+
+      await callWriteMcpConfig(runtime)(
+        'c1',
+        [{ name: 'escalation', url: 'http://host.docker.internal:3100/mcp/abc' }],
+        'sandbox',
+      );
+
+      const written = lastWrittenContent(cm);
+      expect(written).toContain('model_provider = "chatgpt-http"');
+      expect(written).toContain('[model_providers.chatgpt-http]');
+      expect(written).toContain('base_url = "https://chatgpt.com/backend-api/codex"');
+      expect(written).toContain('wire_api = "responses"');
+      expect(written).toContain('requires_openai_auth = true');
+      expect(written).toContain('supports_websockets = false');
+    });
+
+    it('does not replace the provider for API-key-authenticated Codex in sandbox', async () => {
+      const handle = createMockHandle();
+      const cm = createMockContainerManager(handle);
+      const runtime = new CodexRuntime(logger, cm, createMockPodRepo());
+
+      await callWriteMcpConfig(runtime)(
+        'c1',
+        [{ name: 'escalation', url: 'http://host.docker.internal:3100/mcp/abc' }],
+        'sandbox',
+        undefined,
+        { OPENAI_API_KEY: 'test-key' },
+      );
+
+      expect(lastWrittenContent(cm)).not.toContain('model_provider =');
     });
 
     it('retries an idempotent sandbox config ownership command after a transport timeout', async () => {

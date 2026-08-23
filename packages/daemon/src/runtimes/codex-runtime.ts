@@ -34,6 +34,8 @@ const EXTERNAL_SANDBOX_ARGS = ['--dangerously-bypass-approvals-and-sandbox'] as 
 // for human approval or long deploy scripts, so give the client a ceiling just
 // above the daemon's default 1h human-response timeout.
 const CODEX_MCP_TOOL_TIMEOUT_SEC = 3900;
+const SANDBOX_CHATGPT_HTTP_PROVIDER = 'chatgpt-http';
+const SANDBOX_CHATGPT_BASE_URL = 'https://chatgpt.com/backend-api/codex';
 const DEFAULT_ROLLOUT_POLL_MS = 1_000;
 const DEFAULT_SUMMARY_GRACE_MS = 30_000;
 const DEFAULT_SUMMARY_RECOVERY_TIMEOUT_MS = 30_000;
@@ -159,6 +161,7 @@ export class CodexRuntime implements Runtime {
       config.mcpServers,
       config.executionTarget,
       config.reasoningEffort,
+      config.env,
     );
     this.mcpServersBySession.set(config.podId, config.mcpServers);
     this.reasoningEffortBySession.set(config.podId, config.reasoningEffort);
@@ -220,6 +223,7 @@ export class CodexRuntime implements Runtime {
       this.mcpServersBySession.get(podId),
       pod.executionTarget,
       this.reasoningEffortBySession.get(podId),
+      env,
     );
 
     const sessionId = this.codexSessionIds.get(podId) ?? pod.codexSessionId;
@@ -1084,13 +1088,33 @@ export class CodexRuntime implements Runtime {
     mcpServers: SpawnConfig['mcpServers'],
     executionTarget?: ExecutionTarget,
     reasoningEffort?: ReasoningEffort,
+    env?: Record<string, string>,
   ): Promise<void> {
     const hasEffort = reasoningEffort !== undefined && reasoningEffort !== 'auto';
-    if ((!mcpServers || mcpServers.length === 0) && !hasEffort) return;
+    const useSandboxChatGptHttp = executionTarget === 'sandbox' && !env?.OPENAI_API_KEY?.trim();
+    if ((!mcpServers || mcpServers.length === 0) && !hasEffort && !useSandboxChatGptHttp) return;
 
     const sections: string[] = [];
     if (hasEffort) {
       sections.push(`model_reasoning_effort = ${tomlStringVal(reasoningEffort)}`);
+    }
+    if (useSandboxChatGptHttp) {
+      // ACA Sandbox host allow rules are enforced by an inspecting egress proxy.
+      // Codex's ChatGPT WebSocket reconnect path can fail that proxy's TLS/SNI
+      // handling with the sentinel no-sni.invalid certificate. Keep the same
+      // ChatGPT subscription auth and endpoint, but select Codex's supported
+      // Responses HTTP transport for sandbox execution.
+      sections.push(`model_provider = ${tomlStringVal(SANDBOX_CHATGPT_HTTP_PROVIDER)}`);
+      sections.push(
+        [
+          `[model_providers.${SANDBOX_CHATGPT_HTTP_PROVIDER}]`,
+          'name = "ChatGPT HTTP"',
+          `base_url = ${tomlStringVal(SANDBOX_CHATGPT_BASE_URL)}`,
+          'wire_api = "responses"',
+          'requires_openai_auth = true',
+          'supports_websockets = false',
+        ].join('\n'),
+      );
     }
     for (const server of mcpServers ?? []) {
       const lines: string[] = [`[mcp_servers.${tomlKey(server.name)}]`];
