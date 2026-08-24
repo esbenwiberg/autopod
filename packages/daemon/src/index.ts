@@ -115,6 +115,7 @@ const SANDBOX_TERMINAL_REAPER_INTERVAL_MS = parsePositiveInterval(
 );
 const TEAMS_WEBHOOK_URL = process.env.TEAMS_WEBHOOK_URL;
 const ACR_REGISTRY_URL = process.env.ACR_REGISTRY_URL;
+const AZURE_DEVOPS_TENANT_ID = process.env.AZURE_DEVOPS_TENANT_ID;
 const ENTRA_TENANT_ID = process.env.ENTRA_TENANT_ID ?? process.env.AUTOPOD_TENANT_ID;
 const ENTRA_CLIENT_ID = process.env.ENTRA_CLIENT_ID ?? process.env.AUTOPOD_CLIENT_ID;
 const ENTRA_AUDIENCES = parseEnvList(process.env.ENTRA_AUDIENCE ?? process.env.AUTOPOD_AUDIENCE);
@@ -183,7 +184,9 @@ const logger = IS_DEV
   ? pino(PINO_BASE_OPTIONS, (await import('pino-pretty')).build({ colorize: true }))
   : pino(PINO_BASE_OPTIONS);
 const githubAuth = new GhCliDaemonGitHubAuth();
-const azureDevOpsAuth = createAzureDevOpsAuth(logger);
+const azureDevOpsAuth = createAzureDevOpsAuth(logger, {
+  tenantId: AZURE_DEVOPS_TENANT_ID,
+});
 
 // Node's `fetch` (undici) calls `performance.mark()` per request for the
 // Resource Timing API. Over a long-running daemon (PR polling, issue watcher,

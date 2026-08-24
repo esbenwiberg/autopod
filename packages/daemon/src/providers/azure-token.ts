@@ -32,6 +32,11 @@ export interface AzureTokenResult {
   expiresAtMs: number;
 }
 
+export interface AzureTokenOptions {
+  /** Explicit Entra tenant for guest/no-subscription resource access. */
+  tenantId?: string;
+}
+
 /**
  * Acquire an Azure access token for the given scope.
  *
@@ -44,19 +49,25 @@ export interface AzureTokenResult {
  *
  * Throws with a guidance message if all paths fail.
  */
-export async function getAzureToken(scope: string, logger: Logger): Promise<AzureTokenResult> {
-  const log = logger.child({ component: 'azure-token', scope });
+export async function getAzureToken(
+  scope: string,
+  logger: Logger,
+  options: AzureTokenOptions = {},
+): Promise<AzureTokenResult> {
+  const tenantId = options.tenantId?.trim() || undefined;
+  const cacheKey = tenantId ? `${tenantId}:${scope}` : scope;
+  const log = logger.child({ component: 'azure-token', scope, tenantId });
 
-  const cached = cache.get(scope);
+  const cached = cache.get(cacheKey);
   if (cached && Date.now() < cached.expiresAtMs) {
     return { token: cached.token, expiresAtMs: cached.expiresAtMs };
   }
 
   // az CLI takes a resource (not a /.default scope), so strip the suffix.
   const resource = scope.replace(/\/\.default$/, '');
-  const azResult = await getTokenFromAzCli(resource, log);
+  const azResult = await getTokenFromAzCli(resource, log, tenantId);
   if (azResult) {
-    cache.set(scope, azResult);
+    cache.set(cacheKey, azResult);
     return { token: azResult.token, expiresAtMs: azResult.expiresAtMs };
   }
 
@@ -64,11 +75,13 @@ export async function getAzureToken(scope: string, logger: Logger): Promise<Azur
   try {
     const { DefaultAzureCredential } = await import('@azure/identity');
     const credential = new DefaultAzureCredential();
-    const tokenResponse = await credential.getToken(scope);
+    const tokenResponse = tenantId
+      ? await credential.getToken(scope, { tenantId })
+      : await credential.getToken(scope);
     const expiresAtMs =
       (tokenResponse.expiresOnTimestamp ?? Date.now() + FALLBACK_TTL_MS) - TOKEN_REFRESH_BUFFER_MS;
     const entry: CachedToken = { token: tokenResponse.token, expiresAtMs };
-    cache.set(scope, entry);
+    cache.set(cacheKey, entry);
     log.debug('Token acquired via DefaultAzureCredential');
     return { token: entry.token, expiresAtMs };
   } catch (err) {
@@ -76,23 +89,26 @@ export async function getAzureToken(scope: string, logger: Logger): Promise<Azur
     log.debug({ err: identityErr }, 'DefaultAzureCredential failed after az CLI was unavailable');
   }
 
-  cache.delete(scope);
+  cache.delete(cacheKey);
   throw new Error(
     `Azure auth failed for scope '${scope}' — ensure Managed Identity is available, set AZURE_CLIENT_ID/AZURE_CLIENT_SECRET/AZURE_TENANT_ID, or run 'az login'. Last error: ${identityErr ?? 'unknown'}`,
   );
 }
 
-async function getTokenFromAzCli(resource: string, log: Logger): Promise<CachedToken | null> {
+async function getTokenFromAzCli(
+  resource: string,
+  log: Logger,
+  tenantId?: string,
+): Promise<CachedToken | null> {
   try {
     const { execFile } = await import('node:child_process');
     const { promisify } = await import('node:util');
     const execFileAsync = promisify(execFile);
 
-    const { stdout } = await execFileAsync(
-      'az',
-      ['account', 'get-access-token', '--resource', resource, '--output', 'json'],
-      { timeout: AZ_CLI_TIMEOUT_MS },
-    );
+    const args = ['account', 'get-access-token', '--resource', resource];
+    if (tenantId) args.push('--tenant', tenantId);
+    args.push('--output', 'json');
+    const { stdout } = await execFileAsync('az', args, { timeout: AZ_CLI_TIMEOUT_MS });
 
     const parsed = JSON.parse(stdout) as { accessToken?: string; expiresOn?: string };
     if (!parsed.accessToken) return null;

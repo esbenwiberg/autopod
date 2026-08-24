@@ -112,6 +112,31 @@ describe('getAzureToken', () => {
     );
   });
 
+  it('binds Azure CLI token acquisition to the requested tenant', async () => {
+    mockDefaultAzureCredentialToken('mi-token-1');
+    const execFile = mockAzCliToken();
+
+    await getAzureToken(SCOPE, logger, {
+      tenantId: 'ee357b2a-1bf9-42a6-baab-9772d85b28c1',
+    });
+
+    expect(execFile).toHaveBeenCalledWith(
+      'az',
+      [
+        'account',
+        'get-access-token',
+        '--resource',
+        'https://cognitiveservices.azure.com',
+        '--tenant',
+        'ee357b2a-1bf9-42a6-baab-9772d85b28c1',
+        '--output',
+        'json',
+      ],
+      expect.any(Object),
+      expect.any(Function),
+    );
+  });
+
   it('throws with guidance when both managed identity and az CLI fail', async () => {
     mockAzCliFailure();
     mockDefaultAzureCredentialFailure();
@@ -136,5 +161,32 @@ describe('getAzureToken', () => {
     const b = await getAzureToken('https://cognitiveservices.azure.com/.default', logger);
     expect(a.token).not.toBe(b.token);
     expect(getToken).toHaveBeenCalledTimes(2);
+  });
+
+  it('keys cache by tenant so guest-tenant tokens do not collide', async () => {
+    const execFile = vi.fn(
+      (_cmd: string, args: readonly string[], _opts: unknown, cb: ExecFileCallback) => {
+        const tenantIndex = args.indexOf('--tenant');
+        const tenant = tenantIndex >= 0 ? args[tenantIndex + 1] : 'default';
+        cb(null, {
+          stdout: JSON.stringify({
+            accessToken: `token-for-${tenant}`,
+            expiresOn: new Date(Date.now() + 3600_000).toISOString(),
+          }),
+          stderr: '',
+        });
+      },
+    );
+    vi.doMock('node:child_process', () => ({ execFile }));
+
+    const home = await getAzureToken(SCOPE, logger, {
+      tenantId: '0d3aa8f9-8168-4bc2-bda1-c3972e6d9352',
+    });
+    const guest = await getAzureToken(SCOPE, logger, {
+      tenantId: 'ee357b2a-1bf9-42a6-baab-9772d85b28c1',
+    });
+
+    expect(home.token).not.toBe(guest.token);
+    expect(execFile).toHaveBeenCalledTimes(2);
   });
 });

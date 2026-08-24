@@ -33,6 +33,7 @@ Verify every item before going live. Items marked **REQUIRED** will prevent the 
 | `TEAMS_WEBHOOK_URL` | Your Teams channel webhook | Enables pod failure notifications. |
 | `PORT` | `3100` (or a firewall-restricted port) | Default is fine; ensure it is not directly internet-exposed. |
 | `HOST` | `127.0.0.1` (if reverse-proxied) | Use `0.0.0.0` only when the daemon terminates TLS directly. |
+| `AZURE_DEVOPS_TENANT_ID` | Azure DevOps organization tenant UUID | Set when the daemon Azure CLI identity accesses ADO as a guest or through a tenant that differs from its active Azure subscription. |
 
 ### ACI-specific (if using Azure Container Instances)
 

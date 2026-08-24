@@ -21,4 +21,19 @@ describe('createAzureDevOpsAuth', () => {
     );
     expect(getAzureToken).toHaveBeenCalledWith(AZURE_DEVOPS_SCOPE, expect.anything());
   });
+
+  it('binds Azure DevOps token acquisition to the configured tenant', async () => {
+    vi.mocked(getAzureToken).mockResolvedValue({
+      token: 'daemon-entra-token',
+      expiresAtMs: Date.now() + 60_000,
+    });
+
+    await createAzureDevOpsAuth(pino({ enabled: false }), {
+      tenantId: 'ee357b2a-1bf9-42a6-baab-9772d85b28c1',
+    }).getToken();
+
+    expect(getAzureToken).toHaveBeenCalledWith(AZURE_DEVOPS_SCOPE, expect.anything(), {
+      tenantId: 'ee357b2a-1bf9-42a6-baab-9772d85b28c1',
+    });
+  });
 });
