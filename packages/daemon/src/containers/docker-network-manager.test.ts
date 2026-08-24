@@ -60,6 +60,7 @@ describe('DockerNetworkManager', () => {
       expect(DEFAULT_ALLOWED_HOSTS).toContain('api.openai.com');
       expect(DEFAULT_ALLOWED_HOSTS).toContain('chatgpt.com');
       expect(DEFAULT_ALLOWED_HOSTS).toContain('*.chatgpt.com');
+      expect(DEFAULT_ALLOWED_HOSTS).toContain('auth.openai.com');
       expect(DEFAULT_ALLOWED_HOSTS).toContain('files.openai.com');
     });
 

@@ -32,6 +32,8 @@ export const DEFAULT_ALLOWED_HOSTS = [
   // Codex CLI with ChatGPT/Pro auth talks to chatgpt.com plus supporting subdomains.
   'chatgpt.com',
   '*.chatgpt.com',
+  // ChatGPT subscription auth refreshes Codex OAuth tokens here.
+  'auth.openai.com',
   'files.openai.com',
   'registry.npmjs.org',
   'pypi.org',

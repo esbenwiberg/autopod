@@ -803,7 +803,13 @@ function providerRequiredHosts(
   const legacyHosts: Record<string, string[]> = {
     anthropic: ['api.anthropic.com'],
     max: ['api.anthropic.com', 'platform.claude.com', 'claude.ai'],
-    openai: ['api.openai.com', 'chatgpt.com', '*.chatgpt.com', 'files.openai.com'],
+    openai: [
+      'api.openai.com',
+      'chatgpt.com',
+      '*.chatgpt.com',
+      'auth.openai.com',
+      'files.openai.com',
+    ],
     copilot: [
       'api.githubcopilot.com',
       'api.enterprise.githubcopilot.com',
@@ -818,7 +824,13 @@ function providerRequiredHosts(
   if (credentials?.provider === 'pi') {
     const piHosts: Record<string, string[]> = {
       anthropic: ['api.anthropic.com'],
-      'openai-codex': ['api.openai.com', 'chatgpt.com', '*.chatgpt.com', 'files.openai.com'],
+      'openai-codex': [
+        'api.openai.com',
+        'chatgpt.com',
+        '*.chatgpt.com',
+        'auth.openai.com',
+        'files.openai.com',
+      ],
       'github-copilot': [
         'api.githubcopilot.com',
         'api.enterprise.githubcopilot.com',

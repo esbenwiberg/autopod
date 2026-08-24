@@ -32,6 +32,7 @@ describe('addRuntimeNetworkDefaults', () => {
 
     expect(result?.allowedHosts).toContain('chatgpt.com');
     expect(result?.allowedHosts).toContain('*.chatgpt.com');
+    expect(result?.allowedHosts).toContain('auth.openai.com');
     expect(result?.allowedHosts).not.toContain('github.com');
     expect(result?.allowedHosts).not.toContain('api.github.com');
   });
@@ -46,6 +47,7 @@ describe('addRuntimeNetworkDefaults', () => {
     expect(result?.allowedHosts).toContain('example.com');
     expect(result?.allowedHosts).toContain('chatgpt.com');
     expect(result?.allowedHosts).toContain('*.chatgpt.com');
+    expect(result?.allowedHosts).toContain('auth.openai.com');
     expect(result?.allowedHosts).not.toContain('github.com');
     expect(result?.allowedHosts).not.toContain('api.github.com');
   });
