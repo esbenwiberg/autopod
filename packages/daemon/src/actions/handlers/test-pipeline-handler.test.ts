@@ -15,9 +15,7 @@ const mockExecFile = vi.fn(
 );
 vi.mock('node:child_process', () => ({ execFile: mockExecFile }));
 
-const { createTestPipelineHandler, injectPatIntoAdoUrl } = await import(
-  './test-pipeline-handler.js'
-);
+const { createTestPipelineHandler } = await import('./test-pipeline-handler.js');
 
 const logger = pino({ level: 'silent' });
 
@@ -42,7 +40,6 @@ function makeProfileStore(profile: Partial<Profile> = {}) {
   return {
     get: vi.fn(() => ({
       name: 'test-profile',
-      adoPat: 'fake-pat',
       testPipeline: {
         enabled: true,
         testRepo: 'https://dev.azure.com/myorg/myproject/_git/test-repo',
@@ -73,18 +70,6 @@ const statusAction: ActionDefinition = {
   response: { fields: ['status', 'url'] },
 };
 
-describe('injectPatIntoAdoUrl', () => {
-  it('embeds the PAT as x-access-token:PAT in an ADO repo URL', () => {
-    const out = injectPatIntoAdoUrl(
-      'https://dev.azure.com/myorg/myproject/_git/test-repo',
-      'SUPERSECRET',
-    );
-    expect(out).toBe(
-      'https://x-access-token:SUPERSECRET@dev.azure.com/myorg/myproject/_git/test-repo',
-    );
-  });
-});
-
 describe('test-pipeline handler', () => {
   beforeEach(() => {
     mockExecFile.mockClear();
@@ -97,6 +82,7 @@ describe('test-pipeline handler', () => {
   it('rejects when the profile has no testPipeline enabled', async () => {
     const handler = createTestPipelineHandler({
       logger,
+      getAzureDevOpsToken: async () => 'daemon-entra-token',
       podRepo: makePodRepo(),
       profileStore: makeProfileStore({ testPipeline: null }),
     });
@@ -105,18 +91,10 @@ describe('test-pipeline handler', () => {
     );
   });
 
-  it('rejects when the profile has no adoPat', async () => {
-    const handler = createTestPipelineHandler({
-      logger,
-      podRepo: makePodRepo(),
-      profileStore: makeProfileStore({ adoPat: null }),
-    });
-    await expect(handler.execute(runAction, {}, { podId: 'pod-1' })).rejects.toThrow(/adoPat/);
-  });
-
   it('rejects when podId context is missing', async () => {
     const handler = createTestPipelineHandler({
       logger,
+      getAzureDevOpsToken: async () => 'daemon-entra-token',
       podRepo: makePodRepo(),
       profileStore: makeProfileStore(),
     });
@@ -132,6 +110,7 @@ describe('test-pipeline handler', () => {
     );
     const handler = createTestPipelineHandler({
       logger,
+      getAzureDevOpsToken: async () => 'daemon-entra-token',
       podRepo: makePodRepo(),
       profileStore: makeProfileStore(),
       rateLimitState,
@@ -143,6 +122,7 @@ describe('test-pipeline handler', () => {
     const podRepo = makePodRepo();
     const handler = createTestPipelineHandler({
       logger,
+      getAzureDevOpsToken: async () => 'daemon-entra-token',
       podRepo,
       profileStore: makeProfileStore(),
     });
@@ -163,14 +143,16 @@ describe('test-pipeline handler', () => {
     expect(out.url).toBe('https://dev.azure.com/run/555');
     expect(out.testBranch).toMatch(/^test-runs\/pod-1\/\d+$/);
 
-    // git push was invoked with x-access-token-authenticated URL
+    // git push uses the clean URL; the Entra token is carried in an extraheader env var.
     expect(mockExecFile).toHaveBeenCalledTimes(1);
     const args = mockExecFile.mock.calls[0]?.[1] as string[];
     expect(args[0]).toBe('-C');
     expect(args[1]).toBe('/tmp/autopod/pod-1');
     expect(args[2]).toBe('push');
     expect(args[3]).toBe('--force');
-    expect(args[4]).toContain('x-access-token:fake-pat@dev.azure.com');
+    expect(args[4]).toBe('https://dev.azure.com/myorg/myproject/_git/test-repo');
+    const execOptions = mockExecFile.mock.calls[0]?.[2] as { env: Record<string, string> };
+    expect(execOptions.env.GIT_CONFIG_VALUE_0).toBe('Authorization: Bearer daemon-entra-token');
     // testBranch is recorded on the pod for cleanup later
     expect(podRepo.update).toHaveBeenCalledWith(
       'pod-1',
@@ -180,12 +162,8 @@ describe('test-pipeline handler', () => {
     );
   });
 
-  it('redacts the ADO PAT from failed push errors', async () => {
+  it('redacts the daemon Entra token from failed push errors', async () => {
     const secret = 'SUPERSECRET';
-    const authenticatedUrl = injectPatIntoAdoUrl(
-      'https://dev.azure.com/myorg/myproject/_git/test-repo',
-      secret,
-    );
     mockExecFile.mockImplementationOnce(
       (
         _cmd: string,
@@ -193,14 +171,15 @@ describe('test-pipeline handler', () => {
         _opts: unknown,
         cb: (err: Error | null, stdout: string, stderr: string) => void,
       ) => {
-        cb(new Error(`fatal: could not push to ${authenticatedUrl}`), '', '');
+        cb(new Error(`fatal: rejected bearer ${secret}`), '', '');
       },
     );
 
     const handler = createTestPipelineHandler({
       logger,
       podRepo: makePodRepo(),
-      profileStore: makeProfileStore({ adoPat: secret }),
+      profileStore: makeProfileStore(),
+      getAzureDevOpsToken: async () => secret,
     });
 
     let thrown: unknown;
@@ -213,13 +192,13 @@ describe('test-pipeline handler', () => {
     expect(thrown).toBeInstanceOf(Error);
     const message = (thrown as Error).message;
     expect(message).not.toContain(secret);
-    expect(message).not.toContain(`:${secret}@`);
     expect(message).toContain('[REDACTED]');
   });
 
   it('get_test_run_status returns succeeded with duration when run completes', async () => {
     const handler = createTestPipelineHandler({
       logger,
+      getAzureDevOpsToken: async () => 'daemon-entra-token',
       podRepo: makePodRepo(),
       profileStore: makeProfileStore(),
     });

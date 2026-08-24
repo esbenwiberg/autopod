@@ -393,8 +393,6 @@ const createProfileBaseSchema = z.object({
    */
   mergePollIntervalSec: z.number().int().min(5).max(3600).nullable().optional().default(null),
   prProvider: z.enum(['github', 'ado']).nullable().default('github'),
-  adoPat: z.string().min(1).nullable().default(null),
-  adoPatExpiresAt: dateOnlySchema.nullable().default(null),
   githubPat: z.string().min(1).nullable().default(null),
   githubPatExpiresAt: dateOnlySchema.nullable().default(null),
   openrouterApiKey: z.string().min(1).nullable().default(null),

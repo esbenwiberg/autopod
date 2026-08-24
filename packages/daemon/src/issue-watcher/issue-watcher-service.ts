@@ -15,6 +15,7 @@ import type { DaemonGitHubAuth } from '../github/daemon-github-auth.js';
 import type { EventBus } from '../pods/event-bus.js';
 import type { PodManager } from '../pods/pod-manager.js';
 import type { ProfileStore } from '../profiles/profile-store.js';
+import type { AzureDevOpsAuth } from '../providers/azure-devops-auth.js';
 import type { SafetyEventsRepository } from '../safety/safety-events-repository.js';
 import type { IssueClient, WatchedIssueCandidate } from './issue-client.js';
 import { createIssueClient } from './issue-client.js';
@@ -42,8 +43,10 @@ export interface IssueWatcherServiceDependencies {
   issueClientFactory?: (
     profile: Profile,
     githubAuth?: DaemonGitHubAuth,
+    azureDevOpsAuth?: AzureDevOpsAuth,
   ) => IssueClient | Promise<IssueClient>;
   githubAuth?: DaemonGitHubAuth;
+  azureDevOpsAuth?: AzureDevOpsAuth;
 }
 
 export function createIssueWatcherService(
@@ -568,23 +571,9 @@ ${input.body}${requirementsSection}
   }
 
   async function pollProfile(profile: Profile): Promise<void> {
-    if (profile.prProvider === 'ado' && !profile.adoPat) {
-      logger.warn(
-        {
-          profile: profile.name,
-          extends: profile.extends ?? undefined,
-          prProvider: profile.prProvider,
-        },
-        profile.extends
-          ? `Issue watcher enabled but no PAT found in inheritance chain (${profile.name} → ${profile.extends}), skipping`
-          : 'Issue watcher enabled but no PAT configured, skipping',
-      );
-      return;
-    }
-
     let client: IssueClient;
     try {
-      client = await issueClientFactory(profile, deps.githubAuth);
+      client = await issueClientFactory(profile, deps.githubAuth, deps.azureDevOpsAuth);
     } catch (err) {
       logger.error({ err, profile: profile.name }, 'Failed to create issue client');
       return;
@@ -675,7 +664,7 @@ ${input.body}${requirementsSection}
     void (async () => {
       try {
         const profile = profileStore.get(tracked.profileName);
-        const client = issueClientFactory(profile);
+        const client = await issueClientFactory(profile, deps.githubAuth, deps.azureDevOpsAuth);
         const prefix = profile.issueWatcherLabelPrefix;
 
         if (newStatus === 'complete' && tracked.phase === 'planning') {
@@ -778,7 +767,7 @@ ${input.body}${requirementsSection}
     void (async () => {
       try {
         const profile = profileStore.get(tracked.profileName);
-        const client = issueClientFactory(profile);
+        const client = await issueClientFactory(profile, deps.githubAuth, deps.azureDevOpsAuth);
         const payload = event.escalation.payload as { question?: string };
         const question = payload.question ?? 'Pod needs human input.';
         await client.addComment(tracked.issueId, `**Pod needs input:**\n\n${question}`);

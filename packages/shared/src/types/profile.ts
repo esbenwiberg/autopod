@@ -162,10 +162,6 @@ export interface Profile {
   preflightConflictPolicy?: 'warn' | 'block' | null;
   /** PR provider — determines which service creates/merges pull requests */
   prProvider: 'github' | 'ado' | null;
-  /** ADO Personal Access Token (encrypted at rest). Required when prProvider is 'ado'. */
-  adoPat: string | null;
-  /** Date-only PAT expiry metadata, formatted as YYYY-MM-DD. Non-secret. */
-  adoPatExpiresAt?: string | null;
   /** GitHub Personal Access Token (encrypted at rest). Used for PR creation and action read access. */
   githubPat: string | null;
   /** OpenRouter API key (encrypted at rest). Used when modelProvider is 'openrouter'. */
@@ -251,14 +247,12 @@ export interface Profile {
 
 export type PublicProfile = Omit<
   Profile,
-  'adoPat' | 'githubPat' | 'registryPat' | 'openrouterApiKey' | 'providerCredentials'
+  'githubPat' | 'registryPat' | 'openrouterApiKey' | 'providerCredentials'
 > & {
-  adoPat: null;
   githubPat: null;
   registryPat: null;
   openrouterApiKey: null;
   providerCredentials: Pick<ProviderCredentials, 'provider'> | null;
-  hasAdoPat: boolean;
   hasGithubPat: boolean;
   hasRegistryPat: boolean;
 };

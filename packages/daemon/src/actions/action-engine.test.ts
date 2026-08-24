@@ -125,9 +125,9 @@ describe('ActionEngine', () => {
       getSecret: (ref) => {
         if (ref === 'GITHUB_TOKEN' || ref === 'github-pat')
           return 'ghp_test_token_000000000000000000000000000000';
-        if (ref === 'ADO_PAT' || ref === 'ado-pat') return 'test-ado-pat';
         return undefined;
       },
+      getAzureDevOpsToken: async () => 'daemon-entra-token',
     });
   });
 
@@ -421,7 +421,8 @@ describe('ActionEngine', () => {
       registry: createMockRegistry([adoReadFileAction]),
       auditRepo: createMockAuditRepo(),
       logger: pino({ level: 'silent' }),
-      getSecret: () => 'test-ado-pat',
+      getSecret: () => undefined,
+      getAzureDevOpsToken: async () => 'daemon-entra-token',
     });
 
     const result = await adoEngine.execute(
@@ -450,7 +451,8 @@ describe('ActionEngine', () => {
       registry: createMockRegistry([adoReadFileAction]),
       auditRepo: createMockAuditRepo(),
       logger: pino({ level: 'silent' }),
-      getSecret: () => 'test-ado-pat',
+      getSecret: () => undefined,
+      getAzureDevOpsToken: async () => 'daemon-entra-token',
     });
 
     const result = await adoEngine.execute(
@@ -479,7 +481,8 @@ describe('ActionEngine', () => {
       registry: createMockRegistry([adoReadFileAction]),
       auditRepo: createMockAuditRepo(),
       logger: pino({ level: 'silent' }),
-      getSecret: () => 'test-ado-pat',
+      getSecret: () => undefined,
+      getAzureDevOpsToken: async () => 'daemon-entra-token',
     });
 
     const result = await adoEngine.execute(
@@ -508,7 +511,8 @@ describe('ActionEngine', () => {
       registry: createMockRegistry([adoReadFileAction]),
       auditRepo: createMockAuditRepo(),
       logger: pino({ level: 'silent' }),
-      getSecret: () => 'test-ado-pat',
+      getSecret: () => undefined,
+      getAzureDevOpsToken: async () => 'daemon-entra-token',
     });
 
     const result = await adoEngine.execute(

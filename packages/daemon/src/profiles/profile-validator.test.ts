@@ -437,7 +437,6 @@ describe('ProfileValidator', () => {
       const result = validateProfile({
         ...validInput,
         githubPatExpiresAt: '2026-06-01',
-        adoPatExpiresAt: '2026-07-01',
         registryPatExpiresAt: '2026-08-01',
       });
       expect(result.valid).toBe(true);
@@ -447,14 +446,10 @@ describe('ProfileValidator', () => {
       const result = validateProfile({
         ...validInput,
         githubPatExpiresAt: '2026-02-30',
-        adoPatExpiresAt: '06/01/2026',
       });
       expect(result.valid).toBe(false);
       expect(result.errors).toEqual(
-        expect.arrayContaining([
-          expect.stringContaining('githubPatExpiresAt'),
-          expect.stringContaining('adoPatExpiresAt'),
-        ]),
+        expect.arrayContaining([expect.stringContaining('githubPatExpiresAt')]),
       );
     });
   });

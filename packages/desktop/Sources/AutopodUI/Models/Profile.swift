@@ -78,14 +78,11 @@ public struct Profile: Identifiable, Sendable {
 
     // Credentials — `hasXxxPat` reflects API state; `xxxPat` holds new values being set
     public var hasGithubPat: Bool
-    public var hasAdoPat: Bool
     public var hasRegistryPat: Bool
     public var githubPat: String?
-    public var adoPat: String?
     public var openrouterApiKey: String?
     public var registryPat: String?
     public var githubPatExpiresAt: String?
-    public var adoPatExpiresAt: String?
     public var registryPatExpiresAt: String?
 
     // Network policy
@@ -182,12 +179,10 @@ public struct Profile: Identifiable, Sendable {
     public var claudeMdSectionCount: Int { claudeMdSections.count }
     public var skillCount: Int { skills.count }
     public var githubPatExpiryStatus: PatExpiryStatus { Self.patExpiryStatus(githubPatExpiresAt) }
-    public var adoPatExpiryStatus: PatExpiryStatus { Self.patExpiryStatus(adoPatExpiresAt) }
     public var registryPatExpiryStatus: PatExpiryStatus { Self.patExpiryStatus(registryPatExpiresAt) }
 
     public var worstConfiguredPatExpiryStatus: PatExpiryStatus? {
         var statuses: [PatExpiryStatus] = []
-        if hasAdoPat { statuses.append(adoPatExpiryStatus) }
         if hasRegistryPat { statuses.append(registryPatExpiryStatus) }
         if let expired = statuses.first(where: \.isExpired) { return expired }
         if let warning = statuses.first(where: \.isWarning) { return warning }
@@ -227,10 +222,10 @@ public struct Profile: Identifiable, Sendable {
         tokenBudget: Int? = nil, tokenBudgetPolicy: TokenBudgetPolicy = .soft,
         tokenBudgetWarnAt: Double = 0.8, maxBudgetExtensions: Int? = nil,
         issueWatcherEnabled: Bool = false, issueWatcherLabelPrefix: String = "autopod",
-        hasGithubPat: Bool = false, hasAdoPat: Bool = false, hasRegistryPat: Bool = false,
-        githubPat: String? = nil, adoPat: String? = nil, registryPat: String? = nil,
+        hasGithubPat: Bool = false, hasRegistryPat: Bool = false,
+        githubPat: String? = nil, registryPat: String? = nil,
         openrouterApiKey: String? = nil,
-        githubPatExpiresAt: String? = nil, adoPatExpiresAt: String? = nil,
+        githubPatExpiresAt: String? = nil,
         registryPatExpiresAt: String? = nil,
         networkEnabled: Bool = false, networkMode: NetworkPolicyMode = .restricted,
         allowedHosts: [String] = [], allowPackageManagers: Bool = false,
@@ -297,12 +292,11 @@ public struct Profile: Identifiable, Sendable {
         self.tokenBudgetWarnAt = tokenBudgetWarnAt; self.maxBudgetExtensions = maxBudgetExtensions
         self.issueWatcherEnabled = issueWatcherEnabled
         self.issueWatcherLabelPrefix = issueWatcherLabelPrefix
-        self.hasGithubPat = hasGithubPat; self.hasAdoPat = hasAdoPat
+        self.hasGithubPat = hasGithubPat
         self.hasRegistryPat = hasRegistryPat
-        self.githubPat = githubPat; self.adoPat = adoPat; self.registryPat = registryPat
+        self.githubPat = githubPat; self.registryPat = registryPat
         self.openrouterApiKey = openrouterApiKey
         self.githubPatExpiresAt = githubPatExpiresAt
-        self.adoPatExpiresAt = adoPatExpiresAt
         self.registryPatExpiresAt = registryPatExpiresAt
         self.networkEnabled = networkEnabled; self.networkMode = networkMode
         self.allowedHosts = allowedHosts; self.allowPackageManagers = allowPackageManagers
@@ -975,7 +969,7 @@ public enum MockProfiles: Sendable {
         healthPath: "/health",
         defaultModel: "claude-opus-4-8",
         prProvider: .ado,
-        hasAdoPat: true, hasRegistryPat: true,
+        hasRegistryPat: true,
         networkEnabled: true, networkMode: .restricted,
         privateRegistries: [PrivateRegistry(type: .nuget, url: "https://pkgs.dev.azure.com/org/_packaging/feed/nuget/v3/index.json")]
     )

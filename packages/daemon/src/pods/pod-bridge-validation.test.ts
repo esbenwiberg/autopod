@@ -75,7 +75,6 @@ function buildBridge(opts: BuildOpts = {}): {
       lintTimeout: null,
       privateRegistries: [],
       registryPat: null,
-      adoPat: null,
       ...(opts.profileOverrides ?? {}),
     }),
   } as unknown as Deps['profileStore'];
@@ -405,7 +404,6 @@ describe('PodBridge.runValidationPhase', () => {
           buildCommand: 'npm run build',
           privateRegistries: [],
           registryPat: null,
-          adoPat: null,
           buildEnv: null,
         }),
       } as unknown as Deps['profileStore'],

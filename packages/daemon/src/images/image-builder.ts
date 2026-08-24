@@ -44,7 +44,12 @@ export class ImageBuilder {
   /** Build a warm image for a profile and push it to ACR. */
   async buildWarmImage(
     profile: Profile,
-    options: { rebuild?: boolean; gitPat?: string; registryPat?: string } = {},
+    options: {
+      rebuild?: boolean;
+      gitPat?: string;
+      gitEntraToken?: string;
+      registryPat?: string;
+    } = {},
   ): Promise<ImageBuildResult> {
     const localTag = `autopod/${profile.name}:latest`;
     const publishedTag = this.acr ? this.acr.resolveTag(localTag) : localTag;
@@ -67,13 +72,14 @@ export class ImageBuilder {
     const baseImage = await this.resolveBaseImage(profile);
     const dockerfile = generateDockerfile({
       profile,
-      gitCredentials: options.gitPat ? 'pat' : 'none',
+      gitCredentials: options.gitEntraToken ? 'entra-bearer' : options.gitPat ? 'pat' : 'none',
       ...(baseImage ? { baseImage } : {}),
     });
 
     // 2. Build image from Dockerfile
     const buildArgs: Record<string, string> = {};
     if (options.gitPat) buildArgs.GIT_PAT = options.gitPat;
+    if (options.gitEntraToken) buildArgs.GIT_ENTRA_TOKEN = options.gitEntraToken;
     if (options.registryPat) {
       // npm .npmrc still uses REGISTRY_PAT for _authToken
       buildArgs.REGISTRY_PAT = options.registryPat;

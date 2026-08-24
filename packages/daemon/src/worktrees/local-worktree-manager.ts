@@ -24,6 +24,7 @@ import type {
   WorktreeResult,
 } from '../interfaces/worktree-manager.js';
 import { agentToolingCachePaths } from '../pods/agent-tooling-cache-paths.js';
+import type { AzureDevOpsAuth } from '../providers/azure-devops-auth.js';
 import type { ProfileLlmClientDeps } from '../providers/llm-client.js';
 import { KeyedPromiseQueue } from '../util/keyed-promise-queue.js';
 import { generateAutoCommitMessage } from './auto-commit-message.js';
@@ -37,10 +38,9 @@ import {
 const execFileAsync = promisify(execFile);
 const AUTOPOD_SYNC_STAGING_PREFIXES = ['.autopod-sync-', '.autopod-extract-'] as const;
 
-interface GitCredential {
-  username: string;
-  password: string;
-}
+type GitCredential =
+  | { kind: 'basic'; username: string; password: string }
+  | { kind: 'bearer'; token: string };
 
 interface AuthenticatedRemote {
   url: string;
@@ -135,11 +135,14 @@ function git(
       throw new Error('A credential URL is required for an explicit git credential');
     }
     const url = new URL(credentialUrl);
-    const basic = Buffer.from(`${credential.username}:${credential.password}`).toString('base64');
+    const authorization =
+      credential.kind === 'bearer'
+        ? `Bearer ${credential.token}`
+        : `Basic ${Buffer.from(`${credential.username}:${credential.password}`).toString('base64')}`;
     credentialEnv = {
       GIT_CONFIG_COUNT: '3',
       GIT_CONFIG_KEY_2: `http.${url.origin}/.extraheader`,
-      GIT_CONFIG_VALUE_2: `Authorization: Basic ${basic}`,
+      GIT_CONFIG_VALUE_2: `Authorization: ${authorization}`,
     };
   }
   return execFileAsync('git', args, {
@@ -263,7 +266,7 @@ export function classifyGitError(err: unknown, op: string): unknown {
   const wrapped = new GitCredentialError(
     service === 'github'
       ? `git ${op} rejected: daemon GitHub CLI authentication is missing or unauthorized. Log in as the daemon service account with gh auth login and resume the pod.`
-      : `git ${op} rejected: credentials missing or unauthorized for ${service}. Update the profile PAT (it must have write access to the target repo) and resume the pod.`,
+      : `git ${op} rejected: the daemon Azure CLI/managed identity is missing or unauthorized for Azure DevOps. Sign the daemon host into the correct Entra identity, verify its ADO repository access, then resume the pod.`,
     service,
     op,
     stderr.slice(0, 500),
@@ -384,6 +387,7 @@ export interface LocalWorktreeManagerConfig {
   /** Stores so the auto-commit LLM helper resolves live provider-account credentials. */
   llmDeps?: ProfileLlmClientDeps;
   githubAuth?: DaemonGitHubAuth;
+  azureDevOpsAuth?: AzureDevOpsAuth;
 }
 
 /**
@@ -401,15 +405,8 @@ export class LocalWorktreeManager implements WorktreeManager {
   /** Per-repo mutex to avoid git lock contention during concurrent fetches. */
   private repoLocks = new KeyedPromiseQueue();
 
-  /**
-   * In-memory credential cache keyed by bare repo path.
-   * Credentials are never written to the git remote URL — remote stays clean so
-   * containers that mount the bare repo cannot read them. Host-side git
-   * operations (fetch, push) use the auth URL constructed from this cache at
-   * call time only.
-   */
-  private patCache = new Map<string, string>();
   private githubAuth?: DaemonGitHubAuth;
+  private azureDevOpsAuth?: AzureDevOpsAuth;
 
   constructor(config: LocalWorktreeManagerConfig) {
     this.cacheDir =
@@ -423,16 +420,17 @@ export class LocalWorktreeManager implements WorktreeManager {
     this.logger = config.logger;
     this.llmDeps = config.llmDeps;
     this.githubAuth = config.githubAuth;
+    this.azureDevOpsAuth = config.azureDevOpsAuth;
   }
 
   async create(config: WorktreeCreateConfig): Promise<WorktreeResult> {
-    const { repoUrl, branch, baseBranch, pat } = config;
+    const { repoUrl, branch, baseBranch } = config;
     const startBranch = config.startBranch ?? baseBranch;
     const cacheKey = this.sanitizeRepoUrl(repoUrl);
     const bareRepoPath = path.join(this.cacheDir, `${cacheKey}.git`);
     let remote: AuthenticatedRemote;
     try {
-      remote = await this.getAuthenticatedRemoteForRepo(repoUrl, bareRepoPath, pat);
+      remote = await this.getAuthenticatedRemoteForRepo(repoUrl);
     } catch (err) {
       if (err instanceof DaemonGitHubAuthError) {
         if (err.code === 'GH_TIMEOUT') {
@@ -649,8 +647,6 @@ export class LocalWorktreeManager implements WorktreeManager {
         cwd: worktreePath,
       });
       const bareRepoPath = path.resolve(worktreePath, stdout.trim());
-      this.patCache.delete(bareRepoPath);
-
       await git(['worktree', 'remove', '--force', worktreePath], {
         cwd: bareRepoPath,
       }).catch(async () => {
@@ -1941,7 +1937,7 @@ export class LocalWorktreeManager implements WorktreeManager {
 
   private async getAuthenticatedRemote(
     worktreePath: string,
-    pat?: string,
+    _pat?: string,
   ): Promise<AuthenticatedRemote> {
     const { stdout: commonDir } = await git(['rev-parse', '--git-common-dir'], {
       cwd: worktreePath,
@@ -1951,14 +1947,10 @@ export class LocalWorktreeManager implements WorktreeManager {
       cwd: bareRepoPath,
     });
     const cleanUrl = remoteUrl.trim();
-    return this.getAuthenticatedRemoteForRepo(cleanUrl, bareRepoPath, pat);
+    return this.getAuthenticatedRemoteForRepo(cleanUrl);
   }
 
-  private async getAuthenticatedRemoteForRepo(
-    repoUrl: string,
-    bareRepoPath: string,
-    pat?: string,
-  ): Promise<AuthenticatedRemote> {
+  private async getAuthenticatedRemoteForRepo(repoUrl: string): Promise<AuthenticatedRemote> {
     this.assertSupportedRemoteHost(repoUrl);
     if (this.isGitHubUrl(repoUrl)) {
       if (!this.githubAuth) {
@@ -1970,26 +1962,36 @@ export class LocalWorktreeManager implements WorktreeManager {
       const credential = await this.githubAuth.resolveCredential();
       return {
         url: repoUrl,
-        credential: { username: credential.username, password: credential.token },
+        credential: {
+          kind: 'basic',
+          username: credential.username,
+          password: credential.token,
+        },
       };
     }
 
-    const authPat = pat ?? this.patCache.get(bareRepoPath);
-    if (!authPat) {
-      this.logger.warn(
-        { bareRepoPath },
-        'No PAT cached for this repo — git push/fetch will fail without credentials. ' +
-          'Add an ADO PAT to the profile if this repo requires authentication.',
+    if (!this.azureDevOpsAuth) {
+      throw new GitCredentialError(
+        "Azure DevOps daemon authentication is not configured — sign the daemon host into Azure CLI with 'az login' or configure managed identity",
+        'ado',
+        'fetch',
+        '',
       );
     }
-    if (authPat) {
-      this.patCache.set(bareRepoPath, authPat);
+    try {
       return {
         url: repoUrl,
-        credential: { username: 'x-access-token', password: authPat },
+        credential: { kind: 'bearer', token: await this.azureDevOpsAuth.getToken() },
       };
+    } catch (err) {
+      const detail = err instanceof Error ? err.message : String(err);
+      throw new GitCredentialError(
+        `Azure DevOps daemon Entra authentication failed: ${detail}`,
+        'ado',
+        'fetch',
+        detail.slice(0, 500),
+      );
     }
-    return { url: repoUrl };
   }
 
   private isGitHubUrl(url: string): boolean {

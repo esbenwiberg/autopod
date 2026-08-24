@@ -1061,7 +1061,7 @@ export function createSessionBridge(deps: SessionBridgeDependencies): PodBridge 
       const cwd = profile.buildWorkDir ? `/workspace/${profile.buildWorkDir}` : '/workspace';
       const env = buildValidationExecEnv(
         profile.privateRegistries,
-        profile.registryPat ?? profile.adoPat ?? null,
+        profile.registryPat ?? null,
         profile.buildEnv,
       );
       const cm = containerManagerFactory.get(pod.executionTarget);

@@ -5,20 +5,23 @@ import { fetchWithTimeout, pickFields, pickFieldsArray, readSafeJson } from './h
 const ADO_API_VERSION = '7.1';
 
 export function createAdoHandler(config: HandlerConfig): ActionHandler {
-  const { logger, getSecret } = config;
+  const { logger, getAzureDevOpsToken } = config;
   const log = logger.child({ handler: 'ado' });
 
-  function getAuth(): string {
-    const pat = getSecret('ADO_PAT') ?? getSecret('ado-pat');
-    if (!pat) throw new Error('Azure DevOps PAT not configured (ADO_PAT or ado-pat)');
-    return `Basic ${Buffer.from(`:${pat}`).toString('base64')}`;
+  async function getAuth(): Promise<string> {
+    if (!getAzureDevOpsToken) {
+      throw new Error(
+        "Azure DevOps daemon authentication is not configured — sign the daemon host into Azure CLI with 'az login' or configure managed identity",
+      );
+    }
+    return `Bearer ${await getAzureDevOpsToken()}`;
   }
 
   async function adoFetch(url: string): Promise<unknown> {
     const response = await fetchWithTimeout(url, {
       headers: {
         Accept: 'application/json',
-        Authorization: getAuth(),
+        Authorization: await getAuth(),
         'Content-Type': 'application/json',
       },
       timeout: 15_000,
@@ -37,7 +40,7 @@ export function createAdoHandler(config: HandlerConfig): ActionHandler {
       method: 'POST',
       headers: {
         Accept: 'application/json',
-        Authorization: getAuth(),
+        Authorization: await getAuth(),
         'Content-Type': 'application/json',
       },
       body: JSON.stringify(body),

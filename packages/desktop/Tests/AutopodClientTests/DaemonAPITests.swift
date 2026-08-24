@@ -277,8 +277,6 @@ import AutopodUI
     "buildTimeout": 300,
     "testTimeout": 600,
     "prProvider": "github",
-    "adoPat": null,
-    "adoPatExpiresAt": null,
     "githubPat": "encrypted-value",
     "githubPatExpiresAt": "2026-06-01",
     "privateRegistries": [],

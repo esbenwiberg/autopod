@@ -31,6 +31,8 @@ export interface HandlerConfig {
   getSecret: (ref: string) => string | undefined;
   /** Canonical daemon-level GitHub credential source. */
   getGitHubToken?: () => Promise<string>;
+  /** Canonical daemon-level Azure DevOps Entra credential source. */
+  getAzureDevOpsToken?: () => Promise<string>;
   /**
    * SSRF guard hook. Returns `{ ok: false, reason }` to abort an HTTP call.
    * Defaults to `assertPublicUrl` from `api/ssrf-guard.ts`. Override in tests

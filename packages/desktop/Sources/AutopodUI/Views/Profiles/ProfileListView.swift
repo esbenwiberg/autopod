@@ -529,7 +529,7 @@ struct ProfileCard: View {
                 if profile.networkEnabled {
                     statBadge(icon: "shield.checkered", label: profile.networkMode.label, color: .green)
                 }
-                if profile.hasAdoPat || profile.hasRegistryPat {
+                if profile.hasRegistryPat {
                     statBadge(icon: credentialBadgeIcon, label: credentialBadgeLabel, color: credentialBadgeColor)
                 }
                 if profile.mcpServerCount > 0 {
@@ -623,7 +623,6 @@ struct ProfileCard: View {
 
     private var nonGitHubPatExpiryStatus: PatExpiryStatus? {
         let statuses = [
-            profile.hasAdoPat ? profile.adoPatExpiryStatus : nil,
             profile.hasRegistryPat ? profile.registryPatExpiryStatus : nil,
         ].compactMap { $0 }
         if let expired = statuses.first(where: { if case .expired = $0 { true } else { false } }) {

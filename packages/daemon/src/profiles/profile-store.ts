@@ -223,8 +223,6 @@ export function rowToProfile(
     mergePollIntervalSec: nullableNum(row.merge_poll_interval_sec),
     preflightConflictPolicy: nullableStr(row.preflight_conflict_policy) as 'warn' | 'block' | null,
     prProvider: nullableStr(row.pr_provider) as Profile['prProvider'],
-    adoPat: decryptPat(row.ado_pat),
-    adoPatExpiresAt: nullableStr(row.ado_pat_expires_at),
     githubPat: decryptPat(row.github_pat),
     githubPatExpiresAt: nullableStr(row.github_pat_expires_at),
     openrouterApiKey: decryptPat(row.openrouter_api_key),
@@ -376,7 +374,7 @@ export function createProfileStore(
           extends, worker_profile, mcp_servers, claude_md_sections, skills, network_policy, action_policy, output_mode,
           agent_mode, output_target, validate, validation_suite, advisory_browser_qa_enabled, promotable,
           model_provider, provider_account_id, provider_failover, provider_credentials, test_command, validation_setup_command, pr_provider,
-          ado_pat, ado_pat_expires_at, github_pat, github_pat_expires_at, openrouter_api_key,
+          github_pat, github_pat_expires_at, openrouter_api_key,
           private_registries, registry_pat, registry_pat_expires_at, branch_prefix, container_memory_gb,
           build_timeout, test_timeout, build_env,
           lint_command, lint_timeout, sast_command, sast_timeout,
@@ -398,7 +396,7 @@ export function createProfileStore(
           @extends, @workerProfile, @mcpServers, @claudeMdSections, @skills, @networkPolicy, @actionPolicy, @outputMode,
           @agentMode, @outputTarget, @validate, @validationSuite, @advisoryBrowserQaEnabled, @promotable,
           @modelProvider, @providerAccountId, @providerFailover, @providerCredentials, @testCommand, @validationSetupCommand, @prProvider,
-          @adoPat, @adoPatExpiresAt, @githubPat, @githubPatExpiresAt, @openrouterApiKey,
+          @githubPat, @githubPatExpiresAt, @openrouterApiKey,
           @privateRegistries, @registryPat, @registryPatExpiresAt, @branchPrefix, @containerMemoryGb,
           @buildTimeout, @testTimeout, @buildEnv,
           @lintCommand, @lintTimeout, @sastCommand, @sastTimeout,
@@ -467,8 +465,6 @@ export function createProfileStore(
         mergePollIntervalSec: parsed.mergePollIntervalSec ?? null,
         preflightConflictPolicy: parsed.preflightConflictPolicy ?? null,
         prProvider: parsed.prProvider,
-        adoPat: encryptPat(parsed.adoPat),
-        adoPatExpiresAt: parsed.adoPatExpiresAt ?? null,
         githubPat: encryptPat(parsed.githubPat),
         githubPatExpiresAt: parsed.githubPatExpiresAt ?? null,
         openrouterApiKey: encryptPat(parsed.openrouterApiKey),
@@ -755,14 +751,6 @@ export function createProfileStore(
       if (parsed.prProvider !== undefined) {
         setClauses.push('pr_provider = @prProvider');
         fieldMap.prProvider = parsed.prProvider;
-      }
-      if (parsed.adoPat !== undefined) {
-        setClauses.push('ado_pat = @adoPat');
-        fieldMap.adoPat = encryptPat(parsed.adoPat);
-      }
-      if (parsed.adoPatExpiresAt !== undefined) {
-        setClauses.push('ado_pat_expires_at = @adoPatExpiresAt');
-        fieldMap.adoPatExpiresAt = parsed.adoPatExpiresAt ?? null;
       }
       if (parsed.githubPat !== undefined) {
         setClauses.push('github_pat = @githubPat');

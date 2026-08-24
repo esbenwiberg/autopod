@@ -37,7 +37,8 @@ export interface ReferenceRepo {
   mountPath: string; // derived from last URL segment at pod creation time
   /**
    * Name of the profile that contributed this URL, when the user picked it
-   * from the profile list. Lets the daemon resolve auth (githubPat / adoPat)
+   * from the profile list. Lets the daemon resolve GitHub auth while ADO uses
+   * the daemon's Azure CLI/managed identity.
    * from the source profile at clone time. Absent for ad-hoc URLs, which
    * clone unauthenticated.
    */
@@ -567,7 +568,7 @@ export interface CreatePodRequest {
   /**
    * Reference repos to clone read-only into the container. Mount paths are
    * derived automatically. When `sourceProfile` is set, the daemon resolves
-   * auth from that profile's `githubPat` / `adoPat` at clone time. Ad-hoc
+   * GitHub auth from that profile at clone time; ADO uses daemon Entra auth. Ad-hoc
    * URLs (no `sourceProfile`) clone unauthenticated — must be public/SSH.
    */
   referenceRepos?: { url: string; sourceProfile?: string }[];

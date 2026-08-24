@@ -331,7 +331,6 @@ export function createMockProfileStore(db: Database.Database): ProfileStore {
           : null,
         testCommand: (row.test_command as string) ?? null,
         prProvider: (row.pr_provider as 'github' | 'ado') ?? 'github',
-        adoPat: (row.ado_pat as string) ?? null,
         githubPat: (row.github_pat as string) ?? null,
         privateRegistries: JSON.parse((row.private_registries as string) ?? '[]'),
         registryPat: (row.registry_pat as string) ?? null,

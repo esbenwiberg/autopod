@@ -83,14 +83,14 @@ const validProfileInput = {
 
 function expectRedactedPatFields(
   profile: Record<string, unknown>,
-  expected: { github?: boolean; ado?: boolean; registry?: boolean } = {},
+  expected: { github?: boolean; registry?: boolean } = {},
 ): void {
   expect(profile.githubPat).toBeNull();
-  expect(profile.adoPat).toBeNull();
+  expect(profile.adoPat).toBeUndefined();
   expect(profile.registryPat).toBeNull();
   // Legacy GitHub PAT presence is never exposed as current profile status.
   expect(profile.hasGithubPat).toBe(false);
-  expect(profile.hasAdoPat).toBe(expected.ado ?? false);
+  expect(profile.hasAdoPat).toBeUndefined();
   expect(profile.hasRegistryPat).toBe(expected.registry ?? false);
 }
 
@@ -283,10 +283,8 @@ describe('Integration', () => {
       const secretProfile = {
         ...validProfileInput,
         githubPat: 'ghp_secret_profile_read',
-        adoPat: 'ado_secret_profile_read',
         registryPat: 'registry_secret_profile_read',
         githubPatExpiresAt: '2026-12-31',
-        adoPatExpiresAt: '2026-11-30',
         registryPatExpiresAt: '2026-10-31',
       };
 
@@ -297,9 +295,8 @@ describe('Integration', () => {
         payload: secretProfile,
       });
       expect(createRes.statusCode).toBe(201);
-      expectRedactedPatFields(createRes.json(), { github: true, ado: true, registry: true });
+      expectRedactedPatFields(createRes.json(), { github: true, registry: true });
       expect(createRes.body).not.toContain('ghp_secret_profile_read');
-      expect(createRes.body).not.toContain('ado_secret_profile_read');
       expect(createRes.body).not.toContain('registry_secret_profile_read');
 
       const listRes = await app.inject({
@@ -308,9 +305,8 @@ describe('Integration', () => {
         headers: { authorization: 'Bearer test-token' },
       });
       expect(listRes.statusCode).toBe(200);
-      expectRedactedPatFields(listRes.json()[0], { github: true, ado: true, registry: true });
+      expectRedactedPatFields(listRes.json()[0], { github: true, registry: true });
       expect(listRes.body).not.toContain('ghp_secret_profile_read');
-      expect(listRes.body).not.toContain('ado_secret_profile_read');
       expect(listRes.body).not.toContain('registry_secret_profile_read');
 
       const getRes = await app.inject({
@@ -319,9 +315,8 @@ describe('Integration', () => {
         headers: { authorization: 'Bearer test-token' },
       });
       expect(getRes.statusCode).toBe(200);
-      expectRedactedPatFields(getRes.json(), { github: true, ado: true, registry: true });
+      expectRedactedPatFields(getRes.json(), { github: true, registry: true });
       expect(getRes.body).not.toContain('ghp_secret_profile_read');
-      expect(getRes.body).not.toContain('ado_secret_profile_read');
       expect(getRes.body).not.toContain('registry_secret_profile_read');
 
       const patchRes = await app.inject({
@@ -331,9 +326,8 @@ describe('Integration', () => {
         payload: { buildCommand: 'pnpm build' },
       });
       expect(patchRes.statusCode).toBe(200);
-      expectRedactedPatFields(patchRes.json(), { github: true, ado: true, registry: true });
+      expectRedactedPatFields(patchRes.json(), { github: true, registry: true });
       expect(patchRes.body).not.toContain('ghp_secret_profile_read');
-      expect(patchRes.body).not.toContain('ado_secret_profile_read');
       expect(patchRes.body).not.toContain('registry_secret_profile_read');
     });
 
@@ -345,7 +339,6 @@ describe('Integration', () => {
         payload: {
           ...validProfileInput,
           githubPat: 'ghp_secret_editor_parent',
-          adoPat: 'ado_secret_editor_parent',
           registryPat: 'registry_secret_editor_parent',
         },
       });
@@ -368,10 +361,9 @@ describe('Integration', () => {
       expect(res.statusCode).toBe(200);
       const body = res.json();
       expectRedactedPatFields(body.raw);
-      expectRedactedPatFields(body.resolved, { github: true, ado: true, registry: true });
-      expectRedactedPatFields(body.parent, { github: true, ado: true, registry: true });
+      expectRedactedPatFields(body.resolved, { github: true, registry: true });
+      expectRedactedPatFields(body.parent, { github: true, registry: true });
       expect(res.body).not.toContain('ghp_secret_editor_parent');
-      expect(res.body).not.toContain('ado_secret_editor_parent');
       expect(res.body).not.toContain('registry_secret_editor_parent');
     });
 
@@ -383,7 +375,6 @@ describe('Integration', () => {
         payload: {
           ...validProfileInput,
           githubPat: 'ghp_secret_preserved',
-          adoPat: 'ado_secret_preserved',
           registryPat: 'registry_secret_preserved',
         },
       });
@@ -395,17 +386,15 @@ describe('Integration', () => {
         payload: { buildCommand: 'pnpm build' },
       });
       expect(res.statusCode).toBe(200);
-      expectRedactedPatFields(res.json(), { github: true, ado: true, registry: true });
+      expectRedactedPatFields(res.json(), { github: true, registry: true });
 
       const row = db
-        .prepare('SELECT github_pat, ado_pat, registry_pat FROM profiles WHERE name = ?')
+        .prepare('SELECT github_pat, registry_pat FROM profiles WHERE name = ?')
         .get('test-app') as {
         github_pat: string | null;
-        ado_pat: string | null;
         registry_pat: string | null;
       };
       expect(row.github_pat).toBe('ghp_secret_preserved');
-      expect(row.ado_pat).toBe('ado_secret_preserved');
       expect(row.registry_pat).toBe('registry_secret_preserved');
     });
 

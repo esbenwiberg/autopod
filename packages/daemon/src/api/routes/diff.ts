@@ -7,7 +7,7 @@ import {
   computePodUntrackedPreview,
 } from '../../pods/pod-diff-fetcher.js';
 import type { ContainerManagerFactory, PodManager } from '../../pods/pod-manager.js';
-import { type ProfileStore, selectGitPat } from '../../profiles/index.js';
+import type { ProfileStore } from '../../profiles/index.js';
 
 interface DiffFile {
   path: string;
@@ -110,7 +110,6 @@ export function diffRoutes(
         repoUrl: profile.repoUrl,
         branch: pod.branch,
         baseBranch,
-        pat: selectGitPat(profile),
         startCommitSha: pod.startCommitSha,
       });
       if (branchDiff.trim()) {

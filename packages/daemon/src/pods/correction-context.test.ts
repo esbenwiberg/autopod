@@ -78,7 +78,6 @@ function mockProfile(overrides: Partial<Profile> = {}): Profile {
     providerCredentials: null,
     testCommand: null,
     prProvider: 'github' as const,
-    adoPat: null,
     skills: [],
     privateRegistries: [],
     registryPat: null,

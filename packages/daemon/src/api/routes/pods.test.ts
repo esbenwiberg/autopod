@@ -882,11 +882,11 @@ describe('GET /pods/analytics/reliability', () => {
     const profile = updateRes.json();
     expect(profile.providerCredentials).toEqual({ provider: 'max' });
     expect(profile.githubPat).toBeNull();
-    expect(profile.adoPat).toBeNull();
+    expect(profile.adoPat).toBeUndefined();
     expect(profile.registryPat).toBeNull();
     expect(profile.openrouterApiKey).toBeNull();
     expect(profile.hasGithubPat).toBe(false);
-    expect(profile.hasAdoPat).toBe(true);
+    expect(profile.hasAdoPat).toBeUndefined();
     expect(profile.hasRegistryPat).toBe(true);
   });
 
@@ -930,11 +930,11 @@ describe('GET /pods/analytics/reliability', () => {
     ).json().profileSnapshot;
     expect(profileSnapshot.providerCredentials).toEqual({ provider: 'max' });
     expect(profileSnapshot.githubPat).toBeNull();
-    expect(profileSnapshot.adoPat).toBeNull();
+    expect(profileSnapshot.adoPat).toBeUndefined();
     expect(profileSnapshot.registryPat).toBeNull();
     expect(profileSnapshot.openrouterApiKey).toBeNull();
     expect(profileSnapshot.hasGithubPat).toBe(false);
-    expect(profileSnapshot.hasAdoPat).toBe(true);
+    expect(profileSnapshot.hasAdoPat).toBeUndefined();
     expect(profileSnapshot.hasRegistryPat).toBe(true);
   });
 });

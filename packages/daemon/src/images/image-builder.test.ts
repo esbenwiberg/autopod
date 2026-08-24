@@ -40,7 +40,6 @@ function mockProfile(overrides: Partial<Profile> = {}): Profile {
     providerCredentials: null,
     testCommand: null,
     prProvider: 'github' as const,
-    adoPat: null,
     skills: [],
     privateRegistries: [],
     registryPat: null,
@@ -320,7 +319,25 @@ describe('ImageBuilder', () => {
     );
   });
 
-  it('does not pass build args when no gitPat or registryPat', async () => {
+  it('passes an ADO Entra token as a bearer build arg', async () => {
+    const { mockDocker, mockAcr, mockProfileStore } = createMockDeps();
+    const builder = new ImageBuilder({
+      docker: mockDocker,
+      acr: mockAcr,
+      profileStore: mockProfileStore,
+    });
+
+    await builder.buildWarmImage(mockProfile(), { gitEntraToken: 'entra-token' });
+
+    expect(mockDocker.buildImage).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        buildargs: { GIT_ENTRA_TOKEN: 'entra-token' },
+      }),
+    );
+  });
+
+  it('does not pass build args when no git auth or registryPat is provided', async () => {
     const { mockDocker, mockAcr, mockProfileStore } = createMockDeps();
     const builder = new ImageBuilder({
       docker: mockDocker,

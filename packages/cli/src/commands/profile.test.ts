@@ -37,8 +37,6 @@ function createProfile(overrides: Record<string, unknown> = {}) {
     extends: null,
     githubPat: null,
     githubPatExpiresAt: null,
-    adoPat: null,
-    adoPatExpiresAt: null,
     registryPat: null,
     registryPatExpiresAt: null,
     buildEnv: null,
@@ -426,7 +424,7 @@ printf '{"anthropic":{"accessToken":""}}' > "$PI_CODING_AGENT_DIR/auth.json"
     >;
     expect(updates).not.toHaveProperty('githubPat');
     expect(updates).not.toHaveProperty('githubPatExpiresAt');
-    expect(updates).toHaveProperty('adoPatExpiresAt');
+    expect(updates).not.toHaveProperty('adoPatExpiresAt');
   });
 
   it('round-trips profile failover policy through editor updates', async () => {

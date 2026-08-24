@@ -40,7 +40,6 @@ function makeProfile(overrides: Partial<Profile> = {}): Profile {
     claudeMdSections: [],
     skills: [],
     githubPat: null,
-    adoPat: null,
     prProvider: 'github',
     autoMerge: false,
     referenceRepo: null,

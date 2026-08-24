@@ -47,7 +47,6 @@ function mockProfile(overrides: Partial<Profile> = {}): Profile {
     providerCredentials: null,
     testCommand: null,
     prProvider: 'github' as const,
-    adoPat: null,
     skills: [],
     privateRegistries: [],
     registryPat: null,
@@ -406,6 +405,19 @@ describe('generateDockerfile', () => {
     expect(df).toContain('rm -rf /workspace/.git');
   });
 
+  it('uses an Entra bearer header for Azure DevOps clones', () => {
+    const df = generateDockerfile({
+      profile: mockProfile({ repoUrl: 'https://dev.azure.com/example/Project/_git/Repo' }),
+      gitCredentials: 'entra-bearer',
+    });
+
+    expect(df).toContain('ARG GIT_ENTRA_TOKEN');
+    expect(df).toContain(
+      'http.https://dev.azure.com/.extraheader="Authorization: Bearer ${GIT_ENTRA_TOKEN}"',
+    );
+    expect(df).not.toContain('x-access-token');
+  });
+
   it('does not include PAT args for public repos', () => {
     const df = generateDockerfile({
       profile: mockProfile(),
@@ -426,19 +438,17 @@ describe('generateDockerfile', () => {
     expect(df).not.toContain('https://https://');
   });
 
-  it('strips embedded userinfo from ADO-style repo URLs in PAT clone', () => {
-    // Azure DevOps repo URLs often embed the org as a username
-    // (e.g. https://365projectum@dev.azure.com/...). Without stripping the
-    // userinfo segment, the generated clone URL has TWO `@` signs and git
-    // rejects it with exit 128.
+  it('strips embedded userinfo from repo URLs in PAT clone', () => {
+    // Without stripping existing userinfo, the generated clone URL has two
+    // `@` signs and git rejects it with exit 128.
     const df = generateDockerfile({
       profile: mockProfile({
-        repoUrl: 'https://365projectum@dev.azure.com/365projectum/Foo/_git/Bar',
+        repoUrl: 'https://legacy-user@github.com/org/repo',
       }),
       gitCredentials: 'pat',
     });
-    expect(df).toContain('x-access-token:${GIT_PAT}@dev.azure.com/365projectum/Foo/_git/Bar');
-    expect(df).not.toContain('@365projectum@');
+    expect(df).toContain('x-access-token:${GIT_PAT}@github.com/org/repo');
+    expect(df).not.toContain('@legacy-user@');
   });
 
   it('uses plain git clone for public repos', () => {

@@ -9,7 +9,7 @@ const BASE_CONFIG = {
   orgUrl: 'https://dev.azure.com/myorg',
   project: 'MyProject',
   repoName: 'MyRepo',
-  pat: 'secret',
+  getToken: async () => 'daemon-entra-token',
   logger,
 };
 
@@ -575,7 +575,7 @@ describe('AdoPrManager.createPr — screenshot attachments', () => {
       rawScreenshots: [{ pagePath: '/', ref: MOCK_REF_1 }],
     });
 
-    const expectedAuth = `Basic ${Buffer.from(':secret').toString('base64')}`;
+    const expectedAuth = 'Bearer daemon-entra-token';
     const calls = fetchMock.mock.calls as Array<[string, { headers?: Record<string, string> }]>;
     // All calls (create, upload, patch) must carry the same auth header
     for (const [, opts] of calls) {

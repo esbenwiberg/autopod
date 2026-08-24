@@ -11,7 +11,7 @@ describe('AdoIssueClient', () => {
     client = new AdoIssueClient({
       orgUrl: 'https://dev.azure.com/myorg',
       project: 'MyProject',
-      pat: 'ado-test-pat',
+      getToken: async () => 'daemon-entra-token',
     });
     mockFetch.mockReset();
   });
@@ -78,7 +78,7 @@ describe('AdoIssueClient', () => {
       expect(candidates[0].requirements).toEqual(['Dark mode toggle works', 'Theme persists']);
     });
 
-    it('sends Basic auth header', async () => {
+    it('sends daemon Entra Bearer auth header', async () => {
       mockFetch.mockResolvedValueOnce({
         ok: true,
         json: async () => ({ workItems: [] }),
@@ -86,7 +86,7 @@ describe('AdoIssueClient', () => {
 
       await client.listByLabel('autopod');
 
-      const expectedAuth = `Basic ${Buffer.from(':ado-test-pat').toString('base64')}`;
+      const expectedAuth = 'Bearer daemon-entra-token';
       expect(mockFetch).toHaveBeenCalledWith(
         expect.any(String),
         expect.objectContaining({

@@ -11,7 +11,6 @@ The following SQLite columns in the `profiles` table are encrypted with AES-256-
 | Column | Contains |
 |---|---|
 | `provider_credentials` | Anthropic/MAX/Foundry API keys |
-| `ado_pat` | Azure DevOps Personal Access Token |
 | `github_pat` | Legacy GitHub PAT retained for rollback/rolling-client compatibility; ignored by current GitHub operations |
 | `registry_pat` | Private container registry PAT |
 
@@ -144,17 +143,16 @@ const reencrypt = (val) => {
   catch { return val; } // already plain JSON (pre-encryption rows) — re-encrypt as-is
 };
 
-const profiles = db.prepare('SELECT id, provider_credentials, ado_pat, github_pat, registry_pat FROM profiles').all();
+const profiles = db.prepare('SELECT id, provider_credentials, github_pat, registry_pat FROM profiles').all();
 
 const update = db.prepare(
-  'UPDATE profiles SET provider_credentials=?, ado_pat=?, github_pat=?, registry_pat=? WHERE id=?'
+  'UPDATE profiles SET provider_credentials=?, github_pat=?, registry_pat=? WHERE id=?'
 );
 
 db.transaction(() => {
   for (const row of profiles) {
     update.run(
       reencrypt(row.provider_credentials),
-      reencrypt(row.ado_pat),
       reencrypt(row.github_pat),
       reencrypt(row.registry_pat),
       row.id,
@@ -218,7 +216,7 @@ If the key file is gone and no backup exists:
 1. **Stop the daemon** — running without the key means all credential reads will fail with a decryption error.
 2. **Delete all affected profile credentials** via a direct SQLite update:
    ```sql
-   UPDATE profiles SET provider_credentials=NULL, ado_pat=NULL, github_pat=NULL, registry_pat=NULL;
+   UPDATE profiles SET provider_credentials=NULL, github_pat=NULL, registry_pat=NULL;
    ```
 3. **Generate a new key** — the daemon will create `~/.autopod/secrets.key` automatically on next startup.
 4. **Re-enter all credentials** through the CLI or API.

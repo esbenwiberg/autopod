@@ -53,8 +53,8 @@ export interface AdoPrManagerConfig {
   project: string;
   /** Git repository name */
   repoName: string;
-  /** Personal access token with Code (Read & Write) scope */
-  pat: string;
+  /** Canonical daemon Azure DevOps Entra token provider. */
+  getToken: () => Promise<string>;
   logger: Logger;
   /**
    * On-disk screenshot store. When provided and rawScreenshots are passed to
@@ -135,7 +135,7 @@ export class AdoPrManager implements PrManager {
   private readonly orgUrl: string;
   private readonly project: string;
   private readonly repoName: string;
-  private readonly authHeader: string;
+  private readonly getToken: () => Promise<string>;
   private readonly logger: Logger;
   private readonly screenshotStore: ScreenshotStore | undefined;
   private readonly llmDeps: ProfileLlmClientDeps | undefined;
@@ -144,7 +144,7 @@ export class AdoPrManager implements PrManager {
     this.orgUrl = config.orgUrl.replace(/\/$/, '');
     this.project = config.project;
     this.repoName = config.repoName;
-    this.authHeader = `Basic ${Buffer.from(`:${config.pat}`).toString('base64')}`;
+    this.getToken = config.getToken;
     this.logger = config.logger;
     this.screenshotStore = config.screenshotStore;
     this.llmDeps = config.llmDeps;
@@ -158,7 +158,7 @@ export class AdoPrManager implements PrManager {
     const response = await fetch(url, {
       ...options,
       headers: {
-        Authorization: this.authHeader,
+        Authorization: `Bearer ${await this.getToken()}`,
         'Content-Type': 'application/json',
         Accept: 'application/json',
         ...(options.headers as Record<string, string>),
@@ -203,8 +203,7 @@ export class AdoPrManager implements PrManager {
    * the source bucket prevents collisions when smoke and review buckets contain
    * files with the same base name within the same PR.
    *
-   * If uploads 401/403, the ADO PAT likely lacks Code (Read & Write) scope
-   * (vso.code_full). This is logged explicitly so operators can diagnose quickly.
+   * If uploads 401/403, the daemon Entra identity likely lacks repository write access.
    */
   private async uploadScreenshotAttachments(
     prId: number,
@@ -229,11 +228,10 @@ export class AdoPrManager implements PrManager {
         results.push(buildAdoAttachmentRef(pagePath, response.url));
       } catch (err) {
         // Non-fatal — PR is already created.
-        // If 401/403, the ADO PAT may lack Code (Read & Write) / vso.code_full scope.
         this.logger.warn(
           { err, pagePath, podId: ref.podId },
           'ADO screenshot attachment upload failed — screenshot omitted from PR body. ' +
-            'If 401/403, verify the ADO PAT has Code (Read & Write) scope (vso.code_full).',
+            'If 401/403, verify the daemon Entra identity has repository write access.',
         );
       }
     }

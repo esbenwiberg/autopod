@@ -14,6 +14,7 @@ import type { DaemonGitHubAuth } from '../../github/daemon-github-auth.js';
 import type { ImageBuilder } from '../../images/index.js';
 import { type ProfileStore, buildSourceMap } from '../../profiles/index.js';
 import type { ProviderAccountStore } from '../../provider-accounts/index.js';
+import type { AzureDevOpsAuth } from '../../providers/azure-devops-auth.js';
 import { redactProfileSecrets } from '../profile-redaction.js';
 import { redactProviderAccountSecrets } from '../provider-account-redaction.js';
 
@@ -31,6 +32,7 @@ export function profileRoutes(
   imageBuilder?: ImageBuilder,
   providerAccountStore?: ProviderAccountStore,
   githubAuth?: DaemonGitHubAuth,
+  azureDevOpsAuth?: AzureDevOpsAuth,
 ): void {
   function validateProviderAccountMismatch(name: string, changes: Record<string, unknown>): void {
     if (!providerAccountStore) return;
@@ -286,7 +288,6 @@ export function profileRoutes(
     const { name } = request.params as { name: string };
     const body = (request.body ?? {}) as {
       rebuild?: boolean;
-      gitPat?: string;
       registryPat?: string;
     };
     const profile = profileStore.get(name);
@@ -300,19 +301,19 @@ export function profileRoutes(
     }
 
     // The image build runs `git clone` inside the Dockerfile and (for some
-    // templates) authenticates against private package registries. Both PATs
-    // are already stored on the profile — fall back to those when the caller
-    // doesn't pass them in the body, so the CLI never has to handle secrets.
+    // templates) authenticates against private package registries. ADO clones
+    // use the daemon's Entra token; registry credentials remain independent.
     const gitPat =
-      profile.prProvider === 'github'
-        ? (await githubAuth?.resolveCredential())?.token
-        : (body.gitPat ?? profile.adoPat ?? undefined);
+      profile.prProvider === 'github' ? (await githubAuth?.resolveCredential())?.token : undefined;
+    const gitEntraToken =
+      profile.prProvider === 'ado' ? await azureDevOpsAuth?.getToken() : undefined;
     const registryPat = body.registryPat ?? profile.registryPat ?? undefined;
 
     try {
       const result = await imageBuilder.buildWarmImage(profile, {
         rebuild: body.rebuild,
         gitPat: gitPat ?? undefined,
+        gitEntraToken: gitEntraToken ?? undefined,
         registryPat: registryPat ?? undefined,
       });
       return {

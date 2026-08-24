@@ -725,7 +725,7 @@ import AutopodUI
       "timestamp": "2026-05-20T09:56:24Z",
       "payload": {
         "service": "ado",
-        "reason": "git push was rejected by ado. Update the profile's adoPat with a token that has write access to the target repo, then resume the pod.",
+        "reason": "git push was rejected by ADO. Repair the daemon Azure CLI identity, then resume the pod.",
         "source": "host_push"
       },
       "response": null
@@ -763,7 +763,7 @@ import AutopodUI
 
   #expect(pod.status == .awaitingInput)
   #expect(pod.escalationType == "request_credential")
-  #expect(pod.escalationQuestion?.contains("Update the profile's adoPat") == true)
+  #expect(pod.escalationQuestion?.contains("daemon Azure CLI identity") == true)
 }
 
 @Test func mapsWorkspaceSession() throws {

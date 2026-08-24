@@ -45,7 +45,7 @@ function isValidDateOnly(value: string): boolean {
 
 function validateDateOnlyField(
   input: Record<string, unknown>,
-  field: 'githubPatExpiresAt' | 'adoPatExpiresAt' | 'registryPatExpiresAt',
+  field: 'githubPatExpiresAt' | 'registryPatExpiresAt',
   errors: string[],
 ): void {
   const value = input[field];
@@ -334,7 +334,6 @@ export function validateProfile(input: Record<string, unknown>): ProfileValidati
   }
 
   validateDateOnlyField(input, 'githubPatExpiresAt', errors);
-  validateDateOnlyField(input, 'adoPatExpiresAt', errors);
   validateDateOnlyField(input, 'registryPatExpiresAt', errors);
 
   // Note: unlike the removed ACI backend, the Sandbox execution target supports

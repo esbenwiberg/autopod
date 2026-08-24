@@ -3,7 +3,7 @@ import type { PrivateRegistry, Profile, StackTemplate } from '@autopod/shared';
 
 export interface DockerfileOptions {
   profile: Profile;
-  gitCredentials: 'pat' | 'ssh' | 'none';
+  gitCredentials: 'pat' | 'entra-bearer' | 'ssh' | 'none';
   /** Override the complete base reference after registry resolution. */
   baseImage?: string;
   /** Override image digests for tests. Production code loads from image-digests.json. */
@@ -78,6 +78,12 @@ export function generateDockerfile(options: DockerfileOptions): string {
       lines.push(
         'ARG GIT_PAT',
         `RUN git clone --depth 1 https://x-access-token:\${GIT_PAT}@${stripProtocol(profile.repoUrl)} .`,
+      );
+    } else if (options.gitCredentials === 'entra-bearer') {
+      const origin = new URL(profile.repoUrl).origin;
+      lines.push(
+        'ARG GIT_ENTRA_TOKEN',
+        `RUN git -c http.${origin}/.extraheader="Authorization: Bearer \${GIT_ENTRA_TOKEN}" clone --depth 1 ${profile.repoUrl} .`,
       );
     } else {
       lines.push(`RUN git clone --depth 1 ${profile.repoUrl} .`);

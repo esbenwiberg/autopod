@@ -66,9 +66,6 @@ public struct ProfileResponse: Codable, Sendable {
   /// Override for the merge poller's interval, in seconds. Null = daemon default (60s).
   public var mergePollIntervalSec: Int?
   public var prProvider: String?
-  public var adoPat: String?
-  public var hasAdoPat: Bool?
-  public var adoPatExpiresAt: String?
   public var githubPat: String?
   public var hasGithubPat: Bool?
   public var githubPatExpiresAt: String?
@@ -156,9 +153,6 @@ public struct ProfileResponse: Codable, Sendable {
     case sastTimeout
     case mergePollIntervalSec
     case prProvider
-    case adoPat
-    case hasAdoPat
-    case adoPatExpiresAt
     case githubPat
     case hasGithubPat
     case githubPatExpiresAt
@@ -245,9 +239,6 @@ public struct ProfileResponse: Codable, Sendable {
     sastTimeout = try c.decodeIfPresent(Int.self, forKey: .sastTimeout)
     mergePollIntervalSec = try c.decodeIfPresent(Int.self, forKey: .mergePollIntervalSec)
     prProvider = try c.decodeIfPresent(String.self, forKey: .prProvider)
-    adoPat = try c.decodeIfPresent(String.self, forKey: .adoPat)
-    hasAdoPat = try c.decodeIfPresent(Bool.self, forKey: .hasAdoPat)
-    adoPatExpiresAt = try c.decodeIfPresent(String.self, forKey: .adoPatExpiresAt)
     githubPat = try c.decodeIfPresent(String.self, forKey: .githubPat)
     hasGithubPat = try c.decodeIfPresent(Bool.self, forKey: .hasGithubPat)
     githubPatExpiresAt = try c.decodeIfPresent(String.self, forKey: .githubPatExpiresAt)
@@ -293,8 +284,8 @@ public struct ProfileResponse: Codable, Sendable {
     providerFailoverResolution = nil
     testTimeout = 600; prProvider = "github"; privateRegistries = []
     validationSetupCommand = nil
-    hasAdoPat = false; hasGithubPat = false; hasRegistryPat = false
-    adoPatExpiresAt = nil; githubPatExpiresAt = nil; registryPatExpiresAt = nil
+    hasGithubPat = false; hasRegistryPat = false
+    githubPatExpiresAt = nil; registryPatExpiresAt = nil
     version = 1; createdAt = ""; updatedAt = ""
   }
 }

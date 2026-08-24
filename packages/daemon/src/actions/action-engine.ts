@@ -34,6 +34,7 @@ export interface ActionEngineDependencies {
   logger: Logger;
   getSecret: (ref: string) => string | undefined;
   getGitHubToken?: () => Promise<string>;
+  getAzureDevOpsToken?: () => Promise<string>;
   /**
    * Override for the SSRF guard used by the generic HTTP handler. Defaults to
    * `assertPublicUrl` (rejects private/loopback/metadata addresses). Tests
@@ -54,6 +55,7 @@ export function createActionEngine(deps: ActionEngineDependencies): ActionEngine
     logger,
     getSecret,
     getGitHubToken,
+    getAzureDevOpsToken,
     ssrfGuard,
     podRepo,
     profileStore,
@@ -61,7 +63,13 @@ export function createActionEngine(deps: ActionEngineDependencies): ActionEngine
   const log = logger.child({ component: 'action-engine' });
 
   // Create handler instances
-  const handlerConfig: HandlerConfig = { logger: log, getSecret, getGitHubToken, ssrfGuard };
+  const handlerConfig: HandlerConfig = {
+    logger: log,
+    getSecret,
+    getGitHubToken,
+    getAzureDevOpsToken,
+    ssrfGuard,
+  };
   const handlers: Record<string, ActionHandler> = {
     github: createGitHubHandler(handlerConfig),
     ado: createAdoHandler(handlerConfig),
@@ -69,11 +77,12 @@ export function createActionEngine(deps: ActionEngineDependencies): ActionEngine
     'azure-pim': createAzurePimHandler(handlerConfig),
     http: createGenericHttpHandler(handlerConfig),
   };
-  if (podRepo && profileStore) {
+  if (podRepo && profileStore && getAzureDevOpsToken) {
     handlers['test-pipeline'] = createTestPipelineHandler({
       logger: log,
       podRepo,
       profileStore,
+      getAzureDevOpsToken,
     });
   }
   if (podRepo && profileStore) {

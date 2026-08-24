@@ -7,7 +7,7 @@ import type { EventRepository } from '../pods/event-repository.js';
 import { computePodDiff, computePodUntrackedPreview } from '../pods/pod-diff-fetcher.js';
 import type { ContainerManagerFactory, PodManager } from '../pods/pod-manager.js';
 import type { ProviderAttemptRepository } from '../pods/provider-attempt-repository.js';
-import { type ProfileStore, selectGitPat } from '../profiles/index.js';
+import type { ProfileStore } from '../profiles/index.js';
 import { buildPodsitterEvidence, podsitterAttentionSignature } from './evidence-builder.js';
 import type { PodsitterRepository } from './podsitter-repository.js';
 import type { PodsitterCandidate, PodsitterEvidenceProvider } from './podsitter-service.js';
@@ -183,7 +183,6 @@ export function createDaemonPodsitterEvidenceProvider(deps: {
           repoUrl: profile.repoUrl,
           branch: pod.branch,
           baseBranch: defaultBranch,
-          pat: selectGitPat(profile),
           startCommitSha: pod.startCommitSha,
         });
         if (diff.trim()) source = 'worktree';

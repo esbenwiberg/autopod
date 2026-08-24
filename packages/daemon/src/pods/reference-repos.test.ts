@@ -81,7 +81,6 @@ function makeProfile(overrides: Partial<Profile>): Profile {
     name: 'duck',
     repoUrl: 'https://github.com/esbenwiberg/duck',
     githubPat: null,
-    adoPat: null,
     prProvider: null,
     ...overrides,
   } as Profile;
@@ -108,15 +107,14 @@ describe('resolveRefRepoPat', () => {
     );
   });
 
-  it('returns the ADO PAT when prProvider=ado', async () => {
+  it('leaves ADO auth to the worktree manager when prProvider=ado', async () => {
     const profile = makeProfile({
-      adoPat: 'ado_token',
       githubPat: 'should_not_be_used',
       prProvider: 'ado',
     });
     const store = { get: vi.fn().mockReturnValue(profile) };
     const repo = { ...repoBase, sourceProfile: 'duck' };
-    expect(await resolveRefRepoPat(repo, store)).toBe('ado_token');
+    expect(await resolveRefRepoPat(repo, store)).toBeUndefined();
   });
 
   it('warns and returns undefined when the source profile is missing', async () => {

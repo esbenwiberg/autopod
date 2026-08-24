@@ -2427,11 +2427,6 @@ public struct ProfileEditorView: View {
             .font(.caption)
             .foregroundStyle(.secondary)
         }
-        patRow("ADO PAT", value: $profile.adoPat, expiresAt: $profile.adoPatExpiresAt,
-               expiryStatus: profile.adoPatExpiryStatus, isSet: profile.hasAdoPat,
-               isInherited: inheritedFields.contains("adoPat"),
-               isExpiryInherited: inheritedFields.contains("adoPatExpiresAt"),
-               help: "Azure DevOps token — needed for ADO repos, PRs, and package feeds.")
         patRow("Registry PAT", value: $profile.registryPat, expiresAt: $profile.registryPatExpiresAt,
                expiryStatus: profile.registryPatExpiryStatus, isSet: profile.hasRegistryPat,
                isInherited: inheritedFields.contains("registryPat"),
@@ -3365,21 +3360,6 @@ public struct ProfileEditorView: View {
                 parent: editorPayload?.parent?.mergePollIntervalSec,
                 placeholder: "60")
         // MARK: Credentials
-        case "adoPat":
-            patCard(field,
-                value: Binding(
-                    get: { profile.adoPat ?? "" },
-                    set: { profile.adoPat = $0.isEmpty ? nil : $0 }
-                ),
-                isSet: profile.hasAdoPat)
-        case "adoPatExpiresAt":
-            dateOnlyCard(field,
-                value: Binding(
-                    get: { profile.adoPatExpiresAt ?? "" },
-                    set: { profile.adoPatExpiresAt = $0.isEmpty ? nil : $0 }
-                ),
-                parent: editorPayload?.parent?.adoPatExpiresAt ?? "",
-                status: profile.adoPatExpiryStatus)
         case "registryPat":
             patCard(field,
                 value: Binding(

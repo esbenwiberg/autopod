@@ -104,6 +104,63 @@ ALTER TABLE does_not_exist ADD COLUMN foo TEXT;`,
   });
 });
 
+describe('migration 141 — remove ADO profile PATs', () => {
+  it('drops profile columns and scrubs historical profile snapshots', () => {
+    const db = new Database(':memory:');
+    db.exec(`
+      CREATE TABLE profiles (name TEXT, ado_pat TEXT, ado_pat_expires_at TEXT);
+      CREATE TABLE pods (profile_snapshot TEXT);
+      CREATE TABLE provider_attempts (
+        pod_id TEXT, ordinal INTEGER, provider TEXT, provider_account_id TEXT,
+        runtime TEXT, model TEXT, profile_reference TEXT, profile_snapshot TEXT,
+        started_at TEXT, ended_at TEXT, handoff_reference TEXT, native_session_id TEXT,
+        input_tokens INTEGER, output_tokens INTEGER, cost_usd REAL,
+        pre_submit_review_runs INTEGER
+      );
+      CREATE TRIGGER provider_attempts_append_close_only
+      BEFORE UPDATE ON provider_attempts BEGIN SELECT 1; END;
+    `);
+    const snapshot = JSON.stringify({
+      name: 'legacy',
+      adoPat: 'secret',
+      adoPatExpiresAt: '2026-12-01',
+      hasAdoPat: true,
+      registryPat: 'keep-registry-field',
+    });
+    db.prepare('INSERT INTO profiles VALUES (?, ?, ?)').run('legacy', 'secret', '2026-12-01');
+    db.prepare('INSERT INTO pods VALUES (?)').run(snapshot);
+    db.prepare(
+      `INSERT INTO provider_attempts VALUES (
+        'pod-1', 1, 'anthropic', NULL, 'claude', 'model', 'legacy', ?,
+        '2026-01-01', NULL, NULL, NULL, 0, 0, 0, 0
+      )`,
+    ).run(snapshot);
+
+    const sql = fs.readFileSync(path.join(MIGRATIONS_DIR, '141_remove_ado_pat.sql'), 'utf8');
+    db.exec(sql);
+
+    expect(hasColumn(db, 'profiles', 'ado_pat')).toBe(false);
+    expect(hasColumn(db, 'profiles', 'ado_pat_expires_at')).toBe(false);
+    for (const table of ['pods', 'provider_attempts']) {
+      const parsed = JSON.parse(
+        (
+          db.prepare(`SELECT profile_snapshot FROM ${table}`).get() as {
+            profile_snapshot: string;
+          }
+        ).profile_snapshot,
+      ) as Record<string, unknown>;
+      expect(parsed).not.toHaveProperty('adoPat');
+      expect(parsed).not.toHaveProperty('adoPatExpiresAt');
+      expect(parsed).not.toHaveProperty('hasAdoPat');
+      expect(parsed.registryPat).toBe('keep-registry-field');
+    }
+    expect(() => db.prepare("UPDATE provider_attempts SET profile_snapshot = '{}'").run()).toThrow(
+      'provider attempts are append/close-only',
+    );
+    db.close();
+  });
+});
+
 // ── Migrations 092-095 — Safety / Guardrails foundation ──────────────────────
 
 describe('runMigrations — migrations 092-095 (safety foundation)', () => {

@@ -36,7 +36,8 @@ export function deriveReferenceRepos(
 
 /**
  * Resolve the explicit credential for cloning a profile-selected reference
- * repo. GitHub uses the daemon identity; ADO continues to use the profile PAT.
+ * repo. GitHub uses the daemon identity; ADO authentication is resolved by the
+ * worktree manager from the daemon Azure CLI/managed identity.
  * Ad-hoc URLs remain unauthenticated and may use public/SSH access.
  */
 export async function resolveRefRepoPat(
@@ -54,7 +55,7 @@ export async function resolveRefRepoPat(
     );
     return undefined;
   }
-  if (profile.prProvider === 'ado') return profile.adoPat ?? undefined;
+  if (profile.prProvider === 'ado') return undefined;
   if (!githubAuth) {
     throw new DaemonGitHubAuthError(
       'Daemon GitHub authentication is not configured',

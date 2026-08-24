@@ -159,7 +159,6 @@ export function registerProfileCommands(program: Command, getClient: () => Autop
           console.log(`${chalk.bold('Extends:')}    ${data.extends}`);
         }
         const patExpiries = [
-          hasAdoPat(data) ? `ADO ${data.adoPatExpiresAt ?? '(no expiry)'}` : null,
           hasRegistryPat(data) ? `Registry ${data.registryPatExpiresAt ?? '(no expiry)'}` : null,
         ].filter(Boolean);
         if (patExpiries.length > 0) {
@@ -352,7 +351,6 @@ export function registerProfileCommands(program: Command, getClient: () => Autop
         mcpServers: [],
         claudeMdSections: [],
         extends: null,
-        adoPatExpiresAt: null,
         registryPatExpiresAt: null,
         providerAccountId: null,
         providerFailover: null,
@@ -398,11 +396,9 @@ export function registerProfileCommands(program: Command, getClient: () => Autop
         warmImageTag: _w,
         warmImageBuiltAt: _wb,
         hasGithubPat: _hgp,
-        hasAdoPat: _hap,
         hasRegistryPat: _hrp,
         githubPat: _gp,
         githubPatExpiresAt: _gpe,
-        adoPat: _ap,
         registryPat: _rp,
         ...editable
       } = existing;
@@ -846,11 +842,7 @@ export function registerProfileCommands(program: Command, getClient: () => Autop
 }
 
 type ProfileWithOptionalPresence = Profile &
-  Partial<Pick<PublicProfile, 'hasGithubPat' | 'hasAdoPat' | 'hasRegistryPat'>>;
-
-function hasAdoPat(profile: ProfileWithOptionalPresence): boolean {
-  return profile.hasAdoPat ?? profile.adoPat !== null;
-}
+  Partial<Pick<PublicProfile, 'hasGithubPat' | 'hasRegistryPat'>>;
 
 function hasRegistryPat(profile: ProfileWithOptionalPresence): boolean {
   return profile.hasRegistryPat ?? profile.registryPat !== null;
@@ -860,14 +852,13 @@ function prepareProfileEditUpdates(edited: Record<string, unknown>): Record<stri
   const {
     name: _n,
     hasGithubPat: _hgp,
-    hasAdoPat: _hap,
     hasRegistryPat: _hrp,
     githubPat: _gp,
     githubPatExpiresAt: _gpe,
     ...updates
   } = edited;
 
-  for (const field of ['adoPat', 'registryPat'] as const) {
+  for (const field of ['registryPat'] as const) {
     if (typeof updates[field] !== 'string' || updates[field].length === 0) {
       delete updates[field];
     }

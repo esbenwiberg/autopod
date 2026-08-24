@@ -4,10 +4,10 @@ import { fetchIssueProvider, issueProviderHttpError } from './issue-fetch.js';
 
 const ADO_API_VERSION = '7.1';
 
-interface AdoIssueClientConfig {
+export interface AdoIssueClientConfig {
   orgUrl: string;
   project: string;
-  pat: string;
+  getToken: () => Promise<string>;
 }
 
 interface WiqlResponse {
@@ -30,18 +30,17 @@ interface WorkItem {
 export class AdoIssueClient implements IssueClient {
   private readonly orgUrl: string;
   private readonly project: string;
-  private readonly pat: string;
+  private readonly getToken: () => Promise<string>;
 
   constructor(config: AdoIssueClientConfig) {
     this.orgUrl = config.orgUrl;
     this.project = config.project;
-    this.pat = config.pat;
+    this.getToken = config.getToken;
   }
 
-  private headers(contentType = 'application/json'): Record<string, string> {
-    const auth = Buffer.from(`:${this.pat}`).toString('base64');
+  private async headers(contentType = 'application/json'): Promise<Record<string, string>> {
     return {
-      Authorization: `Basic ${auth}`,
+      Authorization: `Bearer ${await this.getToken()}`,
       'Content-Type': contentType,
     };
   }
@@ -55,7 +54,7 @@ export class AdoIssueClient implements IssueClient {
       wiqlUrl,
       {
         method: 'POST',
-        headers: this.headers(),
+        headers: await this.headers(),
         body: JSON.stringify({ query }),
       },
       { provider: 'ado', operation: 'WIQL' },
@@ -82,7 +81,7 @@ export class AdoIssueClient implements IssueClient {
     const detailResponse = await fetchIssueProvider(
       detailUrl,
       {
-        headers: this.headers(),
+        headers: await this.headers(),
       },
       { provider: 'ado', operation: 'work item detail fetch' },
     );
@@ -159,7 +158,7 @@ export class AdoIssueClient implements IssueClient {
       url,
       {
         method: 'POST',
-        headers: this.headers(),
+        headers: await this.headers(),
         body: JSON.stringify({ text: body }),
       },
       { provider: 'ado', operation: 'add comment' },
@@ -178,7 +177,7 @@ export class AdoIssueClient implements IssueClient {
     const url = `${this.orgUrl}/${this.project}/_apis/wit/workitems/${issueId}?fields=System.Tags&api-version=${ADO_API_VERSION}`;
     const response = await fetchIssueProvider(
       url,
-      { headers: this.headers() },
+      { headers: await this.headers() },
       { provider: 'ado', operation: 'get work item tags' },
     );
     if (!response.ok) {
@@ -201,7 +200,7 @@ export class AdoIssueClient implements IssueClient {
       url,
       {
         method: 'PATCH',
-        headers: this.headers('application/json-patch+json'),
+        headers: await this.headers('application/json-patch+json'),
         body: JSON.stringify([
           {
             op: 'replace',

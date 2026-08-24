@@ -39,7 +39,6 @@ function makeProfile(overrides?: Partial<Profile>): Profile {
     providerCredentials: null,
     testCommand: null,
     prProvider: 'github' as const,
-    adoPat: null,
     privateRegistries: [],
     registryPat: null,
     createdAt: '2026-01-01T00:00:00Z',

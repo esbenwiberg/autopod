@@ -38,6 +38,7 @@ import type { PodsitterRepository } from '../podsitter/podsitter-repository.js';
 import type { PodsitterService } from '../podsitter/podsitter-service.js';
 import type { ProfileStore } from '../profiles/index.js';
 import type { ProviderAccountStore } from '../provider-accounts/index.js';
+import type { AzureDevOpsAuth } from '../providers/azure-devops-auth.js';
 import type { SafetyEventsRepository } from '../safety/safety-events-repository.js';
 import type { ScheduledJobManager } from '../scheduled-jobs/scheduled-job-manager.js';
 import { errorHandler } from './error-handler.js';
@@ -95,6 +96,7 @@ export interface ServerDependencies {
   maxConcurrency?: number;
   imageBuilder?: ImageBuilder;
   githubAuth?: DaemonGitHubAuth;
+  azureDevOpsAuth?: AzureDevOpsAuth;
   actionRegistry?: ActionRegistry;
   actionAuditRepo?: ActionAuditRepository;
   sessionTokenIssuer?: PodTokenIssuer;
@@ -198,6 +200,7 @@ export async function createServer(deps: ServerDependencies): Promise<FastifyIns
     deps.imageBuilder,
     deps.providerAccountStore,
     deps.githubAuth,
+    deps.azureDevOpsAuth,
   );
   if (deps.providerAccountStore) {
     providerAccountRoutes(app, deps.providerAccountStore, deps.profileStore);

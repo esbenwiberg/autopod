@@ -2,6 +2,7 @@ import type { Profile } from '@autopod/shared';
 import type { Logger } from 'pino';
 import type { DaemonGitHubAuth } from '../github/daemon-github-auth.js';
 import type { ProfileStore } from '../profiles/index.js';
+import type { AzureDevOpsAuth } from '../providers/azure-devops-auth.js';
 import type { ImageBuildResult, ImageBuilder } from './image-builder.js';
 
 export const DEFAULT_WARM_IMAGE_MAINTENANCE_INTERVAL_MS = 24 * 60 * 60 * 1000;
@@ -33,6 +34,7 @@ export interface WarmImageMaintenanceDeps {
   runOnStart?: boolean;
   scope?: WarmImageMaintenanceScope;
   githubAuth?: DaemonGitHubAuth;
+  azureDevOpsAuth?: AzureDevOpsAuth;
 }
 
 type WarmImageBuildOptions = Parameters<ImageBuilder['buildWarmImage']>[1];
@@ -68,14 +70,16 @@ function skipReason(
 async function warmImageBuildOptions(
   profile: Profile,
   githubAuth?: DaemonGitHubAuth,
+  azureDevOpsAuth?: AzureDevOpsAuth,
 ): Promise<WarmImageBuildOptions> {
   const options: NonNullable<WarmImageBuildOptions> = {};
   const gitPat =
-    profile.prProvider === 'ado'
-      ? (profile.adoPat ?? undefined)
-      : (await githubAuth?.resolveCredential())?.token;
+    profile.prProvider === 'github' ? (await githubAuth?.resolveCredential())?.token : undefined;
+  const gitEntraToken =
+    profile.prProvider === 'ado' ? await azureDevOpsAuth?.getToken() : undefined;
 
   if (gitPat) options.gitPat = gitPat;
+  if (gitEntraToken) options.gitEntraToken = gitEntraToken;
   if (profile.registryPat) options.registryPat = profile.registryPat;
   return options;
 }
@@ -121,7 +125,7 @@ export function createWarmImageMaintenanceJob(
         try {
           const build = await deps.imageBuilder.buildWarmImage(
             profile,
-            await warmImageBuildOptions(profile, deps.githubAuth),
+            await warmImageBuildOptions(profile, deps.githubAuth, deps.azureDevOpsAuth),
           );
           result.built++;
           logBuildSuccess(deps.logger, profile, build);

@@ -77,7 +77,6 @@ function createMockProfileStore(db: Database.Database) {
           repoUrl: row.repo_url as string,
           prProvider: 'github' as const,
           githubPat: 'ghp_test',
-          adoPat: null,
           issueWatcherEnabled: !!(row.issue_watcher_enabled as number),
           issueWatcherLabelPrefix: (row.issue_watcher_label_prefix as string) ?? 'autopod',
         } as unknown as Profile;
@@ -95,7 +94,6 @@ function createMockProfileStore(db: Database.Database) {
         repoUrl: row.repo_url as string,
         prProvider: 'github' as const,
         githubPat: 'ghp_test',
-        adoPat: null,
         issueWatcherEnabled: !!(row.issue_watcher_enabled as number),
         issueWatcherLabelPrefix: (row.issue_watcher_label_prefix as string) ?? 'autopod',
       } as unknown as Profile;
@@ -545,7 +543,6 @@ human_review: []
     mockProfileStore.setProfile('test-profile', {
       prProvider: 'github',
       githubPat: null,
-      adoPat: null,
       issueWatcherEnabled: true,
       issueWatcherLabelPrefix: 'autopod',
       extends: 'base-profile',

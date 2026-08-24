@@ -74,11 +74,9 @@ public enum ProfileMapper {
       issueWatcherEnabled: response.issueWatcherEnabled ?? false,
       issueWatcherLabelPrefix: response.issueWatcherLabelPrefix ?? "autopod",
       hasGithubPat: false,
-      hasAdoPat: response.hasAdoPat ?? (response.adoPat != nil),
       hasRegistryPat: response.hasRegistryPat ?? (response.registryPat != nil),
       openrouterApiKey: response.openrouterApiKey,
       githubPatExpiresAt: nil,
-      adoPatExpiresAt: response.adoPatExpiresAt,
       registryPatExpiresAt: response.registryPatExpiresAt,
       networkEnabled: response.networkPolicy?.enabled ?? false,
       networkMode: networkMode,
@@ -302,10 +300,8 @@ public enum ProfileMapper {
     if let v = profile.mergePollIntervalSec { d["mergePollIntervalSec"] = v }
     else { d["mergePollIntervalSec"] = NSNull() }
     if let v = profile.containerMemoryGb { d["containerMemoryGb"] = v }
-    if let v = profile.adoPat { d["adoPat"] = v }
     if let v = profile.openrouterApiKey { d["openrouterApiKey"] = v }
     if let v = profile.registryPat { d["registryPat"] = v }
-    d["adoPatExpiresAt"] = profile.adoPatExpiresAt ?? NSNull()
     d["registryPatExpiresAt"] = profile.registryPatExpiresAt ?? NSNull()
     if let v = profile.extendsProfile { d["extends"] = v }
     if let v = profile.workerProfile { d["workerProfile"] = v }

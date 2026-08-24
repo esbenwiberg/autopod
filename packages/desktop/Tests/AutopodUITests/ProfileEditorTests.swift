@@ -16,15 +16,15 @@ private final class EffortBox: @unchecked Sendable {
     }
 }
 
-@Test func profileEditorUsesDaemonGitHubAuthAndKeepsAdoPatManagement() {
+@Test func profileEditorKeepsGitCredentialsOutOfProfileOverrides() {
     let credentialKeys = ProfileOverrideCatalog.all
         .filter { $0.section == .credentials }
         .map(\.key)
 
     #expect(!credentialKeys.contains("githubPat"))
     #expect(!credentialKeys.contains("githubPatExpiresAt"))
-    #expect(credentialKeys.contains("adoPat"))
-    #expect(credentialKeys.contains("adoPatExpiresAt"))
+    #expect(!credentialKeys.contains("adoPat"))
+    #expect(!credentialKeys.contains("adoPatExpiresAt"))
 }
 
 @Test func daemonGitHubAuthStatusRepresentsReadyAndUnavailableStates() throws {

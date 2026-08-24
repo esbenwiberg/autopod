@@ -72,6 +72,7 @@ import { createPodsitterRepository } from './podsitter/podsitter-repository.js';
 import { createPodsitterService } from './podsitter/podsitter-service.js';
 import { createProfileStore } from './profiles/index.js';
 import { createProviderAccountStore } from './provider-accounts/index.js';
+import { createAzureDevOpsAuth } from './providers/azure-devops-auth.js';
 import {
   ClaudeRuntime,
   CodexRuntime,
@@ -182,6 +183,7 @@ const logger = IS_DEV
   ? pino(PINO_BASE_OPTIONS, (await import('pino-pretty')).build({ colorize: true }))
   : pino(PINO_BASE_OPTIONS);
 const githubAuth = new GhCliDaemonGitHubAuth();
+const azureDevOpsAuth = createAzureDevOpsAuth(logger);
 
 // Node's `fetch` (undici) calls `performance.mark()` per request for the
 // Resource Timing API. Over a long-running daemon (PR polling, issue watcher,
@@ -368,7 +370,12 @@ function parseWarmImageMaintenanceScope(value: string | undefined): WarmImageMai
 
 const authModule: AuthModule = createConfiguredAuthModule();
 
-const worktreeManager = new LocalWorktreeManager({ logger, llmDeps, githubAuth });
+const worktreeManager = new LocalWorktreeManager({
+  logger,
+  llmDeps,
+  githubAuth,
+  azureDevOpsAuth,
+});
 
 const MOCK_DOCKER = process.env.AUTOPOD_MOCK_DOCKER === 'true';
 
@@ -516,6 +523,7 @@ if (warmImageMaintenanceEnabled) {
       intervalMs,
       scope,
       githubAuth,
+      azureDevOpsAuth,
     });
     logger.info({ intervalMs, scope }, 'Warm-image maintenance configured');
   }
@@ -683,13 +691,6 @@ function prManagerFactory(
   profile: import('@autopod/shared').Profile,
 ): import('./interfaces/pr-manager.js').PrManager | null {
   if (profile.prProvider === 'ado') {
-    if (!profile.adoPat) {
-      logger.warn(
-        { profileName: profile.name },
-        'ADO pr provider configured but adoPat is missing — skipping PR creation',
-      );
-      return null;
-    }
     if (!profile.repoUrl) {
       logger.warn(
         { profileName: profile.name },
@@ -703,7 +704,7 @@ function prManagerFactory(
         orgUrl,
         project,
         repoName,
-        pat: profile.adoPat,
+        getToken: () => azureDevOpsAuth.getToken(),
         logger,
         screenshotStore,
         llmDeps,
@@ -767,6 +768,7 @@ podManager = createPodManager({
   progressEventRepo,
   profileStore,
   githubAuth,
+  azureDevOpsAuth,
   providerAccountStore,
   eventBus,
   eventRepo,
@@ -806,7 +808,7 @@ podManager = createPodManager({
   logger,
 });
 
-function makeActionEngine(profile: import('@autopod/shared').Profile) {
+function makeActionEngine(_profile: import('@autopod/shared').Profile) {
   return createActionEngine({
     registry: actionRegistry,
     auditRepo: actionAuditRepo,
@@ -814,13 +816,9 @@ function makeActionEngine(profile: import('@autopod/shared').Profile) {
     logger,
     podRepo,
     profileStore,
-    getSecret: (ref: string) => {
-      const envVal = process.env[ref];
-      if (envVal) return envVal;
-      if (ref === 'ado-pat' || ref === 'ADO_PAT') return profile.adoPat ?? undefined;
-      return undefined;
-    },
+    getSecret: (ref: string) => process.env[ref],
     getGitHubToken: async () => (await githubAuth.resolveCredential()).token,
+    getAzureDevOpsToken: () => azureDevOpsAuth.getToken(),
   });
 }
 
@@ -946,6 +944,7 @@ const issueWatcherService = createIssueWatcherService({
   logger,
   pollIntervalMs: ISSUE_WATCHER_POLL_INTERVAL,
   githubAuth,
+  azureDevOpsAuth,
 });
 issueWatcherService.start();
 
@@ -1032,6 +1031,7 @@ const app = await createServer({
   maxConcurrency: MAX_CONCURRENCY,
   imageBuilder,
   githubAuth,
+  azureDevOpsAuth,
   actionRegistry,
   actionAuditRepo,
   sessionTokenIssuer,

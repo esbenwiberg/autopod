@@ -401,18 +401,6 @@ public enum ProfileOverrideCatalog {
 
         // MARK: Credentials
         .init(
-            key: "adoPat",
-            label: "ADO PAT",
-            section: .credentials,
-            help: "Personal access token for Azure DevOps."
-        ),
-        .init(
-            key: "adoPatExpiresAt",
-            label: "ADO PAT Expiry",
-            section: .credentials,
-            help: "Date the ADO PAT expires, formatted as YYYY-MM-DD."
-        ),
-        .init(
             key: "registryPat",
             label: "Registry PAT",
             section: .credentials,

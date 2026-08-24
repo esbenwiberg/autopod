@@ -743,7 +743,7 @@ prProvider: github
 
 # Azure DevOps
 prProvider: ado
-adoPat: <your-ado-personal-access-token>  # encrypted at rest
+# Git and REST auth use the daemon host's Azure CLI / managed identity.
 ```
 
 ADO supports both URL formats:

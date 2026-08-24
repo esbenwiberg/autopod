@@ -1357,6 +1357,8 @@ export interface PodManagerDependencies {
   profileStore: ProfileStore;
   /** Canonical credential source for every GitHub operation. Legacy profile PATs are ignored. */
   githubAuth?: DaemonGitHubAuth;
+  /** Canonical credential source for every Azure DevOps operation. */
+  azureDevOpsAuth?: import('../providers/azure-devops-auth.js').AzureDevOpsAuth;
   providerAccountStore?: ProviderAccountStore;
   /** Validated catalog override for deterministic manifest-only conformance tests. */
   providerCatalog?: PublicProviderCatalog;
@@ -2751,7 +2753,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
   }
 
   async function resolveGitCredential(profile: Profile): Promise<string | undefined> {
-    if (profile.prProvider === 'ado') return profile.adoPat ?? undefined;
+    if (profile.prProvider === 'ado') return deps.azureDevOpsAuth?.getToken();
     if (!profile.repoUrl) {
       throw new Error(`GitHub profile "${profile.name}" does not have a repository URL`);
     }
@@ -3516,14 +3518,12 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
     if (!branches || branches.length === 0) return;
     const profile = profileStore.get(current.profileName);
     const cfg = profile.testPipeline;
-    if (!cfg || !cfg.enabled || !profile.adoPat) {
+    if (!cfg || !cfg.enabled || !deps.azureDevOpsAuth) {
       podRepo.update(podId, { testRunBranches: null });
       return;
     }
-    const authedUrl = new URL(cfg.testRepo);
-    authedUrl.username = 'x-access-token';
-    authedUrl.password = profile.adoPat;
-    const authedUrlStr = authedUrl.toString();
+    const token = await deps.azureDevOpsAuth.getToken();
+    const origin = new URL(cfg.testRepo).origin;
     if (!current.worktreePath) {
       // No worktree to run git from. Can't delete; leave a daily sweep to reap.
       logger.warn({ podId, branches }, 'Cannot cleanup test-run branches — pod has no worktree');
@@ -3535,8 +3535,17 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         try {
           await execFileAsync(
             'git',
-            ['-C', current.worktreePath as string, 'push', authedUrlStr, '--delete', branch],
-            { timeout: 30_000 },
+            ['-C', current.worktreePath as string, 'push', cfg.testRepo, '--delete', branch],
+            {
+              timeout: 30_000,
+              env: {
+                ...process.env,
+                GIT_TERMINAL_PROMPT: '0',
+                GIT_CONFIG_COUNT: '1',
+                GIT_CONFIG_KEY_0: `http.${origin}/.extraheader`,
+                GIT_CONFIG_VALUE_0: `Authorization: Bearer ${token}`,
+              },
+            },
           );
         } catch (err) {
           logger.warn({ err, podId, branch }, 'Failed to delete test-run branch');
@@ -5917,12 +5926,14 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
     const profile = profileStore.get(pod.profileName);
 
     const pat =
-      service === 'github' ? (await deps.githubAuth?.resolveCredential())?.token : profile.adoPat;
+      service === 'github'
+        ? (await deps.githubAuth?.resolveCredential())?.token
+        : await deps.azureDevOpsAuth?.getToken();
     if (!pat) {
       throw new AutopodError(
         service === 'github'
           ? `Daemon GitHub CLI authentication is unavailable for profile '${pod.profileName}'.`
-          : `No ADO PAT configured in profile '${pod.profileName}'. Add one via ap profile update.`,
+          : 'Daemon Azure DevOps authentication is unavailable. Sign the daemon host into Azure CLI or configure managed identity.',
         'MISSING_CREDENTIAL',
         400,
       );
@@ -6527,7 +6538,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
    */
   /**
    * Park a pod in `awaiting_input` after a daemon-side git push failed on
-   * credentials. The operator updates the profile PAT and replies/nudges; the
+   * credentials. The operator repairs the daemon identity and replies/nudges; the
    * resume handler picks up the escalation, retries the push from
    * `validating`, and continues to PR creation — no agent re-run, no lost
    * validation work. Returns true so the call site can `return` cleanly.
@@ -6544,7 +6555,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         reason:
           err.service === 'github'
             ? `git ${err.op} was rejected by GitHub. Authenticate the daemon service account with gh auth login and ensure it has write access to the target repo, then resume the pod.`
-            : `git ${err.op} was rejected by ADO. Update the profile's adoPat with a token that has write access to the target repo, then resume the pod.`,
+            : `git ${err.op} was rejected by ADO. Sign the daemon host into the correct Azure CLI identity, verify that identity has repository access, then resume the pod.`,
         source: 'host_push',
       },
       response: null,
@@ -6557,7 +6568,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
     transition(pod, 'awaiting_input');
     emitActivityStatus(
       podId,
-      `Push blocked — ${err.service} credentials missing or unauthorized. Update PAT and resume.`,
+      `Push blocked — ${err.service} credentials missing or unauthorized. Repair daemon authentication and resume.`,
     );
     logger.warn(
       { podId, service: err.service, op: err.op, escalationId: escalation.id },
@@ -7971,10 +7982,8 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         const template = profile.template ?? 'node22';
         const isDotnet = template.startsWith('dotnet');
 
-        // Resolve registry PAT early — needed for both container env vars and config files.
-        // Fall back to adoPat when registryPat isn't set — they're usually the same
-        // PAT for ADO-hosted feeds, and requiring both is a footgun.
-        const effectiveRegistryPat = profile.registryPat ?? profile.adoPat ?? null;
+        // Registry authentication is independent from Azure DevOps Git/REST auth.
+        const effectiveRegistryPat = profile.registryPat ?? null;
 
         // Resolve sidecar specs up front so their env vars (e.g. Dagger's
         // _EXPERIMENTAL_DAGGER_RUNNER_HOST) can be baked into the pod container
@@ -9780,7 +9789,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
                 reason:
                   err.service === 'github'
                     ? 'The daemon could not fetch the required remote branch. Authenticate the daemon GitHub account with gh auth login, then resume this pod.'
-                    : `The daemon could not fetch the required remote branch. Update profile '${current.profileName}' with an ADO PAT that can read the repository, then resume this pod.`,
+                    : 'The daemon could not fetch the required remote branch. Repair the daemon Azure CLI/managed identity access to this Azure DevOps repository, then resume this pod.',
                 source: 'host_fetch',
               },
               response: null,
@@ -10774,7 +10783,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
             throw new AutopodError(
               payload.service === 'github'
                 ? 'Daemon GitHub authentication is still unavailable. Run gh auth login as the daemon service account and try again.'
-                : `Profile '${pod.profileName}' still has no ADO PAT with repository read access.`,
+                : 'Daemon Azure DevOps authentication is still unavailable. Repair the daemon Azure CLI/managed identity and try again.',
               'MISSING_CREDENTIAL',
               400,
             );
@@ -10795,8 +10804,8 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         }
 
         // Daemon-side push failure: skip container injection (no agent waiting)
-        // and retry the post-validation push from the host with the freshly
-        // updated profile PAT.
+        // and retry the post-validation push from the host with the repaired
+        // daemon identity.
         if (payload.source === 'host_push') {
           const profile = profileStore.get(pod.profileName);
           const pat = await resolveGitCredential(profile);
@@ -10804,7 +10813,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
             throw new AutopodError(
               payload.service === 'github'
                 ? 'Daemon GitHub authentication is still unavailable. Run gh auth login as the daemon service account and try again.'
-                : `Profile '${pod.profileName}' still has no ADO PAT. Add adoPat to the profile (must have write access to the target repo) and try again.`,
+                : 'Daemon Azure DevOps authentication is still unavailable. Repair the daemon Azure CLI/managed identity and try again.',
               'MISSING_CREDENTIAL',
               400,
             );
@@ -10822,7 +10831,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
             respondedAt: new Date().toISOString(),
             respondedBy: legacyRespondedBy(actor),
             actor,
-            response: 'pat_updated',
+            response: 'daemon_auth_repaired',
           });
           // awaiting_input → validating: park-then-retry without re-running the
           // agent. The validation result we already passed is still authoritative.
@@ -12699,7 +12708,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         const validationExecEnv = {
           ...(buildValidationExecEnv(
             profile.privateRegistries,
-            profile.registryPat ?? profile.adoPat ?? null,
+            profile.registryPat ?? null,
             profile.buildEnv,
           ) ?? {}),
           ...buildValidationContextEnv({
@@ -13922,7 +13931,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         const revalidationExecEnv = {
           ...(buildValidationExecEnv(
             profile.privateRegistries,
-            profile.registryPat ?? profile.adoPat ?? null,
+            profile.registryPat ?? null,
             profile.buildEnv,
           ) ?? {}),
           ...buildValidationContextEnv({

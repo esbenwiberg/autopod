@@ -128,6 +128,7 @@ describe('LocalWorktreeManager', () => {
       worktreeDir,
       logger,
       githubAuth: fakeGitHubAuth(),
+      azureDevOpsAuth: { getToken: async () => 'daemon-entra-token' },
     });
   });
 
@@ -1396,7 +1397,6 @@ describe('LocalWorktreeManager', () => {
       const result = await manager.ensureRemoteBranch({
         worktreePath: '/tmp/worktree/sess',
         branch: 'feature/base',
-        pat: 'ado-pat',
       });
 
       expect(result).toEqual({ branch: 'feature/base', created: false });
@@ -1432,7 +1432,6 @@ describe('LocalWorktreeManager', () => {
         worktreePath: '/tmp/worktree/sess',
         branch: 'feature/base',
         sourceRef: 'refs/heads/feature/base',
-        pat: 'ado-pat',
       });
 
       const pushCall = calls.find((args) => args[0] === 'push');
@@ -1901,6 +1900,17 @@ describe('LocalWorktreeManager', () => {
     });
 
     it('keeps concurrent ADO credentials scoped to their own git invocations', async () => {
+      const getToken = vi
+        .fn<() => Promise<string>>()
+        .mockResolvedValueOnce('entra-token-one')
+        .mockResolvedValueOnce('entra-token-two');
+      manager = new LocalWorktreeManager({
+        cacheDir,
+        worktreeDir,
+        logger,
+        githubAuth: fakeGitHubAuth(),
+        azureDevOpsAuth: { getToken },
+      });
       const authorizationHeaders: string[] = [];
       execFileMock.mockImplementation(
         (_file: string, args: string[], arg3: unknown, arg4?: unknown) => {
@@ -1923,22 +1933,17 @@ describe('LocalWorktreeManager', () => {
           repoUrl: 'https://dev.azure.com/org/project/_git/repo',
           branch: 'feat/one',
           baseBranch: 'main',
-          pat: 'ado-token-one',
         }),
         manager.create({
           repoUrl: 'https://dev.azure.com/org/project/_git/repo',
           branch: 'feat/two',
           baseBranch: 'main',
-          pat: 'ado-token-two',
         }),
       ]);
 
-      const decodedCredentials = authorizationHeaders.map((header) =>
-        Buffer.from(header.replace('Authorization: Basic ', ''), 'base64').toString('utf8'),
-      );
-      expect(decodedCredentials).toEqual([
-        'x-access-token:ado-token-one',
-        'x-access-token:ado-token-two',
+      expect(authorizationHeaders).toEqual([
+        'Authorization: Bearer entra-token-one',
+        'Authorization: Bearer entra-token-two',
       ]);
     });
 
@@ -2256,7 +2261,7 @@ describe('LocalWorktreeManager', () => {
       ).rejects.toThrow('Required start branch "pi/gone" does not exist on the remote');
     });
 
-    it('does not retain a legacy GitHub profile PAT in the ADO credential cache', async () => {
+    it('does not retain a legacy profile PAT in memory', async () => {
       execFileMock.mockImplementation(
         (_file: string, args: string[], arg3: unknown, arg4?: unknown) => {
           const cb = resolveCallback(arg3, arg4);
@@ -2277,11 +2282,7 @@ describe('LocalWorktreeManager', () => {
         pat: 'cached-pat',
       });
 
-      const patCache = (manager as unknown as { patCache: Map<string, string> }).patCache as Map<
-        string,
-        string
-      >;
-      expect([...patCache.values()]).not.toContain('cached-pat');
+      expect('patCache' in manager).toBe(false);
     });
 
     it('returns the resolved HEAD SHA so callers can persist startCommitSha before container start', async () => {

@@ -159,8 +159,6 @@ interface TestProfileOverrides {
   branchPrefix?: string;
   githubPat?: string;
   githubPatExpiresAt?: string;
-  adoPat?: string;
-  adoPatExpiresAt?: string;
   prProvider?: 'github' | 'ado';
   defaultModel?: string;
   defaultRuntime?: RuntimeType;
@@ -183,7 +181,7 @@ function insertTestProfile(db: Database.Database, overrides: TestProfileOverride
       default_model, default_runtime, escalation_config,
       validation_setup_command,
       private_registries, registry_pat, registry_pat_expires_at, branch_prefix,
-      pr_provider, github_pat, github_pat_expires_at, ado_pat, ado_pat_expires_at,
+      pr_provider, github_pat, github_pat_expires_at,
       model_provider
       , reasoning_effort
     ) VALUES (
@@ -192,7 +190,7 @@ function insertTestProfile(db: Database.Database, overrides: TestProfileOverride
       @defaultModel, @defaultRuntime, @escalationConfig,
       @validationSetupCommand,
       @privateRegistries, @registryPat, @registryPatExpiresAt, @branchPrefix,
-      @prProvider, @githubPat, @githubPatExpiresAt, @adoPat, @adoPatExpiresAt,
+      @prProvider, @githubPat, @githubPatExpiresAt,
       @modelProvider
       , @reasoningEffort
     )
@@ -224,8 +222,6 @@ function insertTestProfile(db: Database.Database, overrides: TestProfileOverride
     prProvider: opts.prProvider ?? 'github',
     githubPat: opts.githubPat ?? null,
     githubPatExpiresAt: opts.githubPatExpiresAt ?? null,
-    adoPat: opts.adoPat ?? null,
-    adoPatExpiresAt: opts.adoPatExpiresAt ?? null,
     modelProvider: opts.modelProvider ?? 'anthropic',
     reasoningEffort: opts.reasoningEffort ?? 'auto',
   });
@@ -823,8 +819,6 @@ function createTestContext(
         validationSetupCommand: (row.validation_setup_command as string | null) ?? null,
         testCommand: (row.test_command as string) ?? null,
         prProvider: (row.pr_provider as 'github' | 'ado') ?? 'github',
-        adoPat: (row.ado_pat as string) ?? null,
-        adoPatExpiresAt: (row.ado_pat_expires_at as string) ?? null,
         githubPat: (row.github_pat as string) ?? null,
         githubPatExpiresAt: (row.github_pat_expires_at as string) ?? null,
         skills: JSON.parse((row.skills as string) ?? '[]'),
@@ -910,6 +904,7 @@ function createTestContext(
       })),
       getStatus: vi.fn(async () => ({ available: true, login: 'autopod-dev', setup: 'setup' })),
     },
+    azureDevOpsAuth: { getToken: vi.fn(async () => 'daemon-ado-token') },
     eventBus,
     containerManagerFactory: { get: vi.fn(() => containerManager) },
     worktreeManager,
@@ -3638,17 +3633,15 @@ describe('PodManager', () => {
       expect(pod.status).toBe('queued');
     });
 
-    it('blocks creation when registry auth falls back to an expired ADO PAT', () => {
+    it('does not fall back from registry auth to Azure DevOps credentials', () => {
       const ctx = createTestContext(undefined, {
         privateRegistries: JSON.stringify([{ type: 'npm', url: 'https://registry.example.com' }]),
-        adoPat: 'ado_secret',
-        adoPatExpiresAt: '2000-01-01',
       });
       const manager = createPodManager(ctx.deps);
 
-      expect(() =>
-        manager.createSession({ profileName: 'test-profile', task: 'Do stuff' }, 'user-1'),
-      ).toThrow(/expired ADO PAT used for registry auth|PAT_EXPIRED/);
+      expect(
+        manager.createSession({ profileName: 'test-profile', task: 'Do stuff' }, 'user-1').status,
+      ).toBe('queued');
     });
 
     it('uses profile branchPrefix for auto-generated branch names', () => {
@@ -4542,10 +4535,9 @@ describe('PodManager', () => {
       );
     });
 
-    it('forwards profile.adoPat for ADO profiles (prProvider=ado) on approval push', async () => {
+    it('uses daemon Entra auth for ADO profiles on approval push', async () => {
       const ctx = createTestContext(undefined, {
         prProvider: 'ado',
-        adoPat: 'ado_test_pat_xyz',
         githubPat: 'should_not_be_used',
       });
       ctx.deps.prManagerFactory = undefined;
@@ -4564,14 +4556,13 @@ describe('PodManager', () => {
       await manager.approveSession(pod.id);
 
       expect(ctx.worktreeManager.mergeBranch).toHaveBeenCalledWith(
-        expect.objectContaining({ pat: 'ado_test_pat_xyz' }),
+        expect.objectContaining({ pat: 'daemon-ado-token' }),
       );
     });
 
     it('publishes a non-default PR base branch before approval retry creates the PR', async () => {
       const ctx = createTestContext(undefined, {
         prProvider: 'ado',
-        adoPat: 'ado_test_pat_xyz',
       });
       const manager = createPodManager(ctx.deps);
 
@@ -4597,7 +4588,7 @@ describe('PodManager', () => {
         worktreePath: '/tmp/wt',
         branch: 'feature/workspace-base',
         sourceRef: 'refs/heads/feature/workspace-base',
-        pat: 'ado_test_pat_xyz',
+        pat: 'daemon-ado-token',
       });
       expect(ctx.prManager.createPr).toHaveBeenCalledWith(
         expect.objectContaining({

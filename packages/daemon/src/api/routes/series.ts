@@ -14,7 +14,6 @@ import {
 import type { FastifyInstance } from 'fastify';
 import type { WorktreeManager } from '../../interfaces/worktree-manager.js';
 import type { PodManager } from '../../pods/index.js';
-import { selectGitPat } from '../../profiles/profile-pat.js';
 import type { ProfileStore } from '../../profiles/profile-store.js';
 import { serializePodForWire } from '../wire-serializers.js';
 
@@ -595,7 +594,6 @@ export function seriesRoutes(
         repoUrl: profile.repoUrl,
         branch: body.branch,
         relPath: body.path,
-        pat: selectGitPat(profile),
       });
       return parseSingleBrief(contents.files, {
         sourceDescription: `${body.path} on ${body.branch}`,
@@ -640,7 +638,6 @@ export function seriesRoutes(
         repoUrl: profile.repoUrl,
         branch: body.branch,
         relPath: body.path,
-        pat: selectGitPat(profile),
       });
 
       if (contents.files.length === 0) {

@@ -44,8 +44,6 @@ function makeProfile(overrides: Partial<Profile> = {}): Profile {
     sastTimeout: 300,
     mergePollIntervalSec: null,
     prProvider: 'github',
-    adoPat: null,
-    adoPatExpiresAt: null,
     githubPat: null,
     githubPatExpiresAt: null,
     privateRegistries: [],
@@ -94,15 +92,6 @@ describe('PAT expiry checks', () => {
     expect(findExpiredPat(profile, now)).toBeNull();
   });
 
-  it('finds an expired selected ADO PAT', () => {
-    const profile = makeProfile({
-      prProvider: 'ado',
-      adoPat: 'ado_secret',
-      adoPatExpiresAt: '2026-05-19',
-    });
-    expect(findExpiredPat(profile, now)?.label).toBe('ADO PAT');
-  });
-
   it('finds an expired registry PAT when private registries are configured', () => {
     const profile = makeProfile({
       privateRegistries: [{ type: 'npm', url: 'https://registry.example.com' }],
@@ -110,14 +99,5 @@ describe('PAT expiry checks', () => {
       registryPatExpiresAt: '2026-05-19',
     });
     expect(findExpiredPat(profile, now)?.label).toBe('Registry PAT');
-  });
-
-  it('uses ADO PAT expiry when registry auth falls back to ADO', () => {
-    const profile = makeProfile({
-      privateRegistries: [{ type: 'nuget', url: 'https://pkgs.dev.azure.com/org/feed' }],
-      adoPat: 'ado_secret',
-      adoPatExpiresAt: '2026-05-19',
-    });
-    expect(findExpiredPat(profile, now)?.label).toBe('ADO PAT used for registry auth');
   });
 });

@@ -25,17 +25,18 @@ export interface TestPipelineHandlerConfig {
   logger: Logger;
   podRepo: PodRepository;
   profileStore: ProfileStore;
+  getAzureDevOpsToken: () => Promise<string>;
   /** HH:MM timestamps of recent triggers per pod for rate limiting. */
   rateLimitState?: Map<string, number[]>;
 }
 
 export function createTestPipelineHandler(config: TestPipelineHandlerConfig): ActionHandler {
-  const { logger, podRepo, profileStore } = config;
+  const { logger, podRepo, profileStore, getAzureDevOpsToken } = config;
   const rateLimitState = config.rateLimitState ?? new Map<string, number[]>();
   const log = logger.child({ handler: 'test-pipeline' });
 
-  function getAuth(pat: string): string {
-    return `Basic ${Buffer.from(`:${pat}`).toString('base64')}`;
+  async function getAuth(): Promise<string> {
+    return `Bearer ${await getAzureDevOpsToken()}`;
   }
 
   return {
@@ -63,21 +64,12 @@ export function createTestPipelineHandler(config: TestPipelineHandlerConfig): Ac
           400,
         );
       }
-      if (!profile.adoPat) {
-        throw new AutopodError(
-          `Profile '${profile.name}' is missing adoPat — required to push + trigger pipelines`,
-          'MISSING_CREDENTIAL',
-          400,
-        );
-      }
-
       switch (action.name) {
         case 'ado_run_test_pipeline':
           return runTestPipeline({
             podId: context.podId,
             podBranch: pod.branch,
             worktreePath: pod.worktreePath,
-            pat: profile.adoPat,
             cfg,
             logger: log,
             rateLimitState,
@@ -87,7 +79,6 @@ export function createTestPipelineHandler(config: TestPipelineHandlerConfig): Ac
         case 'ado_get_test_run_status':
           return getTestRunStatus({
             runId: params.run_id as number,
-            pat: profile.adoPat,
             cfg,
             logger: log,
             timeoutMs: (params.timeout_seconds as number | undefined)
@@ -107,13 +98,12 @@ export function createTestPipelineHandler(config: TestPipelineHandlerConfig): Ac
     podId: string;
     podBranch: string;
     worktreePath: string | null;
-    pat: string;
     cfg: TestPipelineConfig;
     logger: Logger;
     rateLimitState: Map<string, number[]>;
     podRepo: PodRepository;
   }): Promise<{ runId: number; url: string; testBranch: string }> {
-    const { podId, podBranch, worktreePath, pat, cfg, rateLimitState, podRepo } = args;
+    const { podId, podBranch, worktreePath, cfg, rateLimitState, podRepo } = args;
     if (!worktreePath) {
       throw new AutopodError(
         `Pod ${podId} has no worktree — cannot push to test repo`,
@@ -143,7 +133,8 @@ export function createTestPipelineHandler(config: TestPipelineHandlerConfig): Ac
     const { orgUrl, project } = parseAdoRepoUrl(cfg.testRepo);
     const branchPrefix = cfg.branchPrefix ?? DEFAULT_BRANCH_PREFIX;
     const testBranch = `${branchPrefix}${podId}/${now}`;
-    const authenticatedUrl = injectPatIntoAdoUrl(cfg.testRepo, pat);
+    const token = await getAzureDevOpsToken();
+    const origin = new URL(cfg.testRepo).origin;
     args.logger.info(
       { podId, testBranch, testRepo: cfg.testRepo },
       'Pushing pod branch to test repo',
@@ -151,13 +142,22 @@ export function createTestPipelineHandler(config: TestPipelineHandlerConfig): Ac
     try {
       await execFileAsync(
         'git',
-        ['-C', worktreePath, 'push', '--force', authenticatedUrl, `HEAD:refs/heads/${testBranch}`],
-        { timeout: 60_000 },
+        ['-C', worktreePath, 'push', '--force', cfg.testRepo, `HEAD:refs/heads/${testBranch}`],
+        {
+          timeout: 60_000,
+          env: {
+            ...process.env,
+            GIT_TERMINAL_PROMPT: '0',
+            GIT_CONFIG_COUNT: '1',
+            GIT_CONFIG_KEY_0: `http.${origin}/.extraheader`,
+            GIT_CONFIG_VALUE_0: `Authorization: Bearer ${token}`,
+          },
+        },
       );
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       throw new AutopodError(
-        `Failed to push to test repo: ${redactGitCredentialMessage(message, pat).slice(0, 300)}`,
+        `Failed to push to test repo: ${redactGitCredentialMessage(message, token).slice(0, 300)}`,
         'PUSH_FAILED',
         502,
       );
@@ -184,7 +184,7 @@ export function createTestPipelineHandler(config: TestPipelineHandlerConfig): Ac
       method: 'POST',
       headers: {
         Accept: 'application/json',
-        Authorization: getAuth(pat),
+        Authorization: await getAuth(),
         'Content-Type': 'application/json',
       },
       body: JSON.stringify(runBody),
@@ -211,7 +211,6 @@ export function createTestPipelineHandler(config: TestPipelineHandlerConfig): Ac
 
   async function getTestRunStatus(args: {
     runId: number;
-    pat: string;
     cfg: TestPipelineConfig;
     logger: Logger;
     timeoutMs: number;
@@ -222,14 +221,14 @@ export function createTestPipelineHandler(config: TestPipelineHandlerConfig): Ac
     failingStage?: string;
     logsTail?: string;
   }> {
-    const { runId, pat, cfg, timeoutMs } = args;
+    const { runId, cfg, timeoutMs } = args;
     const { orgUrl, project } = parseAdoRepoUrl(cfg.testRepo);
     const deadline = Date.now() + timeoutMs;
     const runUrl = `${orgUrl}/${encodeURIComponent(project)}/_apis/pipelines/${cfg.testPipelineId}/runs/${runId}?api-version=${ADO_API_VERSION}`;
 
     while (Date.now() < deadline) {
       const res = await fetchWithTimeout(runUrl, {
-        headers: { Accept: 'application/json', Authorization: getAuth(pat) },
+        headers: { Accept: 'application/json', Authorization: await getAuth() },
         timeout: 15_000,
       });
       if (!res.ok) {
@@ -263,7 +262,7 @@ export function createTestPipelineHandler(config: TestPipelineHandlerConfig): Ac
         else if (r === 'canceled') status = 'canceled';
         const logsTail =
           status === 'failed'
-            ? await fetchFailingLogTail(runId, pat, cfg).catch(() => undefined)
+            ? await fetchFailingLogTail(runId, cfg).catch(() => undefined)
             : undefined;
         return {
           status,
@@ -286,7 +285,6 @@ export function createTestPipelineHandler(config: TestPipelineHandlerConfig): Ac
 
   async function fetchFailingLogTail(
     runId: number,
-    pat: string,
     cfg: TestPipelineConfig,
   ): Promise<string | undefined> {
     const { orgUrl, project } = parseAdoRepoUrl(cfg.testRepo);
@@ -294,7 +292,7 @@ export function createTestPipelineHandler(config: TestPipelineHandlerConfig): Ac
     // /build/builds/{id}/logs lists log blobs; we grab the last one.
     const listUrl = `${orgUrl}/${encodeURIComponent(project)}/_apis/build/builds/${runId}/logs?api-version=7.1`;
     const listRes = await fetchWithTimeout(listUrl, {
-      headers: { Accept: 'application/json', Authorization: getAuth(pat) },
+      headers: { Accept: 'application/json', Authorization: await getAuth() },
       timeout: 15_000,
     });
     if (!listRes.ok) return undefined;
@@ -303,7 +301,7 @@ export function createTestPipelineHandler(config: TestPipelineHandlerConfig): Ac
     if (lastId == null) return undefined;
     const logUrl = `${orgUrl}/${encodeURIComponent(project)}/_apis/build/builds/${runId}/logs/${lastId}?api-version=7.1`;
     const logRes = await fetchWithTimeout(logUrl, {
-      headers: { Authorization: getAuth(pat) },
+      headers: { Authorization: await getAuth() },
       timeout: 15_000,
     });
     if (!logRes.ok) return undefined;
@@ -313,22 +311,10 @@ export function createTestPipelineHandler(config: TestPipelineHandlerConfig): Ac
   }
 }
 
-/**
- * Rewrite a `https://dev.azure.com/...` URL to embed a PAT for git push.
- * Example: https://dev.azure.com/org/proj/_git/repo →
- *          https://x-access-token:PAT@dev.azure.com/org/proj/_git/repo
- */
-export function injectPatIntoAdoUrl(repoUrl: string, pat: string): string {
-  const u = new URL(repoUrl);
-  u.username = 'x-access-token';
-  u.password = pat;
-  return u.toString();
-}
-
-function redactGitCredentialMessage(message: string, pat: string): string {
+function redactGitCredentialMessage(message: string, token: string): string {
   let redacted = message;
-  if (pat) {
-    redacted = redacted.split(pat).join('[REDACTED]');
+  if (token) {
+    redacted = redacted.split(token).join('[REDACTED]');
   }
   return redacted.replace(/(https?:\/\/[^/\s:@]+:)[^@\s/]+(@)/g, '$1[REDACTED]$2');
 }

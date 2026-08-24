@@ -811,12 +811,10 @@ describe('ProfileStore', () => {
       store.create({
         ...validInput,
         githubPatExpiresAt: '2026-06-01',
-        adoPatExpiresAt: '2026-07-01',
         registryPatExpiresAt: '2026-08-01',
       });
       const profile = store.get('my-app');
       expect(profile.githubPatExpiresAt).toBe('2026-06-01');
-      expect(profile.adoPatExpiresAt).toBe('2026-07-01');
       expect(profile.registryPatExpiresAt).toBe('2026-08-01');
     });
 
@@ -875,20 +873,16 @@ describe('ProfileStore', () => {
       store.create(validInput);
       const updated = store.update('my-app', {
         githubPatExpiresAt: '2026-06-01',
-        adoPatExpiresAt: '2026-07-01',
         registryPatExpiresAt: '2026-08-01',
       });
       expect(updated.githubPatExpiresAt).toBe('2026-06-01');
-      expect(updated.adoPatExpiresAt).toBe('2026-07-01');
       expect(updated.registryPatExpiresAt).toBe('2026-08-01');
 
       const cleared = store.update('my-app', {
         githubPatExpiresAt: null,
-        adoPatExpiresAt: null,
         registryPatExpiresAt: null,
       });
       expect(cleared.githubPatExpiresAt).toBeNull();
-      expect(cleared.adoPatExpiresAt).toBeNull();
       expect(cleared.registryPatExpiresAt).toBeNull();
     });
   });

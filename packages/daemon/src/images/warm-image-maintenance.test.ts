@@ -51,8 +51,6 @@ function mockProfile(overrides: Partial<Profile> = {}): Profile {
     mergePollIntervalSec: null,
     preflightConflictPolicy: null,
     prProvider: 'github',
-    adoPat: null,
-    adoPatExpiresAt: null,
     githubPat: null,
     githubPatExpiresAt: null,
     openrouterApiKey: null,
@@ -139,6 +137,25 @@ describe('WarmImageMaintenanceJob', () => {
     expect(deps.imageBuilder.buildWarmImage).toHaveBeenCalledWith(profile, {
       gitPat: 'daemon-gh-token',
       registryPat: 'registry_secret',
+    });
+  });
+
+  it('builds stale ADO profiles with the daemon Entra token', async () => {
+    const profile = mockProfile({ prProvider: 'ado' });
+    const deps = {
+      ...createDeps([profile]),
+      azureDevOpsAuth: {
+        getToken: vi.fn(async () => 'daemon-entra-token'),
+      },
+    };
+    const job = createWarmImageMaintenanceJob(deps);
+
+    const result = await job.runOnce();
+
+    expect(result.built).toBe(1);
+    expect(result.failed).toBe(0);
+    expect(deps.imageBuilder.buildWarmImage).toHaveBeenCalledWith(profile, {
+      gitEntraToken: 'daemon-entra-token',
     });
   });
 

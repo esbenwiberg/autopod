@@ -38,7 +38,7 @@ describe('createAdoHandler', () => {
     global.fetch = originalFetch;
   });
 
-  it('throws during execute when no PAT is available', async () => {
+  it('throws during execute when daemon Entra auth is unavailable', async () => {
     const handler = createAdoHandler({ logger, getSecret: () => undefined });
 
     await expect(
@@ -47,36 +47,45 @@ describe('createAdoHandler', () => {
         project: 'myproject',
         workitem_id: 1,
       }),
-    ).rejects.toThrow(/pat/i);
+    ).rejects.toThrow(/daemon authentication/i);
   });
 
   it('returns a handler with handlerType "ado"', () => {
     const handler = createAdoHandler({
       logger,
-      getSecret: (ref) => (ref === 'ADO_PAT' ? 'ado-token' : undefined),
+      getSecret: () => undefined,
+      getAzureDevOpsToken: async () => 'ado-token',
     });
     expect(handler.handlerType).toBe('ado');
   });
 
-  it('accepts token from ado-pat fallback', async () => {
+  it('uses daemon Entra Bearer auth and never ADO_PAT', async () => {
     vi.mocked(global.fetch).mockResolvedValueOnce(
       mockResponse({ id: 1, fields: { 'System.Title': 'Test' } }),
     );
-
+    const getSecret = vi.fn(() => 'legacy-pat-must-not-be-read');
+    const getAzureDevOpsToken = vi.fn().mockResolvedValue('daemon-entra-token');
     const handler = createAdoHandler({
       logger,
-      getSecret: (ref) => (ref === 'ado-pat' ? 'ado-fallback' : undefined),
-    });
+      getSecret,
+      getAzureDevOpsToken,
+    } as Parameters<typeof createAdoHandler>[0]);
 
     await handler.execute(makeAction('read_workitem'), {
       org: 'myorg',
       project: 'myproject',
       workitem_id: 1,
     });
-    expect(global.fetch).toHaveBeenCalled();
+
+    const calledOpts = vi.mocked(global.fetch).mock.calls[0]?.[1] as RequestInit;
+    expect((calledOpts.headers as Record<string, string>).Authorization).toBe(
+      'Bearer daemon-entra-token',
+    );
+    expect(getAzureDevOpsToken).toHaveBeenCalledTimes(1);
+    expect(getSecret).not.toHaveBeenCalled();
   });
 
-  it('read_workitem calls correct URL with Basic auth and picks fields', async () => {
+  it('read_workitem calls correct URL with Bearer auth and picks fields', async () => {
     const workitemData = {
       id: 123,
       fields: {
@@ -88,7 +97,8 @@ describe('createAdoHandler', () => {
 
     const handler = createAdoHandler({
       logger,
-      getSecret: (ref) => (ref === 'ADO_PAT' ? 'ado-token' : undefined),
+      getSecret: () => undefined,
+      getAzureDevOpsToken: async () => 'ado-token',
     });
 
     const result = await handler.execute(
@@ -103,8 +113,7 @@ describe('createAdoHandler', () => {
 
     const calledOpts = vi.mocked(global.fetch).mock.calls[0][1] as RequestInit;
     const authHeader = (calledOpts.headers as Record<string, string>).Authorization;
-    const expectedAuth = `Basic ${Buffer.from(':ado-token').toString('base64')}`;
-    expect(authHeader).toBe(expectedAuth);
+    expect(authHeader).toBe('Bearer ado-token');
 
     expect(result).toEqual(expect.objectContaining({ id: 123 }));
   });
@@ -126,7 +135,8 @@ describe('createAdoHandler', () => {
 
     const handler = createAdoHandler({
       logger,
-      getSecret: (ref) => (ref === 'ADO_PAT' ? 'ado-token' : undefined),
+      getSecret: () => undefined,
+      getAzureDevOpsToken: async () => 'ado-token',
     });
 
     const result = await handler.execute(makeAction('search_workitems', ['id']), {
@@ -157,7 +167,8 @@ describe('createAdoHandler', () => {
 
     const handler = createAdoHandler({
       logger,
-      getSecret: (ref) => (ref === 'ADO_PAT' ? 'ado-token' : undefined),
+      getSecret: () => undefined,
+      getAzureDevOpsToken: async () => 'ado-token',
     });
 
     const rawQuery = "SELECT [System.Id] FROM WorkItems WHERE [System.State] = 'Active'";
@@ -180,7 +191,8 @@ describe('createAdoHandler', () => {
 
     const handler = createAdoHandler({
       logger,
-      getSecret: (ref) => (ref === 'ADO_PAT' ? 'ado-token' : undefined),
+      getSecret: () => undefined,
+      getAzureDevOpsToken: async () => 'ado-token',
     });
 
     await handler.execute(makeAction('search_workitems'), {
@@ -204,7 +216,8 @@ describe('createAdoHandler', () => {
 
     const handler = createAdoHandler({
       logger,
-      getSecret: (ref) => (ref === 'ADO_PAT' ? 'ado-token' : undefined),
+      getSecret: () => undefined,
+      getAzureDevOpsToken: async () => 'ado-token',
     });
 
     const result = await handler.execute(makeAction('search_workitems'), {
@@ -223,7 +236,8 @@ describe('createAdoHandler', () => {
 
     const handler = createAdoHandler({
       logger,
-      getSecret: (ref) => (ref === 'ADO_PAT' ? 'ado-token' : undefined),
+      getSecret: () => undefined,
+      getAzureDevOpsToken: async () => 'ado-token',
     });
 
     await expect(
@@ -238,7 +252,8 @@ describe('createAdoHandler', () => {
   it('throws on unknown action', async () => {
     const handler = createAdoHandler({
       logger,
-      getSecret: (ref) => (ref === 'ADO_PAT' ? 'ado-token' : undefined),
+      getSecret: () => undefined,
+      getAzureDevOpsToken: async () => 'ado-token',
     });
 
     await expect(
@@ -265,7 +280,8 @@ describe('createAdoHandler', () => {
 
     const handler = createAdoHandler({
       logger,
-      getSecret: (ref) => (ref === 'ADO_PAT' ? 'ado-token' : undefined),
+      getSecret: () => undefined,
+      getAzureDevOpsToken: async () => 'ado-token',
     });
 
     const result = await handler.execute(
@@ -308,7 +324,8 @@ describe('createAdoHandler', () => {
 
     const handler = createAdoHandler({
       logger,
-      getSecret: (ref) => (ref === 'ADO_PAT' ? 'ado-token' : undefined),
+      getSecret: () => undefined,
+      getAzureDevOpsToken: async () => 'ado-token',
     });
 
     const result = await handler.execute(makeAction('ado_read_pr_threads', ['id', 'status']), {
@@ -355,7 +372,8 @@ describe('createAdoHandler', () => {
 
     const handler = createAdoHandler({
       logger,
-      getSecret: (ref) => (ref === 'ADO_PAT' ? 'ado-token' : undefined),
+      getSecret: () => undefined,
+      getAzureDevOpsToken: async () => 'ado-token',
     });
 
     const result = (await handler.execute(
@@ -397,7 +415,8 @@ describe('createAdoHandler', () => {
 
     const handler = createAdoHandler({
       logger,
-      getSecret: (ref) => (ref === 'ADO_PAT' ? 'ado-token' : undefined),
+      getSecret: () => undefined,
+      getAzureDevOpsToken: async () => 'ado-token',
     });
 
     const result = (await handler.execute(
@@ -425,7 +444,8 @@ describe('createAdoHandler', () => {
 
     const handler = createAdoHandler({
       logger,
-      getSecret: (ref) => (ref === 'ADO_PAT' ? 'ado-token' : undefined),
+      getSecret: () => undefined,
+      getAzureDevOpsToken: async () => 'ado-token',
     });
 
     const result = await handler.execute(makeAction('ado_read_pr_changes'), {
@@ -453,7 +473,8 @@ describe('createAdoHandler', () => {
 
     const handler = createAdoHandler({
       logger,
-      getSecret: (ref) => (ref === 'ADO_PAT' ? 'ado-token' : undefined),
+      getSecret: () => undefined,
+      getAzureDevOpsToken: async () => 'ado-token',
     });
 
     const result = await handler.execute(makeAction('ado_read_file', ['content', 'path']), {
@@ -485,7 +506,8 @@ describe('createAdoHandler', () => {
 
     const handler = createAdoHandler({
       logger,
-      getSecret: (ref) => (ref === 'ADO_PAT' ? 'ado-token' : undefined),
+      getSecret: () => undefined,
+      getAzureDevOpsToken: async () => 'ado-token',
     });
 
     await handler.execute(makeAction('ado_read_file', ['content']), {
@@ -508,7 +530,8 @@ describe('createAdoHandler', () => {
 
     const handler = createAdoHandler({
       logger,
-      getSecret: (ref) => (ref === 'ADO_PAT' ? 'ado-token' : undefined),
+      getSecret: () => undefined,
+      getAzureDevOpsToken: async () => 'ado-token',
     });
 
     const result = await handler.execute(makeAction('ado_search_code', ['fileName', 'path']), {
@@ -539,7 +562,8 @@ describe('createAdoHandler', () => {
 
     const handler = createAdoHandler({
       logger,
-      getSecret: (ref) => (ref === 'ADO_PAT' ? 'ado-token' : undefined),
+      getSecret: () => undefined,
+      getAzureDevOpsToken: async () => 'ado-token',
     });
 
     await handler.execute(makeAction('ado_search_code', ['fileName']), {
@@ -559,7 +583,8 @@ describe('createAdoHandler', () => {
 
     const handler = createAdoHandler({
       logger,
-      getSecret: (ref) => (ref === 'ADO_PAT' ? 'ado-token' : undefined),
+      getSecret: () => undefined,
+      getAzureDevOpsToken: async () => 'ado-token',
     });
 
     const result = await handler.execute(makeAction('ado_search_code', ['fileName']), {

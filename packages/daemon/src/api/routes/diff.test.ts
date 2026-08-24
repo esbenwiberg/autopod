@@ -206,7 +206,6 @@ describe('diff route', () => {
         defaultBranch: 'main',
         prProvider: 'github',
         githubPat: 'ghp_test',
-        adoPat: null,
       }),
     } as unknown as ProfileStore;
 
