@@ -15,10 +15,10 @@
     "build": "tsup",
     "postbuild": "mkdir -p dist/db dist/actions && cp -R src/db/migrations dist/db/ && cp -R src/actions/defaults dist/actions/",
     "clean": "rm -rf dist",
-    "typecheck": "tsup --dts-only",
-    "pretest": "pnpm --filter @autopod/shared build",
+    "typecheck": "AUTOPOD_TYPECHECK=1 tsup --dts-only --out-dir .turbo/typecheck",
+    "pretest": "[ -n \"$TURBO_HASH\" ] || pnpm --filter @autopod/shared build",
     "test": "vitest run",
-    "predev": "pnpm --filter @autopod/shared build",
+    "predev": "[ -n \"$TURBO_HASH\" ] || pnpm --filter @autopod/shared build",
     "dev": "AUTOPOD_ALLOW_DEV_AUTH=${AUTOPOD_ALLOW_DEV_AUTH:-1} tsup --watch src --watch ../shared/dist/index.js --watch ../validator/dist/index.js --watch ../escalation-mcp/dist/index.js --no-dts --onSuccess 'cp -r src/db/migrations dist/db/ && mkdir -p dist/actions && cp -r src/actions/defaults dist/actions/ && node dist/index.js'",
     "start": "node dist/index.js"
   },

@@ -171,6 +171,7 @@ export type {
 
 export type {
   ModelProvider,
+  PiOAuthProviderId,
   ProviderCredentials,
   GenericApiKeyCredentials,
   AnthropicCredentials,

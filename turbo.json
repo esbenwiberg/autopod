@@ -1,5 +1,6 @@
 {
   "$schema": "https://turbo.build/schema.json",
+  "globalDependencies": ["tsconfig.base.json"],
   "tasks": {
     "build": {
       "dependsOn": ["^build"],
@@ -13,13 +14,53 @@
       "dependsOn": ["^build"],
       "outputs": []
     },
-    "lint": {
-      "outputs": []
+    "@autopod/daemon#typecheck": {
+      "dependsOn": ["^build"],
+      "outputs": [".turbo/typecheck/**"]
     },
     "dev": {
       "dependsOn": ["^build"],
       "cache": false,
       "persistent": true
+    },
+    "@autopod/daemon#test": {
+      "dependsOn": ["build"],
+      "env": ["SKIP_DB_TESTS"],
+      "outputs": []
+    },
+    "@autopod/daemon#dev": {
+      "dependsOn": ["^build"],
+      "cache": false,
+      "persistent": true,
+      "passThroughEnv": [
+        "ACR_*",
+        "ANTHROPIC_API_KEY",
+        "AUTOPOD_*",
+        "AZURE_*",
+        "CLAUDE_CODE_OAUTH_TOKEN",
+        "CONTAINER_CPUS",
+        "DAEMON_*",
+        "DATA_DIR",
+        "DB_PATH",
+        "ENTRA_*",
+        "HOST",
+        "ISSUE_WATCHER_POLL_INTERVAL_MS",
+        "LOG_LEVEL",
+        "MAX_CONCURRENCY",
+        "NODE_ENV",
+        "OPENAI_*",
+        "OPENROUTER_API_KEY",
+        "PORT",
+        "SANDBOX_*",
+        "SKILLS_DIR",
+        "TEAMS_WEBHOOK_URL"
+      ]
+    },
+    "@autopod/mobile-web#dev": {
+      "dependsOn": ["^build"],
+      "cache": false,
+      "persistent": true,
+      "env": ["AUTOPOD_DAEMON_URL"]
     },
     "clean": {
       "cache": false

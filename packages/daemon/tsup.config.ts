@@ -9,6 +9,7 @@ export default defineConfig({
   sourcemap: true,
   external: ['better-sqlite3', 'pino-pretty'],
   onSuccess: async () => {
+    if (process.env.AUTOPOD_TYPECHECK === '1') return;
     mkdirSync('dist/db/migrations', { recursive: true });
     cpSync('src/db/migrations', 'dist/db/migrations', { recursive: true });
     mkdirSync('dist/actions/defaults', { recursive: true });

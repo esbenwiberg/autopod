@@ -87,7 +87,7 @@ async function readDesktopProcessIds(): Promise<string[]> {
       .map((line) => line.trim())
       .filter((line) => /^\d+$/.test(line));
   } catch (err) {
-    const code = (err as NodeJS.ErrnoException).code;
+    const code = (err as { code?: string | number }).code;
     if (code === 1) return [];
     throw err;
   }

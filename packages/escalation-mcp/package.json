@@ -14,7 +14,7 @@
   "scripts": {
     "build": "tsup",
     "clean": "rm -rf dist",
-    "typecheck": "tsup --dts-only",
+    "typecheck": "tsc --noEmit --project tsconfig.typecheck.json",
     "test": "vitest run",
     "dev": "tsup --watch --no-dts"
   },

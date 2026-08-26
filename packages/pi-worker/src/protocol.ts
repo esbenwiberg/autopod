@@ -75,20 +75,36 @@ export function createCancelledNotification(
 }
 
 export function parseJsonRpcResponse(value: unknown): JsonRpcResponse {
-  if (!isObject(value) || value.jsonrpc !== '2.0' || !('id' in value)) {
+  if (
+    !isObject(value) ||
+    value.jsonrpc !== '2.0' ||
+    (typeof value.id !== 'string' && typeof value.id !== 'number')
+  ) {
     throw new Error('Invalid MCP JSON-RPC response');
   }
   if ('error' in value) {
     const error = value.error;
-    if (!isObject(error) || typeof error.message !== 'string') {
+    if (!isObject(error) || typeof error.code !== 'number' || typeof error.message !== 'string') {
       throw new Error('Invalid MCP JSON-RPC error response');
     }
-    return value as JsonRpcFailure;
+    return {
+      jsonrpc: '2.0',
+      id: value.id,
+      error: {
+        code: error.code,
+        message: error.message,
+        data: error.data,
+      },
+    } satisfies JsonRpcFailure;
   }
   if (!('result' in value)) {
     throw new Error('Invalid MCP JSON-RPC success response');
   }
-  return value as JsonRpcSuccess;
+  return {
+    jsonrpc: '2.0',
+    id: value.id,
+    result: value.result,
+  } satisfies JsonRpcSuccess;
 }
 
 export function assertSuccess(response: JsonRpcResponse): unknown {

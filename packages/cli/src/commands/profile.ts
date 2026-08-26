@@ -4,6 +4,7 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import type {
   ActionOverride,
+  ModelProvider,
   PodOptions,
   Profile,
   ProviderCredentials,
@@ -35,7 +36,7 @@ import {
   runPiLogin,
 } from './provider-auth.js';
 
-const profileColumns: ColumnDef<Profile>[] = [
+const profileColumns: ColumnDef<PublicProfile>[] = [
   { header: 'Name', key: 'name', width: 20 },
   { header: 'Template', key: 'template', width: 14 },
   { header: 'Repo', formatter: (p) => (p.repoUrl ?? '').replace(/^https?:\/\//, ''), width: 40 },
@@ -47,7 +48,7 @@ export function resolveCatalogProfileSelection(
   catalog: PublicProviderCatalog,
   providerId: string,
   modelId: string,
-): { modelProvider: string; defaultRuntime?: 'pi'; defaultModel: string } | undefined {
+): { modelProvider: ModelProvider; defaultRuntime?: 'pi'; defaultModel: string } | undefined {
   const provider = catalog.providers.find((candidate) => candidate.id === providerId);
   const model = catalog.models.find((candidate) => candidate.id === modelId);
   if (
@@ -72,7 +73,7 @@ function parseValidationSuite(value: string): ValidationSuite {
   process.exit(1);
 }
 
-function defaultPodOptions(profile: Profile): PodOptions {
+function defaultPodOptions(profile: Pick<Profile, 'pod' | 'outputMode'>): PodOptions {
   return profile.pod ?? podOptionsFromOutputMode(profile.outputMode ?? 'pr');
 }
 
@@ -841,10 +842,10 @@ export function registerProfileCommands(program: Command, getClient: () => Autop
     });
 }
 
-type ProfileWithOptionalPresence = Profile &
-  Partial<Pick<PublicProfile, 'hasGithubPat' | 'hasRegistryPat'>>;
-
-function hasRegistryPat(profile: ProfileWithOptionalPresence): boolean {
+function hasRegistryPat(profile: {
+  hasRegistryPat?: boolean;
+  registryPat: string | null;
+}): boolean {
   return profile.hasRegistryPat ?? profile.registryPat !== null;
 }
 

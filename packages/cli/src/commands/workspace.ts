@@ -481,7 +481,8 @@ async function pickProfileInteractively(client: AutopodClient): Promise<string> 
 
   const sortedProfiles = [...profiles].sort((a, b) => a.name.localeCompare(b.name));
   if (sortedProfiles.length === 1) {
-    const [profile] = sortedProfiles;
+    const profile = sortedProfiles[0];
+    if (!profile) throw new Error('Profile list unexpectedly became empty.');
     console.log(chalk.dim(`Using only profile: ${profile.name}`));
     return profile.name;
   }

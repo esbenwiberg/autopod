@@ -45,18 +45,18 @@ ERRORS=0
 # ─── Install ──────────────────────────────────────────────────
 if [ "$QUICK" = false ]; then
   step "Installing dependencies"
-  if node scripts/run-pnpm.mjs install --frozen-lockfile 2>&1 | tail -3; then
+  if npx pnpm install --frozen-lockfile 2>&1 | tail -3; then
     ok "Dependencies installed"
   else
     # Fallback without frozen lockfile (for local dev)
     warn "Frozen lockfile failed, trying regular install"
-    node scripts/run-pnpm.mjs install 2>&1 | tail -3
+    npx pnpm install 2>&1 | tail -3
   fi
 fi
 
 # ─── Lint ─────────────────────────────────────────────────────
 step "Linting"
-if node scripts/run-pnpm.mjs lint 2>&1; then
+if npx pnpm lint 2>&1; then
   ok "Lint passed"
 else
   fail "Lint failed"
@@ -65,7 +65,7 @@ fi
 
 # ─── Build ────────────────────────────────────────────────────
 step "Building"
-if node scripts/run-pnpm.mjs build 2>&1; then
+if npx pnpm build 2>&1; then
   ok "Build passed"
 else
   fail "Build failed"
@@ -74,7 +74,7 @@ fi
 
 # ─── Test ─────────────────────────────────────────────────────
 step "Typechecking"
-if node scripts/run-pnpm.mjs typecheck 2>&1; then
+if npx pnpm typecheck 2>&1; then
   ok "Typecheck passed"
 else
   fail "Typecheck failed"
@@ -83,7 +83,7 @@ fi
 
 # ─── Test ─────────────────────────────────────────────────────
 step "Testing"
-if node scripts/run-pnpm.mjs test 2>&1; then
+if npx pnpm test 2>&1; then
   ok "Tests passed"
 else
   fail "Tests failed"
@@ -92,7 +92,7 @@ fi
 
 # ─── Dependency Audit ─────────────────────────────────────────
 step "Auditing dependencies"
-if node scripts/run-pnpm.mjs audit --audit-level high 2>&1; then
+if npx pnpm audit --audit-level high 2>&1; then
   ok "Dependency audit passed"
 else
   fail "Dependency audit failed"
@@ -101,7 +101,7 @@ fi
 
 # ─── Secret Scan ──────────────────────────────────────────────
 step "Scanning secrets"
-if node scripts/run-pnpm.mjs secret-scan 2>&1; then
+if npx pnpm secret-scan 2>&1; then
   ok "Secret scan passed"
 else
   fail "Secret scan failed"

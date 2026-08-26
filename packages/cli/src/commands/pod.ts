@@ -1,4 +1,4 @@
-import { existsSync, lstatSync, readFileSync, readdirSync, realpathSync, statSync } from 'node:fs';
+import { existsSync, lstatSync, readFileSync, readdirSync, realpathSync } from 'node:fs';
 import { basename, isAbsolute, join, relative, resolve } from 'node:path';
 import type {
   AgentActivityEvent,

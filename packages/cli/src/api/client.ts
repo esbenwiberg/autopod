@@ -12,6 +12,7 @@ import type {
   CreatePodRequest,
   CreateScheduledJobRequest,
   CreateScheduledJobTemplateRequest,
+  ModelProvider,
   Pod,
   PodStatus,
   PodsitterActivation,
@@ -454,7 +455,12 @@ export class AutopodClient {
 
   async setProfileCredentials(
     name: string,
-    credentials: { modelProvider: string; providerCredentials: unknown; defaultRuntime?: string },
+    credentials: {
+      modelProvider: ModelProvider;
+      providerCredentials: ProviderCredentials;
+      defaultRuntime?: Profile['defaultRuntime'];
+      defaultModel?: string;
+    },
   ): Promise<PublicProfile> {
     return this.request<PublicProfile>('PATCH', `/profiles/${name}`, credentials);
   }

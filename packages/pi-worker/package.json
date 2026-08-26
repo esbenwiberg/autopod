@@ -14,7 +14,7 @@
   "scripts": {
     "build": "tsup src/index.ts --format esm --dts",
     "clean": "rm -rf dist",
-    "typecheck": "tsup src/index.ts --dts-only",
+    "typecheck": "tsc --noEmit --project tsconfig.typecheck.json",
     "test": "vitest run",
     "dev": "tsup src/index.ts --format esm --watch --no-dts"
   },
