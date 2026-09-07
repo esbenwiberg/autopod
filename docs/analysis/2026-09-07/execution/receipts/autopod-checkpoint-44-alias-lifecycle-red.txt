@@ -1,0 +1,31 @@
+
+ RUN  v4.1.11 /private/tmp/autopod-durable-execution/packages/daemon
+
+ ❯ src/pods/merge-journal.test.ts (16 tests | 2 failed | 13 skipped) 142ms
+     × does not admit an ambiguous duplicate through an equivalent ADO address (https://dev.azure.com/ORG/Project/_git/Repo/pullrequest/42) 65ms
+     × does not admit an ambiguous duplicate through an equivalent ADO address (https://dev.azure.com/org/%50roject/_git/Repo/pullrequest/42) 37ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 2 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/pods/merge-journal.test.ts > durable merge journal > does not admit an ambiguous duplicate through an equivalent ADO address (https://dev.azure.com/ORG/Project/_git/Repo/pullrequest/42)
+ FAIL  src/pods/merge-journal.test.ts > durable merge journal > does not admit an ambiguous duplicate through an equivalent ADO address (https://dev.azure.com/org/%50roject/_git/Repo/pullrequest/42)
+AssertionError: expected [Function] to throw error including 'ambiguous' but got 'The requested PR is no longer assigne…'
+
+Expected: "ambiguous"
+Received: "The requested PR is no longer assigned to this lifecycle. Retain source resources and reconcile the PR before retrying delivery."
+
+ ❯ src/pods/merge-journal.test.ts:198:9
+    196|           prUrl: alias,
+    197|         }),
+    198|       ).toThrow('ambiguous');
+       |         ^
+    199|       expect(f.db.prepare('SELECT count(*) AS n FROM merge_attempts').…
+    200|     } finally {
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/2]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  2 failed | 1 passed | 13 skipped (16)
+   Start at  01:33:49
+   Duration  403ms (transform 111ms, setup 0ms, import 170ms, tests 142ms, environment 0ms)

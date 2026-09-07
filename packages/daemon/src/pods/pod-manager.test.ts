@@ -4515,6 +4515,120 @@ describe('PodManager', () => {
   });
 
   describe('merge poll lifecycle', () => {
+    it.each([
+      { disposition: 'admitted', merged: false, dirty: false },
+      { disposition: 'scheduled', merged: false, dirty: false },
+      { disposition: 'admitted', merged: true, dirty: false },
+      { disposition: 'admitted', merged: true, dirty: true },
+      { disposition: 'pending', merged: false, dirty: true },
+      { disposition: 'pending', merged: false, dirty: false },
+    ])(
+      'reconciles journaled polling after restart ($disposition, merged=$merged, dirty=$dirty)',
+      async ({ disposition, merged, dirty }) => {
+        vi.useFakeTimers();
+        try {
+          const ctx = createTestContext();
+          const manager = createPodManager(ctx.deps);
+          const created = manager.createSession(
+            { profileName: 'test-profile', task: 'Recover journaled poll' },
+            'user-1',
+          );
+          ctx.podRepo.update(
+            created.id,
+            validatedPodUpdates(created.id, {
+              status: 'merge_pending',
+              prUrl: 'https://github.com/org/repo/pull/42',
+              worktreePath: '/tmp/journaled-poll',
+              containerId: 'retained-source',
+              filesChanged: 1,
+            }),
+          );
+          const pod = ctx.podRepo.getOrThrow(created.id);
+          const publication = ctx.podRepo.sourcePublications;
+          const journal = ctx.podRepo.mergeJournal;
+          if (!publication || !journal) throw new Error('Missing durable test repositories');
+          const source = {
+            repository: 'https://github.com/org/repo',
+            branch: pod.branch,
+            commitSha: 'a'.repeat(40),
+            treeSha: 'b'.repeat(40),
+            remoteRef: `refs/heads/${pod.branch}`,
+            observedRemoteCommitSha: 'a'.repeat(40),
+            worktreeClean: true as const,
+            observedAt: new Date().toISOString(),
+          };
+          const publicationId = publication.admit(pod, source);
+          publication.confirm(pod, publicationId, source);
+          const target = { repository: source.repository, branch: pod.branch, baseBranch: 'main' };
+          const attempt = journal.claim(pod, pod, publicationId, {
+            prUrl: pod.prUrl ?? '',
+            expectedHeadSha: source.commitSha,
+            expectedTarget: target,
+          });
+          if (disposition !== 'admitted')
+            journal.observe(
+              attempt,
+              {
+                merged: false,
+                autoMergeScheduled: disposition === 'scheduled',
+              },
+              'merge_response',
+            );
+          const inspect = ctx.worktreeManager.inspectSource;
+          if (!inspect) throw new Error('Missing source inspection fixture');
+          vi.mocked(inspect).mockResolvedValue({ ...source, worktreeClean: !dirty });
+          vi.mocked(ctx.prManager.getPrStatus).mockResolvedValue({
+            merged,
+            open: !merged,
+            headSha: source.commitSha,
+            sourceTarget: target,
+            blockReason: null,
+            ciFailures: [],
+            reviewComments: [],
+            reviewDecision: 'APPROVED',
+          });
+          createPodManager(ctx.deps);
+          await vi.advanceTimersByTimeAsync(0);
+          if (merged && !dirty) {
+            expect(manager.getSession(pod.id).status).toBe('complete');
+            expect(ctx.containerManager.kill).toHaveBeenCalledTimes(1);
+            expect(
+              ctx.db
+                .prepare(
+                  "SELECT count(*) AS n FROM merge_observations WHERE disposition = 'merged'",
+                )
+                .get(),
+            ).toEqual({ n: 1 });
+          } else {
+            expect(manager.getSession(pod.id)).toMatchObject({
+              status: 'merge_pending',
+              containerId: 'retained-source',
+              completedAt: null,
+            });
+            expect(ctx.containerManager.kill).not.toHaveBeenCalled();
+          }
+          const retries = disposition === 'pending' && !dirty ? 1 : 0;
+          expect(ctx.prManager.mergePr).toHaveBeenCalledTimes(retries);
+          if (retries)
+            expect(ctx.prManager.mergePr).toHaveBeenCalledWith(
+              expect.objectContaining({
+                expectedHeadSha: source.commitSha,
+                expectedTarget: target,
+                onPrepared: expect.any(Function),
+              }),
+            );
+          expect(ctx.worktreeManager.pushBranch).not.toHaveBeenCalled();
+          expect(ctx.worktreeManager.mergeBranch).not.toHaveBeenCalled();
+          expect(ctx.worktreeManager.rebaseOntoBase).not.toHaveBeenCalled();
+          expect(ctx.db.prepare('SELECT count(*) AS n FROM merge_attempts').get()).toEqual({
+            n: 1 + retries,
+          });
+        } finally {
+          vi.useRealTimers();
+        }
+      },
+    );
+
     it('drains an old poll before a same-generation operator restart', async () => {
       vi.useFakeTimers();
       const gate = deferred<void>();

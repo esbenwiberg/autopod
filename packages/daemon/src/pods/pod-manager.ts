@@ -159,7 +159,11 @@ import {
 import { buildValidationContextEnv } from '../validation/validation-context-env.js';
 import { createValidationIdentityCollector } from '../validation/validation-identity-collector.js';
 import { pushCommitsToBareViaStagingRef } from '../worktrees/bare-push.js';
-import { mergePublishedSource, reconcileMerge } from '../worktrees/durable-merge.js';
+import {
+  inspectRetainedMergeSource,
+  mergePublishedSource,
+  reconcileMerge,
+} from '../worktrees/durable-merge.js';
 import { createDurablePrManagerFactory } from '../worktrees/durable-pr-manager.js';
 import { publishCommittedSource, publishSource } from '../worktrees/durable-source-publication.js';
 import { graftHostTreeOntoBase } from '../worktrees/graft-reconcile.js';
@@ -4376,6 +4380,80 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           }),
         );
 
+        // A durable admission must be reconciled before any subsequent mutation.
+        // Legacy rows without an admission retain their separate recovery path.
+        let journaled = false;
+        try {
+          const journal = podRepo.mergeJournal;
+          const entry = journal?.find(pod);
+          if (journal && entry) {
+            journaled = true;
+            if (status.merged) {
+              await pollOperation(() => reconcileMerge(journal, pod, entry, prManager, status));
+              await pollOperation(() =>
+                inspectRetainedMergeSource(
+                  journal,
+                  podRepo.sourcePublications,
+                  pod,
+                  entry,
+                  worktreeManager,
+                ),
+              );
+            } else {
+              if (entry.state !== 'pending' || entry.result?.autoMergeScheduled || !status.open)
+                mergeReconciliation(
+                  'The earlier merge requires source-bound provider reconciliation; original resources retained.',
+                );
+              const source = await pollOperation(() =>
+                inspectRetainedMergeSource(
+                  journal,
+                  podRepo.sourcePublications,
+                  pod,
+                  entry,
+                  worktreeManager,
+                ),
+              );
+              if (!status.ciFailures.length && !status.reviewComments.length) {
+                const reviewOk = !status.reviewDecision || status.reviewDecision === 'APPROVED';
+                if (reviewOk)
+                  await mergeQueue.enqueueMerge(
+                    entry.request.config.expectedTarget.repository,
+                    entry.request.config.expectedTarget.baseBranch,
+                    async () => {
+                      assertCurrent();
+                      const result = await pollOperation(() =>
+                        mergePublishedSource(
+                          journal,
+                          pod,
+                          { ...pod, prUrl: entry.request.publicationPrUrl },
+                          source,
+                          prManager,
+                          {
+                            ...entry.request.config,
+                            worktreePath: pod.worktreePath,
+                            onPrepared: () => assertCurrent(),
+                          },
+                        ),
+                      );
+                      return result.merged;
+                    },
+                  );
+                // A later poll confirms cleanup. Never rebase or push over an
+                // admitted request; a changed source needs its own validation.
+                return;
+              }
+            }
+          }
+        } catch (error) {
+          assertCurrent();
+          const reason = `Merge reconciliation required. ${error instanceof Error ? error.message : String(error)}`;
+          if (pod.mergeBlockReason !== reason) {
+            podRepo.update(podId, { mergeBlockReason: reason });
+            emitActivityStatus(podId, reason);
+          }
+          return;
+        }
+
         if (status.merged) {
           emitActivityStatus(podId, 'PR merged successfully');
           await cleanupContainer(pod, 'pr-merged-complete', 'kill', () =>
@@ -4490,7 +4568,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         // hasn't advanced, so this is a single fetch in the steady state.
         // Serialized with approveSession via the merge queue so two pods on the
         // same base never race.
-        if (pod.worktreePath && pod.branch) {
+        if (!journaled && pod.worktreePath && pod.branch) {
           try {
             await pollOperation(async () => access(pod.worktreePath));
           } catch (err) {
@@ -11772,22 +11850,14 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
             if (!provider) mergeReconciliation('The original merge provider is unavailable.');
             const result = await reconcileMerge(podRepo.mergeJournal, pod, entry, provider);
             assertApprovalCurrent(pod);
-            const source = podRepo.sourcePublications?.confirmedForMerge(
-              { ...pod, prUrl: entry.request.publicationPrUrl },
+            await inspectRetainedMergeSource(
+              podRepo.mergeJournal,
+              podRepo.sourcePublications,
               pod,
-              entry.publicationId,
+              entry,
+              worktreeManager,
             );
-            if (!source || !pod.worktreePath || !worktreeManager.inspectSource)
-              mergeReconciliation('Retained local source cannot be verified before cleanup.');
-            const snapshot = await worktreeManager.inspectSource(pod.worktreePath, pod.branch);
             assertApprovalCurrent(pod);
-            if (
-              !snapshot.worktreeClean ||
-              snapshot.branch !== source.branch ||
-              snapshot.commitSha !== source.commitSha ||
-              snapshot.treeSha !== source.treeSha
-            )
-              mergeReconciliation('Retained local source changed after the admitted publication.');
             recoveredMerge = result.merged;
           }
         } catch (error) {

@@ -1,0 +1,34 @@
+
+ RUN  v4.1.11 /private/tmp/autopod-durable-execution/packages/daemon
+
+ ❯ src/pods/merge-journal.test.ts (16 tests | 2 failed | 13 skipped) 140ms
+     × does not admit an ambiguous duplicate through an equivalent ADO address (https://dev.azure.com/ORG/Project/_git/Repo/pullrequest/42) 66ms
+     × does not admit an ambiguous duplicate through an equivalent ADO address (https://dev.azure.com/org/%50roject/_git/Repo/pullrequest/42) 37ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 2 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/pods/merge-journal.test.ts > durable merge journal > does not admit an ambiguous duplicate through an equivalent ADO address (https://dev.azure.com/ORG/Project/_git/Repo/pullrequest/42)
+ FAIL  src/pods/merge-journal.test.ts > durable merge journal > does not admit an ambiguous duplicate through an equivalent ADO address (https://dev.azure.com/org/%50roject/_git/Repo/pullrequest/42)
+AssertionError: expected [Function] to throw an error
+
+- Expected:
+null
+
++ Received:
+undefined
+
+ ❯ src/pods/merge-journal.test.ts:204:9
+    202|           prUrl: alias,
+    203|         }),
+    204|       ).toThrow('ambiguous');
+       |         ^
+    205|       expect(f.db.prepare('SELECT count(*) AS n FROM merge_attempts').…
+    206|     } finally {
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/2]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  2 failed | 1 passed | 13 skipped (16)
+   Start at  01:34:16
+   Duration  405ms (transform 112ms, setup 0ms, import 172ms, tests 140ms, environment 0ms)

@@ -78,9 +78,21 @@ function prIdentity(raw: string): string {
     );
     if (!match || !Number.isSafeInteger(Number(match[1])))
       return mergeReconciliation('The durable PR address is not an exact supported pull request.');
-    if (url.hostname.endsWith('.visualstudio.com'))
-      return `https://dev.azure.com/${url.hostname.slice(0, -'.visualstudio.com'.length)}${path}`;
-    if (url.hostname === 'dev.azure.com') return `${url.origin}${path}`;
+    const parts = path.split('/').slice(1).map(decodeURIComponent);
+    const legacy = url.hostname.endsWith('.visualstudio.com');
+    if (canonical || legacy) {
+      const org = canonical ? parts[0] : url.hostname.slice(0, -'.visualstudio.com'.length);
+      const project = parts[canonical ? 1 : 0];
+      const repository = parts[canonical ? 3 : 2];
+      if (
+        !org ||
+        !project ||
+        !repository ||
+        [org, project, repository].some((part) => /[\/\\\0\r\n]/.test(part))
+      )
+        return mergeReconciliation('The durable PR repository path is ambiguous.');
+      return `https://dev.azure.com/${encodeURIComponent(org.toLowerCase())}/${encodeURIComponent(project)}/_git/${encodeURIComponent(repository)}/pullrequest/${Number(match[1])}`;
+    }
   } catch {
     return mergeReconciliation('The durable PR identity is unsupported.');
   }
@@ -202,7 +214,16 @@ export function createMergeJournal(db: Database.Database): MergeJournal {
           const prior = db
             .prepare(`SELECT ${columns} FROM merge_intents WHERE identity = ?`)
             .get(hash) as IntentRow | undefined;
-          if (prior && entry(prior).result?.autoMergeScheduled)
+          const scheduled = db
+            .prepare(
+              `SELECT i.id FROM merge_intents i JOIN merge_observations o ON o.intent_id = i.id
+             WHERE i.pr_identity = ? AND o.disposition = 'pending'
+               AND json_extract(o.result, '$.autoMergeScheduled') = 1
+               AND NOT EXISTS (SELECT 1 FROM merge_observations done
+                 WHERE done.intent_id = i.id AND done.disposition = 'merged') LIMIT 1`,
+            )
+            .get(resource);
+          if (scheduled)
             return mergeReconciliation(
               'The earlier merge is already scheduled; reconcile its disposition.',
             );

@@ -1,0 +1,112 @@
+
+ RUN  v4.1.11 /private/tmp/autopod-durable-execution/packages/daemon
+
+ ❯ src/pods/pod-manager.test.ts (512 tests | 6 failed | 506 skipped) 299ms
+       × reconciles journaled polling after restart ('admitted', merged=false, dirty=false) 80ms
+       × reconciles journaled polling after restart ('scheduled', merged=false, dirty=false) 45ms
+       × reconciles journaled polling after restart ('admitted', merged=true, dirty=false) 53ms
+       × reconciles journaled polling after restart ('admitted', merged=true, dirty=true) 40ms
+       × reconciles journaled polling after restart ('pending', merged=false, dirty=true) 38ms
+       × reconciles journaled polling after restart ('pending', merged=false, dirty=false) 42ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 6 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/pods/pod-manager.test.ts > PodManager > merge poll lifecycle > reconciles journaled polling after restart ('admitted', merged=false, dirty=false)
+ FAIL  src/pods/pod-manager.test.ts > PodManager > merge poll lifecycle > reconciles journaled polling after restart ('scheduled', merged=false, dirty=false)
+ FAIL  src/pods/pod-manager.test.ts > PodManager > merge poll lifecycle > reconciles journaled polling after restart ('pending', merged=false, dirty=true)
+AssertionError: expected "vi.fn()" to be called +0 times, but got 1 times
+ ❯ src/pods/pod-manager.test.ts:4611:41
+    4609|           }
+    4610|           const retries = disposition === 'pending' && !dirty ? 1 : 0;
+    4611|           expect(ctx.prManager.mergePr).toHaveBeenCalledTimes(retries);
+       |                                         ^
+    4612|           if (retries)
+    4613|             expect(ctx.prManager.mergePr).toHaveBeenCalledWith(
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/6]⎯
+
+ FAIL  src/pods/pod-manager.test.ts > PodManager > merge poll lifecycle > reconciles journaled polling after restart ('admitted', merged=true, dirty=false)
+AssertionError: expected { n: +0 } to deeply equal { n: 1 }
+
+- Expected
++ Received
+
+  {
+-   "n": 1,
++   "n": 0,
+  }
+
+ ❯ src/pods/pod-manager.test.ts:4601:15
+    4599|                 )
+    4600|                 .get(),
+    4601|             ).toEqual({ n: 1 });
+       |               ^
+    4602|           } else {
+    4603|             expect(manager.getSession(pod.id)).toMatchObject({
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/6]⎯
+
+ FAIL  src/pods/pod-manager.test.ts > PodManager > merge poll lifecycle > reconciles journaled polling after restart ('admitted', merged=true, dirty=true)
+AssertionError: expected { id: 'combined-minnow', …(113) } to match object { status: 'merge_pending', …(2) }
+(124 matching properties omitted from actual)
+
+- Expected
++ Received
+
+  {
+-   "completedAt": null,
++   "completedAt": "2026-09-07T23:29:20.653Z",
+    "containerId": "retained-source",
+-   "status": "merge_pending",
++   "status": "complete",
+  }
+
+ ❯ src/pods/pod-manager.test.ts:4603:48
+    4601|             ).toEqual({ n: 1 });
+    4602|           } else {
+    4603|             expect(manager.getSession(pod.id)).toMatchObject({
+       |                                                ^
+    4604|               status: 'merge_pending',
+    4605|               containerId: 'retained-source',
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/6]⎯
+
+ FAIL  src/pods/pod-manager.test.ts > PodManager > merge poll lifecycle > reconciles journaled polling after restart ('pending', merged=false, dirty=false)
+AssertionError: expected "vi.fn()" to be called with arguments: [ ObjectContaining{…} ]
+
+Received:
+
+  1st vi.fn() call:
+
+  [
+-   ObjectContaining {
+-     "expectedHeadSha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+-     "expectedTarget": {
+-       "baseBranch": "main",
+-       "branch": "autopod/nutty-quail",
+-       "repository": "https://github.com/org/repo",
+-     },
+-     "onPrepared": Any<Function>,
++   {
++     "prUrl": "https://github.com/org/repo/pull/42",
+    },
+  ]
+
+
+Number of calls: 1
+
+ ❯ src/pods/pod-manager.test.ts:4613:43
+    4611|           expect(ctx.prManager.mergePr).toHaveBeenCalledTimes(retries);
+    4612|           if (retries)
+    4613|             expect(ctx.prManager.mergePr).toHaveBeenCalledWith(
+       |                                           ^
+    4614|               expect.objectContaining({
+    4615|                 expectedHeadSha: source.commitSha,
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[4/6]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  6 failed | 506 skipped (512)
+   Start at  01:29:19
+   Duration  1.52s (transform 753ms, setup 0ms, import 1.11s, tests 299ms, environment 0ms)

@@ -1,6 +1,13 @@
 import type { Pod } from '@autopod/shared';
-import type { MergePrConfig, MergePrResult, PrManager } from '../interfaces/pr-manager.js';
+import type {
+  MergePrConfig,
+  MergePrResult,
+  PrManager,
+  PrMergeStatus,
+} from '../interfaces/pr-manager.js';
+import type { WorktreeManager } from '../interfaces/worktree-manager.js';
 import type { MergeJournal, MergeJournalEntry } from '../pods/merge-journal.js';
+import type { SourcePublicationLedger } from '../pods/source-publication-ledger.js';
 import type { ConfirmedSourcePublication } from './durable-source-publication.js';
 import { mergeReconciliation } from './merge-source-identity.js';
 
@@ -10,13 +17,16 @@ export async function reconcileMerge(
   pod: Pod,
   entry: MergeJournalEntry,
   provider: PrManager,
+  observedStatus?: PrMergeStatus,
 ): Promise<MergePrResult> {
   journal.check(pod, entry);
   if (entry.state === 'merged' && entry.result?.merged) return entry.result;
-  const status = await provider.getPrStatus({
-    prUrl: entry.request.config.prUrl,
-    worktreePath: pod.worktreePath ?? undefined,
-  });
+  const status =
+    observedStatus ??
+    (await provider.getPrStatus({
+      prUrl: entry.request.config.prUrl,
+      worktreePath: pod.worktreePath ?? undefined,
+    }));
   if (status.merged !== true || !status.headSha || !status.sourceTarget)
     return mergeReconciliation(
       'The earlier merge is not confirmed for its admitted source and target.',
@@ -86,4 +96,32 @@ export async function mergePublishedSource(
     }
     throw error;
   }
+}
+
+/** Read-only proof for consuming a historical merge or retrying its exact source. */
+export async function inspectRetainedMergeSource(
+  journal: MergeJournal,
+  publications: SourcePublicationLedger | undefined,
+  pod: Pod,
+  entry: MergeJournalEntry,
+  manager: WorktreeManager,
+): Promise<ConfirmedSourcePublication> {
+  journal.check(pod, entry);
+  const source = publications?.confirmedForMerge(
+    { ...pod, prUrl: entry.request.publicationPrUrl },
+    pod,
+    entry.publicationId,
+  );
+  if (!source || !pod.worktreePath || !manager.inspectSource)
+    return mergeReconciliation('Retained local source cannot be verified before delivery.');
+  const snapshot = await manager.inspectSource(pod.worktreePath, pod.branch);
+  journal.check(pod, entry);
+  if (
+    !snapshot.worktreeClean ||
+    snapshot.branch !== source.branch ||
+    snapshot.commitSha !== source.commitSha ||
+    snapshot.treeSha !== source.treeSha
+  )
+    return mergeReconciliation('Retained local source changed after the admitted publication.');
+  return { ...source, publicationId: entry.publicationId };
 }

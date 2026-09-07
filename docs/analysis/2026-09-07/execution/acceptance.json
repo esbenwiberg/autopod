@@ -256,7 +256,8 @@
         "receipts/checkpoint-42-validation-identity.json",
         "checkpoint-43.md: durable approval merge admission and recovery; poller, resource cleanup and broader acceptance remain partial",
         "receipts/checkpoint-43-full-validation.txt",
-        "receipts/checkpoint-43-validation-identity.json"
+        "receipts/checkpoint-43-validation-identity.json",
+        "checkpoint-44.md: journal-aware polling and cross-generation admission guards; legacy unjournaled polling, complete cleanup and operator acceptance remain partial"
       ],
       "prerequisites": [
         "PR creation intent/reconciliation implemented locally; broader finalization side effects and operator override remain."
@@ -1679,5 +1680,5 @@
       "prerequisites": []
     }
   ],
-  "lastCheckpoint": "checkpoint-43.md"
+  "lastCheckpoint": "checkpoint-44.md"
 }

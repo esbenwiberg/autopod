@@ -10,7 +10,11 @@ import { createMergeJournal } from './merge-journal.js';
 import { createPodRepository } from './pod-repository.js';
 import { createSourcePublicationLedger } from './source-publication-ledger.js';
 
-function fixture(db = createTestDb(), confirmed = true) {
+function fixture(
+  db = createTestDb(),
+  confirmed = true,
+  repository = 'https://github.com/org/repo',
+) {
   insertTestProfile(db);
   const repo = createPodRepository(db);
   repo.insert({
@@ -32,7 +36,7 @@ function fixture(db = createTestDb(), confirmed = true) {
   const publications = createSourcePublicationLedger(db);
   const proof = {
     branch: 'feature',
-    repository: 'https://github.com/org/repo',
+    repository,
     commitSha: 'a'.repeat(40),
     treeSha: 'b'.repeat(40),
     remoteRef: 'refs/heads/feature',
@@ -42,7 +46,10 @@ function fixture(db = createTestDb(), confirmed = true) {
   };
   const publicationId = publications.admit(publicationPod, proof);
   if (confirmed) publications.confirm(publicationPod, publicationId, proof);
-  repo.update('merge-source', { status: 'merging', prUrl: 'https://github.com/org/repo/pull/42' });
+  repo.update('merge-source', {
+    status: 'merging',
+    prUrl: `${repository}/${repository.includes('github.com') ? 'pull' : 'pullrequest'}/42`,
+  });
   const pod = repo.getOrThrow('merge-source');
   const config = {
     prUrl: pod.prUrl ?? '',
@@ -150,6 +157,51 @@ describe('durable merge journal', () => {
       expect(() => f.journal.claim(f.pod, f.publicationPod, f.publicationId, f.config)).toThrow(
         'already scheduled',
       );
+      expect(f.db.prepare('SELECT count(*) AS n FROM merge_attempts').get()).toEqual({ n: 1 });
+    } finally {
+      f.db.close();
+    }
+  });
+
+  it('does not bypass a scheduled merge by creating a new lifecycle publication', () => {
+    const f = fixture();
+    try {
+      const attempt = f.journal.claim(f.pod, f.publicationPod, f.publicationId, f.config);
+      f.journal.observe(attempt, { merged: false, autoMergeScheduled: true }, 'merge_response');
+      f.repo.incrementLifecycleGeneration(f.pod.id);
+      const current = f.repo.getOrThrow(f.pod.id);
+      const publications = createSourcePublicationLedger(f.db);
+      const newPublication = publications.admit(current, f.proof);
+      publications.confirm(current, newPublication, f.proof);
+      expect(() => f.journal.claim(current, current, newPublication, f.config)).toThrow(
+        'already scheduled',
+      );
+      expect(f.db.prepare('SELECT count(*) AS n FROM merge_attempts').get()).toEqual({ n: 1 });
+    } finally {
+      f.db.close();
+    }
+  });
+
+  it.each([
+    'https://dev.azure.com/ORG/Project/_git/Repo/pullrequest/42',
+    'https://org.visualstudio.com/Project/_git/Repo/pullrequest/42',
+    'https://dev.azure.com/org/%50roject/_git/Repo/pullrequest/42',
+  ])('does not admit an ambiguous duplicate through an equivalent ADO address (%s)', (alias) => {
+    const f = fixture(undefined, true, 'https://dev.azure.com/org/Project/_git/Repo');
+    try {
+      f.journal.claim(f.pod, f.publicationPod, f.publicationId, f.config);
+      f.repo.incrementLifecycleGeneration(f.pod.id);
+      f.repo.update(f.pod.id, { prUrl: alias });
+      const current = f.repo.getOrThrow(f.pod.id);
+      const publications = createSourcePublicationLedger(f.db);
+      const publicationId = publications.admit(current, f.proof);
+      publications.confirm(current, publicationId, f.proof);
+      expect(() =>
+        f.journal.claim(current, current, publicationId, {
+          ...f.config,
+          prUrl: alias,
+        }),
+      ).toThrow('ambiguous');
       expect(f.db.prepare('SELECT count(*) AS n FROM merge_attempts').get()).toEqual({ n: 1 });
     } finally {
       f.db.close();
