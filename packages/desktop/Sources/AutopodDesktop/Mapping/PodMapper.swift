@@ -102,7 +102,7 @@ public enum PodMapper {
       containerUrl: response.previewUrl.flatMap(URL.init(string:)),
       hasWebUi: response.hasWebUi,
       latestActivity: response.finalization?.operatorSummary
-        ?? response.recordDiagnostics.flatMap { $0.isEmpty ? nil : "Saved evidence unreadable: " + $0.map(\.field).joined(separator: ", ") }
+        ?? response.recordDiagnostics.flatMap { $0.isEmpty ? nil : "Saved evidence unavailable in this view: " + $0.map { "\($0.field) (\($0.code))" }.joined(separator: ", ") }
         ?? response.progressSummary
         ?? response.lastCorrectionMessage
         ?? response.mergeBlockReason
@@ -452,7 +452,7 @@ public enum PodMapper {
     let containerUrl: URL? = response.previewUrl.flatMap { URL(string: $0) }
     let hasWebUi: Bool = response.hasWebUi ?? false
     let evidenceDiagnostic: String? = response.recordDiagnostics.flatMap { records in
-      records.isEmpty ? nil : "Saved evidence unreadable: " + records.map(\.field).joined(separator: ", ")
+      records.isEmpty ? nil : "Saved evidence unavailable in this view: " + records.map { "\($0.field) (\($0.code))" }.joined(separator: ", ")
     }
     let latestActivity: String? = evidenceDiagnostic
       ?? response.finalization?.operatorSummary

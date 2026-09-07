@@ -36,6 +36,11 @@ import type Database from 'better-sqlite3';
 import { type UnitOfWork, createUnitOfWork } from '../db/unit-of-work.js';
 import { extractFindings } from '../validation/finding-fingerprint.js';
 import {
+  COMPACT_JSON_FIELDS,
+  COMPACT_POD_COLUMNS,
+  type CompactPodSource,
+} from './compact-pod-projection.js';
+import {
   type DispatchPreflightLedger,
   createDispatchPreflightLedger,
 } from './dispatch-preflight-ledger.js';
@@ -253,6 +258,8 @@ export interface PodRepository extends Partial<UnitOfWork> {
   list(filters?: PodFilters): Pod[];
   /** Operator reads only: preserve healthy records and explicitly identify unreadable JSON. */
   listForDisplay?(filters?: PodFilters): Pod[];
+  /** Compact operator projection: bounded display JSON, no full control-plane evidence. */
+  listCompactForDisplay?(filters?: PodFilters): CompactPodSource[];
   /** Bounded cost projection; never materializes contracts, prompts or validation payloads. */
   listCostRecords?(completedSince: string): Pod[];
   /** All pods whose status is not terminal (`complete` / `killed`). */
@@ -578,6 +585,17 @@ function rowToDisplaySession(source: Record<string, unknown>): Pod {
       row.task_summary = null;
     }
   }
+  for (const [field, keys] of [
+    ['pending_escalation', ['question']],
+    ['progress', ['phase', 'description']],
+  ] as const) {
+    if (!row[field]) continue;
+    const value = JSON.parse(String(row[field])) as Record<string, unknown>;
+    if (value && keys.some((key) => typeof value[key] !== 'string')) {
+      diagnostics.push({ field, code: 'invalid_shape' });
+      row[field] = null;
+    }
+  }
   // Keep unknown or malformed cost telemetry explicit, never NaN or invented zero phase costs.
   if (row.phase_token_usage) {
     const phases = JSON.parse(String(row.phase_token_usage)) as Record<string, unknown>;
@@ -611,7 +629,7 @@ export function createPodRepository(db: Database.Database): PodRepository {
   const completionJournal = createCompletionJournal(db);
   const dispatchPreflight = createDispatchPreflightLedger(db);
   const taskExecutions = createTaskExecutionLedger(db);
-  function listRows(filters?: PodFilters): Iterable<Record<string, unknown>> {
+  function listRows(filters?: PodFilters, columns = '*'): Iterable<Record<string, unknown>> {
     const whereClauses: string[] = [];
     const params: Record<string, unknown> = {};
 
@@ -648,7 +666,7 @@ export function createPodRepository(db: Database.Database): PodRepository {
     const limit = filters?.limit === undefined ? '' : ' LIMIT @limit';
     if (filters?.limit !== undefined) params.limit = filters.limit;
     return db
-      .prepare(`SELECT * FROM pods ${where} ORDER BY created_at DESC, id DESC${limit}`)
+      .prepare(`SELECT ${columns} FROM pods ${where} ORDER BY created_at DESC, id DESC${limit}`)
       .iterate(params) as Iterable<Record<string, unknown>>;
   }
 
@@ -1202,6 +1220,19 @@ export function createPodRepository(db: Database.Database): PodRepository {
 
     list(filters?: PodFilters): Pod[] {
       return Array.from(listRows(filters), rowToSession);
+    },
+
+    listCompactForDisplay(filters?: PodFilters): CompactPodSource[] {
+      return Array.from(listRows(filters, COMPACT_POD_COLUMNS), (row) => {
+        const pod = rowToDisplaySession(row);
+        for (const field of COMPACT_JSON_FIELDS) {
+          if (row[`${field}_oversized`]) pod.recordDiagnostics?.push({ field, code: 'size_limit' });
+        }
+        return {
+          ...pod,
+          finalization: completionJournal.getForDisplay?.(pod.id, pod.lifecycleGeneration) ?? null,
+        };
+      });
     },
 
     listForDisplay(filters?: PodFilters): Pod[] {

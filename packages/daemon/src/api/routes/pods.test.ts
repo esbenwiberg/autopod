@@ -153,6 +153,80 @@ describe('GET /pods/:podId provider-attempt projection', () => {
     expect(cost.json().total).toBe(4);
   });
 
+  it('projects compact history without parsing large unrelated evidence or returning settled output', async () => {
+    insertPod(db, { id: 'bounded-list', status: 'complete' });
+    const large = 'large-evidence-marker '.repeat(100_000);
+    db.prepare(`UPDATE pods SET task = ?, contract = ?, last_validation_result = ?,
+      spec_files = ?, task_summary = ? WHERE id = 'bounded-list'`).run(
+      large,
+      JSON.stringify({ purpose: large }),
+      JSON.stringify({ output: large }),
+      JSON.stringify([{ path: 'huge.md', content: large }]),
+      JSON.stringify({ actualSummary: 'Preserved summary' }),
+    );
+    db.prepare(`INSERT INTO pod_finalizations
+      (pod_id, generation, cycle, phase, agent_settled_at, result, updated_at)
+      VALUES ('bounded-list', 1, 1, 'preserving', datetime('now'), ?, datetime('now'))`).run(large);
+    const parse = JSON.parse;
+    const parser = vi.spyOn(JSON, 'parse').mockImplementation((...args) => {
+      if (args[0].length > 256 * 1024) throw new Error('Unbounded evidence reached JSON parser');
+      return parse(...args);
+    });
+    try {
+      const response = await app.inject({
+        method: 'GET',
+        url: '/pods?compact=true&page=true&limit=10',
+      });
+      expect(response.statusCode, response.body.slice(0, 500)).toBe(200);
+      expect(Buffer.byteLength(response.body)).toBeLessThan(16 * 1024);
+      expect(response.json().pods[0]).toMatchObject({
+        id: 'bounded-list',
+        taskSummary: 'Preserved summary',
+        finalization: { phase: 'preserving', resultTruncated: true },
+      });
+      expect(response.json().pods[0].taskExcerpt).toHaveLength(2_000);
+      expect(response.json().pods[0].finalization.result).toHaveLength(500);
+      expect(parser.mock.calls.every(([text]) => text.length <= 256 * 1024)).toBe(true);
+    } finally {
+      parser.mockRestore();
+    }
+    expect(
+      db
+        .prepare(
+          "SELECT length(result) AS size FROM pod_finalizations WHERE pod_id = 'bounded-list'",
+        )
+        .get(),
+    ).toEqual({ size: large.length });
+  });
+
+  it('reports oversized compact evidence and malformed display fields without dropping records', async () => {
+    insertPod(db, { id: 'oversized-list', status: 'running', completedAt: undefined });
+    insertPod(db, { id: 'healthy-list', status: 'complete' });
+    db.prepare(`UPDATE pods SET task_summary = ?, pending_escalation = ?, progress = ?
+      WHERE id = 'oversized-list'`).run(
+      JSON.stringify({ actualSummary: 'x'.repeat(100_000) }),
+      JSON.stringify({ question: { invalid: true } }),
+      JSON.stringify({ phase: ['invalid'], description: 'Progress' }),
+    );
+    const response = await app.inject({
+      method: 'GET',
+      url: '/pods?compact=true&page=true&limit=10',
+    });
+    expect(response.statusCode).toBe(200);
+    const pods = response.json().pods;
+    expect(pods).toHaveLength(2);
+    expect(pods.find((pod: { id: string }) => pod.id === 'oversized-list')).toMatchObject({
+      taskSummary: null,
+      pendingEscalationSummary: null,
+      progressSummary: null,
+      recordDiagnostics: expect.arrayContaining([
+        { field: 'task_summary', code: 'size_limit' },
+        { field: 'pending_escalation', code: 'invalid_shape' },
+        { field: 'progress', code: 'invalid_shape' },
+      ]),
+    });
+  });
+
   it('exposes bounded task accounting even when unrelated large pod evidence is malformed', async () => {
     insertPod(db, { id: 'task-accounting', status: 'running', completedAt: undefined });
     createPodRepository(db).taskExecutions?.register('task-accounting');

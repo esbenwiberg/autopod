@@ -98,6 +98,55 @@ describe('continue-provider command', () => {
   });
 });
 
+it('shows compact evidence omissions through the actual HTTP client and CLI command', async () => {
+  const requests: string[] = [];
+  const server = createServer((request, response) => {
+    requests.push(`${request.method} ${request.url}`);
+    response.setHeader('content-type', 'application/json');
+    response.end(
+      JSON.stringify([
+        {
+          id: 'bounded-list',
+          profileName: 'test',
+          status: 'complete',
+          title: 'Preserved work',
+          startedAt: null,
+          completedAt: null,
+          recordDiagnostics: [{ field: 'task_summary', code: 'size_limit' }],
+        },
+      ]),
+    );
+  });
+  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+  const address = server.address();
+  if (!address || typeof address === 'string') throw new Error('Missing fixture port');
+  const client = new AutopodClient({
+    baseUrl: `http://127.0.0.1:${address.port}`,
+    getToken: async () => 'local-fixture-only',
+  });
+  const log = vi.spyOn(console, 'log').mockImplementation(() => {});
+  try {
+    const program = new Command();
+    registerPodCommands(program, () => client);
+    await program.parseAsync(['node', 'ap', 'ls', '--compact', '--limit', '10']);
+    const output = log.mock.calls.map((call) => call.join(' ')).join('\n');
+    expect(output).toContain('Preserved work');
+    expect(output).toContain(
+      'bounded-list: Evidence unavailable in this view: task_summary (size_limit)',
+    );
+    expect(requests).toHaveLength(1);
+    const request = requests[0];
+    if (!request) throw new Error('CLI did not send its list request');
+    const url = new URL(request.slice(4), 'http://localhost');
+    expect(url.pathname).toBe('/pods');
+    expect(url.searchParams.get('compact')).toBe('true');
+    expect(url.searchParams.get('limit')).toBe('10');
+  } finally {
+    log.mockRestore();
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+  }
+});
+
 describe('ls command', () => {
   let program: Command;
   let mockClient: AutopodClient;

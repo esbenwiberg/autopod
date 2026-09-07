@@ -199,11 +199,16 @@ export interface Pod {
     phase: 'running' | 'awaiting_human' | 'ready' | 'preserving' | 'finalizing' | 'finished';
     agentSettledAt: string | null;
     result: string | null;
+    /** Compact display excerpt only; the complete durable result remains stored. */
+    resultTruncated?: boolean;
     pendingDecisionId: string | null;
     sourcePreservedAt: string | null;
   } | null;
   /** Read-only list diagnostics. Raw control-plane reads still reject corrupt state. */
-  recordDiagnostics?: Array<{ field: string; code: 'invalid_json' | 'invalid_shape' }>;
+  recordDiagnostics?: Array<{
+    field: string;
+    code: 'invalid_json' | 'invalid_shape' | 'size_limit';
+  }>;
 
   id: string;
   profileName: string;
@@ -651,7 +656,10 @@ export interface PodSummary {
 export interface CompactPod {
   finalization?: Pod['finalization'];
   /** Read-only list diagnostics. Raw control-plane reads still reject corrupt state. */
-  recordDiagnostics?: Array<{ field: string; code: 'invalid_json' | 'invalid_shape' }>;
+  recordDiagnostics?: Array<{
+    field: string;
+    code: 'invalid_json' | 'invalid_shape' | 'size_limit';
+  }>;
 
   id: string;
   title: string;

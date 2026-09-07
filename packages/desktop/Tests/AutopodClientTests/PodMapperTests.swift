@@ -1657,4 +1657,10 @@ private let minimalSessionJson = """
   finished["status"] = "complete"
   let complete = try JSONDecoder().decode(SessionResponse.self, from: JSONSerialization.data(withJSONObject: finished))
   #expect(!PodMapper.map(complete).artifactCollectionPending)
+  finished["finalization"] = NSNull()
+  finished["recordDiagnostics"] = [["field": "task_summary", "code": "size_limit"]]
+  let omitted = try JSONSerialization.data(withJSONObject: finished)
+  let message = "Saved evidence unavailable in this view: task_summary (size_limit)"
+  #expect(PodMapper.map(try JSONDecoder().decode(SessionResponse.self, from: omitted)).latestActivity == message)
+  #expect(PodMapper.map(try JSONDecoder().decode(CompactPodResponse.self, from: omitted)).latestActivity == message)
 }

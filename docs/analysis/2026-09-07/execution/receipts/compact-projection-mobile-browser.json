@@ -1,0 +1,17 @@
+{
+  "scope": "Built local mobile with synthetic read-only data; no runtime or production operation",
+  "baseCommit": "3a7af4a9a2e04adb9894e916bc34b8568c07bcbd",
+  "source": "Checkpoint 20 changes uncommitted during interaction",
+  "surface": "Codex in-app browser tab 13",
+  "url": "http://127.0.0.1:51740/mobile/",
+  "observed": [
+    "List to detail and Back navigation completed.",
+    "Detail showed Saved evidence unavailable: lastValidationResult (invalid_json), retained settlement and the unanswered human question. No answer or action was submitted."
+  ],
+  "limitations": [
+    "The accessibility snapshot did not expose the list card alert, so the exact changed card label is not browser-verified.",
+    "This synthetic fixture uses full pod responses. Actual compact SQL behavior is tested through real SQLite/Fastify tests separately.",
+    "Native desktop has compiled tests, not actual UI interaction."
+  ],
+  "cleanup": "Tab closed and local fixture stopped with Ctrl-C."
+}

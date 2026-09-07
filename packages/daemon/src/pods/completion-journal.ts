@@ -5,6 +5,7 @@ import { hasUnansweredDecision } from './decision-admission.js';
 type Finalization = NonNullable<Pod['finalization']>;
 export interface CompletionJournal {
   get(podId: string, generation: number): Finalization | null;
+  getForDisplay?(podId: string, generation: number): Finalization | null;
   begin(pod: Pod): void;
   settle(pod: Pod, result?: string): Finalization;
   mark(pod: Pod, phase: Finalization['phase'], sourcePreserved?: boolean): void;
@@ -15,14 +16,16 @@ export interface CompletionJournal {
 
 /** SQLite journal, deliberately independent of ephemeral MCP waiters and runtime promises. */
 export function createCompletionJournal(db: Database.Database): CompletionJournal {
-  function get(podId: string, generation: number): Finalization | null {
-    return (
+  function get(podId: string, generation: number, display = false): Finalization | null {
+    const entry =
       (db
         .prepare(`SELECT generation, cycle, phase, agent_settled_at AS agentSettledAt,
-      result, pending_decision_id AS pendingDecisionId, source_preserved_at AS sourcePreservedAt
+      ${display ? 'substr(result, 1, 500)' : 'result'} AS result,
+      ${display ? 'length(result) > 500 AS resultTruncated,' : ''}
+      pending_decision_id AS pendingDecisionId, source_preserved_at AS sourcePreservedAt
       FROM pod_finalizations WHERE pod_id = ? AND generation = ? ORDER BY cycle DESC LIMIT 1`)
-        .get(podId, generation) as Finalization | undefined) ?? null
-    );
+        .get(podId, generation) as Finalization | undefined) ?? null;
+    return display && entry ? { ...entry, resultTruncated: Boolean(entry.resultTruncated) } : entry;
   }
   function current(pod: Pod): boolean {
     const row = db
@@ -48,6 +51,7 @@ export function createCompletionJournal(db: Database.Database): CompletionJourna
     );
   });
   return {
+    getForDisplay: (podId, generation) => get(podId, generation, true),
     get,
     begin: (pod) => begin(pod),
     replyWatermark(podId) {

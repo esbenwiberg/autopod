@@ -1,0 +1,45 @@
+
+ RUN  v4.1.11 /private/tmp/autopod-durable-execution/packages/daemon
+
+ ❯ src/api/routes/pods.test.ts (80 tests | 2 failed | 78 skipped) 160ms
+     × projects compact history without parsing large unrelated evidence or returning settled output 109ms
+     × reports oversized compact evidence and malformed display fields without dropping records 50ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 2 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/api/routes/pods.test.ts > GET /pods/:podId provider-attempt projection > projects compact history without parsing large unrelated evidence or returning settled output
+AssertionError: expected 2203430 to be less than 16384
+ ❯ src/api/routes/pods.test.ts:178:48
+    176|       const response = await app.inject({ method: 'GET', url: '/pods?c…
+    177|       expect(response.statusCode).toBe(200);
+    178|       expect(Buffer.byteLength(response.body)).toBeLessThan(16 * 1024);
+       |                                                ^
+    179|       expect(response.json().pods[0]).toMatchObject({
+    180|         id: 'bounded-list',
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/2]⎯
+
+ FAIL  src/api/routes/pods.test.ts > GET /pods/:podId provider-attempt projection > reports oversized compact evidence and malformed display fields without dropping records
+AssertionError: expected 500 to be 200 // Object.is equality
+
+- Expected
++ Received
+
+- 200
++ 500
+
+ ❯ src/api/routes/pods.test.ts:202:33
+    200|     );
+    201|     const response = await app.inject({ method: 'GET', url: '/pods?com…
+    202|     expect(response.statusCode).toBe(200);
+       |                                 ^
+    203|     const pods = response.json().pods;
+    204|     expect(pods).toHaveLength(2);
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/2]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  2 failed | 78 skipped (80)
+   Start at  19:22:38
+   Duration  1.78s (transform 872ms, setup 0ms, import 1.49s, tests 160ms, environment 0ms)

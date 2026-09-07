@@ -17,6 +17,7 @@ import type Database from 'better-sqlite3';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import type { ActionAuditRepository } from '../../actions/audit-repository.js';
+import type { CompactPodSource } from '../../pods/compact-pod-projection.js';
 import { aggregateCost, parseDays } from '../../pods/cost-aggregation.js';
 import { dispatchRerunRequest } from '../../pods/dispatch-rerun-request.js';
 import type { EscalationRepository } from '../../pods/escalation-repository.js';
@@ -136,7 +137,7 @@ function compactText(value: string | null | undefined, maxChars = COMPACT_SUMMAR
 }
 
 function compactPod(
-  pod: ReturnType<PodManager['getSession']>,
+  pod: CompactPodSource,
   request: FastifyRequest,
   eventRepo?: EventRepository,
 ): CompactPod {
@@ -238,7 +239,7 @@ function serializePodForRequest(
 }
 
 function latestActiveReviewProgress(
-  pod: ReturnType<PodManager['getSession']>,
+  pod: Pick<CompactPodSource, 'id' | 'status' | 'validationAttempts'>,
   eventRepo?: EventRepository,
 ): ReviewProgressSnapshot | null {
   if (!eventRepo || pod.status !== 'validating') return null;
@@ -656,15 +657,16 @@ export function podRoutes(
     const paginatedLimit = limit ?? MAX_POD_LIST_LIMIT;
     const readPods =
       podRepo?.listForDisplay?.bind(podRepo) ?? podManager.listSessions.bind(podManager);
-    const pods = readPods({
+    const filters = {
       profileName: query.profileName ?? query.profile,
       status: statuses,
       userId: query.userId,
       limit: paginated ? paginatedLimit + 1 : limit,
       since,
       before: cursor ?? undefined,
-    });
+    };
     if (query.compact === 'true') {
+      const pods = podRepo?.listCompactForDisplay?.(filters) ?? readPods(filters);
       if (!paginated) return pods.map((pod) => compactPod(pod, request, eventRepo));
       const hasMore = pods.length > paginatedLimit;
       const records = hasMore ? pods.slice(0, paginatedLimit) : pods;
@@ -676,6 +678,7 @@ export function podRoutes(
       };
       return response;
     }
+    const pods = readPods(filters);
     return pods.map((pod) => serializePodForRequest(pod, request, providerAttemptRepo, eventRepo));
   });
 

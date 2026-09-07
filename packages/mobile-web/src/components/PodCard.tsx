@@ -33,7 +33,8 @@ export function PodCard({ pod }: Props): JSX.Element {
       </div>
       {pod.recordDiagnostics?.length ? (
         <div role="alert" className="error">
-          Some saved evidence is unreadable: {pod.recordDiagnostics.map((d) => d.field).join(', ')}
+          Saved evidence unavailable in this view:{' '}
+          {pod.recordDiagnostics.map((d) => `${d.field} (${d.code})`).join(', ')}
         </div>
       ) : null}
       {pod.finalization?.pendingDecisionId && pod.finalization.agentSettledAt ? (

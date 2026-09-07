@@ -656,6 +656,13 @@ export function registerPodCommands(program: Command, getClient: () => AutopodCl
               return;
             }
             console.log(renderTable(data, compactPodColumns));
+            for (const pod of data)
+              for (const diagnostic of pod.recordDiagnostics ?? [])
+                console.log(
+                  chalk.yellow(
+                    `${pod.id}: Evidence unavailable in this view: ${diagnostic.field} (${diagnostic.code})`,
+                  ),
+                );
           });
           return;
         }

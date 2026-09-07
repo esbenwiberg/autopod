@@ -817,15 +817,24 @@
       "implementation": [
         "packages/daemon/src/pods/pod-repository.ts",
         "packages/daemon/src/pods/cost-aggregation.ts",
-        "packages/daemon/src/api/routes/pods.ts"
+        "packages/daemon/src/api/routes/pods.ts",
+        "packages/daemon/src/pods/compact-pod-projection.ts",
+        "packages/daemon/src/pods/completion-journal.ts",
+        "packages/shared/src/types/pod.ts"
       ],
       "tests": [
         "docs/analysis/2026-09-07/diagnostics.test.ts",
         "packages/daemon/src/pods/cost-aggregation.test.ts",
         "packages/daemon/src/api/routes/pods.test.ts"
       ],
-      "evidence": ["receipts/history-cost-api.txt"],
-      "prerequisites": []
+      "evidence": [
+        "receipts/history-cost-api.txt",
+        "checkpoint-20.md",
+        "receipts/compact-projection-red.txt",
+        "receipts/compact-projection-final.txt"
+      ],
+      "prerequisites": [],
+      "remaining": "Dedicated compact SQLite projection bounds task/text excerpts and four display JSON fields before Node materialization, excludes unrelated evidence, and marks truncated finalization output without changing storage. Paginated rows retain existing keyset/limit rules. Legacy full/nonpaginated reads and review-event hydration are not globally memory bounded; historical live failure cause, final source and live verification remain."
     },
     {
       "id": "W4.7",
@@ -910,7 +919,12 @@
         "receipts/task-budget-affected.txt",
         "receipts/task-budget-cli.txt",
         "receipts/task-budget-swift.txt",
-        "receipts/task-budget-mobile-browser.json"
+        "receipts/task-budget-mobile-browser.json",
+        "receipts/compact-projection-cli.txt",
+        "receipts/compact-projection-swift.txt",
+        "receipts/compact-projection-swift-diagnostic.txt",
+        "receipts/compact-projection-mobile.txt",
+        "receipts/compact-projection-mobile-browser.json"
       ],
       "prerequisites": [
         "Selected mobile flows and new health CLI have local interaction proof. Desktop has compilation and tests only. Remaining operator flows, physical device and live evidence are outstanding."
@@ -1290,7 +1304,9 @@
         "receipts/checkpoint-18-full-validation.txt",
         "receipts/checkpoint-18-validation-identity.json",
         "receipts/linux-process-18e5bd37.txt",
-        "receipts/linux-process-18e5bd37-identity.json"
+        "receipts/linux-process-18e5bd37-identity.json",
+        "receipts/compact-projection-final.txt",
+        "receipts/compact-projection-build.txt"
       ],
       "prerequisites": [
         "Full pipeline passed on clean 64bb3840: daemon 4462 passed, one Linux-only skip, audit zero. The exact skipped callback and implementation function passed separately in local Linux via node:test at unchanged implementation HEAD 18e5bd37. This is not a full Linux Vitest run. Final source verification remains after subsequent implementation."
@@ -1313,7 +1329,12 @@
         "receipts/artifact-recovery-swift.txt",
         "receipts/task-budget-mobile-browser.json",
         "receipts/task-budget-cli.txt",
-        "receipts/task-budget-swift.txt"
+        "receipts/task-budget-swift.txt",
+        "receipts/compact-projection-cli.txt",
+        "receipts/compact-projection-swift.txt",
+        "receipts/compact-projection-swift-diagnostic.txt",
+        "receipts/compact-projection-mobile.txt",
+        "receipts/compact-projection-mobile-browser.json"
       ],
       "prerequisites": [
         "Selected mobile flows and new health CLI have local interaction proof. Desktop has compilation and tests only. Remaining operator flows, physical device and live evidence are outstanding."
@@ -1338,5 +1359,5 @@
       "prerequisites": []
     }
   ],
-  "lastCheckpoint": "checkpoint-19.md"
+  "lastCheckpoint": "checkpoint-20.md"
 }
