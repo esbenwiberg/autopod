@@ -1,6 +1,7 @@
 import type { ActionDefinition } from '@autopod/shared';
 import type { Logger } from 'pino';
 import { getAzureToken } from '../../providers/azure-token.js';
+import { ActionHttpError } from '../action-diagnostics.js';
 import type { ActionHandler, HandlerConfig } from './handler.js';
 import { fetchWithTimeout, readSafeJson } from './handler.js';
 
@@ -37,9 +38,9 @@ async function findEligibilitySchedule(
     timeout: 15_000,
   });
   if (!response.ok) {
-    const body = await response.text().catch(() => '');
-    throw new Error(
-      `Failed to list role eligibility schedule instances ${response.status}: ${body.slice(0, 300)}`,
+    throw new ActionHttpError(
+      response.status,
+      'Failed to list role eligibility schedule instances',
     );
   }
   const data = (await readSafeJson(response)) as {
@@ -97,10 +98,7 @@ async function findActiveAssignment(
     timeout: 15_000,
   });
   if (!response.ok) {
-    const body = await response.text().catch(() => '');
-    throw new Error(
-      `Failed to list role assignment schedule instances ${response.status}: ${body.slice(0, 300)}`,
-    );
+    throw new ActionHttpError(response.status, 'Failed to list role assignment schedule instances');
   }
   const data = (await readSafeJson(response)) as {
     value?: Array<{
@@ -206,8 +204,7 @@ export function createPimClient(
       });
 
       if (!response.ok) {
-        const body = await response.text().catch(() => '');
-        throw new Error(`PIM activate failed ${response.status}: ${body.slice(0, 300)}`);
+        throw new ActionHttpError(response.status, 'PIM activate failed');
       }
 
       return readSafeJson(response);
@@ -231,8 +228,7 @@ export function createPimClient(
       });
 
       if (!response.ok) {
-        const body = await response.text().catch(() => '');
-        throw new Error(`PIM deactivate failed ${response.status}: ${body.slice(0, 300)}`);
+        throw new ActionHttpError(response.status, 'PIM deactivate failed');
       }
 
       return readSafeJson(response);
@@ -250,8 +246,7 @@ export function createPimClient(
       });
 
       if (!response.ok) {
-        const body = await response.text().catch(() => '');
-        throw new Error(`PIM list failed ${response.status}: ${body.slice(0, 300)}`);
+        throw new ActionHttpError(response.status, 'PIM list failed');
       }
 
       const data = (await readSafeJson(response)) as { value?: unknown[] };
@@ -331,8 +326,7 @@ export function createPimClient(
       });
 
       if (!response.ok) {
-        const body = await response.text().catch(() => '');
-        throw new Error(`PIM RBAC role activate failed ${response.status}: ${body.slice(0, 300)}`);
+        throw new ActionHttpError(response.status, 'PIM RBAC role activate failed');
       }
 
       return readSafeJson(response);
@@ -387,10 +381,7 @@ export function createPimClient(
       });
 
       if (!response.ok) {
-        const body = await response.text().catch(() => '');
-        throw new Error(
-          `PIM RBAC role deactivate failed ${response.status}: ${body.slice(0, 300)}`,
-        );
+        throw new ActionHttpError(response.status, 'PIM RBAC role deactivate failed');
       }
 
       return readSafeJson(response);

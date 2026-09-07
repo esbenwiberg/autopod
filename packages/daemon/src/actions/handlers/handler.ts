@@ -1,6 +1,7 @@
 import type { ActionDefinition } from '@autopod/shared';
 import type { Logger } from 'pino';
 import type { SsrfCheckResult } from '../../api/ssrf-guard.js';
+import { ActionBoundaryError } from '../action-diagnostics.js';
 import type { PinnedHttpTransport } from '../pinned-http-transport.js';
 
 /**
@@ -43,6 +44,8 @@ export interface HandlerConfig {
   ssrfGuard?: (url: string) => Promise<SsrfCheckResult>;
   /** Trusted dependency injection only; never selected from request/profile input. */
   httpTransport?: PinnedHttpTransport;
+  /** Record resolved credentials only in the current action's diagnostic scope. */
+  recordSecret?: (secret: string) => void;
 }
 
 /**
@@ -117,9 +120,7 @@ const DEFAULT_TIMEOUT = 15_000;
 const MAX_RESPONSE_BYTES = 2 * 1024 * 1024;
 
 function responseTooLarge(): Error {
-  return new Error(
-    `Response too large (limit ${MAX_RESPONSE_BYTES} bytes). Use more specific query parameters to reduce results.`,
-  );
+  return new ActionBoundaryError('response_too_large');
 }
 
 /** Consume at most the limit, cancelling the upstream stream on every failure. */
@@ -182,7 +183,7 @@ export async function fetchWithTimeout(
   const signal = callerSignal
     ? AbortSignal.any([controller.signal, callerSignal])
     : controller.signal;
-  const timer = setTimeout(() => controller.abort(), timeout);
+  const timer = setTimeout(() => controller.abort(new ActionBoundaryError('timeout')), timeout);
 
   try {
     signal.throwIfAborted();
@@ -221,7 +222,11 @@ export async function fetchWithTimeout(
 /** Also enforce streaming byte bounds for responses supplied by other callers. */
 export async function readSafeJson(response: Response): Promise<unknown> {
   const bytes = await readBoundedBody(response);
-  return JSON.parse(new TextDecoder().decode(bytes));
+  try {
+    return JSON.parse(new TextDecoder().decode(bytes));
+  } catch {
+    throw new ActionBoundaryError('invalid_response');
+  }
 }
 
 /** Abort pending DNS/transport work promptly; clean up a response arriving late. */

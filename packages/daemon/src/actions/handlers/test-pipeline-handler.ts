@@ -6,6 +6,7 @@ import type { Logger } from 'pino';
 import type { PodRepository } from '../../pods/pod-repository.js';
 import type { ProfileStore } from '../../profiles/index.js';
 import { parseAdoRepoUrl } from '../../worktrees/ado-pr-manager.js';
+import { ActionHttpError } from '../action-diagnostics.js';
 import {
   type ActionHandler,
   type ActionHandlerContext,
@@ -191,12 +192,7 @@ export function createTestPipelineHandler(config: TestPipelineHandlerConfig): Ac
       timeout: 30_000,
     });
     if (!response.ok) {
-      const text = await response.text().catch(() => '');
-      throw new AutopodError(
-        `ADO pipeline trigger failed (${response.status}): ${text.slice(0, 300)}`,
-        'PIPELINE_TRIGGER_FAILED',
-        502,
-      );
+      throw new ActionHttpError(response.status, 'ADO pipeline trigger failed');
     }
     const run = (await readSafeJson(response)) as {
       id: number;
@@ -232,12 +228,7 @@ export function createTestPipelineHandler(config: TestPipelineHandlerConfig): Ac
         timeout: 15_000,
       });
       if (!res.ok) {
-        const text = await res.text().catch(() => '');
-        throw new AutopodError(
-          `ADO pipeline status fetch failed (${res.status}): ${text.slice(0, 300)}`,
-          'PIPELINE_STATUS_FAILED',
-          502,
-        );
+        throw new ActionHttpError(res.status, 'ADO pipeline status fetch failed');
       }
       const data = (await readSafeJson(res)) as {
         id: number;

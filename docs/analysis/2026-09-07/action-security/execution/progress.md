@@ -21,3 +21,13 @@ Local TLS fixtures prove trusted matching certificates succeed, untrusted certif
 Compatibility: generic HTTP actions reject 3xx responses and URL-embedded credentials; administrators must configure a final URL and explicit auth. All shared action requests now buffer at most 2 MiB decoded bytes under a full-body deadline, including text/log/error bodies previously unbounded. No automatic retry of side-effecting requests. DNS lookup itself may settle after cancellation, but no late request is issued.
 
 Next: reproduce synthetic credential leakage through actual action logs, audit records and tool responses; remove unsafe error content while retaining useful diagnostics and truthful metadata. Current action/SSRF overlap check still clear.
+
+## Checkpoint 3: safe action diagnostics
+
+Checkpoint 2 commit: 37d37673. Three RED failures demonstrate opaque credential leakage through upstream errors, credential lookup exceptions, and nested audit values. Failure responses now withhold raw upstream text and raw exception properties, retaining a safe category, action, HTTP status where available, and a UUID matching log/audit entries. Structured action logging and audit parameters use bounded recursive redaction, including URL credentials/query values. AsyncLocalStorage scopes observed credentials to the individual concurrent action; handler instances and their rate-limit state remain shared as before. No audit history is rewritten.
+
+Raw failure content is withheld even without optional PII policy. sanitized=true means content was removed; piiDetected=false and quarantineScore=0 make no unperformed PII/injection classification claim. The same safe response passes through the real exported MCP formatter. Denied approval/resource requests perform zero credential lookups, DNS guards or handler operations, and create no execution audit record. 276 focused tests pass across 17 files, including preserved audit hash verification, provider behavior, and HTTP/TLS fixtures.
+
+Additional raw `tsc --noEmit --project packages/daemon/tsconfig.json` is not the repository's configured typecheck and reports existing test typing debt (for example unchanged action-engine.test.ts lacks getSafetySummary in a mock and uses an invalid group). New fixture typing/import errors found by this extra check were corrected; none remain in new test files or changed production modules. Required repository typecheck and full pipeline are still pending on final committed source.
+
+Latest overlap check shows no concurrent changes in action/SSRF paths. Next: run ./scripts/validate.sh on the checkpoint commit without editing source during the run, then review and close every criterion. Do not mark the overall goal complete before that evidence exists.

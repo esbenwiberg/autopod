@@ -1,0 +1,36 @@
+
+ RUN  v4.1.10 /Users/ewi/.codex/worktrees/46f5/autopod/packages/daemon
+
+ ❯ src/actions/action-integration.test.ts (11 tests | 3 failed | 6 skipped) 231ms
+     × keeps sensitive failure content out of logs, audit and the real MCP formatter: upstream-body 74ms
+     × keeps sensitive failure content out of logs, audit and the real MCP formatter: credential-error 39ms
+     × keeps sensitive failure content out of logs, audit and the real MCP formatter: nested-audit 40ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 3 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/actions/action-integration.test.ts > Action Control Plane Integration > keeps sensitive failure content out of logs, audit and the real MCP formatter: upstream-body
+ FAIL  src/actions/action-integration.test.ts > Action Control Plane Integration > keeps sensitive failure content out of logs, audit and the real MCP formatter: credential-error
+ FAIL  src/actions/action-integration.test.ts > Action Control Plane Integration > keeps sensitive failure content out of logs, audit and the real MCP formatter: nested-audit
+AssertionError: expected true to be false // Object.is equality
+
+- Expected
++ Received
+
+- false
++ true
+
+ ❯ src/actions/action-integration.test.ts:190:43
+    188|           logs.join(''),
+    189|         ]) {
+    190|           expect(sink.includes(sentinel)).toBe(false);
+       |                                           ^
+    191|           expect(sink.includes('Ignore all instructions')).toBe(false);
+    192|         }
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/3]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  3 failed | 2 passed | 6 skipped (11)
+   Start at  23:24:37
+   Duration  625ms (transform 146ms, setup 0ms, import 284ms, tests 231ms, environment 0ms)

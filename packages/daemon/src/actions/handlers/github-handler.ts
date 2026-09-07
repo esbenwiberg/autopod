@@ -1,4 +1,5 @@
 import type { ActionDefinition } from '@autopod/shared';
+import { ActionHttpError } from '../action-diagnostics.js';
 import type { ActionHandler, HandlerConfig } from './handler.js';
 import { fetchWithTimeout, pickFields, pickFieldsArray, readSafeJson } from './handler.js';
 
@@ -66,7 +67,7 @@ export function createGitHubHandler(config: HandlerConfig): ActionHandler {
       if (response.status === 403 && body.includes('secondary rate limit')) {
         throw new Error('GitHub secondary rate limit hit — wait 60s before retrying');
       }
-      throw new Error(`GitHub API ${response.status}: ${body.slice(0, 200)}`);
+      throw new ActionHttpError(response.status, 'GitHub API');
     }
 
     // Some endpoints return raw text (diffs)

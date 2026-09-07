@@ -107,25 +107,29 @@ describe.each(['fetch', 'pinned'] as const)('action HTTP transport resource boun
     await expect(readSafeJson(response)).rejects.toThrow(/too large/i);
   });
 
-  it('stops reading and cancels an oversized stream before its end', async () => {
-    let pulls = 0;
-    let cancelled = false;
-    const response = new Response(
-      new ReadableStream<Uint8Array>({
-        pull(controller) {
-          pulls += 1;
-          controller.enqueue(new Uint8Array(64 * 1024));
-          if (pulls === 100) controller.close();
-        },
-        cancel() {
-          cancelled = true;
-        },
-      }),
-    );
-    await expect(readSafeJson(response)).rejects.toThrow(/too large/i);
-    expect(pulls).toBeLessThan(40);
-    expect(cancelled).toBe(true);
-  });
+  it.each([undefined, '1', 'invalid', String(LIMIT + 1)])(
+    'stops and cancels oversized streams despite Content-Length %s',
+    async (length) => {
+      let pulls = 0;
+      let cancelled = false;
+      const response = new Response(
+        new ReadableStream<Uint8Array>({
+          pull(controller) {
+            pulls += 1;
+            controller.enqueue(new Uint8Array(64 * 1024));
+            if (pulls === 100) controller.close();
+          },
+          cancel() {
+            cancelled = true;
+          },
+        }),
+        { headers: length === undefined ? {} : { 'Content-Length': length } },
+      );
+      await expect(readSafeJson(response)).rejects.toThrow(/too large/i);
+      expect(pulls).toBeLessThan(40);
+      expect(cancelled).toBe(true);
+    },
+  );
 
   it('retains valid JSON and empty 204 response semantics', async () => {
     const url = await serve((req, res) => {

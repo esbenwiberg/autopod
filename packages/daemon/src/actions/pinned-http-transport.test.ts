@@ -3,6 +3,7 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:https';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { createSecureContext } from 'node:tls';
 import type { ActionDefinition } from '@autopod/shared';
 import pino from 'pino';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
@@ -15,6 +16,7 @@ describe('pinned action HTTPS trust and hostname verification', () => {
   let port: number;
   let server: ReturnType<typeof createServer>;
   const requests: string[] = [];
+  const serverNames: string[] = [];
 
   beforeAll(async () => {
     directory = mkdtempSync(join(tmpdir(), 'autopod-action-tls-'));
@@ -44,7 +46,20 @@ describe('pinned action HTTPS trust and hostname verification', () => {
     );
     certificate = readFileSync(join(directory, 'cert.pem'), 'utf8');
     server = createServer(
-      { key: readFileSync(join(directory, 'key.pem')), cert: certificate },
+      {
+        key: readFileSync(join(directory, 'key.pem')),
+        cert: certificate,
+        SNICallback: (name, callback) => {
+          serverNames.push(name);
+          callback(
+            null,
+            createSecureContext({
+              key: readFileSync(join(directory, 'key.pem')),
+              cert: certificate,
+            }),
+          );
+        },
+      },
       (req, res) => {
         requests.push(req.headers.host ?? '');
         res.end('{"ok":true}');
@@ -77,7 +92,7 @@ describe('pinned action HTTPS trust and hostname verification', () => {
     const action: ActionDefinition = {
       name: 'tls_fixture',
       description: '',
-      group: 'http',
+      group: 'custom',
       handler: 'http',
       params: {},
       endpoint: { url: `https://${hostname}:${port}`, method: 'GET', timeout: 1_000 },
@@ -89,6 +104,7 @@ describe('pinned action HTTPS trust and hostname verification', () => {
   it('uses the pinned address while preserving Host and trusted certificate matching', async () => {
     await expect(execute('pinned.invalid', true)).resolves.toEqual({ ok: true });
     expect(requests).toContain(`pinned.invalid:${port}`);
+    expect(serverNames).toContain('pinned.invalid');
   });
 
   it('rejects an untrusted certificate before sending an HTTP request', async () => {

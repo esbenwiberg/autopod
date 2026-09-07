@@ -1,0 +1,284 @@
+
+ RUN  v4.1.10 /Users/ewi/.codex/worktrees/46f5/autopod/packages/daemon
+
+ ✓ src/actions/handlers/github-handler.test.ts > createGitHubHandler > throws during execute when no token is available 4ms
+ ✓ src/actions/handlers/github-handler.test.ts > createGitHubHandler > returns a handler with handlerType "github" 0ms
+ ✓ src/actions/handlers/github-handler.test.ts > createGitHubHandler > does not accept the legacy github-pat fallback 0ms
+ ✓ src/actions/handlers/github-handler.test.ts > createGitHubHandler > throws on invalid repo format 0ms
+ ✓ src/actions/handlers/github-handler.test.ts > createGitHubHandler > read_issue calls correct GitHub API URL and picks fields 38ms
+ ✓ src/actions/handlers/github-handler.test.ts > createGitHubHandler > search_issues URL-encodes query and adds state filter 1ms
+ ✓ src/actions/handlers/github-handler.test.ts > createGitHubHandler > read_file decodes base64 content 0ms
+ ✓ src/actions/handlers/github-handler.test.ts > createGitHubHandler > read_pr_diff filters by file_path param 0ms
+ ✓ src/actions/handlers/github-handler.test.ts > createGitHubHandler > throws on HTTP error with status and body 0ms
+ ✓ src/actions/handlers/github-handler.test.ts > createGitHubHandler > throws on unknown action 0ms
+ ✓ src/actions/handlers/github-handler.test.ts > createGitHubHandler > tracks rate limits from response headers 0ms
+ ✓ src/actions/handlers/github-handler.test.ts > createGitHubHandler > throws when rate limit is exceeded 0ms
+ ✓ src/actions/handlers/ado-handler.test.ts > createAdoHandler > throws during execute when daemon Entra auth is unavailable 5ms
+ ✓ src/actions/handlers/ado-handler.test.ts > createAdoHandler > returns a handler with handlerType "ado" 0ms
+ ✓ src/actions/handlers/ado-handler.test.ts > createAdoHandler > uses daemon Entra Bearer auth and never ADO_PAT 34ms
+ ✓ src/actions/handlers/ado-handler.test.ts > createAdoHandler > read_workitem calls correct URL with Bearer auth and picks fields 1ms
+ ✓ src/actions/handlers/ado-handler.test.ts > createAdoHandler > search_workitems builds auto-generated WIQL query and picks fields from batch 1ms
+ ✓ src/actions/handlers/ado-handler.test.ts > createAdoHandler > search_workitems uses raw WIQL when query includes WHERE 1ms
+ ✓ src/actions/handlers/ado-handler.test.ts > createAdoHandler > search_workitems escapes single quotes in query, state, and type 0ms
+ ✓ src/actions/handlers/ado-handler.test.ts > createAdoHandler > search_workitems returns empty array for no results 0ms
+ ✓ src/actions/handlers/ado-handler.test.ts > createAdoHandler > throws on HTTP error with status 0ms
+ ✓ src/actions/handlers/ado-handler.test.ts > createAdoHandler > throws on unknown action 0ms
+ ✓ src/actions/handlers/ado-handler.test.ts > createAdoHandler > ado_read_pr calls correct URL and picks fields 0ms
+ ✓ src/actions/handlers/ado-handler.test.ts > createAdoHandler > ado_read_pr_threads filters system threads and respects max_results 0ms
+ ✓ src/actions/handlers/ado-handler.test.ts > createAdoHandler > ado_read_pr_threads surfaces comment bodies when whitelisted 1ms
+ ✓ src/actions/handlers/ado-handler.test.ts > createAdoHandler > ado_read_pr_changes fetches iterations then last iteration changes 0ms
+ ✓ src/actions/handlers/ado-handler.test.ts > createAdoHandler > ado_read_pr_changes returns empty for no iterations 0ms
+ ✓ src/actions/handlers/ado-handler.test.ts > createAdoHandler > ado_read_file calls correct URL with path and picks fields 0ms
+ ✓ src/actions/handlers/ado-handler.test.ts > createAdoHandler > ado_read_file includes version descriptor when version is provided 0ms
+ ✓ src/actions/handlers/ado-handler.test.ts > createAdoHandler > ado_search_code posts to almsearch.dev.azure.com with correct body 0ms
+ ✓ src/actions/handlers/ado-handler.test.ts > createAdoHandler > ado_search_code includes repo filter when repo is provided 0ms
+ ✓ src/actions/handlers/ado-handler.test.ts > createAdoHandler > ado_search_code returns empty array for no results 0ms
+ ✓ src/actions/handlers/azure-pim-handler.test.ts > createPimClient > activate sends correct Graph API request body 38ms
+ ✓ src/actions/handlers/azure-pim-handler.test.ts > createPimClient > deactivate sends selfDeactivate action 1ms
+ ✓ src/actions/handlers/azure-pim-handler.test.ts > createPimClient > listActive queries assignmentSchedules with filter 1ms
+ ✓ src/actions/handlers/azure-pim-handler.test.ts > createPimClient > throws on HTTP error 2ms
+ ✓ src/actions/handlers/azure-pim-handler.test.ts > createPimClient > prefers az CLI for RBAC role activation when no explicit ARM token is configured 12ms
+ ✓ src/actions/handlers/azure-pim-handler.test.ts > createAzurePimHandler > dispatches activate_pim_group to client.activate 0ms
+ ✓ src/actions/handlers/azure-pim-handler.test.ts > createAzurePimHandler > dispatches deactivate_pim_group to client.deactivate 0ms
+ ✓ src/actions/handlers/azure-pim-handler.test.ts > createAzurePimHandler > dispatches list_pim_activations to client.listActive 0ms
+ ✓ src/actions/handlers/azure-pim-handler.test.ts > createAzurePimHandler > throws on unknown action name 0ms
+ ✓ src/actions/handlers/azure-pim-handler.test.ts > createAzurePimHandler > uses default duration PT8H when not provided 0ms
+ ✓ src/actions/handlers/azure-logs-handler.test.ts > createAzureLogsHandler > uses AZURE_MONITOR_TOKEN when available 36ms
+ ✓ src/actions/handlers/azure-logs-handler.test.ts > createAzureLogsHandler > prefers az CLI for Azure Monitor when no explicit token is configured 10ms
+ ✓ src/actions/handlers/azure-logs-handler.test.ts > createAzureLogsHandler > query_logs calls correct URL with query and default timespan PT1H 1ms
+ ✓ src/actions/handlers/azure-logs-handler.test.ts > createAzureLogsHandler > query_logs uses custom timespan when provided 1ms
+ ✓ src/actions/handlers/azure-logs-handler.test.ts > createAzureLogsHandler > read_app_insights calls correct URL 1ms
+ ✓ src/actions/handlers/azure-logs-handler.test.ts > createAzureLogsHandler > read_container_logs builds KQL query with single-quote escaping 1ms
+ ✓ src/actions/handlers/azure-logs-handler.test.ts > createAzureLogsHandler > formatTables converts tabular response to named tables with row objects 1ms
+ ✓ src/actions/handlers/azure-logs-handler.test.ts > createAzureLogsHandler > formatTables handles empty tables 0ms
+ ✓ src/actions/handlers/azure-logs-handler.test.ts > createAzureLogsHandler > throws on HTTP error 1ms
+ ✓ src/actions/handlers/azure-logs-handler.test.ts > createAzureLogsHandler > throws on unknown action 0ms
+ ✓ src/actions/http-destination.test.ts > generic HTTP destination boundary > blocks equivalent mapped private URL http://[::ffff:127.0.0.1]/ before DNS or transport 11ms
+ ✓ src/actions/http-destination.test.ts > generic HTTP destination boundary > blocks equivalent mapped private URL http://[::ffff:7f00:1]/ before DNS or transport 1ms
+ ✓ src/actions/http-destination.test.ts > generic HTTP destination boundary > blocks equivalent mapped private URL http://[0:0:0:0:0:ffff:a9fe:a9fe]/ before DNS or transport 1ms
+ ✓ src/actions/http-destination.test.ts > generic HTTP destination boundary > never follows a redirect with bearer credentials 11ms
+ ✓ src/actions/http-destination.test.ts > generic HTTP destination boundary > never follows a redirect with custom-header credentials 2ms
+ ✓ src/actions/http-destination.test.ts > generic HTTP destination boundary > connects using the validated address without resolving the hostname again 10ms
+ ✓ src/actions/handlers/test-pipeline-handler.test.ts > test-pipeline handler > rejects when the profile has no testPipeline enabled 4ms
+ ✓ src/actions/handlers/test-pipeline-handler.test.ts > test-pipeline handler > rejects when podId context is missing 1ms
+ ✓ src/actions/handlers/test-pipeline-handler.test.ts > test-pipeline handler > enforces per-pod rate limit 0ms
+ ✓ src/actions/handlers/test-pipeline-handler.test.ts > test-pipeline handler > pushes the branch, triggers the pipeline, and returns runId + url + testBranch 24ms
+ ✓ src/actions/handlers/test-pipeline-handler.test.ts > test-pipeline handler > redacts the daemon Entra token from failed push errors 0ms
+ ✓ src/actions/handlers/test-pipeline-handler.test.ts > test-pipeline handler > get_test_run_status returns succeeded with duration when run completes 0ms
+ ✓ src/actions/audit-repository.test.ts > ActionAuditRepository > insert + listBySession round-trip 10ms
+ ✓ src/actions/audit-repository.test.ts > ActionAuditRepository > JSON round-trip for complex nested params 1ms
+ ✓ src/actions/audit-repository.test.ts > ActionAuditRepository > piiDetected boolean conversion: true stored as 1, returned as true 0ms
+ ✓ src/actions/audit-repository.test.ts > ActionAuditRepository > piiDetected boolean conversion: false stored as 0, returned as false 0ms
+ ✓ src/actions/audit-repository.test.ts > ActionAuditRepository > listBySession respects limit 0ms
+ ✓ src/actions/audit-repository.test.ts > ActionAuditRepository > listBySession orders by created_at DESC 0ms
+ ✓ src/actions/audit-repository.test.ts > ActionAuditRepository > listBySession applies until before limit 0ms
+ ✓ src/actions/audit-repository.test.ts > ActionAuditRepository > countBySession returns correct count 0ms
+ ✓ src/actions/audit-repository.test.ts > ActionAuditRepository > countBySession returns 0 for unknown pod 0ms
+ ✓ src/actions/audit-repository.test.ts > ActionAuditRepository > listBySession returns empty array for unknown pod 0ms
+ ✓ src/actions/audit-repository.test.ts > ActionAuditRepository > pii_categories round-trip: array stored and returned correctly 0ms
+ ✓ src/actions/audit-repository.test.ts > ActionAuditRepository > pii_categories round-trip: null stored and returned as null 1ms
+ ✓ src/actions/audit-repository.test.ts > ActionAuditRepository > pii_categories round-trip: undefined (not provided) stored and returned as null 2ms
+ ✓ src/actions/audit-repository.test.ts > ActionAuditRepository > multiple pods do not leak across queries 1ms
+ ✓ src/actions/audit-repository.test.ts > ActionAuditRepository — hash chain > first entry has null prevHash and a non-null entryHash 0ms
+ ✓ src/actions/audit-repository.test.ts > ActionAuditRepository — hash chain > second entry prevHash equals first entry entryHash 0ms
+ ✓ src/actions/audit-repository.test.ts > ActionAuditRepository — hash chain > verifyAuditChain returns valid for empty pod 0ms
+ ✓ src/actions/audit-repository.test.ts > ActionAuditRepository — hash chain > verifyAuditChain passes for a clean sequence 0ms
+ ✓ src/actions/audit-repository.test.ts > ActionAuditRepository — hash chain > verifyAuditChain detects a tampered entry_hash 0ms
+ ✓ src/actions/audit-repository.test.ts > ActionAuditRepository — hash chain > repository interface has no update or delete methods (application-layer immutability) 0ms
+ ✓ src/actions/audit-repository.test.ts > ActionAuditRepository — hash chain > entry_hash is identical regardless of piiCategories value (ADR-019) 0ms
+ ✓ src/actions/audit-repository.test.ts > ActionAuditRepository — hash chain > hash chains are independent across pods 0ms
+ ✓ src/actions/handlers/http-resilience.test.ts > action HTTP transport resource bounds: fetch > enforces the complete deadline and closes the socket: delayed headers 125ms
+ ✓ src/actions/generic-http-handler.test.ts > createGenericHttpHandler > throws when endpoint config is missing 3ms
+ ✓ src/actions/generic-http-handler.test.ts > createGenericHttpHandler > has handlerType "http" 0ms
+ ✓ src/actions/generic-http-handler.test.ts > createGenericHttpHandler > bearer auth resolves secret and sends correct header 8ms
+ ✓ src/actions/generic-http-handler.test.ts > createGenericHttpHandler > basic auth resolves username and password secrets 1ms
+ ✓ src/actions/generic-http-handler.test.ts > createGenericHttpHandler > custom header auth sends the correct header 1ms
+ ✓ src/actions/generic-http-handler.test.ts > createGenericHttpHandler > URL template expansion with path mapping 1ms
+ ✓ src/actions/generic-http-handler.test.ts > createGenericHttpHandler > query string building appends to URL 1ms
+ ✓ src/actions/generic-http-handler.test.ts > createGenericHttpHandler > query string building works when URL already has ? 0ms
+ ✓ src/actions/generic-http-handler.test.ts > createGenericHttpHandler > body mapping for POST sends JSON body 0ms
+ ✓ src/actions/generic-http-handler.test.ts > createGenericHttpHandler > resultPath resolution on response (e.g. "data.results") 1ms
+ ✓ src/actions/generic-http-handler.test.ts > createGenericHttpHandler > field whitelisting filters out unlisted fields 0ms
+ ✓ src/actions/generic-http-handler.test.ts > createGenericHttpHandler > throws when secret reference cannot be resolved 0ms
+ ✓ src/actions/generic-http-handler.test.ts > createGenericHttpHandler > throws on HTTP error with status 0ms
+ ✓ src/actions/generic-http-handler.test.ts > createGenericHttpHandler > SSRF guard > blocks an agent-templated URL pointing at the cloud metadata service 0ms
+ ✓ src/actions/generic-http-handler.test.ts > createGenericHttpHandler > SSRF guard > blocks a URL whose hostname resolves to a private IP (DNS pointer attack) 0ms
+ ✓ src/actions/generic-http-handler.test.ts > createGenericHttpHandler > SSRF guard > blocks localhost 0ms
+ ✓ src/actions/generic-http-handler.test.ts > createGenericHttpHandler > SSRF guard > blocks .internal TLD 0ms
+ ✓ src/actions/generic-http-handler.test.ts > createGenericHttpHandler > SSRF guard > allows a public URL through to fetch 0ms
+ ✓ src/actions/generic-http-handler.test.ts > createGenericHttpHandler > GET requests do not include a body 0ms
+ ✓ src/actions/http-destination.test.ts > generic HTTP destination boundary > includes DNS validation in the action deadline and issues no late request 214ms
+ ✓ src/actions/action-registry.test.ts > ActionRegistry > creates without crashing (even without defaults dir) 4ms
+ ✓ src/actions/action-registry.test.ts > ActionRegistry > filters actions by enabled groups 1ms
+ ✓ src/actions/action-registry.test.ts > ActionRegistry > includes custom actions when custom group is enabled 1ms
+ ✓ src/actions/action-registry.test.ts > ActionRegistry > respects disabled override 0ms
+ ✓ src/actions/action-registry.test.ts > ActionRegistry > getAction returns undefined for non-existent action 0ms
+ ✓ src/actions/action-registry.test.ts > ActionRegistry > enables individual actions via enabledActions without group 2ms
+ ✓ src/actions/action-registry.test.ts > ActionRegistry > enables built-in actions via enabledActions when group is disabled 1ms
+ ✓ src/actions/action-registry.test.ts > ActionRegistry > disabled override does NOT block the action — disabled means the rule is paused 0ms
+ ✓ src/actions/action-registry.test.ts > ActionRegistry > backward compat: works without enabledActions field 0ms
+ ✓ src/actions/pinned-http-transport.test.ts > pinned action HTTPS trust and hostname verification > uses the pinned address while preserving Host and trusted certificate matching 22ms
+ ✓ src/actions/pinned-http-transport.test.ts > pinned action HTTPS trust and hostname verification > rejects an untrusted certificate before sending an HTTP request 5ms
+ ✓ src/actions/pinned-http-transport.test.ts > pinned action HTTPS trust and hostname verification > rejects a hostname mismatch even when the issuing certificate is trusted 7ms
+ ✓ src/actions/action-engine.test.ts > ActionEngine > forwards daemon GitHub auth without changing policy or audit boundaries 4ms
+ ✓ src/actions/action-engine.test.ts > ActionEngine > returns error when action not found 0ms
+ ✓ src/actions/action-engine.test.ts > ActionEngine > returns error for missing required params 0ms
+ ✓ src/actions/action-engine.test.ts > ActionEngine > returns error for wrong param type 0ms
+ ✓ src/actions/action-engine.test.ts > ActionEngine > returns error when approval is required 0ms
+ ✓ src/actions/action-engine.test.ts > ActionEngine > returns error when resource not allowed 0ms
+ ✓ src/actions/action-engine.test.ts > ActionEngine > allows when resource is an exact match in allowedResources 0ms
+ ✓ src/actions/action-engine.test.ts > ActionEngine > allows when resource matches an org/* wildcard 0ms
+ ✓ src/actions/action-engine.test.ts > ActionEngine > blocks when resource does not match an org/* wildcard 0ms
+ ✓ src/actions/action-engine.test.ts > ActionEngine > allows any resource when allowedResources contains * 0ms
+ ✓ src/actions/action-engine.test.ts > ActionEngine > writes audit entry on success 0ms
+ ✓ src/actions/action-engine.test.ts > ActionEngine > allows access to all repos when multiple per-repo overrides are configured 0ms
+ ✓ src/actions/action-engine.test.ts > ActionEngine > matches URL-encoded resource patterns against decoded params 0ms
+ ✓ src/actions/action-engine.test.ts > ActionEngine > skips disabled overrides when evaluating allowedResources 0ms
+ ✓ src/actions/action-engine.test.ts > ActionEngine > allows ado_read_file when org/project pattern prefix-matches org/project/repo resource 0ms
+ ✓ src/actions/action-engine.test.ts > ActionEngine > allows ado_read_file when org/project/*-wildcard matches org/project/repo resource 1ms
+ ✓ src/actions/action-engine.test.ts > ActionEngine > allows ado_read_file with URL-encoded org/project pattern via prefix match 0ms
+ ✓ src/actions/action-engine.test.ts > ActionEngine > blocks ado_read_file when org/project does not match 1ms
+ ✓ src/actions/action-engine.test.ts > ActionEngine > getAvailableActions delegates to registry 2ms
+ ✓ src/actions/action-engine.test.ts > ActionEngine > validates enum params 1ms
+ ✓ src/actions/action-engine.test.ts > ActionEngine — safety events > PII-only path: writes pii safety_events rows + sets pii_categories on audit 6ms
+ ✓ src/actions/action-engine.test.ts > ActionEngine — safety events > injection-only path: writes injection safety_events rows 0ms
+ ✓ src/actions/action-engine.test.ts > ActionEngine — safety events > mixed path: both PII and injection rows written, audit has pii_categories 0ms
+ ✓ src/actions/action-engine.test.ts > ActionEngine — safety events > quarantine score still set on audit regardless of PII work 0ms
+ ✓ src/actions/action-engine.test.ts > ActionEngine — safety events > no safety events written when no PII and no threats 0ms
+ ✓ src/api/ssrf-guard.test.ts > isPrivateIp > rejects private IPv4 127.0.0.1 1ms
+ ✓ src/api/ssrf-guard.test.ts > isPrivateIp > rejects private IPv4 127.255.255.254 0ms
+ ✓ src/api/ssrf-guard.test.ts > isPrivateIp > rejects private IPv4 0.0.0.0 0ms
+ ✓ src/api/ssrf-guard.test.ts > isPrivateIp > rejects private IPv4 10.0.0.1 0ms
+ ✓ src/api/ssrf-guard.test.ts > isPrivateIp > rejects private IPv4 10.255.255.255 0ms
+ ✓ src/api/ssrf-guard.test.ts > isPrivateIp > rejects private IPv4 169.254.169.254 0ms
+ ✓ src/api/ssrf-guard.test.ts > isPrivateIp > rejects private IPv4 169.254.0.1 0ms
+ ✓ src/api/ssrf-guard.test.ts > isPrivateIp > rejects private IPv4 192.168.0.1 0ms
+ ✓ src/api/ssrf-guard.test.ts > isPrivateIp > rejects private IPv4 172.16.0.1 0ms
+ ✓ src/api/ssrf-guard.test.ts > isPrivateIp > rejects private IPv4 172.31.255.255 0ms
+ ✓ src/api/ssrf-guard.test.ts > isPrivateIp > rejects private IPv4 100.64.0.1 0ms
+ ✓ src/api/ssrf-guard.test.ts > isPrivateIp > rejects private IPv4 100.127.255.255 0ms
+ ✓ src/api/ssrf-guard.test.ts > isPrivateIp > accepts public IPv4 8.8.8.8 0ms
+ ✓ src/api/ssrf-guard.test.ts > isPrivateIp > accepts public IPv4 1.1.1.1 0ms
+ ✓ src/api/ssrf-guard.test.ts > isPrivateIp > accepts public IPv4 172.32.0.1 0ms
+ ✓ src/api/ssrf-guard.test.ts > isPrivateIp > accepts public IPv4 172.15.255.255 0ms
+ ✓ src/api/ssrf-guard.test.ts > isPrivateIp > accepts public IPv4 100.63.0.1 0ms
+ ✓ src/api/ssrf-guard.test.ts > isPrivateIp > accepts public IPv4 100.128.0.1 0ms
+ ✓ src/api/ssrf-guard.test.ts > isPrivateIp > rejects private IPv6 :: 3ms
+ ✓ src/api/ssrf-guard.test.ts > isPrivateIp > rejects private IPv6 ::1 2ms
+ ✓ src/api/ssrf-guard.test.ts > isPrivateIp > rejects private IPv6 fc00::1 0ms
+ ✓ src/api/ssrf-guard.test.ts > isPrivateIp > rejects private IPv6 fd00::1 0ms
+ ✓ src/api/ssrf-guard.test.ts > isPrivateIp > rejects private IPv6 fdff:ffff:ffff:ffff:ffff:ffff:ffff:ffff 0ms
+ ✓ src/api/ssrf-guard.test.ts > isPrivateIp > rejects private IPv6 fe80::1 0ms
+ ✓ src/api/ssrf-guard.test.ts > isPrivateIp > rejects private IPv6 feb0::1 0ms
+ ✓ src/api/ssrf-guard.test.ts > isPrivateIp > rejects private IPv6 ::ffff:127.0.0.1 0ms
+ ✓ src/api/ssrf-guard.test.ts > isPrivateIp > rejects private IPv6 ::ffff:169.254.169.254 0ms
+ ✓ src/api/ssrf-guard.test.ts > isPrivateIp > accepts public IPv6 2001:4860:4860::8888 0ms
+ ✓ src/api/ssrf-guard.test.ts > isPrivateIp > accepts public IPv6 2606:4700:4700::1111 0ms
+ ✓ src/api/ssrf-guard.test.ts > isPrivateIp > accepts public IPv6 ::ffff:8.8.8.8 0ms
+ ✓ src/api/ssrf-guard.test.ts > isPrivateUrl > rejects http://localhost/ 1ms
+ ✓ src/api/ssrf-guard.test.ts > isPrivateUrl > rejects http://localhost:5000/x 1ms
+ ✓ src/api/ssrf-guard.test.ts > isPrivateUrl > rejects http://127.0.0.1/ 0ms
+ ✓ src/api/ssrf-guard.test.ts > isPrivateUrl > rejects http://169.254.169.254/latest/meta-data/ 0ms
+ ✓ src/api/ssrf-guard.test.ts > isPrivateUrl > rejects http://[::1]:8080/ 0ms
+ ✓ src/api/ssrf-guard.test.ts > isPrivateUrl > rejects http://[fe80::1]/ 0ms
+ ✓ src/api/ssrf-guard.test.ts > isPrivateUrl > rejects http://10.0.0.1/ 0ms
+ ✓ src/api/ssrf-guard.test.ts > isPrivateUrl > rejects http://192.168.1.1/ 0ms
+ ✓ src/api/ssrf-guard.test.ts > isPrivateUrl > rejects http://metadata.google.internal/computeMetadata/v1/ 0ms
+ ✓ src/api/ssrf-guard.test.ts > isPrivateUrl > rejects http://metadata/ 0ms
+ ✓ src/api/ssrf-guard.test.ts > isPrivateUrl > rejects http://something.internal/ 0ms
+ ✓ src/api/ssrf-guard.test.ts > isPrivateUrl > rejects http://service.local/ 0ms
+ ✓ src/api/ssrf-guard.test.ts > isPrivateUrl > accepts https://api.github.com/ 0ms
+ ✓ src/api/ssrf-guard.test.ts > isPrivateUrl > accepts https://example.com/path 0ms
+ ✓ src/api/ssrf-guard.test.ts > isPrivateUrl > accepts https://8.8.8.8/ 0ms
+ ✓ src/api/ssrf-guard.test.ts > isPrivateUrl > accepts https://[2001:4860:4860::8888]/ 0ms
+ ✓ src/api/ssrf-guard.test.ts > isPrivateUrl > blocks malformed URLs 0ms
+ ✓ src/api/ssrf-guard.test.ts > isPrivateUrl > strips trailing dot in metadata FQDN 0ms
+ ✓ src/api/ssrf-guard.test.ts > assertPublicUrl > rejects malformed URL without DNS 0ms
+ ✓ src/api/ssrf-guard.test.ts > assertPublicUrl > rejects unsupported protocol 0ms
+ ✓ src/api/ssrf-guard.test.ts > assertPublicUrl > rejects private hostname literal without DNS lookup 0ms
+ ✓ src/api/ssrf-guard.test.ts > assertPublicUrl > accepts an IP literal that is public without DNS lookup 1ms
+ ✓ src/api/ssrf-guard.test.ts > assertPublicUrl > blocks "evil.com → 169.254.169.254" hostname pointer attack 0ms
+ ✓ src/api/ssrf-guard.test.ts > assertPublicUrl > blocks if any resolved record is private (defeats split-record DNS rebind) 0ms
+ ✓ src/api/ssrf-guard.test.ts > assertPublicUrl > accepts a hostname whose A records are all public 0ms
+ ✓ src/api/ssrf-guard.test.ts > assertPublicUrl > rejects when DNS returns empty 0ms
+ ✓ src/api/ssrf-guard.test.ts > assertPublicUrl > rejects when DNS resolution fails 0ms
+ ✓ src/actions/handlers/http-resilience.test.ts > action HTTP transport resource bounds: fetch > enforces the complete deadline and closes the socket: stalled body 118ms
+ ✓ src/actions/policy-resolver.test.ts > resolveEffectiveActionPolicy > returns null when profile has no policy and deployment is disabled 1ms
+ ✓ src/actions/policy-resolver.test.ts > resolveEffectiveActionPolicy > returns null when profile has no policy and deployment.enabled is false 0ms
+ ✓ src/actions/policy-resolver.test.ts > resolveEffectiveActionPolicy > synthesizes a minimal policy with deploy when deployment is enabled and policy is null 0ms
+ ✓ src/actions/policy-resolver.test.ts > resolveEffectiveActionPolicy > returns the policy unchanged when deployment is disabled 0ms
+ ✓ src/actions/policy-resolver.test.ts > resolveEffectiveActionPolicy > appends deploy to enabledGroups when deployment is enabled 0ms
+ ✓ src/actions/policy-resolver.test.ts > resolveEffectiveActionPolicy > does not duplicate deploy when already in enabledGroups 0ms
+ ✓ src/actions/policy-resolver.test.ts > resolveEffectiveActionPolicy > preserves enabledActions, overrides, custom actions, quarantine when augmenting 0ms
+ ✓ src/actions/handlers/handler.test.ts > pickFields > picks top-level fields 1ms
+ ✓ src/actions/handlers/handler.test.ts > pickFields > picks nested fields via dot notation 0ms
+ ✓ src/actions/handlers/handler.test.ts > pickFields > skips missing fields 0ms
+ ✓ src/actions/handlers/handler.test.ts > pickFields > handles null/undefined input 0ms
+ ✓ src/actions/handlers/handler.test.ts > pickFields > handles empty fields array 0ms
+ ✓ src/actions/handlers/handler.test.ts > pickFields > projects through arrays for paths like `array.field` 0ms
+ ✓ src/actions/handlers/handler.test.ts > pickFields > skips array elements where the path resolves to undefined 0ms
+ ✓ src/actions/handlers/handler.test.ts > pickFields > omits array-projected field entirely when no element matches 0ms
+ ✓ src/actions/handlers/handler.test.ts > pickFieldsArray > applies field picking to each item 0ms
+ ✓ src/actions/handlers/handler.test.ts > resolveResultPath > resolves nested path 0ms
+ ✓ src/actions/handlers/handler.test.ts > resolveResultPath > returns whole object when no path 0ms
+ ✓ src/actions/handlers/handler.test.ts > resolveResultPath > returns undefined for missing path 0ms
+ ✓ src/actions/action-integration.test.ts > Action Control Plane Integration > keeps sensitive failure content out of logs, audit and the real MCP formatter: upstream-body 93ms
+ ✓ src/actions/handlers/deploy-handler.test.ts > deploy handler — execute > runs script with resolved env vars on the daemon host 2ms
+ ✓ src/actions/handlers/deploy-handler.test.ts > deploy handler — execute > does not leak unrelated daemon env vars into the script env 0ms
+ ✓ src/actions/handlers/deploy-handler.test.ts > deploy handler — execute > rejects $DAEMON: ref when daemon env var is not set 1ms
+ ✓ src/actions/handlers/deploy-handler.test.ts > deploy handler — execute > throws when deployment is disabled on the profile 0ms
+ ✓ src/actions/handlers/deploy-handler.test.ts > deploy handler — execute > throws when deployment config is null 0ms
+ ✓ src/actions/handlers/deploy-handler.test.ts > deploy handler — execute > throws when the pod has no worktree 0ms
+ ✓ src/actions/handlers/deploy-handler.test.ts > deploy handler — execute > blocks script with path traversal 0ms
+ ✓ src/actions/handlers/deploy-handler.test.ts > deploy handler — execute > blocks absolute script paths 0ms
+ ✓ src/actions/handlers/deploy-handler.test.ts > deploy handler — execute > enforces allowedScripts allowlist 0ms
+ ✓ src/actions/handlers/deploy-handler.test.ts > deploy handler — execute > allows script matching a glob pattern when baseline matches 0ms
+ ✓ src/actions/handlers/deploy-handler.test.ts > deploy handler — execute > aborts when script differs from the trusted baseline 0ms
+ ✓ src/actions/handlers/deploy-handler.test.ts > deploy handler — execute > executes when content matches the baseline 0ms
+ ✓ src/actions/handlers/deploy-handler.test.ts > deploy handler — execute > aborts when no baseline was captured for the pod (safe-fail) 0ms
+ ✓ src/actions/handlers/deploy-handler.test.ts > deploy handler — execute > aborts when script has no baseline entry (e.g. added during pod session) 0ms
+ ✓ src/actions/handlers/deploy-handler.test.ts > deploy handler — execute > skips baseline check when allowedScripts is not configured (legacy mode) 0ms
+ ✓ src/actions/handlers/deploy-handler.test.ts > deploy handler — execute > passes args to the script 0ms
+ ✓ src/actions/handlers/deploy-handler.test.ts > deploy handler — execute > never includes env var values in the returned response 0ms
+ ✓ src/actions/handlers/deploy-handler.test.ts > deploy handler — getApprovalContext > returns script content and sha256 hash read from the host worktree 0ms
+ ✓ src/actions/handlers/deploy-handler.test.ts > deploy handler — getApprovalContext > throws on invalid script path in approval context 0ms
+ ✓ src/actions/handlers/deploy-handler.test.ts > deploy handler — getApprovalContext > throws when the pod has no worktree 0ms
+ ✓ src/actions/handlers/http-resilience.test.ts > action HTTP transport resource bounds: fetch > enforces the complete deadline and closes the socket: slow chunks 113ms
+ ✓ src/actions/handlers/http-resilience.test.ts > action HTTP transport resource bounds: fetch > preserves caller cancellation during body consumption 86ms
+ ✓ src/actions/action-integration.test.ts > Action Control Plane Integration > keeps sensitive failure content out of logs, audit and the real MCP formatter: credential-error 42ms
+ ✓ src/actions/action-integration.test.ts > Action Control Plane Integration > keeps sensitive failure content out of logs, audit and the real MCP formatter: nested-audit 37ms
+ ✓ src/actions/action-integration.test.ts > Action Control Plane Integration > denied approval policy performs no request or credential lookup 35ms
+ ✓ src/actions/handlers/http-resilience.test.ts > action HTTP transport resource bounds: fetch > bounds chunked response bytes for status 200 4ms
+ ✓ src/actions/handlers/http-resilience.test.ts > action HTTP transport resource bounds: fetch > bounds chunked response bytes for status 503 3ms
+ ✓ src/actions/handlers/http-resilience.test.ts > action HTTP transport resource bounds: fetch > bounds decompressed response bytes 8ms
+ ✓ src/actions/handlers/http-resilience.test.ts > action HTTP transport resource bounds: fetch > counts UTF-8 bytes rather than JavaScript characters 3ms
+ ✓ src/actions/handlers/http-resilience.test.ts > action HTTP transport resource bounds: fetch > stops and cancels oversized streams despite Content-Length undefined 1ms
+ ✓ src/actions/handlers/http-resilience.test.ts > action HTTP transport resource bounds: fetch > stops and cancels oversized streams despite Content-Length 1 0ms
+ ✓ src/actions/handlers/http-resilience.test.ts > action HTTP transport resource bounds: fetch > stops and cancels oversized streams despite Content-Length invalid 0ms
+ ✓ src/actions/handlers/http-resilience.test.ts > action HTTP transport resource bounds: fetch > stops and cancels oversized streams despite Content-Length 2097153 0ms
+ ✓ src/actions/handlers/http-resilience.test.ts > action HTTP transport resource bounds: fetch > retains valid JSON and empty 204 response semantics 2ms
+ ✓ src/actions/action-integration.test.ts > Action Control Plane Integration > denied resource policy performs no request or credential lookup 35ms
+ ✓ src/actions/action-integration.test.ts > Action Control Plane Integration > full pipeline: custom HTTP action → sanitize → audit 36ms
+ ✓ src/actions/action-integration.test.ts > Action Control Plane Integration > full pipeline: quarantine blocks injected content 36ms
+ ✓ src/actions/handlers/http-resilience.test.ts > action HTTP transport resource bounds: pinned > enforces the complete deadline and closes the socket: delayed headers 114ms
+ ✓ src/actions/action-integration.test.ts > Action Control Plane Integration > registry resolves built-in + custom actions correctly 36ms
+ ✓ src/actions/action-integration.test.ts > Action Control Plane Integration > action override: disabled action not returned 34ms
+ ✓ src/actions/action-integration.test.ts > Action Control Plane Integration > param validation rejects bad input before hitting handler 34ms
+ ✓ src/actions/action-integration.test.ts > Action Control Plane Integration > audit trail persists across multiple action executions 36ms
+ ✓ src/actions/handlers/http-resilience.test.ts > action HTTP transport resource bounds: pinned > enforces the complete deadline and closes the socket: stalled body 115ms
+ ✓ src/actions/handlers/http-resilience.test.ts > action HTTP transport resource bounds: pinned > enforces the complete deadline and closes the socket: slow chunks 114ms
+ ✓ src/actions/handlers/http-resilience.test.ts > action HTTP transport resource bounds: pinned > preserves caller cancellation during body consumption 83ms
+ ✓ src/actions/handlers/http-resilience.test.ts > action HTTP transport resource bounds: pinned > bounds chunked response bytes for status 200 6ms
+ ✓ src/actions/handlers/http-resilience.test.ts > action HTTP transport resource bounds: pinned > bounds chunked response bytes for status 503 7ms
+ ✓ src/actions/handlers/http-resilience.test.ts > action HTTP transport resource bounds: pinned > bounds decompressed response bytes 12ms
+ ✓ src/actions/handlers/http-resilience.test.ts > action HTTP transport resource bounds: pinned > counts UTF-8 bytes rather than JavaScript characters 3ms
+ ✓ src/actions/handlers/http-resilience.test.ts > action HTTP transport resource bounds: pinned > stops and cancels oversized streams despite Content-Length undefined 0ms
+ ✓ src/actions/handlers/http-resilience.test.ts > action HTTP transport resource bounds: pinned > stops and cancels oversized streams despite Content-Length 1 0ms
+ ✓ src/actions/handlers/http-resilience.test.ts > action HTTP transport resource bounds: pinned > stops and cancels oversized streams despite Content-Length invalid 0ms
+ ✓ src/actions/handlers/http-resilience.test.ts > action HTTP transport resource bounds: pinned > stops and cancels oversized streams despite Content-Length 2097153 0ms
+ ✓ src/actions/handlers/http-resilience.test.ts > action HTTP transport resource bounds: pinned > retains valid JSON and empty 204 response semantics 2ms
+
+ Test Files  17 passed (17)
+      Tests  276 passed (276)
+   Start at  23:34:53
+   Duration  1.22s (transform 856ms, setup 0ms, import 1.87s, tests 2.23s, environment 1ms)

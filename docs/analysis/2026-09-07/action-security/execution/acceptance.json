@@ -70,20 +70,35 @@
     {
       "id": "W3.1",
       "requirement": "Synthetic secrets absent from actual logs, audit persistence, action and tool failure responses",
-      "status": "not-run",
-      "evidence": []
+      "status": "fixed",
+      "evidence": [
+        "receipts/action-failures-red.txt",
+        "receipts/action-failures-green.txt",
+        "receipts/action-failures-source.json"
+      ],
+      "remaining": "Final pipeline and closure review pending."
     },
     {
       "id": "W3.2",
       "requirement": "Safe useful failure diagnostics and truthful sanitization/quarantine metadata",
-      "status": "not-run",
-      "evidence": []
+      "status": "fixed",
+      "evidence": [
+        "receipts/action-failures-red.txt",
+        "receipts/action-failures-green.txt",
+        "receipts/action-failures-source.json"
+      ],
+      "remaining": "Final pipeline and closure review pending."
     },
     {
       "id": "W3.3",
       "requirement": "Audit integrity and approval/resource denials preserve zero side effects",
-      "status": "not-run",
-      "evidence": []
+      "status": "fixed",
+      "evidence": [
+        "receipts/action-failures-red.txt",
+        "receipts/action-failures-green.txt",
+        "receipts/action-failures-source.json"
+      ],
+      "remaining": "Final pipeline and closure review pending."
     },
     {
       "id": "W4.1",

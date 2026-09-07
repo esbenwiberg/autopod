@@ -32,7 +32,7 @@ function action(
     name: 'destination_fixture',
     description: '',
     handler: 'http',
-    group: 'http',
+    group: 'custom',
     params: {},
     response: { fields: ['ok'] },
     endpoint: { url, method: 'GET', auth, timeout },
@@ -50,7 +50,16 @@ describe('generic HTTP destination boundary', () => {
   ])('blocks equivalent mapped private URL %s before DNS or transport', async (url) => {
     const resolver = vi.fn(async () => ['8.8.8.8']);
     expect((await assertPublicUrl(url, { resolver })).ok).toBe(false);
+    const transport = vi.fn(async () => new Response('{}'));
+    const handler = createGenericHttpHandler({
+      logger: pino({ level: 'silent' }),
+      getSecret: () => undefined,
+      ssrfGuard: (destination) => assertPublicUrl(destination, { resolver }),
+      httpTransport: transport,
+    });
+    await expect(handler.execute(action(url), {})).rejects.toThrow(/blocked/i);
     expect(resolver).not.toHaveBeenCalled();
+    expect(transport).not.toHaveBeenCalled();
   });
 
   it.each(['bearer', 'custom-header'] as const)(

@@ -1,5 +1,6 @@
 import type { ActionDefinition, AuthConfig } from '@autopod/shared';
 import { assertPublicUrl } from '../api/ssrf-guard.js';
+import { ActionBoundaryError, ActionHttpError } from './action-diagnostics.js';
 import type { ActionHandler, HandlerConfig } from './handlers/handler.js';
 import {
   fetchWithTimeout,
@@ -23,8 +24,10 @@ export function createGenericHttpHandler(config: HandlerConfig): ActionHandler {
     if (envMatch?.[1]) {
       const value = getSecret(envMatch[1]);
       if (!value) throw new Error(`Secret not found: ${envMatch[1]}`);
+      config.recordSecret?.(value);
       return value;
     }
+    config.recordSecret?.(ref);
     return ref;
   }
 
@@ -117,9 +120,7 @@ export function createGenericHttpHandler(config: HandlerConfig): ActionHandler {
           signal.throwIfAborted();
           if (!checked.ok) {
             log.warn({ action: action.name }, 'HTTP action blocked by destination policy');
-            throw new Error(
-              `HTTP action '${action.name}' blocked: ${checked.reason ?? 'private address'}`,
-            );
+            throw new ActionBoundaryError('destination_blocked');
           }
           if (!checked.resolvedIps?.length) throw new Error('Missing validated HTTP destination');
           log.debug({ action: action.name, method }, 'Executing HTTP action');
@@ -128,8 +129,7 @@ export function createGenericHttpHandler(config: HandlerConfig): ActionHandler {
       );
 
       if (!response.ok) {
-        const text = await response.text().catch(() => '');
-        throw new Error(`HTTP ${response.status} from ${action.name}: ${text.slice(0, 200)}`);
+        throw new ActionHttpError(response.status, 'HTTP');
       }
 
       const data = await readSafeJson(response);

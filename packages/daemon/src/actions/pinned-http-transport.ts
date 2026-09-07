@@ -4,6 +4,8 @@ import { isIP } from 'node:net';
 import { Readable, pipeline } from 'node:stream';
 import { createBrotliDecompress, createGunzip, createInflate } from 'node:zlib';
 
+import { ActionBoundaryError } from './action-diagnostics.js';
+
 export type PinnedHttpTransport = (
   url: string,
   init: RequestInit,
@@ -57,7 +59,7 @@ export function createPinnedHttpTransport(options: { ca?: string } = {}): Pinned
           const status = incoming.statusCode ?? 502;
           if (status >= 300 && status < 400) {
             incoming.destroy();
-            reject(new Error('HTTP action redirect blocked; configure the final destination URL'));
+            reject(new ActionBoundaryError('redirect_blocked'));
             return;
           }
           const responseHeaders = new Headers();
