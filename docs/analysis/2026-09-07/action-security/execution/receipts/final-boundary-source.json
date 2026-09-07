@@ -1,0 +1,10 @@
+{
+  "baseCommit": "1ea58def2926636e6ab0159cd258652e89591061",
+  "sourceHashes": {
+    "packages/daemon/src/api/ssrf-guard.ts": "46b72859a5a646aefccf6fa6ad08adfbf8fef3980d77142f252976fd0c279010",
+    "packages/daemon/src/api/ssrf-guard.test.ts": "ca4a1c98cbcf0c58386973714a999e7bff3389e85cefd41a35e809add7f21629",
+    "packages/daemon/src/actions/ssrf-consumers.test.ts": "9d3d8669caacd128b87e09cc617f36cb823a22e1d2d101489c1031f7c65b0c78"
+  },
+  "command": "vitest run src/actions src/api/ssrf-guard.test.ts src/api/mcp-proxy-handler.test.ts src/profiles/profile-validator.test.ts --reporter=verbose",
+  "result": "355 passed across 20 files"
+}

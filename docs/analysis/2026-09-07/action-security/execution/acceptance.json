@@ -4,119 +4,141 @@
     {
       "id": "W1.1",
       "requirement": "Final URL, protocol, host and complete DNS answer validation including equivalent IP representations",
-      "status": "fixed",
+      "status": "verified",
       "evidence": [
         "receipts/http-destination-red.txt",
         "receipts/http-destination-green.txt",
-        "receipts/http-destination-source.json"
-      ],
-      "remaining": "Final edge review and full pipeline pending."
+        "receipts/http-destination-source.json",
+        "receipts/final-boundary-green.txt",
+        "receipts/final-boundary-source.json"
+      ]
     },
     {
       "id": "W1.2",
       "requirement": "Validated addresses bound to real connection with TLS hostname verification preserved",
-      "status": "fixed",
+      "status": "verified",
       "evidence": [
         "receipts/http-destination-red.txt",
         "receipts/http-destination-green.txt",
-        "receipts/http-destination-source.json"
-      ],
-      "remaining": "Final edge review and full pipeline pending."
+        "receipts/http-destination-source.json",
+        "receipts/final-boundary-green.txt",
+        "receipts/final-boundary-source.json"
+      ]
     },
     {
       "id": "W1.3",
       "requirement": "Bounded redirect policy with no cross-origin credentials or forbidden connection attempts",
-      "status": "fixed",
+      "status": "verified",
       "evidence": [
         "receipts/http-destination-red.txt",
         "receipts/http-destination-green.txt",
-        "receipts/http-destination-source.json"
-      ],
-      "remaining": "Final edge review and full pipeline pending."
+        "receipts/http-destination-source.json",
+        "receipts/final-boundary-green.txt",
+        "receipts/final-boundary-source.json"
+      ]
     },
     {
       "id": "W2.1",
       "requirement": "Deadline spans DNS, connection, headers and body; caller abort and resource cleanup",
-      "status": "fixed",
+      "status": "verified",
       "evidence": [
         "receipts/http-resilience-red.txt",
         "receipts/http-resilience-green.txt",
-        "receipts/http-resilience-source.json"
-      ],
-      "remaining": "Generic HTTP DNS phase binding and additional edge/cleanup checks remain; full pipeline pending."
+        "receipts/http-resilience-source.json",
+        "receipts/final-boundary-green.txt",
+        "receipts/final-boundary-source.json"
+      ]
     },
     {
       "id": "W2.2",
       "requirement": "Streaming decoded byte limits on success and error responses independent of Content-Length",
-      "status": "fixed",
+      "status": "verified",
       "evidence": [
         "receipts/http-resilience-red.txt",
         "receipts/http-resilience-green.txt",
-        "receipts/http-resilience-source.json"
-      ],
-      "remaining": "Generic HTTP DNS phase binding and additional edge/cleanup checks remain; full pipeline pending."
+        "receipts/http-resilience-source.json",
+        "receipts/final-boundary-green.txt",
+        "receipts/final-boundary-source.json"
+      ]
     },
     {
       "id": "W2.3",
       "requirement": "Fixed local timing and byte fixture matrix plus all affected handler compatibility tests",
-      "status": "fixed",
+      "status": "verified",
       "evidence": [
         "receipts/http-resilience-red.txt",
         "receipts/http-resilience-green.txt",
-        "receipts/http-resilience-source.json"
-      ],
-      "remaining": "Generic HTTP DNS phase binding and additional edge/cleanup checks remain; full pipeline pending."
+        "receipts/http-resilience-source.json",
+        "receipts/final-boundary-green.txt",
+        "receipts/final-boundary-source.json"
+      ]
     },
     {
       "id": "W3.1",
       "requirement": "Synthetic secrets absent from actual logs, audit persistence, action and tool failure responses",
-      "status": "fixed",
+      "status": "verified",
       "evidence": [
         "receipts/action-failures-red.txt",
         "receipts/action-failures-green.txt",
-        "receipts/action-failures-source.json"
-      ],
-      "remaining": "Final pipeline and closure review pending."
+        "receipts/action-failures-source.json",
+        "receipts/final-boundary-green.txt",
+        "receipts/final-boundary-source.json"
+      ]
     },
     {
       "id": "W3.2",
       "requirement": "Safe useful failure diagnostics and truthful sanitization/quarantine metadata",
-      "status": "fixed",
+      "status": "verified",
       "evidence": [
         "receipts/action-failures-red.txt",
         "receipts/action-failures-green.txt",
-        "receipts/action-failures-source.json"
-      ],
-      "remaining": "Final pipeline and closure review pending."
+        "receipts/action-failures-source.json",
+        "receipts/final-boundary-green.txt",
+        "receipts/final-boundary-source.json"
+      ]
     },
     {
       "id": "W3.3",
       "requirement": "Audit integrity and approval/resource denials preserve zero side effects",
-      "status": "fixed",
+      "status": "verified",
       "evidence": [
         "receipts/action-failures-red.txt",
         "receipts/action-failures-green.txt",
-        "receipts/action-failures-source.json"
-      ],
-      "remaining": "Final pipeline and closure review pending."
+        "receipts/action-failures-source.json",
+        "receipts/final-boundary-green.txt",
+        "receipts/final-boundary-source.json"
+      ]
     },
     {
       "id": "W4.1",
       "requirement": "Reproductions, exact source receipts, scoped commits and overlap checks",
-      "status": "not-run",
-      "evidence": []
+      "status": "verified",
+      "evidence": [
+        "progress.md",
+        "receipts/http-resilience-source.json",
+        "receipts/http-destination-source.json",
+        "receipts/action-failures-source.json",
+        "receipts/final-boundary-source.json"
+      ]
     },
     {
       "id": "W4.2",
       "requirement": "Action integration and local HTTP/TLS evidence; required full validation pipeline",
-      "status": "not-run",
-      "evidence": []
+      "status": "blocked",
+      "evidence": [
+        "receipts/checkpoint-3-full-validation.txt",
+        "receipts/checkpoint-3-validation-identity.json",
+        "prerequisites/README.md"
+      ],
+      "remaining": "Required dependency audit fails on baseline lockfile. Reusing the existing six-file dependency prerequisite needs scope approval; then run compatibility checks and the full pipeline on the combined final commit."
     },
     {
       "id": "W4.3",
       "requirement": "Final diff review and criterion-by-criterion closure",
-      "status": "not-run",
-      "evidence": []
+      "status": "fixed",
+      "evidence": ["closure.md"],
+      "remaining": "Closure is provisional while W4.2 is blocked; refresh final source and receipts after dependency prerequisite."
     }
-  ]
+  ],
+  "goalComplete": false
 }

@@ -63,7 +63,8 @@ function isPrivateIPv6(ip: string): boolean {
 
 /** Returns true for any private/loopback IPv4 or IPv6 literal. */
 export function isPrivateIp(ip: string): boolean {
-  if (!isIP(ip)) return true; // Reject malformed resolver answers.
+  if (!isIP(ip)) return false; // Hostnames are not IP literals.
+  if (ip.includes('%')) return true; // Scoped interfaces are never public destinations.
   return ip.includes(':') ? isPrivateIPv6(ip) : isPrivateIPv4(ip);
 }
 
@@ -179,7 +180,7 @@ export async function assertPublicUrl(
   }
 
   for (const address of addresses) {
-    if (isPrivateIp(address)) {
+    if (!isIP(address) || isPrivateIp(address)) {
       return { ok: false, reason: `resolved to private address: ${address}` };
     }
   }

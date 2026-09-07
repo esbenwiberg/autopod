@@ -1,0 +1,363 @@
+
+ RUN  v4.1.10 /Users/ewi/.codex/worktrees/46f5/autopod/packages/daemon
+
+ ✓ src/actions/handlers/ado-handler.test.ts > createAdoHandler > throws during execute when daemon Entra auth is unavailable 4ms
+ ✓ src/actions/handlers/ado-handler.test.ts > createAdoHandler > returns a handler with handlerType "ado" 0ms
+ ✓ src/actions/handlers/ado-handler.test.ts > createAdoHandler > uses daemon Entra Bearer auth and never ADO_PAT 42ms
+ ✓ src/actions/handlers/ado-handler.test.ts > createAdoHandler > read_workitem calls correct URL with Bearer auth and picks fields 1ms
+ ✓ src/actions/handlers/ado-handler.test.ts > createAdoHandler > search_workitems builds auto-generated WIQL query and picks fields from batch 1ms
+ ✓ src/actions/handlers/ado-handler.test.ts > createAdoHandler > search_workitems uses raw WIQL when query includes WHERE 0ms
+ ✓ src/actions/handlers/ado-handler.test.ts > createAdoHandler > search_workitems escapes single quotes in query, state, and type 0ms
+ ✓ src/actions/handlers/ado-handler.test.ts > createAdoHandler > search_workitems returns empty array for no results 0ms
+ ✓ src/actions/handlers/ado-handler.test.ts > createAdoHandler > throws on HTTP error with status 0ms
+ ✓ src/actions/handlers/ado-handler.test.ts > createAdoHandler > throws on unknown action 0ms
+ ✓ src/actions/handlers/ado-handler.test.ts > createAdoHandler > ado_read_pr calls correct URL and picks fields 0ms
+ ✓ src/actions/handlers/ado-handler.test.ts > createAdoHandler > ado_read_pr_threads filters system threads and respects max_results 0ms
+ ✓ src/actions/handlers/ado-handler.test.ts > createAdoHandler > ado_read_pr_threads surfaces comment bodies when whitelisted 0ms
+ ✓ src/actions/handlers/ado-handler.test.ts > createAdoHandler > ado_read_pr_changes fetches iterations then last iteration changes 0ms
+ ✓ src/actions/handlers/ado-handler.test.ts > createAdoHandler > ado_read_pr_changes returns empty for no iterations 0ms
+ ✓ src/actions/handlers/ado-handler.test.ts > createAdoHandler > ado_read_file calls correct URL with path and picks fields 0ms
+ ✓ src/actions/handlers/ado-handler.test.ts > createAdoHandler > ado_read_file includes version descriptor when version is provided 0ms
+ ✓ src/actions/handlers/ado-handler.test.ts > createAdoHandler > ado_search_code posts to almsearch.dev.azure.com with correct body 1ms
+ ✓ src/actions/handlers/ado-handler.test.ts > createAdoHandler > ado_search_code includes repo filter when repo is provided 0ms
+ ✓ src/actions/handlers/ado-handler.test.ts > createAdoHandler > ado_search_code returns empty array for no results 0ms
+ ✓ src/actions/handlers/github-handler.test.ts > createGitHubHandler > throws during execute when no token is available 3ms
+ ✓ src/actions/handlers/github-handler.test.ts > createGitHubHandler > returns a handler with handlerType "github" 0ms
+ ✓ src/actions/handlers/github-handler.test.ts > createGitHubHandler > does not accept the legacy github-pat fallback 1ms
+ ✓ src/actions/handlers/github-handler.test.ts > createGitHubHandler > throws on invalid repo format 0ms
+ ✓ src/actions/handlers/github-handler.test.ts > createGitHubHandler > read_issue calls correct GitHub API URL and picks fields 44ms
+ ✓ src/actions/handlers/github-handler.test.ts > createGitHubHandler > search_issues URL-encodes query and adds state filter 1ms
+ ✓ src/actions/handlers/github-handler.test.ts > createGitHubHandler > read_file decodes base64 content 1ms
+ ✓ src/actions/handlers/github-handler.test.ts > createGitHubHandler > read_pr_diff filters by file_path param 1ms
+ ✓ src/actions/handlers/github-handler.test.ts > createGitHubHandler > throws on HTTP error with status and body 1ms
+ ✓ src/actions/handlers/github-handler.test.ts > createGitHubHandler > throws on unknown action 0ms
+ ✓ src/actions/handlers/github-handler.test.ts > createGitHubHandler > tracks rate limits from response headers 1ms
+ ✓ src/actions/handlers/github-handler.test.ts > createGitHubHandler > throws when rate limit is exceeded 0ms
+ ✓ src/actions/handlers/azure-logs-handler.test.ts > createAzureLogsHandler > uses AZURE_MONITOR_TOKEN when available 40ms
+ ✓ src/actions/handlers/azure-logs-handler.test.ts > createAzureLogsHandler > prefers az CLI for Azure Monitor when no explicit token is configured 12ms
+ ✓ src/actions/handlers/azure-logs-handler.test.ts > createAzureLogsHandler > query_logs calls correct URL with query and default timespan PT1H 0ms
+ ✓ src/actions/handlers/azure-logs-handler.test.ts > createAzureLogsHandler > query_logs uses custom timespan when provided 0ms
+ ✓ src/actions/handlers/azure-logs-handler.test.ts > createAzureLogsHandler > read_app_insights calls correct URL 0ms
+ ✓ src/actions/handlers/azure-logs-handler.test.ts > createAzureLogsHandler > read_container_logs builds KQL query with single-quote escaping 1ms
+ ✓ src/actions/handlers/azure-logs-handler.test.ts > createAzureLogsHandler > formatTables converts tabular response to named tables with row objects 0ms
+ ✓ src/actions/handlers/azure-logs-handler.test.ts > createAzureLogsHandler > formatTables handles empty tables 0ms
+ ✓ src/actions/handlers/azure-logs-handler.test.ts > createAzureLogsHandler > throws on HTTP error 1ms
+ ✓ src/actions/handlers/azure-logs-handler.test.ts > createAzureLogsHandler > throws on unknown action 0ms
+ ✓ src/actions/handlers/azure-pim-handler.test.ts > createPimClient > activate sends correct Graph API request body 44ms
+ ✓ src/actions/handlers/azure-pim-handler.test.ts > createPimClient > deactivate sends selfDeactivate action 0ms
+ ✓ src/actions/handlers/azure-pim-handler.test.ts > createPimClient > listActive queries assignmentSchedules with filter 1ms
+ ✓ src/actions/handlers/azure-pim-handler.test.ts > createPimClient > throws on HTTP error 1ms
+ ✓ src/actions/handlers/azure-pim-handler.test.ts > createPimClient > prefers az CLI for RBAC role activation when no explicit ARM token is configured 32ms
+ ✓ src/actions/handlers/azure-pim-handler.test.ts > createAzurePimHandler > dispatches activate_pim_group to client.activate 1ms
+ ✓ src/actions/handlers/azure-pim-handler.test.ts > createAzurePimHandler > dispatches deactivate_pim_group to client.deactivate 0ms
+ ✓ src/actions/handlers/azure-pim-handler.test.ts > createAzurePimHandler > dispatches list_pim_activations to client.listActive 0ms
+ ✓ src/actions/handlers/azure-pim-handler.test.ts > createAzurePimHandler > throws on unknown action name 0ms
+ ✓ src/actions/handlers/azure-pim-handler.test.ts > createAzurePimHandler > uses default duration PT8H when not provided 0ms
+ ✓ src/actions/pinned-http-transport.test.ts > pinned action HTTPS trust and hostname verification > uses the pinned address while preserving Host and trusted certificate matching 25ms
+ ✓ src/actions/pinned-http-transport.test.ts > pinned action HTTPS trust and hostname verification > rejects an untrusted certificate before sending an HTTP request 7ms
+ ✓ src/actions/pinned-http-transport.test.ts > pinned action HTTPS trust and hostname verification > rejects a hostname mismatch even when the issuing certificate is trusted 3ms
+ ✓ src/api/mcp-proxy-handler.test.ts > rewriteMcpUrls > rewrites URL correctly with server name and pod ID 2ms
+ ✓ src/api/mcp-proxy-handler.test.ts > rewriteMcpUrls > encodes server names with special characters 0ms
+ ✓ src/api/mcp-proxy-handler.test.ts > rewriteMcpUrls > strips auth headers from rewritten servers 0ms
+ ✓ src/api/mcp-proxy-handler.test.ts > rewriteMcpUrls > preserves server name property 0ms
+ ✓ src/api/mcp-proxy-handler.test.ts > rewriteMcpUrls > handles multiple servers 0ms
+ ✓ src/api/mcp-proxy-handler.test.ts > rewriteMcpUrls > empty server list returns empty array 0ms
+ ✓ src/api/mcp-proxy-handler.test.ts > mcpProxyHandler — safety events > threat path: writes injection safety_events row with source=mcp_proxy 65ms
+ ✓ src/api/mcp-proxy-handler.test.ts > mcpProxyHandler — safety events > PII path: writes pii safety_events row with source=mcp_proxy 3ms
+ ✓ src/api/mcp-proxy-handler.test.ts > mcpProxyHandler — safety events > existing log line fires when response is quarantined 2ms
+ ✓ src/api/mcp-proxy-handler.test.ts > mcpProxyHandler — safety events > no safety events written when upstream returns clean content 3ms
+ ✓ src/actions/handlers/http-resilience.test.ts > action HTTP transport resource bounds: fetch > enforces the complete deadline and closes the socket: delayed headers 124ms
+ ✓ src/api/ssrf-guard.test.ts > isPrivateIp > rejects private IPv4 127.0.0.1 1ms
+ ✓ src/api/ssrf-guard.test.ts > isPrivateIp > rejects private IPv4 127.255.255.254 0ms
+ ✓ src/api/ssrf-guard.test.ts > isPrivateIp > rejects private IPv4 0.0.0.0 0ms
+ ✓ src/api/ssrf-guard.test.ts > isPrivateIp > rejects private IPv4 10.0.0.1 0ms
+ ✓ src/api/ssrf-guard.test.ts > isPrivateIp > rejects private IPv4 10.255.255.255 0ms
+ ✓ src/api/ssrf-guard.test.ts > isPrivateIp > rejects private IPv4 169.254.169.254 0ms
+ ✓ src/api/ssrf-guard.test.ts > isPrivateIp > rejects private IPv4 169.254.0.1 0ms
+ ✓ src/api/ssrf-guard.test.ts > isPrivateIp > rejects private IPv4 192.168.0.1 0ms
+ ✓ src/api/ssrf-guard.test.ts > isPrivateIp > rejects private IPv4 172.16.0.1 0ms
+ ✓ src/api/ssrf-guard.test.ts > isPrivateIp > rejects private IPv4 172.31.255.255 0ms
+ ✓ src/api/ssrf-guard.test.ts > isPrivateIp > rejects private IPv4 100.64.0.1 0ms
+ ✓ src/api/ssrf-guard.test.ts > isPrivateIp > rejects private IPv4 100.127.255.255 0ms
+ ✓ src/api/ssrf-guard.test.ts > isPrivateIp > accepts public IPv4 8.8.8.8 0ms
+ ✓ src/api/ssrf-guard.test.ts > isPrivateIp > accepts public IPv4 1.1.1.1 0ms
+ ✓ src/api/ssrf-guard.test.ts > isPrivateIp > accepts public IPv4 172.32.0.1 0ms
+ ✓ src/api/ssrf-guard.test.ts > isPrivateIp > accepts public IPv4 172.15.255.255 0ms
+ ✓ src/api/ssrf-guard.test.ts > isPrivateIp > accepts public IPv4 100.63.0.1 0ms
+ ✓ src/api/ssrf-guard.test.ts > isPrivateIp > accepts public IPv4 100.128.0.1 0ms
+ ✓ src/api/ssrf-guard.test.ts > isPrivateIp > rejects private IPv6 :: 1ms
+ ✓ src/api/ssrf-guard.test.ts > isPrivateIp > rejects private IPv6 ::1 1ms
+ ✓ src/api/ssrf-guard.test.ts > isPrivateIp > rejects private IPv6 fc00::1 0ms
+ ✓ src/api/ssrf-guard.test.ts > isPrivateIp > rejects private IPv6 fd00::1 0ms
+ ✓ src/api/ssrf-guard.test.ts > isPrivateIp > rejects private IPv6 fdff:ffff:ffff:ffff:ffff:ffff:ffff:ffff 0ms
+ ✓ src/api/ssrf-guard.test.ts > isPrivateIp > rejects private IPv6 fe80::1 0ms
+ ✓ src/api/ssrf-guard.test.ts > isPrivateIp > rejects private IPv6 feb0::1 0ms
+ ✓ src/api/ssrf-guard.test.ts > isPrivateIp > rejects private IPv6 ::ffff:127.0.0.1 0ms
+ ✓ src/api/ssrf-guard.test.ts > isPrivateIp > rejects private IPv6 ::ffff:169.254.169.254 0ms
+ ✓ src/api/ssrf-guard.test.ts > isPrivateIp > accepts public IPv6 2001:4860:4860::8888 0ms
+ ✓ src/api/ssrf-guard.test.ts > isPrivateIp > accepts public IPv6 2606:4700:4700::1111 0ms
+ ✓ src/api/ssrf-guard.test.ts > isPrivateIp > accepts public IPv6 ::ffff:8.8.8.8 0ms
+ ✓ src/api/ssrf-guard.test.ts > isPrivateUrl > rejects http://localhost/ 0ms
+ ✓ src/api/ssrf-guard.test.ts > isPrivateUrl > rejects http://localhost:5000/x 0ms
+ ✓ src/api/ssrf-guard.test.ts > isPrivateUrl > rejects http://127.0.0.1/ 0ms
+ ✓ src/api/ssrf-guard.test.ts > isPrivateUrl > rejects http://169.254.169.254/latest/meta-data/ 0ms
+ ✓ src/api/ssrf-guard.test.ts > isPrivateUrl > rejects http://[::1]:8080/ 0ms
+ ✓ src/api/ssrf-guard.test.ts > isPrivateUrl > rejects http://[fe80::1]/ 0ms
+ ✓ src/api/ssrf-guard.test.ts > isPrivateUrl > rejects http://10.0.0.1/ 0ms
+ ✓ src/api/ssrf-guard.test.ts > isPrivateUrl > rejects http://192.168.1.1/ 0ms
+ ✓ src/api/ssrf-guard.test.ts > isPrivateUrl > rejects http://metadata.google.internal/computeMetadata/v1/ 0ms
+ ✓ src/api/ssrf-guard.test.ts > isPrivateUrl > rejects http://metadata/ 0ms
+ ✓ src/api/ssrf-guard.test.ts > isPrivateUrl > rejects http://something.internal/ 0ms
+ ✓ src/api/ssrf-guard.test.ts > isPrivateUrl > rejects http://service.local/ 0ms
+ ✓ src/api/ssrf-guard.test.ts > isPrivateUrl > accepts https://api.github.com/ 0ms
+ ✓ src/api/ssrf-guard.test.ts > isPrivateUrl > accepts https://example.com/path 0ms
+ ✓ src/api/ssrf-guard.test.ts > isPrivateUrl > accepts https://8.8.8.8/ 0ms
+ ✓ src/api/ssrf-guard.test.ts > isPrivateUrl > accepts https://[2001:4860:4860::8888]/ 0ms
+ ✓ src/api/ssrf-guard.test.ts > isPrivateUrl > blocks malformed URLs 0ms
+ ✓ src/api/ssrf-guard.test.ts > isPrivateUrl > strips trailing dot in metadata FQDN 0ms
+ ✓ src/api/ssrf-guard.test.ts > assertPublicUrl > rejects malformed or scoped resolver address fe80::1%lo0 without throwing 1ms
+ ✓ src/api/ssrf-guard.test.ts > assertPublicUrl > rejects malformed or scoped resolver address not-an-address without throwing 0ms
+ ✓ src/api/ssrf-guard.test.ts > assertPublicUrl > rejects malformed URL without DNS 0ms
+ ✓ src/api/ssrf-guard.test.ts > assertPublicUrl > rejects unsupported protocol 0ms
+ ✓ src/api/ssrf-guard.test.ts > assertPublicUrl > rejects private hostname literal without DNS lookup 0ms
+ ✓ src/api/ssrf-guard.test.ts > assertPublicUrl > accepts an IP literal that is public without DNS lookup 0ms
+ ✓ src/api/ssrf-guard.test.ts > assertPublicUrl > blocks "evil.com → 169.254.169.254" hostname pointer attack 0ms
+ ✓ src/api/ssrf-guard.test.ts > assertPublicUrl > blocks if any resolved record is private (defeats split-record DNS rebind) 0ms
+ ✓ src/api/ssrf-guard.test.ts > assertPublicUrl > accepts a hostname whose A records are all public 0ms
+ ✓ src/api/ssrf-guard.test.ts > assertPublicUrl > rejects when DNS returns empty 0ms
+ ✓ src/api/ssrf-guard.test.ts > assertPublicUrl > rejects when DNS resolution fails 0ms
+ ✓ src/actions/http-destination.test.ts > generic HTTP destination boundary > blocks equivalent mapped private URL http://[::ffff:127.0.0.1]/ before DNS or transport 13ms
+ ✓ src/actions/http-destination.test.ts > generic HTTP destination boundary > blocks equivalent mapped private URL http://[::ffff:7f00:1]/ before DNS or transport 1ms
+ ✓ src/actions/http-destination.test.ts > generic HTTP destination boundary > blocks equivalent mapped private URL http://[0:0:0:0:0:ffff:a9fe:a9fe]/ before DNS or transport 1ms
+ ✓ src/actions/http-destination.test.ts > generic HTTP destination boundary > never follows a redirect with bearer credentials 10ms
+ ✓ src/actions/http-destination.test.ts > generic HTTP destination boundary > never follows a redirect with custom-header credentials 2ms
+ ✓ src/actions/http-destination.test.ts > generic HTTP destination boundary > connects using the validated address without resolving the hostname again 7ms
+ ✓ src/actions/http-destination.test.ts > generic HTTP destination boundary > includes DNS validation in the action deadline and issues no late request 216ms
+ ✓ src/actions/audit-repository.test.ts > ActionAuditRepository > insert + listBySession round-trip 9ms
+ ✓ src/actions/audit-repository.test.ts > ActionAuditRepository > JSON round-trip for complex nested params 2ms
+ ✓ src/actions/audit-repository.test.ts > ActionAuditRepository > piiDetected boolean conversion: true stored as 1, returned as true 1ms
+ ✓ src/actions/audit-repository.test.ts > ActionAuditRepository > piiDetected boolean conversion: false stored as 0, returned as false 0ms
+ ✓ src/actions/audit-repository.test.ts > ActionAuditRepository > listBySession respects limit 0ms
+ ✓ src/actions/audit-repository.test.ts > ActionAuditRepository > listBySession orders by created_at DESC 0ms
+ ✓ src/actions/audit-repository.test.ts > ActionAuditRepository > listBySession applies until before limit 0ms
+ ✓ src/actions/audit-repository.test.ts > ActionAuditRepository > countBySession returns correct count 0ms
+ ✓ src/actions/audit-repository.test.ts > ActionAuditRepository > countBySession returns 0 for unknown pod 0ms
+ ✓ src/actions/audit-repository.test.ts > ActionAuditRepository > listBySession returns empty array for unknown pod 0ms
+ ✓ src/actions/audit-repository.test.ts > ActionAuditRepository > pii_categories round-trip: array stored and returned correctly 0ms
+ ✓ src/actions/audit-repository.test.ts > ActionAuditRepository > pii_categories round-trip: null stored and returned as null 0ms
+ ✓ src/actions/audit-repository.test.ts > ActionAuditRepository > pii_categories round-trip: undefined (not provided) stored and returned as null 0ms
+ ✓ src/actions/audit-repository.test.ts > ActionAuditRepository > multiple pods do not leak across queries 0ms
+ ✓ src/actions/audit-repository.test.ts > ActionAuditRepository — hash chain > first entry has null prevHash and a non-null entryHash 0ms
+ ✓ src/actions/audit-repository.test.ts > ActionAuditRepository — hash chain > second entry prevHash equals first entry entryHash 0ms
+ ✓ src/actions/audit-repository.test.ts > ActionAuditRepository — hash chain > verifyAuditChain returns valid for empty pod 0ms
+ ✓ src/actions/audit-repository.test.ts > ActionAuditRepository — hash chain > verifyAuditChain passes for a clean sequence 0ms
+ ✓ src/actions/audit-repository.test.ts > ActionAuditRepository — hash chain > verifyAuditChain detects a tampered entry_hash 0ms
+ ✓ src/actions/audit-repository.test.ts > ActionAuditRepository — hash chain > repository interface has no update or delete methods (application-layer immutability) 0ms
+ ✓ src/actions/audit-repository.test.ts > ActionAuditRepository — hash chain > entry_hash is identical regardless of piiCategories value (ADR-019) 0ms
+ ✓ src/actions/audit-repository.test.ts > ActionAuditRepository — hash chain > hash chains are independent across pods 0ms
+ ✓ src/actions/generic-http-handler.test.ts > createGenericHttpHandler > throws when endpoint config is missing 6ms
+ ✓ src/actions/generic-http-handler.test.ts > createGenericHttpHandler > has handlerType "http" 1ms
+ ✓ src/actions/generic-http-handler.test.ts > createGenericHttpHandler > bearer auth resolves secret and sends correct header 8ms
+ ✓ src/actions/generic-http-handler.test.ts > createGenericHttpHandler > basic auth resolves username and password secrets 4ms
+ ✓ src/actions/generic-http-handler.test.ts > createGenericHttpHandler > custom header auth sends the correct header 1ms
+ ✓ src/actions/generic-http-handler.test.ts > createGenericHttpHandler > URL template expansion with path mapping 0ms
+ ✓ src/actions/generic-http-handler.test.ts > createGenericHttpHandler > query string building appends to URL 2ms
+ ✓ src/actions/generic-http-handler.test.ts > createGenericHttpHandler > query string building works when URL already has ? 0ms
+ ✓ src/actions/generic-http-handler.test.ts > createGenericHttpHandler > body mapping for POST sends JSON body 0ms
+ ✓ src/actions/generic-http-handler.test.ts > createGenericHttpHandler > resultPath resolution on response (e.g. "data.results") 2ms
+ ✓ src/actions/generic-http-handler.test.ts > createGenericHttpHandler > field whitelisting filters out unlisted fields 5ms
+ ✓ src/actions/generic-http-handler.test.ts > createGenericHttpHandler > throws when secret reference cannot be resolved 0ms
+ ✓ src/actions/generic-http-handler.test.ts > createGenericHttpHandler > throws on HTTP error with status 1ms
+ ✓ src/actions/generic-http-handler.test.ts > createGenericHttpHandler > SSRF guard > blocks an agent-templated URL pointing at the cloud metadata service 2ms
+ ✓ src/actions/generic-http-handler.test.ts > createGenericHttpHandler > SSRF guard > blocks a URL whose hostname resolves to a private IP (DNS pointer attack) 2ms
+ ✓ src/actions/generic-http-handler.test.ts > createGenericHttpHandler > SSRF guard > blocks localhost 2ms
+ ✓ src/actions/generic-http-handler.test.ts > createGenericHttpHandler > SSRF guard > blocks .internal TLD 0ms
+ ✓ src/actions/generic-http-handler.test.ts > createGenericHttpHandler > SSRF guard > allows a public URL through to fetch 0ms
+ ✓ src/actions/generic-http-handler.test.ts > createGenericHttpHandler > GET requests do not include a body 1ms
+ ✓ src/actions/handlers/http-resilience.test.ts > action HTTP transport resource bounds: fetch > enforces the complete deadline and closes the socket: stalled body 119ms
+ ✓ src/actions/action-registry.test.ts > ActionRegistry > creates without crashing (even without defaults dir) 5ms
+ ✓ src/actions/action-registry.test.ts > ActionRegistry > filters actions by enabled groups 2ms
+ ✓ src/actions/action-registry.test.ts > ActionRegistry > includes custom actions when custom group is enabled 1ms
+ ✓ src/actions/action-registry.test.ts > ActionRegistry > respects disabled override 1ms
+ ✓ src/actions/action-registry.test.ts > ActionRegistry > getAction returns undefined for non-existent action 1ms
+ ✓ src/actions/action-registry.test.ts > ActionRegistry > enables individual actions via enabledActions without group 2ms
+ ✓ src/actions/action-registry.test.ts > ActionRegistry > enables built-in actions via enabledActions when group is disabled 2ms
+ ✓ src/actions/action-registry.test.ts > ActionRegistry > disabled override does NOT block the action — disabled means the rule is paused 1ms
+ ✓ src/actions/action-registry.test.ts > ActionRegistry > backward compat: works without enabledActions field 1ms
+ ✓ src/actions/handlers/deploy-handler.test.ts > deploy handler — execute > runs script with resolved env vars on the daemon host 4ms
+ ✓ src/actions/handlers/deploy-handler.test.ts > deploy handler — execute > does not leak unrelated daemon env vars into the script env 1ms
+ ✓ src/actions/handlers/deploy-handler.test.ts > deploy handler — execute > rejects $DAEMON: ref when daemon env var is not set 1ms
+ ✓ src/actions/handlers/deploy-handler.test.ts > deploy handler — execute > throws when deployment is disabled on the profile 0ms
+ ✓ src/actions/handlers/deploy-handler.test.ts > deploy handler — execute > throws when deployment config is null 0ms
+ ✓ src/actions/handlers/deploy-handler.test.ts > deploy handler — execute > throws when the pod has no worktree 0ms
+ ✓ src/actions/handlers/deploy-handler.test.ts > deploy handler — execute > blocks script with path traversal 0ms
+ ✓ src/actions/handlers/deploy-handler.test.ts > deploy handler — execute > blocks absolute script paths 0ms
+ ✓ src/actions/handlers/deploy-handler.test.ts > deploy handler — execute > enforces allowedScripts allowlist 0ms
+ ✓ src/actions/handlers/deploy-handler.test.ts > deploy handler — execute > allows script matching a glob pattern when baseline matches 0ms
+ ✓ src/actions/handlers/deploy-handler.test.ts > deploy handler — execute > aborts when script differs from the trusted baseline 0ms
+ ✓ src/actions/handlers/deploy-handler.test.ts > deploy handler — execute > executes when content matches the baseline 0ms
+ ✓ src/actions/handlers/deploy-handler.test.ts > deploy handler — execute > aborts when no baseline was captured for the pod (safe-fail) 0ms
+ ✓ src/actions/handlers/deploy-handler.test.ts > deploy handler — execute > aborts when script has no baseline entry (e.g. added during pod session) 0ms
+ ✓ src/actions/handlers/deploy-handler.test.ts > deploy handler — execute > skips baseline check when allowedScripts is not configured (legacy mode) 0ms
+ ✓ src/actions/handlers/deploy-handler.test.ts > deploy handler — execute > passes args to the script 0ms
+ ✓ src/actions/handlers/deploy-handler.test.ts > deploy handler — execute > never includes env var values in the returned response 0ms
+ ✓ src/actions/handlers/deploy-handler.test.ts > deploy handler — getApprovalContext > returns script content and sha256 hash read from the host worktree 0ms
+ ✓ src/actions/handlers/deploy-handler.test.ts > deploy handler — getApprovalContext > throws on invalid script path in approval context 0ms
+ ✓ src/actions/handlers/deploy-handler.test.ts > deploy handler — getApprovalContext > throws when the pod has no worktree 0ms
+ ✓ src/actions/handlers/test-pipeline-handler.test.ts > test-pipeline handler > rejects when the profile has no testPipeline enabled 3ms
+ ✓ src/actions/handlers/test-pipeline-handler.test.ts > test-pipeline handler > rejects when podId context is missing 0ms
+ ✓ src/actions/handlers/test-pipeline-handler.test.ts > test-pipeline handler > enforces per-pod rate limit 1ms
+ ✓ src/actions/handlers/test-pipeline-handler.test.ts > test-pipeline handler > pushes the branch, triggers the pipeline, and returns runId + url + testBranch 43ms
+ ✓ src/actions/handlers/test-pipeline-handler.test.ts > test-pipeline handler > redacts the daemon Entra token from failed push errors 0ms
+ ✓ src/actions/handlers/test-pipeline-handler.test.ts > test-pipeline handler > get_test_run_status returns succeeded with duration when run completes 0ms
+ ✓ src/actions/handlers/handler.test.ts > pickFields > picks top-level fields 2ms
+ ✓ src/actions/handlers/handler.test.ts > pickFields > picks nested fields via dot notation 0ms
+ ✓ src/actions/handlers/handler.test.ts > pickFields > skips missing fields 0ms
+ ✓ src/actions/handlers/handler.test.ts > pickFields > handles null/undefined input 0ms
+ ✓ src/actions/handlers/handler.test.ts > pickFields > handles empty fields array 0ms
+ ✓ src/actions/handlers/handler.test.ts > pickFields > projects through arrays for paths like `array.field` 0ms
+ ✓ src/actions/handlers/handler.test.ts > pickFields > skips array elements where the path resolves to undefined 0ms
+ ✓ src/actions/handlers/handler.test.ts > pickFields > omits array-projected field entirely when no element matches 0ms
+ ✓ src/actions/handlers/handler.test.ts > pickFieldsArray > applies field picking to each item 0ms
+ ✓ src/actions/handlers/handler.test.ts > resolveResultPath > resolves nested path 0ms
+ ✓ src/actions/handlers/handler.test.ts > resolveResultPath > returns whole object when no path 0ms
+ ✓ src/actions/handlers/handler.test.ts > resolveResultPath > returns undefined for missing path 0ms
+ ✓ src/actions/handlers/http-resilience.test.ts > action HTTP transport resource bounds: fetch > enforces the complete deadline and closes the socket: slow chunks 114ms
+ ✓ src/actions/handlers/http-resilience.test.ts > action HTTP transport resource bounds: fetch > preserves caller cancellation during body consumption 86ms
+ ✓ src/actions/policy-resolver.test.ts > resolveEffectiveActionPolicy > returns null when profile has no policy and deployment is disabled 1ms
+ ✓ src/actions/policy-resolver.test.ts > resolveEffectiveActionPolicy > returns null when profile has no policy and deployment.enabled is false 0ms
+ ✓ src/actions/policy-resolver.test.ts > resolveEffectiveActionPolicy > synthesizes a minimal policy with deploy when deployment is enabled and policy is null 0ms
+ ✓ src/actions/policy-resolver.test.ts > resolveEffectiveActionPolicy > returns the policy unchanged when deployment is disabled 0ms
+ ✓ src/actions/policy-resolver.test.ts > resolveEffectiveActionPolicy > appends deploy to enabledGroups when deployment is enabled 0ms
+ ✓ src/actions/policy-resolver.test.ts > resolveEffectiveActionPolicy > does not duplicate deploy when already in enabledGroups 0ms
+ ✓ src/actions/policy-resolver.test.ts > resolveEffectiveActionPolicy > preserves enabledActions, overrides, custom actions, quarantine when augmenting 0ms
+ ✓ src/profiles/profile-validator.test.ts > ProfileValidator > should pass for a valid profile 1ms
+ ✓ src/profiles/profile-validator.test.ts > ProfileValidator > should reject uppercase names 0ms
+ ✓ src/profiles/profile-validator.test.ts > ProfileValidator > should reject names with spaces 0ms
+ ✓ src/profiles/profile-validator.test.ts > ProfileValidator > should reject names with special characters 0ms
+ ✓ src/profiles/profile-validator.test.ts > ProfileValidator > should reject names starting with a hyphen 0ms
+ ✓ src/profiles/profile-validator.test.ts > ProfileValidator > should reject names longer than 50 chars 0ms
+ ✓ src/profiles/profile-validator.test.ts > ProfileValidator > should accept single character names 0ms
+ ✓ src/profiles/profile-validator.test.ts > ProfileValidator > validates complete profile failover policies and allows explicit disablement 1ms
+ ✓ src/profiles/profile-validator.test.ts > ProfileValidator > should reject non-https repoUrl 0ms
+ ✓ src/profiles/profile-validator.test.ts > ProfileValidator > should reject non-github/azure repoUrl 0ms
+ ✓ src/profiles/profile-validator.test.ts > ProfileValidator > should reject repository hosts that only contain github.com 0ms
+ ✓ src/profiles/profile-validator.test.ts > ProfileValidator > should reject invalid URL format 0ms
+ ✓ src/profiles/profile-validator.test.ts > ProfileValidator > should accept dev.azure.com URLs 0ms
+ ✓ src/profiles/profile-validator.test.ts > ProfileValidator > should reject dangerous build commands with rm -rf / 0ms
+ ✓ src/profiles/profile-validator.test.ts > ProfileValidator > should reject sudo in build commands 0ms
+ ✓ src/profiles/profile-validator.test.ts > ProfileValidator > should reject curl | bash in build commands 0ms
+ ✓ src/profiles/profile-validator.test.ts > ProfileValidator > should reject start command without $PORT 0ms
+ ✓ src/profiles/profile-validator.test.ts > ProfileValidator > should reject healthPath without leading / 0ms
+ ✓ src/profiles/profile-validator.test.ts > ProfileValidator > should reject healthTimeout out of range 0ms
+ ✓ src/profiles/profile-validator.test.ts > ProfileValidator > should reject healthTimeout above max 0ms
+ ✓ src/profiles/profile-validator.test.ts > ProfileValidator > should accept any model string 0ms
+ ✓ src/profiles/profile-validator.test.ts > ProfileValidator > should accept advisory as a skippable validation phase 0ms
+ ✓ src/profiles/profile-validator.test.ts > ProfileValidator > should accept setup as a skippable validation phase 0ms
+ ✓ src/profiles/profile-validator.test.ts > ProfileValidator > should accept a validation suite in pod defaults 0ms
+ ✓ src/profiles/profile-validator.test.ts > ProfileValidator > should reject an invalid validation suite in pod defaults 0ms
+ ✓ src/profiles/profile-validator.test.ts > ProfileValidator > should accept validationSetupCommand when it is a command or null 0ms
+ ✓ src/profiles/profile-validator.test.ts > ProfileValidator > should reject dangerous validation setup commands 0ms
+ ✓ src/profiles/profile-validator.test.ts > ProfileValidator > should reject empty model string 0ms
+ ✓ src/profiles/profile-validator.test.ts > ProfileValidator > should reject unknown runtime 0ms
+ ✓ src/profiles/profile-validator.test.ts > ProfileValidator > should accept Pi as an additive runtime 0ms
+ ✓ src/profiles/profile-validator.test.ts > ProfileValidator > should accept portable reasoning effort values and null inheritance 0ms
+ ✓ src/profiles/profile-validator.test.ts > ProfileValidator > should reject invalid reasoning effort values 0ms
+ ✓ src/profiles/profile-validator.test.ts > ProfileValidator > should reject maxValidationAttempts out of range 0ms
+ ✓ src/profiles/profile-validator.test.ts > ProfileValidator > should accept the Node, Playwright, and PostgreSQL template 0ms
+ ✓ src/profiles/profile-validator.test.ts > ProfileValidator > should reject invalid template 0ms
+ ✓ src/profiles/profile-validator.test.ts > ProfileValidator > should return all errors at once 0ms
+ ✓ src/profiles/profile-validator.test.ts > ProfileValidator > Sandbox + network policy (egress supported natively) > accepts sandbox profile with restricted network policy 0ms
+ ✓ src/profiles/profile-validator.test.ts > ProfileValidator > Sandbox + network policy (egress supported natively) > accepts sandbox profile with deny-all network policy 0ms
+ ✓ src/profiles/profile-validator.test.ts > ProfileValidator > Sandbox + network policy (egress supported natively) > accepts sandbox profile with allow-all network policy 0ms
+ ✓ src/profiles/profile-validator.test.ts > ProfileValidator > Sandbox + network policy (egress supported natively) > accepts Docker profile with restricted network policy 0ms
+ ✓ src/profiles/profile-validator.test.ts > ProfileValidator > repo-less profiles (ephemeral / base anchor) > accepts a profile with no repoUrl 0ms
+ ✓ src/profiles/profile-validator.test.ts > ProfileValidator > repo-less profiles (ephemeral / base anchor) > accepts a profile with no repoUrl and no buildCommand or startCommand 0ms
+ ✓ src/profiles/profile-validator.test.ts > ProfileValidator > repo-less profiles (ephemeral / base anchor) > accepts a profile with no repoUrl but with a buildCommand 0ms
+ ✓ src/profiles/profile-validator.test.ts > ProfileValidator > repo-less profiles (ephemeral / base anchor) > still rejects dangerous buildCommand even without a repoUrl 0ms
+ ✓ src/profiles/profile-validator.test.ts > ProfileValidator > repo-less profiles (ephemeral / base anchor) > still requires buildCommand when repoUrl is set 0ms
+ ✓ src/profiles/profile-validator.test.ts > ProfileValidator > repo-less profiles (ephemeral / base anchor) > still requires $PORT in startCommand when repoUrl is set 0ms
+ ✓ src/profiles/profile-validator.test.ts > ProfileValidator > repo-less profiles (ephemeral / base anchor) > does not require $PORT in startCommand when repoUrl is null 0ms
+ ✓ src/profiles/profile-validator.test.ts > ProfileValidator > private registry SSRF guard > rejects a registry URL pointing at the AWS/GCP/Azure metadata endpoint 0ms
+ ✓ src/profiles/profile-validator.test.ts > ProfileValidator > private registry SSRF guard > rejects a registry URL pointing at localhost 0ms
+ ✓ src/profiles/profile-validator.test.ts > ProfileValidator > private registry SSRF guard > rejects a registry URL pointing at a private RFC-1918 address 0ms
+ ✓ src/profiles/profile-validator.test.ts > ProfileValidator > private registry SSRF guard > rejects a registry URL using metadata.google.internal 0ms
+ ✓ src/profiles/profile-validator.test.ts > ProfileValidator > private registry SSRF guard > accepts a legitimate Azure DevOps registry URL 0ms
+ ✓ src/profiles/profile-validator.test.ts > ProfileValidator > private registry SSRF guard > accepts an empty privateRegistries array 0ms
+ ✓ src/profiles/profile-validator.test.ts > ProfileValidator > loop tunables > accepts a sensible mergePollIntervalSec 0ms
+ ✓ src/profiles/profile-validator.test.ts > ProfileValidator > loop tunables > rejects a mergePollIntervalSec that is too aggressive 0ms
+ ✓ src/profiles/profile-validator.test.ts > ProfileValidator > loop tunables > rejects a mergePollIntervalSec that is unreasonably long 0ms
+ ✓ src/profiles/profile-validator.test.ts > ProfileValidator > PAT expiry metadata > accepts valid date-only expiry fields 0ms
+ ✓ src/profiles/profile-validator.test.ts > ProfileValidator > PAT expiry metadata > rejects malformed or impossible expiry dates 0ms
+ ✓ src/actions/action-integration.test.ts > Action Control Plane Integration > keeps sensitive failure content out of logs, audit and the real MCP formatter: upstream-body 85ms
+ ✓ src/actions/action-engine.test.ts > ActionEngine > forwards daemon GitHub auth without changing policy or audit boundaries 3ms
+ ✓ src/actions/action-engine.test.ts > ActionEngine > returns error when action not found 1ms
+ ✓ src/actions/action-engine.test.ts > ActionEngine > returns error for missing required params 0ms
+ ✓ src/actions/action-engine.test.ts > ActionEngine > returns error for wrong param type 0ms
+ ✓ src/actions/action-engine.test.ts > ActionEngine > returns error when approval is required 0ms
+ ✓ src/actions/action-engine.test.ts > ActionEngine > returns error when resource not allowed 0ms
+ ✓ src/actions/action-engine.test.ts > ActionEngine > allows when resource is an exact match in allowedResources 1ms
+ ✓ src/actions/action-engine.test.ts > ActionEngine > allows when resource matches an org/* wildcard 0ms
+ ✓ src/actions/action-engine.test.ts > ActionEngine > blocks when resource does not match an org/* wildcard 0ms
+ ✓ src/actions/action-engine.test.ts > ActionEngine > allows any resource when allowedResources contains * 0ms
+ ✓ src/actions/action-engine.test.ts > ActionEngine > writes audit entry on success 0ms
+ ✓ src/actions/action-engine.test.ts > ActionEngine > allows access to all repos when multiple per-repo overrides are configured 0ms
+ ✓ src/actions/action-engine.test.ts > ActionEngine > matches URL-encoded resource patterns against decoded params 0ms
+ ✓ src/actions/action-engine.test.ts > ActionEngine > skips disabled overrides when evaluating allowedResources 0ms
+ ✓ src/actions/action-engine.test.ts > ActionEngine > allows ado_read_file when org/project pattern prefix-matches org/project/repo resource 0ms
+ ✓ src/actions/action-engine.test.ts > ActionEngine > allows ado_read_file when org/project/*-wildcard matches org/project/repo resource 0ms
+ ✓ src/actions/action-engine.test.ts > ActionEngine > allows ado_read_file with URL-encoded org/project pattern via prefix match 0ms
+ ✓ src/actions/action-engine.test.ts > ActionEngine > blocks ado_read_file when org/project does not match 0ms
+ ✓ src/actions/action-engine.test.ts > ActionEngine > getAvailableActions delegates to registry 1ms
+ ✓ src/actions/action-engine.test.ts > ActionEngine > validates enum params 0ms
+ ✓ src/actions/action-engine.test.ts > ActionEngine — safety events > PII-only path: writes pii safety_events rows + sets pii_categories on audit 1ms
+ ✓ src/actions/action-engine.test.ts > ActionEngine — safety events > injection-only path: writes injection safety_events rows 0ms
+ ✓ src/actions/action-engine.test.ts > ActionEngine — safety events > mixed path: both PII and injection rows written, audit has pii_categories 0ms
+ ✓ src/actions/action-engine.test.ts > ActionEngine — safety events > quarantine score still set on audit regardless of PII work 0ms
+ ✓ src/actions/action-engine.test.ts > ActionEngine — safety events > no safety events written when no PII and no threats 0ms
+ ✓ src/actions/handlers/http-resilience.test.ts > action HTTP transport resource bounds: fetch > bounds chunked response bytes for status 200 5ms
+ ✓ src/actions/handlers/http-resilience.test.ts > action HTTP transport resource bounds: fetch > bounds chunked response bytes for status 503 4ms
+ ✓ src/actions/handlers/http-resilience.test.ts > action HTTP transport resource bounds: fetch > bounds decompressed response bytes 14ms
+ ✓ src/actions/handlers/http-resilience.test.ts > action HTTP transport resource bounds: fetch > counts UTF-8 bytes rather than JavaScript characters 4ms
+ ✓ src/actions/handlers/http-resilience.test.ts > action HTTP transport resource bounds: fetch > stops and cancels oversized streams despite Content-Length undefined 1ms
+ ✓ src/actions/handlers/http-resilience.test.ts > action HTTP transport resource bounds: fetch > stops and cancels oversized streams despite Content-Length 1 0ms
+ ✓ src/actions/handlers/http-resilience.test.ts > action HTTP transport resource bounds: fetch > stops and cancels oversized streams despite Content-Length invalid 0ms
+ ✓ src/actions/handlers/http-resilience.test.ts > action HTTP transport resource bounds: fetch > stops and cancels oversized streams despite Content-Length 2097153 0ms
+ ✓ src/actions/handlers/http-resilience.test.ts > action HTTP transport resource bounds: fetch > retains valid JSON and empty 204 response semantics 7ms
+ ✓ src/actions/action-integration.test.ts > Action Control Plane Integration > keeps sensitive failure content out of logs, audit and the real MCP formatter: credential-error 49ms
+ ✓ src/actions/action-integration.test.ts > Action Control Plane Integration > keeps sensitive failure content out of logs, audit and the real MCP formatter: nested-audit 42ms
+ ✓ src/actions/action-integration.test.ts > Action Control Plane Integration > denied approval policy performs no request or credential lookup 36ms
+ ✓ src/actions/ssrf-consumers.test.ts > browser validation consumer of the shared address classifier > preserves the existing loopback allowlist: http://localhost:3000/ 2ms
+ ✓ src/actions/ssrf-consumers.test.ts > browser validation consumer of the shared address classifier > preserves the existing loopback allowlist: http://127.0.0.1:3000/ 0ms
+ ✓ src/actions/ssrf-consumers.test.ts > browser validation consumer of the shared address classifier > preserves the existing loopback allowlist: http://127.2.3.4/ 0ms
+ ✓ src/actions/ssrf-consumers.test.ts > browser validation consumer of the shared address classifier > retains the existing deny boundary: https://public.example/ 1ms
+ ✓ src/actions/ssrf-consumers.test.ts > browser validation consumer of the shared address classifier > retains the existing deny boundary: http://169.254.169.254/ 0ms
+ ✓ src/actions/ssrf-consumers.test.ts > browser validation consumer of the shared address classifier > retains the existing deny boundary: http://[::ffff:7f00:1]/ 0ms
+ ✓ src/actions/ssrf-consumers.test.ts > browser validation consumer of the shared address classifier > retains the existing deny boundary: http://[::ffff:a9fe:a9fe]/ 0ms
+ ✓ src/actions/ssrf-consumers.test.ts > browser validation consumer of the shared address classifier > retains the existing deny boundary: http://[::1]/ 0ms
+ ✓ src/actions/ssrf-consumers.test.ts > browser validation consumer of the shared address classifier > retains the existing deny boundary: file:///tmp/fixture 0ms
+ ✓ src/actions/handlers/http-resilience.test.ts > action HTTP transport resource bounds: pinned > enforces the complete deadline and closes the socket: delayed headers 113ms
+ ✓ src/actions/action-integration.test.ts > Action Control Plane Integration > denied resource policy performs no request or credential lookup 37ms
+ ✓ src/actions/action-integration.test.ts > Action Control Plane Integration > full pipeline: custom HTTP action → sanitize → audit 39ms
+ ✓ src/actions/action-integration.test.ts > Action Control Plane Integration > full pipeline: quarantine blocks injected content 40ms
+ ✓ src/actions/handlers/http-resilience.test.ts > action HTTP transport resource bounds: pinned > enforces the complete deadline and closes the socket: stalled body 115ms
+ ✓ src/actions/action-integration.test.ts > Action Control Plane Integration > registry resolves built-in + custom actions correctly 34ms
+ ✓ src/actions/action-integration.test.ts > Action Control Plane Integration > action override: disabled action not returned 33ms
+ ✓ src/actions/action-integration.test.ts > Action Control Plane Integration > param validation rejects bad input before hitting handler 33ms
+ ✓ src/actions/action-integration.test.ts > Action Control Plane Integration > audit trail persists across multiple action executions 36ms
+ ✓ src/actions/handlers/http-resilience.test.ts > action HTTP transport resource bounds: pinned > enforces the complete deadline and closes the socket: slow chunks 114ms
+ ✓ src/actions/handlers/http-resilience.test.ts > action HTTP transport resource bounds: pinned > preserves caller cancellation during body consumption 82ms
+ ✓ src/actions/handlers/http-resilience.test.ts > action HTTP transport resource bounds: pinned > bounds chunked response bytes for status 200 3ms
+ ✓ src/actions/handlers/http-resilience.test.ts > action HTTP transport resource bounds: pinned > bounds chunked response bytes for status 503 3ms
+ ✓ src/actions/handlers/http-resilience.test.ts > action HTTP transport resource bounds: pinned > bounds decompressed response bytes 10ms
+ ✓ src/actions/handlers/http-resilience.test.ts > action HTTP transport resource bounds: pinned > counts UTF-8 bytes rather than JavaScript characters 2ms
+ ✓ src/actions/handlers/http-resilience.test.ts > action HTTP transport resource bounds: pinned > stops and cancels oversized streams despite Content-Length undefined 0ms
+ ✓ src/actions/handlers/http-resilience.test.ts > action HTTP transport resource bounds: pinned > stops and cancels oversized streams despite Content-Length 1 0ms
+ ✓ src/actions/handlers/http-resilience.test.ts > action HTTP transport resource bounds: pinned > stops and cancels oversized streams despite Content-Length invalid 0ms
+ ✓ src/actions/handlers/http-resilience.test.ts > action HTTP transport resource bounds: pinned > stops and cancels oversized streams despite Content-Length 2097153 0ms
+ ✓ src/actions/handlers/http-resilience.test.ts > action HTTP transport resource bounds: pinned > retains valid JSON and empty 204 response semantics 1ms
+
+ Test Files  20 passed (20)
+      Tests  355 passed (355)
+   Start at  23:43:11
+   Duration  1.19s (transform 915ms, setup 0ms, import 2.15s, tests 2.23s, environment 1ms)
