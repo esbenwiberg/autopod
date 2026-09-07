@@ -1,0 +1,31 @@
+
+ RUN  v4.1.11 /private/tmp/autopod-durable-execution/packages/mobile-web
+
+ ❯ src/components/TaskExecutionPanel.test.tsx (2 tests | 2 failed) 34ms
+   × keeps unavailable accounting explicit and refreshes delivery observations (available: true) 28ms
+   × keeps unavailable accounting explicit and refreshes delivery observations (available: false) 4ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 2 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/components/TaskExecutionPanel.test.tsx > keeps unavailable accounting explicit and refreshes delivery observations (available: true)
+ FAIL  src/components/TaskExecutionPanel.test.tsx > keeps unavailable accounting explicit and refreshes delivery observations (available: false)
+AssertionError: expected 'Task accountingLogical task: logical-…' to contain '1 PR receipts · 1 unresolved of 2 int…'
+
+Expected: "1 PR receipts · 1 unresolved of 2 intents"
+Received: "Task accountingLogical task: logical-originalExecution: fix-execution2 pods · 3 recorded agent runs · 4 provider attempts · 5 validations1 delivery receipts · 1 unresolved of 2 intentsDurable ledger only; historical PR URLs are not reconstructed receipts.Recorded tokens: 100 / 100Stored task cost subtotal: $1.2500 · partial telemetryBilling unverified; stored amounts can include estimates.Known estimates: $0.5000 · 1 identified phases with unavailable cost · 1 pods with conflicting attributionroot: Stored phase costs conflict; no proportional allocation applied.2 additional cost diagnostics omitted.Task token accounting incomplete; reconcile prior execution telemetry.Infrastructure cost unavailableRefresh task accounting"
+
+ ❯ src/components/TaskExecutionPanel.test.tsx:103:37
+    101|       expect(container.textContent).toContain('$1.2500 · partial telem…
+    102|       expect(container.textContent).toContain('Infrastructure cost una…
+    103|       expect(container.textContent).toContain('1 PR receipts · 1 unres…
+       |                                     ^
+    104|       expect(container.textContent).toContain(
+    105|         hasDisposition
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/2]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  2 failed (2)
+   Start at  22:43:15
+   Duration  493ms (transform 34ms, setup 14ms, import 55ms, tests 34ms, environment 289ms)

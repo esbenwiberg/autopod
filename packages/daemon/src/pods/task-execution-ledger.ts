@@ -232,14 +232,31 @@ export function createTaskExecutionLedger(db: Database.Database): TaskExecutionL
       JOIN task_executions e ON e.pod_id = r.pod_id WHERE e.task_id = ?`)
           .get(identity.taskId) as { n: number }
       ).n;
+    // Aggregate scalar receipt metadata only. Large/malformed legacy result
+    // bodies are not parsed, and repeated observations never inflate receipts.
     const delivery = db
-      .prepare(`SELECT COUNT(*) AS intentCount, COUNT(r.id) AS receiptCount,
-      COALESCE(SUM(CASE WHEN r.id IS NULL THEN 1 ELSE 0 END), 0) AS unresolvedCount
-      FROM delivery_intents i LEFT JOIN delivery_receipts r ON r.intent_id = i.id WHERE i.task_id = ?`)
+      .prepare(`WITH deliveries AS (
+        SELECT r.id AS receiptId, COALESCE(
+          (SELECT o.disposition FROM delivery_observations o WHERE o.receipt_id = r.id
+            ORDER BY o.sequence DESC LIMIT 1), r.disposition) AS disposition
+        FROM delivery_intents i LEFT JOIN delivery_receipts r ON r.intent_id = i.id
+        WHERE i.task_id = ?
+      ) SELECT COUNT(*) AS intentCount, COUNT(receiptId) AS receiptCount,
+        COALESCE(SUM(receiptId IS NULL), 0) AS unresolvedCount,
+        COALESCE(SUM(disposition = 'open'), 0) AS openCount,
+        COALESCE(SUM(disposition = 'merged'), 0) AS mergedCount,
+        COALESCE(SUM(disposition = 'closed'), 0) AS closedCount,
+        COALESCE(SUM(receiptId IS NOT NULL AND
+          (disposition IS NULL OR disposition NOT IN ('open','merged','closed'))), 0) AS unavailableCount
+      FROM deliveries`)
       .get(identity.taskId) as {
       intentCount: number;
       receiptCount: number;
       unresolvedCount: number;
+      openCount: number;
+      mergedCount: number;
+      closedCount: number;
+      unavailableCount: number;
     };
     const root = db
       .prepare('SELECT token_budget AS budget FROM pods WHERE id = ?')
@@ -274,7 +291,20 @@ export function createTaskExecutionLedger(db: Database.Database): TaskExecutionL
       budgetCheck,
       providerAttemptCount: count('provider_attempts'),
       validationExecutionCount: count('validations'),
-      delivery: { ...delivery, scope: 'durable-receipts-only' },
+      delivery: {
+        intentCount: delivery.intentCount,
+        receiptCount: delivery.receiptCount,
+        unresolvedCount: delivery.unresolvedCount,
+        scope: 'durable-receipts-only',
+        disposition: {
+          openCount: delivery.openCount,
+          mergedCount: delivery.mergedCount,
+          closedCount: delivery.closedCount,
+          unavailableCount: delivery.unavailableCount,
+          basis: 'last-recorded',
+          liveVerified: false,
+        },
+      },
       recordedInputTokens,
       recordedOutputTokens,
       recordedCostUsd,

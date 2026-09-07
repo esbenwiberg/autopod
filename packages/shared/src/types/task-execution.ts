@@ -17,6 +17,15 @@ export interface TaskExecutionSummary {
     receiptCount: number;
     unresolvedCount: number;
     scope: 'durable-receipts-only';
+    /** Latest stored observation per PR receipt; absence means older server evidence is unavailable. */
+    disposition?: {
+      openCount: number;
+      mergedCount: number;
+      closedCount: number;
+      unavailableCount: number;
+      basis: 'last-recorded';
+      liveVerified: false;
+    };
   };
   tokenBudget: number | null;
   /** Admission check of recorded usage; this does not reserve future provider spending. */

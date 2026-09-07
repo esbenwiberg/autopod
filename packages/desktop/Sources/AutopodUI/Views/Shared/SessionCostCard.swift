@@ -30,11 +30,17 @@ public struct SessionCostCard: View {
                     Text(task.taskId).font(.caption).textSelection(.enabled)
                     Text("\(task.podCount) pods · \(task.agentRunCount) recorded agent runs · \(task.providerAttemptCount) provider attempts · \(task.validationExecutionCount) validations")
                     if let delivery = task.delivery {
-                        Text("\(delivery.receiptCount) delivery receipts · \(delivery.unresolvedCount) unresolved of \(delivery.intentCount) intents")
+                        Text("\(delivery.receiptCount) PR receipts · \(delivery.unresolvedCount) unresolved of \(delivery.intentCount) intents")
                         Text("Durable ledger only; historical PR URLs excluded.").font(.caption).foregroundStyle(.secondary)
                     } else {
-                        Text("Delivery receipts unavailable").font(.caption).foregroundStyle(.secondary)
+                        Text("PR receipts unavailable").font(.caption).foregroundStyle(.secondary)
                     }
+                    if let disposition = task.delivery?.disposition {
+                        Text("Last recorded PR status: \(disposition.openCount) open · \(disposition.mergedCount) merged · \(disposition.closedCount) closed · \(disposition.unavailableCount) unavailable")
+                    } else {
+                        Text("PR disposition observations unavailable.").font(.caption).foregroundStyle(.secondary)
+                    }
+                    Text("Current provider status unverified.").font(.caption).foregroundStyle(.secondary)
                     Text("Stored task cost subtotal: \(formatCost(task.recordedCostUsd)) · \(task.telemetry) telemetry")
                     CostEvidenceView(evidence: task.costEvidence)
                     Text("Task tokens: \(task.recordedInputTokens + task.recordedOutputTokens) / \(task.tokenBudget.map(String.init) ?? "no configured limit")")

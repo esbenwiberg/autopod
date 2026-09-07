@@ -36,14 +36,20 @@ export function TaskExecutionPanel({ podId, revision }: { podId: string; revisio
           </p>
           <p>
             {data.delivery
-              ? `${data.delivery.receiptCount} delivery receipts · ${data.delivery.unresolvedCount} unresolved of ${data.delivery.intentCount} intents`
-              : 'Delivery receipts unavailable.'}
+              ? `${data.delivery.receiptCount} PR receipts · ${data.delivery.unresolvedCount} unresolved of ${data.delivery.intentCount} intents`
+              : 'PR receipts unavailable.'}
           </p>
           {data.delivery && (
             <p className="muted">
               Durable ledger only; historical PR URLs are not reconstructed receipts.
             </p>
           )}
+          <p>
+            {data.delivery?.disposition
+              ? `Last recorded PR status: ${data.delivery.disposition.openCount} open · ${data.delivery.disposition.mergedCount} merged · ${data.delivery.disposition.closedCount} closed · ${data.delivery.disposition.unavailableCount} unavailable`
+              : 'PR disposition observations unavailable.'}
+          </p>
+          <p className="muted">Current provider status unverified.</p>
           <p>
             Recorded tokens: {data.recordedInputTokens + data.recordedOutputTokens} /{' '}
             {data.tokenBudget ?? 'no configured limit'}

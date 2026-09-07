@@ -40,6 +40,63 @@ function fixture() {
 const binding = { runtime: 'codex', model: 'model', providerAccountId: 'account' };
 
 describe('task-wide execution accounting', () => {
+  it('projects latest recorded PR dispositions across linked pods without inflating receipts or parsing legacy bodies', () => {
+    const { db, repo } = fixture();
+    try {
+      const ledger = repo.deliveryLedger;
+      if (!ledger) throw new Error('Missing delivery ledger');
+      const insert = (podId: string, id: string, disposition: string | null) => {
+        const taskId = repo.taskExecutions?.snapshot(podId).taskId;
+        const url = `https://github.com/org/repo/pull/${id}`;
+        db.prepare(
+          "INSERT INTO delivery_intents(id,identity,pod_id,task_id,generation,repository,branch,base_branch,state,created_at,updated_at) VALUES (?,?,?,?,1,'github.com/org/repo',?,'main','reserved',?,?)",
+        ).run(id, id, podId, taskId, id, '2026-09-07T00:00:00Z', '2026-09-07T00:00:00Z');
+        if (disposition !== null)
+          db.prepare(
+            "INSERT INTO delivery_receipts(id,intent_id,pr_url,evidence,disposition,result,recorded_at) VALUES (?, ?, ?, 'create_response', ?, 'malformed legacy result', ?)",
+          ).run(`receipt-${id}`, id, url, disposition, '2026-09-07T00:00:00Z');
+        return url;
+      };
+      insert('root', 'open', 'open');
+      const reopened = insert('root', 'reopened', 'closed');
+      ledger.observe(reopened, 'open');
+      const closed = insert('fix', 'closed', 'open');
+      ledger.observe(closed, 'closed');
+      ledger.observe(closed, 'open');
+      ledger.observe(closed, 'closed');
+      const merged = insert('fix', 'merged', 'closed');
+      ledger.observe(merged, 'merged');
+      insert('root', 'unresolved', null);
+      insert('rerun', 'separate', 'merged');
+      db.pragma('ignore_check_constraints = ON');
+      insert('fix', 'legacy-invalid', 'unknown-legacy-value');
+      db.pragma('ignore_check_constraints = OFF');
+      expect(repo.taskExecutions?.snapshot('fix').delivery).toEqual({
+        intentCount: 6,
+        receiptCount: 5,
+        unresolvedCount: 1,
+        scope: 'durable-receipts-only',
+        disposition: {
+          openCount: 2,
+          mergedCount: 1,
+          closedCount: 1,
+          unavailableCount: 1,
+          basis: 'last-recorded',
+          liveVerified: false,
+        },
+      });
+      expect(repo.taskExecutions?.snapshot('rerun').delivery).toMatchObject({
+        receiptCount: 1,
+        disposition: { mergedCount: 1, openCount: 0 },
+      });
+      expect(db.prepare('SELECT COUNT(*) AS count FROM delivery_receipts').get()).toEqual({
+        count: 6,
+      });
+      expect(repo.taskExecutions?.snapshot('fix').agentRunCount).toBe(0);
+    } finally {
+      db.close();
+    }
+  });
   it('retains healthy phase amounts after malformed and unknown phases without authorizing incomplete tokens', () => {
     const { db, repo } = fixture();
     try {

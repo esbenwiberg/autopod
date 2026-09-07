@@ -900,7 +900,8 @@
         "receipts/task-ledger-corrected-telemetry.txt",
         "receipts/checkpoint-3-affected.txt",
         "checkpoint-30.md: retained failed approval delivery, explicit HTTP error/retry, review gate and original lifecycle guards; wider durability remains partial",
-        "checkpoint-33.md: transactional durable decision admission and confirmed merge observations; operator disposition projection and broader delivery receipts remain partial"
+        "checkpoint-33.md: transactional durable decision admission and confirmed merge observations; operator disposition projection and broader delivery receipts remain partial",
+        "checkpoint-34.md: bounded latest-recorded PR disposition in task/cost API, CLI, mobile browser and native source/client tests; native UI/live and wider delivery acceptance remain partial"
       ],
       "prerequisites": [],
       "remaining": "Distinct task/pod/run/provider/validation units implemented. Durable logical delivery receipts remain."
@@ -935,7 +936,8 @@
         "receipts/delivery-dedup-red.txt",
         "receipts/model-dedup-green.txt",
         "receipts/delivery-receipts-observations.txt",
-        "receipts/delivery-final-affected.txt"
+        "receipts/delivery-final-affected.txt",
+        "checkpoint-34.md: bounded latest-recorded PR disposition in task/cost API, CLI, mobile browser and native source/client tests; native UI/live and wider delivery acceptance remain partial"
       ],
       "prerequisites": [],
       "remaining": "Distinct task receipt counts now use durable unique PR evidence; historical analytics still use explicitly labelled legacy URL measures. Wider outcome/denominator reconciliation remains."
@@ -1639,5 +1641,5 @@
       "prerequisites": []
     }
   ],
-  "lastCheckpoint": "checkpoint-33.md"
+  "lastCheckpoint": "checkpoint-34.md"
 }

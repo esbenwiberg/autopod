@@ -93,6 +93,16 @@ public struct TaskDeliverySummaryResponse: Codable, Equatable, Sendable {
   public let receiptCount: Int
   public let unresolvedCount: Int
   public let scope: String
+  public let disposition: TaskDeliveryDispositionResponse?
+}
+
+public struct TaskDeliveryDispositionResponse: Codable, Equatable, Sendable {
+  public let openCount: Int
+  public let mergedCount: Int
+  public let closedCount: Int
+  public let unavailableCount: Int
+  public let basis: String
+  public let liveVerified: Bool
 }
 
 public struct TaskBudgetCheckResponse: Codable, Equatable, Sendable {

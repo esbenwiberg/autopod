@@ -1,0 +1,44 @@
+
+ RUN  v4.1.11 /private/tmp/autopod-durable-execution/packages/daemon
+
+ ❯ src/pods/task-execution-ledger.test.ts (13 tests | 1 failed | 12 skipped) 93ms
+     × projects latest recorded PR dispositions across linked pods without inflating receipts or parsing legacy bodies 92ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/pods/task-execution-ledger.test.ts > task-wide execution accounting > projects latest recorded PR dispositions across linked pods without inflating receipts or parsing legacy bodies
+AssertionError: expected { intentCount: 6, …(3) } to deeply equal { intentCount: 6, …(4) }
+
+- Expected
++ Received
+
+  {
+-   "disposition": {
+-     "basis": "last-recorded",
+-     "closedCount": 1,
+-     "liveVerified": false,
+-     "mergedCount": 1,
+-     "openCount": 2,
+-     "unavailableCount": 1,
+-   },
+    "intentCount": 6,
+    "receiptCount": 5,
+    "scope": "durable-receipts-only",
+    "unresolvedCount": 1,
+  }
+
+ ❯ src/pods/task-execution-ledger.test.ts:73:61
+     71|       insert('fix', 'legacy-invalid', 'unknown-legacy-value');
+     72|       db.pragma('ignore_check_constraints = OFF');
+     73|       expect(repo.taskExecutions?.snapshot('fix').delivery).toEqual({
+       |                                                             ^
+     74|         intentCount: 6,
+     75|         receiptCount: 5,
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 12 skipped (13)
+   Start at  22:43:14
+   Duration  577ms (transform 207ms, setup 0ms, import 315ms, tests 93ms, environment 0ms)

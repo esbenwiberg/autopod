@@ -1,0 +1,106 @@
+
+ RUN  v4.1.11 /private/tmp/autopod-durable-execution/packages/cli
+
+ ❯ src/commands/pod.test.ts (27 tests | 2 failed | 25 skipped) 31ms
+   × status command renders HTTP delivery accounting and reused evidence (disposition available: true) 23ms
+   × status command renders HTTP delivery accounting and reused evidence (disposition available: false) 8ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 2 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/commands/pod.test.ts > status command renders HTTP delivery accounting and reused evidence (disposition available: true)
+AssertionError: expected 'Pod abcd1234\n───────────────────────…' to contain 'Last recorded PR status: 0 open · 1 m…'
+
+- Expected
++ Received
+
+- Last recorded PR status: 0 open · 1 merged · 0 closed · 0 unavailable
++ Pod abcd1234
++ ──────────────────────────────────────────────────
++ Profile:      test
++ Status:       ● Validated
++ Logical task: logical-root (2 pods)
++ Execution: execution-fixture
++ Task runs: 3 recorded agent runs, 4 provider attempts, 5 validations
++ Delivery receipts: 1 confirmed, 1 unresolved of 2 intents (durable ledger only; historical URLs excluded)
++ Task tokens: 100/100
++ Stored task cost subtotal: $1.2500 (partial telemetry)
++ Billing unverified; stored amounts can include estimates.
++ Known estimates: $0.5000; 1 identified phases with unavailable cost; 1 pods with conflicting attribution
++ root: Stored phase costs conflict; no proportional allocation applied.
++ 2 additional cost diagnostics omitted.
++ Task token accounting incomplete; reconcile prior execution telemetry.
++ Readiness: pending/unavailable
++ Task:         do things
++ Model:        opus
++ Runtime:      claude
++ Branch:       ap/abcd1234
++ Duration:     23540h 43m
++ Validations:  1/3
++ Suite:        full
++ Escalations:  0
++ Changes:      5 files (+100 -20)
++ test: reused receipt local-receipt; originally executed 2026-09-07T10:00:00Z (1200 ms)
++
++ Last validation: PASS (full, attempt 1)
+
+ ❯ src/commands/pod.test.ts:564:22
+    562|       expect(output).toContain('1 confirmed, 1 unresolved of 2 intents…
+    563|       expect(output).toContain('historical URLs excluded');
+    564|       expect(output).toContain(
+       |                      ^
+    565|         hasDisposition
+    566|           ? 'Last recorded PR status: 0 open · 1 merged · 0 closed · 0…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/2]⎯
+
+ FAIL  src/commands/pod.test.ts > status command renders HTTP delivery accounting and reused evidence (disposition available: false)
+AssertionError: expected 'Pod abcd1234\n───────────────────────…' to contain 'PR disposition observations unavailab…'
+
+- Expected
++ Received
+
+- PR disposition observations unavailable.
++ Pod abcd1234
++ ──────────────────────────────────────────────────
++ Profile:      test
++ Status:       ● Validated
++ Logical task: logical-root (2 pods)
++ Execution: execution-fixture
++ Task runs: 3 recorded agent runs, 4 provider attempts, 5 validations
++ Delivery receipts: 1 confirmed, 1 unresolved of 2 intents (durable ledger only; historical URLs excluded)
++ Task tokens: 100/100
++ Stored task cost subtotal: $1.2500 (partial telemetry)
++ Billing unverified; stored amounts can include estimates.
++ Known estimates: $0.5000; 1 identified phases with unavailable cost; 1 pods with conflicting attribution
++ root: Stored phase costs conflict; no proportional allocation applied.
++ 2 additional cost diagnostics omitted.
++ Task token accounting incomplete; reconcile prior execution telemetry.
++ Readiness: pending/unavailable
++ Task:         do things
++ Model:        opus
++ Runtime:      claude
++ Branch:       ap/abcd1234
++ Duration:     23540h 43m
++ Validations:  1/3
++ Suite:        full
++ Escalations:  0
++ Changes:      5 files (+100 -20)
++ test: reused receipt local-receipt; originally executed 2026-09-07T10:00:00Z (1200 ms)
++
++ Last validation: PASS (full, attempt 1)
+
+ ❯ src/commands/pod.test.ts:564:22
+    562|       expect(output).toContain('1 confirmed, 1 unresolved of 2 intents…
+    563|       expect(output).toContain('historical URLs excluded');
+    564|       expect(output).toContain(
+       |                      ^
+    565|         hasDisposition
+    566|           ? 'Last recorded PR status: 0 open · 1 merged · 0 closed · 0…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/2]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  2 failed | 25 skipped (27)
+   Start at  22:43:40
+   Duration  408ms (transform 142ms, setup 0ms, import 269ms, tests 31ms, environment 0ms)

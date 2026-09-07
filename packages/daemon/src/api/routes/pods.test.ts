@@ -369,6 +369,52 @@ describe('GET /pods/:podId provider-attempt projection', () => {
     });
   });
 
+  it('exposes last-recorded PR disposition in task and cost routes without parsing receipt bodies', async () => {
+    insertPod(db, { id: 'task-disposition', status: 'running', completedAt: undefined });
+    const repo = createPodRepository(db);
+    repo.taskExecutions?.register('task-disposition');
+    const task = repo.taskExecutions?.snapshot('task-disposition');
+    if (!task || !repo.deliveryLedger) throw new Error('Missing durable task fixture');
+    db.prepare(
+      "INSERT INTO delivery_intents(id,identity,pod_id,task_id,generation,repository,branch,base_branch,state,created_at,updated_at) VALUES ('intent','intent','task-disposition',?,1,'github.com/org/repo','feature','main','delivered',?,?)",
+    ).run(task.taskId, '2026-09-07T00:00:00Z', '2026-09-07T00:00:00Z');
+    db.prepare(
+      "INSERT INTO delivery_receipts(id,intent_id,pr_url,evidence,disposition,result,recorded_at) VALUES ('receipt','intent',?,'create_response','open',?,?)",
+    ).run(
+      'https://github.com/org/repo/pull/1',
+      'malformed legacy receipt body',
+      '2026-09-07T00:00:00Z',
+    );
+    repo.deliveryLedger.observe('https://github.com/org/repo/pull/1', 'merged');
+    const response = await app.inject({
+      method: 'GET',
+      url: '/pods/task-disposition/task-execution',
+    });
+    expect(response.statusCode, response.body).toBe(200);
+    expect(response.json().delivery).toEqual({
+      intentCount: 1,
+      receiptCount: 1,
+      unresolvedCount: 0,
+      scope: 'durable-receipts-only',
+      disposition: {
+        openCount: 0,
+        mergedCount: 1,
+        closedCount: 0,
+        unavailableCount: 0,
+        basis: 'last-recorded',
+        liveVerified: false,
+      },
+    });
+    const cost = await app.inject({ method: 'GET', url: '/pods/task-disposition/cost' });
+    expect(cost.statusCode, cost.body).toBe(200);
+    expect(cost.json().taskExecution.delivery).toEqual(response.json().delivery);
+    expect(response.body).not.toContain('malformed legacy receipt body');
+    expect(response.body.length).toBeLessThan(16_384);
+    expect(db.prepare('SELECT disposition FROM delivery_receipts').get()).toEqual({
+      disposition: 'open',
+    });
+  });
+
   it('exposes bounded task accounting even when unrelated large pod evidence is malformed', async () => {
     insertPod(db, { id: 'task-accounting', status: 'running', completedAt: undefined });
     createPodRepository(db).taskExecutions?.register('task-accounting');
@@ -387,6 +433,14 @@ describe('GET /pods/:podId provider-attempt projection', () => {
         receiptCount: 0,
         unresolvedCount: 0,
         scope: 'durable-receipts-only',
+        disposition: {
+          openCount: 0,
+          mergedCount: 0,
+          closedCount: 0,
+          unavailableCount: 0,
+          basis: 'last-recorded',
+          liveVerified: false,
+        },
       },
       podCount: 1,
       recordedInputTokens: 9,

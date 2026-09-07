@@ -716,9 +716,16 @@ export function registerPodCommands(program: Command, getClient: () => AutopodCl
         );
         console.log(
           task.delivery
-            ? `${chalk.bold('Delivery receipts:')} ${task.delivery.receiptCount} confirmed, ${task.delivery.unresolvedCount} unresolved of ${task.delivery.intentCount} intents (durable ledger only; historical URLs excluded)`
-            : `${chalk.bold('Delivery receipts:')} unavailable`,
+            ? `${chalk.bold('PR receipts:')} ${task.delivery.receiptCount} confirmed, ${task.delivery.unresolvedCount} unresolved of ${task.delivery.intentCount} intents (durable ledger only; historical URLs excluded)`
+            : `${chalk.bold('PR receipts:')} unavailable`,
         );
+        const disposition = task.delivery?.disposition;
+        console.log(
+          disposition
+            ? `Last recorded PR status: ${disposition.openCount} open · ${disposition.mergedCount} merged · ${disposition.closedCount} closed · ${disposition.unavailableCount} unavailable`
+            : 'PR disposition observations unavailable.',
+        );
+        console.log('Current provider status unverified.');
         console.log(
           `${chalk.bold('Task tokens:')} ${task.recordedInputTokens + task.recordedOutputTokens}/${task.tokenBudget ?? 'no configured limit'}`,
         );

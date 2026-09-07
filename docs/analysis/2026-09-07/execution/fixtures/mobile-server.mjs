@@ -184,6 +184,8 @@ if (startupRetryFixture) {
   retryState.interruptedCount = 0;
   retryState.latest = { id: 'local-startup-failure', outcome: 'transient' };
 }
+const deliveryDispositionFixture = process.env.FIXTURE_MODE === 'delivery-disposition';
+let deliveryDispositionReads = 0;
 const normalDeliveryFixture = process.env.FIXTURE_MODE === 'approval-delivery';
 const approvalPreservationFixture =
   process.env.FIXTURE_MODE === 'approval-preservation' || normalDeliveryFixture;
@@ -478,6 +480,20 @@ const server = createServer(async (req, res) => {
       release: { commitSha: 'LOCAL-FIXTURE', dirty: true },
       backup: { state: 'stale', lastCompletedAt: '2026-09-01T00:00:00Z' },
     });
+  if (
+    deliveryDispositionFixture &&
+    req.method === 'GET' &&
+    pathname === '/pods/local-fixture/task-execution'
+  ) {
+    deliveryDispositionReads++;
+    console.log(
+      JSON.stringify({
+        scope: 'local fixture only',
+        action: 'read-delivery-disposition',
+        request: deliveryDispositionReads,
+      }),
+    );
+  }
   if (req.method === 'GET' && pathname === '/pods/local-fixture/task-execution')
     return json({
       taskId: 'task:local-original',
@@ -542,6 +558,18 @@ const server = createServer(async (req, res) => {
         receiptCount: 1,
         unresolvedCount: 1,
         scope: 'durable-receipts-only',
+        ...(deliveryDispositionFixture && deliveryDispositionReads > 1
+          ? {
+              disposition: {
+                openCount: 0,
+                mergedCount: 1,
+                closedCount: 0,
+                unavailableCount: 0,
+                basis: 'last-recorded',
+                liveVerified: false,
+              },
+            }
+          : {}),
       },
       diagnostics: ['Infrastructure cost unavailable'],
     });

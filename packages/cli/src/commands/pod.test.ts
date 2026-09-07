@@ -452,120 +452,145 @@ describe('update-from-base command', () => {
   });
 });
 
-it('status command renders real HTTP delivery accounting and reused evidence, preserving JSON units', async () => {
-  const pod = await createMockClient().getSession('abcd1234');
-  const evidence = {
-    receiptId: 'local-receipt',
-    originalExecutedAt: '2026-09-07T10:00:00Z',
-    originalDurationMs: 1200,
-  };
-  const task = {
-    taskId: 'logical-root',
-    executionId: 'execution-fixture',
-    podCount: 2,
-    agentRunCount: 3,
-    providerAttemptCount: 4,
-    validationExecutionCount: 5,
-    recordedInputTokens: 90,
-    recordedOutputTokens: 10,
-    tokenBudget: 100,
-    budgetCheck: {
-      status: 'unavailable',
-      reason: 'Task token accounting incomplete; reconcile prior execution telemetry.',
-    },
-    recordedCostUsd: 1.25,
-    costEvidence: {
-      basis: 'stored_subtotal',
-      billingVerified: false,
-      knownEstimatedCostUsd: 0.5,
-      unavailablePhaseCount: 1,
-      conflictingPodCount: 1,
-      omittedDiagnosticCount: 2,
-      diagnostics: [
-        {
-          podId: 'root',
-          code: 'PHASE_COST_CONFLICT',
-          message: 'Stored phase costs conflict; no proportional allocation applied.',
-        },
-      ],
-    },
-    telemetry: 'partial',
-    diagnostics: [],
-    delivery: {
-      intentCount: 2,
-      receiptCount: 1,
-      unresolvedCount: 1,
-      scope: 'durable-receipts-only',
-    },
-  };
-  const paths: string[] = [];
-  const server = createServer((req, res) => {
-    paths.push(req.url ?? '');
-    expect(req.method).toBe('GET');
-    expect(req.headers.authorization).toBe('Bearer local-fixture-only');
-    res.setHeader('content-type', 'application/json');
-    if (req.url === '/pods/abcd1234/task-execution') res.end(JSON.stringify(task));
-    else if (req.url === '/pods/abcd1234')
-      res.end(
-        JSON.stringify({
-          ...pod,
-          lastValidationResult: { overall: 'pass', attempt: 1, test: { reusedEvidence: evidence } },
-        }),
-      );
-    else {
-      res.statusCode = 404;
-      res.end('{}');
-    }
-  });
-  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
-  const address = server.address();
-  if (!address || typeof address === 'string') throw new Error('Missing fixture port');
-  const client = new AutopodClient({
-    baseUrl: `http://127.0.0.1:${address.port}`,
-    getToken: async () => 'local-fixture-only',
-  });
-  const log = vi.spyOn(console, 'log').mockImplementation(() => {});
-  const stdout = vi.spyOn(process.stdout, 'write').mockImplementation(() => true);
-  try {
-    const command = () => {
-      const program = new Command();
-      registerPodCommands(program, () => client);
-      return program;
+it.each([true, false])(
+  'status command renders HTTP delivery accounting and reused evidence (disposition available: %s)',
+  async (hasDisposition) => {
+    const pod = await createMockClient().getSession('abcd1234');
+    const evidence = {
+      receiptId: 'local-receipt',
+      originalExecutedAt: '2026-09-07T10:00:00Z',
+      originalDurationMs: 1200,
     };
-    await command().parseAsync(['node', 'ap', 'status', 'abcd1234']);
-    const output = log.mock.calls.map((call) => call.join(' ')).join('\n');
-    expect(output).toContain('Stored task cost subtotal:');
-    expect(output).toContain('Billing unverified');
-    expect(output).toContain(
-      'Known estimates: $0.5000; 1 identified phases with unavailable cost; 1 pods with conflicting attribution',
-    );
-    expect(output).toContain('Stored phase costs conflict; no proportional allocation applied.');
-    expect(output).toContain('2 additional cost diagnostics omitted.');
-    expect(output).toContain('1 confirmed, 1 unresolved of 2 intents');
-    expect(output).toContain('historical URLs excluded');
-    expect(output).toContain(
-      'Task token accounting incomplete; reconcile prior execution telemetry.',
-    );
-    expect(output).toContain(
-      'test: reused receipt local-receipt; originally executed 2026-09-07T10:00:00Z (1200 ms)',
-    );
-    log.mockClear();
-    await command().parseAsync(['node', 'ap', 'status', 'abcd1234', '--json']);
-    const structured = JSON.parse(stdout.mock.calls.map((call) => String(call[0])).join(''));
-    expect(structured.taskExecution.costEvidence).toEqual(task.costEvidence);
-    expect(structured.taskExecution.delivery).toEqual(task.delivery);
-    expect(paths).toEqual([
-      '/pods/abcd1234',
-      '/pods/abcd1234/task-execution',
-      '/pods/abcd1234',
-      '/pods/abcd1234/task-execution',
-    ]);
-  } finally {
-    log.mockRestore();
-    stdout.mockRestore();
-    await new Promise<void>((resolve) => server.close(() => resolve()));
-  }
-});
+    const task = {
+      taskId: 'logical-root',
+      executionId: 'execution-fixture',
+      podCount: 2,
+      agentRunCount: 3,
+      providerAttemptCount: 4,
+      validationExecutionCount: 5,
+      recordedInputTokens: 90,
+      recordedOutputTokens: 10,
+      tokenBudget: 100,
+      budgetCheck: {
+        status: 'unavailable',
+        reason: 'Task token accounting incomplete; reconcile prior execution telemetry.',
+      },
+      recordedCostUsd: 1.25,
+      costEvidence: {
+        basis: 'stored_subtotal',
+        billingVerified: false,
+        knownEstimatedCostUsd: 0.5,
+        unavailablePhaseCount: 1,
+        conflictingPodCount: 1,
+        omittedDiagnosticCount: 2,
+        diagnostics: [
+          {
+            podId: 'root',
+            code: 'PHASE_COST_CONFLICT',
+            message: 'Stored phase costs conflict; no proportional allocation applied.',
+          },
+        ],
+      },
+      telemetry: 'partial',
+      diagnostics: [],
+      delivery: {
+        intentCount: 2,
+        receiptCount: 1,
+        unresolvedCount: 1,
+        scope: 'durable-receipts-only',
+        ...(hasDisposition
+          ? {
+              disposition: {
+                openCount: 0,
+                mergedCount: 1,
+                closedCount: 0,
+                unavailableCount: 0,
+                basis: 'last-recorded',
+                liveVerified: false,
+              },
+            }
+          : {}),
+      },
+    };
+    const paths: string[] = [];
+    const server = createServer((req, res) => {
+      paths.push(req.url ?? '');
+      expect(req.method).toBe('GET');
+      expect(req.headers.authorization).toBe('Bearer local-fixture-only');
+      res.setHeader('content-type', 'application/json');
+      if (req.url === '/pods/abcd1234/task-execution') res.end(JSON.stringify(task));
+      else if (req.url === '/pods/abcd1234')
+        res.end(
+          JSON.stringify({
+            ...pod,
+            lastValidationResult: {
+              overall: 'pass',
+              attempt: 1,
+              test: { reusedEvidence: evidence },
+            },
+          }),
+        );
+      else {
+        res.statusCode = 404;
+        res.end('{}');
+      }
+    });
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+    const address = server.address();
+    if (!address || typeof address === 'string') throw new Error('Missing fixture port');
+    const client = new AutopodClient({
+      baseUrl: `http://127.0.0.1:${address.port}`,
+      getToken: async () => 'local-fixture-only',
+    });
+    const log = vi.spyOn(console, 'log').mockImplementation(() => {});
+    const stdout = vi.spyOn(process.stdout, 'write').mockImplementation(() => true);
+    try {
+      const command = () => {
+        const program = new Command();
+        registerPodCommands(program, () => client);
+        return program;
+      };
+      await command().parseAsync(['node', 'ap', 'status', 'abcd1234']);
+      const output = log.mock.calls.map((call) => call.join(' ')).join('\n');
+      expect(output).toContain('Stored task cost subtotal:');
+      expect(output).toContain('Billing unverified');
+      expect(output).toContain(
+        'Known estimates: $0.5000; 1 identified phases with unavailable cost; 1 pods with conflicting attribution',
+      );
+      expect(output).toContain('Stored phase costs conflict; no proportional allocation applied.');
+      expect(output).toContain('2 additional cost diagnostics omitted.');
+      expect(output).toContain('1 confirmed, 1 unresolved of 2 intents');
+      expect(output).toContain('historical URLs excluded');
+      expect(output).toContain(
+        hasDisposition
+          ? 'Last recorded PR status: 0 open · 1 merged · 0 closed · 0 unavailable'
+          : 'PR disposition observations unavailable.',
+      );
+      expect(output).toContain('Current provider status unverified.');
+      expect(output).toContain(
+        'Task token accounting incomplete; reconcile prior execution telemetry.',
+      );
+      expect(output).toContain(
+        'test: reused receipt local-receipt; originally executed 2026-09-07T10:00:00Z (1200 ms)',
+      );
+      log.mockClear();
+      await command().parseAsync(['node', 'ap', 'status', 'abcd1234', '--json']);
+      const structured = JSON.parse(stdout.mock.calls.map((call) => String(call[0])).join(''));
+      expect(structured.taskExecution.costEvidence).toEqual(task.costEvidence);
+      expect(structured.taskExecution.delivery).toEqual(task.delivery);
+      expect(paths).toEqual([
+        '/pods/abcd1234',
+        '/pods/abcd1234/task-execution',
+        '/pods/abcd1234',
+        '/pods/abcd1234/task-execution',
+      ]);
+    } finally {
+      log.mockRestore();
+      stdout.mockRestore();
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+  },
+);
 
 it.each(['validation', 'sandbox_startup'] as const)(
   'drives %s retry inspection, idempotent authorization and separate Resume through the real HTTP client',

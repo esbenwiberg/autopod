@@ -101,3 +101,20 @@ import Testing
   let roundTrip = try JSONDecoder().decode(PodCostBreakdownResponse.self, from: JSONEncoder().encode(response))
   #expect(roundTrip == response)
 }
+
+@Test func taskDeliveryDispositionRetainsStoredEvidenceAndMissingLegacyStatus() throws {
+  let json = #"{"intentCount":3,"receiptCount":2,"unresolvedCount":1,"scope":"durable-receipts-only","disposition":{"openCount":0,"mergedCount":1,"closedCount":0,"unavailableCount":1,"basis":"last-recorded","liveVerified":false}}"#.data(using: .utf8)!
+  let response = try JSONDecoder().decode(TaskDeliverySummaryResponse.self, from: json)
+  #expect(response.receiptCount == 2)
+  #expect(response.disposition?.mergedCount == 1)
+  #expect(response.disposition?.unavailableCount == 1)
+  #expect(response.disposition?.basis == "last-recorded")
+  #expect(response.disposition?.liveVerified == false)
+  let roundTrip = try JSONDecoder().decode(TaskDeliverySummaryResponse.self, from: JSONEncoder().encode(response))
+  #expect(roundTrip == response)
+  var legacy = try #require(JSONSerialization.jsonObject(with: json) as? [String: Any])
+  legacy.removeValue(forKey: "disposition")
+  let old = try JSONDecoder().decode(TaskDeliverySummaryResponse.self, from: JSONSerialization.data(withJSONObject: legacy))
+  #expect(old.receiptCount == 2)
+  #expect(old.disposition == nil)
+}

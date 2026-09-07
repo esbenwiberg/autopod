@@ -181,6 +181,14 @@ describe('durable PR delivery boundary', () => {
         receiptCount: 1,
         unresolvedCount: 0,
         scope: 'durable-receipts-only',
+        disposition: {
+          openCount: 1,
+          mergedCount: 0,
+          closedCount: 0,
+          unavailableCount: 0,
+          basis: 'last-recorded',
+          liveVerified: false,
+        },
       });
       expect(f.db.prepare('SELECT COUNT(*) AS n FROM delivery_receipts').get()).toEqual({ n: 1 });
       const restarted = requireValue(
