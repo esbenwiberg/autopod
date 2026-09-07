@@ -156,7 +156,7 @@ describe('durable PR delivery boundary', () => {
     }
   });
 
-  it.each([139, 144])(
+  it.each([139, 153])(
     'upgrades schema %s and reconciles in-flight delivery after actual close/reopen',
     async (version) => {
       const dir = mkdtempSync(join(tmpdir(), 'delivery-restart-'));

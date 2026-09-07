@@ -38,7 +38,7 @@ const collection: ScheduledScanCollection = {
 };
 
 describe('scheduled scan reports independent of worker lifetime', () => {
-  it.each([139, 145])(
+  it.each([139, 154])(
     'upgrades existing schema %s while preserving legacy records and durable report recovery',
     async (version) => {
       const directory = mkdtempSync(join(tmpdir(), 'scan-upgrade-'));

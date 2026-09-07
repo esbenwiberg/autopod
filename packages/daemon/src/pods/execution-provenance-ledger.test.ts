@@ -79,7 +79,7 @@ it('retains failed provenance through restart and pod deletion without changing 
     rmSync(dir, { recursive: true, force: true });
   }
 });
-it.each([139, 148])(
+it.each([139, 157])(
   'upgrades schema %s without manufacturing missing historical provenance',
   (version) => {
     const dir = mkdtempSync(join(tmpdir(), 'provenance-upgrade-'));

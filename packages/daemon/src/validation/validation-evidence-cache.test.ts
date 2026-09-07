@@ -31,7 +31,7 @@ function fixture() {
 }
 
 describe('exact-input validation evidence', () => {
-  it.each([139, 143])(
+  it.each([139, 152])(
     'upgrades schema %s and reuses immutable evidence after a real database close/reopen',
     (version) => {
       const dir = mkdtempSync(join(tmpdir(), 'evidence-upgrade-'));

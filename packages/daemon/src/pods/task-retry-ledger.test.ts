@@ -159,7 +159,7 @@ describe('durable task validation retry admission', () => {
   });
 });
 
-it.each([139, 146])(
+it.each([139, 155])(
   'upgrades schema %s on disk without changing legacy evidence and retains retry settlement through reopen',
   (version) => {
     const dir = mkdtempSync(join(tmpdir(), 'retry-upgrade-'));

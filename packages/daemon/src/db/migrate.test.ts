@@ -922,3 +922,26 @@ describe('runMigrations — profile reasoning effort (migration 129)', () => {
     ]);
   });
 });
+
+it('rejects duplicate numeric migration prefixes before applying any business migration', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'migration-prefix-'));
+  const db = new Database(':memory:');
+  try {
+    fs.writeFileSync(path.join(root, '001_alpha.sql'), 'CREATE TABLE alpha (id TEXT);');
+    fs.writeFileSync(path.join(root, '001_beta.sql'), 'CREATE TABLE beta (id TEXT);');
+    expect(() => runMigrations(db, root, logger)).toThrow('Migration prefix collision');
+    expect(
+      db
+        .prepare("SELECT name FROM sqlite_master WHERE type='table' AND name IN ('alpha','beta')")
+        .all(),
+    ).toEqual([]);
+    fs.unlinkSync(path.join(root, '001_beta.sql'));
+    runMigrations(db, root, logger);
+    fs.writeFileSync(path.join(root, '001_beta.sql'), 'CREATE TABLE beta (id TEXT);');
+    expect(() => runMigrations(db, root, logger)).toThrow('Migration prefix collision');
+    expect(db.prepare("SELECT name FROM sqlite_master WHERE name='beta'").get()).toBeUndefined();
+  } finally {
+    db.close();
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});

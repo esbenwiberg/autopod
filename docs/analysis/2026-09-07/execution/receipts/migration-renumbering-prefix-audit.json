@@ -1,0 +1,60 @@
+{
+  "refCount": 262,
+  "refFilesAtOrAbove151": [],
+  "worktrees": [
+    {
+      "path": "/Users/ewi/repos/autopod",
+      "maxPrefix": 141,
+      "filesAtOrAbove142": []
+    },
+    {
+      "path": "/private/tmp/autopod-dispatcher-managed-v1",
+      "maxPrefix": 150,
+      "filesAtOrAbove142": [
+        "142_managed_artifact_exports.sql",
+        "143_managed_pods.sql",
+        "144_managed_provider_allowances.sql",
+        "145_managed_events_controls.sql",
+        "146_managed_results.sql",
+        "147_managed_inputs.sql",
+        "148_managed_source.sql",
+        "149_managed_sandbox_allocations.sql",
+        "150_managed_workspaces.sql"
+      ]
+    },
+    {
+      "path": "/private/tmp/autopod-durable-execution",
+      "maxPrefix": 158,
+      "filesAtOrAbove142": [
+        "142_managed_artifact_exports.sql",
+        "143_managed_pods.sql",
+        "144_managed_provider_allowances.sql",
+        "145_managed_events_controls.sql",
+        "146_managed_results.sql",
+        "147_managed_inputs.sql",
+        "148_managed_source.sql",
+        "149_managed_sandbox_allocations.sql",
+        "150_managed_workspaces.sql",
+        "151_completion_journal.sql",
+        "152_task_executions.sql",
+        "153_validation_phase_evidence.sql",
+        "154_delivery_intents.sql",
+        "155_scheduled_scan_reports.sql",
+        "156_task_retry_admission.sql",
+        "157_dispatch_preflight.sql",
+        "158_execution_provenance.sql"
+      ]
+    },
+    {
+      "path": "/private/tmp/autopod-sandbox-recovery",
+      "maxPrefix": 0,
+      "filesAtOrAbove142": []
+    },
+    {
+      "path": "/Users/ewi/Documents/Codex/2026-07-22-lets-clone-https-github-com-esbenwiberg/autopod-rw139",
+      "maxPrefix": 123,
+      "filesAtOrAbove142": []
+    }
+  ],
+  "note": "origin/main freshly fetched; local owned/untracked worktree migrations included"
+}

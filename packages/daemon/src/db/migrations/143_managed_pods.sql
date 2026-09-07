@@ -1,0 +1,25 @@
+-- A managed pod is one subordinate attempt, never a legacy workflow/series pod.
+CREATE TABLE managed_pods (
+    pod_id TEXT PRIMARY KEY,
+    dispatcher_installation_id TEXT NOT NULL,
+    dispatcher_attempt_id TEXT NOT NULL,
+    managed_start_key TEXT NOT NULL,
+    execution_spec_digest TEXT NOT NULL,
+    profile_snapshot_digest TEXT NOT NULL,
+    managed_mode INTEGER NOT NULL DEFAULT 1 CHECK(managed_mode=1),
+    grant_id TEXT NOT NULL,
+    grant_revision INTEGER NOT NULL,
+    effective_grant_digest TEXT NOT NULL,
+    request_json TEXT NOT NULL,
+    handle_json TEXT NOT NULL,
+    state TEXT NOT NULL DEFAULT 'queued',
+    runtime_ref TEXT,
+    revoked INTEGER NOT NULL DEFAULT 0,
+    stop_requested INTEGER NOT NULL DEFAULT 0,
+    observed_exit INTEGER NOT NULL DEFAULT 0,
+    cleanup TEXT NOT NULL DEFAULT 'not-requested',
+    consumed_tokens INTEGER NOT NULL DEFAULT 0,
+    created_at INTEGER NOT NULL,
+    UNIQUE(dispatcher_installation_id, managed_start_key),
+    UNIQUE(dispatcher_installation_id, dispatcher_attempt_id)
+);

@@ -178,7 +178,7 @@ describe('dispatch admission against immutable execution evidence', () => {
   });
 });
 
-it.each([139, 147])('upgrades schema %s and preserves unknown legacy evidence', (version) => {
+it.each([139, 156])('upgrades schema %s and preserves unknown legacy evidence', (version) => {
   const dir = mkdtempSync(join(tmpdir(), 'dispatch-upgrade-'));
   const migrations = resolve(import.meta.dirname, '../db/migrations');
   for (const file of readdirSync(migrations))

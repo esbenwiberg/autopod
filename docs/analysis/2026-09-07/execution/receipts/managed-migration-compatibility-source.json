@@ -1,0 +1,52 @@
+{
+  "scope": "Exact local producer migration fixtures; remote byte verification pending approved SSH inspection",
+  "sourceTask": "01a07af6-a670-7260-98c6-54b22570e30f",
+  "schemaVersionReportedBySourceTask": 150,
+  "files": [
+    {
+      "name": "142_managed_artifact_exports.sql",
+      "sha256": "6ecb43078581d2e80f01b70c48d964a6e6e98cfd49613d5994daab999a273173",
+      "source": "/private/tmp/autopod-dispatcher-managed-v1/packages/daemon/src/db/migrations/142_managed_artifact_exports.sql"
+    },
+    {
+      "name": "143_managed_pods.sql",
+      "sha256": "66645b2c981bf98af521895edd0723a6a754566837691bd2966956b51a14d949",
+      "source": "/private/tmp/autopod-dispatcher-managed-v1/packages/daemon/src/db/migrations/143_managed_pods.sql"
+    },
+    {
+      "name": "144_managed_provider_allowances.sql",
+      "sha256": "57e8beee61e866ba573c19d3eda71dabec389a69f7376d4d171edf6717cb2db5",
+      "source": "/private/tmp/autopod-dispatcher-managed-v1/packages/daemon/src/db/migrations/144_managed_provider_allowances.sql"
+    },
+    {
+      "name": "145_managed_events_controls.sql",
+      "sha256": "a4bc512abdf8ba501a7bb94b8e9dbbc192e07dde30e1b4955fcb24d0a61955c2",
+      "source": "/private/tmp/autopod-dispatcher-managed-v1/packages/daemon/src/db/migrations/145_managed_events_controls.sql"
+    },
+    {
+      "name": "146_managed_results.sql",
+      "sha256": "43d58deb44e4908d27a5409ad2b0e2bb52607903bf1280e5be2e1bfb01164c7e",
+      "source": "/private/tmp/autopod-dispatcher-managed-v1/packages/daemon/src/db/migrations/146_managed_results.sql"
+    },
+    {
+      "name": "147_managed_inputs.sql",
+      "sha256": "5382b47c53c10261aad10e8d739623554ebc89a9fd6d12fa173be0ae09829a78",
+      "source": "/private/tmp/autopod-dispatcher-managed-v1/packages/daemon/src/db/migrations/147_managed_inputs.sql"
+    },
+    {
+      "name": "148_managed_source.sql",
+      "sha256": "5b42b890005c1189dc1afb99fe179b6d83ad4a1b2e933a595dd8ad07285d359e",
+      "source": "/private/tmp/autopod-dispatcher-managed-v1/packages/daemon/src/db/migrations/148_managed_source.sql"
+    },
+    {
+      "name": "149_managed_sandbox_allocations.sql",
+      "sha256": "20a6c8fccfff200c1d7637e159407992863afd5f9720bed2fe2874fd9e87c49c",
+      "source": "/private/tmp/autopod-dispatcher-managed-v1/packages/daemon/src/db/migrations/149_managed_sandbox_allocations.sql"
+    },
+    {
+      "name": "150_managed_workspaces.sql",
+      "sha256": "b337ca08c4a99ddb9b5045a3881d32e69adb1802412421e558f93f19fd6c280a",
+      "source": "/private/tmp/autopod-dispatcher-managed-v1/packages/daemon/src/db/migrations/150_managed_workspaces.sql"
+    }
+  ]
+}

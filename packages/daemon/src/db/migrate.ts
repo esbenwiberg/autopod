@@ -93,6 +93,20 @@ export function runMigrations(
     .filter((f) => f.endsWith('.sql'))
     .sort();
 
+  // Refuse ambiguous prefixes even when they are below MAX(version). Otherwise a
+  // deployed schema can silently skip another branch's unrelated definitions.
+  const namesByVersion = new Map<number, string>();
+  for (const file of files) {
+    const match = file.match(/^(\d+)_/);
+    if (!match?.[1]) continue;
+    const version = Number.parseInt(match[1], 10);
+    if (!Number.isSafeInteger(version) || version <= 0)
+      throw new Error(`Invalid migration version: ${file}`);
+    const previous = namesByVersion.get(version);
+    if (previous) throw new Error(`Migration prefix collision ${version}: ${previous} and ${file}`);
+    namesByVersion.set(version, file);
+  }
+
   // Pre-scan: check if the cutover migration is pending before applying anything
   const pendingVersions = new Set<number>();
   for (const file of files) {
@@ -110,6 +124,7 @@ export function runMigrations(
   }
 
   let applied = 0;
+  let latestAppliedVersion = currentVersion;
 
   for (const file of files) {
     const match = file.match(/^(\d+)_/);
@@ -168,12 +183,13 @@ export function runMigrations(
       }
     }
     applied++;
+    latestAppliedVersion = version;
     logger.info({ version, file }, 'Applied migration');
   }
 
   if (applied === 0) {
     logger.info({ currentVersion }, 'Database schema is up to date');
   } else {
-    logger.info({ applied, newVersion: currentVersion + applied }, 'Migrations complete');
+    logger.info({ applied, newVersion: latestAppliedVersion }, 'Migrations complete');
   }
 }

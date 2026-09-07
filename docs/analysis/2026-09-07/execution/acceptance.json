@@ -75,9 +75,9 @@
       "requirement": "Finalization decisions and generations are durable with idempotent side effects",
       "status": "partial",
       "implementation": [
-        "packages/daemon/src/db/migrations/142_completion_journal.sql",
+        "packages/daemon/src/db/migrations/151_completion_journal.sql",
         "packages/daemon/src/pods/completion-journal.ts",
-        "packages/daemon/src/db/migrations/145_delivery_intents.sql",
+        "packages/daemon/src/db/migrations/154_delivery_intents.sql",
         "packages/daemon/src/pods/delivery-ledger.ts",
         "packages/daemon/src/worktrees/durable-pr-manager.ts",
         "packages/daemon/src/pods/pod-repository.ts",
@@ -145,11 +145,11 @@
       "status": "partial",
       "implementation": [
         "packages/daemon/src/pods/task-execution-ledger.ts",
-        "packages/daemon/src/db/migrations/143_task_executions.sql",
+        "packages/daemon/src/db/migrations/152_task_executions.sql",
         "packages/daemon/src/pods/pod-manager.ts",
         "packages/daemon/src/pods/task-retry-ledger.ts",
         "packages/daemon/src/validation/retry-identity.ts",
-        "packages/daemon/src/db/migrations/147_task_retry_admission.sql",
+        "packages/daemon/src/db/migrations/156_task_retry_admission.sql",
         "packages/daemon/src/api/routes/pods.ts",
         "packages/shared/src/types/task-retry.ts",
         "packages/cli/src/commands/pod.ts",
@@ -189,7 +189,7 @@
         "packages/daemon/src/pods/task-retry-ledger.ts",
         "packages/daemon/src/validation/retry-identity.ts",
         "packages/daemon/src/pods/pod-manager.ts",
-        "packages/daemon/src/db/migrations/147_task_retry_admission.sql",
+        "packages/daemon/src/db/migrations/156_task_retry_admission.sql",
         "packages/daemon/src/api/routes/pods.ts",
         "packages/shared/src/types/task-retry.ts",
         "packages/cli/src/commands/pod.ts",
@@ -223,7 +223,7 @@
         "packages/daemon/src/pods/task-retry-ledger.ts",
         "packages/daemon/src/validation/retry-identity.ts",
         "packages/daemon/src/pods/pod-manager.ts",
-        "packages/daemon/src/db/migrations/147_task_retry_admission.sql",
+        "packages/daemon/src/db/migrations/156_task_retry_admission.sql",
         "packages/daemon/src/api/routes/pods.ts",
         "packages/shared/src/types/task-retry.ts",
         "packages/cli/src/commands/pod.ts",
@@ -255,11 +255,11 @@
       "status": "partial",
       "implementation": [
         "packages/daemon/src/pods/task-execution-ledger.ts",
-        "packages/daemon/src/db/migrations/143_task_executions.sql",
+        "packages/daemon/src/db/migrations/152_task_executions.sql",
         "packages/daemon/src/pods/pod-manager.ts",
         "packages/daemon/src/pods/task-retry-ledger.ts",
         "packages/daemon/src/validation/retry-identity.ts",
-        "packages/daemon/src/db/migrations/147_task_retry_admission.sql",
+        "packages/daemon/src/db/migrations/156_task_retry_admission.sql",
         "packages/daemon/src/api/routes/pods.ts",
         "packages/shared/src/types/task-retry.ts",
         "packages/cli/src/commands/pod.ts",
@@ -296,7 +296,7 @@
       "requirement": "Validation reuse requires complete matching tree, contract, toolchain, commands, dependencies, environment and implementation identity",
       "status": "partial",
       "implementation": [
-        "packages/daemon/src/db/migrations/144_validation_phase_evidence.sql",
+        "packages/daemon/src/db/migrations/153_validation_phase_evidence.sql",
         "packages/daemon/src/validation/validation-evidence-cache.ts",
         "packages/daemon/src/validation/run-with-evidence.ts",
         "packages/daemon/src/validation/validation-identity-collector.ts",
@@ -353,7 +353,7 @@
         "packages/daemon/src/worktrees/contract-base-preflight.ts",
         "packages/daemon/src/pods/pod-manager.ts",
         "packages/daemon/src/validation/local-validation-engine.ts",
-        "packages/daemon/src/db/migrations/148_dispatch_preflight.sql",
+        "packages/daemon/src/db/migrations/157_dispatch_preflight.sql",
         "packages/daemon/src/pods/dispatch-preflight-ledger.ts",
         "packages/daemon/src/pods/dispatch-rerun-request.ts",
         "packages/daemon/src/api/routes/pods.ts",
@@ -392,9 +392,9 @@
       "status": "partial",
       "implementation": [
         "packages/daemon/src/pods/task-execution-ledger.ts",
-        "packages/daemon/src/db/migrations/143_task_executions.sql",
+        "packages/daemon/src/db/migrations/152_task_executions.sql",
         "packages/daemon/src/pods/pod-manager.ts",
-        "packages/daemon/src/db/migrations/148_dispatch_preflight.sql",
+        "packages/daemon/src/db/migrations/157_dispatch_preflight.sql",
         "packages/daemon/src/pods/dispatch-preflight-ledger.ts",
         "packages/daemon/src/pods/dispatch-rerun-request.ts",
         "packages/daemon/src/api/routes/pods.ts",
@@ -439,7 +439,7 @@
         "packages/daemon/src/pods/required-command-preflight.ts",
         "packages/daemon/src/runtimes/agent-cli-preflight.ts",
         "packages/daemon/src/runtimes/build-input-identity.ts",
-        "packages/daemon/src/db/migrations/149_execution_provenance.sql",
+        "packages/daemon/src/db/migrations/158_execution_provenance.sql",
         "packages/shared/src/types/execution-provenance.ts",
         "packages/shared/src/contract.ts",
         "packages/daemon/src/api/routes/pods.ts",
@@ -512,7 +512,7 @@
       "status": "partial",
       "implementation": [
         "packages/daemon/src/pods/pod-manager.ts",
-        "packages/daemon/src/db/migrations/148_dispatch_preflight.sql",
+        "packages/daemon/src/db/migrations/157_dispatch_preflight.sql",
         "packages/daemon/src/pods/dispatch-preflight-ledger.ts",
         "packages/daemon/src/pods/dispatch-rerun-request.ts",
         "packages/daemon/src/api/routes/pods.ts",
@@ -556,7 +556,7 @@
       "implementation": [
         "packages/daemon/src/pods/models-aggregator.ts",
         "packages/daemon/src/pods/task-execution-ledger.ts",
-        "packages/daemon/src/db/migrations/143_task_executions.sql",
+        "packages/daemon/src/db/migrations/152_task_executions.sql",
         "packages/daemon/src/pods/pod-manager.ts",
         "packages/shared/src/types/task-execution.ts"
       ],
@@ -669,7 +669,7 @@
         "packages/daemon/src/pods/cost-aggregation.ts",
         "packages/shared/src/types/analytics.ts",
         "packages/daemon/src/pods/task-execution-ledger.ts",
-        "packages/daemon/src/db/migrations/143_task_executions.sql",
+        "packages/daemon/src/db/migrations/152_task_executions.sql",
         "packages/daemon/src/pods/pod-manager.ts"
       ],
       "tests": [
@@ -827,7 +827,7 @@
       "status": "partial",
       "implementation": [
         "packages/daemon/src/scheduled-jobs/scan-report-repository.ts",
-        "packages/daemon/src/db/migrations/146_scheduled_scan_reports.sql"
+        "packages/daemon/src/db/migrations/155_scheduled_scan_reports.sql"
       ],
       "tests": [
         "packages/daemon/src/scheduled-jobs/scan-report-repository.test.ts",
@@ -928,7 +928,7 @@
         "packages/daemon/src/pods/required-command-preflight.ts",
         "packages/daemon/src/runtimes/agent-cli-preflight.ts",
         "packages/daemon/src/runtimes/build-input-identity.ts",
-        "packages/daemon/src/db/migrations/149_execution_provenance.sql",
+        "packages/daemon/src/db/migrations/158_execution_provenance.sql",
         "packages/shared/src/types/execution-provenance.ts",
         "packages/shared/src/contract.ts",
         "packages/daemon/src/api/routes/pods.ts",
@@ -1044,11 +1044,27 @@
       "id": "G.2",
       "requirement": "Migration numbering checked against current branches and representative prior database upgrades verified",
       "status": "partial",
-      "implementation": ["packages/daemon/src/db/migrations/142_completion_journal.sql"],
-      "tests": ["packages/daemon/src/pods/completion-journal.test.ts"],
-      "evidence": ["receipts/journal-migration.txt"],
+      "implementation": [
+        "packages/daemon/src/db/migrations/151_completion_journal.sql",
+        "packages/daemon/src/db/migrate.ts",
+        "packages/daemon/src/db/migrations/158_execution_provenance.sql"
+      ],
+      "tests": [
+        "packages/daemon/src/pods/completion-journal.test.ts",
+        "packages/daemon/src/db/managed-migration-compatibility.test.ts",
+        "packages/daemon/src/db/migrate.test.ts"
+      ],
+      "evidence": [
+        "receipts/journal-migration.txt",
+        "receipts/migration-coexistence-red.txt",
+        "receipts/migration-coexistence-green.txt",
+        "receipts/migration-coexistence-final.txt",
+        "receipts/migration-renumbering.json",
+        "receipts/migration-renumbering-prefix-audit.json",
+        "receipts/managed-migration-compatibility-source.json"
+      ],
       "prerequisites": [],
-      "remaining": "Newly discovered managed schema 142-150 was deployed by separate task from untracked worktree files. Our unpublished 142-149 collide. Renumber and verify combined-schema upgrades before any rollout."
+      "remaining": "Managed 142-150 definitions retained as inert baseline; unpublished native additions renumbered 151-158. Combined schema upgrade preserves native/managed data locally. Exact remote migration-byte verification awaits approved read-only inspection; no live migration was performed."
     },
     {
       "id": "G.3",
@@ -1098,5 +1114,5 @@
       "prerequisites": []
     }
   ],
-  "lastCheckpoint": "checkpoint-11.md"
+  "lastCheckpoint": "checkpoint-12.md"
 }
