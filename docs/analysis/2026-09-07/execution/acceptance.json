@@ -512,7 +512,12 @@
         "packages/daemon/src/validation/local-validation-engine.test.ts",
         "packages/daemon/src/pods/validation-repository.test.ts"
       ],
-      "evidence": ["checkpoint-21.md", "receipts/checkpoint-18-full-validation.txt"],
+      "evidence": [
+        "checkpoint-21.md",
+        "receipts/checkpoint-18-full-validation.txt",
+        "receipts/checkpoint-21-full-validation.txt",
+        "receipts/checkpoint-21-validation-identity.json"
+      ],
       "prerequisites": [],
       "remaining": "Current source retains frozen identity, independently addressable substantive findings, bounded closure chunks, fail-closed unavailable axes/closure, and immutable validation history. Existing local regression coverage is mapped; final committed pipeline and deployed-byte verification remain separate requirements."
     },
@@ -1289,7 +1294,9 @@
       "evidence": [
         "checkpoint-21.md",
         "receipts/checkpoint-18-full-validation.txt",
-        "receipts/summary-launch-race-final.txt"
+        "receipts/summary-launch-race-final.txt",
+        "receipts/checkpoint-21-full-validation.txt",
+        "receipts/checkpoint-21-validation-identity.json"
       ],
       "prerequisites": [
         "Historical source safeguards and their regression suites are retained. Deployment status requires approved guest inspection of exact deployed bytes; health/count snapshots and another task report do not prove all fixes are deployed. Final source pipeline remains."
@@ -1362,10 +1369,12 @@
         "receipts/checkpoint-20-validation-identity.json",
         "receipts/checkpoint-20-codex-rerun.txt",
         "receipts/summary-launch-race-final.txt",
-        "receipts/summary-launch-race-build.txt"
+        "receipts/summary-launch-race-build.txt",
+        "receipts/checkpoint-21-full-validation.txt",
+        "receipts/checkpoint-21-validation-identity.json"
       ],
       "prerequisites": [
-        "Last full pass: clean 64bb3840. Pipeline 4c65c643 failed receipt formatting and one 250 ms Codex recovery test; isolated old runtime rerun passed. Formatting is corrected and an independently reproduced launch-listener race is fixed with 519 affected tests and all builds passing. A new committed full pipeline remains required."
+        "Full required pipeline passes on clean 46f63982ea42aef832fcb6df1c21631e468f409c: daemon 4468 passed, one known Linux-only skip; all 15 Turbo tasks passed; audit zero, secret scan and deployment/cleanup safeguards passed. The skipped source callback has separate local Linux proof at unchanged implementation 18e5bd37. Final source validation remains after further implementation."
       ]
     },
     {
