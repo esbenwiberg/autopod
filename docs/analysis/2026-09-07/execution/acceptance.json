@@ -503,10 +503,13 @@
       "evidence": [
         "receipts/validation-replay-benchmark-initial.json",
         "receipts/validation-replay-benchmark.json",
-        "receipts/validation-replay-isolation-gate.txt"
+        "receipts/validation-replay-isolation-gate.txt",
+        "checkpoint-19.md",
+        "receipts/validation-replay-18e5bd37.json",
+        "receipts/validation-replay-18e5bd37.txt"
       ],
       "prerequisites": [],
-      "remaining": "Local short-check target unsupported: -185.22% reduction, zero additional escaped defects. Final committed replay and any authorized live workload comparison remain."
+      "remaining": "Clean committed local replay at 18e5bd37 measured -190.90 percent reduction (631.75 ms baseline, 1837.78 ms candidate), zero escaped seeded defects in both modes and unchanged coverage. The 25 percent target is unsupported for this short-check workload. Representative live comparison requires bounded authorization; no general workload improvement is claimed."
     },
     {
       "id": "W3.1",
@@ -1283,10 +1286,14 @@
         "receipts/task-budget-affected.txt",
         "receipts/task-budget-build.txt",
         "receipts/decision-admission-affected.txt",
-        "receipts/decision-admission-build.txt"
+        "receipts/decision-admission-build.txt",
+        "receipts/checkpoint-18-full-validation.txt",
+        "receipts/checkpoint-18-validation-identity.json",
+        "receipts/linux-process-18e5bd37.txt",
+        "receipts/linux-process-18e5bd37-identity.json"
       ],
       "prerequisites": [
-        "Full pipeline passed on clean ce7f8b94 with audit zero. Later budget and decision-admission changes pass affected suites and full builds; final committed pipeline remains required."
+        "Full pipeline passed on clean 64bb3840: daemon 4462 passed, one Linux-only skip, audit zero. The exact skipped callback and implementation function passed separately in local Linux via node:test at unchanged implementation HEAD 18e5bd37. This is not a full Linux Vitest run. Final source verification remains after subsequent implementation."
       ]
     },
     {
@@ -1331,5 +1338,5 @@
       "prerequisites": []
     }
   ],
-  "lastCheckpoint": "checkpoint-18.md"
+  "lastCheckpoint": "checkpoint-19.md"
 }

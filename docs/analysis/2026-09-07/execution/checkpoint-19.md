@@ -1,0 +1,18 @@
+# Checkpoint 19: committed benchmark and local Linux process proof
+
+The complete required validation pipeline passed on clean 64bb3840c0161cf8507faebae1b05ad4d17eee5d: daemon 4,462 passed and one Linux-only skip; all 15 Turbo tasks succeeded; audit reported zero vulnerabilities; secret scanning and deployment/cleanup safeguards passed. Receipts and source identity are retained under receipts/checkpoint-18-*. The subsequent 18e5bd37c2421c9768d105eff6863ad067bf7c1a changes benchmark provenance and receipt documentation, with no implementation changes.
+
+The matched replay ran at clean 18e5bd37. The version-2 report records source and oracle hashes, actual clean status, OS/CPU/memory and Node executable identity. Source/status are checked again after the run; output names are unique and exclusive. Tasks, alternating pair order, assertions, defects, coverage and calculation remain unchanged. Repeated validation measured 631.751502 ms without reuse and 1,837.77754 ms with reuse: -190.901966% reduction. Both modes caught both seeded defects, with zero escapes, four reuse hits and 18 actual build commands. The test passes its correctness/measurement assertions; the performance target does not pass. This tiny local workload remains dominated by fingerprint overhead. It does not establish representative live performance, Docker isolation or provider execution. Historical results are preserved separately.
+
+Local Docker Desktop was available (Linux arm64). A disposable container used the already cached image sha256:ba849c60be29959425b8734d57b8b4b7d56f98edd9504c9af091d5281095a71e (Node v24.20.0), network disabled, read-only root, all capabilities dropped, no new privileges, one CPU, 256 MiB memory, 64 PIDs and 16 MiB temporary storage. It received only one read-only generated test file. No daemon socket, repository, credentials or production data were mounted. The container was removed and its absence verified.
+
+The preparation fixture extracts the named implementation function and exact Linux-only regression callback using TypeScript's parser. It preserves the two source assertions through strict Node assertions and fails if the oracle shape changes. The generated file executes through node:test: one passed, zero skipped, approximately 2.13 seconds. This proves the implementation terminates the surviving TERM-ignoring child on this local Linux image. It is separate from the full macOS Vitest run, which still reports the skip; the full Linux suite was not executed. Source, callback and generated hashes are in the identity receipt.
+
+Reproduce with a fresh output path:
+
+```sh
+node docs/analysis/2026-09-07/execution/fixtures/prepare-linux-process-check.mjs /private/tmp/autopod-linux-process-check.mjs
+docker --host unix:///Users/ewi/.docker/run/docker.sock run --rm --pull never --network none --read-only --cap-drop ALL --security-opt no-new-privileges --memory 256m --cpus 1 --pids-limit 64 --tmpfs /tmp:rw,nosuid,nodev,size=16m --mount type=bind,source=/private/tmp/autopod-linux-process-check.mjs,target=/check.mjs,readonly --entrypoint node sha256:ba849c60be29959425b8734d57b8b4b7d56f98edd9504c9af091d5281095a71e --test /check.mjs
+```
+
+All six workstreams remain subject to the acceptance ledger. The next independent work is bounded history projection and retained-gate evidence, followed by unresolved execution/finalization accounting and operator requirements. Read-only production metadata inspection still awaits the specific approval requested after automatic review rejected its egress. No production mutation, paid provider, publication or cloud change occurred.

@@ -1,0 +1,10 @@
+{"sourceHead":"18e5bd37c2421c9768d105eff6863ad067bf7c1a","sourceStatus":"","implementationPath":"packages/daemon/src/containers/docker-container-manager.ts","implementationSha256":"1282a9df6d2a99aa23900c858073f4808540afd9359e830f25c9e0597f177cda","testPath":"packages/daemon/src/containers/docker-container-manager.test.ts","testSha256":"4d9040125085f703ee8a830e075267ec5286a02d67fc2886e6b4c1a9aa50978b","callbackSha256":"6940e339bb7881b242d5548eab1232e0d4cc4a7c4ade5eb1c6686084e35bc71a","proofScope":"Exact extracted regression callback and implementation function via node:test on Linux","runtime":"v24.20.0","platform":"linux","architecture":"arm64"}
+✔ terminates a surviving child in the dedicated streaming process group (2131.461501ms)
+ℹ tests 1
+ℹ suites 0
+ℹ pass 1
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 2169.928001
