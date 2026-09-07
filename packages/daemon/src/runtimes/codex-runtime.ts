@@ -68,6 +68,7 @@ interface OutputState {
 
 interface SandboxRolloutRecovery {
   containerId: string;
+  taskSummarySignal?: Promise<void>;
 }
 
 interface RolloutCandidate {
@@ -187,21 +188,29 @@ export class CodexRuntime implements Runtime {
     });
 
     const shimPath = '/run/autopod/agent-shim.sh';
-    const handle = await this.containerManager.execStreaming(
-      config.containerId,
-      ['sh', shimPath, 'codex', ...args],
-      { cwd: config.workDir, env: config.env },
-    );
+    const summary = this.observeTaskSummary(config.podId, config.executionTarget === 'sandbox');
+    let interrupted: boolean;
+    try {
+      const handle = await this.containerManager.execStreaming(
+        config.containerId,
+        ['sh', shimPath, 'codex', ...args],
+        { cwd: config.workDir, env: config.env },
+      );
 
-    this.handles.set(config.podId, handle);
+      this.handles.set(config.podId, handle);
 
-    const interrupted = yield* this.streamInvocation(
-      handle,
-      config.podId,
-      config.containerId,
-      config.model,
-      config.executionTarget === 'sandbox' ? { containerId: config.containerId } : undefined,
-    );
+      interrupted = yield* this.streamInvocation(
+        handle,
+        config.podId,
+        config.containerId,
+        config.model,
+        config.executionTarget === 'sandbox'
+          ? { containerId: config.containerId, taskSummarySignal: summary.signal }
+          : undefined,
+      );
+    } finally {
+      summary.dispose();
+    }
     if (interrupted) {
       yield* this.recoverInterruptedTurn(config.podId, config.containerId, config.env);
     }
@@ -284,25 +293,33 @@ export class CodexRuntime implements Runtime {
     });
 
     const shimPath = '/run/autopod/agent-shim.sh';
-    const handle = await this.containerManager.execStreaming(
-      containerId,
-      ['sh', shimPath, 'codex', ...args],
-      {
-        cwd: '/workspace',
-        ...(env ? { env } : {}),
-      },
-    );
+    const summary = this.observeTaskSummary(podId, pod.executionTarget === 'sandbox');
+    let interrupted: boolean;
+    try {
+      const handle = await this.containerManager.execStreaming(
+        containerId,
+        ['sh', shimPath, 'codex', ...args],
+        {
+          cwd: '/workspace',
+          ...(env ? { env } : {}),
+        },
+      );
 
-    this.handles.set(podId, handle);
+      this.handles.set(podId, handle);
 
-    const interrupted = yield* this.streamInvocation(
-      handle,
-      podId,
-      containerId,
-      pod.model,
-      pod.executionTarget === 'sandbox' ? { containerId } : undefined,
-      rolloutTail,
-    );
+      interrupted = yield* this.streamInvocation(
+        handle,
+        podId,
+        containerId,
+        pod.model,
+        pod.executionTarget === 'sandbox'
+          ? { containerId, taskSummarySignal: summary.signal }
+          : undefined,
+        rolloutTail,
+      );
+    } finally {
+      summary.dispose();
+    }
     if (!interrupted) return;
 
     if (!allowInterruptedRecovery) {
@@ -460,6 +477,26 @@ export class CodexRuntime implements Runtime {
     }
   }
 
+  /** Subscribe before launch: the worker may report while execStreaming is still opening. */
+  private observeTaskSummary(
+    podId: string,
+    enabled: boolean,
+  ): {
+    signal: Promise<void> | undefined;
+    dispose: () => void;
+  } {
+    if (!enabled || !this.eventBus) return { signal: undefined, dispose: () => {} };
+    let resolveSummary: () => void = () => {};
+    const signal = new Promise<void>((resolve) => {
+      resolveSummary = resolve;
+    });
+    const dispose = this.eventBus.subscribeToSession(podId, (event) => {
+      if (event.type === 'pod.agent_activity' && event.event.type === 'task_summary')
+        resolveSummary();
+    });
+    return { signal, dispose };
+  }
+
   private async settleInterruptedInvocation(
     podId: string,
     handle: StreamingExecResult,
@@ -537,25 +574,6 @@ export class CodexRuntime implements Runtime {
       abortLiveRollout.abort();
       abortSummaryGrace.abort();
     });
-    let taskSummaryObserved = false;
-    let resolveTaskSummary: (() => void) | null = null;
-    const taskSummarySignal = new Promise<void>((resolve) => {
-      resolveTaskSummary = resolve;
-    });
-    const unsubscribeTaskSummary =
-      summaryRecovery && this.eventBus
-        ? this.eventBus.subscribeToSession(podId, (event) => {
-            if (
-              taskSummaryObserved ||
-              event.type !== 'pod.agent_activity' ||
-              event.event.type !== 'task_summary'
-            ) {
-              return;
-            }
-            taskSummaryObserved = true;
-            resolveTaskSummary?.();
-          })
-        : null;
     const stdoutIterator = this.parseCodexLines(handle.stdout, podId, seen, outputState, modelHint)[
       Symbol.asyncIterator
     ]();
@@ -570,8 +588,12 @@ export class CodexRuntime implements Runtime {
     let stdoutDone = false;
     let stdoutNext = nextFrom('stdout', stdoutIterator);
     let rolloutNext = nextFrom('rollout', rolloutIterator);
-    let taskSummaryNext = unsubscribeTaskSummary
-      ? taskSummarySignal.then(() => ({ source: 'task-summary' as const }))
+    let taskSummaryObserved = false;
+    let taskSummaryNext = summaryRecovery?.taskSummarySignal
+      ? summaryRecovery.taskSummarySignal.then(() => {
+          taskSummaryObserved = true;
+          return { source: 'task-summary' as const };
+        })
       : neverRuntimeSignal<'task-summary'>();
     let summaryRecoveryNext = neverRuntimeSignal<'summary-recovery'>();
     let lastMergedEventAt = Date.now();
@@ -702,7 +724,6 @@ export class CodexRuntime implements Runtime {
       this.suspensionSignals.delete(podId);
       abortLiveRollout.abort();
       abortSummaryGrace.abort();
-      unsubscribeTaskSummary?.();
       await rolloutIterator.return?.();
     }
 

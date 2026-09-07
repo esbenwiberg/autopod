@@ -17,7 +17,8 @@
         "packages/daemon/src/db/migrations/159_decision_recovery.sql",
         "packages/daemon/src/pods/decision-admission.ts",
         "packages/daemon/src/pods/task-execution-ledger.ts",
-        "packages/daemon/src/pods/task-retry-ledger.ts"
+        "packages/daemon/src/pods/task-retry-ledger.ts",
+        "packages/daemon/src/runtimes/codex-runtime.ts"
       ],
       "tests": [
         "packages/daemon/src/pods/pod-lifecycle.e2e.test.ts",
@@ -26,7 +27,9 @@
         "packages/daemon/src/pods/pod-manager.test.ts",
         "packages/daemon/src/pods/completion-journal.test.ts",
         "packages/daemon/src/pods/task-execution-ledger.test.ts",
-        "packages/daemon/src/pods/task-retry-ledger.test.ts"
+        "packages/daemon/src/pods/task-retry-ledger.test.ts",
+        "packages/daemon/src/runtimes/codex-runtime.test.ts",
+        "packages/daemon/src/runtimes/stream-grace.test.ts"
       ],
       "evidence": [
         "receipts/settlement-red.txt",
@@ -40,10 +43,13 @@
         "receipts/reply-recovery-affected-final.txt",
         "checkpoint-18.md",
         "receipts/decision-admission-red.txt",
-        "receipts/decision-admission-affected.txt"
+        "receipts/decision-admission-affected.txt",
+        "checkpoint-21.md",
+        "receipts/summary-launch-race-red.txt",
+        "receipts/summary-launch-race-final.txt"
       ],
       "prerequisites": [],
-      "remaining": "Normal replies are atomic, retained in bounded recovery context, and fence older completion events. New unanswered decisions remain actionable. Attached MCP delivery acknowledgment, delayed concurrent stream ordering, other response boundaries, historical orphan questions and broader finalization side effects remain. New worker/cycle and validation admission now preserve pending decisions, including older unresolved cycles in the current generation. Historical missing payload recovery and stream/MCP delivery acknowledgment remain."
+      "remaining": "Normal replies are atomic, retained in bounded recovery context, and fence older completion events. New unanswered decisions remain actionable. Attached MCP delivery acknowledgment, delayed concurrent stream ordering, other response boundaries, historical orphan questions and broader finalization side effects remain. New worker/cycle and validation admission now preserve pending decisions, including older unresolved cycles in the current generation. Historical missing payload recovery and stream/MCP delivery acknowledgment remain. Codex now observes summary events before Spawn/Resume launch and disposes each invocation listener. This closes the local launch/stream attachment race, not durable delivery acknowledgment across all runtimes or daemon restart."
     },
     {
       "id": "W1.2",
@@ -80,7 +86,9 @@
         "packages/daemon/src/pods/artifact-snapshot-receipt.test.ts",
         "packages/daemon/src/pods/sandbox-terminal-reaper.test.ts",
         "packages/daemon/src/pods/task-execution-ledger.test.ts",
-        "packages/daemon/src/pods/task-retry-ledger.test.ts"
+        "packages/daemon/src/pods/task-retry-ledger.test.ts",
+        "packages/daemon/src/runtimes/codex-runtime.test.ts",
+        "packages/daemon/src/runtimes/stream-grace.test.ts"
       ],
       "evidence": [
         "receipts/journal-migration.txt",
@@ -110,10 +118,13 @@
         "receipts/artifact-recovery-final.txt",
         "checkpoint-18.md",
         "receipts/decision-admission-red.txt",
-        "receipts/decision-admission-affected.txt"
+        "receipts/decision-admission-affected.txt",
+        "checkpoint-21.md",
+        "receipts/summary-launch-race-red.txt",
+        "receipts/summary-launch-race-final.txt"
       ],
       "prerequisites": [],
-      "remaining": "Entered artifact collection survives restart with sources retained; generation/cycle-bound integrity receipts and in-process duplicate coordination are implemented. Independent source inventory, fsync/power-loss proof, orphan snapshot/DB-path reconciliation, interactive duplicates, other reply boundaries and broader durable finalization side effects remain. New worker/cycle and validation admission now preserve pending decisions, including older unresolved cycles in the current generation. Historical missing payload recovery and stream/MCP delivery acknowledgment remain."
+      "remaining": "Entered artifact collection survives restart with sources retained; generation/cycle-bound integrity receipts and in-process duplicate coordination are implemented. Independent source inventory, fsync/power-loss proof, orphan snapshot/DB-path reconciliation, interactive duplicates, other reply boundaries and broader durable finalization side effects remain. New worker/cycle and validation admission now preserve pending decisions, including older unresolved cycles in the current generation. Historical missing payload recovery and stream/MCP delivery acknowledgment remain. Codex now observes summary events before Spawn/Resume launch and disposes each invocation listener. This closes the local launch/stream attachment race, not durable delivery acknowledgment across all runtimes or daemon restart."
     },
     {
       "id": "W1.3",
@@ -488,11 +499,22 @@
     {
       "id": "W2.6",
       "requirement": "Frozen review finding and closure ledgers and substantive gates are retained",
-      "status": "unverified",
-      "implementation": [],
-      "tests": [],
-      "evidence": [],
-      "prerequisites": []
+      "status": "partial",
+      "implementation": [
+        "packages/daemon/src/validation/review-ledger.ts",
+        "packages/daemon/src/validation/review-batch-runner.ts",
+        "packages/daemon/src/validation/local-validation-engine.ts",
+        "packages/daemon/src/pods/validation-repository.ts"
+      ],
+      "tests": [
+        "packages/daemon/src/validation/review-ledger.test.ts",
+        "packages/daemon/src/validation/review-batch-runner.test.ts",
+        "packages/daemon/src/validation/local-validation-engine.test.ts",
+        "packages/daemon/src/pods/validation-repository.test.ts"
+      ],
+      "evidence": ["checkpoint-21.md", "receipts/checkpoint-18-full-validation.txt"],
+      "prerequisites": [],
+      "remaining": "Current source retains frozen identity, independently addressable substantive findings, bounded closure chunks, fail-closed unavailable axes/closure, and immutable validation history. Existing local regression coverage is mapped; final committed pipeline and deployed-byte verification remain separate requirements."
     },
     {
       "id": "W2.7",
@@ -1238,11 +1260,40 @@
     {
       "id": "G.1",
       "requirement": "Historical strict fetch, validation-only recovery, bounded review, ledgers, history sequences, Codex transport/OAuth, ADO auth and guarded deployment retain regression coverage and deployment status evidence",
-      "status": "unverified",
-      "implementation": [],
-      "tests": [],
-      "evidence": [],
-      "prerequisites": []
+      "status": "partial",
+      "implementation": [
+        "packages/daemon/src/worktrees/local-worktree-manager.ts",
+        "packages/daemon/src/pods/pod-manager.ts",
+        "packages/daemon/src/validation/review-batch-runner.ts",
+        "packages/daemon/src/validation/review-ledger.ts",
+        "packages/daemon/src/pods/validation-repository.ts",
+        "packages/daemon/src/runtimes/codex-runtime.ts",
+        "packages/daemon/src/providers/azure-devops-auth.ts",
+        "scripts/deploy-hosted-daemon.sh",
+        "scripts/cleanup-hosted-daemon.sh"
+      ],
+      "tests": [
+        "packages/daemon/src/worktrees/local-worktree-manager.test.ts",
+        "packages/daemon/src/worktrees/local-worktree-manager.git.test.ts",
+        "packages/daemon/src/pods/pod-manager.test.ts",
+        "packages/daemon/src/validation/review-batch-runner.test.ts",
+        "packages/daemon/src/validation/review-ledger.test.ts",
+        "packages/daemon/src/pods/validation-repository.test.ts",
+        "packages/daemon/src/runtimes/codex-runtime.test.ts",
+        "packages/daemon/src/providers/credential-refresh.test.ts",
+        "packages/daemon/src/providers/credential-persistence.test.ts",
+        "packages/daemon/src/providers/azure-devops-auth.test.ts",
+        "scripts/deploy-hosted-daemon.test.sh",
+        "scripts/cleanup-hosted-daemon.test.sh"
+      ],
+      "evidence": [
+        "checkpoint-21.md",
+        "receipts/checkpoint-18-full-validation.txt",
+        "receipts/summary-launch-race-final.txt"
+      ],
+      "prerequisites": [
+        "Historical source safeguards and their regression suites are retained. Deployment status requires approved guest inspection of exact deployed bytes; health/count snapshots and another task report do not prove all fixes are deployed. Final source pipeline remains."
+      ]
     },
     {
       "id": "G.2",
@@ -1306,10 +1357,15 @@
         "receipts/linux-process-18e5bd37.txt",
         "receipts/linux-process-18e5bd37-identity.json",
         "receipts/compact-projection-final.txt",
-        "receipts/compact-projection-build.txt"
+        "receipts/compact-projection-build.txt",
+        "receipts/checkpoint-20-full-validation-red.txt",
+        "receipts/checkpoint-20-validation-identity.json",
+        "receipts/checkpoint-20-codex-rerun.txt",
+        "receipts/summary-launch-race-final.txt",
+        "receipts/summary-launch-race-build.txt"
       ],
       "prerequisites": [
-        "Full pipeline passed on clean 64bb3840: daemon 4462 passed, one Linux-only skip, audit zero. The exact skipped callback and implementation function passed separately in local Linux via node:test at unchanged implementation HEAD 18e5bd37. This is not a full Linux Vitest run. Final source verification remains after subsequent implementation."
+        "Last full pass: clean 64bb3840. Pipeline 4c65c643 failed receipt formatting and one 250 ms Codex recovery test; isolated old runtime rerun passed. Formatting is corrected and an independently reproduced launch-listener race is fixed with 519 affected tests and all builds passing. A new committed full pipeline remains required."
       ]
     },
     {
@@ -1359,5 +1415,5 @@
       "prerequisites": []
     }
   ],
-  "lastCheckpoint": "checkpoint-20.md"
+  "lastCheckpoint": "checkpoint-21.md"
 }

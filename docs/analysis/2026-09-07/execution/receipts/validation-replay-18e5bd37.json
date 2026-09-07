@@ -20,11 +20,7 @@
   "imageIdentity": "fixture hash of actual Node binary; not a Docker image receipt",
   "coverage": {
     "assertionsPerTestExecution": 5,
-    "configuredPhases": [
-      "lint",
-      "build",
-      "test"
-    ],
+    "configuredPhases": ["lint", "build", "test"],
     "unchangedAcrossModes": true,
     "excludedInBothModes": [
       "web health/pages (no web app)",
@@ -37,10 +33,7 @@
   "candidateRepeatedMs": 1837.7775400000003,
   "reductionPercent": -190.9019660708303,
   "targetMet": false,
-  "seededDefects": [
-    "off-by-one",
-    "missing-zero-boundary"
-  ],
+  "seededDefects": ["off-by-one", "missing-zero-boundary"],
   "baselineEscapes": 0,
   "candidateEscapes": 0,
   "cacheHits": 4,

@@ -61,9 +61,14 @@ function createMockContainerManager(handle: StreamingExecResult): ContainerManag
 
 function createTaskSummaryEventBus(): {
   eventBus: EventBus;
+  whenSubscribed: Promise<void>;
   emitTaskSummary(podId: string): void;
 } {
   let subscriber: ((event: SystemEvent) => void) | null = null;
+  let markSubscribed = () => {};
+  const whenSubscribed = new Promise<void>((resolve) => {
+    markSubscribed = resolve;
+  });
   const eventBus: EventBus = {
     emit: vi.fn((event: SystemEvent) => {
       subscriber?.(event);
@@ -72,14 +77,16 @@ function createTaskSummaryEventBus(): {
     subscribe: vi.fn(() => () => {}),
     subscribeToSession: vi.fn((_podId, nextSubscriber) => {
       subscriber = nextSubscriber;
-      return () => {
+      markSubscribed();
+      return vi.fn(() => {
         subscriber = null;
-      };
+      });
     }),
   };
 
   return {
     eventBus,
+    whenSubscribed,
     emitTaskSummary(podId: string): void {
       eventBus.emit({
         type: 'pod.agent_activity',
@@ -683,109 +690,172 @@ describe('CodexRuntime', () => {
       }
     });
 
-    it('recovers sandbox completion after final task summary when stdout stalls', async () => {
-      const previousStateDir = process.env.AUTOPOD_CODEX_STATE_DIR;
-      const previousSummaryGrace = process.env.AUTOPOD_CODEX_SUMMARY_GRACE_MS;
-      const previousExitTimeout = process.env.AUTOPOD_EXIT_CODE_TIMEOUT_MS;
-      const tmpRoot = await mkdtemp(join(tmpdir(), 'autopod-codex-summary-recovery-'));
-      process.env.AUTOPOD_CODEX_STATE_DIR = tmpRoot;
-      process.env.AUTOPOD_CODEX_SUMMARY_GRACE_MS = '20';
-      process.env.AUTOPOD_EXIT_CODE_TIMEOUT_MS = '20';
-
-      try {
-        const podId = 'summary-recovery';
-        const handle = createMockHandle();
-        const cm = createMockContainerManager(handle);
-        const extract = vi.mocked(cm.extractDirectoryFromContainer);
-        extract.mockImplementation(async (_containerId, _containerPath, hostPath) => {
-          const rolloutDir = join(hostPath, '2026', '07', '13');
-          await mkdir(rolloutDir, { recursive: true });
-          await writeFile(
-            join(rolloutDir, 'rollout-2026-07-13T18-00-00-thread-summary.jsonl'),
-            [
-              JSON.stringify({
-                timestamp: '2026-07-13T18:00:00.000Z',
-                type: 'event_msg',
-                payload: {
-                  type: 'task_complete',
-                  last_agent_message: 'Recovered from sandbox rollout.',
-                },
-              }),
-            ].join('\n'),
-          );
-        });
-        const summaryEvents = createTaskSummaryEventBus();
-        const runtime = new CodexRuntime(logger, cm, createMockPodRepo(), summaryEvents.eventBus);
-
-        setTimeout(() => {
-          (handle.stdout as PassThrough).write(
-            `${JSON.stringify({
-              type: 'thread.started',
-              thread_id: 'thread-summary',
-            })}\n`,
-          );
-          summaryEvents.emitTaskSummary(podId);
-        }, 10);
-
-        const events: AgentEvent[] = [];
-        const run = (async () => {
-          for await (const event of runtime.spawn({
-            podId,
-            task: 'Finish after the summary.',
-            model: 'gpt-5.5',
-            reasoningEffort: 'auto',
-            workDir: '/workspace',
-            containerId: 'container-123',
-            executionTarget: 'sandbox',
-            env: {},
-          })) {
-            events.push(event);
-          }
-        })();
+    it.each([
+      { timing: 'after-start', operation: 'spawn' },
+      { timing: 'during-launch', operation: 'spawn' },
+      { timing: 'during-launch', operation: 'resume' },
+    ] as const)(
+      'recovers sandbox completion after final task summary when stdout stalls ($operation, $timing)',
+      async ({ timing, operation }) => {
+        const previousStateDir = process.env.AUTOPOD_CODEX_STATE_DIR;
+        const previousSummaryGrace = process.env.AUTOPOD_CODEX_SUMMARY_GRACE_MS;
+        const previousExitTimeout = process.env.AUTOPOD_EXIT_CODE_TIMEOUT_MS;
+        const tmpRoot = await mkdtemp(join(tmpdir(), 'autopod-codex-summary-recovery-'));
+        process.env.AUTOPOD_CODEX_STATE_DIR = tmpRoot;
+        process.env.AUTOPOD_CODEX_SUMMARY_GRACE_MS = '20';
+        process.env.AUTOPOD_EXIT_CODE_TIMEOUT_MS = '20';
 
         try {
-          await withTimeout(run, 250);
-        } finally {
-          // biome-ignore lint/suspicious/noExplicitAny: accessing test helper method
-          (handle as any).finish(0);
-        }
+          const podId = 'summary-recovery';
+          const handle = createMockHandle();
+          const cm = createMockContainerManager(handle);
+          const extract = vi.mocked(cm.extractDirectoryFromContainer);
+          extract.mockImplementation(async (_containerId, _containerPath, hostPath) => {
+            const rolloutDir = join(hostPath, '2026', '07', '13');
+            await mkdir(rolloutDir, { recursive: true });
+            await writeFile(
+              join(rolloutDir, 'rollout-2026-07-13T18-00-00-thread-summary.jsonl'),
+              [
+                JSON.stringify({
+                  timestamp: '2026-07-13T18:00:00.000Z',
+                  type: 'event_msg',
+                  payload: {
+                    type: 'task_complete',
+                    last_agent_message: 'Recovered from sandbox rollout.',
+                  },
+                }),
+              ].join('\n'),
+            );
+          });
+          const summaryEvents = createTaskSummaryEventBus();
+          const runtime = new CodexRuntime(
+            logger,
+            cm,
+            createMockPodRepo(null, { executionTarget: 'sandbox', model: 'gpt-5.5' }),
+            summaryEvents.eventBus,
+          );
 
-        expect(extract).toHaveBeenCalledWith(
-          'container-123',
-          '/home/autopod/.codex/sessions',
-          join(tmpRoot, podId),
+          const reportSummary = () => {
+            (handle.stdout as PassThrough).write(
+              `${JSON.stringify({
+                type: 'thread.started',
+                thread_id: 'thread-summary',
+              })}\n`,
+            );
+            summaryEvents.emitTaskSummary(podId);
+          };
+          if (timing === 'during-launch') {
+            vi.mocked(cm.execStreaming).mockImplementationOnce(async () => {
+              reportSummary();
+              return handle;
+            });
+          } else void summaryEvents.whenSubscribed.then(() => setTimeout(reportSummary, 10));
+
+          const events: AgentEvent[] = [];
+          const run = (async () => {
+            const spawnConfig: SpawnConfig = {
+              podId,
+              task: 'Finish after the summary.',
+              model: 'gpt-5.5',
+              reasoningEffort: 'auto',
+              workDir: '/workspace',
+              containerId: 'container-123',
+              executionTarget: 'sandbox',
+              env: {},
+            };
+            const invocation =
+              operation === 'resume'
+                ? runtime.resume(podId, spawnConfig.task, spawnConfig.containerId, {})
+                : runtime.spawn(spawnConfig);
+            for await (const event of invocation) {
+              events.push(event);
+            }
+          })();
+
+          try {
+            await withTimeout(run, 250);
+          } finally {
+            // biome-ignore lint/suspicious/noExplicitAny: accessing test helper method
+            (handle as any).finish(0);
+          }
+
+          expect(extract).toHaveBeenCalledWith(
+            'container-123',
+            '/home/autopod/.codex/sessions',
+            join(tmpRoot, podId),
+          );
+          expect(events).toEqual(
+            expect.arrayContaining([
+              expect.objectContaining({
+                type: 'complete',
+                result: 'Recovered from sandbox rollout.',
+              }),
+            ]),
+          );
+          expect(events.filter((event) => event.type === 'complete')).toHaveLength(1);
+          expect(
+            vi.mocked(summaryEvents.eventBus.subscribeToSession).mock.results[0]?.value,
+          ).toHaveBeenCalledOnce();
+        } finally {
+          if (previousStateDir === undefined) {
+            // biome-ignore lint/performance/noDelete: tests must restore absent env vars exactly
+            delete process.env.AUTOPOD_CODEX_STATE_DIR;
+          } else {
+            process.env.AUTOPOD_CODEX_STATE_DIR = previousStateDir;
+          }
+          if (previousSummaryGrace === undefined) {
+            // biome-ignore lint/performance/noDelete: tests must restore absent env vars exactly
+            delete process.env.AUTOPOD_CODEX_SUMMARY_GRACE_MS;
+          } else {
+            process.env.AUTOPOD_CODEX_SUMMARY_GRACE_MS = previousSummaryGrace;
+          }
+          if (previousExitTimeout === undefined) {
+            // biome-ignore lint/performance/noDelete: tests must restore absent env vars exactly
+            delete process.env.AUTOPOD_EXIT_CODE_TIMEOUT_MS;
+          } else {
+            process.env.AUTOPOD_EXIT_CODE_TIMEOUT_MS = previousExitTimeout;
+          }
+          await rm(tmpRoot, { recursive: true, force: true });
+        }
+      },
+    );
+
+    it.each(['spawn', 'resume'] as const)(
+      'disposes the summary listener when %s launch fails',
+      async (operation) => {
+        const handle = createMockHandle();
+        const cm = createMockContainerManager(handle);
+        vi.mocked(cm.execStreaming).mockRejectedValueOnce(new Error('Launch unavailable'));
+        const summaries = createTaskSummaryEventBus();
+        const runtime = new CodexRuntime(
+          logger,
+          cm,
+          createMockPodRepo(null, { executionTarget: 'sandbox' }),
+          summaries.eventBus,
         );
-        expect(events).toEqual(
-          expect.arrayContaining([
-            expect.objectContaining({
-              type: 'complete',
-              result: 'Recovered from sandbox rollout.',
-            }),
-          ]),
+        const invocation =
+          operation === 'resume'
+            ? runtime.resume('launch-failure', 'Continue', 'container-123', {})
+            : runtime.spawn({
+                podId: 'launch-failure',
+                task: 'Start',
+                model: 'gpt-5.5',
+                reasoningEffort: 'auto',
+                workDir: '/workspace',
+                containerId: 'container-123',
+                executionTarget: 'sandbox',
+                env: {},
+              });
+        await expect(invocation[Symbol.asyncIterator]().next()).rejects.toThrow(
+          'Launch unavailable',
         );
-        expect(events.filter((event) => event.type === 'complete')).toHaveLength(1);
-      } finally {
-        if (previousStateDir === undefined) {
-          // biome-ignore lint/performance/noDelete: tests must restore absent env vars exactly
-          delete process.env.AUTOPOD_CODEX_STATE_DIR;
-        } else {
-          process.env.AUTOPOD_CODEX_STATE_DIR = previousStateDir;
-        }
-        if (previousSummaryGrace === undefined) {
-          // biome-ignore lint/performance/noDelete: tests must restore absent env vars exactly
-          delete process.env.AUTOPOD_CODEX_SUMMARY_GRACE_MS;
-        } else {
-          process.env.AUTOPOD_CODEX_SUMMARY_GRACE_MS = previousSummaryGrace;
-        }
-        if (previousExitTimeout === undefined) {
-          // biome-ignore lint/performance/noDelete: tests must restore absent env vars exactly
-          delete process.env.AUTOPOD_EXIT_CODE_TIMEOUT_MS;
-        } else {
-          process.env.AUTOPOD_EXIT_CODE_TIMEOUT_MS = previousExitTimeout;
-        }
-        await rm(tmpRoot, { recursive: true, force: true });
-      }
-    });
+        expect(summaries.eventBus.subscribeToSession).toHaveBeenCalledOnce();
+        expect(
+          vi.mocked(summaries.eventBus.subscribeToSession).mock.results[0]?.value,
+        ).toHaveBeenCalledOnce();
+        expect(handle.kill).not.toHaveBeenCalled();
+      },
+    );
 
     it('fails bounded when final task summary has no terminal proof', async () => {
       const previousStateDir = process.env.AUTOPOD_CODEX_STATE_DIR;
