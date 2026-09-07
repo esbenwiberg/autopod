@@ -1,5 +1,6 @@
 import { AutopodError, type OperatorActor, type Pod } from '@autopod/shared';
 import type Database from 'better-sqlite3';
+import { hasUnansweredDecision } from './decision-admission.js';
 
 type Finalization = NonNullable<Pod['finalization']>;
 export interface CompletionJournal {
@@ -29,9 +30,15 @@ export function createCompletionJournal(db: Database.Database): CompletionJourna
       .get(pod.id) as { generation: number } | undefined;
     return row?.generation === pod.lifecycleGeneration;
   }
-  const begin = db.transaction((pod: Pod) => {
+  const begin = db.transaction((pod: Pod, initialSettlement = false) => {
     if (!current(pod)) return;
     const previous = get(pod.id, pod.lifecycleGeneration);
+    if (!(initialSettlement && !previous) && hasUnansweredDecision(db, pod.id))
+      throw new AutopodError(
+        'An unanswered human decision must be resolved before starting another worker.',
+        'HUMAN_DECISION_PENDING',
+        409,
+      );
     db.prepare(`INSERT INTO pod_finalizations (pod_id, generation, cycle, phase, updated_at)
       VALUES (?, ?, ?, 'running', ?)`).run(
       pod.id,
@@ -42,7 +49,7 @@ export function createCompletionJournal(db: Database.Database): CompletionJourna
   });
   return {
     get,
-    begin,
+    begin: (pod) => begin(pod),
     replyWatermark(podId) {
       return (
         db
@@ -86,7 +93,7 @@ export function createCompletionJournal(db: Database.Database): CompletionJourna
       if (!current(pod)) throw new Error('Stale lifecycle cannot record settlement');
       let entry = get(pod.id, pod.lifecycleGeneration);
       if (!entry) {
-        begin(pod);
+        begin(pod, true);
         entry = get(pod.id, pod.lifecycleGeneration);
       }
       if (!entry) throw new Error('Missing completion journal');

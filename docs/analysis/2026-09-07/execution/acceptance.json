@@ -14,14 +14,19 @@
         "packages/daemon/src/db/unit-of-work.ts",
         "packages/daemon/src/pods/escalation-coordinator.ts",
         "packages/daemon/src/pods/completion-journal.ts",
-        "packages/daemon/src/db/migrations/159_decision_recovery.sql"
+        "packages/daemon/src/db/migrations/159_decision_recovery.sql",
+        "packages/daemon/src/pods/decision-admission.ts",
+        "packages/daemon/src/pods/task-execution-ledger.ts",
+        "packages/daemon/src/pods/task-retry-ledger.ts"
       ],
       "tests": [
         "packages/daemon/src/pods/pod-lifecycle.e2e.test.ts",
         "packages/daemon/src/pods/pod-bridge-task-summary.test.ts",
         "packages/daemon/src/db/unit-of-work.test.ts",
         "packages/daemon/src/pods/pod-manager.test.ts",
-        "packages/daemon/src/pods/completion-journal.test.ts"
+        "packages/daemon/src/pods/completion-journal.test.ts",
+        "packages/daemon/src/pods/task-execution-ledger.test.ts",
+        "packages/daemon/src/pods/task-retry-ledger.test.ts"
       ],
       "evidence": [
         "receipts/settlement-red.txt",
@@ -32,10 +37,13 @@
         "receipts/escalation-coordinator-audit-final.txt",
         "receipts/reply-recovery-red.txt",
         "receipts/reply-context-bound-red.txt",
-        "receipts/reply-recovery-affected-final.txt"
+        "receipts/reply-recovery-affected-final.txt",
+        "checkpoint-18.md",
+        "receipts/decision-admission-red.txt",
+        "receipts/decision-admission-affected.txt"
       ],
       "prerequisites": [],
-      "remaining": "Normal replies are atomic, retained in bounded recovery context, and fence older completion events. New unanswered decisions remain actionable. Attached MCP delivery acknowledgment, delayed concurrent stream ordering, other response boundaries, historical orphan questions and broader finalization side effects remain."
+      "remaining": "Normal replies are atomic, retained in bounded recovery context, and fence older completion events. New unanswered decisions remain actionable. Attached MCP delivery acknowledgment, delayed concurrent stream ordering, other response boundaries, historical orphan questions and broader finalization side effects remain. New worker/cycle and validation admission now preserve pending decisions, including older unresolved cycles in the current generation. Historical missing payload recovery and stream/MCP delivery acknowledgment remain."
     },
     {
       "id": "W1.2",
@@ -55,7 +63,10 @@
         "packages/daemon/src/api/routes/files.ts",
         "packages/daemon/src/pods/artifact-finalization-recovery.ts",
         "packages/daemon/src/pods/artifact-snapshot-receipt.ts",
-        "packages/daemon/src/pods/sandbox-terminal-reaper.ts"
+        "packages/daemon/src/pods/sandbox-terminal-reaper.ts",
+        "packages/daemon/src/pods/decision-admission.ts",
+        "packages/daemon/src/pods/task-execution-ledger.ts",
+        "packages/daemon/src/pods/task-retry-ledger.ts"
       ],
       "tests": [
         "packages/daemon/src/pods/completion-journal.test.ts",
@@ -67,7 +78,9 @@
         "packages/daemon/src/pods/artifact-preservation.test.ts",
         "packages/daemon/src/api/routes/files.test.ts",
         "packages/daemon/src/pods/artifact-snapshot-receipt.test.ts",
-        "packages/daemon/src/pods/sandbox-terminal-reaper.test.ts"
+        "packages/daemon/src/pods/sandbox-terminal-reaper.test.ts",
+        "packages/daemon/src/pods/task-execution-ledger.test.ts",
+        "packages/daemon/src/pods/task-retry-ledger.test.ts"
       ],
       "evidence": [
         "receipts/journal-migration.txt",
@@ -94,10 +107,13 @@
         "receipts/artifact-restart-red.txt",
         "receipts/artifact-snapshot-resume-red.txt",
         "receipts/artifact-duplicate-red.txt",
-        "receipts/artifact-recovery-final.txt"
+        "receipts/artifact-recovery-final.txt",
+        "checkpoint-18.md",
+        "receipts/decision-admission-red.txt",
+        "receipts/decision-admission-affected.txt"
       ],
       "prerequisites": [],
-      "remaining": "Entered artifact collection survives restart with sources retained; generation/cycle-bound integrity receipts and in-process duplicate coordination are implemented. Independent source inventory, fsync/power-loss proof, orphan snapshot/DB-path reconciliation, interactive duplicates, other reply boundaries and broader durable finalization side effects remain."
+      "remaining": "Entered artifact collection survives restart with sources retained; generation/cycle-bound integrity receipts and in-process duplicate coordination are implemented. Independent source inventory, fsync/power-loss proof, orphan snapshot/DB-path reconciliation, interactive duplicates, other reply boundaries and broader durable finalization side effects remain. New worker/cycle and validation admission now preserve pending decisions, including older unresolved cycles in the current generation. Historical missing payload recovery and stream/MCP delivery acknowledgment remain."
     },
     {
       "id": "W1.3",
@@ -220,7 +236,10 @@
         "packages/daemon/src/pods/artifact-snapshot-receipt.ts",
         "packages/daemon/src/pods/sandbox-terminal-reaper.ts",
         "packages/daemon/src/pods/local-reconciler.ts",
-        "packages/daemon/src/pods/reconciler.ts"
+        "packages/daemon/src/pods/reconciler.ts",
+        "packages/daemon/src/pods/decision-admission.ts",
+        "packages/daemon/src/pods/task-execution-ledger.ts",
+        "packages/daemon/src/pods/task-retry-ledger.ts"
       ],
       "tests": [
         "packages/daemon/src/db/unit-of-work.test.ts",
@@ -231,7 +250,9 @@
         "packages/daemon/src/pods/artifact-snapshot-receipt.test.ts",
         "packages/daemon/src/pods/sandbox-terminal-reaper.test.ts",
         "packages/daemon/src/pods/local-reconciler.test.ts",
-        "packages/daemon/src/pods/reconciler.test.ts"
+        "packages/daemon/src/pods/reconciler.test.ts",
+        "packages/daemon/src/pods/task-execution-ledger.test.ts",
+        "packages/daemon/src/pods/task-retry-ledger.test.ts"
       ],
       "evidence": [
         "receipts/escalation-atomicity-red.txt",
@@ -251,10 +272,13 @@
         "receipts/artifact-restart-red.txt",
         "receipts/artifact-snapshot-resume-red.txt",
         "receipts/artifact-duplicate-red.txt",
-        "receipts/artifact-recovery-final.txt"
+        "receipts/artifact-recovery-final.txt",
+        "checkpoint-18.md",
+        "receipts/decision-admission-red.txt",
+        "receipts/decision-admission-affected.txt"
       ],
       "prerequisites": [],
-      "remaining": "Entered artifact collection survives restart with sources retained; generation/cycle-bound integrity receipts and in-process duplicate coordination are implemented. Independent source inventory, fsync/power-loss proof, orphan snapshot/DB-path reconciliation, interactive duplicates, other reply boundaries and broader durable finalization side effects remain."
+      "remaining": "Entered artifact collection survives restart with sources retained; generation/cycle-bound integrity receipts and in-process duplicate coordination are implemented. Independent source inventory, fsync/power-loss proof, orphan snapshot/DB-path reconciliation, interactive duplicates, other reply boundaries and broader durable finalization side effects remain. New worker/cycle and validation admission now preserve pending decisions, including older unresolved cycles in the current generation. Historical missing payload recovery and stream/MCP delivery acknowledgment remain."
     },
     {
       "id": "W2.1",
@@ -1257,10 +1281,12 @@
         "receipts/checkpoint-16-full-validation.txt",
         "receipts/checkpoint-16-validation-identity.json",
         "receipts/task-budget-affected.txt",
-        "receipts/task-budget-build.txt"
+        "receipts/task-budget-build.txt",
+        "receipts/decision-admission-affected.txt",
+        "receipts/decision-admission-build.txt"
       ],
       "prerequisites": [
-        "Full pipeline passed on clean ce7f8b94 with audit zero. Subsequent task-budget changes have affected-suite/build proof; final committed pipeline remains required."
+        "Full pipeline passed on clean ce7f8b94 with audit zero. Later budget and decision-admission changes pass affected suites and full builds; final committed pipeline remains required."
       ]
     },
     {
@@ -1305,5 +1331,5 @@
       "prerequisites": []
     }
   ],
-  "lastCheckpoint": "checkpoint-17.md"
+  "lastCheckpoint": "checkpoint-18.md"
 }

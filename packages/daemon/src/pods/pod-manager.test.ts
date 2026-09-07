@@ -1487,6 +1487,46 @@ describe('PodManager', () => {
     expect(ctx.podRepo.taskExecutions?.snapshot(fix.id).agentRunCount).toBe(0);
   });
 
+  it('does not open a new completion cycle or consume a worker while a decision is unanswered', async () => {
+    const ctx = createTestContext();
+    const manager = createPodManager(ctx.deps);
+    const pod = manager.createSession(
+      { profileName: 'test-profile', task: 'Wait for decision' },
+      'user-1',
+    );
+    ctx.podRepo.update(pod.id, {
+      status: 'awaiting_input',
+      pendingEscalation: {
+        id: 'pending-admission',
+        podId: pod.id,
+        type: 'ask_human',
+        timestamp: new Date().toISOString(),
+        response: null,
+        payload: { question: 'Select the repair' },
+      },
+    });
+    ctx.podRepo.completionJournal?.settle(ctx.podRepo.getOrThrow(pod.id), 'Preserved report');
+    const before = ctx.podRepo.getOrThrow(pod.id);
+    let consumed = false;
+    await expect(
+      manager.consumeAgentEvents(
+        pod.id,
+        (async function* () {
+          consumed = true;
+          yield {
+            type: 'complete',
+            timestamp: new Date().toISOString(),
+            result: 'Unapproved continuation',
+          } as const;
+        })(),
+      ),
+    ).rejects.toMatchObject({ code: 'HUMAN_DECISION_PENDING' });
+    expect(consumed).toBe(false);
+    expect(ctx.podRepo.getOrThrow(pod.id).finalization).toEqual(before.finalization);
+    expect(ctx.podRepo.getOrThrow(pod.id).pendingEscalation).toEqual(before.pendingEscalation);
+    expect(ctx.podRepo.taskExecutions?.snapshot(pod.id).agentRunCount).toBe(0);
+  });
+
   it('does not retain an active run when event-consumer initialization fails', async () => {
     const ctx = createTestContext(undefined, { defaultRuntime: 'codex' });
     const runtime = ctx.runtime as Runtime & { suspend: ReturnType<typeof vi.fn> };

@@ -23,6 +23,37 @@ function insertPod(db: Database.Database) {
 }
 
 describe('durable completion journal', () => {
+  it('cannot hide an unanswered earlier cycle behind a new admission', () => {
+    const db = createTestDb();
+    try {
+      insertPod(db);
+      const repo = createPodRepository(db);
+      const pod = repo.getOrThrow('settled');
+      repo.completionJournal?.settle(pod, 'Report retained');
+      // Model legacy drift: a later empty cycle and missing pod pointer must
+      // not erase the earlier journal's unanswered decision.
+      db.prepare(
+        "UPDATE pods SET status = 'running', pending_escalation = NULL WHERE id = 'settled'",
+      ).run();
+      db.prepare(
+        "INSERT INTO pod_finalizations(pod_id,generation,cycle,phase,updated_at) VALUES ('settled',1,2,'running','2026-09-07T10:00:00Z')",
+      ).run();
+      expect(() => repo.completionJournal?.begin(repo.getOrThrow('settled'))).toThrow(
+        'unanswered human decision',
+      );
+      expect(db.prepare('SELECT COUNT(*) AS count FROM pod_finalizations').get()).toEqual({
+        count: 2,
+      });
+      expect(
+        db
+          .prepare('SELECT pending_decision_id AS decision FROM pod_finalizations WHERE cycle = 1')
+          .get(),
+      ).toEqual({ decision: 'decision' });
+    } finally {
+      db.close();
+    }
+  });
+
   it('retains settlement and an unanswered decision across a real database close/reopen', () => {
     const dir = mkdtempSync(path.join(tmpdir(), 'completion-journal-'));
     const source = createTestDb();
@@ -34,7 +65,6 @@ describe('durable completion journal', () => {
       .run();
     const repo = createPodRepository(source);
     const pod = repo.getOrThrow('settled');
-    repo.completionJournal?.begin(pod);
     repo.completionJournal?.settle(pod, 'Report collected');
     repo.completionJournal?.mark(pod, 'awaiting_human', true);
     const before = repo.getOrThrow('settled').finalization;

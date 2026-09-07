@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { AutopodError, type TaskExecutionSummary } from '@autopod/shared';
 import type Database from 'better-sqlite3';
+import { hasUnansweredDecision } from './decision-admission.js';
 
 export interface ExecutionBinding {
   runtime: string;
@@ -270,6 +271,12 @@ export function createTaskExecutionLedger(db: Database.Database): TaskExecutionL
         .get(podId) as { generation: number } | undefined;
       if (current?.generation !== generation)
         throw new Error('Stale lifecycle cannot start a task run');
+      if (hasUnansweredDecision(db, podId))
+        throw new AutopodError(
+          'An unanswered human decision must be resolved before starting another worker.',
+          'HUMAN_DECISION_PENDING',
+          409,
+        );
       const prior = db
         .prepare(
           'SELECT id, binding FROM task_agent_runs WHERE pod_id = ? AND generation = ? AND cycle = ?',

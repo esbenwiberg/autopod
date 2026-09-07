@@ -9,6 +9,7 @@ import {
   type TaskRetryState,
 } from '@autopod/shared';
 import type Database from 'better-sqlite3';
+import { hasUnansweredDecision } from './decision-admission.js';
 
 export class TaskRetryBlockedError extends AutopodError {
   constructor(message: string, code = 'TASK_RETRY_RECONCILIATION_REQUIRED') {
@@ -56,14 +57,8 @@ export function createTaskRetryLedger(db: Database.Database): TaskRetryLedger {
       );
     return row;
   };
-  const assertNoPendingDecision = (podId: string, generation: number) => {
-    const pending = db
-      .prepare(`SELECT 1 FROM pods p WHERE p.id = ? AND
-      (p.status = 'awaiting_input' OR EXISTS (SELECT 1 FROM pod_finalizations f
-        WHERE f.pod_id = p.id AND f.generation = ? AND f.pending_decision_id IS NOT NULL
-        AND NOT EXISTS (SELECT 1 FROM completion_decisions d WHERE d.pod_id = f.pod_id AND d.decision_id = f.pending_decision_id)))`)
-      .get(podId, generation);
-    if (pending)
+  const assertNoPendingDecision = (podId: string) => {
+    if (hasUnansweredDecision(db, podId))
       throw new TaskRetryBlockedError(
         'An unanswered human decision must be reconciled before validation can execute',
       );
@@ -143,7 +138,7 @@ export function createTaskRetryLedger(db: Database.Database): TaskRetryLedger {
         backoffs: number[],
       ) => {
         const member = membership(podId);
-        assertNoPendingDecision(podId, member.generation);
+        assertNoPendingDecision(podId);
         if (member.generation !== generation)
           throw new TaskRetryBlockedError('Stale lifecycle cannot admit validation');
         if (
@@ -236,7 +231,7 @@ export function createTaskRetryLedger(db: Database.Database): TaskRetryLedger {
       if (!row || row.started_at || row.ended_at)
         throw new TaskRetryBlockedError('Retry admission has already started or settled');
       const member = membership(row.pod_id as string);
-      assertNoPendingDecision(row.pod_id as string, member.generation);
+      assertNoPendingDecision(row.pod_id as string);
       if (member.executionId !== row.execution_id || member.generation !== row.generation)
         throw new TaskRetryBlockedError('Retry admission belongs to a stale execution');
       if (Date.parse(row.not_before as string) > Date.now())
@@ -251,6 +246,7 @@ export function createTaskRetryLedger(db: Database.Database): TaskRetryLedger {
           WHERE e.execution_id = task_retry_attempts.execution_id
           AND p.id = task_retry_attempts.pod_id AND p.lifecycle_generation = task_retry_attempts.generation
           AND p.status <> 'awaiting_input'
+          AND p.pending_escalation IS NULL
           AND NOT EXISTS (SELECT 1 FROM pod_finalizations f WHERE f.pod_id = p.id AND f.generation = p.lifecycle_generation
             AND f.pending_decision_id IS NOT NULL AND NOT EXISTS
               (SELECT 1 FROM completion_decisions d WHERE d.pod_id = f.pod_id AND d.decision_id = f.pending_decision_id)))`)

@@ -39,6 +39,21 @@ function fixture() {
 const binding = { runtime: 'codex', model: 'model', providerAccountId: 'account' };
 
 describe('task-wide execution accounting', () => {
+  it('rejects direct worker admission when a durable question remains pending', () => {
+    const { db, repo } = fixture();
+    try {
+      db.prepare("UPDATE pods SET pending_escalation = ? WHERE id = 'root'").run(
+        JSON.stringify({ id: 'pending-question', payload: { question: 'Continue?' } }),
+      );
+      expect(() => repo.taskExecutions?.beginRun('root', 1, 1, binding)).toThrow(
+        'unanswered human decision',
+      );
+      expect(repo.taskExecutions?.snapshot('root').agentRunCount).toBe(0);
+    } finally {
+      db.close();
+    }
+  });
+
   it('does not authorize more budgeted work from an incomplete prior spending subtotal', () => {
     const { db, repo } = fixture();
     try {

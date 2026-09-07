@@ -45,6 +45,28 @@ function fixture() {
 }
 
 describe('durable task validation retry admission', () => {
+  it('blocks admission and execution when a pending pod question survives with a stale running status', () => {
+    const { db, ledger } = fixture();
+    try {
+      const question = JSON.stringify({
+        id: 'drifted-question',
+        payload: { question: 'Approve validation?' },
+      });
+      db.prepare("UPDATE pods SET pending_escalation = ? WHERE id = 'root'").run(question);
+      expect(() => ledger.admit('root', 1, identity, binding, [])).toThrow(
+        'unanswered human decision',
+      );
+      expect(ledger.state('root').admissionCount).toBe(0);
+      db.prepare("UPDATE pods SET pending_escalation = NULL WHERE id = 'root'").run();
+      const admission = ledger.admit('root', 1, identity, binding, []);
+      db.prepare("UPDATE pods SET pending_escalation = ? WHERE id = 'root'").run(question);
+      expect(() => ledger.start(admission.id)).toThrow('unanswered human decision');
+      expect(ledger.state('root').executedCount).toBe(0);
+    } finally {
+      db.close();
+    }
+  });
+
   it('pins backoffs and cumulative budget across disk restart and linked fixes while reruns are distinct', () => {
     const f = fixture();
     const first = f.ledger.admit('root', 1, identity, binding, [0]);
