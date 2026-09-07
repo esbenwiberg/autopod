@@ -56,7 +56,8 @@
         "receipts/checkpoint-23-full-validation.txt",
         "receipts/checkpoint-23-validation-identity.json",
         "checkpoint-28.md: approval push failure preservation, restart retry, stale generation and late decision regressions, API/CLI/mobile/native client checks; broader durable finalization and native interaction remain",
-        "checkpoint-29.md: original approval identity retained across approved/merging/complete status callbacks; broader durable approval and event delivery remain partial"
+        "checkpoint-29.md: original approval identity retained across approved/merging/complete status callbacks; broader durable approval and event delivery remain partial",
+        "checkpoint-30.md: retained failed approval delivery, explicit HTTP error/retry, review gate and original lifecycle guards; wider durability remains partial"
       ],
       "prerequisites": [],
       "remaining": "Normal replies are atomic, retained in bounded recovery context, and fence older completion events. New unanswered decisions remain actionable. Attached MCP delivery acknowledgment, delayed concurrent stream ordering, other response boundaries, historical orphan questions and broader finalization side effects remain. New worker/cycle and validation admission now preserve pending decisions, including older unresolved cycles in the current generation. Historical missing payload recovery and stream/MCP delivery acknowledgment remain. Codex now observes summary events before Spawn/Resume launch and disposes each invocation listener. This closes the local launch/stream attachment race, not durable delivery acknowledgment across all runtimes or daemon restart. Concurrent interactive completions now coalesce in process, conflicting promotion/generation requests fail closed, and current source/lifecycle/decision ownership is checked across push and container release boundaries. This is not durable cross-process idempotency, cancellation of already-dispatched external operations, or complete post-completion side-effect accounting."
@@ -214,7 +215,8 @@
         "receipts/checkpoint-23-full-validation.txt",
         "receipts/checkpoint-23-validation-identity.json",
         "checkpoint-28.md: approval push failure preservation, restart retry, stale generation and late decision regressions, API/CLI/mobile/native client checks; broader durable finalization and native interaction remain",
-        "checkpoint-29.md: original approval identity retained across approved/merging/complete status callbacks; broader durable approval and event delivery remain partial"
+        "checkpoint-29.md: original approval identity retained across approved/merging/complete status callbacks; broader durable approval and event delivery remain partial",
+        "checkpoint-30.md: retained failed approval delivery, explicit HTTP error/retry, review gate and original lifecycle guards; wider durability remains partial"
       ],
       "prerequisites": [
         "PR creation intent/reconciliation implemented locally; broader finalization side effects and operator override remain."
@@ -646,8 +648,12 @@
       "id": "W2.7",
       "requirement": "Matched reproducible benchmark measures 25 percent target and seeded defect escape with fixed coverage; local and live separated",
       "status": "partial",
-      "implementation": ["docs/analysis/2026-09-07/execution/benchmarks/validation-replay.test.ts"],
-      "tests": ["docs/analysis/2026-09-07/execution/benchmarks/validation-replay.test.ts"],
+      "implementation": [
+        "docs/analysis/2026-09-07/execution/benchmarks/validation-replay.test.ts"
+      ],
+      "tests": [
+        "docs/analysis/2026-09-07/execution/benchmarks/validation-replay.test.ts"
+      ],
       "evidence": [
         "receipts/validation-replay-benchmark-initial.json",
         "receipts/validation-replay-benchmark.json",
@@ -886,7 +892,8 @@
         "receipts/task-budget-manager-red.txt",
         "receipts/task-ledger-green-2.txt",
         "receipts/task-ledger-corrected-telemetry.txt",
-        "receipts/checkpoint-3-affected.txt"
+        "receipts/checkpoint-3-affected.txt",
+        "checkpoint-30.md: retained failed approval delivery, explicit HTTP error/retry, review gate and original lifecycle guards; wider durability remains partial"
       ],
       "prerequisites": [],
       "remaining": "Distinct task/pod/run/provider/validation units implemented. Durable logical delivery receipts remain."
@@ -930,8 +937,12 @@
       "id": "W4.4",
       "requirement": "Latest validation, history, waivers and delivery reconcile without rewriting failures",
       "status": "partial",
-      "implementation": ["packages/mobile-web/src/components/ValidationSummary.tsx"],
-      "tests": ["packages/mobile-web/src/components/ValidationSummary.test.tsx"],
+      "implementation": [
+        "packages/mobile-web/src/components/ValidationSummary.tsx"
+      ],
+      "tests": [
+        "packages/mobile-web/src/components/ValidationSummary.test.tsx"
+      ],
       "evidence": [
         "receipts/mobile-evidence-history-red.txt",
         "receipts/mobile-evidence-history-green.txt",
@@ -1398,8 +1409,12 @@
         "packages/daemon/src/api/routes/health.ts",
         "packages/daemon/tsup.config.ts"
       ],
-      "tests": ["packages/daemon/src/api/routes/health.test.ts"],
-      "evidence": ["receipts/backup-health-cli-green.txt"],
+      "tests": [
+        "packages/daemon/src/api/routes/health.test.ts"
+      ],
+      "evidence": [
+        "receipts/backup-health-cli-green.txt"
+      ],
       "prerequisites": []
     },
     {
@@ -1419,7 +1434,9 @@
         "packages/daemon/src/db/backup.ts",
         "packages/daemon/src/db/backup-verification.ts"
       ],
-      "tests": ["packages/daemon/src/db/backup.test.ts"],
+      "tests": [
+        "packages/daemon/src/db/backup.test.ts"
+      ],
       "evidence": [
         "receipts/backup-red.txt",
         "receipts/backup-restore-green.txt",
@@ -1437,7 +1454,9 @@
         "packages/daemon/src/db/backup-verification.ts",
         "packages/daemon/src/db/verify-backup-cli.ts"
       ],
-      "tests": ["packages/daemon/src/db/backup.test.ts"],
+      "tests": [
+        "packages/daemon/src/db/backup.test.ts"
+      ],
       "evidence": [
         "receipts/backup-health-cli-green.txt",
         "receipts/backup-scope-red.txt",
@@ -1625,5 +1644,5 @@
       "prerequisites": []
     }
   ],
-  "lastCheckpoint": "checkpoint-29.md"
+  "lastCheckpoint": "checkpoint-30.md"
 }

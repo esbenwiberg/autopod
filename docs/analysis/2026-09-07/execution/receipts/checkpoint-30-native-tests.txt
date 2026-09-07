@@ -1,0 +1,24 @@
+[1/1] Compiling plugin GenerateManual
+[2/2] Compiling plugin GenerateDoccReference
+Building for debugging...
+[2/7] Write sources
+[3/7] Write swift-version--58304C5D6DBC2206.txt
+[5/7] Compiling AutopodClientTests ApprovalPreservationTests.swift
+[6/7] Emitting module AutopodClientTests
+[6/8] Write Objects.LinkFileList
+[7/8] Linking AutopodDesktopPackageTests
+Build complete! (3.28s)
+Test Suite 'Selected tests' started at 2026-09-07 22:06:07.209.
+Test Suite 'AutopodDesktopPackageTests.xctest' started at 2026-09-07 22:06:07.215.
+Test Suite 'AutopodDesktopPackageTests.xctest' passed at 2026-09-07 22:06:07.215.
+	 Executed 0 tests, with 0 failures (0 unexpected) in 0.000 (0.000) seconds
+Test Suite 'Selected tests' passed at 2026-09-07 22:06:07.215.
+	 Executed 0 tests, with 0 failures (0 unexpected) in 0.000 (0.006) seconds
+◇ Test run started.
+↳ Testing Library Version: 1902
+↳ Target Platform: arm64e-apple-macos14.0
+◇ Test approvalClientSurfacesPreservationFailure(podID:) started.
+◇ Test case passing 1 argument podID → "failed" to approvalClientSurfacesPreservationFailure(podID:) started.
+◇ Test case passing 1 argument podID → "delivery-failed" to approvalClientSurfacesPreservationFailure(podID:) started.
+✔ Test approvalClientSurfacesPreservationFailure(podID:) with 2 test cases passed after 0.005 seconds.
+✔ Test run with 1 test in 0 suites passed after 0.005 seconds.

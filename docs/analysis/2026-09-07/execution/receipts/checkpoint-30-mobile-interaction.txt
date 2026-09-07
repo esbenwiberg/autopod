@@ -1,0 +1,2 @@
+Local built mobile app, loopback port 56012, fixture mode approval-delivery.
+CUA tab 19: Active -> local-fixture -> validated with Approve. First Approve: visible APPROVAL_DELIVERY_FAILED message, original resources retained, retry approval; status remains validated and Approve remains available. Second explicit Approve: error disappears. Fixture has no WebSocket; reload shows complete and no Approve/Reject/Kill actions. Server confirms exactly two fixture requests. Tab closed; server stopped with exit 130. No live daemon, provider or native UI interaction.

@@ -1,0 +1,114 @@
+
+ RUN  v4.1.11 /private/tmp/autopod-durable-execution/packages/daemon
+
+ ❯ src/pods/pod-manager.test.ts (463 tests | 10 failed | 453 skipped) 642ms
+       × retains normal branch delivery after push failure and retries after restart 84ms
+       × retains unconfirmed PR delivery when status is closed 179ms
+       × retains unconfirmed PR delivery when status is unknown 74ms
+       × retains unconfirmed PR delivery when status is review-unavailable 43ms
+       × rejects a replacement lifecycle during normal approval push 45ms
+       × rejects a replacement lifecycle during normal approval create 42ms
+       × rejects a replacement lifecycle during normal approval merge 42ms
+       × rejects a replacement lifecycle during normal approval approved 45ms
+       × rejects a replacement lifecycle during normal approval merging 44ms
+       × rejects a replacement lifecycle during normal approval complete 43ms
+
+⎯⎯⎯⎯⎯⎯ Failed Tests 10 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/pods/pod-manager.test.ts > PodManager > approveSession > retains normal branch delivery after push failure and retries after restart
+AssertionError: promise resolved "undefined" instead of rejecting
+
+- Expected:
+Error {
+  "message": "rejected promise",
+}
+
++ Received:
+undefined
+
+ ❯ src/pods/pod-manager.test.ts:4976:50
+    4974|         if (event.type === 'pod.completed') completed.push(event.podId…
+    4975|       });
+    4976|       await expect(manager.approveSession(pod.id)).rejects.toMatchObje…
+       |                                                  ^
+    4977|         code: 'APPROVAL_DELIVERY_FAILED',
+    4978|       });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/10]⎯
+
+ FAIL  src/pods/pod-manager.test.ts > PodManager > approveSession > retains unconfirmed PR delivery when status is closed
+ FAIL  src/pods/pod-manager.test.ts > PodManager > approveSession > retains unconfirmed PR delivery when status is unknown
+ FAIL  src/pods/pod-manager.test.ts > PodManager > approveSession > retains unconfirmed PR delivery when status is review-unavailable
+AssertionError: promise resolved "undefined" instead of rejecting
+
+- Expected:
+Error {
+  "message": "rejected promise",
+}
+
++ Received:
+undefined
+
+ ❯ src/pods/pod-manager.test.ts:5033:52
+    5031|         }
+    5032|         vi.mocked(ctx.prManager.mergePr).mockRejectedValue(new Error('…
+    5033|         await expect(manager.approveSession(pod.id)).rejects.toMatchOb…
+       |                                                    ^
+    5034|           code: 'APPROVAL_DELIVERY_FAILED',
+    5035|         });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/10]⎯
+
+ FAIL  src/pods/pod-manager.test.ts > PodManager > approveSession > rejects a replacement lifecycle during normal approval push
+ FAIL  src/pods/pod-manager.test.ts > PodManager > approveSession > rejects a replacement lifecycle during normal approval create
+ FAIL  src/pods/pod-manager.test.ts > PodManager > approveSession > rejects a replacement lifecycle during normal approval merge
+ FAIL  src/pods/pod-manager.test.ts > PodManager > approveSession > rejects a replacement lifecycle during normal approval merging
+ FAIL  src/pods/pod-manager.test.ts > PodManager > approveSession > rejects a replacement lifecycle during normal approval complete
+AssertionError: promise resolved "undefined" instead of rejecting
+
+- Expected:
+Error {
+  "message": "rejected promise",
+}
+
++ Received:
+undefined
+
+ ❯ src/pods/pod-manager.test.ts:5091:52
+    5089|           if (event.type === 'pod.completed') completed.push(event.pod…
+    5090|         });
+    5091|         await expect(manager.approveSession(pod.id)).rejects.toMatchOb…
+       |                                                    ^
+    5092|           code: 'STALE_APPROVAL',
+    5093|         });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/10]⎯
+
+ FAIL  src/pods/pod-manager.test.ts > PodManager > approveSession > rejects a replacement lifecycle during normal approval approved
+AssertionError: expected InvalidStateTransitionError: Cannot trans… { …(2) } to match object { code: 'STALE_APPROVAL' }
+(2 matching properties omitted from actual)
+
+- Expected
++ Received
+
+- {
+-   "code": "STALE_APPROVAL",
++ InvalidStateTransitionError {
++   "code": "INVALID_STATE_TRANSITION",
+  }
+
+ ❯ src/pods/pod-manager.test.ts:5091:52
+    5089|           if (event.type === 'pod.completed') completed.push(event.pod…
+    5090|         });
+    5091|         await expect(manager.approveSession(pod.id)).rejects.toMatchOb…
+       |                                                    ^
+    5092|           code: 'STALE_APPROVAL',
+    5093|         });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[4/10]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  10 failed | 453 skipped (463)
+   Start at  22:00:31
+   Duration  2.10s (transform 927ms, setup 0ms, import 1.32s, tests 642ms, environment 0ms)

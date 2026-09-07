@@ -2,12 +2,12 @@ import Foundation
 import Testing
 @testable import AutopodClient
 
-@Test func approvalClientSurfacesPreservationFailure() async throws {
+@Test(arguments: ["failed", "delivery-failed"]) func approvalClientSurfacesPreservationFailure(podID: String) async throws {
   let config = URLSessionConfiguration.ephemeral
   config.protocolClasses = [ApprovalPreservationProtocol.self]
   let api = DaemonAPI(baseURL: URL(string: "https://approval-preservation.invalid")!, token: "synthetic", session: URLSession(configuration: config))
   do {
-    try await api.approvePod("failed")
+    try await api.approvePod(podID)
     Issue.record("Failed preservation was accepted as an approval")
   } catch let error as DaemonError {
     if case .serverError(let status, let message) = error {
@@ -25,8 +25,11 @@ private final class ApprovalPreservationProtocol: URLProtocol, @unchecked Sendab
   override func startLoading() {
     #expect(request.httpMethod == "POST")
     #expect(request.url?.path.hasSuffix("/approve") == true)
-    let failed = request.url?.path == "/pods/failed/approve"
-    let body = failed
+    let failed = request.url?.path != "/pods/succeeded/approve"
+    let delivery = request.url?.path == "/pods/delivery-failed/approve"
+    let body = delivery
+      ? #"{"error":"APPROVAL_DELIVERY_FAILED","message":"Approval delivery failed. Original resources retained; repair delivery and retry approval."}"#
+      : failed
       ? #"{"error":"BRANCH_PRESERVATION_FAILED","message":"Branch preservation failed. Original resources retained; repair remote access and retry approval."}"#
       : #"{"ok":true}"#
     client?.urlProtocol(self, didReceive: HTTPURLResponse(url: request.url!, statusCode: failed ? 502 : 200, httpVersion: nil, headerFields: ["Content-Type":"application/json"])!, cacheStoragePolicy: .notAllowed)

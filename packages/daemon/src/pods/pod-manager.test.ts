@@ -4924,7 +4924,9 @@ describe('PodManager', () => {
       const events: unknown[] = [];
       ctx.eventBus.subscribe((e) => events.push(e));
 
-      await manager.approveSession(pod.id);
+      await expect(manager.approveSession(pod.id)).rejects.toMatchObject({
+        code: 'APPROVAL_DELIVERY_FAILED',
+      });
 
       const result = manager.getSession(pod.id);
       expect(result.status).toBe('validated');
@@ -4948,6 +4950,280 @@ describe('PodManager', () => {
         return [];
       });
       expect(messages).toContain('PR creation failed: gh auth failed — pod returned to validated');
+    });
+
+    it('retains normal branch delivery after push failure and retries after restart', async () => {
+      const ctx = createTestContext();
+      ctx.deps.prManagerFactory = undefined;
+      const manager = createPodManager(ctx.deps);
+      const pod = manager.createSession(
+        { profileName: 'test-profile', task: 'Preserve delivery' },
+        'user-1',
+      );
+      ctx.podRepo.update(
+        pod.id,
+        validatedPodUpdates(pod.id, {
+          worktreePath: '/tmp/delivery',
+          containerId: 'delivery-container',
+          filesChanged: 1,
+        }),
+      );
+      vi.mocked(ctx.worktreeManager.mergeBranch).mockRejectedValueOnce(
+        new Error('remote unavailable'),
+      );
+      const completed: string[] = [];
+      ctx.eventBus.subscribe((event) => {
+        if (event.type === 'pod.completed') completed.push(event.podId);
+      });
+      await expect(manager.approveSession(pod.id)).rejects.toMatchObject({
+        code: 'APPROVAL_DELIVERY_FAILED',
+      });
+      expect(manager.getSession(pod.id)).toMatchObject({
+        status: 'validated',
+        completedAt: null,
+        worktreePath: '/tmp/delivery',
+        containerId: 'delivery-container',
+        failureReason: expect.stringContaining('retry approval'),
+      });
+      expect(ctx.containerManager.kill).not.toHaveBeenCalled();
+      expect(completed).toEqual([]);
+      await createPodManager(ctx.deps).approveSession(pod.id);
+      expect(manager.getSession(pod.id)).toMatchObject({ status: 'complete', failureReason: null });
+      expect(completed).toEqual([pod.id]);
+      expect(ctx.worktreeManager.mergeBranch).toHaveBeenCalledTimes(2);
+      expect(ctx.runtime.spawn).not.toHaveBeenCalled();
+      expect(ctx.prManager.createPr).not.toHaveBeenCalled();
+    });
+
+    it.each(['closed', 'unknown', 'review-unavailable'] as const)(
+      'retains unconfirmed PR delivery when status is %s',
+      async (scenario) => {
+        const ctx = createTestContext();
+        const manager = createPodManager(ctx.deps);
+        const pod = manager.createSession(
+          { profileName: 'test-profile', task: 'Require merge evidence' },
+          'user-1',
+        );
+        ctx.podRepo.update(
+          pod.id,
+          validatedPodUpdates(pod.id, {
+            worktreePath: '/tmp/delivery',
+            containerId: 'delivery-container',
+            filesChanged: 1,
+            prUrl: 'https://github.com/org/repo/pull/42',
+          }),
+        );
+        const status = vi.mocked(ctx.prManager.getPrStatus);
+        if (scenario === 'review-unavailable')
+          status.mockRejectedValue(new Error('status unavailable'));
+        else {
+          status.mockResolvedValueOnce({
+            open: true,
+            merged: false,
+            reviewDecision: 'APPROVED',
+            blockReason: null,
+            ciFailures: [],
+            reviewComments: [],
+          });
+          if (scenario === 'unknown') status.mockRejectedValue(new Error('status unavailable'));
+          else
+            status.mockResolvedValue({
+              open: false,
+              merged: false,
+              blockReason: 'Closed without merge',
+              ciFailures: [],
+              reviewComments: [],
+            });
+        }
+        vi.mocked(ctx.prManager.mergePr).mockRejectedValue(new Error('merge unavailable'));
+        await expect(manager.approveSession(pod.id)).rejects.toMatchObject({
+          code: 'APPROVAL_DELIVERY_FAILED',
+        });
+        expect(manager.getSession(pod.id)).toMatchObject({
+          status: 'validated',
+          completedAt: null,
+          worktreePath: '/tmp/delivery',
+          containerId: 'delivery-container',
+        });
+        expect(ctx.containerManager.kill).not.toHaveBeenCalled();
+        if (scenario === 'review-unavailable') expect(ctx.prManager.mergePr).not.toHaveBeenCalled();
+      },
+    );
+
+    it.each([
+      'push',
+      'failed-push',
+      'existing-push',
+      'rebase',
+      'create',
+      'merge',
+      'approved',
+      'merging',
+      'complete',
+    ] as const)('rejects a replacement lifecycle during normal approval %s', async (step) => {
+      const ctx = createTestContext();
+      const manager = createPodManager(ctx.deps);
+      const pod = manager.createSession(
+        { profileName: 'test-profile', task: 'Fence normal delivery' },
+        'user-1',
+      );
+      ctx.podRepo.update(
+        pod.id,
+        validatedPodUpdates(pod.id, {
+          worktreePath: '/tmp/delivery',
+          containerId: 'delivery-container',
+          filesChanged: 1,
+          prUrl: ['existing-push', 'rebase'].includes(step)
+            ? 'https://github.com/org/repo/pull/42'
+            : null,
+        }),
+      );
+      const replace = () => {
+        ctx.podRepo.incrementLifecycleGeneration(pod.id);
+        ctx.podRepo.update(pod.id, {
+          status: 'running',
+          worktreePath: '/tmp/replacement',
+          containerId: 'replacement-container',
+        });
+      };
+      if (step === 'push')
+        vi.mocked(ctx.worktreeManager.mergeBranch).mockImplementationOnce(async () => {
+          replace();
+        });
+      if (step === 'failed-push')
+        vi.mocked(ctx.worktreeManager.mergeBranch).mockImplementationOnce(async () => {
+          replace();
+          throw new Error('old push rejected');
+        });
+      if (step === 'existing-push')
+        vi.mocked(ctx.worktreeManager.pushBranch).mockImplementationOnce(async () => {
+          replace();
+        });
+      if (step === 'rebase')
+        vi.mocked(ctx.worktreeManager.rebaseOntoBase).mockImplementationOnce(async () => {
+          replace();
+          return { rebased: true, alreadyUpToDate: true, conflicts: [] };
+        });
+      if (step === 'create')
+        vi.mocked(ctx.prManager.createPr).mockImplementationOnce(async () => {
+          replace();
+          return { url: 'https://github.com/org/repo/pull/42', usedFallback: false };
+        });
+      if (step === 'merge')
+        vi.mocked(ctx.prManager.mergePr).mockImplementationOnce(async () => {
+          replace();
+          return { merged: true, autoMergeScheduled: false };
+        });
+      const completed: string[] = [];
+      ctx.eventBus.subscribe((event) => {
+        if (event.type === 'pod.status_changed' && event.newStatus === step) replace();
+        if (event.type === 'pod.completed') completed.push(event.podId);
+      });
+      await expect(manager.approveSession(pod.id)).rejects.toMatchObject({
+        code: 'STALE_APPROVAL',
+      });
+      expect(manager.getSession(pod.id)).toMatchObject({
+        status: 'running',
+        worktreePath: '/tmp/replacement',
+        containerId: 'replacement-container',
+      });
+      expect(completed).toEqual([]);
+      expect(ctx.containerManager.kill).not.toHaveBeenCalledWith('replacement-container');
+      if (step === 'push') expect(ctx.prManager.createPr).not.toHaveBeenCalled();
+      if (step === 'create') {
+        expect(ctx.prManager.mergePr).not.toHaveBeenCalled();
+        expect(manager.getSession(pod.id).prUrl).toBeNull();
+      }
+    });
+
+    it.each(['REVIEW_REQUIRED', 'CHANGES_REQUESTED', 'unavailable'] as const)(
+      'does not merge a newly created PR with review status %s',
+      async (decision) => {
+        const ctx = createTestContext();
+        const manager = createPodManager(ctx.deps);
+        const pod = manager.createSession(
+          { profileName: 'test-profile', task: 'Review new delivery' },
+          'user-1',
+        );
+        ctx.podRepo.update(
+          pod.id,
+          validatedPodUpdates(pod.id, {
+            worktreePath: '/tmp/delivery',
+            containerId: 'delivery-container',
+            filesChanged: 1,
+          }),
+        );
+        if (decision === 'unavailable')
+          vi.mocked(ctx.prManager.getPrStatus).mockRejectedValue(new Error('status unavailable'));
+        else
+          vi.mocked(ctx.prManager.getPrStatus).mockResolvedValue({
+            open: true,
+            merged: false,
+            blockReason: null,
+            ciFailures: [],
+            reviewComments: [],
+            reviewDecision: decision,
+          });
+        await manager.approveSession(pod.id);
+        expect(manager.getSession(pod.id)).toMatchObject({
+          status: 'merge_pending',
+          completedAt: null,
+          containerId: 'delivery-container',
+          prUrl: 'https://github.com/org/repo/pull/42',
+        });
+        expect(ctx.prManager.mergePr).not.toHaveBeenCalled();
+        expect(ctx.containerManager.kill).not.toHaveBeenCalled();
+      },
+    );
+
+    it('accepts authoritative merged status after an uncertain merge response', async () => {
+      const ctx = createTestContext();
+      const manager = createPodManager(ctx.deps);
+      const pod = manager.createSession(
+        { profileName: 'test-profile', task: 'Reconcile merge receipt' },
+        'user-1',
+      );
+      ctx.podRepo.update(
+        pod.id,
+        validatedPodUpdates(pod.id, {
+          worktreePath: '/tmp/delivery',
+          filesChanged: 1,
+          prUrl: 'https://github.com/org/repo/pull/42',
+        }),
+      );
+      vi.mocked(ctx.prManager.mergePr).mockRejectedValue(new Error('connection lost after merge'));
+      await manager.approveSession(pod.id);
+      expect(manager.getSession(pod.id).status).toBe('complete');
+      expect(ctx.prManager.getPrStatus).toHaveBeenCalledTimes(2);
+    });
+
+    it('retains delivery after the pre-merge rebase operation rejects', async () => {
+      const ctx = createTestContext();
+      const manager = createPodManager(ctx.deps);
+      const pod = manager.createSession(
+        { profileName: 'test-profile', task: 'Preserve failed rebase' },
+        'user-1',
+      );
+      ctx.podRepo.update(
+        pod.id,
+        validatedPodUpdates(pod.id, {
+          worktreePath: '/tmp/delivery',
+          containerId: 'delivery-container',
+          filesChanged: 1,
+          prUrl: 'https://github.com/org/repo/pull/42',
+        }),
+      );
+      vi.mocked(ctx.worktreeManager.rebaseOntoBase).mockRejectedValue(new Error('git unavailable'));
+      await expect(manager.approveSession(pod.id)).rejects.toMatchObject({
+        code: 'APPROVAL_DELIVERY_FAILED',
+      });
+      expect(manager.getSession(pod.id)).toMatchObject({
+        status: 'validated',
+        containerId: 'delivery-container',
+        completedAt: null,
+      });
+      expect(ctx.prManager.mergePr).not.toHaveBeenCalled();
+      expect(ctx.containerManager.kill).not.toHaveBeenCalled();
     });
 
     it('falls back to branch push when no prUrl and no prManager', async () => {
