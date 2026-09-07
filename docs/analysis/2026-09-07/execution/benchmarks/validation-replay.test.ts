@@ -1,7 +1,7 @@
 import { execFile, execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { arch, cpus, platform, release, tmpdir, totalmem } from 'node:os';
 import { join, resolve } from 'node:path';
 import { promisify } from 'node:util';
 import { expect, it } from 'vitest';
@@ -30,6 +30,20 @@ for (const [input, expected] of [[0,0],[1,0],[2,1],[10,9],[100,99]]) assert.equa
 console.log('five fixed boundary assertions passed');\n`;
 
 it('measures matched validation reuse with fixed assertions and seeded defects', async () => {
+  const sourceRoot = resolve(import.meta.dirname, '../../../../..');
+  const sourceGit = (...args: string[]) =>
+    execFileSync('git', args, { cwd: sourceRoot, encoding: 'utf8' }).trim();
+  const sourceInputs = [
+    'packages',
+    'package.json',
+    'pnpm-lock.yaml',
+    'pnpm-workspace.yaml',
+    'turbo.json',
+    'tsconfig.base.json',
+    'docs/analysis/2026-09-07/execution/benchmarks',
+  ];
+  const sourceHead = sourceGit('rev-parse', 'HEAD');
+  const sourceStatus = sourceGit('status', '--porcelain', '--', ...sourceInputs);
   const root = mkdtempSync(join(tmpdir(), 'autopod-validation-replay-'));
   const db = createTestDb();
   insertTestProfile(db);
@@ -119,7 +133,9 @@ it('measures matched validation reuse with fixed assertions and seeded defects',
     ];
     const implementation = sha(
       implementationFiles
-        .map((file) => readFileSync(resolve('packages/daemon/src/validation', file), 'utf8'))
+        .map((file) =>
+          readFileSync(resolve(sourceRoot, 'packages/daemon/src/validation', file), 'utf8'),
+        )
         .join('\n'),
     );
     const baseConfig: ValidationEngineConfig = {
@@ -212,15 +228,25 @@ it('measures matched validation reuse with fixed assertions and seeded defects',
     const baselineMs = total('baseline');
     const candidateMs = total('candidate');
     const report = {
-      version: 1,
+      version: 2,
       scope:
         'local deterministic replay, actual validation engine and child processes; no production/provider claim',
       capturedAt: new Date().toISOString(),
-      sourceHead: execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim(),
-      sourceModified: true,
+      sourceHead,
+      sourceModified: sourceStatus.length > 0,
+      sourceStatus,
       oracleSha256: sha(oracle),
       implementationSha256: implementation,
       runtime: process.version,
+      host: {
+        platform: platform(),
+        architecture: arch(),
+        release: release(),
+        cpuModel: cpus()[0]?.model ?? null,
+        cpuCount: cpus().length,
+        memoryBytes: totalmem(),
+      },
+      runtimeExecutableSha256: imageDigest.slice('sha256:'.length),
       imageIdentity: 'fixture hash of actual Node binary; not a Docker image receipt',
       coverage: {
         assertionsPerTestExecution: 5,
@@ -249,10 +275,16 @@ it('measures matched validation reuse with fixed assertions and seeded defects',
       actualBuildCommands: observedCommands.filter((c) => c === 'node build.cjs').length,
       rows,
     };
-    writeFileSync(
-      'docs/analysis/2026-09-07/execution/receipts/validation-replay-benchmark.json',
-      `${JSON.stringify(report, null, 2)}\n`,
-    );
+    expect(sourceGit('rev-parse', 'HEAD')).toBe(sourceHead);
+    expect(sourceGit('status', '--porcelain', '--', ...sourceInputs)).toBe(sourceStatus);
+    const output =
+      process.env.AUTOPOD_BENCHMARK_OUTPUT ??
+      resolve(
+        sourceRoot,
+        'docs/analysis/2026-09-07/execution/receipts',
+        `validation-replay-${sourceHead.slice(0, 8)}-${Date.now()}.json`,
+      );
+    writeFileSync(output, `${JSON.stringify(report, null, 2)}\n`, { flag: 'wx' });
     expect(report.cacheHits).toBeGreaterThan(0);
     expect(report.candidateEscapes).toBe(report.baselineEscapes);
     expect(report.actualBuildCommands).toBe(rows.length);
