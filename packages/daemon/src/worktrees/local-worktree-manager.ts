@@ -3,12 +3,13 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { promisify } from 'node:util';
-import type { RequiredFact } from '@autopod/shared';
+import { AutopodError, type RequiredFact } from '@autopod/shared';
 import type { Logger } from 'pino';
 import { type DaemonGitHubAuth, DaemonGitHubAuthError } from '../github/daemon-github-auth.js';
 import type {
   BranchDiffConfig,
   BranchFolderContents,
+  BranchPublicationReceipt,
   CanonicalDiffClassification,
   CommitPendingChangesOptions,
   DiffStats,
@@ -1374,7 +1375,7 @@ export class LocalWorktreeManager implements WorktreeManager {
     worktreePath: string,
     expectedBranch: string,
     options?: { force?: boolean; pat?: string },
-  ): Promise<void> {
+  ): Promise<BranchPublicationReceipt> {
     const force = options?.force === true;
     this.logger.info({ worktreePath, expectedBranch, force }, 'Pushing branch to origin');
     const remote = await this.getAuthenticatedRemote(worktreePath, options?.pat);
@@ -1386,29 +1387,108 @@ export class LocalWorktreeManager implements WorktreeManager {
         `Expected HEAD to be on branch '${expectedBranch}' but it is on '${actualBranch.trim()}'`,
       );
     }
-    const refspec = `HEAD:refs/heads/${expectedBranch}`;
-    let pushArgs = ['push', '--no-verify', remote.url, refspec];
-    if (force) {
-      const { stdout: localHead } = await git(['rev-parse', 'HEAD'], {
+    const requireEvidence = (condition: boolean, detail: string): void => {
+      if (!condition)
+        throw new AutopodError(
+          `Source publication requires reconciliation. ${detail} Original resources must be retained.`,
+          'SOURCE_PUBLICATION_RECONCILIATION_REQUIRED',
+          409,
+        );
+    };
+    const readSource = async () => {
+      const head = (await git(['rev-parse', 'HEAD'], { cwd: worktreePath })).stdout.trim();
+      const tree = (
+        await git(['rev-parse', `${head}^{tree}`], { cwd: worktreePath })
+      ).stdout.trim();
+      const status = await git(['status', '--porcelain=v1', '-z', '--untracked-files=normal'], {
         cwd: worktreePath,
       });
-      const remoteRef = `refs/heads/${expectedBranch}`;
-      const { stdout: remoteHead } = await git(['ls-remote', '--heads', remote.url, remoteRef], {
+      requireEvidence(
+        /^(?:[a-f0-9]{40}|[a-f0-9]{64})$/.test(head) &&
+          /^(?:[a-f0-9]{40}|[a-f0-9]{64})$/.test(tree),
+        'Commit or tree identity is unavailable.',
+      );
+      requireEvidence(
+        status.stdout.length === 0,
+        'Uncommitted source is not covered by a branch push.',
+      );
+      return { head, tree };
+    };
+    const source = await readSource();
+    const scp = remote.url.match(/^git@([^:]+):(.+)$/);
+    const repositoryUrl = new URL(
+      scp
+        ? `https://${scp[1]}/${scp[2]}`
+        : path.isAbsolute(remote.url)
+          ? `file://${remote.url}`
+          : remote.url,
+    );
+    requireEvidence(
+      ['https:', 'http:', 'ssh:', 'file:'].includes(repositoryUrl.protocol),
+      'Repository identity is unsupported.',
+    );
+    const repository = `${repositoryUrl.protocol}//${repositoryUrl.host}${repositoryUrl.pathname.replace(/\/+$/, '').replace(/\.git$/, '')}`;
+    const remoteRef = `refs/heads/${expectedBranch}`;
+    const observeRemote = async (): Promise<string | null> => {
+      const result = await git(['ls-remote', '--heads', remote.url, remoteRef], {
         cwd: worktreePath,
         credential: remote.credential,
         credentialUrl: remote.url,
       });
-      const observedRemoteOid = remoteHead
+      const matches = result.stdout
         .trim()
         .split('\n')
-        .map((line) => line.trim().split(/\s+/, 2))
-        .find(([, ref]) => ref === remoteRef)?.[0];
-      if (observedRemoteOid && observedRemoteOid === localHead.trim()) {
+        .filter(Boolean)
+        .map((line) => line.trim().split(/\s+/))
+        .filter((fields) => fields[1] === remoteRef);
+      requireEvidence(matches.length <= 1, 'Remote ref evidence is ambiguous.');
+      const match = matches[0];
+      if (!match) return null;
+      requireEvidence(
+        match.length === 2 && /^(?:[a-f0-9]{40}|[a-f0-9]{64})$/.test(match[0] ?? ''),
+        'Remote commit identity is unavailable.',
+      );
+      return match[0] ?? null;
+    };
+    const confirm = async (): Promise<BranchPublicationReceipt> => {
+      const observed = await observeRemote();
+      requireEvidence(
+        observed === source.head,
+        'Remote ref does not match the admitted source commit.',
+      );
+      const current = await readSource();
+      const currentBranch = (
+        await git(['rev-parse', '--abbrev-ref', 'HEAD'], { cwd: worktreePath })
+      ).stdout.trim();
+      requireEvidence(
+        current.head === source.head &&
+          current.tree === source.tree &&
+          currentBranch === expectedBranch,
+        'Local source changed during publication.',
+      );
+      return {
+        branch: expectedBranch,
+        repository,
+        commitSha: source.head,
+        treeSha: source.tree,
+        remoteRef,
+        observedRemoteCommitSha: source.head,
+        worktreeClean: true,
+        observedAt: new Date().toISOString(),
+      };
+    };
+    // An immutable source ref prevents a concurrent checkout/commit from silently
+    // changing which source the external push publishes.
+    const refspec = `${source.head}:${remoteRef}`;
+    let pushArgs = ['push', '--no-verify', remote.url, refspec];
+    if (force) {
+      const observedRemoteOid = await observeRemote();
+      if (observedRemoteOid === source.head) {
         this.logger.info(
-          { worktreePath, expectedBranch, localHead: localHead.trim() },
-          'Remote branch already matches local HEAD; skipping force push',
+          { worktreePath, expectedBranch },
+          'Remote already matches admitted source; verifying receipt',
         );
-        return;
+        return confirm();
       }
 
       // URL pushes do not reliably associate an implicit lease with origin/<branch>.
@@ -1435,6 +1515,7 @@ export class LocalWorktreeManager implements WorktreeManager {
     } catch (err) {
       throw classifyGitError(sanitizeGitError(err), 'push');
     }
+    return confirm();
   }
 
   async ensureRemoteBranch(config: EnsureRemoteBranchConfig): Promise<EnsureRemoteBranchResult> {

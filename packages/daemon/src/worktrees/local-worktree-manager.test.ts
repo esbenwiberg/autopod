@@ -1211,6 +1211,66 @@ describe('LocalWorktreeManager', () => {
   // -------------------------------------------------------------------------
 
   describe('pushBranch', () => {
+    it.each([
+      'verified',
+      'remote-moved',
+      'remote-absent',
+      'duplicate-ref',
+      'head-moved',
+      'dirty-source',
+    ] as const)(
+      'binds source publication to exact committed source and remote evidence (%s)',
+      async (scenario) => {
+        const source = 'a'.repeat(40);
+        const other = 'b'.repeat(40);
+        const tree = 'c'.repeat(40);
+        const calls: string[][] = [];
+        let pushed = false;
+        execFileMock.mockImplementation(
+          (_file: string, args: string[], arg3: unknown, arg4?: unknown) => {
+            calls.push(args);
+            const cb = resolveCallback(arg3, arg4);
+            const cmd = args.join(' ');
+            let stdout = '';
+            if (cmd.includes('remote get-url origin')) stdout = 'https://github.com/org/repo.git';
+            else if (cmd.includes('rev-parse --git-common-dir')) stdout = '.git';
+            else if (cmd.includes('rev-parse --abbrev-ref HEAD')) stdout = 'feature';
+            else if (cmd.includes('^{tree}')) stdout = tree;
+            else if (cmd.includes('rev-parse HEAD'))
+              stdout = pushed && scenario === 'head-moved' ? other : source;
+            else if (args.includes('status'))
+              stdout = scenario === 'dirty-source' ? ' M source.ts\0' : '';
+            else if (args.includes('push')) pushed = true;
+            else if (args.includes('ls-remote'))
+              stdout =
+                scenario === 'remote-absent'
+                  ? ''
+                  : scenario === 'duplicate-ref'
+                    ? `${source}\trefs/heads/feature\n${other}\trefs/heads/feature`
+                    : `${scenario === 'remote-moved' ? other : source}\trefs/heads/feature`;
+            cb(null, { stdout, stderr: '' });
+            return {} as ChildProcess;
+          },
+        );
+        if (scenario === 'verified') {
+          await expect(manager.pushBranch('/tmp/source', 'feature')).resolves.toMatchObject({
+            commitSha: source,
+            treeSha: tree,
+            remoteRef: 'refs/heads/feature',
+            observedRemoteCommitSha: source,
+            worktreeClean: true,
+            observedAt: expect.any(String),
+          });
+        } else
+          await expect(manager.pushBranch('/tmp/source', 'feature')).rejects.toMatchObject({
+            code: 'SOURCE_PUBLICATION_RECONCILIATION_REQUIRED',
+          });
+        const push = calls.find((args) => args.includes('push'));
+        if (scenario === 'dirty-source') expect(push).toBeUndefined();
+        else expect(push).toContain(`${source}:refs/heads/feature`);
+      },
+    );
+
     it('rejects when HEAD is on a different branch than expectedBranch', async () => {
       execFileMock.mockImplementation(
         (_file: string, args: string[], arg3: unknown, arg4?: unknown) => {
@@ -1230,96 +1290,59 @@ describe('LocalWorktreeManager', () => {
       );
     });
 
-    it('pushes with explicit HEAD:refs/heads/<branch> refspec when branch matches', async () => {
-      const pushedArgs: string[][] = [];
-      execFileMock.mockImplementation(
-        (_file: string, args: string[], arg3: unknown, arg4?: unknown) => {
-          const cb = resolveCallback(arg3, arg4);
-          const cmd = args.join(' ');
-          if (cmd.includes('rev-parse --abbrev-ref HEAD')) {
-            cb(null, { stdout: 'feat/security\n', stderr: '' });
-          } else if (cmd.includes('rev-parse --git-common-dir')) {
-            cb(null, { stdout: '.git\n', stderr: '' });
-          } else if (cmd.includes('remote get-url origin')) {
-            cb(null, { stdout: 'https://github.com/org/repo.git\n', stderr: '' });
-          } else {
-            pushedArgs.push(args);
-            cb(null, { stdout: '', stderr: '' });
-          }
-          return {} as ChildProcess;
-        },
-      );
-
-      await manager.pushBranch('/tmp/worktree/sess', 'feat/security');
-
-      const pushCall = pushedArgs.find((a) => a.includes('push'));
-      expect(pushCall).toEqual([
-        'push',
-        '--no-verify',
-        'https://github.com/org/repo.git',
-        'HEAD:refs/heads/feat/security',
-      ]);
-    });
-
-    it('pins a force push lease to the remote-tracking branch OID', async () => {
-      const pushedArgs: string[][] = [];
-      execFileMock.mockImplementation(
-        (_file: string, args: string[], arg3: unknown, arg4?: unknown) => {
-          const cb = resolveCallback(arg3, arg4);
-          const cmd = args.join(' ');
-          if (cmd.includes('rev-parse --abbrev-ref HEAD')) {
-            cb(null, { stdout: 'feat/security\n', stderr: '' });
-          } else if (cmd.includes('rev-parse --git-common-dir')) {
-            cb(null, { stdout: '.git\n', stderr: '' });
-          } else if (cmd.includes('remote get-url origin')) {
-            cb(null, { stdout: 'https://github.com/org/repo.git\n', stderr: '' });
-          } else if (cmd.includes('rev-parse --verify refs/remotes/origin/feat/security')) {
-            cb(null, { stdout: 'abc123\n', stderr: '' });
-          } else {
-            pushedArgs.push(args);
-            cb(null, { stdout: '', stderr: '' });
-          }
-          return {} as ChildProcess;
-        },
-      );
-
-      await manager.pushBranch('/tmp/worktree/sess', 'feat/security', { force: true });
-
-      expect(pushedArgs.find((args) => args.includes('push'))).toEqual([
-        'push',
-        '--no-verify',
-        '--force-with-lease=refs/heads/feat/security:abc123',
-        'https://github.com/org/repo.git',
-        'HEAD:refs/heads/feat/security',
-      ]);
-    });
-
-    it('skips a force push when the authenticated remote branch already matches HEAD', async () => {
+    function publicationGit(branch: string, remoteBefore: string, tracking = 'b'.repeat(40)) {
       const calls: string[][] = [];
+      let pushed = false;
+      const source = 'a'.repeat(40);
       execFileMock.mockImplementation(
         (_file: string, args: string[], arg3: unknown, arg4?: unknown) => {
           calls.push(args);
           const cb = resolveCallback(arg3, arg4);
           const cmd = args.join(' ');
-          if (cmd.includes('rev-parse --abbrev-ref HEAD')) {
-            cb(null, { stdout: 'feat/security\n', stderr: '' });
-          } else if (cmd.includes('rev-parse --git-common-dir')) {
-            cb(null, { stdout: '.git\n', stderr: '' });
-          } else if (cmd.includes('remote get-url origin')) {
-            cb(null, { stdout: 'https://github.com/org/repo.git\n', stderr: '' });
-          } else if (cmd.includes('rev-parse HEAD')) {
-            cb(null, { stdout: 'abc123\n', stderr: '' });
-          } else if (cmd.includes('ls-remote --heads')) {
-            cb(null, { stdout: 'abc123\trefs/heads/feat/security\n', stderr: '' });
-          } else {
-            cb(null, { stdout: '', stderr: '' });
-          }
+          let stdout = '';
+          if (cmd.includes('remote get-url origin')) stdout = 'https://github.com/org/repo.git';
+          else if (cmd.includes('rev-parse --git-common-dir')) stdout = '.git';
+          else if (cmd.includes('rev-parse --abbrev-ref HEAD')) stdout = branch;
+          else if (cmd.includes('^{tree}')) stdout = 'c'.repeat(40);
+          else if (cmd.includes('rev-parse HEAD')) stdout = source;
+          else if (cmd.includes('rev-parse --verify refs/remotes/origin/')) stdout = tracking;
+          else if (args.includes('push')) pushed = true;
+          else if (args.includes('ls-remote'))
+            stdout = pushed ? `${source}\trefs/heads/${branch}` : remoteBefore;
+          cb(null, { stdout, stderr: '' });
           return {} as ChildProcess;
         },
       );
+      return calls;
+    }
 
+    it('pushes a captured commit to the explicit target ref', async () => {
+      const calls = publicationGit('feat/security', '');
+      const receipt = await manager.pushBranch('/tmp/worktree/sess', 'feat/security');
+      expect(calls.find((args) => args.includes('push'))).toEqual([
+        'push',
+        '--no-verify',
+        'https://github.com/org/repo.git',
+        `${'a'.repeat(40)}:refs/heads/feat/security`,
+      ]);
+      expect(receipt.repository).toBe('https://github.com/org/repo');
+    });
+
+    it('pins a force push lease to the remote-tracking branch OID', async () => {
+      const calls = publicationGit('feat/security', `${'b'.repeat(40)}\trefs/heads/feat/security`);
       await manager.pushBranch('/tmp/worktree/sess', 'feat/security', { force: true });
+      expect(calls.find((args) => args.includes('push'))).toEqual([
+        'push',
+        '--no-verify',
+        `--force-with-lease=refs/heads/feat/security:${'b'.repeat(40)}`,
+        'https://github.com/org/repo.git',
+        `${'a'.repeat(40)}:refs/heads/feat/security`,
+      ]);
+    });
 
+    it('skips a force push when the authenticated remote branch already matches HEAD', async () => {
+      const calls = publicationGit('feat/security', `${'a'.repeat(40)}\trefs/heads/feat/security`);
+      await manager.pushBranch('/tmp/worktree/sess', 'feat/security', { force: true });
       expect(calls.some((args) => args.includes('push'))).toBe(false);
       expect(calls).not.toContainEqual([
         'rev-parse',
@@ -1335,42 +1358,17 @@ describe('LocalWorktreeManager', () => {
     });
 
     it('does not confuse a suffix-matching remote branch with the target branch', async () => {
-      const calls: string[][] = [];
-      execFileMock.mockImplementation(
-        (_file: string, args: string[], arg3: unknown, arg4?: unknown) => {
-          calls.push(args);
-          const cb = resolveCallback(arg3, arg4);
-          const cmd = args.join(' ');
-          if (cmd.includes('rev-parse --abbrev-ref HEAD')) {
-            cb(null, { stdout: 'feature\n', stderr: '' });
-          } else if (cmd.includes('rev-parse --git-common-dir')) {
-            cb(null, { stdout: '.git\n', stderr: '' });
-          } else if (cmd.includes('remote get-url origin')) {
-            cb(null, { stdout: 'https://github.com/org/repo.git\n', stderr: '' });
-          } else if (cmd.includes('rev-parse HEAD')) {
-            cb(null, { stdout: 'local123\n', stderr: '' });
-          } else if (cmd.includes('ls-remote --heads')) {
-            cb(null, {
-              stdout: 'local123\trefs/heads/nested/feature\nremote456\trefs/heads/feature\n',
-              stderr: '',
-            });
-          } else if (cmd.includes('rev-parse --verify refs/remotes/origin/feature')) {
-            cb(null, { stdout: 'remote456\n', stderr: '' });
-          } else {
-            cb(null, { stdout: '', stderr: '' });
-          }
-          return {} as ChildProcess;
-        },
+      const calls = publicationGit(
+        'feature',
+        `${'a'.repeat(40)}\trefs/heads/nested/feature\n${'b'.repeat(40)}\trefs/heads/feature`,
       );
-
       await manager.pushBranch('/tmp/worktree/sess', 'feature', { force: true });
-
       expect(calls.find((args) => args.includes('push'))).toEqual([
         'push',
         '--no-verify',
-        '--force-with-lease=refs/heads/feature:remote456',
+        `--force-with-lease=refs/heads/feature:${'b'.repeat(40)}`,
         'https://github.com/org/repo.git',
-        'HEAD:refs/heads/feature',
+        `${'a'.repeat(40)}:refs/heads/feature`,
       ]);
     });
   });

@@ -1,0 +1,67 @@
+
+ RUN  v4.1.11 /private/tmp/autopod-durable-execution/packages/daemon
+
+ ❯ src/worktrees/local-worktree-manager.test.ts (125 tests | 2 failed) 27ms
+       × returns canonical changed stats only after proving the materialized host snapshot 5ms
+       × fails closed when the materialized host snapshot does not match the checkpoint 0ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 2 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/worktrees/local-worktree-manager.test.ts > LocalWorktreeManager > classifyCanonicalDiff > returns canonical changed stats only after proving the materialized host snapshot
+AssertionError: expected { outcome: 'unavailable', …(1) } to deeply equal { outcome: 'changed', …(3) }
+
+- Expected
++ Received
+
+  {
+-   "hostHead": "head123",
+-   "hostTree": "tree123",
+-   "outcome": "changed",
+-   "stats": {
+-     "filesChanged": 1,
+-     "linesAdded": 2,
+-     "linesRemoved": 0,
+-   },
++   "code": "GIT_FAILURE",
++   "outcome": "unavailable",
+  }
+
+ ❯ src/worktrees/local-worktree-manager.test.ts:429:7
+    427|       await expect(
+    428|         manager.classifyCanonicalDiff('/tmp/worktree/sess', 'base123',…
+    429|       ).resolves.toEqual({
+       |       ^
+    430|         outcome: 'changed',
+    431|         stats: { filesChanged: 1, linesAdded: 2, linesRemoved: 0 },
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/2]⎯
+
+ FAIL  src/worktrees/local-worktree-manager.test.ts > LocalWorktreeManager > classifyCanonicalDiff > fails closed when the materialized host snapshot does not match the checkpoint
+AssertionError: expected { outcome: 'unavailable', …(1) } to deeply equal { outcome: 'unavailable', …(3) }
+
+- Expected
++ Received
+
+  {
+-   "code": "HOST_PROOF_MISMATCH",
+-   "hostHead": "other-head",
+-   "hostTree": "other-tree",
++   "code": "GIT_FAILURE",
+    "outcome": "unavailable",
+  }
+
+ ❯ src/worktrees/local-worktree-manager.test.ts:446:7
+    444|       await expect(
+    445|         manager.classifyCanonicalDiff('/tmp/worktree/sess', 'base123',…
+    446|       ).resolves.toEqual({
+       |       ^
+    447|         outcome: 'unavailable',
+    448|         code: 'HOST_PROOF_MISMATCH',
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/2]⎯
+
+
+ Test Files  1 failed | 1 passed (2)
+      Tests  2 failed | 128 passed (130)
+   Start at  23:32:43
+   Duration  3.55s (transform 283ms, setup 0ms, import 473ms, tests 3.24s, environment 0ms)

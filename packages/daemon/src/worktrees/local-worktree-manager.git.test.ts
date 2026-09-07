@@ -86,11 +86,29 @@ describe('LocalWorktreeManager real Git regressions', () => {
   it('force-pushes to a URL when the explicit remote OID lease still matches', async () => {
     const worktree = await createRebasedFeature('lease-success');
 
-    await manager.pushBranch(worktree, 'feature', { force: true });
+    const receipt = await manager.pushBranch(worktree, 'feature', { force: true });
+    expect(receipt).toMatchObject({
+      commitSha: await git(worktree, ['rev-parse', 'HEAD']),
+      treeSha: await git(worktree, ['rev-parse', 'HEAD^{tree}']),
+      remoteRef: 'refs/heads/feature',
+      observedRemoteCommitSha: await git(remote, ['rev-parse', 'refs/heads/feature']),
+      worktreeClean: true,
+    });
 
     expect(await git(remote, ['rev-parse', 'refs/heads/feature'])).toBe(
       await git(worktree, ['rev-parse', 'HEAD']),
     );
+  });
+
+  it('rejects uncommitted work before publishing and retains the source file', async () => {
+    const worktree = await createRebasedFeature('dirty-source');
+    const originalRemote = await git(remote, ['rev-parse', 'refs/heads/feature']);
+    await writeFile(path.join(worktree, 'feature.txt'), 'uncommitted work\n');
+    await expect(manager.pushBranch(worktree, 'feature')).rejects.toMatchObject({
+      code: 'SOURCE_PUBLICATION_RECONCILIATION_REQUIRED',
+    });
+    expect(await git(remote, ['rev-parse', 'refs/heads/feature'])).toBe(originalRemote);
+    expect(await git(worktree, ['diff', '--', 'feature.txt'])).toContain('uncommitted work');
   });
 
   it('rejects a force push when the remote branch advanced after the tracked OID', async () => {
