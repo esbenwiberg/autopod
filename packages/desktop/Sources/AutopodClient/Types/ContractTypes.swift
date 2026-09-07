@@ -1,6 +1,8 @@
 import Foundation
 
 public struct SpecContractResponse: Codable, Sendable, Hashable {
+  public var executionRequirements: ExecutionRequirementsResponse? = nil
+  public var validationEvidence: ValidationEvidenceManifestResponse? = nil
   public let contractVersion: Int
   public let title: String
   public let dependsOn: [String]
@@ -42,4 +44,19 @@ public struct FactEvidenceResponse: Codable, Sendable, Hashable {
   public let command: String
   public let result: String
   public let notes: String?
+}
+
+public struct ExecutionRequirementsResponse: Codable, Sendable, Hashable {
+  public let version: Int
+  public let executables: [String]
+  public let minimumMemoryBytes: Int?
+  public let minimumCpu: Double?
+}
+public struct ValidationEvidenceManifestResponse: Codable, Sendable, Hashable {
+  public let version: Int
+  public let hermetic: Bool
+  public let toolchainFiles: [String]
+  public let dependencyPaths: [String]
+  public let environmentFiles: [String]
+  public let environmentRevision: String
 }

@@ -1,6 +1,8 @@
 // Types
 export type {
   ContractScenario,
+  ExecutionRequirements,
+  ValidationEvidenceManifest,
   FactArtifactChange,
   FactEvidence,
   HumanReviewItem,
@@ -634,3 +636,8 @@ export type {
 } from './types/task-retry.js';
 
 export type { IntentionalRerun, DispatchPreflightEvidence } from './types/dispatch-preflight.js';
+
+export type {
+  ExecutionProvenance,
+  ExecutionProvenanceInput,
+} from './types/execution-provenance.js';

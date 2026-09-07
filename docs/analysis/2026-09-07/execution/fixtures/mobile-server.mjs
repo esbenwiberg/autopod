@@ -172,6 +172,12 @@ const server = createServer(async (req, res) => {
     res.setHeader('content-type', 'application/json');
     res.end(JSON.stringify(value));
   };
+  if (pathname === '/pods/local-fixture/execution-provenance')
+    return json({
+      latest: JSON.parse(
+        await readFile(new URL('./execution-provenance.json', import.meta.url), 'utf8'),
+      ),
+    });
   if (pathname === '/pods/local-fixture/dispatch-preflight')
     return json({
       latest: {

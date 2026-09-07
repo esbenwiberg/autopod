@@ -1,4 +1,6 @@
 export interface DaemonReleaseInfo {
+  /** SHA-256 of bounded source/build/dependency inputs; unavailable when not embedded. */
+  validationImplementationHash?: string | null;
   commitSha: string | null;
   dirty: boolean | null;
   builtAt: string | null;

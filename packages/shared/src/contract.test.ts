@@ -346,3 +346,49 @@ human_review: []
     expect(result.diagnostics.map((diagnostic) => diagnostic.code)).toContain(expectedCode);
   });
 });
+
+it('preserves explicit execution requirements in YAML and rejects unsafe executable and resource declarations', () => {
+  const requirements = {
+    version: 1,
+    executables: ['node', 'dotnet'],
+    minimumMemoryBytes: 2147483648,
+    minimumCpu: 2,
+  };
+  expect(
+    inspectSpecContract({ ...validDomainContract(), executionRequirements: requirements }).contract
+      ?.executionRequirements,
+  ).toEqual(requirements);
+  expect(
+    inspectSpecContract({
+      ...validDomainContract(),
+      executionRequirements: { ...requirements, executables: ['-v'] },
+    }).diagnostics.length,
+  ).toBeGreaterThan(0);
+  expect(
+    inspectSpecContract({
+      ...validDomainContract(),
+      executionRequirements: { ...requirements, minimumCpu: -1 },
+    }).diagnostics.length,
+  ).toBeGreaterThan(0);
+  const parsed = inspectSpecContractYaml(`contract_version: 1
+title: Environment
+scenarios:
+  - id: scenario
+    given: [input]
+    when: [compiled]
+    then: [verified]
+required_facts:
+  - id: fact
+    proves: [scenario]
+    kind: custom-command
+    artifact: {path: result.ts, change: create}
+    command: node result.ts
+execution_requirements:
+  version: 1
+  executables: [node, dotnet]
+  minimumMemoryBytes: 2147483648
+  minimumCpu: 2
+`);
+  expect(parsed.diagnostics).toEqual([]);
+  expect(parsed.contract?.executionRequirements).toEqual(requirements);
+});

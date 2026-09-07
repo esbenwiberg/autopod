@@ -68,6 +68,7 @@ public struct PodActions: Sendable {
   /// Token-free recovery for a `failed` pod — pushes + opens PR if validation already passed,
   /// otherwise re-runs validation only (no agent rework). Cheapest possible path forward.
   public var retryDraftScope: String
+  public var loadExecutionProvenance: @MainActor @Sendable (String) async throws -> ExecutionProvenanceResponse
   public var loadDispatchPreflight: @MainActor @Sendable (String) async throws -> DispatchPreflightResponse
   public var loadRerunTemplate: @MainActor @Sendable (String) async throws -> IntentionalRerunDraft
   public var createIntentionalRerun: @MainActor @Sendable (IntentionalRerunDraft) async throws -> String
@@ -159,6 +160,7 @@ public struct PodActions: Sendable {
     spawnFix: @escaping @MainActor @Sendable (String, String?) async -> SpawnFixResponse? = { _, _ in nil },
     retryCreatePr: @escaping @MainActor @Sendable (String) async -> Void = { _ in },
     retryDraftScope: String = "preview",
+    loadExecutionProvenance: @escaping @MainActor @Sendable (String) async throws -> ExecutionProvenanceResponse = { _ in throw URLError(.unsupportedURL) },
     loadDispatchPreflight: @escaping @MainActor @Sendable (String) async throws -> DispatchPreflightResponse = { _ in throw URLError(.unsupportedURL) },
     loadRerunTemplate: @escaping @MainActor @Sendable (String) async throws -> IntentionalRerunDraft = { _ in throw URLError(.unsupportedURL) },
     createIntentionalRerun: @escaping @MainActor @Sendable (IntentionalRerunDraft) async throws -> String = { _ in throw URLError(.unsupportedURL) },
@@ -211,6 +213,7 @@ public struct PodActions: Sendable {
     self.spawnFix = spawnFix
     self.retryCreatePr = retryCreatePr
     self.retryDraftScope = retryDraftScope
+    self.loadExecutionProvenance = loadExecutionProvenance
     self.loadDispatchPreflight = loadDispatchPreflight
     self.loadRerunTemplate = loadRerunTemplate
     self.createIntentionalRerun = createIntentionalRerun

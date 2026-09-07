@@ -258,6 +258,9 @@ public actor DaemonAPI {
   /// Operator escape hatch for `failed` pods — picks the cheapest recovery path
   /// (push + open PR if validation already passed, otherwise re-run validation).
   /// Returns the action the daemon took, so the UI can confirm what happened.
+  public func getExecutionProvenance(_ id: String) async throws -> ExecutionProvenanceResponse {
+    try await request("GET", "/pods/\(id)/execution-provenance")
+  }
   public func getDispatchPreflight(_ id: String) async throws -> DispatchPreflightResponse {
     try await request("GET", "/pods/\(id)/dispatch-preflight")
   }

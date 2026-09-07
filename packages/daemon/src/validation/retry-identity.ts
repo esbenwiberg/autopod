@@ -1,5 +1,4 @@
 import { createHash } from 'node:crypto';
-import { readFile } from 'node:fs/promises';
 import type { TaskRetryIdentity } from '@autopod/shared';
 import type { ContainerManager } from '../interfaces/container-manager.js';
 import type { ValidationEngineConfig } from '../interfaces/validation-engine.js';
@@ -75,14 +74,10 @@ export async function captureValidationRetryIdentity(
   } catch {
     /* Missing source/environment does not prove changed conditions. */
   }
-  if (daemonRelease.source === 'build') {
-    try {
-      identity.implementation = createHash('sha256')
-        .update(await readFile(new URL(import.meta.url)))
-        .digest('hex');
-    } catch {
-      /* Unknown implementation cannot authorize a retry. */
-    }
-  }
+  if (
+    daemonRelease.source === 'build' &&
+    /^[a-f0-9]{64}$/.test(daemonRelease.validationImplementationHash ?? '')
+  )
+    identity.implementation = daemonRelease.validationImplementationHash ?? null;
   return identity;
 }

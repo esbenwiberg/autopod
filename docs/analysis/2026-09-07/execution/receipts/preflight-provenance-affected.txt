@@ -1,0 +1,43 @@
+
+ RUN  v4.1.10 /private/tmp/autopod-durable-execution/packages/daemon
+
+ ❯ src/pods/pod-manager.test.ts (418 tests | 2 failed) 19082ms
+       × persists Codex auth.json back to a linked OpenAI provider account after agent run 64ms
+     × logs provider, runtime, and model before spawning the worker 39ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 2 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/pods/pod-manager.test.ts > PodManager > processPod > persists Codex auth.json back to a linked OpenAI provider account after agent run
+AssertionError: expected 'failed' to be 'validated' // Object.is equality
+
+Expected: "validated"
+Received: "failed"
+
+ ❯ src/pods/pod-manager.test.ts:5512:49
+    5510|       await manager.processPod(pod.id);
+    5511|
+    5512|       expect(manager.getSession(pod.id).status).toBe('validated');
+       |                                                 ^
+    5513|       expect(providerAccountStore.touchLastUsed).toHaveBeenCalledWith(…
+    5514|       expect(providerAccountStore.updateCredentials).toHaveBeenCalledW…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/2]⎯
+
+ FAIL  src/pods/pod-manager.test.ts > worker startup diagnostics > logs provider, runtime, and model before spawning the worker
+AssertionError: expected "vi.fn()" to be called at least once
+ ❯ src/pods/pod-manager.test.ts:16170:27
+    16168|       'Starting worker: provider=openai, runtime=codex, model=auto',
+    16169|     );
+    16170|     expect(runtime.spawn).toHaveBeenCalled();
+       |                           ^
+    16171|     const spawnConfig = vi.mocked(runtime.spawn).mock.calls[0]?.[0];
+    16172|     expect(spawnConfig?.env.CODEX_HOME).toBe('/home/autopod/.codex');
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/2]⎯
+
+
+ Test Files  1 failed | 4 passed (5)
+      Tests  2 failed | 462 passed (464)
+   Start at  16:26:52
+   Duration  20.19s (transform 2.33s, setup 0ms, import 3.92s, tests 21.93s, environment 0ms)
+

@@ -1,0 +1,176 @@
+[
+  {
+    "path": "docs/analysis/2026-09-07/execution/receipts/build-input-identity.txt",
+    "originalSha256": "1adde414f971143c1fdae698afa4b1ce57821443c14a97c683c877604c1275db",
+    "normalizedSha256": "1adde414f971143c1fdae698afa4b1ce57821443c14a97c683c877604c1275db",
+    "normalization": "rstrip each line; final newline"
+  },
+  {
+    "path": "docs/analysis/2026-09-07/execution/receipts/execution-provenance-durable.txt",
+    "originalSha256": "acbdb02fdbac2ff0ec3c3314246757b3739dc9d58deb344eed2b8807dc0b8ab6",
+    "normalizedSha256": "acbdb02fdbac2ff0ec3c3314246757b3739dc9d58deb344eed2b8807dc0b8ab6",
+    "normalization": "rstrip each line; final newline"
+  },
+  {
+    "path": "docs/analysis/2026-09-07/execution/receipts/execution-provenance-first-green.txt",
+    "originalSha256": "a864dfc922fe57c3832c309aef5bc1bc805d0b2dcdabcac82050c4a6ff35ba0e",
+    "normalizedSha256": "a864dfc922fe57c3832c309aef5bc1bc805d0b2dcdabcac82050c4a6ff35ba0e",
+    "normalization": "rstrip each line; final newline"
+  },
+  {
+    "path": "docs/analysis/2026-09-07/execution/receipts/execution-provenance-red.txt",
+    "originalSha256": "e2a32e1f53f249fade08e40beff839f36a9bd7f3d9477c3e01a1868677243fe2",
+    "normalizedSha256": "e2a32e1f53f249fade08e40beff839f36a9bd7f3d9477c3e01a1868677243fe2",
+    "normalization": "rstrip each line; final newline"
+  },
+  {
+    "path": "docs/analysis/2026-09-07/execution/receipts/execution-requirements-contract.txt",
+    "originalSha256": "b66a746a0f0e9590e8c76380a57becc113bbab1e7b6a1ac844cae073d859e932",
+    "normalizedSha256": "b66a746a0f0e9590e8c76380a57becc113bbab1e7b6a1ac844cae073d859e932",
+    "normalization": "rstrip each line; final newline"
+  },
+  {
+    "path": "docs/analysis/2026-09-07/execution/receipts/preflight-provenance-affected-corrected.txt",
+    "originalSha256": "e1ad31ff9e29635169433ec164af46abe9ab08712faf7c9f8d3edd8711036819",
+    "normalizedSha256": "e1ad31ff9e29635169433ec164af46abe9ab08712faf7c9f8d3edd8711036819",
+    "normalization": "rstrip each line; final newline"
+  },
+  {
+    "path": "docs/analysis/2026-09-07/execution/receipts/preflight-provenance-affected.txt",
+    "originalSha256": "1d8ebafcdfa87d916f33a6317ecc5c25a722476a2f10f2edd70a761c506d83b7",
+    "normalizedSha256": "1d8ebafcdfa87d916f33a6317ecc5c25a722476a2f10f2edd70a761c506d83b7",
+    "normalization": "rstrip each line; final newline"
+  },
+  {
+    "path": "docs/analysis/2026-09-07/execution/receipts/preflight-timeout-red.txt",
+    "originalSha256": "22a78612f2946d63a20f5ce46efc201be222e760d3b880f4cf08ccee4239a28b",
+    "normalizedSha256": "22a78612f2946d63a20f5ce46efc201be222e760d3b880f4cf08ccee4239a28b",
+    "normalization": "rstrip each line; final newline"
+  },
+  {
+    "path": "docs/analysis/2026-09-07/execution/receipts/provenance-biome.txt",
+    "originalSha256": "699d958b5c95aa5b17a91fce8f13711e8bf42504d909dea84d7a3f08bd20f715",
+    "normalizedSha256": "699d958b5c95aa5b17a91fce8f13711e8bf42504d909dea84d7a3f08bd20f715",
+    "normalization": "rstrip each line; final newline"
+  },
+  {
+    "path": "docs/analysis/2026-09-07/execution/receipts/provenance-build-final-bounded.txt",
+    "originalSha256": "dd91f25ee20be9befcee9f78aa54f88bb73f6d67fa02053e9082cfeddbca40d7",
+    "normalizedSha256": "d39792b164f7a78507243e1e69f91015619fa04ef713eb7af417e6606099c904",
+    "normalization": "rstrip each line; final newline"
+  },
+  {
+    "path": "docs/analysis/2026-09-07/execution/receipts/provenance-build-final-layout.txt",
+    "originalSha256": "8e86247830ea8449dffdf9b667aa34cafdf273852acd0407ada18a4a89b4625a",
+    "normalizedSha256": "f4a585b49a7fbc5d04ef143b632a336ccafdbdd884815d801ec2b3068f16b94f",
+    "normalization": "rstrip each line; final newline"
+  },
+  {
+    "path": "docs/analysis/2026-09-07/execution/receipts/provenance-build-final.txt",
+    "originalSha256": "6936f041926dc5c3083ce6da056395789d47e2be9033d682186f4d76e8a6857a",
+    "normalizedSha256": "2ccc559c041e78d7038fec457c0cdbbc82718b2fbaf2fe3000cd70227f1b5d9b",
+    "normalization": "rstrip each line; final newline"
+  },
+  {
+    "path": "docs/analysis/2026-09-07/execution/receipts/provenance-build.txt",
+    "originalSha256": "e42e0643f86310e664516fb2f8f220a867b91e160e3f97e7fd1f5692844197ed",
+    "normalizedSha256": "307c127d5302afbae6316057348a5bfa21e1b33d97dfb117cc66892257fb4ae6",
+    "normalization": "rstrip each line; final newline"
+  },
+  {
+    "path": "docs/analysis/2026-09-07/execution/receipts/provenance-cli-tests.txt",
+    "originalSha256": "d835a80316c19faac6e35583570bac67e9f03fccc14b3389debc1a7c4b0f068c",
+    "normalizedSha256": "d835a80316c19faac6e35583570bac67e9f03fccc14b3389debc1a7c4b0f068c",
+    "normalization": "rstrip each line; final newline"
+  },
+  {
+    "path": "docs/analysis/2026-09-07/execution/receipts/provenance-daemon-tsc-final.txt",
+    "originalSha256": "77a3eb1d07129d9da9a9de76487e7ca47a70f1d011cd7e1bb48bcb908f9ebe73",
+    "normalizedSha256": "77a3eb1d07129d9da9a9de76487e7ca47a70f1d011cd7e1bb48bcb908f9ebe73",
+    "normalization": "rstrip each line; final newline"
+  },
+  {
+    "path": "docs/analysis/2026-09-07/execution/receipts/provenance-daemon-tsc.txt",
+    "originalSha256": "6e72a9f1cdf9f537445052a467bfffc1af12a947c19fc0e8e5c29319c6ab8405",
+    "normalizedSha256": "6e72a9f1cdf9f537445052a467bfffc1af12a947c19fc0e8e5c29319c6ab8405",
+    "normalization": "rstrip each line; final newline"
+  },
+  {
+    "path": "docs/analysis/2026-09-07/execution/receipts/provenance-final-targeted-authorized.txt",
+    "originalSha256": "a2661f1576c529dafa5966e119bdfce7e21dde53678d5f4e69e1e45ded5e3816",
+    "normalizedSha256": "a2661f1576c529dafa5966e119bdfce7e21dde53678d5f4e69e1e45ded5e3816",
+    "normalization": "rstrip each line; final newline"
+  },
+  {
+    "path": "docs/analysis/2026-09-07/execution/receipts/provenance-final-targeted.txt",
+    "originalSha256": "fbeb5eea8584fda425e1c22165207bb0ec4c77cefdbed0b7fb9c697bbeb7ed78",
+    "normalizedSha256": "fbeb5eea8584fda425e1c22165207bb0ec4c77cefdbed0b7fb9c697bbeb7ed78",
+    "normalization": "rstrip each line; final newline"
+  },
+  {
+    "path": "docs/analysis/2026-09-07/execution/receipts/provenance-lint-initial.txt",
+    "originalSha256": "8fade1b457d5ae9b3150dfe22a190773bfe7d8df0582fec4ef6756c642a9b80e",
+    "normalizedSha256": "8fade1b457d5ae9b3150dfe22a190773bfe7d8df0582fec4ef6756c642a9b80e",
+    "normalization": "rstrip each line; final newline"
+  },
+  {
+    "path": "docs/analysis/2026-09-07/execution/receipts/provenance-mobile-tests.txt",
+    "originalSha256": "c2f4565bfd40bc981cb16bb7e3ede883c8aec78462316ace01ea6e1a17d71be2",
+    "normalizedSha256": "c2f4565bfd40bc981cb16bb7e3ede883c8aec78462316ace01ea6e1a17d71be2",
+    "normalization": "rstrip each line; final newline"
+  },
+  {
+    "path": "docs/analysis/2026-09-07/execution/receipts/provenance-swift-final.txt",
+    "originalSha256": "6d263117f2c488e3090324ad1edad8fc1c73c96288a238ef2bf1c9f2749f4757",
+    "normalizedSha256": "6d263117f2c488e3090324ad1edad8fc1c73c96288a238ef2bf1c9f2749f4757",
+    "normalization": "rstrip each line; final newline"
+  },
+  {
+    "path": "docs/analysis/2026-09-07/execution/receipts/provenance-swift.txt",
+    "originalSha256": "2be9874832b8b84afcaef2a88215eca8806f41594aa1c7c5980a5c04292f50b0",
+    "normalizedSha256": "2be9874832b8b84afcaef2a88215eca8806f41594aa1c7c5980a5c04292f50b0",
+    "normalization": "rstrip each line; final newline"
+  },
+  {
+    "path": "docs/analysis/2026-09-07/execution/receipts/provenance-type-fixes-targeted.txt",
+    "originalSha256": "0c6f471e318512fefff92c3f2f080401f3fdef125c90b376aa6480baf02c89cc",
+    "normalizedSha256": "0c6f471e318512fefff92c3f2f080401f3fdef125c90b376aa6480baf02c89cc",
+    "normalization": "rstrip each line; final newline"
+  },
+  {
+    "path": "docs/analysis/2026-09-07/execution/receipts/required-command-before-integration-red.txt",
+    "originalSha256": "a2a555568aefad74c419a643971844340c942fa8c3e0409f99e5fe88d196b75a",
+    "normalizedSha256": "a2a555568aefad74c419a643971844340c942fa8c3e0409f99e5fe88d196b75a",
+    "normalization": "rstrip each line; final newline"
+  },
+  {
+    "path": "docs/analysis/2026-09-07/execution/receipts/required-command-first-green.txt",
+    "originalSha256": "7719498e22114b6bf5cbdf3c4508cf06f57748afb757f9bf78e83b356334b05a",
+    "normalizedSha256": "7719498e22114b6bf5cbdf3c4508cf06f57748afb757f9bf78e83b356334b05a",
+    "normalization": "rstrip each line; final newline"
+  },
+  {
+    "path": "docs/analysis/2026-09-07/execution/receipts/runtime-resource-manager-final.txt",
+    "originalSha256": "8b649063d0d9f3107f1103e986ed47df3aec58a18ecde89d11786da1f6afec38",
+    "normalizedSha256": "8b649063d0d9f3107f1103e986ed47df3aec58a18ecde89d11786da1f6afec38",
+    "normalization": "rstrip each line; final newline"
+  },
+  {
+    "path": "docs/analysis/2026-09-07/execution/receipts/runtime-version-affected.txt",
+    "originalSha256": "159f1811c1b07f9d616c1e73c908cc03a2481ad0aa51d1db4a667c05a42d2031",
+    "normalizedSha256": "159f1811c1b07f9d616c1e73c908cc03a2481ad0aa51d1db4a667c05a42d2031",
+    "normalization": "rstrip each line; final newline"
+  },
+  {
+    "path": "docs/analysis/2026-09-07/execution/receipts/runtime-version-green.txt",
+    "originalSha256": "9ddebb55782f578dfa5f4ae56c660feb3b31be0c07a114186c788192edeeb284",
+    "normalizedSha256": "9ddebb55782f578dfa5f4ae56c660feb3b31be0c07a114186c788192edeeb284",
+    "normalization": "rstrip each line; final newline"
+  },
+  {
+    "path": "docs/analysis/2026-09-07/execution/receipts/runtime-version-red.txt",
+    "originalSha256": "ed8c7925b6e73135bf63af05e6717b942584a5c11becfa9c0fea44831c5abc74",
+    "normalizedSha256": "ed8c7925b6e73135bf63af05e6717b942584a5c11becfa9c0fea44831c5abc74",
+    "normalization": "rstrip each line; final newline"
+  }
+]

@@ -1,0 +1,70 @@
+
+ RUN  v4.1.10 /private/tmp/autopod-durable-execution/packages/daemon
+
+ ❯ src/pods/pod-manager.test.ts (415 tests | 1 failed | 414 skipped) 87ms
+       × does not start a coding agent when its runtime version cannot be verified 86ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/pods/pod-manager.test.ts > PodManager > processPod > does not start a coding agent when its runtime version cannot be verified
+AssertionError: expected "vi.fn()" to not be called at all, but actually been called 1 times
+
+Received:
+
+  1st vi.fn() call:
+
+    Array [
+      Object {
+        "containerId": "container-123",
+        "customInstructions": undefined,
+        "env": Object {
+          "AUTOPOD_BASE_BRANCH": "main",
+          "AUTOPOD_HEAD_BRANCH": "autopod/filthy-lemming",
+          "AUTOPOD_POD_ID": "filthy-lemming",
+          "AUTOPOD_PR_BASE_REF": "origin/main",
+          "AUTOPOD_START_COMMIT_SHA": "abc1234567890abcdef1234567890abcdef1234",
+          "AUTOPOD_VALIDATION_BASE_REF": "abc1234567890abcdef1234567890abcdef1234",
+          "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1",
+          "DISABLE_ERROR_REPORTING": "1",
+          "DISABLE_TELEMETRY": "1",
+          "DO_NOT_TRACK": "1",
+          "NEXT_TELEMETRY_DISABLED": "1",
+          "POD_ID": "filthy-lemming",
+          "VERCEL_TELEMETRY_DISABLED": "1",
+        },
+        "executionTarget": "local",
+        "mcpServers": Array [
+          Object {
+            "headers": undefined,
+            "name": "escalation",
+            "type": "http",
+            "url": "http://localhost:8080/mcp/filthy-lemming",
+          },
+        ],
+        "model": "opus",
+        "podId": "filthy-lemming",
+        "reasoningEffort": "auto",
+        "task": "Require verifiable runtime",
+        "workDir": "/workspace",
+      },
+    ]
+
+
+Number of calls: 1
+
+ ❯ src/pods/pod-manager.test.ts:5687:37
+    5685|       const pod = manager.createSession({profileName:'test-profile',ta…
+    5686|       await manager.processPod(pod.id);
+    5687|       expect(ctx.runtime.spawn).not.toHaveBeenCalled();
+       |                                     ^
+    5688|       expect(manager.getSession(pod.id).failureReason).toContain('vers…
+    5689|     });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 414 skipped (415)
+   Start at  16:08:16
+   Duration  1.16s (transform 611ms, setup 0ms, import 962ms, tests 87ms, environment 0ms)
+

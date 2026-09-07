@@ -255,20 +255,24 @@
         "packages/daemon/src/validation/validation-evidence-cache.ts",
         "packages/daemon/src/validation/run-with-evidence.ts",
         "packages/daemon/src/validation/validation-identity-collector.ts",
-        "packages/daemon/src/validation/local-validation-engine.ts"
+        "packages/daemon/src/validation/local-validation-engine.ts",
+        "packages/daemon/src/runtimes/build-input-identity.ts",
+        "packages/daemon/src/validation/retry-identity.ts"
       ],
       "tests": [
         "packages/daemon/src/validation/validation-evidence-cache.test.ts",
         "packages/daemon/src/validation/run-with-evidence.test.ts",
         "packages/daemon/src/validation/validation-identity-collector.test.ts",
-        "packages/daemon/src/validation/validation-evidence-engine.test.ts"
+        "packages/daemon/src/validation/validation-evidence-engine.test.ts",
+        "packages/daemon/src/runtimes/build-input-identity.test.ts"
       ],
       "evidence": [
         "receipts/validation-cache-engine-red.txt",
         "receipts/validation-cache-engine-green.txt",
         "receipts/checkpoint-4-affected.txt",
         "receipts/validation-replay-isolation-gate.txt",
-        "receipts/delivery-mobile-browser.json"
+        "receipts/delivery-mobile-browser.json",
+        "receipts/provenance-final-targeted-authorized.txt"
       ],
       "prerequisites": [],
       "remaining": "Local exact-input reuse proved; actual Docker/supported operator interaction and exact final source verification remain. Complete hermetic read set is an explicit contract obligation."
@@ -383,14 +387,52 @@
       "id": "W3.3",
       "requirement": "Required commands, resources and provider binding checked before coding agent spawn",
       "status": "partial",
-      "implementation": ["packages/daemon/src/containers/sandbox-container-manager.ts"],
+      "implementation": [
+        "packages/daemon/src/containers/sandbox-container-manager.ts",
+        "packages/daemon/src/pods/execution-preflight.ts",
+        "packages/daemon/src/pods/execution-provenance-ledger.ts",
+        "packages/daemon/src/pods/required-command-preflight.ts",
+        "packages/daemon/src/runtimes/agent-cli-preflight.ts",
+        "packages/daemon/src/runtimes/build-input-identity.ts",
+        "packages/daemon/src/db/migrations/149_execution_provenance.sql",
+        "packages/shared/src/types/execution-provenance.ts",
+        "packages/shared/src/contract.ts",
+        "packages/daemon/src/api/routes/pods.ts",
+        "packages/cli/src/commands/pod.ts",
+        "packages/mobile-web/src/components/DispatchPreflightPanel.tsx",
+        "packages/desktop/Sources/AutopodUI/Views/Shared/DispatchPreflightCard.swift"
+      ],
       "tests": [
         "packages/daemon/src/containers/sandbox-container-manager.test.ts",
-        "packages/daemon/src/containers/container-memory.test.ts"
+        "packages/daemon/src/containers/container-memory.test.ts",
+        "packages/daemon/src/pods/pod-manager.test.ts",
+        "packages/daemon/src/pods/execution-provenance-ledger.test.ts",
+        "packages/daemon/src/pods/required-command-preflight.test.ts",
+        "packages/daemon/src/pods/execution-preflight.test.ts",
+        "packages/daemon/src/runtimes/build-input-identity.test.ts",
+        "packages/shared/src/contract.test.ts",
+        "packages/cli/src/commands/pod.test.ts",
+        "packages/mobile-web/src/components/DispatchPreflightPanel.test.tsx",
+        "packages/desktop/Tests/AutopodClientTests/DispatchPreflightTests.swift"
       ],
-      "evidence": ["receipts/resource-capacity-red.txt", "receipts/resource-capacity-green.txt"],
+      "evidence": [
+        "receipts/resource-capacity-red.txt",
+        "receipts/resource-capacity-green.txt",
+        "receipts/provenance-final-targeted-authorized.txt",
+        "receipts/provenance-type-fixes-targeted.txt",
+        "receipts/provenance-cli-tests.txt",
+        "receipts/provenance-mobile-tests.txt",
+        "receipts/provenance-mobile-browser.json",
+        "receipts/provenance-swift-final.txt",
+        "receipts/provenance-build-final-layout.txt",
+        "receipts/preflight-timeout-red.txt",
+        "receipts/runtime-version-red.txt",
+        "receipts/required-command-before-integration-red.txt",
+        "receipts/execution-provenance-red.txt",
+        "receipts/provenance-migration-prefix.json"
+      ],
       "prerequisites": [],
-      "remaining": "Sandbox requests above configured supported capacity now fail before allocation. Actual effective resource probe, required command checks, cohesive preflight receipt, other targets and live acceptance remain."
+      "remaining": "Main coding startup records immutable actual CLI/version, daemon build input identity, contract and available backend resources before runtime.spawn. Required launcher/resource gates are implemented locally. Metadata is bounded; unavailable values remain explicit. Validation-only/recovered completion and other resume paths still need provenance coverage; sandbox actual metadata and native/live acceptance remain unverified. Launcher availability does not prove repository script semantics."
     },
     {
       "id": "W3.4",
@@ -821,11 +863,48 @@
     {
       "id": "W6.1",
       "requirement": "Execution records contain daemon SHA, CLI version, image digest, contract/validation identity and capabilities",
-      "status": "unverified",
-      "implementation": [],
-      "tests": [],
-      "evidence": [],
-      "prerequisites": []
+      "status": "partial",
+      "implementation": [
+        "packages/daemon/src/pods/execution-preflight.ts",
+        "packages/daemon/src/pods/execution-provenance-ledger.ts",
+        "packages/daemon/src/pods/required-command-preflight.ts",
+        "packages/daemon/src/runtimes/agent-cli-preflight.ts",
+        "packages/daemon/src/runtimes/build-input-identity.ts",
+        "packages/daemon/src/db/migrations/149_execution_provenance.sql",
+        "packages/shared/src/types/execution-provenance.ts",
+        "packages/shared/src/contract.ts",
+        "packages/daemon/src/api/routes/pods.ts",
+        "packages/cli/src/commands/pod.ts",
+        "packages/mobile-web/src/components/DispatchPreflightPanel.tsx",
+        "packages/desktop/Sources/AutopodUI/Views/Shared/DispatchPreflightCard.swift"
+      ],
+      "tests": [
+        "packages/daemon/src/pods/pod-manager.test.ts",
+        "packages/daemon/src/pods/execution-provenance-ledger.test.ts",
+        "packages/daemon/src/pods/required-command-preflight.test.ts",
+        "packages/daemon/src/pods/execution-preflight.test.ts",
+        "packages/daemon/src/runtimes/build-input-identity.test.ts",
+        "packages/shared/src/contract.test.ts",
+        "packages/cli/src/commands/pod.test.ts",
+        "packages/mobile-web/src/components/DispatchPreflightPanel.test.tsx",
+        "packages/desktop/Tests/AutopodClientTests/DispatchPreflightTests.swift"
+      ],
+      "evidence": [
+        "receipts/provenance-final-targeted-authorized.txt",
+        "receipts/provenance-type-fixes-targeted.txt",
+        "receipts/provenance-cli-tests.txt",
+        "receipts/provenance-mobile-tests.txt",
+        "receipts/provenance-mobile-browser.json",
+        "receipts/provenance-swift-final.txt",
+        "receipts/provenance-build-final-layout.txt",
+        "receipts/preflight-timeout-red.txt",
+        "receipts/runtime-version-red.txt",
+        "receipts/required-command-before-integration-red.txt",
+        "receipts/execution-provenance-red.txt",
+        "receipts/provenance-migration-prefix.json"
+      ],
+      "prerequisites": [],
+      "remaining": "Main coding startup records immutable actual CLI/version, daemon build input identity, contract and available backend resources before runtime.spawn. Required launcher/resource gates are implemented locally. Metadata is bounded; unavailable values remain explicit. Validation-only/recovered completion and other resume paths still need provenance coverage; sandbox actual metadata and native/live acceptance remain unverified. Launcher availability does not prove repository script semantics."
     },
     {
       "id": "W6.2",
@@ -950,5 +1029,5 @@
       "prerequisites": []
     }
   ],
-  "lastCheckpoint": "checkpoint-3.md"
+  "lastCheckpoint": "checkpoint-9.md"
 }

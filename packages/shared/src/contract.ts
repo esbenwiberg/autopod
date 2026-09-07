@@ -71,6 +71,29 @@ export const specContractV1Schema = z
     scenarios: list(scenarioSchema),
     requiredFacts: list(factSchema),
     humanReview: list(reviewSchema),
+    executionRequirements: z
+      .object({
+        version: z.literal(1),
+        executables: z
+          .array(
+            z
+              .string()
+              .min(1)
+              .max(256)
+              .regex(/^[A-Za-z0-9_./+:][A-Za-z0-9_./+:-]*$/),
+          )
+          .min(1)
+          .max(64),
+        minimumMemoryBytes: z
+          .number()
+          .int()
+          .positive()
+          .max(1024 ** 4)
+          .optional(),
+        minimumCpu: z.number().positive().max(1024).optional(),
+      })
+      .strict()
+      .optional(),
     validationEvidence: z
       .object({
         version: z.literal(1),
@@ -303,6 +326,9 @@ export function inspectSpecContractYaml(
           requiredFacts: raw.required_facts,
           humanReview: raw.human_review ?? [],
           ...(raw.validation_evidence ? { validationEvidence: raw.validation_evidence } : {}),
+          ...(raw.execution_requirements
+            ? { executionRequirements: raw.execution_requirements }
+            : {}),
         }
       : raw;
   return inspectSpecContract(mapped, source);

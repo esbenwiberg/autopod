@@ -1,6 +1,7 @@
 import { execFileSync } from 'node:child_process';
 import { cpSync, mkdirSync } from 'node:fs';
 import { defineConfig } from 'tsup';
+import { collectImplementationIdentity } from './src/runtimes/build-input-identity.js';
 
 let commitSha: string | null = null;
 let dirty: boolean | null = null;
@@ -27,6 +28,7 @@ try {
   /* copied source with no git evidence is explicitly unidentified */
 }
 const release = {
+  validationImplementationHash: collectImplementationIdentity(),
   commitSha,
   dirty,
   builtAt: new Date().toISOString(),

@@ -38,6 +38,10 @@ import {
   type DispatchPreflightLedger,
   createDispatchPreflightLedger,
 } from './dispatch-preflight-ledger.js';
+import {
+  type ExecutionProvenanceLedger,
+  createExecutionProvenanceLedger,
+} from './execution-provenance-ledger.js';
 import { type TaskRetryLedger, createTaskRetryLedger } from './task-retry-ledger.js';
 
 export interface NewPod {
@@ -234,6 +238,7 @@ import { type TaskExecutionLedger, createTaskExecutionLedger } from './task-exec
 export interface PodRepository {
   taskRetries?: TaskRetryLedger;
   dispatchPreflight?: DispatchPreflightLedger;
+  executionProvenance?: ExecutionProvenanceLedger;
   /** Defer external publication while an enclosing SQLite transaction is pending. */
   afterInsertCommitted?(id: string, effect: () => void): void;
   deliveryLedger?: DeliveryLedger;
@@ -667,6 +672,7 @@ export function createPodRepository(db: Database.Database): PodRepository {
     },
     taskRetries: createTaskRetryLedger(db),
     dispatchPreflight,
+    executionProvenance: createExecutionProvenanceLedger(db),
     completionJournal,
     deliveryLedger: createDeliveryLedger(db),
     taskExecutions,

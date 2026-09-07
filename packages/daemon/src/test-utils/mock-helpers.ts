@@ -150,8 +150,19 @@ export function createMockContainerManager(): ContainerManager {
     extractDirectoryFromContainer: vi.fn(async () => {}),
     getStatus: vi.fn(async () => 'running' as const),
     execInContainer: vi.fn(async (_containerId, command) => {
+      if (command[2]?.includes('autopod-command-preflight-v1')) {
+        const names = JSON.parse(command[3] ?? '[]') as string[];
+        return {
+          stdout: JSON.stringify(names.map((executable) => ({ executable, available: true }))),
+          stderr: '',
+          exitCode: 0,
+        };
+      }
       if (command.join(' ') === 'codex --version') {
         return { stdout: 'codex-cli 0.144.4\n', stderr: '', exitCode: 0 };
+      }
+      if (['claude --version', 'copilot --version', 'pi --version'].includes(command.join(' '))) {
+        return { stdout: `${command[0]} 1.0.0\n`, stderr: '', exitCode: 0 };
       }
       return { stdout: '', stderr: '', exitCode: 0 };
     }),

@@ -25,6 +25,7 @@ import {
 import Database from 'better-sqlite3';
 import pino from 'pino';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { SandboxContainerManager } from '../containers/sandbox-container-manager.js';
 
 // Mock child_process so we can control deriveBareRepoPath and recovery-context git calls
 vi.mock('node:child_process', () => ({
@@ -335,8 +336,19 @@ function createMockContainerManager(): ContainerManager {
     extractDirectoryFromContainer: vi.fn(async () => {}),
     getStatus: vi.fn(async () => 'running' as const),
     execInContainer: vi.fn(async (_containerId, command) => {
+      if (command[2]?.includes('autopod-command-preflight-v1')) {
+        const names = JSON.parse(command[3] ?? '[]') as string[];
+        return {
+          stdout: JSON.stringify(names.map((executable) => ({ executable, available: true }))),
+          stderr: '',
+          exitCode: 0,
+        };
+      }
       if (command.join(' ') === 'codex --version') {
         return { stdout: 'codex-cli 0.144.4\n', stderr: '', exitCode: 0 };
+      }
+      if (['claude --version', 'copilot --version', 'pi --version'].includes(command.join(' '))) {
+        return { stdout: `${command[0]} 1.0.0\n`, stderr: '', exitCode: 0 };
       }
       return { stdout: '', stderr: '', exitCode: 0 };
     }),
@@ -2357,13 +2369,15 @@ describe('PodManager', () => {
       outputTokens: 10,
       costUsd: 0.2,
     });
+    const originalExec = vi.mocked(ctx.containerManager.execInContainer).getMockImplementation();
+    if (!originalExec) throw new Error('Missing container fixture');
     vi.mocked(ctx.containerManager.execInContainer).mockImplementation(
-      async (_containerId, command) => {
+      async (containerId, command, options) => {
         const script = command.join(' ');
         if (script.includes('# autopod: provider failover handoff')) {
           return { stdout: '', stderr: '', exitCode: 1 };
         }
-        return { stdout: '', stderr: '', exitCode: 0 };
+        return originalExec(containerId, command, options);
       },
     );
     vi.mocked(ctx.runtime.spawn).mockImplementation(async function* () {
@@ -5461,8 +5475,10 @@ describe('PodManager', () => {
         oldCredentials,
       );
       ctx.deps.providerAccountStore = providerAccountStore;
+      const originalExec = vi.mocked(ctx.containerManager.execInContainer).getMockImplementation();
+      if (!originalExec) throw new Error('No container fixture');
       vi.mocked(ctx.containerManager.execInContainer).mockImplementation(
-        async (_containerId, command) => {
+        async (containerId, command, options) => {
           const rendered = command.join(' ');
           if (rendered.includes('command -v codex')) {
             return { stdout: '/usr/local/bin/codex\n', stderr: '', exitCode: 0 };
@@ -5470,7 +5486,7 @@ describe('PodManager', () => {
           if (rendered === 'codex --version') {
             return { stdout: 'codex-cli 0.144.4\n', stderr: '', exitCode: 0 };
           }
-          return { stdout: '', stderr: '', exitCode: 0 };
+          return originalExec(containerId, command, options);
         },
       );
       vi.mocked(ctx.containerManager.readFile).mockImplementation(
@@ -5671,6 +5687,143 @@ describe('PodManager', () => {
       } finally {
         await app.close();
       }
+    });
+
+    it('blocks a missing required contract launcher before starting a coding agent', async () => {
+      const ctx = createTestContext();
+      const original = vi.mocked(ctx.containerManager.execInContainer).getMockImplementation();
+      if (!original) throw new Error('No container fixture');
+      vi.mocked(ctx.containerManager.execInContainer).mockImplementation(
+        async (id, command, options) => {
+          if (command[2]?.includes('autopod-command-preflight-v1'))
+            return {
+              stdout: JSON.stringify(
+                (JSON.parse(command[3] ?? '[]') as string[]).map((executable) => ({
+                  executable,
+                  available: executable !== 'autopod_missing_compiler',
+                })),
+              ),
+              stderr: '',
+              exitCode: 0,
+            };
+          return original(id, command, options);
+        },
+      );
+      const manager = createPodManager(ctx.deps);
+      const pod = manager.createSession(
+        {
+          profileName: 'test-profile',
+          task: 'Use the required compiler',
+          skipValidation: true,
+          contract: {
+            contractVersion: 1,
+            title: 'Compiler preflight',
+            dependsOn: [],
+            scenarios: [
+              // biome-ignore lint/suspicious/noThenProperty: contract scenario assertion
+              { id: 'scenario', given: ['input'], when: ['compiled'], then: ['verified'] },
+            ],
+            requiredFacts: [
+              {
+                id: 'compiler',
+                proves: ['scenario'],
+                kind: 'custom-command',
+                artifact: { path: 'new-test.ts', change: 'create' },
+                command: 'autopod_missing_compiler --verify',
+              },
+            ],
+            humanReview: [],
+          },
+        },
+        'operator',
+      );
+      await manager.processPod(pod.id);
+      expect(ctx.runtime.spawn).not.toHaveBeenCalled();
+      expect(manager.getSession(pod.id).failureReason).toContain('autopod_missing_compiler');
+    });
+
+    it('persists runtime and environment provenance before the coding agent starts', async () => {
+      const ctx = createTestContext();
+      ctx.containerManager.getExecutionMetadata = vi.fn(async () => ({
+        imageDigest: `sha256:${'b'.repeat(64)}`,
+        memoryLimitBytes: 10 * 1024 ** 3,
+        cpuLimit: 2,
+        networkMode: 'bridge',
+      }));
+      const spawn = vi.mocked(ctx.runtime.spawn).getMockImplementation();
+      if (!spawn) throw new Error('No runtime fixture');
+      vi.mocked(ctx.runtime.spawn).mockImplementation((config) => {
+        expect(ctx.podRepo.executionProvenance?.latest(config.podId)).toMatchObject({
+          runtime: 'claude',
+          cliVersion: '1.0.0',
+          imageDigest: `sha256:${'b'.repeat(64)}`,
+          capabilities: { memoryLimitBytes: 10 * 1024 ** 3 },
+          status: 'checked',
+        });
+        return spawn(config);
+      });
+      const manager = createPodManager(ctx.deps);
+      const pod = manager.createSession(
+        {
+          profileName: 'test-profile',
+          task: 'Retain exact execution environment',
+          skipValidation: true,
+        },
+        'operator',
+      );
+      await manager.processPod(pod.id);
+      expect(ctx.runtime.spawn).toHaveBeenCalledTimes(1);
+      expect(manager.getSession(pod.id).status).toBe('validated');
+      expect(ctx.podRepo.executionProvenance?.latest(pod.id)?.executionId).toBe(
+        ctx.podRepo.taskExecutions?.snapshot(pod.id).executionId,
+      );
+    });
+
+    it('refuses an undersized sandbox through the actual adapter before allocating or starting a worker', async () => {
+      const ctx = createTestContext(undefined, {
+        executionTarget: 'sandbox',
+        warmImageTag: 'example.azurecr.io/autopod/test-profile:latest',
+      });
+      const createSandbox = vi.fn();
+      const sandbox = new SandboxContainerManager({ createSandbox } as never, logger);
+      vi.mocked(ctx.containerManager.spawn).mockImplementation((config) => sandbox.spawn(config));
+      const manager = createPodManager(ctx.deps);
+      const pod = manager.createSession(
+        { profileName: 'test-profile', task: 'Require the configured memory' },
+        'operator',
+      );
+      await manager.processPod(pod.id);
+      expect(ctx.containerManager.spawn).toHaveBeenCalledTimes(1);
+      expect(createSandbox).not.toHaveBeenCalled();
+      expect(ctx.runtime.spawn).not.toHaveBeenCalled();
+      expect(manager.getSession(pod.id).failureReason).toContain('requested 10 GiB');
+    });
+
+    it('does not start a coding agent when its runtime version cannot be verified', async () => {
+      const ctx = createTestContext();
+      const execute = vi.mocked(ctx.containerManager.execInContainer).getMockImplementation();
+      if (!execute) throw new Error('No container fixture');
+      vi.mocked(ctx.containerManager.execInContainer).mockImplementation(
+        async (id, command, options) =>
+          command.join(' ') === 'claude --version'
+            ? { exitCode: 1, stdout: '', stderr: 'version unavailable' }
+            : execute(id, command, options),
+      );
+      const manager = createPodManager(ctx.deps);
+      const pod = manager.createSession(
+        { profileName: 'test-profile', task: 'Require verifiable runtime' },
+        'operator',
+      );
+      await manager.processPod(pod.id);
+      expect(ctx.runtime.spawn).not.toHaveBeenCalled();
+      expect(manager.getSession(pod.id).failureReason).toContain('version');
+      expect(ctx.podRepo.executionProvenance?.latest(pod.id)).toMatchObject({
+        status: 'blocked',
+        cliVersion: null,
+        diagnostics: expect.arrayContaining([
+          expect.objectContaining({ code: 'PREFLIGHT_RUNTIME_UNAVAILABLE' }),
+        ]),
+      });
     });
 
     it('stops stale contracts after fresh worktree creation and before container provisioning', async () => {
@@ -15992,8 +16145,10 @@ describe('worker startup diagnostics', () => {
       modelProvider: 'openai',
     });
     ctx.deps.runtimeRegistry = createMockRuntimeRegistry(runtime);
+    const originalExec = vi.mocked(ctx.containerManager.execInContainer).getMockImplementation();
+    if (!originalExec) throw new Error('No container fixture');
     vi.mocked(ctx.containerManager.execInContainer).mockImplementation(
-      async (_containerId, command) => {
+      async (containerId, command, options) => {
         const rendered = command.join(' ');
         if (rendered.includes('command -v codex')) {
           return { stdout: '/usr/local/bin/codex\n', stderr: '', exitCode: 0 };
@@ -16001,7 +16156,7 @@ describe('worker startup diagnostics', () => {
         if (rendered === 'codex --version') {
           return { stdout: 'codex-cli 0.144.4\n', stderr: '', exitCode: 0 };
         }
-        return { stdout: '', stderr: '', exitCode: 0 };
+        return originalExec(containerId, command, options);
       },
     );
 

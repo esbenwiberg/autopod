@@ -5,6 +5,7 @@ struct DispatchPreflightCard: View {
   let podId: String
   let actions: PodActions
   @State private var evidence: DispatchPreflightEvidence?
+  @State private var environment: ExecutionProvenance?
   @State private var reason = ""
   @State private var pending: IntentionalRerunDraft?
   @State private var busy = false
@@ -24,6 +25,20 @@ struct DispatchPreflightCard: View {
         }
         if let rerun = evidence.rerun { Text("Intentional rerun of \(rerun.ofPodId): \(rerun.reason)") }
       } else { Text("No dispatch receipt available for this execution.") }
+      Text("Execution environment").font(.headline)
+      if let environment {
+        Text("Preflight \(environment.status) · generation \(environment.generation) · \(environment.checkedAt)")
+        Text("\(environment.runtime) CLI \(environment.cliVersion ?? "unverified") · \(environment.model)")
+        Text("Daemon: \(environment.release.commitSha ?? "unverified")\(environment.release.dirty == true ? " · modified source" : "")").textSelection(.enabled)
+        Text("Image: \(environment.imageDigest ?? "unverified")").font(.caption).textSelection(.enabled)
+        Text("Validation implementation: \(environment.validationImplementationHash ?? "unverified")").font(.caption).textSelection(.enabled)
+        Text("Contract: \(environment.contractHash)").font(.caption).textSelection(.enabled)
+        Text("Memory: \(environment.capabilities.memoryLimitBytes.map(String.init) ?? "unverified") bytes · CPU: \(environment.capabilities.cpuLimit.map { String($0) } ?? "unverified")")
+        ForEach(Array(environment.commands.requirements.enumerated()), id: \.offset) { _, command in
+          Text("\(command.source): \(command.executable) · \(command.available.map { $0 ? "available" : "missing" } ?? "unverified")")
+        }
+        ForEach(Array(environment.diagnostics.enumerated()), id: \.offset) { _, diagnostic in Text(diagnostic.detail) }
+      } else { Text("No execution environment receipt available.") }
       if let created { Text("Distinct execution created: \(created). Inspect its preflight and execution outcome.").textSelection(.enabled) }
       else {
         Text("Intentionally repeating this request creates a distinct task and may run a coding agent. Fresh contract, provider, and environment checks still apply.")
@@ -34,7 +49,7 @@ struct DispatchPreflightCard: View {
       Button("Refresh dispatch evidence") { Task { await refresh() } }.disabled(busy)
     }.padding(16).background(Color(nsColor: .controlBackgroundColor)).clipShape(RoundedRectangle(cornerRadius: 10))
       .task(id: podId) {
-        evidence = nil; pending = nil; reason = ""; error = ""; created = nil
+        evidence = nil; environment = nil; pending = nil; reason = ""; error = ""; created = nil
         if let data = UserDefaults.standard.data(forKey: draftKey) {
           do { let draft = try JSONDecoder().decode(IntentionalRerunDraft.self, from: data); pending = draft; reason = draft.intentionalRerun?.reason ?? "" }
           catch { self.error = "Saved rerun request is unreadable." }
@@ -43,7 +58,7 @@ struct DispatchPreflightCard: View {
       }
   }
   private func refresh() async {
-    do { evidence = try await actions.loadDispatchPreflight(podId).latest; error = "" }
+    do { evidence = try await actions.loadDispatchPreflight(podId).latest; environment = try await actions.loadExecutionProvenance(podId).latest; error = "" }
     catch { self.error = error.localizedDescription }
   }
   private func rerun() async {

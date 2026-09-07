@@ -931,3 +931,9 @@ code {
   font: inherit;
   white-space: normal;
 }
+
+.retry-panel code {
+  overflow-wrap: anywhere;
+  word-break: break-all;
+  white-space: normal;
+}

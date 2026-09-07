@@ -90,6 +90,10 @@ public final class ActionHandler {
       spawnFix: { [weak self] id, message in await self?.spawnFixSession(id, userMessage: message) ?? nil },
       retryCreatePr: { [weak self] id in await self?.retryCreatePr(id) },
       retryDraftScope: api.baseURL.absoluteString,
+      loadExecutionProvenance: { [weak self] id in
+        guard let self else { throw URLError(.notConnectedToInternet) }
+        return try await self.api.getExecutionProvenance(id)
+      },
       loadDispatchPreflight: { [weak self] id in
         guard let self else { throw URLError(.notConnectedToInternet) }
         return try await self.api.getDispatchPreflight(id)

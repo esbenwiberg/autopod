@@ -25,3 +25,11 @@ import Testing
   #expect(receipt.latest?.conflicts.first?.status == "deleted")
   #expect(receipt.latest?.rerun == nil)
 }
+
+@Test func nativeContractPreservesDeclaredExecutionRequirements() throws {
+  let raw = Data(#"{"contractVersion":1,"title":"Environment","dependsOn":[],"scenarios":[],"requiredFacts":[],"humanReview":[],"executionRequirements":{"version":1,"executables":["node"],"minimumMemoryBytes":2147483648,"minimumCpu":2}}"#.utf8)
+  let contract = try JSONDecoder().decode(SpecContractResponse.self, from: raw)
+  #expect(contract.executionRequirements?.minimumCpu == 2)
+  let encoded = try JSONSerialization.jsonObject(with: JSONEncoder().encode(contract)) as! [String: Any]
+  #expect((encoded["executionRequirements"] as? [String: Any])?["minimumMemoryBytes"] as? Int == 2147483648)
+}

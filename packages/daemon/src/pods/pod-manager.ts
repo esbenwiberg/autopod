@@ -180,6 +180,7 @@ import { dispatchRequestHash } from './dispatch-preflight-ledger.js';
 import type { EscalationRepository } from './escalation-repository.js';
 import type { EventBus } from './event-bus.js';
 import type { EventRepository } from './event-repository.js';
+import { inspectExecutionPreflight } from './execution-preflight.js';
 import { formatFeedback } from './feedback-formatter.js';
 import type { FixFeedbackRepository } from './fix-feedback-repository.js';
 import { mergeClaudeMdSections, mergeMcpServers, mergeSkills } from './injection-merger.js';
@@ -1259,76 +1260,6 @@ function mergeOverrides(
   for (const o of existing) map.set(o.findingId, o);
   for (const o of incoming) map.set(o.findingId, o);
   return [...map.values()];
-}
-
-const AGENT_CLI_BY_RUNTIME: Record<Pod['runtime'], string> = {
-  claude: 'claude',
-  codex: 'codex',
-  copilot: 'copilot',
-  pi: 'pi',
-};
-
-const MIN_CODEX_CLI_VERSION = '0.144.4';
-
-function parseCliVersion(output: string): [number, number, number] | null {
-  const match = output.match(/\b(\d+)\.(\d+)\.(\d+)\b/);
-  if (!match) return null;
-  return [Number(match[1]), Number(match[2]), Number(match[3])];
-}
-
-function isVersionBelow(
-  version: [number, number, number],
-  minimum: [number, number, number],
-): boolean {
-  for (let index = 0; index < version.length; index += 1) {
-    const current = version[index] ?? 0;
-    const required = minimum[index] ?? 0;
-    if (current !== required) return current < required;
-  }
-  return false;
-}
-
-async function verifyAgentCli(
-  containerManager: ContainerManager,
-  containerId: string,
-  runtime: Pod['runtime'],
-): Promise<string> {
-  const cli = AGENT_CLI_BY_RUNTIME[runtime];
-  const result = await containerManager.execInContainer(
-    containerId,
-    ['sh', '-lc', `command -v ${cli}`],
-    { timeout: 10_000 },
-  );
-
-  if (result.exitCode !== 0) {
-    const detail = (result.stderr || result.stdout).trim();
-    throw new Error(
-      `Agent CLI missing: ${cli} is not installed in this image. Rebuild the ${runtime} base/warm image.${detail ? ` ${detail}` : ''}`,
-    );
-  }
-
-  if (runtime === 'codex') {
-    const versionResult = await containerManager.execInContainer(
-      containerId,
-      ['codex', '--version'],
-      { timeout: 10_000 },
-    );
-    const output = (versionResult.stdout || versionResult.stderr).trim();
-    const version = parseCliVersion(output);
-    const minimum = parseCliVersion(MIN_CODEX_CLI_VERSION);
-    if (versionResult.exitCode !== 0 || !version || !minimum) {
-      throw new Error(
-        `Unable to verify the Codex CLI version${output ? ` (${output})` : ''}. Rebuild the codex base/warm image with Codex CLI ${MIN_CODEX_CLI_VERSION} or newer.`,
-      );
-    }
-    if (isVersionBelow(version, minimum)) {
-      throw new Error(
-        `Codex CLI ${version.join('.')} is incompatible; Autopod requires ${MIN_CODEX_CLI_VERSION} or newer. Rebuild the codex base/warm image.`,
-      );
-    }
-  }
-
-  return result.stdout.trim();
 }
 
 export interface ContainerManagerFactory {
@@ -9646,14 +9577,31 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         emitStatus(
           `Starting worker: provider=${profile.modelProvider ?? 'anthropic'}, runtime=${pod.runtime}, model=${pod.model}`,
         );
-        try {
-          const cliPath = await verifyAgentCli(containerManager, containerId, pod.runtime);
-          logger.info({ podId, runtime: pod.runtime, cliPath }, 'Agent CLI preflight passed');
-        } catch (err) {
-          const message = err instanceof Error ? err.message : String(err);
+        const provenance = await inspectExecutionPreflight(
+          containerManager,
+          containerId,
+          pod,
+          profile,
+        );
+        podRepo.executionProvenance?.record(podId, pod.lifecycleGeneration, provenance);
+        if (provenance.status === 'blocked') {
+          const failure = provenance.diagnostics.find(
+            (item) =>
+              item.code.startsWith('PREFLIGHT_') || item.code === 'STREAMING_EXEC_UNSUPPORTED',
+          );
+          const message = failure?.detail ?? 'Execution preflight requires reconciliation';
           emitStatus(message);
-          throw err;
+          throw new AutopodError(message, failure?.code ?? 'EXECUTION_PREFLIGHT_BLOCKED', 409);
         }
+        logger.info(
+          {
+            podId,
+            runtime: pod.runtime,
+            cliPath: provenance.cliPath,
+            cliVersion: provenance.cliVersion,
+          },
+          'Agent CLI preflight passed',
+        );
 
         emitStatus('Spawning agent…');
         const runtime = runtimeRegistry.get(pod.runtime);

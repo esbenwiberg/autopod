@@ -706,6 +706,14 @@ export function podRoutes(
     return podRepo.taskExecutions.snapshot(podId);
   });
 
+  app.get('/pods/:podId/execution-provenance', async (request) => {
+    const { podId } = request.params as { podId: string };
+    podRepo.getOrThrow(podId);
+    if (!podRepo.executionProvenance)
+      throw new AutopodError('Execution provenance unavailable', 'PROVENANCE_UNAVAILABLE', 503);
+    return { latest: podRepo.executionProvenance.latest(podId) };
+  });
+
   app.get('/pods/:podId/rerun-template', async (request) => {
     const { podId } = request.params as { podId: string };
     return dispatchRerunRequest(podRepo.getOrThrow(podId));

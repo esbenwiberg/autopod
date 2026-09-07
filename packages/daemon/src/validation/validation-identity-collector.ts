@@ -1,5 +1,4 @@
 import { createHash } from 'node:crypto';
-import { readFile } from 'node:fs/promises';
 import type { ValidationInputIdentity } from '@autopod/shared';
 import type { ContainerManager } from '../interfaces/container-manager.js';
 import type { ValidationEngineConfig } from '../interfaces/validation-engine.js';
@@ -89,10 +88,9 @@ export function createValidationIdentityCollector(
     try {
       implementationPromise ??= implementationOverride
         ? Promise.resolve(implementationOverride)
-        : daemonRelease.source === 'build'
-          ? readFile(new URL(import.meta.url)).then((bytes) =>
-              createHash('sha256').update(bytes).digest('hex'),
-            )
+        : daemonRelease.source === 'build' &&
+            /^[a-f0-9]{64}$/.test(daemonRelease.validationImplementationHash ?? '')
+          ? Promise.resolve(daemonRelease.validationImplementationHash as string)
           : Promise.resolve(undefined);
       const implementation = await implementationPromise;
       if (!implementation || !/^[a-f0-9]{64}$/.test(implementation)) return undefined;

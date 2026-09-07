@@ -1,0 +1,26 @@
+
+ RUN  v4.1.10 /private/tmp/autopod-durable-execution/packages/daemon
+
+ ❯ src/pods/pod-manager.test.ts (415 tests | 1 failed) 18062ms
+     × does not protect a missing historical handoff during later rework 55ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/pods/pod-manager.test.ts > PodManager > does not protect a missing historical handoff during later rework
+AssertionError: expected "vi.fn()" to be called at least once
+ ❯ src/pods/pod-manager.test.ts:2382:31
+    2380|     await manager.processPod(pod.id);
+    2381|
+    2382|     expect(ctx.runtime.spawn).toHaveBeenCalled();
+       |                               ^
+    2383|     expect(manager.getSession(pod.id).status).not.toBe('failed');
+    2384|     const handoffGuardCalls = vi
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed | 2 passed (3)
+      Tests  1 failed | 454 passed (455)
+   Start at  16:10:23
+   Duration  19.10s (transform 1.49s, setup 0ms, import 2.68s, tests 20.50s, environment 0ms)
+

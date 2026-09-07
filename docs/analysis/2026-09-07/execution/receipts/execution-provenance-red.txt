@@ -1,0 +1,30 @@
+
+ RUN  v4.1.10 /private/tmp/autopod-durable-execution/packages/daemon
+
+ ❯ src/pods/pod-manager.test.ts (417 tests | 1 failed | 416 skipped) 85ms
+       × persists runtime and environment provenance before the coding agent starts 84ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/pods/pod-manager.test.ts > PodManager > processPod > persists runtime and environment provenance before the coding agent starts
+AssertionError: expected 'failed' to be 'validated' // Object.is equality
+
+Expected: "validated"
+Received: "failed"
+
+ ❯ src/pods/pod-manager.test.ts:5697:49
+    5695|       await manager.processPod(pod.id);
+    5696|       expect(ctx.runtime.spawn).toHaveBeenCalledTimes(1);
+    5697|       expect(manager.getSession(pod.id).status).toBe('validated');
+       |                                                 ^
+    5698|       expect(ctx.podRepo.executionProvenance?.latest(pod.id)?.executio…
+    5699|     });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 416 skipped (417)
+   Start at  16:13:28
+   Duration  1.31s (transform 717ms, setup 0ms, import 1.11s, tests 85ms, environment 0ms)
+

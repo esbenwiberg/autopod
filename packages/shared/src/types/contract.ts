@@ -44,7 +44,15 @@ export interface ValidationEvidenceManifest {
   environmentRevision: string;
 }
 
+export interface ExecutionRequirements {
+  version: 1;
+  /** Explicit launcher dependencies for dynamic shell commands. */
+  executables: string[];
+  minimumMemoryBytes?: number;
+  minimumCpu?: number;
+}
 export interface SpecContract {
+  executionRequirements?: ExecutionRequirements;
   validationEvidence?: ValidationEvidenceManifest;
   contractVersion: 1;
   title: string;

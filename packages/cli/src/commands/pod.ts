@@ -231,6 +231,41 @@ function resolveContractPath(specRoot: string): string {
 
 export function registerPodCommands(program: Command, getClient: () => AutopodClient): void {
   program
+    .command('execution-provenance <id>')
+    .description('Inspect recorded runtime, image, build, resource and command preflight evidence')
+    .option('--json', 'Output JSON')
+    .action(async (id: string, opts: { json?: boolean }) => {
+      const client = getClient();
+      const data = await client.getExecutionProvenance(await resolvePodId(client, id));
+      withJsonOutput(opts, data, ({ latest }) => {
+        if (!latest) {
+          console.log('Execution provenance unavailable for this execution.');
+          return;
+        }
+        console.log(
+          `Preflight ${latest.status} at ${latest.checkedAt}; execution ${latest.executionId}, generation ${latest.generation}`,
+        );
+        console.log(
+          `${latest.runtime} CLI ${latest.cliVersion ?? 'unverified'}; model ${latest.model}`,
+        );
+        console.log(
+          `Daemon ${latest.release.commitSha ?? 'unverified'}${latest.release.dirty ? ' (modified source)' : ''}; image ${latest.imageDigest ?? 'unverified'}`,
+        );
+        console.log(
+          `Contract ${latest.contractHash}; validation implementation ${latest.validationImplementationHash ?? 'unverified'}`,
+        );
+        console.log(
+          `Memory ${latest.capabilities.memoryLimitBytes ?? 'unverified'} bytes; CPU ${latest.capabilities.cpuLimit ?? 'unverified'}`,
+        );
+        for (const command of latest.commands.requirements)
+          console.log(
+            `${command.source}: ${command.executable} ${command.available === null ? 'unverified' : command.available ? 'available' : 'missing'}`,
+          );
+        for (const diagnostic of latest.diagnostics)
+          console.log(`${diagnostic.code}: ${diagnostic.detail}`);
+      });
+    });
+  program
     .command('rerun <id>')
     .description(
       'Create an intentional distinct task using the prior request; all preflight gates still apply',
