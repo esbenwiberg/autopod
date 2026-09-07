@@ -826,7 +826,7 @@ it('reads execution provenance through the real HTTP client without inventing un
   }
 });
 
-it.each(['Branch preservation', 'Approval delivery'])(
+it.each(['Branch preservation', 'Approval delivery', 'Source reconciliation'])(
   'does not report approval when %s fails over HTTP and permits explicit retry',
   async (failure) => {
     const pod = await createMockClient().getSession('abcd1234');
@@ -836,13 +836,15 @@ it.each(['Branch preservation', 'Approval delivery'])(
       if (req.method === 'POST' && req.url === '/pods/abcd1234/approve') {
         attempts++;
         if (attempts === 1) {
-          res.statusCode = 502;
+          res.statusCode = failure === 'Source reconciliation' ? 409 : 502;
           res.end(
             JSON.stringify({
               error:
-                failure === 'Branch preservation'
-                  ? 'BRANCH_PRESERVATION_FAILED'
-                  : 'APPROVAL_DELIVERY_FAILED',
+                failure === 'Source reconciliation'
+                  ? 'DELIVERY_RECONCILIATION_REQUIRED'
+                  : failure === 'Branch preservation'
+                    ? 'BRANCH_PRESERVATION_FAILED'
+                    : 'APPROVAL_DELIVERY_FAILED',
               message: `${failure} failed. Original resources retained; repair remote access and retry approval.`,
             }),
           );

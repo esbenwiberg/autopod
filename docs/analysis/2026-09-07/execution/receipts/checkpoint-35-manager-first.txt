@@ -1,0 +1,68 @@
+
+ RUN  v4.1.11 /private/tmp/autopod-durable-execution/packages/daemon
+
+ ❯ src/pods/pod-manager.test.ts (489 tests | 4 failed | 428 skipped) 2962ms
+       × autoApprove readiness skips needs_review, risky, and waived pods 71ms
+       × single PR readiness approval uses series readiness for the PR-owning pod 47ms
+       × enqueues dependent series pod after manual approval 39ms
+       × does not start single-PR dependents on force-approved validated parents 45ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 4 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/pods/pod-manager.test.ts > PodManager > approveSession > autoApprove readiness skips needs_review, risky, and waived pods
+AutopodError: Approval delivery failed. Worktree identity is unavailable. Original resources retained; repair delivery and retry approval.
+ ❯ Object.approveSession src/pods/pod-manager.ts:11727:17
+    11725|           podRepo.update(podId, { failureReason: reason });
+    11726|           emitActivityError(podId, reason, false);
+    11727|           throw new AutopodError(reason, 'DELIVERY_RECONCILIATION_REQU…
+       |                 ^
+    11728|         }
+    11729|       }
+ ❯ src/pods/pod-manager.test.ts:5064:7
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/4]⎯
+
+ FAIL  src/pods/pod-manager.test.ts > PodManager > approveSession > single PR readiness approval uses series readiness for the PR-owning pod
+AutopodError: Approval delivery failed. Worktree identity is unavailable. Original resources retained; repair delivery and retry approval.
+ ❯ Object.approveSession src/pods/pod-manager.ts:11727:17
+    11725|           podRepo.update(podId, { failureReason: reason });
+    11726|           emitActivityError(podId, reason, false);
+    11727|           throw new AutopodError(reason, 'DELIVERY_RECONCILIATION_REQU…
+       |                 ^
+    11728|         }
+    11729|       }
+ ❯ src/pods/pod-manager.test.ts:5132:7
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/4]⎯
+
+ FAIL  src/pods/pod-manager.test.ts > PodManager > approveSession > enqueues dependent series pod after manual approval
+AutopodError: Approval delivery failed. Worktree identity is unavailable. Original resources retained; repair delivery and retry approval.
+ ❯ Object.approveSession src/pods/pod-manager.ts:11727:17
+    11725|           podRepo.update(podId, { failureReason: reason });
+    11726|           emitActivityError(podId, reason, false);
+    11727|           throw new AutopodError(reason, 'DELIVERY_RECONCILIATION_REQU…
+       |                 ^
+    11728|         }
+    11729|       }
+ ❯ src/pods/pod-manager.test.ts:5758:7
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/4]⎯
+
+ FAIL  src/pods/pod-manager.test.ts > PodManager > approveSession > does not start single-PR dependents on force-approved validated parents
+AutopodError: Approval delivery failed. Worktree identity is unavailable. Original resources retained; repair delivery and retry approval.
+ ❯ Object.approveSession src/pods/pod-manager.ts:11727:17
+    11725|           podRepo.update(podId, { failureReason: reason });
+    11726|           emitActivityError(podId, reason, false);
+    11727|           throw new AutopodError(reason, 'DELIVERY_RECONCILIATION_REQU…
+       |                 ^
+    11728|         }
+    11729|       }
+ ❯ src/pods/pod-manager.test.ts:5835:7
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[4/4]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  4 failed | 57 passed | 428 skipped (489)
+   Start at  23:09:24
+   Duration  4.19s (transform 756ms, setup 0ms, import 1.13s, tests 2.96s, environment 0ms)

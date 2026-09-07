@@ -5,7 +5,7 @@ import { expect, it, vi } from 'vitest';
 import { usePodsStore } from '../store/pods.js';
 import { ActionBar } from './ActionBar.js';
 
-it.each(['Branch preservation', 'Approval delivery'])(
+it.each(['Branch preservation', 'Approval delivery', 'Source reconciliation'])(
   'waits for daemon evidence and retains a retryable action after %s fails',
   async (failure) => {
     // This view reads identity, status and readiness; unrelated full-pod fields are unused.
@@ -39,12 +39,14 @@ it.each(['Branch preservation', 'Approval delivery'])(
           new Response(
             JSON.stringify({
               error:
-                failure === 'Branch preservation'
-                  ? 'BRANCH_PRESERVATION_FAILED'
-                  : 'APPROVAL_DELIVERY_FAILED',
+                failure === 'Source reconciliation'
+                  ? 'DELIVERY_RECONCILIATION_REQUIRED'
+                  : failure === 'Branch preservation'
+                    ? 'BRANCH_PRESERVATION_FAILED'
+                    : 'APPROVAL_DELIVERY_FAILED',
               message: `${failure} failed. Original resources retained; repair remote access and retry approval.`,
             }),
-            { status: 502 },
+            { status: failure === 'Source reconciliation' ? 409 : 502 },
           ),
         );
       });

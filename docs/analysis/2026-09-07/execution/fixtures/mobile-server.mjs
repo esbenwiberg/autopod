@@ -186,9 +186,12 @@ if (startupRetryFixture) {
 }
 const deliveryDispositionFixture = process.env.FIXTURE_MODE === 'delivery-disposition';
 let deliveryDispositionReads = 0;
+const missingSourceFixture = process.env.FIXTURE_MODE === 'approval-source-missing';
 const normalDeliveryFixture = process.env.FIXTURE_MODE === 'approval-delivery';
 const approvalPreservationFixture =
-  process.env.FIXTURE_MODE === 'approval-preservation' || normalDeliveryFixture;
+  process.env.FIXTURE_MODE === 'approval-preservation' ||
+  normalDeliveryFixture ||
+  missingSourceFixture;
 let approvalAttempts = 0;
 if (approvalPreservationFixture)
   pod = {
@@ -199,7 +202,7 @@ if (approvalPreservationFixture)
     finalization: null,
     task: '[Local fixture] Preserve branch after failed approval push',
     branch: 'local-preserved-branch',
-    worktreePath: '/local-fixture/preserved-worktree',
+    worktreePath: missingSourceFixture ? null : '/local-fixture/preserved-worktree',
     containerId: 'local-preserved-container',
   };
 const costPayloadLimitFixture = process.env.FIXTURE_MODE === 'cost-payload-limit';
@@ -245,17 +248,28 @@ const server = createServer(async (req, res) => {
       }),
     );
     if (approvalAttempts === 1) {
-      const message = normalDeliveryFixture
-        ? 'Approval delivery failed. Branch push did not complete. Original resources retained; repair delivery and retry approval.'
-        : 'Branch preservation failed. Original resources retained; repair the branch or remote access and retry approval.';
+      const message = missingSourceFixture
+        ? 'Approval delivery failed. Worktree identity is unavailable. Original resources retained; repair delivery and retry approval.'
+        : normalDeliveryFixture
+          ? 'Approval delivery failed. Branch push did not complete. Original resources retained; repair delivery and retry approval.'
+          : 'Branch preservation failed. Original resources retained; repair the branch or remote access and retry approval.';
       pod = { ...pod, failureReason: message };
-      res.statusCode = 502;
+      res.statusCode = missingSourceFixture ? 409 : 502;
       return json({
-        error: normalDeliveryFixture ? 'APPROVAL_DELIVERY_FAILED' : 'BRANCH_PRESERVATION_FAILED',
+        error: missingSourceFixture
+          ? 'DELIVERY_RECONCILIATION_REQUIRED'
+          : normalDeliveryFixture
+            ? 'APPROVAL_DELIVERY_FAILED'
+            : 'BRANCH_PRESERVATION_FAILED',
         message,
       });
     }
-    pod = { ...pod, status: 'complete', failureReason: null };
+    pod = {
+      ...pod,
+      status: 'complete',
+      failureReason: null,
+      ...(missingSourceFixture ? { worktreePath: '/local-fixture/restored-worktree' } : {}),
+    };
     return json({ ok: true });
   }
   if (pathname === '/pods/local-fixture/execution-provenance')

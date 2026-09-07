@@ -2,7 +2,7 @@ import Foundation
 import Testing
 @testable import AutopodClient
 
-@Test(arguments: ["failed", "delivery-failed"]) func approvalClientSurfacesPreservationFailure(podID: String) async throws {
+@Test(arguments: ["failed", "delivery-failed", "missing-source"]) func approvalClientSurfacesPreservationFailure(podID: String) async throws {
   let config = URLSessionConfiguration.ephemeral
   config.protocolClasses = [ApprovalPreservationProtocol.self]
   let api = DaemonAPI(baseURL: URL(string: "https://approval-preservation.invalid")!, token: "synthetic", session: URLSession(configuration: config))
@@ -11,7 +11,7 @@ import Testing
     Issue.record("Failed preservation was accepted as an approval")
   } catch let error as DaemonError {
     if case .serverError(let status, let message) = error {
-      #expect(status == 502)
+      #expect(status == (podID == "missing-source" ? 409 : 502))
       #expect(message.contains("Original resources retained"))
       #expect(message.contains("retry approval"))
     } else { Issue.record("Unexpected error: \(error)") }
@@ -27,12 +27,15 @@ private final class ApprovalPreservationProtocol: URLProtocol, @unchecked Sendab
     #expect(request.url?.path.hasSuffix("/approve") == true)
     let failed = request.url?.path != "/pods/succeeded/approve"
     let delivery = request.url?.path == "/pods/delivery-failed/approve"
-    let body = delivery
+    let missingSource = request.url?.path == "/pods/missing-source/approve"
+    let body = missingSource
+      ? #"{"error":"DELIVERY_RECONCILIATION_REQUIRED","message":"Approval delivery failed. Worktree identity is unavailable. Original resources retained; repair delivery and retry approval."}"#
+      : delivery
       ? #"{"error":"APPROVAL_DELIVERY_FAILED","message":"Approval delivery failed. Original resources retained; repair delivery and retry approval."}"#
       : failed
       ? #"{"error":"BRANCH_PRESERVATION_FAILED","message":"Branch preservation failed. Original resources retained; repair remote access and retry approval."}"#
       : #"{"ok":true}"#
-    client?.urlProtocol(self, didReceive: HTTPURLResponse(url: request.url!, statusCode: failed ? 502 : 200, httpVersion: nil, headerFields: ["Content-Type":"application/json"])!, cacheStoragePolicy: .notAllowed)
+    client?.urlProtocol(self, didReceive: HTTPURLResponse(url: request.url!, statusCode: missingSource ? 409 : failed ? 502 : 200, httpVersion: nil, headerFields: ["Content-Type":"application/json"])!, cacheStoragePolicy: .notAllowed)
     client?.urlProtocol(self, didLoad: Data(body.utf8))
     client?.urlProtocolDidFinishLoading(self)
   }

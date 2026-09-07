@@ -11713,6 +11713,20 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
       const readiness = await resolveApprovalReadiness(pod, { waitForAdvisory: true });
       const approvalReason = assertApprovalAllowed(podId, readiness, options);
       const isWorkspacePod = pod.options?.agentMode === 'interactive';
+      assertApprovalCurrent(pod);
+      if (pod.options.output === 'pr' || pod.options.output === 'branch') {
+        const missingIdentity = !pod.worktreePath?.trim()
+          ? 'Worktree identity is unavailable.'
+          : !pod.branch?.trim()
+            ? 'Branch identity is unavailable.'
+            : null;
+        if (missingIdentity) {
+          const reason = `Approval delivery failed. ${missingIdentity} Original resources retained; repair delivery and retry approval.`;
+          podRepo.update(podId, { failureReason: reason });
+          emitActivityError(podId, reason, false);
+          throw new AutopodError(reason, 'DELIVERY_RECONCILIATION_REQUIRED', 409);
+        }
+      }
 
       // No-change fast-path: skip PR creation and complete directly.
       // Workspace pods are excluded — their human edits live in the container until
@@ -11820,7 +11834,8 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           assertApprovalCurrent(mergingAnchor, { allowRemovedContainer: true });
           const noChangePod = transition(s2, 'complete', {
             completedAt: new Date().toISOString(),
-            ...(pod.failureReason?.startsWith('Branch preservation failed.')
+            ...(pod.failureReason?.startsWith('Branch preservation failed.') ||
+            pod.failureReason?.startsWith('Approval delivery failed.')
               ? { failureReason: null }
               : {}),
           });

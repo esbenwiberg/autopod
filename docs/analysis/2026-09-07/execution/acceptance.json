@@ -226,7 +226,8 @@
         "checkpoint-30.md: retained failed approval delivery, explicit HTTP error/retry, review gate and original lifecycle guards; wider durability remains partial",
         "checkpoint-31.md: late merge-poller lifecycle and PR identity guards; overlapping ticks and durable cross-process receipts remain partial",
         "checkpoint-32.md: serial in-process merge polls, replacement owner drain and stop fencing; cross-process delivery and cleanup dispositions remain partial",
-        "checkpoint-33.md: transactional durable decision admission and confirmed merge observations; operator disposition projection and broader delivery receipts remain partial"
+        "checkpoint-33.md: transactional durable decision admission and confirmed merge observations; operator disposition projection and broader delivery receipts remain partial",
+        "checkpoint-35.md"
       ],
       "prerequisites": [
         "PR creation intent/reconciliation implemented locally; broader finalization side effects and operator override remain."
@@ -1151,7 +1152,8 @@
         "receipts/checkpoint-25-full-validation.txt",
         "receipts/checkpoint-25-validation-identity.json",
         "checkpoint-26.md: stored subtotals, unavailable attribution, source estimates, API/CLI/mobile/native test evidence; live and native interaction remain unverified",
-        "checkpoint-27.md: bounded phase projections, local malformed-contract per-pod HTTP 500 regression, CLI/mobile/native checks; live root cause and native interaction remain unverified"
+        "checkpoint-27.md: bounded phase projections, local malformed-contract per-pod HTTP 500 regression, CLI/mobile/native checks; live root cause and native interaction remain unverified",
+        "checkpoint-35.md"
       ],
       "prerequisites": [
         "Selected mobile flows and new health CLI have local interaction proof. Desktop has compilation and tests only. Remaining operator flows, physical device and live evidence are outstanding."
@@ -1577,7 +1579,8 @@
         "receipts/interactive-preservation-cli.txt",
         "receipts/interactive-coordination-final.txt",
         "receipts/interactive-coordination-build.txt",
-        "receipts/interactive-coordination-cli.txt"
+        "receipts/interactive-coordination-cli.txt",
+        "checkpoint-35.md"
       ],
       "prerequisites": [
         "Full required pipeline passes on clean 46f63982ea42aef832fcb6df1c21631e468f409c: daemon 4468 passed, one known Linux-only skip; all 15 Turbo tasks passed; audit zero, secret scan and deployment/cleanup safeguards passed. The skipped source callback has separate local Linux proof at unchanged implementation 18e5bd37. Final source validation remains after further implementation."
@@ -1616,7 +1619,8 @@
         "receipts/interactive-coordination-cli.txt",
         "checkpoint-26.md: stored subtotals, unavailable attribution, source estimates, API/CLI/mobile/native test evidence; live and native interaction remain unverified",
         "checkpoint-27.md: bounded phase projections, local malformed-contract per-pod HTTP 500 regression, CLI/mobile/native checks; live root cause and native interaction remain unverified",
-        "checkpoint-28.md: approval push failure preservation, restart retry, stale generation and late decision regressions, API/CLI/mobile/native client checks; broader durable finalization and native interaction remain"
+        "checkpoint-28.md: approval push failure preservation, restart retry, stale generation and late decision regressions, API/CLI/mobile/native client checks; broader durable finalization and native interaction remain",
+        "checkpoint-35.md"
       ],
       "prerequisites": [
         "Selected mobile flows and new health CLI have local interaction proof. Desktop has compilation and tests only. Remaining operator flows, physical device and live evidence are outstanding."
@@ -1641,5 +1645,5 @@
       "prerequisites": []
     }
   ],
-  "lastCheckpoint": "checkpoint-34.md"
+  "lastCheckpoint": "checkpoint-35.md"
 }

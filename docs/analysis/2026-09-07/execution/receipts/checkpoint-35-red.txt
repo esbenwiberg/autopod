@@ -1,0 +1,57 @@
+
+ RUN  v4.1.11 /private/tmp/autopod-durable-execution/packages/daemon
+
+ ❯ src/pods/pod-manager.test.ts (489 tests | 5 failed | 483 skipped) 281ms
+       × retains git output without a worktree and retries after repair ('pr', cached +0) 76ms
+       × retains git output without a worktree and retries after repair ('pr', cached 2) 41ms
+       × retains git output without a worktree and retries after repair ('branch', cached +0) 40ms
+       × retains git output without a worktree and retries after repair ('branch', cached 2) 40ms
+       × retains normal git delivery when the branch identity is missing 43ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 5 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/pods/pod-manager.test.ts > PodManager > approveSession > retains git output without a worktree and retries after repair ('pr', cached +0)
+ FAIL  src/pods/pod-manager.test.ts > PodManager > approveSession > retains git output without a worktree and retries after repair ('pr', cached 2)
+ FAIL  src/pods/pod-manager.test.ts > PodManager > approveSession > retains git output without a worktree and retries after repair ('branch', cached +0)
+ FAIL  src/pods/pod-manager.test.ts > PodManager > approveSession > retains git output without a worktree and retries after repair ('branch', cached 2)
+AssertionError: promise resolved "undefined" instead of rejecting
+
+- Expected:
+Error {
+  "message": "rejected promise",
+}
+
++ Received:
+undefined
+
+ ❯ src/pods/pod-manager.test.ts:4773:50
+
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/5]⎯
+
+ FAIL  src/pods/pod-manager.test.ts > PodManager > approveSession > retains normal git delivery when the branch identity is missing
+AssertionError: promise resolved "undefined" instead of rejecting
+
+- Expected:
+Error {
+  "message": "rejected promise",
+}
+
++ Received:
+undefined
+
+ ❯ src/pods/pod-manager.test.ts:4797:50
+    4795|       ctx.podRepo.update(pod.id, validatedPodUpdates(pod.id, { contain…
+    4796|       ctx.db.prepare("UPDATE pods SET branch = '' WHERE id = ?").run(p…
+    4797|       await expect(manager.approveSession(pod.id)).rejects.toMatchObje…
+       |                                                  ^
+    4798|       expect(manager.getSession(pod.id)).toMatchObject({ status: 'vali…
+    4799|       expect(ctx.containerManager.kill).not.toHaveBeenCalled();
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/5]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  5 failed | 1 passed | 483 skipped (489)
+   Start at  23:08:44
+   Duration  1.54s (transform 743ms, setup 0ms, import 1.14s, tests 281ms, environment 0ms)

@@ -1,0 +1,7 @@
+Local browser interaction with actual built mobile client and approval-source-missing fixture.
+Initial navigation to port 56014 failed because the command used PORT, while fixture uses FIXTURE_PORT; server reported assigned loopback port 52017. No application claim rests on the failed navigation.
+Tab 22 at http://127.0.0.1:52017/mobile/#/pod/local-fixture displayed validated and enabled Approve.
+First Approve returned fixture HTTP 409 DELIVERY_RECONCILIATION_REQUIRED. AX displayed: Approval delivery failed. Worktree identity is unavailable. Original resources retained; repair delivery and retry approval.
+Status remained validated, Approve remained available. Explicit second click cleared error, with no optimistic completion. Fixture models source repair before returning success.
+New tab 23 fetched complete and no Approve action. Exactly two POST attempts are recorded in fixture log. Tabs 22 and 23 closed. Selecting initial failed-navigation tab 21 for cleanup was blocked by browser URL policy for its generated data URL; its closure is unverified. Fixture server terminated with exit 130.
+Actual source retention/reconciliation is proven separately through the real SQLite/Fastify/manager tests. This browser fixture is UI interaction evidence, not production/provider/native UI evidence.

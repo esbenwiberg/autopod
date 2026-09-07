@@ -4758,6 +4758,140 @@ describe('PodManager', () => {
   });
 
   describe('approveSession', () => {
+    it.each([
+      { output: 'pr' as const, cachedChanges: 0 },
+      { output: 'pr' as const, cachedChanges: 2 },
+      { output: 'branch' as const, cachedChanges: 0 },
+      { output: 'branch' as const, cachedChanges: 2 },
+    ])(
+      'retains git output without a worktree and retries after repair ($output, cached $cachedChanges)',
+      async ({ output, cachedChanges }) => {
+        const ctx = createTestContext();
+        const manager = createPodManager(ctx.deps);
+        const pod = manager.createSession(
+          {
+            profileName: 'test-profile',
+            task: 'Preserve missing worktree',
+            options: { agentMode: 'auto', output, validate: true },
+          },
+          'user-1',
+        );
+        ctx.podRepo.update(
+          pod.id,
+          validatedPodUpdates(pod.id, {
+            containerId: 'preserved-source',
+            worktreePath: null,
+            filesChanged: cachedChanges,
+          }),
+        );
+        const completed: string[] = [];
+        const transitions: string[] = [];
+        ctx.eventBus.subscribe((event) => {
+          if (event.type === 'pod.status_changed') transitions.push(event.newStatus);
+          if (event.type === 'pod.completed') completed.push(event.podId);
+        });
+        await expect(manager.approveSession(pod.id)).rejects.toMatchObject({
+          code: 'DELIVERY_RECONCILIATION_REQUIRED',
+          statusCode: 409,
+        });
+        expect(manager.getSession(pod.id)).toMatchObject({
+          status: 'validated',
+          containerId: 'preserved-source',
+          worktreePath: null,
+          completedAt: null,
+          failureReason: expect.stringContaining('Worktree'),
+        });
+        expect(ctx.containerManager.kill).not.toHaveBeenCalled();
+        expect(ctx.prManager.createPr).not.toHaveBeenCalled();
+        expect(ctx.prManager.mergePr).not.toHaveBeenCalled();
+        expect(ctx.worktreeManager.mergeBranch).not.toHaveBeenCalled();
+        expect(completed).toEqual([]);
+        expect(transitions).toEqual([]);
+        expect(ctx.worktreeManager.pushBranch).not.toHaveBeenCalled();
+        ctx.podRepo.update(pod.id, { worktreePath: '/tmp/restored-approval' });
+        vi.mocked(ctx.worktreeManager.getDiffStats).mockResolvedValue({
+          filesChanged: 2,
+          linesAdded: 3,
+          linesRemoved: 0,
+        });
+        await createPodManager(ctx.deps).approveSession(pod.id);
+        expect(manager.getSession(pod.id)).toMatchObject({
+          status: 'complete',
+          failureReason: null,
+        });
+        expect(completed).toEqual([pod.id]);
+        expect(ctx.worktreeManager.mergeBranch).toHaveBeenCalledTimes(1);
+        expect(ctx.prManager.createPr).toHaveBeenCalledTimes(output === 'pr' ? 1 : 0);
+        expect(ctx.runtime.spawn).not.toHaveBeenCalled();
+        expect(ctx.runtime.resume).not.toHaveBeenCalled();
+      },
+    );
+
+    it('retains normal git delivery when the branch identity is missing', async () => {
+      const ctx = createTestContext();
+      const manager = createPodManager(ctx.deps);
+      const pod = manager.createSession(
+        { profileName: 'test-profile', task: 'Repair missing branch identity' },
+        'user-1',
+      );
+      ctx.podRepo.update(
+        pod.id,
+        validatedPodUpdates(pod.id, {
+          containerId: 'preserved-source',
+          worktreePath: '/tmp/branch-source',
+          filesChanged: 2,
+        }),
+      );
+      ctx.db.prepare("UPDATE pods SET branch = '' WHERE id = ?").run(pod.id);
+      await expect(manager.approveSession(pod.id)).rejects.toMatchObject({
+        code: 'DELIVERY_RECONCILIATION_REQUIRED',
+        statusCode: 409,
+      });
+      expect(manager.getSession(pod.id)).toMatchObject({
+        status: 'validated',
+        completedAt: null,
+        containerId: 'preserved-source',
+        failureReason: expect.stringContaining('Branch identity'),
+      });
+      expect(ctx.containerManager.kill).not.toHaveBeenCalled();
+      expect(ctx.worktreeManager.mergeBranch).not.toHaveBeenCalled();
+      expect(ctx.prManager.createPr).not.toHaveBeenCalled();
+      ctx.db.prepare('UPDATE pods SET branch = ? WHERE id = ?').run(pod.branch, pod.id);
+      vi.mocked(ctx.worktreeManager.getDiffStats).mockResolvedValue({
+        filesChanged: 0,
+        linesAdded: 0,
+        linesRemoved: 0,
+      });
+      (ctx.worktreeManager.hasChangesAgainstBase as ReturnType<typeof vi.fn>).mockResolvedValue(
+        false,
+      );
+      await createPodManager(ctx.deps).approveSession(pod.id);
+      expect(manager.getSession(pod.id)).toMatchObject({ status: 'complete', failureReason: null });
+      expect(ctx.worktreeManager.pushBranch).not.toHaveBeenCalled();
+      expect(ctx.prManager.createPr).not.toHaveBeenCalled();
+    });
+
+    it('retains explicit ephemeral completion without requiring git delivery', async () => {
+      const ctx = createTestContext();
+      const manager = createPodManager(ctx.deps);
+      const pod = manager.createSession(
+        {
+          profileName: 'test-profile',
+          task: 'Ephemeral checked task',
+          options: { agentMode: 'auto', output: 'none', validate: true },
+        },
+        'user-1',
+      );
+      ctx.podRepo.update(
+        pod.id,
+        validatedPodUpdates(pod.id, { worktreePath: null, filesChanged: 0 }),
+      );
+      await manager.approveSession(pod.id);
+      expect(manager.getSession(pod.id).status).toBe('complete');
+      expect(ctx.worktreeManager.mergeBranch).not.toHaveBeenCalled();
+      expect(ctx.prManager.createPr).not.toHaveBeenCalled();
+    });
+
     it('records human automation and Podsitter actors', async () => {
       const cases = [
         {
@@ -4786,7 +4920,7 @@ describe('PodManager', () => {
           { profileName: 'test-profile', task: `Actor ${testCase.actor.type}` },
           'user-1',
         );
-        ctx.podRepo.update(pod.id, validatedPodUpdates(pod.id));
+        ctx.podRepo.update(pod.id, validatedPodUpdates(pod.id, { worktreePath: '/tmp/wt' }));
 
         await manager.approveSession(pod.id, { actor: testCase.actor });
 
@@ -4818,7 +4952,7 @@ describe('PodManager', () => {
       );
 
       // Move to validated state
-      ctx.podRepo.update(pod.id, validatedPodUpdates(pod.id));
+      ctx.podRepo.update(pod.id, validatedPodUpdates(pod.id, { worktreePath: '/tmp/wt' }));
 
       await manager.approveSession(pod.id);
 
@@ -4835,7 +4969,7 @@ describe('PodManager', () => {
         { profileName: 'test-profile', task: 'Do stuff' },
         'user-1',
       );
-      ctx.podRepo.update(pod.id, validatedPodUpdates(pod.id));
+      ctx.podRepo.update(pod.id, validatedPodUpdates(pod.id, { worktreePath: '/tmp/wt' }));
 
       const events: unknown[] = [];
       ctx.eventBus.subscribe((e) => events.push(e));
@@ -4867,7 +5001,10 @@ describe('PodManager', () => {
           { profileName: 'test-profile', task: `Approve ${testCase.status}` },
           'user-1',
         );
-        ctx.podRepo.update(pod.id, validatedPodUpdates(pod.id, testCase.updates ?? {}));
+        ctx.podRepo.update(
+          pod.id,
+          validatedPodUpdates(pod.id, { worktreePath: '/tmp/wt', ...testCase.updates }),
+        );
         if (testCase.status === 'needs_review') {
           ctx.eventBus.emit({
             type: 'pod.firewall_denied',
@@ -4929,7 +5066,10 @@ describe('PodManager', () => {
       );
 
       for (const pod of [ready, needsReview, risky, waived]) {
-        ctx.podRepo.update(pod.id, validatedPodUpdates(pod.id, { autoApprove: true }));
+        ctx.podRepo.update(
+          pod.id,
+          validatedPodUpdates(pod.id, { autoApprove: true, worktreePath: '/tmp/wt' }),
+        );
       }
       ctx.eventBus.emit({
         type: 'pod.firewall_denied',
@@ -4998,7 +5138,7 @@ describe('PodManager', () => {
         readinessReview: makeReadinessReview('risky', 'Member has a hard release risk.'),
       });
       ctx.podRepo.update(owner.id, {
-        ...validatedPodUpdates(owner.id),
+        ...validatedPodUpdates(owner.id, { worktreePath: '/tmp/wt' }),
         prUrl: 'https://github.com/org/repo/pull/42',
         readinessReview: makeReadinessReview('ready'),
       });
@@ -5634,7 +5774,10 @@ describe('PodManager', () => {
       // Child must not be enqueued yet (waiting for parent)
       expect(ctx.enqueuedSessions).not.toContain(child.id);
 
-      ctx.podRepo.update(parent.id, validatedPodUpdates(parent.id, { branch: 'feature/parent' }));
+      ctx.podRepo.update(
+        parent.id,
+        validatedPodUpdates(parent.id, { branch: 'feature/parent', worktreePath: '/tmp/wt' }),
+      );
       await manager.approveSession(parent.id);
 
       expect(manager.getSession(parent.id).status).toBe('complete');
@@ -5704,7 +5847,7 @@ describe('PodManager', () => {
       // Simulate legacy/corrupted rows created before single-mode branch sharing
       // was enforced at creation time.
       ctx.db.prepare('UPDATE pods SET branch = ? WHERE id = ?').run('feature/child', child.id);
-      ctx.podRepo.update(parent.id, { status: 'failed' });
+      ctx.podRepo.update(parent.id, { status: 'failed', worktreePath: '/tmp/wt' });
       ctx.enqueuedSessions.length = 0;
 
       await manager.forceApprove(parent.id, 'waive infrastructure-only validation issue');
@@ -6152,7 +6295,7 @@ describe('PodManager', () => {
           true,
         );
         await expect(manager.approveSession(pod.id)).rejects.toMatchObject({
-          code: 'BRANCH_PRESERVATION_FAILED',
+          code: 'DELIVERY_RECONCILIATION_REQUIRED',
         });
         expect(manager.getSession(pod.id).status).toBe('validated');
         expect(ctx.worktreeManager.pushBranch).not.toHaveBeenCalled();
