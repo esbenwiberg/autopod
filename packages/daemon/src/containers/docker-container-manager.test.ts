@@ -111,6 +111,26 @@ describe('DockerContainerManager', () => {
     manager = new DockerContainerManager({ docker, logger });
   });
 
+  it('captures immutable image and configured resources, retaining unknown values as null', async () => {
+    container.inspect.mockResolvedValue({
+      Image: `sha256:${'a'.repeat(64)}`,
+      HostConfig: { Memory: 1024, NanoCpus: 2500000000, NetworkMode: 'none' },
+    });
+    expect(await manager.getExecutionMetadata('container')).toEqual({
+      imageDigest: `sha256:${'a'.repeat(64)}`,
+      memoryLimitBytes: 1024,
+      cpuLimit: 2.5,
+      networkMode: 'none',
+    });
+    container.inspect.mockResolvedValue({ Image: 'node:mutable', HostConfig: { Memory: 0 } });
+    expect(await manager.getExecutionMetadata('container')).toEqual({
+      imageDigest: null,
+      memoryLimitBytes: null,
+      cpuLimit: null,
+      networkMode: null,
+    });
+  });
+
   // ─── spawn() ────────────────────────────────────────────
 
   describe('spawn()', () => {

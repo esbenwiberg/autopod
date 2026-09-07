@@ -155,6 +155,7 @@ import {
   collectScreenshots,
 } from '../validation/screenshot-collector.js';
 import { buildValidationContextEnv } from '../validation/validation-context-env.js';
+import { createValidationIdentityCollector } from '../validation/validation-identity-collector.js';
 import { pushCommitsToBareViaStagingRef } from '../worktrees/bare-push.js';
 import { graftHostTreeOntoBase } from '../worktrees/graft-reconcile.js';
 import {
@@ -6901,6 +6902,13 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
     logMessage: string,
   ): Promise<ValidationResult> {
     const { podId, attempt } = validationConfig;
+    const cm = containerManagerFactory.get(
+      validationConfig.executionTarget ?? podRepo.getOrThrow(podId).executionTarget,
+    );
+    validationConfig.captureEvidenceIdentity ??= createValidationIdentityCollector(
+      cm,
+      validationConfig,
+    );
 
     const runValidation = async (): Promise<ValidationResult> => {
       try {

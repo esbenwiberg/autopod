@@ -32,9 +32,12 @@ export function validationCoverage(value: unknown): StageEvidence[] {
   ];
   return entries.map(([stage, values]) => {
     const statuses = values.map((v) => record(v).status);
+    const currentExecutions = values
+      .filter((v) => !record(v).reusedEvidence)
+      .map((v) => record(v).status);
     return {
       stage,
-      executed: statuses.some((s) => s === 'pass' || s === 'fail'),
+      executed: currentExecutions.some((s) => s === 'pass' || s === 'fail'),
       failed: statuses.includes('fail'),
     };
   });

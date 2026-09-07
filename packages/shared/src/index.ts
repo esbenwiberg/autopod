@@ -603,3 +603,8 @@ export type {
 export type { BackupHealth, DaemonHealthSummary, DaemonReleaseInfo } from './types/release.js';
 
 export type { TaskExecutionSummary } from './types/task-execution.js';
+
+export type {
+  ReusedValidationEvidence,
+  ValidationInputIdentity,
+} from './types/validation-evidence.js';

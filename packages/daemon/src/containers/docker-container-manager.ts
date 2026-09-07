@@ -16,6 +16,7 @@ import Dockerode from 'dockerode';
 import type { Logger } from 'pino';
 import * as tar from 'tar-stream';
 import type {
+  ContainerExecutionMetadata,
   ContainerManager,
   ContainerSpawnConfig,
   ExecOptions,
@@ -780,6 +781,23 @@ export class DockerContainerManager implements ContainerManager {
     } finally {
       rmSync(stagingPath, { recursive: true, force: true });
     }
+  }
+
+  async getExecutionMetadata(containerId: string): Promise<ContainerExecutionMetadata> {
+    const info = await boundedDockerCall(this.docker.getContainer(containerId).inspect(), {
+      label: 'container.inspect (execution metadata)',
+      timeoutMs: DOCKER_CALL_TIMEOUTS.inspect,
+      logger: this.logger,
+      containerId,
+    });
+    return {
+      imageDigest: /^sha256:[a-f0-9]{64}$/.test(info.Image) ? info.Image : null,
+      memoryLimitBytes:
+        (info.HostConfig?.Memory ?? 0) > 0 ? (info.HostConfig?.Memory ?? null) : null,
+      cpuLimit:
+        (info.HostConfig?.NanoCpus ?? 0) > 0 ? (info.HostConfig?.NanoCpus ?? 0) / 1e9 : null,
+      networkMode: info.HostConfig?.NetworkMode ?? null,
+    };
   }
 
   async getStatus(containerId: string): Promise<'running' | 'stopped' | 'unknown'> {

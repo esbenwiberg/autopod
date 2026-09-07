@@ -235,6 +235,7 @@ public struct AdvisoryQaDetail: Sendable {
 // MARK: - Validation checks
 
 public struct ValidationChecks: Sendable {
+    public let reusedEvidence: [String: ReusedValidationEvidenceResponse]
     public let setup: Bool?
     public let smoke: Bool
     public let build: Bool?
@@ -271,7 +272,7 @@ public struct ValidationChecks: Sendable {
     /// The formatted markdown feedback that was sent back to the agent after a failed validation attempt.
     public let correctionMessage: String?
     public init(
-        smoke: Bool, setup: Bool? = nil, build: Bool? = nil,
+        smoke: Bool, reusedEvidence: [String: ReusedValidationEvidenceResponse] = [:], setup: Bool? = nil, build: Bool? = nil,
         tests: Bool? = nil, lint: Bool? = nil, sast: Bool? = nil, review: Bool? = nil,
         setupOutput: String? = nil, buildOutput: String? = nil, testOutput: String? = nil,
         lintOutput: String? = nil, sastOutput: String? = nil,
@@ -292,6 +293,7 @@ public struct ValidationChecks: Sendable {
         proofOfWorkScreenshots: [ScreenshotRef]? = nil,
         correctionMessage: String? = nil
     ) {
+        self.reusedEvidence = reusedEvidence
         self.setup = setup; self.smoke = smoke; self.build = build
         self.tests = tests; self.lint = lint; self.sast = sast
         self.review = review ?? Self.failedReviewInfrastructureState(reviewSkipKind)
@@ -529,6 +531,7 @@ public struct ValidationProgress: Sendable {
     public var advisory: ValidationPhaseState
 
     // Phase result data (populated on completion, used by detail panel)
+    public var reusedEvidence: [String: ReusedValidationEvidenceResponse] = [:]
     public var setupOutput: String?          // setup logs
     public var buildOutput: String?          // build logs
     public var testOutput: String?           // combined stdout/stderr
@@ -624,12 +627,14 @@ public struct ValidationProgress: Sendable {
             build = ValidationPhaseState(status: ps, duration: result.buildResult?.duration)
             buildOutput = result.buildResult.map { $0.output.isEmpty ? nil : $0.output } ?? nil
         case .test:
+            reusedEvidence["test"] = result.testResult?.reusedEvidence
             test = ValidationPhaseState(status: ps, duration: result.testResult?.duration)
             let stdout = result.testResult?.stdout ?? ""
             let stderr = result.testResult?.stderr ?? ""
             testOutput = [stdout, stderr].filter { !$0.isEmpty }.joined(separator: "\n")
             if testOutput?.isEmpty == true { testOutput = nil }
         case .lint:
+            reusedEvidence["lint"] = result.lintResult?.reusedEvidence
             lint = ValidationPhaseState(status: ps, duration: result.lintResult?.duration)
             lintOutput = result.lintResult.flatMap { $0.output.isEmpty ? nil : $0.output }
         case .sast:

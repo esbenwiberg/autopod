@@ -6,6 +6,8 @@ export interface StoredValidation {
   id: string;
   podId: string;
   attempt: number;
+  sequence?: number;
+  cycle?: number;
   result: ValidationResult;
   createdAt: string;
 }
@@ -46,7 +48,11 @@ export function rowsFor(result: ValidationResult): Row[] {
     rows.push({
       label: 'lint',
       status: result.lint.status,
-      note: result.lint.status === 'fail' ? firstLine(result.lint.output) : undefined,
+      note: result.lint.reusedEvidence
+        ? `Reused ${result.lint.reusedEvidence.receiptId}; executed ${result.lint.reusedEvidence.originalExecutedAt}`
+        : result.lint.status === 'fail'
+          ? firstLine(result.lint.output)
+          : undefined,
     });
   }
   if (result.sast) {
@@ -60,8 +66,9 @@ export function rowsFor(result: ValidationResult): Row[] {
     rows.push({
       label: 'test',
       status: result.test.status,
-      note:
-        result.test.status === 'fail'
+      note: result.test.reusedEvidence
+        ? `Reused ${result.test.reusedEvidence.receiptId}; executed ${result.test.reusedEvidence.originalExecutedAt}`
+        : result.test.status === 'fail'
           ? firstLine(result.test.stderr ?? result.test.stdout ?? '')
           : undefined,
     });
@@ -70,8 +77,13 @@ export function rowsFor(result: ValidationResult): Row[] {
   const failedPages = result.smoke.pages.filter((p) => p.status === 'fail').length;
   rows.push({
     label: `pages (${result.smoke.pages.length})`,
-    status: failedPages > 0 ? 'fail' : 'pass',
-    note: failedPages > 0 ? `${failedPages} failed` : undefined,
+    status: result.smoke.pages.length === 0 ? 'skip' : failedPages > 0 ? 'fail' : 'pass',
+    note:
+      result.smoke.pages.length === 0
+        ? 'No page checks executed'
+        : failedPages > 0
+          ? `${failedPages} failed`
+          : undefined,
   });
 
   if (result.factValidation) {
@@ -104,6 +116,9 @@ interface Props {
 
 interface ValidationDisplayItem {
   id: string;
+  sequence?: number;
+  cycle?: number;
+  source: 'history' | 'latest';
   createdAt: string;
   result: ValidationResult;
 }
@@ -144,25 +159,43 @@ export function validationItemsForDisplay(
   history: StoredValidation[],
   latest: ValidationResult | null,
 ): ValidationDisplayItem[] {
-  const byAttempt = new Map<number, ValidationDisplayItem>();
-
-  for (const item of history) {
-    byAttempt.set(item.attempt, {
-      id: item.id,
-      createdAt: item.createdAt,
-      result: item.result,
-    });
-  }
-
-  if (latest) {
-    byAttempt.set(latest.attempt, {
-      id: `latest-${latest.attempt}`,
+  const canonical = (value: unknown): unknown => {
+    if (Array.isArray(value)) return value.map(canonical);
+    if (value && typeof value === 'object')
+      return Object.fromEntries(
+        Object.entries(value)
+          .sort(([a], [b]) => a.localeCompare(b))
+          .map(([key, child]) => [key, canonical(child)]),
+      );
+    return value;
+  };
+  const items: ValidationDisplayItem[] = history.map((item) => ({
+    id: item.id,
+    sequence: item.sequence,
+    cycle: item.cycle,
+    source: 'history',
+    createdAt: item.createdAt,
+    result: item.result,
+  }));
+  // Never replace a durable failure using a mutable display-attempt number.
+  if (
+    latest &&
+    !history.some(
+      (item) => JSON.stringify(canonical(item.result)) === JSON.stringify(canonical(latest)),
+    )
+  ) {
+    items.push({
+      id: `latest-${latest.timestamp}-${latest.attempt}`,
+      source: 'latest',
       createdAt: latest.timestamp,
       result: latest,
     });
   }
-
-  return Array.from(byAttempt.values()).sort((a, b) => b.result.attempt - a.result.attempt);
+  return items.sort((a, b) => {
+    if (a.source !== b.source) return a.source === 'latest' ? -1 : 1;
+    if (a.sequence !== undefined && b.sequence !== undefined) return b.sequence - a.sequence;
+    return b.createdAt.localeCompare(a.createdAt) || b.id.localeCompare(a.id);
+  });
 }
 
 function ValidationAttempt({ item }: { item: ValidationDisplayItem }): JSX.Element {
@@ -172,9 +205,14 @@ function ValidationAttempt({ item }: { item: ValidationDisplayItem }): JSX.Eleme
     <article className="validation-attempt">
       <header className="validation-header">
         <div>
-          <div className="validation-title">Validation #{result.attempt}</div>
+          <div className="validation-title">Validation #{item.sequence ?? result.attempt}</div>
           <div className="validation-meta">
             {shortDateTime(item.createdAt)} · {formatDuration(result.duration)}
+            {item.source === 'latest'
+              ? ' · Latest snapshot; durable record unavailable or different'
+              : item.sequence === undefined
+                ? ' · Legacy attempt number'
+                : ` · Attempt ${result.attempt}, cycle ${(item.cycle ?? 0) + 1}`}
           </div>
         </div>
         <span className={`chip chip-${result.overall === 'pass' ? 'ok' : 'danger'}`}>

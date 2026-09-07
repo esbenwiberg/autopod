@@ -308,6 +308,7 @@ public enum PodMapper {
       )
       return ValidationChecks(
         smoke: v.smoke.status == "pass",
+        reusedEvidence: ["lint": v.lint?.reusedEvidence, "test": v.test?.reusedEvidence].compactMapValues { $0 },
         setup: mapTriState(v.setup?.status),
         build: mapTriState(v.smoke.build.status),
         tests: mapTriState(v.test?.status),

@@ -61,6 +61,32 @@ required_facts:
     );
   });
 
+  it('retains the explicit complete validation input manifest and rejects incomplete identities', () => {
+    const manifest = {
+      version: 1,
+      hermetic: true,
+      toolchainFiles: ['tools/compiler'],
+      dependencyPaths: ['node_modules'],
+      environmentFiles: [],
+      environmentRevision: 'a'.repeat(64),
+    };
+    expect(
+      inspectSpecContract({ ...validDomainContract(), validationEvidence: manifest }).contract
+        ?.validationEvidence,
+    ).toEqual(manifest);
+    for (const invalid of [
+      { ...manifest, hermetic: false },
+      { ...manifest, toolchainFiles: [] },
+      { ...manifest, environmentRevision: 'mutable' },
+      { ...manifest, dependencyPaths: undefined },
+    ]) {
+      expect(
+        inspectSpecContract({ ...validDomainContract(), validationEvidence: invalid }).diagnostics
+          .length,
+      ).toBeGreaterThan(0);
+    }
+  });
+
   it('accepts an explicit delete declaration', () => {
     const contract = validDomainContract();
     const result = inspectSpecContract({

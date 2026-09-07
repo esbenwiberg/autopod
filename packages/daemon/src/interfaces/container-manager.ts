@@ -106,7 +106,16 @@ export interface TerminalSession {
   close(): void;
 }
 
+export interface ContainerExecutionMetadata {
+  imageDigest: string | null;
+  memoryLimitBytes: number | null;
+  cpuLimit: number | null;
+  networkMode: string | null;
+}
+
 export interface ContainerManager {
+  /** Read actual backend identity; unsupported metadata remains unavailable. */
+  getExecutionMetadata?(containerId: string): Promise<ContainerExecutionMetadata>;
   /**
    * Whether `execStreaming()` supports long-lived stdout/stderr streams for agent runtimes.
    * Omitted means supported for legacy/test managers; buffered-only managers must set false.

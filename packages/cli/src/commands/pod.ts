@@ -642,6 +642,15 @@ export function registerPodCommands(program: Command, getClient: () => AutopodCl
       if (s.lastValidationResult) {
         const vr = s.lastValidationResult;
         const color = vr.overall === 'pass' ? chalk.green : chalk.red;
+        for (const [phase, evidence] of [
+          ['lint', vr.lint?.reusedEvidence],
+          ['test', vr.test?.reusedEvidence],
+        ] as const) {
+          if (evidence)
+            console.log(
+              `${phase}: reused receipt ${evidence.receiptId}; originally executed ${evidence.originalExecutedAt} (${evidence.originalDurationMs} ms)`,
+            );
+        }
         console.log(
           `\n${chalk.bold('Last validation:')} ${color(vr.overall.toUpperCase())} (${vr.validationSuite ?? s.options?.validationSuite ?? 'full'}, attempt ${vr.attempt})`,
         );

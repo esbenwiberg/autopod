@@ -71,6 +71,17 @@ export const specContractV1Schema = z
     scenarios: list(scenarioSchema),
     requiredFacts: list(factSchema),
     humanReview: list(reviewSchema),
+    validationEvidence: z
+      .object({
+        version: z.literal(1),
+        hermetic: z.literal(true),
+        toolchainFiles: z.array(text(500)).min(1).max(100),
+        dependencyPaths: z.array(text(500)).max(100),
+        environmentFiles: z.array(text(500)).max(100),
+        environmentRevision: z.string().regex(/^[a-f0-9]{64}$/),
+      })
+      .strict()
+      .optional(),
   })
   .passthrough();
 
@@ -291,6 +302,7 @@ export function inspectSpecContractYaml(
           scenarios: raw.scenarios,
           requiredFacts: raw.required_facts,
           humanReview: raw.human_review ?? [],
+          ...(raw.validation_evidence ? { validationEvidence: raw.validation_evidence } : {}),
         }
       : raw;
   return inspectSpecContract(mapped, source);

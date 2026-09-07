@@ -34,7 +34,18 @@ export interface HumanReviewItem {
   reason: string;
 }
 
+/** Explicit input manifest for deterministic checks. Unversioned external state is ineligible. */
+export interface ValidationEvidenceManifest {
+  version: 1;
+  hermetic: true;
+  toolchainFiles: string[];
+  dependencyPaths: string[];
+  environmentFiles: string[];
+  environmentRevision: string;
+}
+
 export interface SpecContract {
+  validationEvidence?: ValidationEvidenceManifest;
   contractVersion: 1;
   title: string;
   dependsOn: string[];

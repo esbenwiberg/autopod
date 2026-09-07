@@ -61,6 +61,8 @@ import {
 } from './review-ledger.js';
 import { reviewClosureOutputContract } from './review-structured-output.js';
 import { runToolUseReview } from './review-tool-runner.js';
+import { runWithValidationEvidence } from './run-with-evidence.js';
+import type { ValidationEvidenceCache } from './validation-evidence-cache.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -359,6 +361,7 @@ export function createLocalValidationEngine(
   logger?: Logger,
   hostBrowserRunner?: HostBrowserRunner,
   screenshotStore?: import('../pods/screenshot-store.js').ScreenshotStore,
+  evidenceCache?: ValidationEvidenceCache,
 ): ValidationEngine {
   const log = logger?.child({ component: 'local-validation-engine' });
 
@@ -512,7 +515,13 @@ export function createLocalValidationEngine(
         } else {
           callbacks?.onPhaseStarted?.('lint');
           if (config.lintCommand) onProgress?.('Running lint…');
-          lintResult = await runLint(containerManager, config, log);
+          lintResult = await runWithValidationEvidence(
+            config.podId,
+            'lint',
+            () => runLint(containerManager, config, log),
+            evidenceCache,
+            config.captureEvidenceIdentity,
+          );
         }
         infrastructureFailure = lintResult.infrastructureFailure;
         callbacks?.onPhaseCompleted?.('lint', lintResult.status, lintResult);
@@ -563,7 +572,13 @@ export function createLocalValidationEngine(
           if (buildResult.status === 'pass' && config.testCommand) onProgress?.('Running tests…');
           testResult =
             buildResult.status === 'pass'
-              ? await runTests(containerManager, config, log)
+              ? await runWithValidationEvidence(
+                  config.podId,
+                  'test',
+                  () => runTests(containerManager, config, log),
+                  evidenceCache,
+                  config.captureEvidenceIdentity,
+                )
               : { status: 'skip' as const, duration: 0 };
         }
         infrastructureFailure ??= testResult.infrastructureFailure;

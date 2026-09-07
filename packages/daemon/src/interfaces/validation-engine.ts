@@ -15,6 +15,10 @@ import type {
 } from '@autopod/shared';
 
 export interface ValidationEngineConfig {
+  /** Trusted collector, not a client-provided hash. Missing identity always executes checks. */
+  captureEvidenceIdentity?: () => Promise<
+    import('@autopod/shared').ValidationInputIdentity | undefined
+  >;
   podId: string;
   containerId: string;
   /** Execution backend used to distinguish sandbox resource ceilings from local runner failures. */

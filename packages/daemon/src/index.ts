@@ -93,6 +93,7 @@ import {
 import { capLargeStrings } from './util/log-sanitizer.js';
 import { createHostBrowserRunner } from './validation/host-browser-runner.js';
 import { createLocalValidationEngine } from './validation/local-validation-engine.js';
+import { createValidationEvidenceCache } from './validation/validation-evidence-cache.js';
 import { AdoPrManager, parseAdoRepoUrl } from './worktrees/ado-pr-manager.js';
 import { LocalWorktreeManager } from './worktrees/local-worktree-manager.js';
 import { GhPrManager } from './worktrees/pr-manager.js';
@@ -679,6 +680,7 @@ const validationEngine = createLocalValidationEngine(
   logger,
   hostBrowserRunner,
   screenshotStore,
+  createValidationEvidenceCache(db),
 );
 
 const runtimeRegistry = createRuntimeRegistry([

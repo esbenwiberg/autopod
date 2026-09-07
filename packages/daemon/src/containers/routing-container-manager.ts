@@ -68,6 +68,18 @@ export class RoutingContainerManager implements ContainerManager {
     );
   }
 
+  async getExecutionMetadata(containerId: string) {
+    const delegate = this.delegate(containerId);
+    return delegate.getExecutionMetadata
+      ? delegate.getExecutionMetadata(containerId)
+      : {
+          imageDigest: null,
+          memoryLimitBytes: null,
+          cpuLimit: null,
+          networkMode: null,
+        };
+  }
+
   getStatus(containerId: string): Promise<'running' | 'stopped' | 'deleted' | 'unknown'> {
     return this.delegate(containerId).getStatus(containerId);
   }

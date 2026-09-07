@@ -378,6 +378,7 @@ public struct ValidationTab: View {
 
     return ValidationChecks(
       smoke: response.smoke.status == "pass",
+      reusedEvidence: ["lint": response.lint?.reusedEvidence, "test": response.test?.reusedEvidence].compactMapValues { $0 },
       setup: mapTriState(response.setup?.status),
       build: mapTriState(response.smoke.build.status),
       tests: mapTriState(response.test?.status),
@@ -1210,6 +1211,10 @@ public struct ValidationTab: View {
                        ? "Setup failed — tests skipped"
                        : (smokeOk ? "No test command configured" : "Build failed — tests skipped"),
                      duration: dur)
+      if let evidence = progress?.reusedEvidence["test"] ?? (progress == nil ? displayedChecks?.reusedEvidence["test"] : nil) {
+        Text("Reused evidence \(evidence.receiptId). Originally executed \(evidence.originalExecutedAt) in \(evidence.originalDurationMs) ms.")
+          .font(.caption).foregroundStyle(.secondary).textSelection(.enabled)
+      }
       if let output, !output.isEmpty {
         outputBlock(title: "Test Output", text: output, expanded: $expandedTestOutput, color: status.color)
       }
@@ -1229,6 +1234,10 @@ public struct ValidationTab: View {
                        ? "Setup failed — lint skipped"
                        : (buildOk ? "No lint command configured" : "Build failed — lint skipped"),
                      duration: dur)
+      if let evidence = progress?.reusedEvidence["lint"] ?? (progress == nil ? displayedChecks?.reusedEvidence["lint"] : nil) {
+        Text("Reused evidence \(evidence.receiptId). Originally executed \(evidence.originalExecutedAt) in \(evidence.originalDurationMs) ms.")
+          .font(.caption).foregroundStyle(.secondary).textSelection(.enabled)
+      }
       if let output, !output.isEmpty {
         outputBlock(title: "Lint Output", text: output, expanded: $expandedLintOutput, color: status.color)
       }

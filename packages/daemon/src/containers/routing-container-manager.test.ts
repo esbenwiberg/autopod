@@ -29,6 +29,30 @@ describe('RoutingContainerManager', () => {
     expect(local.execStreaming).not.toHaveBeenCalled();
   });
 
+  it('uses metadata from the resolved backend and leaves unsupported metadata unknown', async () => {
+    const local = fakeContainerManager('local');
+    const sandbox = fakeContainerManager('sandbox');
+    local.getExecutionMetadata = vi.fn(async () => ({
+      imageDigest: 'local-digest',
+      memoryLimitBytes: 10,
+      cpuLimit: 1,
+      networkMode: 'none',
+    }));
+    const router = new RoutingContainerManager({
+      local,
+      sandbox,
+      resolveTarget: (id) => (id === 'local' ? 'local' : 'sandbox'),
+    });
+    expect((await router.getExecutionMetadata('local')).imageDigest).toBe('local-digest');
+    expect(await router.getExecutionMetadata('sandbox')).toEqual({
+      imageDigest: null,
+      memoryLimitBytes: null,
+      cpuLimit: null,
+      networkMode: null,
+    });
+    expect(local.getExecutionMetadata).toHaveBeenCalledTimes(1);
+  });
+
   it('falls back to the local manager when no sandbox manager is configured', async () => {
     const local = fakeContainerManager('local-container');
     const router = new RoutingContainerManager({

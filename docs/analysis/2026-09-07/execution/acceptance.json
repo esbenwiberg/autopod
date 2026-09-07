@@ -16,7 +16,10 @@
         "packages/daemon/src/pods/pod-lifecycle.e2e.test.ts",
         "packages/daemon/src/pods/pod-bridge-task-summary.test.ts"
       ],
-      "evidence": ["receipts/settlement-red.txt", "receipts/settlement-first-green.txt"],
+      "evidence": [
+        "receipts/settlement-red.txt",
+        "receipts/settlement-first-green.txt"
+      ],
       "prerequisites": []
     },
     {
@@ -55,8 +58,12 @@
         "packages/daemon/src/db/migrations/142_completion_journal.sql",
         "packages/daemon/src/pods/completion-journal.ts"
       ],
-      "tests": ["packages/daemon/src/pods/completion-journal.test.ts"],
-      "evidence": ["receipts/journal-migration.txt"],
+      "tests": [
+        "packages/daemon/src/pods/completion-journal.test.ts"
+      ],
+      "evidence": [
+        "receipts/journal-migration.txt"
+      ],
       "prerequisites": [
         "Journal is implemented; delivery side-effect intent/reconciliation/idempotency remains unfinished."
       ]
@@ -146,11 +153,28 @@
     {
       "id": "W2.5",
       "requirement": "Validation reuse requires complete matching tree, contract, toolchain, commands, dependencies, environment and implementation identity",
-      "status": "unverified",
-      "implementation": [],
-      "tests": [],
-      "evidence": [],
-      "prerequisites": []
+      "status": "partial",
+      "implementation": [
+        "packages/daemon/src/db/migrations/144_validation_phase_evidence.sql",
+        "packages/daemon/src/validation/validation-evidence-cache.ts",
+        "packages/daemon/src/validation/run-with-evidence.ts",
+        "packages/daemon/src/validation/validation-identity-collector.ts",
+        "packages/daemon/src/validation/local-validation-engine.ts"
+      ],
+      "tests": [
+        "packages/daemon/src/validation/validation-evidence-cache.test.ts",
+        "packages/daemon/src/validation/run-with-evidence.test.ts",
+        "packages/daemon/src/validation/validation-identity-collector.test.ts",
+        "packages/daemon/src/validation/validation-evidence-engine.test.ts"
+      ],
+      "evidence": [
+        "receipts/validation-cache-engine-red.txt",
+        "receipts/validation-cache-engine-green.txt",
+        "receipts/checkpoint-4-affected.txt",
+        "receipts/validation-replay-isolation-gate.txt"
+      ],
+      "prerequisites": [],
+      "remaining": "Local exact-input reuse proved; actual Docker/supported operator interaction and exact final source verification remain. Complete hermetic read set is an explicit contract obligation."
     },
     {
       "id": "W2.6",
@@ -164,11 +188,20 @@
     {
       "id": "W2.7",
       "requirement": "Matched reproducible benchmark measures 25 percent target and seeded defect escape with fixed coverage; local and live separated",
-      "status": "unverified",
-      "implementation": [],
-      "tests": [],
-      "evidence": [],
-      "prerequisites": []
+      "status": "partial",
+      "implementation": [
+        "docs/analysis/2026-09-07/execution/benchmarks/validation-replay.test.ts"
+      ],
+      "tests": [
+        "docs/analysis/2026-09-07/execution/benchmarks/validation-replay.test.ts"
+      ],
+      "evidence": [
+        "receipts/validation-replay-benchmark-initial.json",
+        "receipts/validation-replay-benchmark.json",
+        "receipts/validation-replay-isolation-gate.txt"
+      ],
+      "prerequisites": [],
+      "remaining": "Local short-check target unsupported: -185.22% reduction, zero additional escaped defects. Final committed replay and any authorized live workload comparison remain."
     },
     {
       "id": "W3.1",
@@ -249,9 +282,16 @@
       "id": "W3.5",
       "requirement": "Queued provider binding survives mutable profile changes with actionable reconciliation errors",
       "status": "partial",
-      "implementation": ["packages/daemon/src/pods/pod-manager.ts"],
-      "tests": ["packages/daemon/src/pods/pod-manager.test.ts"],
-      "evidence": ["receipts/queue-binding-red.txt", "receipts/queue-binding-green.txt"],
+      "implementation": [
+        "packages/daemon/src/pods/pod-manager.ts"
+      ],
+      "tests": [
+        "packages/daemon/src/pods/pod-manager.test.ts"
+      ],
+      "evidence": [
+        "receipts/queue-binding-red.txt",
+        "receipts/queue-binding-green.txt"
+      ],
       "prerequisites": []
     },
     {
@@ -323,11 +363,20 @@
     {
       "id": "W4.4",
       "requirement": "Latest validation, history, waivers and delivery reconcile without rewriting failures",
-      "status": "unverified",
-      "implementation": [],
-      "tests": [],
-      "evidence": [],
-      "prerequisites": []
+      "status": "partial",
+      "implementation": [
+        "packages/mobile-web/src/components/ValidationSummary.tsx"
+      ],
+      "tests": [
+        "packages/mobile-web/src/components/ValidationSummary.test.tsx"
+      ],
+      "evidence": [
+        "receipts/mobile-evidence-history-red.txt",
+        "receipts/mobile-evidence-history-green.txt",
+        "receipts/checkpoint-4-mobile.txt"
+      ],
+      "prerequisites": [],
+      "remaining": "Mobile preserves sequence history and unmatched latest snapshot; backend waiver/history and durable delivery reconciliation remain."
     },
     {
       "id": "W4.5",
@@ -335,10 +384,14 @@
       "status": "unverified",
       "implementation": [],
       "tests": [],
-      "evidence": ["receipts/live-api-baseline.jsonl"],
+      "evidence": [
+        "receipts/live-api-baseline.jsonl",
+        "receipts/live-vm-inspection-failed.json"
+      ],
       "prerequisites": [
         "Await read-only Azure command (exec session 29869) for actual release and sanitized log evidence; no production root cause claimed."
-      ]
+      ],
+      "remaining": "RunCommandLinux settings update failed with no space left on device. Application history/cost root cause is still unproven; approved host recovery may be needed for inspection."
     },
     {
       "id": "W4.6",
@@ -354,7 +407,9 @@
         "packages/daemon/src/pods/cost-aggregation.test.ts",
         "packages/daemon/src/api/routes/pods.test.ts"
       ],
-      "evidence": ["receipts/history-cost-api.txt"],
+      "evidence": [
+        "receipts/history-cost-api.txt"
+      ],
       "prerequisites": []
     },
     {
@@ -492,8 +547,12 @@
         "packages/daemon/src/api/routes/health.ts",
         "packages/daemon/tsup.config.ts"
       ],
-      "tests": ["packages/daemon/src/api/routes/health.test.ts"],
-      "evidence": ["receipts/backup-health-cli-green.txt"],
+      "tests": [
+        "packages/daemon/src/api/routes/health.test.ts"
+      ],
+      "evidence": [
+        "receipts/backup-health-cli-green.txt"
+      ],
       "prerequisites": []
     },
     {
@@ -513,7 +572,9 @@
         "packages/daemon/src/db/backup.ts",
         "packages/daemon/src/db/backup-verification.ts"
       ],
-      "tests": ["packages/daemon/src/db/backup.test.ts"],
+      "tests": [
+        "packages/daemon/src/db/backup.test.ts"
+      ],
       "evidence": [
         "receipts/backup-red.txt",
         "receipts/backup-restore-green.txt",
@@ -531,7 +592,9 @@
         "packages/daemon/src/db/backup-verification.ts",
         "packages/daemon/src/db/verify-backup-cli.ts"
       ],
-      "tests": ["packages/daemon/src/db/backup.test.ts"],
+      "tests": [
+        "packages/daemon/src/db/backup.test.ts"
+      ],
       "evidence": [
         "receipts/backup-health-cli-green.txt",
         "receipts/backup-scope-red.txt",
@@ -553,9 +616,15 @@
       "id": "G.2",
       "requirement": "Migration numbering checked against current branches and representative prior database upgrades verified",
       "status": "partial",
-      "implementation": ["packages/daemon/src/db/migrations/142_completion_journal.sql"],
-      "tests": ["packages/daemon/src/pods/completion-journal.test.ts"],
-      "evidence": ["receipts/journal-migration.txt"],
+      "implementation": [
+        "packages/daemon/src/db/migrations/142_completion_journal.sql"
+      ],
+      "tests": [
+        "packages/daemon/src/pods/completion-journal.test.ts"
+      ],
+      "evidence": [
+        "receipts/journal-migration.txt"
+      ],
       "prerequisites": []
     },
     {
