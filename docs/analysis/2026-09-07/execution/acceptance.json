@@ -238,7 +238,9 @@
         "checkpoint-39.md",
         "receipts/checkpoint-39-full-validation.txt",
         "receipts/checkpoint-39-validation-identity.json",
-        "checkpoint-40.md: source-bound approval requests and explicit provider merge confirmation; durable poller binding and cleanup remain partial"
+        "checkpoint-40.md: source-bound approval requests and explicit provider merge confirmation; durable poller binding and cleanup remain partial",
+        "receipts/checkpoint-40-full-validation.txt",
+        "receipts/checkpoint-40-validation-identity.json"
       ],
       "prerequisites": [
         "PR creation intent/reconciliation implemented locally; broader finalization side effects and operator override remain."
