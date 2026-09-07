@@ -4508,6 +4508,137 @@ describe('PodManager', () => {
   });
 
   describe('merge poll lifecycle', () => {
+    it('drains an old poll before a same-generation operator restart', async () => {
+      vi.useFakeTimers();
+      const gate = deferred<void>();
+      try {
+        const ctx = createTestContext();
+        const manager = createPodManager(ctx.deps);
+        const pod = manager.createSession(
+          { profileName: 'test-profile', task: 'Replace polling owner' },
+          'user-1',
+        );
+        const profile = ctx.deps.profileStore.get('test-profile');
+        vi.mocked(ctx.deps.profileStore.get).mockReturnValue({
+          ...profile,
+          mergePollIntervalSec: 5,
+        });
+        const failForRetry = () =>
+          ctx.podRepo.update(pod.id, {
+            status: 'failed',
+            mergeBlockReason: 'Max PR fix attempts reached',
+            prUrl: 'https://github.com/org/repo/pull/42',
+          });
+        vi.mocked(ctx.prManager.getPrStatus)
+          .mockImplementationOnce(async () => {
+            await gate.promise;
+            return {
+              merged: true,
+              open: false,
+              blockReason: null,
+              ciFailures: [],
+              reviewComments: [],
+            };
+          })
+          .mockResolvedValueOnce({
+            merged: false,
+            open: true,
+            blockReason: 'Awaiting review',
+            reviewDecision: 'REVIEW_REQUIRED',
+            ciFailures: [],
+            reviewComments: [],
+          });
+        const completed: string[] = [];
+        ctx.eventBus.subscribe((event) => {
+          if (event.type === 'pod.completed') completed.push(event.podId);
+        });
+        failForRetry();
+        await manager.extendPrAttempts(pod.id, 1);
+        await vi.advanceTimersByTimeAsync(0);
+        failForRetry();
+        await manager.extendPrAttempts(pod.id, 1);
+        await vi.advanceTimersByTimeAsync(10_000);
+        expect(ctx.prManager.getPrStatus).toHaveBeenCalledTimes(1);
+        gate.resolve();
+        await vi.advanceTimersByTimeAsync(0);
+        expect(ctx.prManager.getPrStatus).toHaveBeenCalledTimes(2);
+        expect(manager.getSession(pod.id).status).toBe('merge_pending');
+        expect(completed).toEqual([]);
+        await vi.advanceTimersByTimeAsync(5_000);
+        expect(ctx.prManager.getPrStatus).toHaveBeenCalledTimes(3);
+        expect(manager.getSession(pod.id).status).toBe('complete');
+        expect(completed).toEqual([pod.id]);
+      } finally {
+        gate.resolve();
+        vi.useRealTimers();
+      }
+    });
+    it.each(['status', 'merge', 'cleanup'] as const)(
+      'does not overlap merge polls while %s is unresolved',
+      async (step) => {
+        vi.useFakeTimers();
+        const gate = deferred<void>();
+        try {
+          const ctx = createTestContext();
+          const manager = createPodManager(ctx.deps);
+          const pod = manager.createSession(
+            { profileName: 'test-profile', task: 'Serialize delivery observation' },
+            'user-1',
+          );
+          ctx.podRepo.update(pod.id, {
+            status: 'merge_pending',
+            prUrl: 'https://github.com/org/repo/pull/42',
+            containerId: 'poll-container',
+          });
+          vi.mocked(ctx.prManager.getPrStatus).mockImplementationOnce(async () => {
+            if (step === 'status') await gate.promise;
+            return {
+              merged: step !== 'merge',
+              open: step === 'merge',
+              blockReason: null,
+              ciFailures: [],
+              reviewComments: [],
+              reviewDecision: 'APPROVED',
+            };
+          });
+          if (step === 'merge')
+            vi.mocked(ctx.prManager.mergePr).mockImplementationOnce(async () => {
+              await gate.promise;
+              return { merged: true, autoMergeScheduled: false };
+            });
+          if (step === 'cleanup')
+            vi.mocked(ctx.containerManager.kill).mockImplementationOnce(async () => {
+              await gate.promise;
+            });
+          const completed: string[] = [];
+          ctx.eventBus.subscribe((event) => {
+            if (event.type === 'pod.completed') completed.push(event.podId);
+          });
+          const profile = ctx.deps.profileStore.get('test-profile');
+          vi.mocked(ctx.deps.profileStore.get).mockReturnValue({
+            ...profile,
+            mergePollIntervalSec: 5,
+          });
+          createPodManager(ctx.deps);
+          await vi.advanceTimersByTimeAsync(0);
+          await vi.advanceTimersByTimeAsync(10_000);
+          expect(ctx.prManager.getPrStatus).toHaveBeenCalledTimes(1);
+          expect(ctx.prManager.mergePr).toHaveBeenCalledTimes(step === 'merge' ? 1 : 0);
+          expect(ctx.containerManager.kill).toHaveBeenCalledTimes(step === 'cleanup' ? 1 : 0);
+          expect(completed).toEqual([]);
+          gate.resolve();
+          await vi.advanceTimersByTimeAsync(0);
+          if (step === 'merge') await vi.advanceTimersByTimeAsync(5_000);
+          expect(manager.getSession(pod.id).status).toBe('complete');
+          expect(completed).toEqual([pod.id]);
+          expect(ctx.containerManager.kill).toHaveBeenCalledTimes(1);
+          expect(ctx.prManager.getPrStatus).toHaveBeenCalledTimes(step === 'merge' ? 2 : 1);
+        } finally {
+          gate.resolve();
+          vi.useRealTimers();
+        }
+      },
+    );
     it.each(['pr-replaced', 'complete-reopened'] as const)(
       'does not publish a merge when the same generation is %s',
       async (step) => {
@@ -4923,56 +5054,62 @@ describe('PodManager', () => {
       expect(ctx.worktreeManager.mergeBranch).not.toHaveBeenCalled();
     });
 
-    it('polls and merges a clean PR when the parent worktree is stale', async () => {
-      vi.useFakeTimers();
-      try {
-        const ctx = createTestContext();
-        const manager = createPodManager(ctx.deps);
-        const pod = manager.createSession(
-          { profileName: 'test-profile', task: 'Do stuff' },
-          'user-1',
-        );
-        ctx.podRepo.update(pod.id, {
-          status: 'merge_pending',
-          prUrl: 'https://github.com/org/repo/pull/42',
-          worktreePath: `/tmp/autopod-missing-parent-${pod.id}`,
-        });
-        vi.mocked(ctx.prManager.getPrStatus)
-          .mockResolvedValueOnce({
-            merged: false,
-            open: true,
-            blockReason: null,
-            ciFailures: [],
-            reviewComments: [],
-            reviewDecision: 'APPROVED',
-          })
-          .mockResolvedValueOnce({
-            merged: true,
-            open: false,
-            blockReason: null,
-            ciFailures: [],
-            reviewComments: [],
+    it.each(['missing', 'existing'] as const)(
+      'polls and merges a clean PR without maintaining the %s parent worktree after merge',
+      async (worktree) => {
+        vi.useFakeTimers();
+        try {
+          const ctx = createTestContext();
+          const manager = createPodManager(ctx.deps);
+          const pod = manager.createSession(
+            { profileName: 'test-profile', task: 'Do stuff' },
+            'user-1',
+          );
+          ctx.podRepo.update(pod.id, {
+            status: 'merge_pending',
+            prUrl: 'https://github.com/org/repo/pull/42',
+            worktreePath:
+              worktree === 'existing' ? '/private/tmp' : `/tmp/autopod-missing-parent-${pod.id}`,
           });
-        vi.mocked(ctx.prManager.mergePr).mockResolvedValueOnce({
-          merged: true,
-          autoMergeScheduled: false,
-        });
+          vi.mocked(ctx.prManager.getPrStatus)
+            .mockResolvedValueOnce({
+              merged: false,
+              open: true,
+              blockReason: null,
+              ciFailures: [],
+              reviewComments: [],
+              reviewDecision: 'APPROVED',
+            })
+            .mockResolvedValueOnce({
+              merged: true,
+              open: false,
+              blockReason: null,
+              ciFailures: [],
+              reviewComments: [],
+            });
+          vi.mocked(ctx.prManager.mergePr).mockResolvedValueOnce({
+            merged: true,
+            autoMergeScheduled: false,
+          });
 
-        // A fresh manager resumes merge polling for persisted merge_pending pods.
-        createPodManager(ctx.deps);
-        await vi.advanceTimersByTimeAsync(0);
+          // A fresh manager resumes merge polling for persisted merge_pending pods.
+          createPodManager(ctx.deps);
+          await vi.advanceTimersByTimeAsync(0);
 
-        expect(ctx.prManager.mergePr).toHaveBeenCalledWith({
-          prUrl: 'https://github.com/org/repo/pull/42',
-        });
-        expect(ctx.worktreeManager.rebaseOntoBase).not.toHaveBeenCalled();
+          expect(ctx.prManager.mergePr).toHaveBeenCalledWith({
+            prUrl: 'https://github.com/org/repo/pull/42',
+          });
+          expect(ctx.worktreeManager.rebaseOntoBase).not.toHaveBeenCalled();
 
-        await vi.advanceTimersByTimeAsync(60_000);
-        expect(manager.getSession(pod.id).status).toBe('complete');
-      } finally {
-        vi.useRealTimers();
-      }
-    });
+          await vi.advanceTimersByTimeAsync(60_000);
+          expect(manager.getSession(pod.id).status).toBe('complete');
+          expect(ctx.worktreeManager.rebaseOntoBase).not.toHaveBeenCalled();
+          expect(ctx.worktreeManager.pushBranch).not.toHaveBeenCalled();
+        } finally {
+          vi.useRealTimers();
+        }
+      },
+    );
 
     it('passes squash option to PR merge', async () => {
       const ctx = createTestContext();

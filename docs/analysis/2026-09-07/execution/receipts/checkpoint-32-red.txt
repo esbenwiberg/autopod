@@ -1,0 +1,49 @@
+
+ RUN  v4.1.11 /private/tmp/autopod-durable-execution/packages/daemon
+
+ ❯ src/pods/pod-manager.test.ts (481 tests | 3 failed | 478 skipped) 172ms
+       × does not overlap merge polls while status is unresolved 75ms
+       × does not overlap merge polls while merge is unresolved 51ms
+       × does not overlap merge polls while cleanup is unresolved 45ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 3 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/pods/pod-manager.test.ts > PodManager > merge poll lifecycle > does not overlap merge polls while status is unresolved
+ FAIL  src/pods/pod-manager.test.ts > PodManager > merge poll lifecycle > does not overlap merge polls while merge is unresolved
+AssertionError: expected "vi.fn()" to be called 1 times, but got 2 times
+ ❯ src/pods/pod-manager.test.ts:4555:45
+    4553|           await vi.advanceTimersByTimeAsync(0);
+    4554|           await vi.advanceTimersByTimeAsync(120_000);
+    4555|           expect(ctx.prManager.getPrStatus).toHaveBeenCalledTimes(1);
+       |                                             ^
+    4556|           expect(ctx.prManager.mergePr).toHaveBeenCalledTimes(step ===…
+    4557|           expect(ctx.containerManager.kill).toHaveBeenCalledTimes(step…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/3]⎯
+
+ FAIL  src/pods/pod-manager.test.ts > PodManager > merge poll lifecycle > does not overlap merge polls while cleanup is unresolved
+AssertionError: expected [ 'northern-panther' ] to deeply equal []
+
+- Expected
++ Received
+
+- []
++ [
++   "northern-panther",
++ ]
+
+ ❯ src/pods/pod-manager.test.ts:4558:29
+    4556|           expect(ctx.prManager.mergePr).toHaveBeenCalledTimes(step ===…
+    4557|           expect(ctx.containerManager.kill).toHaveBeenCalledTimes(step…
+    4558|           expect(completed).toEqual([]);
+       |                             ^
+    4559|           gate.resolve();
+    4560|           await vi.advanceTimersByTimeAsync(0);
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/3]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  3 failed | 478 skipped (481)
+   Start at  22:22:34
+   Duration  1.33s (transform 720ms, setup 0ms, import 1.06s, tests 172ms, environment 0ms)

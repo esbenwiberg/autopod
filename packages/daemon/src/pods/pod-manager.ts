@@ -195,6 +195,7 @@ import { prefilterMemories, selectRelevantMemories } from './memory-selector.js'
 import type { MemoryUsageRepository } from './memory-usage-repository.js';
 import type { NudgeRepository } from './nudge-repository.js';
 import type { PodRepository, PodStats, PodUpdates } from './pod-repository.js';
+import { type PollOwnership, createPollingCoordinator } from './polling-coordinator.js';
 import { type PreflightConflict, findPreflightConflicts } from './preflight.js';
 import { buildSupervisorCommand, parseStatus } from './preview-supervisor.js';
 import type { ProgressEventRepository } from './progress-event-repository.js';
@@ -3587,8 +3588,9 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
 
   const COMMIT_POLL_INTERVAL_MS = 60_000;
 
-  /** Active merge polling intervals, keyed by podId. */
-  const mergePollers = new Map<string, ReturnType<typeof setInterval>>();
+  const mergePolling = createPollingCoordinator((err, podId) =>
+    logger.debug({ err, podId }, 'Merge polling operation failed'),
+  );
 
   const DEFAULT_MERGE_POLL_INTERVAL_MS = 60_000;
 
@@ -4316,25 +4318,26 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
 
   /** Start polling PR merge status for a pod in merge_pending state. */
   function startMergePolling(podId: string): void {
-    stopMergePolling(podId);
     const generation = podRepo.getOrThrow(podId).lifecycleGeneration;
 
-    const poll = async () => {
+    const poll = async (ownership: PollOwnership) => {
       try {
         const pod = podRepo.getOrThrow(podId);
         if (pod.status !== 'merge_pending' || pod.lifecycleGeneration !== generation) {
-          stopMergePolling(podId);
+          ownership.stop();
           return;
         }
 
         if (!pod.prUrl) {
-          stopMergePolling(podId);
+          ownership.stop();
           return;
         }
 
         const assertCurrent = (
           options: { allowRemovedContainer?: boolean; status?: PodStatus } = {},
         ) => {
+          if (!ownership.isCurrent())
+            throw new AutopodError('Merge polling ownership was replaced.', 'STALE_APPROVAL', 409);
           assertApprovalCurrent(
             { ...pod, status: options.status ?? pod.status },
             { allowRemovedContainer: options.allowRemovedContainer },
@@ -4360,7 +4363,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         const profile = profileStore.get(pod.profileName);
         const prManager = prManagerFactory ? prManagerFactory(profile) : null;
         if (!prManager) {
-          stopMergePolling(podId);
+          ownership.stop();
           return;
         }
 
@@ -4402,7 +4405,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
 
           logger.info({ podId, prUrl: pod.prUrl }, 'Merge polling: PR merged — pod complete');
           assertCurrent({ allowRemovedContainer: true, status: 'complete' });
-          stopMergePolling(podId);
+          ownership.stop();
           maybeTriggerDependents(mergedPod);
           return;
         }
@@ -4419,7 +4422,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
             'Merge polling: PR closed — pod failed',
           );
           assertCurrent({ status: 'failed' });
-          stopMergePolling(podId);
+          ownership.stop();
           return;
         }
 
@@ -4457,10 +4460,18 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
             const baseBranch = pod.baseBranch ?? profile.defaultBranch ?? 'main';
             const prUrl = pod.prUrl;
             try {
-              await mergeQueue.enqueueMerge(profile.repoUrl ?? null, baseBranch, async () => {
-                const result = await pollOperation(async () => prManager.mergePr({ prUrl }));
-                if (result.merged) emitActivityStatus(podId, 'PR merged by poller');
-              });
+              const merged = await mergeQueue.enqueueMerge(
+                profile.repoUrl ?? null,
+                baseBranch,
+                async () => {
+                  const result = await pollOperation(async () => prManager.mergePr({ prUrl }));
+                  if (result.merged) emitActivityStatus(podId, 'PR merged by poller');
+                  return result.merged;
+                },
+              );
+              // The next status observation confirms completion. Do not rebase
+              // or push a branch after the provider has already merged its PR.
+              if (merged) return;
             } catch (err) {
               assertCurrent();
               logger.debug({ err, podId }, 'Merge poller active merge attempt failed');
@@ -4563,20 +4574,12 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
       // Pod or profile gone — let poll() decide what to do on its first tick.
     }
 
-    // Run first poll immediately
-    poll();
-    const interval = setInterval(poll, pollIntervalMs);
-    interval.unref();
-    mergePollers.set(podId, interval);
+    mergePolling.start(podId, pollIntervalMs, poll);
   }
 
   /** Stop merge polling for a pod. */
   function stopMergePolling(podId: string): void {
-    const interval = mergePollers.get(podId);
-    if (interval) {
-      clearInterval(interval);
-      mergePollers.delete(podId);
-    }
+    mergePolling.stop(podId);
   }
 
   /** Resume merge polling for any pods left in merge_pending state (e.g. after daemon restart). */
