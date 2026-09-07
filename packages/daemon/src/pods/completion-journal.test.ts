@@ -54,6 +54,11 @@ describe('durable completion journal', () => {
         userId: 'reviewer',
       });
       expect(restarted.getOrThrow('settled').finalization?.pendingDecisionId).toBeNull();
+      const decisionContext = restarted.completionJournal?.recoveryContext(restored);
+      expect(decisionContext).toContain('Select finding A');
+      expect(decisionContext).toContain('Select findings');
+      expect(decisionContext).toContain('decision');
+      expect(restarted.completionJournal?.replyWatermark(restored.id)).toBe(0);
       const firstDecision = reopened.prepare('SELECT * FROM completion_decisions').get();
       const firstEscalation = reopened.prepare('SELECT response FROM escalations').get();
       restarted.completionJournal?.recordReply(restored, 'Select finding A', {
@@ -74,6 +79,56 @@ describe('durable completion journal', () => {
       expect(restarted.getOrThrow('settled').finalization).toBeNull();
     } finally {
       reopened.close();
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('refuses escaped decision context larger than its bound without discarding the stored reply', () => {
+    const db = createTestDb();
+    try {
+      insertPod(db);
+      const repo = createPodRepository(db);
+      const pod = repo.getOrThrow('settled');
+      const response = '\u0000'.repeat(20_000);
+      repo.completionJournal?.recordReply(pod, response, { type: 'human', userId: 'reviewer' });
+      expect(() => repo.completionJournal?.recoveryContext(pod)).toThrow('safe continuation bound');
+      expect(db.prepare('SELECT response FROM completion_decisions').get()).toEqual({ response });
+    } finally {
+      db.close();
+    }
+  });
+
+  it('upgrades legacy decision history with a conservative event-order fence and retains it across reopen', () => {
+    const dir = mkdtempSync(path.join(tmpdir(), 'decision-upgrade-'));
+    const migrations = path.resolve(import.meta.dirname, '../db/migrations');
+    for (const file of readdirSync(migrations)) {
+      if (Number.parseInt(file, 10) <= 158)
+        copyFileSync(path.join(migrations, file), path.join(dir, file));
+    }
+    const filename = path.join(dir, 'legacy.db');
+    let db = new Database(filename);
+    try {
+      runMigrations(db, dir, logger);
+      insertPod(db);
+      db.exec(`INSERT INTO completion_decisions(pod_id,decision_id,response,actor,responded_at)
+        VALUES ('settled','old-answer','Keep report only','{"type":"human","userId":"reviewer"}','2026-01-01');
+        INSERT INTO events(pod_id,type,payload) VALUES ('settled','pod.agent_activity','{}');`);
+      const watermark = (db.prepare('SELECT MAX(id) AS id FROM events').get() as { id: number }).id;
+      runMigrations(db, migrations, logger);
+      db.close();
+      db = new Database(filename);
+      const repo = createPodRepository(db);
+      expect(repo.completionJournal?.replyWatermark('settled')).toBe(watermark);
+      expect(repo.completionJournal?.recoveryContext(repo.getOrThrow('settled'))).toContain(
+        'Keep report only',
+      );
+      expect(db.prepare('SELECT generation, question FROM completion_decisions').get()).toEqual({
+        generation: null,
+        question: null,
+      });
+      expect(db.pragma('integrity_check', { simple: true })).toBe('ok');
+    } finally {
+      db.close();
       rmSync(dir, { recursive: true, force: true });
     }
   });

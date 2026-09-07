@@ -199,9 +199,9 @@ import { resolveProviderPreflight } from './provider-preflight.js';
 import type { QualityScoreRepository } from './quality-score-repository.js';
 import { createReadinessService } from './readiness-review.js';
 import {
-  buildContinuationPrompt,
-  buildRecoveryTask,
-  buildReworkTask,
+  buildContinuationPrompt as buildContinuationPromptFromWorktree,
+  buildRecoveryTask as buildRecoveryTaskFromWorktree,
+  buildReworkTask as buildReworkTaskFromWorktree,
   hasPendingProviderContinuation,
   writeProviderFailoverHandoff,
 } from './recovery-context.js';
@@ -1674,19 +1674,22 @@ function agentPhaseBucketKey(attempt: number): 'agent_initial' | `agent_rework_$
 function hasLatestPersistedAgentTerminalEventComplete(
   eventRepo: EventRepository | undefined,
   podId: string,
+  afterEventId = 0,
 ): boolean {
   if (!eventRepo) return false;
   let latestTerminalEvent: 'complete' | 'error' | null = null;
+  let terminalEventId = 0;
   for (const event of eventRepo.getForSession(podId)) {
     if (event.payload.type !== 'pod.agent_activity') continue;
     const agentEvent = event.payload.event;
     if (agentEvent.type === 'complete') {
       latestTerminalEvent = 'complete';
+      terminalEventId = event.id;
     } else if (agentEvent.type === 'error' && agentEvent.fatal) {
       latestTerminalEvent = 'error';
     }
   }
-  return latestTerminalEvent === 'complete';
+  return latestTerminalEvent === 'complete' && terminalEventId > afterEventId;
 }
 
 function agentCompleteEventKey(event: Extract<AgentEvent, { type: 'complete' }>): string {
@@ -2109,6 +2112,22 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
       costUsd: active.costUsd,
       handoffReference,
     });
+  }
+
+  function appendDecisionContext(pod: Pod, task: string): string {
+    return task + (podRepo.completionJournal?.recoveryContext(pod) ?? '');
+  }
+
+  async function buildRecoveryTask(pod: Pod, worktreePath: string): Promise<string> {
+    return appendDecisionContext(pod, await buildRecoveryTaskFromWorktree(pod, worktreePath));
+  }
+
+  async function buildContinuationPrompt(pod: Pod, worktreePath: string): Promise<string> {
+    return appendDecisionContext(pod, await buildContinuationPromptFromWorktree(pod, worktreePath));
+  }
+
+  async function buildReworkTask(pod: Pod, worktreePath: string, reason: string): Promise<string> {
+    return appendDecisionContext(pod, await buildReworkTaskFromWorktree(pod, worktreePath, reason));
   }
 
   function hasDurableAgentExecutionEvidence(pod: Pod): boolean {
@@ -9619,7 +9638,11 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           isRecovery &&
           !isInfrastructureRecovery &&
           !isRework &&
-          hasLatestPersistedAgentTerminalEventComplete(deps.eventRepo, podId)
+          hasLatestPersistedAgentTerminalEventComplete(
+            deps.eventRepo,
+            podId,
+            podRepo.completionJournal?.replyWatermark(podId) ?? 0,
+          )
         ) {
           const recoveredProvenance = await inspectExecutionPreflight(
             containerManager,
@@ -9877,7 +9900,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           // Normal path
           events = runtime.spawn({
             podId,
-            task: pod.task,
+            task: appendDecisionContext(pod, pod.task),
             model: pod.model,
             reasoningEffort,
             workDir: '/workspace',

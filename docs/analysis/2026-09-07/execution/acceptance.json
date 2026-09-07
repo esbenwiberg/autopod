@@ -13,7 +13,8 @@
         "packages/daemon/src/pods/pod-bridge-impl.ts",
         "packages/daemon/src/db/unit-of-work.ts",
         "packages/daemon/src/pods/escalation-coordinator.ts",
-        "packages/daemon/src/pods/completion-journal.ts"
+        "packages/daemon/src/pods/completion-journal.ts",
+        "packages/daemon/src/db/migrations/159_decision_recovery.sql"
       ],
       "tests": [
         "packages/daemon/src/pods/pod-lifecycle.e2e.test.ts",
@@ -28,10 +29,13 @@
         "receipts/escalation-atomicity-red.txt",
         "receipts/escalation-overlap-red.txt",
         "receipts/duplicate-reply-audit-red.txt",
-        "receipts/escalation-coordinator-audit-final.txt"
+        "receipts/escalation-coordinator-audit-final.txt",
+        "receipts/reply-recovery-red.txt",
+        "receipts/reply-context-bound-red.txt",
+        "receipts/reply-recovery-affected-final.txt"
       ],
       "prerequisites": [],
-      "remaining": "New question/state and normal reply/state transactions, after-commit status publication, overlap/duplicate question handling, and first-reply audit are locally verified. Other response dispatch boundaries, historical orphan decisions, reply delivery after commit/restart, and broad finalization side effects remain."
+      "remaining": "Normal replies are atomic, retained in bounded recovery context, and fence older completion events. New unanswered decisions remain actionable. Attached MCP delivery acknowledgment, delayed concurrent stream ordering, other response boundaries, historical orphan questions and broader finalization side effects remain."
     },
     {
       "id": "W1.2",
@@ -44,7 +48,8 @@
         "packages/daemon/src/runtimes/codex-runtime.ts",
         "packages/mobile-web/src/components/EscalationCard.tsx",
         "packages/daemon/src/db/unit-of-work.ts",
-        "packages/daemon/src/pods/escalation-coordinator.ts"
+        "packages/daemon/src/pods/escalation-coordinator.ts",
+        "packages/daemon/src/db/migrations/159_decision_recovery.sql"
       ],
       "tests": [
         "packages/daemon/src/pods/completion-journal.test.ts",
@@ -65,10 +70,13 @@
         "receipts/escalation-atomicity-red.txt",
         "receipts/escalation-overlap-red.txt",
         "receipts/duplicate-reply-audit-red.txt",
-        "receipts/escalation-coordinator-audit-final.txt"
+        "receipts/escalation-coordinator-audit-final.txt",
+        "receipts/reply-recovery-red.txt",
+        "receipts/reply-context-bound-red.txt",
+        "receipts/reply-recovery-affected-final.txt"
       ],
       "prerequisites": [],
-      "remaining": "New question/state and normal reply/state transactions, after-commit status publication, overlap/duplicate question handling, and first-reply audit are locally verified. Other response dispatch boundaries, historical orphan decisions, reply delivery after commit/restart, and broad finalization side effects remain."
+      "remaining": "Normal replies are atomic, retained in bounded recovery context, and fence older completion events. New unanswered decisions remain actionable. Attached MCP delivery acknowledgment, delayed concurrent stream ordering, other response boundaries, historical orphan questions and broader finalization side effects remain."
     },
     {
       "id": "W1.3",
@@ -82,7 +90,8 @@
         "packages/daemon/src/worktrees/durable-pr-manager.ts",
         "packages/daemon/src/pods/pod-repository.ts",
         "packages/daemon/src/db/unit-of-work.ts",
-        "packages/daemon/src/pods/escalation-coordinator.ts"
+        "packages/daemon/src/pods/escalation-coordinator.ts",
+        "packages/daemon/src/db/migrations/159_decision_recovery.sql"
       ],
       "tests": [
         "packages/daemon/src/pods/completion-journal.test.ts",
@@ -100,12 +109,15 @@
         "receipts/escalation-atomicity-red.txt",
         "receipts/escalation-overlap-red.txt",
         "receipts/duplicate-reply-audit-red.txt",
-        "receipts/escalation-coordinator-audit-final.txt"
+        "receipts/escalation-coordinator-audit-final.txt",
+        "receipts/reply-recovery-red.txt",
+        "receipts/reply-context-bound-red.txt",
+        "receipts/reply-recovery-affected-final.txt"
       ],
       "prerequisites": [
         "PR creation intent/reconciliation implemented locally; broader finalization side effects and operator override remain."
       ],
-      "remaining": "New question/state and normal reply/state transactions, after-commit status publication, overlap/duplicate question handling, and first-reply audit are locally verified. Other response dispatch boundaries, historical orphan decisions, reply delivery after commit/restart, and broad finalization side effects remain."
+      "remaining": "Normal replies are atomic, retained in bounded recovery context, and fence older completion events. New unanswered decisions remain actionable. Attached MCP delivery acknowledgment, delayed concurrent stream ordering, other response boundaries, historical orphan questions and broader finalization side effects remain."
     },
     {
       "id": "W1.4",
@@ -123,7 +135,8 @@
       "implementation": [
         "packages/daemon/src/db/unit-of-work.ts",
         "packages/daemon/src/pods/escalation-coordinator.ts",
-        "packages/daemon/src/pods/completion-journal.ts"
+        "packages/daemon/src/pods/completion-journal.ts",
+        "packages/daemon/src/db/migrations/159_decision_recovery.sql"
       ],
       "tests": [
         "packages/daemon/src/db/unit-of-work.test.ts",
@@ -134,10 +147,13 @@
         "receipts/escalation-atomicity-red.txt",
         "receipts/escalation-overlap-red.txt",
         "receipts/duplicate-reply-audit-red.txt",
-        "receipts/escalation-coordinator-audit-final.txt"
+        "receipts/escalation-coordinator-audit-final.txt",
+        "receipts/reply-recovery-red.txt",
+        "receipts/reply-context-bound-red.txt",
+        "receipts/reply-recovery-affected-final.txt"
       ],
       "prerequisites": [],
-      "remaining": "New question/state and normal reply/state transactions, after-commit status publication, overlap/duplicate question handling, and first-reply audit are locally verified. Other response dispatch boundaries, historical orphan decisions, reply delivery after commit/restart, and broad finalization side effects remain."
+      "remaining": "Normal replies are atomic, retained in bounded recovery context, and fence older completion events. New unanswered decisions remain actionable. Attached MCP delivery acknowledgment, delayed concurrent stream ordering, other response boundaries, historical orphan questions and broader finalization side effects remain."
     },
     {
       "id": "W2.1",
@@ -1047,7 +1063,8 @@
       "implementation": [
         "packages/daemon/src/db/migrations/151_completion_journal.sql",
         "packages/daemon/src/db/migrate.ts",
-        "packages/daemon/src/db/migrations/158_execution_provenance.sql"
+        "packages/daemon/src/db/migrations/158_execution_provenance.sql",
+        "packages/daemon/src/db/migrations/159_decision_recovery.sql"
       ],
       "tests": [
         "packages/daemon/src/pods/completion-journal.test.ts",
@@ -1061,7 +1078,8 @@
         "receipts/migration-coexistence-final.txt",
         "receipts/migration-renumbering.json",
         "receipts/migration-renumbering-prefix-audit.json",
-        "receipts/managed-migration-compatibility-source.json"
+        "receipts/managed-migration-compatibility-source.json",
+        "receipts/decision-migration-prefix.json"
       ],
       "prerequisites": [],
       "remaining": "Managed 142-150 definitions retained as inert baseline; unpublished native additions renumbered 151-158. Combined schema upgrade preserves native/managed data locally. Exact remote migration-byte verification awaits approved read-only inspection; no live migration was performed."
@@ -1069,7 +1087,7 @@
     {
       "id": "G.3",
       "requirement": "All affected suites and full repository validation pipeline pass on exact recorded commits",
-      "status": "unverified",
+      "status": "partial",
       "implementation": [],
       "tests": [],
       "evidence": [
@@ -1079,10 +1097,12 @@
         "receipts/checkpoint-12-full-validation-identity.json",
         "receipts/route-preflight-fixture-green.txt",
         "receipts/dependency-audit-security-updates.json",
-        "receipts/dependency-compatibility.txt"
+        "receipts/dependency-compatibility.txt",
+        "receipts/checkpoint-13-full-validation.txt",
+        "receipts/checkpoint-13-full-validation-identity.json"
       ],
       "prerequisites": [
-        "Checkpoint 12 full pipeline failed four stale route fixtures and audit. Local fixtures corrected, 48 routes pass; audit now zero after compatible security updates. Full committed pipeline rerun required."
+        "Full required pipeline passed on 83c561e6 with audit zero. Later decision recovery changes pass 475 affected tests and full build; final committed pipeline still required."
       ]
     },
     {
@@ -1119,5 +1139,5 @@
       "prerequisites": []
     }
   ],
-  "lastCheckpoint": "checkpoint-13.md"
+  "lastCheckpoint": "checkpoint-14.md"
 }

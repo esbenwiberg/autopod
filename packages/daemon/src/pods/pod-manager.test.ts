@@ -7463,6 +7463,98 @@ describe('PodManager', () => {
         expect(task).toContain('def5678 Half-done work');
       });
 
+      it.each(['claude', 'codex', 'copilot'] as const)(
+        'replays the saved human decision after a %s reply-resume failure instead of reusing older completion',
+        async (runtimeType) => {
+          const ctx = createTestContext();
+          setupExecFileMock({ bareRepoPath: '/tmp/bare/recovered.git' });
+          const manager = createPodManager(ctx.deps);
+          const pod = manager.createSession(
+            {
+              profileName: 'test-profile',
+              task: 'Review then repair',
+              runtime: runtimeType,
+              skipValidation: true,
+            },
+            'user-1',
+          );
+          const question: EscalationRequest = {
+            id: 'durable-reply-recovery',
+            podId: pod.id,
+            type: 'ask_human',
+            timestamp: '2026-01-01T00:00:00.000Z',
+            payload: { question: 'Which finding?' },
+            response: null,
+          };
+          ctx.escalationRepo.insert(question);
+          ctx.podRepo.update(pod.id, {
+            status: 'awaiting_input',
+            pendingEscalation: question,
+            containerId: 'container-123',
+            worktreePath: '/tmp/worktree/existing',
+            ...(runtimeType === 'codex' ? { codexSessionId: 'saved-session' } : {}),
+          });
+          ctx.eventBus.emit({
+            type: 'pod.agent_activity',
+            podId: pod.id,
+            timestamp: '2026-01-01T00:00:01.000Z',
+            event: {
+              type: 'complete',
+              timestamp: '2026-01-01T00:00:01.000Z',
+              result: 'Report collected',
+            },
+          });
+          const continuation = async function* (): AsyncIterable<AgentEvent> {
+            yield {
+              type: 'complete',
+              timestamp: new Date().toISOString(),
+              result: 'Selected repair completed',
+            };
+          };
+          vi.mocked(ctx.runtime.spawn).mockImplementation(continuation);
+          vi.mocked(ctx.runtime.resume).mockImplementation(continuation);
+          vi.mocked(ctx.runtime.resume).mockImplementationOnce(() => {
+            throw new Error('crash after reply commit');
+          });
+          await expect(
+            manager.sendMessage(pod.id, 'Repair finding A only', {
+              type: 'human',
+              userId: 'reviewer',
+            }),
+          ).rejects.toThrow('crash after reply commit');
+          expect(ctx.db.prepare('SELECT response FROM completion_decisions').get()).toEqual({
+            response: 'Repair finding A only',
+          });
+          vi.mocked(ctx.runtime.resume).mockClear();
+          ctx.podRepo.update(pod.id, {
+            status: 'queued',
+            recoveryWorktreePath: '/tmp/worktree/existing',
+          });
+          const restarted = createPodManager(ctx.deps);
+          await restarted.processPod(pod.id);
+          const delivered =
+            runtimeType === 'codex'
+              ? vi.mocked(ctx.runtime.resume).mock.calls[0]?.[1]
+              : vi.mocked(ctx.runtime.spawn).mock.calls[0]?.[0].task;
+          expect(delivered).toContain('Repair finding A only');
+          expect(delivered).toContain(question.id);
+          expect(delivered).toContain('Which finding?');
+          expect(restarted.getSession(pod.id).status).toBe('validated');
+          const continuationCount =
+            vi.mocked(ctx.runtime.resume).mock.calls.length +
+            vi.mocked(ctx.runtime.spawn).mock.calls.length;
+          ctx.podRepo.update(pod.id, {
+            status: 'queued',
+            recoveryWorktreePath: '/tmp/worktree/existing',
+          });
+          await createPodManager(ctx.deps).processPod(pod.id);
+          expect(
+            vi.mocked(ctx.runtime.resume).mock.calls.length +
+              vi.mocked(ctx.runtime.spawn).mock.calls.length,
+          ).toBe(continuationCount);
+        },
+      );
+
       it('skips agent spawn during recovery when the prior run already emitted complete', async () => {
         const ctx = createTestContext();
         setupExecFileMock({ bareRepoPath: '/tmp/bare/recovered.git' });

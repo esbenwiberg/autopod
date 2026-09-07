@@ -1,4 +1,4 @@
-import type { OperatorActor, Pod } from '@autopod/shared';
+import { AutopodError, type OperatorActor, type Pod } from '@autopod/shared';
 import type Database from 'better-sqlite3';
 
 type Finalization = NonNullable<Pod['finalization']>;
@@ -7,6 +7,8 @@ export interface CompletionJournal {
   begin(pod: Pod): void;
   settle(pod: Pod, result?: string): Finalization;
   mark(pod: Pod, phase: Finalization['phase'], sourcePreserved?: boolean): void;
+  recoveryContext(pod: Pod): string;
+  replyWatermark(podId: string): number;
   recordReply(pod: Pod, message: string, actor: OperatorActor): void;
 }
 
@@ -41,6 +43,45 @@ export function createCompletionJournal(db: Database.Database): CompletionJourna
   return {
     get,
     begin,
+    replyWatermark(podId) {
+      return (
+        db
+          .prepare(
+            'SELECT COALESCE(MAX(event_watermark), 0) AS watermark FROM completion_decisions WHERE pod_id = ?',
+          )
+          .get(podId) as { watermark: number }
+      ).watermark;
+    },
+    recoveryContext(pod) {
+      const size = db
+        .prepare(`SELECT COUNT(*) AS count,
+        COALESCE(SUM(length(CAST(response AS BLOB)) + COALESCE(length(CAST(question AS BLOB)), 0)), 0) AS bytes
+        FROM completion_decisions WHERE pod_id = ?`)
+        .get(pod.id) as { count: number; bytes: number };
+      if (!size.count) return '';
+      if (size.count > 64 || size.bytes > 65_536)
+        throw new AutopodError(
+          'Saved decision context exceeds the safe continuation bound. Reconcile the decision history before starting a worker; no reply was discarded.',
+          'DECISION_CONTEXT_RECONCILIATION_REQUIRED',
+          409,
+        );
+      const decisions = db
+        .prepare(`SELECT decision_id AS decisionId, generation, question,
+        response, responded_at AS respondedAt FROM completion_decisions WHERE pod_id = ? ORDER BY rowid`)
+        .all(pod.id);
+      const context = [
+        '\n\nRECORDED OPERATOR DECISIONS (durable history):',
+        'Preserve these answers and their decision IDs. Replaying this history is not a new request to repeat completed actions or expand approval. Check preserved work before continuing.',
+        JSON.stringify(decisions),
+      ].join('\n');
+      if (Buffer.byteLength(context, 'utf8') > 65_536)
+        throw new AutopodError(
+          'Saved decision context exceeds the safe continuation bound. Reconcile the decision history before starting a worker; no reply was discarded.',
+          'DECISION_CONTEXT_RECONCILIATION_REQUIRED',
+          409,
+        );
+      return context;
+    },
     settle: db.transaction((pod: Pod, result?: string): Finalization => {
       if (!current(pod)) throw new Error('Stale lifecycle cannot record settlement');
       let entry = get(pod.id, pod.lifecycleGeneration);
@@ -95,8 +136,18 @@ export function createCompletionJournal(db: Database.Database): CompletionJourna
       if (existing) return;
       const now = new Date().toISOString();
       db.prepare(
-        'INSERT OR IGNORE INTO completion_decisions (pod_id, decision_id, response, actor, responded_at) VALUES (?, ?, ?, ?, ?)',
-      ).run(pod.id, decision.id, message, JSON.stringify(actor), now);
+        `INSERT INTO completion_decisions (pod_id, decision_id, response, actor, responded_at, generation, question, event_watermark)
+         VALUES (?, ?, ?, ?, ?, ?, ?, (SELECT COALESCE(MAX(id), 0) FROM events WHERE pod_id = ?))`,
+      ).run(
+        pod.id,
+        decision.id,
+        message,
+        JSON.stringify(actor),
+        now,
+        pod.lifecycleGeneration,
+        JSON.stringify(decision.payload),
+        pod.id,
+      );
       // Runtime escalation events can lack an MCP row; the independent decision receipt is still durable.
       db.prepare(
         'UPDATE escalations SET response = ?, resolved_at = ? WHERE id = ? AND pod_id = ?',
