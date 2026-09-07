@@ -40,6 +40,7 @@ import {
   COMPACT_POD_COLUMNS,
   type CompactPodSource,
 } from './compact-pod-projection.js';
+import { hasUnansweredDecision } from './decision-admission.js';
 import {
   type DispatchPreflightLedger,
   createDispatchPreflightLedger,
@@ -250,6 +251,7 @@ export interface PodRepository extends Partial<UnitOfWork> {
   deliveryLedger?: DeliveryLedger;
   taskExecutions?: TaskExecutionLedger;
   completionJournal?: CompletionJournal;
+  hasUnansweredDecision?(podId: string): boolean;
   insert(pod: NewPod): void;
   getOrThrow(id: string): Pod;
   update(id: string, changes: PodUpdates): void;
@@ -694,6 +696,7 @@ export function createPodRepository(db: Database.Database): PodRepository {
     dispatchPreflight,
     executionProvenance: createExecutionProvenanceLedger(db),
     completionJournal,
+    hasUnansweredDecision: (podId) => hasUnansweredDecision(db, podId),
     deliveryLedger: createDeliveryLedger(db),
     taskExecutions,
     insert: db.transaction((pod: NewPod): void => {

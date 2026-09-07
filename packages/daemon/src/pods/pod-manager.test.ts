@@ -12791,6 +12791,207 @@ describe('PodManager', () => {
         fs.rmSync(completionDataDir, { recursive: true, force: true });
       });
 
+      it.each(['branch', 'artifact'] as const)(
+        'coalesces concurrent interactive %s completion requests',
+        async (output) => {
+          const ctx = createTestContext();
+          const manager = createPodManager(ctx.deps);
+          const pod = manager.createSession(
+            {
+              profileName: 'test-profile',
+              task: 'Complete once',
+              options: { agentMode: 'interactive', output, validate: false, promotable: true },
+            },
+            'user-1',
+          );
+          ctx.podRepo.update(pod.id, {
+            status: 'running',
+            containerId: output === 'artifact' ? 'ctr-artifact' : null,
+            worktreePath: '/tmp/worktree/abc',
+          });
+          const gate = deferred<void>();
+          const operation =
+            output === 'artifact'
+              ? vi.mocked(ctx.containerManager.extractDirectoryFromContainer)
+              : vi.mocked(ctx.worktreeManager.mergeBranch);
+          operation.mockImplementation(async () => {
+            await gate.promise;
+          });
+          const first = manager.completeSession(pod.id);
+          await waitForAssertion(() => expect(operation).toHaveBeenCalledOnce());
+          const results = Promise.allSettled([first, manager.completeSession(pod.id)]);
+          gate.resolve();
+          expect((await results).map((result) => result.status)).toEqual([
+            'fulfilled',
+            'fulfilled',
+          ]);
+          expect(operation).toHaveBeenCalledOnce();
+          expect(manager.getSession(pod.id).status).toBe('complete');
+        },
+      );
+
+      it('rejects a different promotion while interactive completion is already pending', async () => {
+        const ctx = createTestContext();
+        const manager = createPodManager(ctx.deps);
+        const pod = manager.createSession(
+          { profileName: 'test-profile', task: 'Complete once', outputMode: 'workspace' },
+          'user-1',
+        );
+        ctx.podRepo.update(pod.id, { status: 'running', worktreePath: '/tmp/worktree/abc' });
+        const gate = deferred<void>();
+        vi.mocked(ctx.worktreeManager.mergeBranch).mockImplementation(async () => {
+          await gate.promise;
+        });
+        const first = manager.completeSession(pod.id);
+        await waitForAssertion(() =>
+          expect(ctx.worktreeManager.mergeBranch).toHaveBeenCalledOnce(),
+        );
+        try {
+          await expect(manager.completeSession(pod.id, { promoteTo: 'pr' })).rejects.toMatchObject({
+            code: 'COMPLETION_IN_PROGRESS',
+          });
+        } finally {
+          gate.resolve();
+          await first.catch(() => {});
+        }
+        expect(manager.getSession(pod.id).options.agentMode).toBe('interactive');
+        expect(ctx.runtime.spawn).not.toHaveBeenCalled();
+      });
+
+      it('retains unanswered input before interactive completion can push or clean up', async () => {
+        const ctx = createTestContext();
+        const manager = createPodManager(ctx.deps);
+        const pod = manager.createSession(
+          { profileName: 'test-profile', task: 'Wait for decision', outputMode: 'workspace' },
+          'user-1',
+        );
+        ctx.podRepo.update(pod.id, {
+          status: 'running',
+          worktreePath: '/tmp/worktree/abc',
+          pendingEscalation: { id: 'pending', question: 'Keep this work?' },
+        });
+        await expect(manager.completeSession(pod.id)).rejects.toMatchObject({
+          code: 'HUMAN_DECISION_PENDING',
+        });
+        expect(ctx.worktreeManager.mergeBranch).not.toHaveBeenCalled();
+        expect(ctx.worktreeManager.cleanup).not.toHaveBeenCalled();
+        expect(manager.getSession(pod.id).pendingEscalation?.id).toBe('pending');
+      });
+
+      it('does not clean a replacement lifecycle after an interactive push returns', async () => {
+        const ctx = createTestContext();
+        const manager = createPodManager(ctx.deps);
+        const pod = manager.createSession(
+          { profileName: 'test-profile', task: 'Finish old lifecycle', outputMode: 'workspace' },
+          'user-1',
+        );
+        ctx.podRepo.update(pod.id, { status: 'running', worktreePath: '/tmp/worktree/abc' });
+        vi.mocked(ctx.worktreeManager.mergeBranch).mockImplementation(async () => {
+          ctx.podRepo.incrementLifecycleGeneration(pod.id);
+          ctx.podRepo.update(pod.id, {
+            status: 'running',
+            containerId: 'replacement-container',
+            worktreePath: '/replacement/worktree',
+          });
+        });
+        await expect(manager.completeSession(pod.id)).rejects.toMatchObject({
+          code: 'STALE_WORKSPACE_COMPLETION',
+        });
+        expect(ctx.worktreeManager.cleanup).not.toHaveBeenCalled();
+        expect(ctx.containerManager.kill).not.toHaveBeenCalled();
+        expect(manager.getSession(pod.id)).toMatchObject({
+          status: 'running',
+          containerId: 'replacement-container',
+          worktreePath: '/replacement/worktree',
+        });
+      });
+
+      it('keeps an older unanswered journal cycle from being hidden by interactive completion', async () => {
+        const ctx = createTestContext();
+        const manager = createPodManager(ctx.deps);
+        const pod = manager.createSession(
+          { profileName: 'test-profile', task: 'Keep decision', outputMode: 'workspace' },
+          'user-1',
+        );
+        ctx.podRepo.update(pod.id, { status: 'running', worktreePath: '/tmp/worktree/abc' });
+        ctx.db
+          .prepare(`INSERT INTO pod_finalizations
+          (pod_id, generation, cycle, phase, pending_decision_id, updated_at)
+          VALUES (?, 1, 1, 'awaiting_human', 'older-question', datetime('now')),
+                 (?, 1, 2, 'running', NULL, datetime('now'))`)
+          .run(pod.id, pod.id);
+        await expect(manager.completeSession(pod.id)).rejects.toMatchObject({
+          code: 'HUMAN_DECISION_PENDING',
+        });
+        expect(ctx.worktreeManager.mergeBranch).not.toHaveBeenCalled();
+        expect(
+          ctx.db
+            .prepare(
+              'SELECT pending_decision_id FROM pod_finalizations WHERE pod_id = ? AND cycle = 1',
+            )
+            .get(pod.id),
+        ).toEqual({ pending_decision_id: 'older-question' });
+      });
+
+      it('retains the container when a question arrives during interactive pre-cleanup work', async () => {
+        const ctx = createTestContext();
+        const manager = createPodManager(ctx.deps);
+        const pod = manager.createSession(
+          { profileName: 'test-profile', task: 'Keep decision', outputMode: 'workspace' },
+          'user-1',
+        );
+        ctx.podRepo.update(pod.id, {
+          status: 'running',
+          containerId: 'ctr-source',
+          worktreePath: '/tmp/worktree/abc',
+        });
+        ctx.deps.beforeContainerCleanup = async () => {
+          ctx.podRepo.update(pod.id, {
+            pendingEscalation: { id: 'late-question', question: 'Preserve this source?' },
+          });
+        };
+        await expect(manager.completeSession(pod.id)).rejects.toMatchObject({
+          code: 'HUMAN_DECISION_PENDING',
+        });
+        expect(ctx.containerManager.kill).not.toHaveBeenCalled();
+        expect(manager.getSession(pod.id)).toMatchObject({
+          status: 'running',
+          containerId: 'ctr-source',
+          pendingEscalation: { id: 'late-question' },
+        });
+      });
+
+      it('does not complete a new generation when interactive container cleanup returns late', async () => {
+        const ctx = createTestContext();
+        const manager = createPodManager(ctx.deps);
+        const pod = manager.createSession(
+          { profileName: 'test-profile', task: 'Keep current lifecycle', outputMode: 'workspace' },
+          'user-1',
+        );
+        ctx.podRepo.update(pod.id, {
+          status: 'running',
+          containerId: 'ctr-old',
+          worktreePath: '/tmp/worktree/abc',
+        });
+        vi.mocked(ctx.containerManager.kill).mockImplementation(async () => {
+          ctx.podRepo.incrementLifecycleGeneration(pod.id);
+          ctx.podRepo.update(pod.id, {
+            status: 'running',
+            containerId: 'ctr-new',
+            worktreePath: '/new/worktree',
+          });
+        });
+        await expect(manager.completeSession(pod.id)).rejects.toMatchObject({
+          code: 'STALE_WORKSPACE_COMPLETION',
+        });
+        expect(ctx.containerManager.kill).toHaveBeenCalledExactlyOnceWith('ctr-old');
+        expect(manager.getSession(pod.id)).toMatchObject({
+          status: 'running',
+          containerId: 'ctr-new',
+          worktreePath: '/new/worktree',
+        });
+      });
+
       it('pushes branch and transitions running → complete', async () => {
         const ctx = createTestContext();
         const manager = createPodManager(ctx.deps);

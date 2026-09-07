@@ -18,7 +18,9 @@
         "packages/daemon/src/pods/decision-admission.ts",
         "packages/daemon/src/pods/task-execution-ledger.ts",
         "packages/daemon/src/pods/task-retry-ledger.ts",
-        "packages/daemon/src/runtimes/codex-runtime.ts"
+        "packages/daemon/src/runtimes/codex-runtime.ts",
+        "packages/daemon/src/pods/interactive-completion-coordinator.ts",
+        "packages/daemon/src/pods/pod-repository.ts"
       ],
       "tests": [
         "packages/daemon/src/pods/pod-lifecycle.e2e.test.ts",
@@ -46,10 +48,13 @@
         "receipts/decision-admission-affected.txt",
         "checkpoint-21.md",
         "receipts/summary-launch-race-red.txt",
-        "receipts/summary-launch-race-final.txt"
+        "receipts/summary-launch-race-final.txt",
+        "checkpoint-23.md",
+        "receipts/interactive-coordination-red.txt",
+        "receipts/interactive-coordination-final.txt"
       ],
       "prerequisites": [],
-      "remaining": "Normal replies are atomic, retained in bounded recovery context, and fence older completion events. New unanswered decisions remain actionable. Attached MCP delivery acknowledgment, delayed concurrent stream ordering, other response boundaries, historical orphan questions and broader finalization side effects remain. New worker/cycle and validation admission now preserve pending decisions, including older unresolved cycles in the current generation. Historical missing payload recovery and stream/MCP delivery acknowledgment remain. Codex now observes summary events before Spawn/Resume launch and disposes each invocation listener. This closes the local launch/stream attachment race, not durable delivery acknowledgment across all runtimes or daemon restart."
+      "remaining": "Normal replies are atomic, retained in bounded recovery context, and fence older completion events. New unanswered decisions remain actionable. Attached MCP delivery acknowledgment, delayed concurrent stream ordering, other response boundaries, historical orphan questions and broader finalization side effects remain. New worker/cycle and validation admission now preserve pending decisions, including older unresolved cycles in the current generation. Historical missing payload recovery and stream/MCP delivery acknowledgment remain. Codex now observes summary events before Spawn/Resume launch and disposes each invocation listener. This closes the local launch/stream attachment race, not durable delivery acknowledgment across all runtimes or daemon restart. Concurrent interactive completions now coalesce in process, conflicting promotion/generation requests fail closed, and current source/lifecycle/decision ownership is checked across push and container release boundaries. This is not durable cross-process idempotency, cancellation of already-dispatched external operations, or complete post-completion side-effect accounting."
     },
     {
       "id": "W1.2",
@@ -72,7 +77,9 @@
         "packages/daemon/src/pods/sandbox-terminal-reaper.ts",
         "packages/daemon/src/pods/decision-admission.ts",
         "packages/daemon/src/pods/task-execution-ledger.ts",
-        "packages/daemon/src/pods/task-retry-ledger.ts"
+        "packages/daemon/src/pods/task-retry-ledger.ts",
+        "packages/daemon/src/pods/interactive-completion-coordinator.ts",
+        "packages/daemon/src/pods/pod-repository.ts"
       ],
       "tests": [
         "packages/daemon/src/pods/completion-journal.test.ts",
@@ -121,10 +128,13 @@
         "receipts/decision-admission-affected.txt",
         "checkpoint-21.md",
         "receipts/summary-launch-race-red.txt",
-        "receipts/summary-launch-race-final.txt"
+        "receipts/summary-launch-race-final.txt",
+        "checkpoint-23.md",
+        "receipts/interactive-coordination-red.txt",
+        "receipts/interactive-coordination-final.txt"
       ],
       "prerequisites": [],
-      "remaining": "Entered artifact collection survives restart with sources retained; generation/cycle-bound integrity receipts and in-process duplicate coordination are implemented. Independent source inventory, fsync/power-loss proof, orphan snapshot/DB-path reconciliation, interactive duplicates, other reply boundaries and broader durable finalization side effects remain. New worker/cycle and validation admission now preserve pending decisions, including older unresolved cycles in the current generation. Historical missing payload recovery and stream/MCP delivery acknowledgment remain. Codex now observes summary events before Spawn/Resume launch and disposes each invocation listener. This closes the local launch/stream attachment race, not durable delivery acknowledgment across all runtimes or daemon restart."
+      "remaining": "Entered artifact collection survives restart with sources retained; generation/cycle-bound integrity receipts and in-process duplicate coordination are implemented. Independent source inventory, fsync/power-loss proof, orphan snapshot/DB-path reconciliation, interactive duplicates, other reply boundaries and broader durable finalization side effects remain. New worker/cycle and validation admission now preserve pending decisions, including older unresolved cycles in the current generation. Historical missing payload recovery and stream/MCP delivery acknowledgment remain. Codex now observes summary events before Spawn/Resume launch and disposes each invocation listener. This closes the local launch/stream attachment race, not durable delivery acknowledgment across all runtimes or daemon restart. Concurrent interactive completions now coalesce in process, conflicting promotion/generation requests fail closed, and current source/lifecycle/decision ownership is checked across push and container release boundaries. This is not durable cross-process idempotency, cancellation of already-dispatched external operations, or complete post-completion side-effect accounting."
     },
     {
       "id": "W1.3",
@@ -147,7 +157,8 @@
         "packages/daemon/src/pods/artifact-snapshot-receipt.ts",
         "packages/daemon/src/pods/sandbox-terminal-reaper.ts",
         "packages/daemon/src/pods/local-reconciler.ts",
-        "packages/daemon/src/pods/reconciler.ts"
+        "packages/daemon/src/pods/reconciler.ts",
+        "packages/daemon/src/pods/interactive-completion-coordinator.ts"
       ],
       "tests": [
         "packages/daemon/src/pods/completion-journal.test.ts",
@@ -188,12 +199,15 @@
         "receipts/artifact-recovery-final.txt",
         "checkpoint-22.md",
         "receipts/interactive-preservation-red.txt",
-        "receipts/interactive-preservation-final.txt"
+        "receipts/interactive-preservation-final.txt",
+        "checkpoint-23.md",
+        "receipts/interactive-coordination-red.txt",
+        "receipts/interactive-coordination-final.txt"
       ],
       "prerequisites": [
         "PR creation intent/reconciliation implemented locally; broader finalization side effects and operator override remain."
       ],
-      "remaining": "Entered artifact collection survives restart with sources retained; generation/cycle-bound integrity receipts and in-process duplicate coordination are implemented. Independent source inventory, fsync/power-loss proof, orphan snapshot/DB-path reconciliation, interactive duplicates, other reply boundaries and broader durable finalization side effects remain. Interactive completion now stops before push/cleanup when sync and archive fallback fail or a branch container lacks its host worktree; the source remains retryable. Duplicate concurrent interactive requests, cancellation fences, restart/durable side-effect receipts and complete source-inventory proof remain."
+      "remaining": "Entered artifact collection survives restart with sources retained; generation/cycle-bound integrity receipts and in-process duplicate coordination are implemented. Independent source inventory, fsync/power-loss proof, orphan snapshot/DB-path reconciliation, interactive duplicates, other reply boundaries and broader durable finalization side effects remain. Interactive completion now stops before push/cleanup when sync and archive fallback fail or a branch container lacks its host worktree; the source remains retryable. Duplicate concurrent interactive requests, cancellation fences, restart/durable side-effect receipts and complete source-inventory proof remain. Concurrent interactive completions now coalesce in process, conflicting promotion/generation requests fail closed, and current source/lifecycle/decision ownership is checked across push and container release boundaries. This is not durable cross-process idempotency, cancellation of already-dispatched external operations, or complete post-completion side-effect accounting."
     },
     {
       "id": "W1.4",
@@ -207,7 +221,9 @@
         "packages/daemon/src/pods/artifact-snapshot-receipt.ts",
         "packages/daemon/src/pods/sandbox-terminal-reaper.ts",
         "packages/daemon/src/pods/local-reconciler.ts",
-        "packages/daemon/src/pods/reconciler.ts"
+        "packages/daemon/src/pods/reconciler.ts",
+        "packages/daemon/src/pods/interactive-completion-coordinator.ts",
+        "packages/daemon/src/pods/pod-repository.ts"
       ],
       "tests": [
         "packages/daemon/src/pods/artifact-preservation.test.ts",
@@ -232,10 +248,13 @@
         "receipts/artifact-recovery-final.txt",
         "checkpoint-22.md",
         "receipts/interactive-preservation-red.txt",
-        "receipts/interactive-preservation-final.txt"
+        "receipts/interactive-preservation-final.txt",
+        "checkpoint-23.md",
+        "receipts/interactive-coordination-red.txt",
+        "receipts/interactive-coordination-final.txt"
       ],
       "prerequisites": [],
-      "remaining": "Entered artifact collection survives restart with sources retained; generation/cycle-bound integrity receipts and in-process duplicate coordination are implemented. Independent source inventory, fsync/power-loss proof, orphan snapshot/DB-path reconciliation, interactive duplicates, other reply boundaries and broader durable finalization side effects remain. Interactive completion now stops before push/cleanup when sync and archive fallback fail or a branch container lacks its host worktree; the source remains retryable. Duplicate concurrent interactive requests, cancellation fences, restart/durable side-effect receipts and complete source-inventory proof remain."
+      "remaining": "Entered artifact collection survives restart with sources retained; generation/cycle-bound integrity receipts and in-process duplicate coordination are implemented. Independent source inventory, fsync/power-loss proof, orphan snapshot/DB-path reconciliation, interactive duplicates, other reply boundaries and broader durable finalization side effects remain. Interactive completion now stops before push/cleanup when sync and archive fallback fail or a branch container lacks its host worktree; the source remains retryable. Duplicate concurrent interactive requests, cancellation fences, restart/durable side-effect receipts and complete source-inventory proof remain. Concurrent interactive completions now coalesce in process, conflicting promotion/generation requests fail closed, and current source/lifecycle/decision ownership is checked across push and container release boundaries. This is not durable cross-process idempotency, cancellation of already-dispatched external operations, or complete post-completion side-effect accounting."
     },
     {
       "id": "W1.5",
@@ -256,7 +275,9 @@
         "packages/daemon/src/pods/reconciler.ts",
         "packages/daemon/src/pods/decision-admission.ts",
         "packages/daemon/src/pods/task-execution-ledger.ts",
-        "packages/daemon/src/pods/task-retry-ledger.ts"
+        "packages/daemon/src/pods/task-retry-ledger.ts",
+        "packages/daemon/src/pods/interactive-completion-coordinator.ts",
+        "packages/daemon/src/pods/pod-repository.ts"
       ],
       "tests": [
         "packages/daemon/src/db/unit-of-work.test.ts",
@@ -292,10 +313,13 @@
         "receipts/artifact-recovery-final.txt",
         "checkpoint-18.md",
         "receipts/decision-admission-red.txt",
-        "receipts/decision-admission-affected.txt"
+        "receipts/decision-admission-affected.txt",
+        "checkpoint-23.md",
+        "receipts/interactive-coordination-red.txt",
+        "receipts/interactive-coordination-final.txt"
       ],
       "prerequisites": [],
-      "remaining": "Entered artifact collection survives restart with sources retained; generation/cycle-bound integrity receipts and in-process duplicate coordination are implemented. Independent source inventory, fsync/power-loss proof, orphan snapshot/DB-path reconciliation, interactive duplicates, other reply boundaries and broader durable finalization side effects remain. New worker/cycle and validation admission now preserve pending decisions, including older unresolved cycles in the current generation. Historical missing payload recovery and stream/MCP delivery acknowledgment remain."
+      "remaining": "Entered artifact collection survives restart with sources retained; generation/cycle-bound integrity receipts and in-process duplicate coordination are implemented. Independent source inventory, fsync/power-loss proof, orphan snapshot/DB-path reconciliation, interactive duplicates, other reply boundaries and broader durable finalization side effects remain. New worker/cycle and validation admission now preserve pending decisions, including older unresolved cycles in the current generation. Historical missing payload recovery and stream/MCP delivery acknowledgment remain. Concurrent interactive completions now coalesce in process, conflicting promotion/generation requests fail closed, and current source/lifecycle/decision ownership is checked across push and container release boundaries. This is not durable cross-process idempotency, cancellation of already-dispatched external operations, or complete post-completion side-effect accounting."
     },
     {
       "id": "W2.1",
@@ -958,7 +982,8 @@
         "receipts/compact-projection-swift-diagnostic.txt",
         "receipts/compact-projection-mobile.txt",
         "receipts/compact-projection-mobile-browser.json",
-        "receipts/interactive-preservation-cli.txt"
+        "receipts/interactive-preservation-cli.txt",
+        "receipts/interactive-coordination-cli.txt"
       ],
       "prerequisites": [
         "Selected mobile flows and new health CLI have local interaction proof. Desktop has compilation and tests only. Remaining operator flows, physical device and live evidence are outstanding."
@@ -1381,7 +1406,10 @@
         "receipts/checkpoint-21-validation-identity.json",
         "receipts/interactive-preservation-final.txt",
         "receipts/interactive-preservation-build.txt",
-        "receipts/interactive-preservation-cli.txt"
+        "receipts/interactive-preservation-cli.txt",
+        "receipts/interactive-coordination-final.txt",
+        "receipts/interactive-coordination-build.txt",
+        "receipts/interactive-coordination-cli.txt"
       ],
       "prerequisites": [
         "Full required pipeline passes on clean 46f63982ea42aef832fcb6df1c21631e468f409c: daemon 4468 passed, one known Linux-only skip; all 15 Turbo tasks passed; audit zero, secret scan and deployment/cleanup safeguards passed. The skipped source callback has separate local Linux proof at unchanged implementation 18e5bd37. Final source validation remains after further implementation."
@@ -1410,7 +1438,8 @@
         "receipts/compact-projection-swift-diagnostic.txt",
         "receipts/compact-projection-mobile.txt",
         "receipts/compact-projection-mobile-browser.json",
-        "receipts/interactive-preservation-cli.txt"
+        "receipts/interactive-preservation-cli.txt",
+        "receipts/interactive-coordination-cli.txt"
       ],
       "prerequisites": [
         "Selected mobile flows and new health CLI have local interaction proof. Desktop has compilation and tests only. Remaining operator flows, physical device and live evidence are outstanding."
@@ -1435,5 +1464,5 @@
       "prerequisites": []
     }
   ],
-  "lastCheckpoint": "checkpoint-22.md"
+  "lastCheckpoint": "checkpoint-23.md"
 }
