@@ -932,7 +932,7 @@ export class LocalWorktreeManager implements WorktreeManager {
     }
   }
 
-  async mergeBranch(config: MergeBranchConfig): Promise<void> {
+  async mergeBranch(config: MergeBranchConfig): Promise<BranchPublicationReceipt> {
     const { worktreePath, targetBranch, pat } = config;
     // Resolve remote authentication before committing or otherwise mutating the worktree.
     const remote = await this.getAuthenticatedRemote(worktreePath, pat);
@@ -973,26 +973,10 @@ export class LocalWorktreeManager implements WorktreeManager {
       );
     }
 
-    // Push using auth URL so the PAT is never stored in git config. Daemon validation already
-    // ran, so bypass repo-local hooks that may not be runnable from the host worktree.
-    this.logger.info({ worktreePath, targetBranch }, 'Pushing branch to origin');
-    const { stdout: actualBranch } = await git(['rev-parse', '--abbrev-ref', 'HEAD'], {
-      cwd: worktreePath,
+    return this.publishBranchWithRemote(worktreePath, targetBranch, remote, {
+      expectedRepository: config.expectedRepository,
+      onPrepared: config.onPrepared,
     });
-    if (actualBranch.trim() !== targetBranch) {
-      throw new Error(
-        `Expected HEAD to be on branch '${targetBranch}' but it is on '${actualBranch.trim()}'`,
-      );
-    }
-    try {
-      await git(['push', '--no-verify', remote.url, `HEAD:refs/heads/${targetBranch}`], {
-        cwd: worktreePath,
-        credential: remote.credential,
-        credentialUrl: remote.url,
-      });
-    } catch (err) {
-      throw classifyGitError(sanitizeGitError(err), 'push');
-    }
   }
 
   async commitFiles(worktreePath: string, paths: string[], message: string): Promise<void> {
@@ -1377,9 +1361,21 @@ export class LocalWorktreeManager implements WorktreeManager {
     expectedBranch: string,
     options?: BranchPublicationOptions,
   ): Promise<BranchPublicationReceipt> {
-    const force = options?.force === true;
-    this.logger.info({ worktreePath, expectedBranch, force }, 'Pushing branch to origin');
     const remote = await this.getAuthenticatedRemote(worktreePath, options?.pat);
+    return this.publishBranchWithRemote(worktreePath, expectedBranch, remote, options);
+  }
+
+  private async publishBranchWithRemote(
+    worktreePath: string,
+    expectedBranch: string,
+    remote: AuthenticatedRemote,
+    options?: BranchPublicationOptions,
+  ): Promise<BranchPublicationReceipt> {
+    const force = options?.force === true;
+    this.logger.info(
+      { worktreePath, expectedBranch, force },
+      'Publishing captured source to origin',
+    );
     const { stdout: actualBranch } = await git(['rev-parse', '--abbrev-ref', 'HEAD'], {
       cwd: worktreePath,
     });

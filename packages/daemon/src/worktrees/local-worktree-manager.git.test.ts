@@ -6,6 +6,7 @@ import { promisify } from 'node:util';
 import Database from 'better-sqlite3';
 import pino from 'pino';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import type { WorktreeManager } from '../interfaces/worktree-manager.js';
 import { createPodRepository } from '../pods/pod-repository.js';
 import { createSourcePublicationLedger } from '../pods/source-publication-ledger.js';
 import {
@@ -13,7 +14,7 @@ import {
   createTestDb,
   insertTestProfile,
 } from '../test-utils/mock-helpers.js';
-import { publishSource } from './durable-source-publication.js';
+import { publishCommittedSource, publishSource } from './durable-source-publication.js';
 import { LocalWorktreeManager } from './local-worktree-manager.js';
 
 const execFileAsync = promisify(execFile);
@@ -109,68 +110,116 @@ describe('LocalWorktreeManager real Git regressions', () => {
     );
   });
 
-  it('reconciles a real push interrupted before confirmation after database reopen', async () => {
-    const worktree = await createRebasedFeature('publication-recovery');
-    const db = createTestDb();
-    insertTestProfile(db);
-    const repo = createPodRepository(db);
-    repo.insert({
-      id: 'source',
-      profileName: 'test-profile',
-      task: 'Publish captured source',
-      model: 'model',
-      runtime: 'codex',
-      branch: 'feature',
-      userId: 'user',
-      status: 'validated',
-      executionTarget: 'local',
-      maxValidationAttempts: 3,
-      skipValidation: false,
-      outputMode: 'pr',
-    });
-    repo.update('source', { worktreePath: worktree, containerId: 'retained-source' });
-    const pod = repo.getOrThrow('source');
-    const ledger = createSourcePublicationLedger(db);
-    const interrupted = {
-      ...createMockWorktreeManager(),
-      pushBranch: async (...args: Parameters<typeof manager.pushBranch>) => {
-        await manager.pushBranch(...args);
-        throw new Error('response lost before receipt');
-      },
-    };
-    const databasePath = path.join(root, 'publication.db');
-    try {
-      await expect(publishSource(ledger, pod, `file://${remote}`, interrupted)).rejects.toThrow(
-        'response lost',
-      );
-      const { id } = db.prepare('SELECT id FROM source_publication_intents').get() as {
-        id: string;
-      };
-      expect(ledger.get(id)).toMatchObject({ state: 'admitted', receipt: null });
-      expect(await git(remote, ['rev-parse', 'refs/heads/feature'])).toBe(
-        await git(worktree, ['rev-parse', 'HEAD']),
-      );
-      await db.backup(databasePath);
-      db.close();
-      const reopened = new Database(databasePath);
-      try {
-        const resumed = createSourcePublicationLedger(reopened);
-        expect(resumed.get(id)).toMatchObject({ state: 'admitted', receipt: null });
-        const receipt = await publishSource(resumed, pod, `file://${remote}`, manager);
-        expect(resumed.get(id)).toMatchObject({ state: 'confirmed', receipt });
-        expect(
-          reopened.prepare('SELECT count(*) AS n FROM source_publication_intents').get(),
-        ).toEqual({ n: 1 });
-        expect(
-          reopened.prepare('SELECT count(*) AS n FROM source_publication_receipts').get(),
-        ).toEqual({ n: 1 });
-        expect(reopened.pragma('integrity_check', { simple: true })).toBe('ok');
-      } finally {
-        reopened.close();
+  it.each(['push', 'commit-and-push'] as const)(
+    'reconciles real %s interrupted before confirmation after database reopen',
+    async (mode) => {
+      const worktree = await createRebasedFeature('publication-recovery');
+      if (mode === 'commit-and-push') {
+        await git(worktree, ['config', 'user.name', 'Publication Fixture']);
+        await git(worktree, ['config', 'user.email', 'publication@example.invalid']);
+        await writeFile(
+          path.join(worktree, 'feature.txt'),
+          'uncommitted source for durable delivery\n',
+        );
       }
-    } finally {
-      if (db.open) db.close();
-    }
+      const db = createTestDb();
+      insertTestProfile(db);
+      const repo = createPodRepository(db);
+      repo.insert({
+        id: 'source',
+        profileName: 'test-profile',
+        task: 'Publish captured source',
+        model: 'model',
+        runtime: 'codex',
+        branch: 'feature',
+        userId: 'user',
+        status: 'validated',
+        executionTarget: 'local',
+        maxValidationAttempts: 3,
+        skipValidation: false,
+        outputMode: 'pr',
+      });
+      repo.update('source', { worktreePath: worktree, containerId: 'retained-source' });
+      const pod = repo.getOrThrow('source');
+      const ledger = createSourcePublicationLedger(db);
+      const interrupted = {
+        ...createMockWorktreeManager(),
+        pushBranch: async (...args: Parameters<typeof manager.pushBranch>) => {
+          await manager.pushBranch(...args);
+          throw new Error('response lost before receipt');
+        },
+      };
+      interrupted.mergeBranch = async (config) => {
+        await manager.mergeBranch(config);
+        throw new Error('response lost before receipt');
+      };
+      const publish = (
+        target: ReturnType<typeof createSourcePublicationLedger>,
+        transport: WorktreeManager,
+      ) =>
+        mode === 'push'
+          ? publishSource(target, pod, `file://${remote}`, transport)
+          : publishCommittedSource(target, pod, `file://${remote}`, transport, {
+              worktreePath: worktree,
+              targetBranch: 'feature',
+              maxDeletions: 0,
+              commitMessage: 'Preserve fixture source',
+            });
+      const databasePath = path.join(root, 'publication.db');
+      try {
+        await expect(publish(ledger, interrupted)).rejects.toThrow('response lost');
+        const { id } = db.prepare('SELECT id FROM source_publication_intents').get() as {
+          id: string;
+        };
+        expect(ledger.get(id)).toMatchObject({ state: 'admitted', receipt: null });
+        expect(await git(remote, ['rev-parse', 'refs/heads/feature'])).toBe(
+          await git(worktree, ['rev-parse', 'HEAD']),
+        );
+        await db.backup(databasePath);
+        db.close();
+        const reopened = new Database(databasePath);
+        try {
+          const resumed = createSourcePublicationLedger(reopened);
+          expect(resumed.get(id)).toMatchObject({ state: 'admitted', receipt: null });
+          const receipt = await publish(resumed, manager);
+          expect(resumed.get(id)).toMatchObject({ state: 'confirmed', receipt });
+          expect(
+            reopened.prepare('SELECT count(*) AS n FROM source_publication_intents').get(),
+          ).toEqual({ n: 1 });
+          expect(
+            reopened.prepare('SELECT count(*) AS n FROM source_publication_receipts').get(),
+          ).toEqual({ n: 1 });
+          expect(reopened.pragma('integrity_check', { simple: true })).toBe('ok');
+        } finally {
+          reopened.close();
+        }
+      } finally {
+        if (db.open) db.close();
+      }
+    },
+  );
+
+  it('returns exact committed-source proof after guarded auto-commit and publication', async () => {
+    const worktree = await createRebasedFeature('commit-publication');
+    await git(worktree, ['config', 'user.name', 'Publication Fixture']);
+    await git(worktree, ['config', 'user.email', 'publication@example.invalid']);
+    await writeFile(path.join(worktree, 'feature.txt'), 'work to preserve before delivery\n');
+    const receipt = await manager.mergeBranch({
+      worktreePath: worktree,
+      targetBranch: 'feature',
+      maxDeletions: 0,
+      commitMessage: 'Preserve fixture source',
+    });
+    expect(receipt).toMatchObject({
+      commitSha: await git(worktree, ['rev-parse', 'HEAD']),
+      treeSha: await git(worktree, ['rev-parse', 'HEAD^{tree}']),
+      observedRemoteCommitSha: await git(remote, ['rev-parse', 'refs/heads/feature']),
+      worktreeClean: true,
+    });
+    expect(await git(worktree, ['status', '--porcelain'])).toBe('');
+    expect(await git(remote, ['show', 'refs/heads/feature:feature.txt'])).toBe(
+      'work to preserve before delivery',
+    );
   });
 
   it('rejects uncommitted work before publishing and retains the source file', async () => {

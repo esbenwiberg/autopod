@@ -39,7 +39,8 @@ export interface WorktreeCreateConfig {
   sessionId?: string;
 }
 
-export interface MergeBranchConfig {
+export interface MergeBranchConfig
+  extends Pick<BranchPublicationOptions, 'expectedRepository' | 'onPrepared'> {
   worktreePath: string;
   targetBranch: string;
   /** PAT to use for the push — overrides the in-memory cache. Required when the cache may be cold (e.g. after a daemon restart). */
@@ -232,7 +233,7 @@ export interface WorktreeManager {
    * This is strict because safety gates must not treat an unresolved base as an empty change set.
    */
   getChangedPathsAgainstBase?(worktreePath: string, baseBranch: string): Promise<string[]>;
-  mergeBranch(config: MergeBranchConfig): Promise<void>;
+  mergeBranch(config: MergeBranchConfig): Promise<BranchPublicationReceipt> | Promise<void>;
   /** Get raw diff between current HEAD and a base branch (or a specific commit). */
   getDiff(
     worktreePath: string,

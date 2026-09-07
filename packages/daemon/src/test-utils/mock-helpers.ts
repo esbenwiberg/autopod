@@ -24,6 +24,7 @@ import type {
 import type {
   BranchPublicationOptions,
   BranchPublicationReceipt,
+  MergeBranchConfig,
 } from '../interfaces/worktree-manager.js';
 import { createEscalationRepository } from '../pods/escalation-repository.js';
 import type { EscalationRepository } from '../pods/escalation-repository.js';
@@ -59,6 +60,12 @@ export async function mockBranchPublication(
   };
   options?.onPrepared?.(receipt);
   return receipt;
+}
+
+export async function mockCommittedPublication(
+  config: MergeBranchConfig,
+): Promise<BranchPublicationReceipt> {
+  return mockBranchPublication(config.worktreePath, config.targetBranch, config);
 }
 
 export const logger = pino({ level: 'silent' });
@@ -229,7 +236,7 @@ export function createMockWorktreeManager(): WorktreeManager {
     hasChangesAgainstBase: vi.fn(async () => true),
     getChangedPathsAgainstBase: vi.fn(async () => ['file.ts']),
     getDiff: vi.fn(async () => 'diff --git a/file.ts b/file.ts\n+added line'),
-    mergeBranch: vi.fn(async () => {}),
+    mergeBranch: vi.fn(mockCommittedPublication),
     commitFiles: vi.fn(async () => {}),
     pushArtifactBranch: vi.fn(async () => true),
     commitPendingChanges: vi.fn(async () => false),

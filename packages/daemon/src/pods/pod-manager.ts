@@ -160,7 +160,7 @@ import { buildValidationContextEnv } from '../validation/validation-context-env.
 import { createValidationIdentityCollector } from '../validation/validation-identity-collector.js';
 import { pushCommitsToBareViaStagingRef } from '../worktrees/bare-push.js';
 import { createDurablePrManagerFactory } from '../worktrees/durable-pr-manager.js';
-import { publishSource } from '../worktrees/durable-source-publication.js';
+import { publishCommittedSource, publishSource } from '../worktrees/durable-source-publication.js';
 import { graftHostTreeOntoBase } from '../worktrees/graft-reconcile.js';
 import {
   DeletionGuardError,
@@ -11729,6 +11729,21 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           );
         return publishSource(ledger, anchor, repository, worktreeManager, pushOptions);
       };
+      const commitAndPublishApprovalBranch = (
+        anchor: Pod,
+        config: Parameters<WorktreeManager['mergeBranch']>[0],
+      ) => {
+        assertApprovalCurrent(anchor);
+        const ledger = podRepo.sourcePublications;
+        const repository = profileStore.get(anchor.profileName).repoUrl;
+        if (!ledger || !repository)
+          throw new AutopodError(
+            'Durable source publication is unavailable; retain resources and reconcile delivery.',
+            'SOURCE_PUBLICATION_RECONCILIATION_REQUIRED',
+            409,
+          );
+        return publishCommittedSource(ledger, anchor, repository, worktreeManager, config);
+      };
       assertApprovalCurrent(pod);
       if (pod.options.output === 'pr' || pod.options.output === 'branch') {
         const missingIdentity = !pod.worktreePath?.trim()
@@ -12127,7 +12142,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         try {
           const retryProfile = profileStore.get(pod.profileName);
           await deliveryOperation(async () =>
-            worktreeManager.mergeBranch({
+            commitAndPublishApprovalBranch(mergingAnchor, {
               worktreePath: pod.worktreePath,
               // Push the feature branch up so the PR can be opened against the resolved base.
               targetBranch: pod.branch,
@@ -12256,7 +12271,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         try {
           const profile = profileStore.get(pod.profileName);
           await deliveryOperation(async () =>
-            worktreeManager.mergeBranch({
+            commitAndPublishApprovalBranch(mergingAnchor, {
               worktreePath: pod.worktreePath,
               // Push the feature branch up to origin — no PR manager configured, so this is the
               // last step. Pushing onto profile.defaultBranch would force-push the feature work

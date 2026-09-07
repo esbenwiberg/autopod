@@ -2,6 +2,7 @@ import { AutopodError, type Pod } from '@autopod/shared';
 import type {
   BranchPublicationOptions,
   BranchPublicationReceipt,
+  MergeBranchConfig,
   WorktreeManager,
 } from '../interfaces/worktree-manager.js';
 import type { SourcePublicationLedger } from '../pods/source-publication-ledger.js';
@@ -11,12 +12,11 @@ function repositoryIdentity(raw: string): string {
   const url = new URL(scp ? `https://${scp[1]}/${scp[2]}` : raw);
   return `${url.protocol === 'file:' ? 'file:' : ''}//${url.host}${url.pathname.replace(/\/+$/, '').replace(/\.git$/, '')}`;
 }
-export async function publishSource(
+async function performPublication(
   ledger: SourcePublicationLedger,
   pod: Pod,
   expectedRepository: string,
-  manager: WorktreeManager,
-  options?: Omit<BranchPublicationOptions, 'onPrepared'>,
+  publish: (options: BranchPublicationOptions) => Promise<BranchPublicationReceipt> | Promise<void>,
 ): Promise<BranchPublicationReceipt> {
   let intentId: string | undefined;
   const failure = () =>
@@ -26,8 +26,7 @@ export async function publishSource(
       409,
     );
   if (!pod.worktreePath || !pod.branch) throw failure();
-  const receipt = await manager.pushBranch(pod.worktreePath, pod.branch, {
-    ...options,
+  const receipt = await publish({
     expectedRepository,
     onPrepared(source) {
       if (repositoryIdentity(source.repository) !== repositoryIdentity(expectedRepository))
@@ -38,4 +37,34 @@ export async function publishSource(
   if (!intentId || !receipt) throw failure();
   ledger.confirm(pod, intentId, receipt);
   return receipt;
+}
+
+export function publishSource(
+  ledger: SourcePublicationLedger,
+  pod: Pod,
+  expectedRepository: string,
+  manager: WorktreeManager,
+  options?: Omit<BranchPublicationOptions, 'onPrepared'>,
+): Promise<BranchPublicationReceipt> {
+  return performPublication(ledger, pod, expectedRepository, (admission) =>
+    manager.pushBranch(pod.worktreePath ?? '', pod.branch, { ...options, ...admission }),
+  );
+}
+
+export function publishCommittedSource(
+  ledger: SourcePublicationLedger,
+  pod: Pod,
+  expectedRepository: string,
+  manager: WorktreeManager,
+  config: Omit<MergeBranchConfig, 'onPrepared' | 'expectedRepository'>,
+): Promise<BranchPublicationReceipt> {
+  if (config.worktreePath !== pod.worktreePath || config.targetBranch !== pod.branch)
+    throw new AutopodError(
+      'Commit-and-push source identity changed; retain original resources.',
+      'SOURCE_PUBLICATION_RECONCILIATION_REQUIRED',
+      409,
+    );
+  return performPublication(ledger, pod, expectedRepository, (admission) =>
+    manager.mergeBranch({ ...config, ...admission }),
+  );
 }

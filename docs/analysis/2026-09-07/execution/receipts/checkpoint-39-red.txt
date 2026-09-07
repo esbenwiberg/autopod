@@ -1,0 +1,32 @@
+
+ RUN  v4.1.11 /private/tmp/autopod-durable-execution/packages/daemon
+
+ ❯ src/worktrees/local-worktree-manager.git.test.ts (7 tests | 1 failed | 6 skipped) 613ms
+     × returns exact committed-source proof after guarded auto-commit and publication 612ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/worktrees/local-worktree-manager.git.test.ts > LocalWorktreeManager real Git regressions > returns exact committed-source proof after guarded auto-commit and publication
+AssertionError: expected undefined to match object { …(4) }
+
+- Expected:
+{
+  "commitSha": "f4bb46366a4a4a542c27271912d9effbd287cbd8",
+  "observedRemoteCommitSha": "f4bb46366a4a4a542c27271912d9effbd287cbd8",
+  "treeSha": "ae6ab23322260f772311f5ff9c855aa3863fecaf",
+  "worktreeClean": true,
+}
+
++ Received:
+undefined
+
+ ❯ src/worktrees/local-worktree-manager.git.test.ts:182:21
+
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 6 skipped (7)
+   Start at  23:51:57
+   Duration  979ms (transform 146ms, setup 0ms, import 253ms, tests 613ms, environment 0ms)

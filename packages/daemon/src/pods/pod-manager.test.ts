@@ -27,7 +27,7 @@ import Database from 'better-sqlite3';
 import pino from 'pino';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { SandboxContainerManager } from '../containers/sandbox-container-manager.js';
-import { mockBranchPublication } from '../test-utils/mock-helpers.js';
+import { mockBranchPublication, mockCommittedPublication } from '../test-utils/mock-helpers.js';
 import { createSessionBridge } from './pod-bridge-impl.js';
 
 // Mock child_process so we can control deriveBareRepoPath and recovery-context git calls
@@ -395,7 +395,7 @@ function createMockWorktreeManager(): WorktreeManager {
     hasChangesAgainstBase: vi.fn(async () => true),
     getChangedPathsAgainstBase: vi.fn(async () => ['file.ts']),
     getDiff: vi.fn(async () => 'diff --git a/file.ts b/file.ts\n+added line'),
-    mergeBranch: vi.fn(async () => {}),
+    mergeBranch: vi.fn(mockCommittedPublication),
     commitFiles: vi.fn(async () => {}),
     commitPendingChanges: vi.fn(async () => false),
     commitPendingChangesWithGeneratedMessage: vi.fn(async () => false),
@@ -4759,6 +4759,58 @@ describe('PodManager', () => {
   });
 
   describe('approveSession', () => {
+    it.each(['pr', 'branch'] as const)(
+      'requires durable commit-and-push proof before completing %s output',
+      async (output) => {
+        const ctx = createTestContext();
+        const manager = createPodManager(ctx.deps);
+        const pod = manager.createSession(
+          {
+            profileName: 'test-profile',
+            task: 'Preserve committed source proof',
+            options: { agentMode: 'auto', output, validate: true },
+          },
+          'user-1',
+        );
+        ctx.podRepo.update(
+          pod.id,
+          validatedPodUpdates(pod.id, {
+            worktreePath: '/tmp/source',
+            containerId: 'retained-source',
+            filesChanged: 2,
+          }),
+        );
+        vi.mocked(ctx.worktreeManager.mergeBranch).mockResolvedValueOnce(undefined);
+        await expect(manager.approveSession(pod.id)).rejects.toMatchObject({
+          code: 'APPROVAL_DELIVERY_FAILED',
+        });
+        expect(manager.getSession(pod.id)).toMatchObject({
+          status: 'validated',
+          containerId: 'retained-source',
+          completedAt: null,
+        });
+        expect(ctx.containerManager.kill).not.toHaveBeenCalled();
+        expect(ctx.prManager.createPr).not.toHaveBeenCalled();
+        expect(ctx.prManager.mergePr).not.toHaveBeenCalled();
+        expect(
+          ctx.db.prepare('SELECT count(*) AS n FROM source_publication_receipts').get(),
+        ).toEqual({ n: 0 });
+        await createPodManager(ctx.deps).approveSession(pod.id);
+        expect(manager.getSession(pod.id)).toMatchObject({
+          status: 'complete',
+          failureReason: null,
+        });
+        expect(
+          ctx.db.prepare('SELECT count(*) AS n FROM source_publication_intents').get(),
+        ).toEqual({ n: 1 });
+        expect(
+          ctx.db.prepare('SELECT count(*) AS n FROM source_publication_receipts').get(),
+        ).toEqual({ n: 1 });
+        expect(ctx.prManager.createPr).toHaveBeenCalledTimes(output === 'pr' ? 1 : 0);
+        expect(ctx.runtime.spawn).not.toHaveBeenCalled();
+      },
+    );
+
     it('retains resources when a legacy publication adapter supplies no durable evidence', async () => {
       const ctx = createTestContext();
       const manager = createPodManager(ctx.deps);

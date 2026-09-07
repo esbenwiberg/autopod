@@ -230,7 +230,8 @@
         "checkpoint-35.md",
         "checkpoint-36.md",
         "checkpoint-37.md",
-        "checkpoint-38.md"
+        "checkpoint-38.md",
+        "checkpoint-39.md"
       ],
       "prerequisites": [
         "PR creation intent/reconciliation implemented locally; broader finalization side effects and operator override remain."
@@ -1587,7 +1588,8 @@
         "checkpoint-35.md",
         "checkpoint-36.md",
         "checkpoint-37.md",
-        "checkpoint-38.md"
+        "checkpoint-38.md",
+        "checkpoint-39.md"
       ],
       "prerequisites": [
         "Full required pipeline passes on clean 46f63982ea42aef832fcb6df1c21631e468f409c: daemon 4468 passed, one known Linux-only skip; all 15 Turbo tasks passed; audit zero, secret scan and deployment/cleanup safeguards passed. The skipped source callback has separate local Linux proof at unchanged implementation 18e5bd37. Final source validation remains after further implementation."
@@ -1652,5 +1654,5 @@
       "prerequisites": []
     }
   ],
-  "lastCheckpoint": "checkpoint-38.md"
+  "lastCheckpoint": "checkpoint-39.md"
 }
