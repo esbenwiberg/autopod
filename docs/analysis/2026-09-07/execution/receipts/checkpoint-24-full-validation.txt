@@ -1,0 +1,1788 @@
+
+▸ Installing dependencies
+Already up to date
+
+Done in 446ms
+  ✓ Dependencies installed
+
+▸ Linting
+
+> autopod@ lint /private/tmp/autopod-durable-execution
+> biome check .
+
+Checked 918 files in 515ms. No fixes applied.
+  ✓ Lint passed
+
+▸ Building
+
+> autopod@ build /private/tmp/autopod-durable-execution
+> turbo run build
+
+• turbo 2.10.12
+
+   • Packages in scope: @autopod/cli, @autopod/daemon, @autopod/e2e, @autopod/escalation-mcp, @autopod/mobile-web, @autopod/pi-worker, @autopod/shared, @autopod/validator
+   • Running build in 8 packages
+   • Remote caching disabled, using shared worktree cache
+
+@autopod/pi-worker:build: cache hit, replaying logs b2e7833479ae06bd
+@autopod/shared:build: cache hit, replaying logs a35bc7eb5ea26e8f
+@autopod/pi-worker:build:
+@autopod/pi-worker:build: > @autopod/pi-worker@0.0.1 build /private/tmp/autopod-durable-execution/packages/pi-worker
+@autopod/pi-worker:build: > tsup src/index.ts --format esm --dts
+@autopod/pi-worker:build:
+@autopod/pi-worker:build: CLI Building entry: src/index.ts
+@autopod/pi-worker:build: CLI Using tsconfig: tsconfig.json
+@autopod/pi-worker:build: CLI tsup v8.5.1
+@autopod/pi-worker:build: CLI Target: es2022
+@autopod/pi-worker:build: ESM Build start
+@autopod/pi-worker:build: ESM dist/index.js 15.17 KB
+@autopod/pi-worker:build: ESM ⚡️ Build success in 79ms
+@autopod/pi-worker:build: DTS Build start
+@autopod/pi-worker:build: DTS ⚡️ Build success in 317ms
+@autopod/pi-worker:build: DTS dist/index.d.ts 5.25 KB
+@autopod/shared:build:
+@autopod/shared:build: > @autopod/shared@0.0.1 build /private/tmp/autopod-durable-execution/packages/shared
+@autopod/shared:build: > tsup
+@autopod/shared:build:
+@autopod/shared:build: CLI Building entry: src/index.ts
+@autopod/shared:build: CLI Using tsconfig: tsconfig.json
+@autopod/shared:build: CLI tsup v8.5.1
+@autopod/shared:build: CLI Using tsup config: /private/tmp/autopod-durable-execution/packages/shared/tsup.config.ts
+@autopod/shared:build: CLI Target: es2022
+@autopod/shared:build: ESM Build start
+@autopod/shared:build: ESM dist/index.js     113.37 KB
+@autopod/shared:build: ESM dist/index.js.map 235.27 KB
+@autopod/shared:build: ESM ⚡️ Build success in 16ms
+@autopod/shared:build: DTS Build start
+@autopod/shared:build: DTS ⚡️ Build success in 1109ms
+@autopod/shared:build: DTS dist/index.d.ts 764.44 KB
+@autopod/mobile-web:build: cache hit, replaying logs 5fdb32dd5d772c32
+@autopod/escalation-mcp:build: cache hit, replaying logs d76753e7d084a439
+@autopod/cli:build: cache hit, replaying logs 98d2537ef35e6337
+@autopod/validator:build: cache hit, replaying logs 9a2aa8aaffbec3d7
+@autopod/escalation-mcp:build:
+@autopod/escalation-mcp:build: > @autopod/escalation-mcp@0.0.1 build /private/tmp/autopod-durable-execution/packages/escalation-mcp
+@autopod/escalation-mcp:build: > tsup
+@autopod/escalation-mcp:build:
+@autopod/escalation-mcp:build: CLI Building entry: src/index.ts
+@autopod/escalation-mcp:build: CLI Using tsconfig: tsconfig.json
+@autopod/escalation-mcp:build: CLI tsup v8.5.1
+@autopod/escalation-mcp:build: CLI Using tsup config: /private/tmp/autopod-durable-execution/packages/escalation-mcp/tsup.config.ts
+@autopod/escalation-mcp:build: CLI Target: es2022
+@autopod/escalation-mcp:build: ESM Build start
+@autopod/escalation-mcp:build: ESM dist/index.js     41.67 KB
+@autopod/escalation-mcp:build: ESM dist/index.js.map 82.30 KB
+@autopod/escalation-mcp:build: ESM ⚡️ Build success in 26ms
+@autopod/escalation-mcp:build: DTS Build start
+@autopod/escalation-mcp:build: DTS ⚡️ Build success in 1252ms
+@autopod/escalation-mcp:build: DTS dist/index.d.ts 15.12 KB
+@autopod/mobile-web:build:
+@autopod/mobile-web:build: > @autopod/mobile-web@0.0.1 build /private/tmp/autopod-durable-execution/packages/mobile-web
+@autopod/mobile-web:build: > vite build
+@autopod/mobile-web:build:
+@autopod/mobile-web:build: vite v6.4.3 building for production...
+@autopod/mobile-web:build: transforming...
+@autopod/mobile-web:build: ✓ 72 modules transformed.
+@autopod/mobile-web:build: rendering chunks...
+@autopod/mobile-web:build: computing gzip size...
+@autopod/mobile-web:build: dist/index.html                   0.93 kB │ gzip:  0.42 kB
+@autopod/mobile-web:build: dist/assets/index-DcKgCAYr.css   12.59 kB │ gzip:  2.93 kB
+@autopod/mobile-web:build: dist/assets/index-BW2MyKuY.js   292.64 kB │ gzip: 92.20 kB │ map: 1,553.45 kB
+@autopod/mobile-web:build: ✓ built in 590ms
+@autopod/cli:build:
+@autopod/cli:build: > @autopod/cli@0.0.1 build /private/tmp/autopod-durable-execution/packages/cli
+@autopod/cli:build: > tsup
+@autopod/cli:build:
+@autopod/cli:build: CLI Building entry: src/index.ts
+@autopod/validator:build:
+@autopod/validator:build: > @autopod/validator@0.0.1 build /private/tmp/autopod-durable-execution/packages/validator
+@autopod/validator:build: > tsup
+@autopod/validator:build:
+@autopod/validator:build: CLI Building entry: src/index.ts
+@autopod/validator:build: CLI Using tsconfig: tsconfig.json
+@autopod/validator:build: CLI tsup v8.5.1
+@autopod/validator:build: CLI Using tsup config: /private/tmp/autopod-durable-execution/packages/validator/tsup.config.ts
+@autopod/validator:build: CLI Target: es2022
+@autopod/validator:build: CLI Cleaning output folder
+@autopod/validator:build: ESM Build start
+@autopod/validator:build: ESM dist/index.js     9.58 KB
+@autopod/validator:build: ESM dist/index.js.map 13.63 KB
+@autopod/validator:build: ESM ⚡️ Build success in 23ms
+@autopod/validator:build: DTS Build start
+@autopod/validator:build: DTS ⚡️ Build success in 565ms
+@autopod/validator:build: DTS dist/index.d.ts 1.04 KB
+@autopod/cli:build: CLI Using tsconfig: tsconfig.json
+@autopod/cli:build: CLI tsup v8.5.1
+@autopod/cli:build: CLI Using tsup config: /private/tmp/autopod-durable-execution/packages/cli/tsup.config.ts
+@autopod/cli:build: CLI Target: es2022
+@autopod/cli:build: CLI Cleaning output folder
+@autopod/cli:build: ESM Build start
+@autopod/cli:build: ESM dist/index.js     239.88 KB
+@autopod/cli:build: ESM dist/index.js.map 467.36 KB
+@autopod/cli:build: ESM ⚡️ Build success in 28ms
+@autopod/daemon:build: cache bypass, force executing 149c1446ef275446
+@autopod/daemon:build:
+@autopod/daemon:build: > @autopod/daemon@0.0.1 build /private/tmp/autopod-durable-execution/packages/daemon
+@autopod/daemon:build: > tsup
+@autopod/daemon:build:
+@autopod/daemon:build: CLI Building entry: src/index.ts, src/db/verify-backup-cli.ts
+@autopod/daemon:build: CLI Using tsconfig: tsconfig.json
+@autopod/daemon:build: CLI tsup v8.5.1
+@autopod/daemon:build: CLI Using tsup config: /private/tmp/autopod-durable-execution/packages/daemon/tsup.config.ts
+@autopod/daemon:build: CLI Target: es2022
+@autopod/daemon:build: CLI Cleaning output folder
+@autopod/daemon:build: ESM Build start
+@autopod/daemon:build: ESM dist/chunk-HGDG2PZU.js                         4.03 KB
+@autopod/daemon:build: ESM dist/db/verify-backup-cli.js                   1.08 KB
+@autopod/daemon:build: ESM dist/sandbox-container-manager-JQ4HEINM.js     257.00 B
+@autopod/daemon:build: ESM dist/azure-pim-handler-B5OOSGZE.js             221.00 B
+@autopod/daemon:build: ESM dist/sleep-detector-TV2HIHQF.js                5.00 KB
+@autopod/daemon:build: ESM dist/chunk-7CKEJ2ZX.js                         69.02 KB
+@autopod/daemon:build: ESM dist/chunk-FOWXBYL6.js                         730.00 B
+@autopod/daemon:build: ESM dist/chunk-DJ4KDQP3.js                         17.99 KB
+@autopod/daemon:build: ESM dist/reconciler-NIPJJWXR.js                    7.57 KB
+@autopod/daemon:build: ESM dist/chunk-AVKA4LYI.js                         10.24 KB
+@autopod/daemon:build: ESM dist/image-builder-33QWRU6S.js                 4.79 KB
+@autopod/daemon:build: ESM dist/acr-client-VBNF3IMT.js                    6.81 KB
+@autopod/daemon:build: ESM dist/chunk-5UZUO24J.js                         381.00 B
+@autopod/daemon:build: ESM dist/mock-container-manager-ESABN34Q.js        1.01 KB
+@autopod/daemon:build: ESM dist/local-reconciler-TIRXS2BO.js              214.00 B
+@autopod/daemon:build: ESM dist/warm-image-maintenance-ZSKESAPA.js        3.68 KB
+@autopod/daemon:build: ESM dist/chunk-XI7TSX2Y.js                         24.07 KB
+@autopod/daemon:build: ESM dist/chunk-HGDG2PZU.js.map                     7.82 KB
+@autopod/daemon:build: ESM dist/sandbox-container-manager-JQ4HEINM.js.map 71.00 B
+@autopod/daemon:build: ESM dist/azure-pim-handler-B5OOSGZE.js.map         71.00 B
+@autopod/daemon:build: ESM dist/db/verify-backup-cli.js.map               1.77 KB
+@autopod/daemon:build: ESM dist/chunk-7CKEJ2ZX.js.map                     145.58 KB
+@autopod/daemon:build: ESM dist/sleep-detector-TV2HIHQF.js.map            10.08 KB
+@autopod/daemon:build: ESM dist/chunk-AVKA4LYI.js.map                     22.83 KB
+@autopod/daemon:build: ESM dist/chunk-FOWXBYL6.js.map                     1.11 KB
+@autopod/daemon:build: ESM dist/reconciler-NIPJJWXR.js.map                14.57 KB
+@autopod/daemon:build: ESM dist/chunk-5UZUO24J.js.map                     412.00 B
+@autopod/daemon:build: ESM dist/chunk-DJ4KDQP3.js.map                     38.50 KB
+@autopod/daemon:build: ESM dist/image-builder-33QWRU6S.js.map             10.20 KB
+@autopod/daemon:build: ESM dist/acr-client-VBNF3IMT.js.map                12.27 KB
+@autopod/daemon:build: ESM dist/mock-container-manager-ESABN34Q.js.map    1.86 KB
+@autopod/daemon:build: ESM dist/local-reconciler-TIRXS2BO.js.map          71.00 B
+@autopod/daemon:build: ESM dist/chunk-XI7TSX2Y.js.map                     52.29 KB
+@autopod/daemon:build: ESM dist/warm-image-maintenance-ZSKESAPA.js.map    7.64 KB
+@autopod/daemon:build: ESM dist/index.js                                  2.34 MB
+@autopod/daemon:build: ESM dist/index.js.map                              4.58 MB
+@autopod/daemon:build: ESM ⚡️ Build success in 127ms
+@autopod/daemon:build: DTS Build start
+@autopod/daemon:build: DTS ⚡️ Build success in 2738ms
+@autopod/daemon:build: DTS dist/db/verify-backup-cli.d.ts 13.00 B
+@autopod/daemon:build: DTS dist/index.d.ts                13.00 B
+@autopod/daemon:build:
+@autopod/daemon:build: > @autopod/daemon@0.0.1 postbuild /private/tmp/autopod-durable-execution/packages/daemon
+@autopod/daemon:build: > mkdir -p dist/db dist/actions && cp -R src/db/migrations dist/db/ && cp -R src/actions/defaults dist/actions/
+@autopod/daemon:build:
+
+ Tasks:    7 successful, 7 total
+Cached:    6 cached, 7 total
+  Time:    4.057s
+
+  ✓ Build passed
+
+▸ Typechecking
+
+> autopod@ typecheck /private/tmp/autopod-durable-execution
+> turbo run typecheck
+
+• turbo 2.10.12
+
+   • Packages in scope: @autopod/cli, @autopod/daemon, @autopod/e2e, @autopod/escalation-mcp, @autopod/mobile-web, @autopod/pi-worker, @autopod/shared, @autopod/validator
+   • Running typecheck in 8 packages
+   • Remote caching disabled, using shared worktree cache
+
+@autopod/shared:build: cache hit, replaying logs a35bc7eb5ea26e8f
+@autopod/shared:typecheck: cache hit, replaying logs 52ab46c9f42c6c0c
+@autopod/shared:build:
+@autopod/shared:build: > @autopod/shared@0.0.1 build /private/tmp/autopod-durable-execution/packages/shared
+@autopod/shared:build: > tsup
+@autopod/shared:build:
+@autopod/shared:build: CLI Building entry: src/index.ts
+@autopod/shared:build: CLI Using tsconfig: tsconfig.json
+@autopod/shared:build: CLI tsup v8.5.1
+@autopod/shared:build: CLI Using tsup config: /private/tmp/autopod-durable-execution/packages/shared/tsup.config.ts
+@autopod/shared:build: CLI Target: es2022
+@autopod/shared:build: ESM Build start
+@autopod/shared:build: ESM dist/index.js     113.37 KB
+@autopod/shared:build: ESM dist/index.js.map 235.27 KB
+@autopod/shared:build: ESM ⚡️ Build success in 16ms
+@autopod/shared:build: DTS Build start
+@autopod/shared:build: DTS ⚡️ Build success in 1109ms
+@autopod/pi-worker:typecheck: cache hit, replaying logs da0e9c23c2972b49
+@autopod/e2e:typecheck: cache hit, replaying logs 1076c5d6bf976d6d
+@autopod/shared:build: DTS dist/index.d.ts 764.44 KB
+@autopod/shared:typecheck:
+@autopod/shared:typecheck: > @autopod/shared@0.0.1 typecheck /private/tmp/autopod-durable-execution/packages/shared
+@autopod/shared:typecheck: > tsc --noEmit --project tsconfig.typecheck.json
+@autopod/shared:typecheck:
+@autopod/pi-worker:typecheck:
+@autopod/pi-worker:typecheck: > @autopod/pi-worker@0.0.1 typecheck /private/tmp/autopod-durable-execution/packages/pi-worker
+@autopod/pi-worker:typecheck: > tsc --noEmit --project tsconfig.typecheck.json
+@autopod/pi-worker:typecheck:
+@autopod/e2e:typecheck:
+@autopod/e2e:typecheck: > @autopod/e2e@0.0.1 typecheck /private/tmp/autopod-durable-execution/e2e
+@autopod/e2e:typecheck: > echo 'No e2e TypeScript sources yet'
+@autopod/e2e:typecheck:
+@autopod/e2e:typecheck: No e2e TypeScript sources yet
+@autopod/escalation-mcp:build: cache hit, replaying logs d76753e7d084a439
+@autopod/escalation-mcp:build:
+@autopod/escalation-mcp:build: > @autopod/escalation-mcp@0.0.1 build /private/tmp/autopod-durable-execution/packages/escalation-mcp
+@autopod/escalation-mcp:build: > tsup
+@autopod/escalation-mcp:build:
+@autopod/escalation-mcp:build: CLI Building entry: src/index.ts
+@autopod/escalation-mcp:build: CLI Using tsconfig: tsconfig.json
+@autopod/escalation-mcp:build: CLI tsup v8.5.1
+@autopod/escalation-mcp:build: CLI Using tsup config: /private/tmp/autopod-durable-execution/packages/escalation-mcp/tsup.config.ts
+@autopod/escalation-mcp:build: CLI Target: es2022
+@autopod/escalation-mcp:build: ESM Build start
+@autopod/escalation-mcp:build: ESM dist/index.js     41.67 KB
+@autopod/escalation-mcp:build: ESM dist/index.js.map 82.30 KB
+@autopod/escalation-mcp:build: ESM ⚡️ Build success in 26ms
+@autopod/escalation-mcp:build: DTS Build start
+@autopod/escalation-mcp:build: DTS ⚡️ Build success in 1252ms
+@autopod/escalation-mcp:build: DTS dist/index.d.ts 15.12 KB
+@autopod/escalation-mcp:typecheck: cache hit, replaying logs 4cee66e51d42c31e
+@autopod/cli:typecheck: cache hit, replaying logs b0d21c75fc9a9ae9
+@autopod/escalation-mcp:typecheck:
+@autopod/escalation-mcp:typecheck: > @autopod/escalation-mcp@0.0.1 typecheck /private/tmp/autopod-durable-execution/packages/escalation-mcp
+@autopod/escalation-mcp:typecheck: > tsc --noEmit --project tsconfig.typecheck.json
+@autopod/escalation-mcp:typecheck:
+@autopod/validator:build: cache hit, replaying logs 9a2aa8aaffbec3d7
+@autopod/mobile-web:typecheck: cache hit, replaying logs f408741be0f00907
+@autopod/cli:typecheck:
+@autopod/cli:typecheck: > @autopod/cli@0.0.1 typecheck /private/tmp/autopod-durable-execution/packages/cli
+@autopod/validator:typecheck: cache hit, replaying logs 559c82fb4309a9c5
+@autopod/validator:build:
+@autopod/validator:build: > @autopod/validator@0.0.1 build /private/tmp/autopod-durable-execution/packages/validator
+@autopod/validator:build: > tsup
+@autopod/validator:build:
+@autopod/cli:typecheck: > tsc --noEmit --project tsconfig.typecheck.json
+@autopod/cli:typecheck:
+@autopod/validator:build: CLI Building entry: src/index.ts
+@autopod/validator:build: CLI Using tsconfig: tsconfig.json
+@autopod/validator:build: CLI tsup v8.5.1
+@autopod/validator:build: CLI Using tsup config: /private/tmp/autopod-durable-execution/packages/validator/tsup.config.ts
+@autopod/validator:build: CLI Target: es2022
+@autopod/validator:build: CLI Cleaning output folder
+@autopod/validator:build: ESM Build start
+@autopod/validator:build: ESM dist/index.js     9.58 KB
+@autopod/validator:build: ESM dist/index.js.map 13.63 KB
+@autopod/validator:build: ESM ⚡️ Build success in 23ms
+@autopod/validator:build: DTS Build start
+@autopod/validator:build: DTS ⚡️ Build success in 565ms
+@autopod/validator:build: DTS dist/index.d.ts 1.04 KB
+@autopod/mobile-web:typecheck:
+@autopod/mobile-web:typecheck: > @autopod/mobile-web@0.0.1 typecheck /private/tmp/autopod-durable-execution/packages/mobile-web
+@autopod/mobile-web:typecheck: > tsc --noEmit --project tsconfig.typecheck.json
+@autopod/mobile-web:typecheck:
+@autopod/validator:typecheck:
+@autopod/validator:typecheck: > @autopod/validator@0.0.1 typecheck /private/tmp/autopod-durable-execution/packages/validator
+@autopod/validator:typecheck: > tsc --noEmit --project tsconfig.typecheck.json
+@autopod/validator:typecheck:
+@autopod/daemon:typecheck: cache hit, replaying logs 02eacb096038093d
+@autopod/daemon:typecheck:
+@autopod/daemon:typecheck: > @autopod/daemon@0.0.1 typecheck /private/tmp/autopod-durable-execution/packages/daemon
+@autopod/daemon:typecheck: > AUTOPOD_TYPECHECK=1 tsup --dts-only --out-dir .turbo/typecheck
+@autopod/daemon:typecheck:
+@autopod/daemon:typecheck: CLI Building entry: src/index.ts, src/db/verify-backup-cli.ts
+@autopod/daemon:typecheck: CLI Using tsconfig: tsconfig.json
+@autopod/daemon:typecheck: CLI tsup v8.5.1
+@autopod/daemon:typecheck: CLI Using tsup config: /private/tmp/autopod-durable-execution/packages/daemon/tsup.config.ts
+@autopod/daemon:typecheck: DTS Build start
+@autopod/daemon:typecheck: DTS ⚡️ Build success in 3996ms
+@autopod/daemon:typecheck: DTS .turbo/typecheck/db/verify-backup-cli.d.ts 13.00 B
+@autopod/daemon:typecheck: DTS .turbo/typecheck/index.d.ts                13.00 B
+
+ Tasks:    11 successful, 11 total
+Cached:    11 cached, 11 total
+  Time:    17ms >>> FULL TURBO
+
+  ✓ Typecheck passed
+
+▸ Testing
+
+> autopod@ test /private/tmp/autopod-durable-execution
+> turbo run test && bash scripts/deploy-hosted-daemon.test.sh && bash scripts/cleanup-hosted-daemon.test.sh
+
+• turbo 2.10.12
+
+   • Packages in scope: @autopod/cli, @autopod/daemon, @autopod/e2e, @autopod/escalation-mcp, @autopod/mobile-web, @autopod/pi-worker, @autopod/shared, @autopod/validator
+   • Running test in 8 packages
+   • Remote caching disabled, using shared worktree cache
+
+@autopod/shared:build: cache hit, replaying logs a35bc7eb5ea26e8f
+@autopod/shared:build:
+@autopod/shared:build: > @autopod/shared@0.0.1 build /private/tmp/autopod-durable-execution/packages/shared
+@autopod/shared:build: > tsup
+@autopod/shared:build:
+@autopod/shared:build: CLI Building entry: src/index.ts
+@autopod/shared:build: CLI Using tsconfig: tsconfig.json
+@autopod/shared:build: CLI tsup v8.5.1
+@autopod/shared:build: CLI Using tsup config: /private/tmp/autopod-durable-execution/packages/shared/tsup.config.ts
+@autopod/shared:build: CLI Target: es2022
+@autopod/shared:build: ESM Build start
+@autopod/shared:build: ESM dist/index.js     113.37 KB
+@autopod/shared:build: ESM dist/index.js.map 235.27 KB
+@autopod/shared:build: ESM ⚡️ Build success in 16ms
+@autopod/shared:build: DTS Build start
+@autopod/shared:build: DTS ⚡️ Build success in 1109ms
+@autopod/shared:build: DTS dist/index.d.ts 764.44 KB
+@autopod/pi-worker:build: cache hit, replaying logs b2e7833479ae06bd
+@autopod/pi-worker:build:
+@autopod/pi-worker:build: > @autopod/pi-worker@0.0.1 build /private/tmp/autopod-durable-execution/packages/pi-worker
+@autopod/pi-worker:build: > tsup src/index.ts --format esm --dts
+@autopod/pi-worker:build:
+@autopod/pi-worker:build: CLI Building entry: src/index.ts
+@autopod/pi-worker:build: CLI Using tsconfig: tsconfig.json
+@autopod/pi-worker:build: CLI tsup v8.5.1
+@autopod/pi-worker:build: CLI Target: es2022
+@autopod/pi-worker:build: ESM Build start
+@autopod/pi-worker:build: ESM dist/index.js 15.17 KB
+@autopod/pi-worker:build: ESM ⚡️ Build success in 79ms
+@autopod/pi-worker:build: DTS Build start
+@autopod/pi-worker:build: DTS ⚡️ Build success in 317ms
+@autopod/pi-worker:build: DTS dist/index.d.ts 5.25 KB
+@autopod/e2e:test: cache hit, replaying logs c8d9e07ce4a678d9
+@autopod/escalation-mcp:build: cache hit, replaying logs d76753e7d084a439
+@autopod/mobile-web:build: cache hit, replaying logs 5fdb32dd5d772c32
+@autopod/validator:build: cache hit, replaying logs 9a2aa8aaffbec3d7
+@autopod/escalation-mcp:build:
+@autopod/escalation-mcp:build: > @autopod/escalation-mcp@0.0.1 build /private/tmp/autopod-durable-execution/packages/escalation-mcp
+@autopod/escalation-mcp:build: > tsup
+@autopod/escalation-mcp:build:
+@autopod/e2e:test:
+@autopod/shared:test: cache hit, replaying logs ccd57d796bb85e93
+@autopod/cli:build: cache hit, replaying logs 98d2537ef35e6337
+@autopod/e2e:test: > @autopod/e2e@0.0.1 test /private/tmp/autopod-durable-execution/e2e
+@autopod/e2e:test: > echo 'No e2e tests yet'
+@autopod/e2e:test:
+@autopod/validator:build:
+@autopod/validator:build: > @autopod/validator@0.0.1 build /private/tmp/autopod-durable-execution/packages/validator
+@autopod/validator:build: > tsup
+@autopod/mobile-web:build:
+@autopod/pi-worker:test: cache hit, replaying logs dad27a6bbae8fdb9
+@autopod/cli:build:
+@autopod/cli:build: > @autopod/cli@0.0.1 build /private/tmp/autopod-durable-execution/packages/cli
+@autopod/cli:build: > tsup
+@autopod/cli:build:
+@autopod/cli:build: CLI Building entry: src/index.ts
+@autopod/mobile-web:build: > @autopod/mobile-web@0.0.1 build /private/tmp/autopod-durable-execution/packages/mobile-web
+@autopod/validator:build:
+@autopod/validator:build: CLI Building entry: src/index.ts
+@autopod/validator:build: CLI Using tsconfig: tsconfig.json
+@autopod/escalation-mcp:build: CLI Building entry: src/index.ts
+@autopod/escalation-mcp:build: CLI Using tsconfig: tsconfig.json
+@autopod/escalation-mcp:build: CLI tsup v8.5.1
+@autopod/e2e:test: No e2e tests yet
+@autopod/mobile-web:build: > vite build
+@autopod/mobile-web:build:
+@autopod/mobile-web:build: vite v6.4.3 building for production...
+@autopod/mobile-web:build: transforming...
+@autopod/mobile-web:build: ✓ 72 modules transformed.
+@autopod/mobile-web:build: rendering chunks...
+@autopod/pi-worker:test:
+@autopod/pi-worker:test: > @autopod/pi-worker@0.0.1 test /private/tmp/autopod-durable-execution/packages/pi-worker
+@autopod/validator:build: CLI tsup v8.5.1
+@autopod/validator:build: CLI Using tsup config: /private/tmp/autopod-durable-execution/packages/validator/tsup.config.ts
+@autopod/validator:build: CLI Target: es2022
+@autopod/cli:build: CLI Using tsconfig: tsconfig.json
+@autopod/cli:build: CLI tsup v8.5.1
+@autopod/cli:build: CLI Using tsup config: /private/tmp/autopod-durable-execution/packages/cli/tsup.config.ts
+@autopod/cli:build: CLI Target: es2022
+@autopod/mobile-web:build: computing gzip size...
+@autopod/mobile-web:build: dist/index.html                   0.93 kB │ gzip:  0.42 kB
+@autopod/pi-worker:test: > vitest run
+@autopod/pi-worker:test:
+@autopod/pi-worker:test:
+@autopod/escalation-mcp:build: CLI Using tsup config: /private/tmp/autopod-durable-execution/packages/escalation-mcp/tsup.config.ts
+@autopod/escalation-mcp:build: CLI Target: es2022
+@autopod/escalation-mcp:build: ESM Build start
+@autopod/escalation-mcp:build: ESM dist/index.js     41.67 KB
+@autopod/escalation-mcp:build: ESM dist/index.js.map 82.30 KB
+@autopod/escalation-mcp:build: ESM ⚡️ Build success in 26ms
+@autopod/validator:build: CLI Cleaning output folder
+@autopod/validator:build: ESM Build start
+@autopod/shared:test:
+@autopod/pi-worker:test:  RUN  v4.1.11 /private/tmp/autopod-durable-execution/packages/pi-worker
+@autopod/pi-worker:test:
+@autopod/escalation-mcp:build: DTS Build start
+@autopod/escalation-mcp:build: DTS ⚡️ Build success in 1252ms
+@autopod/validator:build: ESM dist/index.js     9.58 KB
+@autopod/validator:build: ESM dist/index.js.map 13.63 KB
+@autopod/validator:build: ESM ⚡️ Build success in 23ms
+@autopod/validator:build: DTS Build start
+@autopod/validator:build: DTS ⚡️ Build success in 565ms
+@autopod/pi-worker:test:  ✓ src/worker-extension.test.ts (7 tests) 6ms
+@autopod/pi-worker:test:  ✓ src/mcp-bridge.test.ts (2 tests) 3248ms
+@autopod/pi-worker:test:      ✓ cancels long-running calls without applying a short default timeout  3081ms
+@autopod/pi-worker:test:
+@autopod/pi-worker:test:  Test Files  2 passed (2)
+@autopod/pi-worker:test:       Tests  9 passed (9)
+@autopod/escalation-mcp:build: DTS dist/index.d.ts 15.12 KB
+@autopod/cli:build: CLI Cleaning output folder
+@autopod/cli:build: ESM Build start
+@autopod/cli:build: ESM dist/index.js     239.88 KB
+@autopod/pi-worker:test:    Start at  17:44:04
+@autopod/cli:build: ESM dist/index.js.map 467.36 KB
+@autopod/cli:build: ESM ⚡️ Build success in 28ms
+@autopod/mobile-web:build: dist/assets/index-DcKgCAYr.css   12.59 kB │ gzip:  2.93 kB
+@autopod/mobile-web:build: dist/assets/index-BW2MyKuY.js   292.64 kB │ gzip: 92.20 kB │ map: 1,553.45 kB
+@autopod/mobile-web:build: ✓ built in 590ms
+@autopod/pi-worker:test:    Duration  3.62s (transform 166ms, setup 0ms, import 321ms, tests 3.25s, environment 0ms)
+@autopod/pi-worker:test:
+@autopod/validator:build: DTS dist/index.d.ts 1.04 KB
+@autopod/shared:test: > @autopod/shared@0.0.1 test /private/tmp/autopod-durable-execution/packages/shared
+@autopod/shared:test: > vitest run
+@autopod/shared:test:
+@autopod/shared:test:
+@autopod/shared:test:  RUN  v4.1.11 /private/tmp/autopod-durable-execution/packages/shared
+@autopod/shared:test:
+@autopod/shared:test:  ✓ src/sanitize/sanitize.test.ts (42 tests) 7ms
+@autopod/shared:test:  ✓ src/sanitize/patterns.test.ts (111 tests) 29ms
+@autopod/cli:test: cache miss, executing fc38bad6fc63192b
+@autopod/shared:test:  ✓ src/sanitize/processor.test.ts (37 tests) 11ms
+@autopod/mobile-web:test: cache miss, executing bdf7833897de3a7d
+@autopod/daemon:build: cache bypass, force executing 149c1446ef275446
+@autopod/shared:test:  ✓ src/contract.test.ts (21 tests) 34ms
+@autopod/shared:test:  ✓ src/skills/skill-frontmatter.test.ts (3 tests) 11ms
+@autopod/shared:test:  ✓ src/series/parse-briefs.test.ts (22 tests) 38ms
+@autopod/shared:test:  ✓ src/schemas/pod.schema.test.ts (15 tests) 6ms
+@autopod/shared:test:  ✓ src/schemas/profile.schema.test.ts (26 tests) 78ms
+@autopod/shared:test:  ✓ src/evidence.test.ts (2 tests) 21ms
+@autopod/shared:test:  ✓ src/types/pod-options.test.ts (5 tests) 6ms
+@autopod/shared:test:  ✓ src/pricing/index.test.ts (29 tests) 5ms
+@autopod/shared:test:  ✓ src/sanitize/quarantine.test.ts (20 tests) 5ms
+@autopod/shared:test:  ✓ src/provider-catalog/provider-catalog.test.ts (19 tests) 8ms
+@autopod/shared:test:  ✓ src/schemas/injection.schema.test.ts (1 test) 5ms
+@autopod/shared:test:  ✓ src/constants.test.ts (7 tests) 2ms
+@autopod/shared:test:  ✓ src/types/readiness.test.ts (4 tests) 6ms
+@autopod/shared:test:
+@autopod/shared:test:  Test Files  16 passed (16)
+@autopod/shared:test:       Tests  364 passed (364)
+@autopod/shared:test:    Start at  20:37:19
+@autopod/shared:test:    Duration  1.87s (transform 3.72s, setup 0ms, import 5.78s, tests 274ms, environment 2ms)
+@autopod/shared:test:
+@autopod/escalation-mcp:test: cache hit, replaying logs 341bae0ad3067044
+@autopod/validator:test: cache hit, replaying logs 94bd21e51e15f368
+@autopod/escalation-mcp:test:
+@autopod/escalation-mcp:test: > @autopod/escalation-mcp@0.0.1 test /private/tmp/autopod-durable-execution/packages/escalation-mcp
+@autopod/escalation-mcp:test: > vitest run
+@autopod/escalation-mcp:test:
+@autopod/escalation-mcp:test:
+@autopod/escalation-mcp:test:  RUN  v4.1.11 /private/tmp/autopod-durable-execution/packages/escalation-mcp
+@autopod/escalation-mcp:test:
+@autopod/escalation-mcp:test:  ✓ src/pending-requests.test.ts (9 tests) 9ms
+@autopod/escalation-mcp:test:  ✓ src/tools/validate-in-browser.test.ts (34 tests) 18ms
+@autopod/escalation-mcp:test:  ✓ src/tools/pre-submit-review.test.ts (6 tests) 3ms
+@autopod/escalation-mcp:test:  ✓ src/tools/validate-locally.test.ts (13 tests) 15ms
+@autopod/escalation-mcp:test:  ✓ src/tools/actions.test.ts (16 tests) 156ms
+@autopod/escalation-mcp:test:  ✓ src/server.test.ts (8 tests) 517ms
+@autopod/escalation-mcp:test:      ✓ registers report_plan memory intent schema and passes accepted values to the bridge  502ms
+@autopod/validator:test:
+@autopod/validator:test: > @autopod/validator@0.0.1 test /private/tmp/autopod-durable-execution/packages/validator
+@autopod/validator:test: > vitest run
+@autopod/validator:test:
+@autopod/validator:test:
+@autopod/validator:test:  RUN  v4.1.11 /private/tmp/autopod-durable-execution/packages/validator
+@autopod/validator:test:
+@autopod/validator:test:  ✓ src/parse-results.test.ts (8 tests) 8ms
+@autopod/validator:test:  ✓ src/playwright-script.test.ts (8 tests) 2ms
+@autopod/escalation-mcp:test:  ✓ src/tools/escalation-tools.test.ts (25 tests) 31ms
+@autopod/escalation-mcp:test:
+@autopod/escalation-mcp:test:  Test Files  7 passed (7)
+@autopod/escalation-mcp:test:       Tests  111 passed (111)
+@autopod/escalation-mcp:test:    Start at  20:37:19
+@autopod/escalation-mcp:test:    Duration  1.54s (transform 1.44s, setup 0ms, import 3.24s, tests 748ms, environment 1ms)
+@autopod/escalation-mcp:test:
+@autopod/validator:test:
+@autopod/validator:test:  Test Files  2 passed (2)
+@autopod/validator:test:       Tests  16 passed (16)
+@autopod/validator:test:    Start at  20:37:21
+@autopod/validator:test:    Duration  1.02s (transform 330ms, setup 0ms, import 412ms, tests 11ms, environment 0ms)
+@autopod/validator:test:
+@autopod/mobile-web:test:
+@autopod/mobile-web:test: > @autopod/mobile-web@0.0.1 test /private/tmp/autopod-durable-execution/packages/mobile-web
+@autopod/mobile-web:test: > vitest run
+@autopod/mobile-web:test:
+@autopod/cli:test:
+@autopod/cli:test: > @autopod/cli@0.0.1 test /private/tmp/autopod-durable-execution/packages/cli
+@autopod/cli:test: > vitest run
+@autopod/cli:test:
+@autopod/daemon:build:
+@autopod/daemon:build: > @autopod/daemon@0.0.1 build /private/tmp/autopod-durable-execution/packages/daemon
+@autopod/daemon:build: > tsup
+@autopod/daemon:build:
+@autopod/mobile-web:test:
+@autopod/mobile-web:test:  RUN  v4.1.11 /private/tmp/autopod-durable-execution/packages/mobile-web
+@autopod/mobile-web:test:
+@autopod/daemon:build: CLI Building entry: src/index.ts, src/db/verify-backup-cli.ts
+@autopod/daemon:build: CLI Using tsconfig: tsconfig.json
+@autopod/daemon:build: CLI tsup v8.5.1
+@autopod/daemon:build: CLI Using tsup config: /private/tmp/autopod-durable-execution/packages/daemon/tsup.config.ts
+@autopod/daemon:build: CLI Target: es2022
+@autopod/daemon:build: CLI Cleaning output folder
+@autopod/daemon:build: ESM Build start
+@autopod/cli:test:
+@autopod/cli:test:  RUN  v4.1.11 /private/tmp/autopod-durable-execution/packages/cli
+@autopod/cli:test:
+@autopod/daemon:build: DTS Build start
+@autopod/daemon:build: ESM dist/reconciler-OSMM7X7H.js                    7.57 KB
+@autopod/daemon:build: ESM dist/sleep-detector-YDXMOMBZ.js                5.00 KB
+@autopod/daemon:build: ESM dist/warm-image-maintenance-KELCZP5P.js        3.68 KB
+@autopod/daemon:build: ESM dist/chunk-HGDG2PZU.js                         4.03 KB
+@autopod/daemon:build: ESM dist/db/verify-backup-cli.js                   1.08 KB
+@autopod/daemon:build: ESM dist/azure-pim-handler-ER772OUN.js             221.00 B
+@autopod/daemon:build: ESM dist/chunk-DJ4KDQP3.js                         17.99 KB
+@autopod/daemon:build: ESM dist/sandbox-container-manager-I7QIRR6X.js     257.00 B
+@autopod/daemon:build: ESM dist/chunk-7CKEJ2ZX.js                         69.02 KB
+@autopod/daemon:build: ESM dist/local-reconciler-ONOE3AL4.js              214.00 B
+@autopod/daemon:build: ESM dist/chunk-AVKA4LYI.js                         10.24 KB
+@autopod/daemon:build: ESM dist/mock-container-manager-HUMO33HG.js        1.01 KB
+@autopod/daemon:build: ESM dist/chunk-XI7TSX2Y.js                         24.07 KB
+@autopod/daemon:build: ESM dist/image-builder-T5BOHKPL.js                 4.79 KB
+@autopod/daemon:build: ESM dist/chunk-C4C5W3JO.js                         381.00 B
+@autopod/daemon:build: ESM dist/acr-client-4FHIN5SG.js                    6.81 KB
+@autopod/daemon:build: ESM dist/chunk-FOWXBYL6.js                         730.00 B
+@autopod/daemon:build: ESM dist/index.js                                  2.34 MB
+@autopod/daemon:build: ESM dist/sleep-detector-YDXMOMBZ.js.map            10.08 KB
+@autopod/daemon:build: ESM dist/chunk-HGDG2PZU.js.map                     7.82 KB
+@autopod/daemon:build: ESM dist/chunk-DJ4KDQP3.js.map                     38.50 KB
+@autopod/daemon:build: ESM dist/sandbox-container-manager-I7QIRR6X.js.map 71.00 B
+@autopod/daemon:build: ESM dist/db/verify-backup-cli.js.map               1.77 KB
+@autopod/daemon:build: ESM dist/azure-pim-handler-ER772OUN.js.map         71.00 B
+@autopod/daemon:build: ESM dist/reconciler-OSMM7X7H.js.map                14.57 KB
+@autopod/daemon:build: ESM dist/local-reconciler-ONOE3AL4.js.map          71.00 B
+@autopod/daemon:build: ESM dist/chunk-AVKA4LYI.js.map                     22.83 KB
+@autopod/daemon:build: ESM dist/warm-image-maintenance-KELCZP5P.js.map    7.64 KB
+@autopod/daemon:build: ESM dist/chunk-7CKEJ2ZX.js.map                     145.58 KB
+@autopod/daemon:build: ESM dist/chunk-XI7TSX2Y.js.map                     52.29 KB
+@autopod/daemon:build: ESM dist/image-builder-T5BOHKPL.js.map             10.20 KB
+@autopod/daemon:build: ESM dist/chunk-FOWXBYL6.js.map                     1.11 KB
+@autopod/daemon:build: ESM dist/mock-container-manager-HUMO33HG.js.map    1.86 KB
+@autopod/daemon:build: ESM dist/acr-client-4FHIN5SG.js.map                12.27 KB
+@autopod/daemon:build: ESM dist/chunk-C4C5W3JO.js.map                     412.00 B
+@autopod/daemon:build: ESM dist/index.js.map                              4.58 MB
+@autopod/daemon:build: ESM ⚡️ Build success in 621ms
+@autopod/mobile-web:test:  ✓ src/lib/pod-filters.test.ts (5 tests) 24ms
+@autopod/mobile-web:test:  ✓ src/lib/api.test.ts (9 tests) 12ms
+@autopod/mobile-web:test:  ✓ src/components/ActivityList.test.tsx (3 tests) 19ms
+@autopod/mobile-web:test:  ✓ src/components/ValidationSummary.test.tsx (8 tests) 103ms
+@autopod/mobile-web:test:  ✓ src/components/TaskExecutionPanel.test.tsx (1 test) 105ms
+@autopod/mobile-web:test:  ✓ src/components/TaskRetryPanel.test.tsx (3 tests) 86ms
+@autopod/cli:test:
+@autopod/cli:test: Terminal closed: Pod not found
+@autopod/cli:test:  ✓ src/utils/remote-terminal.test.ts (5 tests) 288ms
+@autopod/cli:test: error: required option '--target <account:runtime:model>' not specified
+@autopod/mobile-web:test:  ✓ src/screens/ScanReport.test.tsx (1 test) 186ms
+@autopod/mobile-web:test:  ✓ src/components/DispatchPreflightPanel.test.tsx (1 test) 141ms
+@autopod/mobile-web:test:  ✓ src/components/EscalationCard.test.tsx (9 tests) 219ms
+@autopod/cli:test:  ✓ src/commands/spec.test.ts (7 tests) 97ms
+@autopod/cli:test: - Fetching daemon-native Podsitter status...
+@autopod/cli:test: ✔ Fetching daemon-native Podsitter status...
+@autopod/cli:test: - Fetching daemon-native Podsitter status...
+@autopod/cli:test: ✔ Fetching daemon-native Podsitter status...
+@autopod/cli:test: - Fetching Podsitter decisions...
+@autopod/cli:test: ✔ Fetching Podsitter decisions...
+@autopod/cli:test: - Fetching Podsitter decisions...
+@autopod/cli:test: ✔ Fetching Podsitter decisions...
+@autopod/cli:test: stdout | src/commands/session.test.ts > pod commands > registers run command that calls createSession
+@autopod/cli:test: Pod abcd1234 created.
+@autopod/cli:test: Profile:  test
+@autopod/cli:test: Status:   ○ Queued
+@autopod/cli:test: Branch:   ap/abcd1234
+@autopod/cli:test: Target:   undefined
+@autopod/cli:test: Suite:    full
+@autopod/cli:test: Track progress: ap status abcd1234
+@autopod/cli:test:
+@autopod/cli:test: stdout | src/commands/session.test.ts > pod commands > passes --sidecar flags as requireSidecars on run
+@autopod/cli:test: Pod abcd1234 created.
+@autopod/cli:test: Profile:  test
+@autopod/cli:test: Status:   ○ Queued
+@autopod/cli:test: Branch:   ap/abcd1234
+@autopod/cli:test: Target:   undefined
+@autopod/cli:test: Suite:    full
+@autopod/cli:test: Track progress: ap status abcd1234
+@autopod/cli:test:
+@autopod/cli:test: stdout | src/commands/session.test.ts > pod commands > accepts multiple --sidecar flags on start
+@autopod/cli:test: Pod abcd1234 created.
+@autopod/cli:test: Profile:  test
+@autopod/cli:test: Status:   ○ Queued
+@autopod/cli:test: Branch:   ap/abcd1234
+@autopod/cli:test: Target:   undefined
+@autopod/cli:test: Pod:      auto → pr
+@autopod/cli:test: Suite:    full
+@autopod/cli:test: Track progress: ap status abcd1234
+@autopod/cli:test:
+@autopod/cli:test: stdout | src/commands/session.test.ts > pod commands > omits requireSidecars when no --sidecar flags are passed
+@autopod/cli:test: Pod abcd1234 created.
+@autopod/cli:test: Profile:  test
+@autopod/cli:test: Status:   ○ Queued
+@autopod/cli:test: Branch:   ap/abcd1234
+@autopod/cli:test: Target:   undefined
+@autopod/cli:test: Suite:    full
+@autopod/cli:test: Track progress: ap status abcd1234
+@autopod/cli:test:
+@autopod/cli:test: stdout | src/commands/session.test.ts > pod commands > passes --ref-repo and --ref-from-profile flags as referenceRepos on start
+@autopod/cli:test: Pod abcd1234 created.
+@autopod/cli:test: Profile:  test
+@autopod/cli:test: Status:   ○ Queued
+@autopod/cli:test: Branch:   ap/abcd1234
+@autopod/cli:test: Target:   undefined
+@autopod/cli:test: Pod:      auto → pr
+@autopod/cli:test: Suite:    full
+@autopod/cli:test: Track progress: ap status abcd1234
+@autopod/cli:test:
+@autopod/cli:test:  ✓ src/commands/podsitter.test.ts (5 tests) 20ms
+@autopod/cli:test: stdout | src/commands/session.test.ts > pod commands > exposes local spec files as runtime context for --spec pod creation by default
+@autopod/cli:test: Pod abcd1234 created.
+@autopod/cli:test: Profile:  test
+@autopod/cli:test: Status:   ○ Queued
+@autopod/cli:test: Branch:   ap/abcd1234
+@autopod/cli:test: Target:   undefined
+@autopod/cli:test: Suite:    full
+@autopod/cli:test: Track progress: ap status abcd1234
+@autopod/cli:test:
+@autopod/cli:test: stdout | src/commands/pod.test.ts > continue-provider command > preserves paused provider-limit continuation
+@autopod/cli:test: Pod positive-urial provider continuation queued.
+@autopod/cli:test:
+@autopod/cli:test: stdout | src/commands/series.test.ts > series commands > exposes local spec files as runtime context for series creation by default
+@autopod/cli:test:
+@autopod/cli:test: Creating series "autopod-cli-series-2Go20X" with 1 pods...
+@autopod/cli:test:
+@autopod/cli:test:
+@autopod/cli:test: stdout | src/commands/series.test.ts > series commands > exposes local spec files as runtime context for series creation by default
+@autopod/cli:test:
+@autopod/cli:test: Series created: series-1
+@autopod/cli:test:
+@autopod/cli:test:   Name:    feature
+@autopod/cli:test:   PR mode: single
+@autopod/cli:test:   Auto-approve: no
+@autopod/cli:test:   Pods:
+@autopod/cli:test:
+@autopod/cli:test:     abcd1234  Build the first piece.  ○ Queued
+@autopod/cli:test:
+@autopod/cli:test: Track progress: ap series status series-1
+@autopod/cli:test:
+@autopod/cli:test:
+@autopod/cli:test:  ✓ src/commands/provider-account.test.ts (14 tests) 853ms
+@autopod/cli:test: stdout | src/commands/session.test.ts > pod commands > accepts contract.yml for --spec pod creation
+@autopod/cli:test: Pod abcd1234 created.
+@autopod/cli:test: Profile:  test
+@autopod/cli:test: Status:   ○ Queued
+@autopod/cli:test: Branch:   ap/abcd1234
+@autopod/cli:test: Target:   undefined
+@autopod/cli:test: Suite:    full
+@autopod/cli:test: Track progress: ap status abcd1234
+@autopod/cli:test:
+@autopod/cli:test: stdout | src/commands/session.test.ts > pod commands > includes local spec files for --spec pod creation when opted in
+@autopod/cli:test: Pod abcd1234 created.
+@autopod/cli:test: Profile:  test
+@autopod/cli:test: Status:   ○ Queued
+@autopod/cli:test: Branch:   ap/abcd1234
+@autopod/cli:test: Target:   undefined
+@autopod/cli:test: Suite:    full
+@autopod/cli:test: Track progress: ap status abcd1234
+@autopod/cli:test:
+@autopod/cli:test: stdout | src/commands/session.test.ts > pod commands > can disable runtime spec context for --spec pod creation
+@autopod/cli:test: Pod abcd1234 created.
+@autopod/cli:test: Profile:  test
+@autopod/cli:test: Status:   ○ Queued
+@autopod/cli:test: Branch:   ap/abcd1234
+@autopod/cli:test: Target:   undefined
+@autopod/cli:test: Suite:    full
+@autopod/cli:test: Track progress: ap status abcd1234
+@autopod/cli:test:
+@autopod/cli:test: stdout | src/commands/session.test.ts > pod commands > omits referenceRepos when no ref flags are passed
+@autopod/cli:test: Pod abcd1234 created.
+@autopod/cli:test: Profile:  test
+@autopod/cli:test: Status:   ○ Queued
+@autopod/cli:test: Branch:   ap/abcd1234
+@autopod/cli:test: Target:   undefined
+@autopod/cli:test: Pod:      auto → pr
+@autopod/cli:test: Suite:    full
+@autopod/cli:test: Track progress: ap status abcd1234
+@autopod/cli:test:
+@autopod/cli:test: stdout | src/commands/session.test.ts > pod commands > registers ls command that calls listSessions
+@autopod/cli:test: No pods found.
+@autopod/cli:test:
+@autopod/cli:test: stdout | src/commands/series.test.ts > series commands > accepts contract.yml for series creation
+@autopod/cli:test:
+@autopod/cli:test: Creating series "autopod-cli-series-Nrsi0B" with 1 pods...
+@autopod/cli:test:
+@autopod/cli:test:
+@autopod/cli:test: stdout | src/commands/series.test.ts > series commands > accepts contract.yml for series creation
+@autopod/cli:test:
+@autopod/cli:test: Series created: series-1
+@autopod/cli:test:
+@autopod/cli:test:   Name:    feature
+@autopod/cli:test:   PR mode: single
+@autopod/cli:test:   Auto-approve: no
+@autopod/cli:test:   Pods:
+@autopod/cli:test:
+@autopod/cli:test:     abcd1234  Build the first piece.  ○ Queued
+@autopod/cli:test:
+@autopod/cli:test: Track progress: ap series status series-1
+@autopod/cli:test:
+@autopod/cli:test:
+@autopod/cli:test: stdout | src/commands/session.test.ts > pod commands > registers ls command with filters
+@autopod/cli:test: No pods found.
+@autopod/cli:test:
+@autopod/cli:test: []
+@autopod/cli:test: stdout | src/commands/series.test.ts > series commands > includes local spec files for series creation when opted in
+@autopod/cli:test:
+@autopod/cli:test: Creating series "autopod-cli-series-aY1jBZ" with 1 pods...
+@autopod/cli:test:
+@autopod/cli:test:
+@autopod/cli:test: stdout | src/commands/series.test.ts > series commands > includes local spec files for series creation when opted in
+@autopod/cli:test:
+@autopod/cli:test: Series created: series-1
+@autopod/cli:test:
+@autopod/cli:test:   Name:    feature
+@autopod/cli:test:   PR mode: single
+@autopod/cli:test:   Auto-approve: no
+@autopod/cli:test:   Pods:
+@autopod/cli:test:
+@autopod/cli:test:     abcd1234  Build the first piece.  ○ Queued
+@autopod/cli:test:
+@autopod/cli:test: Track progress: ap series status series-1
+@autopod/cli:test:
+@autopod/cli:test:
+@autopod/cli:test: stdout | src/commands/series.test.ts > series commands > can disable runtime spec context for series creation
+@autopod/cli:test:
+@autopod/cli:test: Creating series "autopod-cli-series-RoUTZk" with 1 pods...
+@autopod/cli:test:
+@autopod/cli:test:
+@autopod/cli:test: stdout | src/commands/series.test.ts > series commands > can disable runtime spec context for series creation
+@autopod/cli:test:
+@autopod/cli:test: Series created: series-1
+@autopod/cli:test:
+@autopod/cli:test:   Name:    feature
+@autopod/cli:test:   PR mode: single
+@autopod/cli:test:   Auto-approve: no
+@autopod/cli:test:   Pods:
+@autopod/cli:test:
+@autopod/cli:test:     abcd1234  Build the first piece.  ○ Queued
+@autopod/cli:test:
+@autopod/cli:test: Track progress: ap series status series-1
+@autopod/cli:test:
+@autopod/cli:test:
+@autopod/cli:test: stdout | src/commands/session.test.ts > pod commands > renders compact records without requiring JSON
+@autopod/cli:test: [2m┌──────────[22m[2m┬────────────────[22m[2m┬──────────────────[22m[2m┬──────────────────────────────────────────[22m[2m┬──────────┐[22m
+@autopod/cli:test: [2m│[22m[36m ID       [39m[2m│[22m[36m Profile        [39m[2m│[22m[36m Status           [39m[2m│[22m[36m Title                                    [39m[2m│[22m[36m Duration [39m[2m│[22m
+@autopod/cli:test: [2m├──────────[22m[2m┼────────────────[22m[2m┼──────────────────[22m[2m┼──────────────────────────────────────────[22m[2m┼──────────┤[22m
+@autopod/cli:test: [2m│[22m compact1 [2m│[22m test           [2m│[22m ◉ Running        [2m│[22m Compact title                            [2m│[22m -        [2m│[22m
+@autopod/cli:test: [2m└──────────[22m[2m┴────────────────[22m[2m┴──────────────────[22m[2m┴──────────────────────────────────────────[22m[2m┴──────────┘[22m
+@autopod/cli:test:
+@autopod/cli:test: stdout | src/commands/session.test.ts > pod commands > registers status command that calls getSession
+@autopod/cli:test: Pod abcd1234
+@autopod/cli:test: ──────────────────────────────────────────────────
+@autopod/cli:test: Profile:      test
+@autopod/cli:test: Status:       ◉ Running
+@autopod/cli:test: Task accounting unavailable
+@autopod/cli:test: Readiness: pending/unavailable
+@autopod/cli:test: Task:         do things
+@autopod/cli:test: Model:        opus
+@autopod/cli:test: Runtime:      claude
+@autopod/cli:test: Branch:       ap/abcd1234
+@autopod/cli:test: Duration:     23538h 38m
+@autopod/cli:test: Validations:  0/3
+@autopod/cli:test: Suite:        full
+@autopod/cli:test: Escalations:  0
+@autopod/cli:test: Changes:      5 files (+100 -20)
+@autopod/cli:test:
+@autopod/cli:test: stdout | src/commands/session.test.ts > pod commands > registers tell command that calls sendMessage
+@autopod/cli:test: Message sent.
+@autopod/cli:test:
+@autopod/cli:test: stdout | src/commands/session.test.ts > pod commands > registers approve command that calls approveSession
+@autopod/cli:test: Pod abcd1234 approved.
+@autopod/cli:test:
+@autopod/cli:test: stdout | src/commands/session.test.ts > pod commands > passes approve reason to the daemon client
+@autopod/cli:test: Pod abcd1234 approved.
+@autopod/cli:test:
+@autopod/cli:test: stdout | src/commands/session.test.ts > pod commands > registers reject command that calls rejectSession
+@autopod/cli:test: Pod abcd1234 rejected with feedback.
+@autopod/cli:test:
+@autopod/cli:test: stdout | src/commands/session.test.ts > pod commands > registers kill command that calls killSession
+@autopod/cli:test: Pod abcd1234 killed.
+@autopod/cli:test:
+@autopod/cli:test:  ✓ src/commands/series.test.ts (6 tests) 530ms
+@autopod/cli:test:  ✓ src/commands/schedule.test.ts (4 tests) 662ms
+@autopod/cli:test:    ✓ runs scan create, report review, human triage and explicit repair through the real HTTP CLI client  489ms
+@autopod/cli:test: stdout | src/commands/session.test.ts > pod commands > registers approve --all-validated
+@autopod/cli:test: Approved: a, b
+@autopod/cli:test:
+@autopod/cli:test: stdout | src/commands/session.test.ts > pod commands > registers kill --all-failed
+@autopod/cli:test: Killed 1 pod(s): c
+@autopod/cli:test:
+@autopod/cli:test:  ✓ src/commands/session.test.ts (25 tests) 792ms
+@autopod/cli:test: stdout | src/commands/pod.test.ts > ls command > ls since forwards a duration filter as an ISO timestamp
+@autopod/cli:test: No pods found.
+@autopod/cli:test:
+@autopod/cli:test: stdout | src/commands/pod.test.ts > update-from-base command > registers update-from-base <id>
+@autopod/cli:test: Validation is stopping. Update from base will run before the next validation step.
+@autopod/cli:test:
+@autopod/cli:test: stdout | src/commands/pod.test.ts > update-from-base command > resolves short ID before calling updateFromBase
+@autopod/cli:test: Validation is stopping. Update from base will run before the next validation step.
+@autopod/cli:test:
+@autopod/cli:test: stderr | src/commands/profile.test.ts > profile commands > leaves profile credentials unchanged when Pi auth has the wrong provider
+@autopod/cli:test:
+@autopod/cli:test: Pi auth.json did not contain credentials for provider "openai-codex".
+@autopod/cli:test:
+@autopod/cli:test: stderr | src/commands/profile.test.ts > profile commands > leaves profile credentials unchanged when Pi auth is malformed
+@autopod/cli:test:
+@autopod/cli:test: Pi auth.json was not valid JSON.
+@autopod/cli:test:
+@autopod/mobile-web:test:  ✓ src/lib/token.test.ts (10 tests) 17ms
+@autopod/cli:test: stderr | src/commands/profile.test.ts > profile commands > leaves profile credentials unchanged when the selected Pi credential is empty
+@autopod/cli:test:
+@autopod/cli:test: Pi credential for provider "anthropic" was malformed.
+@autopod/cli:test:
+@autopod/mobile-web:test:  ✓ src/lib/ws-client.test.ts (7 tests) 9ms
+@autopod/mobile-web:test:  ✓ src/store/pods.test.ts (10 tests) 11ms
+@autopod/mobile-web:test:  ✓ src/lib/task-markdown.test.ts (4 tests) 6ms
+@autopod/mobile-web:test:  ✓ src/lib/pod-actions.test.ts (24 tests) 15ms
+@autopod/cli:test:  ✓ src/commands/workspace.test.ts (25 tests) 1039ms
+@autopod/cli:test:    ✓ keeps 'WORKSPACE_PRESERVATION_FAILED' visible and completes only after an explicit CLI retry  525ms
+@autopod/cli:test: stderr | src/commands/profile.test.ts > profile commands > leaves profile credentials unchanged when Pi login is cancelled
+@autopod/cli:test:
+@autopod/cli:test: pi exited with code 130
+@autopod/cli:test:
+@autopod/cli:test: stderr | src/commands/profile.test.ts > profile commands > leaves profile credentials unchanged when the Pi executable is missing
+@autopod/cli:test:
+@autopod/cli:test: Pi CLI not found. Install @earendil-works/pi-coding-agent@0.80.6 and retry.
+@autopod/cli:test:
+@autopod/cli:test:  ✓ src/commands/profile.test.ts (21 tests) 1710ms
+@autopod/cli:test:      ✓ captures only the requested Pi provider into profile credentials  713ms
+@autopod/cli:test:  ✓ src/commands/pod.test.ts (24 tests) 1316ms
+@autopod/cli:test:    ✓ shows compact evidence omissions through the actual HTTP client and CLI command  616ms
+@autopod/cli:test:      ✓ prints non-follow logs from persisted events  378ms
+@autopod/mobile-web:test:  ✓ src/lib/pod-display.test.ts (5 tests) 4ms
+@autopod/cli:test: stderr | src/config/config-store.test.ts > ConfigStore > falls back to defaults on invalid config
+@autopod/cli:test: Warning: Invalid config at /tmp/autopod-test-1788806282718/.autopod/config.yaml, using defaults
+@autopod/cli:test:
+@autopod/cli:test:  ✓ src/config/config-store.test.ts (6 tests) 14ms
+@autopod/cli:test:  ✓ src/commands/provider-catalog.test.ts (5 tests) 48ms
+@autopod/mobile-web:test:  ✓ src/lib/activity-format.test.ts (9 tests) 4ms
+@autopod/mobile-web:test:
+@autopod/mobile-web:test:  Test Files  16 passed (16)
+@autopod/mobile-web:test:       Tests  109 passed (109)
+@autopod/mobile-web:test:    Start at  20:37:59
+@autopod/mobile-web:test:    Duration  3.67s (transform 867ms, setup 660ms, import 1.79s, tests 961ms, environment 19.52s)
+@autopod/mobile-web:test:
+@autopod/cli:test:  ✓ src/commands/mobile.test.ts (6 tests) 16ms
+@autopod/cli:test:  ✓ src/auth/msal-cache.test.ts (4 tests) 6ms
+@autopod/cli:test:  ✓ src/commands/desktop.test.ts (7 tests) 22ms
+@autopod/cli:test:  ✓ src/api/client.test.ts (33 tests) 10ms
+@autopod/cli:test:  ✓ src/output/colors.test.ts (8 tests) 3ms
+@autopod/cli:test:  ✓ src/utils/id-resolver.test.ts (5 tests) 5ms
+@autopod/cli:test:  ✓ src/utils/truncate.test.ts (8 tests) 3ms
+@autopod/cli:test:  ✓ src/commands/auth.test.ts (3 tests) 4ms
+@autopod/cli:test:  ✓ src/auth/token-refresh.test.ts (1 test) 5ms
+@autopod/cli:test:  ✓ src/auth/token-manager.test.ts (5 tests) 2ms
+@autopod/cli:test:  ✓ src/utils/error-handler.test.ts (8 tests) 2ms
+@autopod/cli:test:
+@autopod/cli:test:  Test Files  23 passed (23)
+@autopod/cli:test:       Tests  235 passed (235)
+@autopod/cli:test:    Start at  20:37:59
+@autopod/cli:test:    Duration  3.66s (transform 4.74s, setup 0ms, import 10.09s, tests 7.44s, environment 2ms)
+@autopod/cli:test:
+@autopod/daemon:build: DTS ⚡️ Build success in 5655ms
+@autopod/daemon:build: DTS dist/db/verify-backup-cli.d.ts 13.00 B
+@autopod/daemon:build: DTS dist/index.d.ts                13.00 B
+@autopod/daemon:build:
+@autopod/daemon:build: > @autopod/daemon@0.0.1 postbuild /private/tmp/autopod-durable-execution/packages/daemon
+@autopod/daemon:build: > mkdir -p dist/db dist/actions && cp -R src/db/migrations dist/db/ && cp -R src/actions/defaults dist/actions/
+@autopod/daemon:build:
+@autopod/daemon:test: cache miss, executing d4451f4a89aecbbc
+@autopod/daemon:test:
+@autopod/daemon:test: > @autopod/daemon@0.0.1 pretest /private/tmp/autopod-durable-execution/packages/daemon
+@autopod/daemon:test: > [ -n "$TURBO_HASH" ] || pnpm --filter @autopod/shared build
+@autopod/daemon:test:
+@autopod/daemon:test:
+@autopod/daemon:test: > @autopod/daemon@0.0.1 test /private/tmp/autopod-durable-execution/packages/daemon
+@autopod/daemon:test: > vitest run
+@autopod/daemon:test:
+@autopod/daemon:test:
+@autopod/daemon:test:  RUN  v4.1.11 /private/tmp/autopod-durable-execution/packages/daemon
+@autopod/daemon:test:
+@autopod/daemon:test: {"level":30,"time":1788806287268,"pid":96055,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"my-app","msg":"Profile created"}
+@autopod/daemon:test: (node:96056) [FSTDEP023] FastifyDeprecation: disableRequestLogging option is deprecated. Use the logController option with disableRequestLogging or isLogDisabled override instead. The disableRequestLogging top-level option will be removed in `fastify@6`.
+@autopod/daemon:test: (Use `node --trace-warnings ...` to show where the warning was created)
+@autopod/daemon:test: (node:96056) [FSTDEP023] FastifyDeprecation: disableRequestLogging option is deprecated. Use the logController option with disableRequestLogging or isLogDisabled override instead. The disableRequestLogging top-level option will be removed in `fastify@6`.
+@autopod/daemon:test: (node:96056) [FSTDEP023] FastifyDeprecation: disableRequestLogging option is deprecated. Use the logController option with disableRequestLogging or isLogDisabled override instead. The disableRequestLogging top-level option will be removed in `fastify@6`.
+@autopod/daemon:test: {"level":30,"time":1788806289311,"pid":96056,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"test-app","msg":"Profile created"}
+@autopod/daemon:test: (node:96056) [FSTDEP023] FastifyDeprecation: disableRequestLogging option is deprecated. Use the logController option with disableRequestLogging or isLogDisabled override instead. The disableRequestLogging top-level option will be removed in `fastify@6`.
+@autopod/daemon:test: {"level":30,"time":1788806289422,"pid":96056,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"test-app","msg":"Profile created"}
+@autopod/daemon:test: (node:96056) [FSTDEP023] FastifyDeprecation: disableRequestLogging option is deprecated. Use the logController option with disableRequestLogging or isLogDisabled override instead. The disableRequestLogging top-level option will be removed in `fastify@6`.
+@autopod/daemon:test: {"level":30,"time":1788806289424,"pid":96056,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"test-app","fields":["buildCommand"],"msg":"Profile updated"}
+@autopod/daemon:test: {"level":30,"time":1788806289502,"pid":96056,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"test-app","msg":"Profile created"}
+@autopod/daemon:test: (node:96056) [FSTDEP023] FastifyDeprecation: disableRequestLogging option is deprecated. Use the logController option with disableRequestLogging or isLogDisabled override instead. The disableRequestLogging top-level option will be removed in `fastify@6`.
+@autopod/daemon:test: {"level":30,"time":1788806289503,"pid":96056,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"test-app-derived","msg":"Profile created"}
+@autopod/daemon:test: {"level":30,"time":1788806289599,"pid":96056,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"test-app","msg":"Profile created"}
+@autopod/daemon:test: (node:96056) [FSTDEP023] FastifyDeprecation: disableRequestLogging option is deprecated. Use the logController option with disableRequestLogging or isLogDisabled override instead. The disableRequestLogging top-level option will be removed in `fastify@6`.
+@autopod/daemon:test: {"level":30,"time":1788806289600,"pid":96056,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"test-app","fields":["buildCommand"],"msg":"Profile updated"}
+@autopod/daemon:test: (node:96056) [FSTDEP023] FastifyDeprecation: disableRequestLogging option is deprecated. Use the logController option with disableRequestLogging or isLogDisabled override instead. The disableRequestLogging top-level option will be removed in `fastify@6`.
+@autopod/daemon:test: {"level":30,"time":1788806289724,"pid":96056,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"test-app","msg":"Profile created"}
+@autopod/daemon:test: (node:96056) [FSTDEP023] FastifyDeprecation: disableRequestLogging option is deprecated. Use the logController option with disableRequestLogging or isLogDisabled override instead. The disableRequestLogging top-level option will be removed in `fastify@6`.
+@autopod/daemon:test: {"level":30,"time":1788806289826,"pid":96056,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"test-app","msg":"Profile created"}
+@autopod/daemon:test: {"level":30,"time":1788806289890,"pid":96056,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"test-app","msg":"Profile created"}
+@autopod/daemon:test: (node:96056) [FSTDEP023] FastifyDeprecation: disableRequestLogging option is deprecated. Use the logController option with disableRequestLogging or isLogDisabled override instead. The disableRequestLogging top-level option will be removed in `fastify@6`.
+@autopod/daemon:test: {"level":30,"time":1788806289891,"pid":96056,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"test-app","fields":["buildCommand"],"msg":"Profile updated"}
+@autopod/daemon:test: (node:96056) [FSTDEP023] FastifyDeprecation: disableRequestLogging option is deprecated. Use the logController option with disableRequestLogging or isLogDisabled override instead. The disableRequestLogging top-level option will be removed in `fastify@6`.
+@autopod/daemon:test: {"level":30,"time":1788806289965,"pid":96056,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"test-app","msg":"Profile created"}
+@autopod/daemon:test: {"level":30,"time":1788806289966,"pid":96056,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"test-app","msg":"Profile deleted"}
+@autopod/daemon:test: (node:96056) [FSTDEP023] FastifyDeprecation: disableRequestLogging option is deprecated. Use the logController option with disableRequestLogging or isLogDisabled override instead. The disableRequestLogging top-level option will be removed in `fastify@6`.
+@autopod/daemon:test: {"level":30,"time":1788806290043,"pid":96056,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"test-app","msg":"Profile created"}
+@autopod/daemon:test: (node:96056) [FSTDEP023] FastifyDeprecation: disableRequestLogging option is deprecated. Use the logController option with disableRequestLogging or isLogDisabled override instead. The disableRequestLogging top-level option will be removed in `fastify@6`.
+@autopod/daemon:test: {"level":30,"time":1788806290116,"pid":96056,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"auth-base","msg":"Profile created"}
+@autopod/daemon:test: {"level":30,"time":1788806290118,"pid":96056,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"auth-derived","msg":"Profile created"}
+@autopod/daemon:test: {"level":30,"time":1788806290194,"pid":96056,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"test-app","msg":"Profile created"}
+@autopod/daemon:test: (node:96056) [FSTDEP023] FastifyDeprecation: disableRequestLogging option is deprecated. Use the logController option with disableRequestLogging or isLogDisabled override instead. The disableRequestLogging top-level option will be removed in `fastify@6`.
+@autopod/daemon:test: {"level":30,"time":1788806290195,"pid":96056,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"test-app-derived","msg":"Profile created"}
+@autopod/daemon:test: {"level":30,"time":1788806290261,"pid":96056,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"test-app","msg":"Profile created"}
+@autopod/daemon:test: {"level":30,"time":1788806290261,"pid":96056,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"test-app-derived","msg":"Profile created"}
+@autopod/daemon:test: (node:96056) [FSTDEP023] FastifyDeprecation: disableRequestLogging option is deprecated. Use the logController option with disableRequestLogging or isLogDisabled override instead. The disableRequestLogging top-level option will be removed in `fastify@6`.
+@autopod/daemon:test: {"level":30,"time":1788806290262,"pid":96056,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"test-app-derived","fields":["buildCommand"],"msg":"Profile updated"}
+@autopod/daemon:test: {"level":30,"time":1788806290318,"pid":96056,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"test-app","msg":"Profile created"}
+@autopod/daemon:test:  ✓ src/pods/throughput-aggregator.test.ts (18 tests) 3024ms
+@autopod/daemon:test:      ✓ cohort is capped at 5000 and cohortTruncated=true when >5000 pods  1767ms
+@autopod/daemon:test: (node:96056) [FSTDEP023] FastifyDeprecation: disableRequestLogging option is deprecated. Use the logController option with disableRequestLogging or isLogDisabled override instead. The disableRequestLogging top-level option will be removed in `fastify@6`.
+@autopod/daemon:test: {"level":30,"time":1788806290385,"pid":96056,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"test-app","msg":"Profile created"}
+@autopod/daemon:test: (node:96056) [FSTDEP023] FastifyDeprecation: disableRequestLogging option is deprecated. Use the logController option with disableRequestLogging or isLogDisabled override instead. The disableRequestLogging top-level option will be removed in `fastify@6`.
+@autopod/daemon:test: {"level":30,"time":1788806290450,"pid":96056,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"test-app","msg":"Profile created"}
+@autopod/daemon:test: (node:96056) [FSTDEP023] FastifyDeprecation: disableRequestLogging option is deprecated. Use the logController option with disableRequestLogging or isLogDisabled override instead. The disableRequestLogging top-level option will be removed in `fastify@6`.
+@autopod/daemon:test: {"level":30,"time":1788806290539,"pid":96056,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"test-app","msg":"Profile created"}
+@autopod/daemon:test:  ✓ src/worktrees/bare-push.test.ts (5 tests) 3508ms
+@autopod/daemon:test:      ✓ REGRESSION: direct `git push <bare> HEAD` is rejected by denyCurrentBranch  711ms
+@autopod/daemon:test:      ✓ pushCommitsToBareViaStagingRef advances the bare branch and cleans up the staging ref  791ms
+@autopod/daemon:test:      ✓ rejects a non-fast-forward staging tip without moving the branch  837ms
+@autopod/daemon:test:      ✓ refuses detached HEAD without leaving a staging ref behind  506ms
+@autopod/daemon:test:      ✓ creates a branch on first push when the bare has no such branch  662ms
+@autopod/daemon:test: (node:96056) [FSTDEP023] FastifyDeprecation: disableRequestLogging option is deprecated. Use the logController option with disableRequestLogging or isLogDisabled override instead. The disableRequestLogging top-level option will be removed in `fastify@6`.
+@autopod/daemon:test: {"level":30,"time":1788806290662,"pid":96056,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"test-app","msg":"Profile created"}
+@autopod/daemon:test: {"level":30,"time":1788806290730,"pid":96056,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"test-app","msg":"Profile created"}
+@autopod/daemon:test: (node:96056) [FSTDEP023] FastifyDeprecation: disableRequestLogging option is deprecated. Use the logController option with disableRequestLogging or isLogDisabled override instead. The disableRequestLogging top-level option will be removed in `fastify@6`.
+@autopod/daemon:test: (node:96056) [FSTDEP023] FastifyDeprecation: disableRequestLogging option is deprecated. Use the logController option with disableRequestLogging or isLogDisabled override instead. The disableRequestLogging top-level option will be removed in `fastify@6`.
+@autopod/daemon:test: {"level":30,"time":1788806290799,"pid":96056,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"test-app","msg":"Profile created"}
+@autopod/daemon:test: (node:96056) [FSTDEP023] FastifyDeprecation: disableRequestLogging option is deprecated. Use the logController option with disableRequestLogging or isLogDisabled override instead. The disableRequestLogging top-level option will be removed in `fastify@6`.
+@autopod/daemon:test: {"level":30,"time":1788806290925,"pid":96056,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"test-app","msg":"Profile created"}
+@autopod/daemon:test: (node:96056) [FSTDEP023] FastifyDeprecation: disableRequestLogging option is deprecated. Use the logController option with disableRequestLogging or isLogDisabled override instead. The disableRequestLogging top-level option will be removed in `fastify@6`.
+@autopod/daemon:test: {"level":30,"time":1788806291019,"pid":96056,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"test-app","msg":"Profile created"}
+@autopod/daemon:test: (node:96056) [FSTDEP023] FastifyDeprecation: disableRequestLogging option is deprecated. Use the logController option with disableRequestLogging or isLogDisabled override instead. The disableRequestLogging top-level option will be removed in `fastify@6`.
+@autopod/daemon:test: {"level":30,"time":1788806291150,"pid":96056,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"test-app","msg":"Profile created"}
+@autopod/daemon:test: (node:96056) [FSTDEP023] FastifyDeprecation: disableRequestLogging option is deprecated. Use the logController option with disableRequestLogging or isLogDisabled override instead. The disableRequestLogging top-level option will be removed in `fastify@6`.
+@autopod/daemon:test: {"level":30,"time":1788806291245,"pid":96056,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"test-app","msg":"Profile created"}
+@autopod/daemon:test: (node:837) [FSTDEP023] FastifyDeprecation: disableRequestLogging option is deprecated. Use the logController option with disableRequestLogging or isLogDisabled override instead. The disableRequestLogging top-level option will be removed in `fastify@6`.
+@autopod/daemon:test: (Use `node --trace-warnings ...` to show where the warning was created)
+@autopod/daemon:test: (node:96056) [FSTDEP023] FastifyDeprecation: disableRequestLogging option is deprecated. Use the logController option with disableRequestLogging or isLogDisabled override instead. The disableRequestLogging top-level option will be removed in `fastify@6`.
+@autopod/daemon:test: {"level":30,"time":1788806291323,"pid":837,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"test-app","msg":"Profile created"}
+@autopod/daemon:test: {"level":30,"time":1788806291326,"pid":96056,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"test-app","msg":"Profile created"}
+@autopod/daemon:test: (node:96056) [FSTDEP023] FastifyDeprecation: disableRequestLogging option is deprecated. Use the logController option with disableRequestLogging or isLogDisabled override instead. The disableRequestLogging top-level option will be removed in `fastify@6`.
+@autopod/daemon:test: (node:837) [FSTDEP023] FastifyDeprecation: disableRequestLogging option is deprecated. Use the logController option with disableRequestLogging or isLogDisabled override instead. The disableRequestLogging top-level option will be removed in `fastify@6`.
+@autopod/daemon:test: {"level":30,"time":1788806291427,"pid":837,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"test-app","msg":"Profile created"}
+@autopod/daemon:test: (node:96056) [FSTDEP023] FastifyDeprecation: disableRequestLogging option is deprecated. Use the logController option with disableRequestLogging or isLogDisabled override instead. The disableRequestLogging top-level option will be removed in `fastify@6`.
+@autopod/daemon:test: (node:837) [FSTDEP023] FastifyDeprecation: disableRequestLogging option is deprecated. Use the logController option with disableRequestLogging or isLogDisabled override instead. The disableRequestLogging top-level option will be removed in `fastify@6`.
+@autopod/daemon:test: {"level":30,"time":1788806291494,"pid":837,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"test-app","msg":"Profile created"}
+@autopod/daemon:test: (node:96056) [FSTDEP023] FastifyDeprecation: disableRequestLogging option is deprecated. Use the logController option with disableRequestLogging or isLogDisabled override instead. The disableRequestLogging top-level option will be removed in `fastify@6`.
+@autopod/daemon:test: {"level":30,"time":1788806291542,"pid":96056,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"test-app","msg":"Profile created"}
+@autopod/daemon:test: (node:837) [FSTDEP023] FastifyDeprecation: disableRequestLogging option is deprecated. Use the logController option with disableRequestLogging or isLogDisabled override instead. The disableRequestLogging top-level option will be removed in `fastify@6`.
+@autopod/daemon:test: {"level":30,"time":1788806291567,"pid":837,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"test-app","msg":"Profile created"}
+@autopod/daemon:test: (node:96056) [FSTDEP023] FastifyDeprecation: disableRequestLogging option is deprecated. Use the logController option with disableRequestLogging or isLogDisabled override instead. The disableRequestLogging top-level option will be removed in `fastify@6`.
+@autopod/daemon:test: {"level":30,"time":1788806291608,"pid":96056,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"test-app","msg":"Profile created"}
+@autopod/daemon:test: (node:837) [FSTDEP023] FastifyDeprecation: disableRequestLogging option is deprecated. Use the logController option with disableRequestLogging or isLogDisabled override instead. The disableRequestLogging top-level option will be removed in `fastify@6`.
+@autopod/daemon:test: {"level":30,"time":1788806291632,"pid":837,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"test-app","msg":"Profile created"}
+@autopod/daemon:test: (node:96056) [FSTDEP023] FastifyDeprecation: disableRequestLogging option is deprecated. Use the logController option with disableRequestLogging or isLogDisabled override instead. The disableRequestLogging top-level option will be removed in `fastify@6`.
+@autopod/daemon:test: {"level":30,"time":1788806291666,"pid":96056,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"test-app","msg":"Profile created"}
+@autopod/daemon:test: (node:837) [FSTDEP023] FastifyDeprecation: disableRequestLogging option is deprecated. Use the logController option with disableRequestLogging or isLogDisabled override instead. The disableRequestLogging top-level option will be removed in `fastify@6`.
+@autopod/daemon:test: {"level":30,"time":1788806291702,"pid":837,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"test-app","msg":"Profile created"}
+@autopod/daemon:test: (node:96056) [FSTDEP023] FastifyDeprecation: disableRequestLogging option is deprecated. Use the logController option with disableRequestLogging or isLogDisabled override instead. The disableRequestLogging top-level option will be removed in `fastify@6`.
+@autopod/daemon:test: {"level":30,"time":1788806291734,"pid":96056,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"deny-all-profile","msg":"Profile created"}
+@autopod/daemon:test: (node:96056) [FSTDEP023] FastifyDeprecation: disableRequestLogging option is deprecated. Use the logController option with disableRequestLogging or isLogDisabled override instead. The disableRequestLogging top-level option will be removed in `fastify@6`.
+@autopod/daemon:test: {"level":30,"time":1788806291796,"pid":96056,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"deny-all-workspace","msg":"Profile created"}
+@autopod/daemon:test: (node:837) [FSTDEP023] FastifyDeprecation: disableRequestLogging option is deprecated. Use the logController option with disableRequestLogging or isLogDisabled override instead. The disableRequestLogging top-level option will be removed in `fastify@6`.
+@autopod/daemon:test: {"level":30,"time":1788806291828,"pid":837,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"test-app","msg":"Profile created"}
+@autopod/daemon:test: (node:96056) [FSTDEP023] FastifyDeprecation: disableRequestLogging option is deprecated. Use the logController option with disableRequestLogging or isLogDisabled override instead. The disableRequestLogging top-level option will be removed in `fastify@6`.
+@autopod/daemon:test: {"level":30,"time":1788806291862,"pid":96056,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"test-app","msg":"Profile created"}
+@autopod/daemon:test: (node:837) [FSTDEP023] FastifyDeprecation: disableRequestLogging option is deprecated. Use the logController option with disableRequestLogging or isLogDisabled override instead. The disableRequestLogging top-level option will be removed in `fastify@6`.
+@autopod/daemon:test: {"level":30,"time":1788806291932,"pid":837,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"test-app","msg":"Profile created"}
+@autopod/daemon:test: (node:96056) [FSTDEP023] FastifyDeprecation: disableRequestLogging option is deprecated. Use the logController option with disableRequestLogging or isLogDisabled override instead. The disableRequestLogging top-level option will be removed in `fastify@6`.
+@autopod/daemon:test: {"level":30,"time":1788806291940,"pid":96056,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"test-app","msg":"Profile created"}
+@autopod/daemon:test: (node:96056) [FSTDEP023] FastifyDeprecation: disableRequestLogging option is deprecated. Use the logController option with disableRequestLogging or isLogDisabled override instead. The disableRequestLogging top-level option will be removed in `fastify@6`.
+@autopod/daemon:test: {"level":30,"time":1788806292023,"pid":96056,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"test-app","msg":"Profile created"}
+@autopod/daemon:test: (node:837) [FSTDEP023] FastifyDeprecation: disableRequestLogging option is deprecated. Use the logController option with disableRequestLogging or isLogDisabled override instead. The disableRequestLogging top-level option will be removed in `fastify@6`.
+@autopod/daemon:test: {"level":30,"time":1788806292048,"pid":837,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"test-app","msg":"Profile created"}
+@autopod/daemon:test: (node:96056) [FSTDEP023] FastifyDeprecation: disableRequestLogging option is deprecated. Use the logController option with disableRequestLogging or isLogDisabled override instead. The disableRequestLogging top-level option will be removed in `fastify@6`.
+@autopod/daemon:test: {"level":30,"time":1788806292115,"pid":96056,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"test-app","msg":"Profile created"}
+@autopod/daemon:test: (node:1136) [FSTDEP023] FastifyDeprecation: disableRequestLogging option is deprecated. Use the logController option with disableRequestLogging or isLogDisabled override instead. The disableRequestLogging top-level option will be removed in `fastify@6`.
+@autopod/daemon:test: (Use `node --trace-warnings ...` to show where the warning was created)
+@autopod/daemon:test: (node:837) [FSTDEP023] FastifyDeprecation: disableRequestLogging option is deprecated. Use the logController option with disableRequestLogging or isLogDisabled override instead. The disableRequestLogging top-level option will be removed in `fastify@6`.
+@autopod/daemon:test: {"level":30,"time":1788806292168,"pid":1136,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"test-profile","msg":"Profile created"}
+@autopod/daemon:test: {"level":30,"time":1788806292169,"pid":837,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"test-app","msg":"Profile created"}
+@autopod/daemon:test: (node:96056) [FSTDEP023] FastifyDeprecation: disableRequestLogging option is deprecated. Use the logController option with disableRequestLogging or isLogDisabled override instead. The disableRequestLogging top-level option will be removed in `fastify@6`.
+@autopod/daemon:test: {"level":30,"time":1788806292205,"pid":96056,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"test-app","msg":"Profile created"}
+@autopod/daemon:test: (node:837) [FSTDEP023] FastifyDeprecation: disableRequestLogging option is deprecated. Use the logController option with disableRequestLogging or isLogDisabled override instead. The disableRequestLogging top-level option will be removed in `fastify@6`.
+@autopod/daemon:test: {"level":30,"time":1788806292232,"pid":837,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"test-app","msg":"Profile created"}
+@autopod/daemon:test: (node:1136) [FSTDEP023] FastifyDeprecation: disableRequestLogging option is deprecated. Use the logController option with disableRequestLogging or isLogDisabled override instead. The disableRequestLogging top-level option will be removed in `fastify@6`.
+@autopod/daemon:test: {"level":30,"time":1788806292247,"pid":1136,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"test-profile","msg":"Profile created"}
+@autopod/daemon:test: (node:837) [FSTDEP023] FastifyDeprecation: disableRequestLogging option is deprecated. Use the logController option with disableRequestLogging or isLogDisabled override instead. The disableRequestLogging top-level option will be removed in `fastify@6`.
+@autopod/daemon:test: {"level":30,"time":1788806292291,"pid":837,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"test-app","msg":"Profile created"}
+@autopod/daemon:test: (node:96056) [FSTDEP023] FastifyDeprecation: disableRequestLogging option is deprecated. Use the logController option with disableRequestLogging or isLogDisabled override instead. The disableRequestLogging top-level option will be removed in `fastify@6`.
+@autopod/daemon:test: {"level":30,"time":1788806292298,"pid":96056,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"test-app","msg":"Profile created"}
+@autopod/daemon:test: (node:1136) [FSTDEP023] FastifyDeprecation: disableRequestLogging option is deprecated. Use the logController option with disableRequestLogging or isLogDisabled override instead. The disableRequestLogging top-level option will be removed in `fastify@6`.
+@autopod/daemon:test: {"level":30,"time":1788806292328,"pid":1136,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"test-profile","msg":"Profile created"}
+@autopod/daemon:test: (node:837) [FSTDEP023] FastifyDeprecation: disableRequestLogging option is deprecated. Use the logController option with disableRequestLogging or isLogDisabled override instead. The disableRequestLogging top-level option will be removed in `fastify@6`.
+@autopod/daemon:test: {"level":30,"time":1788806292351,"pid":837,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"test-app","msg":"Profile created"}
+@autopod/daemon:test: (node:96056) [FSTDEP023] FastifyDeprecation: disableRequestLogging option is deprecated. Use the logController option with disableRequestLogging or isLogDisabled override instead. The disableRequestLogging top-level option will be removed in `fastify@6`.
+@autopod/daemon:test: {"level":30,"time":1788806292374,"pid":96056,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"test-app","msg":"Profile created"}
+@autopod/daemon:test: (node:1136) [FSTDEP023] FastifyDeprecation: disableRequestLogging option is deprecated. Use the logController option with disableRequestLogging or isLogDisabled override instead. The disableRequestLogging top-level option will be removed in `fastify@6`.
+@autopod/daemon:test:  ✓ src/security/scan-engine.test.ts (16 tests) 5296ms
+@autopod/daemon:test:      ✓ runs the secrets detector on the always-scan list at provisioning  308ms
+@autopod/daemon:test:      ✓ push diff scan with missing origin/<branch> falls back to local branch and warns  343ms
+@autopod/daemon:test:      ✓ push diff scan with NO usable base ref scans alwaysScanPaths only and flags scanIncomplete  383ms
+@autopod/daemon:test:      ✓ omits an unchanged same-path secret after surrounding content moves  390ms
+@autopod/daemon:test:      ✓ blocks introduced and rotated secret values  424ms
+@autopod/daemon:test:      ✓ subtracts same-path occurrences as a multiset so a duplicate blocks  348ms
+@autopod/daemon:test:      ✓ does not apply a baseline across paths or when the same-path base blob is missing  401ms
+@autopod/daemon:test:      ✓ retains current findings when the baseline detector fails  461ms
+@autopod/daemon:test:      ✓ retains current findings when the budget expires 'before base loading'  351ms
+@autopod/daemon:test:      ✓ retains current findings when the budget expires 'during base detection'  402ms
+@autopod/daemon:test: {"level":30,"time":1788806292416,"pid":1136,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"test-profile","msg":"Profile created"}
+@autopod/daemon:test: (node:837) [FSTDEP023] FastifyDeprecation: disableRequestLogging option is deprecated. Use the logController option with disableRequestLogging or isLogDisabled override instead. The disableRequestLogging top-level option will be removed in `fastify@6`.
+@autopod/daemon:test: {"level":30,"time":1788806292427,"pid":837,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"test-app","msg":"Profile created"}
+@autopod/daemon:test: (node:96056) [FSTDEP023] FastifyDeprecation: disableRequestLogging option is deprecated. Use the logController option with disableRequestLogging or isLogDisabled override instead. The disableRequestLogging top-level option will be removed in `fastify@6`.
+@autopod/daemon:test: {"level":30,"time":1788806292452,"pid":96056,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"test-app","msg":"Profile created"}
+@autopod/daemon:test: (node:1136) [FSTDEP023] FastifyDeprecation: disableRequestLogging option is deprecated. Use the logController option with disableRequestLogging or isLogDisabled override instead. The disableRequestLogging top-level option will be removed in `fastify@6`.
+@autopod/daemon:test: {"level":30,"time":1788806292474,"pid":1136,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"test-profile","msg":"Profile created"}
+@autopod/daemon:test: (node:837) [FSTDEP023] FastifyDeprecation: disableRequestLogging option is deprecated. Use the logController option with disableRequestLogging or isLogDisabled override instead. The disableRequestLogging top-level option will be removed in `fastify@6`.
+@autopod/daemon:test: {"level":30,"time":1788806292503,"pid":837,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"test-app","msg":"Profile created"}
+@autopod/daemon:test: (node:96056) [FSTDEP023] FastifyDeprecation: disableRequestLogging option is deprecated. Use the logController option with disableRequestLogging or isLogDisabled override instead. The disableRequestLogging top-level option will be removed in `fastify@6`.
+@autopod/daemon:test: {"level":30,"time":1788806292532,"pid":96056,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"test-app","msg":"Profile created"}
+@autopod/daemon:test: (node:1136) [FSTDEP023] FastifyDeprecation: disableRequestLogging option is deprecated. Use the logController option with disableRequestLogging or isLogDisabled override instead. The disableRequestLogging top-level option will be removed in `fastify@6`.
+@autopod/daemon:test: {"level":30,"time":1788806292576,"pid":1136,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"test-profile","msg":"Profile created"}
+@autopod/daemon:test: (node:837) [FSTDEP023] FastifyDeprecation: disableRequestLogging option is deprecated. Use the logController option with disableRequestLogging or isLogDisabled override instead. The disableRequestLogging top-level option will be removed in `fastify@6`.
+@autopod/daemon:test: {"level":30,"time":1788806292605,"pid":837,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"test-app","msg":"Profile created"}
+@autopod/daemon:test: (node:96056) [FSTDEP023] FastifyDeprecation: disableRequestLogging option is deprecated. Use the logController option with disableRequestLogging or isLogDisabled override instead. The disableRequestLogging top-level option will be removed in `fastify@6`.
+@autopod/daemon:test: {"level":30,"time":1788806292628,"pid":96056,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"test-app","msg":"Profile created"}
+@autopod/daemon:test: (node:1136) [FSTDEP023] FastifyDeprecation: disableRequestLogging option is deprecated. Use the logController option with disableRequestLogging or isLogDisabled override instead. The disableRequestLogging top-level option will be removed in `fastify@6`.
+@autopod/daemon:test: {"level":30,"time":1788806292651,"pid":1136,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"test-profile","msg":"Profile created"}
+@autopod/daemon:test: (node:837) [FSTDEP023] FastifyDeprecation: disableRequestLogging option is deprecated. Use the logController option with disableRequestLogging or isLogDisabled override instead. The disableRequestLogging top-level option will be removed in `fastify@6`.
+@autopod/daemon:test: {"level":30,"time":1788806292672,"pid":837,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"test-app","msg":"Profile created"}
+@autopod/daemon:test: (node:96056) [FSTDEP023] FastifyDeprecation: disableRequestLogging option is deprecated. Use the logController option with disableRequestLogging or isLogDisabled override instead. The disableRequestLogging top-level option will be removed in `fastify@6`.
+@autopod/daemon:test: {"level":30,"time":1788806292704,"pid":96056,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"test-app","msg":"Profile created"}
+@autopod/daemon:test: (node:1136) [FSTDEP023] FastifyDeprecation: disableRequestLogging option is deprecated. Use the logController option with disableRequestLogging or isLogDisabled override instead. The disableRequestLogging top-level option will be removed in `fastify@6`.
+@autopod/daemon:test: {"level":30,"time":1788806292716,"pid":1136,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"test-profile","msg":"Profile created"}
+@autopod/daemon:test: (node:837) [FSTDEP023] FastifyDeprecation: disableRequestLogging option is deprecated. Use the logController option with disableRequestLogging or isLogDisabled override instead. The disableRequestLogging top-level option will be removed in `fastify@6`.
+@autopod/daemon:test: {"level":30,"time":1788806292739,"pid":837,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"test-app","msg":"Profile created"}
+@autopod/daemon:test:  ✓ src/worktrees/local-worktree-manager.git.test.ts (4 tests) 5505ms
+@autopod/daemon:test:      ✓ force-pushes to a URL when the explicit remote OID lease still matches  1261ms
+@autopod/daemon:test:      ✓ rejects a force push when the remote branch advanced after the tracked OID  1220ms
+@autopod/daemon:test:      ✓ succeeds when remote already matches HEAD despite a stale tracked OID  1055ms
+@autopod/daemon:test: (node:1136) [FSTDEP023] FastifyDeprecation: disableRequestLogging option is deprecated. Use the logController option with disableRequestLogging or isLogDisabled override instead. The disableRequestLogging top-level option will be removed in `fastify@6`.
+@autopod/daemon:test:      ✓ materializes exact fresh remote base and start SHAs despite stale local heads  1968ms
+@autopod/daemon:test: (node:96056) [FSTDEP023] FastifyDeprecation: disableRequestLogging option is deprecated. Use the logController option with disableRequestLogging or isLogDisabled override instead. The disableRequestLogging top-level option will be removed in `fastify@6`.
+@autopod/daemon:test: {"level":30,"time":1788806292791,"pid":1136,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"test-profile","msg":"Profile created"}
+@autopod/daemon:test: {"level":30,"time":1788806292793,"pid":1136,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"test-profile","fields":["providerCredentials","githubPat","openrouterApiKey","registryPat"],"msg":"Profile updated"}
+@autopod/daemon:test: {"level":30,"time":1788806292799,"pid":96056,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"test-app","msg":"Profile created"}
+@autopod/daemon:test: (node:837) [FSTDEP023] FastifyDeprecation: disableRequestLogging option is deprecated. Use the logController option with disableRequestLogging or isLogDisabled override instead. The disableRequestLogging top-level option will be removed in `fastify@6`.
+@autopod/daemon:test: {"level":30,"time":1788806292823,"pid":837,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"test-app","msg":"Profile created"}
+@autopod/daemon:test: (node:96056) [FSTDEP023] FastifyDeprecation: disableRequestLogging option is deprecated. Use the logController option with disableRequestLogging or isLogDisabled override instead. The disableRequestLogging top-level option will be removed in `fastify@6`.
+@autopod/daemon:test: (node:1136) [FSTDEP023] FastifyDeprecation: disableRequestLogging option is deprecated. Use the logController option with disableRequestLogging or isLogDisabled override instead. The disableRequestLogging top-level option will be removed in `fastify@6`.
+@autopod/daemon:test: {"level":30,"time":1788806292878,"pid":96056,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"test-app","msg":"Profile created"}
+@autopod/daemon:test: {"level":30,"time":1788806292888,"pid":1136,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"test-profile","msg":"Profile created"}
+@autopod/daemon:test: (node:837) [FSTDEP023] FastifyDeprecation: disableRequestLogging option is deprecated. Use the logController option with disableRequestLogging or isLogDisabled override instead. The disableRequestLogging top-level option will be removed in `fastify@6`.
+@autopod/daemon:test: {"level":30,"time":1788806292902,"pid":837,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"test-app","msg":"Profile created"}
+@autopod/daemon:test: (node:1136) [FSTDEP023] FastifyDeprecation: disableRequestLogging option is deprecated. Use the logController option with disableRequestLogging or isLogDisabled override instead. The disableRequestLogging top-level option will be removed in `fastify@6`.
+@autopod/daemon:test: (node:96056) [FSTDEP023] FastifyDeprecation: disableRequestLogging option is deprecated. Use the logController option with disableRequestLogging or isLogDisabled override instead. The disableRequestLogging top-level option will be removed in `fastify@6`.
+@autopod/daemon:test: {"level":30,"time":1788806292957,"pid":96056,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"test-app","msg":"Profile created"}
+@autopod/daemon:test: (node:837) [FSTDEP023] FastifyDeprecation: disableRequestLogging option is deprecated. Use the logController option with disableRequestLogging or isLogDisabled override instead. The disableRequestLogging top-level option will be removed in `fastify@6`.
+@autopod/daemon:test: {"level":30,"time":1788806292984,"pid":837,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"test-app","msg":"Profile created"}
+@autopod/daemon:test: (node:1136) [FSTDEP023] FastifyDeprecation: disableRequestLogging option is deprecated. Use the logController option with disableRequestLogging or isLogDisabled override instead. The disableRequestLogging top-level option will be removed in `fastify@6`.
+@autopod/daemon:test: (node:96056) [FSTDEP023] FastifyDeprecation: disableRequestLogging option is deprecated. Use the logController option with disableRequestLogging or isLogDisabled override instead. The disableRequestLogging top-level option will be removed in `fastify@6`.
+@autopod/daemon:test: {"level":30,"time":1788806293047,"pid":96056,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"test-app","msg":"Profile created"}
+@autopod/daemon:test: (node:837) [FSTDEP023] FastifyDeprecation: disableRequestLogging option is deprecated. Use the logController option with disableRequestLogging or isLogDisabled override instead. The disableRequestLogging top-level option will be removed in `fastify@6`.
+@autopod/daemon:test: {"level":30,"time":1788806293067,"pid":837,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"test-app","msg":"Profile created"}
+@autopod/daemon:test: (node:1136) [FSTDEP023] FastifyDeprecation: disableRequestLogging option is deprecated. Use the logController option with disableRequestLogging or isLogDisabled override instead. The disableRequestLogging top-level option will be removed in `fastify@6`.
+@autopod/daemon:test: (node:96056) [FSTDEP023] FastifyDeprecation: disableRequestLogging option is deprecated. Use the logController option with disableRequestLogging or isLogDisabled override instead. The disableRequestLogging top-level option will be removed in `fastify@6`.
+@autopod/daemon:test: {"level":30,"time":1788806293120,"pid":96056,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"test-app","msg":"Profile created"}
+@autopod/daemon:test: {"level":30,"time":1788806293121,"pid":96056,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"workspace-default","msg":"Profile created"}
+@autopod/daemon:test: (node:1136) [FSTDEP023] FastifyDeprecation: disableRequestLogging option is deprecated. Use the logController option with disableRequestLogging or isLogDisabled override instead. The disableRequestLogging top-level option will be removed in `fastify@6`.
+@autopod/daemon:test: (node:837) [FSTDEP023] FastifyDeprecation: disableRequestLogging option is deprecated. Use the logController option with disableRequestLogging or isLogDisabled override instead. The disableRequestLogging top-level option will be removed in `fastify@6`.
+@autopod/daemon:test: (node:96056) [FSTDEP023] FastifyDeprecation: disableRequestLogging option is deprecated. Use the logController option with disableRequestLogging or isLogDisabled override instead. The disableRequestLogging top-level option will be removed in `fastify@6`.
+@autopod/daemon:test: {"level":30,"time":1788806293192,"pid":837,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"test-app","msg":"Profile created"}
+@autopod/daemon:test: (node:1136) [FSTDEP023] FastifyDeprecation: disableRequestLogging option is deprecated. Use the logController option with disableRequestLogging or isLogDisabled override instead. The disableRequestLogging top-level option will be removed in `fastify@6`.
+@autopod/daemon:test:  ✓ src/profiles/profile-store.test.ts (78 tests) 6075ms
+@autopod/daemon:test: {"level":30,"time":1788806287359,"pid":96055,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"my-app","msg":"Profile created"}
+@autopod/daemon:test: {"level":30,"time":1788806287458,"pid":96055,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"my-app","msg":"Profile created"}
+@autopod/daemon:test: {"level":30,"time":1788806287554,"pid":96055,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"parent","msg":"Profile created"}
+@autopod/daemon:test: {"level":30,"time":1788806287554,"pid":96055,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"child","msg":"Profile created"}
+@autopod/daemon:test: {"level":30,"time":1788806287705,"pid":96055,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"my-app","msg":"Profile created"}
+@autopod/daemon:test: {"level":30,"time":1788806287791,"pid":96055,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"my-app","msg":"Profile created"}
+@autopod/daemon:test: {"level":30,"time":1788806287853,"pid":96055,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"my-app","msg":"Profile created"}
+@autopod/daemon:test: {"level":30,"time":1788806287981,"pid":96055,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"my-app","msg":"Profile created"}
+@autopod/daemon:test: {"level":30,"time":1788806288148,"pid":96055,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"parent","msg":"Profile created"}
+@autopod/daemon:test: {"level":30,"time":1788806288148,"pid":96055,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"child","msg":"Profile created"}
+@autopod/daemon:test: {"level":30,"time":1788806288233,"pid":96055,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"parent","msg":"Profile created"}
+@autopod/daemon:test: {"level":30,"time":1788806288233,"pid":96055,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"child","msg":"Profile created"}
+@autopod/daemon:test: {"level":30,"time":1788806288352,"pid":96055,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"my-app","msg":"Profile created"}
+@autopod/daemon:test: {"level":30,"time":1788806288435,"pid":96055,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"my-app","msg":"Profile created"}
+@autopod/daemon:test: {"level":30,"time":1788806288508,"pid":96055,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"parent","msg":"Profile created"}
+@autopod/daemon:test: {"level":30,"time":1788806288508,"pid":96055,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"child","msg":"Profile created"}
+@autopod/daemon:test: {"level":30,"time":1788806288745,"pid":96055,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"parent","msg":"Profile created"}
+@autopod/daemon:test: {"level":30,"time":1788806288745,"pid":96055,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"child","msg":"Profile created"}
+@autopod/daemon:test: {"level":30,"time":1788806288806,"pid":96055,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"parent","msg":"Profile created"}
+@autopod/daemon:test: {"level":30,"time":1788806288807,"pid":96055,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"child","msg":"Profile created"}
+@autopod/daemon:test: {"level":30,"time":1788806288910,"pid":96055,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"app-a","msg":"Profile created"}
+@autopod/daemon:test: {"level":30,"time":1788806288910,"pid":96055,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"app-b","msg":"Profile created"}
+@autopod/daemon:test: {"level":30,"time":1788806288983,"pid":96055,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"parent","msg":"Profile created"}
+@autopod/daemon:test: {"level":30,"time":1788806288984,"pid":96055,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"child","msg":"Profile created"}
+@autopod/daemon:test: {"level":30,"time":1788806289060,"pid":96055,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"my-app","msg":"Profile created"}
+@autopod/daemon:test: {"level":30,"time":1788806289060,"pid":96055,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"my-app","fields":["reasoningEffort"],"msg":"Profile updated"}
+@autopod/daemon:test: {"level":30,"time":1788806289061,"pid":96055,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"parent","msg":"Profile created"}
+@autopod/daemon:test: {"level":30,"time":1788806289061,"pid":96055,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"child","msg":"Profile created"}
+@autopod/daemon:test: {"level":30,"time":1788806289061,"pid":96055,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"child","fields":["reasoningEffort"],"msg":"Profile updated"}
+@autopod/daemon:test: {"level":30,"time":1788806289137,"pid":96055,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"my-app","msg":"Profile created"}
+@autopod/daemon:test: {"level":30,"time":1788806289138,"pid":96055,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"my-app","fields":["buildCommand"],"msg":"Profile updated"}
+@autopod/daemon:test: {"level":30,"time":1788806289259,"pid":96055,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"my-app","msg":"Profile created"}
+@autopod/daemon:test: {"level":30,"time":1788806289259,"pid":96055,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"my-app","fields":["buildCommand"],"msg":"Profile updated"}
+@autopod/daemon:test: {"level":30,"time":1788806289464,"pid":96055,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"my-app","msg":"Profile created"}
+@autopod/daemon:test: {"level":30,"time":1788806289465,"pid":96055,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"my-app","fields":["buildCommand"],"msg":"Profile updated"}
+@autopod/daemon:test: {"level":30,"time":1788806289536,"pid":96055,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"my-app","msg":"Profile created"}
+@autopod/daemon:test: {"level":30,"time":1788806289537,"pid":96055,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"my-app","fields":["agentDonePrompt"],"msg":"Profile updated"}
+@autopod/daemon:test: {"level":30,"time":1788806289537,"pid":96055,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"my-app","fields":["agentDonePrompt"],"msg":"Profile updated"}
+@autopod/daemon:test: {"level":30,"time":1788806289625,"pid":96055,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"my-app","msg":"Profile created"}
+@autopod/daemon:test: {"level":30,"time":1788806289751,"pid":96055,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"my-app","msg":"Profile created"}
+@autopod/daemon:test: {"level":30,"time":1788806289819,"pid":96055,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"my-app","msg":"Profile created"}
+@autopod/daemon:test: {"level":30,"time":1788806289819,"pid":96055,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"my-app","fields":["codeIntelligence"],"msg":"Profile updated"}
+@autopod/daemon:test: {"level":30,"time":1788806289881,"pid":96055,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"my-app","msg":"Profile created"}
+@autopod/daemon:test: {"level":30,"time":1788806289882,"pid":96055,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"my-app","fields":["codeIntelligence"],"msg":"Profile updated"}
+@autopod/daemon:test: {"level":30,"time":1788806289952,"pid":96055,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"my-app","msg":"Profile created"}
+@autopod/daemon:test: {"level":30,"time":1788806289954,"pid":96055,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"my-app","fields":["reviewerModel"],"msg":"Profile updated"}
+@autopod/daemon:test: {"level":30,"time":1788806290034,"pid":96055,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"my-app","msg":"Profile created"}
+@autopod/daemon:test: {"level":30,"time":1788806290035,"pid":96055,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"my-app","fields":["validationSetupCommand"],"msg":"Profile updated"}
+@autopod/daemon:test: {"level":30,"time":1788806290035,"pid":96055,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"my-app","fields":["validationSetupCommand"],"msg":"Profile updated"}
+@autopod/daemon:test: {"level":30,"time":1788806290107,"pid":96055,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"my-app","msg":"Profile created"}
+@autopod/daemon:test: {"level":30,"time":1788806290190,"pid":96055,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"my-app","msg":"Profile created"}
+@autopod/daemon:test: {"level":30,"time":1788806290191,"pid":96055,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"my-app","fields":["skipValidationPhases"],"msg":"Profile updated"}
+@autopod/daemon:test: {"level":30,"time":1788806290191,"pid":96055,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"my-app","fields":["skipValidationPhases"],"msg":"Profile updated"}
+@autopod/daemon:test: {"level":30,"time":1788806290259,"pid":96055,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"my-app","msg":"Profile created"}
+@autopod/daemon:test: {"level":30,"time":1788806290259,"pid":96055,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"my-app","fields":["pod"],"msg":"Profile updated"}
+@autopod/daemon:test: {"level":30,"time":1788806290259,"pid":96055,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"my-app","fields":["pod"],"msg":"Profile updated"}
+@autopod/daemon:test: {"level":30,"time":1788806290319,"pid":96055,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"my-app","msg":"Profile created"}
+@autopod/daemon:test: {"level":30,"time":1788806290378,"pid":96055,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"my-app","msg":"Profile created"}
+@autopod/daemon:test: {"level":30,"time":1788806290449,"pid":96055,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"my-app","msg":"Profile created"}
+@autopod/daemon:test: {"level":30,"time":1788806290449,"pid":96055,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"my-app","fields":["mergePollIntervalSec"],"msg":"Profile updated"}
+@autopod/daemon:test: {"level":30,"time":1788806290522,"pid":96055,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"my-app","msg":"Profile created"}
+@autopod/daemon:test: {"level":30,"time":1788806290522,"pid":96055,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"my-app","fields":["pod"],"msg":"Profile updated"}
+@autopod/daemon:test: {"level":30,"time":1788806290522,"pid":96055,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"my-app","fields":["pod"],"msg":"Profile updated"}
+@autopod/daemon:test: {"level":30,"time":1788806290612,"pid":96055,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"parent","msg":"Profile created"}
+@autopod/daemon:test: {"level":30,"time":1788806290612,"pid":96055,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"child","msg":"Profile created"}
+@autopod/daemon:test: {"level":30,"time":1788806290613,"pid":96055,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"child","fields":["hasWebUi","issueWatcherEnabled","trustedSource"],"msg":"Profile updated"}
+@autopod/daemon:test: {"level":30,"time":1788806290704,"pid":96055,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"parent","msg":"Profile created"}
+@autopod/daemon:test: {"level":30,"time":1788806290705,"pid":96055,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"child","msg":"Profile created"}
+@autopod/daemon:test: {"level":30,"time":1788806290705,"pid":96055,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"child","fields":["customInstructions"],"msg":"Profile updated"}
+@autopod/daemon:test: {"level":30,"time":1788806290764,"pid":96055,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"parent","msg":"Profile created"}
+@autopod/daemon:test: {"level":30,"time":1788806290764,"pid":96055,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"child","msg":"Profile created"}
+@autopod/daemon:test: {"level":30,"time":1788806290764,"pid":96055,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"child","fields":["customInstructions"],"msg":"Profile updated"}
+@autopod/daemon:test: {"level":30,"time":1788806290834,"pid":96055,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"my-app","msg":"Profile created"}
+@autopod/daemon:test: {"level":30,"time":1788806290834,"pid":96055,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"my-app","tag":"autopod/my-app:latest","builtAt":"2026-04-27T10:00:00.000Z","msg":"Profile warm image updated"}
+@autopod/daemon:test: {"level":30,"time":1788806290928,"pid":96055,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"my-app","msg":"Profile created"}
+@autopod/daemon:test: {"level":30,"time":1788806290929,"pid":96055,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"my-app","tag":"autopod/my-app:latest","builtAt":"2026-09-07T18:38:10.928Z","msg":"Profile warm image updated"}
+@autopod/daemon:test: {"level":30,"time":1788806291074,"pid":96055,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"my-app","msg":"Profile created"}
+@autopod/daemon:test: {"level":30,"time":1788806291074,"pid":96055,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"my-app","msg":"Profile deleted"}
+@autopod/daemon:test: {"level":30,"time":1788806291213,"pid":96055,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"my-app","msg":"Profile created"}
+@autopod/daemon:test: {"level":30,"time":1788806291286,"pid":96055,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"my-app","msg":"Profile created"}
+@autopod/daemon:test: {"level":30,"time":1788806291286,"pid":96055,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"my-app","msg":"Profile deleted"}
+@autopod/daemon:test: {"level":30,"time":1788806291350,"pid":96055,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"parent","msg":"Profile created"}
+@autopod/daemon:test: {"level":30,"time":1788806291350,"pid":96055,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"child","msg":"Profile created"}
+@autopod/daemon:test: {"level":30,"time":1788806291402,"pid":96055,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"my-app","msg":"Profile created"}
+@autopod/daemon:test: {"level":30,"time":1788806291533,"pid":96055,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"my-app","msg":"Profile created"}
+@autopod/daemon:test: {"level":30,"time":1788806291595,"pid":96055,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"my-app","msg":"Profile created"}
+@autopod/daemon:test: {"level":30,"time":1788806291655,"pid":96055,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"my-app","msg":"Profile created"}
+@autopod/daemon:test: {"level":30,"time":1788806291712,"pid":96055,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"my-app","msg":"Profile created"}
+@autopod/daemon:test: {"level":30,"time":1788806291787,"pid":96055,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"my-app","msg":"Profile created"}
+@autopod/daemon:test: {"level":30,"time":1788806291841,"pid":96055,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"my-app","msg":"Profile created"}
+@autopod/daemon:test: {"level":30,"time":1788806291899,"pid":96055,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"my-app","msg":"Profile created"}
+@autopod/daemon:test: {"level":30,"time":1788806291965,"pid":96055,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"my-app","msg":"Profile created"}
+@autopod/daemon:test: {"level":30,"time":1788806292041,"pid":96055,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"my-app","msg":"Profile created"}
+@autopod/daemon:test: {"level":30,"time":1788806292123,"pid":96055,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"my-app","msg":"Profile created"}
+@autopod/daemon:test: {"level":30,"time":1788806292123,"pid":96055,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"my-app","fields":["buildEnv"],"msg":"Profile updated"}
+@autopod/daemon:test: {"level":30,"time":1788806292123,"pid":96055,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"my-app","fields":["buildEnv"],"msg":"Profile updated"}
+@autopod/daemon:test: {"level":30,"time":1788806292207,"pid":96055,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"my-app","msg":"Profile created"}
+@autopod/daemon:test: {"level":30,"time":1788806292208,"pid":96055,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"my-app","fields":["privateRegistries","registryPat"],"msg":"Profile updated"}
+@autopod/daemon:test: {"level":30,"time":1788806292277,"pid":96055,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"my-app","msg":"Profile created"}
+@autopod/daemon:test: {"level":30,"time":1788806292277,"pid":96055,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"my-app","fields":["githubPatExpiresAt","registryPatExpiresAt"],"msg":"Profile updated"}
+@autopod/daemon:test: {"level":30,"time":1788806292277,"pid":96055,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"my-app","fields":["githubPatExpiresAt","registryPatExpiresAt"],"msg":"Profile updated"}
+@autopod/daemon:test: {"level":30,"time":1788806292347,"pid":96055,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"grandparent","msg":"Profile created"}
+@autopod/daemon:test: {"level":30,"time":1788806292347,"pid":96055,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"parent","msg":"Profile created"}
+@autopod/daemon:test: {"level":30,"time":1788806292348,"pid":96055,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"child","msg":"Profile created"}
+@autopod/daemon:test: {"level":30,"time":1788806292409,"pid":96055,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"owner","msg":"Profile created"}
+@autopod/daemon:test: {"level":30,"time":1788806292470,"pid":96055,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"parent","msg":"Profile created"}
+@autopod/daemon:test: {"level":30,"time":1788806292470,"pid":96055,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"child","msg":"Profile created"}
+@autopod/daemon:test: {"level":30,"time":1788806292570,"pid":96055,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"base","msg":"Profile created"}
+@autopod/daemon:test: {"level":30,"time":1788806292570,"pid":96055,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"middle","msg":"Profile created"}
+@autopod/daemon:test: {"level":30,"time":1788806292570,"pid":96055,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"leaf","msg":"Profile created"}
+@autopod/daemon:test: {"level":30,"time":1788806292647,"pid":96055,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"base","msg":"Profile created"}
+@autopod/daemon:test: {"level":30,"time":1788806292648,"pid":96055,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"middle","msg":"Profile created"}
+@autopod/daemon:test: {"level":30,"time":1788806292648,"pid":96055,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"leaf","msg":"Profile created"}
+@autopod/daemon:test: {"level":30,"time":1788806292710,"pid":96055,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"my-app","msg":"Profile created"}
+@autopod/daemon:test: {"level":30,"time":1788806292711,"pid":96055,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"my-app","fields":["providerAccountId"],"msg":"Profile updated"}
+@autopod/daemon:test: {"level":30,"time":1788806292711,"pid":96055,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"my-app","fields":["providerAccountId"],"msg":"Profile updated"}
+@autopod/daemon:test: {"level":30,"time":1788806292782,"pid":96055,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"base","msg":"Profile created"}
+@autopod/daemon:test: {"level":30,"time":1788806292783,"pid":96055,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"middle","msg":"Profile created"}
+@autopod/daemon:test: {"level":30,"time":1788806292783,"pid":96055,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"leaf","msg":"Profile created"}
+@autopod/daemon:test: {"level":30,"time":1788806292852,"pid":96055,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"base","msg":"Profile created"}
+@autopod/daemon:test: {"level":30,"time":1788806292852,"pid":96055,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"middle","msg":"Profile created"}
+@autopod/daemon:test: {"level":30,"time":1788806292853,"pid":96055,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"leaf","msg":"Profile created"}
+@autopod/daemon:test: {"level":30,"time":1788806292941,"pid":96055,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"my-app","msg":"Profile created"}
+@autopod/daemon:test: {"level":30,"time":1788806293036,"pid":96055,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"my-app","msg":"Profile created"}
+@autopod/daemon:test: {"level":30,"time":1788806293100,"pid":96055,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"my-app","msg":"Profile created"}
+@autopod/daemon:test: {"level":30,"time":1788806293158,"pid":96055,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"base","msg":"Profile created"}
+@autopod/daemon:test: {"level":30,"time":1788806293158,"pid":96055,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"middle","msg":"Profile created"}
+@autopod/daemon:test: {"level":30,"time":1788806293158,"pid":96055,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"leaf","msg":"Profile created"}
+@autopod/daemon:test: {"level":30,"time":1788806293235,"pid":96055,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"my-app","msg":"Profile created"}
+@autopod/daemon:test: {"level":30,"time":1788806293235,"pid":96055,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"my-app","fields":["providerFailover"],"msg":"Profile updated"}
+@autopod/daemon:test: {"level":30,"time":1788806293235,"pid":96055,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"my-app","fields":["providerFailover"],"msg":"Profile updated"}
+@autopod/daemon:test: (node:837) [FSTDEP023] FastifyDeprecation: disableRequestLogging option is deprecated. Use the logController option with disableRequestLogging or isLogDisabled override instead. The disableRequestLogging top-level option will be removed in `fastify@6`.
+@autopod/daemon:test: (node:96056) [FSTDEP023] FastifyDeprecation: disableRequestLogging option is deprecated. Use the logController option with disableRequestLogging or isLogDisabled override instead. The disableRequestLogging top-level option will be removed in `fastify@6`.
+@autopod/daemon:test: {"level":30,"time":1788806293270,"pid":837,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"test-app","msg":"Profile created"}
+@autopod/daemon:test: (node:1136) [FSTDEP023] FastifyDeprecation: disableRequestLogging option is deprecated. Use the logController option with disableRequestLogging or isLogDisabled override instead. The disableRequestLogging top-level option will be removed in `fastify@6`.
+@autopod/daemon:test: (node:96056) [FSTDEP023] FastifyDeprecation: disableRequestLogging option is deprecated. Use the logController option with disableRequestLogging or isLogDisabled override instead. The disableRequestLogging top-level option will be removed in `fastify@6`.
+@autopod/daemon:test: (node:837) [FSTDEP023] FastifyDeprecation: disableRequestLogging option is deprecated. Use the logController option with disableRequestLogging or isLogDisabled override instead. The disableRequestLogging top-level option will be removed in `fastify@6`.
+@autopod/daemon:test: {"level":30,"time":1788806293346,"pid":837,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"test-app","msg":"Profile created"}
+@autopod/daemon:test: (node:1136) [FSTDEP023] FastifyDeprecation: disableRequestLogging option is deprecated. Use the logController option with disableRequestLogging or isLogDisabled override instead. The disableRequestLogging top-level option will be removed in `fastify@6`.
+@autopod/daemon:test: (node:96056) [FSTDEP023] FastifyDeprecation: disableRequestLogging option is deprecated. Use the logController option with disableRequestLogging or isLogDisabled override instead. The disableRequestLogging top-level option will be removed in `fastify@6`.
+@autopod/daemon:test: (node:1136) [FSTDEP023] FastifyDeprecation: disableRequestLogging option is deprecated. Use the logController option with disableRequestLogging or isLogDisabled override instead. The disableRequestLogging top-level option will be removed in `fastify@6`.
+@autopod/daemon:test: (node:837) [FSTDEP023] FastifyDeprecation: disableRequestLogging option is deprecated. Use the logController option with disableRequestLogging or isLogDisabled override instead. The disableRequestLogging top-level option will be removed in `fastify@6`.
+@autopod/daemon:test: {"level":30,"time":1788806293475,"pid":837,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"test-app","msg":"Profile created"}
+@autopod/daemon:test: (node:96056) [FSTDEP023] FastifyDeprecation: disableRequestLogging option is deprecated. Use the logController option with disableRequestLogging or isLogDisabled override instead. The disableRequestLogging top-level option will be removed in `fastify@6`.
+@autopod/daemon:test: (node:1136) [FSTDEP023] FastifyDeprecation: disableRequestLogging option is deprecated. Use the logController option with disableRequestLogging or isLogDisabled override instead. The disableRequestLogging top-level option will be removed in `fastify@6`.
+@autopod/daemon:test: (node:837) [FSTDEP023] FastifyDeprecation: disableRequestLogging option is deprecated. Use the logController option with disableRequestLogging or isLogDisabled override instead. The disableRequestLogging top-level option will be removed in `fastify@6`.
+@autopod/daemon:test: {"level":30,"time":1788806293561,"pid":837,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"test-app","msg":"Profile created"}
+@autopod/daemon:test: (node:96056) [FSTDEP023] FastifyDeprecation: disableRequestLogging option is deprecated. Use the logController option with disableRequestLogging or isLogDisabled override instead. The disableRequestLogging top-level option will be removed in `fastify@6`.
+@autopod/daemon:test: (node:1136) [FSTDEP023] FastifyDeprecation: disableRequestLogging option is deprecated. Use the logController option with disableRequestLogging or isLogDisabled override instead. The disableRequestLogging top-level option will be removed in `fastify@6`.
+@autopod/daemon:test: (node:837) [FSTDEP023] FastifyDeprecation: disableRequestLogging option is deprecated. Use the logController option with disableRequestLogging or isLogDisabled override instead. The disableRequestLogging top-level option will be removed in `fastify@6`.
+@autopod/daemon:test: (node:96056) [FSTDEP023] FastifyDeprecation: disableRequestLogging option is deprecated. Use the logController option with disableRequestLogging or isLogDisabled override instead. The disableRequestLogging top-level option will be removed in `fastify@6`.
+@autopod/daemon:test: {"level":30,"time":1788806293633,"pid":837,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"test-app","msg":"Profile created"}
+@autopod/daemon:test:  ✓ src/integration.test.ts (56 tests) 4717ms
+@autopod/daemon:test: (node:1136) [FSTDEP023] FastifyDeprecation: disableRequestLogging option is deprecated. Use the logController option with disableRequestLogging or isLogDisabled override instead. The disableRequestLogging top-level option will be removed in `fastify@6`.
+@autopod/daemon:test: {"level":30,"time":1788806293676,"pid":1136,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"test-profile","msg":"Profile created"}
+@autopod/daemon:test: (node:837) [FSTDEP023] FastifyDeprecation: disableRequestLogging option is deprecated. Use the logController option with disableRequestLogging or isLogDisabled override instead. The disableRequestLogging top-level option will be removed in `fastify@6`.
+@autopod/daemon:test: {"level":30,"time":1788806293702,"pid":837,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"test-app","msg":"Profile created"}
+@autopod/daemon:test: (node:1136) [FSTDEP023] FastifyDeprecation: disableRequestLogging option is deprecated. Use the logController option with disableRequestLogging or isLogDisabled override instead. The disableRequestLogging top-level option will be removed in `fastify@6`.
+@autopod/daemon:test: {"level":30,"time":1788806293751,"pid":1136,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"test-profile","msg":"Profile created"}
+@autopod/daemon:test: (node:837) [FSTDEP023] FastifyDeprecation: disableRequestLogging option is deprecated. Use the logController option with disableRequestLogging or isLogDisabled override instead. The disableRequestLogging top-level option will be removed in `fastify@6`.
+@autopod/daemon:test: {"level":30,"time":1788806293767,"pid":837,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"test-app","msg":"Profile created"}
+@autopod/daemon:test: (node:1136) [FSTDEP023] FastifyDeprecation: disableRequestLogging option is deprecated. Use the logController option with disableRequestLogging or isLogDisabled override instead. The disableRequestLogging top-level option will be removed in `fastify@6`.
+@autopod/daemon:test: {"level":30,"time":1788806293830,"pid":1136,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"test-profile","msg":"Profile created"}
+@autopod/daemon:test: (node:837) [FSTDEP023] FastifyDeprecation: disableRequestLogging option is deprecated. Use the logController option with disableRequestLogging or isLogDisabled override instead. The disableRequestLogging top-level option will be removed in `fastify@6`.
+@autopod/daemon:test: {"level":30,"time":1788806293858,"pid":837,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"test-app","msg":"Profile created"}
+@autopod/daemon:test: (node:1136) [FSTDEP023] FastifyDeprecation: disableRequestLogging option is deprecated. Use the logController option with disableRequestLogging or isLogDisabled override instead. The disableRequestLogging top-level option will be removed in `fastify@6`.
+@autopod/daemon:test: {"level":30,"time":1788806293921,"pid":1136,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"test-profile","msg":"Profile created"}
+@autopod/daemon:test: (node:837) [FSTDEP023] FastifyDeprecation: disableRequestLogging option is deprecated. Use the logController option with disableRequestLogging or isLogDisabled override instead. The disableRequestLogging top-level option will be removed in `fastify@6`.
+@autopod/daemon:test: {"level":30,"time":1788806293936,"pid":837,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"test-app","msg":"Profile created"}
+@autopod/daemon:test: (node:1136) [FSTDEP023] FastifyDeprecation: disableRequestLogging option is deprecated. Use the logController option with disableRequestLogging or isLogDisabled override instead. The disableRequestLogging top-level option will be removed in `fastify@6`.
+@autopod/daemon:test: {"level":30,"time":1788806294004,"pid":1136,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"test-profile","msg":"Profile created"}
+@autopod/daemon:test: (node:837) [FSTDEP023] FastifyDeprecation: disableRequestLogging option is deprecated. Use the logController option with disableRequestLogging or isLogDisabled override instead. The disableRequestLogging top-level option will be removed in `fastify@6`.
+@autopod/daemon:test: {"level":30,"time":1788806294052,"pid":837,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"test-app","msg":"Profile created"}
+@autopod/daemon:test: (node:1136) [FSTDEP023] FastifyDeprecation: disableRequestLogging option is deprecated. Use the logController option with disableRequestLogging or isLogDisabled override instead. The disableRequestLogging top-level option will be removed in `fastify@6`.
+@autopod/daemon:test: {"level":30,"time":1788806294093,"pid":1136,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"test-profile","msg":"Profile created"}
+@autopod/daemon:test: (node:837) [FSTDEP023] FastifyDeprecation: disableRequestLogging option is deprecated. Use the logController option with disableRequestLogging or isLogDisabled override instead. The disableRequestLogging top-level option will be removed in `fastify@6`.
+@autopod/daemon:test: {"level":30,"time":1788806294118,"pid":837,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"test-app","msg":"Profile created"}
+@autopod/daemon:test: (node:1136) [FSTDEP023] FastifyDeprecation: disableRequestLogging option is deprecated. Use the logController option with disableRequestLogging or isLogDisabled override instead. The disableRequestLogging top-level option will be removed in `fastify@6`.
+@autopod/daemon:test: {"level":30,"time":1788806294172,"pid":1136,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"test-profile","msg":"Profile created"}
+@autopod/daemon:test: (node:837) [FSTDEP023] FastifyDeprecation: disableRequestLogging option is deprecated. Use the logController option with disableRequestLogging or isLogDisabled override instead. The disableRequestLogging top-level option will be removed in `fastify@6`.
+@autopod/daemon:test: {"level":30,"time":1788806294199,"pid":837,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"test-app","msg":"Profile created"}
+@autopod/daemon:test: (node:1136) [FSTDEP023] FastifyDeprecation: disableRequestLogging option is deprecated. Use the logController option with disableRequestLogging or isLogDisabled override instead. The disableRequestLogging top-level option will be removed in `fastify@6`.
+@autopod/daemon:test: {"level":30,"time":1788806294246,"pid":1136,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"test-profile","msg":"Profile created"}
+@autopod/daemon:test: (node:837) [FSTDEP023] FastifyDeprecation: disableRequestLogging option is deprecated. Use the logController option with disableRequestLogging or isLogDisabled override instead. The disableRequestLogging top-level option will be removed in `fastify@6`.
+@autopod/daemon:test: {"level":30,"time":1788806294276,"pid":837,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"test-app","msg":"Profile created"}
+@autopod/daemon:test: (node:1136) [FSTDEP023] FastifyDeprecation: disableRequestLogging option is deprecated. Use the logController option with disableRequestLogging or isLogDisabled override instead. The disableRequestLogging top-level option will be removed in `fastify@6`.
+@autopod/daemon:test: {"level":30,"time":1788806294319,"pid":1136,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"test-profile","msg":"Profile created"}
+@autopod/daemon:test: (node:837) [FSTDEP023] FastifyDeprecation: disableRequestLogging option is deprecated. Use the logController option with disableRequestLogging or isLogDisabled override instead. The disableRequestLogging top-level option will be removed in `fastify@6`.
+@autopod/daemon:test: {"level":30,"time":1788806294354,"pid":837,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"test-app","msg":"Profile created"}
+@autopod/daemon:test: (node:1136) [FSTDEP023] FastifyDeprecation: disableRequestLogging option is deprecated. Use the logController option with disableRequestLogging or isLogDisabled override instead. The disableRequestLogging top-level option will be removed in `fastify@6`.
+@autopod/daemon:test: {"level":30,"time":1788806294391,"pid":1136,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"test-profile","msg":"Profile created"}
+@autopod/daemon:test: (node:837) [FSTDEP023] FastifyDeprecation: disableRequestLogging option is deprecated. Use the logController option with disableRequestLogging or isLogDisabled override instead. The disableRequestLogging top-level option will be removed in `fastify@6`.
+@autopod/daemon:test: {"level":30,"time":1788806294426,"pid":837,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"test-app","msg":"Profile created"}
+@autopod/daemon:test: (node:1136) [FSTDEP023] FastifyDeprecation: disableRequestLogging option is deprecated. Use the logController option with disableRequestLogging or isLogDisabled override instead. The disableRequestLogging top-level option will be removed in `fastify@6`.
+@autopod/daemon:test: {"level":30,"time":1788806294462,"pid":1136,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"test-profile","msg":"Profile created"}
+@autopod/daemon:test: (node:1136) [FSTDEP023] FastifyDeprecation: disableRequestLogging option is deprecated. Use the logController option with disableRequestLogging or isLogDisabled override instead. The disableRequestLogging top-level option will be removed in `fastify@6`.
+@autopod/daemon:test: {"level":30,"time":1788806294537,"pid":1136,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"test-profile","msg":"Profile created"}
+@autopod/daemon:test: (node:837) [FSTDEP023] FastifyDeprecation: disableRequestLogging option is deprecated. Use the logController option with disableRequestLogging or isLogDisabled override instead. The disableRequestLogging top-level option will be removed in `fastify@6`.
+@autopod/daemon:test: {"level":30,"time":1788806294560,"pid":837,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"test-app","msg":"Profile created"}
+@autopod/daemon:test: (node:1136) [FSTDEP023] FastifyDeprecation: disableRequestLogging option is deprecated. Use the logController option with disableRequestLogging or isLogDisabled override instead. The disableRequestLogging top-level option will be removed in `fastify@6`.
+@autopod/daemon:test: {"level":30,"time":1788806294615,"pid":1136,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"test-profile","msg":"Profile created"}
+@autopod/daemon:test: (node:837) [FSTDEP023] FastifyDeprecation: disableRequestLogging option is deprecated. Use the logController option with disableRequestLogging or isLogDisabled override instead. The disableRequestLogging top-level option will be removed in `fastify@6`.
+@autopod/daemon:test: {"level":30,"time":1788806294642,"pid":837,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"test-app","msg":"Profile created"}
+@autopod/daemon:test: (node:1136) [FSTDEP023] FastifyDeprecation: disableRequestLogging option is deprecated. Use the logController option with disableRequestLogging or isLogDisabled override instead. The disableRequestLogging top-level option will be removed in `fastify@6`.
+@autopod/daemon:test: {"level":30,"time":1788806294691,"pid":1136,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"test-profile","msg":"Profile created"}
+@autopod/daemon:test: (node:837) [FSTDEP023] FastifyDeprecation: disableRequestLogging option is deprecated. Use the logController option with disableRequestLogging or isLogDisabled override instead. The disableRequestLogging top-level option will be removed in `fastify@6`.
+@autopod/daemon:test: {"level":30,"time":1788806294719,"pid":837,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"test-app","msg":"Profile created"}
+@autopod/daemon:test: (node:1136) [FSTDEP023] FastifyDeprecation: disableRequestLogging option is deprecated. Use the logController option with disableRequestLogging or isLogDisabled override instead. The disableRequestLogging top-level option will be removed in `fastify@6`.
+@autopod/daemon:test: {"level":30,"time":1788806294766,"pid":1136,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"test-profile","msg":"Profile created"}
+@autopod/daemon:test: (node:837) [FSTDEP023] FastifyDeprecation: disableRequestLogging option is deprecated. Use the logController option with disableRequestLogging or isLogDisabled override instead. The disableRequestLogging top-level option will be removed in `fastify@6`.
+@autopod/daemon:test: {"level":30,"time":1788806294796,"pid":837,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"test-app","msg":"Profile created"}
+@autopod/daemon:test: (node:1136) [FSTDEP023] FastifyDeprecation: disableRequestLogging option is deprecated. Use the logController option with disableRequestLogging or isLogDisabled override instead. The disableRequestLogging top-level option will be removed in `fastify@6`.
+@autopod/daemon:test: {"level":30,"time":1788806294841,"pid":1136,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"test-profile","msg":"Profile created"}
+@autopod/daemon:test: (node:837) [FSTDEP023] FastifyDeprecation: disableRequestLogging option is deprecated. Use the logController option with disableRequestLogging or isLogDisabled override instead. The disableRequestLogging top-level option will be removed in `fastify@6`.
+@autopod/daemon:test: {"level":30,"time":1788806294873,"pid":837,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"test-app","msg":"Profile created"}
+@autopod/daemon:test: (node:1136) [FSTDEP023] FastifyDeprecation: disableRequestLogging option is deprecated. Use the logController option with disableRequestLogging or isLogDisabled override instead. The disableRequestLogging top-level option will be removed in `fastify@6`.
+@autopod/daemon:test: {"level":30,"time":1788806294953,"pid":1136,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"test-profile","msg":"Profile created"}
+@autopod/daemon:test: (node:837) [FSTDEP023] FastifyDeprecation: disableRequestLogging option is deprecated. Use the logController option with disableRequestLogging or isLogDisabled override instead. The disableRequestLogging top-level option will be removed in `fastify@6`.
+@autopod/daemon:test: {"level":30,"time":1788806294973,"pid":837,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"test-app","msg":"Profile created"}
+@autopod/daemon:test: (node:1136) [FSTDEP023] FastifyDeprecation: disableRequestLogging option is deprecated. Use the logController option with disableRequestLogging or isLogDisabled override instead. The disableRequestLogging top-level option will be removed in `fastify@6`.
+@autopod/daemon:test: {"level":30,"time":1788806295026,"pid":1136,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"test-profile","msg":"Profile created"}
+@autopod/daemon:test: (node:837) [FSTDEP023] FastifyDeprecation: disableRequestLogging option is deprecated. Use the logController option with disableRequestLogging or isLogDisabled override instead. The disableRequestLogging top-level option will be removed in `fastify@6`.
+@autopod/daemon:test: {"level":30,"time":1788806295051,"pid":837,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"test-app","msg":"Profile created"}
+@autopod/daemon:test: (node:1136) [FSTDEP023] FastifyDeprecation: disableRequestLogging option is deprecated. Use the logController option with disableRequestLogging or isLogDisabled override instead. The disableRequestLogging top-level option will be removed in `fastify@6`.
+@autopod/daemon:test: {"level":30,"time":1788806295105,"pid":1136,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"test-profile","msg":"Profile created"}
+@autopod/daemon:test: (node:837) [FSTDEP023] FastifyDeprecation: disableRequestLogging option is deprecated. Use the logController option with disableRequestLogging or isLogDisabled override instead. The disableRequestLogging top-level option will be removed in `fastify@6`.
+@autopod/daemon:test: (node:1136) [FSTDEP023] FastifyDeprecation: disableRequestLogging option is deprecated. Use the logController option with disableRequestLogging or isLogDisabled override instead. The disableRequestLogging top-level option will be removed in `fastify@6`.
+@autopod/daemon:test: {"level":30,"time":1788806295186,"pid":1136,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"test-profile","msg":"Profile created"}
+@autopod/daemon:test: (node:837) [FSTDEP023] FastifyDeprecation: disableRequestLogging option is deprecated. Use the logController option with disableRequestLogging or isLogDisabled override instead. The disableRequestLogging top-level option will be removed in `fastify@6`.
+@autopod/daemon:test: {"level":30,"time":1788806295216,"pid":837,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"test-app","msg":"Profile created"}
+@autopod/daemon:test:  ✓ src/security/file-walker.test.ts (14 tests) 2673ms
+@autopod/daemon:test:      ✓ listDiffFiles returns the changed paths against a base ref  303ms
+@autopod/daemon:test:      ✓ resolveBaseRef returns null when nothing in the chain exists  554ms
+@autopod/daemon:test: (node:1136) [FSTDEP023] FastifyDeprecation: disableRequestLogging option is deprecated. Use the logController option with disableRequestLogging or isLogDisabled override instead. The disableRequestLogging top-level option will be removed in `fastify@6`.
+@autopod/daemon:test: {"level":30,"time":1788806295268,"pid":1136,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"test-profile","msg":"Profile created"}
+@autopod/daemon:test: (node:837) [FSTDEP023] FastifyDeprecation: disableRequestLogging option is deprecated. Use the logController option with disableRequestLogging or isLogDisabled override instead. The disableRequestLogging top-level option will be removed in `fastify@6`.
+@autopod/daemon:test: {"level":30,"time":1788806295287,"pid":837,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"test-app","msg":"Profile created"}
+@autopod/daemon:test: (node:1136) [FSTDEP023] FastifyDeprecation: disableRequestLogging option is deprecated. Use the logController option with disableRequestLogging or isLogDisabled override instead. The disableRequestLogging top-level option will be removed in `fastify@6`.
+@autopod/daemon:test: (node:837) [FSTDEP023] FastifyDeprecation: disableRequestLogging option is deprecated. Use the logController option with disableRequestLogging or isLogDisabled override instead. The disableRequestLogging top-level option will be removed in `fastify@6`.
+@autopod/daemon:test: {"level":30,"time":1788806295358,"pid":837,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"test-app","msg":"Profile created"}
+@autopod/daemon:test:  ✓ src/routes-extended.test.ts (48 tests) 4165ms
+@autopod/daemon:test: (node:1136) [FSTDEP023] FastifyDeprecation: disableRequestLogging option is deprecated. Use the logController option with disableRequestLogging or isLogDisabled override instead. The disableRequestLogging top-level option will be removed in `fastify@6`.
+@autopod/daemon:test: (node:1136) [FSTDEP023] FastifyDeprecation: disableRequestLogging option is deprecated. Use the logController option with disableRequestLogging or isLogDisabled override instead. The disableRequestLogging top-level option will be removed in `fastify@6`.
+@autopod/daemon:test: (node:1136) [FSTDEP023] FastifyDeprecation: disableRequestLogging option is deprecated. Use the logController option with disableRequestLogging or isLogDisabled override instead. The disableRequestLogging top-level option will be removed in `fastify@6`.
+@autopod/daemon:test: (node:1136) [FSTDEP023] FastifyDeprecation: disableRequestLogging option is deprecated. Use the logController option with disableRequestLogging or isLogDisabled override instead. The disableRequestLogging top-level option will be removed in `fastify@6`.
+@autopod/daemon:test: (node:1136) [FSTDEP023] FastifyDeprecation: disableRequestLogging option is deprecated. Use the logController option with disableRequestLogging or isLogDisabled override instead. The disableRequestLogging top-level option will be removed in `fastify@6`.
+@autopod/daemon:test: (node:1136) [FSTDEP023] FastifyDeprecation: disableRequestLogging option is deprecated. Use the logController option with disableRequestLogging or isLogDisabled override instead. The disableRequestLogging top-level option will be removed in `fastify@6`.
+@autopod/daemon:test: (node:1136) [FSTDEP023] FastifyDeprecation: disableRequestLogging option is deprecated. Use the logController option with disableRequestLogging or isLogDisabled override instead. The disableRequestLogging top-level option will be removed in `fastify@6`.
+@autopod/daemon:test: (node:1136) [FSTDEP023] FastifyDeprecation: disableRequestLogging option is deprecated. Use the logController option with disableRequestLogging or isLogDisabled override instead. The disableRequestLogging top-level option will be removed in `fastify@6`.
+@autopod/daemon:test: (node:1136) [FSTDEP023] FastifyDeprecation: disableRequestLogging option is deprecated. Use the logController option with disableRequestLogging or isLogDisabled override instead. The disableRequestLogging top-level option will be removed in `fastify@6`.
+@autopod/daemon:test: {"level":30,"time":1788806296108,"pid":1136,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"test-profile","msg":"Profile created"}
+@autopod/daemon:test:  ✓ src/scheduled-jobs/scan-collector.test.ts (6 tests) 3092ms
+@autopod/daemon:test:      ✓ freezes a strict time window, keeps an old branch empty, and rejects timestamps that would widen its delta  844ms
+@autopod/daemon:test:      ✓ persists the real Git report before judgment, deduplicates collection, and keeps interrupted judgment terminal  564ms
+@autopod/daemon:test:      ✓ skips bounded judgment for an actual empty delta and retains incomplete preparation failures  344ms
+@autopod/daemon:test:      ✓ reads only changed Git blobs, preserves stable redacted IDs, and reports unsupported dependencies as incomplete  689ms
+@autopod/daemon:test:      ✓ does not disguise a detector exception/null result as zero findings  370ms
+@autopod/daemon:test: (node:1136) [FSTDEP023] FastifyDeprecation: disableRequestLogging option is deprecated. Use the logController option with disableRequestLogging or isLogDisabled override instead. The disableRequestLogging top-level option will be removed in `fastify@6`.
+@autopod/daemon:test: {"level":30,"time":1788806296178,"pid":1136,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"test-profile","msg":"Profile created"}
+@autopod/daemon:test: (node:1136) [FSTDEP023] FastifyDeprecation: disableRequestLogging option is deprecated. Use the logController option with disableRequestLogging or isLogDisabled override instead. The disableRequestLogging top-level option will be removed in `fastify@6`.
+@autopod/daemon:test: {"level":30,"time":1788806296261,"pid":1136,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"test-profile","msg":"Profile created"}
+@autopod/daemon:test:  ✓ src/validation/local-validation-engine.test.ts (155 tests) 8565ms
+@autopod/daemon:test:      ✓ installs missing host package dependencies before browser-test fact commands  687ms
+@autopod/daemon:test:      ✓ installs host dependencies when node_modules exists but is incomplete  650ms
+@autopod/daemon:test:      ✓ does not download Playwright browsers during browser-test dependency prep  565ms
+@autopod/daemon:test:      ✓ prewarms the app-local Playwright browser before browser-test fact commands  482ms
+@autopod/daemon:test:      ✓ blocks browser-test facts as pending_human when app-local Playwright prewarm fails  310ms
+@autopod/daemon:test:      ✓ keeps initial semantic IDs stable when aggregate truncation changes stored text  1493ms
+@autopod/daemon:test:      ✓ closes prior findings across verified sibling sandbox checkpoints  833ms
+@autopod/daemon:test:      ✓ preserves canonical council retry authority through an A/B repair lifecycle  2193ms
+@autopod/daemon:test: (node:1136) [FSTDEP023] FastifyDeprecation: disableRequestLogging option is deprecated. Use the logController option with disableRequestLogging or isLogDisabled override instead. The disableRequestLogging top-level option will be removed in `fastify@6`.
+@autopod/daemon:test: {"level":30,"time":1788806296322,"pid":1136,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"test-profile","msg":"Profile created"}
+@autopod/daemon:test: (node:1136) [FSTDEP023] FastifyDeprecation: disableRequestLogging option is deprecated. Use the logController option with disableRequestLogging or isLogDisabled override instead. The disableRequestLogging top-level option will be removed in `fastify@6`.
+@autopod/daemon:test: {"level":30,"time":1788806296383,"pid":1136,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"test-profile","msg":"Profile created"}
+@autopod/daemon:test: (node:1136) [FSTDEP023] FastifyDeprecation: disableRequestLogging option is deprecated. Use the logController option with disableRequestLogging or isLogDisabled override instead. The disableRequestLogging top-level option will be removed in `fastify@6`.
+@autopod/daemon:test: {"level":30,"time":1788806296458,"pid":1136,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"test-profile","msg":"Profile created"}
+@autopod/daemon:test:  ✓ src/pods/pod-bridge-validation.test.ts (37 tests) 2875ms
+@autopod/daemon:test: (node:1136) [FSTDEP023] FastifyDeprecation: disableRequestLogging option is deprecated. Use the logController option with disableRequestLogging or isLogDisabled override instead. The disableRequestLogging top-level option will be removed in `fastify@6`.
+@autopod/daemon:test: {"level":30,"time":1788806296515,"pid":1136,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"test-profile","msg":"Profile created"}
+@autopod/daemon:test: (node:1136) [FSTDEP023] FastifyDeprecation: disableRequestLogging option is deprecated. Use the logController option with disableRequestLogging or isLogDisabled override instead. The disableRequestLogging top-level option will be removed in `fastify@6`.
+@autopod/daemon:test: {"level":30,"time":1788806296586,"pid":1136,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"test-profile","msg":"Profile created"}
+@autopod/daemon:test: (node:1136) [FSTDEP023] FastifyDeprecation: disableRequestLogging option is deprecated. Use the logController option with disableRequestLogging or isLogDisabled override instead. The disableRequestLogging top-level option will be removed in `fastify@6`.
+@autopod/daemon:test: {"level":30,"time":1788806296651,"pid":1136,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"test-profile","msg":"Profile created"}
+@autopod/daemon:test: (node:1136) [FSTDEP023] FastifyDeprecation: disableRequestLogging option is deprecated. Use the logController option with disableRequestLogging or isLogDisabled override instead. The disableRequestLogging top-level option will be removed in `fastify@6`.
+@autopod/daemon:test: {"level":30,"time":1788806296712,"pid":1136,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"test-profile","msg":"Profile created"}
+@autopod/daemon:test: (node:1136) [FSTDEP023] FastifyDeprecation: disableRequestLogging option is deprecated. Use the logController option with disableRequestLogging or isLogDisabled override instead. The disableRequestLogging top-level option will be removed in `fastify@6`.
+@autopod/daemon:test: {"level":30,"time":1788806296771,"pid":1136,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"test-profile","msg":"Profile created"}
+@autopod/daemon:test: (node:1136) [FSTDEP023] FastifyDeprecation: disableRequestLogging option is deprecated. Use the logController option with disableRequestLogging or isLogDisabled override instead. The disableRequestLogging top-level option will be removed in `fastify@6`.
+@autopod/daemon:test: {"level":30,"time":1788806296827,"pid":1136,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"test-profile","msg":"Profile created"}
+@autopod/daemon:test:  ✓ src/pods/quality-signals.test.ts (35 tests) 2960ms
+@autopod/daemon:test: (node:1136) [FSTDEP023] FastifyDeprecation: disableRequestLogging option is deprecated. Use the logController option with disableRequestLogging or isLogDisabled override instead. The disableRequestLogging top-level option will be removed in `fastify@6`.
+@autopod/daemon:test: (node:1136) [FSTDEP023] FastifyDeprecation: disableRequestLogging option is deprecated. Use the logController option with disableRequestLogging or isLogDisabled override instead. The disableRequestLogging top-level option will be removed in `fastify@6`.
+@autopod/daemon:test: (node:1136) [FSTDEP023] FastifyDeprecation: disableRequestLogging option is deprecated. Use the logController option with disableRequestLogging or isLogDisabled override instead. The disableRequestLogging top-level option will be removed in `fastify@6`.
+@autopod/daemon:test:  ✓ src/worktrees/sandbox-workspace-checkpoint.test.ts (6 tests) 9753ms
+@autopod/daemon:test:      ✓ captures and materializes dirty sandbox work through a real Git bundle  1161ms
+@autopod/daemon:test:      ✓ materializes committed uncommitted mixed empty and net-zero sandbox snapshots  4280ms
+@autopod/daemon:test:      ✓ replaces a daemon-authored no-op checkpoint when the sandbox advances from its parent  890ms
+@autopod/daemon:test:      ✓ supersedes a prior content-bearing checkpoint from the same sandbox lineage  1735ms
+@autopod/daemon:test:      ✓ retains an operator-authored empty commit as a divergence barrier  818ms
+@autopod/daemon:test:      ✓ retains a content-bearing checkpoint lookalike outside the pod quarantine  867ms
+@autopod/daemon:test:  ✓ src/api/routes/pods.test.ts (80 tests) 5949ms
+@autopod/daemon:test:  ✓ src/pods/cost-aggregation.test.ts (42 tests) 2510ms
+@autopod/daemon:test:  ✓ src/validation/review-context-builder.test.ts (13 tests) 2112ms
+@autopod/daemon:test:      ✓ detects gitignore violations  335ms
+@autopod/daemon:test:      ✓ returns clean status for committed repo  307ms
+@autopod/daemon:test:      ✓ detects contradictory ops across commits  355ms
+@autopod/daemon:test:  ✓ src/pods/models-aggregator.test.ts (35 tests) 2542ms
+@autopod/daemon:test:  ✓ src/pods/memory-candidate-recorder.test.ts (22 tests) 2627ms
+@autopod/daemon:test:  ✓ src/pods/pod-repository.test.ts (55 tests) 3674ms
+@autopod/daemon:test:  ✓ src/validation/validation-identity-collector.test.ts (2 tests) 2076ms
+@autopod/daemon:test:      ✓ fingerprints real source, dependencies, tools, environment and backend image without returning secret contents  1581ms
+@autopod/daemon:test:      ✓ declines reuse for unknown image, missing declared files or uncommitted source  493ms
+@autopod/daemon:test:  ✓ src/pods/local-reconciler.test.ts (32 tests) 2476ms
+@autopod/daemon:test:  ✓ src/issue-watcher/issue-watcher-service.test.ts (16 tests) 2248ms
+@autopod/daemon:test:  ✓ src/worktrees/sandbox-reconcile.test.ts (3 tests) 1872ms
+@autopod/daemon:test:      ✓ makes an isolated container resolve a host-only commit via bundle transfer  801ms
+@autopod/daemon:test:      ✓ fails cleanly when the bundle transfer step throws  397ms
+@autopod/daemon:test:      ✓ fails cleanly when the base prerequisite is missing in the container  672ms
+@autopod/daemon:test:  ✓ src/pods/reliability-aggregator.test.ts (27 tests) 2050ms
+@autopod/daemon:test:  ✓ src/pods/memory-repository.test.ts (26 tests) 1870ms
+@autopod/daemon:test:  ✓ src/pods/recovery-context.test.ts (16 tests) 1491ms
+@autopod/daemon:test:      ✓ sanitizes selected context and bounds the provider handoff  1484ms
+@autopod/daemon:test:  ✓ src/pods/escalations-aggregator.test.ts (26 tests) 1900ms
+@autopod/daemon:test:  ✓ src/scheduled-jobs/scheduled-job-manager.test.ts (25 tests) 1829ms
+@autopod/daemon:test:  ✓ src/pods/pod-lifecycle.e2e.test.ts (29 tests) 3057ms
+@autopod/daemon:test:        ✓ transitions to review_required when validation engine throws (treated as failed validation)  307ms
+@autopod/daemon:test:  ✓ src/pods/quality-score-repository.test.ts (23 tests) 1768ms
+@autopod/daemon:test:  ✓ src/worktrees/contract-base-preflight.test.ts (4 tests) 1586ms
+@autopod/daemon:test:      ✓ checks immutable fetched base rather than existing agent work on the start branch  484ms
+@autopod/daemon:test:      ✓ requires a delete target to exist in the actual base  489ms
+@autopod/daemon:test:      ✓ detects newly landed work only after the remote base advances  337ms
+@autopod/daemon:test:  ✓ src/e2e.test.ts (11 tests) 1668ms
+@autopod/daemon:test:  ✓ src/podsitter/podsitter-service.test.ts (17 tests) 1494ms
+@autopod/daemon:test:  ✓ src/runtimes/codex-runtime.test.ts (71 tests) 1440ms
+@autopod/daemon:test:  ✓ src/api/routes/pod-events-route.test.ts (16 tests) 1322ms
+@autopod/daemon:test:      ✓ returns all agent activity events when no limit is provided  333ms
+@autopod/daemon:test:  ✓ src/pods/pod-bridge-memory.test.ts (18 tests) 1208ms
+@autopod/daemon:test:  ✓ src/podsitter/podsitter-repository.test.ts (16 tests) 1019ms
+@autopod/daemon:test:  ✓ src/containers/docker-container-manager.test.ts (85 tests | 1 skipped) 1410ms
+@autopod/daemon:test:        ✓ kill() rejects with timeout when remove also hangs  354ms
+@autopod/daemon:test:        ✓ kill() resolves when remove times out but follow-up inspect reports the container gone  304ms
+@autopod/daemon:test:        ✓ kill() still rejects when remove times out and follow-up inspect finds the container  302ms
+@autopod/daemon:test: {"level":30,"time":1788806303966,"pid":15737,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"app","msg":"Profile created"}
+@autopod/daemon:test: {"level":30,"time":1788806303981,"pid":15737,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"app","fields":["providerAccountId","providerCredentials"],"msg":"Profile updated"}
+@autopod/daemon:test: {"level":30,"time":1788806303982,"pid":15737,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"app","fields":["providerAccountId"],"msg":"Profile updated"}
+@autopod/daemon:test: {"level":30,"time":1788806304061,"pid":15737,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"app","msg":"Profile created"}
+@autopod/daemon:test: {"level":30,"time":1788806304063,"pid":15737,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"app","fields":["providerAccountId","providerCredentials"],"msg":"Profile updated"}
+@autopod/daemon:test: {"level":30,"time":1788806304148,"pid":15737,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"app","msg":"Profile created"}
+@autopod/daemon:test:  ✓ src/db/migrate.test.ts (27 tests) 1053ms
+@autopod/daemon:test: {"level":30,"time":1788806304149,"pid":15737,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"app","fields":["providerAccountId"],"msg":"Profile updated"}
+@autopod/daemon:test: {"level":30,"time":1788806304224,"pid":15737,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"base","msg":"Profile created"}
+@autopod/daemon:test: {"level":30,"time":1788806304225,"pid":15737,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"child","msg":"Profile created"}
+@autopod/daemon:test:  ✓ src/worktrees/graft-reconcile.test.ts (3 tests) 953ms
+@autopod/daemon:test:      ✓ grafts a divergent host tree onto the container HEAD, preserving content and ancestry  594ms
+@autopod/daemon:test: {"level":30,"time":1788806304227,"pid":15737,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"base","fields":["providerAccountId"],"msg":"Profile updated"}
+@autopod/daemon:test: {"level":30,"time":1788806304227,"pid":15737,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"child","fields":["providerAccountId"],"msg":"Profile updated"}
+@autopod/daemon:test: {"level":30,"time":1788806304228,"pid":15737,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"base","fields":["providerCredentials"],"msg":"Profile updated"}
+@autopod/daemon:test: {"level":30,"time":1788806304295,"pid":15737,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"base","msg":"Profile created"}
+@autopod/daemon:test: {"level":30,"time":1788806304296,"pid":15737,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"base","fields":["providerAccountId"],"msg":"Profile updated"}
+@autopod/daemon:test: {"level":30,"time":1788806304355,"pid":15737,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"base","msg":"Profile created"}
+@autopod/daemon:test: {"level":30,"time":1788806304357,"pid":15737,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"base","fields":["providerAccountId"],"msg":"Profile updated"}
+@autopod/daemon:test: {"level":30,"time":1788806304357,"pid":15737,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"base","fields":["providerCredentials"],"msg":"Profile updated"}
+@autopod/daemon:test: {"level":30,"time":1788806304426,"pid":15737,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"base","msg":"Profile created"}
+@autopod/daemon:test: {"level":30,"time":1788806304426,"pid":15737,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"child","msg":"Profile created"}
+@autopod/daemon:test: {"level":30,"time":1788806304427,"pid":15737,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"base","fields":["providerAccountId"],"msg":"Profile updated"}
+@autopod/daemon:test: {"level":30,"time":1788806304515,"pid":15737,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"base","msg":"Profile created"}
+@autopod/daemon:test: {"level":30,"time":1788806304516,"pid":15737,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"child","msg":"Profile created"}
+@autopod/daemon:test: {"level":30,"time":1788806304522,"pid":15737,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"child","fields":["providerFailover"],"msg":"Profile updated"}
+@autopod/daemon:test:  ✓ src/validation/review-tool-runner.test.ts (14 tests) 1027ms
+@autopod/daemon:test:  ✓ src/podsitter/action-executor.test.ts (7 tests) 1106ms
+@autopod/daemon:test:      ✓ rejects stale and duplicate decisions before side effects  776ms
+@autopod/daemon:test: {"level":30,"time":1788806304525,"pid":15737,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"child","fields":["providerFailover"],"msg":"Profile updated"}
+@autopod/daemon:test: {"level":30,"time":1788806304592,"pid":15737,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"app","msg":"Profile created"}
+@autopod/daemon:test: {"level":30,"time":1788806304594,"pid":15737,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"app","fields":["providerFailover"],"msg":"Profile updated"}
+@autopod/daemon:test: {"level":30,"time":1788806304596,"pid":15737,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"app","fields":["providerAccountId","providerFailover"],"msg":"Profile updated"}
+@autopod/daemon:test: {"level":30,"time":1788806304597,"pid":15737,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"policy-parent","msg":"Profile created"}
+@autopod/daemon:test: {"level":30,"time":1788806304597,"pid":15737,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"reparent-child","msg":"Profile created"}
+@autopod/daemon:test: {"level":30,"time":1788806304597,"pid":15737,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"family-root","msg":"Profile created"}
+@autopod/daemon:test: {"level":30,"time":1788806304597,"pid":15737,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"family-child","msg":"Profile created"}
+@autopod/daemon:test:  ✓ src/api/routes/provider-accounts.test.ts (14 tests) 1110ms
+@autopod/daemon:test:  ✓ src/pods/quality-score-recorder.test.ts (13 tests) 1165ms
+@autopod/daemon:test:  ✓ src/scheduled-jobs/scheduled-job-repository.test.ts (16 tests) 1143ms
+@autopod/daemon:test:  ✓ src/pods/event-repository.test.ts (14 tests) 1023ms
+@autopod/daemon:test:  ✓ src/pods/task-execution-ledger.test.ts (11 tests) 853ms
+@autopod/daemon:test: {"level":30,"time":1788806305450,"pid":16930,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"profile-referrer","msg":"Profile created"}
+@autopod/daemon:test:  ✓ src/pods/pod-token-budget.test.ts (12 tests) 870ms
+@autopod/daemon:test:  ✓ src/pods/escalation-repository.test.ts (10 tests) 681ms
+@autopod/daemon:test:  ✓ src/validation/validation-evidence-cache.test.ts (11 tests) 903ms
+@autopod/daemon:test:  ✓ src/safety/safety-events-repository.test.ts (13 tests) 928ms
+@autopod/daemon:test:  ✓ src/validation/retry-identity.test.ts (1 test) 984ms
+@autopod/daemon:test:    ✓ uses actual tracked and untracked content; unchanged commits and hidden index changes cannot fool identity  983ms
+@autopod/daemon:test:  ✓ src/provider-accounts/provider-account-store.test.ts (13 tests) 957ms
+@autopod/daemon:test:  ✓ src/api/routes/podsitter.test.ts (8 tests) 844ms
+@autopod/daemon:test:  ✓ src/pods/screenshot-retention.test.ts (11 tests) 766ms
+@autopod/daemon:test: {"level":30,"time":1788806306534,"pid":17222,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"fixture-profile","msg":"Profile created"}
+@autopod/daemon:test: {"level":30,"time":1788806306536,"pid":17222,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"fixture-profile","fields":["providerAccountId","providerCredentials"],"msg":"Profile updated"}
+@autopod/daemon:test:  ✓ src/runtimes/stream-grace.test.ts (17 tests) 788ms
+@autopod/daemon:test:  ✓ src/pods/task-retry-ledger.test.ts (9 tests) 723ms
+@autopod/daemon:test:  ✓ src/validation/host-browser-runner.test.ts (14 tests) 772ms
+@autopod/daemon:test:        ✓ rejects on timeout  508ms
+@autopod/daemon:test:  ✓ src/api/routes/memory.test.ts (9 tests) 677ms
+@autopod/daemon:test: {"level":30,"time":1788806306722,"pid":17222,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"fixture-profile","msg":"Profile created"}
+@autopod/daemon:test: {"level":30,"time":1788806306723,"pid":17222,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"fixture-profile","fields":["providerAccountId","providerCredentials"],"msg":"Profile updated"}
+@autopod/daemon:test:  ✓ src/containers/sidecar-manager.test.ts (17 tests) 776ms
+@autopod/daemon:test:  ✓ src/provider-portability.integration.test.ts (4 tests) 482ms
+@autopod/daemon:test:  ✓ src/pods/dispatch-preflight-ledger.test.ts (7 tests) 599ms
+@autopod/daemon:test:  ✓ src/worktrees/durable-pr-manager.test.ts (6 tests) 651ms
+@autopod/daemon:test:  ✓ src/images/base-template.test.ts (33 tests) 489ms
+@autopod/daemon:test:      ✓ makes every successfully initialized cluster TCP-only  470ms
+@autopod/daemon:test:  ✓ src/issue-watcher/issue-watcher-repository.test.ts (8 tests) 645ms
+@autopod/daemon:test:  ✓ src/pods/completion-journal.test.ts (6 tests) 664ms
+@autopod/daemon:test:  ✓ src/validation/review-ledger.test.ts (20 tests) 573ms
+@autopod/daemon:test:      ✓ projects only bounded sanitized source references into closure prompts  461ms
+@autopod/daemon:test:  ✓ src/pods/validation-repository.test.ts (8 tests) 643ms
+@autopod/daemon:test:  ✓ src/pods/provider-attempt-repository.test.ts (7 tests) 550ms
+@autopod/daemon:test:  ✓ src/pods/pod-bridge-task-summary.test.ts (8 tests) 615ms
+@autopod/daemon:test:  ✓ src/pods/section-resolver.test.ts (17 tests) 413ms
+@autopod/daemon:test:      ✓ truncates long dynamic content to token budget  375ms
+@autopod/daemon:test:  ✓ src/pods/fix-feedback-repository.test.ts (7 tests) 558ms
+@autopod/daemon:test:  ✓ src/api/websocket.test.ts (6 tests) 560ms
+@autopod/daemon:test:  ✓ src/podsitter/evidence-builder.test.ts (6 tests) 403ms
+@autopod/daemon:test:      ✓ redacts and independently bounds untrusted evidence  396ms
+@autopod/daemon:test:  ✓ src/scheduled-jobs/scan-report-repository.test.ts (5 tests) 649ms
+@autopod/daemon:test:  ✓ src/pods/execution-provenance-ledger.test.ts (3 tests) 408ms
+@autopod/daemon:test:  ✓ src/actions/action-integration.test.ts (6 tests) 574ms
+@autopod/daemon:test:  ✓ src/history/history-exporter.test.ts (4 tests) 359ms
+@autopod/daemon:test:  ✓ src/notifications/notification-service.test.ts (19 tests) 444ms
+@autopod/daemon:test:  ✓ src/security/detectors/secretlint-detector.test.ts (5 tests) 384ms
+@autopod/daemon:test:      ✓ does not retain profiler entries across repeated scans  347ms
+@autopod/daemon:test:  ✓ src/runtimes/copilot-runtime.test.ts (28 tests) 405ms
+@autopod/daemon:test:  ✓ src/pods/token-telemetry-repair.test.ts (3 tests) 247ms
+@autopod/daemon:test:  ✓ src/pods/safety-aggregator.test.ts (4 tests) 339ms
+@autopod/daemon:test:  ✓ src/security/scan-repository.test.ts (3 tests) 289ms
+@autopod/daemon:test:  ✓ src/api/plugins/rate-limit.test.ts (3 tests) 162ms
+@autopod/daemon:test:  ✓ src/db/backup.test.ts (7 tests) 394ms
+@autopod/daemon:test:  ✓ src/runtimes/claude-runtime.test.ts (40 tests) 315ms
+@autopod/daemon:test:  ✓ src/system-sandbox/decision-output.test.ts (10 tests) 147ms
+@autopod/daemon:test:  ✓ src/performance-cleanup.test.ts (3 tests) 280ms
+@autopod/daemon:test:  ✓ src/containers/sandbox-container-manager.test.ts (39 tests) 563ms
+@autopod/daemon:test:        ✓ uploads more than the Azure request limit with one bulk file request  468ms
+@autopod/daemon:test:  ✓ src/api/routes/files.test.ts (20 tests) 336ms
+@autopod/daemon:test:  ✓ src/runtimes/runtime-config-capability.test.ts (3 tests) 175ms
+@autopod/daemon:test:  ✓ src/auth/entra-auth-module.test.ts (5 tests) 103ms
+@autopod/daemon:test:  ✓ src/containers/docker-bounds.test.ts (8 tests) 185ms
+@autopod/daemon:test:  ✓ src/validation/validation-evidence-engine.test.ts (2 tests) 135ms
+@autopod/daemon:test:  ✓ src/provider-accounts/generic-api-key-account.test.ts (2 tests) 202ms
+@autopod/daemon:test:  ✓ src/podsitter/daemon-evidence-provider.test.ts (6 tests) 160ms
+@autopod/daemon:test:  ✓ src/pods/memory-effectiveness-aggregator.test.ts (2 tests) 160ms
+@autopod/daemon:test:  ✓ src/runtimes/run-claude-cli.test.ts (9 tests) 160ms
+@autopod/daemon:test:  ✓ src/db/managed-migration-compatibility.test.ts (1 test) 181ms
+@autopod/daemon:test:  ✓ src/api/routes/scheduled-jobs.test.ts (19 tests) 170ms
+@autopod/daemon:test:  ✓ src/pods/required-command-preflight.test.ts (3 tests) 149ms
+@autopod/daemon:test:  ✓ src/api/mcp-proxy-route.test.ts (5 tests) 112ms
+@autopod/daemon:test:  ✓ src/system-sandbox/system-decision-runner.test.ts (18 tests) 148ms
+@autopod/daemon:test:  ✓ src/api/routes/health.test.ts (16 tests) 75ms
+@autopod/daemon:test:  ✓ src/pods/artifact-preservation.test.ts (4 tests) 106ms
+@autopod/daemon:test:  ✓ src/actions/handlers/ado-handler.test.ts (20 tests) 52ms
+@autopod/daemon:test:  ✓ src/pods/artifact-snapshot-receipt.test.ts (8 tests) 70ms
+@autopod/daemon:test:  ✓ src/api/routes/diff.test.ts (5 tests) 110ms
+@autopod/daemon:test:  ✓ src/pods/agent-shim.test.ts (8 tests) 94ms
+@autopod/daemon:test:  ✓ src/api/plugins/mobile-static.test.ts (5 tests) 115ms
+@autopod/daemon:test:  ✓ src/api/routes/brief-preview.test.ts (4 tests) 73ms
+@autopod/daemon:test:  ✓ src/containers/azure-sandbox-api-client.test.ts (36 tests) 53ms
+@autopod/daemon:test:  ✓ src/podsitter/activation.test.ts (4 tests) 45ms
+@autopod/daemon:test:  ✓ src/pods/screenshot-store.test.ts (21 tests) 86ms
+@autopod/daemon:test:  ✓ src/api/mcp-proxy-handler.test.ts (10 tests) 86ms
+@autopod/daemon:test:  ✓ src/api/routes/screenshots.test.ts (10 tests) 103ms
+@autopod/daemon:test:  ✓ src/validation/advisory-browser-qa-runner.test.ts (26 tests) 86ms
+@autopod/daemon:test:  ✓ src/containers/docker-network-manager.test.ts (69 tests) 16ms
+@autopod/daemon:test:  ✓ src/worktrees/local-worktree-manager.test.ts (119 tests) 69ms
+@autopod/daemon:test:  ✓ src/runtimes/pi-runtime.test.ts (14 tests) 48ms
+@autopod/daemon:test:  ✓ src/pods/pod-queue.test.ts (11 tests) 82ms
+@autopod/daemon:test:  ✓ src/actions/handlers/azure-logs-handler.test.ts (10 tests) 123ms
+@autopod/daemon:test:  ✓ src/actions/handlers/azure-pim-handler.test.ts (10 tests) 48ms
+@autopod/daemon:test:  ✓ src/actions/handlers/github-handler.test.ts (12 tests) 78ms
+@autopod/daemon:test:  ✓ src/api/error-handler.test.ts (2 tests) 47ms
+@autopod/daemon:test:  ✓ src/providers/llm-client.test.ts (4 tests) 42ms
+@autopod/daemon:test:  ✓ src/api/routes/token-telemetry.test.ts (2 tests) 96ms
+@autopod/daemon:test:  ✓ src/containers/cgroup-execution-metadata.test.ts (3 tests) 6ms
+@autopod/daemon:test:  ✓ src/pods/sleep-detector.test.ts (24 tests) 25ms
+@autopod/daemon:test:  ✓ src/notifications/teams-adapter.test.ts (5 tests) 53ms
+@autopod/daemon:test:  ✓ src/providers/credential-persistence.test.ts (18 tests) 98ms
+@autopod/daemon:test:  ✓ src/containers/haproxy-deny-stream.test.ts (5 tests) 22ms
+@autopod/daemon:test:  ✓ src/api/plugins/auth.test.ts (5 tests) 68ms
+@autopod/daemon:test:  ✓ src/runtimes/codex-stream-parser.test.ts (58 tests) 38ms
+@autopod/daemon:test:  ✓ src/pods/reconciler.test.ts (15 tests) 23ms
+@autopod/daemon:test:  ✓ src/api/routes/model-providers.test.ts (3 tests) 52ms
+@autopod/daemon:test:  ✓ src/validation/report-generator.test.ts (5 tests) 15ms
+@autopod/daemon:test:  ✓ src/worktrees/pr-manager.test.ts (14 tests) 15ms
+@autopod/daemon:test:  ✓ src/providers/azure-token.test.ts (7 tests) 36ms
+@autopod/daemon:test:  ✓ src/actions/generic-http-handler.test.ts (19 tests) 87ms
+@autopod/daemon:test:  ✓ src/validation/review-batch-runner.test.ts (19 tests) 21ms
+@autopod/daemon:test:  ✓ src/providers/env-builder.test.ts (25 tests) 42ms
+@autopod/daemon:test:  ✓ src/runtimes/claude-state-store.test.ts (4 tests) 11ms
+@autopod/daemon:test:  ✓ src/runtimes/copilot-stream-parser.test.ts (6 tests) 6ms
+@autopod/daemon:test:  ✓ src/pods/system-instructions-generator.test.ts (56 tests) 18ms
+@autopod/daemon:test:  ✓ src/actions/handlers/deploy-handler.test.ts (20 tests) 10ms
+@autopod/daemon:test:  ✓ src/images/dockerfile-generator.test.ts (74 tests) 10ms
+@autopod/daemon:test:  ✓ src/pods/skill-resolver.test.ts (20 tests) 27ms
+@autopod/daemon:test:  ✓ src/security/dependency-compatibility.test.ts (3 tests) 38ms
+@autopod/daemon:test:  ✓ src/pods/sandbox-preview-proxy.test.ts (2 tests) 34ms
+@autopod/daemon:test: {"level":30,"time":1788806312075,"pid":18477,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"image-builder","profile":"test-app","msg":"Building warm image"}
+@autopod/daemon:test:  ✓ src/pods/memory-selector.test.ts (6 tests) 30ms
+@autopod/daemon:test:  ✓ src/worktrees/ado-pr-manager.test.ts (24 tests) 18ms
+@autopod/daemon:test: {"level":30,"time":1788806312083,"pid":18477,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"image-builder","localTag":"autopod/test-app:latest","publishedTag":"ewiacr.azurecr.io/autopod/test-app:latest","msg":"Pushing warm image to ACR"}
+@autopod/daemon:test: {"level":30,"time":1788806312084,"pid":18477,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"image-builder","tag":"ewiacr.azurecr.io/autopod/test-app:latest","localTag":"autopod/test-app:latest","sizeMb":512,"buildDuration":"0.0","msg":"Warm image built successfully"}
+@autopod/daemon:test: {"level":30,"time":1788806312086,"pid":18477,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"image-builder","profile":"test-app","msg":"Building warm image"}
+@autopod/daemon:test: {"level":30,"time":1788806312087,"pid":18477,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"image-builder","localTag":"autopod/test-app:latest","publishedTag":"ewiacr.azurecr.io/autopod/test-app:latest","msg":"Pushing warm image to ACR"}
+@autopod/daemon:test: {"level":30,"time":1788806312087,"pid":18477,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"image-builder","tag":"ewiacr.azurecr.io/autopod/test-app:latest","localTag":"autopod/test-app:latest","sizeMb":512,"buildDuration":"0.0","msg":"Warm image built successfully"}
+@autopod/daemon:test: {"level":30,"time":1788806312089,"pid":18477,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"image-builder","profile":"test-app","msg":"Building warm image"}
+@autopod/daemon:test: {"level":30,"time":1788806312091,"pid":18477,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"image-builder","profile":"test-app","msg":"Building warm image"}
+@autopod/daemon:test: {"level":30,"time":1788806312093,"pid":18477,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"image-builder","tag":"autopod/test-app:latest","msg":"ACR not configured — keeping warm image local-only"}
+@autopod/daemon:test: {"level":30,"time":1788806312093,"pid":18477,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"image-builder","tag":"autopod/test-app:latest","localTag":"autopod/test-app:latest","sizeMb":512,"buildDuration":"0.0","msg":"Warm image built successfully"}
+@autopod/daemon:test: {"level":30,"time":1788806312094,"pid":18477,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"image-builder","profile":"test-app","msg":"Building warm image"}
+@autopod/daemon:test: {"level":30,"time":1788806312095,"pid":18477,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"image-builder","localTag":"autopod/test-app:latest","publishedTag":"ewiacr.azurecr.io/autopod/test-app:latest","msg":"Pushing warm image to ACR"}
+@autopod/daemon:test: {"level":30,"time":1788806312095,"pid":18477,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"image-builder","tag":"ewiacr.azurecr.io/autopod/test-app:latest","localTag":"autopod/test-app:latest","sizeMb":512,"buildDuration":"0.0","msg":"Warm image built successfully"}
+@autopod/daemon:test: {"level":30,"time":1788806312095,"pid":18477,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"image-builder","profile":"test-app","msg":"Building warm image"}
+@autopod/daemon:test: {"level":30,"time":1788806312095,"pid":18477,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"image-builder","localTag":"autopod/test-app:latest","publishedTag":"ewiacr.azurecr.io/autopod/test-app:latest","msg":"Pushing warm image to ACR"}
+@autopod/daemon:test: {"level":30,"time":1788806312095,"pid":18477,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"image-builder","tag":"ewiacr.azurecr.io/autopod/test-app:latest","localTag":"autopod/test-app:latest","sizeMb":512,"buildDuration":"0.0","msg":"Warm image built successfully"}
+@autopod/daemon:test: {"level":30,"time":1788806312096,"pid":18477,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"image-builder","profile":"test-app","msg":"Building warm image"}
+@autopod/daemon:test: {"level":30,"time":1788806312096,"pid":18477,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"image-builder","localTag":"autopod/test-app:latest","publishedTag":"ewiacr.azurecr.io/autopod/test-app:latest","msg":"Pushing warm image to ACR"}
+@autopod/daemon:test: {"level":30,"time":1788806312096,"pid":18477,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"image-builder","tag":"ewiacr.azurecr.io/autopod/test-app:latest","localTag":"autopod/test-app:latest","sizeMb":512,"buildDuration":"0.0","msg":"Warm image built successfully"}
+@autopod/daemon:test: {"level":30,"time":1788806312097,"pid":18477,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"image-builder","profile":"test-app","msg":"Building warm image"}
+@autopod/daemon:test: {"level":30,"time":1788806312097,"pid":18477,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"image-builder","localTag":"autopod/test-app:latest","publishedTag":"ewiacr.azurecr.io/autopod/test-app:latest","msg":"Pushing warm image to ACR"}
+@autopod/daemon:test: {"level":30,"time":1788806312097,"pid":18477,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"image-builder","tag":"ewiacr.azurecr.io/autopod/test-app:latest","localTag":"autopod/test-app:latest","sizeMb":512,"buildDuration":"0.0","msg":"Warm image built successfully"}
+@autopod/daemon:test: {"level":30,"time":1788806312097,"pid":18477,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"image-builder","profile":"test-app","msg":"Building warm image"}
+@autopod/daemon:test: {"level":30,"time":1788806312098,"pid":18477,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"image-builder","localTag":"autopod/test-app:latest","publishedTag":"ewiacr.azurecr.io/autopod/test-app:latest","msg":"Pushing warm image to ACR"}
+@autopod/daemon:test: {"level":30,"time":1788806312098,"pid":18477,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"image-builder","tag":"ewiacr.azurecr.io/autopod/test-app:latest","localTag":"autopod/test-app:latest","sizeMb":512,"buildDuration":"0.0","msg":"Warm image built successfully"}
+@autopod/daemon:test: {"level":30,"time":1788806312098,"pid":18477,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"image-builder","profile":"test-app","msg":"Building warm image"}
+@autopod/daemon:test: {"level":30,"time":1788806312098,"pid":18477,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"image-builder","localTag":"autopod/test-app:latest","publishedTag":"ewiacr.azurecr.io/autopod/test-app:latest","msg":"Pushing warm image to ACR"}
+@autopod/daemon:test: {"level":30,"time":1788806312098,"pid":18477,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"image-builder","tag":"ewiacr.azurecr.io/autopod/test-app:latest","localTag":"autopod/test-app:latest","sizeMb":512,"buildDuration":"0.0","msg":"Warm image built successfully"}
+@autopod/daemon:test: {"level":30,"time":1788806312098,"pid":18477,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"image-builder","profile":"test-app","msg":"Building warm image"}
+@autopod/daemon:test: {"level":30,"time":1788806312098,"pid":18477,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"image-builder","localTag":"autopod/test-app:latest","publishedTag":"ewiacr.azurecr.io/autopod/test-app:latest","msg":"Pushing warm image to ACR"}
+@autopod/daemon:test: {"level":30,"time":1788806312098,"pid":18477,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"image-builder","tag":"ewiacr.azurecr.io/autopod/test-app:latest","localTag":"autopod/test-app:latest","sizeMb":512,"buildDuration":"0.0","msg":"Warm image built successfully"}
+@autopod/daemon:test:  ✓ src/images/image-builder.test.ts (15 tests) 26ms
+@autopod/daemon:test:  ✓ src/util/keyed-promise-queue.test.ts (5 tests) 18ms
+@autopod/daemon:test:  ✓ src/actions/action-registry.test.ts (9 tests) 17ms
+@autopod/daemon:test:  ✓ src/runtimes/build-input-identity.test.ts (1 test) 7ms
+@autopod/daemon:test:  ✓ src/validation/container-reviewer-runner.test.ts (11 tests) 27ms
+@autopod/daemon:test:  ✓ src/validation/finding-fingerprint.test.ts (22 tests) 9ms
+@autopod/daemon:test:  ✓ src/scheduled-jobs/scan-judge.test.ts (2 tests) 25ms
+@autopod/daemon:test: {"level":30,"time":1788806312380,"pid":18495,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"acr-client","tag":"myregistry.azurecr.io/autopod/test-app:latest","digest":"sha256:deadbeef","msg":"Pushed image to ACR"}
+@autopod/daemon:test: {"level":30,"time":1788806312382,"pid":18495,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"acr-client","tag":"myregistry.azurecr.io/autopod/test-app:latest","digest":"sha256:deadbeef","msg":"Pushed image to ACR"}
+@autopod/daemon:test: {"level":30,"time":1788806312382,"pid":18495,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"acr-client","tag":"myregistry.azurecr.io/autopod/test-app:latest","msg":"Pulled image from ACR"}
+@autopod/daemon:test: {"level":30,"time":1788806312382,"pid":18495,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"acr-client","tag":"myregistry.azurecr.io/autopod-node22-pw@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","msg":"Pulled image from ACR"}
+@autopod/daemon:test: {"level":30,"time":1788806312383,"pid":18495,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"acr-client","tag":"myregistry.azurecr.io/autopod-node22-pw@sha256:abc","msg":"Pulled image from ACR"}
+@autopod/daemon:test: {"level":30,"time":1788806312384,"pid":18495,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"acr-client","tag":"myregistry.azurecr.io/autopod/test-app:latest","digest":"sha256:deadbeef","msg":"Pushed image to ACR"}
+@autopod/daemon:test: {"level":30,"time":1788806312384,"pid":18495,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"acr-client","tag":"myregistry.azurecr.io/autopod/test-app:latest","digest":"sha256:deadbeef","msg":"Pushed image to ACR"}
+@autopod/daemon:test: {"level":30,"time":1788806312384,"pid":18495,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"acr-client","tag":"myregistry.azurecr.io/autopod/test-app:latest","digest":"sha256:deadbeef","msg":"Pushed image to ACR"}
+@autopod/daemon:test:  ✓ src/images/acr-client.test.ts (14 tests) 8ms
+@autopod/daemon:test:  ✓ src/actions/audit-repository.test.ts (22 tests) 19ms
+@autopod/daemon:test:  ✓ src/validation/review-structured-output.test.ts (14 tests) 17ms
+@autopod/daemon:test:  ✓ src/pods/execution-preflight.test.ts (4 tests) 20ms
+@autopod/daemon:test:  ✓ src/actions/action-engine.test.ts (25 tests) 25ms
+@autopod/daemon:test:  ✓ src/validation/run-with-evidence.test.ts (3 tests) 9ms
+@autopod/daemon:test:  ✓ src/pods/registry-injector.test.ts (49 tests) 17ms
+@autopod/daemon:test:  ✓ src/validation/pre-submit-review.test.ts (21 tests) 17ms
+@autopod/daemon:test:  ✓ src/pods/pod-diff-fetcher.test.ts (15 tests) 12ms
+@autopod/daemon:test:  ✓ src/validation/review-codex-runner.test.ts (10 tests) 8ms
+@autopod/daemon:test:  ✓ src/pods/memory-extraction.test.ts (24 tests) 13ms
+@autopod/daemon:test:  ✓ src/containers/haproxy-config.test.ts (14 tests) 4ms
+@autopod/daemon:test:  ✓ src/actions/handlers/handler.test.ts (12 tests) 3ms
+@autopod/daemon:test:  ✓ src/api/ssrf-guard.test.ts (57 tests) 8ms
+@autopod/daemon:test:  ✓ src/system-sandbox/system-provider-auth.test.ts (9 tests) 36ms
+@autopod/daemon:test:  ✓ src/providers/credential-refresh.test.ts (8 tests) 13ms
+@autopod/daemon:test:  ✓ src/pods/correction-context.test.ts (26 tests) 10ms
+@autopod/daemon:test:  ✓ src/validation/review-synthesizer.test.ts (6 tests) 35ms
+@autopod/daemon:test:  ✓ src/runtimes/pi-rpc-parser.test.ts (31 tests) 49ms
+@autopod/daemon:test:  ✓ src/providers/memory-reviewer.test.ts (12 tests) 7ms
+@autopod/daemon:test:  ✓ src/security/detectors/injection-detector.test.ts (7 tests) 4ms
+@autopod/daemon:test:  ✓ src/runtimes/claude-stream-parser.test.ts (38 tests) 9ms
+@autopod/daemon:test:  ✓ src/profiles/profile-validator.test.ts (58 tests) 6ms
+@autopod/daemon:test:  ✓ src/pods/readiness-review.test.ts (31 tests) 28ms
+@autopod/daemon:test:  ✓ src/pods/provider-preflight.test.ts (17 tests) 26ms
+@autopod/daemon:test:  ✓ src/pods/preview-supervisor.test.ts (14 tests) 12ms
+@autopod/daemon:test:  ✓ src/github/daemon-github-auth.test.ts (9 tests) 10ms
+@autopod/daemon:test:  ✓ src/images/warm-image-maintenance.test.ts (7 tests) 8ms
+@autopod/daemon:test:  ✓ src/worktrees/pr-description-generator.test.ts (19 tests) 5ms
+@autopod/daemon:test:  ✓ src/worktrees/pr-body-builder.test.ts (43 tests) 9ms
+@autopod/daemon:test:  ✓ src/issue-watcher/github-issue-client.test.ts (9 tests) 5ms
+@autopod/daemon:test:  ✓ src/pods/reference-repos.test.ts (12 tests) 9ms
+@autopod/daemon:test:  ✓ src/security/detectors/pii-detector.test.ts (11 tests) 9ms
+@autopod/daemon:test:  ✓ src/pods/injection-merger.test.ts (15 tests) 8ms
+@autopod/daemon:test:  ✓ src/runtimes/provider-error-classifier.test.ts (52 tests) 46ms
+@autopod/daemon:test:  ✓ src/issue-watcher/ado-issue-client.test.ts (9 tests) 9ms
+@autopod/daemon:test:  ✓ src/pods/sandbox-terminal-reaper.test.ts (7 tests) 5ms
+@autopod/daemon:test:  ✓ src/runtimes/codex-state-store.test.ts (4 tests) 8ms
+@autopod/daemon:test:  ✓ src/notifications/card-builder.test.ts (21 tests) 8ms
+@autopod/daemon:test:  ✓ src/api/routes/terminal.test.ts (3 tests) 4ms
+@autopod/daemon:test:  ✓ src/validation/review-finding-filter.test.ts (23 tests) 16ms
+@autopod/daemon:test:  ✓ src/pods/event-bus.test.ts (10 tests) 7ms
+@autopod/daemon:test:  ✓ src/db/unit-of-work.test.ts (1 test) 7ms
+@autopod/daemon:test:  ✓ src/pods/feedback-formatter.test.ts (22 tests) 8ms
+@autopod/daemon:test:  ✓ src/pods/state-machine.test.ts (16 tests) 4ms
+@autopod/daemon:test:  ✓ src/profiles/inheritance.test.ts (41 tests) 9ms
+@autopod/daemon:test:  ✓ src/scheduled-jobs/npm-lock-audit.test.ts (8 tests) 5ms
+@autopod/daemon:test:  ✓ src/validation/override-applicator.test.ts (15 tests) 5ms
+@autopod/daemon:test:  ✓ src/containers/sidecar-resolver.test.ts (10 tests) 23ms
+@autopod/daemon:test:  ✓ src/pods/glob-overlap.test.ts (16 tests) 5ms
+@autopod/daemon:test:  ✓ src/pods/quality-activity.test.ts (38 tests) 9ms
+@autopod/daemon:test:  ✓ src/pods/quality-score.test.ts (6 tests) 3ms
+@autopod/daemon:test:  ✓ src/pods/workspace-tools-doc.test.ts (15 tests) 10ms
+@autopod/daemon:test:  ✓ src/pods/workspace-checkpoint-controller.test.ts (6 tests) 9ms
+@autopod/daemon:test:  ✓ src/pods/pr-fix-task.test.ts (15 tests) 6ms
+@autopod/daemon:test:  ✓ src/issue-watcher/issue-fetch.test.ts (4 tests) 9ms
+@autopod/daemon:test:  ✓ src/containers/sandbox-api-client.test.ts (7 tests) 4ms
+@autopod/daemon:test:  ✓ src/scheduled-jobs/scheduled-job-scheduler.test.ts (4 tests) 11ms
+@autopod/daemon:test:  ✓ src/actions/handlers/test-pipeline-handler.test.ts (6 tests) 10ms
+@autopod/daemon:test:  ✓ src/pods/preflight.test.ts (10 tests) 3ms
+@autopod/daemon:test:  ✓ src/api/wire-serializers.test.ts (13 tests) 5ms
+@autopod/daemon:test:  ✓ src/crypto/credentials-cipher.test.ts (6 tests) 9ms
+@autopod/daemon:test:  ✓ src/validation/screenshot-artifacts.test.ts (5 tests) 6ms
+@autopod/daemon:test:  ✓ src/pods/runtime-resolver.test.ts (24 tests) 12ms
+@autopod/daemon:test:  ✓ src/providers/azure-devops-auth.test.ts (2 tests) 4ms
+@autopod/daemon:test:  ✓ src/crypto/pod-tokens.test.ts (7 tests) 7ms
+@autopod/daemon:test:  ✓ src/validation/screenshot-collector.test.ts (13 tests) 10ms
+@autopod/daemon:test:  ✓ src/notifications/rate-limiter.test.ts (7 tests) 9ms
+@autopod/daemon:test:  ✓ src/containers/haproxy-deny-parser.test.ts (8 tests) 3ms
+@autopod/daemon:test:  ✓ src/validation/validation-context-env.test.ts (3 tests) 3ms
+@autopod/daemon:test:  ✓ src/worktrees/auto-commit-message.test.ts (15 tests) 21ms
+@autopod/daemon:test:  ✓ src/security/model-manager.test.ts (4 tests) 4ms
+@autopod/daemon:test:  ✓ src/security/warning-section.test.ts (4 tests) 3ms
+@autopod/daemon:test:  ✓ src/auth/dev-auth-module.test.ts (3 tests) 5ms
+@autopod/daemon:test:  ✓ src/providers/generic-api-key-env.test.ts (4 tests) 9ms
+@autopod/daemon:test:  ✓ src/actions/policy-resolver.test.ts (7 tests) 3ms
+@autopod/daemon:test:  ✓ src/api/plugins/request-logger.test.ts (2 tests) 4ms
+@autopod/daemon:test:  ✓ src/history/instructions-generator.test.ts (6 tests) 3ms
+@autopod/daemon:test:  ✓ src/containers/routing-container-manager.test.ts (3 tests) 4ms
+@autopod/daemon:test:  ✓ src/api/websocket-auth.test.ts (3 tests) 2ms
+@autopod/daemon:test:  ✓ src/pods/runtime-network-defaults.test.ts (5 tests) 5ms
+@autopod/daemon:test:  ✓ src/runtimes/runtime-registry.test.ts (4 tests) 22ms
+@autopod/daemon:test:  ✓ src/security/scan-policy.test.ts (11 tests) 5ms
+@autopod/daemon:test:  ✓ src/api/preview-url.test.ts (11 tests) 5ms
+@autopod/daemon:test:  ✓ src/system-sandbox/execution-target.test.ts (3 tests) 3ms
+@autopod/daemon:test:  ✓ src/containers/container-memory.test.ts (6 tests) 2ms
+@autopod/daemon:test:  ✓ src/worktrees/merge-queue.test.ts (4 tests) 2ms
+@autopod/daemon:test:  ✓ src/validation/review-agentic-runner.test.ts (1 test) 2ms
+@autopod/daemon:test:  ✓ src/util/log-sanitizer.test.ts (2 tests) 3ms
+@autopod/daemon:test:  ✓ src/profiles/pat-expiry.test.ts (4 tests) 2ms
+@autopod/daemon:test:  ✓ src/pods/pod-manager.test.ts (443 tests) 36015ms
+@autopod/daemon:test:      ✓ provider-failover-pauses across unsafe policy and protection cases  324ms
+@autopod/daemon:test:      ✓ provider-failover-pauses without mutating rejected operator continuations  481ms
+@autopod/daemon:test:        ✓ readiness approval enforces manual reason rules and stores approval metadata  327ms
+@autopod/daemon:test:        ✓ classifies sandbox checkpoint committed uncommitted mixed and net-zero completion  352ms
+@autopod/daemon:test:
+@autopod/daemon:test:  Test Files  251 passed (251)
+@autopod/daemon:test:       Tests  4482 passed | 1 skipped (4483)
+@autopod/daemon:test:    Start at  20:38:06
+@autopod/daemon:test:    Duration  38.48s (transform 10.19s, setup 0ms, import 33.60s, tests 191.34s, environment 18ms)
+@autopod/daemon:test:
+
+ Tasks:    15 successful, 15 total
+Cached:    11 cached, 15 total
+  Time:    46.384s
+
+cleanup-hosted-daemon tests passed
+  ✓ Tests passed
+
+▸ Auditing dependencies
+No known vulnerabilities found
+  ✓ Dependency audit passed
+
+▸ Scanning secrets
+
+> autopod@ secret-scan /private/tmp/autopod-durable-execution
+> node scripts/secret-scan.mjs
+
+Secret scan passed.
+  ✓ Secret scan passed
+
+All checks passed.

@@ -392,7 +392,9 @@
         "receipts/sandbox-task-retry-swift.txt",
         "receipts/sandbox-task-retry-build.txt",
         "receipts/sandbox-startup-browser-server.txt",
-        "receipts/sandbox-startup-browser.json"
+        "receipts/sandbox-startup-browser.json",
+        "receipts/checkpoint-24-full-validation.txt",
+        "receipts/checkpoint-24-validation-identity.json"
       ],
       "prerequisites": [],
       "remaining": "Validation admission identity and pinned cumulative transient allowance persist across Resume, restart and linked fix pods. Task-wide agent/repository-rework limits, cumulative provider/sandbox recovery and audited token-budget extensions still require integration; historical pre-ledger retries are not reconstructed. Incomplete known prior spending now blocks further budgeted agent consumption. This does not reserve future spend or reconstruct unrecorded legacy work; task-wide provider/rework admission and phase reconciliation remain. Checkpoint 24 adds durable sandbox startup retries, legacy allowance lower bounds, stage-scoped one-use decisions, measured startup time and local operator proof. Provider retries after first runtime event, repository rework, complete historical reconstruction, phase billing, native interaction and live acceptance remain."
@@ -439,7 +441,9 @@
         "receipts/sandbox-task-retry-swift.txt",
         "receipts/sandbox-task-retry-build.txt",
         "receipts/sandbox-startup-browser-server.txt",
-        "receipts/sandbox-startup-browser.json"
+        "receipts/sandbox-startup-browser.json",
+        "receipts/checkpoint-24-full-validation.txt",
+        "receipts/checkpoint-24-validation-identity.json"
       ],
       "prerequisites": [],
       "remaining": "Actual validation repeat admission requires known changed source/contract/commands/environment/implementation or one-use authenticated human authorization. Agent-rework admission and explicit provider-rebinding reconciliation remain; unavailable identity never proves change. Checkpoint 24 adds durable sandbox startup retries, legacy allowance lower bounds, stage-scoped one-use decisions, measured startup time and local operator proof. Provider retries after first runtime event, repository rework, complete historical reconstruction, phase billing, native interaction and live acceptance remain."
@@ -486,7 +490,9 @@
         "receipts/sandbox-task-retry-swift.txt",
         "receipts/sandbox-task-retry-build.txt",
         "receipts/sandbox-startup-browser-server.txt",
-        "receipts/sandbox-startup-browser.json"
+        "receipts/sandbox-startup-browser.json",
+        "receipts/checkpoint-24-full-validation.txt",
+        "receipts/checkpoint-24-validation-identity.json"
       ],
       "prerequisites": [],
       "remaining": "Validation infrastructure/reviewer failure admission uses persisted bounded backoff under unchanged captured provider/account/model. Other provider/sandbox retry paths and explicit authorized binding changes still require reconciliation. Checkpoint 24 adds durable sandbox startup retries, legacy allowance lower bounds, stage-scoped one-use decisions, measured startup time and local operator proof. Provider retries after first runtime event, repository rework, complete historical reconstruction, phase billing, native interaction and live acceptance remain."
@@ -552,7 +558,9 @@
         "receipts/sandbox-task-retry-swift.txt",
         "receipts/sandbox-task-retry-build.txt",
         "receipts/sandbox-startup-browser-server.txt",
-        "receipts/sandbox-startup-browser.json"
+        "receipts/sandbox-startup-browser.json",
+        "receipts/checkpoint-24-full-validation.txt",
+        "receipts/checkpoint-24-validation-identity.json"
       ],
       "prerequisites": [],
       "remaining": "Actual engine wall duration is recorded once per executed validation admission; waiting and interrupted unknown duration are separate. Complete cross-phase cost/time reconciliation and available infrastructure billing remain. Native interaction and live acceptance are unverified. Incomplete known prior spending now blocks further budgeted agent consumption. Future spending reservations, unrecorded legacy work, phase accounting and native/live verification remain. Checkpoint 24 adds durable sandbox startup retries, legacy allowance lower bounds, stage-scoped one-use decisions, measured startup time and local operator proof. Provider retries after first runtime event, repository rework, complete historical reconstruction, phase billing, native interaction and live acceptance remain."
@@ -1066,7 +1074,9 @@
         "receipts/sandbox-task-retry-swift.txt",
         "receipts/sandbox-task-retry-build.txt",
         "receipts/sandbox-startup-browser-server.txt",
-        "receipts/sandbox-startup-browser.json"
+        "receipts/sandbox-startup-browser.json",
+        "receipts/checkpoint-24-full-validation.txt",
+        "receipts/checkpoint-24-validation-identity.json"
       ],
       "prerequisites": [
         "Selected mobile flows and new health CLI have local interaction proof. Desktop has compilation and tests only. Remaining operator flows, physical device and live evidence are outstanding."
