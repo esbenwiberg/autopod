@@ -6,7 +6,7 @@ struct DispatchPreflightCard: View {
   let actions: PodActions
   @State private var evidence: DispatchPreflightEvidence?
   @State private var reason = ""
-  @State private var pending: CreateSessionRequest?
+  @State private var pending: IntentionalRerunDraft?
   @State private var busy = false
   @State private var error = ""
   @State private var created: String?
@@ -36,7 +36,7 @@ struct DispatchPreflightCard: View {
       .task(id: podId) {
         evidence = nil; pending = nil; reason = ""; error = ""; created = nil
         if let data = UserDefaults.standard.data(forKey: draftKey) {
-          do { let draft = try JSONDecoder().decode(CreateSessionRequest.self, from: data); pending = draft; reason = draft.intentionalRerun?.reason ?? "" }
+          do { let draft = try JSONDecoder().decode(IntentionalRerunDraft.self, from: data); pending = draft; reason = draft.intentionalRerun?.reason ?? "" }
           catch { self.error = "Saved rerun request is unreadable." }
         }
         await refresh()
@@ -49,7 +49,7 @@ struct DispatchPreflightCard: View {
   private func rerun() async {
     busy = true; defer { busy = false }
     do {
-      var draft: CreateSessionRequest
+      var draft: IntentionalRerunDraft
       if let pending { draft = pending }
       else {
         draft = try await actions.loadRerunTemplate(podId)

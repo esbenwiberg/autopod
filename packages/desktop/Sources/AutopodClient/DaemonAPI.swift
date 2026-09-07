@@ -261,7 +261,10 @@ public actor DaemonAPI {
   public func getDispatchPreflight(_ id: String) async throws -> DispatchPreflightResponse {
     try await request("GET", "/pods/\(id)/dispatch-preflight")
   }
-  public func getRerunTemplate(_ id: String) async throws -> CreateSessionRequest {
+  public func createIntentionalRerun(_ body: IntentionalRerunDraft) async throws -> SessionResponse {
+    try await request("POST", "/pods", body: encode(body))
+  }
+  public func getRerunTemplate(_ id: String) async throws -> IntentionalRerunDraft {
     try await request("GET", "/pods/\(id)/rerun-template")
   }
   public func getRetryState(_ id: String) async throws -> TaskRetryState {

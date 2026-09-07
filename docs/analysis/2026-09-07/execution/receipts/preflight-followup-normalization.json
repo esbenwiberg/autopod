@@ -1,0 +1,26 @@
+[
+  {
+    "file": "dispatch-native-contract-red.txt",
+    "beforeSha256": "4acd460e31df35aa626a8691a8b36f1ba58ea03dd3e265200b0611c1c322fe97",
+    "afterSha256": "4acd460e31df35aa626a8691a8b36f1ba58ea03dd3e265200b0611c1c322fe97",
+    "normalization": "Trailing whitespace and final blank lines only"
+  },
+  {
+    "file": "dispatch-native-contract-green.txt",
+    "beforeSha256": "9965357ebfd5e9186d02975d5a3dfa0a03a6b334cad84fe39a731372175dc313",
+    "afterSha256": "9965357ebfd5e9186d02975d5a3dfa0a03a6b334cad84fe39a731372175dc313",
+    "normalization": "Trailing whitespace and final blank lines only"
+  },
+  {
+    "file": "resource-capacity-red.txt",
+    "beforeSha256": "674d947106dae2ee843fd7c90987026ef224efe6d0615fb257a2a96f1c66fc21",
+    "afterSha256": "55b1b50c7c17f457923a59465a0e4c99a37a968f766672266b05345085951c97",
+    "normalization": "Trailing whitespace and final blank lines only"
+  },
+  {
+    "file": "resource-capacity-green.txt",
+    "beforeSha256": "1c4c96aff6077117a63ad1dd7584f8416d582bc0a81af086d978170a9ebab113",
+    "afterSha256": "6e940b3e78d00cc183255ca1efc82cf328c3e4f21c0203bfc55bbde58aff4c90",
+    "normalization": "Trailing whitespace and final blank lines only"
+  }
+]

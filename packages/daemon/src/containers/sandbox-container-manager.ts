@@ -12,6 +12,7 @@ import { readFile } from 'node:fs/promises';
 import { dirname, join, posix } from 'node:path';
 import { Readable, Writable } from 'node:stream';
 import { createGzip } from 'node:zlib';
+import { AutopodError } from '@autopod/shared';
 import type { Logger } from 'pino';
 import { type Headers as TarHeaders, type Pack as TarPack, pack as tarPack } from 'tar-stream';
 import type {
@@ -148,18 +149,13 @@ export class SandboxContainerManager implements ContainerManager {
 
     const tier = pickSandboxTier(config.memoryBytes, this.defaultTier);
     const grantedMemoryBytes = SANDBOX_TIER_MEMORY_BYTES[tier];
-    // The platform's largest tier is 4 GB, so any bigger request is silently
-    // downgraded. Say so out loud — a clamped ceiling shows up much later as an
-    // allocation failure inside the agent's toolchain, and looks like a code bug.
+    // Refuse an impossible request before allocating a sandbox. The adapter's
+    // supported capacity is a bound, never permission to silently reduce it.
     if (config.memoryBytes && config.memoryBytes > grantedMemoryBytes) {
-      this.logger.warn(
-        {
-          podId: config.podId,
-          requestedMemoryGb: config.memoryBytes / 1024 ** 3,
-          grantedMemoryGb: grantedMemoryBytes / 1024 ** 3,
-          tier,
-        },
-        'Requested container memory exceeds the largest sandbox tier — clamped. Memory-hungry tooling may fail; use the docker execution target if it needs more.',
+      throw new AutopodError(
+        `Sandbox resource preflight failed: requested ${config.memoryBytes / 1024 ** 3} GiB, but the supported ${tier} tier provides ${grantedMemoryBytes / 1024 ** 3} GiB. Explicitly choose a smaller requirement or a compatible execution target.`,
+        'PREFLIGHT_INSUFFICIENT_MEMORY',
+        409,
       );
     }
     const egressPolicy = egressPolicyForMode(config.networkPolicyMode, config.allowedHosts ?? []);

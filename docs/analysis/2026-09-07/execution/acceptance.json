@@ -372,7 +372,9 @@
         "receipts/dispatch-cli-tests.txt",
         "receipts/dispatch-mobile-tests.txt",
         "receipts/dispatch-mobile-browser.json",
-        "receipts/dispatch-swift-with-draft-tests.txt"
+        "receipts/dispatch-swift-with-draft-tests.txt",
+        "receipts/dispatch-native-contract-red.txt",
+        "receipts/dispatch-native-contract-green.txt"
       ],
       "prerequisites": [],
       "remaining": "Fresh-fetch actual-base receipts, exact task/contract equivalent-work admission, frozen repository/base binding and authenticated idempotent distinct reruns proven locally. Native interaction and live dispatch acceptance remain unverified. Required command/resource preflight and per-execution provenance remain separate unfinished criteria."
@@ -380,11 +382,15 @@
     {
       "id": "W3.3",
       "requirement": "Required commands, resources and provider binding checked before coding agent spawn",
-      "status": "unverified",
-      "implementation": [],
-      "tests": [],
-      "evidence": [],
-      "prerequisites": []
+      "status": "partial",
+      "implementation": ["packages/daemon/src/containers/sandbox-container-manager.ts"],
+      "tests": [
+        "packages/daemon/src/containers/sandbox-container-manager.test.ts",
+        "packages/daemon/src/containers/container-memory.test.ts"
+      ],
+      "evidence": ["receipts/resource-capacity-red.txt", "receipts/resource-capacity-green.txt"],
+      "prerequisites": [],
+      "remaining": "Sandbox requests above configured supported capacity now fail before allocation. Actual effective resource probe, required command checks, cohesive preflight receipt, other targets and live acceptance remain."
     },
     {
       "id": "W3.4",

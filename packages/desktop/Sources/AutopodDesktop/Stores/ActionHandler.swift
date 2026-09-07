@@ -100,7 +100,7 @@ public final class ActionHandler {
       },
       createIntentionalRerun: { [weak self] request in
         guard let self else { throw URLError(.notConnectedToInternet) }
-        let response = try await self.api.createPod(request)
+        let response = try await self.api.createIntentionalRerun(request)
         self.podStore.upsertSession(PodMapper.map(response))
         return response.id
       },

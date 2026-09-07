@@ -30,3 +30,24 @@ public struct DispatchConflict: Codable, Sendable, Identifiable {
   public let status: String
   public let evidence: String
 }
+
+/// Preserve all server-validated extension fields in an intentional rerun.
+/// Narrow display models must not rewrite the request contract.
+public struct IntentionalRerunDraft: Codable, Sendable {
+  private var fields: [String: AnyCodable]
+  public var intentionalRerun: IntentionalRerunRequest?
+  public init(from decoder: any Decoder) throws {
+    fields = try decoder.singleValueContainer().decode([String: AnyCodable].self)
+    if let intent = fields["intentionalRerun"] {
+      intentionalRerun = try JSONDecoder().decode(IntentionalRerunRequest.self, from: JSONEncoder().encode(intent))
+    }
+  }
+  public func encode(to encoder: any Encoder) throws {
+    var value = fields
+    if let intentionalRerun {
+      value["intentionalRerun"] = try JSONDecoder().decode(AnyCodable.self, from: JSONEncoder().encode(intentionalRerun))
+    } else { value.removeValue(forKey: "intentionalRerun") }
+    var container = encoder.singleValueContainer()
+    try container.encode(value)
+  }
+}
