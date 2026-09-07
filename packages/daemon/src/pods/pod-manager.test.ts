@@ -5634,6 +5634,63 @@ describe('PodManager', () => {
         expect(ctx.worktreeManager.pushBranch).toHaveBeenCalledTimes(1);
       });
 
+      it.each(['approved', 'merging', 'complete'] as const)(
+        'does not adopt a lifecycle replaced by the %s status listener',
+        async (phase) => {
+          const ctx = createTestContext();
+          const manager = createPodManager(ctx.deps);
+          const pod = manager.createSession(
+            { profileName: 'test-profile', task: 'Fence reentrant status listener' },
+            'user-1',
+          );
+          ctx.podRepo.update(
+            pod.id,
+            validatedPodUpdates(pod.id, {
+              worktreePath: '/tmp/original-approval',
+              containerId: 'original-container',
+              filesChanged: 0,
+            }),
+          );
+          vi.mocked(ctx.worktreeManager.getDiffStats).mockResolvedValue({
+            filesChanged: 0,
+            linesAdded: 0,
+            linesRemoved: 0,
+          });
+          (ctx.worktreeManager.hasChangesAgainstBase as ReturnType<typeof vi.fn>).mockResolvedValue(
+            true,
+          );
+          const completed: string[] = [];
+          ctx.eventBus.subscribe((event) => {
+            if (
+              event.type === 'pod.status_changed' &&
+              event.podId === pod.id &&
+              event.newStatus === phase
+            ) {
+              ctx.podRepo.incrementLifecycleGeneration(pod.id);
+              ctx.podRepo.update(pod.id, {
+                status: 'running',
+                containerId: 'replacement-container',
+                worktreePath: '/tmp/replacement-approval',
+                readinessReview: null,
+              });
+            }
+            if (event.type === 'pod.completed') completed.push(event.podId);
+          });
+          await expect(manager.approveSession(pod.id)).rejects.toMatchObject({
+            code: 'STALE_APPROVAL',
+          });
+          expect(manager.getSession(pod.id)).toMatchObject({
+            status: 'running',
+            containerId: 'replacement-container',
+            worktreePath: '/tmp/replacement-approval',
+            readinessReview: null,
+          });
+          expect(ctx.containerManager.kill).not.toHaveBeenCalledWith('replacement-container');
+          expect(completed).toEqual([]);
+          if (phase !== 'complete') expect(ctx.containerManager.kill).not.toHaveBeenCalled();
+        },
+      );
+
       it('pushes branch with accumulated work before emitting pod.completed', async () => {
         const ctx = createTestContext();
         const manager = createPodManager(ctx.deps);

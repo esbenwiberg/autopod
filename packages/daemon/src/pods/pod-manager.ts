@@ -11754,19 +11754,30 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           } else {
             forceWithLeaseAllowances.delete(podId);
           }
+          // transition publishes status synchronously and returns the current row.
+          // A listener can replace that row; retain the original approval identity.
+          const approvedAnchor: Pod = { ...pod, status: 'approved' };
+          const mergingAnchor: Pod = { ...pod, status: 'merging' };
           const s1 = transition(pod, 'approved');
+          assertApprovalCurrent(approvedAnchor);
           persistReadinessApproval(podId, readiness, actor, approvalReason);
+          assertApprovalCurrent(approvedAnchor);
           const s2 = transition(s1, 'merging');
+          assertApprovalCurrent(mergingAnchor);
           await cleanupContainerAfterAdvisorySettles(s2, 'approve-no-changes', 'kill', () =>
-            assertApprovalCurrent(s2, { allowRemovedContainer: true, allowComplete: true }),
+            assertApprovalCurrent(mergingAnchor, {
+              allowRemovedContainer: true,
+              allowComplete: true,
+            }),
           );
-          assertApprovalCurrent(s2, { allowRemovedContainer: true });
+          assertApprovalCurrent(mergingAnchor, { allowRemovedContainer: true });
           const noChangePod = transition(s2, 'complete', {
             completedAt: new Date().toISOString(),
             ...(pod.failureReason?.startsWith('Branch preservation failed.')
               ? { failureReason: null }
               : {}),
           });
+          assertApprovalCurrent({ ...pod, status: 'complete' }, { allowRemovedContainer: true });
           eventBus.emit({
             type: 'pod.completed',
             timestamp: new Date().toISOString(),
@@ -11788,6 +11799,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
             { podId, branchPushed: shouldPushBranch },
             'Pod approved with no changes — completed without PR',
           );
+          assertApprovalCurrent({ ...pod, status: 'complete' }, { allowRemovedContainer: true });
           maybeTriggerDependents(noChangePod);
           return;
         }

@@ -1,0 +1,60 @@
+
+ RUN  v4.1.11 /private/tmp/autopod-durable-execution/packages/daemon
+
+ ❯ src/pods/pod-manager.test.ts (453 tests | 3 failed | 450 skipped) 182ms
+         × does not adopt a lifecycle replaced by the approved status listener 93ms
+         × does not adopt a lifecycle replaced by the merging status listener 46ms
+         × does not adopt a lifecycle replaced by the complete status listener 43ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 3 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/pods/pod-manager.test.ts > PodManager > approveSession > no-changes fast-path > does not adopt a lifecycle replaced by the approved status listener
+AssertionError: expected InvalidStateTransitionError: Cannot trans… { …(2) } to match object { code: 'STALE_APPROVAL' }
+(2 matching properties omitted from actual)
+
+- Expected
++ Received
+
+- {
+-   "code": "STALE_APPROVAL",
++ InvalidStateTransitionError {
++   "code": "INVALID_STATE_TRANSITION",
+  }
+
+ ❯ src/pods/pod-manager.test.ts:5679:54
+    5677|             if (event.type === 'pod.completed') completed.push(event.p…
+    5678|           });
+    5679|           await expect(manager.approveSession(pod.id)).rejects.toMatch…
+       |                                                      ^
+    5680|             code: 'STALE_APPROVAL',
+    5681|           });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/3]⎯
+
+ FAIL  src/pods/pod-manager.test.ts > PodManager > approveSession > no-changes fast-path > does not adopt a lifecycle replaced by the merging status listener
+ FAIL  src/pods/pod-manager.test.ts > PodManager > approveSession > no-changes fast-path > does not adopt a lifecycle replaced by the complete status listener
+AssertionError: promise resolved "undefined" instead of rejecting
+
+- Expected:
+Error {
+  "message": "rejected promise",
+}
+
++ Received:
+undefined
+
+ ❯ src/pods/pod-manager.test.ts:5679:54
+    5677|             if (event.type === 'pod.completed') completed.push(event.p…
+    5678|           });
+    5679|           await expect(manager.approveSession(pod.id)).rejects.toMatch…
+       |                                                      ^
+    5680|             code: 'STALE_APPROVAL',
+    5681|           });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/3]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  3 failed | 450 skipped (453)
+   Start at  21:47:03
+   Duration  1.47s (transform 787ms, setup 0ms, import 1.18s, tests 182ms, environment 0ms)

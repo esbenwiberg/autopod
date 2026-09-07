@@ -1,0 +1,22 @@
+{
+  "approval29-red.txt": {
+    "rawPath": "/private/tmp/autopod-approval29-red.txt",
+    "rawSha256": "c807ac1d539cc8a7b4eb6ac2667f24d20470497fb3e3a84b33003381fe8f2832",
+    "normalization": "trailing whitespace and final blank lines only"
+  },
+  "approval29-focused.txt": {
+    "rawPath": "/private/tmp/autopod-approval29-focused.txt",
+    "rawSha256": "208a5719c85e0058c4b2ff8eb0f15c05e27b4edcc8858ee9d05829ecf376c572",
+    "normalization": "trailing whitespace and final blank lines only"
+  },
+  "approval29-lint.txt": {
+    "rawPath": "/private/tmp/autopod-approval29-lint.txt",
+    "rawSha256": "b6de960dafeca8c00bf5b00031cca8cb52e9d795cdf0ead20597b4ed457b7f70",
+    "normalization": "trailing whitespace and final blank lines only"
+  },
+  "approval29-build.txt": {
+    "rawPath": "/private/tmp/autopod-approval29-build.txt",
+    "rawSha256": "f90f0a8ffc09000855f679edca05301d5671db39abca94a6e14fd1e8ef8673bd",
+    "normalization": "trailing whitespace and final blank lines only"
+  }
+}
