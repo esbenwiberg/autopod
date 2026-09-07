@@ -1,0 +1,32 @@
+{
+  "cost27-red.txt": {
+    "rawPath": "/private/tmp/autopod-cost27-red.txt",
+    "rawSha256": "0a107bb0dfe80cd29369d35134805081f7ec36b2596ab90cd51e6373e05cafed",
+    "normalization": "trailing whitespace and final blank lines only"
+  },
+  "cost27-daemon.txt": {
+    "rawPath": "/private/tmp/autopod-cost27-focused.txt",
+    "rawSha256": "fffa7877754e764e648deccaa90a54d36488fd8beb564dfa8325b9620fb1d9fd",
+    "normalization": "trailing whitespace and final blank lines only"
+  },
+  "cost27-cli.txt": {
+    "rawPath": "/private/tmp/autopod-cost27-cli.txt",
+    "rawSha256": "a7eb2361b01592ddf80b51c6632778477eecfbdc6fe254d6e1d7dc592367427c",
+    "normalization": "trailing whitespace and final blank lines only"
+  },
+  "cost27-mobile.txt": {
+    "rawPath": "/private/tmp/autopod-cost27-mobile.txt",
+    "rawSha256": "a526358cb29ac304b542c24d0b775fd218935faabed1a8e7a5192f9f1ed149df",
+    "normalization": "trailing whitespace and final blank lines only"
+  },
+  "cost27-swift.txt": {
+    "rawPath": "/private/tmp/autopod-cost27-swift.txt",
+    "rawSha256": "acabc906ca690114b71a402fb9f19fb1a08262cf9afb1921349ba92876a682e2",
+    "normalization": "trailing whitespace and final blank lines only"
+  },
+  "cost27-build.txt": {
+    "rawPath": "/private/tmp/autopod-cost27-build-final.txt",
+    "rawSha256": "3a9f9cc9086d03049eebe0f0e7ff82d8002657c73e06451cd87df85b1cbb6da6",
+    "normalization": "trailing whitespace and final blank lines only"
+  }
+}

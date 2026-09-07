@@ -729,7 +729,7 @@ export function registerPodCommands(program: Command, getClient: () => AutopodCl
         if (task.costEvidence) {
           const evidence = task.costEvidence;
           console.log(
-            `Known estimates: $${evidence.knownEstimatedCostUsd.toFixed(4)}; ${evidence.unavailablePhaseCount} phases with unavailable cost; ${evidence.conflictingPodCount} pods with conflicting attribution`,
+            `Known estimates: $${evidence.knownEstimatedCostUsd.toFixed(4)}; ${evidence.unavailablePhaseCount} identified phases with unavailable cost; ${evidence.conflictingPodCount} pods with conflicting attribution`,
           );
           for (const item of evidence.diagnostics) console.log(`${item.podId}: ${item.message}`);
           if (evidence.omittedDiagnosticCount > 0)

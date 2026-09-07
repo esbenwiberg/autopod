@@ -1,4 +1,5 @@
-import type { Pod, PodCostBreakdownResponse, PodCostBucket, PodCostSegment } from '@autopod/shared';
+import type { PodCostBreakdownResponse, PodCostBucket, PodCostSegment } from '@autopod/shared';
+import type { PodCostSource } from './cost-pod-projection.js';
 import { reconcilePodCosts } from './cost-reconciliation.js';
 import type { ProviderUsageProjection } from './provider-usage-projection.js';
 
@@ -19,7 +20,7 @@ const definitions: Array<{
 ];
 
 export function computePodCostBreakdown(
-  pod: Pod,
+  pod: PodCostSource,
   usage?: ProviderUsageProjection,
 ): PodCostBreakdownResponse {
   const result = reconcilePodCosts(pod, usage);

@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { AutopodError, type TaskExecutionSummary } from '@autopod/shared';
 import type Database from 'better-sqlite3';
+import { COST_PHASE_COLUMNS } from './cost-pod-projection.js';
 import {
   appendCostEvidence,
   emptyCostEvidence,
@@ -91,7 +92,7 @@ export function createTaskExecutionLedger(db: Database.Database): TaskExecutionL
     let incompleteSpending = false;
     const rows = db
       .prepare(`SELECT p.id, p.input_tokens, p.output_tokens, p.cost_usd,
-      p.phase_token_usage, p.token_telemetry_accuracy FROM task_executions e JOIN pods p ON p.id = e.pod_id
+      ${COST_PHASE_COLUMNS}, p.token_telemetry_accuracy FROM task_executions e JOIN pods p ON p.id = e.pod_id
       WHERE e.task_id = ?`)
       .all(identity.taskId) as Array<{
       id: string;
@@ -99,6 +100,7 @@ export function createTaskExecutionLedger(db: Database.Database): TaskExecutionL
       output_tokens: number;
       cost_usd: number;
       phase_token_usage: string | null;
+      phase_token_usage_oversized: number | null;
       token_telemetry_accuracy: string;
     }>;
     const number = (value: unknown, id: string): number => {
@@ -153,6 +155,9 @@ export function createTaskExecutionLedger(db: Database.Database): TaskExecutionL
           outputTokens: row.output_tokens,
           costUsd: row.cost_usd,
           phaseTokenUsage: rawPhases,
+          recordDiagnostics: row.phase_token_usage_oversized
+            ? [{ field: 'phase_token_usage', code: 'size_limit' }]
+            : [],
         },
         attempts,
       );
@@ -173,6 +178,12 @@ export function createTaskExecutionLedger(db: Database.Database): TaskExecutionL
       ) {
         diagnostics.push(`${row.id}: agent telemetry incomplete`);
         if (priorWork) incompleteSpending = true;
+      }
+      if (row.phase_token_usage_oversized) {
+        diagnostics.push(
+          `${row.id}: phase telemetry exceeds the 64 KiB read limit; stored source preserved`,
+        );
+        incompleteSpending = true;
       }
       if (!row.phase_token_usage) {
         diagnostics.push(`${row.id}: phase telemetry unavailable`);

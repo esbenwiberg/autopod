@@ -1,0 +1,88 @@
+
+ RUN  v4.1.11 /private/tmp/autopod-durable-execution/packages/daemon
+
+ ❯ src/api/routes/pods.test.ts (85 tests | 4 failed | 81 skipped) 227ms
+     × bounds cost phase reads before JSON parsing and preserves unrelated legacy evidence 86ms
+     × bounds task-execution phase reads before JSON parsing and preserves unrelated legacy evidence 52ms
+     × bounds fleet phase reads before JSON parsing and preserves unrelated legacy evidence 47ms
+     × serves healthy per-pod cost without parsing malformed unrelated control-plane evidence 40ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 4 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/api/routes/pods.test.ts > GET /pods/:podId provider-attempt projection > bounds cost phase reads before JSON parsing and preserves unrelated legacy evidence
+AssertionError: {"statusCode":500,"error":"Internal Server Error","message":"Unexpected token 'm', \"malformed-\"... is not valid JSON"}: expected 500 to be 200 // Object.is equality
+
+- Expected
++ Received
+
+- 200
++ 500
+
+ ❯ src/api/routes/pods.test.ts:237:66
+    235|         const url = view === 'fleet' ? '/pods/analytics/cost?days=1' :…
+    236|         const response = await app.inject({ method: 'GET', url });
+    237|         expect(response.statusCode, response.body.slice(0, 500)).toBe(…
+       |                                                                  ^
+    238|         expect(Buffer.byteLength(response.body)).toBeLessThan(16 * 102…
+    239|         const body = response.json();
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/4]⎯
+
+ FAIL  src/api/routes/pods.test.ts > GET /pods/:podId provider-attempt projection > bounds task-execution phase reads before JSON parsing and preserves unrelated legacy evidence
+ FAIL  src/api/routes/pods.test.ts > GET /pods/:podId provider-attempt projection > bounds fleet phase reads before JSON parsing and preserves unrelated legacy evidence
+AssertionError: expected [ …(2) ] to deep equally contain ObjectContaining{…}
+
+- Expected:
+ObjectContaining {
+  "code": "PHASE_PAYLOAD_LIMIT",
+  "podId": "bounded-cost",
+}
+
++ Received:
+[
+  {
+    "code": "PHASE_ATTRIBUTION_UNAVAILABLE",
+    "message": "Phase cost attribution is unavailable.",
+    "podId": "bounded-cost",
+  },
+  {
+    "code": "COST_PROVENANCE_UNVERIFIED",
+    "message": "Stored amounts can include runtime or historical estimates; billing and infrastructure cost are unverified.",
+    "podId": "bounded-cost",
+  },
+]
+
+ ❯ src/api/routes/pods.test.ts:241:47
+    239|         const body = response.json();
+    240|         expect(body.total ?? body.totalCostUsd ?? body.recordedCostUsd…
+    241|         expect(body.costEvidence.diagnostics).toContainEqual(
+       |                                               ^
+    242|           expect.objectContaining({ podId: 'bounded-cost', code: 'PHAS…
+    243|         );
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/4]⎯
+
+ FAIL  src/api/routes/pods.test.ts > GET /pods/:podId provider-attempt projection > serves healthy per-pod cost without parsing malformed unrelated control-plane evidence
+AssertionError: {"statusCode":500,"error":"Internal Server Error","message":"Unexpected token 'm', \"malformed-\"... is not valid JSON"}: expected 500 to be 200 // Object.is equality
+
+- Expected
++ Received
+
+- 200
++ 500
+
+ ❯ src/api/routes/pods.test.ts:264:62
+    262|     ).run(JSON.stringify({ review: { inputTokens: 5, outputTokens: 2, …
+    263|     const response = await app.inject({ method: 'GET', url: '/pods/hea…
+    264|     expect(response.statusCode, response.body.slice(0, 500)).toBe(200);
+       |                                                              ^
+    265|     expect(response.json().totalCostUsd).toBe(1.25);
+    266|     expect(db.prepare("SELECT contract FROM pods WHERE id='healthy-cos…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/4]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  4 failed | 81 skipped (85)
+   Start at  21:18:05
+   Duration  1.39s (transform 624ms, setup 0ms, import 1.05s, tests 227ms, environment 0ms)

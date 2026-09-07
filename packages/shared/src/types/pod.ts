@@ -80,6 +80,7 @@ export interface CostEvidence {
   basis: 'stored_subtotal';
   billingVerified: false;
   knownEstimatedCostUsd: number;
+  /** Recognized phase entries missing a stored amount; unreadable whole payloads have unknown phase counts. */
   unavailablePhaseCount: number;
   conflictingPodCount: number;
   diagnostics: Array<{ podId: string; code: string; message: string }>;

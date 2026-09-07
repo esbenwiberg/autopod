@@ -937,7 +937,7 @@ export function podRoutes(
   app.get('/pods/:podId/cost', async (request) => {
     const { podId } = request.params as { podId: string };
     const breakdown = computePodCostBreakdown(
-      podManager.getSession(podId),
+      podRepo?.getCostRecord?.(podId) ?? podManager.getSession(podId),
       podRepo?.getProviderUsage?.(podId),
     );
     try {

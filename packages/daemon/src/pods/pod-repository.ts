@@ -243,8 +243,7 @@ import { type DeliveryLedger, createDeliveryLedger } from './delivery-ledger.js'
 
 import { type TaskExecutionLedger, createTaskExecutionLedger } from './task-execution-ledger.js';
 
-/** Cost readers validate raw phase buckets individually to retain healthy siblings. */
-export type PodCostSource = Omit<Pod, 'phaseTokenUsage'> & { phaseTokenUsage: unknown };
+import { COST_POD_COLUMNS, type PodCostSource } from './cost-pod-projection.js';
 
 export interface PodRepository extends Partial<UnitOfWork> {
   taskRetries?: TaskRetryLedger;
@@ -269,6 +268,7 @@ export interface PodRepository extends Partial<UnitOfWork> {
   listCompactForDisplay?(filters?: PodFilters): CompactPodSource[];
   /** Bounded cost projection; never materializes contracts, prompts or validation payloads. */
   listCostRecords?(completedSince: string): PodCostSource[];
+  getCostRecord?(podId: string): PodCostSource;
   getProviderUsage?(podId: string): ProviderUsageProjection;
   /** All pods whose status is not terminal (`complete` / `killed`). */
   listNonTerminal(): Pod[];
@@ -631,6 +631,22 @@ function rowToDisplaySession(source: Record<string, unknown>): Pod {
     }
   }
   return { ...rowToSession(row), recordDiagnostics: diagnostics };
+}
+
+function rowToCostSource(row: Record<string, unknown>): PodCostSource {
+  // Display decoding diagnoses corrupt siblings; reconciliation needs raw values
+  // to preserve healthy costs and report unavailable phases independently.
+  const rawPhases = row.phase_token_usage;
+  const pod = rowToDisplaySession(row);
+  let phaseTokenUsage: unknown = null;
+  try {
+    phaseTokenUsage = rawPhases ? JSON.parse(String(rawPhases)) : null;
+  } catch {
+    /* already diagnosed */
+  }
+  if (row.phase_token_usage_oversized)
+    pod.recordDiagnostics?.push({ field: 'phase_token_usage', code: 'size_limit' });
+  return { ...pod, phaseTokenUsage };
 }
 
 export function createPodRepository(db: Database.Database): PodRepository {
@@ -1254,28 +1270,21 @@ export function createPodRepository(db: Database.Database): PodRepository {
 
     getProviderUsage: (podId) => readProviderUsage(db, podId),
 
+    getCostRecord(podId: string): PodCostSource {
+      const row = db.prepare(`SELECT ${COST_POD_COLUMNS} FROM pods WHERE id = ?`).get(podId) as
+        | Record<string, unknown>
+        | undefined;
+      if (!row) throw new PodNotFoundError(podId);
+      return rowToCostSource(row);
+    },
+
     listCostRecords(completedSince: string): PodCostSource[] {
       const rows = db
-        .prepare(`SELECT id, profile_name, status, model, runtime, completed_at,
-        input_tokens, output_tokens, cost_usd, phase_token_usage, token_telemetry_accuracy,
-        output_mode, agent_mode, output_target, validate, promotable
-        FROM pods WHERE status IN ('complete','killed','failed','rejected')
+        .prepare(`SELECT ${COST_POD_COLUMNS} FROM pods WHERE status IN ('complete','killed','failed','rejected')
           AND agent_mode != 'interactive' AND completed_at >= ?
         ORDER BY completed_at, id`)
         .iterate(completedSince) as Iterable<Record<string, unknown>>;
-      return Array.from(rows, (row) => {
-        // Display decoding diagnoses corrupt siblings; reconciliation needs raw values
-        // to preserve healthy costs and report unavailable phases independently.
-        const rawPhases = row.phase_token_usage;
-        const pod = rowToDisplaySession(row);
-        let phaseTokenUsage: unknown = null;
-        try {
-          phaseTokenUsage = rawPhases ? JSON.parse(String(rawPhases)) : null;
-        } catch {
-          /* already diagnosed */
-        }
-        return { ...pod, phaseTokenUsage };
-      });
+      return Array.from(rows, rowToCostSource);
     },
 
     listNonTerminalPodIds(): string[] {

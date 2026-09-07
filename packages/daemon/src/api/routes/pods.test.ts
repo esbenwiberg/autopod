@@ -209,6 +209,66 @@ describe('GET /pods/:podId provider-attempt projection', () => {
     ).toBe(0.5);
   });
 
+  it.each(['cost', 'task-execution', 'fleet'] as const)(
+    'bounds %s phase reads before JSON parsing and preserves unrelated legacy evidence',
+    async (view) => {
+      insertPod(db, { id: 'bounded-cost', status: 'complete' });
+      createPodRepository(db).taskExecutions?.register('bounded-cost');
+      const large = JSON.stringify({
+        review: {
+          inputTokens: 5,
+          outputTokens: 2,
+          costUsd: 0.25,
+          legacyOutput: 'large-private-fixture '.repeat(100_000),
+        },
+      });
+      db.prepare(
+        "UPDATE pods SET completed_at=?, contract='malformed-unrelated-contract', task_summary='malformed-unrelated-summary', spec_files=?, phase_token_usage=?, cost_usd=1, input_tokens=10, token_telemetry_accuracy='complete', token_budget=100 WHERE id='bounded-cost'",
+      ).run(new Date().toISOString(), large, large);
+      const parse = JSON.parse;
+      const parser = vi.spyOn(JSON, 'parse').mockImplementation((...args) => {
+        if (args[0].length > 64 * 1024)
+          throw new Error('Unbounded phase payload reached JSON parser');
+        return parse(...args);
+      });
+      try {
+        const url = view === 'fleet' ? '/pods/analytics/cost?days=1' : `/pods/bounded-cost/${view}`;
+        const response = await app.inject({ method: 'GET', url });
+        expect(response.statusCode, response.body.slice(0, 500)).toBe(200);
+        expect(Buffer.byteLength(response.body)).toBeLessThan(16 * 1024);
+        expect(parser.mock.calls.every((args) => args[0].length <= 64 * 1024)).toBe(true);
+        const body = response.json();
+        expect(body.total ?? body.totalCostUsd ?? body.recordedCostUsd).toBe(1);
+        expect(body.costEvidence.diagnostics).toContainEqual(
+          expect.objectContaining({ podId: 'bounded-cost', code: 'PHASE_PAYLOAD_LIMIT' }),
+        );
+        if (view === 'task-execution') expect(body.budgetCheck.status).toBe('unavailable');
+      } finally {
+        parser.mockRestore();
+      }
+      expect(
+        db
+          .prepare(
+            "SELECT contract, length(CAST(phase_token_usage AS BLOB)) AS bytes FROM pods WHERE id='bounded-cost'",
+          )
+          .get(),
+      ).toEqual({ contract: 'malformed-unrelated-contract', bytes: Buffer.byteLength(large) });
+    },
+  );
+
+  it('serves healthy per-pod cost without parsing malformed unrelated control-plane evidence', async () => {
+    insertPod(db, { id: 'healthy-cost', status: 'complete' });
+    db.prepare(
+      "UPDATE pods SET contract='malformed-unrelated-contract', cost_usd=1, phase_token_usage=? WHERE id='healthy-cost'",
+    ).run(JSON.stringify({ review: { inputTokens: 5, outputTokens: 2, costUsd: 0.25 } }));
+    const response = await app.inject({ method: 'GET', url: '/pods/healthy-cost/cost' });
+    expect(response.statusCode, response.body.slice(0, 500)).toBe(200);
+    expect(response.json().totalCostUsd).toBe(1.25);
+    expect(db.prepare("SELECT contract FROM pods WHERE id='healthy-cost'").get()).toEqual({
+      contract: 'malformed-unrelated-contract',
+    });
+  });
+
   it('keeps malformed legacy list evidence visible without hiding healthy records or breaking projected costs', async () => {
     for (const id of ['healthy', 'malformed'])
       db.prepare(`INSERT INTO pods

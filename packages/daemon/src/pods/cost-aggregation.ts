@@ -1,6 +1,7 @@
 import type { CostAnalyticsResponse } from '@autopod/shared';
+import type { PodCostSource } from './cost-pod-projection.js';
 import { appendCostEvidence, emptyCostEvidence, reconcilePodCosts } from './cost-reconciliation.js';
-import type { PodCostSource, PodRepository } from './pod-repository.js';
+import type { PodRepository } from './pod-repository.js';
 
 type CompletedPod = PodCostSource & { completedAt: string };
 

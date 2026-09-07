@@ -1,0 +1,16 @@
+{
+  "scope": "built mobile app with local response fixtures only",
+  "url": "http://127.0.0.1:56010/mobile/#/pod/local-fixture",
+  "observed": [
+    "Stored task cost subtotal: $1.0000; partial telemetry",
+    "Billing unverified; stored amounts can include estimates",
+    "0 identified phases with unavailable cost",
+    "Phase telemetry exceeds the 64 KiB read limit; its cost is unavailable and the stored source is preserved.",
+    "Task token accounting incomplete; reconcile prior execution and phase telemetry before starting more budgeted work."
+  ],
+  "action": "Refresh task accounting",
+  "result": "same diagnostic, scoped count, subtotal and budget message visible after refresh",
+  "cleanup": "tab closed; fixture server exited 130 after Ctrl-C",
+  "nativeInteraction": "unverified",
+  "production": "not exercised"
+}

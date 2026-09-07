@@ -57,7 +57,7 @@ export function TaskExecutionPanel({ podId, revision }: { podId: string; revisio
             <>
               <p>
                 Known estimates: ${data.costEvidence.knownEstimatedCostUsd.toFixed(4)} ·{' '}
-                {data.costEvidence.unavailablePhaseCount} phases with unavailable cost ·{' '}
+                {data.costEvidence.unavailablePhaseCount} identified phases with unavailable cost ·{' '}
                 {data.costEvidence.conflictingPodCount} pods with conflicting attribution
               </p>
               {data.costEvidence.diagnostics.map((item, index) => (

@@ -537,7 +537,7 @@ it('status command renders real HTTP delivery accounting and reused evidence, pr
     expect(output).toContain('Stored task cost subtotal:');
     expect(output).toContain('Billing unverified');
     expect(output).toContain(
-      'Known estimates: $0.5000; 1 phases with unavailable cost; 1 pods with conflicting attribution',
+      'Known estimates: $0.5000; 1 identified phases with unavailable cost; 1 pods with conflicting attribution',
     );
     expect(output).toContain('Stored phase costs conflict; no proportional allocation applied.');
     expect(output).toContain('2 additional cost diagnostics omitted.');

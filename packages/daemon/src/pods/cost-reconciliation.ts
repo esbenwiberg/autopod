@@ -19,7 +19,9 @@ export const isHarnessCostPhase = (phase: string): boolean =>
 /** Reconcile stored amounts without substituting current model prices or
  * manufacturing phase allocation. A conflicting source remains visible. */
 export function reconcilePodCosts(
-  pod: Pick<Pod, 'id' | 'inputTokens' | 'outputTokens' | 'costUsd'> & { phaseTokenUsage: unknown },
+  pod: Pick<Pod, 'id' | 'inputTokens' | 'outputTokens' | 'costUsd' | 'recordDiagnostics'> & {
+    phaseTokenUsage: unknown;
+  },
   usage?: ProviderUsageProjection,
 ): { total: number; agent: number; phases: CostPhase[]; evidence: CostEvidence } {
   const diagnostics: CostEvidence['diagnostics'] = [];
@@ -28,6 +30,15 @@ export function reconcilePodCosts(
     if (diagnostics.length < 100) diagnostics.push({ podId: pod.id, code, message });
     else omittedDiagnosticCount++;
   };
+  for (const issue of pod.recordDiagnostics ?? []) {
+    if (issue.field === 'phase_token_usage')
+      diagnose(
+        issue.code === 'size_limit' ? 'PHASE_PAYLOAD_LIMIT' : 'PHASE_PAYLOAD_INVALID',
+        issue.code === 'size_limit'
+          ? 'Phase telemetry exceeds the 64 KiB read limit; its cost is unavailable and the stored source is preserved.'
+          : 'Some phase telemetry is unreadable; healthy stored phase amounts remain included.',
+      );
+  }
   const provider = usage && usage.count > 0 ? usage : null;
   const amount = provider ? provider.costUsd : pod.costUsd;
   const agent = finiteAmount(amount) ? amount : 0;

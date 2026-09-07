@@ -184,7 +184,8 @@ if (startupRetryFixture) {
   retryState.interruptedCount = 0;
   retryState.latest = { id: 'local-startup-failure', outcome: 'transient' };
 }
-const taskBudgetFixture = process.env.TASK_BUDGET_FIXTURE === '1';
+const costPayloadLimitFixture = process.env.FIXTURE_MODE === 'cost-payload-limit';
+const taskBudgetFixture = process.env.TASK_BUDGET_FIXTURE === '1' || costPayloadLimitFixture;
 const savedSnapshotRecovery = process.env.ARTIFACT_SNAPSHOT_FIXTURE === '1';
 const artifactRecovery = process.env.ARTIFACT_RECOVERY_FIXTURE === '1' || savedSnapshotRecovery;
 let artifactRetryCount = 0;
@@ -458,22 +459,39 @@ const server = createServer(async (req, res) => {
           },
       recordedInputTokens: taskBudgetFixture ? 10 : 90,
       recordedOutputTokens: taskBudgetFixture ? 5 : 10,
-      recordedCostUsd: 1.25,
-      costEvidence: {
-        basis: 'stored_subtotal',
-        billingVerified: false,
-        knownEstimatedCostUsd: 0.5,
-        unavailablePhaseCount: 1,
-        conflictingPodCount: 1,
-        omittedDiagnosticCount: 2,
-        diagnostics: [
-          {
-            podId: 'local-original',
-            code: 'PHASE_COST_CONFLICT',
-            message: 'Stored phase costs conflict; no proportional allocation applied.',
+      recordedCostUsd: costPayloadLimitFixture ? 1 : 1.25,
+      costEvidence: costPayloadLimitFixture
+        ? {
+            basis: 'stored_subtotal',
+            billingVerified: false,
+            knownEstimatedCostUsd: 0,
+            unavailablePhaseCount: 0,
+            conflictingPodCount: 0,
+            omittedDiagnosticCount: 0,
+            diagnostics: [
+              {
+                podId: 'local-original',
+                code: 'PHASE_PAYLOAD_LIMIT',
+                message:
+                  'Phase telemetry exceeds the 64 KiB read limit; its cost is unavailable and the stored source is preserved.',
+              },
+            ],
+          }
+        : {
+            basis: 'stored_subtotal',
+            billingVerified: false,
+            knownEstimatedCostUsd: 0.5,
+            unavailablePhaseCount: 1,
+            conflictingPodCount: 1,
+            omittedDiagnosticCount: 2,
+            diagnostics: [
+              {
+                podId: 'local-original',
+                code: 'PHASE_COST_CONFLICT',
+                message: 'Stored phase costs conflict; no proportional allocation applied.',
+              },
+            ],
           },
-        ],
-      },
       infrastructureCostUsd: null,
       telemetry: 'partial',
       delivery: {

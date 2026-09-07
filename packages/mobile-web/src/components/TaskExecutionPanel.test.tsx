@@ -78,7 +78,7 @@ it('keeps unavailable accounting explicit and refreshes after a disconnected req
     expect(container.textContent).toContain('Stored task cost subtotal:');
     expect(container.textContent).toContain('Billing unverified');
     expect(container.textContent).toContain(
-      'Known estimates: $0.5000 · 1 phases with unavailable cost · 1 pods with conflicting attribution',
+      'Known estimates: $0.5000 · 1 identified phases with unavailable cost · 1 pods with conflicting attribution',
     );
     expect(container.textContent).toContain(
       'Stored phase costs conflict; no proportional allocation applied.',
