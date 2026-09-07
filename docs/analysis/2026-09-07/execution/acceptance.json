@@ -231,7 +231,9 @@
         "checkpoint-36.md",
         "checkpoint-37.md",
         "checkpoint-38.md",
-        "checkpoint-39.md"
+        "checkpoint-39.md",
+        "receipts/checkpoint-39-full-validation.txt",
+        "receipts/checkpoint-39-validation-identity.json"
       ],
       "prerequisites": [
         "PR creation intent/reconciliation implemented locally; broader finalization side effects and operator override remain."
