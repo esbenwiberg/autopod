@@ -800,3 +800,55 @@ it('reads execution provenance through the real HTTP client without inventing un
     await new Promise<void>((resolve) => server.close(() => resolve()));
   }
 });
+
+it('does not report approval when branch preservation fails over HTTP and permits explicit retry', async () => {
+  const pod = await createMockClient().getSession('abcd1234');
+  let attempts = 0;
+  const server = createServer((req, res) => {
+    res.setHeader('content-type', 'application/json');
+    if (req.method === 'POST' && req.url === '/pods/abcd1234/approve') {
+      attempts++;
+      if (attempts === 1) {
+        res.statusCode = 502;
+        res.end(
+          JSON.stringify({
+            error: 'BRANCH_PRESERVATION_FAILED',
+            message:
+              'Branch preservation failed. Original resources retained; repair remote access and retry approval.',
+          }),
+        );
+      } else res.end(JSON.stringify({ ok: true }));
+    } else if (req.method === 'GET' && req.url === '/pods/abcd1234') res.end(JSON.stringify(pod));
+    else {
+      res.statusCode = 404;
+      res.end('{}');
+    }
+  });
+  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+  const address = server.address();
+  if (!address || typeof address === 'string') throw new Error('No fixture address');
+  const client = new AutopodClient({
+    baseUrl: `http://127.0.0.1:${address.port}`,
+    getToken: async () => 'local-fixture-only',
+  });
+  const log = vi.spyOn(console, 'log').mockImplementation(() => {});
+  const command = () => {
+    const program = new Command();
+    registerPodCommands(program, () => client);
+    return program;
+  };
+  try {
+    await expect(command().parseAsync(['node', 'ap', 'approve', 'abcd1234'])).rejects.toThrow(
+      'retry approval',
+    );
+    expect(log.mock.calls.flat().join(' ')).not.toContain('approved.');
+    await command().parseAsync(['node', 'ap', 'approve', 'abcd1234']);
+    expect(log.mock.calls.flat().join(' ')).toContain('Pod abcd1234 approved.');
+    expect(attempts).toBe(2);
+  } finally {
+    log.mockRestore();
+    await new Promise<void>((resolve, reject) =>
+      server.close((error) => (error ? reject(error) : resolve())),
+    );
+  }
+});

@@ -3651,15 +3651,16 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
     pod: Pod,
     label: string,
     mode: 'kill' | 'stop' = 'kill',
+    assertReleaseAllowed?: () => void,
   ): Promise<void> {
     const advisoryRun = advisoryRuns.get(pod.id);
     if (!advisoryRun) {
-      return cleanupContainer(pod, label, mode);
+      return cleanupContainer(pod, label, mode, assertReleaseAllowed);
     }
 
     emitActivityStatus(pod.id, 'Keeping container running until advisory browser QA finishes…');
     void advisoryRun
-      .finally(() => cleanupContainer(pod, label, mode))
+      .finally(() => cleanupContainer(pod, label, mode, assertReleaseAllowed))
       .catch((err) =>
         logger.warn(
           { err, podId: pod.id, label, mode },
@@ -6644,6 +6645,46 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
       emitActivityError(pod.id, failureReason, false);
     }
     throw new AutopodError(failureReason, 'WORKSPACE_PRESERVATION_FAILED', 502);
+  }
+
+  function assertApprovalCurrent(
+    pod: Pod,
+    options: { allowRemovedContainer?: boolean; allowComplete?: boolean } = {},
+  ): void {
+    const current = podRepo.getOrThrow(pod.id);
+    if (
+      current.lifecycleGeneration !== pod.lifecycleGeneration ||
+      (current.status !== pod.status &&
+        !(options.allowComplete && current.status === 'complete')) ||
+      current.options.agentMode !== pod.options.agentMode ||
+      current.options.output !== pod.options.output ||
+      current.branch !== pod.branch ||
+      current.baseBranch !== pod.baseBranch ||
+      current.executionTarget !== pod.executionTarget ||
+      current.worktreePath !== pod.worktreePath ||
+      (current.containerId !== pod.containerId &&
+        !(options.allowRemovedContainer && current.containerId === null))
+    )
+      throw new AutopodError(
+        'Approval was superseded; the current lifecycle and resources are retained.',
+        'STALE_APPROVAL',
+        409,
+      );
+    if (podRepo.hasUnansweredDecision?.(pod.id))
+      throw new AutopodError(
+        'An unanswered human decision blocks approval.',
+        'PENDING_HUMAN_DECISION',
+        409,
+      );
+  }
+
+  function failBranchPreservation(pod: Pod): never {
+    assertApprovalCurrent(pod);
+    const reason =
+      'Branch preservation failed. Original resources retained; repair the branch or remote access and retry approval.';
+    podRepo.update(pod.id, { failureReason: reason });
+    emitActivityError(pod.id, reason, false);
+    throw new AutopodError(reason, 'BRANCH_PRESERVATION_FAILED', 502);
   }
 
   function assertInteractiveCompletionCurrent(pod: Pod, allowRemovedContainer = false): void {
@@ -11635,6 +11676,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
       // a failed/reworked run, so only suppress the branch push when the whole
       // branch is proven empty against its base.
       if (!isWorkspacePod && pod.worktreePath && !pod.prUrl) {
+        assertApprovalCurrent(pod);
         let trulyNoChanges = false;
         let branchHasAccumulatedChanges: boolean | null = null;
         try {
@@ -11647,6 +11689,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
             baseBranchForStats,
             sinceCommit,
           );
+          assertApprovalCurrent(pod);
           if (
             stats.filesChanged !== pod.filesChanged ||
             stats.linesAdded !== pod.linesAdded ||
@@ -11673,6 +11716,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
             }
           }
         } catch (err) {
+          assertApprovalCurrent(pod);
           logger.warn(
             { err, podId },
             'getDiffStats failed in approveSession; falling back to normal merge path',
@@ -11680,6 +11724,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           trulyNoChanges = false;
         }
 
+        assertApprovalCurrent(pod);
         if (trulyNoChanges) {
           const shouldPushBranch = branchHasAccumulatedChanges !== false;
           emitActivityStatus(
@@ -11688,7 +11733,8 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
               ? 'No new changes to merge — pushing existing branch and completing pod'
               : 'No changes to merge — completing without branch push',
           );
-          if (shouldPushBranch && pod.branch) {
+          if (shouldPushBranch) {
+            if (!pod.branch) failBranchPreservation(pod);
             try {
               const useForce = forceWithLeaseAllowances.has(podId);
               if (useForce) {
@@ -11696,22 +11742,30 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
               } else {
                 await worktreeManager.pushBranch(pod.worktreePath, pod.branch);
               }
-              forceWithLeaseAllowances.delete(podId);
             } catch (err) {
               logger.warn(
                 { err, podId },
-                'Branch push failed in no-changes fast-path; continuing to complete',
+                'Branch preservation failed in no-changes approval; retaining resources',
               );
+              failBranchPreservation(pod);
             }
+            assertApprovalCurrent(pod);
+            forceWithLeaseAllowances.delete(podId);
           } else {
             forceWithLeaseAllowances.delete(podId);
           }
           const s1 = transition(pod, 'approved');
           persistReadinessApproval(podId, readiness, actor, approvalReason);
           const s2 = transition(s1, 'merging');
-          await cleanupContainerAfterAdvisorySettles(pod, 'approve-no-changes');
+          await cleanupContainerAfterAdvisorySettles(s2, 'approve-no-changes', 'kill', () =>
+            assertApprovalCurrent(s2, { allowRemovedContainer: true, allowComplete: true }),
+          );
+          assertApprovalCurrent(s2, { allowRemovedContainer: true });
           const noChangePod = transition(s2, 'complete', {
             completedAt: new Date().toISOString(),
+            ...(pod.failureReason?.startsWith('Branch preservation failed.')
+              ? { failureReason: null }
+              : {}),
           });
           eventBus.emit({
             type: 'pod.completed',

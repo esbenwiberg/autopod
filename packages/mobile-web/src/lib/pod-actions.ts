@@ -67,7 +67,8 @@ const APPROVE: ActionDef = {
   kind: 'approve',
   label: 'Approve',
   tone: 'neutral',
-  optimistic: { status: 'approved' },
+  // Approval can fail after remote work; status comes from daemon evidence.
+  optimistic: null,
   promptsForText: false,
 };
 const REJECT: ActionDef = {

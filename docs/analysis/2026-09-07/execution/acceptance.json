@@ -20,7 +20,8 @@
         "packages/daemon/src/pods/task-retry-ledger.ts",
         "packages/daemon/src/runtimes/codex-runtime.ts",
         "packages/daemon/src/pods/interactive-completion-coordinator.ts",
-        "packages/daemon/src/pods/pod-repository.ts"
+        "packages/daemon/src/pods/pod-repository.ts",
+        "packages/mobile-web/src/lib/pod-actions.ts"
       ],
       "tests": [
         "packages/daemon/src/pods/pod-lifecycle.e2e.test.ts",
@@ -53,7 +54,8 @@
         "receipts/interactive-coordination-red.txt",
         "receipts/interactive-coordination-final.txt",
         "receipts/checkpoint-23-full-validation.txt",
-        "receipts/checkpoint-23-validation-identity.json"
+        "receipts/checkpoint-23-validation-identity.json",
+        "checkpoint-28.md: approval push failure preservation, restart retry, stale generation and late decision regressions, API/CLI/mobile/native client checks; broader durable finalization and native interaction remain"
       ],
       "prerequisites": [],
       "remaining": "Normal replies are atomic, retained in bounded recovery context, and fence older completion events. New unanswered decisions remain actionable. Attached MCP delivery acknowledgment, delayed concurrent stream ordering, other response boundaries, historical orphan questions and broader finalization side effects remain. New worker/cycle and validation admission now preserve pending decisions, including older unresolved cycles in the current generation. Historical missing payload recovery and stream/MCP delivery acknowledgment remain. Codex now observes summary events before Spawn/Resume launch and disposes each invocation listener. This closes the local launch/stream attachment race, not durable delivery acknowledgment across all runtimes or daemon restart. Concurrent interactive completions now coalesce in process, conflicting promotion/generation requests fail closed, and current source/lifecycle/decision ownership is checked across push and container release boundaries. This is not durable cross-process idempotency, cancellation of already-dispatched external operations, or complete post-completion side-effect accounting."
@@ -162,7 +164,8 @@
         "packages/daemon/src/pods/sandbox-terminal-reaper.ts",
         "packages/daemon/src/pods/local-reconciler.ts",
         "packages/daemon/src/pods/reconciler.ts",
-        "packages/daemon/src/pods/interactive-completion-coordinator.ts"
+        "packages/daemon/src/pods/interactive-completion-coordinator.ts",
+        "packages/mobile-web/src/lib/pod-actions.ts"
       ],
       "tests": [
         "packages/daemon/src/pods/completion-journal.test.ts",
@@ -208,7 +211,8 @@
         "receipts/interactive-coordination-red.txt",
         "receipts/interactive-coordination-final.txt",
         "receipts/checkpoint-23-full-validation.txt",
-        "receipts/checkpoint-23-validation-identity.json"
+        "receipts/checkpoint-23-validation-identity.json",
+        "checkpoint-28.md: approval push failure preservation, restart retry, stale generation and late decision regressions, API/CLI/mobile/native client checks; broader durable finalization and native interaction remain"
       ],
       "prerequisites": [
         "PR creation intent/reconciliation implemented locally; broader finalization side effects and operator override remain."
@@ -1568,7 +1572,9 @@
       "implementation": [
         "packages/daemon/src/pods/cost-reconciliation.ts",
         "packages/shared/src/types/pod.ts",
-        "packages/daemon/src/pods/cost-pod-projection.ts"
+        "packages/daemon/src/pods/cost-pod-projection.ts",
+        "packages/daemon/src/pods/pod-manager.ts",
+        "packages/mobile-web/src/lib/pod-actions.ts"
       ],
       "tests": [],
       "evidence": [
@@ -1591,7 +1597,8 @@
         "receipts/interactive-preservation-cli.txt",
         "receipts/interactive-coordination-cli.txt",
         "checkpoint-26.md: stored subtotals, unavailable attribution, source estimates, API/CLI/mobile/native test evidence; live and native interaction remain unverified",
-        "checkpoint-27.md: bounded phase projections, local malformed-contract per-pod HTTP 500 regression, CLI/mobile/native checks; live root cause and native interaction remain unverified"
+        "checkpoint-27.md: bounded phase projections, local malformed-contract per-pod HTTP 500 regression, CLI/mobile/native checks; live root cause and native interaction remain unverified",
+        "checkpoint-28.md: approval push failure preservation, restart retry, stale generation and late decision regressions, API/CLI/mobile/native client checks; broader durable finalization and native interaction remain"
       ],
       "prerequisites": [
         "Selected mobile flows and new health CLI have local interaction proof. Desktop has compilation and tests only. Remaining operator flows, physical device and live evidence are outstanding."
@@ -1616,5 +1623,5 @@
       "prerequisites": []
     }
   ],
-  "lastCheckpoint": "checkpoint-27.md"
+  "lastCheckpoint": "checkpoint-28.md"
 }

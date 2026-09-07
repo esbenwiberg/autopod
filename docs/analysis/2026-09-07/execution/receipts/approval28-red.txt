@@ -1,0 +1,58 @@
+
+ RUN  v4.1.11 /private/tmp/autopod-durable-execution/packages/daemon
+
+ ❯ src/pods/pod-manager.test.ts (446 tests | 3 failed | 443 skipped) 189ms
+         × preserves accumulated work after failed branch push (base evidence true) and retries without a worker 87ms
+         × preserves accumulated work after failed branch push (base evidence null) and retries without a worker 50ms
+         × does not complete or clean a replacement generation after approval push settles 51ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 3 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/pods/pod-manager.test.ts > PodManager > approveSession > no-changes fast-path > preserves accumulated work after failed branch push (base evidence true) and retries without a worker
+ FAIL  src/pods/pod-manager.test.ts > PodManager > approveSession > no-changes fast-path > preserves accumulated work after failed branch push (base evidence null) and retries without a worker
+AssertionError: promise resolved "undefined" instead of rejecting
+
+- Expected:
+Error {
+  "message": "rejected promise",
+}
+
++ Received:
+undefined
+
+ ❯ src/pods/pod-manager.test.ts:5444:54
+    5442|             if (event.type === 'pod.completed') completed.push(event.p…
+    5443|           });
+    5444|           await expect(manager.approveSession(pod.id)).rejects.toMatch…
+       |                                                      ^
+    5445|             code: 'BRANCH_PRESERVATION_FAILED',
+    5446|           });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/3]⎯
+
+ FAIL  src/pods/pod-manager.test.ts > PodManager > approveSession > no-changes fast-path > does not complete or clean a replacement generation after approval push settles
+AssertionError: promise resolved "undefined" instead of rejecting
+
+- Expected:
+Error {
+  "message": "rejected promise",
+}
+
++ Received:
+undefined
+
+ ❯ src/pods/pod-manager.test.ts:5499:52
+    5497|           });
+    5498|         });
+    5499|         await expect(manager.approveSession(pod.id)).rejects.toMatchOb…
+       |                                                    ^
+    5500|           code: 'STALE_APPROVAL',
+    5501|         });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/3]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  3 failed | 443 skipped (446)
+   Start at  21:29:14
+   Duration  1.40s (transform 746ms, setup 0ms, import 1.10s, tests 189ms, environment 0ms)

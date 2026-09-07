@@ -184,6 +184,20 @@ if (startupRetryFixture) {
   retryState.interruptedCount = 0;
   retryState.latest = { id: 'local-startup-failure', outcome: 'transient' };
 }
+const approvalPreservationFixture = process.env.FIXTURE_MODE === 'approval-preservation';
+let approvalAttempts = 0;
+if (approvalPreservationFixture)
+  pod = {
+    ...pod,
+    status: 'validated',
+    pendingEscalation: null,
+    recordDiagnostics: [],
+    finalization: null,
+    task: '[Local fixture] Preserve branch after failed approval push',
+    branch: 'local-preserved-branch',
+    worktreePath: '/local-fixture/preserved-worktree',
+    containerId: 'local-preserved-container',
+  };
 const costPayloadLimitFixture = process.env.FIXTURE_MODE === 'cost-payload-limit';
 const taskBudgetFixture = process.env.TASK_BUDGET_FIXTURE === '1' || costPayloadLimitFixture;
 const savedSnapshotRecovery = process.env.ARTIFACT_SNAPSHOT_FIXTURE === '1';
@@ -213,6 +227,29 @@ const server = createServer(async (req, res) => {
     res.setHeader('content-type', 'application/json');
     res.end(JSON.stringify(value));
   };
+  if (
+    approvalPreservationFixture &&
+    req.method === 'POST' &&
+    pathname === '/pods/local-fixture/approve'
+  ) {
+    approvalAttempts++;
+    console.log(
+      JSON.stringify({
+        scope: 'local fixture only',
+        action: 'approve-preserved-branch',
+        attempt: approvalAttempts,
+      }),
+    );
+    if (approvalAttempts === 1) {
+      const message =
+        'Branch preservation failed. Original resources retained; repair the branch or remote access and retry approval.';
+      pod = { ...pod, failureReason: message };
+      res.statusCode = 502;
+      return json({ error: 'BRANCH_PRESERVATION_FAILED', message });
+    }
+    pod = { ...pod, status: 'complete', failureReason: null };
+    return json({ ok: true });
+  }
   if (pathname === '/pods/local-fixture/execution-provenance')
     return json({
       latest: JSON.parse(

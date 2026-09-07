@@ -5406,6 +5406,234 @@ describe('PodManager', () => {
         expect(manager.getSession(pod.id).status).toBe('complete');
       });
 
+      it.each([true, null])(
+        'preserves accumulated work after failed branch push (base evidence %s) and retries without a worker',
+        async (baseEvidence) => {
+          const ctx = createTestContext();
+          const manager = createPodManager(ctx.deps);
+          const pod = manager.createSession(
+            { profileName: 'test-profile', task: 'Preserve accumulated work' },
+            'user-1',
+          );
+          ctx.podRepo.update(
+            pod.id,
+            validatedPodUpdates(pod.id, {
+              worktreePath: '/tmp/preserved-approval',
+              containerId: 'preserved-container',
+              filesChanged: 0,
+            }),
+          );
+          vi.mocked(ctx.worktreeManager.getDiffStats).mockResolvedValue({
+            filesChanged: 0,
+            linesAdded: 0,
+            linesRemoved: 0,
+          });
+          if (baseEvidence === null)
+            (
+              ctx.worktreeManager.hasChangesAgainstBase as ReturnType<typeof vi.fn>
+            ).mockRejectedValue(new Error('base unavailable'));
+          else
+            (
+              ctx.worktreeManager.hasChangesAgainstBase as ReturnType<typeof vi.fn>
+            ).mockResolvedValue(baseEvidence);
+          vi.mocked(ctx.worktreeManager.pushBranch).mockRejectedValueOnce(
+            new Error('remote unavailable'),
+          );
+          const completed: string[] = [];
+          ctx.eventBus.subscribe((event) => {
+            if (event.type === 'pod.completed') completed.push(event.podId);
+          });
+          await expect(manager.approveSession(pod.id)).rejects.toMatchObject({
+            code: 'BRANCH_PRESERVATION_FAILED',
+          });
+          expect(manager.getSession(pod.id)).toMatchObject({
+            status: 'validated',
+            worktreePath: '/tmp/preserved-approval',
+            containerId: 'preserved-container',
+            failureReason: expect.stringContaining('retry approval'),
+          });
+          expect(ctx.containerManager.kill).not.toHaveBeenCalled();
+          expect(completed).toEqual([]);
+          expect(ctx.runtime.spawn).not.toHaveBeenCalled();
+          expect(ctx.runtime.resume).not.toHaveBeenCalled();
+          // A new manager reuses the persisted source and state after a daemon restart.
+          await createPodManager(ctx.deps).approveSession(pod.id);
+          expect(ctx.worktreeManager.pushBranch).toHaveBeenCalledTimes(2);
+          expect(manager.getSession(pod.id)).toMatchObject({
+            status: 'complete',
+            failureReason: null,
+          });
+          expect(completed).toEqual([pod.id]);
+          expect(ctx.runtime.spawn).not.toHaveBeenCalled();
+          expect(ctx.prManager.createPr).not.toHaveBeenCalled();
+        },
+      );
+
+      it('does not complete or clean a replacement generation after approval push settles', async () => {
+        const ctx = createTestContext();
+        const manager = createPodManager(ctx.deps);
+        const pod = manager.createSession(
+          { profileName: 'test-profile', task: 'Protect replacement generation' },
+          'user-1',
+        );
+        ctx.podRepo.update(
+          pod.id,
+          validatedPodUpdates(pod.id, {
+            worktreePath: '/tmp/old-approval',
+            containerId: 'old-container',
+            filesChanged: 0,
+          }),
+        );
+        vi.mocked(ctx.worktreeManager.getDiffStats).mockResolvedValue({
+          filesChanged: 0,
+          linesAdded: 0,
+          linesRemoved: 0,
+        });
+        (ctx.worktreeManager.hasChangesAgainstBase as ReturnType<typeof vi.fn>).mockResolvedValue(
+          true,
+        );
+        vi.mocked(ctx.worktreeManager.pushBranch).mockImplementationOnce(async () => {
+          ctx.podRepo.incrementLifecycleGeneration(pod.id);
+          ctx.podRepo.update(pod.id, {
+            status: 'running',
+            containerId: 'replacement-container',
+            worktreePath: '/tmp/replacement-approval',
+          });
+        });
+        await expect(manager.approveSession(pod.id)).rejects.toMatchObject({
+          code: 'STALE_APPROVAL',
+        });
+        expect(manager.getSession(pod.id)).toMatchObject({
+          status: 'running',
+          containerId: 'replacement-container',
+          worktreePath: '/tmp/replacement-approval',
+        });
+        expect(ctx.containerManager.kill).not.toHaveBeenCalled();
+      });
+
+      it.each(['diff', 'cleanup'] as const)(
+        'retains replacement resources when lifecycle changes during approval %s',
+        async (step) => {
+          const ctx = createTestContext();
+          const replace = async () => {
+            ctx.podRepo.incrementLifecycleGeneration(podId);
+            ctx.podRepo.update(podId, {
+              status: 'running',
+              containerId: 'new-container',
+              worktreePath: '/tmp/new-approval',
+            });
+          };
+          if (step === 'cleanup') ctx.deps.beforeContainerCleanup = replace;
+          const manager = createPodManager(ctx.deps);
+          const podId = manager.createSession(
+            { profileName: 'test-profile', task: 'Fence cleanup' },
+            'user-1',
+          ).id;
+          ctx.podRepo.update(
+            podId,
+            validatedPodUpdates(podId, {
+              worktreePath: '/tmp/old-approval',
+              containerId: 'old-container',
+              filesChanged: 0,
+            }),
+          );
+          vi.mocked(ctx.worktreeManager.getDiffStats).mockImplementation(async () => {
+            if (step === 'diff') await replace();
+            return { filesChanged: 0, linesAdded: 0, linesRemoved: 0 };
+          });
+          (ctx.worktreeManager.hasChangesAgainstBase as ReturnType<typeof vi.fn>).mockResolvedValue(
+            true,
+          );
+          await expect(manager.approveSession(podId)).rejects.toMatchObject({
+            code: 'STALE_APPROVAL',
+          });
+          expect(manager.getSession(podId)).toMatchObject({
+            status: 'running',
+            containerId: 'new-container',
+            worktreePath: '/tmp/new-approval',
+          });
+          expect(ctx.containerManager.kill).not.toHaveBeenCalled();
+          if (step === 'diff') expect(ctx.worktreeManager.pushBranch).not.toHaveBeenCalled();
+        },
+      );
+
+      it('keeps a human decision arriving during approval push actionable', async () => {
+        const ctx = createTestContext();
+        const manager = createPodManager(ctx.deps);
+        const pod = manager.createSession(
+          { profileName: 'test-profile', task: 'Keep decision' },
+          'user-1',
+        );
+        ctx.podRepo.update(
+          pod.id,
+          validatedPodUpdates(pod.id, {
+            worktreePath: '/tmp/approval-decision',
+            containerId: 'decision-container',
+            filesChanged: 0,
+          }),
+        );
+        vi.mocked(ctx.worktreeManager.getDiffStats).mockResolvedValue({
+          filesChanged: 0,
+          linesAdded: 0,
+          linesRemoved: 0,
+        });
+        (ctx.worktreeManager.hasChangesAgainstBase as ReturnType<typeof vi.fn>).mockResolvedValue(
+          true,
+        );
+        vi.mocked(ctx.worktreeManager.pushBranch).mockImplementationOnce(async () => {
+          ctx.db
+            .prepare('UPDATE pods SET pending_escalation = ? WHERE id = ?')
+            .run(JSON.stringify({ id: 'late-decision', question: 'Confirm scope' }), pod.id);
+        });
+        await expect(manager.approveSession(pod.id)).rejects.toMatchObject({
+          code: 'PENDING_HUMAN_DECISION',
+        });
+        expect(manager.getSession(pod.id)).toMatchObject({
+          status: 'validated',
+          pendingEscalation: { id: 'late-decision' },
+        });
+        expect(ctx.containerManager.kill).not.toHaveBeenCalled();
+      });
+
+      it('requires a branch identity before releasing accumulated work', async () => {
+        const ctx = createTestContext();
+        const manager = createPodManager(ctx.deps);
+        const pod = manager.createSession(
+          { profileName: 'test-profile', task: 'Repair missing branch identity' },
+          'user-1',
+        );
+        ctx.podRepo.update(
+          pod.id,
+          validatedPodUpdates(pod.id, {
+            worktreePath: '/tmp/unbound-approval',
+            containerId: 'retained-container',
+            filesChanged: 0,
+          }),
+        );
+        ctx.db.prepare("UPDATE pods SET branch = '' WHERE id = ?").run(pod.id);
+        vi.mocked(ctx.worktreeManager.getDiffStats).mockResolvedValue({
+          filesChanged: 0,
+          linesAdded: 0,
+          linesRemoved: 0,
+        });
+        (ctx.worktreeManager.hasChangesAgainstBase as ReturnType<typeof vi.fn>).mockResolvedValue(
+          true,
+        );
+        await expect(manager.approveSession(pod.id)).rejects.toMatchObject({
+          code: 'BRANCH_PRESERVATION_FAILED',
+        });
+        expect(manager.getSession(pod.id).status).toBe('validated');
+        expect(ctx.worktreeManager.pushBranch).not.toHaveBeenCalled();
+        expect(ctx.containerManager.kill).not.toHaveBeenCalled();
+        ctx.db.prepare('UPDATE pods SET branch = ? WHERE id = ?').run(pod.branch, pod.id);
+        await manager.approveSession(pod.id);
+        expect(manager.getSession(pod.id)).toMatchObject({
+          status: 'complete',
+          failureReason: null,
+        });
+        expect(ctx.worktreeManager.pushBranch).toHaveBeenCalledTimes(1);
+      });
+
       it('pushes branch with accumulated work before emitting pod.completed', async () => {
         const ctx = createTestContext();
         const manager = createPodManager(ctx.deps);

@@ -1,0 +1,29 @@
+
+ RUN  v4.1.11 /private/tmp/autopod-durable-execution/packages/mobile-web
+
+ ❯ src/components/ActionBar.test.tsx (1 test | 1 failed) 14ms
+   × waits for daemon approval evidence and retains a retryable action after branch preservation fails 14ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/components/ActionBar.test.tsx > waits for daemon approval evidence and retains a retryable action after branch preservation fails
+AssertionError: expected 'approved' to be 'validated' // Object.is equality
+
+Expected: "validated"
+Received: "approved"
+
+ ❯ src/components/ActionBar.test.tsx:34:53
+     32|       approve()?.click();
+     33|     });
+     34|     expect(usePodsStore.getState().pods[0]?.status).toBe('validated');
+       |                                                     ^
+     35|     await act(async () => {
+     36|       reply(
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed (1)
+   Start at  21:35:48
+   Duration  428ms (transform 30ms, setup 14ms, import 41ms, tests 14ms, environment 264ms)

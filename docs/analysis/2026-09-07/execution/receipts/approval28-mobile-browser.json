@@ -1,0 +1,20 @@
+{
+  "scope": "built mobile with local response fixtures only",
+  "url": "http://127.0.0.1:56011/mobile/#/pod/local-fixture",
+  "actions": [
+    "Approve: first fixture request returned 502",
+    "Approve: second explicit request returned success",
+    "reload: fetched complete state"
+  ],
+  "observed": [
+    "validated retained after first failure",
+    "Branch preservation failed. Original resources retained; repair the branch or remote access and retry approval.",
+    "Approve remained available after failure",
+    "error removed after retry",
+    "complete after reload; Approve absent"
+  ],
+  "simulatedApprovalRequests": 2,
+  "realProviderOrGitCalls": 0,
+  "cleanup": "tab closed; fixture server terminated with Ctrl-C, exit 130",
+  "nativeInteraction": "unverified"
+}
