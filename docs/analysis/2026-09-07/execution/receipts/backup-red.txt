@@ -1,0 +1,71 @@
+
+ RUN  v4.1.10 /private/tmp/autopod-durable-execution
+
+ ❯ packages/daemon/src/db/backup.test.ts (4 tests | 4 failed) 35ms
+     × rejects a configured backup path for a different open database 22ms
+     × backs up committed WAL data and reports freshness across manager restart 2ms
+     × refuses backup on insufficient headroom and retains the last successful backup 6ms
+     × prunes only finalized backups belonging to this database 3ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 4 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  packages/daemon/src/db/backup.test.ts > active database backup provenance > rejects a configured backup path for a different open database
+AssertionError: expected [Function] to throw an error
+
+- Expected:
+null
+
++ Received:
+undefined
+
+ ❯ packages/daemon/src/db/backup.test.ts:25:76
+     23|   it('rejects a configured backup path for a different open database',…
+     24|     const { dir, db } = fixture();
+     25|     expect(() => createDbBackupManager(db, join(dir, 'stale.db'), logg…
+       |                                                                            ^
+     26|   });
+     27|   it('backs up committed WAL data and reports freshness across manager…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/4]⎯
+
+ FAIL  packages/daemon/src/db/backup.test.ts > active database backup provenance > backs up committed WAL data and reports freshness across manager restart
+TypeError: manager.getStatus is not a function
+ ❯ packages/daemon/src/db/backup.test.ts:31:20
+     29|     let now = Date.parse('2026-09-07T11:00:00Z');
+     30|     const manager = createDbBackupManager(db, dbPath, logger, { now: (…
+     31|     expect(manager.getStatus().state).toBe('missing');
+       |                    ^
+     32|     await manager.runOnce();
+     33|     expect(manager.getStatus()).toMatchObject({ state: 'fresh', source…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/4]⎯
+
+ FAIL  packages/daemon/src/db/backup.test.ts > active database backup provenance > refuses backup on insufficient headroom and retains the last successful backup
+TypeError: manager.runOnce is not a function
+ ❯ packages/daemon/src/db/backup.test.ts:45:19
+     43|     let free = 1024 ** 3;
+     44|     const manager = createDbBackupManager(db, dbPath, logger, { availa…
+     45|     await manager.runOnce();
+       |                   ^
+     46|     const last = manager.getStatus().latest;
+     47|     free = 1;
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/4]⎯
+
+ FAIL  packages/daemon/src/db/backup.test.ts > active database backup provenance > prunes only finalized backups belonging to this database
+TypeError: manager.runOnce is not a function
+ ❯ packages/daemon/src/db/backup.test.ts:55:19
+     53|     let now = 1000;
+     54|     const manager = createDbBackupManager(db, dbPath, logger, { now: (…
+     55|     await manager.runOnce();
+       |                   ^
+     56|     const unrelated = join(dir, 'backups', '1700000000000.db');
+     57|     writeFileSync(unrelated, 'other database backup');
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[4/4]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  4 failed (4)
+   Start at  11:12:35
+   Duration  657ms (transform 71ms, setup 0ms, import 129ms, tests 35ms, environment 0ms)

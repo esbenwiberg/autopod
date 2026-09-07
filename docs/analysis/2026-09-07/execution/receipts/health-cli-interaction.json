@@ -1,0 +1,7 @@
+{
+  "scope": "local HTTP fixture; actual built CLI process",
+  "requests": 2,
+  "machineReadable": "passed",
+  "operatorText": "passed",
+  "output": "Daemon v0.0.1: ok\nRelease: fixture-release (modified source)\nBackup: stale; latest 2026-09-01T00:00:00Z\n"
+}

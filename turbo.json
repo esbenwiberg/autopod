@@ -64,6 +64,11 @@
     },
     "clean": {
       "cache": false
+    },
+    "@autopod/daemon#build": {
+      "dependsOn": ["^build"],
+      "outputs": ["dist/**"],
+      "cache": false
     }
   }
 }

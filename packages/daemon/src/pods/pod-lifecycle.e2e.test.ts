@@ -267,14 +267,17 @@ describe('Pod Lifecycle E2E', () => {
       // processPod's consumeAgentEvents loop hangs until the stream ends.
       // We simulate this by having spawn block on a never-resolving promise.
 
-      const neverResolves = new Promise<void>(() => {});
+      let releaseStream!: () => void;
+      const streamWait = new Promise<void>((resolve) => {
+        releaseStream = resolve;
+      });
 
       const runtime = createMockRuntime({
         spawn: vi.fn(async function* () {
           yield statusEvent('Analyzing codebase...');
           yield escalationEvent('sess-placeholder', 'Which database should I use?');
           // Block forever — simulates the real runtime waiting for human response
-          await neverResolves;
+          await streamWait;
         } as () => AsyncIterable<AgentEvent>),
       });
 
@@ -290,16 +293,20 @@ describe('Pod Lifecycle E2E', () => {
       // We don't await it — it'll be cleaned up when the test ends
       const processPromise = manager.processPod(pod.id);
 
-      // Wait a tick for events to be consumed up to the escalation
-      await new Promise((r) => setTimeout(r, 50));
+      // Wait for the observable transition, independent of machine load.
+      await vi.waitFor(() => expect(manager.getSession(pod.id).status).toBe('awaiting_input'), {
+        timeout: 5000,
+      });
 
       const escalated = manager.getSession(pod.id);
       expect(escalated.status).toBe('awaiting_input');
       expect(escalated.pendingEscalation).not.toBeNull();
       expect(escalated.escalationCount).toBe(1);
 
-      // Note: the sendMessage→resume→completion flow is tested separately
-      // in the existing pod-manager.test.ts sendMessage tests
+      releaseStream();
+      await processPromise;
+      expect(manager.getSession(pod.id).status).toBe('awaiting_input');
+      ctx.db.close();
     });
 
     it('human response via sendMessage resumes agent and completes', async () => {

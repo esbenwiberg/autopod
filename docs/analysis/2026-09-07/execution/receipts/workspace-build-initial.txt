@@ -10,10 +10,10 @@
 
 @autopod/shared:build: cache miss, executing 772c514017506f6e
 @autopod/pi-worker:build: cache hit, replaying logs 0226b42f5501413f
-@autopod/pi-worker:build: 
+@autopod/pi-worker:build:
 @autopod/pi-worker:build: > @autopod/pi-worker@0.0.1 build /Users/ewi/repos/autopod/packages/pi-worker
 @autopod/pi-worker:build: > tsup src/index.ts --format esm --dts
-@autopod/pi-worker:build: 
+@autopod/pi-worker:build:
 @autopod/pi-worker:build: CLI Building entry: src/index.ts
 @autopod/pi-worker:build: CLI Using tsconfig: tsconfig.json
 @autopod/pi-worker:build: CLI tsup v8.5.1
@@ -24,10 +24,10 @@
 @autopod/pi-worker:build: DTS Build start
 @autopod/pi-worker:build: DTS ⚡️ Build success in 2163ms
 @autopod/pi-worker:build: DTS dist/index.d.ts 5.25 KB
-@autopod/shared:build: 
+@autopod/shared:build:
 @autopod/shared:build: > @autopod/shared@0.0.1 build /private/tmp/autopod-durable-execution/packages/shared
 @autopod/shared:build: > tsup
-@autopod/shared:build: 
+@autopod/shared:build:
 @autopod/shared:build: CLI Building entry: src/index.ts
 @autopod/shared:build: CLI Using tsconfig: tsconfig.json
 @autopod/shared:build: CLI tsup v8.5.1
@@ -44,22 +44,22 @@
 @autopod/cli:build: cache miss, executing c21d75f002bb8d1d
 @autopod/mobile-web:build: cache miss, executing 0fc42a0bb999f836
 @autopod/escalation-mcp:build: cache miss, executing 1b336f75f32171ec
-@autopod/escalation-mcp:build: 
+@autopod/escalation-mcp:build:
 @autopod/escalation-mcp:build: > @autopod/escalation-mcp@0.0.1 build /private/tmp/autopod-durable-execution/packages/escalation-mcp
 @autopod/escalation-mcp:build: > tsup
-@autopod/escalation-mcp:build: 
-@autopod/cli:build: 
+@autopod/escalation-mcp:build:
+@autopod/cli:build:
 @autopod/cli:build: > @autopod/cli@0.0.1 build /private/tmp/autopod-durable-execution/packages/cli
 @autopod/cli:build: > tsup
-@autopod/cli:build: 
-@autopod/validator:build: 
+@autopod/cli:build:
+@autopod/validator:build:
 @autopod/validator:build: > @autopod/validator@0.0.1 build /private/tmp/autopod-durable-execution/packages/validator
 @autopod/validator:build: > tsup
-@autopod/validator:build: 
-@autopod/mobile-web:build: 
+@autopod/validator:build:
+@autopod/mobile-web:build:
 @autopod/mobile-web:build: > @autopod/mobile-web@0.0.1 build /private/tmp/autopod-durable-execution/packages/mobile-web
 @autopod/mobile-web:build: > vite build
-@autopod/mobile-web:build: 
+@autopod/mobile-web:build:
 @autopod/cli:build: CLI Building entry: src/index.ts
 @autopod/cli:build: CLI Using tsconfig: tsconfig.json
 @autopod/cli:build: CLI tsup v8.5.1
@@ -105,10 +105,10 @@
 @autopod/escalation-mcp:build: DTS ⚡️ Build success in 2639ms
 @autopod/escalation-mcp:build: DTS dist/index.d.ts 15.12 KB
 @autopod/daemon:build: cache miss, executing 39f5724cf5594bb1
-@autopod/daemon:build: 
+@autopod/daemon:build:
 @autopod/daemon:build: > @autopod/daemon@0.0.1 build /private/tmp/autopod-durable-execution/packages/daemon
 @autopod/daemon:build: > tsup
-@autopod/daemon:build: 
+@autopod/daemon:build:
 @autopod/daemon:build: CLI Building entry: src/index.ts
 @autopod/daemon:build: CLI Using tsconfig: tsconfig.json
 @autopod/daemon:build: CLI tsup v8.5.1
@@ -148,12 +148,11 @@
 @autopod/daemon:build: DTS Build start
 @autopod/daemon:build: DTS ⚡️ Build success in 9348ms
 @autopod/daemon:build: DTS dist/index.d.ts 13.00 B
-@autopod/daemon:build: 
+@autopod/daemon:build:
 @autopod/daemon:build: > @autopod/daemon@0.0.1 postbuild /private/tmp/autopod-durable-execution/packages/daemon
 @autopod/daemon:build: > mkdir -p dist/db dist/actions && cp -R src/db/migrations dist/db/ && cp -R src/actions/defaults dist/actions/
-@autopod/daemon:build: 
+@autopod/daemon:build:
 
  Tasks:    7 successful, 7 total
 Cached:    1 cached, 7 total
-  Time:    25.158s 
-
+  Time:    25.158s

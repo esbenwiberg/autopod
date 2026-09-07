@@ -1,0 +1,32 @@
+
+ RUN  v4.1.10 /private/tmp/autopod-durable-execution
+
+ ❯ packages/daemon/src/db/backup.test.ts (4 tests | 1 failed) 146ms
+     × rejects a configured backup path for a different open database 28ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  packages/daemon/src/db/backup.test.ts > active database backup provenance > rejects a configured backup path for a different open database
+AssertionError: expected [Function] to throw error matching /active database/ but got 'ENOENT: no such file or directory, ls…'
+
+- Expected:
+/active database/
+
++ Received:
+"ENOENT: no such file or directory, lstat '/private/var/folders/k6/nj5ps5vj2078xw4xv9_1k_3m0000gn/T/autopod-backup-2nHi48/stale.db'"
+
+ ❯ packages/daemon/src/db/backup.test.ts:29:76
+     27|   it('rejects a configured backup path for a different open database',…
+     28|     const { dir, db } = fixture();
+     29|     expect(() => createDbBackupManager(db, join(dir, 'stale.db'), logg…
+       |                                                                            ^
+     30|       /active database/,
+     31|     );
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 3 passed (4)
+   Start at  11:14:02
+   Duration  663ms (transform 71ms, setup 0ms, import 162ms, tests 146ms, environment 0ms)

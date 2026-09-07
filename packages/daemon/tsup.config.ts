@@ -1,8 +1,41 @@
+import { execFileSync } from 'node:child_process';
 import { cpSync, mkdirSync } from 'node:fs';
 import { defineConfig } from 'tsup';
 
+let commitSha: string | null = null;
+let dirty: boolean | null = null;
+try {
+  const candidate = execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
+  if (/^[a-f0-9]{40}$/.test(candidate)) commitSha = candidate;
+  dirty =
+    execFileSync(
+      'git',
+      [
+        'status',
+        '--porcelain',
+        '--',
+        ':(top)packages',
+        ':(top)package.json',
+        ':(top)pnpm-lock.yaml',
+        ':(top)pnpm-workspace.yaml',
+        ':(top)turbo.json',
+        ':(top)tsconfig.base.json',
+      ],
+      { encoding: 'utf8' },
+    ).trim().length > 0;
+} catch {
+  /* copied source with no git evidence is explicitly unidentified */
+}
+const release = {
+  commitSha,
+  dirty,
+  builtAt: new Date().toISOString(),
+  source: commitSha ? 'build' : 'unavailable',
+};
+
 export default defineConfig({
-  entry: ['src/index.ts'],
+  define: { __AUTOPOD_RELEASE__: JSON.stringify(release) },
+  entry: ['src/index.ts', 'src/db/verify-backup-cli.ts'],
   format: ['esm'],
   dts: true,
   clean: true,

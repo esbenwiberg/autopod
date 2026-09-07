@@ -26,14 +26,25 @@
       "implementation": [
         "packages/daemon/src/pods/completion-journal.ts",
         "packages/daemon/src/pods/local-reconciler.ts",
-        "packages/daemon/src/pods/reconciler.ts"
+        "packages/daemon/src/pods/reconciler.ts",
+        "packages/daemon/src/runtimes/codex-runtime.ts",
+        "packages/mobile-web/src/components/EscalationCard.tsx"
       ],
       "tests": [
         "packages/daemon/src/pods/completion-journal.test.ts",
         "packages/daemon/src/pods/local-reconciler.test.ts",
-        "packages/daemon/src/pods/reconciler.test.ts"
+        "packages/daemon/src/pods/reconciler.test.ts",
+        "packages/mobile-web/src/components/EscalationCard.test.tsx"
       ],
-      "evidence": ["receipts/journal-migration.txt", "receipts/settlement-restart-suites.txt"],
+      "evidence": [
+        "receipts/journal-migration.txt",
+        "receipts/settlement-restart-suites.txt",
+        "receipts/rollout-ordering-red.txt",
+        "receipts/rollout-ordering-green.txt",
+        "receipts/mobile-disconnected-reply-red.txt",
+        "receipts/mobile-disconnected-reply-green.txt",
+        "receipts/mobile-browser-interaction.json"
+      ],
       "prerequisites": []
     },
     {
@@ -161,19 +172,29 @@
     {
       "id": "W3.4",
       "requirement": "Supported capability probe resolves sandbox config ownership and registry execution semantics",
-      "status": "unverified",
-      "implementation": [],
-      "tests": [],
-      "evidence": [],
+      "status": "partial",
+      "implementation": [
+        "packages/daemon/src/runtimes/runtime-config-capability.ts",
+        "packages/daemon/src/pods/registry-injector.ts"
+      ],
+      "tests": [
+        "packages/daemon/src/runtimes/runtime-config-capability.test.ts",
+        "packages/daemon/src/pods/registry-injector.test.ts"
+      ],
+      "evidence": [
+        "receipts/registry-preflight-red.txt",
+        "receipts/registry-preflight-green.txt",
+        "receipts/config-capability-tests.txt"
+      ],
       "prerequisites": []
     },
     {
       "id": "W3.5",
       "requirement": "Queued provider binding survives mutable profile changes with actionable reconciliation errors",
-      "status": "unverified",
-      "implementation": [],
-      "tests": [],
-      "evidence": [],
+      "status": "partial",
+      "implementation": ["packages/daemon/src/pods/pod-manager.ts"],
+      "tests": ["packages/daemon/src/pods/pod-manager.test.ts"],
+      "evidence": ["receipts/queue-binding-red.txt", "receipts/queue-binding-green.txt"],
       "prerequisites": []
     },
     {
@@ -287,9 +308,14 @@
         "packages/desktop/Tests/AutopodUITests/ModelsSimulatorTests.swift",
         "packages/cli/src/commands/pod.test.ts"
       ],
-      "evidence": ["receipts/checkpoint-1-desktop.txt"],
+      "evidence": [
+        "receipts/checkpoint-1-desktop.txt",
+        "receipts/mobile-browser-interaction.json",
+        "receipts/health-cli-interaction.json",
+        "receipts/checkpoint-2-desktop.txt"
+      ],
       "prerequisites": [
-        "Supported-surface interaction evidence remains required; decoding/mapping/unit tests and compilation do not satisfy it."
+        "Selected mobile flows and new health CLI have local interaction proof. Desktop has compilation and tests only. Remaining operator flows, physical device and live evidence are outstanding."
       ]
     },
     {
@@ -358,10 +384,14 @@
     {
       "id": "W6.2",
       "requirement": "Health and operator release/readiness views identify meaningful release and failure provenance",
-      "status": "unverified",
-      "implementation": [],
-      "tests": [],
-      "evidence": [],
+      "status": "partial",
+      "implementation": [
+        "packages/daemon/src/release.ts",
+        "packages/daemon/src/api/routes/health.ts",
+        "packages/daemon/tsup.config.ts"
+      ],
+      "tests": ["packages/daemon/src/api/routes/health.test.ts"],
+      "evidence": ["receipts/backup-health-cli-green.txt"],
       "prerequisites": []
     },
     {
@@ -376,19 +406,22 @@
     {
       "id": "W6.4",
       "requirement": "Freshness and disk headroom checks added while preserving cleanup/deployment safeguards",
-      "status": "unverified",
-      "implementation": [],
-      "tests": [],
-      "evidence": [],
+      "status": "partial",
+      "implementation": ["packages/daemon/src/db/backup.ts"],
+      "tests": ["packages/daemon/src/db/backup.test.ts"],
+      "evidence": ["receipts/backup-red.txt", "receipts/backup-restore-green.txt"],
       "prerequisites": []
     },
     {
       "id": "W6.5",
       "requirement": "Sampled backup restores in isolation with freshness and integrity verification",
-      "status": "unverified",
-      "implementation": [],
-      "tests": [],
-      "evidence": [],
+      "status": "partial",
+      "implementation": [
+        "packages/daemon/src/db/backup-verification.ts",
+        "packages/daemon/src/db/verify-backup-cli.ts"
+      ],
+      "tests": ["packages/daemon/src/db/backup.test.ts"],
+      "evidence": ["receipts/backup-health-cli-green.txt"],
       "prerequisites": []
     },
     {
@@ -415,17 +448,28 @@
       "status": "unverified",
       "implementation": [],
       "tests": [],
-      "evidence": [],
-      "prerequisites": []
+      "evidence": [
+        "receipts/checkpoint-1-full-validation.txt",
+        "receipts/dependency-audit-before.json"
+      ],
+      "prerequisites": [
+        "Checkpoint f69a70fa full pipeline failed tests (50ms escalation race) and dependency audit (35 high, 26 moderate, 3 low); no audit suppression. Corrected transition wait needs full rerun; vulnerability remediation remains."
+      ]
     },
     {
       "id": "G.4",
       "requirement": "Desktop/mobile/CLI supported-surface interactions verified; compilation alone is insufficient",
-      "status": "unverified",
+      "status": "partial",
       "implementation": [],
       "tests": [],
-      "evidence": [],
-      "prerequisites": []
+      "evidence": [
+        "receipts/mobile-browser-interaction.json",
+        "receipts/health-cli-interaction.json",
+        "receipts/checkpoint-2-desktop.txt"
+      ],
+      "prerequisites": [
+        "Selected mobile flows and new health CLI have local interaction proof. Desktop has compilation and tests only. Remaining operator flows, physical device and live evidence are outstanding."
+      ]
     },
     {
       "id": "G.5",

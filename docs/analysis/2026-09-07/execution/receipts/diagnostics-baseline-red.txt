@@ -102,4 +102,3 @@ SyntaxError: Unexpected token 'o', "not-json" is not valid JSON
       Tests  5 failed | 1 passed (6)
    Start at  10:32:39
    Duration  576ms (transform 116ms, setup 0ms, import 191ms, tests 262ms, environment 0ms)
-

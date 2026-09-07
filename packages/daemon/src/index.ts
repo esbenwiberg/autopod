@@ -1053,6 +1053,7 @@ const app = await createServer({
   onShutdown: () => void shutdown('API'),
   modelManager,
   securityMlEnabled,
+  backupManager,
 });
 
 const sandboxTerminalReaper = sandboxContainerManager

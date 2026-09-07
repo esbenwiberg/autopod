@@ -5250,51 +5250,70 @@ describe('PodManager', () => {
       );
     });
 
-    it('fails before provisioning when a queued profile changes provider account', async () => {
-      const firstId = 'team-openai-first';
-      const secondId = 'team-openai-second';
-      const credentials = {
-        provider: 'openai',
-        authMode: 'api-key',
-        apiKey: 'test-openai-key',
-      } satisfies ProviderCredentials;
-      const ctx = createTestContext(undefined, {
-        defaultModel: 'gpt-5',
-        defaultRuntime: 'codex',
-        modelProvider: 'openai',
-      });
-      insertProviderAccount(ctx.db, firstId, 'openai', credentials);
-      insertProviderAccount(ctx.db, secondId, 'openai', credentials);
-      linkProfileToProviderAccount(ctx.db, 'test-profile', firstId);
-      const accounts = new Map([
-        [firstId, createMutableProviderAccountStore(firstId, 'openai', credentials).get(firstId)],
-        [
-          secondId,
-          createMutableProviderAccountStore(secondId, 'openai', credentials).get(secondId),
-        ],
-      ]);
-      ctx.deps.providerAccountStore = {
-        get: vi.fn((id: string) => {
-          const value = accounts.get(id);
-          if (!value) throw new Error('missing test account');
-          return value;
-        }),
-      } as ProviderAccountStore;
-      const manager = createPodManager(ctx.deps);
-      const pod = manager.createSession(
-        { profileName: 'test-profile', task: 'Build widget' },
-        'user-1',
-      );
+    it.each(['retained', 'deleted', 'provider-changed'] as const)(
+      'reconciles the authorized queued account after a profile edit: %s',
+      async (accountState) => {
+        const firstId = 'team-openai-first';
+        const secondId = 'team-openai-second';
+        const credentials = {
+          provider: 'openai',
+          authMode: 'api-key',
+          apiKey: 'test-openai-key',
+        } satisfies ProviderCredentials;
+        const ctx = createTestContext(undefined, {
+          defaultModel: 'gpt-5',
+          defaultRuntime: 'codex',
+          modelProvider: 'openai',
+        });
+        insertProviderAccount(ctx.db, firstId, 'openai', credentials);
+        insertProviderAccount(ctx.db, secondId, 'openai', credentials);
+        linkProfileToProviderAccount(ctx.db, 'test-profile', firstId);
+        const accounts = new Map([
+          [firstId, createMutableProviderAccountStore(firstId, 'openai', credentials).get(firstId)],
+          [
+            secondId,
+            createMutableProviderAccountStore(secondId, 'openai', credentials).get(secondId),
+          ],
+        ]);
+        ctx.deps.providerAccountStore = {
+          touchLastUsed: vi.fn(),
+          get: vi.fn((id: string) => {
+            const value = accounts.get(id);
+            if (!value) throw new Error('missing test account');
+            return value;
+          }),
+        } as ProviderAccountStore;
+        const manager = createPodManager(ctx.deps);
+        const pod = manager.createSession(
+          { profileName: 'test-profile', task: 'Build widget', skipValidation: true },
+          'user-1',
+        );
 
-      linkProfileToProviderAccount(ctx.db, 'test-profile', secondId);
-      await manager.processPod(pod.id);
+        linkProfileToProviderAccount(ctx.db, 'test-profile', secondId);
+        if (accountState === 'deleted') accounts.delete(firstId);
+        if (accountState === 'provider-changed') {
+          const first = accounts.get(firstId);
+          if (first) accounts.set(firstId, { ...first, provider: 'anthropic' });
+        }
+        await manager.processPod(pod.id);
+        if (accountState !== 'retained') {
+          expect(manager.getSession(pod.id).status).toBe('failed');
+          expect(manager.getSession(pod.id).failureReason).toContain(
+            'Queued provider account is unavailable',
+          );
+          expect(ctx.containerManager.spawn).not.toHaveBeenCalled();
+          return;
+        }
 
-      expect(manager.getSession(pod.id).status).toBe('failed');
-      expect(manager.getSession(pod.id).failureReason).toContain(
-        'Selected provider account changed after pod creation',
-      );
-      expect(ctx.containerManager.spawn).not.toHaveBeenCalled();
-    });
+        expect(
+          manager.getSession(pod.id).status,
+          manager.getSession(pod.id).failureReason ?? undefined,
+        ).toBe('validated');
+        expect(manager.getSession(pod.id).providerAccountIdSnapshot).toBe(firstId);
+        expect(ctx.containerManager.spawn).toHaveBeenCalled();
+        expect(ctx.deps.providerAccountStore.get).not.toHaveBeenCalledWith(secondId);
+      },
+    );
 
     it('recovers and rewrites fresh Codex auth.json for resume env from provider account', async () => {
       const accountId = 'team-openai';

@@ -97,6 +97,8 @@ public struct SettingsView: View {
     }
 
     @State private var selectedSection: SettingsSection = .profiles
+    @State private var daemonHealth: DaemonHealthSnapshot?
+    @State private var healthError: String?
     @State private var showAddConnection = false
     @State private var switchingConnectionId: UUID?
     @State private var connectionError: String?
@@ -545,6 +547,13 @@ public struct SettingsView: View {
                 .foregroundStyle(.blue)
             Text("Autopod Desktop")
                 .font(.title3.weight(.semibold))
+            Text(daemonHealth?.releaseSummary ?? "Release identity unavailable")
+                .font(.caption.monospaced()).textSelection(.enabled)
+            Text(daemonHealth?.backupSummary ?? "Backup freshness unverified")
+                .font(.caption).textSelection(.enabled)
+            if let healthError { Text(healthError).font(.caption).foregroundStyle(.red) }
+            Button("Refresh daemon health") { Task { await refreshDaemonHealth() } }
+                .disabled(connectionManager.api == nil)
             Text("Native macOS client for orchestrating Autopod pods.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
@@ -553,5 +562,14 @@ public struct SettingsView: View {
         }
         .frame(maxWidth: .infinity)
         .padding(20)
+        .task(id: connectionManager.connection?.id) { await refreshDaemonHealth() }
+    }
+
+    @MainActor private func refreshDaemonHealth() async {
+        daemonHealth = nil
+        healthError = nil
+        guard let api = connectionManager.api else { return }
+        do { daemonHealth = try await api.healthSnapshot() }
+        catch { healthError = "Daemon health unavailable: \(error.localizedDescription)" }
     }
 }

@@ -2057,21 +2057,21 @@ describe('CodexRuntime', () => {
           createMockPodRepo('current-session', { model: 'gpt-5.6-sol' }),
         );
 
-        setTimeout(() => {
-          void mkdir(rolloutDir, { recursive: true }).then(() =>
-            writeFile(
-              rolloutPath,
-              JSON.stringify({
-                timestamp: '2026-07-16T08:00:00.000Z',
-                type: 'event_msg',
-                payload: {
-                  type: 'task_complete',
-                  last_agent_message: 'Previous late completion.',
-                },
-              }),
-            ),
+        // The mount creates an empty file first; its prior-turn contents arrive
+        // only once exec starts. A byte offset of zero is not fresh-turn proof.
+        await mkdir(rolloutDir, { recursive: true });
+        await writeFile(rolloutPath, '');
+        vi.mocked(cm.execStreaming).mockImplementationOnce(async () => {
+          await writeFile(
+            rolloutPath,
+            JSON.stringify({
+              timestamp: '2026-07-16T08:00:00.000Z',
+              type: 'event_msg',
+              payload: { type: 'task_complete', last_agent_message: 'Previous late completion.' },
+            }),
           );
-        }, 5);
+          return handle;
+        });
         setTimeout(() => {
           if (!(handle.stdout as PassThrough).writableEnded) {
             (handle.stdout as PassThrough).write(
@@ -2158,7 +2158,7 @@ describe('CodexRuntime', () => {
           if (extractionCount >= 2) {
             records.push(
               JSON.stringify({
-                timestamp: '2026-07-13T21:53:14.000Z',
+                timestamp: new Date().toISOString(),
                 type: 'event_msg',
                 payload: {
                   type: 'patch_apply_end',
@@ -2170,7 +2170,7 @@ describe('CodexRuntime', () => {
           if (extractionCount >= 3) {
             records.push(
               JSON.stringify({
-                timestamp: '2026-07-13T22:18:36.000Z',
+                timestamp: new Date().toISOString(),
                 type: 'event_msg',
                 payload: {
                   type: 'task_complete',
@@ -2215,7 +2215,7 @@ describe('CodexRuntime', () => {
       }, 5);
 
       try {
-        await withTimeout(run, 250);
+        await withTimeout(run, 2000);
       } finally {
         // Let a failing implementation unwind after the assertion times out.
         // biome-ignore lint/suspicious/noExplicitAny: accessing test helper method
@@ -2558,36 +2558,36 @@ describe('CodexRuntime', () => {
       );
     });
 
-    it('makes the generated config world-readable (0644) on sandbox', async () => {
-      // On sandbox the reviewer's `codex exec` runs as a non-root, non-autopod
-      // user, so a 0600 autopod-only config is unreadable and the pre-submit
-      // review dies with "config.toml: Permission denied". World-read matches the
-      // sandbox posture (secret files are already 0444) and keeps the reviewer working.
-      const handle = createMockHandle();
-      const cm = createMockContainerManager(handle);
+    it('installs sandbox config atomically with the effective user and verifies runtime readability', async () => {
+      const cm = createMockContainerManager(createMockHandle());
       const runtime = new CodexRuntime(logger, cm, createMockPodRepo());
-
       await callWriteMcpConfig(runtime)(
         'c1',
-        [
-          {
-            name: 'escalation',
-            url: 'http://host.docker.internal:3100/mcp/abc',
-            headers: { Authorization: 'Bearer tok123' },
-          },
-        ],
+        [{ name: 'escalation', url: 'http://h/mcp' }],
         'sandbox',
       );
-
+      const command = vi.mocked(cm.execInContainer).mock.calls[0]?.[1];
+      expect(command?.[2]).toContain('effective_uid=$(id -u)');
+      expect(command?.[2]).toContain('if [ "$effective_uid" = 0 ]; then chown');
+      expect(command?.[2]).toContain('mktemp');
+      expect(command?.[2]).toContain('chmod 0644');
       expect(cm.execInContainer).toHaveBeenCalledWith(
         'c1',
-        [
-          'sh',
-          '-c',
-          "chown autopod:autopod '/home/autopod/.codex/config.toml' && chmod 0644 '/home/autopod/.codex/config.toml'",
-        ],
-        { timeout: 30_000, user: 'root' },
+        ['test', '-r', '/home/autopod/.codex/config.toml'],
+        { timeout: 30_000 },
       );
+    });
+
+    it('does not launch when the effective runtime user cannot read the sandbox config', async () => {
+      const cm = createMockContainerManager(createMockHandle());
+      vi.mocked(cm.execInContainer)
+        .mockResolvedValueOnce({ stdout: '', stderr: '', exitCode: 0 })
+        .mockResolvedValueOnce({ stdout: '', stderr: '', exitCode: 1 });
+      const runtime = new CodexRuntime(logger, cm, createMockPodRepo());
+      await expect(callWriteMcpConfig(runtime)('c1', [], 'sandbox')).rejects.toThrow(
+        'effective runtime user cannot read',
+      );
+      expect(cm.execStreaming).not.toHaveBeenCalled();
     });
 
     it('uses HTTP streaming for ChatGPT-authenticated Codex in sandbox', async () => {
@@ -2646,8 +2646,8 @@ describe('CodexRuntime', () => {
         'sandbox',
       );
 
-      expect(cm.execInContainer).toHaveBeenCalledTimes(2);
-      expect(cm.execInContainer).toHaveBeenLastCalledWith('c1', expect.any(Array), {
+      expect(cm.execInContainer).toHaveBeenCalledTimes(4);
+      expect(cm.execInContainer).toHaveBeenNthCalledWith(2, 'c1', expect.any(Array), {
         timeout: 30_000,
         user: 'root',
       });

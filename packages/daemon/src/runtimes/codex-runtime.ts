@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import { type Dirent, createReadStream } from 'node:fs';
 import { readdir, stat } from 'node:fs/promises';
 import path from 'node:path';
@@ -21,6 +22,7 @@ import {
   type CodexUsageAccumulator,
   createCodexUsageAccumulator,
 } from './codex-stream-parser.js';
+import { runtimeConfigInstallCommand } from './runtime-config-capability.js';
 import {
   awaitExitCodeBounded,
   withIdleLivenessProbe,
@@ -78,6 +80,7 @@ interface RolloutTailState {
   path: string | null;
   offset: number;
   carry: Buffer;
+  notBefore?: number;
 }
 
 function isRecoverableCodexInterruption(event: AgentEvent): event is CodexTurnAbortedEvent {
@@ -1136,53 +1139,79 @@ export class CodexRuntime implements Runtime {
       sections.push(lines.join('\n'));
     }
 
-    await this.containerManager.writeFile(
-      containerId,
-      MCP_CONFIG_PATH,
-      `${sections.join('\n\n')}\n`,
-    );
-    // On sandbox the files API writes root-owned files and exec runs as a
-    // non-root, non-`autopod` user (the same reason secret files use 0444 and
-    // build binaries are repaired to a+rx). A 0600 `autopod`-only config would
-    // then be unreadable by the reviewer's `codex exec`. Both the native stream
-    // and buffered fallback run as the sandbox-assigned non-root user, so the
-    // pre-submit review dies with "config.toml: Permission denied". Use
-    // world-readable 0644 there; the sandbox is single-tenant and
-    // OPENAI_API_KEY is already 0444.
-    // Docker keeps 0600 (single `autopod` user; exec runs as `autopod`).
-    const configMode = executionTarget === 'sandbox' ? '0644' : '0600';
-    const secureCommand = [
-      'sh',
-      '-c',
-      `chown ${CONTAINER_USER}:${CONTAINER_USER} '${MCP_CONFIG_PATH}' && chmod ${configMode} '${MCP_CONFIG_PATH}'`,
-    ];
+    const uploadPath =
+      executionTarget === 'sandbox'
+        ? `${MCP_CONFIG_PATH}.pending-${randomUUID()}`
+        : MCP_CONFIG_PATH;
+    await this.containerManager.writeFile(containerId, uploadPath, `${sections.join('\n\n')}\n`);
+    const secureCommand =
+      executionTarget === 'sandbox'
+        ? runtimeConfigInstallCommand(uploadPath, MCP_CONFIG_PATH)
+        : [
+            'sh',
+            '-c',
+            `chown ${CONTAINER_USER}:${CONTAINER_USER} '${MCP_CONFIG_PATH}' && chmod 0600 '${MCP_CONFIG_PATH}'`,
+          ];
     const timeout = executionTarget === 'sandbox' ? SANDBOX_CONFIG_COMMAND_TIMEOUT_MS : 5_000;
-    for (let attempt = 1; attempt <= SANDBOX_CONFIG_COMMAND_ATTEMPTS; attempt++) {
-      try {
-        const secureConfig = await this.containerManager.execInContainer(
-          containerId,
-          secureCommand,
-          {
-            timeout,
-            user: 'root',
-          },
-        );
-        if (secureConfig.exitCode !== 0) {
-          throw new Error(
-            `Failed to secure Codex MCP config (exit ${secureConfig.exitCode}): ${secureConfig.stderr}`,
+    try {
+      for (let attempt = 1; attempt <= SANDBOX_CONFIG_COMMAND_ATTEMPTS; attempt++) {
+        try {
+          const secureConfig = await this.containerManager.execInContainer(
+            containerId,
+            secureCommand,
+            {
+              timeout,
+              user: 'root',
+            },
+          );
+          if (secureConfig.exitCode !== 0) {
+            throw new Error(
+              `Failed to secure Codex MCP config (exit ${secureConfig.exitCode}): the image must support readable uploads and atomic writes in the Codex config directory for its effective exec user`,
+            );
+          }
+          if (executionTarget === 'sandbox') {
+            const readable = await this.containerManager.execInContainer(
+              containerId,
+              ['test', '-r', MCP_CONFIG_PATH],
+              { timeout },
+            );
+            if (readable.exitCode !== 0)
+              throw new Error(
+                'Failed to secure Codex MCP config: effective runtime user cannot read the installed config',
+              );
+          }
+          return;
+        } catch (error) {
+          const retryableTimeout =
+            executionTarget === 'sandbox' &&
+            error instanceof AutopodError &&
+            error.code === 'AZURE_SANDBOX_TIMEOUT';
+          if (!retryableTimeout || attempt === SANDBOX_CONFIG_COMMAND_ATTEMPTS) throw error;
+          this.logger.warn(
+            { containerId, attempt, timeout },
+            'Sandbox Codex config ownership timed out — retrying idempotent command',
           );
         }
-        return;
-      } catch (error) {
-        const retryableTimeout =
-          executionTarget === 'sandbox' &&
-          error instanceof AutopodError &&
-          error.code === 'AZURE_SANDBOX_TIMEOUT';
-        if (!retryableTimeout || attempt === SANDBOX_CONFIG_COMMAND_ATTEMPTS) throw error;
-        this.logger.warn(
-          { containerId, attempt, timeout },
-          'Sandbox Codex config ownership timed out — retrying idempotent command',
-        );
+      }
+    } finally {
+      if (executionTarget === 'sandbox') {
+        try {
+          const cleanup = await this.containerManager.execInContainer(
+            containerId,
+            ['rm', '-f', uploadPath],
+            { timeout, user: 'root' },
+          );
+          if (cleanup.exitCode !== 0)
+            this.logger.warn(
+              { containerId },
+              'Could not remove staged Codex config; container cleanup required',
+            );
+        } catch {
+          this.logger.warn(
+            { containerId },
+            'Could not remove staged Codex config; container cleanup required',
+          );
+        }
       }
     }
   }
@@ -1366,7 +1395,25 @@ async function readRolloutDelta(
   const parsed = splitCompleteJsonLines(Buffer.concat([tail.carry, appended]));
   tail.offset = rollout.size;
   tail.carry = parsed.carry;
-  return parsed.complete;
+  if (tail.notBefore === undefined) return parsed.complete;
+  // A mount can expose an empty/partial prior-turn snapshot before filling it.
+  // A byte offset alone cannot distinguish those late old records from this
+  // invocation. Missing or older event time is not current settlement proof.
+  return parsed.complete
+    .split('\n')
+    .filter((line) => {
+      try {
+        const record = JSON.parse(line) as { timestamp?: unknown };
+        const timestamp =
+          typeof record.timestamp === 'string' ? Date.parse(record.timestamp) : Number.NaN;
+        return (
+          Number.isFinite(timestamp) && timestamp >= (tail.notBefore ?? Number.POSITIVE_INFINITY)
+        );
+      } catch {
+        return false;
+      }
+    })
+    .join('\n');
 }
 
 async function readRolloutAppend(pathname: string, start: number, size: number): Promise<Buffer> {
@@ -1434,10 +1481,11 @@ async function createResumeRolloutTail(
   sessionId?: string,
 ): Promise<RolloutTailState> {
   if (!sessionId) return { path: null, offset: 0, carry: Buffer.alloc(0) };
+  const notBefore = Date.now();
   const rollout = await findLatestCodexRollout(codexStateDirForPod(podId), sessionId);
   return rollout
-    ? { path: rollout.path, offset: rollout.size, carry: Buffer.alloc(0) }
-    : { path: null, offset: -1, carry: Buffer.alloc(0) };
+    ? { path: rollout.path, offset: rollout.size, carry: Buffer.alloc(0), notBefore }
+    : { path: null, offset: -1, carry: Buffer.alloc(0), notBefore };
 }
 
 async function collectRolloutFiles(dir: string, candidates: RolloutCandidate[]): Promise<void> {

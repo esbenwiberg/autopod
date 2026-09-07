@@ -599,3 +599,5 @@ export type {
   ModelsAnalyticsResponse,
   MemoryAnalyticsResponse,
 } from './types/analytics.js';
+
+export type { BackupHealth, DaemonHealthSummary, DaemonReleaseInfo } from './types/release.js';

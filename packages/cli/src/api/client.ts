@@ -1,3 +1,4 @@
+import type { DaemonHealthSummary } from '@autopod/shared';
 import {
   AuthError,
   AutopodError,
@@ -686,8 +687,8 @@ export class AutopodClient {
   }
 
   // Health
-  async checkHealth(): Promise<{ status: string; version: string }> {
-    return this.request<{ status: string; version: string }>('GET', '/health');
+  async checkHealth(): Promise<DaemonHealthSummary> {
+    return this.request<DaemonHealthSummary>('GET', '/health');
   }
 
   // WebSocket helpers

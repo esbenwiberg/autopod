@@ -7,6 +7,31 @@ import { withSpinner } from '../output/spinner.js';
 
 export function registerDaemonCommands(program: Command): void {
   program
+    .command('health')
+    .description('Show daemon release and backup readiness')
+    .option('--json', 'Print machine-readable health evidence')
+    .option('--url <url>', 'Inspect this daemon without changing the saved connection')
+    .action(async (options: { json?: boolean; url?: string }) => {
+      const daemonUrl = options.url ?? configStore.get('daemon');
+      if (!daemonUrl) throw new Error('No daemon configured. Run: ap connect <url>');
+      const health = await new AutopodClient({
+        baseUrl: daemonUrl,
+        getToken: async () => '',
+      }).checkHealth();
+      if (options.json) {
+        console.log(JSON.stringify(health, null, 2));
+        return;
+      }
+      console.log(`Daemon v${health.version}: ${health.status}`);
+      console.log(
+        `Release: ${health.release?.commitSha ?? 'unavailable'}${health.release?.dirty ? ' (modified source)' : ''}`,
+      );
+      console.log(
+        `Backup: ${health.backup?.state ?? 'unavailable'}; latest ${health.backup?.lastCompletedAt ?? 'unverified'}`,
+      );
+    });
+
+  program
     .command('connect <url>')
     .description('Connect to a daemon instance')
     .action(async (url: string) => {

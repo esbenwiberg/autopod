@@ -1,0 +1,173 @@
+
+ RUN  v4.1.10 /private/tmp/autopod-durable-execution
+
+ ❯ packages/daemon/src/pods/registry-injector.test.ts (49 tests | 9 failed) 29ms
+     × throws when nuget auth fails with NU1301 6ms
+     × throws when nuget auth probe exits non-zero without NU1301 1ms
+     × checks supported capability and passes config paths as literal arguments 2ms
+     × fails before network probing when the image lacks the supported SDK command 1ms
+     × does not infer rejected credentials from an unavailable service index 1ms
+     × rejects incomplete successful search output without publishing raw provider text: not JSON 0ms
+     × rejects incomplete successful search output without publishing raw provider text: {"version":2,"problems":[{"text":"feed timed out"}],"searchResult":[]} 1ms
+     × rejects incomplete successful search output without publishing raw provider text: {"version":2,"problems":[]} 1ms
+     × validates both files when both present 0ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 9 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  packages/daemon/src/pods/registry-injector.test.ts > validateRegistryFiles > throws when nuget auth fails with NU1301
+AssertionError: promise resolved "undefined" instead of rejecting
+
+- Expected:
+Error {
+  "message": "rejected promise",
+}
+
++ Received:
+undefined
+
+ ❯ packages/daemon/src/pods/registry-injector.test.ts:425:59
+    423|     });
+    424|     const files = [{ path: NUGET_CONFIG_PATH, content: '<valid/>' }];
+    425|     await expect(validateRegistryFiles(cm, 'ctr-1', files)).rejects.to…
+       |                                                           ^
+    426|       /Registry auth failed.*PAT.*Packaging/,
+    427|     );
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/9]⎯
+
+ FAIL  packages/daemon/src/pods/registry-injector.test.ts > validateRegistryFiles > throws when nuget auth probe exits non-zero without NU1301
+AssertionError: promise resolved "undefined" instead of rejecting
+
+- Expected:
+Error {
+  "message": "rejected promise",
+}
+
++ Received:
+undefined
+
+ ❯ packages/daemon/src/pods/registry-injector.test.ts:444:59
+    442|     });
+    443|     const files = [{ path: NUGET_CONFIG_PATH, content: '<valid/>' }];
+    444|     await expect(validateRegistryFiles(cm, 'ctr-1', files)).rejects.to…
+       |                                                           ^
+    445|       /Registry auth probe failed.*exited 1/,
+    446|     );
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/9]⎯
+
+ FAIL  packages/daemon/src/pods/registry-injector.test.ts > validateRegistryFiles > checks supported capability and passes config paths as literal arguments
+AssertionError: expected 2nd "vi.fn()" call to have been called with [ 'ctr-1', …(2) ]
+
+- Expected
++ Received
+
+@@ -1,12 +1,11 @@
+  [
+    "ctr-1",
+    [
+-     "dotnet",
+-     "package",
+-     "search",
+-     "--help",
++     "sh",
++     "-c",
++     "dotnet nuget search \"__autopod_auth_probe__\" --configfile /workspace/a space;false/NuGet.Config --take 1 2>&1",
+    ],
+    {
+      "cwd": "/workspace",
+      "timeout": 60000,
+    },
+
+ ❯ packages/daemon/src/pods/registry-injector.test.ts:457:32
+    455|     const path = '/workspace/a space;false/NuGet.Config';
+    456|     await validateRegistryFiles(cm, 'ctr-1', [{ path, content: '<valid…
+    457|     expect(cm.execInContainer).toHaveBeenNthCalledWith(2, 'ctr-1',
+       |                                ^
+    458|       ['dotnet', 'package', 'search', '--help'], expect.any(Object));
+    459|     expect(cm.execInContainer).toHaveBeenNthCalledWith(3, 'ctr-1',
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/9]⎯
+
+ FAIL  packages/daemon/src/pods/registry-injector.test.ts > validateRegistryFiles > fails before network probing when the image lacks the supported SDK command
+AssertionError: promise resolved "undefined" instead of rejecting
+
+- Expected:
+Error {
+  "message": "rejected promise",
+}
+
++ Received:
+undefined
+
+ ❯ packages/daemon/src/pods/registry-injector.test.ts:465:96
+    463|   it('fails before network probing when the image lacks the supported …
+    464|     const cm = mockCm({ 'dotnet package search --help': { stdout: 'Unk…
+    465|     await expect(validateRegistryFiles(cm, 'ctr-1', [{ path: NUGET_CON…
+       |                                                                                                ^
+    466|       .rejects.toThrow(/capability.*8\.0\.2/i);
+    467|     expect(cm.execInContainer).toHaveBeenCalledTimes(2);
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[4/9]⎯
+
+ FAIL  packages/daemon/src/pods/registry-injector.test.ts > validateRegistryFiles > does not infer rejected credentials from an unavailable service index
+AssertionError: promise resolved "undefined" instead of rejecting
+
+- Expected:
+Error {
+  "message": "rejected promise",
+}
+
++ Received:
+undefined
+
+ ❯ packages/daemon/src/pods/registry-injector.test.ts:474:96
+    472|       stdout: 'error NU1301: service index unavailable token=secret-va…
+    473|     } });
+    474|     await expect(validateRegistryFiles(cm, 'ctr-1', [{ path: NUGET_CON…
+       |                                                                                                ^
+    475|       .rejects.toThrow(/^Registry feed unavailable:.*authentication is…
+    476|   });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[5/9]⎯
+
+ FAIL  packages/daemon/src/pods/registry-injector.test.ts > validateRegistryFiles > rejects incomplete successful search output without publishing raw provider text: not JSON
+ FAIL  packages/daemon/src/pods/registry-injector.test.ts > validateRegistryFiles > rejects incomplete successful search output without publishing raw provider text: {"version":2,"problems":[{"text":"feed timed out"}],"searchResult":[]}
+ FAIL  packages/daemon/src/pods/registry-injector.test.ts > validateRegistryFiles > rejects incomplete successful search output without publishing raw provider text: {"version":2,"problems":[]}
+AssertionError: promise resolved "undefined" instead of rejecting
+
+- Expected:
+Error {
+  "message": "rejected promise",
+}
+
++ Received:
+undefined
+
+ ❯ packages/daemon/src/pods/registry-injector.test.ts:484:96
+    482|   ])('rejects incomplete successful search output without publishing r…
+    483|     const cm = mockCm({ 'dotnet package search __autopod_auth_probe__'…
+    484|     await expect(validateRegistryFiles(cm, 'ctr-1', [{ path: NUGET_CON…
+       |                                                                                                ^
+    485|       .rejects.toThrow(/Registry probe incomplete/);
+    486|   });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[6/9]⎯
+
+ FAIL  packages/daemon/src/pods/registry-injector.test.ts > validateRegistryFiles > validates both files when both present
+AssertionError: expected "vi.fn()" to be called 4 times, but got 3 times
+ ❯ packages/daemon/src/pods/registry-injector.test.ts:510:32
+    508|     await expect(validateRegistryFiles(cm, 'ctr-1', files)).resolves.t…
+    509|     // npm parse + NuGet config parse + capability help + JSON search …
+    510|     expect(cm.execInContainer).toHaveBeenCalledTimes(4);
+       |                                ^
+    511|   });
+    512|
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[7/9]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  9 failed | 40 passed (49)
+   Start at  11:05:24
+   Duration  321ms (transform 91ms, setup 0ms, import 115ms, tests 29ms, environment 0ms)

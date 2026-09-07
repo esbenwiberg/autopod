@@ -44,6 +44,10 @@ public actor DaemonAPI {
     return true
   }
 
+  public func healthSnapshot() async throws -> DaemonHealthSnapshot {
+    try await request("GET", "/health")
+  }
+
   public func version() async throws -> String {
     let res: VersionResponse = try await request("GET", "/version")
     return res.version

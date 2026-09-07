@@ -3,6 +3,7 @@ import { act } from 'react';
 import { type Root, createRoot } from 'react-dom/client';
 import { type MockInstance, afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { STORAGE_KEY } from '../lib/token.js';
+import { usePodsStore } from '../store/pods.js';
 import { EscalationCard } from './EscalationCard.js';
 
 function escalation(overrides: Partial<EscalationRequest>): EscalationRequest {
@@ -248,5 +249,50 @@ describe('EscalationCard', () => {
     const textarea = container.querySelector('textarea');
     expect(textarea?.value).toBe('do this');
     expect(container.textContent).toContain('nope');
+  });
+  it('refreshes authoritative pod state after an acknowledged reply without WebSocket events', async () => {
+    const updated = {
+      id: 'pod-1',
+      status: 'running',
+      pendingEscalation: null,
+      finalization: { phase: 'running', pendingDecisionId: null },
+    };
+    const spy = vi
+      .spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce(new Response(null, { status: 204 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify(updated), { status: 200 }));
+    await renderCard(escalation({ payload: { question: 'Choose', options: ['A'] } }));
+    await act(async () => {
+      clickByText(container, 'A');
+      await flush();
+    });
+    expect(spy.mock.calls[1]?.[0]).toBe('/pods/pod-1');
+    expect(usePodsStore.getState().pods.find((p) => p.id === 'pod-1')).toMatchObject(updated);
+  });
+
+  it('keeps an accepted reply acknowledged when refresh fails, then retries only the read', async () => {
+    const spy = vi
+      .spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce(new Response(null, { status: 204 }))
+      .mockResolvedValueOnce(new Response('offline', { status: 503 }))
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ id: 'pod-1', status: 'running', pendingEscalation: null }), {
+          status: 200,
+        }),
+      );
+    await renderCard(escalation({ payload: { question: 'Choose', options: ['A'] } }));
+    await act(async () => {
+      clickByText(container, 'A');
+      await flush();
+    });
+    expect(container.textContent).toContain('Reply accepted');
+    expect(
+      Array.from(container.querySelectorAll('button')).find((b) => b.textContent === 'A')?.disabled,
+    ).toBe(true);
+    await act(async () => {
+      clickByText(container, 'Refresh state');
+      await flush();
+    });
+    expect(spy.mock.calls.filter(([, init]) => init?.method === 'POST')).toHaveLength(1);
   });
 });

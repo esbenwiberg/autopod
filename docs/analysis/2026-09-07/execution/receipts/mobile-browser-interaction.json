@@ -1,0 +1,51 @@
+{
+  "scope": "local built mobile app against isolated HTTP fixture; no WebSocket, live daemon, provider or physical device",
+  "fixture": "fixtures/mobile-server.mjs",
+  "buildReceipt": "receipts/mobile-reply-build.txt",
+  "surface": "Codex in-app browser via CUA",
+  "steps": [
+    {
+      "action": "Open About",
+      "observed": [
+        "LOCAL-FIXTURE \u00b7 modified source",
+        "Backup stale \u00b7 2026-09-01T00:00:00Z"
+      ]
+    },
+    {
+      "action": "Open pending pod",
+      "observed": [
+        "awaiting input",
+        "Saved evidence unavailable: lastValidationResult (invalid_json)",
+        "Worker settlement",
+        "Human decision remains unanswered",
+        "Repair finding A button enabled"
+      ]
+    },
+    {
+      "action": "Click Repair finding A",
+      "observed": [
+        "HTTP fixture received exactly the selected message",
+        "status running",
+        "Next stage: running",
+        "pending question and reply controls removed",
+        "diagnostic retained"
+      ]
+    },
+    {
+      "action": "Inspect screenshot at 390 by 844",
+      "observed": [
+        "running state and settlement visible",
+        "diagnostic readable",
+        "no horizontal clipping"
+      ]
+    }
+  ],
+  "result": "passed for these local browser interactions",
+  "cleanup": "viewport reset, temporary tab closed, fixture server stopped",
+  "notProven": [
+    "physical phone",
+    "live daemon integration",
+    "desktop native interaction",
+    "other goal operator flows"
+  ]
+}

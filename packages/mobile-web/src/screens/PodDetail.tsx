@@ -131,7 +131,11 @@ export function PodDetail(): JSX.Element {
       <ProgressPlan pod={data} />
 
       {data.pendingEscalation ? (
-        <EscalationCard podId={data.id} escalation={data.pendingEscalation} />
+        <EscalationCard
+          key={data.pendingEscalation.id}
+          podId={data.id}
+          escalation={data.pendingEscalation}
+        />
       ) : null}
 
       <ValidationSummary result={data.lastValidationResult} history={validationHistory} />

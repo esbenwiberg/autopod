@@ -2497,16 +2497,14 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
   function resolveEffectiveBoundProfile(pod: Pod): Profile {
     const profile = profileStore.get(pod.profileName);
     const repository = deps.providerAttemptRepo;
-    if (!repository) return profile;
-
-    const activeAttempt = repository.getActive(pod.id);
+    const activeAttempt = repository?.getActive(pod.id);
     if (activeAttempt) {
       if (activeAttempt.runtime !== pod.runtime || activeAttempt.model !== pod.model) {
         throw new Error(`Active provider attempt identity mismatch for pod ${pod.id}`);
       }
     }
 
-    const latestAttempt = repository.list(pod.id).at(-1);
+    const latestAttempt = repository?.list(pod.id).at(-1);
     if (
       !activeAttempt &&
       latestAttempt &&
@@ -2522,6 +2520,28 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
       );
     }
     const boundAttempt = activeAttempt ?? latestAttempt;
+    // Before the first attempt, the creation snapshot is the authority. Editing
+    // a shared profile must not move already queued work to a different account.
+    if (!boundAttempt && pod.providerAccountIdSnapshot) {
+      let account: ReturnType<ProviderAccountStore['get']> | undefined;
+      try {
+        account = providerAccountStore?.get(pod.providerAccountIdSnapshot);
+      } catch {
+        // Convert deleted-account lookup failures into an actionable binding error.
+      }
+      if (!account || account.provider !== pod.providerIdSnapshot) {
+        throw new AutopodError(
+          'Queued provider account is unavailable or its provider identity changed; restore the authorized account or explicitly select a new target before retrying',
+          'INVALID_PROVIDER_TARGET',
+          409,
+        );
+      }
+      return profileForProviderTarget(profile, {
+        providerAccountId: pod.providerAccountIdSnapshot,
+        runtime: pod.runtime,
+        model: pod.model,
+      });
+    }
     if (!boundAttempt?.providerAccountId) {
       const hasUnreconciledBinding =
         (pod.providerAccountIdSnapshot !== null &&

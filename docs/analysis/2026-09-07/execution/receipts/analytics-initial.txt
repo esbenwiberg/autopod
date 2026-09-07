@@ -171,4 +171,3 @@ AssertionError: expected +0 to be 1 // Object.is equality
       Tests  9 failed | 95 passed (104)
    Start at  10:34:06
    Duration  1.80s (transform 288ms, setup 0ms, import 543ms, tests 2.66s, environment 0ms)
-

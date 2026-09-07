@@ -1,0 +1,49 @@
+
+ RUN  v4.1.10 /private/tmp/autopod-durable-execution/packages/mobile-web
+
+ ❯ src/components/EscalationCard.test.tsx (9 tests | 2 failed) 466ms
+     × refreshes authoritative pod state after an acknowledged reply without WebSocket events 24ms
+     × keeps an accepted reply acknowledged when refresh fails, then retries only the read 24ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 2 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/components/EscalationCard.test.tsx > EscalationCard > refreshes authoritative pod state after an acknowledged reply without WebSocket events
+AssertionError: expected undefined to be '/pods/pod-1' // Object.is equality
+
+- Expected:
+"/pods/pod-1"
+
++ Received:
+undefined
+
+ ❯ src/components/EscalationCard.test.tsx:259:36
+    257|     await renderCard(escalation({ payload: { question: 'Choose', optio…
+    258|     await act(async () => { clickByText(container, 'A'); await flush()…
+    259|     expect(spy.mock.calls[1]?.[0]).toBe('/pods/pod-1');
+       |                                    ^
+    260|     expect(usePodsStore.getState().pods.find(p => p.id === 'pod-1')).t…
+    261|   });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/2]⎯
+
+ FAIL  src/components/EscalationCard.test.tsx > EscalationCard > keeps an accepted reply acknowledged when refresh fails, then retries only the read
+AssertionError: expected 'awaiting inputAgent needs inputChoose…' to contain 'Reply accepted'
+
+Expected: "Reply accepted"
+Received: "awaiting inputAgent needs inputChooseASend"
+
+ ❯ src/components/EscalationCard.test.tsx:269:35
+    267|     await renderCard(escalation({ payload: { question: 'Choose', optio…
+    268|     await act(async () => { clickByText(container, 'A'); await flush()…
+    269|     expect(container.textContent).toContain('Reply accepted');
+       |                                   ^
+    270|     expect(Array.from(container.querySelectorAll('button')).find(b => …
+    271|     await act(async () => { clickByText(container, 'Refresh state'); a…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/2]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  2 failed | 7 passed (9)
+   Start at  11:30:25
+   Duration  4.41s (transform 645ms, setup 398ms, import 594ms, tests 466ms, environment 2.19s)

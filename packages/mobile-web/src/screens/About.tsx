@@ -1,23 +1,17 @@
+import type { DaemonHealthSummary } from '@autopod/shared';
 import type { JSX } from 'react';
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { ApiError, AuthRequiredError, apiFetch } from '../lib/api.js';
 import { readStoredToken } from '../lib/token.js';
 
-interface HealthResponse {
-  status: string;
-  version: string;
-  timestamp: string;
-  requestDurationMs: number;
-}
-
 export function About(): JSX.Element {
-  const [health, setHealth] = useState<HealthResponse | null>(null);
+  const [health, setHealth] = useState<DaemonHealthSummary | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
-    apiFetch<HealthResponse>('/health')
+    apiFetch<DaemonHealthSummary>('/health')
       .then((h) => {
         if (!cancelled) setHealth(h);
       })
@@ -44,6 +38,17 @@ export function About(): JSX.Element {
       <dl className="about-list">
         <dt>Daemon</dt>
         <dd>{health ? `v${health.version} · ${health.status}` : (error ?? 'checking…')}</dd>
+
+        <dt>Release</dt>
+        <dd>
+          {health?.release?.commitSha ?? 'unavailable'}
+          {health?.release?.dirty ? ' · modified source' : ''}
+        </dd>
+        <dt>Backup</dt>
+        <dd>
+          {health?.backup?.state ?? 'unavailable'} ·{' '}
+          {health?.backup?.lastCompletedAt ?? 'freshness unverified'}
+        </dd>
 
         <dt>Round trip</dt>
         <dd>{health ? `${health.requestDurationMs} ms` : '—'}</dd>

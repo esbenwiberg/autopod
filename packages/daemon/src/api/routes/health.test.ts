@@ -1,6 +1,7 @@
 import Database from 'better-sqlite3';
 import Fastify from 'fastify';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import type { DbBackupManager } from '../../db/backup.js';
 import { healthRoutes } from './health.js';
 
 describe('healthRoutes', () => {
@@ -187,5 +188,52 @@ describe('healthRoutes', () => {
       expect(res.statusCode).toBe(200);
       expect(res.json().version).toBe('0.0.1');
     });
+  });
+});
+
+describe('backup health evidence', () => {
+  it('exposes stale backup state and unknown release identity without changing liveness semantics', async () => {
+    const app = Fastify();
+    healthRoutes(app, {
+      backupManager: {
+        getStatus: () => ({
+          state: 'stale',
+          sourceIdentity: 'active-db-hash',
+          ageMs: 3600000,
+          latest: { completedAt: '2026-09-07T10:00:00Z' },
+          availableBytes: 1000000,
+          requiredBytes: 1000,
+        }),
+      } as DbBackupManager,
+    });
+    try {
+      const basic = (await app.inject('/health')).json();
+      expect(basic).toMatchObject({
+        status: 'ok',
+        release: { source: 'unavailable', commitSha: null },
+        backup: { state: 'stale', ageMs: 3600000 },
+      });
+      expect((await app.inject('/health?detail=full')).json().status).toBe('degraded');
+    } finally {
+      await app.close();
+    }
+  });
+  it('keeps liveness available when backup storage cannot be inspected', async () => {
+    const app = Fastify();
+    healthRoutes(app, {
+      backupManager: {
+        getStatus: () => {
+          throw new Error('disk unavailable');
+        },
+      } as unknown as DbBackupManager,
+    });
+    try {
+      const response = await app.inject('/health');
+      expect(response.statusCode).toBe(200);
+      expect(response.json().backup).toEqual({ state: 'failed' });
+      expect((await app.inject('/health?detail=full')).json().status).toBe('degraded');
+    } finally {
+      await app.close();
+    }
   });
 });
