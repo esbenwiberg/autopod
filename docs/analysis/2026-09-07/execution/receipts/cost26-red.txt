@@ -55,4 +55,3 @@ AssertionError: expected 3.25 to be 2 // Object.is equality
       Tests  2 failed | 42 skipped (44)
    Start at  20:56:17
    Duration  406ms (transform 118ms, setup 0ms, import 190ms, tests 113ms, environment 0ms)
-
