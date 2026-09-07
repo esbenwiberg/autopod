@@ -152,6 +152,7 @@ describe('GET /pods/:podId provider-attempt projection', () => {
         inputTokens: 50,
         outputTokens: 10,
         costUsd: 1,
+        phaseTokenUsage: { agent_initial: { inputTokens: 50, outputTokens: 10, costUsd: 1 } },
       });
       db.prepare(`INSERT INTO provider_attempts (pod_id, ordinal, provider, runtime, model, profile_reference, profile_snapshot,
         started_at, ended_at, outcome, input_tokens, output_tokens, cost_usd)
@@ -167,10 +168,20 @@ describe('GET /pods/:podId provider-attempt projection', () => {
       expect(response.statusCode, response.body).toBe(200);
       expect(response.json()).toMatchObject({
         totalCostUsd: correctedCost,
+        costEvidence: {
+          billingVerified: false,
+          knownEstimatedCostUsd: correctedCost,
+          conflictingPodCount: 1,
+        },
         inputTokens: 20,
         outputTokens: 5,
         taskExecution: {
           recordedCostUsd: correctedCost,
+          costEvidence: {
+            billingVerified: false,
+            knownEstimatedCostUsd: correctedCost,
+            conflictingPodCount: 1,
+          },
           recordedInputTokens: 20,
           recordedOutputTokens: 5,
         },
@@ -180,11 +191,19 @@ describe('GET /pods/:podId provider-attempt projection', () => {
           .json()
           .segments.reduce((sum: number, segment: { costUsd: number }) => sum + segment.costUsd, 0),
       ).toBe(correctedCost);
+      expect(
+        response.json().segments.find((segment: { bucket: string }) => segment.bucket === 'work'),
+      ).toMatchObject({ costUsd: 0, storedCostUsd: 1, attribution: 'unavailable' });
       expect(repo.getOrThrow(id)).toMatchObject({ costUsd: 1, inputTokens: 50, outputTokens: 10 });
     }
     const fleet = await app.inject({ method: 'GET', url: '/pods/analytics/cost?days=1' });
     expect(fleet.statusCode, fleet.body).toBe(200);
     expect(fleet.json().total).toBe(0.5);
+    expect(fleet.json().costEvidence).toMatchObject({
+      billingVerified: false,
+      knownEstimatedCostUsd: 0.5,
+      conflictingPodCount: 2,
+    });
     expect(
       fleet.json().top10.reduce((sum: number, pod: { costUsd: number }) => sum + pod.costUsd, 0),
     ).toBe(0.5);

@@ -13,7 +13,7 @@ public struct SessionCostCard: View {
             HStack(spacing: 8) {
                 Image(systemName: "dollarsign.circle")
                     .foregroundStyle(.green)
-                Text("Session Cost")
+                Text("Session Cost Subtotal")
                     .font(.system(.headline).weight(.semibold))
                     .lineLimit(1)
                 Spacer()
@@ -21,6 +21,8 @@ public struct SessionCostCard: View {
                     .font(.system(size: 18, weight: .semibold, design: .monospaced))
                     .monospacedDigit()
             }
+
+            CostEvidenceView(evidence: breakdown.costEvidence)
 
             if let task = breakdown.taskExecution {
                 VStack(alignment: .leading, spacing: 6) {
@@ -33,7 +35,8 @@ public struct SessionCostCard: View {
                     } else {
                         Text("Delivery receipts unavailable").font(.caption).foregroundStyle(.secondary)
                     }
-                    Text("Recorded task cost: \(formatCost(task.recordedCostUsd)) · \(task.telemetry) telemetry")
+                    Text("Stored task cost subtotal: \(formatCost(task.recordedCostUsd)) · \(task.telemetry) telemetry")
+                    CostEvidenceView(evidence: task.costEvidence)
                     Text("Task tokens: \(task.recordedInputTokens + task.recordedOutputTokens) / \(task.tokenBudget.map(String.init) ?? "no configured limit")")
                     Text(task.budgetCheck?.reason ?? "Task budget admission evidence unavailable.")
                     ForEach(task.diagnostics, id: \.self) { Text($0).font(.caption).foregroundStyle(.secondary) }
@@ -139,7 +142,12 @@ public struct SessionCostCard: View {
 
             Spacer(minLength: 12)
 
-            Text(formatCost(segment.costUsd))
+            VStack(alignment: .trailing, spacing: 2) {
+                Text(segment.attribution == "unavailable" ? "Unavailable" : formatCost(segment.costUsd))
+                if segment.attribution == "unavailable", let stored = segment.storedCostUsd {
+                    Text("Stored: \(formatCost(stored))").font(.caption2)
+                }
+            }
                 .font(.system(.subheadline, design: .monospaced).weight(.semibold))
                 .foregroundStyle(isZero ? .secondary : .primary)
                 .monospacedDigit()

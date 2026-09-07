@@ -37,6 +37,21 @@ it('keeps unavailable accounting explicit and refreshes after a disconnected req
             reason: 'Task token accounting incomplete; reconcile prior execution telemetry.',
           },
           recordedCostUsd: 1.25,
+          costEvidence: {
+            basis: 'stored_subtotal',
+            billingVerified: false,
+            knownEstimatedCostUsd: 0.5,
+            unavailablePhaseCount: 1,
+            conflictingPodCount: 1,
+            omittedDiagnosticCount: 2,
+            diagnostics: [
+              {
+                podId: 'root',
+                code: 'PHASE_COST_CONFLICT',
+                message: 'Stored phase costs conflict; no proportional allocation applied.',
+              },
+            ],
+          },
           telemetry: 'partial',
           delivery: {
             intentCount: 2,
@@ -60,6 +75,15 @@ it('keeps unavailable accounting explicit and refreshes after a disconnected req
     expect(container.textContent).toContain(
       'Task token accounting incomplete; reconcile prior execution telemetry.',
     );
+    expect(container.textContent).toContain('Stored task cost subtotal:');
+    expect(container.textContent).toContain('Billing unverified');
+    expect(container.textContent).toContain(
+      'Known estimates: $0.5000 · 1 phases with unavailable cost · 1 pods with conflicting attribution',
+    );
+    expect(container.textContent).toContain(
+      'Stored phase costs conflict; no proportional allocation applied.',
+    );
+    expect(container.textContent).toContain('2 additional cost diagnostics omitted.');
     expect(container.textContent).toContain('$1.2500 · partial telemetry');
     expect(container.textContent).toContain('Infrastructure cost unavailable');
     expect(container.textContent).toContain('1 delivery receipts · 1 unresolved of 2 intents');

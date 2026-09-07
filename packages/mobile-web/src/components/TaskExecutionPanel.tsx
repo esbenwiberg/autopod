@@ -49,8 +49,31 @@ export function TaskExecutionPanel({ podId, revision }: { podId: string; revisio
             {data.tokenBudget ?? 'no configured limit'}
           </p>
           <p>
-            Recorded task cost: ${data.recordedCostUsd.toFixed(4)} · {data.telemetry} telemetry
+            Stored task cost subtotal: ${data.recordedCostUsd.toFixed(4)} · {data.telemetry}{' '}
+            telemetry
           </p>
+          <p className="muted">Billing unverified; stored amounts can include estimates.</p>
+          {data.costEvidence ? (
+            <>
+              <p>
+                Known estimates: ${data.costEvidence.knownEstimatedCostUsd.toFixed(4)} ·{' '}
+                {data.costEvidence.unavailablePhaseCount} phases with unavailable cost ·{' '}
+                {data.costEvidence.conflictingPodCount} pods with conflicting attribution
+              </p>
+              {data.costEvidence.diagnostics.map((item, index) => (
+                <p key={`${item.podId}:${item.code}:${index}`} className="muted">
+                  {item.podId}: {item.message}
+                </p>
+              ))}
+              {data.costEvidence.omittedDiagnosticCount > 0 && (
+                <p>
+                  {data.costEvidence.omittedDiagnosticCount} additional cost diagnostics omitted.
+                </p>
+              )}
+            </>
+          ) : (
+            <p className="muted">Cost provenance unavailable.</p>
+          )}
           <p>{data.budgetCheck?.reason ?? 'Task budget admission evidence unavailable.'}</p>
           {data.diagnostics.map((message) => (
             <p key={message} className="muted">

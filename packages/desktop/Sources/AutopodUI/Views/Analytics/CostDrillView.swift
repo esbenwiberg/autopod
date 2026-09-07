@@ -48,6 +48,7 @@ struct CostDrillView: View {
                         Text("Unreadable cost records: " + diagnostics.map { "\($0.podId): \($0.field)" }.joined(separator: ", "))
                             .font(.caption).foregroundStyle(.orange)
                     }
+                    CostEvidenceView(evidence: data.costEvidence)
                     CostPhaseBarSectionView(byPhase: data.byPhase)
                     Divider()
                     CostProfileModelSectionView(byProfileModel: data.byProfileModel)
@@ -160,7 +161,7 @@ private struct CostPhaseBarSectionView: View {
         let segments = displaySegments
         let total = segments.reduce(0.0) { $0 + $1.costUsd }
         VStack(alignment: .leading, spacing: 12) {
-            Text("Cost by Phase")
+            Text("Attributed Cost Subtotal by Phase")
                 .font(.headline)
 
             if total > 0 {

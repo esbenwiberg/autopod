@@ -1,6 +1,13 @@
 import { randomUUID } from 'node:crypto';
 import { AutopodError, type TaskExecutionSummary } from '@autopod/shared';
 import type Database from 'better-sqlite3';
+import {
+  appendCostEvidence,
+  emptyCostEvidence,
+  isAgentCostPhase,
+  isHarnessCostPhase,
+  reconcilePodCosts,
+} from './cost-reconciliation.js';
 import { hasUnansweredDecision } from './decision-admission.js';
 import { readProviderUsage } from './provider-usage-projection.js';
 
@@ -80,6 +87,7 @@ export function createTaskExecutionLedger(db: Database.Database): TaskExecutionL
     let recordedInputTokens = 0;
     let recordedOutputTokens = 0;
     let recordedCostUsd = 0;
+    const costEvidence = emptyCostEvidence();
     let incompleteSpending = false;
     const rows = db
       .prepare(`SELECT p.id, p.input_tokens, p.output_tokens, p.cost_usd,
@@ -131,7 +139,25 @@ export function createTaskExecutionLedger(db: Database.Database): TaskExecutionL
         (agent.costUsd ?? 0) > 0;
       recordedInputTokens += number(agent.inputTokens, row.id);
       recordedOutputTokens += number(agent.outputTokens, row.id);
-      recordedCostUsd += number(agent.costUsd, row.id);
+      // Parse once for cost reconciliation; keep independent token admission diagnostics below.
+      let rawPhases: unknown = null;
+      try {
+        rawPhases = row.phase_token_usage ? JSON.parse(row.phase_token_usage) : null;
+      } catch {
+        /* reported below */
+      }
+      const cost = reconcilePodCosts(
+        {
+          id: row.id,
+          inputTokens: row.input_tokens,
+          outputTokens: row.output_tokens,
+          costUsd: row.cost_usd,
+          phaseTokenUsage: rawPhases,
+        },
+        attempts,
+      );
+      recordedCostUsd += cost.total;
+      appendCostEvidence(costEvidence, cost.evidence);
       if (
         attempts.count > 0 &&
         (attempts.inputTokens !== row.input_tokens ||
@@ -154,18 +180,25 @@ export function createTaskExecutionLedger(db: Database.Database): TaskExecutionL
         continue;
       }
       try {
-        const phases: unknown = JSON.parse(row.phase_token_usage);
+        const phases: unknown = rawPhases;
         if (!phases || typeof phases !== 'object' || Array.isArray(phases))
           throw new Error('Invalid phases');
         for (const [name, value] of Object.entries(phases)) {
           // Agent phase buckets attribute the pod total; summing them again double counts it.
-          if (name === 'agent_initial' || /^agent_rework_\d+$/.test(name)) continue;
-          if (!value || typeof value !== 'object' || Array.isArray(value))
-            throw new Error('Invalid phase');
+          if (isAgentCostPhase(name)) continue;
+          if (!isHarnessCostPhase(name)) {
+            diagnostics.push(`${row.id}: unrecognized phase telemetry excluded`);
+            incompleteSpending = true;
+            continue;
+          }
+          if (!value || typeof value !== 'object' || Array.isArray(value)) {
+            diagnostics.push(`${row.id}: phase telemetry unreadable`);
+            incompleteSpending = true;
+            continue;
+          }
           const phase = value as Record<string, unknown>;
           recordedInputTokens += number(phase.inputTokens, row.id);
           recordedOutputTokens += number(phase.outputTokens, row.id);
-          recordedCostUsd += number(phase.costUsd, row.id);
         }
       } catch {
         diagnostics.push(`${row.id}: phase telemetry unreadable`);
@@ -234,6 +267,7 @@ export function createTaskExecutionLedger(db: Database.Database): TaskExecutionL
       recordedInputTokens,
       recordedOutputTokens,
       recordedCostUsd,
+      costEvidence,
       infrastructureCostUsd: null,
       telemetry: 'partial',
       diagnostics: [

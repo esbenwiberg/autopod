@@ -75,7 +75,20 @@ export type TokenTelemetryAccuracy = 'complete' | 'partial' | 'repaired';
 
 export type PodCostBucket = 'work' | 'rework' | 'validation' | 'advisory' | 'unattributed';
 
+/** Stored amounts may themselves be historical estimates. Never a billing receipt. */
+export interface CostEvidence {
+  basis: 'stored_subtotal';
+  billingVerified: false;
+  knownEstimatedCostUsd: number;
+  unavailablePhaseCount: number;
+  conflictingPodCount: number;
+  diagnostics: Array<{ podId: string; code: string; message: string }>;
+  omittedDiagnosticCount: number;
+}
+
 export interface PodCostSegment {
+  storedCostUsd?: number | null;
+  attribution?: 'stored' | 'unavailable' | 'unattributed';
   bucket: PodCostBucket;
   label: string;
   costUsd: number;
@@ -85,6 +98,7 @@ export interface PodCostSegment {
 }
 
 export interface PodCostBreakdownResponse {
+  costEvidence?: CostEvidence;
   taskExecution?: import('./task-execution.js').TaskExecutionSummary | null;
   podId: string;
   model: string | null;

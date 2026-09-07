@@ -243,6 +243,9 @@ import { type DeliveryLedger, createDeliveryLedger } from './delivery-ledger.js'
 
 import { type TaskExecutionLedger, createTaskExecutionLedger } from './task-execution-ledger.js';
 
+/** Cost readers validate raw phase buckets individually to retain healthy siblings. */
+export type PodCostSource = Omit<Pod, 'phaseTokenUsage'> & { phaseTokenUsage: unknown };
+
 export interface PodRepository extends Partial<UnitOfWork> {
   taskRetries?: TaskRetryLedger;
   sandboxStartupRetries?: TaskRetryLedger;
@@ -265,7 +268,7 @@ export interface PodRepository extends Partial<UnitOfWork> {
   /** Compact operator projection: bounded display JSON, no full control-plane evidence. */
   listCompactForDisplay?(filters?: PodFilters): CompactPodSource[];
   /** Bounded cost projection; never materializes contracts, prompts or validation payloads. */
-  listCostRecords?(completedSince: string): Pod[];
+  listCostRecords?(completedSince: string): PodCostSource[];
   getProviderUsage?(podId: string): ProviderUsageProjection;
   /** All pods whose status is not terminal (`complete` / `killed`). */
   listNonTerminal(): Pod[];
@@ -1251,7 +1254,7 @@ export function createPodRepository(db: Database.Database): PodRepository {
 
     getProviderUsage: (podId) => readProviderUsage(db, podId),
 
-    listCostRecords(completedSince: string): Pod[] {
+    listCostRecords(completedSince: string): PodCostSource[] {
       const rows = db
         .prepare(`SELECT id, profile_name, status, model, runtime, completed_at,
         input_tokens, output_tokens, cost_usd, phase_token_usage, token_telemetry_accuracy,
@@ -1260,7 +1263,19 @@ export function createPodRepository(db: Database.Database): PodRepository {
           AND agent_mode != 'interactive' AND completed_at >= ?
         ORDER BY completed_at, id`)
         .iterate(completedSince) as Iterable<Record<string, unknown>>;
-      return Array.from(rows, rowToDisplaySession);
+      return Array.from(rows, (row) => {
+        // Display decoding diagnoses corrupt siblings; reconciliation needs raw values
+        // to preserve healthy costs and report unavailable phases independently.
+        const rawPhases = row.phase_token_usage;
+        const pod = rowToDisplaySession(row);
+        let phaseTokenUsage: unknown = null;
+        try {
+          phaseTokenUsage = rawPhases ? JSON.parse(String(rawPhases)) : null;
+        } catch {
+          /* already diagnosed */
+        }
+        return { ...pod, phaseTokenUsage };
+      });
     },
 
     listNonTerminalPodIds(): string[] {

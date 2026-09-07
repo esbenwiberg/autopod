@@ -30,6 +30,7 @@ export type {
   PodCostBreakdownResponse,
   PodCostBucket,
   PodCostSegment,
+  CostEvidence,
   ProviderAttempt,
   ProviderAttemptOutcome,
   PodStatus,

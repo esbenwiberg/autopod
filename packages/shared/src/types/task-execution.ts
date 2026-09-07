@@ -1,3 +1,5 @@
+import type { CostEvidence } from './pod.js';
+
 /** Counts refer to one durable linked task, not delivery or successful acceptance. */
 export interface TaskExecutionSummary {
   taskId: string;
@@ -25,6 +27,7 @@ export interface TaskExecutionSummary {
   recordedInputTokens: number;
   recordedOutputTokens: number;
   recordedCostUsd: number;
+  costEvidence?: CostEvidence;
   infrastructureCostUsd: number | null;
   telemetry: 'partial' | 'complete';
   diagnostics: string[];

@@ -1,156 +1,58 @@
-import {
-  type PhaseTokenUsage,
-  type Pod,
-  type PodCostBreakdownResponse,
-  type PodCostBucket,
-  type PodCostSegment,
-  computeCostWithCache,
-  effectiveCostUsd,
-} from '@autopod/shared';
+import type { Pod, PodCostBreakdownResponse, PodCostBucket, PodCostSegment } from '@autopod/shared';
+import { reconcilePodCosts } from './cost-reconciliation.js';
 import type { ProviderUsageProjection } from './provider-usage-projection.js';
 
-type TokenBucket = { inputTokens: number; outputTokens: number; cachedInputTokens?: number };
-const COST_EPSILON = 1e-9;
-
-const SEGMENT_DEFS: Array<{
+const definitions: Array<{
   bucket: PodCostBucket;
   label: string;
-  costScope: 'agent' | 'harness';
-  phases: readonly string[];
-  includePhase?: (phase: string) => boolean;
+  includes: (phase: string) => boolean;
 }> = [
-  { bucket: 'work', label: 'Work', costScope: 'agent', phases: ['agent_initial'] },
-  {
-    bucket: 'rework',
-    label: 'Rework',
-    costScope: 'agent',
-    phases: [],
-    includePhase: (phase) => /^agent_rework_\d+$/.test(phase),
-  },
+  { bucket: 'work', label: 'Work', includes: (phase) => phase === 'agent_initial' },
+  { bucket: 'rework', label: 'Rework', includes: (phase) => /^agent_rework_\d+$/.test(phase) },
   {
     bucket: 'validation',
     label: 'Validation',
-    costScope: 'harness',
-    phases: ['review', 'plan_eval'],
+    includes: (phase) => ['review', 'plan_eval'].includes(phase),
   },
-  { bucket: 'advisory', label: 'Advisory', costScope: 'harness', phases: ['advisory'] },
+  { bucket: 'advisory', label: 'Advisory', includes: (phase) => phase === 'advisory' },
+  { bucket: 'unattributed', label: 'Unattributed', includes: (phase) => phase === 'agent_legacy' },
 ];
-
-function comparePhaseName(a: string, b: string): number {
-  const reworkRe = /^agent_rework_(\d+)$/;
-  const aMatch = reworkRe.exec(a);
-  const bMatch = reworkRe.exec(b);
-  if (aMatch && bMatch) return Number(aMatch[1]) - Number(bMatch[1]);
-  return a.localeCompare(b);
-}
-
-function addTokens(total: TokenBucket, bucket: TokenBucket | undefined): void {
-  if (!bucket) return;
-  total.inputTokens += bucket.inputTokens;
-  total.outputTokens += bucket.outputTokens;
-  const cachedInputTokens = (total.cachedInputTokens ?? 0) + (bucket.cachedInputTokens ?? 0);
-  if (cachedInputTokens > 0) total.cachedInputTokens = cachedInputTokens;
-}
-
-function collectSegmentTokens(
-  usage: PhaseTokenUsage | null,
-  def: (typeof SEGMENT_DEFS)[number],
-  model: string | null,
-): { tokens: TokenBucket; sourcePhases: string[]; costUsd: number } {
-  const tokens: TokenBucket = { inputTokens: 0, outputTokens: 0 };
-  const sourcePhases: string[] = [];
-  let costUsd = 0;
-  if (!usage) return { tokens, sourcePhases, costUsd };
-
-  const allPhases = Object.keys(usage).sort(comparePhaseName);
-  const matchingPhases = [
-    ...def.phases,
-    ...allPhases.filter((phase) => def.includePhase?.(phase) ?? false),
-  ];
-
-  for (const phase of matchingPhases) {
-    const bucket = usage[phase as keyof PhaseTokenUsage];
-    if (!bucket) continue;
-    addTokens(tokens, bucket);
-    costUsd += phaseBucketCost(model, bucket);
-    sourcePhases.push(phase);
-  }
-
-  return { tokens, sourcePhases, costUsd };
-}
-
-function phaseBucketCost(model: string | null, bucket: TokenBucket & { costUsd?: number }): number {
-  if (typeof bucket.costUsd === 'number' && Number.isFinite(bucket.costUsd)) {
-    return bucket.costUsd;
-  }
-  return computeCostWithCache(
-    model,
-    bucket.inputTokens,
-    bucket.outputTokens,
-    bucket.cachedInputTokens ?? 0,
-  );
-}
 
 export function computePodCostBreakdown(
   pod: Pod,
   usage?: ProviderUsageProjection,
 ): PodCostBreakdownResponse {
-  const recorded = usage && usage.count > 0 ? usage : null;
-  const agentCostUsd = recorded ? (recorded.costUsd ?? 0) : effectiveCostUsd(pod);
-  const phaseUsage = pod.phaseTokenUsage;
-
-  const segments: PodCostSegment[] = SEGMENT_DEFS.map((def) => {
-    const { tokens, sourcePhases, costUsd } = collectSegmentTokens(phaseUsage, def, pod.model);
+  const result = reconcilePodCosts(pod, usage);
+  const provider = usage && usage.count > 0 ? usage : null;
+  const segments: PodCostSegment[] = definitions.map((def) => {
+    const phases = result.phases.filter((p) => def.includes(p.phase));
+    const unavailable = phases.some((p) => p.attributedCostUsd === null);
     return {
       bucket: def.bucket,
       label: def.label,
-      costUsd,
-      inputTokens: tokens.inputTokens,
-      outputTokens: tokens.outputTokens,
-      sourcePhases,
+      costUsd: phases.reduce((sum, p) => sum + (p.attributedCostUsd ?? 0), 0),
+      storedCostUsd:
+        phases.length === 0 || phases.some((p) => p.storedCostUsd === null)
+          ? null
+          : phases.reduce((sum, p) => sum + (p.storedCostUsd ?? 0), 0),
+      attribution:
+        def.bucket === 'unattributed'
+          ? 'unattributed'
+          : unavailable || phases.length === 0
+            ? 'unavailable'
+            : 'stored',
+      inputTokens: phases.reduce((sum, p) => sum + p.inputTokens, 0),
+      outputTokens: phases.reduce((sum, p) => sum + p.outputTokens, 0),
+      sourcePhases: phases.map((p) => p.phase),
     };
   });
-
-  const rawAgentCostUsd = segments.reduce((sum, segment) => {
-    const def = SEGMENT_DEFS.find((candidate) => candidate.bucket === segment.bucket);
-    return def?.costScope === 'agent' ? sum + segment.costUsd : sum;
-  }, 0);
-
-  if (rawAgentCostUsd > agentCostUsd && rawAgentCostUsd > 0) {
-    const scale = agentCostUsd / rawAgentCostUsd;
-    for (const segment of segments.filter((segment) => {
-      const def = SEGMENT_DEFS.find((candidate) => candidate.bucket === segment.bucket);
-      return def?.costScope === 'agent';
-    })) {
-      segment.costUsd *= scale;
-    }
-  }
-
-  const attributedAgentCostUsd = segments.reduce((sum, segment) => {
-    const def = SEGMENT_DEFS.find((candidate) => candidate.bucket === segment.bucket);
-    return def?.costScope === 'agent' ? sum + segment.costUsd : sum;
-  }, 0);
-  const harnessCostUsd = segments.reduce((sum, segment) => {
-    const def = SEGMENT_DEFS.find((candidate) => candidate.bucket === segment.bucket);
-    return def?.costScope === 'harness' ? sum + segment.costUsd : sum;
-  }, 0);
-  const agentGapUsd = agentCostUsd - attributedAgentCostUsd;
-
-  segments.push({
-    bucket: 'unattributed',
-    label: 'Unattributed',
-    costUsd: agentGapUsd > COST_EPSILON ? agentGapUsd : 0,
-    inputTokens: 0,
-    outputTokens: 0,
-    sourcePhases: agentGapUsd > COST_EPSILON ? ['agent_legacy'] : [],
-  });
-
   return {
     podId: pod.id,
     model: pod.model || null,
-    totalCostUsd: agentCostUsd + harnessCostUsd,
-    inputTokens: recorded ? (recorded.inputTokens ?? 0) : pod.inputTokens,
-    outputTokens: recorded ? (recorded.outputTokens ?? 0) : pod.outputTokens,
+    totalCostUsd: result.total,
+    inputTokens: provider ? (provider.inputTokens ?? 0) : pod.inputTokens,
+    outputTokens: provider ? (provider.outputTokens ?? 0) : pod.outputTokens,
     segments,
+    costEvidence: result.evidence,
   };
 }

@@ -459,6 +459,21 @@ const server = createServer(async (req, res) => {
       recordedInputTokens: taskBudgetFixture ? 10 : 90,
       recordedOutputTokens: taskBudgetFixture ? 5 : 10,
       recordedCostUsd: 1.25,
+      costEvidence: {
+        basis: 'stored_subtotal',
+        billingVerified: false,
+        knownEstimatedCostUsd: 0.5,
+        unavailablePhaseCount: 1,
+        conflictingPodCount: 1,
+        omittedDiagnosticCount: 2,
+        diagnostics: [
+          {
+            podId: 'local-original',
+            code: 'PHASE_COST_CONFLICT',
+            message: 'Stored phase costs conflict; no proportional allocation applied.',
+          },
+        ],
+      },
       infrastructureCostUsd: null,
       telemetry: 'partial',
       delivery: {

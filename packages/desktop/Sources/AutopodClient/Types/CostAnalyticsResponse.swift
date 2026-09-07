@@ -12,6 +12,7 @@ public struct CostRecordDiagnostic: Decodable, Equatable, Sendable {
 }
 public struct CostAnalyticsResponse: Decodable, Equatable, Sendable {
     public let telemetry: CostTelemetry?
+    public let costEvidence: CostEvidence?
     public let total: Double
     public let sparkline: [SparklinePoint]
     public let deltaVsPrior: CostDelta

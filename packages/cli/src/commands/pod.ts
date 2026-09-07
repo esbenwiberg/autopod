@@ -723,8 +723,19 @@ export function registerPodCommands(program: Command, getClient: () => AutopodCl
           `${chalk.bold('Task tokens:')} ${task.recordedInputTokens + task.recordedOutputTokens}/${task.tokenBudget ?? 'no configured limit'}`,
         );
         console.log(
-          `${chalk.bold('Recorded task cost:')} $${task.recordedCostUsd.toFixed(4)} (${task.telemetry} telemetry)`,
+          `${chalk.bold('Stored task cost subtotal:')} $${task.recordedCostUsd.toFixed(4)} (${task.telemetry} telemetry)`,
         );
+        console.log('Billing unverified; stored amounts can include estimates.');
+        if (task.costEvidence) {
+          const evidence = task.costEvidence;
+          console.log(
+            `Known estimates: $${evidence.knownEstimatedCostUsd.toFixed(4)}; ${evidence.unavailablePhaseCount} phases with unavailable cost; ${evidence.conflictingPodCount} pods with conflicting attribution`,
+          );
+          for (const item of evidence.diagnostics) console.log(`${item.podId}: ${item.message}`);
+          if (evidence.omittedDiagnosticCount > 0)
+            console.log(`${evidence.omittedDiagnosticCount} additional cost diagnostics omitted.`);
+        } else console.log('Cost provenance unavailable.');
+
         for (const diagnostic of task.diagnostics) console.log(chalk.dim(diagnostic));
         console.log(task.budgetCheck?.reason ?? 'Task budget admission evidence unavailable.');
       } else console.log(chalk.yellow('Task accounting unavailable'));

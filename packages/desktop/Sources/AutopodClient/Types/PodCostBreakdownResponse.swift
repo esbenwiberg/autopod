@@ -9,6 +9,7 @@ public struct PodCostBreakdownResponse: Codable, Equatable, Sendable {
   public let outputTokens: Int
   public let segments: [PodCostSegment]
   public let taskExecution: TaskExecutionSummary?
+  public let costEvidence: CostEvidence?
 
   public init(
     podId: String,
@@ -17,7 +18,8 @@ public struct PodCostBreakdownResponse: Codable, Equatable, Sendable {
     inputTokens: Int,
     outputTokens: Int,
     segments: [PodCostSegment],
-    taskExecution: TaskExecutionSummary? = nil
+    taskExecution: TaskExecutionSummary? = nil,
+    costEvidence: CostEvidence? = nil
   ) {
     self.podId = podId
     self.model = model
@@ -26,6 +28,7 @@ public struct PodCostBreakdownResponse: Codable, Equatable, Sendable {
     self.outputTokens = outputTokens
     self.segments = segments
     self.taskExecution = taskExecution
+    self.costEvidence = costEvidence
   }
 }
 
@@ -36,6 +39,8 @@ public struct PodCostSegment: Codable, Equatable, Sendable, Identifiable {
   public let bucket: String
   public let label: String
   public let costUsd: Double
+  public let storedCostUsd: Double?
+  public let attribution: String?
   public let inputTokens: Int
   public let outputTokens: Int
   public let sourcePhases: [String]
@@ -46,7 +51,9 @@ public struct PodCostSegment: Codable, Equatable, Sendable, Identifiable {
     costUsd: Double,
     inputTokens: Int,
     outputTokens: Int,
-    sourcePhases: [String]
+    sourcePhases: [String],
+    storedCostUsd: Double? = nil,
+    attribution: String? = nil
   ) {
     self.bucket = bucket
     self.label = label
@@ -54,6 +61,8 @@ public struct PodCostSegment: Codable, Equatable, Sendable, Identifiable {
     self.inputTokens = inputTokens
     self.outputTokens = outputTokens
     self.sourcePhases = sourcePhases
+    self.storedCostUsd = storedCostUsd
+    self.attribution = attribution
   }
 }
 
@@ -73,6 +82,7 @@ public struct TaskExecutionSummary: Codable, Equatable, Sendable {
   public let recordedInputTokens: Int
   public let recordedOutputTokens: Int
   public let recordedCostUsd: Double
+  public let costEvidence: CostEvidence?
   public let infrastructureCostUsd: Double?
   public let telemetry: String
   public let diagnostics: [String]
@@ -88,4 +98,19 @@ public struct TaskDeliverySummaryResponse: Codable, Equatable, Sendable {
 public struct TaskBudgetCheckResponse: Codable, Equatable, Sendable {
   public let status: String
   public let reason: String
+}
+
+public struct CostEvidence: Codable, Equatable, Sendable {
+  public let basis: String
+  public let billingVerified: Bool
+  public let knownEstimatedCostUsd: Double
+  public let unavailablePhaseCount: Int
+  public let conflictingPodCount: Int
+  public let diagnostics: [CostEvidenceDiagnostic]
+  public let omittedDiagnosticCount: Int
+}
+public struct CostEvidenceDiagnostic: Codable, Equatable, Sendable {
+  public let podId: String
+  public let code: String
+  public let message: String
 }

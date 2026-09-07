@@ -128,6 +128,58 @@ describe('aggregateCost', () => {
     expect(actual.byPhase.reduce((total, phase) => total + phase.costUsd, 0)).toBe(3);
   });
 
+  it('preserves conflicting stored phase costs without inventing proportional attribution', () => {
+    const id = insertPod(db, {
+      costUsd: 2,
+      completedAt: msToIso(NOW_MS - 1000),
+      phaseTokenUsage: {
+        agent_initial: { inputTokens: 10, outputTokens: 0, costUsd: 3 },
+        agent_rework_1: { inputTokens: 5, outputTokens: 0, costUsd: 1 },
+        review: { inputTokens: 2, outputTokens: 0, costUsd: 0.5 },
+      },
+    });
+    const fleet = aggregateCost({ podRepo, now: nowFn }, { days: 30 });
+    const pod = computePodCostBreakdown(podRepo.getOrThrow(id));
+    expect(fleet.total).toBe(2.5);
+    expect(pod.totalCostUsd).toBe(2.5);
+    expect(pod.segments.find((x) => x.bucket === 'work')).toMatchObject({
+      costUsd: 0,
+      storedCostUsd: 3,
+      attribution: 'unavailable',
+    });
+    expect(pod.segments.find((x) => x.bucket === 'rework')).toMatchObject({
+      costUsd: 0,
+      storedCostUsd: 1,
+      attribution: 'unavailable',
+    });
+    expect(pod.segments.find((x) => x.bucket === 'unattributed')?.costUsd).toBe(2);
+    expect(fleet.byPhase.find((x) => x.phase === 'agent_initial')).toBeUndefined();
+    expect(fleet.costEvidence?.conflictingPodCount).toBe(1);
+    expect(fleet.byPhase.find((x) => x.phase === 'agent_legacy')?.costUsd).toBe(2);
+    expect(podRepo.getOrThrow(id).phaseTokenUsage?.agent_initial?.costUsd).toBe(3);
+  });
+
+  it('does not price unmeasured reviewer usage using the worker model', () => {
+    const id = insertPod(db, {
+      model: 'gpt-5',
+      costUsd: 2,
+      completedAt: msToIso(NOW_MS - 1000),
+      phaseTokenUsage: {
+        agent_initial: { inputTokens: 10, outputTokens: 0, costUsd: 2 },
+        review: { inputTokens: 1_000_000, outputTokens: 0 },
+      },
+    });
+    const fleet = aggregateCost({ podRepo, now: nowFn }, { days: 30 });
+    const pod = computePodCostBreakdown(podRepo.getOrThrow(id));
+    expect(fleet.total).toBe(2);
+    expect(pod.totalCostUsd).toBe(2);
+    expect(pod.segments.find((x) => x.bucket === 'validation')).toMatchObject({
+      costUsd: 0,
+      storedCostUsd: null,
+      attribution: 'unavailable',
+    });
+  });
+
   it('empty DB returns zero-value response', () => {
     const result = aggregateCost({ podRepo, now: nowFn }, { days: 30 });
     expect(result.total).toBe(0);
@@ -191,7 +243,7 @@ describe('aggregateCost', () => {
     expect(result.total).toBe(5.0);
   });
 
-  it('computes cost from tokens when costUsd is 0 (non-Claude path)', () => {
+  it('preserves a stored zero without substituting current token prices', () => {
     insertPod(db, {
       model: 'gpt-5',
       costUsd: 0,
@@ -200,10 +252,11 @@ describe('aggregateCost', () => {
       completedAt: msToIso(WINDOW_START_MS + 1),
     });
     const result = aggregateCost({ podRepo, now: nowFn }, { days: 30 });
-    expect(result.total).toBe(1.25);
+    expect(result.total).toBe(0);
+    expect(result.costEvidence?.billingVerified).toBe(false);
   });
 
-  it('prices a historical model alias without reporting it as unknown', () => {
+  it('does not reprice historical model aliases', () => {
     const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
     insertPod(db, {
       model: 'opus',
@@ -215,12 +268,12 @@ describe('aggregateCost', () => {
 
     const result = aggregateCost({ podRepo, now: nowFn }, { days: 30 });
 
-    expect(result.total).toBe(5);
+    expect(result.total).toBe(0);
     expect(warnSpy).not.toHaveBeenCalledWith(expect.stringContaining('opus'));
     warnSpy.mockRestore();
   });
 
-  it('returns 0 cost for unknown model and warns', () => {
+  it('exposes unverified provenance independently of model recognition', () => {
     const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
     insertPod(db, {
       model: 'unknown-foo',
@@ -231,7 +284,10 @@ describe('aggregateCost', () => {
     });
     const result = aggregateCost({ podRepo, now: nowFn }, { days: 30 });
     expect(result.total).toBe(0);
-    expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('unknown-foo'));
+    expect(result.costEvidence?.diagnostics).toContainEqual(
+      expect.objectContaining({ code: 'COST_PROVENANCE_UNVERIFIED' }),
+    );
+    expect(warnSpy).not.toHaveBeenCalled();
     warnSpy.mockRestore();
   });
 
@@ -248,10 +304,10 @@ describe('aggregateCost', () => {
       outputTokens: 0,
       completedAt: msToIso(WINDOW_START_MS + 1),
       phaseTokenUsage: {
-        agent_rework_2: { inputTokens: 1_000_000, outputTokens: 0 },
-        agent_initial: { inputTokens: 1_000_000, outputTokens: 0 },
-        agent_rework_1: { inputTokens: 1_000_000, outputTokens: 0 },
-        review: { inputTokens: 1_000_000, outputTokens: 0 },
+        agent_rework_2: { inputTokens: 1_000_000, outputTokens: 0, costUsd: 1.25 },
+        agent_initial: { inputTokens: 1_000_000, outputTokens: 0, costUsd: 1.25 },
+        agent_rework_1: { inputTokens: 1_000_000, outputTokens: 0, costUsd: 1.25 },
+        review: { inputTokens: 1_000_000, outputTokens: 0, costUsd: 1.25 },
       },
     });
     const result = aggregateCost({ podRepo, now: nowFn }, { days: 30 });
@@ -275,12 +331,6 @@ describe('aggregateCost', () => {
   });
 
   it('pod with costUsd > sum of phase bucket costs → remainder goes to agent_legacy', () => {
-    // gpt-5 inputPer1M=1.25, so 1M input tokens = $1.25 per bucket
-    // Phase buckets sum to $7.00 → need 7M/1.25 = 5.6M tokens? Let me use a different model.
-    // Use claude-sonnet-4-6: inputPer1M=3.0, outputPer1M=15.0
-    // costUsd=10.0, phase buckets: agent_initial 1M input = $3.0, agent_rework_1 = 1M input = $3.0 → $6.0
-    // Gap: $10.0 - $6.0 = $4.0 → nope, let me set up to get exactly $7.00 in phases
-    // Use gpt-5: 4M input = $5.00, 0.2M output = $2.00 → $7.00
     insertPod(db, {
       model: 'gpt-5',
       costUsd: 10.0, // vendor reported more (e.g. cache reads)
@@ -288,8 +338,8 @@ describe('aggregateCost', () => {
       outputTokens: 0,
       completedAt: msToIso(WINDOW_START_MS + 1),
       phaseTokenUsage: {
-        agent_initial: { inputTokens: 4_000_000, outputTokens: 0 }, // 4M * 1.25/M = $5.00
-        review: { inputTokens: 0, outputTokens: 200_000 }, // 0.2M * 10.0/M = $2.00
+        agent_initial: { inputTokens: 4_000_000, outputTokens: 0, costUsd: 5 }, // 4M * 1.25/M = $5.00
+        review: { inputTokens: 0, outputTokens: 200_000, costUsd: 2 }, // 0.2M * 10.0/M = $2.00
       },
     });
     const result = aggregateCost({ podRepo, now: nowFn }, { days: 30 });
@@ -299,7 +349,7 @@ describe('aggregateCost', () => {
     expect(legacy.costUsd).toBeCloseTo(5.0);
   });
 
-  it('scales phase costs down when cached vendor cost is below raw phase pricing', () => {
+  it('leaves conflicting stored phase costs unattributed', () => {
     insertPod(db, {
       model: 'gpt-5',
       costUsd: 2.0,
@@ -307,8 +357,8 @@ describe('aggregateCost', () => {
       outputTokens: 0,
       completedAt: msToIso(WINDOW_START_MS + 1),
       phaseTokenUsage: {
-        agent_initial: { inputTokens: 1_000_000, outputTokens: 0 },
-        agent_rework_1: { inputTokens: 1_000_000, outputTokens: 0 },
+        agent_initial: { inputTokens: 1_000_000, outputTokens: 0, costUsd: 1.25 },
+        agent_rework_1: { inputTokens: 1_000_000, outputTokens: 0, costUsd: 1.25 },
       },
     });
 
@@ -318,13 +368,14 @@ describe('aggregateCost', () => {
     const legacy = result.byPhase.find((p) => p.phase === 'agent_legacy');
 
     expect(result.total).toBe(2.0);
-    expect(initial?.costUsd).toBeCloseTo(1.0);
-    expect(rework?.costUsd).toBeCloseTo(1.0);
-    expect(legacy).toBeUndefined();
+    expect(initial).toBeUndefined();
+    expect(rework).toBeUndefined();
+    expect(legacy?.costUsd).toBe(2);
+    expect(result.costEvidence?.conflictingPodCount).toBe(1);
     expect(result.byPhase.reduce((sum, p) => sum + p.costUsd, 0)).toBeCloseTo(result.total);
   });
 
-  it('uses cached input tokens when computing phase costs', () => {
+  it('keeps cached usage with missing cost unavailable', () => {
     insertPod(db, {
       model: 'gpt-5',
       costUsd: 0,
@@ -339,8 +390,9 @@ describe('aggregateCost', () => {
     const result = aggregateCost({ podRepo, now: nowFn }, { days: 30 });
     const review = result.byPhase.find((p) => p.phase === 'review');
 
-    expect(result.total).toBe(0.35);
-    expect(review?.costUsd).toBeCloseTo(0.35);
+    expect(result.total).toBe(0);
+    expect(review).toBeUndefined();
+    expect(result.costEvidence?.unavailablePhaseCount).toBe(1);
   });
 
   it('uses exact phase cost when a runner reports it', () => {
@@ -369,13 +421,13 @@ describe('aggregateCost', () => {
   it('does not emit zero-cost phase segments', () => {
     insertPod(db, {
       model: 'gpt-5',
-      costUsd: 0,
+      costUsd: 1.25,
       inputTokens: 1_000_000,
       outputTokens: 0,
       completedAt: msToIso(WINDOW_START_MS + 1),
       phaseTokenUsage: {
-        agent_initial: { inputTokens: 1_000_000, outputTokens: 0 },
-        review: { inputTokens: 0, outputTokens: 0 }, // zero → should be skipped
+        agent_initial: { inputTokens: 1_000_000, outputTokens: 0, costUsd: 1.25 },
+        review: { inputTokens: 0, outputTokens: 0, costUsd: 0 }, // zero → should be skipped
       },
     });
     const result = aggregateCost({ podRepo, now: nowFn }, { days: 30 });
@@ -497,11 +549,11 @@ describe('computePodCostBreakdown', () => {
       inputTokens: 5_000_000,
       outputTokens: 0,
       phaseTokenUsage: {
-        agent_initial: { inputTokens: 1_000_000, outputTokens: 0 },
-        agent_rework_1: { inputTokens: 1_000_000, outputTokens: 0 },
-        review: { inputTokens: 1_000_000, outputTokens: 0 },
-        plan_eval: { inputTokens: 1_000_000, outputTokens: 0 },
-        advisory: { inputTokens: 1_000_000, outputTokens: 0 },
+        agent_initial: { inputTokens: 1_000_000, outputTokens: 0, costUsd: 1.25 },
+        agent_rework_1: { inputTokens: 1_000_000, outputTokens: 0, costUsd: 1.25 },
+        review: { inputTokens: 1_000_000, outputTokens: 0, costUsd: 1.25 },
+        plan_eval: { inputTokens: 1_000_000, outputTokens: 0, costUsd: 1.25 },
+        advisory: { inputTokens: 1_000_000, outputTokens: 0, costUsd: 1.25 },
       },
     });
 
@@ -545,15 +597,15 @@ describe('computePodCostBreakdown', () => {
     });
   });
 
-  it('keeps segment costs reconciled when recorded cached cost is lower than raw pricing', () => {
+  it('preserves raw phase costs when they exceed the stored agent amount', () => {
     const podId = insertPod(db, {
       model: 'gpt-5',
       costUsd: 2,
       inputTokens: 2_000_000,
       outputTokens: 0,
       phaseTokenUsage: {
-        agent_initial: { inputTokens: 1_000_000, outputTokens: 0 },
-        agent_rework_1: { inputTokens: 1_000_000, outputTokens: 0 },
+        agent_initial: { inputTokens: 1_000_000, outputTokens: 0, costUsd: 1.25 },
+        agent_rework_1: { inputTokens: 1_000_000, outputTokens: 0, costUsd: 1.25 },
       },
     });
 
@@ -563,15 +615,15 @@ describe('computePodCostBreakdown', () => {
     const unattributed = result.segments.find((segment) => segment.bucket === 'unattributed');
 
     expect(result.totalCostUsd).toBe(2);
-    expect(work?.costUsd).toBeCloseTo(1);
-    expect(rework?.costUsd).toBeCloseTo(1);
-    expect(unattributed?.costUsd).toBe(0);
+    expect(work).toMatchObject({ costUsd: 0, storedCostUsd: 1.25, attribution: 'unavailable' });
+    expect(rework).toMatchObject({ costUsd: 0, storedCostUsd: 1.25, attribution: 'unavailable' });
+    expect(unattributed?.costUsd).toBe(2);
     expect(result.segments.reduce((sum, segment) => sum + segment.costUsd, 0)).toBeCloseTo(
       result.totalCostUsd,
     );
   });
 
-  it('uses cached input tokens when computing segment costs', () => {
+  it('does not infer segment prices from cached worker usage', () => {
     const podId = insertPod(db, {
       model: 'gpt-5',
       costUsd: 0,
@@ -585,8 +637,12 @@ describe('computePodCostBreakdown', () => {
     const result = computePodCostBreakdown(podRepo.getOrThrow(podId));
     const validation = result.segments.find((segment) => segment.bucket === 'validation');
 
-    expect(result.totalCostUsd).toBe(0.35);
-    expect(validation?.costUsd).toBeCloseTo(0.35);
+    expect(result.totalCostUsd).toBe(0);
+    expect(validation).toMatchObject({
+      costUsd: 0,
+      storedCostUsd: null,
+      attribution: 'unavailable',
+    });
   });
 
   it('uses exact phase cost when computing segment costs', () => {
@@ -669,7 +725,7 @@ describe('computePodCostBreakdown', () => {
       inputTokens: 1_000_000,
       outputTokens: 0,
       phaseTokenUsage: {
-        agent_initial: { inputTokens: 1_000_000, outputTokens: 0 },
+        agent_initial: { inputTokens: 1_000_000, outputTokens: 0, costUsd: 1.25 },
       },
     });
 

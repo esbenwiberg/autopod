@@ -40,6 +40,34 @@ function fixture() {
 const binding = { runtime: 'codex', model: 'model', providerAccountId: 'account' };
 
 describe('task-wide execution accounting', () => {
+  it('retains healthy phase amounts after malformed and unknown phases without authorizing incomplete tokens', () => {
+    const { db, repo } = fixture();
+    try {
+      const phases = JSON.stringify({
+        review: null,
+        future_unknown: { inputTokens: 900, outputTokens: 1, costUsd: 99 },
+        advisory: { inputTokens: 5, outputTokens: 2, costUsd: 0.25 },
+      });
+      db.prepare(
+        "UPDATE pods SET status='complete', completed_at=?, input_tokens=10, cost_usd=1, phase_token_usage=?, token_telemetry_accuracy='complete' WHERE id='root'",
+      ).run(new Date().toISOString(), phases);
+      const task = repo.taskExecutions?.snapshot('root');
+      expect(task).toMatchObject({
+        recordedCostUsd: 1.25,
+        recordedInputTokens: 15,
+        recordedOutputTokens: 2,
+        budgetCheck: { status: 'unavailable' },
+        costEvidence: { unavailablePhaseCount: 1, billingVerified: false },
+      });
+      expect(aggregateCost({ podRepo: repo }, { days: 1 }).total).toBe(1.25);
+      expect(
+        db.prepare("SELECT phase_token_usage AS phases FROM pods WHERE id='root'").get(),
+      ).toEqual({ phases });
+    } finally {
+      db.close();
+    }
+  });
+
   it('rejects direct worker admission when a durable question remains pending', () => {
     const { db, repo } = fixture();
     try {

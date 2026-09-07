@@ -474,6 +474,21 @@ it('status command renders real HTTP delivery accounting and reused evidence, pr
       reason: 'Task token accounting incomplete; reconcile prior execution telemetry.',
     },
     recordedCostUsd: 1.25,
+    costEvidence: {
+      basis: 'stored_subtotal',
+      billingVerified: false,
+      knownEstimatedCostUsd: 0.5,
+      unavailablePhaseCount: 1,
+      conflictingPodCount: 1,
+      omittedDiagnosticCount: 2,
+      diagnostics: [
+        {
+          podId: 'root',
+          code: 'PHASE_COST_CONFLICT',
+          message: 'Stored phase costs conflict; no proportional allocation applied.',
+        },
+      ],
+    },
     telemetry: 'partial',
     diagnostics: [],
     delivery: {
@@ -519,6 +534,13 @@ it('status command renders real HTTP delivery accounting and reused evidence, pr
     };
     await command().parseAsync(['node', 'ap', 'status', 'abcd1234']);
     const output = log.mock.calls.map((call) => call.join(' ')).join('\n');
+    expect(output).toContain('Stored task cost subtotal:');
+    expect(output).toContain('Billing unverified');
+    expect(output).toContain(
+      'Known estimates: $0.5000; 1 phases with unavailable cost; 1 pods with conflicting attribution',
+    );
+    expect(output).toContain('Stored phase costs conflict; no proportional allocation applied.');
+    expect(output).toContain('2 additional cost diagnostics omitted.');
     expect(output).toContain('1 confirmed, 1 unresolved of 2 intents');
     expect(output).toContain('historical URLs excluded');
     expect(output).toContain(
@@ -530,6 +552,7 @@ it('status command renders real HTTP delivery accounting and reused evidence, pr
     log.mockClear();
     await command().parseAsync(['node', 'ap', 'status', 'abcd1234', '--json']);
     const structured = JSON.parse(stdout.mock.calls.map((call) => String(call[0])).join(''));
+    expect(structured.taskExecution.costEvidence).toEqual(task.costEvidence);
     expect(structured.taskExecution.delivery).toEqual(task.delivery);
     expect(paths).toEqual([
       '/pods/abcd1234',

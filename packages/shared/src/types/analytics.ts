@@ -1,4 +1,4 @@
-import type { PodQualityScore } from './pod.js';
+import type { CostEvidence, PodQualityScore } from './pod.js';
 
 export interface QualityAnalyticsResponse {
   /** High-level totals over the trailing window. */
@@ -35,6 +35,7 @@ export interface QualityAnalyticsResponse {
 }
 
 export interface CostAnalyticsResponse {
+  costEvidence?: CostEvidence;
   telemetry?: {
     completeness: 'recorded' | 'partial';
     infrastructureCost: 'unavailable';

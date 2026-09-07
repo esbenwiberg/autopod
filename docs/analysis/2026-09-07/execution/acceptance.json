@@ -521,7 +521,9 @@
         "packages/daemon/src/index.ts",
         "packages/daemon/src/pods/provider-usage-projection.ts",
         "packages/daemon/src/pods/cost-aggregation.ts",
-        "packages/daemon/src/pods/pod-cost-breakdown.ts"
+        "packages/daemon/src/pods/pod-cost-breakdown.ts",
+        "packages/daemon/src/pods/cost-reconciliation.ts",
+        "packages/shared/src/types/pod.ts"
       ],
       "tests": [
         "packages/daemon/src/pods/task-execution-ledger.test.ts",
@@ -572,7 +574,8 @@
         "receipts/cost-reconciliation-affected.txt",
         "receipts/cost-reconciliation-build.txt",
         "receipts/checkpoint-25-full-validation.txt",
-        "receipts/checkpoint-25-validation-identity.json"
+        "receipts/checkpoint-25-validation-identity.json",
+        "checkpoint-26.md: stored subtotals, unavailable attribution, source estimates, API/CLI/mobile/native test evidence; live and native interaction remain unverified"
       ],
       "prerequisites": [],
       "remaining": "Actual engine wall duration is recorded once per executed validation admission; waiting and interrupted unknown duration are separate. Complete cross-phase cost/time reconciliation and available infrastructure billing remain. Native interaction and live acceptance are unverified. Incomplete known prior spending now blocks further budgeted agent consumption. Future spending reservations, unrecorded legacy work, phase accounting and native/live verification remain. Checkpoint 24 adds durable sandbox startup retries, legacy allowance lower bounds, stage-scoped one-use decisions, measured startup time and local operator proof. Provider retries after first runtime event, repository rework, complete historical reconstruction, phase billing, native interaction and live acceptance remain. Checkpoint 25 reconciles corrected provider totals in task, per-pod and fleet APIs, including recorded zero. Phase attribution, legacy estimates, telemetry completeness, operator presentation and live proof remain."
@@ -959,7 +962,8 @@
         "packages/daemon/src/api/routes/pods.ts",
         "packages/daemon/src/pods/compact-pod-projection.ts",
         "packages/daemon/src/pods/completion-journal.ts",
-        "packages/shared/src/types/pod.ts"
+        "packages/shared/src/types/pod.ts",
+        "packages/daemon/src/pods/cost-reconciliation.ts"
       ],
       "tests": [
         "docs/analysis/2026-09-07/diagnostics.test.ts",
@@ -970,7 +974,8 @@
         "receipts/history-cost-api.txt",
         "checkpoint-20.md",
         "receipts/compact-projection-red.txt",
-        "receipts/compact-projection-final.txt"
+        "receipts/compact-projection-final.txt",
+        "checkpoint-26.md: stored subtotals, unavailable attribution, source estimates, API/CLI/mobile/native test evidence; live and native interaction remain unverified"
       ],
       "prerequisites": [],
       "remaining": "Dedicated compact SQLite projection bounds task/text excerpts and four display JSON fields before Node materialization, excludes unrelated evidence, and marks truncated finalization output without changing storage. Paginated rows retain existing keyset/limit rules. Legacy full/nonpaginated reads and review-event hydration are not globally memory bounded; historical live failure cause, final source and live verification remain."
@@ -992,7 +997,9 @@
         "packages/daemon/src/pods/provider-usage-projection.ts",
         "packages/daemon/src/pods/pod-cost-breakdown.ts",
         "packages/daemon/src/pods/pod-repository.ts",
-        "packages/daemon/src/api/routes/pods.ts"
+        "packages/daemon/src/api/routes/pods.ts",
+        "packages/daemon/src/pods/cost-reconciliation.ts",
+        "packages/shared/src/types/pod.ts"
       ],
       "tests": [
         "packages/daemon/src/pods/cost-aggregation.test.ts",
@@ -1023,7 +1030,8 @@
         "receipts/cost-reconciliation-affected.txt",
         "receipts/cost-reconciliation-build.txt",
         "receipts/checkpoint-25-full-validation.txt",
-        "receipts/checkpoint-25-validation-identity.json"
+        "receipts/checkpoint-25-validation-identity.json",
+        "checkpoint-26.md: stored subtotals, unavailable attribution, source estimates, API/CLI/mobile/native test evidence; live and native interaction remain unverified"
       ],
       "prerequisites": [],
       "remaining": "Effective corrected provider ledger is authoritative; pod totals are legacy fallback; harness phases added once. Missing billing and earlier run identity remain explicit. Incomplete known prior spending now blocks further budgeted agent consumption. Future spending reservations, unrecorded legacy work, phase accounting and native/live verification remain. Checkpoint 25 reconciles corrected provider totals in task, per-pod and fleet APIs, including recorded zero. Phase attribution, legacy estimates, telemetry completeness, operator presentation and live proof remain."
@@ -1053,7 +1061,9 @@
         "packages/desktop/Sources/AutopodUI/Views/Shared/TaskRetryCard.swift",
         "packages/daemon/src/pods/provider-usage-projection.ts",
         "packages/daemon/src/pods/cost-aggregation.ts",
-        "packages/daemon/src/pods/pod-cost-breakdown.ts"
+        "packages/daemon/src/pods/pod-cost-breakdown.ts",
+        "packages/daemon/src/pods/cost-reconciliation.ts",
+        "packages/shared/src/types/pod.ts"
       ],
       "tests": [
         "packages/desktop/Tests/AutopodUITests/ModelsSimulatorTests.swift",
@@ -1112,7 +1122,8 @@
         "receipts/cost-reconciliation-affected.txt",
         "receipts/cost-reconciliation-build.txt",
         "receipts/checkpoint-25-full-validation.txt",
-        "receipts/checkpoint-25-validation-identity.json"
+        "receipts/checkpoint-25-validation-identity.json",
+        "checkpoint-26.md: stored subtotals, unavailable attribution, source estimates, API/CLI/mobile/native test evidence; live and native interaction remain unverified"
       ],
       "prerequisites": [
         "Selected mobile flows and new health CLI have local interaction proof. Desktop has compilation and tests only. Remaining operator flows, physical device and live evidence are outstanding."
@@ -1548,7 +1559,10 @@
       "id": "G.4",
       "requirement": "Desktop/mobile/CLI supported-surface interactions verified; compilation alone is insufficient",
       "status": "partial",
-      "implementation": [],
+      "implementation": [
+        "packages/daemon/src/pods/cost-reconciliation.ts",
+        "packages/shared/src/types/pod.ts"
+      ],
       "tests": [],
       "evidence": [
         "receipts/mobile-browser-interaction.json",
@@ -1568,7 +1582,8 @@
         "receipts/compact-projection-mobile.txt",
         "receipts/compact-projection-mobile-browser.json",
         "receipts/interactive-preservation-cli.txt",
-        "receipts/interactive-coordination-cli.txt"
+        "receipts/interactive-coordination-cli.txt",
+        "checkpoint-26.md: stored subtotals, unavailable attribution, source estimates, API/CLI/mobile/native test evidence; live and native interaction remain unverified"
       ],
       "prerequisites": [
         "Selected mobile flows and new health CLI have local interaction proof. Desktop has compilation and tests only. Remaining operator flows, physical device and live evidence are outstanding."
@@ -1593,5 +1608,5 @@
       "prerequisites": []
     }
   ],
-  "lastCheckpoint": "checkpoint-23.md"
+  "lastCheckpoint": "checkpoint-26.md"
 }

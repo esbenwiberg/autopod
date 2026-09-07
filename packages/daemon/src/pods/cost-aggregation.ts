@@ -1,13 +1,8 @@
-import {
-  type CostAnalyticsResponse,
-  type Pod,
-  canonicalModelKey,
-  computeCostWithCache,
-  effectiveCostUsd,
-} from '@autopod/shared';
-import type { PodRepository } from './pod-repository.js';
+import type { CostAnalyticsResponse } from '@autopod/shared';
+import { appendCostEvidence, emptyCostEvidence, reconcilePodCosts } from './cost-reconciliation.js';
+import type { PodCostSource, PodRepository } from './pod-repository.js';
 
-type CompletedPod = Pod & { completedAt: string };
+type CompletedPod = PodCostSource & { completedAt: string };
 
 export interface CostAggregationDeps {
   podRepo: PodRepository;
@@ -20,14 +15,6 @@ export interface CostAggregationOptions {
 
 const TERMINAL_STATUSES = new Set(['complete', 'killed', 'failed', 'rejected']);
 const WASTE_STATUSES = new Set(['killed', 'failed', 'rejected']);
-const COST_EPSILON = 1e-9;
-
-type PhaseBucket = {
-  inputTokens: number;
-  outputTokens: number;
-  cachedInputTokens?: number;
-  costUsd?: number;
-};
 
 /** Sort phase keys per spec: agent_initial, agent_rework_1..N, review, plan_eval, advisory, agent_legacy. */
 function comparePhaseKeys(a: string, b: string): number {
@@ -42,40 +29,6 @@ function comparePhaseKeys(a: string, b: string): number {
   if (bM) return 1;
   const tail = ['review', 'plan_eval', 'advisory', 'agent_legacy'];
   return tail.indexOf(a) - tail.indexOf(b);
-}
-
-function isAgentPhaseKey(key: string): boolean {
-  return key === 'agent_initial' || /^agent_rework_\d+$/.test(key);
-}
-
-function isHarnessPhaseKey(key: string): boolean {
-  return key === 'review' || key === 'plan_eval' || key === 'advisory';
-}
-
-function isKnownPhaseKey(key: string): boolean {
-  return isAgentPhaseKey(key) || isHarnessPhaseKey(key);
-}
-
-function phaseBucketCost(model: string | null, bucket: PhaseBucket): number {
-  if (typeof bucket.costUsd === 'number' && Number.isFinite(bucket.costUsd)) {
-    return bucket.costUsd;
-  }
-  return computeCostWithCache(
-    model,
-    bucket.inputTokens,
-    bucket.outputTokens,
-    bucket.cachedInputTokens ?? 0,
-  );
-}
-
-function harnessCostForPod(pod: Pod): number {
-  let cost = 0;
-  if (!pod.phaseTokenUsage) return cost;
-  for (const [key, bucket] of Object.entries(pod.phaseTokenUsage)) {
-    if (!bucket || !isHarnessPhaseKey(key)) continue;
-    cost += phaseBucketCost(pod.model, bucket);
-  }
-  return cost;
 }
 
 /**
@@ -108,13 +61,6 @@ export function aggregateCost(
 
   // Production uses a date-filtered scalar projection; compatibility for injected repositories.
   const allPods = deps.podRepo.listCostRecords?.(priorStartIso) ?? deps.podRepo.list();
-  const recordedAgentCosts = new Map<string, number>();
-  for (const pod of allPods) {
-    const usage = deps.podRepo.getProviderUsage?.(pod.id);
-    if (usage && usage.count > 0) recordedAgentCosts.set(pod.id, usage.costUsd ?? 0);
-  }
-  const agentCostForPod = (pod: Pod): number =>
-    recordedAgentCosts.get(pod.id) ?? effectiveCostUsd(pod);
 
   const relevant = allPods.filter(
     (pod): pod is CompletedPod =>
@@ -143,57 +89,15 @@ export function aggregateCost(
   >();
   // Cache cost per pod so top10 sort doesn't re-invoke effectiveCostUsd.
   const costById = new Map<string, number>();
-  const unknownPhaseKeys = new Set<string>();
-  const unknownModels = new Set<string>();
+  const evidence = emptyCostEvidence();
 
   for (const pod of currentPods) {
-    const agentCost = agentCostForPod(pod);
-
-    if (pod.costUsd === 0 && pod.model && !canonicalModelKey(pod.model)) {
-      unknownModels.add(pod.model);
+    const reconciled = reconcilePodCosts(pod, deps.podRepo.getProviderUsage?.(pod.id));
+    for (const phase of reconciled.phases) {
+      phaseMap.set(phase.phase, (phaseMap.get(phase.phase) ?? 0) + (phase.attributedCostUsd ?? 0));
     }
-
-    const agentPhaseCosts: Array<{ key: string; costUsd: number }> = [];
-    const harnessPhaseCosts: Array<{ key: string; costUsd: number }> = [];
-    let rawAgentPhaseCostSum = 0;
-    if (pod.phaseTokenUsage) {
-      for (const [key, bucket] of Object.entries(pod.phaseTokenUsage)) {
-        if (!bucket) continue;
-        if (!isKnownPhaseKey(key)) {
-          unknownPhaseKeys.add(key);
-          continue;
-        }
-        const phaseCost = phaseBucketCost(pod.model, bucket);
-        if (isAgentPhaseKey(key)) {
-          agentPhaseCosts.push({ key, costUsd: phaseCost });
-          rawAgentPhaseCostSum += phaseCost;
-        } else {
-          harnessPhaseCosts.push({ key, costUsd: phaseCost });
-        }
-      }
-    }
-
-    const phaseScale =
-      rawAgentPhaseCostSum > agentCost && rawAgentPhaseCostSum > 0
-        ? agentCost / rawAgentPhaseCostSum
-        : 1;
-    let agentPhaseCostSum = 0;
-    for (const phase of agentPhaseCosts) {
-      const scaledCost = phase.costUsd * phaseScale;
-      phaseMap.set(phase.key, (phaseMap.get(phase.key) ?? 0) + scaledCost);
-      agentPhaseCostSum += scaledCost;
-    }
-    const gap = agentCost - agentPhaseCostSum;
-    if (gap > COST_EPSILON) {
-      phaseMap.set('agent_legacy', (phaseMap.get('agent_legacy') ?? 0) + gap);
-    }
-    let harnessCost = 0;
-    for (const phase of harnessPhaseCosts) {
-      phaseMap.set(phase.key, (phaseMap.get(phase.key) ?? 0) + phase.costUsd);
-      harnessCost += phase.costUsd;
-    }
-
-    const cost = agentCost + harnessCost;
+    appendCostEvidence(evidence, reconciled.evidence);
+    const cost = reconciled.total;
     costById.set(pod.id, cost);
     total += cost;
 
@@ -222,18 +126,7 @@ export function aggregateCost(
   }
 
   for (const pod of priorPods) {
-    priorTotal += agentCostForPod(pod) + harnessCostForPod(pod);
-  }
-
-  if (unknownPhaseKeys.size > 0) {
-    console.warn(
-      `[cost-aggregation] Ignoring unrecognized phaseTokenUsage keys: ${[...unknownPhaseKeys].join(', ')}`,
-    );
-  }
-  if (unknownModels.size > 0) {
-    console.warn(
-      `[cost-aggregation] Unknown model(s) — effective cost defaulted to 0: ${[...unknownModels].join(', ')}`,
-    );
+    priorTotal += reconcilePodCosts(pod, deps.podRepo.getProviderUsage?.(pod.id)).total;
   }
 
   let direction: 'up' | 'down' | 'flat';
@@ -268,12 +161,16 @@ export function aggregateCost(
     }));
 
   return {
+    costEvidence: evidence,
     telemetry: {
-      completeness: currentPods.every(
-        (pod) => pod.tokenTelemetryAccuracy !== 'partial' && !pod.recordDiagnostics?.length,
-      )
-        ? 'recorded'
-        : 'partial',
+      completeness:
+        evidence.unavailablePhaseCount === 0 &&
+        evidence.conflictingPodCount === 0 &&
+        currentPods.every(
+          (pod) => pod.tokenTelemetryAccuracy !== 'partial' && !pod.recordDiagnostics?.length,
+        )
+          ? 'recorded'
+          : 'partial',
       infrastructureCost: 'unavailable',
       diagnostics: currentPods.flatMap((pod) =>
         (pod.recordDiagnostics ?? []).map((diagnostic) => ({ podId: pod.id, ...diagnostic })),

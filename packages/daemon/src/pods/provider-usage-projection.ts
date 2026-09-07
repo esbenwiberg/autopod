@@ -6,6 +6,7 @@ export interface ProviderUsageProjection {
   inputTokens: number | null;
   outputTokens: number | null;
   costUsd: number | null;
+  knownEstimatedCostUsd?: number | null;
 }
 
 /** Corrections replace their original segment; legacy pod totals are never an
@@ -16,7 +17,8 @@ export function readProviderUsage(db: Database.Database, podId: string): Provide
     .prepare(`SELECT COUNT(*) AS count, SUM(a.ended_at IS NOT NULL) AS settledCount,
     SUM(COALESCE(c.input_tokens, a.input_tokens)) AS inputTokens,
     SUM(COALESCE(c.output_tokens, a.output_tokens)) AS outputTokens,
-    SUM(COALESCE(c.cost_usd, a.cost_usd)) AS costUsd
+    SUM(COALESCE(c.cost_usd, a.cost_usd)) AS costUsd,
+    SUM(CASE WHEN c.source = 'codex_rollout' THEN c.cost_usd ELSE 0 END) AS knownEstimatedCostUsd
     FROM provider_attempts a LEFT JOIN provider_attempt_telemetry_corrections c
       ON c.pod_id = a.pod_id AND c.ordinal = a.ordinal WHERE a.pod_id = ?`)
     .get(podId) as ProviderUsageProjection;

@@ -83,3 +83,21 @@ import Testing
   let old = try JSONDecoder().decode(TaskExecutionSummary.self, from: JSONSerialization.data(withJSONObject: legacy))
   #expect(old.budgetCheck == nil)
 }
+
+@Test func costEvidenceRetainsEstimatesAndConflictingStoredAmounts() throws {
+  let json = """
+  {"podId":"root","model":"worker","totalCostUsd":2,"inputTokens":10,"outputTokens":2,
+   "segments":[{"bucket":"work","label":"Work","costUsd":0,"storedCostUsd":3,"attribution":"unavailable","inputTokens":10,"outputTokens":2,"sourcePhases":["agent_initial"]}],
+   "costEvidence":{"basis":"stored_subtotal","billingVerified":false,"knownEstimatedCostUsd":0.5,"unavailablePhaseCount":1,"conflictingPodCount":1,"omittedDiagnosticCount":2,
+   "diagnostics":[{"podId":"root","code":"PHASE_COST_CONFLICT","message":"No proportional allocation applied."}]}}
+  """.data(using: .utf8)!
+  let response = try JSONDecoder().decode(PodCostBreakdownResponse.self, from: json)
+  #expect(response.costEvidence?.billingVerified == false)
+  #expect(response.costEvidence?.knownEstimatedCostUsd == 0.5)
+  #expect(response.costEvidence?.conflictingPodCount == 1)
+  #expect(response.costEvidence?.omittedDiagnosticCount == 2)
+  #expect(response.segments[0].storedCostUsd == 3)
+  #expect(response.segments[0].attribution == "unavailable")
+  let roundTrip = try JSONDecoder().decode(PodCostBreakdownResponse.self, from: JSONEncoder().encode(response))
+  #expect(roundTrip == response)
+}
