@@ -57,15 +57,13 @@ it('waits for daemon approval evidence and retains a retryable action after bran
     expect(container.textContent).not.toContain('Branch preservation failed.');
     expect(usePodsStore.getState().pods[0]?.status).toBe('validated');
     act(() => {
-      usePodsStore
-        .getState()
-        .applyEvent({
-          type: 'pod.status_changed',
-          timestamp: '2026-09-07T00:00:00Z',
-          podId: pod.id,
-          previousStatus: 'merging',
-          newStatus: 'complete',
-        });
+      usePodsStore.getState().applyEvent({
+        type: 'pod.status_changed',
+        timestamp: '2026-09-07T00:00:00Z',
+        podId: pod.id,
+        previousStatus: 'merging',
+        newStatus: 'complete',
+      });
     });
     expect(usePodsStore.getState().pods[0]?.status).toBe('complete');
   } finally {
