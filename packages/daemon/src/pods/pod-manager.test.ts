@@ -6554,7 +6554,7 @@ describe('PodManager', () => {
         );
       } finally {
         if (previousDataDir === undefined) {
-          process.env.DATA_DIR = undefined;
+          Reflect.deleteProperty(process.env, 'DATA_DIR');
         } else {
           process.env.DATA_DIR = previousDataDir;
         }
@@ -6602,7 +6602,7 @@ describe('PodManager', () => {
         ).toBe('# Parent handover\n');
       } finally {
         if (previousDataDir === undefined) {
-          process.env.DATA_DIR = undefined;
+          Reflect.deleteProperty(process.env, 'DATA_DIR');
         } else {
           process.env.DATA_DIR = previousDataDir;
         }
@@ -6649,7 +6649,7 @@ describe('PodManager', () => {
         );
       } finally {
         if (previousDataDir === undefined) {
-          process.env.DATA_DIR = undefined;
+          Reflect.deleteProperty(process.env, 'DATA_DIR');
         } else {
           process.env.DATA_DIR = previousDataDir;
         }
@@ -6695,7 +6695,7 @@ describe('PodManager', () => {
           ).toBe(false);
         } finally {
           if (previousDataDir === undefined) {
-            process.env.DATA_DIR = undefined;
+            Reflect.deleteProperty(process.env, 'DATA_DIR');
           } else {
             process.env.DATA_DIR = previousDataDir;
           }
@@ -12701,6 +12701,20 @@ describe('PodManager', () => {
     });
 
     describe('completeSession', () => {
+      let completionDataDir: string;
+      let previousCompletionDataDir: string | undefined;
+      beforeEach(() => {
+        previousCompletionDataDir = process.env.DATA_DIR;
+        completionDataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'autopod-completion-'));
+        process.env.DATA_DIR = completionDataDir;
+      });
+      afterEach(() => {
+        if (previousCompletionDataDir === undefined)
+          Reflect.deleteProperty(process.env, 'DATA_DIR');
+        else process.env.DATA_DIR = previousCompletionDataDir;
+        fs.rmSync(completionDataDir, { recursive: true, force: true });
+      });
+
       it('pushes branch and transitions running → complete', async () => {
         const ctx = createTestContext();
         const manager = createPodManager(ctx.deps);
@@ -12893,6 +12907,77 @@ describe('PodManager', () => {
         await manager.handleCompletion(pod.id);
         expect(manager.getSession(pod.id)).toMatchObject({ status: 'killed', artifactsPath: null });
         expect(ctx.containerManager.kill).not.toHaveBeenCalled();
+      });
+
+      it('coalesces duplicate artifact completion events into one collection and cleanup', async () => {
+        const ctx = createTestContext();
+        const manager = createPodManager(ctx.deps);
+        const pod = manager.createSession(
+          {
+            profileName: 'test-profile',
+            task: 'Collect report',
+            options: { agentMode: 'auto', output: 'artifact', validate: false, promotable: false },
+          },
+          'user-1',
+        );
+        ctx.podRepo.update(pod.id, { status: 'running', containerId: 'container-abc' });
+        ctx.podRepo.completionJournal?.settle(ctx.podRepo.getOrThrow(pod.id), 'Report complete');
+        await Promise.all([manager.handleCompletion(pod.id), manager.handleCompletion(pod.id)]);
+        expect(ctx.podRepo.getOrThrow(pod.id).status).toBe('complete');
+        expect(ctx.containerManager.extractDirectoryFromContainer).toHaveBeenCalledTimes(1);
+        expect(ctx.containerManager.kill).toHaveBeenCalledTimes(1);
+      });
+
+      it('resumes finalization from a verified snapshot after restart without a source container', async () => {
+        const ctx = createTestContext();
+        const manager = createPodManager(ctx.deps);
+        const pod = manager.createSession(
+          {
+            profileName: 'test-profile',
+            task: 'Collect report',
+            options: { agentMode: 'auto', output: 'artifact', validate: false, promotable: false },
+          },
+          'user-1',
+        );
+        ctx.podRepo.update(pod.id, { status: 'running', containerId: 'container-abc' });
+        ctx.podRepo.completionJournal?.settle(ctx.podRepo.getOrThrow(pod.id), 'Report complete');
+        vi.mocked(ctx.containerManager.extractDirectoryFromContainer).mockImplementationOnce(
+          async (_id, _source, target) => {
+            fs.writeFileSync(path.join(target, 'report.md'), 'saved report');
+          },
+        );
+        await manager.handleCompletion(pod.id);
+        const saved = ctx.podRepo.getOrThrow(pod.id);
+        expect(saved.artifactsPath).not.toBeNull();
+        // Reproduce the durable state at a crash after source publication and
+        // container removal but before the final status commit.
+        ctx.podRepo.completionJournal?.mark(saved, 'preserving', true);
+        ctx.podRepo.update(pod.id, { status: 'failed', containerId: null, worktreePath: null });
+        vi.mocked(ctx.containerManager.extractDirectoryFromContainer).mockClear();
+        vi.mocked(ctx.containerManager.kill).mockClear();
+        const restarted = createPodManager(ctx.deps);
+        const reportPath = path.join(saved.artifactsPath as string, 'report.md');
+        fs.writeFileSync(reportPath, 'corrupt report');
+        await expect(restarted.resumePod(pod.id)).rejects.toMatchObject({
+          code: 'ARTIFACT_SNAPSHOT_UNVERIFIED',
+        });
+        expect(ctx.podRepo.getOrThrow(pod.id).status).toBe('failed');
+        expect(ctx.runtime.spawn).not.toHaveBeenCalled();
+        fs.writeFileSync(reportPath, 'saved report');
+        expect(
+          await Promise.all([restarted.resumePod(pod.id), restarted.resumePod(pod.id)]),
+        ).toEqual([{ action: 'collect-artifacts' }, { action: 'collect-artifacts' }]);
+        expect(ctx.podRepo.getOrThrow(pod.id)).toMatchObject({
+          status: 'complete',
+          artifactsPath: saved.artifactsPath,
+        });
+        expect(fs.readFileSync(path.join(saved.artifactsPath as string, 'report.md'), 'utf8')).toBe(
+          'saved report',
+        );
+        expect(ctx.containerManager.extractDirectoryFromContainer).not.toHaveBeenCalled();
+        expect(ctx.containerManager.kill).not.toHaveBeenCalled();
+        expect(ctx.runtime.spawn).not.toHaveBeenCalled();
+        expect(ctx.runtime.resume).not.toHaveBeenCalled();
       });
 
       it('retries failed artifact collection through Resume without a worktree or another worker', async () => {

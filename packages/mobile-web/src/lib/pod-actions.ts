@@ -144,10 +144,9 @@ export function availableActions(
     pod?.options.output === 'artifact' &&
     pod.finalization?.phase === 'preserving' &&
     pod.finalization.agentSettledAt &&
-    !pod.finalization.sourcePreservedAt &&
     !pod.pendingEscalation
   )
-    return [{ ...RESUME_FAILED, label: 'Retry artifact collection' }, KILL];
+    return [{ ...RESUME_FAILED, label: 'Resume artifact finalization' }, KILL];
   return ACTIONS_BY_STATUS[status] ?? [];
 }
 

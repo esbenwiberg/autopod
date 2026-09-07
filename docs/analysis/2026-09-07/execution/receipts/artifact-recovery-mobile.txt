@@ -1,0 +1,8 @@
+
+ RUN  v4.1.11 /private/tmp/autopod-durable-execution/packages/mobile-web
+
+
+ Test Files  16 passed (16)
+      Tests  108 passed (108)
+   Start at  18:38:27
+   Duration  1.46s (transform 500ms, setup 236ms, import 742ms, tests 446ms, environment 8.26s)

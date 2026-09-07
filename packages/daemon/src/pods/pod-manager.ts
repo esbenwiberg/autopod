@@ -175,7 +175,9 @@ import {
   checkpointSandboxWorkspace,
 } from '../worktrees/sandbox-workspace-checkpoint.js';
 import { agentToolingCachePaths } from './agent-tooling-cache-paths.js';
+import { hasInterruptedArtifactCollection } from './artifact-finalization-recovery.js';
 import { collectArtifactSnapshot } from './artifact-preservation.js';
+import { verifyArtifactSnapshot } from './artifact-snapshot-receipt.js';
 import { buildCorrectionMessage } from './correction-context.js';
 import { dispatchRequestHash } from './dispatch-preflight-ledger.js';
 import { persistCompletionReply, persistEscalation } from './escalation-coordinator.js';
@@ -3568,6 +3570,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
   const sandboxCheckpointRuns = new Map<string, Promise<WorkspaceCheckpointResult>>();
   const infrastructureResumeRuns = new Map<string, Promise<void>>();
   const artifactResumeRuns = new Map<string, Promise<void>>();
+  const artifactCompletionRuns = new Map<string, Promise<void>>();
   const pauseIntents = new Map<string, symbol>();
   const activeAgentRuns = new Map<string, { token: symbol; settled: Promise<void> }>();
   const activeAgentRunResolvers = new Map<string, { token: symbol; resolve: () => void }>();
@@ -6603,14 +6606,35 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
 
   async function preserveArtifacts(pod: Pod): Promise<string> {
     const dataDir = process.env.DATA_DIR ?? path.join(process.cwd(), '.autopod-data');
+    const artifactRoot = path.join(dataDir, 'artifacts', pod.id);
+    if (
+      pod.finalization?.phase === 'preserving' &&
+      pod.finalization.sourcePreservedAt &&
+      pod.artifactsPath
+    ) {
+      await verifyArtifactSnapshot(
+        pod.artifactsPath,
+        artifactRoot,
+        pod.lifecycleGeneration,
+        pod.finalization.cycle,
+      );
+      if (!ownsArtifactCompletion(pod))
+        throw new AutopodError(
+          'Artifact finalization was superseded.',
+          'STALE_ARTIFACT_COLLECTION',
+          409,
+        );
+      return pod.artifactsPath;
+    }
     podRepo.completionJournal?.mark(pod, 'preserving');
     emitActivityStatus(pod.id, 'Collecting artifacts…');
     try {
       const artifactsPath = await collectArtifactSnapshot({
         containerManager: containerManagerFactory.get(pod.executionTarget),
         containerId: pod.containerId,
-        artifactRoot: path.join(dataDir, 'artifacts', pod.id),
+        artifactRoot,
         generation: pod.lifecycleGeneration,
+        cycle: pod.finalization?.cycle ?? 0,
         isCurrent: () => ownsArtifactCompletion(pod),
       });
       if (!ownsArtifactCompletion(pod))
@@ -6631,6 +6655,58 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
       }
       throw err;
     }
+  }
+
+  async function finalizeArtifactPod(pod: Pod): Promise<void> {
+    const podId = pod.id;
+    if (!ownsArtifactCompletion(pod)) return;
+    await syncSandboxSeriesHandover(podId);
+    const profile = profileStore.get(pod.profileName);
+    const dataDir = process.env.DATA_DIR ?? path.join(process.cwd(), '.autopod-data');
+    let artifactsPath: string;
+    try {
+      artifactsPath = await preserveArtifacts(pod);
+    } catch {
+      if (ownsArtifactCompletion(pod)) {
+        transition(podRepo.getOrThrow(podId), 'failed');
+      }
+      return;
+    }
+
+    // If profile has a destination repo: lazy-clone, copy artifacts, push branch (best-effort)
+    if (profile.repoUrl) {
+      const repoBranch = pod.branch ?? `research/${podId}`;
+      try {
+        emitActivityStatus(podId, 'Pushing artifact branch…');
+        const tempWorktreeParent = path.join(dataDir, 'artifact-worktrees');
+        await mkdir(tempWorktreeParent, { recursive: true });
+        const pat = await resolveGitCredential(profile);
+        const worktreeResult = await worktreeManager.create({
+          repoUrl: profile.repoUrl,
+          branch: repoBranch,
+          baseBranch: pod.baseBranch ?? profile.defaultBranch ?? 'main',
+          pat,
+        });
+        // Copy artifacts into the worktree (cp -a copies contents, trailing /. required)
+        await execFileAsync('cp', ['-a', `${artifactsPath}/.`, `${worktreeResult.worktreePath}/`]);
+        await worktreeManager.commitPendingChanges(
+          worktreeResult.worktreePath,
+          `research: ${pod.task.slice(0, 72)}`,
+          { maxDeletions: 1000 },
+        );
+        if (!ownsArtifactCompletion(pod)) return;
+        await worktreeManager.pushBranch(worktreeResult.worktreePath, repoBranch);
+        logger.info({ podId, branch: repoBranch }, 'Artifact branch pushed');
+      } catch (err) {
+        logger.warn({ err, podId }, 'Failed to push artifact branch — artifacts available via API');
+      }
+    }
+
+    // Transition to complete — skip validation entirely
+    if (!ownsArtifactCompletion(pod)) return;
+    await cleanupContainer(pod, 'artifact-complete');
+    if (!ownsArtifactCompletion(pod, true)) return;
+    transition(podRepo.getOrThrow(podId), 'complete');
   }
 
   function parkOnWorktreeSyncFailure(podId: string, reason: string): void {
@@ -10648,65 +10724,20 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         return;
       }
 
-      await syncSandboxSeriesHandover(podId);
-
-      // Artifact pods: extract /workspace, optionally push branch, skip validation entirely
       if (pod.options.output === 'artifact') {
-        const profile = profileStore.get(pod.profileName);
-        const dataDir = process.env.DATA_DIR ?? path.join(process.cwd(), '.autopod-data');
-        let artifactsPath: string;
+        const key = `${pod.id}:${pod.lifecycleGeneration}:${pod.finalization?.cycle ?? 0}`;
+        const pending = artifactCompletionRuns.get(key);
+        if (pending) return pending;
+        const completion = Promise.resolve().then(() => finalizeArtifactPod(pod));
+        artifactCompletionRuns.set(key, completion);
         try {
-          artifactsPath = await preserveArtifacts(pod);
-        } catch {
-          if (ownsArtifactCompletion(pod)) {
-            transition(podRepo.getOrThrow(podId), 'failed');
-          }
-          return;
+          await completion;
+        } finally {
+          if (artifactCompletionRuns.get(key) === completion) artifactCompletionRuns.delete(key);
         }
-
-        // If profile has a destination repo: lazy-clone, copy artifacts, push branch (best-effort)
-        if (profile.repoUrl) {
-          const repoBranch = pod.branch ?? `research/${podId}`;
-          try {
-            emitActivityStatus(podId, 'Pushing artifact branch…');
-            const tempWorktreeParent = path.join(dataDir, 'artifact-worktrees');
-            await mkdir(tempWorktreeParent, { recursive: true });
-            const pat = await resolveGitCredential(profile);
-            const worktreeResult = await worktreeManager.create({
-              repoUrl: profile.repoUrl,
-              branch: repoBranch,
-              baseBranch: pod.baseBranch ?? profile.defaultBranch ?? 'main',
-              pat,
-            });
-            // Copy artifacts into the worktree (cp -a copies contents, trailing /. required)
-            await execFileAsync('cp', [
-              '-a',
-              `${artifactsPath}/.`,
-              `${worktreeResult.worktreePath}/`,
-            ]);
-            await worktreeManager.commitPendingChanges(
-              worktreeResult.worktreePath,
-              `research: ${pod.task.slice(0, 72)}`,
-              { maxDeletions: 1000 },
-            );
-            if (!ownsArtifactCompletion(pod)) return;
-            await worktreeManager.pushBranch(worktreeResult.worktreePath, repoBranch);
-            logger.info({ podId, branch: repoBranch }, 'Artifact branch pushed');
-          } catch (err) {
-            logger.warn(
-              { err, podId },
-              'Failed to push artifact branch — artifacts available via API',
-            );
-          }
-        }
-
-        // Transition to complete — skip validation entirely
-        if (!ownsArtifactCompletion(pod)) return;
-        await cleanupContainer(pod, 'artifact-complete');
-        if (!ownsArtifactCompletion(pod, true)) return;
-        transition(podRepo.getOrThrow(podId), 'complete');
         return;
       }
+      await syncSandboxSeriesHandover(podId);
 
       // Sync workspace back to host worktree before any host-side git reads
       // Sandboxes are deliberately different: a verified Git checkpoint is the
@@ -15897,21 +15928,23 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         return { action: 'collect-artifacts' };
       }
       const pod = podRepo.getOrThrow(podId);
-      if (
-        pod.status === 'failed' &&
-        pod.options.output === 'artifact' &&
-        pod.finalization?.phase === 'preserving' &&
-        pod.finalization.agentSettledAt &&
-        !pod.finalization.sourcePreservedAt &&
-        !pod.pendingEscalation
-      ) {
-        if (!pod.containerId)
+      if (pod.status === 'failed' && hasInterruptedArtifactCollection(pod)) {
+        if (!pod.finalization?.sourcePreservedAt && !pod.containerId)
           throw new AutopodError(
             'Artifact source container is unavailable. Restore the preserved source before retrying collection.',
             'ARTIFACT_SOURCE_UNAVAILABLE',
             409,
           );
         const collection = Promise.resolve().then(async () => {
+          if (pod.finalization?.sourcePreservedAt) {
+            const dataDir = process.env.DATA_DIR ?? path.join(process.cwd(), '.autopod-data');
+            await verifyArtifactSnapshot(
+              pod.artifactsPath ?? '',
+              path.join(dataDir, 'artifacts', pod.id),
+              pod.lifecycleGeneration,
+              pod.finalization.cycle,
+            );
+          }
           const current = podRepo.getOrThrow(podId);
           if (
             !ownsLifecycle(podId, pod.lifecycleGeneration, pod.containerId) ||

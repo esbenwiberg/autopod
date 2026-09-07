@@ -46,6 +46,29 @@ function build(pods: Pod[]) {
 }
 
 describe('SandboxTerminalReaper', () => {
+  it('retains a failed artifact source until artifact finalization completes', async () => {
+    const failed = pod('failed');
+    failed.options = { agentMode: 'auto', output: 'artifact', validate: false };
+    const deps = build([failed]);
+    await deps.reaper.runSweep();
+    expect(deps.preserveWorkspace).not.toHaveBeenCalled();
+    expect(deps.sandboxContainerManager.kill).not.toHaveBeenCalled();
+    expect(failed.containerId).toBe('sandbox-pod-1');
+  });
+
+  it('does not delete a lifecycle resumed while failed-work preservation was pending', async () => {
+    const failed = pod('failed');
+    failed.lifecycleGeneration = 3;
+    const deps = build([failed]);
+    deps.preserveWorkspace.mockImplementationOnce(async () => {
+      failed.status = 'running';
+      failed.lifecycleGeneration = 4;
+    });
+    await deps.reaper.runSweep();
+    expect(deps.sandboxContainerManager.kill).not.toHaveBeenCalled();
+    expect(failed.containerId).toBe('sandbox-pod-1');
+  });
+
   it('deletes complete and killed sandboxes then clears their container IDs', async () => {
     const complete = pod('complete', 'complete');
     const killed = pod('killed', 'killed');

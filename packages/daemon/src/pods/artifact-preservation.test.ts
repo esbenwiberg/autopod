@@ -41,7 +41,9 @@ describe('artifact snapshot publication', () => {
     );
     await expect(collectArtifactSnapshot(config)).rejects.toThrow('Artifact preservation failed');
     expect(await readFile(path.join(published, 'report.md'), 'utf8')).toBe('complete report');
-    expect(await readdir(root)).toEqual([path.basename(published)]);
+    expect((await readdir(root)).sort()).toEqual(
+      [path.basename(published), `${path.basename(published)}.receipt.json`].sort(),
+    );
     expect(config.containerManager.kill).not.toHaveBeenCalled();
   });
 

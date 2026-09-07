@@ -954,12 +954,12 @@ public struct SessionCardFinal: View {
                     Button {
                         Task { await actions.resume(pod.id) }
                     } label: {
-                        Label("Retry artifact collection", systemImage: "arrow.down.doc")
+                        Label("Resume artifact finalization", systemImage: "arrow.down.doc")
                             .frame(maxWidth: .infinity)
                     }
                     .buttonStyle(.borderedProminent)
                     .controlSize(.small)
-                    .help("Collect the settled worker's files without starting another worker.")
+                    .help("Verify or collect the settled worker's files without starting another worker.")
                 } else if pod.isFixDeliveryFailure {
                     Text("Validated fix could not be pushed")
                         .font(.caption)

@@ -52,7 +52,10 @@
         "packages/daemon/src/db/migrations/159_decision_recovery.sql",
         "packages/daemon/src/pods/artifact-preservation.ts",
         "packages/daemon/src/pods/pod-manager.ts",
-        "packages/daemon/src/api/routes/files.ts"
+        "packages/daemon/src/api/routes/files.ts",
+        "packages/daemon/src/pods/artifact-finalization-recovery.ts",
+        "packages/daemon/src/pods/artifact-snapshot-receipt.ts",
+        "packages/daemon/src/pods/sandbox-terminal-reaper.ts"
       ],
       "tests": [
         "packages/daemon/src/pods/completion-journal.test.ts",
@@ -62,7 +65,9 @@
         "packages/daemon/src/db/unit-of-work.test.ts",
         "packages/daemon/src/pods/pod-manager.test.ts",
         "packages/daemon/src/pods/artifact-preservation.test.ts",
-        "packages/daemon/src/api/routes/files.test.ts"
+        "packages/daemon/src/api/routes/files.test.ts",
+        "packages/daemon/src/pods/artifact-snapshot-receipt.test.ts",
+        "packages/daemon/src/pods/sandbox-terminal-reaper.test.ts"
       ],
       "evidence": [
         "receipts/journal-migration.txt",
@@ -83,10 +88,16 @@
         "receipts/artifact-preservation-red.txt",
         "receipts/artifact-cancellation-red.txt",
         "receipts/artifact-retry-status-red.txt",
-        "receipts/artifact-final-affected.txt"
+        "receipts/artifact-final-affected.txt",
+        "checkpoint-16.md",
+        "receipts/artifact-reaper-red.txt",
+        "receipts/artifact-restart-red.txt",
+        "receipts/artifact-snapshot-resume-red.txt",
+        "receipts/artifact-duplicate-red.txt",
+        "receipts/artifact-recovery-final.txt"
       ],
       "prerequisites": [],
-      "remaining": "Normal replies are atomic, retained in bounded recovery context, and fence older completion events. New unanswered decisions remain actionable. Attached MCP delivery acknowledgment, delayed concurrent stream ordering, other response boundaries, historical orphan questions and broader finalization side effects remain. Artifact collection now fails closed and retries without another worker; snapshot/journal crash reconciliation, content inventory and broader finalization side effects remain."
+      "remaining": "Entered artifact collection survives restart with sources retained; generation/cycle-bound integrity receipts and in-process duplicate coordination are implemented. Independent source inventory, fsync/power-loss proof, orphan snapshot/DB-path reconciliation, interactive duplicates, other reply boundaries and broader durable finalization side effects remain."
     },
     {
       "id": "W1.3",
@@ -104,7 +115,12 @@
         "packages/daemon/src/db/migrations/159_decision_recovery.sql",
         "packages/daemon/src/pods/artifact-preservation.ts",
         "packages/daemon/src/pods/pod-manager.ts",
-        "packages/daemon/src/api/routes/files.ts"
+        "packages/daemon/src/api/routes/files.ts",
+        "packages/daemon/src/pods/artifact-finalization-recovery.ts",
+        "packages/daemon/src/pods/artifact-snapshot-receipt.ts",
+        "packages/daemon/src/pods/sandbox-terminal-reaper.ts",
+        "packages/daemon/src/pods/local-reconciler.ts",
+        "packages/daemon/src/pods/reconciler.ts"
       ],
       "tests": [
         "packages/daemon/src/pods/completion-journal.test.ts",
@@ -112,7 +128,11 @@
         "packages/daemon/src/pods/pod-manager.test.ts",
         "packages/daemon/src/db/unit-of-work.test.ts",
         "packages/daemon/src/pods/artifact-preservation.test.ts",
-        "packages/daemon/src/api/routes/files.test.ts"
+        "packages/daemon/src/api/routes/files.test.ts",
+        "packages/daemon/src/pods/artifact-snapshot-receipt.test.ts",
+        "packages/daemon/src/pods/sandbox-terminal-reaper.test.ts",
+        "packages/daemon/src/pods/local-reconciler.test.ts",
+        "packages/daemon/src/pods/reconciler.test.ts"
       ],
       "evidence": [
         "receipts/journal-migration.txt",
@@ -132,12 +152,18 @@
         "receipts/artifact-preservation-red.txt",
         "receipts/artifact-cancellation-red.txt",
         "receipts/artifact-retry-status-red.txt",
-        "receipts/artifact-final-affected.txt"
+        "receipts/artifact-final-affected.txt",
+        "checkpoint-16.md",
+        "receipts/artifact-reaper-red.txt",
+        "receipts/artifact-restart-red.txt",
+        "receipts/artifact-snapshot-resume-red.txt",
+        "receipts/artifact-duplicate-red.txt",
+        "receipts/artifact-recovery-final.txt"
       ],
       "prerequisites": [
         "PR creation intent/reconciliation implemented locally; broader finalization side effects and operator override remain."
       ],
-      "remaining": "Normal replies are atomic, retained in bounded recovery context, and fence older completion events. New unanswered decisions remain actionable. Attached MCP delivery acknowledgment, delayed concurrent stream ordering, other response boundaries, historical orphan questions and broader finalization side effects remain. Artifact collection now fails closed and retries without another worker; snapshot/journal crash reconciliation, content inventory and broader finalization side effects remain."
+      "remaining": "Entered artifact collection survives restart with sources retained; generation/cycle-bound integrity receipts and in-process duplicate coordination are implemented. Independent source inventory, fsync/power-loss proof, orphan snapshot/DB-path reconciliation, interactive duplicates, other reply boundaries and broader durable finalization side effects remain."
     },
     {
       "id": "W1.4",
@@ -146,22 +172,37 @@
       "implementation": [
         "packages/daemon/src/pods/artifact-preservation.ts",
         "packages/daemon/src/pods/pod-manager.ts",
-        "packages/daemon/src/api/routes/files.ts"
+        "packages/daemon/src/api/routes/files.ts",
+        "packages/daemon/src/pods/artifact-finalization-recovery.ts",
+        "packages/daemon/src/pods/artifact-snapshot-receipt.ts",
+        "packages/daemon/src/pods/sandbox-terminal-reaper.ts",
+        "packages/daemon/src/pods/local-reconciler.ts",
+        "packages/daemon/src/pods/reconciler.ts"
       ],
       "tests": [
         "packages/daemon/src/pods/artifact-preservation.test.ts",
         "packages/daemon/src/pods/pod-manager.test.ts",
-        "packages/daemon/src/api/routes/files.test.ts"
+        "packages/daemon/src/api/routes/files.test.ts",
+        "packages/daemon/src/pods/artifact-snapshot-receipt.test.ts",
+        "packages/daemon/src/pods/sandbox-terminal-reaper.test.ts",
+        "packages/daemon/src/pods/local-reconciler.test.ts",
+        "packages/daemon/src/pods/reconciler.test.ts"
       ],
       "evidence": [
         "checkpoint-15.md",
         "receipts/artifact-preservation-red.txt",
         "receipts/artifact-cancellation-red.txt",
         "receipts/artifact-retry-status-red.txt",
-        "receipts/artifact-final-affected.txt"
+        "receipts/artifact-final-affected.txt",
+        "checkpoint-16.md",
+        "receipts/artifact-reaper-red.txt",
+        "receipts/artifact-restart-red.txt",
+        "receipts/artifact-snapshot-resume-red.txt",
+        "receipts/artifact-duplicate-red.txt",
+        "receipts/artifact-recovery-final.txt"
       ],
       "prerequisites": [],
-      "remaining": " Artifact collection now fails closed and retries without another worker; snapshot/journal crash reconciliation, content inventory and broader finalization side effects remain."
+      "remaining": "Entered artifact collection survives restart with sources retained; generation/cycle-bound integrity receipts and in-process duplicate coordination are implemented. Independent source inventory, fsync/power-loss proof, orphan snapshot/DB-path reconciliation, interactive duplicates, other reply boundaries and broader durable finalization side effects remain."
     },
     {
       "id": "W1.5",
@@ -174,14 +215,23 @@
         "packages/daemon/src/db/migrations/159_decision_recovery.sql",
         "packages/daemon/src/pods/artifact-preservation.ts",
         "packages/daemon/src/pods/pod-manager.ts",
-        "packages/daemon/src/api/routes/files.ts"
+        "packages/daemon/src/api/routes/files.ts",
+        "packages/daemon/src/pods/artifact-finalization-recovery.ts",
+        "packages/daemon/src/pods/artifact-snapshot-receipt.ts",
+        "packages/daemon/src/pods/sandbox-terminal-reaper.ts",
+        "packages/daemon/src/pods/local-reconciler.ts",
+        "packages/daemon/src/pods/reconciler.ts"
       ],
       "tests": [
         "packages/daemon/src/db/unit-of-work.test.ts",
         "packages/daemon/src/pods/pod-manager.test.ts",
         "packages/daemon/src/pods/completion-journal.test.ts",
         "packages/daemon/src/pods/artifact-preservation.test.ts",
-        "packages/daemon/src/api/routes/files.test.ts"
+        "packages/daemon/src/api/routes/files.test.ts",
+        "packages/daemon/src/pods/artifact-snapshot-receipt.test.ts",
+        "packages/daemon/src/pods/sandbox-terminal-reaper.test.ts",
+        "packages/daemon/src/pods/local-reconciler.test.ts",
+        "packages/daemon/src/pods/reconciler.test.ts"
       ],
       "evidence": [
         "receipts/escalation-atomicity-red.txt",
@@ -195,10 +245,16 @@
         "receipts/artifact-preservation-red.txt",
         "receipts/artifact-cancellation-red.txt",
         "receipts/artifact-retry-status-red.txt",
-        "receipts/artifact-final-affected.txt"
+        "receipts/artifact-final-affected.txt",
+        "checkpoint-16.md",
+        "receipts/artifact-reaper-red.txt",
+        "receipts/artifact-restart-red.txt",
+        "receipts/artifact-snapshot-resume-red.txt",
+        "receipts/artifact-duplicate-red.txt",
+        "receipts/artifact-recovery-final.txt"
       ],
       "prerequisites": [],
-      "remaining": "Normal replies are atomic, retained in bounded recovery context, and fence older completion events. New unanswered decisions remain actionable. Attached MCP delivery acknowledgment, delayed concurrent stream ordering, other response boundaries, historical orphan questions and broader finalization side effects remain. Artifact collection now fails closed and retries without another worker; snapshot/journal crash reconciliation, content inventory and broader finalization side effects remain."
+      "remaining": "Entered artifact collection survives restart with sources retained; generation/cycle-bound integrity receipts and in-process duplicate coordination are implemented. Independent source inventory, fsync/power-loss proof, orphan snapshot/DB-path reconciliation, interactive duplicates, other reply boundaries and broader durable finalization side effects remain."
     },
     {
       "id": "W2.1",
@@ -1147,10 +1203,14 @@
         "receipts/checkpoint-13-full-validation-identity.json",
         "receipts/artifact-final-affected.txt",
         "receipts/artifact-mobile-full.txt",
-        "receipts/artifact-build-verified.txt"
+        "receipts/artifact-build-verified.txt",
+        "receipts/checkpoint-15-full-validation.txt",
+        "receipts/checkpoint-15-validation-identity.json",
+        "receipts/artifact-recovery-final.txt",
+        "receipts/artifact-recovery-build-final.txt"
       ],
       "prerequisites": [
-        "Historical full pipeline passed on 83c561e6 with audit zero. Decision/artifact changes have affected-suite and full build proof; final committed pipeline remains required."
+        "Full pipeline passed on clean 6789690c with audit zero. Subsequent recovery changes pass affected suites and builds; final committed pipeline remains required."
       ]
     },
     {
@@ -1165,7 +1225,9 @@
         "receipts/checkpoint-2-desktop.txt",
         "receipts/artifact-mobile-browser.json",
         "receipts/artifact-cli-final.txt",
-        "receipts/artifact-swift-verified.txt"
+        "receipts/artifact-swift-verified.txt",
+        "receipts/artifact-snapshot-mobile-browser.json",
+        "receipts/artifact-recovery-swift.txt"
       ],
       "prerequisites": [
         "Selected mobile flows and new health CLI have local interaction proof. Desktop has compilation and tests only. Remaining operator flows, physical device and live evidence are outstanding."
@@ -1190,5 +1252,5 @@
       "prerequisites": []
     }
   ],
-  "lastCheckpoint": "checkpoint-15.md"
+  "lastCheckpoint": "checkpoint-16.md"
 }

@@ -1,0 +1,62 @@
+
+ RUN  v4.1.11 /private/tmp/autopod-durable-execution/packages/daemon
+
+ ❯ src/pods/sandbox-terminal-reaper.test.ts (7 tests | 2 failed) 8ms
+     × retains a failed artifact source until artifact finalization completes 4ms
+     × does not delete a lifecycle resumed while failed-work preservation was pending 0ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 2 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/pods/sandbox-terminal-reaper.test.ts > SandboxTerminalReaper > retains a failed artifact source until artifact finalization completes
+AssertionError: expected "vi.fn()" to not be called at all, but actually been called 1 times
+
+Received:
+
+  1st vi.fn() call:
+
+    Array [
+      "pod-1",
+    ]
+
+
+Number of calls: 1
+
+ ❯ src/pods/sandbox-terminal-reaper.test.ts:54:40
+     52|     const deps = build([failed]);
+     53|     await deps.reaper.runSweep();
+     54|     expect(deps.preserveWorkspace).not.toHaveBeenCalled();
+       |                                        ^
+     55|     expect(deps.sandboxContainerManager.kill).not.toHaveBeenCalled();
+     56|     expect(failed.containerId).toBe('sandbox-pod-1');
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/2]⎯
+
+ FAIL  src/pods/sandbox-terminal-reaper.test.ts > SandboxTerminalReaper > does not delete a lifecycle resumed while failed-work preservation was pending
+AssertionError: expected "vi.fn()" to not be called at all, but actually been called 1 times
+
+Received:
+
+  1st vi.fn() call:
+
+    Array [
+      "sandbox-pod-1",
+    ]
+
+
+Number of calls: 1
+
+ ❯ src/pods/sandbox-terminal-reaper.test.ts:68:51
+     66|     });
+     67|     await deps.reaper.runSweep();
+     68|     expect(deps.sandboxContainerManager.kill).not.toHaveBeenCalled();
+       |                                                   ^
+     69|     expect(failed.containerId).toBe('sandbox-pod-1');
+     70|   });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/2]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  2 failed | 5 passed (7)
+   Start at  18:25:47
+   Duration  149ms (transform 17ms, setup 0ms, import 35ms, tests 8ms, environment 0ms)

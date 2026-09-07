@@ -58,8 +58,13 @@ describe('availableActions', () => {
       pendingEscalation: null,
     };
     expect(availableActions('failed', pod).map((action) => [action.kind, action.label])).toEqual([
-      ['retry', 'Retry artifact collection'],
+      ['retry', 'Resume artifact finalization'],
       ['kill', 'Kill'],
+    ]);
+    if (pod.finalization) pod.finalization.sourcePreservedAt = '2026-09-07T10:01:00Z';
+    expect(availableActions('failed', pod).map((action) => action.label)).toEqual([
+      'Resume artifact finalization',
+      'Kill',
     ]);
     expect(availableActions('awaiting_input', pod).map((action) => action.kind)).toEqual(['kill']);
   });

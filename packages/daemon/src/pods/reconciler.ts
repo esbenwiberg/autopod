@@ -2,6 +2,10 @@ import { access } from 'node:fs/promises';
 import type { Pod } from '@autopod/shared';
 import type { Logger } from 'pino';
 import type { SandboxContainerManager } from '../containers/sandbox-container-manager.js';
+import {
+  ARTIFACT_RESTART_REASON,
+  hasInterruptedArtifactCollection,
+} from './artifact-finalization-recovery.js';
 import type { EventBus } from './event-bus.js';
 import type { PodRepository } from './pod-repository.js';
 
@@ -34,10 +38,14 @@ export async function reconcileSandboxSessions(deps: ReconcilerDependencies): Pr
   const sandboxSessions = candidateStatuses.flatMap((status) =>
     podRepo
       .list({ status })
+      .map((pod) => podRepo.getOrThrow(pod.id))
       .filter(
         (pod) =>
+          pod.status === status &&
           pod.executionTarget === 'sandbox' &&
-          (pod.status === 'provisioning' || Boolean(pod.containerId)),
+          (pod.status === 'provisioning' ||
+            Boolean(pod.containerId) ||
+            hasInterruptedArtifactCollection(pod)),
       ),
   );
 
@@ -63,6 +71,10 @@ export async function reconcileSandboxSessions(deps: ReconcilerDependencies): Pr
 
 async function reconcileSession(pod: Pod, deps: ReconcilerDependencies): Promise<void> {
   const { sandboxContainerManager, podRepo, eventBus, logger } = deps;
+  if (hasInterruptedArtifactCollection(pod)) {
+    parkSession(pod, 'failed', ARTIFACT_RESTART_REASON, podRepo, eventBus);
+    return;
+  }
   if (pod.status === 'provisioning') {
     await recoverInterruptedProvisioning(pod, deps);
     return;

@@ -1648,6 +1648,12 @@ private let minimalSessionJson = """
   #expect(PodMapper.map(detail).artifactCollectionPending)
   #expect(PodMapper.map(compact).artifactCollectionPending)
   var finished = try #require(JSONSerialization.jsonObject(with: json) as? [String: Any])
+  var finalization = try #require(finished["finalization"] as? [String: Any])
+  finalization["sourcePreservedAt"] = "2026-09-07T10:01:00Z"
+  finished["finalization"] = finalization
+  let preservedData = try JSONSerialization.data(withJSONObject: finished)
+  #expect(PodMapper.map(try JSONDecoder().decode(SessionResponse.self, from: preservedData)).artifactCollectionPending)
+  #expect(PodMapper.map(try JSONDecoder().decode(CompactPodResponse.self, from: preservedData)).artifactCollectionPending)
   finished["status"] = "complete"
   let complete = try JSONDecoder().decode(SessionResponse.self, from: JSONSerialization.data(withJSONObject: finished))
   #expect(!PodMapper.map(complete).artifactCollectionPending)

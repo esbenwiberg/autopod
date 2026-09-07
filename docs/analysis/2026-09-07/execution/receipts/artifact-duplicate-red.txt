@@ -1,0 +1,25 @@
+
+ RUN  v4.1.11 /private/tmp/autopod-durable-execution/packages/daemon
+
+ ❯ src/pods/pod-manager.test.ts (429 tests | 1 failed | 428 skipped) 86ms
+         × coalesces duplicate artifact completion events into one collection and cleanup 85ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/pods/pod-manager.test.ts > PodManager > workspace pods > completeSession > coalesces duplicate artifact completion events into one collection and cleanup
+AssertionError: expected "vi.fn()" to be called 1 times, but got 2 times
+ ❯ src/pods/pod-manager.test.ts:12908:68
+    12906|         await Promise.all([manager.handleCompletion(pod.id), manager.h…
+    12907|         expect(ctx.podRepo.getOrThrow(pod.id).status).toBe('complete');
+    12908|         expect(ctx.containerManager.extractDirectoryFromContainer).toH…
+       |                                                                    ^
+    12909|         expect(ctx.containerManager.kill).toHaveBeenCalledTimes(1);
+    12910|       });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 428 skipped (429)
+   Start at  18:37:08
+   Duration  1.55s (transform 940ms, setup 0ms, import 1.35s, tests 86ms, environment 0ms)

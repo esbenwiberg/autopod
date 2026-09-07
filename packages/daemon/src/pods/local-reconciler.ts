@@ -2,6 +2,10 @@ import { access } from 'node:fs/promises';
 import type { Pod, PodStatus } from '@autopod/shared';
 import type { Logger } from 'pino';
 import type { ContainerManager } from '../interfaces/container-manager.js';
+import {
+  ARTIFACT_RESTART_REASON,
+  hasInterruptedArtifactCollection,
+} from './artifact-finalization-recovery.js';
 import type { EventBus } from './event-bus.js';
 import type { PodRepository } from './pod-repository.js';
 import type { ValidationRepository } from './validation-repository.js';
@@ -66,7 +70,9 @@ export async function reconcileLocalSessions(
 
     for (const pod of localSessions) {
       try {
-        await reconcileSession(pod, deps, result);
+        const current = podRepo.getOrThrow(pod.id);
+        if (current.status !== status || current.executionTarget !== 'local') continue;
+        await reconcileSession(current, deps, result);
       } catch (err) {
         logger.error({ err, podId: pod.id }, 'Failed to reconcile local pod');
         markSessionKilled(pod, deps);
@@ -93,6 +99,18 @@ async function reconcileSession(
       lastCorrectionMessage:
         'Human decision remains pending after daemon restart. Review the pending question; preserved worker state may require recovery before continuation.',
     });
+    result.skipped.push(pod.id);
+    return;
+  }
+
+  if (hasInterruptedArtifactCollection(pod)) {
+    podRepo.update(pod.id, {
+      status: 'failed',
+      failureReason: ARTIFACT_RESTART_REASON,
+      lastRecoveryTrigger: deps.trigger ?? 'restart',
+      lastCorrectionMessage: ARTIFACT_RESTART_REASON,
+    });
+    emitStatusChanged(pod.id, pod.status, 'failed', eventBus);
     result.skipped.push(pod.id);
     return;
   }

@@ -134,6 +134,47 @@ function makeFailingValidationResult(podId: string, attempt = 1): ValidationResu
 }
 
 describe('reconcileLocalSessions', () => {
+  it.each([false, true])(
+    'retains interrupted artifact collection after restart (published=%s)',
+    async (published) => {
+      const { deps, podRepo, enqueuedSessions, containerManager } = createReconcilerDeps();
+      podRepo.insert({
+        id: 'artifact-restart',
+        profileName: 'test-profile',
+        task: 'Collect report',
+        status: 'running',
+        model: 'opus',
+        runtime: 'claude',
+        executionTarget: 'local',
+        branch: 'branch',
+        userId: 'user',
+        maxValidationAttempts: 3,
+        skipValidation: false,
+        outputMode: 'artifact',
+        baseBranch: null,
+        options: { agentMode: 'auto', output: 'artifact', validate: false },
+      });
+      podRepo.update('artifact-restart', {
+        worktreePath: null,
+        containerId: published ? null : 'saved-container',
+        artifactsPath: published ? '/saved/artifact-snapshot' : null,
+      });
+      const pod = podRepo.getOrThrow('artifact-restart');
+      podRepo.completionJournal?.settle(pod, 'Report complete');
+      podRepo.completionJournal?.mark(pod, 'preserving', published);
+      mockedAccess.mockRejectedValue(new Error('not available'));
+      await reconcileLocalSessions(deps);
+      expect(podRepo.getOrThrow(pod.id)).toMatchObject({
+        status: 'failed',
+        containerId: published ? null : 'saved-container',
+        artifactsPath: published ? '/saved/artifact-snapshot' : null,
+        finalization: { phase: 'preserving', result: 'Report complete' },
+      });
+      expect(enqueuedSessions).toEqual([]);
+      expect(containerManager.kill).not.toHaveBeenCalled();
+    },
+  );
+
   it('does not turn an unanswered decision into restart work or kill it when its worktree is unavailable', async () => {
     const { deps, podRepo, enqueuedSessions, containerManager } = createReconcilerDeps();
     podRepo.insert({

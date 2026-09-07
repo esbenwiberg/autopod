@@ -3,6 +3,7 @@ import { mkdir, mkdtemp, rename, rm } from 'node:fs/promises';
 import path from 'node:path';
 import { AutopodError } from '@autopod/shared';
 import type { ContainerManager } from '../interfaces/container-manager.js';
+import { writeArtifactSnapshotReceipt } from './artifact-snapshot-receipt.js';
 
 /** Publish only a completed copy. A failed/expired copy never replaces a prior snapshot. */
 export async function collectArtifactSnapshot(options: {
@@ -10,6 +11,7 @@ export async function collectArtifactSnapshot(options: {
   containerId: string | null;
   artifactRoot: string;
   generation: number;
+  cycle?: number;
   isCurrent: () => boolean;
   timeoutMs?: number;
 }): Promise<string> {
@@ -25,6 +27,7 @@ export async function collectArtifactSnapshot(options: {
   const staging = await mkdtemp(path.join(options.artifactRoot, '.collect-'));
   let expired = false;
   let timer: ReturnType<typeof setTimeout> | undefined;
+  let snapshot: string | undefined;
   const copy = Promise.resolve().then(() =>
     options.containerManager.extractDirectoryFromContainer(containerId, '/workspace', staging),
   );
@@ -46,14 +49,15 @@ export async function collectArtifactSnapshot(options: {
         }, options.timeoutMs ?? 120_000);
       }),
     ]);
+    if (timer) clearTimeout(timer);
     if (!options.isCurrent()) throw failure();
-    const snapshot = path.join(
-      options.artifactRoot,
-      `generation-${options.generation}-${randomUUID()}`,
-    );
+    snapshot = path.join(options.artifactRoot, `generation-${options.generation}-${randomUUID()}`);
+    await writeArtifactSnapshotReceipt(staging, snapshot, options.generation, options.cycle ?? 0);
+    if (!options.isCurrent()) throw failure();
     await rename(staging, snapshot);
     return snapshot;
   } catch {
+    if (snapshot) await rm(`${snapshot}.receipt.json`, { force: true }).catch(() => {});
     if (!expired) await rm(staging, { recursive: true, force: true }).catch(() => {});
     throw failure();
   } finally {

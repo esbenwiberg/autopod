@@ -1,0 +1,103 @@
+
+ RUN  v4.1.11 /private/tmp/autopod-durable-execution/packages/daemon
+
+ ❯ src/pods/reconciler.test.ts (15 tests | 2 failed) 9ms
+     × retains interrupted artifact collection without resuming the sandbox (published=false) 4ms
+     × retains interrupted artifact collection without resuming the sandbox (published=true) 1ms
+ ❯ src/pods/local-reconciler.test.ts (32 tests | 2 failed) 1298ms
+     × retains interrupted artifact collection after restart (published=false) 69ms
+     × retains interrupted artifact collection after restart (published=true) 40ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 4 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/pods/local-reconciler.test.ts > reconcileLocalSessions > retains interrupted artifact collection after restart (published=false)
+AssertionError: expected { id: 'artifact-restart', …(113) } to match object { status: 'failed', …(3) }
+(116 matching properties omitted from actual)
+
+- Expected
++ Received
+
+@@ -3,7 +3,7 @@
+    "containerId": "saved-container",
+    "finalization": {
+      "phase": "preserving",
+      "result": "Report complete",
+    },
+-   "status": "failed",
++   "status": "killed",
+  }
+
+ ❯ src/pods/local-reconciler.test.ts:155:40
+    153|     mockedAccess.mockRejectedValue(new Error('not available'));
+    154|     await reconcileLocalSessions(deps);
+    155|     expect(podRepo.getOrThrow(pod.id)).toMatchObject({
+       |                                        ^
+    156|       status: 'failed', containerId: published ? null : 'saved-contain…
+    157|       artifactsPath: published ? '/saved/artifact-snapshot' : null,
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/4]⎯
+
+ FAIL  src/pods/local-reconciler.test.ts > reconcileLocalSessions > retains interrupted artifact collection after restart (published=true)
+AssertionError: expected { id: 'artifact-restart', …(113) } to match object { status: 'failed', …(3) }
+(116 matching properties omitted from actual)
+
+- Expected
++ Received
+
+@@ -3,7 +3,7 @@
+    "containerId": null,
+    "finalization": {
+      "phase": "preserving",
+      "result": "Report complete",
+    },
+-   "status": "failed",
++   "status": "killed",
+  }
+
+ ❯ src/pods/local-reconciler.test.ts:155:40
+    153|     mockedAccess.mockRejectedValue(new Error('not available'));
+    154|     await reconcileLocalSessions(deps);
+    155|     expect(podRepo.getOrThrow(pod.id)).toMatchObject({
+       |                                        ^
+    156|       status: 'failed', containerId: published ? null : 'saved-contain…
+    157|       artifactsPath: published ? '/saved/artifact-snapshot' : null,
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/4]⎯
+
+ FAIL  src/pods/reconciler.test.ts > reconcileSandboxSessions > retains interrupted artifact collection without resuming the sandbox (published=false)
+AssertionError: expected 'paused' to be 'failed' // Object.is equality
+
+Expected: "failed"
+Received: "paused"
+
+ ❯ src/pods/reconciler.test.ts:84:29
+     82|     });
+     83|     await reconcileSandboxSessions({ ...deps, logger });
+     84|     expect(deps.pod.status).toBe('failed');
+       |                             ^
+     85|     expect(deps.pod.containerId).toBe(published ? null : 'sandbox-1');
+     86|     expect(deps.pod.artifactsPath).toBe(published ? '/saved/artifact-s…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/4]⎯
+
+ FAIL  src/pods/reconciler.test.ts > reconcileSandboxSessions > retains interrupted artifact collection without resuming the sandbox (published=true)
+AssertionError: expected 'running' to be 'failed' // Object.is equality
+
+Expected: "failed"
+Received: "running"
+
+ ❯ src/pods/reconciler.test.ts:84:29
+     82|     });
+     83|     await reconcileSandboxSessions({ ...deps, logger });
+     84|     expect(deps.pod.status).toBe('failed');
+       |                             ^
+     85|     expect(deps.pod.containerId).toBe(published ? null : 'sandbox-1');
+     86|     expect(deps.pod.artifactsPath).toBe(published ? '/saved/artifact-s…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[4/4]⎯
+
+
+ Test Files  2 failed (2)
+      Tests  4 failed | 43 passed (47)
+   Start at  18:28:08
+   Duration  1.58s (transform 163ms, setup 0ms, import 240ms, tests 1.31s, environment 0ms)

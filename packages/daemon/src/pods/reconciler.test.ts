@@ -35,6 +35,7 @@ function buildDeps(
   const pod = makePod(overrides);
   const updates: Array<Partial<Pod>> = [];
   const podRepo = {
+    getOrThrow: vi.fn(() => pod),
     list: vi.fn(({ status }: { status: Pod['status'] }) => (pod.status === status ? [pod] : [])),
     update: vi.fn((_podId: string, changes: Partial<Pod>) => {
       updates.push(changes);
@@ -67,6 +68,36 @@ function buildDeps(
 }
 
 describe('reconcileSandboxSessions', () => {
+  it.each([false, true])(
+    'retains interrupted artifact collection without resuming the sandbox (published=%s)',
+    async (published) => {
+      const deps = buildDeps('running', {
+        lifecycleGeneration: 1,
+        options: { agentMode: 'auto', output: 'artifact', validate: false },
+        containerId: published ? null : 'sandbox-1',
+        worktreePath: null,
+        artifactsPath: published ? '/saved/artifact-snapshot' : null,
+        finalization: {
+          generation: 1,
+          cycle: 1,
+          phase: 'preserving',
+          agentSettledAt: '2026-09-07T10:00:00Z',
+          result: 'Report complete',
+          pendingDecisionId: null,
+          sourcePreservedAt: published ? '2026-09-07T10:01:00Z' : null,
+        },
+      });
+      await reconcileSandboxSessions({ ...deps, logger });
+      expect(deps.pod.status).toBe('failed');
+      expect(deps.pod.containerId).toBe(published ? null : 'sandbox-1');
+      expect(deps.pod.artifactsPath).toBe(published ? '/saved/artifact-snapshot' : null);
+      expect(deps.preserveWorkspace).not.toHaveBeenCalled();
+      expect(deps.quiesceSandboxAgent).not.toHaveBeenCalled();
+      expect(deps.suspendSandbox).not.toHaveBeenCalled();
+      expect(deps.enqueueSession).not.toHaveBeenCalled();
+      expect(deps.sandboxContainerManager.start).not.toHaveBeenCalled();
+    },
+  );
   it.each(['running', 'stopped', 'unknown', 'deleted'] as const)(
     'retains unanswered triage when sandbox status is %s after restart',
     async (status) => {

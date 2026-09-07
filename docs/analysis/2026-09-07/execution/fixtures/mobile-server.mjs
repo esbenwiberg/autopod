@@ -164,7 +164,8 @@ const retryState = {
   authorizations: [],
   telemetry: 'partial',
 };
-const artifactRecovery = process.env.ARTIFACT_RECOVERY_FIXTURE === '1';
+const savedSnapshotRecovery = process.env.ARTIFACT_SNAPSHOT_FIXTURE === '1';
+const artifactRecovery = process.env.ARTIFACT_RECOVERY_FIXTURE === '1' || savedSnapshotRecovery;
 let artifactRetryCount = 0;
 if (artifactRecovery)
   pod = {
@@ -174,11 +175,11 @@ if (artifactRecovery)
     options: { agentMode: 'auto', output: 'artifact', validate: false, promotable: false },
     pendingEscalation: null,
     recordDiagnostics: [],
-    artifactsPath: null,
+    artifactsPath: savedSnapshotRecovery ? '/local-fixture/snapshot' : null,
     finalization: {
       ...pod.finalization,
       phase: 'preserving',
-      sourcePreservedAt: null,
+      sourcePreservedAt: savedSnapshotRecovery ? '2026-09-07T10:01:00Z' : null,
       pendingDecisionId: null,
     },
   };
@@ -289,10 +290,14 @@ const server = createServer(async (req, res) => {
         }),
       );
       if (artifactRetryCount === 1) {
-        res.statusCode = 502;
+        res.statusCode = savedSnapshotRecovery ? 409 : 502;
         return json({
-          error: 'ARTIFACT_PRESERVATION_FAILED',
-          message: 'Artifact preservation failed. Original container retained.',
+          error: savedSnapshotRecovery
+            ? 'ARTIFACT_SNAPSHOT_UNVERIFIED'
+            : 'ARTIFACT_PRESERVATION_FAILED',
+          message: savedSnapshotRecovery
+            ? 'Saved artifact snapshot could not be verified. Restore its snapshot and receipt before finalizing; the settled worker was not restarted.'
+            : 'Artifact preservation failed. Original container retained.',
         });
       }
       pod = {
