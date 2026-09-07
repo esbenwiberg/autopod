@@ -68,6 +68,9 @@ public struct PodActions: Sendable {
   /// Token-free recovery for a `failed` pod — pushes + opens PR if validation already passed,
   /// otherwise re-runs validation only (no agent rework). Cheapest possible path forward.
   public var retryDraftScope: String
+  public var loadDispatchPreflight: @MainActor @Sendable (String) async throws -> DispatchPreflightResponse
+  public var loadRerunTemplate: @MainActor @Sendable (String) async throws -> CreateSessionRequest
+  public var createIntentionalRerun: @MainActor @Sendable (CreateSessionRequest) async throws -> String
   public var loadRetryState: @MainActor @Sendable (String) async throws -> TaskRetryState
   public var authorizeRetry: @MainActor @Sendable (String, TaskRetryAuthorizationRequest) async throws -> TaskRetryAuthorization
   public var resume: @MainActor @Sendable (String) async -> Void
@@ -156,6 +159,9 @@ public struct PodActions: Sendable {
     spawnFix: @escaping @MainActor @Sendable (String, String?) async -> SpawnFixResponse? = { _, _ in nil },
     retryCreatePr: @escaping @MainActor @Sendable (String) async -> Void = { _ in },
     retryDraftScope: String = "preview",
+    loadDispatchPreflight: @escaping @MainActor @Sendable (String) async throws -> DispatchPreflightResponse = { _ in throw URLError(.unsupportedURL) },
+    loadRerunTemplate: @escaping @MainActor @Sendable (String) async throws -> CreateSessionRequest = { _ in throw URLError(.unsupportedURL) },
+    createIntentionalRerun: @escaping @MainActor @Sendable (CreateSessionRequest) async throws -> String = { _ in throw URLError(.unsupportedURL) },
     loadRetryState: @escaping @MainActor @Sendable (String) async throws -> TaskRetryState = { _ in throw URLError(.unsupportedURL) },
     authorizeRetry: @escaping @MainActor @Sendable (String, TaskRetryAuthorizationRequest) async throws -> TaskRetryAuthorization = { _, _ in throw URLError(.unsupportedURL) },
     resume: @escaping @MainActor @Sendable (String) async -> Void = { _ in },
@@ -205,6 +211,9 @@ public struct PodActions: Sendable {
     self.spawnFix = spawnFix
     self.retryCreatePr = retryCreatePr
     self.retryDraftScope = retryDraftScope
+    self.loadDispatchPreflight = loadDispatchPreflight
+    self.loadRerunTemplate = loadRerunTemplate
+    self.createIntentionalRerun = createIntentionalRerun
     self.loadRetryState = loadRetryState
     self.authorizeRetry = authorizeRetry
     self.resume = resume

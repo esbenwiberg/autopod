@@ -1,0 +1,32 @@
+
+ RUN  v4.1.10 /private/tmp/autopod-durable-execution/packages/daemon
+
+ ❯ src/pods/pod-manager.test.ts (414 tests | 1 failed | 413 skipped) 141ms
+       × creates an authenticated idempotent rerun through the real API without inheriting approval or lineage 141ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/pods/pod-manager.test.ts > PodManager > processPod > creates an authenticated idempotent rerun through the real API without inheriting approval or lineage
+AssertionError: expected 400 to be 201 // Object.is equality
+
+- Expected
++ Received
+
+- 201
++ 400
+
+ ❯ src/pods/pod-manager.test.ts:5654:34
+    5652|         ).toBe(400);
+    5653|         const first = await app.inject({ method: 'POST', url: '/pods',…
+    5654|         expect(first.statusCode).toBe(201);
+       |                                  ^
+    5655|         const duplicate = await app.inject({ method: 'POST', url: '/po…
+    5656|         expect(duplicate.statusCode).toBe(201);
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 413 skipped (414)
+   Start at  15:49:07
+   Duration  1.25s (transform 640ms, setup 0ms, import 992ms, tests 141ms, environment 0ms)

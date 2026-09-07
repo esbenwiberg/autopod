@@ -176,6 +176,7 @@ import {
 } from '../worktrees/sandbox-workspace-checkpoint.js';
 import { agentToolingCachePaths } from './agent-tooling-cache-paths.js';
 import { buildCorrectionMessage } from './correction-context.js';
+import { dispatchRequestHash } from './dispatch-preflight-ledger.js';
 import type { EscalationRepository } from './escalation-repository.js';
 import type { EventBus } from './event-bus.js';
 import type { EventRepository } from './event-repository.js';
@@ -1464,7 +1465,12 @@ export interface ApproveAllSkippedPod {
 }
 
 export interface PodManager {
-  createSession(request: CreatePodRequest, userId: string, creator?: PodCreator): Pod;
+  createSession(
+    request: CreatePodRequest,
+    userId: string,
+    creator?: PodCreator,
+    actor?: OperatorActor,
+  ): Pod;
   processPod(podId: string): Promise<void>;
   consumeAgentEvents(
     podId: string,
@@ -7208,7 +7214,24 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
   }
 
   return {
-    createSession(request: CreatePodRequest, userId: string, creator?: PodCreator): Pod {
+    createSession(
+      request: CreatePodRequest,
+      userId: string,
+      creator?: PodCreator,
+      actor?: OperatorActor,
+    ): Pod {
+      if (request.intentionalRerun && (actor?.type !== 'human' || actor.userId !== userId))
+        throw new AutopodError(
+          'Intentional rerun requires an authenticated human decision',
+          'UNAUTHORIZED_RERUN',
+          403,
+        );
+      if (request.intentionalRerun) {
+        if (!podRepo.dispatchPreflight)
+          throw new AutopodError('Durable rerun admission unavailable', 'RERUN_UNAVAILABLE', 503);
+        const existing = podRepo.dispatchPreflight.findRerun(request, userId);
+        if (existing) return podRepo.getOrThrow(existing);
+      }
       const profile = profileStore.get(request.profileName);
       assertNoExpiredPat(profile);
       const providerPreflight = resolveProviderPreflight(profile, request.runtime, request.model, {
@@ -7445,6 +7468,9 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
             maxValidationAttempts: profile.maxValidationAttempts ?? 3,
             skipValidation,
             contract: request.contract ?? null,
+            intentionalRerun: request.intentionalRerun,
+            dispatchRepository: profile.repoUrl,
+            rerunRequestHash: request.intentionalRerun ? dispatchRequestHash(request) : undefined,
             options: resolvedPod,
             outputMode: effectiveOutputMode,
             startBranch: effectiveStartBranch !== effectiveBaseBranch ? effectiveStartBranch : null,
@@ -7952,18 +7978,26 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
               podRepo.update(podId, { infrastructureFailure: null });
               pod = podRepo.getOrThrow(podId);
             }
-            if (
-              !isRecovery &&
-              !pod.skipAgent &&
-              pod.options.agentMode !== 'interactive' &&
-              pod.contract?.requiredFacts.length
-            ) {
+            if (!isRecovery && !pod.skipAgent && pod.options.agentMode !== 'interactive') {
               emitStatus('Checking contract declarations against fetched base…');
-              await worktreeManager.inspectContractBase(
+              const baseEvidence = await worktreeManager.inspectContractBase(
                 worktreePath,
                 pod.baseBranch ?? profile.defaultBranch ?? 'main',
-                pod.contract.requiredFacts,
+                pod.contract?.requiredFacts ?? [],
               );
+              const dispatchEvidence = podRepo.dispatchPreflight?.inspect(
+                podId,
+                pod.lifecycleGeneration,
+                profile.repoUrl,
+                pod.baseBranch ?? profile.defaultBranch ?? 'main',
+                baseEvidence.baseCommitSha,
+              );
+              if (dispatchEvidence?.status === 'review_required')
+                throw new AutopodError(
+                  `Equivalent active or recent work requires review: ${dispatchEvidence.conflicts.map((entry) => entry.podId).join(', ')}. Reconcile the existing execution or create an intentional rerun with a recorded reason.`,
+                  'EQUIVALENT_WORK_REVIEW_REQUIRED',
+                  409,
+                );
             }
             const materializedStartSha = await materializeSpecFiles(
               worktreePath,

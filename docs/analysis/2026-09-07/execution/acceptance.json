@@ -303,22 +303,39 @@
       "implementation": [
         "packages/daemon/src/worktrees/contract-base-preflight.ts",
         "packages/daemon/src/pods/pod-manager.ts",
-        "packages/daemon/src/validation/local-validation-engine.ts"
+        "packages/daemon/src/validation/local-validation-engine.ts",
+        "packages/daemon/src/db/migrations/148_dispatch_preflight.sql",
+        "packages/daemon/src/pods/dispatch-preflight-ledger.ts",
+        "packages/daemon/src/pods/dispatch-rerun-request.ts",
+        "packages/daemon/src/api/routes/pods.ts",
+        "packages/cli/src/commands/pod.ts",
+        "packages/mobile-web/src/components/DispatchPreflightPanel.tsx",
+        "packages/desktop/Sources/AutopodUI/Views/Shared/DispatchPreflightCard.swift"
       ],
       "tests": [
         "packages/daemon/src/worktrees/contract-base-preflight.test.ts",
         "packages/daemon/src/pods/pod-manager.test.ts",
-        "packages/daemon/src/validation/local-validation-engine.test.ts"
+        "packages/daemon/src/validation/local-validation-engine.test.ts",
+        "packages/daemon/src/pods/dispatch-preflight-ledger.test.ts",
+        "packages/cli/src/commands/pod.test.ts",
+        "packages/mobile-web/src/components/DispatchPreflightPanel.test.tsx",
+        "packages/desktop/Tests/AutopodClientTests/DispatchPreflightTests.swift"
       ],
       "evidence": [
         "receipts/contract-preflight-red.txt",
         "receipts/contract-preflight-green.txt",
         "receipts/contract-base-validation.txt",
         "receipts/contract-cli-tests-2.txt",
-        "receipts/checkpoint-3-affected.txt"
+        "receipts/checkpoint-3-affected.txt",
+        "receipts/equivalent-dispatch-red.txt",
+        "receipts/dispatch-affected-final.txt",
+        "receipts/dispatch-cli-tests.txt",
+        "receipts/dispatch-mobile-tests.txt",
+        "receipts/dispatch-mobile-browser.json",
+        "receipts/dispatch-swift-with-draft-tests.txt"
       ],
       "prerequisites": [],
-      "remaining": "Fresh-ref actual-base declaration gate and delete fact validation proven locally; live dispatch acceptance outstanding."
+      "remaining": "Fresh-fetch actual-base receipts, exact task/contract equivalent-work admission, frozen repository/base binding and authenticated idempotent distinct reruns proven locally. Native interaction and live dispatch acceptance remain unverified. Required command/resource preflight and per-execution provenance remain separate unfinished criteria."
     },
     {
       "id": "W3.2",
@@ -327,21 +344,38 @@
       "implementation": [
         "packages/daemon/src/pods/task-execution-ledger.ts",
         "packages/daemon/src/db/migrations/143_task_executions.sql",
-        "packages/daemon/src/pods/pod-manager.ts"
+        "packages/daemon/src/pods/pod-manager.ts",
+        "packages/daemon/src/db/migrations/148_dispatch_preflight.sql",
+        "packages/daemon/src/pods/dispatch-preflight-ledger.ts",
+        "packages/daemon/src/pods/dispatch-rerun-request.ts",
+        "packages/daemon/src/api/routes/pods.ts",
+        "packages/cli/src/commands/pod.ts",
+        "packages/mobile-web/src/components/DispatchPreflightPanel.tsx",
+        "packages/desktop/Sources/AutopodUI/Views/Shared/DispatchPreflightCard.swift"
       ],
       "tests": [
         "packages/daemon/src/pods/task-execution-ledger.test.ts",
-        "packages/daemon/src/pods/pod-manager.test.ts"
+        "packages/daemon/src/pods/pod-manager.test.ts",
+        "packages/daemon/src/pods/dispatch-preflight-ledger.test.ts",
+        "packages/cli/src/commands/pod.test.ts",
+        "packages/mobile-web/src/components/DispatchPreflightPanel.test.tsx",
+        "packages/desktop/Tests/AutopodClientTests/DispatchPreflightTests.swift"
       ],
       "evidence": [
         "receipts/task-ledger-red.txt",
         "receipts/task-budget-manager-red.txt",
         "receipts/task-ledger-green-2.txt",
         "receipts/task-ledger-corrected-telemetry.txt",
-        "receipts/checkpoint-3-affected.txt"
+        "receipts/checkpoint-3-affected.txt",
+        "receipts/equivalent-dispatch-red.txt",
+        "receipts/dispatch-affected-final.txt",
+        "receipts/dispatch-cli-tests.txt",
+        "receipts/dispatch-mobile-tests.txt",
+        "receipts/dispatch-mobile-browser.json",
+        "receipts/dispatch-swift-with-draft-tests.txt"
       ],
       "prerequisites": [],
-      "remaining": "Independent reruns have distinct task and execution identity; detection/reconciliation of equivalent active or recent work remains."
+      "remaining": "Fresh-fetch actual-base receipts, exact task/contract equivalent-work admission, frozen repository/base binding and authenticated idempotent distinct reruns proven locally. Native interaction and live dispatch acceptance remain unverified. Required command/resource preflight and per-execution provenance remain separate unfinished criteria."
     },
     {
       "id": "W3.3",
@@ -375,10 +409,35 @@
       "id": "W3.5",
       "requirement": "Queued provider binding survives mutable profile changes with actionable reconciliation errors",
       "status": "partial",
-      "implementation": ["packages/daemon/src/pods/pod-manager.ts"],
-      "tests": ["packages/daemon/src/pods/pod-manager.test.ts"],
-      "evidence": ["receipts/queue-binding-red.txt", "receipts/queue-binding-green.txt"],
-      "prerequisites": []
+      "implementation": [
+        "packages/daemon/src/pods/pod-manager.ts",
+        "packages/daemon/src/db/migrations/148_dispatch_preflight.sql",
+        "packages/daemon/src/pods/dispatch-preflight-ledger.ts",
+        "packages/daemon/src/pods/dispatch-rerun-request.ts",
+        "packages/daemon/src/api/routes/pods.ts",
+        "packages/cli/src/commands/pod.ts",
+        "packages/mobile-web/src/components/DispatchPreflightPanel.tsx",
+        "packages/desktop/Sources/AutopodUI/Views/Shared/DispatchPreflightCard.swift"
+      ],
+      "tests": [
+        "packages/daemon/src/pods/pod-manager.test.ts",
+        "packages/daemon/src/pods/dispatch-preflight-ledger.test.ts",
+        "packages/cli/src/commands/pod.test.ts",
+        "packages/mobile-web/src/components/DispatchPreflightPanel.test.tsx",
+        "packages/desktop/Tests/AutopodClientTests/DispatchPreflightTests.swift"
+      ],
+      "evidence": [
+        "receipts/queue-binding-red.txt",
+        "receipts/queue-binding-green.txt",
+        "receipts/equivalent-dispatch-red.txt",
+        "receipts/dispatch-affected-final.txt",
+        "receipts/dispatch-cli-tests.txt",
+        "receipts/dispatch-mobile-tests.txt",
+        "receipts/dispatch-mobile-browser.json",
+        "receipts/dispatch-swift-with-draft-tests.txt"
+      ],
+      "prerequisites": [],
+      "remaining": "Fresh-fetch actual-base receipts, exact task/contract equivalent-work admission, frozen repository/base binding and authenticated idempotent distinct reruns proven locally. Native interaction and live dispatch acceptance remain unverified. Required command/resource preflight and per-execution provenance remain separate unfinished criteria."
     },
     {
       "id": "W3.6",

@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { ActionBar } from '../components/ActionBar.js';
 import { ActivityList } from '../components/ActivityList.js';
+import { DispatchPreflightPanel } from '../components/DispatchPreflightPanel.js';
 import { EscalationCard } from '../components/EscalationCard.js';
 import { SkipValidationToggle } from '../components/SkipValidationToggle.js';
 import { StatusChip } from '../components/StatusChip.js';
@@ -130,6 +131,7 @@ export function PodDetail(): JSX.Element {
           )}
         </section>
       ) : null}
+      <DispatchPreflightPanel pod={pod} />
       <TaskRetryPanel podId={pod.id} revision={pod.updatedAt} status={pod.status} />
       <TaskExecutionPanel
         podId={data.id}

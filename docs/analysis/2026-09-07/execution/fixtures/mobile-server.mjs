@@ -88,7 +88,7 @@ let pod = {
     response: null,
   },
 };
-if (process.env.FIXTURE_MODE === 'retry')
+if (['retry', 'dispatch'].includes(process.env.FIXTURE_MODE))
   pod = {
     ...pod,
     status: 'review_required',
@@ -164,12 +164,71 @@ const retryState = {
   authorizations: [],
   telemetry: 'partial',
 };
+let rerunDecision = null;
+let rerunResponseLost = false;
 const server = createServer(async (req, res) => {
   const pathname = new URL(req.url, 'http://localhost').pathname;
   const json = (value) => {
     res.setHeader('content-type', 'application/json');
     res.end(JSON.stringify(value));
   };
+  if (pathname === '/pods/local-fixture/dispatch-preflight')
+    return json({
+      latest: {
+        id: 'fixture-receipt',
+        executionId: 'fixture-execution',
+        taskId: 'fixture-task',
+        status: 'review_required',
+        repository: 'github.com/example/repo',
+        baseBranch: 'main',
+        baseCommitSha: 'a'.repeat(40),
+        checkedAt: '2026-09-07T15:00:00Z',
+        conflicts: [
+          {
+            podId: 'prior-fixture',
+            executionId: 'prior-execution',
+            status: 'validated',
+            evidence: 'dispatch_receipt',
+          },
+        ],
+        rerun: null,
+      },
+    });
+  if (pathname === '/pods/local-fixture/rerun-template')
+    return json({
+      profileName: pod.profileName,
+      task: pod.task,
+      options: pod.options,
+      model: pod.model,
+      runtime: pod.runtime,
+    });
+  if (req.method === 'POST' && pathname === '/pods') {
+    let body = '';
+    for await (const chunk of req) body += chunk;
+    const request = JSON.parse(body);
+    if (rerunDecision && JSON.stringify(rerunDecision) !== JSON.stringify(request)) {
+      res.statusCode = 409;
+      return json({ message: 'Different request after lost response' });
+    }
+    rerunDecision = request;
+    console.log(
+      JSON.stringify({
+        action: 'intentional-rerun',
+        requestKey: request.intentionalRerun.requestKey,
+        reason: request.intentionalRerun.reason,
+        simulated: true,
+      }),
+    );
+    if (!rerunResponseLost) {
+      rerunResponseLost = true;
+      res.statusCode = 503;
+      return json({
+        message:
+          'Response unavailable after recording the simulated rerun. Retry the same request.',
+      });
+    }
+    return json({ ...pod, id: 'same-fixture-rerun', status: 'queued' });
+  }
   if (pathname === '/pods/local-fixture/retry-state') return json(retryState);
   if (req.method === 'POST' && pathname === '/pods/local-fixture/retry-authorizations') {
     let body = '';
@@ -341,6 +400,6 @@ const server = createServer(async (req, res) => {
   }
 });
 server.on('upgrade', (_req, socket) => socket.destroy());
-server.listen(0, '127.0.0.1', () =>
+server.listen(Number(process.env.FIXTURE_PORT ?? 0), '127.0.0.1', () =>
   console.log(`http://127.0.0.1:${server.address().port}/mobile/`),
 );

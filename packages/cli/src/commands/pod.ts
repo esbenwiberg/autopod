@@ -231,6 +231,55 @@ function resolveContractPath(specRoot: string): string {
 
 export function registerPodCommands(program: Command, getClient: () => AutopodClient): void {
   program
+    .command('rerun <id>')
+    .description(
+      'Create an intentional distinct task using the prior request; all preflight gates still apply',
+    )
+    .requiredOption('--reason <reason>', 'Human reason for intentionally repeating this work')
+    .requiredOption('--request-key <key>', 'Stable key; reuse after a lost response')
+    .option('--json', 'Output JSON')
+    .action(async (id: string, opts: { reason: string; requestKey: string; json?: boolean }) => {
+      const client = getClient();
+      const source = await resolvePodId(client, id);
+      if (!opts.reason.trim()) throw new Error('Intentional rerun requires a human reason');
+      const request = await client.getRerunTemplate(source);
+      const pod = await client.createSession({
+        ...request,
+        intentionalRerun: {
+          ofPodId: source,
+          reason: opts.reason.trim(),
+          requestKey: opts.requestKey,
+        },
+      });
+      withJsonOutput(opts, pod, (value) =>
+        console.log(
+          `Distinct task ${value.id}: ${value.status}. Inspect dispatch-preflight and status for the outcome.`,
+        ),
+      );
+    });
+  program
+    .command('dispatch-preflight <id>')
+    .description('Inspect fresh base, equivalent work, and intentional rerun evidence')
+    .option('--json', 'Output JSON')
+    .action(async (id: string, opts: { json?: boolean }) => {
+      const client = getClient();
+      const state = await client.getDispatchPreflight(await resolvePodId(client, id));
+      withJsonOutput(opts, state, ({ latest }) => {
+        if (!latest) {
+          console.log('Dispatch preflight not recorded for this execution.');
+          return;
+        }
+        console.log(
+          `${latest.status}: ${latest.repository} ${latest.baseBranch} @ ${latest.baseCommitSha}`,
+        );
+        console.log(`Execution ${latest.executionId}; checked ${latest.checkedAt}`);
+        for (const conflict of latest.conflicts)
+          console.log(`${conflict.podId}: ${conflict.status} (${conflict.evidence})`);
+        if (latest.rerun)
+          console.log(`Intentional rerun of ${latest.rerun.ofPodId}: ${latest.rerun.reason}`);
+      });
+    });
+  program
     .command('retry-state <id>')
     .description('Inspect task-wide validation admissions and retry authorizations')
     .option('--json', 'Output JSON')
@@ -295,6 +344,9 @@ export function registerPodCommands(program: Command, getClient: () => AutopodCl
     .option('-b, --branch <branch>', 'Target branch name')
     .option('--branch-prefix <prefix>', 'Override branch prefix (e.g. hotfix/)')
     .option('--start-branch <branch>', 'Branch/ref to start from while targeting --base-branch')
+    .option('--rerun-of <id>', 'Explicitly repeat this prior pod as a distinct task')
+    .option('--rerun-reason <reason>', 'Human reason for intentionally repeating equivalent work')
+    .option('--rerun-request-key <key>', 'Stable decision key; reuse it after a lost response')
     .option('--base-branch <branch>', 'Branch from a specific base (e.g. workspace output)')
     .option('--skip-validation', 'Skip validation phase')
     .option('--validation-suite <suite>', validationSuiteHelp)
@@ -316,6 +368,9 @@ export function registerPodCommands(program: Command, getClient: () => AutopodCl
           branchPrefix?: string;
           startBranch?: string;
           baseBranch?: string;
+          rerunOf?: string;
+          rerunReason?: string;
+          rerunRequestKey?: string;
           skipValidation?: boolean;
           validationSuite?: string;
           sidecar: string[];
@@ -336,6 +391,7 @@ export function registerPodCommands(program: Command, getClient: () => AutopodCl
             branchPrefix: opts.branchPrefix,
             startBranch: opts.startBranch,
             baseBranch: opts.baseBranch,
+            intentionalRerun: parseIntentionalRerun(opts),
             skipValidation: opts.skipValidation,
             options: validationSuite ? { validationSuite } : undefined,
             requireSidecars: opts.sidecar.length > 0 ? opts.sidecar : undefined,
@@ -371,6 +427,9 @@ export function registerPodCommands(program: Command, getClient: () => AutopodCl
     .option('-b, --branch <branch>', 'Target branch name')
     .option('--branch-prefix <prefix>', 'Override branch prefix (e.g. hotfix/)')
     .option('--start-branch <branch>', 'Branch/ref to start from while targeting --base-branch')
+    .option('--rerun-of <id>', 'Explicitly repeat this prior pod as a distinct task')
+    .option('--rerun-reason <reason>', 'Human reason for intentionally repeating equivalent work')
+    .option('--rerun-request-key <key>', 'Stable decision key; reuse it after a lost response')
     .option('--base-branch <branch>', 'Branch from a specific base')
     .option(
       '-s, --sidecar <name>',
@@ -406,6 +465,9 @@ export function registerPodCommands(program: Command, getClient: () => AutopodCl
           branchPrefix?: string;
           startBranch?: string;
           baseBranch?: string;
+          rerunOf?: string;
+          rerunReason?: string;
+          rerunRequestKey?: string;
           sidecar: string[];
           refRepo: string[];
           refFromProfile: string[];
@@ -469,6 +531,7 @@ export function registerPodCommands(program: Command, getClient: () => AutopodCl
             branchPrefix: opts.branchPrefix,
             startBranch: opts.startBranch,
             baseBranch: opts.baseBranch,
+            intentionalRerun: parseIntentionalRerun(opts),
             options: podOptions,
             requireSidecars: opts.sidecar.length > 0 ? opts.sidecar : undefined,
             referenceRepos,
@@ -1042,6 +1105,9 @@ export function registerPodCommands(program: Command, getClient: () => AutopodCl
     .option('-b, --branch <branch>', 'target branch name')
     .option('--branch-prefix <prefix>', 'override branch prefix (e.g. hotfix/)')
     .option('--start-branch <branch>', 'branch/ref to start from while targeting --base-branch')
+    .option('--rerun-of <id>', 'Explicitly repeat this prior pod as a distinct task')
+    .option('--rerun-reason <reason>', 'Human reason for intentionally repeating equivalent work')
+    .option('--rerun-request-key <key>', 'Stable decision key; reuse it after a lost response')
     .option('--base-branch <branch>', 'branch from a specific base')
     .option('--skip-validation', 'skip validation phase')
     .option('--validation-suite <suite>', validationSuiteHelp)
@@ -1067,6 +1133,9 @@ export function registerPodCommands(program: Command, getClient: () => AutopodCl
           branchPrefix?: string;
           startBranch?: string;
           baseBranch?: string;
+          rerunOf?: string;
+          rerunReason?: string;
+          rerunRequestKey?: string;
           skipValidation?: boolean;
           validationSuite?: string;
           sidecar: string[];
@@ -1138,6 +1207,7 @@ export function registerPodCommands(program: Command, getClient: () => AutopodCl
             branchPrefix: opts.branchPrefix,
             startBranch: opts.startBranch,
             baseBranch: opts.baseBranch,
+            intentionalRerun: parseIntentionalRerun(opts),
             specFiles,
             specContextFiles,
             skipValidation: opts.skipValidation,
@@ -1300,4 +1370,21 @@ function formatLogEvent(
     default:
       console.log(`${ts} ${chalk.dim(JSON.stringify(event))}`);
   }
+}
+
+function parseIntentionalRerun(opts: {
+  rerunOf?: string;
+  rerunReason?: string;
+  rerunRequestKey?: string;
+}) {
+  if (!opts.rerunOf && !opts.rerunReason && !opts.rerunRequestKey) return undefined;
+  if (!opts.rerunOf || !opts.rerunReason?.trim() || !opts.rerunRequestKey)
+    throw new Error(
+      'Intentional rerun requires --rerun-of, --rerun-reason, and --rerun-request-key. Reuse the same key after a lost response.',
+    );
+  return {
+    ofPodId: opts.rerunOf,
+    reason: opts.rerunReason.trim(),
+    requestKey: opts.rerunRequestKey,
+  };
 }

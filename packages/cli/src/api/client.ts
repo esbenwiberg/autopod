@@ -1,3 +1,4 @@
+import type { DispatchPreflightEvidence } from '@autopod/shared';
 import type {
   ScanRepairDispatch,
   ScanReportDetail,
@@ -229,6 +230,14 @@ export class AutopodClient {
 
   async getTaskExecution(id: string): Promise<TaskExecutionSummary> {
     return this.request('GET', `/pods/${id}/task-execution`);
+  }
+
+  async getRerunTemplate(id: string): Promise<CreatePodRequest> {
+    return this.request('GET', `/pods/${id}/rerun-template`);
+  }
+
+  async getDispatchPreflight(id: string): Promise<{ latest: DispatchPreflightEvidence | null }> {
+    return this.request('GET', `/pods/${id}/dispatch-preflight`);
   }
 
   async getRetryState(id: string): Promise<TaskRetryState> {

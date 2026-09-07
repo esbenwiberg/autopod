@@ -18,6 +18,7 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import type { ActionAuditRepository } from '../../actions/audit-repository.js';
 import { aggregateCost, parseDays } from '../../pods/cost-aggregation.js';
+import { dispatchRerunRequest } from '../../pods/dispatch-rerun-request.js';
 import type { EscalationRepository } from '../../pods/escalation-repository.js';
 import {
   type EscalationsAnalyticsScope,
@@ -581,10 +582,15 @@ export function podRoutes(
     }
 
     try {
-      const pod = podManager.createSession(sanitized, request.user.oid, {
-        email: request.user.preferred_username,
-        name: request.user.name,
-      });
+      const pod = podManager.createSession(
+        sanitized,
+        request.user.oid,
+        {
+          email: request.user.preferred_username,
+          name: request.user.name,
+        },
+        humanActor(request),
+      );
       reply.status(201);
       return serializePodForRequest(pod, request, providerAttemptRepo, eventRepo);
     } catch (err) {
@@ -700,6 +706,18 @@ export function podRoutes(
     return podRepo.taskExecutions.snapshot(podId);
   });
 
+  app.get('/pods/:podId/rerun-template', async (request) => {
+    const { podId } = request.params as { podId: string };
+    return dispatchRerunRequest(podRepo.getOrThrow(podId));
+  });
+
+  app.get('/pods/:podId/dispatch-preflight', async (request) => {
+    if (!podRepo?.dispatchPreflight)
+      throw new AutopodError('Dispatch evidence unavailable', 'DISPATCH_IDENTITY_UNAVAILABLE', 503);
+    return {
+      latest: podRepo.dispatchPreflight.latest((request.params as { podId: string }).podId),
+    };
+  });
   app.get('/pods/:podId/retry-state', async (request) => {
     if (!podRepo?.taskRetries)
       throw new AutopodError('Task retry accounting unavailable', 'TASK_IDENTITY_UNAVAILABLE', 503);

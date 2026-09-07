@@ -1,6 +1,7 @@
 import type {
   AgentMode,
   ExecutionTarget,
+  IntentionalRerun,
   NetworkPolicyMode,
   OperatorActor,
   OutputMode,
@@ -33,9 +34,16 @@ import {
 } from '@autopod/shared';
 import type Database from 'better-sqlite3';
 import { extractFindings } from '../validation/finding-fingerprint.js';
+import {
+  type DispatchPreflightLedger,
+  createDispatchPreflightLedger,
+} from './dispatch-preflight-ledger.js';
 import { type TaskRetryLedger, createTaskRetryLedger } from './task-retry-ledger.js';
 
 export interface NewPod {
+  intentionalRerun?: IntentionalRerun;
+  dispatchRepository?: string;
+  rerunRequestHash?: string;
   id: string;
   profileName: string;
   task: string;
@@ -225,6 +233,7 @@ import { type TaskExecutionLedger, createTaskExecutionLedger } from './task-exec
 
 export interface PodRepository {
   taskRetries?: TaskRetryLedger;
+  dispatchPreflight?: DispatchPreflightLedger;
   /** Defer external publication while an enclosing SQLite transaction is pending. */
   afterInsertCommitted?(id: string, effect: () => void): void;
   deliveryLedger?: DeliveryLedger;
@@ -594,6 +603,7 @@ function rowToDisplaySession(source: Record<string, unknown>): Pod {
 
 export function createPodRepository(db: Database.Database): PodRepository {
   const completionJournal = createCompletionJournal(db);
+  const dispatchPreflight = createDispatchPreflightLedger(db);
   const taskExecutions = createTaskExecutionLedger(db);
   function listRows(filters?: PodFilters): Iterable<Record<string, unknown>> {
     const whereClauses: string[] = [];
@@ -656,6 +666,7 @@ export function createPodRepository(db: Database.Database): PodRepository {
       });
     },
     taskRetries: createTaskRetryLedger(db),
+    dispatchPreflight,
     completionJournal,
     deliveryLedger: createDeliveryLedger(db),
     taskExecutions,
@@ -750,6 +761,14 @@ export function createPodRepository(db: Database.Database): PodRepository {
         disableAskHuman: pod.disableAskHuman ? 1 : 0,
       });
       taskExecutions.register(pod.id);
+      dispatchPreflight.registerRequest(pod.id, pod.dispatchRepository);
+      if (pod.intentionalRerun)
+        dispatchPreflight.registerRerun(
+          pod.id,
+          pod.intentionalRerun,
+          pod.userId,
+          pod.rerunRequestHash ?? '',
+        );
     }),
 
     getOrThrow(id: string): Pod {

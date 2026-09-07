@@ -568,3 +568,81 @@ it('drives retry inspection, idempotent authorization and separate Resume throug
     await new Promise<void>((resolve) => server.close(() => resolve()));
   }
 });
+
+it('sends the same explicit rerun decision through the actual CLI HTTP client and prints dispatch evidence', async () => {
+  const requests: unknown[] = [];
+  const server = createServer(async (request, response) => {
+    response.setHeader('content-type', 'application/json');
+    expect(request.headers.authorization).toBe('Bearer local-fixture-only');
+    if (request.method === 'POST') {
+      const chunks: Buffer[] = [];
+      for await (const chunk of request) chunks.push(Buffer.from(chunk));
+      requests.push(JSON.parse(Buffer.concat(chunks).toString()));
+      response.end(JSON.stringify({ id: 'rerun-id', status: 'queued' }));
+    } else if (request.url?.endsWith('rerun-template'))
+      response.end(
+        JSON.stringify({
+          profileName: 'profile',
+          task: 'Exact original task',
+          contract: { contractVersion: 1 },
+        }),
+      );
+    else if (request.url?.endsWith('dispatch-preflight'))
+      response.end(
+        JSON.stringify({
+          latest: {
+            status: 'review_required',
+            repository: 'host/repo',
+            baseBranch: 'main',
+            baseCommitSha: 'a'.repeat(40),
+            executionId: 'execution',
+            checkedAt: 'today',
+            conflicts: [{ podId: 'other', status: 'running', evidence: 'dispatch_receipt' }],
+            rerun: null,
+          },
+        }),
+      );
+    else response.end(JSON.stringify({ id: 'abcd1234' }));
+  });
+  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+  const address = server.address();
+  if (!address || typeof address === 'string') throw new Error('No fixture port');
+  const client = new AutopodClient({
+    baseUrl: `http://127.0.0.1:${address.port}`,
+    getToken: async () => 'local-fixture-only',
+  });
+  const log = vi.spyOn(console, 'log').mockImplementation(() => {});
+  const command = () => {
+    const program = new Command();
+    registerPodCommands(program, () => client);
+    return program;
+  };
+  try {
+    for (let i = 0; i < 2; i++)
+      await command().parseAsync([
+        'node',
+        'ap',
+        'rerun',
+        'abcd1234',
+        '--reason',
+        'Reviewed independent repeat',
+        '--request-key',
+        'same-key',
+      ]);
+    expect(requests).toHaveLength(2);
+    expect(requests[0]).toEqual(requests[1]);
+    expect(requests[0]).toMatchObject({
+      intentionalRerun: {
+        ofPodId: 'abcd1234',
+        reason: 'Reviewed independent repeat',
+        requestKey: 'same-key',
+      },
+    });
+    await command().parseAsync(['node', 'ap', 'dispatch-preflight', 'abcd1234']);
+    expect(log.mock.calls.flat().join('\n')).toContain('review_required: host/repo main');
+    expect(log.mock.calls.flat().join('\n')).toContain('other: running (dispatch_receipt)');
+  } finally {
+    log.mockRestore();
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+  }
+});

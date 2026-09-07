@@ -539,6 +539,9 @@ public struct BriefPodMetadata: Sendable, Hashable {
 // MARK: - Create pod request
 
 public struct CreateSessionRequest: Codable, Sendable {
+  public var intentionalRerun: IntentionalRerunRequest?
+  public var specContextFiles: [SpecFilePayload]?
+  public var handoffInstructions: String?
   public var profileName: String
   public var task: String
   public var model: String?
@@ -628,7 +631,7 @@ public struct CreateSessionRequest: Codable, Sendable {
     case pod = "options"
     case startBranch, baseBranch, specFiles, branchPrefix, linkedSessionId, pimGroups
     case dependsOnPodIds, seriesId, seriesName, requireSidecars
-    case referenceRepos
+    case referenceRepos, intentionalRerun, specContextFiles, handoffInstructions
   }
 }
 

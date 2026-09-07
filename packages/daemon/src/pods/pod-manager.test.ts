@@ -354,6 +354,13 @@ function createMockContainerManager(): ContainerManager {
 
 function createMockWorktreeManager(): WorktreeManager {
   return {
+    inspectContractBase: vi.fn(async (_path, _base, facts) => ({
+      baseCommitSha: 'a'.repeat(40),
+      artifacts: facts.map((fact) => ({
+        path: fact.artifact.path,
+        exists: fact.artifact.change !== 'create',
+      })),
+    })),
     create: vi.fn(async () => ({
       worktreePath: '/tmp/worktree/abc',
       bareRepoPath: '/tmp/bare/abc.git',
@@ -3575,7 +3582,7 @@ describe('PodManager', () => {
           headers,
           payload: input,
         });
-        expect(first.statusCode).toBe(201);
+        expect(first.statusCode, first.body).toBe(201);
         expect(first.json().actor.userId).toBe('human-reviewer');
         const repeated = await app.inject({
           method: 'POST',
@@ -5499,6 +5506,171 @@ describe('PodManager', () => {
         '/home/autopod/.codex/auth.json',
         oldAuthJson,
       );
+    });
+
+    it('reviews equivalent active work after fresh fetch before starting another coding agent', async () => {
+      const ctx = createTestContext();
+      const manager = createPodManager(ctx.deps);
+      const request = {
+        profileName: 'test-profile',
+        task: 'Implement the same requested artifact',
+        skipValidation: true,
+        contract: {
+          contractVersion: 1 as const,
+          title: 'Same delivery',
+          dependsOn: [],
+          scenarios: [],
+          humanReview: [],
+          requiredFacts: [
+            {
+              id: 'artifact',
+              proves: [],
+              kind: 'custom-command' as const,
+              artifact: { path: 'same.ts', change: 'create' as const },
+              command: 'node verify.cjs',
+            },
+          ],
+        },
+      };
+      const first = manager.createSession(request, 'operator');
+      await manager.processPod(first.id);
+      expect(manager.getSession(first.id).status).toBe('validated');
+      const second = manager.createSession(request, 'operator');
+      await manager.processPod(second.id);
+      expect(ctx.worktreeManager.create).toHaveBeenCalledTimes(2);
+      expect(ctx.runtime.spawn).toHaveBeenCalledTimes(1);
+      expect(manager.getSession(second.id).status).toBe('failed');
+      expect(manager.getSession(second.id).failureReason).toContain('Equivalent');
+      const rerunRequest = {
+        ...request,
+        intentionalRerun: {
+          requestKey: 'explicit-rerun-1',
+          ofPodId: first.id,
+          reason: 'Independent repeat approved for comparison',
+        },
+      };
+      expect(() => manager.createSession(rerunRequest, 'operator')).toThrow('authenticated human');
+      const rerun = manager.createSession(rerunRequest, 'operator', undefined, {
+        type: 'human',
+        userId: 'operator',
+      });
+      const retry = manager.createSession(rerunRequest, 'operator', undefined, {
+        type: 'human',
+        userId: 'operator',
+      });
+      expect(retry.id).toBe(rerun.id);
+      expect(() =>
+        manager.createSession({ ...rerunRequest, task: 'Changed request' }, 'operator', undefined, {
+          type: 'human',
+          userId: 'operator',
+        }),
+      ).toThrow('different request');
+      const restarted = createPodManager(ctx.deps);
+      expect(
+        restarted.createSession(rerunRequest, 'operator', undefined, {
+          type: 'human',
+          userId: 'operator',
+        }).id,
+      ).toBe(rerun.id);
+      await manager.processPod(rerun.id);
+      expect(manager.getSession(rerun.id).status).toBe('validated');
+      expect(ctx.runtime.spawn).toHaveBeenCalledTimes(2);
+      expect(ctx.podRepo.taskExecutions?.snapshot(rerun.id).taskId).not.toBe(
+        ctx.podRepo.taskExecutions?.snapshot(first.id).taskId,
+      );
+      expect(ctx.podRepo.dispatchPreflight?.latest(rerun.id)).toMatchObject({
+        status: 'admitted',
+        baseCommitSha: 'a'.repeat(40),
+        rerun: {
+          ofPodId: first.id,
+          reason: rerunRequest.intentionalRerun.reason,
+          actor: { type: 'human', userId: 'operator' },
+        },
+      });
+    });
+
+    it('creates an authenticated idempotent rerun through the real API without inheriting approval or lineage', async () => {
+      const ctx = createTestContext(undefined, { defaultModel: 'claude-sonnet-5' });
+      const manager = createPodManager(ctx.deps);
+      const original = manager.createSession(
+        { profileName: 'test-profile', task: 'Repeat this exact task', skipValidation: true },
+        'human-reviewer',
+      );
+      await manager.processPod(original.id);
+      const app = Fastify();
+      app.setErrorHandler(errorHandler);
+      authPlugin(app, {
+        validateToken: async (token: string) => {
+          if (token !== 'operator-fixture')
+            throw new AutopodError('Invalid token', 'AUTH_ERROR', 401);
+          return { oid: 'human-reviewer', name: 'Reviewer' };
+        },
+      } as never);
+      podRoutes(app, manager, ctx.eventRepo, undefined, ctx.podRepo);
+      const headers = { authorization: 'Bearer operator-fixture' };
+      try {
+        const template = await app.inject({
+          method: 'GET',
+          url: `/pods/${original.id}/rerun-template`,
+          headers,
+        });
+        expect(template.statusCode, template.body).toBe(200);
+        const request = template.json();
+        expect(request.options.validate).toBe(true);
+        for (const key of [
+          'linkedPodId',
+          'prUrl',
+          'branch',
+          'skipValidation',
+          'validationWaiver',
+          'autoApprove',
+        ])
+          expect(request[key]).toBeUndefined();
+        const payload = {
+          ...request,
+          intentionalRerun: {
+            ofPodId: original.id,
+            reason: 'Independent repeat after review',
+            requestKey: 'rerun-after-lost-response',
+          },
+        };
+        expect((await app.inject({ method: 'POST', url: '/pods', payload })).statusCode).toBe(401);
+        expect(
+          (
+            await app.inject({
+              method: 'POST',
+              url: '/pods',
+              headers,
+              payload: {
+                ...payload,
+                intentionalRerun: {
+                  ...payload.intentionalRerun,
+                  actor: { type: 'human', userId: 'forged' },
+                },
+              },
+            })
+          ).statusCode,
+        ).toBe(400);
+        const first = await app.inject({ method: 'POST', url: '/pods', headers, payload });
+        expect(first.statusCode, first.body).toBe(201);
+        const duplicate = await app.inject({ method: 'POST', url: '/pods', headers, payload });
+        expect(duplicate.statusCode).toBe(201);
+        expect(duplicate.json().id).toBe(first.json().id);
+        expect(ctx.runtime.spawn).toHaveBeenCalledTimes(1);
+        await manager.processPod(first.json().id);
+        const evidence = await app.inject({
+          method: 'GET',
+          url: `/pods/${first.json().id}/dispatch-preflight`,
+          headers,
+        });
+        expect(evidence.json().latest).toMatchObject({
+          status: 'admitted',
+          rerun: { actor: { type: 'human', userId: 'human-reviewer' } },
+        });
+        expect(ctx.runtime.spawn).toHaveBeenCalledTimes(2);
+      } finally {
+        await app.close();
+      }
     });
 
     it('stops stale contracts after fresh worktree creation and before container provisioning', async () => {
@@ -9819,7 +9991,7 @@ describe('PodManager', () => {
           ).statusCode,
         ).toBe(400);
         const first = await app.inject({ method: 'POST', url, headers, payload });
-        expect(first.statusCode).toBe(201);
+        expect(first.statusCode, first.body).toBe(201);
         expect(first.json().actor.userId).toBe('human-reviewer');
         const repeated = await app.inject({ method: 'POST', url, headers, payload });
         expect(repeated.json().id).toBe(first.json().id);

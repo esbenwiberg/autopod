@@ -534,6 +534,7 @@ export interface Pod {
 }
 
 export interface CreatePodRequest {
+  intentionalRerun?: import('./dispatch-preflight.js').IntentionalRerun;
   profileName: string;
   task: string;
   model?: string;

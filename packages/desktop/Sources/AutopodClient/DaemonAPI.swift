@@ -258,6 +258,12 @@ public actor DaemonAPI {
   /// Operator escape hatch for `failed` pods — picks the cheapest recovery path
   /// (push + open PR if validation already passed, otherwise re-run validation).
   /// Returns the action the daemon took, so the UI can confirm what happened.
+  public func getDispatchPreflight(_ id: String) async throws -> DispatchPreflightResponse {
+    try await request("GET", "/pods/\(id)/dispatch-preflight")
+  }
+  public func getRerunTemplate(_ id: String) async throws -> CreateSessionRequest {
+    try await request("GET", "/pods/\(id)/rerun-template")
+  }
   public func getRetryState(_ id: String) async throws -> TaskRetryState {
     try await request("GET", "/pods/\(id)/retry-state")
   }

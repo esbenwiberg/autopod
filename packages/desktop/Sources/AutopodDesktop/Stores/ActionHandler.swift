@@ -90,6 +90,20 @@ public final class ActionHandler {
       spawnFix: { [weak self] id, message in await self?.spawnFixSession(id, userMessage: message) ?? nil },
       retryCreatePr: { [weak self] id in await self?.retryCreatePr(id) },
       retryDraftScope: api.baseURL.absoluteString,
+      loadDispatchPreflight: { [weak self] id in
+        guard let self else { throw URLError(.notConnectedToInternet) }
+        return try await self.api.getDispatchPreflight(id)
+      },
+      loadRerunTemplate: { [weak self] id in
+        guard let self else { throw URLError(.notConnectedToInternet) }
+        return try await self.api.getRerunTemplate(id)
+      },
+      createIntentionalRerun: { [weak self] request in
+        guard let self else { throw URLError(.notConnectedToInternet) }
+        let response = try await self.api.createPod(request)
+        self.podStore.upsertSession(PodMapper.map(response))
+        return response.id
+      },
       loadRetryState: { [weak self] id in
         guard let self else { throw URLError(.notConnectedToInternet) }
         return try await self.api.getRetryState(id)

@@ -1,0 +1,29 @@
+
+ RUN  v4.1.10 /private/tmp/autopod-durable-execution/packages/daemon
+
+ ❯ src/pods/dispatch-preflight-ledger.test.ts (7 tests | 1 failed) 523ms
+     × serializes equivalent queued work, exempts linked rework, and requires an audited distinct rerun 88ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/pods/dispatch-preflight-ledger.test.ts > dispatch admission against immutable execution evidence > serializes equivalent queued work, exempts linked rework, and requires an audited distinct rerun
+AssertionError: expected 'review_required' to be 'admitted' // Object.is equality
+
+Expected: "admitted"
+Received: "review_required"
+
+ ❯ src/pods/dispatch-preflight-ledger.test.ts:49:73
+     47|       expect(first.status).toBe('admitted');
+     48|       repo.insert(request('fix', { linkedPodId: 'first' }));
+     49|       expect(ledger.inspect('fix', 1, repository, 'main', base).status…
+       |                                                                         ^
+     50|       repo.insert(
+     51|         request('rerun', {
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed | 1 passed (2)
+      Tests  1 failed | 7 passed | 412 skipped (420)
+   Start at  15:40:08
+   Duration  1.33s (transform 1.01s, setup 0ms, import 1.59s, tests 598ms, environment 0ms)

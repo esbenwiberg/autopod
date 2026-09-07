@@ -632,3 +632,5 @@ export type {
   TaskRetryAuthorization,
   TaskRetryState,
 } from './types/task-retry.js';
+
+export type { IntentionalRerun, DispatchPreflightEvidence } from './types/dispatch-preflight.js';

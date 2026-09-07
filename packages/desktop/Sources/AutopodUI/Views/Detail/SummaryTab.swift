@@ -126,6 +126,7 @@ struct WorkTab: View {
     private var selectedSectionContent: some View {
         switch selectedSection {
         case .task:
+            DispatchPreflightCard(podId: pod.id, actions: actions)
             promptCard
         case .plan:
             if let plan = pod.plan {
