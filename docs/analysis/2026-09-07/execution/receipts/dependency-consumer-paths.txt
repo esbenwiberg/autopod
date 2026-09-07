@@ -1,0 +1,120 @@
+Legend: production dependency, optional only, dev only
+
+autopod /private/tmp/autopod-durable-execution (PRIVATE)
+
+devDependencies:
+vitest 4.1.11
+├─┬ @vitest/mocker 4.1.11
+│ └─┬ vite 8.0.16 peer
+│   └── esbuild 0.27.7 peer
+└─┬ vite 8.0.16 peer
+  └── esbuild 0.27.7 peer
+
+@autopod/cli@0.0.1 /private/tmp/autopod-durable-execution/packages/cli (PRIVATE)
+
+dependencies:
+@azure/msal-node 2.16.3
+└── uuid 8.3.2
+
+devDependencies:
+tsup 8.5.1
+├─┬ bundle-require 5.1.0
+│ └── esbuild 0.27.7 peer
+└── esbuild 0.27.7
+vitest 4.1.11
+├─┬ @vitest/mocker 4.1.11
+│ └─┬ vite 8.0.16 peer
+│   └── esbuild 0.27.7 peer
+└─┬ vite 8.0.16 peer
+  └── esbuild 0.27.7 peer
+
+@autopod/daemon@0.0.1 /private/tmp/autopod-durable-execution/packages/daemon (PRIVATE)
+
+dependencies:
+@huggingface/transformers 4.2.0
+├─┬ onnxruntime-node 1.24.3
+│ └── adm-zip 0.5.18
+└── sharp 0.34.5
+
+devDependencies:
+tsup 8.5.1
+├─┬ bundle-require 5.1.0
+│ └── esbuild 0.27.7 peer
+└── esbuild 0.27.7
+vitest 4.1.11
+├─┬ @vitest/mocker 4.1.11
+│ └─┬ vite 8.0.16 peer
+│   └── esbuild 0.27.7 peer
+└─┬ vite 8.0.16 peer
+  └── esbuild 0.27.7 peer
+
+@autopod/escalation-mcp@0.0.1 /private/tmp/autopod-durable-execution/packages/escalation-mcp (PRIVATE)
+
+devDependencies:
+tsup 8.5.1
+├─┬ bundle-require 5.1.0
+│ └── esbuild 0.27.7 peer
+└── esbuild 0.27.7
+vitest 4.1.11
+├─┬ @vitest/mocker 4.1.11
+│ └─┬ vite 8.0.16 peer
+│   └── esbuild 0.27.7 peer
+└─┬ vite 8.0.16 peer
+  └── esbuild 0.27.7 peer
+
+@autopod/mobile-web@0.0.1 /private/tmp/autopod-durable-execution/packages/mobile-web (PRIVATE)
+
+devDependencies:
+@vitejs/plugin-react 4.7.0
+└─┬ vite 6.4.3 peer
+  └── esbuild 0.25.12
+vite 6.4.3
+└── esbuild 0.25.12
+vitest 4.1.11
+├─┬ @vitest/mocker 4.1.11
+│ └─┬ vite 6.4.3 peer
+│   └── esbuild 0.25.12
+└─┬ vite 6.4.3 peer
+  └── esbuild 0.25.12
+
+@autopod/pi-worker@0.0.1 /private/tmp/autopod-durable-execution/packages/pi-worker (PRIVATE)
+
+devDependencies:
+tsup 8.5.1
+├─┬ bundle-require 5.1.0
+│ └── esbuild 0.27.7 peer
+└── esbuild 0.27.7
+vitest 4.1.11
+├─┬ @vitest/mocker 4.1.11
+│ └─┬ vite 8.0.16 peer
+│   └── esbuild 0.27.7 peer
+└─┬ vite 8.0.16 peer
+  └── esbuild 0.27.7 peer
+
+@autopod/shared@0.0.1 /private/tmp/autopod-durable-execution/packages/shared (PRIVATE)
+
+devDependencies:
+tsup 8.5.1
+├─┬ bundle-require 5.1.0
+│ └── esbuild 0.27.7 peer
+└── esbuild 0.27.7
+vitest 4.1.11
+├─┬ @vitest/mocker 4.1.11
+│ └─┬ vite 8.0.16 peer
+│   └── esbuild 0.27.7 peer
+└─┬ vite 8.0.16 peer
+  └── esbuild 0.27.7 peer
+
+@autopod/validator@0.0.1 /private/tmp/autopod-durable-execution/packages/validator (PRIVATE)
+
+devDependencies:
+tsup 8.5.1
+├─┬ bundle-require 5.1.0
+│ └── esbuild 0.27.7 peer
+└── esbuild 0.27.7
+vitest 4.1.11
+├─┬ @vitest/mocker 4.1.11
+│ └─┬ vite 8.0.16 peer
+│   └── esbuild 0.27.7 peer
+└─┬ vite 8.0.16 peer
+  └── esbuild 0.27.7 peer

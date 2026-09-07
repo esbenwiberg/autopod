@@ -38,6 +38,10 @@ import {
 } from './pods/index.js';
 import { createNudgeRepository } from './pods/nudge-repository.js';
 import { createProfileStore } from './profiles/index.js';
+import {
+  createMockWorktreeManager,
+  createMockContainerManager as createSharedMockContainerManager,
+} from './test-utils/mock-helpers.js';
 
 const migrationsDir = path.resolve(import.meta.dirname, 'db/migrations');
 const MIGRATION_FILES = fs
@@ -98,7 +102,7 @@ const validProfileInput = {
   name: 'test-app',
   repoUrl: 'https://github.com/org/repo',
   buildCommand: 'npm run build',
-  startCommand: 'node server.js --port $PORT',
+  startCommand: 'node server.js --port 3000',
 };
 
 const authHeaders = { authorization: 'Bearer test-token' };
@@ -109,17 +113,11 @@ describe('Extended Route Tests', () => {
   let containerManager: ReturnType<typeof createMockContainerManager>;
 
   function createMockContainerManager() {
+    const manager = createSharedMockContainerManager();
     return {
-      spawn: vi.fn().mockResolvedValue('container-123'),
-      kill: vi.fn().mockResolvedValue(undefined),
-      stop: vi.fn().mockResolvedValue(undefined),
-      start: vi.fn().mockResolvedValue(undefined),
-      refreshFirewall: vi.fn().mockResolvedValue(undefined),
-      writeFile: vi.fn().mockResolvedValue(undefined),
-      readFile: vi.fn().mockResolvedValue(''),
-      getStatus: vi.fn().mockResolvedValue('running' as const),
-      execInContainer: vi.fn().mockResolvedValue({ stdout: '', stderr: '', exitCode: 0 }),
-      execStreaming: vi.fn(),
+      ...manager,
+      spawn: vi.mocked(manager.spawn),
+      execInContainer: vi.mocked(manager.execInContainer),
     };
   }
 
@@ -138,6 +136,7 @@ describe('Extended Route Tests', () => {
     const authModule = createMockAuthModule();
 
     const worktreeManager = {
+      ...createMockWorktreeManager(),
       create: vi.fn().mockResolvedValue({
         worktreePath: '/tmp/wt',
         bareRepoPath: '/tmp/bare.git',
@@ -281,9 +280,14 @@ describe('Extended Route Tests', () => {
     await vi.waitFor(
       () => {
         const row = db
-          .prepare('SELECT status, container_id AS containerId FROM pods WHERE id = ?')
+          .prepare(
+            'SELECT status, container_id AS containerId, failure_reason AS failureReason FROM pods WHERE id = ?',
+          )
           .get(podId) as { status: string; containerId: string | null } | undefined;
-        expect(row).toMatchObject({ status: 'validated', containerId: 'container-123' });
+        expect(row, JSON.stringify(row)).toMatchObject({
+          status: 'validated',
+          containerId: 'container-123',
+        });
       },
       { timeout: 1000 },
     );
@@ -911,6 +915,8 @@ describe('Extended Route Tests', () => {
 
   describe('POST /pods/:id/approve', () => {
     it('returns 409 when pod is not in validated state', async () => {
+      // Hold provisioning so the request tests a known, non-actionable state.
+      containerManager.spawn.mockImplementation(() => new Promise(() => {}));
       const createRes = await app.inject({
         method: 'POST',
         url: '/pods',
@@ -946,6 +952,8 @@ describe('Extended Route Tests', () => {
 
   describe('POST /pods/:id/reject', () => {
     it('returns 409 when pod is not in validated state', async () => {
+      // Hold provisioning so the request tests a known, non-actionable state.
+      containerManager.spawn.mockImplementation(() => new Promise(() => {}));
       const createRes = await app.inject({
         method: 'POST',
         url: '/pods',
@@ -1182,6 +1190,8 @@ describe('Extended Route Tests', () => {
 
   describe('POST /pods/:id/validate', () => {
     it('returns 409 when pod cannot be validated from current state', async () => {
+      // Hold provisioning so the request tests a known, non-actionable state.
+      containerManager.spawn.mockImplementation(() => new Promise(() => {}));
       const createRes = await app.inject({
         method: 'POST',
         url: '/pods',
@@ -1195,8 +1205,8 @@ describe('Extended Route Tests', () => {
         url: `/pods/${podId}/validate`,
         headers: authHeaders,
       });
-      // queued → not in a state that can be force-validated
-      expect([200, 409]).toContain(res.statusCode);
+      // Provisioning cannot be force-validated.
+      expect(res.statusCode).toBe(409);
     });
 
     it('returns 404 for nonexistent pod', async () => {

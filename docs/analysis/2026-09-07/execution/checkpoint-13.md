@@ -1,0 +1,11 @@
+# Checkpoint 13: validation fixture repair and dependency security updates
+
+The full pipeline at 92756037 failed four extended route tests and audit (64 findings). Install, lint, build, configured typecheck and secret scan passed. Daemon tests: 4,419 passed, four failed, one skipped. Deployment/cleanup shell tests were not reached because the package test command failed.
+
+The older route fixture lacked fresh-base inspection and valid CLI/preflight command replies; its dynamic start command also required a declaration. Reused shared mocks, made its fixed fake start command explicit, and held provisioning for the two state-guard tests. All 48 route tests pass. No production guard was relaxed.
+
+Refreshed the lockfile within declared ranges, then raised minimum fixed versions of Fastify, static serving, Undici, Nanoid and React Router. Kept other original manifest ranges. Four scoped overrides repair upstream-pinned dependencies: Transformers Sharp 0.35.0, ONNX adm-zip 0.6.0, MSAL 2 UUID 11.1.1, affected esbuild 0.28.1. These are dependency substitutions, not advisory suppression. Audit now reports zero findings across 812 dependencies. Compatibility tests exercise actual Transformers/Sharp resize, ONNX zip entry extraction and MSAL CommonJS UUID API offline; 51 tests pass with the route suite. Full workspace build passes, including esbuild consumers.
+
+Compatibility sources inspected: https://github.com/fastify/fastify-static (and installed plugin metadata confirms Fastify 5.x); https://reactrouter.com/6.30.3/upgrading/future. Mobile uses HashRouter with fixed routes, no multi-segment splat or component-local lazy loading. Real browser checks of detail/reload/back/inbox/report routes passed with pending decisions and incomplete status intact. Native dependency/model download and actual model inference remain outside these offline checks.
+
+Next: run full required validation on this committed source, address any failure, then continue completion recovery, task-wide provider/rework admission and operator outcome reconciliation. Full acceptance remains outstanding. Read-only guest inspection still awaits the previously requested explicit approval after auto-review rejected metadata egress. No deployment, live lifecycle action, or paid canary occurred here.

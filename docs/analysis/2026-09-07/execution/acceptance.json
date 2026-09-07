@@ -1074,10 +1074,15 @@
       "tests": [],
       "evidence": [
         "receipts/checkpoint-1-full-validation.txt",
-        "receipts/dependency-audit-before.json"
+        "receipts/dependency-audit-before.json",
+        "receipts/checkpoint-12-full-validation-red.txt",
+        "receipts/checkpoint-12-full-validation-identity.json",
+        "receipts/route-preflight-fixture-green.txt",
+        "receipts/dependency-audit-security-updates.json",
+        "receipts/dependency-compatibility.txt"
       ],
       "prerequisites": [
-        "Checkpoint f69a70fa full pipeline failed tests (50ms escalation race) and dependency audit (35 high, 26 moderate, 3 low); no audit suppression. Corrected transition wait needs full rerun; vulnerability remediation remains."
+        "Checkpoint 12 full pipeline failed four stale route fixtures and audit. Local fixtures corrected, 48 routes pass; audit now zero after compatible security updates. Full committed pipeline rerun required."
       ]
     },
     {
@@ -1114,5 +1119,5 @@
       "prerequisites": []
     }
   ],
-  "lastCheckpoint": "checkpoint-12.md"
+  "lastCheckpoint": "checkpoint-13.md"
 }
