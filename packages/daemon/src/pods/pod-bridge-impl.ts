@@ -38,6 +38,7 @@ import {
   runPreSubmitReview,
 } from '../validation/pre-submit-review.js';
 import { runCodexReview } from '../validation/review-codex-runner.js';
+import { persistEscalation } from './escalation-coordinator.js';
 import type { EscalationRepository } from './escalation-repository.js';
 import type { EventBus } from './event-bus.js';
 import type { MemoryRepository } from './memory-repository.js';
@@ -128,20 +129,21 @@ export function createSessionBridge(deps: SessionBridgeDependencies): PodBridge 
   return {
     createEscalation(escalation: EscalationRequest): void {
       podManager.touchHeartbeat(escalation.podId);
-      escalationRepo.insert(escalation);
-      logger.info(
-        { escalationId: escalation.id, podId: escalation.podId, type: escalation.type },
-        'Escalation created',
-      );
-      // Transition pod to awaiting_input so the TUI shows the pending question/approval
-      if (
-        escalation.type === 'ask_human' ||
-        escalation.type === 'report_blocker' ||
-        escalation.type === 'action_approval' ||
-        escalation.type === 'request_credential'
-      ) {
-        podManager.notifyEscalation(escalation.podId, escalation);
-      }
+      persistEscalation(podRepo, escalationRepo, escalation, () => {
+        logger.info(
+          { escalationId: escalation.id, podId: escalation.podId, type: escalation.type },
+          'Escalation created',
+        );
+        // Transition pod to awaiting_input so the TUI shows the pending question/approval
+        if (
+          escalation.type === 'ask_human' ||
+          escalation.type === 'report_blocker' ||
+          escalation.type === 'action_approval' ||
+          escalation.type === 'request_credential'
+        ) {
+          podManager.notifyEscalation(escalation.podId, escalation);
+        }
+      });
     },
 
     resolveEscalation(escalationId: string, response: EscalationResponse): void {

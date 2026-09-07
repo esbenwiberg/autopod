@@ -4,6 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import type {
   AgentEvent,
+  EscalationRequest,
   PodCreatedEvent,
   Profile,
   ProviderAccount,
@@ -26,6 +27,7 @@ import Database from 'better-sqlite3';
 import pino from 'pino';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { SandboxContainerManager } from '../containers/sandbox-container-manager.js';
+import { createSessionBridge } from './pod-bridge-impl.js';
 
 // Mock child_process so we can control deriveBareRepoPath and recovery-context git calls
 vi.mock('node:child_process', () => ({
@@ -12068,6 +12070,119 @@ describe('PodManager', () => {
   });
 
   describe('sendMessage', () => {
+    it('rolls back escalation creation and defers operator publication when pending-state persistence fails', () => {
+      const ctx = createTestContext();
+      const manager = createPodManager(ctx.deps);
+      const pod = manager.createSession(
+        { profileName: 'test-profile', task: 'Ask atomically' },
+        'user-1',
+      );
+      ctx.podRepo.update(pod.id, { status: 'running' });
+      const published: string[] = [];
+      ctx.eventBus.subscribe((event) => {
+        if (event.type === 'pod.status_changed') published.push(event.newStatus);
+      });
+      const originalNotify = manager.notifyEscalation;
+      manager.notifyEscalation = (id, request) => {
+        originalNotify(id, request);
+        throw new Error('injected crash before escalation commit');
+      };
+      const bridge = createSessionBridge({
+        ...ctx.deps,
+        podManager: manager,
+        pendingRequestsByPod: new Map(),
+      });
+      expect(() =>
+        bridge.createEscalation({
+          id: 'atomic-question',
+          podId: pod.id,
+          type: 'ask_human',
+          timestamp: new Date().toISOString(),
+          payload: { question: 'Select repair' },
+          response: null,
+        }),
+      ).toThrow('injected crash');
+      expect(ctx.escalationRepo.listBySession(pod.id)).toEqual([]);
+      expect(ctx.podRepo.getOrThrow(pod.id).status).toBe('running');
+      expect(published).not.toContain('awaiting_input');
+    });
+
+    it('keeps one actionable question and treats its duplicate creation as the same decision', () => {
+      const ctx = createTestContext();
+      const manager = createPodManager(ctx.deps);
+      const pod = manager.createSession(
+        { profileName: 'test-profile', task: 'Retain one question' },
+        'user-1',
+      );
+      ctx.podRepo.update(pod.id, { status: 'running' });
+      const bridge = createSessionBridge({
+        ...ctx.deps,
+        podManager: manager,
+        pendingRequestsByPod: new Map(),
+      });
+      const question: EscalationRequest = {
+        id: 'one-question',
+        podId: pod.id,
+        type: 'ask_human',
+        timestamp: new Date().toISOString(),
+        payload: { question: 'Select a repair' },
+        response: null,
+      };
+      bridge.createEscalation(question);
+      expect(() => bridge.createEscalation({ ...question, id: 'second-question' })).toThrow(
+        'already has an unanswered decision',
+      );
+      expect(() => bridge.createEscalation(question)).not.toThrow();
+      expect(() =>
+        bridge.createEscalation({ ...question, payload: { question: 'Different authority' } }),
+      ).toThrow('different content');
+      expect(ctx.escalationRepo.listBySession(pod.id)).toHaveLength(1);
+      expect(ctx.podRepo.getOrThrow(pod.id)).toMatchObject({
+        status: 'awaiting_input',
+        pendingEscalation: { id: 'one-question' },
+        escalationCount: 1,
+      });
+    });
+
+    it('rolls back a durable reply when its pending-state transition fails', async () => {
+      const ctx = createTestContext();
+      const manager = createPodManager(ctx.deps);
+      const pod = manager.createSession(
+        { profileName: 'test-profile', task: 'Reply atomically' },
+        'user-1',
+      );
+      const question: EscalationRequest = {
+        id: 'atomic-reply',
+        podId: pod.id,
+        type: 'ask_human',
+        timestamp: new Date().toISOString(),
+        payload: { question: 'Select repair' },
+        response: null,
+      };
+      ctx.escalationRepo.insert(question);
+      ctx.podRepo.update(pod.id, { status: 'awaiting_input', pendingEscalation: question });
+      ctx.podRepo.completionJournal?.settle(ctx.podRepo.getOrThrow(pod.id), 'Preserved summary');
+      const originalUpdate = ctx.podRepo.update;
+      ctx.podRepo.update = (id, changes) => {
+        originalUpdate(id, changes);
+        if (changes.status === 'running' && changes.pendingEscalation === null)
+          throw new Error('injected crash before reply commit');
+      };
+      await expect(
+        manager.sendMessage(pod.id, 'Repair finding A', { type: 'human', userId: 'reviewer' }),
+      ).rejects.toThrow('injected crash');
+      expect(ctx.escalationRepo.getOrThrow(question.id).response).toBeNull();
+      expect(ctx.db.prepare('SELECT count(*) AS count FROM completion_decisions').get()).toEqual({
+        count: 0,
+      });
+      expect(ctx.podRepo.getOrThrow(pod.id)).toMatchObject({
+        status: 'awaiting_input',
+        pendingEscalation: { id: question.id },
+        finalization: { phase: 'awaiting_human', result: 'Preserved summary' },
+      });
+      expect(ctx.runtime.resume).not.toHaveBeenCalled();
+    });
+
     it('throws if pod is not awaiting_input', async () => {
       const ctx = createTestContext();
       const manager = createPodManager(ctx.deps);

@@ -1,0 +1,9 @@
+
+ RUN  v4.1.10 /private/tmp/autopod-durable-execution/packages/daemon
+
+
+ Test Files  2 passed (2)
+      Tests  3 passed | 418 skipped (421)
+   Start at  17:08:19
+   Duration  1.64s (transform 1.25s, setup 0ms, import 1.72s, tests 118ms, environment 0ms)
+

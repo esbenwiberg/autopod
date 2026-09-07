@@ -1,0 +1,73 @@
+
+ RUN  v4.1.10 /private/tmp/autopod-durable-execution/packages/daemon
+
+ ❯ src/pods/pod-manager.test.ts (420 tests | 2 failed | 418 skipped) 125ms
+       × rolls back escalation creation and defers operator publication when pending-state persistence fails 80ms
+       × rolls back a durable reply when its pending-state transition fails 44ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 2 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/pods/pod-manager.test.ts > PodManager > sendMessage > rolls back escalation creation and defers operator publication when pending-state persistence fails
+AssertionError: expected [ { id: 'atomic-question', …(6) } ] to deeply equal []
+
+- Expected
++ Received
+
+- []
++ [
++   {
++     "createdAt": "2026-09-07 15:07:04",
++     "id": "atomic-question",
++     "payload": {
++       "question": "Select repair",
++     },
++     "podId": "cultural-warbler",
++     "resolvedAt": null,
++     "response": null,
++     "type": "ask_human",
++   },
++ ]
+
+ ❯ src/pods/pod-manager.test.ts:12105:56
+    12103|         }),
+    12104|       ).toThrow('injected crash');
+    12105|       expect(ctx.escalationRepo.listBySession(pod.id)).toEqual([]);
+       |                                                        ^
+    12106|       expect(ctx.podRepo.getOrThrow(pod.id).status).toBe('running');
+    12107|       expect(published).not.toContain('awaiting_input');
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/2]⎯
+
+ FAIL  src/pods/pod-manager.test.ts > PodManager > sendMessage > rolls back a durable reply when its pending-state transition fails
+AssertionError: expected { respondedBy: 'ai', …(3) } to be null
+
+- Expected:
+null
+
++ Received:
+{
+  "actor": {
+    "id": "direct-pod-manager",
+    "type": "automation",
+  },
+  "respondedAt": "2026-09-07T15:07:04.893Z",
+  "respondedBy": "ai",
+  "response": "Repair finding A",
+}
+
+ ❯ src/pods/pod-manager.test.ts:12137:67
+    12135|         'injected crash',
+    12136|       );
+    12137|       expect(ctx.escalationRepo.getOrThrow(question.id).response).toBe…
+       |                                                                   ^
+    12138|       expect(ctx.db.prepare('SELECT count(*) AS count FROM completion_…
+    12139|         count: 0,
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/2]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  2 failed | 418 skipped (420)
+   Start at  17:07:03
+   Duration  1.49s (transform 812ms, setup 0ms, import 1.25s, tests 125ms, environment 0ms)
+

@@ -10,14 +10,28 @@
       "status": "partial",
       "implementation": [
         "packages/daemon/src/pods/pod-manager.ts",
-        "packages/daemon/src/pods/pod-bridge-impl.ts"
+        "packages/daemon/src/pods/pod-bridge-impl.ts",
+        "packages/daemon/src/db/unit-of-work.ts",
+        "packages/daemon/src/pods/escalation-coordinator.ts",
+        "packages/daemon/src/pods/completion-journal.ts"
       ],
       "tests": [
         "packages/daemon/src/pods/pod-lifecycle.e2e.test.ts",
-        "packages/daemon/src/pods/pod-bridge-task-summary.test.ts"
+        "packages/daemon/src/pods/pod-bridge-task-summary.test.ts",
+        "packages/daemon/src/db/unit-of-work.test.ts",
+        "packages/daemon/src/pods/pod-manager.test.ts",
+        "packages/daemon/src/pods/completion-journal.test.ts"
       ],
-      "evidence": ["receipts/settlement-red.txt", "receipts/settlement-first-green.txt"],
-      "prerequisites": []
+      "evidence": [
+        "receipts/settlement-red.txt",
+        "receipts/settlement-first-green.txt",
+        "receipts/escalation-atomicity-red.txt",
+        "receipts/escalation-overlap-red.txt",
+        "receipts/duplicate-reply-audit-red.txt",
+        "receipts/escalation-coordinator-audit-final.txt"
+      ],
+      "prerequisites": [],
+      "remaining": "New question/state and normal reply/state transactions, after-commit status publication, overlap/duplicate question handling, and first-reply audit are locally verified. Other response dispatch boundaries, historical orphan decisions, reply delivery after commit/restart, and broad finalization side effects remain."
     },
     {
       "id": "W1.2",
@@ -28,13 +42,17 @@
         "packages/daemon/src/pods/local-reconciler.ts",
         "packages/daemon/src/pods/reconciler.ts",
         "packages/daemon/src/runtimes/codex-runtime.ts",
-        "packages/mobile-web/src/components/EscalationCard.tsx"
+        "packages/mobile-web/src/components/EscalationCard.tsx",
+        "packages/daemon/src/db/unit-of-work.ts",
+        "packages/daemon/src/pods/escalation-coordinator.ts"
       ],
       "tests": [
         "packages/daemon/src/pods/completion-journal.test.ts",
         "packages/daemon/src/pods/local-reconciler.test.ts",
         "packages/daemon/src/pods/reconciler.test.ts",
-        "packages/mobile-web/src/components/EscalationCard.test.tsx"
+        "packages/mobile-web/src/components/EscalationCard.test.tsx",
+        "packages/daemon/src/db/unit-of-work.test.ts",
+        "packages/daemon/src/pods/pod-manager.test.ts"
       ],
       "evidence": [
         "receipts/journal-migration.txt",
@@ -43,9 +61,14 @@
         "receipts/rollout-ordering-green.txt",
         "receipts/mobile-disconnected-reply-red.txt",
         "receipts/mobile-disconnected-reply-green.txt",
-        "receipts/mobile-browser-interaction.json"
+        "receipts/mobile-browser-interaction.json",
+        "receipts/escalation-atomicity-red.txt",
+        "receipts/escalation-overlap-red.txt",
+        "receipts/duplicate-reply-audit-red.txt",
+        "receipts/escalation-coordinator-audit-final.txt"
       ],
-      "prerequisites": []
+      "prerequisites": [],
+      "remaining": "New question/state and normal reply/state transactions, after-commit status publication, overlap/duplicate question handling, and first-reply audit are locally verified. Other response dispatch boundaries, historical orphan decisions, reply delivery after commit/restart, and broad finalization side effects remain."
     },
     {
       "id": "W1.3",
@@ -57,12 +80,15 @@
         "packages/daemon/src/db/migrations/145_delivery_intents.sql",
         "packages/daemon/src/pods/delivery-ledger.ts",
         "packages/daemon/src/worktrees/durable-pr-manager.ts",
-        "packages/daemon/src/pods/pod-repository.ts"
+        "packages/daemon/src/pods/pod-repository.ts",
+        "packages/daemon/src/db/unit-of-work.ts",
+        "packages/daemon/src/pods/escalation-coordinator.ts"
       ],
       "tests": [
         "packages/daemon/src/pods/completion-journal.test.ts",
         "packages/daemon/src/worktrees/durable-pr-manager.test.ts",
-        "packages/daemon/src/pods/pod-manager.test.ts"
+        "packages/daemon/src/pods/pod-manager.test.ts",
+        "packages/daemon/src/db/unit-of-work.test.ts"
       ],
       "evidence": [
         "receipts/journal-migration.txt",
@@ -70,11 +96,16 @@
         "receipts/delivery-manager-green.txt",
         "receipts/delivery-final-affected.txt",
         "receipts/scan-repair-transaction-red.txt",
-        "receipts/scheduled-creation-generation-tests.txt"
+        "receipts/scheduled-creation-generation-tests.txt",
+        "receipts/escalation-atomicity-red.txt",
+        "receipts/escalation-overlap-red.txt",
+        "receipts/duplicate-reply-audit-red.txt",
+        "receipts/escalation-coordinator-audit-final.txt"
       ],
       "prerequisites": [
         "PR creation intent/reconciliation implemented locally; broader finalization side effects and operator override remain."
-      ]
+      ],
+      "remaining": "New question/state and normal reply/state transactions, after-commit status publication, overlap/duplicate question handling, and first-reply audit are locally verified. Other response dispatch boundaries, historical orphan decisions, reply delivery after commit/restart, and broad finalization side effects remain."
     },
     {
       "id": "W1.4",
@@ -88,11 +119,25 @@
     {
       "id": "W1.5",
       "requirement": "Completion/escalation, provider recovery and delivery have cohesive ownership",
-      "status": "unverified",
-      "implementation": [],
-      "tests": [],
-      "evidence": [],
-      "prerequisites": []
+      "status": "partial",
+      "implementation": [
+        "packages/daemon/src/db/unit-of-work.ts",
+        "packages/daemon/src/pods/escalation-coordinator.ts",
+        "packages/daemon/src/pods/completion-journal.ts"
+      ],
+      "tests": [
+        "packages/daemon/src/db/unit-of-work.test.ts",
+        "packages/daemon/src/pods/pod-manager.test.ts",
+        "packages/daemon/src/pods/completion-journal.test.ts"
+      ],
+      "evidence": [
+        "receipts/escalation-atomicity-red.txt",
+        "receipts/escalation-overlap-red.txt",
+        "receipts/duplicate-reply-audit-red.txt",
+        "receipts/escalation-coordinator-audit-final.txt"
+      ],
+      "prerequisites": [],
+      "remaining": "New question/state and normal reply/state transactions, after-commit status publication, overlap/duplicate question handling, and first-reply audit are locally verified. Other response dispatch boundaries, historical orphan decisions, reply delivery after commit/restart, and broad finalization side effects remain."
     },
     {
       "id": "W2.1",
@@ -588,11 +633,16 @@
       "status": "unverified",
       "implementation": [],
       "tests": [],
-      "evidence": ["receipts/live-api-baseline.jsonl", "receipts/live-vm-inspection-failed.json"],
+      "evidence": [
+        "receipts/live-api-baseline.jsonl",
+        "receipts/live-vm-inspection-failed.json",
+        "receipts/live-api-refresh-checkpoint-11.jsonl",
+        "receipts/live-inspection-approval-block.json"
+      ],
       "prerequisites": [
         "Await read-only Azure command (exec session 29869) for actual release and sanitized log evidence; no production root cause claimed."
       ],
-      "remaining": "RunCommandLinux settings update failed with no space left on device. Application history/cost root cause is still unproven; approved host recovery may be needed for inspection."
+      "remaining": "Cost and compact-history APIs now return 200 after independently authorized maintenance. Actual historical failure cause is not established. Bounded read-only SSH metadata/log inspection awaits explicit payload-egress approval after auto-review rejection."
     },
     {
       "id": "W4.6",
@@ -997,7 +1047,8 @@
       "implementation": ["packages/daemon/src/db/migrations/142_completion_journal.sql"],
       "tests": ["packages/daemon/src/pods/completion-journal.test.ts"],
       "evidence": ["receipts/journal-migration.txt"],
-      "prerequisites": []
+      "prerequisites": [],
+      "remaining": "Newly discovered managed schema 142-150 was deployed by separate task from untracked worktree files. Our unpublished 142-149 collide. Renumber and verify combined-schema upgrades before any rollout."
     },
     {
       "id": "G.3",
@@ -1047,5 +1098,5 @@
       "prerequisites": []
     }
   ],
-  "lastCheckpoint": "checkpoint-10.md"
+  "lastCheckpoint": "checkpoint-11.md"
 }

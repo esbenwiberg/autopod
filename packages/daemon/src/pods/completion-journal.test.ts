@@ -27,6 +27,11 @@ describe('durable completion journal', () => {
     const dir = mkdtempSync(path.join(tmpdir(), 'completion-journal-'));
     const source = createTestDb();
     insertPod(source);
+    source
+      .prepare(
+        "INSERT INTO escalations(id,pod_id,type,payload) VALUES ('decision','settled','ask_human','{}')",
+      )
+      .run();
     const repo = createPodRepository(source);
     const pod = repo.getOrThrow('settled');
     repo.completionJournal?.begin(pod);
@@ -49,6 +54,15 @@ describe('durable completion journal', () => {
         userId: 'reviewer',
       });
       expect(restarted.getOrThrow('settled').finalization?.pendingDecisionId).toBeNull();
+      const firstDecision = reopened.prepare('SELECT * FROM completion_decisions').get();
+      const firstEscalation = reopened.prepare('SELECT response FROM escalations').get();
+      restarted.completionJournal?.recordReply(restored, 'Select finding A', {
+        type: 'human',
+        userId: 'another-reviewer',
+      });
+      expect(reopened.prepare('SELECT * FROM completion_decisions').get()).toEqual(firstDecision);
+      expect(reopened.prepare('SELECT response FROM escalations').get()).toEqual(firstEscalation);
+
       expect(() =>
         restarted.completionJournal?.recordReply(restored, 'Select finding B', {
           type: 'human',

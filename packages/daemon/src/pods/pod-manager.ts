@@ -177,6 +177,7 @@ import {
 import { agentToolingCachePaths } from './agent-tooling-cache-paths.js';
 import { buildCorrectionMessage } from './correction-context.js';
 import { dispatchRequestHash } from './dispatch-preflight-ledger.js';
+import { persistCompletionReply, persistEscalation } from './escalation-coordinator.js';
 import type { EscalationRepository } from './escalation-repository.js';
 import type { EventBus } from './event-bus.js';
 import type { EventRepository } from './event-repository.js';
@@ -6530,12 +6531,12 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
       },
       response: null,
     };
-    escalationRepo.insert(escalation);
-    podRepo.update(podId, {
-      pendingEscalation: escalation,
-      escalationCount: pod.escalationCount + 1,
+    persistEscalation(podRepo, escalationRepo, escalation, () => {
+      transition(pod, 'awaiting_input', {
+        pendingEscalation: escalation,
+        escalationCount: pod.escalationCount + 1,
+      });
     });
-    transition(pod, 'awaiting_input');
     emitActivityStatus(
       podId,
       `Push blocked — ${err.service} credentials missing or unauthorized. Repair daemon authentication and resume.`,
@@ -6754,13 +6755,17 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
     podRepo.update(pod.id, updates);
     if (to === 'complete') podRepo.completionJournal?.mark(pod, 'finished');
     else if (to === 'validating') podRepo.completionJournal?.mark(pod, 'finalizing');
-    eventBus.emit({
-      type: 'pod.status_changed',
-      timestamp: new Date().toISOString(),
-      podId: pod.id,
-      previousStatus,
-      newStatus: to,
-    });
+    const publish = () => {
+      eventBus.emit({
+        type: 'pod.status_changed',
+        timestamp: new Date().toISOString(),
+        podId: pod.id,
+        previousStatus,
+        newStatus: to,
+      });
+    };
+    if (podRepo.afterCommit) podRepo.afterCommit(publish);
+    else publish();
     if (to === 'validated' || to === 'review_required' || to === 'failed') {
       refreshReadiness(pod.id);
     }
@@ -9974,10 +9979,11 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
               },
               response: null,
             };
-            escalationRepo.insert(escalation);
-            transition(current, 'awaiting_input', {
-              pendingEscalation: escalation,
-              escalationCount: current.escalationCount + 1,
+            persistEscalation(podRepo, escalationRepo, escalation, () => {
+              transition(current, 'awaiting_input', {
+                pendingEscalation: escalation,
+                escalationCount: current.escalationCount + 1,
+              });
             });
             emitActivityStatus(
               podId,
@@ -11299,9 +11305,10 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
       }
 
       // ── Normal escalation responses ───────────────────────────────────
-      podRepo.completionJournal?.recordReply(pod, message, actor);
+      persistCompletionReply(podRepo, pod, message, actor, () => {
+        transition(pod, 'running', { pendingEscalation: null });
+      });
       emitActivityStatus(podId, 'Human replied — resuming agent…');
-      transition(pod, 'running', { pendingEscalation: null });
 
       // If the pod was blocked on an ask_human MCP call, resolve the pending request.
       // A still-attached MCP stream can deliver the response directly. If the
@@ -13520,12 +13527,12 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
                     response: null,
                   };
 
-                  escalationRepo.insert(escalation);
-                  podRepo.update(podId, {
-                    pendingEscalation: escalation,
-                    escalationCount: s2.escalationCount + 1,
+                  persistEscalation(podRepo, escalationRepo, escalation, () => {
+                    transition(s2, 'awaiting_input', {
+                      pendingEscalation: escalation,
+                      escalationCount: s2.escalationCount + 1,
+                    });
                   });
-                  transition(s2, 'awaiting_input');
 
                   logger.info(
                     {

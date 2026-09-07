@@ -1,0 +1,68 @@
+[
+  {
+    "path": "docs/analysis/2026-09-07/execution/receipts/duplicate-reply-audit-red.txt",
+    "originalSha256": "ceeba6c548f2af339a6d4c807440c5ad6a55304135161d83ea173392a703cf47",
+    "normalizedSha256": "ceeba6c548f2af339a6d4c807440c5ad6a55304135161d83ea173392a703cf47",
+    "normalization": "rstrip lines and final newline"
+  },
+  {
+    "path": "docs/analysis/2026-09-07/execution/receipts/escalation-atomicity-affected.txt",
+    "originalSha256": "fba1af16651ee0caff93810b30f3505e63b10b1d0df51de6b5c190dce246bb2c",
+    "normalizedSha256": "fba1af16651ee0caff93810b30f3505e63b10b1d0df51de6b5c190dce246bb2c",
+    "normalization": "rstrip lines and final newline"
+  },
+  {
+    "path": "docs/analysis/2026-09-07/execution/receipts/escalation-atomicity-build.txt",
+    "originalSha256": "116aeadc4373b3c650b8fd5293d6bd1dee25914deb42176bc3dc9e6c4da030df",
+    "normalizedSha256": "c503f2c617ae435caa86db1234b89af9c03bb884673ba20646d49abb4b78d8da",
+    "normalization": "rstrip lines and final newline"
+  },
+  {
+    "path": "docs/analysis/2026-09-07/execution/receipts/escalation-atomicity-first-green.txt",
+    "originalSha256": "357541385c24d72c5815a241ddff6cd1603068e995e66a85714e04217d7d36e1",
+    "normalizedSha256": "357541385c24d72c5815a241ddff6cd1603068e995e66a85714e04217d7d36e1",
+    "normalization": "rstrip lines and final newline"
+  },
+  {
+    "path": "docs/analysis/2026-09-07/execution/receipts/escalation-atomicity-red.txt",
+    "originalSha256": "db66661b3b0e64030b5fe1191335ea10dc1d0ef822a709282664be4eb3977f50",
+    "normalizedSha256": "db66661b3b0e64030b5fe1191335ea10dc1d0ef822a709282664be4eb3977f50",
+    "normalization": "rstrip lines and final newline"
+  },
+  {
+    "path": "docs/analysis/2026-09-07/execution/receipts/escalation-atomicity-tsc.txt",
+    "originalSha256": "82b2c13486d4a9e29fe201f132c706409af12135b66a779937aeec8f4b2e1f38",
+    "normalizedSha256": "82b2c13486d4a9e29fe201f132c706409af12135b66a779937aeec8f4b2e1f38",
+    "normalization": "rstrip lines and final newline"
+  },
+  {
+    "path": "docs/analysis/2026-09-07/execution/receipts/escalation-coordinator-audit-final.txt",
+    "originalSha256": "4dd365e96d20920771ab18ad40f92450cffa2680591706907dfe7f6cb86fe46a",
+    "normalizedSha256": "4dd365e96d20920771ab18ad40f92450cffa2680591706907dfe7f6cb86fe46a",
+    "normalization": "rstrip lines and final newline"
+  },
+  {
+    "path": "docs/analysis/2026-09-07/execution/receipts/escalation-coordinator-build-final.txt",
+    "originalSha256": "943bc42818393ecba19d9161fde5c016f58a46b73ab8c8d4a0827f6a421f35cb",
+    "normalizedSha256": "8a7f5ad9ec0de95e9c0cac00ea36084b0eec1742b7e4c12620476c89141c5542",
+    "normalization": "rstrip lines and final newline"
+  },
+  {
+    "path": "docs/analysis/2026-09-07/execution/receipts/escalation-coordinator-final.txt",
+    "originalSha256": "111cf5b4416b34d5801068ce56473078c9d67b0ae3c235f9456173ca6ebf7edc",
+    "normalizedSha256": "111cf5b4416b34d5801068ce56473078c9d67b0ae3c235f9456173ca6ebf7edc",
+    "normalization": "rstrip lines and final newline"
+  },
+  {
+    "path": "docs/analysis/2026-09-07/execution/receipts/escalation-overlap-audit-green.txt",
+    "originalSha256": "7c12573b766a44f46c9353972ecdb2967f0e60e899a54c495ebff2bc0ec07966",
+    "normalizedSha256": "7c12573b766a44f46c9353972ecdb2967f0e60e899a54c495ebff2bc0ec07966",
+    "normalization": "rstrip lines and final newline"
+  },
+  {
+    "path": "docs/analysis/2026-09-07/execution/receipts/escalation-overlap-red.txt",
+    "originalSha256": "dbacfdcc12fa04d4cc9a6a5f3bc6716bcf5dade2058a29b0692f228b830920bc",
+    "normalizedSha256": "dbacfdcc12fa04d4cc9a6a5f3bc6716bcf5dade2058a29b0692f228b830920bc",
+    "normalization": "rstrip lines and final newline"
+  }
+]

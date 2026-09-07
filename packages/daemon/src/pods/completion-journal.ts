@@ -91,6 +91,8 @@ export function createCompletionJournal(db: Database.Database): CompletionJourna
         .get(pod.id, decision.id) as { response: string } | undefined;
       if (existing && existing.response !== message)
         throw new Error('Decision already has a different durable response');
+      // An idempotent duplicate preserves the first responder and response time.
+      if (existing) return;
       const now = new Date().toISOString();
       db.prepare(
         'INSERT OR IGNORE INTO completion_decisions (pod_id, decision_id, response, actor, responded_at) VALUES (?, ?, ?, ?, ?)',

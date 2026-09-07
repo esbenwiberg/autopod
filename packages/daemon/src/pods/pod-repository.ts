@@ -33,6 +33,7 @@ import {
   readinessReviewSchema,
 } from '@autopod/shared';
 import type Database from 'better-sqlite3';
+import { type UnitOfWork, createUnitOfWork } from '../db/unit-of-work.js';
 import { extractFindings } from '../validation/finding-fingerprint.js';
 import {
   type DispatchPreflightLedger,
@@ -235,7 +236,7 @@ import { type DeliveryLedger, createDeliveryLedger } from './delivery-ledger.js'
 
 import { type TaskExecutionLedger, createTaskExecutionLedger } from './task-execution-ledger.js';
 
-export interface PodRepository {
+export interface PodRepository extends Partial<UnitOfWork> {
   taskRetries?: TaskRetryLedger;
   dispatchPreflight?: DispatchPreflightLedger;
   executionProvenance?: ExecutionProvenanceLedger;
@@ -652,6 +653,7 @@ export function createPodRepository(db: Database.Database): PodRepository {
   }
 
   return {
+    ...createUnitOfWork(db),
     afterInsertCommitted(id, effect) {
       if (!db.inTransaction) {
         effect();
