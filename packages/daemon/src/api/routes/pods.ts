@@ -936,7 +936,10 @@ export function podRoutes(
   // GET /pods/:podId/cost — per-pod cost grouped into operator-facing buckets
   app.get('/pods/:podId/cost', async (request) => {
     const { podId } = request.params as { podId: string };
-    const breakdown = computePodCostBreakdown(podManager.getSession(podId));
+    const breakdown = computePodCostBreakdown(
+      podManager.getSession(podId),
+      podRepo?.getProviderUsage?.(podId),
+    );
     try {
       return { ...breakdown, taskExecution: podRepo?.taskExecutions?.snapshot(podId) ?? null };
     } catch {

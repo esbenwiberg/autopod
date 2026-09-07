@@ -49,6 +49,7 @@ import {
   type ExecutionProvenanceLedger,
   createExecutionProvenanceLedger,
 } from './execution-provenance-ledger.js';
+import { type ProviderUsageProjection, readProviderUsage } from './provider-usage-projection.js';
 import { type TaskRetryLedger, createTaskRetryLedger } from './task-retry-ledger.js';
 
 export interface NewPod {
@@ -265,6 +266,7 @@ export interface PodRepository extends Partial<UnitOfWork> {
   listCompactForDisplay?(filters?: PodFilters): CompactPodSource[];
   /** Bounded cost projection; never materializes contracts, prompts or validation payloads. */
   listCostRecords?(completedSince: string): Pod[];
+  getProviderUsage?(podId: string): ProviderUsageProjection;
   /** All pods whose status is not terminal (`complete` / `killed`). */
   listNonTerminal(): Pod[];
   countByStatusAndProfile(status: PodStatus, profileName: string): number;
@@ -1246,6 +1248,8 @@ export function createPodRepository(db: Database.Database): PodRepository {
         return { ...pod, finalization: completionJournal.get(pod.id, pod.lifecycleGeneration) };
       });
     },
+
+    getProviderUsage: (podId) => readProviderUsage(db, podId),
 
     listCostRecords(completedSince: string): Pod[] {
       const rows = db

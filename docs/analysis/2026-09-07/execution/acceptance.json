@@ -518,7 +518,10 @@
         "packages/desktop/Sources/AutopodUI/Views/Shared/SessionCostCard.swift",
         "packages/daemon/src/pods/sandbox-startup-admission.ts",
         "packages/daemon/src/pods/pod-repository.ts",
-        "packages/daemon/src/index.ts"
+        "packages/daemon/src/index.ts",
+        "packages/daemon/src/pods/provider-usage-projection.ts",
+        "packages/daemon/src/pods/cost-aggregation.ts",
+        "packages/daemon/src/pods/pod-cost-breakdown.ts"
       ],
       "tests": [
         "packages/daemon/src/pods/task-execution-ledger.test.ts",
@@ -529,7 +532,8 @@
         "packages/mobile-web/src/components/TaskRetryPanel.test.tsx",
         "packages/desktop/Tests/AutopodClientTests/TaskRetryClientTests.swift",
         "packages/mobile-web/src/components/TaskExecutionPanel.test.tsx",
-        "packages/desktop/Tests/AutopodClientTests/PodCostBreakdownResponseTests.swift"
+        "packages/desktop/Tests/AutopodClientTests/PodCostBreakdownResponseTests.swift",
+        "packages/daemon/src/api/routes/pods.test.ts"
       ],
       "evidence": [
         "receipts/task-ledger-red.txt",
@@ -560,10 +564,16 @@
         "receipts/sandbox-startup-browser-server.txt",
         "receipts/sandbox-startup-browser.json",
         "receipts/checkpoint-24-full-validation.txt",
-        "receipts/checkpoint-24-validation-identity.json"
+        "receipts/checkpoint-24-validation-identity.json",
+        "checkpoint-25.md",
+        "receipts/cost-reconciliation-red.txt",
+        "receipts/cost-reconciliation-first-green.txt",
+        "receipts/cost-reconciliation-api.txt",
+        "receipts/cost-reconciliation-affected.txt",
+        "receipts/cost-reconciliation-build.txt"
       ],
       "prerequisites": [],
-      "remaining": "Actual engine wall duration is recorded once per executed validation admission; waiting and interrupted unknown duration are separate. Complete cross-phase cost/time reconciliation and available infrastructure billing remain. Native interaction and live acceptance are unverified. Incomplete known prior spending now blocks further budgeted agent consumption. Future spending reservations, unrecorded legacy work, phase accounting and native/live verification remain. Checkpoint 24 adds durable sandbox startup retries, legacy allowance lower bounds, stage-scoped one-use decisions, measured startup time and local operator proof. Provider retries after first runtime event, repository rework, complete historical reconstruction, phase billing, native interaction and live acceptance remain."
+      "remaining": "Actual engine wall duration is recorded once per executed validation admission; waiting and interrupted unknown duration are separate. Complete cross-phase cost/time reconciliation and available infrastructure billing remain. Native interaction and live acceptance are unverified. Incomplete known prior spending now blocks further budgeted agent consumption. Future spending reservations, unrecorded legacy work, phase accounting and native/live verification remain. Checkpoint 24 adds durable sandbox startup retries, legacy allowance lower bounds, stage-scoped one-use decisions, measured startup time and local operator proof. Provider retries after first runtime event, repository rework, complete historical reconstruction, phase billing, native interaction and live acceptance remain. Checkpoint 25 reconciles corrected provider totals in task, per-pod and fleet APIs, including recorded zero. Phase attribution, legacy estimates, telemetry completeness, operator presentation and live proof remain."
     },
     {
       "id": "W2.5",
@@ -976,7 +986,11 @@
         "packages/shared/src/types/task-execution.ts",
         "packages/cli/src/commands/pod.ts",
         "packages/mobile-web/src/components/TaskExecutionPanel.tsx",
-        "packages/desktop/Sources/AutopodUI/Views/Shared/SessionCostCard.swift"
+        "packages/desktop/Sources/AutopodUI/Views/Shared/SessionCostCard.swift",
+        "packages/daemon/src/pods/provider-usage-projection.ts",
+        "packages/daemon/src/pods/pod-cost-breakdown.ts",
+        "packages/daemon/src/pods/pod-repository.ts",
+        "packages/daemon/src/api/routes/pods.ts"
       ],
       "tests": [
         "packages/daemon/src/pods/cost-aggregation.test.ts",
@@ -984,7 +998,8 @@
         "packages/daemon/src/pods/pod-manager.test.ts",
         "packages/mobile-web/src/components/TaskExecutionPanel.test.tsx",
         "packages/cli/src/commands/pod.test.ts",
-        "packages/desktop/Tests/AutopodClientTests/PodCostBreakdownResponseTests.swift"
+        "packages/desktop/Tests/AutopodClientTests/PodCostBreakdownResponseTests.swift",
+        "packages/daemon/src/api/routes/pods.test.ts"
       ],
       "evidence": [
         "receipts/history-cost-api.txt",
@@ -998,10 +1013,16 @@
         "receipts/task-budget-affected.txt",
         "receipts/task-budget-cli.txt",
         "receipts/task-budget-swift.txt",
-        "receipts/task-budget-mobile-browser.json"
+        "receipts/task-budget-mobile-browser.json",
+        "checkpoint-25.md",
+        "receipts/cost-reconciliation-red.txt",
+        "receipts/cost-reconciliation-first-green.txt",
+        "receipts/cost-reconciliation-api.txt",
+        "receipts/cost-reconciliation-affected.txt",
+        "receipts/cost-reconciliation-build.txt"
       ],
       "prerequisites": [],
-      "remaining": "Effective corrected provider ledger is authoritative; pod totals are legacy fallback; harness phases added once. Missing billing and earlier run identity remain explicit. Incomplete known prior spending now blocks further budgeted agent consumption. Future spending reservations, unrecorded legacy work, phase accounting and native/live verification remain."
+      "remaining": "Effective corrected provider ledger is authoritative; pod totals are legacy fallback; harness phases added once. Missing billing and earlier run identity remain explicit. Incomplete known prior spending now blocks further budgeted agent consumption. Future spending reservations, unrecorded legacy work, phase accounting and native/live verification remain. Checkpoint 25 reconciles corrected provider totals in task, per-pod and fleet APIs, including recorded zero. Phase attribution, legacy estimates, telemetry completeness, operator presentation and live proof remain."
     },
     {
       "id": "W4.8",
@@ -1025,7 +1046,10 @@
         "packages/daemon/src/index.ts",
         "packages/shared/src/types/task-retry.ts",
         "packages/mobile-web/src/components/TaskRetryPanel.tsx",
-        "packages/desktop/Sources/AutopodUI/Views/Shared/TaskRetryCard.swift"
+        "packages/desktop/Sources/AutopodUI/Views/Shared/TaskRetryCard.swift",
+        "packages/daemon/src/pods/provider-usage-projection.ts",
+        "packages/daemon/src/pods/cost-aggregation.ts",
+        "packages/daemon/src/pods/pod-cost-breakdown.ts"
       ],
       "tests": [
         "packages/desktop/Tests/AutopodUITests/ModelsSimulatorTests.swift",
@@ -1076,12 +1100,18 @@
         "receipts/sandbox-startup-browser-server.txt",
         "receipts/sandbox-startup-browser.json",
         "receipts/checkpoint-24-full-validation.txt",
-        "receipts/checkpoint-24-validation-identity.json"
+        "receipts/checkpoint-24-validation-identity.json",
+        "checkpoint-25.md",
+        "receipts/cost-reconciliation-red.txt",
+        "receipts/cost-reconciliation-first-green.txt",
+        "receipts/cost-reconciliation-api.txt",
+        "receipts/cost-reconciliation-affected.txt",
+        "receipts/cost-reconciliation-build.txt"
       ],
       "prerequisites": [
         "Selected mobile flows and new health CLI have local interaction proof. Desktop has compilation and tests only. Remaining operator flows, physical device and live evidence are outstanding."
       ],
-      "remaining": "Task projection and current mobile interaction verified locally. Actual desktop interaction and remaining changed operator flows remain. Incomplete known prior spending now blocks further budgeted agent consumption. Future spending reservations, unrecorded legacy work, phase accounting and native/live verification remain. Checkpoint 24 adds durable sandbox startup retries, legacy allowance lower bounds, stage-scoped one-use decisions, measured startup time and local operator proof. Provider retries after first runtime event, repository rework, complete historical reconstruction, phase billing, native interaction and live acceptance remain."
+      "remaining": "Task projection and current mobile interaction verified locally. Actual desktop interaction and remaining changed operator flows remain. Incomplete known prior spending now blocks further budgeted agent consumption. Future spending reservations, unrecorded legacy work, phase accounting and native/live verification remain. Checkpoint 24 adds durable sandbox startup retries, legacy allowance lower bounds, stage-scoped one-use decisions, measured startup time and local operator proof. Provider retries after first runtime event, repository rework, complete historical reconstruction, phase billing, native interaction and live acceptance remain. Checkpoint 25 reconciles corrected provider totals in task, per-pod and fleet APIs, including recorded zero. Phase attribution, legacy estimates, telemetry completeness, operator presentation and live proof remain."
     },
     {
       "id": "W5.1",

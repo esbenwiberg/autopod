@@ -108,6 +108,13 @@ export function aggregateCost(
 
   // Production uses a date-filtered scalar projection; compatibility for injected repositories.
   const allPods = deps.podRepo.listCostRecords?.(priorStartIso) ?? deps.podRepo.list();
+  const recordedAgentCosts = new Map<string, number>();
+  for (const pod of allPods) {
+    const usage = deps.podRepo.getProviderUsage?.(pod.id);
+    if (usage && usage.count > 0) recordedAgentCosts.set(pod.id, usage.costUsd ?? 0);
+  }
+  const agentCostForPod = (pod: Pod): number =>
+    recordedAgentCosts.get(pod.id) ?? effectiveCostUsd(pod);
 
   const relevant = allPods.filter(
     (pod): pod is CompletedPod =>
@@ -140,7 +147,7 @@ export function aggregateCost(
   const unknownModels = new Set<string>();
 
   for (const pod of currentPods) {
-    const agentCost = effectiveCostUsd(pod);
+    const agentCost = agentCostForPod(pod);
 
     if (pod.costUsd === 0 && pod.model && !canonicalModelKey(pod.model)) {
       unknownModels.add(pod.model);
@@ -215,7 +222,7 @@ export function aggregateCost(
   }
 
   for (const pod of priorPods) {
-    priorTotal += effectiveCostUsd(pod) + harnessCostForPod(pod);
+    priorTotal += agentCostForPod(pod) + harnessCostForPod(pod);
   }
 
   if (unknownPhaseKeys.size > 0) {

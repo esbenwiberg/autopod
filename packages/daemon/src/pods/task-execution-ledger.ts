@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { AutopodError, type TaskExecutionSummary } from '@autopod/shared';
 import type Database from 'better-sqlite3';
 import { hasUnansweredDecision } from './decision-admission.js';
+import { readProviderUsage } from './provider-usage-projection.js';
 
 export interface ExecutionBinding {
   runtime: string;
@@ -99,20 +100,7 @@ export function createTaskExecutionLedger(db: Database.Database): TaskExecutionL
       return 0;
     };
     for (const row of rows) {
-      const attempts = db
-        .prepare(`SELECT COUNT(*) AS count, SUM(a.ended_at IS NOT NULL) AS settledCount,
-        SUM(COALESCE(c.input_tokens, a.input_tokens)) AS inputTokens,
-        SUM(COALESCE(c.output_tokens, a.output_tokens)) AS outputTokens,
-        SUM(COALESCE(c.cost_usd, a.cost_usd)) AS costUsd
-        FROM provider_attempts a LEFT JOIN provider_attempt_telemetry_corrections c
-          ON c.pod_id = a.pod_id AND c.ordinal = a.ordinal WHERE a.pod_id = ?`)
-        .get(row.id) as {
-        count: number;
-        settledCount: number | null;
-        inputTokens: number | null;
-        outputTokens: number | null;
-        costUsd: number | null;
-      };
+      const attempts = readProviderUsage(db, row.id);
       // The corrected append-only provider ledger is authoritative when present.
       // The pod row is a legacy fallback, never an additional bucket of provider spend.
       const agent =

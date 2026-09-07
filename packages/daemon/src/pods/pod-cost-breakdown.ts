@@ -7,6 +7,7 @@ import {
   computeCostWithCache,
   effectiveCostUsd,
 } from '@autopod/shared';
+import type { ProviderUsageProjection } from './provider-usage-projection.js';
 
 type TokenBucket = { inputTokens: number; outputTokens: number; cachedInputTokens?: number };
 const COST_EPSILON = 1e-9;
@@ -90,8 +91,12 @@ function phaseBucketCost(model: string | null, bucket: TokenBucket & { costUsd?:
   );
 }
 
-export function computePodCostBreakdown(pod: Pod): PodCostBreakdownResponse {
-  const agentCostUsd = effectiveCostUsd(pod);
+export function computePodCostBreakdown(
+  pod: Pod,
+  usage?: ProviderUsageProjection,
+): PodCostBreakdownResponse {
+  const recorded = usage && usage.count > 0 ? usage : null;
+  const agentCostUsd = recorded ? (recorded.costUsd ?? 0) : effectiveCostUsd(pod);
   const phaseUsage = pod.phaseTokenUsage;
 
   const segments: PodCostSegment[] = SEGMENT_DEFS.map((def) => {
@@ -144,8 +149,8 @@ export function computePodCostBreakdown(pod: Pod): PodCostBreakdownResponse {
     podId: pod.id,
     model: pod.model || null,
     totalCostUsd: agentCostUsd + harnessCostUsd,
-    inputTokens: pod.inputTokens,
-    outputTokens: pod.outputTokens,
+    inputTokens: recorded ? (recorded.inputTokens ?? 0) : pod.inputTokens,
+    outputTokens: recorded ? (recorded.outputTokens ?? 0) : pod.outputTokens,
     segments,
   };
 }

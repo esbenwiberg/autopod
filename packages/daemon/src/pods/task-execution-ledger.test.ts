@@ -5,6 +5,7 @@ import Database from 'better-sqlite3';
 import { describe, expect, it } from 'vitest';
 import { runMigrations } from '../db/migrate.js';
 import { createTestDb, insertTestProfile, logger } from '../test-utils/mock-helpers.js';
+import { aggregateCost } from './cost-aggregation.js';
 import { createPodRepository } from './pod-repository.js';
 
 function fixture() {
@@ -161,6 +162,12 @@ describe('task-wide execution accounting', () => {
       expect(repo.taskExecutions?.snapshot('fix').diagnostics).toContain(
         'root: provider ledger differs from legacy pod totals; corrected ledger used',
       );
+      repo.update('root', { status: 'complete', completedAt: '2026-09-07T01:00:00Z' });
+      const fleet = aggregateCost(
+        { podRepo: repo, now: () => new Date('2026-09-07T02:00:00Z') },
+        { days: 1 },
+      );
+      expect(fleet.total).toBe(repo.taskExecutions?.snapshot('root').recordedCostUsd);
     } finally {
       db.close();
     }

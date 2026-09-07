@@ -127,6 +127,69 @@ describe('GET /pods/:podId provider-attempt projection', () => {
     db.close();
   });
 
+  it('reconciles corrected provider usage in task, pod and fleet cost APIs without rewriting legacy rows', async () => {
+    const repo = createPodRepository(db);
+    for (const [id, correctedCost] of [
+      ['corrected-cost', 0.5],
+      ['recorded-zero', 0],
+    ] as const) {
+      repo.insert({
+        id,
+        profileName: 'test-profile',
+        task: 'Reconcile recorded usage',
+        status: 'complete',
+        model: 'gpt-5',
+        runtime: 'codex',
+        executionTarget: 'local',
+        branch: id,
+        userId: 'user',
+        maxValidationAttempts: 3,
+        skipValidation: false,
+        outputMode: 'pr',
+      });
+      repo.update(id, {
+        completedAt: new Date().toISOString(),
+        inputTokens: 50,
+        outputTokens: 10,
+        costUsd: 1,
+      });
+      db.prepare(`INSERT INTO provider_attempts (pod_id, ordinal, provider, runtime, model, profile_reference, profile_snapshot,
+        started_at, ended_at, outcome, input_tokens, output_tokens, cost_usd)
+        VALUES (?, 1, 'openai', 'codex', 'gpt-5', 'pod:test@profile-snapshot#abcdef1', '{}',
+          '2026-09-07T00:00:00Z', '2026-09-07T00:01:00Z', 'completed', 50, 10, 1)`).run(id);
+      db.prepare(`INSERT INTO provider_attempt_telemetry_corrections
+        (pod_id, ordinal, input_tokens, output_tokens, cost_usd, source, reason, corrected_at)
+        VALUES (?, 1, 20, 5, ?, 'codex_rollout', 'duplicate aggregate repaired', '2026-09-07T00:02:00Z')`).run(
+        id,
+        correctedCost,
+      );
+      const response = await app.inject({ method: 'GET', url: `/pods/${id}/cost` });
+      expect(response.statusCode, response.body).toBe(200);
+      expect(response.json()).toMatchObject({
+        totalCostUsd: correctedCost,
+        inputTokens: 20,
+        outputTokens: 5,
+        taskExecution: {
+          recordedCostUsd: correctedCost,
+          recordedInputTokens: 20,
+          recordedOutputTokens: 5,
+        },
+      });
+      expect(
+        response
+          .json()
+          .segments.reduce((sum: number, segment: { costUsd: number }) => sum + segment.costUsd, 0),
+      ).toBe(correctedCost);
+      expect(repo.getOrThrow(id)).toMatchObject({ costUsd: 1, inputTokens: 50, outputTokens: 10 });
+    }
+    const fleet = await app.inject({ method: 'GET', url: '/pods/analytics/cost?days=1' });
+    expect(fleet.statusCode, fleet.body).toBe(200);
+    expect(fleet.json().total).toBe(0.5);
+    expect(
+      fleet.json().top10.reduce((sum: number, pod: { costUsd: number }) => sum + pod.costUsd, 0),
+    ).toBe(0.5);
+  });
+
   it('keeps malformed legacy list evidence visible without hiding healthy records or breaking projected costs', async () => {
     for (const id of ['healthy', 'malformed'])
       db.prepare(`INSERT INTO pods
