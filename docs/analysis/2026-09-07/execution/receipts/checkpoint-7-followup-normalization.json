@@ -1,0 +1,44 @@
+[
+  {
+    "file": "validation-replay-benchmark-initial.json",
+    "beforeSha256": "123e1be6d8e9a2545cfef5cc559b070bc19862752aa20e4f78035b8c82360d38",
+    "afterSha256": "5495a6d03d6a477fbdb13a902fcfb5df1e70f94defa952dfbcf3f12b41b26865",
+    "semanticJSONEqual": true
+  },
+  {
+    "file": "validation-replay-benchmark.json",
+    "beforeSha256": "b85dfa1b2eb0cb1d3102f1591f8f74cd00a7634a790b43c7e4a818a278bcc5ca",
+    "afterSha256": "380a75d69068256a38de2a18c7d457d017fbb3d5f70ac4e84db074c5abc15196",
+    "semanticJSONEqual": true
+  },
+  {
+    "file": "checkpoint-7-cli-corrected.txt",
+    "beforeSha256": "0893655bd7df9178954b26e4de06e7c344371bbc69ba3bbf2c9dd2dc8aea02b0",
+    "afterSha256": "542cb746260fa92543050de8a76fcebeb346740b15a2bd95c058a62bf2f23bda",
+    "change": "trailing whitespace and final blank lines only"
+  },
+  {
+    "file": "checkpoint-7-e2e-corrected.txt",
+    "beforeSha256": "b6d65f13dbd1d6c84f464af5d4e658b8babc4d9ac1d33a400d06b5f80c19dcec",
+    "afterSha256": "4f3717e7896e6da6223c4b1ba895b91d781b6b34578dee1fbdd3c7c30c37ebf4",
+    "change": "trailing whitespace and final blank lines only"
+  },
+  {
+    "file": "checkpoint-7-full-validation.txt",
+    "beforeSha256": "5d0f92aab829db6a74f86f6e09346d646767e3c22fc02d5ecb98261f07dd0e17",
+    "afterSha256": "c640b9f29c63eec97cb2d0ec0fa84933334e90061a9f4d39d100f41fd8aa5a76",
+    "change": "trailing whitespace and final blank lines only"
+  },
+  {
+    "file": "checkpoint-7-lint-corrected.txt",
+    "beforeSha256": "55ffd56918a179be2cde91a2e2cdd1abf460496f1c23614248c7909ac836363f",
+    "afterSha256": "55ffd56918a179be2cde91a2e2cdd1abf460496f1c23614248c7909ac836363f",
+    "change": "trailing whitespace and final blank lines only"
+  },
+  {
+    "file": "checkpoint-7-workspace-tests.txt",
+    "beforeSha256": "1276b0dc8983672aca9e3f35b2fb3527755a067b891eb590ed1b419644e71820",
+    "afterSha256": "febde2b87cad70e7664b31ce954331a745fdf49d79ef28a2ffa3a26fee012107",
+    "change": "trailing whitespace and final blank lines only"
+  }
+]

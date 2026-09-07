@@ -127,7 +127,11 @@ describe('E2E: validation failure with retry', () => {
       return createPassingValidationResult(config.podId, config.attempt);
     };
 
-    const ctx = createTestContext({ runtime, validationResultFactory });
+    const ctx = createTestContext({
+      runtime,
+      validationResultFactory,
+      simulatedReworkChangesSource: true,
+    });
     const manager = createPodManager(ctx.deps);
 
     const pod = manager.createSession(
@@ -174,7 +178,11 @@ describe('E2E: validation failure with retry', () => {
       return createPassingValidationResult(config.podId, config.attempt);
     };
 
-    const ctx = createTestContext({ runtime, validationResultFactory });
+    const ctx = createTestContext({
+      runtime,
+      validationResultFactory,
+      simulatedReworkChangesSource: true,
+    });
     const manager = createPodManager(ctx.deps);
 
     const pod = manager.createSession(
@@ -315,6 +323,7 @@ describe('E2E: max retries exhausted', () => {
       runtime,
       validationResultFactory,
       maxValidationAttempts: 3,
+      simulatedReworkChangesSource: true,
     });
     const manager = createPodManager(ctx.deps);
 

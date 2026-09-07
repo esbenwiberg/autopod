@@ -45,6 +45,7 @@ function createMockClient() {
       previewUrl: null,
     }),
     listSessions: vi.fn().mockResolvedValue([]),
+    getTaskExecution: vi.fn().mockRejectedValue(new Error('Older daemon: accounting unavailable')),
     getSession: vi.fn().mockResolvedValue({
       id: 'abcd1234',
       profileName: 'test',

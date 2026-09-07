@@ -43,6 +43,7 @@ import { type PodManager, createPodManager } from './pod-manager.js';
 
 function createMockPrManager(): PrManager {
   return {
+    findPr: vi.fn(async () => null),
     createPr: vi.fn(async () => ({
       url: 'https://github.com/org/repo/pull/42',
       usedFallback: false,
@@ -150,6 +151,7 @@ describe('Pod Lifecycle E2E', () => {
     it('retries on validation failure and succeeds on second attempt', async () => {
       let attempt = 0;
       const ctx = createTestContext({
+        simulatedReworkChangesSource: true,
         validationResultFactory: (config) => {
           attempt++;
           // Fail first attempt, pass second
@@ -183,6 +185,7 @@ describe('Pod Lifecycle E2E', () => {
 
     it('exhausts all validation attempts and transitions to review_required', async () => {
       const ctx = createTestContext({
+        simulatedReworkChangesSource: true,
         validationResultFactory: (config) =>
           createFailingValidationResult(config.podId, config.attempt),
       });

@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import type {
@@ -483,6 +484,8 @@ export function createTestContext(opts?: {
   validationResultFactory?: (config: { podId: string; attempt: number }) => ValidationResult;
   runtime?: Runtime;
   maxValidationAttempts?: number;
+  /** Explicit fake-infrastructure premise: each mocked rework produces changed source. */
+  simulatedReworkChangesSource?: boolean;
 }): TestContext {
   const db = createTestDb();
   insertTestProfile(db, { maxValidationAttempts: opts?.maxValidationAttempts });
@@ -504,6 +507,19 @@ export function createTestContext(opts?: {
   const enqueuedSessions: string[] = [];
 
   const deps: PodManagerDependencies = {
+    ...(opts?.simulatedReworkChangesSource
+      ? {
+          captureRetryIdentity: async () => ({
+            source: createHash('sha256')
+              .update(String(vi.mocked(runtime.resume).mock.calls.length))
+              .digest('hex'),
+            contract: null,
+            commands: null,
+            environment: null,
+            implementation: null,
+          }),
+        }
+      : {}),
     podRepo,
     escalationRepo,
     nudgeRepo,
