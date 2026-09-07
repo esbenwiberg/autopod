@@ -4759,6 +4759,39 @@ describe('PodManager', () => {
   });
 
   describe('approveSession', () => {
+    it('rechecks lifecycle ownership after provider preparation before merge mutation', async () => {
+      const ctx = createTestContext();
+      const manager = createPodManager(ctx.deps);
+      const pod = manager.createSession(
+        { profileName: 'test-profile', task: 'Fence prepared merge' },
+        'user-1',
+      );
+      ctx.podRepo.update(
+        pod.id,
+        validatedPodUpdates(pod.id, {
+          worktreePath: '/tmp/source',
+          containerId: 'retained-source',
+          filesChanged: 2,
+          prUrl: 'https://github.com/org/repo/pull/42',
+        }),
+      );
+      let mutationStarted = false;
+      vi.mocked(ctx.prManager.mergePr).mockImplementation(async (config) => {
+        ctx.db
+          .prepare('UPDATE pods SET lifecycle_generation = lifecycle_generation + 1 WHERE id = ?')
+          .run(pod.id);
+        config.onPrepared?.();
+        mutationStarted = true;
+        return { merged: true, autoMergeScheduled: false };
+      });
+      await expect(manager.approveSession(pod.id)).rejects.toMatchObject({
+        code: 'STALE_APPROVAL',
+      });
+      expect(mutationStarted).toBe(false);
+      expect(ctx.containerManager.kill).not.toHaveBeenCalled();
+      expect(manager.getSession(pod.id).containerId).toBe('retained-source');
+    });
+
     it.each(['existing', 'rebased', 'new'] as const)(
       'binds approval merge to the latest durable publication (%s)',
       async (path) => {
@@ -4801,7 +4834,14 @@ describe('PodManager', () => {
         await manager.approveSession(pod.id);
         const sha = (path === 'rebased' ? 'b' : 'a').repeat(40);
         expect(ctx.prManager.mergePr).toHaveBeenCalledWith(
-          expect.objectContaining({ expectedHeadSha: sha }),
+          expect.objectContaining({
+            expectedHeadSha: sha,
+            expectedTarget: {
+              repository: 'https://github.com/org/repo',
+              branch: pod.branch,
+              baseBranch: 'main',
+            },
+          }),
         );
         const rows = ctx.db
           .prepare('SELECT receipt FROM source_publication_receipts')
@@ -5416,7 +5456,13 @@ describe('PodManager', () => {
       await manager.approveSession(pod.id);
 
       expect(ctx.prManager.mergePr).toHaveBeenCalledWith({
+        onPrepared: expect.any(Function),
         expectedHeadSha: 'a'.repeat(40),
+        expectedTarget: {
+          repository: 'https://github.com/org/repo',
+          branch: pod.branch,
+          baseBranch: 'main',
+        },
         worktreePath: '/tmp/wt',
         prUrl: 'https://github.com/org/repo/pull/42',
         squash: undefined,

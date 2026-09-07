@@ -9,6 +9,7 @@ import type {
   FoundPr,
   MergePrConfig,
   MergePrResult,
+  MergePrTarget,
   PrManager,
   PrMergeStatus,
   ReviewCommentDetail,
@@ -16,12 +17,16 @@ import type {
   ReviewFeedbackReplyResult,
 } from '../interfaces/pr-manager.js';
 import type { ProfileLlmClientDeps } from '../providers/llm-client.js';
+import { parseGitHubRepoUrl, parseGitHubPrUrl as parsePrUrl } from './github-url-identity.js';
 import {
+  assertMergeRepository,
   assertMergeSource,
+  assertMergeTarget,
   expectedMergeSource,
   mergeReconciliation,
   sourceCommit,
 } from './merge-source-identity.js';
+export { parseGitHubRepoUrl } from './github-url-identity.js';
 import { buildPrBody } from './pr-body-builder.js';
 import {
   type PrNarrativeResult,
@@ -298,11 +303,16 @@ export class GhPrManager implements PrManager {
     this.githubAuth = config.githubAuth ?? new GhCliDaemonGitHubAuth();
   }
 
-  private async execGh(args: string[], options: { cwd?: string; timeout: number }) {
+  private async execGh(
+    args: string[],
+    options: { cwd?: string; timeout: number; onPrepared?: () => void },
+  ) {
     const credential = await this.githubAuth.resolveCredential();
     const { GH_TOKEN: _ambientGh, GITHUB_TOKEN: _ambientGitHub, ...hostEnv } = process.env;
     const env = { ...hostEnv, GH_TOKEN: credential.token };
-    return execFileAsync('gh', args, { ...options, env });
+    const { onPrepared, ...execOptions } = options;
+    onPrepared?.();
+    return execFileAsync('gh', args, { ...execOptions, env });
   }
 
   async findPr(
@@ -425,6 +435,48 @@ export class GhPrManager implements PrManager {
 
   async mergePr(config: MergePrConfig): Promise<MergePrResult> {
     const expectedHeadSha = expectedMergeSource(config.expectedHeadSha);
+    if (config.expectedTarget && !expectedHeadSha)
+      mergeReconciliation('An exact merge target requires a confirmed source commit.');
+    const checkTarget = async () => {
+      const requested = parsePrUrl(config.prUrl);
+      assertMergeRepository(
+        config.expectedTarget,
+        `https://github.com/${requested.owner}/${requested.repo}`,
+      );
+      const { stdout } = await this.execGh(
+        [
+          'pr',
+          'view',
+          config.prUrl,
+          '--json',
+          'url,state,headRefOid,headRefName,baseRefName,isCrossRepository',
+        ],
+        { timeout: 15_000 },
+      );
+      const observed = JSON.parse(stdout) as {
+        url?: string;
+        state?: string;
+        headRefOid?: string;
+        headRefName?: string;
+        baseRefName?: string;
+        isCrossRepository?: boolean;
+      } | null;
+      if (!observed?.url || observed.isCrossRepository !== false)
+        mergeReconciliation('The PR source repository is unavailable or differs from its target.');
+      const target = parsePrUrl(observed.url);
+      if (target.number !== requested.number)
+        mergeReconciliation('The provider returned a different PR identity.');
+      assertMergeSource(expectedHeadSha, observed.headRefOid);
+      assertMergeTarget(config.expectedTarget, {
+        repository: `https://github.com/${target.owner}/${target.repo}`,
+        branch: observed.headRefName,
+        baseBranch: observed.baseRefName,
+      });
+      if (!['OPEN', 'CLOSED', 'MERGED'].includes(observed.state ?? ''))
+        mergeReconciliation('The provider PR disposition is unavailable.');
+      return observed.state;
+    };
+    if (config.expectedTarget) await checkTarget();
     const args = [
       'pr',
       'merge',
@@ -441,10 +493,17 @@ export class GhPrManager implements PrManager {
     try {
       await this.execGh(args, {
         timeout: 30_000,
+        onPrepared: config.onPrepared,
       });
     } catch (err) {
       this.logger.error({ err, prUrl: config.prUrl }, 'Failed to merge pull request');
       throw err;
+    }
+
+    if (config.expectedTarget) {
+      const state = await checkTarget();
+      if (state === 'CLOSED') mergeReconciliation('The requested PR closed without merging.');
+      return { merged: state === 'MERGED', autoMergeScheduled: false };
     }
 
     // Check if the merge completed immediately or auto-merge was scheduled
@@ -709,23 +768,33 @@ export class GhPrManager implements PrManager {
   }
 }
 
+interface GitHubTargetObservation {
+  head?: { sha?: string; ref?: string; repo?: { full_name?: string } | null };
+  base?: { ref?: string; repo?: { full_name?: string } | null };
+}
+function assertGitHubTarget(
+  expected: MergePrTarget | undefined,
+  pr: GitHubTargetObservation | null,
+) {
+  if (!expected) return;
+  assertMergeRepository(
+    expected,
+    pr?.head?.repo?.full_name ? `https://github.com/${pr.head.repo.full_name}` : undefined,
+  );
+  assertMergeTarget(expected, {
+    repository: pr?.base?.repo?.full_name
+      ? `https://github.com/${pr.base.repo.full_name}`
+      : undefined,
+    branch: pr?.head?.ref,
+    baseBranch: pr?.base?.ref,
+  });
+}
+
 export interface GitHubApiPrManagerConfig {
   pat: string;
   logger: Logger;
   /** Stores so PR-body LLM helpers resolve live provider-account credentials. */
   llmDeps?: ProfileLlmClientDeps;
-}
-
-export function parseGitHubRepoUrl(repoUrl: string): { owner: string; repo: string } {
-  const httpsMatch = repoUrl.match(/github\.com[/:]([^/]+)\/([^/.]+?)(?:\.git)?$/);
-  if (!httpsMatch) throw new Error(`Cannot parse GitHub repo URL: ${repoUrl}`);
-  return { owner: httpsMatch[1], repo: httpsMatch[2] };
-}
-
-function parsePrUrl(prUrl: string): { owner: string; repo: string; number: number } {
-  const match = prUrl.match(/github\.com\/([^/]+)\/([^/]+)\/pull\/(\d+)/);
-  if (!match) throw new Error(`Cannot parse PR URL: ${prUrl}`);
-  return { owner: match[1], repo: match[2], number: Number.parseInt(match[3], 10) };
 }
 
 function parseGitHubCommentFeedbackId(feedbackId: string): number | null {
@@ -866,6 +935,10 @@ export class GitHubApiPrManager implements PrManager {
     const expectedHeadSha = expectedMergeSource(config.expectedHeadSha);
     const { owner, repo, number } = parsePrUrl(config.prUrl);
 
+    if (config.expectedTarget && !expectedHeadSha)
+      mergeReconciliation('An exact merge target requires a confirmed source commit.');
+    assertMergeRepository(config.expectedTarget, `https://github.com/${owner}/${repo}`);
+
     this.logger.info(
       { prUrl: config.prUrl, squash: config.squash ?? false },
       'Merging pull request via GitHub API',
@@ -881,9 +954,11 @@ export class GitHubApiPrManager implements PrManager {
       const text = await prResponse.text();
       throw new Error(`GitHub API error fetching PR ${prResponse.status}: ${text}`);
     }
-    const pr = (await prResponse.json()) as { head?: { sha?: string } } | null;
+    const pr = (await prResponse.json()) as GitHubTargetObservation | null;
     assertMergeSource(expectedHeadSha, pr?.head?.sha);
+    assertGitHubTarget(config.expectedTarget, pr);
 
+    config.onPrepared?.();
     const mergeResponse = await fetch(
       `https://api.github.com/repos/${owner}/${repo}/pulls/${number}/merge`,
       {
@@ -910,6 +985,20 @@ export class GitHubApiPrManager implements PrManager {
     const confirmation = (await mergeResponse.json()) as { merged?: unknown } | null;
     if (confirmation?.merged !== true)
       mergeReconciliation('GitHub did not confirm that the requested merge completed.');
+
+    if (config.expectedTarget) {
+      const response = await fetch(
+        `https://api.github.com/repos/${owner}/${repo}/pulls/${number}`,
+        { headers: this.headers },
+      );
+      if (!response.ok) mergeReconciliation('The final PR target could not be observed.');
+      const final = (await response.json()) as
+        | (GitHubTargetObservation & { merged?: unknown })
+        | null;
+      if (final?.merged !== true) mergeReconciliation('The final PR disposition is unconfirmed.');
+      assertMergeSource(expectedHeadSha, final.head?.sha);
+      assertGitHubTarget(config.expectedTarget, final);
+    }
 
     // Source branch cleanup requires its own identity and receipt; a successful
     // merge does not authorize deleting a ref that may since have advanced.

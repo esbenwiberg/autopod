@@ -12065,7 +12065,13 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
             try {
               const mergeResult = await deliveryOperation(async () =>
                 prManager.mergePr({
+                  onPrepared: () => assertApprovalCurrent(mergingAnchor),
                   expectedHeadSha: publishedSource.commitSha,
+                  expectedTarget: {
+                    repository: publishedSource.repository,
+                    branch: publishedSource.branch,
+                    baseBranch: mergeBaseBranch,
+                  },
                   worktreePath,
                   prUrl,
                   squash: options?.squash,
@@ -12226,7 +12232,13 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           }
           const retryMergeResult = await deliveryOperation(async () =>
             prManager.mergePr({
+              onPrepared: () => assertApprovalCurrent(mergingAnchor),
               expectedHeadSha: publishedSource.commitSha,
+              expectedTarget: {
+                repository: publishedSource.repository,
+                branch: publishedSource.branch,
+                baseBranch,
+              },
               worktreePath: pod.worktreePath,
               prUrl: newPrUrl,
               squash: options?.squash,

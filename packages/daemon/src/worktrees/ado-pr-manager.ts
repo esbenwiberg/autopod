@@ -17,7 +17,9 @@ import type { ScreenshotStore } from '../pods/screenshot-store.js';
 import type { ProfileLlmClientDeps } from '../providers/llm-client.js';
 import { buildAdoAttachmentRef } from '../validation/screenshot-collector.js';
 import {
+  assertMergeRepository,
   assertMergeSource,
+  assertMergeTarget,
   expectedMergeSource,
   mergeReconciliation,
   sourceCommit,
@@ -161,11 +163,17 @@ export class AdoPrManager implements PrManager {
     return `${this.orgUrl}/${encodeURIComponent(this.project)}/_apis/git/repositories/${encodeURIComponent(this.repoName)}`;
   }
 
-  private async rawFetch(url: string, options: RequestInit): Promise<unknown> {
+  private async rawFetch(
+    url: string,
+    options: RequestInit,
+    onPrepared?: () => void,
+  ): Promise<unknown> {
+    const token = await this.getToken();
+    onPrepared?.();
     const response = await fetch(url, {
       ...options,
       headers: {
-        Authorization: `Bearer ${await this.getToken()}`,
+        Authorization: `Bearer ${token}`,
         'Content-Type': 'application/json',
         Accept: 'application/json',
         ...(options.headers as Record<string, string>),
@@ -186,8 +194,12 @@ export class AdoPrManager implements PrManager {
     return text ? JSON.parse(text) : null;
   }
 
-  private async adoFetch(path: string, options: RequestInit): Promise<unknown> {
-    return this.rawFetch(`${this.baseUrl}${path}`, options);
+  private async adoFetch(
+    path: string,
+    options: RequestInit,
+    onPrepared?: () => void,
+  ): Promise<unknown> {
+    return this.rawFetch(`${this.baseUrl}${path}`, options, onPrepared);
   }
 
   /** Fetch from the project-level API base (e.g. policy evaluations). */
@@ -454,6 +466,26 @@ export class AdoPrManager implements PrManager {
     const expectedHeadSha = expectedMergeSource(config.expectedHeadSha);
     const prId = this.extractPrId(config.prUrl);
 
+    const repository = `${this.orgUrl}/${encodeURIComponent(this.project)}/_git/${encodeURIComponent(this.repoName)}`;
+    if (config.expectedTarget && !expectedHeadSha)
+      mergeReconciliation('An exact merge target requires a confirmed source commit.');
+    assertMergeRepository(config.expectedTarget, repository);
+    const checkTarget = (
+      pr: { sourceRefName?: string; targetRefName?: string; forkSource?: unknown } | null,
+    ) => {
+      if (config.expectedTarget && pr?.forkSource)
+        mergeReconciliation('Fork source identity is not confirmed for this delivery.');
+      assertMergeTarget(config.expectedTarget, {
+        repository,
+        branch: pr?.sourceRefName?.startsWith('refs/heads/')
+          ? pr.sourceRefName.slice(11)
+          : undefined,
+        baseBranch: pr?.targetRefName?.startsWith('refs/heads/')
+          ? pr.targetRefName.slice(11)
+          : undefined,
+      });
+    };
+
     this.logger.info(
       { prUrl: config.prUrl, prId, squash: config.squash ?? false },
       'Completing ADO pull request',
@@ -462,8 +494,14 @@ export class AdoPrManager implements PrManager {
     // Fetch current PR to get lastMergeSourceCommit
     const pr = (await this.adoFetch(`/pullrequests/${prId}?api-version=7.1`, {
       method: 'GET',
-    })) as { lastMergeSourceCommit?: { commitId?: string } } | null;
+    })) as {
+      lastMergeSourceCommit?: { commitId?: string };
+      sourceRefName?: string;
+      targetRefName?: string;
+      forkSource?: unknown;
+    } | null;
     assertMergeSource(expectedHeadSha, pr?.lastMergeSourceCommit?.commitId);
+    checkTarget(pr);
 
     const patchBody = {
       status: 'completed',
@@ -476,11 +514,18 @@ export class AdoPrManager implements PrManager {
       },
     };
 
-    const result = (await this.adoFetch(`/pullrequests/${prId}?api-version=7.1`, {
-      method: 'PATCH',
-      body: JSON.stringify(patchBody),
-    })) as {
+    const result = (await this.adoFetch(
+      `/pullrequests/${prId}?api-version=7.1`,
+      {
+        method: 'PATCH',
+        body: JSON.stringify(patchBody),
+      },
+      config.onPrepared,
+    )) as {
       status?: string;
+      sourceRefName?: string;
+      targetRefName?: string;
+      forkSource?: unknown;
       lastMergeSourceCommit?: { commitId?: string };
       autoCompleteSetBy?: { id?: string };
     } | null;
@@ -496,6 +541,7 @@ export class AdoPrManager implements PrManager {
     if (result?.status !== 'completed')
       mergeReconciliation('ADO did not confirm that the requested merge completed.');
     assertMergeSource(expectedHeadSha, result.lastMergeSourceCommit?.commitId);
+    checkTarget(result);
 
     this.logger.info({ prUrl: config.prUrl, prId }, 'ADO pull request completed');
     return { merged: true, autoMergeScheduled: false };

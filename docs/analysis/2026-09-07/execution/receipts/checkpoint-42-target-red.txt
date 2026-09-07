@@ -1,0 +1,142 @@
+
+ RUN  v4.1.11 /private/tmp/autopod-durable-execution/packages/daemon
+
+ ❯ src/worktrees/ado-pr-manager.test.ts (49 tests | 3 failed | 46 skipped) 6ms
+     × rejects unconfirmed ADO target before PATCH (source) 5ms
+     × rejects unconfirmed ADO target before PATCH (base) 0ms
+     × rejects unconfirmed ADO target before PATCH (missing) 0ms
+ ❯ src/worktrees/pr-manager.test.ts (53 tests | 12 failed | 41 skipped) 8ms
+     × checks CLI target identity before merge (branch) 4ms
+     × checks CLI target identity before merge (base) 0ms
+     × checks CLI target identity before merge (repository) 0ms
+     × checks CLI target identity before merge (fork) 0ms
+     × checks CLI target identity before merge (missing) 0ms
+     × checks GitHub API target identity before merge (branch) 0ms
+     × checks GitHub API target identity before merge (base) 0ms
+     × checks GitHub API target identity before merge (repository) 0ms
+     × checks GitHub API target identity before merge (fork) 0ms
+     × checks GitHub API target identity before merge (missing) 0ms
+     × verifies the final GitHub target after the conditioned merge (retargeted=false) 0ms
+     × verifies the final GitHub target after the conditioned merge (retargeted=true) 0ms
+
+⎯⎯⎯⎯⎯⎯ Failed Tests 15 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/worktrees/ado-pr-manager.test.ts > ADO exact source and target branches > rejects unconfirmed ADO target before PATCH (source)
+ FAIL  src/worktrees/ado-pr-manager.test.ts > ADO exact source and target branches > rejects unconfirmed ADO target before PATCH (base)
+ FAIL  src/worktrees/ado-pr-manager.test.ts > ADO exact source and target branches > rejects unconfirmed ADO target before PATCH (missing)
+AssertionError: promise resolved "{ merged: true, …(1) }" instead of rejecting
+
+- Expected
++ Received
+
+- Error {
+-   "message": "rejected promise",
++ {
++   "autoMergeScheduled": false,
++   "merged": true,
+  }
+
+ ❯ src/worktrees/ado-pr-manager.test.ts:812:7
+    810|       prUrl: PR_URL, expectedHeadSha: sha,
+    811|       expectedTarget: { repository: 'https://dev.azure.com/myorg/MyPro…
+    812|     })).rejects.toMatchObject({ code: 'DELIVERY_RECONCILIATION_REQUIRE…
+       |       ^
+    813|     expect(fetchMock).toHaveBeenCalledTimes(1);
+    814|   });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/15]⎯
+
+ FAIL  src/worktrees/pr-manager.test.ts > GhPrManager > checks CLI target identity before merge (branch)
+ FAIL  src/worktrees/pr-manager.test.ts > GhPrManager > checks CLI target identity before merge (base)
+ FAIL  src/worktrees/pr-manager.test.ts > GhPrManager > checks CLI target identity before merge (repository)
+ FAIL  src/worktrees/pr-manager.test.ts > GhPrManager > checks CLI target identity before merge (fork)
+ FAIL  src/worktrees/pr-manager.test.ts > GhPrManager > checks CLI target identity before merge (missing)
+AssertionError: promise resolved "{ merged: true, …(1) }" instead of rejecting
+
+- Expected
++ Received
+
+- Error {
+-   "message": "rejected promise",
++ {
++   "autoMergeScheduled": false,
++   "merged": true,
+  }
+
+ ❯ src/worktrees/pr-manager.test.ts:100:7
+     98|       prUrl: observation.url, expectedHeadSha: sha,
+     99|       expectedTarget: { repository: 'https://github.com/org/repo', bra…
+    100|     })).rejects.toMatchObject({ code: 'DELIVERY_RECONCILIATION_REQUIRE…
+       |       ^
+    101|     expect(execCalls.every(call => (call[1] as string[])[1] === 'view'…
+    102|   });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/15]⎯
+
+ FAIL  src/worktrees/pr-manager.test.ts > GitHubApiPrManager > checks GitHub API target identity before merge (branch)
+ FAIL  src/worktrees/pr-manager.test.ts > GitHubApiPrManager > checks GitHub API target identity before merge (base)
+ FAIL  src/worktrees/pr-manager.test.ts > GitHubApiPrManager > checks GitHub API target identity before merge (repository)
+ FAIL  src/worktrees/pr-manager.test.ts > GitHubApiPrManager > checks GitHub API target identity before merge (fork)
+ FAIL  src/worktrees/pr-manager.test.ts > GitHubApiPrManager > checks GitHub API target identity before merge (missing)
+AssertionError: promise resolved "{ merged: true, …(1) }" instead of rejecting
+
+- Expected
++ Received
+
+- Error {
+-   "message": "rejected promise",
++ {
++   "autoMergeScheduled": false,
++   "merged": true,
+  }
+
+ ❯ src/worktrees/pr-manager.test.ts:629:7
+    627|       prUrl: 'https://github.com/org/repo/pull/42', expectedHeadSha: s…
+    628|       expectedTarget: { repository: 'https://github.com/org/repo', bra…
+    629|     })).rejects.toMatchObject({ code: 'DELIVERY_RECONCILIATION_REQUIRE…
+       |       ^
+    630|     expect(fetchMock).toHaveBeenCalledTimes(1);
+    631|   });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/15]⎯
+
+ FAIL  src/worktrees/pr-manager.test.ts > GitHubApiPrManager > verifies the final GitHub target after the conditioned merge (retargeted=false)
+AssertionError: expected "vi.fn()" to be called 3 times, but got 2 times
+ ❯ src/worktrees/pr-manager.test.ts:648:23
+    646|     if (retargeted) await expect(call).rejects.toMatchObject({ code: '…
+    647|     else expect((await call).merged).toBe(true);
+    648|     expect(fetchMock).toHaveBeenCalledTimes(3);
+       |                       ^
+    649|     expect(JSON.parse(fetchMock.mock.calls[1]?.[1].body).sha).toBe(sha…
+    650|   });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[4/15]⎯
+
+ FAIL  src/worktrees/pr-manager.test.ts > GitHubApiPrManager > verifies the final GitHub target after the conditioned merge (retargeted=true)
+AssertionError: promise resolved "{ merged: true, …(1) }" instead of rejecting
+
+- Expected
++ Received
+
+- Error {
+-   "message": "rejected promise",
++ {
++   "autoMergeScheduled": false,
++   "merged": true,
+  }
+
+ ❯ src/worktrees/pr-manager.test.ts:646:38
+    644|       expectedTarget: { repository: 'git@github.com:org/repo.git', bra…
+    645|     });
+    646|     if (retargeted) await expect(call).rejects.toMatchObject({ code: '…
+       |                                      ^
+    647|     else expect((await call).merged).toBe(true);
+    648|     expect(fetchMock).toHaveBeenCalledTimes(3);
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[5/15]⎯
+
+
+ Test Files  2 failed (2)
+      Tests  15 failed | 87 skipped (102)
+   Start at  00:25:50
+   Duration  338ms (transform 207ms, setup 0ms, import 381ms, tests 14ms, environment 0ms)

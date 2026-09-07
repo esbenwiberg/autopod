@@ -61,7 +61,17 @@ export interface CreatePrConfig {
   handoffInstructions?: string;
 }
 
+export interface MergePrTarget {
+  repository: string;
+  branch: string;
+  baseBranch: string;
+}
+
 export interface MergePrConfig {
+  /** Synchronous final admission after provider preparation/auth, immediately before mutation. */
+  onPrepared?: () => void;
+  /** Exact repository and branches associated with the confirmed source publication. */
+  expectedTarget?: MergePrTarget;
   /** Confirmed published source commit. Legacy callers without it remain unbound. */
   expectedHeadSha?: string;
   /** Worktree path for repository-bound implementations; URL-addressed operations may omit it. */

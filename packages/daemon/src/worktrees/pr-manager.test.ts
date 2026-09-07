@@ -1,7 +1,7 @@
 import type { Profile } from '@autopod/shared';
 import pino from 'pino';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { GhPrManager, GitHubApiPrManager } from './pr-manager.js';
+import { GhPrManager, GitHubApiPrManager, parseGitHubRepoUrl } from './pr-manager.js';
 
 // Track call count so we can return different responses for sequential calls
 let callCount = 0;
@@ -82,6 +82,104 @@ describe('GhPrManager', () => {
       ).rejects.toMatchObject({ code: 'DELIVERY_RECONCILIATION_REQUIRED' });
     },
   );
+
+  it.each(['branch', 'base', 'repository', 'fork', 'missing'] as const)(
+    'checks CLI target identity before merge (%s)',
+    async (change) => {
+      const sha = 'a'.repeat(40);
+      const observation = {
+        state: 'MERGED',
+        headRefOid: sha,
+        url: 'https://github.com/org/repo/pull/42',
+        headRefName: 'feature',
+        baseRefName: 'main',
+        isCrossRepository: false,
+      };
+      const changed =
+        change === 'branch'
+          ? { headRefName: 'other' }
+          : change === 'base'
+            ? { baseRefName: 'release' }
+            : change === 'repository'
+              ? { url: 'https://github.com/org/other/pull/42' }
+              : change === 'fork'
+                ? { isCrossRepository: true }
+                : { headRefName: undefined };
+      execResponses.push(
+        { stdout: JSON.stringify({ ...observation, ...changed }), stderr: '' },
+        { stdout: JSON.stringify(observation), stderr: '' },
+      );
+      await expect(
+        new GhPrManager({ logger, githubAuth }).mergePr({
+          prUrl: observation.url,
+          expectedHeadSha: sha,
+          expectedTarget: {
+            repository: 'https://github.com/org/repo',
+            branch: 'feature',
+            baseBranch: 'main',
+          },
+        }),
+      ).rejects.toMatchObject({ code: 'DELIVERY_RECONCILIATION_REQUIRED' });
+      expect(execCalls.every((call) => (call[1] as string[])[1] === 'view')).toBe(true);
+    },
+  );
+
+  it.each(['merged', 'pending', 'retargeted'] as const)(
+    'observes the final CLI target and disposition (%s)',
+    async (outcome) => {
+      const sha = 'a'.repeat(40);
+      const pr = {
+        url: 'https://github.com/org/repo/pull/42',
+        state: 'OPEN',
+        headRefOid: sha,
+        headRefName: 'feature',
+        baseRefName: 'main',
+        isCrossRepository: false,
+      };
+      execResponses.push(
+        { stdout: JSON.stringify(pr), stderr: '' },
+        { stdout: '', stderr: '' },
+        {
+          stdout: JSON.stringify({
+            ...pr,
+            state: outcome === 'pending' ? 'OPEN' : 'MERGED',
+            baseRefName: outcome === 'retargeted' ? 'release' : 'main',
+          }),
+          stderr: '',
+        },
+      );
+      const call = new GhPrManager({ logger, githubAuth }).mergePr({
+        prUrl: pr.url,
+        expectedHeadSha: sha,
+        expectedTarget: {
+          repository: 'https://github.com/org/repo.git',
+          branch: 'feature',
+          baseBranch: 'main',
+        },
+      });
+      if (outcome === 'retargeted')
+        await expect(call).rejects.toMatchObject({ code: 'DELIVERY_RECONCILIATION_REQUIRED' });
+      else expect(await call).toEqual({ merged: outcome === 'merged', autoMergeScheduled: false });
+      expect(execCalls).toHaveLength(3);
+      expect(execCalls[1]?.[1]).toEqual(expect.arrayContaining(['--match-head-commit', sha]));
+    },
+  );
+
+  it('honors a rejected final CLI admission before executing a merge', async () => {
+    const onPrepared = vi.fn(() => {
+      expect(githubAuth.resolveCredential).toHaveBeenCalledOnce();
+      throw new Error('admission rejected');
+    });
+    await expect(
+      new GhPrManager({ logger, githubAuth }).mergePr({
+        prUrl: 'https://github.com/org/repo/pull/42',
+        expectedHeadSha: 'a'.repeat(40),
+        onPrepared,
+      }),
+    ).rejects.toThrow('admission rejected');
+    expect(execCalls).toHaveLength(0);
+    expect(onPrepared).toHaveBeenCalledOnce();
+  });
 
   it('can be instantiated', () => {
     const manager = new GhPrManager({ logger, githubAuth });
@@ -599,6 +697,93 @@ describe('GitHubApiPrManager', () => {
     },
   );
 
+  it.each(['branch', 'base', 'repository', 'fork', 'missing'] as const)(
+    'checks GitHub API target identity before merge (%s)',
+    async (change) => {
+      const sha = 'a'.repeat(40);
+      const head = {
+        sha,
+        ref: change === 'branch' ? 'other' : 'feature',
+        repo: { full_name: change === 'fork' ? 'someone/repo' : 'org/repo' },
+      };
+      const base =
+        change === 'missing'
+          ? undefined
+          : {
+              ref: change === 'base' ? 'release' : 'main',
+              repo: { full_name: change === 'repository' ? 'org/other' : 'org/repo' },
+            };
+      const fetchMock = makeFetch([
+        { ok: true, body: { head, base } },
+        { ok: true, body: { merged: true } },
+      ]);
+      vi.stubGlobal('fetch', fetchMock);
+      await expect(
+        new GitHubApiPrManager({ pat: 'local-token', logger }).mergePr({
+          prUrl: 'https://github.com/org/repo/pull/42',
+          expectedHeadSha: sha,
+          expectedTarget: {
+            repository: 'https://github.com/org/repo',
+            branch: 'feature',
+            baseBranch: 'main',
+          },
+        }),
+      ).rejects.toMatchObject({ code: 'DELIVERY_RECONCILIATION_REQUIRED' });
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+    },
+  );
+
+  it.each([false, true])(
+    'verifies the final GitHub target after the conditioned merge (retargeted=%s)',
+    async (retargeted) => {
+      const sha = 'a'.repeat(40);
+      const pr = {
+        merged: true,
+        state: 'closed',
+        head: { sha, ref: 'feature', repo: { full_name: 'org/repo' } },
+        base: { ref: 'main', repo: { full_name: 'org/repo' } },
+      };
+      const fetchMock = makeFetch([
+        { ok: true, body: pr },
+        { ok: true, body: { merged: true } },
+        { ok: true, body: retargeted ? { ...pr, base: { ...pr.base, ref: 'other' } } : pr },
+      ]);
+      vi.stubGlobal('fetch', fetchMock);
+      const call = new GitHubApiPrManager({ pat: 'local-token', logger }).mergePr({
+        prUrl: 'https://github.com/org/repo/pull/42',
+        expectedHeadSha: sha,
+        expectedTarget: {
+          repository: 'git@github.com:org/repo.git',
+          branch: 'feature',
+          baseBranch: 'main',
+        },
+      });
+      if (retargeted)
+        await expect(call).rejects.toMatchObject({ code: 'DELIVERY_RECONCILIATION_REQUIRED' });
+      else expect((await call).merged).toBe(true);
+      expect(fetchMock).toHaveBeenCalledTimes(3);
+      expect(JSON.parse(fetchMock.mock.calls[1]?.[1].body).sha).toBe(sha);
+    },
+  );
+
+  it('honors rejected final API admission after reading the source and before PUT', async () => {
+    const sha = 'a'.repeat(40);
+    const fetchMock = makeFetch([{ ok: true, body: { head: { sha } } }]);
+    vi.stubGlobal('fetch', fetchMock);
+    const onPrepared = vi.fn(() => {
+      throw new Error('admission rejected');
+    });
+    await expect(
+      new GitHubApiPrManager({ pat: 'local-token', logger }).mergePr({
+        prUrl: 'https://github.com/org/repo/pull/42',
+        expectedHeadSha: sha,
+        onPrepared,
+      }),
+    ).rejects.toThrow('admission rejected');
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(onPrepared).toHaveBeenCalledOnce();
+  });
+
   it('looks up exact repository/head/base with bounded authenticated GET and rejects errors as absence', async () => {
     const row = {
       html_url: 'https://github.com/org/repo/pull/42',
@@ -754,5 +939,49 @@ describe('GitHubApiPrManager', () => {
     expect(result.resolved).toBe(0);
     expect(result.errors).toEqual(['network down']);
     expect(result.resolutionErrors).toEqual(['GitHub resolve error 500: resolve failed']);
+  });
+});
+
+describe('GitHub repository and PR URL identity', () => {
+  it.each([
+    'https://github.com/org/repo.name.git',
+    'git@github.com:org/repo.name.git',
+    'ssh://git@github.com/org/repo.name.git',
+    'https://github.com/org/repo.name/',
+    'https://fixture-user:fixture-password@github.com/org/repo.name.git',
+  ])('preserves supported exact repository forms: %s', (url) => {
+    expect(parseGitHubRepoUrl(url)).toEqual({ owner: 'org', repo: 'repo.name' });
+  });
+
+  it.each([
+    'https://evilgithub.com/org/repo',
+    'https://example.com/github.com/org/repo',
+    'https://github.com/org/extra/repo',
+    'https://github.com/org/repo?other=1',
+    'https://github.com:8443/org/repo',
+    'https://github.com/org/%2frepo',
+  ])('rejects ambiguous repository identity: %s', (url) => {
+    expect(() => parseGitHubRepoUrl(url)).toThrow();
+  });
+
+  it.each([
+    'https://evilgithub.com/org/repo/pull/42',
+    'https://example.com/github.com/org/repo/pull/42',
+    'https://github.com/org/repo/pull/42not-a-number',
+    'https://github.com/org/repo/pull/0',
+    'https://github.com/org/repo/pull/9007199254740992',
+    'https://github.com/org/%2frepo/pull/42',
+    'https://user:password@github.com/org/repo/pull/42',
+  ])('rejects malformed PR addresses before API reads, merge and replies: %s', async (prUrl) => {
+    const fetchMock = makeFetch([{ ok: true, body: { state: 'closed', merged: true } }]);
+    vi.stubGlobal('fetch', fetchMock);
+    const manager = new GitHubApiPrManager({ pat: 'local-token', logger });
+    for (const call of [
+      () => manager.getPrStatus({ prUrl }),
+      () => manager.mergePr({ prUrl }),
+      () => manager.replyToReviewFeedback({ prUrl, responses: [] }),
+    ])
+      await expect(call()).rejects.toMatchObject({ code: 'DELIVERY_RECONCILIATION_REQUIRED' });
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 });
