@@ -61,7 +61,13 @@ export function createDurablePrManagerFactory(
         return operation;
       },
       findPr: provider.findPr?.bind(provider),
-      mergePr: provider.mergePr.bind(provider),
+      async mergePr(config) {
+        const result = await provider.mergePr(config);
+        // Preserve confirmed provider disposition before the lifecycle caller
+        // continues. Pending/ambiguous requests are not merge observations.
+        if (result.merged) ledger.observe(config.prUrl, 'merged');
+        return result;
+      },
       async getPrStatus(config) {
         const status = await provider.getPrStatus(config);
         ledger.observe(config.prUrl, status.merged ? 'merged' : status.open ? 'open' : 'closed');

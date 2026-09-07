@@ -58,6 +58,115 @@ function fixture(db = createTestDb()) {
 }
 
 describe('durable PR delivery boundary', () => {
+  it('does not create while an unanswered earlier decision is hidden by legacy pointer drift', async () => {
+    const f = fixture();
+    const decision = {
+      id: 'saved-decision',
+      podId: 'pod',
+      type: 'ask_human' as const,
+      timestamp: new Date().toISOString(),
+      response: null,
+      payload: { question: 'Deliver the reviewed work?' },
+    };
+    try {
+      vi.mocked(requireValue(f.provider.findPr)).mockImplementationOnce(async () => {
+        f.repo.update('pod', { status: 'awaiting_input', pendingEscalation: decision });
+        f.repo.completionJournal?.settle(f.repo.getOrThrow('pod'), 'Preserved settlement');
+        f.repo.update('pod', { status: 'validated', pendingEscalation: null });
+        f.db
+          .prepare(
+            "INSERT INTO pod_finalizations(pod_id,generation,cycle,phase,updated_at) SELECT pod_id,generation,cycle+1,'ready',updated_at FROM pod_finalizations WHERE pod_id = 'pod' ORDER BY cycle DESC LIMIT 1",
+          )
+          .run();
+        expect(f.repo.hasUnansweredDecision?.('pod')).toBe(true);
+        return null;
+      });
+      await expect(f.manager.createPr(f.config)).rejects.toThrow(/reconciliation/);
+      expect(f.provider.createPr).not.toHaveBeenCalled();
+      expect(f.db.prepare('SELECT state FROM delivery_intents').get()).toEqual({
+        state: 'reserved',
+      });
+      expect(f.repo.hasUnansweredDecision?.('pod')).toBe(true);
+      // A durable explicit answer resolves the gate; a lost pointer does not.
+      f.repo.completionJournal?.recordReply(
+        { ...f.repo.getOrThrow('pod'), pendingEscalation: decision },
+        'Deliver the reviewed work',
+        { type: 'human', userId: 'reviewer' },
+      );
+      expect(await f.manager.createPr(f.config)).toMatchObject({
+        url: 'https://github.com/org/repo/pull/1',
+      });
+      expect(f.provider.createPr).toHaveBeenCalledTimes(1);
+    } finally {
+      f.db.close();
+    }
+  });
+
+  it.each(['merged', 'pending', 'rejected'] as const)(
+    'records only confirmed merge responses as durable disposition: %s',
+    async (outcome) => {
+      const f = fixture();
+      try {
+        const created = await f.manager.createPr(f.config);
+        if (outcome === 'rejected')
+          vi.mocked(f.provider.mergePr).mockRejectedValue(new Error('ambiguous merge request'));
+        else
+          vi.mocked(f.provider.mergePr).mockResolvedValue({
+            merged: outcome === 'merged',
+            autoMergeScheduled: outcome === 'pending',
+          });
+        const call = () => f.manager.mergePr({ prUrl: created.url });
+        if (outcome === 'rejected') await expect(call()).rejects.toThrow('ambiguous merge request');
+        else {
+          await call();
+          await call();
+        }
+        expect(f.db.prepare('SELECT disposition FROM delivery_observations').all()).toEqual(
+          outcome === 'merged' ? [{ disposition: 'merged' }] : [],
+        );
+        expect(f.db.prepare('SELECT disposition FROM delivery_receipts').get()).toEqual({
+          disposition: 'open',
+        });
+        expect(f.repo.taskExecutions?.snapshot('pod').delivery?.receiptCount).toBe(1);
+      } finally {
+        f.db.close();
+      }
+    },
+  );
+  it('retains a confirmed merge across database close/reopen without another creation receipt', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'merge-disposition-restart-'));
+    const databasePath = join(dir, 'test.db');
+    let db = new Database(databasePath);
+    try {
+      runMigrations(db, new URL('../db/migrations', import.meta.url).pathname, logger);
+      const f = fixture(db);
+      const created = await f.manager.createPr(f.config);
+      vi.mocked(f.provider.mergePr).mockResolvedValue({ merged: true, autoMergeScheduled: false });
+      await f.manager.mergePr({ prUrl: created.url });
+      db.close();
+      db = new Database(databasePath);
+      const restarted = requireValue(
+        createDurablePrManagerFactory(createDeliveryLedger(db), () => f.provider)(f.config.profile),
+      );
+      expect(await restarted.createPr(f.config)).toEqual(created);
+      expect(f.provider.createPr).toHaveBeenCalledTimes(1);
+      expect(db.prepare('SELECT disposition FROM delivery_receipts').all()).toEqual([
+        { disposition: 'open' },
+      ]);
+      expect(db.prepare('SELECT disposition FROM delivery_observations').all()).toEqual([
+        { disposition: 'merged' },
+      ]);
+      expect(createPodRepository(db).taskExecutions?.snapshot('pod').delivery?.receiptCount).toBe(
+        1,
+      );
+      expect(db.pragma('integrity_check', { simple: true })).toBe('ok');
+      expect(db.pragma('foreign_key_check')).toEqual([]);
+    } finally {
+      db.close();
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   it('serializes duplicate completion across wrappers and counts one immutable receipt', async () => {
     const f = fixture();
     try {

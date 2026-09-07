@@ -2,6 +2,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { AutopodError } from '@autopod/shared';
 import type Database from 'better-sqlite3';
 import type { CreatePrConfig, CreatePrResult } from '../interfaces/pr-manager.js';
+import { hasUnansweredDecision } from './decision-admission.js';
 
 export interface DeliveryIntent {
   id: string;
@@ -85,13 +86,21 @@ export function createDeliveryLedger(db: Database.Database): DeliveryLedger {
       return { id, state: 'reserved' as const, generation: pod.generation };
     }),
     claim(intent) {
-      return (
-        db
-          .prepare(
-            `UPDATE delivery_intents SET state = 'creating', updated_at = ? WHERE id = ? AND state = 'reserved' AND generation = (SELECT lifecycle_generation FROM pods WHERE id = delivery_intents.pod_id) AND (SELECT pending_escalation FROM pods WHERE id = delivery_intents.pod_id) IS NULL AND (SELECT status FROM pods WHERE id = delivery_intents.pod_id) NOT IN ('awaiting_input', 'killing', 'killed')`,
-          )
-          .run(new Date().toISOString(), intent.id).changes === 1
-      );
+      return db
+        .transaction(() => {
+          const owner = db
+            .prepare('SELECT pod_id AS podId FROM delivery_intents WHERE id = ?')
+            .get(intent.id) as { podId: string } | undefined;
+          if (!owner || hasUnansweredDecision(db, owner.podId)) return false;
+          return (
+            db
+              .prepare(
+                `UPDATE delivery_intents SET state = 'creating', updated_at = ? WHERE id = ? AND state = 'reserved' AND generation = (SELECT lifecycle_generation FROM pods WHERE id = delivery_intents.pod_id) AND (SELECT pending_escalation FROM pods WHERE id = delivery_intents.pod_id) IS NULL AND (SELECT status FROM pods WHERE id = delivery_intents.pod_id) NOT IN ('awaiting_input', 'killing', 'killed')`,
+              )
+              .run(new Date().toISOString(), intent.id).changes === 1
+          );
+        })
+        .immediate();
     },
     uncertain(id) {
       db.prepare(
