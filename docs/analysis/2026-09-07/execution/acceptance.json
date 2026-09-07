@@ -648,12 +648,8 @@
       "id": "W2.7",
       "requirement": "Matched reproducible benchmark measures 25 percent target and seeded defect escape with fixed coverage; local and live separated",
       "status": "partial",
-      "implementation": [
-        "docs/analysis/2026-09-07/execution/benchmarks/validation-replay.test.ts"
-      ],
-      "tests": [
-        "docs/analysis/2026-09-07/execution/benchmarks/validation-replay.test.ts"
-      ],
+      "implementation": ["docs/analysis/2026-09-07/execution/benchmarks/validation-replay.test.ts"],
+      "tests": ["docs/analysis/2026-09-07/execution/benchmarks/validation-replay.test.ts"],
       "evidence": [
         "receipts/validation-replay-benchmark-initial.json",
         "receipts/validation-replay-benchmark.json",
@@ -937,12 +933,8 @@
       "id": "W4.4",
       "requirement": "Latest validation, history, waivers and delivery reconcile without rewriting failures",
       "status": "partial",
-      "implementation": [
-        "packages/mobile-web/src/components/ValidationSummary.tsx"
-      ],
-      "tests": [
-        "packages/mobile-web/src/components/ValidationSummary.test.tsx"
-      ],
+      "implementation": ["packages/mobile-web/src/components/ValidationSummary.tsx"],
+      "tests": ["packages/mobile-web/src/components/ValidationSummary.test.tsx"],
       "evidence": [
         "receipts/mobile-evidence-history-red.txt",
         "receipts/mobile-evidence-history-green.txt",
@@ -1409,12 +1401,8 @@
         "packages/daemon/src/api/routes/health.ts",
         "packages/daemon/tsup.config.ts"
       ],
-      "tests": [
-        "packages/daemon/src/api/routes/health.test.ts"
-      ],
-      "evidence": [
-        "receipts/backup-health-cli-green.txt"
-      ],
+      "tests": ["packages/daemon/src/api/routes/health.test.ts"],
+      "evidence": ["receipts/backup-health-cli-green.txt"],
       "prerequisites": []
     },
     {
@@ -1434,9 +1422,7 @@
         "packages/daemon/src/db/backup.ts",
         "packages/daemon/src/db/backup-verification.ts"
       ],
-      "tests": [
-        "packages/daemon/src/db/backup.test.ts"
-      ],
+      "tests": ["packages/daemon/src/db/backup.test.ts"],
       "evidence": [
         "receipts/backup-red.txt",
         "receipts/backup-restore-green.txt",
@@ -1454,9 +1440,7 @@
         "packages/daemon/src/db/backup-verification.ts",
         "packages/daemon/src/db/verify-backup-cli.ts"
       ],
-      "tests": [
-        "packages/daemon/src/db/backup.test.ts"
-      ],
+      "tests": ["packages/daemon/src/db/backup.test.ts"],
       "evidence": [
         "receipts/backup-health-cli-green.txt",
         "receipts/backup-scope-red.txt",

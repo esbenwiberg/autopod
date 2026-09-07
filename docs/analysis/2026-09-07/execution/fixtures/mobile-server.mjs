@@ -185,7 +185,8 @@ if (startupRetryFixture) {
   retryState.latest = { id: 'local-startup-failure', outcome: 'transient' };
 }
 const normalDeliveryFixture = process.env.FIXTURE_MODE === 'approval-delivery';
-const approvalPreservationFixture = process.env.FIXTURE_MODE === 'approval-preservation' || normalDeliveryFixture;
+const approvalPreservationFixture =
+  process.env.FIXTURE_MODE === 'approval-preservation' || normalDeliveryFixture;
 let approvalAttempts = 0;
 if (approvalPreservationFixture)
   pod = {
@@ -247,7 +248,10 @@ const server = createServer(async (req, res) => {
         : 'Branch preservation failed. Original resources retained; repair the branch or remote access and retry approval.';
       pod = { ...pod, failureReason: message };
       res.statusCode = 502;
-      return json({ error: normalDeliveryFixture ? 'APPROVAL_DELIVERY_FAILED' : 'BRANCH_PRESERVATION_FAILED', message });
+      return json({
+        error: normalDeliveryFixture ? 'APPROVAL_DELIVERY_FAILED' : 'BRANCH_PRESERVATION_FAILED',
+        message,
+      });
     }
     pod = { ...pod, status: 'complete', failureReason: null };
     return json({ ok: true });
