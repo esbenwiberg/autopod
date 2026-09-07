@@ -406,11 +406,42 @@ export class AdoPrManager implements PrManager {
   }
 
   private extractPrId(prUrl: string): string {
-    const prId = prUrl.split('/').at(-1);
-    if (!prId || Number.isNaN(Number(prId))) {
-      throw new Error(`Cannot extract PR ID from URL: ${prUrl}`);
+    // An explicit numeric reference is already scoped to the configured repository.
+    if (/^[1-9][0-9]*$/.test(prUrl) && Number.isSafeInteger(Number(prUrl))) return prUrl;
+    try {
+      const url = new URL(prUrl);
+      const match = url.pathname.match(/^(.*)\/pullrequest\/([1-9][0-9]*)\/?$/);
+      if (
+        url.protocol !== 'https:' ||
+        url.port ||
+        url.username ||
+        url.password ||
+        !match?.[1] ||
+        !match[2] ||
+        !Number.isSafeInteger(Number(match[2]))
+      )
+        throw new Error('Invalid PR address');
+      const segments = match[1].split('/').slice(1);
+      if (segments.length !== (url.hostname === 'dev.azure.com' ? 4 : 3))
+        throw new Error('Unexpected repository path');
+      const actual = parseAdoRepoUrl(`${url.origin}${match[1]}`);
+      const expected = parseAdoRepoUrl(
+        `${this.orgUrl}/${encodeURIComponent(this.project)}/_git/${encodeURIComponent(this.repoName)}`,
+      );
+      if (
+        actual.orgUrl.toLowerCase() !== expected.orgUrl.toLowerCase() ||
+        actual.project !== expected.project ||
+        actual.repoName !== expected.repoName
+      )
+        throw new Error('Repository identity changed');
+      return match[2];
+    } catch {
+      // Never reinterpret a foreign URL's numeric suffix inside this manager's
+      // configured repository. Do not include credential-bearing input in errors.
+      mergeReconciliation(
+        'The ADO PR URL does not match the configured organization, project and repository.',
+      );
     }
-    return prId;
   }
 
   private parseAdoThreadFeedbackId(feedbackId: string): number | null {

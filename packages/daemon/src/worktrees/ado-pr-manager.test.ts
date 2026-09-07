@@ -752,3 +752,48 @@ describe('ADO source-bound merge confirmation', () => {
     ).toEqual({ merged: false, autoMergeScheduled: false });
   });
 });
+
+describe('ADO URL repository identity', () => {
+  const wrongUrls = [
+    PR_URL.replace('myorg', 'otherorg'),
+    PR_URL.replace('MyProject', 'OtherProject'),
+    PR_URL.replace('MyRepo', 'OtherRepo'),
+    PR_URL.replace('dev.azure.com', 'example.com'),
+    PR_URL.replace('/pullrequest/', '/extra/pullrequest/'),
+    PR_URL.replace('/42', '/0'),
+    PR_URL.replace('/42', '/1.5'),
+    PR_URL.replace('/42', '/1e2'),
+    PR_URL.replace('https://', 'http://'),
+    PR_URL.replace('https://', 'https://user:password@'),
+  ];
+  it.each(wrongUrls)(
+    'rejects mismatched identity before auth, reads, merges or review replies: %s',
+    async (prUrl) => {
+      const fetchMock = makeFetch([{ ok: true, body: { status: 'completed' } }]);
+      const getToken = vi.fn(async () => 'local-fixture-token');
+      vi.stubGlobal('fetch', fetchMock);
+      const manager = new AdoPrManager({ ...BASE_CONFIG, getToken });
+      for (const call of [
+        () => manager.getPrStatus({ prUrl }),
+        () => manager.mergePr({ prUrl }),
+        () => manager.replyToReviewFeedback({ prUrl, responses: [] }),
+      ])
+        await expect(call()).rejects.toMatchObject({ code: 'DELIVERY_RECONCILIATION_REQUIRED' });
+      expect(fetchMock).not.toHaveBeenCalled();
+      expect(getToken).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each([
+    `${PR_URL}/?view=files#discussion`,
+    '42',
+    'https://myorg.visualstudio.com/MyProject/_git/MyRepo/pullrequest/42',
+  ])('resolves a matching canonical or legacy URL: %s', async (prUrl) => {
+    const fetchMock = makeFetch([{ ok: true, body: { status: 'completed' } }]);
+    vi.stubGlobal('fetch', fetchMock);
+    expect((await new AdoPrManager(BASE_CONFIG).getPrStatus({ prUrl })).merged).toBe(true);
+    expect(fetchMock.mock.calls[0]?.[0]).toBe(
+      'https://dev.azure.com/myorg/MyProject/_apis/git/repositories/MyRepo/pullrequests/42?api-version=7.1',
+    );
+  });
+});

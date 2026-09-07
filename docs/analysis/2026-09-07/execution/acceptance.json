@@ -240,7 +240,8 @@
         "receipts/checkpoint-39-validation-identity.json",
         "checkpoint-40.md: source-bound approval requests and explicit provider merge confirmation; durable poller binding and cleanup remain partial",
         "receipts/checkpoint-40-full-validation.txt",
-        "receipts/checkpoint-40-validation-identity.json"
+        "receipts/checkpoint-40-validation-identity.json",
+        "checkpoint-41.md: ADO exact URL repository admission before auth/read/merge/reply; source/PR/base lifecycle binding remains partial"
       ],
       "prerequisites": [
         "PR creation intent/reconciliation implemented locally; broader finalization side effects and operator override remain."
@@ -1663,5 +1664,5 @@
       "prerequisites": []
     }
   ],
-  "lastCheckpoint": "checkpoint-40.md"
+  "lastCheckpoint": "checkpoint-41.md"
 }
