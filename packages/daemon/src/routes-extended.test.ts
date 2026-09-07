@@ -637,9 +637,9 @@ describe('Extended Route Tests', () => {
       `).run({
         id,
         phaseTokenUsage: JSON.stringify({
-          agent_initial: { inputTokens: 1_000_000, outputTokens: 0 },
-          agent_rework_1: { inputTokens: 1_000_000, outputTokens: 0 },
-          review: { inputTokens: 1_000_000, outputTokens: 0 },
+          agent_initial: { inputTokens: 1_000_000, outputTokens: 0, costUsd: 1.25 },
+          agent_rework_1: { inputTokens: 1_000_000, outputTokens: 0, costUsd: 1.25 },
+          review: { inputTokens: 1_000_000, outputTokens: 0, costUsd: 1.25 },
         }),
       });
     }
@@ -656,7 +656,7 @@ describe('Extended Route Tests', () => {
       expect(res.statusCode).toBe(200);
       const body = res.json();
       expect(body.podId).toBe('pod-cost-1');
-      // totalCostUsd = stored agent cost (10) + harness review cost (1M tokens × $1.25/M for gpt-5 = 1.25)
+      // totalCostUsd = stored agent cost (10) + stored harness review cost (1.25)
       expect(body.totalCostUsd).toBe(11.25);
       expect(body.inputTokens).toBe(3_000_000);
       expect(body.segments.map((segment: { bucket: string }) => segment.bucket)).toEqual([
