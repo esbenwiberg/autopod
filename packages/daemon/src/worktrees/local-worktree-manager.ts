@@ -9,6 +9,7 @@ import { type DaemonGitHubAuth, DaemonGitHubAuthError } from '../github/daemon-g
 import type {
   BranchDiffConfig,
   BranchFolderContents,
+  BranchPublicationOptions,
   BranchPublicationReceipt,
   CanonicalDiffClassification,
   CommitPendingChangesOptions,
@@ -1374,7 +1375,7 @@ export class LocalWorktreeManager implements WorktreeManager {
   async pushBranch(
     worktreePath: string,
     expectedBranch: string,
-    options?: { force?: boolean; pat?: string },
+    options?: BranchPublicationOptions,
   ): Promise<BranchPublicationReceipt> {
     const force = options?.force === true;
     this.logger.info({ worktreePath, expectedBranch, force }, 'Pushing branch to origin');
@@ -1479,6 +1480,14 @@ export class LocalWorktreeManager implements WorktreeManager {
     };
     // An immutable source ref prevents a concurrent checkout/commit from silently
     // changing which source the external push publishes.
+    options?.onPrepared?.({
+      branch: expectedBranch,
+      repository,
+      commitSha: source.head,
+      treeSha: source.tree,
+      remoteRef,
+      worktreeClean: true,
+    });
     const refspec = `${source.head}:${remoteRef}`;
     let pushArgs = ['push', '--no-verify', remote.url, refspec];
     if (force) {

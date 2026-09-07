@@ -152,7 +152,6 @@ describe('Extended Route Tests', () => {
       getDiff: vi.fn().mockResolvedValue('diff --git a/file.ts b/file.ts\n+added line'),
       mergeBranch: vi.fn().mockResolvedValue(undefined),
       commitFiles: vi.fn().mockResolvedValue(undefined),
-      pushBranch: vi.fn().mockResolvedValue(undefined),
       getCommitLog: vi.fn().mockResolvedValue(''),
     };
 

@@ -160,6 +160,7 @@ import { buildValidationContextEnv } from '../validation/validation-context-env.
 import { createValidationIdentityCollector } from '../validation/validation-identity-collector.js';
 import { pushCommitsToBareViaStagingRef } from '../worktrees/bare-push.js';
 import { createDurablePrManagerFactory } from '../worktrees/durable-pr-manager.js';
+import { publishSource } from '../worktrees/durable-source-publication.js';
 import { graftHostTreeOntoBase } from '../worktrees/graft-reconcile.js';
 import {
   DeletionGuardError,
@@ -11713,6 +11714,21 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
       const readiness = await resolveApprovalReadiness(pod, { waitForAdvisory: true });
       const approvalReason = assertApprovalAllowed(podId, readiness, options);
       const isWorkspacePod = pod.options?.agentMode === 'interactive';
+      const publishApprovalBranch = async (
+        anchor: Pod,
+        pushOptions?: { force?: boolean; pat?: string },
+      ) => {
+        assertApprovalCurrent(anchor);
+        const ledger = podRepo.sourcePublications;
+        const repository = profileStore.get(anchor.profileName).repoUrl;
+        if (!ledger || !repository)
+          throw new AutopodError(
+            'Durable source publication is unavailable; retain resources and reconcile delivery.',
+            'SOURCE_PUBLICATION_RECONCILIATION_REQUIRED',
+            409,
+          );
+        return publishSource(ledger, anchor, repository, worktreeManager, pushOptions);
+      };
       assertApprovalCurrent(pod);
       if (pod.options.output === 'pr' || pod.options.output === 'branch') {
         const missingIdentity = !pod.worktreePath?.trim()
@@ -11799,9 +11815,9 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
             try {
               const useForce = forceWithLeaseAllowances.has(podId);
               if (useForce) {
-                await worktreeManager.pushBranch(pod.worktreePath, pod.branch, { force: true });
+                await publishApprovalBranch(pod, { force: true });
               } else {
-                await worktreeManager.pushBranch(pod.worktreePath, pod.branch);
+                await publishApprovalBranch(pod);
               }
             } catch (err) {
               logger.warn(
@@ -11908,7 +11924,6 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         const queueKey = MergeQueue.keyFor(approveProfile.repoUrl, mergeBaseBranch);
         const worktreePath = pod.worktreePath;
         const prUrl = pod.prUrl;
-        const branch = pod.branch ?? '';
 
         // Outcome of the queued critical section. We do state transitions outside
         // the queue so the lock is released as quickly as possible.
@@ -11929,7 +11944,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
             const useForce = forceWithLeaseAllowances.has(podId);
             try {
               await deliveryOperation(async () =>
-                worktreeManager.pushBranch(worktreePath, branch, {
+                publishApprovalBranch(mergingAnchor, {
                   pat: await deliveryCredential(approveProfile),
                   ...(useForce ? { force: true } : {}),
                 }),
@@ -11985,7 +12000,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
             if (!rebaseResult.alreadyUpToDate) {
               try {
                 await deliveryOperation(async () =>
-                  worktreeManager.pushBranch(worktreePath, branch, {
+                  publishApprovalBranch(mergingAnchor, {
                     force: true,
                     pat: await deliveryCredential(approveProfile),
                   }),

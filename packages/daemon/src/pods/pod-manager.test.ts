@@ -27,6 +27,7 @@ import Database from 'better-sqlite3';
 import pino from 'pino';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { SandboxContainerManager } from '../containers/sandbox-container-manager.js';
+import { mockBranchPublication } from '../test-utils/mock-helpers.js';
 import { createSessionBridge } from './pod-bridge-impl.js';
 
 // Mock child_process so we can control deriveBareRepoPath and recovery-context git calls
@@ -398,7 +399,7 @@ function createMockWorktreeManager(): WorktreeManager {
     commitFiles: vi.fn(async () => {}),
     commitPendingChanges: vi.fn(async () => false),
     commitPendingChangesWithGeneratedMessage: vi.fn(async () => false),
-    pushBranch: vi.fn(async () => {}),
+    pushBranch: vi.fn(mockBranchPublication),
     ensureRemoteBranch: vi.fn(async ({ branch }) => ({ branch, created: false })),
     pullBranch: vi.fn(async () => ({ newCommits: false })),
     rebaseOntoBase: vi.fn(async () => ({ alreadyUpToDate: false, rebased: true, conflicts: [] })),
@@ -4758,6 +4759,38 @@ describe('PodManager', () => {
   });
 
   describe('approveSession', () => {
+    it('retains resources when a legacy publication adapter supplies no durable evidence', async () => {
+      const ctx = createTestContext();
+      const manager = createPodManager(ctx.deps);
+      const pod = manager.createSession(
+        { profileName: 'test-profile', task: 'Require publication receipt' },
+        'user-1',
+      );
+      ctx.podRepo.update(
+        pod.id,
+        validatedPodUpdates(pod.id, {
+          worktreePath: '/tmp/source',
+          containerId: 'retained-source',
+          filesChanged: 1,
+          prUrl: 'https://github.com/org/repo/pull/42',
+        }),
+      );
+      vi.mocked(ctx.worktreeManager.pushBranch).mockResolvedValue(undefined);
+      await expect(manager.approveSession(pod.id)).rejects.toMatchObject({
+        code: 'APPROVAL_DELIVERY_FAILED',
+      });
+      expect(manager.getSession(pod.id)).toMatchObject({
+        status: 'validated',
+        containerId: 'retained-source',
+        completedAt: null,
+      });
+      expect(ctx.prManager.mergePr).not.toHaveBeenCalled();
+      expect(ctx.containerManager.kill).not.toHaveBeenCalled();
+      expect(ctx.db.prepare('SELECT count(*) AS n FROM source_publication_receipts').get()).toEqual(
+        { n: 0 },
+      );
+    });
+
     it.each(['initial-push', 'rebased-push', 'rebase-conflict'] as const)(
       'keeps failed PR preparation out of merge polling across restart (%s)',
       async (failure) => {
@@ -4785,7 +4818,7 @@ describe('PodManager', () => {
           else if (failure === 'rebased-push') {
             rebase.mockResolvedValueOnce({ rebased: true, alreadyUpToDate: false, conflicts: [] });
             push
-              .mockResolvedValueOnce(undefined)
+              .mockImplementationOnce(mockBranchPublication)
               .mockRejectedValueOnce(new Error('rewritten source unpublished'));
           } else
             rebase.mockResolvedValueOnce({
@@ -6485,8 +6518,9 @@ describe('PodManager', () => {
         // so the branch is durably on origin if the daemon dies between push and emit.
         const order: string[] = [];
         (ctx.worktreeManager.pushBranch as ReturnType<typeof vi.fn>).mockImplementation(
-          async () => {
+          async (...args: Parameters<typeof mockBranchPublication>) => {
             order.push('push');
+            return mockBranchPublication(...args);
           },
         );
         ctx.eventBus.subscribe((e) => {
@@ -6496,7 +6530,14 @@ describe('PodManager', () => {
 
         await manager.approveSession(pod.id);
 
-        expect(ctx.worktreeManager.pushBranch).toHaveBeenCalledWith('/tmp/wt', pod.branch);
+        expect(ctx.worktreeManager.pushBranch).toHaveBeenCalledWith(
+          '/tmp/wt',
+          pod.branch,
+          expect.objectContaining({
+            onPrepared: expect.any(Function),
+            expectedRepository: 'https://github.com/org/repo',
+          }),
+        );
         expect(order).toEqual(['push', 'completed']);
       });
     });

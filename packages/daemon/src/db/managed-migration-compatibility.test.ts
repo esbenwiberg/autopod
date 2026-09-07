@@ -38,6 +38,8 @@ it('upgrades the independently deployed managed schema without skipping native r
       'logical_tasks',
       'validation_phase_evidence',
       'delivery_intents',
+      'source_publication_intents',
+      'source_publication_receipts',
       'scheduled_scan_reports',
       'task_retry_attempts',
       'execution_dispatch_bindings',

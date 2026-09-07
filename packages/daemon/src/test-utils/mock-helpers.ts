@@ -21,6 +21,10 @@ import type {
   ValidationEngine,
   WorktreeManager,
 } from '../interfaces/index.js';
+import type {
+  BranchPublicationOptions,
+  BranchPublicationReceipt,
+} from '../interfaces/worktree-manager.js';
 import { createEscalationRepository } from '../pods/escalation-repository.js';
 import type { EscalationRepository } from '../pods/escalation-repository.js';
 import { createEventBus } from '../pods/event-bus.js';
@@ -36,6 +40,26 @@ import type { PodRepository } from '../pods/pod-repository.js';
 import type { ProfileStore } from '../profiles/index.js';
 import { createScheduledJobRepository } from '../scheduled-jobs/scheduled-job-repository.js';
 import { createScheduledJobTemplateRepository } from '../scheduled-jobs/scheduled-job-template-repository.js';
+
+/** Synthetic transport evidence for lifecycle tests; real Git coverage is separate. */
+export async function mockBranchPublication(
+  _worktreePath: string,
+  branch: string,
+  options?: BranchPublicationOptions,
+): Promise<BranchPublicationReceipt> {
+  const receipt: BranchPublicationReceipt = {
+    branch,
+    repository: options?.expectedRepository?.replace(/\.git$/, '') ?? 'https://github.com/org/repo',
+    commitSha: 'a'.repeat(40),
+    treeSha: 'b'.repeat(40),
+    remoteRef: `refs/heads/${branch}`,
+    observedRemoteCommitSha: 'a'.repeat(40),
+    worktreeClean: true,
+    observedAt: '2026-09-07T12:00:00Z',
+  };
+  options?.onPrepared?.(receipt);
+  return receipt;
+}
 
 export const logger = pino({ level: 'silent' });
 
@@ -210,7 +234,7 @@ export function createMockWorktreeManager(): WorktreeManager {
     pushArtifactBranch: vi.fn(async () => true),
     commitPendingChanges: vi.fn(async () => false),
     commitPendingChangesWithGeneratedMessage: vi.fn(async () => false),
-    pushBranch: vi.fn(async () => {}),
+    pushBranch: vi.fn(mockBranchPublication),
     ensureRemoteBranch: vi.fn(async ({ branch }) => ({ branch, created: false })),
     pullBranch: vi.fn(async () => ({ newCommits: false })),
     rebaseOntoBase: vi.fn(async () => ({ alreadyUpToDate: false, rebased: true, conflicts: [] })),

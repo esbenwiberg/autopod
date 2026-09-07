@@ -229,7 +229,8 @@
         "checkpoint-33.md: transactional durable decision admission and confirmed merge observations; operator disposition projection and broader delivery receipts remain partial",
         "checkpoint-35.md",
         "checkpoint-36.md",
-        "checkpoint-37.md"
+        "checkpoint-37.md",
+        "checkpoint-38.md"
       ],
       "prerequisites": [
         "PR creation intent/reconciliation implemented locally; broader finalization side effects and operator override remain."
@@ -1529,7 +1530,8 @@
         "receipts/migration-renumbering.json",
         "receipts/migration-renumbering-prefix-audit.json",
         "receipts/managed-migration-compatibility-source.json",
-        "receipts/decision-migration-prefix.json"
+        "receipts/decision-migration-prefix.json",
+        "checkpoint-38.md"
       ],
       "prerequisites": [],
       "remaining": "Managed 142-150 definitions retained as inert baseline; unpublished native additions renumbered 151-158. Combined schema upgrade preserves native/managed data locally. Exact remote migration-byte verification awaits approved read-only inspection; no live migration was performed."
@@ -1584,7 +1586,8 @@
         "receipts/interactive-coordination-cli.txt",
         "checkpoint-35.md",
         "checkpoint-36.md",
-        "checkpoint-37.md"
+        "checkpoint-37.md",
+        "checkpoint-38.md"
       ],
       "prerequisites": [
         "Full required pipeline passes on clean 46f63982ea42aef832fcb6df1c21631e468f409c: daemon 4468 passed, one known Linux-only skip; all 15 Turbo tasks passed; audit zero, secret scan and deployment/cleanup safeguards passed. The skipped source callback has separate local Linux proof at unchanged implementation 18e5bd37. Final source validation remains after further implementation."
@@ -1649,5 +1652,5 @@
       "prerequisites": []
     }
   ],
-  "lastCheckpoint": "checkpoint-37.md"
+  "lastCheckpoint": "checkpoint-38.md"
 }

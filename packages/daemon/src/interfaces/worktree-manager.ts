@@ -15,6 +15,18 @@ export interface BranchPublicationReceipt {
   observedAt: string;
 }
 
+export type BranchPublicationSource = Omit<
+  BranchPublicationReceipt,
+  'observedAt' | 'observedRemoteCommitSha'
+>;
+export interface BranchPublicationOptions {
+  expectedRepository?: string;
+  force?: boolean;
+  pat?: string;
+  /** Synchronous durable admission; throwing prevents the external push. */
+  onPrepared?: (source: BranchPublicationSource) => void;
+}
+
 export interface WorktreeCreateConfig {
   repoUrl: string;
   branch: string;
@@ -265,7 +277,7 @@ export interface WorktreeManager {
   pushBranch(
     worktreePath: string,
     expectedBranch: string,
-    options?: { force?: boolean; pat?: string },
+    options?: BranchPublicationOptions,
   ): Promise<BranchPublicationReceipt> | Promise<void>;
   /**
    * Ensure origin has `branch`, publishing an existing local ref when it does not.

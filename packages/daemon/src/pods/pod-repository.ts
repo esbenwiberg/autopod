@@ -50,6 +50,10 @@ import {
   createExecutionProvenanceLedger,
 } from './execution-provenance-ledger.js';
 import { type ProviderUsageProjection, readProviderUsage } from './provider-usage-projection.js';
+import {
+  type SourcePublicationLedger,
+  createSourcePublicationLedger,
+} from './source-publication-ledger.js';
 import { type TaskRetryLedger, createTaskRetryLedger } from './task-retry-ledger.js';
 
 export interface NewPod {
@@ -253,6 +257,7 @@ export interface PodRepository extends Partial<UnitOfWork> {
   /** Defer external publication while an enclosing SQLite transaction is pending. */
   afterInsertCommitted?(id: string, effect: () => void): void;
   deliveryLedger?: DeliveryLedger;
+  sourcePublications?: SourcePublicationLedger;
   taskExecutions?: TaskExecutionLedger;
   completionJournal?: CompletionJournal;
   hasUnansweredDecision?(podId: string): boolean;
@@ -721,6 +726,7 @@ export function createPodRepository(db: Database.Database): PodRepository {
     completionJournal,
     hasUnansweredDecision: (podId) => hasUnansweredDecision(db, podId),
     deliveryLedger: createDeliveryLedger(db),
+    sourcePublications: createSourcePublicationLedger(db),
     taskExecutions,
     insert: db.transaction((pod: NewPod): void => {
       // Keep legacy output_mode and new pod columns in sync.
