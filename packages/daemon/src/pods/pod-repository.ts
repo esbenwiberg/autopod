@@ -244,6 +244,7 @@ export interface PodStats {
 
 import { type CompletionJournal, createCompletionJournal } from './completion-journal.js';
 import { type DeliveryLedger, createDeliveryLedger } from './delivery-ledger.js';
+import { type MergeJournal, createMergeJournal } from './merge-journal.js';
 
 import { type TaskExecutionLedger, createTaskExecutionLedger } from './task-execution-ledger.js';
 
@@ -258,6 +259,7 @@ export interface PodRepository extends Partial<UnitOfWork> {
   afterInsertCommitted?(id: string, effect: () => void): void;
   deliveryLedger?: DeliveryLedger;
   sourcePublications?: SourcePublicationLedger;
+  mergeJournal?: MergeJournal;
   taskExecutions?: TaskExecutionLedger;
   completionJournal?: CompletionJournal;
   hasUnansweredDecision?(podId: string): boolean;
@@ -727,6 +729,7 @@ export function createPodRepository(db: Database.Database): PodRepository {
     hasUnansweredDecision: (podId) => hasUnansweredDecision(db, podId),
     deliveryLedger: createDeliveryLedger(db),
     sourcePublications: createSourcePublicationLedger(db),
+    mergeJournal: createMergeJournal(db),
     taskExecutions,
     insert: db.transaction((pod: NewPod): void => {
       // Keep legacy output_mode and new pod columns in sync.

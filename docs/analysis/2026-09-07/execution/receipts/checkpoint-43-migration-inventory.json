@@ -1,0 +1,8 @@
+{
+  "observedAt": "2026-09-07T23:25:38.393116+00:00",
+  "scope": "Locally available branch and remote-tracking refs; no live remote inventory",
+  "refsInspected": 263,
+  "highestCommittedPrefix": 160,
+  "refsWithPrefix161OrHigher": [],
+  "newMigration": "161_merge_journal.sql"
+}

@@ -1,0 +1,89 @@
+import type { Pod } from '@autopod/shared';
+import type { MergePrConfig, MergePrResult, PrManager } from '../interfaces/pr-manager.js';
+import type { MergeJournal, MergeJournalEntry } from '../pods/merge-journal.js';
+import type { ConfirmedSourcePublication } from './durable-source-publication.js';
+import { mergeReconciliation } from './merge-source-identity.js';
+
+/** An open/absent PR response never proves that an ambiguous mutation failed. */
+export async function reconcileMerge(
+  journal: MergeJournal,
+  pod: Pod,
+  entry: MergeJournalEntry,
+  provider: PrManager,
+): Promise<MergePrResult> {
+  journal.check(pod, entry);
+  if (entry.state === 'merged' && entry.result?.merged) return entry.result;
+  const status = await provider.getPrStatus({
+    prUrl: entry.request.config.prUrl,
+    worktreePath: pod.worktreePath ?? undefined,
+  });
+  if (status.merged !== true || !status.headSha || !status.sourceTarget)
+    return mergeReconciliation(
+      'The earlier merge is not confirmed for its admitted source and target.',
+    );
+  const result: MergePrResult = {
+    merged: true,
+    autoMergeScheduled: false,
+    source: {
+      headSha: status.headSha,
+      target: status.sourceTarget,
+      observedAt: new Date().toISOString(),
+    },
+  };
+  journal.observe(entry.attemptId, result, 'provider_lookup');
+  journal.check(pod, entry);
+  return result;
+}
+
+export async function mergePublishedSource(
+  journal: MergeJournal,
+  pod: Pod,
+  publicationPod: Pod,
+  publication: ConfirmedSourcePublication,
+  provider: PrManager,
+  config: MergePrConfig,
+): Promise<MergePrResult> {
+  const previous = journal.find(pod);
+  if (previous && (previous.state !== 'pending' || previous.result?.autoMergeScheduled)) {
+    if (
+      previous.publicationId !== publication.publicationId ||
+      previous.request.config.squash !== (config.squash === true)
+    )
+      return mergeReconciliation(
+        'The earlier merge source or method requires reconciliation before another request.',
+      );
+    return reconcileMerge(journal, pod, previous, provider);
+  }
+  let attemptId: string | undefined;
+  // Preserve the original requested identity separately from the provider's object.
+  const expected = {
+    ...config,
+    expectedTarget: config.expectedTarget ? { ...config.expectedTarget } : undefined,
+  };
+  try {
+    const result = await provider.mergePr({
+      ...config,
+      expectedTarget: config.expectedTarget ? { ...config.expectedTarget } : undefined,
+      onPrepared() {
+        config.onPrepared?.();
+        if (attemptId)
+          return mergeReconciliation('The provider attempted merge admission more than once.');
+        attemptId = journal.claim(pod, publicationPod, publication.publicationId, expected);
+      },
+    });
+    if (!attemptId)
+      return mergeReconciliation('The provider did not establish durable merge admission.');
+    journal.observe(attemptId, result, 'merge_response');
+    const admitted = journal.find(pod);
+    if (!admitted)
+      return mergeReconciliation('The merge lifecycle changed before confirmation was consumed.');
+    journal.check(pod, admitted);
+    return result;
+  } catch (error) {
+    if (attemptId) {
+      const admitted = journal.find(pod);
+      if (admitted) return reconcileMerge(journal, pod, admitted, provider);
+    }
+    throw error;
+  }
+}

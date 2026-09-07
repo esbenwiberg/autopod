@@ -159,7 +159,24 @@ describe('GhPrManager', () => {
       });
       if (outcome === 'retargeted')
         await expect(call).rejects.toMatchObject({ code: 'DELIVERY_RECONCILIATION_REQUIRED' });
-      else expect(await call).toEqual({ merged: outcome === 'merged', autoMergeScheduled: false });
+      else
+        expect(await call).toEqual({
+          merged: outcome === 'merged',
+          autoMergeScheduled: false,
+          ...(outcome === 'merged'
+            ? {
+                source: {
+                  headSha: sha,
+                  target: {
+                    repository: 'https://github.com/org/repo.git',
+                    branch: 'feature',
+                    baseBranch: 'main',
+                  },
+                  observedAt: expect.any(String),
+                },
+              }
+            : {}),
+        });
       expect(execCalls).toHaveLength(3);
       expect(execCalls[1]?.[1]).toEqual(expect.arrayContaining(['--match-head-commit', sha]));
     },
@@ -298,6 +315,37 @@ describe('GhPrManager', () => {
 
     expect(result).toEqual({ merged: false, autoMergeScheduled: true });
   });
+
+  it.each(['matched', 'other-pr', 'fork', 'missing'])(
+    'projects CLI recovery identity only for the requested non-fork PR (%s)',
+    async (scenario) => {
+      execResponses.push({
+        stdout: JSON.stringify({
+          state: 'MERGED',
+          headRefOid: 'a'.repeat(40),
+          url: `https://github.com/org/repo/pull/${scenario === 'other-pr' ? 43 : 42}`,
+          headRefName: scenario === 'missing' ? undefined : 'feature',
+          baseRefName: 'main',
+          isCrossRepository: scenario === 'fork',
+        }),
+        stderr: '',
+      });
+      const status = await new GhPrManager({ logger, githubAuth }).getPrStatus({
+        prUrl: 'https://github.com/org/repo/pull/42',
+      });
+      expect(status.merged).toBe(true);
+      expect(status.headSha).toBe('a'.repeat(40));
+      expect(status.sourceTarget).toEqual(
+        scenario === 'matched'
+          ? {
+              repository: 'https://github.com/org/repo',
+              branch: 'feature',
+              baseBranch: 'main',
+            }
+          : undefined,
+      );
+    },
+  );
 
   it('getPrStatus returns merged when PR is merged', async () => {
     execResponses.push({
@@ -646,6 +694,45 @@ describe('GitHubApiPrManager', () => {
   beforeEach(() => {
     vi.unstubAllGlobals();
   });
+
+  it.each(['matched', 'other-pr', 'fork', 'missing'])(
+    'projects API recovery identity only for the requested non-fork PR (%s)',
+    async (scenario) => {
+      vi.stubGlobal(
+        'fetch',
+        makeFetch([
+          {
+            ok: true,
+            body: {
+              merged: true,
+              state: 'closed',
+              number: scenario === 'other-pr' ? 43 : 42,
+              head: {
+                sha: 'a'.repeat(40),
+                ref: scenario === 'missing' ? undefined : 'feature',
+                repo: { full_name: scenario === 'fork' ? 'other/repo' : 'org/repo' },
+              },
+              base: { ref: 'main', repo: { full_name: 'org/repo' } },
+            },
+          },
+        ]),
+      );
+      const status = await new GitHubApiPrManager({ pat: 'local-token', logger }).getPrStatus({
+        prUrl: 'https://github.com/org/repo/pull/42',
+      });
+      expect(status.merged).toBe(true);
+      expect(status.headSha).toBe('a'.repeat(40));
+      expect(status.sourceTarget).toEqual(
+        scenario === 'matched'
+          ? {
+              repository: 'https://github.com/org/repo',
+              branch: 'feature',
+              baseBranch: 'main',
+            }
+          : undefined,
+      );
+    },
+  );
 
   it('sends the expected source SHA to the GitHub merge condition and preserves the branch', async () => {
     const sha = 'a'.repeat(40);

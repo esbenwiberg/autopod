@@ -41,6 +41,7 @@ import { createProfileStore } from './profiles/index.js';
 import {
   createMockWorktreeManager,
   createMockContainerManager as createSharedMockContainerManager,
+  mockPrMerge,
 } from './test-utils/mock-helpers.js';
 
 const migrationsDir = path.resolve(import.meta.dirname, 'db/migrations');
@@ -922,7 +923,7 @@ describe('Extended Route Tests', () => {
         if (delivery === 'existing-pr-push') {
           approvalPrManager = {
             createPr: vi.fn(),
-            mergePr: vi.fn().mockResolvedValue({ merged: true, autoMergeScheduled: false }),
+            mergePr: vi.fn().mockImplementation(mockPrMerge),
             getPrStatus: vi.fn().mockResolvedValue({
               open: true,
               merged: false,

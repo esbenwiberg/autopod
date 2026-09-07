@@ -401,6 +401,36 @@ export interface LocalWorktreeManagerConfig {
  * Each pod gets its own worktree checked out from the bare repo.
  */
 export class LocalWorktreeManager implements WorktreeManager {
+  async inspectSource(worktreePath: string, expectedBranch: string) {
+    const branch = (
+      await git(['rev-parse', '--abbrev-ref', 'HEAD'], { cwd: worktreePath })
+    ).stdout.trim();
+    const commitSha = (await git(['rev-parse', 'HEAD'], { cwd: worktreePath })).stdout.trim();
+    const treeSha = (
+      await git(['rev-parse', `${commitSha}^{tree}`], { cwd: worktreePath })
+    ).stdout.trim();
+    const status = await git(['status', '--porcelain=v1', '-z', '--untracked-files=normal'], {
+      cwd: worktreePath,
+    });
+    const after = (await git(['rev-parse', 'HEAD'], { cwd: worktreePath })).stdout.trim();
+    const branchAfter = (
+      await git(['rev-parse', '--abbrev-ref', 'HEAD'], { cwd: worktreePath })
+    ).stdout.trim();
+    if (
+      branch !== expectedBranch ||
+      branchAfter !== branch ||
+      after !== commitSha ||
+      !/^(?:[a-f0-9]{40}|[a-f0-9]{64})$/.test(commitSha) ||
+      !/^(?:[a-f0-9]{40}|[a-f0-9]{64})$/.test(treeSha)
+    )
+      throw new AutopodError(
+        'Local source identity changed during recovery; retain resources.',
+        'SOURCE_PUBLICATION_RECONCILIATION_REQUIRED',
+        409,
+      );
+    return { branch, commitSha, treeSha, worktreeClean: status.stdout.length === 0 };
+  }
+
   async inspectContractBase(worktreePath: string, baseBranch: string, facts: RequiredFact[]) {
     return inspectContractBase(worktreePath, baseBranch, facts);
   }

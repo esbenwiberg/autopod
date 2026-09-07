@@ -1,5 +1,5 @@
 import { AutopodError } from '@autopod/shared';
-import type { MergePrTarget } from '../interfaces/pr-manager.js';
+import type { MergePrConfig, MergePrResult, MergePrTarget } from '../interfaces/pr-manager.js';
 import { parseGitHubRepoUrl } from './github-url-identity.js';
 
 export function sourceCommit(value: unknown): string | undefined {
@@ -95,4 +95,25 @@ export function assertMergeTarget(
         'The PR source or base branch does not match the admitted delivery target.',
       );
   }
+}
+
+/** Call only after the adapter has checked final provider source/target evidence. */
+export function confirmedMergeResult(
+  config: MergePrConfig,
+  merged: boolean,
+  autoMergeScheduled: boolean,
+): MergePrResult {
+  return {
+    merged,
+    autoMergeScheduled,
+    ...(merged && config.expectedHeadSha && config.expectedTarget
+      ? {
+          source: {
+            headSha: config.expectedHeadSha,
+            target: { ...config.expectedTarget },
+            observedAt: new Date().toISOString(),
+          },
+        }
+      : {}),
+  };
 }

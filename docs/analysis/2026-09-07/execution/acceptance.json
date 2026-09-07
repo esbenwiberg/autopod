@@ -179,7 +179,10 @@
         "packages/daemon/src/worktrees/merge-source-identity.ts",
         "packages/daemon/src/worktrees/pr-manager.ts",
         "packages/daemon/src/worktrees/ado-pr-manager.ts",
-        "packages/daemon/src/worktrees/github-url-identity.ts"
+        "packages/daemon/src/worktrees/github-url-identity.ts",
+        "packages/daemon/src/db/migrations/161_merge_journal.sql",
+        "packages/daemon/src/pods/merge-journal.ts",
+        "packages/daemon/src/worktrees/durable-merge.ts"
       ],
       "tests": [
         "packages/daemon/src/pods/completion-journal.test.ts",
@@ -192,7 +195,9 @@
         "packages/daemon/src/pods/sandbox-terminal-reaper.test.ts",
         "packages/daemon/src/pods/local-reconciler.test.ts",
         "packages/daemon/src/pods/reconciler.test.ts",
-        "packages/daemon/src/pods/polling-coordinator.test.ts"
+        "packages/daemon/src/pods/polling-coordinator.test.ts",
+        "packages/daemon/src/pods/merge-journal.test.ts",
+        "packages/daemon/src/worktrees/local-worktree-manager.git.test.ts"
       ],
       "evidence": [
         "receipts/journal-migration.txt",
@@ -248,7 +253,8 @@
         "receipts/checkpoint-41-validation-identity.json",
         "checkpoint-42.md: exact repository/head/base and final merge lifecycle admission; restart-safe merge journal, poller reconciliation and cleanup remain partial",
         "receipts/checkpoint-42-full-validation.txt",
-        "receipts/checkpoint-42-validation-identity.json"
+        "receipts/checkpoint-42-validation-identity.json",
+        "checkpoint-43.md: durable approval merge admission and recovery; poller, resource cleanup and broader acceptance remain partial"
       ],
       "prerequisites": [
         "PR creation intent/reconciliation implemented locally; broader finalization side effects and operator override remain."
@@ -1671,5 +1677,5 @@
       "prerequisites": []
     }
   ],
-  "lastCheckpoint": "checkpoint-42.md"
+  "lastCheckpoint": "checkpoint-43.md"
 }

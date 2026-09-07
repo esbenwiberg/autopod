@@ -7,6 +7,10 @@ import type {
 } from '../interfaces/worktree-manager.js';
 import type { SourcePublicationLedger } from '../pods/source-publication-ledger.js';
 
+export interface ConfirmedSourcePublication extends BranchPublicationReceipt {
+  publicationId: string;
+}
+
 function repositoryIdentity(raw: string): string {
   const scp = raw.match(/^git@([^:]+):(.+)$/);
   const url = new URL(scp ? `https://${scp[1]}/${scp[2]}` : raw);
@@ -17,7 +21,7 @@ async function performPublication(
   pod: Pod,
   expectedRepository: string,
   publish: (options: BranchPublicationOptions) => Promise<BranchPublicationReceipt> | Promise<void>,
-): Promise<BranchPublicationReceipt> {
+): Promise<ConfirmedSourcePublication> {
   let intentId: string | undefined;
   const failure = () =>
     new AutopodError(
@@ -36,7 +40,7 @@ async function performPublication(
   });
   if (!intentId || !receipt) throw failure();
   ledger.confirm(pod, intentId, receipt);
-  return receipt;
+  return { ...receipt, publicationId: intentId };
 }
 
 export function publishSource(
@@ -45,7 +49,7 @@ export function publishSource(
   expectedRepository: string,
   manager: WorktreeManager,
   options?: Omit<BranchPublicationOptions, 'onPrepared'>,
-): Promise<BranchPublicationReceipt> {
+): Promise<ConfirmedSourcePublication> {
   return performPublication(ledger, pod, expectedRepository, (admission) =>
     manager.pushBranch(pod.worktreePath ?? '', pod.branch, { ...options, ...admission }),
   );
@@ -57,7 +61,7 @@ export function publishCommittedSource(
   expectedRepository: string,
   manager: WorktreeManager,
   config: Omit<MergeBranchConfig, 'onPrepared' | 'expectedRepository'>,
-): Promise<BranchPublicationReceipt> {
+): Promise<ConfirmedSourcePublication> {
   if (config.worktreePath !== pod.worktreePath || config.targetBranch !== pod.branch)
     throw new AutopodError(
       'Commit-and-push source identity changed; retain original resources.',

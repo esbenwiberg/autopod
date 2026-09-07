@@ -188,6 +188,40 @@ describe('AdoPrManager.getPrStatus', () => {
     vi.unstubAllGlobals();
   });
 
+  it.each(['matched', 'other-pr', 'fork', 'missing'])(
+    'projects ADO recovery identity only for the requested non-fork PR (%s)',
+    async (scenario) => {
+      vi.stubGlobal(
+        'fetch',
+        makeFetch([
+          {
+            ok: true,
+            body: {
+              status: 'completed',
+              pullRequestId: scenario === 'other-pr' ? 43 : 42,
+              sourceRefName: scenario === 'missing' ? undefined : 'refs/heads/feature',
+              targetRefName: 'refs/heads/main',
+              forkSource: scenario === 'fork' ? {} : undefined,
+              lastMergeSourceCommit: { commitId: 'a'.repeat(40) },
+            },
+          },
+        ]),
+      );
+      const status = await new AdoPrManager(BASE_CONFIG).getPrStatus({ prUrl: PR_URL });
+      expect(status.merged).toBe(true);
+      expect(status.headSha).toBe('a'.repeat(40));
+      expect(status.sourceTarget).toEqual(
+        scenario === 'matched'
+          ? {
+              repository: 'https://dev.azure.com/myorg/MyProject/_git/MyRepo',
+              branch: 'feature',
+              baseBranch: 'main',
+            }
+          : undefined,
+      );
+    },
+  );
+
   it('returns merged:true when PR is completed', async () => {
     vi.stubGlobal('fetch', makeFetch([{ ok: true, body: { status: 'completed' } }]));
     const manager = new AdoPrManager(BASE_CONFIG);

@@ -43,6 +43,29 @@ import { createScheduledJobRepository } from '../scheduled-jobs/scheduled-job-re
 import { createScheduledJobTemplateRepository } from '../scheduled-jobs/scheduled-job-template-repository.js';
 
 /** Synthetic transport evidence for lifecycle tests; real Git coverage is separate. */
+/** Synthetic provider evidence for local lifecycle fixtures, never live provider proof. */
+export async function mockPrMerge(
+  config: import('../interfaces/pr-manager.js').MergePrConfig,
+): Promise<import('../interfaces/pr-manager.js').MergePrResult> {
+  config.onPrepared?.();
+  return {
+    merged: true,
+    autoMergeScheduled: false,
+    ...(config.expectedHeadSha && config.expectedTarget
+      ? {
+          source: {
+            headSha: config.expectedHeadSha,
+            target: { ...config.expectedTarget },
+            observedAt: new Date().toISOString(),
+          },
+        }
+      : {}),
+  };
+}
+export async function mockSourceSnapshot(_worktreePath: string, branch: string) {
+  return { branch, commitSha: 'a'.repeat(40), treeSha: 'b'.repeat(40), worktreeClean: true };
+}
+
 export async function mockBranchPublication(
   _worktreePath: string,
   branch: string,
@@ -211,6 +234,7 @@ export function createMockContainerManager(): ContainerManager {
 
 export function createMockWorktreeManager(): WorktreeManager {
   return {
+    inspectSource: vi.fn(mockSourceSnapshot),
     inspectContractBase: vi.fn(async (_worktreePath, _baseBranch, facts) => ({
       baseCommitSha: 'a'.repeat(40),
       artifacts: facts.map((f) => ({

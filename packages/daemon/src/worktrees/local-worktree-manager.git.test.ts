@@ -93,6 +93,30 @@ describe('LocalWorktreeManager real Git regressions', () => {
     return result.worktreePath;
   }
 
+  it('inspects retained source and dirty edits without publishing or altering the remote', async () => {
+    const worktree = await createRebasedFeature('source-inspection');
+    const remoteBefore = await git(remote, ['rev-parse', 'refs/heads/feature']);
+    const commitSha = await git(worktree, ['rev-parse', 'HEAD']);
+    const treeSha = await git(worktree, ['rev-parse', 'HEAD^{tree}']);
+    expect(await manager.inspectSource(worktree, 'feature')).toEqual({
+      branch: 'feature',
+      commitSha,
+      treeSha,
+      worktreeClean: true,
+    });
+    await writeFile(path.join(worktree, 'new-unpublished.txt'), 'retain this work');
+    expect(await manager.inspectSource(worktree, 'feature')).toEqual({
+      branch: 'feature',
+      commitSha,
+      treeSha,
+      worktreeClean: false,
+    });
+    await expect(manager.inspectSource(worktree, 'wrong-branch')).rejects.toThrow(
+      'identity changed',
+    );
+    expect(await git(remote, ['rev-parse', 'refs/heads/feature'])).toBe(remoteBefore);
+  });
+
   it('force-pushes to a URL when the explicit remote OID lease still matches', async () => {
     const worktree = await createRebasedFeature('lease-success');
 
@@ -181,7 +205,8 @@ describe('LocalWorktreeManager real Git regressions', () => {
         try {
           const resumed = createSourcePublicationLedger(reopened);
           expect(resumed.get(id)).toMatchObject({ state: 'admitted', receipt: null });
-          const receipt = await publish(resumed, manager);
+          const { publicationId, ...receipt } = await publish(resumed, manager);
+          expect(publicationId).toBe(id);
           expect(resumed.get(id)).toMatchObject({ state: 'confirmed', receipt });
           expect(
             reopened.prepare('SELECT count(*) AS n FROM source_publication_intents').get(),

@@ -7,6 +7,7 @@ import type {
   FoundPr,
   MergePrConfig,
   MergePrResult,
+  MergePrTarget,
   PrManager,
   PrMergeStatus,
   ReviewCommentDetail,
@@ -20,6 +21,7 @@ import {
   assertMergeRepository,
   assertMergeSource,
   assertMergeTarget,
+  confirmedMergeResult,
   expectedMergeSource,
   mergeReconciliation,
   sourceCommit,
@@ -544,7 +546,7 @@ export class AdoPrManager implements PrManager {
     checkTarget(result);
 
     this.logger.info({ prUrl: config.prUrl, prId }, 'ADO pull request completed');
-    return { merged: true, autoMergeScheduled: false };
+    return confirmedMergeResult(config, true, false);
   }
 
   async replyToReviewFeedback(config: {
@@ -587,15 +589,32 @@ export class AdoPrManager implements PrManager {
     const pr = (await this.adoFetch(`/pullrequests/${prId}?api-version=7.1`, {
       method: 'GET',
     })) as {
+      pullRequestId?: number;
       status: string;
+      sourceRefName?: string;
+      targetRefName?: string;
+      forkSource?: unknown;
       mergeStatus?: string;
       repository: { id: string };
       lastMergeSourceCommit?: { commitId?: string };
     };
 
+    const sourceTarget: MergePrTarget | undefined =
+      pr.pullRequestId === Number(prId) &&
+      !pr.forkSource &&
+      pr.sourceRefName?.startsWith('refs/heads/') &&
+      pr.targetRefName?.startsWith('refs/heads/')
+        ? {
+            repository: `${this.orgUrl}/${encodeURIComponent(this.project)}/_git/${encodeURIComponent(this.repoName)}`,
+            branch: pr.sourceRefName.slice(11),
+            baseBranch: pr.targetRefName.slice(11),
+          }
+        : undefined;
+
     if (pr.status === 'completed') {
       return {
         headSha: sourceCommit(pr.lastMergeSourceCommit?.commitId),
+        sourceTarget,
         merged: true,
         open: false,
         blockReason: null,
@@ -606,6 +625,7 @@ export class AdoPrManager implements PrManager {
     if (pr.status === 'abandoned') {
       return {
         headSha: sourceCommit(pr.lastMergeSourceCommit?.commitId),
+        sourceTarget,
         merged: false,
         open: false,
         blockReason: 'PR was abandoned',
@@ -740,6 +760,7 @@ export class AdoPrManager implements PrManager {
 
     return {
       headSha: sourceCommit(pr.lastMergeSourceCommit?.commitId),
+      sourceTarget,
       merged: false,
       open: true,
       blockReason: reasons.length > 0 ? reasons.join('; ') : 'Waiting for policies to pass',

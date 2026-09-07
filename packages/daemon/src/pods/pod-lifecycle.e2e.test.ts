@@ -35,6 +35,7 @@ import {
   createTestContext,
   escalationEvent,
   insertTestProfile,
+  mockPrMerge,
   statusEvent,
 } from '../test-utils/mock-helpers.js';
 import { type PodManager, createPodManager } from './pod-manager.js';
@@ -48,7 +49,7 @@ function createMockPrManager(): PrManager {
       url: 'https://github.com/org/repo/pull/42',
       usedFallback: false,
     })),
-    mergePr: vi.fn(async () => ({ merged: true, autoMergeScheduled: false })),
+    mergePr: vi.fn(mockPrMerge),
     getPrStatus: vi.fn(async () => ({
       merged: true,
       open: false,

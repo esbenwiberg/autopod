@@ -11,6 +11,7 @@ export type PublicationSource = Omit<
 export interface SourcePublicationLedger {
   admit(pod: Pod, source: PublicationSource): string;
   confirm(pod: Pod, id: string, receipt: BranchPublicationReceipt): void;
+  confirmedForMerge(publicationPod: Pod, currentPod: Pod, id: string): BranchPublicationReceipt;
   get(
     id: string,
   ): { state: 'admitted' | 'confirmed'; receipt: BranchPublicationReceipt | null } | null;
@@ -172,6 +173,23 @@ export function createSourcePublicationLedger(db: Database.Database): SourcePubl
           new Date().toISOString(),
         );
       }).immediate();
+    },
+    confirmedForMerge(publicationPod, currentPod, id) {
+      assertCurrent(currentPod);
+      const row = db
+        .prepare(
+          'SELECT i.identity, r.receipt FROM source_publication_intents i JOIN source_publication_receipts r ON r.intent_id = i.id WHERE i.id = ? AND length(r.receipt) <= 16384',
+        )
+        .get(id) as { identity: string; receipt: string } | undefined;
+      requireEvidence(Boolean(row));
+      const receipt = JSON.parse(row?.receipt ?? 'null') as BranchPublicationReceipt;
+      requireEvidence(
+        (publicationPod.prUrl === null || publicationPod.prUrl === currentPod.prUrl) &&
+          row?.identity === identity(publicationPod, receipt) &&
+          identity({ ...publicationPod, prUrl: currentPod.prUrl }, receipt) ===
+            identity(currentPod, receipt),
+      );
+      return receipt;
     },
     get(id) {
       const row = db

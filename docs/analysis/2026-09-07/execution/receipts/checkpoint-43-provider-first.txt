@@ -1,0 +1,43 @@
+
+ RUN  v4.1.11 /private/tmp/autopod-durable-execution/packages/daemon
+
+ ❯ src/worktrees/pr-manager.test.ts (59 tests | 1 failed) 24ms
+     × observes the final CLI target and disposition (merged) 7ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/worktrees/pr-manager.test.ts > GhPrManager > observes the final CLI target and disposition (merged)
+AssertionError: expected { merged: true, …(2) } to deeply equal { merged: true, …(1) }
+
+- Expected
++ Received
+
+  {
+    "autoMergeScheduled": false,
+    "merged": true,
++   "source": {
++     "headSha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
++     "observedAt": "2026-09-07T23:03:54.792Z",
++     "target": {
++       "baseBranch": "main",
++       "branch": "feature",
++       "repository": "https://github.com/org/repo.git",
++     },
++   },
+  }
+
+ ❯ src/worktrees/pr-manager.test.ts:162:31
+    160|       if (outcome === 'retargeted')
+    161|         await expect(call).rejects.toMatchObject({ code: 'DELIVERY_REC…
+    162|       else expect(await call).toEqual({ merged: outcome === 'merged', …
+       |                               ^
+    163|       expect(execCalls).toHaveLength(3);
+    164|       expect(execCalls[1]?.[1]).toEqual(expect.arrayContaining(['--mat…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed | 4 passed (5)
+      Tests  1 failed | 130 passed (131)
+   Start at  01:03:54
+   Duration  1.09s (transform 746ms, setup 0ms, import 1.25s, tests 1.25s, environment 1ms)

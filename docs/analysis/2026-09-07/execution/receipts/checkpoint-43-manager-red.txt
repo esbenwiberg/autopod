@@ -1,0 +1,58 @@
+
+ RUN  v4.1.11 /private/tmp/autopod-durable-execution/packages/daemon
+
+ ❯ src/pods/pod-manager.test.ts (502 tests | 3 failed | 499 skipped) 165ms
+       × reconciles an ambiguous admitted merge after manager restart without publishing again (existing) 79ms
+       × reconciles an ambiguous admitted merge after manager restart without publishing again (new) 44ms
+       × does not treat a legacy merge adapter without durable admission as confirmed delivery 41ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 3 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/pods/pod-manager.test.ts > PodManager > approveSession > reconciles an ambiguous admitted merge after manager restart without publishing again (existing)
+ FAIL  src/pods/pod-manager.test.ts > PodManager > approveSession > reconciles an ambiguous admitted merge after manager restart without publishing again (new)
+AssertionError: promise resolved "undefined" instead of rejecting
+
+- Expected:
+Error {
+  "message": "rejected promise",
+}
+
++ Received:
+undefined
+
+ ❯ src/pods/pod-manager.test.ts:4778:52
+    4776|           throw new Error('provider response lost after mutation');
+    4777|         });
+    4778|         await expect(manager.approveSession(pod.id)).rejects.toMatchOb…
+       |                                                    ^
+    4779|         expect(manager.getSession(pod.id)).toMatchObject({ status: 'va…
+    4780|         expect(ctx.db.prepare('SELECT count(*) AS n FROM merge_attempt…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/3]⎯
+
+ FAIL  src/pods/pod-manager.test.ts > PodManager > approveSession > does not treat a legacy merge adapter without durable admission as confirmed delivery
+AssertionError: promise resolved "undefined" instead of rejecting
+
+- Expected:
+Error {
+  "message": "rejected promise",
+}
+
++ Received:
+undefined
+
+ ❯ src/pods/pod-manager.test.ts:4809:50
+    4807|       ctx.podRepo.update(pod.id, validatedPodUpdates(pod.id, { worktre…
+    4808|       vi.mocked(ctx.prManager.mergePr).mockResolvedValue({ merged: tru…
+    4809|       await expect(manager.approveSession(pod.id)).rejects.toMatchObje…
+       |                                                  ^
+    4810|       expect(manager.getSession(pod.id).status).toBe('validated');
+    4811|       expect(ctx.containerManager.kill).not.toHaveBeenCalled();
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/3]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  3 failed | 499 skipped (502)
+   Start at  00:50:19
+   Duration  1.38s (transform 758ms, setup 0ms, import 1.11s, tests 165ms, environment 0ms)

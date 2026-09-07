@@ -159,6 +159,7 @@ import {
 import { buildValidationContextEnv } from '../validation/validation-context-env.js';
 import { createValidationIdentityCollector } from '../validation/validation-identity-collector.js';
 import { pushCommitsToBareViaStagingRef } from '../worktrees/bare-push.js';
+import { mergePublishedSource, reconcileMerge } from '../worktrees/durable-merge.js';
 import { createDurablePrManagerFactory } from '../worktrees/durable-pr-manager.js';
 import { publishCommittedSource, publishSource } from '../worktrees/durable-source-publication.js';
 import { graftHostTreeOntoBase } from '../worktrees/graft-reconcile.js';
@@ -169,6 +170,7 @@ import {
   GitTransientFetchError,
 } from '../worktrees/local-worktree-manager.js';
 import { MergeQueue } from '../worktrees/merge-queue.js';
+import { mergeReconciliation } from '../worktrees/merge-source-identity.js';
 import { transferCommitToContainer } from '../worktrees/sandbox-reconcile.js';
 import {
   type SandboxWorkspaceCheckpointArgs,
@@ -11759,6 +11761,44 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         }
       }
 
+      let recoveredMerge = false;
+      if (pod.prUrl && podRepo.mergeJournal) {
+        try {
+          const entry = podRepo.mergeJournal.find(pod);
+          if (entry && (entry.state !== 'pending' || entry.result?.autoMergeScheduled)) {
+            if (options.squash !== undefined && entry.request.config.squash !== options.squash)
+              mergeReconciliation('An earlier admitted merge uses a different method.');
+            const provider = prManagerFactory?.(profileStore.get(pod.profileName));
+            if (!provider) mergeReconciliation('The original merge provider is unavailable.');
+            const result = await reconcileMerge(podRepo.mergeJournal, pod, entry, provider);
+            assertApprovalCurrent(pod);
+            const source = podRepo.sourcePublications?.confirmedForMerge(
+              { ...pod, prUrl: entry.request.publicationPrUrl },
+              pod,
+              entry.publicationId,
+            );
+            if (!source || !pod.worktreePath || !worktreeManager.inspectSource)
+              mergeReconciliation('Retained local source cannot be verified before cleanup.');
+            const snapshot = await worktreeManager.inspectSource(pod.worktreePath, pod.branch);
+            assertApprovalCurrent(pod);
+            if (
+              !snapshot.worktreeClean ||
+              snapshot.branch !== source.branch ||
+              snapshot.commitSha !== source.commitSha ||
+              snapshot.treeSha !== source.treeSha
+            )
+              mergeReconciliation('Retained local source changed after the admitted publication.');
+            recoveredMerge = result.merged;
+          }
+        } catch (error) {
+          assertApprovalCurrent(pod);
+          const reason = `Approval delivery failed. ${error instanceof Error ? error.message : String(error)} Original resources retained; reconcile delivery before retrying approval.`;
+          podRepo.update(podId, { failureReason: reason });
+          emitActivityError(podId, reason, false);
+          throw new AutopodError(reason, 'APPROVAL_DELIVERY_FAILED', 502);
+        }
+      }
+
       // No-change fast-path: skip PR creation and complete directly.
       // Workspace pods are excluded — their human edits live in the container until
       // mergeBranch() runs container→host sync-back, so they MUST take the normal
@@ -11934,7 +11974,27 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
       // Merge the PR if one was created, otherwise fall back to branch push
       const approveProfile = profileStore.get(pod.profileName);
       const prManager = prManagerFactory ? prManagerFactory(approveProfile) : null;
-      if (pod.prUrl && prManager && pod.worktreePath) {
+      const mergeApprovalSource = (
+        publication: Awaited<ReturnType<typeof publishApprovalBranch>>,
+        provider: PrManager,
+        config: Parameters<PrManager['mergePr']>[0],
+      ) => {
+        if (!podRepo.mergeJournal) mergeReconciliation('Durable merge admission is unavailable.');
+        return mergePublishedSource(
+          podRepo.mergeJournal,
+          podRepo.getOrThrow(podId),
+          mergingAnchor,
+          publication,
+          provider,
+          config,
+        );
+      };
+      if (recoveredMerge) {
+        emitActivityStatus(
+          podId,
+          'Earlier merge confirmed from durable source and target evidence',
+        );
+      } else if (pod.prUrl && prManager && pod.worktreePath) {
         const mergeBaseBranch = pod.baseBranch ?? approveProfile.defaultBranch ?? 'main';
         const queueKey = MergeQueue.keyFor(approveProfile.repoUrl, mergeBaseBranch);
         const worktreePath = pod.worktreePath;
@@ -12064,7 +12124,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
             emitActivityStatus(podId, `Merging PR: ${prUrl}`);
             try {
               const mergeResult = await deliveryOperation(async () =>
-                prManager.mergePr({
+                mergeApprovalSource(publishedSource, prManager, {
                   onPrepared: () => assertApprovalCurrent(mergingAnchor),
                   expectedHeadSha: publishedSource.commitSha,
                   expectedTarget: {
@@ -12099,28 +12159,6 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
             } catch (err) {
               assertApprovalCurrent(mergingAnchor);
               logger.error({ err, podId, prUrl }, 'Failed to merge PR');
-              // Merge command failed — check if the PR is blocked by checks/reviews
-              try {
-                const fallbackStatus = await deliveryOperation(async () =>
-                  prManager.getPrStatus({ prUrl, worktreePath }),
-                );
-                if (fallbackStatus.merged) return { kind: 'merged' };
-                if (fallbackStatus.open) {
-                  const blockReason =
-                    fallbackStatus.blockReason ?? 'Merge failed — waiting for conditions';
-                  logger.info(
-                    { podId, prUrl, blockReason },
-                    'Merge failed but PR is open — entering merge_pending',
-                  );
-                  return { kind: 'merge_pending', blockReason };
-                }
-              } catch (statusErr) {
-                assertApprovalCurrent(mergingAnchor);
-                logger.warn(
-                  { err: statusErr, podId },
-                  'Failed to check PR status after merge failure',
-                );
-              }
               return { kind: 'merge_failed', reason: 'PR merge could not be confirmed.' };
             }
           })
@@ -12231,7 +12269,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
             return;
           }
           const retryMergeResult = await deliveryOperation(async () =>
-            prManager.mergePr({
+            mergeApprovalSource(publishedSource, prManager, {
               onPrepared: () => assertApprovalCurrent(mergingAnchor),
               expectedHeadSha: publishedSource.commitSha,
               expectedTarget: {
@@ -12268,15 +12306,8 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
             failDelivery('Source synchronization was rejected by the deletion guard.');
           }
           const message = err instanceof Error ? err.message : String(err);
-          if (retryPrUrl) {
-            const blockReason = `Merge after PR creation failed: ${message}`;
-            emitActivityStatus(podId, `Merge pending: ${blockReason}`);
-            assertApprovalCurrent(mergingAnchor);
-            transition(s2, 'merge_pending', { mergeBlockReason: blockReason });
-            assertApprovalCurrent({ ...pod, status: 'merge_pending' });
-            startMergePolling(podId);
-            return;
-          }
+          if (retryPrUrl)
+            failDelivery(`Merge after PR creation could not be confirmed: ${message}`);
           emitActivityStatus(podId, `PR creation failed: ${message} — pod returned to validated`);
           failDelivery('PR creation did not complete.');
         }

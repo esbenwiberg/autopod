@@ -202,6 +202,17 @@ export interface PushArtifactBranchConfig {
 }
 
 export interface WorktreeManager {
+  /** Read-only local source identity for recovery; unavailable adapters cannot authorize cleanup. */
+  inspectSource?(
+    worktreePath: string,
+    expectedBranch: string,
+  ): Promise<{
+    branch: string;
+    commitSha: string;
+    treeSha: string;
+    worktreeClean: boolean;
+  }>;
+
   inspectContractBase(
     worktreePath: string,
     baseBranch: string,
