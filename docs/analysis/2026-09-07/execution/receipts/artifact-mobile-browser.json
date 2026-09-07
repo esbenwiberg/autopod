@@ -1,0 +1,21 @@
+{
+  "scope": "Local synthetic fixture and actual built mobile client; no provider or production actions",
+  "baseCommit": "300029acc42b27d27529d712e5fe6f6aeeaca7e0",
+  "changes": "Checkpoint 15 uncommitted source at verification; subsequent commit records the same implementation",
+  "surface": "Codex in-app browser tab 10, closed after verification",
+  "url": "http://127.0.0.1:58792/mobile/#/pod/local-fixture",
+  "observed": [
+    "Failed artifact pod displayed settled worker, source preservation not verified, phase preserving, Retry artifact collection and Kill.",
+    "First Retry returned synthetic HTTP 502 with the actual daemon error envelope; human-readable message appeared and Retry stayed available.",
+    "Second Retry returned success; client fetched current pod without WebSocket delivery. Status became complete, source preservation timestamp appeared, phase became finished, Retry and Kill disappeared.",
+    "Fixture recorded two collection requests and zero worker starts. Actual manager tests separately prove failed extraction retention and duplicate Resume coalescing without another worker."
+  ],
+  "failureMessage": "Artifact preservation failed. Original container retained.",
+  "completionTimestamp": "2026-09-07T16:18:38.129Z",
+  "limitations": [
+    "Synthetic API does not prove live infrastructure collection.",
+    "No native desktop interaction or physical mobile device acceptance.",
+    "Existing historical validation/preflight/accounting fixture records are unrelated to artifact collection."
+  ],
+  "cleanup": "Browser closed and local fixture process interrupted."
+}

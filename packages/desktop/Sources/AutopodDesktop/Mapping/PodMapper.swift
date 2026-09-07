@@ -83,6 +83,9 @@ public enum PodMapper {
       status: PodStatus(rawValue: response.status) ?? .queued,
       pod: config,
       hasWorktree: response.worktreePath != nil,
+      artifactCollectionPending: response.status == "failed" && response.options.output == "artifact"
+        && response.finalization?.phase == "preserving" && response.finalization?.agentSettledAt != nil
+        && response.finalization?.sourcePreservedAt == nil && response.finalization?.pendingDecisionId == nil,
       branch: response.branch,
       profileName: response.profileName,
       task: searchableTask.isEmpty ? response.title : searchableTask,
@@ -467,6 +470,9 @@ public enum PodMapper {
       status: status,
       pod: pod,
       hasWorktree: response.worktreePath != nil,
+      artifactCollectionPending: response.status == "failed" && pod.output == .artifact
+        && response.finalization?.phase == "preserving" && response.finalization?.agentSettledAt != nil
+        && response.finalization?.sourcePreservedAt == nil && response.finalization?.pendingDecisionId == nil,
       branch: response.branch,
       profileName: response.profileName,
       task: response.task,

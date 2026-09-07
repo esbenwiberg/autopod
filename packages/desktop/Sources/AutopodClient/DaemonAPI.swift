@@ -1217,7 +1217,8 @@ struct ForceCompleteBody: Codable {
 public struct ResumeResponse: Codable, Sendable {
   public let ok: Bool?
   /// "retry-pr" (push + open PR), "revalidate" (validation only), or
-  /// "retry-fix-delivery" (push an already-validated fix pod).
+  /// "retry-fix-delivery" (push an already-validated fix pod), or
+  /// "collect-artifacts" (copy the settled worker output without starting a worker).
   public let action: String?
 }
 

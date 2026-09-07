@@ -59,6 +59,23 @@ describe('apiFetch', () => {
     });
   });
 
+  it('shows the daemon error message and preserves the HTTP status', async () => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          error: 'ARTIFACT_PRESERVATION_FAILED',
+          message: 'Artifact preservation failed. Original container retained.',
+        }),
+        { status: 502 },
+      ),
+    );
+
+    await expect(apiFetch('/pods/x/resume', { method: 'POST' })).rejects.toMatchObject({
+      status: 502,
+      message: 'Artifact preservation failed. Original container retained.',
+    });
+  });
+
   it('sets Content-Type: application/json when a body is supplied', async () => {
     window.localStorage.setItem(STORAGE_KEY, 't');
     const fetchSpy = vi

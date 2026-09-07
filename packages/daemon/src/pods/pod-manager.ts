@@ -175,6 +175,7 @@ import {
   checkpointSandboxWorkspace,
 } from '../worktrees/sandbox-workspace-checkpoint.js';
 import { agentToolingCachePaths } from './agent-tooling-cache-paths.js';
+import { collectArtifactSnapshot } from './artifact-preservation.js';
 import { buildCorrectionMessage } from './correction-context.js';
 import { dispatchRequestHash } from './dispatch-preflight-ledger.js';
 import { persistCompletionReply, persistEscalation } from './escalation-coordinator.js';
@@ -1588,7 +1589,7 @@ export interface PodManager {
    * failed on infra. Throws when the pod isn't in a recoverable state.
    */
   resumePod(podId: string): Promise<{
-    action: 'retry-pr' | 'revalidate' | 'retry-fix-delivery' | 'retry-agent';
+    action: 'retry-pr' | 'revalidate' | 'retry-fix-delivery' | 'retry-agent' | 'collect-artifacts';
   }>;
   /**
    * Continue a provider-limit pause, or explicitly recover a failed pod on the
@@ -3566,6 +3567,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
   // One immutable checkpoint per pod makes duplicate requests observationally identical.
   const sandboxCheckpointRuns = new Map<string, Promise<WorkspaceCheckpointResult>>();
   const infrastructureResumeRuns = new Map<string, Promise<void>>();
+  const artifactResumeRuns = new Map<string, Promise<void>>();
   const pauseIntents = new Map<string, symbol>();
   const activeAgentRuns = new Map<string, { token: symbol; settled: Promise<void> }>();
   const activeAgentRunResolvers = new Map<string, { token: symbol; resolve: () => void }>();
@@ -6586,6 +6588,49 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
       `Worktree out of sync with container — ${err.deletionCount} phantom deletions blocked. Do not retry PR; work may still live in the container.`,
     );
     return true;
+  }
+
+  function ownsArtifactCompletion(pod: Pod, allowRemovedContainer = false): boolean {
+    const current = podRepo.getOrThrow(pod.id);
+    return (
+      current.lifecycleGeneration === pod.lifecycleGeneration &&
+      (current.containerId === pod.containerId ||
+        (allowRemovedContainer && current.containerId === null)) &&
+      current.status === 'running' &&
+      current.pendingEscalation === null
+    );
+  }
+
+  async function preserveArtifacts(pod: Pod): Promise<string> {
+    const dataDir = process.env.DATA_DIR ?? path.join(process.cwd(), '.autopod-data');
+    podRepo.completionJournal?.mark(pod, 'preserving');
+    emitActivityStatus(pod.id, 'Collecting artifacts…');
+    try {
+      const artifactsPath = await collectArtifactSnapshot({
+        containerManager: containerManagerFactory.get(pod.executionTarget),
+        containerId: pod.containerId,
+        artifactRoot: path.join(dataDir, 'artifacts', pod.id),
+        generation: pod.lifecycleGeneration,
+        isCurrent: () => ownsArtifactCompletion(pod),
+      });
+      if (!ownsArtifactCompletion(pod))
+        throw new AutopodError(
+          'Artifact collection belongs to an older lifecycle; current resources retained.',
+          'STALE_ARTIFACT_COLLECTION',
+          409,
+        );
+      podRepo.update(pod.id, { artifactsPath });
+      podRepo.completionJournal?.mark(pod, 'preserving', true);
+      return artifactsPath;
+    } catch (err) {
+      if (ownsArtifactCompletion(pod)) {
+        const failureReason =
+          'Artifact preservation failed. Original container retained; retry collection before completing.';
+        podRepo.update(pod.id, { failureReason });
+        emitActivityError(pod.id, failureReason, false);
+      }
+      throw err;
+    }
   }
 
   function parkOnWorktreeSyncFailure(podId: string, reason: string): void {
@@ -10609,25 +10654,15 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
       if (pod.options.output === 'artifact') {
         const profile = profileStore.get(pod.profileName);
         const dataDir = process.env.DATA_DIR ?? path.join(process.cwd(), '.autopod-data');
-        const artifactsPath = path.join(dataDir, 'artifacts', podId);
-
-        await mkdir(artifactsPath, { recursive: true });
-
-        if (pod.containerId) {
-          const cm = containerManagerFactory.get(pod.executionTarget);
-          try {
-            emitActivityStatus(podId, 'Collecting artifacts…');
-            await cm.extractDirectoryFromContainer(pod.containerId, '/workspace', artifactsPath);
-            logger.info({ podId, artifactsPath }, 'Artifacts extracted from container');
-          } catch (err) {
-            logger.warn(
-              { err, podId },
-              'Failed to extract artifacts — pod will complete with empty artifact store',
-            );
+        let artifactsPath: string;
+        try {
+          artifactsPath = await preserveArtifacts(pod);
+        } catch {
+          if (ownsArtifactCompletion(pod)) {
+            transition(podRepo.getOrThrow(podId), 'failed');
           }
+          return;
         }
-
-        podRepo.update(podId, { artifactsPath });
 
         // If profile has a destination repo: lazy-clone, copy artifacts, push branch (best-effort)
         if (profile.repoUrl) {
@@ -10654,6 +10689,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
               `research: ${pod.task.slice(0, 72)}`,
               { maxDeletions: 1000 },
             );
+            if (!ownsArtifactCompletion(pod)) return;
             await worktreeManager.pushBranch(worktreeResult.worktreePath, repoBranch);
             logger.info({ podId, branch: repoBranch }, 'Artifact branch pushed');
           } catch (err) {
@@ -10665,8 +10701,10 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         }
 
         // Transition to complete — skip validation entirely
+        if (!ownsArtifactCompletion(pod)) return;
         await cleanupContainer(pod, 'artifact-complete');
-        transition(pod, 'complete');
+        if (!ownsArtifactCompletion(pod, true)) return;
+        transition(podRepo.getOrThrow(podId), 'complete');
         return;
       }
 
@@ -12335,30 +12373,9 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
       let pushError: string | undefined;
 
       if (pod.options.output === 'artifact') {
-        // Artifact pods: tar-stream /workspace out to the host data dir and
-        // complete. Mirrors the auto-mode path in processPod (~line 2362), minus
-        // the optional branch push — if the user picked `artifact` they want a
-        // file drop, not a PR. To get a branch in the same motion, promote
-        // via `ap complete <id> --pr`.
-        const dataDir = process.env.DATA_DIR ?? path.join(process.cwd(), '.autopod-data');
-        const artifactsPath = path.join(dataDir, 'artifacts', podId);
-        await mkdir(artifactsPath, { recursive: true });
-
-        if (pod.containerId) {
-          const cm = containerManagerFactory.get(pod.executionTarget);
-          try {
-            emitActivityStatus(podId, 'Collecting artifacts…');
-            await cm.extractDirectoryFromContainer(pod.containerId, '/workspace', artifactsPath);
-            logger.info({ podId, artifactsPath }, 'Artifacts extracted from container');
-          } catch (err) {
-            logger.warn(
-              { err, podId },
-              'Failed to extract artifacts — completing with empty artifact store',
-            );
-          }
-        }
-
-        podRepo.update(podId, { artifactsPath });
+        // An interactive completion remains retryable if copying fails. No source
+        // cleanup or terminal success can run before the snapshot is published.
+        await preserveArtifacts(pod);
       } else {
         // Sync workspace changes back to host worktree before pushing
         let workspaceSyncOk = true;
@@ -12439,9 +12456,21 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         }
       }
 
+      if (pod.options.output === 'artifact' && !ownsArtifactCompletion(pod))
+        throw new AutopodError(
+          'Artifact completion was superseded; current lifecycle retained.',
+          'STALE_ARTIFACT_COLLECTION',
+          409,
+        );
       emitActivityStatus(podId, 'Pod complete');
       await cleanupContainer(pod, 'workspace-complete');
-      transition(pod, 'complete', { completedAt: new Date().toISOString() });
+      if (pod.options.output === 'artifact' && !ownsArtifactCompletion(pod, true))
+        throw new AutopodError(
+          'Artifact completion was superseded; current lifecycle retained.',
+          'STALE_ARTIFACT_COLLECTION',
+          409,
+        );
+      transition(podRepo.getOrThrow(podId), 'complete', { completedAt: new Date().toISOString() });
 
       // Deactivate PIM groups on pod completion
       if (pod.pimGroups?.length && pod.userId) {
@@ -15854,10 +15883,82 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
       logger.info({ podId, prUrl: newPrUrl }, 'PR created via retryCreatePr');
     },
 
-    async resumePod(
-      podId: string,
-    ): Promise<{ action: 'retry-pr' | 'revalidate' | 'retry-fix-delivery' | 'retry-agent' }> {
+    async resumePod(podId: string): Promise<{
+      action:
+        | 'retry-pr'
+        | 'revalidate'
+        | 'retry-fix-delivery'
+        | 'retry-agent'
+        | 'collect-artifacts';
+    }> {
+      const pendingCollection = artifactResumeRuns.get(podId);
+      if (pendingCollection) {
+        await pendingCollection;
+        return { action: 'collect-artifacts' };
+      }
       const pod = podRepo.getOrThrow(podId);
+      if (
+        pod.status === 'failed' &&
+        pod.options.output === 'artifact' &&
+        pod.finalization?.phase === 'preserving' &&
+        pod.finalization.agentSettledAt &&
+        !pod.finalization.sourcePreservedAt &&
+        !pod.pendingEscalation
+      ) {
+        if (!pod.containerId)
+          throw new AutopodError(
+            'Artifact source container is unavailable. Restore the preserved source before retrying collection.',
+            'ARTIFACT_SOURCE_UNAVAILABLE',
+            409,
+          );
+        const collection = Promise.resolve().then(async () => {
+          const current = podRepo.getOrThrow(podId);
+          if (
+            !ownsLifecycle(podId, pod.lifecycleGeneration, pod.containerId) ||
+            current.status !== 'failed' ||
+            current.pendingEscalation
+          )
+            throw new AutopodError(
+              'Artifact retry was superseded; current lifecycle retained.',
+              'STALE_ARTIFACT_COLLECTION',
+              409,
+            );
+          transition(current, 'running', { failureReason: null });
+          emitActivityStatus(
+            podId,
+            'Resume: retrying artifact collection from the settled worker…',
+          );
+          await this.handleCompletion(podId);
+          const collected = podRepo.getOrThrow(podId);
+          if (
+            collected.lifecycleGeneration === pod.lifecycleGeneration &&
+            collected.status === 'failed' &&
+            !collected.finalization?.sourcePreservedAt
+          )
+            throw new AutopodError(
+              collected.failureReason ??
+                'Artifact preservation failed. Original container retained.',
+              'ARTIFACT_PRESERVATION_FAILED',
+              502,
+            );
+          if (
+            collected.lifecycleGeneration !== pod.lifecycleGeneration ||
+            collected.status !== 'complete'
+          )
+            throw new AutopodError(
+              'Artifact completion remains unresolved. Refresh the pod and reconcile its current lifecycle.',
+              'ARTIFACT_COMPLETION_UNRESOLVED',
+              409,
+            );
+        });
+        artifactResumeRuns.set(podId, collection);
+        try {
+          await collection;
+        } finally {
+          artifactResumeRuns.delete(podId);
+        }
+        return { action: 'collect-artifacts' };
+      }
       if (isRetryableFixDeliveryFailure(pod)) {
         if (!pod.worktreePath) {
           throw new AutopodError(

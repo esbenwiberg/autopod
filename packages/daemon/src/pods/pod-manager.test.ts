@@ -12873,7 +12873,97 @@ describe('PodManager', () => {
         expect(completed.artifactsPath).toContain(`artifacts/${pod.id}`);
       });
 
-      it('completes interactive-artifact pod even when extraction fails', async () => {
+      it('does not publish artifacts or complete a lifecycle cancelled during extraction', async () => {
+        const ctx = createTestContext();
+        const manager = createPodManager(ctx.deps);
+        const pod = manager.createSession(
+          {
+            profileName: 'test-profile',
+            task: 'Collect report',
+            options: { agentMode: 'auto', output: 'artifact', validate: false, promotable: false },
+          },
+          'user-1',
+        );
+        ctx.podRepo.update(pod.id, { status: 'running', containerId: 'container-abc' });
+        vi.mocked(ctx.containerManager.extractDirectoryFromContainer).mockImplementation(
+          async () => {
+            ctx.podRepo.update(pod.id, { status: 'killed' });
+          },
+        );
+        await manager.handleCompletion(pod.id);
+        expect(manager.getSession(pod.id)).toMatchObject({ status: 'killed', artifactsPath: null });
+        expect(ctx.containerManager.kill).not.toHaveBeenCalled();
+      });
+
+      it('retries failed artifact collection through Resume without a worktree or another worker', async () => {
+        const ctx = createTestContext();
+        const manager = createPodManager(ctx.deps);
+        const pod = manager.createSession(
+          {
+            profileName: 'test-profile',
+            task: 'Collect report',
+            options: { agentMode: 'auto', output: 'artifact', validate: false, promotable: false },
+          },
+          'user-1',
+        );
+        ctx.podRepo.update(pod.id, {
+          status: 'running',
+          containerId: 'container-abc',
+          worktreePath: null,
+        });
+        ctx.podRepo.completionJournal?.settle(ctx.podRepo.getOrThrow(pod.id), 'Report complete');
+        vi.mocked(ctx.containerManager.extractDirectoryFromContainer)
+          .mockRejectedValueOnce(new Error('disk full'))
+          .mockRejectedValueOnce(new Error('disk still full'));
+        await manager.handleCompletion(pod.id);
+        expect(manager.getSession(pod.id).status).toBe('failed');
+        await expect(manager.resumePod(pod.id)).rejects.toMatchObject({
+          code: 'ARTIFACT_PRESERVATION_FAILED',
+          statusCode: 502,
+        });
+        expect(manager.getSession(pod.id)).toMatchObject({
+          status: 'failed',
+          containerId: 'container-abc',
+          artifactsPath: null,
+        });
+        expect(ctx.containerManager.kill).not.toHaveBeenCalled();
+        const results = await Promise.all([manager.resumePod(pod.id), manager.resumePod(pod.id)]);
+        expect(results).toEqual([{ action: 'collect-artifacts' }, { action: 'collect-artifacts' }]);
+        expect(manager.getSession(pod.id).status).toBe('complete');
+        expect(ctx.containerManager.extractDirectoryFromContainer).toHaveBeenCalledTimes(3);
+        expect(ctx.runtime.spawn).not.toHaveBeenCalled();
+        expect(ctx.runtime.resume).not.toHaveBeenCalled();
+      });
+
+      it('keeps automatic artifact completion unresolved when extraction fails', async () => {
+        const ctx = createTestContext();
+        const manager = createPodManager(ctx.deps);
+        const pod = manager.createSession(
+          {
+            profileName: 'test-profile',
+            task: 'Collect report',
+            options: { agentMode: 'auto', output: 'artifact', validate: false, promotable: false },
+          },
+          'user-1',
+        );
+        ctx.podRepo.update(pod.id, { status: 'running', containerId: 'container-abc' });
+        vi.mocked(ctx.containerManager.extractDirectoryFromContainer).mockRejectedValue(
+          new Error('disk full'),
+        );
+        await manager.handleCompletion(pod.id);
+        expect(manager.getSession(pod.id)).toMatchObject({
+          status: 'failed',
+          artifactsPath: null,
+          containerId: 'container-abc',
+        });
+        expect(ctx.containerManager.kill).not.toHaveBeenCalled();
+        expect(ctx.worktreeManager.pushBranch).not.toHaveBeenCalled();
+        expect(
+          ctx.eventRepo.getForSession(pod.id).some((e) => e.payload.type === 'pod.completed'),
+        ).toBe(false);
+      });
+
+      it('retains interactive artifacts and the container when extraction fails', async () => {
         const ctx = createTestContext();
         (
           ctx.containerManager.extractDirectoryFromContainer as ReturnType<typeof vi.fn>
@@ -12900,12 +12990,15 @@ describe('PodManager', () => {
           startedAt: new Date().toISOString(),
         });
 
-        await manager.completeSession(pod.id);
-
-        const completed = manager.getSession(pod.id);
-        expect(completed.status).toBe('complete');
-        // artifactsPath is still set — the dir was created even if extraction failed
-        expect(completed.artifactsPath).toContain(`artifacts/${pod.id}`);
+        await expect(manager.completeSession(pod.id)).rejects.toThrow(
+          'Artifact preservation failed',
+        );
+        const retained = manager.getSession(pod.id);
+        expect(retained.status).toBe('running');
+        expect(retained.artifactsPath).toBeNull();
+        expect(retained.containerId).toBe('container-abc');
+        expect(ctx.containerManager.kill).not.toHaveBeenCalled();
+        expect(ctx.containerManager.stop).not.toHaveBeenCalled();
       });
     });
   });

@@ -164,6 +164,24 @@ const retryState = {
   authorizations: [],
   telemetry: 'partial',
 };
+const artifactRecovery = process.env.ARTIFACT_RECOVERY_FIXTURE === '1';
+let artifactRetryCount = 0;
+if (artifactRecovery)
+  pod = {
+    ...pod,
+    status: 'failed',
+    task: '[Local fixture] Preserve collected report',
+    options: { agentMode: 'auto', output: 'artifact', validate: false, promotable: false },
+    pendingEscalation: null,
+    recordDiagnostics: [],
+    artifactsPath: null,
+    finalization: {
+      ...pod.finalization,
+      phase: 'preserving',
+      sourcePreservedAt: null,
+      pendingDecisionId: null,
+    },
+  };
 let rerunDecision = null;
 let rerunResponseLost = false;
 const server = createServer(async (req, res) => {
@@ -260,6 +278,37 @@ const server = createServer(async (req, res) => {
     return json(grant);
   }
   if (req.method === 'POST' && pathname === '/pods/local-fixture/resume') {
+    if (artifactRecovery) {
+      artifactRetryCount++;
+      console.log(
+        JSON.stringify({
+          scope: 'local fixture only',
+          action: 'collect-artifacts',
+          attempt: artifactRetryCount,
+          workerStarts: 0,
+        }),
+      );
+      if (artifactRetryCount === 1) {
+        res.statusCode = 502;
+        return json({
+          error: 'ARTIFACT_PRESERVATION_FAILED',
+          message: 'Artifact preservation failed. Original container retained.',
+        });
+      }
+      pod = {
+        ...pod,
+        status: 'complete',
+        updatedAt: new Date().toISOString(),
+        artifactsPath: '/local-fixture/snapshot',
+        finalization: {
+          ...pod.finalization,
+          phase: 'finished',
+          sourcePreservedAt: new Date().toISOString(),
+        },
+      };
+      return json({ ok: true, action: 'collect-artifacts' });
+    }
+
     const grant = retryState.authorizations.find((entry) => !entry.usedByAttemptId);
     if (!grant) {
       res.statusCode = 409;

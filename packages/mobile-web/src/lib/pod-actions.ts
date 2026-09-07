@@ -11,6 +11,7 @@ import { apiFetch } from './api.js';
 export type ActionKind =
   | 'pause'
   | 'resume'
+  | 'retry'
   | 'kill'
   | 'nudge'
   | 'approve'
@@ -114,7 +115,7 @@ const FORCE_COMPLETE: ActionDef = {
   promptsForText: true,
 };
 const RESUME_FAILED: ActionDef = {
-  kind: 'resume',
+  kind: 'retry',
   label: 'Resume',
   tone: 'neutral',
   optimistic: null, // Server picks the recovery path; status follows.
@@ -134,7 +135,19 @@ const ACTIONS_BY_STATUS: Partial<Record<PodStatus, ActionDef[]>> = {
   failed: [RESUME_FAILED, UPDATE_FROM_BASE, EXTEND_PR_ATTEMPTS, SPAWN_FIX, FORCE_COMPLETE, KILL],
 };
 
-export function availableActions(status: PodStatus): ActionDef[] {
+export function availableActions(
+  status: PodStatus,
+  pod?: Pick<Pod, 'options' | 'finalization' | 'pendingEscalation'>,
+): ActionDef[] {
+  if (
+    status === 'failed' &&
+    pod?.options.output === 'artifact' &&
+    pod.finalization?.phase === 'preserving' &&
+    pod.finalization.agentSettledAt &&
+    !pod.finalization.sourcePreservedAt &&
+    !pod.pendingEscalation
+  )
+    return [{ ...RESUME_FAILED, label: 'Retry artifact collection' }, KILL];
   return ACTIONS_BY_STATUS[status] ?? [];
 }
 
@@ -149,6 +162,9 @@ export async function runAction(podId: string, kind: ActionKind, message?: strin
       return;
     case 'kill':
       await apiFetch(`/pods/${podId}/kill`, { method: 'POST' });
+      return;
+    case 'retry':
+      await apiFetch(`/pods/${podId}/resume`, { method: 'POST' });
       return;
     case 'resume':
       // No dedicated unpause endpoint — a nudge releases the paused pod.

@@ -1,4 +1,4 @@
-import type { PodStatus } from '@autopod/shared';
+import type { Pod, PodStatus } from '@autopod/shared';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { availableActions, runAction, toggleSkipValidation } from './pod-actions.js';
 import { STORAGE_KEY } from './token.js';
@@ -34,13 +34,34 @@ describe('availableActions', () => {
 
   it('failed pods expose the full recovery set', () => {
     expect(availableActions('failed').map((a) => a.kind)).toEqual([
-      'resume',
+      'retry',
       'update_from_base',
       'extend_pr_attempts',
       'spawn_fix',
       'force_complete',
       'kill',
     ]);
+  });
+
+  it('offers collection recovery for a settled artifact failure without force completion or worker rework', () => {
+    const pod: Pick<Pod, 'options' | 'finalization' | 'pendingEscalation'> = {
+      options: { agentMode: 'auto', output: 'artifact', validate: false, promotable: false },
+      finalization: {
+        generation: 1,
+        cycle: 1,
+        phase: 'preserving',
+        agentSettledAt: '2026-09-07T10:00:00Z',
+        sourcePreservedAt: null,
+        pendingDecisionId: null,
+        result: 'Report ready',
+      },
+      pendingEscalation: null,
+    };
+    expect(availableActions('failed', pod).map((action) => [action.kind, action.label])).toEqual([
+      ['retry', 'Retry artifact collection'],
+      ['kill', 'Kill'],
+    ]);
+    expect(availableActions('awaiting_input', pod).map((action) => action.kind)).toEqual(['kill']);
   });
 
   it('terminal pods have no actions', () => {
@@ -87,6 +108,14 @@ describe('runAction', () => {
     const spy = mockFetch();
     await runAction('pod-1', 'kill');
     expect(spy.mock.calls[0]?.[0]).toBe('/pods/pod-1/kill');
+  });
+
+  it('failed-pod Resume requests durable recovery rather than sending a nudge', async () => {
+    const spy = mockFetch();
+    const action = availableActions('failed')[0];
+    if (!action) throw new Error('Missing failed-pod action');
+    await runAction('pod-1', action.kind);
+    expect(spy.mock.calls[0]?.[0]).toBe('/pods/pod-1/resume');
   });
 
   it('resume sends a "continue" nudge', async () => {

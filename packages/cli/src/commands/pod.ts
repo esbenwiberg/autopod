@@ -357,7 +357,7 @@ export function registerPodCommands(program: Command, getClient: () => AutopodCl
   program
     .command('resume <id>')
     .description(
-      'Resume delivery or validation using the existing task budget and provider binding',
+      'Resume artifact collection, delivery or validation using the existing task budget and provider binding',
     )
     .option('--json', 'Output JSON')
     .action(async (id: string, opts: { json?: boolean }) => {

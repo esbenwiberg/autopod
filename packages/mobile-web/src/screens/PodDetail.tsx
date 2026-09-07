@@ -132,7 +132,9 @@ export function PodDetail(): JSX.Element {
         </section>
       ) : null}
       <DispatchPreflightPanel pod={pod} />
-      <TaskRetryPanel podId={pod.id} revision={pod.updatedAt} status={pod.status} />
+      {pod.options.output !== 'artifact' ? (
+        <TaskRetryPanel podId={pod.id} revision={pod.updatedAt} status={pod.status} />
+      ) : null}
       <TaskExecutionPanel
         podId={data.id}
         revision={`${data.status}:${data.inputTokens}:${data.outputTokens}:${data.validationAttempts}`}

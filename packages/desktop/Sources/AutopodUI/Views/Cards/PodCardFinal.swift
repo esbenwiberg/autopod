@@ -950,7 +950,17 @@ public struct SessionCardFinal: View {
                         .font(.caption2)
                         .foregroundStyle(.secondary)
                 }
-                if pod.isFixDeliveryFailure {
+                if pod.artifactCollectionPending {
+                    Button {
+                        Task { await actions.resume(pod.id) }
+                    } label: {
+                        Label("Retry artifact collection", systemImage: "arrow.down.doc")
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .controlSize(.small)
+                    .help("Collect the settled worker's files without starting another worker.")
+                } else if pod.isFixDeliveryFailure {
                     Text("Validated fix could not be pushed")
                         .font(.caption)
                         .foregroundStyle(.secondary)

@@ -1,0 +1,35 @@
+
+ RUN  v4.1.11 /private/tmp/autopod-durable-execution/packages/daemon
+
+ ❯ src/pods/pod-manager.test.ts (427 tests | 1 failed | 426 skipped) 84ms
+         × retries failed artifact collection through Resume without a worktree or another worker 83ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/pods/pod-manager.test.ts > PodManager > workspace pods > completeSession > retries failed artifact collection through Resume without a worktree or another worker
+AssertionError: promise resolved "{ action: 'collect-artifacts' }" instead of rejecting
+
+- Expected
++ Received
+
+- Error {
+-   "message": "rejected promise",
++ {
++   "action": "collect-artifacts",
+  }
+
+ ❯ src/pods/pod-manager.test.ts:12920:47
+    12918|         await manager.handleCompletion(pod.id);
+    12919|         expect(manager.getSession(pod.id).status).toBe('failed');
+    12920|         await expect(manager.resumePod(pod.id)).rejects.toMatchObject({
+       |                                               ^
+    12921|           code: 'ARTIFACT_PRESERVATION_FAILED',
+    12922|           statusCode: 502,
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 426 skipped (427)
+   Start at  18:19:40
+   Duration  1.40s (transform 801ms, setup 0ms, import 1.20s, tests 84ms, environment 0ms)

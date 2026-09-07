@@ -864,6 +864,7 @@ public struct Pod: Identifiable, Sendable {
     public var status: PodStatus
     public var pod: PodConfig
     public var hasWorktree: Bool
+    public var artifactCollectionPending: Bool
     public var branch: String
     public var profileName: String
     public var task: String
@@ -1017,6 +1018,7 @@ public struct Pod: Identifiable, Sendable {
         status: PodStatus,
         pod: PodConfig = PodConfig(),
         hasWorktree: Bool = false,
+        artifactCollectionPending: Bool = false,
         branch: String,
         profileName: String,
         task: String = "",
@@ -1074,6 +1076,7 @@ public struct Pod: Identifiable, Sendable {
     ) {
         self.id = id; self.status = status; self.pod = pod
         self.hasWorktree = hasWorktree
+        self.artifactCollectionPending = artifactCollectionPending
         self.branch = branch; self.profileName = profileName; self.task = task
         self.model = model; self.startedAt = startedAt; self.runningAt = runningAt; self.updatedAt = updatedAt
         self.baseBranch = baseBranch

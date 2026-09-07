@@ -1,0 +1,26 @@
+
+ RUN  v4.1.11 /private/tmp/autopod-durable-execution/packages/daemon
+
+ ❯ src/pods/pod-manager.test.ts (427 tests | 1 failed | 426 skipped) 89ms
+         × retries failed artifact collection through Resume without a worktree or another worker 88ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/pods/pod-manager.test.ts > PodManager > workspace pods > completeSession > retries failed artifact collection through Resume without a worktree or another worker
+AutopodError: Pod intense-parrot has no worktree — cannot resume
+ ❯ Object.resumePod src/pods/pod-manager.ts:15932:15
+    15930|       }
+    15931|       if (!pod.worktreePath) {
+    15932|         throw new AutopodError(
+       |               ^
+    15933|           `Pod ${podId} has no worktree — cannot resume`,
+    15934|           'INVALID_STATE',
+ ❯ src/pods/pod-manager.test.ts:12909:52
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 426 skipped (427)
+   Start at  18:04:11
+   Duration  1.48s (transform 808ms, setup 0ms, import 1.27s, tests 89ms, environment 0ms)
