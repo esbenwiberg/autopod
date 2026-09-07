@@ -925,16 +925,14 @@ describe('Extended Route Tests', () => {
           approvalPrManager = {
             createPr: vi.fn(),
             mergePr: vi.fn().mockResolvedValue({ merged: true, autoMergeScheduled: false }),
-            getPrStatus: vi
-              .fn()
-              .mockResolvedValue({
-                open: true,
-                merged: false,
-                reviewDecision: 'APPROVED',
-                blockReason: null,
-                ciFailures: [],
-                reviewComments: [],
-              }),
+            getPrStatus: vi.fn().mockResolvedValue({
+              open: true,
+              merged: false,
+              reviewDecision: 'APPROVED',
+              blockReason: null,
+              ciFailures: [],
+              reviewComments: [],
+            }),
           };
           vi.mocked(worktreeManager.rebaseOntoBase).mockResolvedValue({
             rebased: true,
