@@ -1,0 +1,138 @@
+[
+  {
+    "file": "task-lint.txt",
+    "originalSha256": "dc64241350bc4fc995e89a43bcba27091dcb3f27c788505394215ea2b512d8c2",
+    "normalizedSha256": "ba6a4e87385f56247ab5f70b923505b92a7fa0e7a5a2e26a6b5d227f1cf1b731"
+  },
+  {
+    "file": "task-workspace-build.txt",
+    "originalSha256": "65a1344ecd77c85a51035b3baa0c34a3c3942d26d034d9d952464e8f3cd8f73d",
+    "normalizedSha256": "08ed766c3f6ff77e0665eb41ce7b687f0b352555a935e8abdb4ad6cf4467d6c7"
+  },
+  {
+    "file": "backup-scope-full-schema.txt",
+    "normalization": "single final newline",
+    "originalSha256": "431b0673d14a754bb76679301213462b2ef3c91e2e47cc83fdfab66463a1ab64",
+    "normalizedSha256": "b998ed908264cabf2443b44fb4175083001f11680f34d3933ecf14f914abb10f"
+  },
+  {
+    "file": "backup-scope-green.txt",
+    "normalization": "single final newline",
+    "originalSha256": "3c12230c45088b5267d25b933873d50ba0c4cdd85541cff9e5724b8fd854cb70",
+    "normalizedSha256": "0e9978df5a46308016c14e0d889a91365e9587851b4f31ab832827bfdf42fdd8"
+  },
+  {
+    "file": "backup-scope-red.txt",
+    "normalization": "single final newline",
+    "originalSha256": "3d6fed5438de8b47f5bbd1582e90f2ea717c18e7ed3294c2f6437b49d740e99e",
+    "normalizedSha256": "601586a16413e75b55ee50164da643ae341b3fd324645d61b9b196efd34183f6"
+  },
+  {
+    "file": "checkpoint-3-affected.txt",
+    "normalization": "single final newline",
+    "originalSha256": "fcb08d836b03e7ee63f1713e6f05c89af85add2468865954f2478626f12cac2d",
+    "normalizedSha256": "b4aa47e444b3621a0204b2e0c90ed342e2d752268c2a18d59a456f5c7e4fdc55"
+  },
+  {
+    "file": "contract-base-validation.txt",
+    "normalization": "single final newline",
+    "originalSha256": "38436526d0dd80469d20353f0c05d49595002a323ed2a49db667e4edd64a8a6d",
+    "normalizedSha256": "446d02f892e7b2102d582495166e5eac155269febc26790d2b868151d7486f06"
+  },
+  {
+    "file": "contract-cli-tests-2.txt",
+    "normalization": "single final newline",
+    "originalSha256": "b5e40b3a910c2d4a0ea8929b6781a92ed10facda42288e7a2c9813cec827c029",
+    "normalizedSha256": "a1fa23dd7cacf4de445d9559c1ef61fa667d8324bdb93b1c9785ac3c71876bd8"
+  },
+  {
+    "file": "contract-preflight-green.txt",
+    "normalization": "single final newline",
+    "originalSha256": "148de4962f0d0e826903b38a2b3e284df760f8b08eee369848d2bb6db350cdb0",
+    "normalizedSha256": "5b4b2bf2d799045f49e44466f4da5a36eebd4423e010ed1c076f9907360d688e"
+  },
+  {
+    "file": "contract-preflight-red.txt",
+    "normalization": "single final newline",
+    "originalSha256": "c1e20576c5a6aa6931e3f3f80f3525e8b9af6e5c476899b6440dfc2ccfc8048e",
+    "normalizedSha256": "18c11f85de6d8da606ce0a2f9743c30c6701be5fd6d3555d7a21d87dc3784fc9"
+  },
+  {
+    "file": "task-api-migrations.txt",
+    "normalization": "single final newline",
+    "originalSha256": "257211db697c4f8ccafb8e8570c2e2a8eaa948a0a0703ea7fe9c9811161d8da0",
+    "normalizedSha256": "03d0b1d45b4a749c80346733b1b0568ba33a767953960e77dbb0ad0dedadbe33"
+  },
+  {
+    "file": "task-budget-manager-red.txt",
+    "normalization": "single final newline",
+    "originalSha256": "0e2bf3166a44b217c2b58890faf3f8eab5fd56e8213bbc7dcdea2a43a238506c",
+    "normalizedSha256": "6664e961386eb84ba428d0b746561ea93e582438ad233140e1ef75f4e934a68c"
+  },
+  {
+    "file": "task-cli-tests.txt",
+    "normalization": "single final newline",
+    "originalSha256": "148e963527d49fe353a7a7119c2c88e6833aaad7dd72ea16efac4f51d5d2f124",
+    "normalizedSha256": "31a7cf3b38f677cdbc23d66bfa5592c94965e1f7f2b8ce3d8e89cbda85e433c3"
+  },
+  {
+    "file": "task-daemon-build-2.txt",
+    "normalization": "single final newline",
+    "originalSha256": "ef4371cc2e8c1494b339148961706868e943f5c49ac077ebfa19b6547a26e140",
+    "normalizedSha256": "1b7c900879dd3ff0fd03c1a61c504267ecbbcfe5f75e1b6a9d030bbede2d10e0"
+  },
+  {
+    "file": "task-ledger-affected-2.txt",
+    "normalization": "single final newline",
+    "originalSha256": "748554c12d0b9162007aa312411e58e07ee6e5de923e5841c58b1a0dc429f482",
+    "normalizedSha256": "f1c1e1bc54b2d993ee5c1932fe65ddd896e1cfc6d0ce76df7033d0426c0c1a1e"
+  },
+  {
+    "file": "task-ledger-affected.txt",
+    "normalization": "single final newline",
+    "originalSha256": "5e4dd7a2129b8c680bea7494fba4619e7e32fca8d57fc7bc751f9d59c68b0878",
+    "normalizedSha256": "dc14a174f58bfa5352e16c23ea4287a7f9f78fbd3afbcfaf39cac448ecf1db30"
+  },
+  {
+    "file": "task-ledger-corrected-telemetry.txt",
+    "normalization": "single final newline",
+    "originalSha256": "7978ad6dc1de4cbfd528e5e840e125234a3bafa28fd8679b3a2ed47d8a056436",
+    "normalizedSha256": "ba2ce807a8ec87378197bb1493ec49bf3d3b2d6d8daee80d4c754e2363c76c72"
+  },
+  {
+    "file": "task-ledger-green-2.txt",
+    "normalization": "single final newline",
+    "originalSha256": "e124a6a708d0356703f7ba8f3580f762b9a0cc5dcdadf9b266736f84cbb3a65f",
+    "normalizedSha256": "523cf43ac0e01328341fc8628e23febb02cdb66a5d21a0a51b87eda05485e1b1"
+  },
+  {
+    "file": "task-ledger-green.txt",
+    "normalization": "single final newline",
+    "originalSha256": "58577543b01edbea2e85ab08804c48ae649f770749cb05ae52f4b1d5c00ed598",
+    "normalizedSha256": "9e7d339fb86977bc0c753cd6435ec332253c288eebf6ab03f27ba888fdb16dd8"
+  },
+  {
+    "file": "task-ledger-red.txt",
+    "normalization": "single final newline",
+    "originalSha256": "39374880505603c062a381bb375c08e3c0dd740825815722711521e910ff7824",
+    "normalizedSha256": "7c9f1a6843447748bceb9d588fb00bae079d25c392c96504c832d402edce62a8"
+  },
+  {
+    "file": "task-mobile-tests.txt",
+    "normalization": "single final newline",
+    "originalSha256": "7fcf892f819df8772d716d3393aa4f2eec3029c7dba93152682fdb043d861350",
+    "normalizedSha256": "3d3d525f7e36abb4f08419cb92cfc63f4582ece27e099fea7e12855db0042eba"
+  },
+  {
+    "file": "task-mobile-typecheck.txt",
+    "normalization": "single final newline",
+    "originalSha256": "c44a873bb71b14322b20149f4d800e43612066bbd82aed1c5b1bcf92a8a98a60",
+    "normalizedSha256": "0b8e0f57d7f689fda5d729c0acb32c8a7e7509fc7af602d8cc83b282b8ee2cab"
+  },
+  {
+    "file": "task-workspace-build.txt",
+    "normalization": "single final newline",
+    "originalSha256": "08ed766c3f6ff77e0665eb41ce7b687f0b352555a935e8abdb4ad6cf4467d6c7",
+    "normalizedSha256": "4fe8b60b7a2b8bec7725d571eae65754f4a72b18934303b8495ea6c5ab1dc39a"
+  }
+]

@@ -16,6 +16,7 @@ vi.mock('ora', () => ({
 function createMockClient() {
   return {
     listSessions: vi.fn().mockResolvedValue([]),
+    getTaskExecution: vi.fn().mockRejectedValue(new Error('Unavailable on older daemon')),
     getSession: vi.fn().mockResolvedValue({
       id: 'abcd1234',
       profileName: 'test',
@@ -354,6 +355,40 @@ describe('update-from-base command', () => {
     expect(output).not.toContain('Denied egress observed');
     expect(output).not.toContain('Operator should inspect network events.');
     logSpy.mockRestore();
+  });
+
+  it('prints task-wide counts and partial cost without treating attempts as delivered PRs', async () => {
+    vi.mocked(mockClient.getTaskExecution).mockResolvedValueOnce({
+      taskId: 'logical-root',
+      executionId: 'fix-execution',
+      rootPodId: 'original',
+      podCount: 2,
+      agentRunCount: 3,
+      failedRunCount: 1,
+      transientFailureCount: 0,
+      providerAttemptCount: 4,
+      validationExecutionCount: 5,
+      tokenBudget: 100,
+      recordedInputTokens: 90,
+      recordedOutputTokens: 10,
+      recordedCostUsd: 1.25,
+      infrastructureCostUsd: null,
+      telemetry: 'partial',
+      diagnostics: ['Infrastructure cost unavailable'],
+    });
+    const log = vi.spyOn(console, 'log').mockImplementation(() => {});
+    try {
+      await program.parseAsync(['node', 'ap', 'status', 'abcd1234']);
+      const output = log.mock.calls.map((call) => call.join(' ')).join('\n');
+      expect(output).toContain('logical-root (2 pods)');
+      expect(output).toContain('3 recorded agent runs, 4 provider attempts, 5 validations');
+      expect(output).toContain('100/100');
+      expect(output).toContain('$1.2500 (partial telemetry)');
+      expect(output).toContain('Infrastructure cost unavailable');
+      expect(output).not.toContain('4 delivered');
+    } finally {
+      log.mockRestore();
+    }
   });
 
   it('prints readiness pending when missing', async () => {

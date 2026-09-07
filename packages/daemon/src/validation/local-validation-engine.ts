@@ -1887,11 +1887,7 @@ async function runFactValidation(
           replacementPath,
           log,
         );
-        const replacementChanged = artifactChangeSatisfied(
-          config.diff,
-          replacementPath,
-          'modified',
-        );
+        const replacementChanged = artifactChangeSatisfied(config.diff, replacementPath, 'update');
         const replacementCmd = await containerManager.execInContainer(
           config.containerId,
           ['sh', '-c', replacement.command],
@@ -1971,7 +1967,7 @@ async function runFactValidation(
         artifact: {
           path: artifactPath,
           change: fact.artifact.change,
-          exists: artifactExists,
+          exists: artifactExists ?? false,
           changed: artifactChanged,
           ...(artifactHash ? { hash: artifactHash } : {}),
         },
@@ -2039,9 +2035,13 @@ async function runFactValidation(
       fact.kind === 'browser-test' && config.worktreePath
         ? await collectHostFactAttachments(config.worktreePath, fact.id, log)
         : await collectFactAttachments(containerManager, config, fact.id, log);
-    const passed = artifactExists && artifactChanged && commandPassed;
+    const presenceSatisfied =
+      fact.artifact.change === 'delete' ? artifactExists === false : artifactExists === true;
+    const passed = presenceSatisfied && artifactChanged && commandPassed;
     const failedReasons = [
-      artifactExists ? null : `artifact ${artifactPath} does not exist`,
+      presenceSatisfied
+        ? null
+        : `artifact ${artifactPath} ${fact.artifact.change === 'delete' ? 'is still present or absence is unverified' : 'does not exist or presence is unverified'}`,
       artifactChanged
         ? null
         : `artifact ${artifactPath} does not satisfy ${fact.artifact.change} requirement`,
@@ -2075,7 +2075,7 @@ async function runFactValidation(
       artifact: {
         path: artifactPath,
         change: fact.artifact.change,
-        exists: artifactExists,
+        exists: artifactExists ?? false,
         changed: artifactChanged,
         ...(artifactHash ? { hash: artifactHash } : {}),
       },
@@ -2520,17 +2520,17 @@ async function artifactExistsInContainer(
   config: ValidationEngineConfig,
   artifactPath: string,
   log?: Logger,
-): Promise<boolean> {
+): Promise<boolean | null> {
   try {
     const result = await containerManager.execInContainer(
       config.containerId,
       ['sh', '-c', `test -e ${shellQuote(`/workspace/${artifactPath}`)}`],
       { cwd: '/workspace', timeout: 10_000 },
     );
-    return result.exitCode === 0;
+    return result.exitCode === 0 ? true : result.exitCode === 1 ? false : null;
   } catch (err) {
     log?.warn({ err, artifactPath }, 'required fact artifact existence check failed');
-    return false;
+    return null;
   }
 }
 
@@ -2659,7 +2659,7 @@ function shellQuote(value: string): string {
 export function artifactChangeSatisfied(
   diff: string,
   path: string,
-  change: 'create' | 'update' | 'touch',
+  change: 'create' | 'update' | 'delete' | 'touch',
 ): boolean {
   if (change === 'touch') return true;
   const normalized = normalizeContractPath(path);
@@ -2667,20 +2667,28 @@ export function artifactChangeSatisfied(
     (entry) => entry.path === normalized || entry.path.startsWith(`${normalized}/`),
   );
   if (change === 'create') return entries.some((entry) => entry.created);
+  if (change === 'delete') return entries.some((entry) => entry.deleted);
   return entries.length > 0;
 }
 
-function parseDiffEntries(diff: string): Array<{ path: string; created: boolean }> {
-  const entries: Array<{ path: string; created: boolean }> = [];
-  let current: { path: string; created: boolean } | null = null;
+function parseDiffEntries(
+  diff: string,
+): Array<{ path: string; created: boolean; deleted: boolean }> {
+  const entries: Array<{ path: string; created: boolean; deleted: boolean }> = [];
+  let current: { path: string; created: boolean; deleted: boolean } | null = null;
   for (const line of diff.split('\n')) {
     const match = /^diff --git a\/(.+) b\/(.+)$/.exec(line);
     if (match) {
-      current = { path: normalizeContractPath(match[2] ?? match[1] ?? ''), created: false };
+      current = {
+        path: normalizeContractPath(match[2] ?? match[1] ?? ''),
+        created: false,
+        deleted: false,
+      };
       entries.push(current);
       continue;
     }
     if (!current) continue;
+    if (line.startsWith('deleted file mode ') || line === '+++ /dev/null') current.deleted = true;
     if (line === 'new file mode' || line.startsWith('new file mode ') || line === '--- /dev/null') {
       current.created = true;
     }

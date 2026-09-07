@@ -1,0 +1,71 @@
+
+ RUN  v4.1.10 /private/tmp/autopod-durable-execution
+
+ ❯ packages/daemon/src/pods/task-execution-ledger.test.ts (4 tests | 4 failed) 198ms
+     × retains task/run identity through restart and linked fixes while intentional reruns remain distinct 76ms
+     × counts parent agent work and harness phases once and blocks a linked fix before further spending 44ms
+     × reports malformed phase telemetry without losing the other task records 39ms
+     × rejects changing task membership after execution identity has been assigned 38ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 4 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  packages/daemon/src/pods/task-execution-ledger.test.ts > task-wide execution accounting > retains task/run identity through restart and linked fixes while intentional reruns remain distinct
+TypeError: Cannot read properties of undefined (reading 'snapshot')
+ ❯ packages/daemon/src/pods/task-execution-ledger.test.ts:27:25
+     25|     const { db, repo } = fixture();
+     26|     const ledger = repo.taskExecutions!;
+     27|     const root = ledger.snapshot('root');
+       |                         ^
+     28|     expect(ledger.snapshot('fix').taskId).toBe(root.taskId);
+     29|     expect(ledger.snapshot('fix').executionId).not.toBe(root.execution…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/4]⎯
+
+ FAIL  packages/daemon/src/pods/task-execution-ledger.test.ts > task-wide execution accounting > counts parent agent work and harness phases once and blocks a linked fix before further spending
+TypeError: Cannot read properties of undefined (reading 'snapshot')
+ ❯ packages/daemon/src/pods/task-execution-ledger.test.ts:56:35
+     54|           review: { inputTokens: 15, outputTokens: 5, costUsd: 0.25 },
+     55|         } });
+     56|       expect(repo.taskExecutions!.snapshot('fix')).toMatchObject({
+       |                                   ^
+     57|         tokenBudget: 100, recordedInputTokens: 75, recordedOutputToken…
+     58|         podCount: 2, infrastructureCostUsd: null,
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/4]⎯
+
+ FAIL  packages/daemon/src/pods/task-execution-ledger.test.ts > task-wide execution accounting > reports malformed phase telemetry without losing the other task records
+TypeError: Cannot read properties of undefined (reading 'snapshot')
+ ❯ packages/daemon/src/pods/task-execution-ledger.test.ts:70:45
+     68|       repo.update('root', { inputTokens: 9, outputTokens: 1 });
+     69|       db.prepare("UPDATE pods SET phase_token_usage = 'broken' WHERE i…
+     70|       const snapshot = repo.taskExecutions!.snapshot('root');
+       |                                             ^
+     71|       expect(snapshot.recordedInputTokens).toBe(9);
+     72|       expect(snapshot.telemetry).toBe('partial');
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/4]⎯
+
+ FAIL  packages/daemon/src/pods/task-execution-ledger.test.ts > task-wide execution accounting > rejects changing task membership after execution identity has been assigned
+AssertionError: expected [Function] to throw an error
+
+- Expected:
+null
+
++ Received:
+undefined
+
+ ❯ packages/daemon/src/pods/task-execution-ledger.test.ts:80:66
+     78|     const { db, repo } = fixture();
+     79|     try {
+     80|       expect(() => repo.update('fix', { linkedPodId: 'rerun' })).toThr…
+       |                                                                  ^
+     81|       expect(repo.getOrThrow('fix').linkedPodId).toBe('root');
+     82|     } finally { db.close(); }
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[4/4]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  4 failed (4)
+   Start at  11:54:17
+   Duration  520ms (transform 105ms, setup 0ms, import 186ms, tests 198ms, environment 0ms)

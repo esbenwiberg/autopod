@@ -82,11 +82,25 @@
     {
       "id": "W2.1",
       "requirement": "Task retry identity and cumulative budget survive Resume, restart and linked fix pods",
-      "status": "unverified",
-      "implementation": [],
-      "tests": [],
-      "evidence": [],
-      "prerequisites": []
+      "status": "partial",
+      "implementation": [
+        "packages/daemon/src/pods/task-execution-ledger.ts",
+        "packages/daemon/src/db/migrations/143_task_executions.sql",
+        "packages/daemon/src/pods/pod-manager.ts"
+      ],
+      "tests": [
+        "packages/daemon/src/pods/task-execution-ledger.test.ts",
+        "packages/daemon/src/pods/pod-manager.test.ts"
+      ],
+      "evidence": [
+        "receipts/task-ledger-red.txt",
+        "receipts/task-budget-manager-red.txt",
+        "receipts/task-ledger-green-2.txt",
+        "receipts/task-ledger-corrected-telemetry.txt",
+        "receipts/checkpoint-3-affected.txt"
+      ],
+      "prerequisites": [],
+      "remaining": "Task membership, run identities and measured cumulative token gate implemented; task-wide retry limits and audited budget extensions remain."
     },
     {
       "id": "W2.2",
@@ -109,11 +123,25 @@
     {
       "id": "W2.4",
       "requirement": "Initial, rework, review, validation time and available infrastructure costs reconcile without double counting",
-      "status": "unverified",
-      "implementation": [],
-      "tests": [],
-      "evidence": [],
-      "prerequisites": []
+      "status": "partial",
+      "implementation": [
+        "packages/daemon/src/pods/task-execution-ledger.ts",
+        "packages/daemon/src/db/migrations/143_task_executions.sql",
+        "packages/daemon/src/pods/pod-manager.ts"
+      ],
+      "tests": [
+        "packages/daemon/src/pods/task-execution-ledger.test.ts",
+        "packages/daemon/src/pods/pod-manager.test.ts"
+      ],
+      "evidence": [
+        "receipts/task-ledger-red.txt",
+        "receipts/task-budget-manager-red.txt",
+        "receipts/task-ledger-green-2.txt",
+        "receipts/task-ledger-corrected-telemetry.txt",
+        "receipts/checkpoint-3-affected.txt"
+      ],
+      "prerequisites": [],
+      "remaining": "Recorded provider/phase amounts reconcile without double counting. Validation time, retry classification policy and available infrastructure billing collection remain."
     },
     {
       "id": "W2.5",
@@ -145,20 +173,49 @@
     {
       "id": "W3.1",
       "requirement": "Fresh remote refs precede actual-base create/update/delete contract checks",
-      "status": "unverified",
-      "implementation": [],
-      "tests": [],
-      "evidence": [],
-      "prerequisites": []
+      "status": "partial",
+      "implementation": [
+        "packages/daemon/src/worktrees/contract-base-preflight.ts",
+        "packages/daemon/src/pods/pod-manager.ts",
+        "packages/daemon/src/validation/local-validation-engine.ts"
+      ],
+      "tests": [
+        "packages/daemon/src/worktrees/contract-base-preflight.test.ts",
+        "packages/daemon/src/pods/pod-manager.test.ts",
+        "packages/daemon/src/validation/local-validation-engine.test.ts"
+      ],
+      "evidence": [
+        "receipts/contract-preflight-red.txt",
+        "receipts/contract-preflight-green.txt",
+        "receipts/contract-base-validation.txt",
+        "receipts/contract-cli-tests-2.txt",
+        "receipts/checkpoint-3-affected.txt"
+      ],
+      "prerequisites": [],
+      "remaining": "Fresh-ref actual-base declaration gate and delete fact validation proven locally; live dispatch acceptance outstanding."
     },
     {
       "id": "W3.2",
       "requirement": "Equivalent active/recent work is detected; intentional reruns receive distinct execution identity",
-      "status": "unverified",
-      "implementation": [],
-      "tests": [],
-      "evidence": [],
-      "prerequisites": []
+      "status": "partial",
+      "implementation": [
+        "packages/daemon/src/pods/task-execution-ledger.ts",
+        "packages/daemon/src/db/migrations/143_task_executions.sql",
+        "packages/daemon/src/pods/pod-manager.ts"
+      ],
+      "tests": [
+        "packages/daemon/src/pods/task-execution-ledger.test.ts",
+        "packages/daemon/src/pods/pod-manager.test.ts"
+      ],
+      "evidence": [
+        "receipts/task-ledger-red.txt",
+        "receipts/task-budget-manager-red.txt",
+        "receipts/task-ledger-green-2.txt",
+        "receipts/task-ledger-corrected-telemetry.txt",
+        "receipts/checkpoint-3-affected.txt"
+      ],
+      "prerequisites": [],
+      "remaining": "Independent reruns have distinct task and execution identity; detection/reconciliation of equivalent active or recent work remains."
     },
     {
       "id": "W3.3",
@@ -210,10 +267,29 @@
       "id": "W4.1",
       "requirement": "Logical tasks, pods, provider attempts, validation executions and delivery receipts have distinct units",
       "status": "partial",
-      "implementation": ["packages/daemon/src/pods/models-aggregator.ts"],
-      "tests": ["packages/daemon/src/pods/models-aggregator.test.ts"],
-      "evidence": ["receipts/diagnostics-baseline-red.txt", "receipts/model-dedup-green.txt"],
-      "prerequisites": []
+      "implementation": [
+        "packages/daemon/src/pods/models-aggregator.ts",
+        "packages/daemon/src/pods/task-execution-ledger.ts",
+        "packages/daemon/src/db/migrations/143_task_executions.sql",
+        "packages/daemon/src/pods/pod-manager.ts",
+        "packages/shared/src/types/task-execution.ts"
+      ],
+      "tests": [
+        "packages/daemon/src/pods/models-aggregator.test.ts",
+        "packages/daemon/src/pods/task-execution-ledger.test.ts",
+        "packages/daemon/src/pods/pod-manager.test.ts"
+      ],
+      "evidence": [
+        "receipts/diagnostics-baseline-red.txt",
+        "receipts/model-dedup-green.txt",
+        "receipts/task-ledger-red.txt",
+        "receipts/task-budget-manager-red.txt",
+        "receipts/task-ledger-green-2.txt",
+        "receipts/task-ledger-corrected-telemetry.txt",
+        "receipts/checkpoint-3-affected.txt"
+      ],
+      "prerequisites": [],
+      "remaining": "Distinct task/pod/run/provider/validation units implemented. Durable logical delivery receipts remain."
     },
     {
       "id": "W4.2",
@@ -287,11 +363,26 @@
       "status": "partial",
       "implementation": [
         "packages/daemon/src/pods/cost-aggregation.ts",
-        "packages/shared/src/types/analytics.ts"
+        "packages/shared/src/types/analytics.ts",
+        "packages/daemon/src/pods/task-execution-ledger.ts",
+        "packages/daemon/src/db/migrations/143_task_executions.sql",
+        "packages/daemon/src/pods/pod-manager.ts"
       ],
-      "tests": ["packages/daemon/src/pods/cost-aggregation.test.ts"],
-      "evidence": ["receipts/history-cost-api.txt"],
-      "prerequisites": []
+      "tests": [
+        "packages/daemon/src/pods/cost-aggregation.test.ts",
+        "packages/daemon/src/pods/task-execution-ledger.test.ts",
+        "packages/daemon/src/pods/pod-manager.test.ts"
+      ],
+      "evidence": [
+        "receipts/history-cost-api.txt",
+        "receipts/task-ledger-red.txt",
+        "receipts/task-budget-manager-red.txt",
+        "receipts/task-ledger-green-2.txt",
+        "receipts/task-ledger-corrected-telemetry.txt",
+        "receipts/checkpoint-3-affected.txt"
+      ],
+      "prerequisites": [],
+      "remaining": "Effective corrected provider ledger is authoritative; pod totals are legacy fallback; harness phases added once. Missing billing and earlier run identity remain explicit."
     },
     {
       "id": "W4.8",
@@ -302,21 +393,32 @@
         "packages/desktop/Sources/AutopodUI/Views/Analytics/ModelsSimulator.swift",
         "packages/desktop/Sources/AutopodUI/Views/Analytics/CostDrillView.swift",
         "packages/mobile-web/src/screens/PodDetail.tsx",
-        "packages/cli/src/commands/pod.ts"
+        "packages/cli/src/commands/pod.ts",
+        "packages/daemon/src/api/routes/pods.ts",
+        "packages/mobile-web/src/components/TaskExecutionPanel.tsx",
+        "packages/desktop/Sources/AutopodUI/Views/Shared/SessionCostCard.swift"
       ],
       "tests": [
         "packages/desktop/Tests/AutopodUITests/ModelsSimulatorTests.swift",
-        "packages/cli/src/commands/pod.test.ts"
+        "packages/cli/src/commands/pod.test.ts",
+        "packages/daemon/src/api/routes/pods.test.ts",
+        "packages/mobile-web/src/components/TaskExecutionPanel.test.tsx"
       ],
       "evidence": [
         "receipts/checkpoint-1-desktop.txt",
         "receipts/mobile-browser-interaction.json",
         "receipts/health-cli-interaction.json",
-        "receipts/checkpoint-2-desktop.txt"
+        "receipts/checkpoint-2-desktop.txt",
+        "receipts/task-api-migrations.txt",
+        "receipts/task-cli-tests.txt",
+        "receipts/task-mobile-tests.txt",
+        "receipts/task-mobile-browser-interaction.json",
+        "receipts/task-desktop-tests.txt"
       ],
       "prerequisites": [
         "Selected mobile flows and new health CLI have local interaction proof. Desktop has compilation and tests only. Remaining operator flows, physical device and live evidence are outstanding."
-      ]
+      ],
+      "remaining": "Task projection and current mobile interaction verified locally. Actual desktop interaction and remaining changed operator flows remain."
     },
     {
       "id": "W5.1",
@@ -407,10 +509,19 @@
       "id": "W6.4",
       "requirement": "Freshness and disk headroom checks added while preserving cleanup/deployment safeguards",
       "status": "partial",
-      "implementation": ["packages/daemon/src/db/backup.ts"],
+      "implementation": [
+        "packages/daemon/src/db/backup.ts",
+        "packages/daemon/src/db/backup-verification.ts"
+      ],
       "tests": ["packages/daemon/src/db/backup.test.ts"],
-      "evidence": ["receipts/backup-red.txt", "receipts/backup-restore-green.txt"],
-      "prerequisites": []
+      "evidence": [
+        "receipts/backup-red.txt",
+        "receipts/backup-restore-green.txt",
+        "receipts/backup-scope-red.txt",
+        "receipts/backup-scope-full-schema.txt"
+      ],
+      "prerequisites": [],
+      "remaining": "New version-2 receipts cover every actual SQLite table. Version-1 subset verification stays explicit. Hosted backup freshness and restore acceptance remain unverified."
     },
     {
       "id": "W6.5",
@@ -421,8 +532,13 @@
         "packages/daemon/src/db/verify-backup-cli.ts"
       ],
       "tests": ["packages/daemon/src/db/backup.test.ts"],
-      "evidence": ["receipts/backup-health-cli-green.txt"],
-      "prerequisites": []
+      "evidence": [
+        "receipts/backup-health-cli-green.txt",
+        "receipts/backup-scope-red.txt",
+        "receipts/backup-scope-full-schema.txt"
+      ],
+      "prerequisites": [],
+      "remaining": "New version-2 receipts cover every actual SQLite table. Version-1 subset verification stays explicit. Hosted backup freshness and restore acceptance remain unverified."
     },
     {
       "id": "G.1",
@@ -489,5 +605,6 @@
       "evidence": [],
       "prerequisites": []
     }
-  ]
+  ],
+  "lastCheckpoint": "checkpoint-3.md"
 }

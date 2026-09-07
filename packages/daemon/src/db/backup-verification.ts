@@ -6,7 +6,7 @@ import { join } from 'node:path';
 import Database from 'better-sqlite3';
 
 export interface BackupReceipt {
-  version: 1;
+  version: 1 | 2;
   sourceIdentity: string;
   file: string;
   startedAt: string;
@@ -23,23 +23,29 @@ export async function fileChecksum(file: string): Promise<string> {
   for await (const chunk of createReadStream(file)) hash.update(chunk);
   return hash.digest('hex');
 }
-export function databaseWatermark(db: Database.Database): BackupReceipt['watermark'] {
+export function databaseWatermark(
+  db: Database.Database,
+  selectedTables?: readonly string[],
+): BackupReceipt['watermark'] {
   const result: BackupReceipt['watermark'] = {};
-  for (const table of [
-    'pods',
-    'provider_attempts',
-    'validation_history',
-    'escalation_requests',
-    'schema_version',
-  ]) {
+  const tables =
+    selectedTables ??
+    (
+      db.prepare("SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name").all() as {
+        name: string;
+      }[]
+    ).map((row) => row.name);
+  for (const table of tables) {
     if (!db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?").get(table))
       continue;
-    const hasUpdatedAt = (db.pragma(`table_info(${table})`) as { name: string }[]).some(
-      (column) => column.name === 'updated_at',
-    );
+    const hasUpdatedAt = (
+      db.prepare('SELECT name FROM pragma_table_info(?)').all(table) as { name: string }[]
+    ).some((column) => column.name === 'updated_at');
+    // Table names are catalog data; quote them even though normal migrations use fixed identifiers.
+    const quotedTable = `"${table.replaceAll('"', '""')}"`;
     result[table] = db
       .prepare(
-        `SELECT COUNT(*) AS rows, ${hasUpdatedAt ? 'MAX(updated_at)' : 'NULL'} AS latestUpdatedAt FROM ${table}`,
+        `SELECT COUNT(*) AS rows, ${hasUpdatedAt ? 'MAX(updated_at)' : 'NULL'} AS latestUpdatedAt FROM ${quotedTable}`,
       )
       .get() as { rows: number; latestUpdatedAt: string | null };
   }
@@ -55,7 +61,7 @@ export function assertBackupIntegrity(db: Database.Database): void {
 export function parseBackupReceipt(text: string): BackupReceipt {
   const value = JSON.parse(text) as BackupReceipt;
   if (
-    value?.version !== 1 ||
+    (value?.version !== 1 && value?.version !== 2) ||
     !/^[a-f0-9]{64}$/.test(value.sourceIdentity) ||
     !/^[a-f0-9]{64}$/.test(value.sha256) ||
     !Number.isFinite(Date.parse(value.completedAt)) ||
@@ -83,6 +89,7 @@ export async function verifyBackupRestore(
   },
 ): Promise<{
   verifiedAt: string;
+  watermarkScope: 'all_tables' | 'legacy_subset';
   sourceIdentity: string;
   watermark: BackupReceipt['watermark'];
   sha256: string;
@@ -108,12 +115,16 @@ export async function verifyBackupRestore(
     const restored = new Database(restoredPath);
     try {
       assertBackupIntegrity(restored);
-      const watermark = databaseWatermark(restored);
+      const watermark = databaseWatermark(
+        restored,
+        receipt.version === 1 ? Object.keys(receipt.watermark) : undefined,
+      );
       if (JSON.stringify(watermark) !== JSON.stringify(receipt.watermark))
         throw new Error('Restored data does not match the recorded backup watermark');
       restored.exec('BEGIN; CREATE TABLE autopod_restore_write_probe (id INTEGER); ROLLBACK;');
       return {
         verifiedAt: new Date(now).toISOString(),
+        watermarkScope: receipt.version === 2 ? 'all_tables' : 'legacy_subset',
         sourceIdentity: receipt.sourceIdentity,
         watermark,
         sha256: receipt.sha256,

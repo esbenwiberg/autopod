@@ -601,3 +601,5 @@ export type {
 } from './types/analytics.js';
 
 export type { BackupHealth, DaemonHealthSummary, DaemonReleaseInfo } from './types/release.js';
+
+export type { TaskExecutionSummary } from './types/task-execution.js';

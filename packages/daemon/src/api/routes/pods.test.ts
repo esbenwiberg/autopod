@@ -153,6 +153,27 @@ describe('GET /pods/:podId provider-attempt projection', () => {
     expect(cost.json().total).toBe(4);
   });
 
+  it('exposes bounded task accounting even when unrelated large pod evidence is malformed', async () => {
+    insertPod(db, { id: 'task-accounting', status: 'running', completedAt: undefined });
+    createPodRepository(db).taskExecutions?.register('task-accounting');
+    db.prepare(
+      "UPDATE pods SET task_summary = 'broken', input_tokens = 9, output_tokens = 1 WHERE id = 'task-accounting'",
+    ).run();
+    const response = await app.inject({
+      method: 'GET',
+      url: '/pods/task-accounting/task-execution',
+    });
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toMatchObject({
+      rootPodId: 'task-accounting',
+      podCount: 1,
+      recordedInputTokens: 9,
+      recordedOutputTokens: 1,
+      telemetry: 'partial',
+    });
+    expect(JSON.stringify(response.json())).not.toContain('broken');
+  });
+
   it('provider-attempt returns ordered redacted attempts and ledger projections', async () => {
     insertPod(db, { id: 'provider-attempt-pod', status: 'running', completedAt: undefined });
     db.prepare(`

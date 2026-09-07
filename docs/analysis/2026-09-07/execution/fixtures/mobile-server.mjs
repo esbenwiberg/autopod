@@ -52,6 +52,25 @@ const server = createServer(async (req, res) => {
       release: { commitSha: 'LOCAL-FIXTURE', dirty: true },
       backup: { state: 'stale', lastCompletedAt: '2026-09-01T00:00:00Z' },
     });
+  if (req.method === 'GET' && pathname === '/pods/local-fixture/task-execution')
+    return json({
+      taskId: 'task:local-original',
+      executionId: 'execution:local-fixture',
+      rootPodId: 'local-original',
+      podCount: 2,
+      agentRunCount: 3,
+      failedRunCount: 1,
+      transientFailureCount: 0,
+      providerAttemptCount: 4,
+      validationExecutionCount: 5,
+      tokenBudget: 100,
+      recordedInputTokens: 90,
+      recordedOutputTokens: 10,
+      recordedCostUsd: 1.25,
+      infrastructureCostUsd: null,
+      telemetry: 'partial',
+      diagnostics: ['Infrastructure cost unavailable'],
+    });
   if (req.method === 'GET' && pathname === '/pods') return json([pod]);
   if (req.method === 'GET' && pathname === '/pods/local-fixture') return json(pod);
   if (req.method === 'GET' && /\/pods\/local-fixture\/(events|validations)$/.test(pathname))

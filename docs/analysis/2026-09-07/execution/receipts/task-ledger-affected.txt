@@ -1,0 +1,157 @@
+
+ RUN  v4.1.10 /private/tmp/autopod-durable-execution
+
+ ❯ packages/cli/src/commands/spec.test.ts (7 tests | 2 failed) 33ms
+     × preflights the tracked canonical scaffold 3ms
+     × continues to preflight an existing tracked contract series 4ms
+ ❯ packages/daemon/src/pods/pod-manager.test.ts (404 tests | 7 failed) 29012ms
+       × starts a daemon host-port preview proxy for sandbox pods 162ms
+       × retries delivery for a validated fix pod parked in awaiting_input 140ms
+       × retries delivery for an already-failed fix pod with the delivery marker 83ms
+       × completes retry delivery without pushing when the linked parent is terminal 87ms
+       × does not push when the linked parent becomes terminal during retry rebase 50ms
+       × retains force-with-lease when retry rebase is already up to date 47ms
+       × re-parks a validated fix pod when retry delivery fails again 42ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 9 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  packages/cli/src/commands/spec.test.ts > spec command > preflights the tracked canonical scaffold
+Error: process.exit unexpectedly called with "1"
+ ❯ Command.<anonymous> packages/cli/src/commands/spec.ts:45:36
+     43|         );
+     44|       }
+     45|       if (!envelope.valid) process.exit(1);
+       |                                    ^
+     46|     });
+     47| }
+ ❯ Command.listener [as _actionHandler] node_modules/.pnpm/commander@15.0.0/node_modules/commander/lib/command.js:569:17
+ ❯ node_modules/.pnpm/commander@15.0.0/node_modules/commander/lib/command.js:1616:14
+ ❯ Command._chainOrCall node_modules/.pnpm/commander@15.0.0/node_modules/commander/lib/command.js:1500:12
+ ❯ Command._parseCommand node_modules/.pnpm/commander@15.0.0/node_modules/commander/lib/command.js:1615:27
+ ❯ node_modules/.pnpm/commander@15.0.0/node_modules/commander/lib/command.js:1379:27
+ ❯ Command._chainOrCall node_modules/.pnpm/commander@15.0.0/node_modules/commander/lib/command.js:1500:12
+ ❯ Command._dispatchSubcommand node_modules/.pnpm/commander@15.0.0/node_modules/commander/lib/command.js:1375:25
+ ❯ Command._parseCommand node_modules/.pnpm/commander@15.0.0/node_modules/commander/lib/command.js:1571:19
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/9]⎯
+
+ FAIL  packages/cli/src/commands/spec.test.ts > spec command > continues to preflight an existing tracked contract series
+AssertionError: expected [ { …(5) } ] to deeply equal []
+
+- Expected
++ Received
+
+- []
++ [
++   {
++     "code": "SERIES_BRIEFS_NOT_FOUND",
++     "hint": "Pass an existing spec, briefs, brief, or contract folder.",
++     "message": "Spec folder does not exist.",
++     "path": "",
++     "source": "/private/specs/advisory-browser-qa",
++   },
++ ]
+
+ ❯ packages/cli/src/commands/spec.test.ts:193:32
+    191|   it('continues to preflight an existing tracked contract series', () …
+    192|     const result = preflightSeriesFolder(resolve(process.cwd(), '../..…
+    193|     expect(result.diagnostics).toEqual([]);
+       |                                ^
+    194|     expect(result.briefs?.length).toBeGreaterThan(0);
+    195|   });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/9]⎯
+
+ FAIL  packages/daemon/src/pods/pod-manager.test.ts > PodManager > triggerValidation — loud-fail on push > starts a daemon host-port preview proxy for sandbox pods
+Error: listen EPERM: operation not permitted 0.0.0.0:42915
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/9]⎯
+
+ FAIL  packages/daemon/src/pods/pod-manager.test.ts > PodManager > resumePod — token-free escape hatch for failed pods > retries delivery for a validated fix pod parked in awaiting_input
+SqliteError: task membership is immutable; create a distinct execution
+ ❯ Object.update packages/daemon/src/pods/pod-repository.ts:1131:10
+    1129|       const result = db
+    1130|         .prepare(`UPDATE pods SET ${setClauses.join(', ')} WHERE id = …
+    1131|         .run(params);
+       |          ^
+    1132|
+    1133|       if (result.changes === 0) throw new PodNotFoundError(id);
+ ❯ setupParkedFixDeliveryFailure packages/daemon/src/pods/pod-manager.test.ts:13340:19
+ ❯ packages/daemon/src/pods/pod-manager.test.ts:13355:32
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[4/9]⎯
+
+ FAIL  packages/daemon/src/pods/pod-manager.test.ts > PodManager > resumePod — token-free escape hatch for failed pods > retries delivery for an already-failed fix pod with the delivery marker
+SqliteError: task membership is immutable; create a distinct execution
+ ❯ Object.update packages/daemon/src/pods/pod-repository.ts:1131:10
+    1129|       const result = db
+    1130|         .prepare(`UPDATE pods SET ${setClauses.join(', ')} WHERE id = …
+    1131|         .run(params);
+       |          ^
+    1132|
+    1133|       if (result.changes === 0) throw new PodNotFoundError(id);
+ ❯ setupParkedFixDeliveryFailure packages/daemon/src/pods/pod-manager.test.ts:13340:19
+ ❯ packages/daemon/src/pods/pod-manager.test.ts:13379:32
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[5/9]⎯
+
+ FAIL  packages/daemon/src/pods/pod-manager.test.ts > PodManager > resumePod — token-free escape hatch for failed pods > completes retry delivery without pushing when the linked parent is terminal
+SqliteError: task membership is immutable; create a distinct execution
+ ❯ Object.update packages/daemon/src/pods/pod-repository.ts:1131:10
+    1129|       const result = db
+    1130|         .prepare(`UPDATE pods SET ${setClauses.join(', ')} WHERE id = …
+    1131|         .run(params);
+       |          ^
+    1132|
+    1133|       if (result.changes === 0) throw new PodNotFoundError(id);
+ ❯ setupParkedFixDeliveryFailure packages/daemon/src/pods/pod-manager.test.ts:13340:19
+ ❯ packages/daemon/src/pods/pod-manager.test.ts:13390:40
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[6/9]⎯
+
+ FAIL  packages/daemon/src/pods/pod-manager.test.ts > PodManager > resumePod — token-free escape hatch for failed pods > does not push when the linked parent becomes terminal during retry rebase
+SqliteError: task membership is immutable; create a distinct execution
+ ❯ Object.update packages/daemon/src/pods/pod-repository.ts:1131:10
+    1129|       const result = db
+    1130|         .prepare(`UPDATE pods SET ${setClauses.join(', ')} WHERE id = …
+    1131|         .run(params);
+       |          ^
+    1132|
+    1133|       if (result.changes === 0) throw new PodNotFoundError(id);
+ ❯ setupParkedFixDeliveryFailure packages/daemon/src/pods/pod-manager.test.ts:13340:19
+ ❯ packages/daemon/src/pods/pod-manager.test.ts:13406:40
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[7/9]⎯
+
+ FAIL  packages/daemon/src/pods/pod-manager.test.ts > PodManager > resumePod — token-free escape hatch for failed pods > retains force-with-lease when retry rebase is already up to date
+SqliteError: task membership is immutable; create a distinct execution
+ ❯ Object.update packages/daemon/src/pods/pod-repository.ts:1131:10
+    1129|       const result = db
+    1130|         .prepare(`UPDATE pods SET ${setClauses.join(', ')} WHERE id = …
+    1131|         .run(params);
+       |          ^
+    1132|
+    1133|       if (result.changes === 0) throw new PodNotFoundError(id);
+ ❯ setupParkedFixDeliveryFailure packages/daemon/src/pods/pod-manager.test.ts:13340:19
+ ❯ packages/daemon/src/pods/pod-manager.test.ts:13427:32
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[8/9]⎯
+
+ FAIL  packages/daemon/src/pods/pod-manager.test.ts > PodManager > resumePod — token-free escape hatch for failed pods > re-parks a validated fix pod when retry delivery fails again
+SqliteError: task membership is immutable; create a distinct execution
+ ❯ Object.update packages/daemon/src/pods/pod-repository.ts:1131:10
+    1129|       const result = db
+    1130|         .prepare(`UPDATE pods SET ${setClauses.join(', ')} WHERE id = …
+    1131|         .run(params);
+       |          ^
+    1132|
+    1133|       if (result.changes === 0) throw new PodNotFoundError(id);
+ ❯ setupParkedFixDeliveryFailure packages/daemon/src/pods/pod-manager.test.ts:13340:19
+ ❯ packages/daemon/src/pods/pod-manager.test.ts:13447:32
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[9/9]⎯
+
+
+ Test Files  2 failed | 3 passed (5)
+      Tests  9 failed | 464 passed (473)
+   Start at  11:58:45
+   Duration  30.28s (transform 1.79s, setup 0ms, import 2.85s, tests 32.11s, environment 0ms)

@@ -16,3 +16,6 @@ Local HEAD and live remote main both 2d5456edac542a99d27f12eb1dbd16e5ad8c2c2a (l
 
 ## Acceptance method
 Every implementation is linked from acceptance.json to regression/fault-injection receipts. Reproduce defects before fixing; preserve historical receipts as dated evidence. Explicitly distinguish local mocked orchestration, real local processes, supported operator interactions, and live production/canary proof. Use bounded projections for historical records and diagnostics without credential-bearing payloads. Unknown measurements remain unknown.
+
+## Checkpoint 3 continuation
+See checkpoint-3.md and acceptance.json. Actual-base declaration gates, durable task membership/run accounting, operator task projections, and all-table backup receipts are locally implemented. Continue with retry-condition governance and exact-input validation reuse, then scheduler/triage and durable delivery. The goal remains active; all required acceptance is not yet verified.

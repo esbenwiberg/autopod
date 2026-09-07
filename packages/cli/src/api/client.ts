@@ -35,6 +35,7 @@ import type {
   ScheduledJobTemplate,
   SpecContract,
   SpecFile,
+  TaskExecutionSummary,
   UpdateFromBaseResponse,
   UpdateScheduledJobRequest,
   UpdateScheduledJobTemplateRequest,
@@ -215,6 +216,10 @@ export class AutopodClient {
 
   async getSession(id: string): Promise<Pod> {
     return this.request<Pod>('GET', `/pods/${id}`);
+  }
+
+  async getTaskExecution(id: string): Promise<TaskExecutionSummary> {
+    return this.request('GET', `/pods/${id}/task-execution`);
   }
 
   async sendMessage(id: string, message: string): Promise<void> {

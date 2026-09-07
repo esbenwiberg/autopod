@@ -138,12 +138,78 @@ index 0000000..3333333
     expect(artifactChangeSatisfied(diff, 'Client/src', 'create')).toBe(false);
   });
 
+  it('requires a deletion diff for delete declarations', () => {
+    expect(artifactChangeSatisfied(diff, 'Client/src/Foo.ts', 'delete')).toBe(false);
+    expect(
+      artifactChangeSatisfied(
+        'diff --git a/obsolete.ts b/obsolete.ts\ndeleted file mode 100644\n--- a/obsolete.ts\n+++ /dev/null',
+        'obsolete.ts',
+        'delete',
+      ),
+    ).toBe(true);
+  });
+
   it('treats touch as an existence-only change requirement', () => {
     expect(artifactChangeSatisfied('', 'Client/src', 'touch')).toBe(true);
   });
 });
 
 describe('required fact execution', () => {
+  it.each([
+    { presenceExit: 1, commandExit: 0, passed: true },
+    { presenceExit: 0, commandExit: 0, passed: false },
+    { presenceExit: 2, commandExit: 0, passed: false },
+    { presenceExit: 1, commandExit: 1, passed: false },
+  ])(
+    'verifies deletion and the required command with no invented absence: %j',
+    async ({ presenceExit, commandExit, passed }) => {
+      const cm = {
+        execInContainer: vi.fn(async (_id: string, command: string[]) => {
+          const shell = command[2] ?? '';
+          if (shell.includes('test -e')) return { stdout: '', stderr: '', exitCode: presenceExit };
+          return {
+            stdout: '',
+            stderr: '',
+            exitCode: shell === 'node verify-removal.mjs' ? commandExit : 0,
+          };
+        }),
+      } as unknown as ContainerManager;
+      const engine = createLocalValidationEngine(cm);
+      const result = await engine.validate({
+        podId: 'deletion',
+        containerId: 'fixture',
+        previewUrl: '',
+        buildCommand: '',
+        startCommand: '',
+        healthPath: '/',
+        healthTimeout: 1,
+        smokePages: [],
+        attempt: 1,
+        task: 'Remove obsolete file',
+        hasWebUi: false,
+        skipPhases: ['setup', 'lint', 'sast', 'build', 'test', 'health', 'pages', 'review'],
+        diff: 'diff --git a/obsolete.ts b/obsolete.ts\ndeleted file mode 100644\n--- a/obsolete.ts\n+++ /dev/null',
+        contract: {
+          contractVersion: 1,
+          title: 'Remove obsolete',
+          dependsOn: [],
+          scenarios: [],
+          humanReview: [],
+          requiredFacts: [
+            {
+              id: 'removal',
+              proves: [],
+              kind: 'custom-command',
+              artifact: { path: 'obsolete.ts', change: 'delete' },
+              command: 'node verify-removal.mjs',
+            },
+          ],
+        },
+      });
+      expect(result.factValidation?.results[0]?.passed).toBe(passed);
+    },
+  );
+
   async function validateBrowserFact(options: {
     hostBrowserRunner?: HostBrowserRunner;
     command?: string;

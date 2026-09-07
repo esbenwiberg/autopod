@@ -1,3 +1,8 @@
+import type { RequiredFact } from '@autopod/shared';
+export interface ContractBaseEvidence {
+  baseCommitSha: string;
+  artifacts: Array<{ path: string; exists: boolean }>;
+}
 export interface WorktreeCreateConfig {
   repoUrl: string;
   branch: string;
@@ -172,6 +177,11 @@ export interface PushArtifactBranchConfig {
 }
 
 export interface WorktreeManager {
+  inspectContractBase(
+    worktreePath: string,
+    baseBranch: string,
+    facts: RequiredFact[],
+  ): Promise<ContractBaseEvidence>;
   create(config: WorktreeCreateConfig): Promise<WorktreeResult>;
   /** Install daemon-managed commit exclusions. Throws when protection cannot be proven. */
   ensureExcludes?(worktreePath: string, entries: string[]): Promise<void>;

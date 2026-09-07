@@ -34,7 +34,7 @@ required_facts:
   - id: broken
     proves: []
     kind: unit-test
-    artifact: { path: test.ts, change: delete }
+    artifact: { path: test.ts, change: unsupported }
     command: npx pnpm --filter shared test -- contract.test.ts
   - id: too-long
     proves: [${'x'.repeat(129)}]
@@ -59,6 +59,18 @@ required_facts:
     expect(result.diagnostics.map((d) => d.path)).toEqual(
       expect.arrayContaining(['requiredFacts.0.artifact.change', 'requiredFacts.0.proves']),
     );
+  });
+
+  it('accepts an explicit delete declaration', () => {
+    const contract = validDomainContract();
+    const result = inspectSpecContract({
+      ...contract,
+      requiredFacts: [
+        { ...contract.requiredFacts[0], artifact: { path: 'obsolete.ts', change: 'delete' } },
+      ],
+    });
+    expect(result.diagnostics).toEqual([]);
+    expect(result.contract?.requiredFacts[0]?.artifact.change).toBe('delete');
   });
 
   it('accepts the corrected Luumi counterpart', () => {

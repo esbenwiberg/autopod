@@ -1,0 +1,48 @@
+
+> autopod@ lint /private/tmp/autopod-durable-execution
+> biome check .
+
+./docs/analysis/2026-09-07/execution/fixtures/mobile-server.mjs format ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  × Formatter would have printed the following content:
+
+     53  53 │         backup: { state: 'stale', lastCompletedAt: '2026-09-01T00:00:00Z' },
+     54  54 │       });
+     55     │ - ··if·(req.method·===·'GET'·&&·pathname·===·'/pods/local-fixture/task-execution')·return·json({
+     56     │ - ····taskId:·'task:local-original',·executionId:·'execution:local-fixture',·rootPodId:·'local-original',
+     57     │ - ····podCount:·2,·agentRunCount:·3,·failedRunCount:·1,·transientFailureCount:·0,
+     58     │ - ····providerAttemptCount:·4,·validationExecutionCount:·5,·tokenBudget:·100,
+     59     │ - ····recordedInputTokens:·90,·recordedOutputTokens:·10,·recordedCostUsd:·1.25,
+     60     │ - ····infrastructureCostUsd:·null,·telemetry:·'partial',·diagnostics:·['Infrastructure·cost·unavailable'],
+     61     │ - ··});
+         55 │ + ··if·(req.method·===·'GET'·&&·pathname·===·'/pods/local-fixture/task-execution')
+         56 │ + ····return·json({
+         57 │ + ······taskId:·'task:local-original',
+         58 │ + ······executionId:·'execution:local-fixture',
+         59 │ + ······rootPodId:·'local-original',
+         60 │ + ······podCount:·2,
+         61 │ + ······agentRunCount:·3,
+         62 │ + ······failedRunCount:·1,
+         63 │ + ······transientFailureCount:·0,
+         64 │ + ······providerAttemptCount:·4,
+         65 │ + ······validationExecutionCount:·5,
+         66 │ + ······tokenBudget:·100,
+         67 │ + ······recordedInputTokens:·90,
+         68 │ + ······recordedOutputTokens:·10,
+         69 │ + ······recordedCostUsd:·1.25,
+         70 │ + ······infrastructureCostUsd:·null,
+         71 │ + ······telemetry:·'partial',
+         72 │ + ······diagnostics:·['Infrastructure·cost·unavailable'],
+         73 │ + ····});
+     62  74 │     if (req.method === 'GET' && pathname === '/pods') return json([pod]);
+     63  75 │     if (req.method === 'GET' && pathname === '/pods/local-fixture') return json(pod);
+
+
+Checked 797 files in 747ms. No fixes applied.
+Found 1 error.
+check ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  × Some errors were emitted while running checks.
+
+
+ ELIFECYCLE  Command failed with exit code 1.

@@ -145,7 +145,7 @@ export function createDbBackupManager(
         snapshot.close();
       }
       const receipt: BackupReceipt = {
-        version: 1,
+        version: 2,
         sourceIdentity,
         file,
         startedAt: new Date(started).toISOString(),

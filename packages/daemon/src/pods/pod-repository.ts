@@ -219,7 +219,10 @@ export interface PodStats {
 
 import { type CompletionJournal, createCompletionJournal } from './completion-journal.js';
 
+import { type TaskExecutionLedger, createTaskExecutionLedger } from './task-execution-ledger.js';
+
 export interface PodRepository {
+  taskExecutions?: TaskExecutionLedger;
   completionJournal?: CompletionJournal;
   insert(pod: NewPod): void;
   getOrThrow(id: string): Pod;
@@ -585,6 +588,7 @@ function rowToDisplaySession(source: Record<string, unknown>): Pod {
 
 export function createPodRepository(db: Database.Database): PodRepository {
   const completionJournal = createCompletionJournal(db);
+  const taskExecutions = createTaskExecutionLedger(db);
   function listRows(filters?: PodFilters): Iterable<Record<string, unknown>> {
     const whereClauses: string[] = [];
     const params: Record<string, unknown> = {};
@@ -628,7 +632,8 @@ export function createPodRepository(db: Database.Database): PodRepository {
 
   return {
     completionJournal,
-    insert(pod: NewPod): void {
+    taskExecutions,
+    insert: db.transaction((pod: NewPod): void => {
       // Keep legacy output_mode and new pod columns in sync.
       const podOpts: PodOptions = pod.options ?? podOptionsFromOutputMode(pod.outputMode);
       const legacyOutputMode: OutputMode = pod.options
@@ -718,7 +723,8 @@ export function createPodRepository(db: Database.Database): PodRepository {
         autoApprove: pod.autoApprove ? 1 : 0,
         disableAskHuman: pod.disableAskHuman ? 1 : 0,
       });
-    },
+      taskExecutions.register(pod.id);
+    }),
 
     getOrThrow(id: string): Pod {
       const row = db.prepare('SELECT * FROM pods WHERE id = ?').get(id) as

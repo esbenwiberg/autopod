@@ -7,6 +7,7 @@ import { ActivityList } from '../components/ActivityList.js';
 import { EscalationCard } from '../components/EscalationCard.js';
 import { SkipValidationToggle } from '../components/SkipValidationToggle.js';
 import { StatusChip } from '../components/StatusChip.js';
+import { TaskExecutionPanel } from '../components/TaskExecutionPanel.js';
 import { TaskMarkdownCards } from '../components/TaskMarkdownCards.js';
 import { type StoredValidation, ValidationSummary } from '../components/ValidationSummary.js';
 import { ApiError, AuthRequiredError, apiFetch } from '../lib/api.js';
@@ -128,6 +129,10 @@ export function PodDetail(): JSX.Element {
           )}
         </section>
       ) : null}
+      <TaskExecutionPanel
+        podId={data.id}
+        revision={`${data.status}:${data.inputTokens}:${data.outputTokens}:${data.validationAttempts}`}
+      />
       <ProgressPlan pod={data} />
 
       {data.pendingEscalation ? (

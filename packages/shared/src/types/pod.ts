@@ -85,6 +85,7 @@ export interface PodCostSegment {
 }
 
 export interface PodCostBreakdownResponse {
+  taskExecution?: import('./task-execution.js').TaskExecutionSummary | null;
   podId: string;
   model: string | null;
   totalCostUsd: number;

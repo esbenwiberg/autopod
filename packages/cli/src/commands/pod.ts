@@ -525,11 +525,27 @@ export function registerPodCommands(program: Command, getClient: () => AutopodCl
     const resolvedId = await resolvePodId(client, id);
     const pod = await client.getSession(resolvedId);
 
-    withJsonOutput(opts, pod, (s) => {
+    const taskExecution = await client.getTaskExecution(resolvedId).catch(() => null);
+    withJsonOutput(opts, { ...pod, taskExecution }, (s) => {
       console.log(chalk.bold.cyan(`Pod ${s.id}`));
       console.log(chalk.dim('─'.repeat(50)));
       console.log(`${chalk.bold('Profile:')}      ${s.profileName}`);
       console.log(`${chalk.bold('Status:')}       ${formatStatus(s.status)}`);
+      if (s.taskExecution) {
+        const task = s.taskExecution;
+        console.log(`${chalk.bold('Logical task:')} ${task.taskId} (${task.podCount} pods)`);
+        console.log(`${chalk.bold('Execution:')} ${task.executionId}`);
+        console.log(
+          `${chalk.bold('Task runs:')} ${task.agentRunCount} recorded agent runs, ${task.providerAttemptCount} provider attempts, ${task.validationExecutionCount} validations`,
+        );
+        console.log(
+          `${chalk.bold('Task tokens:')} ${task.recordedInputTokens + task.recordedOutputTokens}/${task.tokenBudget ?? 'no configured limit'}`,
+        );
+        console.log(
+          `${chalk.bold('Recorded task cost:')} $${task.recordedCostUsd.toFixed(4)} (${task.telemetry} telemetry)`,
+        );
+        for (const diagnostic of task.diagnostics) console.log(chalk.dim(diagnostic));
+      } else console.log(chalk.yellow('Task accounting unavailable'));
       if (s.finalization?.agentSettledAt) {
         console.log(`${chalk.bold('Agent settled:')} ${s.finalization.agentSettledAt}`);
         console.log(`${chalk.bold('Finalization:')} ${s.finalization.phase}`);

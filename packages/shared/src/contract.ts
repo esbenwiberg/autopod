@@ -54,7 +54,7 @@ const factSchema = z
       'custom-command',
     ]),
     artifact: z
-      .object({ path: text(500), change: z.enum(['create', 'update', 'touch']) })
+      .object({ path: text(500), change: z.enum(['create', 'update', 'delete', 'touch']) })
       .passthrough(),
     command: text(1000),
   })
@@ -102,7 +102,7 @@ export function inspectSpecContract(input: unknown, source = 'contract'): Contra
       let hint = 'Provide the required value in the documented contract-v1 format.';
       if (/^requiredFacts\.\d+\.artifact\.change$/.test(path)) {
         code = 'CONTRACT_ARTIFACT_CHANGE_INVALID';
-        hint = 'Use one of create, update, or touch.';
+        hint = 'Use one of create, update, delete, or touch.';
       } else if (/^requiredFacts\.\d+\.proves$/.test(path)) {
         code = 'CONTRACT_PROVES_EMPTY';
         hint = 'List at least one declared scenario id.';

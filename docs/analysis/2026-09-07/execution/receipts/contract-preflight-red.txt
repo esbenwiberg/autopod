@@ -1,0 +1,29 @@
+
+ RUN  v4.1.10 /private/tmp/autopod-durable-execution
+
+ ❯ packages/daemon/src/pods/pod-manager.test.ts (403 tests | 1 failed | 402 skipped) 113ms
+       × stops stale contracts after fresh worktree creation and before container provisioning 112ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  packages/daemon/src/pods/pod-manager.test.ts > PodManager > processPod > stops stale contracts after fresh worktree creation and before container provisioning
+AssertionError: expected 'validated' to be 'failed' // Object.is equality
+
+Expected: "failed"
+Received: "validated"
+
+ ❯ packages/daemon/src/pods/pod-manager.test.ts:5262:49
+    5260|       }, 'user-1');
+    5261|       await manager.processPod(pod.id);
+    5262|       expect(manager.getSession(pod.id).status).toBe('failed');
+       |                                                 ^
+    5263|       expect(manager.getSession(pod.id).failureReason).toContain('Stal…
+    5264|       expect(check).toHaveBeenCalledWith('/tmp/worktree/abc', 'main', …
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 402 skipped (403)
+   Start at  11:42:20
+   Duration  1.35s (transform 675ms, setup 0ms, import 1.12s, tests 113ms, environment 0ms)

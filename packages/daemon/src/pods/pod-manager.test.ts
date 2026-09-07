@@ -1374,6 +1374,37 @@ describe('PodManager', () => {
     expect(ctx.podRepo.getOrThrow(pod.id).status).toBe('paused');
   });
 
+  it('blocks linked fix agent execution using cumulative task budget before consuming the runtime', async () => {
+    const ctx = createTestContext();
+    const manager = createPodManager(ctx.deps);
+    const parent = manager.createSession(
+      { profileName: 'test-profile', task: 'original', tokenBudget: 100 },
+      'user-1',
+    );
+    ctx.podRepo.update(parent.id, { status: 'running', inputTokens: 80, outputTokens: 20 });
+    const fix = manager.createSession(
+      { profileName: 'test-profile', task: 'fix original', linkedPodId: parent.id },
+      'user-1',
+    );
+    ctx.podRepo.update(fix.id, { status: 'running' });
+    let consumed = false;
+    await expect(
+      manager.consumeAgentEvents(
+        fix.id,
+        (async function* () {
+          consumed = true;
+          yield {
+            type: 'complete',
+            timestamp: new Date().toISOString(),
+            result: 'unwanted paid work',
+          } as const;
+        })(),
+      ),
+    ).rejects.toThrow('Task token budget');
+    expect(consumed).toBe(false);
+    expect(ctx.podRepo.taskExecutions?.snapshot(fix.id).agentRunCount).toBe(0);
+  });
+
   it('does not retain an active run when event-consumer initialization fails', async () => {
     const ctx = createTestContext(undefined, { defaultRuntime: 'codex' });
     const runtime = ctx.runtime as Runtime & { suspend: ReturnType<typeof vi.fn> };
@@ -5248,6 +5279,53 @@ describe('PodManager', () => {
         '/home/autopod/.codex/auth.json',
         oldAuthJson,
       );
+    });
+
+    it('stops stale contracts after fresh worktree creation and before container provisioning', async () => {
+      const ctx = createTestContext();
+      const check = vi
+        .fn()
+        .mockRejectedValue(
+          new AutopodError(
+            'Stale contract requires review: artifact already exists',
+            'STALE_CONTRACT',
+            409,
+          ),
+        );
+      Object.assign(ctx.worktreeManager, { inspectContractBase: check });
+      const manager = createPodManager(ctx.deps);
+      const pod = manager.createSession(
+        {
+          profileName: 'test-profile',
+          task: 'Create declared artifact',
+          skipValidation: true,
+          contract: {
+            contractVersion: 1,
+            title: 'Existing artifact',
+            dependsOn: [],
+            scenarios: [],
+            humanReview: [],
+            requiredFacts: [
+              {
+                id: 'f1',
+                proves: [],
+                kind: 'custom-command',
+                artifact: { path: 'existing.ts', change: 'create' },
+                command: 'node verify.mjs',
+              },
+            ],
+          },
+        },
+        'user-1',
+      );
+      await manager.processPod(pod.id);
+      expect(manager.getSession(pod.id).status).toBe('failed');
+      expect(manager.getSession(pod.id).failureReason).toContain('Stale contract requires review');
+      expect(check).toHaveBeenCalledWith('/tmp/worktree/abc', 'main', pod.contract?.requiredFacts);
+      expect(vi.mocked(ctx.worktreeManager.create).mock.invocationCallOrder[0]).toBeLessThan(
+        check.mock.invocationCallOrder[0],
+      );
+      expect(ctx.containerManager.spawn).not.toHaveBeenCalled();
     });
 
     it.each(['retained', 'deleted', 'provider-changed'] as const)(
@@ -13256,12 +13334,15 @@ describe('PodManager', () => {
         worktreePath: '/tmp/worktree/parent',
       });
       const fix = manager.createSession(
-        { profileName: 'test-profile', task: '[PR FIX] Address review feedback' },
+        {
+          profileName: 'test-profile',
+          task: '[PR FIX] Address review feedback',
+          linkedPodId: parent.id,
+        },
         'user-1',
       );
       ctx.podRepo.update(fix.id, {
         status,
-        linkedPodId: parent.id,
         branch: parent.branch,
         prUrl: parent.prUrl,
         worktreePath: '/tmp/worktree/fix',

@@ -3,6 +3,7 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { promisify } from 'node:util';
+import type { RequiredFact } from '@autopod/shared';
 import type { Logger } from 'pino';
 import { type DaemonGitHubAuth, DaemonGitHubAuthError } from '../github/daemon-github-auth.js';
 import type {
@@ -28,6 +29,7 @@ import type { AzureDevOpsAuth } from '../providers/azure-devops-auth.js';
 import type { ProfileLlmClientDeps } from '../providers/llm-client.js';
 import { KeyedPromiseQueue } from '../util/keyed-promise-queue.js';
 import { generateAutoCommitMessage } from './auto-commit-message.js';
+import { inspectContractBase } from './contract-base-preflight.js';
 import {
   DIFF_EXCLUDE_PATHSPECS,
   modeOnlyChangedPaths,
@@ -397,6 +399,10 @@ export interface LocalWorktreeManagerConfig {
  * Each pod gets its own worktree checked out from the bare repo.
  */
 export class LocalWorktreeManager implements WorktreeManager {
+  async inspectContractBase(worktreePath: string, baseBranch: string, facts: RequiredFact[]) {
+    return inspectContractBase(worktreePath, baseBranch, facts);
+  }
+
   private cacheDir: string;
   private worktreeDir: string;
   private logger: Logger;

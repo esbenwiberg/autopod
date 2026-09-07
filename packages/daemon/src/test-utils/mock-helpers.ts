@@ -168,6 +168,13 @@ export function createMockContainerManager(): ContainerManager {
 
 export function createMockWorktreeManager(): WorktreeManager {
   return {
+    inspectContractBase: vi.fn(async (_worktreePath, _baseBranch, facts) => ({
+      baseCommitSha: 'a'.repeat(40),
+      artifacts: facts.map((f) => ({
+        path: f.artifact.path,
+        exists: f.artifact.change !== 'create',
+      })),
+    })),
     create: vi.fn(async () => ({
       worktreePath: '/tmp/worktree/abc',
       bareRepoPath: '/tmp/bare/abc.git',

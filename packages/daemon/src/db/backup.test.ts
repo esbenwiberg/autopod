@@ -6,7 +6,9 @@ import { fileURLToPath } from 'node:url';
 import Database from 'better-sqlite3';
 import pino from 'pino';
 import { afterEach, describe, expect, it } from 'vitest';
-import { verifyBackupRestore } from './backup-verification.js';
+import { createPodRepository } from '../pods/pod-repository.js';
+import { createTestDb, insertTestProfile } from '../test-utils/mock-helpers.js';
+import { databaseWatermark, verifyBackupRestore } from './backup-verification.js';
 import { createDbBackupManager } from './backup.js';
 
 const logger = pino({ level: 'silent' });
@@ -27,6 +29,66 @@ function fixture() {
   return { dir, dbPath, db };
 }
 describe('active database backup provenance', () => {
+  it('includes actual validation, escalation and task execution tables in backup scope receipts', () => {
+    const db = createTestDb();
+    try {
+      const watermark = databaseWatermark(db);
+      for (const table of [
+        'validations',
+        'escalations',
+        'logical_tasks',
+        'task_executions',
+        'task_agent_runs',
+        'pod_finalizations',
+        'completion_decisions',
+      ])
+        expect(watermark[table], table).toMatchObject({ rows: 0 });
+    } finally {
+      db.close();
+    }
+  });
+
+  it('restores durable task runs from a full current schema without replacing newer active runs', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'autopod-full-backup-'));
+    cleanups.push(() => rmSync(dir, { recursive: true, force: true }));
+    const source = createTestDb();
+    insertTestProfile(source);
+    source
+      .prepare(`INSERT INTO pods (id, profile_name, task, status, model, runtime, branch, user_id)
+      VALUES ('root', 'test-profile', 'work', 'running', 'model', 'codex', 'branch', 'user')`)
+      .run();
+    const initial = createPodRepository(source);
+    initial.taskExecutions?.register('root');
+    initial.taskExecutions?.beginRun('root', 1, 1, {
+      runtime: 'codex',
+      model: 'model',
+      providerAccountId: null,
+    });
+    const dbPath = join(dir, 'active.db');
+    writeFileSync(dbPath, source.serialize());
+    source.close();
+    const active = new Database(dbPath);
+    cleanups.push(() => active.close());
+    const manager = createDbBackupManager(active, dbPath, logger);
+    await manager.runOnce();
+    const receipt = manager.getStatus().latest;
+    if (!receipt) throw new Error('Expected full-schema backup');
+    createPodRepository(active).taskExecutions?.beginRun('root', 1, 2, {
+      runtime: 'codex',
+      model: 'model',
+      providerAccountId: null,
+    });
+    const verified = await verifyBackupRestore(join(dir, 'backups', receipt.file), {
+      expectedSourceIdentity: manager.getStatus().sourceIdentity,
+      maxAgeMs: 60_000,
+    });
+    expect(verified.watermarkScope).toBe('all_tables');
+    expect(verified.watermark.task_agent_runs?.rows).toBe(1);
+    expect(verified.watermark.validations?.rows).toBe(0);
+    expect(verified.watermark.escalations?.rows).toBe(0);
+    expect(active.prepare('SELECT COUNT(*) AS n FROM task_agent_runs').get()).toEqual({ n: 2 });
+  });
+
   it('rejects a configured backup path for a different open database', () => {
     const { dir, db } = fixture();
     expect(() => createDbBackupManager(db, join(dir, 'stale.db'), logger)).toThrow(

@@ -1,0 +1,267 @@
+import { randomUUID } from 'node:crypto';
+import { AutopodError, type TaskExecutionSummary } from '@autopod/shared';
+import type Database from 'better-sqlite3';
+
+export interface ExecutionBinding {
+  runtime: string;
+  model: string;
+  providerAccountId: string | null;
+}
+export interface TaskExecutionLedger {
+  register(podId: string): void;
+  snapshot(podId: string): TaskExecutionSummary;
+  beginRun(podId: string, generation: number, cycle: number, binding: ExecutionBinding): string;
+  finishRun(
+    id: string,
+    outcome: 'completed' | 'failed' | 'paused' | 'stopped',
+    category: string | null,
+  ): void;
+}
+interface Membership {
+  taskId: string;
+  executionId: string;
+  rootPodId: string;
+}
+
+export function createTaskExecutionLedger(db: Database.Database): TaskExecutionLedger {
+  const membership = (podId: string): Membership | undefined =>
+    db
+      .prepare(`
+    SELECT e.task_id AS taskId, e.execution_id AS executionId, t.root_pod_id AS rootPodId
+    FROM task_executions e JOIN logical_tasks t ON t.id = e.task_id WHERE e.pod_id = ?
+  `)
+      .get(podId) as Membership | undefined;
+  const register = db.transaction((podId: string) => {
+    const seen = new Set<string>();
+    const assign = (id: string): Membership => {
+      const existing = membership(id);
+      if (existing) return existing;
+      if (seen.has(id))
+        throw new AutopodError(
+          'Cyclic task lineage requires reconciliation',
+          'TASK_IDENTITY_UNAVAILABLE',
+          409,
+        );
+      seen.add(id);
+      const pod = db
+        .prepare('SELECT linked_pod_id AS parent, created_at AS createdAt FROM pods WHERE id = ?')
+        .get(id) as { parent: string | null; createdAt: string } | undefined;
+      if (!pod)
+        throw new AutopodError(
+          'Missing task ancestor requires reconciliation',
+          'TASK_IDENTITY_UNAVAILABLE',
+          409,
+        );
+      const taskId = pod.parent ? assign(pod.parent).taskId : `task:${randomUUID()}`;
+      if (!pod.parent)
+        db.prepare('INSERT INTO logical_tasks (id, root_pod_id, created_at) VALUES (?, ?, ?)').run(
+          taskId,
+          id,
+          pod.createdAt,
+        );
+      db.prepare(
+        'INSERT INTO task_executions (pod_id, execution_id, task_id, parent_pod_id, created_at) VALUES (?, ?, ?, ?, ?)',
+      ).run(id, `execution:${randomUUID()}`, taskId, pod.parent, pod.createdAt);
+      return membership(id) as Membership;
+    };
+    assign(podId);
+  });
+  function snapshot(podId: string): TaskExecutionSummary {
+    const identity = membership(podId);
+    if (!identity)
+      throw new AutopodError(
+        'Task identity is unavailable; reconcile legacy lineage before execution',
+        'TASK_IDENTITY_UNAVAILABLE',
+        409,
+      );
+    const diagnostics: string[] = [];
+    let recordedInputTokens = 0;
+    let recordedOutputTokens = 0;
+    let recordedCostUsd = 0;
+    const rows = db
+      .prepare(`SELECT p.id, p.input_tokens, p.output_tokens, p.cost_usd,
+      p.phase_token_usage, p.token_telemetry_accuracy FROM task_executions e JOIN pods p ON p.id = e.pod_id
+      WHERE e.task_id = ?`)
+      .all(identity.taskId) as Array<{
+      id: string;
+      input_tokens: number;
+      output_tokens: number;
+      cost_usd: number;
+      phase_token_usage: string | null;
+      token_telemetry_accuracy: string;
+    }>;
+    const number = (value: unknown, id: string): number => {
+      if (typeof value === 'number' && Number.isFinite(value) && value >= 0) return value;
+      diagnostics.push(`${id}: telemetry value unavailable`);
+      return 0;
+    };
+    for (const row of rows) {
+      const attempts = db
+        .prepare(`SELECT COUNT(*) AS count,
+        SUM(COALESCE(c.input_tokens, a.input_tokens)) AS inputTokens,
+        SUM(COALESCE(c.output_tokens, a.output_tokens)) AS outputTokens,
+        SUM(COALESCE(c.cost_usd, a.cost_usd)) AS costUsd
+        FROM provider_attempts a LEFT JOIN provider_attempt_telemetry_corrections c
+          ON c.pod_id = a.pod_id AND c.ordinal = a.ordinal WHERE a.pod_id = ?`)
+        .get(row.id) as {
+        count: number;
+        inputTokens: number | null;
+        outputTokens: number | null;
+        costUsd: number | null;
+      };
+      // The corrected append-only provider ledger is authoritative when present.
+      // The pod row is a legacy fallback, never an additional bucket of provider spend.
+      const agent =
+        attempts.count > 0
+          ? attempts
+          : {
+              inputTokens: row.input_tokens,
+              outputTokens: row.output_tokens,
+              costUsd: row.cost_usd,
+            };
+      recordedInputTokens += number(agent.inputTokens, row.id);
+      recordedOutputTokens += number(agent.outputTokens, row.id);
+      recordedCostUsd += number(agent.costUsd, row.id);
+      if (
+        attempts.count > 0 &&
+        (attempts.inputTokens !== row.input_tokens ||
+          attempts.outputTokens !== row.output_tokens ||
+          Math.abs((attempts.costUsd ?? 0) - row.cost_usd) > 1e-9)
+      )
+        diagnostics.push(
+          `${row.id}: provider ledger differs from legacy pod totals; corrected ledger used`,
+        );
+      if (
+        row.token_telemetry_accuracy !== 'complete' &&
+        row.token_telemetry_accuracy !== 'repaired'
+      )
+        diagnostics.push(`${row.id}: agent telemetry incomplete`);
+      if (!row.phase_token_usage) {
+        diagnostics.push(`${row.id}: phase telemetry unavailable`);
+        continue;
+      }
+      try {
+        const phases: unknown = JSON.parse(row.phase_token_usage);
+        if (!phases || typeof phases !== 'object' || Array.isArray(phases))
+          throw new Error('Invalid phases');
+        for (const [name, value] of Object.entries(phases)) {
+          // Agent phase buckets attribute the pod total; summing them again double counts it.
+          if (name === 'agent_initial' || /^agent_rework_\d+$/.test(name)) continue;
+          if (!value || typeof value !== 'object' || Array.isArray(value))
+            throw new Error('Invalid phase');
+          const phase = value as Record<string, unknown>;
+          recordedInputTokens += number(phase.inputTokens, row.id);
+          recordedOutputTokens += number(phase.outputTokens, row.id);
+          recordedCostUsd += number(phase.costUsd, row.id);
+        }
+      } catch {
+        diagnostics.push(`${row.id}: phase telemetry unreadable`);
+      }
+    }
+    const counts = db
+      .prepare(`SELECT COUNT(*) AS agentRunCount,
+      COALESCE(SUM(outcome = 'failed'), 0) AS failedRunCount,
+      COALESCE(SUM(outcome = 'failed' AND failure_category IN ('transient','provider_unavailable')), 0) AS transientFailureCount
+      FROM task_agent_runs r JOIN task_executions e ON e.pod_id = r.pod_id WHERE e.task_id = ?`)
+      .get(identity.taskId) as Pick<
+      TaskExecutionSummary,
+      'agentRunCount' | 'failedRunCount' | 'transientFailureCount'
+    >;
+    const count = (table: 'provider_attempts' | 'validations'): number =>
+      (
+        db
+          .prepare(`SELECT COUNT(*) AS n FROM ${table} r
+      JOIN task_executions e ON e.pod_id = r.pod_id WHERE e.task_id = ?`)
+          .get(identity.taskId) as { n: number }
+      ).n;
+    const root = db
+      .prepare('SELECT token_budget AS budget FROM pods WHERE id = ?')
+      .get(identity.rootPodId) as { budget: number | null } | undefined;
+    if (!root) diagnostics.push('Task budget source unavailable');
+    // Infrastructure billing is a separate missing measurement, never a fabricated zero.
+    return {
+      ...identity,
+      ...counts,
+      podCount: rows.length,
+      tokenBudget: root?.budget ?? null,
+      providerAttemptCount: count('provider_attempts'),
+      validationExecutionCount: count('validations'),
+      recordedInputTokens,
+      recordedOutputTokens,
+      recordedCostUsd,
+      infrastructureCostUsd: null,
+      telemetry: 'partial',
+      diagnostics: [
+        ...new Set([
+          ...diagnostics,
+          'Infrastructure cost unavailable',
+          'Historical agent runs before schema 143 are not reconstructed',
+        ]),
+      ],
+    };
+  }
+  return {
+    register,
+    snapshot,
+    beginRun: db.transaction((podId, generation, cycle, binding) => {
+      const encoded = JSON.stringify({
+        runtime: binding.runtime,
+        model: binding.model,
+        providerAccountId: binding.providerAccountId,
+      });
+      const current = db
+        .prepare('SELECT lifecycle_generation AS generation FROM pods WHERE id = ?')
+        .get(podId) as { generation: number } | undefined;
+      if (current?.generation !== generation)
+        throw new Error('Stale lifecycle cannot start a task run');
+      const prior = db
+        .prepare(
+          'SELECT id, binding FROM task_agent_runs WHERE pod_id = ? AND generation = ? AND cycle = ?',
+        )
+        .get(podId, generation, cycle) as { id: string; binding: string } | undefined;
+      if (prior) {
+        if (prior.binding !== encoded)
+          throw new Error('Execution binding cannot change for an existing run');
+        return prior.id;
+      }
+      const task = snapshot(podId);
+      if (task.diagnostics.includes('Task budget source unavailable'))
+        throw new AutopodError(
+          'Task budget source unavailable; reconcile the missing root pod',
+          'TASK_BUDGET_UNAVAILABLE',
+          409,
+        );
+      if (
+        task.tokenBudget !== null &&
+        task.tokenBudget > 0 &&
+        task.recordedInputTokens + task.recordedOutputTokens >= task.tokenBudget
+      )
+        throw new AutopodError(
+          `Task token budget exhausted across ${task.podCount} pods; reconcile or extend the task budget before agent execution`,
+          'TASK_BUDGET_EXHAUSTED',
+          409,
+        );
+      const id = randomUUID();
+      db.prepare(
+        'INSERT INTO task_agent_runs (id, pod_id, generation, cycle, binding, started_at) VALUES (?, ?, ?, ?, ?, ?)',
+      ).run(id, podId, generation, cycle, encoded, new Date().toISOString());
+      return id;
+    }),
+    finishRun: db.transaction((id, outcome, category) => {
+      const prior = db
+        .prepare('SELECT ended_at, outcome, failure_category FROM task_agent_runs WHERE id = ?')
+        .get(id) as
+        | { ended_at: string | null; outcome: string | null; failure_category: string | null }
+        | undefined;
+      if (!prior) throw new Error('Unknown task run');
+      if (prior.ended_at) {
+        if (prior.outcome !== outcome || prior.failure_category !== category)
+          throw new Error('Task run already settled differently');
+        return;
+      }
+      db.prepare(
+        'UPDATE task_agent_runs SET ended_at = ?, outcome = ?, failure_category = ? WHERE id = ?',
+      ).run(new Date().toISOString(), outcome, category, id);
+    }),
+  };
+}

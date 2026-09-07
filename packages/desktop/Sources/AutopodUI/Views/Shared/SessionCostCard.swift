@@ -22,6 +22,19 @@ public struct SessionCostCard: View {
                     .monospacedDigit()
             }
 
+            if let task = breakdown.taskExecution {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("Task accounting").font(.headline)
+                    Text(task.taskId).font(.caption).textSelection(.enabled)
+                    Text("\(task.podCount) pods · \(task.agentRunCount) recorded agent runs · \(task.providerAttemptCount) provider attempts · \(task.validationExecutionCount) validations")
+                    Text("Recorded task cost: \(formatCost(task.recordedCostUsd)) · \(task.telemetry) telemetry")
+                    Text("Task tokens: \(task.recordedInputTokens + task.recordedOutputTokens) / \(task.tokenBudget.map(String.init) ?? "no configured limit")")
+                    ForEach(task.diagnostics, id: \.self) { Text($0).font(.caption).foregroundStyle(.secondary) }
+                }
+            } else {
+                Text("Task accounting unavailable").font(.caption).foregroundStyle(.secondary)
+            }
+
             costBar
 
             VStack(spacing: 0) {

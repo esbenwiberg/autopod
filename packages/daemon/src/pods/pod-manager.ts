@@ -7850,6 +7850,19 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
               podRepo.update(podId, { infrastructureFailure: null });
               pod = podRepo.getOrThrow(podId);
             }
+            if (
+              !isRecovery &&
+              !pod.skipAgent &&
+              pod.options.agentMode !== 'interactive' &&
+              pod.contract?.requiredFacts.length
+            ) {
+              emitStatus('Checking contract declarations against fetched base…');
+              await worktreeManager.inspectContractBase(
+                worktreePath,
+                pod.baseBranch ?? profile.defaultBranch ?? 'main',
+                pod.contract.requiredFacts,
+              );
+            }
             const materializedStartSha = await materializeSpecFiles(
               worktreePath,
               pod.specFiles,
@@ -9972,14 +9985,35 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
       let attemptPod: Pod;
       let attemptProfile: Profile;
       let seenCompleteEvents: Set<string>;
+      let taskRunId: string | undefined;
       try {
         attemptPod = podRepo.getOrThrow(podId);
         podRepo.completionJournal?.begin(attemptPod);
         attemptProfile = resolveEffectiveBoundProfile(attemptPod);
+        if (podRepo.taskExecutions) {
+          podRepo.taskExecutions.register(podId);
+          const cycle = podRepo.completionJournal?.get(
+            podId,
+            attemptPod.lifecycleGeneration,
+          )?.cycle;
+          if (cycle === undefined)
+            throw new Error('Task execution requires a durable completion cycle');
+          taskRunId = podRepo.taskExecutions.beginRun(
+            podId,
+            attemptPod.lifecycleGeneration,
+            cycle,
+            {
+              runtime: attemptPod.runtime,
+              model: attemptPod.model,
+              providerAccountId: attemptProfile.providerAccountId ?? null,
+            },
+          );
+        }
         ensureProviderAttempt(attemptPod, attemptProfile);
         seenCompleteEvents = persistedAgentCompleteEventKeys(deps.eventRepo, podId);
         startCommitPolling(podId);
       } catch (err) {
+        if (taskRunId) podRepo.taskExecutions?.finishRun(taskRunId, 'failed', 'initialization');
         settleActiveRun();
         throw err;
       }
@@ -9994,7 +10028,8 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
               { podId, containerId: lifecycle.containerId, generation: lifecycle.generation },
               'Stopped processing stale lifecycle agent events',
             );
-            return 'stopped';
+            outcome = 'stopped';
+            return outcome;
           }
           if (pauseIntents.has(podId)) {
             outcome = 'paused';
@@ -10182,8 +10217,11 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
             }
 
             // Token budget enforcement — only when token data is available
-            const effectiveBudget = currentSession.tokenBudget;
-            const totalUsed = newInputTokens + newOutputTokens;
+            const taskUsage = podRepo.taskExecutions?.snapshot(podId);
+            const effectiveBudget = taskUsage ? taskUsage.tokenBudget : currentSession.tokenBudget;
+            const totalUsed = taskUsage
+              ? taskUsage.recordedInputTokens + taskUsage.recordedOutputTokens
+              : newInputTokens + newOutputTokens;
             if (effectiveBudget !== null && effectiveBudget > 0 && totalUsed > 0) {
               const profile = profileStore.get(currentSession.profileName);
               const warnAt = profile.tokenBudgetWarnAt ?? 0.8;
@@ -10335,9 +10373,18 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
               closeProviderAttempt(podId, outcome, classification);
             }
           } finally {
-            stopCommitPolling(podId);
-            lastEventWriteAt.delete(podId);
-            settleActiveRun();
+            try {
+              if (taskRunId)
+                podRepo.taskExecutions?.finishRun(
+                  taskRunId,
+                  outcome,
+                  terminalClassification?.category ?? null,
+                );
+            } finally {
+              stopCommitPolling(podId);
+              lastEventWriteAt.delete(podId);
+              settleActiveRun();
+            }
           }
         }
       }

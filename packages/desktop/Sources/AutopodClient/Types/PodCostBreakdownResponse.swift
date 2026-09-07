@@ -8,6 +8,7 @@ public struct PodCostBreakdownResponse: Codable, Equatable, Sendable {
   public let inputTokens: Int
   public let outputTokens: Int
   public let segments: [PodCostSegment]
+  public let taskExecution: TaskExecutionSummary?
 
   public init(
     podId: String,
@@ -15,7 +16,8 @@ public struct PodCostBreakdownResponse: Codable, Equatable, Sendable {
     totalCostUsd: Double,
     inputTokens: Int,
     outputTokens: Int,
-    segments: [PodCostSegment]
+    segments: [PodCostSegment],
+    taskExecution: TaskExecutionSummary? = nil
   ) {
     self.podId = podId
     self.model = model
@@ -23,6 +25,7 @@ public struct PodCostBreakdownResponse: Codable, Equatable, Sendable {
     self.inputTokens = inputTokens
     self.outputTokens = outputTokens
     self.segments = segments
+    self.taskExecution = taskExecution
   }
 }
 
@@ -52,4 +55,23 @@ public struct PodCostSegment: Codable, Equatable, Sendable, Identifiable {
     self.outputTokens = outputTokens
     self.sourcePhases = sourcePhases
   }
+}
+
+public struct TaskExecutionSummary: Codable, Equatable, Sendable {
+  public let taskId: String
+  public let executionId: String
+  public let rootPodId: String
+  public let podCount: Int
+  public let agentRunCount: Int
+  public let failedRunCount: Int
+  public let transientFailureCount: Int
+  public let providerAttemptCount: Int
+  public let validationExecutionCount: Int
+  public let tokenBudget: Int?
+  public let recordedInputTokens: Int
+  public let recordedOutputTokens: Int
+  public let recordedCostUsd: Double
+  public let infrastructureCostUsd: Double?
+  public let telemetry: String
+  public let diagnostics: [String]
 }

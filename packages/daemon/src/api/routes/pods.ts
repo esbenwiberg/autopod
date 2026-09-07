@@ -692,6 +692,14 @@ export function podRoutes(
     );
   });
 
+  // Task projection deliberately avoids deserializing the pod's contract/validation JSON.
+  app.get('/pods/:podId/task-execution', async (request) => {
+    const { podId } = request.params as { podId: string };
+    if (!podRepo?.taskExecutions)
+      throw new AutopodError('Task accounting unavailable', 'TASK_IDENTITY_UNAVAILABLE', 503);
+    return podRepo.taskExecutions.snapshot(podId);
+  });
+
   // POST /pods/:podId/message — send message
   app.post('/pods/:podId/message', async (request) => {
     const { podId } = request.params as { podId: string };
@@ -863,7 +871,12 @@ export function podRoutes(
   // GET /pods/:podId/cost — per-pod cost grouped into operator-facing buckets
   app.get('/pods/:podId/cost', async (request) => {
     const { podId } = request.params as { podId: string };
-    return computePodCostBreakdown(podManager.getSession(podId));
+    const breakdown = computePodCostBreakdown(podManager.getSession(podId));
+    try {
+      return { ...breakdown, taskExecution: podRepo?.taskExecutions?.snapshot(podId) ?? null };
+    } catch {
+      return { ...breakdown, taskExecution: null };
+    }
   });
 
   // GET /pods/quality/trends — daily average process-health scores (legacy route name)

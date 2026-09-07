@@ -1,4 +1,4 @@
-export type FactArtifactChange = 'create' | 'update' | 'touch';
+export type FactArtifactChange = 'create' | 'update' | 'delete' | 'touch';
 export type FactKind =
   | 'unit-test'
   | 'integration-test'
