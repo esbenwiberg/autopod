@@ -50,6 +50,7 @@ import type {
   SpawnFixResponse,
   SpecFile,
   StdioInjectedMcpServer,
+  TaskRetryIdentity,
   TaskReviewResult,
   TaskSummary,
   UpdateFromBaseResponse,
@@ -146,6 +147,7 @@ import {
 import type { PiRuntime } from '../runtimes/pi-runtime.js';
 import { detectRecurringFindings, extractFindings } from '../validation/finding-fingerprint.js';
 import { applyOverrides } from '../validation/override-applicator.js';
+import { captureValidationRetryIdentity } from '../validation/retry-identity.js';
 import { parseDiffFilePaths } from '../validation/review-context-builder.js';
 import { addTokenUsage } from '../validation/review-synthesizer.js';
 import { publishScreenshotArtifacts } from '../validation/screenshot-artifacts.js';
@@ -232,6 +234,7 @@ import {
   validateTransition,
 } from './state-machine.js';
 import { generateSystemInstructions } from './system-instructions-generator.js';
+import { TaskRetryBlockedError } from './task-retry-ledger.js';
 import type { ValidationRepository } from './validation-repository.js';
 import type { WorkspaceCheckpointController } from './workspace-checkpoint-controller.js';
 import {
@@ -1422,7 +1425,11 @@ export interface PodManagerDependencies {
     args: SandboxWorkspaceCheckpointArgs,
   ) => Promise<WorkspaceCheckpointResult>;
   workspaceCheckpointController?: WorkspaceCheckpointController;
-  /** Bounded run-level retries for typed validation infrastructure failures. */
+  /** Trusted identity capture seam; production captures actual container inputs. */
+  captureRetryIdentity?: (
+    config: Parameters<ValidationEngine['validate']>[0],
+  ) => Promise<TaskRetryIdentity>;
+  /** Task-wide automatic retries for typed validation infrastructure failures. */
   validationInfrastructureRetryBackoffMs?: readonly number[];
   /** Test seam for the durable fresh-sandbox recovery cooldown. */
   sandboxInfrastructureRecoveryDelay?: (delayMs: number) => Promise<void>;
@@ -6915,9 +6922,48 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
       validationConfig,
     );
 
+    const infrastructureBackoffs = deps.validationInfrastructureRetryBackoffMs ?? [1_000, 5_000];
+    const retryLedger = podRepo.taskRetries;
     const runValidation = async (): Promise<ValidationResult> => {
+      const pod = podRepo.getOrThrow(podId);
+      const identity = retryLedger
+        ? await (deps.captureRetryIdentity?.(validationConfig) ??
+            captureValidationRetryIdentity(cm, validationConfig))
+        : null;
+      const bindingHash = createHash('sha256')
+        .update(
+          JSON.stringify({
+            runtime: pod.runtime,
+            model: pod.model,
+            provider: pod.providerIdSnapshot,
+            account: pod.providerAccountIdSnapshot,
+            reviewerModel: validationConfig.reviewerModel ?? null,
+            reviewerProvider: validationConfig.reviewerProvider ?? null,
+          }),
+        )
+        .digest('hex');
+      const admission =
+        retryLedger && identity
+          ? retryLedger.admit(podId, pod.lifecycleGeneration, identity, bindingHash, [
+              ...infrastructureBackoffs,
+            ])
+          : null;
+      if (admission && retryLedger) {
+        try {
+          const waitMs = Math.max(0, Date.parse(admission.notBefore) - Date.now());
+          if (waitMs > 0) await sleep(waitMs);
+          if (validationController.signal.aborted)
+            throw new TaskRetryBlockedError('Validation admission cancelled before execution');
+          retryLedger.start(admission.id);
+        } catch (err) {
+          retryLedger.finish(admission.id, 'cancelled', null);
+          throw err;
+        }
+      }
+      const started = performance.now();
+      let result: ValidationResult;
       try {
-        return await validationEngine.validate(
+        result = await validationEngine.validate(
           validationConfig,
           (phase) => emitActivityStatus(podId, phase),
           validationController.signal,
@@ -6925,21 +6971,42 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         );
       } catch (validateErr) {
         logger.error({ err: validateErr, podId, attempt }, logMessage);
-        return makeUnexpectedValidationFailureResult(podId, attempt, validateErr);
+        result = makeUnexpectedValidationFailureResult(podId, attempt, validateErr);
       }
+      if (admission && retryLedger)
+        retryLedger.finish(
+          admission.id,
+          validationController.signal.aborted
+            ? 'cancelled'
+            : result.overall === 'pass'
+              ? 'pass'
+              : result.infrastructureFailure?.retryable || isReviewInfrastructureOnlyFailure(result)
+                ? 'transient'
+                : 'nonretryable',
+          Math.round(performance.now() - started),
+        );
+      return result;
     };
 
     let result = await runValidation();
-    const infrastructureBackoffs = deps.validationInfrastructureRetryBackoffMs ?? [1_000, 5_000];
     for (const [index, waitMs] of infrastructureBackoffs.entries()) {
       if (!result.infrastructureFailure?.retryable || validationController.signal.aborted) break;
       emitActivityStatus(
         podId,
         `${validationInfrastructureFailureLabel(result)} — retrying validation without agent rework (${index + 1}/${infrastructureBackoffs.length})`,
       );
-      if (waitMs > 0) await sleep(waitMs);
+      if (!retryLedger && waitMs > 0) await sleep(waitMs);
       if (validationController.signal.aborted) break;
-      result = await runValidation();
+      try {
+        result = await runValidation();
+      } catch (err) {
+        if (!(err instanceof TaskRetryBlockedError)) throw err;
+        // Preserve the result of work that actually executed before the next
+        // admission was denied. The caller still records and parks that failure.
+        emitActivityStatus(podId, err.message);
+        podRepo.update(podId, { failureReason: err.message });
+        break;
+      }
     }
 
     if (isReviewInfrastructureOnlyFailure(result)) {
@@ -6950,6 +7017,24 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
     }
 
     return result;
+  }
+
+  async function parkOnRetryAdmission(pod: Pod, error: TaskRetryBlockedError): Promise<void> {
+    if (pod.status !== 'validating') return;
+    emitActivityStatus(pod.id, error.message);
+    transition(pod, 'review_required', { failureReason: error.message });
+    podRepo.update(pod.id, { validationAttempts: Math.max(0, pod.validationAttempts - 1) });
+    if (pod.containerId) {
+      try {
+        await stopSandboxPreviewProxy(pod.id);
+        await containerManagerFactory.get(pod.executionTarget).stop(pod.containerId);
+      } catch (err) {
+        logger.warn(
+          { err, podId: pod.id },
+          'Failed to stop container after retry admission was denied',
+        );
+      }
+    }
   }
 
   async function parkOnValidationInfrastructureFailure(
@@ -13824,6 +13909,10 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
       } catch (err) {
         logger.error({ err, podId }, 'Validation error');
         const s2 = podRepo.getOrThrow(podId);
+        if (err instanceof TaskRetryBlockedError) {
+          await parkOnRetryAdmission(s2, err);
+          return;
+        }
 
         if (isParkedHostPushRecovery(s2)) {
           logger.info({ podId, status: s2.status }, 'Validation error already parked for retry');
@@ -14416,6 +14505,10 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
       } catch (err) {
         logger.error({ err, podId }, 'Revalidation error');
         const s2 = podRepo.getOrThrow(podId);
+        if (err instanceof TaskRetryBlockedError) {
+          await parkOnRetryAdmission(s2, err);
+          return { newCommits, result: 'fail' };
+        }
         const failureReason = sanitizeFailureReason(
           err,
           'Validation failed before checks could complete',
@@ -15718,9 +15811,13 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         lastValidationResult !== null &&
         (lastValidationResult.infrastructureFailure !== undefined ||
           isReviewInfrastructureOnlyFailure(lastValidationResult));
-      if (pod.status !== 'failed' && !isInfrastructureReviewResume) {
+      const hasSettledRetryFailure =
+        pod.status === 'review_required' &&
+        podRepo.taskRetries?.state(podId).latest?.outcome != null &&
+        podRepo.taskRetries?.state(podId).latest?.outcome !== 'pass';
+      if (pod.status !== 'failed' && !isInfrastructureReviewResume && !hasSettledRetryFailure) {
         throw new AutopodError(
-          `Cannot resume pod ${podId} in status ${pod.status} — only failed or infrastructure-blocked review_required pods can be resumed`,
+          `Cannot resume pod ${podId} in status ${pod.status} — only failed pods or review_required pods with a recorded validation failure can be resumed`,
           'INVALID_STATE',
           409,
         );

@@ -67,6 +67,9 @@ public struct PodActions: Sendable {
   public var retryCreatePr: @MainActor @Sendable (String) async -> Void
   /// Token-free recovery for a `failed` pod — pushes + opens PR if validation already passed,
   /// otherwise re-runs validation only (no agent rework). Cheapest possible path forward.
+  public var retryDraftScope: String
+  public var loadRetryState: @MainActor @Sendable (String) async throws -> TaskRetryState
+  public var authorizeRetry: @MainActor @Sendable (String, TaskRetryAuthorizationRequest) async throws -> TaskRetryAuthorization
   public var resume: @MainActor @Sendable (String) async -> Void
   /// Recover a worktree-compromised pod. Returns the daemon's response
   /// (recovered + human-readable message) so the UI can surface the outcome.
@@ -152,6 +155,9 @@ public struct PodActions: Sendable {
     approveFactWaiver: @escaping @MainActor @Sendable (String, String, String?) async -> Void = { _, _, _ in },
     spawnFix: @escaping @MainActor @Sendable (String, String?) async -> SpawnFixResponse? = { _, _ in nil },
     retryCreatePr: @escaping @MainActor @Sendable (String) async -> Void = { _ in },
+    retryDraftScope: String = "preview",
+    loadRetryState: @escaping @MainActor @Sendable (String) async throws -> TaskRetryState = { _ in throw URLError(.unsupportedURL) },
+    authorizeRetry: @escaping @MainActor @Sendable (String, TaskRetryAuthorizationRequest) async throws -> TaskRetryAuthorization = { _, _ in throw URLError(.unsupportedURL) },
     resume: @escaping @MainActor @Sendable (String) async -> Void = { _ in },
     recoverWorktree: @escaping @MainActor @Sendable (String) async -> RecoverWorktreeResponse? = { _ in nil },
     forceComplete: @escaping @MainActor @Sendable (String, String?) async -> Void = { _, _ in },
@@ -198,6 +204,9 @@ public struct PodActions: Sendable {
     self.approveFactWaiver = approveFactWaiver
     self.spawnFix = spawnFix
     self.retryCreatePr = retryCreatePr
+    self.retryDraftScope = retryDraftScope
+    self.loadRetryState = loadRetryState
+    self.authorizeRetry = authorizeRetry
     self.resume = resume
     self.recoverWorktree = recoverWorktree
     self.forceComplete = forceComplete

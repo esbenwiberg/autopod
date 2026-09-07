@@ -230,6 +230,61 @@ function resolveContractPath(specRoot: string): string {
 }
 
 export function registerPodCommands(program: Command, getClient: () => AutopodClient): void {
+  program
+    .command('retry-state <id>')
+    .description('Inspect task-wide validation admissions and retry authorizations')
+    .option('--json', 'Output JSON')
+    .action(async (id: string, opts: { json?: boolean }) => {
+      const client = getClient();
+      const resolved = await resolvePodId(client, id);
+      const state = await client.getRetryState(resolved);
+      withJsonOutput(opts, state, (value) => {
+        console.log(
+          `Task ${value.taskId}: ${value.executedCount} executed / ${value.admissionCount} admitted validations`,
+        );
+        console.log(
+          `${value.transientRetryCount}/${value.backoffsMs?.length ?? 0} automatic transient retries; ${value.measuredDurationMs} ms measured; ${value.interruptedCount} interrupted with unknown duration`,
+        );
+        console.log(
+          `Latest outcome: ${value.latest?.outcome ?? 'none'}; telemetry: ${value.telemetry}`,
+        );
+        for (const grant of value.authorizations)
+          console.log(
+            `${grant.id}: ${grant.usedByAttemptId ? 'consumed' : `recorded for failure ${grant.failureId}`} — ${grant.reason}`,
+          );
+      });
+    });
+  program
+    .command('authorize-retry <id>')
+    .description('Record one human retry authorization; Resume is a separate action')
+    .requiredOption('--reason <text>', 'Reason for repeating the failed validation')
+    .requiredOption('--request-key <key>', 'Stable key; reuse after an uncertain response')
+    .option('--json', 'Output JSON')
+    .action(async (id: string, opts: { reason: string; requestKey: string; json?: boolean }) => {
+      const client = getClient();
+      const resolved = await resolvePodId(client, id);
+      const grant = await client.authorizeRetry(resolved, opts.requestKey, opts.reason);
+      withJsonOutput(opts, grant, (value) =>
+        console.log(
+          `Recorded ${value.id}. Run ap resume ${resolved} to request execution; normal lifecycle and binding checks still apply.`,
+        ),
+      );
+    });
+  program
+    .command('resume <id>')
+    .description(
+      'Resume delivery or validation using the existing task budget and provider binding',
+    )
+    .option('--json', 'Output JSON')
+    .action(async (id: string, opts: { json?: boolean }) => {
+      const client = getClient();
+      const result = await client.resumePod(await resolvePodId(client, id));
+      withJsonOutput(opts, result, (value) =>
+        console.log(
+          `Resume requested: ${value.action}. Inspect status and retry-state for execution outcome.`,
+        ),
+      );
+    });
   // ap run
   program
     .command('run <profile> <task>')

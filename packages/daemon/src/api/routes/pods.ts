@@ -700,6 +700,34 @@ export function podRoutes(
     return podRepo.taskExecutions.snapshot(podId);
   });
 
+  app.get('/pods/:podId/retry-state', async (request) => {
+    if (!podRepo?.taskRetries)
+      throw new AutopodError('Task retry accounting unavailable', 'TASK_IDENTITY_UNAVAILABLE', 503);
+    return podRepo.taskRetries.state((request.params as { podId: string }).podId);
+  });
+  // Default authenticated user route: never trust an actor supplied in the body.
+  app.post('/pods/:podId/retry-authorizations', async (request, reply) => {
+    if (!request.user?.oid)
+      throw new AutopodError('Authenticated human identity required', 'UNAUTHORIZED', 401);
+    if (!podRepo?.taskRetries)
+      throw new AutopodError('Task retry accounting unavailable', 'TASK_IDENTITY_UNAVAILABLE', 503);
+    const input = z
+      .object({
+        requestKey: z.string().min(1).max(200),
+        reason: z.string().trim().min(1).max(4000),
+      })
+      .strict()
+      .parse(request.body);
+    const result = podRepo.taskRetries.authorize(
+      (request.params as { podId: string }).podId,
+      input.requestKey,
+      input.reason,
+      humanActor(request),
+    );
+    reply.code(201);
+    return result;
+  });
+
   // POST /pods/:podId/message — send message
   app.post('/pods/:podId/message', async (request) => {
     const { podId } = request.params as { podId: string };

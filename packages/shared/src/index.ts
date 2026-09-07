@@ -624,3 +624,11 @@ export type {
   ScanTriageRequest,
   ScanRepairDispatch,
 } from './types/scheduled-scan.js';
+
+export type {
+  TaskRetryIdentity,
+  TaskRetryOutcome,
+  TaskRetryAttempt,
+  TaskRetryAuthorization,
+  TaskRetryState,
+} from './types/task-retry.js';

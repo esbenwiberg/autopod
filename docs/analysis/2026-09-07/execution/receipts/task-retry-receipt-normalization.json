@@ -1,0 +1,128 @@
+[
+  {
+    "file": "task-retry-affected-final.txt",
+    "originalSha256": "788df181c8dd65fe545524eb9a450d3da61530b91d91b96baba8828779f05cab",
+    "normalizedSha256": "a3f0a6bb77f28c68fa373ca3b04284d3230c5570f71c29ee0ca54f7ea606bda7",
+    "change": "trailing whitespace and final blank lines only"
+  },
+  {
+    "file": "task-retry-affected.txt",
+    "originalSha256": "66bfc22a45692c2a028cf47bc458734b2f71cb400ba0f4e5717c8a149c5692f4",
+    "normalizedSha256": "55cbdb951b801cd60310b520364037edf84c9243c0410acc4593752a11fd958c",
+    "change": "trailing whitespace and final blank lines only"
+  },
+  {
+    "file": "task-retry-api-first.txt",
+    "originalSha256": "1325d0305eddd40050f535f02b531150b26c7c0f754446a4d2b6c85aff298ce4",
+    "normalizedSha256": "aabef7eced0a7345910c715804acb0ae22db24c2133723c3c4334674c9a57aba",
+    "change": "trailing whitespace and final blank lines only"
+  },
+  {
+    "file": "task-retry-build-first.txt",
+    "originalSha256": "58d90e8dc91b6430ef951545559fadd503b174f6af4afec15c25c64acfac83da",
+    "normalizedSha256": "a039ed75616968f1c582fb02daef9a8ca549b4ac84c59ad0e99d69cb7ed64275",
+    "change": "trailing whitespace and final blank lines only"
+  },
+  {
+    "file": "task-retry-cli.txt",
+    "originalSha256": "dc81439ba36ec8288d381b13d33268f905e48f166e9a37dec8449f0d99b67e90",
+    "normalizedSha256": "480d4a528a9e122e65ff0dde20e0364a6eac30e30c7f51ce3423daa4be6f8fc8",
+    "change": "trailing whitespace and final blank lines only"
+  },
+  {
+    "file": "task-retry-direct-typecheck-followup.txt",
+    "originalSha256": "d84a53fa2a0a15e2da81bdbf4d58ce9da99a58bd7dac862d1580aca4bd6be4fa",
+    "normalizedSha256": "d84a53fa2a0a15e2da81bdbf4d58ce9da99a58bd7dac862d1580aca4bd6be4fa",
+    "change": "trailing whitespace and final blank lines only"
+  },
+  {
+    "file": "task-retry-direct-typecheck.txt",
+    "originalSha256": "4212ab63eaa1fc0232df201fa05c5c90b313700245e210d699fcd11d1f46e214",
+    "normalizedSha256": "4212ab63eaa1fc0232df201fa05c5c90b313700245e210d699fcd11d1f46e214",
+    "change": "trailing whitespace and final blank lines only"
+  },
+  {
+    "file": "task-retry-ledger-first.txt",
+    "originalSha256": "0ca85f77e61c6e5849b093133c49a5b0e880ec5c5b29e3b5c67a8678a3d8eb06",
+    "normalizedSha256": "734ec91f5db22ca3d9c002d61a29886b19f76d9077425763a7ed166ad226839f",
+    "change": "trailing whitespace and final blank lines only"
+  },
+  {
+    "file": "task-retry-lint.txt",
+    "originalSha256": "0cb8f4cc2b113834430303149a1a9a86096fde5549a3ccd0167b1c3fb642bbb6",
+    "normalizedSha256": "0cb8f4cc2b113834430303149a1a9a86096fde5549a3ccd0167b1c3fb642bbb6",
+    "change": "trailing whitespace and final blank lines only"
+  },
+  {
+    "file": "task-retry-manager-first.txt",
+    "originalSha256": "ce07f2645ee5d4019a980d12cbb653776fafd80f61a9327246a966b00a79b624",
+    "normalizedSha256": "ec00934718c1790eb4314b6d29da329d753d80b0b725c6e3ce5b81552e496556",
+    "change": "trailing whitespace and final blank lines only"
+  },
+  {
+    "file": "task-retry-manager-green.txt",
+    "originalSha256": "415d730f73bc06c903cdd81f5eb0b8748453b0f17879eca3d593ea0014ca9f47",
+    "normalizedSha256": "41cf7633dfda907ec250d40275f857d561eaf56612aca9ab911cea721545bb24",
+    "change": "trailing whitespace and final blank lines only"
+  },
+  {
+    "file": "task-retry-mobile-build.txt",
+    "originalSha256": "dcb936e210c425e25ba0c103b9505f21582aeb5d1f0b6c53c1f0f168a304826e",
+    "normalizedSha256": "dcb936e210c425e25ba0c103b9505f21582aeb5d1f0b6c53c1f0f168a304826e",
+    "change": "trailing whitespace and final blank lines only"
+  },
+  {
+    "file": "task-retry-mobile-final.txt",
+    "originalSha256": "75e4938068339099aee11e8be028f1f870baf0efdc714ba9a65480addca7f196",
+    "normalizedSha256": "41eb430729e9e9719b77669c6f3cd3a67f314ebea00636461a3b9c185d6d4720",
+    "change": "trailing whitespace and final blank lines only"
+  },
+  {
+    "file": "task-retry-mobile-layout-build.txt",
+    "originalSha256": "c3bac88bb9b0a248ec04da789d19b6a01ecaa531aadd8fb058a41d6a2f2cc417",
+    "normalizedSha256": "c3bac88bb9b0a248ec04da789d19b6a01ecaa531aadd8fb058a41d6a2f2cc417",
+    "change": "trailing whitespace and final blank lines only"
+  },
+  {
+    "file": "task-retry-mobile.txt",
+    "originalSha256": "281211e352ec2aef7e35a73a15710d6dbc6a6c9f285202ad612e5d80e4b836d1",
+    "normalizedSha256": "a66655d9f3b980b8231468febfbf9379f7e2897008c7bc16c0f9fe4b56e85c92",
+    "change": "trailing whitespace and final blank lines only"
+  },
+  {
+    "file": "task-retry-result-retention.txt",
+    "originalSha256": "bde4a3bcd9454ac09eb4220262ca1268713e7912250d1b0fdf45082dbf8a52c0",
+    "normalizedSha256": "e78b697cc7841d0f378b308e5ba5c72ed40d1926ec5cd784674fe074ebbc6594",
+    "change": "trailing whitespace and final blank lines only"
+  },
+  {
+    "file": "task-retry-resume-green.txt",
+    "originalSha256": "b0588385a81761596c14e6368ce110744374996f2759cb67af182773872f004e",
+    "normalizedSha256": "ecdbac4c1abad308d1be05c582dd7fa6b775d7407cc5efa9395498f5cf2c92ec",
+    "change": "trailing whitespace and final blank lines only"
+  },
+  {
+    "file": "task-retry-resume-red.txt",
+    "originalSha256": "ee6f6496258f35b02379cc5dcd43822b39f80ef3892addde4ae08243d7175489",
+    "normalizedSha256": "d560fb9a8130ded52b184515f4ae8ec17c1d847b851b1dd4482940865c9f8ca1",
+    "change": "trailing whitespace and final blank lines only"
+  },
+  {
+    "file": "task-retry-shared-build.txt",
+    "originalSha256": "b20bcfb6c57f17f29e47725f1bd587b247b1d1c652c1940da0e7e0d78c960279",
+    "normalizedSha256": "b20bcfb6c57f17f29e47725f1bd587b247b1d1c652c1940da0e7e0d78c960279",
+    "change": "trailing whitespace and final blank lines only"
+  },
+  {
+    "file": "task-retry-swift-first.txt",
+    "originalSha256": "e04b6987a76a77bd86f056f71e2da614b7e8c86b4560ec9fe2ba8432609554d9",
+    "normalizedSha256": "e04b6987a76a77bd86f056f71e2da614b7e8c86b4560ec9fe2ba8432609554d9",
+    "change": "trailing whitespace and final blank lines only"
+  },
+  {
+    "file": "task-retry-swift.txt",
+    "originalSha256": "ac2dc1ef1079276c2365e7f153a89000668e365eb4e5bd683e8b3bb5c4b00b3e",
+    "normalizedSha256": "ac2dc1ef1079276c2365e7f153a89000668e365eb4e5bd683e8b3bb5c4b00b3e",
+    "change": "trailing whitespace and final blank lines only"
+  }
+]

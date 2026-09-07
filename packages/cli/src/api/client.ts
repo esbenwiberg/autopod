@@ -43,6 +43,8 @@ import type {
   SpecContract,
   SpecFile,
   TaskExecutionSummary,
+  TaskRetryAuthorization,
+  TaskRetryState,
   UpdateFromBaseResponse,
   UpdateScheduledJobRequest,
   UpdateScheduledJobTemplateRequest,
@@ -227,6 +229,20 @@ export class AutopodClient {
 
   async getTaskExecution(id: string): Promise<TaskExecutionSummary> {
     return this.request('GET', `/pods/${id}/task-execution`);
+  }
+
+  async getRetryState(id: string): Promise<TaskRetryState> {
+    return this.request('GET', `/pods/${id}/retry-state`);
+  }
+  async authorizeRetry(
+    id: string,
+    requestKey: string,
+    reason: string,
+  ): Promise<TaskRetryAuthorization> {
+    return this.request('POST', `/pods/${id}/retry-authorizations`, { requestKey, reason });
+  }
+  async resumePod(id: string): Promise<{ ok: boolean; action: string }> {
+    return this.request('POST', `/pods/${id}/resume`);
   }
 
   async sendMessage(id: string, message: string): Promise<void> {

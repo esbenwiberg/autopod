@@ -46,16 +46,35 @@ let pod = {
     response: null,
   },
 };
+if (process.env.FIXTURE_MODE === 'retry') pod = { ...pod, status: 'review_required', pendingEscalation: null, recordDiagnostics: [], finalization: { ...pod.finalization, phase: 'ready', pendingDecisionId: null }, lastValidationResult: { ...successfulValidation, overall: 'fail' } };
 const scanJob = { id: 'scan-fixture', name: 'Local dependency and secret scan', profileName: 'local-fixture', enabled: false, cronExpression: '0 9 * * *', scan: { version: 1, baseRef: 'main', headRef: 'work', scanners: ['secrets', 'dependencies'], judgment: 'none' } };
 const scanFinding = { id: 'fixture-finding-stable-identity', scanner: 'dependencies', ruleId: 'fixture-advisory', file: 'packages/example/package-lock.json', severity: 'high', summary: 'Synthetic dependency finding for local interaction proof.', disposition: 'unresolved' };
 const scanReport = { kind: 'scan_report', id: 'report-fixture', jobId: scanJob.id, status: 'incomplete', createdAt: '2026-09-07T10:00:00Z', completedAt: '2026-09-07T10:01:00Z', policy: scanJob.scan, collection: { version: 1, repository: 'https://github.com/example/local-fixture.git', baseSha: 'a'.repeat(40), headSha: 'b'.repeat(40), files: [{ path: scanFinding.file, change: 'modified' }], scanners: [{ scanner: 'secrets', version: 'fixture-v1', status: 'failed', findingCount: null, diagnostic: 'Synthetic scanner failure; no clean result available.' }, { scanner: 'dependencies', version: 'fixture-v1', status: 'completed', findingCount: 1 }], diagnostics: [], findings: [scanFinding], stacks: ['node'] }, judgment: { status: 'not_requested' } };
 let scanDecisions = [];
+const retryState = { taskId: 'local-task', stage: 'validation', backoffsMs: [1000, 5000], admissionCount: 4, executedCount: 3, transientRetryCount: 2, measuredDurationMs: 1875, interruptedCount: 1, latest: { id: 'local-failure', outcome: 'unknown' }, authorizations: [], telemetry: 'partial' };
 const server = createServer(async (req, res) => {
   const pathname = new URL(req.url, 'http://localhost').pathname;
   const json = (value) => {
     res.setHeader('content-type', 'application/json');
     res.end(JSON.stringify(value));
   };
+  if (pathname === '/pods/local-fixture/retry-state') return json(retryState);
+  if (req.method === 'POST' && pathname === '/pods/local-fixture/retry-authorizations') {
+    let body = ''; for await (const chunk of req) body += chunk;
+    const input = JSON.parse(body);
+    let grant = retryState.authorizations.find((entry) => entry.requestKey === input.requestKey);
+    if (!grant) { grant = { ...input, id: 'local-grant', failureId: retryState.latest.id, usedByAttemptId: null }; retryState.authorizations.push(grant); }
+    console.log(JSON.stringify({ scope: 'local fixture only', action: 'retry-authorization', requestKey: input.requestKey }));
+    return json(grant);
+  }
+  if (req.method === 'POST' && pathname === '/pods/local-fixture/resume') {
+    const grant = retryState.authorizations.find((entry) => !entry.usedByAttemptId);
+    if (!grant) { res.statusCode = 409; return json({ error: 'Task-wide retry budget exhausted' }); }
+    grant.usedByAttemptId = 'local-new-attempt'; retryState.admissionCount++; retryState.executedCount++;
+    retryState.latest = { id: 'local-new-attempt', outcome: 'nonretryable' };
+    console.log(JSON.stringify({ scope: 'local fixture only', action: 'resume-validation', simulated: true }));
+    return json({ ok: true, action: 'revalidate' });
+  }
   if (pathname === '/scheduled-jobs') return json([scanJob]);
   if (pathname === '/scheduled-jobs/scan-fixture/reports') return json([scanReport]);
   if (pathname === '/scheduled-jobs/scan-fixture/trigger') return json(scanReport);

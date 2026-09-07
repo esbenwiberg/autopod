@@ -258,6 +258,13 @@ public actor DaemonAPI {
   /// Operator escape hatch for `failed` pods — picks the cheapest recovery path
   /// (push + open PR if validation already passed, otherwise re-run validation).
   /// Returns the action the daemon took, so the UI can confirm what happened.
+  public func getRetryState(_ id: String) async throws -> TaskRetryState {
+    try await request("GET", "/pods/\(id)/retry-state")
+  }
+  public func authorizeRetry(_ id: String, request input: TaskRetryAuthorizationRequest) async throws -> TaskRetryAuthorization {
+    try await request("POST", "/pods/\(id)/retry-authorizations", body: encode(input))
+  }
+
   public func resumePod(_ id: String) async throws -> ResumeResponse {
     try await request("POST", "/pods/\(id)/resume")
   }

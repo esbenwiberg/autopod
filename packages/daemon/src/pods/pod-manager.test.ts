@@ -47,6 +47,7 @@ const mockedExecFile = vi.mocked(execFile);
 import Fastify from 'fastify';
 import { errorHandler } from '../api/error-handler.js';
 import { authPlugin } from '../api/plugins/auth.js';
+import { podRoutes } from '../api/routes/pods.js';
 import { scanReportRoutes } from '../api/routes/scan-reports.js';
 import type {
   ContainerManager,
@@ -646,8 +647,8 @@ function insertApprovedMemory(
   });
 }
 
-function validationInfrastructureFailureResult(): Partial<ValidationResult> {
-  return {
+function validationInfrastructureFailureResult(): ValidationResult {
+  return makeValidationResult({
     overall: 'fail',
     smoke: {
       status: 'pass',
@@ -672,7 +673,7 @@ function validationInfrastructureFailureResult(): Partial<ValidationResult> {
     taskReview: null,
     reviewSkipKind: 'upstream-failed',
     reviewSkipReason: 'Skipped — validation infrastructure failed',
-  };
+  });
 }
 
 function ordinaryTestFailureResult(): Partial<ValidationResult> {
@@ -903,6 +904,18 @@ function createTestContext(
   const enqueuedSessions: string[] = [];
 
   const deps: PodManagerDependencies = {
+    validationInfrastructureRetryBackoffMs: [0, 0],
+    // This mock runtime represents one changed source tree per agent rework.
+    // Actual Git content capture is covered separately by retry-identity tests.
+    captureRetryIdentity: async () => ({
+      source: createHash('sha256')
+        .update(String(vi.mocked(runtime.resume).mock.calls.length))
+        .digest('hex'),
+      contract: 'a'.repeat(64),
+      commands: 'b'.repeat(64),
+      environment: 'c'.repeat(64),
+      implementation: 'd'.repeat(64),
+    }),
     podRepo,
     escalationRepo,
     fixFeedbackRepo,
@@ -9621,7 +9634,10 @@ describe('PodManager', () => {
 
     it('retries retryable infrastructure validation after a non-zero backoff', async () => {
       const ctx = createTestContext();
-      ctx.deps.validationInfrastructureRetryBackoffMs = [1];
+      ctx.deps.validationInfrastructureRetryBackoffMs = [50];
+      vi.mocked(sleep).mockImplementationOnce(
+        (delay) => new Promise((resolve) => setTimeout(resolve, delay)),
+      );
       vi.mocked(ctx.validationEngine.validate)
         .mockResolvedValueOnce(validationInfrastructureFailureResult())
         .mockResolvedValueOnce(makeValidationResult());
@@ -9640,7 +9656,11 @@ describe('PodManager', () => {
       await manager.triggerValidation(pod.id);
 
       expect(ctx.validationEngine.validate).toHaveBeenCalledTimes(2);
-      expect(vi.mocked(sleep)).toHaveBeenCalledWith(1);
+      expect(
+        vi
+          .mocked(sleep)
+          .mock.calls.some(([delay]) => typeof delay === 'number' && delay > 0 && delay <= 50),
+      ).toBe(true);
       expect(manager.getSession(pod.id).status).toBe('validated');
     });
 
@@ -9674,6 +9694,161 @@ describe('PodManager', () => {
       expect(manager.getSession(pod.id).lastValidationResult?.infrastructureFailure?.code).toBe(
         'SANDBOX_STATUS_UNAVAILABLE',
       );
+    });
+
+    it('does not renew an exhausted task-wide transient validation budget through Resume and manager restart', async () => {
+      const ctx = createTestContext();
+      ctx.deps.validationInfrastructureRetryBackoffMs = [0, 0];
+      vi.mocked(ctx.validationEngine.validate).mockResolvedValue(
+        validationInfrastructureFailureResult(),
+      );
+      let manager = createPodManager(ctx.deps);
+      const pod = manager.createSession(
+        { profileName: 'test-profile', task: 'Bound transient retries' },
+        'user-1',
+      );
+      ctx.podRepo.update(pod.id, {
+        status: 'running',
+        containerId: 'ctr-1',
+        worktreePath: '/tmp/wt',
+        validationAttempts: 0,
+      });
+      await manager.triggerValidation(pod.id);
+      expect(ctx.validationEngine.validate).toHaveBeenCalledTimes(3);
+      manager = createPodManager(ctx.deps);
+      const revalidate = vi.spyOn(manager, 'revalidateSession');
+      await manager.resumePod(pod.id);
+      await revalidate.mock.results[0]?.value;
+      expect(ctx.validationEngine.validate).toHaveBeenCalledTimes(3);
+      expect(manager.getSession(pod.id).status).toBe('review_required');
+      expect(manager.getSession(pod.id).failureReason).toContain('retry budget');
+      expect(ctx.runtime.resume).not.toHaveBeenCalled();
+    });
+
+    it('retains an executed transient result when its authorized retry cannot admit another automatic retry', async () => {
+      const ctx = createTestContext();
+      vi.mocked(ctx.validationEngine.validate).mockResolvedValue(
+        validationInfrastructureFailureResult(),
+      );
+      const manager = createPodManager(ctx.deps);
+      const pod = manager.createSession(
+        { profileName: 'test-profile', task: 'Persist authorized execution evidence' },
+        'user-1',
+      );
+      ctx.podRepo.update(pod.id, {
+        status: 'running',
+        containerId: 'ctr-1',
+        worktreePath: '/tmp/wt',
+      });
+      await manager.triggerValidation(pod.id);
+      const before = ctx.validationRepo.getForSession(pod.id).length;
+      ctx.podRepo.taskRetries?.authorize(pod.id, 'one-extra', 'External service repaired', {
+        type: 'human',
+        userId: 'operator',
+      });
+      await manager.revalidateSession(pod.id, { force: true });
+      expect(ctx.validationEngine.validate).toHaveBeenCalledTimes(4);
+      expect(ctx.validationRepo.getForSession(pod.id)).toHaveLength(before + 1);
+      expect(manager.getSession(pod.id)).toMatchObject({
+        status: 'review_required',
+        lastValidationResult: { overall: 'fail', infrastructureFailure: { retryable: true } },
+      });
+      expect(ctx.podRepo.taskRetries?.state(pod.id)).toMatchObject({
+        executedCount: 4,
+        latest: { outcome: 'transient', retryKind: 'override' },
+      });
+    });
+
+    it('requires an authenticated one-use reason before repeating unchanged nonretryable validation through the real API', async () => {
+      const ctx = createTestContext();
+      vi.mocked(ctx.validationEngine.validate).mockResolvedValue(
+        makeValidationResult({ overall: 'fail' }),
+      );
+      const manager = createPodManager(ctx.deps);
+      const pod = manager.createSession(
+        { profileName: 'test-profile', task: 'Unchanged failure' },
+        'user-1',
+      );
+      ctx.podRepo.update(pod.id, {
+        status: 'running',
+        containerId: 'ctr-1',
+        worktreePath: '/tmp/wt',
+        maxValidationAttempts: 1,
+      });
+      await manager.triggerValidation(pod.id);
+      expect(ctx.validationEngine.validate).toHaveBeenCalledTimes(1);
+      await manager.revalidateSession(pod.id, { force: true });
+      expect(ctx.validationEngine.validate).toHaveBeenCalledTimes(1);
+      expect(manager.getSession(pod.id).failureReason).toContain('Unchanged');
+      const app = Fastify();
+      app.setErrorHandler(errorHandler);
+      authPlugin(app, {
+        validateToken: async (token: string) => {
+          if (token !== 'operator-fixture')
+            throw new AutopodError('Invalid token', 'AUTH_ERROR', 401);
+          return { oid: 'human-reviewer', name: 'Reviewer' };
+        },
+      } as never);
+      podRoutes(app, manager, ctx.eventRepo, undefined, ctx.podRepo);
+      const url = `/pods/${pod.id}/retry-authorizations`;
+      const headers = { authorization: 'Bearer operator-fixture' };
+      const payload = {
+        requestKey: 'lost-retry-response',
+        reason: 'Inspected the external prerequisite',
+      };
+      try {
+        expect((await app.inject({ method: 'POST', url, payload })).statusCode).toBe(401);
+        expect(
+          (
+            await app.inject({
+              method: 'POST',
+              url,
+              headers: { authorization: 'Bearer pod-token' },
+              payload,
+            })
+          ).statusCode,
+        ).toBe(401);
+        expect(
+          (
+            await app.inject({
+              method: 'POST',
+              url,
+              headers,
+              payload: { ...payload, actor: { type: 'human', userId: 'forged' } },
+            })
+          ).statusCode,
+        ).toBe(400);
+        const first = await app.inject({ method: 'POST', url, headers, payload });
+        expect(first.statusCode).toBe(201);
+        expect(first.json().actor.userId).toBe('human-reviewer');
+        const repeated = await app.inject({ method: 'POST', url, headers, payload });
+        expect(repeated.json().id).toBe(first.json().id);
+        expect(ctx.validationEngine.validate).toHaveBeenCalledTimes(1);
+        const resumed = await app.inject({
+          method: 'POST',
+          url: `/pods/${pod.id}/resume`,
+          headers,
+        });
+        expect(resumed.statusCode).toBe(200);
+        expect(ctx.validationEngine.validate).toHaveBeenCalledTimes(2);
+        await app.inject({ method: 'POST', url: `/pods/${pod.id}/resume`, headers });
+        expect(ctx.validationEngine.validate).toHaveBeenCalledTimes(2);
+        const state = await app.inject({
+          method: 'GET',
+          url: `/pods/${pod.id}/retry-state`,
+          headers,
+        });
+        expect(state.statusCode).toBe(200);
+        expect(state.json()).toMatchObject({
+          executedCount: 2,
+          admissionCount: 2,
+          latest: { outcome: 'nonretryable' },
+        });
+        expect(state.json().authorizations[0].usedByAttemptId).toBeTruthy();
+        expect(ctx.runtime.resume).not.toHaveBeenCalled();
+      } finally {
+        await app.close();
+      }
     });
 
     it('persistent validation infrastructure failure parks once', async () => {

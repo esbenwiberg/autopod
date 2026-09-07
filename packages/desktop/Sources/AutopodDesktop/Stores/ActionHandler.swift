@@ -89,6 +89,15 @@ public final class ActionHandler {
       },
       spawnFix: { [weak self] id, message in await self?.spawnFixSession(id, userMessage: message) ?? nil },
       retryCreatePr: { [weak self] id in await self?.retryCreatePr(id) },
+      retryDraftScope: api.baseURL.absoluteString,
+      loadRetryState: { [weak self] id in
+        guard let self else { throw URLError(.notConnectedToInternet) }
+        return try await self.api.getRetryState(id)
+      },
+      authorizeRetry: { [weak self] id, input in
+        guard let self else { throw URLError(.notConnectedToInternet) }
+        return try await self.api.authorizeRetry(id, request: input)
+      },
       resume: { [weak self] id in await self?.resume(id) },
       recoverWorktree: { [weak self] id in await self?.recoverWorktree(id) ?? nil },
       forceComplete: { [weak self] id, reason in await self?.forceComplete(id, reason: reason) },

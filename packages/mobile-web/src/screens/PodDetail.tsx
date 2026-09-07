@@ -9,6 +9,7 @@ import { SkipValidationToggle } from '../components/SkipValidationToggle.js';
 import { StatusChip } from '../components/StatusChip.js';
 import { TaskExecutionPanel } from '../components/TaskExecutionPanel.js';
 import { TaskMarkdownCards } from '../components/TaskMarkdownCards.js';
+import { TaskRetryPanel } from '../components/TaskRetryPanel.js';
 import { type StoredValidation, ValidationSummary } from '../components/ValidationSummary.js';
 import { ApiError, AuthRequiredError, apiFetch } from '../lib/api.js';
 import { progressDetail, progressLabel, taskTitle } from '../lib/pod-display.js';
@@ -129,6 +130,7 @@ export function PodDetail(): JSX.Element {
           )}
         </section>
       ) : null}
+      <TaskRetryPanel podId={pod.id} revision={pod.updatedAt} status={pod.status} />
       <TaskExecutionPanel
         podId={data.id}
         revision={`${data.status}:${data.inputTokens}:${data.outputTokens}:${data.validationAttempts}`}

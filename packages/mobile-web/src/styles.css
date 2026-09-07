@@ -901,3 +901,33 @@ code {
 .scan-report .form-actions {
   flex-wrap: wrap;
 }
+
+.retry-panel {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: .75rem;
+  padding: 1rem;
+  overflow-wrap: anywhere;
+}
+.retry-panel p,
+.retry-panel h2 {
+  margin: 0;
+}
+.retry-panel label {
+  display: flex;
+  flex-direction: column;
+  gap: .5rem;
+}
+.retry-panel textarea {
+  width: 100%;
+  min-height: 5rem;
+  padding: .75rem;
+  font: inherit;
+  box-sizing: border-box;
+}
+.retry-panel button {
+  min-height: 44px;
+  padding: .6rem .75rem;
+  font: inherit;
+  white-space: normal;
+}

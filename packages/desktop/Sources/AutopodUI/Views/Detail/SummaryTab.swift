@@ -152,6 +152,7 @@ struct WorkTab: View {
                 emptyWorkSection("No process signals yet", icon: "gauge.with.dots.needle.67percent")
             }
         case .cost:
+            TaskRetryCard(podId: pod.id, status: pod.status.rawValue, actions: actions)
             if let cost {
                 SessionCostCard(breakdown: cost)
             } else {

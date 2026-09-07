@@ -104,39 +104,108 @@
       "implementation": [
         "packages/daemon/src/pods/task-execution-ledger.ts",
         "packages/daemon/src/db/migrations/143_task_executions.sql",
-        "packages/daemon/src/pods/pod-manager.ts"
+        "packages/daemon/src/pods/pod-manager.ts",
+        "packages/daemon/src/pods/task-retry-ledger.ts",
+        "packages/daemon/src/validation/retry-identity.ts",
+        "packages/daemon/src/db/migrations/147_task_retry_admission.sql",
+        "packages/daemon/src/api/routes/pods.ts",
+        "packages/shared/src/types/task-retry.ts",
+        "packages/cli/src/commands/pod.ts",
+        "packages/mobile-web/src/components/TaskRetryPanel.tsx",
+        "packages/desktop/Sources/AutopodUI/Views/Shared/TaskRetryCard.swift"
       ],
       "tests": [
         "packages/daemon/src/pods/task-execution-ledger.test.ts",
-        "packages/daemon/src/pods/pod-manager.test.ts"
+        "packages/daemon/src/pods/pod-manager.test.ts",
+        "packages/daemon/src/pods/task-retry-ledger.test.ts",
+        "packages/daemon/src/validation/retry-identity.test.ts",
+        "packages/cli/src/commands/pod.test.ts",
+        "packages/mobile-web/src/components/TaskRetryPanel.test.tsx",
+        "packages/desktop/Tests/AutopodClientTests/TaskRetryClientTests.swift"
       ],
       "evidence": [
         "receipts/task-ledger-red.txt",
         "receipts/task-budget-manager-red.txt",
         "receipts/task-ledger-green-2.txt",
         "receipts/task-ledger-corrected-telemetry.txt",
-        "receipts/checkpoint-3-affected.txt"
+        "receipts/checkpoint-3-affected.txt",
+        "receipts/task-retry-resume-red.txt",
+        "receipts/task-retry-affected-final.txt",
+        "receipts/task-retry-cli.txt",
+        "receipts/task-retry-mobile-final.txt",
+        "receipts/task-retry-swift.txt",
+        "receipts/task-retry-mobile-browser.json"
       ],
       "prerequisites": [],
-      "remaining": "Task membership, run identities and measured cumulative token gate implemented; task-wide retry limits and audited budget extensions remain."
+      "remaining": "Validation admission identity and pinned cumulative transient allowance persist across Resume, restart and linked fix pods. Task-wide agent/repository-rework limits, cumulative provider/sandbox recovery and audited token-budget extensions still require integration; historical pre-ledger retries are not reconstructed."
     },
     {
       "id": "W2.2",
       "requirement": "Unchanged nonretryable failures require changed relevant inputs or recorded authorized override",
-      "status": "unverified",
-      "implementation": [],
-      "tests": [],
-      "evidence": [],
-      "prerequisites": []
+      "status": "partial",
+      "implementation": [
+        "packages/daemon/src/pods/task-retry-ledger.ts",
+        "packages/daemon/src/validation/retry-identity.ts",
+        "packages/daemon/src/pods/pod-manager.ts",
+        "packages/daemon/src/db/migrations/147_task_retry_admission.sql",
+        "packages/daemon/src/api/routes/pods.ts",
+        "packages/shared/src/types/task-retry.ts",
+        "packages/cli/src/commands/pod.ts",
+        "packages/mobile-web/src/components/TaskRetryPanel.tsx",
+        "packages/desktop/Sources/AutopodUI/Views/Shared/TaskRetryCard.swift"
+      ],
+      "tests": [
+        "packages/daemon/src/pods/task-retry-ledger.test.ts",
+        "packages/daemon/src/validation/retry-identity.test.ts",
+        "packages/daemon/src/pods/pod-manager.test.ts",
+        "packages/cli/src/commands/pod.test.ts",
+        "packages/mobile-web/src/components/TaskRetryPanel.test.tsx",
+        "packages/desktop/Tests/AutopodClientTests/TaskRetryClientTests.swift"
+      ],
+      "evidence": [
+        "receipts/task-retry-resume-red.txt",
+        "receipts/task-retry-affected-final.txt",
+        "receipts/task-retry-cli.txt",
+        "receipts/task-retry-mobile-final.txt",
+        "receipts/task-retry-swift.txt",
+        "receipts/task-retry-mobile-browser.json"
+      ],
+      "prerequisites": [],
+      "remaining": "Actual validation repeat admission requires known changed source/contract/commands/environment/implementation or one-use authenticated human authorization. Agent-rework admission and explicit provider-rebinding reconciliation remain; unavailable identity never proves change."
     },
     {
       "id": "W2.3",
       "requirement": "Transient provider failures use bounded backoff within authorized binding separately from repository rework",
-      "status": "unverified",
-      "implementation": [],
-      "tests": [],
-      "evidence": [],
-      "prerequisites": []
+      "status": "partial",
+      "implementation": [
+        "packages/daemon/src/pods/task-retry-ledger.ts",
+        "packages/daemon/src/validation/retry-identity.ts",
+        "packages/daemon/src/pods/pod-manager.ts",
+        "packages/daemon/src/db/migrations/147_task_retry_admission.sql",
+        "packages/daemon/src/api/routes/pods.ts",
+        "packages/shared/src/types/task-retry.ts",
+        "packages/cli/src/commands/pod.ts",
+        "packages/mobile-web/src/components/TaskRetryPanel.tsx",
+        "packages/desktop/Sources/AutopodUI/Views/Shared/TaskRetryCard.swift"
+      ],
+      "tests": [
+        "packages/daemon/src/pods/task-retry-ledger.test.ts",
+        "packages/daemon/src/validation/retry-identity.test.ts",
+        "packages/daemon/src/pods/pod-manager.test.ts",
+        "packages/cli/src/commands/pod.test.ts",
+        "packages/mobile-web/src/components/TaskRetryPanel.test.tsx",
+        "packages/desktop/Tests/AutopodClientTests/TaskRetryClientTests.swift"
+      ],
+      "evidence": [
+        "receipts/task-retry-resume-red.txt",
+        "receipts/task-retry-affected-final.txt",
+        "receipts/task-retry-cli.txt",
+        "receipts/task-retry-mobile-final.txt",
+        "receipts/task-retry-swift.txt",
+        "receipts/task-retry-mobile-browser.json"
+      ],
+      "prerequisites": [],
+      "remaining": "Validation infrastructure/reviewer failure admission uses persisted bounded backoff under unchanged captured provider/account/model. Other provider/sandbox retry paths and explicit authorized binding changes still require reconciliation."
     },
     {
       "id": "W2.4",
@@ -145,21 +214,40 @@
       "implementation": [
         "packages/daemon/src/pods/task-execution-ledger.ts",
         "packages/daemon/src/db/migrations/143_task_executions.sql",
-        "packages/daemon/src/pods/pod-manager.ts"
+        "packages/daemon/src/pods/pod-manager.ts",
+        "packages/daemon/src/pods/task-retry-ledger.ts",
+        "packages/daemon/src/validation/retry-identity.ts",
+        "packages/daemon/src/db/migrations/147_task_retry_admission.sql",
+        "packages/daemon/src/api/routes/pods.ts",
+        "packages/shared/src/types/task-retry.ts",
+        "packages/cli/src/commands/pod.ts",
+        "packages/mobile-web/src/components/TaskRetryPanel.tsx",
+        "packages/desktop/Sources/AutopodUI/Views/Shared/TaskRetryCard.swift"
       ],
       "tests": [
         "packages/daemon/src/pods/task-execution-ledger.test.ts",
-        "packages/daemon/src/pods/pod-manager.test.ts"
+        "packages/daemon/src/pods/pod-manager.test.ts",
+        "packages/daemon/src/pods/task-retry-ledger.test.ts",
+        "packages/daemon/src/validation/retry-identity.test.ts",
+        "packages/cli/src/commands/pod.test.ts",
+        "packages/mobile-web/src/components/TaskRetryPanel.test.tsx",
+        "packages/desktop/Tests/AutopodClientTests/TaskRetryClientTests.swift"
       ],
       "evidence": [
         "receipts/task-ledger-red.txt",
         "receipts/task-budget-manager-red.txt",
         "receipts/task-ledger-green-2.txt",
         "receipts/task-ledger-corrected-telemetry.txt",
-        "receipts/checkpoint-3-affected.txt"
+        "receipts/checkpoint-3-affected.txt",
+        "receipts/task-retry-resume-red.txt",
+        "receipts/task-retry-affected-final.txt",
+        "receipts/task-retry-cli.txt",
+        "receipts/task-retry-mobile-final.txt",
+        "receipts/task-retry-swift.txt",
+        "receipts/task-retry-mobile-browser.json"
       ],
       "prerequisites": [],
-      "remaining": "Recorded provider/phase amounts reconcile without double counting. Validation time, retry classification policy and available infrastructure billing collection remain."
+      "remaining": "Actual engine wall duration is recorded once per executed validation admission; waiting and interrupted unknown duration are separate. Complete cross-phase cost/time reconciliation and available infrastructure billing remain. Native interaction and live acceptance are unverified."
     },
     {
       "id": "W2.5",

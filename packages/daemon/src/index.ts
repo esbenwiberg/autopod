@@ -246,6 +246,7 @@ const podsitterRepo = createPodsitterRepository(db);
 // the same live provider-account credentials the agent authenticates with.
 const llmDeps = { profileStore, providerAccountStore };
 const podRepo = createPodRepository(db);
+podRepo.taskRetries?.recoverInterrupted();
 const providerAttemptRepo = createProviderAttemptRepository(db);
 const tokenTelemetryRepair = createTokenTelemetryRepair({ db, podRepo, providerAttemptRepo });
 const eventRepo = createEventRepository(db);

@@ -33,6 +33,7 @@ import {
 } from '@autopod/shared';
 import type Database from 'better-sqlite3';
 import { extractFindings } from '../validation/finding-fingerprint.js';
+import { type TaskRetryLedger, createTaskRetryLedger } from './task-retry-ledger.js';
 
 export interface NewPod {
   id: string;
@@ -223,6 +224,7 @@ import { type DeliveryLedger, createDeliveryLedger } from './delivery-ledger.js'
 import { type TaskExecutionLedger, createTaskExecutionLedger } from './task-execution-ledger.js';
 
 export interface PodRepository {
+  taskRetries?: TaskRetryLedger;
   /** Defer external publication while an enclosing SQLite transaction is pending. */
   afterInsertCommitted?(id: string, effect: () => void): void;
   deliveryLedger?: DeliveryLedger;
@@ -653,6 +655,7 @@ export function createPodRepository(db: Database.Database): PodRepository {
         if (committed?.execution_id === execution.execution_id) effect();
       });
     },
+    taskRetries: createTaskRetryLedger(db),
     completionJournal,
     deliveryLedger: createDeliveryLedger(db),
     taskExecutions,
