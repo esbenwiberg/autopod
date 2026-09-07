@@ -100,7 +100,11 @@ export function createSessionBridge(deps: SessionBridgeDependencies): PodBridge 
 
   function assertAgentWriteAllowed(podId: string, toolName: string): void {
     const pod = podRepo.getOrThrow(podId);
-    if (pod.status === 'running') return;
+    if (
+      pod.status === 'running' ||
+      (pod.status === 'awaiting_input' && toolName === 'report_task_summary')
+    )
+      return;
 
     logger.warn(
       { podId, status: pod.status, toolName },

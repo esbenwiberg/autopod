@@ -1,0 +1,51 @@
+
+ RUN  v4.1.10 /private/tmp/autopod-durable-execution
+
+ ❯ packages/daemon/src/pods/pod-bridge-task-summary.test.ts (8 tests | 1 failed | 7 skipped) 94ms
+     × preserves a late task summary while human input remains outstanding 92ms
+ ❯ packages/daemon/src/pods/pod-lifecycle.e2e.test.ts (29 tests | 1 failed | 28 skipped) 220ms
+       × keeps an unanswered decision actionable after agent settlement and duplicate finalization 219ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 2 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  packages/daemon/src/pods/pod-bridge-task-summary.test.ts > PodBridge.reportTaskSummary — lock-on-first-write > preserves a late task summary while human input remains outstanding
+AssertionError: expected [Function] to not throw an error but 'Error: report_task_summary is only ac…' was thrown
+
+- Expected:
+undefined
+
++ Received:
+"Error: report_task_summary is only accepted while the pod is running (current status: awaiting_input)."
+
+ ❯ packages/daemon/src/pods/pod-bridge-task-summary.test.ts:159:103
+    157|     const { bridge, podRepo, podId } = buildBridge();
+    158|     podRepo.update(podId, { status: 'awaiting_input' });
+    159|     expect(() => bridge.reportTaskSummary(podId, 'Collected findings; …
+       |                                                                                                       ^
+    160|     expect(podRepo.getOrThrow(podId).taskSummary?.actualSummary).toBe(…
+    161|     expect(podRepo.getOrThrow(podId).status).toBe('awaiting_input');
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/2]⎯
+
+ FAIL  packages/daemon/src/pods/pod-lifecycle.e2e.test.ts > Pod Lifecycle E2E > Escalation flow: agent → awaiting_input → human responds → agent continues > keeps an unanswered decision actionable after agent settlement and duplicate finalization
+AssertionError: expected 'validated' to be 'awaiting_input' // Object.is equality
+
+Expected: "awaiting_input"
+Received: "validated"
+
+ ❯ packages/daemon/src/pods/pod-lifecycle.e2e.test.ts:240:49
+    238|       await expect(manager.processPod(pod.id)).resolves.toBeUndefined(…
+    239|       await expect(manager.handleCompletion(pod.id)).resolves.toBeUnde…
+    240|       expect(manager.getSession(pod.id).status).toBe('awaiting_input');
+       |                                                 ^
+    241|       expect(manager.getSession(pod.id).pendingEscalation).not.toBeNul…
+    242|       expect(events.some((e) => e.type === 'pod.completed')).toBe(fals…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/2]⎯
+
+
+ Test Files  2 failed (2)
+      Tests  2 failed | 35 skipped (37)
+   Start at  10:44:07
+   Duration  2.43s (transform 2.14s, setup 0ms, import 3.29s, tests 314ms, environment 0ms)
+

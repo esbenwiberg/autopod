@@ -105,6 +105,29 @@ export function PodDetail(): JSX.Element {
         {data.profileName} · {data.runtime} · {data.model}
       </p>
 
+      {data.recordDiagnostics?.length ? (
+        <section role="alert" className="error">
+          Saved evidence unavailable:{' '}
+          {data.recordDiagnostics.map((d) => `${d.field} (${d.code})`).join(', ')}. Resolve the
+          record before relying on it for an action.
+        </section>
+      ) : null}
+      {data.finalization?.agentSettledAt ? (
+        <section className="info-panel">
+          <h2>Worker settlement</h2>
+          <p>
+            Agent settled at {data.finalization.agentSettledAt}. Source preservation:{' '}
+            {data.finalization.sourcePreservedAt ?? 'not verified'}.
+          </p>
+          {data.finalization.pendingDecisionId ? (
+            <p>
+              Human decision remains unanswered. Reply to the pending question before continuation.
+            </p>
+          ) : (
+            <p>Next stage: {data.finalization.phase}.</p>
+          )}
+        </section>
+      ) : null}
       <ProgressPlan pod={data} />
 
       {data.pendingEscalation ? (

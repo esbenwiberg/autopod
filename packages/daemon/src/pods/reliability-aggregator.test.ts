@@ -148,6 +148,24 @@ describe('computeReliabilityAnalytics', () => {
     db.close();
   });
 
+  it('does not rewrite an earlier failure when a later validation passes', () => {
+    const podId = insertPod(db);
+    insertValidation(db, podId, makeValidationResult({ overall: 'fail' }), 0);
+    insertValidation(db, podId, makeValidationResult(), 1);
+    expect(computeReliabilityAnalytics(db, 30).firstPassRate).toBe(0);
+  });
+
+  it.each([null, [], { overall: 'pass', sast: { status: 'skip' } }])(
+    'requires executed evidence for legacy %j',
+    (result) => {
+      const podId = insertPod(db);
+      db.prepare(
+        'INSERT INTO validations (id, pod_id, attempt, sequence, result) VALUES (?, ?, 1, 1, ?)',
+      ).run('legacy', podId, JSON.stringify(result));
+      expect(computeReliabilityAnalytics(db, 30).firstPassRate).toBe(0);
+    },
+  );
+
   // ── Empty cohort ────────────────────────────────────────────────────────────
 
   it('empty cohort returns zero-value response', () => {
@@ -168,9 +186,10 @@ describe('computeReliabilityAnalytics', () => {
 
   // ── First-pass single pod ───────────────────────────────────────────────────
 
-  it('single complete pod with all bands: firstPassRate=1, no drops, all band counts=1', () => {
+  it('single complete pod with executed first pass: firstPassRate=1, no drops, all band counts=1', () => {
     const podId = insertPod(db, { status: 'complete', reworkCount: 0 });
     insertAllBandEvents(db, podId);
+    insertValidation(db, podId, makeValidationResult());
 
     const result = computeReliabilityAnalytics(db, 30);
 
@@ -373,7 +392,7 @@ describe('computeReliabilityAnalytics', () => {
   it('delta direction: up when current >> prior (> +0.5pp)', () => {
     const now = new Date();
     // Current window: 100% first-pass
-    insertPod(db, {
+    const passed = insertPod(db, {
       status: 'complete',
       reworkCount: 0,
       completedAt: new Date(now.getTime() - 5 * 86_400_000).toISOString(),
@@ -384,6 +403,7 @@ describe('computeReliabilityAnalytics', () => {
       completedAt: new Date(now.getTime() - 35 * 86_400_000).toISOString(),
     });
 
+    insertValidation(db, passed, makeValidationResult());
     const result = computeReliabilityAnalytics(db, 30);
     // delta = (1.0 - 0.0) * 100 = +100pp > +0.5pp → 'up'
     expect(result.firstPassRateDelta.direction).toBe('up');
@@ -398,12 +418,13 @@ describe('computeReliabilityAnalytics', () => {
       completedAt: new Date(now.getTime() - 5 * 86_400_000).toISOString(),
     });
     // Prior window: 100% first-pass
-    insertPod(db, {
+    const passed = insertPod(db, {
       status: 'complete',
       reworkCount: 0,
       completedAt: new Date(now.getTime() - 35 * 86_400_000).toISOString(),
     });
 
+    insertValidation(db, passed, makeValidationResult());
     const result = computeReliabilityAnalytics(db, 30);
     // delta = (0.0 - 1.0) * 100 = -100pp < -0.5pp → 'down'
     expect(result.firstPassRateDelta.direction).toBe('down');
@@ -568,7 +589,7 @@ describe('computeReliabilityAnalytics', () => {
     const result = computeReliabilityAnalytics(db, 30);
 
     expect(result.summary.totalPodsInWindow).toBe(1);
-    expect(result.firstPassRate).toBe(1);
+    expect(result.firstPassRate).toBe(0); // Worker settlement alone is not validation evidence.
     expect(result.funnel.bands.find((band) => band.band === 'complete')?.count).toBe(1);
   });
 });

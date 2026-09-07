@@ -1,0 +1,11 @@
+automatic pods: 159 {'awaiting_input': 1, 'failed': 4, 'killed': 24, 'complete': 130}
+validation records: 346
+pods with validation: 121
+pods with repeated validation: 66
+validation hours: 26.8512
+agent and review recorded costs: {'review': 302.5853204, 'agent': 1975.28744385}
+build ran: 121 ever failed: 2
+test ran: 118 ever failed: 20
+factValidation ran: 49 ever failed: 11
+taskReview ran: 74 ever failed: 52
+sast ran: 6 ever failed: 0

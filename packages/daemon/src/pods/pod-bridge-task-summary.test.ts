@@ -153,6 +153,18 @@ describe('PodBridge.reportTaskSummary — lock-on-first-write', () => {
     expect(arg.event?.actualSummary).toBe('second');
   });
 
+  it('preserves a late task summary while human input remains outstanding', () => {
+    const { bridge, podRepo, podId } = buildBridge();
+    podRepo.update(podId, { status: 'awaiting_input' });
+    expect(() =>
+      bridge.reportTaskSummary(podId, 'Collected findings; human triage pending', []),
+    ).not.toThrow();
+    expect(podRepo.getOrThrow(podId).taskSummary?.actualSummary).toBe(
+      'Collected findings; human triage pending',
+    );
+    expect(podRepo.getOrThrow(podId).status).toBe('awaiting_input');
+  });
+
   it('updates memory outcomes on a locked re-report while preserving original summary text', () => {
     const { bridge, podRepo, memoryRepo, usageRepo, podId } = buildBridge();
     const memoryId = insertSelectedMemory(memoryRepo, usageRepo, podId);

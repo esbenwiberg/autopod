@@ -127,6 +127,32 @@ describe('GET /pods/:podId provider-attempt projection', () => {
     db.close();
   });
 
+  it('keeps malformed legacy list evidence visible without hiding healthy records or breaking projected costs', async () => {
+    for (const id of ['healthy', 'malformed'])
+      db.prepare(`INSERT INTO pods
+      (id, profile_name, task, status, model, runtime, branch, user_id, output_mode, agent_mode, output_target, validate, promotable, completed_at, cost_usd)
+      VALUES (?, 'test-profile', ?, 'complete', 'gpt-5.6-sol', 'codex', 'branch', 'test-user-1', 'pr', 'auto', 'pr', 1, 0, ?, 2)`).run(
+        id,
+        'Large task description '.repeat(5000),
+        new Date().toISOString(),
+      );
+    db.prepare("UPDATE pods SET task_summary = 'not-json' WHERE id = 'malformed'").run();
+    const list = await app.inject({ method: 'GET', url: '/pods?compact=true&page=true&limit=10' });
+    expect(list.statusCode).toBe(200);
+    expect(
+      list
+        .json()
+        .pods.map((pod: { id: string }) => pod.id)
+        .sort(),
+    ).toEqual(['healthy', 'malformed']);
+    expect(
+      list.json().pods.find((pod: { id: string }) => pod.id === 'malformed').recordDiagnostics,
+    ).toEqual([{ field: 'task_summary', code: 'invalid_json' }]);
+    const cost = await app.inject({ method: 'GET', url: '/pods/analytics/cost?days=30' });
+    expect(cost.statusCode).toBe(200);
+    expect(cost.json().total).toBe(4);
+  });
+
   it('provider-attempt returns ordered redacted attempts and ledger projections', async () => {
     insertPod(db, { id: 'provider-attempt-pod', status: 'running', completedAt: undefined });
     db.prepare(`
@@ -809,7 +835,7 @@ describe('GET /pods/analytics/reliability', () => {
     expect(res.statusCode).toBe(200);
     const body = res.json();
     expect(body.summary.totalPodsInWindow).toBe(1);
-    expect(body.firstPassRate).toBe(1);
+    expect(body.firstPassRate).toBe(0); // No executed validation receipt in this fixture.
   });
 
   it('readiness exposes null and object snapshots in pod API responses', async () => {

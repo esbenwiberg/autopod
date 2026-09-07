@@ -106,8 +106,8 @@ export function aggregateCost(
   const windowStartIso = new Date(windowStartMs).toISOString();
   const priorStartIso = new Date(priorStartMs).toISOString();
 
-  // Fetch all pods; filter in-memory (operator-grade dataset, no date-range query needed).
-  const allPods = deps.podRepo.list();
+  // Production uses a date-filtered scalar projection; compatibility for injected repositories.
+  const allPods = deps.podRepo.listCostRecords?.(priorStartIso) ?? deps.podRepo.list();
 
   const relevant = allPods.filter(
     (pod): pod is CompletedPod =>
@@ -261,6 +261,17 @@ export function aggregateCost(
     }));
 
   return {
+    telemetry: {
+      completeness: currentPods.every(
+        (pod) => pod.tokenTelemetryAccuracy !== 'partial' && !pod.recordDiagnostics?.length,
+      )
+        ? 'recorded'
+        : 'partial',
+      infrastructureCost: 'unavailable',
+      diagnostics: currentPods.flatMap((pod) =>
+        (pod.recordDiagnostics ?? []).map((diagnostic) => ({ podId: pod.id, ...diagnostic })),
+      ),
+    },
     total,
     sparkline,
     deltaVsPrior: { value: total - priorTotal, direction },

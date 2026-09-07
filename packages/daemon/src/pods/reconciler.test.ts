@@ -67,6 +67,26 @@ function buildDeps(
 }
 
 describe('reconcileSandboxSessions', () => {
+  it.each(['running', 'stopped', 'unknown', 'deleted'] as const)(
+    'retains unanswered triage when sandbox status is %s after restart',
+    async (status) => {
+      const deps = buildDeps(status, {
+        status: 'awaiting_input',
+        pendingEscalation: {
+          id: 'selection',
+          podId: 'pod-1',
+          type: 'ask_human',
+          timestamp: new Date().toISOString(),
+          payload: { question: 'Select repairs' },
+          response: null,
+        },
+      });
+      await reconcileSandboxSessions({ ...deps, logger });
+      expect(deps.pod.status).toBe('awaiting_input');
+      expect(deps.pod.pendingEscalation?.id).toBe('selection');
+      expect(deps.enqueueSession).not.toHaveBeenCalled();
+    },
+  );
   it('re-queues interrupted provisioning once with its surviving worktree', async () => {
     const worktreePath = await mkdtemp(path.join(tmpdir(), 'autopod-reconcile-'));
     const deps = buildDeps('unknown', {

@@ -1,0 +1,105 @@
+
+ RUN  v4.1.10 /private/tmp/autopod-durable-execution
+
+ ❯ diagnostics-baseline.test.ts (6 tests | 5 failed) 262ms
+     × excludes skipped SAST from executed coverage 75ms
+     × requires validation evidence for first-pass success 39ms
+     × keeps attempts distinct from logical pods and delivered PRs 40ms
+     × recognizes structured Claude overload as provider unavailability 37ms
+     × preserves healthy history reads when a legacy row is malformed 37ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 5 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  diagnostics-baseline.test.ts > Durable execution contract: desired behavior > excludes skipped SAST from executed coverage
+AssertionError: expected 1 to be +0 // Object.is equality
+
+- Expected
++ Received
+
+- 0
++ 1
+
+ ❯ diagnostics-baseline.test.ts:40:29
+     38|       (x) => x.stage === 'sast',
+     39|     );
+     40|     expect(actual?.podsRan).toBe(0);
+       |                             ^
+     41|   });
+     42|   it('requires validation evidence for first-pass success', () => {
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/5]⎯
+
+ FAIL  diagnostics-baseline.test.ts > Durable execution contract: desired behavior > requires validation evidence for first-pass success
+AssertionError: expected 1 to be +0 // Object.is equality
+
+- Expected
++ Received
+
+- 0
++ 1
+
+ ❯ diagnostics-baseline.test.ts:44:63
+     42|   it('requires validation evidence for first-pass success', () => {
+     43|     pod('no-validation');
+     44|     expect(computeReliabilityAnalytics(db, 30).firstPassRate).toBe(0);
+       |                                                               ^
+     45|     expect(db.prepare('SELECT count(*) AS n FROM validations').get()).…
+     46|   });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/5]⎯
+
+ FAIL  diagnostics-baseline.test.ts > Durable execution contract: desired behavior > keeps attempts distinct from logical pods and delivered PRs
+AssertionError: expected 2 to be 1 // Object.is equality
+
+- Expected
++ Received
+
+- 1
++ 2
+
+ ❯ diagnostics-baseline.test.ts:62:41
+     60|     const actual = computeModelsAnalytics(db, 30);
+     61|     expect(actual.summary.cohortSize).toBe(1);
+     62|     expect(actual.byModel[0]?.podCount).toBe(1);
+       |                                         ^
+     63|     expect(actual.byModel[0]?.completeCount).toBe(0);
+     64|     expect(actual.byModel[0]?.dollarPerPr).toBeNull();
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/5]⎯
+
+ FAIL  diagnostics-baseline.test.ts > Durable execution contract: desired behavior > recognizes structured Claude overload as provider unavailability
+AssertionError: expected 'unknown' to be 'provider_unavailable' // Object.is equality
+
+Expected: "provider_unavailable"
+Received: "unknown"
+
+ ❯ diagnostics-baseline.test.ts:73:7
+     71|           'API Error: 529 Overloaded. This is a server-side issue, usu…
+     72|       }).category,
+     73|     ).toBe('provider_unavailable');
+       |       ^
+     74|   });
+     75|   it('correctly refuses completion with unresolved human input', () =>…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[4/5]⎯
+
+ FAIL  diagnostics-baseline.test.ts > Durable execution contract: desired behavior > preserves healthy history reads when a legacy row is malformed
+SyntaxError: Unexpected token 'o', "not-json" is not valid JSON
+ ❯ rowToSession ../../../Users/ewi/repos/autopod/packages/daemon/src/pods/pod-repository.ts:409:42
+    407|     startCommitSha: (row.start_commit_sha as string) ?? null,
+    408|     linkedPodId: (row.linked_pod_id as string) ?? null,
+    409|     taskSummary: row.task_summary ? JSON.parse(row.task_summary as str…
+       |                                          ^
+    410|     preSubmitReview: row.pre_submit_review
+    411|       ? (JSON.parse(row.pre_submit_review as string) as PreSubmitRevie…
+ ❯ Object.list ../../../Users/ewi/repos/autopod/packages/daemon/src/pods/pod-repository.ts:1037:19
+ ❯ diagnostics-baseline.test.ts:85:17
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[5/5]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  5 failed | 1 passed (6)
+   Start at  10:32:39
+   Duration  576ms (transform 116ms, setup 0ms, import 191ms, tests 262ms, environment 0ms)
+

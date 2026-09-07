@@ -102,7 +102,11 @@ function classify(
   if ((code !== null && AUTH_CODES.has(code)) || AUTH_MESSAGE.test(rawMessage.trim())) {
     return classification('auth', false, sanitizedMessage, retryAfter);
   }
-  if ((code !== null && OUTAGE_CODES.has(code)) || OUTAGE_MESSAGE.test(rawMessage.trim())) {
+  if (
+    (runtime === 'claude' && status === 529) ||
+    (code !== null && OUTAGE_CODES.has(code)) ||
+    OUTAGE_MESSAGE.test(rawMessage.trim())
+  ) {
     return classification('provider_unavailable', false, sanitizedMessage, retryAfter);
   }
   if (

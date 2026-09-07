@@ -1,0 +1,449 @@
+{
+  "scope": "../goal-prompt.md",
+  "sourceBaseline": "2d5456edac542a99d27f12eb1dbd16e5ad8c2c2a",
+  "branch": "codex/durable-execution-contract",
+  "worktree": "/private/tmp/autopod-durable-execution",
+  "criteria": [
+    {
+      "id": "W1.1",
+      "requirement": "Settlement and unresolved human input are reconciled without weakening transitions",
+      "status": "partial",
+      "implementation": [
+        "packages/daemon/src/pods/pod-manager.ts",
+        "packages/daemon/src/pods/pod-bridge-impl.ts"
+      ],
+      "tests": [
+        "packages/daemon/src/pods/pod-lifecycle.e2e.test.ts",
+        "packages/daemon/src/pods/pod-bridge-task-summary.test.ts"
+      ],
+      "evidence": ["receipts/settlement-red.txt", "receipts/settlement-first-green.txt"],
+      "prerequisites": []
+    },
+    {
+      "id": "W1.2",
+      "requirement": "Summaries and work survive disconnect, expiry, late replies, duplicate completion and restart",
+      "status": "partial",
+      "implementation": [
+        "packages/daemon/src/pods/completion-journal.ts",
+        "packages/daemon/src/pods/local-reconciler.ts",
+        "packages/daemon/src/pods/reconciler.ts"
+      ],
+      "tests": [
+        "packages/daemon/src/pods/completion-journal.test.ts",
+        "packages/daemon/src/pods/local-reconciler.test.ts",
+        "packages/daemon/src/pods/reconciler.test.ts"
+      ],
+      "evidence": ["receipts/journal-migration.txt", "receipts/settlement-restart-suites.txt"],
+      "prerequisites": []
+    },
+    {
+      "id": "W1.3",
+      "requirement": "Finalization decisions and generations are durable with idempotent side effects",
+      "status": "partial",
+      "implementation": [
+        "packages/daemon/src/db/migrations/142_completion_journal.sql",
+        "packages/daemon/src/pods/completion-journal.ts"
+      ],
+      "tests": ["packages/daemon/src/pods/completion-journal.test.ts"],
+      "evidence": ["receipts/journal-migration.txt"],
+      "prerequisites": [
+        "Journal is implemented; delivery side-effect intent/reconciliation/idempotency remains unfinished."
+      ]
+    },
+    {
+      "id": "W1.4",
+      "requirement": "Agent settlement, source preservation, validation, delivery and external disposition are separate",
+      "status": "unverified",
+      "implementation": [],
+      "tests": [],
+      "evidence": [],
+      "prerequisites": []
+    },
+    {
+      "id": "W1.5",
+      "requirement": "Completion/escalation, provider recovery and delivery have cohesive ownership",
+      "status": "unverified",
+      "implementation": [],
+      "tests": [],
+      "evidence": [],
+      "prerequisites": []
+    },
+    {
+      "id": "W2.1",
+      "requirement": "Task retry identity and cumulative budget survive Resume, restart and linked fix pods",
+      "status": "unverified",
+      "implementation": [],
+      "tests": [],
+      "evidence": [],
+      "prerequisites": []
+    },
+    {
+      "id": "W2.2",
+      "requirement": "Unchanged nonretryable failures require changed relevant inputs or recorded authorized override",
+      "status": "unverified",
+      "implementation": [],
+      "tests": [],
+      "evidence": [],
+      "prerequisites": []
+    },
+    {
+      "id": "W2.3",
+      "requirement": "Transient provider failures use bounded backoff within authorized binding separately from repository rework",
+      "status": "unverified",
+      "implementation": [],
+      "tests": [],
+      "evidence": [],
+      "prerequisites": []
+    },
+    {
+      "id": "W2.4",
+      "requirement": "Initial, rework, review, validation time and available infrastructure costs reconcile without double counting",
+      "status": "unverified",
+      "implementation": [],
+      "tests": [],
+      "evidence": [],
+      "prerequisites": []
+    },
+    {
+      "id": "W2.5",
+      "requirement": "Validation reuse requires complete matching tree, contract, toolchain, commands, dependencies, environment and implementation identity",
+      "status": "unverified",
+      "implementation": [],
+      "tests": [],
+      "evidence": [],
+      "prerequisites": []
+    },
+    {
+      "id": "W2.6",
+      "requirement": "Frozen review finding and closure ledgers and substantive gates are retained",
+      "status": "unverified",
+      "implementation": [],
+      "tests": [],
+      "evidence": [],
+      "prerequisites": []
+    },
+    {
+      "id": "W2.7",
+      "requirement": "Matched reproducible benchmark measures 25 percent target and seeded defect escape with fixed coverage; local and live separated",
+      "status": "unverified",
+      "implementation": [],
+      "tests": [],
+      "evidence": [],
+      "prerequisites": []
+    },
+    {
+      "id": "W3.1",
+      "requirement": "Fresh remote refs precede actual-base create/update/delete contract checks",
+      "status": "unverified",
+      "implementation": [],
+      "tests": [],
+      "evidence": [],
+      "prerequisites": []
+    },
+    {
+      "id": "W3.2",
+      "requirement": "Equivalent active/recent work is detected; intentional reruns receive distinct execution identity",
+      "status": "unverified",
+      "implementation": [],
+      "tests": [],
+      "evidence": [],
+      "prerequisites": []
+    },
+    {
+      "id": "W3.3",
+      "requirement": "Required commands, resources and provider binding checked before coding agent spawn",
+      "status": "unverified",
+      "implementation": [],
+      "tests": [],
+      "evidence": [],
+      "prerequisites": []
+    },
+    {
+      "id": "W3.4",
+      "requirement": "Supported capability probe resolves sandbox config ownership and registry execution semantics",
+      "status": "unverified",
+      "implementation": [],
+      "tests": [],
+      "evidence": [],
+      "prerequisites": []
+    },
+    {
+      "id": "W3.5",
+      "requirement": "Queued provider binding survives mutable profile changes with actionable reconciliation errors",
+      "status": "unverified",
+      "implementation": [],
+      "tests": [],
+      "evidence": [],
+      "prerequisites": []
+    },
+    {
+      "id": "W3.6",
+      "requirement": "Live actual-image capability canary verified under explicit authority",
+      "status": "unverified",
+      "implementation": [],
+      "tests": [],
+      "evidence": [],
+      "prerequisites": []
+    },
+    {
+      "id": "W4.1",
+      "requirement": "Logical tasks, pods, provider attempts, validation executions and delivery receipts have distinct units",
+      "status": "partial",
+      "implementation": ["packages/daemon/src/pods/models-aggregator.ts"],
+      "tests": ["packages/daemon/src/pods/models-aggregator.test.ts"],
+      "evidence": ["receipts/diagnostics-baseline-red.txt", "receipts/model-dedup-green.txt"],
+      "prerequisites": []
+    },
+    {
+      "id": "W4.2",
+      "requirement": "Executed pass/fail, skipped, unavailable, waived, no-change, cancelled, external and unresolved outcomes remain explicit",
+      "status": "unverified",
+      "implementation": [],
+      "tests": [],
+      "evidence": [],
+      "prerequisites": []
+    },
+    {
+      "id": "W4.3",
+      "requirement": "First-pass and delivery denominators require evidence; one logical delivery counts once",
+      "status": "partial",
+      "implementation": [
+        "packages/daemon/src/pods/reliability-aggregator.ts",
+        "packages/daemon/src/pods/validation-coverage.ts",
+        "packages/daemon/src/pods/models-aggregator.ts"
+      ],
+      "tests": [
+        "packages/daemon/src/pods/reliability-aggregator.test.ts",
+        "packages/daemon/src/pods/models-aggregator.test.ts"
+      ],
+      "evidence": [
+        "receipts/analytics-regression.txt",
+        "receipts/delivery-dedup-red.txt",
+        "receipts/model-dedup-green.txt"
+      ],
+      "prerequisites": []
+    },
+    {
+      "id": "W4.4",
+      "requirement": "Latest validation, history, waivers and delivery reconcile without rewriting failures",
+      "status": "unverified",
+      "implementation": [],
+      "tests": [],
+      "evidence": [],
+      "prerequisites": []
+    },
+    {
+      "id": "W4.5",
+      "requirement": "Live broad history/cost API root cause proven before claiming production repair",
+      "status": "unverified",
+      "implementation": [],
+      "tests": [],
+      "evidence": ["receipts/live-api-baseline.jsonl"],
+      "prerequisites": [
+        "Await read-only Azure command (exec session 29869) for actual release and sanitized log evidence; no production root cause claimed."
+      ]
+    },
+    {
+      "id": "W4.6",
+      "requirement": "Bounded projections and per-record diagnostics preserve healthy rows with malformed legacy records and realistic payload sizes",
+      "status": "partial",
+      "implementation": [
+        "packages/daemon/src/pods/pod-repository.ts",
+        "packages/daemon/src/pods/cost-aggregation.ts",
+        "packages/daemon/src/api/routes/pods.ts"
+      ],
+      "tests": [
+        "docs/analysis/2026-09-07/diagnostics.test.ts",
+        "packages/daemon/src/pods/cost-aggregation.test.ts",
+        "packages/daemon/src/api/routes/pods.test.ts"
+      ],
+      "evidence": ["receipts/history-cost-api.txt"],
+      "prerequisites": []
+    },
+    {
+      "id": "W4.7",
+      "requirement": "Task/phase/attempt cost totals reconcile with explicit telemetry completeness",
+      "status": "partial",
+      "implementation": [
+        "packages/daemon/src/pods/cost-aggregation.ts",
+        "packages/shared/src/types/analytics.ts"
+      ],
+      "tests": ["packages/daemon/src/pods/cost-aggregation.test.ts"],
+      "evidence": ["receipts/history-cost-api.txt"],
+      "prerequisites": []
+    },
+    {
+      "id": "W4.8",
+      "requirement": "Affected APIs, shared contracts, CLI, desktop and mobile updated and interactions verified",
+      "status": "partial",
+      "implementation": [
+        "packages/desktop/Sources/AutopodUI/Views/Analytics/ModelsDrillView.swift",
+        "packages/desktop/Sources/AutopodUI/Views/Analytics/ModelsSimulator.swift",
+        "packages/desktop/Sources/AutopodUI/Views/Analytics/CostDrillView.swift",
+        "packages/mobile-web/src/screens/PodDetail.tsx",
+        "packages/cli/src/commands/pod.ts"
+      ],
+      "tests": [
+        "packages/desktop/Tests/AutopodUITests/ModelsSimulatorTests.swift",
+        "packages/cli/src/commands/pod.test.ts"
+      ],
+      "evidence": ["receipts/checkpoint-1-desktop.txt"],
+      "prerequisites": [
+        "Supported-surface interaction evidence remains required; decoding/mapping/unit tests and compilation do not satisfy it."
+      ]
+    },
+    {
+      "id": "W5.1",
+      "requirement": "Versioned deterministic stack/delta/scanner collection precedes bounded agent judgment in actual scheduling path",
+      "status": "unverified",
+      "implementation": [],
+      "tests": [],
+      "evidence": [],
+      "prerequisites": []
+    },
+    {
+      "id": "W5.2",
+      "requirement": "Exact delta preserved and empty delta never widened",
+      "status": "unverified",
+      "implementation": [],
+      "tests": [],
+      "evidence": [],
+      "prerequisites": []
+    },
+    {
+      "id": "W5.3",
+      "requirement": "Incomplete scanner execution cannot report clean",
+      "status": "unverified",
+      "implementation": [],
+      "tests": [],
+      "evidence": [],
+      "prerequisites": []
+    },
+    {
+      "id": "W5.4",
+      "requirement": "Stable finding identities preserve unresolved findings across runs without duplicate prompts",
+      "status": "unverified",
+      "implementation": [],
+      "tests": [],
+      "evidence": [],
+      "prerequisites": []
+    },
+    {
+      "id": "W5.5",
+      "requirement": "Reports and triage survive worker lifetime and disconnected human wait",
+      "status": "unverified",
+      "implementation": [],
+      "tests": [],
+      "evidence": [],
+      "prerequisites": []
+    },
+    {
+      "id": "W5.6",
+      "requirement": "Repairs launch only after required human selection; report-only completion differs from patch delivery",
+      "status": "unverified",
+      "implementation": [],
+      "tests": [],
+      "evidence": [],
+      "prerequisites": []
+    },
+    {
+      "id": "W6.1",
+      "requirement": "Execution records contain daemon SHA, CLI version, image digest, contract/validation identity and capabilities",
+      "status": "unverified",
+      "implementation": [],
+      "tests": [],
+      "evidence": [],
+      "prerequisites": []
+    },
+    {
+      "id": "W6.2",
+      "requirement": "Health and operator release/readiness views identify meaningful release and failure provenance",
+      "status": "unverified",
+      "implementation": [],
+      "tests": [],
+      "evidence": [],
+      "prerequisites": []
+    },
+    {
+      "id": "W6.3",
+      "requirement": "Active hosted database and backup scope verified without inferring all hosted backups missing",
+      "status": "unverified",
+      "implementation": [],
+      "tests": [],
+      "evidence": [],
+      "prerequisites": []
+    },
+    {
+      "id": "W6.4",
+      "requirement": "Freshness and disk headroom checks added while preserving cleanup/deployment safeguards",
+      "status": "unverified",
+      "implementation": [],
+      "tests": [],
+      "evidence": [],
+      "prerequisites": []
+    },
+    {
+      "id": "W6.5",
+      "requirement": "Sampled backup restores in isolation with freshness and integrity verification",
+      "status": "unverified",
+      "implementation": [],
+      "tests": [],
+      "evidence": [],
+      "prerequisites": []
+    },
+    {
+      "id": "G.1",
+      "requirement": "Historical strict fetch, validation-only recovery, bounded review, ledgers, history sequences, Codex transport/OAuth, ADO auth and guarded deployment retain regression coverage and deployment status evidence",
+      "status": "unverified",
+      "implementation": [],
+      "tests": [],
+      "evidence": [],
+      "prerequisites": []
+    },
+    {
+      "id": "G.2",
+      "requirement": "Migration numbering checked against current branches and representative prior database upgrades verified",
+      "status": "partial",
+      "implementation": ["packages/daemon/src/db/migrations/142_completion_journal.sql"],
+      "tests": ["packages/daemon/src/pods/completion-journal.test.ts"],
+      "evidence": ["receipts/journal-migration.txt"],
+      "prerequisites": []
+    },
+    {
+      "id": "G.3",
+      "requirement": "All affected suites and full repository validation pipeline pass on exact recorded commits",
+      "status": "unverified",
+      "implementation": [],
+      "tests": [],
+      "evidence": [],
+      "prerequisites": []
+    },
+    {
+      "id": "G.4",
+      "requirement": "Desktop/mobile/CLI supported-surface interactions verified; compilation alone is insufficient",
+      "status": "unverified",
+      "implementation": [],
+      "tests": [],
+      "evidence": [],
+      "prerequisites": []
+    },
+    {
+      "id": "G.5",
+      "requirement": "Deployment/rollback identities, canary scope and spend prepared before requesting gated actions",
+      "status": "unverified",
+      "implementation": [],
+      "tests": [],
+      "evidence": [],
+      "prerequisites": []
+    },
+    {
+      "id": "G.6",
+      "requirement": "Final closure maps every recommendation to implementation/tests/evidence/prerequisites; no unverified acceptance treated as PASS",
+      "status": "unverified",
+      "implementation": [],
+      "tests": [],
+      "evidence": [],
+      "prerequisites": []
+    }
+  ]
+}

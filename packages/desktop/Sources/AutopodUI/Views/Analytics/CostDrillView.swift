@@ -42,6 +42,12 @@ struct CostDrillView: View {
                 }
 
                 if let data = costData {
+                    Text("Cost telemetry: \(data.telemetry?.completeness ?? "unavailable"). Infrastructure cost: \(data.telemetry?.infrastructureCost ?? "unavailable").")
+                        .font(.caption).foregroundStyle(.secondary)
+                    if let diagnostics = data.telemetry?.diagnostics, !diagnostics.isEmpty {
+                        Text("Unreadable cost records: " + diagnostics.map { "\($0.podId): \($0.field)" }.joined(separator: ", "))
+                            .font(.caption).foregroundStyle(.orange)
+                    }
                     CostPhaseBarSectionView(byPhase: data.byPhase)
                     Divider()
                     CostProfileModelSectionView(byProfileModel: data.byProfileModel)

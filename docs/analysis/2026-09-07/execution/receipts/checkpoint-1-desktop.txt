@@ -1,0 +1,305 @@
+[1/1] Compiling plugin GenerateManual
+[2/2] Compiling plugin GenerateDoccReference
+Building for debugging...
+[2/9] Write sources
+[5/9] Write swift-version--58304C5D6DBC2206.txt
+[7/12] Emitting module AutopodClient
+[8/12] Compiling AutopodClient PodResponse.swift
+[9/12] Compiling AutopodClient CostAnalyticsResponse.swift
+[10/16] Compiling AutopodClient ProfileResponse.swift
+[11/16] Compiling AutopodClient EventSocket.swift
+[12/16] Compiling AutopodClient DaemonAPI.swift
+[13/16] Compiling AutopodClient EventTypes.swift
+[14/81] Compiling AutopodUI ProviderModelSaveEligibility.swift
+[15/81] Compiling AutopodUI ReadinessReview.swift
+[16/81] Compiling AutopodUI ReviewCouncil.swift
+[17/81] Compiling AutopodUI RuntimeModelOptions.swift
+[18/81] Compiling AutopodUI AnalyticsCard.swift
+[19/81] Compiling AutopodUI AnalyticsRightPaneView.swift
+[20/81] Compiling AutopodUI AnalyticsView.swift
+[21/88] Compiling AutopodUI ScheduledJobRow.swift
+[22/88] Compiling AutopodUI ScheduledJobTemplateSheet.swift
+[23/88] Compiling AutopodUI ScheduledJobsView.swift
+[24/88] Compiling AutopodUI PipelineNodeView.swift
+[25/88] Compiling AutopodUI PodActivityPanel.swift
+[26/88] Compiling AutopodUI SeriesListView.swift
+[27/88] Compiling AutopodUI SeriesPipelineView.swift
+[28/88] Compiling AutopodUI ReadinessTab.swift
+[29/88] Compiling AutopodUI RelatedEventsDebugSheet.swift
+[30/88] Compiling AutopodUI ReviewCouncilView.swift
+[31/88] Compiling AutopodUI SpawnFixSheet.swift
+[32/88] Compiling AutopodUI SummaryTab.swift
+[33/88] Compiling AutopodUI TaskStructuredView.swift
+[34/88] Compiling AutopodUI TerminalTab.swift
+[35/88] Compiling AutopodUI ActivityFeedList.swift
+[36/88] Compiling AutopodUI SessionCostCard.swift
+[37/88] Compiling AutopodUI SessionQualityCard.swift
+[38/88] Compiling AutopodUI StatTile.swift
+[39/88] Compiling AutopodUI StatusDot.swift
+[40/88] Compiling AutopodUI MainView.swift
+[41/88] Compiling AutopodUI SidebarView.swift
+[42/88] Compiling AutopodUI ReliabilityDrillView.swift
+[43/88] Compiling AutopodUI SafetyDrillView.swift
+[44/88] Compiling AutopodUI ThroughputDrillView.swift
+[45/88] Compiling AutopodUI PodCardFinal.swift
+[46/88] Compiling AutopodUI CommandPalette.swift
+[47/88] Compiling AutopodUI CreatePodSheet.swift
+[48/88] Compiling AutopodUI CreateSeriesSheet.swift
+[49/88] Emitting module AutopodUI
+[50/88] Compiling AutopodUI MockData.swift
+[51/88] Compiling AutopodUI Pod.swift
+[52/88] Compiling AutopodUI PodActions.swift
+[53/88] Compiling AutopodUI PreviewPoller.swift
+[54/88] Compiling AutopodUI Profile.swift
+[55/88] Compiling AutopodUI ProviderCatalogEditorLoader.swift
+[56/88] Compiling AutopodUI ProviderCatalogProfileOptions.swift
+[57/88] Compiling AutopodUI SpawnDependentSheet.swift
+[58/88] Compiling AutopodUI ArtifactsTab.swift
+[59/88] Compiling AutopodUI DetailPanelView.swift
+[60/88] Compiling AutopodUI DiffTab.swift
+[61/88] Compiling AutopodUI EvidenceTab.swift
+[62/88] Compiling AutopodUI MarkdownTab.swift
+[63/88] Compiling AutopodUI OverviewTab.swift
+[64/88] Compiling AutopodUI CostDrillView.swift
+[65/88] Compiling AutopodUI EscalationsDrillView.swift
+[66/88] Compiling AutopodUI HistoryView.swift
+[67/88] Compiling AutopodUI MemoryAnalyticsDrillView.swift
+[68/88] Compiling AutopodUI ModelsDrillView.swift
+[69/88] Compiling AutopodUI ModelsSimulator.swift
+[70/88] Compiling AutopodUI QualityDrillView.swift
+[71/88] Compiling AutopodUI ValidationTab.swift
+[72/88] Compiling AutopodUI FeatureDetailPanelView.swift
+[73/88] Compiling AutopodUI FeatureOverviewView.swift
+[74/88] Compiling AutopodUI SalesPitchView.swift
+[75/88] Compiling AutopodUI LogPopover.swift
+[76/88] Compiling AutopodUI LogStreamView.swift
+[77/88] Compiling AutopodUI MemoryManagementView.swift
+[78/88] Compiling AutopodUI InheritanceChip.swift
+[79/88] Compiling AutopodUI ProfileEditorView.swift
+[80/88] Compiling AutopodUI ProfileFieldCatalog.swift
+[81/88] Compiling AutopodUI ProfileListView.swift
+[82/88] Compiling AutopodUI ProviderFailoverEditor.swift
+[83/88] Compiling AutopodUI CreateScheduledJobSheet.swift
+[84/88] Compiling AutopodUI EditScheduledJobSheet.swift
+[85/125] Compiling AutopodDesktop ScheduledJobStore.swift
+[86/125] Compiling AutopodDesktop TerminalManager.swift
+[87/127] Compiling AutopodDesktop EntraDesktopAuthService.swift
+[88/127] Compiling AutopodDesktop NotificationService.swift
+[89/127] Emitting module AutopodDesktop
+[90/127] Compiling AutopodUITests ValidationHistoryIdentityTests.swift
+[91/127] Compiling AutopodUITests ValidationHistoryRefreshTests.swift
+[92/127] Compiling AutopodDesktop EventStream.swift
+[93/127] Compiling AutopodDesktop MemoryStore.swift
+[94/128] Compiling AutopodDesktop ProfileAuthenticator.swift
+[95/128] Compiling AutopodDesktop ActionHandler.swift
+[96/128] Compiling AutopodDesktop ConnectionManager.swift
+[99/128] Compiling AutopodDesktop PodStore.swift
+[100/128] Compiling AutopodDesktop PodsitterStore.swift
+[101/128] Compiling AutopodDesktop ProfileStore.swift
+[102/128] Compiling AutopodDesktop AppRootView.swift
+[103/128] Compiling AutopodDesktop MenuBarView.swift
+[104/128] Compiling AutopodUITests ValidationProgressTests.swift
+[105/128] Compiling AutopodDesktop SettingsView.swift
+[106/128] Compiling AutopodDesktop SetupSheet.swift
+[107/128] Compiling AutopodDesktop ProviderAccountsCatalogFailure.swift
+[115/128] Compiling AutopodDesktop PodMapper.swift
+[116/128] Compiling AutopodDesktop ProfileMapper.swift
+[119/128] Emitting module AutopodUITests
+[120/128] Compiling AutopodDesktop PodsitterSettingsView.swift
+[121/128] Compiling AutopodDesktop ProviderAccountsSettingsView.swift
+[125/157] Compiling AutopodDesktopTests PodsitterStoreTests.swift
+[126/157] Compiling AutopodDesktopExe AutopodApp.swift
+[127/157] Emitting module AutopodDesktopExe
+[127/157] Write Objects.LinkFileList
+[129/157] Compiling AutopodDesktopTests ProfileAuthenticatorTests.swift
+[130/157] Emitting module AutopodDesktopTests
+[131/157] Compiling AutopodDesktopTests ProviderAccountsCatalogFailureTests.swift
+[132/157] Compiling AutopodClientTests ActionAuditResponseTests.swift
+[133/157] Compiling AutopodClientTests AnalyticsCardKindTests.swift
+[134/157] Compiling AutopodClientTests AnalyticsWiringTests.swift
+[135/159] Compiling AutopodClientTests PodStoreFleetTests.swift
+[136/159] Compiling AutopodClientTests PodsitterAPITests.swift
+[137/159] Compiling AutopodClientTests ReliabilityAnalyticsResponseTests.swift
+[138/159] Compiling AutopodClientTests ReviewProgressStateTests.swift
+[139/159] Compiling AutopodClientTests EventStreamResyncTests.swift
+[140/159] Compiling AutopodClientTests MemoryResponseTests.swift
+[141/159] Compiling AutopodClientTests MemoryStoreTests.swift
+[142/159] Compiling AutopodClientTests ModelsAnalyticsResponseTests.swift
+[143/159] Compiling AutopodClientTests PipelineDAGLayoutTests.swift
+[143/159] Linking AutopodDesktopExe
+[144/159] Applying AutopodDesktopExe
+[146/159] Compiling AutopodClientTests SafetyAnalyticsResponseTests.swift
+[147/159] Compiling AutopodClientTests ThroughputAnalyticsResponseTests.swift
+[148/159] Compiling AutopodClientTests ProfileMapperTests.swift
+[149/159] Compiling AutopodClientTests QualityAnalyticsResponseTests.swift
+[150/159] Compiling AutopodClientTests EscalationsAnalyticsResponseTests.swift
+[151/159] Compiling AutopodClientTests EventSocketControlMessageTests.swift
+[152/159] Compiling AutopodClientTests EventStreamDedupeTests.swift
+[153/159] Compiling AutopodClientTests ConnectionTests.swift
+/private/tmp/autopod-durable-execution/packages/desktop/Tests/AutopodClientTests/DaemonAPITests.swift:14:13: warning: no 'async' operations occur within 'await' expression
+ 12 |     token: "test-token"
+ 13 |   )
+ 14 |   let url = await api.baseURL
+    |             `- warning: no 'async' operations occur within 'await' expression
+ 15 |   #expect(url.absoluteString == "http://localhost:3000")
+ 16 | }
+[154/159] Compiling AutopodClientTests CostAnalyticsResponseTests.swift
+/private/tmp/autopod-durable-execution/packages/desktop/Tests/AutopodClientTests/DaemonAPITests.swift:14:13: warning: no 'async' operations occur within 'await' expression
+ 12 |     token: "test-token"
+ 13 |   )
+ 14 |   let url = await api.baseURL
+    |             `- warning: no 'async' operations occur within 'await' expression
+ 15 |   #expect(url.absoluteString == "http://localhost:3000")
+ 16 | }
+[155/159] Compiling AutopodClientTests DaemonAPITests.swift
+/private/tmp/autopod-durable-execution/packages/desktop/Tests/AutopodClientTests/DaemonAPITests.swift:14:13: warning: no 'async' operations occur within 'await' expression
+ 12 |     token: "test-token"
+ 13 |   )
+ 14 |   let url = await api.baseURL
+    |             `- warning: no 'async' operations occur within 'await' expression
+ 15 |   #expect(url.absoluteString == "http://localhost:3000")
+ 16 | }
+[156/159] Compiling AutopodClientTests PodCostBreakdownResponseTests.swift
+[157/159] Compiling AutopodClientTests PodMapperTests.swift
+[158/159] Emitting module AutopodClientTests
+[158/160] Write Objects.LinkFileList
+[159/160] Linking AutopodDesktopPackageTests
+Build complete! (46.69s)
+Test Suite 'Selected tests' started at 2026-09-07 10:53:58.373.
+Test Suite 'AutopodDesktopPackageTests.xctest' started at 2026-09-07 10:53:58.380.
+Test Suite 'AutopodDesktopPackageTests.xctest' passed at 2026-09-07 10:53:58.380.
+	 Executed 0 tests, with 0 failures (0 unexpected) in 0.000 (0.000) seconds
+Test Suite 'Selected tests' passed at 2026-09-07 10:53:58.380.
+	 Executed 0 tests, with 0 failures (0 unexpected) in 0.000 (0.007) seconds
+◇ Test run started.
+↳ Testing Library Version: 1902
+↳ Target Platform: arm64e-apple-macos14.0
+◇ Test mapperResolvesScreenshotURL() started.
+◇ Test successRateWeightedByPodCount() started.
+◇ Test modelsDollarDeltaDirectionDecodesAllCases() started.
+◇ Test podMapperPropagatesCurrentReviewCouncil() started.
+◇ Test mapsValidationOverrideFindingProvenance() started.
+◇ Test zeroRedirectIdentity() started.
+◇ Test modelsAnalyticsResponseDecodesNullCostFields() started.
+◇ Test decodesTaskSummaryFactDeviations() started.
+◇ Test fullRedirectDollarPerPr() started.
+◇ Test decodesScreenshotRefResponse() started.
+◇ Test costDeltaDirectionRejectsUnknownString() started.
+◇ Test finalStatusRejectsUnknownString() started.
+◇ Test partialRedirectDollarPerPr() started.
+◇ Test mapsMissingRunningAt() started.
+◇ Test modelsFailureStageCellStageLabelsDecodeCorrectly() started.
+◇ Test costSparklineDecodes30Elements() started.
+◇ Test escalationRateWeightedByPodCount() started.
+◇ Test unknownModelExcludedFromBaseline() started.
+◇ Test qualityNullOnTargetYieldsNilProjected() started.
+◇ Test ttmNullOnTargetContributesNothing() started.
+◇ Test modelsAnalyticsResponseDecodesMinimalPayload() started.
+◇ Test threeModelFleetHaikuUnchanged() started.
+◇ Test mapsNullRunningAt() started.
+◇ Test funnelBandDecodesAllCases() started.
+◇ Test funnelBandRejectsUnknownString() started.
+◇ Test costDeltaDirectionDecodesAllCases() started.
+◇ Test seriesReadinessUsesDaemonScopedSnapshotWithoutMembers() started.
+◇ Test profileModelCellDecodesNullModel() started.
+◇ Test modelsAnalyticsResponseDecodesUnknownModelRow() started.
+◇ Test dropEntryWithOverflowDecodes() started.
+◇ Test mapsAwaitingInputWithEscalation() started.
+◇ Test finalStatusDecodesAllCases() started.
+◇ Test reliabilityAnalyticsResponseDecodesRoundTrip() started.
+◇ Test mapsWorkspaceSession() started.
+◇ Test mapsHasWebUiFalse() started.
+◇ Test mapsRequestCredentialEscalationReason() started.
+◇ Test validationChecksExcludeAdvisoryQaFromPhaseCounts() started.
+◇ Test modelsAnalyticsResponseDecodesRoundTrip() started.
+◇ Test mapsHasWebUiMissingDefaultsFalse() started.
+◇ Test mapsReworkCyclesSeparatelyFromWorkerExecution() started.
+◇ Test mapsPodConfigFromResponse() started.
+◇ Test mapperMapsValidationInfrastructureWithoutClaimingTestsFailed() started.
+◇ Test mapsPersistedFailureReasonAfterRefreshWithoutValidation() started.
+◇ Test seriesReadinessRollupUsesMemberSnapshots() started.
+◇ Test mapsHasWebUiTrue() started.
+◇ Test validationStageDecodesAllCases() started.
+◇ Test topFailureStageEmptyStringDecodesToNil() started.
+◇ Test readinessAvailabilityStatusesAreNotApprovable() started.
+◇ Test topFailureStageTestStringDecodesToTest() started.
+◇ Test mapsInteractiveArtifactPodWithArtifactsPath() started.
+◇ Test modelsAnalyticsResponseDecodesNullQualityAndTtm() started.
+◇ Test costAnalyticsResponseDecodesRoundTrip() started.
+◇ Test mapsPrFixContextFromLinkedPodId() started.
+◇ Test validationStageRejectsUnknownString() started.
+◇ Test modelsAnalyticsResponseUsesDefaultKeyStrategy() started.
+◇ Test reliabilitySparklineDecodes30Elements() started.
+◇ Test mapperMapsSetupFailureAsBlockingValidationPhase() started.
+◇ Test mapsParentPrFixContextAndLegacyLinkedSessionId() started.
+◇ Test modelsRuntimeKindDecodesAllCases() started.
+◇ Test mapperPreservesScreenshotSetOrdering() started.
+◇ Test decodesAbsentScreenshotFields() started.
+◇ Test mapsRunningSession() started.
+◇ Test decodesAndMapsReadinessReview() started.
+◇ Test mapperMapsAdvisoryQaWithoutAffectingValidationOutcome() started.
+✔ Test decodesTaskSummaryFactDeviations() passed after 0.007 seconds.
+✔ Test successRateWeightedByPodCount() passed after 0.007 seconds.
+✔ Test fullRedirectDollarPerPr() passed after 0.007 seconds.
+✔ Test modelsDollarDeltaDirectionDecodesAllCases() passed after 0.007 seconds.
+✔ Test partialRedirectDollarPerPr() passed after 0.007 seconds.
+✔ Test zeroRedirectIdentity() passed after 0.007 seconds.
+✔ Test escalationRateWeightedByPodCount() passed after 0.007 seconds.
+✔ Test decodesScreenshotRefResponse() passed after 0.007 seconds.
+✔ Test modelsAnalyticsResponseDecodesNullCostFields() passed after 0.007 seconds.
+✔ Test ttmNullOnTargetContributesNothing() passed after 0.007 seconds.
+✔ Test threeModelFleetHaikuUnchanged() passed after 0.007 seconds.
+✔ Test unknownModelExcludedFromBaseline() passed after 0.007 seconds.
+✔ Test modelsFailureStageCellStageLabelsDecodeCorrectly() passed after 0.007 seconds.
+✔ Test costDeltaDirectionRejectsUnknownString() passed after 0.007 seconds.
+✔ Test finalStatusRejectsUnknownString() passed after 0.007 seconds.
+✔ Test qualityNullOnTargetYieldsNilProjected() passed after 0.007 seconds.
+✔ Test funnelBandRejectsUnknownString() passed after 0.007 seconds.
+✔ Test funnelBandDecodesAllCases() passed after 0.007 seconds.
+✔ Test costDeltaDirectionDecodesAllCases() passed after 0.007 seconds.
+✔ Test profileModelCellDecodesNullModel() passed after 0.007 seconds.
+✔ Test seriesReadinessUsesDaemonScopedSnapshotWithoutMembers() passed after 0.007 seconds.
+✔ Test modelsAnalyticsResponseDecodesUnknownModelRow() passed after 0.007 seconds.
+✔ Test dropEntryWithOverflowDecodes() passed after 0.007 seconds.
+✔ Test mapsAwaitingInputWithEscalation() passed after 0.007 seconds.
+✔ Test finalStatusDecodesAllCases() passed after 0.007 seconds.
+✔ Test mapsMissingRunningAt() passed after 0.007 seconds.
+✔ Test mapperResolvesScreenshotURL() passed after 0.007 seconds.
+✔ Test podMapperPropagatesCurrentReviewCouncil() passed after 0.007 seconds.
+✔ Test mapsNullRunningAt() passed after 0.007 seconds.
+✔ Test validationChecksExcludeAdvisoryQaFromPhaseCounts() passed after 0.007 seconds.
+✔ Test mapsWorkspaceSession() passed after 0.007 seconds.
+✔ Test mapsHasWebUiFalse() passed after 0.007 seconds.
+✔ Test mapsRequestCredentialEscalationReason() passed after 0.007 seconds.
+✔ Test mapsHasWebUiMissingDefaultsFalse() passed after 0.007 seconds.
+✔ Test mapsPodConfigFromResponse() passed after 0.007 seconds.
+✔ Test validationStageDecodesAllCases() passed after 0.007 seconds.
+✔ Test readinessAvailabilityStatusesAreNotApprovable() passed after 0.007 seconds.
+✔ Test mapsReworkCyclesSeparatelyFromWorkerExecution() passed after 0.007 seconds.
+✔ Test topFailureStageTestStringDecodesToTest() passed after 0.007 seconds.
+✔ Test topFailureStageEmptyStringDecodesToNil() passed after 0.007 seconds.
+✔ Test mapsPersistedFailureReasonAfterRefreshWithoutValidation() passed after 0.007 seconds.
+✔ Test modelsAnalyticsResponseDecodesNullQualityAndTtm() passed after 0.007 seconds.
+✔ Test mapperMapsValidationInfrastructureWithoutClaimingTestsFailed() passed after 0.007 seconds.
+✔ Test seriesReadinessRollupUsesMemberSnapshots() passed after 0.007 seconds.
+✔ Test validationStageRejectsUnknownString() passed after 0.007 seconds.
+✔ Test mapsHasWebUiTrue() passed after 0.007 seconds.
+✔ Test modelsAnalyticsResponseUsesDefaultKeyStrategy() passed after 0.007 seconds.
+✔ Test mapsInteractiveArtifactPodWithArtifactsPath() passed after 0.007 seconds.
+✔ Test mapsPrFixContextFromLinkedPodId() passed after 0.007 seconds.
+✔ Test mapsValidationOverrideFindingProvenance() passed after 0.007 seconds.
+✔ Test modelsAnalyticsResponseDecodesMinimalPayload() passed after 0.007 seconds.
+✔ Test decodesAbsentScreenshotFields() passed after 0.007 seconds.
+✔ Test mapsParentPrFixContextAndLegacyLinkedSessionId() passed after 0.007 seconds.
+✔ Test modelsAnalyticsResponseDecodesRoundTrip() passed after 0.007 seconds.
+✔ Test reliabilitySparklineDecodes30Elements() passed after 0.007 seconds.
+✔ Test mapperMapsSetupFailureAsBlockingValidationPhase() passed after 0.007 seconds.
+✔ Test mapperMapsAdvisoryQaWithoutAffectingValidationOutcome() passed after 0.006 seconds.
+✔ Test costAnalyticsResponseDecodesRoundTrip() passed after 0.007 seconds.
+✔ Test modelsRuntimeKindDecodesAllCases() passed after 0.007 seconds.
+✔ Test costSparklineDecodes30Elements() passed after 0.007 seconds.
+✔ Test reliabilityAnalyticsResponseDecodesRoundTrip() passed after 0.007 seconds.
+✔ Test mapsRunningSession() passed after 0.007 seconds.
+✔ Test decodesAndMapsReadinessReview() passed after 0.007 seconds.
+✔ Test mapperPreservesScreenshotSetOrdering() passed after 0.007 seconds.
+✔ Test run with 64 tests in 0 suites passed after 0.008 seconds.

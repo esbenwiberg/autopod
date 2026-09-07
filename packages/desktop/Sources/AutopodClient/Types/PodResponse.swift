@@ -1,3 +1,21 @@
+public struct RecordDiagnosticResponse: Codable, Equatable, Sendable {
+  public let field: String
+  public let code: String
+}
+
+public struct FinalizationResponse: Codable, Sendable {
+  public let phase: String
+  public let agentSettledAt: String?
+  public let pendingDecisionId: String?
+  public let sourcePreservedAt: String?
+
+  public var operatorSummary: String? {
+    guard agentSettledAt != nil else { return nil }
+    let decision = pendingDecisionId == nil ? "Finalization: \(phase)." : "Human decision remains unanswered; reply before continuation."
+    return "Agent settled. \(decision) Source preservation: \(sourcePreservedAt ?? "not verified")."
+  }
+}
+
 import Foundation
 
 // MARK: - Pod config (mirrors packages/shared/src/types/pod.ts)
@@ -50,6 +68,8 @@ public struct CompactPodPageResponse: Codable, Sendable {
 }
 
 public struct CompactPodResponse: Codable, Sendable {
+  public let recordDiagnostics: [RecordDiagnosticResponse]?
+  public let finalization: FinalizationResponse?
   public let id: String
   public let title: String
   public let taskExcerpt: String?
@@ -128,6 +148,8 @@ public struct ProviderAttemptResponse: Codable, Sendable {
 }
 
 public struct SessionResponse: Codable, Sendable {
+  public let recordDiagnostics: [RecordDiagnosticResponse]?
+  public let finalization: FinalizationResponse?
   public let id: String
   public let profileName: String
   public let task: String
@@ -243,7 +265,7 @@ public struct SessionResponse: Codable, Sendable {
   private enum CodingKeys: String, CodingKey {
     case id, profileName, task, status, model, runtime, executionTarget, branch
     case containerId, worktreePath, validationAttempts, maxValidationAttempts, reworkCount
-    case providerAttempts
+    case providerAttempts, recordDiagnostics, finalization
     case lastValidationResult, validationWaiver, lastValidationFindings, pendingEscalation, escalationCount, skipValidation
     case createdAt, startedAt, runningAt, completedAt, failureReason, updatedAt, userId
     case filesChanged, linesAdded, linesRemoved, previewUrl, hasWebUi, prUrl

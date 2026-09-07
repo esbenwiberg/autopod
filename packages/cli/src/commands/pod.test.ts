@@ -124,6 +124,33 @@ describe('ls command', () => {
     }
   });
 
+  it('prints settled worker evidence without treating pending input as completion', async () => {
+    const baseline = await mockClient.getSession('abcd1234');
+    vi.mocked(mockClient.getSession).mockResolvedValueOnce({
+      ...baseline,
+      status: 'awaiting_input',
+      finalization: {
+        generation: 1,
+        cycle: 1,
+        phase: 'awaiting_human',
+        agentSettledAt: '2026-09-07T08:00:00Z',
+        pendingDecisionId: 'selection',
+        sourcePreservedAt: null,
+        result: 'Report collected',
+      },
+    });
+    const log = vi.spyOn(console, 'log').mockImplementation(() => {});
+    try {
+      await program.parseAsync(['node', 'ap', 'status', 'abcd1234']);
+      const output = log.mock.calls.map((call) => call.join(' ')).join('\n');
+      expect(output).toContain('Agent settled:');
+      expect(output).toContain('not verified');
+      expect(output).toContain('Human decision remains unanswered');
+    } finally {
+      log.mockRestore();
+    }
+  });
+
   it('rejects unsupported status before listing pods', async () => {
     await expect(program.parseAsync(['node', 'ap', 'ls', '--status', 'blocked'])).rejects.toThrow(
       /Unsupported pod status: blocked.*Supported statuses:/,

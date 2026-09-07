@@ -335,7 +335,7 @@ public struct AnalyticsView: View {
                                 direction: AnalyticsCardDelta.Direction($0.firstPassRateDelta.direction)
                             )
                         },
-                        subline: reliabilityDataIfPopulated == nil ? nil : "first-pass completion",
+                        subline: reliabilityDataIfPopulated == nil ? nil : "first validation passed; no rework",
                         isSelected: selectedCard == .reliability,
                         onClick: { selectedCard = selectedCard == .reliability ? nil : .reliability }
                     )

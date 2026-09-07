@@ -1,6 +1,17 @@
 import Foundation
 
+public struct CostTelemetry: Decodable, Equatable, Sendable {
+    public let completeness: String
+    public let infrastructureCost: String
+    public let diagnostics: [CostRecordDiagnostic]
+}
+public struct CostRecordDiagnostic: Decodable, Equatable, Sendable {
+    public let podId: String
+    public let field: String
+    public let code: String
+}
 public struct CostAnalyticsResponse: Decodable, Equatable, Sendable {
+    public let telemetry: CostTelemetry?
     public let total: Double
     public let sparkline: [SparklinePoint]
     public let deltaVsPrior: CostDelta

@@ -146,6 +146,8 @@ function compactPod(
   ) as string;
   return {
     id: pod.id,
+    recordDiagnostics: pod.recordDiagnostics,
+    finalization: pod.finalization,
     title,
     taskExcerpt: pod.task.slice(0, COMPACT_TASK_MAX_CHARS),
     taskSummary: compactText(pod.taskSummary?.actualSummary),
@@ -646,7 +648,9 @@ export function podRoutes(
     }
     const statuses = rawStatuses as PodStatus[] | undefined;
     const paginatedLimit = limit ?? MAX_POD_LIST_LIMIT;
-    const pods = podManager.listSessions({
+    const readPods =
+      podRepo?.listForDisplay?.bind(podRepo) ?? podManager.listSessions.bind(podManager);
+    const pods = readPods({
       profileName: query.profileName ?? query.profile,
       status: statuses,
       userId: query.userId,

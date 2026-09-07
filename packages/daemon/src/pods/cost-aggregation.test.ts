@@ -93,6 +93,41 @@ describe('aggregateCost', () => {
   // Empty DB
   // ──────────────────────────────────────────────────────────────────────────
 
+  it('projects cost without hydrating large contracts or malformed unrelated legacy JSON', () => {
+    for (let i = 0; i < 128; i++) {
+      const id = insertPod(db, { costUsd: 1, completedAt: msToIso(NOW_MS - 1000) });
+      db.prepare('UPDATE pods SET task = ?, contract = ?, task_summary = ? WHERE id = ?').run(
+        'task '.repeat(16000),
+        JSON.stringify({ body: 'x'.repeat(64000) }),
+        'not-json',
+        id,
+      );
+    }
+    const strictRead = vi.spyOn(podRepo, 'list').mockImplementation(() => {
+      throw new Error('unbounded full hydration');
+    });
+    const actual = aggregateCost({ podRepo, now: nowFn }, { days: 30 });
+    expect(actual.total).toBe(128);
+    expect(actual.top10).toHaveLength(10);
+    expect(strictRead).not.toHaveBeenCalled();
+  });
+
+  it('retains measured totals and diagnoses malformed phase telemetry', () => {
+    const id = insertPod(db, {
+      costUsd: 3,
+      completedAt: msToIso(NOW_MS - 1000),
+      phaseTokenUsage: { agent_initial: { inputTokens: 'unknown' } },
+    });
+    const actual = aggregateCost({ podRepo, now: nowFn }, { days: 30 });
+    expect(actual.total).toBe(3);
+    expect(actual.telemetry).toMatchObject({
+      completeness: 'partial',
+      infrastructureCost: 'unavailable',
+      diagnostics: [{ podId: id, field: 'phase_token_usage', code: 'invalid_shape' }],
+    });
+    expect(actual.byPhase.reduce((total, phase) => total + phase.costUsd, 0)).toBe(3);
+  });
+
   it('empty DB returns zero-value response', () => {
     const result = aggregateCost({ podRepo, now: nowFn }, { days: 30 });
     expect(result.total).toBe(0);

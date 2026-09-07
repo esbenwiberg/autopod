@@ -1,0 +1,174 @@
+
+ RUN  v4.1.10 /private/tmp/autopod-durable-execution
+
+ ❯ packages/daemon/src/pods/reliability-aggregator.test.ts (23 tests | 4 failed) 1173ms
+     × single complete pod with all bands: firstPassRate=1, no drops, all band counts=1 53ms
+     × delta direction: up when current >> prior (> +0.5pp) 59ms
+     × delta direction: down when current << prior (< -0.5pp) 52ms
+     × provider-attempt keeps one logical pod in the reliability denominator 57ms
+ ❯ packages/daemon/src/pods/models-aggregator.test.ts (30 tests | 5 failed) 1477ms
+     × single-model cohort — correct per-model rollup and summary 51ms
+     × MIN_COHORT_FOR_HEADLINE — haiku has 3 complete pods (< 5), excluded from cheapest headline 52ms
+     × cost waste — totalCostUsd includes killed pods, dollarPerPr divides by completeCount 53ms
+     × prior-window delta — current $1.20/PR, prior $1.50/PR → value ≈ -0.30, direction down 42ms
+     × provider-attempt attributes two-provider usage without duplicating logical cohort cost 41ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 9 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  packages/daemon/src/pods/models-aggregator.test.ts > computeModelsAnalytics > single-model cohort — correct per-model rollup and summary
+AssertionError: expected null to be close to 4.285714285714286, received difference is 4.285714285714286, but expected 0.000005
+ ❯ packages/daemon/src/pods/models-aggregator.test.ts:200:29
+    198|     expect(row.successRate).toBeCloseTo(0.7);
+    199|     expect(row.totalCostUsd).toBeCloseTo(30, 5);
+    200|     expect(row.dollarPerPr).toBeCloseTo(30 / 7, 5);
+       |                             ^
+    201|     expect(row.scoredCount).toBe(5);
+    202|     expect(row.avgQuality).toBeCloseTo(80);
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/9]⎯
+
+ FAIL  packages/daemon/src/pods/models-aggregator.test.ts > computeModelsAnalytics > MIN_COHORT_FOR_HEADLINE — haiku has 3 complete pods (< 5), excluded from cheapest headline
+AssertionError: expected null to be 'claude-opus-4-7' // Object.is equality
+
+- Expected:
+"claude-opus-4-7"
+
++ Received:
+null
+
+ ❯ packages/daemon/src/pods/models-aggregator.test.ts:271:53
+    269|     const result = computeModelsAnalytics(db, 30);
+    270|
+    271|     expect(result.summary.cheapestDollarPerPrModel).toBe('claude-opus-…
+       |                                                     ^
+    272|     // Haiku still appears in byModel
+    273|     const haiku = result.byModel.find((r) => r.model === 'claude-haiku…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/9]⎯
+
+ FAIL  packages/daemon/src/pods/models-aggregator.test.ts > computeModelsAnalytics > cost waste — totalCostUsd includes killed pods, dollarPerPr divides by completeCount
+AssertionError: expected null to be close to 8, received difference is 8, but expected 0.005
+ ❯ packages/daemon/src/pods/models-aggregator.test.ts:409:29
+    407|
+    408|     expect(row.totalCostUsd).toBeCloseTo(8);
+    409|     expect(row.dollarPerPr).toBeCloseTo(8); // 8 / 1 complete pod
+       |                             ^
+    410|   });
+    411|
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/9]⎯
+
+ FAIL  packages/daemon/src/pods/models-aggregator.test.ts > computeModelsAnalytics > prior-window delta — current $1.20/PR, prior $1.50/PR → value ≈ -0.30, direction down
+AssertionError: expected +0 to be close to -0.3, received difference is 0.3, but expected 0.000005
+ ❯ packages/daemon/src/pods/models-aggregator.test.ts:599:59
+    597|     const result = computeModelsAnalytics(db, 30);
+    598|
+    599|     expect(result.summary.cheapestDollarPerPrDelta.value).toBeCloseTo(…
+       |                                                           ^
+    600|     expect(result.summary.cheapestDollarPerPrDelta.direction).toBe('do…
+    601|   });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[4/9]⎯
+
+ FAIL  packages/daemon/src/pods/models-aggregator.test.ts > computeModelsAnalytics > provider-attempt attributes two-provider usage without duplicating logical cohort cost
+AssertionError: expected { model: 'claude-opus-4-7', …(16) } to match object { podCount: 1, failedCount: 1, …(2) }
+(13 matching properties omitted from actual)
+
+- Expected
++ Received
+
+  {
+-   "completeCount": 0,
+-   "failedCount": 1,
++   "completeCount": 1,
++   "failedCount": 0,
+    "podCount": 1,
+    "totalCostUsd": 1.25,
+  }
+
+ ❯ packages/daemon/src/pods/models-aggregator.test.ts:657:20
+    655|
+    656|     expect(result.summary.cohortSize).toBe(1);
+    657|     expect(claude).toMatchObject({
+       |                    ^
+    658|       podCount: 1,
+    659|       failedCount: 1,
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[5/9]⎯
+
+ FAIL  packages/daemon/src/pods/reliability-aggregator.test.ts > computeReliabilityAnalytics > single complete pod with all bands: firstPassRate=1, no drops, all band counts=1
+AssertionError: expected +0 to be 1 // Object.is equality
+
+- Expected
++ Received
+
+- 1
++ 0
+
+ ❯ packages/daemon/src/pods/reliability-aggregator.test.ts:177:34
+    175|     const result = computeReliabilityAnalytics(db, 30);
+    176|
+    177|     expect(result.firstPassRate).toBe(1);
+       |                                  ^
+    178|     expect(result.funnel.drops).toEqual([]);
+    179|     expect(result.funnel.bands.every((b) => b.count === 1)).toBe(true);
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[6/9]⎯
+
+ FAIL  packages/daemon/src/pods/reliability-aggregator.test.ts > computeReliabilityAnalytics > delta direction: up when current >> prior (> +0.5pp)
+AssertionError: expected 'flat' to be 'up' // Object.is equality
+
+Expected: "up"
+Received: "flat"
+
+ ❯ packages/daemon/src/pods/reliability-aggregator.test.ts:389:49
+    387|     const result = computeReliabilityAnalytics(db, 30);
+    388|     // delta = (1.0 - 0.0) * 100 = +100pp > +0.5pp → 'up'
+    389|     expect(result.firstPassRateDelta.direction).toBe('up');
+       |                                                 ^
+    390|     expect(result.firstPassRateDelta.value).toBeGreaterThan(0.5);
+    391|   });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[7/9]⎯
+
+ FAIL  packages/daemon/src/pods/reliability-aggregator.test.ts > computeReliabilityAnalytics > delta direction: down when current << prior (< -0.5pp)
+AssertionError: expected 'flat' to be 'down' // Object.is equality
+
+Expected: "down"
+Received: "flat"
+
+ ❯ packages/daemon/src/pods/reliability-aggregator.test.ts:409:49
+    407|     const result = computeReliabilityAnalytics(db, 30);
+    408|     // delta = (0.0 - 1.0) * 100 = -100pp < -0.5pp → 'down'
+    409|     expect(result.firstPassRateDelta.direction).toBe('down');
+       |                                                 ^
+    410|     expect(result.firstPassRateDelta.value).toBeLessThan(-0.5);
+    411|   });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[8/9]⎯
+
+ FAIL  packages/daemon/src/pods/reliability-aggregator.test.ts > computeReliabilityAnalytics > provider-attempt keeps one logical pod in the reliability denominator
+AssertionError: expected +0 to be 1 // Object.is equality
+
+- Expected
++ Received
+
+- 1
++ 0
+
+ ❯ packages/daemon/src/pods/reliability-aggregator.test.ts:571:34
+    569|
+    570|     expect(result.summary.totalPodsInWindow).toBe(1);
+    571|     expect(result.firstPassRate).toBe(1);
+       |                                  ^
+    572|     expect(result.funnel.bands.find((band) => band.band === 'complete'…
+    573|   });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[9/9]⎯
+
+
+ Test Files  2 failed | 1 passed (3)
+      Tests  9 failed | 95 passed (104)
+   Start at  10:34:06
+   Duration  1.80s (transform 288ms, setup 0ms, import 543ms, tests 2.66s, environment 0ms)
+

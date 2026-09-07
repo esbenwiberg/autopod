@@ -191,6 +191,19 @@ export interface ValidationWaiver {
 }
 
 export interface Pod {
+  /** Durable worker settlement; this never grants validation or delivery authority. */
+  finalization?: {
+    generation: number;
+    cycle: number;
+    phase: 'running' | 'awaiting_human' | 'ready' | 'preserving' | 'finalizing' | 'finished';
+    agentSettledAt: string | null;
+    result: string | null;
+    pendingDecisionId: string | null;
+    sourcePreservedAt: string | null;
+  } | null;
+  /** Read-only list diagnostics. Raw control-plane reads still reject corrupt state. */
+  recordDiagnostics?: Array<{ field: string; code: 'invalid_json' | 'invalid_shape' }>;
+
   id: string;
   profileName: string;
   task: string;
@@ -634,6 +647,10 @@ export interface PodSummary {
 
 /** Lightweight pod representation for monitoring and discovery consumers. */
 export interface CompactPod {
+  finalization?: Pod['finalization'];
+  /** Read-only list diagnostics. Raw control-plane reads still reject corrupt state. */
+  recordDiagnostics?: Array<{ field: string; code: 'invalid_json' | 'invalid_shape' }>;
+
   id: string;
   title: string;
   taskExcerpt: string;

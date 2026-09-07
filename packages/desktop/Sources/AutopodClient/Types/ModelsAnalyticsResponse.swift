@@ -17,7 +17,7 @@ public struct ModelsAnalyticsResponse: Decodable, Equatable, Sendable {
 // MARK: - Summary
 
 public struct ModelsSummary: Decodable, Equatable, Sendable {
-    /// Cheapest $/PR canonical model name. Null when no model has >= 5 complete pods.
+    /// Cheapest $/PR canonical model name. Null when no model has >= 5 recorded PR deliveries.
     public let cheapestDollarPerPrModel: String?
     /// dollarPerPr for cheapestDollarPerPrModel. Null when cheapestDollarPerPrModel is null.
     public let cheapestDollarPerPr: Double?
@@ -59,6 +59,10 @@ public struct PerModelAggregate: Decodable, Equatable, Sendable {
     /// Canonical model key (post-MODEL_CANONICAL coalescing). "<unknown>" for unpriced pods.
     public let model: String
     public let podCount: Int
+    /// Missing on older daemon responses; never infer attempts or PRs from completed pods.
+    public let providerAttemptCount: Int?
+    public let completedAttemptCount: Int?
+    public let deliveredPrCount: Int?
     public let completeCount: Int
     public let killedCount: Int
     public let failedCount: Int
@@ -66,7 +70,7 @@ public struct PerModelAggregate: Decodable, Equatable, Sendable {
     public let successRate: Double
     /// SUM(effectiveCostUsd) including killed/failed. Null when model == "<unknown>".
     public let totalCostUsd: Double?
-    /// totalCostUsd / completeCount. Null when completeCount == 0 or model == "<unknown>".
+    /// totalCostUsd / deliveredPrCount. Null without recorded deliveries or model == "<unknown>".
     public let dollarPerPr: Double?
     public let scoredCount: Int
     /// Mean process-health score. Legacy wire name retained for compatibility.
@@ -85,6 +89,10 @@ public struct PerModelAggregate: Decodable, Equatable, Sendable {
 public struct PerRuntimeAggregate: Decodable, Equatable, Sendable {
     public let runtime: ModelsRuntimeKind
     public let podCount: Int
+    /// Missing on older daemon responses; never infer attempts or PRs from completed pods.
+    public let providerAttemptCount: Int?
+    public let completedAttemptCount: Int?
+    public let deliveredPrCount: Int?
     public let completeCount: Int
     public let killedCount: Int
     public let failedCount: Int

@@ -217,13 +217,20 @@ export interface PodStats {
   byStatus: Record<PodStatus, number>;
 }
 
+import { type CompletionJournal, createCompletionJournal } from './completion-journal.js';
+
 export interface PodRepository {
+  completionJournal?: CompletionJournal;
   insert(pod: NewPod): void;
   getOrThrow(id: string): Pod;
   update(id: string, changes: PodUpdates): void;
   incrementLifecycleGeneration(id: string): number;
   delete(id: string): void;
   list(filters?: PodFilters): Pod[];
+  /** Operator reads only: preserve healthy records and explicitly identify unreadable JSON. */
+  listForDisplay?(filters?: PodFilters): Pod[];
+  /** Bounded cost projection; never materializes contracts, prompts or validation payloads. */
+  listCostRecords?(completedSince: string): Pod[];
   /** All pods whose status is not terminal (`complete` / `killed`). */
   listNonTerminal(): Pod[];
   countByStatusAndProfile(status: PodStatus, profileName: string): number;
@@ -480,8 +487,147 @@ function rowToSession(row: Record<string, unknown>): Pod {
   };
 }
 
+/** A display projection is never used for state transitions or approval decisions. */
+function rowToDisplaySession(source: Record<string, unknown>): Pod {
+  const row = { ...source };
+  const diagnostics: NonNullable<Pod['recordDiagnostics']> = [];
+  const arrayFields = new Set([
+    'does_not_touch',
+    'pim_groups',
+    'reference_repos',
+    'require_sidecars',
+    'spec_context_files',
+    'spec_files',
+    'test_run_branches',
+    'touches',
+    'validation_overrides',
+  ]);
+  for (const field of [
+    'contract',
+    'deploy_baseline_hashes',
+    'does_not_touch',
+    'infrastructure_failure',
+    'last_validation_result',
+    'pending_escalation',
+    'phase_token_usage',
+    'pim_groups',
+    'plan',
+    'pre_submit_review',
+    'profile_snapshot',
+    'progress',
+    'readiness_review',
+    'reference_repos',
+    'require_sidecars',
+    'sidecar_container_ids',
+    'skip_validation_actor',
+    'spec_context_files',
+    'spec_files',
+    'task_summary',
+    'test_run_branches',
+    'touches',
+    'validation_overrides',
+    'validation_waiver',
+  ]) {
+    if (row[field] === null || row[field] === undefined || row[field] === '') continue;
+    try {
+      const value: unknown = JSON.parse(String(row[field]));
+      if (value === null) continue;
+      if (typeof value !== 'object' || Array.isArray(value) !== arrayFields.has(field)) {
+        diagnostics.push({ field, code: 'invalid_shape' });
+        row[field] = null;
+      }
+    } catch {
+      diagnostics.push({ field, code: 'invalid_json' });
+      row[field] = null;
+    }
+  }
+  if (row.task_summary) {
+    const summary = JSON.parse(String(row.task_summary)) as Record<string, unknown> | null;
+    if (
+      summary &&
+      ['actualSummary', 'how'].some(
+        (key) =>
+          summary[key] !== undefined && summary[key] !== null && typeof summary[key] !== 'string',
+      )
+    ) {
+      diagnostics.push({ field: 'task_summary', code: 'invalid_shape' });
+      row.task_summary = null;
+    }
+  }
+  // Keep unknown or malformed cost telemetry explicit, never NaN or invented zero phase costs.
+  if (row.phase_token_usage) {
+    const phases = JSON.parse(String(row.phase_token_usage)) as Record<string, unknown>;
+    if (
+      phases &&
+      Object.values(phases).some((value) => {
+        if (!value || typeof value !== 'object' || Array.isArray(value)) return true;
+        const bucket = value as Record<string, unknown>;
+        return (
+          ['inputTokens', 'outputTokens'].some(
+            (key) =>
+              typeof bucket[key] !== 'number' ||
+              !Number.isFinite(bucket[key]) ||
+              (bucket[key] as number) < 0,
+          ) ||
+          (bucket.costUsd !== undefined &&
+            (typeof bucket.costUsd !== 'number' ||
+              !Number.isFinite(bucket.costUsd) ||
+              bucket.costUsd < 0))
+        );
+      })
+    ) {
+      diagnostics.push({ field: 'phase_token_usage', code: 'invalid_shape' });
+      row.phase_token_usage = null;
+    }
+  }
+  return { ...rowToSession(row), recordDiagnostics: diagnostics };
+}
+
 export function createPodRepository(db: Database.Database): PodRepository {
+  const completionJournal = createCompletionJournal(db);
+  function listRows(filters?: PodFilters): Iterable<Record<string, unknown>> {
+    const whereClauses: string[] = [];
+    const params: Record<string, unknown> = {};
+
+    if (filters?.profileName !== undefined) {
+      whereClauses.push('profile_name = @profileName');
+      params.profileName = filters.profileName;
+    }
+    if (filters?.status !== undefined) {
+      const statuses = Array.isArray(filters.status) ? filters.status : [filters.status];
+      const placeholders = statuses.map((status, index) => {
+        const key = `status${index}`;
+        params[key] = status;
+        return `@${key}`;
+      });
+      whereClauses.push(`status IN (${placeholders.join(', ')})`);
+    }
+    if (filters?.userId !== undefined) {
+      whereClauses.push('user_id = @userId');
+      params.userId = filters.userId;
+    }
+    if (filters?.since !== undefined) {
+      whereClauses.push('created_at >= @since');
+      params.since = filters.since;
+    }
+    if (filters?.before !== undefined) {
+      whereClauses.push(
+        '(created_at < @beforeCreatedAt OR (created_at = @beforeCreatedAt AND id < @beforeId))',
+      );
+      params.beforeCreatedAt = filters.before.createdAt;
+      params.beforeId = filters.before.id;
+    }
+
+    const where = whereClauses.length > 0 ? `WHERE ${whereClauses.join(' AND ')}` : '';
+    const limit = filters?.limit === undefined ? '' : ' LIMIT @limit';
+    if (filters?.limit !== undefined) params.limit = filters.limit;
+    return db
+      .prepare(`SELECT * FROM pods ${where} ORDER BY created_at DESC, id DESC${limit}`)
+      .iterate(params) as Iterable<Record<string, unknown>>;
+  }
+
   return {
+    completionJournal,
     insert(pod: NewPod): void {
       // Keep legacy output_mode and new pod columns in sync.
       const podOpts: PodOptions = pod.options ?? podOptionsFromOutputMode(pod.outputMode);
@@ -579,7 +725,8 @@ export function createPodRepository(db: Database.Database): PodRepository {
         | Record<string, unknown>
         | undefined;
       if (!row) throw new PodNotFoundError(id);
-      return rowToSession(row);
+      const pod = rowToSession(row);
+      return { ...pod, finalization: completionJournal.get(pod.id, pod.lifecycleGeneration) };
     },
 
     update(id: string, changes: PodUpdates): void {
@@ -995,46 +1142,26 @@ export function createPodRepository(db: Database.Database): PodRepository {
     },
 
     list(filters?: PodFilters): Pod[] {
-      const whereClauses: string[] = [];
-      const params: Record<string, unknown> = {};
+      return Array.from(listRows(filters), rowToSession);
+    },
 
-      if (filters?.profileName !== undefined) {
-        whereClauses.push('profile_name = @profileName');
-        params.profileName = filters.profileName;
-      }
-      if (filters?.status !== undefined) {
-        const statuses = Array.isArray(filters.status) ? filters.status : [filters.status];
-        const placeholders = statuses.map((status, index) => {
-          const key = `status${index}`;
-          params[key] = status;
-          return `@${key}`;
-        });
-        whereClauses.push(`status IN (${placeholders.join(', ')})`);
-      }
-      if (filters?.userId !== undefined) {
-        whereClauses.push('user_id = @userId');
-        params.userId = filters.userId;
-      }
-      if (filters?.since !== undefined) {
-        whereClauses.push('created_at >= @since');
-        params.since = filters.since;
-      }
-      if (filters?.before !== undefined) {
-        whereClauses.push(
-          '(created_at < @beforeCreatedAt OR (created_at = @beforeCreatedAt AND id < @beforeId))',
-        );
-        params.beforeCreatedAt = filters.before.createdAt;
-        params.beforeId = filters.before.id;
-      }
+    listForDisplay(filters?: PodFilters): Pod[] {
+      return Array.from(listRows(filters), (row) => {
+        const pod = rowToDisplaySession(row);
+        return { ...pod, finalization: completionJournal.get(pod.id, pod.lifecycleGeneration) };
+      });
+    },
 
-      const where = whereClauses.length > 0 ? `WHERE ${whereClauses.join(' AND ')}` : '';
-      const limit = filters?.limit === undefined ? '' : ' LIMIT @limit';
-      if (filters?.limit !== undefined) params.limit = filters.limit;
+    listCostRecords(completedSince: string): Pod[] {
       const rows = db
-        .prepare(`SELECT * FROM pods ${where} ORDER BY created_at DESC, id DESC${limit}`)
-        .all(params) as Record<string, unknown>[];
-
-      return rows.map(rowToSession);
+        .prepare(`SELECT id, profile_name, status, model, runtime, completed_at,
+        input_tokens, output_tokens, cost_usd, phase_token_usage, token_telemetry_accuracy,
+        output_mode, agent_mode, output_target, validate, promotable
+        FROM pods WHERE status IN ('complete','killed','failed','rejected')
+          AND agent_mode != 'interactive' AND completed_at >= ?
+        ORDER BY completed_at, id`)
+        .iterate(completedSince) as Iterable<Record<string, unknown>>;
+      return Array.from(rows, rowToDisplaySession);
     },
 
     listNonTerminalPodIds(): string[] {

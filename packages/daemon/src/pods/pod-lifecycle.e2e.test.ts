@@ -224,6 +224,44 @@ describe('Pod Lifecycle E2E', () => {
   });
 
   describe('Escalation flow: agent → awaiting_input → human responds → agent continues', () => {
+    it('keeps an unanswered decision actionable after agent settlement and duplicate finalization', async () => {
+      const runtime = createMockRuntime({
+        spawn: vi.fn(async function* () {
+          yield escalationEvent('placeholder', 'Select findings to repair');
+          yield completeEvent('Scan report collected; awaiting human selection');
+        } as () => AsyncIterable<AgentEvent>),
+      });
+      const ctx = createTestContext({ runtime });
+      const manager = createPodManager(ctx.deps);
+      const events = collectEvents(ctx);
+      const pod = manager.createSession(
+        { profileName: 'test-profile', task: 'Collect scan report', skipValidation: false },
+        'user-1',
+      );
+      await expect(manager.processPod(pod.id)).resolves.toBeUndefined();
+      await expect(manager.handleCompletion(pod.id)).resolves.toBeUndefined();
+      expect(manager.getSession(pod.id).status).toBe('awaiting_input');
+      expect(manager.getSession(pod.id).pendingEscalation).not.toBeNull();
+      expect(events.some((e) => e.type === 'pod.completed')).toBe(false);
+      expect(ctx.worktreeManager.pushBranch).not.toHaveBeenCalled();
+      const settled = manager.getSession(pod.id).finalization;
+      expect(settled).toMatchObject({ phase: 'awaiting_human', cycle: 1 });
+      expect(settled?.agentSettledAt).not.toBeNull();
+      const restarted = createPodManager(ctx.deps);
+      await restarted.handleCompletion(pod.id);
+      expect(restarted.getSession(pod.id).finalization).toEqual(settled);
+      await restarted.sendMessage(pod.id, 'Repair only finding A', {
+        type: 'human',
+        id: 'reviewer',
+      });
+      expect(
+        ctx.db.prepare('SELECT response FROM completion_decisions WHERE pod_id = ?').get(pod.id),
+      ).toEqual({ response: 'Repair only finding A' });
+      expect(runtime.resume).toHaveBeenCalledTimes(1);
+      expect(restarted.getSession(pod.id).pendingEscalation).toBeNull();
+      ctx.db.close();
+    });
+
     it('transitions to awaiting_input when agent escalates', async () => {
       // In reality, the runtime stream blocks when the agent escalates.
       // processPod's consumeAgentEvents loop hangs until the stream ends.

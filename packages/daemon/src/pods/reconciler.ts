@@ -101,6 +101,16 @@ async function reconcileSession(pod: Pod, deps: ReconcilerDependencies): Promise
     }
 
     case 'deleted': {
+      if (pod.pendingEscalation) {
+        parkSession(
+          pod,
+          'failed',
+          'Sandbox is unavailable; the unanswered decision and saved work remain for operator recovery.',
+          podRepo,
+          eventBus,
+        );
+        return;
+      }
       logger.warn({ podId: pod.id, containerId }, 'Sandbox was deleted, marking pod killed');
       markSessionFailed(pod, podRepo, eventBus, logger);
       break;
@@ -195,7 +205,7 @@ function parkSession(
 ): void {
   const previousStatus = pod.status;
   podRepo.update(pod.id, {
-    status,
+    status: pod.pendingEscalation ? 'awaiting_input' : status,
     pauseReason:
       status === 'paused'
         ? pod.status === 'paused'
@@ -204,7 +214,9 @@ function parkSession(
         : null,
     lastCorrectionMessage: reason,
     ...(status === 'paused' ? { lastRecoveryTrigger: 'restart' as const } : {}),
-    ...(status === 'failed' ? { completedAt: new Date().toISOString() } : {}),
+    ...(status === 'failed' && !pod.pendingEscalation
+      ? { completedAt: new Date().toISOString() }
+      : {}),
   });
 
   const timestamp = new Date().toISOString();
@@ -213,7 +225,7 @@ function parkSession(
     timestamp,
     podId: pod.id,
     previousStatus,
-    newStatus: status,
+    newStatus: pod.pendingEscalation ? 'awaiting_input' : status,
   });
   eventBus.emit({
     type: 'pod.agent_activity',

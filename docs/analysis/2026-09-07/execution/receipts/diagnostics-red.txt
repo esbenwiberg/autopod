@@ -1,0 +1,39 @@
+npm error code ENOTFOUND
+npm error syscall getaddrinfo
+npm error errno ENOTFOUND
+npm error network request to https://registry.npmjs.org/pnpm failed, reason: getaddrinfo ENOTFOUND registry.npmjs.org
+npm error network This is a problem related to network connectivity.
+npm error network In most cases you are behind a proxy or have bad network settings.
+npm error network
+npm error network If you are behind a proxy, please make sure that the 'proxy' config is set properly.  See: 'npm help config'
+npm error Log files were not written due to an error writing to the directory: /Users/ewi/.npm/_logs
+npm error You can rerun the command with `--loglevel=verbose` to see the logs in your terminal
+ytics(db, 30);
+     61|     expect(actual.summary.cohortSize).toBe(1);
+     62|     expect(actual.byModel[0]?.podCount).toBe(1);
+       |                                         ^
+     63|     expect(actual.byModel[0]?.completeCount).toBe(0);
+     64|     expect(actual.byModel[0]?.dollarPerPr).toBeNull();
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/2]⎯
+
+ FAIL  docs/analysis/2026-09-07/diagnostics.test.ts > Durable execution contract: desired behavior > preserves healthy history reads when a legacy row is malformed
+SyntaxError: Unexpected token 'o', "not-json" is not valid JSON
+ ❯ rowToSession packages/daemon/src/pods/pod-repository.ts:409:42
+    407|     startCommitSha: (row.start_commit_sha as string) ?? null,
+    408|     linkedPodId: (row.linked_pod_id as string) ?? null,
+    409|     taskSummary: row.task_summary ? JSON.parse(row.task_summary as str…
+       |                                          ^
+    410|     preSubmitReview: row.pre_submit_review
+    411|       ? (JSON.parse(row.pre_submit_review as string) as PreSubmitRevie…
+ ❯ Object.list packages/daemon/src/pods/pod-repository.ts:1037:19
+ ❯ docs/analysis/2026-09-07/diagnostics.test.ts:85:17
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/2]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  2 failed | 4 passed (6)
+   Start at  10:32:06
+   Duration  723ms (transform 110ms, setup 0ms, import 184ms, tests 426ms, environment 0ms)
+

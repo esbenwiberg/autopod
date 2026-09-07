@@ -4,6 +4,7 @@
  * returns a ReliabilityAnalyticsResponse. No side effects, no mutations.
  */
 import type Database from 'better-sqlite3';
+import { isExecutedFirstPass, validationCoverage } from './validation-coverage.js';
 
 // ── Types (local — not exported through @autopod/shared) ──────────────────────
 
@@ -30,7 +31,7 @@ export type ValidationStage =
   | 'taskReview';
 
 export interface ReliabilityAnalyticsResponse {
-  /** First-pass rate over the trailing window: 0..1. */
+  /** Complete, no-rework pods whose first recorded validation executed and passed, divided by all terminal non-workspace pods in the window. */
   firstPassRate: number;
   /** One entry per day in window. Length == days. */
   firstPassRateSparkline: Array<{ day: string; rate: number }>;
@@ -130,20 +131,7 @@ interface CohortRow {
   status: string;
   completedAt: string;
   reworkCount: number;
-}
-
-// Only the fields we read from stored validation JSON.
-interface StoredValidationResult {
-  smoke?: {
-    build?: { status?: string };
-    health?: { status?: string };
-    pages?: Array<{ status?: string }>;
-  };
-  test?: { status?: string } | null;
-  lint?: { status?: string } | null;
-  sast?: { status?: string } | null;
-  factValidation?: { status?: string } | null;
-  taskReview?: { status?: string } | null;
+  firstValidation: string | null;
 }
 
 interface DropGroup {
@@ -214,7 +202,9 @@ export function computeReliabilityAnalytics(
               profile_name  AS profileName,
               status,
               completed_at  AS completedAt,
-              rework_count  AS reworkCount
+              rework_count  AS reworkCount,
+              (SELECT result FROM validations v WHERE v.pod_id = pods.id
+               ORDER BY v.sequence, v.created_at, v.id LIMIT 1) AS firstValidation
        FROM pods
        WHERE ${terminalCohortWhere()}`,
     )
@@ -223,9 +213,9 @@ export function computeReliabilityAnalytics(
   const totalPodsInWindow = cohort.length;
   if (totalPodsInWindow === 0) return emptyResponse(days);
 
-  // First-pass: complete with no rework.
+  // Earliest durable sequence, never a later successful retry or a waived latest result.
   const firstPassCount = cohort.filter(
-    (p) => p.status === 'complete' && p.reworkCount === 0,
+    (p) => p.status === 'complete' && p.reworkCount === 0 && isExecutedFirstPass(p.firstValidation),
   ).length;
   const firstPassRate = firstPassCount / totalPodsInWindow;
 
@@ -236,7 +226,12 @@ export function computeReliabilityAnalytics(
     const day = pod.completedAt.slice(0, 10);
     const bucket = dayBuckets.get(day) ?? { firstPass: 0, total: 0 };
     bucket.total++;
-    if (pod.status === 'complete' && pod.reworkCount === 0) bucket.firstPass++;
+    if (
+      pod.status === 'complete' &&
+      pod.reworkCount === 0 &&
+      isExecutedFirstPass(pod.firstValidation)
+    )
+      bucket.firstPass++;
     dayBuckets.set(day, bucket);
   }
   const firstPassRateSparkline = sparklineDays(days).map((day) => {
@@ -247,17 +242,26 @@ export function computeReliabilityAnalytics(
   // Prior-window delta: the period immediately before the current window.
   const prior = db
     .prepare(
-      `SELECT COUNT(*) AS total,
-              SUM(CASE WHEN status = 'complete' AND rework_count = 0 THEN 1 ELSE 0 END) AS firstPass
+      `SELECT status, rework_count AS reworkCount,
+              (SELECT result FROM validations v WHERE v.pod_id = pods.id
+               ORDER BY v.sequence, v.created_at, v.id LIMIT 1) AS firstValidation
        FROM pods
        WHERE output_mode != 'workspace'
          AND status IN ('complete', 'killed', 'failed')
          AND completed_at >= datetime('now', '-' || @priorDays || ' days')
          AND completed_at <  datetime('now', '-' || @days    || ' days')`,
     )
-    .get({ priorDays: days * 2, days }) as { total: number; firstPass: number };
+    .all({ priorDays: days * 2, days }) as CohortRow[];
 
-  const priorRate = prior.total > 0 ? prior.firstPass / prior.total : 0;
+  const priorRate =
+    prior.length > 0
+      ? prior.filter(
+          (p) =>
+            p.status === 'complete' &&
+            p.reworkCount === 0 &&
+            isExecutedFirstPass(p.firstValidation),
+        ).length / prior.length
+      : 0;
   const deltaValue = (firstPassRate - priorRate) * 100;
   const deltaDirection: 'up' | 'down' | 'flat' =
     deltaValue > 0.5 ? 'up' : deltaValue < -0.5 ? 'down' : 'flat';
@@ -268,7 +272,7 @@ export function computeReliabilityAnalytics(
   const eventRows = db
     .prepare(
       `SELECT pod_id AS podId,
-              json_extract(payload, '$.newStatus') AS newStatus
+              CASE WHEN json_valid(payload) THEN json_extract(payload, '$.newStatus') END AS newStatus
        FROM events
        WHERE type = 'pod.status_changed'
          AND pod_id IN (SELECT id FROM pods WHERE ${terminalCohortWhere()})`,
@@ -349,10 +353,10 @@ export function computeReliabilityAnalytics(
     )
     .all({ days }) as Array<{ podId: string; result: string }>;
 
-  const podValidations = new Map<string, StoredValidationResult[]>();
+  const podValidations = new Map<string, unknown[]>();
   for (const row of validationRows) {
     try {
-      const parsed = JSON.parse(row.result) as StoredValidationResult;
+      const parsed = JSON.parse(row.result) as unknown;
       let list = podValidations.get(row.podId);
       if (!list) {
         list = [];
@@ -377,64 +381,14 @@ export function computeReliabilityAnalytics(
     }
 
     for (const vr of podValidations.get(pod.id) ?? []) {
-      // build — reads from result.smoke.build (not a top-level field)
-      if (vr.smoke?.build !== undefined) {
-        stageRan.build.add(pod.id);
-        pMap.build.ran.add(pod.id);
-        if (vr.smoke.build.status === 'fail') {
-          stageFailed.build.add(pod.id);
-          pMap.build.failed.add(pod.id);
-        }
-      }
-
-      // health — reads from result.smoke.health (not a top-level field)
-      if (vr.smoke?.health !== undefined) {
-        stageRan.health.add(pod.id);
-        pMap.health.ran.add(pod.id);
-        if (vr.smoke.health.status === 'fail') {
-          stageFailed.health.add(pod.id);
-          pMap.health.failed.add(pod.id);
-        }
-      }
-
-      // smoke — failed when any page in result.smoke.pages has status 'fail'
-      if (vr.smoke?.pages !== undefined) {
-        stageRan.smoke.add(pod.id);
-        pMap.smoke.ran.add(pod.id);
-        if (vr.smoke.pages.some((pg) => pg.status === 'fail')) {
-          stageFailed.smoke.add(pod.id);
-          pMap.smoke.failed.add(pod.id);
-        }
-      }
-
-      // test, lint, sast — optional top-level fields
-      for (const stage of ['test', 'lint', 'sast'] as const) {
-        const sr = vr[stage];
-        if (sr !== undefined && sr !== null) {
+      for (const { stage, executed, failed } of validationCoverage(vr)) {
+        if (executed) {
           stageRan[stage].add(pod.id);
           pMap[stage].ran.add(pod.id);
-          if (sr.status === 'fail') {
-            stageFailed[stage].add(pod.id);
-            pMap[stage].failed.add(pod.id);
-          }
         }
-      }
-
-      if (vr.factValidation !== undefined && vr.factValidation !== null) {
-        stageRan.facts.add(pod.id);
-        pMap.facts.ran.add(pod.id);
-        if (vr.factValidation.status === 'fail') {
-          stageFailed.facts.add(pod.id);
-          pMap.facts.failed.add(pod.id);
-        }
-      }
-
-      if (vr.taskReview !== undefined && vr.taskReview !== null) {
-        stageRan.taskReview.add(pod.id);
-        pMap.taskReview.ran.add(pod.id);
-        if (vr.taskReview.status === 'fail') {
-          stageFailed.taskReview.add(pod.id);
-          pMap.taskReview.failed.add(pod.id);
+        if (failed) {
+          stageFailed[stage].add(pod.id);
+          pMap[stage].failed.add(pod.id);
         }
       }
     }

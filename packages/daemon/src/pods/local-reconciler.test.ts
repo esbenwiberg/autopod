@@ -134,6 +134,45 @@ function makeFailingValidationResult(podId: string, attempt = 1): ValidationResu
 }
 
 describe('reconcileLocalSessions', () => {
+  it('does not turn an unanswered decision into restart work or kill it when its worktree is unavailable', async () => {
+    const { deps, podRepo, enqueuedSessions, containerManager } = createReconcilerDeps();
+    podRepo.insert({
+      id: 'pending-restart',
+      profileName: 'test-profile',
+      task: 'Triage report',
+      status: 'queued',
+      model: 'opus',
+      runtime: 'claude',
+      executionTarget: 'local',
+      branch: 'branch',
+      userId: 'user',
+      maxValidationAttempts: 3,
+      skipValidation: false,
+      outputMode: 'pr',
+      baseBranch: null,
+    });
+    podRepo.update('pending-restart', {
+      status: 'awaiting_input',
+      worktreePath: '/unavailable',
+      containerId: 'saved-container',
+      pendingEscalation: {
+        id: 'selection',
+        podId: 'pending-restart',
+        type: 'ask_human',
+        payload: { question: 'Which finding?' },
+        timestamp: new Date().toISOString(),
+        response: null,
+      },
+    });
+    mockedAccess.mockRejectedValue(new Error('not available'));
+    await reconcileLocalSessions(deps);
+    const after = podRepo.getOrThrow('pending-restart');
+    expect(after.status).toBe('awaiting_input');
+    expect(after.pendingEscalation?.id).toBe('selection');
+    expect(after.containerId).toBe('saved-container');
+    expect(enqueuedSessions).toEqual([]);
+    expect(containerManager.kill).not.toHaveBeenCalled();
+  });
   it('rehydrates a queued host fetch retry without consuming capacity before retryNotBefore', async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date('2026-08-20T12:00:00.000Z'));

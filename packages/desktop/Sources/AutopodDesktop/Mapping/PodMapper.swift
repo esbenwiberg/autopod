@@ -98,7 +98,9 @@ public enum PodMapper {
       escalationQuestion: response.pendingEscalationSummary,
       containerUrl: response.previewUrl.flatMap(URL.init(string:)),
       hasWebUi: response.hasWebUi,
-      latestActivity: response.progressSummary
+      latestActivity: response.finalization?.operatorSummary
+        ?? response.recordDiagnostics.flatMap { $0.isEmpty ? nil : "Saved evidence unreadable: " + $0.map(\.field).joined(separator: ", ") }
+        ?? response.progressSummary
         ?? response.lastCorrectionMessage
         ?? response.mergeBlockReason
         ?? response.failureReason,
@@ -445,7 +447,12 @@ public enum PodMapper {
     let prUrl: URL? = response.prUrl.flatMap { URL(string: $0) }
     let containerUrl: URL? = response.previewUrl.flatMap { URL(string: $0) }
     let hasWebUi: Bool = response.hasWebUi ?? false
-    let latestActivity: String? = response.failureReason
+    let evidenceDiagnostic: String? = response.recordDiagnostics.flatMap { records in
+      records.isEmpty ? nil : "Saved evidence unreadable: " + records.map(\.field).joined(separator: ", ")
+    }
+    let latestActivity: String? = evidenceDiagnostic
+      ?? response.finalization?.operatorSummary
+      ?? response.failureReason
       ?? response.mergeBlockReason
       ?? response.plan?.summary
     let profileSnapshotMapped: Profile? = response.profileSnapshot.map { ProfileMapper.map($0) }

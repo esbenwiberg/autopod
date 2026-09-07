@@ -530,6 +530,19 @@ export function registerPodCommands(program: Command, getClient: () => AutopodCl
       console.log(chalk.dim('─'.repeat(50)));
       console.log(`${chalk.bold('Profile:')}      ${s.profileName}`);
       console.log(`${chalk.bold('Status:')}       ${formatStatus(s.status)}`);
+      if (s.finalization?.agentSettledAt) {
+        console.log(`${chalk.bold('Agent settled:')} ${s.finalization.agentSettledAt}`);
+        console.log(`${chalk.bold('Finalization:')} ${s.finalization.phase}`);
+        console.log(
+          `${chalk.bold('Source saved:')} ${s.finalization.sourcePreservedAt ?? 'not verified'}`,
+        );
+        if (s.finalization.pendingDecisionId)
+          console.log(
+            'Human decision remains unanswered; respond to the pending question before continuation.',
+          );
+      }
+      for (const diagnostic of s.recordDiagnostics ?? [])
+        console.log(chalk.yellow(`Record unavailable: ${diagnostic.field} (${diagnostic.code})`));
       console.log(formatReadinessLine(s));
       console.log(`${chalk.bold('Task:')}         ${s.task}`);
       console.log(`${chalk.bold('Model:')}        ${s.model}`);

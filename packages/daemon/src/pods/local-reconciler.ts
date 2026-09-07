@@ -85,6 +85,18 @@ async function reconcileSession(
 ): Promise<void> {
   const { podRepo, eventBus, containerManager, enqueueSession, logger } = deps;
 
+  // A daemon restart is not an answer to a human decision. Retain its identity
+  // and resources; a later explicit reply drives recovery rather than auto-dispatch.
+  if (pod.status === 'awaiting_input' || pod.pendingEscalation) {
+    podRepo.update(pod.id, {
+      lastRecoveryTrigger: 'restart',
+      lastCorrectionMessage:
+        'Human decision remains pending after daemon restart. Review the pending question; preserved worker state may require recovery before continuation.',
+    });
+    result.skipped.push(pod.id);
+    return;
+  }
+
   // 0. Workspace pods whose container is still alive — restore running status in-place.
   //    Docker containers are independent processes and survive daemon restarts, so there
   //    is no reason to kill and re-provision them. Preserves user state (e.g. Claude auth

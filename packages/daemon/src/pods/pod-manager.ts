@@ -6782,6 +6782,8 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
       recordNotReportedMemoryUsage(pod.id);
     }
     podRepo.update(pod.id, updates);
+    if (to === 'complete') podRepo.completionJournal?.mark(pod, 'finished');
+    else if (to === 'validating') podRepo.completionJournal?.mark(pod, 'finalizing');
     eventBus.emit({
       type: 'pod.status_changed',
       timestamp: new Date().toISOString(),
@@ -9952,6 +9954,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
       let seenCompleteEvents: Set<string>;
       try {
         attemptPod = podRepo.getOrThrow(podId);
+        podRepo.completionJournal?.begin(attemptPod);
         attemptProfile = resolveEffectiveBoundProfile(attemptPod);
         ensureProviderAttempt(attemptPod, attemptProfile);
         seenCompleteEvents = persistedAgentCompleteEventKeys(deps.eventRepo, podId);
@@ -10080,6 +10083,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
             }
           } else if (event.type === 'complete') {
             outcome = 'completed';
+            podRepo.completionJournal?.settle(podRepo.getOrThrow(podId), event.result);
             // Accumulate token counts and cost cumulatively across all runs in this pod
             const currentSession = podRepo.getOrThrow(podId);
             const newInputTokens = currentSession.inputTokens + (event.totalInputTokens ?? 0);
@@ -10333,6 +10337,28 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         pod.status === 'failed' ||
         pod.status === 'review_required'
       ) {
+        return;
+      }
+
+      // Worker settlement cannot discharge an unanswered human decision. Preserve
+      // the workspace while retaining the waiter, even if its HTTP stream expired.
+      if (pod.status === 'awaiting_input' || pod.pendingEscalation) {
+        const settlement = podRepo.completionJournal?.settle(pod);
+        if (!settlement?.sourcePreservedAt && pod.containerId && pod.worktreePath) {
+          try {
+            await preservePodWorkspace(pod, 'waiting for human decision after agent settlement');
+            podRepo.completionJournal?.mark(pod, 'awaiting_human', true);
+          } catch (err) {
+            logger.error(
+              { err, podId },
+              'Pending-decision workspace preservation failed; retaining worker resources',
+            );
+          }
+        }
+        emitActivityStatus(
+          podId,
+          'Agent settled; human decision remains unanswered. Review the pending question before continuing.',
+        );
         return;
       }
 
@@ -11061,6 +11087,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
       }
 
       // ── Normal escalation responses ───────────────────────────────────
+      podRepo.completionJournal?.recordReply(pod, message, actor);
       emitActivityStatus(podId, 'Human replied — resuming agent…');
       transition(pod, 'running', { pendingEscalation: null });
 
