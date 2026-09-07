@@ -4758,6 +4758,98 @@ describe('PodManager', () => {
   });
 
   describe('approveSession', () => {
+    it.each(['initial-push', 'rebased-push', 'rebase-conflict'] as const)(
+      'keeps failed PR preparation out of merge polling across restart (%s)',
+      async (failure) => {
+        vi.useFakeTimers();
+        try {
+          const ctx = createTestContext();
+          const manager = createPodManager(ctx.deps);
+          const pod = manager.createSession(
+            { profileName: 'test-profile', task: 'Preserve unpublished source' },
+            'user-1',
+          );
+          ctx.podRepo.update(
+            pod.id,
+            validatedPodUpdates(pod.id, {
+              worktreePath: '/tmp/unpublished-source',
+              containerId: 'retained-source',
+              filesChanged: 2,
+              prUrl: 'https://github.com/org/repo/pull/42',
+            }),
+          );
+          const push = vi.mocked(ctx.worktreeManager.pushBranch);
+          const rebase = vi.mocked(ctx.worktreeManager.rebaseOntoBase);
+          if (failure === 'initial-push')
+            push.mockRejectedValueOnce(new Error('publication unavailable'));
+          else if (failure === 'rebased-push') {
+            rebase.mockResolvedValueOnce({ rebased: true, alreadyUpToDate: false, conflicts: [] });
+            push
+              .mockResolvedValueOnce(undefined)
+              .mockRejectedValueOnce(new Error('rewritten source unpublished'));
+          } else
+            rebase.mockResolvedValueOnce({
+              rebased: false,
+              alreadyUpToDate: false,
+              conflicts: ['src/source.ts'],
+            });
+          // A stale provider PR can look fully merged while local source is still unpublished.
+          vi.mocked(ctx.prManager.getPrStatus).mockResolvedValue({
+            merged: true,
+            open: false,
+            blockReason: null,
+            ciFailures: [],
+            reviewComments: [],
+          });
+          const transitions: string[] = [];
+          const completed: string[] = [];
+          ctx.eventBus.subscribe((event) => {
+            if (event.type === 'pod.status_changed') transitions.push(event.newStatus);
+            if (event.type === 'pod.completed') completed.push(event.podId);
+          });
+          await expect(manager.approveSession(pod.id)).rejects.toMatchObject({
+            code: 'APPROVAL_DELIVERY_FAILED',
+            statusCode: 502,
+          });
+          expect(manager.getSession(pod.id)).toMatchObject({
+            status: 'validated',
+            containerId: 'retained-source',
+            worktreePath: '/tmp/unpublished-source',
+            completedAt: null,
+            failureReason: expect.stringContaining('retry approval'),
+          });
+          expect(transitions).not.toContain('merge_pending');
+          const restarted = createPodManager(ctx.deps);
+          await vi.advanceTimersByTimeAsync(120_000);
+          expect(restarted.getSession(pod.id).status).toBe('validated');
+          expect(ctx.prManager.getPrStatus).not.toHaveBeenCalled();
+          expect(ctx.prManager.mergePr).not.toHaveBeenCalled();
+          expect(ctx.containerManager.kill).not.toHaveBeenCalled();
+          expect(completed).toEqual([]);
+          vi.mocked(ctx.prManager.getPrStatus).mockResolvedValue({
+            merged: false,
+            open: true,
+            reviewDecision: 'APPROVED',
+            blockReason: null,
+            ciFailures: [],
+            reviewComments: [],
+          });
+          await restarted.approveSession(pod.id);
+          expect(restarted.getSession(pod.id)).toMatchObject({
+            status: 'complete',
+            failureReason: null,
+          });
+          expect(ctx.prManager.mergePr).toHaveBeenCalledTimes(1);
+          expect(ctx.prManager.createPr).not.toHaveBeenCalled();
+          expect(ctx.runtime.spawn).not.toHaveBeenCalled();
+          expect(ctx.runtime.resume).not.toHaveBeenCalled();
+          expect(completed).toEqual([pod.id]);
+        } finally {
+          vi.useRealTimers();
+        }
+      },
+    );
+
     it.each([
       { output: 'pr' as const, cachedChanges: 0 },
       { output: 'pr' as const, cachedChanges: 2 },

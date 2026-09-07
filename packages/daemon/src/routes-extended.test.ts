@@ -25,7 +25,7 @@ import type { FastifyInstance } from 'fastify';
 import pino from 'pino';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createServer } from './api/server.js';
-import type { AuthModule } from './interfaces/index.js';
+import type { AuthModule, PrManager } from './interfaces/index.js';
 import {
   createEscalationRepository,
   createEventBus,
@@ -110,6 +110,7 @@ const authHeaders = { authorization: 'Bearer test-token' };
 describe('Extended Route Tests', () => {
   let db: Database.Database;
   let app: FastifyInstance;
+  let approvalPrManager: PrManager | null;
   let containerManager: ReturnType<typeof createMockContainerManager>;
   let worktreeManager: ReturnType<typeof createMockWorktreeManager>;
 
@@ -124,6 +125,7 @@ describe('Extended Route Tests', () => {
 
   beforeEach(async () => {
     db = createTestDb();
+    approvalPrManager = null;
     containerManager = createMockContainerManager();
 
     const profileStore = createProfileStore(db);
@@ -219,6 +221,7 @@ describe('Extended Route Tests', () => {
     );
 
     podManager = createPodManager({
+      prManagerFactory: () => approvalPrManager,
       podRepo,
       escalationRepo,
       nudgeRepo,
@@ -915,9 +918,30 @@ describe('Extended Route Tests', () => {
   // -------------------------------------------------------------------------
 
   describe('POST /pods/:id/approve', () => {
-    it.each(['no-changes', 'branch', 'missing-worktree'] as const)(
+    it.each(['no-changes', 'branch', 'missing-worktree', 'existing-pr-push'] as const)(
       'returns an actionable error for %s without cleanup and accepts a later explicit approval retry',
       async (delivery) => {
+        if (delivery === 'existing-pr-push') {
+          approvalPrManager = {
+            createPr: vi.fn(),
+            mergePr: vi.fn().mockResolvedValue({ merged: true, autoMergeScheduled: false }),
+            getPrStatus: vi
+              .fn()
+              .mockResolvedValue({
+                open: true,
+                merged: false,
+                reviewDecision: 'APPROVED',
+                blockReason: null,
+                ciFailures: [],
+                reviewComments: [],
+              }),
+          };
+          vi.mocked(worktreeManager.rebaseOntoBase).mockResolvedValue({
+            rebased: true,
+            alreadyUpToDate: true,
+            conflicts: [],
+          });
+        }
         const repo = createPodRepository(db);
         repo.insert({
           id: 'approval-preserved',
@@ -940,6 +964,9 @@ describe('Extended Route Tests', () => {
           },
         });
         repo.update('approval-preserved', {
+          ...(delivery === 'existing-pr-push'
+            ? { prUrl: 'https://github.com/org/repo/pull/42' }
+            : {}),
           containerId: 'preserved-container',
           worktreePath: delivery === 'missing-worktree' ? null : '/tmp/preserved-approval',
           filesChanged: delivery === 'no-changes' ? 0 : 1,
@@ -979,7 +1006,7 @@ describe('Extended Route Tests', () => {
           error:
             delivery === 'missing-worktree'
               ? 'DELIVERY_RECONCILIATION_REQUIRED'
-              : delivery === 'branch'
+              : delivery === 'branch' || delivery === 'existing-pr-push'
                 ? 'APPROVAL_DELIVERY_FAILED'
                 : 'BRANCH_PRESERVATION_FAILED',
           message: expect.stringContaining('retry approval'),
@@ -1004,7 +1031,9 @@ describe('Extended Route Tests', () => {
           failureReason: null,
         });
         expect(
-          delivery === 'no-changes' ? worktreeManager.pushBranch : worktreeManager.mergeBranch,
+          delivery === 'no-changes' || delivery === 'existing-pr-push'
+            ? worktreeManager.pushBranch
+            : worktreeManager.mergeBranch,
         ).toHaveBeenCalledTimes(delivery === 'missing-worktree' ? 1 : 2);
       },
     );

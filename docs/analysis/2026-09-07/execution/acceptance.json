@@ -227,7 +227,8 @@
         "checkpoint-31.md: late merge-poller lifecycle and PR identity guards; overlapping ticks and durable cross-process receipts remain partial",
         "checkpoint-32.md: serial in-process merge polls, replacement owner drain and stop fencing; cross-process delivery and cleanup dispositions remain partial",
         "checkpoint-33.md: transactional durable decision admission and confirmed merge observations; operator disposition projection and broader delivery receipts remain partial",
-        "checkpoint-35.md"
+        "checkpoint-35.md",
+        "checkpoint-36.md"
       ],
       "prerequisites": [
         "PR creation intent/reconciliation implemented locally; broader finalization side effects and operator override remain."
@@ -1580,7 +1581,8 @@
         "receipts/interactive-coordination-final.txt",
         "receipts/interactive-coordination-build.txt",
         "receipts/interactive-coordination-cli.txt",
-        "checkpoint-35.md"
+        "checkpoint-35.md",
+        "checkpoint-36.md"
       ],
       "prerequisites": [
         "Full required pipeline passes on clean 46f63982ea42aef832fcb6df1c21631e468f409c: daemon 4468 passed, one known Linux-only skip; all 15 Turbo tasks passed; audit zero, secret scan and deployment/cleanup safeguards passed. The skipped source callback has separate local Linux proof at unchanged implementation 18e5bd37. Final source validation remains after further implementation."
@@ -1645,5 +1647,5 @@
       "prerequisites": []
     }
   ],
-  "lastCheckpoint": "checkpoint-35.md"
+  "lastCheckpoint": "checkpoint-36.md"
 }

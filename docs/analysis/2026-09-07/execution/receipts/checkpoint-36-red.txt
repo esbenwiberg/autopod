@@ -1,0 +1,33 @@
+
+ RUN  v4.1.11 /private/tmp/autopod-durable-execution/packages/daemon
+
+ ❯ src/pods/pod-manager.test.ts (492 tests | 3 failed | 489 skipped) 234ms
+       × keeps failed PR preparation out of merge polling across restart (initial-push) 107ms
+       × keeps failed PR preparation out of merge polling across restart (rebased-push) 67ms
+       × keeps failed PR preparation out of merge polling across restart (rebase-conflict) 58ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 3 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/pods/pod-manager.test.ts > PodManager > approveSession > keeps failed PR preparation out of merge polling across restart (initial-push)
+ FAIL  src/pods/pod-manager.test.ts > PodManager > approveSession > keeps failed PR preparation out of merge polling across restart (rebased-push)
+ FAIL  src/pods/pod-manager.test.ts > PodManager > approveSession > keeps failed PR preparation out of merge polling across restart (rebase-conflict)
+AssertionError: promise resolved "undefined" instead of rejecting
+
+- Expected:
+Error {
+  "message": "rejected promise",
+}
+
++ Received:
+undefined
+
+ ❯ src/pods/pod-manager.test.ts:4788:54
+
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/3]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  3 failed | 489 skipped (492)
+   Start at  23:20:09
+   Duration  2.27s (transform 1.33s, setup 0ms, import 1.84s, tests 234ms, environment 0ms)

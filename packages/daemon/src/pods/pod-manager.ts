@@ -11942,9 +11942,9 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
               const blockReason = `Push to origin failed: ${reason}`;
               logger.warn(
                 { err: pushErr, podId },
-                'Pre-merge push failed — entering merge_pending instead of merging stale origin',
+                'Pre-merge push failed — retaining source for explicit approval retry',
               );
-              return { kind: 'merge_pending', blockReason };
+              return { kind: 'merge_failed', reason: blockReason };
             }
 
             // Pre-merge rebase onto latest origin/<base>. Catches conflicts
@@ -11974,9 +11974,9 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
                   baseBranch: mergeBaseBranch,
                   conflicts: rebaseResult.conflicts,
                 },
-                'Pre-merge rebase produced conflicts — entering merge_pending for manual resolution',
+                'Pre-merge rebase produced conflicts — retaining source for manual resolution',
               );
-              return { kind: 'merge_pending', blockReason };
+              return { kind: 'merge_failed', reason: blockReason };
             }
 
             // Rebase rewrote history → force-push so origin/<branch> matches our
@@ -11997,9 +11997,9 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
                 const blockReason = `Force-push after rebase failed: ${reason}`;
                 logger.warn(
                   { err: pushErr, podId },
-                  'Force-push after rebase failed — entering merge_pending instead of merging stale origin',
+                  'Force-push after rebase failed — retaining source for explicit approval retry',
                 );
-                return { kind: 'merge_pending', blockReason };
+                return { kind: 'merge_failed', reason: blockReason };
               }
             }
 
