@@ -254,7 +254,9 @@
         "checkpoint-42.md: exact repository/head/base and final merge lifecycle admission; restart-safe merge journal, poller reconciliation and cleanup remain partial",
         "receipts/checkpoint-42-full-validation.txt",
         "receipts/checkpoint-42-validation-identity.json",
-        "checkpoint-43.md: durable approval merge admission and recovery; poller, resource cleanup and broader acceptance remain partial"
+        "checkpoint-43.md: durable approval merge admission and recovery; poller, resource cleanup and broader acceptance remain partial",
+        "receipts/checkpoint-43-full-validation.txt",
+        "receipts/checkpoint-43-validation-identity.json"
       ],
       "prerequisites": [
         "PR creation intent/reconciliation implemented locally; broader finalization side effects and operator override remain."
