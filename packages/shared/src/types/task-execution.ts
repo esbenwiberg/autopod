@@ -17,6 +17,11 @@ export interface TaskExecutionSummary {
     scope: 'durable-receipts-only';
   };
   tokenBudget: number | null;
+  /** Admission check of recorded usage; this does not reserve future provider spending. */
+  budgetCheck?: {
+    status: 'unlimited' | 'below_recorded_limit' | 'exhausted' | 'unavailable';
+    reason: string;
+  };
   recordedInputTokens: number;
   recordedOutputTokens: number;
   recordedCostUsd: number;

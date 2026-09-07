@@ -271,7 +271,10 @@
         "packages/shared/src/types/task-retry.ts",
         "packages/cli/src/commands/pod.ts",
         "packages/mobile-web/src/components/TaskRetryPanel.tsx",
-        "packages/desktop/Sources/AutopodUI/Views/Shared/TaskRetryCard.swift"
+        "packages/desktop/Sources/AutopodUI/Views/Shared/TaskRetryCard.swift",
+        "packages/shared/src/types/task-execution.ts",
+        "packages/mobile-web/src/components/TaskExecutionPanel.tsx",
+        "packages/desktop/Sources/AutopodUI/Views/Shared/SessionCostCard.swift"
       ],
       "tests": [
         "packages/daemon/src/pods/task-execution-ledger.test.ts",
@@ -280,7 +283,9 @@
         "packages/daemon/src/validation/retry-identity.test.ts",
         "packages/cli/src/commands/pod.test.ts",
         "packages/mobile-web/src/components/TaskRetryPanel.test.tsx",
-        "packages/desktop/Tests/AutopodClientTests/TaskRetryClientTests.swift"
+        "packages/desktop/Tests/AutopodClientTests/TaskRetryClientTests.swift",
+        "packages/mobile-web/src/components/TaskExecutionPanel.test.tsx",
+        "packages/desktop/Tests/AutopodClientTests/PodCostBreakdownResponseTests.swift"
       ],
       "evidence": [
         "receipts/task-ledger-red.txt",
@@ -293,10 +298,16 @@
         "receipts/task-retry-cli.txt",
         "receipts/task-retry-mobile-final.txt",
         "receipts/task-retry-swift.txt",
-        "receipts/task-retry-mobile-browser.json"
+        "receipts/task-retry-mobile-browser.json",
+        "checkpoint-17.md",
+        "receipts/task-budget-unknown-red.txt",
+        "receipts/task-budget-affected.txt",
+        "receipts/task-budget-cli.txt",
+        "receipts/task-budget-swift.txt",
+        "receipts/task-budget-mobile-browser.json"
       ],
       "prerequisites": [],
-      "remaining": "Validation admission identity and pinned cumulative transient allowance persist across Resume, restart and linked fix pods. Task-wide agent/repository-rework limits, cumulative provider/sandbox recovery and audited token-budget extensions still require integration; historical pre-ledger retries are not reconstructed."
+      "remaining": "Validation admission identity and pinned cumulative transient allowance persist across Resume, restart and linked fix pods. Task-wide agent/repository-rework limits, cumulative provider/sandbox recovery and audited token-budget extensions still require integration; historical pre-ledger retries are not reconstructed. Incomplete known prior spending now blocks further budgeted agent consumption. This does not reserve future spend or reconstruct unrecorded legacy work; task-wide provider/rework admission and phase reconciliation remain."
     },
     {
       "id": "W2.2",
@@ -381,7 +392,10 @@
         "packages/shared/src/types/task-retry.ts",
         "packages/cli/src/commands/pod.ts",
         "packages/mobile-web/src/components/TaskRetryPanel.tsx",
-        "packages/desktop/Sources/AutopodUI/Views/Shared/TaskRetryCard.swift"
+        "packages/desktop/Sources/AutopodUI/Views/Shared/TaskRetryCard.swift",
+        "packages/shared/src/types/task-execution.ts",
+        "packages/mobile-web/src/components/TaskExecutionPanel.tsx",
+        "packages/desktop/Sources/AutopodUI/Views/Shared/SessionCostCard.swift"
       ],
       "tests": [
         "packages/daemon/src/pods/task-execution-ledger.test.ts",
@@ -390,7 +404,9 @@
         "packages/daemon/src/validation/retry-identity.test.ts",
         "packages/cli/src/commands/pod.test.ts",
         "packages/mobile-web/src/components/TaskRetryPanel.test.tsx",
-        "packages/desktop/Tests/AutopodClientTests/TaskRetryClientTests.swift"
+        "packages/desktop/Tests/AutopodClientTests/TaskRetryClientTests.swift",
+        "packages/mobile-web/src/components/TaskExecutionPanel.test.tsx",
+        "packages/desktop/Tests/AutopodClientTests/PodCostBreakdownResponseTests.swift"
       ],
       "evidence": [
         "receipts/task-ledger-red.txt",
@@ -403,10 +419,16 @@
         "receipts/task-retry-cli.txt",
         "receipts/task-retry-mobile-final.txt",
         "receipts/task-retry-swift.txt",
-        "receipts/task-retry-mobile-browser.json"
+        "receipts/task-retry-mobile-browser.json",
+        "checkpoint-17.md",
+        "receipts/task-budget-unknown-red.txt",
+        "receipts/task-budget-affected.txt",
+        "receipts/task-budget-cli.txt",
+        "receipts/task-budget-swift.txt",
+        "receipts/task-budget-mobile-browser.json"
       ],
       "prerequisites": [],
-      "remaining": "Actual engine wall duration is recorded once per executed validation admission; waiting and interrupted unknown duration are separate. Complete cross-phase cost/time reconciliation and available infrastructure billing remain. Native interaction and live acceptance are unverified."
+      "remaining": "Actual engine wall duration is recorded once per executed validation admission; waiting and interrupted unknown duration are separate. Complete cross-phase cost/time reconciliation and available infrastructure billing remain. Native interaction and live acceptance are unverified. Incomplete known prior spending now blocks further budgeted agent consumption. Future spending reservations, unrecorded legacy work, phase accounting and native/live verification remain."
     },
     {
       "id": "W2.5",
@@ -787,12 +809,19 @@
         "packages/shared/src/types/analytics.ts",
         "packages/daemon/src/pods/task-execution-ledger.ts",
         "packages/daemon/src/db/migrations/152_task_executions.sql",
-        "packages/daemon/src/pods/pod-manager.ts"
+        "packages/daemon/src/pods/pod-manager.ts",
+        "packages/shared/src/types/task-execution.ts",
+        "packages/cli/src/commands/pod.ts",
+        "packages/mobile-web/src/components/TaskExecutionPanel.tsx",
+        "packages/desktop/Sources/AutopodUI/Views/Shared/SessionCostCard.swift"
       ],
       "tests": [
         "packages/daemon/src/pods/cost-aggregation.test.ts",
         "packages/daemon/src/pods/task-execution-ledger.test.ts",
-        "packages/daemon/src/pods/pod-manager.test.ts"
+        "packages/daemon/src/pods/pod-manager.test.ts",
+        "packages/mobile-web/src/components/TaskExecutionPanel.test.tsx",
+        "packages/cli/src/commands/pod.test.ts",
+        "packages/desktop/Tests/AutopodClientTests/PodCostBreakdownResponseTests.swift"
       ],
       "evidence": [
         "receipts/history-cost-api.txt",
@@ -800,10 +829,16 @@
         "receipts/task-budget-manager-red.txt",
         "receipts/task-ledger-green-2.txt",
         "receipts/task-ledger-corrected-telemetry.txt",
-        "receipts/checkpoint-3-affected.txt"
+        "receipts/checkpoint-3-affected.txt",
+        "checkpoint-17.md",
+        "receipts/task-budget-unknown-red.txt",
+        "receipts/task-budget-affected.txt",
+        "receipts/task-budget-cli.txt",
+        "receipts/task-budget-swift.txt",
+        "receipts/task-budget-mobile-browser.json"
       ],
       "prerequisites": [],
-      "remaining": "Effective corrected provider ledger is authoritative; pod totals are legacy fallback; harness phases added once. Missing billing and earlier run identity remain explicit."
+      "remaining": "Effective corrected provider ledger is authoritative; pod totals are legacy fallback; harness phases added once. Missing billing and earlier run identity remain explicit. Incomplete known prior spending now blocks further budgeted agent consumption. Future spending reservations, unrecorded legacy work, phase accounting and native/live verification remain."
     },
     {
       "id": "W4.8",
@@ -817,13 +852,18 @@
         "packages/cli/src/commands/pod.ts",
         "packages/daemon/src/api/routes/pods.ts",
         "packages/mobile-web/src/components/TaskExecutionPanel.tsx",
-        "packages/desktop/Sources/AutopodUI/Views/Shared/SessionCostCard.swift"
+        "packages/desktop/Sources/AutopodUI/Views/Shared/SessionCostCard.swift",
+        "packages/daemon/src/pods/task-execution-ledger.ts",
+        "packages/shared/src/types/task-execution.ts"
       ],
       "tests": [
         "packages/desktop/Tests/AutopodUITests/ModelsSimulatorTests.swift",
         "packages/cli/src/commands/pod.test.ts",
         "packages/daemon/src/api/routes/pods.test.ts",
-        "packages/mobile-web/src/components/TaskExecutionPanel.test.tsx"
+        "packages/mobile-web/src/components/TaskExecutionPanel.test.tsx",
+        "packages/daemon/src/pods/task-execution-ledger.test.ts",
+        "packages/daemon/src/pods/pod-manager.test.ts",
+        "packages/desktop/Tests/AutopodClientTests/PodCostBreakdownResponseTests.swift"
       ],
       "evidence": [
         "receipts/checkpoint-1-desktop.txt",
@@ -837,12 +877,18 @@
         "receipts/task-desktop-tests.txt",
         "receipts/delivery-mobile-browser.json",
         "receipts/delivery-cli-http-fixed.txt",
-        "receipts/delivery-swift-fixed.txt"
+        "receipts/delivery-swift-fixed.txt",
+        "checkpoint-17.md",
+        "receipts/task-budget-unknown-red.txt",
+        "receipts/task-budget-affected.txt",
+        "receipts/task-budget-cli.txt",
+        "receipts/task-budget-swift.txt",
+        "receipts/task-budget-mobile-browser.json"
       ],
       "prerequisites": [
         "Selected mobile flows and new health CLI have local interaction proof. Desktop has compilation and tests only. Remaining operator flows, physical device and live evidence are outstanding."
       ],
-      "remaining": "Task projection and current mobile interaction verified locally. Actual desktop interaction and remaining changed operator flows remain."
+      "remaining": "Task projection and current mobile interaction verified locally. Actual desktop interaction and remaining changed operator flows remain. Incomplete known prior spending now blocks further budgeted agent consumption. Future spending reservations, unrecorded legacy work, phase accounting and native/live verification remain."
     },
     {
       "id": "W5.1",
@@ -1207,10 +1253,14 @@
         "receipts/checkpoint-15-full-validation.txt",
         "receipts/checkpoint-15-validation-identity.json",
         "receipts/artifact-recovery-final.txt",
-        "receipts/artifact-recovery-build-final.txt"
+        "receipts/artifact-recovery-build-final.txt",
+        "receipts/checkpoint-16-full-validation.txt",
+        "receipts/checkpoint-16-validation-identity.json",
+        "receipts/task-budget-affected.txt",
+        "receipts/task-budget-build.txt"
       ],
       "prerequisites": [
-        "Full pipeline passed on clean 6789690c with audit zero. Subsequent recovery changes pass affected suites and builds; final committed pipeline remains required."
+        "Full pipeline passed on clean ce7f8b94 with audit zero. Subsequent task-budget changes have affected-suite/build proof; final committed pipeline remains required."
       ]
     },
     {
@@ -1227,7 +1277,10 @@
         "receipts/artifact-cli-final.txt",
         "receipts/artifact-swift-verified.txt",
         "receipts/artifact-snapshot-mobile-browser.json",
-        "receipts/artifact-recovery-swift.txt"
+        "receipts/artifact-recovery-swift.txt",
+        "receipts/task-budget-mobile-browser.json",
+        "receipts/task-budget-cli.txt",
+        "receipts/task-budget-swift.txt"
       ],
       "prerequisites": [
         "Selected mobile flows and new health CLI have local interaction proof. Desktop has compilation and tests only. Remaining operator flows, physical device and live evidence are outstanding."
@@ -1252,5 +1305,5 @@
       "prerequisites": []
     }
   ],
-  "lastCheckpoint": "checkpoint-16.md"
+  "lastCheckpoint": "checkpoint-17.md"
 }

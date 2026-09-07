@@ -69,6 +69,7 @@ public struct TaskExecutionSummary: Codable, Equatable, Sendable {
   public let validationExecutionCount: Int
   public let delivery: TaskDeliverySummaryResponse?
   public let tokenBudget: Int?
+  public let budgetCheck: TaskBudgetCheckResponse?
   public let recordedInputTokens: Int
   public let recordedOutputTokens: Int
   public let recordedCostUsd: Double
@@ -82,4 +83,9 @@ public struct TaskDeliverySummaryResponse: Codable, Equatable, Sendable {
   public let receiptCount: Int
   public let unresolvedCount: Int
   public let scope: String
+}
+
+public struct TaskBudgetCheckResponse: Codable, Equatable, Sendable {
+  public let status: String
+  public let reason: String
 }

@@ -51,6 +51,7 @@ export function TaskExecutionPanel({ podId, revision }: { podId: string; revisio
           <p>
             Recorded task cost: ${data.recordedCostUsd.toFixed(4)} · {data.telemetry} telemetry
           </p>
+          <p>{data.budgetCheck?.reason ?? 'Task budget admission evidence unavailable.'}</p>
           {data.diagnostics.map((message) => (
             <p key={message} className="muted">
               {message}

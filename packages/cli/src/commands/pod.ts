@@ -703,6 +703,7 @@ export function registerPodCommands(program: Command, getClient: () => AutopodCl
           `${chalk.bold('Recorded task cost:')} $${task.recordedCostUsd.toFixed(4)} (${task.telemetry} telemetry)`,
         );
         for (const diagnostic of task.diagnostics) console.log(chalk.dim(diagnostic));
+        console.log(task.budgetCheck?.reason ?? 'Task budget admission evidence unavailable.');
       } else console.log(chalk.yellow('Task accounting unavailable'));
       if (s.finalization?.agentSettledAt) {
         console.log(`${chalk.bold('Agent settled:')} ${s.finalization.agentSettledAt}`);

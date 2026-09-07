@@ -60,3 +60,26 @@ import Testing
   #expect(response.model == nil)
   #expect(response.segments.isEmpty)
 }
+
+@Test func taskAccountingRetainsUnavailableBudgetAdmission() throws {
+  let json = """
+  {
+    "taskId": "task:root", "executionId": "execution:fix", "rootPodId": "root",
+    "podCount": 2, "agentRunCount": 1, "failedRunCount": 1, "transientFailureCount": 0,
+    "providerAttemptCount": 1, "validationExecutionCount": 0,
+    "tokenBudget": 100, "recordedInputTokens": 10, "recordedOutputTokens": 5,
+    "recordedCostUsd": 0.5, "infrastructureCostUsd": null, "telemetry": "partial",
+    "diagnostics": [],
+    "budgetCheck": { "status": "unavailable", "reason": "Task token accounting incomplete; reconcile prior execution telemetry." }
+  }
+  """.data(using: .utf8)!
+  let response = try JSONDecoder().decode(TaskExecutionSummary.self, from: json)
+  #expect(response.recordedInputTokens + response.recordedOutputTokens == 15)
+  #expect(response.tokenBudget == 100)
+  #expect(response.budgetCheck?.status == "unavailable")
+  #expect(response.budgetCheck?.reason.contains("reconcile prior execution telemetry") == true)
+  var legacy = try #require(JSONSerialization.jsonObject(with: json) as? [String: Any])
+  legacy.removeValue(forKey: "budgetCheck")
+  let old = try JSONDecoder().decode(TaskExecutionSummary.self, from: JSONSerialization.data(withJSONObject: legacy))
+  #expect(old.budgetCheck == nil)
+}

@@ -164,6 +164,7 @@ const retryState = {
   authorizations: [],
   telemetry: 'partial',
 };
+const taskBudgetFixture = process.env.TASK_BUDGET_FIXTURE === '1';
 const savedSnapshotRecovery = process.env.ARTIFACT_SNAPSHOT_FIXTURE === '1';
 const artifactRecovery = process.env.ARTIFACT_RECOVERY_FIXTURE === '1' || savedSnapshotRecovery;
 let artifactRetryCount = 0;
@@ -402,8 +403,18 @@ const server = createServer(async (req, res) => {
       providerAttemptCount: 4,
       validationExecutionCount: 5,
       tokenBudget: 100,
-      recordedInputTokens: 90,
-      recordedOutputTokens: 10,
+      budgetCheck: taskBudgetFixture
+        ? {
+            status: 'unavailable',
+            reason:
+              'Task token accounting incomplete; reconcile prior execution and phase telemetry before starting more budgeted work.',
+          }
+        : {
+            status: 'exhausted',
+            reason: 'Recorded task tokens have reached the configured limit.',
+          },
+      recordedInputTokens: taskBudgetFixture ? 10 : 90,
+      recordedOutputTokens: taskBudgetFixture ? 5 : 10,
       recordedCostUsd: 1.25,
       infrastructureCostUsd: null,
       telemetry: 'partial',

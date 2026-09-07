@@ -1451,6 +1451,42 @@ describe('PodManager', () => {
     expect(ctx.podRepo.taskExecutions?.snapshot(fix.id).agentRunCount).toBe(0);
   });
 
+  it('blocks a linked fix before provider consumption when prior task spending is incomplete', async () => {
+    const ctx = createTestContext();
+    const manager = createPodManager(ctx.deps);
+    const parent = manager.createSession(
+      { profileName: 'test-profile', task: 'original', tokenBudget: 100 },
+      'user-1',
+    );
+    ctx.podRepo.update(parent.id, {
+      status: 'failed',
+      inputTokens: 10,
+      outputTokens: 5,
+      tokenTelemetryAccuracy: 'partial',
+    });
+    const fix = manager.createSession(
+      { profileName: 'test-profile', task: 'fix original', linkedPodId: parent.id },
+      'user-1',
+    );
+    ctx.podRepo.update(fix.id, { status: 'running' });
+    let consumed = false;
+    await expect(
+      manager.consumeAgentEvents(
+        fix.id,
+        (async function* () {
+          consumed = true;
+          yield {
+            type: 'complete',
+            timestamp: new Date().toISOString(),
+            result: 'unwanted paid work',
+          } as const;
+        })(),
+      ),
+    ).rejects.toMatchObject({ code: 'TASK_BUDGET_UNAVAILABLE' });
+    expect(consumed).toBe(false);
+    expect(ctx.podRepo.taskExecutions?.snapshot(fix.id).agentRunCount).toBe(0);
+  });
+
   it('does not retain an active run when event-consumer initialization fails', async () => {
     const ctx = createTestContext(undefined, { defaultRuntime: 'codex' });
     const runtime = ctx.runtime as Runtime & { suspend: ReturnType<typeof vi.fn> };

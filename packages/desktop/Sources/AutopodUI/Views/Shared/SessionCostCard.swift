@@ -35,6 +35,7 @@ public struct SessionCostCard: View {
                     }
                     Text("Recorded task cost: \(formatCost(task.recordedCostUsd)) · \(task.telemetry) telemetry")
                     Text("Task tokens: \(task.recordedInputTokens + task.recordedOutputTokens) / \(task.tokenBudget.map(String.init) ?? "no configured limit")")
+                    Text(task.budgetCheck?.reason ?? "Task budget admission evidence unavailable.")
                     ForEach(task.diagnostics, id: \.self) { Text($0).font(.caption).foregroundStyle(.secondary) }
                 }
             } else {

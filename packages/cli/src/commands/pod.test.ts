@@ -420,6 +420,10 @@ it('status command renders real HTTP delivery accounting and reused evidence, pr
     recordedInputTokens: 90,
     recordedOutputTokens: 10,
     tokenBudget: 100,
+    budgetCheck: {
+      status: 'unavailable',
+      reason: 'Task token accounting incomplete; reconcile prior execution telemetry.',
+    },
     recordedCostUsd: 1.25,
     telemetry: 'partial',
     diagnostics: [],
@@ -468,6 +472,9 @@ it('status command renders real HTTP delivery accounting and reused evidence, pr
     const output = log.mock.calls.map((call) => call.join(' ')).join('\n');
     expect(output).toContain('1 confirmed, 1 unresolved of 2 intents');
     expect(output).toContain('historical URLs excluded');
+    expect(output).toContain(
+      'Task token accounting incomplete; reconcile prior execution telemetry.',
+    );
     expect(output).toContain(
       'test: reused receipt local-receipt; originally executed 2026-09-07T10:00:00Z (1200 ms)',
     );

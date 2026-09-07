@@ -39,8 +39,32 @@ function fixture() {
 const binding = { runtime: 'codex', model: 'model', providerAccountId: 'account' };
 
 describe('task-wide execution accounting', () => {
+  it('does not authorize more budgeted work from an incomplete prior spending subtotal', () => {
+    const { db, repo } = fixture();
+    try {
+      repo.update('root', { inputTokens: 10, outputTokens: 5, tokenTelemetryAccuracy: 'partial' });
+      expect(repo.taskExecutions?.snapshot('fix')).toMatchObject({
+        recordedInputTokens: 10,
+        recordedOutputTokens: 5,
+        tokenBudget: 100,
+        budgetCheck: { status: 'unavailable' },
+      });
+      expect(() => repo.taskExecutions?.beginRun('fix', 1, 1, binding)).toThrow(
+        'Task token accounting incomplete',
+      );
+      expect(repo.taskExecutions?.snapshot('fix').agentRunCount).toBe(0);
+      repo.update('root', { tokenTelemetryAccuracy: 'repaired', phaseTokenUsage: {} });
+      expect(repo.taskExecutions?.snapshot('fix').budgetCheck?.status).toBe('below_recorded_limit');
+      expect(repo.taskExecutions?.beginRun('fix', 1, 1, binding)).toEqual(expect.any(String));
+    } finally {
+      db.close();
+    }
+  });
+
   it('retains task/run identity through restart and linked fixes while intentional reruns remain distinct', () => {
     const { db, repo } = fixture();
+    // This case tests lineage and settlement with no configured spending cap.
+    repo.update('root', { tokenBudget: null });
     const ledger = repo.taskExecutions;
     if (!ledger) throw new Error('Missing ledger');
     const root = ledger.snapshot('root');

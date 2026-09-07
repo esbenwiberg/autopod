@@ -78,6 +78,7 @@ export function createTaskExecutionLedger(db: Database.Database): TaskExecutionL
     let recordedInputTokens = 0;
     let recordedOutputTokens = 0;
     let recordedCostUsd = 0;
+    let incompleteSpending = false;
     const rows = db
       .prepare(`SELECT p.id, p.input_tokens, p.output_tokens, p.cost_usd,
       p.phase_token_usage, p.token_telemetry_accuracy FROM task_executions e JOIN pods p ON p.id = e.pod_id
@@ -93,11 +94,12 @@ export function createTaskExecutionLedger(db: Database.Database): TaskExecutionL
     const number = (value: unknown, id: string): number => {
       if (typeof value === 'number' && Number.isFinite(value) && value >= 0) return value;
       diagnostics.push(`${id}: telemetry value unavailable`);
+      incompleteSpending = true;
       return 0;
     };
     for (const row of rows) {
       const attempts = db
-        .prepare(`SELECT COUNT(*) AS count,
+        .prepare(`SELECT COUNT(*) AS count, SUM(a.ended_at IS NOT NULL) AS settledCount,
         SUM(COALESCE(c.input_tokens, a.input_tokens)) AS inputTokens,
         SUM(COALESCE(c.output_tokens, a.output_tokens)) AS outputTokens,
         SUM(COALESCE(c.cost_usd, a.cost_usd)) AS costUsd
@@ -105,6 +107,7 @@ export function createTaskExecutionLedger(db: Database.Database): TaskExecutionL
           ON c.pod_id = a.pod_id AND c.ordinal = a.ordinal WHERE a.pod_id = ?`)
         .get(row.id) as {
         count: number;
+        settledCount: number | null;
         inputTokens: number | null;
         outputTokens: number | null;
         costUsd: number | null;
@@ -119,6 +122,24 @@ export function createTaskExecutionLedger(db: Database.Database): TaskExecutionL
               outputTokens: row.output_tokens,
               costUsd: row.cost_usd,
             };
+      const priorRuns = (
+        db
+          .prepare('SELECT COUNT(*) AS count FROM task_agent_runs WHERE pod_id = ?')
+          .get(row.id) as {
+          count: number;
+        }
+      ).count;
+      // An opened zero-use provider segment can precede the first runtime event.
+      // Existing runs, settled segments and positive usage demonstrate prior work.
+      const priorWork =
+        priorRuns > 0 ||
+        (attempts.settledCount ?? 0) > 0 ||
+        row.input_tokens > 0 ||
+        row.output_tokens > 0 ||
+        row.cost_usd > 0 ||
+        (agent.inputTokens ?? 0) > 0 ||
+        (agent.outputTokens ?? 0) > 0 ||
+        (agent.costUsd ?? 0) > 0;
       recordedInputTokens += number(agent.inputTokens, row.id);
       recordedOutputTokens += number(agent.outputTokens, row.id);
       recordedCostUsd += number(agent.costUsd, row.id);
@@ -134,10 +155,13 @@ export function createTaskExecutionLedger(db: Database.Database): TaskExecutionL
       if (
         row.token_telemetry_accuracy !== 'complete' &&
         row.token_telemetry_accuracy !== 'repaired'
-      )
+      ) {
         diagnostics.push(`${row.id}: agent telemetry incomplete`);
+        if (priorWork) incompleteSpending = true;
+      }
       if (!row.phase_token_usage) {
         diagnostics.push(`${row.id}: phase telemetry unavailable`);
+        if (priorWork) incompleteSpending = true;
         continue;
       }
       try {
@@ -156,6 +180,7 @@ export function createTaskExecutionLedger(db: Database.Database): TaskExecutionL
         }
       } catch {
         diagnostics.push(`${row.id}: phase telemetry unreadable`);
+        incompleteSpending = true;
       }
     }
     const counts = db
@@ -187,12 +212,33 @@ export function createTaskExecutionLedger(db: Database.Database): TaskExecutionL
       .prepare('SELECT token_budget AS budget FROM pods WHERE id = ?')
       .get(identity.rootPodId) as { budget: number | null } | undefined;
     if (!root) diagnostics.push('Task budget source unavailable');
+    const budgetCheck: NonNullable<TaskExecutionSummary['budgetCheck']> = !root
+      ? { status: 'unavailable', reason: 'Task budget source unavailable.' }
+      : root.budget === null || root.budget <= 0
+        ? { status: 'unlimited', reason: 'No task token limit configured.' }
+        : recordedInputTokens + recordedOutputTokens >= root.budget
+          ? {
+              status: 'exhausted',
+              reason: 'Recorded task tokens have reached the configured limit.',
+            }
+          : incompleteSpending
+            ? {
+                status: 'unavailable',
+                reason:
+                  'Task token accounting incomplete; reconcile prior execution and phase telemetry before starting more budgeted work.',
+              }
+            : {
+                status: 'below_recorded_limit',
+                reason:
+                  'Recorded usage is below the task limit. Future provider spending is not reserved.',
+              };
     // Infrastructure billing is a separate missing measurement, never a fabricated zero.
     return {
       ...identity,
       ...counts,
       podCount: rows.length,
       tokenBudget: root?.budget ?? null,
+      budgetCheck,
       providerAttemptCount: count('provider_attempts'),
       validationExecutionCount: count('validations'),
       delivery: { ...delivery, scope: 'durable-receipts-only' },
@@ -205,7 +251,7 @@ export function createTaskExecutionLedger(db: Database.Database): TaskExecutionL
         ...new Set([
           ...diagnostics,
           'Infrastructure cost unavailable',
-          'Historical agent runs before schema 143 are not reconstructed',
+          'Historical agent runs before schema 152 are not reconstructed',
         ]),
       ],
     };
@@ -251,6 +297,8 @@ export function createTaskExecutionLedger(db: Database.Database): TaskExecutionL
           'TASK_BUDGET_EXHAUSTED',
           409,
         );
+      if (task.budgetCheck?.status === 'unavailable')
+        throw new AutopodError(task.budgetCheck.reason, 'TASK_BUDGET_UNAVAILABLE', 409);
       const id = randomUUID();
       db.prepare(
         'INSERT INTO task_agent_runs (id, pod_id, generation, cycle, binding, started_at) VALUES (?, ?, ?, ?, ?, ?)',

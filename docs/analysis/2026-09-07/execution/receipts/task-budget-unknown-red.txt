@@ -1,0 +1,62 @@
+
+ RUN  v4.1.11 /private/tmp/autopod-durable-execution/packages/daemon
+
+ ❯ src/pods/task-execution-ledger.test.ts (10 tests | 1 failed | 9 skipped) 68ms
+     × does not authorize more budgeted work from an incomplete prior spending subtotal 68ms
+ ❯ src/pods/pod-manager.test.ts (430 tests | 1 failed | 429 skipped) 65ms
+     × blocks a linked fix before provider consumption when prior task spending is incomplete 64ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 2 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/pods/pod-manager.test.ts > PodManager > blocks a linked fix before provider consumption when prior task spending is incomplete
+AssertionError: promise resolved "'completed'" instead of rejecting
+
+- Expected:
+Error {
+  "message": "rejected promise",
+}
+
++ Received:
+"completed"
+
+ ❯ src/pods/pod-manager.test.ts:1465:10
+    1463|       consumed = true;
+    1464|       yield { type: 'complete', timestamp: new Date().toISOString(), r…
+    1465|     })())).rejects.toMatchObject({ code: 'TASK_BUDGET_UNAVAILABLE' });
+       |          ^
+    1466|     expect(consumed).toBe(false);
+    1467|     expect(ctx.podRepo.taskExecutions?.snapshot(fix.id).agentRunCount)…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/2]⎯
+
+ FAIL  src/pods/task-execution-ledger.test.ts > task-wide execution accounting > does not authorize more budgeted work from an incomplete prior spending subtotal
+AssertionError: expected { …(17) } to match object { recordedInputTokens: 10, …(3) }
+(18 matching properties omitted from actual)
+
+- Expected
++ Received
+
+  {
+-   "budgetCheck": {
+-     "status": "unavailable",
+-   },
+    "recordedInputTokens": 10,
+    "recordedOutputTokens": 5,
+    "tokenBudget": 100,
+  }
+
+ ❯ src/pods/task-execution-ledger.test.ts:46:52
+     44|     try {
+     45|       repo.update('root', { inputTokens: 10, outputTokens: 5, tokenTel…
+     46|       expect(repo.taskExecutions?.snapshot('fix')).toMatchObject({
+       |                                                    ^
+     47|         recordedInputTokens: 10, recordedOutputTokens: 5, tokenBudget:…
+     48|         budgetCheck: { status: 'unavailable' },
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/2]⎯
+
+
+ Test Files  2 failed (2)
+      Tests  2 failed | 438 skipped (440)
+   Start at  18:47:56
+   Duration  1.24s (transform 992ms, setup 0ms, import 1.46s, tests 133ms, environment 0ms)
