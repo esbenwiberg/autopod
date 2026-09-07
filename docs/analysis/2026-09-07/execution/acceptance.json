@@ -570,7 +570,9 @@
         "receipts/cost-reconciliation-first-green.txt",
         "receipts/cost-reconciliation-api.txt",
         "receipts/cost-reconciliation-affected.txt",
-        "receipts/cost-reconciliation-build.txt"
+        "receipts/cost-reconciliation-build.txt",
+        "receipts/checkpoint-25-full-validation.txt",
+        "receipts/checkpoint-25-validation-identity.json"
       ],
       "prerequisites": [],
       "remaining": "Actual engine wall duration is recorded once per executed validation admission; waiting and interrupted unknown duration are separate. Complete cross-phase cost/time reconciliation and available infrastructure billing remain. Native interaction and live acceptance are unverified. Incomplete known prior spending now blocks further budgeted agent consumption. Future spending reservations, unrecorded legacy work, phase accounting and native/live verification remain. Checkpoint 24 adds durable sandbox startup retries, legacy allowance lower bounds, stage-scoped one-use decisions, measured startup time and local operator proof. Provider retries after first runtime event, repository rework, complete historical reconstruction, phase billing, native interaction and live acceptance remain. Checkpoint 25 reconciles corrected provider totals in task, per-pod and fleet APIs, including recorded zero. Phase attribution, legacy estimates, telemetry completeness, operator presentation and live proof remain."
@@ -1019,7 +1021,9 @@
         "receipts/cost-reconciliation-first-green.txt",
         "receipts/cost-reconciliation-api.txt",
         "receipts/cost-reconciliation-affected.txt",
-        "receipts/cost-reconciliation-build.txt"
+        "receipts/cost-reconciliation-build.txt",
+        "receipts/checkpoint-25-full-validation.txt",
+        "receipts/checkpoint-25-validation-identity.json"
       ],
       "prerequisites": [],
       "remaining": "Effective corrected provider ledger is authoritative; pod totals are legacy fallback; harness phases added once. Missing billing and earlier run identity remain explicit. Incomplete known prior spending now blocks further budgeted agent consumption. Future spending reservations, unrecorded legacy work, phase accounting and native/live verification remain. Checkpoint 25 reconciles corrected provider totals in task, per-pod and fleet APIs, including recorded zero. Phase attribution, legacy estimates, telemetry completeness, operator presentation and live proof remain."
@@ -1106,7 +1110,9 @@
         "receipts/cost-reconciliation-first-green.txt",
         "receipts/cost-reconciliation-api.txt",
         "receipts/cost-reconciliation-affected.txt",
-        "receipts/cost-reconciliation-build.txt"
+        "receipts/cost-reconciliation-build.txt",
+        "receipts/checkpoint-25-full-validation.txt",
+        "receipts/checkpoint-25-validation-identity.json"
       ],
       "prerequisites": [
         "Selected mobile flows and new health CLI have local interaction proof. Desktop has compilation and tests only. Remaining operator flows, physical device and live evidence are outstanding."
