@@ -12826,6 +12826,78 @@ describe('PodManager', () => {
         expect(completed.completedAt).not.toBeNull();
       });
 
+      it('retains the interactive source and retries completion when workspace synchronization failed', async () => {
+        const ctx = createTestContext();
+        const manager = createPodManager(ctx.deps);
+        const pod = manager.createSession(
+          { profileName: 'test-profile', task: 'Preserve workspace', outputMode: 'workspace' },
+          'user-1',
+        );
+        ctx.podRepo.update(pod.id, {
+          status: 'running',
+          containerId: 'ctr-source',
+          worktreePath: '/tmp/worktree/abc',
+        });
+        vi.mocked(ctx.containerManager.execInContainer).mockRejectedValue(new Error('Sync failed'));
+        vi.mocked(ctx.containerManager.extractDirectoryFromContainer).mockRejectedValue(
+          new Error('Archive failed'),
+        );
+        await expect(manager.completeSession(pod.id)).rejects.toMatchObject({
+          code: 'WORKSPACE_PRESERVATION_FAILED',
+        });
+        expect(manager.getSession(pod.id)).toMatchObject({
+          status: 'running',
+          containerId: 'ctr-source',
+          worktreePath: '/tmp/worktree/abc',
+          failureReason: expect.stringContaining('Workspace preservation failed.'),
+        });
+        expect(ctx.worktreeManager.mergeBranch).not.toHaveBeenCalled();
+        expect(ctx.worktreeManager.cleanup).not.toHaveBeenCalled();
+        expect(ctx.containerManager.kill).not.toHaveBeenCalled();
+        expect(ctx.containerManager.stop).not.toHaveBeenCalled();
+        expect(
+          ctx.eventRepo
+            .getForSession(pod.id)
+            .some((event) => event.payload.type === 'pod.completed'),
+        ).toBe(false);
+
+        vi.mocked(ctx.containerManager.execInContainer).mockResolvedValue({
+          stdout: '',
+          stderr: '',
+          exitCode: 0,
+        });
+        await manager.completeSession(pod.id);
+        expect(manager.getSession(pod.id).status).toBe('complete');
+        expect(manager.getSession(pod.id).failureReason).toBeNull();
+        expect(ctx.worktreeManager.mergeBranch).toHaveBeenCalledOnce();
+        expect(ctx.runtime.spawn).not.toHaveBeenCalled();
+        expect(ctx.runtime.resume).not.toHaveBeenCalled();
+      });
+
+      it('does not discard an interactive branch container when its host worktree is unavailable', async () => {
+        const ctx = createTestContext();
+        const manager = createPodManager(ctx.deps);
+        const pod = manager.createSession(
+          { profileName: 'test-profile', task: 'Preserve workspace', outputMode: 'workspace' },
+          'user-1',
+        );
+        ctx.podRepo.update(pod.id, {
+          status: 'running',
+          containerId: 'ctr-source',
+          worktreePath: null,
+        });
+        await expect(manager.completeSession(pod.id)).rejects.toMatchObject({
+          code: 'WORKSPACE_PRESERVATION_FAILED',
+        });
+        expect(manager.getSession(pod.id)).toMatchObject({
+          status: 'running',
+          containerId: 'ctr-source',
+        });
+        expect(ctx.containerManager.kill).not.toHaveBeenCalled();
+        expect(ctx.containerManager.stop).not.toHaveBeenCalled();
+        expect(ctx.worktreeManager.mergeBranch).not.toHaveBeenCalled();
+      });
+
       it('emits pod.completed event', async () => {
         const ctx = createTestContext();
         const manager = createPodManager(ctx.deps);

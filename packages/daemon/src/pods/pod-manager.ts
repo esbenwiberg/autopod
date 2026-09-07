@@ -6604,6 +6604,15 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
     );
   }
 
+  function failInteractivePreservation(pod: Pod, reason: string): never {
+    const failureReason = `Workspace preservation failed. ${reason} Original resources retained; repair synchronization and retry completion.`;
+    if (ownsArtifactCompletion(pod)) {
+      podRepo.update(pod.id, { failureReason });
+      emitActivityError(pod.id, failureReason, false);
+    }
+    throw new AutopodError(failureReason, 'WORKSPACE_PRESERVATION_FAILED', 502);
+  }
+
   async function preserveArtifacts(pod: Pod): Promise<string> {
     const dataDir = process.env.DATA_DIR ?? path.join(process.cwd(), '.autopod-data');
     const artifactRoot = path.join(dataDir, 'artifacts', pod.id);
@@ -12409,7 +12418,8 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         await preserveArtifacts(pod);
       } else {
         // Sync workspace changes back to host worktree before pushing
-        let workspaceSyncOk = true;
+        if (pod.containerId && !pod.worktreePath && pod.options.output !== 'none')
+          failInteractivePreservation(pod, 'The host worktree is unavailable.');
         if (pod.containerId && pod.worktreePath) {
           try {
             const cm = containerManagerFactory.get(pod.executionTarget);
@@ -12421,8 +12431,11 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
               pod.executionTarget,
             );
           } catch (err) {
-            workspaceSyncOk = false;
             logger.warn({ err, podId }, 'Failed to sync workspace before push');
+            failInteractivePreservation(
+              pod,
+              'Neither workspace synchronization nor archive fallback succeeded.',
+            );
           }
         }
 
@@ -12449,8 +12462,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
               );
             }
             // mergeBranch auto-commits any remaining uncommitted changes before pushing.
-            // If sync-back failed, the host worktree may be missing files the index still
-            // references — tighten the deletion guard so a ghost mass-delete cannot ship.
+            // Sync-back must succeed before this point; retain the normal deletion guard.
             const rawTask = pod.task?.trim() ?? '';
             const commitMessage =
               rawTask.length > 0
@@ -12465,7 +12477,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
               // possibly hours/days after the worktree was created. The in-memory PAT
               // cache may be cold after a daemon restart in between.
               pat: await resolveGitCredential(pushScanProfile),
-              maxDeletions: workspaceSyncOk ? 100 : 0,
+              maxDeletions: 100,
               commitMessage,
             });
             logger.info({ podId, branch: pod.branch }, 'Workspace branch pushed to origin');
@@ -12501,7 +12513,13 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           'STALE_ARTIFACT_COLLECTION',
           409,
         );
-      transition(podRepo.getOrThrow(podId), 'complete', { completedAt: new Date().toISOString() });
+      const completingPod = podRepo.getOrThrow(podId);
+      transition(completingPod, 'complete', {
+        completedAt: new Date().toISOString(),
+        ...(completingPod.failureReason?.startsWith('Workspace preservation failed.')
+          ? { failureReason: null }
+          : {}),
+      });
 
       // Deactivate PIM groups on pod completion
       if (pod.pimGroups?.length && pod.userId) {

@@ -185,12 +185,15 @@
         "receipts/artifact-restart-red.txt",
         "receipts/artifact-snapshot-resume-red.txt",
         "receipts/artifact-duplicate-red.txt",
-        "receipts/artifact-recovery-final.txt"
+        "receipts/artifact-recovery-final.txt",
+        "checkpoint-22.md",
+        "receipts/interactive-preservation-red.txt",
+        "receipts/interactive-preservation-final.txt"
       ],
       "prerequisites": [
         "PR creation intent/reconciliation implemented locally; broader finalization side effects and operator override remain."
       ],
-      "remaining": "Entered artifact collection survives restart with sources retained; generation/cycle-bound integrity receipts and in-process duplicate coordination are implemented. Independent source inventory, fsync/power-loss proof, orphan snapshot/DB-path reconciliation, interactive duplicates, other reply boundaries and broader durable finalization side effects remain."
+      "remaining": "Entered artifact collection survives restart with sources retained; generation/cycle-bound integrity receipts and in-process duplicate coordination are implemented. Independent source inventory, fsync/power-loss proof, orphan snapshot/DB-path reconciliation, interactive duplicates, other reply boundaries and broader durable finalization side effects remain. Interactive completion now stops before push/cleanup when sync and archive fallback fail or a branch container lacks its host worktree; the source remains retryable. Duplicate concurrent interactive requests, cancellation fences, restart/durable side-effect receipts and complete source-inventory proof remain."
     },
     {
       "id": "W1.4",
@@ -226,10 +229,13 @@
         "receipts/artifact-restart-red.txt",
         "receipts/artifact-snapshot-resume-red.txt",
         "receipts/artifact-duplicate-red.txt",
-        "receipts/artifact-recovery-final.txt"
+        "receipts/artifact-recovery-final.txt",
+        "checkpoint-22.md",
+        "receipts/interactive-preservation-red.txt",
+        "receipts/interactive-preservation-final.txt"
       ],
       "prerequisites": [],
-      "remaining": "Entered artifact collection survives restart with sources retained; generation/cycle-bound integrity receipts and in-process duplicate coordination are implemented. Independent source inventory, fsync/power-loss proof, orphan snapshot/DB-path reconciliation, interactive duplicates, other reply boundaries and broader durable finalization side effects remain."
+      "remaining": "Entered artifact collection survives restart with sources retained; generation/cycle-bound integrity receipts and in-process duplicate coordination are implemented. Independent source inventory, fsync/power-loss proof, orphan snapshot/DB-path reconciliation, interactive duplicates, other reply boundaries and broader durable finalization side effects remain. Interactive completion now stops before push/cleanup when sync and archive fallback fail or a branch container lacks its host worktree; the source remains retryable. Duplicate concurrent interactive requests, cancellation fences, restart/durable side-effect receipts and complete source-inventory proof remain."
     },
     {
       "id": "W1.5",
@@ -951,7 +957,8 @@
         "receipts/compact-projection-swift.txt",
         "receipts/compact-projection-swift-diagnostic.txt",
         "receipts/compact-projection-mobile.txt",
-        "receipts/compact-projection-mobile-browser.json"
+        "receipts/compact-projection-mobile-browser.json",
+        "receipts/interactive-preservation-cli.txt"
       ],
       "prerequisites": [
         "Selected mobile flows and new health CLI have local interaction proof. Desktop has compilation and tests only. Remaining operator flows, physical device and live evidence are outstanding."
@@ -1371,7 +1378,10 @@
         "receipts/summary-launch-race-final.txt",
         "receipts/summary-launch-race-build.txt",
         "receipts/checkpoint-21-full-validation.txt",
-        "receipts/checkpoint-21-validation-identity.json"
+        "receipts/checkpoint-21-validation-identity.json",
+        "receipts/interactive-preservation-final.txt",
+        "receipts/interactive-preservation-build.txt",
+        "receipts/interactive-preservation-cli.txt"
       ],
       "prerequisites": [
         "Full required pipeline passes on clean 46f63982ea42aef832fcb6df1c21631e468f409c: daemon 4468 passed, one known Linux-only skip; all 15 Turbo tasks passed; audit zero, secret scan and deployment/cleanup safeguards passed. The skipped source callback has separate local Linux proof at unchanged implementation 18e5bd37. Final source validation remains after further implementation."
@@ -1399,7 +1409,8 @@
         "receipts/compact-projection-swift.txt",
         "receipts/compact-projection-swift-diagnostic.txt",
         "receipts/compact-projection-mobile.txt",
-        "receipts/compact-projection-mobile-browser.json"
+        "receipts/compact-projection-mobile-browser.json",
+        "receipts/interactive-preservation-cli.txt"
       ],
       "prerequisites": [
         "Selected mobile flows and new health CLI have local interaction proof. Desktop has compilation and tests only. Remaining operator flows, physical device and live evidence are outstanding."
@@ -1424,5 +1435,5 @@
       "prerequisites": []
     }
   ],
-  "lastCheckpoint": "checkpoint-21.md"
+  "lastCheckpoint": "checkpoint-22.md"
 }
