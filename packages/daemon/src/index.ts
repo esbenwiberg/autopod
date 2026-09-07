@@ -247,6 +247,7 @@ const podsitterRepo = createPodsitterRepository(db);
 const llmDeps = { profileStore, providerAccountStore };
 const podRepo = createPodRepository(db);
 podRepo.taskRetries?.recoverInterrupted();
+podRepo.sandboxStartupRetries?.recoverInterrupted();
 const providerAttemptRepo = createProviderAttemptRepository(db);
 const tokenTelemetryRepair = createTokenTelemetryRepair({ db, podRepo, providerAttemptRepo });
 const eventRepo = createEventRepository(db);

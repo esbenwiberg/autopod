@@ -7,79 +7,90 @@ afterEach(() => {
   vi.restoreAllMocks();
   localStorage.clear();
 });
-it('preserves one human authorization through lost response and reload without implicitly resuming', async () => {
-  const input = { requestKey: 'durable-key', reason: 'External prerequisite checked' };
-  localStorage.setItem('autopod.retry-authorization.fix', JSON.stringify(input));
-  const state = {
-    taskId: 'task',
-    admissionCount: 4,
-    executedCount: 3,
-    transientRetryCount: 2,
-    backoffsMs: [0, 0],
-    measuredDurationMs: 15,
-    interruptedCount: 1,
-    latest: { id: 'failure', outcome: 'unknown' },
-    authorizations: [] as Array<{
-      id: string;
-      failureId: string;
-      reason: string;
-      usedByAttemptId: string | null;
-    }>,
-  };
-  const bodies: unknown[] = [];
-  let resumes = 0;
-  vi.spyOn(globalThis, 'fetch').mockImplementation(async (url, init) => {
-    if (String(url).endsWith('retry-authorizations')) {
-      bodies.push(JSON.parse(String(init?.body)));
-      state.authorizations = [
-        { id: 'grant', failureId: 'failure', reason: input.reason, usedByAttemptId: null },
-      ];
-      if (bodies.length === 1) throw new Error('Response lost after commit');
-      return new Response(JSON.stringify(state.authorizations[0]));
-    }
-    if (String(url).endsWith('/resume')) {
-      resumes++;
-      return new Response(JSON.stringify({ ok: true, action: 'revalidate' }));
-    }
-    return new Response(JSON.stringify(state));
-  });
-  const container = document.createElement('div');
-  document.body.append(container);
-  let root = createRoot(container);
-  const render = () =>
-    act(async () => {
-      root.render(<TaskRetryPanel podId="fix" revision="failed" status="failed" />);
+it.each(['validation', 'sandbox_startup'] as const)(
+  'preserves one %s authorization through lost response and reload without implicitly resuming',
+  async (stage) => {
+    const input = { requestKey: 'durable-key', reason: 'External prerequisite checked' };
+    const key = `autopod.retry-authorization.fix${stage === 'validation' ? '' : '.sandbox_startup'}`;
+    localStorage.setItem(key, JSON.stringify(input));
+    const state = {
+      taskId: 'task',
+      admissionCount: 4,
+      executedCount: 3,
+      transientRetryCount: 2,
+      backoffsMs: [0, 0],
+      measuredDurationMs: 15,
+      interruptedCount: 1,
+      latest: { id: 'failure', outcome: 'unknown' },
+      authorizations: [] as Array<{
+        id: string;
+        failureId: string;
+        reason: string;
+        usedByAttemptId: string | null;
+      }>,
+    };
+    const bodies: unknown[] = [];
+    let resumes = 0;
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (url, init) => {
+      if (String(url).endsWith('retry-authorizations')) {
+        bodies.push(JSON.parse(String(init?.body)));
+        state.authorizations = [
+          { id: 'grant', failureId: 'failure', reason: input.reason, usedByAttemptId: null },
+        ];
+        if (bodies.length === 1) throw new Error('Response lost after commit');
+        return new Response(JSON.stringify(state.authorizations[0]));
+      }
+      if (String(url).endsWith('/resume')) {
+        resumes++;
+        return new Response(JSON.stringify({ ok: true, action: 'revalidate' }));
+      }
+      return new Response(JSON.stringify(state));
     });
-  const click = (label: string) =>
-    act(async () => {
-      const button = [...container.querySelectorAll('button')].find(
-        (entry) => entry.textContent === label,
+    const container = document.createElement('div');
+    document.body.append(container);
+    let root = createRoot(container);
+    const render = () =>
+      act(async () => {
+        root.render(<TaskRetryPanel podId="fix" revision="failed" status="failed" stage={stage} />);
+      });
+    const click = (label: string) =>
+      act(async () => {
+        const button = [...container.querySelectorAll('button')].find(
+          (entry) => entry.textContent === label,
+        );
+        expect(button).toBeTruthy();
+        button?.click();
+      });
+    try {
+      await render();
+      expect(globalThis.fetch).toHaveBeenCalledWith(
+        expect.stringContaining(
+          stage === 'validation' ? '/retry-state' : '/retry-state?stage=sandbox_startup',
+        ),
+        expect.anything(),
       );
-      expect(button).toBeTruthy();
-      button?.click();
-    });
-  try {
-    await render();
-    expect(container.textContent).toContain('3 executed / 4 admitted');
-    expect(container.textContent).toContain('1 interrupted with unknown duration');
-    await click('Retry recording the same authorization');
-    expect(resumes).toBe(0);
-    await act(async () => root.unmount());
-    root = createRoot(container);
-    await render();
-    expect(container.querySelector('textarea')?.value).toBe(input.reason);
-    await click('Retry recording the same authorization');
-    expect(bodies).toEqual([input, input]);
-    expect(resumes).toBe(0);
-    expect(localStorage.getItem('autopod.retry-authorization.fix')).toBeNull();
-    await click('Resume validation');
-    expect(resumes).toBe(1);
-    expect(container.textContent).toContain('Resume requested.');
-  } finally {
-    act(() => root.unmount());
-    container.remove();
-  }
-});
+      expect(container.textContent).toContain('3 executed / 4 admitted');
+      expect(container.textContent).toContain('1 interrupted with unknown duration');
+      await click('Retry recording the same authorization');
+      expect(resumes).toBe(0);
+      await act(async () => root.unmount());
+      root = createRoot(container);
+      await render();
+      expect(container.querySelector('textarea')?.value).toBe(input.reason);
+      await click('Retry recording the same authorization');
+      const sent = { ...input, ...(stage === 'validation' ? {} : { stage }) };
+      expect(bodies).toEqual([sent, sent]);
+      expect(resumes).toBe(0);
+      expect(localStorage.getItem(key)).toBeNull();
+      await click(stage === 'validation' ? 'Resume validation' : 'Resume sandbox startup');
+      expect(resumes).toBe(1);
+      expect(container.textContent).toContain('Resume requested.');
+    } finally {
+      act(() => root.unmount());
+      container.remove();
+    }
+  },
+);
 
 it('shows accounting without retry controls while a separate human decision is pending', async () => {
   vi.spyOn(globalThis, 'fetch').mockResolvedValue(

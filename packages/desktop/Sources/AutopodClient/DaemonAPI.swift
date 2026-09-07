@@ -270,8 +270,8 @@ public actor DaemonAPI {
   public func getRerunTemplate(_ id: String) async throws -> IntentionalRerunDraft {
     try await request("GET", "/pods/\(id)/rerun-template")
   }
-  public func getRetryState(_ id: String) async throws -> TaskRetryState {
-    try await request("GET", "/pods/\(id)/retry-state")
+  public func getRetryState(_ id: String, stage: String = "validation") async throws -> TaskRetryState {
+    try await request("GET", "/pods/\(id)/retry-state", query: ["stage": stage])
   }
   public func authorizeRetry(_ id: String, request input: TaskRetryAuthorizationRequest) async throws -> TaskRetryAuthorization {
     try await request("POST", "/pods/\(id)/retry-authorizations", body: encode(input))

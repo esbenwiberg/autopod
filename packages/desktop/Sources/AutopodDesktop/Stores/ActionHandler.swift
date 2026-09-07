@@ -108,13 +108,18 @@ public final class ActionHandler {
         self.podStore.upsertSession(PodMapper.map(response))
         return response.id
       },
-      loadRetryState: { [weak self] id in
+      loadRetryState: { [weak self] id, stage in
         guard let self else { throw URLError(.notConnectedToInternet) }
-        return try await self.api.getRetryState(id)
+        return try await self.api.getRetryState(id, stage: stage)
       },
       authorizeRetry: { [weak self] id, input in
         guard let self else { throw URLError(.notConnectedToInternet) }
         return try await self.api.authorizeRetry(id, request: input)
+      },
+      resumeRetry: { [weak self] id in
+        guard let self else { throw URLError(.notConnectedToInternet) }
+        _ = try await self.api.resumePod(id)
+        await self.podStore.refreshSession(id)
       },
       resume: { [weak self] id in await self?.resume(id) },
       recoverWorktree: { [weak self] id in await self?.recoverWorktree(id) ?? nil },

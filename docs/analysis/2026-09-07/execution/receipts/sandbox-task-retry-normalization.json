@@ -1,0 +1,40 @@
+{
+  "normalization": "Only trailing whitespace and final blank lines removed from raw logs retained under /private/tmp/autopod-sandbox-task-retry-*",
+  "receipts": [
+    {
+      "receipt": "sandbox-task-retry-build.txt",
+      "rawSha256": "6e8d527313e2371b21a4ccd6b8ebbc482671ec6df997d40dbab197d84814a90f",
+      "normalizedSha256": "2d9972df5e04f6f6e8709084977883ade54ca27e1b3fd619e6310d9237142910"
+    },
+    {
+      "receipt": "sandbox-task-retry-cli.txt",
+      "rawSha256": "ecc9aff003192433b74b26a20951e101704697681e1a1a90596f9eca84562823",
+      "normalizedSha256": "ae90d6ebbec80432cb6e7ecdd72f9065c7f0ab796f2a81640b841e9c1ac43169"
+    },
+    {
+      "receipt": "sandbox-task-retry-final.txt",
+      "rawSha256": "393b5de56c12ae27574c5e6b9a65fe01cd024a305ade86f8c1d97096f3d4fec4",
+      "normalizedSha256": "76900573c7f152a4157cc39ea30e09f96f45912e4e828c1b2d87951e6e1ddd30"
+    },
+    {
+      "receipt": "sandbox-task-retry-first-green.txt",
+      "rawSha256": "dfa014e8aee44cd53821767b282bf08dd02d7ae9d5eb8e2a1405fc5bcbbab198",
+      "normalizedSha256": "321010d1b49c73c7ec508b829904b3faff9ec7ce4001c1905f3f4dee1f8dba24"
+    },
+    {
+      "receipt": "sandbox-task-retry-mobile.txt",
+      "rawSha256": "c094dfa3f3e1c5d3f84e6eaad799eb8a4b2700a654a5c407ed303c1bc8a00ab0",
+      "normalizedSha256": "b6d16a730fb49c5e300cf121c7526198f7ed0dd19f0730ffb2a80b8a3f2a6c97"
+    },
+    {
+      "receipt": "sandbox-task-retry-red.txt",
+      "rawSha256": "2db98f997553d6fd61bfef3b377be7cc793f889969545ace3a386ca128728255",
+      "normalizedSha256": "c85a5247517ec3d1f36372bda3c9792f36d61029672393ef790b4ccfaf37a1b6"
+    },
+    {
+      "receipt": "sandbox-task-retry-swift.txt",
+      "rawSha256": "80285b696d2441465c7933452da407d68a52c74db7897e9bec1c1446b9c9bd9a",
+      "normalizedSha256": "80285b696d2441465c7933452da407d68a52c74db7897e9bec1c1446b9c9bd9a"
+    }
+  ]
+}

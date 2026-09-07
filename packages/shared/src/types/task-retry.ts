@@ -8,12 +8,13 @@ export interface TaskRetryIdentity {
   environment: string | null;
   implementation: string | null;
 }
+export type TaskRetryStage = 'validation' | 'sandbox_startup';
 export type TaskRetryOutcome = 'pass' | 'nonretryable' | 'transient' | 'cancelled' | 'unknown';
 export interface TaskRetryAttempt {
   id: string;
   taskId: string;
   podId: string;
-  stage: 'validation';
+  stage: TaskRetryStage;
   identity: TaskRetryIdentity;
   retryKind: 'transient' | 'changed_conditions' | 'override' | null;
   admittedAt: string;
@@ -28,7 +29,7 @@ export interface TaskRetryAuthorization {
   requestKey: string;
   taskId: string;
   podId: string;
-  stage: 'validation';
+  stage: TaskRetryStage;
   failureId: string;
   actor: OperatorActor;
   reason: string;
@@ -37,7 +38,7 @@ export interface TaskRetryAuthorization {
 }
 export interface TaskRetryState {
   taskId: string;
-  stage: 'validation';
+  stage: TaskRetryStage;
   backoffsMs: number[] | null;
   admissionCount: number;
   executedCount: number;

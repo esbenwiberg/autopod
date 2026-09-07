@@ -72,8 +72,9 @@ public struct PodActions: Sendable {
   public var loadDispatchPreflight: @MainActor @Sendable (String) async throws -> DispatchPreflightResponse
   public var loadRerunTemplate: @MainActor @Sendable (String) async throws -> IntentionalRerunDraft
   public var createIntentionalRerun: @MainActor @Sendable (IntentionalRerunDraft) async throws -> String
-  public var loadRetryState: @MainActor @Sendable (String) async throws -> TaskRetryState
+  public var loadRetryState: @MainActor @Sendable (String, String) async throws -> TaskRetryState
   public var authorizeRetry: @MainActor @Sendable (String, TaskRetryAuthorizationRequest) async throws -> TaskRetryAuthorization
+  public var resumeRetry: @MainActor @Sendable (String) async throws -> Void
   public var resume: @MainActor @Sendable (String) async -> Void
   /// Recover a worktree-compromised pod. Returns the daemon's response
   /// (recovered + human-readable message) so the UI can surface the outcome.
@@ -164,8 +165,9 @@ public struct PodActions: Sendable {
     loadDispatchPreflight: @escaping @MainActor @Sendable (String) async throws -> DispatchPreflightResponse = { _ in throw URLError(.unsupportedURL) },
     loadRerunTemplate: @escaping @MainActor @Sendable (String) async throws -> IntentionalRerunDraft = { _ in throw URLError(.unsupportedURL) },
     createIntentionalRerun: @escaping @MainActor @Sendable (IntentionalRerunDraft) async throws -> String = { _ in throw URLError(.unsupportedURL) },
-    loadRetryState: @escaping @MainActor @Sendable (String) async throws -> TaskRetryState = { _ in throw URLError(.unsupportedURL) },
+    loadRetryState: @escaping @MainActor @Sendable (String, String) async throws -> TaskRetryState = { _, _ in throw URLError(.unsupportedURL) },
     authorizeRetry: @escaping @MainActor @Sendable (String, TaskRetryAuthorizationRequest) async throws -> TaskRetryAuthorization = { _, _ in throw URLError(.unsupportedURL) },
+    resumeRetry: @escaping @MainActor @Sendable (String) async throws -> Void = { _ in throw URLError(.unsupportedURL) },
     resume: @escaping @MainActor @Sendable (String) async -> Void = { _ in },
     recoverWorktree: @escaping @MainActor @Sendable (String) async -> RecoverWorktreeResponse? = { _ in nil },
     forceComplete: @escaping @MainActor @Sendable (String, String?) async -> Void = { _, _ in },
@@ -219,6 +221,7 @@ public struct PodActions: Sendable {
     self.createIntentionalRerun = createIntentionalRerun
     self.loadRetryState = loadRetryState
     self.authorizeRetry = authorizeRetry
+    self.resumeRetry = resumeRetry
     self.resume = resume
     self.recoverWorktree = recoverWorktree
     self.forceComplete = forceComplete

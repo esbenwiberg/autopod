@@ -1,4 +1,4 @@
-import type { TaskRetryState } from '@autopod/shared';
+import type { TaskRetryStage, TaskRetryState } from '@autopod/shared';
 import { useEffect, useState } from 'react';
 import { apiFetch } from '../lib/api.js';
 
@@ -7,7 +7,8 @@ export function TaskRetryPanel({
   podId,
   revision,
   status,
-}: { podId: string; revision: string; status: string }) {
+  stage = 'validation',
+}: { podId: string; revision: string; status: string; stage?: TaskRetryStage }) {
   const [state, setState] = useState<TaskRetryState | null>(null);
   const [reason, setReason] = useState('');
   const [pending, setPending] = useState<Draft | null>(null);
@@ -15,7 +16,9 @@ export function TaskRetryPanel({
   const [error, setError] = useState('');
   const [message, setMessage] = useState('');
   const [refresh, setRefresh] = useState(0);
-  const key = `autopod.retry-authorization.${podId}`;
+  const key = `autopod.retry-authorization.${podId}${stage === 'validation' ? '' : `.${stage}`}`;
+  const statePath = `/pods/${podId}/retry-state${stage === 'validation' ? '' : `?stage=${stage}`}`;
+  const label = stage === 'validation' ? 'Validation' : 'Sandbox startup';
   // biome-ignore lint/correctness/useExhaustiveDependencies: Pod revisions and explicit refresh reload durable admission state.
   useEffect(() => {
     let cancelled = false;
@@ -33,7 +36,7 @@ export function TaskRetryPanel({
     } catch {
       setError('Saved retry draft is unreadable.');
     }
-    apiFetch<TaskRetryState>(`/pods/${podId}/retry-state`)
+    apiFetch<TaskRetryState>(statePath)
       .then((value) => {
         if (!cancelled) setState(value);
       })
@@ -43,7 +46,7 @@ export function TaskRetryPanel({
     return () => {
       cancelled = true;
     };
-  }, [podId, revision, refresh, key]);
+  }, [podId, revision, refresh, key, statePath]);
   const record = async () => {
     setBusy(true);
     setError('');
@@ -54,13 +57,13 @@ export function TaskRetryPanel({
       setPending(draft);
       await apiFetch(`/pods/${podId}/retry-authorizations`, {
         method: 'POST',
-        body: JSON.stringify(draft),
+        body: JSON.stringify({ ...draft, ...(stage === 'validation' ? {} : { stage }) }),
       });
       localStorage.removeItem(key);
       setPending(null);
       setReason('');
-      setState(await apiFetch<TaskRetryState>(`/pods/${podId}/retry-state`));
-      setMessage('One retry authorization recorded. Resume validation is a separate action.');
+      setState(await apiFetch<TaskRetryState>(statePath));
+      setMessage('One retry authorization recorded. Resume is a separate action.');
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
@@ -72,7 +75,7 @@ export function TaskRetryPanel({
     setError('');
     try {
       await apiFetch(`/pods/${podId}/resume`, { method: 'POST' });
-      setState(await apiFetch<TaskRetryState>(`/pods/${podId}/retry-state`));
+      setState(await apiFetch<TaskRetryState>(statePath));
       setMessage(
         'Resume requested. Refresh to inspect whether execution was admitted and completed.',
       );
@@ -86,14 +89,14 @@ export function TaskRetryPanel({
   const resumable = status === 'failed' || status === 'review_required';
   return (
     <section className="info-panel retry-panel">
-      <h2>Validation retry budget</h2>
+      <h2>{label} retry budget</h2>
       {error && <p role="alert">{error}</p>}
       {message && <output>{message}</output>}
       {state && (
         <>
           <p>
-            {state.executedCount} executed / {state.admissionCount} admitted validations across this
-            task.
+            {state.executedCount} executed / {state.admissionCount} admitted{' '}
+            {stage === 'validation' ? 'validations' : 'sandbox startups'} across this task.
           </p>
           <p>
             {state.transientRetryCount} / {state.backoffsMs?.length ?? 0} automatic transient
@@ -134,7 +137,7 @@ export function TaskRetryPanel({
                   : 'Record one retry authorization'}
               </button>
               <button type="button" disabled={busy} onClick={() => void resume()}>
-                Resume validation
+                Resume {stage === 'validation' ? 'validation' : 'sandbox startup'}
               </button>
             </>
           )}

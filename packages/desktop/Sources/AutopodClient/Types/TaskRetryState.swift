@@ -31,5 +31,8 @@ public struct TaskRetryAuthorization: Codable, Sendable, Identifiable {
 public struct TaskRetryAuthorizationRequest: Codable, Sendable {
   public let requestKey: String
   public let reason: String
-  public init(requestKey: String, reason: String) { self.requestKey = requestKey; self.reason = reason }
+  public let stage: String?
+  public init(requestKey: String, reason: String, stage: String? = nil) {
+    self.requestKey = requestKey; self.reason = reason; self.stage = stage
+  }
 }

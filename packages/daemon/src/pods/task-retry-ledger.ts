@@ -6,6 +6,7 @@ import {
   type TaskRetryAuthorization,
   type TaskRetryIdentity,
   type TaskRetryOutcome,
+  type TaskRetryStage,
   type TaskRetryState,
 } from '@autopod/shared';
 import type Database from 'better-sqlite3';
@@ -25,6 +26,13 @@ export interface TaskRetryLedger {
     bindingHash: string,
     backoffs: number[],
   ): TaskRetryAttempt;
+  assertCanAdmit(
+    podId: string,
+    generation: number,
+    identity: TaskRetryIdentity,
+    bindingHash: string,
+    backoffs: number[],
+  ): void;
   start(id: string): void;
   finish(id: string, outcome: TaskRetryOutcome, measuredDurationMs: number | null): void;
   recoverInterrupted(): number;
@@ -45,7 +53,12 @@ const keys: Array<keyof TaskRetryIdentity> = [
 const validHash = (value: unknown): value is string =>
   typeof value === 'string' && /^[a-f0-9]{64}$/.test(value);
 
-export function createTaskRetryLedger(db: Database.Database): TaskRetryLedger {
+export function createTaskRetryLedger(
+  db: Database.Database,
+  stage: TaskRetryStage = 'validation',
+): TaskRetryLedger {
+  if (stage !== 'validation' && stage !== 'sandbox_startup') throw new Error('Unknown retry stage');
+  const label = stage === 'validation' ? 'validation' : 'sandbox startup';
   const membership = (podId: string) => {
     const row = db
       .prepare(`SELECT e.task_id AS taskId, e.execution_id AS executionId, p.lifecycle_generation AS generation
@@ -60,20 +73,20 @@ export function createTaskRetryLedger(db: Database.Database): TaskRetryLedger {
   const assertNoPendingDecision = (podId: string) => {
     if (hasUnansweredDecision(db, podId))
       throw new TaskRetryBlockedError(
-        'An unanswered human decision must be reconciled before validation can execute',
+        `An unanswered human decision must be reconciled before ${label} can execute`,
       );
   };
   const latest = (taskId: string) =>
     db
       .prepare(
-        "SELECT * FROM task_retry_attempts WHERE task_id = ? AND stage = 'validation' ORDER BY rowid DESC LIMIT 1",
+        `SELECT * FROM task_retry_attempts WHERE task_id = ? AND stage = '${stage}' ORDER BY rowid DESC LIMIT 1`,
       )
       .get(taskId) as Record<string, unknown> | undefined;
   const attempt = (row: Record<string, unknown>): TaskRetryAttempt => ({
     id: row.id as string,
     taskId: row.task_id as string,
     podId: row.pod_id as string,
-    stage: 'validation',
+    stage,
     identity: JSON.parse(row.identity as string),
     retryKind: row.retry_kind as TaskRetryAttempt['retryKind'],
     admittedAt: row.admitted_at as string,
@@ -88,7 +101,7 @@ export function createTaskRetryLedger(db: Database.Database): TaskRetryLedger {
     requestKey: row.request_key as string,
     taskId: row.task_id as string,
     podId: row.pod_id as string,
-    stage: 'validation',
+    stage: row.stage as TaskRetryStage,
     failureId: row.failure_id as string,
     actor: JSON.parse(row.actor as string),
     reason: row.reason as string,
@@ -100,22 +113,22 @@ export function createTaskRetryLedger(db: Database.Database): TaskRetryLedger {
   const state = (podId: string): TaskRetryState => {
     const { taskId } = membership(podId);
     const policy = db
-      .prepare(
-        "SELECT backoffs FROM task_retry_policies WHERE task_id = ? AND stage = 'validation'",
-      )
+      .prepare(`SELECT backoffs FROM task_retry_policies WHERE task_id = ? AND stage = '${stage}'`)
       .get(taskId) as { backoffs: string } | undefined;
     const counts = db
       .prepare(`SELECT COUNT(*) AS admissions, SUM(started_at IS NOT NULL) AS executions,
       SUM(retry_kind = 'transient') AS retries, SUM(COALESCE(measured_duration_ms, 0)) AS duration,
-      SUM(outcome = 'unknown') AS interrupted FROM task_retry_attempts WHERE task_id = ? AND stage = 'validation'`)
+      SUM(outcome = 'unknown') AS interrupted FROM task_retry_attempts WHERE task_id = ? AND stage = '${stage}'`)
       .get(taskId) as Record<string, number | null>;
     const last = latest(taskId);
     const decisions = db
-      .prepare(`${authorizationSelect} WHERE a.task_id = ? ORDER BY a.created_at DESC LIMIT 100`)
-      .all(taskId) as Array<Record<string, unknown>>;
+      .prepare(
+        `${authorizationSelect} WHERE a.task_id = ? AND a.stage = ? ORDER BY a.created_at DESC LIMIT 100`,
+      )
+      .all(taskId, stage) as Array<Record<string, unknown>>;
     return {
       taskId,
-      stage: 'validation',
+      stage,
       backoffsMs: policy ? JSON.parse(policy.backoffs) : null,
       admissionCount: counts.admissions ?? 0,
       executedCount: counts.executions ?? 0,
@@ -127,8 +140,90 @@ export function createTaskRetryLedger(db: Database.Database): TaskRetryLedger {
       telemetry: 'partial',
     };
   };
+  const evaluate = (
+    podId: string,
+    generation: number,
+    identity: TaskRetryIdentity,
+    bindingHash: string,
+    backoffs: number[],
+  ) => {
+    const member = membership(podId);
+    assertNoPendingDecision(podId);
+    if (member.generation !== generation)
+      throw new TaskRetryBlockedError(`Stale lifecycle cannot admit ${label}`);
+    if (
+      !validHash(bindingHash) ||
+      keys.some((key) => identity[key] !== null && !validHash(identity[key]))
+    )
+      throw new TaskRetryBlockedError('Invalid trusted retry input identity');
+    if (
+      backoffs.length > 10 ||
+      backoffs.some((value) => !Number.isSafeInteger(value) || value < 0 || value > 300000)
+    )
+      throw new TaskRetryBlockedError('Invalid task retry backoff policy');
+    const task = state(podId);
+    // Existing persisted recovery counters are lower bounds, not new telemetry.
+    // Consume their known allowance when first introducing this stage's policy.
+    const legacyUsed =
+      stage === 'sandbox_startup' && task.backoffsMs === null
+        ? (
+            db
+              .prepare(`SELECT COALESCE(SUM(p.infrastructure_recovery_count), 0) AS used
+          FROM task_executions e JOIN pods p ON p.id = e.pod_id WHERE e.task_id = ?`)
+              .get(member.taskId) as { used: number }
+          ).used
+        : 0;
+    if (!Number.isSafeInteger(legacyUsed) || legacyUsed < 0)
+      throw new TaskRetryBlockedError('Legacy startup retry accounting requires reconciliation');
+    const effectiveBackoffs = task.backoffsMs ?? backoffs.slice(legacyUsed);
+    const prior = latest(member.taskId);
+    let retryKind: TaskRetryAttempt['retryKind'] = null;
+    let useAuthorization: string | undefined;
+    let notBefore = Date.now();
+    if (prior && !prior.ended_at)
+      throw new TaskRetryBlockedError(
+        `A ${label} admission is already active for this logical task`,
+        'TASK_RETRY_IN_PROGRESS',
+      );
+    if (prior && prior.outcome !== 'pass') {
+      if (prior.binding_hash !== bindingHash)
+        throw new TaskRetryBlockedError(
+          `${label} provider binding changed; explicitly reconcile the authorized provider before retrying`,
+          'TASK_RETRY_BINDING_CHANGED',
+        );
+      const old = JSON.parse(prior.identity as string) as TaskRetryIdentity;
+      const changed = keys.some(
+        (key) => validHash(old[key]) && validHash(identity[key]) && old[key] !== identity[key],
+      );
+      const grant = db
+        .prepare(
+          `${authorizationSelect} WHERE a.pod_id = ? AND a.failure_id = ? AND u.attempt_id IS NULL ORDER BY a.created_at, a.id LIMIT 1`,
+        )
+        .get(podId, prior.id) as Record<string, unknown> | undefined;
+      if (grant) {
+        retryKind = 'override';
+        useAuthorization = grant.id as string;
+      } else if (prior.outcome === 'transient') {
+        const delay = effectiveBackoffs[task.transientRetryCount];
+        if (delay === undefined)
+          throw new TaskRetryBlockedError(
+            `Task-wide ${label} retry budget exhausted; record an authorized retry with a reason before repeating`,
+          );
+        retryKind = 'transient';
+        notBefore = Date.parse(prior.ended_at as string) + delay;
+      } else if (changed) retryKind = 'changed_conditions';
+      else
+        throw new TaskRetryBlockedError(
+          `Unchanged or unverified nonretryable ${label} inputs; change relevant conditions or record an authorized retry with a reason`,
+        );
+    }
+    return { member, prior, retryKind, useAuthorization, notBefore, effectiveBackoffs };
+  };
   return {
     state,
+    assertCanAdmit(podId, generation, identity, bindingHash, backoffs) {
+      evaluate(podId, generation, identity, bindingHash, backoffs);
+    },
     admit: db.transaction(
       (
         podId: string,
@@ -137,69 +232,15 @@ export function createTaskRetryLedger(db: Database.Database): TaskRetryLedger {
         bindingHash: string,
         backoffs: number[],
       ) => {
-        const member = membership(podId);
-        assertNoPendingDecision(podId);
-        if (member.generation !== generation)
-          throw new TaskRetryBlockedError('Stale lifecycle cannot admit validation');
-        if (
-          !validHash(bindingHash) ||
-          keys.some((key) => identity[key] !== null && !validHash(identity[key]))
-        )
-          throw new TaskRetryBlockedError('Invalid trusted retry input identity');
-        if (
-          backoffs.length > 10 ||
-          backoffs.some((value) => !Number.isSafeInteger(value) || value < 0 || value > 300000)
-        )
-          throw new TaskRetryBlockedError('Invalid task retry backoff policy');
+        const { member, prior, retryKind, useAuthorization, notBefore, effectiveBackoffs } =
+          evaluate(podId, generation, identity, bindingHash, backoffs);
         db.prepare(
-          "INSERT OR IGNORE INTO task_retry_policies(task_id, stage, version, backoffs) VALUES (?, 'validation', 1, ?)",
-        ).run(member.taskId, JSON.stringify(backoffs));
-        const task = state(podId);
-        const prior = latest(member.taskId);
-        let retryKind: TaskRetryAttempt['retryKind'] = null;
-        let useAuthorization: string | undefined;
-        let notBefore = Date.now();
-        if (prior && !prior.ended_at)
-          throw new TaskRetryBlockedError(
-            'A validation admission is already active for this logical task',
-            'TASK_RETRY_IN_PROGRESS',
-          );
-        if (prior && prior.outcome !== 'pass') {
-          if (prior.binding_hash !== bindingHash)
-            throw new TaskRetryBlockedError(
-              'Validation provider binding changed; explicitly reconcile the authorized provider before retrying',
-              'TASK_RETRY_BINDING_CHANGED',
-            );
-          const old = JSON.parse(prior.identity as string) as TaskRetryIdentity;
-          const changed = keys.some(
-            (key) => validHash(old[key]) && validHash(identity[key]) && old[key] !== identity[key],
-          );
-          const grant = db
-            .prepare(
-              `${authorizationSelect} WHERE a.pod_id = ? AND a.failure_id = ? AND u.attempt_id IS NULL ORDER BY a.created_at, a.id LIMIT 1`,
-            )
-            .get(podId, prior.id) as Record<string, unknown> | undefined;
-          if (grant) {
-            retryKind = 'override';
-            useAuthorization = grant.id as string;
-          } else if (prior.outcome === 'transient') {
-            const delay = task.backoffsMs?.[task.transientRetryCount];
-            if (delay === undefined)
-              throw new TaskRetryBlockedError(
-                'Task-wide validation retry budget exhausted; record an authorized retry with a reason before repeating',
-              );
-            retryKind = 'transient';
-            notBefore = Date.parse(prior.ended_at as string) + delay;
-          } else if (changed) retryKind = 'changed_conditions';
-          else
-            throw new TaskRetryBlockedError(
-              'Unchanged or unverified nonretryable validation inputs; change relevant conditions or record an authorized retry with a reason',
-            );
-        }
+          `INSERT OR IGNORE INTO task_retry_policies(task_id, stage, version, backoffs) VALUES (?, '${stage}', 1, ?)`,
+        ).run(member.taskId, JSON.stringify(effectiveBackoffs));
         const id = randomUUID();
         const now = new Date().toISOString();
         db.prepare(`INSERT INTO task_retry_attempts(id,task_id,pod_id,execution_id,generation,stage,identity,binding_hash,retry_kind,previous_failure_id,admitted_at,not_before)
-        VALUES (?,?,?,?,?,'validation',?,?,?,?,?,?)`).run(
+        VALUES (?,?,?,?,?,'${stage}',?,?,?,?,?,?)`).run(
           id,
           member.taskId,
           podId,
@@ -217,17 +258,16 @@ export function createTaskRetryLedger(db: Database.Database): TaskRetryLedger {
             'INSERT INTO task_retry_authorization_uses(authorization_id,attempt_id) VALUES (?,?)',
           ).run(useAuthorization, id);
         return attempt(
-          db.prepare('SELECT * FROM task_retry_attempts WHERE id = ?').get(id) as Record<
-            string,
-            unknown
-          >,
+          db
+            .prepare('SELECT * FROM task_retry_attempts WHERE id = ? AND stage = ?')
+            .get(id, stage) as Record<string, unknown>,
         );
       },
     ),
     start(id) {
-      const row = db.prepare('SELECT * FROM task_retry_attempts WHERE id = ?').get(id) as
-        | Record<string, unknown>
-        | undefined;
+      const row = db
+        .prepare('SELECT * FROM task_retry_attempts WHERE id = ? AND stage = ?')
+        .get(id, stage) as Record<string, unknown> | undefined;
       if (!row || row.started_at || row.ended_at)
         throw new TaskRetryBlockedError('Retry admission has already started or settled');
       const member = membership(row.pod_id as string);
@@ -256,8 +296,10 @@ export function createTaskRetryLedger(db: Database.Database): TaskRetryLedger {
     },
     finish(id, outcome, measuredDurationMs) {
       const row = db
-        .prepare('SELECT started_at, ended_at, outcome FROM task_retry_attempts WHERE id = ?')
-        .get(id) as
+        .prepare(
+          'SELECT started_at, ended_at, outcome FROM task_retry_attempts WHERE id = ? AND stage = ?',
+        )
+        .get(id, stage) as
         | { started_at: string | null; ended_at: string | null; outcome: string | null }
         | undefined;
       if (!row) throw new Error('Unknown retry admission');
@@ -282,9 +324,9 @@ export function createTaskRetryLedger(db: Database.Database): TaskRetryLedger {
     recoverInterrupted() {
       return db
         .prepare(
-          "UPDATE task_retry_attempts SET ended_at = ?, outcome = 'unknown', measured_duration_ms = NULL WHERE ended_at IS NULL",
+          "UPDATE task_retry_attempts SET ended_at = ?, outcome = 'unknown', measured_duration_ms = NULL WHERE ended_at IS NULL AND stage = ?",
         )
-        .run(new Date().toISOString()).changes;
+        .run(new Date().toISOString(), stage).changes;
     },
     authorize: db.transaction(
       (podId: string, requestKey: string, reason: string, actor: OperatorActor) => {
@@ -309,6 +351,7 @@ export function createTaskRetryLedger(db: Database.Database): TaskRetryLedger {
           const recorded = authorization(existing);
           if (
             recorded.podId !== podId ||
+            recorded.stage !== stage ||
             recorded.reason !== reason ||
             JSON.stringify(recorded.actor) !== JSON.stringify(actor)
           )
@@ -322,11 +365,11 @@ export function createTaskRetryLedger(db: Database.Database): TaskRetryLedger {
         const failure = latest(member.taskId);
         if (!failure?.ended_at || failure.outcome === 'pass')
           throw new TaskRetryBlockedError(
-            'A settled failed validation is required before authorizing one retry',
+            `A settled failed ${label} attempt is required before authorizing one retry`,
           );
         const id = randomUUID();
         db.prepare(
-          "INSERT INTO task_retry_authorizations(id,request_key,task_id,pod_id,stage,failure_id,actor,reason,created_at) VALUES (?,?,?,?,'validation',?,?,?,?)",
+          `INSERT INTO task_retry_authorizations(id,request_key,task_id,pod_id,stage,failure_id,actor,reason,created_at) VALUES (?,?,?,?,'${stage}',?,?,?,?)`,
         ).run(
           id,
           requestKey,

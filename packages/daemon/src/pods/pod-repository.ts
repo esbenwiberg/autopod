@@ -244,6 +244,7 @@ import { type TaskExecutionLedger, createTaskExecutionLedger } from './task-exec
 
 export interface PodRepository extends Partial<UnitOfWork> {
   taskRetries?: TaskRetryLedger;
+  sandboxStartupRetries?: TaskRetryLedger;
   dispatchPreflight?: DispatchPreflightLedger;
   executionProvenance?: ExecutionProvenanceLedger;
   /** Defer external publication while an enclosing SQLite transaction is pending. */
@@ -693,6 +694,7 @@ export function createPodRepository(db: Database.Database): PodRepository {
       });
     },
     taskRetries: createTaskRetryLedger(db),
+    sandboxStartupRetries: createTaskRetryLedger(db, 'sandbox_startup'),
     dispatchPreflight,
     executionProvenance: createExecutionProvenanceLedger(db),
     completionJournal,

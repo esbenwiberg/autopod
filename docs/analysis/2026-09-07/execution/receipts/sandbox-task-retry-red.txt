@@ -1,0 +1,35 @@
+
+ RUN  v4.1.11 /private/tmp/autopod-durable-execution/packages/daemon
+
+ ❯ src/pods/pod-manager.test.ts (442 tests | 1 failed | 441 skipped) 92ms
+     × keeps exhausted sandbox startup retries across manager restart and Resume without mutating sources 92ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/pods/pod-manager.test.ts > PodManager > keeps exhausted sandbox startup retries across manager restart and Resume without mutating sources
+AssertionError: promise resolved "{ action: 'retry-agent' }" instead of rejecting
+
+- Expected
++ Received
+
+- Error {
+-   "message": "rejected promise",
++ {
++   "action": "retry-agent",
+  }
+
+ ❯ src/pods/pod-manager.test.ts:1103:45
+    1101|     const before = ctx.podRepo.getOrThrow(pod.id);
+    1102|     const restarted = createPodManager(ctx.deps);
+    1103|     await expect(restarted.resumePod(pod.id)).rejects.toMatchObject({
+       |                                             ^
+    1104|       code: 'TASK_RETRY_RECONCILIATION_REQUIRED',
+    1105|     });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 441 skipped (442)
+   Start at  20:18:23
+   Duration  1.34s (transform 808ms, setup 0ms, import 1.14s, tests 92ms, environment 0ms)

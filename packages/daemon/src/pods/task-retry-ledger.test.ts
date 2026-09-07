@@ -6,6 +6,7 @@ import { describe, expect, it } from 'vitest';
 import { runMigrations } from '../db/migrate.js';
 import { createTestDb, insertTestProfile, logger } from '../test-utils/mock-helpers.js';
 import { createPodRepository } from './pod-repository.js';
+import { createTaskRetryLedger } from './task-retry-ledger.js';
 
 const identity = {
   source: 'a'.repeat(64),
@@ -252,6 +253,85 @@ it('does not let retry authorization bypass an unanswered durable human decision
     ).run(new Date().toISOString());
     expect(() => ledger.start(admission.id)).toThrow('unanswered human decision');
     expect(ledger.state('root').executedCount).toBe(1);
+  } finally {
+    db.close();
+  }
+});
+
+it('persists sandbox startup policy across disk restart and linked fixes independently from validation', () => {
+  const f = fixture();
+  const startup = createTaskRetryLedger(f.db, 'sandbox_startup');
+  const first = startup.admit('root', 1, identity, binding, [0]);
+  startup.start(first.id);
+  startup.finish(first.id, 'transient', 7);
+  const second = startup.admit('fix', 1, identity, binding, [0, 0]);
+  startup.start(second.id);
+  startup.finish(second.id, 'transient', 9);
+  const validation = f.ledger.admit('fix', 1, identity, binding, []);
+  f.ledger.start(validation.id);
+  f.ledger.finish(validation.id, 'nonretryable', 4);
+  const human = { type: 'human' as const, userId: 'operator' };
+  const grant = startup.authorize('fix', 'startup-key', 'Sandbox prerequisite inspected', human);
+  expect(() => f.ledger.authorize('fix', 'startup-key', grant.reason, human)).toThrow(
+    'different authorization',
+  );
+  expect(f.ledger.state('fix').authorizations).toEqual([]);
+  startup.assertCanAdmit('fix', 1, identity, binding, [0]);
+  expect(startup.state('fix').admissionCount).toBe(2);
+  expect(startup.state('fix').authorizations[0]?.usedByAttemptId).toBeNull();
+  const dir = mkdtempSync(join(tmpdir(), 'startup-retry-ledger-'));
+  writeFileSync(join(dir, 'state.db'), f.db.serialize());
+  f.db.close();
+  const db = new Database(join(dir, 'state.db'));
+  try {
+    const repo = createPodRepository(db);
+    const next = repo.sandboxStartupRetries;
+    if (!next) throw new Error('Missing startup ledger');
+    expect(() => next.assertCanAdmit('root', 1, identity, binding, [0, 0, 0])).toThrow(
+      'retry budget exhausted',
+    );
+    expect(next.state('fix')).toMatchObject({
+      backoffsMs: [0],
+      executedCount: 2,
+      transientRetryCount: 1,
+      measuredDurationMs: 16,
+    });
+    const admitted = next.admit('fix', 1, identity, binding, [0]);
+    expect(admitted.retryKind).toBe('override');
+    expect(() => repo.taskRetries?.start(admitted.id)).toThrow('already started or settled');
+    expect(() => repo.taskRetries?.finish(admitted.id, 'unknown', null)).toThrow(
+      'Unknown retry admission',
+    );
+    expect(repo.taskRetries?.recoverInterrupted()).toBe(0);
+    expect(next.recoverInterrupted()).toBe(1);
+    expect(next.state('fix')).toMatchObject({
+      executedCount: 2,
+      interruptedCount: 1,
+      measuredDurationMs: 16,
+      latest: { outcome: 'unknown', measuredDurationMs: null },
+    });
+    expect(() => next.admit('fix', 1, identity, binding, [0])).toThrow('Unchanged');
+    expect(db.pragma('foreign_key_check')).toEqual([]);
+    expect(db.pragma('integrity_check')).toEqual([{ integrity_check: 'ok' }]);
+  } finally {
+    db.close();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+it('subtracts recorded legacy sandbox recoveries across the logical task from the initial allowance', () => {
+  const { db, repo } = fixture();
+  try {
+    repo.update('root', { infrastructureRecoveryCount: 1 });
+    const startup = createTaskRetryLedger(db, 'sandbox_startup');
+    const first = startup.admit('fix', 1, identity, binding, [30000]);
+    startup.start(first.id);
+    startup.finish(first.id, 'transient', 5);
+    expect(startup.state('fix').backoffsMs).toEqual([]);
+    repo.update('root', { infrastructureRecoveryCount: 0 });
+    expect(() => startup.admit('fix', 1, identity, binding, [0, 0])).toThrow(
+      'retry budget exhausted',
+    );
   } finally {
     db.close();
   }

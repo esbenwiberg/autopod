@@ -316,15 +316,18 @@ export function registerPodCommands(program: Command, getClient: () => AutopodCl
     });
   program
     .command('retry-state <id>')
-    .description('Inspect task-wide validation admissions and retry authorizations')
+    .description('Inspect task-wide stage admissions and retry authorizations')
+    .option('--stage <stage>', 'validation or sandbox_startup', 'validation')
     .option('--json', 'Output JSON')
-    .action(async (id: string, opts: { json?: boolean }) => {
+    .action(async (id: string, opts: { json?: boolean; stage: string }) => {
+      if (opts.stage !== 'validation' && opts.stage !== 'sandbox_startup')
+        throw new Error('Stage must be validation or sandbox_startup');
       const client = getClient();
       const resolved = await resolvePodId(client, id);
-      const state = await client.getRetryState(resolved);
+      const state = await client.getRetryState(resolved, opts.stage);
       withJsonOutput(opts, state, (value) => {
         console.log(
-          `Task ${value.taskId}: ${value.executedCount} executed / ${value.admissionCount} admitted validations`,
+          `Task ${value.taskId}: ${value.executedCount} executed / ${value.admissionCount} admitted ${value.stage === 'sandbox_startup' ? 'sandbox startups' : 'validations'}`,
         );
         console.log(
           `${value.transientRetryCount}/${value.backoffsMs?.length ?? 0} automatic transient retries; ${value.measuredDurationMs} ms measured; ${value.interruptedCount} interrupted with unknown duration`,
@@ -341,19 +344,32 @@ export function registerPodCommands(program: Command, getClient: () => AutopodCl
   program
     .command('authorize-retry <id>')
     .description('Record one human retry authorization; Resume is a separate action')
-    .requiredOption('--reason <text>', 'Reason for repeating the failed validation')
+    .requiredOption('--reason <text>', 'Reason for repeating the failed stage')
     .requiredOption('--request-key <key>', 'Stable key; reuse after an uncertain response')
+    .option('--stage <stage>', 'validation or sandbox_startup', 'validation')
     .option('--json', 'Output JSON')
-    .action(async (id: string, opts: { reason: string; requestKey: string; json?: boolean }) => {
-      const client = getClient();
-      const resolved = await resolvePodId(client, id);
-      const grant = await client.authorizeRetry(resolved, opts.requestKey, opts.reason);
-      withJsonOutput(opts, grant, (value) =>
-        console.log(
-          `Recorded ${value.id}. Run ap resume ${resolved} to request execution; normal lifecycle and binding checks still apply.`,
-        ),
-      );
-    });
+    .action(
+      async (
+        id: string,
+        opts: { reason: string; requestKey: string; json?: boolean; stage: string },
+      ) => {
+        if (opts.stage !== 'validation' && opts.stage !== 'sandbox_startup')
+          throw new Error('Stage must be validation or sandbox_startup');
+        const client = getClient();
+        const resolved = await resolvePodId(client, id);
+        const grant = await client.authorizeRetry(
+          resolved,
+          opts.requestKey,
+          opts.reason,
+          opts.stage,
+        );
+        withJsonOutput(opts, grant, (value) =>
+          console.log(
+            `Recorded ${value.id}. Run ap resume ${resolved} to request execution; normal lifecycle and binding checks still apply.`,
+          ),
+        );
+      },
+    );
   program
     .command('resume <id>')
     .description(

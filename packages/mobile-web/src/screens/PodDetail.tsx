@@ -135,6 +135,14 @@ export function PodDetail(): JSX.Element {
       {pod.options.output !== 'artifact' ? (
         <TaskRetryPanel podId={pod.id} revision={pod.updatedAt} status={pod.status} />
       ) : null}
+      {pod.executionTarget === 'sandbox' && (
+        <TaskRetryPanel
+          podId={pod.id}
+          revision={pod.updatedAt}
+          status={pod.status}
+          stage="sandbox_startup"
+        />
+      )}
       <TaskExecutionPanel
         podId={data.id}
         revision={`${data.status}:${data.inputTokens}:${data.outputTokens}:${data.validationAttempts}`}

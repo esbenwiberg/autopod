@@ -45,6 +45,7 @@ import type {
   SpecFile,
   TaskExecutionSummary,
   TaskRetryAuthorization,
+  TaskRetryStage,
   TaskRetryState,
   UpdateFromBaseResponse,
   UpdateScheduledJobRequest,
@@ -244,15 +245,23 @@ export class AutopodClient {
     return this.request('GET', `/pods/${id}/dispatch-preflight`);
   }
 
-  async getRetryState(id: string): Promise<TaskRetryState> {
-    return this.request('GET', `/pods/${id}/retry-state`);
+  async getRetryState(id: string, stage: TaskRetryStage = 'validation'): Promise<TaskRetryState> {
+    return this.request(
+      'GET',
+      `/pods/${id}/retry-state${stage === 'validation' ? '' : `?stage=${stage}`}`,
+    );
   }
   async authorizeRetry(
     id: string,
     requestKey: string,
     reason: string,
+    stage: TaskRetryStage = 'validation',
   ): Promise<TaskRetryAuthorization> {
-    return this.request('POST', `/pods/${id}/retry-authorizations`, { requestKey, reason });
+    return this.request('POST', `/pods/${id}/retry-authorizations`, {
+      requestKey,
+      reason,
+      ...(stage === 'validation' ? {} : { stage }),
+    });
   }
   async resumePod(id: string): Promise<{ ok: boolean; action: string }> {
     return this.request('POST', `/pods/${id}/resume`);

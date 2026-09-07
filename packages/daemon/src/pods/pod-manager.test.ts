@@ -959,6 +959,7 @@ function createTestContext(
     validationRepo,
     prManagerFactory: () => prManager,
     enqueueSession: (id) => enqueuedSessions.push(id),
+    sandboxInfrastructureRetryBackoffMs: [0],
     mcpBaseUrl: 'http://localhost:8080',
     daemonConfig: { mcpServers: [], claudeMdSections: [] },
     sandboxWorkspaceCheckpoint: vi.fn(async ({ podId, sequence }) => ({
@@ -1083,6 +1084,139 @@ describe('PodManager', () => {
     });
   });
 
+  it('keeps exhausted sandbox startup retries across manager restart and Resume without mutating sources', async () => {
+    const ctx = createTestContext(undefined, {
+      executionTarget: 'sandbox',
+      warmImageTag: 'example.azurecr.io/autopod/test-profile:latest',
+    });
+    ctx.deps.requeueSessionAfterCurrent = vi.fn();
+    ctx.deps.sandboxInfrastructureRecoveryDelay = vi.fn(async () => {});
+    vi.mocked(ctx.containerManager.spawn).mockRejectedValue(
+      new SandboxInfrastructureError(403, {}),
+    );
+    const manager = createPodManager(ctx.deps);
+    const pod = manager.createSession(
+      { profileName: 'test-profile', task: 'Keep the same task startup limit' },
+      'user-1',
+    );
+    await manager.processPod(pod.id);
+    await manager.processPod(pod.id);
+    ctx.podRepo.update(pod.id, { worktreePath: '/tmp/preserved-startup-worktree' });
+    const before = ctx.podRepo.getOrThrow(pod.id);
+    const restarted = createPodManager(ctx.deps);
+    await expect(restarted.resumePod(pod.id)).rejects.toMatchObject({
+      code: 'TASK_RETRY_RECONCILIATION_REQUIRED',
+    });
+    expect(ctx.podRepo.getOrThrow(pod.id)).toEqual(before);
+    expect(ctx.containerManager.spawn).toHaveBeenCalledTimes(2);
+    expect(ctx.runtime.spawn).not.toHaveBeenCalled();
+    expect(ctx.enqueuedSessions.filter((id) => id === pod.id)).toHaveLength(1);
+    const linked = restarted.createSession(
+      { profileName: 'test-profile', task: 'Linked repair', linkedPodId: pod.id },
+      'user-1',
+    );
+    await restarted.processPod(linked.id);
+    expect(ctx.containerManager.spawn).toHaveBeenCalledTimes(2);
+    expect(ctx.podRepo.getOrThrow(linked.id).failureReason).toContain(
+      'startup retry budget exhausted',
+    );
+    const app = Fastify();
+    app.setErrorHandler(errorHandler);
+    authPlugin(app, {
+      validateToken: async () => ({ oid: 'startup-operator', name: 'Operator' }),
+    } as never);
+    podRoutes(app, restarted, ctx.eventRepo, undefined, ctx.podRepo);
+    const headers = { authorization: 'Bearer local-fixture' };
+    try {
+      const payload = {
+        requestKey: 'startup-extra-once',
+        reason: 'Confirmed sandbox service recovered',
+        stage: 'sandbox_startup',
+      };
+      const url = `/pods/${pod.id}/retry-authorizations`;
+      const grant = await app.inject({ method: 'POST', url, headers, payload });
+      expect(grant.statusCode, grant.body).toBe(201);
+      expect(grant.json()).toMatchObject({
+        stage: 'sandbox_startup',
+        actor: { userId: 'startup-operator' },
+      });
+      const duplicate = await app.inject({ method: 'POST', url, headers, payload });
+      expect(duplicate.json().id).toBe(grant.json().id);
+      expect(ctx.containerManager.spawn).toHaveBeenCalledTimes(2);
+      const invalid = await app.inject({
+        method: 'GET',
+        url: `/pods/${pod.id}/retry-state?stage=agent`,
+        headers,
+      });
+      expect(invalid.statusCode).toBe(400);
+      const resume = await app.inject({ method: 'POST', url: `/pods/${pod.id}/resume`, headers });
+      expect(resume.statusCode, resume.body).toBe(200);
+      await restarted.processPod(pod.id);
+      expect(ctx.containerManager.spawn).toHaveBeenCalledTimes(3);
+      expect(ctx.podRepo.getOrThrow(pod.id).status).toBe('failed');
+      const state = await app.inject({
+        method: 'GET',
+        url: `/pods/${pod.id}/retry-state?stage=sandbox_startup`,
+        headers,
+      });
+      expect(state.json()).toMatchObject({
+        stage: 'sandbox_startup',
+        executedCount: 3,
+        transientRetryCount: 1,
+      });
+      expect(state.json().authorizations[0].usedByAttemptId).toBeTruthy();
+      expect(ctx.podRepo.taskRetries?.state(pod.id).admissionCount).toBe(0);
+    } finally {
+      await app.close();
+    }
+  });
+
+  it('retains consumed sandbox cooldown admission when a newer lifecycle interrupts before allocation', async () => {
+    const ctx = createTestContext(undefined, {
+      executionTarget: 'sandbox',
+      warmImageTag: 'registry.azurecr.io/startup:latest',
+    });
+    ctx.deps.sandboxInfrastructureRetryBackoffMs = [30000];
+    ctx.deps.requeueSessionAfterCurrent = vi.fn();
+    vi.mocked(ctx.containerManager.spawn).mockRejectedValue(
+      new SandboxInfrastructureError(403, {}),
+    );
+    const manager = createPodManager(ctx.deps);
+    const pod = manager.createSession(
+      { profileName: 'test-profile', task: 'Interrupt the cooldown' },
+      'user-1',
+    );
+    await manager.processPod(pod.id);
+    const wait = deferred<void>();
+    ctx.deps.sandboxInfrastructureRecoveryDelay = vi.fn(() => wait.promise);
+    const retry = manager.processPod(pod.id);
+    await waitForAssertion(() =>
+      expect(ctx.deps.sandboxInfrastructureRecoveryDelay).toHaveBeenCalledOnce(),
+    );
+    expect(ctx.deps.sandboxInfrastructureRecoveryDelay).toHaveBeenCalledWith(expect.any(Number));
+    const delay = vi.mocked(ctx.deps.sandboxInfrastructureRecoveryDelay).mock.calls[0]?.[0];
+    expect(delay).toBeGreaterThan(25000);
+    const before = ctx.podRepo.sandboxStartupRetries?.state(pod.id);
+    expect(before).toMatchObject({
+      executedCount: 1,
+      admissionCount: 2,
+      transientRetryCount: 1,
+      latest: { startedAt: null },
+    });
+    ctx.podRepo.incrementLifecycleGeneration(pod.id);
+    wait.resolve();
+    await retry;
+    expect(ctx.containerManager.spawn).toHaveBeenCalledOnce();
+    expect(ctx.runtime.spawn).not.toHaveBeenCalled();
+    expect(ctx.podRepo.sandboxStartupRetries?.state(pod.id)).toMatchObject({
+      executedCount: 1,
+      admissionCount: 2,
+      transientRetryCount: 1,
+      interruptedCount: 1,
+      latest: { outcome: 'unknown', measuredDurationMs: null },
+    });
+  });
+
   it('preserves sandbox infrastructure errors from ownership repair for automatic recovery', async () => {
     const ctx = createTestContext(undefined, {
       executionTarget: 'sandbox',
@@ -1155,7 +1289,7 @@ describe('PodManager', () => {
       infrastructureFailure: expect.objectContaining({
         recoveryDisposition: 'automatic_retry_scheduled',
       }),
-      infrastructureRecoveryCount: 0,
+      infrastructureRecoveryCount: 1,
       recoveryWorktreePath: '/tmp/safe-worktree',
       skipAgent: false,
     });
@@ -7386,7 +7520,7 @@ describe('PodManager', () => {
           status: 'queued',
           recoveryWorktreePath: '/tmp/worktree/existing',
           skipAgent: true,
-          infrastructureRecoveryCount: 0,
+          infrastructureRecoveryCount: 1,
         });
         expect(ctx.enqueuedSessions).toContain(pod.id);
       });

@@ -544,86 +544,102 @@ it('status command renders real HTTP delivery accounting and reused evidence, pr
   }
 });
 
-it('drives retry inspection, idempotent authorization and separate Resume through the real HTTP client', async () => {
-  const calls: Array<{ path: string; method: string; body: string }> = [];
-  const server = createServer(async (request, response) => {
-    const chunks: Buffer[] = [];
-    for await (const chunk of request) chunks.push(Buffer.from(chunk));
-    const body = Buffer.concat(chunks).toString();
-    calls.push({ path: request.url ?? '', method: request.method ?? '', body });
-    response.setHeader('Content-Type', 'application/json');
-    response.end(
-      JSON.stringify(
-        request.url?.endsWith('retry-state')
-          ? {
-              taskId: 'task',
-              executedCount: 3,
-              admissionCount: 4,
-              backoffsMs: [0, 0],
-              transientRetryCount: 2,
-              measuredDurationMs: 15,
-              interruptedCount: 1,
-              latest: { outcome: 'unknown' },
-              authorizations: [],
-              telemetry: 'partial',
-            }
-          : request.url?.endsWith('retry-authorizations')
-            ? { id: 'grant', ...JSON.parse(body) }
-            : request.url?.endsWith('resume')
-              ? { ok: true, action: 'revalidate' }
-              : { id: 'abcd1234' },
-      ),
-    );
-  });
-  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
-  const address = server.address();
-  if (!address || typeof address === 'string') throw new Error('No fixture port');
-  const client = new AutopodClient({
-    baseUrl: `http://127.0.0.1:${address.port}`,
-    getToken: async () => 'fixture-token',
-  });
-  const output = vi.spyOn(console, 'log').mockImplementation(() => {});
-  const run = async (args: string[]) => {
-    const program = new Command();
-    program.exitOverride();
-    registerPodCommands(program, () => client);
-    await program.parseAsync(['node', 'ap', ...args]);
-  };
-  try {
-    await run(['retry-state', 'abcd1234']);
-    expect(output.mock.calls.flat().join('\n')).toContain('3 executed / 4 admitted');
-    await run([
-      'authorize-retry',
-      'abcd1234',
-      '--reason',
-      'External condition verified',
-      '--request-key',
-      'stable-key',
-    ]);
-    await run([
-      'authorize-retry',
-      'abcd1234',
-      '--reason',
-      'External condition verified',
-      '--request-key',
-      'stable-key',
-    ]);
-    expect(calls.filter((call) => call.path.endsWith('resume'))).toHaveLength(0);
-    const decisions = calls.filter((call) => call.path.endsWith('retry-authorizations'));
-    expect(decisions).toHaveLength(2);
-    expect(decisions[0]?.body).toBe(decisions[1]?.body);
-    expect(JSON.parse(decisions[0]?.body ?? '{}')).toEqual({
-      requestKey: 'stable-key',
-      reason: 'External condition verified',
+it.each(['validation', 'sandbox_startup'] as const)(
+  'drives %s retry inspection, idempotent authorization and separate Resume through the real HTTP client',
+  async (stage) => {
+    const calls: Array<{ path: string; method: string; body: string }> = [];
+    const server = createServer(async (request, response) => {
+      const chunks: Buffer[] = [];
+      for await (const chunk of request) chunks.push(Buffer.from(chunk));
+      const body = Buffer.concat(chunks).toString();
+      calls.push({ path: request.url ?? '', method: request.method ?? '', body });
+      response.setHeader('Content-Type', 'application/json');
+      response.end(
+        JSON.stringify(
+          request.url?.includes('retry-state')
+            ? {
+                taskId: 'task',
+                stage,
+                executedCount: 3,
+                admissionCount: 4,
+                backoffsMs: [0, 0],
+                transientRetryCount: 2,
+                measuredDurationMs: 15,
+                interruptedCount: 1,
+                latest: { outcome: 'unknown' },
+                authorizations: [],
+                telemetry: 'partial',
+              }
+            : request.url?.endsWith('retry-authorizations')
+              ? { id: 'grant', ...JSON.parse(body) }
+              : request.url?.endsWith('resume')
+                ? { ok: true, action: 'revalidate' }
+                : { id: 'abcd1234' },
+        ),
+      );
     });
-    await run(['resume', 'abcd1234']);
-    expect(calls.filter((call) => call.path.endsWith('resume'))).toHaveLength(1);
-    expect(output.mock.calls.flat().join('\n')).toContain('Inspect status and retry-state');
-  } finally {
-    output.mockRestore();
-    await new Promise<void>((resolve) => server.close(() => resolve()));
-  }
-});
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+    const address = server.address();
+    if (!address || typeof address === 'string') throw new Error('No fixture port');
+    const client = new AutopodClient({
+      baseUrl: `http://127.0.0.1:${address.port}`,
+      getToken: async () => 'fixture-token',
+    });
+    const output = vi.spyOn(console, 'log').mockImplementation(() => {});
+    const run = async (args: string[]) => {
+      const program = new Command();
+      program.exitOverride();
+      registerPodCommands(program, () => client);
+      await program.parseAsync(['node', 'ap', ...args]);
+    };
+    try {
+      await run(['retry-state', 'abcd1234', '--stage', stage]);
+      expect(
+        calls.some(
+          (call) =>
+            call.path ===
+            `/pods/abcd1234/retry-state${stage === 'validation' ? '' : '?stage=sandbox_startup'}`,
+        ),
+      ).toBe(true);
+      expect(output.mock.calls.flat().join('\n')).toContain('3 executed / 4 admitted');
+      await run([
+        'authorize-retry',
+        '--stage',
+        stage,
+        'abcd1234',
+        '--reason',
+        'External condition verified',
+        '--request-key',
+        'stable-key',
+      ]);
+      await run([
+        'authorize-retry',
+        '--stage',
+        stage,
+        'abcd1234',
+        '--reason',
+        'External condition verified',
+        '--request-key',
+        'stable-key',
+      ]);
+      expect(calls.filter((call) => call.path.endsWith('resume'))).toHaveLength(0);
+      const decisions = calls.filter((call) => call.path.endsWith('retry-authorizations'));
+      expect(decisions).toHaveLength(2);
+      expect(decisions[0]?.body).toBe(decisions[1]?.body);
+      expect(JSON.parse(decisions[0]?.body ?? '{}')).toEqual({
+        requestKey: 'stable-key',
+        reason: 'External condition verified',
+        ...(stage === 'validation' ? {} : { stage }),
+      });
+      await run(['resume', 'abcd1234']);
+      expect(calls.filter((call) => call.path.endsWith('resume'))).toHaveLength(1);
+      expect(output.mock.calls.flat().join('\n')).toContain('Inspect status and retry-state');
+    } finally {
+      output.mockRestore();
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+  },
+);
 
 it('sends the same explicit rerun decision through the actual CLI HTTP client and prints dispatch evidence', async () => {
   const requests: unknown[] = [];

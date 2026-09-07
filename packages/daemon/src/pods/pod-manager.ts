@@ -228,6 +228,7 @@ import {
   resolveReviewerProvider,
 } from './runtime-resolver.js';
 import { type SandboxPreviewProxy, startSandboxPreviewProxy } from './sandbox-preview-proxy.js';
+import { sandboxStartupRetryInput } from './sandbox-startup-admission.js';
 import { resolveSections } from './section-resolver.js';
 import { resolveSkills } from './skill-resolver.js';
 import {
@@ -1370,6 +1371,8 @@ export interface PodManagerDependencies {
   validationInfrastructureRetryBackoffMs?: readonly number[];
   /** Test seam for the durable fresh-sandbox recovery cooldown. */
   sandboxInfrastructureRecoveryDelay?: (delayMs: number) => Promise<void>;
+  /** Persisted task-wide sandbox startup policy; defaults to one 30-second retry. */
+  sandboxInfrastructureRetryBackoffMs?: readonly number[];
   /** Test seam for bounding best-effort sandbox runtime-session extraction. */
   sandboxRuntimeSessionSyncTimeoutMs?: number;
   /** Safety events repository for writing per-pattern detection rows. */
@@ -2217,7 +2220,26 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
       });
       return false;
     }
-    if (capturedPod.infrastructureRecoveryCount >= 1) {
+    const startupLedger = podRepo.sandboxStartupRetries;
+    let exhausted = capturedPod.infrastructureRecoveryCount >= 1;
+    if (startupLedger) {
+      const input = sandboxStartupRetryInput(capturedPod);
+      try {
+        startupLedger.assertCanAdmit(
+          podId,
+          capturedPod.lifecycleGeneration,
+          input.identity,
+          input.bindingHash,
+          [...(deps.sandboxInfrastructureRetryBackoffMs ?? [30_000])],
+        );
+        exhausted = false;
+      } catch (admissionError) {
+        if (!(admissionError instanceof TaskRetryBlockedError)) throw admissionError;
+        exhausted = true;
+        emitActivityStatus(podId, admissionError.message);
+      }
+    }
+    if (exhausted) {
       podRepo.update(podId, {
         infrastructureFailure: sandboxInfrastructureFailure(
           error,
@@ -2265,7 +2287,9 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
       return false;
     }
 
-    const retryNotBefore = new Date(Date.now() + 30_000).toISOString();
+    const startupState = startupLedger?.state(podId);
+    const delay = startupState?.backoffsMs?.[startupState.transientRetryCount] ?? 30_000;
+    const retryNotBefore = new Date(Date.now() + delay).toISOString();
     closeProviderAttempt(podId, 'aborted');
     await killSidecarsForPod(podId);
     await destroyPodNetwork(podId);
@@ -2279,7 +2303,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
     podRepo.update(podId, {
       containerId: null,
       recoveryWorktreePath: afterCleanup.worktreePath,
-      infrastructureRecoveryCount: 1,
+      infrastructureRecoveryCount: capturedPod.infrastructureRecoveryCount + 1,
       infrastructureFailure: sandboxInfrastructureFailure(
         error,
         phase,
@@ -2294,7 +2318,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
     if (queued.status !== 'queued') podRepo.update(podId, { status: 'queued' });
     emitActivityStatus(
       podId,
-      'Azure sandbox was unavailable before agent execution; retrying once with a fresh sandbox.',
+      'Azure sandbox was unavailable before agent execution; retrying within the task startup budget.',
     );
     if (deps.requeueSessionAfterCurrent) {
       deps.requeueSessionAfterCurrent(podId);
@@ -7837,6 +7861,18 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
       let visibleFailurePhase: OperatorFailurePhase = 'setup';
       let runtimeEventObserved = false;
       const stagedReferenceArchivePaths = new Set<string>();
+      let startupAdmission: { id: string; started: number | null } | undefined;
+      const finishStartup = (outcome: import('@autopod/shared').TaskRetryOutcome): void => {
+        if (!startupAdmission) return;
+        podRepo.sandboxStartupRetries?.finish(
+          startupAdmission.id,
+          outcome,
+          startupAdmission.started === null || outcome === 'unknown'
+            ? null
+            : Math.round(performance.now() - startupAdmission.started),
+        );
+        startupAdmission = undefined;
+      };
 
       // Defense-in-depth: processPod must only run for pods in queued/handoff state.
       // The queue's activeIds dedup prevents most races, but this guard ensures
@@ -7856,6 +7892,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
       try {
         const retryNotBefore = pod.infrastructureFailure?.retryNotBefore;
         if (
+          !podRepo.sandboxStartupRetries &&
           pod.infrastructureFailure?.source === 'azure-sandbox' &&
           pod.infrastructureFailure.recoveryDisposition === 'automatic_retry_scheduled' &&
           retryNotBefore
@@ -8209,6 +8246,26 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         // A fresh repository must be materialized from authenticated remote refs
         // before entering provisioning. Recovery pods intentionally retain their
         // surviving worktree semantics and do not pass through this gate.
+        if (pod.executionTarget === 'sandbox' && podRepo.sandboxStartupRetries) {
+          const ledger = podRepo.sandboxStartupRetries;
+          const input = sandboxStartupRetryInput(pod);
+          const admission = ledger.admit(
+            podId,
+            lifecycleGeneration,
+            input.identity,
+            input.bindingHash,
+            [...(deps.sandboxInfrastructureRetryBackoffMs ?? [30_000])],
+          );
+          startupAdmission = { id: admission.id, started: null };
+          const waitMs = Math.max(0, Date.parse(admission.notBefore) - Date.now());
+          if (waitMs > 0) {
+            emitStatus('Waiting for task-wide sandbox startup cooldown…');
+            await (deps.sandboxInfrastructureRecoveryDelay ?? sleep)(waitMs);
+          }
+          if (!ownsLifecycle(podId, lifecycleGeneration, null)) return;
+          ledger.start(admission.id);
+          startupAdmission.started = performance.now();
+        }
         pod = transition(podRepo.getOrThrow(podId), 'provisioning', provisioningUpdates);
         podRepo.update(podId, { profileSnapshot: profile });
         if (!pod.networkPolicyResolved) {
@@ -9314,6 +9371,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           }
 
           logger.info({ podId }, 'Workspace pod running — awaiting manual attach');
+          finishStartup('pass');
           return;
         }
 
@@ -9785,6 +9843,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
             'completion',
           );
           podRepo.executionProvenance?.record(podId, pod.lifecycleGeneration, preservedProvenance);
+          finishStartup('pass');
           podRepo.update(podId, { skipAgent: false });
           if (isFreshContainerValidationOnly) {
             emitStatus('Skipping agent — running validation only…');
@@ -9821,6 +9880,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
             'completion',
           );
           podRepo.executionProvenance?.record(podId, pod.lifecycleGeneration, recoveredProvenance);
+          finishStartup('pass');
           emitStatus('Agent already finished before recovery — resuming completion…');
           logger.info(
             { podId, worktreePath },
@@ -10084,7 +10144,10 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         visibleFailurePhase = 'agent';
         const observedEvents = (async function* () {
           for await (const event of events) {
-            if (!runtimeEventObserved) podRepo.update(podId, { infrastructureFailure: null });
+            if (!runtimeEventObserved) {
+              finishStartup('pass');
+              podRepo.update(podId, { infrastructureFailure: null });
+            }
             runtimeEventObserved = true;
             yield event;
           }
@@ -10117,6 +10180,20 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           await preserveSandboxAfterAgentFailure(podId, 'fatal agent exit');
         }
       } catch (err) {
+        if (startupAdmission) {
+          const current = podRepo.getOrThrow(podId);
+          const safeTransient =
+            err instanceof SandboxInfrastructureError &&
+            !runtimeEventObserved &&
+            (current.skipAgent || !hasDurableAgentExecutionEvidence(current));
+          finishStartup(
+            startupAdmission.started === null
+              ? 'cancelled'
+              : safeTransient
+                ? 'transient'
+                : 'nonretryable',
+          );
+        }
         if (!ownsLifecycle(podId, lifecycleGeneration, null)) {
           logger.info(
             { podId, generation: lifecycleGeneration },
@@ -10299,6 +10376,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           /* swallow — best effort */
         }
       } finally {
+        finishStartup('unknown');
         await Promise.all(
           [...stagedReferenceArchivePaths].map((archivePath) => rm(archivePath, { force: true })),
         );
@@ -12934,7 +13012,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           completedAt: null,
           failureReason: null,
           infrastructureFailure: null,
-          infrastructureRecoveryCount: 0,
+          infrastructureRecoveryCount: pod.infrastructureRecoveryCount,
           ...(failedBeforeAgentWork
             ? {
                 filesChanged: 0,
@@ -16097,6 +16175,19 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         logger.info({ podId }, 'Coalesced duplicate validation infrastructure Resume');
         return { action: 'revalidate' };
       }
+      if (pod.executionTarget === 'sandbox' && podRepo.sandboxStartupRetries) {
+        const latest = podRepo.sandboxStartupRetries.state(podId).latest;
+        if (latest && latest.outcome !== 'pass') {
+          const input = sandboxStartupRetryInput(pod);
+          podRepo.sandboxStartupRetries.assertCanAdmit(
+            podId,
+            pod.lifecycleGeneration,
+            input.identity,
+            input.bindingHash,
+            [...(deps.sandboxInfrastructureRetryBackoffMs ?? [30_000])],
+          );
+        }
+      }
       if (!pod.worktreePath) {
         throw new AutopodError(
           `Pod ${podId} has no worktree — cannot resume`,
@@ -16162,7 +16253,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
             recoveryDisposition: 'automatic_retry_scheduled',
             retryNotBefore: null,
           },
-          infrastructureRecoveryCount: 0,
+          infrastructureRecoveryCount: pod.infrastructureRecoveryCount,
           failureReason: null,
           completedAt: null,
           skipAgent: isSafeValidationOnlyInfrastructureResume,

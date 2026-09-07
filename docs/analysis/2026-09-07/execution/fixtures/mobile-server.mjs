@@ -164,6 +164,26 @@ const retryState = {
   authorizations: [],
   telemetry: 'partial',
 };
+const startupRetryFixture = process.env.FIXTURE_MODE === 'sandbox-startup';
+if (startupRetryFixture) {
+  pod = {
+    ...pod,
+    status: 'failed',
+    executionTarget: 'sandbox',
+    pendingEscalation: null,
+    recordDiagnostics: [],
+    task: '[Local fixture] Inspect exhausted sandbox startup',
+    finalization: null,
+    lastValidationResult: null,
+  };
+  retryState.stage = 'sandbox_startup';
+  retryState.backoffsMs = [30000];
+  retryState.admissionCount = 2;
+  retryState.executedCount = 2;
+  retryState.transientRetryCount = 1;
+  retryState.interruptedCount = 0;
+  retryState.latest = { id: 'local-startup-failure', outcome: 'transient' };
+}
 const taskBudgetFixture = process.env.TASK_BUDGET_FIXTURE === '1';
 const savedSnapshotRecovery = process.env.ARTIFACT_SNAPSHOT_FIXTURE === '1';
 const artifactRecovery = process.env.ARTIFACT_RECOVERY_FIXTURE === '1' || savedSnapshotRecovery;
@@ -255,7 +275,22 @@ const server = createServer(async (req, res) => {
     }
     return json({ ...pod, id: 'same-fixture-rerun', status: 'queued' });
   }
-  if (pathname === '/pods/local-fixture/retry-state') return json(retryState);
+  if (pathname === '/pods/local-fixture/retry-state') {
+    const stage = new URL(req.url, 'http://localhost').searchParams.get('stage') ?? 'validation';
+    if (startupRetryFixture && stage === 'validation')
+      return json({
+        ...retryState,
+        stage,
+        backoffsMs: null,
+        admissionCount: 0,
+        executedCount: 0,
+        transientRetryCount: 0,
+        measuredDurationMs: 0,
+        latest: null,
+        authorizations: [],
+      });
+    return json(retryState);
+  }
   if (req.method === 'POST' && pathname === '/pods/local-fixture/retry-authorizations') {
     let body = '';
     for await (const chunk of req) body += chunk;
@@ -274,6 +309,7 @@ const server = createServer(async (req, res) => {
       JSON.stringify({
         scope: 'local fixture only',
         action: 'retry-authorization',
+        stage: input.stage ?? 'validation',
         requestKey: input.requestKey,
       }),
     );
@@ -318,16 +354,23 @@ const server = createServer(async (req, res) => {
     const grant = retryState.authorizations.find((entry) => !entry.usedByAttemptId);
     if (!grant) {
       res.statusCode = 409;
-      return json({ error: 'Task-wide retry budget exhausted' });
+      return json({
+        error: 'TASK_RETRY_RECONCILIATION_REQUIRED',
+        message: 'Task-wide retry budget exhausted; record an authorized retry with a reason.',
+      });
     }
     grant.usedByAttemptId = 'local-new-attempt';
     retryState.admissionCount++;
     retryState.executedCount++;
     retryState.latest = { id: 'local-new-attempt', outcome: 'nonretryable' };
     console.log(
-      JSON.stringify({ scope: 'local fixture only', action: 'resume-validation', simulated: true }),
+      JSON.stringify({
+        scope: 'local fixture only',
+        action: startupRetryFixture ? 'resume-sandbox-startup' : 'resume-validation',
+        simulated: true,
+      }),
     );
-    return json({ ok: true, action: 'revalidate' });
+    return json({ ok: true, action: startupRetryFixture ? 'retry-agent' : 'revalidate' });
   }
   if (pathname === '/scheduled-jobs') return json([scanJob]);
   if (pathname === '/scheduled-jobs/scan-fixture/reports') return json([scanReport]);

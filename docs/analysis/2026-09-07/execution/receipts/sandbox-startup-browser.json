@@ -1,0 +1,29 @@
+{
+  "scope": "Local built mobile UI and in-memory simulated HTTP responses; no real sandbox/provider or production mutations",
+  "sourceBaseline": "9689429ca57ea144d441c7fb25e414ddcb3ea6eb",
+  "sourceState": "Uncommitted checkpoint-24 implementation, followed by exact-commit full pipeline",
+  "browser": "Codex in-app browser temporary tab 14",
+  "url": "http://127.0.0.1:56008/mobile/#/pod/local-fixture",
+  "observed": [
+    "Validation count 0/0 and sandbox startup count 2/2 rendered separately",
+    "Startup automatic retry count 1/1 and partial telemetry displayed",
+    "Resume before authorization reports exhausted task-wide budget; count remains 2/2 and task remains failed",
+    "Reason entered through UI and one sandbox_startup authorization recorded; separate Resume message visible",
+    "Reload retains available authorization and startup count 2/2",
+    "Separate Resume changes simulated count to 3/3 and authorization to Consumed",
+    "Another Resume reports budget exhausted and count remains 3/3"
+  ],
+  "serverEventsReceipt": "sandbox-startup-browser-server.txt",
+  "cleanup": "Temporary browser tab closed and loopback server stopped",
+  "notProven": [
+    "Native UI interaction",
+    "Physical mobile device interaction",
+    "Live daemon/sandbox execution",
+    "Actual provider or infrastructure billing"
+  ],
+  "assetHashes": {
+    "packages/mobile-web/dist/assets/index-BW2MyKuY.js": "2c581bbf324d3b3d564e397e8a0510a902e38402d82ca978a34f70456f30ee5a",
+    "packages/mobile-web/dist/assets/index-BW2MyKuY.js.map": "1b1e1396763270376e7396074edaaaabb3e7401fa894c06ac65c8bcb7ab65ef5",
+    "packages/mobile-web/dist/assets/index-DcKgCAYr.css": "414fe3c9318d8846a08bc3b390f8e8bd5dba91c1e2875366a4932eb619e0187a"
+  }
+}
