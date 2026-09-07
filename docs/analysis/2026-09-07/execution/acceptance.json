@@ -51,7 +51,9 @@
         "receipts/summary-launch-race-final.txt",
         "checkpoint-23.md",
         "receipts/interactive-coordination-red.txt",
-        "receipts/interactive-coordination-final.txt"
+        "receipts/interactive-coordination-final.txt",
+        "receipts/checkpoint-23-full-validation.txt",
+        "receipts/checkpoint-23-validation-identity.json"
       ],
       "prerequisites": [],
       "remaining": "Normal replies are atomic, retained in bounded recovery context, and fence older completion events. New unanswered decisions remain actionable. Attached MCP delivery acknowledgment, delayed concurrent stream ordering, other response boundaries, historical orphan questions and broader finalization side effects remain. New worker/cycle and validation admission now preserve pending decisions, including older unresolved cycles in the current generation. Historical missing payload recovery and stream/MCP delivery acknowledgment remain. Codex now observes summary events before Spawn/Resume launch and disposes each invocation listener. This closes the local launch/stream attachment race, not durable delivery acknowledgment across all runtimes or daemon restart. Concurrent interactive completions now coalesce in process, conflicting promotion/generation requests fail closed, and current source/lifecycle/decision ownership is checked across push and container release boundaries. This is not durable cross-process idempotency, cancellation of already-dispatched external operations, or complete post-completion side-effect accounting."
@@ -131,7 +133,9 @@
         "receipts/summary-launch-race-final.txt",
         "checkpoint-23.md",
         "receipts/interactive-coordination-red.txt",
-        "receipts/interactive-coordination-final.txt"
+        "receipts/interactive-coordination-final.txt",
+        "receipts/checkpoint-23-full-validation.txt",
+        "receipts/checkpoint-23-validation-identity.json"
       ],
       "prerequisites": [],
       "remaining": "Entered artifact collection survives restart with sources retained; generation/cycle-bound integrity receipts and in-process duplicate coordination are implemented. Independent source inventory, fsync/power-loss proof, orphan snapshot/DB-path reconciliation, interactive duplicates, other reply boundaries and broader durable finalization side effects remain. New worker/cycle and validation admission now preserve pending decisions, including older unresolved cycles in the current generation. Historical missing payload recovery and stream/MCP delivery acknowledgment remain. Codex now observes summary events before Spawn/Resume launch and disposes each invocation listener. This closes the local launch/stream attachment race, not durable delivery acknowledgment across all runtimes or daemon restart. Concurrent interactive completions now coalesce in process, conflicting promotion/generation requests fail closed, and current source/lifecycle/decision ownership is checked across push and container release boundaries. This is not durable cross-process idempotency, cancellation of already-dispatched external operations, or complete post-completion side-effect accounting."
@@ -202,7 +206,9 @@
         "receipts/interactive-preservation-final.txt",
         "checkpoint-23.md",
         "receipts/interactive-coordination-red.txt",
-        "receipts/interactive-coordination-final.txt"
+        "receipts/interactive-coordination-final.txt",
+        "receipts/checkpoint-23-full-validation.txt",
+        "receipts/checkpoint-23-validation-identity.json"
       ],
       "prerequisites": [
         "PR creation intent/reconciliation implemented locally; broader finalization side effects and operator override remain."
@@ -251,7 +257,9 @@
         "receipts/interactive-preservation-final.txt",
         "checkpoint-23.md",
         "receipts/interactive-coordination-red.txt",
-        "receipts/interactive-coordination-final.txt"
+        "receipts/interactive-coordination-final.txt",
+        "receipts/checkpoint-23-full-validation.txt",
+        "receipts/checkpoint-23-validation-identity.json"
       ],
       "prerequisites": [],
       "remaining": "Entered artifact collection survives restart with sources retained; generation/cycle-bound integrity receipts and in-process duplicate coordination are implemented. Independent source inventory, fsync/power-loss proof, orphan snapshot/DB-path reconciliation, interactive duplicates, other reply boundaries and broader durable finalization side effects remain. Interactive completion now stops before push/cleanup when sync and archive fallback fail or a branch container lacks its host worktree; the source remains retryable. Duplicate concurrent interactive requests, cancellation fences, restart/durable side-effect receipts and complete source-inventory proof remain. Concurrent interactive completions now coalesce in process, conflicting promotion/generation requests fail closed, and current source/lifecycle/decision ownership is checked across push and container release boundaries. This is not durable cross-process idempotency, cancellation of already-dispatched external operations, or complete post-completion side-effect accounting."
@@ -316,7 +324,9 @@
         "receipts/decision-admission-affected.txt",
         "checkpoint-23.md",
         "receipts/interactive-coordination-red.txt",
-        "receipts/interactive-coordination-final.txt"
+        "receipts/interactive-coordination-final.txt",
+        "receipts/checkpoint-23-full-validation.txt",
+        "receipts/checkpoint-23-validation-identity.json"
       ],
       "prerequisites": [],
       "remaining": "Entered artifact collection survives restart with sources retained; generation/cycle-bound integrity receipts and in-process duplicate coordination are implemented. Independent source inventory, fsync/power-loss proof, orphan snapshot/DB-path reconciliation, interactive duplicates, other reply boundaries and broader durable finalization side effects remain. New worker/cycle and validation admission now preserve pending decisions, including older unresolved cycles in the current generation. Historical missing payload recovery and stream/MCP delivery acknowledgment remain. Concurrent interactive completions now coalesce in process, conflicting promotion/generation requests fail closed, and current source/lifecycle/decision ownership is checked across push and container release boundaries. This is not durable cross-process idempotency, cancellation of already-dispatched external operations, or complete post-completion side-effect accounting."
