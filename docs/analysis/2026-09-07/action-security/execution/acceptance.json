@@ -4,20 +4,35 @@
     {
       "id": "W1.1",
       "requirement": "Final URL, protocol, host and complete DNS answer validation including equivalent IP representations",
-      "status": "not-run",
-      "evidence": []
+      "status": "fixed",
+      "evidence": [
+        "receipts/http-destination-red.txt",
+        "receipts/http-destination-green.txt",
+        "receipts/http-destination-source.json"
+      ],
+      "remaining": "Final edge review and full pipeline pending."
     },
     {
       "id": "W1.2",
       "requirement": "Validated addresses bound to real connection with TLS hostname verification preserved",
-      "status": "not-run",
-      "evidence": []
+      "status": "fixed",
+      "evidence": [
+        "receipts/http-destination-red.txt",
+        "receipts/http-destination-green.txt",
+        "receipts/http-destination-source.json"
+      ],
+      "remaining": "Final edge review and full pipeline pending."
     },
     {
       "id": "W1.3",
       "requirement": "Bounded redirect policy with no cross-origin credentials or forbidden connection attempts",
-      "status": "not-run",
-      "evidence": []
+      "status": "fixed",
+      "evidence": [
+        "receipts/http-destination-red.txt",
+        "receipts/http-destination-green.txt",
+        "receipts/http-destination-source.json"
+      ],
+      "remaining": "Final edge review and full pipeline pending."
     },
     {
       "id": "W2.1",

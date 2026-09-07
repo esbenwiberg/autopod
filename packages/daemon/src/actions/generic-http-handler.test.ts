@@ -18,7 +18,7 @@ function mockResponse(
 const logger = pino({ level: 'silent' });
 
 /** Permissive SSRF guard for tests — production uses assertPublicUrl. */
-const allowAllGuard = async (_url: string) => ({ ok: true });
+const allowAllGuard = async (_url: string) => ({ ok: true, resolvedIps: ['127.0.0.1'] });
 
 function makeAction(overrides: Partial<ActionDefinition> = {}): ActionDefinition {
   return {
@@ -46,6 +46,7 @@ describe('createGenericHttpHandler', () => {
   it('throws when endpoint config is missing', async () => {
     const handler = createGenericHttpHandler({
       logger,
+      httpTransport: (url, init) => fetch(url, init),
       ssrfGuard: allowAllGuard,
       getSecret: () => undefined,
     });
@@ -58,6 +59,7 @@ describe('createGenericHttpHandler', () => {
   it('has handlerType "http"', () => {
     const handler = createGenericHttpHandler({
       logger,
+      httpTransport: (url, init) => fetch(url, init),
       ssrfGuard: allowAllGuard,
       getSecret: () => undefined,
     });
@@ -69,6 +71,7 @@ describe('createGenericHttpHandler', () => {
 
     const handler = createGenericHttpHandler({
       logger,
+      httpTransport: (url, init) => fetch(url, init),
       ssrfGuard: allowAllGuard,
       getSecret: (ref) => (ref === 'MY_API_KEY' ? 'secret-token-xyz' : undefined),
     });
@@ -95,6 +98,7 @@ describe('createGenericHttpHandler', () => {
 
     const handler = createGenericHttpHandler({
       logger,
+      httpTransport: (url, init) => fetch(url, init),
       ssrfGuard: allowAllGuard,
       getSecret: (ref) => {
         if (ref === 'USER') return 'admin';
@@ -126,6 +130,7 @@ describe('createGenericHttpHandler', () => {
 
     const handler = createGenericHttpHandler({
       logger,
+      httpTransport: (url, init) => fetch(url, init),
       ssrfGuard: allowAllGuard,
       getSecret: (ref) => (ref === 'KEY' ? 'api-key-123' : undefined),
     });
@@ -152,6 +157,7 @@ describe('createGenericHttpHandler', () => {
 
     const handler = createGenericHttpHandler({
       logger,
+      httpTransport: (url, init) => fetch(url, init),
       ssrfGuard: allowAllGuard,
       getSecret: () => undefined,
     });
@@ -177,6 +183,7 @@ describe('createGenericHttpHandler', () => {
 
     const handler = createGenericHttpHandler({
       logger,
+      httpTransport: (url, init) => fetch(url, init),
       ssrfGuard: allowAllGuard,
       getSecret: () => undefined,
     });
@@ -206,6 +213,7 @@ describe('createGenericHttpHandler', () => {
 
     const handler = createGenericHttpHandler({
       logger,
+      httpTransport: (url, init) => fetch(url, init),
       ssrfGuard: allowAllGuard,
       getSecret: () => undefined,
     });
@@ -237,6 +245,7 @@ describe('createGenericHttpHandler', () => {
 
     const handler = createGenericHttpHandler({
       logger,
+      httpTransport: (url, init) => fetch(url, init),
       ssrfGuard: allowAllGuard,
       getSecret: () => undefined,
     });
@@ -277,6 +286,7 @@ describe('createGenericHttpHandler', () => {
 
     const handler = createGenericHttpHandler({
       logger,
+      httpTransport: (url, init) => fetch(url, init),
       ssrfGuard: allowAllGuard,
       getSecret: () => undefined,
     });
@@ -311,6 +321,7 @@ describe('createGenericHttpHandler', () => {
 
     const handler = createGenericHttpHandler({
       logger,
+      httpTransport: (url, init) => fetch(url, init),
       ssrfGuard: allowAllGuard,
       getSecret: () => undefined,
     });
@@ -335,6 +346,7 @@ describe('createGenericHttpHandler', () => {
   it('throws when secret reference cannot be resolved', async () => {
     const handler = createGenericHttpHandler({
       logger,
+      httpTransport: (url, init) => fetch(url, init),
       ssrfGuard: allowAllGuard,
       getSecret: () => undefined,
     });
@@ -361,6 +373,7 @@ describe('createGenericHttpHandler', () => {
 
     const handler = createGenericHttpHandler({
       logger,
+      httpTransport: (url, init) => fetch(url, init),
       ssrfGuard: allowAllGuard,
       getSecret: () => undefined,
     });
@@ -386,6 +399,7 @@ describe('createGenericHttpHandler', () => {
     it('blocks an agent-templated URL pointing at the cloud metadata service', async () => {
       const handler = createGenericHttpHandler({
         logger,
+        httpTransport: (url, init) => fetch(url, init),
         getSecret: () => undefined,
       });
 
@@ -410,6 +424,7 @@ describe('createGenericHttpHandler', () => {
       // Stub DNS to return a private IP for the attacker hostname.
       const handler = createGenericHttpHandler({
         logger,
+        httpTransport: (url, init) => fetch(url, init),
         ssrfGuard: (url) => assertPublicUrl(url, { resolver: async () => ['127.0.0.1'] }),
         getSecret: () => undefined,
       });
@@ -434,6 +449,7 @@ describe('createGenericHttpHandler', () => {
     it('blocks localhost', async () => {
       const handler = createGenericHttpHandler({
         logger,
+        httpTransport: (url, init) => fetch(url, init),
         getSecret: () => undefined,
       });
 
@@ -455,6 +471,7 @@ describe('createGenericHttpHandler', () => {
     it('blocks .internal TLD', async () => {
       const handler = createGenericHttpHandler({
         logger,
+        httpTransport: (url, init) => fetch(url, init),
         getSecret: () => undefined,
       });
 
@@ -478,6 +495,7 @@ describe('createGenericHttpHandler', () => {
 
       const handler = createGenericHttpHandler({
         logger,
+        httpTransport: (url, init) => fetch(url, init),
         // Stub DNS to return a public IP so the test does not hit real DNS.
         ssrfGuard: (url) => assertPublicUrl(url, { resolver: async () => ['8.8.8.8'] }),
         getSecret: () => undefined,
@@ -504,6 +522,7 @@ describe('createGenericHttpHandler', () => {
 
     const handler = createGenericHttpHandler({
       logger,
+      httpTransport: (url, init) => fetch(url, init),
       ssrfGuard: allowAllGuard,
       getSecret: () => undefined,
     });

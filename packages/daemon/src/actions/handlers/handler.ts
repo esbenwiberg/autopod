@@ -1,5 +1,7 @@
 import type { ActionDefinition } from '@autopod/shared';
 import type { Logger } from 'pino';
+import type { SsrfCheckResult } from '../../api/ssrf-guard.js';
+import type { PinnedHttpTransport } from '../pinned-http-transport.js';
 
 /**
  * Common interface for all action handlers.
@@ -38,7 +40,9 @@ export interface HandlerConfig {
    * Defaults to `assertPublicUrl` from `api/ssrf-guard.ts`. Override in tests
    * that hit a localhost mock server.
    */
-  ssrfGuard?: (url: string) => Promise<{ ok: boolean; reason?: string }>;
+  ssrfGuard?: (url: string) => Promise<SsrfCheckResult>;
+  /** Trusted dependency injection only; never selected from request/profile input. */
+  httpTransport?: PinnedHttpTransport;
 }
 
 /**
@@ -168,6 +172,7 @@ async function readBoundedBody(response: Response, signal?: AbortSignal): Promis
 export async function fetchWithTimeout(
   url: string,
   init: RequestInit & { timeout?: number },
+  transport: (url: string, init: RequestInit) => Promise<Response> = fetch,
 ): Promise<Response> {
   const { timeout = DEFAULT_TIMEOUT, signal: callerSignal, ...requestInit } = init;
   if (!Number.isFinite(timeout) || timeout <= 0 || timeout > 2_147_483_647) {
@@ -181,14 +186,20 @@ export async function fetchWithTimeout(
 
   try {
     signal.throwIfAborted();
-    const response = await fetch(url, {
-      ...requestInit,
-      headers: {
-        'Accept-Language': 'en-US',
-        ...init.headers,
-      },
+    const response = await withAbort(
+      transport(url, {
+        ...requestInit,
+        headers: {
+          'Accept-Language': 'en-US',
+          ...init.headers,
+        },
+        signal,
+      }),
       signal,
-    });
+      (late) => {
+        void late.body?.cancel().catch(() => {});
+      },
+    );
     const bytes = await readBoundedBody(response, signal);
     const buffered = new Response(response.body === null ? null : bytes, {
       status: response.status,
@@ -211,4 +222,23 @@ export async function fetchWithTimeout(
 export async function readSafeJson(response: Response): Promise<unknown> {
   const bytes = await readBoundedBody(response);
   return JSON.parse(new TextDecoder().decode(bytes));
+}
+
+/** Abort pending DNS/transport work promptly; clean up a response arriving late. */
+export function withAbort<T>(
+  work: Promise<T>,
+  signal: AbortSignal,
+  onLate?: (value: T) => void,
+): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const abort = () => reject(signal.reason);
+    signal.addEventListener('abort', abort, { once: true });
+    if (signal.aborted) abort();
+    work
+      .then((value) => {
+        if (signal.aborted) onLate?.(value);
+        else resolve(value);
+      }, reject)
+      .finally(() => signal.removeEventListener('abort', abort));
+  });
 }

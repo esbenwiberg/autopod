@@ -7,12 +7,15 @@ import {
   pickFieldsArray,
   readSafeJson,
   resolveResultPath,
+  withAbort,
 } from './handlers/handler.js';
+import { createPinnedHttpTransport } from './pinned-http-transport.js';
 
 export function createGenericHttpHandler(config: HandlerConfig): ActionHandler {
   const { logger, getSecret, ssrfGuard } = config;
   const log = logger.child({ handler: 'http' });
   const guard = ssrfGuard ?? ((url: string) => assertPublicUrl(url));
+  const transport = config.httpTransport ?? createPinnedHttpTransport();
 
   function resolveSecret(ref: string): string {
     // Supports ${ENV_VAR} syntax
@@ -99,29 +102,30 @@ export function createGenericHttpHandler(config: HandlerConfig): ActionHandler {
         }
       }
 
-      // SSRF guard: refuse to fetch URLs that resolve to private/loopback/
-      // link-local/metadata addresses. Action endpoint URLs are admin-defined
-      // but their `{{params}}` are agent-supplied — without this, an agent
-      // can template `{{host}}=169.254.169.254` and exfiltrate cloud metadata.
-      const guardResult = await guard(url);
-      if (!guardResult.ok) {
-        log.warn(
-          { action: action.name, url, reason: guardResult.reason },
-          'HTTP action blocked by SSRF guard',
-        );
-        throw new Error(
-          `HTTP action '${action.name}' blocked: ${guardResult.reason ?? 'private address'}`,
-        );
-      }
-
-      log.debug({ action: action.name, url, method }, 'Executing HTTP action');
-
-      const response = await fetchWithTimeout(url, {
-        method,
-        headers,
-        body,
-        timeout: actionTimeout ?? 15_000,
-      });
+      const response = await fetchWithTimeout(
+        url,
+        {
+          method,
+          headers,
+          body,
+          timeout: actionTimeout ?? 15_000,
+        },
+        async (destination, init) => {
+          const signal = init.signal;
+          if (!signal) throw new Error('Missing HTTP request deadline');
+          const checked = await withAbort(guard(destination), signal);
+          signal.throwIfAborted();
+          if (!checked.ok) {
+            log.warn({ action: action.name }, 'HTTP action blocked by destination policy');
+            throw new Error(
+              `HTTP action '${action.name}' blocked: ${checked.reason ?? 'private address'}`,
+            );
+          }
+          if (!checked.resolvedIps?.length) throw new Error('Missing validated HTTP destination');
+          log.debug({ action: action.name, method }, 'Executing HTTP action');
+          return transport(destination, init, checked.resolvedIps);
+        },
+      );
 
       if (!response.ok) {
         const text = await response.text().catch(() => '');

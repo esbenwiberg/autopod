@@ -1,6 +1,7 @@
 import { type RequestListener, createServer } from 'node:http';
 import { gzipSync } from 'node:zlib';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { createPinnedHttpTransport } from '../pinned-http-transport.js';
 import { fetchWithTimeout, readSafeJson } from './handler.js';
 
 const LIMIT = 2 * 1024 * 1024;
@@ -29,7 +30,14 @@ afterEach(async () => {
   await Promise.all(cleanups.splice(0).map((close) => close()));
 });
 
-describe('action HTTP transport resource bounds', () => {
+describe.each(['fetch', 'pinned'] as const)('action HTTP transport resource bounds: %s', (kind) => {
+  const pinned = createPinnedHttpTransport();
+  const request = (url: string, init: RequestInit & { timeout?: number }) =>
+    fetchWithTimeout(
+      url,
+      init,
+      kind === 'pinned' ? (u, i) => pinned(u, i, ['127.0.0.1']) : undefined,
+    );
   it.each(['delayed headers', 'stalled body', 'slow chunks'])(
     'enforces the complete deadline and closes the socket: %s',
     async (mode) => {
@@ -49,7 +57,7 @@ describe('action HTTP transport resource bounds', () => {
       });
       const started = performance.now();
       await expect(
-        fetchWithTimeout(url, { timeout: 60 }).then((response) => response.text()),
+        request(url, { timeout: 60 }).then((response) => response.text()),
       ).rejects.toThrow();
       expect(performance.now() - started).toBeLessThan(1_000);
       await vi.waitFor(() => expect(socketClosed).toBe(true));
@@ -71,7 +79,7 @@ describe('action HTTP transport resource bounds', () => {
       });
     });
     await expect(
-      fetchWithTimeout(url, { timeout: 2_000, signal: controller.signal }).then((r) => r.text()),
+      request(url, { timeout: 2_000, signal: controller.signal }).then((r) => r.text()),
     ).rejects.toThrow();
     await vi.waitFor(() => expect(closed).toBe(true));
   });
@@ -82,7 +90,7 @@ describe('action HTTP transport resource bounds', () => {
       res.write('x'.repeat(LIMIT));
       res.end('x');
     });
-    await expect(fetchWithTimeout(url, {}).then((r) => r.text())).rejects.toThrow(/too large/i);
+    await expect(request(url, {}).then((r) => r.text())).rejects.toThrow(/too large/i);
   });
 
   it('bounds decompressed response bytes', async () => {
@@ -91,7 +99,7 @@ describe('action HTTP transport resource bounds', () => {
       res.writeHead(200, { 'Content-Encoding': 'gzip', 'Content-Length': body.length });
       res.end(body);
     });
-    await expect(fetchWithTimeout(url, {}).then((r) => r.text())).rejects.toThrow(/too large/i);
+    await expect(request(url, {}).then((r) => r.text())).rejects.toThrow(/too large/i);
   });
 
   it('counts UTF-8 bytes rather than JavaScript characters', async () => {
@@ -128,8 +136,8 @@ describe('action HTTP transport resource bounds', () => {
         res.end('{"ok":true}');
       }
     });
-    expect(await readSafeJson(await fetchWithTimeout(url, {}))).toEqual({ ok: true });
-    const empty = await fetchWithTimeout(`${url}/empty`, {});
+    expect(await readSafeJson(await request(url, {}))).toEqual({ ok: true });
+    const empty = await request(`${url}/empty`, {});
     expect(empty.status).toBe(204);
     expect(await empty.text()).toBe('');
   });

@@ -1,0 +1,101 @@
+
+ RUN  v4.1.10 /Users/ewi/.codex/worktrees/46f5/autopod/packages/daemon
+
+ ❯ src/actions/http-destination.test.ts (7 tests | 7 failed) 299ms
+     × blocks equivalent mapped private URL http://[::ffff:127.0.0.1]/ before DNS or transport 5ms
+     × blocks equivalent mapped private URL http://[::ffff:7f00:1]/ before DNS or transport 0ms
+     × blocks equivalent mapped private URL http://[0:0:0:0:0:ffff:a9fe:a9fe]/ before DNS or transport 0ms
+     × never follows a redirect with bearer credentials 80ms
+     × never follows a redirect with custom-header credentials 43ms
+     × connects using the validated address without resolving the hostname again 43ms
+     × includes DNS validation in the action deadline and issues no late request 126ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 7 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/actions/http-destination.test.ts > generic HTTP destination boundary > blocks equivalent mapped private URL http://[::ffff:127.0.0.1]/ before DNS or transport
+ FAIL  src/actions/http-destination.test.ts > generic HTTP destination boundary > blocks equivalent mapped private URL http://[::ffff:7f00:1]/ before DNS or transport
+ FAIL  src/actions/http-destination.test.ts > generic HTTP destination boundary > blocks equivalent mapped private URL http://[0:0:0:0:0:ffff:a9fe:a9fe]/ before DNS or transport
+AssertionError: expected true to be false // Object.is equality
+
+- Expected
++ Received
+
+- false
++ true
+
+ ❯ src/actions/http-destination.test.ts:37:59
+     35|   ])('blocks equivalent mapped private URL %s before DNS or transport'…
+     36|     const resolver = vi.fn(async () => ['8.8.8.8']);
+     37|     expect((await assertPublicUrl(url, { resolver })).ok).toBe(false);
+       |                                                           ^
+     38|     expect(resolver).not.toHaveBeenCalled();
+     39|   });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/7]⎯
+
+ FAIL  src/actions/http-destination.test.ts > generic HTTP destination boundary > never follows a redirect with bearer credentials
+ FAIL  src/actions/http-destination.test.ts > generic HTTP destination boundary > never follows a redirect with custom-header credentials
+AssertionError: promise resolved "{ ok: true }" instead of rejecting
+
+- Expected
++ Received
+
+- Error {
+-   "message": "rejected promise",
++ {
++   "ok": true,
+  }
+
+ ❯ src/actions/http-destination.test.ts:50:63
+     48|     const handler = createGenericHttpHandler({ logger: pino({ level: '…
+     49|     const auth = type === 'bearer' ? { type, secret: '${KEY}' } : { ty…
+     50|     await expect(handler.execute(action(origin.url, auth), {})).reject…
+       |                                                               ^
+     51|     expect(target).not.toHaveBeenCalled();
+     52|   });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/7]⎯
+
+ FAIL  src/actions/http-destination.test.ts > generic HTTP destination boundary > connects using the validated address without resolving the hostname again
+AssertionError: promise rejected "TypeError: fetch failed" instead of resolving
+ ❯ src/actions/http-destination.test.ts:61:85
+     59|     const guard = vi.fn(async () => ({ ok: true, resolvedIps: ['127.0.…
+     60|     const handler = createGenericHttpHandler({ logger: pino({ level: '…
+     61|     await expect(handler.execute(action(`http://pinned.invalid:${origi…
+       |                                                                                     ^
+     62|     expect(host).toBe(`pinned.invalid:${origin.port}`);
+     63|     expect(guard).toHaveBeenCalledTimes(1);
+
+Caused by: TypeError: fetch failed
+Caused by: Error: getaddrinfo ENOTFOUND pinned.invalid
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯
+Serialized Error: { errno: -3008, code: 'ENOTFOUND', syscall: 'getaddrinfo', hostname: 'pinned.invalid' }
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/7]⎯
+
+ FAIL  src/actions/http-destination.test.ts > generic HTTP destination boundary > includes DNS validation in the action deadline and issues no late request
+AssertionError: promise resolved "{ ok: true }" instead of rejecting
+
+- Expected
++ Received
+
+- Error {
+-   "message": "rejected promise",
++ {
++   "ok": true,
+  }
+
+ ❯ src/actions/http-destination.test.ts:74:72
+     72|     };
+     73|     const handler = createGenericHttpHandler({ logger: pino({ level: '…
+     74|     await expect(handler.execute(action(origin.url, undefined, 60), {}…
+       |                                                                        ^
+     75|     await new Promise<void>((resolve) => setTimeout(resolve, 150));
+     76|     expect(target).not.toHaveBeenCalled();
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[4/7]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  7 failed (7)
+   Start at  23:15:28
+   Duration  987ms (transform 232ms, setup 0ms, import 404ms, tests 299ms, environment 0ms)

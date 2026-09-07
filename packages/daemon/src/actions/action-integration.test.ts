@@ -120,7 +120,7 @@ describe('Action Control Plane Integration', () => {
         auditRepo,
         logger,
         // Tests hit a localhost mock server; the production guard rejects loopback.
-        ssrfGuard: async () => ({ ok: true }),
+        ssrfGuard: async () => ({ ok: true, resolvedIps: ['127.0.0.1'] }),
         getSecret: (ref) => (ref === 'TEST_KEY' ? 'test-secret' : undefined),
       });
 
@@ -218,7 +218,7 @@ describe('Action Control Plane Integration', () => {
         auditRepo,
         logger,
         // Tests hit a localhost mock server; the production guard rejects loopback.
-        ssrfGuard: async () => ({ ok: true }),
+        ssrfGuard: async () => ({ ok: true, resolvedIps: ['127.0.0.1'] }),
         getSecret: () => 'test',
       });
 
@@ -431,7 +431,7 @@ describe('Action Control Plane Integration', () => {
         auditRepo,
         logger,
         // Tests hit a localhost mock server; the production guard rejects loopback.
-        ssrfGuard: async () => ({ ok: true }),
+        ssrfGuard: async () => ({ ok: true, resolvedIps: ['127.0.0.1'] }),
         getSecret: () => 'key',
       });
 
