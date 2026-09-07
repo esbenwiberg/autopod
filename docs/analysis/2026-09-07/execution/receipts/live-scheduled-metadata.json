@@ -1,0 +1,85 @@
+{
+  "capturedAt": "2026-09-07T12:10:12.481907+00:00",
+  "scope": "live read-only scheduled metadata; prompt content not emitted",
+  "httpStatus": 200,
+  "jobs": [
+    {
+      "id": "YufQ2-9y",
+      "profileName": "teamplanner-logs",
+      "enabled": false,
+      "cronExpression": "0 10 * * 1-5",
+      "lastRunAt": "2026-08-03T10:00:35.021Z",
+      "lastPodId": "inclined-mouse",
+      "hasDeterministicPolicy": false,
+      "taskSha256": "8d945fdf22d1026189bf1d48027457ad782f326b4ebc1e1e74520417c1691228",
+      "scopePhrases": [],
+      "mentionsSecrets": false,
+      "mentionsDependencies": false
+    },
+    {
+      "id": "uVm8nSsa",
+      "profileName": "teamplanner-agent",
+      "enabled": false,
+      "cronExpression": "0 11 * * 1-5",
+      "lastRunAt": "2026-05-21T09:00:17.409Z",
+      "lastPodId": null,
+      "hasDeterministicPolicy": false,
+      "taskSha256": "ff77f7372a6250e05a0105ee44859f7a0d5cd1d81a8da97fcc33c5aeefaf3611",
+      "scopePhrases": [],
+      "mentionsSecrets": false,
+      "mentionsDependencies": true
+    },
+    {
+      "id": "4AbxtWzo",
+      "profileName": "teamplanner-pr-read",
+      "enabled": true,
+      "cronExpression": "0 9 * * 1-5",
+      "lastRunAt": "2026-09-03T09:00:48.602Z",
+      "lastPodId": "acceptable-cephalopod",
+      "hasDeterministicPolicy": false,
+      "taskSha256": "e71a3219041f2b689fd5d73fa4e153422a7e4d4b48e6abdeadcdc81ebeab5d0a",
+      "scopePhrases": [],
+      "mentionsSecrets": true,
+      "mentionsDependencies": true
+    },
+    {
+      "id": "KM_9GgZj",
+      "profileName": "teamplanner-agent",
+      "enabled": false,
+      "cronExpression": "0 9 * * 1",
+      "lastRunAt": "2026-05-18T07:00:40.670Z",
+      "lastPodId": "yummy-mule",
+      "hasDeterministicPolicy": false,
+      "taskSha256": "d241685a51151ddd978f5520faab68e8150b18baa981ecdbfd08064b13b78b97",
+      "scopePhrases": [],
+      "mentionsSecrets": false,
+      "mentionsDependencies": true
+    },
+    {
+      "id": "kSR1LCM3",
+      "profileName": "portfolio-simulation-github",
+      "enabled": false,
+      "cronExpression": "0 10 * * *",
+      "lastRunAt": "2026-06-07T08:00:28.706Z",
+      "lastPodId": "spotty-fish",
+      "hasDeterministicPolicy": false,
+      "taskSha256": "e71e0b1d10c261e0faab21ed96aa1622e2547c83dd3b6bf13461af1e268a50b9",
+      "scopePhrases": [],
+      "mentionsSecrets": false,
+      "mentionsDependencies": false
+    },
+    {
+      "id": "BcAHGvzb",
+      "profileName": "portfolio-simulation-github",
+      "enabled": false,
+      "cronExpression": "0 13 * * *",
+      "lastRunAt": "2026-06-15T11:00:33.495Z",
+      "lastPodId": "compact-salamander",
+      "hasDeterministicPolicy": false,
+      "taskSha256": "ff77f7372a6250e05a0105ee44859f7a0d5cd1d81a8da97fcc33c5aeefaf3611",
+      "scopePhrases": [],
+      "mentionsSecrets": false,
+      "mentionsDependencies": true
+    }
+  ]
+}

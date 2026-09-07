@@ -1,4 +1,6 @@
 import { createInterface } from 'node:readline';
+import { scheduledScanPolicySchema } from '@autopod/shared';
+import type { Pod, ScanTriageRequest, ScheduledScanReport } from '@autopod/shared';
 import type {
   ScheduledJob,
   ScheduledJobTemplate,
@@ -9,6 +11,16 @@ import type { Command } from 'commander';
 import type { AutopodClient } from '../api/client.js';
 import { withJsonOutput } from '../output/json.js';
 import { type ColumnDef, renderTable } from '../output/table.js';
+
+function printRun(result: Pod | ScheduledScanReport): void {
+  if ('kind' in result && result.kind === 'scan_report') {
+    console.log(`Report ${result.id}: ${result.status}. No repair worker was launched.`);
+    console.log(`Review: ap schedule report ${result.id}`);
+  } else {
+    console.log(chalk.green(`Pod ${chalk.bold(result.id)} started.`));
+    console.log(chalk.dim(`Track progress: ap status ${result.id.slice(0, 8)}`));
+  }
+}
 
 function confirm(question: string): Promise<boolean> {
   const rl = createInterface({ input: process.stdin, output: process.stderr });
@@ -137,6 +149,104 @@ export function registerScheduleCommands(program: Command, getClient: () => Auto
   const schedule = program
     .command('schedule')
     .description('Manage scheduled jobs (ap schedule <subcommand>)');
+
+  const scanPolicyOptions = (command: Command) =>
+    command
+      .requiredOption('--base <branch>', 'Exact freshly fetched base branch')
+      .requiredOption('--head <branch>', 'Exact freshly fetched head branch')
+      .option(
+        '--scanners <names>',
+        'Comma-separated secrets,dependencies; dependency audit sends lock metadata to npm',
+        'secrets,dependencies',
+      )
+      .option(
+        '--window-hours <hours>',
+        'Strict rolling first-parent committer-time net delta; base and head must match',
+      )
+      .option('--judgment <mode>', 'none or bounded (may incur configured provider cost)', 'none');
+  const parseScan = (opts: {
+    base: string;
+    head: string;
+    scanners: string;
+    judgment: string;
+    windowHours?: string;
+  }) =>
+    scheduledScanPolicySchema.parse({
+      version: 1,
+      baseRef: opts.base,
+      headRef: opts.head,
+      scanners: opts.scanners.split(','),
+      judgment: opts.judgment,
+      ...(opts.windowHours ? { windowHours: Number(opts.windowHours) } : {}),
+    });
+  scanPolicyOptions(
+    schedule
+      .command('scan-create <profile> <name> <cron>')
+      .description('Create a deterministic report schedule'),
+  )
+    .option('--disabled', 'Create disabled')
+    .action(async (profile: string, name: string, cron: string, opts) => {
+      const scan = parseScan(opts);
+      const job = await getClient().createScheduledJob({
+        profileName: profile,
+        name,
+        cronExpression: cron,
+        task: 'Deterministic scan report. Repairs require a recorded human selection.',
+        scan,
+        enabled: !opts.disabled,
+      });
+      console.log(`Report schedule ${job.id} created (${job.enabled ? 'enabled' : 'disabled'}).`);
+    });
+  scanPolicyOptions(
+    schedule
+      .command('scan-configure <id>')
+      .description('Set an explicit deterministic scan policy'),
+  ).action(async (id: string, opts) => {
+    const job = await getClient().updateScheduledJob(id, { scan: parseScan(opts) });
+    console.log(`Schedule ${job.id} now produces deterministic reports.`);
+  });
+  schedule
+    .command('reports <jobId>')
+    .description('List durable reports, including for a deleted schedule')
+    .action(async (jobId: string) =>
+      console.log(JSON.stringify(await getClient().listScanReports(jobId), null, 2)),
+    );
+  schedule
+    .command('report <reportId>')
+    .description('Review scanner completeness, unresolved findings and durable human decisions')
+    .action(async (reportId: string) =>
+      console.log(JSON.stringify(await getClient().getScanReport(reportId), null, 2)),
+    );
+  schedule
+    .command('triage <reportId>')
+    .description('Record human triage; selection alone does not launch repairs')
+    .requiredOption('--finding <id>', 'Selected finding ID (repeatable)', collect, [])
+    .requiredOption('--action <action>', 'defer, resolve, or select_repair')
+    .requiredOption('--reason <text>', 'Reason for the human decision')
+    .requiredOption(
+      '--request-key <key>',
+      'Stable request identity; reuse after an interrupted response',
+    )
+    .action(async (reportId: string, opts) => {
+      if (!['defer', 'resolve', 'select_repair'].includes(opts.action))
+        throw new Error('Invalid triage action');
+      const decision = await getClient().triageScanReport(reportId, {
+        findingIds: opts.finding,
+        action: opts.action as ScanTriageRequest['action'],
+        reason: opts.reason,
+        requestKey: opts.requestKey,
+      });
+      console.log(JSON.stringify(decision, null, 2));
+    });
+  schedule
+    .command('repair <reportId> <selectionId>')
+    .description('Launch the recorded human repair selection once')
+    .action(async (reportId: string, selectionId: string) => {
+      const result = await getClient().launchScanRepair(reportId, selectionId);
+      console.log(
+        `Selected repair pod: ${result.podId}. This is a dispatch receipt, not patch delivery.`,
+      );
+    });
 
   // ap schedule create <profile> <cron> --template <id-or-name>
   // Legacy form remains supported: ap schedule create <profile> <name> <cron> <task>
@@ -310,6 +420,9 @@ export function registerScheduleCommands(program: Command, getClient: () => Auto
       );
       console.log(`${chalk.bold('Last run:')}     ${formatRelativeAgo(job.lastRunAt)}`);
       console.log(`${chalk.bold('Last pod:')} ${job.lastPodId ?? '-'}`);
+      console.log(`Last report: ${job.lastReportId ?? '-'}`);
+      console.log(`Run mode: ${job.scan ? 'deterministic report' : 'worker'}`);
+      if (job.scan) console.log(`Scan policy: ${JSON.stringify(job.scan)}`);
       console.log(`${chalk.bold('Status:')}       ${formatJobStatus(job)}`);
       if (Object.keys(job.fieldValues ?? {}).length > 0) {
         console.log(`${chalk.bold('Overrides:')}`);
@@ -409,8 +522,7 @@ export function registerScheduleCommands(program: Command, getClient: () => Auto
     .action(async (id: string) => {
       const client = getClient();
       const pod = await client.triggerScheduledJob(id);
-      console.log(chalk.green(`Pod ${chalk.bold(pod.id)} started.`));
-      console.log(chalk.dim(`Track progress: ap status ${pod.id.slice(0, 8)}`));
+      printRun(pod);
     });
 
   // ap schedule catchup
@@ -435,7 +547,7 @@ export function registerScheduleCommands(program: Command, getClient: () => Auto
 
         if (run) {
           const pod = await client.runScheduledJobCatchup(job.id);
-          console.log(chalk.green(`Pod ${chalk.bold(pod.id)} started.`));
+          printRun(pod);
         } else {
           await client.skipScheduledJobCatchup(job.id);
           console.log('Skipped.');

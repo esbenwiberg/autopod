@@ -19,3 +19,7 @@ Every implementation is linked from acceptance.json to regression/fault-injectio
 
 ## Checkpoint 3 continuation
 See checkpoint-3.md and acceptance.json. Actual-base declaration gates, durable task membership/run accounting, operator task projections, and all-table backup receipts are locally implemented. Continue with retry-condition governance and exact-input validation reuse, then scheduler/triage and durable delivery. The goal remains active; all required acceptance is not yet verified.
+
+## Checkpoint 6 continuation
+
+Scheduler-wired deterministic reports, strict delta/window collection, durable triage and human-selected repair dispatch are implemented locally. See checkpoint-6.md and the W5 ledger entries for proof and limits. Native interaction, live schedule conversion/scanner canaries and the final committed pipeline remain outstanding. Continue with unchanged-failure retry identity/authorization and cumulative backoff/budgets, then the remaining W1/W3/W4/W6 criteria; do not stop at this checkpoint.

@@ -1,0 +1,28 @@
+ RUN  v4.1.10 /private/tmp/autopod-durable-execution/packages/daemon
+
+ ❯ src/pods/pod-manager.test.ts (407 tests | 1 failed | 406 skipped) 294ms
+       × publishes and enqueues only committed repair pods after the selection transaction 292ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/pods/pod-manager.test.ts > PodManager > createSession > publishes and enqueues only committed repair pods after the selection transaction
+AssertionError: expected [Function] to throw error including 'Dispatch receipt write failed' but got 'expected [ \'shared-canid\' ] to deep…'
+
+Expected: "Dispatch receipt write failed"
+Received: "expected [ 'shared-canid' ] to deeply equal []"
+
+ ❯ src/pods/pod-manager.test.ts:3474:13
+    3472|         expect(events).not.toHaveBeenCalledWith(expect.objectContainin…
+    3473|         throw new Error('Dispatch receipt write failed');
+    3474|       })()).toThrow('Dispatch receipt write failed');
+       |             ^
+    3475|       await new Promise<void>((resolve) => setImmediate(resolve));
+    3476|       expect(ctx.podRepo.get(rolledBackId)).toBeNull();
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 406 skipped (407)
+   Start at  13:49:19
+   Duration  4.74s (transform 2.73s, setup 0ms, import 3.95s, tests 294ms, environment 0ms)

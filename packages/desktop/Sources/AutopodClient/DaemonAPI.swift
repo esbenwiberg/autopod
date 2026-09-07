@@ -831,6 +831,19 @@ public actor DaemonAPI {
     let _: EmptyResponse = try await request("DELETE", "/scheduled-job-templates/\(id)")
   }
 
+  public func listScanReports(_ jobId: String) async throws -> [ScheduledScanReport] {
+    try await request("GET", "/scheduled-jobs/\(jobId)/reports")
+  }
+  public func getScanReport(_ id: String) async throws -> ScanReportDetail {
+    try await request("GET", "/scan-reports/\(id)")
+  }
+  public func triageScanReport(_ id: String, _ body: ScanTriageRequest) async throws -> ScanTriageDecision {
+    try await request("POST", "/scan-reports/\(id)/triage", body: try encode(body))
+  }
+  public func launchScanRepair(_ reportId: String, selectionId: String) async throws -> ScanRepairDispatch {
+    try await request("POST", "/scan-reports/\(reportId)/repairs", body: try encode(["selectionId": selectionId]))
+  }
+
   public func listScheduledJobs() async throws -> [ScheduledJob] {
     try await request("GET", "/scheduled-jobs")
   }
@@ -839,7 +852,7 @@ public actor DaemonAPI {
     try await request("GET", "/scheduled-jobs/\(id)")
   }
 
-  public func runScheduledJobCatchup(_ id: String) async throws -> SessionResponse {
+  public func runScheduledJobCatchup(_ id: String) async throws -> ScheduledRunResponse {
     try await request("POST", "/scheduled-jobs/\(id)/catchup")
   }
 
@@ -859,7 +872,7 @@ public actor DaemonAPI {
     let _: EmptyResponse = try await request("DELETE", "/scheduled-jobs/\(id)")
   }
 
-  public func triggerScheduledJob(_ id: String) async throws -> SessionResponse {
+  public func triggerScheduledJob(_ id: String) async throws -> ScheduledRunResponse {
     try await request("POST", "/scheduled-jobs/\(id)/trigger")
   }
 

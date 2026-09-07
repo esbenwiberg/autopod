@@ -1,0 +1,92 @@
+ RUN  v4.1.10 /private/tmp/autopod-durable-execution
+
+ ❯ packages/daemon/src/scheduled-jobs/scheduled-job-manager.test.ts (25 tests | 1 failed | 24 skipped) 79ms
+     × runs an explicit empty-delta scan as durable report collection without creating a worker or human waiter 78ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  packages/daemon/src/scheduled-jobs/scheduled-job-manager.test.ts > ScheduledJobManager > runs an explicit empty-delta scan as durable report collection without creating a worker or human waiter
+AssertionError: expected { id: 'sess-abc', …(53) } to deeply equal { kind: 'scan_report', …(6) }
+
+- Expected
++ Received
+
+  {
+-   "completedAt": "2026-09-07T11:20:02.357Z",
+-   "files": [],
+-   "findings": [],
+-   "id": "report-1",
+-   "jobId": "rSWghhW-",
+-   "kind": "scan_report",
+-   "status": "empty_delta",
++   "baseBranch": null,
++   "branch": "autopod/sess-abc",
++   "budgetExtensionsUsed": 0,
++   "claudeSessionId": null,
++   "commitCount": 0,
++   "completedAt": null,
++   "containerId": null,
++   "costUsd": 0,
++   "createdAt": "2026-09-07T11:20:02.358Z",
++   "escalationCount": 0,
++   "executionTarget": "local",
++   "filesChanged": 0,
++   "fixPodId": null,
++   "id": "sess-abc",
++   "inputTokens": 0,
++   "lastCommitAt": null,
++   "lastCorrectionMessage": null,
++   "lastHeartbeatAt": null,
++   "lastValidationResult": null,
++   "linesAdded": 0,
++   "linesRemoved": 0,
++   "linkedPodId": null,
++   "maxPrFixAttempts": 3,
++   "maxValidationAttempts": 3,
++   "mergeBlockReason": null,
++   "model": "opus",
++   "outputMode": "pr",
++   "outputTokens": 0,
++   "pauseReason": null,
++   "pendingEscalation": null,
++   "pimGroups": null,
++   "plan": null,
++   "prFixAttempts": 0,
++   "prUrl": null,
++   "previewUrl": null,
++   "profileName": "test-profile",
++   "profileSnapshot": null,
++   "progress": null,
++   "recoveryWorktreePath": null,
++   "reworkReason": null,
++   "runtime": "claude",
++   "scheduledJobId": null,
++   "skipValidation": false,
++   "startCommitSha": null,
++   "startedAt": null,
++   "status": "queued",
++   "task": "test task",
++   "taskSummary": null,
++   "tokenBudget": null,
++   "updatedAt": "2026-09-07T11:20:02.358Z",
++   "userId": "scheduler",
++   "validationAttempts": 0,
++   "validationOverrides": null,
++   "worktreePath": null,
+  }
+
+ ❯ packages/daemon/src/scheduled-jobs/scheduled-job-manager.test.ts:127:20
+    125|     vi.spyOn(deps.scheduledJobRepo, 'getOrThrow').mockReturnValue({ ..…
+    126|     const result = await manager.trigger(job.id);
+    127|     expect(result).toEqual(report);
+       |                    ^
+    128|     expect(collect).toHaveBeenCalledTimes(1);
+    129|     expect(deps.podManager.createSession).not.toHaveBeenCalled();
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 24 skipped (25)
+   Start at  13:20:02
+   Duration  367ms (transform 106ms, setup 0ms, import 181ms, tests 79ms, environment 0ms)

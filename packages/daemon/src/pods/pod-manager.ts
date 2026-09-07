@@ -7427,66 +7427,70 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
 
       const pod = podRepo.getOrThrow(id);
 
-      eventBus.emit({
-        type: 'pod.created',
-        timestamp: new Date().toISOString(),
-        pod: {
-          id: pod.id,
-          profileName: pod.profileName,
-          task: pod.task,
-          status: pod.status,
-          model: pod.model,
-          runtime: pod.runtime,
-          branch: pod.branch,
-          baseBranch: pod.baseBranch,
-          duration: null,
-          filesChanged: pod.filesChanged,
-          createdAt: pod.createdAt,
-        },
-      });
-
-      // Emit the preflight overlap warning (computed before insert above) now
-      // that the new pod has an ID. The `block` policy already short-circuited
-      // earlier; reaching this point means the policy is `warn` or unset.
-      if (preflightConflicts.length > 0) {
+      const publishCommittedPod = () => {
         eventBus.emit({
-          type: 'pod.preflight_overlap',
+          type: 'pod.created',
           timestamp: new Date().toISOString(),
-          podId: id,
-          conflicts: preflightConflicts.map((c) => ({
-            conflictingPodId: c.conflictingPodId,
-            conflictingPodTask: c.conflictingPodTask,
-            conflictingPodStatus: c.conflictingPodStatus,
-            overlappingGlobs: c.overlappingGlobs,
-          })),
+          pod: {
+            id: pod.id,
+            profileName: pod.profileName,
+            task: pod.task,
+            status: pod.status,
+            model: pod.model,
+            runtime: pod.runtime,
+            branch: pod.branch,
+            baseBranch: pod.baseBranch,
+            duration: null,
+            filesChanged: pod.filesChanged,
+            createdAt: pod.createdAt,
+          },
         });
-        logger.warn(
+
+        // Emit the preflight overlap warning (computed before insert above) now
+        // that the new pod has an ID. The `block` policy already short-circuited
+        // earlier; reaching this point means the policy is `warn` or unset.
+        if (preflightConflicts.length > 0) {
+          eventBus.emit({
+            type: 'pod.preflight_overlap',
+            timestamp: new Date().toISOString(),
+            podId: id,
+            conflicts: preflightConflicts.map((c) => ({
+              conflictingPodId: c.conflictingPodId,
+              conflictingPodTask: c.conflictingPodTask,
+              conflictingPodStatus: c.conflictingPodStatus,
+              overlappingGlobs: c.overlappingGlobs,
+            })),
+          });
+          logger.warn(
+            {
+              podId: id,
+              conflictingPodIds: preflightConflicts.map((c) => c.conflictingPodId),
+            },
+            'Pod created with preflight overlap on in-flight pods — possible merge conflict',
+          );
+        }
+
+        // Dependent pods must not start until their predecessors reach `validated`;
+        // maybeTriggerDependents() will enqueue them at that point. A pod counts
+        // as dependent if either the new multi-parent array or the legacy single
+        // field is populated.
+        const hasDeps = (request.dependsOnPodIds?.length ?? 0) > 0 || !!request.dependsOnPodId;
+        if (!hasDeps) {
+          enqueueSession(id);
+        }
+        logger.info(
           {
             podId: id,
-            conflictingPodIds: preflightConflicts.map((c) => c.conflictingPodId),
+            profile: request.profileName,
+            branch: pod.branch,
+            baseBranch: pod.baseBranch,
+            startBranch: pod.startBranch,
           },
-          'Pod created with preflight overlap on in-flight pods — possible merge conflict',
+          'Pod created',
         );
-      }
-
-      // Dependent pods must not start until their predecessors reach `validated`;
-      // maybeTriggerDependents() will enqueue them at that point. A pod counts
-      // as dependent if either the new multi-parent array or the legacy single
-      // field is populated.
-      const hasDeps = (request.dependsOnPodIds?.length ?? 0) > 0 || !!request.dependsOnPodId;
-      if (!hasDeps) {
-        enqueueSession(id);
-      }
-      logger.info(
-        {
-          podId: id,
-          profile: request.profileName,
-          branch: pod.branch,
-          baseBranch: pod.baseBranch,
-          startBranch: pod.startBranch,
-        },
-        'Pod created',
-      );
+      };
+      if (podRepo.afterInsertCommitted) podRepo.afterInsertCommitted(pod.id, publishCommittedPod);
+      else publishCommittedPod();
       return pod;
     },
 

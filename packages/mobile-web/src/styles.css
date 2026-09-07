@@ -865,3 +865,39 @@ code {
   height: 1.1rem;
   accent-color: var(--accent);
 }
+
+.scan-report {
+  overflow-wrap: anywhere;
+}
+.scan-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 0.5rem;
+  padding: 1rem;
+  margin-block: 1rem;
+  overflow-wrap: anywhere;
+}
+.scan-report .form-actions > .action-btn {
+  flex: 1 1 10rem;
+  overflow-wrap: normal;
+}
+.scan-finding {
+  display: flex;
+  align-items: flex-start;
+  gap: .75rem;
+  padding-block: .75rem;
+}
+.scan-finding input {
+  flex: 0 0 auto;
+  margin-top: .3rem;
+}
+.scan-finding span {
+  min-width: 0;
+}
+.scan-decision {
+  padding-block: .75rem;
+  border-top: 1px solid var(--border);
+}
+.scan-report .form-actions {
+  flex-wrap: wrap;
+}

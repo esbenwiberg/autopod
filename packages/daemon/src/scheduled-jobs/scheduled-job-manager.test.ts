@@ -114,6 +114,40 @@ describe('ScheduledJobManager', () => {
     insertTestProfile(db);
   });
 
+  it('runs an explicit empty-delta scan as durable report collection without creating a worker or human waiter', async () => {
+    const deps = makeDeps(db);
+    const manager = createScheduledJobManager(deps);
+    const job = manager.create({
+      name: 'Strict delta',
+      profileName: 'test-profile',
+      task: 'Only this delta',
+      cronExpression: '0 9 * * *',
+    });
+    const scan = {
+      version: 1,
+      baseRef: 'main',
+      headRef: 'main',
+      scanners: ['secrets'],
+      judgment: 'none',
+    };
+    const report = {
+      kind: 'scan_report',
+      id: 'report-1',
+      jobId: job.id,
+      status: 'empty_delta',
+      findings: [],
+      files: [],
+      completedAt: new Date().toISOString(),
+    };
+    const collect = vi.fn(async () => report);
+    Object.assign(deps, { scanCoordinator: { collect } });
+    vi.spyOn(deps.scheduledJobRepo, 'getOrThrow').mockReturnValue({ ...job, scan } as typeof job);
+    const result = await manager.trigger(job.id);
+    expect(result).toEqual(report);
+    expect(collect).toHaveBeenCalledTimes(1);
+    expect(deps.podManager.createSession).not.toHaveBeenCalled();
+  });
+
   describe('create', () => {
     it('creates a job with valid cron expression', () => {
       const deps = makeDeps(db);

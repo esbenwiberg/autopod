@@ -81,6 +81,11 @@ import {
   createRuntimeRegistry,
 } from './runtimes/index.js';
 import { createSafetyEventsRepository } from './safety/safety-events-repository.js';
+import { auditNpmLockfile } from './scheduled-jobs/npm-lock-audit.js';
+import { createScanCoordinator } from './scheduled-jobs/scan-coordinator.js';
+import { createBoundedScanJudge } from './scheduled-jobs/scan-judge.js';
+import { createScanOperatorService } from './scheduled-jobs/scan-operator-service.js';
+import { createScanReportRepository } from './scheduled-jobs/scan-report-repository.js';
 import { createScheduledJobManager } from './scheduled-jobs/scheduled-job-manager.js';
 import { createScheduledJobRepository } from './scheduled-jobs/scheduled-job-repository.js';
 import { createScheduledJobScheduler } from './scheduled-jobs/scheduled-job-scheduler.js';
@@ -830,9 +835,50 @@ function makeActionEngine(_profile: import('@autopod/shared').Profile) {
 // Scheduled jobs
 const scheduledJobRepo = createScheduledJobRepository(db);
 const scheduledJobTemplateRepo = createScheduledJobTemplateRepository(db);
+const scanReportRepo = createScanReportRepository(db);
+scanReportRepo.recoverInterrupted();
+const scanCoordinator = createScanCoordinator({
+  reports: scanReportRepo,
+  collector: { auditLockfile: auditNpmLockfile },
+  logger,
+  async prepare(job, reportId) {
+    const profile = profileStore.get(job.profileName);
+    if (!profile.repoUrl || !job.scan) throw new Error('Scan repository or policy unavailable');
+    const repository = new URL(profile.repoUrl);
+    repository.username = '';
+    repository.password = '';
+    repository.search = '';
+    repository.hash = '';
+    if (profile.prProvider !== 'ado' && repository.hostname !== 'github.com')
+      throw new Error('Scan repository host does not match GitHub credential authority');
+    const judge =
+      job.scan.judgment === 'bounded'
+        ? createBoundedScanJudge(profile, llmDeps, logger)
+        : undefined;
+    const pat =
+      profile.prProvider === 'ado'
+        ? await azureDevOpsAuth.getToken()
+        : (await githubAuth.resolveCredential()).token;
+    const workdir = await worktreeManager.create({
+      repoUrl: profile.repoUrl,
+      branch: `autopod/scan-${reportId}`,
+      baseBranch: job.scan.baseRef,
+      startBranch: job.scan.headRef,
+      sessionId: `scan-${reportId}`,
+      pat,
+    });
+    return {
+      workdir: workdir.worktreePath,
+      repository: repository.toString(),
+      judge,
+      cleanup: () => worktreeManager.cleanup(workdir.worktreePath),
+    };
+  },
+});
 const scheduledJobManager = createScheduledJobManager({
   scheduledJobRepo,
   scheduledJobTemplateRepo,
+  scanCoordinator,
   podManager,
   eventBus,
   logger,
@@ -1046,6 +1092,12 @@ const app = await createServer({
   memoryUsageRepo,
   pendingOverrideRepo,
   scheduledJobManager,
+  scanOperatorService: createScanOperatorService({
+    reports: scanReportRepo,
+    jobs: scheduledJobRepo,
+    profiles: profileStore,
+    pods: podManager,
+  }),
   safetyEventsRepo,
   issueWatcherRepo,
   screenshotStore,

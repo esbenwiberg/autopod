@@ -1,0 +1,145 @@
+{
+  "normalization": "Trailing whitespace removed per line; one final newline. Test outcomes and content retained.",
+  "receipts": [
+    {
+      "path": "docs/analysis/2026-09-07/execution/receipts/scan-repair-transaction-fixture-not-installed.txt",
+      "originalSha256": "d11e42f1a2594285a60286adb61945d8f7458fd3f350ecae2d8ac43e08ae0b43",
+      "normalizedSha256": "5f53efd6b033d30d744df0e2aee6ea5e82dffaea9bbdb651278888e88c57dbb3"
+    },
+    {
+      "path": "docs/analysis/2026-09-07/execution/receipts/scan-repair-transaction-green.txt",
+      "originalSha256": "aabb943833aaab182b10f75dc6594ca552454a271952fe7aaa36971772c46625",
+      "normalizedSha256": "ffdd5aeb7ba76331eaf0386cf5ba8624e3be8787946ae398d14490b05022cf2c"
+    },
+    {
+      "path": "docs/analysis/2026-09-07/execution/receipts/scan-repair-transaction-red.txt",
+      "originalSha256": "239a272f725c365d2b46aae2f98bdc0e35242fff03b365e629297291d56ed689",
+      "normalizedSha256": "e1ec589b471555be0d6023098c64c9d3de6b92cc4866a68a0db7536e775b3dbd"
+    },
+    {
+      "path": "docs/analysis/2026-09-07/execution/receipts/scan-shared-build.txt",
+      "originalSha256": "fb8f270fbc50aa96ddb31ed09179c9113745a6e3909971c224f859abab539bc1",
+      "normalizedSha256": "cf79130698c99ca64dec3c0d1a1571a277d27cc7133365e286f7d3df226a1491"
+    },
+    {
+      "path": "docs/analysis/2026-09-07/execution/receipts/scheduled-api-real-dispatch.txt",
+      "originalSha256": "50cacc9176021bae8cecf12f1a796d294f049ed06c80d18d0f29f6221229123d",
+      "normalizedSha256": "ac05b0f202d30d126da551390a2ee2f9ae4e52110532c1bef1e76da8a8f55ed6"
+    },
+    {
+      "path": "docs/analysis/2026-09-07/execution/receipts/scheduled-cli-final-tests.txt",
+      "originalSha256": "a40f6bf47f79baf31ff815940b95b7f4e1c0527aedaab6d968f1c76bf0014baf",
+      "normalizedSha256": "0be235181e5b8050e1f9731c5e7ce85a0fb4c54bfc0c5f2a78b993df8fac1c33"
+    },
+    {
+      "path": "docs/analysis/2026-09-07/execution/receipts/scheduled-cli-http-tests.txt",
+      "originalSha256": "d99f25d4c9a031a7f3ed27739d3f9366ec9317ae3548b5343a594a88799e6712",
+      "normalizedSha256": "b6cbff73391da4663d7972b589b19afe3be3b9500b51f97545aed04cad9023fb"
+    },
+    {
+      "path": "docs/analysis/2026-09-07/execution/receipts/scheduled-cli-window-tests.txt",
+      "originalSha256": "98c6793eca5df5459535c7d003e8f715cb15092ca60c5ec14f2c2da570da2bd4",
+      "normalizedSha256": "6227c33338368e9740d8c00b10b2c0f660fbc2f550087623e16dba4283d1ad6c"
+    },
+    {
+      "path": "docs/analysis/2026-09-07/execution/receipts/scheduled-collection-judgment-tests.txt",
+      "originalSha256": "c8d714011532ff2fe595e76c64351dc18634fea73e23f50117e5a9649ff21f2b",
+      "normalizedSha256": "00decf2a8c9752c27258eb3002f0e8d983af1442a42800e282e3f416d3f2d665"
+    },
+    {
+      "path": "docs/analysis/2026-09-07/execution/receipts/scheduled-creation-generation-tests.txt",
+      "originalSha256": "8be300a95147bc991f38cc7b48e18e20cc6838513d117366b6bd296e84b6b5d3",
+      "normalizedSha256": "d7fbb8f101b25e4bc0b76138e08a0dff0657b8fd06386a8367723b70861ba383"
+    },
+    {
+      "path": "docs/analysis/2026-09-07/execution/receipts/scheduled-desktop-build-tests.txt",
+      "originalSha256": "209787f223d12c3bb3ff3fd7e172b2c8e6fe98197e738c2ad539998532c95163",
+      "normalizedSha256": "209787f223d12c3bb3ff3fd7e172b2c8e6fe98197e738c2ad539998532c95163"
+    },
+    {
+      "path": "docs/analysis/2026-09-07/execution/receipts/scheduled-desktop-window-tests.txt",
+      "originalSha256": "56a3140e32f1af4c7f1f0cf8baccd6555a7c03b53351b07f5bc0c02e46544f6d",
+      "normalizedSha256": "56a3140e32f1af4c7f1f0cf8baccd6555a7c03b53351b07f5bc0c02e46544f6d"
+    },
+    {
+      "path": "docs/analysis/2026-09-07/execution/receipts/scheduled-full-affected-authorized.txt",
+      "originalSha256": "53120875a736206be63727de7b1619e1255ac58061ab82bfab137c76e506c130",
+      "normalizedSha256": "38c4815c343af06a281fc9aa45eb1bdb90afcbd647e887b1cf439a6a43ca93f2"
+    },
+    {
+      "path": "docs/analysis/2026-09-07/execution/receipts/scheduled-full-affected-tests.txt",
+      "originalSha256": "f05b0950ea8fec2f997b054c299434a13ffb21e909de418864a5e32a0a6deffb",
+      "normalizedSha256": "a2fca315e608444162d7597ef11fd993b06873164dc09f5b8de5db450a90e9ad"
+    },
+    {
+      "path": "docs/analysis/2026-09-07/execution/receipts/scheduled-mobile-final-tests.txt",
+      "originalSha256": "87eeb11b79c2ab98c1820be410b466b53db86408e99c02b961fffe7071975d3e",
+      "normalizedSha256": "f19a136bc904ccccaf789ec3e5d37f2f67205896a40bae53c6eb34ff683d3408"
+    },
+    {
+      "path": "docs/analysis/2026-09-07/execution/receipts/scheduled-mobile-interaction-tests.txt",
+      "originalSha256": "aab0b8499decd25c178957beff6146a3c87ca8304dfd2091772a1c86c7f6abd3",
+      "normalizedSha256": "4fe39040cc96373249f3c29f96833362ea0fafcd3346266c73893dfbb76691c8"
+    },
+    {
+      "path": "docs/analysis/2026-09-07/execution/receipts/scheduled-mobile-layout-build.txt",
+      "originalSha256": "434107408a0c101261f6c0c2dc1e59e70d48449e28f4fc500191f369a5d1ba56",
+      "normalizedSha256": "d926bd89c989406a2a721b6791b2bfba2a341b6600bf49690787f95d87c79066"
+    },
+    {
+      "path": "docs/analysis/2026-09-07/execution/receipts/scheduled-operator-build.txt",
+      "originalSha256": "a55a709d04a6f3a8b3634266f08ce7ebb15303f6ca8d92ff611f3c8b1972c6d4",
+      "normalizedSha256": "e4812dd34466080ab17854a75652c26236aa62baffaeaf9c689fc91efa874245"
+    },
+    {
+      "path": "docs/analysis/2026-09-07/execution/receipts/scheduled-real-git-collector.txt",
+      "originalSha256": "7d236471d79631abe148f1f0c5c569d0cb171e7f75016da0208e21c9f4947f5b",
+      "normalizedSha256": "4dfbb01e6849a595b89b46d2a6dc2e95f9c12f71916ecdc432c4be8288ccff06"
+    },
+    {
+      "path": "docs/analysis/2026-09-07/execution/receipts/scheduled-report-first-green.txt",
+      "originalSha256": "fdf3164604a6bf54ed417071641478a48015f160b39e67deb7c101e5a886ae97",
+      "normalizedSha256": "d09bc76fc2fd38e2f8b0eef0401849eb61a69af79e45b2a4f58d91b046010c43"
+    },
+    {
+      "path": "docs/analysis/2026-09-07/execution/receipts/scheduled-report-red.txt",
+      "originalSha256": "009e6e30bb8416e385eedf379aa133863280584b5bf8e75a657b8fa9b0e60007",
+      "normalizedSha256": "fa02dd7e26a9bebfbd96bef76e16fb1e874faaf0a5dc6ed21159358032508083"
+    },
+    {
+      "path": "docs/analysis/2026-09-07/execution/receipts/scheduled-runtime-build-after-wiring.txt",
+      "originalSha256": "8fade1b457d5ae9b3150dfe22a190773bfe7d8df0582fec4ef6756c642a9b80e",
+      "normalizedSha256": "8fade1b457d5ae9b3150dfe22a190773bfe7d8df0582fec4ef6756c642a9b80e"
+    },
+    {
+      "path": "docs/analysis/2026-09-07/execution/receipts/scheduled-runtime-build-authorized.txt",
+      "originalSha256": "7588ec8c204f061adebc3589e5ad1d6c0237e794218ab67478987c82319138f3",
+      "normalizedSha256": "3c0fa35ca592a68cafe6ec0766b558109960c0fce8f2b54fce6c2422215d67d9"
+    },
+    {
+      "path": "docs/analysis/2026-09-07/execution/receipts/scheduled-runtime-build.txt",
+      "originalSha256": "d323046cb0d9d7da67fd7bd066c35dbfaa19e3f57fa2ea3193e7db467cbfd0c4",
+      "normalizedSha256": "b049cfcdf1cb9874b7d28d5f5e9fe13485ff82fc268f87af66f92a38d29f86a4"
+    },
+    {
+      "path": "docs/analysis/2026-09-07/execution/receipts/scheduled-scoped-lint.txt",
+      "originalSha256": "9f0d16ae9608639ca2c7bd984dcd63290215c9fa5069e91a5c68f000cedcee4a",
+      "normalizedSha256": "9f0d16ae9608639ca2c7bd984dcd63290215c9fa5069e91a5c68f000cedcee4a"
+    },
+    {
+      "path": "docs/analysis/2026-09-07/execution/receipts/scheduled-window-operator-build.txt",
+      "originalSha256": "1cfcbdb99b06fd2c1d6a0680c7ecb48229b2ef2ff86435c71dc851c60da34e54",
+      "normalizedSha256": "4c64f2391230ed15022d2519980d947da2f0601d50b262317b2a89b85ea2793e"
+    },
+    {
+      "path": "docs/analysis/2026-09-07/execution/receipts/scheduled-window-root-tests.txt",
+      "originalSha256": "11c6bfd034248795872925efaecd1fa0bfbf30ca06d41e3523d7a737dee5a326",
+      "normalizedSha256": "d230c18d10901fc6222c345a07678143fb02738644398fee3f3d838626499a7b"
+    },
+    {
+      "path": "docs/analysis/2026-09-07/execution/receipts/scheduled-window-tests.txt",
+      "originalSha256": "c205c4ce19e1a76ea88b56ae2dd6466eb408562159e210a14f3916f6e5e1453f",
+      "normalizedSha256": "8bffe263e73871076c539e6603819146af47516900077e65e2c3993f41e12481"
+    }
+  ]
+}

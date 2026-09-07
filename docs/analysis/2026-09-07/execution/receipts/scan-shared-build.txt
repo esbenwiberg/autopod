@@ -1,0 +1,15 @@
+> @autopod/shared@0.0.1 build /private/tmp/autopod-durable-execution/packages/shared
+> tsup
+
+CLI Building entry: src/index.ts
+CLI Using tsconfig: tsconfig.json
+CLI tsup v8.5.1
+CLI Using tsup config: /private/tmp/autopod-durable-execution/packages/shared/tsup.config.ts
+CLI Target: es2022
+ESM Build start
+ESM dist/index.js     112.44 KB
+ESM dist/index.js.map 231.92 KB
+ESM ⚡️ Build success in 43ms
+DTS Build start
+DTS ⚡️ Build success in 2932ms
+DTS dist/index.d.ts 749.95 KB

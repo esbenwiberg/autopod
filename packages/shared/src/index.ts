@@ -608,3 +608,19 @@ export type {
   ReusedValidationEvidence,
   ValidationInputIdentity,
 } from './types/validation-evidence.js';
+
+export { scheduledScanPolicySchema } from './types/scheduled-scan.js';
+export type {
+  ScheduledScanPolicy,
+  ScheduledScanReport,
+  ScheduledScanCollection,
+  ScheduledScanFinding,
+  ScheduledScannerResult,
+} from './types/scheduled-scan.js';
+
+export type {
+  ScanTriageDecision,
+  ScanReportDetail,
+  ScanTriageRequest,
+  ScanRepairDispatch,
+} from './types/scheduled-scan.js';

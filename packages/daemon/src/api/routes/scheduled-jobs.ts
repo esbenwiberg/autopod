@@ -1,3 +1,4 @@
+import { scheduledScanPolicySchema } from '@autopod/shared';
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import type { ScheduledJobManager } from '../../scheduled-jobs/scheduled-job-manager.js';
@@ -19,6 +20,7 @@ const createSchema = z.object({
   fieldValues: fieldValuesSchema.optional(),
   cronExpression: z.string().min(1),
   enabled: z.boolean().optional(),
+  scan: scheduledScanPolicySchema.nullable().optional(),
 });
 
 const updateSchema = z.object({
@@ -29,6 +31,7 @@ const updateSchema = z.object({
   profileName: z.string().min(1).optional(),
   cronExpression: z.string().min(1).optional(),
   enabled: z.boolean().optional(),
+  scan: scheduledScanPolicySchema.nullable().optional(),
 });
 
 const createTemplateSchema = z.object({

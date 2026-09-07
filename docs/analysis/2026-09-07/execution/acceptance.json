@@ -59,7 +59,8 @@
         "packages/daemon/src/pods/completion-journal.ts",
         "packages/daemon/src/db/migrations/145_delivery_intents.sql",
         "packages/daemon/src/pods/delivery-ledger.ts",
-        "packages/daemon/src/worktrees/durable-pr-manager.ts"
+        "packages/daemon/src/worktrees/durable-pr-manager.ts",
+        "packages/daemon/src/pods/pod-repository.ts"
       ],
       "tests": [
         "packages/daemon/src/pods/completion-journal.test.ts",
@@ -70,7 +71,9 @@
         "receipts/journal-migration.txt",
         "receipts/delivery-manager-red.txt",
         "receipts/delivery-manager-green.txt",
-        "receipts/delivery-final-affected.txt"
+        "receipts/delivery-final-affected.txt",
+        "receipts/scan-repair-transaction-red.txt",
+        "receipts/scheduled-creation-generation-tests.txt"
       ],
       "prerequisites": [
         "PR creation intent/reconciliation implemented locally; broader finalization side effects and operator override remain."
@@ -497,56 +500,193 @@
     {
       "id": "W5.1",
       "requirement": "Versioned deterministic stack/delta/scanner collection precedes bounded agent judgment in actual scheduling path",
-      "status": "unverified",
-      "implementation": [],
-      "tests": [],
-      "evidence": [],
-      "prerequisites": []
+      "status": "partial",
+      "implementation": [
+        "packages/shared/src/types/scheduled-scan.ts",
+        "packages/daemon/src/scheduled-jobs/scan-collector.ts",
+        "packages/daemon/src/scheduled-jobs/scan-coordinator.ts",
+        "packages/daemon/src/scheduled-jobs/scan-judge.ts",
+        "packages/daemon/src/scheduled-jobs/scheduled-job-manager.ts",
+        "packages/daemon/src/index.ts"
+      ],
+      "tests": [
+        "packages/daemon/src/scheduled-jobs/scheduled-job-manager.test.ts",
+        "packages/daemon/src/scheduled-jobs/scan-collector.test.ts",
+        "packages/daemon/src/scheduled-jobs/scan-judge.test.ts"
+      ],
+      "evidence": [
+        "checkpoint-6.md",
+        "receipts/scheduled-full-affected-authorized.txt",
+        "receipts/scheduled-window-root-tests.txt",
+        "receipts/scheduled-creation-generation-tests.txt",
+        "receipts/scheduled-cli-window-tests.txt",
+        "receipts/scheduled-mobile-final-tests.txt",
+        "receipts/scheduled-mobile-browser.json",
+        "receipts/scheduled-desktop-window-tests.txt",
+        "receipts/live-scheduled-metadata.json"
+      ],
+      "prerequisites": [
+        "Required native desktop interaction remains unverified.",
+        "Live schedule conversion and paid judgment/scanner acceptance require the reviewed rollout/canary authorization."
+      ],
+      "remaining": "Exact final committed pipeline and live/native acceptance remain. Unsupported dependency ecosystems explicitly remain incomplete; report/inbox pagination and report-phase accounting require W4 reconciliation."
     },
     {
       "id": "W5.2",
       "requirement": "Exact delta preserved and empty delta never widened",
-      "status": "unverified",
-      "implementation": [],
-      "tests": [],
-      "evidence": [],
-      "prerequisites": []
+      "status": "partial",
+      "implementation": [
+        "packages/daemon/src/scheduled-jobs/scan-collector.ts",
+        "packages/shared/src/types/scheduled-scan.ts"
+      ],
+      "tests": [
+        "packages/daemon/src/scheduled-jobs/scan-collector.test.ts",
+        "packages/cli/src/commands/schedule.test.ts"
+      ],
+      "evidence": [
+        "checkpoint-6.md",
+        "receipts/scheduled-full-affected-authorized.txt",
+        "receipts/scheduled-window-root-tests.txt",
+        "receipts/scheduled-creation-generation-tests.txt",
+        "receipts/scheduled-cli-window-tests.txt",
+        "receipts/scheduled-mobile-final-tests.txt",
+        "receipts/scheduled-mobile-browser.json",
+        "receipts/scheduled-desktop-window-tests.txt",
+        "receipts/live-scheduled-metadata.json"
+      ],
+      "prerequisites": [
+        "Required native desktop interaction remains unverified.",
+        "Live schedule conversion and paid judgment/scanner acceptance require the reviewed rollout/canary authorization."
+      ],
+      "remaining": "Exact final committed pipeline and live/native acceptance remain. Unsupported dependency ecosystems explicitly remain incomplete; report/inbox pagination and report-phase accounting require W4 reconciliation."
     },
     {
       "id": "W5.3",
       "requirement": "Incomplete scanner execution cannot report clean",
-      "status": "unverified",
-      "implementation": [],
-      "tests": [],
-      "evidence": [],
-      "prerequisites": []
+      "status": "partial",
+      "implementation": [
+        "packages/daemon/src/scheduled-jobs/scan-collector.ts",
+        "packages/daemon/src/scheduled-jobs/npm-lock-audit.ts",
+        "packages/daemon/src/scheduled-jobs/scan-report-repository.ts"
+      ],
+      "tests": [
+        "packages/daemon/src/scheduled-jobs/scan-collector.test.ts",
+        "packages/daemon/src/scheduled-jobs/npm-lock-audit.test.ts",
+        "packages/daemon/src/scheduled-jobs/scan-report-repository.test.ts"
+      ],
+      "evidence": [
+        "checkpoint-6.md",
+        "receipts/scheduled-full-affected-authorized.txt",
+        "receipts/scheduled-window-root-tests.txt",
+        "receipts/scheduled-creation-generation-tests.txt",
+        "receipts/scheduled-cli-window-tests.txt",
+        "receipts/scheduled-mobile-final-tests.txt",
+        "receipts/scheduled-mobile-browser.json",
+        "receipts/scheduled-desktop-window-tests.txt",
+        "receipts/live-scheduled-metadata.json"
+      ],
+      "prerequisites": [
+        "Required native desktop interaction remains unverified.",
+        "Live schedule conversion and paid judgment/scanner acceptance require the reviewed rollout/canary authorization."
+      ],
+      "remaining": "Exact final committed pipeline and live/native acceptance remain. Unsupported dependency ecosystems explicitly remain incomplete; report/inbox pagination and report-phase accounting require W4 reconciliation."
     },
     {
       "id": "W5.4",
       "requirement": "Stable finding identities preserve unresolved findings across runs without duplicate prompts",
-      "status": "unverified",
-      "implementation": [],
-      "tests": [],
-      "evidence": [],
-      "prerequisites": []
+      "status": "partial",
+      "implementation": [
+        "packages/daemon/src/scheduled-jobs/scan-report-repository.ts",
+        "packages/daemon/src/db/migrations/146_scheduled_scan_reports.sql"
+      ],
+      "tests": [
+        "packages/daemon/src/scheduled-jobs/scan-report-repository.test.ts",
+        "packages/daemon/src/scheduled-jobs/scan-collector.test.ts"
+      ],
+      "evidence": [
+        "checkpoint-6.md",
+        "receipts/scheduled-full-affected-authorized.txt",
+        "receipts/scheduled-window-root-tests.txt",
+        "receipts/scheduled-creation-generation-tests.txt",
+        "receipts/scheduled-cli-window-tests.txt",
+        "receipts/scheduled-mobile-final-tests.txt",
+        "receipts/scheduled-mobile-browser.json",
+        "receipts/scheduled-desktop-window-tests.txt",
+        "receipts/live-scheduled-metadata.json"
+      ],
+      "prerequisites": [
+        "Required native desktop interaction remains unverified.",
+        "Live schedule conversion and paid judgment/scanner acceptance require the reviewed rollout/canary authorization."
+      ],
+      "remaining": "Exact final committed pipeline and live/native acceptance remain. Unsupported dependency ecosystems explicitly remain incomplete; report/inbox pagination and report-phase accounting require W4 reconciliation."
     },
     {
       "id": "W5.5",
       "requirement": "Reports and triage survive worker lifetime and disconnected human wait",
-      "status": "unverified",
-      "implementation": [],
-      "tests": [],
-      "evidence": [],
-      "prerequisites": []
+      "status": "partial",
+      "implementation": [
+        "packages/daemon/src/scheduled-jobs/scan-report-repository.ts",
+        "packages/daemon/src/scheduled-jobs/scan-coordinator.ts",
+        "packages/mobile-web/src/screens/ScanReport.tsx",
+        "packages/desktop/Sources/AutopodDesktop/Views/ScanInboxView.swift"
+      ],
+      "tests": [
+        "packages/daemon/src/scheduled-jobs/scan-report-repository.test.ts",
+        "packages/daemon/src/scheduled-jobs/scan-collector.test.ts",
+        "packages/mobile-web/src/screens/ScanReport.test.tsx"
+      ],
+      "evidence": [
+        "checkpoint-6.md",
+        "receipts/scheduled-full-affected-authorized.txt",
+        "receipts/scheduled-window-root-tests.txt",
+        "receipts/scheduled-creation-generation-tests.txt",
+        "receipts/scheduled-cli-window-tests.txt",
+        "receipts/scheduled-mobile-final-tests.txt",
+        "receipts/scheduled-mobile-browser.json",
+        "receipts/scheduled-desktop-window-tests.txt",
+        "receipts/live-scheduled-metadata.json"
+      ],
+      "prerequisites": [
+        "Required native desktop interaction remains unverified.",
+        "Live schedule conversion and paid judgment/scanner acceptance require the reviewed rollout/canary authorization."
+      ],
+      "remaining": "Exact final committed pipeline and live/native acceptance remain. Unsupported dependency ecosystems explicitly remain incomplete; report/inbox pagination and report-phase accounting require W4 reconciliation."
     },
     {
       "id": "W5.6",
       "requirement": "Repairs launch only after required human selection; report-only completion differs from patch delivery",
-      "status": "unverified",
-      "implementation": [],
-      "tests": [],
-      "evidence": [],
-      "prerequisites": []
+      "status": "partial",
+      "implementation": [
+        "packages/daemon/src/scheduled-jobs/scan-operator-service.ts",
+        "packages/daemon/src/api/routes/scan-reports.ts",
+        "packages/daemon/src/pods/pod-repository.ts",
+        "packages/daemon/src/pods/pod-manager.ts",
+        "packages/cli/src/commands/schedule.ts",
+        "packages/mobile-web/src/screens/ScanReport.tsx",
+        "packages/desktop/Sources/AutopodDesktop/Views/ScanInboxView.swift"
+      ],
+      "tests": [
+        "packages/daemon/src/pods/pod-manager.test.ts",
+        "packages/cli/src/commands/schedule.test.ts",
+        "packages/mobile-web/src/screens/ScanReport.test.tsx",
+        "packages/desktop/Tests/AutopodClientTests/ScheduledScanTests.swift"
+      ],
+      "evidence": [
+        "checkpoint-6.md",
+        "receipts/scheduled-full-affected-authorized.txt",
+        "receipts/scheduled-window-root-tests.txt",
+        "receipts/scheduled-creation-generation-tests.txt",
+        "receipts/scheduled-cli-window-tests.txt",
+        "receipts/scheduled-mobile-final-tests.txt",
+        "receipts/scheduled-mobile-browser.json",
+        "receipts/scheduled-desktop-window-tests.txt",
+        "receipts/live-scheduled-metadata.json"
+      ],
+      "prerequisites": [
+        "Required native desktop interaction remains unverified.",
+        "Live schedule conversion and paid judgment/scanner acceptance require the reviewed rollout/canary authorization."
+      ],
+      "remaining": "Exact final committed pipeline and live/native acceptance remain. Unsupported dependency ecosystems explicitly remain incomplete; report/inbox pagination and report-phase accounting require W4 reconciliation."
     },
     {
       "id": "W6.1",

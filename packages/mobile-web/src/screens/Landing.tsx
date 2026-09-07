@@ -89,6 +89,9 @@ export function Landing(): JSX.Element {
       </section>
 
       <footer className="app-footer">
+        <Link to="/scan-reports" className="footer-link">
+          Scan reports
+        </Link>
         <Link to="/about" className="muted footer-link">
           About
         </Link>

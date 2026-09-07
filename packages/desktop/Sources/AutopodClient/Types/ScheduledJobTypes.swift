@@ -125,6 +125,7 @@ public struct UpdateScheduledJobRequest: Codable, Sendable {
   public let fieldValues: [String: String]?
   public let profileName: String?
   public let cronExpression: String?
+  public let scan: ScheduledScanPolicy?
   public let enabled: Bool?
 
   public init(
@@ -134,7 +135,8 @@ public struct UpdateScheduledJobRequest: Codable, Sendable {
     fieldValues: [String: String]? = nil,
     profileName: String? = nil,
     cronExpression: String? = nil,
-    enabled: Bool? = nil
+    enabled: Bool? = nil,
+    scan: ScheduledScanPolicy? = nil
   ) {
     self.templateId = templateId
     self.name = name
@@ -143,6 +145,7 @@ public struct UpdateScheduledJobRequest: Codable, Sendable {
     self.profileName = profileName
     self.cronExpression = cronExpression
     self.enabled = enabled
+    self.scan = scan
   }
 }
 
@@ -161,6 +164,8 @@ public struct ScheduledJob: Codable, Identifiable, Sendable, Hashable {
   public let nextRunAt: String
   public let lastRunAt: String?
   public let lastPodId: String?
+  public let scan: ScheduledScanPolicy?
+  public let lastReportId: String?
   public let catchupPending: Bool
   public let createdAt: String
   public let updatedAt: String
@@ -180,7 +185,9 @@ public struct ScheduledJob: Codable, Identifiable, Sendable, Hashable {
     lastPodId: String?,
     catchupPending: Bool,
     createdAt: String,
-    updatedAt: String
+    updatedAt: String,
+    scan: ScheduledScanPolicy? = nil,
+    lastReportId: String? = nil
   ) {
     self.id = id
     self.name = name
@@ -197,10 +204,13 @@ public struct ScheduledJob: Codable, Identifiable, Sendable, Hashable {
     self.catchupPending = catchupPending
     self.createdAt = createdAt
     self.updatedAt = updatedAt
+    self.scan = scan
+    self.lastReportId = lastReportId
   }
 
   private enum CodingKeys: String, CodingKey {
     case id, name, templateId, templateName, profileName, task, fieldValues, cronExpression
+    case scan, lastReportId
     case enabled, nextRunAt, lastRunAt, lastPodId, catchupPending, createdAt, updatedAt
   }
 
@@ -218,6 +228,8 @@ public struct ScheduledJob: Codable, Identifiable, Sendable, Hashable {
     nextRunAt = try c.decode(String.self, forKey: .nextRunAt)
     lastRunAt = try c.decodeIfPresent(String.self, forKey: .lastRunAt)
     lastPodId = try c.decodeIfPresent(String.self, forKey: .lastPodId)
+    scan = try c.decodeIfPresent(ScheduledScanPolicy.self, forKey: .scan)
+    lastReportId = try c.decodeIfPresent(String.self, forKey: .lastReportId)
     catchupPending = try c.decode(Bool.self, forKey: .catchupPending)
     createdAt = try c.decode(String.self, forKey: .createdAt)
     updatedAt = try c.decode(String.self, forKey: .updatedAt)

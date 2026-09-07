@@ -223,6 +223,8 @@ import { type DeliveryLedger, createDeliveryLedger } from './delivery-ledger.js'
 import { type TaskExecutionLedger, createTaskExecutionLedger } from './task-execution-ledger.js';
 
 export interface PodRepository {
+  /** Defer external publication while an enclosing SQLite transaction is pending. */
+  afterInsertCommitted?(id: string, effect: () => void): void;
   deliveryLedger?: DeliveryLedger;
   taskExecutions?: TaskExecutionLedger;
   completionJournal?: CompletionJournal;
@@ -633,6 +635,24 @@ export function createPodRepository(db: Database.Database): PodRepository {
   }
 
   return {
+    afterInsertCommitted(id, effect) {
+      if (!db.inTransaction) {
+        effect();
+        return;
+      }
+      // SQLite transactions are synchronous. The next event-loop turn observes
+      // the outer commit or rollback, before publishing or starting any worker.
+      const execution = db
+        .prepare('SELECT execution_id FROM task_executions WHERE pod_id = ?')
+        .get(id) as { execution_id: string } | undefined;
+      setImmediate(() => {
+        if (!db.open || !execution) return;
+        const committed = db
+          .prepare('SELECT execution_id FROM task_executions WHERE pod_id = ?')
+          .get(id) as { execution_id: string } | undefined;
+        if (committed?.execution_id === execution.execution_id) effect();
+      });
+    },
     completionJournal,
     deliveryLedger: createDeliveryLedger(db),
     taskExecutions,

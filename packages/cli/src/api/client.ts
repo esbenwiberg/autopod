@@ -1,3 +1,10 @@
+import type {
+  ScanRepairDispatch,
+  ScanReportDetail,
+  ScanTriageDecision,
+  ScanTriageRequest,
+  ScheduledScanReport,
+} from '@autopod/shared';
 import type { DaemonHealthSummary } from '@autopod/shared';
 import {
   AuthError,
@@ -608,16 +615,34 @@ export class AutopodClient {
     await this.request<void>('DELETE', `/scheduled-jobs/${id}`);
   }
 
-  async runScheduledJobCatchup(id: string): Promise<Pod> {
-    return this.request<Pod>('POST', `/scheduled-jobs/${id}/catchup`);
+  async runScheduledJobCatchup(id: string): Promise<Pod | ScheduledScanReport> {
+    return this.request<Pod | ScheduledScanReport>('POST', `/scheduled-jobs/${id}/catchup`);
   }
 
   async skipScheduledJobCatchup(id: string): Promise<void> {
     await this.request<void>('DELETE', `/scheduled-jobs/${id}/catchup`);
   }
 
-  async triggerScheduledJob(id: string): Promise<Pod> {
-    return this.request<Pod>('POST', `/scheduled-jobs/${id}/trigger`);
+  async triggerScheduledJob(id: string): Promise<Pod | ScheduledScanReport> {
+    return this.request<Pod | ScheduledScanReport>('POST', `/scheduled-jobs/${id}/trigger`);
+  }
+
+  async listScanReports(jobId: string): Promise<ScheduledScanReport[]> {
+    return this.request('GET', `/scheduled-jobs/${encodeURIComponent(jobId)}/reports`);
+  }
+  async getScanReport(reportId: string): Promise<ScanReportDetail> {
+    return this.request('GET', `/scan-reports/${encodeURIComponent(reportId)}`);
+  }
+  async triageScanReport(
+    reportId: string,
+    request: ScanTriageRequest,
+  ): Promise<ScanTriageDecision> {
+    return this.request('POST', `/scan-reports/${encodeURIComponent(reportId)}/triage`, request);
+  }
+  async launchScanRepair(reportId: string, selectionId: string): Promise<ScanRepairDispatch> {
+    return this.request('POST', `/scan-reports/${encodeURIComponent(reportId)}/repairs`, {
+      selectionId,
+    });
   }
 
   // Bulk

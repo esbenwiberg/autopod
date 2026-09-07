@@ -330,7 +330,8 @@ export interface ScheduledJobFiredEvent {
   timestamp: string;
   jobId: string;
   jobName: string;
-  podId: string;
+  podId: string | null;
+  reportId?: string;
 }
 
 export interface IssueWatcherPickedUpEvent {

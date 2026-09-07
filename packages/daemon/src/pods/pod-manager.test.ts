@@ -44,6 +44,10 @@ import { setTimeout as sleep } from 'node:timers/promises';
 import { SandboxInfrastructureError } from '../containers/sandbox-api-client.js';
 
 const mockedExecFile = vi.mocked(execFile);
+import Fastify from 'fastify';
+import { errorHandler } from '../api/error-handler.js';
+import { authPlugin } from '../api/plugins/auth.js';
+import { scanReportRoutes } from '../api/routes/scan-reports.js';
 import type {
   ContainerManager,
   PrManager,
@@ -56,6 +60,13 @@ import type { ProviderAccountStore } from '../provider-accounts/index.js';
 import { createProviderAccountStore } from '../provider-accounts/index.js';
 import { createProfileMemoryReviewer } from '../providers/memory-reviewer.js';
 import { ResumeSessionNotFoundError } from '../runtimes/claude-runtime.js';
+import {
+  canonicalScanRepository,
+  createScanOperatorService,
+} from '../scheduled-jobs/scan-operator-service.js';
+import { createScanReportRepository } from '../scheduled-jobs/scan-report-repository.js';
+import { createScheduledJobRepository } from '../scheduled-jobs/scheduled-job-repository.js';
+import { createScheduledJobTemplateRepository } from '../scheduled-jobs/scheduled-job-template-repository.js';
 import {
   DeletionGuardError,
   GitCredentialError,
@@ -3461,6 +3472,201 @@ describe('PodManager', () => {
   });
 
   describe('createSession', () => {
+    it('dispatches exactly one actual pod through authenticated report triage after a lost response', async () => {
+      const ctx = createTestContext();
+      const pods = createPodManager(ctx.deps);
+      const reports = createScanReportRepository(ctx.db);
+      const jobs = createScheduledJobRepository(ctx.db);
+      const templates = createScheduledJobTemplateRepository(ctx.db);
+      templates.insert({ id: 'scan-template', name: 'Scan', prompt: 'Report only' });
+      jobs.insert({
+        id: 'scan-job',
+        templateId: 'scan-template',
+        name: 'Scan',
+        task: 'Report only',
+        profileName: 'test-profile',
+        cronExpression: '0 8 * * *',
+        enabled: false,
+        nextRunAt: '2030-01-01T00:00:00Z',
+        lastRunAt: null,
+        lastPodId: null,
+        catchupPending: false,
+      });
+      const report = reports.begin('scan-job', 'run-once', {
+        version: 1,
+        baseRef: 'main',
+        headRef: 'main',
+        scanners: ['secrets'],
+        judgment: 'none',
+      });
+      reports.finish(report.id, {
+        version: 1,
+        repository: canonicalScanRepository(ctx.profileStore.get('test-profile').repoUrl),
+        baseSha: 'a'.repeat(40),
+        headSha: 'b'.repeat(40),
+        files: [
+          { path: 'selected.ts', change: 'added' },
+          { path: 'unselected.ts', change: 'added' },
+        ],
+        stacks: ['typescript'],
+        scanners: [
+          { scanner: 'secrets', version: 'fixture-v1', status: 'completed', findingCount: 2 },
+        ],
+        findings: ['selected', 'unselected'].map((id) => ({
+          id,
+          file: `${id}.ts`,
+          scanner: 'secrets' as const,
+          ruleId: 'synthetic',
+          severity: 'high' as const,
+          summary: 'Redacted finding',
+        })),
+        diagnostics: [],
+      });
+      const app = Fastify();
+      app.setErrorHandler(errorHandler);
+      authPlugin(app, {
+        validateToken: async (token: string) => {
+          if (token !== 'operator-fixture')
+            throw new AutopodError('Invalid token', 'AUTH_ERROR', 401);
+          return { oid: 'human-reviewer', name: 'Reviewer' };
+        },
+      } as never);
+      scanReportRoutes(
+        app,
+        createScanOperatorService({ reports, jobs, profiles: ctx.profileStore, pods }),
+      );
+      const headers = { authorization: 'Bearer operator-fixture' };
+      const input = {
+        requestKey: 'reused-after-disconnect',
+        findingIds: ['selected'],
+        action: 'select_repair',
+        reason: 'Fix only this finding',
+      };
+      try {
+        const denied = await app.inject({
+          method: 'POST',
+          url: `/scan-reports/${report.id}/triage`,
+          payload: input,
+        });
+        expect(denied.statusCode).toBe(401);
+        const forged = await app.inject({
+          method: 'POST',
+          url: `/scan-reports/${report.id}/triage`,
+          headers,
+          payload: { ...input, actor: { type: 'human', userId: 'forged' } },
+        });
+        expect(forged.statusCode).toBe(400);
+        const first = await app.inject({
+          method: 'POST',
+          url: `/scan-reports/${report.id}/triage`,
+          headers,
+          payload: input,
+        });
+        expect(first.statusCode).toBe(201);
+        expect(first.json().actor.userId).toBe('human-reviewer');
+        const repeated = await app.inject({
+          method: 'POST',
+          url: `/scan-reports/${report.id}/triage`,
+          headers,
+          payload: input,
+        });
+        expect(repeated.json().id).toBe(first.json().id);
+        expect(ctx.enqueuedSessions).toEqual([]);
+        const payload = { selectionId: first.json().id };
+        const dispatch = await app.inject({
+          method: 'POST',
+          url: `/scan-reports/${report.id}/repairs`,
+          headers,
+          payload,
+        });
+        expect(dispatch.statusCode).toBe(201);
+        const retry = await app.inject({
+          method: 'POST',
+          url: `/scan-reports/${report.id}/repairs`,
+          headers,
+          payload,
+        });
+        expect(retry.json()).toEqual(dispatch.json());
+        await new Promise<void>((resolve) => setImmediate(resolve));
+        expect(ctx.enqueuedSessions).toEqual([dispatch.json().podId]);
+        const pod = ctx.podRepo.getOrThrow(dispatch.json().podId);
+        expect(pod.task).toContain('selected.ts');
+        expect(pod.task).not.toContain('unselected.ts');
+        expect(pod.autoApprove).toBe(false);
+        expect(pod.disableAskHuman).toBe(false);
+        expect(pod.userId).toBe('human-reviewer');
+        ctx.podRepo.delete(pod.id);
+        jobs.delete('scan-job');
+        const retained = await app.inject({
+          method: 'GET',
+          url: `/scan-reports/${report.id}`,
+          headers,
+        });
+        expect(retained.statusCode).toBe(200);
+        expect(retained.json().decisions[0].repairPodId).toBe(pod.id);
+        expect(retained.json().unresolved).toHaveLength(2);
+        const retainedReceipt = await app.inject({
+          method: 'POST',
+          url: `/scan-reports/${report.id}/repairs`,
+          headers,
+          payload,
+        });
+        expect(retainedReceipt.json()).toEqual(dispatch.json());
+      } finally {
+        await app.close();
+      }
+    });
+
+    it('does not publish a rolled-back insertion when its friendly pod ID is reused before the next turn', async () => {
+      const ctx = createTestContext();
+      const manager = createPodManager(ctx.deps);
+      let original: ReturnType<typeof manager.createSession> | undefined;
+      expect(() =>
+        ctx.db.transaction(() => {
+          original = manager.createSession(
+            { profileName: 'test-profile', task: 'Rolled back selected repair' },
+            'human',
+          );
+          throw new Error('rollback');
+        })(),
+      ).toThrow('rollback');
+      if (!original) throw new Error('Fixture insertion missing');
+      ctx.podRepo.insert({ ...original, task: 'Different execution reusing friendly id' });
+      await new Promise<void>((resolve) => setImmediate(resolve));
+      expect(ctx.enqueuedSessions).toEqual([]);
+    });
+
+    it('publishes and enqueues only committed repair pods after the selection transaction', async () => {
+      const ctx = createTestContext();
+      const manager = createPodManager(ctx.deps);
+      const events = vi.spyOn(ctx.eventBus, 'emit');
+      let rolledBackId = '';
+      expect(() =>
+        ctx.db.transaction(() => {
+          rolledBackId = manager.createSession(
+            { profileName: 'test-profile', task: 'Selected repair' },
+            'human',
+          ).id;
+          expect(ctx.enqueuedSessions).toEqual([]);
+          expect(events).not.toHaveBeenCalledWith(expect.objectContaining({ type: 'pod.created' }));
+          throw new Error('Dispatch receipt write failed');
+        })(),
+      ).toThrow('Dispatch receipt write failed');
+      await new Promise<void>((resolve) => setImmediate(resolve));
+      expect(() => ctx.podRepo.getOrThrow(rolledBackId)).toThrow();
+      expect(ctx.enqueuedSessions).toEqual([]);
+      const pod = ctx.db.transaction(() =>
+        manager.createSession(
+          { profileName: 'test-profile', task: 'Selected repair committed' },
+          'human',
+        ),
+      )();
+      expect(ctx.enqueuedSessions).toEqual([]);
+      await new Promise<void>((resolve) => setImmediate(resolve));
+      expect(ctx.enqueuedSessions).toEqual([pod.id]);
+      expect(events.mock.calls.filter(([event]) => event.type === 'pod.created')).toHaveLength(1);
+    });
+
     it('creates a pod in queued status', () => {
       const ctx = createTestContext();
       const manager = createPodManager(ctx.deps);

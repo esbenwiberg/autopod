@@ -1,5 +1,5 @@
 import type { ScheduledJob, ScheduledJobTemplateField } from '@autopod/shared';
-import { AutopodError } from '@autopod/shared';
+import { AutopodError, scheduledScanPolicySchema } from '@autopod/shared';
 import type Database from 'better-sqlite3';
 import { renderScheduledJobPrompt } from './scheduled-job-renderer.js';
 
@@ -16,6 +16,7 @@ export interface ScheduledJobInsert {
   name: string;
   task: string;
   fieldValues?: Record<string, string>;
+  scan?: ScheduledJob['scan'];
 }
 
 export interface ScheduledJobRepository {
@@ -56,6 +57,10 @@ function mapRow(row: Record<string, unknown>): ScheduledJob {
     profileName: row.profile_name as string,
     task,
     fieldValues,
+    scan: row.scan_policy
+      ? scheduledScanPolicySchema.parse(JSON.parse(row.scan_policy as string))
+      : null,
+    lastReportId: (row.last_report_id as string) ?? null,
     cronExpression: row.cron_expression as string,
     enabled: Boolean(row.enabled),
     nextRunAt: row.next_run_at as string,
@@ -117,10 +122,10 @@ export function createScheduledJobRepository(db: Database.Database): ScheduledJo
       db.prepare(`
         INSERT INTO scheduled_jobs (
           id, name, template_id, profile_name, task, cron_expression, enabled,
-          next_run_at, last_run_at, last_pod_id, catchup_pending, field_values
+          next_run_at, last_run_at, last_pod_id, catchup_pending, field_values, scan_policy
         ) VALUES (
           @id, @name, @templateId, @profileName, @task, @cronExpression, @enabled,
-          @nextRunAt, @lastRunAt, @lastPodId, @catchupPending, @fieldValues
+          @nextRunAt, @lastRunAt, @lastPodId, @catchupPending, @fieldValues, @scanPolicy
         )
       `).run({
         id: job.id,
@@ -135,6 +140,7 @@ export function createScheduledJobRepository(db: Database.Database): ScheduledJo
         lastPodId: job.lastPodId ?? null,
         catchupPending: job.catchupPending ? 1 : 0,
         fieldValues: JSON.stringify(job.fieldValues ?? {}),
+        scanPolicy: job.scan ? JSON.stringify(scheduledScanPolicySchema.parse(job.scan)) : null,
       });
       return this.getOrThrow(job.id);
     },
@@ -164,6 +170,16 @@ export function createScheduledJobRepository(db: Database.Database): ScheduledJo
       const setClauses: string[] = ["updated_at = datetime('now')"];
       const params: Record<string, unknown> = { id };
 
+      if (changes.scan !== undefined) {
+        setClauses.push('scan_policy = @scanPolicy');
+        params.scanPolicy = changes.scan
+          ? JSON.stringify(scheduledScanPolicySchema.parse(changes.scan))
+          : null;
+      }
+      if (changes.lastReportId !== undefined) {
+        setClauses.push('last_report_id = @lastReportId');
+        params.lastReportId = changes.lastReportId;
+      }
       if (changes.name !== undefined) {
         setClauses.push('name = @name');
         params.name = changes.name;

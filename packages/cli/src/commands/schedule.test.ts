@@ -1,3 +1,4 @@
+import { createServer } from 'node:http';
 import type {
   CreateScheduledJobRequest,
   CreateScheduledJobTemplateRequest,
@@ -6,7 +7,7 @@ import type {
 } from '@autopod/shared';
 import { Command } from 'commander';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import type { AutopodClient } from '../api/client.js';
+import { AutopodClient } from '../api/client.js';
 import { registerScheduleCommands } from './schedule.js';
 
 function createProgram(client: Partial<AutopodClient>): Command {
@@ -103,4 +104,143 @@ describe('schedule command', () => {
       enabled: true,
     });
   });
+});
+
+it('runs scan create, report review, human triage and explicit repair through the real HTTP CLI client', async () => {
+  const requests: Array<{ method: string; path: string; body: Record<string, unknown> }> = [];
+  const report = {
+    kind: 'scan_report',
+    id: 'report-fixture',
+    status: 'incomplete',
+    collection: { scanners: [{ scanner: 'dependencies', status: 'failed', findingCount: null }] },
+  };
+  const server = createServer(async (req, res) => {
+    let body = '';
+    for await (const chunk of req) body += String(chunk);
+    const parsed = body ? JSON.parse(body) : {};
+    requests.push({ method: req.method ?? '', path: req.url ?? '', body: parsed });
+    res.setHeader('content-type', 'application/json');
+    if (req.url === '/scheduled-jobs')
+      res.end(JSON.stringify({ id: 'job-fixture', enabled: false }));
+    else if (req.url?.endsWith('/trigger')) res.end(JSON.stringify(report));
+    else if (req.url?.endsWith('/triage'))
+      res.end(JSON.stringify({ id: 'selection-fixture', ...parsed }));
+    else if (req.url?.endsWith('/repairs'))
+      res.end(
+        JSON.stringify({
+          kind: 'repair_dispatch',
+          selectionId: parsed.selectionId,
+          podId: 'repair-fixture',
+        }),
+      );
+    else
+      res.end(JSON.stringify({ report, unresolved: [{ id: 'finding-fixture' }], decisions: [] }));
+  });
+  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+  const address = server.address();
+  if (!address || typeof address === 'string') throw new Error('Fixture listener missing');
+  const client = new AutopodClient({
+    baseUrl: `http://127.0.0.1:${address.port}`,
+    getToken: async () => 'synthetic',
+  });
+  const logs: string[] = [];
+  const log = vi.spyOn(console, 'log').mockImplementation((value) => {
+    logs.push(String(value));
+  });
+  const run = (args: string[]) =>
+    createProgram(client).parseAsync(['node', 'ap', 'schedule', ...args]);
+  try {
+    await run([
+      'scan-create',
+      'profile',
+      'Report fixture',
+      '0 8 * * *',
+      '--base',
+      'main',
+      '--head',
+      'work',
+      '--disabled',
+    ]);
+    expect(requests[0]?.body).toMatchObject({
+      enabled: false,
+      scan: {
+        version: 1,
+        baseRef: 'main',
+        headRef: 'work',
+        judgment: 'none',
+        scanners: ['secrets', 'dependencies'],
+      },
+    });
+    await run(['run', 'job-fixture']);
+    expect(logs.join('\n')).toContain(
+      'Report report-fixture: incomplete. No repair worker was launched.',
+    );
+    await run(['report', 'report-fixture']);
+    expect(logs.join('\n')).toContain('"findingCount": null');
+    const triage = [
+      'triage',
+      'report-fixture',
+      '--finding',
+      'finding-fixture',
+      '--action',
+      'select_repair',
+      '--reason',
+      'Repair selected finding',
+      '--request-key',
+      'retained-cli-intent',
+    ];
+    await run(triage);
+    await run(triage);
+    const writes = requests.filter((request) => request.path.endsWith('/triage'));
+    expect(writes).toHaveLength(2);
+    expect(writes[0]?.body).toEqual(writes[1]?.body);
+    expect(requests.some((request) => request.path.endsWith('/repairs'))).toBe(false);
+    await run(['repair', 'report-fixture', 'selection-fixture']);
+    expect(requests.at(-1)?.body).toEqual({ selectionId: 'selection-fixture' });
+    expect(logs.join('\n')).toContain('not patch delivery');
+  } finally {
+    log.mockRestore();
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+  }
+});
+
+it('passes an explicit time window and rejects a wider two-branch window before HTTP dispatch', async () => {
+  const updateScheduledJob = vi.fn(async () => ({ id: 'job' }) as ScheduledJob);
+  const log = vi.spyOn(console, 'log').mockImplementation(() => {});
+  try {
+    await createProgram({ updateScheduledJob }).parseAsync([
+      'node',
+      'ap',
+      'schedule',
+      'scan-configure',
+      'job',
+      '--base',
+      'main',
+      '--head',
+      'main',
+      '--window-hours',
+      '24',
+    ]);
+    expect(updateScheduledJob).toHaveBeenCalledWith('job', {
+      scan: expect.objectContaining({ windowHours: 24, baseRef: 'main', headRef: 'main' }),
+    });
+    await expect(
+      createProgram({ updateScheduledJob }).parseAsync([
+        'node',
+        'ap',
+        'schedule',
+        'scan-configure',
+        'job',
+        '--base',
+        'main',
+        '--head',
+        'different',
+        '--window-hours',
+        '24',
+      ]),
+    ).rejects.toThrow('must match');
+    expect(updateScheduledJob).toHaveBeenCalledTimes(1);
+  } finally {
+    log.mockRestore();
+  }
 });

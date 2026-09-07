@@ -42,6 +42,10 @@ public struct ScheduledJobRow: View {
           .foregroundStyle(nextRunColor)
       }
 
+      if let scan = job.scan {
+        Text("Report only · \(scan.baseRef) → \(scan.headRef)\(scan.windowHours.map { " · last \($0) hours" } ?? "")").font(.caption)
+        if let reportId = job.lastReportId { Text("Last report: \(reportId)").font(.caption).foregroundStyle(.secondary) }
+      }
       if job.catchupPending {
         HStack(spacing: 8) {
           Text("Missed run — action required")

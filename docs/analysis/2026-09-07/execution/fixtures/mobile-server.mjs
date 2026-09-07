@@ -46,12 +46,36 @@ let pod = {
     response: null,
   },
 };
+const scanJob = { id: 'scan-fixture', name: 'Local dependency and secret scan', profileName: 'local-fixture', enabled: false, cronExpression: '0 9 * * *', scan: { version: 1, baseRef: 'main', headRef: 'work', scanners: ['secrets', 'dependencies'], judgment: 'none' } };
+const scanFinding = { id: 'fixture-finding-stable-identity', scanner: 'dependencies', ruleId: 'fixture-advisory', file: 'packages/example/package-lock.json', severity: 'high', summary: 'Synthetic dependency finding for local interaction proof.', disposition: 'unresolved' };
+const scanReport = { kind: 'scan_report', id: 'report-fixture', jobId: scanJob.id, status: 'incomplete', createdAt: '2026-09-07T10:00:00Z', completedAt: '2026-09-07T10:01:00Z', policy: scanJob.scan, collection: { version: 1, repository: 'https://github.com/example/local-fixture.git', baseSha: 'a'.repeat(40), headSha: 'b'.repeat(40), files: [{ path: scanFinding.file, change: 'modified' }], scanners: [{ scanner: 'secrets', version: 'fixture-v1', status: 'failed', findingCount: null, diagnostic: 'Synthetic scanner failure; no clean result available.' }, { scanner: 'dependencies', version: 'fixture-v1', status: 'completed', findingCount: 1 }], diagnostics: [], findings: [scanFinding], stacks: ['node'] }, judgment: { status: 'not_requested' } };
+let scanDecisions = [];
 const server = createServer(async (req, res) => {
   const pathname = new URL(req.url, 'http://localhost').pathname;
   const json = (value) => {
     res.setHeader('content-type', 'application/json');
     res.end(JSON.stringify(value));
   };
+  if (pathname === '/scheduled-jobs') return json([scanJob]);
+  if (pathname === '/scheduled-jobs/scan-fixture/reports') return json([scanReport]);
+  if (pathname === '/scheduled-jobs/scan-fixture/trigger') return json(scanReport);
+  if (pathname === '/scan-reports/report-fixture') return json({ report: scanReport, unresolved: [scanFinding], decisions: scanDecisions });
+  if (req.method === 'POST' && pathname === '/scan-reports/report-fixture/triage') {
+    let body = ''; for await (const chunk of req) body += chunk;
+    const input = JSON.parse(body);
+    let decision = scanDecisions.find((item) => item.requestKey === input.requestKey);
+    if (!decision) { decision = { ...input, id: 'fixture-selection', actor: { type: 'human', userId: 'local-fixture' }, createdAt: new Date().toISOString(), repairPodId: null }; scanDecisions.push(decision); }
+    console.log(JSON.stringify({ scope: 'local fixture only', action: 'scan-triage', requestKey: input.requestKey, actionType: input.action, findingIds: input.findingIds }));
+    return json(decision);
+  }
+  if (req.method === 'POST' && pathname === '/scan-reports/report-fixture/repairs') {
+    let body = ''; for await (const chunk of req) body += chunk;
+    const input = JSON.parse(body); const decision = scanDecisions.find((item) => item.id === input.selectionId && item.action === 'select_repair');
+    if (!decision) { res.statusCode = 409; return json({ error: 'Recorded selection required' }); }
+    decision.repairPodId = 'local-fixture';
+    console.log(JSON.stringify({ scope: 'local fixture only', action: 'scan-repair-dispatch', selectionId: decision.id, simulated: true }));
+    return json({ kind: 'repair_dispatch', podId: decision.repairPodId, selectionId: decision.id });
+  }
   if (pathname === '/health')
     return json({
       status: 'ok',

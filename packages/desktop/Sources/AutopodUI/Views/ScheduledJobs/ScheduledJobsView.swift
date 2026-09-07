@@ -8,6 +8,7 @@ public struct ScheduledJobsView: View {
   public var profileNames: [String]
   public var onRunCatchup: ((ScheduledJob) -> Void)?
   public var onSkipCatchup: ((ScheduledJob) -> Void)?
+  public var onOpenScanReports: ((ScheduledJob) -> Void)?
   public var onTriggerJob: ((ScheduledJob) -> Void)?
   public var onCreateJob: ((CreateScheduledJobRequest) -> Void)?
   public var onEditJob: ((String, UpdateScheduledJobRequest) -> Void)?
@@ -34,6 +35,7 @@ public struct ScheduledJobsView: View {
     profileNames: [String] = [],
     onRunCatchup: ((ScheduledJob) -> Void)? = nil,
     onSkipCatchup: ((ScheduledJob) -> Void)? = nil,
+    onOpenScanReports: ((ScheduledJob) -> Void)? = nil,
     onTriggerJob: ((ScheduledJob) -> Void)? = nil,
     onCreateJob: ((CreateScheduledJobRequest) -> Void)? = nil,
     onEditJob: ((String, UpdateScheduledJobRequest) -> Void)? = nil,
@@ -47,6 +49,7 @@ public struct ScheduledJobsView: View {
     self.profileNames = profileNames
     self.onRunCatchup = onRunCatchup
     self.onSkipCatchup = onSkipCatchup
+    self.onOpenScanReports = onOpenScanReports
     self.onTriggerJob = onTriggerJob
     self.onCreateJob = onCreateJob
     self.onEditJob = onEditJob
@@ -330,6 +333,7 @@ public struct ScheduledJobsView: View {
       onSkipCatchup: onSkipCatchup
     )
     .contextMenu {
+      Button("Reports and scan policy") { onOpenScanReports?(job) }
       Button("Run Now") { onTriggerJob?(job) }
       Divider()
       Button("Edit") { jobToEdit = job }

@@ -69,7 +69,8 @@ public struct MainView: View {
     // Scheduled Jobs
     public var onRunCatchup: ((ScheduledJob) -> Void)?
     public var onSkipCatchup: ((ScheduledJob) -> Void)?
-    public var onTriggerJob: ((ScheduledJob) -> Void)?
+    public var onOpenScanReports: ((ScheduledJob) -> Void)?
+  public var onTriggerJob: ((ScheduledJob) -> Void)?
     public var onCreateJob: ((CreateScheduledJobRequest) -> Void)?
     public var onEditJob: ((String, UpdateScheduledJobRequest) -> Void)?
     public var onDeleteJob: ((ScheduledJob) -> Void)?
@@ -162,7 +163,8 @@ public struct MainView: View {
         qualityScores: [String: PodQualityScore] = [:],
         onRunCatchup: ((ScheduledJob) -> Void)? = nil,
         onSkipCatchup: ((ScheduledJob) -> Void)? = nil,
-        onTriggerJob: ((ScheduledJob) -> Void)? = nil,
+        onOpenScanReports: ((ScheduledJob) -> Void)? = nil,
+    onTriggerJob: ((ScheduledJob) -> Void)? = nil,
         onCreateJob: ((CreateScheduledJobRequest) -> Void)? = nil,
         onEditJob: ((String, UpdateScheduledJobRequest) -> Void)? = nil,
         onDeleteJob: ((ScheduledJob) -> Void)? = nil,
@@ -250,7 +252,8 @@ public struct MainView: View {
         self.qualityScores = qualityScores
         self.onRunCatchup = onRunCatchup
         self.onSkipCatchup = onSkipCatchup
-        self.onTriggerJob = onTriggerJob
+        self.onOpenScanReports = onOpenScanReports
+    self.onTriggerJob = onTriggerJob
         self.onCreateJob = onCreateJob
         self.onEditJob = onEditJob
         self.onDeleteJob = onDeleteJob
@@ -547,6 +550,7 @@ public struct MainView: View {
                     profileNames: profileNames,
                     onRunCatchup: onRunCatchup,
                     onSkipCatchup: onSkipCatchup,
+                    onOpenScanReports: onOpenScanReports,
                     onTriggerJob: onTriggerJob,
                     onCreateJob: onCreateJob,
                     onEditJob: onEditJob,

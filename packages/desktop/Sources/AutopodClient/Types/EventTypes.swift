@@ -62,6 +62,7 @@ public struct RawSystemEvent: Codable, Sendable {
   public let override: ValidationOverrideEntry?
 
   // scheduled_job.catchup_requested / scheduled_job.fired
+  public let reportId: String?
   public let jobId: String?
   public let jobName: String?
   public let lastRunAt: String?
@@ -152,7 +153,7 @@ public enum SystemEvent: Sendable {
   case memoryCandidateUpdated(podId: String, candidate: MemoryCandidate)
   case validationOverrideQueued(podId: String, override: ValidationOverrideEntry)
   case scheduledJobCatchupRequested(jobId: String, jobName: String, lastRunAt: String?)
-  case scheduledJobFired(jobId: String, jobName: String, podId: String)
+  case scheduledJobFired(jobId: String, jobName: String, podId: String?, reportId: String?)
   case firewallDenied(podId: String, timestamp: String, sni: String, src: String)
 
   public var eventId: Int? { nil }  // Set externally from _eventId
@@ -232,11 +233,12 @@ public enum SystemEvent: Sendable {
       )
 
     case "scheduled_job.fired":
-      guard let jobId = raw.jobId, let podId = raw.podId else { return nil }
+      guard let jobId = raw.jobId else { return nil }
       return .scheduledJobFired(
         jobId: jobId,
         jobName: raw.jobName ?? jobId,
-        podId: podId
+        podId: raw.podId,
+        reportId: raw.reportId
       )
 
     case "pod.firewall_denied":
