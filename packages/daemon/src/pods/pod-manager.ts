@@ -11956,9 +11956,10 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
             // Pass the PAT so we don't depend on the in-memory cache, which is
             // evicted whenever any sibling worktree on the same bare repo is
             // cleaned up (local-worktree-manager.ts cleanup()).
+            let publishedSource: Awaited<ReturnType<typeof publishApprovalBranch>>;
             const useForce = forceWithLeaseAllowances.has(podId);
             try {
-              await deliveryOperation(async () =>
+              publishedSource = await deliveryOperation(async () =>
                 publishApprovalBranch(mergingAnchor, {
                   pat: await deliveryCredential(approveProfile),
                   ...(useForce ? { force: true } : {}),
@@ -12014,7 +12015,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
             // date) since we already pushed above.
             if (!rebaseResult.alreadyUpToDate) {
               try {
-                await deliveryOperation(async () =>
+                publishedSource = await deliveryOperation(async () =>
                   publishApprovalBranch(mergingAnchor, {
                     force: true,
                     pat: await deliveryCredential(approveProfile),
@@ -12064,6 +12065,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
             try {
               const mergeResult = await deliveryOperation(async () =>
                 prManager.mergePr({
+                  expectedHeadSha: publishedSource.commitSha,
                   worktreePath,
                   prUrl,
                   squash: options?.squash,
@@ -12141,7 +12143,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         let retryPrUrl: string | null = null;
         try {
           const retryProfile = profileStore.get(pod.profileName);
-          await deliveryOperation(async () =>
+          const publishedSource = await deliveryOperation(async () =>
             commitAndPublishApprovalBranch(mergingAnchor, {
               worktreePath: pod.worktreePath,
               // Push the feature branch up so the PR can be opened against the resolved base.
@@ -12224,6 +12226,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           }
           const retryMergeResult = await deliveryOperation(async () =>
             prManager.mergePr({
+              expectedHeadSha: publishedSource.commitSha,
               worktreePath: pod.worktreePath,
               prUrl: newPrUrl,
               squash: options?.squash,

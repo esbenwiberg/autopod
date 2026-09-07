@@ -1,0 +1,95 @@
+
+ RUN  v4.1.11 /private/tmp/autopod-durable-execution/packages/daemon
+
+ ❯ src/pods/pod-lifecycle.e2e.test.ts (29 tests | 1 failed) 1591ms
+       × walks through the entire lifecycle 140ms
+ ❯ src/pods/pod-manager.test.ts (498 tests | 4 failed) 21246ms
+       × binds approval merge to the latest durable publication (existing) 51ms
+       × binds approval merge to the latest durable publication (rebased) 40ms
+       × merges PR when prUrl exists 41ms
+       × starts a daemon host-port preview proxy for sandbox pods 40ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 5 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/pods/pod-lifecycle.e2e.test.ts > Pod Lifecycle E2E > Happy path: create → process → validate → PR → approve → complete > walks through the entire lifecycle
+AssertionError: expected "vi.fn()" to be called with arguments: [ { …(3) } ]
+
+Received:
+
+  1st vi.fn() call:
+
+  [
+    {
++     "expectedHeadSha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "prUrl": "https://github.com/org/repo/pull/42",
+      "squash": undefined,
+      "worktreePath": "/tmp/worktree/abc",
+    },
+  ]
+
+
+Number of calls: 1
+
+ ❯ src/pods/pod-lifecycle.e2e.test.ts:125:33
+    123|
+    124|       // 4. Verify PR was merged
+    125|       expect(prManager.mergePr).toHaveBeenCalledWith({
+       |                                 ^
+    126|         worktreePath: '/tmp/worktree/abc',
+    127|         prUrl: 'https://github.com/org/repo/pull/42',
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/5]⎯
+
+ FAIL  src/pods/pod-manager.test.ts > PodManager > approveSession > binds approval merge to the latest durable publication (existing)
+ FAIL  src/pods/pod-manager.test.ts > PodManager > approveSession > binds approval merge to the latest durable publication (rebased)
+AutopodError: Approval delivery failed. Push to origin failed: Cannot read properties of undefined (reading 'match') Original resources retained; repair delivery and retry approval.
+ ❯ failDelivery src/pods/pod-manager.ts:11931:15
+    11929|         assertApprovalCurrent({ ...pod, status: 'validated' });
+    11930|         emitActivityError(podId, reason, false);
+    11931|         throw new AutopodError(reason, 'APPROVAL_DELIVERY_FAILED', 502…
+       |               ^
+    11932|       };
+    11933|
+ ❯ Object.approveSession src/pods/pod-manager.ts:12138:11
+ ❯ src/pods/pod-manager.test.ts:4798:9
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/5]⎯
+
+ FAIL  src/pods/pod-manager.test.ts > PodManager > approveSession > merges PR when prUrl exists
+AssertionError: expected "vi.fn()" to be called with arguments: [ { worktreePath: '/tmp/wt', …(2) } ]
+
+Received:
+
+  1st vi.fn() call:
+
+  [
+    {
++     "expectedHeadSha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "prUrl": "https://github.com/org/repo/pull/42",
+      "squash": undefined,
+      "worktreePath": "/tmp/wt",
+    },
+  ]
+
+
+Number of calls: 1
+
+ ❯ src/pods/pod-manager.test.ts:5415:37
+    5413|       await manager.approveSession(pod.id);
+    5414|
+    5415|       expect(ctx.prManager.mergePr).toHaveBeenCalledWith({
+       |                                     ^
+    5416|         worktreePath: '/tmp/wt',
+    5417|         prUrl: 'https://github.com/org/repo/pull/42',
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/5]⎯
+
+ FAIL  src/pods/pod-manager.test.ts > PodManager > triggerValidation — loud-fail on push > starts a daemon host-port preview proxy for sandbox pods
+Error: listen EPERM: operation not permitted 0.0.0.0:38174
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[4/5]⎯
+
+
+ Test Files  2 failed | 3 passed (5)
+      Tests  5 failed | 590 passed (595)
+   Start at  00:09:58
+   Duration  22.33s (transform 1.96s, setup 0ms, import 3.14s, tests 23.57s, environment 0ms)

@@ -16,6 +16,12 @@ import type {
 import type { ScreenshotStore } from '../pods/screenshot-store.js';
 import type { ProfileLlmClientDeps } from '../providers/llm-client.js';
 import { buildAdoAttachmentRef } from '../validation/screenshot-collector.js';
+import {
+  assertMergeSource,
+  expectedMergeSource,
+  mergeReconciliation,
+  sourceCommit,
+} from './merge-source-identity.js';
 import { buildPrBody } from './pr-body-builder.js';
 import {
   type PrNarrativeResult,
@@ -414,6 +420,7 @@ export class AdoPrManager implements PrManager {
   }
 
   async mergePr(config: MergePrConfig): Promise<MergePrResult> {
+    const expectedHeadSha = expectedMergeSource(config.expectedHeadSha);
     const prId = this.extractPrId(config.prUrl);
 
     this.logger.info(
@@ -424,31 +431,40 @@ export class AdoPrManager implements PrManager {
     // Fetch current PR to get lastMergeSourceCommit
     const pr = (await this.adoFetch(`/pullrequests/${prId}?api-version=7.1`, {
       method: 'GET',
-    })) as { lastMergeSourceCommit: { commitId: string } };
+    })) as { lastMergeSourceCommit?: { commitId?: string } } | null;
+    assertMergeSource(expectedHeadSha, pr?.lastMergeSourceCommit?.commitId);
 
     const patchBody = {
       status: 'completed',
-      lastMergeSourceCommit: pr.lastMergeSourceCommit,
+      lastMergeSourceCommit: expectedHeadSha
+        ? { commitId: expectedHeadSha }
+        : pr?.lastMergeSourceCommit,
       completionOptions: {
         mergeStrategy: config.squash ? 'squash' : 'noFastForward',
-        deleteSourceBranch: true,
+        deleteSourceBranch: false,
       },
     };
 
     const result = (await this.adoFetch(`/pullrequests/${prId}?api-version=7.1`, {
       method: 'PATCH',
       body: JSON.stringify(patchBody),
-    })) as { status: string; autoCompleteSetBy?: { displayName: string } };
+    })) as {
+      status?: string;
+      lastMergeSourceCommit?: { commitId?: string };
+      autoCompleteSetBy?: { id?: string };
+    } | null;
 
-    // If the PR is still active after the PATCH, policies are blocking the merge
-    // and ADO set auto-complete instead
-    if (result.status === 'active') {
-      this.logger.info(
-        { prUrl: config.prUrl, prId, autoCompleteSetBy: result.autoCompleteSetBy?.displayName },
-        'ADO auto-complete set — policies blocking merge',
-      );
-      return { merged: false, autoMergeScheduled: true };
+    if (result?.status === 'active') {
+      return {
+        merged: false,
+        autoMergeScheduled:
+          typeof result.autoCompleteSetBy?.id === 'string' &&
+          result.autoCompleteSetBy.id.length > 0,
+      };
     }
+    if (result?.status !== 'completed')
+      mergeReconciliation('ADO did not confirm that the requested merge completed.');
+    assertMergeSource(expectedHeadSha, result.lastMergeSourceCommit?.commitId);
 
     this.logger.info({ prUrl: config.prUrl, prId }, 'ADO pull request completed');
     return { merged: true, autoMergeScheduled: false };
@@ -493,13 +509,26 @@ export class AdoPrManager implements PrManager {
 
     const pr = (await this.adoFetch(`/pullrequests/${prId}?api-version=7.1`, {
       method: 'GET',
-    })) as { status: string; mergeStatus?: string; repository: { id: string } };
+    })) as {
+      status: string;
+      mergeStatus?: string;
+      repository: { id: string };
+      lastMergeSourceCommit?: { commitId?: string };
+    };
 
     if (pr.status === 'completed') {
-      return { merged: true, open: false, blockReason: null, ciFailures: [], reviewComments: [] };
+      return {
+        headSha: sourceCommit(pr.lastMergeSourceCommit?.commitId),
+        merged: true,
+        open: false,
+        blockReason: null,
+        ciFailures: [],
+        reviewComments: [],
+      };
     }
     if (pr.status === 'abandoned') {
       return {
+        headSha: sourceCommit(pr.lastMergeSourceCommit?.commitId),
         merged: false,
         open: false,
         blockReason: 'PR was abandoned',
@@ -633,6 +662,7 @@ export class AdoPrManager implements PrManager {
     }
 
     return {
+      headSha: sourceCommit(pr.lastMergeSourceCommit?.commitId),
       merged: false,
       open: true,
       blockReason: reasons.length > 0 ? reasons.join('; ') : 'Waiting for policies to pass',

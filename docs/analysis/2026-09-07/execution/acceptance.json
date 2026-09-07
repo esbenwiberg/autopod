@@ -173,7 +173,11 @@
         "packages/daemon/src/pods/reconciler.ts",
         "packages/daemon/src/pods/interactive-completion-coordinator.ts",
         "packages/mobile-web/src/lib/pod-actions.ts",
-        "packages/daemon/src/pods/polling-coordinator.ts"
+        "packages/daemon/src/pods/polling-coordinator.ts",
+        "packages/daemon/src/interfaces/pr-manager.ts",
+        "packages/daemon/src/worktrees/merge-source-identity.ts",
+        "packages/daemon/src/worktrees/pr-manager.ts",
+        "packages/daemon/src/worktrees/ado-pr-manager.ts"
       ],
       "tests": [
         "packages/daemon/src/pods/completion-journal.test.ts",
@@ -233,7 +237,8 @@
         "checkpoint-38.md",
         "checkpoint-39.md",
         "receipts/checkpoint-39-full-validation.txt",
-        "receipts/checkpoint-39-validation-identity.json"
+        "receipts/checkpoint-39-validation-identity.json",
+        "checkpoint-40.md: source-bound approval requests and explicit provider merge confirmation; durable poller binding and cleanup remain partial"
       ],
       "prerequisites": [
         "PR creation intent/reconciliation implemented locally; broader finalization side effects and operator override remain."
@@ -1656,5 +1661,5 @@
       "prerequisites": []
     }
   ],
-  "lastCheckpoint": "checkpoint-39.md"
+  "lastCheckpoint": "checkpoint-40.md"
 }

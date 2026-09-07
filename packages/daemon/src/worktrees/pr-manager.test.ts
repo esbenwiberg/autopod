@@ -37,6 +37,52 @@ describe('GhPrManager', () => {
     execCalls.length = 0;
   });
 
+  it('pins an expected source commit without scheduling a later merge or deleting the branch', async () => {
+    const sha = 'a'.repeat(40);
+    execResponses.push(
+      { stdout: '', stderr: '' },
+      {
+        stdout: JSON.stringify({
+          state: 'MERGED',
+          headRefOid: sha,
+          statusCheckRollup: null,
+        }),
+        stderr: '',
+      },
+    );
+    const result = await new GhPrManager({ logger, githubAuth }).mergePr({
+      prUrl: 'https://github.com/org/repo/pull/42',
+      expectedHeadSha: sha,
+    });
+    expect(result.merged).toBe(true);
+    expect(execCalls[0]?.[1]).toEqual(expect.arrayContaining(['--match-head-commit', sha]));
+    expect(execCalls[0]?.[1]).not.toEqual(expect.arrayContaining(['--auto']));
+    expect(execCalls[0]?.[1]).not.toEqual(expect.arrayContaining(['--delete-branch']));
+  });
+
+  it.each([undefined, 'b'.repeat(40)])(
+    'rejects a merged CLI observation with unconfirmed source %s',
+    async (headRefOid) => {
+      execResponses.push(
+        { stdout: '', stderr: '' },
+        {
+          stdout: JSON.stringify({
+            state: 'MERGED',
+            headRefOid,
+            statusCheckRollup: null,
+          }),
+          stderr: '',
+        },
+      );
+      await expect(
+        new GhPrManager({ logger, githubAuth }).mergePr({
+          prUrl: 'https://github.com/org/repo/pull/42',
+          expectedHeadSha: 'a'.repeat(40),
+        }),
+      ).rejects.toMatchObject({ code: 'DELIVERY_RECONCILIATION_REQUIRED' });
+    },
+  );
+
   it('can be instantiated', () => {
     const manager = new GhPrManager({ logger, githubAuth });
     expect(manager).toBeDefined();
@@ -502,6 +548,56 @@ describe('GitHubApiPrManager', () => {
   beforeEach(() => {
     vi.unstubAllGlobals();
   });
+
+  it('sends the expected source SHA to the GitHub merge condition and preserves the branch', async () => {
+    const sha = 'a'.repeat(40);
+    const fetchMock = makeFetch([
+      { ok: true, body: { head: { ref: 'feature', sha } } },
+      { ok: true, body: { merged: true, sha: 'c'.repeat(40) } },
+    ]);
+    vi.stubGlobal('fetch', fetchMock);
+    const result = await new GitHubApiPrManager({ pat: 'local-token', logger }).mergePr({
+      prUrl: 'https://github.com/org/repo/pull/42',
+      expectedHeadSha: sha,
+    });
+    expect(result).toEqual({ merged: true, autoMergeScheduled: false });
+    expect(JSON.parse(fetchMock.mock.calls[1]?.[1].body)).toMatchObject({ sha });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it.each([undefined, 'b'.repeat(40)])(
+    'refuses GitHub mutation when observed source is %s',
+    async (sha) => {
+      const fetchMock = makeFetch([{ ok: true, body: { head: { ref: 'feature', sha } } }]);
+      vi.stubGlobal('fetch', fetchMock);
+      await expect(
+        new GitHubApiPrManager({ pat: 'local-token', logger }).mergePr({
+          prUrl: 'https://github.com/org/repo/pull/42',
+          expectedHeadSha: 'a'.repeat(40),
+        }),
+      ).rejects.toMatchObject({ code: 'DELIVERY_RECONCILIATION_REQUIRED' });
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+    },
+  );
+
+  it.each([{}, { merged: false }, { merged: 'true' }, null])(
+    'requires an explicit GitHub merge confirmation: %j',
+    async (body) => {
+      const sha = 'a'.repeat(40);
+      const fetchMock = makeFetch([
+        { ok: true, body: { head: { ref: 'feature', sha } } },
+        { ok: true, body },
+      ]);
+      vi.stubGlobal('fetch', fetchMock);
+      await expect(
+        new GitHubApiPrManager({ pat: 'local-token', logger }).mergePr({
+          prUrl: 'https://github.com/org/repo/pull/42',
+          expectedHeadSha: sha,
+        }),
+      ).rejects.toMatchObject({ code: 'DELIVERY_RECONCILIATION_REQUIRED' });
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+    },
+  );
 
   it('looks up exact repository/head/base with bounded authenticated GET and rejects errors as absence', async () => {
     const row = {

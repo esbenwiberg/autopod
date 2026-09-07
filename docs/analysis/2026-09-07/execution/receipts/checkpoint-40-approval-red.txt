@@ -1,0 +1,60 @@
+
+ RUN  v4.1.11 /private/tmp/autopod-durable-execution/packages/daemon
+
+ ❯ src/pods/pod-manager.test.ts (498 tests | 3 failed | 495 skipped) 188ms
+       × binds approval merge to the latest durable publication (existing) 85ms
+       × binds approval merge to the latest durable publication (rebased) 46ms
+       × binds approval merge to the latest durable publication (new) 56ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 3 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/pods/pod-manager.test.ts > PodManager > approveSession > binds approval merge to the latest durable publication (existing)
+ FAIL  src/pods/pod-manager.test.ts > PodManager > approveSession > binds approval merge to the latest durable publication (rebased)
+AutopodError: Approval delivery failed. Push to origin failed: Cannot read properties of undefined (reading 'match') Original resources retained; repair delivery and retry approval.
+ ❯ failDelivery src/pods/pod-manager.ts:11931:15
+    11929|         assertApprovalCurrent({ ...pod, status: 'validated' });
+    11930|         emitActivityError(podId, reason, false);
+    11931|         throw new AutopodError(reason, 'APPROVAL_DELIVERY_FAILED', 502…
+       |               ^
+    11932|       };
+    11933|
+ ❯ Object.approveSession src/pods/pod-manager.ts:12136:11
+ ❯ src/pods/pod-manager.test.ts:4781:7
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/3]⎯
+
+ FAIL  src/pods/pod-manager.test.ts > PodManager > approveSession > binds approval merge to the latest durable publication (new)
+AssertionError: expected "vi.fn()" to be called with arguments: [ ObjectContaining{…} ]
+
+Received:
+
+  1st vi.fn() call:
+
+  [
+-   ObjectContaining {
+-     "expectedHeadSha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
++   {
++     "prUrl": "https://github.com/org/repo/pull/42",
++     "squash": undefined,
++     "worktreePath": "/tmp/source",
+    },
+  ]
+
+
+Number of calls: 1
+
+ ❯ src/pods/pod-manager.test.ts:4783:37
+    4781|       await manager.approveSession(pod.id);
+    4782|       const sha = (path === 'rebased' ? 'b' : 'a').repeat(40);
+    4783|       expect(ctx.prManager.mergePr).toHaveBeenCalledWith(expect.object…
+       |                                     ^
+    4784|       const rows = ctx.db.prepare('SELECT receipt FROM source_publicat…
+    4785|       expect(rows.map(row => JSON.parse(row.receipt).commitSha)).toCon…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/3]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  3 failed | 495 skipped (498)
+   Start at  00:09:03
+   Duration  1.50s (transform 788ms, setup 0ms, import 1.20s, tests 188ms, environment 0ms)

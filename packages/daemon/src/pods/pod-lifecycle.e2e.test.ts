@@ -123,6 +123,7 @@ describe('Pod Lifecycle E2E', () => {
 
       // 4. Verify PR was merged
       expect(prManager.mergePr).toHaveBeenCalledWith({
+        expectedHeadSha: 'a'.repeat(40),
         worktreePath: '/tmp/worktree/abc',
         prUrl: 'https://github.com/org/repo/pull/42',
         squash: undefined,

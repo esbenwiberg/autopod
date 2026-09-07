@@ -62,6 +62,8 @@ export interface CreatePrConfig {
 }
 
 export interface MergePrConfig {
+  /** Confirmed published source commit. Legacy callers without it remain unbound. */
+  expectedHeadSha?: string;
   /** Worktree path for repository-bound implementations; URL-addressed operations may omit it. */
   worktreePath?: string;
   /** PR URL or number to merge */
@@ -117,6 +119,8 @@ export interface ReviewFeedbackReplyResult {
 }
 
 export interface PrMergeStatus {
+  /** Provider-observed source commit; absent when unavailable, never the merge commit. */
+  headSha?: string;
   /** Whether the PR has been merged */
   merged: boolean;
   /** Whether the PR is still open (false = closed/abandoned without merging) */

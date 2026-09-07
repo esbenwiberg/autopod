@@ -4759,6 +4759,59 @@ describe('PodManager', () => {
   });
 
   describe('approveSession', () => {
+    it.each(['existing', 'rebased', 'new'] as const)(
+      'binds approval merge to the latest durable publication (%s)',
+      async (path) => {
+        const ctx = createTestContext();
+        const manager = createPodManager(ctx.deps);
+        const pod = manager.createSession(
+          { profileName: 'test-profile', task: 'Bind published source' },
+          'user-1',
+        );
+        ctx.podRepo.update(
+          pod.id,
+          validatedPodUpdates(pod.id, {
+            worktreePath: '/tmp/source',
+            containerId: 'source-container',
+            filesChanged: 2,
+            ...(path === 'new' ? {} : { prUrl: 'https://github.com/org/repo/pull/42' }),
+          }),
+        );
+        let publicationCount = 0;
+        vi.mocked(ctx.worktreeManager.pushBranch).mockImplementation(
+          async (worktree, branch, options) => {
+            const commitSha = String.fromCharCode(97 + publicationCount++).repeat(40);
+            const receipt = {
+              ...(await mockBranchPublication(worktree, branch, {
+                ...options,
+                onPrepared: undefined,
+              })),
+              commitSha,
+              observedRemoteCommitSha: commitSha,
+            };
+            options?.onPrepared?.(receipt);
+            return receipt;
+          },
+        );
+        vi.mocked(ctx.worktreeManager.rebaseOntoBase).mockResolvedValue({
+          rebased: true,
+          alreadyUpToDate: path !== 'rebased',
+          conflicts: [],
+        });
+        await manager.approveSession(pod.id);
+        const sha = (path === 'rebased' ? 'b' : 'a').repeat(40);
+        expect(ctx.prManager.mergePr).toHaveBeenCalledWith(
+          expect.objectContaining({ expectedHeadSha: sha }),
+        );
+        const rows = ctx.db
+          .prepare('SELECT receipt FROM source_publication_receipts')
+          .all() as Array<{ receipt: string }>;
+        expect(rows.map((row) => JSON.parse(row.receipt).commitSha)).toContain(sha);
+        expect(rows).toHaveLength(path === 'rebased' ? 2 : 1);
+        expect(manager.getSession(pod.id).status).toBe('complete');
+      },
+    );
+
     it.each(['pr', 'branch'] as const)(
       'requires durable commit-and-push proof before completing %s output',
       async (output) => {
@@ -5363,6 +5416,7 @@ describe('PodManager', () => {
       await manager.approveSession(pod.id);
 
       expect(ctx.prManager.mergePr).toHaveBeenCalledWith({
+        expectedHeadSha: 'a'.repeat(40),
         worktreePath: '/tmp/wt',
         prUrl: 'https://github.com/org/repo/pull/42',
         squash: undefined,

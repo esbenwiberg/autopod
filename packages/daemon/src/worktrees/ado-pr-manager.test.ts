@@ -684,3 +684,71 @@ describe('AdoPrManager.createPr — screenshot attachments', () => {
     expect(store.read).not.toHaveBeenCalled();
   });
 });
+
+describe('ADO source-bound merge confirmation', () => {
+  it('submits the expected source commit and preserves the source branch', async () => {
+    const sha = 'a'.repeat(40);
+    const fetchMock = makeFetch([
+      { ok: true, body: { lastMergeSourceCommit: { commitId: sha } } },
+      { ok: true, body: { status: 'completed', lastMergeSourceCommit: { commitId: sha } } },
+    ]);
+    vi.stubGlobal('fetch', fetchMock);
+    const result = await new AdoPrManager(BASE_CONFIG).mergePr({
+      prUrl: PR_URL,
+      expectedHeadSha: sha,
+    });
+    expect(result).toEqual({ merged: true, autoMergeScheduled: false });
+    expect(JSON.parse(fetchMock.mock.calls[1]?.[1].body)).toMatchObject({
+      lastMergeSourceCommit: { commitId: sha },
+      completionOptions: { deleteSourceBranch: false },
+    });
+  });
+
+  it.each([undefined, 'b'.repeat(40)])(
+    'refuses ADO mutation when observed source is %s',
+    async (commitId) => {
+      const fetchMock = makeFetch([{ ok: true, body: { lastMergeSourceCommit: { commitId } } }]);
+      vi.stubGlobal('fetch', fetchMock);
+      await expect(
+        new AdoPrManager(BASE_CONFIG).mergePr({
+          prUrl: PR_URL,
+          expectedHeadSha: 'a'.repeat(40),
+        }),
+      ).rejects.toMatchObject({ code: 'DELIVERY_RECONCILIATION_REQUIRED' });
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+    },
+  );
+
+  it.each([
+    {},
+    { status: 'abandoned' },
+    null,
+    { status: 'completed' },
+    { status: 'completed', lastMergeSourceCommit: { commitId: 'b'.repeat(40) } },
+  ])('requires explicit ADO source and completed disposition: %j', async (body) => {
+    const sha = 'a'.repeat(40);
+    const fetchMock = makeFetch([
+      { ok: true, body: { lastMergeSourceCommit: { commitId: sha } } },
+      { ok: true, body },
+    ]);
+    vi.stubGlobal('fetch', fetchMock);
+    await expect(
+      new AdoPrManager(BASE_CONFIG).mergePr({
+        prUrl: PR_URL,
+        expectedHeadSha: sha,
+      }),
+    ).rejects.toMatchObject({ code: 'DELIVERY_RECONCILIATION_REQUIRED' });
+  });
+
+  it('does not invent auto-complete from an active PATCH response', async () => {
+    const sha = 'a'.repeat(40);
+    const fetchMock = makeFetch([
+      { ok: true, body: { lastMergeSourceCommit: { commitId: sha } } },
+      { ok: true, body: { status: 'active' } },
+    ]);
+    vi.stubGlobal('fetch', fetchMock);
+    expect(
+      await new AdoPrManager(BASE_CONFIG).mergePr({ prUrl: PR_URL, expectedHeadSha: sha }),
+    ).toEqual({ merged: false, autoMergeScheduled: false });
+  });
+});

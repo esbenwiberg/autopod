@@ -16,6 +16,12 @@ import type {
   ReviewFeedbackReplyResult,
 } from '../interfaces/pr-manager.js';
 import type { ProfileLlmClientDeps } from '../providers/llm-client.js';
+import {
+  assertMergeSource,
+  expectedMergeSource,
+  mergeReconciliation,
+  sourceCommit,
+} from './merge-source-identity.js';
 import { buildPrBody } from './pr-body-builder.js';
 import {
   type PrNarrativeResult,
@@ -418,13 +424,13 @@ export class GhPrManager implements PrManager {
   }
 
   async mergePr(config: MergePrConfig): Promise<MergePrResult> {
+    const expectedHeadSha = expectedMergeSource(config.expectedHeadSha);
     const args = [
       'pr',
       'merge',
       config.prUrl,
       config.squash ? '--squash' : '--merge',
-      '--delete-branch',
-      '--auto',
+      ...(expectedHeadSha ? ['--match-head-commit', expectedHeadSha] : ['--auto']),
     ];
 
     this.logger.info(
@@ -445,6 +451,7 @@ export class GhPrManager implements PrManager {
     const status = await this.getPrStatus({
       prUrl: config.prUrl,
     });
+    assertMergeSource(expectedHeadSha, status.headSha);
     if (status.merged) {
       this.logger.info({ prUrl: config.prUrl }, 'Pull request merged immediately');
       return { merged: true, autoMergeScheduled: false };
@@ -452,9 +459,11 @@ export class GhPrManager implements PrManager {
 
     this.logger.info(
       { prUrl: config.prUrl, blockReason: status.blockReason },
-      'Auto-merge scheduled — PR not yet mergeable',
+      expectedHeadSha
+        ? 'Source-bound merge remains pending'
+        : 'Auto-merge requested — PR not yet mergeable',
     );
-    return { merged: false, autoMergeScheduled: true };
+    return { merged: false, autoMergeScheduled: expectedHeadSha === undefined };
   }
 
   async getPrStatus(config: { prUrl: string; worktreePath?: string }): Promise<PrMergeStatus> {
@@ -463,7 +472,7 @@ export class GhPrManager implements PrManager {
       'view',
       config.prUrl,
       '--json',
-      'state,mergedAt,statusCheckRollup,reviewDecision,autoMergeRequest',
+      'state,mergedAt,statusCheckRollup,reviewDecision,autoMergeRequest,headRefOid',
     ];
 
     const { stdout } = await this.execGh(args, {
@@ -471,6 +480,7 @@ export class GhPrManager implements PrManager {
     });
 
     const pr = JSON.parse(stdout) as {
+      headRefOid?: string;
       state: string;
       mergedAt: string | null;
       statusCheckRollup: Array<{ name: string; status: string; conclusion: string }> | null;
@@ -480,6 +490,7 @@ export class GhPrManager implements PrManager {
 
     if (pr.state === 'MERGED') {
       return {
+        headSha: sourceCommit(pr.headRefOid),
         merged: true,
         open: false,
         blockReason: null,
@@ -491,6 +502,7 @@ export class GhPrManager implements PrManager {
 
     if (pr.state === 'CLOSED') {
       return {
+        headSha: sourceCommit(pr.headRefOid),
         merged: false,
         open: false,
         blockReason: 'PR was closed without merging',
@@ -604,6 +616,7 @@ export class GhPrManager implements PrManager {
     }
 
     return {
+      headSha: sourceCommit(pr.headRefOid),
       merged: false,
       open: true,
       blockReason: reasons.length > 0 ? reasons.join('; ') : 'Waiting for merge conditions',
@@ -850,6 +863,7 @@ export class GitHubApiPrManager implements PrManager {
   }
 
   async mergePr(config: MergePrConfig): Promise<MergePrResult> {
+    const expectedHeadSha = expectedMergeSource(config.expectedHeadSha);
     const { owner, repo, number } = parsePrUrl(config.prUrl);
 
     this.logger.info(
@@ -867,15 +881,18 @@ export class GitHubApiPrManager implements PrManager {
       const text = await prResponse.text();
       throw new Error(`GitHub API error fetching PR ${prResponse.status}: ${text}`);
     }
-    const pr = (await prResponse.json()) as { head: { ref: string }; node_id: string };
-    const headBranch = pr.head.ref;
+    const pr = (await prResponse.json()) as { head?: { sha?: string } } | null;
+    assertMergeSource(expectedHeadSha, pr?.head?.sha);
 
     const mergeResponse = await fetch(
       `https://api.github.com/repos/${owner}/${repo}/pulls/${number}/merge`,
       {
         method: 'PUT',
         headers: this.headers,
-        body: JSON.stringify({ merge_method: config.squash ? 'squash' : 'merge' }),
+        body: JSON.stringify({
+          merge_method: config.squash ? 'squash' : 'merge',
+          sha: expectedHeadSha,
+        }),
       },
     );
 
@@ -890,18 +907,12 @@ export class GitHubApiPrManager implements PrManager {
       throw new Error(`GitHub API merge error ${mergeResponse.status}: ${text}`);
     }
 
-    const deleteResponse = await fetch(
-      `https://api.github.com/repos/${owner}/${repo}/git/refs/heads/${headBranch}`,
-      { method: 'DELETE', headers: this.headers },
-    );
+    const confirmation = (await mergeResponse.json()) as { merged?: unknown } | null;
+    if (confirmation?.merged !== true)
+      mergeReconciliation('GitHub did not confirm that the requested merge completed.');
 
-    if (!deleteResponse.ok && deleteResponse.status !== 422) {
-      this.logger.warn(
-        { status: deleteResponse.status, branch: headBranch },
-        'Failed to delete branch after merge',
-      );
-    }
-
+    // Source branch cleanup requires its own identity and receipt; a successful
+    // merge does not authorize deleting a ref that may since have advanced.
     this.logger.info({ prUrl: config.prUrl }, 'Pull request merged');
     return { merged: true, autoMergeScheduled: false };
   }
@@ -925,6 +936,7 @@ export class GitHubApiPrManager implements PrManager {
 
     if (pr.merged) {
       return {
+        headSha: sourceCommit(pr.head?.sha),
         merged: true,
         open: false,
         blockReason: null,
@@ -935,6 +947,7 @@ export class GitHubApiPrManager implements PrManager {
     }
     if (pr.state === 'closed') {
       return {
+        headSha: sourceCommit(pr.head?.sha),
         merged: false,
         open: false,
         blockReason: 'PR was closed without merging',
@@ -1100,6 +1113,7 @@ export class GitHubApiPrManager implements PrManager {
     }
 
     return {
+      headSha: sourceCommit(pr.head?.sha),
       merged: false,
       open: true,
       blockReason: reasons.length > 0 ? reasons.join('; ') : 'Waiting for merge conditions',

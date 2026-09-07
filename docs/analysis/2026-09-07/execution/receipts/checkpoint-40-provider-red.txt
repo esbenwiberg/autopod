@@ -1,0 +1,276 @@
+
+ RUN  v4.1.11 /private/tmp/autopod-durable-execution/packages/daemon
+
+ ❯ src/worktrees/ado-pr-manager.test.ts (33 tests | 9 failed) 13ms
+     × submits the expected source commit and preserves the source branch 3ms
+     × refuses ADO mutation when observed source is undefined 1ms
+     × refuses ADO mutation when observed source is bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb 0ms
+     × requires explicit ADO source and completed disposition: {} 0ms
+     × requires explicit ADO source and completed disposition: {"status":"abandoned"} 0ms
+     × requires explicit ADO source and completed disposition: null 0ms
+     × requires explicit ADO source and completed disposition: {"status":"completed"} 0ms
+     × requires explicit ADO source and completed disposition: {"status":"completed","lastMergeSourceCommit":{"commitId":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"}} 0ms
+     × does not invent auto-complete from an active PATCH response 0ms
+ ❯ src/worktrees/pr-manager.test.ts (24 tests | 10 failed) 13ms
+     × pins an expected source commit without scheduling a later merge or deleting the branch 4ms
+     × rejects a merged CLI observation with unconfirmed source undefined 1ms
+     × rejects a merged CLI observation with unconfirmed source bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb 0ms
+     × sends the expected source SHA to the GitHub merge condition and preserves the branch 1ms
+     × refuses GitHub mutation when observed source is undefined 0ms
+     × refuses GitHub mutation when observed source is bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb 0ms
+     × requires an explicit GitHub merge confirmation: {} 0ms
+     × requires an explicit GitHub merge confirmation: {"merged":false} 0ms
+     × requires an explicit GitHub merge confirmation: {"merged":"true"} 0ms
+     × requires an explicit GitHub merge confirmation: null 0ms
+
+⎯⎯⎯⎯⎯⎯ Failed Tests 19 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/worktrees/ado-pr-manager.test.ts > ADO source-bound merge confirmation > submits the expected source commit and preserves the source branch
+AssertionError: expected { status: 'completed', …(2) } to match object { …(2) }
+(2 matching properties omitted from actual)
+
+- Expected
++ Received
+
+  {
+    "completionOptions": {
+-     "deleteSourceBranch": false,
++     "deleteSourceBranch": true,
+    },
+    "lastMergeSourceCommit": {
+      "commitId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    },
+  }
+
+ ❯ src/worktrees/ado-pr-manager.test.ts:699:59
+    697|     const result = await new AdoPrManager(BASE_CONFIG).mergePr({ prUrl…
+    698|     expect(result).toEqual({ merged: true, autoMergeScheduled: false }…
+    699|     expect(JSON.parse(fetchMock.mock.calls[1]?.[1].body)).toMatchObjec…
+       |                                                           ^
+    700|       lastMergeSourceCommit: { commitId: sha }, completionOptions: { d…
+    701|     });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/19]⎯
+
+ FAIL  src/worktrees/ado-pr-manager.test.ts > ADO source-bound merge confirmation > refuses ADO mutation when observed source is undefined
+ FAIL  src/worktrees/ado-pr-manager.test.ts > ADO source-bound merge confirmation > refuses ADO mutation when observed source is bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
+AssertionError: expected TypeError: Cannot read properties of null… to match object { Object (code) }
+
+- Expected
++ Received
+
+- {
+-   "code": "DELIVERY_RECONCILIATION_REQUIRED",
++ TypeError {
++   "message": "Cannot read properties of null (reading 'status')",
+  }
+
+ ❯ src/worktrees/ado-pr-manager.test.ts:709:7
+    707|     await expect(new AdoPrManager(BASE_CONFIG).mergePr({
+    708|       prUrl: PR_URL, expectedHeadSha: 'a'.repeat(40),
+    709|     })).rejects.toMatchObject({ code: 'DELIVERY_RECONCILIATION_REQUIRE…
+       |       ^
+    710|     expect(fetchMock).toHaveBeenCalledTimes(1);
+    711|   });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/19]⎯
+
+ FAIL  src/worktrees/ado-pr-manager.test.ts > ADO source-bound merge confirmation > requires explicit ADO source and completed disposition: {}
+ FAIL  src/worktrees/ado-pr-manager.test.ts > ADO source-bound merge confirmation > requires explicit ADO source and completed disposition: {"status":"abandoned"}
+ FAIL  src/worktrees/ado-pr-manager.test.ts > ADO source-bound merge confirmation > requires explicit ADO source and completed disposition: {"status":"completed"}
+ FAIL  src/worktrees/ado-pr-manager.test.ts > ADO source-bound merge confirmation > requires explicit ADO source and completed disposition: {"status":"completed","lastMergeSourceCommit":{"commitId":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"}}
+AssertionError: promise resolved "{ merged: true, …(1) }" instead of rejecting
+
+- Expected
++ Received
+
+- Error {
+-   "message": "rejected promise",
++ {
++   "autoMergeScheduled": false,
++   "merged": true,
+  }
+
+ ❯ src/worktrees/ado-pr-manager.test.ts:723:7
+    721|     await expect(new AdoPrManager(BASE_CONFIG).mergePr({
+    722|       prUrl: PR_URL, expectedHeadSha: sha,
+    723|     })).rejects.toMatchObject({ code: 'DELIVERY_RECONCILIATION_REQUIRE…
+       |       ^
+    724|   });
+    725|
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/19]⎯
+
+ FAIL  src/worktrees/ado-pr-manager.test.ts > ADO source-bound merge confirmation > requires explicit ADO source and completed disposition: null
+AssertionError: expected TypeError: Cannot read properties of null… to match object { Object (code) }
+
+- Expected
++ Received
+
+- {
+-   "code": "DELIVERY_RECONCILIATION_REQUIRED",
++ TypeError {
++   "message": "Cannot read properties of null (reading 'status')",
+  }
+
+ ❯ src/worktrees/ado-pr-manager.test.ts:723:7
+    721|     await expect(new AdoPrManager(BASE_CONFIG).mergePr({
+    722|       prUrl: PR_URL, expectedHeadSha: sha,
+    723|     })).rejects.toMatchObject({ code: 'DELIVERY_RECONCILIATION_REQUIRE…
+       |       ^
+    724|   });
+    725|
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[4/19]⎯
+
+ FAIL  src/worktrees/ado-pr-manager.test.ts > ADO source-bound merge confirmation > does not invent auto-complete from an active PATCH response
+AssertionError: expected { merged: false, …(1) } to deeply equal { merged: false, …(1) }
+
+- Expected
++ Received
+
+  {
+-   "autoMergeScheduled": false,
++   "autoMergeScheduled": true,
+    "merged": false,
+  }
+
+ ❯ src/worktrees/ado-pr-manager.test.ts:734:8
+    732|     vi.stubGlobal('fetch', fetchMock);
+    733|     expect(await new AdoPrManager(BASE_CONFIG).mergePr({ prUrl: PR_URL…
+    734|       .toEqual({ merged: false, autoMergeScheduled: false });
+       |        ^
+    735|   });
+    736| });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[5/19]⎯
+
+ FAIL  src/worktrees/pr-manager.test.ts > GhPrManager > pins an expected source commit without scheduling a later merge or deleting the branch
+AssertionError: expected [ 'pr', 'merge', …(4) ] to deeply equal ArrayContaining{…}
+
+- Expected
++ Received
+
+- ArrayContaining [
+-   "--match-head-commit",
+-   "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
++ [
++   "pr",
++   "merge",
++   "https://github.com/org/repo/pull/42",
++   "--merge",
++   "--delete-branch",
++   "--auto",
+  ]
+
+ ❯ src/worktrees/pr-manager.test.ts:49:31
+     47|     });
+     48|     expect(result.merged).toBe(true);
+     49|     expect(execCalls[0]?.[1]).toEqual(expect.arrayContaining(['--match…
+       |                               ^
+     50|     expect(execCalls[0]?.[1]).not.toEqual(expect.arrayContaining(['--a…
+     51|     expect(execCalls[0]?.[1]).not.toEqual(expect.arrayContaining(['--d…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[6/19]⎯
+
+ FAIL  src/worktrees/pr-manager.test.ts > GhPrManager > rejects a merged CLI observation with unconfirmed source undefined
+ FAIL  src/worktrees/pr-manager.test.ts > GhPrManager > rejects a merged CLI observation with unconfirmed source bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
+AssertionError: promise resolved "{ merged: true, …(1) }" instead of rejecting
+
+- Expected
++ Received
+
+- Error {
+-   "message": "rejected promise",
++ {
++   "autoMergeScheduled": false,
++   "merged": true,
+  }
+
+ ❯ src/worktrees/pr-manager.test.ts:60:7
+     58|     await expect(new GhPrManager({ logger, githubAuth }).mergePr({
+     59|       prUrl: 'https://github.com/org/repo/pull/42', expectedHeadSha: '…
+     60|     })).rejects.toMatchObject({ code: 'DELIVERY_RECONCILIATION_REQUIRE…
+       |       ^
+     61|   });
+     62|
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[7/19]⎯
+
+ FAIL  src/worktrees/pr-manager.test.ts > GitHubApiPrManager > sends the expected source SHA to the GitHub merge condition and preserves the branch
+AssertionError: expected { merge_method: 'merge' } to match object { Object (sha) }
+(1 matching property omitted from actual)
+
+- Expected
++ Received
+
+  {
+-   "sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
++   "merge_method": "merge",
+  }
+
+ ❯ src/worktrees/pr-manager.test.ts:540:59
+    538|     });
+    539|     expect(result).toEqual({ merged: true, autoMergeScheduled: false }…
+    540|     expect(JSON.parse(fetchMock.mock.calls[1]?.[1].body)).toMatchObjec…
+       |                                                           ^
+    541|     expect(fetchMock).toHaveBeenCalledTimes(2);
+    542|   });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[8/19]⎯
+
+ FAIL  src/worktrees/pr-manager.test.ts > GitHubApiPrManager > refuses GitHub mutation when observed source is undefined
+ FAIL  src/worktrees/pr-manager.test.ts > GitHubApiPrManager > refuses GitHub mutation when observed source is bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
+AssertionError: promise resolved "{ merged: true, …(1) }" instead of rejecting
+
+- Expected
++ Received
+
+- Error {
+-   "message": "rejected promise",
++ {
++   "autoMergeScheduled": false,
++   "merged": true,
+  }
+
+ ❯ src/worktrees/pr-manager.test.ts:549:7
+    547|     await expect(new GitHubApiPrManager({ pat: 'local-token', logger }…
+    548|       prUrl: 'https://github.com/org/repo/pull/42', expectedHeadSha: '…
+    549|     })).rejects.toMatchObject({ code: 'DELIVERY_RECONCILIATION_REQUIRE…
+       |       ^
+    550|     expect(fetchMock).toHaveBeenCalledTimes(1);
+    551|   });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[9/19]⎯
+
+ FAIL  src/worktrees/pr-manager.test.ts > GitHubApiPrManager > requires an explicit GitHub merge confirmation: {}
+ FAIL  src/worktrees/pr-manager.test.ts > GitHubApiPrManager > requires an explicit GitHub merge confirmation: {"merged":false}
+ FAIL  src/worktrees/pr-manager.test.ts > GitHubApiPrManager > requires an explicit GitHub merge confirmation: {"merged":"true"}
+ FAIL  src/worktrees/pr-manager.test.ts > GitHubApiPrManager > requires an explicit GitHub merge confirmation: null
+AssertionError: promise resolved "{ merged: true, …(1) }" instead of rejecting
+
+- Expected
++ Received
+
+- Error {
+-   "message": "rejected promise",
++ {
++   "autoMergeScheduled": false,
++   "merged": true,
+  }
+
+ ❯ src/worktrees/pr-manager.test.ts:561:7
+    559|     await expect(new GitHubApiPrManager({ pat: 'local-token', logger }…
+    560|       prUrl: 'https://github.com/org/repo/pull/42', expectedHeadSha: s…
+    561|     })).rejects.toMatchObject({ code: 'DELIVERY_RECONCILIATION_REQUIRE…
+       |       ^
+    562|     expect(fetchMock).toHaveBeenCalledTimes(2);
+    563|   });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[10/19]⎯
+
+
+ Test Files  2 failed (2)
+      Tests  19 failed | 38 passed (57)
+   Start at  00:06:34
+   Duration  342ms (transform 168ms, setup 0ms, import 305ms, tests 25ms, environment 0ms)
