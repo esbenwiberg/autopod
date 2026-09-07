@@ -1,0 +1,11 @@
+{
+  "baseline": "2d5456edac542a99d27f12eb1dbd16e5ad8c2c2a",
+  "sourceHashes": {
+    "packages/daemon/src/actions/handlers/handler.ts": "8470ac2f87bcd7ac6db1cc8c23cb807eb6b5a31e872a61c1405889c36bc71812",
+    "packages/daemon/src/actions/handlers/http-resilience.test.ts": "131da95f92986e69098e4711bdc3725514e9a4186a3b25accfc31f51100997cc",
+    "packages/daemon/src/actions/handlers/test-pipeline-handler.test.ts": "c7a55d13f4d40c1191577934834746d99d2ed13bbbb409f49848ed2025034e7d"
+  },
+  "command": "vitest run http-resilience, handler, github-handler, ado-handler, azure-logs-handler, azure-pim-handler, test-pipeline-handler, generic-http-handler",
+  "result": "99 passed across 8 files",
+  "scope": "affected local tests, not full pipeline"
+}

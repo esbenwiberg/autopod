@@ -1,0 +1,92 @@
+{
+  "baseline": "2d5456edac542a99d27f12eb1dbd16e5ad8c2c2a",
+  "criteria": [
+    {
+      "id": "W1.1",
+      "requirement": "Final URL, protocol, host and complete DNS answer validation including equivalent IP representations",
+      "status": "not-run",
+      "evidence": []
+    },
+    {
+      "id": "W1.2",
+      "requirement": "Validated addresses bound to real connection with TLS hostname verification preserved",
+      "status": "not-run",
+      "evidence": []
+    },
+    {
+      "id": "W1.3",
+      "requirement": "Bounded redirect policy with no cross-origin credentials or forbidden connection attempts",
+      "status": "not-run",
+      "evidence": []
+    },
+    {
+      "id": "W2.1",
+      "requirement": "Deadline spans DNS, connection, headers and body; caller abort and resource cleanup",
+      "status": "fixed",
+      "evidence": [
+        "receipts/http-resilience-red.txt",
+        "receipts/http-resilience-green.txt",
+        "receipts/http-resilience-source.json"
+      ],
+      "remaining": "Generic HTTP DNS phase binding and additional edge/cleanup checks remain; full pipeline pending."
+    },
+    {
+      "id": "W2.2",
+      "requirement": "Streaming decoded byte limits on success and error responses independent of Content-Length",
+      "status": "fixed",
+      "evidence": [
+        "receipts/http-resilience-red.txt",
+        "receipts/http-resilience-green.txt",
+        "receipts/http-resilience-source.json"
+      ],
+      "remaining": "Generic HTTP DNS phase binding and additional edge/cleanup checks remain; full pipeline pending."
+    },
+    {
+      "id": "W2.3",
+      "requirement": "Fixed local timing and byte fixture matrix plus all affected handler compatibility tests",
+      "status": "fixed",
+      "evidence": [
+        "receipts/http-resilience-red.txt",
+        "receipts/http-resilience-green.txt",
+        "receipts/http-resilience-source.json"
+      ],
+      "remaining": "Generic HTTP DNS phase binding and additional edge/cleanup checks remain; full pipeline pending."
+    },
+    {
+      "id": "W3.1",
+      "requirement": "Synthetic secrets absent from actual logs, audit persistence, action and tool failure responses",
+      "status": "not-run",
+      "evidence": []
+    },
+    {
+      "id": "W3.2",
+      "requirement": "Safe useful failure diagnostics and truthful sanitization/quarantine metadata",
+      "status": "not-run",
+      "evidence": []
+    },
+    {
+      "id": "W3.3",
+      "requirement": "Audit integrity and approval/resource denials preserve zero side effects",
+      "status": "not-run",
+      "evidence": []
+    },
+    {
+      "id": "W4.1",
+      "requirement": "Reproductions, exact source receipts, scoped commits and overlap checks",
+      "status": "not-run",
+      "evidence": []
+    },
+    {
+      "id": "W4.2",
+      "requirement": "Action integration and local HTTP/TLS evidence; required full validation pipeline",
+      "status": "not-run",
+      "evidence": []
+    },
+    {
+      "id": "W4.3",
+      "requirement": "Final diff review and criterion-by-criterion closure",
+      "status": "not-run",
+      "evidence": []
+    }
+  ]
+}
