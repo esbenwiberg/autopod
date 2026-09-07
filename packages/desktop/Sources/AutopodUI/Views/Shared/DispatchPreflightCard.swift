@@ -27,8 +27,8 @@ struct DispatchPreflightCard: View {
       } else { Text("No dispatch receipt available for this execution.") }
       Text("Execution environment").font(.headline)
       if let environment {
-        Text("Preflight \(environment.status) · generation \(environment.generation) · \(environment.checkedAt)")
-        Text("\(environment.runtime) CLI \(environment.cliVersion ?? "unverified") · \(environment.model)")
+        Text("\(environment.purpose ?? "coding") preflight \(environment.status) · generation \(environment.generation) · \(environment.checkedAt)")
+        Text("Configured worker: \(environment.runtime) CLI \(environment.cliVersion ?? "unverified") · \(environment.model)")
         Text("Daemon: \(environment.release.commitSha ?? "unverified")\(environment.release.dirty == true ? " · modified source" : "")").textSelection(.enabled)
         Text("Image: \(environment.imageDigest ?? "unverified")").font(.caption).textSelection(.enabled)
         Text("Validation implementation: \(environment.validationImplementationHash ?? "unverified")").font(.caption).textSelection(.enabled)

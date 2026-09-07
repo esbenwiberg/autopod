@@ -20,9 +20,11 @@ export async function inspectExecutionPreflight(
   containerId: string,
   pod: Pod,
   profile: Profile,
+  purpose: NonNullable<ExecutionProvenanceInput['purpose']> = 'coding',
 ): Promise<ExecutionProvenanceInput> {
   const result: ExecutionProvenanceInput = {
     version: 1,
+    purpose,
     status: 'checked',
     runtime: pod.runtime,
     model: pod.model,
@@ -58,13 +60,20 @@ export async function inspectExecutionPreflight(
   try {
     Object.assign(result, await verifyAgentCli(cm, containerId, pod.runtime));
   } catch (error) {
-    result.status = 'blocked';
+    if (purpose === 'coding') result.status = 'blocked';
     result.diagnostics.push({
-      code: error instanceof AutopodError ? error.code : 'PREFLIGHT_RUNTIME_UNAVAILABLE',
+      code:
+        purpose !== 'coding'
+          ? 'WORKER_CLI_NOT_REQUIRED'
+          : error instanceof AutopodError
+            ? error.code
+            : 'PREFLIGHT_RUNTIME_UNAVAILABLE',
       detail:
-        error instanceof AutopodError
-          ? error.message
-          : 'Runtime CLI probe unavailable; inspect container connectivity and image capabilities.',
+        purpose !== 'coding'
+          ? 'Configured worker CLI is unavailable; this phase does not start a coding agent.'
+          : error instanceof AutopodError
+            ? error.message
+            : 'Runtime CLI probe unavailable; inspect container connectivity and image capabilities.',
     });
   }
   try {
@@ -91,6 +100,7 @@ export async function inspectExecutionPreflight(
         pod.contract?.executionRequirements?.minimumMemoryBytes ?? 0,
       );
       if (
+        purpose !== 'completion' &&
         result.capabilities.memoryLimitBytes !== null &&
         result.capabilities.memoryLimitBytes < required
       ) {
@@ -107,13 +117,14 @@ export async function inspectExecutionPreflight(
       detail: 'Backend environment metadata could not be read.',
     });
   }
-  result.commands = await inspectRequiredCommands(cm, containerId, pod, profile);
+  if (purpose !== 'completion' && purpose !== 'review')
+    result.commands = await inspectRequiredCommands(cm, containerId, pod, profile);
   for (const requirement of result.commands.requirements) {
     if (requirement.available !== true) {
       result.status = 'blocked';
       result.diagnostics.push({
         code: 'PREFLIGHT_COMMAND_UNAVAILABLE',
-        detail: `Required launcher ${requirement.executable} (${requirement.source}) is ${requirement.available === false ? 'missing' : 'unverified'}. Reconcile the image or declared command before coding.`,
+        detail: `Required launcher ${requirement.executable} (${requirement.source}) is ${requirement.available === false ? 'missing' : 'unverified'}. Reconcile the image or declared command before ${purpose}.`,
       });
     }
   }
@@ -127,7 +138,7 @@ export async function inspectExecutionPreflight(
         'Dynamic shell commands require explicit executionRequirements.executables in the contract. Only launcher availability is verified; actual script execution remains a validation gate.',
     });
   }
-  const declared = pod.contract?.executionRequirements;
+  const declared = purpose === 'completion' ? undefined : pod.contract?.executionRequirements;
   if (
     (declared?.minimumMemoryBytes && result.capabilities.memoryLimitBytes === null) ||
     (declared?.minimumCpu &&
@@ -140,7 +151,7 @@ export async function inspectExecutionPreflight(
         'Explicit resource requirements are unavailable or exceed effective limits. Reconcile the environment before coding.',
     });
   }
-  if (result.capabilities.streamingExec === 'unsupported') {
+  if (purpose === 'coding' && result.capabilities.streamingExec === 'unsupported') {
     result.status = 'blocked';
     result.diagnostics.push({
       code: 'STREAMING_EXEC_UNSUPPORTED',

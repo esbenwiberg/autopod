@@ -29,6 +29,7 @@ it('retains the complete rerun request through a lost response and reload', asyn
         JSON.stringify({
           latest: {
             status: 'blocked',
+            purpose: 'validation',
             generation: 1,
             checkedAt: 'today',
             runtime: 'codex',
@@ -95,7 +96,7 @@ it('retains the complete rerun request through a lost response and reload', asyn
   try {
     await render();
     expect(container.textContent).toContain('review_required');
-    expect(container.textContent).toContain('Preflight blocked');
+    expect(container.textContent).toContain('validation preflight blocked');
     expect(container.textContent).toContain('dotnet · missing');
     expect(container.textContent).toContain('Memory: unverified bytes');
     await click();

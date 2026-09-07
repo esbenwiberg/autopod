@@ -33,3 +33,19 @@ import Testing
   let encoded = try JSONSerialization.jsonObject(with: JSONEncoder().encode(contract)) as! [String: Any]
   #expect((encoded["executionRequirements"] as? [String: Any])?["minimumMemoryBytes"] as? Int == 2147483648)
 }
+
+@Test func executionProvenanceKeepsValidationPurposeAndSupportsEarlierRecords() throws {
+  var json: [String: Any] = [
+    "executionId": "exec", "generation": 2, "checkedAt": "today", "status": "checked", "purpose": "validation", "runtime": "codex", "model": "worker",
+    "contractHash": String(repeating: "a", count: 64),
+    "release": ["source": "unavailable"],
+    "capabilities": ["streamingExec": "unverified"],
+    "commands": ["requirements": [], "unresolvedSources": [], "deferredArtifacts": [], "explicitDependencies": false],
+    "diagnostics": [["code": "WORKER_CLI_NOT_REQUIRED", "detail": "No coding agent started"]]
+  ]
+  let current = try JSONDecoder().decode(ExecutionProvenance.self, from: JSONSerialization.data(withJSONObject: json))
+  #expect(current.purpose == "validation"); #expect(current.cliVersion == nil)
+  json.removeValue(forKey: "purpose")
+  let legacy = try JSONDecoder().decode(ExecutionProvenance.self, from: JSONSerialization.data(withJSONObject: json))
+  #expect(legacy.purpose == nil)
+}

@@ -16,6 +16,7 @@ import { AutopodError } from '@autopod/shared';
 import type { Logger } from 'pino';
 import { type Headers as TarHeaders, type Pack as TarPack, pack as tarPack } from 'tar-stream';
 import type {
+  ContainerExecutionMetadata,
   ContainerManager,
   ContainerSpawnConfig,
   ExecOptions,
@@ -27,6 +28,10 @@ import type {
   TerminalSessionOptions,
 } from '../interfaces/container-manager.js';
 import { AzureSandboxApiClient } from './azure-sandbox-api-client.js';
+import {
+  CGROUP_EXECUTION_METADATA_PROBE,
+  parseCgroupExecutionMetadata,
+} from './cgroup-execution-metadata.js';
 import type { SandboxPortAuth } from './sandbox-api-client.js';
 import {
   SANDBOX_TIER_MEMORY_BYTES,
@@ -142,6 +147,19 @@ export class SandboxContainerManager implements ContainerManager {
       logger,
     );
     return new SandboxContainerManager(client, logger, { defaultTier: config.tier ?? 'L' });
+  }
+
+  async getExecutionMetadata(containerId: string): Promise<ContainerExecutionMetadata> {
+    try {
+      const result = await this.execInContainer(
+        containerId,
+        ['node', '-e', CGROUP_EXECUTION_METADATA_PROBE],
+        { timeout: 10000 },
+      );
+      return parseCgroupExecutionMetadata(result);
+    } catch {
+      return { imageDigest: null, memoryLimitBytes: null, cpuLimit: null, networkMode: null };
+    }
   }
 
   async spawn(config: ContainerSpawnConfig): Promise<string> {

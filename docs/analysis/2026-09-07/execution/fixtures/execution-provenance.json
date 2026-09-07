@@ -43,7 +43,7 @@
   "diagnostics": [
     {
       "code": "PREFLIGHT_COMMAND_UNAVAILABLE",
-      "detail": "Required launcher dotnet is missing. Reconcile the image or declared command before coding."
+      "detail": "Required launcher dotnet is missing. Reconcile the image or declared command before validation."
     },
     {
       "code": "IMAGE_IDENTITY_UNAVAILABLE",
@@ -53,5 +53,6 @@
       "code": "MEMORY_CAPACITY_UNVERIFIED",
       "detail": "Effective memory capacity is unverified."
     }
-  ]
+  ],
+  "purpose": "validation"
 }

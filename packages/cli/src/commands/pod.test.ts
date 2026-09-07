@@ -657,6 +657,7 @@ it('reads execution provenance through the real HTTP client without inventing un
           ? {
               latest: {
                 status: 'blocked',
+                purpose: 'validation',
                 checkedAt: 'today',
                 executionId: 'execution',
                 generation: 1,
@@ -695,7 +696,7 @@ it('reads execution provenance through the real HTTP client without inventing un
     registerPodCommands(program, () => client);
     await program.parseAsync(['node', 'ap', 'execution-provenance', 'abcd1234']);
     const output = log.mock.calls.flat().join('\n');
-    expect(output).toContain('Preflight blocked');
+    expect(output).toContain('validation preflight blocked');
     expect(output).toContain('Memory unverified bytes; CPU unverified');
     expect(output).toContain('Daemon unverified; image unverified');
     expect(output).toContain('dotnet missing');

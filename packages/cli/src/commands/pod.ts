@@ -243,10 +243,10 @@ export function registerPodCommands(program: Command, getClient: () => AutopodCl
           return;
         }
         console.log(
-          `Preflight ${latest.status} at ${latest.checkedAt}; execution ${latest.executionId}, generation ${latest.generation}`,
+          `${latest.purpose ?? 'coding'} preflight ${latest.status} at ${latest.checkedAt}; execution ${latest.executionId}, generation ${latest.generation}`,
         );
         console.log(
-          `${latest.runtime} CLI ${latest.cliVersion ?? 'unverified'}; model ${latest.model}`,
+          `Configured worker: ${latest.runtime} CLI ${latest.cliVersion ?? 'unverified'}; model ${latest.model}`,
         );
         console.log(
           `Daemon ${latest.release.commitSha ?? 'unverified'}${latest.release.dirty ? ' (modified source)' : ''}; image ${latest.imageDigest ?? 'unverified'}`,

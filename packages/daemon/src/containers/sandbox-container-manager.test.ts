@@ -16,7 +16,7 @@ import { gunzipSync } from 'node:zlib';
 import pino from 'pino';
 import { extract as tarExtract } from 'tar-stream';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { ContainerSpawnConfig } from '../interfaces/container-manager.js';
+import type { ContainerManager, ContainerSpawnConfig } from '../interfaces/container-manager.js';
 import { AzureSandboxApiClient } from './azure-sandbox-api-client.js';
 import type {
   CreateSandboxOptions,
@@ -1006,3 +1006,25 @@ function relativeSandboxPath(parent: string, child: string): string {
   const relative = posix.relative(normalizeSandboxPath(parent), normalizeSandboxPath(child));
   return relative && !relative.startsWith('..') ? relative : '';
 }
+
+it('captures actual sandbox cgroup limits without substituting spawn hints or inventing image identity', async () => {
+  const client = new FakeSandboxApiClient(() => ({
+    exitCode: 0,
+    stdout: '{"memoryLimitBytes":2147483648,"cpuLimit":0.5}',
+    stderr: '',
+  }));
+  const manager: ContainerManager = new SandboxContainerManager(client, logger);
+  const id = await manager.spawn({
+    image: 'example.azurecr.io/test:latest',
+    podId: 'metadata',
+    env: {},
+    memoryBytes: 4 * 1024 ** 3,
+  });
+  expect(await manager.getExecutionMetadata?.(id)).toEqual({
+    imageDigest: null,
+    memoryLimitBytes: 2147483648,
+    cpuLimit: 0.5,
+    networkMode: null,
+  });
+  expect(client.execCalls.at(-1)?.command.slice(0, 2)).toEqual(['node', '-e']);
+});

@@ -6844,6 +6844,50 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
     };
   }
 
+  async function recordValidationProvenance(
+    config: Parameters<ValidationEngine['validate']>[0],
+    purpose: 'validation' | 'review' = 'validation',
+  ): Promise<void> {
+    if (!podRepo.executionProvenance) return;
+    const pod = podRepo.getOrThrow(config.podId);
+    const profile = resolveEffectiveBoundProfile(pod);
+    const skips = new Set(config.skipPhases ?? []);
+    const provenance = await inspectExecutionPreflight(
+      containerManagerFactory.get(pod.executionTarget),
+      config.containerId,
+      {
+        ...pod,
+        skipValidation: false,
+        options: { ...pod.options, validate: true },
+        contract:
+          skips.has('facts') && config.contract
+            ? { ...config.contract, requiredFacts: [] }
+            : config.contract,
+      },
+      {
+        ...profile,
+        buildCommand: skips.has('build') ? '' : config.buildCommand,
+        startCommand: skips.has('health') && skips.has('pages') ? '' : config.startCommand,
+        testCommand: skips.has('test') ? undefined : config.testCommand,
+        lintCommand: skips.has('lint') ? undefined : config.lintCommand,
+        sastCommand: skips.has('sast') ? undefined : config.sastCommand,
+        validationSetupCommand: skips.has('setup') ? undefined : config.validationSetupCommand,
+        buildWorkDir: config.buildWorkDir ?? null,
+        buildEnv: config.extraExecEnv ?? null,
+      },
+      purpose,
+    );
+    provenance.contractHash = createHash('sha256')
+      .update(JSON.stringify(config.contract ?? null))
+      .digest('hex');
+    podRepo.executionProvenance.record(pod.id, pod.lifecycleGeneration, provenance);
+    if (provenance.status === 'blocked')
+      throw new TaskRetryBlockedError(
+        provenance.diagnostics.find((item) => item.code.startsWith('PREFLIGHT_'))?.detail ??
+          'Validation environment requires reconciliation',
+      );
+  }
+
   async function validateWithInfrastructureRetries(
     validationConfig: Parameters<ValidationEngine['validate']>[0],
     validationController: AbortController,
@@ -6863,6 +6907,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
     const retryLedger = podRepo.taskRetries;
     const runValidation = async (): Promise<ValidationResult> => {
       const pod = podRepo.getOrThrow(podId);
+      await recordValidationProvenance(validationConfig);
       const identity = retryLedger
         ? await (deps.captureRetryIdentity?.(validationConfig) ??
             captureValidationRetryIdentity(cm, validationConfig))
@@ -9539,6 +9584,14 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         // Clear the one-shot flag *before* handing off so a future failed →
         // resume cycle re-runs the agent normally.
         if (pod.skipAgent) {
+          const preservedProvenance = await inspectExecutionPreflight(
+            containerManager,
+            containerId,
+            pod,
+            profile,
+            'completion',
+          );
+          podRepo.executionProvenance?.record(podId, pod.lifecycleGeneration, preservedProvenance);
           podRepo.update(podId, { skipAgent: false });
           if (isFreshContainerValidationOnly) {
             emitStatus('Skipping agent — running validation only…');
@@ -9563,6 +9616,14 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           !isRework &&
           hasLatestPersistedAgentTerminalEventComplete(deps.eventRepo, podId)
         ) {
+          const recoveredProvenance = await inspectExecutionPreflight(
+            containerManager,
+            containerId,
+            pod,
+            profile,
+            'completion',
+          );
+          podRepo.executionProvenance?.record(podId, pod.lifecycleGeneration, recoveredProvenance);
           emitStatus('Agent already finished before recovery — resuming completion…');
           logger.info(
             { podId, worktreePath },
@@ -13276,29 +13337,31 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
               const candidateFindingIds = [...candidateIds].sort();
               const originalReviewBatchId = effectiveResult.taskReview?.reviewBatch?.id;
               try {
+                const reviewConfig: Parameters<ValidationEngine['validate']>[0] = {
+                  ...validationConfig,
+                  reviewDepth: 'deep',
+                  reviewOnly: true,
+                  councilOnly: true,
+                  preSubmitReview: null,
+                  // This is an independent adjudication of the current bytes,
+                  // not another ledger-reconciliation pass. Reusing the prior
+                  // batch here can carry the same historical finding into both
+                  // opinions without either reviewer rediscovering the defect.
+                  priorReviewBatch: undefined,
+                  skipPhases: [
+                    'setup',
+                    'lint',
+                    'sast',
+                    'build',
+                    'test',
+                    'health',
+                    'pages',
+                    'facts',
+                  ],
+                };
+                await recordValidationProvenance(reviewConfig, 'review');
                 const reviewOnly = await validationEngine.validate(
-                  {
-                    ...validationConfig,
-                    reviewDepth: 'deep',
-                    reviewOnly: true,
-                    councilOnly: true,
-                    preSubmitReview: null,
-                    // This is an independent adjudication of the current bytes,
-                    // not another ledger-reconciliation pass. Reusing the prior
-                    // batch here can carry the same historical finding into both
-                    // opinions without either reviewer rediscovering the defect.
-                    priorReviewBatch: undefined,
-                    skipPhases: [
-                      'setup',
-                      'lint',
-                      'sast',
-                      'build',
-                      'test',
-                      'health',
-                      'pages',
-                      'facts',
-                    ],
-                  },
+                  reviewConfig,
                   (phase) => emitActivityStatus(podId, phase),
                   validationController.signal,
                   buildPhaseEventCallbacks(podId),

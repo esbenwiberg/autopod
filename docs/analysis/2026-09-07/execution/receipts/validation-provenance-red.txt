@@ -1,0 +1,37 @@
+
+ RUN  v4.1.10 /private/tmp/autopod-durable-execution/packages/daemon
+
+ ❯ src/pods/pod-manager.test.ts (418 tests | 1 failed | 417 skipped) 88ms
+         × runs validation after fresh-container validation-only recovery 87ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/pods/pod-manager.test.ts > PodManager > processPod > recovery mode > runs validation after fresh-container validation-only recovery
+AssertionError: expected null to match object { purpose: 'validation', …(2) }
+
+- Expected:
+{
+  "cliVersion": null,
+  "purpose": "validation",
+  "status": "checked",
+}
+
++ Received:
+null
+
+ ❯ src/pods/pod-manager.test.ts:7207:25
+    7205|         expect(updated.prUrl).toBe('https://github.com/org/repo/pull/4…
+    7206|         const receipt = ctx.podRepo.executionProvenance?.latest(pod.id…
+    7207|         expect(receipt).toMatchObject({ purpose: 'validation', status:…
+       |                         ^
+    7208|         expect(receipt?.diagnostics.map(item => item.code)).toContain(…
+    7209|       });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 417 skipped (418)
+   Start at  16:50:05
+   Duration  1.18s (transform 645ms, setup 0ms, import 986ms, tests 88ms, environment 0ms)
+

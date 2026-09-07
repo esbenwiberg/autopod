@@ -1,0 +1,38 @@
+
+ RUN  v4.1.10 /private/tmp/autopod-durable-execution/packages/daemon
+
+ ❯ src/containers/sandbox-container-manager.test.ts (39 tests | 1 failed | 38 skipped) 4ms
+   × captures actual sandbox cgroup limits without substituting spawn hints or inventing image identity 4ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/containers/sandbox-container-manager.test.ts > captures actual sandbox cgroup limits without substituting spawn hints or inventing image identity
+AssertionError: expected undefined to deeply equal { imageDigest: null, …(3) }
+
+- Expected:
+{
+  "cpuLimit": 0.5,
+  "imageDigest": null,
+  "memoryLimitBytes": 2147483648,
+  "networkMode": null,
+}
+
++ Received:
+undefined
+
+ ❯ src/containers/sandbox-container-manager.test.ts:1023:52
+    1021|     memoryBytes: 4 * 1024 ** 3,
+    1022|   });
+    1023|   expect(await manager.getExecutionMetadata?.(id)).toEqual({
+       |                                                    ^
+    1024|     imageDigest: null,
+    1025|     memoryLimitBytes: 2147483648,
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 38 skipped (39)
+   Start at  16:55:40
+   Duration  377ms (transform 95ms, setup 0ms, import 273ms, tests 4ms, environment 0ms)
+

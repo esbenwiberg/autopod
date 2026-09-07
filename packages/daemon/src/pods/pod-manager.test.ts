@@ -7171,6 +7171,12 @@ describe('PodManager', () => {
       it('runs validation after fresh-container validation-only recovery', async () => {
         const ctx = createTestContext({ overall: 'pass' });
         setupExecFileMock();
+        const originalExec = ctx.containerManager.execInContainer;
+        ctx.containerManager.execInContainer = vi.fn(async (id, command, options) => {
+          if (command[0] === 'claude' && command[1] === '--version')
+            return { exitCode: 127, stdout: '', stderr: 'worker CLI unavailable' };
+          return originalExec(id, command, options);
+        });
         vi.mocked(ctx.worktreeManager.getDiffStats).mockResolvedValue({
           filesChanged: 0,
           linesAdded: 0,
@@ -7197,6 +7203,13 @@ describe('PodManager', () => {
         expect(updated.lastValidationResult?.overall).toBe('pass');
         expect(updated.status).toBe('validated');
         expect(updated.prUrl).toBe('https://github.com/org/repo/pull/42');
+        const receipt = ctx.podRepo.executionProvenance?.latest(pod.id);
+        expect(receipt).toMatchObject({
+          purpose: 'validation',
+          status: 'checked',
+          cliVersion: null,
+        });
+        expect(receipt?.diagnostics.map((item) => item.code)).toContain('WORKER_CLI_NOT_REQUIRED');
       });
 
       it('auto-recovers validation-only provisioning infrastructure without treating prior agent evidence as ambiguous', async () => {
@@ -9239,8 +9252,9 @@ describe('PodManager', () => {
 
     it('recovers from live container when workspace sync fails before validation', async () => {
       const ctx = createTestContext({ overall: 'pass' });
-      (ctx.containerManager.execInContainer as ReturnType<typeof vi.fn>).mockImplementation(
-        async (_containerId, command: string[]) => {
+      const originalExec = ctx.containerManager.execInContainer;
+      ctx.containerManager.execInContainer = vi.fn(
+        async (_containerId, command: string[], options) => {
           if (
             command[0] === 'sh' &&
             command[1] === '-c' &&
@@ -9248,7 +9262,7 @@ describe('PodManager', () => {
           ) {
             throw new Error('docker exec failed');
           }
-          return { stdout: '', stderr: '', exitCode: 0 };
+          return originalExec(_containerId, command, options);
         },
       );
       (
@@ -9351,7 +9365,8 @@ describe('PodManager', () => {
       });
 
       const ctx = createTestContext({ overall: 'pass' });
-      ctx.containerManager.execInContainer = vi.fn(async (_containerId, command) => {
+      const originalExec = ctx.containerManager.execInContainer;
+      ctx.containerManager.execInContainer = vi.fn(async (_containerId, command, options) => {
         if (command[0] === 'git' && command[3] === 'rev-parse') {
           return { stdout: `${containerHead}\n`, stderr: '', exitCode: 0 };
         }
@@ -9365,7 +9380,7 @@ describe('PodManager', () => {
             exitCode: command[5] === containerHead && command[6] === hostHead ? 0 : 1,
           };
         }
-        return { stdout: '', stderr: '', exitCode: 0 };
+        return originalExec(_containerId, command, options);
       });
       const manager = createPodManager(ctx.deps);
 

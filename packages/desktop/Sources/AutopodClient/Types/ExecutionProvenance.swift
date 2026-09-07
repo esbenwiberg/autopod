@@ -5,6 +5,7 @@ public struct ExecutionProvenance: Codable, Sendable {
   public let executionId: String
   public let generation: Int
   public let checkedAt: String
+  public let purpose: String?
   public let status: String
   public let runtime: String
   public let model: String

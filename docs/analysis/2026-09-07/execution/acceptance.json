@@ -400,7 +400,8 @@
         "packages/daemon/src/api/routes/pods.ts",
         "packages/cli/src/commands/pod.ts",
         "packages/mobile-web/src/components/DispatchPreflightPanel.tsx",
-        "packages/desktop/Sources/AutopodUI/Views/Shared/DispatchPreflightCard.swift"
+        "packages/desktop/Sources/AutopodUI/Views/Shared/DispatchPreflightCard.swift",
+        "packages/daemon/src/containers/cgroup-execution-metadata.ts"
       ],
       "tests": [
         "packages/daemon/src/containers/sandbox-container-manager.test.ts",
@@ -413,7 +414,8 @@
         "packages/shared/src/contract.test.ts",
         "packages/cli/src/commands/pod.test.ts",
         "packages/mobile-web/src/components/DispatchPreflightPanel.test.tsx",
-        "packages/desktop/Tests/AutopodClientTests/DispatchPreflightTests.swift"
+        "packages/desktop/Tests/AutopodClientTests/DispatchPreflightTests.swift",
+        "packages/daemon/src/containers/cgroup-execution-metadata.test.ts"
       ],
       "evidence": [
         "receipts/resource-capacity-red.txt",
@@ -429,10 +431,16 @@
         "receipts/runtime-version-red.txt",
         "receipts/required-command-before-integration-red.txt",
         "receipts/execution-provenance-red.txt",
-        "receipts/provenance-migration-prefix.json"
+        "receipts/provenance-migration-prefix.json",
+        "receipts/validation-provenance-red.txt",
+        "receipts/sandbox-metadata-red.txt",
+        "receipts/validation-sandbox-provenance-affected.txt",
+        "receipts/recovery-provenance-e2e.txt",
+        "receipts/recovery-provenance-mobile-browser.json",
+        "receipts/recovery-provenance-swift-reviewed.txt"
       ],
       "prerequisites": [],
-      "remaining": "Main coding startup records immutable actual CLI/version, daemon build input identity, contract and available backend resources before runtime.spawn. Required launcher/resource gates are implemented locally. Metadata is bounded; unavailable values remain explicit. Validation-only/recovered completion and other resume paths still need provenance coverage; sandbox actual metadata and native/live acceptance remain unverified. Launcher availability does not prove repository script semantics."
+      "remaining": "Coding, validation/retry, review-only and completion recovery provenance are locally implemented. Sandbox effective cgroup resources are read without substituting requests; image and network identity remain unavailable. Every direct agent-resume path, actual reviewer CLI identity, complete receipt history/operator coverage, native interaction and live acceptance remain outstanding."
     },
     {
       "id": "W3.4",
@@ -876,7 +884,9 @@
         "packages/daemon/src/api/routes/pods.ts",
         "packages/cli/src/commands/pod.ts",
         "packages/mobile-web/src/components/DispatchPreflightPanel.tsx",
-        "packages/desktop/Sources/AutopodUI/Views/Shared/DispatchPreflightCard.swift"
+        "packages/desktop/Sources/AutopodUI/Views/Shared/DispatchPreflightCard.swift",
+        "packages/daemon/src/containers/cgroup-execution-metadata.ts",
+        "packages/daemon/src/containers/sandbox-container-manager.ts"
       ],
       "tests": [
         "packages/daemon/src/pods/pod-manager.test.ts",
@@ -887,7 +897,9 @@
         "packages/shared/src/contract.test.ts",
         "packages/cli/src/commands/pod.test.ts",
         "packages/mobile-web/src/components/DispatchPreflightPanel.test.tsx",
-        "packages/desktop/Tests/AutopodClientTests/DispatchPreflightTests.swift"
+        "packages/desktop/Tests/AutopodClientTests/DispatchPreflightTests.swift",
+        "packages/daemon/src/containers/cgroup-execution-metadata.test.ts",
+        "packages/daemon/src/containers/sandbox-container-manager.test.ts"
       ],
       "evidence": [
         "receipts/provenance-final-targeted-authorized.txt",
@@ -901,10 +913,16 @@
         "receipts/runtime-version-red.txt",
         "receipts/required-command-before-integration-red.txt",
         "receipts/execution-provenance-red.txt",
-        "receipts/provenance-migration-prefix.json"
+        "receipts/provenance-migration-prefix.json",
+        "receipts/validation-provenance-red.txt",
+        "receipts/sandbox-metadata-red.txt",
+        "receipts/validation-sandbox-provenance-affected.txt",
+        "receipts/recovery-provenance-e2e.txt",
+        "receipts/recovery-provenance-mobile-browser.json",
+        "receipts/recovery-provenance-swift-reviewed.txt"
       ],
       "prerequisites": [],
-      "remaining": "Main coding startup records immutable actual CLI/version, daemon build input identity, contract and available backend resources before runtime.spawn. Required launcher/resource gates are implemented locally. Metadata is bounded; unavailable values remain explicit. Validation-only/recovered completion and other resume paths still need provenance coverage; sandbox actual metadata and native/live acceptance remain unverified. Launcher availability does not prove repository script semantics."
+      "remaining": "Coding, validation/retry, review-only and completion recovery provenance are locally implemented. Sandbox effective cgroup resources are read without substituting requests; image and network identity remain unavailable. Every direct agent-resume path, actual reviewer CLI identity, complete receipt history/operator coverage, native interaction and live acceptance remain outstanding."
     },
     {
       "id": "W6.2",
@@ -1029,5 +1047,5 @@
       "prerequisites": []
     }
   ],
-  "lastCheckpoint": "checkpoint-9.md"
+  "lastCheckpoint": "checkpoint-10.md"
 }

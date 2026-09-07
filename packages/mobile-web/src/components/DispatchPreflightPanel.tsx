@@ -116,11 +116,12 @@ export function DispatchPreflightPanel({ pod }: { pod: Pod }) {
       {environment ? (
         <>
           <p>
-            Preflight {environment.status} · generation {environment.generation} ·{' '}
-            {environment.checkedAt}
+            {environment.purpose ?? 'coding'} preflight {environment.status} · generation{' '}
+            {environment.generation} · {environment.checkedAt}
           </p>
           <p>
-            {environment.runtime} CLI {environment.cliVersion ?? 'unverified'} · {environment.model}
+            Configured worker: {environment.runtime} CLI {environment.cliVersion ?? 'unverified'} ·{' '}
+            {environment.model}
           </p>
           <p>
             Daemon: {environment.release.commitSha ?? 'unverified'}
