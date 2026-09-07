@@ -386,6 +386,7 @@ function createMockRuntimeRegistry(runtime: Runtime): RuntimeRegistry {
 
 function createMockPrManager(): PrManager {
   return {
+    findPr: vi.fn(async () => null),
     createPr: vi.fn(async () => ({
       url: 'https://github.com/org/repo/pull/42',
       usedFallback: false,
@@ -12008,6 +12009,35 @@ describe('PodManager', () => {
       }
       return { manager, pod };
     }
+
+    it('reconciles a PR created before an ambiguous response across manager restart without another create', async () => {
+      const ctx = createTestContext();
+      const { manager, pod } = await setupCompletePodForRetry(ctx);
+      const url = 'https://github.com/org/repo/pull/42';
+      const lookup = vi
+        .fn()
+        .mockResolvedValueOnce(null)
+        .mockResolvedValue({ url, disposition: 'open' });
+      Object.assign(ctx.prManager, { findPr: lookup });
+      vi.mocked(ctx.prManager.createPr).mockRejectedValueOnce(
+        new Error('connection lost after provider accepted create'),
+      );
+      await expect(manager.retryCreatePr(pod.id)).rejects.toThrow();
+      const restarted = createPodManager(ctx.deps);
+      await restarted.retryCreatePr(pod.id);
+      expect(ctx.prManager.createPr).toHaveBeenCalledTimes(1);
+      expect(restarted.getSession(pod.id).prUrl).toBe(url);
+    });
+
+    it('does not repeat an ambiguous PR create when provider lookup cannot confirm a result', async () => {
+      const ctx = createTestContext();
+      const { manager, pod } = await setupCompletePodForRetry(ctx);
+      Object.assign(ctx.prManager, { findPr: vi.fn(async () => null) });
+      vi.mocked(ctx.prManager.createPr).mockRejectedValueOnce(new Error('response lost'));
+      await expect(manager.retryCreatePr(pod.id)).rejects.toThrow();
+      await expect(createPodManager(ctx.deps).retryCreatePr(pod.id)).rejects.toThrow(/reconcil/i);
+      expect(ctx.prManager.createPr).toHaveBeenCalledTimes(1);
+    });
 
     it('retry PR preserves an affected materialized sandbox branch without claiming validation', async () => {
       const ctx = createTestContext();

@@ -1,7 +1,8 @@
+import { createServer } from 'node:http';
 import { AutopodError } from '@autopod/shared';
 import { Command } from 'commander';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import type { AutopodClient } from '../api/client.js';
+import { AutopodClient } from '../api/client.js';
 import { registerPodCommands } from './pod.js';
 
 vi.mock('ora', () => ({
@@ -400,4 +401,89 @@ describe('update-from-base command', () => {
     expect(output).toContain('Readiness: pending/unavailable');
     logSpy.mockRestore();
   });
+});
+
+it('status command renders real HTTP delivery accounting and reused evidence, preserving JSON units', async () => {
+  const pod = await createMockClient().getSession('abcd1234');
+  const evidence = {
+    receiptId: 'local-receipt',
+    originalExecutedAt: '2026-09-07T10:00:00Z',
+    originalDurationMs: 1200,
+  };
+  const task = {
+    taskId: 'logical-root',
+    executionId: 'execution-fixture',
+    podCount: 2,
+    agentRunCount: 3,
+    providerAttemptCount: 4,
+    validationExecutionCount: 5,
+    recordedInputTokens: 90,
+    recordedOutputTokens: 10,
+    tokenBudget: 100,
+    recordedCostUsd: 1.25,
+    telemetry: 'partial',
+    diagnostics: [],
+    delivery: {
+      intentCount: 2,
+      receiptCount: 1,
+      unresolvedCount: 1,
+      scope: 'durable-receipts-only',
+    },
+  };
+  const paths: string[] = [];
+  const server = createServer((req, res) => {
+    paths.push(req.url ?? '');
+    expect(req.method).toBe('GET');
+    expect(req.headers.authorization).toBe('Bearer local-fixture-only');
+    res.setHeader('content-type', 'application/json');
+    if (req.url === '/pods/abcd1234/task-execution') res.end(JSON.stringify(task));
+    else if (req.url === '/pods/abcd1234')
+      res.end(
+        JSON.stringify({
+          ...pod,
+          lastValidationResult: { overall: 'pass', attempt: 1, test: { reusedEvidence: evidence } },
+        }),
+      );
+    else {
+      res.statusCode = 404;
+      res.end('{}');
+    }
+  });
+  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+  const address = server.address();
+  if (!address || typeof address === 'string') throw new Error('Missing fixture port');
+  const client = new AutopodClient({
+    baseUrl: `http://127.0.0.1:${address.port}`,
+    getToken: async () => 'local-fixture-only',
+  });
+  const log = vi.spyOn(console, 'log').mockImplementation(() => {});
+  const stdout = vi.spyOn(process.stdout, 'write').mockImplementation(() => true);
+  try {
+    const command = () => {
+      const program = new Command();
+      registerPodCommands(program, () => client);
+      return program;
+    };
+    await command().parseAsync(['node', 'ap', 'status', 'abcd1234']);
+    const output = log.mock.calls.map((call) => call.join(' ')).join('\n');
+    expect(output).toContain('1 confirmed, 1 unresolved of 2 intents');
+    expect(output).toContain('historical URLs excluded');
+    expect(output).toContain(
+      'test: reused receipt local-receipt; originally executed 2026-09-07T10:00:00Z (1200 ms)',
+    );
+    log.mockClear();
+    await command().parseAsync(['node', 'ap', 'status', 'abcd1234', '--json']);
+    const structured = JSON.parse(stdout.mock.calls.map((call) => String(call[0])).join(''));
+    expect(structured.taskExecution.delivery).toEqual(task.delivery);
+    expect(paths).toEqual([
+      '/pods/abcd1234',
+      '/pods/abcd1234/task-execution',
+      '/pods/abcd1234',
+      '/pods/abcd1234/task-execution',
+    ]);
+  } finally {
+    log.mockRestore();
+    stdout.mockRestore();
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+  }
 });

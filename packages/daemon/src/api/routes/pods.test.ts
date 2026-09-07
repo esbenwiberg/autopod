@@ -166,6 +166,12 @@ describe('GET /pods/:podId provider-attempt projection', () => {
     expect(response.statusCode).toBe(200);
     expect(response.json()).toMatchObject({
       rootPodId: 'task-accounting',
+      delivery: {
+        intentCount: 0,
+        receiptCount: 0,
+        unresolvedCount: 0,
+        scope: 'durable-receipts-only',
+      },
       podCount: 1,
       recordedInputTokens: 9,
       recordedOutputTokens: 1,

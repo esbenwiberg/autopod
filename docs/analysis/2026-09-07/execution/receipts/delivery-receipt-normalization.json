@@ -1,0 +1,86 @@
+[
+  {
+    "file": "delivery-build.txt",
+    "originalSha256": "b49136022046f23f5a924b0aa20b93162c66f8bc5fb705022a3dcf5510119c0a",
+    "normalizedSha256": "6c178e52348a5b65bbda7a10b57507b283912571ef672e73560cda07a7126488",
+    "transformation": "strip trailing line whitespace and retain one final newline; no substantive output changes"
+  },
+  {
+    "file": "delivery-reconciliation.txt",
+    "originalSha256": "ae376619450cab10167d88698503bc0b733cbaf2c82842009c7e8faa9838427b",
+    "normalizedSha256": "e17656a109c7e1e94dc6af817bd929dd33fdb47901440e9d48797594ed1adcc4",
+    "transformation": "strip trailing line whitespace and retain one final newline; no substantive output changes"
+  },
+  {
+    "file": "delivery-final-affected.txt",
+    "originalSha256": "12e016109350b38c03ee2cb29a8240dd0b2418a2e5aa84162c1af8944636cc52",
+    "normalizedSha256": "fd3bded216602ce98d9048d6a5c4ea88b4460d29128da51bcee678afcf364336",
+    "transformation": "strip trailing line whitespace and retain one final newline; no substantive output changes"
+  },
+  {
+    "file": "delivery-cli-http.txt",
+    "originalSha256": "c55818ff2117b09040f74ab4290dc58f256f6a964efe4fc67f9639030363f61f",
+    "normalizedSha256": "41cd36b8fb2cb4880eadc7415a262c0318ecaa1a6a1f26079eaef5656705d911",
+    "transformation": "strip trailing line whitespace and retain one final newline; no substantive output changes"
+  },
+  {
+    "file": "delivery-lifecycle.txt",
+    "originalSha256": "f004e98b85722769c898e4f0ef855da657b95c3eb4bb511a2dd509b1843ba029",
+    "normalizedSha256": "5875d8e0ea09415efd35610976dd10dd4a7881bc0846caa6be3f6a7cb5f0c49a",
+    "transformation": "strip trailing line whitespace and retain one final newline; no substantive output changes"
+  },
+  {
+    "file": "delivery-mobile.txt",
+    "originalSha256": "df95815ccd7ffa26dfec6a1a7da1d9dff4b1bde0d096d19a4b079608e347afe6",
+    "normalizedSha256": "bc0fa51725fe625a11732872e2e45fa769c167fac7b94cd2122b0ec64cdb8090",
+    "transformation": "strip trailing line whitespace and retain one final newline; no substantive output changes"
+  },
+  {
+    "file": "delivery-github-api.txt",
+    "originalSha256": "0c3c9797b4f664e730da53e861dd1a55b7cce6a97385ef0b5e7cd03675154b2e",
+    "normalizedSha256": "aa2c2e9ff623351395cf21f0ee868a85a773b60db5c963e2f93a66c16357b495",
+    "transformation": "strip trailing line whitespace and retain one final newline; no substantive output changes"
+  },
+  {
+    "file": "delivery-swift.txt",
+    "originalSha256": "0a30405305beabb3e8c2c6e30891153075151e6337ba57ff4e20f202cb342a63",
+    "normalizedSha256": "674b29da386a1a62c61de5c85f88021f26e10cc059d03a7ecf3111c88b793c0c",
+    "transformation": "strip trailing line whitespace and retain one final newline; no substantive output changes"
+  },
+  {
+    "file": "delivery-manager-red.txt",
+    "originalSha256": "be39f5e2cd4c11b86c3a8bbee1b57640469a45892090bb9b76c5aa02060bd81c",
+    "normalizedSha256": "7cfaf7891bfa375e5539900c430b3078933d743cc1f4125da110755242d1b4a3",
+    "transformation": "strip trailing line whitespace and retain one final newline; no substantive output changes"
+  },
+  {
+    "file": "delivery-manager-green.txt",
+    "originalSha256": "c3c536bad870cefbb523b95c0c9d455b27c0ab931a21c29d486007db200d0cbc",
+    "normalizedSha256": "9c85320d763930015b2c186675d09674a3ebacbf1eb406422bf30004d8b21ff0",
+    "transformation": "strip trailing line whitespace and retain one final newline; no substantive output changes"
+  },
+  {
+    "file": "delivery-receipts-observations.txt",
+    "originalSha256": "63e989f075af7cb44d78df71906fbb089471865bb7b4f6420984151359ffba72",
+    "normalizedSha256": "8b67fdcbaa59f24424a9b264bb5c2db615725f6e0ee95760657f9c861b985a7c",
+    "transformation": "strip trailing line whitespace and retain one final newline; no substantive output changes"
+  },
+  {
+    "file": "delivery-operator-build.txt",
+    "originalSha256": "47e4f273f12997caf7f1fe81b43a1c4eb76f7196cc5f8bd57e585ad51ce869a1",
+    "normalizedSha256": "ed79d17ffd5b69626507390f7c8ed60091c0284629348348823896eba9afc8e1",
+    "transformation": "strip trailing line whitespace and retain one final newline; no substantive output changes"
+  },
+  {
+    "file": "delivery-cli-http-fixed.txt",
+    "originalSha256": "751cd14ca35c3b9e0c82c43d78ad0538b3f2b36f5e7319693681c2d1e3a4de59",
+    "normalizedSha256": "9d36797b2af566b209409db5216f9b46a28fa5758021404829905a055eafc210",
+    "transformation": "strip trailing line whitespace and retain one final newline; no substantive output changes"
+  },
+  {
+    "file": "delivery-build-final.txt",
+    "originalSha256": "5ce0d2061076ff7c576123a039ce117730c0cf568724ae9d60c1cf9190592236",
+    "normalizedSha256": "6996956bd6f33fee5007eba13cf9a2c5db73e3d221d56231b7917d634459101c",
+    "transformation": "strip trailing line whitespace and retain one final newline; no substantive output changes"
+  }
+]

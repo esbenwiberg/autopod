@@ -1,0 +1,17 @@
+{
+  "scope": "actual built mobile bundle against isolated local HTTP fixture; not production or physical phone",
+  "sourceHead": "d16ca42f with delivery and note wrapping changes",
+  "fixture": "fixtures/mobile-server.mjs",
+  "viewport": {
+    "width": 390,
+    "height": 844
+  },
+  "observed": [
+    "Opened pending pod; task accounting showed 1 delivery receipt and 1 unresolved of 2 intents with explicit historical exclusion",
+    "Expanded previous attempt: durable Validation 12 attempt 1 cycle 2 pass and Validation 11 attempt 1 cycle 1 fail both remained visible",
+    "Reused evidence retained original receipt local-evidence-1 and timestamp; zero pages shown as skipped",
+    "Found clipped receipt text on narrow viewport; changed validation notes to wrap; rebuilt, reloaded, expanded and visually verified full receipt and timestamp readable",
+    "Unanswered human decision remained visible and no response was submitted"
+  ],
+  "cleanup": "viewport reset, temporary tab closed, local fixture stopped"
+}

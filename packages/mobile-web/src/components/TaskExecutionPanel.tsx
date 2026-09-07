@@ -35,6 +35,16 @@ export function TaskExecutionPanel({ podId, revision }: { podId: string; revisio
             validations
           </p>
           <p>
+            {data.delivery
+              ? `${data.delivery.receiptCount} delivery receipts · ${data.delivery.unresolvedCount} unresolved of ${data.delivery.intentCount} intents`
+              : 'Delivery receipts unavailable.'}
+          </p>
+          {data.delivery && (
+            <p className="muted">
+              Durable ledger only; historical PR URLs are not reconstructed receipts.
+            </p>
+          )}
+          <p>
             Recorded tokens: {data.recordedInputTokens + data.recordedOutputTokens} /{' '}
             {data.tokenBudget ?? 'no configured limit'}
           </p>

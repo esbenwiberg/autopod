@@ -2,6 +2,15 @@ import { readFile } from 'node:fs/promises';
 import { createServer } from 'node:http';
 import { extname, resolve } from 'node:path';
 const dist = resolve('packages/mobile-web/dist');
+const successfulValidation = {
+  podId: 'local-fixture', attempt: 1, timestamp: '2026-09-07T10:10:00Z', overall: 'pass', duration: 100,
+  smoke: { status: 'pass', build: { status: 'pass', output: '', duration: 100 }, health: { status: 'skip', url: '', responseCode: null, duration: 0 }, pages: [] },
+  test: { status: 'pass', duration: 0, output: '', reusedEvidence: { receiptId: 'local-evidence-1', identityHash: 'a'.repeat(64), originalPodId: 'local-original', originalExecutedAt: '2026-09-07T09:00:00Z', originalDurationMs: 1200 } }, taskReview: null,
+};
+const validationHistory = [
+  { id: 'v11', podId: 'local-fixture', attempt: 1, sequence: 11, cycle: 0, createdAt: '2026-09-07T09:00:00Z', result: { ...successfulValidation, overall: 'fail', timestamp: '2026-09-07T09:00:00Z', test: { status: 'fail', duration: 1200, output: 'Seeded defect detected' } } },
+  { id: 'v12', podId: 'local-fixture', attempt: 1, sequence: 12, cycle: 1, createdAt: successfulValidation.timestamp, result: successfulValidation },
+];
 let pod = {
   id: 'local-fixture',
   profileName: 'local-fixture',
@@ -14,7 +23,7 @@ let pod = {
   updatedAt: '2026-09-07T10:10:00Z',
   validationAttempts: 0,
   maxValidationAttempts: 3,
-  lastValidationResult: null,
+  lastValidationResult: successfulValidation,
   skipValidation: false,
   escalationCount: 1,
   recordDiagnostics: [{ field: 'lastValidationResult', code: 'invalid_json' }],
@@ -69,12 +78,13 @@ const server = createServer(async (req, res) => {
       recordedCostUsd: 1.25,
       infrastructureCostUsd: null,
       telemetry: 'partial',
+      delivery: { intentCount: 2, receiptCount: 1, unresolvedCount: 1, scope: 'durable-receipts-only' },
       diagnostics: ['Infrastructure cost unavailable'],
     });
   if (req.method === 'GET' && pathname === '/pods') return json([pod]);
   if (req.method === 'GET' && pathname === '/pods/local-fixture') return json(pod);
-  if (req.method === 'GET' && /\/pods\/local-fixture\/(events|validations)$/.test(pathname))
-    return json([]);
+  if (req.method === 'GET' && pathname === '/pods/local-fixture/validations') return json(validationHistory);
+  if (req.method === 'GET' && pathname === '/pods/local-fixture/events') return json([]);
   if (req.method === 'POST' && pathname === '/pods/local-fixture/message') {
     let body = '';
     for await (const chunk of req) body += chunk;

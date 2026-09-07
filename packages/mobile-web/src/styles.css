@@ -652,11 +652,11 @@ code {
 }
 
 .validation-note {
+  grid-column: 1 / -1;
   color: var(--muted);
   font-size: 0.78rem;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  overflow-wrap: anywhere;
+  white-space: normal;
 }
 
 .activity-section {

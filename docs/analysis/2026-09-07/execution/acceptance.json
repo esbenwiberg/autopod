@@ -56,16 +56,24 @@
       "status": "partial",
       "implementation": [
         "packages/daemon/src/db/migrations/142_completion_journal.sql",
-        "packages/daemon/src/pods/completion-journal.ts"
+        "packages/daemon/src/pods/completion-journal.ts",
+        "packages/daemon/src/db/migrations/145_delivery_intents.sql",
+        "packages/daemon/src/pods/delivery-ledger.ts",
+        "packages/daemon/src/worktrees/durable-pr-manager.ts"
       ],
       "tests": [
-        "packages/daemon/src/pods/completion-journal.test.ts"
+        "packages/daemon/src/pods/completion-journal.test.ts",
+        "packages/daemon/src/worktrees/durable-pr-manager.test.ts",
+        "packages/daemon/src/pods/pod-manager.test.ts"
       ],
       "evidence": [
-        "receipts/journal-migration.txt"
+        "receipts/journal-migration.txt",
+        "receipts/delivery-manager-red.txt",
+        "receipts/delivery-manager-green.txt",
+        "receipts/delivery-final-affected.txt"
       ],
       "prerequisites": [
-        "Journal is implemented; delivery side-effect intent/reconciliation/idempotency remains unfinished."
+        "PR creation intent/reconciliation implemented locally; broader finalization side effects and operator override remain."
       ]
     },
     {
@@ -171,7 +179,8 @@
         "receipts/validation-cache-engine-red.txt",
         "receipts/validation-cache-engine-green.txt",
         "receipts/checkpoint-4-affected.txt",
-        "receipts/validation-replay-isolation-gate.txt"
+        "receipts/validation-replay-isolation-gate.txt",
+        "receipts/delivery-mobile-browser.json"
       ],
       "prerequisites": [],
       "remaining": "Local exact-input reuse proved; actual Docker/supported operator interaction and exact final source verification remain. Complete hermetic read set is an explicit contract obligation."
@@ -347,18 +356,24 @@
       "implementation": [
         "packages/daemon/src/pods/reliability-aggregator.ts",
         "packages/daemon/src/pods/validation-coverage.ts",
-        "packages/daemon/src/pods/models-aggregator.ts"
+        "packages/daemon/src/pods/models-aggregator.ts",
+        "packages/daemon/src/pods/delivery-ledger.ts",
+        "packages/daemon/src/pods/task-execution-ledger.ts"
       ],
       "tests": [
         "packages/daemon/src/pods/reliability-aggregator.test.ts",
-        "packages/daemon/src/pods/models-aggregator.test.ts"
+        "packages/daemon/src/pods/models-aggregator.test.ts",
+        "packages/daemon/src/worktrees/durable-pr-manager.test.ts"
       ],
       "evidence": [
         "receipts/analytics-regression.txt",
         "receipts/delivery-dedup-red.txt",
-        "receipts/model-dedup-green.txt"
+        "receipts/model-dedup-green.txt",
+        "receipts/delivery-receipts-observations.txt",
+        "receipts/delivery-final-affected.txt"
       ],
-      "prerequisites": []
+      "prerequisites": [],
+      "remaining": "Distinct task receipt counts now use durable unique PR evidence; historical analytics still use explicitly labelled legacy URL measures. Wider outcome/denominator reconciliation remains."
     },
     {
       "id": "W4.4",
@@ -373,7 +388,8 @@
       "evidence": [
         "receipts/mobile-evidence-history-red.txt",
         "receipts/mobile-evidence-history-green.txt",
-        "receipts/checkpoint-4-mobile.txt"
+        "receipts/checkpoint-4-mobile.txt",
+        "receipts/delivery-mobile-browser.json"
       ],
       "prerequisites": [],
       "remaining": "Mobile preserves sequence history and unmatched latest snapshot; backend waiver/history and durable delivery reconciliation remain."
@@ -468,7 +484,10 @@
         "receipts/task-cli-tests.txt",
         "receipts/task-mobile-tests.txt",
         "receipts/task-mobile-browser-interaction.json",
-        "receipts/task-desktop-tests.txt"
+        "receipts/task-desktop-tests.txt",
+        "receipts/delivery-mobile-browser.json",
+        "receipts/delivery-cli-http-fixed.txt",
+        "receipts/delivery-swift-fixed.txt"
       ],
       "prerequisites": [
         "Selected mobile flows and new health CLI have local interaction proof. Desktop has compilation and tests only. Remaining operator flows, physical device and live evidence are outstanding."

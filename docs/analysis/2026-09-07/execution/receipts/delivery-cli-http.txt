@@ -1,0 +1,82 @@
+
+ RUN  v4.1.10 /private/tmp/autopod-durable-execution/packages/cli
+
+{
+  "id": "abcd1234",
+  "profileName": "test",
+  "task": "do things",
+  "status": "validated",
+  "model": "opus",
+  "runtime": "claude",
+  "branch": "ap/abcd1234",
+  "containerId": "ctr1",
+  "worktreePath": null,
+  "validationAttempts": 1,
+  "maxValidationAttempts": 3,
+  "lastValidationResult": {
+    "overall": "pass",
+    "attempt": 1,
+    "test": {
+      "reusedEvidence": {
+        "receiptId": "local-receipt",
+        "originalExecutedAt": "2026-09-07T10:00:00Z",
+        "originalDurationMs": 1200
+      }
+    }
+  },
+  "pendingEscalation": null,
+  "escalationCount": 0,
+  "skipValidation": false,
+  "createdAt": "2024-01-01T00:00:00Z",
+  "startedAt": "2024-01-01T00:00:01Z",
+  "completedAt": null,
+  "updatedAt": "2024-01-01T00:00:01Z",
+  "userId": "user1",
+  "filesChanged": 5,
+  "linesAdded": 100,
+  "linesRemoved": 20,
+  "previewUrl": null,
+  "readinessReview": null,
+  "taskExecution": {
+    "taskId": "logical-root",
+    "executionId": "execution-fixture",
+    "podCount": 2,
+    "agentRunCount": 3,
+    "providerAttemptCount": 4,
+    "validationExecutionCount": 5,
+    "recordedInputTokens": 90,
+    "recordedOutputTokens": 10,
+    "tokenBudget": 100,
+    "recordedCostUsd": 1.25,
+    "telemetry": "partial",
+    "diagnostics": [],
+    "delivery": {
+      "intentCount": 2,
+      "receiptCount": 1,
+      "unresolvedCount": 1,
+      "scope": "durable-receipts-only"
+    }
+  }
+}
+ ❯ src/commands/pod.test.ts (19 tests | 1 failed) 39ms
+   × status command renders real HTTP delivery accounting and reused evidence, preserving JSON units 19ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/commands/pod.test.ts > status command renders real HTTP delivery accounting and reused evidence, preserving JSON units
+SyntaxError: "undefined" is not valid JSON
+ ❯ src/commands/pod.test.ts:475:29
+    473|     log.mockClear();
+    474|     await command().parseAsync(['node', 'ap', 'status', 'abcd1234', '-…
+    475|     const structured = JSON.parse(String(log.mock.calls[0]?.[0]));
+       |                             ^
+    476|     expect(structured.taskExecution.delivery).toEqual(task.delivery);
+    477|     expect(paths).toEqual([
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 18 passed (19)
+   Start at  13:12:09
+   Duration  366ms (transform 111ms, setup 0ms, import 228ms, tests 39ms, environment 0ms)

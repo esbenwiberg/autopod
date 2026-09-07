@@ -9,6 +9,13 @@ export interface TaskExecutionSummary {
   transientFailureCount: number;
   providerAttemptCount: number;
   validationExecutionCount: number;
+  /** Ledger-only counts; historical PR URLs are not reconstructed provider receipts. */
+  delivery?: {
+    intentCount: number;
+    receiptCount: number;
+    unresolvedCount: number;
+    scope: 'durable-receipts-only';
+  };
   tokenBudget: number | null;
   recordedInputTokens: number;
   recordedOutputTokens: number;

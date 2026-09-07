@@ -539,6 +539,11 @@ export function registerPodCommands(program: Command, getClient: () => AutopodCl
           `${chalk.bold('Task runs:')} ${task.agentRunCount} recorded agent runs, ${task.providerAttemptCount} provider attempts, ${task.validationExecutionCount} validations`,
         );
         console.log(
+          task.delivery
+            ? `${chalk.bold('Delivery receipts:')} ${task.delivery.receiptCount} confirmed, ${task.delivery.unresolvedCount} unresolved of ${task.delivery.intentCount} intents (durable ledger only; historical URLs excluded)`
+            : `${chalk.bold('Delivery receipts:')} unavailable`,
+        );
+        console.log(
           `${chalk.bold('Task tokens:')} ${task.recordedInputTokens + task.recordedOutputTokens}/${task.tokenBudget ?? 'no configured limit'}`,
         );
         console.log(

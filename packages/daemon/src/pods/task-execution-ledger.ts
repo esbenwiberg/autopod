@@ -174,6 +174,15 @@ export function createTaskExecutionLedger(db: Database.Database): TaskExecutionL
       JOIN task_executions e ON e.pod_id = r.pod_id WHERE e.task_id = ?`)
           .get(identity.taskId) as { n: number }
       ).n;
+    const delivery = db
+      .prepare(`SELECT COUNT(*) AS intentCount, COUNT(r.id) AS receiptCount,
+      COALESCE(SUM(CASE WHEN r.id IS NULL THEN 1 ELSE 0 END), 0) AS unresolvedCount
+      FROM delivery_intents i LEFT JOIN delivery_receipts r ON r.intent_id = i.id WHERE i.task_id = ?`)
+      .get(identity.taskId) as {
+      intentCount: number;
+      receiptCount: number;
+      unresolvedCount: number;
+    };
     const root = db
       .prepare('SELECT token_budget AS budget FROM pods WHERE id = ?')
       .get(identity.rootPodId) as { budget: number | null } | undefined;
@@ -186,6 +195,7 @@ export function createTaskExecutionLedger(db: Database.Database): TaskExecutionL
       tokenBudget: root?.budget ?? null,
       providerAttemptCount: count('provider_attempts'),
       validationExecutionCount: count('validations'),
+      delivery: { ...delivery, scope: 'durable-receipts-only' },
       recordedInputTokens,
       recordedOutputTokens,
       recordedCostUsd,

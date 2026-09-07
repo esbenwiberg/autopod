@@ -151,7 +151,16 @@ export interface CreatePrResult {
   narrativeUsedFallback?: boolean;
 }
 
+export interface FoundPr {
+  url: string;
+  disposition: 'open' | 'merged' | 'closed';
+}
+
 export interface PrManager {
+  /** Bounded, exact repository/head/base lookup across all dispositions. Errors are not absence. */
+  findPr?(
+    config: Pick<CreatePrConfig, 'worktreePath' | 'repoUrl' | 'branch' | 'baseBranch'>,
+  ): Promise<FoundPr | null>;
   createPr(config: CreatePrConfig): Promise<CreatePrResult>;
   mergePr(config: MergePrConfig): Promise<MergePrResult>;
   getPrStatus(config: { prUrl: string; worktreePath?: string }): Promise<PrMergeStatus>;

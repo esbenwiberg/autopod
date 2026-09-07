@@ -34,6 +34,12 @@ it('keeps unavailable accounting explicit and refreshes after a disconnected req
           tokenBudget: 100,
           recordedCostUsd: 1.25,
           telemetry: 'partial',
+          delivery: {
+            intentCount: 2,
+            receiptCount: 1,
+            unresolvedCount: 1,
+            scope: 'durable-receipts-only',
+          },
           diagnostics: ['Infrastructure cost unavailable'],
         }),
         { status: 200 },
@@ -49,6 +55,8 @@ it('keeps unavailable accounting explicit and refreshes after a disconnected req
     expect(container.textContent).toContain('Recorded tokens: 100 / 100');
     expect(container.textContent).toContain('$1.2500 · partial telemetry');
     expect(container.textContent).toContain('Infrastructure cost unavailable');
+    expect(container.textContent).toContain('1 delivery receipts · 1 unresolved of 2 intents');
+    expect(container.textContent).toContain('historical PR URLs are not reconstructed receipts');
     expect(fetch).toHaveBeenLastCalledWith('/pods/fix/task-execution', expect.anything());
   } finally {
     act(() => root.unmount());

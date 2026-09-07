@@ -157,6 +157,7 @@ import {
 import { buildValidationContextEnv } from '../validation/validation-context-env.js';
 import { createValidationIdentityCollector } from '../validation/validation-identity-collector.js';
 import { pushCommitsToBareViaStagingRef } from '../worktrees/bare-push.js';
+import { createDurablePrManagerFactory } from '../worktrees/durable-pr-manager.js';
 import { graftHostTreeOntoBase } from '../worktrees/graft-reconcile.js';
 import {
   DeletionGuardError,
@@ -1888,7 +1889,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
     validationEngine,
     networkManager,
     sidecarManager,
-    prManagerFactory,
+    prManagerFactory: rawPrManagerFactory,
     enqueueSession,
     clearStuckQueueEntry,
     mcpBaseUrl,
@@ -1903,6 +1904,10 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
     safetyEventsRepo,
     qualityScoreRepo,
   } = deps;
+  const prManagerFactory =
+    rawPrManagerFactory && podRepo.deliveryLedger
+      ? createDurablePrManagerFactory(podRepo.deliveryLedger, rawPrManagerFactory)
+      : rawPrManagerFactory;
   const hostFetchRetryTimers = new Map<string, ReturnType<typeof setTimeout>>();
 
   function scheduleHostFetchRetry(pod: Pod, error: GitTransientFetchError): void {

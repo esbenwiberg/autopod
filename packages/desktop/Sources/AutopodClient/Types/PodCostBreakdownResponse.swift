@@ -67,6 +67,7 @@ public struct TaskExecutionSummary: Codable, Equatable, Sendable {
   public let transientFailureCount: Int
   public let providerAttemptCount: Int
   public let validationExecutionCount: Int
+  public let delivery: TaskDeliverySummaryResponse?
   public let tokenBudget: Int?
   public let recordedInputTokens: Int
   public let recordedOutputTokens: Int
@@ -74,4 +75,11 @@ public struct TaskExecutionSummary: Codable, Equatable, Sendable {
   public let infrastructureCostUsd: Double?
   public let telemetry: String
   public let diagnostics: [String]
+}
+
+public struct TaskDeliverySummaryResponse: Codable, Equatable, Sendable {
+  public let intentCount: Int
+  public let receiptCount: Int
+  public let unresolvedCount: Int
+  public let scope: String
 }

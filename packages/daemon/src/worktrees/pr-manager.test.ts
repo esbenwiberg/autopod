@@ -42,6 +42,43 @@ describe('GhPrManager', () => {
     expect(manager).toBeDefined();
   });
 
+  it('looks up exact head/base across all states and refuses ambiguous or cross-repository matches', async () => {
+    const row = {
+      url: 'https://github.com/org/repo/pull/42',
+      state: 'MERGED',
+      headRefName: 'feature',
+      baseRefName: 'main',
+      isCrossRepository: false,
+    };
+    execResponses.push(
+      { stdout: JSON.stringify([row]), stderr: '' },
+      { stdout: JSON.stringify([row, row]), stderr: '' },
+      { stdout: JSON.stringify([{ ...row, isCrossRepository: true }]), stderr: '' },
+    );
+    const manager = new GhPrManager({ logger, githubAuth });
+    const config = {
+      worktreePath: '/tmp/worktree',
+      repoUrl: 'https://github.com/org/repo',
+      branch: 'feature',
+      baseBranch: 'main',
+    };
+    expect(await manager.findPr(config)).toEqual({ url: row.url, disposition: 'merged' });
+    expect(execCalls[0]?.[1]).toEqual(
+      expect.arrayContaining([
+        '--state',
+        'all',
+        '--head',
+        'feature',
+        '--base',
+        'main',
+        '--limit',
+        '2',
+      ]),
+    );
+    await expect(manager.findPr(config)).rejects.toThrow('ambiguous');
+    await expect(manager.findPr(config)).rejects.toThrow('exact');
+  });
+
   it('createPr returns trimmed PR URL with fallback metadata', async () => {
     execResponses.push({ stdout: 'https://github.com/org/repo/pull/42\n', stderr: '' });
     const manager = new GhPrManager({ logger, githubAuth });
@@ -464,6 +501,35 @@ function reviewThreadsResponse() {
 describe('GitHubApiPrManager', () => {
   beforeEach(() => {
     vi.unstubAllGlobals();
+  });
+
+  it('looks up exact repository/head/base with bounded authenticated GET and rejects errors as absence', async () => {
+    const row = {
+      html_url: 'https://github.com/org/repo/pull/42',
+      state: 'closed',
+      merged_at: '2026-09-07',
+      head: { ref: 'feature/a', repo: { full_name: 'org/repo' } },
+      base: { ref: 'main' },
+    };
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce({ ok: true, json: async () => [row] })
+      .mockResolvedValueOnce({ ok: false, status: 401 });
+    vi.stubGlobal('fetch', fetchMock);
+    const manager = new GitHubApiPrManager({ pat: 'local-token', logger });
+    const config = {
+      worktreePath: '/tmp/fixture',
+      repoUrl: 'https://github.com/org/repo',
+      branch: 'feature/a',
+      baseBranch: 'main',
+    };
+    expect(await manager.findPr(config)).toEqual({ url: row.html_url, disposition: 'merged' });
+    const [url, options] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(new URL(url).searchParams.get('head')).toBe('org:feature/a');
+    expect(new URL(url).searchParams.get('state')).toBe('all');
+    expect(new URL(url).searchParams.get('per_page')).toBe('2');
+    expect(options.headers).toMatchObject({ Authorization: 'Bearer local-token' });
+    await expect(manager.findPr(config)).rejects.toThrow('HTTP 401');
   });
 
   it('getPrStatus maps unresolved GraphQL review threads and skips resolved threads', async () => {

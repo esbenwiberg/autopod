@@ -218,10 +218,12 @@ export interface PodStats {
 }
 
 import { type CompletionJournal, createCompletionJournal } from './completion-journal.js';
+import { type DeliveryLedger, createDeliveryLedger } from './delivery-ledger.js';
 
 import { type TaskExecutionLedger, createTaskExecutionLedger } from './task-execution-ledger.js';
 
 export interface PodRepository {
+  deliveryLedger?: DeliveryLedger;
   taskExecutions?: TaskExecutionLedger;
   completionJournal?: CompletionJournal;
   insert(pod: NewPod): void;
@@ -632,6 +634,7 @@ export function createPodRepository(db: Database.Database): PodRepository {
 
   return {
     completionJournal,
+    deliveryLedger: createDeliveryLedger(db),
     taskExecutions,
     insert: db.transaction((pod: NewPod): void => {
       // Keep legacy output_mode and new pod columns in sync.

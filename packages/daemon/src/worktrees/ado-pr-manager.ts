@@ -4,6 +4,7 @@ import type {
   CiFailureDetail,
   CreatePrConfig,
   CreatePrResult,
+  FoundPr,
   MergePrConfig,
   MergePrResult,
   PrManager,
@@ -237,6 +238,45 @@ export class AdoPrManager implements PrManager {
     }
 
     return results;
+  }
+
+  async findPr(
+    config: Pick<CreatePrConfig, 'worktreePath' | 'repoUrl' | 'branch' | 'baseBranch'>,
+  ): Promise<FoundPr | null> {
+    const query = new URLSearchParams({
+      'api-version': '7.1',
+      'searchCriteria.status': 'all',
+      'searchCriteria.sourceRefName': `refs/heads/${config.branch}`,
+      'searchCriteria.targetRefName': `refs/heads/${config.baseBranch}`,
+      $top: '2',
+    });
+    const response = (await this.adoFetch(`/pullrequests?${query}`, {
+      signal: AbortSignal.timeout(30000),
+    })) as {
+      value?: Array<{
+        pullRequestId: number;
+        sourceRefName: string;
+        targetRefName: string;
+        status: string;
+      }>;
+    };
+    if (!Array.isArray(response?.value) || response.value.length > 1)
+      throw new Error('PR delivery lookup is ambiguous or malformed');
+    const row = response.value[0];
+    if (!row) return null;
+    if (
+      !Number.isSafeInteger(row.pullRequestId) ||
+      row.pullRequestId <= 0 ||
+      row.sourceRefName !== `refs/heads/${config.branch}` ||
+      row.targetRefName !== `refs/heads/${config.baseBranch}` ||
+      !['active', 'completed', 'abandoned'].includes(row.status)
+    )
+      throw new Error('PR delivery lookup did not confirm exact repository/head/base');
+    return {
+      url: `${this.orgUrl}/${encodeURIComponent(this.project)}/_git/${encodeURIComponent(this.repoName)}/pullrequest/${row.pullRequestId}`,
+      disposition:
+        row.status === 'active' ? 'open' : row.status === 'completed' ? 'merged' : 'closed',
+    };
   }
 
   async createPr(config: CreatePrConfig): Promise<CreatePrResult> {

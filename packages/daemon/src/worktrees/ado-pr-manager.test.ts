@@ -88,6 +88,61 @@ vi.mock('./pr-description-generator.js', () => ({
   }),
 }));
 
+describe('ADO delivery lookup', () => {
+  it('uses authenticated exact branch filters and distinguishes merged work without creating a PR', async () => {
+    const fetchMock = makeFetch([
+      {
+        ok: true,
+        body: {
+          value: [
+            {
+              pullRequestId: 42,
+              sourceRefName: 'refs/heads/feature/a',
+              targetRefName: 'refs/heads/main',
+              status: 'completed',
+            },
+          ],
+        },
+      },
+    ]);
+    vi.stubGlobal('fetch', fetchMock);
+    try {
+      const result = await new AdoPrManager(BASE_CONFIG).findPr({
+        worktreePath: '/tmp/local',
+        branch: 'feature/a',
+        baseBranch: 'main',
+      });
+      expect(result).toEqual({ url: PR_URL, disposition: 'merged' });
+      const [url, options] = fetchMock.mock.calls[0] as [string, RequestInit];
+      const params = new URL(url).searchParams;
+      expect(params.get('searchCriteria.status')).toBe('all');
+      expect(params.get('searchCriteria.sourceRefName')).toBe('refs/heads/feature/a');
+      expect(params.get('$top')).toBe('2');
+      expect(options.headers).toMatchObject({ Authorization: 'Bearer daemon-entra-token' });
+      expect(options.method).not.toBe('POST');
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+  it('does not treat malformed or unauthorized lookup as an absent PR', async () => {
+    vi.stubGlobal(
+      'fetch',
+      makeFetch([
+        { ok: true, body: {} },
+        { ok: false, status: 401, body: {} },
+      ]),
+    );
+    try {
+      const manager = new AdoPrManager(BASE_CONFIG);
+      const config = { worktreePath: '/tmp/local', branch: 'feature', baseBranch: 'main' };
+      await expect(manager.findPr(config)).rejects.toThrow('malformed');
+      await expect(manager.findPr(config)).rejects.toThrow();
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+});
+
 describe('parseAdoRepoUrl', () => {
   it('parses dev.azure.com URL', () => {
     const result = parseAdoRepoUrl('https://dev.azure.com/myorg/MyProject/_git/MyRepo');

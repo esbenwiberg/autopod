@@ -6,6 +6,7 @@ import type {
   CiFailureDetail,
   CreatePrConfig,
   CreatePrResult,
+  FoundPr,
   MergePrConfig,
   MergePrResult,
   PrManager,
@@ -296,6 +297,47 @@ export class GhPrManager implements PrManager {
     const { GH_TOKEN: _ambientGh, GITHUB_TOKEN: _ambientGitHub, ...hostEnv } = process.env;
     const env = { ...hostEnv, GH_TOKEN: credential.token };
     return execFileAsync('gh', args, { ...options, env });
+  }
+
+  async findPr(
+    config: Pick<CreatePrConfig, 'worktreePath' | 'repoUrl' | 'branch' | 'baseBranch'>,
+  ): Promise<FoundPr | null> {
+    const { stdout } = await this.execGh(
+      [
+        'pr',
+        'list',
+        '--state',
+        'all',
+        '--head',
+        config.branch,
+        '--base',
+        config.baseBranch,
+        '--limit',
+        '2',
+        '--json',
+        'url,state,headRefName,baseRefName,isCrossRepository',
+        ...(config.repoUrl ? ['--repo', config.repoUrl] : []),
+      ],
+      { cwd: config.worktreePath, timeout: 30000 },
+    );
+    const rows = JSON.parse(stdout);
+    if (!Array.isArray(rows) || rows.length > 1)
+      throw new Error('PR delivery lookup is ambiguous or malformed');
+    if (!rows.length) return null;
+    const row = rows[0];
+    if (
+      !row ||
+      typeof row.url !== 'string' ||
+      row.headRefName !== config.branch ||
+      row.baseRefName !== config.baseBranch ||
+      row.isCrossRepository !== false ||
+      !['OPEN', 'MERGED', 'CLOSED'].includes(row.state)
+    )
+      throw new Error('PR delivery lookup did not confirm exact repository/head/base');
+    return {
+      url: row.url,
+      disposition: row.state === 'OPEN' ? 'open' : row.state === 'MERGED' ? 'merged' : 'closed',
+    };
   }
 
   async createPr(config: CreatePrConfig): Promise<CreatePrResult> {
@@ -696,6 +738,42 @@ export class GitHubApiPrManager implements PrManager {
       Accept: 'application/vnd.github+json',
       'X-GitHub-Api-Version': '2022-11-28',
       'Content-Type': 'application/json',
+    };
+  }
+
+  async findPr(
+    config: Pick<CreatePrConfig, 'worktreePath' | 'repoUrl' | 'branch' | 'baseBranch'>,
+  ): Promise<FoundPr | null> {
+    if (!config.repoUrl) throw new Error('repoUrl is required for delivery lookup');
+    const { owner, repo } = parseGitHubRepoUrl(config.repoUrl);
+    const query = new URLSearchParams({
+      state: 'all',
+      head: `${owner}:${config.branch}`,
+      base: config.baseBranch,
+      per_page: '2',
+    });
+    const response = await fetch(`https://api.github.com/repos/${owner}/${repo}/pulls?${query}`, {
+      headers: this.headers,
+      signal: AbortSignal.timeout(30000),
+    });
+    if (!response.ok) throw new Error(`PR delivery lookup failed (HTTP ${response.status})`);
+    const rows = await response.json();
+    if (!Array.isArray(rows) || rows.length > 1)
+      throw new Error('PR delivery lookup is ambiguous or malformed');
+    if (!rows.length) return null;
+    const row = rows[0];
+    if (
+      !row ||
+      typeof row.html_url !== 'string' ||
+      row.head?.ref !== config.branch ||
+      row.base?.ref !== config.baseBranch ||
+      row.head?.repo?.full_name?.toLowerCase() !== `${owner}/${repo}`.toLowerCase() ||
+      !['open', 'closed'].includes(row.state)
+    )
+      throw new Error('PR delivery lookup did not confirm exact repository/head/base');
+    return {
+      url: row.html_url,
+      disposition: row.state === 'open' ? 'open' : row.merged_at ? 'merged' : 'closed',
     };
   }
 
