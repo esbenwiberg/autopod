@@ -4507,6 +4507,125 @@ describe('PodManager', () => {
     });
   });
 
+  describe('merge poll lifecycle', () => {
+    it.each(['pr-replaced', 'complete-reopened'] as const)(
+      'does not publish a merge when the same generation is %s',
+      async (step) => {
+        vi.useFakeTimers();
+        try {
+          const ctx = createTestContext();
+          const manager = createPodManager(ctx.deps);
+          const pod = manager.createSession(
+            { profileName: 'test-profile', task: 'Reconcile current PR' },
+            'user-1',
+          );
+          ctx.podRepo.update(pod.id, {
+            status: 'merge_pending',
+            prUrl: 'https://github.com/org/repo/pull/42',
+            containerId: 'poll-container',
+          });
+          const completed: string[] = [];
+          ctx.eventBus.subscribe((event) => {
+            if (
+              step === 'complete-reopened' &&
+              event.type === 'pod.status_changed' &&
+              event.newStatus === 'complete'
+            )
+              ctx.podRepo.update(pod.id, { status: 'merge_pending' });
+            if (event.type === 'pod.completed') completed.push(event.podId);
+          });
+          vi.mocked(ctx.prManager.getPrStatus).mockImplementationOnce(async () => {
+            if (step === 'pr-replaced')
+              ctx.podRepo.update(pod.id, { prUrl: 'https://github.com/org/repo/pull/43' });
+            return {
+              merged: true,
+              open: false,
+              blockReason: null,
+              ciFailures: [],
+              reviewComments: [],
+            };
+          });
+          createPodManager(ctx.deps);
+          await vi.advanceTimersByTimeAsync(0);
+          expect(manager.getSession(pod.id).status).toBe('merge_pending');
+          expect(completed).toEqual([]);
+          if (step === 'pr-replaced') expect(ctx.containerManager.kill).not.toHaveBeenCalled();
+        } finally {
+          vi.useRealTimers();
+        }
+      },
+    );
+    it.each(['merged', 'closed', 'open', 'cleanup', 'complete-callback'] as const)(
+      'preserves a replacement lifecycle after a late poll %s',
+      async (step) => {
+        vi.useFakeTimers();
+        try {
+          const ctx = createTestContext();
+          const manager = createPodManager(ctx.deps);
+          const pod = manager.createSession(
+            { profileName: 'test-profile', task: 'Fence late poll' },
+            'user-1',
+          );
+          ctx.podRepo.update(pod.id, {
+            status: 'merge_pending',
+            prUrl: 'https://github.com/org/repo/pull/42',
+            worktreePath: '/tmp/old-poll',
+            containerId: 'old-poll-container',
+          });
+          const replace = () => {
+            ctx.podRepo.incrementLifecycleGeneration(pod.id);
+            ctx.podRepo.update(pod.id, {
+              status: 'running',
+              containerId: 'new-poll-container',
+              worktreePath: '/tmp/new-poll',
+              mergeBlockReason: 'Replacement reason',
+            });
+          };
+          if (step === 'cleanup')
+            ctx.deps.beforeContainerCleanup = async () => {
+              replace();
+            };
+          const completed: string[] = [];
+          ctx.eventBus.subscribe((event) => {
+            if (
+              step === 'complete-callback' &&
+              event.type === 'pod.status_changed' &&
+              event.newStatus === 'complete'
+            )
+              replace();
+            if (event.type === 'pod.completed') completed.push(event.podId);
+          });
+          vi.mocked(ctx.prManager.getPrStatus).mockImplementationOnce(async () => {
+            if (['merged', 'closed', 'open'].includes(step)) replace();
+            return {
+              merged: !['closed', 'open'].includes(step),
+              open: step === 'open',
+              blockReason: 'Old status',
+              ciFailures: [],
+              reviewComments: [],
+              reviewDecision: 'APPROVED',
+            };
+          });
+          createPodManager(ctx.deps);
+          await vi.advanceTimersByTimeAsync(0);
+          expect(manager.getSession(pod.id)).toMatchObject({
+            status: 'running',
+            containerId: 'new-poll-container',
+            worktreePath: '/tmp/new-poll',
+            mergeBlockReason: 'Replacement reason',
+          });
+          expect(ctx.containerManager.kill).not.toHaveBeenCalledWith('new-poll-container');
+          if (step !== 'complete-callback')
+            expect(ctx.containerManager.kill).not.toHaveBeenCalled();
+          expect(ctx.prManager.mergePr).not.toHaveBeenCalled();
+          expect(completed).toEqual([]);
+        } finally {
+          vi.useRealTimers();
+        }
+      },
+    );
+  });
+
   describe('approveSession', () => {
     it('records human automation and Podsitter actors', async () => {
       const cases = [

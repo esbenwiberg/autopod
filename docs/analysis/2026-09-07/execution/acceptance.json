@@ -57,7 +57,8 @@
         "receipts/checkpoint-23-validation-identity.json",
         "checkpoint-28.md: approval push failure preservation, restart retry, stale generation and late decision regressions, API/CLI/mobile/native client checks; broader durable finalization and native interaction remain",
         "checkpoint-29.md: original approval identity retained across approved/merging/complete status callbacks; broader durable approval and event delivery remain partial",
-        "checkpoint-30.md: retained failed approval delivery, explicit HTTP error/retry, review gate and original lifecycle guards; wider durability remains partial"
+        "checkpoint-30.md: retained failed approval delivery, explicit HTTP error/retry, review gate and original lifecycle guards; wider durability remains partial",
+        "checkpoint-31.md: late merge-poller lifecycle and PR identity guards; overlapping ticks and durable cross-process receipts remain partial"
       ],
       "prerequisites": [],
       "remaining": "Normal replies are atomic, retained in bounded recovery context, and fence older completion events. New unanswered decisions remain actionable. Attached MCP delivery acknowledgment, delayed concurrent stream ordering, other response boundaries, historical orphan questions and broader finalization side effects remain. New worker/cycle and validation admission now preserve pending decisions, including older unresolved cycles in the current generation. Historical missing payload recovery and stream/MCP delivery acknowledgment remain. Codex now observes summary events before Spawn/Resume launch and disposes each invocation listener. This closes the local launch/stream attachment race, not durable delivery acknowledgment across all runtimes or daemon restart. Concurrent interactive completions now coalesce in process, conflicting promotion/generation requests fail closed, and current source/lifecycle/decision ownership is checked across push and container release boundaries. This is not durable cross-process idempotency, cancellation of already-dispatched external operations, or complete post-completion side-effect accounting."
@@ -216,7 +217,8 @@
         "receipts/checkpoint-23-validation-identity.json",
         "checkpoint-28.md: approval push failure preservation, restart retry, stale generation and late decision regressions, API/CLI/mobile/native client checks; broader durable finalization and native interaction remain",
         "checkpoint-29.md: original approval identity retained across approved/merging/complete status callbacks; broader durable approval and event delivery remain partial",
-        "checkpoint-30.md: retained failed approval delivery, explicit HTTP error/retry, review gate and original lifecycle guards; wider durability remains partial"
+        "checkpoint-30.md: retained failed approval delivery, explicit HTTP error/retry, review gate and original lifecycle guards; wider durability remains partial",
+        "checkpoint-31.md: late merge-poller lifecycle and PR identity guards; overlapping ticks and durable cross-process receipts remain partial"
       ],
       "prerequisites": [
         "PR creation intent/reconciliation implemented locally; broader finalization side effects and operator override remain."
@@ -1628,5 +1630,5 @@
       "prerequisites": []
     }
   ],
-  "lastCheckpoint": "checkpoint-30.md"
+  "lastCheckpoint": "checkpoint-31.md"
 }

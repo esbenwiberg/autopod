@@ -4317,11 +4317,12 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
   /** Start polling PR merge status for a pod in merge_pending state. */
   function startMergePolling(podId: string): void {
     stopMergePolling(podId);
+    const generation = podRepo.getOrThrow(podId).lifecycleGeneration;
 
     const poll = async () => {
       try {
         const pod = podRepo.getOrThrow(podId);
-        if (pod.status !== 'merge_pending') {
+        if (pod.status !== 'merge_pending' || pod.lifecycleGeneration !== generation) {
           stopMergePolling(podId);
           return;
         }
@@ -4331,6 +4332,31 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           return;
         }
 
+        const assertCurrent = (
+          options: { allowRemovedContainer?: boolean; status?: PodStatus } = {},
+        ) => {
+          assertApprovalCurrent(
+            { ...pod, status: options.status ?? pod.status },
+            { allowRemovedContainer: options.allowRemovedContainer },
+          );
+          if (podRepo.getOrThrow(podId).prUrl !== pod.prUrl)
+            throw new AutopodError(
+              'Merge polling was superseded by another PR.',
+              'STALE_APPROVAL',
+              409,
+            );
+        };
+        const pollOperation = async <T>(operation: () => Promise<T>): Promise<T> => {
+          assertCurrent();
+          try {
+            return await operation();
+          } finally {
+            assertCurrent();
+          }
+        };
+        const pollCredential = (profile: Profile) =>
+          pollOperation(() => resolveGitCredential(profile));
+        assertCurrent();
         const profile = profileStore.get(pod.profileName);
         const prManager = prManagerFactory ? prManagerFactory(profile) : null;
         if (!prManager) {
@@ -4338,18 +4364,24 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           return;
         }
 
-        const status = await prManager.getPrStatus({
-          prUrl: pod.prUrl,
-        });
+        const status = await pollOperation(async () =>
+          prManager.getPrStatus({
+            prUrl: pod.prUrl,
+          }),
+        );
 
         if (status.merged) {
           emitActivityStatus(podId, 'PR merged successfully');
-          await cleanupContainer(pod, 'pr-merged-complete');
+          await cleanupContainer(pod, 'pr-merged-complete', 'kill', () =>
+            assertCurrent({ allowRemovedContainer: true }),
+          );
+          assertCurrent({ allowRemovedContainer: true });
           const mergedPod = transition(pod, 'complete', {
             completedAt: new Date().toISOString(),
             mergeBlockReason: null,
           });
 
+          assertCurrent({ allowRemovedContainer: true, status: 'complete' });
           eventBus.emit({
             type: 'pod.completed',
             timestamp: new Date().toISOString(),
@@ -4369,6 +4401,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           });
 
           logger.info({ podId, prUrl: pod.prUrl }, 'Merge polling: PR merged — pod complete');
+          assertCurrent({ allowRemovedContainer: true, status: 'complete' });
           stopMergePolling(podId);
           maybeTriggerDependents(mergedPod);
           return;
@@ -4379,11 +4412,13 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
             podId,
             `PR closed without merging: ${status.blockReason ?? 'unknown reason'}`,
           );
+          assertCurrent();
           transition(pod, 'failed', { mergeBlockReason: status.blockReason });
           logger.warn(
             { podId, prUrl: pod.prUrl, reason: status.blockReason },
             'Merge polling: PR closed — pod failed',
           );
+          assertCurrent({ status: 'failed' });
           stopMergePolling(podId);
           return;
         }
@@ -4405,13 +4440,14 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         // 391 rows across ~46h. Skip the enqueue when the latest queued summary
         // is byte-identical to the one we'd add. A new failure signature still
         // gets through.
+        assertCurrent();
         if (status.ciFailures.length > 0 || status.reviewComments.length > 0) {
           const summary = buildActionableFailureSummary(status, profile);
           const latest = fixFeedbackRepo.peekLatest(podId);
           if (latest?.message !== summary) {
             fixFeedbackRepo.enqueue(podId, summary);
           }
-          await maybeSpawnFixSession(podId, status);
+          await pollOperation(async () => maybeSpawnFixSession(podId, status));
         } else {
           // PR is clean — actively re-attempt the merge so the poller is not
           // purely observational. The `status.merged` branch above handles the
@@ -4422,10 +4458,11 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
             const prUrl = pod.prUrl;
             try {
               await mergeQueue.enqueueMerge(profile.repoUrl ?? null, baseBranch, async () => {
-                const result = await prManager.mergePr({ prUrl });
+                const result = await pollOperation(async () => prManager.mergePr({ prUrl }));
                 if (result.merged) emitActivityStatus(podId, 'PR merged by poller');
               });
             } catch (err) {
+              assertCurrent();
               logger.debug({ err, podId }, 'Merge poller active merge attempt failed');
             }
           }
@@ -4441,8 +4478,9 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         // same base never race.
         if (pod.worktreePath && pod.branch) {
           try {
-            await access(pod.worktreePath);
+            await pollOperation(async () => access(pod.worktreePath));
           } catch (err) {
+            assertCurrent();
             const code = (err as NodeJS.ErrnoException).code;
             if (code === 'ENOENT' || code === 'ENOTDIR') {
               logger.info(
@@ -4465,11 +4503,14 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
             const worktreePath = pod.worktreePath;
             const branch = pod.branch;
             await mergeQueue.run(queueKey, async () => {
-              const result = await worktreeManager.rebaseOntoBase({
-                worktreePath,
-                baseBranch,
-                pat: await resolveGitCredential(profile),
-              });
+              assertCurrent();
+              const result = await pollOperation(async () =>
+                worktreeManager.rebaseOntoBase({
+                  worktreePath,
+                  baseBranch,
+                  pat: await pollCredential(profile),
+                }),
+              );
               if (!result.rebased) {
                 const blockReason = formatRebaseConflictReason(baseBranch, result.conflicts);
                 if (blockReason !== pod.mergeBlockReason) {
@@ -4483,10 +4524,12 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
                 return;
               }
               if (!result.alreadyUpToDate) {
-                await worktreeManager.pushBranch(worktreePath, branch, {
-                  force: true,
-                  pat: await resolveGitCredential(profile),
-                });
+                await pollOperation(async () =>
+                  worktreeManager.pushBranch(worktreePath, branch, {
+                    force: true,
+                    pat: await pollCredential(profile),
+                  }),
+                );
                 logger.info(
                   { podId, baseBranch },
                   'Merge poller: rebased stale branch and force-pushed onto latest base',
@@ -4494,6 +4537,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
               }
             });
           } catch (err) {
+            assertCurrent();
             logger.warn({ err, podId }, 'Merge poller self-heal rebase/push failed');
             emitActivityStatus(
               podId,
