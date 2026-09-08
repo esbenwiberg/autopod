@@ -104,3 +104,27 @@ it('does not retry uncertain mutation or emit error bodies; bounds downloads and
     ),
   ).toEqual({ body: {} });
 });
+
+it('does not declare a JSON body for bodyless artifact downloads', async () => {
+  const fetcher = vi.fn(async (_url: string | URL | Request, options?: RequestInit) => {
+    expect(options?.method).toBe('POST');
+    expect(options?.body).toBeUndefined();
+    expect(options?.headers).not.toHaveProperty('Content-Type');
+    return new Response('bundle');
+  });
+  await expect(
+    managedRequest(
+      binding,
+      binding.endpoint,
+      token(),
+      {
+        method: 'POST',
+        path: '/artifacts/artifact-one/download',
+        binary: true,
+        maximumBytes: 10,
+      },
+      fetcher,
+    ),
+  ).resolves.toEqual({ base64: Buffer.from('bundle').toString('base64') });
+  expect(fetcher).toHaveBeenCalledTimes(1);
+});
