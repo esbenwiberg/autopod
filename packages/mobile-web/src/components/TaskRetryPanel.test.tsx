@@ -195,3 +195,53 @@ it('shows remaining worker cooldown allowance with Resume and no required permis
     act(() => root.unmount());
   }
 });
+
+it.each([false, true])(
+  'shows duration coverage including missing completed records (legacy daemon: %s)',
+  async (legacy) => {
+    const state = {
+      taskId: 'task',
+      stage: 'worker',
+      admissionCount: 1,
+      executedCount: 1,
+      transientRetryCount: 0,
+      backoffsMs: [],
+      measuredDurationMs: legacy ? 0 : null,
+      interruptedCount: 0,
+      latest: { id: 'old', outcome: 'pass' },
+      authorizations: [],
+      telemetry: 'partial',
+      ...(!legacy
+        ? {
+            durationEvidence: {
+              measuredRecordCount: 0,
+              unavailableRecordCount: 1,
+              pendingRecordCount: 0,
+              basis: 'stage_elapsed_subtotal',
+              additiveAcrossStages: false,
+            },
+          }
+        : {}),
+    };
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(JSON.stringify(state)));
+    const container = document.createElement('div');
+    document.body.append(container);
+    const root = createRoot(container);
+    try {
+      await act(async () =>
+        root.render(
+          <TaskRetryPanel podId="old" revision="failed" status="failed" stage="worker" />,
+        ),
+      );
+      expect(container.textContent).toContain(
+        legacy ? 'Duration coverage unavailable from this daemon.' : '1 records without duration',
+      );
+      if (!legacy) expect(container.textContent).toContain('Measured duration unavailable');
+      expect(container.textContent).toContain('Stage durations can overlap; do not add them.');
+      expect(container.textContent).not.toContain('null ms');
+    } finally {
+      act(() => root.unmount());
+      container.remove();
+    }
+  },
+);

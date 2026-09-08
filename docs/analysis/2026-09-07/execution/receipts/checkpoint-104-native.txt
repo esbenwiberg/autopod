@@ -1,0 +1,197 @@
+[0/1] Planning build
+[1/1] Compiling plugin GenerateManual
+[2/2] Compiling plugin GenerateDoccReference
+Building for debugging...
+[2/10] Write sources
+[5/10] Write swift-version--58304C5D6DBC2206.txt
+[7/12] Compiling AutopodClient TaskRetryState.swift
+[8/13] Emitting module AutopodClient
+[9/13] Compiling AutopodClient DaemonAPI.swift
+[10/81] Compiling AutopodUI MockData.swift
+[11/81] Compiling AutopodUI Pod.swift
+[12/81] Compiling AutopodUI PodActions.swift
+[13/81] Compiling AutopodUI PreviewPoller.swift
+[14/81] Compiling AutopodUI Profile.swift
+[15/81] Compiling AutopodUI ProviderCatalogEditorLoader.swift
+[16/81] Compiling AutopodUI ProviderCatalogProfileOptions.swift
+[17/81] Compiling AutopodUI ProviderModelSaveEligibility.swift
+[18/88] Emitting module AutopodUI
+[19/88] Compiling AutopodUI SessionCostCard.swift
+[20/88] Compiling AutopodUI SessionQualityCard.swift
+[21/88] Compiling AutopodUI StatTile.swift
+[22/88] Compiling AutopodUI StatusDot.swift
+[23/88] Compiling AutopodUI TaskRetryCard.swift
+[24/88] Compiling AutopodUI MainView.swift
+[25/88] Compiling AutopodUI SidebarView.swift
+[26/88] Compiling AutopodUI DiffTab.swift
+[27/88] Compiling AutopodUI EvidenceTab.swift
+[28/88] Compiling AutopodUI MarkdownTab.swift
+[29/88] Compiling AutopodUI OverviewTab.swift
+[30/88] Compiling AutopodUI ReadinessTab.swift
+[31/88] Compiling AutopodUI RelatedEventsDebugSheet.swift
+[32/88] Compiling AutopodUI ReviewCouncilView.swift
+[33/88] Compiling AutopodUI PipelineNodeView.swift
+[34/88] Compiling AutopodUI PodActivityPanel.swift
+[35/88] Compiling AutopodUI SeriesListView.swift
+[36/88] Compiling AutopodUI SeriesPipelineView.swift
+[37/88] Compiling AutopodUI ActivityFeedList.swift
+[38/88] Compiling AutopodUI CostEvidenceView.swift
+[39/88] Compiling AutopodUI DispatchPreflightCard.swift
+[40/88] Compiling AutopodUI ProfileListView.swift
+[41/88] Compiling AutopodUI ProviderFailoverEditor.swift
+[42/88] Compiling AutopodUI CreateScheduledJobSheet.swift
+[43/88] Compiling AutopodUI EditScheduledJobSheet.swift
+[44/88] Compiling AutopodUI ScheduledJobRow.swift
+[45/88] Compiling AutopodUI ScheduledJobTemplateSheet.swift
+[46/88] Compiling AutopodUI ScheduledJobsView.swift
+[47/88] Compiling AutopodUI ReadinessReview.swift
+[48/88] Compiling AutopodUI ReviewCouncil.swift
+[49/88] Compiling AutopodUI RuntimeModelOptions.swift
+[50/88] Compiling AutopodUI AnalyticsCard.swift
+[51/88] Compiling AutopodUI AnalyticsRightPaneView.swift
+[52/88] Compiling AutopodUI AnalyticsView.swift
+[53/88] Compiling AutopodUI CostDrillView.swift
+[54/88] Compiling AutopodUI EscalationsDrillView.swift
+[55/88] Compiling AutopodUI HistoryView.swift
+[56/88] Compiling AutopodUI MemoryAnalyticsDrillView.swift
+[57/88] Compiling AutopodUI ModelsDrillView.swift
+[58/88] Compiling AutopodUI ModelsSimulator.swift
+[59/88] Compiling AutopodUI QualityDrillView.swift
+[60/88] Compiling AutopodUI ReliabilityDrillView.swift
+[61/88] Compiling AutopodUI SafetyDrillView.swift
+[62/88] Compiling AutopodUI ThroughputDrillView.swift
+[63/88] Compiling AutopodUI PodCardFinal.swift
+[64/88] Compiling AutopodUI CommandPalette.swift
+[65/88] Compiling AutopodUI CreatePodSheet.swift
+[66/88] Compiling AutopodUI CreateSeriesSheet.swift
+[67/88] Compiling AutopodUI SpawnDependentSheet.swift
+[68/88] Compiling AutopodUI ArtifactsTab.swift
+[69/88] Compiling AutopodUI DetailPanelView.swift
+[70/88] Compiling AutopodUI SpawnFixSheet.swift
+[71/88] Compiling AutopodUI SummaryTab.swift
+[72/88] Compiling AutopodUI TaskStructuredView.swift
+[73/88] Compiling AutopodUI TerminalTab.swift
+[74/88] Compiling AutopodUI ValidationTab.swift
+[75/88] Compiling AutopodUI FeatureDetailPanelView.swift
+[76/88] Compiling AutopodUI FeatureOverviewView.swift
+[77/88] Compiling AutopodUI SalesPitchView.swift
+[78/88] Compiling AutopodUI LogPopover.swift
+[79/88] Compiling AutopodUI LogStreamView.swift
+[80/88] Compiling AutopodUI MemoryManagementView.swift
+[81/88] Compiling AutopodUI InheritanceChip.swift
+[82/88] Compiling AutopodUI ProfileEditorView.swift
+[83/88] Compiling AutopodUI ProfileFieldCatalog.swift
+[84/126] Compiling AutopodDesktop ProfileStore.swift
+[85/126] Compiling AutopodDesktop ScheduledJobStore.swift
+[86/128] Compiling AutopodUITests ValidationHistoryRefreshTests.swift
+[87/129] Compiling AutopodDesktop EntraDesktopAuthService.swift
+[88/129] Compiling AutopodDesktop NotificationService.swift
+[89/129] Compiling AutopodDesktop ProfileAuthenticator.swift
+[90/129] Compiling AutopodUITests ValidationHistoryIdentityTests.swift
+[91/129] Emitting module AutopodDesktop
+[92/129] Compiling AutopodDesktop PodStore.swift
+[93/129] Compiling AutopodDesktop PodsitterStore.swift
+[94/129] Compiling AutopodDesktop TerminalManager.swift
+[95/129] Compiling AutopodDesktop AppRootView.swift
+[96/129] Compiling AutopodDesktop MenuBarView.swift
+[97/129] Compiling AutopodDesktop PodsitterSettingsView.swift
+[100/129] Compiling AutopodDesktop EventStream.swift
+[101/129] Compiling AutopodDesktop MemoryStore.swift
+[102/129] Compiling AutopodDesktop ActionHandler.swift
+[103/129] Compiling AutopodDesktop ConnectionManager.swift
+[104/129] Compiling AutopodUITests ValidationProgressTests.swift
+[105/129] Compiling AutopodDesktop SettingsView.swift
+[106/129] Compiling AutopodDesktop SetupSheet.swift
+[115/129] Compiling AutopodDesktop PodMapper.swift
+[116/129] Compiling AutopodDesktop ProfileMapper.swift
+[117/129] Compiling AutopodDesktop ProviderAccountsCatalogFailure.swift
+[119/129] Emitting module AutopodUITests
+[120/129] Compiling AutopodDesktop ProviderAccountsSettingsView.swift
+[121/129] Compiling AutopodDesktop ScanInboxView.swift
+[125/165] Compiling AutopodDesktopTests ProviderAccountsCatalogFailureTests.swift
+[126/165] Compiling AutopodDesktopExe AutopodApp.swift
+[127/165] Emitting module AutopodDesktopExe
+[127/165] Write Objects.LinkFileList
+[129/165] Compiling AutopodDesktopTests ProfileAuthenticatorTests.swift
+[130/165] Emitting module AutopodDesktopTests
+[131/165] Compiling AutopodDesktopTests PodsitterStoreTests.swift
+[132/165] Compiling AutopodClientTests EventStreamResyncTests.swift
+[133/165] Compiling AutopodClientTests FactWaiverRefreshTests.swift
+[134/165] Compiling AutopodClientTests MemoryResponseTests.swift
+[135/168] Emitting module AutopodClientTests
+[136/168] Compiling AutopodClientTests EscalationsAnalyticsResponseTests.swift
+[137/168] Compiling AutopodClientTests EventSocketControlMessageTests.swift
+[138/168] Compiling AutopodClientTests EventStreamDedupeTests.swift
+[138/168] Linking AutopodDesktopExe
+[139/168] Applying AutopodDesktopExe
+[141/168] Compiling AutopodClientTests ReviewProgressStateTests.swift
+[142/168] Compiling AutopodClientTests SafetyAnalyticsResponseTests.swift
+[143/168] Compiling AutopodClientTests ScheduledScanTests.swift
+[144/168] Compiling AutopodClientTests PodsitterAPITests.swift
+[145/168] Compiling AutopodClientTests ProfileMapperTests.swift
+[146/168] Compiling AutopodClientTests QualityAnalyticsResponseTests.swift
+[147/168] Compiling AutopodClientTests ReliabilityAnalyticsResponseTests.swift
+[148/168] Compiling AutopodClientTests RetainedAnalyticsTests.swift
+[149/168] Compiling AutopodClientTests RetryDurationEvidenceTests.swift
+[150/168] Compiling AutopodClientTests TaskRetryClientTests.swift
+[151/168] Compiling AutopodClientTests ThroughputAnalyticsResponseTests.swift
+[152/168] Compiling AutopodClientTests UnverifiedTerminationActionTests.swift
+[153/168] Compiling AutopodClientTests PodCostBreakdownResponseTests.swift
+[154/168] Compiling AutopodClientTests PodMapperTests.swift
+[155/168] Compiling AutopodClientTests PodStoreFleetTests.swift
+[156/168] Compiling AutopodClientTests ActionAuditResponseTests.swift
+[157/168] Compiling AutopodClientTests AnalyticsCardKindTests.swift
+[158/168] Compiling AutopodClientTests AnalyticsWiringTests.swift
+[159/168] Compiling AutopodClientTests ApprovalPreservationTests.swift
+[160/168] Compiling AutopodClientTests ConnectionTests.swift
+/private/tmp/autopod-durable-execution/packages/desktop/Tests/AutopodClientTests/DaemonAPITests.swift:14:13: warning: no 'async' operations occur within 'await' expression
+ 12 |     token: "test-token"
+ 13 |   )
+ 14 |   let url = await api.baseURL
+    |             `- warning: no 'async' operations occur within 'await' expression
+ 15 |   #expect(url.absoluteString == "http://localhost:3000")
+ 16 | }
+[161/168] Compiling AutopodClientTests CostAnalyticsResponseTests.swift
+/private/tmp/autopod-durable-execution/packages/desktop/Tests/AutopodClientTests/DaemonAPITests.swift:14:13: warning: no 'async' operations occur within 'await' expression
+ 12 |     token: "test-token"
+ 13 |   )
+ 14 |   let url = await api.baseURL
+    |             `- warning: no 'async' operations occur within 'await' expression
+ 15 |   #expect(url.absoluteString == "http://localhost:3000")
+ 16 | }
+[162/168] Compiling AutopodClientTests DaemonAPITests.swift
+/private/tmp/autopod-durable-execution/packages/desktop/Tests/AutopodClientTests/DaemonAPITests.swift:14:13: warning: no 'async' operations occur within 'await' expression
+ 12 |     token: "test-token"
+ 13 |   )
+ 14 |   let url = await api.baseURL
+    |             `- warning: no 'async' operations occur within 'await' expression
+ 15 |   #expect(url.absoluteString == "http://localhost:3000")
+ 16 | }
+[163/168] Compiling AutopodClientTests DispatchPreflightTests.swift
+/private/tmp/autopod-durable-execution/packages/desktop/Tests/AutopodClientTests/DaemonAPITests.swift:14:13: warning: no 'async' operations occur within 'await' expression
+ 12 |     token: "test-token"
+ 13 |   )
+ 14 |   let url = await api.baseURL
+    |             `- warning: no 'async' operations occur within 'await' expression
+ 15 |   #expect(url.absoluteString == "http://localhost:3000")
+ 16 | }
+[164/168] Compiling AutopodClientTests MemoryStoreTests.swift
+[165/168] Compiling AutopodClientTests ModelsAnalyticsResponseTests.swift
+[166/168] Compiling AutopodClientTests PipelineDAGLayoutTests.swift
+[166/168] Write Objects.LinkFileList
+[167/168] Linking AutopodDesktopPackageTests
+Build complete! (78.83s)
+Test Suite 'Selected tests' started at 2026-09-08 22:35:10.642.
+Test Suite 'AutopodDesktopPackageTests.xctest' started at 2026-09-08 22:35:10.652.
+Test Suite 'AutopodDesktopPackageTests.xctest' passed at 2026-09-08 22:35:10.652.
+	 Executed 0 tests, with 0 failures (0 unexpected) in 0.000 (0.000) seconds
+Test Suite 'Selected tests' passed at 2026-09-08 22:35:10.652.
+	 Executed 0 tests, with 0 failures (0 unexpected) in 0.000 (0.010) seconds
+◇ Test run started.
+↳ Testing Library Version: 1902
+↳ Target Platform: arm64e-apple-macos14.0
+◇ Test retryDurationEvidenceRemainsUnavailableWhenMissing(legacy:) started.
+◇ Test case passing 1 argument legacy → false to retryDurationEvidenceRemainsUnavailableWhenMissing(legacy:) started.
+◇ Test case passing 1 argument legacy → true to retryDurationEvidenceRemainsUnavailableWhenMissing(legacy:) started.
+✔ Test retryDurationEvidenceRemainsUnavailableWhenMissing(legacy:) with 2 test cases passed after 0.003 seconds.
+✔ Test run with 1 test in 0 suites passed after 0.003 seconds.

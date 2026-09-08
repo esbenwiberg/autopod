@@ -47,7 +47,15 @@ export interface TaskRetryState {
   admissionCount: number;
   executedCount: number;
   transientRetryCount: number;
-  measuredDurationMs: number;
+  /** Sum of valid recorded elapsed values for this stage; null if the subtotal is unsafe. */
+  measuredDurationMs: number | null;
+  durationEvidence?: {
+    measuredRecordCount: number;
+    unavailableRecordCount: number;
+    pendingRecordCount: number;
+    basis: 'stage_elapsed_subtotal';
+    additiveAcrossStages: false;
+  };
   interruptedCount: number;
   latest: TaskRetryAttempt | null;
   authorizations: TaskRetryAuthorization[];

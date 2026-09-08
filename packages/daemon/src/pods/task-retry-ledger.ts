@@ -80,10 +80,10 @@ export function createTaskRetryLedger(
         : stage === 'worker'
           ? 'worker'
           : 'Codex interruption recovery';
-  const membership = (podId: string) => {
+  const membership = (podId: string, includeRetained = false) => {
     const row = db
       .prepare(`SELECT e.task_id AS taskId, e.execution_id AS executionId, p.lifecycle_generation AS generation
-      FROM task_executions e JOIN pods p ON p.id = e.pod_id WHERE e.pod_id = ?`)
+      FROM ${includeRetained ? 'retained_task_executions' : 'task_executions'} e JOIN ${includeRetained ? 'retained_pods' : 'pods'} p ON p.id = e.pod_id WHERE e.pod_id = ?`)
       .get(podId) as { taskId: string; executionId: string; generation: number } | undefined;
     if (!row)
       throw new TaskRetryBlockedError(
@@ -116,7 +116,13 @@ export function createTaskRetryLedger(
     startedAt: row.started_at as string | null,
     endedAt: row.ended_at as string | null,
     outcome: row.outcome as TaskRetryOutcome | null,
-    measuredDurationMs: row.measured_duration_ms as number | null,
+    measuredDurationMs:
+      row.started_at !== null &&
+      typeof row.measured_duration_ms === 'number' &&
+      Number.isSafeInteger(row.measured_duration_ms) &&
+      row.measured_duration_ms >= 0
+        ? row.measured_duration_ms
+        : null,
   });
   const authorization = (row: Record<string, unknown>): TaskRetryAuthorization => ({
     id: row.id as string,
@@ -134,14 +140,20 @@ export function createTaskRetryLedger(
   const authorizationSelect =
     'SELECT a.*, u.attempt_id FROM task_retry_authorizations a LEFT JOIN task_retry_authorization_uses u ON u.authorization_id = a.id';
   const state = (podId: string, workerRunId?: string): TaskRetryState => {
-    const { taskId } = membership(podId);
+    const { taskId } = membership(podId, true);
     if (stage === 'worker') retainWorkerRetryHistory(db, taskId, workerRunId);
     const policy = db
       .prepare(`SELECT backoffs FROM task_retry_policies WHERE task_id = ? AND stage = '${stage}'`)
       .get(taskId) as { backoffs: string } | undefined;
+    const validDuration =
+      "started_at IS NOT NULL AND typeof(measured_duration_ms) = 'integer' AND measured_duration_ms BETWEEN 0 AND 9007199254740991";
     const counts = db
       .prepare(`SELECT COUNT(*) AS admissions, SUM(started_at IS NOT NULL) AS executions,
-      SUM(retry_kind = 'transient') AS retries, SUM(COALESCE(measured_duration_ms, 0)) AS duration,
+      SUM(retry_kind = 'transient') AS retries,
+      SUM(CASE WHEN ${validDuration} THEN CAST(measured_duration_ms AS REAL) ELSE 0 END) AS duration,
+      SUM(CASE WHEN ${validDuration} THEN 1 ELSE 0 END) AS measured,
+      SUM(CASE WHEN started_at IS NULL AND ended_at IS NULL THEN 1 ELSE 0 END) AS pending,
+      SUM(CASE WHEN (started_at IS NOT NULL OR ended_at IS NOT NULL) AND NOT COALESCE(${validDuration},0) THEN 1 ELSE 0 END) AS unavailable,
       SUM(outcome = 'unknown' AND ('${stage}' <> 'worker' OR EXISTS (SELECT 1 FROM retained_task_agent_runs r WHERE r.id = task_retry_attempts.id AND r.ended_at IS NULL))) AS interrupted FROM task_retry_attempts WHERE task_id = ? AND stage = '${stage}'`)
       .get(taskId) as Record<string, number | null>;
     const last = latest(taskId);
@@ -158,7 +170,16 @@ export function createTaskRetryLedger(
       admissionCount: counts.admissions ?? 0,
       executedCount: counts.executions ?? 0,
       transientRetryCount: counts.retries ?? 0,
-      measuredDurationMs: counts.duration ?? 0,
+      measuredDurationMs: Number.isSafeInteger(counts.duration ?? 0)
+        ? (counts.duration ?? 0)
+        : null,
+      durationEvidence: {
+        measuredRecordCount: counts.measured ?? 0,
+        unavailableRecordCount: counts.unavailable ?? 0,
+        pendingRecordCount: counts.pending ?? 0,
+        basis: 'stage_elapsed_subtotal',
+        additiveAcrossStages: false,
+      },
       interruptedCount: counts.interrupted ?? 0,
       latest: last ? attempt(last) : null,
       authorizations: decisions.map(authorization),

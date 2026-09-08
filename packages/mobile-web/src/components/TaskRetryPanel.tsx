@@ -129,8 +129,16 @@ export function TaskRetryPanel({
           <p>
             {stage !== 'codex_interruption' &&
               `${state.transientRetryCount} / ${state.backoffsMs?.length ?? 0} ${stage === 'worker' ? 'transient retry admissions' : 'automatic transient retries'} · `}
-            {state.measuredDurationMs} ms measured · {state.interruptedCount} interrupted with
-            unknown duration.
+            {state.measuredDurationMs === null
+              ? 'Measured duration unavailable'
+              : `${state.measuredDurationMs} ms measured`}{' '}
+            · {state.interruptedCount} interrupted with unknown duration.
+          </p>
+          <p>
+            {state.durationEvidence
+              ? `${state.durationEvidence.measuredRecordCount} measured records; ${state.durationEvidence.unavailableRecordCount} records without duration; ${state.durationEvidence.pendingRecordCount} pending.`
+              : 'Duration coverage unavailable from this daemon.'}{' '}
+            Stage durations can overlap; do not add them.
           </p>
           {stage === 'codex_interruption' && (
             <p>

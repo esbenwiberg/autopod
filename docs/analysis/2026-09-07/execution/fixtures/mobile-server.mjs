@@ -281,8 +281,12 @@ const workerDeadlineFixture = process.env.FIXTURE_MODE === 'worker-deadline';
 const workerTransientFixture =
   process.env.FIXTURE_MODE === 'worker-transient' || workerDeadlineFixture;
 const workerUnknownFixture = process.env.FIXTURE_MODE === 'worker-unknown';
+const durationEvidenceFixture = process.env.FIXTURE_MODE === 'duration-evidence';
 const workerAuthFixture =
-  process.env.FIXTURE_MODE === 'worker-auth' || workerTransientFixture || workerUnknownFixture;
+  process.env.FIXTURE_MODE === 'worker-auth' ||
+  workerTransientFixture ||
+  workerUnknownFixture ||
+  durationEvidenceFixture;
 if (workerAuthFixture) {
   pod = {
     ...pod,
@@ -307,6 +311,28 @@ if (workerAuthFixture) {
     interruptedCount: 0,
     authorizationRequired: true,
     latest: { id: 'local-unstarted-retry', outcome: 'unknown', startedAt: null },
+  });
+}
+if (durationEvidenceFixture) {
+  pod = {
+    ...pod,
+    task: '[Local fixture] Retain missing worker duration',
+    failureReason: 'Validation evidence remains unavailable.',
+  };
+  Object.assign(retryState, {
+    admissionCount: 1,
+    executedCount: 1,
+    measuredDurationMs: 0,
+    interruptedCount: 0,
+    authorizationRequired: false,
+    latest: { id: 'completed-legacy', outcome: 'pass' },
+    durationEvidence: {
+      measuredRecordCount: 0,
+      unavailableRecordCount: 1,
+      pendingRecordCount: 0,
+      basis: 'stage_elapsed_subtotal',
+      additiveAcrossStages: false,
+    },
   });
 }
 if (workerUnknownFixture) {
@@ -596,6 +622,13 @@ const server = createServer(async (req, res) => {
         stage,
         backoffsMs: null,
         admissionCount: 0,
+        durationEvidence: {
+          measuredRecordCount: 0,
+          unavailableRecordCount: 0,
+          pendingRecordCount: 0,
+          basis: 'stage_elapsed_subtotal',
+          additiveAcrossStages: false,
+        },
         executedCount: 0,
         transientRetryCount: 0,
         measuredDurationMs: 0,

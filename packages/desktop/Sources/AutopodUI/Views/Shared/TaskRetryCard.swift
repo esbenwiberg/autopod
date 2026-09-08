@@ -29,11 +29,12 @@ struct TaskRetryCard: View {
               "\(state.executedCount) executed / \(state.admissionCount) admitted \(stage == "codex_interruption" ? "Codex interruption recoveries" : stage == "validation" ? "validations" : stage == "worker" ? "worker runs" : "sandbox startups") across this task"
             )
             Text(
-              (stage == "codex_interruption") ? "\(state.measuredDurationMs) ms measured" : "\(state.transientRetryCount) / \(state.backoffsMs?.count ?? 0) \(stage == "worker" ? "transient retry admissions" : "automatic transient retries") · \(state.measuredDurationMs) ms measured"
+              (stage == "codex_interruption") ? state.measuredDurationDescription : "\(state.transientRetryCount) / \(state.backoffsMs?.count ?? 0) \(stage == "worker" ? "transient retry admissions" : "automatic transient retries") · \(state.measuredDurationDescription)"
             )
             Text(
               "\(state.interruptedCount) interrupted with unknown duration · \(state.telemetry) telemetry"
             )
+            Text(state.durationEvidenceDescription)
             if stage == "codex_interruption" { Text("One automatic inner recovery per logical task; further recoveries require recorded human authorization. Duration overlaps the enclosing agent run; usage is not counted again.") }
             if stage == "worker" { Text("Repeated worker failures with unknown causes or rejected authentication require a recorded human authorization. Classified throttling and provider outages use the persisted task allowance and cooldown. Worker elapsed time overlaps phase measurements; usage is not counted again.") }
             if stage == "worker", let deadline = state.latest?.providerRetryNotBefore { Text("Provider retry not before: \(deadline)") }

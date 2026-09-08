@@ -1310,3 +1310,63 @@ it.each(['nudge', 'tell'] as const)(
     }
   },
 );
+
+it.each([false, true])(
+  'renders unavailable duration evidence through retry-state HTTP (legacy daemon: %s)',
+  async (legacy) => {
+    const state = {
+      taskId: 'task',
+      stage: 'worker',
+      admissionCount: 1,
+      executedCount: 1,
+      transientRetryCount: 0,
+      backoffsMs: [],
+      measuredDurationMs: legacy ? 0 : null,
+      interruptedCount: 0,
+      latest: { id: 'old', outcome: 'pass' },
+      authorizations: [],
+      telemetry: 'partial',
+      ...(!legacy
+        ? {
+            durationEvidence: {
+              measuredRecordCount: 0,
+              unavailableRecordCount: 1,
+              pendingRecordCount: 0,
+              basis: 'stage_elapsed_subtotal',
+              additiveAcrossStages: false,
+            },
+          }
+        : {}),
+    };
+    const requests: string[] = [];
+    const server = createServer((req, res) => {
+      requests.push(`${req.method} ${req.url}`);
+      res.setHeader('Content-Type', 'application/json');
+      res.end(JSON.stringify(state));
+    });
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+    const address = server.address();
+    if (!address || typeof address === 'string') throw new Error('Missing port');
+    const client = new AutopodClient({
+      baseUrl: `http://127.0.0.1:${address.port}`,
+      getToken: async () => 'synthetic',
+    });
+    const output = vi.spyOn(console, 'log').mockImplementation(() => {});
+    try {
+      const program = new Command();
+      registerPodCommands(program, () => client);
+      await program.parseAsync(['node', 'ap', 'retry-state', 'abcd1234', '--stage', 'worker']);
+      const text = output.mock.calls.flat().join('\n');
+      expect(text).toContain(
+        legacy ? 'Duration coverage unavailable from this daemon.' : '1 records without duration',
+      );
+      if (!legacy) expect(text).toContain('Measured duration unavailable');
+      expect(text).toContain('Stage durations can overlap; do not add them.');
+      expect(text).not.toContain('null ms');
+      expect(requests.every((r) => r.startsWith('GET '))).toBe(true);
+    } finally {
+      output.mockRestore();
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+  },
+);

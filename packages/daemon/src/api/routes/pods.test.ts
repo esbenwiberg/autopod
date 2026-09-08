@@ -3333,6 +3333,7 @@ describe('POST /pods/:podId/spawn-fix', () => {
     app = await createServer({
       authModule,
       podManager,
+      podRepo,
       profileStore,
       eventBus,
       eventRepo,
@@ -3417,6 +3418,41 @@ describe('POST /pods/:podId/spawn-fix', () => {
       message: expect.stringContaining('sidecars'),
     });
     expect(repo.getOrThrow(podId).sidecarContainerIds).toEqual({ database: 'owned-sidecar' });
+  });
+
+  it('reads retained retry duration coverage after pod deletion without allowing new admission', async () => {
+    const podId = insertMergePendingPod();
+    const repo = createPodRepository(db);
+    repo.taskExecutions?.register(podId);
+    db.prepare(`INSERT INTO task_retry_attempts(id,task_id,pod_id,execution_id,generation,stage,identity,binding_hash,admitted_at,not_before,started_at,ended_at,outcome)
+      SELECT 'legacy-duration',task_id,pod_id,execution_id,1,'validation','{}','binding','2026-09-08','2026-09-08','2026-09-08','2026-09-08','pass' FROM task_executions WHERE pod_id=?`).run(
+      podId,
+    );
+    repo.delete(podId);
+    const response = await app.inject({
+      method: 'GET',
+      url: `/pods/${podId}/retry-state`,
+      headers: authHeaders,
+    });
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toMatchObject({
+      measuredDurationMs: 0,
+      durationEvidence: {
+        measuredRecordCount: 0,
+        unavailableRecordCount: 1,
+        pendingRecordCount: 0,
+        additiveAcrossStages: false,
+      },
+    });
+    expect(() =>
+      repo.taskRetries?.admit(
+        podId,
+        1,
+        { source: null, contract: null, commands: null, environment: null, implementation: null },
+        'a'.repeat(64),
+        [],
+      ),
+    ).toThrow('identity unavailable');
   });
 
   it('rejects Delete and Rework through HTTP while a durable deletion attempt is unresolved', async () => {

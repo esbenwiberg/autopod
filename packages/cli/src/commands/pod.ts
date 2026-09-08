@@ -354,7 +354,12 @@ export function registerPodCommands(program: Command, getClient: () => AutopodCl
             'One automatic inner recovery per logical task; further recoveries require recorded human authorization. These durations overlap the enclosing agent run; usage is not counted again.',
           );
         console.log(
-          `${value.stage === 'codex_interruption' ? '' : `${value.transientRetryCount}/${value.backoffsMs?.length ?? 0} ${value.stage === 'worker' ? 'transient retry admissions' : 'automatic transient retries'}; `}${value.measuredDurationMs} ms measured; ${value.interruptedCount} interrupted with unknown duration`,
+          `${value.stage === 'codex_interruption' ? '' : `${value.transientRetryCount}/${value.backoffsMs?.length ?? 0} ${value.stage === 'worker' ? 'transient retry admissions' : 'automatic transient retries'}; `}${value.measuredDurationMs === null ? 'Measured duration unavailable' : `${value.measuredDurationMs} ms measured`}; ${value.interruptedCount} interrupted with unknown duration`,
+        );
+        console.log(
+          value.durationEvidence
+            ? `${value.durationEvidence.measuredRecordCount} measured records; ${value.durationEvidence.unavailableRecordCount} records without duration; ${value.durationEvidence.pendingRecordCount} pending. Stage durations can overlap; do not add them.`
+            : 'Duration coverage unavailable from this daemon. Stage durations can overlap; do not add them.',
         );
         console.log(
           `Latest outcome: ${value.latest?.outcome ?? 'none'}; telemetry: ${value.telemetry}`,
