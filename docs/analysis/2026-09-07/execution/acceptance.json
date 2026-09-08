@@ -755,12 +755,8 @@
       "id": "W2.7",
       "requirement": "Matched reproducible benchmark measures 25 percent target and seeded defect escape with fixed coverage; local and live separated",
       "status": "partial",
-      "implementation": [
-        "docs/analysis/2026-09-07/execution/benchmarks/validation-replay.test.ts"
-      ],
-      "tests": [
-        "docs/analysis/2026-09-07/execution/benchmarks/validation-replay.test.ts"
-      ],
+      "implementation": ["docs/analysis/2026-09-07/execution/benchmarks/validation-replay.test.ts"],
+      "tests": ["docs/analysis/2026-09-07/execution/benchmarks/validation-replay.test.ts"],
       "evidence": [
         "receipts/validation-replay-benchmark-initial.json",
         "receipts/validation-replay-benchmark.json",
@@ -1614,9 +1610,7 @@
         "packages/daemon/src/db/reconcile-native-checkpoint.ts",
         "packages/daemon/src/db/reconcile-native-checkpoint-cli.ts"
       ],
-      "tests": [
-        "packages/daemon/src/db/reconcile-native-checkpoint.test.ts"
-      ],
+      "tests": ["packages/daemon/src/db/reconcile-native-checkpoint.test.ts"],
       "evidence": [
         "checkpoint-48.md: current tracking-branch migration collision reproduced and resolved with byte-preserving native renumbering, managed upgrade tests and copy-only checkpoint reconciliation; production acceptance remains unverified",
         "receipts/checkpoint-48-full-validation.txt",
@@ -1633,9 +1627,7 @@
         "packages/daemon/src/db/backup.ts",
         "packages/daemon/src/db/backup-verification.ts"
       ],
-      "tests": [
-        "packages/daemon/src/db/backup.test.ts"
-      ],
+      "tests": ["packages/daemon/src/db/backup.test.ts"],
       "evidence": [
         "receipts/backup-red.txt",
         "receipts/backup-restore-green.txt",
@@ -1653,9 +1645,7 @@
         "packages/daemon/src/db/backup-verification.ts",
         "packages/daemon/src/db/verify-backup-cli.ts"
       ],
-      "tests": [
-        "packages/daemon/src/db/backup.test.ts"
-      ],
+      "tests": ["packages/daemon/src/db/backup.test.ts"],
       "evidence": [
         "receipts/backup-health-cli-green.txt",
         "receipts/backup-scope-red.txt",
