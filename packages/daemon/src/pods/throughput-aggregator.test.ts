@@ -1,5 +1,5 @@
 import type Database from 'better-sqlite3';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createTestDb, insertTestProfile } from '../test-utils/mock-helpers.js';
 import { computeThroughputAnalytics } from './throughput-aggregator.js';
 
@@ -343,6 +343,52 @@ describe('computeThroughputAnalytics', () => {
     // The spec says "workspace pods don't queue normally" — we assert total backlog is
     // whatever is present (workspace pods are not excluded from live backlog by design).
     expect(typeof result.summary.backlog).toBe('number');
+  });
+
+  it('preserves every queue minute sample for clipped, adjacent and sub-minute intervals', () => {
+    const now = Date.now();
+    const clock = vi.spyOn(Date, 'now').mockReturnValue(now);
+    const days = 2;
+    const firstHour = Math.floor((now - days * 86_400_000) / 3_600_000) * 3_600_000;
+    const intervals = [
+      { start: -60_000, end: null },
+      { start: 3_660_000, end: 3_720_000 },
+      { start: 3_720_000, end: 3_780_000 },
+      { start: 3_660_001, end: 3_719_999 },
+      { start: 3_660_001, end: 3_720_001 },
+      { start: 3_660_000, end: 3_660_000 },
+      { start: -60_000, end: 86_400_000 },
+      { start: 86_400_000, end: 86_400_001 },
+      ...Array.from({ length: 30 }, (_, index) => ({
+        start: 3_600_000 + index * 1234567,
+        end: index % 3 === 0 ? null : 3_600_000 + index * 1234567 + 3456789,
+      })),
+    ];
+    try {
+      for (const interval of intervals)
+        insertPod(db, {
+          status: 'queued',
+          createdAt: new Date(firstHour + interval.start).toISOString(),
+          startedAt:
+            interval.end === null ? null : new Date(firstHour + interval.end).toISOString(),
+          completedAt: null,
+        });
+      const expected = Array.from({ length: days * 24 }, (_, hour) => {
+        const samples = Array.from({ length: 60 }, (_, minute) => {
+          const at = (hour * 60 + minute) * 60_000;
+          return intervals.filter(({ start, end }) => start <= at && (end === null || end > at))
+            .length;
+        });
+        return {
+          hour: new Date(firstHour + hour * 3_600_000).toISOString().replace('.000Z', 'Z'),
+          max: Math.max(...samples),
+          mean: samples.reduce((sum, value) => sum + value, 0) / 60,
+        };
+      });
+      expect(computeThroughputAnalytics(db, days).queueDepth).toEqual(expected);
+    } finally {
+      clock.mockRestore();
+    }
   });
 
   // ── Cohort truncation ───────────────────────────────────────────────────────

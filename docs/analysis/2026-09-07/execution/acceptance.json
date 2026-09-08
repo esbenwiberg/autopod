@@ -1173,13 +1173,15 @@
         "packages/mobile-web/src/components/ValidationSummary.tsx",
         "packages/daemon/src/pods/validation-ownership.ts",
         "packages/daemon/src/pods/validation-repository.ts",
-        "packages/daemon/src/pods/provider-attempt-repository.ts"
+        "packages/daemon/src/pods/provider-attempt-repository.ts",
+        "packages/daemon/src/pods/throughput-aggregator.ts"
       ],
       "tests": [
         "packages/mobile-web/src/components/ValidationSummary.test.tsx",
         "packages/daemon/src/pods/pod-manager.test.ts",
         "packages/daemon/src/pods/validation-repository.test.ts",
-        "packages/daemon/src/pods/provider-attempt-repository.test.ts"
+        "packages/daemon/src/pods/provider-attempt-repository.test.ts",
+        "packages/daemon/src/pods/throughput-aggregator.test.ts"
       ],
       "evidence": [
         "receipts/mobile-evidence-history-red.txt",
@@ -1190,7 +1192,8 @@
         "checkpoint-56.md",
         "checkpoint-57.md",
         "checkpoint-58.md",
-        "checkpoint-59.md"
+        "checkpoint-59.md",
+        "checkpoint-72.md"
       ],
       "prerequisites": [],
       "remaining": "Mobile preserves sequence history and unmatched latest snapshot; backend waiver/history and durable delivery reconciliation remain."
@@ -1199,13 +1202,14 @@
       "id": "W4.5",
       "requirement": "Live broad history/cost API root cause proven before claiming production repair",
       "status": "unverified",
-      "implementation": [],
-      "tests": [],
+      "implementation": ["packages/daemon/src/pods/throughput-aggregator.ts"],
+      "tests": ["packages/daemon/src/pods/throughput-aggregator.test.ts"],
       "evidence": [
         "receipts/live-api-baseline.jsonl",
         "receipts/live-vm-inspection-failed.json",
         "receipts/live-api-refresh-checkpoint-11.jsonl",
-        "receipts/live-inspection-approval-block.json"
+        "receipts/live-inspection-approval-block.json",
+        "checkpoint-72.md"
       ],
       "prerequisites": [
         "Await read-only Azure command (exec session 29869) for actual release and sanitized log evidence; no production root cause claimed."

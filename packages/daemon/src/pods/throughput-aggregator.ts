@@ -108,11 +108,25 @@ function computeQueueDepth(pods: QueuePodRow[], days: number): QueueDepthBucket[
   const windowStartMs = nowMs - days * 86_400_000;
   const windowStartHourMs = Math.floor(windowStartMs / 3_600_000) * 3_600_000;
 
-  // Convert pod timestamps to ms once to avoid repeated Date parsing per sample.
-  const podTimes = pods.map((p) => ({
-    createdAtMs: new Date(p.createdAt).getTime(),
-    startedAtMs: p.startedAt ? new Date(p.startedAt).getTime() : null,
-  }));
+  // Each queue interval contributes +1 at its first included minute sample and
+  // -1 at its first excluded sample. Keep the same minute boundaries and the
+  // exclusive startedAt endpoint without revisiting every pod at every sample.
+  const sampleCount = days * 24 * 60;
+  const changes = new Float64Array(sampleCount + 1);
+  for (const pod of pods) {
+    const created = new Date(pod.createdAt).getTime();
+    const started = pod.startedAt ? new Date(pod.startedAt).getTime() : null;
+    if (!Number.isFinite(created) || (started !== null && !Number.isFinite(started))) continue;
+    const first = Math.max(0, Math.ceil((created - windowStartHourMs) / 60_000));
+    const end =
+      started === null
+        ? sampleCount
+        : Math.min(sampleCount, Math.ceil((started - windowStartHourMs) / 60_000));
+    if (first >= end || first >= sampleCount) continue;
+    changes[first] = (changes[first] ?? 0) + 1;
+    changes[end] = (changes[end] ?? 0) - 1;
+  }
+  let depth = 0;
 
   const buckets: QueueDepthBucket[] = [];
 
@@ -125,13 +139,7 @@ function computeQueueDepth(pods: QueuePodRow[], days: number): QueueDepthBucket[
 
     // Sample at 60 minute boundaries within the hour.
     for (let m = 0; m < 60; m++) {
-      const tMs = hourStartMs + m * 60_000;
-      let depth = 0;
-      for (const pod of podTimes) {
-        if (pod.createdAtMs <= tMs && (pod.startedAtMs === null || pod.startedAtMs > tMs)) {
-          depth++;
-        }
-      }
+      depth += changes[i * 60 + m] ?? 0;
       if (depth > maxDepth) maxDepth = depth;
       totalDepth += depth;
     }
