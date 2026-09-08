@@ -246,6 +246,7 @@ import { type CompletionJournal, createCompletionJournal } from './completion-jo
 import { type DeliveryLedger, createDeliveryLedger } from './delivery-ledger.js';
 import { type MergeJournal, createMergeJournal } from './merge-journal.js';
 
+import { HISTORY_JSON_FIELDS, HISTORY_POD_COLUMNS } from '../history/history-pod-projection.js';
 import { type TaskExecutionLedger, createTaskExecutionLedger } from './task-execution-ledger.js';
 import { createTaskHistoryArchive } from './task-history-archive.js';
 
@@ -272,6 +273,8 @@ export interface PodRepository extends Partial<UnitOfWork> {
   incrementLifecycleGeneration(id: string): number;
   delete(id: string): void;
   list(filters?: PodFilters): Pod[];
+  /** Historical operator projection, including retained deleted pods. */
+  listForHistory?(filters?: PodFilters): Pod[];
   /** Operator reads only: preserve healthy records and explicitly identify unreadable JSON. */
   listForDisplay?(filters?: PodFilters): Pod[];
   /** Compact operator projection: bounded display JSON, no full control-plane evidence. */
@@ -664,7 +667,11 @@ export function createPodRepository(db: Database.Database): PodRepository {
   const dispatchPreflight = createDispatchPreflightLedger(db);
   const taskExecutions = createTaskExecutionLedger(db);
   const archiveTaskHistory = createTaskHistoryArchive(db);
-  function listRows(filters?: PodFilters, columns = '*'): Iterable<Record<string, unknown>> {
+  function listRows(
+    filters?: PodFilters,
+    columns = '*',
+    table: 'pods' | 'retained_pods' = 'pods',
+  ): Iterable<Record<string, unknown>> {
     const whereClauses: string[] = [];
     const params: Record<string, unknown> = {};
 
@@ -701,7 +708,7 @@ export function createPodRepository(db: Database.Database): PodRepository {
     const limit = filters?.limit === undefined ? '' : ' LIMIT @limit';
     if (filters?.limit !== undefined) params.limit = filters.limit;
     return db
-      .prepare(`SELECT ${columns} FROM pods ${where} ORDER BY created_at DESC, id DESC${limit}`)
+      .prepare(`SELECT ${columns} FROM ${table} ${where} ORDER BY created_at DESC, id DESC${limit}`)
       .iterate(params) as Iterable<Record<string, unknown>>;
   }
 
@@ -1261,6 +1268,15 @@ export function createPodRepository(db: Database.Database): PodRepository {
 
     list(filters?: PodFilters): Pod[] {
       return Array.from(listRows(filters), rowToSession);
+    },
+
+    listForHistory(filters?: PodFilters): Pod[] {
+      return Array.from(listRows(filters, HISTORY_POD_COLUMNS, 'retained_pods'), (row) => {
+        const pod = rowToDisplaySession(row);
+        for (const field of HISTORY_JSON_FIELDS)
+          if (row[`${field}_oversized`]) pod.recordDiagnostics?.push({ field, code: 'size_limit' });
+        return pod;
+      });
     },
 
     listCompactForDisplay(filters?: PodFilters): CompactPodSource[] {

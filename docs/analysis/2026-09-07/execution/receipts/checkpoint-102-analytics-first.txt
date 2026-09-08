@@ -1,0 +1,26 @@
+
+ RUN  v4.1.11 /private/tmp/autopod-durable-execution/packages/daemon
+
+ ❯ src/pods/retained-analytics.test.ts (3 tests | 1 failed) 340ms
+   × retains exported pod and validation observations after actual deletion 90ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/pods/retained-analytics.test.ts > retains exported pod and validation observations after actual deletion
+TypeError: Cannot read properties of undefined (reading 'getForSession')
+ ❯ Object.export src/history/history-exporter.ts:287:39
+    285|
+    286|         // Errors (from event stream)
+    287|         const events = deps.eventRepo.getForSession(pod.id);
+       |                                       ^
+    288|         for (const evt of events) {
+    289|           if (evt.type === 'pod.agent_activity') {
+ ❯ src/pods/retained-analytics.test.ts:85:33
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed | 2 passed (3)
+      Tests  1 failed | 48 passed (49)
+   Start at  21:43:09
+   Duration  2.16s (transform 647ms, setup 0ms, import 1.02s, tests 3.34s, environment 0ms)

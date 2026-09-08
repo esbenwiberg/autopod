@@ -13,6 +13,8 @@ const TABLES = [
   'completion_decisions',
   'escalations',
   'nudge_messages',
+  'events',
+  'session_progress_events',
 ] as const;
 
 /** Prepared at startup so a future schema/mirror mismatch fails before destructive cleanup. */

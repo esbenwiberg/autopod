@@ -1,6 +1,10 @@
 import type { ReviewBatchResult, ValidationResult } from '@autopod/shared';
 import { generateId } from '@autopod/shared';
 import type Database from 'better-sqlite3';
+import {
+  type HistoryDiagnosticSink,
+  readRetainedHistory,
+} from '../history/retained-history-read.js';
 
 export interface StoredValidation {
   id: string;
@@ -23,7 +27,11 @@ export interface ValidationRepository {
     validationId: string,
     result: NonNullable<ValidationResult['advisoryBrowserQa']>,
   ): boolean;
-  getForSession(podId: string): StoredValidation[];
+  getForSession(
+    podId: string,
+    includeRetained?: boolean,
+    diagnostic?: HistoryDiagnosticSink,
+  ): StoredValidation[];
   getLatest(podId: string): StoredValidation | null;
   isLatestForPod(podId: string, validationId: string): boolean;
   getLatestReviewBatch(podId: string): ReviewBatchResult | undefined;
@@ -102,9 +110,17 @@ export function createValidationRepository(db: Database.Database): ValidationRep
       return info.changes > 0;
     },
 
-    getForSession(podId: string): StoredValidation[] {
+    getForSession(
+      podId: string,
+      includeRetained = false,
+      diagnostic?: HistoryDiagnosticSink,
+    ): StoredValidation[] {
+      if (includeRetained && diagnostic)
+        return readRetainedHistory(db, 'validations', podId, rowToStoredValidation, diagnostic);
       const rows = db
-        .prepare('SELECT * FROM validations WHERE pod_id = ? ORDER BY sequence ASC')
+        .prepare(
+          `SELECT * FROM ${includeRetained ? 'retained_validations' : 'validations'} WHERE pod_id = ? ORDER BY sequence ASC`,
+        )
         .all(podId) as Record<string, unknown>[];
       return rows.map(rowToStoredValidation);
     },

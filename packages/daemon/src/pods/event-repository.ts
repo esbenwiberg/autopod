@@ -1,5 +1,9 @@
 import type { SystemEvent } from '@autopod/shared';
 import type Database from 'better-sqlite3';
+import {
+  type HistoryDiagnosticSink,
+  readRetainedHistory,
+} from '../history/retained-history-read.js';
 
 export interface StoredEvent {
   id: number;
@@ -19,6 +23,8 @@ export interface EventRepository {
       type?: string;
       types?: string[];
       latest?: number;
+      includeRetained?: boolean;
+      diagnostic?: HistoryDiagnosticSink;
     },
   ): StoredEvent[];
 }
@@ -79,6 +85,8 @@ export function createEventRepository(db: Database.Database): EventRepository {
     },
 
     getForSession(podId: string, options = {}): StoredEvent[] {
+      if (options.includeRetained && options.diagnostic)
+        return readRetainedHistory(db, 'events', podId, rowToStoredEvent, options.diagnostic);
       const clauses = ['pod_id = @podId'];
       const params: Record<string, string | number> = { podId };
       if (options.type) {
@@ -94,15 +102,16 @@ export function createEventRepository(db: Database.Database): EventRepository {
       }
 
       const where = clauses.join(' AND ');
+      const table = options.includeRetained ? 'retained_events' : 'events';
       const rows =
         options.latest === undefined
           ? (db
-              .prepare(`SELECT * FROM events WHERE ${where} ORDER BY id ASC`)
+              .prepare(`SELECT * FROM ${table} WHERE ${where} ORDER BY id ASC`)
               .all(params) as Record<string, unknown>[])
           : (db
               .prepare(
                 `SELECT * FROM (
-                  SELECT * FROM events WHERE ${where} ORDER BY id DESC LIMIT @latest
+                  SELECT * FROM ${table} WHERE ${where} ORDER BY id DESC LIMIT @latest
                 ) ORDER BY id ASC`,
               )
               .all({ ...params, latest: options.latest }) as Record<string, unknown>[]);

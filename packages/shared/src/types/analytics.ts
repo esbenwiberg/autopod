@@ -189,6 +189,8 @@ export interface SafetyAnalyticsResponse {
 export type LoadBearingStatus = 'queued' | 'running' | 'validating' | 'awaiting_input';
 
 export interface ThroughputCohortPod {
+  /** Retained history; no live pod resource remains for navigation. */
+  historyArchived?: boolean;
   podId: string;
   profile: string;
   status: 'complete' | 'killed' | 'failed';
@@ -228,7 +230,7 @@ export interface ThroughputAnalyticsResponse {
     podsPerDaySparkline: Array<{ day: string; count: number }>;
     /** Signed difference in mean pods/day vs the immediately-prior window of the same length. */
     podsPerDayDelta: { value: number; direction: 'up' | 'down' | 'flat' };
-    /** Mean time-to-merge in seconds, restricted to status='complete' pods. 0 when none. */
+    /** Legacy wire name: mean created-to-completed elapsed seconds of complete pods, not merge timing. 0 when none. */
     mttmSeconds: number;
     /** Live point-in-time count: pods with status IN ('queued','provisioning'). Window-independent. */
     backlog: number;

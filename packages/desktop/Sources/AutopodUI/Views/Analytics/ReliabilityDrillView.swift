@@ -219,6 +219,7 @@ private struct ReliabilityFunnelSectionView: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
+                if entry.historyArchived == true { Text("Deleted · retained").font(.caption2).foregroundStyle(.secondary) }
                 Spacer()
                 finalStatusBadge(entry.finalStatus)
                 Text(analyticsRelativeDate(entry.completedAt))
@@ -230,6 +231,7 @@ private struct ReliabilityFunnelSectionView: View {
         }
         .buttonStyle(.plain)
         .contentShape(Rectangle())
+        .disabled(entry.historyArchived == true)
     }
 
     private func finalStatusBadge(_ status: FinalStatus) -> some View {

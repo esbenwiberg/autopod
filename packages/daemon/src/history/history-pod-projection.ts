@@ -1,0 +1,33 @@
+/** Export only the fields used by the history artifact; bound JSON before SQLite returns it. */
+export const HISTORY_JSON_FIELDS = ['plan', 'task_summary', 'phase_token_usage'] as const;
+export const HISTORY_POD_COLUMNS = [
+  'id',
+  'profile_name',
+  'status',
+  'model',
+  'runtime',
+  'branch',
+  'user_id',
+  'output_mode',
+  'validation_attempts',
+  'max_validation_attempts',
+  'input_tokens',
+  'output_tokens',
+  'cost_usd',
+  'files_changed',
+  'lines_added',
+  'lines_removed',
+  'escalation_count',
+  'commit_count',
+  'created_at',
+  'started_at',
+  'completed_at',
+  'token_telemetry_accuracy',
+  'history_archived',
+  'substr(CAST(task AS TEXT),1,500) AS task',
+  'substr(CAST(rework_reason AS TEXT),1,1000) AS rework_reason',
+  ...HISTORY_JSON_FIELDS.flatMap((field) => [
+    `CASE WHEN length(CAST(${field} AS BLOB))<=65536 THEN ${field} ELSE NULL END AS ${field}`,
+    `length(CAST(${field} AS BLOB))>65536 AS ${field}_oversized`,
+  ]),
+].join(', ');

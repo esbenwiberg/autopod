@@ -52,6 +52,7 @@ export interface ReliabilityAnalyticsResponse {
         profile: string;
         finalStatus: FinalStatus;
         completedAt: string;
+        historyArchived?: boolean;
       }>;
       overflow: number;
     }>;
@@ -132,6 +133,7 @@ interface CohortRow {
   completedAt: string;
   reworkCount: number;
   firstValidation: string | null;
+  historyArchived: number;
 }
 
 interface DropGroup {
@@ -198,14 +200,14 @@ export function computeReliabilityAnalytics(
   // Terminal cohort: worker pods that reached a final status within the trailing window.
   const cohort = db
     .prepare(
-      `SELECT id,
+      `SELECT id, history_archived AS historyArchived,
               profile_name  AS profileName,
               status,
               completed_at  AS completedAt,
               rework_count  AS reworkCount,
-              (SELECT result FROM validations v WHERE v.pod_id = pods.id
+              (SELECT result FROM retained_validations v WHERE v.pod_id = p.id
                ORDER BY v.sequence, v.created_at, v.id LIMIT 1) AS firstValidation
-       FROM pods
+       FROM retained_pods p
        WHERE ${terminalCohortWhere()}`,
     )
     .all({ days }) as CohortRow[];
@@ -243,9 +245,9 @@ export function computeReliabilityAnalytics(
   const prior = db
     .prepare(
       `SELECT status, rework_count AS reworkCount,
-              (SELECT result FROM validations v WHERE v.pod_id = pods.id
+              (SELECT result FROM retained_validations v WHERE v.pod_id = p.id
                ORDER BY v.sequence, v.created_at, v.id LIMIT 1) AS firstValidation
-       FROM pods
+       FROM retained_pods p
        WHERE output_mode != 'workspace'
          AND status IN ('complete', 'killed', 'failed')
          AND completed_at >= datetime('now', '-' || @priorDays || ' days')
@@ -273,9 +275,9 @@ export function computeReliabilityAnalytics(
     .prepare(
       `SELECT pod_id AS podId,
               CASE WHEN json_valid(payload) THEN json_extract(payload, '$.newStatus') END AS newStatus
-       FROM events
+       FROM retained_events
        WHERE type = 'pod.status_changed'
-         AND pod_id IN (SELECT id FROM pods WHERE ${terminalCohortWhere()})`,
+         AND pod_id IN (SELECT id FROM retained_pods WHERE ${terminalCohortWhere()})`,
     )
     .all({ days }) as Array<{ podId: string; newStatus: string | null }>;
 
@@ -335,6 +337,7 @@ export function computeReliabilityAnalytics(
       count: group.pods.length,
       topPods: sorted.slice(0, 10).map((p) => ({
         podId: p.id,
+        ...(p.historyArchived === 1 ? { historyArchived: true } : {}),
         profile: p.profileName,
         finalStatus: p.status as FinalStatus,
         completedAt: p.completedAt,
@@ -348,8 +351,8 @@ export function computeReliabilityAnalytics(
   const validationRows = db
     .prepare(
       `SELECT pod_id AS podId, result
-       FROM validations
-       WHERE pod_id IN (SELECT id FROM pods WHERE ${terminalCohortWhere()})`,
+       FROM retained_validations
+       WHERE pod_id IN (SELECT id FROM retained_pods WHERE ${terminalCohortWhere()})`,
     )
     .all({ days }) as Array<{ podId: string; result: string }>;
 

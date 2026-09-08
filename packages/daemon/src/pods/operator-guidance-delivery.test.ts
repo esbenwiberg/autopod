@@ -318,7 +318,11 @@ it('upgrades schema 179 without inventing acknowledgment of consumed legacy rows
   try {
     db.pragma('foreign_keys = ON');
     runMigrations(db, dir, logger);
-    const { repo, runId, nudges } = seed(db);
+    insertTestProfile(db);
+    db.prepare(
+      "INSERT INTO pods(id,profile_name,task,status,model,runtime,branch,user_id,max_validation_attempts,skip_validation,output_mode) VALUES ('worker','test-profile','Retain legacy guidance','running','model','codex','worker','operator',3,0,'pr')",
+    ).run();
+    const nudges = createNudgeRepository(db);
     nudges.queue('worker', 'Retain pending legacy guidance');
     db.prepare(
       "INSERT INTO nudge_messages(pod_id,message,consumed,created_at,consumed_at) VALUES ('worker','Legacy consumed without receipt',1,'2026-09-07T00:00:00Z','2026-09-07T01:00:00Z')",
@@ -329,6 +333,14 @@ it('upgrades schema 179 without inventing acknowledgment of consumed legacy rows
     expect(
       db.prepare('SELECT COUNT(*) AS count FROM operator_guidance_acknowledgments').get(),
     ).toEqual({ count: 0 });
+    const repo = createPodRepository(db);
+    repo.taskExecutions?.register('worker');
+    const runId = repo.taskExecutions?.beginRun('worker', 1, 1, {
+      runtime: 'codex',
+      model: 'model',
+      providerAccountId: null,
+    });
+    if (!runId) throw new Error('Missing upgraded worker');
     const delivery = nudges.readPending('worker');
     if (!delivery) throw new Error('Missing legacy delivery');
     expect(delivery.messages).toEqual(['Retain pending legacy guidance']);

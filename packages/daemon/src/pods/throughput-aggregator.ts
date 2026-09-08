@@ -60,6 +60,7 @@ function queueIntersectWhere(): string {
 // ── Internal types ────────────────────────────────────────────────────────────
 
 interface CohortRow {
+  historyArchived: number;
   id: string;
   profileName: string;
   status: string;
@@ -218,12 +219,12 @@ export function computeThroughputAnalytics(
   // Used for: podsPerDay, sparkline, delta, mttmSeconds, cohort[], timeInStatus[].
   const cohortRows = db
     .prepare(
-      `SELECT id,
+      `SELECT id, history_archived AS historyArchived,
               profile_name  AS profileName,
               status,
               completed_at  AS completedAt,
               created_at    AS createdAt
-       FROM pods
+       FROM retained_pods p
        WHERE ${terminalCohortWhere()}
        ORDER BY completed_at DESC`,
     )
@@ -254,7 +255,7 @@ export function computeThroughputAnalytics(
   const priorRow = db
     .prepare(
       `SELECT COUNT(*) AS count
-       FROM pods
+       FROM retained_pods p
        WHERE output_mode != 'workspace'
          AND status IN ('complete', 'killed', 'failed')
          AND completed_at >= datetime('now', '-' || @priorDays || ' days')
@@ -277,6 +278,7 @@ export function computeThroughputAnalytics(
   const cohortSlice = cohortTruncated ? cohortRows.slice(0, COHORT_CAP) : cohortRows;
   const cohort = cohortSlice.map((p) => ({
     podId: p.id,
+    ...(p.historyArchived === 1 ? { historyArchived: true } : {}),
     profile: p.profileName,
     status: p.status as 'complete' | 'killed' | 'failed',
     completedAt: p.completedAt,
@@ -286,7 +288,7 @@ export function computeThroughputAnalytics(
   const queuePods = db
     .prepare(
       `SELECT created_at AS createdAt, started_at AS startedAt
-       FROM pods
+       FROM retained_pods p
        WHERE ${queueIntersectWhere()}`,
     )
     .all({ days }) as QueuePodRow[];
@@ -298,11 +300,11 @@ export function computeThroughputAnalytics(
   const statusEvents = db
     .prepare(
       `SELECT pod_id    AS podId,
-              json_extract(payload, '$.newStatus') AS newStatus,
+              CASE WHEN json_valid(payload) THEN json_extract(payload, '$.newStatus') END AS newStatus,
               created_at AS createdAt
-       FROM events
+       FROM retained_events
        WHERE type = 'pod.status_changed'
-         AND pod_id IN (SELECT id FROM pods WHERE ${terminalCohortWhere()})
+         AND pod_id IN (SELECT id FROM retained_pods WHERE ${terminalCohortWhere()})
        ORDER BY pod_id, created_at`,
     )
     .all({ days }) as StatusEventRow[];
