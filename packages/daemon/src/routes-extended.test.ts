@@ -1183,8 +1183,15 @@ describe('Extended Route Tests', () => {
       });
       const podId = createRes.json().id;
 
-      // Force to a terminal state so deletion is allowed
-      db.prepare('UPDATE pods SET status = ? WHERE id = ?').run('killed', podId);
+      // Observe the worker and validation settlement before making it terminal.
+      // Merely changing status while provisioning is pending does not own cleanup.
+      await waitForPodValidated(podId);
+      const killed = await app.inject({
+        method: 'POST',
+        url: `/pods/${podId}/kill`,
+        headers: authHeaders,
+      });
+      expect(killed.statusCode).toBe(200);
 
       const res = await app.inject({
         method: 'DELETE',
