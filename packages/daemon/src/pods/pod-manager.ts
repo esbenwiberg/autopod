@@ -239,6 +239,7 @@ import {
   ensureNuGetCredentialProvider,
   validateRegistryFiles,
 } from './registry-injector.js';
+import { waitForRetryBackoff } from './retry-backoff-wait.js';
 import { reviewerApiProvenance } from './reviewer-api-provenance.js';
 import { addRuntimeNetworkDefaults } from './runtime-network-defaults.js';
 import {
@@ -7451,8 +7452,11 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
             : null;
         if (admission && retryLedger) {
           try {
-            const waitMs = Math.max(0, Date.parse(admission.notBefore) - Date.now());
-            if (waitMs > 0) await sleep(waitMs);
+            await waitForRetryBackoff(admission.notBefore, sleep, () => {
+              ownership.assertCurrent();
+              if (validationController.signal.aborted)
+                throw new TaskRetryBlockedError('Validation admission cancelled during cooldown');
+            });
             resolveEffectiveBoundProfile(ownership.assertCurrent());
             if (validationController.signal.aborted)
               throw new TaskRetryBlockedError('Validation admission cancelled before execution');

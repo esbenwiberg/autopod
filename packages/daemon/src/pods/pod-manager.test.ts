@@ -13249,6 +13249,46 @@ describe('PodManager', () => {
       expect(manager.getSession(pod.id).status).toBe('validated');
     });
 
+    it('retries retryable infrastructure validation when a timer wakes one millisecond before the persisted backoff', async () => {
+      const ctx = createTestContext();
+      ctx.deps.validationInfrastructureRetryBackoffMs = [50];
+      vi.useFakeTimers({ toFake: ['Date'] });
+      let wakes = 0;
+      vi.mocked(sleep).mockImplementation(async (delay) => {
+        vi.setSystemTime(Date.now() + delay - (wakes++ === 0 ? 1 : 0));
+      });
+      vi.mocked(ctx.validationEngine.validate)
+        .mockResolvedValueOnce(validationInfrastructureFailureResult())
+        .mockResolvedValueOnce(makeValidationResult());
+      const manager = createPodManager(ctx.deps);
+
+      const pod = manager.createSession(
+        { profileName: 'test-profile', task: 'Add feature' },
+        'user-1',
+      );
+      ctx.podRepo.update(pod.id, {
+        status: 'running',
+        containerId: 'ctr-1',
+        validationAttempts: 0,
+      });
+
+      try {
+        await manager.triggerValidation(pod.id);
+      } finally {
+        vi.useRealTimers();
+        vi.mocked(sleep).mockImplementation(() => Promise.resolve());
+      }
+
+      expect(ctx.validationEngine.validate).toHaveBeenCalledTimes(2);
+      expect(
+        vi
+          .mocked(sleep)
+          .mock.calls.some(([delay]) => typeof delay === 'number' && delay > 0 && delay <= 50),
+      ).toBe(true);
+      expect(wakes).toBe(2);
+      expect(manager.getSession(pod.id).status).toBe('validated');
+    });
+
     it('parks an unknown sandbox status instead of failing validation', async () => {
       const ctx = createTestContext();
       vi.mocked(ctx.containerManager.getStatus)

@@ -7,7 +7,7 @@ const inputs = [
   `target blocker ${'x'.repeat(200)}`,
   'a@b.co2c@d.com',
   'user+tag@example.com next@test.invalid',
-  'x'.repeat(8000) + '@example.com',
+  `${'x'.repeat(8000)}@example.com`,
 ];
 const outputs = [];
 const times = [];
