@@ -3779,6 +3779,7 @@ async function runTaskReview(
         } else {
           const claudeReview = await runClaudeCli({
             beforeSpawn: config.assertReviewerCurrent,
+            recordHostDispatch: config.recordHostReviewerDispatch,
             model: config.reviewerModel,
             input: prompt,
             timeout: reviewTimeout,
@@ -3954,6 +3955,7 @@ async function runTaskReview(
         try {
           const tier3Result = await runAgenticReview({
             beforeSpawn: config.assertReviewerCurrent,
+            recordHostDispatch: config.recordHostReviewerDispatch,
             model: config.reviewerModel,
             prompt,
             worktreePath,

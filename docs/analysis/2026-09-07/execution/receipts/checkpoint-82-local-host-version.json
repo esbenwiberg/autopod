@@ -1,0 +1,8 @@
+{
+  "scope": "read-only local development host version probe; no review/provider canary",
+  "checkedAtUTC": "2026-09-08T14:31:23.600365+00:00",
+  "configuredPath": "/Users/ewi/.local/bin/claude",
+  "resolvedPath": "/Users/ewi/.local/share/claude/versions/2.1.263",
+  "cliVersion": "2.1.263",
+  "exitCode": 0
+}

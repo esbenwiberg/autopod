@@ -79,3 +79,13 @@ import Testing
   #expect(record.imageLabel == "not applicable")
   #expect(record.diagnostics.first?.code == "REVIEWER_LEGACY_API_DISPATCH_PREFLIGHT")
 }
+
+
+@Test func hostReviewerProvenanceDisplaysObservedCliAndUnknownCredentials() throws {
+  let raw = Data(#"{"version":2,"surface":"host-cli","dispatchModel":"alias","subject":"reviewer","purpose":"review","executionId":"exec","generation":1,"checkedAt":"today","status":"checked","runtime":"claude","cliPath":"/fixture/claude","cliVersion":"2.9.1","model":"alias","providerId":null,"providerAccountId":null,"contractHash":"hash","release":{"source":"unavailable"},"capabilities":{"streamingExec":"unverified"},"commands":{"requirements":[],"unresolvedSources":[],"deferredArtifacts":[],"explicitDependencies":false},"diagnostics":[]}"#.utf8)
+  let record = try JSONDecoder().decode(ExecutionProvenance.self, from: raw)
+  #expect(record.runtimeLabel == "Host claude CLI 2.9.1")
+  #expect(record.cliPath == "/fixture/claude")
+  #expect(record.imageLabel == "not applicable")
+  #expect(record.providerId == nil); #expect(record.providerAccountId == nil)
+}

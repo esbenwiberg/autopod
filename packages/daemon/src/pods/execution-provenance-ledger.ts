@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import path from 'node:path';
 import {
   AutopodError,
   type ExecutionProvenance,
@@ -12,16 +13,30 @@ export interface ExecutionProvenanceLedger {
 export function createExecutionProvenanceLedger(db: Database.Database): ExecutionProvenanceLedger {
   return {
     record: db.transaction((podId: string, generation: number, input: ExecutionProvenanceInput) => {
+      const apiSurface =
+        input.surface === 'provider-api' &&
+        input.runtime === null &&
+        input.cliPath === null &&
+        input.cliVersion === null;
+      const hostSurface =
+        input.surface === 'host-cli' &&
+        input.runtime === 'claude' &&
+        input.providerId === null &&
+        input.providerAccountId === null &&
+        (input.cliPath === null ||
+          (path.isAbsolute(input.cliPath) &&
+            input.cliPath.length <= 1024 &&
+            ![...input.cliPath].some((character) => character.charCodeAt(0) < 32))) &&
+        (input.cliVersion === null ||
+          (input.cliVersion.length <= 64 && /^\d+\.\d+\.\d+$/.test(input.cliVersion))) &&
+        (input.status === 'blocked' || (input.cliPath !== null && input.cliVersion !== null));
       if (
         (input.version === 1 && (!input.runtime || input.surface || input.dispatchModel)) ||
         (input.version === 2 &&
-          (input.surface !== 'provider-api' ||
-            input.runtime !== null ||
+          ((!apiSurface && !hostSurface) ||
             input.subject !== 'reviewer' ||
             input.purpose !== 'review' ||
             !input.dispatchModel?.trim() ||
-            input.cliPath !== null ||
-            input.cliVersion !== null ||
             input.imageDigest !== null)) ||
         (input.version !== 1 && input.version !== 2)
       )

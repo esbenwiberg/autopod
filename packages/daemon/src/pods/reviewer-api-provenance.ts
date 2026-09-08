@@ -66,3 +66,30 @@ export function legacyReviewerApiProvenance(
     ],
   };
 }
+
+/** Host CLI credentials may come from local state; the worker account is not asserted. */
+export function reviewerHostCliProvenance(
+  config: ValidationEngineConfig,
+  evidence: import('../runtimes/host-cli-provenance.js').HostCliDispatchEvidence,
+): ExecutionProvenanceInput {
+  return {
+    ...legacyReviewerApiProvenance(config, evidence.model),
+    surface: 'host-cli',
+    runtime: 'claude',
+    status: evidence.status,
+    cliPath: evidence.cliPath,
+    cliVersion: evidence.cliVersion,
+    diagnostics: [
+      {
+        code:
+          evidence.status === 'checked'
+            ? 'REVIEWER_HOST_CLI_DISPATCH_PREFLIGHT'
+            : 'PREFLIGHT_HOST_CLI_UNAVAILABLE',
+        detail:
+          evidence.status === 'checked'
+            ? 'Host reviewer CLI version observed at the selected executable path before dispatch. Provider/account identity, resolved model, binary hash and transitive dependencies are unverified. Container image is not applicable. This receipt does not prove a provider response, billing or review completion.'
+            : 'Host reviewer CLI identity could not be verified; review dispatch is blocked. Reconcile the installed CLI. Provider/account identity remains unverified; container image is not applicable.',
+      },
+    ],
+  };
+}

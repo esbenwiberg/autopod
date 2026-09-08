@@ -6,6 +6,9 @@ export interface AgenticReviewConfig {
   worktreePath: string;
   timeout: number;
   beforeSpawn?: () => void;
+  recordHostDispatch?: (
+    evidence: import('../runtimes/host-cli-provenance.js').HostCliDispatchEvidence,
+  ) => void;
 }
 
 export interface AgenticReviewTokenUsage {
@@ -29,6 +32,7 @@ export async function runAgenticReview(
   const result = await runClaudeCli({
     model: config.model,
     beforeSpawn: config.beforeSpawn,
+    recordHostDispatch: config.recordHostDispatch,
     input: config.prompt,
     timeout: config.timeout,
     outputFormat: 'text',

@@ -1,0 +1,38 @@
+[1/1] Compiling plugin GenerateManual
+[2/2] Compiling plugin GenerateDoccReference
+Building for debugging...
+[2/7] Write sources
+[3/7] Write swift-version--58304C5D6DBC2206.txt
+[5/9] Emitting module AutopodClient
+[6/9] Compiling AutopodClient ExecutionProvenance.swift
+[6/11] Write Objects.LinkFileList
+[8/11] Linking AutopodDesktopExe
+[9/11] Linking AutopodDesktopPackageTests
+[10/11] Applying AutopodDesktopExe
+Build complete! (2.84s)
+Test Suite 'Selected tests' started at 2026-09-08 16:33:44.665.
+Test Suite 'AutopodDesktopPackageTests.xctest' started at 2026-09-08 16:33:44.670.
+Test Suite 'AutopodDesktopPackageTests.xctest' passed at 2026-09-08 16:33:44.670.
+	 Executed 0 tests, with 0 failures (0 unexpected) in 0.000 (0.000) seconds
+Test Suite 'Selected tests' passed at 2026-09-08 16:33:44.670.
+	 Executed 0 tests, with 0 failures (0 unexpected) in 0.000 (0.005) seconds
+◇ Test run started.
+↳ Testing Library Version: 1902
+↳ Target Platform: arm64e-apple-macos14.0
+◇ Test hostReviewerProvenanceDisplaysObservedCliAndUnknownCredentials() started.
+◇ Test legacyApiProvenancePreservesUnknownAccountAndDispatchDiagnostic() started.
+◇ Test apiProvenanceClientSendsVersionAsQueryParameter() started.
+◇ Test apiProvenanceDoesNotRequireOrDisplayCliIdentity() started.
+◇ Test memoryWorkbenchFormatsScopeProvenanceLabels() started.
+◇ Test degradedCouncilDoesNotRepeatFirstGateFindingInCanonicalProvenance() started.
+◇ Test mapsValidationOverrideFindingProvenance() started.
+◇ Test executionProvenanceKeepsValidationPurposeAndSupportsEarlierRecords() started.
+✔ Test memoryWorkbenchFormatsScopeProvenanceLabels() passed after 0.001 seconds.
+✔ Test apiProvenanceDoesNotRequireOrDisplayCliIdentity() passed after 0.001 seconds.
+✔ Test hostReviewerProvenanceDisplaysObservedCliAndUnknownCredentials() passed after 0.001 seconds.
+✔ Test legacyApiProvenancePreservesUnknownAccountAndDispatchDiagnostic() passed after 0.001 seconds.
+✔ Test executionProvenanceKeepsValidationPurposeAndSupportsEarlierRecords() passed after 0.001 seconds.
+✔ Test degradedCouncilDoesNotRepeatFirstGateFindingInCanonicalProvenance() passed after 0.001 seconds.
+✔ Test mapsValidationOverrideFindingProvenance() passed after 0.002 seconds.
+✔ Test apiProvenanceClientSendsVersionAsQueryParameter() passed after 0.005 seconds.
+✔ Test run with 8 tests in 0 suites passed after 0.005 seconds.

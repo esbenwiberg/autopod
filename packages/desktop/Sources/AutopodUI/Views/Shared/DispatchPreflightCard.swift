@@ -29,6 +29,7 @@ struct DispatchPreflightCard: View {
       if let environment {
         Text("\(environment.purpose ?? "coding") preflight \(environment.status) · generation \(environment.generation) · \(environment.checkedAt)")
         Text("\(environment.subjectLabel): \(environment.runtimeLabel) · \(environment.model)")
+        if environment.surface == "host-cli" { Text("Executable: \(environment.cliPath ?? "unverified")").font(.caption).textSelection(.enabled) }
         Text("Provider: \(environment.providerId ?? "unverified") · account: \(environment.providerAccountId ?? "not recorded")")
         Text("Daemon: \(environment.release.commitSha ?? "unverified")\(environment.release.dirty == true ? " · modified source" : "")").textSelection(.enabled)
         Text("Image: \(environment.imageLabel)").font(.caption).textSelection(.enabled)

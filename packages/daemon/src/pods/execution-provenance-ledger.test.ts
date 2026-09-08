@@ -35,7 +35,7 @@ const input: ExecutionProvenanceInput = {
   },
   diagnostics: [{ code: 'PREFLIGHT_RUNTIME_UNAVAILABLE', detail: 'CLI version unknown' }],
 };
-it.each([undefined, 'worker', 'reviewer', 'api', 'legacy-api'] as const)(
+it.each([undefined, 'worker', 'reviewer', 'api', 'legacy-api', 'host'] as const)(
   'retains subject=%s failed provenance through restart and deletion without changing receipts',
   (subject) => {
     const f = createTestDb();
@@ -70,13 +70,26 @@ it.each([undefined, 'worker', 'reviewer', 'api', 'legacy-api'] as const)(
             ],
           }
         : {}),
-      subject: subject === 'api' || subject === 'legacy-api' ? 'reviewer' : subject,
+      subject:
+        subject === 'api' || subject === 'legacy-api' || subject === 'host' ? 'reviewer' : subject,
       ...(subject === 'api' || subject === 'legacy-api'
         ? ({
             version: 2,
             surface: 'provider-api',
             runtime: null,
             dispatchModel: 'resolved-model',
+          } as const)
+        : {}),
+      ...(subject === 'host'
+        ? ({
+            version: 2,
+            surface: 'host-cli',
+            runtime: 'claude',
+            dispatchModel: 'sonnet',
+            providerId: null,
+            providerAccountId: null,
+            cliPath: '/fixture/claude',
+            cliVersion: '2.9.1',
           } as const)
         : {}),
     });

@@ -246,13 +246,15 @@ export function registerPodCommands(program: Command, getClient: () => AutopodCl
           `${latest.purpose ?? 'coding'} preflight ${latest.status} at ${latest.checkedAt}; execution ${latest.executionId}, generation ${latest.generation}`,
         );
         console.log(
-          `${latest.subject === 'reviewer' ? 'Reviewer' : 'Configured worker'}: ${latest.surface === 'provider-api' ? `Provider API; dispatch model ${latest.dispatchModel}` : `${latest.runtime} CLI ${latest.cliVersion ?? 'unverified'}`}; model ${latest.model}`,
+          `${latest.subject === 'reviewer' ? 'Reviewer' : 'Configured worker'}: ${latest.surface === 'provider-api' ? `Provider API; dispatch model ${latest.dispatchModel}` : `${latest.surface === 'host-cli' ? 'Host ' : ''}${latest.runtime} CLI ${latest.cliVersion ?? 'unverified'}`}; model ${latest.model}`,
         );
+        if (latest.surface === 'host-cli')
+          console.log(`Executable: ${latest.cliPath ?? 'unverified'}`);
         console.log(
           `Provider ${latest.providerId ?? 'unverified'}; account ${latest.providerAccountId ?? 'not recorded'}`,
         );
         console.log(
-          `Daemon ${latest.release.commitSha ?? 'unverified'}${latest.release.dirty ? ' (modified source)' : ''}; image ${latest.surface === 'provider-api' ? 'not applicable' : (latest.imageDigest ?? 'unverified')}`,
+          `Daemon ${latest.release.commitSha ?? 'unverified'}${latest.release.dirty ? ' (modified source)' : ''}; image ${latest.surface === 'provider-api' || latest.surface === 'host-cli' ? 'not applicable' : (latest.imageDigest ?? 'unverified')}`,
         );
         console.log(
           `Contract ${latest.contractHash}; validation implementation ${latest.validationImplementationHash ?? 'unverified'}`,

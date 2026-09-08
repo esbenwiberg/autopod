@@ -9,7 +9,7 @@ afterEach(() => {
   vi.restoreAllMocks();
   localStorage.clear();
 });
-it.each([undefined, 'reviewer', 'api', 'legacy-api'] as const)(
+it.each([undefined, 'reviewer', 'api', 'legacy-api', 'host'] as const)(
   'retains the complete rerun through reload while labeling provenance subject=%s',
   async (subject) => {
     const draft = {
@@ -37,13 +37,28 @@ it.each([undefined, 'reviewer', 'api', 'legacy-api'] as const)(
               status: 'blocked',
               purpose: subject ? 'review' : 'validation',
               subject: subject ? 'reviewer' : undefined,
-              providerId: subject && subject !== 'legacy-api' ? 'anthropic' : null,
-              providerAccountId: subject && subject !== 'legacy-api' ? 'review-account' : null,
+              providerId:
+                subject && subject !== 'legacy-api' && subject !== 'host' ? 'anthropic' : null,
+              providerAccountId:
+                subject && subject !== 'legacy-api' && subject !== 'host' ? 'review-account' : null,
               generation: 1,
               checkedAt: 'today',
-              runtime: subject === 'api' || subject === 'legacy-api' ? null : 'codex',
+              runtime:
+                subject === 'api' || subject === 'legacy-api'
+                  ? null
+                  : subject === 'host'
+                    ? 'claude'
+                    : 'codex',
               ...(subject === 'api' || subject === 'legacy-api'
                 ? { version: 2, surface: 'provider-api', dispatchModel: 'resolved-model' }
+                : {}),
+              ...(subject === 'host'
+                ? {
+                    version: 2,
+                    surface: 'host-cli',
+                    dispatchModel: 'fixture',
+                    cliPath: '/fixture/claude',
+                  }
                 : {}),
               cliVersion: '0.144.4',
               model: 'fixture',
@@ -120,10 +135,12 @@ it.each([undefined, 'reviewer', 'api', 'legacy-api'] as const)(
       expect(container.textContent).toContain(
         subject === 'api' || subject === 'legacy-api'
           ? 'Reviewer: Provider API'
-          : `${subject ? 'Reviewer' : 'Configured worker'}: codex CLI 0.144.4`,
+          : subject === 'host'
+            ? 'Reviewer: Host claude CLI 0.144.4'
+            : `${subject ? 'Reviewer' : 'Configured worker'}: codex CLI 0.144.4`,
       );
       expect(container.textContent).toContain(
-        subject && subject !== 'legacy-api'
+        subject && subject !== 'legacy-api' && subject !== 'host'
           ? 'Provider: anthropic · account: review-account'
           : 'Provider: unverified · account: not recorded',
       );

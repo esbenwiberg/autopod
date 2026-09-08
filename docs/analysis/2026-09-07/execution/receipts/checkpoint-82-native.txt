@@ -1,0 +1,50 @@
+[1/1] Compiling plugin GenerateManual
+[2/2] Compiling plugin GenerateDoccReference
+Building for debugging...
+[2/9] Write sources
+[5/9] Write swift-version--58304C5D6DBC2206.txt
+[7/11] Emitting module AutopodClient
+[8/11] Compiling AutopodClient ExecutionProvenance.swift
+[9/12] Compiling AutopodClient DaemonAPI.swift
+[10/18] Emitting module AutopodUI
+[11/18] Compiling AutopodUI DispatchPreflightCard.swift
+[12/18] Compiling AutopodUI PodActions.swift
+[13/18] Compiling AutopodUI SummaryTab.swift
+[14/21] Emitting module AutopodUITests
+[15/21] Emitting module AutopodDesktop
+[16/21] Compiling AutopodDesktop ActionHandler.swift
+[16/21] Write Objects.LinkFileList
+[18/24] Compiling AutopodClientTests DispatchPreflightTests.swift
+[19/24] Emitting module AutopodClientTests
+[20/24] Compiling AutopodClientTests ScheduledScanTests.swift
+[20/24] Write Objects.LinkFileList
+[21/24] Linking AutopodDesktopExe
+[22/24] Applying AutopodDesktopExe
+[23/24] Linking AutopodDesktopPackageTests
+Build complete! (7.19s)
+Test Suite 'Selected tests' started at 2026-09-08 16:27:17.950.
+Test Suite 'AutopodDesktopPackageTests.xctest' started at 2026-09-08 16:27:17.955.
+Test Suite 'AutopodDesktopPackageTests.xctest' passed at 2026-09-08 16:27:17.955.
+	 Executed 0 tests, with 0 failures (0 unexpected) in 0.000 (0.000) seconds
+Test Suite 'Selected tests' passed at 2026-09-08 16:27:17.955.
+	 Executed 0 tests, with 0 failures (0 unexpected) in 0.000 (0.006) seconds
+◇ Test run started.
+↳ Testing Library Version: 1902
+↳ Target Platform: arm64e-apple-macos14.0
+◇ Test executionProvenanceKeepsValidationPurposeAndSupportsEarlierRecords() started.
+◇ Test apiProvenanceDoesNotRequireOrDisplayCliIdentity() started.
+◇ Test mapsValidationOverrideFindingProvenance() started.
+◇ Test hostReviewerProvenanceDisplaysObservedCliAndUnknownCredentials() started.
+◇ Test apiProvenanceClientSendsVersionAsQueryParameter() started.
+◇ Test degradedCouncilDoesNotRepeatFirstGateFindingInCanonicalProvenance() started.
+◇ Test legacyApiProvenancePreservesUnknownAccountAndDispatchDiagnostic() started.
+◇ Test memoryWorkbenchFormatsScopeProvenanceLabels() started.
+✔ Test memoryWorkbenchFormatsScopeProvenanceLabels() passed after 0.001 seconds.
+✔ Test hostReviewerProvenanceDisplaysObservedCliAndUnknownCredentials() passed after 0.001 seconds.
+✔ Test apiProvenanceDoesNotRequireOrDisplayCliIdentity() passed after 0.001 seconds.
+✔ Test legacyApiProvenancePreservesUnknownAccountAndDispatchDiagnostic() passed after 0.001 seconds.
+✔ Test executionProvenanceKeepsValidationPurposeAndSupportsEarlierRecords() passed after 0.001 seconds.
+✔ Test degradedCouncilDoesNotRepeatFirstGateFindingInCanonicalProvenance() passed after 0.001 seconds.
+✔ Test mapsValidationOverrideFindingProvenance() passed after 0.003 seconds.
+✔ Test apiProvenanceClientSendsVersionAsQueryParameter() passed after 0.005 seconds.
+✔ Test run with 8 tests in 0 suites passed after 0.006 seconds.

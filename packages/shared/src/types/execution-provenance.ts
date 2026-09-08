@@ -4,8 +4,8 @@ import type { RuntimeType } from './runtime.js';
 export interface ExecutionProvenance {
   id: string;
   version: 1 | 2;
-  /** v2 identifies selected direct API dispatch preparation. */
-  surface?: 'provider-api';
+  /** v2 distinguishes direct API and host CLI reviewer dispatch preparation. */
+  surface?: 'provider-api' | 'host-cli';
   dispatchModel?: string;
   podId: string;
   taskId: string;

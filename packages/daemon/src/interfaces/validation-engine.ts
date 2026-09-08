@@ -24,6 +24,10 @@ export interface ValidationEngineConfig {
   recordReviewerApiDispatch?: (dispatchModel: string) => void;
   /** Legacy daemon API-key path; provider/account identity is not established. */
   recordLegacyReviewerApiDispatch?: (dispatchModel: string) => void;
+  /** Host CLI receipt after its version probe and immediately before dispatch. */
+  recordHostReviewerDispatch?: (
+    evidence: import('../runtimes/host-cli-provenance.js').HostCliDispatchEvidence,
+  ) => void;
   /** Trusted collector, not a client-provided hash. Missing identity always executes checks. */
   captureEvidenceIdentity?: () => Promise<
     import('@autopod/shared').ValidationInputIdentity | undefined

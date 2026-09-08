@@ -12,12 +12,13 @@ public struct ExecutionProvenance: Codable, Sendable {
   public let version: Int?
   public let surface: String?
   public let dispatchModel: String?
-  public var runtimeLabel: String { surface == "provider-api" ? "Provider API · dispatch model \(dispatchModel ?? "unverified")" : "\(runtime ?? "unverified") CLI \(cliVersion ?? "unverified")" }
-  public var imageLabel: String { surface == "provider-api" ? "not applicable" : (imageDigest ?? "unverified") }
+  public var runtimeLabel: String { surface == "provider-api" ? "Provider API · dispatch model \(dispatchModel ?? "unverified")" : "\(surface == "host-cli" ? "Host " : "")\(runtime ?? "unverified") CLI \(cliVersion ?? "unverified")" }
+  public var imageLabel: String { (surface == "provider-api" || surface == "host-cli") ? "not applicable" : (imageDigest ?? "unverified") }
   public let runtime: String?
   public let model: String
   public let providerId: String?
   public let providerAccountId: String?
+  public let cliPath: String?
   public let cliVersion: String?
   public let imageDigest: String?
   public let contractHash: String

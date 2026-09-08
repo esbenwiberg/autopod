@@ -125,9 +125,14 @@ export function DispatchPreflightPanel({ pod }: { pod: Pod }) {
             {environment.subject === 'reviewer' ? 'Reviewer' : 'Configured worker'}:{' '}
             {environment.surface === 'provider-api'
               ? `Provider API · dispatch model ${environment.dispatchModel}`
-              : `${environment.runtime} CLI ${environment.cliVersion ?? 'unverified'}`}{' '}
+              : `${environment.surface === 'host-cli' ? 'Host ' : ''}${environment.runtime} CLI ${environment.cliVersion ?? 'unverified'}`}{' '}
             · {environment.model}
           </p>
+          {environment.surface === 'host-cli' ? (
+            <p>
+              Executable: <code>{environment.cliPath ?? 'unverified'}</code>
+            </p>
+          ) : null}
           <p>
             Provider: {environment.providerId ?? 'unverified'} · account:{' '}
             {environment.providerAccountId ?? 'not recorded'}
@@ -139,9 +144,7 @@ export function DispatchPreflightPanel({ pod }: { pod: Pod }) {
           <p>
             Image:{' '}
             <code>
-              {environment.surface === 'provider-api'
-                ? 'not applicable'
-                : (environment.imageDigest ?? 'unverified')}
+              {environment.surface ? 'not applicable' : (environment.imageDigest ?? 'unverified')}
             </code>
           </p>
           <p>

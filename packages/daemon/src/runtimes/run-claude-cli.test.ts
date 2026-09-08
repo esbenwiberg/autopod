@@ -1,4 +1,7 @@
 import { type ChildProcess, spawn } from 'node:child_process';
+import fs from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 import { createMockChildProcess } from '../test-utils/mock-helpers.js';
 import { ClaudeCliError, runClaudeCli } from './run-claude-cli.js';
@@ -13,6 +16,96 @@ function bash(script: string) {
 }
 
 describe('runClaudeCli', () => {
+  it.each([
+    'missing',
+    'invalid-version',
+    'changed-executable',
+    'deleted-executable',
+    'timeout',
+  ] as const)('blocks host review when CLI provenance is %s', async (fault) => {
+    const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'autopod-host-blocked-'));
+    const command = path.join(directory, 'claude');
+    const probe =
+      fault === 'timeout'
+        ? 'exec /bin/sleep 1'
+        : fault === 'deleted-executable'
+          ? 'rm -- "$0"; echo "2.9.1"'
+          : fault === 'changed-executable'
+            ? 'echo "# changed" >> "$0"; echo "2.9.1"'
+            : 'echo "version unavailable"';
+    if (fault !== 'missing')
+      await fs.writeFile(
+        command,
+        `#!/bin/sh\nif [ "$1" = "--version" ]; then ${probe}; exit 0; fi\necho dispatched > dispatch.txt\n`,
+        { mode: 0o700 },
+      );
+    const recordHostDispatch = vi.fn();
+    try {
+      await expect(
+        runClaudeCli({
+          model: MODEL,
+          command,
+          input: 'review',
+          timeout: fault === 'timeout' ? 100 : 2000,
+          spawnOptions: { cwd: directory },
+          recordHostDispatch,
+        }),
+      ).rejects.toBeInstanceOf(Error);
+      expect(recordHostDispatch).toHaveBeenCalledWith(
+        expect.objectContaining({ status: 'blocked', model: MODEL }),
+      );
+      await expect(fs.stat(path.join(directory, 'dispatch.txt'))).rejects.toMatchObject({
+        code: 'ENOENT',
+      });
+    } finally {
+      await fs.rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  it.each([false, true])(
+    'records observed host CLI version before dispatch; receipt rejection=%s',
+    async (rejectReceipt) => {
+      const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'autopod-host-reviewer-'));
+      const command = path.join(directory, 'claude');
+      const dispatch = path.join(directory, 'dispatch.txt');
+      await fs.writeFile(
+        command,
+        '#!/bin/sh\nif [ "$1" = "--version" ]; then echo "2.9.1 (fixture)"; exit 0; fi\necho dispatched > dispatch.txt\necho fixture-verdict\n',
+        { mode: 0o700 },
+      );
+      const recordHostDispatch = vi.fn(() => {
+        if (rejectReceipt) throw new Error('fixture receipt rejected');
+      });
+      try {
+        const result = runClaudeCli({
+          model: MODEL,
+          input: 'review',
+          timeout: 1000,
+          command,
+          spawnOptions: { cwd: directory },
+          recordHostDispatch,
+        });
+        if (rejectReceipt) {
+          await expect(result).rejects.toThrow('fixture receipt rejected');
+          await expect(fs.stat(dispatch)).rejects.toMatchObject({ code: 'ENOENT' });
+        } else {
+          expect((await result).stdout.trim()).toBe('fixture-verdict');
+          expect(await fs.readFile(dispatch, 'utf8')).toBe('dispatched\n');
+        }
+        expect(recordHostDispatch).toHaveBeenCalledWith(
+          expect.objectContaining({
+            model: MODEL,
+            cliPath: await fs.realpath(command),
+            cliVersion: '2.9.1',
+            status: 'checked',
+          }),
+        );
+      } finally {
+        await fs.rm(directory, { recursive: true, force: true });
+      }
+    },
+  );
+
   it('checks reviewer ownership immediately before host spawn', async () => {
     const { child } = createMockChildProcess();
     const spawnImpl = vi.fn(() => {

@@ -1,0 +1,29 @@
+
+ RUN  v4.1.11 /private/tmp/autopod-durable-execution/packages/daemon
+
+ ❯ src/runtimes/run-claude-cli.test.ts (22 tests | 1 failed | 21 skipped) 323ms
+     × blocks host review when CLI provenance is deleted-executable 323ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/runtimes/run-claude-cli.test.ts > runClaudeCli > blocks host review when CLI provenance is deleted-executable
+AssertionError: expected "vi.fn()" to be called with arguments: [ ObjectContaining{…} ]
+
+Number of calls: 0
+
+ ❯ src/runtimes/run-claude-cli.test.ts:50:36
+     48|           }),
+     49|         ).rejects.toBeInstanceOf(Error);
+     50|         expect(recordHostDispatch).toHaveBeenCalledWith(
+       |                                    ^
+     51|           expect.objectContaining({ status: 'blocked', model: MODEL }),
+     52|         );
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 21 skipped (22)
+   Start at  16:28:55
+   Duration  620ms (transform 132ms, setup 0ms, import 201ms, tests 323ms, environment 0ms)
+

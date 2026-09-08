@@ -1,0 +1,77 @@
+
+ RUN  v4.1.11 /private/tmp/autopod-durable-execution/packages/daemon
+
+ ❯ src/runtimes/run-claude-cli.test.ts (17 tests | 2 failed) 5986ms
+     × records observed host CLI version before dispatch; receipt rejection=false 213ms
+     × records observed host CLI version before dispatch; receipt rejection=true 111ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 2 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/runtimes/run-claude-cli.test.ts > runClaudeCli > records observed host CLI version before dispatch; receipt rejection=false
+AssertionError: expected "vi.fn()" to be called with arguments: [ ObjectContaining{…} ]
+
+Received:
+
+  1st vi.fn() call:
+
+  [
+-   ObjectContaining {
+-     "cliPath": "/var/folders/k6/nj5ps5vj2078xw4xv9_1k_3m0000gn/T/autopod-host-reviewer-4YmMLe/claude",
++   {
++     "cliPath": "/private/var/folders/k6/nj5ps5vj2078xw4xv9_1k_3m0000gn/T/autopod-host-reviewer-4YmMLe/claude",
+      "cliVersion": "2.9.1",
+      "model": "fake-model",
+      "status": "checked",
+    },
+  ]
+
+
+Number of calls: 1
+
+ ❯ src/runtimes/run-claude-cli.test.ts:49:36
+     47|           expect(await fs.readFile(dispatch, 'utf8')).toBe('dispatched…
+     48|         }
+     49|         expect(recordHostDispatch).toHaveBeenCalledWith(
+       |                                    ^
+     50|           expect.objectContaining({
+     51|             model: MODEL,
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/2]⎯
+
+ FAIL  src/runtimes/run-claude-cli.test.ts > runClaudeCli > records observed host CLI version before dispatch; receipt rejection=true
+AssertionError: expected "vi.fn()" to be called with arguments: [ ObjectContaining{…} ]
+
+Received:
+
+  1st vi.fn() call:
+
+  [
+-   ObjectContaining {
+-     "cliPath": "/var/folders/k6/nj5ps5vj2078xw4xv9_1k_3m0000gn/T/autopod-host-reviewer-Ro5nM5/claude",
++   {
++     "cliPath": "/private/var/folders/k6/nj5ps5vj2078xw4xv9_1k_3m0000gn/T/autopod-host-reviewer-Ro5nM5/claude",
+      "cliVersion": "2.9.1",
+      "model": "fake-model",
+      "status": "checked",
+    },
+  ]
+
+
+Number of calls: 1
+
+ ❯ src/runtimes/run-claude-cli.test.ts:49:36
+     47|           expect(await fs.readFile(dispatch, 'utf8')).toBe('dispatched…
+     48|         }
+     49|         expect(recordHostDispatch).toHaveBeenCalledWith(
+       |                                    ^
+     50|           expect.objectContaining({
+     51|             model: MODEL,
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/2]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  2 failed | 15 passed (17)
+   Start at  16:20:07
+   Duration  6.31s (transform 137ms, setup 0ms, import 218ms, tests 5.99s, environment 0ms)
+

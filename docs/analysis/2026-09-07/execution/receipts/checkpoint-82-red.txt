@@ -1,0 +1,53 @@
+
+ RUN  v4.1.11 /private/tmp/autopod-durable-execution/packages/daemon
+
+ ❯ src/runtimes/run-claude-cli.test.ts (17 tests | 2 failed | 15 skipped) 392ms
+     × records observed host CLI version before dispatch; receipt rejection=false 280ms
+     × records observed host CLI version before dispatch; receipt rejection=true 111ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 2 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/runtimes/run-claude-cli.test.ts > runClaudeCli > records observed host CLI version before dispatch; receipt rejection=false
+AssertionError: expected "vi.fn()" to be called with arguments: [ ObjectContaining{…} ]
+
+Number of calls: 0
+
+ ❯ src/runtimes/run-claude-cli.test.ts:37:34
+     35|         expect(await fs.readFile(dispatch, 'utf8')).toBe('dispatched\n…
+     36|       }
+     37|       expect(recordHostDispatch).toHaveBeenCalledWith(expect.objectCon…
+       |                                  ^
+     38|         model: MODEL, cliPath: command, cliVersion: '2.9.1', status: '…
+     39|       }));
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/2]⎯
+
+ FAIL  src/runtimes/run-claude-cli.test.ts > runClaudeCli > records observed host CLI version before dispatch; receipt rejection=true
+AssertionError: promise resolved "{ stdout: 'fixture-verdict\n' }" instead of rejecting
+
+- Expected
++ Received
+
+- Error {
+-   "message": "rejected promise",
++ {
++   "stdout": "fixture-verdict
++ ",
+  }
+
+ ❯ src/runtimes/run-claude-cli.test.ts:31:28
+     29|         command, spawnOptions: { cwd: directory }, recordHostDispatch …
+     30|       if (rejectReceipt) {
+     31|         await expect(result).rejects.toThrow('fixture receipt rejected…
+       |                            ^
+     32|         await expect(fs.stat(dispatch)).rejects.toMatchObject({ code: …
+     33|       } else {
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/2]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  2 failed | 15 skipped (17)
+   Start at  16:18:35
+   Duration  688ms (transform 128ms, setup 0ms, import 200ms, tests 392ms, environment 0ms)
+

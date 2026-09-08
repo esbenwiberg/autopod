@@ -410,13 +410,15 @@ const server = createServer(async (req, res) => {
       latest: JSON.parse(
         await readFile(
           new URL(
-            process.env.FIXTURE_MODE === 'legacy-api-reviewer-provenance'
-              ? './legacy-api-reviewer-provenance.json'
-              : process.env.FIXTURE_MODE === 'api-reviewer-provenance'
-                ? './api-reviewer-provenance.json'
-                : process.env.FIXTURE_MODE === 'reviewer-provenance'
-                  ? './reviewer-provenance.json'
-                  : './execution-provenance.json',
+            process.env.FIXTURE_MODE === 'host-reviewer-provenance'
+              ? './host-reviewer-provenance.json'
+              : process.env.FIXTURE_MODE === 'legacy-api-reviewer-provenance'
+                ? './legacy-api-reviewer-provenance.json'
+                : process.env.FIXTURE_MODE === 'api-reviewer-provenance'
+                  ? './api-reviewer-provenance.json'
+                  : process.env.FIXTURE_MODE === 'reviewer-provenance'
+                    ? './reviewer-provenance.json'
+                    : './execution-provenance.json',
             import.meta.url,
           ),
           'utf8',

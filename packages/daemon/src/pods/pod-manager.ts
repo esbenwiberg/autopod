@@ -242,7 +242,11 @@ import {
   validateRegistryFiles,
 } from './registry-injector.js';
 import { waitForRetryBackoff } from './retry-backoff-wait.js';
-import { legacyReviewerApiProvenance, reviewerApiProvenance } from './reviewer-api-provenance.js';
+import {
+  legacyReviewerApiProvenance,
+  reviewerApiProvenance,
+  reviewerHostCliProvenance,
+} from './reviewer-api-provenance.js';
 import { addRuntimeNetworkDefaults } from './runtime-network-defaults.js';
 import {
   resolveEffectiveReviewerProfile,
@@ -7385,6 +7389,23 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         legacyReviewerApiProvenance,
         resolveToolReviewModelId,
       ),
+      recordHostReviewerDispatch: (evidence) => {
+        const pod = ownership.assertCurrent();
+        resolveEffectiveBoundProfile(pod);
+        if (evidence.model !== (config.reviewerModel ?? 'auto'))
+          throw new TaskRetryBlockedError(
+            'Host reviewer model differs from the frozen validation configuration.',
+          );
+        if (!podRepo.executionProvenance)
+          throw new TaskRetryBlockedError(
+            'Host reviewer provenance ledger is unavailable; reconcile before dispatch.',
+          );
+        podRepo.executionProvenance.record(
+          pod.id,
+          pod.lifecycleGeneration,
+          reviewerHostCliProvenance(config, evidence),
+        );
+      },
       beforeReviewerLaunch: async (identity) => {
         resolveEffectiveBoundProfile(ownership.assertCurrent());
         const selectedRuntime = resolveContainerReviewer({

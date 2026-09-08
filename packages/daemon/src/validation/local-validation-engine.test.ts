@@ -3427,11 +3427,13 @@ human_review: []
       },
     });
     const assertReviewerCurrent = vi.fn();
+    const recordHostDispatch = vi.fn();
     const engine = createLocalValidationEngine(stubContainerManager());
 
     const result = await engine.validate(
       baseConfig({
         assertReviewerCurrent,
+        recordHostReviewerDispatch: recordHostDispatch,
         reviewerModel: 'claude-sonnet-4-6',
         reviewDepth: 'deep',
         worktreePath,
@@ -3456,13 +3458,13 @@ human_review: []
     expect(result.taskReview?.tokenUsage?.costUsd).toBeGreaterThan(0);
     expect(runAgenticReview).toHaveBeenCalledTimes(1);
     expect(runClaudeCli).toHaveBeenCalledWith(
-      expect.objectContaining({ beforeSpawn: assertReviewerCurrent }),
+      expect.objectContaining({ beforeSpawn: assertReviewerCurrent, recordHostDispatch }),
     );
     expect(runToolUseReview).toHaveBeenCalledWith(
       expect.objectContaining({ beforeRequest: assertReviewerCurrent }),
     );
     expect(runAgenticReview).toHaveBeenCalledWith(
-      expect.objectContaining({ beforeSpawn: assertReviewerCurrent }),
+      expect.objectContaining({ beforeSpawn: assertReviewerCurrent, recordHostDispatch }),
     );
   });
 

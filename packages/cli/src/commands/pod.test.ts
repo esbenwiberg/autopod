@@ -799,7 +799,7 @@ it('sends the same explicit rerun decision through the actual CLI HTTP client an
   }
 });
 
-it.each([undefined, 'reviewer', 'api', 'legacy-api'] as const)(
+it.each([undefined, 'reviewer', 'api', 'legacy-api', 'host'] as const)(
   'reads subject=%s provenance through the real HTTP client with legacy and reviewer identity',
   async (subject) => {
     const server = createServer((request, response) => {
@@ -813,16 +813,33 @@ it.each([undefined, 'reviewer', 'api', 'legacy-api'] as const)(
                   status: 'blocked',
                   purpose: subject ? 'review' : 'validation',
                   subject: subject ? 'reviewer' : undefined,
-                  providerId: subject && subject !== 'legacy-api' ? 'anthropic' : null,
-                  providerAccountId: subject && subject !== 'legacy-api' ? 'review-account' : null,
+                  providerId:
+                    subject && subject !== 'legacy-api' && subject !== 'host' ? 'anthropic' : null,
+                  providerAccountId:
+                    subject && subject !== 'legacy-api' && subject !== 'host'
+                      ? 'review-account'
+                      : null,
                   checkedAt: 'today',
                   executionId: 'execution',
                   generation: 1,
-                  runtime: subject === 'api' || subject === 'legacy-api' ? null : 'codex',
+                  runtime:
+                    subject === 'api' || subject === 'legacy-api'
+                      ? null
+                      : subject === 'host'
+                        ? 'claude'
+                        : 'codex',
                   ...(subject === 'api' || subject === 'legacy-api'
                     ? { version: 2, surface: 'provider-api', dispatchModel: 'resolved-model' }
                     : {}),
                   model: 'fixture',
+                  ...(subject === 'host'
+                    ? {
+                        version: 2,
+                        surface: 'host-cli',
+                        dispatchModel: 'fixture',
+                        cliPath: '/fixture/claude',
+                      }
+                    : {}),
                   cliVersion: '0.144.4',
                   release: { commitSha: null },
                   imageDigest: null,
@@ -869,16 +886,18 @@ it.each([undefined, 'reviewer', 'api', 'legacy-api'] as const)(
       expect(output).toContain(
         subject === 'api' || subject === 'legacy-api'
           ? 'Reviewer: Provider API'
-          : `${subject ? 'Reviewer' : 'Configured worker'}: codex CLI 0.144.4`,
+          : subject === 'host'
+            ? 'Reviewer: Host claude CLI 0.144.4'
+            : `${subject ? 'Reviewer' : 'Configured worker'}: codex CLI 0.144.4`,
       );
       expect(output).toContain(
-        subject && subject !== 'legacy-api'
+        subject && subject !== 'legacy-api' && subject !== 'host'
           ? 'Provider anthropic; account review-account'
           : 'Provider unverified; account not recorded',
       );
       expect(output).toContain('Memory unverified bytes; CPU unverified');
       expect(output).toContain(
-        `Daemon unverified; image ${subject === 'api' || subject === 'legacy-api' ? 'not applicable' : 'unverified'}`,
+        `Daemon unverified; image ${subject === 'api' || subject === 'legacy-api' || subject === 'host' ? 'not applicable' : 'unverified'}`,
       );
       if (subject === 'api' || subject === 'legacy-api') {
         expect(output).toContain('dispatch model resolved-model');

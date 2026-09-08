@@ -1,4 +1,5 @@
 import { type ChildProcess, type SpawnOptions, spawn } from 'node:child_process';
+import { type HostCliDispatchEvidence, runWithHostCliProvenance } from './host-cli-provenance.js';
 
 export type ClaudeCliErrorKind =
   | 'non-zero-exit'
@@ -102,7 +103,9 @@ export interface ClaudeCliTokenUsage {
  * fields (exit code, signal, stderr, duration) so callers and the UI can
  * tell what actually went wrong rather than guessing from substring matches.
  */
-export function runClaudeCli(opts: {
+export interface ClaudeCliOptions {
+  /** Trusted receipt writer enables host identity verification before reviewer dispatch. */
+  recordHostDispatch?: (evidence: HostCliDispatchEvidence) => void;
   model: string;
   input: string;
   timeout: number;
@@ -119,7 +122,12 @@ export function runClaudeCli(opts: {
   outputFormat?: 'text' | 'json';
   /** Test seam — defaults to `['-p', '--model', model, '--output-format', outputFormat]`. */
   args?: readonly string[];
-}): Promise<{ stdout: string; tokenUsage?: ClaudeCliTokenUsage }> {
+}
+
+export function runClaudeCli(
+  opts: ClaudeCliOptions,
+): Promise<{ stdout: string; tokenUsage?: ClaudeCliTokenUsage }> {
+  if (opts.recordHostDispatch) return runWithHostCliProvenance(opts, runClaudeCli);
   const maxBuf = opts.maxBuffer ?? 2 * 1024 * 1024;
   const spawnFn = opts.spawnImpl ?? spawn;
   const command = opts.command ?? 'claude';
