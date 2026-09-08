@@ -251,7 +251,11 @@ export function composeManagedAcceptance(
         route: config.request.route,
         manager: dependencies.manager,
         image: config.image,
-        command: codexReportCommand(config.request.route, config.mirror.enrollmentId),
+        command: codexReportCommand(
+          config.request.route,
+          config.mirror.enrollmentId,
+          config.request.inputArtifacts[0]?.name,
+        ),
         transport: provider,
         channel,
         maximumRequests: 1,
