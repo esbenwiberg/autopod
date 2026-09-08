@@ -77,8 +77,10 @@ describe('review tool runner - Anthropic request shape', () => {
         });
       const { runToolUseReview } = await import('./review-tool-runner.js');
       const beforeRequest = vi.fn();
+      const onDispatch = vi.fn();
       const result = await runToolUseReview({
         beforeRequest,
+        onDispatch,
         model: 'configured',
         prompt: 'review',
         worktreePath: root,
@@ -89,7 +91,8 @@ describe('review tool runner - Anthropic request shape', () => {
         },
       });
       expect(create).toHaveBeenCalledTimes(2);
-      expect(beforeRequest).toHaveBeenCalledTimes(5);
+      expect(beforeRequest).toHaveBeenCalledTimes(7);
+      expect(onDispatch.mock.calls).toEqual([['selected-deployment'], ['selected-deployment']]);
       expect(create.mock.calls.map(([body]) => body.model)).toEqual([
         'selected-deployment',
         'selected-deployment',

@@ -62,3 +62,11 @@ import Testing
   #expect(reviewer.runtime == "claude"); #expect(reviewer.model == "reviewer-model")
   #expect(reviewer.providerId == "anthropic"); #expect(reviewer.providerAccountId == "review-account")
 }
+
+@Test func apiProvenanceDoesNotRequireOrDisplayCliIdentity() throws {
+  let raw = Data(#"{"version":2,"surface":"provider-api","dispatchModel":"resolved","subject":"reviewer","purpose":"review","executionId":"exec","generation":1,"checkedAt":"today","status":"checked","runtime":null,"model":"alias","contractHash":"hash","release":{"source":"unavailable"},"capabilities":{"streamingExec":"unverified"},"commands":{"requirements":[],"unresolvedSources":[],"deferredArtifacts":[],"explicitDependencies":false},"diagnostics":[]}"#.utf8)
+  let record = try JSONDecoder().decode(ExecutionProvenance.self, from: raw)
+  #expect(record.runtime == nil)
+  #expect(record.runtimeLabel == "Provider API · dispatch model resolved")
+  #expect(record.imageLabel == "not applicable")
+}

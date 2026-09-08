@@ -793,7 +793,7 @@ it('sends the same explicit rerun decision through the actual CLI HTTP client an
   }
 });
 
-it.each([undefined, 'reviewer'] as const)(
+it.each([undefined, 'reviewer', 'api'] as const)(
   'reads subject=%s provenance through the real HTTP client with legacy and reviewer identity',
   async (subject) => {
     const server = createServer((request, response) => {
@@ -801,18 +801,21 @@ it.each([undefined, 'reviewer'] as const)(
       response.setHeader('content-type', 'application/json');
       response.end(
         JSON.stringify(
-          request.url?.endsWith('execution-provenance')
+          request.url?.endsWith('execution-provenance?schemaVersion=2')
             ? {
                 latest: {
                   status: 'blocked',
-                  purpose: subject === 'reviewer' ? 'review' : 'validation',
-                  subject,
+                  purpose: subject ? 'review' : 'validation',
+                  subject: subject ? 'reviewer' : undefined,
                   providerId: subject ? 'anthropic' : null,
                   providerAccountId: subject ? 'review-account' : null,
                   checkedAt: 'today',
                   executionId: 'execution',
                   generation: 1,
-                  runtime: 'codex',
+                  runtime: subject === 'api' ? null : 'codex',
+                  ...(subject === 'api'
+                    ? { version: 2, surface: 'provider-api', dispatchModel: 'resolved-model' }
+                    : {}),
                   model: 'fixture',
                   cliVersion: '0.144.4',
                   release: { commitSha: null },
@@ -851,14 +854,24 @@ it.each([undefined, 'reviewer'] as const)(
       await program.parseAsync(['node', 'ap', 'execution-provenance', 'abcd1234']);
       const output = log.mock.calls.flat().join('\n');
       expect(output).toContain(`${subject ? 'review' : 'validation'} preflight blocked`);
-      expect(output).toContain(`${subject ? 'Reviewer' : 'Configured worker'}: codex CLI 0.144.4`);
+      expect(output).toContain(
+        subject === 'api'
+          ? 'Reviewer: Provider API'
+          : `${subject ? 'Reviewer' : 'Configured worker'}: codex CLI 0.144.4`,
+      );
       expect(output).toContain(
         subject
           ? 'Provider anthropic; account review-account'
           : 'Provider unverified; account not recorded',
       );
       expect(output).toContain('Memory unverified bytes; CPU unverified');
-      expect(output).toContain('Daemon unverified; image unverified');
+      expect(output).toContain(
+        `Daemon unverified; image ${subject === 'api' ? 'not applicable' : 'unverified'}`,
+      );
+      if (subject === 'api') {
+        expect(output).toContain('dispatch model resolved-model');
+        expect(output).not.toContain('CLI');
+      }
       expect(output).toContain('dotnet missing');
     } finally {
       log.mockRestore();

@@ -1,0 +1,33 @@
+- generic [ref=e15]:
+  - heading "Dispatch preflight" [level=2] [ref=e16]
+  - paragraph [ref=e79]: review_required · 2026-09-07T15:00:00Z
+  - paragraph [ref=e80]: github.com/example/repo · main
+  - paragraph [ref=e81]:
+    - text: "Fresh base:"
+    - code [ref=e82]: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+  - paragraph [ref=e83]:
+    - text: "Equivalent work:"
+    - link "prior-fixture" [ref=e84] [cursor=pointer]:
+      - /url: "#/pod/prior-fixture"
+    - text: · validated · dispatch_receipt
+  - heading "Execution environment" [level=3] [ref=e18]
+  - paragraph [ref=e85]: review preflight checked · generation 1 · 2026-09-07T16:30:00Z
+  - paragraph [ref=e86]: "Reviewer: Provider API · dispatch model resolved-local-model · local-reviewer-model"
+  - paragraph [ref=e87]: "Provider: foundry · account: local-reviewer-account"
+  - paragraph [ref=e88]: "Daemon: unverified"
+  - paragraph [ref=e89]:
+    - text: "Image:"
+    - code [ref=e90]: not applicable
+  - paragraph [ref=e91]:
+    - text: "Validation implementation:"
+    - code [ref=e92]: unverified
+  - paragraph [ref=e93]:
+    - text: "Contract:"
+    - code [ref=e94]: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+  - paragraph [ref=e95]: "Memory: unverified bytes · CPU: unverified"
+  - paragraph [ref=e96]: "Local fixture: selected profile API client prepared for dispatch. This receipt does not prove a provider response, billed execution or completion. CLI and image are not applicable; API client version and remote capabilities are unverified."
+  - paragraph [ref=e20]: To intentionally repeat this request, provide a reason. This creates a distinct task and may run a coding agent. Fresh contract, provider, and environment checks still apply.
+  - generic [ref=e21]:
+    - text: Reason for intentional rerun
+    - textbox "Reason for intentional rerun" [ref=e22]
+  - button "Create intentional rerun" [disabled] [ref=e23]

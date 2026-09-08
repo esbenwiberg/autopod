@@ -3768,6 +3768,7 @@ async function runTaskReview(
             prompt,
             reviewTimeout,
             config.assertReviewerCurrent,
+            config.recordReviewerApiDispatch,
           );
           stdout = providerReview.stdout;
           tier1TokenUsage = providerReview.tokenUsage;
@@ -3884,7 +3885,10 @@ async function runTaskReview(
         worktreePath,
         timeout: reviewTimeout,
         ...(shouldUseProfileBoundAnthropicReviewer(config)
-          ? { providerClient: await getBoundProvider() }
+          ? {
+              providerClient: await getBoundProvider(),
+              onDispatch: config.recordReviewerApiDispatch,
+            }
           : { apiKey: config.reviewerApiKey }),
       });
 
@@ -4173,10 +4177,13 @@ async function runProfileBoundAnthropicReview(
   prompt: string,
   timeout: number,
   assertCurrent?: () => void,
+  onDispatch?: (model: string) => void,
 ): Promise<{
   stdout: string;
   tokenUsage?: { inputTokens: number; outputTokens: number; cachedInputTokens?: number };
 }> {
+  assertCurrent?.();
+  onDispatch?.(llm.model);
   assertCurrent?.();
   const response = await llm.client.messages.create(
     {

@@ -12,6 +12,24 @@ export interface ExecutionProvenanceLedger {
 export function createExecutionProvenanceLedger(db: Database.Database): ExecutionProvenanceLedger {
   return {
     record: db.transaction((podId: string, generation: number, input: ExecutionProvenanceInput) => {
+      if (
+        (input.version === 1 && (!input.runtime || input.surface || input.dispatchModel)) ||
+        (input.version === 2 &&
+          (input.surface !== 'provider-api' ||
+            input.runtime !== null ||
+            input.subject !== 'reviewer' ||
+            input.purpose !== 'review' ||
+            !input.dispatchModel?.trim() ||
+            input.cliPath !== null ||
+            input.cliVersion !== null ||
+            input.imageDigest !== null)) ||
+        (input.version !== 1 && input.version !== 2)
+      )
+        throw new AutopodError(
+          'Invalid execution provenance surface identity',
+          'PROVENANCE_INVALID',
+          409,
+        );
       const identity = db
         .prepare(
           'SELECT e.execution_id AS executionId,e.task_id AS taskId,p.lifecycle_generation AS generation FROM task_executions e JOIN pods p ON p.id=e.pod_id WHERE e.pod_id=?',

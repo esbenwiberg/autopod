@@ -20,6 +20,8 @@ export interface ValidationEngineConfig {
   beforeReviewerLaunch?: BeforeReviewerLaunch;
   /** Trusted synchronous ownership fence for host/API reviewer dispatch and tool turns. */
   assertReviewerCurrent?: () => void;
+  /** Trusted receipt writer for the selected profile API client, before each request. */
+  recordReviewerApiDispatch?: (dispatchModel: string) => void;
   /** Trusted collector, not a client-provided hash. Missing identity always executes checks. */
   captureEvidenceIdentity?: () => Promise<
     import('@autopod/shared').ValidationInputIdentity | undefined

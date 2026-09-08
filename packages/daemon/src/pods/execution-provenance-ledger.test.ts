@@ -35,7 +35,7 @@ const input: ExecutionProvenanceInput = {
   },
   diagnostics: [{ code: 'PREFLIGHT_RUNTIME_UNAVAILABLE', detail: 'CLI version unknown' }],
 };
-it.each([undefined, 'worker', 'reviewer'] as const)(
+it.each([undefined, 'worker', 'reviewer', 'api'] as const)(
   'retains subject=%s failed provenance through restart and deletion without changing receipts',
   (subject) => {
     const f = createTestDb();
@@ -58,9 +58,41 @@ it.each([undefined, 'worker', 'reviewer'] as const)(
     const saved = repo.executionProvenance?.record('pod', 1, {
       ...input,
       purpose: 'review',
-      subject,
+      subject: subject === 'api' ? 'reviewer' : subject,
+      ...(subject === 'api'
+        ? ({
+            version: 2,
+            surface: 'provider-api',
+            runtime: null,
+            dispatchModel: 'resolved-model',
+          } as const)
+        : {}),
     });
     expect(saved).toBeTruthy();
+    for (const invalid of [
+      {
+        version: 2,
+        surface: 'provider-api',
+        subject: 'reviewer',
+        purpose: 'review',
+        runtime: 'claude',
+        dispatchModel: 'resolved',
+      },
+      {
+        version: 2,
+        surface: 'provider-api',
+        subject: 'reviewer',
+        purpose: 'review',
+        runtime: null,
+      },
+      { version: 1, runtime: null },
+    ])
+      expect(() =>
+        repo.executionProvenance?.record('pod', 1, {
+          ...input,
+          ...invalid,
+        } as ExecutionProvenanceInput),
+      ).toThrow('surface identity');
     expect(() => repo.executionProvenance?.record('pod', 2, input)).toThrow('current lifecycle');
     expect(() => f.prepare("UPDATE execution_provenance SET payload = '{}'").run()).toThrow(
       'immutable',

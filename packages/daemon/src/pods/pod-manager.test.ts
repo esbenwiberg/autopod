@@ -13995,6 +13995,50 @@ describe('PodManager', () => {
       },
     );
 
+    it('records versioned selected API dispatch and rejects stale or mismatched launches', async () => {
+      const ctx = createTestContext();
+      ctx.db
+        .prepare("UPDATE profiles SET reviewer_model = ? WHERE name = 'test-profile'")
+        .run('review-model');
+      const manager = createPodManager(ctx.deps);
+      const pod = manager.createSession(
+        { profileName: 'test-profile', task: 'Record API review' },
+        'operator',
+      );
+      ctx.podRepo.update(pod.id, {
+        status: 'running',
+        containerId: 'ctr-1',
+        worktreePath: '/tmp/worktree/abc',
+      });
+      let record: ((model: string) => void) | undefined;
+      let proved = false;
+      vi.mocked(ctx.validationEngine.validate).mockImplementation(async (config) => {
+        record = config.recordReviewerApiDispatch;
+        expect(record).toBeTypeOf('function');
+        expect(() => record?.('different-model')).toThrow(/identity/i);
+        record?.('review-model');
+        expect(ctx.podRepo.executionProvenance?.latest(pod.id)).toMatchObject({
+          version: 2,
+          surface: 'provider-api',
+          subject: 'reviewer',
+          purpose: 'review',
+          runtime: null,
+          model: 'review-model',
+          dispatchModel: 'review-model',
+          cliVersion: null,
+          imageDigest: null,
+        });
+        proved = true;
+        ctx.podRepo.update(pod.id, { status: 'running', containerId: 'replacement-container' });
+        return makeValidationResult({ podId: pod.id, attempt: 1 });
+      });
+      await manager.triggerValidation(pod.id);
+      expect(proved).toBe(true);
+      expect(record).toBeTypeOf('function');
+      expect(() => record?.('review-model')).toThrow(/superseded/i);
+      expect(ctx.runtime.resume).not.toHaveBeenCalled();
+    });
+
     it('binds non-container reviewer launch ownership to the actual validation invocation', async () => {
       const ctx = createTestContext();
       const manager = createPodManager(ctx.deps);

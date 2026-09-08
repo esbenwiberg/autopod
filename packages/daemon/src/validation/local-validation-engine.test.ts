@@ -3834,12 +3834,14 @@ human_review: []
       model: 'claude-sonnet-4-6',
     } as Awaited<ReturnType<typeof createProviderAnthropicClient>>);
     const assertReviewerCurrent = vi.fn();
+    const recordReviewerApiDispatch = vi.fn();
     const cm = stubContainerManager();
     const engine = createLocalValidationEngine(cm);
 
     const result = await engine.validate(
       baseConfig({
         assertReviewerCurrent,
+        recordReviewerApiDispatch,
         reviewerProvider: 'foundry',
         reviewerProviderCredentials: {
           provider: 'foundry',
@@ -3870,7 +3872,11 @@ human_review: []
       },
     });
     expect(result.overall).toBe('pass');
-    expect(assertReviewerCurrent).toHaveBeenCalledTimes(3);
+    expect(assertReviewerCurrent).toHaveBeenCalledTimes(4);
+    expect(recordReviewerApiDispatch).toHaveBeenCalledWith('claude-sonnet-4-6');
+    expect(recordReviewerApiDispatch.mock.invocationCallOrder[0]).toBeLessThan(
+      messagesCreate.mock.invocationCallOrder[0] ?? 0,
+    );
     expect(vi.mocked(runClaudeCli)).not.toHaveBeenCalled();
     expect(createProviderAnthropicClient).toHaveBeenCalledWith(
       {

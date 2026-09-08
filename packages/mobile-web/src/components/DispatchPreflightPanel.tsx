@@ -44,7 +44,9 @@ export function DispatchPreflightPanel({ pod }: { pod: Pod }) {
       .catch((err) => {
         if (!cancelled) setError(err instanceof Error ? err.message : String(err));
       });
-    apiFetch<{ latest: ExecutionProvenance | null }>(`/pods/${pod.id}/execution-provenance`)
+    apiFetch<{ latest: ExecutionProvenance | null }>(
+      `/pods/${pod.id}/execution-provenance?schemaVersion=2`,
+    )
       .then((value) => {
         if (!cancelled) setEnvironment(value.latest);
       })
@@ -121,7 +123,10 @@ export function DispatchPreflightPanel({ pod }: { pod: Pod }) {
           </p>
           <p>
             {environment.subject === 'reviewer' ? 'Reviewer' : 'Configured worker'}:{' '}
-            {environment.runtime} CLI {environment.cliVersion ?? 'unverified'} · {environment.model}
+            {environment.surface === 'provider-api'
+              ? `Provider API · dispatch model ${environment.dispatchModel}`
+              : `${environment.runtime} CLI ${environment.cliVersion ?? 'unverified'}`}{' '}
+            · {environment.model}
           </p>
           <p>
             Provider: {environment.providerId ?? 'unverified'} · account:{' '}
@@ -132,7 +137,12 @@ export function DispatchPreflightPanel({ pod }: { pod: Pod }) {
             {environment.release.dirty ? ' · modified source' : ''}
           </p>
           <p>
-            Image: <code>{environment.imageDigest ?? 'unverified'}</code>
+            Image:{' '}
+            <code>
+              {environment.surface === 'provider-api'
+                ? 'not applicable'
+                : (environment.imageDigest ?? 'unverified')}
+            </code>
           </p>
           <p>
             Validation implementation:{' '}

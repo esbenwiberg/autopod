@@ -714,7 +714,17 @@ export function podRoutes(
     podRepo.getOrThrow(podId);
     if (!podRepo.executionProvenance)
       throw new AutopodError('Execution provenance unavailable', 'PROVENANCE_UNAVAILABLE', 503);
-    return { latest: podRepo.executionProvenance.latest(podId) };
+    const { schemaVersion } = request.query as { schemaVersion?: string };
+    if (schemaVersion !== undefined && schemaVersion !== '1' && schemaVersion !== '2')
+      throw new AutopodError(
+        'Unsupported provenance schema version',
+        'PROVENANCE_SCHEMA_UNSUPPORTED',
+        400,
+      );
+    const latest = podRepo.executionProvenance.latest(podId);
+    if (latest?.version === 2 && schemaVersion !== '2')
+      return { latest: null, requiresSchemaVersion: 2 };
+    return { latest };
   });
 
   app.get('/pods/:podId/rerun-template', async (request) => {

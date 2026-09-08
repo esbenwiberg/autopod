@@ -234,7 +234,7 @@ export class AutopodClient {
   }
 
   async getExecutionProvenance(id: string): Promise<{ latest: ExecutionProvenance | null }> {
-    return this.request('GET', `/pods/${id}/execution-provenance`);
+    return this.request('GET', `/pods/${id}/execution-provenance?schemaVersion=2`);
   }
 
   async getRerunTemplate(id: string): Promise<CreatePodRequest> {

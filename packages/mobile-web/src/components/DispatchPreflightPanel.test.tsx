@@ -9,7 +9,7 @@ afterEach(() => {
   vi.restoreAllMocks();
   localStorage.clear();
 });
-it.each([undefined, 'reviewer'] as const)(
+it.each([undefined, 'reviewer', 'api'] as const)(
   'retains the complete rerun through reload while labeling provenance subject=%s',
   async (subject) => {
     const draft = {
@@ -36,12 +36,15 @@ it.each([undefined, 'reviewer'] as const)(
             latest: {
               status: 'blocked',
               purpose: subject ? 'review' : 'validation',
-              subject,
+              subject: subject ? 'reviewer' : undefined,
               providerId: subject ? 'anthropic' : null,
               providerAccountId: subject ? 'review-account' : null,
               generation: 1,
               checkedAt: 'today',
-              runtime: 'codex',
+              runtime: subject === 'api' ? null : 'codex',
+              ...(subject === 'api'
+                ? { version: 2, surface: 'provider-api', dispatchModel: 'resolved-model' }
+                : {}),
               cliVersion: '0.144.4',
               model: 'fixture',
               release: { commitSha: null },
@@ -109,7 +112,9 @@ it.each([undefined, 'reviewer'] as const)(
         `${subject ? 'review' : 'validation'} preflight blocked`,
       );
       expect(container.textContent).toContain(
-        `${subject ? 'Reviewer' : 'Configured worker'}: codex CLI 0.144.4`,
+        subject === 'api'
+          ? 'Reviewer: Provider API'
+          : `${subject ? 'Reviewer' : 'Configured worker'}: codex CLI 0.144.4`,
       );
       expect(container.textContent).toContain(
         subject

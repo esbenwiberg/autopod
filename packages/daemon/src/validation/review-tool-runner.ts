@@ -49,6 +49,7 @@ export interface ToolUseReviewConfig {
   maxToolCalls?: number;
   /** Trusted ownership fence before provider dispatch and each local tool operation. */
   beforeRequest?: () => void;
+  onDispatch?: (model: string) => void;
   /** Anthropic API key. If not provided, uses ANTHROPIC_API_KEY env var. */
   apiKey?: string;
   /** Already resolved provider endpoint/auth and exact dispatch model. Never falls back to daemon auth. */
@@ -125,7 +126,20 @@ export async function runToolUseReview(
     return remainingMs;
   };
   while (true) {
-    const remainingMs = checkActive();
+    let remainingMs = checkActive();
+    if (config.onDispatch) {
+      try {
+        config.onDispatch(model);
+      } catch (cause) {
+        throw new ToolReviewError(
+          'ownership-lost',
+          cause instanceof Error ? cause.message : 'Dispatch provenance unavailable',
+          usage(),
+          cause,
+        );
+      }
+      remainingMs = checkActive();
+    }
     let response: Message;
     try {
       response = await client.messages.create(

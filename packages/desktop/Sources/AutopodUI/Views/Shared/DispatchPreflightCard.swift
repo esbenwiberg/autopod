@@ -28,10 +28,10 @@ struct DispatchPreflightCard: View {
       Text("Execution environment").font(.headline)
       if let environment {
         Text("\(environment.purpose ?? "coding") preflight \(environment.status) · generation \(environment.generation) · \(environment.checkedAt)")
-        Text("\(environment.subjectLabel): \(environment.runtime) CLI \(environment.cliVersion ?? "unverified") · \(environment.model)")
+        Text("\(environment.subjectLabel): \(environment.runtimeLabel) · \(environment.model)")
         Text("Provider: \(environment.providerId ?? "unverified") · account: \(environment.providerAccountId ?? "not recorded")")
         Text("Daemon: \(environment.release.commitSha ?? "unverified")\(environment.release.dirty == true ? " · modified source" : "")").textSelection(.enabled)
-        Text("Image: \(environment.imageDigest ?? "unverified")").font(.caption).textSelection(.enabled)
+        Text("Image: \(environment.imageLabel)").font(.caption).textSelection(.enabled)
         Text("Validation implementation: \(environment.validationImplementationHash ?? "unverified")").font(.caption).textSelection(.enabled)
         Text("Contract: \(environment.contractHash)").font(.caption).textSelection(.enabled)
         Text("Memory: \(environment.capabilities.memoryLimitBytes.map(String.init) ?? "unverified") bytes · CPU: \(environment.capabilities.cpuLimit.map { String($0) } ?? "unverified")")

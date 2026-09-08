@@ -259,7 +259,7 @@ public actor DaemonAPI {
   /// (push + open PR if validation already passed, otherwise re-run validation).
   /// Returns the action the daemon took, so the UI can confirm what happened.
   public func getExecutionProvenance(_ id: String) async throws -> ExecutionProvenanceResponse {
-    try await request("GET", "/pods/\(id)/execution-provenance")
+    try await request("GET", "/pods/\(id)/execution-provenance?schemaVersion=2")
   }
   public func getDispatchPreflight(_ id: String) async throws -> DispatchPreflightResponse {
     try await request("GET", "/pods/\(id)/dispatch-preflight")

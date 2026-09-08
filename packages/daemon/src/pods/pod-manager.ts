@@ -132,6 +132,7 @@ import type {
   ProfileLlmClientResult,
   ProviderEnvResult,
 } from '../providers/index.js';
+import { resolveAnthropicModelId } from '../providers/llm-client.js';
 import { createProfileMemoryReviewer } from '../providers/memory-reviewer.js';
 import { RUNTIME_TELEMETRY_OPT_OUT_ENV } from '../runtime-env.js';
 import { type ClaudeRuntime, ResumeSessionNotFoundError } from '../runtimes/claude-runtime.js';
@@ -238,6 +239,7 @@ import {
   ensureNuGetCredentialProvider,
   validateRegistryFiles,
 } from './registry-injector.js';
+import { reviewerApiProvenance } from './reviewer-api-provenance.js';
 import { addRuntimeNetworkDefaults } from './runtime-network-defaults.js';
 import {
   resolveEffectiveReviewerProfile,
@@ -7325,6 +7327,23 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
       ...config,
       assertReviewerCurrent: () => {
         resolveEffectiveBoundProfile(ownership.assertCurrent());
+      },
+      recordReviewerApiDispatch: (dispatchModel) => {
+        const pod = ownership.assertCurrent();
+        resolveEffectiveBoundProfile(pod);
+        if (dispatchModel !== resolveAnthropicModelId(config.reviewerModel ?? 'auto'))
+          throw new TaskRetryBlockedError(
+            'Reviewer API dispatch identity differs from the frozen validation configuration.',
+          );
+        if (!podRepo.executionProvenance)
+          throw new TaskRetryBlockedError(
+            'Reviewer API provenance is unavailable; reconcile the execution ledger.',
+          );
+        podRepo.executionProvenance.record(
+          pod.id,
+          pod.lifecycleGeneration,
+          reviewerApiProvenance(config, dispatchModel),
+        );
       },
       beforeReviewerLaunch: async (identity) => {
         resolveEffectiveBoundProfile(ownership.assertCurrent());

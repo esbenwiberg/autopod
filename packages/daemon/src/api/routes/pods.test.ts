@@ -127,6 +127,59 @@ describe('GET /pods/:podId provider-attempt projection', () => {
     db.close();
   });
 
+  it('requires explicit version 2 before returning API provenance to clients', async () => {
+    const repo = createPodRepository(db);
+    repo.insert({
+      id: 'api-review',
+      profileName: 'test-profile',
+      task: 'API provenance',
+      status: 'running',
+      model: 'worker',
+      runtime: 'codex',
+      executionTarget: 'local',
+      branch: 'api-review',
+      userId: 'operator',
+      maxValidationAttempts: 3,
+      skipValidation: false,
+      outputMode: 'pr',
+    });
+    const { reviewerApiProvenance } = await import('../../pods/reviewer-api-provenance.js');
+    const receipt = repo.executionProvenance?.record(
+      'api-review',
+      1,
+      reviewerApiProvenance(
+        {
+          reviewerModel: 'alias',
+          reviewerProvider: 'foundry',
+          reviewerProviderAccountId: 'frozen-account',
+        } as import('../../interfaces/validation-engine.js').ValidationEngineConfig,
+        'resolved',
+      ),
+    );
+    for (const suffix of ['', '?schemaVersion=1']) {
+      const response = await app.inject({
+        method: 'GET',
+        url: `/pods/api-review/execution-provenance${suffix}`,
+      });
+      expect(response.statusCode).toBe(200);
+      expect(response.json()).toEqual({ latest: null, requiresSchemaVersion: 2 });
+    }
+    const response = await app.inject({
+      method: 'GET',
+      url: '/pods/api-review/execution-provenance?schemaVersion=2',
+    });
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toEqual({ latest: receipt });
+    expect(
+      (
+        await app.inject({
+          method: 'GET',
+          url: '/pods/api-review/execution-provenance?schemaVersion=3',
+        })
+      ).statusCode,
+    ).toBe(400);
+  });
+
   it('reconciles corrected provider usage in task, pod and fleet cost APIs without rewriting legacy rows', async () => {
     const repo = createPodRepository(db);
     for (const [id, correctedCost] of [

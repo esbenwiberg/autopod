@@ -3,7 +3,10 @@ import type { RuntimeType } from './runtime.js';
 
 export interface ExecutionProvenance {
   id: string;
-  version: 1;
+  version: 1 | 2;
+  /** v2 identifies selected direct API dispatch preparation. */
+  surface?: 'provider-api';
+  dispatchModel?: string;
   podId: string;
   taskId: string;
   executionId: string;
@@ -14,7 +17,7 @@ export interface ExecutionProvenance {
   purpose?: 'coding' | 'validation' | 'review' | 'completion';
   /** Absent on historical records, which probed the configured worker even for review. */
   subject?: 'worker' | 'reviewer';
-  runtime: RuntimeType;
+  runtime: RuntimeType | null;
   model: string;
   providerId: string | null;
   providerAccountId: string | null;
