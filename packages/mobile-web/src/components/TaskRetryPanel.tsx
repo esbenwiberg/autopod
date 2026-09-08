@@ -147,6 +147,9 @@ export function TaskRetryPanel({
               measurements; usage is not counted again.
             </p>
           )}
+          {stage === 'worker' && state.latest?.providerRetryNotBefore && (
+            <p>Provider retry not before: {state.latest.providerRetryNotBefore}</p>
+          )}
           <p>Latest outcome: {state.latest?.outcome ?? 'none'} · partial telemetry.</p>
           {state.authorizations.map((grant) => (
             <p key={grant.id}>

@@ -658,7 +658,7 @@ it.each(['validation', 'sandbox_startup', 'codex_interruption', 'worker'] as con
                 transientRetryCount: 2,
                 measuredDurationMs: 15,
                 interruptedCount: 1,
-                latest: { outcome: 'unknown' },
+                latest: { outcome: 'unknown', providerRetryNotBefore: '2026-09-09T12:00:00.000Z' },
                 authorizations: [],
                 telemetry: 'partial',
               }
@@ -697,6 +697,9 @@ it.each(['validation', 'sandbox_startup', 'codex_interruption', 'worker'] as con
       if (stage === 'worker') {
         expect(output.mock.calls.flat().join('\n')).toContain('2/2 transient retry admissions');
         expect(output.mock.calls.flat().join('\n')).toContain('unknown causes');
+        expect(output.mock.calls.flat().join('\n')).toContain(
+          'Provider retry not before: 2026-09-09T12:00:00.000Z',
+        );
       }
       await run([
         'authorize-retry',

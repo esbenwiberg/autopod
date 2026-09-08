@@ -1,0 +1,130 @@
+- main [ref=e3] [box=0,-2051,390,4596]:
+  - link "← Back" [ref=e4] [cursor=pointer] [box=16,-2035,49,25]:
+    - /url: "#/"
+  - generic [ref=e5] [box=16,-2002,358,18]:
+    - generic [ref=e6] [box=16,-2001,106,16]: local-fixture
+    - generic [ref=e7] [box=325,-2002,49,18]: failed
+  - heading "[Local fixture] Retry a throttled worker within the task allowance" [level=1] [ref=e8] [box=16,-1974,358,46]
+  - paragraph [ref=e9] [box=16,-1915,358,15]: local-fixture · codex · fixture-model
+  - region "Recovery details" [ref=e10] [box=16,-1884,358,150]:
+    - heading "Recovery details" [level=2] [ref=e11] [box=16,-1864,358,28]
+    - paragraph [ref=e12] [box=16,-1788,358,38]: Provider throttled. One recorded task retry remains; Rework waits for its cooldown.
+  - generic [ref=e13] [box=16,-1718,358,1044]:
+    - heading "Dispatch preflight" [level=2] [ref=e14] [box=33,-1701,324,28]
+    - paragraph [ref=e54] [box=33,-1661,324,19]: review_required · 2026-09-07T15:00:00Z
+    - paragraph [ref=e55] [box=33,-1630,324,19]: github.com/example/repo · main
+    - paragraph [ref=e56] [box=33,-1599,324,38]:
+      - text: "Fresh base:"
+      - code [ref=e57] [box=33,-1597,317,37]: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+    - paragraph [ref=e58] [box=33,-1549,324,38]:
+      - text: "Equivalent work:"
+      - link "prior-fixture" [ref=e59] [cursor=pointer] [box=156,-1549,86,19]:
+        - /url: "#/pod/prior-fixture"
+      - text: · validated · dispatch_receipt
+    - heading "Execution environment" [level=3] [ref=e16] [box=33,-1481,324,22]
+    - paragraph [ref=e60] [box=33,-1428,324,38]: validation preflight blocked · generation 1 · 2026-09-07T16:30:00Z
+    - paragraph [ref=e61] [box=33,-1378,324,38]: "Configured worker: codex CLI 0.144.4 · fixture-model"
+    - paragraph [ref=e62] [box=33,-1328,324,38]: "Provider: fixture-provider · account: not recorded"
+    - paragraph [ref=e63] [box=33,-1278,324,19]: "Daemon: unverified"
+    - paragraph [ref=e64] [box=33,-1247,324,19]:
+      - text: "Image:"
+      - code [ref=e65] [box=86,-1245,86,18]: unverified
+    - paragraph [ref=e66] [box=33,-1216,324,19]:
+      - text: "Validation implementation:"
+      - code [ref=e67] [box=229,-1214,86,18]: unverified
+    - paragraph [ref=e68] [box=33,-1185,324,38]:
+      - text: "Contract:"
+      - code [ref=e69] [box=33,-1183,323,37]: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+    - paragraph [ref=e70] [box=33,-1135,324,19]: "Memory: unverified bytes · CPU: unverified"
+    - paragraph [ref=e71] [box=33,-1104,324,19]: "fact:compile: dotnet · missing"
+    - paragraph [ref=e72] [box=33,-1073,324,57]: Required launcher dotnet is missing. Reconcile the image or declared command before validation.
+    - paragraph [ref=e73] [box=33,-1004,324,19]: Actual image digest is unverified.
+    - paragraph [ref=e74] [box=33,-973,324,19]: Effective memory capacity is unverified.
+    - paragraph [ref=e18] [box=33,-942,324,76]: To intentionally repeat this request, provide a reason. This creates a distinct task and may run a coding agent. Fresh contract, provider, and environment checks still apply.
+    - generic [ref=e19] [box=33,-854,324,107]:
+      - text: Reason for intentional rerun
+      - textbox "Reason for intentional rerun" [ref=e20] [box=33,-827,324,80]
+    - button "Create intentional rerun" [disabled] [ref=e21] [box=33,-735,324,44]
+  - generic [ref=e22] [box=16,-658,358,268]:
+    - heading "Validation retry budget" [level=2] [ref=e23] [box=33,-641,324,28]
+    - paragraph [ref=e75] [box=33,-601,324,38]: 0 executed / 0 admitted validations across this task.
+    - paragraph [ref=e76] [box=33,-551,324,57]: 0 / 0 automatic transient retries · 0 ms measured · 0 interrupted with unknown duration.
+    - paragraph [ref=e77] [box=33,-482,324,19]: "Latest outcome: none · partial telemetry."
+    - button "Refresh retry accounting" [ref=e24] [box=33,-451,324,44]
+  - generic [ref=e25] [box=16,-374,358,356]:
+    - heading "Codex recovery allowance" [level=2] [ref=e26] [box=33,-357,324,28]
+    - paragraph [ref=e78] [box=33,-317,324,38]: 0 executed / 0 admitted Codex interruption recoveries across this task.
+    - paragraph [ref=e79] [box=33,-267,324,38]: 0 ms measured · 0 interrupted with unknown duration.
+    - paragraph [ref=e80] [box=33,-217,324,95]: One automatic inner recovery per logical task; further recoveries require recorded human authorization. Duration overlaps the enclosing agent run; usage is not counted again.
+    - paragraph [ref=e81] [box=33,-110,324,19]: "Latest outcome: none · partial telemetry."
+    - button "Refresh retry accounting" [ref=e27] [box=33,-79,324,44]
+  - generic [ref=e28] [box=16,-2,358,588]:
+    - heading "Worker execution" [level=2] [ref=e29] [box=33,15,324,28]
+    - alert [ref=e129] [box=33,55,324,57]: Provider retry cooldown remains until 2026-09-08T19:51:33.992Z. No permission or retry allowance was consumed.
+    - paragraph [ref=e82] [box=33,124,324,38]: 1 executed / 1 admitted worker runs across this task.
+    - paragraph [ref=e83] [box=33,174,324,57]: 0 / 1 transient retry admissions · 150 ms measured · 0 interrupted with unknown duration.
+    - paragraph [ref=e84] [box=33,243,324,133]: Repeated worker failures with unknown causes or rejected authentication require a recorded human authorization. Classified throttling and provider outages use the persisted task allowance and cooldown. Worker elapsed time overlaps phase measurements; usage is not counted again.
+    - paragraph [ref=e85] [box=33,388,324,38]: "Provider retry not before: 2026-09-08T19:51:33.992Z"
+    - paragraph [ref=e86] [box=33,438,324,19]: "Latest outcome: transient · partial telemetry."
+    - button "Rework worker" [ref=e87] [box=33,469,324,44]
+    - button "Refresh retry accounting" [ref=e30] [box=33,525,324,44]
+  - generic [ref=e31] [box=16,602,358,1261]:
+    - heading "Task accounting" [level=2] [ref=e32] [box=16,622,358,28]
+    - paragraph [ref=e88] [box=16,698,358,19]: "Logical task: task:local-original"
+    - paragraph [ref=e89] [box=16,761,358,19]: "Execution: execution:local-fixture"
+    - paragraph [ref=e90] [box=16,824,358,38]: 2 pods · 3 recorded agent runs · 4 provider attempts · 5 validations
+    - paragraph [ref=e91] [box=16,906,358,19]: 1 PR receipts · 1 unresolved of 2 intents
+    - paragraph [ref=e92] [box=16,969,358,38]: Durable ledger only; historical PR URLs are not reconstructed receipts.
+    - paragraph [ref=e93] [box=16,1051,358,19]: PR disposition observations unavailable.
+    - paragraph [ref=e94] [box=16,1114,358,19]: Source-bound merge evidence unavailable.
+    - paragraph [ref=e95] [box=16,1177,358,19]: Current provider status unverified.
+    - paragraph [ref=e96] [box=16,1240,358,19]: "Recorded tokens: 100 / 100"
+    - paragraph [ref=e97] [box=16,1303,358,38]: "Stored task cost subtotal: $1.2500 · partial telemetry"
+    - paragraph [ref=e98] [box=16,1385,358,38]: Billing unverified; stored amounts can include estimates.
+    - paragraph [ref=e99] [box=16,1467,358,57]: "Known estimates: $0.5000 · 1 identified phases with unavailable cost · 1 pods with conflicting attribution"
+    - paragraph [ref=e100] [box=16,1568,358,38]: "local-original: Stored phase costs conflict; no proportional allocation applied."
+    - paragraph [ref=e101] [box=16,1650,358,19]: 2 additional cost diagnostics omitted.
+    - paragraph [ref=e102] [box=16,1713,358,38]: Recorded task tokens have reached the configured limit.
+    - paragraph [ref=e103] [box=16,1795,358,19]: Infrastructure cost unavailable
+    - button "Refresh task accounting" [ref=e34] [box=16,1842,358,22]
+  - generic [ref=e104] [box=16,1879,358,273]:
+    - heading "Validation results" [level=2] [ref=e105] [box=16,1879,358,18]
+    - article [ref=e107] [box=16,1905,358,215]:
+      - generic [ref=e108] [box=31,1918,327,33]:
+        - generic [ref=e109] [box=31,1918,248,33]:
+          - generic [ref=e110] [box=31,1918,248,17]: "Validation #12"
+          - generic [ref=e111] [box=31,1937,248,14]: Sep 7, 12:10 PM · 100 ms · Attempt 1, cycle 2
+        - generic [ref=e112] [box=315,1918,44,18]: pass
+      - list [ref=e113] [box=31,1960,327,147]:
+        - listitem [ref=e114] [box=31,1960,327,18]:
+          - generic [ref=e115] [box=31,1961,96,16]: build
+          - generic [ref=e116] [box=135,1960,44,18]: pass
+        - listitem [ref=e117] [box=31,1983,327,18]:
+          - generic [ref=e118] [box=31,1984,96,16]: health
+          - generic [ref=e119] [box=135,1983,41,18]: skip
+        - listitem [ref=e120] [box=31,2006,327,55]:
+          - generic [ref=e121] [box=31,2007,96,16]: test
+          - generic [ref=e122] [box=135,2006,44,18]: pass
+          - generic [ref=e123] [box=31,2032,327,29]: Reused local-evidence-1; executed 2026-09-07T09:00:00Z
+        - listitem [ref=e124] [box=31,2066,327,41]:
+          - generic [ref=e125] [box=31,2067,96,16]: pages (0)
+          - generic [ref=e126] [box=135,2066,41,18]: skip
+          - generic [ref=e127] [box=31,2093,327,15]: No page checks executed
+    - button "Show previous 1 attempt" [ref=e128] [cursor=pointer] [box=16,2130,160,22]
+  - generic [ref=e35] [box=16,2168,358,127]:
+    - button "Resume" [ref=e36] [cursor=pointer] [box=16,2168,178,37]
+    - button "Rework" [ref=e37] [cursor=pointer] [box=202,2168,172,37]
+    - button "Rebase + revalidate" [ref=e38] [cursor=pointer] [box=16,2213,173,37]
+    - button "Extend PR fixes (+3)" [ref=e39] [cursor=pointer] [box=197,2213,177,37]
+    - button "Spawn fix" [ref=e40] [cursor=pointer] [box=16,2258,112,37]
+    - button "Force complete" [ref=e41] [cursor=pointer] [box=136,2258,150,37]
+    - button "Kill" [ref=e42] [cursor=pointer] [box=294,2258,80,37]
+  - region "Task details" [ref=e43] [box=16,2311,358,113]:
+    - article [ref=e44] [box=16,2311,358,113]:
+      - generic [ref=e46] [box=20,2312,353,111]:
+        - generic [ref=e47] [box=34,2324,326,14]: Task
+        - heading "Task" [level=2] [ref=e48] [box=34,2343,326,20]
+        - paragraph [ref=e50] [box=34,2370,326,42]: "[Local fixture] Retry a throttled worker within the task allowance"
+  - generic [ref=e51] [box=16,2444,358,53]:
+    - heading "Recent activity" [level=2] [ref=e52] [box=16,2444,358,18]
+    - paragraph [ref=e53] [box=16,2478,358,19]: No activity yet.

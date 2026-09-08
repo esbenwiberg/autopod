@@ -48,7 +48,7 @@ it.each([151, 158, 163])(
       expect(readFileSync(input)).toEqual(bytes);
       expect(receipt).toMatchObject({
         fromVersion: version,
-        toVersion: 178,
+        toVersion: 179,
         retainedRowsVerified: true,
         inputFreshness: 'unverified',
       });
@@ -88,7 +88,7 @@ it.each([151, 158, 163])(
       expect(cliReceipt).toMatchObject({
         status: 'verified-copy',
         fromVersion: version,
-        toVersion: 178,
+        toVersion: 179,
         retainedRowsVerified: true,
         activated: false,
       });

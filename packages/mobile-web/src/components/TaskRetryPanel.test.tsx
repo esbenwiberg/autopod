@@ -25,6 +25,7 @@ it.each(['validation', 'sandbox_startup', 'codex_interruption', 'worker'] as con
       interruptedCount: 1,
       latest: {
         id: 'failure',
+        providerRetryNotBefore: stage === 'worker' ? '2026-09-09T12:00:00.000Z' : null,
         outcome: stage === 'codex_interruption' ? 'pass' : 'unknown',
       },
       authorizations: [] as Array<{
@@ -75,7 +76,12 @@ it.each(['validation', 'sandbox_startup', 'codex_interruption', 'worker'] as con
         expect.anything(),
       );
       expect(container.textContent).toContain('3 executed / 4 admitted');
-      if (stage === 'worker') expect(container.textContent).toContain('unknown causes');
+      if (stage === 'worker') {
+        expect(container.textContent).toContain('unknown causes');
+        expect(container.textContent).toContain(
+          'Provider retry not before: 2026-09-09T12:00:00.000Z',
+        );
+      }
       expect(container.textContent).toContain('1 interrupted with unknown duration');
       await click('Retry recording the same authorization');
       expect(resumes).toBe(0);

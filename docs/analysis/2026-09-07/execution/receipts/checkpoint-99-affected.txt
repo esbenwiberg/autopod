@@ -1,0 +1,106 @@
+
+ RUN  v4.1.11 /private/tmp/autopod-durable-execution/packages/daemon
+
+ ❯ src/pods/task-retry-ledger.test.ts (23 tests | 1 failed) 3319ms
+   × upgrades schema 177 without broadening an existing worker permission 372ms
+ ❯ src/db/reconcile-native-checkpoint.test.ts (3 tests | 3 failed) 6425ms
+   × reconciles exact checkpoint 151 only in a new verified copy 2103ms
+   × reconciles exact checkpoint 158 only in a new verified copy 2396ms
+   × reconciles exact checkpoint 163 only in a new verified copy 1925ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 4 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/db/reconcile-native-checkpoint.test.ts > reconciles exact checkpoint 151 only in a new verified copy
+AssertionError: expected { status: 'verified-copy', …(8) } to match object { status: 'verified-copy', …(4) }
+(4 matching properties omitted from actual)
+
+- Expected
++ Received
+
+  {
+    "activated": false,
+    "fromVersion": 151,
+    "retainedRowsVerified": true,
+    "status": "verified-copy",
+-   "toVersion": 179,
++   "toVersion": 178,
+  }
+
+ ❯ src/db/reconcile-native-checkpoint.test.ts:88:26
+     86|       );
+     87|       expect(statSync(cliOutput).mode & 0o777).toBe(0o600);
+     88|       expect(cliReceipt).toMatchObject({
+       |                          ^
+     89|         status: 'verified-copy',
+     90|         fromVersion: version,
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/4]⎯
+
+ FAIL  src/db/reconcile-native-checkpoint.test.ts > reconciles exact checkpoint 158 only in a new verified copy
+AssertionError: expected { status: 'verified-copy', …(8) } to match object { status: 'verified-copy', …(4) }
+(4 matching properties omitted from actual)
+
+- Expected
++ Received
+
+  {
+    "activated": false,
+    "fromVersion": 158,
+    "retainedRowsVerified": true,
+    "status": "verified-copy",
+-   "toVersion": 179,
++   "toVersion": 178,
+  }
+
+ ❯ src/db/reconcile-native-checkpoint.test.ts:88:26
+     86|       );
+     87|       expect(statSync(cliOutput).mode & 0o777).toBe(0o600);
+     88|       expect(cliReceipt).toMatchObject({
+       |                          ^
+     89|         status: 'verified-copy',
+     90|         fromVersion: version,
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/4]⎯
+
+ FAIL  src/db/reconcile-native-checkpoint.test.ts > reconciles exact checkpoint 163 only in a new verified copy
+AssertionError: expected { status: 'verified-copy', …(8) } to match object { status: 'verified-copy', …(4) }
+(4 matching properties omitted from actual)
+
+- Expected
++ Received
+
+  {
+    "activated": false,
+    "fromVersion": 163,
+    "retainedRowsVerified": true,
+    "status": "verified-copy",
+-   "toVersion": 179,
++   "toVersion": 178,
+  }
+
+ ❯ src/db/reconcile-native-checkpoint.test.ts:88:26
+     86|       );
+     87|       expect(statSync(cliOutput).mode & 0o777).toBe(0o600);
+     88|       expect(cliReceipt).toMatchObject({
+       |                          ^
+     89|         status: 'verified-copy',
+     90|         fromVersion: version,
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/4]⎯
+
+ FAIL  src/pods/task-retry-ledger.test.ts > upgrades schema 177 without broadening an existing worker permission
+SqliteError: table task_retry_attempts has no column named provider_retry_not_before
+ ❯ Database.prepare ../../node_modules/.pnpm/better-sqlite3@11.10.0/node_modules/better-sqlite3/lib/methods/wrappers.js:5:21
+ ❯ Object.<anonymous> src/pods/task-retry-ledger.ts:337:12
+
+ ❯ Object.sqliteTransaction [as admit] ../../node_modules/.pnpm/better-sqlite3@11.10.0/node_modules/better-sqlite3/lib/methods/transaction.js:65:24
+ ❯ src/pods/task-retry-ledger.test.ts:771:24
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[4/4]⎯
+
+
+ Test Files  2 failed | 3 passed (5)
+      Tests  4 failed | 673 passed (677)
+   Start at  20:49:10
+   Duration  50.19s (transform 4.32s, setup 0ms, import 6.50s, tests 56.94s, environment 0ms)
+

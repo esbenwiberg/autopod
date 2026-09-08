@@ -275,6 +275,7 @@ import { assertTaskExecutionTerminationVerified } from './task-execution-ledger.
 import { TaskRetryBlockedError } from './task-retry-ledger.js';
 import { ValidationSupersededError, captureValidationOwnership } from './validation-ownership.js';
 import type { ValidationRepository } from './validation-repository.js';
+import { workerRetryDeadline } from './worker-retry-deadline.js';
 import {
   WORKER_RETRY_BACKOFFS_MS,
   unavailableWorkerInputs,
@@ -10969,6 +10970,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
       let terminalClassification: ProviderFailureClassification | null = null;
       let executionTerminationUnverified = false;
       let workerEventObserved = false;
+      let providerRetryNotBefore: string | null = null;
       const retainUnverifiedTermination = () => {
         executionTerminationUnverified = true;
         if (taskRunId) podRepo.taskExecutions?.retainUnverifiedRun(taskRunId);
@@ -11282,6 +11284,14 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
                 sanitizedMessage: sanitizeFailureReason(event.message, 'Agent failed'),
                 retryAfter: null,
               } satisfies ProviderFailureClassification);
+            if (
+              terminalClassification.category === 'transient' ||
+              terminalClassification.category === 'provider_unavailable'
+            )
+              providerRetryNotBefore = workerRetryDeadline(
+                terminalClassification.retryAfter,
+                Date.now(),
+              );
             if (canFail(pod.status)) {
               const failureReason = sanitizeFailureReason(event.message, 'Agent failed');
               emitActivityStatus(podId, failureReason);
@@ -11332,6 +11342,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           ),
           retryAfter: null,
         };
+        providerRetryNotBefore = null;
         eventError = err;
         hasEventError = true;
       } finally {
@@ -11432,6 +11443,9 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
                   workerStartedAt === undefined || executionTerminationUnverified
                     ? null
                     : Math.max(0, Math.round(performance.now() - workerStartedAt)),
+                  executionTerminationUnverified || recordedOutcome !== 'failed'
+                    ? null
+                    : providerRetryNotBefore,
                 );
             } finally {
               if (activeAgentRuns.get(podId)?.token === runToken) {

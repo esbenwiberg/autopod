@@ -266,7 +266,9 @@ if (uncollectedGuidanceFixture) {
     finalization: { ...pod.finalization, phase: 'awaiting_human', pendingDecisionId: null },
   };
 }
-const workerTransientFixture = process.env.FIXTURE_MODE === 'worker-transient';
+const workerDeadlineFixture = process.env.FIXTURE_MODE === 'worker-deadline';
+const workerTransientFixture =
+  process.env.FIXTURE_MODE === 'worker-transient' || workerDeadlineFixture;
 const workerUnknownFixture = process.env.FIXTURE_MODE === 'worker-unknown';
 const workerAuthFixture =
   process.env.FIXTURE_MODE === 'worker-auth' || workerTransientFixture || workerUnknownFixture;
@@ -324,7 +326,13 @@ if (workerTransientFixture) {
     admissionCount: 1,
     executedCount: 1,
     transientRetryCount: 0,
-    latest: { id: 'local-throttled', outcome: 'transient' },
+    latest: {
+      id: 'local-throttled',
+      outcome: 'transient',
+      providerRetryNotBefore: workerDeadlineFixture
+        ? new Date(Date.now() + 3600000).toISOString()
+        : null,
+    },
   });
 }
 const codexRecoveryFixture = process.env.FIXTURE_MODE === 'codex-recovery';
@@ -439,7 +447,8 @@ let rerunDecision = null;
 let rerunResponseLost = false;
 const server = createServer(async (req, res) => {
   const pathname = new URL(req.url, 'http://localhost').pathname;
-  const json = (value) => {
+  const json = (value, status = 200) => {
+    res.statusCode = status;
     res.setHeader('content-type', 'application/json');
     res.end(JSON.stringify(value));
   };
@@ -583,6 +592,18 @@ const server = createServer(async (req, res) => {
     req.method === 'POST' &&
     pathname === '/pods/local-fixture/validate'
   ) {
+    if (workerDeadlineFixture) {
+      console.log(
+        JSON.stringify({ scope: 'local fixture only', action: 'provider-cooldown-blocked' }),
+      );
+      return json(
+        {
+          error: 'TASK_RETRY_BACKOFF_PENDING',
+          message: `Provider retry cooldown remains until ${retryState.latest.providerRetryNotBefore}. No permission or retry allowance was consumed.`,
+        },
+        409,
+      );
+    }
     Object.assign(retryState, {
       admissionCount: 2,
       executedCount: 2,

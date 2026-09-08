@@ -3301,6 +3301,143 @@ describe('PodManager', () => {
     },
   );
 
+  it.each(['seconds', 'utc'] as const)(
+    'retains the observed provider Retry-After deadline across manager reconstruction: %s',
+    async (format) => {
+      const ctx = createTestContext();
+      ctx.deps.workerInfrastructureRetryBackoffMs = [1000];
+      const manager = createPodManager(ctx.deps);
+      const root = manager.createSession(
+        { profileName: 'test-profile', task: 'Honor provider retry deadline' },
+        'operator',
+      );
+      ctx.podRepo.update(root.id, { status: 'running', containerId: 'original-container' });
+      vi.useFakeTimers({ toFake: ['Date'] });
+      const observed = Date.now();
+      const deadline = new Date(observed + 3000).toISOString();
+      try {
+        await manager.consumeAgentEvents(
+          root.id,
+          (async function* () {
+            yield {
+              type: 'error',
+              timestamp: new Date().toISOString(),
+              fatal: true,
+              message: 'Provider temporarily throttled',
+              classification: {
+                category: 'transient',
+                definitive: false,
+                sanitizedMessage: 'Throttled',
+                retryAfter: format === 'seconds' ? '3' : deadline,
+              },
+            } as const;
+          })(),
+        );
+        vi.setSystemTime(observed + 1000);
+        const fix = manager.createSession(
+          { profileName: 'test-profile', task: 'Continue', linkedPodId: root.id },
+          'operator',
+        );
+        ctx.podRepo.update(fix.id, { status: 'running', containerId: 'replacement-container' });
+        let pulled = false;
+        ctx.deps.workerInfrastructureRetryDelay = vi.fn(async (delay) => {
+          expect(pulled).toBe(false);
+          expect(delay).toBe(2000);
+          vi.setSystemTime(Date.now() + delay);
+        });
+        const restarted = createPodManager(ctx.deps);
+        expect(
+          await restarted.consumeAgentEvents(
+            fix.id,
+            (async function* () {
+              pulled = true;
+              yield {
+                type: 'complete',
+                timestamp: new Date().toISOString(),
+                result: 'Continued after deadline',
+              } as const;
+            })(),
+          ),
+        ).toBe('completed');
+        expect(pulled).toBe(true);
+        expect(ctx.deps.workerInfrastructureRetryDelay).toHaveBeenCalledTimes(1);
+        expect(ctx.podRepo.workerRetries?.state(fix.id)).toMatchObject({
+          transientRetryCount: 1,
+          admissionCount: 2,
+          latest: { notBefore: deadline, providerRetryNotBefore: deadline },
+        });
+      } finally {
+        vi.useRealTimers();
+      }
+    },
+  );
+
+  it('rejects long provider cooldown before Rework HTTP acceptance and preserves unused permission', async () => {
+    const ctx = createTestContext();
+    const manager = createPodManager(ctx.deps);
+    const pod = manager.createSession(
+      { profileName: 'test-profile', task: 'Wait for provider recovery' },
+      'operator',
+    );
+    ctx.podRepo.update(pod.id, { status: 'running', containerId: 'owned-container' });
+    await manager.consumeAgentEvents(
+      pod.id,
+      (async function* () {
+        yield {
+          type: 'error',
+          fatal: true,
+          timestamp: new Date().toISOString(),
+          message: 'Throttled',
+          classification: {
+            category: 'transient',
+            definitive: false,
+            sanitizedMessage: 'Throttled',
+            retryAfter: '3600',
+          },
+        } as const;
+      })(),
+    );
+    const before = ctx.podRepo.getOrThrow(pod.id);
+    ctx.enqueuedSessions.length = 0;
+    const app = Fastify();
+    app.setErrorHandler(errorHandler);
+    authPlugin(app, {
+      validateToken: async () => ({ oid: 'operator', name: 'Operator' }),
+    } as never);
+    podRoutes(app, manager, ctx.eventRepo, undefined, ctx.podRepo);
+    try {
+      const grant = await app.inject({
+        method: 'POST',
+        url: `/pods/${pod.id}/retry-authorizations`,
+        headers: { authorization: 'Bearer fixture' },
+        payload: {
+          stage: 'worker',
+          requestKey: 'cooldown-permission',
+          reason: 'Inspected provider; retry after cooldown',
+        },
+      });
+      expect(grant.statusCode).toBe(201);
+      const response = await app.inject({
+        method: 'POST',
+        url: `/pods/${pod.id}/validate`,
+        headers: { authorization: 'Bearer fixture' },
+      });
+      expect(response.statusCode, response.body).toBe(409);
+      expect(response.json().error).toBe('TASK_RETRY_BACKOFF_PENDING');
+      expect(response.json().message).toContain('No permission or retry allowance was consumed');
+      expect(ctx.podRepo.getOrThrow(pod.id)).toEqual(before);
+      expect(ctx.containerManager.kill).not.toHaveBeenCalled();
+      expect(ctx.enqueuedSessions).toEqual([]);
+      expect(ctx.podRepo.workerRetries?.state(pod.id)).toMatchObject({
+        admissionCount: 1,
+        transientRetryCount: 0,
+        authorizations: [{ usedByAttemptId: null }],
+      });
+    } finally {
+      await app.close();
+    }
+  });
+
   it.each(['early-wake', 'stalled-clock', 'superseded', 'human-decision'] as const)(
     'checks the persisted outer worker cooldown before iterator entry: %s',
     async (mode) => {

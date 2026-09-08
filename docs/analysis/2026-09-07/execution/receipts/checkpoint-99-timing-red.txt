@@ -1,0 +1,28 @@
+
+ RUN  v4.1.11 /private/tmp/autopod-durable-execution/packages/daemon
+
+ ❯ src/pods/pod-manager.test.ts (637 tests | 2 failed | 635 skipped) 177ms
+     × retains the observed provider Retry-After deadline across manager reconstruction: seconds 114ms
+     × retains the observed provider Retry-After deadline across manager reconstruction: utc 62ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 2 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/pods/pod-manager.test.ts > PodManager > retains the observed provider Retry-After deadline across manager reconstruction: seconds
+ FAIL  src/pods/pod-manager.test.ts > PodManager > retains the observed provider Retry-After deadline across manager reconstruction: utc
+AssertionError: expected "vi.fn()" to be called 1 times, but got 0 times
+ ❯ src/pods/pod-manager.test.ts:3340:57
+    3338|         })())).toBe('completed');
+    3339|         expect(pulled).toBe(true);
+    3340|         expect(ctx.deps.workerInfrastructureRetryDelay).toHaveBeenCall…
+       |                                                         ^
+    3341|         expect(ctx.podRepo.workerRetries?.state(fix.id)).toMatchObject…
+    3342|           transientRetryCount: 1, admissionCount: 2,
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/2]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  2 failed | 635 skipped (637)
+   Start at  20:43:59
+   Duration  2.16s (transform 1.30s, setup 0ms, import 1.85s, tests 177ms, environment 0ms)
+

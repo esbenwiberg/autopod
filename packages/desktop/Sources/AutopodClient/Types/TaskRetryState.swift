@@ -18,6 +18,7 @@ public struct TaskRetryState: Codable, Sendable {
 public struct TaskRetryAttempt: Codable, Sendable {
   public let id: String
   public let outcome: String?
+  public let providerRetryNotBefore: String?
   public let startedAt: String?
   public let endedAt: String?
   public let measuredDurationMs: Int?

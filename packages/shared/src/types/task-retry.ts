@@ -19,6 +19,8 @@ export interface TaskRetryAttempt {
   retryKind: 'transient' | 'changed_conditions' | 'override' | null;
   admittedAt: string;
   notBefore: string;
+  /** Absolute provider cooldown; retained across same-binding retry ancestry. */
+  providerRetryNotBefore?: string | null;
   startedAt: string | null;
   endedAt: string | null;
   outcome: TaskRetryOutcome | null;

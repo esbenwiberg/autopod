@@ -36,7 +36,12 @@ export interface TaskRetryLedger {
     backoffs: number[],
   ): void;
   start(id: string): void;
-  finish(id: string, outcome: TaskRetryOutcome, measuredDurationMs: number | null): void;
+  finish(
+    id: string,
+    outcome: TaskRetryOutcome,
+    measuredDurationMs: number | null,
+    providerRetryNotBefore?: string | null,
+  ): void;
   recoverInterrupted(): number;
   authorize(
     podId: string,
@@ -107,6 +112,7 @@ export function createTaskRetryLedger(
     retryKind: row.retry_kind as TaskRetryAttempt['retryKind'],
     admittedAt: row.admitted_at as string,
     notBefore: row.not_before as string,
+    providerRetryNotBefore: (row.provider_retry_not_before as string | null) ?? null,
     startedAt: row.started_at as string | null,
     endedAt: row.ended_at as string | null,
     outcome: row.outcome as TaskRetryOutcome | null,
@@ -214,6 +220,15 @@ export function createTaskRetryLedger(
     let retryKind: TaskRetryAttempt['retryKind'] = null;
     let useAuthorization: string | undefined;
     let notBefore = Date.now();
+    const providerRetryNotBefore =
+      stage === 'worker' && prior?.binding_hash === bindingHash
+        ? ((prior.provider_retry_not_before as string | null) ?? null)
+        : null;
+    if (providerRetryNotBefore && Date.parse(providerRetryNotBefore) - Date.now() > 300_000)
+      throw new TaskRetryBlockedError(
+        `Provider retry cooldown remains until ${providerRetryNotBefore}; retry after that deadline. No permission or retry allowance was consumed.`,
+        'TASK_RETRY_BACKOFF_PENDING',
+      );
     if (prior && !prior.ended_at)
       throw new TaskRetryBlockedError(
         `A ${label} admission is already active for this logical task`,
@@ -268,7 +283,16 @@ export function createTaskRetryLedger(
           `Unchanged or unverified nonretryable ${label} inputs; change relevant conditions or record an authorized retry with a reason`,
         );
     }
-    return { member, prior, retryKind, useAuthorization, notBefore, effectiveBackoffs };
+    if (providerRetryNotBefore) notBefore = Math.max(notBefore, Date.parse(providerRetryNotBefore));
+    return {
+      member,
+      prior,
+      retryKind,
+      useAuthorization,
+      notBefore,
+      effectiveBackoffs,
+      providerRetryNotBefore,
+    };
   };
   return {
     state,
@@ -284,8 +308,15 @@ export function createTaskRetryLedger(
         backoffs: number[],
         workerRunId?: string,
       ) => {
-        const { member, prior, retryKind, useAuthorization, notBefore, effectiveBackoffs } =
-          evaluate(podId, generation, identity, bindingHash, backoffs, workerRunId);
+        const {
+          member,
+          prior,
+          retryKind,
+          useAuthorization,
+          notBefore,
+          effectiveBackoffs,
+          providerRetryNotBefore,
+        } = evaluate(podId, generation, identity, bindingHash, backoffs, workerRunId);
         if (
           stage === 'worker' &&
           (!workerRunId ||
@@ -303,8 +334,8 @@ export function createTaskRetryLedger(
         ).run(member.taskId, JSON.stringify(effectiveBackoffs));
         const id = stage === 'worker' ? (workerRunId as string) : randomUUID();
         const now = new Date().toISOString();
-        db.prepare(`INSERT INTO task_retry_attempts(id,task_id,pod_id,execution_id,generation,stage,identity,binding_hash,retry_kind,previous_failure_id,admitted_at,not_before)
-        VALUES (?,?,?,?,?,'${stage}',?,?,?,?,?,?)`).run(
+        db.prepare(`INSERT INTO task_retry_attempts(id,task_id,pod_id,execution_id,generation,stage,identity,binding_hash,retry_kind,previous_failure_id,admitted_at,not_before,provider_retry_not_before)
+        VALUES (?,?,?,?,?,'${stage}',?,?,?,?,?,?,?)`).run(
           id,
           member.taskId,
           podId,
@@ -316,6 +347,7 @@ export function createTaskRetryLedger(
           prior && (prior.outcome !== 'pass' || stage === 'codex_interruption') ? prior.id : null,
           now,
           new Date(notBefore).toISOString(),
+          providerRetryNotBefore,
         );
         if (useAuthorization)
           db.prepare(
@@ -358,16 +390,38 @@ export function createTaskRetryLedger(
       if (claimed.changes !== 1)
         throw new TaskRetryBlockedError('Retry execution claim was superseded');
     },
-    finish(id, outcome, measuredDurationMs) {
+    finish(id, outcome, measuredDurationMs, providerRetryNotBefore = null) {
+      if (
+        providerRetryNotBefore !== null &&
+        (stage !== 'worker' ||
+          outcome !== 'transient' ||
+          !Number.isFinite(Date.parse(providerRetryNotBefore)) ||
+          new Date(providerRetryNotBefore).toISOString() !== providerRetryNotBefore)
+      )
+        throw new Error('Invalid worker provider retry deadline');
       const row = db
         .prepare(
-          'SELECT started_at, ended_at, outcome FROM task_retry_attempts WHERE id = ? AND stage = ?',
+          'SELECT started_at, ended_at, outcome, provider_retry_not_before FROM task_retry_attempts WHERE id = ? AND stage = ?',
         )
         .get(id, stage) as
-        | { started_at: string | null; ended_at: string | null; outcome: string | null }
+        | {
+            started_at: string | null;
+            ended_at: string | null;
+            outcome: string | null;
+            provider_retry_not_before: string | null;
+          }
         | undefined;
       if (!row) throw new Error('Unknown retry admission');
+      const deadline =
+        providerRetryNotBefore === null
+          ? row.provider_retry_not_before
+          : row.provider_retry_not_before === null ||
+              providerRetryNotBefore > row.provider_retry_not_before
+            ? providerRetryNotBefore
+            : row.provider_retry_not_before;
       if (row.ended_at) {
+        if (deadline !== row.provider_retry_not_before)
+          throw new Error('Retry deadline already settled differently');
         if (row.outcome !== outcome) throw new Error('Retry admission already settled differently');
         return;
       }
@@ -382,8 +436,8 @@ export function createTaskRetryLedger(
       )
         throw new Error('Invalid measured validation duration');
       db.prepare(
-        'UPDATE task_retry_attempts SET ended_at = ?, outcome = ?, measured_duration_ms = ? WHERE id = ?',
-      ).run(new Date().toISOString(), outcome, measuredDurationMs, id);
+        'UPDATE task_retry_attempts SET ended_at = ?, outcome = ?, measured_duration_ms = ?, provider_retry_not_before = ? WHERE id = ?',
+      ).run(new Date().toISOString(), outcome, measuredDurationMs, deadline, id);
     },
     recoverInterrupted() {
       return db
