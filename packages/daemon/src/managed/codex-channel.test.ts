@@ -95,6 +95,9 @@ it.each([false, true])('polls one digest-bound request; tampered=%s', async (tam
     expect(codexReportCommand(request.route, 'fixture-repo')).toContain(
       '/repositories/fixture-repo/README.md',
     );
+    expect(codexReportCommand(request.route, 'fixture-repo', 'research')).toContain(
+      '/inputs/research',
+    );
   } finally {
     close?.();
     vi.useRealTimers();
