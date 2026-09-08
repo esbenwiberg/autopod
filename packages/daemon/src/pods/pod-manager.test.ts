@@ -1948,6 +1948,52 @@ describe('PodManager', () => {
     },
   );
 
+  it('records incomplete Copilot stderr without treating a truncated quota line as provider-limit authority', async () => {
+    const ctx = createTestContext(undefined, { defaultRuntime: 'copilot' });
+    const attempts = createProviderAttemptRepository(ctx.db);
+    ctx.deps.providerAttemptRepo = attempts;
+    const manager = createPodManager(ctx.deps);
+    const pod = manager.createSession(
+      { profileName: 'test-profile', task: 'Retain diagnostic uncertainty' },
+      'operator',
+    );
+    ctx.podRepo.update(pod.id, { status: 'running', containerId: 'owned-container' });
+    vi.mocked(ctx.containerManager.execStreaming).mockResolvedValue({
+      stdout: Readable.from(['Retain output\n']),
+      stderr: Readable.from([`${'x'.repeat(100000)}\nYou have exhausted your premium requests.\n`]),
+      exitCode: Promise.resolve(1),
+      kill: vi.fn(async () => {}),
+    });
+    const runtime = new CopilotRuntime(pino({ level: 'silent' }), ctx.containerManager);
+    expect(
+      await manager.consumeAgentEvents(
+        pod.id,
+        runtime.spawn({
+          podId: pod.id,
+          task: pod.task,
+          model: pod.model,
+          reasoningEffort: 'auto',
+          containerId: 'owned-container',
+          workDir: '/workspace',
+          env: {},
+        }),
+      ),
+    ).toBe('failed');
+    expect(ctx.podRepo.getOrThrow(pod.id)).toMatchObject({ status: 'failed', pauseReason: null });
+    expect(attempts.list(pod.id).at(-1)).toMatchObject({
+      outcome: 'failed',
+      classification: { category: 'unknown', definitive: false },
+    });
+    expect(
+      JSON.stringify(
+        ctx.eventRepo.getForSession(pod.id, { type: 'pod.agent_activity', latest: 20 }),
+      ),
+    ).toContain('stderr diagnostics incomplete');
+    expect(ctx.podRepo.taskExecutions?.hasUnverifiedTermination(pod.id)).toBe(false);
+    expect(ctx.validationEngine.validate).not.toHaveBeenCalled();
+    expect(ctx.containerManager.execStreaming).toHaveBeenCalledTimes(1);
+  });
+
   it.each(['thrown', 'fatal-event', 'advisory-event'] as const)(
     'retains explicit unverified termination from %s before admitting linked work',
     async (failure) => {

@@ -3,6 +3,7 @@ import { CONTAINER_HOME_DIR } from '@autopod/shared';
 import type { AgentEvent, Runtime, SpawnConfig } from '@autopod/shared';
 import type { Logger } from 'pino';
 import type { ContainerManager, StreamingExecResult } from '../interfaces/container-manager.js';
+import { captureBoundedStderr } from './bounded-stderr.js';
 import { CopilotStreamParser } from './copilot-stream-parser.js';
 import { withObservedRuntimeExit } from './observed-runtime-exit.js';
 import { classifyProviderError, sanitizeProviderMessage } from './provider-error-classifier.js';
@@ -72,15 +73,10 @@ export class CopilotRuntime implements Runtime {
 
     this.handles.set(config.podId, handle);
 
-    // Accumulate stderr into a promise so we catch it even if it arrives after stdout ends
-    const stderrPromise = new Promise<string>((resolve) => {
-      const chunks: string[] = [];
-      handle.stderr.on('data', (chunk: Buffer) => chunks.push(chunk.toString('utf-8')));
-      handle.stderr.on('end', () => resolve(chunks.join('')));
-      handle.stderr.on('error', () => resolve(chunks.join('')));
-    });
+    const stderr = captureBoundedStderr(handle.stderr);
 
     let exitCode: number;
+    let stderrResult: Awaited<ReturnType<typeof stderr.finish>>;
     try {
       exitCode = yield* withObservedRuntimeExit(
         withPostCompleteGrace(
@@ -105,11 +101,20 @@ export class CopilotRuntime implements Runtime {
         handle.exitCode,
         { runtimeName: 'copilot-runtime', podId: config.podId, logger: this.logger },
       );
+      stderrResult = await stderr.finish();
     } finally {
+      stderr.dispose();
       if (this.handles.get(config.podId) === handle) this.handles.delete(config.podId);
     }
 
-    const stderrText = await stderrPromise;
+    const stderrText = stderrResult.text;
+    if (!stderrResult.complete)
+      yield {
+        type: 'error',
+        timestamp: new Date().toISOString(),
+        fatal: false,
+        message: `Copilot stderr diagnostics incomplete${stderrResult.truncated ? ' (16 KiB tail limit)' : ' (channel did not finish cleanly within the drain limit)'}. Provider failure classification is unavailable from this partial capture.`,
+      };
 
     if (stderrText.trim()) {
       this.logger.warn(
@@ -128,7 +133,14 @@ export class CopilotRuntime implements Runtime {
         .map((line) => line.trim())
         .filter(Boolean);
       const evidenceMessage = stderrLines.at(-1) ?? 'Copilot provider error';
-      const classification = classifyProviderError('copilot', { message: evidenceMessage });
+      const classification = stderrResult.complete
+        ? classifyProviderError('copilot', { message: evidenceMessage })
+        : {
+            category: 'unknown' as const,
+            definitive: false,
+            sanitizedMessage: sanitizeProviderMessage(evidenceMessage),
+            retryAfter: null,
+          };
       yield {
         type: 'error',
         timestamp: new Date().toISOString(),
