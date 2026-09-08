@@ -104,3 +104,29 @@ it('does not retry uncertain mutation or emit error bodies; bounds downloads and
     ),
   ).toEqual({ body: {} });
 });
+it('omits the JSON content type for a bodyless artifact download POST', async () => {
+  const fetcher = vi.fn(async (_url: string | URL | Request, init?: RequestInit) => {
+    if (
+      init?.method === 'POST' &&
+      init.body === undefined &&
+      new Headers(init.headers).get('content-type') === 'application/json'
+    ) {
+      return new Response('empty JSON body rejected', { status: 400 });
+    }
+    return new Response('bundle');
+  });
+  await expect(
+    managedRequest(
+      binding,
+      binding.endpoint,
+      token(),
+      {
+        method: 'POST',
+        path: '/artifacts/artifact-one/download',
+        binary: true,
+        maximumBytes: 1024,
+      },
+      fetcher,
+    ),
+  ).resolves.toEqual({ base64: Buffer.from('bundle').toString('base64') });
+});
