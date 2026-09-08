@@ -1,4 +1,5 @@
 import type { Route } from '@autopod/shared';
+import { z } from 'zod';
 import type { BoundedProviderTransport, ProviderCredential } from './bounded-provider.js';
 import { responseSchema } from './bounded-provider.js';
 import { canonical, digest } from './canonical.js';
@@ -31,6 +32,12 @@ export interface ChatGptFailureDiagnostic {
     | 'output-size'
     | 'unclassified';
 }
+const completedItemSchema = z.object({
+  output_index: z.number().int().nonnegative().safe(),
+  item: z
+    .object({ id: z.string().min(1).max(200), status: z.literal('completed').optional() })
+    .passthrough(),
+});
 const failureReasons = new Set([
   'account',
   'http',
@@ -136,6 +143,10 @@ export class ChatGptReportTransport implements BoundedProviderTransport {
       let buffer = '';
       let bytes = 0;
       let completed: unknown;
+      let completionSeen = false;
+      const completedItems: z.infer<typeof responseSchema>['output'] = [];
+      const completedItemIds = new Set<string>();
+      const orderedItemIds: string[] = [];
       const consume = (line: string) => {
         if (!line.startsWith('data:')) return;
         const raw = line.slice(5).trim();
@@ -147,8 +158,33 @@ export class ChatGptReportTransport implements BoundedProviderTransport {
           event.type === 'response.incomplete'
         )
           throw new Error('incomplete');
+        // The pinned endpoint may emit complete items but omit them from the
+        // terminal response (canary 016). Never reconstruct from text deltas:
+        // each item must be complete, schema-valid, uniquely identified and in
+        // contiguous output order before the single terminal completion.
+        if (
+          completionSeen &&
+          typeof event.type === 'string' &&
+          event.type.startsWith('response.output')
+        )
+          throw new Error('incomplete');
+        if (event.type === 'response.output_item.done') {
+          const itemEvent = completedItemSchema.parse(event);
+          if (
+            itemEvent.output_index !== completedItems.length ||
+            completedItemIds.has(itemEvent.item.id)
+          )
+            throw new Error('incomplete');
+          const item = responseSchema.shape.output.element.parse(itemEvent.item);
+          if (item.type === 'message' && itemEvent.item.status !== 'completed')
+            throw new Error('incomplete');
+          completedItems.push(item);
+          completedItemIds.add(itemEvent.item.id);
+          orderedItemIds.push(itemEvent.item.id);
+        }
         if (event.type === 'response.completed') {
-          if (completed !== undefined) throw new Error('duplicate-completion');
+          if (completionSeen) throw new Error('duplicate-completion');
+          completionSeen = true;
           completed = event.response;
         }
       };
@@ -177,6 +213,22 @@ export class ChatGptReportTransport implements BoundedProviderTransport {
       assertActive();
       phase = 'response-schema';
       const result = responseSchema.parse(completed);
+      if (completedItems.length) {
+        if (result.output.length) {
+          // A populated terminal response must agree with the completed items;
+          // neither representation may override contradictory provider evidence.
+          if (canonical(result.output) !== canonical(completedItems)) throw new Error('incomplete');
+          const terminal = completed as { output: Array<{ id?: unknown }> };
+          if (
+            terminal.output.some(
+              (item, index) => item.id !== undefined && item.id !== orderedItemIds[index],
+            )
+          )
+            throw new Error('incomplete');
+        } else {
+          result.output = completedItems;
+        }
+      }
       phase = 'model';
       if (result.model !== route.model) throw new Error('usage');
       phase = 'usage';

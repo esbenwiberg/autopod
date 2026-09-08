@@ -190,3 +190,152 @@ it('accepts case-insensitive SSE media type with parameters', async () => {
   );
   expect((await x.call()).consumedTokens).toBe(5010);
 });
+
+function streamedOutput(x: ReturnType<typeof setup>, events: unknown[]) {
+  x.fetcher.mockImplementation(
+    async () =>
+      new Response(events.map((event) => `data: ${JSON.stringify(event)}\n\n`).join(''), {
+        headers: { 'content-type': 'text/event-stream' },
+      }),
+  );
+}
+function doneItem(x: ReturnType<typeof setup>, index = 0) {
+  return {
+    type: 'response.output_item.done',
+    output_index: index,
+    item: { ...x.response.output[0], id: `message-${index}`, status: 'completed' },
+  };
+}
+it('accepts validated completed items when the terminal response omits streamed output', async () => {
+  const x = setup();
+  streamedOutput(x, [
+    doneItem(x),
+    { type: 'response.completed', response: { ...x.response, output: [] } },
+  ]);
+  const result = await x.call();
+  expect(result.value).toContain('Facts.');
+  expect(result.consumedTokens).toBe(5010);
+  expect(x.fetcher).toHaveBeenCalledTimes(1);
+});
+it.each([
+  'duplicate-index',
+  'duplicate-id',
+  'gap',
+  'missing-id',
+  'incomplete-item',
+  'tool',
+  'after-completion',
+  'conflict',
+  'delta-only',
+  'oversize',
+])('rejects unsafe streamed completion %s without retry', async (kind) => {
+  const x = setup();
+  const first = doneItem(x);
+  const second = doneItem(x, 1);
+  const complete = {
+    type: 'response.completed',
+    response: { ...x.response, output: [] as unknown[] },
+  };
+  let events: unknown[] = [first, complete];
+  if (kind === 'duplicate-index') events = [first, first, complete];
+  if (kind === 'duplicate-id') {
+    second.item.id = first.item.id;
+    events = [first, second, complete];
+  }
+  if (kind === 'gap') events = [second, complete];
+  if (kind === 'missing-id') Object.assign(first.item, { id: undefined });
+  if (kind === 'incomplete-item') first.item.status = 'in_progress';
+  if (kind === 'tool') Object.assign(first, { item: { id: 'tool-one', type: 'function_call' } });
+  if (kind === 'after-completion') events = [complete, first];
+  if (kind === 'conflict')
+    complete.response.output = [
+      { ...first.item, content: [{ type: 'output_text', text: 'Different.' }] },
+    ];
+  if (kind === 'delta-only')
+    events = [{ type: 'response.output_text.delta', delta: 'Unfinished' }, complete];
+  if (kind === 'oversize')
+    Object.assign(first.item, { content: [{ type: 'output_text', text: 'x'.repeat(16385) }] });
+  streamedOutput(x, events);
+  await expect(x.call()).rejects.toThrow('managed-chatgpt-request-unavailable');
+  expect(x.fetcher).toHaveBeenCalledTimes(1);
+});
+it('accepts matching terminal and streamed items without duplicating report text', async () => {
+  const x = setup();
+  streamedOutput(x, [doneItem(x), { type: 'response.completed', response: x.response }]);
+  const result = await x.call();
+  expect(result.consumedTokens).toBe(5010);
+});
+
+it.each([
+  'missing-response',
+  'different-id',
+  'missing-status',
+  'wrong-role',
+  'negative-index',
+  'fractional-index',
+])('rejects malformed completed-item evidence %s', async (kind) => {
+  const x = setup();
+  const item = doneItem(x);
+  const complete = {
+    type: 'response.completed',
+    response: { ...x.response, output: [] as unknown[] },
+  };
+  let events: unknown[] = [item, complete];
+  if (kind === 'missing-response') events = [{ type: 'response.completed' }, item, complete];
+  if (kind === 'different-id') complete.response.output = [{ ...item.item, id: 'different' }];
+  if (kind === 'missing-status') Object.assign(item.item, { status: undefined });
+  if (kind === 'wrong-role') Object.assign(item.item, { role: 'user' });
+  if (kind === 'negative-index') item.output_index = -1;
+  if (kind === 'fractional-index') item.output_index = 0.5;
+  streamedOutput(x, events);
+  await expect(x.call()).rejects.toThrow('managed-chatgpt-request-unavailable');
+});
+it('retains reasoning order and accepts a complete UTF8 message without terminal output', async () => {
+  const x = setup();
+  const message = doneItem(x, 1);
+  Object.assign(message.item, { content: [{ type: 'output_text', text: 'Fakta: æ.' }] });
+  streamedOutput(x, [
+    {
+      type: 'response.output_item.done',
+      output_index: 0,
+      item: { type: 'reasoning', id: 'reasoning-one', summary: [] },
+    },
+    message,
+    { type: 'response.completed', response: { ...x.response, output: [] } },
+  ]);
+  const result = await x.call();
+  expect(result.value).toContain('Fakta: æ.');
+});
+it('does not release completed items when authority is revoked at terminal validation', async () => {
+  const x = setup();
+  let revoked = false;
+  const events = [
+    doneItem(x),
+    { type: 'response.completed', response: { ...x.response, output: [] } },
+  ];
+  x.fetcher.mockImplementation(
+    async () =>
+      new Response(
+        new ReadableStream({
+          start(controller) {
+            controller.enqueue(
+              new TextEncoder().encode(
+                events.map((event) => `data: ${JSON.stringify(event)}\n\n`).join(''),
+              ),
+            );
+          },
+          pull(controller) {
+            revoked = true;
+            controller.close();
+          },
+        }),
+        { headers: { 'content-type': 'text/event-stream' } },
+      ),
+  );
+  await expect(
+    x.transport.generate(x.route, x.raw, 0, new AbortController().signal, () => {
+      if (revoked) throw new Error('revoked');
+    }),
+  ).rejects.toThrow('managed-chatgpt-request-unavailable');
+  expect(x.fetcher).toHaveBeenCalledTimes(1);
+});
