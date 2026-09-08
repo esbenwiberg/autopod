@@ -144,4 +144,5 @@ it.each([151, 158, 163])(
       rmSync(dir, { recursive: true, force: true });
     }
   },
+  30_000, // Multiple complete SQLite integrity/schema checks plus the packaged CLI.
 );
