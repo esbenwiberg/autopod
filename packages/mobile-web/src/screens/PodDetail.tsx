@@ -155,6 +155,14 @@ export function PodDetail(): JSX.Element {
           stage="sandbox_startup"
         />
       )}
+      {pod.runtime === 'codex' && (
+        <TaskRetryPanel
+          podId={pod.id}
+          revision={pod.updatedAt}
+          status={pod.status}
+          stage="codex_interruption"
+        />
+      )}
       <TaskExecutionPanel
         podId={data.id}
         revision={`${data.status}:${data.inputTokens}:${data.outputTokens}:${data.validationAttempts}`}

@@ -238,6 +238,32 @@ if (startupRetryFixture) {
   retryState.interruptedCount = 0;
   retryState.latest = { id: 'local-startup-failure', outcome: 'transient' };
 }
+const codexRecoveryFixture = process.env.FIXTURE_MODE === 'codex-recovery';
+if (codexRecoveryFixture) {
+  pod = {
+    ...pod,
+    runtime: 'codex',
+    status: 'failed',
+    executionTarget: 'local',
+    pendingEscalation: null,
+    recordDiagnostics: [],
+    finalization: null,
+    lastValidationResult: null,
+    task: '[Local fixture] Inspect task-wide Codex interruption allowance',
+    failureReason:
+      'Automatic task-wide Codex interruption recovery allowance consumed; inspect retained session/results before another inner recovery.',
+  };
+  Object.assign(retryState, {
+    stage: 'codex_interruption',
+    backoffsMs: [],
+    admissionCount: 1,
+    executedCount: 1,
+    transientRetryCount: 0,
+    measuredDurationMs: 1875,
+    interruptedCount: 0,
+    latest: { id: 'local-recovery', outcome: 'pass' },
+  });
+}
 const deliveryDispositionFixture = [
   'delivery-disposition',
   'merge-disposition',
@@ -428,7 +454,10 @@ const server = createServer(async (req, res) => {
   }
   if (pathname === '/pods/local-fixture/retry-state') {
     const stage = new URL(req.url, 'http://localhost').searchParams.get('stage') ?? 'validation';
-    if (startupRetryFixture && stage === 'validation')
+    if (
+      (startupRetryFixture && stage === 'validation') ||
+      (codexRecoveryFixture && stage !== 'codex_interruption')
+    )
       return json({
         ...retryState,
         stage,

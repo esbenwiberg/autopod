@@ -1,0 +1,41 @@
+
+ RUN  v4.1.11 /private/tmp/autopod-durable-execution/packages/daemon
+
+ ❯ src/runtimes/codex-runtime.test.ts (77 tests | 5 failed) 26491ms
+       × fences an inner recovery when generation changes during config preparation 5017ms
+       × fences an inner recovery when binding changes during config preparation 5017ms
+       × fences an inner recovery when question changes during config preparation 5016ms
+       × fences an inner recovery when session changes during config preparation 5009ms
+       × fences an inner recovery when budget changes during config preparation 5005ms
+ ❯ src/pods/pod-manager.test.ts (577 tests | 1 failed) 51186ms
+       × starts a daemon host-port preview proxy for sandbox pods 56ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 6 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/runtimes/codex-runtime.test.ts > CodexRuntime > resume > fences an inner recovery when generation changes during config preparation
+ FAIL  src/runtimes/codex-runtime.test.ts > CodexRuntime > resume > fences an inner recovery when binding changes during config preparation
+ FAIL  src/runtimes/codex-runtime.test.ts > CodexRuntime > resume > fences an inner recovery when question changes during config preparation
+ FAIL  src/runtimes/codex-runtime.test.ts > CodexRuntime > resume > fences an inner recovery when session changes during config preparation
+ FAIL  src/runtimes/codex-runtime.test.ts > CodexRuntime > resume > fences an inner recovery when budget changes during config preparation
+Error: Test timed out in 5000ms.
+If this is a long-running test, pass a timeout value as the last argument or configure it globally with "testTimeout".
+ ❯ src/runtimes/codex-runtime.test.ts:1827:80
+    1825|     });
+    1826|
+    1827|     it.each(['generation', 'binding', 'question', 'session', 'budget']…
+       |                                                                                ^
+    1828|       'fences an inner recovery when %s changes during config preparat…
+    1829|       async (change) => {
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/6]⎯
+
+ FAIL  src/pods/pod-manager.test.ts > PodManager > triggerValidation — loud-fail on push > starts a daemon host-port preview proxy for sandbox pods
+Error: listen EPERM: operation not permitted 0.0.0.0:11477
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/6]⎯
+
+
+ Test Files  2 failed | 1 passed (3)
+      Tests  6 failed | 658 passed (664)
+   Start at  13:23:43
+   Duration  53.65s (transform 2.59s, setup 0ms, import 4.18s, tests 78.83s, environment 0ms)
+

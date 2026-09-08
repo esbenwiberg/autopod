@@ -336,3 +336,46 @@ it('subtracts recorded legacy sandbox recoveries across the logical task from th
     db.close();
   }
 });
+
+it('consumes one task-wide Codex recovery allowance even after success and requires a scoped human extension', () => {
+  const { db, repo } = fixture();
+  try {
+    const ledger = repo.codexInterruptionRetries;
+    if (!ledger) throw new Error('Missing recovery ledger');
+    const first = ledger.admit('root', 1, identity, binding, []);
+    ledger.start(first.id);
+    ledger.finish(first.id, 'pass', 12);
+    expect(() =>
+      ledger.admit('fix', 1, { ...identity, source: 'f'.repeat(64) }, binding, [0, 0]),
+    ).toThrow('task-wide Codex interruption recovery');
+    const actor = { type: 'human' as const, userId: 'operator' };
+    const grant = ledger.authorize(
+      'fix',
+      'extension',
+      'Inspected retained work before another recovery',
+      actor,
+    );
+    expect(ledger.authorize('fix', 'extension', grant.reason, actor).id).toBe(grant.id);
+    expect(() => ledger.admit('root', 1, identity, binding, [])).toThrow(
+      'task-wide Codex interruption recovery',
+    );
+    expect(() => ledger.admit('fix', 1, identity, 'e'.repeat(64), [])).toThrow('binding changed');
+    const next = ledger.admit('fix', 1, identity, binding, []);
+    expect(next.retryKind).toBe('override');
+    expect(ledger.state('root').authorizations[0]?.usedByAttemptId).toBe(next.id);
+    expect(ledger.recoverInterrupted()).toBe(1);
+    expect(ledger.state('fix')).toMatchObject({
+      admissionCount: 2,
+      executedCount: 1,
+      measuredDurationMs: 12,
+      interruptedCount: 1,
+    });
+    expect(() => ledger.admit('fix', 1, identity, binding, [])).toThrow(
+      'task-wide Codex interruption recovery',
+    );
+    expect(ledger.admit('rerun', 1, identity, binding, [])).toMatchObject({ retryKind: null });
+    expect(repo.taskRetries?.state('fix').admissionCount).toBe(0);
+  } finally {
+    db.close();
+  }
+});

@@ -8,7 +8,7 @@ export interface TaskRetryIdentity {
   environment: string | null;
   implementation: string | null;
 }
-export type TaskRetryStage = 'validation' | 'sandbox_startup';
+export type TaskRetryStage = 'validation' | 'sandbox_startup' | 'codex_interruption';
 export type TaskRetryOutcome = 'pass' | 'nonretryable' | 'transient' | 'cancelled' | 'unknown';
 export interface TaskRetryAttempt {
   id: string;

@@ -7,14 +7,17 @@ import { AutopodError, CONTAINER_HOME_DIR, CONTAINER_USER } from '@autopod/share
 import type {
   AgentEvent,
   ExecutionTarget,
+  Pod,
   ReasoningEffort,
   Runtime,
   SpawnConfig,
+  TaskRetryOutcome,
 } from '@autopod/shared';
 import type { Logger } from 'pino';
 import type { ContainerManager, StreamingExecResult } from '../interfaces/container-manager.js';
 import type { EventBus } from '../pods/event-bus.js';
 import type { PodRepository } from '../pods/pod-repository.js';
+import { admitCodexRecovery } from './codex-recovery-admission.js';
 import { codexStateDirForPod } from './codex-state-store.js';
 import {
   CodexStreamParser,
@@ -153,6 +156,7 @@ export class CodexRuntime implements Runtime {
   }
 
   async *spawn(config: SpawnConfig): AsyncIterable<AgentEvent> {
+    const recoveryOwner = structuredClone(this.podRepo.getOrThrow(config.podId));
     // A fresh spawn must not inherit the prior turn's durable rollout selector.
     // The new thread.started event will repopulate this map before live rollout
     // polling begins, keeping stale completed sessions from closing the new stream.
@@ -212,7 +216,12 @@ export class CodexRuntime implements Runtime {
       summary.dispose();
     }
     if (interrupted) {
-      yield* this.recoverInterruptedTurn(config.podId, config.containerId, config.env);
+      yield* this.recoverInterruptedTurn(
+        config.podId,
+        config.containerId,
+        recoveryOwner,
+        config.env,
+      );
     }
   }
 
@@ -222,9 +231,10 @@ export class CodexRuntime implements Runtime {
     containerId: string,
     env?: Record<string, string>,
     allowInterruptedRecovery = true,
+    beforeRecoveryLaunch?: () => void,
   ): AsyncIterable<AgentEvent> {
     // Prefer in-memory shortcut; fall back to durable DB source across daemon restarts.
-    const pod = this.podRepo.getOrThrow(podId);
+    const pod = structuredClone(this.podRepo.getOrThrow(podId));
 
     // Re-write the Codex config into the (potentially new) container before launching codex.
     // Crash recovery spawns a fresh container that has no config file on disk; without this
@@ -296,6 +306,7 @@ export class CodexRuntime implements Runtime {
     const summary = this.observeTaskSummary(podId, pod.executionTarget === 'sandbox');
     let interrupted: boolean;
     try {
+      beforeRecoveryLaunch?.();
       const handle = await this.containerManager.execStreaming(
         containerId,
         ['sh', shimPath, 'codex', ...args],
@@ -331,7 +342,7 @@ export class CodexRuntime implements Runtime {
       };
       return;
     }
-    yield* this.recoverInterruptedTurn(podId, containerId, env);
+    yield* this.recoverInterruptedTurn(podId, containerId, pod, env);
   }
 
   async abort(podId: string): Promise<void> {
@@ -526,6 +537,7 @@ export class CodexRuntime implements Runtime {
   private async *recoverInterruptedTurn(
     podId: string,
     containerId: string,
+    expected: Pod,
     env?: Record<string, string>,
   ): AsyncIterable<AgentEvent> {
     if (!this.codexSessionIds.get(podId) && !this.podRepo.getOrThrow(podId).codexSessionId) {
@@ -538,12 +550,61 @@ export class CodexRuntime implements Runtime {
       return;
     }
 
-    yield {
-      type: 'status',
-      timestamp: new Date().toISOString(),
-      message: 'Codex turn was interrupted — resuming the same session once',
-    };
-    yield* this.resume(podId, INTERRUPTED_TURN_CONTINUATION, containerId, env, false);
+    let recovery: ReturnType<typeof admitCodexRecovery> | undefined;
+    let outcome: TaskRetryOutcome = 'unknown';
+    try {
+      const sessionId =
+        this.codexSessionIds.get(podId) ?? this.podRepo.getOrThrow(podId).codexSessionId;
+      if (!sessionId) throw new Error('Codex recovery session unavailable');
+      recovery = admitCodexRecovery(
+        this.podRepo,
+        podId,
+        expected,
+        containerId,
+        sessionId,
+        INTERRUPTED_TURN_CONTINUATION,
+      );
+      yield {
+        type: 'status',
+        timestamp: new Date().toISOString(),
+        message: 'Codex turn was interrupted — resuming the same session once',
+      };
+      for await (const event of this.resume(
+        podId,
+        INTERRUPTED_TURN_CONTINUATION,
+        containerId,
+        env,
+        false,
+        () => {
+          if (
+            (this.codexSessionIds.get(podId) ?? this.podRepo.getOrThrow(podId).codexSessionId) !==
+            sessionId
+          )
+            throw new AutopodError(
+              'Codex recovery session was superseded',
+              'STALE_CODEX_RECOVERY',
+              409,
+            );
+          recovery?.beforeLaunch();
+        },
+      )) {
+        if (event.type === 'error' && event.fatal) outcome = 'nonretryable';
+        else if (event.type === 'complete' && outcome !== 'nonretryable') outcome = 'pass';
+        yield event;
+      }
+    } catch (error) {
+      yield {
+        type: 'error',
+        timestamp: new Date().toISOString(),
+        fatal: true,
+        message:
+          error instanceof AutopodError
+            ? error.message
+            : 'Codex interruption recovery failed; reconcile retained session and results before another execution.',
+      };
+    } finally {
+      recovery?.settle(outcome);
+    }
   }
 
   private buildSpawnArgs(config: SpawnConfig): string[] {

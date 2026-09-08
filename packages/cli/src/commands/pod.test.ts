@@ -618,7 +618,7 @@ it.each([true, false])(
   },
 );
 
-it.each(['validation', 'sandbox_startup'] as const)(
+it.each(['validation', 'sandbox_startup', 'codex_interruption'] as const)(
   'drives %s retry inspection, idempotent authorization and separate Resume through the real HTTP client',
   async (stage) => {
     const calls: Array<{ path: string; method: string; body: string }> = [];
@@ -672,7 +672,7 @@ it.each(['validation', 'sandbox_startup'] as const)(
         calls.some(
           (call) =>
             call.path ===
-            `/pods/abcd1234/retry-state${stage === 'validation' ? '' : '?stage=sandbox_startup'}`,
+            `/pods/abcd1234/retry-state${stage === 'validation' ? '' : `?stage=${stage}`}`,
         ),
       ).toBe(true);
       expect(output.mock.calls.flat().join('\n')).toContain('3 executed / 4 admitted');

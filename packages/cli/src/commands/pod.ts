@@ -320,20 +320,28 @@ export function registerPodCommands(program: Command, getClient: () => AutopodCl
   program
     .command('retry-state <id>')
     .description('Inspect task-wide stage admissions and retry authorizations')
-    .option('--stage <stage>', 'validation or sandbox_startup', 'validation')
+    .option('--stage <stage>', 'validation, sandbox_startup or codex_interruption', 'validation')
     .option('--json', 'Output JSON')
     .action(async (id: string, opts: { json?: boolean; stage: string }) => {
-      if (opts.stage !== 'validation' && opts.stage !== 'sandbox_startup')
-        throw new Error('Stage must be validation or sandbox_startup');
+      if (
+        opts.stage !== 'validation' &&
+        opts.stage !== 'sandbox_startup' &&
+        opts.stage !== 'codex_interruption'
+      )
+        throw new Error('Stage must be validation, sandbox_startup or codex_interruption');
       const client = getClient();
       const resolved = await resolvePodId(client, id);
       const state = await client.getRetryState(resolved, opts.stage);
       withJsonOutput(opts, state, (value) => {
         console.log(
-          `Task ${value.taskId}: ${value.executedCount} executed / ${value.admissionCount} admitted ${value.stage === 'sandbox_startup' ? 'sandbox startups' : 'validations'}`,
+          `Task ${value.taskId}: ${value.executedCount} executed / ${value.admissionCount} admitted ${value.stage === 'codex_interruption' ? 'Codex interruption recoveries' : value.stage === 'sandbox_startup' ? 'sandbox startups' : 'validations'}`,
         );
+        if (value.stage === 'codex_interruption')
+          console.log(
+            'One automatic inner recovery per logical task; further recoveries require recorded human authorization. These durations overlap the enclosing agent run; usage is not counted again.',
+          );
         console.log(
-          `${value.transientRetryCount}/${value.backoffsMs?.length ?? 0} automatic transient retries; ${value.measuredDurationMs} ms measured; ${value.interruptedCount} interrupted with unknown duration`,
+          `${value.stage === 'codex_interruption' ? '' : `${value.transientRetryCount}/${value.backoffsMs?.length ?? 0} automatic transient retries; `}${value.measuredDurationMs} ms measured; ${value.interruptedCount} interrupted with unknown duration`,
         );
         console.log(
           `Latest outcome: ${value.latest?.outcome ?? 'none'}; telemetry: ${value.telemetry}`,
@@ -349,15 +357,19 @@ export function registerPodCommands(program: Command, getClient: () => AutopodCl
     .description('Record one human retry authorization; Resume is a separate action')
     .requiredOption('--reason <text>', 'Reason for repeating the failed stage')
     .requiredOption('--request-key <key>', 'Stable key; reuse after an uncertain response')
-    .option('--stage <stage>', 'validation or sandbox_startup', 'validation')
+    .option('--stage <stage>', 'validation, sandbox_startup or codex_interruption', 'validation')
     .option('--json', 'Output JSON')
     .action(
       async (
         id: string,
         opts: { reason: string; requestKey: string; json?: boolean; stage: string },
       ) => {
-        if (opts.stage !== 'validation' && opts.stage !== 'sandbox_startup')
-          throw new Error('Stage must be validation or sandbox_startup');
+        if (
+          opts.stage !== 'validation' &&
+          opts.stage !== 'sandbox_startup' &&
+          opts.stage !== 'codex_interruption'
+        )
+          throw new Error('Stage must be validation, sandbox_startup or codex_interruption');
         const client = getClient();
         const resolved = await resolvePodId(client, id);
         const grant = await client.authorizeRetry(

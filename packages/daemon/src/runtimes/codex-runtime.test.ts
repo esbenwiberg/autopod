@@ -10,11 +10,14 @@ import type {
   SystemEvent,
 } from '@autopod/shared';
 import { AutopodError } from '@autopod/shared';
+import Database from 'better-sqlite3';
 import pino from 'pino';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ContainerManager, StreamingExecResult } from '../interfaces/container-manager.js';
 import type { EventBus } from '../pods/event-bus.js';
+import { createPodRepository } from '../pods/pod-repository.js';
 import type { PodRepository } from '../pods/pod-repository.js';
+import { createTestDb, insertTestProfile } from '../test-utils/mock-helpers.js';
 import { CodexRuntime } from './codex-runtime.js';
 
 const logger = pino({ level: 'silent' });
@@ -108,9 +111,21 @@ function createMockPodRepo(
   overrides: Record<string, unknown> = {},
 ): PodRepository {
   return {
+    codexInterruptionRetries: {
+      admit: vi.fn(() => ({ id: 'recovery' })),
+      start: vi.fn(),
+      finish: vi.fn(),
+    } as unknown as NonNullable<PodRepository['codexInterruptionRetries']>,
     insert: vi.fn(),
     getOrThrow: vi.fn(
-      () => ({ codexSessionId, ...overrides }) as ReturnType<PodRepository['getOrThrow']>,
+      () =>
+        ({
+          status: 'running',
+          runtime: 'codex',
+          containerId: 'container-123',
+          codexSessionId,
+          ...overrides,
+        }) as ReturnType<PodRepository['getOrThrow']>,
     ),
     update: vi.fn(),
     delete: vi.fn(),
@@ -1726,6 +1741,170 @@ describe('CodexRuntime', () => {
   });
 
   describe('resume', () => {
+    it.each(['root', 'fix'])(
+      'does not reset automatic interruption recovery after disk restart for %s',
+      async (nextPodId) => {
+        const db = createTestDb();
+        insertTestProfile(db);
+        const repo = createPodRepository(db);
+        for (const [id, parent] of [
+          ['root', null],
+          ['fix', 'root'],
+        ] as const) {
+          repo.insert({
+            id,
+            profileName: 'test-profile',
+            task: 'Recover',
+            status: 'running',
+            model: 'model',
+            runtime: 'codex',
+            executionTarget: 'local',
+            branch: id,
+            userId: 'user',
+            maxValidationAttempts: 3,
+            skipValidation: false,
+            outputMode: 'pr',
+            linkedPodId: parent,
+          });
+          repo.update(id, { containerId: 'container-123', codexSessionId: `session-${id}` });
+        }
+        const interrupted = () => {
+          const handle = createMockHandle();
+          (handle.stdout as PassThrough).end(
+            `${JSON.stringify({ id: 'abort', msg: { type: 'turn_aborted', reason: 'interrupted', turn_id: 'turn' } })}\n`,
+          );
+          (handle as StreamingExecResult & { finish(code: number): void }).finish(0);
+          return handle;
+        };
+        const complete = () => {
+          const handle = createMockHandle();
+          (handle.stdout as PassThrough).end(
+            `${JSON.stringify({ id: 'complete', msg: { type: 'task_complete', turn_id: 'recovered', last_agent_message: 'Recovered' } })}\n`,
+          );
+          (handle as StreamingExecResult & { finish(code: number): void }).finish(0);
+          return handle;
+        };
+        const cm = createMockContainerManager(interrupted());
+        vi.mocked(cm.execStreaming)
+          .mockResolvedValueOnce(interrupted())
+          .mockResolvedValueOnce(complete());
+        const collect = async (runtime: CodexRuntime, podId: string) => {
+          const events: AgentEvent[] = [];
+          for await (const event of runtime.resume(podId, 'Continue', 'container-123'))
+            events.push(event);
+          return events;
+        };
+        const directory = await mkdtemp(join(tmpdir(), 'codex-task-recovery-'));
+        let reopened: Database.Database | undefined;
+        try {
+          expect(await collect(new CodexRuntime(logger, cm, repo), 'root')).toEqual(
+            expect.arrayContaining([expect.objectContaining({ type: 'complete' })]),
+          );
+          expect(cm.execStreaming).toHaveBeenCalledTimes(2);
+          await writeFile(join(directory, 'state.db'), db.serialize());
+          db.close();
+          reopened = new Database(join(directory, 'state.db'));
+          const nextRepo = createPodRepository(reopened);
+          vi.mocked(cm.execStreaming)
+            .mockResolvedValueOnce(interrupted())
+            .mockResolvedValueOnce(complete());
+          const events = await collect(new CodexRuntime(logger, cm, nextRepo), nextPodId);
+          expect(cm.execStreaming).toHaveBeenCalledTimes(3);
+          expect(events).toEqual(
+            expect.arrayContaining([
+              expect.objectContaining({
+                type: 'error',
+                fatal: true,
+                message: expect.stringContaining('task-wide Codex interruption recovery'),
+              }),
+            ]),
+          );
+          const ledger = nextRepo.codexInterruptionRetries;
+          if (!ledger) throw new Error('Missing durable recovery ledger');
+          ledger.authorize(
+            nextPodId,
+            'extend-recovery',
+            'Inspected prior work and response before another inner recovery',
+            { type: 'human', userId: 'operator' },
+          );
+          vi.mocked(cm.execStreaming)
+            .mockReset()
+            .mockResolvedValueOnce(interrupted())
+            .mockResolvedValueOnce(complete());
+          expect(await collect(new CodexRuntime(logger, cm, nextRepo), nextPodId)).toEqual(
+            expect.arrayContaining([expect.objectContaining({ type: 'complete' })]),
+          );
+          expect(cm.execStreaming).toHaveBeenCalledTimes(2);
+          expect(ledger.state(nextPodId)).toMatchObject({
+            admissionCount: 2,
+            executedCount: 2,
+            latest: { retryKind: 'override', outcome: 'pass' },
+          });
+          expect(ledger.state(nextPodId).authorizations[0]?.usedByAttemptId).toBeTruthy();
+          expect(reopened.pragma('integrity_check')).toEqual([{ integrity_check: 'ok' }]);
+          expect(reopened.pragma('foreign_key_check')).toEqual([]);
+        } finally {
+          if (db.open) db.close();
+          reopened?.close();
+          await rm(directory, { recursive: true, force: true });
+        }
+      },
+    );
+
+    it.each(['generation', 'binding', 'question', 'session', 'budget'] as const)(
+      'fences an inner recovery when %s changes during config preparation',
+      async (change) => {
+        const handle = createMockHandle();
+        (handle.stdout as PassThrough).end(
+          `${JSON.stringify({ id: 'abort', msg: { type: 'turn_aborted', reason: 'interrupted', turn_id: 'turn' } })}\n`,
+        );
+        (handle as StreamingExecResult & { finish(code: number): void }).finish(0);
+        const cm = createMockContainerManager(handle);
+        const repo = createMockPodRepo('session-123', { model: 'model', lifecycleGeneration: 1 });
+        const current = repo.getOrThrow('pod');
+        vi.mocked(repo.getOrThrow).mockImplementation(() => current);
+        let calls = 0;
+        vi.mocked(cm.execInContainer).mockImplementation(async () => {
+          calls++;
+          if (calls === 2) {
+            if (change === 'generation') current.lifecycleGeneration++;
+            if (change === 'binding') current.model = 'replacement';
+            if (change === 'question') current.status = 'awaiting_input';
+            if (change === 'session') current.codexSessionId = 'replacement-session';
+            if (change === 'budget')
+              repo.taskExecutions = {
+                snapshot: () => ({
+                  budgetCheck: { status: 'exhausted', reason: 'Task budget exhausted' },
+                }),
+              } as unknown as NonNullable<PodRepository['taskExecutions']>;
+          }
+          return { stdout: '', stderr: '', exitCode: 0 };
+        });
+        const events: AgentEvent[] = [];
+        for await (const event of new CodexRuntime(logger, cm, repo).spawn({
+          podId: 'pod',
+          task: 'Continue',
+          containerId: 'container-123',
+          model: 'model',
+          reasoningEffort: 'auto',
+          workDir: '/workspace',
+          env: {},
+          mcpServers: [{ name: 'synthetic', url: 'http://fixture.invalid' }],
+        }))
+          events.push(event);
+        expect(calls).toBe(2);
+        expect(cm.execStreaming).toHaveBeenCalledTimes(1);
+        expect(repo.codexInterruptionRetries?.start).not.toHaveBeenCalled();
+        expect(repo.codexInterruptionRetries?.finish).toHaveBeenCalledWith(
+          'recovery',
+          'cancelled',
+          null,
+        );
+        expect(events).toEqual(
+          expect.arrayContaining([expect.objectContaining({ type: 'error', fatal: true })]),
+        );
+      },
+    );
     it('automatically resumes one interrupted Codex turn', async () => {
       const firstHandle = createMockHandle();
       const recoveryHandle = createMockHandle();

@@ -1223,6 +1223,67 @@ describe('PodManager', () => {
     }
   });
 
+  it('exposes durable Codex interruption recovery and idempotent human extension without dispatch', async () => {
+    const ctx = createTestContext();
+    const manager = createPodManager(ctx.deps);
+    const pod = manager.createSession(
+      { profileName: 'test-profile', task: 'Inspect recovery' },
+      'user-1',
+    );
+    const ledger = ctx.podRepo.codexInterruptionRetries;
+    if (!ledger) throw new Error('Missing recovery ledger');
+    const identity = {
+      source: null,
+      contract: null,
+      commands: null,
+      environment: null,
+      implementation: null,
+    };
+    const admission = ledger.admit(pod.id, pod.lifecycleGeneration, identity, 'a'.repeat(64), []);
+    ledger.start(admission.id);
+    ledger.finish(admission.id, 'pass', 10);
+    const app = Fastify();
+    app.setErrorHandler(errorHandler);
+    authPlugin(app, {
+      validateToken: async () => ({ oid: 'recovery-human', name: 'Operator' }),
+    } as never);
+    podRoutes(app, manager, ctx.eventRepo, undefined, ctx.podRepo);
+    const headers = { authorization: 'Bearer synthetic' };
+    try {
+      const state = await app.inject({
+        method: 'GET',
+        url: `/pods/${pod.id}/retry-state?stage=codex_interruption`,
+        headers,
+      });
+      expect(state.statusCode, state.body).toBe(200);
+      expect(state.json()).toMatchObject({
+        stage: 'codex_interruption',
+        admissionCount: 1,
+        executedCount: 1,
+        latest: { outcome: 'pass' },
+      });
+      const url = `/pods/${pod.id}/retry-authorizations`;
+      const payload = {
+        requestKey: 'recovery-extension',
+        reason: 'Inspected previous recovery before extension',
+        stage: 'codex_interruption',
+      };
+      const first = await app.inject({ method: 'POST', url, headers, payload });
+      const duplicate = await app.inject({ method: 'POST', url, headers, payload });
+      expect(first.statusCode, first.body).toBe(201);
+      expect(duplicate.json().id).toBe(first.json().id);
+      expect(first.json()).toMatchObject({
+        actor: { type: 'human', userId: 'recovery-human' },
+        usedByAttemptId: null,
+      });
+      expect(ledger.state(pod.id).admissionCount).toBe(1);
+      expect(ctx.runtime.spawn).not.toHaveBeenCalled();
+      expect(ctx.runtime.resume).not.toHaveBeenCalled();
+      expect(ctx.podRepo.taskRetries?.state(pod.id).admissionCount).toBe(0);
+    } finally {
+      await app.close();
+    }
+  });
   it('retains consumed sandbox cooldown admission when a newer lifecycle interrupts before allocation', async () => {
     const ctx = createTestContext(undefined, {
       executionTarget: 'sandbox',

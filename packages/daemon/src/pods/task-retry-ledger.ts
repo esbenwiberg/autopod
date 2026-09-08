@@ -57,8 +57,14 @@ export function createTaskRetryLedger(
   db: Database.Database,
   stage: TaskRetryStage = 'validation',
 ): TaskRetryLedger {
-  if (stage !== 'validation' && stage !== 'sandbox_startup') throw new Error('Unknown retry stage');
-  const label = stage === 'validation' ? 'validation' : 'sandbox startup';
+  if (stage !== 'validation' && stage !== 'sandbox_startup' && stage !== 'codex_interruption')
+    throw new Error('Unknown retry stage');
+  const label =
+    stage === 'validation'
+      ? 'validation'
+      : stage === 'sandbox_startup'
+        ? 'sandbox startup'
+        : 'Codex interruption recovery';
   const membership = (podId: string) => {
     const row = db
       .prepare(`SELECT e.task_id AS taskId, e.execution_id AS executionId, p.lifecycle_generation AS generation
@@ -185,7 +191,7 @@ export function createTaskRetryLedger(
         `A ${label} admission is already active for this logical task`,
         'TASK_RETRY_IN_PROGRESS',
       );
-    if (prior && prior.outcome !== 'pass') {
+    if (prior && (prior.outcome !== 'pass' || stage === 'codex_interruption')) {
       if (prior.binding_hash !== bindingHash)
         throw new TaskRetryBlockedError(
           `${label} provider binding changed; explicitly reconcile the authorized provider before retrying`,
@@ -203,6 +209,10 @@ export function createTaskRetryLedger(
       if (grant) {
         retryKind = 'override';
         useAuthorization = grant.id as string;
+      } else if (stage === 'codex_interruption') {
+        throw new TaskRetryBlockedError(
+          'Automatic task-wide Codex interruption recovery allowance consumed; inspect retained session/results and record a human retry authorization before allowing another inner recovery.',
+        );
       } else if (prior.outcome === 'transient') {
         const delay = effectiveBackoffs[task.transientRetryCount];
         if (delay === undefined)
@@ -249,7 +259,7 @@ export function createTaskRetryLedger(
           JSON.stringify(identity),
           bindingHash,
           retryKind,
-          prior && prior.outcome !== 'pass' ? prior.id : null,
+          prior && (prior.outcome !== 'pass' || stage === 'codex_interruption') ? prior.id : null,
           now,
           new Date(notBefore).toISOString(),
         );
@@ -363,9 +373,9 @@ export function createTaskRetryLedger(
           return recorded;
         }
         const failure = latest(member.taskId);
-        if (!failure?.ended_at || failure.outcome === 'pass')
+        if (!failure?.ended_at || (failure.outcome === 'pass' && stage !== 'codex_interruption'))
           throw new TaskRetryBlockedError(
-            `A settled failed ${label} attempt is required before authorizing one retry`,
+            `A settled ${label} attempt requiring another admission is required before authorizing one retry`,
           );
         const id = randomUUID();
         db.prepare(

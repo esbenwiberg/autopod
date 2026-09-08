@@ -88,7 +88,8 @@
         "checkpoint-60.md",
         "checkpoint-62.md",
         "checkpoint-63.md",
-        "checkpoint-65.md"
+        "checkpoint-65.md",
+        "checkpoint-72.md"
       ],
       "prerequisites": [],
       "remaining": "Normal replies are atomic, retained in bounded recovery context, and fence older completion events. New unanswered decisions remain actionable. Attached MCP delivery acknowledgment, delayed concurrent stream ordering, other response boundaries, historical orphan questions and broader finalization side effects remain. New worker/cycle and validation admission now preserve pending decisions, including older unresolved cycles in the current generation. Historical missing payload recovery and stream/MCP delivery acknowledgment remain. Codex now observes summary events before Spawn/Resume launch and disposes each invocation listener. This closes the local launch/stream attachment race, not durable delivery acknowledgment across all runtimes or daemon restart. Concurrent interactive completions now coalesce in process, conflicting promotion/generation requests fail closed, and current source/lifecycle/decision ownership is checked across push and container release boundaries. This is not durable cross-process idempotency, cancellation of already-dispatched external operations, or complete post-completion side-effect accounting."
@@ -477,7 +478,8 @@
         "packages/daemon/src/pods/provider-attempt-repository.ts",
         "packages/daemon/src/validation/review-tool-runner.ts",
         "packages/daemon/src/validation/local-validation-engine.ts",
-        "packages/daemon/src/validation/reviewer-api-budget.ts"
+        "packages/daemon/src/validation/reviewer-api-budget.ts",
+        "packages/daemon/src/runtimes/codex-recovery-admission.ts"
       ],
       "tests": [
         "packages/daemon/src/pods/task-execution-ledger.test.ts",
@@ -489,7 +491,8 @@
         "packages/desktop/Tests/AutopodClientTests/TaskRetryClientTests.swift",
         "packages/mobile-web/src/components/TaskExecutionPanel.test.tsx",
         "packages/desktop/Tests/AutopodClientTests/PodCostBreakdownResponseTests.swift",
-        "packages/daemon/src/pods/provider-attempt-repository.test.ts"
+        "packages/daemon/src/pods/provider-attempt-repository.test.ts",
+        "packages/daemon/src/runtimes/codex-runtime.test.ts"
       ],
       "evidence": [
         "receipts/task-ledger-red.txt",
@@ -525,7 +528,8 @@
         "checkpoint-55.md",
         "checkpoint-59.md",
         "checkpoint-66.md",
-        "checkpoint-68.md"
+        "checkpoint-68.md",
+        "checkpoint-72.md"
       ],
       "prerequisites": [],
       "remaining": "Validation admission identity and pinned cumulative transient allowance persist across Resume, restart and linked fix pods. Task-wide agent/repository-rework limits, cumulative provider/sandbox recovery and audited token-budget extensions still require integration; historical pre-ledger retries are not reconstructed. Incomplete known prior spending now blocks further budgeted agent consumption. This does not reserve future spend or reconstruct unrecorded legacy work; task-wide provider/rework admission and phase reconciliation remain. Checkpoint 24 adds durable sandbox startup retries, legacy allowance lower bounds, stage-scoped one-use decisions, measured startup time and local operator proof. Provider retries after first runtime event, repository rework, complete historical reconstruction, phase billing, native interaction and live acceptance remain."
@@ -550,7 +554,8 @@
         "packages/daemon/src/pods/validation-ownership.ts",
         "packages/daemon/src/validation/review-tool-runner.ts",
         "packages/daemon/src/validation/local-validation-engine.ts",
-        "packages/daemon/src/validation/reviewer-api-budget.ts"
+        "packages/daemon/src/validation/reviewer-api-budget.ts",
+        "packages/daemon/src/runtimes/codex-recovery-admission.ts"
       ],
       "tests": [
         "packages/daemon/src/pods/task-retry-ledger.test.ts",
@@ -558,7 +563,8 @@
         "packages/daemon/src/pods/pod-manager.test.ts",
         "packages/cli/src/commands/pod.test.ts",
         "packages/mobile-web/src/components/TaskRetryPanel.test.tsx",
-        "packages/desktop/Tests/AutopodClientTests/TaskRetryClientTests.swift"
+        "packages/desktop/Tests/AutopodClientTests/TaskRetryClientTests.swift",
+        "packages/daemon/src/runtimes/codex-runtime.test.ts"
       ],
       "evidence": [
         "receipts/task-retry-resume-red.txt",
@@ -582,7 +588,8 @@
         "checkpoint-54.md: ambiguous validation-feedback turns are not automatically replayed; known idempotent Codex setup retry retained; task-wide provider/rework admission remains unfinished",
         "checkpoint-55.md",
         "checkpoint-66.md",
-        "checkpoint-68.md"
+        "checkpoint-68.md",
+        "checkpoint-72.md"
       ],
       "prerequisites": [],
       "remaining": "Actual validation repeat admission requires known changed source/contract/commands/environment/implementation or one-use authenticated human authorization. Agent-rework admission and explicit provider-rebinding reconciliation remain; unavailable identity never proves change. Checkpoint 24 adds durable sandbox startup retries, legacy allowance lower bounds, stage-scoped one-use decisions, measured startup time and local operator proof. Provider retries after first runtime event, repository rework, complete historical reconstruction, phase billing, native interaction and live acceptance remain."
@@ -611,7 +618,8 @@
         "packages/daemon/src/runtimes/run-claude-cli.ts",
         "packages/daemon/src/validation/review-agentic-runner.ts",
         "packages/daemon/src/validation/local-validation-engine.ts",
-        "packages/daemon/src/validation/review-tool-runner.ts"
+        "packages/daemon/src/validation/review-tool-runner.ts",
+        "packages/daemon/src/runtimes/codex-recovery-admission.ts"
       ],
       "tests": [
         "packages/daemon/src/pods/task-retry-ledger.test.ts",
@@ -619,7 +627,8 @@
         "packages/daemon/src/pods/pod-manager.test.ts",
         "packages/cli/src/commands/pod.test.ts",
         "packages/mobile-web/src/components/TaskRetryPanel.test.tsx",
-        "packages/desktop/Tests/AutopodClientTests/TaskRetryClientTests.swift"
+        "packages/desktop/Tests/AutopodClientTests/TaskRetryClientTests.swift",
+        "packages/daemon/src/runtimes/codex-runtime.test.ts"
       ],
       "evidence": [
         "receipts/task-retry-resume-red.txt",
@@ -644,7 +653,8 @@
         "checkpoint-54.md: ambiguous validation-feedback turns are not automatically replayed; known idempotent Codex setup retry retained; task-wide provider/rework admission remains unfinished",
         "checkpoint-62.md",
         "checkpoint-63.md",
-        "checkpoint-66.md"
+        "checkpoint-66.md",
+        "checkpoint-72.md"
       ],
       "prerequisites": [],
       "remaining": "Validation infrastructure/reviewer failure admission uses persisted bounded backoff under unchanged captured provider/account/model. Other provider/sandbox retry paths and explicit authorized binding changes still require reconciliation. Checkpoint 24 adds durable sandbox startup retries, legacy allowance lower bounds, stage-scoped one-use decisions, measured startup time and local operator proof. Provider retries after first runtime event, repository rework, complete historical reconstruction, phase billing, native interaction and live acceptance remain."
@@ -680,7 +690,8 @@
         "packages/daemon/src/runtimes/run-claude-cli.ts",
         "packages/daemon/src/validation/review-agentic-runner.ts",
         "packages/daemon/src/validation/container-reviewer-runner.ts",
-        "packages/daemon/src/validation/local-validation-engine.ts"
+        "packages/daemon/src/validation/local-validation-engine.ts",
+        "packages/daemon/src/runtimes/codex-recovery-admission.ts"
       ],
       "tests": [
         "packages/daemon/src/pods/task-execution-ledger.test.ts",
@@ -692,7 +703,8 @@
         "packages/desktop/Tests/AutopodClientTests/TaskRetryClientTests.swift",
         "packages/mobile-web/src/components/TaskExecutionPanel.test.tsx",
         "packages/desktop/Tests/AutopodClientTests/PodCostBreakdownResponseTests.swift",
-        "packages/daemon/src/api/routes/pods.test.ts"
+        "packages/daemon/src/api/routes/pods.test.ts",
+        "packages/daemon/src/runtimes/codex-runtime.test.ts"
       ],
       "evidence": [
         "receipts/task-ledger-red.txt",
@@ -735,7 +747,8 @@
         "checkpoint-26.md: stored subtotals, unavailable attribution, source estimates, API/CLI/mobile/native test evidence; live and native interaction remain unverified",
         "checkpoint-55.md",
         "checkpoint-58.md",
-        "checkpoint-63.md"
+        "checkpoint-63.md",
+        "checkpoint-72.md"
       ],
       "prerequisites": [],
       "remaining": "Actual engine wall duration is recorded once per executed validation admission; waiting and interrupted unknown duration are separate. Complete cross-phase cost/time reconciliation and available infrastructure billing remain. Native interaction and live acceptance are unverified. Incomplete known prior spending now blocks further budgeted agent consumption. Future spending reservations, unrecorded legacy work, phase accounting and native/live verification remain. Checkpoint 24 adds durable sandbox startup retries, legacy allowance lower bounds, stage-scoped one-use decisions, measured startup time and local operator proof. Provider retries after first runtime event, repository rework, complete historical reconstruction, phase billing, native interaction and live acceptance remain. Checkpoint 25 reconciles corrected provider totals in task, per-pod and fleet APIs, including recorded zero. Phase attribution, legacy estimates, telemetry completeness, operator presentation and live proof remain."
@@ -751,14 +764,16 @@
         "packages/daemon/src/validation/validation-identity-collector.ts",
         "packages/daemon/src/validation/local-validation-engine.ts",
         "packages/daemon/src/runtimes/build-input-identity.ts",
-        "packages/daemon/src/validation/retry-identity.ts"
+        "packages/daemon/src/validation/retry-identity.ts",
+        "packages/daemon/src/runtimes/codex-recovery-admission.ts"
       ],
       "tests": [
         "packages/daemon/src/validation/validation-evidence-cache.test.ts",
         "packages/daemon/src/validation/run-with-evidence.test.ts",
         "packages/daemon/src/validation/validation-identity-collector.test.ts",
         "packages/daemon/src/validation/validation-evidence-engine.test.ts",
-        "packages/daemon/src/runtimes/build-input-identity.test.ts"
+        "packages/daemon/src/runtimes/build-input-identity.test.ts",
+        "packages/daemon/src/runtimes/codex-runtime.test.ts"
       ],
       "evidence": [
         "receipts/validation-cache-engine-red.txt",
@@ -766,7 +781,8 @@
         "receipts/checkpoint-4-affected.txt",
         "receipts/validation-replay-isolation-gate.txt",
         "receipts/delivery-mobile-browser.json",
-        "receipts/provenance-final-targeted-authorized.txt"
+        "receipts/provenance-final-targeted-authorized.txt",
+        "checkpoint-72.md"
       ],
       "prerequisites": [],
       "remaining": "Local exact-input reuse proved; actual Docker/supported operator interaction and exact final source verification remain. Complete hermetic read set is an explicit contract obligation."
@@ -779,13 +795,15 @@
         "packages/daemon/src/validation/review-ledger.ts",
         "packages/daemon/src/validation/review-batch-runner.ts",
         "packages/daemon/src/validation/local-validation-engine.ts",
-        "packages/daemon/src/pods/validation-repository.ts"
+        "packages/daemon/src/pods/validation-repository.ts",
+        "packages/daemon/src/runtimes/codex-recovery-admission.ts"
       ],
       "tests": [
         "packages/daemon/src/validation/review-ledger.test.ts",
         "packages/daemon/src/validation/review-batch-runner.test.ts",
         "packages/daemon/src/validation/local-validation-engine.test.ts",
-        "packages/daemon/src/pods/validation-repository.test.ts"
+        "packages/daemon/src/pods/validation-repository.test.ts",
+        "packages/daemon/src/runtimes/codex-runtime.test.ts"
       ],
       "evidence": [
         "checkpoint-21.md",
@@ -793,7 +811,8 @@
         "receipts/checkpoint-21-full-validation.txt",
         "receipts/checkpoint-21-validation-identity.json",
         "checkpoint-56.md",
-        "checkpoint-57.md"
+        "checkpoint-57.md",
+        "checkpoint-72.md"
       ],
       "prerequisites": [],
       "remaining": "Current source retains frozen identity, independently addressable substantive findings, bounded closure chunks, fail-closed unavailable axes/closure, and immutable validation history. Existing local regression coverage is mapped; final committed pipeline and deployed-byte verification remain separate requirements."
@@ -802,15 +821,22 @@
       "id": "W2.7",
       "requirement": "Matched reproducible benchmark measures 25 percent target and seeded defect escape with fixed coverage; local and live separated",
       "status": "partial",
-      "implementation": ["docs/analysis/2026-09-07/execution/benchmarks/validation-replay.test.ts"],
-      "tests": ["docs/analysis/2026-09-07/execution/benchmarks/validation-replay.test.ts"],
+      "implementation": [
+        "docs/analysis/2026-09-07/execution/benchmarks/validation-replay.test.ts",
+        "packages/daemon/src/runtimes/codex-recovery-admission.ts"
+      ],
+      "tests": [
+        "docs/analysis/2026-09-07/execution/benchmarks/validation-replay.test.ts",
+        "packages/daemon/src/runtimes/codex-runtime.test.ts"
+      ],
       "evidence": [
         "receipts/validation-replay-benchmark-initial.json",
         "receipts/validation-replay-benchmark.json",
         "receipts/validation-replay-isolation-gate.txt",
         "checkpoint-19.md",
         "receipts/validation-replay-18e5bd37.json",
-        "receipts/validation-replay-18e5bd37.txt"
+        "receipts/validation-replay-18e5bd37.txt",
+        "checkpoint-72.md"
       ],
       "prerequisites": [],
       "remaining": "Clean committed local replay at 18e5bd37 measured -190.90 percent reduction (631.75 ms baseline, 1837.78 ms candidate), zero escaped seeded defects in both modes and unchanged coverage. The 25 percent target is unsupported for this short-check workload. Representative live comparison requires bounded authorization; no general workload improvement is claimed."
@@ -1932,7 +1958,8 @@
         "checkpoint-67.md",
         "checkpoint-69.md",
         "checkpoint-70.md",
-        "checkpoint-71.md"
+        "checkpoint-71.md",
+        "checkpoint-72.md"
       ],
       "prerequisites": [
         "Selected mobile flows and new health CLI have local interaction proof. Desktop has compilation and tests only. Remaining operator flows, physical device and live evidence are outstanding."
@@ -1957,7 +1984,7 @@
       "prerequisites": []
     }
   ],
-  "lastCheckpoint": "checkpoint-71.md",
+  "lastCheckpoint": "checkpoint-72.md",
   "migrationLineage": {
     "managedBaseline": "142-152; exact bytes from tracking commit cba763ba0bb3d65cb4c055e00033016ba1d5c646",
     "nativeCurrent": "164-176; byte-preserving move of unpublished native 151-163",

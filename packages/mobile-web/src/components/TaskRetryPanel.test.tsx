@@ -7,11 +7,11 @@ afterEach(() => {
   vi.restoreAllMocks();
   localStorage.clear();
 });
-it.each(['validation', 'sandbox_startup'] as const)(
+it.each(['validation', 'sandbox_startup', 'codex_interruption'] as const)(
   'preserves one %s authorization through lost response and reload without implicitly resuming',
   async (stage) => {
     const input = { requestKey: 'durable-key', reason: 'External prerequisite checked' };
-    const key = `autopod.retry-authorization.fix${stage === 'validation' ? '' : '.sandbox_startup'}`;
+    const key = `autopod.retry-authorization.fix${stage === 'validation' ? '' : `.${stage}`}`;
     localStorage.setItem(key, JSON.stringify(input));
     const state = {
       taskId: 'task',
@@ -21,7 +21,7 @@ it.each(['validation', 'sandbox_startup'] as const)(
       backoffsMs: [0, 0],
       measuredDurationMs: 15,
       interruptedCount: 1,
-      latest: { id: 'failure', outcome: 'unknown' },
+      latest: { id: 'failure', outcome: stage === 'codex_interruption' ? 'pass' : 'unknown' },
       authorizations: [] as Array<{
         id: string;
         failureId: string;
@@ -65,7 +65,7 @@ it.each(['validation', 'sandbox_startup'] as const)(
       await render();
       expect(globalThis.fetch).toHaveBeenCalledWith(
         expect.stringContaining(
-          stage === 'validation' ? '/retry-state' : '/retry-state?stage=sandbox_startup',
+          stage === 'validation' ? '/retry-state' : `/retry-state?stage=${stage}`,
         ),
         expect.anything(),
       );
@@ -80,9 +80,19 @@ it.each(['validation', 'sandbox_startup'] as const)(
       await click('Retry recording the same authorization');
       const sent = { ...input, ...(stage === 'validation' ? {} : { stage }) };
       expect(bodies).toEqual([sent, sent]);
+      if (stage === 'codex_interruption') {
+        expect(container.textContent).toContain('Available for latest recovery');
+        expect(container.textContent).toContain('Latest outcome: pass');
+      }
       expect(resumes).toBe(0);
       expect(localStorage.getItem(key)).toBeNull();
-      await click(stage === 'validation' ? 'Resume validation' : 'Resume sandbox startup');
+      await click(
+        stage === 'codex_interruption'
+          ? 'Resume task'
+          : stage === 'validation'
+            ? 'Resume validation'
+            : 'Resume sandbox startup',
+      );
       expect(resumes).toBe(1);
       expect(container.textContent).toContain('Resume requested.');
     } finally {

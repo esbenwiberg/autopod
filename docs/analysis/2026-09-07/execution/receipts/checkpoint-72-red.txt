@@ -1,0 +1,26 @@
+
+ RUN  v4.1.11 /private/tmp/autopod-durable-execution/packages/daemon
+
+ ❯ src/runtimes/codex-runtime.test.ts (72 tests | 1 failed | 71 skipped) 102ms
+       × does not reset automatic interruption recovery after disk restart or in a linked fix 100ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/runtimes/codex-runtime.test.ts > CodexRuntime > resume > does not reset automatic interruption recovery after disk restart or in a linked fix
+AssertionError: expected "vi.fn()" to be called 3 times, but got 4 times
+ ❯ src/runtimes/codex-runtime.test.ts:1772:34
+    1770|         vi.mocked(cm.execStreaming).mockResolvedValueOnce(interrupted(…
+    1771|         const events = await collect(new CodexRuntime(logger, cm, next…
+    1772|         expect(cm.execStreaming).toHaveBeenCalledTimes(3);
+       |                                  ^
+    1773|         expect(events).toEqual(expect.arrayContaining([expect.objectCo…
+    1774|       } finally {
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 71 skipped (72)
+   Start at  13:17:52
+   Duration  653ms (transform 303ms, setup 0ms, import 431ms, tests 102ms, environment 0ms)
+

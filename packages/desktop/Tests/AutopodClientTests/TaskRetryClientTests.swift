@@ -3,7 +3,7 @@ import Testing
 
 @testable import AutopodClient
 
-@Test(arguments: ["validation", "sandbox_startup"])
+@Test(arguments: ["validation", "sandbox_startup", "codex_interruption"])
 func retryClientPreservesUnknownExecutionAndSeparateAuthorization(stage: String) async throws {
   let configuration = URLSessionConfiguration.ephemeral
   configuration.protocolClasses = [RetryFixtureProtocol.self]
