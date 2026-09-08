@@ -6,6 +6,7 @@ import { describe, expect, it } from 'vitest';
 import { runMigrations } from '../db/migrate.js';
 import { createTestDb, insertTestProfile, logger } from '../test-utils/mock-helpers.js';
 import { createPodRepository } from './pod-repository.js';
+import { createTaskExecutionLedger } from './task-execution-ledger.js';
 import { createTaskRetryLedger } from './task-retry-ledger.js';
 import { unavailableWorkerInputs, workerBindingHash } from './worker-retry-history.js';
 
@@ -750,25 +751,15 @@ it('upgrades schema 177 without broadening an existing worker permission', () =>
     db.pragma('foreign_keys = ON');
     runMigrations(db, dir, logger);
     insertTestProfile(db);
-    const repo = createPodRepository(db);
-    repo.insert({
-      id: 'root',
-      profileName: 'test-profile',
-      task: 'Retain old permission',
-      status: 'running',
-      model: 'model',
-      runtime: 'codex',
-      executionTarget: 'local',
-      branch: 'root',
-      userId: 'operator',
-      maxValidationAttempts: 3,
-      skipValidation: false,
-      outputMode: 'pr',
-    });
+    db.prepare(
+      "INSERT INTO pods(id,profile_name,task,status,model,runtime,branch,user_id,max_validation_attempts,skip_validation,output_mode) VALUES ('root','test-profile','Retain old permission','running','model','codex','root','operator',3,0,'pr')",
+    ).run();
+    const executions = createTaskExecutionLedger(db);
+    executions.register('root');
     const bound = { runtime: 'codex', model: 'model', providerAccountId: null };
-    const run = repo.taskExecutions?.beginRun('root', 1, 1, bound);
-    if (!run || !repo.workerRetries) throw new Error('Missing worker ledger');
-    repo.taskExecutions?.finishRun(run, 'failed', 'auth');
+    const run = executions.beginRun('root', 1, 1, bound);
+    if (!run) throw new Error('Missing worker ledger');
+    executions.finishRun(run, 'failed', 'auth');
     // Build the exact old-schema row without calling a newer ledger writer.
     db.prepare(`INSERT INTO task_retry_attempts(id,task_id,pod_id,execution_id,generation,stage,identity,binding_hash,admitted_at,not_before,started_at,ended_at,outcome,measured_duration_ms)
       SELECT r.id,e.task_id,r.pod_id,e.execution_id,r.generation,'worker',?,?,r.started_at,r.started_at,r.started_at,r.ended_at,'nonretryable',11
@@ -778,7 +769,7 @@ it('upgrades schema 177 without broadening an existing worker permission', () =>
       run,
     );
     const actor = { type: 'human' as const, userId: 'operator' };
-    const taskId = repo.taskExecutions?.snapshot('root').taskId;
+    const taskId = executions.snapshot('root').taskId;
     db.prepare(`INSERT INTO task_retry_authorizations(id,request_key,task_id,pod_id,stage,failure_id,actor,reason,created_at)
       VALUES ('legacy','legacy-key',?,'root','worker',?,?,'Retry original provider','2026-09-08T10:00:00Z')`).run(
       taskId,
@@ -907,16 +898,16 @@ it('upgrades schema 178 without inventing provider deadlines for older worker ev
     db.prepare(
       "INSERT INTO pods(id,profile_name,task,status,model,runtime,branch,user_id) VALUES ('legacy','test-profile','Retain deadline uncertainty','failed','model','codex','legacy','operator')",
     ).run();
-    const repo = createPodRepository(db);
-    repo.taskExecutions?.register('legacy');
-    const run = repo.taskExecutions?.beginRun('legacy', 1, 1, {
+    const executions = createTaskExecutionLedger(db);
+    executions.register('legacy');
+    const run = executions.beginRun('legacy', 1, 1, {
       runtime: 'codex',
       model: 'model',
       providerAccountId: null,
     });
     if (!run) throw new Error('Missing run');
-    repo.taskExecutions?.finishRun(run, 'failed', 'transient');
-    repo.workerRetries?.state('legacy');
+    executions.finishRun(run, 'failed', 'transient');
+    createTaskRetryLedger(db, 'worker').state('legacy');
     const before = db.prepare('SELECT * FROM task_retry_attempts WHERE id=?').get(run) as Record<
       string,
       unknown
