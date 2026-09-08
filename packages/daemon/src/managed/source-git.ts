@@ -18,17 +18,29 @@ export interface SourceEnrollment {
   /** Trusted isolated Git repository per pod; never the user's ordinary checkout. */
   workspace(podId: string): string;
 }
+function managedGitSafeDirectories(
+  cwd: string,
+  trustedDirectories: readonly string[] = [],
+): string[] {
+  const directories = [path.resolve(cwd), ...trustedDirectories];
+  for (const directory of directories)
+    if (!path.isAbsolute(directory) || /[\0\r\n*]/.test(directory))
+      throw new Error('managed-git-safe-directory-invalid');
+  return [...new Set(directories.map((item) => path.resolve(item)))];
+}
+export function managedGitConfigContents(
+  cwd: string,
+  trustedDirectories: readonly string[] = [],
+): string {
+  return `[safe]\n${managedGitSafeDirectories(cwd, trustedDirectories)
+    .map((directory) => `\tdirectory = ${JSON.stringify(directory)}\n`)
+    .join('')}`;
+}
 export function managedGitArguments(
   cwd: string,
   trustedDirectories: readonly string[] = [],
 ): string[] {
-  for (const directory of trustedDirectories)
-    if (!path.isAbsolute(directory) || /[\0\r\n*]/.test(directory))
-      throw new Error('managed-git-safe-directory-invalid');
-  const safeDirectories = [
-    path.resolve(cwd),
-    ...trustedDirectories.map((item) => path.resolve(item)),
-  ];
+  const safeDirectories = managedGitSafeDirectories(cwd, trustedDirectories);
   return [
     '--no-pager',
     ...[...new Set(safeDirectories)].flatMap((directory) => ['-c', `safe.directory=${directory}`]),
@@ -50,7 +62,13 @@ export async function managedGit(
   credential?: { url: string; token: string },
   trustedDirectories: readonly string[] = [],
 ): Promise<string> {
+  const configRoot = await mkdtemp(path.join(tmpdir(), 'autopod-managed-git-config-'));
+  const configPath = path.join(configRoot, 'config');
   try {
+    await writeFile(configPath, managedGitConfigContents(cwd, trustedDirectories), {
+      mode: 0o600,
+      flag: 'wx',
+    });
     const result = await exec('git', [...managedGitArguments(cwd, trustedDirectories), ...args], {
       cwd,
       maxBuffer: MAX_CANDIDATE_BYTES,
@@ -59,7 +77,9 @@ export async function managedGit(
         PATH: process.env.PATH,
         HOME: '/nonexistent',
         GIT_CONFIG_NOSYSTEM: '1',
-        GIT_CONFIG_GLOBAL: '/dev/null',
+        // Local clone's upload-pack child ignores command-line safe.directory entries but
+        // inherits this exact, non-secret per-call config.
+        GIT_CONFIG_GLOBAL: configPath,
         GIT_TERMINAL_PROMPT: '0',
         GIT_NO_REPLACE_OBJECTS: '1',
         ...(credential
@@ -74,6 +94,8 @@ export async function managedGit(
     return result.stdout.trim();
   } catch {
     throw new Error('managed-git-operation-failed');
+  } finally {
+    await rm(configRoot, { recursive: true, force: true });
   }
 }
 
