@@ -92,6 +92,38 @@ describe('reviewer launch ownership', () => {
     }
   });
 
+  it('bounds a stalled remote kill request without claiming termination', async () => {
+    vi.useFakeTimers();
+    try {
+      const cm = containerManager();
+      const kill = vi.fn(() => new Promise<void>(() => {}));
+      vi.mocked(cm.execStreaming).mockResolvedValue({
+        stdout: new PassThrough(),
+        stderr: new PassThrough(),
+        exitCode: new Promise<number>(() => {}),
+        kill,
+      });
+      let result: unknown;
+      const pending = runContainerReviewer({
+        podId: 'pod',
+        containerId: 'container',
+        containerManager: cm,
+        profile: profile({}),
+        model: 'review-model',
+        prompt: 'review',
+        timeout: 100,
+      }).catch((error: unknown) => {
+        result = error;
+      });
+      await vi.advanceTimersByTimeAsync(10100);
+      expect(kill).toHaveBeenCalledOnce();
+      expect(result).toMatchObject({ kind: 'termination-failed' });
+      await pending;
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('bounds a stalled reviewer preflight and never launches it after timeout', async () => {
     vi.useFakeTimers();
     let release!: (guard: () => void) => void;

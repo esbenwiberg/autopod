@@ -12,7 +12,7 @@ import type {
 } from '../interfaces/validation-engine.js';
 import { createValidationRepository } from '../pods/validation-repository.js';
 import { createProviderAnthropicClient } from '../providers/llm-client.js';
-import { runClaudeCli } from '../runtimes/run-claude-cli.js';
+import { ClaudeCliError, runClaudeCli } from '../runtimes/run-claude-cli.js';
 import { createTestDb, insertTestProfile } from '../test-utils/mock-helpers.js';
 import { runContainerReviewer } from './container-reviewer-runner.js';
 import type { HostBrowserRunner } from './host-browser-runner.js';
@@ -3172,6 +3172,75 @@ human_review: []
     expect(cm.execInContainer).not.toHaveBeenCalled();
     expect(result.taskReview?.status).toBe('pass');
   });
+
+  it('does not replay Codex when its structured termination failure mentions timeout', async () => {
+    vi.mocked(runCodexReview).mockRejectedValue(
+      new CodexReviewError({
+        kind: 'termination-failed',
+        message: 'timeout: remote reviewer kill did not complete',
+      }),
+    );
+    const result = await createLocalValidationEngine(stubContainerManager()).validate(
+      baseConfig({
+        reviewerModel: 'test',
+        reviewerProvider: 'openai',
+        validationSuite: 'deterministic',
+        diff: '+const changed = true;',
+      }),
+    );
+    expect(result.overall).toBe('fail');
+    expect(result.taskReview).toBeNull();
+    expect(result.reviewSkipReason).toMatch(/termination could not be confirmed/);
+    expect(runCodexReview).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([1, 3])(
+    'does not retry or accept an earlier verdict after tier %s termination is unconfirmed',
+    async (tier) => {
+      const worktreePath = await fs.mkdtemp(path.join(os.tmpdir(), 'autopod-review-termination-'));
+      try {
+        const failure = new ClaudeCliError({
+          kind: 'termination-failed',
+          model: 'test',
+          exitCode: null,
+          signal: null,
+          stderr: '',
+          stdoutPreview: '',
+          durationMs: 10100,
+        });
+        if (tier === 1) vi.mocked(runClaudeCli).mockRejectedValue(failure);
+        else {
+          vi.mocked(runClaudeCli).mockResolvedValue({
+            stdout: JSON.stringify({ status: 'pass', reasoning: 'tier1', issues: [] }),
+            tokenUsage: { inputTokens: 100, outputTokens: 10 },
+          });
+          vi.mocked(runToolUseReview).mockResolvedValue({
+            stdout: JSON.stringify({ status: 'uncertain', reasoning: 'need more', issues: [] }),
+            tokenUsage: { inputTokens: 200, outputTokens: 20 },
+          });
+          vi.mocked(runAgenticReview).mockRejectedValue(failure);
+        }
+        const result = await createLocalValidationEngine(stubContainerManager()).validate(
+          baseConfig({
+            reviewerModel: 'test',
+            reviewDepth: 'deep',
+            validationSuite: 'deterministic',
+            worktreePath,
+            diff: '+const changed = true;',
+          }),
+        );
+        expect(result.overall).toBe('fail');
+        expect(result.taskReview).toBeNull();
+        expect(result.reviewSkipReason).toMatch(/termination could not be confirmed/);
+        expect(runClaudeCli).toHaveBeenCalledTimes(1);
+        expect(runAgenticReview).toHaveBeenCalledTimes(tier === 3 ? 1 : 0);
+        if (tier === 3)
+          expect(result.reviewTokenUsage).toMatchObject({ inputTokens: 300, outputTokens: 30 });
+      } finally {
+        await fs.rm(worktreePath, { recursive: true, force: true });
+      }
+    },
+  );
 
   it('retries only Review after reviewer infrastructure failure', async () => {
     const reviewPass = JSON.stringify({

@@ -1,0 +1,65 @@
+
+ RUN  v4.1.11 /private/tmp/autopod-durable-execution/packages/daemon
+
+ ❯ src/validation/local-validation-engine.test.ts (157 tests | 2 failed | 155 skipped) 67ms
+     × does not retry or accept an earlier verdict after tier 1 termination is unconfirmed 38ms
+     × does not retry or accept an earlier verdict after tier 3 termination is unconfirmed 29ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 2 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/validation/local-validation-engine.test.ts > validate() — facts + review gate > does not retry or accept an earlier verdict after tier 1 termination is unconfirmed
+AssertionError: expected 'Review failed: ' to match /termination could not be confirmed/
+
+- Expected:
+/termination could not be confirmed/
+
++ Received:
+"Review failed: "
+
+ ❯ src/validation/local-validation-engine.test.ts:3193:39
+    3191|       expect(result.overall).toBe('fail');
+    3192|       expect(result.taskReview).toBeNull();
+    3193|       expect(result.reviewSkipReason).toMatch(/termination could not b…
+       |                                       ^
+    3194|       expect(runClaudeCli).toHaveBeenCalledTimes(1);
+    3195|       expect(runAgenticReview).toHaveBeenCalledTimes(tier === 3 ? 1 : …
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/2]⎯
+
+ FAIL  src/validation/local-validation-engine.test.ts > validate() — facts + review gate > does not retry or accept an earlier verdict after tier 3 termination is unconfirmed
+AssertionError: expected { status: 'uncertain', …(10) } to be null
+
+- Expected:
+null
+
++ Received:
+{
+  "deviationsAssessment": undefined,
+  "diff": "+const changed = true;",
+  "firstGateFindings": [],
+  "firstGateOverflow": undefined,
+  "issues": [],
+  "model": "test",
+  "reasoning": "need more",
+  "requirementsCheck": undefined,
+  "screenshots": [],
+  "status": "uncertain",
+  "tokenUsage": undefined,
+}
+
+ ❯ src/validation/local-validation-engine.test.ts:3192:33
+    3190|       }));
+    3191|       expect(result.overall).toBe('fail');
+    3192|       expect(result.taskReview).toBeNull();
+       |                                 ^
+    3193|       expect(result.reviewSkipReason).toMatch(/termination could not b…
+    3194|       expect(runClaudeCli).toHaveBeenCalledTimes(1);
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/2]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  2 failed | 155 skipped (157)
+   Start at  11:25:18
+   Duration  627ms (transform 308ms, setup 0ms, import 458ms, tests 67ms, environment 0ms)
+

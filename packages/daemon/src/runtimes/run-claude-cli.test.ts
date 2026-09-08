@@ -1,4 +1,6 @@
-import { describe, expect, it } from 'vitest';
+import { type ChildProcess, spawn } from 'node:child_process';
+import { describe, expect, it, vi } from 'vitest';
+import { createMockChildProcess } from '../test-utils/mock-helpers.js';
 import { ClaudeCliError, runClaudeCli } from './run-claude-cli.js';
 
 const MODEL = 'fake-model';
@@ -11,6 +13,107 @@ function bash(script: string) {
 }
 
 describe('runClaudeCli', () => {
+  it.each(['timeout', 'maxbuffer'])(
+    'waits for observed exit after %s cancellation',
+    async (kind) => {
+      vi.useFakeTimers();
+      try {
+        const { child, kill } = createMockChildProcess();
+        let result: unknown;
+        const pending = runClaudeCli({
+          model: MODEL,
+          input: '',
+          timeout: 100,
+          maxBuffer: 4,
+          spawnImpl: () => child,
+        }).catch((error: unknown) => {
+          result = error;
+        });
+        if (kind === 'maxbuffer') child.stdout?.emit('data', Buffer.from('too much'));
+        else await vi.advanceTimersByTimeAsync(100);
+        await Promise.resolve();
+        expect(kill).toHaveBeenCalledWith('SIGTERM');
+        expect(result).toBeUndefined();
+        child.emit('exit', null, 'SIGTERM');
+        child.emit('close', null, 'SIGTERM');
+        await pending;
+        expect(result).toMatchObject({ kind });
+      } finally {
+        vi.useRealTimers();
+      }
+    },
+  );
+
+  it('reports unconfirmed termination after bounded signal escalation', async () => {
+    vi.useFakeTimers();
+    try {
+      const { child, kill } = createMockChildProcess();
+      let result: unknown;
+      const pending = runClaudeCli({
+        model: MODEL,
+        input: '',
+        timeout: 100,
+        spawnImpl: () => child,
+      }).catch((error: unknown) => {
+        result = error;
+      });
+      await vi.advanceTimersByTimeAsync(10100);
+      expect(kill.mock.calls.map(([signal]) => signal)).toEqual(['SIGTERM', 'SIGKILL']);
+      expect(result).toMatchObject({ kind: 'termination-failed' });
+      await pending;
+      child.emit('exit', null, 'SIGKILL');
+      child.emit('close', null, 'SIGKILL');
+      expect(result).toMatchObject({ kind: 'termination-failed' });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('uses observed exit when a cancelled collector still has open pipes', async () => {
+    vi.useFakeTimers();
+    try {
+      const { child, kill } = createMockChildProcess();
+      const pending = runClaudeCli({
+        model: MODEL,
+        input: '',
+        timeout: 100,
+        spawnImpl: () => child,
+      }).catch((error: unknown) => error);
+      child.emit('exit', 0, null);
+      await vi.advanceTimersByTimeAsync(100);
+      expect(await pending).toMatchObject({ kind: 'timeout', exitCode: 0 });
+      expect(kill).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('observes a real owned process exit after SIGTERM is ignored', async () => {
+    let child: ChildProcess | undefined;
+    try {
+      await expect(
+        runClaudeCli({
+          model: MODEL,
+          input: '',
+          timeout: 500,
+          command: process.execPath,
+          args: ['-e', "process.on('SIGTERM', () => {}); setInterval(() => {}, 100);"],
+          spawnImpl: (command, args, options) => {
+            child = spawn(command, args, options);
+            return child;
+          },
+        }),
+      ).rejects.toMatchObject({ kind: 'timeout', signal: 'SIGKILL' });
+      expect(child?.signalCode).toBe('SIGKILL');
+      expect(child?.pid).toBeGreaterThan(0);
+      expect(() => process.kill(child?.pid ?? 0, 0)).toThrow(
+        expect.objectContaining({ code: 'ESRCH' }),
+      );
+    } finally {
+      child?.kill('SIGKILL');
+    }
+  }, 15_000);
+
   it('resolves with stdout on exit 0', async () => {
     const { stdout } = await runClaudeCli({
       model: MODEL,

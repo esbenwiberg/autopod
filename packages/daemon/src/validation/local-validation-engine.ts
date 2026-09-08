@@ -3908,6 +3908,12 @@ async function runTaskReview(
             };
           }
         } catch (err) {
+          if (err instanceof ClaudeCliError && err.kind === 'termination-failed')
+            return {
+              result: null,
+              skipReason: 'Review failed: reviewer termination could not be confirmed',
+              tokenUsage: accumulatedTokenUsage,
+            };
           log?.warn({ err }, 'Tier 3 agentic review failed, falling back to Tier 2 result');
         }
       }
@@ -3938,6 +3944,12 @@ async function runTaskReview(
         tokenUsage: allTierTokenUsage,
       };
     } catch (err) {
+      if (err instanceof ClaudeCliError && err.kind === 'termination-failed')
+        return {
+          result: null,
+          skipReason: 'Review failed: reviewer termination could not be confirmed',
+          tokenUsage: tier1TokenUsage,
+        };
       log?.warn({ err }, 'Tier 2 tool-use review failed');
       if (!tier1Parsed) {
         // Truncated diff path: no Tier 1 result to fall back to
@@ -3980,6 +3992,12 @@ async function runTaskReview(
         },
         'task review failed, continuing without review',
       );
+      if (err.kind === 'termination-failed') {
+        return {
+          result: null,
+          skipReason: 'Review failed: reviewer termination could not be confirmed',
+        };
+      }
       if (err.kind === 'timeout') {
         return { result: null, skipReason: `Review timed out: ${err.message}` };
       }
@@ -3999,7 +4017,7 @@ function isReviewInfrastructureFailure(
   return (
     reviewRun.skipReason.startsWith('Review timed out:') ||
     (reviewRun.skipReason.startsWith('Review failed:') &&
-      !/invalid_request_error|unsupported model|model .*not (?:found|available)|remote termination could not be confirmed/i.test(
+      !/invalid_request_error|unsupported model|model .*not (?:found|available)|termination could not be confirmed/i.test(
         reviewRun.skipReason,
       ))
   );

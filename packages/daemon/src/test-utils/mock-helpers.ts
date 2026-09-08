@@ -1,6 +1,8 @@
+import { ChildProcess } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
+import { PassThrough } from 'node:stream';
 import type {
   AgentEscalationEvent,
   AgentEvent,
@@ -619,4 +621,15 @@ export function createTestContext(opts?: {
     enqueuedSessions,
     deps,
   };
+}
+
+/** A process handle with explicit test-controlled exit; never spawns a provider. */
+export function createMockChildProcess() {
+  const child = new ChildProcess();
+  child.stdin = new PassThrough();
+  child.stdout = new PassThrough();
+  child.stderr = new PassThrough();
+  const kill = vi.fn((_signal?: NodeJS.Signals | number) => true);
+  child.kill = kill;
+  return { child, kill };
 }

@@ -299,7 +299,7 @@ async function collectCancellableReview(
       timeoutTriggered = true;
       void (async () => {
         try {
-          await handle.kill();
+          await confirmTermination(handle.kill(), 'remote reviewer kill did not complete');
           await confirmTermination(handle.exitCode);
         } catch (cause) {
           reject(
@@ -342,16 +342,16 @@ async function collectCancellableReview(
   }
 }
 
-async function confirmTermination(exitCode: Promise<number>): Promise<void> {
+async function confirmTermination(
+  signal: Promise<unknown>,
+  message = 'remote reviewer exit was not observed after kill',
+): Promise<void> {
   let timer: ReturnType<typeof setTimeout> | undefined;
   const unconfirmed = new Promise<never>((_resolve, reject) => {
-    timer = setTimeout(
-      () => reject(new Error('remote reviewer exit was not observed after kill')),
-      TERMINATION_CONFIRM_TIMEOUT_MS,
-    );
+    timer = setTimeout(() => reject(new Error(message)), TERMINATION_CONFIRM_TIMEOUT_MS);
   });
   try {
-    await Promise.race([exitCode, unconfirmed]);
+    await Promise.race([signal, unconfirmed]);
   } finally {
     if (timer) clearTimeout(timer);
   }
