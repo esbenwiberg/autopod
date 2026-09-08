@@ -133,6 +133,8 @@ export interface AgentErrorEvent {
   fatal: boolean;
   /** Adapter-normalized terminal provider evidence. Absent for non-provider/runtime errors. */
   classification?: ProviderFailureClassification;
+  /** Trusted runtime adapter evidence; transport settlement is not process termination. */
+  executionTermination?: 'unverified';
 }
 
 export interface AgentEscalationEvent {

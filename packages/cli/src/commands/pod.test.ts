@@ -1036,3 +1036,36 @@ it('shows the unavailable-review reason through real status HTTP and preserves f
     await new Promise<void>((resolve) => server.close(() => resolve()));
   }
 });
+
+it('propagates an HTTP Resume termination conflict without printing accepted execution', async () => {
+  const message =
+    'A worker in this logical task has unverified process termination. Retain its source and resources; reconcile termination before Resume, Rework, validation or delivery.';
+  const requests: string[] = [];
+  const server = createServer((req, res) => {
+    requests.push(`${req.method} ${req.url}`);
+    res.setHeader('content-type', 'application/json');
+    res.statusCode = 409;
+    res.end(JSON.stringify({ error: message, code: 'TASK_EXECUTION_TERMINATION_UNVERIFIED' }));
+  });
+  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+  const address = server.address();
+  if (!address || typeof address === 'string') throw new Error('Missing fixture port');
+  const client = new AutopodClient({
+    baseUrl: `http://127.0.0.1:${address.port}`,
+    getToken: async () => 'local-fixture-only',
+  });
+  const log = vi.spyOn(console, 'log').mockImplementation(() => {});
+  try {
+    const program = new Command();
+    registerPodCommands(program, () => client);
+    await expect(program.parseAsync(['node', 'ap', 'resume', 'abcd1234'])).rejects.toMatchObject({
+      message,
+      statusCode: 409,
+    });
+    expect(requests).toEqual(['POST /pods/abcd1234/resume']);
+    expect(log).not.toHaveBeenCalled();
+  } finally {
+    log.mockRestore();
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+  }
+});

@@ -238,6 +238,21 @@ if (startupRetryFixture) {
   retryState.interruptedCount = 0;
   retryState.latest = { id: 'local-startup-failure', outcome: 'transient' };
 }
+const unverifiedTerminationFixture = process.env.FIXTURE_MODE === 'unverified-termination';
+const terminationMessage =
+  'A worker in this logical task has unverified process termination. Retain its source and resources; reconcile termination before Resume, Rework, validation or delivery.';
+if (unverifiedTerminationFixture) {
+  pod = {
+    ...pod,
+    status: 'failed',
+    pendingEscalation: null,
+    recordDiagnostics: [],
+    finalization: null,
+    lastValidationResult: null,
+    task: '[Local fixture] Retain unverified worker execution',
+    failureReason: terminationMessage,
+  };
+}
 const uncollectedGuidanceFixture = process.env.FIXTURE_MODE === 'uncollected-guidance';
 if (uncollectedGuidanceFixture) {
   pod = {
@@ -539,6 +554,26 @@ const server = createServer(async (req, res) => {
       }),
     );
     return json({ ok: true, accepted: true });
+  }
+  if (
+    unverifiedTerminationFixture &&
+    req.method === 'POST' &&
+    ['/pods/local-fixture/resume', '/pods/local-fixture/validate'].includes(pathname)
+  ) {
+    console.log(
+      JSON.stringify({
+        scope: 'local fixture only',
+        action: 'rejected-unverified-termination',
+        endpoint: pathname,
+        status: 409,
+      }),
+    );
+    res.statusCode = 409;
+    return json(
+      pathname.endsWith('/resume')
+        ? { error: terminationMessage, code: 'TASK_EXECUTION_TERMINATION_UNVERIFIED' }
+        : { error: 'TASK_EXECUTION_TERMINATION_UNVERIFIED', message: terminationMessage },
+    );
   }
   if (req.method === 'POST' && pathname === '/pods/local-fixture/resume') {
     if (legacyDeliveryFixture) {
@@ -918,7 +953,7 @@ const server = createServer(async (req, res) => {
           : {}),
       },
       diagnostics:
-        process.env.FIXTURE_MODE === 'unsettled-run'
+        process.env.FIXTURE_MODE === 'unsettled-run' || unverifiedTerminationFixture
           ? [
               'Infrastructure cost unavailable',
               '1 unsettled worker run blocks another task run; live execution state unverified.',

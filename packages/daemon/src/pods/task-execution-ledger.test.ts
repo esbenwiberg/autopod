@@ -293,6 +293,51 @@ describe('task-wide execution accounting', () => {
     }
   });
 
+  it('retains unverified termination across restart and refuses ordinary settlement or identity replay', () => {
+    const { db, repo } = fixture();
+    repo.update('root', { tokenBudget: null, containerId: 'owned-container' });
+    const ownedBinding = {
+      ...binding,
+      resource: { containerId: 'owned-container', executionTarget: 'local' as const },
+    };
+    const ledger = repo.taskExecutions;
+    if (!ledger) throw new Error('Missing ledger');
+    const run = ledger.beginRun('root', 1, 1, ownedBinding);
+    ledger.retainUnverifiedRun(run);
+    ledger.retainUnverifiedRun(run);
+    const dir = mkdtempSync(path.join(tmpdir(), 'unverified-run-'));
+    const file = path.join(dir, 'state.db');
+    writeFileSync(file, db.serialize());
+    db.close();
+    const reopened = new Database(file);
+    try {
+      const restored = createPodRepository(reopened).taskExecutions;
+      if (!restored) throw new Error('Missing ledger');
+      expect(restored.hasActiveRun('root')).toBe(true);
+      expect(restored.snapshot('fix')).toMatchObject({ agentRunCount: 1, failedRunCount: 1 });
+      expect(() => restored.beginRun('root', 1, 1, ownedBinding)).toThrow(
+        /termination.*unverified/,
+      );
+      expect(() => restored.beginRun('fix', 1, 1, binding)).toThrow(/still active/);
+      for (const outcome of ['completed', 'failed', 'paused', 'stopped'] as const)
+        expect(() => restored.finishRun(run, outcome, null)).toThrow(/termination.*unverified/);
+      expect(
+        reopened
+          .prepare('SELECT ended_at, outcome, failure_category FROM task_agent_runs WHERE id = ?')
+          .get(run),
+      ).toEqual({
+        ended_at: null,
+        outcome: 'failed',
+        failure_category: 'execution_termination_unverified',
+      });
+      expect(reopened.pragma('integrity_check')).toEqual([{ integrity_check: 'ok' }]);
+      expect(reopened.pragma('foreign_key_check')).toEqual([]);
+    } finally {
+      reopened.close();
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   it('retains task/run identity through restart and linked fixes while intentional reruns remain distinct', () => {
     const { db, repo } = fixture();
     // This case tests lineage and settlement with no configured spending cap.

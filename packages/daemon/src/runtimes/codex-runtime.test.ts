@@ -672,6 +672,7 @@ describe('CodexRuntime', () => {
               type: 'error',
               fatal: true,
               message: expect.stringContaining('termination is unverified'),
+              executionTermination: 'unverified',
             }),
           ]),
         );

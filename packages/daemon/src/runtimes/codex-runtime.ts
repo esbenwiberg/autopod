@@ -980,6 +980,7 @@ export class CodexRuntime implements Runtime {
               ? 'Codex exit code did not resolve; process-group termination verified. Retained completion can proceed to validation.'
               : 'Codex exit code did not resolve before task completion — refusing to mark pod complete',
         fatal: killResult.status !== 'fulfilled' || !outputState.sawComplete,
+        ...(killResult.status !== 'fulfilled' && { executionTermination: 'unverified' as const }),
       };
     }
 

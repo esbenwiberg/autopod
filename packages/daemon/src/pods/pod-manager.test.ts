@@ -1827,7 +1827,113 @@ describe('PodManager', () => {
       ]),
     );
     expect(ctx.podRepo.getOrThrow(pod.id).failureReason).toContain('termination is unverified');
+    expect(ctx.podRepo.taskExecutions?.hasActiveRun(pod.id)).toBe(true);
+    const beforeReconciliation = ctx.podRepo.getOrThrow(pod.id);
+    for (const action of [
+      () => manager.resumePod(pod.id),
+      () => manager.triggerValidation(pod.id, { force: true }),
+      () => manager.revalidateSession(pod.id, { force: true }),
+    ])
+      await expect(action()).rejects.toMatchObject({
+        code: 'TASK_EXECUTION_TERMINATION_UNVERIFIED',
+      });
+    expect(ctx.podRepo.getOrThrow(pod.id)).toEqual(beforeReconciliation);
+    expect(ctx.containerManager.kill).not.toHaveBeenCalled();
+    expect(ctx.containerManager.stop).not.toHaveBeenCalled();
+    expect(ctx.worktreeManager.pullBranch).not.toHaveBeenCalled();
+    const app = Fastify();
+    app.setErrorHandler(errorHandler);
+    podRoutes(app, manager, ctx.eventRepo, undefined, ctx.podRepo);
+    try {
+      for (const action of ['resume', 'validate', 'revalidate']) {
+        const response = await app.inject({ method: 'POST', url: `/pods/${pod.id}/${action}` });
+        expect(response.statusCode, response.body).toBe(409);
+        expect(response.body).toContain('TASK_EXECUTION_TERMINATION_UNVERIFIED');
+      }
+    } finally {
+      await app.close();
+    }
+    const nextManager = createPodManager(ctx.deps);
+    let replayed = false;
+    await expect(
+      nextManager.consumeAgentEvents(
+        pod.id,
+        (async function* () {
+          replayed = true;
+          yield {
+            type: 'complete',
+            timestamp: new Date().toISOString(),
+            result: 'Must not replay',
+          } as const;
+        })(),
+      ),
+    ).rejects.toMatchObject({ code: 'TASK_AGENT_RUN_ACTIVE' });
+    expect(replayed).toBe(false);
+    expect(
+      ctx.db
+        .prepare('SELECT ended_at, outcome, failure_category FROM task_agent_runs WHERE pod_id = ?')
+        .get(pod.id),
+    ).toEqual({
+      ended_at: null,
+      outcome: 'failed',
+      failure_category: 'execution_termination_unverified',
+    });
   });
+
+  it.each(['thrown', 'fatal-event', 'advisory-event'] as const)(
+    'retains explicit unverified termination from %s before admitting linked work',
+    async (failure) => {
+      const ctx = createTestContext();
+      const manager = createPodManager(ctx.deps);
+      const pod = manager.createSession(
+        { profileName: 'test-profile', task: 'Unverified execution' },
+        'operator',
+      );
+      ctx.podRepo.update(pod.id, { status: 'running', containerId: 'original-container' });
+      const stream = manager.consumeAgentEvents(
+        pod.id,
+        (async function* () {
+          if (failure === 'thrown')
+            throw new AutopodError('Termination unverified', 'EXEC_EXIT_UNVERIFIED', 409);
+          yield {
+            type: 'error',
+            timestamp: new Date().toISOString(),
+            message: 'Termination unverified',
+            fatal: failure === 'fatal-event',
+            executionTermination: 'unverified',
+          } as const;
+        })(),
+      );
+      if (failure === 'thrown')
+        await expect(stream).rejects.toMatchObject({ code: 'EXEC_EXIT_UNVERIFIED' });
+      else expect(await stream).toBe('failed');
+      const replacement = createPodManager(ctx.deps);
+      const fix = replacement.createSession(
+        { profileName: 'test-profile', task: 'Linked repair', linkedPodId: pod.id },
+        'operator',
+      );
+      ctx.podRepo.update(fix.id, { status: 'running', containerId: 'new-container' });
+      let entered = false;
+      await expect(
+        replacement.consumeAgentEvents(
+          fix.id,
+          (async function* () {
+            entered = true;
+            yield {
+              type: 'complete',
+              timestamp: new Date().toISOString(),
+              result: 'No replay',
+            } as const;
+          })(),
+        ),
+      ).rejects.toMatchObject({ code: 'TASK_AGENT_RUN_ACTIVE' });
+      expect(entered).toBe(false);
+      expect(ctx.podRepo.taskExecutions?.snapshot(fix.id).diagnostics.join('\n')).toContain(
+        '1 unsettled worker run blocks another task run',
+      );
+      expect(ctx.podRepo.taskExecutions?.hasActiveRun(pod.id)).toBe(true);
+    },
+  );
 
   it.each(
     ['end', 'error', 'complete'].flatMap((ending) => [
@@ -14405,9 +14511,13 @@ describe('PodManager', () => {
       },
     );
 
-    it.each(['running', 'failed', 'review_required'] as const)(
-      'records a separate fact waiver while guidance remains queued in %s',
-      async (status) => {
+    it.each(
+      (['running', 'failed', 'review_required'] as const).flatMap((status) =>
+        (['guidance', 'termination'] as const).map((blocker) => ({ status, blocker })),
+      ),
+    )(
+      'records a separate fact waiver while $blocker remains unresolved in $status',
+      async ({ status, blocker }) => {
         const ctx = createTestContext();
         const manager = createPodManager(ctx.deps);
 
@@ -14470,7 +14580,19 @@ describe('PodManager', () => {
           },
         });
 
-        ctx.deps.nudgeRepo.queue(pod.id, 'Keep the existing public behavior');
+        if (blocker === 'guidance')
+          ctx.deps.nudgeRepo.queue(pod.id, 'Keep the existing public behavior');
+        else {
+          ctx.podRepo.update(pod.id, { tokenBudget: null });
+          const ledger = ctx.podRepo.taskExecutions;
+          if (!ledger) throw new Error('Missing ledger');
+          const run = ledger.beginRun(pod.id, 1, 1, {
+            runtime: pod.runtime,
+            model: pod.model,
+            providerAccountId: null,
+          });
+          ledger.retainUnverifiedRun(run);
+        }
         const app = Fastify();
         app.setErrorHandler(errorHandler);
         authPlugin(app, {
@@ -14501,9 +14623,11 @@ describe('PodManager', () => {
         expect(ctx.validationEngine.validate).not.toHaveBeenCalled();
         const updated = manager.getSession(pod.id);
         expect(updated.status).toBe(status);
-        expect(ctx.deps.nudgeRepo.listPending(pod.id).map((entry) => entry.message)).toEqual([
-          'Keep the existing public behavior',
-        ]);
+        expect(ctx.deps.nudgeRepo.listPending(pod.id).map((entry) => entry.message)).toEqual(
+          blocker === 'guidance' ? ['Keep the existing public behavior'] : [],
+        );
+        if (blocker === 'termination')
+          expect(ctx.podRepo.taskExecutions?.hasUnverifiedTermination(pod.id)).toBe(true);
         expect(updated.lastValidationResult?.overall).toBe('fail');
         expect(ctx.runtime.spawn).not.toHaveBeenCalled();
         expect(ctx.runtime.resume).not.toHaveBeenCalled();

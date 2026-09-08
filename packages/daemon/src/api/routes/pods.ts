@@ -43,6 +43,7 @@ import {
   computeSafetyAnalytics,
   runAndPersistAuditChainVerification,
 } from '../../pods/safety-aggregator.js';
+import { assertTaskExecutionTerminationVerified } from '../../pods/task-execution-ledger.js';
 import { computeThroughputAnalytics } from '../../pods/throughput-aggregator.js';
 import type { ValidationRepository } from '../../pods/validation-repository.js';
 import type { SafetyEventsRepository } from '../../safety/safety-events-repository.js';
@@ -1134,6 +1135,7 @@ export function podRoutes(
   // POST /pods/:podId/validate — trigger validation (agent rework on failure)
   app.post('/pods/:podId/validate', async (request, reply) => {
     const { podId } = request.params as { podId: string };
+    assertTaskExecutionTerminationVerified(podRepo?.taskExecutions, podId);
     const pod = podManager.getSession(podId);
     const isTerminalRework = ['failed', 'review_required', 'killed', 'validated'].includes(
       pod.status,

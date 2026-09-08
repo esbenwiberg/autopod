@@ -56,6 +56,14 @@ export async function apiFetch<T>(path: string, init: RequestInit = {}): Promise
         error.message.trim()
       ) {
         message = error.message;
+      } else if (
+        error !== null &&
+        typeof error === 'object' &&
+        'error' in error &&
+        typeof error.error === 'string' &&
+        error.error.trim()
+      ) {
+        message = error.error;
       }
     } catch {
       // Proxies can return plain text; retain that response when it is not JSON.

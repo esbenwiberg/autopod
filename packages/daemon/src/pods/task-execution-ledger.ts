@@ -37,13 +37,30 @@ export interface TaskExecutionLedger {
   snapshot(podId: string): TaskExecutionSummary;
   /** Unsettled durable evidence; not proof that a provider process is still alive. */
   hasActiveRun(podId: string): boolean;
+  /** Across this logical task, including retained failed runs in linked pods. */
+  hasUnverifiedTermination(podId: string): boolean;
   beginRun(podId: string, generation: number, cycle: number, binding: ExecutionBinding): string;
+  /** Record failed execution evidence without releasing its unresolved process claim. */
+  retainUnverifiedRun(id: string): void;
   finishRun(
     id: string,
     outcome: 'completed' | 'failed' | 'paused' | 'stopped',
     category: string | null,
   ): void;
 }
+/** Shared synchronous admission check, including before a route acknowledges detached Rework. */
+export function assertTaskExecutionTerminationVerified(
+  ledger: TaskExecutionLedger | undefined,
+  podId: string,
+): void {
+  if (ledger?.hasUnverifiedTermination(podId))
+    throw new AutopodError(
+      'A worker in this logical task has unverified process termination. Retain its source and resources; reconcile termination before Resume, Rework, validation or delivery.',
+      'TASK_EXECUTION_TERMINATION_UNVERIFIED',
+      409,
+    );
+}
+
 interface Membership {
   taskId: string;
   executionId: string;
@@ -425,6 +442,15 @@ export function createTaskExecutionLedger(db: Database.Database): TaskExecutionL
           .prepare('SELECT 1 FROM task_agent_runs WHERE pod_id = ? AND ended_at IS NULL LIMIT 1')
           .get(podId),
       ),
+    hasUnverifiedTermination: (podId) =>
+      Boolean(
+        db
+          .prepare(`SELECT 1 FROM task_agent_runs r
+      JOIN task_executions e ON e.pod_id = r.pod_id
+      WHERE e.task_id = (SELECT task_id FROM task_executions WHERE pod_id = ?)
+        AND r.ended_at IS NULL AND r.failure_category = 'execution_termination_unverified' LIMIT 1`)
+          .get(podId),
+      ),
     beginRun: db.transaction((podId, generation, cycle, binding) => {
       const encoded = JSON.stringify({
         runtime: binding.runtime,
@@ -463,12 +489,20 @@ export function createTaskExecutionLedger(db: Database.Database): TaskExecutionL
         );
       const prior = db
         .prepare(
-          'SELECT id, binding FROM task_agent_runs WHERE pod_id = ? AND generation = ? AND cycle = ?',
+          'SELECT id, binding, failure_category FROM task_agent_runs WHERE pod_id = ? AND generation = ? AND cycle = ?',
         )
-        .get(podId, generation, cycle) as { id: string; binding: string } | undefined;
+        .get(podId, generation, cycle) as
+        | { id: string; binding: string; failure_category: string | null }
+        | undefined;
       if (prior) {
         if (prior.binding !== encoded)
           throw new Error('Execution binding cannot change for an existing run');
+        if (prior.failure_category === 'execution_termination_unverified')
+          throw new AutopodError(
+            'Task execution termination remains unverified; reconcile retained resources before replay.',
+            'TASK_AGENT_RUN_ACTIVE',
+            409,
+          );
         return prior.id;
       }
       const active = db
@@ -508,6 +542,16 @@ export function createTaskExecutionLedger(db: Database.Database): TaskExecutionL
       ).run(id, podId, generation, cycle, encoded, new Date().toISOString());
       return id;
     }),
+    retainUnverifiedRun: db.transaction((id) => {
+      const prior = db.prepare('SELECT ended_at FROM task_agent_runs WHERE id = ?').get(id) as
+        | { ended_at: string | null }
+        | undefined;
+      if (!prior) throw new Error('Unknown task run');
+      if (prior.ended_at) throw new Error('Settled task run cannot be rewritten as unresolved');
+      db.prepare(
+        "UPDATE task_agent_runs SET outcome = 'failed', failure_category = 'execution_termination_unverified' WHERE id = ? AND ended_at IS NULL",
+      ).run(id);
+    }),
     finishRun: db.transaction((id, outcome, category) => {
       const prior = db
         .prepare('SELECT ended_at, outcome, failure_category FROM task_agent_runs WHERE id = ?')
@@ -515,6 +559,12 @@ export function createTaskExecutionLedger(db: Database.Database): TaskExecutionL
         | { ended_at: string | null; outcome: string | null; failure_category: string | null }
         | undefined;
       if (!prior) throw new Error('Unknown task run');
+      if (prior.failure_category === 'execution_termination_unverified')
+        throw new AutopodError(
+          'Task execution termination remains unverified; retained resource reconciliation is required before settlement.',
+          'TASK_AGENT_RUN_ACTIVE',
+          409,
+        );
       if (prior.ended_at) {
         if (prior.outcome !== outcome || prior.failure_category !== category)
           throw new Error('Task run already settled differently');

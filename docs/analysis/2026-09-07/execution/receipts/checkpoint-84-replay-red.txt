@@ -1,0 +1,33 @@
+
+ RUN  v4.1.11 /private/tmp/autopod-durable-execution/packages/daemon
+
+ ❯ src/pods/task-execution-ledger.test.ts (24 tests | 1 failed | 23 skipped) 76ms
+     × retains unverified termination across restart and refuses ordinary settlement or identity replay 75ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/pods/task-execution-ledger.test.ts > task-wide execution accounting > retains unverified termination across restart and refuses ordinary settlement or identity replay
+AssertionError: expected [Function] to throw an error
+
+- Expected:
+null
+
++ Received:
+undefined
+
+ ❯ src/pods/task-execution-ledger.test.ts:315:67
+    313|       expect(restored.hasActiveRun('root')).toBe(true);
+    314|       expect(restored.snapshot('fix')).toMatchObject({ agentRunCount: …
+    315|       expect(() => restored.beginRun('root', 1, 1, ownedBinding)).toTh…
+       |                                                                   ^
+    316|       expect(() => restored.beginRun('fix', 1, 1, binding)).toThrow(/s…
+    317|       for (const outcome of ['completed', 'failed', 'paused', 'stopped…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 23 skipped (24)
+   Start at  16:58:56
+   Duration  406ms (transform 150ms, setup 0ms, import 232ms, tests 76ms, environment 0ms)
+

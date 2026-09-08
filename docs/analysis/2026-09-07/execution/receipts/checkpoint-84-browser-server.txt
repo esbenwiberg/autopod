@@ -1,0 +1,3 @@
+http://127.0.0.1:56474/mobile/
+{"scope":"local fixture only","action":"rejected-unverified-termination","endpoint":"/pods/local-fixture/resume","status":409}
+{"scope":"local fixture only","action":"rejected-unverified-termination","endpoint":"/pods/local-fixture/validate","status":409}

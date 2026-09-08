@@ -270,6 +270,7 @@ import {
   validateTransition,
 } from './state-machine.js';
 import { generateSystemInstructions } from './system-instructions-generator.js';
+import { assertTaskExecutionTerminationVerified } from './task-execution-ledger.js';
 import { TaskRetryBlockedError } from './task-retry-ledger.js';
 import { ValidationSupersededError, captureValidationOwnership } from './validation-ownership.js';
 import type { ValidationRepository } from './validation-repository.js';
@@ -2175,6 +2176,10 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
       costUsd: active.costUsd,
       handoffReference,
     });
+  }
+
+  function assertExecutionTerminationVerified(podId: string): void {
+    assertTaskExecutionTerminationVerified(podRepo.taskExecutions, podId);
   }
 
   function assertGuidanceCollected(podId: string): void {
@@ -6818,6 +6823,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
     pod: Pod,
     options: { allowRemovedContainer?: boolean; allowComplete?: boolean } = {},
   ): void {
+    assertExecutionTerminationVerified(pod.id);
     const current = podRepo.getOrThrow(pod.id);
     if (
       current.lifecycleGeneration !== pod.lifecycleGeneration ||
@@ -7430,13 +7436,15 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
   }
 
   function claimValidation(expectedPod: Pod, validationController: AbortController) {
+    assertExecutionTerminationVerified(expectedPod.id);
     let claimed = false;
     const ownership = captureValidationOwnership(expectedPod, {
       readCurrent: () => podRepo.getOrThrow(expectedPod.id),
       isCurrentInvocation: () =>
-        claimed
+        !podRepo.taskExecutions?.hasUnverifiedTermination(expectedPod.id) &&
+        (claimed
           ? validationAbortControllers.get(expectedPod.id) === validationController
-          : !validationAbortControllers.has(expectedPod.id),
+          : !validationAbortControllers.has(expectedPod.id)),
       hasPendingDecision: () =>
         nudgeRepo.hasPending(expectedPod.id) ||
         (podRepo.hasUnansweredDecision?.(expectedPod.id) ??
@@ -10904,6 +10912,11 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
       let outcome: AgentRunOutcome = deps.providerAttemptRepo ? 'failed' : 'completed';
       let observedTerminalOutcome: 'completed' | 'failed' | null = null;
       let terminalClassification: ProviderFailureClassification | null = null;
+      let executionTerminationUnverified = false;
+      const retainUnverifiedTermination = () => {
+        executionTerminationUnverified = true;
+        if (taskRunId) podRepo.taskExecutions?.retainUnverifiedRun(taskRunId);
+      };
       try {
         for await (const event of events) {
           if (!ownsRun()) {
@@ -11175,7 +11188,11 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
                 'Token budget set but runtime emits no token data — budget not enforced',
               );
             }
-          } else if (event.type === 'error' && event.fatal) {
+          } else if (
+            event.type === 'error' &&
+            (event.fatal || event.executionTermination === 'unverified')
+          ) {
+            if (event.executionTermination === 'unverified') retainUnverifiedTermination();
             const pod = podRepo.getOrThrow(podId);
             terminalClassification =
               event.classification ??
@@ -11211,6 +11228,8 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           }
         }
       } catch (err) {
+        if (err instanceof AutopodError && err.code === 'EXEC_EXIT_UNVERIFIED')
+          retainUnverifiedTermination();
         if (!ownsRun()) {
           outcome = 'stopped';
           return outcome;
@@ -11298,12 +11317,16 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
             }
           } finally {
             try {
-              if (taskRunId)
-                podRepo.taskExecutions?.finishRun(
-                  taskRunId,
-                  recordedOutcome,
-                  terminalClassification?.category ?? null,
-                );
+              if (taskRunId) {
+                if (executionTerminationUnverified)
+                  podRepo.taskExecutions?.retainUnverifiedRun(taskRunId);
+                else
+                  podRepo.taskExecutions?.finishRun(
+                    taskRunId,
+                    recordedOutcome,
+                    terminalClassification?.category ?? null,
+                  );
+              }
             } finally {
               if (activeAgentRuns.get(podId)?.token === runToken) {
                 stopCommitPolling(podId);
@@ -13728,6 +13751,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
       podId: string,
       options?: { force?: boolean; validationOnly?: boolean },
     ): Promise<void> {
+      assertExecutionTerminationVerified(podId);
       const pod = podRepo.getOrThrow(podId);
       const lifecycleGeneration = pod.lifecycleGeneration;
       const lifecycleContainerId = pod.containerId;
@@ -15108,6 +15132,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
       podId: string,
       options?: { force?: boolean },
     ): Promise<{ newCommits: boolean; result: 'pass' | 'fail' }> {
+      assertExecutionTerminationVerified(podId);
       assertGuidanceCollected(podId);
       const pod = podRepo.getOrThrow(podId);
       const force = options?.force ?? false;
@@ -16359,7 +16384,10 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
     ): Promise<{ newCommits: boolean; result: 'pass' | 'fail' }> {
       const pod = podRepo.getOrThrow(podId);
       const isSettled = pod.status === 'failed' || pod.status === 'review_required';
-      const canRevalidateImmediately = isSettled && !nudgeRepo.hasPending(podId);
+      const canRevalidateImmediately =
+        isSettled &&
+        !nudgeRepo.hasPending(podId) &&
+        !podRepo.taskExecutions?.hasUnverifiedTermination(podId);
       const canRecordForActiveRun = pod.status === 'running' || pod.status === 'validating';
       if (!isSettled && !canRecordForActiveRun) {
         throw new AutopodError(
@@ -16962,6 +16990,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         | 'retry-agent'
         | 'collect-artifacts';
     }> {
+      assertExecutionTerminationVerified(podId);
       assertGuidanceCollected(podId);
       const pendingCollection = artifactResumeRuns.get(podId);
       if (pendingCollection) {

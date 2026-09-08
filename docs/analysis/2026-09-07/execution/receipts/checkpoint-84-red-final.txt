@@ -1,0 +1,33 @@
+
+ RUN  v4.1.11 /private/tmp/autopod-durable-execution/packages/daemon
+
+ ❯ src/pods/pod-manager.test.ts (595 tests | 1 failed | 594 skipped) 85ms
+     × retains actual Codex completion evidence but does not validate or deliver after unverified termination 84ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/pods/pod-manager.test.ts > PodManager > retains actual Codex completion evidence but does not validate or deliver after unverified termination
+AssertionError: expected false to be true // Object.is equality
+
+- Expected
++ Received
+
+- true
++ false
+
+ ❯ src/pods/pod-manager.test.ts:1830:62
+    1828|     );
+    1829|     expect(ctx.podRepo.getOrThrow(pod.id).failureReason).toContain('te…
+    1830|     expect(ctx.podRepo.taskExecutions?.hasActiveRun(pod.id)).toBe(true…
+       |                                                              ^
+    1831|     const nextManager = createPodManager(ctx.deps);
+    1832|     let replayed = false;
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 594 skipped (595)
+   Start at  16:55:35
+   Duration  1.49s (transform 940ms, setup 0ms, import 1.31s, tests 85ms, environment 0ms)
+
