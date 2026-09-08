@@ -29,7 +29,9 @@ import Database from 'better-sqlite3';
 import pino from 'pino';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { SandboxContainerManager } from '../containers/sandbox-container-manager.js';
+import { ClaudeRuntime } from '../runtimes/claude-runtime.js';
 import { CodexRuntime } from '../runtimes/codex-runtime.js';
+import { CopilotRuntime } from '../runtimes/copilot-runtime.js';
 import {
   mockBranchPublication,
   mockCommittedPublication,
@@ -1879,6 +1881,72 @@ describe('PodManager', () => {
       failure_category: 'execution_termination_unverified',
     });
   });
+
+  it.each(['claude-spawn', 'claude-resume', 'copilot'] as const)(
+    'retains the durable run after actual %s transport loses exit evidence',
+    async (kind) => {
+      const ctx = createTestContext(undefined, {
+        defaultRuntime: kind === 'copilot' ? 'copilot' : 'claude',
+      });
+      ctx.deps.providerAttemptRepo = createProviderAttemptRepository(ctx.db);
+      const manager = createPodManager(ctx.deps);
+      const pod = manager.createSession(
+        { profileName: 'test-profile', task: 'Retain finite runtime output' },
+        'operator',
+      );
+      ctx.podRepo.update(pod.id, { status: 'running', containerId: 'owned-container' });
+      const exitCode = Promise.reject(new Error('Backend disconnected before observing exit'));
+      void exitCode.catch(() => {});
+      vi.mocked(ctx.containerManager.execStreaming).mockResolvedValue({
+        stdout: Readable.from([
+          kind === 'copilot'
+            ? 'Retain this output\n'
+            : `${JSON.stringify({ type: 'result', subtype: 'success', result: 'Retain this output' })}\n`,
+        ]),
+        stderr: Readable.from([]),
+        exitCode,
+        kill: vi.fn(async () => {
+          throw new Error('Termination unverified');
+        }),
+      });
+      const runtime =
+        kind === 'copilot'
+          ? new CopilotRuntime(pino({ level: 'silent' }), ctx.containerManager)
+          : new ClaudeRuntime(pino({ level: 'silent' }), ctx.containerManager);
+      const stream =
+        kind === 'claude-resume'
+          ? runtime.resume(pod.id, 'Continue', 'owned-container')
+          : runtime.spawn({
+              podId: pod.id,
+              task: pod.task,
+              model: pod.model,
+              reasoningEffort: 'auto',
+              workDir: '/workspace',
+              containerId: 'owned-container',
+              env: {},
+            });
+      await expect(manager.consumeAgentEvents(pod.id, stream)).rejects.toMatchObject({
+        code: 'EXEC_EXIT_UNVERIFIED',
+      });
+      expect(ctx.podRepo.taskExecutions?.hasUnverifiedTermination(pod.id)).toBe(true);
+      expect(ctx.podRepo.taskExecutions?.snapshot(pod.id)).toMatchObject({
+        agentRunCount: 1,
+        failedRunCount: 1,
+      });
+      expect(
+        JSON.stringify(
+          ctx.eventRepo.getForSession(pod.id, { type: 'pod.agent_activity', latest: 20 }),
+        ),
+      ).toContain('Retain this output');
+      await expect(createPodManager(ctx.deps).resumePod(pod.id)).rejects.toMatchObject({
+        code: 'TASK_EXECUTION_TERMINATION_UNVERIFIED',
+      });
+      expect(ctx.validationEngine.validate).not.toHaveBeenCalled();
+      expect(ctx.prManager.createPr).not.toHaveBeenCalled();
+      expect(ctx.containerManager.kill).not.toHaveBeenCalled();
+      expect(ctx.containerManager.execStreaming).toHaveBeenCalledTimes(1);
+    },
+  );
 
   it.each(['thrown', 'fatal-event', 'advisory-event'] as const)(
     'retains explicit unverified termination from %s before admitting linked work',

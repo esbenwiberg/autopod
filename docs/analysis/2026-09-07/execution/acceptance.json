@@ -40,7 +40,10 @@
         "packages/daemon/src/pods/nudge-repository.ts",
         "packages/shared/src/types/runtime.ts",
         "packages/daemon/src/api/routes/pods.ts",
-        "packages/mobile-web/src/lib/api.ts"
+        "packages/mobile-web/src/lib/api.ts",
+        "packages/daemon/src/runtimes/observed-runtime-exit.ts",
+        "packages/daemon/src/runtimes/claude-runtime.ts",
+        "packages/daemon/src/runtimes/copilot-runtime.ts"
       ],
       "tests": [
         "packages/daemon/src/pods/pod-lifecycle.e2e.test.ts",
@@ -61,7 +64,10 @@
         "packages/mobile-web/src/components/TaskExecutionPanel.test.tsx",
         "packages/desktop/Tests/AutopodClientTests/PodCostBreakdownResponseTests.swift",
         "packages/mobile-web/src/components/ActionBar.test.tsx",
-        "packages/desktop/Tests/AutopodClientTests/UnverifiedTerminationActionTests.swift"
+        "packages/desktop/Tests/AutopodClientTests/UnverifiedTerminationActionTests.swift",
+        "packages/daemon/src/runtimes/finite-runtime-exit.test.ts",
+        "packages/daemon/src/runtimes/claude-runtime.test.ts",
+        "packages/daemon/src/runtimes/copilot-runtime.test.ts"
       ],
       "evidence": [
         "receipts/settlement-red.txt",
@@ -116,7 +122,13 @@
         "receipts/checkpoint-84-replay-red.txt",
         "receipts/checkpoint-84-http-red.txt",
         "receipts/checkpoint-84-daemon-final.txt",
-        "receipts/checkpoint-84-rework.png"
+        "receipts/checkpoint-84-rework.png",
+        "checkpoint-85.md",
+        "receipts/checkpoint-85-red.txt",
+        "receipts/checkpoint-85-runtime-first.txt",
+        "receipts/checkpoint-85-runtime-green.txt",
+        "receipts/checkpoint-85-daemon.txt",
+        "receipts/checkpoint-85-build.txt"
       ],
       "prerequisites": [],
       "remaining": "Normal replies are atomic, retained in bounded recovery context, and fence older completion events. New unanswered decisions remain actionable. Attached MCP delivery acknowledgment, delayed concurrent stream ordering, other response boundaries, historical orphan questions and broader finalization side effects remain. New worker/cycle and validation admission now preserve pending decisions, including older unresolved cycles in the current generation. Historical missing payload recovery and stream/MCP delivery acknowledgment remain. Codex now observes summary events before Spawn/Resume launch and disposes each invocation listener. This closes the local launch/stream attachment race, not durable delivery acknowledgment across all runtimes or daemon restart. Concurrent interactive completions now coalesce in process, conflicting promotion/generation requests fail closed, and current source/lifecycle/decision ownership is checked across push and container release boundaries. This is not durable cross-process idempotency, cancellation of already-dispatched external operations, or complete post-completion side-effect accounting."
@@ -515,7 +527,10 @@
         "packages/daemon/src/containers/exec-exit-evidence.ts",
         "packages/shared/src/types/runtime.ts",
         "packages/daemon/src/runtimes/codex-runtime.ts",
-        "packages/mobile-web/src/lib/api.ts"
+        "packages/mobile-web/src/lib/api.ts",
+        "packages/daemon/src/runtimes/observed-runtime-exit.ts",
+        "packages/daemon/src/runtimes/claude-runtime.ts",
+        "packages/daemon/src/runtimes/copilot-runtime.ts"
       ],
       "tests": [
         "packages/daemon/src/pods/task-execution-ledger.test.ts",
@@ -533,7 +548,10 @@
         "packages/daemon/src/containers/sandbox-container-manager.test.ts",
         "packages/daemon/src/api/routes/pods.test.ts",
         "packages/mobile-web/src/components/ActionBar.test.tsx",
-        "packages/desktop/Tests/AutopodClientTests/UnverifiedTerminationActionTests.swift"
+        "packages/desktop/Tests/AutopodClientTests/UnverifiedTerminationActionTests.swift",
+        "packages/daemon/src/runtimes/finite-runtime-exit.test.ts",
+        "packages/daemon/src/runtimes/claude-runtime.test.ts",
+        "packages/daemon/src/runtimes/copilot-runtime.test.ts"
       ],
       "evidence": [
         "receipts/task-ledger-red.txt",
@@ -583,7 +601,13 @@
         "receipts/checkpoint-84-replay-red.txt",
         "receipts/checkpoint-84-http-red.txt",
         "receipts/checkpoint-84-daemon-final.txt",
-        "receipts/checkpoint-84-rework.png"
+        "receipts/checkpoint-84-rework.png",
+        "checkpoint-85.md",
+        "receipts/checkpoint-85-red.txt",
+        "receipts/checkpoint-85-runtime-first.txt",
+        "receipts/checkpoint-85-runtime-green.txt",
+        "receipts/checkpoint-85-daemon.txt",
+        "receipts/checkpoint-85-build.txt"
       ],
       "prerequisites": [],
       "remaining": "Validation admission identity and pinned cumulative transient allowance persist across Resume, restart and linked fix pods. Task-wide agent/repository-rework limits, cumulative provider/sandbox recovery and audited token-budget extensions still require integration; historical pre-ledger retries are not reconstructed. Incomplete known prior spending now blocks further budgeted agent consumption. This does not reserve future spend or reconstruct unrecorded legacy work; task-wide provider/rework admission and phase reconciliation remain. Checkpoint 24 adds durable sandbox startup retries, legacy allowance lower bounds, stage-scoped one-use decisions, measured startup time and local operator proof. Provider retries after first runtime event, repository rework, complete historical reconstruction, phase billing, native interaction and live acceptance remain."
@@ -2146,7 +2170,7 @@
       "prerequisites": []
     }
   ],
-  "lastCheckpoint": "checkpoint-84.md",
+  "lastCheckpoint": "checkpoint-85.md",
   "migrationLineage": {
     "managedBaseline": "142-152; exact bytes from tracking commit cba763ba0bb3d65cb4c055e00033016ba1d5c646",
     "nativeCurrent": "164-176; byte-preserving move of unpublished native 151-163",

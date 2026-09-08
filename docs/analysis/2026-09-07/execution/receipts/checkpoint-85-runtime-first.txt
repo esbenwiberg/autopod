@@ -1,0 +1,59 @@
+
+ RUN  v4.1.11 /private/tmp/autopod-durable-execution/packages/daemon
+
+ ❯ src/runtimes/claude-runtime.test.ts (40 tests | 1 failed) 281ms
+       × terminates within grace window when stdout never closes after result event 118ms
+ ❯ src/runtimes/copilot-runtime.test.ts (28 tests | 2 failed) 378ms
+       × preserves completion when stdout closes but exit-code resolution times out 64ms
+       × terminates within idle window when stdout stalls and probe says wedged 114ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 3 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/runtimes/claude-runtime.test.ts > ClaudeRuntime > spawn > terminates within grace window when stdout never closes after result event
+AutopodError: claude-runtime execution termination is unverified; retain output, source and resources before another execution.
+ ❯ withObservedRuntimeExit src/runtimes/observed-runtime-exit.ts:21:13
+     19|     if (!observed || observed.timedOut || !isObservedExitCode(observed…
+     20|       // biome-ignore lint/correctness/noUnsafeFinally: Cancellation c…
+     21|       throw new AutopodError(
+       |             ^
+     22|         `${options.runtimeName} execution termination is unverified; r…
+     23|         'EXEC_EXIT_UNVERIFIED',
+ ❯ ClaudeRuntime.spawn src/runtimes/claude-runtime.ts:134:24
+ ❯ src/runtimes/claude-runtime.test.ts:662:26
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/3]⎯
+
+ FAIL  src/runtimes/copilot-runtime.test.ts > CopilotRuntime > spawn > preserves completion when stdout closes but exit-code resolution times out
+AutopodError: copilot-runtime execution termination is unverified; retain output, source and resources before another execution.
+ ❯ withObservedRuntimeExit src/runtimes/observed-runtime-exit.ts:21:13
+     19|     if (!observed || observed.timedOut || !isObservedExitCode(observed…
+     20|       // biome-ignore lint/correctness/noUnsafeFinally: Cancellation c…
+     21|       throw new AutopodError(
+       |             ^
+     22|         `${options.runtimeName} execution termination is unverified; r…
+     23|         'EXEC_EXIT_UNVERIFIED',
+ ❯ CopilotRuntime.spawn src/runtimes/copilot-runtime.ts:85:18
+ ❯ src/runtimes/copilot-runtime.test.ts:406:26
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/3]⎯
+
+ FAIL  src/runtimes/copilot-runtime.test.ts > CopilotRuntime > spawn > terminates within idle window when stdout stalls and probe says wedged
+AutopodError: copilot-runtime execution termination is unverified; retain output, source and resources before another execution.
+ ❯ withObservedRuntimeExit src/runtimes/observed-runtime-exit.ts:21:13
+     19|     if (!observed || observed.timedOut || !isObservedExitCode(observed…
+     20|       // biome-ignore lint/correctness/noUnsafeFinally: Cancellation c…
+     21|       throw new AutopodError(
+       |             ^
+     22|         `${options.runtimeName} execution termination is unverified; r…
+     23|         'EXEC_EXIT_UNVERIFIED',
+ ❯ CopilotRuntime.spawn src/runtimes/copilot-runtime.ts:85:18
+ ❯ src/runtimes/copilot-runtime.test.ts:458:26
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/3]⎯
+
+
+ Test Files  2 failed | 1 passed (3)
+      Tests  3 failed | 72 passed (75)
+   Start at  17:17:04
+   Duration  666ms (transform 186ms, setup 0ms, import 517ms, tests 708ms, environment 0ms)
+

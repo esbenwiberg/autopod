@@ -659,17 +659,20 @@ describe('ClaudeRuntime', () => {
 
         const events: AgentEvent[] = [];
         const start = Date.now();
-        for await (const event of runtime.spawn({
-          podId: 'wedged-sess',
-          task: 'Task',
-          model: 'opus',
-          reasoningEffort: 'auto',
-          workDir: '/workspace',
-          containerId: 'container-123',
-          env: {},
-        })) {
-          events.push(event);
-        }
+        const consumed = (async () => {
+          for await (const event of runtime.spawn({
+            podId: 'wedged-sess',
+            task: 'Task',
+            model: 'opus',
+            reasoningEffort: 'auto',
+            workDir: '/workspace',
+            containerId: 'container-123',
+            env: {},
+          })) {
+            events.push(event);
+          }
+        })();
+        await expect(consumed).rejects.toMatchObject({ code: 'EXEC_EXIT_UNVERIFIED' });
         const elapsed = Date.now() - start;
 
         // Should have terminated within grace + exit-code timeout + a little
@@ -683,14 +686,15 @@ describe('ClaudeRuntime', () => {
         const completeEvent = events.find((e) => e.type === 'complete');
         expect(completeEvent).toBeDefined();
 
-        // Exit code never resolved → synthetic non-fatal error event.
-        const wedgeError = events.find(
-          (e) =>
-            e.type === 'error' &&
-            (e as AgentErrorEvent).fatal === false &&
-            (e as AgentErrorEvent).message.includes('Claude exit code did not resolve'),
-        );
-        expect(wedgeError).toBeDefined();
+        // Output remains historical evidence; a closed stream did not prove process exit.
+        expect(
+          events.some(
+            (e) =>
+              e.type === 'error' &&
+              e.fatal === false &&
+              e.message.includes('exit code did not resolve'),
+          ),
+        ).toBe(false);
       } finally {
         // biome-ignore lint/performance/noDelete: must actually unset, `= undefined` stringifies to "undefined"
         delete process.env.AUTOPOD_POST_COMPLETE_GRACE_MS;
