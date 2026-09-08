@@ -21,3 +21,7 @@ Generic HTTP, GitHub, ADO, Azure Logs, Azure PIM, and test-pipeline handlers use
 ## Fixed fixture limits
 
 Use the existing 2 MiB response limit. Local deadline tests use 60 ms configured deadlines and a 1,000 ms assertion ceiling; fixture safety cutoff is 1,200 ms, to guarantee baseline tests terminate. Do not increase these limits in response to a failure without diagnosing and recording the cause. Cover delayed headers, stalled body, slow chunks, oversized success/error, and caller abort. Prove cleanup through observed stream cancellation/socket closure, not just rejected promises.
+
+## Completion
+
+All four steps are verified. The user-approved dependency prerequisite supersedes the initial instruction to avoid manifests for exactly six files from 83c561e6. Full validation passed on clean d98d7b6b; acceptance.json and closure.md map the final evidence and retained limits.

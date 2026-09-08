@@ -1,6 +1,6 @@
-# Action security closure review — incomplete
+# Action security closure review — complete
 
-The local implementation and boundary checks are complete. The Goal is **not complete**: the required dependency audit fails on baseline dependencies, and the final combined source still needs the complete pipeline after the dependency prerequisite is resolved. See acceptance.json and prerequisites/README.md.
+All four workstreams are verified on local source `d98d7b6bdfd254f49b260193cd65581b2b97d83f`. The complete `./scripts/validate.sh` pipeline exited 0 on 2026-09-08 with the same clean HEAD before and after. Install, lint, build, configured typecheck, tests, dependency audit and secret scan passed. The final closure commit changes only evidence documentation; production source remains the tested source.
 
 ## Implemented behavior
 
@@ -24,22 +24,25 @@ Action failures expose safe categories, action identity, status where available 
 | W3.2 diagnostic truth | Action/status/category and matching diagnostic UUID remain; sanitized=true reports withholding, piiDetected=false/quarantineScore=0 make no unperformed classification claim. |
 | W3.3 audit/denial | Audit hash verification passes; approval and resource denial perform no credential lookup, DNS check or handler side effect. |
 | W4.1 durable evidence | Local checkpoints, baseline reproductions, source hashes and exact validation identity are retained. |
-| W4.2 full pipeline | **BLOCKED:** dependency audit failed. Other required stages passed on checkpoint 3; final scoped-address changes pass 355 focused tests. Full final combined-source pipeline is outstanding. |
-| W4.3 closure | This provisional closure is reviewable; final closure awaits W4.2. |
+| W4.2 full pipeline | **Verified:** final-full-validation.txt and final-validation-identity.json prove exit 0 on clean d98d7b6b. 5,129 tests passed across seven package suites, one existing Linux-only skip; all 15 test/build tasks succeeded. Dependency audit reports no known vulnerabilities. |
+| W4.3 closure | **Verified:** final diff reviewed for destination/TLS enforcement, stream cleanup, failure sinks and scope overlap. Every criterion in acceptance.json is verified; no required local work remains. |
 
-The final focused receipt is receipts/final-boundary-green.txt: **355 tests passed across 20 files**. The complete pipeline receipt is receipts/checkpoint-3-full-validation.txt and its identity JSON: exact clean source `1ea58def2926636e6ab0159cd258652e89591061`, exit 1 solely for dependency audit. Do not describe that run as green. A supplementary raw tsc check reports pre-existing test typing debt outside the configured repository typecheck; newly introduced typing issues were corrected.
+The earlier focused receipt, receipts/final-boundary-green.txt, contains 355 passing tests across 20 files. The final complete pipeline supersedes it for combined-source verification and includes all action, real loopback HTTP/TLS, SSRF consumer and dependency compatibility suites. The earlier checkpoint-3 run remains recorded as failed solely for dependency audit; it is not relabeled. The final daemon count is 4,312 passing tests, with one Linux-only Docker permission test skipped on macOS. A supplementary raw tsc check reports pre-existing test typing debt outside the configured repository typecheck; newly introduced typing issues were corrected. The configured typecheck passed in the final pipeline.
 
 ## Local commits and integration
 
 - 7f227253: bounded HTTP response consumption and cancellation.
 - 37d37673: pinned destinations, redirect rejection, IPv6 normalization, local TLS proof.
 - 1ea58def: safe action diagnostics, logging, audit redaction and failure integration tests.
-- The following checkpoint adds scoped-address handling, consumer verification and this provisional closure.
+- 8463317e: scoped-address handling, consumer verification and provisional closure.
+- d98d7b6b: the approved dependency prerequisite and compatibility tests; exact source used for the final complete pipeline.
 
-No dependency manifests, migrations, profile fields, pod lifecycle code, operator UI, cloud resources or live pods were changed. The other task's last inspected diff has no changes in action/SSRF paths. Its dependency changes are prepared as an exact prerequisite patch; they are not applied here. Integration with its complete reliability branch is unverified.
+The user approved reuse of the six dependency files with “Go on” on 2026-09-08. Their Git blobs exactly match 83c561e69413c71f1195f436621d2a150162af10, as recorded in dependency-prerequisite-identity.json. No lifecycle, reliability fixture or ledger changes from that commit were imported. Its three offline dependency consumer tests were adapted into this task’s action test directory. Eight daemon compatibility checks exercise actual image resizing, archive extraction, authentication UUID calls and mobile static serving; three additional jsdom checks exercise the real App's routes and links. The final pipeline also rebuilds and tests their consumers.
+
+The other task's checkout at eaa697a70ec0c120fd6b4ae2c1b8405bfa91a81c has no committed or uncommitted differences from the shared baseline in our action/SSRF/new router-test paths. Its checkout, branch and processes remain untouched. Integration with its complete reliability branch is unverified. No migrations, profile fields, pod lifecycle code, production operator UI, cloud resources or live pods were changed here.
 
 ## Compatibility and limits
 
 Generic HTTP actions must configure the final destination URL and explicit auth; automatic redirects and URL credentials are intentionally rejected. Responses above 2 MiB decoded bytes now fail even on text/log/error paths. Unknown exception detail is withheld, so diagnosis uses safe categories and correlation rather than raw SDK output. DNS resolution itself may settle after cancellation, but cannot cause a late HTTP operation. These tests prove local transport and code behavior, not a deployed release or live provider acceptance.
 
-The remaining concrete step is approval to reuse the existing six dependency files from 83c561e69413c71f1195f436621d2a150162af10, followed by dependency compatibility validation and a passing full pipeline on the final combined commit. Broad dependency changes were not made under the narrower transport scope. No push, PR, merge or deployment is required for this local Goal.
+No required local prerequisite remains. Optional next acceptance is to integrate this branch with the concurrent reliability branch, rerun validation on that combined source, then separately authorize release or provider verification if desired. No push, PR, merge or deployment was performed or required for this local Goal.

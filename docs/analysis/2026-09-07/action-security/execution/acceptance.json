@@ -10,7 +10,9 @@
         "receipts/http-destination-green.txt",
         "receipts/http-destination-source.json",
         "receipts/final-boundary-green.txt",
-        "receipts/final-boundary-source.json"
+        "receipts/final-boundary-source.json",
+        "receipts/final-full-validation.txt",
+        "receipts/final-validation-identity.json"
       ]
     },
     {
@@ -22,7 +24,9 @@
         "receipts/http-destination-green.txt",
         "receipts/http-destination-source.json",
         "receipts/final-boundary-green.txt",
-        "receipts/final-boundary-source.json"
+        "receipts/final-boundary-source.json",
+        "receipts/final-full-validation.txt",
+        "receipts/final-validation-identity.json"
       ]
     },
     {
@@ -34,7 +38,9 @@
         "receipts/http-destination-green.txt",
         "receipts/http-destination-source.json",
         "receipts/final-boundary-green.txt",
-        "receipts/final-boundary-source.json"
+        "receipts/final-boundary-source.json",
+        "receipts/final-full-validation.txt",
+        "receipts/final-validation-identity.json"
       ]
     },
     {
@@ -46,7 +52,9 @@
         "receipts/http-resilience-green.txt",
         "receipts/http-resilience-source.json",
         "receipts/final-boundary-green.txt",
-        "receipts/final-boundary-source.json"
+        "receipts/final-boundary-source.json",
+        "receipts/final-full-validation.txt",
+        "receipts/final-validation-identity.json"
       ]
     },
     {
@@ -58,7 +66,9 @@
         "receipts/http-resilience-green.txt",
         "receipts/http-resilience-source.json",
         "receipts/final-boundary-green.txt",
-        "receipts/final-boundary-source.json"
+        "receipts/final-boundary-source.json",
+        "receipts/final-full-validation.txt",
+        "receipts/final-validation-identity.json"
       ]
     },
     {
@@ -70,7 +80,9 @@
         "receipts/http-resilience-green.txt",
         "receipts/http-resilience-source.json",
         "receipts/final-boundary-green.txt",
-        "receipts/final-boundary-source.json"
+        "receipts/final-boundary-source.json",
+        "receipts/final-full-validation.txt",
+        "receipts/final-validation-identity.json"
       ]
     },
     {
@@ -82,7 +94,9 @@
         "receipts/action-failures-green.txt",
         "receipts/action-failures-source.json",
         "receipts/final-boundary-green.txt",
-        "receipts/final-boundary-source.json"
+        "receipts/final-boundary-source.json",
+        "receipts/final-full-validation.txt",
+        "receipts/final-validation-identity.json"
       ]
     },
     {
@@ -94,7 +108,9 @@
         "receipts/action-failures-green.txt",
         "receipts/action-failures-source.json",
         "receipts/final-boundary-green.txt",
-        "receipts/final-boundary-source.json"
+        "receipts/final-boundary-source.json",
+        "receipts/final-full-validation.txt",
+        "receipts/final-validation-identity.json"
       ]
     },
     {
@@ -106,7 +122,9 @@
         "receipts/action-failures-green.txt",
         "receipts/action-failures-source.json",
         "receipts/final-boundary-green.txt",
-        "receipts/final-boundary-source.json"
+        "receipts/final-boundary-source.json",
+        "receipts/final-full-validation.txt",
+        "receipts/final-validation-identity.json"
       ]
     },
     {
@@ -118,27 +136,42 @@
         "receipts/http-resilience-source.json",
         "receipts/http-destination-source.json",
         "receipts/action-failures-source.json",
-        "receipts/final-boundary-source.json"
+        "receipts/final-boundary-source.json",
+        "receipts/final-full-validation.txt",
+        "receipts/final-validation-identity.json"
       ]
     },
     {
       "id": "W4.2",
       "requirement": "Action integration and local HTTP/TLS evidence; required full validation pipeline",
-      "status": "blocked",
+      "status": "verified",
       "evidence": [
         "receipts/checkpoint-3-full-validation.txt",
         "receipts/checkpoint-3-validation-identity.json",
-        "prerequisites/README.md"
-      ],
-      "remaining": "Required dependency audit fails on baseline lockfile. Reusing the existing six-file dependency prerequisite needs scope approval; then run compatibility checks and the full pipeline on the combined final commit."
+        "prerequisites/README.md",
+        "receipts/final-full-validation.txt",
+        "receipts/final-validation-identity.json"
+      ]
     },
     {
       "id": "W4.3",
       "requirement": "Final diff review and criterion-by-criterion closure",
-      "status": "fixed",
-      "evidence": ["closure.md"],
-      "remaining": "Closure is provisional while W4.2 is blocked; refresh final source and receipts after dependency prerequisite."
+      "status": "verified",
+      "evidence": [
+        "closure.md",
+        "receipts/final-full-validation.txt",
+        "receipts/final-validation-identity.json"
+      ]
     }
   ],
-  "goalComplete": false
+  "goalComplete": true,
+  "finalTestedSource": "d98d7b6bdfd254f49b260193cd65581b2b97d83f",
+  "validation": {
+    "command": "./scripts/validate.sh",
+    "exitCode": 0,
+    "testsPassed": 5129,
+    "testsSkipped": 1,
+    "audit": "No known vulnerabilities found",
+    "sourceCleanBeforeAndAfter": true
+  }
 }

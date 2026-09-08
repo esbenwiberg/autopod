@@ -45,3 +45,11 @@ The existing dependency fix is commit 83c561e69413c71f1195f436621d2a150162af10. 
 The user approved reuse with “Go on” on 2026-09-08. Imported only the six dependency files from 83c561e69413c71f1195f436621d2a150162af10, with matching Git blob IDs recorded in receipts/dependency-prerequisite-identity.json. The owner checkout still matched those files before import; no changes were made there. Frozen installation passed.
 
 Eight offline daemon compatibility tests pass: actual Transformers/Sharp resizing, ONNX archive extraction, MSAL CommonJS UUID calls, and the existing five Fastify mobile-static checks. The three consumer tests are adapted from the prerequisite author's test file with attribution to that source commit. Three additional jsdom tests drive the real mobile App through hash navigation, back links, direct routes and unknown-route replacement. These prove DOM/router compatibility, not a physical browser or device. Receipts are retained; full combined-source validation remains pending.
+
+## Checkpoint 6: final verified closure
+
+The complete ./scripts/validate.sh run on d98d7b6bdfd254f49b260193cd65581b2b97d83f exited 0. HEAD and clean working-tree status were identical before and after. Install, lint, build, configured typecheck, tests, dependency audit and secret scan all passed. Seven package suites report 5,129 tests passed; daemon contributes 4,312 passed and one existing Linux-only skip. Audit reports no known vulnerabilities. Final output and identity are retained under receipts/final-*.
+
+Installed consumer versions were checked directly: Transformers -> sharp 0.35.0; ONNX -> adm-zip 0.6.0; MSAL -> uuid 11.1.1; daemon Fastify 5.12.3 and Static 10.1.3; CLI undici 8.10.2; mobile React Router 7.18.3; shared nanoid 5.1.16. Exact lockfile blobs remain authoritative.
+
+Final source diff and ownership review found no further action-policy, TLS, diagnostic or resource-cleanup issue requiring changes. Other task checkout HEAD eaa697a70ec0c120fd6b4ae2c1b8405bfa91a81c has no differences from baseline in our action/SSRF/new router-test paths. All acceptance criteria are verified and closure.md records compatibility changes and local proof limits. This final checkpoint changes evidence documents only, preserving the tested production source. No external lifecycle action was taken.
