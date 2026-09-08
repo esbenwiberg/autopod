@@ -163,6 +163,7 @@ export function PodDetail(): JSX.Element {
           stage="codex_interruption"
         />
       )}
+      <TaskRetryPanel podId={pod.id} revision={pod.updatedAt} status={pod.status} stage="worker" />
       <TaskExecutionPanel
         podId={data.id}
         revision={`${data.status}:${data.inputTokens}:${data.outputTokens}:${data.validationAttempts}`}

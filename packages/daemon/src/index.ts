@@ -262,6 +262,7 @@ const podRepo = createPodRepository(db);
 podRepo.taskRetries?.recoverInterrupted();
 podRepo.sandboxStartupRetries?.recoverInterrupted();
 podRepo.codexInterruptionRetries?.recoverInterrupted();
+podRepo.workerRetries?.recoverInterrupted();
 const providerAttemptRepo = createProviderAttemptRepository(db);
 const tokenTelemetryRepair = createTokenTelemetryRepair({ db, podRepo, providerAttemptRepo });
 const eventRepo = createEventRepository(db);

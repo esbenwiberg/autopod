@@ -275,6 +275,7 @@ import { assertTaskExecutionTerminationVerified } from './task-execution-ledger.
 import { TaskRetryBlockedError } from './task-retry-ledger.js';
 import { ValidationSupersededError, captureValidationOwnership } from './validation-ownership.js';
 import type { ValidationRepository } from './validation-repository.js';
+import { unavailableWorkerInputs, workerBindingHash } from './worker-retry-history.js';
 import type { WorkspaceCheckpointController } from './workspace-checkpoint-controller.js';
 import {
   buildBashrcHintBlock,
@@ -10890,6 +10891,8 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
       let attemptProfile: Profile;
       let seenCompleteEvents: Set<string>;
       let taskRunId: string | undefined;
+      let workerAdmissionId: string | undefined;
+      let workerStartedAt: number | undefined;
       try {
         const initialized = atomicPodChange(podRepo, () => {
           const currentPod = podRepo.getOrThrow(podId);
@@ -10914,12 +10917,27 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
               },
             });
           }
+          const workerAdmission = runId
+            ? podRepo.workerRetries?.admit(
+                podId,
+                currentPod.lifecycleGeneration,
+                unavailableWorkerInputs,
+                workerBindingHash({
+                  runtime: currentPod.runtime,
+                  model: currentPod.model,
+                  providerAccountId: currentProfile.providerAccountId ?? null,
+                }),
+                [],
+                runId,
+              )
+            : undefined;
           const providerOrdinal = ensureProviderAttempt(currentPod, currentProfile)?.ordinal;
-          return { currentPod, currentProfile, runId, providerOrdinal };
+          return { currentPod, currentProfile, runId, providerOrdinal, workerAdmission };
         });
         attemptPod = initialized.currentPod;
         attemptProfile = initialized.currentProfile;
         taskRunId = initialized.runId;
+        workerAdmissionId = initialized.workerAdmission?.id;
         runOwner.providerOrdinal = initialized.providerOrdinal;
         seenCompleteEvents = persistedAgentCompleteEventKeys(deps.eventRepo, podId);
         activeAgentRuns.set(podId, runOwner);
@@ -10927,6 +10945,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         startCommitPolling(podId);
       } catch (err) {
         if (taskRunId) podRepo.taskExecutions?.finishRun(taskRunId, 'failed', 'initialization');
+        if (workerAdmissionId) podRepo.workerRetries?.finish(workerAdmissionId, 'unknown', null);
         settleActiveRun();
         throw err;
       }
@@ -10941,6 +10960,12 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         if (taskRunId) podRepo.taskExecutions?.retainUnverifiedRun(taskRunId);
       };
       try {
+        if (!ownsRun()) {
+          outcome = 'stopped';
+          return outcome;
+        }
+        if (workerAdmissionId) podRepo.workerRetries?.start(workerAdmissionId);
+        workerStartedAt = performance.now();
         for await (const event of events) {
           if (!ownsRun()) {
             logger.info(
@@ -11350,6 +11375,22 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
                     terminalClassification?.category ?? null,
                   );
               }
+              if (workerAdmissionId)
+                podRepo.workerRetries?.finish(
+                  workerAdmissionId,
+                  executionTerminationUnverified
+                    ? 'unknown'
+                    : recordedOutcome === 'completed'
+                      ? 'pass'
+                      : recordedOutcome === 'paused' || recordedOutcome === 'stopped'
+                        ? 'cancelled'
+                        : terminalClassification?.category === 'auth'
+                          ? 'nonretryable'
+                          : 'unknown',
+                  workerStartedAt === undefined || executionTerminationUnverified
+                    ? null
+                    : Math.max(0, Math.round(performance.now() - workerStartedAt)),
+                );
             } finally {
               if (activeAgentRuns.get(podId)?.token === runToken) {
                 stopCommitPolling(podId);

@@ -7,7 +7,7 @@ afterEach(() => {
   vi.restoreAllMocks();
   localStorage.clear();
 });
-it.each(['validation', 'sandbox_startup', 'codex_interruption'] as const)(
+it.each(['validation', 'sandbox_startup', 'codex_interruption', 'worker'] as const)(
   'preserves one %s authorization through lost response and reload without implicitly resuming',
   async (stage) => {
     const input = { requestKey: 'durable-key', reason: 'External prerequisite checked' };
@@ -15,13 +15,17 @@ it.each(['validation', 'sandbox_startup', 'codex_interruption'] as const)(
     localStorage.setItem(key, JSON.stringify(input));
     const state = {
       taskId: 'task',
+      authorizationRequired: stage === 'worker',
       admissionCount: 4,
       executedCount: 3,
       transientRetryCount: 2,
       backoffsMs: [0, 0],
       measuredDurationMs: 15,
       interruptedCount: 1,
-      latest: { id: 'failure', outcome: stage === 'codex_interruption' ? 'pass' : 'unknown' },
+      latest: {
+        id: 'failure',
+        outcome: stage === 'codex_interruption' ? 'pass' : 'unknown',
+      },
       authorizations: [] as Array<{
         id: string;
         failureId: string;
@@ -91,7 +95,9 @@ it.each(['validation', 'sandbox_startup', 'codex_interruption'] as const)(
           ? 'Resume task'
           : stage === 'validation'
             ? 'Resume validation'
-            : 'Resume sandbox startup',
+            : stage === 'worker'
+              ? 'Resume worker'
+              : 'Resume sandbox startup',
       );
       expect(resumes).toBe(1);
       expect(container.textContent).toContain('Resume requested.');

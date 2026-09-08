@@ -1292,6 +1292,73 @@ describe('PodManager', () => {
       await app.close();
     }
   });
+  it('records authenticated idempotent worker retry permission without dispatching', async () => {
+    const ctx = createTestContext();
+    const manager = createPodManager(ctx.deps);
+    const pod = manager.createSession(
+      { profileName: 'test-profile', task: 'Retained auth failure' },
+      'operator',
+    );
+    const run = ctx.podRepo.taskExecutions?.beginRun(pod.id, 1, 1, {
+      runtime: pod.runtime,
+      model: pod.model,
+      providerAccountId: null,
+    });
+    if (!run) throw new Error('Missing run');
+    ctx.podRepo.taskExecutions?.finishRun(run, 'failed', 'auth');
+    const app = Fastify();
+    app.setErrorHandler(errorHandler);
+    authPlugin(app, {
+      validateToken: async () => ({ oid: 'actual-human', name: 'Operator' }),
+    } as never);
+    podRoutes(app, manager, ctx.eventRepo, undefined, ctx.podRepo);
+    const headers = { authorization: 'Bearer synthetic' };
+    const url = `/pods/${pod.id}/retry-authorizations`;
+    const payload = {
+      requestKey: 'auth-retry',
+      reason: 'Credential repair verified',
+      stage: 'worker',
+    };
+    try {
+      expect((await app.inject({ method: 'POST', url, payload })).statusCode).toBe(401);
+      expect(
+        (
+          await app.inject({
+            method: 'POST',
+            url,
+            headers,
+            payload: { ...payload, actor: { type: 'human', userId: 'forged' } },
+          })
+        ).statusCode,
+      ).toBe(400);
+      const first = await app.inject({ method: 'POST', url, headers, payload });
+      const duplicate = await app.inject({ method: 'POST', url, headers, payload });
+      expect(first.statusCode, first.body).toBe(201);
+      expect(duplicate.json().id).toBe(first.json().id);
+      expect(first.json()).toMatchObject({
+        actor: { type: 'human', userId: 'actual-human' },
+        usedByAttemptId: null,
+        stage: 'worker',
+        failureId: run,
+      });
+      const state = await app.inject({
+        method: 'GET',
+        url: `/pods/${pod.id}/retry-state?stage=worker`,
+        headers,
+      });
+      expect(state.statusCode).toBe(200);
+      expect(state.json()).toMatchObject({
+        admissionCount: 1,
+        executedCount: 1,
+        latest: { outcome: 'nonretryable', measuredDurationMs: null },
+      });
+      expect(ctx.runtime.spawn).not.toHaveBeenCalled();
+      expect(ctx.runtime.resume).not.toHaveBeenCalled();
+    } finally {
+      await app.close();
+    }
+  });
+
   it.each([true, false])(
     'rechecks an early sandbox cooldown wake with durable ledger=%s',
     async (durable) => {
@@ -2928,6 +2995,192 @@ describe('PodManager', () => {
     },
   );
 
+  it.each(['same-manager', 'second-manager', 'linked-pod'] as const)(
+    'blocks unchanged nonretryable outer worker replay before pulling another iterator: %s',
+    async (route) => {
+      const ctx = createTestContext();
+      const manager = createPodManager(ctx.deps);
+      const root = manager.createSession(
+        { profileName: 'test-profile', task: 'Original unchanged request' },
+        'operator',
+      );
+      ctx.podRepo.update(root.id, { status: 'running', containerId: 'original-container' });
+      const first = await manager.consumeAgentEvents(
+        root.id,
+        (async function* () {
+          yield {
+            type: 'error',
+            timestamp: new Date().toISOString(),
+            fatal: true,
+            message: 'Authentication rejected',
+            classification: {
+              category: 'auth',
+              definitive: true,
+              sanitizedMessage: 'Authentication rejected',
+            },
+          } as const;
+        })(),
+      );
+      expect(first).toBe('failed');
+      expect(ctx.podRepo.taskExecutions?.snapshot(root.id).failedRunCount).toBe(1);
+      const target =
+        route === 'linked-pod'
+          ? manager.createSession(
+              {
+                profileName: 'test-profile',
+                task: 'Original unchanged request',
+                linkedPodId: root.id,
+              },
+              'operator',
+            )
+          : root;
+      ctx.podRepo.update(target.id, { status: 'running', containerId: 'original-container' });
+      const next = route === 'second-manager' ? createPodManager(ctx.deps) : manager;
+      let pulled = false;
+      const before = ctx.db.prepare('SELECT * FROM pod_finalizations ORDER BY pod_id, cycle').all();
+      await expect(
+        next.consumeAgentEvents(
+          target.id,
+          (async function* () {
+            pulled = true;
+            yield {
+              type: 'complete',
+              timestamp: new Date().toISOString(),
+              result: 'Unchanged unauthorized retry',
+            } as const;
+          })(),
+        ),
+      ).rejects.toMatchObject({ code: 'TASK_RETRY_RECONCILIATION_REQUIRED' });
+      expect(pulled).toBe(false);
+      expect(ctx.podRepo.taskExecutions?.snapshot(target.id).agentRunCount).toBe(1);
+      expect(
+        ctx.db.prepare('SELECT * FROM pod_finalizations ORDER BY pod_id, cycle').all(),
+      ).toEqual(before);
+      const retries = ctx.podRepo.workerRetries;
+      if (!retries) throw new Error('Missing worker retry ledger');
+      const grant = retries.authorize(
+        target.id,
+        `auth-${route}`,
+        'Credentials inspected; permit one retry',
+        { type: 'human', userId: 'operator' },
+      );
+      expect(
+        retries.authorize(target.id, `auth-${route}`, 'Credentials inspected; permit one retry', {
+          type: 'human',
+          userId: 'operator',
+        }).id,
+      ).toBe(grant.id);
+      expect(retries.state(target.id).admissionCount).toBe(1);
+      await expect(
+        next.consumeAgentEvents(
+          target.id,
+          (async function* () {
+            pulled = true;
+            yield {
+              type: 'error',
+              timestamp: new Date().toISOString(),
+              fatal: true,
+              message: 'Still rejected',
+              classification: {
+                category: 'auth',
+                definitive: true,
+                sanitizedMessage: 'Still rejected',
+              },
+            } as const;
+          })(),
+        ),
+      ).resolves.toBe('failed');
+      expect(pulled).toBe(true);
+      expect(retries.state(target.id)).toMatchObject({
+        admissionCount: 2,
+        executedCount: 2,
+        latest: { outcome: 'nonretryable', retryKind: 'override' },
+      });
+      expect(retries.state(target.id).authorizations[0]?.usedByAttemptId).toBeTruthy();
+      await expect(
+        next.consumeAgentEvents(
+          target.id,
+          (async function* () {
+            pulled = true;
+            yield { type: 'complete', timestamp: new Date().toISOString(), result: '' } as const;
+          })(),
+        ),
+      ).rejects.toMatchObject({ code: 'TASK_RETRY_RECONCILIATION_REQUIRED' });
+    },
+  );
+
+  it('retains the worker auth guard after committed initialization fails before iterator entry', async () => {
+    const ctx = createTestContext();
+    const manager = createPodManager(ctx.deps);
+    const pod = manager.createSession(
+      { profileName: 'test-profile', task: 'Preserve auth failure' },
+      'operator',
+    );
+    ctx.podRepo.update(pod.id, { status: 'running', containerId: 'owned-container' });
+    await manager.consumeAgentEvents(
+      pod.id,
+      (async function* () {
+        yield {
+          type: 'error',
+          timestamp: new Date().toISOString(),
+          fatal: true,
+          message: 'Authentication rejected',
+          classification: {
+            category: 'auth',
+            definitive: true,
+            sanitizedMessage: 'Authentication rejected',
+          },
+        } as const;
+      })(),
+    );
+    const ledger = ctx.podRepo.workerRetries;
+    if (!ledger) throw new Error('Missing worker retries');
+    const actor = { type: 'human' as const, userId: 'operator' };
+    const grant = ledger.authorize(pod.id, 'first-permission', 'Credentials inspected', actor);
+    let pulls = 0;
+    const stream = async function* () {
+      pulls++;
+      yield {
+        type: 'complete',
+        timestamp: new Date().toISOString(),
+        result: 'Preserved work',
+      } as const;
+    };
+    vi.spyOn(ctx.eventRepo, 'getForSession').mockImplementationOnce(() => {
+      throw new Error('fixture event history unavailable');
+    });
+    await expect(manager.consumeAgentEvents(pod.id, stream())).rejects.toThrow(
+      'fixture event history unavailable',
+    );
+    expect(pulls).toBe(0);
+    expect(ledger.state(pod.id)).toMatchObject({
+      admissionCount: 2,
+      executedCount: 1,
+      authorizationRequired: true,
+      latest: { outcome: 'unknown', startedAt: null, measuredDurationMs: null },
+    });
+    const consumed = ledger
+      .state(pod.id)
+      .authorizations.find((a) => a.id === grant.id)?.usedByAttemptId;
+    expect(consumed).toBeTruthy();
+    const restarted = createPodManager(ctx.deps);
+    await expect(restarted.consumeAgentEvents(pod.id, stream())).rejects.toMatchObject({
+      code: 'TASK_RETRY_RECONCILIATION_REQUIRED',
+    });
+    expect(pulls).toBe(0);
+    ledger.authorize(pod.id, 'second-permission', 'Initialization repaired; permit retry', actor);
+    await expect(restarted.consumeAgentEvents(pod.id, stream())).resolves.toBe('completed');
+    expect(pulls).toBe(1);
+    expect(ledger.state(pod.id)).toMatchObject({
+      admissionCount: 3,
+      executedCount: 2,
+      authorizationRequired: false,
+    });
+    expect(
+      ledger.state(pod.id).authorizations.find((a) => a.id === grant.id)?.usedByAttemptId,
+    ).toBe(consumed);
+  });
+
   it('rolls back completion cycle and task admission when provider segment initialization fails', async () => {
     const ctx = createTestContext();
     const attempts = createProviderAttemptRepository(ctx.db);
@@ -2965,6 +3218,11 @@ describe('PodManager', () => {
       count: 0,
     });
     expect(attempts.list(pod.id)).toEqual([]);
+    expect(
+      ctx.db
+        .prepare("SELECT COUNT(*) AS count FROM task_retry_attempts WHERE stage = 'worker'")
+        .get(),
+    ).toEqual({ count: 0 });
   });
 
   it('does not retain an active run when event-consumer initialization fails', async () => {

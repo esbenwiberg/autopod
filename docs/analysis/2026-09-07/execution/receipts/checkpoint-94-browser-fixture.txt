@@ -1,0 +1,2 @@
+http://127.0.0.1:51813/mobile/
+{"scope":"local fixture only","action":"retry-authorization","stage":"worker","requestKey":"2f249a10-99ca-440b-816e-988568234946"}

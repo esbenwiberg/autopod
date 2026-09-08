@@ -3,7 +3,7 @@ import Testing
 
 @testable import AutopodClient
 
-@Test(arguments: ["validation", "sandbox_startup", "codex_interruption"])
+@Test(arguments: ["validation", "sandbox_startup", "codex_interruption", "worker"])
 func retryClientPreservesUnknownExecutionAndSeparateAuthorization(stage: String) async throws {
   let configuration = URLSessionConfiguration.ephemeral
   configuration.protocolClasses = [RetryFixtureProtocol.self]
@@ -12,6 +12,7 @@ func retryClientPreservesUnknownExecutionAndSeparateAuthorization(stage: String)
     session: URLSession(configuration: configuration))
   let state = try await api.getRetryState("pod", stage: stage)
   #expect(state.stage == stage)
+  #expect(state.authorizationRequired == true)
   #expect(state.executedCount == 3)
   #expect(state.admissionCount == 4)
   #expect(state.latest?.outcome == "unknown")
@@ -40,7 +41,7 @@ private final class RetryFixtureProtocol: URLProtocol, @unchecked Sendable {
     if path.hasSuffix("retry-state") {
       #expect(request.httpMethod == "GET")
       body =
-        #"{"taskId":"task","stage":"validation","backoffsMs":[1000,5000],"admissionCount":4,"executedCount":3,"transientRetryCount":2,"measuredDurationMs":15,"interruptedCount":1,"latest":{"id":"failed","outcome":"unknown","startedAt":null,"endedAt":"2026-09-07T10:00:00Z","measuredDurationMs":null},"authorizations":[],"telemetry":"partial"}"#
+        #"{"taskId":"task","stage":"validation","backoffsMs":[1000,5000],"admissionCount":4,"executedCount":3,"transientRetryCount":2,"measuredDurationMs":15,"interruptedCount":1,"latest":{"id":"failed","outcome":"unknown","startedAt":null,"endedAt":"2026-09-07T10:00:00Z","measuredDurationMs":null},"authorizations":[],"authorizationRequired":true,"telemetry":"partial"}"#
         .replacingOccurrences(
           of: "\"stage\":\"validation\"",
           with:

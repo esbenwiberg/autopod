@@ -742,7 +742,7 @@ export function podRoutes(
   });
   app.get('/pods/:podId/retry-state', async (request) => {
     const stage = z
-      .enum(['validation', 'sandbox_startup', 'codex_interruption'])
+      .enum(['validation', 'sandbox_startup', 'codex_interruption', 'worker'])
       .default('validation')
       .parse((request.query as { stage?: string }).stage);
     const ledger =
@@ -750,7 +750,9 @@ export function podRoutes(
         ? podRepo?.taskRetries
         : stage === 'sandbox_startup'
           ? podRepo?.sandboxStartupRetries
-          : podRepo?.codexInterruptionRetries;
+          : stage === 'worker'
+            ? podRepo?.workerRetries
+            : podRepo?.codexInterruptionRetries;
     if (!ledger)
       throw new AutopodError('Task retry accounting unavailable', 'TASK_IDENTITY_UNAVAILABLE', 503);
     return ledger.state((request.params as { podId: string }).podId);
@@ -764,7 +766,7 @@ export function podRoutes(
         requestKey: z.string().min(1).max(200),
         reason: z.string().trim().min(1).max(4000),
         stage: z
-          .enum(['validation', 'sandbox_startup', 'codex_interruption'])
+          .enum(['validation', 'sandbox_startup', 'codex_interruption', 'worker'])
           .default('validation'),
       })
       .strict()
@@ -774,7 +776,9 @@ export function podRoutes(
         ? podRepo?.taskRetries
         : input.stage === 'sandbox_startup'
           ? podRepo?.sandboxStartupRetries
-          : podRepo?.codexInterruptionRetries;
+          : input.stage === 'worker'
+            ? podRepo?.workerRetries
+            : podRepo?.codexInterruptionRetries;
     if (!ledger)
       throw new AutopodError('Task retry accounting unavailable', 'TASK_IDENTITY_UNAVAILABLE', 503);
     const result = ledger.authorize(

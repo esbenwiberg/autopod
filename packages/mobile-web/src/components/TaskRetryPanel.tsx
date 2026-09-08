@@ -23,7 +23,9 @@ export function TaskRetryPanel({
       ? 'Codex interruption recovery'
       : stage === 'validation'
         ? 'Validation'
-        : 'Sandbox startup';
+        : stage === 'worker'
+          ? 'Worker'
+          : 'Sandbox startup';
   // biome-ignore lint/correctness/useExhaustiveDependencies: Pod revisions and explicit refresh reload durable admission state.
   useEffect(() => {
     let cancelled = false;
@@ -92,12 +94,18 @@ export function TaskRetryPanel({
   };
   const failed =
     state?.latest?.outcome != null &&
-    (state.latest.outcome !== 'pass' || stage === 'codex_interruption');
+    (stage === 'worker'
+      ? state.authorizationRequired === true
+      : state.latest.outcome !== 'pass' || stage === 'codex_interruption');
   const resumable = status === 'failed' || status === 'review_required';
   return (
     <section className="info-panel retry-panel">
       <h2>
-        {stage === 'codex_interruption' ? 'Codex recovery allowance' : `${label} retry budget`}
+        {stage === 'codex_interruption'
+          ? 'Codex recovery allowance'
+          : stage === 'worker'
+            ? 'Worker execution'
+            : `${label} retry budget`}
       </h2>
       {error && <p role="alert">{error}</p>}
       {message && <output>{message}</output>}
@@ -109,11 +117,14 @@ export function TaskRetryPanel({
               ? 'Codex interruption recoveries'
               : stage === 'validation'
                 ? 'validations'
-                : 'sandbox startups'}{' '}
+                : stage === 'worker'
+                  ? 'worker runs'
+                  : 'sandbox startups'}{' '}
             across this task.
           </p>
           <p>
             {stage !== 'codex_interruption' &&
+              stage !== 'worker' &&
               `${state.transientRetryCount} / ${state.backoffsMs?.length ?? 0} automatic transient retries · `}
             {state.measuredDurationMs} ms measured · {state.interruptedCount} interrupted with
             unknown duration.
@@ -123,6 +134,12 @@ export function TaskRetryPanel({
               One automatic inner recovery per logical task; further recoveries require recorded
               human authorization. Duration overlaps the enclosing agent run; usage is not counted
               again.
+            </p>
+          )}
+          {stage === 'worker' && (
+            <p>
+              Repeated worker authentication failures require a recorded human authorization. Worker
+              elapsed time overlaps phase measurements; usage is not counted again.
             </p>
           )}
           <p>Latest outcome: {state.latest?.outcome ?? 'none'} · partial telemetry.</p>
@@ -166,7 +183,9 @@ export function TaskRetryPanel({
                   ? 'task'
                   : stage === 'validation'
                     ? 'validation'
-                    : 'sandbox startup'}
+                    : stage === 'worker'
+                      ? 'worker'
+                      : 'sandbox startup'}
               </button>
             </>
           )}

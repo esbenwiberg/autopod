@@ -7,6 +7,7 @@ import { runMigrations } from '../db/migrate.js';
 import { createTestDb, insertTestProfile, logger } from '../test-utils/mock-helpers.js';
 import { createPodRepository } from './pod-repository.js';
 import { createTaskRetryLedger } from './task-retry-ledger.js';
+import { unavailableWorkerInputs, workerBindingHash } from './worker-retry-history.js';
 
 const identity = {
   source: 'a'.repeat(64),
@@ -375,6 +376,135 @@ it('consumes one task-wide Codex recovery allowance even after success and requi
     );
     expect(ledger.admit('rerun', 1, identity, binding, [])).toMatchObject({ retryKind: null });
     expect(repo.taskRetries?.state('fix').admissionCount).toBe(0);
+  } finally {
+    db.close();
+  }
+});
+
+it('retains legacy worker authentication and one scoped authorization across deletion and disk reopen', () => {
+  const { db, repo } = fixture();
+  const bound = { runtime: 'codex', model: 'model', providerAccountId: null };
+  const run = repo.taskExecutions?.beginRun('root', 1, 1, bound);
+  if (!run) throw new Error('Missing run');
+  repo.taskExecutions?.finishRun(run, 'failed', 'auth');
+  repo.delete('root');
+  const dir = mkdtempSync(join(tmpdir(), 'worker-auth-retry-'));
+  const file = join(dir, 'state.db');
+  writeFileSync(file, db.serialize());
+  db.close();
+  const reopened = new Database(file);
+  try {
+    reopened.pragma('foreign_keys = ON');
+    const next = createPodRepository(reopened);
+    const ledger = next.workerRetries;
+    if (!ledger) throw new Error('Missing worker retries');
+    const state = ledger.state('fix');
+    expect(state).toMatchObject({
+      stage: 'worker',
+      admissionCount: 1,
+      executedCount: 1,
+      latest: {
+        id: run,
+        outcome: 'nonretryable',
+        measuredDurationMs: null,
+        identity: unavailableWorkerInputs,
+      },
+    });
+    expect(ledger.state('fix')).toEqual(state);
+    expect(() =>
+      ledger.assertCanAdmit('fix', 1, unavailableWorkerInputs, workerBindingHash(bound), []),
+    ).toThrow(/authentication/);
+    const grant = ledger.authorize('fix', 'repair-auth', 'Credentials repaired; permit one retry', {
+      type: 'human',
+      userId: 'operator',
+    });
+    expect(() =>
+      ledger.assertCanAdmit(
+        'fix',
+        1,
+        unavailableWorkerInputs,
+        workerBindingHash({ ...bound, model: 'other' }),
+        [],
+      ),
+    ).toThrow(/binding changed/);
+    expect(ledger.state('fix').authorizations[0]?.usedByAttemptId).toBeNull();
+    const admitted = reopened.transaction(() => {
+      const id = next.taskExecutions?.beginRun('fix', 1, 1, bound);
+      if (!id) throw new Error('Missing run');
+      const value = ledger.admit(
+        'fix',
+        1,
+        unavailableWorkerInputs,
+        workerBindingHash(bound),
+        [],
+        id,
+      );
+      ledger.start(id);
+      return value;
+    })();
+    expect(admitted.retryKind).toBe('override');
+    expect(ledger.state('fix').authorizations).toContainEqual(
+      expect.objectContaining({ id: grant.id, usedByAttemptId: admitted.id }),
+    );
+    next.taskExecutions?.finishRun(admitted.id, 'failed', 'auth');
+    ledger.finish(admitted.id, 'nonretryable', 10);
+    expect(() =>
+      ledger.assertCanAdmit('fix', 1, unavailableWorkerInputs, workerBindingHash(bound), []),
+    ).toThrow(/authentication/);
+    expect(ledger.state('rerun').admissionCount).toBe(0);
+    expect(
+      reopened
+        .prepare('SELECT failure_category FROM task_history_task_agent_runs WHERE id = ?')
+        .get(run),
+    ).toEqual({ failure_category: 'auth' });
+    expect(reopened.pragma('integrity_check', { simple: true })).toBe('ok');
+    expect(reopened.pragma('foreign_key_check')).toEqual([]);
+  } finally {
+    reopened.close();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+it('rolls back a worker retry authorization use when initialization fails', () => {
+  const { db, repo } = fixture();
+  try {
+    const bound = { runtime: 'codex', model: 'model', providerAccountId: null };
+    const failed = repo.taskExecutions?.beginRun('root', 1, 1, bound);
+    if (!failed || !repo.workerRetries) throw new Error('Missing worker ledger');
+    repo.taskExecutions?.finishRun(failed, 'failed', 'auth');
+    const ledger = repo.workerRetries;
+    ledger.authorize('fix', 'initialization-fault', 'Credential repair checked', {
+      type: 'human',
+      userId: 'operator',
+    });
+    expect(() =>
+      db.transaction(() => {
+        const run = repo.taskExecutions?.beginRun('fix', 1, 1, bound);
+        ledger.admit('fix', 1, unavailableWorkerInputs, workerBindingHash(bound), [], run);
+        throw new Error('provider initialization failed');
+      })(),
+    ).toThrow('provider initialization failed');
+    expect(ledger.state('fix').admissionCount).toBe(1);
+    expect(ledger.state('fix').authorizations[0]?.usedByAttemptId).toBeNull();
+    expect(repo.taskExecutions?.snapshot('fix').agentRunCount).toBe(1);
+  } finally {
+    db.close();
+  }
+});
+
+it('does not claim legacy worker reservations executed without terminal execution evidence', () => {
+  const { db, repo } = fixture();
+  try {
+    const bound = { runtime: 'codex', model: 'model', providerAccountId: null };
+    const run = repo.taskExecutions?.beginRun('root', 1, 1, bound);
+    if (!run || !repo.workerRetries) throw new Error('Missing worker ledger');
+    repo.taskExecutions?.finishRun(run, 'failed', 'initialization');
+    expect(repo.workerRetries.state('fix')).toMatchObject({
+      admissionCount: 1,
+      executedCount: 0,
+      authorizationRequired: false,
+      latest: { outcome: 'unknown', startedAt: null, measuredDurationMs: null },
+    });
   } finally {
     db.close();
   }

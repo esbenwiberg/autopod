@@ -11,6 +11,7 @@ import {
 } from '@autopod/shared';
 import type Database from 'better-sqlite3';
 import { hasUnansweredDecision } from './decision-admission.js';
+import { isWorkerAuthenticationFailure, retainWorkerRetryHistory } from './worker-retry-history.js';
 
 export class TaskRetryBlockedError extends AutopodError {
   constructor(message: string, code = 'TASK_RETRY_RECONCILIATION_REQUIRED') {
@@ -25,6 +26,7 @@ export interface TaskRetryLedger {
     identity: TaskRetryIdentity,
     bindingHash: string,
     backoffs: number[],
+    workerRunId?: string,
   ): TaskRetryAttempt;
   assertCanAdmit(
     podId: string,
@@ -57,14 +59,21 @@ export function createTaskRetryLedger(
   db: Database.Database,
   stage: TaskRetryStage = 'validation',
 ): TaskRetryLedger {
-  if (stage !== 'validation' && stage !== 'sandbox_startup' && stage !== 'codex_interruption')
+  if (
+    stage !== 'validation' &&
+    stage !== 'sandbox_startup' &&
+    stage !== 'codex_interruption' &&
+    stage !== 'worker'
+  )
     throw new Error('Unknown retry stage');
   const label =
     stage === 'validation'
       ? 'validation'
       : stage === 'sandbox_startup'
         ? 'sandbox startup'
-        : 'Codex interruption recovery';
+        : stage === 'worker'
+          ? 'worker'
+          : 'Codex interruption recovery';
   const membership = (podId: string) => {
     const row = db
       .prepare(`SELECT e.task_id AS taskId, e.execution_id AS executionId, p.lifecycle_generation AS generation
@@ -116,15 +125,16 @@ export function createTaskRetryLedger(
   });
   const authorizationSelect =
     'SELECT a.*, u.attempt_id FROM task_retry_authorizations a LEFT JOIN task_retry_authorization_uses u ON u.authorization_id = a.id';
-  const state = (podId: string): TaskRetryState => {
+  const state = (podId: string, workerRunId?: string): TaskRetryState => {
     const { taskId } = membership(podId);
+    if (stage === 'worker') retainWorkerRetryHistory(db, taskId, workerRunId);
     const policy = db
       .prepare(`SELECT backoffs FROM task_retry_policies WHERE task_id = ? AND stage = '${stage}'`)
       .get(taskId) as { backoffs: string } | undefined;
     const counts = db
       .prepare(`SELECT COUNT(*) AS admissions, SUM(started_at IS NOT NULL) AS executions,
       SUM(retry_kind = 'transient') AS retries, SUM(COALESCE(measured_duration_ms, 0)) AS duration,
-      SUM(outcome = 'unknown') AS interrupted FROM task_retry_attempts WHERE task_id = ? AND stage = '${stage}'`)
+      SUM(outcome = 'unknown' AND ('${stage}' <> 'worker' OR EXISTS (SELECT 1 FROM retained_task_agent_runs r WHERE r.id = task_retry_attempts.id AND r.ended_at IS NULL))) AS interrupted FROM task_retry_attempts WHERE task_id = ? AND stage = '${stage}'`)
       .get(taskId) as Record<string, number | null>;
     const last = latest(taskId);
     const decisions = db
@@ -143,6 +153,9 @@ export function createTaskRetryLedger(
       interruptedCount: counts.interrupted ?? 0,
       latest: last ? attempt(last) : null,
       authorizations: decisions.map(authorization),
+      ...(stage === 'worker'
+        ? { authorizationRequired: last ? isWorkerAuthenticationFailure(db, last.id) : false }
+        : {}),
       telemetry: 'partial',
     };
   };
@@ -152,6 +165,7 @@ export function createTaskRetryLedger(
     identity: TaskRetryIdentity,
     bindingHash: string,
     backoffs: number[],
+    workerRunId?: string,
   ) => {
     const member = membership(podId);
     assertNoPendingDecision(podId);
@@ -167,7 +181,7 @@ export function createTaskRetryLedger(
       backoffs.some((value) => !Number.isSafeInteger(value) || value < 0 || value > 300000)
     )
       throw new TaskRetryBlockedError('Invalid task retry backoff policy');
-    const task = state(podId);
+    const task = state(podId, workerRunId);
     // Existing persisted recovery counters are lower bounds, not new telemetry.
     // Consume their known allowance when first introducing this stage's policy.
     const legacyUsed =
@@ -191,7 +205,11 @@ export function createTaskRetryLedger(
         `A ${label} admission is already active for this logical task`,
         'TASK_RETRY_IN_PROGRESS',
       );
-    if (prior && (prior.outcome !== 'pass' || stage === 'codex_interruption')) {
+    if (
+      prior &&
+      (prior.outcome !== 'pass' || stage === 'codex_interruption') &&
+      (stage !== 'worker' || isWorkerAuthenticationFailure(db, prior.id))
+    ) {
       if (prior.binding_hash !== bindingHash)
         throw new TaskRetryBlockedError(
           `${label} provider binding changed; explicitly reconcile the authorized provider before retrying`,
@@ -209,6 +227,10 @@ export function createTaskRetryLedger(
       if (grant) {
         retryKind = 'override';
         useAuthorization = grant.id as string;
+      } else if (stage === 'worker') {
+        throw new TaskRetryBlockedError(
+          'Unchanged or unverified worker authentication failure; reconcile credentials and record a human retry authorization before another worker execution.',
+        );
       } else if (stage === 'codex_interruption') {
         throw new TaskRetryBlockedError(
           'Automatic task-wide Codex interruption recovery allowance consumed; inspect retained session/results and record a human retry authorization before allowing another inner recovery.',
@@ -241,13 +263,26 @@ export function createTaskRetryLedger(
         identity: TaskRetryIdentity,
         bindingHash: string,
         backoffs: number[],
+        workerRunId?: string,
       ) => {
         const { member, prior, retryKind, useAuthorization, notBefore, effectiveBackoffs } =
-          evaluate(podId, generation, identity, bindingHash, backoffs);
+          evaluate(podId, generation, identity, bindingHash, backoffs, workerRunId);
+        if (
+          stage === 'worker' &&
+          (!workerRunId ||
+            !db
+              .prepare(
+                'SELECT 1 FROM task_agent_runs WHERE id = ? AND pod_id = ? AND generation = ? AND ended_at IS NULL',
+              )
+              .get(workerRunId, podId, generation))
+        )
+          throw new TaskRetryBlockedError(
+            'Worker admission requires its current durable execution claim',
+          );
         db.prepare(
           `INSERT OR IGNORE INTO task_retry_policies(task_id, stage, version, backoffs) VALUES (?, '${stage}', 1, ?)`,
         ).run(member.taskId, JSON.stringify(effectiveBackoffs));
-        const id = randomUUID();
+        const id = stage === 'worker' ? (workerRunId as string) : randomUUID();
         const now = new Date().toISOString();
         db.prepare(`INSERT INTO task_retry_attempts(id,task_id,pod_id,execution_id,generation,stage,identity,binding_hash,retry_kind,previous_failure_id,admitted_at,not_before)
         VALUES (?,?,?,?,?,'${stage}',?,?,?,?,?,?)`).run(
@@ -354,6 +389,7 @@ export function createTaskRetryLedger(
             400,
           );
         const member = membership(podId);
+        if (stage === 'worker') retainWorkerRetryHistory(db, member.taskId);
         const existing = db
           .prepare(`${authorizationSelect} WHERE a.request_key = ?`)
           .get(requestKey) as Record<string, unknown> | undefined;
@@ -373,6 +409,10 @@ export function createTaskRetryLedger(
           return recorded;
         }
         const failure = latest(member.taskId);
+        if (stage === 'worker' && !isWorkerAuthenticationFailure(db, failure?.id ?? null))
+          throw new TaskRetryBlockedError(
+            'A recorded worker authentication failure is required for this authorization',
+          );
         if (!failure?.ended_at || (failure.outcome === 'pass' && stage !== 'codex_interruption'))
           throw new TaskRetryBlockedError(
             `A settled ${label} attempt requiring another admission is required before authorizing one retry`,

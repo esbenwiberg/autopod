@@ -255,6 +255,7 @@ export interface PodRepository extends Partial<UnitOfWork> {
   taskRetries?: TaskRetryLedger;
   sandboxStartupRetries?: TaskRetryLedger;
   codexInterruptionRetries?: TaskRetryLedger;
+  workerRetries?: TaskRetryLedger;
   dispatchPreflight?: DispatchPreflightLedger;
   executionProvenance?: ExecutionProvenanceLedger;
   /** Defer external publication while an enclosing SQLite transaction is pending. */
@@ -727,6 +728,7 @@ export function createPodRepository(db: Database.Database): PodRepository {
     taskRetries: createTaskRetryLedger(db),
     sandboxStartupRetries: createTaskRetryLedger(db, 'sandbox_startup'),
     codexInterruptionRetries: createTaskRetryLedger(db, 'codex_interruption'),
+    workerRetries: createTaskRetryLedger(db, 'worker'),
     dispatchPreflight,
     executionProvenance: createExecutionProvenanceLedger(db),
     completionJournal,

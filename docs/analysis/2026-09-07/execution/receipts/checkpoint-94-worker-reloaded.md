@@ -1,0 +1,133 @@
+- main [ref=f1e3] [box=0,0,375,4785]:
+  - link "← Back" [ref=f1e4] [cursor=pointer] [box=16,16,49,25]:
+    - /url: "#/"
+  - generic [ref=f1e5] [box=16,49,343,18]:
+    - generic [ref=f1e6] [box=16,50,106,16]: local-fixture
+    - generic [ref=f1e7] [box=310,49,49,18]: failed
+  - heading "[Local fixture] Retry worker after authentication reconciliation" [level=1] [ref=f1e8] [box=16,77,343,46]
+  - paragraph [ref=f1e9] [box=16,136,343,15]: local-fixture · codex · fixture-model
+  - region "Recovery details" [ref=f1e10] [box=16,167,343,169]:
+    - heading "Recovery details" [level=2] [ref=f1e11] [box=16,187,343,28]
+    - paragraph [ref=f1e12] [box=16,263,343,57]: Authentication retry initialization failed before worker execution. Record a new permission before another attempt.
+  - generic [ref=f1e13] [box=16,352,343,1082]:
+    - heading "Dispatch preflight" [level=2] [ref=f1e14] [box=33,369,309,28]
+    - paragraph [ref=f1e15] [box=33,409,309,19]: review_required · 2026-09-07T15:00:00Z
+    - paragraph [ref=f1e16] [box=33,440,309,19]: github.com/example/repo · main
+    - paragraph [ref=f1e17] [box=33,471,309,38]:
+      - text: "Fresh base:"
+      - code [ref=f1e18] [box=33,473,302,37]: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+    - paragraph [ref=f1e19] [box=33,521,309,38]:
+      - text: "Equivalent work:"
+      - link "prior-fixture" [ref=f1e20] [cursor=pointer] [box=156,521,86,19]:
+        - /url: "#/pod/prior-fixture"
+      - text: · validated · dispatch_receipt
+    - heading "Execution environment" [level=3] [ref=f1e21] [box=33,589,309,22]
+    - paragraph [ref=f1e22] [box=33,642,309,38]: validation preflight blocked · generation 1 · 2026-09-07T16:30:00Z
+    - paragraph [ref=f1e23] [box=33,692,309,38]: "Configured worker: codex CLI 0.144.4 · fixture-model"
+    - paragraph [ref=f1e24] [box=33,742,309,38]: "Provider: fixture-provider · account: not recorded"
+    - paragraph [ref=f1e25] [box=33,792,309,19]: "Daemon: unverified"
+    - paragraph [ref=f1e26] [box=33,823,309,19]:
+      - text: "Image:"
+      - code [ref=f1e27] [box=86,825,86,18]: unverified
+    - paragraph [ref=f1e28] [box=33,854,309,19]:
+      - text: "Validation implementation:"
+      - code [ref=f1e29] [box=229,856,86,18]: unverified
+    - paragraph [ref=f1e30] [box=33,885,309,38]:
+      - text: "Contract:"
+      - code [ref=f1e31] [box=33,887,308,37]: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+    - paragraph [ref=f1e32] [box=33,935,309,38]: "Memory: unverified bytes · CPU: unverified"
+    - paragraph [ref=f1e33] [box=33,985,309,19]: "fact:compile: dotnet · missing"
+    - paragraph [ref=f1e34] [box=33,1016,309,57]: Required launcher dotnet is missing. Reconcile the image or declared command before validation.
+    - paragraph [ref=f1e35] [box=33,1085,309,19]: Actual image digest is unverified.
+    - paragraph [ref=f1e36] [box=33,1116,309,19]: Effective memory capacity is unverified.
+    - paragraph [ref=f1e37] [box=33,1147,309,95]: To intentionally repeat this request, provide a reason. This creates a distinct task and may run a coding agent. Fresh contract, provider, and environment checks still apply.
+    - generic [ref=f1e38] [box=33,1254,309,107]:
+      - text: Reason for intentional rerun
+      - textbox "Reason for intentional rerun" [ref=f1e39] [box=33,1281,309,80]
+    - button "Create intentional rerun" [disabled] [ref=f1e40] [box=33,1373,309,44]
+  - generic [ref=f1e41] [box=16,1450,343,268]:
+    - heading "Validation retry budget" [level=2] [ref=f1e42] [box=33,1467,309,28]
+    - paragraph [ref=f1e43] [box=33,1507,309,38]: 0 executed / 0 admitted validations across this task.
+    - paragraph [ref=f1e44] [box=33,1557,309,57]: 0 / 0 automatic transient retries · 0 ms measured · 0 interrupted with unknown duration.
+    - paragraph [ref=f1e45] [box=33,1626,309,19]: "Latest outcome: none · partial telemetry."
+    - button "Refresh retry accounting" [ref=f1e46] [box=33,1657,309,44]
+  - generic [ref=f1e47] [box=16,1734,343,356]:
+    - heading "Codex recovery allowance" [level=2] [ref=f1e48] [box=33,1751,309,28]
+    - paragraph [ref=f1e49] [box=33,1791,309,38]: 0 executed / 0 admitted Codex interruption recoveries across this task.
+    - paragraph [ref=f1e50] [box=33,1841,309,38]: 0 ms measured · 0 interrupted with unknown duration.
+    - paragraph [ref=f1e51] [box=33,1891,309,95]: One automatic inner recovery per logical task; further recoveries require recorded human authorization. Duration overlaps the enclosing agent run; usage is not counted again.
+    - paragraph [ref=f1e52] [box=33,1998,309,19]: "Latest outcome: none · partial telemetry."
+    - button "Refresh retry accounting" [ref=f1e53] [box=33,2029,309,44]
+  - generic [ref=f1e54] [box=16,2106,343,675]:
+    - heading "Worker execution" [level=2] [ref=f1e55] [box=33,2123,309,28]
+    - paragraph [ref=f1e56] [box=33,2163,309,38]: 1 executed / 2 admitted worker runs across this task.
+    - paragraph [ref=f1e57] [box=33,2213,309,38]: 150 ms measured · 0 interrupted with unknown duration.
+    - paragraph [ref=f1e58] [box=33,2263,309,95]: Repeated worker authentication failures require a recorded human authorization. Worker elapsed time overlaps phase measurements; usage is not counted again.
+    - paragraph [ref=f1e59] [box=33,2370,309,38]: "Latest outcome: unknown · partial telemetry."
+    - paragraph [ref=f1e60] [box=33,2420,309,57]: "Available for latest failure: Local fixture: credentials and failed initialization inspected; permit one worker retry."
+    - generic [ref=f1e61] [box=33,2489,309,107]:
+      - text: Reason for one extra retry
+      - textbox "Reason for one extra retry" [ref=f1e62] [box=33,2516,309,80]
+    - button "Record one retry authorization" [disabled] [ref=f1e63] [box=33,2608,309,44]
+    - button "Resume worker" [ref=f1e64] [box=33,2664,309,44]
+    - button "Refresh retry accounting" [ref=f1e65] [box=33,2720,309,44]
+  - generic [ref=f1e66] [box=16,2797,343,1261]:
+    - heading "Task accounting" [level=2] [ref=f1e67] [box=16,2817,343,28]
+    - paragraph [ref=f1e68] [box=16,2893,343,19]: "Logical task: task:local-original"
+    - paragraph [ref=f1e69] [box=16,2956,343,19]: "Execution: execution:local-fixture"
+    - paragraph [ref=f1e70] [box=16,3019,343,38]: 2 pods · 3 recorded agent runs · 4 provider attempts · 5 validations
+    - paragraph [ref=f1e71] [box=16,3101,343,19]: 1 PR receipts · 1 unresolved of 2 intents
+    - paragraph [ref=f1e72] [box=16,3164,343,38]: Durable ledger only; historical PR URLs are not reconstructed receipts.
+    - paragraph [ref=f1e73] [box=16,3246,343,19]: PR disposition observations unavailable.
+    - paragraph [ref=f1e74] [box=16,3309,343,19]: Source-bound merge evidence unavailable.
+    - paragraph [ref=f1e75] [box=16,3372,343,19]: Current provider status unverified.
+    - paragraph [ref=f1e76] [box=16,3435,343,19]: "Recorded tokens: 100 / 100"
+    - paragraph [ref=f1e77] [box=16,3498,343,38]: "Stored task cost subtotal: $1.2500 · partial telemetry"
+    - paragraph [ref=f1e78] [box=16,3580,343,38]: Billing unverified; stored amounts can include estimates.
+    - paragraph [ref=f1e79] [box=16,3662,343,57]: "Known estimates: $0.5000 · 1 identified phases with unavailable cost · 1 pods with conflicting attribution"
+    - paragraph [ref=f1e80] [box=16,3763,343,38]: "local-original: Stored phase costs conflict; no proportional allocation applied."
+    - paragraph [ref=f1e81] [box=16,3845,343,19]: 2 additional cost diagnostics omitted.
+    - paragraph [ref=f1e82] [box=16,3908,343,38]: Recorded task tokens have reached the configured limit.
+    - paragraph [ref=f1e83] [box=16,3990,343,19]: Infrastructure cost unavailable
+    - button "Refresh task accounting" [ref=f1e84] [box=16,4037,343,22]
+  - generic [ref=f1e85] [box=16,4074,343,273]:
+    - heading "Validation results" [level=2] [ref=f1e86] [box=16,4074,343,18]
+    - article [ref=f1e88] [box=16,4100,343,215]:
+      - generic [ref=f1e89] [box=31,4113,312,33]:
+        - generic [ref=f1e90] [box=31,4113,248,33]:
+          - generic [ref=f1e91] [box=31,4113,248,17]: "Validation #12"
+          - generic [ref=f1e92] [box=31,4132,248,14]: Sep 7, 12:10 PM · 100 ms · Attempt 1, cycle 2
+        - generic [ref=f1e93] [box=300,4113,44,18]: pass
+      - list [ref=f1e94] [box=31,4155,312,147]:
+        - listitem [ref=f1e95] [box=31,4155,312,18]:
+          - generic [ref=f1e96] [box=31,4156,96,16]: build
+          - generic [ref=f1e97] [box=135,4155,44,18]: pass
+        - listitem [ref=f1e98] [box=31,4178,312,18]:
+          - generic [ref=f1e99] [box=31,4179,96,16]: health
+          - generic [ref=f1e100] [box=135,4178,41,18]: skip
+        - listitem [ref=f1e101] [box=31,4201,312,55]:
+          - generic [ref=f1e102] [box=31,4202,96,16]: test
+          - generic [ref=f1e103] [box=135,4201,44,18]: pass
+          - generic [ref=f1e104] [box=31,4227,312,29]: Reused local-evidence-1; executed 2026-09-07T09:00:00Z
+        - listitem [ref=f1e105] [box=31,4261,312,41]:
+          - generic [ref=f1e106] [box=31,4262,96,16]: pages (0)
+          - generic [ref=f1e107] [box=135,4261,41,18]: skip
+          - generic [ref=f1e108] [box=31,4288,312,15]: No page checks executed
+    - button "Show previous 1 attempt" [ref=f1e109] [cursor=pointer] [box=16,4325,160,22]
+  - generic [ref=f1e110] [box=16,4363,343,172]:
+    - button "Resume" [ref=f1e111] [cursor=pointer] [box=16,4363,170,37]
+    - button "Rework" [ref=f1e112] [cursor=pointer] [box=194,4363,165,37]
+    - button "Rebase + revalidate" [ref=f1e113] [cursor=pointer] [box=16,4408,343,37]
+    - button "Extend PR fixes (+3)" [ref=f1e114] [cursor=pointer] [box=16,4453,204,37]
+    - button "Spawn fix" [ref=f1e115] [cursor=pointer] [box=228,4453,131,37]
+    - button "Force complete" [ref=f1e116] [cursor=pointer] [box=16,4498,210,37]
+    - button "Kill" [ref=f1e117] [cursor=pointer] [box=234,4498,125,37]
+  - region "Task details" [ref=f1e118] [box=16,4551,343,113]:
+    - article [ref=f1e119] [box=16,4551,343,113]:
+      - generic [ref=f1e121] [box=20,4552,338,111]:
+        - generic [ref=f1e122] [box=34,4564,311,14]: Task
+        - heading "Task" [level=2] [ref=f1e123] [box=34,4583,311,20]
+        - paragraph [ref=f1e125] [box=34,4610,311,42]: "[Local fixture] Retry worker after authentication reconciliation"
+  - generic [ref=f1e126] [box=16,4685,343,53]:
+    - heading "Recent activity" [level=2] [ref=f1e127] [box=16,4685,343,18]
+    - paragraph [ref=f1e128] [box=16,4718,343,19]: No activity yet.

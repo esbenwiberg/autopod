@@ -158,6 +158,7 @@ struct WorkTab: View {
             }
             TaskRetryCard(podId: pod.id, status: pod.status.rawValue, actions: actions, stage: "sandbox_startup")
             TaskRetryCard(podId: pod.id, status: pod.status.rawValue, actions: actions, stage: "codex_interruption")
+            TaskRetryCard(podId: pod.id, status: pod.status.rawValue, actions: actions, stage: "worker")
             if let cost {
                 SessionCostCard(breakdown: cost)
             } else {

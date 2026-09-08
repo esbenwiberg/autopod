@@ -266,6 +266,33 @@ if (uncollectedGuidanceFixture) {
     finalization: { ...pod.finalization, phase: 'awaiting_human', pendingDecisionId: null },
   };
 }
+const workerAuthFixture = process.env.FIXTURE_MODE === 'worker-auth';
+if (workerAuthFixture) {
+  pod = {
+    ...pod,
+    runtime: 'codex',
+    status: 'failed',
+    executionTarget: 'local',
+    pendingEscalation: null,
+    recordDiagnostics: [],
+    finalization: null,
+    lastValidationResult: null,
+    task: '[Local fixture] Retry worker after authentication reconciliation',
+    failureReason:
+      'Authentication retry initialization failed before worker execution. Record a new permission before another attempt.',
+  };
+  Object.assign(retryState, {
+    stage: 'worker',
+    backoffsMs: [],
+    admissionCount: 2,
+    executedCount: 1,
+    transientRetryCount: 0,
+    measuredDurationMs: 150,
+    interruptedCount: 0,
+    authorizationRequired: true,
+    latest: { id: 'local-unstarted-retry', outcome: 'unknown', startedAt: null },
+  });
+}
 const codexRecoveryFixture = process.env.FIXTURE_MODE === 'codex-recovery';
 if (codexRecoveryFixture) {
   pod = {
@@ -501,7 +528,8 @@ const server = createServer(async (req, res) => {
     const stage = new URL(req.url, 'http://localhost').searchParams.get('stage') ?? 'validation';
     if (
       (startupRetryFixture && stage === 'validation') ||
-      (codexRecoveryFixture && stage !== 'codex_interruption')
+      (codexRecoveryFixture && stage !== 'codex_interruption') ||
+      (workerAuthFixture && stage !== 'worker')
     )
       return json({
         ...retryState,

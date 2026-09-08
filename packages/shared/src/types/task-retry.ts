@@ -8,7 +8,7 @@ export interface TaskRetryIdentity {
   environment: string | null;
   implementation: string | null;
 }
-export type TaskRetryStage = 'validation' | 'sandbox_startup' | 'codex_interruption';
+export type TaskRetryStage = 'validation' | 'sandbox_startup' | 'codex_interruption' | 'worker';
 export type TaskRetryOutcome = 'pass' | 'nonretryable' | 'transient' | 'cancelled' | 'unknown';
 export interface TaskRetryAttempt {
   id: string;
@@ -47,5 +47,7 @@ export interface TaskRetryState {
   interruptedCount: number;
   latest: TaskRetryAttempt | null;
   authorizations: TaskRetryAuthorization[];
+  /** Worker retry permission is still required, including unstarted retries of that failure. */
+  authorizationRequired?: boolean;
   telemetry: 'partial';
 }

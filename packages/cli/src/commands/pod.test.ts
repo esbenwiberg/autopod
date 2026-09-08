@@ -636,7 +636,7 @@ it.each([true, false])(
   },
 );
 
-it.each(['validation', 'sandbox_startup', 'codex_interruption'] as const)(
+it.each(['validation', 'sandbox_startup', 'codex_interruption', 'worker'] as const)(
   'drives %s retry inspection, idempotent authorization and separate Resume through the real HTTP client',
   async (stage) => {
     const calls: Array<{ path: string; method: string; body: string }> = [];
