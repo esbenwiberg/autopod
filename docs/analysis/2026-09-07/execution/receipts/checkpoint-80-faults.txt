@@ -1,0 +1,47 @@
+
+ RUN  v4.1.11 /private/tmp/autopod-durable-execution/packages/daemon
+
+ ❯ src/e2e.test.ts (14 tests | 2 failed) 1467ms
+     × retains uncollected guidance across preservation-failure 80ms
+     × retains uncollected guidance across replacement-lifecycle 64ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 2 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/e2e.test.ts > E2E: escalation flow > retains uncollected guidance across preservation-failure
+AssertionError: expected 'Worker settled with uncollected human…' to contain 'Workspace preservation failed'
+
+Expected: "Workspace preservation failed"
+Received: "Worker settled with uncollected human guidance. Use Rework to collect check_messages and apply the saved guidance before validation or delivery. Original resources and guidance retained."
+
+ ❯ src/e2e.test.ts:234:39
+    232|       );
+    233|       if (fault === 'preservation-failure') {
+    234|         expect(current.failureReason).toContain('Workspace preservatio…
+       |                                       ^
+    235|         expect(current.finalization?.sourcePreservedAt).toBeNull();
+    236|       }
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/2]⎯
+
+ FAIL  src/e2e.test.ts > E2E: escalation flow > retains uncollected guidance across replacement-lifecycle
+AssertionError: expected 'failed' to be 'running' // Object.is equality
+
+Expected: "running"
+Received: "failed"
+
+ ❯ src/e2e.test.ts:229:30
+    227|       await manager.handleCompletion(pod.id);
+    228|       const current = manager.getSession(pod.id);
+    229|       expect(current.status).toBe(fault === 'replacement-lifecycle' ? …
+       |                              ^
+    230|       expect(current.containerId).toBe(
+    231|         fault === 'replacement-lifecycle' ? 'replacement-container' : …
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/2]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  2 failed | 12 passed (14)
+   Start at  15:53:20
+   Duration  2.35s (transform 483ms, setup 0ms, import 785ms, tests 1.47s, environment 0ms)
+

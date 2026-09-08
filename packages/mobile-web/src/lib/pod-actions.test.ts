@@ -35,6 +35,7 @@ describe('availableActions', () => {
   it('failed pods expose the full recovery set', () => {
     expect(availableActions('failed').map((a) => a.kind)).toEqual([
       'retry',
+      'rework',
       'update_from_base',
       'extend_pr_attempts',
       'spawn_fix',
@@ -107,6 +108,17 @@ describe('runAction', () => {
     await runAction('pod-1', 'pause');
     expect(spy.mock.calls[0]?.[0]).toBe('/pods/pod-1/pause');
     expect((spy.mock.calls[0]?.[1] as RequestInit).method).toBe('POST');
+  });
+
+  it('Rework posts once to the existing terminal rework endpoint', async () => {
+    const spy = mockFetch();
+    await runAction('pod-1', 'rework');
+    expect(spy).toHaveBeenCalledTimes(1);
+    expect(spy.mock.calls[0]?.[0]).toBe('/pods/pod-1/validate');
+    expect(spy.mock.calls[0]?.[1]?.method).toBe('POST');
+    expect(
+      availableActions('failed').find((action) => action.kind === 'rework')?.optimistic,
+    ).toBeNull();
   });
 
   it('kill posts to /pods/:id/kill', async () => {

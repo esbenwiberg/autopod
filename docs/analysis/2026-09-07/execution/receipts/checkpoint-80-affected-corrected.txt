@@ -1,0 +1,29 @@
+
+ RUN  v4.1.11 /private/tmp/autopod-durable-execution/packages/daemon
+
+ ❯ src/e2e.test.ts (14 tests | 2 failed) 1234ms
+     × retains uncollected guidance across preservation-failure 48ms
+     × retains uncollected guidance across replacement-lifecycle 42ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 2 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/e2e.test.ts > E2E: escalation flow > retains uncollected guidance across preservation-failure
+ FAIL  src/e2e.test.ts > E2E: escalation flow > retains uncollected guidance across replacement-lifecycle
+AutopodError: Sandbox execution for profile "test-profile" requires a warm image. Run `ap profile warm test-profile --rebuild` with ACR_REGISTRY_URL configured first.
+ ❯ Object.createSession src/pods/pod-manager.ts:7854:17
+    7852|       if (executionTarget === 'sandbox') {
+    7853|         if (!profile.warmImageTag) {
+    7854|           throw new AutopodError(
+       |                 ^
+    7855|             `Sandbox execution for profile "${profile.name}" requires …
+    7856|             'SANDBOX_WARM_IMAGE_REQUIRED',
+ ❯ src/e2e.test.ts:210:27
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/2]⎯
+
+
+ Test Files  1 failed | 2 passed (3)
+      Tests  2 failed | 611 passed (613)
+   Start at  15:55:14
+   Duration  32.62s (transform 1.91s, setup 0ms, import 2.97s, tests 32.98s, environment 0ms)
+

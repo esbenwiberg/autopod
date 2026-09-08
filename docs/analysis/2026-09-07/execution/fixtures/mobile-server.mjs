@@ -238,6 +238,19 @@ if (startupRetryFixture) {
   retryState.interruptedCount = 0;
   retryState.latest = { id: 'local-startup-failure', outcome: 'transient' };
 }
+const uncollectedGuidanceFixture = process.env.FIXTURE_MODE === 'uncollected-guidance';
+if (uncollectedGuidanceFixture) {
+  pod = {
+    ...pod,
+    status: 'failed',
+    pendingEscalation: null,
+    lastValidationResult: null,
+    task: '[Local fixture] Apply saved human guidance',
+    failureReason:
+      'Worker settled with uncollected human guidance. Use Rework to collect check_messages and apply the saved guidance before validation or delivery. Original resources and guidance retained.',
+    finalization: { ...pod.finalization, phase: 'awaiting_human', pendingDecisionId: null },
+  };
+}
 const codexRecoveryFixture = process.env.FIXTURE_MODE === 'codex-recovery';
 if (codexRecoveryFixture) {
   pod = {
@@ -509,6 +522,21 @@ const server = createServer(async (req, res) => {
       }),
     );
     return json(grant);
+  }
+  if (
+    uncollectedGuidanceFixture &&
+    req.method === 'POST' &&
+    pathname === '/pods/local-fixture/validate'
+  ) {
+    pod = { ...pod, status: 'queued', failureReason: null };
+    console.log(
+      JSON.stringify({
+        scope: 'local fixture only',
+        action: 'rework-uncollected-guidance',
+        endpoint: pathname,
+      }),
+    );
+    return json({ ok: true, accepted: true });
   }
   if (req.method === 'POST' && pathname === '/pods/local-fixture/resume') {
     if (legacyDeliveryFixture) {

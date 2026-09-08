@@ -1,0 +1,17 @@
+{
+  "scope": "local built mobile fixture only; backend E2E is separate evidence",
+  "viewport": {
+    "width": 390,
+    "height": 844
+  },
+  "initialStatus": "failed",
+  "action": "Rework",
+  "postCount": 1,
+  "endpoint": "/pods/local-fixture/validate",
+  "refreshedStatus": "queued",
+  "websocketEvents": 0,
+  "screenshotInspected": true,
+  "fixtureExitCode": 130,
+  "browserClosed": true,
+  "nativeInteraction": "unverified"
+}

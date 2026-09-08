@@ -14,6 +14,7 @@ export interface NudgeRepository {
   consumeNext(podId: string): { hasMessage: boolean; message?: string };
   consumePending(podId: string): string[];
   listPending(podId: string): NudgeMessage[];
+  hasPending(podId: string): boolean;
 }
 
 export function createNudgeRepository(db: Database.Database): NudgeRepository {
@@ -58,6 +59,14 @@ export function createNudgeRepository(db: Database.Database): NudgeRepository {
         ).run(new Date().toISOString(), ...ids);
         return rows.map((row) => row.message);
       })();
+    },
+
+    hasPending(podId: string): boolean {
+      return Boolean(
+        db
+          .prepare('SELECT 1 FROM nudge_messages WHERE pod_id = ? AND consumed = 0 LIMIT 1')
+          .get(podId),
+      );
     },
 
     listPending(podId: string): NudgeMessage[] {

@@ -37,6 +37,7 @@ import {
   mockSourceSnapshot,
 } from '../test-utils/mock-helpers.js';
 import { runToolUseReview } from '../validation/review-tool-runner.js';
+import { createNudgeRepository } from './nudge-repository.js';
 import { createSessionBridge } from './pod-bridge-impl.js';
 
 // Mock child_process so we can control deriveBareRepoPath and recovery-context git calls
@@ -950,6 +951,7 @@ function createTestContext(
     }),
     podRepo,
     escalationRepo,
+    nudgeRepo: createNudgeRepository(db),
     fixFeedbackRepo,
     pendingOverrideRepo,
     eventRepo,

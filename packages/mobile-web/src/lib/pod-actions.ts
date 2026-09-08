@@ -12,6 +12,7 @@ export type ActionKind =
   | 'pause'
   | 'resume'
   | 'retry'
+  | 'rework'
   | 'kill'
   | 'nudge'
   | 'approve'
@@ -123,6 +124,14 @@ const RESUME_FAILED: ActionDef = {
   promptsForText: false,
 };
 
+const REWORK: ActionDef = {
+  kind: 'rework',
+  label: 'Rework',
+  tone: 'warn',
+  optimistic: null,
+  promptsForText: false,
+};
+
 const ACTIONS_BY_STATUS: Partial<Record<PodStatus, ActionDef[]>> = {
   running: [PAUSE, NUDGE, KILL],
   paused: [RESUME, NUDGE, KILL],
@@ -133,7 +142,15 @@ const ACTIONS_BY_STATUS: Partial<Record<PodStatus, ActionDef[]>> = {
   validating: [KILL],
   validated: [APPROVE, REJECT, KILL],
   review_required: [APPROVE, REJECT, EXTEND_ATTEMPTS, SPAWN_FIX, KILL],
-  failed: [RESUME_FAILED, UPDATE_FROM_BASE, EXTEND_PR_ATTEMPTS, SPAWN_FIX, FORCE_COMPLETE, KILL],
+  failed: [
+    RESUME_FAILED,
+    REWORK,
+    UPDATE_FROM_BASE,
+    EXTEND_PR_ATTEMPTS,
+    SPAWN_FIX,
+    FORCE_COMPLETE,
+    KILL,
+  ],
 };
 
 export function availableActions(
@@ -162,6 +179,9 @@ export async function runAction(podId: string, kind: ActionKind, message?: strin
       return;
     case 'kill':
       await apiFetch(`/pods/${podId}/kill`, { method: 'POST' });
+      return;
+    case 'rework':
+      await apiFetch(`/pods/${podId}/validate`, { method: 'POST' });
       return;
     case 'retry':
       await apiFetch(`/pods/${podId}/resume`, { method: 'POST' });

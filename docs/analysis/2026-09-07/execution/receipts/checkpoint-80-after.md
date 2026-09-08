@@ -1,0 +1,135 @@
+- main [ref=e3]:
+  - link "← Back" [ref=e4] [cursor=pointer]:
+    - /url: "#/"
+  - generic [ref=e5]:
+    - generic [ref=e6]: local-fixture
+    - generic [ref=e7]: failed
+  - heading "[Local fixture] Apply saved human guidance" [level=1] [ref=e8]
+  - paragraph [ref=e9]: local-fixture · codex · fixture-model
+  - region "Recovery details" [ref=e10]:
+    - heading "Recovery details" [level=2] [ref=e11]
+    - paragraph [ref=e12]: Worker settled with uncollected human guidance. Use Rework to collect check_messages and apply the saved guidance before validation or delivery. Original resources and guidance retained.
+  - alert [ref=e13]: "Saved evidence unavailable: lastValidationResult (invalid_json). Resolve the record before relying on it for an action."
+  - generic [ref=e14]:
+    - heading "Worker settlement" [level=2] [ref=e15]
+    - paragraph [ref=e16]: "Agent settled at 2026-09-07T10:09:00Z. Source preservation: 2026-09-07T10:10:00Z."
+    - paragraph [ref=e17]: "Next stage: awaiting_human."
+  - generic [ref=e18]:
+    - heading "Dispatch preflight" [level=2] [ref=e19]
+    - paragraph [ref=e20]: review_required · 2026-09-07T15:00:00Z
+    - paragraph [ref=e21]: github.com/example/repo · main
+    - paragraph [ref=e22]:
+      - text: "Fresh base:"
+      - code [ref=e23]: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+    - paragraph [ref=e24]:
+      - text: "Equivalent work:"
+      - link "prior-fixture" [ref=e25] [cursor=pointer]:
+        - /url: "#/pod/prior-fixture"
+      - text: · validated · dispatch_receipt
+    - heading "Execution environment" [level=3] [ref=e26]
+    - paragraph [ref=e27]: validation preflight blocked · generation 1 · 2026-09-07T16:30:00Z
+    - paragraph [ref=e28]: "Configured worker: codex CLI 0.144.4 · fixture-model"
+    - paragraph [ref=e29]: "Provider: fixture-provider · account: not recorded"
+    - paragraph [ref=e30]: "Daemon: unverified"
+    - paragraph [ref=e31]:
+      - text: "Image:"
+      - code [ref=e32]: unverified
+    - paragraph [ref=e33]:
+      - text: "Validation implementation:"
+      - code [ref=e34]: unverified
+    - paragraph [ref=e35]:
+      - text: "Contract:"
+      - code [ref=e36]: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+    - paragraph [ref=e37]: "Memory: unverified bytes · CPU: unverified"
+    - paragraph [ref=e38]: "fact:compile: dotnet · missing"
+    - paragraph [ref=e39]: Required launcher dotnet is missing. Reconcile the image or declared command before validation.
+    - paragraph [ref=e40]: Actual image digest is unverified.
+    - paragraph [ref=e41]: Effective memory capacity is unverified.
+    - paragraph [ref=e42]: To intentionally repeat this request, provide a reason. This creates a distinct task and may run a coding agent. Fresh contract, provider, and environment checks still apply.
+    - generic [ref=e43]:
+      - text: Reason for intentional rerun
+      - textbox "Reason for intentional rerun" [ref=e44]
+    - button "Create intentional rerun" [disabled] [ref=e45]
+  - generic [ref=e46]:
+    - heading "Validation retry budget" [level=2] [ref=e47]
+    - paragraph [ref=e48]: 3 executed / 4 admitted validations across this task.
+    - paragraph [ref=e49]: 2 / 2 automatic transient retries · 1875 ms measured · 1 interrupted with unknown duration.
+    - paragraph [ref=e50]: "Latest outcome: unknown · partial telemetry."
+    - generic [ref=e51]:
+      - text: Reason for one extra retry
+      - textbox "Reason for one extra retry" [ref=e52]
+    - button "Record one retry authorization" [disabled] [ref=e53]
+    - button "Resume validation" [ref=e54]
+    - button "Refresh retry accounting" [ref=e55]
+  - generic [ref=e56]:
+    - heading "Codex recovery allowance" [level=2] [ref=e57]
+    - paragraph [ref=e58]: 3 executed / 4 admitted Codex interruption recoveries across this task.
+    - paragraph [ref=e59]: 1875 ms measured · 1 interrupted with unknown duration.
+    - paragraph [ref=e60]: One automatic inner recovery per logical task; further recoveries require recorded human authorization. Duration overlaps the enclosing agent run; usage is not counted again.
+    - paragraph [ref=e61]: "Latest outcome: unknown · partial telemetry."
+    - generic [ref=e62]:
+      - text: Reason for one extra retry
+      - textbox "Reason for one extra retry" [ref=e63]
+    - button "Record one retry authorization" [disabled] [ref=e64]
+    - button "Resume task" [ref=e65]
+    - button "Refresh retry accounting" [ref=e66]
+  - generic [ref=e67]:
+    - heading "Task accounting" [level=2] [ref=e68]
+    - paragraph [ref=e69]: "Logical task: task:local-original"
+    - paragraph [ref=e70]: "Execution: execution:local-fixture"
+    - paragraph [ref=e71]: 2 pods · 3 recorded agent runs · 4 provider attempts · 5 validations
+    - paragraph [ref=e72]: 1 PR receipts · 1 unresolved of 2 intents
+    - paragraph [ref=e73]: Durable ledger only; historical PR URLs are not reconstructed receipts.
+    - paragraph [ref=e74]: PR disposition observations unavailable.
+    - paragraph [ref=e75]: Source-bound merge evidence unavailable.
+    - paragraph [ref=e76]: Current provider status unverified.
+    - paragraph [ref=e77]: "Recorded tokens: 100 / 100"
+    - paragraph [ref=e78]: "Stored task cost subtotal: $1.2500 · partial telemetry"
+    - paragraph [ref=e79]: Billing unverified; stored amounts can include estimates.
+    - paragraph [ref=e80]: "Known estimates: $0.5000 · 1 identified phases with unavailable cost · 1 pods with conflicting attribution"
+    - paragraph [ref=e81]: "local-original: Stored phase costs conflict; no proportional allocation applied."
+    - paragraph [ref=e82]: 2 additional cost diagnostics omitted.
+    - paragraph [ref=e83]: Recorded task tokens have reached the configured limit.
+    - paragraph [ref=e84]: Infrastructure cost unavailable
+    - button "Refresh task accounting" [ref=e85]
+  - generic [ref=e86]:
+    - heading "Validation results" [level=2] [ref=e87]
+    - article [ref=e89]:
+      - generic [ref=e90]:
+        - generic [ref=e91]:
+          - generic [ref=e92]: "Validation #12"
+          - generic [ref=e93]: Sep 7, 12:10 PM · 100 ms · Attempt 1, cycle 2
+        - generic [ref=e94]: pass
+      - list [ref=e95]:
+        - listitem [ref=e96]:
+          - generic [ref=e97]: build
+          - generic [ref=e98]: pass
+        - listitem [ref=e99]:
+          - generic [ref=e100]: health
+          - generic [ref=e101]: skip
+        - listitem [ref=e102]:
+          - generic [ref=e103]: test
+          - generic [ref=e104]: pass
+          - generic [ref=e105]: Reused local-evidence-1; executed 2026-09-07T09:00:00Z
+        - listitem [ref=e106]:
+          - generic [ref=e107]: pages (0)
+          - generic [ref=e108]: skip
+          - generic [ref=e109]: No page checks executed
+    - button "Show previous 1 attempt" [ref=e110] [cursor=pointer]
+  - generic [ref=e111]:
+    - button "Resume" [ref=e112] [cursor=pointer]
+    - button "Rework" [ref=e113] [cursor=pointer]
+    - button "Rebase + revalidate" [ref=e114] [cursor=pointer]
+    - button "Extend PR fixes (+3)" [ref=e115] [cursor=pointer]
+    - button "Spawn fix" [ref=e116] [cursor=pointer]
+    - button "Force complete" [ref=e117] [cursor=pointer]
+    - button "Kill" [ref=e118] [cursor=pointer]
+  - region "Task details" [ref=e119]:
+    - article [ref=e120]:
+      - generic [ref=e122]:
+        - generic [ref=e123]: Task
+        - heading "Task" [level=2] [ref=e124]
+        - paragraph [ref=e126]: "[Local fixture] Apply saved human guidance"
+  - generic [ref=e127]:
+    - heading "Recent activity" [level=2] [ref=e128]
+    - paragraph [ref=e129]: No activity yet.

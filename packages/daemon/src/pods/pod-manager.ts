@@ -2173,8 +2173,23 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
     });
   }
 
+  function assertGuidanceCollected(podId: string): void {
+    if (nudgeRepo.hasPending(podId))
+      throw new AutopodError(
+        'This pod has uncollected human guidance. Use Rework to let a worker collect check_messages and apply the saved guidance before validation or delivery.',
+        'UNCOLLECTED_HUMAN_GUIDANCE',
+        409,
+      );
+  }
+
   function appendDecisionContext(pod: Pod, task: string): string {
-    return task + (podRepo.completionJournal?.recoveryContext(pod) ?? '');
+    return (
+      task +
+      (podRepo.completionJournal?.recoveryContext(pod) ?? '') +
+      (nudgeRepo.hasPending(pod.id)
+        ? '\n\nUncollected human guidance remains in check_messages. Collect all queued messages, reconcile them with the preserved work, and apply them before reporting completion.'
+        : '')
+    );
   }
 
   async function buildRecoveryTask(pod: Pod, worktreePath: string): Promise<string> {
@@ -3099,6 +3114,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
     pod: Pod,
     options: { waitForAdvisory?: boolean } = {},
   ): Promise<ApprovalReadiness> {
+    assertGuidanceCollected(pod.id);
     const advisoryRun = advisoryRuns.get(pod.id);
     let podReview = readinessService.refreshPodReadiness(pod.id, {
       advisoryQaInFlight: Boolean(advisoryRun),
@@ -3729,6 +3745,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
     mode: 'kill' | 'stop' = 'kill',
     assertReleaseAllowed?: () => void,
   ): Promise<void> {
+    assertGuidanceCollected(pod.id);
     const advisoryRun = advisoryRuns.get(pod.id);
     if (!advisoryRun) {
       return cleanupContainer(pod, label, mode, assertReleaseAllowed);
@@ -4231,6 +4248,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
    * Never calls `prManager.mergePr` — that would race the parent's poller.
    */
   async function completeFixPodAfterPush(fixPod: Pod): Promise<void> {
+    assertGuidanceCollected(fixPod.id);
     const podId = fixPod.id;
     const profile = profileStore.get(fixPod.profileName);
     const baseBranch = fixPod.baseBranch ?? profile.defaultBranch ?? 'main';
@@ -6541,8 +6559,9 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
       statuses: ['validated'],
       readCurrent: () => podRepo.getOrThrow(expectedPod.id),
       hasPendingDecision: () =>
-        podRepo.hasUnansweredDecision?.(expectedPod.id) ??
-        Boolean(podRepo.getOrThrow(expectedPod.id).pendingEscalation),
+        nudgeRepo.hasPending(expectedPod.id) ||
+        (podRepo.hasUnansweredDecision?.(expectedPod.id) ??
+          Boolean(podRepo.getOrThrow(expectedPod.id).pendingEscalation)),
       isCurrentInvocation: () => {
         if (!ownsInvocation()) return false;
         try {
@@ -6766,14 +6785,19 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
     return true;
   }
 
-  function ownsArtifactCompletion(pod: Pod, allowRemovedContainer = false): boolean {
+  function ownsArtifactCompletion(
+    pod: Pod,
+    allowRemovedContainer = false,
+    allowQueuedGuidance = false,
+  ): boolean {
     const current = podRepo.getOrThrow(pod.id);
     return (
       current.lifecycleGeneration === pod.lifecycleGeneration &&
       (current.containerId === pod.containerId ||
         (allowRemovedContainer && current.containerId === null)) &&
       current.status === 'running' &&
-      current.pendingEscalation === null
+      current.pendingEscalation === null &&
+      (allowQueuedGuidance || !nudgeRepo.hasPending(pod.id))
     );
   }
 
@@ -6809,6 +6833,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         'STALE_APPROVAL',
         409,
       );
+    assertGuidanceCollected(pod.id);
     if (podRepo.hasUnansweredDecision?.(pod.id))
       throw new AutopodError(
         'An unanswered human decision blocks approval.',
@@ -6827,6 +6852,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
   }
 
   function assertInteractiveCompletionCurrent(pod: Pod, allowRemovedContainer = false): void {
+    assertGuidanceCollected(pod.id);
     const current = podRepo.getOrThrow(pod.id);
     if (
       current.lifecycleGeneration !== pod.lifecycleGeneration ||
@@ -7024,6 +7050,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
    * + returns the new PR URL on success.
    */
   async function pushAndCreatePr(pod: Pod, callerLabel: string): Promise<string> {
+    assertGuidanceCollected(pod.id);
     const podId = pod.id;
     if (!pod.worktreePath) {
       throw new AutopodError(
@@ -7390,8 +7417,9 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           ? validationAbortControllers.get(expectedPod.id) === validationController
           : !validationAbortControllers.has(expectedPod.id),
       hasPendingDecision: () =>
-        podRepo.hasUnansweredDecision?.(expectedPod.id) ??
-        Boolean(podRepo.getOrThrow(expectedPod.id).pendingEscalation),
+        nudgeRepo.hasPending(expectedPod.id) ||
+        (podRepo.hasUnansweredDecision?.(expectedPod.id) ??
+          Boolean(podRepo.getOrThrow(expectedPod.id).pendingEscalation)),
     });
     ownership.assertCurrent();
     validationAbortControllers.set(expectedPod.id, validationController);
@@ -11304,6 +11332,35 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         return;
       }
 
+      if (nudgeRepo.hasPending(podId)) {
+        // A recorded answer is not proof that the settled worker collected it.
+        // Preserve source but retain the queue and resources for explicit Rework.
+        podRepo.completionJournal?.settle(pod);
+        let preserved = false;
+        let preservationFailure = '';
+        try {
+          if (pod.containerId && pod.worktreePath) {
+            await preservePodWorkspace(pod, 'uncollected human guidance after agent settlement');
+            preserved = true;
+          }
+        } catch (err) {
+          preservationFailure = ` Workspace preservation failed: ${err instanceof Error ? err.message : String(err)}.`;
+          logger.error(
+            { err, podId },
+            'Uncollected-guidance preservation failed; retaining resources',
+          );
+        }
+        if (!ownsArtifactCompletion(pod, false, true)) return;
+        const current = podRepo.getOrThrow(podId);
+        const reason = `Worker settled with uncollected human guidance. Use Rework to collect check_messages and apply the saved guidance before validation or delivery.${preservationFailure} Original resources and guidance retained.`;
+        atomicPodChange(podRepo, () => {
+          podRepo.completionJournal?.mark(current, 'awaiting_human', preserved);
+          transition(current, 'failed', { failureReason: reason });
+        });
+        emitActivityStatus(podId, reason);
+        return;
+      }
+
       if (pod.options.output === 'artifact') {
         const key = `${pod.id}:${pod.lifecycleGeneration}:${pod.finalization?.cycle ?? 0}`;
         const pending = artifactCompletionRuns.get(key);
@@ -13819,6 +13876,8 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         return;
       }
 
+      assertGuidanceCollected(podId);
+
       // Pre-push security scan: inspect the diff for secrets / PII / injection
       // before running validation. block decision throws and the pod's outer
       // error handler transitions to failed; warn / escalate findings ride
@@ -15024,6 +15083,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
       podId: string,
       options?: { force?: boolean },
     ): Promise<{ newCommits: boolean; result: 'pass' | 'fail' }> {
+      assertGuidanceCollected(podId);
       const pod = podRepo.getOrThrow(podId);
       const force = options?.force ?? false;
       if (pod.status !== 'failed' && pod.status !== 'review_required') {
@@ -16272,6 +16332,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
       reason?: string,
       actor: OperatorActor = { type: 'automation', id: 'direct-pod-manager' },
     ): Promise<{ newCommits: boolean; result: 'pass' | 'fail' }> {
+      assertGuidanceCollected(podId);
       const pod = podRepo.getOrThrow(podId);
       const canRevalidateImmediately = pod.status === 'failed' || pod.status === 'review_required';
       const canRecordForActiveRun = pod.status === 'running' || pod.status === 'validating';
@@ -16876,6 +16937,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         | 'retry-agent'
         | 'collect-artifacts';
     }> {
+      assertGuidanceCollected(podId);
       const pendingCollection = artifactResumeRuns.get(podId);
       if (pendingCollection) {
         await pendingCollection;

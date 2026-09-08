@@ -1,0 +1,30 @@
+
+ RUN  v4.1.11 /private/tmp/autopod-durable-execution/packages/daemon
+
+ ❯ src/e2e.test.ts (12 tests | 1 failed | 10 skipped) 278ms
+     × reconciles retained-worker completion with collected reply=false 119ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/e2e.test.ts > E2E: escalation flow > reconciles retained-worker completion with collected reply=false
+AssertionError: expected 'validated' to be 'failed' // Object.is equality
+
+Expected: "failed"
+Received: "validated"
+
+ ❯ src/e2e.test.ts:286:26
+    284|     // The original worker consumes the durable answer before validati…
+    285|     const final = manager.getSession(pod.id);
+    286|     expect(final.status).toBe(collectReply ? 'validated' : 'failed');
+       |                          ^
+    287|     expect(runtime.resume).not.toHaveBeenCalled();
+    288|     if (collectReply) {
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 1 passed | 10 skipped (12)
+   Start at  15:48:44
+   Duration  1.26s (transform 539ms, setup 0ms, import 873ms, tests 278ms, environment 0ms)
+

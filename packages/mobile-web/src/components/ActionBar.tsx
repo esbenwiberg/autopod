@@ -34,7 +34,8 @@ export function ActionBar({ pod }: Props): JSX.Element | null {
 
     try {
       await runAction(pod.id, action.kind, message);
-      if (action.kind === 'retry') upsertPod(await apiFetch<Pod>(`/pods/${pod.id}`));
+      if (action.kind === 'retry' || action.kind === 'rework')
+        upsertPod(await apiFetch<Pod>(`/pods/${pod.id}`));
     } catch (err) {
       if (snapshot) patchPodLocal(pod.id, snapshot);
       if (err instanceof AuthRequiredError) return;
