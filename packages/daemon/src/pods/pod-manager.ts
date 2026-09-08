@@ -2933,7 +2933,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
     return mcpServers;
   }
 
-  async function syncSandboxRuntimeSessionState(pod: Pod): Promise<void> {
+  async function syncSandboxRuntimeSessionState(pod: Pod, ownsRun: () => boolean): Promise<void> {
     const podId = pod.id;
     if (pod.executionTarget !== 'sandbox' || !pod.containerId) return;
 
@@ -2951,20 +2951,30 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           : null;
     if (!statePaths) return;
 
+    const controller = new AbortController();
+    const assertCurrent = () => {
+      if (!ownsRun()) throw new ProviderAttemptSupersededError();
+    };
     let timer: ReturnType<typeof setTimeout> | undefined;
     try {
       const cm = containerManagerFactory.get(pod.executionTarget);
       const timeoutMs = deps.sandboxRuntimeSessionSyncTimeoutMs ?? 30_000;
       await Promise.race([
-        cm.extractDirectoryFromContainer(pod.containerId, statePaths.container, statePaths.host),
+        cm.extractDirectoryFromContainer(
+          pod.containerId,
+          statePaths.container,
+          statePaths.host,
+          undefined,
+          { signal: controller.signal, assertCurrent },
+        ),
         new Promise<never>((_resolve, reject) => {
-          timer = setTimeout(
-            () =>
-              reject(
-                new Error(`Sandbox runtime session state sync timed out after ${timeoutMs}ms`),
-              ),
-            timeoutMs,
-          );
+          timer = setTimeout(() => {
+            const error = new Error(
+              `Sandbox runtime session state sync timed out after ${timeoutMs}ms`,
+            );
+            controller.abort(error);
+            reject(error);
+          }, timeoutMs);
         }),
       ]);
     } catch (err) {
@@ -2973,6 +2983,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         'Failed to sync sandbox runtime session state — future recovery may restart fresh',
       );
     } finally {
+      controller.abort();
       if (timer) clearTimeout(timer);
     }
   }
@@ -11053,7 +11064,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         // must stop before touching a replacement lifecycle.
         const recordedOutcome = superseded ? (observedTerminalOutcome ?? outcome) : outcome;
         try {
-          if (!superseded) await syncSandboxRuntimeSessionState(attemptPod);
+          if (!superseded) await syncSandboxRuntimeSessionState(attemptPod, ownsRun);
         } finally {
           try {
             if (!ownsRun()) superseded = true;

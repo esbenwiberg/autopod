@@ -29,6 +29,22 @@ describe('RoutingContainerManager', () => {
     expect(local.execStreaming).not.toHaveBeenCalled();
   });
 
+  it('preserves the exact extraction guard when routing to the owning backend', async () => {
+    const local = fakeContainerManager('local');
+    const sandbox = fakeContainerManager('sandbox');
+    const router = new RoutingContainerManager({ local, sandbox, resolveTarget: () => 'sandbox' });
+    const guard = { signal: new AbortController().signal, assertCurrent: vi.fn() };
+    await router.extractDirectoryFromContainer('sandbox-1', '/state', '/host', ['cache'], guard);
+    expect(sandbox.extractDirectoryFromContainer).toHaveBeenCalledWith(
+      'sandbox-1',
+      '/state',
+      '/host',
+      ['cache'],
+      guard,
+    );
+    expect(local.extractDirectoryFromContainer).not.toHaveBeenCalled();
+  });
+
   it('uses metadata from the resolved backend and leaves unsupported metadata unknown', async () => {
     const local = fakeContainerManager('local');
     const sandbox = fakeContainerManager('sandbox');

@@ -3,6 +3,7 @@ import type { ExecutionTarget } from '@autopod/shared';
 import type {
   ContainerManager,
   ContainerSpawnConfig,
+  DirectoryExtractionOptions,
   ExecOptions,
 } from '../interfaces/container-manager.js';
 
@@ -70,12 +71,14 @@ export class RoutingContainerManager implements ContainerManager {
     containerPath: string,
     hostPath: string,
     excludes?: string[],
+    options?: DirectoryExtractionOptions,
   ): Promise<void> {
     return this.delegate(containerId).extractDirectoryFromContainer(
       containerId,
       containerPath,
       hostPath,
       excludes,
+      options,
     );
   }
 

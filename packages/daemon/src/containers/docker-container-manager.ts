@@ -3,6 +3,7 @@ import {
   linkSync,
   lstatSync,
   mkdirSync,
+  mkdtempSync,
   readFileSync,
   readdirSync,
   rmSync,
@@ -20,11 +21,13 @@ import type {
   ContainerExecutionMetadata,
   ContainerManager,
   ContainerSpawnConfig,
+  DirectoryExtractionOptions,
   ExecOptions,
   ExecResult,
   StreamingExecResult,
 } from '../interfaces/container-manager.js';
 import { extractManagedDockerOutput } from '../managed/output-extraction.js';
+import { assertDirectoryExtractionCurrent } from './directory-extraction-ownership.js';
 import {
   DOCKER_CALL_TIMEOUTS,
   DockerCallTimeoutError,
@@ -731,7 +734,9 @@ export class DockerContainerManager implements ContainerManager {
     containerPath: string,
     hostPath: string,
     excludes?: string[],
+    options?: DirectoryExtractionOptions,
   ): Promise<void> {
+    assertDirectoryExtractionCurrent(options);
     const container = this.docker.getContainer(containerId);
     // getArchive works on stopped containers — safe to call after container exits
     const archiveStream = await boundedDockerCall(container.getArchive({ path: containerPath }), {
@@ -741,10 +746,15 @@ export class DockerContainerManager implements ContainerManager {
       containerId,
     });
 
+    assertDirectoryExtractionCurrent(options);
     mkdirSync(hostPath, { recursive: true });
-    removeStaleSyncStagingDirs(hostPath);
+    if (!options) removeStaleSyncStagingDirs(hostPath);
     const stagingBase = `.autopod-extract-${process.pid}-${Date.now()}`;
-    const stagingPath = join(hostPath, stagingBase);
+    // A late collector must never write into the current recovery directory,
+    // or remove staging that belongs to another in-flight extraction.
+    const stagingPath = options
+      ? mkdtempSync(join(dirname(hostPath), '.autopod-owned-extract-'))
+      : join(hostPath, stagingBase);
     mkdirSync(stagingPath, { recursive: true });
 
     // Tar entries are prefixed with the basename of containerPath (e.g. "workspace/")
@@ -828,7 +838,8 @@ export class DockerContainerManager implements ContainerManager {
         (archiveStream as NodeJS.ReadableStream).pipe(extract);
       });
 
-      mirrorStagedDirectory(stagingPath, hostPath, excludes, stagingBase);
+      assertDirectoryExtractionCurrent(options);
+      mirrorStagedDirectory(stagingPath, hostPath, excludes, options ? undefined : stagingBase);
     } finally {
       rmSync(stagingPath, { recursive: true, force: true });
     }

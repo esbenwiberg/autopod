@@ -757,6 +757,36 @@ describe('DockerContainerManager', () => {
       rmSync(hostPath, { recursive: true, force: true });
     });
 
+    it.each(['abort', 'supersede'] as const)(
+      'keeps current files if a Docker archive loses ownership by %s',
+      async (reason) => {
+        writeFileSync(join(hostPath, 'file.txt'), 'current history');
+        const archive = new PassThrough();
+        container.getArchive.mockResolvedValue(archive);
+        const controller = new AbortController();
+        let current = true;
+        const extraction = manager.extractDirectoryFromContainer(
+          'abc123',
+          '/workspace',
+          hostPath,
+          undefined,
+          {
+            signal: controller.signal,
+            assertCurrent() {
+              if (!current) throw new Error('superseded extraction');
+            },
+          },
+        );
+        await vi.waitFor(() => expect(archive.listenerCount('data')).toBeGreaterThan(0));
+        if (reason === 'abort') controller.abort(new Error('aborted extraction'));
+        else current = false;
+        const contents = await createTarStreamFromEntries([['workspace/file.txt', 'late history']]);
+        contents.pipe(archive);
+        await expect(extraction).rejects.toThrow(/aborted extraction|superseded extraction/);
+        expect(readFileSync(join(hostPath, 'file.txt'), 'utf-8')).toBe('current history');
+      },
+    );
+
     it('extracts through a staging directory, preserves excludes, and deletes stale files after extraction', async () => {
       mkdirSync(join(hostPath, '.git'), { recursive: true });
       writeFileSync(join(hostPath, '.git', 'HEAD'), 'ref: refs/heads/test\n');

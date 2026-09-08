@@ -1,0 +1,58 @@
+
+ RUN  v4.1.11 /private/tmp/autopod-durable-execution/packages/daemon
+
+ ❯ src/containers/sandbox-container-manager.test.ts (41 tests | 2 failed | 39 skipped) 11ms
+       × does not publish an extracted snapshot after abort 9ms
+       × does not publish an extracted snapshot after supersede 1ms
+ ❯ src/pods/pod-manager.test.ts (569 tests | 1 failed | 568 skipped) 147ms
+       × does not strand a completed run when sandbox session state sync never settles 144ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 3 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/containers/sandbox-container-manager.test.ts > SandboxContainerManager > extractDirectoryFromContainer > does not publish an extracted snapshot after abort
+ FAIL  src/containers/sandbox-container-manager.test.ts > SandboxContainerManager > extractDirectoryFromContainer > does not publish an extracted snapshot after supersede
+AssertionError: promise resolved "undefined" instead of rejecting
+
+- Expected:
+Error {
+  "message": "rejected promise",
+}
+
++ Received:
+undefined
+
+ ❯ src/containers/sandbox-container-manager.test.ts:962:34
+    960|           else current = false;
+    961|           release();
+    962|           await expect(extraction).rejects.toThrow(/aborted extraction…
+       |                                  ^
+    963|           expect(readFileSync(join(hostDir, 'session.jsonl'), 'utf-8')…
+    964|         } finally {
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/3]⎯
+
+ FAIL  src/pods/pod-manager.test.ts > PodManager > sandbox runtime session state sync > does not strand a completed run when sandbox session state sync never settles
+AssertionError: expected undefined to be true // Object.is equality
+
+- Expected:
+true
+
++ Received:
+undefined
+
+ ❯ src/pods/pod-manager.test.ts:4188:52
+    4186|         const extractionOptions = vi.mocked(ctx.containerManager.extra…
+    4187|           .calls[0]?.[4];
+    4188|         expect(extractionOptions?.signal?.aborted).toBe(true);
+       |                                                    ^
+    4189|         expect(extractionOptions?.assertCurrent).toBeTypeOf('function'…
+    4190|
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/3]⎯
+
+
+ Test Files  2 failed (2)
+      Tests  3 failed | 607 skipped (610)
+   Start at  10:35:22
+   Duration  1.69s (transform 1.19s, setup 0ms, import 2.04s, tests 157ms, environment 0ms)
+

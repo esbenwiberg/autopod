@@ -1584,8 +1584,14 @@ describe('PodManager', () => {
       ctx.podRepo.update(created.id, { status: 'running', containerId: 'old-container' });
       const pod = ctx.podRepo.getOrThrow(created.id);
       let replacementOrdinal = 0;
+      let initiallyCurrent = false;
+      let replacementRejected = false;
       vi.mocked(ctx.containerManager.extractDirectoryFromContainer).mockImplementationOnce(
-        async (containerId) => {
+        async (containerId, _containerPath, _hostPath, _excludes, options) => {
+          if (options?.assertCurrent) {
+            options.assertCurrent();
+            initiallyCurrent = true;
+          }
           expect(containerId).toBe('old-container');
           const old = attempts.getActive(pod.id);
           const profileSnapshot = attempts.getActiveProfileSnapshot(pod.id);
@@ -1611,6 +1617,11 @@ describe('PodManager', () => {
             profileReference: old.profileReference,
             profileSnapshot,
           }).ordinal;
+          try {
+            options?.assertCurrent?.();
+          } catch {
+            replacementRejected = true;
+          }
         },
       );
       const outcome = await manager.consumeAgentEvents(
@@ -1633,6 +1644,8 @@ describe('PodManager', () => {
         { generation: pod.lifecycleGeneration, containerId: pod.containerId },
       );
       expect(outcome).toBe('stopped');
+      expect(initiallyCurrent).toBe(true);
+      expect(replacementRejected).toBe(true);
       expect(attempts.getActive(pod.id)?.ordinal).toBe(replacementOrdinal);
       expect(ctx.podRepo.getOrThrow(pod.id)).toMatchObject({
         status: 'running',
@@ -4060,6 +4073,11 @@ describe('PodManager', () => {
         'sandbox-123',
         testCase.containerPath,
         path.join(os.homedir(), '.autopod', testCase.hostFolder, pod.id),
+        undefined,
+        expect.objectContaining({
+          signal: expect.any(AbortSignal),
+          assertCurrent: expect.any(Function),
+        }),
       );
     });
 
@@ -4183,6 +4201,10 @@ describe('PodManager', () => {
         await vi.advanceTimersByTimeAsync(25);
         await Promise.resolve();
         expect(outcome).toBe('completed');
+        const extractionOptions = vi.mocked(ctx.containerManager.extractDirectoryFromContainer).mock
+          .calls[0]?.[4];
+        expect(extractionOptions?.signal?.aborted).toBe(true);
+        expect(extractionOptions?.assertCurrent).toBeTypeOf('function');
 
         blockedSync.resolve();
         await consuming;

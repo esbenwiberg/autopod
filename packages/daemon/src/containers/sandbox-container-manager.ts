@@ -3,6 +3,7 @@ import {
   existsSync,
   lstatSync,
   mkdirSync,
+  mkdtempSync,
   readdirSync,
   readlinkSync,
   rmSync,
@@ -20,6 +21,7 @@ import type {
   ContainerExecutionMetadata,
   ContainerManager,
   ContainerSpawnConfig,
+  DirectoryExtractionOptions,
   ExecOptions,
   ExecResult,
   ExposePortOptions,
@@ -37,6 +39,7 @@ import {
   CGROUP_EXECUTION_METADATA_PROBE,
   parseCgroupExecutionMetadata,
 } from './cgroup-execution-metadata.js';
+import { assertDirectoryExtractionCurrent } from './directory-extraction-ownership.js';
 import type { SandboxPortAuth } from './sandbox-api-client.js';
 import {
   SANDBOX_TIER_MEMORY_BYTES,
@@ -389,18 +392,25 @@ for root in sys.argv[1:]:
     containerPath: string,
     hostPath: string,
     excludes?: string[],
+    options?: DirectoryExtractionOptions,
   ): Promise<void> {
+    assertDirectoryExtractionCurrent(options);
     mkdirSync(hostPath, { recursive: true });
-    removeStaleSyncStagingDirs(hostPath);
+    if (!options) removeStaleSyncStagingDirs(hostPath);
 
     const rootPath = normalizeSandboxPath(containerPath);
     const stagingBase = `.autopod-extract-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-    const stagingPath = join(hostPath, stagingBase);
+    // A late collector must never write into the current recovery directory,
+    // or remove staging that belongs to another in-flight extraction.
+    const stagingPath = options
+      ? mkdtempSync(join(dirname(hostPath), '.autopod-owned-extract-'))
+      : join(hostPath, stagingBase);
     mkdirSync(stagingPath, { recursive: true });
 
     try {
       await this.extractSandboxPath(containerId, rootPath, rootPath, stagingPath, excludes);
-      mirrorStagedDirectory(stagingPath, hostPath, excludes, stagingBase);
+      assertDirectoryExtractionCurrent(options);
+      mirrorStagedDirectory(stagingPath, hostPath, excludes, options ? undefined : stagingBase);
     } finally {
       rmSync(stagingPath, { recursive: true, force: true });
     }

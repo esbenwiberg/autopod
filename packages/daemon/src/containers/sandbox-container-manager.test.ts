@@ -5,6 +5,7 @@ import {
   mkdirSync,
   mkdtempSync,
   readFileSync,
+  readdirSync,
   rmSync,
   symlinkSync,
   writeFileSync,
@@ -923,6 +924,101 @@ describe('SandboxContainerManager', () => {
   });
 
   describe('extractDirectoryFromContainer', () => {
+    it.each(['abort', 'supersede'] as const)(
+      'does not publish an extracted snapshot after %s',
+      async (reason) => {
+        const hostDir = mkdtempSync(join(tmpdir(), 'sandbox-owned-extract-'));
+        const client = new FakeSandboxApiClient();
+        const mgr = new SandboxContainerManager(client, logger);
+        const id = await mgr.spawn(baseConfig);
+        const controller = new AbortController();
+        let current = true;
+        let release!: () => void;
+        let started!: () => void;
+        const pending = new Promise<void>((resolve) => {
+          release = resolve;
+        });
+        const entered = new Promise<void>((resolve) => {
+          started = resolve;
+        });
+        const read = client.readFile.bind(client);
+        vi.spyOn(client, 'readFile').mockImplementationOnce(async (...args) => {
+          started();
+          await pending;
+          return read(...args);
+        });
+        try {
+          writeFileSync(join(hostDir, 'session.jsonl'), 'current history');
+          client.seedFile(id, '/state/session.jsonl', Buffer.from('late history'));
+          const extraction = mgr.extractDirectoryFromContainer(id, '/state', hostDir, undefined, {
+            signal: controller.signal,
+            assertCurrent() {
+              if (!current) throw new Error('superseded extraction');
+            },
+          });
+          await entered;
+          if (reason === 'abort') controller.abort(new Error('aborted extraction'));
+          else current = false;
+          release();
+          await expect(extraction).rejects.toThrow(/aborted extraction|superseded extraction/);
+          expect(readFileSync(join(hostDir, 'session.jsonl'), 'utf-8')).toBe('current history');
+        } finally {
+          release();
+          rmSync(hostDir, { recursive: true, force: true });
+        }
+      },
+    );
+
+    it('retains a newer published snapshot while a superseded collector is still writing', async () => {
+      const root = mkdtempSync(join(tmpdir(), 'sandbox-overlap-extract-'));
+      const hostDir = join(root, 'current');
+      const client = new FakeSandboxApiClient();
+      const mgr = new SandboxContainerManager(client, logger);
+      const oldId = await mgr.spawn(baseConfig);
+      const newId = await mgr.spawn(baseConfig);
+      let current = true;
+      let release!: () => void;
+      let started!: () => void;
+      const pending = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      const entered = new Promise<void>((resolve) => {
+        started = resolve;
+      });
+      const read = client.readFile.bind(client);
+      vi.spyOn(client, 'readFile').mockImplementationOnce(async (...args) => {
+        started();
+        await pending;
+        return read(...args);
+      });
+      try {
+        client.seedFile(oldId, '/state/session.jsonl', Buffer.from('old history'));
+        client.seedFile(newId, '/state/session.jsonl', Buffer.from('new history'));
+        const old = mgr.extractDirectoryFromContainer(oldId, '/state', hostDir, undefined, {
+          assertCurrent() {
+            if (!current) throw new Error('superseded extraction');
+          },
+        });
+        await entered;
+        current = false;
+        await mgr.extractDirectoryFromContainer(newId, '/state', hostDir, undefined, {
+          assertCurrent() {},
+        });
+        expect(readFileSync(join(hostDir, 'session.jsonl'), 'utf-8')).toBe('new history');
+        // Old collection still has its own staging; the new mirror did not remove it.
+        expect(
+          readdirSync(root).filter((entry) => entry.startsWith('.autopod-owned-extract-')),
+        ).toHaveLength(1);
+        release();
+        await expect(old).rejects.toThrow('superseded extraction');
+        expect(readFileSync(join(hostDir, 'session.jsonl'), 'utf-8')).toBe('new history');
+        expect(readdirSync(root)).toEqual(['current']);
+      } finally {
+        release();
+        rmSync(root, { recursive: true, force: true });
+      }
+    });
+
     it('mirrors a sandbox directory back to the host through list/read', async () => {
       const hostDir = mkdtempSync(join(tmpdir(), 'sandbox-extract-'));
       const client = new FakeSandboxApiClient();
@@ -952,30 +1048,39 @@ describe('SandboxContainerManager', () => {
       }
     });
 
-    it('round-trips runtime state through extract and next spawn', async () => {
-      const hostDir = mkdtempSync(join(tmpdir(), 'sandbox-runtime-state-'));
-      const client = new FakeSandboxApiClient();
-      const mgr = new SandboxContainerManager(client, logger);
-      const firstId = await mgr.spawn(baseConfig);
-      const containerPath = '/home/autopod/.codex/sessions';
-      const rolloutPath = `${containerPath}/2026/07/12/rollout-thread-123.jsonl`;
+    it.each([false, true])(
+      'round-trips runtime state through extract and next spawn guarded=%s',
+      async (guarded) => {
+        const hostDir = mkdtempSync(join(tmpdir(), 'sandbox-runtime-state-'));
+        const client = new FakeSandboxApiClient();
+        const mgr = new SandboxContainerManager(client, logger);
+        const firstId = await mgr.spawn(baseConfig);
+        const containerPath = '/home/autopod/.codex/sessions';
+        const rolloutPath = `${containerPath}/2026/07/12/rollout-thread-123.jsonl`;
 
-      try {
-        client.seedFile(firstId, rolloutPath, Buffer.from('{"type":"session_meta"}\n'));
+        try {
+          client.seedFile(firstId, rolloutPath, Buffer.from('{"type":"session_meta"}\n'));
 
-        await mgr.extractDirectoryFromContainer(firstId, containerPath, hostDir);
-        const secondId = await mgr.spawn({
-          ...baseConfig,
-          volumes: [{ host: hostDir, container: containerPath }],
-        });
+          await mgr.extractDirectoryFromContainer(
+            firstId,
+            containerPath,
+            hostDir,
+            undefined,
+            guarded ? { signal: new AbortController().signal, assertCurrent() {} } : undefined,
+          );
+          const secondId = await mgr.spawn({
+            ...baseConfig,
+            volumes: [{ host: hostDir, container: containerPath }],
+          });
 
-        expect(client.sandboxes.get(secondId)?.files.get(rolloutPath)?.toString('utf-8')).toBe(
-          '{"type":"session_meta"}\n',
-        );
-      } finally {
-        rmSync(hostDir, { recursive: true, force: true });
-      }
-    });
+          expect(client.sandboxes.get(secondId)?.files.get(rolloutPath)?.toString('utf-8')).toBe(
+            '{"type":"session_meta"}\n',
+          );
+        } finally {
+          rmSync(hostDir, { recursive: true, force: true });
+        }
+      },
+    );
   });
 
   describe('withAzureClient', () => {
