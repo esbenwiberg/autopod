@@ -1,0 +1,69 @@
+
+ RUN  v4.1.11 /private/tmp/autopod-durable-execution/packages/daemon
+
+ ❯ src/pods/merge-journal.test.ts (31 tests | 5 failed) 1335ms
+     × reconciles historical ADO aliases before admitting a ambiguous duplicate 63ms
+     × reconciles historical ADO aliases before admitting a scheduled duplicate 39ms
+     × reconciles historical ADO aliases before admitting a merged duplicate 38ms
+     × reconciles historical ADO aliases before admitting a closed duplicate 38ms
+     × reports unsupported historical identities as unavailable and retains them before any admission 42ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 5 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/pods/merge-journal.test.ts > durable merge journal > reconciles historical ADO aliases before admitting a ambiguous duplicate
+ FAIL  src/pods/merge-journal.test.ts > durable merge journal > reconciles historical ADO aliases before admitting a scheduled duplicate
+ FAIL  src/pods/merge-journal.test.ts > durable merge journal > reconciles historical ADO aliases before admitting a merged duplicate
+ FAIL  src/pods/merge-journal.test.ts > durable merge journal > reconciles historical ADO aliases before admitting a closed duplicate
+AssertionError: expected [Function] to throw an error
+
+- Expected:
+null
+
++ Received:
+undefined
+
+ ❯ src/pods/merge-journal.test.ts:121:91
+    119|         }
+    120|         const restarted = createMergeJournal(f.db);
+    121|         expect(() => restarted.claim(f.pod, f.publicationPod, f.public…
+       |                                                                                           ^
+    122|           disposition === 'merged' ? 'confirmed' : disposition,
+    123|         );
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/5]⎯
+
+ FAIL  src/pods/merge-journal.test.ts > durable merge journal > reports unsupported historical identities as unavailable and retains them before any admission
+AssertionError: expected { prCount: 2, mergedPrCount: +0, …(7) } to be undefined
+
+- Expected:
+undefined
+
++ Received:
+{
+  "basis": "last-recorded",
+  "closedPrCount": 0,
+  "liveVerified": false,
+  "mergedPrCount": 0,
+  "mergedWithoutRecordedRequestCount": 0,
+  "prCount": 2,
+  "requestCount": 0,
+  "scope": "source-bound-journal-only",
+  "unresolvedPrCount": 2,
+}
+
+ ❯ src/pods/merge-journal.test.ts:162:31
+    160|         .run('x'.repeat(1024 * 1024), current.id);
+    161|       const snapshot = f.repo.taskExecutions?.snapshot(f.pod.id);
+    162|       expect(snapshot?.merge).toBeUndefined();
+       |                               ^
+    163|       expect(snapshot?.diagnostics).toContain(
+    164|         'Merge identity unavailable; reconcile retained journal record…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/5]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  5 failed | 26 passed (31)
+   Start at  08:25:46
+   Duration  1.66s (transform 140ms, setup 0ms, import 212ms, tests 1.34s, environment 0ms)
+

@@ -10,6 +10,7 @@ import {
   reconcilePodCosts,
 } from './cost-reconciliation.js';
 import { hasUnansweredDecision } from './decision-admission.js';
+import { ensureMergeIdentityProjection } from './merge-identity-projection.js';
 import { readProviderUsage } from './provider-usage-projection.js';
 
 export interface ExecutionBinding {
@@ -34,6 +35,7 @@ interface Membership {
 }
 
 export function createTaskExecutionLedger(db: Database.Database): TaskExecutionLedger {
+  ensureMergeIdentityProjection(db);
   const membership = (podId: string): Membership | undefined =>
     db
       .prepare(`
@@ -260,22 +262,23 @@ export function createTaskExecutionLedger(db: Database.Database): TaskExecutionL
     };
     // Scalar-only aggregation: count each canonical PR once across linked executions.
     // A source-bound observation proves disposition, never who caused it.
-    const merge = db
+    const mergeProjection = db
       .prepare(`WITH resources AS (
       SELECT i.pr_identity AS pr, MAX(
         EXISTS (SELECT 1 FROM merge_observations o WHERE o.intent_id = i.id AND o.disposition = 'merged')
         OR EXISTS (SELECT 1 FROM merge_disposition_observations o WHERE o.intent_id = i.id)
       ) AS merged,
-      (SELECT o.disposition FROM merge_status_observations o JOIN merge_intents observed ON observed.id = o.intent_id
+      (SELECT o.disposition FROM merge_status_observations o JOIN canonical_merge_intents observed ON observed.id = o.intent_id
         WHERE observed.pr_identity = i.pr_identity AND observed.task_id = i.task_id ORDER BY o.sequence DESC LIMIT 1) AS lastStatus
-      FROM merge_intents i WHERE i.task_id = ? GROUP BY i.pr_identity
-    ) SELECT COUNT(*) AS prCount, COALESCE(SUM(merged), 0) AS mergedPrCount,
+      FROM canonical_merge_intents i WHERE i.task_id = ? GROUP BY i.pr_identity
+    ) SELECT EXISTS (SELECT 1 FROM canonical_merge_intents WHERE pr_identity IS NULL) AS identityUnavailable,
+      COUNT(*) AS prCount, COALESCE(SUM(merged), 0) AS mergedPrCount,
       COALESCE(SUM(NOT merged AND lastStatus = 'closed'), 0) AS closedPrCount,
       COALESCE(SUM(NOT merged AND COALESCE(lastStatus, 'open') != 'closed'), 0) AS unresolvedPrCount,
       COALESCE(SUM(merged AND NOT EXISTS (
-        SELECT 1 FROM merge_attempts a JOIN merge_intents i ON i.id = a.intent_id WHERE i.pr_identity = resources.pr
+        SELECT 1 FROM merge_attempts a JOIN canonical_merge_intents i ON i.id = a.intent_id WHERE i.pr_identity = resources.pr
       )), 0) AS mergedWithoutRecordedRequestCount,
-      (SELECT COUNT(*) FROM merge_attempts a JOIN merge_intents i ON i.id = a.intent_id WHERE i.task_id = ?) AS requestCount
+      (SELECT COUNT(*) FROM merge_attempts a JOIN canonical_merge_intents i ON i.id = a.intent_id WHERE i.task_id = ?) AS requestCount
       FROM resources`)
       .get(identity.taskId, identity.taskId) as Pick<
       NonNullable<TaskExecutionSummary['merge']>,
@@ -285,7 +288,10 @@ export function createTaskExecutionLedger(db: Database.Database): TaskExecutionL
       | 'unresolvedPrCount'
       | 'mergedWithoutRecordedRequestCount'
       | 'requestCount'
-    >;
+    > & { identityUnavailable: number };
+    const { identityUnavailable: mergeIdentityUnavailable, ...merge } = mergeProjection;
+    if (mergeIdentityUnavailable)
+      diagnostics.push('Merge identity unavailable; reconcile retained journal records');
     const root = db
       .prepare('SELECT token_budget AS budget FROM pods WHERE id = ?')
       .get(identity.rootPodId) as { budget: number | null } | undefined;
@@ -333,12 +339,16 @@ export function createTaskExecutionLedger(db: Database.Database): TaskExecutionL
           liveVerified: false,
         },
       },
-      merge: {
-        ...merge,
-        scope: 'source-bound-journal-only',
-        basis: 'last-recorded',
-        liveVerified: false,
-      },
+      ...(mergeIdentityUnavailable
+        ? {}
+        : {
+            merge: {
+              ...merge,
+              scope: 'source-bound-journal-only' as const,
+              basis: 'last-recorded' as const,
+              liveVerified: false as const,
+            },
+          }),
       recordedInputTokens,
       recordedOutputTokens,
       recordedCostUsd,

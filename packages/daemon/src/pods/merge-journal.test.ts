@@ -79,6 +79,150 @@ function fixture(
 }
 
 describe('durable merge journal', () => {
+  it('keeps historical alias admission and accounting consistent across a real database reopen', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'autopod-historical-merge-'));
+    const path = join(dir, 'journal.db');
+    let db = new Database(path);
+    try {
+      db.pragma('foreign_keys = ON');
+      runMigrations(db, new URL('../db/migrations', import.meta.url).pathname, logger);
+      const f = fixture(db, true, 'https://dev.azure.com/org/Project/_git/Repo');
+      const current = f.journal.plan(f.pod, f.publicationPod, f.publicationId, f.config);
+      db.prepare(`INSERT INTO merge_intents
+        SELECT 'old', 'old-identity', publication_id, pod_id, task_id, generation,
+          ?, request, created_at FROM merge_intents WHERE id = ?`).run(
+        'https://org.visualstudio.com/Project/_git/Repo/pullrequest/42',
+        current.id,
+      );
+      db.prepare(
+        "INSERT INTO merge_attempts(id,intent_id,admitted_at) VALUES ('old-attempt','old',?)",
+      ).run(new Date().toISOString());
+      db.close();
+      db = new Database(path);
+      const restarted = createMergeJournal(db);
+      expect(() => restarted.claim(f.pod, f.publicationPod, f.publicationId, f.config)).toThrow(
+        'ambiguous',
+      );
+      restarted.observe('old-attempt', f.result, 'provider_lookup');
+      expect(() => restarted.claim(f.pod, f.publicationPod, f.publicationId, f.config)).toThrow(
+        'confirmed',
+      );
+      expect(createPodRepository(db).taskExecutions?.snapshot(f.pod.id).merge).toMatchObject({
+        prCount: 1,
+        requestCount: 1,
+        mergedPrCount: 1,
+        mergedWithoutRecordedRequestCount: 0,
+      });
+      expect(db.prepare("SELECT pr_identity FROM merge_intents WHERE id = 'old'").get()).toEqual({
+        pr_identity: 'https://org.visualstudio.com/Project/_git/Repo/pullrequest/42',
+      });
+      expect(db.prepare('SELECT count(*) AS n FROM merge_attempts').get()).toEqual({ n: 1 });
+      expect(db.pragma('integrity_check')).toEqual([{ integrity_check: 'ok' }]);
+      expect(db.pragma('foreign_key_check')).toEqual([]);
+    } finally {
+      if (db.open) db.close();
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it.each(['ambiguous', 'scheduled', 'merged', 'closed'] as const)(
+    'reconciles historical ADO aliases before admitting a %s duplicate',
+    (disposition) => {
+      const f = fixture(undefined, true, 'https://dev.azure.com/org/Project/_git/Repo');
+      try {
+        const current = f.journal.plan(f.pod, f.publicationPod, f.publicationId, f.config);
+        // Seed the immutable row as an older writer did, without updating a receipt.
+        f.db
+          .prepare(`INSERT INTO merge_intents
+          SELECT 'historical', 'historical-identity', publication_id, pod_id, task_id,
+            generation, ?, request, created_at FROM merge_intents WHERE id = ?`)
+          .run('https://org.visualstudio.com/%50roject/_git/Repo/pullrequest/42', current.id);
+        const before = f.db.prepare('SELECT * FROM merge_intents ORDER BY id').all();
+        if (disposition === 'closed') {
+          f.journal.observeStatus('historical', {
+            merged: false,
+            open: false,
+            headSha: f.proof.commitSha,
+            sourceTarget: f.config.expectedTarget,
+            blockReason: null,
+            ciFailures: [],
+            reviewComments: [],
+          });
+        } else {
+          f.db
+            .prepare(
+              "INSERT INTO merge_attempts(id, intent_id, admitted_at) VALUES ('old-attempt', 'historical', ?)",
+            )
+            .run(new Date().toISOString());
+          if (disposition === 'scheduled')
+            f.journal.observe(
+              'old-attempt',
+              { merged: false, autoMergeScheduled: true },
+              'merge_response',
+            );
+          if (disposition === 'merged')
+            f.journal.observe('old-attempt', f.result, 'provider_lookup');
+        }
+        const restarted = createMergeJournal(f.db);
+        expect(() => restarted.claim(f.pod, f.publicationPod, f.publicationId, f.config)).toThrow(
+          disposition === 'merged' ? 'confirmed' : disposition,
+        );
+        expect(f.repo.taskExecutions?.snapshot(f.pod.id).merge).toMatchObject({
+          prCount: 1,
+          requestCount: disposition === 'closed' ? 0 : 1,
+          mergedPrCount: disposition === 'merged' ? 1 : 0,
+          mergedWithoutRecordedRequestCount: 0,
+          closedPrCount: disposition === 'closed' ? 1 : 0,
+        });
+        if (disposition === 'closed') {
+          expect(restarted.find(f.pod)?.prDisposition).toBe('closed');
+          restarted.observeStatus(current.id, {
+            merged: false,
+            open: true,
+            headSha: f.proof.commitSha,
+            sourceTarget: f.config.expectedTarget,
+            blockReason: null,
+            ciFailures: [],
+            reviewComments: [],
+          });
+          expect(restarted.find(f.pod)?.prDisposition).toBe('open');
+          restarted.claim(f.pod, f.publicationPod, f.publicationId, f.config);
+        }
+        expect(f.db.prepare('SELECT * FROM merge_intents ORDER BY id').all()).toEqual(before);
+      } finally {
+        f.db.close();
+      }
+    },
+  );
+
+  it('reports unsupported historical identities as unavailable and retains them before any admission', () => {
+    const f = fixture();
+    try {
+      const current = f.journal.plan(f.pod, f.publicationPod, f.publicationId, f.config);
+      f.db
+        .prepare(`INSERT INTO merge_intents
+        SELECT 'unknown', 'unknown-identity', publication_id, pod_id, task_id,
+          generation, ?, request, created_at FROM merge_intents WHERE id = ?`)
+        .run('x'.repeat(1024 * 1024), current.id);
+      const snapshot = f.repo.taskExecutions?.snapshot(f.pod.id);
+      expect(snapshot?.merge).toBeUndefined();
+      expect(snapshot?.diagnostics).toContain(
+        'Merge identity unavailable; reconcile retained journal records',
+      );
+      expect(() => f.journal.claim(f.pod, f.publicationPod, f.publicationId, f.config)).toThrow(
+        'identity',
+      );
+      expect(f.db.prepare('SELECT COUNT(*) AS n FROM merge_attempts').get()).toEqual({ n: 0 });
+      expect(
+        f.db
+          .prepare("SELECT length(pr_identity) AS n FROM merge_intents WHERE id = 'unknown'")
+          .get(),
+      ).toEqual({ n: 1024 * 1024 });
+    } finally {
+      f.db.close();
+    }
+  });
+
   it('requires a fresh source-bound reopening across equivalent intents for the same PR', () => {
     const f = fixture();
     try {

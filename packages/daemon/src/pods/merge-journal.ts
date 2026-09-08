@@ -7,13 +7,14 @@ import type {
   MergePrTarget,
   PrMergeStatus,
 } from '../interfaces/pr-manager.js';
-import { parseGitHubPrUrl } from '../worktrees/github-url-identity.js';
+import { canonicalMergePrIdentity as prIdentity } from '../worktrees/merge-pr-identity.js';
 import {
   assertMergeRepository,
   assertMergeSource,
   assertMergeTarget,
   mergeReconciliation,
 } from '../worktrees/merge-source-identity.js';
+import { ensureMergeIdentityProjection } from './merge-identity-projection.js';
 import { createSourcePublicationLedger } from './source-publication-ledger.js';
 
 export interface BoundMergeConfig {
@@ -66,54 +67,9 @@ function requestFrom(row: IntentRow): MergeRequest {
     return mergeReconciliation('Durable merge identity is unavailable.');
   }
 }
-function prIdentity(raw: string): string {
-  try {
-    const url = new URL(raw);
-    if (
-      raw.length > 4096 ||
-      url.protocol !== 'https:' ||
-      url.username ||
-      url.password ||
-      url.port ||
-      url.search ||
-      url.hash
-    )
-      return mergeReconciliation('A canonical PR address is required for durable merge admission.');
-    const path = url.pathname.replace(/\/$/, '');
-    if (url.hostname === 'github.com') {
-      const pr = parseGitHubPrUrl(raw);
-      return `https://github.com/${pr.owner.toLowerCase()}/${pr.repo.toLowerCase()}/pull/${pr.number}`;
-    }
-    const canonical = url.hostname === 'dev.azure.com';
-    const match = path.match(
-      canonical
-        ? /^\/[^/]+\/[^/]+\/_git\/[^/]+\/pullrequest\/([1-9][0-9]*)$/
-        : /^\/[^/]+\/_git\/[^/]+\/pullrequest\/([1-9][0-9]*)$/,
-    );
-    if (!match || !Number.isSafeInteger(Number(match[1])))
-      return mergeReconciliation('The durable PR address is not an exact supported pull request.');
-    const parts = path.split('/').slice(1).map(decodeURIComponent);
-    const legacy = url.hostname.endsWith('.visualstudio.com');
-    if (canonical || legacy) {
-      const org = canonical ? parts[0] : url.hostname.slice(0, -'.visualstudio.com'.length);
-      const project = parts[canonical ? 1 : 0];
-      const repository = parts[canonical ? 3 : 2];
-      if (
-        !org ||
-        !project ||
-        !repository ||
-        [org, project, repository].some((part) => /[\/\\\0\r\n]/.test(part))
-      )
-        return mergeReconciliation('The durable PR repository path is ambiguous.');
-      return `https://dev.azure.com/${encodeURIComponent(org.toLowerCase())}/${encodeURIComponent(project)}/_git/${encodeURIComponent(repository)}/pullrequest/${Number(match[1])}`;
-    }
-  } catch {
-    return mergeReconciliation('The durable PR identity is unsupported.');
-  }
-  return mergeReconciliation('The durable PR identity is unsupported.');
-}
 
 export function createMergeJournal(db: Database.Database): MergeJournal {
+  ensureMergeIdentityProjection(db);
   const publications = createSourcePublicationLedger(db);
   const columns = 'id, publication_id AS publicationId, request';
   function verify(pod: Pod, row: IntentRow) {
@@ -156,7 +112,7 @@ export function createMergeJournal(db: Database.Database): MergeJournal {
         .get(row.id)) as { disposition: 'pending' | 'merged'; result: string } | undefined;
     const status = db
       .prepare(
-        'SELECT o.disposition, o.intent_id AS intentId FROM merge_status_observations o JOIN merge_intents i ON i.id = o.intent_id WHERE i.pr_identity = (SELECT pr_identity FROM merge_intents WHERE id = ?) ORDER BY o.sequence DESC LIMIT 1',
+        'SELECT o.disposition, o.intent_id AS intentId FROM merge_status_observations o JOIN canonical_merge_intents i ON i.id = o.intent_id WHERE i.pr_identity = (SELECT pr_identity FROM canonical_merge_intents WHERE id = ?) ORDER BY o.sequence DESC LIMIT 1',
       )
       .get(row.id) as { disposition: 'open' | 'closed' } | undefined;
     return {
@@ -213,16 +169,22 @@ export function createMergeJournal(db: Database.Database): MergeJournal {
         squash: config.squash === true,
       },
     };
+    // Unknown retained identities might refer to this same PR. Do not infer
+    // absence of an earlier request from a failed comparison.
+    if (db.prepare('SELECT 1 FROM canonical_merge_intents WHERE pr_identity IS NULL LIMIT 1').get())
+      return mergeReconciliation(
+        'A retained merge identity is unavailable; reconcile its journal before admission.',
+      );
     const resource = prIdentity(config.prUrl);
     const hash = createHash('sha256')
       .update(JSON.stringify([publicationId, request]))
       .digest('hex');
-    const prior = db.prepare(`SELECT ${columns} FROM merge_intents WHERE identity = ?`).get(hash) as
-      | IntentRow
-      | undefined;
+    const prior = db
+      .prepare(`SELECT ${columns} FROM canonical_merge_intents WHERE identity = ?`)
+      .get(hash) as IntentRow | undefined;
     const scheduled = db
       .prepare(
-        `SELECT i.id FROM merge_intents i JOIN merge_observations o ON o.intent_id = i.id
+        `SELECT i.id FROM canonical_merge_intents i JOIN merge_observations o ON o.intent_id = i.id
      WHERE i.pr_identity = ? AND o.disposition = 'pending'
        AND json_extract(o.result, '$.autoMergeScheduled') = 1
        AND NOT EXISTS (SELECT 1 FROM merge_observations done
@@ -234,14 +196,14 @@ export function createMergeJournal(db: Database.Database): MergeJournal {
         'The earlier merge is already scheduled; reconcile its disposition.',
       );
     const confirmed = db
-      .prepare(`SELECT i.id FROM merge_intents i WHERE i.pr_identity = ?
+      .prepare(`SELECT i.id FROM canonical_merge_intents i WHERE i.pr_identity = ?
       AND (EXISTS (SELECT 1 FROM merge_observations o WHERE o.intent_id = i.id AND o.disposition = 'merged')
         OR EXISTS (SELECT 1 FROM merge_disposition_observations o WHERE o.intent_id = i.id)) LIMIT 1`)
       .get(resource);
     if (confirmed) return mergeReconciliation('This merge is already confirmed.');
     const lastStatus = db
       .prepare(`SELECT o.disposition FROM merge_status_observations o
-      JOIN merge_intents i ON i.id = o.intent_id WHERE i.pr_identity = ? ORDER BY o.sequence DESC LIMIT 1`)
+      JOIN canonical_merge_intents i ON i.id = o.intent_id WHERE i.pr_identity = ? ORDER BY o.sequence DESC LIMIT 1`)
       .get(resource) as { disposition: string } | undefined;
     if (lastStatus?.disposition === 'closed')
       return mergeReconciliation(
@@ -249,7 +211,7 @@ export function createMergeJournal(db: Database.Database): MergeJournal {
       );
     const uncertain = db
       .prepare(
-        'SELECT a.id FROM merge_attempts a JOIN merge_intents i ON i.id = a.intent_id WHERE i.pr_identity = ? AND NOT EXISTS (SELECT 1 FROM merge_observations o WHERE o.attempt_id = a.id) LIMIT 1',
+        'SELECT a.id FROM merge_attempts a JOIN canonical_merge_intents i ON i.id = a.intent_id WHERE i.pr_identity = ? AND NOT EXISTS (SELECT 1 FROM merge_observations o WHERE o.attempt_id = a.id) LIMIT 1',
       )
       .get(resource);
     if (uncertain)
@@ -284,7 +246,7 @@ export function createMergeJournal(db: Database.Database): MergeJournal {
     find(pod) {
       const row = db
         .prepare(
-          `SELECT ${columns} FROM merge_intents WHERE pod_id = ? AND generation = ? ORDER BY rowid DESC LIMIT 1`,
+          `SELECT ${columns} FROM canonical_merge_intents WHERE pod_id = ? AND generation = ? ORDER BY rowid DESC LIMIT 1`,
         )
         .get(pod.id, pod.lifecycleGeneration) as IntentRow | undefined;
       if (!row) return null;
@@ -292,9 +254,9 @@ export function createMergeJournal(db: Database.Database): MergeJournal {
       return entry(row);
     },
     check(pod, value) {
-      const row = db.prepare(`SELECT ${columns} FROM merge_intents WHERE id = ?`).get(value.id) as
-        | IntentRow
-        | undefined;
+      const row = db
+        .prepare(`SELECT ${columns} FROM canonical_merge_intents WHERE id = ?`)
+        .get(value.id) as IntentRow | undefined;
       if (!row) return mergeReconciliation('Merge admission is missing.');
       verify(pod, row);
     },
@@ -318,9 +280,9 @@ export function createMergeJournal(db: Database.Database): MergeJournal {
       if (db.inTransaction)
         return mergeReconciliation('PR status cannot share an uncommitted transaction.');
       db.transaction(() => {
-        const row = db.prepare(`SELECT ${columns} FROM merge_intents WHERE id = ?`).get(intentId) as
-          | IntentRow
-          | undefined;
+        const row = db
+          .prepare(`SELECT ${columns} FROM canonical_merge_intents WHERE id = ?`)
+          .get(intentId) as IntentRow | undefined;
         if (
           !row ||
           status.merged !== false ||
@@ -337,7 +299,7 @@ export function createMergeJournal(db: Database.Database): MergeJournal {
         const disposition = status.open ? 'open' : 'closed';
         const last = db
           .prepare(
-            'SELECT o.disposition, o.intent_id AS intentId FROM merge_status_observations o JOIN merge_intents i ON i.id = o.intent_id WHERE i.pr_identity = (SELECT pr_identity FROM merge_intents WHERE id = ?) ORDER BY o.sequence DESC LIMIT 1',
+            'SELECT o.disposition, o.intent_id AS intentId FROM merge_status_observations o JOIN canonical_merge_intents i ON i.id = o.intent_id WHERE i.pr_identity = (SELECT pr_identity FROM canonical_merge_intents WHERE id = ?) ORDER BY o.sequence DESC LIMIT 1',
           )
           .get(intentId) as { disposition: string; intentId: string } | undefined;
         if (last?.disposition === disposition && last.intentId === intentId) return;
@@ -355,9 +317,9 @@ export function createMergeJournal(db: Database.Database): MergeJournal {
       if (db.inTransaction)
         return mergeReconciliation('Merge disposition cannot share an uncommitted transaction.');
       db.transaction(() => {
-        const row = db.prepare(`SELECT ${columns} FROM merge_intents WHERE id = ?`).get(intentId) as
-          | IntentRow
-          | undefined;
+        const row = db
+          .prepare(`SELECT ${columns} FROM canonical_merge_intents WHERE id = ?`)
+          .get(intentId) as IntentRow | undefined;
         if (
           !row ||
           result.merged !== true ||
@@ -398,7 +360,7 @@ export function createMergeJournal(db: Database.Database): MergeJournal {
       db.transaction(() => {
         const row = db
           .prepare(
-            'SELECT i.id, i.publication_id AS publicationId, i.request FROM merge_attempts a JOIN merge_intents i ON i.id = a.intent_id WHERE a.id = ?',
+            'SELECT i.id, i.publication_id AS publicationId, i.request FROM merge_attempts a JOIN canonical_merge_intents i ON i.id = a.intent_id WHERE a.id = ?',
           )
           .get(attemptId) as IntentRow | undefined;
         if (

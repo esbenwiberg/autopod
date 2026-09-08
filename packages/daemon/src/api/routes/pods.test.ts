@@ -415,6 +415,38 @@ describe('GET /pods/:podId provider-attempt projection', () => {
     });
   });
 
+  it('keeps task and cost APIs available with explicit unknown merge identity diagnostics', async () => {
+    insertPod(db, { id: 'unknown-merge', status: 'running' });
+    const repo = createPodRepository(db);
+    repo.taskExecutions?.register('unknown-merge');
+    const task = repo.taskExecutions?.snapshot('unknown-merge');
+    if (!task) throw new Error('Missing task identity');
+    // Simulate retained legacy rows, including bodies that must not be parsed by these projections.
+    db.prepare(
+      `INSERT INTO source_publication_intents VALUES ('source','source','unknown-merge',?,0,'invalid legacy body','2026-09-08')`,
+    ).run(task.taskId);
+    db.prepare(
+      "INSERT INTO source_publication_receipts VALUES ('source','invalid legacy body','2026-09-08')",
+    ).run();
+    db.prepare(
+      `INSERT INTO merge_intents VALUES ('merge','merge','source','unknown-merge',?,0,?,'invalid legacy body','2026-09-08')`,
+    ).run(task.taskId, 'x'.repeat(1024 * 1024));
+    for (const route of ['task-execution', 'cost']) {
+      const response = await app.inject({ method: 'GET', url: `/pods/unknown-merge/${route}` });
+      expect(response.statusCode, response.body).toBe(200);
+      const summary = route === 'cost' ? response.json().taskExecution : response.json();
+      expect(summary.merge).toBeUndefined();
+      expect(summary.diagnostics).toContain(
+        'Merge identity unavailable; reconcile retained journal records',
+      );
+      expect(response.body.length).toBeLessThan(16384);
+      expect(response.body).not.toContain('invalid legacy body');
+    }
+    expect(db.prepare('SELECT length(pr_identity) AS n FROM merge_intents').get()).toEqual({
+      n: 1024 * 1024,
+    });
+  });
+
   it('exposes bounded task accounting even when unrelated large pod evidence is malformed', async () => {
     insertPod(db, { id: 'task-accounting', status: 'running', completedAt: undefined });
     createPodRepository(db).taskExecutions?.register('task-accounting');
