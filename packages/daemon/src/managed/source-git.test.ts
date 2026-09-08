@@ -1,8 +1,41 @@
+import { execFileSync } from 'node:child_process';
 import { access, mkdir, mkdtemp, realpath, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { expect, it } from 'vitest';
-import { managedGit } from './source-git.js';
+import { managedGit, managedGitArguments, managedGitConfigContents } from './source-git.js';
+
+it('pins each reviewed local source in command and inherited config trust', async () => {
+  expect(managedGitArguments('/attempt root', ['/reviewed mirror']).slice(0, 5)).toEqual([
+    '--no-pager',
+    '-c',
+    'safe.directory=/attempt root',
+    '-c',
+    'safe.directory=/reviewed mirror',
+  ]);
+  expect(() => managedGitArguments('/attempt', ['relative/mirror'])).toThrow(
+    'managed-git-safe-directory-invalid',
+  );
+  expect(() => managedGitArguments('/attempt', ['/reviewed/*'])).toThrow(
+    'managed-git-safe-directory-invalid',
+  );
+  const config = managedGitConfigContents('/attempt root', ['/reviewed mirror']);
+  expect(config).toBe('[safe]\n\tdirectory = "/attempt root"\n\tdirectory = "/reviewed mirror"\n');
+  const root = await mkdtemp(path.join(tmpdir(), 'managed git config '));
+  try {
+    const file = path.join(root, 'config');
+    await writeFile(file, config);
+    expect(
+      execFileSync('git', ['config', '--file', file, '--get-all', 'safe.directory'], {
+        encoding: 'utf8',
+      })
+        .trim()
+        .split('\n'),
+    ).toEqual(['/attempt root', '/reviewed mirror']);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
 
 it('exact-checkout trust keeps worker-controlled Git hooks disabled', async () => {
   const root = await mkdtemp(path.join(tmpdir(), 'managed git trust '));

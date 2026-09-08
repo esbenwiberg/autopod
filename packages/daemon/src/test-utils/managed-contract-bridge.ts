@@ -231,10 +231,9 @@ for await (const line of createInterface({ input: process.stdin })) {
     process.stdout.write(
       `${JSON.stringify({
         status: response.statusCode,
-        body:
-          response.headers['content-type'] === 'application/octet-stream'
-            ? { base64: response.rawPayload.toString('base64') }
-            : response.json(),
+        body: response.headers['content-type']?.startsWith('application/gzip')
+          ? { base64: response.rawPayload.toString('base64') }
+          : response.json(),
       })}\n`,
     );
   } catch {

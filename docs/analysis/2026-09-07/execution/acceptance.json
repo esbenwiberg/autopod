@@ -2036,7 +2036,8 @@
         "receipts/checkpoint-21-full-validation.txt",
         "receipts/checkpoint-21-validation-identity.json",
         "checkpoint-56.md",
-        "checkpoint-89.md"
+        "checkpoint-89.md",
+        "checkpoint-90.md"
       ],
       "prerequisites": [
         "Historical source safeguards and their regression suites are retained. Deployment status requires approved guest inspection of exact deployed bytes; health/count snapshots and another task report do not prove all fixes are deployed. Final source pipeline remains."
@@ -2073,7 +2074,8 @@
         "checkpoint-48.md: current tracking-branch migration collision reproduced and resolved with byte-preserving native renumbering, managed upgrade tests and copy-only checkpoint reconciliation; production acceptance remains unverified",
         "receipts/checkpoint-48-full-validation.txt",
         "receipts/checkpoint-48-validation-identity.json",
-        "checkpoint-89.md"
+        "checkpoint-89.md",
+        "checkpoint-90.md"
       ],
       "prerequisites": [],
       "remaining": "Managed 142-150 definitions retained as inert baseline; unpublished native additions renumbered 151-158. Combined schema upgrade preserves native/managed data locally. Exact remote migration-byte verification awaits approved read-only inspection; no live migration was performed. Checkpoint 48 verifies managed 150/152 upgrades and copy-only conversion of exact unpublished native checkpoint schemas 151/158/163. Live backup scope/freshness, deployed bytes and activation remain unverified; checkpoint 49 integrates and fully validates main f646cfcc locally; current deployed-source verification remains outstanding."
@@ -2141,7 +2143,8 @@
         "checkpoint-75.md",
         "checkpoint-87.md",
         "checkpoint-88.md",
-        "checkpoint-89.md"
+        "checkpoint-89.md",
+        "checkpoint-90.md"
       ],
       "prerequisites": [
         "Full required pipeline passes on clean 46f63982ea42aef832fcb6df1c21631e468f409c: daemon 4468 passed, one known Linux-only skip; all 15 Turbo tasks passed; audit zero, secret scan and deployment/cleanup safeguards passed. The skipped source callback has separate local Linux proof at unchanged implementation 18e5bd37. Final source validation remains after further implementation."
@@ -2227,7 +2230,7 @@
       "prerequisites": []
     }
   ],
-  "lastCheckpoint": "checkpoint-89.md",
+  "lastCheckpoint": "checkpoint-90.md",
   "migrationLineage": {
     "managedBaseline": "142-152; exact bytes from tracking commit cba763ba0bb3d65cb4c055e00033016ba1d5c646",
     "nativeCurrent": "164-176; byte-preserving move of unpublished native 151-163",

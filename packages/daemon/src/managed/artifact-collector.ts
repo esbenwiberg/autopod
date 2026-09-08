@@ -126,31 +126,43 @@ export async function collectOutput(
   const pack = tar.pack();
   const chunks: Buffer[] = [];
   const completed = new Promise<Buffer>((resolve, reject) => {
-    pack.on('data', (chunk) => chunks.push(Buffer.from(chunk)));
+    pack.on('data', (chunk) => {
+      if (!Buffer.isBuffer(chunk)) {
+        pack.destroy(new Error('artifact-nonbinary-chunk'));
+        return;
+      }
+      chunks.push(Buffer.from(chunk));
+    });
     pack.on('error', reject);
     pack.on('end', () => resolve(Buffer.concat(chunks)));
   });
-  for (const entry of entries) {
-    await new Promise<void>((resolve, reject) =>
-      pack.entry(
-        {
-          name: entry.path,
-          size: entry.bytes.length,
-          type: 'file',
-          mode: 0o444,
-          uid: 0,
-          gid: 0,
-          uname: '',
-          gname: '',
-          mtime: new Date(0),
-        },
-        entry.bytes,
-        (error) => (error ? reject(error) : resolve()),
-      ),
-    );
-  }
-  pack.finalize();
-  const bundle = gzipSync(await completed, { level: 9 });
+  const writeEntries = async () => {
+    for (const entry of entries) {
+      await new Promise<void>((resolve, reject) => {
+        const stream = pack.entry(
+          {
+            name: entry.path,
+            size: entry.bytes.length,
+            type: 'file',
+            mode: 0o444,
+            uid: 0,
+            gid: 0,
+            uname: '',
+            gname: '',
+            mtime: new Date(0),
+          },
+          entry.bytes,
+          (error) => (error ? reject(error) : resolve()),
+        );
+        stream.on('error', reject);
+      });
+    }
+    pack.finalize();
+  };
+  // Observe both promises immediately: a packing failure may happen while an
+  // entry callback is pending. Neither rejection may escape as unhandled.
+  const [, bytes] = await Promise.all([writeEntries(), completed]);
+  const bundle = gzipSync(bytes, { level: 9 });
   return {
     files: entries.map((entry) => ({
       path: entry.path,

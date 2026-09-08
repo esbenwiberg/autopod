@@ -1,9 +1,9 @@
 # Bounded managed provider composition
 
-This library is local code, not an enabled native daemon configuration. The deployed
-CLI lane remains dark. `composeDarkManagedCli` is unchanged; migrations 151/152 and the
-new provider modules have not been deployed. Importing `dist/managed.js` does not
-start a listener, discover credentials, select an account or launch a worker.
+The native CLI lane remains dark unless startup receives both the existing strict
+`AUTOPOD_MANAGED_CLI` binding and a complete `AUTOPOD_MANAGED_ACCEPTANCE`
+single-job contract. Importing `dist/managed.js` does not start a listener, discover
+credentials, select an account or launch a worker.
 
 `composeManagedRuntime` connects independent pinned Git copies, verified artifact
 input mounts, `ManagedContainerRuntime`, `ManagedQuotaFeed`, the durable provider
@@ -93,12 +93,22 @@ ceased. An uncertain request is never retried or replaced.
 
 ## Deployment boundary
 
-Budget policy is approved. Local schema 152 and the concrete channel/transport are
-not deployed. An automatic approval-review block currently prevents reading the
-existing Sandbox target identifiers. After that exact read is authorized, bind the
-actual target, stage the immutable release/repository, prove the image's CLI and
-OS/network enforcement and run the single canary. Preserve native configuration,
-rows and active work. The report-only fixture is not general coding acceptance.
+`AUTOPOD_MANAGED_ACCEPTANCE` has no general enable flag. It contains one canonical
+`ManagedPodRequest`, one installation, one frozen repository mirror and one
+digest-pinned image. Startup rejects a second installation, any existing different
+managed attempt, source delivery, input artifacts, identities, network destinations,
+more than one read-only repository, more than one provider request, more than 180
+seconds, or output beyond one 16 KiB `report.md`. Admission compares the full request,
+so changing a job, attempt, start key, grant, objective, route or output contract is
+rejected before runtime allocation or provider access. Replaying the exact start key
+uses the durable pod and provider-request journals.
+
+The acceptance composition reuses the native authenticated HTTPS service and Entra
+CLI binding. It resolves the exact enrolled ChatGPT account in host memory, uses the
+managed Sandbox ledger and Azure Blob store, resumes matching durable work before the
+listener starts, and closes provider gateways before the database. Removing the
+acceptance environment value and restarting returns the CLI lane to dark behavior.
+Source validation is separate from deployment and live Dispatcher/provider evidence.
 
 ## Concrete report-only Codex channel
 

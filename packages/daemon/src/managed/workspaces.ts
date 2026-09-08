@@ -76,14 +76,12 @@ export class ManagedWorkspaces {
         if (!exists) {
           const staging = `${destination}.${randomUUID()}.staging`;
           try {
-            await managedGit(directory, [
-              'clone',
-              '--no-local',
-              '--no-hardlinks',
-              '--no-checkout',
-              mirror.path,
-              staging,
-            ]);
+            await managedGit(
+              directory,
+              ['clone', '--no-local', '--no-hardlinks', '--no-checkout', mirror.path, staging],
+              undefined,
+              [mirror.path],
+            );
             await managedGit(staging, ['remote', 'remove', 'origin']);
             await managedGit(staging, ['checkout', '--detach', repository.baseRevision]);
             await rename(staging, destination);

@@ -16,7 +16,7 @@ import { fileURLToPath } from 'node:url';
 import type { ArtifactOutput } from '@autopod/shared';
 import Dockerode from 'dockerode';
 import type { Logger } from 'pino';
-import * as tar from 'tar-stream';
+import tar from 'tar-stream';
 import type {
   ContainerExecutionMetadata,
   ContainerManager,
@@ -663,7 +663,13 @@ export class DockerContainerManager implements ContainerManager {
     // Collect tar into a Buffer — dockerode putArchive expects a stream or buffer
     const chunks: Buffer[] = [];
     await new Promise<void>((resolve, reject) => {
-      pack.on('data', (chunk: Buffer) => chunks.push(chunk));
+      pack.on('data', (chunk) => {
+        if (!Buffer.isBuffer(chunk)) {
+          pack.destroy(new Error('archive-nonbinary-chunk'));
+          return;
+        }
+        chunks.push(chunk);
+      });
       pack.on('end', resolve);
       pack.on('error', reject);
     });
@@ -700,7 +706,13 @@ export class DockerContainerManager implements ContainerManager {
 
     return new Promise<Buffer>((resolve, reject) => {
       extract.on('entry', (_header, stream, next) => {
-        stream.on('data', (chunk: Buffer) => chunks.push(chunk));
+        stream.on('data', (chunk) => {
+          if (!Buffer.isBuffer(chunk)) {
+            stream.destroy(new Error('archive-nonbinary-chunk'));
+            return;
+          }
+          chunks.push(chunk);
+        });
         stream.on('end', next);
         stream.on('error', reject);
       });
@@ -806,7 +818,13 @@ export class DockerContainerManager implements ContainerManager {
           } else {
             mkdirSync(dirname(fullPath), { recursive: true });
             const chunks: Buffer[] = [];
-            stream.on('data', (chunk: Buffer) => chunks.push(chunk));
+            stream.on('data', (chunk) => {
+              if (!Buffer.isBuffer(chunk)) {
+                stream.destroy(new Error('archive-nonbinary-chunk'));
+                return;
+              }
+              chunks.push(chunk);
+            });
             stream.on('end', () => {
               try {
                 writeFileSync(fullPath, Buffer.concat(chunks));

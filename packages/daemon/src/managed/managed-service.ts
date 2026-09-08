@@ -300,10 +300,27 @@ export class ManagedPodService {
         }
       }
       if (row.revoked || row.stop_requested || this.expired(row)) {
-        this.db
-          .prepare('UPDATE managed_pods SET revoked=1,stop_requested=1 WHERE pod_id=?')
-          .run(row.pod_id);
-        if (row.runtime_ref) await this.runtime.stop(row.runtime_ref);
+        if (row.runtime_ref) {
+          this.db
+            .prepare('UPDATE managed_pods SET revoked=1,stop_requested=1 WHERE pod_id=?')
+            .run(row.pod_id);
+          await this.runtime.stop(row.runtime_ref);
+        } else {
+          const terminal = this.db
+            .transaction(() => {
+              this.db
+                .prepare(
+                  "UPDATE managed_pods SET revoked=1,stop_requested=1,observed_exit=1,state='killed' WHERE pod_id=? AND runtime_ref IS NULL AND observed_exit=0",
+                )
+                .run(row.pod_id);
+              const current = this.row(row.dispatcher_installation_id, row.pod_id);
+              if (current.observed_exit)
+                this.onTransition?.(current, 'runtime-never-allocated', 'killed');
+              return current;
+            })
+            .immediate();
+          row.observed_exit = terminal.observed_exit;
+        }
       }
     }
   }

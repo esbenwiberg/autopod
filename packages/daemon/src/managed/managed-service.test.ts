@@ -74,6 +74,31 @@ it('expiry survives service restart and is enforced without Dispatcher', async (
     f.close();
   }
 });
+it('expiry closes a reservation that failed before runtime allocation', async () => {
+  const f = fixture();
+  try {
+    f.request.effectiveGrant.budget.expiresAt = 110;
+    resign(f.request);
+    await expect(
+      f.service().start('installation-one', f.request, 'after-reservation'),
+    ).rejects.toThrow('injected-after-reservation');
+    expect(f.launches()).toBe(0);
+    f.advance(111);
+    const restarted = f.service();
+    await restarted.enforceExpiry();
+    const row = restarted.lookup('installation-one', f.request.startKey);
+    expect(row).toMatchObject({
+      state: 'killed',
+      runtime_ref: null,
+      revoked: 1,
+      stop_requested: 1,
+      observed_exit: 1,
+    });
+    expect(f.launches()).toBe(0);
+  } finally {
+    f.close();
+  }
+});
 it('dark mode and unenforceable scope cause no effects', async () => {
   const f = fixture();
   try {

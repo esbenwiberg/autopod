@@ -15,6 +15,7 @@ import { join } from 'node:path';
 import { PassThrough } from 'node:stream';
 import type Dockerode from 'dockerode';
 import pino from 'pino';
+import tar from 'tar-stream';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   DockerContainerManager,
@@ -662,6 +663,22 @@ describe('DockerContainerManager', () => {
   // ─── writeFile() ────────────────────────────────────────
 
   describe('writeFile()', () => {
+    it('refuses a nonbinary tar chunk before calling Docker', async () => {
+      const original = tar.pack;
+      const spy = vi.spyOn(tar, 'pack').mockImplementationOnce(() => {
+        const pack = original();
+        pack.once('data', () => pack.emit('data', { unexpected: true }));
+        return pack;
+      });
+      try {
+        await expect(manager.writeFile('abc123', '/workspace/report.md', 'Facts')).rejects.toThrow(
+          'archive-nonbinary-chunk',
+        );
+        expect(container.putArchive).not.toHaveBeenCalled();
+      } finally {
+        spy.mockRestore();
+      }
+    });
     it('puts a tar archive to the container root', async () => {
       await manager.writeFile('abc123', '/workspace/CLAUDE.md', '# Hello');
 

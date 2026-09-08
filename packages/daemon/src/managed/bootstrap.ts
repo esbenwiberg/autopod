@@ -95,6 +95,16 @@ export function registerManagedRoutes(
   authenticate: (request: FastifyRequest) => Promise<string | null>,
 ) {
   const components = managedComponents(config);
+  registerManagedComponentRoutes(app, components, config, authenticate);
+  return components;
+}
+
+export function registerManagedComponentRoutes(
+  app: import('fastify').FastifyInstance,
+  components: ReturnType<typeof managedComponents>,
+  config: Pick<ManagedComponentsConfig, 'db' | 'store'>,
+  authenticate: (request: FastifyRequest) => Promise<string | null>,
+) {
   managedPodRoutes(app, {
     service: components.service,
     authenticate,
