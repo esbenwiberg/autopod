@@ -165,14 +165,25 @@ export function composeManagedAcceptance(
     throw new Error('managed-acceptance-dependency-invalid');
   }
   const rows = dependencies.db
-    .prepare('SELECT dispatcher_installation_id, request_json FROM managed_pods')
-    .all() as Array<{ dispatcher_installation_id: string; request_json: string }>;
+    .prepare(
+      'SELECT dispatcher_installation_id,request_json,runtime_ref,observed_exit,cleanup FROM managed_pods',
+    )
+    .all() as Array<{
+    dispatcher_installation_id: string;
+    request_json: string;
+    runtime_ref: string | null;
+    observed_exit: number;
+    cleanup: string;
+  }>;
+  const matches = (row: (typeof rows)[number]) =>
+    row.dispatcher_installation_id === config.installationId &&
+    canonical(JSON.parse(row.request_json)) === canonical(config.request);
   if (
-    rows.length > 1 ||
+    rows.filter(matches).length > 1 ||
     rows.some(
       (row) =>
-        row.dispatcher_installation_id !== config.installationId ||
-        canonical(JSON.parse(row.request_json)) !== canonical(config.request),
+        (row.observed_exit === 0 || (row.runtime_ref !== null && row.cleanup !== 'observed')) &&
+        !matches(row),
     )
   ) {
     throw new Error('managed-acceptance-existing-attempt-conflict');
