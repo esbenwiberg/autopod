@@ -274,7 +274,9 @@
         "checkpoint-47.md: durable closed/open source observations, retained-source recovery and separate closed counts with local CLI/mobile proof; wider acceptance remains partial",
         "receipts/checkpoint-47-full-validation.txt",
         "receipts/checkpoint-47-validation-identity.json",
-        "checkpoint-48.md: current tracking-branch migration collision reproduced and resolved with byte-preserving native renumbering, managed upgrade tests and copy-only checkpoint reconciliation; production acceptance remains unverified"
+        "checkpoint-48.md: current tracking-branch migration collision reproduced and resolved with byte-preserving native renumbering, managed upgrade tests and copy-only checkpoint reconciliation; production acceptance remains unverified",
+        "receipts/checkpoint-48-full-validation.txt",
+        "receipts/checkpoint-48-validation-identity.json"
       ],
       "prerequisites": [
         "PR creation intent/reconciliation implemented locally; broader finalization side effects and operator override remain."
@@ -1503,7 +1505,9 @@
       ],
       "evidence": [
         "receipts/backup-health-cli-green.txt",
-        "checkpoint-48.md: current tracking-branch migration collision reproduced and resolved with byte-preserving native renumbering, managed upgrade tests and copy-only checkpoint reconciliation; production acceptance remains unverified"
+        "checkpoint-48.md: current tracking-branch migration collision reproduced and resolved with byte-preserving native renumbering, managed upgrade tests and copy-only checkpoint reconciliation; production acceptance remains unverified",
+        "receipts/checkpoint-48-full-validation.txt",
+        "receipts/checkpoint-48-validation-identity.json"
       ],
       "prerequisites": [],
       "remaining": " Checkpoint 48 verifies managed 150/152 upgrades and copy-only conversion of exact unpublished native checkpoint schemas 151/158/163. Live backup scope/freshness, deployed bytes and activation remain unverified; current tracking-main source integration is still outstanding."
@@ -1518,7 +1522,9 @@
       ],
       "tests": ["packages/daemon/src/db/reconcile-native-checkpoint.test.ts"],
       "evidence": [
-        "checkpoint-48.md: current tracking-branch migration collision reproduced and resolved with byte-preserving native renumbering, managed upgrade tests and copy-only checkpoint reconciliation; production acceptance remains unverified"
+        "checkpoint-48.md: current tracking-branch migration collision reproduced and resolved with byte-preserving native renumbering, managed upgrade tests and copy-only checkpoint reconciliation; production acceptance remains unverified",
+        "receipts/checkpoint-48-full-validation.txt",
+        "receipts/checkpoint-48-validation-identity.json"
       ],
       "prerequisites": [],
       "remaining": " Checkpoint 48 verifies managed 150/152 upgrades and copy-only conversion of exact unpublished native checkpoint schemas 151/158/163. Live backup scope/freshness, deployed bytes and activation remain unverified; current tracking-main source integration is still outstanding."
@@ -1626,7 +1632,9 @@
         "receipts/managed-migration-compatibility-source.json",
         "receipts/decision-migration-prefix.json",
         "checkpoint-38.md",
-        "checkpoint-48.md: current tracking-branch migration collision reproduced and resolved with byte-preserving native renumbering, managed upgrade tests and copy-only checkpoint reconciliation; production acceptance remains unverified"
+        "checkpoint-48.md: current tracking-branch migration collision reproduced and resolved with byte-preserving native renumbering, managed upgrade tests and copy-only checkpoint reconciliation; production acceptance remains unverified",
+        "receipts/checkpoint-48-full-validation.txt",
+        "receipts/checkpoint-48-validation-identity.json"
       ],
       "prerequisites": [],
       "remaining": "Managed 142-150 definitions retained as inert baseline; unpublished native additions renumbered 151-158. Combined schema upgrade preserves native/managed data locally. Exact remote migration-byte verification awaits approved read-only inspection; no live migration was performed. Checkpoint 48 verifies managed 150/152 upgrades and copy-only conversion of exact unpublished native checkpoint schemas 151/158/163. Live backup scope/freshness, deployed bytes and activation remain unverified; current tracking-main source integration is still outstanding."
