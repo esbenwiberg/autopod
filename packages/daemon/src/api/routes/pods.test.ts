@@ -3339,6 +3339,23 @@ describe('POST /pods/:podId/spawn-fix', () => {
     }
   });
 
+  it('retains the pod and returns a readable cleanup rejection when its sidecar manager is unavailable', async () => {
+    const podId = insertMergePendingPod();
+    const repo = createPodRepository(db);
+    repo.update(podId, { status: 'failed', sidecarContainerIds: { database: 'owned-sidecar' } });
+    const response = await app.inject({
+      method: 'DELETE',
+      url: `/pods/${podId}`,
+      headers: authHeaders,
+    });
+    expect(response.statusCode).toBe(409);
+    expect(response.json()).toMatchObject({
+      error: 'POD_DELETE_CLEANUP_UNVERIFIED',
+      message: expect.stringContaining('sidecars'),
+    });
+    expect(repo.getOrThrow(podId).sidecarContainerIds).toEqual({ database: 'owned-sidecar' });
+  });
+
   it('queues three back-to-back messages onto one canonical fix pod', async () => {
     const podId = insertMergePendingPod();
 

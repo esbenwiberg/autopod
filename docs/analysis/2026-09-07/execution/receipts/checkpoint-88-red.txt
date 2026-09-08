@@ -1,0 +1,39 @@
+
+ RUN  v4.1.11 /private/tmp/autopod-durable-execution/packages/daemon
+
+ ❯ src/pods/pod-manager.test.ts (609 tests | 3 failed | 606 skipped) 176ms
+     × retains source and stops later Delete steps after container cleanup failure 86ms
+     × retains source and stops later Delete steps after container cleanup timeout 44ms
+     × retains source and stops later Delete steps after container cleanup superseded 45ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 3 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/pods/pod-manager.test.ts > PodManager > retains source and stops later Delete steps after container cleanup failure
+ FAIL  src/pods/pod-manager.test.ts > PodManager > retains source and stops later Delete steps after container cleanup timeout
+ FAIL  src/pods/pod-manager.test.ts > PodManager > retains source and stops later Delete steps after container cleanup superseded
+AssertionError: expected null to match object { Object (code) }
+
+- Expected:
+{
+  "code": "POD_DELETE_CLEANUP_UNVERIFIED",
+}
+
++ Received:
+null
+
+ ❯ src/pods/pod-manager.test.ts:2053:30
+    2051|         if (fault === 'superseded') ctx.podRepo.incrementLifecycleGene…
+    2052|         release();
+    2053|         expect(await result).toMatchObject({ code: 'POD_DELETE_CLEANUP…
+       |                              ^
+    2054|         await vi.advanceTimersByTimeAsync(0);
+    2055|         expect(ctx.worktreeManager.cleanup).not.toHaveBeenCalled();
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/3]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  3 failed | 606 skipped (609)
+   Start at  17:51:10
+   Duration  1.72s (transform 982ms, setup 0ms, import 1.43s, tests 176ms, environment 0ms)
+

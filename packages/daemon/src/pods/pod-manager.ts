@@ -197,6 +197,7 @@ import {
   preflightAgentContinuation,
 } from './continuation-preflight.js';
 import { buildCorrectionMessage } from './correction-context.js';
+import { runDeletionCleanup } from './deletion-cleanup.js';
 import { dispatchRequestHash } from './dispatch-preflight-ledger.js';
 import { persistCompletionReply, persistEscalation } from './escalation-coordinator.js';
 import type { EscalationRepository } from './escalation-repository.js';
@@ -3591,8 +3592,17 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
    *  the most recent `sidecarContainerIds` even if the caller's snapshot is
    *  stale. No-ops if the pod never spawned any, or if no SidecarManager is
    *  configured (older deployments). Best-effort unless `strict` is requested. */
-  async function killSidecarsForPod(podId: string, strict = false): Promise<void> {
-    if (!sidecarManager) return;
+  async function killSidecarsForPod(
+    podId: string,
+    strict = false,
+    assertCurrent?: () => void,
+  ): Promise<void> {
+    assertCurrent?.();
+    if (!sidecarManager) {
+      if (strict && Object.keys(podRepo.getOrThrow(podId).sidecarContainerIds ?? {}).length > 0)
+        throw new Error('Sidecar cleanup capability unavailable');
+      return;
+    }
     let current: Pod;
     try {
       current = podRepo.getOrThrow(podId);
@@ -3618,6 +3628,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
     if (failures.length > 0 && strict) {
       throw new AggregateError(failures, `Failed to clean up sidecars for pod ${podId}`);
     }
+    assertCurrent?.();
     podRepo.update(podId, { sidecarContainerIds: null });
   }
 
@@ -3626,7 +3637,11 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
    *  branches are logged, not thrown. Cleared from the DB afterwards so a
    *  cron-level sweep can see "this pod has no pending test branches".
    */
-  async function cleanupTestRunBranches(podId: string): Promise<void> {
+  async function cleanupTestRunBranches(
+    podId: string,
+    options?: { strict: boolean; assertCurrent: () => void },
+  ): Promise<void> {
+    options?.assertCurrent();
     let current: Pod;
     try {
       current = podRepo.getOrThrow(podId);
@@ -3638,20 +3653,24 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
     const profile = profileStore.get(current.profileName);
     const cfg = profile.testPipeline;
     if (!cfg || !cfg.enabled || !deps.azureDevOpsAuth) {
+      if (options?.strict) throw new Error('Test branch cleanup capability unavailable');
       podRepo.update(podId, { testRunBranches: null });
       return;
     }
     const token = await deps.azureDevOpsAuth.getToken();
+    options?.assertCurrent();
     const origin = new URL(cfg.testRepo).origin;
     if (!current.worktreePath) {
       // No worktree to run git from. Can't delete; leave a daily sweep to reap.
+      if (options?.strict) throw new Error('Test branch worktree unavailable');
       logger.warn({ podId, branches }, 'Cannot cleanup test-run branches — pod has no worktree');
       podRepo.update(podId, { testRunBranches: null });
       return;
     }
-    await Promise.allSettled(
+    const results = await Promise.allSettled(
       branches.map(async (branch) => {
         try {
+          options?.assertCurrent();
           await execFileAsync(
             'git',
             ['-C', current.worktreePath as string, 'push', cfg.testRepo, '--delete', branch],
@@ -3668,9 +3687,13 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           );
         } catch (err) {
           logger.warn({ err, podId, branch }, 'Failed to delete test-run branch');
+          if (options?.strict) throw err;
         }
       }),
     );
+    options?.assertCurrent();
+    if (options?.strict && results.some((result) => result.status === 'rejected'))
+      throw new Error('Test branch cleanup incomplete');
     podRepo.update(podId, { testRunBranches: null });
   }
 
@@ -15787,8 +15810,6 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
 
     async deleteSession(podId: string): Promise<void> {
       podRepo.taskExecutions?.assertCanDelete(podId);
-      clearPreviewTimer(podId);
-      await stopSandboxPreviewProxy(podId);
       const pod = podRepo.getOrThrow(podId);
       const deletable =
         isTerminalState(pod.status) ||
@@ -15802,61 +15823,69 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           409,
         );
       }
-
-      // Cap cleanup so a hung Docker stop or slow worktree rm-rf can't blow
-      // past the desktop's 30s URLSession timeout and leave the pod undeletable.
-      // Mirror killSession's pattern: best-effort cleanup, always finalize the row.
-      const DELETE_TIMEOUT_MS = 25_000;
-      const cleanup = async () => {
-        try {
-          await killSidecarsForPod(podId);
-        } catch (err) {
-          logger.warn({ err, podId }, 'Failed to kill sidecars during delete');
+      const assertOwnership = () => {
+        const current = podRepo.getOrThrow(podId);
+        if (
+          current.lifecycleGeneration !== pod.lifecycleGeneration ||
+          current.status !== pod.status ||
+          current.containerId !== pod.containerId ||
+          current.executionTarget !== pod.executionTarget ||
+          current.worktreePath !== pod.worktreePath ||
+          current.runtime !== pod.runtime
+        ) {
+          throw new AutopodError(
+            'Pod deletion cleanup ownership changed. Reconcile resource and pod state before retrying Delete.',
+            'POD_DELETE_CLEANUP_UNVERIFIED',
+            409,
+          );
         }
-        try {
-          await cleanupTestRunBranches(podId);
-        } catch (err) {
-          logger.warn({ err, podId }, 'Failed to cleanup test branches during delete');
-        }
-        if (pod.containerId) {
-          try {
-            const cm = containerManagerFactory.get(pod.executionTarget);
-            await cm.kill(pod.containerId);
-          } catch (err) {
-            logger.warn({ err, podId }, 'Failed to kill container during delete');
-          }
-        }
-        try {
-          await destroyPodNetwork(podId);
-        } catch (err) {
-          logger.warn({ err, podId }, 'Failed to destroy network during delete');
-        }
-        if (pod.worktreePath) {
-          try {
-            await worktreeManager.cleanup(pod.worktreePath);
-          } catch (err) {
-            logger.warn({ err, podId }, 'Failed to cleanup worktree during delete');
-          }
-        }
-        const runtimeStateDirs: Partial<Record<string, (id: string) => Promise<void>>> = {
-          claude: cleanupClaudeState,
-          codex: cleanupCodexState,
-        };
-        await runtimeStateDirs[pod.runtime]?.(podId)?.catch((err) => {
-          logger.warn({ err, podId }, `Failed to cleanup ${pod.runtime} state dir during delete`);
-        });
+        podRepo.taskExecutions?.assertCanDelete(podId);
       };
-
-      await Promise.race([
-        cleanup(),
-        new Promise<void>((resolve) =>
-          setTimeout(() => {
-            logger.warn({ podId }, 'Delete cleanup timed out — finalizing');
-            resolve();
-          }, DELETE_TIMEOUT_MS),
-        ),
-      ]);
-
+      const runtimeStateDirs: Partial<Record<string, (id: string) => Promise<void>>> = {
+        claude: cleanupClaudeState,
+        codex: cleanupCodexState,
+      };
+      await runDeletionCleanup(
+        [
+          {
+            name: 'preview',
+            run: async () => {
+              clearPreviewTimer(podId);
+              await stopSandboxPreviewProxy(podId);
+            },
+          },
+          {
+            name: 'sidecars',
+            run: (assertCurrent) => killSidecarsForPod(podId, true, assertCurrent),
+          },
+          {
+            name: 'container',
+            run: async () => {
+              if (pod.containerId)
+                await containerManagerFactory.get(pod.executionTarget).kill(pod.containerId);
+            },
+          },
+          { name: 'network', run: () => destroyPodNetwork(podId, true) },
+          {
+            name: 'test branches',
+            run: (assertCurrent) => cleanupTestRunBranches(podId, { strict: true, assertCurrent }),
+          },
+          {
+            name: 'worktree',
+            run: async () => {
+              if (pod.worktreePath) await worktreeManager.cleanup(pod.worktreePath);
+            },
+          },
+          {
+            name: 'runtime state',
+            run: async () => {
+              await runtimeStateDirs[pod.runtime]?.(podId);
+            },
+          },
+        ],
+        assertOwnership,
+      );
+      assertOwnership();
       pendingUpdateFromBaseIntents.delete(podId);
       forceWithLeaseAllowances.delete(podId);
       podRepo.delete(podId);

@@ -228,7 +228,8 @@
         "checkpoint-57.md",
         "checkpoint-58.md",
         "checkpoint-73.md",
-        "checkpoint-87.md"
+        "checkpoint-87.md",
+        "checkpoint-88.md"
       ],
       "prerequisites": [],
       "remaining": "Entered artifact collection survives restart with sources retained; generation/cycle-bound integrity receipts and in-process duplicate coordination are implemented. Independent source inventory, fsync/power-loss proof, orphan snapshot/DB-path reconciliation, interactive duplicates, other reply boundaries and broader durable finalization side effects remain. New worker/cycle and validation admission now preserve pending decisions, including older unresolved cycles in the current generation. Historical missing payload recovery and stream/MCP delivery acknowledgment remain. Codex now observes summary events before Spawn/Resume launch and disposes each invocation listener. This closes the local launch/stream attachment race, not durable delivery acknowledgment across all runtimes or daemon restart. Concurrent interactive completions now coalesce in process, conflicting promotion/generation requests fail closed, and current source/lifecycle/decision ownership is checked across push and container release boundaries. This is not durable cross-process idempotency, cancellation of already-dispatched external operations, or complete post-completion side-effect accounting."
@@ -373,7 +374,8 @@
         "checkpoint-58.md",
         "checkpoint-60.md",
         "checkpoint-79.md",
-        "checkpoint-87.md"
+        "checkpoint-87.md",
+        "checkpoint-88.md"
       ],
       "prerequisites": [
         "PR creation intent/reconciliation implemented locally; broader finalization side effects and operator override remain."
@@ -457,7 +459,8 @@
         "packages/daemon/src/pods/task-retry-ledger.ts",
         "packages/daemon/src/pods/interactive-completion-coordinator.ts",
         "packages/daemon/src/pods/pod-repository.ts",
-        "packages/daemon/src/pods/validation-ownership.ts"
+        "packages/daemon/src/pods/validation-ownership.ts",
+        "packages/daemon/src/pods/deletion-cleanup.ts"
       ],
       "tests": [
         "packages/daemon/src/db/unit-of-work.test.ts",
@@ -501,7 +504,8 @@
         "receipts/checkpoint-23-validation-identity.json",
         "checkpoint-55.md",
         "checkpoint-56.md",
-        "checkpoint-58.md"
+        "checkpoint-58.md",
+        "checkpoint-88.md"
       ],
       "prerequisites": [],
       "remaining": "Entered artifact collection survives restart with sources retained; generation/cycle-bound integrity receipts and in-process duplicate coordination are implemented. Independent source inventory, fsync/power-loss proof, orphan snapshot/DB-path reconciliation, interactive duplicates, other reply boundaries and broader durable finalization side effects remain. New worker/cycle and validation admission now preserve pending decisions, including older unresolved cycles in the current generation. Historical missing payload recovery and stream/MCP delivery acknowledgment remain. Concurrent interactive completions now coalesce in process, conflicting promotion/generation requests fail closed, and current source/lifecycle/decision ownership is checked across push and container release boundaries. This is not durable cross-process idempotency, cancellation of already-dispatched external operations, or complete post-completion side-effect accounting."
@@ -1581,7 +1585,8 @@
         "checkpoint-64.md",
         "checkpoint-74.md",
         "checkpoint-75.md",
-        "checkpoint-87.md"
+        "checkpoint-87.md",
+        "checkpoint-88.md"
       ],
       "prerequisites": [
         "Selected mobile flows and new health CLI have local interaction proof. Desktop has compilation and tests only. Remaining operator flows, physical device and live evidence are outstanding."
@@ -2116,7 +2121,8 @@
         "checkpoint-39.md",
         "checkpoint-74.md",
         "checkpoint-75.md",
-        "checkpoint-87.md"
+        "checkpoint-87.md",
+        "checkpoint-88.md"
       ],
       "prerequisites": [
         "Full required pipeline passes on clean 46f63982ea42aef832fcb6df1c21631e468f409c: daemon 4468 passed, one known Linux-only skip; all 15 Turbo tasks passed; audit zero, secret scan and deployment/cleanup safeguards passed. The skipped source callback has separate local Linux proof at unchanged implementation 18e5bd37. Final source validation remains after further implementation."
@@ -2176,7 +2182,8 @@
         "checkpoint-73.md",
         "checkpoint-74.md",
         "checkpoint-75.md",
-        "checkpoint-87.md"
+        "checkpoint-87.md",
+        "checkpoint-88.md"
       ],
       "prerequisites": [
         "Selected mobile flows and new health CLI have local interaction proof. Desktop has compilation and tests only. Remaining operator flows, physical device and live evidence are outstanding."
@@ -2201,7 +2208,7 @@
       "prerequisites": []
     }
   ],
-  "lastCheckpoint": "checkpoint-87.md",
+  "lastCheckpoint": "checkpoint-88.md",
   "migrationLineage": {
     "managedBaseline": "142-152; exact bytes from tracking commit cba763ba0bb3d65cb4c055e00033016ba1d5c646",
     "nativeCurrent": "164-176; byte-preserving move of unpublished native 151-163",

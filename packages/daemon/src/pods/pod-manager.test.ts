@@ -2024,6 +2024,105 @@ describe('PodManager', () => {
     expect(ctx.podRepo.getOrThrow(pod.id).worktreePath).toBe('/tmp/retained-source');
   });
 
+  it.each(['failure', 'timeout', 'superseded', 'task-admitted'] as const)(
+    'retains source and stops later Delete steps after container cleanup %s',
+    async (fault) => {
+      vi.useFakeTimers();
+      const ctx = createTestContext();
+      const manager = createPodManager(ctx.deps);
+      const pod = manager.createSession(
+        { profileName: 'test-profile', task: 'Retain source until cleanup is observed' },
+        'operator',
+      );
+      ctx.podRepo.update(pod.id, {
+        status: 'failed',
+        containerId: 'retained-container',
+        worktreePath: '/tmp/retained-source',
+      });
+      let release = () => {};
+      const pending = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      vi.mocked(ctx.containerManager.kill).mockImplementation(async () => {
+        if (fault === 'failure') throw new Error('Container removal unavailable');
+        await pending;
+      });
+      const result = manager.deleteSession(pod.id).then(
+        () => null,
+        (error: unknown) => error,
+      );
+      try {
+        await vi.advanceTimersByTimeAsync(0);
+        expect(ctx.containerManager.kill).toHaveBeenCalledWith('retained-container');
+        if (fault === 'timeout') await vi.advanceTimersByTimeAsync(25001);
+        if (fault === 'superseded') ctx.podRepo.incrementLifecycleGeneration(pod.id);
+        if (fault === 'task-admitted')
+          ctx.podRepo.taskExecutions?.beginRun(pod.id, pod.lifecycleGeneration, 1, {
+            runtime: pod.runtime,
+            model: pod.model,
+            providerAccountId: null,
+          });
+        release();
+        expect(await result).toMatchObject({ code: 'POD_DELETE_CLEANUP_UNVERIFIED' });
+        await vi.advanceTimersByTimeAsync(0);
+        expect(ctx.worktreeManager.cleanup).not.toHaveBeenCalled();
+        expect(ctx.podRepo.getOrThrow(pod.id)).toMatchObject({
+          status: 'failed',
+          worktreePath: '/tmp/retained-source',
+        });
+        expect(vi.getTimerCount()).toBe(0);
+      } finally {
+        release();
+        await result;
+        vi.useRealTimers();
+      }
+    },
+  );
+
+  it('deletes a settled pod only after cleanup completes and disposes the deadline', async () => {
+    vi.useFakeTimers();
+    const ctx = createTestContext(undefined, { defaultRuntime: 'copilot' });
+    const manager = createPodManager(ctx.deps);
+    const pod = manager.createSession(
+      { profileName: 'test-profile', task: 'Observed cleanup' },
+      'operator',
+    );
+    ctx.podRepo.update(pod.id, {
+      status: 'failed',
+      containerId: 'owned',
+      worktreePath: '/tmp/owned',
+    });
+    try {
+      await manager.deleteSession(pod.id);
+      expect(ctx.containerManager.kill).toHaveBeenCalledWith('owned');
+      expect(ctx.worktreeManager.cleanup).toHaveBeenCalledWith('/tmp/owned');
+      expect(() => ctx.podRepo.getOrThrow(pod.id)).toThrow(PodNotFoundError);
+      expect(vi.getTimerCount()).toBe(0);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('retains test branch cleanup records and source when its capability is unavailable', async () => {
+    const ctx = createTestContext();
+    const manager = createPodManager(ctx.deps);
+    const pod = manager.createSession(
+      { profileName: 'test-profile', task: 'Retain test cleanup' },
+      'operator',
+    );
+    ctx.podRepo.update(pod.id, {
+      status: 'failed',
+      testRunBranches: ['test/owned'],
+      worktreePath: '/tmp/owned',
+    });
+    await expect(manager.deleteSession(pod.id)).rejects.toMatchObject({
+      code: 'POD_DELETE_CLEANUP_UNVERIFIED',
+      message: expect.stringContaining('test branches'),
+    });
+    expect(ctx.worktreeManager.cleanup).not.toHaveBeenCalled();
+    expect(ctx.podRepo.getOrThrow(pod.id).testRunBranches).toEqual(['test/owned']);
+  });
+
   it.each(['thrown', 'fatal-event', 'advisory-event'] as const)(
     'retains explicit unverified termination from %s before admitting linked work',
     async (failure) => {
