@@ -22,7 +22,8 @@
         "packages/daemon/src/pods/interactive-completion-coordinator.ts",
         "packages/daemon/src/pods/pod-repository.ts",
         "packages/mobile-web/src/lib/pod-actions.ts",
-        "packages/daemon/src/pods/polling-coordinator.ts"
+        "packages/daemon/src/pods/polling-coordinator.ts",
+        "packages/daemon/src/pods/continuation-preflight.ts"
       ],
       "tests": [
         "packages/daemon/src/pods/pod-lifecycle.e2e.test.ts",
@@ -63,7 +64,8 @@
         "checkpoint-31.md: late merge-poller lifecycle and PR identity guards; overlapping ticks and durable cross-process receipts remain partial",
         "checkpoint-32.md: serial in-process merge polls, replacement owner drain and stop fencing; cross-process delivery and cleanup dispositions remain partial",
         "checkpoint-33.md: transactional durable decision admission and confirmed merge observations; operator disposition projection and broader delivery receipts remain partial",
-        "checkpoint-42.md: current lifecycle and unanswered-decision guard rechecked after provider preparation/auth before merge mutation; durable admission remains outstanding"
+        "checkpoint-42.md: current lifecycle and unanswered-decision guard rechecked after provider preparation/auth before merge mutation; durable admission remains outstanding",
+        "checkpoint-51.md: direct worker continuations and missing-session fallbacks record fresh preflight; late decisions and replacement lifecycle retained; broader runtime/live acceptance remains partial"
       ],
       "prerequisites": [],
       "remaining": "Normal replies are atomic, retained in bounded recovery context, and fence older completion events. New unanswered decisions remain actionable. Attached MCP delivery acknowledgment, delayed concurrent stream ordering, other response boundaries, historical orphan questions and broader finalization side effects remain. New worker/cycle and validation admission now preserve pending decisions, including older unresolved cycles in the current generation. Historical missing payload recovery and stream/MCP delivery acknowledgment remain. Codex now observes summary events before Spawn/Resume launch and disposes each invocation listener. This closes the local launch/stream attachment race, not durable delivery acknowledgment across all runtimes or daemon restart. Concurrent interactive completions now coalesce in process, conflicting promotion/generation requests fail closed, and current source/lifecycle/decision ownership is checked across push and container release boundaries. This is not durable cross-process idempotency, cancellation of already-dispatched external operations, or complete post-completion side-effect accounting."
@@ -864,7 +866,7 @@
         "receipts/recovery-provenance-swift-reviewed.txt"
       ],
       "prerequisites": [],
-      "remaining": "Coding, validation/retry, review-only and completion recovery provenance are locally implemented. Sandbox effective cgroup resources are read without substituting requests; image and network identity remain unavailable. Every direct agent-resume path, actual reviewer CLI identity, complete receipt history/operator coverage, native interaction and live acceptance remain outstanding."
+      "remaining": "Coding, validation/retry, review-only and completion recovery provenance are locally implemented. Sandbox effective cgroup resources are read without substituting requests; image and network identity remain unavailable. Checkpoint 51 adds preflight to direct agent Resume and missing-session fallback paths. Side effects after execution begins, actual reviewer CLI identity, complete receipt history/operator coverage, native interaction and live acceptance remain outstanding."
     },
     {
       "id": "W3.4",
@@ -1456,7 +1458,8 @@
         "packages/mobile-web/src/components/DispatchPreflightPanel.tsx",
         "packages/desktop/Sources/AutopodUI/Views/Shared/DispatchPreflightCard.swift",
         "packages/daemon/src/containers/cgroup-execution-metadata.ts",
-        "packages/daemon/src/containers/sandbox-container-manager.ts"
+        "packages/daemon/src/containers/sandbox-container-manager.ts",
+        "packages/daemon/src/pods/continuation-preflight.ts"
       ],
       "tests": [
         "packages/daemon/src/pods/pod-manager.test.ts",
@@ -1489,10 +1492,11 @@
         "receipts/validation-sandbox-provenance-affected.txt",
         "receipts/recovery-provenance-e2e.txt",
         "receipts/recovery-provenance-mobile-browser.json",
-        "receipts/recovery-provenance-swift-reviewed.txt"
+        "receipts/recovery-provenance-swift-reviewed.txt",
+        "checkpoint-51.md: direct worker continuations and missing-session fallbacks record fresh preflight; late decisions and replacement lifecycle retained; broader runtime/live acceptance remains partial"
       ],
       "prerequisites": [],
-      "remaining": "Coding, validation/retry, review-only and completion recovery provenance are locally implemented. Sandbox effective cgroup resources are read without substituting requests; image and network identity remain unavailable. Every direct agent-resume path, actual reviewer CLI identity, complete receipt history/operator coverage, native interaction and live acceptance remain outstanding."
+      "remaining": "Coding, validation/retry, review-only and completion recovery provenance are locally implemented. Sandbox effective cgroup resources are read without substituting requests; image and network identity remain unavailable. Checkpoint 51 adds preflight to direct agent Resume and missing-session fallback paths. Side effects after execution begins, actual reviewer CLI identity, complete receipt history/operator coverage, native interaction and live acceptance remain outstanding."
     },
     {
       "id": "W6.2",
@@ -1762,7 +1766,7 @@
       "prerequisites": []
     }
   ],
-  "lastCheckpoint": "checkpoint-50.md",
+  "lastCheckpoint": "checkpoint-51.md",
   "migrationLineage": {
     "managedBaseline": "142-152; exact bytes from tracking commit cba763ba0bb3d65cb4c055e00033016ba1d5c646",
     "nativeCurrent": "164-176; byte-preserving move of unpublished native 151-163",

@@ -7466,6 +7466,134 @@ describe('PodManager', () => {
   });
 
   describe('rejectSession', () => {
+    it('keeps a new unanswered decision actionable when it arrives during resume preflight', async () => {
+      const ctx = createTestContext();
+      const manager = createPodManager(ctx.deps);
+      const pod = manager.createSession(
+        { profileName: 'test-profile', task: 'Keep new decision' },
+        'operator',
+      );
+      ctx.podRepo.update(pod.id, { status: 'validated', containerId: 'ctr-1' });
+      const bridge = createSessionBridge({
+        ...ctx.deps,
+        podManager: manager,
+        pendingRequestsByPod: new Map(),
+      });
+      ctx.containerManager.getExecutionMetadata = vi.fn(async () => {
+        bridge.createEscalation({
+          id: 'new-question',
+          podId: pod.id,
+          type: 'ask_human',
+          timestamp: new Date().toISOString(),
+          payload: { question: 'Approve this change?' },
+          response: null,
+        });
+        return {
+          imageDigest: null,
+          memoryLimitBytes: 10 * 1024 ** 3,
+          cpuLimit: 2,
+          networkMode: null,
+        };
+      });
+      await expect(manager.rejectSession(pod.id, 'Repair selected finding')).rejects.toThrow();
+      expect(ctx.runtime.resume).not.toHaveBeenCalled();
+      expect(ctx.containerManager.kill).not.toHaveBeenCalled();
+      expect(ctx.podRepo.getOrThrow(pod.id)).toMatchObject({
+        status: 'awaiting_input',
+        containerId: 'ctr-1',
+        pendingEscalation: { id: 'new-question' },
+      });
+      expect(ctx.escalationRepo.getOrThrow('new-question').response).toBeNull();
+    });
+
+    it('records fresh runtime provenance before a rejection starts another worker turn', async () => {
+      const ctx = createTestContext();
+      const manager = createPodManager(ctx.deps);
+      const pod = manager.createSession(
+        { profileName: 'test-profile', task: 'Verify resumed environment' },
+        'operator',
+      );
+      ctx.podRepo.update(pod.id, { status: 'validated', containerId: 'ctr-1' });
+      ctx.containerManager.getExecutionMetadata = vi.fn(async () => ({
+        imageDigest: `sha256:${'c'.repeat(64)}`,
+        memoryLimitBytes: 10 * 1024 ** 3,
+        cpuLimit: 2,
+        networkMode: 'bridge',
+      }));
+      const resume = vi.mocked(ctx.runtime.resume).getMockImplementation();
+      if (!resume) throw new Error('Missing runtime fixture');
+      vi.mocked(ctx.runtime.resume).mockImplementation((...args) => {
+        expect(ctx.podRepo.executionProvenance?.latest(pod.id)).toMatchObject({
+          purpose: 'coding',
+          status: 'checked',
+          runtime: 'claude',
+          cliVersion: '1.0.0',
+          imageDigest: `sha256:${'c'.repeat(64)}`,
+        });
+        return resume(...args);
+      });
+      await manager.rejectSession(pod.id, 'Fix selected finding');
+      expect(ctx.runtime.resume).toHaveBeenCalled();
+    });
+
+    it('retains the container and records a blocked resume when the runtime CLI is unavailable', async () => {
+      const ctx = createTestContext();
+      const manager = createPodManager(ctx.deps);
+      const pod = manager.createSession(
+        { profileName: 'test-profile', task: 'Require the actual runtime' },
+        'operator',
+      );
+      ctx.podRepo.update(pod.id, { status: 'validated', containerId: 'ctr-1' });
+      const exec = vi.mocked(ctx.containerManager.execInContainer).getMockImplementation();
+      if (!exec) throw new Error('Missing container fixture');
+      vi.mocked(ctx.containerManager.execInContainer).mockImplementation(
+        async (id, cmd, options) =>
+          cmd.join(' ') === 'claude --version'
+            ? { exitCode: 1, stdout: '', stderr: 'unavailable' }
+            : exec(id, cmd, options),
+      );
+      await expect(manager.rejectSession(pod.id, 'Fix finding')).rejects.toThrow();
+      expect(ctx.runtime.resume).not.toHaveBeenCalled();
+      expect(ctx.containerManager.kill).not.toHaveBeenCalled();
+      expect(ctx.podRepo.getOrThrow(pod.id)).toMatchObject({
+        status: 'failed',
+        containerId: 'ctr-1',
+      });
+      expect(ctx.podRepo.executionProvenance?.latest(pod.id)).toMatchObject({
+        purpose: 'coding',
+        status: 'blocked',
+        cliVersion: null,
+      });
+    });
+
+    it('does not fail or start a replacement lifecycle that arrives during resume preflight', async () => {
+      const ctx = createTestContext();
+      const manager = createPodManager(ctx.deps);
+      const pod = manager.createSession(
+        { profileName: 'test-profile', task: 'Fence resumed worker' },
+        'operator',
+      );
+      ctx.podRepo.update(pod.id, { status: 'validated', containerId: 'ctr-1' });
+      ctx.containerManager.getExecutionMetadata = vi.fn(async () => {
+        ctx.podRepo.incrementLifecycleGeneration(pod.id);
+        ctx.podRepo.update(pod.id, { containerId: 'replacement', status: 'running' });
+        return {
+          imageDigest: null,
+          memoryLimitBytes: 10 * 1024 ** 3,
+          cpuLimit: 2,
+          networkMode: null,
+        };
+      });
+      await expect(manager.rejectSession(pod.id, 'Fix finding')).rejects.toThrow('superseded');
+      expect(ctx.runtime.resume).not.toHaveBeenCalled();
+      expect(ctx.containerManager.kill).not.toHaveBeenCalled();
+      expect(ctx.podRepo.getOrThrow(pod.id)).toMatchObject({
+        status: 'running',
+        containerId: 'replacement',
+      });
+      expect(ctx.podRepo.executionProvenance?.latest(pod.id)).toBeNull();
+    });
+
     it('resumes agent with rejection feedback and completes cycle', async () => {
       // With passing validation, rejection triggers: resume → agent → validation pass → validated
       const ctx = createTestContext();
@@ -14387,6 +14515,55 @@ describe('PodManager', () => {
   });
 
   describe('sendMessage', () => {
+    it('retains the durable human reply when resumed worker preflight fails', async () => {
+      const ctx = createTestContext();
+      const manager = createPodManager(ctx.deps);
+      const pod = manager.createSession(
+        { profileName: 'test-profile', task: 'Preserve reply before resume' },
+        'operator',
+      );
+      const question: EscalationRequest = {
+        id: 'resume-preflight-question',
+        podId: pod.id,
+        type: 'ask_human',
+        timestamp: new Date().toISOString(),
+        payload: { question: 'Select repair' },
+        response: null,
+      };
+      ctx.escalationRepo.insert(question);
+      ctx.podRepo.update(pod.id, {
+        status: 'awaiting_input',
+        containerId: 'ctr-1',
+        pendingEscalation: question,
+      });
+      const exec = vi.mocked(ctx.containerManager.execInContainer).getMockImplementation();
+      if (!exec) throw new Error('Missing container fixture');
+      vi.mocked(ctx.containerManager.execInContainer).mockImplementation(
+        async (id, cmd, options) =>
+          cmd.join(' ') === 'claude --version'
+            ? { exitCode: 1, stdout: '', stderr: 'unavailable' }
+            : exec(id, cmd, options),
+      );
+      await expect(
+        manager.sendMessage(pod.id, 'Repair finding A', { type: 'human', userId: 'reviewer' }),
+      ).rejects.toThrow();
+      expect(ctx.escalationRepo.getOrThrow(question.id).response).toMatchObject({
+        response: 'Repair finding A',
+        actor: { type: 'human', userId: 'reviewer' },
+      });
+      expect(ctx.runtime.resume).not.toHaveBeenCalled();
+      expect(ctx.containerManager.kill).not.toHaveBeenCalled();
+      expect(ctx.podRepo.getOrThrow(pod.id)).toMatchObject({
+        status: 'failed',
+        containerId: 'ctr-1',
+        pendingEscalation: null,
+      });
+      expect(ctx.podRepo.executionProvenance?.latest(pod.id)).toMatchObject({
+        purpose: 'coding',
+        status: 'blocked',
+      });
+    });
+
     it('rolls back escalation creation and defers operator publication when pending-state persistence fails', () => {
       const ctx = createTestContext();
       const manager = createPodManager(ctx.deps);

@@ -186,6 +186,10 @@ import { agentToolingCachePaths } from './agent-tooling-cache-paths.js';
 import { hasInterruptedArtifactCollection } from './artifact-finalization-recovery.js';
 import { collectArtifactSnapshot } from './artifact-preservation.js';
 import { verifyArtifactSnapshot } from './artifact-snapshot-receipt.js';
+import {
+  AgentContinuationSupersededError,
+  preflightAgentContinuation,
+} from './continuation-preflight.js';
 import { buildCorrectionMessage } from './correction-context.js';
 import { dispatchRequestHash } from './dispatch-preflight-ledger.js';
 import { persistCompletionReply, persistEscalation } from './escalation-coordinator.js';
@@ -2816,6 +2820,18 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
       ].join(' ');
       throw new AutopodError(message, 'UNSUPPORTED_SANDBOX_STREAMING_EXEC', 400);
     }
+  }
+
+  async function recordContinuationProvenance(pod: Pod, containerId: string): Promise<void> {
+    await preflightAgentContinuation(pod, containerId, {
+      containerManager: containerManagerFactory.get(pod.executionTarget),
+      readCurrent: () => podRepo.getOrThrow(pod.id),
+      hasPendingDecision: () =>
+        podRepo.hasUnansweredDecision?.(pod.id) ??
+        Boolean(podRepo.getOrThrow(pod.id).pendingEscalation),
+      resolveProfile: resolveEffectiveBoundProfile,
+      provenance: podRepo.executionProvenance,
+    });
   }
 
   function primeRuntimeForResume(
@@ -10118,6 +10134,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
                 rotateProviderAttemptForFreshSegment(podRef, profileRef, hadActiveProviderAttempt);
               }
               const recoveryTask = await buildRecoveryTask(podRef, safeWorktreePath);
+              await recordContinuationProvenance(podRef, containerIdRef);
               yield* runtimeRef.spawn({
                 podId,
                 task: recoveryTask,
@@ -10249,6 +10266,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           await preserveSandboxAfterAgentFailure(podId, 'fatal agent exit');
         }
       } catch (err) {
+        if (err instanceof AgentContinuationSupersededError) return;
         if (startupAdmission) {
           const current = podRepo.getOrThrow(podId);
           const safeTransient =
@@ -11564,6 +11582,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
             const resumeEnv = await getResumeEnv(pod);
             const runtime = runtimeRegistry.get(pod.runtime);
             if (!pod.containerId) throw new Error(`Pod ${podId} has no container`);
+            await recordContinuationProvenance(pod, pod.containerId);
             primeRuntimeForResume(pod, runtime, pod.containerId, resumeEnv);
             const events = runtime.resume(podId, correctionMessage, pod.containerId, resumeEnv);
             const outcome = await this.consumeAgentEvents(podId, events, pod.validationAttempts);
@@ -11575,6 +11594,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
               await this.handleCompletion(podId);
             }
           } catch (err) {
+            if (err instanceof AgentContinuationSupersededError) throw err;
             logger.error({ err, podId }, 'Failed to resume agent after override guidance');
             const s = podRepo.getOrThrow(podId);
             if (!isTerminalState(s.status)) {
@@ -11633,6 +11653,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           podRepo.update(podId, { lastRecoveryTrigger: null });
           emitActivityStatus(podId, 'Resuming preserved sandbox after daemon restart…');
         }
+        await recordContinuationProvenance(pod, pod.containerId);
         const mcpServers = primeRuntimeForResume(pod, runtime, pod.containerId, resumeEnv);
         let outcome: AgentRunOutcome;
         try {
@@ -11646,9 +11667,11 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
             podId,
             'Saved Claude session was unavailable — starting a fresh recovery worker in the preserved sandbox…',
           );
+          const recoveryTask = await buildRecoveryTask(podRepo.getOrThrow(podId), pod.worktreePath);
+          await recordContinuationProvenance(pod, pod.containerId);
           const recoveryEvents = runtime.spawn({
             podId,
-            task: await buildRecoveryTask(podRepo.getOrThrow(podId), pod.worktreePath),
+            task: recoveryTask,
             model: pod.model,
             reasoningEffort: resolvedReasoningEffort(
               resolveEffectiveBoundProfile(pod),
@@ -11670,6 +11693,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           await this.handleCompletion(podId);
         }
       } catch (err) {
+        if (err instanceof AgentContinuationSupersededError) throw err;
         logger.error({ err, podId }, 'Failed to resume agent after message');
         const s = podRepo.getOrThrow(podId);
         if (!isTerminalState(s.status)) {
@@ -12501,6 +12525,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         // Resume agent with rejection feedback
         const resumeEnv = await getResumeEnv(pod);
         const runtime = runtimeRegistry.get(pod.runtime);
+        await recordContinuationProvenance(pod, pod.containerId);
         primeRuntimeForResume(pod, runtime, pod.containerId, resumeEnv);
         const events = runtime.resume(podId, rejectionMessage, pod.containerId, resumeEnv);
         const outcome = await this.consumeAgentEvents(
@@ -12517,6 +12542,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         }
       } catch (err) {
         // Roll back to failed — don't leave the pod stuck in 'running' with no agent
+        if (err instanceof AgentContinuationSupersededError) throw err;
         logger.error({ err, podId }, 'Failed to resume agent after rejection');
         const s = podRepo.getOrThrow(podId);
         if (!isTerminalState(s.status)) {
@@ -14480,6 +14506,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
                 : 'Sandbox resume transport timed out — retrying agent feedback…',
             );
             try {
+              await recordContinuationProvenance(s2, s2.containerId);
               primeRuntimeForResume(s2, runtime, s2.containerId, resumeEnv);
               const events = runtime.resume(podId, correctionMessage, s2.containerId, resumeEnv);
               outcome = await this.consumeAgentEvents(podId, events, attempt);
@@ -14541,6 +14568,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           }
         }
       } catch (err) {
+        if (err instanceof AgentContinuationSupersededError) return;
         logger.error({ err, podId }, 'Validation error');
         const s2 = podRepo.getOrThrow(podId);
         if (err instanceof TaskRetryBlockedError) {

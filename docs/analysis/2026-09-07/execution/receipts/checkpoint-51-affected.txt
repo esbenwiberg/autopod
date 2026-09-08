@@ -1,0 +1,41 @@
+
+ RUN  v4.1.11 /private/tmp/autopod-durable-execution/packages/daemon
+
+ ❯ src/pods/pod-manager.test.ts (532 tests | 1 failed) 38506ms
+       × retains the durable human reply when resumed worker preflight fails 88ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/pods/pod-manager.test.ts > PodManager > sendMessage > retains the durable human reply when resumed worker preflight fails
+AssertionError: expected { respondedBy: 'human', …(3) } to be 'Repair finding A' // Object.is equality
+
+- Expected:
+"Repair finding A"
+
++ Received:
+{
+  "actor": {
+    "type": "human",
+    "userId": "reviewer",
+  },
+  "respondedAt": "2026-09-08T06:38:16.379Z",
+  "respondedBy": "human",
+  "response": "Repair finding A",
+}
+
+ ❯ src/pods/pod-manager.test.ts:14550:67
+    14548|         manager.sendMessage(pod.id, 'Repair finding A', { type: 'human…
+    14549|       ).rejects.toThrow();
+    14550|       expect(ctx.escalationRepo.getOrThrow(question.id).response).toBe…
+       |                                                                   ^
+    14551|       expect(ctx.runtime.resume).not.toHaveBeenCalled();
+    14552|       expect(ctx.containerManager.kill).not.toHaveBeenCalled();
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed | 3 passed (4)
+      Tests  1 failed | 567 passed (568)
+   Start at  08:37:47
+   Duration  40.71s (transform 3.65s, setup 0ms, import 5.71s, tests 42.19s, environment 0ms)
+

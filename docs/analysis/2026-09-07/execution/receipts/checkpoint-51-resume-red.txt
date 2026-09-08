@@ -1,0 +1,85 @@
+
+ RUN  v4.1.11 /private/tmp/autopod-durable-execution/packages/daemon
+
+ ❯ src/pods/pod-manager.test.ts (530 tests | 3 failed | 523 skipped) 643ms
+       × records fresh runtime provenance before a rejection starts another worker turn 218ms
+       × retains the container and records a blocked resume when the runtime CLI is unavailable 81ms
+       × does not fail or start a replacement lifecycle that arrives during resume preflight 65ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 3 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/pods/pod-manager.test.ts > PodManager > rejectSession > records fresh runtime provenance before a rejection starts another worker turn
+AssertionError: expected null to match object { purpose: 'coding', …(4) }
+
+- Expected:
+{
+  "cliVersion": "1.0.0",
+  "imageDigest": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+  "purpose": "coding",
+  "runtime": "claude",
+  "status": "checked",
+}
+
++ Received:
+null
+
+ ❯ Object.<anonymous> src/pods/pod-manager.test.ts:7486:65
+    7484|       if (!resume) throw new Error('Missing runtime fixture');
+    7485|       vi.mocked(ctx.runtime.resume).mockImplementation((...args) => {
+    7486|         expect(ctx.podRepo.executionProvenance?.latest(pod.id)).toMatc…
+       |                                                                 ^
+    7487|           purpose: 'coding',
+    7488|           status: 'checked',
+ ❯ Object.rejectSession src/pods/pod-manager.ts:12505:32
+ ❯ src/pods/pod-manager.test.ts:7495:7
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/3]⎯
+
+ FAIL  src/pods/pod-manager.test.ts > PodManager > rejectSession > retains the container and records a blocked resume when the runtime CLI is unavailable
+AssertionError: promise resolved "undefined" instead of rejecting
+
+- Expected:
+Error {
+  "message": "rejected promise",
+}
+
++ Received:
+undefined
+
+ ❯ src/pods/pod-manager.test.ts:7515:64
+    7513|             : exec(id, cmd, options),
+    7514|       );
+    7515|       await expect(manager.rejectSession(pod.id, 'Fix finding')).rejec…
+       |                                                                ^
+    7516|       expect(ctx.runtime.resume).not.toHaveBeenCalled();
+    7517|       expect(ctx.containerManager.kill).not.toHaveBeenCalled();
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/3]⎯
+
+ FAIL  src/pods/pod-manager.test.ts > PodManager > rejectSession > does not fail or start a replacement lifecycle that arrives during resume preflight
+AssertionError: promise resolved "undefined" instead of rejecting
+
+- Expected:
+Error {
+  "message": "rejected promise",
+}
+
++ Received:
+undefined
+
+ ❯ src/pods/pod-manager.test.ts:7547:64
+    7545|         };
+    7546|       });
+    7547|       await expect(manager.rejectSession(pod.id, 'Fix finding')).rejec…
+       |                                                                ^
+    7548|       expect(ctx.runtime.resume).not.toHaveBeenCalled();
+    7549|       expect(ctx.containerManager.kill).not.toHaveBeenCalled();
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/3]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  3 failed | 4 passed | 523 skipped (530)
+   Start at  08:34:39
+   Duration  3.00s (transform 1.47s, setup 0ms, import 2.20s, tests 643ms, environment 0ms)
+
