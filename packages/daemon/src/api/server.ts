@@ -16,7 +16,6 @@ import type { ImageBuilder } from '../images/index.js';
 import type { AuthModule } from '../interfaces/index.js';
 import type { WorktreeManager } from '../interfaces/worktree-manager.js';
 import type { IssueWatcherRepository } from '../issue-watcher/issue-watcher-repository.js';
-import type { ArtifactStore } from '../managed/artifact-store.js';
 import type { ManagedComponentsConfig, managedComponents } from '../managed/bootstrap.js';
 import {
   type ManagedUserBinding,
@@ -85,8 +84,7 @@ export interface ServerDependencies {
     | { config: ManagedComponentsConfig; bindings: readonly ManagedUserBinding[] }
     | {
         components: ReturnType<typeof managedComponents>;
-        db: Database.Database;
-        store: ArtifactStore;
+        config: Pick<ManagedComponentsConfig, 'db' | 'store'>;
         bindings: readonly ManagedUserBinding[];
       };
   podManager: PodManager;
@@ -172,8 +170,7 @@ export async function createServer(deps: ServerDependencies): Promise<FastifyIns
         registerManagedUserComponentRoutes(
           managedApp,
           managed.components,
-          managed.db,
-          managed.store,
+          managed.config,
           deps.authModule,
           managed.bindings,
         );

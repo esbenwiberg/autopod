@@ -48,8 +48,7 @@ export interface ManagedAcceptanceConfig {
 
 export interface ManagedAcceptanceRuntime {
   components: ReturnType<typeof managedComponents>;
-  db: Database.Database;
-  store: ArtifactStore;
+  config: { db: Database.Database; store: ArtifactStore };
   bindings: readonly ManagedUserBinding[];
   resume(): Promise<void>;
   close(): void;
@@ -232,8 +231,7 @@ export function composeManagedAcceptance(
   });
   return {
     components,
-    db: dependencies.db,
-    store,
+    config: { db: dependencies.db, store },
     bindings: cli.bindings,
     resume: () => components.resume(),
     close: () => components.close(),

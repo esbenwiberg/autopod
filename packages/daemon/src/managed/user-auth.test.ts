@@ -147,9 +147,10 @@ it('accepts an explicitly enrolled Entra CLI user without an application-role cl
   expect(await auth(request)).toBe('installation-one');
 });
 
-it('mounts routes on the supplied component service', async () => {
+it('mounts one supplied component service without rebuilding its runtime', async () => {
   const f = fixture();
   const app = Fastify();
+  const stateRoot = mkdtempSync(path.join(tmpdir(), 'managed-mounted-'));
   try {
     const store = new MemoryArtifactStore();
     const components = managedComponents({
@@ -157,17 +158,17 @@ it('mounts routes on the supplied component service', async () => {
       admission: f.admission,
       runtime: f.runtime,
       store,
-      stateRoot: '/fixture',
+      stateRoot,
       enabled: true,
     });
     registerManagedUserComponentRoutes(
       app,
       components,
-      f.db,
-      store,
+      { db: f.db, store },
       { validateToken: async () => claims() },
       [binding],
     );
+    const direct = await components.service.start('installation-one', f.request);
     const response = await app.inject({
       method: 'GET',
       url: '/managed/health',
@@ -176,8 +177,21 @@ it('mounts routes on the supplied component service', async () => {
     expect(response.statusCode).toBe(200);
     expect(response.json()).toMatchObject({ enabled: true });
     expect(components.service.health().enabled).toBe(true);
+    const started = await app.inject({
+      method: 'POST',
+      url: '/managed/pods',
+      headers: { authorization: 'Bearer fixture' },
+      payload: f.request,
+    });
+    expect(started.statusCode).toBe(200);
+    expect(started.json()).toEqual(direct);
+    expect(f.launches()).toBe(1);
   } finally {
     await app.close();
     f.close();
+    rmSync(stateRoot, { recursive: true, force: true });
   }
 });
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import path from 'node:path';

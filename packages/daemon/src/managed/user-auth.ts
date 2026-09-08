@@ -1,7 +1,5 @@
-import type Database from 'better-sqlite3';
 import type { FastifyInstance, FastifyRequest } from 'fastify';
 import type { AuthModule } from '../interfaces/auth-module.js';
-import type { ArtifactStore } from './artifact-store.js';
 import {
   type ManagedComponentsConfig,
   type managedComponents,
@@ -68,16 +66,14 @@ export function registerManagedUserRoutes(
 export function registerManagedUserComponentRoutes(
   app: FastifyInstance,
   components: ReturnType<typeof managedComponents>,
-  db: Database.Database,
-  store: ArtifactStore,
+  config: Pick<ManagedComponentsConfig, 'db' | 'store'>,
   auth: AuthModule,
   bindings: readonly ManagedUserBinding[],
 ) {
   return registerManagedComponentRoutes(
     app,
     components,
-    db,
-    store,
+    config,
     managedUserAuthenticator(auth, bindings),
   );
 }
