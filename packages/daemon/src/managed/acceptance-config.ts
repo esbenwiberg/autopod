@@ -97,7 +97,7 @@ export function parseManagedAcceptanceConfig(
       request.outputs.artifacts.limits.maxFiles !== 1 ||
       request.outputs.artifacts.limits.maxFileBytes > 16 * 1024 ||
       request.outputs.artifacts.limits.maxTotalBytes > 16 * 1024 ||
-      request.inputArtifacts.length !== 0 ||
+      request.inputArtifacts.length > 1 ||
       parsed.mirror.enrollmentId !== repository.enrollmentId ||
       parsed.mirror.remote !== repository.remote ||
       parsed.mirror.baseRevision !== repository.baseRevision ||
@@ -189,6 +189,25 @@ export function composeManagedAcceptance(
     throw new Error('managed-acceptance-existing-attempt-conflict');
   }
 
+  const input = config.request.inputArtifacts[0];
+  if (input) {
+    const row = dependencies.db
+      .prepare(`SELECT manifest_sha256,file_count,total_bytes FROM artifact_exports
+        JOIN managed_pods USING(pod_id) WHERE artifact_id=? AND dispatcher_installation_id=?
+        AND artifact_exports.status='committed'`)
+      .get(input.backendArtifactId, config.installationId) as
+      | { manifest_sha256: string; file_count: number; total_bytes: number }
+      | undefined;
+    if (
+      !row ||
+      row.manifest_sha256 !== input.manifestSha256 ||
+      row.file_count !== 1 ||
+      row.total_bytes > 16 * 1024
+    ) {
+      throw new Error('managed-acceptance-input-invalid');
+    }
+  }
+
   const transport = new ManagedIdentityBlobTransport(cli.blobContainerUrl);
   const store = new AzureBlobArtifactStore(transport, async (id) => {
     const row = dependencies.db
@@ -232,7 +251,11 @@ export function composeManagedAcceptance(
         route: config.request.route,
         manager: dependencies.manager,
         image: config.image,
-        command: codexReportCommand(config.request.route, config.mirror.enrollmentId),
+        command: codexReportCommand(
+          config.request.route,
+          config.mirror.enrollmentId,
+          config.request.inputArtifacts[0]?.name,
+        ),
         transport: provider,
         channel,
         maximumRequests: 1,

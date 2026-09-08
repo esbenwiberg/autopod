@@ -163,10 +163,18 @@ export class ContainerCodexChannel implements ManagedWorkerProviderChannel {
 }
 
 /** Reviewed fixed command; the runtime appends the objective after --. */
-export function codexReportCommand(route: Route, enrollmentId: string): readonly string[] {
-  if (route.runtime !== 'codex' || !/^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/.test(enrollmentId))
+export function codexReportCommand(
+  route: Route,
+  enrollmentId: string,
+  inputName?: string,
+): readonly string[] {
+  if (
+    route.runtime !== 'codex' ||
+    !/^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/.test(enrollmentId) ||
+    (inputName !== undefined && !/^[A-Za-z][A-Za-z0-9_-]{0,63}$/.test(inputName))
+  )
     throw new Error('managed-codex-command-binding');
-  return [
+  const command = [
     'python3',
     '/opt/dispatcher/codex_worker.py',
     '--model',
@@ -178,4 +186,6 @@ export function codexReportCommand(route: Route, enrollmentId: string): readonly
     '--output',
     '/output/report.md',
   ];
+  if (inputName !== undefined) command.push('--input-root', `/inputs/${inputName}`);
+  return command;
 }
