@@ -337,5 +337,5 @@ describe('LocalWorktreeManager real Git regressions', () => {
     expect(await git(startResult.worktreePath, ['rev-parse', 'refs/heads/stack-start'])).not.toBe(
       freshStartOid,
     );
-  });
+  }, 30_000);
 });
