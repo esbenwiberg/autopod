@@ -1164,19 +1164,38 @@ describe('validate() — hasWebUi gating', () => {
   }
 
   it('provider-compatible council completes five axes and synthesis', async () => {
-    vi.mocked(runCodexReview).mockResolvedValue({
-      stdout: JSON.stringify({ status: 'pass', reasoning: 'clean', issues: [] }),
-      tokenUsage: { inputTokens: 100, outputTokens: 20 },
-    });
-    vi.mocked(runContainerReviewer).mockImplementation(async ({ prompt, outputContract }) => {
-      expect(outputContract).toBeDefined();
+    const launchGuard = vi.fn();
+    const beforeReviewerLaunch = vi.fn(
+      async (_identity: import('../interfaces/reviewer-launch.js').ReviewerLaunchIdentity) =>
+        launchGuard,
+    );
+    vi.mocked(runCodexReview).mockImplementation(async (config) => {
+      const guard = await config.beforeLaunch?.({
+        podId: config.podId,
+        containerId: config.containerId,
+        runtime: 'codex',
+        model: config.model,
+      });
+      guard?.();
       return {
-        stdout: prompt.includes('synthesizer')
-          ? JSON.stringify({ decisions: [] })
-          : JSON.stringify({ findings: [] }),
-        tokenUsage: { inputTokens: 10, outputTokens: 2 },
+        stdout: JSON.stringify({ status: 'pass', reasoning: 'clean', issues: [] }),
+        tokenUsage: { inputTokens: 100, outputTokens: 20 },
       };
     });
+    vi.mocked(runContainerReviewer).mockImplementation(
+      async ({ prompt, outputContract, beforeLaunch, podId, containerId, model }) => {
+        if (!containerId) throw new Error('Missing reviewer container');
+        const guard = await beforeLaunch?.({ podId, containerId, runtime: 'codex', model });
+        guard?.();
+        expect(outputContract).toBeDefined();
+        return {
+          stdout: prompt.includes('synthesizer')
+            ? JSON.stringify({ decisions: [] })
+            : JSON.stringify({ findings: [] }),
+          tokenUsage: { inputTokens: 10, outputTokens: 2 },
+        };
+      },
+    );
 
     const progress: NonNullable<ValidationPhaseCallbacks['onReviewProgress']> extends (
       value: infer T,
@@ -1185,6 +1204,7 @@ describe('validate() — hasWebUi gating', () => {
       : never = [];
     const result = await createLocalValidationEngine(stubContainerManager()).validate(
       baseConfig({
+        beforeReviewerLaunch,
         reviewerModel: 'gpt-5.6-sol',
         reviewerProvider: 'openai',
         diff: changedDiff,
@@ -1199,6 +1219,13 @@ describe('validate() — hasWebUi gating', () => {
     );
 
     expect(runContainerReviewer).toHaveBeenCalledTimes(6);
+    expect(beforeReviewerLaunch).toHaveBeenCalledTimes(7);
+    expect(launchGuard).toHaveBeenCalledTimes(7);
+    expect(
+      beforeReviewerLaunch.mock.calls.every(
+        (call) => call[0].runtime === 'codex' && call[0].model === 'gpt-5.6-sol',
+      ),
+    ).toBe(true);
     expect(result.taskReview?.reviewBatch).toMatchObject({
       quality: 'healthy',
       synthesis: 'model',
@@ -1541,6 +1568,11 @@ describe('validate() — hasWebUi gating', () => {
     const podId = 'sandbox-review-ledger';
     let reviewNow = 1_000_000;
     const nowSpy = vi.spyOn(Date, 'now').mockImplementation(() => reviewNow);
+    const launchGuard = vi.fn();
+    const beforeReviewerLaunch = vi.fn(
+      async (_identity: import('../interfaces/reviewer-launch.js').ReviewerLaunchIdentity) =>
+        launchGuard,
+    );
     let closureTimeout: number | undefined;
     let closureAttempts = 0;
     const closureContracts: Array<string | undefined> = [];
@@ -1584,7 +1616,10 @@ describe('validate() — hasWebUi gating', () => {
       await git('reset', '--hard', snapshotB);
 
       vi.mocked(runContainerReviewer).mockImplementation(
-        async ({ prompt, timeout, outputContract }) => {
+        async ({ prompt, timeout, outputContract, beforeLaunch, podId, containerId, model }) => {
+          if (!containerId) throw new Error('Missing reviewer container');
+          const guard = await beforeLaunch?.({ podId, containerId, runtime: 'claude', model });
+          guard?.();
           if (prompt.includes('closure verifier')) {
             closureTimeout = timeout;
             closureAttempts++;
@@ -1636,6 +1671,7 @@ describe('validate() — hasWebUi gating', () => {
       };
       const result = await createLocalValidationEngine(stubContainerManager()).validate(
         baseConfig({
+          beforeReviewerLaunch,
           podId,
           reviewerModel: 'claude-sonnet-4-6',
           diff: changedDiff,
@@ -1656,6 +1692,8 @@ describe('validate() — hasWebUi gating', () => {
       expect(result.taskReview?.reviewBatch?.closureVerification?.status).toBe('completed');
       expect(closureTimeout).toBe(100);
       expect(closureAttempts).toBe(2);
+      expect(beforeReviewerLaunch).toHaveBeenCalledTimes(8);
+      expect(launchGuard).toHaveBeenCalledTimes(8);
       expect(closureContracts).toEqual(['review-closure-v1', 'review-closure-v1']);
       expect(result.taskReview?.reviewBatch?.ledger).toEqual([
         expect.objectContaining({

@@ -1,0 +1,83 @@
+
+ RUN  v4.1.11 /private/tmp/autopod-durable-execution/packages/daemon
+
+ ❯ src/validation/container-reviewer-runner.test.ts (13 tests | 2 failed | 11 skipped) 25ms
+     × does not launch Claude after probe-rejected 22ms
+     × does not launch Claude after ownership-lost 2ms
+ ❯ src/validation/review-codex-runner.test.ts (12 tests | 2 failed | 10 skipped) 8ms
+     × does not launch Codex after probe-rejected 6ms
+     × does not launch Codex after ownership-lost 1ms
+ ❯ src/pods/pod-manager.test.ts (572 tests | 1 failed | 571 skipped) 208ms
+       × binds actual reviewer launch preflight to the owning validation invocation 207ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 5 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/pods/pod-manager.test.ts > PodManager > triggerValidation > binds actual reviewer launch preflight to the owning validation invocation
+AssertionError: expected undefined to be type of 'function'
+
+Expected: "function"
+Received: "undefined"
+
+ ❯ src/pods/pod-manager.test.ts:14025:27
+    14023|       });
+    14024|       await manager.triggerValidation(pod.id);
+    14025|       expect(launchGuard).toBeTypeOf('function');
+       |                           ^
+    14026|       expect(launchGuard).toThrow(/superseded/i);
+    14027|       expect(ctx.podRepo.executionProvenance?.latest(pod.id)).toMatchO…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/5]⎯
+
+ FAIL  src/validation/container-reviewer-runner.test.ts > reviewer launch ownership > does not launch Claude after probe-rejected
+ FAIL  src/validation/container-reviewer-runner.test.ts > reviewer launch ownership > does not launch Claude after ownership-lost
+AssertionError: promise resolved "{ stdout: 'review output\n' }" instead of rejecting
+
+- Expected
++ Received
+
+- Error {
+-   "message": "rejected promise",
++ {
++   "stdout": "review output
++ ",
+  }
+
+ ❯ src/validation/container-reviewer-runner.test.ts:80:7
+     78|           beforeLaunch,
+     79|         }),
+     80|       ).rejects.toThrow(/review probe rejected|review ownership lost/);
+       |       ^
+     81|       expect(beforeLaunch).toHaveBeenCalledWith({
+     82|         podId: 'pod',
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/5]⎯
+
+ FAIL  src/validation/review-codex-runner.test.ts > runCodexReview > does not launch Codex after probe-rejected
+ FAIL  src/validation/review-codex-runner.test.ts > runCodexReview > does not launch Codex after ownership-lost
+AssertionError: promise resolved "{ stdout: '{"status":"pass"}' }" instead of rejecting
+
+- Expected
++ Received
+
+- Error {
+-   "message": "rejected promise",
++ {
++   "stdout": "{\"status\":\"pass\"}",
+  }
+
+ ❯ src/validation/review-codex-runner.test.ts:62:7
+     60|           beforeLaunch,
+     61|         }),
+     62|       ).rejects.toThrow(/review probe rejected|review ownership lost/);
+       |       ^
+     63|       expect(beforeLaunch).toHaveBeenCalledWith({
+     64|         podId: 'pod',
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/5]⎯
+
+
+ Test Files  3 failed (3)
+      Tests  5 failed | 592 skipped (597)
+   Start at  11:01:12
+   Duration  2.21s (transform 2.08s, setup 0ms, import 2.97s, tests 241ms, environment 0ms)
+

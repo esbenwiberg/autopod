@@ -116,6 +116,7 @@ import type {
   ValidationEngine,
   WorktreeManager,
 } from '../interfaces/index.js';
+import type { ReviewerLaunchIdentity } from '../interfaces/reviewer-launch.js';
 import type { ProfileStore } from '../profiles/index.js';
 import { assertNoExpiredPat } from '../profiles/pat-expiry.js';
 import type { ProviderAccountStore } from '../provider-accounts/index.js';
@@ -7239,22 +7240,26 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
     config: Parameters<ValidationEngine['validate']>[0],
     purpose: 'validation' | 'review' = 'validation',
     assertCurrent?: () => Pod,
+    reviewerLaunch?: ReviewerLaunchIdentity,
   ): Promise<void> {
     if (!podRepo.executionProvenance) return;
     const pod = assertCurrent?.() ?? podRepo.getOrThrow(config.podId);
     const profile = resolveEffectiveBoundProfile(pod);
     const skips = new Set(config.skipPhases ?? []);
-    // This review entry is the independent frozen council, whose implementation
-    // always dispatches through runContainerReviewer. Other review surfaces need
-    // their own execution-bound observation; never infer their runner from the worker.
+    // Prepared independent councils use their fixed runner resolver. Actual CLI
+    // launches supply identity from the dispatch path after prompt preparation.
     const reviewerRuntime =
       purpose === 'review'
-        ? resolveContainerReviewer({
+        ? (reviewerLaunch?.runtime ??
+          resolveContainerReviewer({
             modelProvider: config.reviewerProvider ?? 'anthropic',
             providerCredentials: config.reviewerProviderCredentials ?? null,
-          })
+          }))
         : null;
-    if (purpose === 'review' && (!config.councilOnly || typeof reviewerRuntime !== 'string'))
+    if (
+      purpose === 'review' &&
+      ((!config.councilOnly && !reviewerLaunch) || typeof reviewerRuntime !== 'string')
+    )
       throw new TaskRetryBlockedError(
         'Independent council reviewer runtime is unsupported or unverified; reconcile its selected provider before review.',
       );
@@ -7298,12 +7303,47 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
     provenance.contractHash = createHash('sha256')
       .update(JSON.stringify(config.contract ?? null))
       .digest('hex');
+    if (reviewerLaunch)
+      provenance.diagnostics.push({
+        code: 'REVIEWER_LAUNCH_PREFLIGHT',
+        detail:
+          'Selected container reviewer checked at its CLI launch boundary; this preflight does not prove execution completion.',
+      });
     podRepo.executionProvenance.record(pod.id, pod.lifecycleGeneration, provenance);
     if (provenance.status === 'blocked')
       throw new TaskRetryBlockedError(
         provenance.diagnostics.find((item) => item.code.startsWith('PREFLIGHT_'))?.detail ??
           'Validation environment requires reconciliation',
       );
+  }
+
+  function withReviewerLaunchPreflight(
+    config: Parameters<ValidationEngine['validate']>[0],
+    ownership: ReturnType<typeof captureValidationOwnership>,
+  ): Parameters<ValidationEngine['validate']>[0] {
+    return {
+      ...config,
+      beforeReviewerLaunch: async (identity) => {
+        resolveEffectiveBoundProfile(ownership.assertCurrent());
+        const selectedRuntime = resolveContainerReviewer({
+          modelProvider: config.reviewerProvider ?? 'anthropic',
+          providerCredentials: config.reviewerProviderCredentials ?? null,
+        });
+        if (
+          identity.podId !== config.podId ||
+          identity.containerId !== config.containerId ||
+          identity.model !== (config.reviewerModel ?? 'auto') ||
+          identity.runtime !== selectedRuntime
+        )
+          throw new TaskRetryBlockedError(
+            'Reviewer launch identity differs from the frozen validation configuration.',
+          );
+        await recordValidationProvenance(config, 'review', ownership.assertCurrent, identity);
+        return () => {
+          resolveEffectiveBoundProfile(ownership.assertCurrent());
+        };
+      },
+    };
   }
 
   function claimValidation(expectedPod: Pod, validationController: AbortController) {
@@ -7404,7 +7444,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         let result: ValidationResult;
         try {
           result = await validationEngine.validate(
-            validationConfig,
+            withReviewerLaunchPreflight(validationConfig, ownership),
             (phase) => {
               if (ownership.isCurrent()) emitActivityStatus(podId, phase);
             },
@@ -14262,7 +14302,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
                 );
                 councilOwnership.assertCurrent();
                 const reviewOnly = await validationEngine.validate(
-                  reviewConfig,
+                  withReviewerLaunchPreflight(reviewConfig, councilOwnership),
                   (phase) => {
                     if (councilOwnership.isCurrent()) emitActivityStatus(podId, phase);
                   },

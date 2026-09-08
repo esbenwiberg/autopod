@@ -927,6 +927,7 @@ export function createLocalValidationEngine(
               },
               execute: async (prompt, _label, timeoutMs, outputContract) =>
                 runContainerReviewer({
+                  beforeLaunch: config.beforeReviewerLaunch,
                   podId: config.podId,
                   containerId: config.containerId,
                   containerManager,
@@ -943,6 +944,7 @@ export function createLocalValidationEngine(
                 }),
               synthesize: async (prompt, _label, timeoutMs, outputContract) =>
                 runContainerReviewer({
+                  beforeLaunch: config.beforeReviewerLaunch,
                   podId: config.podId,
                   containerId: config.containerId,
                   containerManager,
@@ -993,6 +995,7 @@ export function createLocalValidationEngine(
                         );
                       }
                       const response = await runContainerReviewer({
+                        beforeLaunch: config.beforeReviewerLaunch,
                         podId: config.podId,
                         containerId: config.containerId,
                         containerManager,
@@ -3677,6 +3680,7 @@ async function runTaskReview(
         let stdout: string;
         if (reviewRunner === 'codex') {
           const codexReview = await runCodexReview({
+            beforeLaunch: config.beforeReviewerLaunch,
             podId: config.podId,
             attempt: config.attempt,
             containerId: config.containerId,
@@ -3690,6 +3694,7 @@ async function runTaskReview(
           tier1TokenUsage = codexReview.tokenUsage;
         } else if (reviewRunner === 'container-claude') {
           const containerReview = await runContainerReviewer({
+            beforeLaunch: config.beforeReviewerLaunch,
             podId: config.podId,
             containerId: config.containerId,
             containerManager,

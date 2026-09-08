@@ -7,7 +7,9 @@ import type {
   ExecResult,
   StreamingExecResult,
 } from '../interfaces/container-manager.js';
+import type { BeforeReviewerLaunch } from '../interfaces/reviewer-launch.js';
 import type { ReviewerOutputContract } from './review-structured-output.js';
+import { prepareReviewerLaunch } from './reviewer-launch-preflight.js';
 
 export type CodexReviewErrorKind =
   | 'non-zero-exit'
@@ -39,6 +41,7 @@ export class CodexReviewError extends Error {
 }
 
 export interface CodexReviewConfig {
+  beforeLaunch?: BeforeReviewerLaunch;
   podId: string;
   attempt?: number;
   containerId: string;
@@ -119,11 +122,24 @@ export async function runCodexReview(
       ...(config.env ? { env: config.env } : {}),
       timeout: config.timeout,
     };
+    const launch = await prepareReviewerLaunch(
+      config.beforeLaunch,
+      {
+        podId: config.podId,
+        containerId: config.containerId,
+        runtime: 'codex',
+        model: config.model,
+      },
+      config.timeout,
+    );
+    options.timeout = launch.timeout;
     const result = await execReviewCommand(
       config.containerManager,
       config.containerId,
       ['sh', '-c', command],
       options,
+      launch.assertCurrent,
+      launch.remainingTimeout,
     );
 
     if (result.exitCode !== 0) {
@@ -218,26 +234,37 @@ async function execReviewCommand(
   containerId: string,
   command: string[],
   options: ExecOptions,
+  assertCurrent?: () => void,
+  remainingTimeout?: () => number,
 ): Promise<ExecResult> {
+  const currentOptions = () => {
+    const current = remainingTimeout ? { ...options, timeout: remainingTimeout() } : options;
+    assertCurrent?.();
+    return current;
+  };
+  const launchOptions = currentOptions();
   if (
     containerManager.supportsStreamingExec === false ||
     typeof containerManager.execStreaming !== 'function'
   ) {
-    return containerManager.execInContainer(containerId, command, options);
+    return containerManager.execInContainer(containerId, command, launchOptions);
   }
 
   let handle: StreamingExecResult;
   try {
-    handle = await containerManager.execStreaming(containerId, command, options);
+    handle = await containerManager.execStreaming(containerId, command, launchOptions);
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     if (/streaming exec is not supported/i.test(message)) {
-      return containerManager.execInContainer(containerId, command, options);
+      return containerManager.execInContainer(containerId, command, currentOptions());
     }
     throw err;
   }
 
-  return collectStreamingExec(handle, options.timeout);
+  return collectStreamingExec(
+    handle,
+    remainingTimeout ? remainingTimeout() : options.timeout || undefined,
+  );
 }
 
 async function collectStreamingExec(
@@ -250,7 +277,7 @@ async function collectStreamingExec(
     handle.exitCode,
   ]).then(([stdout, stderr, exitCode]) => ({ stdout, stderr, exitCode }));
 
-  if (!timeout) return completed;
+  if (timeout === undefined) return completed;
 
   let timer: ReturnType<typeof setTimeout> | undefined;
   const timedOut = new Promise<'timeout'>((resolve) => {

@@ -13995,6 +13995,66 @@ describe('PodManager', () => {
       },
     );
 
+    it.each([undefined, 'model', 'runtime'] as const)(
+      'binds actual reviewer launch preflight and rejects changed %s',
+      async (changed) => {
+        const ctx = createTestContext(undefined, { defaultRuntime: 'codex' });
+        ctx.db
+          .prepare("UPDATE profiles SET reviewer_model = ? WHERE name = 'test-profile'")
+          .run('review-model');
+        const manager = createPodManager(ctx.deps);
+        const pod = manager.createSession(
+          { profileName: 'test-profile', task: 'Fence reviewer launch' },
+          'operator',
+        );
+        ctx.podRepo.update(pod.id, {
+          status: 'running',
+          containerId: 'ctr-1',
+          worktreePath: '/tmp/worktree/abc',
+        });
+        let launchGuard: (() => void) | undefined;
+        let launchError: unknown;
+        vi.mocked(ctx.validationEngine.validate).mockImplementation(async (config) => {
+          launchGuard = await config
+            .beforeReviewerLaunch?.({
+              podId: pod.id,
+              containerId: 'ctr-1',
+              runtime: changed === 'runtime' ? 'codex' : 'claude',
+              model: changed === 'model' ? 'other-model' : 'review-model',
+            })
+            .catch((error) => {
+              launchError = error;
+              return undefined;
+            });
+          ctx.podRepo.update(pod.id, { status: 'running', containerId: 'replacement-container' });
+          return makeValidationResult({ podId: pod.id, attempt: 1 });
+        });
+        await manager.triggerValidation(pod.id);
+        if (changed) {
+          expect(launchError).toMatchObject({
+            message: 'Reviewer launch identity differs from the frozen validation configuration.',
+          });
+          expect(launchGuard).toBeUndefined();
+          expect(ctx.podRepo.executionProvenance?.latest(pod.id)?.subject).toBe('worker');
+        } else {
+          expect(launchGuard).toBeTypeOf('function');
+          expect(launchGuard).toThrow(/superseded/i);
+          expect(ctx.podRepo.executionProvenance?.latest(pod.id)).toMatchObject({
+            subject: 'reviewer',
+            purpose: 'review',
+            runtime: 'claude',
+            model: 'review-model',
+          });
+        }
+        expect(manager.getSession(pod.id)).toMatchObject({
+          status: 'running',
+          containerId: 'replacement-container',
+        });
+        expect(ctx.containerManager.stop).not.toHaveBeenCalled();
+        expect(ctx.runtime.resume).not.toHaveBeenCalled();
+      },
+    );
+
     it.each(['preflight', 'kill'] as const)(
       'fences independent council at the %s boundary',
       async (boundary) => {

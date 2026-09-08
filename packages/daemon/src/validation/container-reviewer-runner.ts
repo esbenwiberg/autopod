@@ -3,9 +3,11 @@ import type { Readable } from 'node:stream';
 import type { ModelProvider, Profile } from '@autopod/shared';
 import type { Logger } from 'pino';
 import type { ContainerManager } from '../interfaces/container-manager.js';
+import type { BeforeReviewerLaunch } from '../interfaces/reviewer-launch.js';
 import { parseClaudeCliStdout } from '../runtimes/run-claude-cli.js';
 import { type CodexReviewTokenUsage, runCodexReview } from './review-codex-runner.js';
 import type { ReviewerOutputContract } from './review-structured-output.js';
+import { ReviewerLaunchTimeoutError, prepareReviewerLaunch } from './reviewer-launch-preflight.js';
 
 export class ContainerReviewerUnavailableError extends Error {
   readonly kind:
@@ -41,6 +43,7 @@ export class ContainerReviewerUnavailableError extends Error {
 }
 
 export interface ContainerReviewerRunnerConfig {
+  beforeLaunch?: BeforeReviewerLaunch;
   podId: string;
   containerId: string | null | undefined;
   containerManager: ContainerManager;
@@ -84,6 +87,7 @@ export async function runContainerReviewer(
 
   if (runner === 'codex') {
     return runCodexReview({
+      beforeLaunch: config.beforeLaunch,
       podId: config.podId,
       containerId: config.containerId,
       containerManager: config.containerManager,
@@ -167,6 +171,17 @@ async function runClaudeContainerReview(
         'Container reviewer unavailable: Claude review requires cancellable streaming execution',
       );
     }
+    const launch = await prepareReviewerLaunch(
+      config.beforeLaunch,
+      {
+        podId: config.podId,
+        containerId: config.containerId,
+        runtime: 'claude',
+        model: config.model,
+      },
+      config.timeout,
+    );
+    launch.assertCurrent?.();
     const handle = await config.containerManager.execStreaming(
       config.containerId,
       ['sh', '-c', command],
@@ -175,7 +190,10 @@ async function runClaudeContainerReview(
         ...(config.env ? { env: config.env } : {}),
       },
     );
-    const result = await collectCancellableReview(handle, config.timeout);
+    const result = await collectCancellableReview(
+      handle,
+      launch.remainingTimeout?.() ?? launch.timeout,
+    );
 
     if (result.exitCode !== 0) {
       const diagnostic = result.stdout || result.stderr;
@@ -211,6 +229,8 @@ async function runClaudeContainerReview(
 
     return parseClaudeCliStdout(result.stdout, 'json');
   } catch (err) {
+    if (err instanceof ReviewerLaunchTimeoutError)
+      throw new ContainerReviewerUnavailableError(err.message, { kind: 'timeout', cause: err });
     if (err instanceof ContainerReviewerUnavailableError && err.kind === 'timeout') {
       const stagedDiagnostic = await readBoundedDiagnostic(
         config.containerManager,

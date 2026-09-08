@@ -13,8 +13,11 @@ import type {
   ValidationResult,
   ValidationSuite,
 } from '@autopod/shared';
+import type { BeforeReviewerLaunch } from './reviewer-launch.js';
 
 export interface ValidationEngineConfig {
+  /** Trusted per-invocation preflight and ownership fence for actual container reviewer launches. */
+  beforeReviewerLaunch?: BeforeReviewerLaunch;
   /** Trusted collector, not a client-provided hash. Missing identity always executes checks. */
   captureEvidenceIdentity?: () => Promise<
     import('@autopod/shared').ValidationInputIdentity | undefined
