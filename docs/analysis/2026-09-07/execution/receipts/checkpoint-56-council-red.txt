@@ -1,0 +1,150 @@
+
+ RUN  v4.1.11 /private/tmp/autopod-durable-execution/packages/daemon
+
+ ❯ src/pods/pod-manager.test.ts (554 tests | 2 failed | 552 skipped) 236ms
+       × retains the original validation record when a superseded council returns result 168ms
+       × retains the original validation record when a superseded council returns rejection 66ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 2 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/pods/pod-manager.test.ts > PodManager > triggerValidation > retains the original validation record when a superseded council returns result
+AssertionError: expected { id: 'complete-snail', …(113) } to match object { status: 'running', …(3) }
+(123 matching properties omitted from actual)
+
+- Expected
++ Received
+
+@@ -1,11 +1,11 @@
+  {
+    "containerId": "replacement-container",
+-   "failureReason": "replacement-owned-reason",
++   "failureReason": "Validation failed before checks could complete: Cannot transition pod complete-snail from running to validated",
+    "lastValidationResult": {
+-     "attempt": 9,
+-     "duration": 5000,
++     "attempt": 2,
++     "duration": 10000,
+      "overall": "pass",
+      "podId": "complete-snail",
+      "smoke": {
+        "build": {
+          "duration": 100,
+@@ -19,10 +19,61 @@
+          "url": "http://localhost:3000",
+        },
+        "pages": [],
+        "status": "pass",
+      },
+-     "taskReview": null,
+-     "timestamp": "2026-09-08T07:37:55.001Z",
++     "taskReview": {
++       "diff": "+change",
++       "issues": [],
++       "model": "reviewer",
++       "reasoning": "Independent council did not reproduce any retry finding.",
++       "reviewBatch": {
++         "accepted": [
++           {
++             "id": "current-batch-source",
++             "issue": "A recurring review finding",
++             "source": "initial-review",
++           },
++         ],
++         "adjudication": {
++           "candidateFindingIds": [
++             "review:council-ownership",
++           ],
++           "confirmedFindingIds": [],
++           "kind": "recurrence-hoist",
++           "originalReviewBatchId": "current-batch",
++         },
++         "axes": [],
++         "candidates": [
++           {
++             "id": "current-batch-source",
++             "issue": "A recurring review finding",
++             "source": "initial-review",
++           },
++         ],
++         "diffHash": "current-batch-diff",
++         "durationMs": 1,
++         "id": "current-batch",
++         "initialFindings": [
++           {
++             "id": "current-batch-source",
++             "issue": "A recurring review finding",
++             "source": "initial-review",
++           },
++         ],
++         "ledger": [],
++         "merged": [],
++         "model": "reviewer",
++         "promptVersion": "review-council-v1",
++         "quality": "healthy",
++         "rejected": [],
++         "reviewedHead": "current-batch000000000000000000000000000",
++         "schemaVersion": "structured-finding-v2",
++         "synthesis": "model",
++       },
++       "screenshots": [],
++       "status": "pass",
++     },
++     "timestamp": "2026-09-08T07:37:55.000Z",
+    },
+-   "status": "running",
++   "status": "failed",
+  }
+
+ ❯ src/pods/pod-manager.test.ts:13599:44
+    13597|         await manager.triggerValidation(pod.id);
+    13598|         expect(ctx.validationEngine.validate).toHaveBeenCalledTimes(2);
+    13599|         expect(manager.getSession(pod.id)).toMatchObject({
+       |                                            ^
+    13600|           status: 'running', containerId: 'replacement-container',
+    13601|           failureReason: 'replacement-owned-reason', lastValidationRes…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/2]⎯
+
+ FAIL  src/pods/pod-manager.test.ts > PodManager > triggerValidation > retains the original validation record when a superseded council returns rejection
+AssertionError: expected { id: 'spectacular-dolphin', …(113) } to match object { status: 'running', …(3) }
+(123 matching properties omitted from actual)
+
+- Expected
++ Received
+
+@@ -1,8 +1,8 @@
+  {
+    "containerId": "replacement-container",
+-   "failureReason": "replacement-owned-reason",
++   "failureReason": "Validation failed before checks could complete: Cannot transition pod spectacular-dolphin from running to review_required",
+    "lastValidationResult": {
+      "attempt": 9,
+      "duration": 5000,
+      "overall": "pass",
+      "podId": "spectacular-dolphin",
+@@ -22,7 +22,7 @@
+        "status": "pass",
+      },
+      "taskReview": null,
+      "timestamp": "2026-09-08T07:37:55.120Z",
+    },
+-   "status": "running",
++   "status": "failed",
+  }
+
+ ❯ src/pods/pod-manager.test.ts:13599:44
+    13597|         await manager.triggerValidation(pod.id);
+    13598|         expect(ctx.validationEngine.validate).toHaveBeenCalledTimes(2);
+    13599|         expect(manager.getSession(pod.id)).toMatchObject({
+       |                                            ^
+    13600|           status: 'running', containerId: 'replacement-container',
+    13601|           failureReason: 'replacement-owned-reason', lastValidationRes…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/2]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  2 failed | 552 skipped (554)
+   Start at  09:37:52
+   Duration  2.52s (transform 1.42s, setup 0ms, import 2.05s, tests 236ms, environment 0ms)
+

@@ -13557,6 +13557,153 @@ describe('PodManager', () => {
       expect(result.validationAttempts).toBe(3);
     });
 
+    it.each(['result', 'rejection'] as const)(
+      'retains the original validation record when a superseded council returns %s',
+      async (ending) => {
+        const ctx = createTestContext();
+        const emit = vi.spyOn(ctx.eventBus, 'emit');
+        const manager = createPodManager(ctx.deps);
+        const pod = manager.createSession(
+          { profileName: 'test-profile', task: 'Fence independent council' },
+          'user-1',
+        );
+        const issue = 'A recurring review finding';
+        const semanticId = 'review:council-ownership';
+        const original = makeCouncilReviewFailure(
+          pod.id,
+          2,
+          'current-batch',
+          issue,
+          semanticId,
+          false,
+        );
+        ctx.validationRepo.insert(
+          pod.id,
+          1,
+          makeCouncilReviewFailure(pod.id, 1, 'prior-batch', issue, semanticId, true),
+        );
+        ctx.podRepo.update(pod.id, {
+          status: 'running',
+          containerId: 'ctr-1',
+          worktreePath: '/tmp/worktree/abc',
+          validationAttempts: 1,
+        });
+        const replacementResult = makeValidationResult({ podId: pod.id, attempt: 9 });
+        if (!original.taskReview) throw new Error('Missing council fixture');
+        const originalTaskReview = original.taskReview;
+        vi.mocked(ctx.validationEngine.validate).mockImplementation(
+          async (config, onProgress, _signal, callbacks) => {
+            if (!config.reviewOnly) return original;
+            ctx.podRepo.incrementLifecycleGeneration(pod.id);
+            ctx.podRepo.update(pod.id, {
+              status: 'running',
+              containerId: 'replacement-container',
+              failureReason: 'replacement-owned-reason',
+              lastValidationResult: replacementResult,
+            });
+            emit.mockClear();
+            onProgress?.('superseded council progress');
+            callbacks?.onPhaseStarted?.('review');
+            callbacks?.onPhaseCompleted?.('review', 'pass', { status: 'pass' });
+            if (ending === 'rejection') throw new Error('Superseded council failed');
+            return makeValidationResult({
+              podId: pod.id,
+              attempt: 2,
+              taskReview: { ...originalTaskReview, status: 'pass', issues: [] },
+            });
+          },
+        );
+        await manager.triggerValidation(pod.id);
+        expect(ctx.validationEngine.validate).toHaveBeenCalledTimes(2);
+        expect(manager.getSession(pod.id)).toMatchObject({
+          status: 'running',
+          containerId: 'replacement-container',
+          failureReason: 'replacement-owned-reason',
+          lastValidationResult: replacementResult,
+        });
+        expect(ctx.validationRepo.getLatest(pod.id)?.result).toEqual(original);
+        expect(emit).not.toHaveBeenCalled();
+        expect(ctx.containerManager.stop).not.toHaveBeenCalled();
+        expect(ctx.runtime.resume).not.toHaveBeenCalled();
+      },
+    );
+
+    it.each(['preflight', 'kill'] as const)(
+      'fences independent council at the %s boundary',
+      async (boundary) => {
+        const ctx = createTestContext();
+        const manager = createPodManager(ctx.deps);
+        const pod = manager.createSession(
+          { profileName: 'test-profile', task: 'Fence council boundary' },
+          'user-1',
+        );
+        const issue = 'A recurring review finding';
+        const semanticId = 'review:council-boundary';
+        const original = makeCouncilReviewFailure(
+          pod.id,
+          2,
+          'current-batch',
+          issue,
+          semanticId,
+          false,
+        );
+        ctx.validationRepo.insert(
+          pod.id,
+          1,
+          makeCouncilReviewFailure(pod.id, 1, 'prior-batch', issue, semanticId, true),
+        );
+        ctx.podRepo.update(pod.id, {
+          status: 'running',
+          containerId: 'ctr-1',
+          worktreePath: '/tmp/worktree/abc',
+          validationAttempts: 1,
+        });
+        let initialExecuted = false;
+        let boundaryObserved = false;
+        ctx.containerManager.getExecutionMetadata = vi.fn(async () => {
+          if (initialExecuted && boundary === 'preflight') {
+            boundaryObserved = true;
+            ctx.podRepo.update(pod.id, {
+              status: 'running',
+              containerId: 'replacement-container',
+              failureReason: 'replacement-owned-reason',
+            });
+          }
+          return { imageDigest: null, memoryLimitBytes: null, cpuLimit: null, networkMode: null };
+        });
+        vi.mocked(ctx.validationEngine.validate).mockImplementation(
+          async (config, _onProgress, signal) => {
+            if (!config.reviewOnly) {
+              initialExecuted = true;
+              return original;
+            }
+            if (boundary === 'kill') {
+              await manager.killSession(pod.id);
+              boundaryObserved = signal?.aborted === true;
+              throw new Error('Council stopped after kill');
+            }
+            throw new Error('A replaced preflight must not execute a council');
+          },
+        );
+        await manager.triggerValidation(pod.id);
+        expect(boundaryObserved).toBe(true);
+        expect(ctx.validationEngine.validate).toHaveBeenCalledTimes(
+          boundary === 'preflight' ? 1 : 2,
+        );
+        if (boundary === 'preflight') {
+          expect(manager.getSession(pod.id)).toMatchObject({
+            status: 'running',
+            containerId: 'replacement-container',
+            failureReason: 'replacement-owned-reason',
+          });
+          expect(ctx.containerManager.stop).not.toHaveBeenCalled();
+          expect(ctx.containerManager.kill).not.toHaveBeenCalled();
+        } else expect(manager.getSession(pod.id).status).toBe('killed');
+        expect(ctx.validationRepo.getLatest(pod.id)?.result).toEqual(original);
+        expect(ctx.runtime.resume).not.toHaveBeenCalled();
+      },
+    );
+
     it('runs recurring-finding auto-hoist without the prior review ledger', async () => {
       const ctx = createTestContext();
       const manager = createPodManager(ctx.deps);

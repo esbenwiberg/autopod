@@ -7205,15 +7205,39 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
       );
   }
 
-  function ownValidation(expectedPod: Pod, validationController: AbortController) {
-    return captureValidationOwnership(expectedPod, {
+  function claimValidation(expectedPod: Pod, validationController: AbortController) {
+    let claimed = false;
+    const ownership = captureValidationOwnership(expectedPod, {
       readCurrent: () => podRepo.getOrThrow(expectedPod.id),
       isCurrentInvocation: () =>
-        validationAbortControllers.get(expectedPod.id) === validationController,
+        claimed
+          ? validationAbortControllers.get(expectedPod.id) === validationController
+          : !validationAbortControllers.has(expectedPod.id),
       hasPendingDecision: () =>
         podRepo.hasUnansweredDecision?.(expectedPod.id) ??
         Boolean(podRepo.getOrThrow(expectedPod.id).pendingEscalation),
     });
+    ownership.assertCurrent();
+    validationAbortControllers.set(expectedPod.id, validationController);
+    claimed = true;
+    return ownership;
+  }
+
+  function ownedValidationCallbacks(
+    ownership: ReturnType<typeof captureValidationOwnership>,
+    callbacks: Parameters<ValidationEngine['validate']>[3],
+  ): NonNullable<Parameters<ValidationEngine['validate']>[3]> {
+    return {
+      onPhaseStarted: (...args) => {
+        if (ownership.isCurrent()) callbacks?.onPhaseStarted?.(...args);
+      },
+      onPhaseCompleted: (...args) => {
+        if (ownership.isCurrent()) callbacks?.onPhaseCompleted?.(...args);
+      },
+      onReviewProgress: (...args) => {
+        if (ownership.isCurrent()) callbacks?.onReviewProgress?.(...args);
+      },
+    };
   }
 
   async function validateWithInfrastructureRetries(
@@ -7284,17 +7308,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
               if (ownership.isCurrent()) emitActivityStatus(podId, phase);
             },
             validationController.signal,
-            {
-              onPhaseStarted: (...args) => {
-                if (ownership.isCurrent()) callbacks?.onPhaseStarted?.(...args);
-              },
-              onPhaseCompleted: (...args) => {
-                if (ownership.isCurrent()) callbacks?.onPhaseCompleted?.(...args);
-              },
-              onReviewProgress: (...args) => {
-                if (ownership.isCurrent()) callbacks?.onReviewProgress?.(...args);
-              },
-            },
+            ownedValidationCallbacks(ownership, callbacks),
           );
         } catch (validateErr) {
           logger.error({ err: validateErr, podId, attempt }, logMessage);
@@ -13778,8 +13792,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
 
         let result: Awaited<ReturnType<typeof validationEngine.validate>>;
         const validationController = new AbortController();
-        validationAbortControllers.set(podId, validationController);
-        const ownership = ownValidation(pod, validationController);
+        const ownership = claimValidation(pod, validationController);
         try {
           result = await validateWithInfrastructureRetries(
             validationConfig,
@@ -14063,6 +14076,8 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
               const candidateIds = new Set(reviewCandidates.map((finding) => finding.id));
               const candidateFindingIds = [...candidateIds].sort();
               const originalReviewBatchId = effectiveResult.taskReview?.reviewBatch?.id;
+              const councilController = new AbortController();
+              const councilOwnership = claimValidation(pod, councilController);
               try {
                 const reviewConfig: Parameters<ValidationEngine['validate']>[0] = {
                   ...validationConfig,
@@ -14086,13 +14101,21 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
                     'facts',
                   ],
                 };
-                await recordValidationProvenance(reviewConfig, 'review');
+                await recordValidationProvenance(
+                  reviewConfig,
+                  'review',
+                  councilOwnership.assertCurrent,
+                );
+                councilOwnership.assertCurrent();
                 const reviewOnly = await validationEngine.validate(
                   reviewConfig,
-                  (phase) => emitActivityStatus(podId, phase),
-                  validationController.signal,
-                  buildPhaseEventCallbacks(podId),
+                  (phase) => {
+                    if (councilOwnership.isCurrent()) emitActivityStatus(podId, phase);
+                  },
+                  councilController.signal,
+                  ownedValidationCallbacks(councilOwnership, buildPhaseEventCallbacks(podId)),
                 );
+                councilOwnership.assertCurrent();
                 if (
                   isReviewInfrastructureOnlyFailure(reviewOnly) ||
                   reviewOnly.taskReview?.reviewBatch?.quality !== 'healthy'
@@ -14175,8 +14198,12 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
                   validationRepo?.updateResult(validationRecord.id, hoistedResult);
                 }
               } catch (err) {
+                councilOwnership.assertCurrent();
                 hoistError = err;
                 logger.warn({ err, podId }, 'Auto-hoist deeper review failed');
+              } finally {
+                if (validationAbortControllers.get(podId) === councilController)
+                  validationAbortControllers.delete(podId);
               }
 
               // The review call is asynchronous: honor a concurrent kill or
@@ -14987,8 +15014,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
 
         let result: Awaited<ReturnType<typeof validationEngine.validate>>;
         const revalidateController = new AbortController();
-        validationAbortControllers.set(podId, revalidateController);
-        const ownership = ownValidation(pod, revalidateController);
+        const ownership = claimValidation(pod, revalidateController);
         try {
           result = await validateWithInfrastructureRetries(
             validationConfig,
