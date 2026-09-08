@@ -17,7 +17,11 @@ async function requireEmptyStaging(destination: string): Promise<void> {
 
 /** Docker getArchive data is untrusted. Reject links before any filesystem writes. */
 export async function extractManagedDockerOutput(
-  stream: NodeJS.ReadableStream,
+  stream: {
+    on(event: 'error', listener: (error: Error) => void): unknown;
+    pipe(destination: ReturnType<typeof tar.extract>): unknown;
+    destroy?: () => void;
+  },
   destination: string,
   output: ArtifactOutput,
 ): Promise<void> {
@@ -62,6 +66,10 @@ export async function extractManagedDockerOutput(
       const chunks: Buffer[] = [];
       let size = 0;
       entry.on('data', (chunk) => {
+        if (!Buffer.isBuffer(chunk)) {
+          extract.destroy(new Error('artifact-nonbinary-chunk'));
+          return;
+        }
         size += chunk.length;
         if (size > (header.size ?? 0)) extract.destroy(new Error('artifact-extraction-limit'));
         else chunks.push(Buffer.from(chunk));
@@ -75,7 +83,10 @@ export async function extractManagedDockerOutput(
             await writeFile(target, Buffer.concat(chunks), { flag: 'wx', mode: 0o600 });
           }
         };
-        write().then(next, (error) => extract.destroy(error as Error));
+        write().then(
+          () => next(),
+          (error) => extract.destroy(error as Error),
+        );
       });
     });
   });
@@ -83,8 +94,7 @@ export async function extractManagedDockerOutput(
   try {
     await done;
   } finally {
-    const destroyable = stream as NodeJS.ReadableStream & { destroy?: () => void };
-    destroyable.destroy?.();
+    stream.destroy?.();
   }
 }
 

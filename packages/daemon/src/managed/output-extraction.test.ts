@@ -1,15 +1,17 @@
-import { mkdtemp, realpath, rm } from 'node:fs/promises';
+import { mkdtemp, realpath, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
+import { PassThrough } from 'node:stream';
 import type { ArtifactOutput } from '@autopod/shared';
 import tar from 'tar-stream';
-import { afterEach, expect, it } from 'vitest';
+import { afterEach, expect, it, vi } from 'vitest';
 import { collectOutput } from './artifact-collector.js';
 import { sha256 } from './canonical.js';
 import { extractManagedDockerOutput, extractManagedSandboxOutput } from './output-extraction.js';
 
 const roots: string[] = [];
 afterEach(async () => {
+  vi.restoreAllMocks();
   for (const root of roots.splice(0)) await rm(root, { recursive: true, force: true });
 });
 const output: ArtifactOutput = {
@@ -73,4 +75,45 @@ it('rejects traversal and oversized extraction before writes', async () => {
       output,
     ),
   ).rejects.toThrow('invalid-inventory');
+});
+
+it('accepts a Node readable source as well as the tar pack stream', async () => {
+  const base = await root();
+  const pack = tar.pack();
+  const stream = new PassThrough();
+  pack.entry({ name: 'output/research.md' }, Buffer.from('Node stream'));
+  pack.finalize();
+  pack.pipe(stream);
+  await extractManagedDockerOutput(stream, path.join(base, 'node-stream'), output);
+  const result = await collectOutput(path.join(base, 'node-stream'), output);
+  expect(result?.files[0]?.path).toBe('research.md');
+});
+it('rejects a nonbinary extraction chunk before writing output', async () => {
+  const base = await root();
+  const original = tar.extract;
+  vi.spyOn(tar, 'extract').mockImplementationOnce(() => {
+    const extractor = original();
+    extractor.on('entry', (_header, entry) => {
+      queueMicrotask(() => entry.emit('data', { unexpected: true }));
+    });
+    return extractor;
+  });
+  const pack = tar.pack();
+  pack.entry({ name: 'output/research.md' }, Buffer.from('Facts'));
+  pack.finalize();
+  await expect(
+    extractManagedDockerOutput(pack, path.join(base, 'nonbinary'), output),
+  ).rejects.toThrow('artifact-nonbinary-chunk');
+});
+
+it('rejects a nonbinary packing chunk without returning an artifact bundle', async () => {
+  const base = await root();
+  await writeFile(path.join(base, 'research.md'), 'Facts');
+  const original = tar.pack;
+  vi.spyOn(tar, 'pack').mockImplementationOnce(() => {
+    const pack = original();
+    pack.once('data', () => pack.emit('data', { unexpected: true }));
+    return pack;
+  });
+  await expect(collectOutput(base, output)).rejects.toThrow('artifact-nonbinary-chunk');
 });
