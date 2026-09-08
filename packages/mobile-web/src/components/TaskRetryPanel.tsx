@@ -141,9 +141,10 @@ export function TaskRetryPanel({
           )}
           {stage === 'worker' && (
             <p>
-              Repeated worker authentication failures require a recorded human authorization.
-              Classified throttling and provider outages use the persisted task allowance and
-              cooldown. Worker elapsed time overlaps phase measurements; usage is not counted again.
+              Repeated worker failures with unknown causes or rejected authentication require a
+              recorded human authorization. Classified throttling and provider outages use the
+              persisted task allowance and cooldown. Worker elapsed time overlaps phase
+              measurements; usage is not counted again.
             </p>
           )}
           <p>Latest outcome: {state.latest?.outcome ?? 'none'} · partial telemetry.</p>

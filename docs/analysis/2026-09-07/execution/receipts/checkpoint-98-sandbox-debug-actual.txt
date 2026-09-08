@@ -1,0 +1,30 @@
+
+ RUN  v4.1.11 /private/tmp/autopod-durable-execution/packages/daemon
+
+ ❯ src/pods/pod-manager.test.ts (635 tests | 1 failed | 634 skipped) 125ms
+     × auto-recovers exactly one pre-agent transient sandbox failure and fails closed on unsafe evidence 124ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/pods/pod-manager.test.ts > PodManager > auto-recovers exactly one pre-agent transient sandbox failure and fails closed on unsafe evidence
+AssertionError: expected 'Pod failed while the agent was runnin…' to be 'debug recovery failure' // Object.is equality
+
+Expected: "debug recovery failure"
+Received: "Pod failed while the agent was running: Persisted retry backoff has not elapsed; reconcile the clock before retrying"
+
+ ❯ src/pods/pod-manager.test.ts:1138:62
+    1136|     expect(ctx.containerManager.spawn).toHaveBeenCalledTimes(2);
+    1137|     expect(vi.mocked(ctx.runtime.spawn).mock.calls[1]?.[0]).toMatchObj…
+    1138|     expect(ctx.podRepo.getOrThrow(created.id).failureReason).toBe('deb…
+       |                                                              ^
+    1139|     expect(ctx.podRepo.getOrThrow(created.id)).toMatchObject({
+    1140|       status: 'failed',
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 634 skipped (635)
+   Start at  20:37:13
+   Duration  2.16s (transform 1.34s, setup 0ms, import 1.91s, tests 125ms, environment 0ms)
+

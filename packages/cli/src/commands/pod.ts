@@ -345,7 +345,7 @@ export function registerPodCommands(program: Command, getClient: () => AutopodCl
         );
         if (value.stage === 'worker')
           console.log(
-            'Repeated worker authentication failures require a recorded human authorization. Classified throttling and provider outages use the persisted task allowance and cooldown. Worker elapsed time overlaps phase measurements; usage is not counted again.',
+            'Repeated worker failures with unknown causes or rejected authentication require a recorded human authorization. Classified throttling and provider outages use the persisted task allowance and cooldown. Worker elapsed time overlaps phase measurements; usage is not counted again.',
           );
         if (value.stage === 'codex_interruption')
           console.log(

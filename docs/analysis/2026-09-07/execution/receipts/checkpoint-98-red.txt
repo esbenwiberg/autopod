@@ -1,0 +1,122 @@
+
+ RUN  v4.1.11 /private/tmp/autopod-durable-execution/packages/daemon
+
+ ❯ src/pods/task-retry-ledger.test.ts (21 tests | 4 failed | 16 skipped) 433ms
+   × retains legacy worker failure unknown and one scoped authorization across deletion and disk reopen 89ms
+   × retains legacy worker failure null and one scoped authorization across deletion and disk reopen 74ms
+   × retains legacy worker failure initialization and one scoped authorization across deletion and disk reopen 70ms
+   × does not claim legacy worker reservations executed without terminal execution evidence 54ms
+ ❯ src/pods/pod-manager.test.ts (634 tests | 7 failed | 623 skipped) 839ms
+     × rejects unauthorized worker Rework before HTTP acceptance or resource teardown: unknown 82ms
+     × blocks unchanged nonretryable outer worker replay before pulling another iterator: 'same-manager' / 'unknown' 58ms
+     × blocks unchanged nonretryable outer worker replay before pulling another iterator: 'same-manager' / 'missing' 51ms
+     × blocks unchanged nonretryable outer worker replay before pulling another iterator: 'second-manager' / 'unknown' 52ms
+     × blocks unchanged nonretryable outer worker replay before pulling another iterator: 'second-manager' / 'missing' 90ms
+     × blocks unchanged nonretryable outer worker replay before pulling another iterator: 'linked-pod' / 'unknown' 77ms
+     × blocks unchanged nonretryable outer worker replay before pulling another iterator: 'linked-pod' / 'missing' 72ms
+
+⎯⎯⎯⎯⎯⎯ Failed Tests 11 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/pods/pod-manager.test.ts > PodManager > rejects unauthorized worker Rework before HTTP acceptance or resource teardown: unknown
+AssertionError: {"ok":true,"accepted":true}: expected 202 to be 409 // Object.is equality
+
+- Expected
++ Received
+
+- 409
++ 202
+
+ ❯ src/pods/pod-manager.test.ts:1339:50
+    1337|         headers: { authorization: 'Bearer synthetic' },
+    1338|       });
+    1339|       expect(response.statusCode, response.body).toBe(409);
+       |                                                  ^
+    1340|       expect(response.json().error).toBe('TASK_RETRY_RECONCILIATION_RE…
+    1341|       await expect(manager.triggerValidation(pod.id, { force: true }))…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/11]⎯
+
+ FAIL  src/pods/pod-manager.test.ts > PodManager > blocks unchanged nonretryable outer worker replay before pulling another iterator: 'same-manager' / 'unknown'
+ FAIL  src/pods/pod-manager.test.ts > PodManager > blocks unchanged nonretryable outer worker replay before pulling another iterator: 'same-manager' / 'missing'
+ FAIL  src/pods/pod-manager.test.ts > PodManager > blocks unchanged nonretryable outer worker replay before pulling another iterator: 'second-manager' / 'unknown'
+ FAIL  src/pods/pod-manager.test.ts > PodManager > blocks unchanged nonretryable outer worker replay before pulling another iterator: 'second-manager' / 'missing'
+ FAIL  src/pods/pod-manager.test.ts > PodManager > blocks unchanged nonretryable outer worker replay before pulling another iterator: 'linked-pod' / 'unknown'
+ FAIL  src/pods/pod-manager.test.ts > PodManager > blocks unchanged nonretryable outer worker replay before pulling another iterator: 'linked-pod' / 'missing'
+AssertionError: promise resolved "'completed'" instead of rejecting
+
+- Expected:
+Error {
+  "message": "rejected promise",
+}
+
++ Received:
+"completed"
+
+ ❯ src/pods/pod-manager.test.ts:3160:7
+    3158|           })(),
+    3159|         ),
+    3160|       ).rejects.toMatchObject({ code: 'TASK_RETRY_RECONCILIATION_REQUI…
+       |       ^
+    3161|       expect(pulled).toBe(false);
+    3162|       expect(ctx.podRepo.taskExecutions?.snapshot(target.id).agentRunC…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/11]⎯
+
+ FAIL  src/pods/task-retry-ledger.test.ts > retains legacy worker failure unknown and one scoped authorization across deletion and disk reopen
+ FAIL  src/pods/task-retry-ledger.test.ts > retains legacy worker failure null and one scoped authorization across deletion and disk reopen
+ FAIL  src/pods/task-retry-ledger.test.ts > retains legacy worker failure initialization and one scoped authorization across deletion and disk reopen
+AssertionError: expected [Function] to throw an error
+
+- Expected:
+null
+
++ Received:
+undefined
+
+ ❯ src/pods/task-retry-ledger.test.ts:416:7
+    414|     expect(() =>
+    415|       ledger.assertCanAdmit('fix', 1, unavailableWorkerInputs, workerB…
+    416|     ).toThrow(/authentication|nonretryable/);
+       |       ^
+    417|     const grant = ledger.authorize('fix', 'repair-auth', 'Credentials …
+    418|       type: 'human',
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/11]⎯
+
+ FAIL  src/pods/task-retry-ledger.test.ts > does not claim legacy worker reservations executed without terminal execution evidence
+AssertionError: expected { …(13) } to match object { admissionCount: 1, …(4) }
+(8 matching properties omitted from actual)
+
+- Expected
++ Received
+
+  {
+    "admissionCount": 1,
+-   "authorizationRequired": true,
++   "authorizationRequired": false,
+    "executedCount": 0,
+    "latest": {
+      "measuredDurationMs": null,
+      "outcome": "unknown",
+      "startedAt": null,
+    },
+-   "retryFailure": "unknown",
++   "retryFailure": null,
+  }
+
+ ❯ src/pods/task-retry-ledger.test.ts:502:45
+    500|     if (!run || !repo.workerRetries) throw new Error('Missing worker l…
+    501|     repo.taskExecutions?.finishRun(run, 'failed', 'initialization');
+    502|     expect(repo.workerRetries.state('fix')).toMatchObject({
+       |                                             ^
+    503|       admissionCount: 1,
+    504|       executedCount: 0,
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[4/11]⎯
+
+
+ Test Files  2 failed (2)
+      Tests  11 failed | 5 passed | 639 skipped (655)
+   Start at  20:31:16
+   Duration  3.38s (transform 2.06s, setup 0ms, import 3.05s, tests 1.27s, environment 0ms)
+

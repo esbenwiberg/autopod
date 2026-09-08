@@ -161,6 +161,7 @@ export function createTaskRetryLedger(
             retryFailure: workerFailure,
             authorizationRequired:
               workerFailure === 'auth' ||
+              workerFailure === 'unknown' ||
               (workerFailure === 'transient' &&
                 (counts.retries ?? 0) >= (policy ? JSON.parse(policy.backoffs).length : 0)),
           }

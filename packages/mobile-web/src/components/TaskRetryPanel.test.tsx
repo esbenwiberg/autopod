@@ -16,6 +16,7 @@ it.each(['validation', 'sandbox_startup', 'codex_interruption', 'worker'] as con
     const state = {
       taskId: 'task',
       authorizationRequired: stage === 'worker',
+      retryFailure: stage === 'worker' ? 'unknown' : null,
       admissionCount: 4,
       executedCount: 3,
       transientRetryCount: 2,
@@ -74,6 +75,7 @@ it.each(['validation', 'sandbox_startup', 'codex_interruption', 'worker'] as con
         expect.anything(),
       );
       expect(container.textContent).toContain('3 executed / 4 admitted');
+      if (stage === 'worker') expect(container.textContent).toContain('unknown causes');
       expect(container.textContent).toContain('1 interrupted with unknown duration');
       await click('Retry recording the same authorization');
       expect(resumes).toBe(0);

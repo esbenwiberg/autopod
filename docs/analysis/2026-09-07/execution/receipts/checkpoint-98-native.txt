@@ -1,0 +1,31 @@
+[1/1] Compiling plugin GenerateManual
+[2/2] Compiling plugin GenerateDoccReference
+Building for debugging...
+[2/8] Write sources
+[4/8] Write swift-version--58304C5D6DBC2206.txt
+[6/10] Compiling AutopodUI TaskRetryCard.swift
+[7/10] Emitting module AutopodUI
+[7/12] Write Objects.LinkFileList
+[9/14] Compiling AutopodClientTests TaskRetryClientTests.swift
+[10/14] Emitting module AutopodClientTests
+[10/14] Write Objects.LinkFileList
+[11/14] Linking AutopodDesktopExe
+[12/14] Applying AutopodDesktopExe
+[13/14] Linking AutopodDesktopPackageTests
+Build complete! (5.76s)
+Test Suite 'Selected tests' started at 2026-09-08 20:32:31.274.
+Test Suite 'AutopodDesktopPackageTests.xctest' started at 2026-09-08 20:32:31.280.
+Test Suite 'AutopodDesktopPackageTests.xctest' passed at 2026-09-08 20:32:31.280.
+	 Executed 0 tests, with 0 failures (0 unexpected) in 0.000 (0.000) seconds
+Test Suite 'Selected tests' passed at 2026-09-08 20:32:31.280.
+	 Executed 0 tests, with 0 failures (0 unexpected) in 0.000 (0.007) seconds
+◇ Test run started.
+↳ Testing Library Version: 1902
+↳ Target Platform: arm64e-apple-macos14.0
+◇ Test retryClientPreservesUnknownExecutionAndSeparateAuthorization(stage:) started.
+◇ Test case passing 1 argument stage → "codex_interruption" to retryClientPreservesUnknownExecutionAndSeparateAuthorization(stage:) started.
+◇ Test case passing 1 argument stage → "validation" to retryClientPreservesUnknownExecutionAndSeparateAuthorization(stage:) started.
+◇ Test case passing 1 argument stage → "sandbox_startup" to retryClientPreservesUnknownExecutionAndSeparateAuthorization(stage:) started.
+◇ Test case passing 1 argument stage → "worker" to retryClientPreservesUnknownExecutionAndSeparateAuthorization(stage:) started.
+✔ Test retryClientPreservesUnknownExecutionAndSeparateAuthorization(stage:) with 4 test cases passed after 0.008 seconds.
+✔ Test run with 1 test in 0 suites passed after 0.008 seconds.

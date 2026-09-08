@@ -10968,6 +10968,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
       let observedTerminalOutcome: 'completed' | 'failed' | null = null;
       let terminalClassification: ProviderFailureClassification | null = null;
       let executionTerminationUnverified = false;
+      let workerEventObserved = false;
       const retainUnverifiedTermination = () => {
         executionTerminationUnverified = true;
         if (taskRunId) podRepo.taskExecutions?.retainUnverifiedRun(taskRunId);
@@ -10997,6 +10998,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         if (workerAdmissionId) podRepo.workerRetries?.start(workerAdmissionId);
         workerStartedAt = performance.now();
         for await (const event of events) {
+          workerEventObserved = true;
           if (!ownsRun()) {
             logger.info(
               { podId, containerId: expected.containerId, generation: expected.generation },
@@ -11315,7 +11317,14 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         outcome = 'failed';
         observedTerminalOutcome = 'failed';
         terminalClassification = {
-          category: 'unknown',
+          // Preserve the typed pre-agent sandbox recovery path. Other thrown
+          // failures do not acquire an automatic worker retry allowance.
+          category:
+            err instanceof SandboxInfrastructureError &&
+            !workerEventObserved &&
+            !hasDurableAgentExecutionEvidence(attemptPod)
+              ? 'transient'
+              : 'unknown',
           definitive: false,
           sanitizedMessage: sanitizeFailureReason(
             err instanceof Error ? err.message : String(err),

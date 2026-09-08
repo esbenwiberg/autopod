@@ -108,7 +108,7 @@ export function retainWorkerRetryHistory(
 export function workerRetryFailure(
   db: Database.Database,
   runId: unknown,
-): 'auth' | 'transient' | null {
+): 'auth' | 'transient' | 'unknown' | null {
   if (typeof runId !== 'string') return null;
   const read = db.prepare(`SELECT a.task_id, a.started_at, a.previous_failure_id,
     r.outcome AS run_outcome, r.failure_category
@@ -134,6 +134,11 @@ export function workerRetryFailure(
       if (row.failure_category === 'auth') return 'auth';
       if (row.failure_category === 'transient' || row.failure_category === 'provider_unavailable')
         return 'transient';
+      // Quota continuation is governed separately by the frozen failover policy.
+      if (row.failure_category === 'quota_exhausted') return null;
+      // Missing classification cannot grant an unrestricted retry. An unstarted
+      // reservation still inherits its original failure rather than masking it.
+      if (row.started_at !== null || row.previous_failure_id === null) return 'unknown';
     }
     if (row.started_at !== null) return null;
     current = row.previous_failure_id;

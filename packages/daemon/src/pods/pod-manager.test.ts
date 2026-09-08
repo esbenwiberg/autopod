@@ -1107,6 +1107,8 @@ describe('PodManager', () => {
       warmImageTag: 'example.azurecr.io/autopod/test-profile:latest',
     });
     ctx.deps.requeueSessionAfterCurrent = vi.fn();
+    // This fixture stubs sleeps; cooldown clock behavior has separate coverage.
+    ctx.deps.workerInfrastructureRetryBackoffMs = [0];
     ctx.deps.sandboxInfrastructureRecoveryDelay = vi.fn(async () => {});
     // biome-ignore lint/correctness/useYield: models an iterator that throws before its first event
     vi.mocked(ctx.runtime.spawn).mockImplementation(async function* () {
@@ -1130,6 +1132,7 @@ describe('PodManager', () => {
       }),
     });
     expect(ctx.deps.requeueSessionAfterCurrent).toHaveBeenCalledWith(created.id);
+    expect(ctx.podRepo.workerRetries?.state(created.id).retryFailure).toBe('transient');
 
     await manager.processPod(created.id);
 
@@ -1292,115 +1295,118 @@ describe('PodManager', () => {
       await app.close();
     }
   });
-  it('rejects unauthorized worker Rework before HTTP acceptance or resource teardown', async () => {
-    const ctx = createTestContext();
-    const manager = createPodManager(ctx.deps);
-    const pod = manager.createSession(
-      { profileName: 'test-profile', task: 'Preserve failed worker source' },
-      'operator',
-    );
-    const sourceDir = fs.mkdtempSync(path.join(os.tmpdir(), 'worker-rework-'));
-    fs.writeFileSync(path.join(sourceDir, 'work.txt'), 'Retain human and worker changes');
-    ctx.podRepo.update(pod.id, {
-      status: 'running',
-      containerId: 'owned-container',
-      worktreePath: sourceDir,
-    });
-    await manager.consumeAgentEvents(
-      pod.id,
-      (async function* () {
-        yield {
-          type: 'error',
-          timestamp: new Date().toISOString(),
-          fatal: true,
-          message: 'Authentication rejected',
-          classification: {
-            category: 'auth',
-            definitive: false,
-            sanitizedMessage: 'Authentication rejected',
+  it.each(['auth', 'unknown'] as const)(
+    'rejects unauthorized worker Rework before HTTP acceptance or resource teardown: %s',
+    async (category) => {
+      const ctx = createTestContext();
+      const manager = createPodManager(ctx.deps);
+      const pod = manager.createSession(
+        { profileName: 'test-profile', task: 'Preserve failed worker source' },
+        'operator',
+      );
+      const sourceDir = fs.mkdtempSync(path.join(os.tmpdir(), 'worker-rework-'));
+      fs.writeFileSync(path.join(sourceDir, 'work.txt'), 'Retain human and worker changes');
+      ctx.podRepo.update(pod.id, {
+        status: 'running',
+        containerId: 'owned-container',
+        worktreePath: sourceDir,
+      });
+      await manager.consumeAgentEvents(
+        pod.id,
+        (async function* () {
+          yield {
+            type: 'error',
+            timestamp: new Date().toISOString(),
+            fatal: true,
+            message: 'Authentication rejected',
+            classification: {
+              category,
+              definitive: false,
+              sanitizedMessage: 'Authentication rejected',
+            },
+          } as const;
+        })(),
+      );
+      ctx.enqueuedSessions.length = 0;
+      const before = ctx.podRepo.getOrThrow(pod.id);
+      const app = Fastify();
+      app.setErrorHandler(errorHandler);
+      authPlugin(app, {
+        validateToken: async () => ({ oid: 'operator', name: 'Operator' }),
+      } as never);
+      podRoutes(app, manager, ctx.eventRepo, undefined, ctx.podRepo);
+      try {
+        const response = await app.inject({
+          method: 'POST',
+          url: `/pods/${pod.id}/validate`,
+          headers: { authorization: 'Bearer synthetic' },
+        });
+        expect(response.statusCode, response.body).toBe(409);
+        expect(response.json().error).toBe('TASK_RETRY_RECONCILIATION_REQUIRED');
+        await expect(manager.triggerValidation(pod.id, { force: true })).rejects.toMatchObject({
+          code: 'TASK_RETRY_RECONCILIATION_REQUIRED',
+        });
+        expect(ctx.podRepo.getOrThrow(pod.id)).toMatchObject({
+          lifecycleGeneration: before.lifecycleGeneration,
+          containerId: before.containerId,
+          worktreePath: before.worktreePath,
+          status: 'failed',
+        });
+        expect(ctx.containerManager.kill).not.toHaveBeenCalled();
+        expect(ctx.enqueuedSessions).toEqual([]);
+        const grantResponse = await app.inject({
+          method: 'POST',
+          url: `/pods/${pod.id}/retry-authorizations`,
+          headers: { authorization: 'Bearer synthetic' },
+          payload: {
+            stage: 'worker',
+            requestKey: 'rework-permission',
+            reason: 'Credentials repaired; rework preserved source',
           },
-        } as const;
-      })(),
-    );
-    ctx.enqueuedSessions.length = 0;
-    const before = ctx.podRepo.getOrThrow(pod.id);
-    const app = Fastify();
-    app.setErrorHandler(errorHandler);
-    authPlugin(app, {
-      validateToken: async () => ({ oid: 'operator', name: 'Operator' }),
-    } as never);
-    podRoutes(app, manager, ctx.eventRepo, undefined, ctx.podRepo);
-    try {
-      const response = await app.inject({
-        method: 'POST',
-        url: `/pods/${pod.id}/validate`,
-        headers: { authorization: 'Bearer synthetic' },
-      });
-      expect(response.statusCode, response.body).toBe(409);
-      expect(response.json().error).toBe('TASK_RETRY_RECONCILIATION_REQUIRED');
-      await expect(manager.triggerValidation(pod.id, { force: true })).rejects.toMatchObject({
-        code: 'TASK_RETRY_RECONCILIATION_REQUIRED',
-      });
-      expect(ctx.podRepo.getOrThrow(pod.id)).toMatchObject({
-        lifecycleGeneration: before.lifecycleGeneration,
-        containerId: before.containerId,
-        worktreePath: before.worktreePath,
-        status: 'failed',
-      });
-      expect(ctx.containerManager.kill).not.toHaveBeenCalled();
-      expect(ctx.enqueuedSessions).toEqual([]);
-      const grantResponse = await app.inject({
-        method: 'POST',
-        url: `/pods/${pod.id}/retry-authorizations`,
-        headers: { authorization: 'Bearer synthetic' },
-        payload: {
-          stage: 'worker',
-          requestKey: 'rework-permission',
-          reason: 'Credentials repaired; rework preserved source',
-        },
-      });
-      expect(grantResponse.statusCode).toBe(201);
-      expect(
-        (
-          await app.inject({
-            method: 'POST',
-            url: `/pods/${pod.id}/validate`,
-            headers: { authorization: 'Bearer synthetic' },
-          })
-        ).statusCode,
-      ).toBe(202);
-      await vi.waitFor(() => expect(ctx.enqueuedSessions).toContain(pod.id));
-      expect(ctx.podRepo.getOrThrow(pod.id)).toMatchObject({
-        status: 'queued',
-        worktreePath: before.worktreePath,
-        recoveryWorktreePath: before.worktreePath,
-      });
-      expect(
-        ctx.podRepo.workerRetries?.state(pod.id).authorizations[0]?.usedByAttemptId,
-      ).toBeNull();
-      ctx.podRepo.update(pod.id, { status: 'running', containerId: 'replacement-container' });
-      expect(
-        await manager.consumeAgentEvents(
-          pod.id,
-          (async function* () {
-            yield {
-              type: 'complete',
-              timestamp: new Date().toISOString(),
-              result: 'Reworked preserved source',
-            } as const;
-          })(),
-        ),
-      ).toBe('completed');
-      expect(ctx.podRepo.workerRetries?.state(pod.id)).toMatchObject({
-        admissionCount: 2,
-        executedCount: 2,
-        latest: { retryKind: 'override', outcome: 'pass' },
-      });
-    } finally {
-      await app.close();
-      fs.rmSync(sourceDir, { recursive: true, force: true });
-    }
-  });
+        });
+        expect(grantResponse.statusCode).toBe(201);
+        expect(
+          (
+            await app.inject({
+              method: 'POST',
+              url: `/pods/${pod.id}/validate`,
+              headers: { authorization: 'Bearer synthetic' },
+            })
+          ).statusCode,
+        ).toBe(202);
+        await vi.waitFor(() => expect(ctx.enqueuedSessions).toContain(pod.id));
+        expect(ctx.podRepo.getOrThrow(pod.id)).toMatchObject({
+          status: 'queued',
+          worktreePath: before.worktreePath,
+          recoveryWorktreePath: before.worktreePath,
+        });
+        expect(
+          ctx.podRepo.workerRetries?.state(pod.id).authorizations[0]?.usedByAttemptId,
+        ).toBeNull();
+        ctx.podRepo.update(pod.id, { status: 'running', containerId: 'replacement-container' });
+        expect(
+          await manager.consumeAgentEvents(
+            pod.id,
+            (async function* () {
+              yield {
+                type: 'complete',
+                timestamp: new Date().toISOString(),
+                result: 'Reworked preserved source',
+              } as const;
+            })(),
+          ),
+        ).toBe('completed');
+        expect(ctx.podRepo.workerRetries?.state(pod.id)).toMatchObject({
+          admissionCount: 2,
+          executedCount: 2,
+          latest: { retryKind: 'override', outcome: 'pass' },
+        });
+      } finally {
+        await app.close();
+        fs.rmSync(sourceDir, { recursive: true, force: true });
+      }
+    },
+  );
 
   it('records authenticated idempotent worker retry permission without dispatching', async () => {
     const ctx = createTestContext();
@@ -3105,9 +3111,13 @@ describe('PodManager', () => {
     },
   );
 
-  it.each(['same-manager', 'second-manager', 'linked-pod'] as const)(
-    'blocks unchanged nonretryable outer worker replay before pulling another iterator: %s',
-    async (route) => {
+  it.each(
+    ['same-manager', 'second-manager', 'linked-pod'].flatMap((route) =>
+      (['auth', 'unknown', 'missing'] as const).map((category) => ({ route, category })),
+    ),
+  )(
+    'blocks unchanged nonretryable outer worker replay before pulling another iterator: $route / $category',
+    async ({ route, category }) => {
       const ctx = createTestContext();
       const manager = createPodManager(ctx.deps);
       const root = manager.createSession(
@@ -3123,11 +3133,15 @@ describe('PodManager', () => {
             timestamp: new Date().toISOString(),
             fatal: true,
             message: 'Authentication rejected',
-            classification: {
-              category: 'auth',
-              definitive: true,
-              sanitizedMessage: 'Authentication rejected',
-            },
+            ...(category === 'missing'
+              ? {}
+              : {
+                  classification: {
+                    category,
+                    definitive: false,
+                    sanitizedMessage: 'Worker failed',
+                  },
+                }),
           } as const;
         })(),
       );
@@ -3192,8 +3206,8 @@ describe('PodManager', () => {
               fatal: true,
               message: 'Still rejected',
               classification: {
-                category: 'auth',
-                definitive: true,
+                category: category === 'missing' ? 'unknown' : category,
+                definitive: false,
                 sanitizedMessage: 'Still rejected',
               },
             } as const;
@@ -3204,7 +3218,12 @@ describe('PodManager', () => {
       expect(retries.state(target.id)).toMatchObject({
         admissionCount: 2,
         executedCount: 2,
-        latest: { outcome: 'nonretryable', retryKind: 'override' },
+        latest: {
+          outcome: category === 'auth' ? 'nonretryable' : 'unknown',
+          retryKind: 'override',
+        },
+        authorizationRequired: true,
+        retryFailure: category === 'auth' ? 'auth' : 'unknown',
       });
       expect(retries.state(target.id).authorizations[0]?.usedByAttemptId).toBeTruthy();
       await expect(
@@ -3364,77 +3383,80 @@ describe('PodManager', () => {
     },
   );
 
-  it('retains the worker auth guard after committed initialization fails before iterator entry', async () => {
-    const ctx = createTestContext();
-    const manager = createPodManager(ctx.deps);
-    const pod = manager.createSession(
-      { profileName: 'test-profile', task: 'Preserve auth failure' },
-      'operator',
-    );
-    ctx.podRepo.update(pod.id, { status: 'running', containerId: 'owned-container' });
-    await manager.consumeAgentEvents(
-      pod.id,
-      (async function* () {
+  it.each(['auth', 'unknown'] as const)(
+    'retains the worker %s guard after committed initialization fails before iterator entry',
+    async (category) => {
+      const ctx = createTestContext();
+      const manager = createPodManager(ctx.deps);
+      const pod = manager.createSession(
+        { profileName: 'test-profile', task: 'Preserve auth failure' },
+        'operator',
+      );
+      ctx.podRepo.update(pod.id, { status: 'running', containerId: 'owned-container' });
+      await manager.consumeAgentEvents(
+        pod.id,
+        (async function* () {
+          yield {
+            type: 'error',
+            timestamp: new Date().toISOString(),
+            fatal: true,
+            message: 'Authentication rejected',
+            classification: {
+              category,
+              definitive: true,
+              sanitizedMessage: 'Authentication rejected',
+            },
+          } as const;
+        })(),
+      );
+      const ledger = ctx.podRepo.workerRetries;
+      if (!ledger) throw new Error('Missing worker retries');
+      const actor = { type: 'human' as const, userId: 'operator' };
+      const grant = ledger.authorize(pod.id, 'first-permission', 'Credentials inspected', actor);
+      let pulls = 0;
+      const stream = async function* () {
+        pulls++;
         yield {
-          type: 'error',
+          type: 'complete',
           timestamp: new Date().toISOString(),
-          fatal: true,
-          message: 'Authentication rejected',
-          classification: {
-            category: 'auth',
-            definitive: true,
-            sanitizedMessage: 'Authentication rejected',
-          },
+          result: 'Preserved work',
         } as const;
-      })(),
-    );
-    const ledger = ctx.podRepo.workerRetries;
-    if (!ledger) throw new Error('Missing worker retries');
-    const actor = { type: 'human' as const, userId: 'operator' };
-    const grant = ledger.authorize(pod.id, 'first-permission', 'Credentials inspected', actor);
-    let pulls = 0;
-    const stream = async function* () {
-      pulls++;
-      yield {
-        type: 'complete',
-        timestamp: new Date().toISOString(),
-        result: 'Preserved work',
-      } as const;
-    };
-    vi.spyOn(ctx.eventRepo, 'getForSession').mockImplementationOnce(() => {
-      throw new Error('fixture event history unavailable');
-    });
-    await expect(manager.consumeAgentEvents(pod.id, stream())).rejects.toThrow(
-      'fixture event history unavailable',
-    );
-    expect(pulls).toBe(0);
-    expect(ledger.state(pod.id)).toMatchObject({
-      admissionCount: 2,
-      executedCount: 1,
-      authorizationRequired: true,
-      latest: { outcome: 'unknown', startedAt: null, measuredDurationMs: null },
-    });
-    const consumed = ledger
-      .state(pod.id)
-      .authorizations.find((a) => a.id === grant.id)?.usedByAttemptId;
-    expect(consumed).toBeTruthy();
-    const restarted = createPodManager(ctx.deps);
-    await expect(restarted.consumeAgentEvents(pod.id, stream())).rejects.toMatchObject({
-      code: 'TASK_RETRY_RECONCILIATION_REQUIRED',
-    });
-    expect(pulls).toBe(0);
-    ledger.authorize(pod.id, 'second-permission', 'Initialization repaired; permit retry', actor);
-    await expect(restarted.consumeAgentEvents(pod.id, stream())).resolves.toBe('completed');
-    expect(pulls).toBe(1);
-    expect(ledger.state(pod.id)).toMatchObject({
-      admissionCount: 3,
-      executedCount: 2,
-      authorizationRequired: false,
-    });
-    expect(
-      ledger.state(pod.id).authorizations.find((a) => a.id === grant.id)?.usedByAttemptId,
-    ).toBe(consumed);
-  });
+      };
+      vi.spyOn(ctx.eventRepo, 'getForSession').mockImplementationOnce(() => {
+        throw new Error('fixture event history unavailable');
+      });
+      await expect(manager.consumeAgentEvents(pod.id, stream())).rejects.toThrow(
+        'fixture event history unavailable',
+      );
+      expect(pulls).toBe(0);
+      expect(ledger.state(pod.id)).toMatchObject({
+        admissionCount: 2,
+        executedCount: 1,
+        authorizationRequired: true,
+        latest: { outcome: 'unknown', startedAt: null, measuredDurationMs: null },
+      });
+      const consumed = ledger
+        .state(pod.id)
+        .authorizations.find((a) => a.id === grant.id)?.usedByAttemptId;
+      expect(consumed).toBeTruthy();
+      const restarted = createPodManager(ctx.deps);
+      await expect(restarted.consumeAgentEvents(pod.id, stream())).rejects.toMatchObject({
+        code: 'TASK_RETRY_RECONCILIATION_REQUIRED',
+      });
+      expect(pulls).toBe(0);
+      ledger.authorize(pod.id, 'second-permission', 'Initialization repaired; permit retry', actor);
+      await expect(restarted.consumeAgentEvents(pod.id, stream())).resolves.toBe('completed');
+      expect(pulls).toBe(1);
+      expect(ledger.state(pod.id)).toMatchObject({
+        admissionCount: 3,
+        executedCount: 2,
+        authorizationRequired: false,
+      });
+      expect(
+        ledger.state(pod.id).authorizations.find((a) => a.id === grant.id)?.usedByAttemptId,
+      ).toBe(consumed);
+    },
+  );
 
   it('rolls back completion cycle and task admission when provider segment initialization fails', async () => {
     const ctx = createTestContext();

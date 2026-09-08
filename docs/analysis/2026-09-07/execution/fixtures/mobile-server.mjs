@@ -267,7 +267,9 @@ if (uncollectedGuidanceFixture) {
   };
 }
 const workerTransientFixture = process.env.FIXTURE_MODE === 'worker-transient';
-const workerAuthFixture = process.env.FIXTURE_MODE === 'worker-auth' || workerTransientFixture;
+const workerUnknownFixture = process.env.FIXTURE_MODE === 'worker-unknown';
+const workerAuthFixture =
+  process.env.FIXTURE_MODE === 'worker-auth' || workerTransientFixture || workerUnknownFixture;
 if (workerAuthFixture) {
   pod = {
     ...pod,
@@ -292,6 +294,20 @@ if (workerAuthFixture) {
     interruptedCount: 0,
     authorizationRequired: true,
     latest: { id: 'local-unstarted-retry', outcome: 'unknown', startedAt: null },
+  });
+}
+if (workerUnknownFixture) {
+  pod = {
+    ...pod,
+    task: '[Local fixture] Reconcile an unknown worker failure',
+    failureReason:
+      'Worker failed without a classified cause. Inspect preserved source and record permission before rework.',
+  };
+  Object.assign(retryState, {
+    retryFailure: 'unknown',
+    admissionCount: 1,
+    executedCount: 1,
+    latest: { id: 'unknown-worker', outcome: 'unknown' },
   });
 }
 if (workerTransientFixture) {

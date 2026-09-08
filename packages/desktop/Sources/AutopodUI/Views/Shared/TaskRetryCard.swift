@@ -35,7 +35,7 @@ struct TaskRetryCard: View {
               "\(state.interruptedCount) interrupted with unknown duration · \(state.telemetry) telemetry"
             )
             if stage == "codex_interruption" { Text("One automatic inner recovery per logical task; further recoveries require recorded human authorization. Duration overlaps the enclosing agent run; usage is not counted again.") }
-            if stage == "worker" { Text("Repeated worker authentication failures require a recorded human authorization. Classified throttling and provider outages use the persisted task allowance and cooldown. Worker elapsed time overlaps phase measurements; usage is not counted again.") }
+            if stage == "worker" { Text("Repeated worker failures with unknown causes or rejected authentication require a recorded human authorization. Classified throttling and provider outages use the persisted task allowance and cooldown. Worker elapsed time overlaps phase measurements; usage is not counted again.") }
             Text("Latest outcome: \(state.latest?.outcome ?? "none")")
             ForEach(state.authorizations) { grant in
               Text(
