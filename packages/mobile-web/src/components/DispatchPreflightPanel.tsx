@@ -120,8 +120,12 @@ export function DispatchPreflightPanel({ pod }: { pod: Pod }) {
             {environment.generation} · {environment.checkedAt}
           </p>
           <p>
-            Configured worker: {environment.runtime} CLI {environment.cliVersion ?? 'unverified'} ·{' '}
-            {environment.model}
+            {environment.subject === 'reviewer' ? 'Reviewer' : 'Configured worker'}:{' '}
+            {environment.runtime} CLI {environment.cliVersion ?? 'unverified'} · {environment.model}
+          </p>
+          <p>
+            Provider: {environment.providerId ?? 'unverified'} · account:{' '}
+            {environment.providerAccountId ?? 'not recorded'}
           </p>
           <p>
             Daemon: {environment.release.commitSha ?? 'unverified'}

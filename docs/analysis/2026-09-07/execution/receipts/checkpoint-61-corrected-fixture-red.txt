@@ -1,0 +1,78 @@
+
+ RUN  v4.1.11 /private/tmp/autopod-durable-execution/packages/daemon
+
+ ❯ src/pods/pod-manager.test.ts (571 tests | 2 failed | 569 skipped) 248ms
+       × records the independent reviewer identity and blocks missing reviewer CLI=false 139ms
+       × records the independent reviewer identity and blocks missing reviewer CLI=true 107ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 2 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/pods/pod-manager.test.ts > PodManager > triggerValidation > records the independent reviewer identity and blocks missing reviewer CLI=false
+AssertionError: expected { Object (version, purpose, ...) } to match object { purpose: 'review', …(7) }
+(27 matching properties omitted from actual)
+
+- Expected
++ Received
+
+  {
+-   "cliVersion": "1.0.0",
+-   "model": "claude-reviewer-fixture",
++   "cliVersion": "0.144.4",
++   "model": "opus",
+    "providerAccountId": null,
+    "providerId": "anthropic",
+    "purpose": "review",
+-   "runtime": "claude",
++   "runtime": "codex",
+    "status": "checked",
+-   "subject": "reviewer",
+  }
+
+ ❯ src/pods/pod-manager.test.ts:13979:65
+    13977|         );
+    13978|         await manager.triggerValidation(pod.id);
+    13979|         expect(ctx.podRepo.executionProvenance?.latest(pod.id)).toMatc…
+       |                                                                 ^
+    13980|           purpose: 'review',
+    13981|           subject: 'reviewer',
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/2]⎯
+
+ FAIL  src/pods/pod-manager.test.ts > PodManager > triggerValidation > records the independent reviewer identity and blocks missing reviewer CLI=true
+AssertionError: expected { Object (version, purpose, ...) } to match object { purpose: 'review', …(7) }
+(27 matching properties omitted from actual)
+
+- Expected
++ Received
+
+  {
+-   "cliVersion": null,
+-   "model": "claude-reviewer-fixture",
++   "cliVersion": "0.144.4",
++   "model": "opus",
+    "providerAccountId": null,
+    "providerId": "anthropic",
+    "purpose": "review",
+-   "runtime": "claude",
+-   "status": "blocked",
+-   "subject": "reviewer",
++   "runtime": "codex",
++   "status": "checked",
+  }
+
+ ❯ src/pods/pod-manager.test.ts:13979:65
+    13977|         );
+    13978|         await manager.triggerValidation(pod.id);
+    13979|         expect(ctx.podRepo.executionProvenance?.latest(pod.id)).toMatc…
+       |                                                                 ^
+    13980|           purpose: 'review',
+    13981|           subject: 'reviewer',
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/2]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  2 failed | 569 skipped (571)
+   Start at  10:55:23
+   Duration  2.44s (transform 1.35s, setup 0ms, import 2.04s, tests 248ms, environment 0ms)
+

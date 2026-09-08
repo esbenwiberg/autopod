@@ -793,64 +793,79 @@ it('sends the same explicit rerun decision through the actual CLI HTTP client an
   }
 });
 
-it('reads execution provenance through the real HTTP client without inventing unknown resource or release values', async () => {
-  const server = createServer((request, response) => {
-    expect(request.method).toBe('GET');
-    response.setHeader('content-type', 'application/json');
-    response.end(
-      JSON.stringify(
-        request.url?.endsWith('execution-provenance')
-          ? {
-              latest: {
-                status: 'blocked',
-                purpose: 'validation',
-                checkedAt: 'today',
-                executionId: 'execution',
-                generation: 1,
-                runtime: 'codex',
-                model: 'fixture',
-                cliVersion: '0.144.4',
-                release: { commitSha: null },
-                imageDigest: null,
-                contractHash: 'a'.repeat(64),
-                validationImplementationHash: null,
-                capabilities: { memoryLimitBytes: null, cpuLimit: null },
-                commands: {
-                  requirements: [
-                    { source: 'fact:compile', executable: 'dotnet', available: false },
+it.each([undefined, 'reviewer'] as const)(
+  'reads subject=%s provenance through the real HTTP client with legacy and reviewer identity',
+  async (subject) => {
+    const server = createServer((request, response) => {
+      expect(request.method).toBe('GET');
+      response.setHeader('content-type', 'application/json');
+      response.end(
+        JSON.stringify(
+          request.url?.endsWith('execution-provenance')
+            ? {
+                latest: {
+                  status: 'blocked',
+                  purpose: subject === 'reviewer' ? 'review' : 'validation',
+                  subject,
+                  providerId: subject ? 'anthropic' : null,
+                  providerAccountId: subject ? 'review-account' : null,
+                  checkedAt: 'today',
+                  executionId: 'execution',
+                  generation: 1,
+                  runtime: 'codex',
+                  model: 'fixture',
+                  cliVersion: '0.144.4',
+                  release: { commitSha: null },
+                  imageDigest: null,
+                  contractHash: 'a'.repeat(64),
+                  validationImplementationHash: null,
+                  capabilities: { memoryLimitBytes: null, cpuLimit: null },
+                  commands: {
+                    requirements: [
+                      { source: 'fact:compile', executable: 'dotnet', available: false },
+                    ],
+                  },
+                  diagnostics: [
+                    {
+                      code: 'PREFLIGHT_COMMAND_UNAVAILABLE',
+                      detail: 'Required launcher is missing',
+                    },
                   ],
                 },
-                diagnostics: [
-                  { code: 'PREFLIGHT_COMMAND_UNAVAILABLE', detail: 'Required launcher is missing' },
-                ],
-              },
-            }
-          : { id: 'abcd1234' },
-      ),
-    );
-  });
-  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
-  const address = server.address();
-  if (!address || typeof address === 'string') throw new Error('No port');
-  const client = new AutopodClient({
-    baseUrl: `http://127.0.0.1:${address.port}`,
-    getToken: async () => 'fixture-token',
-  });
-  const log = vi.spyOn(console, 'log').mockImplementation(() => {});
-  try {
-    const program = new Command();
-    registerPodCommands(program, () => client);
-    await program.parseAsync(['node', 'ap', 'execution-provenance', 'abcd1234']);
-    const output = log.mock.calls.flat().join('\n');
-    expect(output).toContain('validation preflight blocked');
-    expect(output).toContain('Memory unverified bytes; CPU unverified');
-    expect(output).toContain('Daemon unverified; image unverified');
-    expect(output).toContain('dotnet missing');
-  } finally {
-    log.mockRestore();
-    await new Promise<void>((resolve) => server.close(() => resolve()));
-  }
-});
+              }
+            : { id: 'abcd1234' },
+        ),
+      );
+    });
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+    const address = server.address();
+    if (!address || typeof address === 'string') throw new Error('No port');
+    const client = new AutopodClient({
+      baseUrl: `http://127.0.0.1:${address.port}`,
+      getToken: async () => 'fixture-token',
+    });
+    const log = vi.spyOn(console, 'log').mockImplementation(() => {});
+    try {
+      const program = new Command();
+      registerPodCommands(program, () => client);
+      await program.parseAsync(['node', 'ap', 'execution-provenance', 'abcd1234']);
+      const output = log.mock.calls.flat().join('\n');
+      expect(output).toContain(`${subject ? 'review' : 'validation'} preflight blocked`);
+      expect(output).toContain(`${subject ? 'Reviewer' : 'Configured worker'}: codex CLI 0.144.4`);
+      expect(output).toContain(
+        subject
+          ? 'Provider anthropic; account review-account'
+          : 'Provider unverified; account not recorded',
+      );
+      expect(output).toContain('Memory unverified bytes; CPU unverified');
+      expect(output).toContain('Daemon unverified; image unverified');
+      expect(output).toContain('dotnet missing');
+    } finally {
+      log.mockRestore();
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+  },
+);
 
 it.each(['Branch preservation', 'Approval delivery', 'Source reconciliation'])(
   'does not report approval when %s fails over HTTP and permits explicit retry',

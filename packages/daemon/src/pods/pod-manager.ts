@@ -146,6 +146,7 @@ import {
   ensureCodexStateDir,
 } from '../runtimes/codex-state-store.js';
 import type { PiRuntime } from '../runtimes/pi-runtime.js';
+import { resolveContainerReviewer } from '../validation/container-reviewer-runner.js';
 import { detectRecurringFindings, extractFindings } from '../validation/finding-fingerprint.js';
 import { applyOverrides } from '../validation/override-applicator.js';
 import { captureValidationRetryIdentity } from '../validation/retry-identity.js';
@@ -7243,11 +7244,35 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
     const pod = assertCurrent?.() ?? podRepo.getOrThrow(config.podId);
     const profile = resolveEffectiveBoundProfile(pod);
     const skips = new Set(config.skipPhases ?? []);
+    // This review entry is the independent frozen council, whose implementation
+    // always dispatches through runContainerReviewer. Other review surfaces need
+    // their own execution-bound observation; never infer their runner from the worker.
+    const reviewerRuntime =
+      purpose === 'review'
+        ? resolveContainerReviewer({
+            modelProvider: config.reviewerProvider ?? 'anthropic',
+            providerCredentials: config.reviewerProviderCredentials ?? null,
+          })
+        : null;
+    if (purpose === 'review' && (!config.councilOnly || typeof reviewerRuntime !== 'string'))
+      throw new TaskRetryBlockedError(
+        'Independent council reviewer runtime is unsupported or unverified; reconcile its selected provider before review.',
+      );
+    const executionPod =
+      reviewerRuntime && typeof reviewerRuntime === 'string'
+        ? {
+            ...pod,
+            runtime: reviewerRuntime,
+            model: config.reviewerModel ?? 'auto',
+            providerIdSnapshot: config.reviewerProvider ?? 'anthropic',
+            providerAccountIdSnapshot: config.reviewerProviderAccountId ?? null,
+          }
+        : pod;
     const provenance = await inspectExecutionPreflight(
       containerManagerFactory.get(pod.executionTarget),
       config.containerId,
       {
-        ...pod,
+        ...executionPod,
         skipValidation: false,
         options: { ...pod.options, validate: true },
         contract:
@@ -7267,6 +7292,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         buildEnv: config.extraExecEnv ?? null,
       },
       purpose,
+      purpose === 'review' ? 'reviewer' : 'worker',
     );
     if (assertCurrent) resolveEffectiveBoundProfile(assertCurrent());
     provenance.contractHash = createHash('sha256')
@@ -13896,6 +13922,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           sastTimeout: (profile.sastTimeout ?? 300) * 1_000,
           reviewerModel: resolveReviewerModel(reviewerProfile, logger),
           reviewerProvider: resolveReviewerProvider(reviewerProfile),
+          reviewerProviderAccountId: reviewerProfile.providerAccountId ?? null,
           reviewerProviderCredentials,
           ...(reviewerExecEnv ? { reviewerExecEnv } : {}),
           contract: pod.contract ?? undefined,
@@ -15129,6 +15156,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           sastTimeout: (profile.sastTimeout ?? 300) * 1_000,
           reviewerModel: resolveReviewerModel(reviewerProfile, logger),
           reviewerProvider: resolveReviewerProvider(reviewerProfile),
+          reviewerProviderAccountId: reviewerProfile.providerAccountId ?? null,
           reviewerProviderCredentials,
           ...(reviewerExecEnv ? { reviewerExecEnv } : {}),
           contract: pod.contract ?? undefined,

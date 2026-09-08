@@ -48,4 +48,17 @@ import Testing
   json.removeValue(forKey: "purpose")
   let legacy = try JSONDecoder().decode(ExecutionProvenance.self, from: JSONSerialization.data(withJSONObject: json))
   #expect(legacy.purpose == nil)
+  #expect(legacy.subjectLabel == "Configured worker")
+  json["purpose"] = "review"
+  let historicalReview = try JSONDecoder().decode(ExecutionProvenance.self, from: JSONSerialization.data(withJSONObject: json))
+  #expect(historicalReview.subjectLabel == "Configured worker")
+  json["subject"] = "reviewer"
+  json["runtime"] = "claude"
+  json["model"] = "reviewer-model"
+  json["providerId"] = "anthropic"
+  json["providerAccountId"] = "review-account"
+  let reviewer = try JSONDecoder().decode(ExecutionProvenance.self, from: JSONSerialization.data(withJSONObject: json))
+  #expect(reviewer.subjectLabel == "Reviewer")
+  #expect(reviewer.runtime == "claude"); #expect(reviewer.model == "reviewer-model")
+  #expect(reviewer.providerId == "anthropic"); #expect(reviewer.providerAccountId == "review-account")
 }

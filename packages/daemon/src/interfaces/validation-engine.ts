@@ -47,6 +47,8 @@ export interface ValidationEngineConfig {
   reviewerModel?: string;
   /** Model provider that owns the reviewer model/auth. Defaults to Anthropic for legacy profiles. */
   reviewerProvider?: ModelProvider | null;
+  /** Account captured with the resolved reviewer configuration, never inferred from mutable defaults. */
+  reviewerProviderAccountId?: string | null;
   /** Provider credentials from the resolved profile, used to select provider protocol/surface. */
   reviewerProviderCredentials?: ProviderCredentials | null;
   /** Anthropic API key for Tier 2 tool-use review. Defaults to ANTHROPIC_API_KEY env var. */

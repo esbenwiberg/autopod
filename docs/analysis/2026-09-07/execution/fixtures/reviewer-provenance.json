@@ -1,0 +1,49 @@
+{
+  "id": "local-reviewer-provenance",
+  "version": 1,
+  "podId": "local-fixture",
+  "taskId": "task-local",
+  "executionId": "execution-local",
+  "generation": 1,
+  "checkedAt": "2026-09-07T16:30:00Z",
+  "status": "blocked",
+  "runtime": "claude",
+  "model": "local-reviewer-model",
+  "providerId": "anthropic",
+  "providerAccountId": "local-reviewer-account",
+  "release": {
+    "commitSha": null,
+    "dirty": null,
+    "builtAt": null,
+    "source": "unavailable"
+  },
+  "cliPath": null,
+  "cliVersion": null,
+  "imageDigest": null,
+  "contractHash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "validationImplementationHash": null,
+  "capabilities": {
+    "streamingExec": "unverified",
+    "memoryLimitBytes": null,
+    "cpuLimit": null,
+    "networkMode": null
+  },
+  "commands": {
+    "requirements": [],
+    "unresolvedSources": [],
+    "deferredArtifacts": [],
+    "explicitDependencies": false
+  },
+  "diagnostics": [
+    {
+      "code": "PREFLIGHT_RUNTIME_UNAVAILABLE",
+      "detail": "Local fixture: selected reviewer CLI is missing; reconcile the image before independent review."
+    },
+    {
+      "code": "IMAGE_IDENTITY_UNAVAILABLE",
+      "detail": "Actual image digest is unverified."
+    }
+  ],
+  "purpose": "review",
+  "subject": "reviewer"
+}

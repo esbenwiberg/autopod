@@ -35,50 +35,57 @@ const input: ExecutionProvenanceInput = {
   },
   diagnostics: [{ code: 'PREFLIGHT_RUNTIME_UNAVAILABLE', detail: 'CLI version unknown' }],
 };
-it('retains failed provenance through restart and pod deletion without changing a receipt or attributing it to a stale lifecycle', () => {
-  const f = createTestDb();
-  insertTestProfile(f);
-  const repo = createPodRepository(f);
-  repo.insert({
-    id: 'pod',
-    profileName: 'test-profile',
-    task: 'Probe environment',
-    status: 'queued',
-    runtime: 'codex',
-    model: 'gpt-5.6-sol',
-    executionTarget: 'local',
-    branch: 'branch',
-    userId: 'operator',
-    maxValidationAttempts: 3,
-    skipValidation: false,
-    outputMode: 'pr',
-  });
-  const saved = repo.executionProvenance?.record('pod', 1, input);
-  expect(saved).toBeTruthy();
-  expect(() => repo.executionProvenance?.record('pod', 2, input)).toThrow('current lifecycle');
-  expect(() => f.prepare("UPDATE execution_provenance SET payload = '{}'").run()).toThrow(
-    'immutable',
-  );
-  const dir = mkdtempSync(join(tmpdir(), 'provenance-restart-'));
-  const file = join(dir, 'state.db');
-  writeFileSync(file, f.serialize());
-  f.close();
-  const db = new Database(file);
-  db.pragma('foreign_keys = ON');
-  try {
-    expect(createPodRepository(db).executionProvenance?.latest('pod')).toEqual(saved);
-    db.prepare("DELETE FROM pods WHERE id = 'pod'").run();
-    expect(createPodRepository(db).executionProvenance?.latest('pod')).toBeNull();
-    expect(db.prepare('SELECT count(*) AS count FROM execution_provenance').get()).toEqual({
-      count: 1,
+it.each([undefined, 'worker', 'reviewer'] as const)(
+  'retains subject=%s failed provenance through restart and deletion without changing receipts',
+  (subject) => {
+    const f = createTestDb();
+    insertTestProfile(f);
+    const repo = createPodRepository(f);
+    repo.insert({
+      id: 'pod',
+      profileName: 'test-profile',
+      task: 'Probe environment',
+      status: 'queued',
+      runtime: 'codex',
+      model: 'gpt-5.6-sol',
+      executionTarget: 'local',
+      branch: 'branch',
+      userId: 'operator',
+      maxValidationAttempts: 3,
+      skipValidation: false,
+      outputMode: 'pr',
     });
-    expect(db.pragma('integrity_check')).toEqual([{ integrity_check: 'ok' }]);
-    expect(db.pragma('foreign_key_check')).toEqual([]);
-  } finally {
-    db.close();
-    rmSync(dir, { recursive: true, force: true });
-  }
-});
+    const saved = repo.executionProvenance?.record('pod', 1, {
+      ...input,
+      purpose: 'review',
+      subject,
+    });
+    expect(saved).toBeTruthy();
+    expect(() => repo.executionProvenance?.record('pod', 2, input)).toThrow('current lifecycle');
+    expect(() => f.prepare("UPDATE execution_provenance SET payload = '{}'").run()).toThrow(
+      'immutable',
+    );
+    const dir = mkdtempSync(join(tmpdir(), 'provenance-restart-'));
+    const file = join(dir, 'state.db');
+    writeFileSync(file, f.serialize());
+    f.close();
+    const db = new Database(file);
+    db.pragma('foreign_keys = ON');
+    try {
+      expect(createPodRepository(db).executionProvenance?.latest('pod')).toEqual(saved);
+      db.prepare("DELETE FROM pods WHERE id = 'pod'").run();
+      expect(createPodRepository(db).executionProvenance?.latest('pod')).toBeNull();
+      expect(db.prepare('SELECT count(*) AS count FROM execution_provenance').get()).toEqual({
+        count: 1,
+      });
+      expect(db.pragma('integrity_check')).toEqual([{ integrity_check: 'ok' }]);
+      expect(db.pragma('foreign_key_check')).toEqual([]);
+    } finally {
+      db.close();
+      rmSync(dir, { recursive: true, force: true });
+    }
+  },
+);
 it.each([139, 157])(
   'upgrades schema %s without manufacturing missing historical provenance',
   (version) => {

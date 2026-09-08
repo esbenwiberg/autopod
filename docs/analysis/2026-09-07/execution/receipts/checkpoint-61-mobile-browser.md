@@ -1,0 +1,34 @@
+- generic [ref=e40]:
+  - heading "Dispatch preflight" [level=2] [ref=e41]
+  - paragraph [ref=e42]: review_required · 2026-09-07T15:00:00Z
+  - paragraph [ref=e43]: github.com/example/repo · main
+  - paragraph [ref=e44]:
+    - text: "Fresh base:"
+    - code [ref=e45]: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+  - paragraph [ref=e46]:
+    - text: "Equivalent work:"
+    - link "prior-fixture" [ref=e47] [cursor=pointer]:
+      - /url: "#/pod/prior-fixture"
+    - text: · validated · dispatch_receipt
+  - heading "Execution environment" [level=3] [ref=e48]
+  - paragraph [ref=e49]: review preflight blocked · generation 1 · 2026-09-07T16:30:00Z
+  - paragraph [ref=e50]: "Reviewer: claude CLI unverified · local-reviewer-model"
+  - paragraph [ref=e51]: "Provider: anthropic · account: local-reviewer-account"
+  - paragraph [ref=e52]: "Daemon: unverified"
+  - paragraph [ref=e53]:
+    - text: "Image:"
+    - code [ref=e54]: unverified
+  - paragraph [ref=e55]:
+    - text: "Validation implementation:"
+    - code [ref=e56]: unverified
+  - paragraph [ref=e57]:
+    - text: "Contract:"
+    - code [ref=e58]: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+  - paragraph [ref=e59]: "Memory: unverified bytes · CPU: unverified"
+  - paragraph [ref=e60]: "Local fixture: selected reviewer CLI is missing; reconcile the image before independent review."
+  - paragraph [ref=e61]: Actual image digest is unverified.
+  - paragraph [ref=e62]: To intentionally repeat this request, provide a reason. This creates a distinct task and may run a coding agent. Fresh contract, provider, and environment checks still apply.
+  - generic [ref=e63]:
+    - text: Reason for intentional rerun
+    - textbox "Reason for intentional rerun" [ref=e64]
+  - button "Create intentional rerun" [disabled] [ref=e65]

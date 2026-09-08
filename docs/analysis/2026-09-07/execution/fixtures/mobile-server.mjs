@@ -302,7 +302,15 @@ const server = createServer(async (req, res) => {
   if (pathname === '/pods/local-fixture/execution-provenance')
     return json({
       latest: JSON.parse(
-        await readFile(new URL('./execution-provenance.json', import.meta.url), 'utf8'),
+        await readFile(
+          new URL(
+            process.env.FIXTURE_MODE === 'reviewer-provenance'
+              ? './reviewer-provenance.json'
+              : './execution-provenance.json',
+            import.meta.url,
+          ),
+          'utf8',
+        ),
       ),
     });
   if (pathname === '/pods/local-fixture/dispatch-preflight')

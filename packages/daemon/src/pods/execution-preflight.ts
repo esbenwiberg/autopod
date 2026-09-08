@@ -21,10 +21,12 @@ export async function inspectExecutionPreflight(
   pod: Pod,
   profile: Profile,
   purpose: NonNullable<ExecutionProvenanceInput['purpose']> = 'coding',
+  subject: NonNullable<ExecutionProvenanceInput['subject']> = 'worker',
 ): Promise<ExecutionProvenanceInput> {
   const result: ExecutionProvenanceInput = {
     version: 1,
     purpose,
+    subject,
     status: 'checked',
     runtime: pod.runtime,
     model: pod.model,
@@ -57,23 +59,22 @@ export async function inspectExecutionPreflight(
     },
     diagnostics: [],
   };
+  const requiresCli = purpose === 'coding' || subject === 'reviewer';
   try {
     Object.assign(result, await verifyAgentCli(cm, containerId, pod.runtime));
   } catch (error) {
-    if (purpose === 'coding') result.status = 'blocked';
+    if (requiresCli) result.status = 'blocked';
     result.diagnostics.push({
-      code:
-        purpose !== 'coding'
-          ? 'WORKER_CLI_NOT_REQUIRED'
-          : error instanceof AutopodError
-            ? error.code
-            : 'PREFLIGHT_RUNTIME_UNAVAILABLE',
-      detail:
-        purpose !== 'coding'
-          ? 'Configured worker CLI is unavailable; this phase does not start a coding agent.'
-          : error instanceof AutopodError
-            ? error.message
-            : 'Runtime CLI probe unavailable; inspect container connectivity and image capabilities.',
+      code: !requiresCli
+        ? 'WORKER_CLI_NOT_REQUIRED'
+        : error instanceof AutopodError
+          ? error.code
+          : 'PREFLIGHT_RUNTIME_UNAVAILABLE',
+      detail: !requiresCli
+        ? 'Configured worker CLI is unavailable; this phase does not start a coding agent.'
+        : error instanceof AutopodError
+          ? error.message
+          : 'Runtime CLI probe unavailable; inspect container connectivity and image capabilities.',
     });
   }
   try {

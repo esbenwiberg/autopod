@@ -13911,6 +13911,90 @@ describe('PodManager', () => {
       },
     );
 
+    it.each([false, true])(
+      'records the independent reviewer identity and blocks missing reviewer CLI=%s',
+      async (missing) => {
+        const ctx = createTestContext(undefined, {
+          defaultRuntime: 'codex',
+        });
+        ctx.db
+          .prepare("UPDATE profiles SET reviewer_model = ? WHERE name = 'test-profile'")
+          .run('claude-reviewer-fixture');
+        const manager = createPodManager(ctx.deps);
+        const pod = manager.createSession(
+          { profileName: 'test-profile', task: 'Attribute independent review' },
+          'operator',
+        );
+        const original = makeCouncilReviewFailure(
+          pod.id,
+          2,
+          'current-batch',
+          'Recurring issue',
+          'review:identity',
+          false,
+        );
+        const batch = original.taskReview?.reviewBatch;
+        if (!original.taskReview || !batch) throw new Error('Missing review fixture');
+        const cleared = makeValidationResult({
+          podId: pod.id,
+          attempt: 2,
+          taskReview: {
+            ...original.taskReview,
+            status: 'pass',
+            issues: [],
+            reviewBatch: { ...batch, accepted: [], ledger: [] },
+          },
+        });
+        ctx.validationRepo.insert(
+          pod.id,
+          1,
+          makeCouncilReviewFailure(
+            pod.id,
+            1,
+            'prior-batch',
+            'Recurring issue',
+            'review:identity',
+            true,
+          ),
+        );
+        ctx.podRepo.update(pod.id, {
+          status: 'running',
+          containerId: 'ctr-1',
+          worktreePath: '/tmp/worktree/abc',
+          validationAttempts: 1,
+        });
+        const exec = vi.mocked(ctx.containerManager.execInContainer).getMockImplementation();
+        if (!exec) throw new Error('Missing exec fixture');
+        vi.mocked(ctx.containerManager.execInContainer).mockImplementation(
+          async (containerId, command, options) => {
+            if (missing && command.join(' ').includes('command -v claude'))
+              return { stdout: '', stderr: 'claude missing', exitCode: 1 };
+            return exec(containerId, command, options);
+          },
+        );
+        vi.mocked(ctx.validationEngine.validate).mockImplementation(async (config) =>
+          config.reviewOnly ? cleared : original,
+        );
+        await manager.triggerValidation(pod.id);
+        expect(ctx.podRepo.executionProvenance?.latest(pod.id)).toMatchObject({
+          purpose: 'review',
+          subject: 'reviewer',
+          runtime: 'claude',
+          model: 'claude-reviewer-fixture',
+          providerId: 'anthropic',
+          providerAccountId: null,
+          status: missing ? 'blocked' : 'checked',
+          cliVersion: missing ? null : '1.0.0',
+        });
+        expect(ctx.validationEngine.validate).toHaveBeenCalledTimes(missing ? 1 : 2);
+        expect(ctx.runtime.resume).not.toHaveBeenCalled();
+        if (missing) {
+          expect(manager.getSession(pod.id).status).toBe('review_required');
+          expect(ctx.validationRepo.getLatest(pod.id)?.result).toEqual(original);
+        }
+      },
+    );
+
     it.each(['preflight', 'kill'] as const)(
       'fences independent council at the %s boundary',
       async (boundary) => {

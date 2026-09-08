@@ -12,6 +12,8 @@ export interface ExecutionProvenance {
   status: 'checked' | 'blocked';
   /** Absent on early v1 records; those describe coding startup. */
   purpose?: 'coding' | 'validation' | 'review' | 'completion';
+  /** Absent on historical records, which probed the configured worker even for review. */
+  subject?: 'worker' | 'reviewer';
   runtime: RuntimeType;
   model: string;
   providerId: string | null;

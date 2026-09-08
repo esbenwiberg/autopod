@@ -6,9 +6,13 @@ public struct ExecutionProvenance: Codable, Sendable {
   public let generation: Int
   public let checkedAt: String
   public let purpose: String?
+  public let subject: String?
+  public var subjectLabel: String { subject == "reviewer" ? "Reviewer" : "Configured worker" }
   public let status: String
   public let runtime: String
   public let model: String
+  public let providerId: String?
+  public let providerAccountId: String?
   public let cliVersion: String?
   public let imageDigest: String?
   public let contractHash: String
