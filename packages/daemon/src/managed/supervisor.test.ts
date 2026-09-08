@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process';
-import { mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, readFile, realpath, rename, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { expect, it } from 'vitest';
@@ -9,9 +9,17 @@ it.each(['expired', 'revoked', 'budget-exhausted', 'request-time-expired', 'requ
   async (reason) => {
     const root = await realpath(await mkdtemp(path.join(tmpdir(), 'managed-supervisor-')));
     const script = path.resolve(import.meta.dirname, 'runtime/supervisor.py');
+    // The production quota feed publishes with os.replace. Readers must never
+    // observe this fixture's transient truncation or an empty synthetic clock.
+    const replaceFixtureFile = async (name: string, contents: string) => {
+      const temporary = path.join(root, `${name}.fixture-next`);
+      await writeFile(temporary, contents);
+      await rename(temporary, path.join(root, name));
+    };
     const now = 100;
     const spec = {
-      expiresAt: now + 30,
+      // Isolate expiry while the original five-second quota observation is fresh.
+      expiresAt: now + (reason === 'request-time-expired' ? 3 : 30),
       maxDurationSeconds: 30,
       specDigest: 'fixture-digest',
       ...(reason.startsWith('request-time') ? { budgetMode: 'request-time' } : { maxTokens: 10 }),
@@ -59,25 +67,13 @@ r=pathlib.Path(sys.argv[2]);runpy.run_path(sys.argv[1])['supervise'](r,lambda:fl
         expect(
           JSON.parse(await readFile(path.join(root, 'execution.json'), 'utf8')).observedExit,
         ).toBe(false);
-        if (reason === 'request-time-expired')
-          await writeFile(
-            path.join(root, 'quota.json'),
-            JSON.stringify({
-              specDigest: spec.specDigest,
-              consumedTokens: 6000,
-              observedAt: now + 31,
-            }),
-          );
-        await writeFile(
-          path.join(root, 'clock'),
-          String(now + (reason === 'request-time-stale' ? 6 : 31)),
-        );
+        await replaceFixtureFile('clock', String(now + (reason === 'request-time-stale' ? 6 : 4)));
       }
-      if (reason === 'expired') await writeFile(path.join(root, 'clock'), String(now + 31));
+      if (reason === 'expired') await replaceFixtureFile('clock', String(now + 31));
       if (reason === 'revoked') await writeFile(path.join(root, 'revoked'), 'true');
       if (reason === 'budget-exhausted')
-        await writeFile(
-          path.join(root, 'quota.json'),
+        await replaceFixtureFile(
+          'quota.json',
           JSON.stringify({ specDigest: spec.specDigest, consumedTokens: 10, observedAt: now }),
         );
       let receipt: { observedExit?: boolean; state?: string } = {};
