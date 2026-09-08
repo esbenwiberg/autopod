@@ -14398,91 +14398,120 @@ describe('PodManager', () => {
       },
     );
 
-    it('records a pending fact waiver during agent rework for the next validation', async () => {
-      const ctx = createTestContext();
-      const manager = createPodManager(ctx.deps);
+    it.each(['running', 'failed', 'review_required'] as const)(
+      'records a separate fact waiver while guidance remains queued in %s',
+      async (status) => {
+        const ctx = createTestContext();
+        const manager = createPodManager(ctx.deps);
 
-      const pod = manager.createSession(
-        { profileName: 'test-profile', task: 'Add feature' },
-        'user-1',
-      );
-      const pendingReasoning =
-        'Fact fact-swift-only needs human decision: required fact command `swift` is unavailable in the validation container.';
-      ctx.podRepo.update(pod.id, {
-        status: 'running',
-        containerId: 'ctr-1',
-        taskSummary: {
-          actualSummary: 'Updated the Swift helper.',
-          deviations: [],
-          factDeviations: [
-            {
-              factId: 'fact-swift-only',
-              action: 'waive',
-              reason: 'Swift is unavailable in the validation image',
-              whyImpossible: pendingReasoning,
-            },
-          ],
-        },
-        lastValidationResult: {
-          podId: pod.id,
-          attempt: 1,
-          timestamp: new Date().toISOString(),
-          smoke: {
-            status: 'pass',
-            build: { status: 'pass', output: '', duration: 100 },
-            health: {
-              status: 'pass',
-              url: 'http://localhost:3000',
-              responseCode: 200,
-              duration: 50,
-            },
-            pages: [],
-          },
-          taskReview: null,
-          overall: 'fail',
-          duration: 5000,
-          factValidation: {
-            status: 'pending_human',
-            results: [
+        const pod = manager.createSession(
+          { profileName: 'test-profile', task: 'Add feature' },
+          'user-1',
+        );
+        const pendingReasoning =
+          'Fact fact-swift-only needs human decision: required fact command `swift` is unavailable in the validation container.';
+        ctx.podRepo.update(pod.id, {
+          status,
+          containerId: 'ctr-1',
+          taskSummary: {
+            actualSummary: 'Updated the Swift helper.',
+            deviations: [],
+            factDeviations: [
               {
                 factId: 'fact-swift-only',
-                proves: ['swift-helper-readable'],
-                kind: 'unit-test',
-                artifactPath:
-                  'packages/desktop/Tests/AutopodUITests/ThroughputTimeInStatusDisplayTests.swift',
-                command: 'swift test --filter ThroughputTimeInStatusDisplayTests',
-                passed: false,
-                status: 'pending_human',
-                exitCode: 127,
-                reasoning: pendingReasoning,
+                action: 'waive',
+                reason: 'Swift is unavailable in the validation image',
+                whyImpossible: pendingReasoning,
               },
             ],
           },
-        },
-      });
+          lastValidationResult: {
+            podId: pod.id,
+            attempt: 1,
+            timestamp: new Date().toISOString(),
+            smoke: {
+              status: 'pass',
+              build: { status: 'pass', output: '', duration: 100 },
+              health: {
+                status: 'pass',
+                url: 'http://localhost:3000',
+                responseCode: 200,
+                duration: 50,
+              },
+              pages: [],
+            },
+            taskReview: null,
+            overall: 'fail',
+            duration: 5000,
+            factValidation: {
+              status: 'pending_human',
+              results: [
+                {
+                  factId: 'fact-swift-only',
+                  proves: ['swift-helper-readable'],
+                  kind: 'unit-test',
+                  artifactPath:
+                    'packages/desktop/Tests/AutopodUITests/ThroughputTimeInStatusDisplayTests.swift',
+                  command: 'swift test --filter ThroughputTimeInStatusDisplayTests',
+                  passed: false,
+                  status: 'pending_human',
+                  exitCode: 127,
+                  reasoning: pendingReasoning,
+                },
+              ],
+            },
+          },
+        });
 
-      const result = await manager.approveFactWaiver(
-        pod.id,
-        'fact-swift-only',
-        'Swift is unavailable here',
-        { type: 'human', userId: 'user-1' },
-      );
-
-      expect(result).toEqual({ newCommits: false, result: 'fail' });
-      expect(ctx.validationEngine.validate).not.toHaveBeenCalled();
-      const updated = manager.getSession(pod.id);
-      expect(updated.status).toBe('running');
-      expect(updated.taskSummary?.factDeviations).toEqual([
-        {
-          factId: 'fact-swift-only',
-          action: 'waive',
-          decision: 'approved_waive',
-          actor: { type: 'human', userId: 'user-1' },
-          reason: 'Swift is unavailable here',
-          whyImpossible: pendingReasoning,
-        },
-      ]);
-    });
+        ctx.deps.nudgeRepo.queue(pod.id, 'Keep the existing public behavior');
+        const app = Fastify();
+        app.setErrorHandler(errorHandler);
+        authPlugin(app, {
+          validateToken: async (token: string) => {
+            if (token !== 'operator-fixture')
+              throw new AutopodError('Invalid token', 'AUTH_ERROR', 401);
+            return { oid: 'user-1' };
+          },
+        } as never);
+        podRoutes(app, manager, ctx.eventRepo, undefined, ctx.podRepo);
+        const url = `/pods/${pod.id}/facts/fact-swift-only/approve-waiver`;
+        const payload = { reason: 'Swift is unavailable here' };
+        try {
+          expect((await app.inject({ method: 'POST', url, payload })).statusCode).toBe(401);
+          for (let attempt = 0; attempt < 2; attempt++) {
+            const response = await app.inject({
+              method: 'POST',
+              url,
+              payload,
+              headers: { authorization: 'Bearer operator-fixture' },
+            });
+            expect(response.statusCode).toBe(200);
+            expect(response.json()).toEqual({ ok: true, newCommits: false, result: 'fail' });
+          }
+        } finally {
+          await app.close();
+        }
+        expect(ctx.validationEngine.validate).not.toHaveBeenCalled();
+        const updated = manager.getSession(pod.id);
+        expect(updated.status).toBe(status);
+        expect(ctx.deps.nudgeRepo.listPending(pod.id).map((entry) => entry.message)).toEqual([
+          'Keep the existing public behavior',
+        ]);
+        expect(updated.lastValidationResult?.overall).toBe('fail');
+        expect(ctx.runtime.spawn).not.toHaveBeenCalled();
+        expect(ctx.runtime.resume).not.toHaveBeenCalled();
+        expect(updated.taskSummary?.factDeviations).toEqual([
+          {
+            factId: 'fact-swift-only',
+            action: 'waive',
+            decision: 'approved_waive',
+            actor: { type: 'human', userId: 'user-1' },
+            reason: 'Swift is unavailable here',
+            whyImpossible: pendingReasoning,
+          },
+        ]);
+      },
+    );
 
     it('retries with correction feedback until max attempts exhausted', async () => {
       // With always-failing validation, the retry loop exhausts all attempts

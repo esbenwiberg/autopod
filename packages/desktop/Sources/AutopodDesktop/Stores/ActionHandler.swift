@@ -610,6 +610,8 @@ public final class ActionHandler {
   public func approveFactWaiver(_ podId: String, factId: String, reason: String?) async {
     do {
       try await api.approveFactWaiver(podId: podId, factId: factId, reason: reason)
+      let response = try await api.getPod(podId)
+      podStore.upsertSession(PodMapper.map(response))
     } catch {
       lastError = error.localizedDescription
     }

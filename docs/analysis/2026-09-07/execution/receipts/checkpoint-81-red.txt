@@ -1,0 +1,32 @@
+
+ RUN  v4.1.11 /private/tmp/autopod-durable-execution/packages/daemon
+
+ ❯ src/pods/pod-manager.test.ts (595 tests | 3 failed | 592 skipped) 200ms
+       × records a separate fact waiver while guidance remains queued in running 108ms
+       × records a separate fact waiver while guidance remains queued in failed 46ms
+       × records a separate fact waiver while guidance remains queued in review_required 45ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 3 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/pods/pod-manager.test.ts > PodManager > triggerValidation > records a separate fact waiver while guidance remains queued in running
+ FAIL  src/pods/pod-manager.test.ts > PodManager > triggerValidation > records a separate fact waiver while guidance remains queued in failed
+ FAIL  src/pods/pod-manager.test.ts > PodManager > triggerValidation > records a separate fact waiver while guidance remains queued in review_required
+AutopodError: This pod has uncollected human guidance. Use Rework to let a worker collect check_messages and apply the saved guidance before validation or delivery.
+ ❯ assertGuidanceCollected src/pods/pod-manager.ts:2178:13
+    2176|   function assertGuidanceCollected(podId: string): void {
+    2177|     if (nudgeRepo.hasPending(podId))
+    2178|       throw new AutopodError(
+       |             ^
+    2179|         'This pod has uncollected human guidance. Use Rework to let a …
+    2180|         'UNCOLLECTED_HUMAN_GUIDANCE',
+ ❯ Object.approveFactWaiver src/pods/pod-manager.ts:16335:7
+ ❯ src/pods/pod-manager.test.ts:14465:36
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/3]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  3 failed | 592 skipped (595)
+   Start at  16:08:16
+   Duration  1.70s (transform 950ms, setup 0ms, import 1.37s, tests 200ms, environment 0ms)
+

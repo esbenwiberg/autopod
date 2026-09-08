@@ -16332,11 +16332,11 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
       reason?: string,
       actor: OperatorActor = { type: 'automation', id: 'direct-pod-manager' },
     ): Promise<{ newCommits: boolean; result: 'pass' | 'fail' }> {
-      assertGuidanceCollected(podId);
       const pod = podRepo.getOrThrow(podId);
-      const canRevalidateImmediately = pod.status === 'failed' || pod.status === 'review_required';
+      const isSettled = pod.status === 'failed' || pod.status === 'review_required';
+      const canRevalidateImmediately = isSettled && !nudgeRepo.hasPending(podId);
       const canRecordForActiveRun = pod.status === 'running' || pod.status === 'validating';
-      if (!canRevalidateImmediately && !canRecordForActiveRun) {
+      if (!isSettled && !canRecordForActiveRun) {
         throw new AutopodError(
           `Cannot approve fact waiver for pod ${podId} in status ${pod.status} — only running, validating, failed, or review_required pods`,
           'INVALID_STATE',
