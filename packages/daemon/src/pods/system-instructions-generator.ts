@@ -206,7 +206,10 @@ export function generateSystemInstructions(
   lines.push(
     '  - report_task_summary — report what you actually did and any deviations from your plan (call as your final step)',
   );
-  lines.push('  - check_messages — poll for human nudge messages (non-blocking)');
+  lines.push('  - check_messages — read saved human guidance (non-blocking; does not consume it)');
+  lines.push(
+    '  - acknowledge_messages — acknowledge the deliveryId after receiving complete guidance; does not approve a decision or resume work',
+  );
   lines.push('  - validate_in_browser — open a browser to verify your work (localhost URLs only)');
   lines.push('  - memory_list — list approved memories for global/profile/pod scope');
   lines.push('  - memory_read — retrieve full content of a memory entry by ID');
@@ -540,7 +543,7 @@ export function generateSystemInstructions(
     '   - Do not edit `.husky/**`, `.githooks/**`, `.git/hooks/**`, `.claude/**`, `.codex/**`, or `.mcp.json` to bypass sandbox, permission, or hook execution failures unless the task explicitly asks you to change those operational files. If a hook or environment policy blocks you, report the blocker and commit only the task-scoped code changes.',
   );
   lines.push(
-    '4. **Check for messages**: Call `check_messages` between phases to see if the human has guidance.',
+    '4. **Check for messages**: Call `check_messages` between phases. After receiving complete guidance from this or an interrupted tool, call `acknowledge_messages` with its `deliveryId`. Apply the guidance before continuing; repeat the same acknowledgment if its response is lost.',
   );
   let finishStep = 5;
   if (profile.agentDonePrompt?.trim()) {

@@ -651,3 +651,5 @@ export type {
 } from './types/execution-provenance.js';
 export * from './types/managed-pod.js';
 export * from './managed-protocol.js';
+
+export type { OperatorGuidanceDelivery } from './types/operator-guidance.js';

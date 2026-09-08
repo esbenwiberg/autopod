@@ -5,6 +5,7 @@ export interface OperatorMessageInterruption {
   interruptedTool: string;
   operatorMessages: string[];
   instruction: string;
+  deliveryId: string;
 }
 
 export function consumeOperatorMessages(
@@ -12,14 +13,16 @@ export function consumeOperatorMessages(
   tool: string,
   bridge: PodBridge,
 ): OperatorMessageInterruption | null {
-  const operatorMessages = bridge.consumeMessageBatch?.(podId) ?? [];
-  if (operatorMessages.length === 0) return null;
+  const delivery = bridge.readOperatorGuidance(podId);
+  if (!delivery) return null;
+  const operatorMessages = delivery.messages;
   return {
     interrupted: true,
     interruptedTool: tool,
     operatorMessages,
+    deliveryId: delivery.deliveryId,
     instruction:
-      'Apply all operator guidance before deciding whether to retry the interrupted tool.',
+      'After receiving these complete messages, call acknowledge_messages with this deliveryId. Apply all guidance before deciding whether to retry the interrupted tool. Acknowledgment does not approve a decision or resume execution.',
   };
 }
 

@@ -2199,7 +2199,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
   function assertGuidanceCollected(podId: string): void {
     if (nudgeRepo.hasPending(podId))
       throw new AutopodError(
-        'This pod has uncollected human guidance. Use Rework to let a worker collect check_messages and apply the saved guidance before validation or delivery.',
+        'This pod has uncollected human guidance. Use Rework to let a worker read check_messages, acknowledge its receipt, and apply the saved guidance before validation or delivery.',
         'UNCOLLECTED_HUMAN_GUIDANCE',
         409,
       );
@@ -2210,7 +2210,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
       task +
       (podRepo.completionJournal?.recoveryContext(pod) ?? '') +
       (nudgeRepo.hasPending(pod.id)
-        ? '\n\nUncollected human guidance remains in check_messages. Collect all queued messages, reconcile them with the preserved work, and apply them before reporting completion.'
+        ? '\n\nUncollected human guidance remains in check_messages. Read all queued messages, acknowledge each deliveryId with acknowledge_messages, reconcile them with the preserved work, and apply them before reporting completion.'
         : '')
     );
   }
@@ -11520,7 +11520,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         }
         if (!ownsArtifactCompletion(pod, false, true)) return;
         const current = podRepo.getOrThrow(podId);
-        const reason = `Worker settled with uncollected human guidance. Use Rework to collect check_messages and apply the saved guidance before validation or delivery.${preservationFailure} Original resources and guidance retained.`;
+        const reason = `Worker settled with uncollected human guidance. Use Rework to read check_messages, acknowledge its receipt, and apply the saved guidance before validation or delivery.${preservationFailure} Original resources and guidance retained.`;
         atomicPodChange(podRepo, () => {
           podRepo.completionJournal?.mark(current, 'awaiting_human', preserved);
           transition(current, 'failed', { failureReason: reason });

@@ -262,10 +262,21 @@ if (uncollectedGuidanceFixture) {
     lastValidationResult: null,
     task: '[Local fixture] Apply saved human guidance',
     failureReason:
-      'Worker settled with uncollected human guidance. Use Rework to collect check_messages and apply the saved guidance before validation or delivery. Original resources and guidance retained.',
+      'Worker settled with uncollected human guidance. Use Rework to read check_messages, acknowledge its receipt, and apply the saved guidance before validation or delivery. Original resources and guidance retained.',
     finalization: { ...pod.finalization, phase: 'awaiting_human', pendingDecisionId: null },
   };
 }
+const guidanceReceiptFixture = process.env.FIXTURE_MODE === 'guidance-receipt';
+if (guidanceReceiptFixture)
+  pod = {
+    ...pod,
+    status: 'running',
+    pendingEscalation: null,
+    lastValidationResult: null,
+    finalization: null,
+    failureReason: null,
+    task: '[Local fixture] Save guidance pending worker receipt',
+  };
 const workerDeadlineFixture = process.env.FIXTURE_MODE === 'worker-deadline';
 const workerTransientFixture =
   process.env.FIXTURE_MODE === 'worker-transient' || workerDeadlineFixture;
@@ -452,6 +463,12 @@ const server = createServer(async (req, res) => {
     res.setHeader('content-type', 'application/json');
     res.end(JSON.stringify(value));
   };
+  if (guidanceReceiptFixture && req.method === 'POST' && pathname === '/pods/local-fixture/nudge') {
+    console.log(
+      JSON.stringify({ scope: 'local fixture only', action: 'save-nudge', acknowledged: false }),
+    );
+    return json({ ok: true });
+  }
   if (
     approvalPreservationFixture &&
     req.method === 'POST' &&

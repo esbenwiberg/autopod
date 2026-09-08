@@ -370,10 +370,11 @@ describe('Pod Lifecycle E2E', () => {
         const runtime = createMockRuntime({
           resume: vi.fn(async function* () {
             if (collectReply) {
-              const reply = ctx.nudgeRepo.consumeNext(pod.id);
-              expect(reply.hasMessage).toBe(true);
-              expect(reply.message).toContain('Use PostgreSQL');
-              expect(reply.message).toContain('original MCP response stream closed');
+              const delivery = ctx.nudgeRepo.readPending(pod.id);
+              if (!delivery) throw new Error('Missing guidance delivery');
+              expect(delivery.messages.join('\n')).toContain('Use PostgreSQL');
+              expect(delivery.messages.join('\n')).toContain('original MCP response stream closed');
+              ctx.nudgeRepo.acknowledgeDelivery(pod.id, delivery.deliveryId);
             }
             yield completeEvent('Resumed after detached MCP reply');
           } as () => AsyncIterable<AgentEvent>),

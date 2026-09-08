@@ -282,6 +282,20 @@ export function createEscalationMcpServer(deps: EscalationMcpDeps): {
   );
 
   server.tool(
+    'acknowledge_messages',
+    'Acknowledge receipt of a complete operator guidance delivery returned by check_messages or an interrupted tool. Apply the guidance before continuing. This does not approve decisions or resume work. Repeat the same deliveryId if the acknowledgment response was lost.',
+    { deliveryId: z.string().uuid() },
+    async ({ deliveryId }) => {
+      bridge.acknowledgeOperatorGuidance(podId, deliveryId);
+      return {
+        content: [
+          { type: 'text' as const, text: JSON.stringify({ acknowledged: true, deliveryId }) },
+        ],
+      };
+    },
+  );
+
+  server.tool(
     'check_messages',
     'Check if the human has sent you a message. Call between phases. Returns immediately.',
     {},

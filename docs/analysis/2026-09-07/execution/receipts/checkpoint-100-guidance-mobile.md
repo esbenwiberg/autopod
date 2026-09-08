@@ -1,0 +1,1 @@
+- status [ref=e152]: Nudge saved. It remains pending until the worker acknowledges receipt.

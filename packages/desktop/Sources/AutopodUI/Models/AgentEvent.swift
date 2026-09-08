@@ -88,7 +88,7 @@ public enum AgentEventType: String, Sendable {
 public struct AgentEvent: Identifiable, Sendable {
     private static let plainMCPToolNames: Set<String> = [
         "ask_human", "ask_ai", "report_blocker", "report_plan", "report_progress",
-        "report_task_summary", "check_messages", "request_credential",
+        "report_task_summary", "check_messages", "acknowledge_messages", "request_credential",
         "validate_in_browser", "validate_locally", "pre_submit_review",
         "memory_list", "memory_read", "memory_search", "memory_suggest",
         "trigger_revalidation",

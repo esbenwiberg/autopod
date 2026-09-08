@@ -14,6 +14,7 @@ export function ActionBar({ pod }: Props): JSX.Element | null {
   const patchPodLocal = usePodsStore((s) => s.patchPodLocal);
   const upsertPod = usePodsStore((s) => s.upsertPod);
   const [busy, setBusy] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [prompt, setPrompt] = useState<ActionDef | null>(null);
 
@@ -23,6 +24,7 @@ export function ActionBar({ pod }: Props): JSX.Element | null {
   async function execute(action: ActionDef, message?: string): Promise<void> {
     setBusy(action.kind);
     setError(null);
+    setNotice(null);
 
     const snapshot: Partial<Pod> | null = action.optimistic
       ? (Object.fromEntries(
@@ -34,6 +36,8 @@ export function ActionBar({ pod }: Props): JSX.Element | null {
 
     try {
       await runAction(pod.id, action.kind, message);
+      if (action.kind === 'nudge')
+        setNotice('Nudge saved. It remains pending until the worker acknowledges receipt.');
       if (action.kind === 'retry' || action.kind === 'rework')
         upsertPod(await apiFetch<Pod>(`/pods/${pod.id}`));
     } catch (err) {
@@ -64,6 +68,7 @@ export function ActionBar({ pod }: Props): JSX.Element | null {
           </button>
         ))}
       </div>
+      {notice ? <output style={{ display: 'block' }}>{notice}</output> : null}
       {error ? <div className="error">{error}</div> : null}
       {prompt ? (
         <TextPromptModal

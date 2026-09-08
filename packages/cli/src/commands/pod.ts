@@ -1075,7 +1075,9 @@ export function registerPodCommands(program: Command, getClient: () => AutopodCl
       const client = getClient();
       const resolvedId = await resolvePodId(client, id);
       await withSpinner('Sending nudge...', () => client.nudgeSession(resolvedId, message));
-      console.log(chalk.green('Nudge queued. Agent will see it on next check_messages call.'));
+      console.log(
+        chalk.green('Nudge saved. It remains pending until the worker acknowledges receipt.'),
+      );
     });
 
   // ap kick

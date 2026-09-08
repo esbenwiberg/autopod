@@ -47,7 +47,10 @@
         "packages/daemon/src/runtimes/bounded-stderr.ts",
         "packages/cli/src/commands/pod.ts",
         "packages/desktop/Sources/AutopodDesktop/Stores/ActionHandler.swift",
-        "packages/mobile-web/src/components/TaskRetryPanel.tsx"
+        "packages/mobile-web/src/components/TaskRetryPanel.tsx",
+        "packages/daemon/src/pods/operator-guidance-delivery.ts",
+        "packages/daemon/src/db/migrations/180_operator_guidance_delivery.sql",
+        "packages/escalation-mcp/src/tools/check-messages.ts"
       ],
       "tests": [
         "packages/daemon/src/pods/pod-lifecycle.e2e.test.ts",
@@ -75,7 +78,8 @@
         "packages/daemon/src/runtimes/bounded-stderr.test.ts",
         "packages/daemon/src/runtimes/copilot-stderr.test.ts",
         "packages/mobile-web/src/components/TaskRetryPanel.test.tsx",
-        "packages/desktop/Tests/AutopodClientTests/TaskRetryClientTests.swift"
+        "packages/desktop/Tests/AutopodClientTests/TaskRetryClientTests.swift",
+        "packages/daemon/src/pods/operator-guidance-delivery.test.ts"
       ],
       "evidence": [
         "receipts/settlement-red.txt",
@@ -143,7 +147,8 @@
         "receipts/checkpoint-86-manager.txt",
         "receipts/checkpoint-86-build.txt",
         "checkpoint-93.md",
-        "checkpoint-96.md"
+        "checkpoint-96.md",
+        "checkpoint-100.md"
       ],
       "prerequisites": [
         "Replace destructive message collection with acknowledged delivery on the actual MCP/recovery paths; replay lost responses and late guidance at settlement."
@@ -182,7 +187,10 @@
         "packages/daemon/src/api/routes/pods.ts",
         "packages/cli/src/commands/pod.ts",
         "packages/desktop/Sources/AutopodDesktop/Stores/ActionHandler.swift",
-        "packages/mobile-web/src/components/TaskRetryPanel.tsx"
+        "packages/mobile-web/src/components/TaskRetryPanel.tsx",
+        "packages/daemon/src/pods/operator-guidance-delivery.ts",
+        "packages/daemon/src/db/migrations/180_operator_guidance_delivery.sql",
+        "packages/escalation-mcp/src/tools/check-messages.ts"
       ],
       "tests": [
         "packages/daemon/src/pods/completion-journal.test.ts",
@@ -206,7 +214,8 @@
         "packages/daemon/src/api/routes/pods.test.ts",
         "packages/mobile-web/src/components/TaskRetryPanel.test.tsx",
         "packages/cli/src/commands/pod.test.ts",
-        "packages/desktop/Tests/AutopodClientTests/TaskRetryClientTests.swift"
+        "packages/desktop/Tests/AutopodClientTests/TaskRetryClientTests.swift",
+        "packages/daemon/src/pods/operator-guidance-delivery.test.ts"
       ],
       "evidence": [
         "receipts/journal-migration.txt",
@@ -253,7 +262,8 @@
         "checkpoint-91.md",
         "receipts/checkpoint-91-fault-api-tests.txt",
         "checkpoint-93.md",
-        "checkpoint-96.md"
+        "checkpoint-96.md",
+        "checkpoint-100.md"
       ],
       "prerequisites": [
         "Close durable cleanup ownership and verified stale-execution reconciliation; retain source and decisions throughout restart and failed reconciliation."
@@ -1269,7 +1279,9 @@
       "status": "unverified",
       "implementation": [],
       "tests": [],
-      "evidence": ["checkpoint-93.md"],
+      "evidence": [
+        "checkpoint-93.md"
+      ],
       "prerequisites": [
         "Prepare exact sandbox image, resource/configuration identity, commands, success/failure oracle and estimated spend; obtain explicit canary authorization and record the actual result."
       ]
@@ -1495,8 +1507,12 @@
       "id": "W4.5",
       "requirement": "Live broad history/cost API root cause proven before claiming production repair",
       "status": "unverified",
-      "implementation": ["packages/daemon/src/pods/throughput-aggregator.ts"],
-      "tests": ["packages/daemon/src/pods/throughput-aggregator.test.ts"],
+      "implementation": [
+        "packages/daemon/src/pods/throughput-aggregator.ts"
+      ],
+      "tests": [
+        "packages/daemon/src/pods/throughput-aggregator.test.ts"
+      ],
       "evidence": [
         "receipts/live-api-baseline.jsonl",
         "receipts/live-vm-inspection-failed.json",
@@ -2149,7 +2165,9 @@
         "packages/daemon/src/db/reconcile-native-checkpoint.ts",
         "packages/daemon/src/db/reconcile-native-checkpoint-cli.ts"
       ],
-      "tests": ["packages/daemon/src/db/reconcile-native-checkpoint.test.ts"],
+      "tests": [
+        "packages/daemon/src/db/reconcile-native-checkpoint.test.ts"
+      ],
       "evidence": [
         "checkpoint-48.md: current tracking-branch migration collision reproduced and resolved with byte-preserving native renumbering, managed upgrade tests and copy-only checkpoint reconciliation; production acceptance remains unverified",
         "receipts/checkpoint-48-full-validation.txt",
@@ -2494,7 +2512,9 @@
       "status": "unverified",
       "implementation": [],
       "tests": [],
-      "evidence": ["checkpoint-93.md"],
+      "evidence": [
+        "checkpoint-93.md"
+      ],
       "prerequisites": [
         "After remaining local implementation, freeze the candidate diff and exact source/image/target identities; prepare release/rollback steps, backup safeguards, bounded canary scope and estimated spend before asking for publication/deployment/canary authority."
       ]
@@ -2505,13 +2525,15 @@
       "status": "unverified",
       "implementation": [],
       "tests": [],
-      "evidence": ["checkpoint-93.md"],
+      "evidence": [
+        "checkpoint-93.md"
+      ],
       "prerequisites": [
         "Finish independent local work, reconcile every criterion with final-source receipts and unresolved external prerequisites, then produce the closure report. The goal remains incomplete while required native/live acceptance is unverified."
       ]
     }
   ],
-  "lastCheckpoint": "checkpoint-99.md",
+  "lastCheckpoint": "checkpoint-100.md",
   "migrationLineage": {
     "managedBaseline": "142-152; exact bytes from tracking commit cba763ba0bb3d65cb4c055e00033016ba1d5c646",
     "nativeCurrent": "164-179; byte-preserving native lineage, retained task history 177, exact worker binding authorization 178 and provider retry deadlines 179",

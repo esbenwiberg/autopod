@@ -246,7 +246,7 @@ describe('E2E: escalation flow', () => {
     },
   );
 
-  it.each([true, false])(
+  it.each([true, false, 'read-without-ack'] as const)(
     'reconciles retained-worker completion with collected reply=%s',
     async (collectReply) => {
       // The original worker remains open at its escalation. A detached/absent
@@ -262,11 +262,12 @@ describe('E2E: escalation flow', () => {
           yield escalationEvent(config.podId, 'Should I use CSS variables or Tailwind?');
           // Block until sendMessage resolves the escalation
           await spawnBlock;
-          if (collectReply) {
-            expect(ctx.nudgeRepo.consumeNext(config.podId)).toEqual({
-              hasMessage: true,
-              message: 'Use CSS variables please',
-            });
+          if (collectReply !== false) {
+            const delivery = ctx.nudgeRepo.readPending(config.podId);
+            expect(delivery?.messages).toEqual(['Use CSS variables please']);
+            if (!delivery) throw new Error('Missing guidance delivery');
+            if (collectReply === true)
+              ctx.nudgeRepo.acknowledgeDelivery(config.podId, delivery.deliveryId);
           }
           yield statusEvent('Using CSS variables as instructed');
           yield completeEvent('Dark mode implemented with CSS variables');
@@ -331,9 +332,9 @@ describe('E2E: escalation flow', () => {
 
       // The original worker consumes the durable answer before validation.
       const final = manager.getSession(pod.id);
-      expect(final.status).toBe(collectReply ? 'validated' : 'failed');
+      expect(final.status).toBe(collectReply === true ? 'validated' : 'failed');
       expect(runtime.resume).not.toHaveBeenCalled();
-      if (collectReply) {
+      if (collectReply === true) {
         expect(ctx.nudgeRepo.listPending(pod.id)).toEqual([]);
       } else {
         expect(final.failureReason).toContain('uncollected human guidance');
@@ -358,10 +359,10 @@ describe('E2E: escalation flow', () => {
         vi.mocked(runtime.spawn).mockImplementationOnce(async function* (config) {
           expect(config.task).toContain('Uncollected human guidance');
           expect(config.task).toContain('Use CSS variables please');
-          expect(ctx.nudgeRepo.consumeNext(config.podId)).toEqual({
-            hasMessage: true,
-            message: 'Use CSS variables please',
-          });
+          const delivery = ctx.nudgeRepo.readPending(config.podId);
+          expect(delivery?.messages).toEqual(['Use CSS variables please']);
+          if (!delivery) throw new Error('Missing guidance delivery');
+          ctx.nudgeRepo.acknowledgeDelivery(config.podId, delivery.deliveryId);
           yield completeEvent('Applied saved guidance to preserved work');
         });
         const recoveredManager = createPodManager(ctx.deps);

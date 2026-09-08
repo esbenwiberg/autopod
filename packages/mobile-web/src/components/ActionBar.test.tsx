@@ -160,3 +160,52 @@ it.each(['Resume', 'Rework'] as const)(
     }
   },
 );
+
+it('reports saved guidance only after acceptance and clears that notice on a failed next send', async () => {
+  const pod = { id: 'guidance', status: 'running' } as Pod;
+  const fetch = vi
+    .spyOn(globalThis, 'fetch')
+    .mockResolvedValueOnce(new Response(JSON.stringify({ ok: true })))
+    .mockResolvedValueOnce(
+      new Response(JSON.stringify({ message: 'Guidance could not be saved' }), { status: 409 }),
+    );
+  const container = document.createElement('div');
+  document.body.append(container);
+  const root = createRoot(container);
+  const click = (label: string) =>
+    Array.from(container.querySelectorAll('button'))
+      .find((button) => button.textContent === label)
+      ?.click();
+  try {
+    await act(async () => root.render(<ActionBar pod={pod} />));
+    expect(container.querySelector('output')).toBeNull();
+    for (const message of ['Preserve the source', 'Keep the receipt']) {
+      await act(async () => click('Nudge'));
+      await act(async () => {
+        const input = container.querySelector('textarea');
+        if (!input) throw new Error('Missing nudge input');
+        Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')?.set?.call(
+          input,
+          message,
+        );
+        input.dispatchEvent(new Event('input', { bubbles: true }));
+      });
+      await act(async () => click('Send'));
+      if (message === 'Preserve the source') {
+        expect(container.querySelector('output')?.textContent).toBe(
+          'Nudge saved. It remains pending until the worker acknowledges receipt.',
+        );
+      }
+    }
+    expect(fetch.mock.calls.map(([url, options]) => [url, options?.body])).toEqual([
+      ['/pods/guidance/nudge', JSON.stringify({ message: 'Preserve the source' })],
+      ['/pods/guidance/nudge', JSON.stringify({ message: 'Keep the receipt' })],
+    ]);
+    expect(container.querySelector('output')).toBeNull();
+    expect(container.textContent).toContain('Guidance could not be saved');
+  } finally {
+    act(() => root.unmount());
+    container.remove();
+    fetch.mockRestore();
+  }
+});

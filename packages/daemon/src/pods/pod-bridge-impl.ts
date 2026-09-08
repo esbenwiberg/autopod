@@ -465,14 +465,14 @@ export function createSessionBridge(deps: SessionBridgeDependencies): PodBridge 
       });
     },
 
-    consumeMessages(podId: string): { hasMessage: boolean; message?: string } {
+    readOperatorGuidance(podId: string) {
       podManager.touchHeartbeat(podId);
-      return nudgeRepo.consumeNext(podId);
+      return nudgeRepo.readPending(podId);
     },
 
-    consumeMessageBatch(podId: string): string[] {
+    acknowledgeOperatorGuidance(podId: string, deliveryId: string) {
       podManager.touchHeartbeat(podId);
-      return nudgeRepo.consumePending(podId);
+      nudgeRepo.acknowledgeDelivery(podId, deliveryId);
     },
 
     actionRequiresApproval(podId: string, actionName: string): boolean {

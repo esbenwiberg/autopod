@@ -1,0 +1,8 @@
+
+ RUN  v4.1.11 /private/tmp/autopod-durable-execution/packages/escalation-mcp
+
+
+ Test Files  7 passed (7)
+      Tests  111 passed (111)
+   Start at  21:07:03
+   Duration  544ms (transform 763ms, setup 0ms, import 1.01s, tests 321ms, environment 0ms)
