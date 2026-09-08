@@ -15,7 +15,7 @@ import { createGzip } from 'node:zlib';
 import type { ArtifactOutput } from '@autopod/shared';
 import type Database from 'better-sqlite3';
 import type { Logger } from 'pino';
-import { type Headers as TarHeaders, type Pack as TarPack, pack as tarPack } from 'tar-stream';
+import { type Pack as TarPack, pack as tarPack } from 'tar-stream';
 import type {
   ContainerManager,
   ContainerSpawnConfig,
@@ -727,6 +727,8 @@ interface SandboxVolumeArchive {
   content: Buffer;
   entries: number;
 }
+
+type TarHeaders = Parameters<TarPack['entry']>[0];
 
 async function createSandboxVolumeArchive(rootPath: string): Promise<SandboxVolumeArchive> {
   const pack = tarPack();

@@ -87,12 +87,17 @@ export async function verifyBundle(
       const chunks: Buffer[] = [];
       let size = 0;
       stream.on('data', (chunk) => {
-        size += chunk.length;
+        if (!Buffer.isBuffer(chunk) && !(chunk instanceof Uint8Array)) {
+          extract.destroy(new Error('artifact-invalid-chunk'));
+          return;
+        }
+        const bytes = Buffer.from(chunk);
+        size += bytes.length;
         if (size > file.size) {
           extract.destroy(new Error('artifact-size-mismatch'));
           return;
         }
-        chunks.push(Buffer.from(chunk));
+        chunks.push(bytes);
       });
       stream.on('error', reject);
       stream.on('end', () => {
