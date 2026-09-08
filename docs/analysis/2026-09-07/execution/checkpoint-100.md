@@ -13,3 +13,5 @@ The final accessibility check replaced the notice div with a semantic block outp
 Text receipts have trailing whitespace normalized; raw receipts remain in /private/tmp.
 
 The initial clean pipeline on bd4c78047af595c0ad63be4809364e23b308475d passed build, configured typechecks, tests (5369 daemon passed, one existing skip), dependency audit and secret scan. Lint found three formatter errors in the acceptance ledger and MCP test files. Those formatting-only fixes are applied; the initial run and expanded diagnostics are retained before a complete rerun.
+
+Required full validation passed on clean 8765e27f087bea3c216810f098560e9417670138 from 2026-09-08T19:26:31.087705+00:00 to 2026-09-08T19:29:40.489797+00:00, unchanged HEAD/status. All configured gates passed; daemon 5369 passed with one existing platform skip. Continue attached reply delivery and the remaining criteria.
