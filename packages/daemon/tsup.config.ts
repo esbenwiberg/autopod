@@ -37,7 +37,11 @@ const release = {
 
 export default defineConfig({
   define: { __AUTOPOD_RELEASE__: JSON.stringify(release) },
-  entry: ['src/index.ts', 'src/db/verify-backup-cli.ts'],
+  entry: [
+    'src/index.ts',
+    'src/db/verify-backup-cli.ts',
+    'src/db/reconcile-native-checkpoint-cli.ts',
+  ],
   format: ['esm'],
   dts: true,
   clean: true,
@@ -47,6 +51,12 @@ export default defineConfig({
     if (process.env.AUTOPOD_TYPECHECK === '1') return;
     mkdirSync('dist/db/migrations', { recursive: true });
     cpSync('src/db/migrations', 'dist/db/migrations', { recursive: true });
+    mkdirSync('dist/db/fixtures/native-reliability-151-163', { recursive: true });
+    cpSync(
+      'src/db/fixtures/native-reliability-151-163',
+      'dist/db/fixtures/native-reliability-151-163',
+      { recursive: true },
+    );
     mkdirSync('dist/actions/defaults', { recursive: true });
     cpSync('src/actions/defaults', 'dist/actions/defaults', { recursive: true });
     mkdirSync('dist/containers', { recursive: true });

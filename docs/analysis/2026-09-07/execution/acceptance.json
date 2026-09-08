@@ -14,7 +14,7 @@
         "packages/daemon/src/db/unit-of-work.ts",
         "packages/daemon/src/pods/escalation-coordinator.ts",
         "packages/daemon/src/pods/completion-journal.ts",
-        "packages/daemon/src/db/migrations/159_decision_recovery.sql",
+        "packages/daemon/src/db/migrations/172_decision_recovery.sql",
         "packages/daemon/src/pods/decision-admission.ts",
         "packages/daemon/src/pods/task-execution-ledger.ts",
         "packages/daemon/src/pods/task-retry-ledger.ts",
@@ -80,7 +80,7 @@
         "packages/mobile-web/src/components/EscalationCard.tsx",
         "packages/daemon/src/db/unit-of-work.ts",
         "packages/daemon/src/pods/escalation-coordinator.ts",
-        "packages/daemon/src/db/migrations/159_decision_recovery.sql",
+        "packages/daemon/src/db/migrations/172_decision_recovery.sql",
         "packages/daemon/src/pods/artifact-preservation.ts",
         "packages/daemon/src/pods/pod-manager.ts",
         "packages/daemon/src/api/routes/files.ts",
@@ -155,15 +155,15 @@
       "requirement": "Finalization decisions and generations are durable with idempotent side effects",
       "status": "partial",
       "implementation": [
-        "packages/daemon/src/db/migrations/151_completion_journal.sql",
+        "packages/daemon/src/db/migrations/164_completion_journal.sql",
         "packages/daemon/src/pods/completion-journal.ts",
-        "packages/daemon/src/db/migrations/154_delivery_intents.sql",
+        "packages/daemon/src/db/migrations/167_delivery_intents.sql",
         "packages/daemon/src/pods/delivery-ledger.ts",
         "packages/daemon/src/worktrees/durable-pr-manager.ts",
         "packages/daemon/src/pods/pod-repository.ts",
         "packages/daemon/src/db/unit-of-work.ts",
         "packages/daemon/src/pods/escalation-coordinator.ts",
-        "packages/daemon/src/db/migrations/159_decision_recovery.sql",
+        "packages/daemon/src/db/migrations/172_decision_recovery.sql",
         "packages/daemon/src/pods/artifact-preservation.ts",
         "packages/daemon/src/pods/pod-manager.ts",
         "packages/daemon/src/api/routes/files.ts",
@@ -180,11 +180,13 @@
         "packages/daemon/src/worktrees/pr-manager.ts",
         "packages/daemon/src/worktrees/ado-pr-manager.ts",
         "packages/daemon/src/worktrees/github-url-identity.ts",
-        "packages/daemon/src/db/migrations/161_merge_journal.sql",
+        "packages/daemon/src/db/migrations/174_merge_journal.sql",
         "packages/daemon/src/pods/merge-journal.ts",
         "packages/daemon/src/worktrees/durable-merge.ts",
-        "packages/daemon/src/db/migrations/162_merge_disposition.sql",
-        "packages/daemon/src/db/migrations/163_merge_status_observations.sql"
+        "packages/daemon/src/db/migrations/175_merge_disposition.sql",
+        "packages/daemon/src/db/migrations/176_merge_status_observations.sql",
+        "packages/daemon/src/db/reconcile-native-checkpoint.ts",
+        "packages/daemon/src/db/reconcile-native-checkpoint-cli.ts"
       ],
       "tests": [
         "packages/daemon/src/pods/completion-journal.test.ts",
@@ -199,7 +201,8 @@
         "packages/daemon/src/pods/reconciler.test.ts",
         "packages/daemon/src/pods/polling-coordinator.test.ts",
         "packages/daemon/src/pods/merge-journal.test.ts",
-        "packages/daemon/src/worktrees/local-worktree-manager.git.test.ts"
+        "packages/daemon/src/worktrees/local-worktree-manager.git.test.ts",
+        "packages/daemon/src/db/reconcile-native-checkpoint.test.ts"
       ],
       "evidence": [
         "receipts/journal-migration.txt",
@@ -270,12 +273,13 @@
         "receipts/checkpoint-46-validation-identity.json",
         "checkpoint-47.md: durable closed/open source observations, retained-source recovery and separate closed counts with local CLI/mobile proof; wider acceptance remains partial",
         "receipts/checkpoint-47-full-validation.txt",
-        "receipts/checkpoint-47-validation-identity.json"
+        "receipts/checkpoint-47-validation-identity.json",
+        "checkpoint-48.md: current tracking-branch migration collision reproduced and resolved with byte-preserving native renumbering, managed upgrade tests and copy-only checkpoint reconciliation; production acceptance remains unverified"
       ],
       "prerequisites": [
         "PR creation intent/reconciliation implemented locally; broader finalization side effects and operator override remain."
       ],
-      "remaining": "Entered artifact collection survives restart with sources retained; generation/cycle-bound integrity receipts and in-process duplicate coordination are implemented. Independent source inventory, fsync/power-loss proof, orphan snapshot/DB-path reconciliation, interactive duplicates, other reply boundaries and broader durable finalization side effects remain. Interactive completion now stops before push/cleanup when sync and archive fallback fail or a branch container lacks its host worktree; the source remains retryable. Duplicate concurrent interactive requests, cancellation fences, restart/durable side-effect receipts and complete source-inventory proof remain. Concurrent interactive completions now coalesce in process, conflicting promotion/generation requests fail closed, and current source/lifecycle/decision ownership is checked across push and container release boundaries. This is not durable cross-process idempotency, cancellation of already-dispatched external operations, or complete post-completion side-effect accounting. Checkpoint 46 verifies planned merged disposition and separate request/PR counts locally. Legacy missing source history, closed disposition, broader durable cleanup and native/live interaction remain outstanding. Checkpoint 47 verifies source-bound closure, reopening and planned/acknowledged recovery locally; ambiguous prior requests, legacy unbound evidence, durable cleanup and native/live interaction remain outstanding."
+      "remaining": "Entered artifact collection survives restart with sources retained; generation/cycle-bound integrity receipts and in-process duplicate coordination are implemented. Independent source inventory, fsync/power-loss proof, orphan snapshot/DB-path reconciliation, interactive duplicates, other reply boundaries and broader durable finalization side effects remain. Interactive completion now stops before push/cleanup when sync and archive fallback fail or a branch container lacks its host worktree; the source remains retryable. Duplicate concurrent interactive requests, cancellation fences, restart/durable side-effect receipts and complete source-inventory proof remain. Concurrent interactive completions now coalesce in process, conflicting promotion/generation requests fail closed, and current source/lifecycle/decision ownership is checked across push and container release boundaries. This is not durable cross-process idempotency, cancellation of already-dispatched external operations, or complete post-completion side-effect accounting. Checkpoint 46 verifies planned merged disposition and separate request/PR counts locally. Legacy missing source history, closed disposition, broader durable cleanup and native/live interaction remain outstanding. Checkpoint 47 verifies source-bound closure, reopening and planned/acknowledged recovery locally; ambiguous prior requests, legacy unbound evidence, durable cleanup and native/live interaction remain outstanding. Checkpoint 48 verifies managed 150/152 upgrades and copy-only conversion of exact unpublished native checkpoint schemas 151/158/163. Live backup scope/freshness, deployed bytes and activation remain unverified; current tracking-main source integration is still outstanding."
     },
     {
       "id": "W1.4",
@@ -334,7 +338,7 @@
         "packages/daemon/src/db/unit-of-work.ts",
         "packages/daemon/src/pods/escalation-coordinator.ts",
         "packages/daemon/src/pods/completion-journal.ts",
-        "packages/daemon/src/db/migrations/159_decision_recovery.sql",
+        "packages/daemon/src/db/migrations/172_decision_recovery.sql",
         "packages/daemon/src/pods/artifact-preservation.ts",
         "packages/daemon/src/pods/pod-manager.ts",
         "packages/daemon/src/api/routes/files.ts",
@@ -399,11 +403,11 @@
       "status": "partial",
       "implementation": [
         "packages/daemon/src/pods/task-execution-ledger.ts",
-        "packages/daemon/src/db/migrations/152_task_executions.sql",
+        "packages/daemon/src/db/migrations/165_task_executions.sql",
         "packages/daemon/src/pods/pod-manager.ts",
         "packages/daemon/src/pods/task-retry-ledger.ts",
         "packages/daemon/src/validation/retry-identity.ts",
-        "packages/daemon/src/db/migrations/156_task_retry_admission.sql",
+        "packages/daemon/src/db/migrations/169_task_retry_admission.sql",
         "packages/daemon/src/api/routes/pods.ts",
         "packages/shared/src/types/task-retry.ts",
         "packages/cli/src/commands/pod.ts",
@@ -469,7 +473,7 @@
         "packages/daemon/src/pods/task-retry-ledger.ts",
         "packages/daemon/src/validation/retry-identity.ts",
         "packages/daemon/src/pods/pod-manager.ts",
-        "packages/daemon/src/db/migrations/156_task_retry_admission.sql",
+        "packages/daemon/src/db/migrations/169_task_retry_admission.sql",
         "packages/daemon/src/api/routes/pods.ts",
         "packages/shared/src/types/task-retry.ts",
         "packages/cli/src/commands/pod.ts",
@@ -518,7 +522,7 @@
         "packages/daemon/src/pods/task-retry-ledger.ts",
         "packages/daemon/src/validation/retry-identity.ts",
         "packages/daemon/src/pods/pod-manager.ts",
-        "packages/daemon/src/db/migrations/156_task_retry_admission.sql",
+        "packages/daemon/src/db/migrations/169_task_retry_admission.sql",
         "packages/daemon/src/api/routes/pods.ts",
         "packages/shared/src/types/task-retry.ts",
         "packages/cli/src/commands/pod.ts",
@@ -565,11 +569,11 @@
       "status": "partial",
       "implementation": [
         "packages/daemon/src/pods/task-execution-ledger.ts",
-        "packages/daemon/src/db/migrations/152_task_executions.sql",
+        "packages/daemon/src/db/migrations/165_task_executions.sql",
         "packages/daemon/src/pods/pod-manager.ts",
         "packages/daemon/src/pods/task-retry-ledger.ts",
         "packages/daemon/src/validation/retry-identity.ts",
-        "packages/daemon/src/db/migrations/156_task_retry_admission.sql",
+        "packages/daemon/src/db/migrations/169_task_retry_admission.sql",
         "packages/daemon/src/api/routes/pods.ts",
         "packages/shared/src/types/task-retry.ts",
         "packages/cli/src/commands/pod.ts",
@@ -647,7 +651,7 @@
       "requirement": "Validation reuse requires complete matching tree, contract, toolchain, commands, dependencies, environment and implementation identity",
       "status": "partial",
       "implementation": [
-        "packages/daemon/src/db/migrations/153_validation_phase_evidence.sql",
+        "packages/daemon/src/db/migrations/166_validation_phase_evidence.sql",
         "packages/daemon/src/validation/validation-evidence-cache.ts",
         "packages/daemon/src/validation/run-with-evidence.ts",
         "packages/daemon/src/validation/validation-identity-collector.ts",
@@ -723,7 +727,7 @@
         "packages/daemon/src/worktrees/contract-base-preflight.ts",
         "packages/daemon/src/pods/pod-manager.ts",
         "packages/daemon/src/validation/local-validation-engine.ts",
-        "packages/daemon/src/db/migrations/157_dispatch_preflight.sql",
+        "packages/daemon/src/db/migrations/170_dispatch_preflight.sql",
         "packages/daemon/src/pods/dispatch-preflight-ledger.ts",
         "packages/daemon/src/pods/dispatch-rerun-request.ts",
         "packages/daemon/src/api/routes/pods.ts",
@@ -762,9 +766,9 @@
       "status": "partial",
       "implementation": [
         "packages/daemon/src/pods/task-execution-ledger.ts",
-        "packages/daemon/src/db/migrations/152_task_executions.sql",
+        "packages/daemon/src/db/migrations/165_task_executions.sql",
         "packages/daemon/src/pods/pod-manager.ts",
-        "packages/daemon/src/db/migrations/157_dispatch_preflight.sql",
+        "packages/daemon/src/db/migrations/170_dispatch_preflight.sql",
         "packages/daemon/src/pods/dispatch-preflight-ledger.ts",
         "packages/daemon/src/pods/dispatch-rerun-request.ts",
         "packages/daemon/src/api/routes/pods.ts",
@@ -809,7 +813,7 @@
         "packages/daemon/src/pods/required-command-preflight.ts",
         "packages/daemon/src/runtimes/agent-cli-preflight.ts",
         "packages/daemon/src/runtimes/build-input-identity.ts",
-        "packages/daemon/src/db/migrations/158_execution_provenance.sql",
+        "packages/daemon/src/db/migrations/171_execution_provenance.sql",
         "packages/shared/src/types/execution-provenance.ts",
         "packages/shared/src/contract.ts",
         "packages/daemon/src/api/routes/pods.ts",
@@ -882,7 +886,7 @@
       "status": "partial",
       "implementation": [
         "packages/daemon/src/pods/pod-manager.ts",
-        "packages/daemon/src/db/migrations/157_dispatch_preflight.sql",
+        "packages/daemon/src/db/migrations/170_dispatch_preflight.sql",
         "packages/daemon/src/pods/dispatch-preflight-ledger.ts",
         "packages/daemon/src/pods/dispatch-rerun-request.ts",
         "packages/daemon/src/api/routes/pods.ts",
@@ -926,12 +930,12 @@
       "implementation": [
         "packages/daemon/src/pods/models-aggregator.ts",
         "packages/daemon/src/pods/task-execution-ledger.ts",
-        "packages/daemon/src/db/migrations/152_task_executions.sql",
+        "packages/daemon/src/db/migrations/165_task_executions.sql",
         "packages/daemon/src/pods/pod-manager.ts",
         "packages/shared/src/types/task-execution.ts",
-        "packages/daemon/src/db/migrations/162_merge_disposition.sql",
+        "packages/daemon/src/db/migrations/175_merge_disposition.sql",
         "packages/daemon/src/pods/merge-journal.ts",
-        "packages/daemon/src/db/migrations/163_merge_status_observations.sql"
+        "packages/daemon/src/db/migrations/176_merge_status_observations.sql"
       ],
       "tests": [
         "packages/daemon/src/pods/models-aggregator.test.ts",
@@ -965,9 +969,9 @@
       "requirement": "Executed pass/fail, skipped, unavailable, waived, no-change, cancelled, external and unresolved outcomes remain explicit",
       "status": "partial",
       "implementation": [
-        "packages/daemon/src/db/migrations/162_merge_disposition.sql",
+        "packages/daemon/src/db/migrations/175_merge_disposition.sql",
         "packages/daemon/src/pods/merge-journal.ts",
-        "packages/daemon/src/db/migrations/163_merge_status_observations.sql"
+        "packages/daemon/src/db/migrations/176_merge_status_observations.sql"
       ],
       "tests": ["packages/daemon/src/pods/merge-journal.test.ts"],
       "evidence": [
@@ -1078,7 +1082,7 @@
         "packages/daemon/src/pods/cost-aggregation.ts",
         "packages/shared/src/types/analytics.ts",
         "packages/daemon/src/pods/task-execution-ledger.ts",
-        "packages/daemon/src/db/migrations/152_task_executions.sql",
+        "packages/daemon/src/db/migrations/165_task_executions.sql",
         "packages/daemon/src/pods/pod-manager.ts",
         "packages/shared/src/types/task-execution.ts",
         "packages/cli/src/commands/pod.ts",
@@ -1157,9 +1161,9 @@
         "packages/daemon/src/pods/cost-reconciliation.ts",
         "packages/shared/src/types/pod.ts",
         "packages/daemon/src/pods/cost-pod-projection.ts",
-        "packages/daemon/src/db/migrations/162_merge_disposition.sql",
+        "packages/daemon/src/db/migrations/175_merge_disposition.sql",
         "packages/daemon/src/pods/merge-journal.ts",
-        "packages/daemon/src/db/migrations/163_merge_status_observations.sql"
+        "packages/daemon/src/db/migrations/176_merge_status_observations.sql"
       ],
       "tests": [
         "packages/desktop/Tests/AutopodUITests/ModelsSimulatorTests.swift",
@@ -1335,7 +1339,7 @@
       "status": "partial",
       "implementation": [
         "packages/daemon/src/scheduled-jobs/scan-report-repository.ts",
-        "packages/daemon/src/db/migrations/155_scheduled_scan_reports.sql"
+        "packages/daemon/src/db/migrations/168_scheduled_scan_reports.sql"
       ],
       "tests": [
         "packages/daemon/src/scheduled-jobs/scan-report-repository.test.ts",
@@ -1436,7 +1440,7 @@
         "packages/daemon/src/pods/required-command-preflight.ts",
         "packages/daemon/src/runtimes/agent-cli-preflight.ts",
         "packages/daemon/src/runtimes/build-input-identity.ts",
-        "packages/daemon/src/db/migrations/158_execution_provenance.sql",
+        "packages/daemon/src/db/migrations/171_execution_provenance.sql",
         "packages/shared/src/types/execution-provenance.ts",
         "packages/shared/src/contract.ts",
         "packages/daemon/src/api/routes/pods.ts",
@@ -1489,20 +1493,35 @@
       "implementation": [
         "packages/daemon/src/release.ts",
         "packages/daemon/src/api/routes/health.ts",
-        "packages/daemon/tsup.config.ts"
+        "packages/daemon/tsup.config.ts",
+        "packages/daemon/src/db/reconcile-native-checkpoint.ts",
+        "packages/daemon/src/db/reconcile-native-checkpoint-cli.ts"
       ],
-      "tests": ["packages/daemon/src/api/routes/health.test.ts"],
-      "evidence": ["receipts/backup-health-cli-green.txt"],
-      "prerequisites": []
+      "tests": [
+        "packages/daemon/src/api/routes/health.test.ts",
+        "packages/daemon/src/db/reconcile-native-checkpoint.test.ts"
+      ],
+      "evidence": [
+        "receipts/backup-health-cli-green.txt",
+        "checkpoint-48.md: current tracking-branch migration collision reproduced and resolved with byte-preserving native renumbering, managed upgrade tests and copy-only checkpoint reconciliation; production acceptance remains unverified"
+      ],
+      "prerequisites": [],
+      "remaining": " Checkpoint 48 verifies managed 150/152 upgrades and copy-only conversion of exact unpublished native checkpoint schemas 151/158/163. Live backup scope/freshness, deployed bytes and activation remain unverified; current tracking-main source integration is still outstanding."
     },
     {
       "id": "W6.3",
       "requirement": "Active hosted database and backup scope verified without inferring all hosted backups missing",
       "status": "unverified",
-      "implementation": [],
-      "tests": [],
-      "evidence": [],
-      "prerequisites": []
+      "implementation": [
+        "packages/daemon/src/db/reconcile-native-checkpoint.ts",
+        "packages/daemon/src/db/reconcile-native-checkpoint-cli.ts"
+      ],
+      "tests": ["packages/daemon/src/db/reconcile-native-checkpoint.test.ts"],
+      "evidence": [
+        "checkpoint-48.md: current tracking-branch migration collision reproduced and resolved with byte-preserving native renumbering, managed upgrade tests and copy-only checkpoint reconciliation; production acceptance remains unverified"
+      ],
+      "prerequisites": [],
+      "remaining": " Checkpoint 48 verifies managed 150/152 upgrades and copy-only conversion of exact unpublished native checkpoint schemas 151/158/163. Live backup scope/freshness, deployed bytes and activation remain unverified; current tracking-main source integration is still outstanding."
     },
     {
       "id": "W6.4",
@@ -1584,15 +1603,18 @@
       "requirement": "Migration numbering checked against current branches and representative prior database upgrades verified",
       "status": "partial",
       "implementation": [
-        "packages/daemon/src/db/migrations/151_completion_journal.sql",
+        "packages/daemon/src/db/migrations/164_completion_journal.sql",
         "packages/daemon/src/db/migrate.ts",
-        "packages/daemon/src/db/migrations/158_execution_provenance.sql",
-        "packages/daemon/src/db/migrations/159_decision_recovery.sql"
+        "packages/daemon/src/db/migrations/171_execution_provenance.sql",
+        "packages/daemon/src/db/migrations/172_decision_recovery.sql",
+        "packages/daemon/src/db/reconcile-native-checkpoint.ts",
+        "packages/daemon/src/db/reconcile-native-checkpoint-cli.ts"
       ],
       "tests": [
         "packages/daemon/src/pods/completion-journal.test.ts",
         "packages/daemon/src/db/managed-migration-compatibility.test.ts",
-        "packages/daemon/src/db/migrate.test.ts"
+        "packages/daemon/src/db/migrate.test.ts",
+        "packages/daemon/src/db/reconcile-native-checkpoint.test.ts"
       ],
       "evidence": [
         "receipts/journal-migration.txt",
@@ -1603,10 +1625,11 @@
         "receipts/migration-renumbering-prefix-audit.json",
         "receipts/managed-migration-compatibility-source.json",
         "receipts/decision-migration-prefix.json",
-        "checkpoint-38.md"
+        "checkpoint-38.md",
+        "checkpoint-48.md: current tracking-branch migration collision reproduced and resolved with byte-preserving native renumbering, managed upgrade tests and copy-only checkpoint reconciliation; production acceptance remains unverified"
       ],
       "prerequisites": [],
-      "remaining": "Managed 142-150 definitions retained as inert baseline; unpublished native additions renumbered 151-158. Combined schema upgrade preserves native/managed data locally. Exact remote migration-byte verification awaits approved read-only inspection; no live migration was performed."
+      "remaining": "Managed 142-150 definitions retained as inert baseline; unpublished native additions renumbered 151-158. Combined schema upgrade preserves native/managed data locally. Exact remote migration-byte verification awaits approved read-only inspection; no live migration was performed. Checkpoint 48 verifies managed 150/152 upgrades and copy-only conversion of exact unpublished native checkpoint schemas 151/158/163. Live backup scope/freshness, deployed bytes and activation remain unverified; current tracking-main source integration is still outstanding."
     },
     {
       "id": "G.3",
@@ -1725,5 +1748,10 @@
       "prerequisites": []
     }
   ],
-  "lastCheckpoint": "checkpoint-47.md"
+  "lastCheckpoint": "checkpoint-48.md",
+  "migrationLineage": {
+    "managedBaseline": "142-152; exact bytes from tracking commit cba763ba0bb3d65cb4c055e00033016ba1d5c646",
+    "nativeCurrent": "164-176; byte-preserving move of unpublished native 151-163",
+    "previousNative": "Historical receipts retain their original commit-specific numbering; conversion is copy-only and never activates an output."
+  }
 }

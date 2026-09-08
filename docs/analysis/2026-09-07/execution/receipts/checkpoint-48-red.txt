@@ -1,0 +1,43 @@
+
+ RUN  v4.1.11 /private/tmp/autopod-durable-execution/packages/daemon
+
+ ❯ src/db/managed-migration-compatibility.test.ts (2 tests | 2 failed) 238ms
+   × upgrades managed schema 150 without skipping native reliability tables or changing managed data 138ms
+   × upgrades managed schema 152 without skipping native reliability tables or changing managed data 99ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 2 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/db/managed-migration-compatibility.test.ts > upgrades managed schema 150 without skipping native reliability tables or changing managed data
+Error: ENOENT: no such file or directory, open '/private/tmp/autopod-durable-execution/packages/daemon/src/db/migrations/151_managed_provider_requests.sql'
+ ❯ src/db/managed-migration-compatibility.test.ts:41:14
+     39|     runMigrations(db, migrations, logger);
+     40|     for (const file of readdirSync(managed))
+     41|       expect(readFileSync(join(migrations, file))).toEqual(readFileSyn…
+       |              ^
+     42|     if (baseline === 152) expect(db.prepare('SELECT * FROM managed_pro…
+     43|     for (const table of [
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/2]⎯
+
+ FAIL  src/db/managed-migration-compatibility.test.ts > upgrades managed schema 152 without skipping native reliability tables or changing managed data
+SqliteError: no such table: completion_decisions
+ ❯ Database.exec ../../node_modules/.pnpm/better-sqlite3@11.10.0/node_modules/better-sqlite3/lib/methods/wrappers.js:9:14
+ ❯ src/db/migrate.ts:173:12
+    171|         }
+    172|       } else {
+    173|         db.exec(sql);
+       |            ^
+    174|       }
+    175|       db.prepare('INSERT INTO schema_version (version) VALUES (?)').ru…
+ ❯ sqliteTransaction ../../node_modules/.pnpm/better-sqlite3@11.10.0/node_modules/better-sqlite3/lib/methods/transaction.js:65:24
+ ❯ runMigrations src/db/migrate.ts:179:7
+ ❯ src/db/managed-migration-compatibility.test.ts:39:5
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/2]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  2 failed (2)
+   Start at  07:46:49
+   Duration  507ms (transform 112ms, setup 0ms, import 177ms, tests 238ms, environment 0ms)
+

@@ -349,7 +349,7 @@ export function createTaskExecutionLedger(db: Database.Database): TaskExecutionL
         ...new Set([
           ...diagnostics,
           'Infrastructure cost unavailable',
-          'Historical agent runs before schema 152 are not reconstructed',
+          'Historical agent runs before the task ledger are not reconstructed',
         ]),
       ],
     };

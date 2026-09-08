@@ -107,6 +107,24 @@ export function runMigrations(
     namesByVersion.set(version, file);
   }
 
+  // Earlier unpublished reliability checkpoints used 151-163, which now overlap
+  // the managed lane's authoritative 151-152. Never reinterpret or auto-renumber
+  // a database from that lineage merely because MAX(version) looks recent.
+  if (
+    namesByVersion.get(164) === '164_completion_journal.sql' &&
+    currentVersion >= 151 &&
+    currentVersion <= 163 &&
+    db
+      .prepare(
+        "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name IN ('pod_finalizations', 'logical_tasks') LIMIT 1",
+      )
+      .get()
+  ) {
+    throw new Error(
+      'Unpublished native migration lineage requires explicit reconciliation on a verified backup before upgrade; the database was retained unchanged.',
+    );
+  }
+
   // Pre-scan: check if the cutover migration is pending before applying anything
   const pendingVersions = new Set<number>();
   for (const file of files) {

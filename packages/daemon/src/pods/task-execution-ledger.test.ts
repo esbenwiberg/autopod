@@ -272,7 +272,7 @@ describe('task-wide execution accounting', () => {
     }
   });
 
-  it.each([139, 141, 151])(
+  it.each([139, 141, 152, 164])(
     'upgrades schema %s with existing linked work and unresolved legacy lineage',
     (version) => {
       const dir = mkdtempSync(path.join(tmpdir(), 'task-upgrade-'));

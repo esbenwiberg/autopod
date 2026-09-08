@@ -132,7 +132,7 @@ describe('durable completion journal', () => {
     const dir = mkdtempSync(path.join(tmpdir(), 'decision-upgrade-'));
     const migrations = path.resolve(import.meta.dirname, '../db/migrations');
     for (const file of readdirSync(migrations)) {
-      if (Number.parseInt(file, 10) <= 158)
+      if (Number.parseInt(file, 10) <= 171)
         copyFileSync(path.join(migrations, file), path.join(dir, file));
     }
     const filename = path.join(dir, 'legacy.db');
