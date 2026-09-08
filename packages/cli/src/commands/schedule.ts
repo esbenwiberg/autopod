@@ -229,6 +229,28 @@ export function registerScheduleCommands(program: Command, getClient: () => Auto
       console.log(JSON.stringify(await getClient().getScanReport(reportId), null, 2)),
     );
   schedule
+    .command('review <reportId>')
+    .description('Read the first bounded pages of findings and decisions')
+    .action(async (reportId: string) =>
+      console.log(JSON.stringify(await getClient().getScanReportReview(reportId), null, 2)),
+    );
+  schedule
+    .command('findings <reportId>')
+    .description('Read unresolved findings; pass nextCursor with --after to continue')
+    .option('--after <cursor>', 'Finding cursor from the previous page')
+    .action(async (reportId: string, opts: { after?: string }) =>
+      console.log(JSON.stringify(await getClient().getScanFindings(reportId, opts.after), null, 2)),
+    );
+  schedule
+    .command('decisions <reportId>')
+    .description('Read durable decisions; pass nextCursor with --before for older decisions')
+    .option('--before <cursor>', 'Decision cursor from the previous page')
+    .action(async (reportId: string, opts: { before?: string }) =>
+      console.log(
+        JSON.stringify(await getClient().getScanDecisions(reportId, opts.before), null, 2),
+      ),
+    );
+  schedule
     .command('triage <reportId>')
     .description('Record human triage; selection alone does not launch repairs')
     .requiredOption('--finding <id>', 'Selected finding ID (repeatable)', collect, [])

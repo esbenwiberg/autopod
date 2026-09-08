@@ -626,6 +626,8 @@ export type {
   ScanReportDetail,
   ScanReportSummary,
   ScanReportPage,
+  ScanFindingPage,
+  ScanDecisionPage,
   ScanTriageRequest,
   ScanRepairDispatch,
 } from './types/scheduled-scan.js';

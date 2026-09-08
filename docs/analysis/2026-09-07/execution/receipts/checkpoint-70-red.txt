@@ -1,0 +1,29 @@
+
+ RUN  v4.1.11 /private/tmp/autopod-durable-execution/packages/daemon
+
+ ❯ src/scheduled-jobs/scan-report-repository.test.ts (8 tests | 1 failed | 7 skipped) 83ms
+     × keeps 1200 unresolved findings reviewable and permits only explicitly selected IDs 82ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/scheduled-jobs/scan-report-repository.test.ts > scheduled scan reports independent of worker lifetime > keeps 1200 unresolved findings reviewable and permits only explicitly selected IDs
+AutopodError: Triage scope exceeds 1000 findings; paginate or narrow the job
+ ❯ unresolved src/scheduled-jobs/scan-report-repository.ts:72:13
+     70|       ) as Array<{ finding: string; disposition: 'unresolved' | 'defer…
+     71|     if (rows.length > 1000)
+     72|       throw new AutopodError(
+       |             ^
+     73|         'Triage scope exceeds 1000 findings; paginate or narrow the jo…
+     74|         'SCAN_SCOPE_TOO_LARGE',
+ ❯ Object.<anonymous> src/scheduled-jobs/scan-report-repository.ts:332:31
+ ❯ Object.sqliteTransaction [as triage] ../../node_modules/.pnpm/better-sqlite3@11.10.0/node_modules/better-sqlite3/lib/methods/transaction.js:65:24
+ ❯ src/scheduled-jobs/scan-report-repository.test.ts:109:29
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 7 skipped (8)
+   Start at  12:47:21
+   Duration  397ms (transform 136ms, setup 0ms, import 210ms, tests 83ms, environment 0ms)
+

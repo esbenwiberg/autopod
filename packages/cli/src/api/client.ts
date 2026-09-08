@@ -1,5 +1,7 @@
 import type { DispatchPreflightEvidence, ExecutionProvenance } from '@autopod/shared';
 import type {
+  ScanDecisionPage,
+  ScanFindingPage,
   ScanRepairDispatch,
   ScanReportDetail,
   ScanReportPage,
@@ -674,6 +676,21 @@ export class AutopodClient {
   }
   async listScanReports(jobId: string): Promise<ScheduledScanReport[]> {
     return this.request('GET', `/scheduled-jobs/${encodeURIComponent(jobId)}/reports`);
+  }
+  async getScanReportReview(reportId: string): Promise<ScanReportDetail> {
+    return this.request('GET', `/scan-reports/${encodeURIComponent(reportId)}/review`);
+  }
+  async getScanFindings(reportId: string, after?: string): Promise<ScanFindingPage> {
+    return this.request(
+      'GET',
+      `/scan-reports/${encodeURIComponent(reportId)}/findings${after ? `?after=${encodeURIComponent(after)}` : ''}`,
+    );
+  }
+  async getScanDecisions(reportId: string, before?: string): Promise<ScanDecisionPage> {
+    return this.request(
+      'GET',
+      `/scan-reports/${encodeURIComponent(reportId)}/decisions${before ? `?before=${encodeURIComponent(before)}` : ''}`,
+    );
   }
   async getScanReport(reportId: string): Promise<ScanReportDetail> {
     return this.request('GET', `/scan-reports/${encodeURIComponent(reportId)}`);

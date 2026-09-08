@@ -856,6 +856,15 @@ public actor DaemonAPI {
   public func listScanReports(_ jobId: String) async throws -> [ScheduledScanReport] {
     try await request("GET", "/scheduled-jobs/\(jobId)/reports")
   }
+  public func getScanReportReview(_ id: String) async throws -> ScanReportDetail {
+    try await request("GET", "/scan-reports/\(id)/review")
+  }
+  public func getScanFindings(_ id: String, after: String? = nil) async throws -> ScanFindingPage {
+    try await request("GET", "/scan-reports/\(id)/findings", query: after.map { ["after": $0] } ?? [:])
+  }
+  public func getScanDecisions(_ id: String, before: String? = nil) async throws -> ScanDecisionPage {
+    try await request("GET", "/scan-reports/\(id)/decisions", query: before.map { ["before": $0] } ?? [:])
+  }
   public func getScanReport(_ id: String) async throws -> ScanReportDetail {
     try await request("GET", "/scan-reports/\(id)")
   }

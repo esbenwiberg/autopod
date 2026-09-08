@@ -29,11 +29,23 @@ export function createScanOperatorService(deps: {
         decisions: deps.reports.decisions(reportId),
       };
     },
+    review(reportId: string): ScanReportDetail {
+      const findings = deps.reports.unresolvedPage(reportId);
+      const decisions = deps.reports.decisionPage(reportId);
+      return {
+        report: deps.reports.get(reportId),
+        unresolved: findings.items,
+        decisions: decisions.items,
+        unresolvedNextCursor: findings.nextCursor,
+        decisionsNextCursor: decisions.nextCursor,
+      };
+    },
+    findings: deps.reports.unresolvedPage,
+    decisions: deps.reports.decisionPage,
     triage: deps.reports.triage,
     launch(reportId: string, selectionId: string): ScanRepairDispatch {
       const report = deps.reports.get(reportId);
-      if (!deps.reports.decisions(reportId).some((decision) => decision.id === selectionId))
-        throw new AutopodError('Selection does not belong to this report', 'INVALID_INPUT', 400);
+      deps.reports.getDecision(reportId, selectionId);
       const podId = deps.reports.launchRepair(selectionId, (decision) => {
         const job = deps.jobs.getOrThrow(report.jobId);
         const profile = deps.profiles.get(job.profileName);
@@ -47,7 +59,7 @@ export function createScanOperatorService(deps: {
             'SCAN_RECONCILIATION_REQUIRED',
             409,
           );
-        const unresolved = deps.reports.unresolved(reportId);
+        const unresolved = deps.reports.selectedUnresolved(reportId, decision.findingIds);
         const selected = decision.findingIds.map((id) =>
           unresolved.find((finding) => finding.id === id),
         );

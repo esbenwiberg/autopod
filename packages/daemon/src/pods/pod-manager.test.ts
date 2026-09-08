@@ -4266,6 +4266,29 @@ describe('PodManager', () => {
         })),
         diagnostics: [],
       });
+      const originalCollection = reports.get(report.id).collection;
+      if (!originalCollection) throw new Error('Missing report fixture');
+      const overflowReport = reports.begin('scan-job', 'large-backlog', report.policy);
+      reports.finish(overflowReport.id, {
+        ...originalCollection,
+        findings: Array.from({ length: 1000 }, (_, i) => ({
+          id: `bulk-${String(i).padStart(4, '0')}`,
+          file: 'selected.ts',
+          scanner: 'secrets' as const,
+          ruleId: 'fixture',
+          severity: 'high' as const,
+          summary: 'Historical unresolved fixture',
+        })),
+      });
+      for (let i = 0; i < 1001; i++)
+        reports.triage({
+          reportId: report.id,
+          requestKey: `historical-defer-${i}`,
+          findingIds: ['unselected'],
+          action: 'defer',
+          reason: 'Earlier human decision',
+          actor: { type: 'human', userId: 'human-reviewer' },
+        });
       const app = Fastify();
       app.setErrorHandler(errorHandler);
       authPlugin(app, {
@@ -4293,10 +4316,10 @@ describe('PodManager', () => {
           headers,
         });
         expect(history.statusCode).toBe(200);
-        expect(history.json()).toMatchObject({
-          items: [{ id: report.id, findingCount: 2, judgmentStatus: 'not_requested' }],
-          nextCursor: null,
-        });
+        expect(
+          history.json().items.find((item: { id: string }) => item.id === report.id),
+        ).toMatchObject({ findingCount: 2, judgmentStatus: 'not_requested' });
+        expect(history.json().nextCursor).toBeNull();
         expect(history.json().items[0]).not.toHaveProperty('collection');
         expect(
           (
@@ -4307,6 +4330,23 @@ describe('PodManager', () => {
             })
           ).statusCode,
         ).toBe(400);
+        const review = await app.inject({
+          method: 'GET',
+          url: `/scan-reports/${report.id}/review`,
+          headers,
+        });
+        expect(review.statusCode, review.body).toBe(200);
+        expect(review.json().unresolved).toHaveLength(50);
+        expect(review.json().unresolvedNextCursor).toBe('bulk-0049');
+        expect(review.json().decisions).toHaveLength(25);
+        expect(review.json().decisionsNextCursor).toBeTruthy();
+        const more = await app.inject({
+          method: 'GET',
+          url: `/scan-reports/${report.id}/findings?after=bulk-0049`,
+          headers,
+        });
+        expect(more.statusCode).toBe(200);
+        expect(more.json().items[0].id).toBe('bulk-0050');
         const denied = await app.inject({
           method: 'POST',
           url: `/scan-reports/${report.id}/triage`,
@@ -4363,12 +4403,13 @@ describe('PodManager', () => {
         jobs.delete('scan-job');
         const retained = await app.inject({
           method: 'GET',
-          url: `/scan-reports/${report.id}`,
+          url: `/scan-reports/${report.id}/review`,
           headers,
         });
         expect(retained.statusCode).toBe(200);
         expect(retained.json().decisions[0].repairPodId).toBe(pod.id);
-        expect(retained.json().unresolved).toHaveLength(2);
+        expect(retained.json().unresolved).toHaveLength(50);
+        expect(retained.json().unresolvedNextCursor).toBeTruthy();
         const retainedReceipt = await app.inject({
           method: 'POST',
           url: `/scan-reports/${report.id}/repairs`,

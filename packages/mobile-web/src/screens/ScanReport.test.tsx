@@ -1,6 +1,6 @@
 import { act } from 'react';
 import { createRoot } from 'react-dom/client';
-import { MemoryRouter, Route, Routes } from 'react-router-dom';
+import { Link, MemoryRouter, Route, Routes } from 'react-router-dom';
 import { afterEach, expect, it, vi } from 'vitest';
 import { ScanReport } from './ScanReport.js';
 
@@ -111,10 +111,165 @@ it('retains a human selection through lost response and reload, and requires a s
     await click('Launch selected repair');
     expect(repairs).toBe(1);
     expect(container.textContent).toContain('Delivery remains unverified');
-    expect(container.textContent).toContain('Unresolved findings (1)');
+    expect(container.textContent).toContain('Unresolved findings (1 loaded)');
     expect(container.querySelector('a[href="/pod/repair-one"]')).not.toBeNull();
   } finally {
     act(() => root.unmount());
+    container.remove();
+  }
+});
+
+it('loads independent finding and decision pages while preserving a selected finding from a later page', async () => {
+  const finding = (id: string) => ({
+    id,
+    scanner: 'secrets',
+    ruleId: 'fixture',
+    file: `${id}.ts`,
+    severity: 'high',
+    summary: `Finding ${id}`,
+    disposition: 'unresolved',
+  });
+  const decision = {
+    id: 'older-decision',
+    action: 'defer',
+    findingIds: ['later'],
+    reason: 'Earlier human decision',
+    actor: { type: 'human', userId: 'operator' },
+    createdAt: 'yesterday',
+    repairPodId: null,
+  };
+  const detail = {
+    report: {
+      id: 'paged',
+      status: 'incomplete',
+      createdAt: 'today',
+      policy: { baseRef: 'main', headRef: 'work' },
+      collection: { files: [], scanners: [], diagnostics: [] },
+      judgment: { status: 'unavailable' },
+    },
+    unresolved: [finding('first')],
+    decisions: [],
+    unresolvedNextCursor: 'first',
+    decisionsNextCursor: 'cursor',
+  };
+  localStorage.setItem(
+    'autopod-scan-triage:paged',
+    JSON.stringify({
+      requestKey: 'durable-later-selection',
+      findingIds: ['later'],
+      action: 'select_repair',
+      reason: 'Reviewed later item',
+    }),
+  );
+  const requests: string[] = [];
+  vi.spyOn(globalThis, 'fetch').mockImplementation(async (url, init) => {
+    expect(init?.method ?? 'GET').toBe('GET');
+    const path = String(url);
+    requests.push(path);
+    if (path.includes('/findings?'))
+      return new Response(JSON.stringify({ items: [finding('later')], nextCursor: null }));
+    if (path.includes('/decisions?'))
+      return new Response(JSON.stringify({ items: [decision], nextCursor: null }));
+    return new Response(JSON.stringify(detail));
+  });
+  const container = document.createElement('div');
+  document.body.append(container);
+  const root = createRoot(container);
+  try {
+    await act(async () =>
+      root.render(
+        <MemoryRouter initialEntries={['/scan-report/paged']}>
+          <Routes>
+            <Route path="/scan-report/:id" element={<ScanReport />} />
+          </Routes>
+        </MemoryRouter>,
+      ),
+    );
+    const click = async (label: string) =>
+      act(async () =>
+        [...container.querySelectorAll('button')]
+          .find((button) => button.textContent === label)
+          ?.click(),
+      );
+    await click('Load more findings');
+    await click('Load older decisions');
+    expect(container.textContent).toContain('Unresolved findings (2 loaded)');
+    const boxes = [...container.querySelectorAll('input[type="checkbox"]')] as HTMLInputElement[];
+    expect(boxes.map((box) => box.checked)).toEqual([false, true]);
+    expect(container.textContent).toContain('Earlier human decision');
+    expect(container.textContent).not.toContain('Load more findings');
+    expect(container.textContent).not.toContain('Load older decisions');
+    expect(requests.some((path) => path.endsWith('/findings?after=first'))).toBe(true);
+    expect(requests.some((path) => path.endsWith('/decisions?before=cursor'))).toBe(true);
+  } finally {
+    await act(async () => root.unmount());
+    container.remove();
+  }
+});
+
+it('never appends an old report page after navigation to another report', async () => {
+  let release: ((response: Response) => void) | undefined;
+  const finding = {
+    id: 'old',
+    scanner: 'secrets',
+    ruleId: 'fixture',
+    file: 'old.ts',
+    severity: 'high',
+    summary: 'Old report finding',
+    disposition: 'unresolved',
+  };
+  vi.spyOn(globalThis, 'fetch').mockImplementation(async (url) => {
+    const path = String(url);
+    if (path.includes('/findings?'))
+      return new Promise((resolve) => {
+        release = resolve;
+      });
+    const id = path.includes('/second/') ? 'second' : 'first';
+    return new Response(
+      JSON.stringify({
+        report: {
+          id,
+          status: 'incomplete',
+          createdAt: 'today',
+          policy: { baseRef: 'main', headRef: 'work' },
+          collection: { files: [], scanners: [], diagnostics: [] },
+          judgment: { status: 'unavailable' },
+        },
+        unresolved: [],
+        decisions: [],
+        unresolvedNextCursor: id === 'first' ? 'cursor' : null,
+      }),
+    );
+  });
+  const container = document.createElement('div');
+  document.body.append(container);
+  const root = createRoot(container);
+  try {
+    await act(async () =>
+      root.render(
+        <MemoryRouter initialEntries={['/scan-report/first']}>
+          <Link to="/scan-report/second">Other report</Link>
+          <Routes>
+            <Route path="/scan-report/:id" element={<ScanReport />} />
+          </Routes>
+        </MemoryRouter>,
+      ),
+    );
+    await act(async () =>
+      [...container.querySelectorAll('button')]
+        .find((button) => button.textContent === 'Load more findings')
+        ?.click(),
+    );
+    await act(async () =>
+      container.querySelector<HTMLAnchorElement>('a[href="/scan-report/second"]')?.click(),
+    );
+    await act(async () =>
+      release?.(new Response(JSON.stringify({ items: [finding], nextCursor: null }))),
+    );
+    expect(container.textContent).not.toContain('Old report finding');
+    expect(container.textContent).toContain('Unresolved findings (0 loaded)');
+  } finally {
+    await act(async () => root.unmount());
     container.remove();
   }
 });

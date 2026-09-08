@@ -57,6 +57,52 @@ describe('schedule command', () => {
     }
   });
 
+  it('offers separate read-only finding and decision continuation commands over HTTP', async () => {
+    const requests: string[] = [];
+    const server = createServer((req, res) => {
+      expect(req.method).toBe('GET');
+      requests.push(req.url ?? '');
+      res.setHeader('content-type', 'application/json');
+      res.end(JSON.stringify({ items: [], nextCursor: null }));
+    });
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+    const address = server.address();
+    if (!address || typeof address === 'string') throw new Error('Missing local port');
+    const client = new AutopodClient({
+      baseUrl: `http://127.0.0.1:${address.port}`,
+      getToken: async () => 'fixture',
+    });
+    vi.spyOn(console, 'log').mockImplementation(() => {});
+    try {
+      await createProgram(client).parseAsync(['node', 'ap', 'schedule', 'review', 'report']);
+      await createProgram(client).parseAsync([
+        'node',
+        'ap',
+        'schedule',
+        'findings',
+        'report',
+        '--after',
+        'finding',
+      ]);
+      await createProgram(client).parseAsync([
+        'node',
+        'ap',
+        'schedule',
+        'decisions',
+        'report',
+        '--before',
+        'decision',
+      ]);
+      expect(requests).toEqual([
+        '/scan-reports/report/review',
+        '/scan-reports/report/findings?after=finding',
+        '/scan-reports/report/decisions?before=decision',
+      ]);
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+  });
+
   it('passes template field definitions when creating a template', async () => {
     const createScheduledJobTemplate = vi.fn(
       async (req: CreateScheduledJobTemplateRequest): Promise<ScheduledJobTemplate> => ({

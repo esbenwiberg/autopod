@@ -553,6 +553,48 @@ const server = createServer(async (req, res) => {
     });
   if (pathname === '/scheduled-jobs/scan-fixture/reports') return json([scanReport]);
   if (pathname === '/scheduled-jobs/scan-fixture/trigger') return json(scanReport);
+  if (
+    pathname === '/scan-reports/report-fixture/review' ||
+    pathname === '/scan-reports/report-old-fixture/review'
+  ) {
+    return json({
+      report: pathname.includes('report-old-fixture')
+        ? { ...scanReport, id: 'report-old-fixture' }
+        : scanReport,
+      unresolved: [scanFinding],
+      decisions: scanDecisions,
+      unresolvedNextCursor: process.env.FIXTURE_MODE === 'paged-triage' ? scanFinding.id : null,
+      decisionsNextCursor:
+        process.env.FIXTURE_MODE === 'paged-triage' ? '00000000-0000-4000-8000-000000000001' : null,
+    });
+  }
+  if (pathname === '/scan-reports/report-fixture/findings')
+    return json({
+      items: [
+        {
+          ...scanFinding,
+          id: 'later-finding-fixture',
+          file: 'packages/older/package-lock.json',
+          summary: 'Earlier unresolved fixture finding, still available for human review.',
+        },
+      ],
+      nextCursor: null,
+    });
+  if (pathname === '/scan-reports/report-fixture/decisions')
+    return json({
+      items: [
+        {
+          id: '00000000-0000-4000-8000-000000000002',
+          action: 'defer',
+          findingIds: ['later-finding-fixture'],
+          reason: 'Earlier human decision remains recorded.',
+          actor: { type: 'human', userId: 'fixture-reviewer' },
+          createdAt: '2026-09-06T10:00:00Z',
+          repairPodId: null,
+        },
+      ],
+      nextCursor: null,
+    });
   if (pathname === '/scan-reports/report-fixture')
     return json({ report: scanReport, unresolved: [scanFinding], decisions: scanDecisions });
   if (req.method === 'POST' && pathname === '/scan-reports/report-fixture/triage') {

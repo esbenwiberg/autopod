@@ -98,6 +98,119 @@ describe('scheduled scan reports independent of worker lifetime', () => {
     }
   });
 
+  it('keeps 1200 unresolved findings reviewable and permits only explicitly selected IDs', () => {
+    const db = createTestDb();
+    const repo = createScanReportRepository(db);
+    try {
+      const finding = collection.findings[0];
+      if (!finding) throw new Error('Missing fixture finding');
+      let reportId = '';
+      for (let run = 0; run < 2; run++) {
+        const report = repo.begin('large-job', `large-${run}`, policy);
+        reportId = report.id;
+        repo.finish(report.id, {
+          ...collection,
+          findings: Array.from({ length: 600 }, (_, index) => ({
+            ...finding,
+            id: `finding-${String(run * 600 + index).padStart(4, '0')}`,
+          })),
+        });
+      }
+      const decision = repo.triage({
+        reportId,
+        requestKey: 'large-selection',
+        findingIds: ['finding-1199'],
+        action: 'select_repair',
+        reason: 'Only the reviewed item',
+        actor: { type: 'human', userId: 'operator' },
+      });
+      expect(decision.findingIds).toEqual(['finding-1199']);
+      let page = repo.unresolvedPage(reportId);
+      const ids = page.items.map((item) => item.id);
+      while (page.nextCursor) {
+        page = repo.unresolvedPage(reportId, page.nextCursor);
+        ids.push(...page.items.map((item) => item.id));
+        if (ids.length > 1200) throw new Error('Repeated finding page');
+      }
+      expect(new Set(ids).size).toBe(1200);
+      expect(repo.selectedUnresolved(reportId, ['finding-1199'])).toHaveLength(1);
+      const other = repo.begin('other-job', 'other-run', policy);
+      repo.finish(other.id, {
+        ...collection,
+        findings: [{ ...finding, id: 'foreign-finding' }],
+      });
+      expect(() =>
+        repo.triage({
+          ...decision,
+          requestKey: 'foreign-selection',
+          findingIds: ['foreign-finding'],
+        }),
+      ).toThrow('not unresolved');
+      expect(repo.selectedUnresolved(reportId, ['foreign-finding'])).toEqual([]);
+    } finally {
+      db.close();
+    }
+  });
+
+  it('pages durable decisions newest first and keeps a resolved finding cursor usable', () => {
+    const db = createTestDb();
+    const repo = createScanReportRepository(db);
+    try {
+      const report = repo.begin('job', 'many-decisions', policy);
+      repo.finish(report.id, collection);
+      const ids = Array.from(
+        { length: 1002 },
+        (_, i) =>
+          repo.triage({
+            reportId: report.id,
+            requestKey: `defer-${i}`,
+            findingIds: ['stable-finding'],
+            action: 'defer',
+            reason: 'Recorded human decision',
+            actor: { type: 'human', userId: 'operator' },
+          }).id,
+      );
+      let page = repo.decisionPage(report.id);
+      const loaded = page.items.map((item) => item.id);
+      while (page.nextCursor) {
+        page = repo.decisionPage(report.id, page.nextCursor);
+        loaded.push(...page.items.map((item) => item.id));
+        if (loaded.length > 1002) throw new Error('Repeated decision page');
+      }
+      expect(loaded).toEqual(ids.reverse());
+      const first = loaded[0];
+      if (!first) throw new Error('No decision');
+      expect(repo.getDecision(report.id, first).id).toBe(first);
+      const other = repo.begin('other-job', 'unrelated', policy);
+      expect(() => repo.getDecision(other.id, first)).toThrow('does not belong');
+      expect(() => repo.decisionPage(other.id, first)).toThrow('does not belong');
+      repo.triage({
+        reportId: report.id,
+        requestKey: 'resolve-once',
+        findingIds: ['stable-finding'],
+        action: 'resolve',
+        reason: 'Human reviewed resolution',
+        actor: { type: 'human', userId: 'operator' },
+      });
+      expect(
+        createScanReportRepository(db).unresolvedPage(report.id, 'stable-finding').items,
+      ).toEqual([]);
+      expect(repo.selectedUnresolved(report.id, ['stable-finding'])).toEqual([]);
+      expect(() =>
+        repo.triage({
+          reportId: report.id,
+          requestKey: 'stale-selection',
+          findingIds: ['stable-finding'],
+          action: 'select_repair',
+          reason: 'Stale selection',
+          actor: { type: 'human', userId: 'operator' },
+        }),
+      ).toThrow('not unresolved');
+    } finally {
+      db.close();
+    }
+  });
+
   it.each([139, 154])(
     'upgrades existing schema %s while preserving legacy records and durable report recovery',
     async (version) => {

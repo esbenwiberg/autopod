@@ -1,6 +1,8 @@
 import { randomUUID } from 'node:crypto';
 import {
   AutopodError,
+  type ScanDecisionPage,
+  type ScanFindingPage,
   type ScanReportPage,
   type ScanReportSummary,
   type ScanTriageDecision,
@@ -18,6 +20,10 @@ export interface ScanReportRepository {
   claim(id: string, owner: string): boolean;
   list(jobId: string): ScheduledScanReport[];
   page(jobId: string, before?: string): ScanReportPage;
+  unresolvedPage(reportId: string, after?: string): ScanFindingPage;
+  selectedUnresolved(reportId: string, ids: string[]): ScanFindingPage['items'];
+  decisionPage(reportId: string, before?: string): ScanDecisionPage;
+  getDecision(reportId: string, id: string): ScanDecisionPage['items'][number];
   decisions(reportId: string): Array<ScanTriageDecision & { repairPodId: string | null }>;
   finish(id: string, collection: ScheduledScanCollection): ScheduledScanReport;
   setJudgment(id: string, judgment: ScheduledScanReport['judgment']): void;
@@ -79,8 +85,103 @@ export function createScanReportRepository(db: Database.Database): ScanReportRep
       disposition: row.disposition,
     }));
   };
+  const selectedUnresolved = (reportId: string, ids: string[]): ScanFindingPage['items'] => {
+    if (!ids.length || ids.length > 100 || ids.some((id) => !id || id.length > 200))
+      throw new AutopodError('Select 1 to 100 bounded finding IDs', 'INVALID_INPUT', 400);
+    const report = get(reportId);
+    const rows = db
+      .prepare(`SELECT f.finding, f.disposition FROM scheduled_scan_findings f
+      WHERE f.disposition != 'resolved' AND f.id IN (${ids.map(() => '?').join(',')})
+      AND (? IS NULL OR f.repository = ?)
+      AND EXISTS (SELECT 1 FROM scheduled_scan_occurrences o JOIN scheduled_scan_reports r ON r.id = o.report_id WHERE o.finding_id = f.id AND r.job_id = ?)`)
+      .all(
+        ...ids,
+        report.collection?.repository ?? null,
+        report.collection?.repository ?? null,
+        report.jobId,
+      ) as Array<{ finding: string; disposition: 'unresolved' | 'deferred' }>;
+    return rows.map((row) => ({
+      ...(JSON.parse(row.finding) as ScheduledScanFinding),
+      disposition: row.disposition,
+    }));
+  };
+  const getDecision = (reportId: string, id: string): ScanDecisionPage['items'][number] => {
+    get(reportId);
+    const row = db
+      .prepare(
+        'SELECT t.*, r.pod_id AS repair_pod_id FROM scheduled_scan_triage t LEFT JOIN scheduled_scan_repairs r ON r.selection_id = t.id WHERE t.report_id = ? AND t.id = ?',
+      )
+      .get(reportId, id) as Record<string, unknown> | undefined;
+    if (!row)
+      throw new AutopodError('Selection does not belong to this report', 'INVALID_INPUT', 400);
+    return { ...decision(row), repairPodId: row.repair_pod_id as string | null };
+  };
   return {
     get,
+    selectedUnresolved,
+    getDecision,
+    unresolvedPage(reportId, after) {
+      const report = get(reportId);
+      if (after !== undefined && (!after || after.length > 200))
+        throw new AutopodError('Invalid finding cursor', 'SCAN_CURSOR_INVALID', 400);
+      const scope =
+        '(? IS NULL OR f.repository = ?) AND EXISTS (SELECT 1 FROM scheduled_scan_occurrences o JOIN scheduled_scan_reports r ON r.id = o.report_id WHERE o.finding_id = f.id AND r.job_id = ?)';
+      const bindings = [
+        report.collection?.repository ?? null,
+        report.collection?.repository ?? null,
+        report.jobId,
+      ];
+      if (
+        after &&
+        !db
+          .prepare(`SELECT f.id FROM scheduled_scan_findings f WHERE f.id = ? AND ${scope}`)
+          .get(after, ...bindings)
+      )
+        throw new AutopodError(
+          'Finding cursor does not belong to this review; refresh findings.',
+          'SCAN_CURSOR_INVALID',
+          400,
+        );
+      const rows = db
+        .prepare(
+          `SELECT f.id, f.finding, f.disposition FROM scheduled_scan_findings f WHERE f.disposition != 'resolved' AND ${scope} AND (? IS NULL OR f.id > ?) ORDER BY f.id LIMIT 51`,
+        )
+        .all(...bindings, after ?? null, after ?? null) as Array<{
+        id: string;
+        finding: string;
+        disposition: 'unresolved' | 'deferred';
+      }>;
+      const items = rows.slice(0, 50).map((row) => ({
+        ...(JSON.parse(row.finding) as ScheduledScanFinding),
+        disposition: row.disposition,
+      }));
+      return { items, nextCursor: rows.length > 50 ? (items.at(-1)?.id ?? null) : null };
+    },
+    decisionPage(reportId, before) {
+      get(reportId);
+      const anchor = before
+        ? (db
+            .prepare('SELECT rowid FROM scheduled_scan_triage WHERE report_id = ? AND id = ?')
+            .get(reportId, before) as { rowid: number } | undefined)
+        : undefined;
+      if (before !== undefined && !anchor)
+        throw new AutopodError(
+          'Decision cursor does not belong to this report',
+          'SCAN_CURSOR_INVALID',
+          400,
+        );
+      const rows = db
+        .prepare(
+          'SELECT t.*, r.pod_id AS repair_pod_id FROM scheduled_scan_triage t LEFT JOIN scheduled_scan_repairs r ON r.selection_id = t.id WHERE t.report_id = ? AND (? IS NULL OR t.rowid < ?) ORDER BY t.rowid DESC LIMIT 26',
+        )
+        .all(reportId, anchor?.rowid ?? null, anchor?.rowid ?? null) as Array<
+        Record<string, unknown>
+      >;
+      const items = rows
+        .slice(0, 25)
+        .map((row) => ({ ...decision(row), repairPodId: row.repair_pod_id as string | null }));
+      return { items, nextCursor: rows.length > 25 ? (items.at(-1)?.id ?? null) : null };
+    },
     claim(id, owner) {
       return (
         db
@@ -329,7 +430,7 @@ export function createScanReportRepository(db: Database.Database): ScanReportRep
           );
         return recorded;
       }
-      const allowed = new Set(unresolved(input.reportId).map((finding) => finding.id));
+      const allowed = new Set(selectedUnresolved(input.reportId, ids).map((finding) => finding.id));
       if (ids.some((id) => !allowed.has(id)))
         throw new AutopodError(
           'Selected finding is not unresolved in this job',

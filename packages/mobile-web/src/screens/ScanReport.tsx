@@ -1,5 +1,11 @@
-import type { ScanRepairDispatch, ScanReportDetail, ScanTriageRequest } from '@autopod/shared';
-import { useEffect, useState } from 'react';
+import type {
+  ScanDecisionPage,
+  ScanFindingPage,
+  ScanRepairDispatch,
+  ScanReportDetail,
+  ScanTriageRequest,
+} from '@autopod/shared';
+import { useEffect, useRef, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { apiFetch } from '../lib/api.js';
 
@@ -7,6 +13,8 @@ export function ScanReport() {
   const { id = '' } = useParams();
   const path = `/scan-reports/${encodeURIComponent(id)}`;
   const storageKey = `autopod-scan-triage:${id}`;
+  const viewGeneration = useRef(0);
+  const [loadingPage, setLoadingPage] = useState(false);
   const [detail, setDetail] = useState<ScanReportDetail | null>(null);
   const [selected, setSelected] = useState<string[]>([]);
   const [reason, setReason] = useState('');
@@ -16,6 +24,10 @@ export function ScanReport() {
   const [message, setMessage] = useState('');
   useEffect(() => {
     let active = true;
+    const owner = ++viewGeneration.current;
+    setBusy(false);
+    setLoadingPage(false);
+    setError('');
     setDetail(null);
     setSelected([]);
     setReason('');
@@ -36,18 +48,73 @@ export function ScanReport() {
     } catch {
       /* A malformed local draft never grants repair authority. */
     }
-    apiFetch<ScanReportDetail>(path)
+    apiFetch<ScanReportDetail>(`${path}/review`)
       .then((value) => {
-        if (active) setDetail(value);
+        if (active && owner === viewGeneration.current) setDetail(value);
       })
       .catch((err: Error) => {
         if (active) setError(err.message);
       });
     return () => {
       active = false;
+      viewGeneration.current++;
     };
   }, [path, storageKey]);
+  async function more(kind: 'findings' | 'decisions') {
+    const cursor = kind === 'findings' ? detail?.unresolvedNextCursor : detail?.decisionsNextCursor;
+    if (!cursor || busy || loadingPage) return;
+    const owner = viewGeneration.current;
+    setLoadingPage(true);
+    setError('');
+    try {
+      if (kind === 'findings') {
+        const page = await apiFetch<ScanFindingPage>(
+          `${path}/findings?after=${encodeURIComponent(cursor)}`,
+        );
+        if (owner !== viewGeneration.current) return;
+        setDetail((previous) =>
+          previous
+            ? {
+                ...previous,
+                unresolved: [
+                  ...previous.unresolved,
+                  ...page.items.filter(
+                    (item) => !previous.unresolved.some((old) => old.id === item.id),
+                  ),
+                ],
+                unresolvedNextCursor: page.nextCursor,
+              }
+            : previous,
+        );
+      } else {
+        const page = await apiFetch<ScanDecisionPage>(
+          `${path}/decisions?before=${encodeURIComponent(cursor)}`,
+        );
+        if (owner !== viewGeneration.current) return;
+        setDetail((previous) =>
+          previous
+            ? {
+                ...previous,
+                decisions: [
+                  ...previous.decisions,
+                  ...page.items.filter(
+                    (item) => !previous.decisions.some((old) => old.id === item.id),
+                  ),
+                ],
+                decisionsNextCursor: page.nextCursor,
+              }
+            : previous,
+        );
+      }
+    } catch (err) {
+      if (owner === viewGeneration.current) setError((err as Error).message);
+    } finally {
+      if (owner === viewGeneration.current) setLoadingPage(false);
+    }
+  }
   async function triage(action: ScanTriageRequest['action']) {
+    const owner = ++viewGeneration.current;
+    setLoadingPage(false);
     setBusy(true);
     setError('');
     setMessage('');
@@ -64,7 +131,10 @@ export function ScanReport() {
       localStorage.setItem(storageKey, JSON.stringify(request));
       setPending(request);
       await apiFetch(`${path}/triage`, { method: 'POST', body: JSON.stringify(request) });
-      setDetail(await apiFetch<ScanReportDetail>(path));
+      if (owner !== viewGeneration.current) return;
+      const refreshed = await apiFetch<ScanReportDetail>(`${path}/review`);
+      if (owner !== viewGeneration.current) return;
+      setDetail(refreshed);
       localStorage.removeItem(storageKey);
       setPending(null);
       setSelected([]);
@@ -75,12 +145,15 @@ export function ScanReport() {
           : 'Decision recorded.',
       );
     } catch (err) {
-      setError(`${(err as Error).message}. Your decision is retained here for retry.`);
+      if (owner === viewGeneration.current)
+        setError(`${(err as Error).message}. Your decision is retained here for retry.`);
     } finally {
-      setBusy(false);
+      if (owner === viewGeneration.current) setBusy(false);
     }
   }
   async function repair(selectionId: string) {
+    const owner = ++viewGeneration.current;
+    setLoadingPage(false);
     setBusy(true);
     setError('');
     setMessage('');
@@ -89,12 +162,15 @@ export function ScanReport() {
         method: 'POST',
         body: JSON.stringify({ selectionId }),
       });
-      setDetail(await apiFetch<ScanReportDetail>(path));
+      if (owner !== viewGeneration.current) return;
+      const refreshed = await apiFetch<ScanReportDetail>(`${path}/review`);
+      if (owner !== viewGeneration.current) return;
+      setDetail(refreshed);
       setMessage(`Repair pod ${receipt.podId} recorded. Delivery remains unverified.`);
     } catch (err) {
-      setError((err as Error).message);
+      if (owner === viewGeneration.current) setError((err as Error).message);
     } finally {
-      setBusy(false);
+      if (owner === viewGeneration.current) setBusy(false);
     }
   }
   return (
@@ -111,7 +187,7 @@ export function ScanReport() {
         </p>
       )}
       {message && <output>{message}</output>}
-      {!detail ? (
+      {!detail || detail.report.id !== id ? (
         <p>Loading report…</p>
       ) : (
         <>
@@ -165,7 +241,7 @@ export function ScanReport() {
             )}
           </section>
           <section className="scan-card">
-            <h2>Unresolved findings ({detail.unresolved.length})</h2>
+            <h2>Unresolved findings ({detail.unresolved.length} loaded)</h2>
             <p>
               Includes earlier findings still awaiting resolution. Selecting a repair does not mark
               it fixed.
@@ -179,7 +255,7 @@ export function ScanReport() {
               <label className="scan-finding" key={finding.id}>
                 <input
                   type="checkbox"
-                  disabled={busy}
+                  disabled={busy || (selected.length >= 100 && !selected.includes(finding.id))}
                   checked={selected.includes(finding.id)}
                   onChange={(event) =>
                     setSelected(
@@ -203,6 +279,19 @@ export function ScanReport() {
                 </span>
               </label>
             ))}
+            {detail.unresolvedNextCursor && (
+              <button
+                type="button"
+                className="action-btn"
+                disabled={busy || loadingPage}
+                onClick={() => void more('findings')}
+              >
+                Load more findings
+              </button>
+            )}
+            <p>
+              {selected.length} / 100 findings selected. Select up to 100 findings per decision.
+            </p>
             <label className="form-row">
               Reason
               <textarea
@@ -264,6 +353,16 @@ export function ScanReport() {
                 )}
               </article>
             ))}
+            {detail.decisionsNextCursor && (
+              <button
+                type="button"
+                className="action-btn"
+                disabled={busy || loadingPage}
+                onClick={() => void more('decisions')}
+              >
+                Load older decisions
+              </button>
+            )}
           </section>
         </>
       )}

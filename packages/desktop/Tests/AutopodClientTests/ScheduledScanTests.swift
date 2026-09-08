@@ -45,6 +45,17 @@ import Testing
   #expect(result.latest == nil)
 }
 
+@Test func scanReviewClientUsesIndependentFindingAndDecisionCursors() async throws {
+  let configuration = URLSessionConfiguration.ephemeral; configuration.protocolClasses = [ScanFixtureProtocol.self]
+  let api = DaemonAPI(baseURL: URL(string: "https://scan-fixture.invalid")!, token: "synthetic", session: URLSession(configuration: configuration))
+  let review = try await api.getScanReportReview("report")
+  #expect(review.unresolved.count == 1)
+  let findings = try await api.getScanFindings("report", after: "finding")
+  #expect(findings.nextCursor == nil)
+  let decisions = try await api.getScanDecisions("report", before: "decision")
+  #expect(decisions.nextCursor == nil)
+}
+
 private final class ScanFixtureProtocol: URLProtocol, @unchecked Sendable {
   override class func canInit(with request: URLRequest) -> Bool { request.url?.host == "scan-fixture.invalid" }
   override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
@@ -57,7 +68,11 @@ private final class ScanFixtureProtocol: URLProtocol, @unchecked Sendable {
     let finding = #"{"id":"finding","scanner":"secrets","ruleId":"fixture","file":"source.ts","severity":"high","summary":"Redacted fixture","disposition":"unresolved"}"#
     let report = #"{"kind":"scan_report","id":"report","jobId":"job","status":"incomplete","policy":{"version":1,"baseRef":"main","headRef":"main","scanners":["secrets"],"judgment":"none","windowHours":24},"collection":{"repository":"fixture","files":[],"stacks":[],"scanners":[{"scanner":"secrets","status":"failed","findingCount":null}],"findings":[],"diagnostics":["Scanner unavailable"]},"judgment":{"status":"not_requested"},"createdAt":"2026-09-07T10:00:00Z","completedAt":"2026-09-07T10:01:00Z"}"#
     let body: String
-    if path.hasSuffix("/execution-provenance") {
+    if path.hasSuffix("/findings") {
+      #expect(request.url?.query == "after=finding"); body = #"{"items":[],"nextCursor":null}"#
+    } else if path.hasSuffix("/decisions") {
+      #expect(request.url?.query == "before=decision"); body = #"{"items":[],"nextCursor":null}"#
+    } else if path.hasSuffix("/execution-provenance") {
       #expect(request.url?.query == "schemaVersion=2")
       body = #"{"latest":null}"#
     }

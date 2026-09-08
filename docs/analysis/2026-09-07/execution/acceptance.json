@@ -1457,7 +1457,8 @@
         "receipts/scheduled-mobile-final-tests.txt",
         "receipts/scheduled-mobile-browser.json",
         "receipts/scheduled-desktop-window-tests.txt",
-        "receipts/live-scheduled-metadata.json"
+        "receipts/live-scheduled-metadata.json",
+        "checkpoint-70.md"
       ],
       "prerequisites": [
         "Required native desktop interaction remains unverified.",
@@ -1489,7 +1490,8 @@
         "receipts/scheduled-mobile-browser.json",
         "receipts/scheduled-desktop-window-tests.txt",
         "receipts/live-scheduled-metadata.json",
-        "checkpoint-69.md"
+        "checkpoint-69.md",
+        "checkpoint-70.md"
       ],
       "prerequisites": [
         "Required native desktop interaction remains unverified.",
@@ -1922,7 +1924,8 @@
         "checkpoint-61.md",
         "checkpoint-64.md",
         "checkpoint-67.md",
-        "checkpoint-69.md"
+        "checkpoint-69.md",
+        "checkpoint-70.md"
       ],
       "prerequisites": [
         "Selected mobile flows and new health CLI have local interaction proof. Desktop has compilation and tests only. Remaining operator flows, physical device and live evidence are outstanding."
@@ -1947,7 +1950,7 @@
       "prerequisites": []
     }
   ],
-  "lastCheckpoint": "checkpoint-69.md",
+  "lastCheckpoint": "checkpoint-70.md",
   "migrationLineage": {
     "managedBaseline": "142-152; exact bytes from tracking commit cba763ba0bb3d65cb4c055e00033016ba1d5c646",
     "nativeCurrent": "164-176; byte-preserving move of unpublished native 151-163",

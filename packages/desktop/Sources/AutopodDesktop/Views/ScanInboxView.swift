@@ -9,6 +9,8 @@ struct ScanInboxView: View {
   @State private var nextCursor: String?
   @State private var pageGeneration = 0
   @State private var loadingReports = false
+  @State private var reviewGeneration = 0
+  @State private var loadingReviewPage = false
   @State private var detail: ScanReportDetail?
   @State private var reportId = ""
   @State private var selected: Set<String> = []
@@ -51,7 +53,7 @@ struct ScanInboxView: View {
         if nextCursor != nil { Button("Load older reports") { Task { await loadOlderReports() } }.disabled(busy || loadingReports) }
       }
       ScrollView {
-        if let detail {
+        if let detail, detail.report.id == reportId {
           VStack(alignment: .leading, spacing: 12) {
             Text(detail.report.status.replacingOccurrences(of: "_", with: " ")).font(.headline)
             Text("Report completion is separate from patch delivery.")
@@ -75,7 +77,7 @@ struct ScanInboxView: View {
               Text("\(usage.model) · \(usage.inputTokens + usage.outputTokens) tokens · cost \(usage.costUsd.map { String(format: "$%.4f", $0) } ?? "unavailable")").font(.caption)
             }
             Divider()
-            Text("Unresolved findings (\(detail.unresolved.count))").font(.headline)
+            Text("Unresolved findings (\(detail.unresolved.count) loaded)").font(.headline)
             Text("Includes earlier unresolved findings. A repair selection does not mark them fixed.")
             if let pending { Text("Decision retained for retry: \(pending.action)").foregroundStyle(.orange) }
             ForEach(detail.unresolved) { finding in
@@ -87,8 +89,10 @@ struct ScanInboxView: View {
                   Text(finding.summary)
                   Text("\(finding.disposition ?? "unresolved") · \(finding.id)").font(.caption)
                 }
-              }.toggleStyle(.checkbox).disabled(busy)
+              }.toggleStyle(.checkbox).disabled(busy || (selected.count >= 100 && !selected.contains(finding.id)))
             }
+            if detail.unresolvedNextCursor != nil { Button("Load more findings") { Task { await loadReviewPage(findings: true) } }.disabled(busy || loadingReviewPage) }
+            Text("\(selected.count) / 100 findings selected")
             TextField("Reason for the decision", text: $reason, axis: .vertical).textFieldStyle(.roundedBorder).disabled(busy)
             HStack {
               Button("Defer") { Task { await triage("defer") } }
@@ -109,6 +113,7 @@ struct ScanInboxView: View {
                 }
               }.padding(.vertical, 4)
             }
+            if detail.decisionsNextCursor != nil { Button("Load older decisions") { Task { await loadReviewPage(findings: false) } }.disabled(busy || loadingReviewPage) }
           }.frame(maxWidth: .infinity, alignment: .leading).textSelection(.enabled)
         } else { Text("Select a report to review its durable findings and human decisions.") }
       }
@@ -150,9 +155,10 @@ struct ScanInboxView: View {
   private func loadDetail(restoreDraft: Bool) async {
     guard !reportId.isEmpty else { detail = nil; return }
     let requested = reportId
+    reviewGeneration += 1; let owner = reviewGeneration; loadingReviewPage = false
     do {
-      let loaded = try await api.getScanReport(requested)
-      guard requested == reportId, !Task.isCancelled else { return }
+      let loaded = try await api.getScanReportReview(requested)
+      guard requested == reportId, owner == reviewGeneration, !Task.isCancelled else { return }
       detail = loaded
       if restoreDraft {
         selected = []; reason = ""; pending = nil
@@ -160,7 +166,25 @@ struct ScanInboxView: View {
           pending = draft; selected = Set(draft.findingIds); reason = draft.reason
         }
       }
-    } catch { self.error = error.localizedDescription }
+    } catch { if requested == reportId, owner == reviewGeneration { self.error = error.localizedDescription } }
+  }
+  private func loadReviewPage(findings: Bool) async {
+    guard let cursor = findings ? detail?.unresolvedNextCursor : detail?.decisionsNextCursor, !loadingReviewPage, !busy else { return }
+    let requested = reportId; let owner = reviewGeneration; loadingReviewPage = true
+    defer { if owner == reviewGeneration { loadingReviewPage = false } }
+    do {
+      if findings {
+        let page = try await api.getScanFindings(requested, after: cursor)
+        guard owner == reviewGeneration, requested == reportId, !Task.isCancelled else { return }
+        let existing = Set(detail?.unresolved.map(\.id) ?? [])
+        detail?.unresolved.append(contentsOf: page.items.filter { !existing.contains($0.id) }); detail?.unresolvedNextCursor = page.nextCursor
+      } else {
+        let page = try await api.getScanDecisions(requested, before: cursor)
+        guard owner == reviewGeneration, requested == reportId, !Task.isCancelled else { return }
+        let existing = Set(detail?.decisions.map(\.id) ?? [])
+        detail?.decisions.append(contentsOf: page.items.filter { !existing.contains($0.id) }); detail?.decisionsNextCursor = page.nextCursor
+      }
+    } catch { if owner == reviewGeneration { self.error = error.localizedDescription } }
   }
   private func savePolicy() async {
     busy = true; defer { busy = false }

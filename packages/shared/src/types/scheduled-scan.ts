@@ -109,6 +109,9 @@ export interface ScanTriageDecision {
   createdAt: string;
 }
 export interface ScanReportDetail {
+  /** Present on paginated operator review responses. */
+  unresolvedNextCursor?: string | null;
+  decisionsNextCursor?: string | null;
   report: ScheduledScanReport;
   unresolved: Array<ScheduledScanFinding & { disposition: 'unresolved' | 'deferred' }>;
   decisions: Array<ScanTriageDecision & { repairPodId: string | null }>;
@@ -137,5 +140,14 @@ export interface ScanReportSummary {
 export interface ScanReportPage {
   items: ScanReportSummary[];
   /** Last report identity in this page; scoped to its schedule, ordered by time then ID. */
+  nextCursor: string | null;
+}
+
+export interface ScanFindingPage {
+  items: Array<ScheduledScanFinding & { disposition: 'unresolved' | 'deferred' }>;
+  nextCursor: string | null;
+}
+export interface ScanDecisionPage {
+  items: Array<ScanTriageDecision & { repairPodId: string | null }>;
   nextCursor: string | null;
 }
