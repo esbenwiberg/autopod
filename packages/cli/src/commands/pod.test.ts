@@ -1073,3 +1073,75 @@ it('propagates an HTTP Resume termination conflict without printing accepted exe
     await new Promise<void>((resolve) => server.close(() => resolve()));
   }
 });
+
+it('cost reads a deleted exact ID without requiring a live-list lookup and preserves JSON evidence', async () => {
+  const payload = {
+    podId: 'deleted-root',
+    model: null,
+    totalCostUsd: 2,
+    inputTokens: 90,
+    outputTokens: 10,
+    segments: [{ label: 'Unattributed', costUsd: 2, attribution: 'unattributed' }],
+    costEvidence: {
+      diagnostics: [
+        {
+          podId: 'deleted-root',
+          code: 'RETAINED_DELETED_POD',
+          message: 'Deleted pod retained in recorded cost totals.',
+        },
+      ],
+      omittedDiagnosticCount: 0,
+    },
+    taskExecution: {
+      taskId: 'original-task',
+      podCount: 2,
+      recordedCostUsd: 3,
+      diagnostics: ['2 deleted pod records retain task accounting and execution evidence.'],
+    },
+  };
+  const paths: string[] = [];
+  const server = createServer((req, res) => {
+    paths.push(req.url ?? '');
+    expect(req.method).toBe('GET');
+    expect(req.headers.authorization).toBe('Bearer local-fixture-only');
+    res.setHeader('content-type', 'application/json');
+    if (req.url === '/pods/deleted-root/cost') res.end(JSON.stringify(payload));
+    else {
+      res.statusCode = 404;
+      res.end('{}');
+    }
+  });
+  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+  const address = server.address();
+  if (!address || typeof address === 'string') throw new Error('Missing fixture port');
+  const client = new AutopodClient({
+    baseUrl: `http://127.0.0.1:${address.port}`,
+    getToken: async () => 'local-fixture-only',
+  });
+  const log = vi.spyOn(console, 'log').mockImplementation(() => {});
+  const stdout = vi.spyOn(process.stdout, 'write').mockImplementation(() => true);
+  try {
+    const command = () => {
+      const program = new Command();
+      registerPodCommands(program, () => client);
+      return program;
+    };
+    await command().parseAsync(['node', 'ap', 'cost', 'deleted-root']);
+    const output = log.mock.calls.map((call) => call.join(' ')).join('\n');
+    expect(output).toContain('Pod deleted-root stored cost subtotal: $2.0000');
+    expect(output).toContain('Recorded tokens: 100');
+    expect(output).toContain('Deleted pod retained in recorded cost totals.');
+    expect(output).toContain('Logical task: original-task (2 pods)');
+    expect(output).toContain('Stored task cost subtotal: $3.0000');
+    expect(output).toContain(
+      '2 deleted pod records retain task accounting and execution evidence.',
+    );
+    await command().parseAsync(['node', 'ap', 'cost', 'deleted-root', '--json']);
+    expect(JSON.parse(stdout.mock.calls.map((call) => String(call[0])).join(''))).toEqual(payload);
+    expect(paths).toEqual(['/pods/deleted-root/cost', '/pods/deleted-root/cost']);
+  } finally {
+    log.mockRestore();
+    stdout.mockRestore();
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+  }
+});

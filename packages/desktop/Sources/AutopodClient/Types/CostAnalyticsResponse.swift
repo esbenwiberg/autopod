@@ -56,6 +56,8 @@ public struct ProfileModelCell: Decodable, Equatable, Sendable {
 }
 
 public struct TopPodEntry: Decodable, Equatable, Sendable {
+    public let historyArchived: Bool?
+    public var canOpenLivePod: Bool { historyArchived != true }
     public let podId: String
     public let profile: String
     public let model: String?

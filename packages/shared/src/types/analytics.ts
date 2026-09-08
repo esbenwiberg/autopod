@@ -58,6 +58,8 @@ export interface CostAnalyticsResponse {
   }>;
   /** Top 10 most expensive pods in the window. */
   top10: Array<{
+    /** True when the pod was deleted but its accounting was retained. */
+    historyArchived?: boolean;
     podId: string;
     profile: string;
     model: string | null;

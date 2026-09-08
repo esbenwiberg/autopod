@@ -15,7 +15,7 @@ export type PodCostSource = Pick<
   | 'costUsd'
   | 'tokenTelemetryAccuracy'
   | 'recordDiagnostics'
-> & { phaseTokenUsage: unknown };
+> & { phaseTokenUsage: unknown; historyArchived?: boolean };
 
 export const COST_PHASE_JSON_MAX_BYTES = 64 * 1024;
 // Bounds apply inside SQLite before JSON crosses into the JS process.

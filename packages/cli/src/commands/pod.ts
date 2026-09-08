@@ -712,6 +712,39 @@ export function registerPodCommands(program: Command, getClient: () => AutopodCl
       },
     );
 
+  // Exact IDs also address retained accounting after a pod leaves the live list.
+  program
+    .command('cost <id>')
+    .description('Read recorded cost by exact pod ID, including deleted pods with retained history')
+    .option('--json', 'Output as JSON')
+    .action(async (id: string, opts: { json?: boolean }) => {
+      const value = await getClient().getPodCost(id);
+      withJsonOutput(opts, value, (cost) => {
+        console.log(`Pod ${cost.podId} stored cost subtotal: $${cost.totalCostUsd.toFixed(4)}`);
+        console.log(`Recorded tokens: ${cost.inputTokens + cost.outputTokens}`);
+        console.log('Billing unverified; stored amounts can include estimates.');
+        for (const segment of cost.segments)
+          console.log(`${segment.label}: $${segment.costUsd.toFixed(4)} (${segment.attribution})`);
+        if (cost.costEvidence) {
+          for (const item of cost.costEvidence.diagnostics)
+            console.log(`${item.podId}: ${item.message}`);
+          if (cost.costEvidence.omittedDiagnosticCount > 0)
+            console.log(
+              `${cost.costEvidence.omittedDiagnosticCount} additional cost diagnostics omitted.`,
+            );
+        } else console.log('Cost provenance unavailable.');
+        if (cost.taskExecution) {
+          console.log(
+            `Logical task: ${cost.taskExecution.taskId} (${cost.taskExecution.podCount} pods)`,
+          );
+          console.log(
+            `Stored task cost subtotal: $${cost.taskExecution.recordedCostUsd.toFixed(4)}`,
+          );
+          for (const diagnostic of cost.taskExecution.diagnostics) console.log(diagnostic);
+        } else console.log('Task accounting unavailable.');
+      });
+    });
+
   // ap status
   async function statusAction(id: string, opts: { json?: boolean }): Promise<void> {
     const client = getClient();

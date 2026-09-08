@@ -21,6 +21,7 @@ export const isHarnessCostPhase = (phase: string): boolean =>
 export function reconcilePodCosts(
   pod: Pick<Pod, 'id' | 'inputTokens' | 'outputTokens' | 'costUsd' | 'recordDiagnostics'> & {
     phaseTokenUsage: unknown;
+    historyArchived?: boolean;
   },
   usage?: ProviderUsageProjection,
 ): { total: number; agent: number; phases: CostPhase[]; evidence: CostEvidence } {
@@ -30,6 +31,8 @@ export function reconcilePodCosts(
     if (diagnostics.length < 100) diagnostics.push({ podId: pod.id, code, message });
     else omittedDiagnosticCount++;
   };
+  if (pod.historyArchived)
+    diagnose('RETAINED_DELETED_POD', 'Deleted pod retained in recorded cost totals.');
   for (const issue of pod.recordDiagnostics ?? []) {
     if (issue.field === 'phase_token_usage')
       diagnose(

@@ -153,6 +153,7 @@ export function aggregateCost(
     .sort((a, b) => b.cost - a.cost)
     .slice(0, 10)
     .map(({ pod, cost }) => ({
+      ...(pod.historyArchived ? { historyArchived: true } : {}),
       podId: pod.id,
       profile: pod.profileName,
       model: pod.model ?? null,

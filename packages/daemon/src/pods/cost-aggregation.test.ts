@@ -93,7 +93,47 @@ describe('aggregateCost', () => {
   // Empty DB
   // ──────────────────────────────────────────────────────────────────────────
 
-  it('projects cost without hydrating large contracts or malformed unrelated legacy JSON', () => {
+  it('retains corrected current and prior-window cost after deleting every pod in a task', () => {
+    const current = insertPod(db, {
+      id: 'deleted-current',
+      costUsd: 8,
+      completedAt: msToIso(NOW_MS - 1000),
+      phaseTokenUsage: {},
+    });
+    const prior = insertPod(db, {
+      id: 'deleted-prior',
+      costUsd: 3,
+      completedAt: msToIso(WINDOW_START_MS - 1000),
+      phaseTokenUsage: {},
+    });
+    db.prepare('UPDATE pods SET linked_pod_id = ? WHERE id = ?').run(prior, current);
+    podRepo.taskExecutions?.register(current);
+    db.prepare(`INSERT INTO provider_attempts(pod_id,ordinal,provider,runtime,model,profile_reference,profile_snapshot,started_at,ended_at,outcome,input_tokens,output_tokens,cost_usd)
+      VALUES (?,1,'openai','codex','model','fixture','{}','2024-06-15','2024-06-15','completed',100,20,8)`).run(
+      current,
+    );
+    db.prepare(`INSERT INTO provider_attempt_telemetry_corrections(pod_id,ordinal,input_tokens,output_tokens,cost_usd,source,reason,corrected_at)
+      VALUES (?,1,10,2,2,'codex_rollout','fixture correction','2024-06-15')`).run(current);
+    const before = aggregateCost({ podRepo, now: nowFn }, { days: 30 });
+    expect(before.total).toBe(2);
+    expect(before.deltaVsPrior.value).toBe(-1);
+    podRepo.delete(current);
+    podRepo.delete(prior);
+    const after = aggregateCost({ podRepo, now: nowFn }, { days: 30 });
+    expect(after.total).toBe(before.total);
+    expect(after.deltaVsPrior).toEqual(before.deltaVsPrior);
+    expect(after.top10).toEqual(before.top10.map((entry) => ({ ...entry, historyArchived: true })));
+    expect(after.costEvidence?.knownEstimatedCostUsd).toBe(2);
+    expect(after.costEvidence?.diagnostics).toContainEqual({
+      podId: current,
+      code: 'RETAINED_DELETED_POD',
+      message: 'Deleted pod retained in recorded cost totals.',
+    });
+    expect(podRepo.taskExecutions?.snapshot(current).recordedCostUsd).toBe(5);
+    expect(podRepo.list()).toEqual([]);
+  });
+
+  it('projects live and deleted cost without hydrating large contracts or malformed unrelated legacy JSON', () => {
     for (let i = 0; i < 128; i++) {
       const id = insertPod(db, { costUsd: 1, completedAt: msToIso(NOW_MS - 1000) });
       db.prepare('UPDATE pods SET task = ?, contract = ?, task_summary = ? WHERE id = ?').run(
@@ -102,6 +142,7 @@ describe('aggregateCost', () => {
         'not-json',
         id,
       );
+      if (i % 2 === 0) podRepo.delete(id);
     }
     const strictRead = vi.spyOn(podRepo, 'list').mockImplementation(() => {
       throw new Error('unbounded full hydration');

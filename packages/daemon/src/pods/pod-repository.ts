@@ -655,7 +655,7 @@ function rowToCostSource(row: Record<string, unknown>): PodCostSource {
   }
   if (row.phase_token_usage_oversized)
     pod.recordDiagnostics?.push({ field: 'phase_token_usage', code: 'size_limit' });
-  return { ...pod, phaseTokenUsage };
+  return { ...pod, phaseTokenUsage, historyArchived: row.history_archived === 1 };
 }
 
 export function createPodRepository(db: Database.Database): PodRepository {
@@ -1281,19 +1281,19 @@ export function createPodRepository(db: Database.Database): PodRepository {
       });
     },
 
-    getProviderUsage: (podId) => readProviderUsage(db, podId),
+    getProviderUsage: (podId) => readProviderUsage(db, podId, true),
 
     getCostRecord(podId: string): PodCostSource {
-      const row = db.prepare(`SELECT ${COST_POD_COLUMNS} FROM pods WHERE id = ?`).get(podId) as
-        | Record<string, unknown>
-        | undefined;
+      const row = db
+        .prepare(`SELECT ${COST_POD_COLUMNS}, history_archived FROM retained_pods WHERE id = ?`)
+        .get(podId) as Record<string, unknown> | undefined;
       if (!row) throw new PodNotFoundError(podId);
       return rowToCostSource(row);
     },
 
     listCostRecords(completedSince: string): PodCostSource[] {
       const rows = db
-        .prepare(`SELECT ${COST_POD_COLUMNS} FROM pods WHERE status IN ('complete','killed','failed','rejected')
+        .prepare(`SELECT ${COST_POD_COLUMNS}, history_archived FROM retained_pods WHERE status IN ('complete','killed','failed','rejected')
           AND agent_mode != 'interactive' AND completed_at >= ?
         ORDER BY completed_at, id`)
         .iterate(completedSince) as Iterable<Record<string, unknown>>;

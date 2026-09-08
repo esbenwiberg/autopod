@@ -27,6 +27,7 @@ import type {
   CreateScheduledJobTemplateRequest,
   ModelProvider,
   Pod,
+  PodCostBreakdownResponse,
   PodStatus,
   PodsitterActivation,
   PodsitterBudgets,
@@ -231,6 +232,10 @@ export class AutopodClient {
 
   async getSession(id: string): Promise<Pod> {
     return this.request<Pod>('GET', `/pods/${id}`);
+  }
+
+  async getPodCost(id: string): Promise<PodCostBreakdownResponse> {
+    return this.request('GET', `/pods/${encodeURIComponent(id)}/cost`);
   }
 
   async getTaskExecution(id: string): Promise<TaskExecutionSummary> {

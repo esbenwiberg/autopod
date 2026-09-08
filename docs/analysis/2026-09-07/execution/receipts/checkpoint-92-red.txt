@@ -1,0 +1,54 @@
+
+ RUN  v4.1.11 /private/tmp/autopod-durable-execution/packages/daemon
+
+ ❯ src/pods/cost-aggregation.test.ts (45 tests | 1 failed | 44 skipped) 75ms
+     × retains corrected current and prior-window cost after deleting every pod in a task 75ms
+ ❯ src/api/routes/pods.test.ts (92 tests | 1 failed | 91 skipped) 84ms
+     × keeps deleted cost details and task evidence available without restoring a live pod 83ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 2 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/pods/cost-aggregation.test.ts > aggregateCost > retains corrected current and prior-window cost after deleting every pod in a task
+AssertionError: expected +0 to be 2 // Object.is equality
+
+- Expected
++ Received
+
+- 2
++ 0
+
+ ❯ src/pods/cost-aggregation.test.ts:123:25
+    121|     podRepo.delete(prior);
+    122|     const after = aggregateCost({ podRepo, now: nowFn }, { days: 30 });
+    123|     expect(after.total).toBe(before.total);
+       |                         ^
+    124|     expect(after.deltaVsPrior).toEqual(before.deltaVsPrior);
+    125|     expect(after.top10).toEqual(before.top10);
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/2]⎯
+
+ FAIL  src/api/routes/pods.test.ts > GET /pods/:podId provider-attempt projection > keeps deleted cost details and task evidence available without restoring a live pod
+AssertionError: {"statusCode":404,"code":"POD_NOT_FOUND","error":"Not Found","message":"Pod deleted-cost not found"}: expected 404 to be 200 // Object.is equality
+
+- Expected
++ Received
+
+- 200
++ 404
+
+ ❯ src/api/routes/pods.test.ts:562:48
+    560|     repo.delete('deleted-cost');
+    561|     const response = await app.inject({ method: 'GET', url: '/pods/del…
+    562|     expect(response.statusCode, response.body).toBe(200);
+       |                                                ^
+    563|     expect(response.json()).toMatchObject({
+    564|       totalCostUsd: 2,
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/2]⎯
+
+
+ Test Files  2 failed (2)
+      Tests  2 failed | 135 skipped (137)
+   Start at  18:52:02
+   Duration  1.51s (transform 972ms, setup 0ms, import 1.64s, tests 159ms, environment 0ms)
+

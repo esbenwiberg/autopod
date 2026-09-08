@@ -306,11 +306,12 @@ private struct CostTop10SectionView: View {
                 VStack(spacing: 0) {
                     ForEach(top10, id: \.podId) { entry in
                         Button {
-                            onSelectPod?(entry.podId)
+                            if entry.canOpenLivePod { onSelectPod?(entry.podId) }
                         } label: {
                             podRow(entry)
                         }
                         .buttonStyle(.plain)
+                        .disabled(!entry.canOpenLivePod)
 
                         if entry.podId != top10.last?.podId {
                             Divider().padding(.leading, 12)
@@ -344,7 +345,7 @@ private struct CostTop10SectionView: View {
 
             Spacer()
 
-            Text(entry.finalStatus)
+            Text(entry.historyArchived == true ? "Deleted · \(entry.finalStatus)" : entry.finalStatus)
                 .font(.system(.caption2).weight(.medium))
                 .padding(.horizontal, 5)
                 .padding(.vertical, 2)

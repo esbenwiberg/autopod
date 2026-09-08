@@ -550,6 +550,37 @@ describe('GET /pods/:podId provider-attempt projection', () => {
     ).toEqual({ binding: retainedBinding });
   });
 
+  it('keeps deleted cost details and task evidence available without restoring a live pod', async () => {
+    insertPod(db, { id: 'deleted-cost', status: 'complete' });
+    const repo = createPodRepository(db);
+    repo.taskExecutions?.register('deleted-cost');
+    db.prepare(
+      "UPDATE pods SET cost_usd = 2, phase_token_usage = '{}' WHERE id = 'deleted-cost'",
+    ).run();
+    repo.delete('deleted-cost');
+    const response = await app.inject({ method: 'GET', url: '/pods/deleted-cost/cost' });
+    expect(response.statusCode, response.body).toBe(200);
+    expect(response.json()).toMatchObject({
+      totalCostUsd: 2,
+      taskExecution: { recordedCostUsd: 2, podCount: 1 },
+    });
+    expect(response.json().costEvidence.diagnostics).toContainEqual({
+      podId: 'deleted-cost',
+      code: 'RETAINED_DELETED_POD',
+      message: 'Deleted pod retained in recorded cost totals.',
+    });
+    const fleet = await app.inject({ method: 'GET', url: '/pods/analytics/cost?days=1' });
+    expect(fleet.statusCode).toBe(200);
+    expect(fleet.json()).toMatchObject({
+      total: 2,
+      top10: [{ podId: 'deleted-cost', historyArchived: true, costUsd: 2 }],
+    });
+    expect(() => repo.getOrThrow('deleted-cost')).toThrow();
+    expect((await app.inject({ method: 'GET', url: '/pods/never-existed/cost' })).statusCode).toBe(
+      404,
+    );
+  });
+
   it('exposes deleted root accounting through the surviving child task endpoint', async () => {
     insertPod(db, { id: 'history-root', status: 'complete' });
     insertPod(db, { id: 'history-fix', status: 'failed' });
