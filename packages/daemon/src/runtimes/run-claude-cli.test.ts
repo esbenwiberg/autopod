@@ -13,6 +13,25 @@ function bash(script: string) {
 }
 
 describe('runClaudeCli', () => {
+  it('checks reviewer ownership immediately before host spawn', async () => {
+    const { child } = createMockChildProcess();
+    const spawnImpl = vi.fn(() => {
+      queueMicrotask(() => child.emit('close', 0, null));
+      return child;
+    });
+    const result = await runClaudeCli({
+      model: MODEL,
+      input: '',
+      timeout: 1000,
+      spawnImpl,
+      beforeSpawn: () => {
+        throw new Error('review ownership lost');
+      },
+    }).catch((error: unknown) => error);
+    expect(spawnImpl).not.toHaveBeenCalled();
+    expect(result).toMatchObject({ message: 'review ownership lost' });
+  });
+
   it.each(['timeout', 'maxbuffer'])(
     'waits for observed exit after %s cancellation',
     async (kind) => {

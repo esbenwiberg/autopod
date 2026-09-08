@@ -3426,10 +3426,12 @@ human_review: []
         costUsd: 0.012,
       },
     });
+    const assertReviewerCurrent = vi.fn();
     const engine = createLocalValidationEngine(stubContainerManager());
 
     const result = await engine.validate(
       baseConfig({
+        assertReviewerCurrent,
         reviewerModel: 'claude-sonnet-4-6',
         reviewDepth: 'deep',
         worktreePath,
@@ -3453,6 +3455,15 @@ human_review: []
     });
     expect(result.taskReview?.tokenUsage?.costUsd).toBeGreaterThan(0);
     expect(runAgenticReview).toHaveBeenCalledTimes(1);
+    expect(runClaudeCli).toHaveBeenCalledWith(
+      expect.objectContaining({ beforeSpawn: assertReviewerCurrent }),
+    );
+    expect(runToolUseReview).toHaveBeenCalledWith(
+      expect.objectContaining({ beforeRequest: assertReviewerCurrent }),
+    );
+    expect(runAgenticReview).toHaveBeenCalledWith(
+      expect.objectContaining({ beforeSpawn: assertReviewerCurrent }),
+    );
   });
 
   it('retains structured overflow when Tier 3 falls back to Tier 2', async () => {
@@ -3632,6 +3643,44 @@ human_review: []
     expect(runToolUseReview).not.toHaveBeenCalled();
   });
 
+  it('does not dispatch a provider request after client acquisition loses review ownership', async () => {
+    let current = true;
+    const create = vi.fn().mockResolvedValue({
+      content: [
+        { type: 'text', text: '{"status":"pass","reasoning":"stale verdict","issues":[]}' },
+      ],
+      usage: { input_tokens: 10, output_tokens: 2 },
+    });
+    vi.mocked(createProviderAnthropicClient).mockImplementation(async () => {
+      current = false;
+      return { ok: true, client: { messages: { create } }, model: 'selected' } as Awaited<
+        ReturnType<typeof createProviderAnthropicClient>
+      >;
+    });
+    const result = await createLocalValidationEngine(stubContainerManager()).validate(
+      baseConfig({
+        reviewerProvider: 'foundry',
+        reviewerProviderCredentials: {
+          provider: 'foundry',
+          endpoint: 'https://foundry.example',
+          projectId: 'test',
+          apiKey: 'fixture-only',
+          apiSurface: 'anthropic',
+        },
+        reviewerModel: 'selected',
+        validationSuite: 'deterministic',
+        diff: '+const changed = true;',
+        assertReviewerCurrent: () => {
+          if (!current) throw new Error('review ownership lost');
+        },
+      }),
+    );
+    expect(create).not.toHaveBeenCalled();
+    expect(createProviderAnthropicClient).toHaveBeenCalledOnce();
+    expect(result.overall).toBe('fail');
+    expect(runClaudeCli).not.toHaveBeenCalled();
+  });
+
   it.each(['pass', 'uncertain', 'unavailable'] as const)(
     'keeps deep Foundry review bound when tool review is %s',
     async (toolOutcome) => {
@@ -3743,11 +3792,13 @@ human_review: []
       client: { messages: { create: messagesCreate } },
       model: 'claude-sonnet-4-6',
     } as Awaited<ReturnType<typeof createProviderAnthropicClient>>);
+    const assertReviewerCurrent = vi.fn();
     const cm = stubContainerManager();
     const engine = createLocalValidationEngine(cm);
 
     const result = await engine.validate(
       baseConfig({
+        assertReviewerCurrent,
         reviewerProvider: 'foundry',
         reviewerProviderCredentials: {
           provider: 'foundry',
@@ -3778,6 +3829,7 @@ human_review: []
       },
     });
     expect(result.overall).toBe('pass');
+    expect(assertReviewerCurrent).toHaveBeenCalledTimes(3);
     expect(vi.mocked(runClaudeCli)).not.toHaveBeenCalled();
     expect(createProviderAnthropicClient).toHaveBeenCalledWith(
       {

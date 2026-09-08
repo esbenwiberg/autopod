@@ -75,7 +75,9 @@ describe('review tool runner - Anthropic request shape', () => {
           usage: { input_tokens: 20, output_tokens: 3 },
         });
       const { runToolUseReview } = await import('./review-tool-runner.js');
+      const beforeRequest = vi.fn();
       const result = await runToolUseReview({
+        beforeRequest,
         model: 'configured',
         prompt: 'review',
         worktreePath: root,
@@ -86,6 +88,7 @@ describe('review tool runner - Anthropic request shape', () => {
         },
       });
       expect(create).toHaveBeenCalledTimes(2);
+      expect(beforeRequest).toHaveBeenCalledTimes(3);
       expect(create.mock.calls.map(([body]) => body.model)).toEqual([
         'selected-deployment',
         'selected-deployment',
@@ -98,6 +101,48 @@ describe('review tool runner - Anthropic request shape', () => {
     } finally {
       await fs.rm(root, { recursive: true, force: true });
     }
+  });
+
+  it('does not continue API tool turns after review ownership changes', async () => {
+    let current = true;
+    const create = vi
+      .fn()
+      .mockImplementationOnce(async () => {
+        current = false;
+        return {
+          content: [
+            {
+              type: 'tool_use',
+              id: 'read1',
+              name: 'read_file',
+              input: { path: 'absent-fixture.txt' },
+            },
+          ],
+          stop_reason: 'tool_use',
+          usage: { input_tokens: 10, output_tokens: 2 },
+        };
+      })
+      .mockResolvedValue({
+        content: [{ type: 'text', text: '{"status":"pass"}' }],
+        stop_reason: 'end_turn',
+        usage: { input_tokens: 20, output_tokens: 3 },
+      });
+    const { runToolUseReview } = await import('./review-tool-runner.js');
+    const result = await runToolUseReview({
+      model: 'selected',
+      prompt: 'review',
+      worktreePath: process.cwd(),
+      timeout: 1000,
+      providerClient: {
+        model: 'selected',
+        client: { messages: { create } } as unknown as Anthropic,
+      },
+      beforeRequest: () => {
+        if (!current) throw new Error('review ownership lost');
+      },
+    }).catch((error: unknown) => error);
+    expect(result).toMatchObject({ message: 'review ownership lost' });
+    expect(create).toHaveBeenCalledOnce();
   });
 
   it('passes timeout as an SDK option instead of an API body field', async () => {

@@ -37,6 +37,27 @@ vi.mock('node:child_process', async (importOriginal) => ({
 }));
 
 describe('agentic reviewer cancellation', () => {
+  it('forwards the ownership fence to the actual agentic host spawn', async () => {
+    const { child } = createMockChildProcess();
+    vi.mocked(spawn)
+      .mockClear()
+      .mockImplementation(() => {
+        queueMicrotask(() => child.emit('close', 0, null));
+        return child;
+      });
+    const result = await runAgenticReview({
+      model: 'test',
+      prompt: 'review',
+      worktreePath: '/tmp',
+      timeout: 1000,
+      beforeSpawn: () => {
+        throw new Error('review ownership lost');
+      },
+    }).catch((error: unknown) => error);
+    expect(spawn).not.toHaveBeenCalled();
+    expect(result).toMatchObject({ message: 'review ownership lost' });
+  });
+
   it('preserves the actual agentic command, directory, stdin and telemetry', async () => {
     const { child } = createMockChildProcess();
     vi.mocked(spawn).mockReturnValue(child);
@@ -44,7 +65,9 @@ describe('agentic reviewer cancellation', () => {
     child.stdin?.on('data', (chunk) => {
       input += String(chunk);
     });
+    const beforeSpawn = vi.fn();
     const pending = runAgenticReview({
+      beforeSpawn,
       model: 'chosen-model',
       prompt: 'private review prompt',
       worktreePath: '/tmp/review-worktree',
@@ -68,6 +91,7 @@ describe('agentic reviewer cancellation', () => {
     );
     expect(vi.mocked(spawn).mock.calls.at(-1)?.[1]).not.toContain('private review prompt');
     expect(input).toBe('private review prompt');
+    expect(beforeSpawn).toHaveBeenCalledOnce();
     child.stdout?.emit(
       'data',
       Buffer.from(

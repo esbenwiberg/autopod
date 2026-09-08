@@ -111,6 +111,8 @@ export function runClaudeCli(opts: {
   spawnImpl?: SpawnImpl;
   /** Execution directory and environment for the selected host runner. */
   spawnOptions?: SpawnOptions;
+  /** Synchronous ownership check immediately before dispatch; never launches after rejection. */
+  beforeSpawn?: () => void;
   /** Test seam — defaults to `'claude'`. */
   command?: string;
   /** Output format for the default args. JSON lets callers capture cost/token telemetry. */
@@ -139,6 +141,7 @@ export function runClaudeCli(opts: {
       }
     };
 
+    opts.beforeSpawn?.();
     const child = spawnFn(command, args, opts.spawnOptions);
 
     if (child.stdin) {

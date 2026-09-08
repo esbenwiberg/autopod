@@ -7323,6 +7323,9 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
   ): Parameters<ValidationEngine['validate']>[0] {
     return {
       ...config,
+      assertReviewerCurrent: () => {
+        resolveEffectiveBoundProfile(ownership.assertCurrent());
+      },
       beforeReviewerLaunch: async (identity) => {
         resolveEffectiveBoundProfile(ownership.assertCurrent());
         const selectedRuntime = resolveContainerReviewer({

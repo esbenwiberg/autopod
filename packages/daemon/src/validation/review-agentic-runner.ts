@@ -5,6 +5,7 @@ export interface AgenticReviewConfig {
   prompt: string;
   worktreePath: string;
   timeout: number;
+  beforeSpawn?: () => void;
 }
 
 export interface AgenticReviewTokenUsage {
@@ -27,6 +28,7 @@ export async function runAgenticReview(
 ): Promise<{ stdout: string; tokenUsage?: AgenticReviewTokenUsage }> {
   const result = await runClaudeCli({
     model: config.model,
+    beforeSpawn: config.beforeSpawn,
     input: config.prompt,
     timeout: config.timeout,
     outputFormat: 'text',

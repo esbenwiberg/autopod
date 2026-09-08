@@ -1,0 +1,293 @@
+
+ RUN  v4.1.11 /private/tmp/autopod-durable-execution/packages/daemon
+
+ ❯ src/validation/review-tool-runner.test.ts (17 tests | 1 failed | 16 skipped) 56ms
+     × does not continue API tool turns after review ownership changes 55ms
+ ❯ src/runtimes/run-claude-cli.test.ts (15 tests | 1 failed | 14 skipped) 5ms
+     × checks reviewer ownership immediately before host spawn 4ms
+ ❯ src/validation/review-agentic-runner.test.ts (4 tests | 1 failed | 3 skipped) 4ms
+     × forwards the ownership fence to the actual agentic host spawn 4ms
+ ❯ src/validation/local-validation-engine.test.ts (162 tests | 1 failed | 161 skipped) 8ms
+     × does not dispatch a provider request after client acquisition loses review ownership 8ms
+ ❯ src/pods/pod-manager.test.ts (575 tests | 1 failed | 574 skipped) 98ms
+       × binds non-container reviewer launch ownership to the actual validation invocation 97ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 5 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/runtimes/run-claude-cli.test.ts > runClaudeCli > checks reviewer ownership immediately before host spawn
+AssertionError: expected "vi.fn()" to not be called at all, but actually been called 1 times
+
+Received:
+
+  1st vi.fn() call:
+
+    Array [
+      "claude",
+      Array [
+        "-p",
+        "--model",
+        "fake-model",
+        "--output-format",
+        "text",
+      ],
+      undefined,
+    ]
+
+
+Number of calls: 1
+
+ ❯ src/runtimes/run-claude-cli.test.ts:21:27
+     19|     const result = await runClaudeCli({ model: MODEL, input: '', timeo…
+     20|       beforeSpawn: () => { throw new Error('review ownership lost'); }…
+     21|     expect(spawnImpl).not.toHaveBeenCalled();
+       |                           ^
+     22|     expect(result).toMatchObject({ message: 'review ownership lost' });
+     23|   });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/5]⎯
+
+ FAIL  src/pods/pod-manager.test.ts > PodManager > triggerValidation > binds non-container reviewer launch ownership to the actual validation invocation
+AssertionError: expected undefined to be type of 'function'
+
+Expected: "function"
+Received: "undefined"
+
+ ❯ src/pods/pod-manager.test.ts:14011:21
+    14009|       });
+    14010|       await manager.triggerValidation(pod.id);
+    14011|       expect(guard).toBeTypeOf('function');
+       |                     ^
+    14012|       expect(guard).toThrow(/superseded/i);
+    14013|       expect(manager.getSession(pod.id)).toMatchObject({ status: 'runn…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/5]⎯
+
+ FAIL  src/validation/local-validation-engine.test.ts > validate() — facts + review gate > does not dispatch a provider request after client acquisition loses review ownership
+AssertionError: expected "vi.fn()" to not be called at all, but actually been called 1 times
+
+Received:
+
+  1st vi.fn() call:
+
+    Array [
+      Object {
+        "max_tokens": 8192,
+        "messages": Array [
+          Object {
+            "content": "You are an expert software engineer performing an independent code review of changes made by an AI agent.
+    
+    Your mission: provide high-value, actionable feedback on medium and above severity issues. Low severity findings should be skipped entirely — if they don't meet the medium bar, don't report them.
+    
+    Core principles:
+    - Be helpful, not noisy. Only raise fair, actionable concerns that genuinely improve code.
+    - Focus exclusively on what changed in this diff. Never comment on pre-existing code.
+    - Don't flag style preferences. Only flag significant inconsistencies with existing patterns.
+    - Treat generated code fairly — if it's appropriate and contextually correct, it passes.
+    - When uncertain, skip rather than create noise.
+    - Auto-formatter changes (whitespace, punctuation, quote normalization applied by pre-commit hooks like Prettier or ESLint --fix) are expected commit side-effects. Never flag them as scope creep or unrelated changes.
+    - Files at paths matching `specs/*/handovers/*.md` are required Series Handover Protocol artifacts — agents in a series are explicitly instructed to write them. Their presence in the diff is mandatory and must NOT be flagged as scope violation or undisclosed deviation.
+    - Untracked files (`??` in git status) are NOT part of this PR. They are leftover worktree state from build artifacts, tooling, or prior pod runs. Evaluate ONLY the changes shown in the DIFF section — do not flag, cite, or read untracked files unless investigating a `.gitignore` violation explicitly listed under Warnings.
+    - HARD RULE — every issue you raise MUST cite a file path that appears as a header in the DIFF section above (`+++ b/<path>` or `--- a/<path>`). If a file is not in the DIFF, you may Read it for CONTEXT only — never to flag a new issue in it. Findings citing only paths outside the diff are automatically discarded by the harness; including them wastes the cycle.
+    - Use the CODEBASE CONTEXT section (if present) to verify claims made in the diff. Auto-detected warnings are high-confidence signals — investigate them seriously.
+    
+    ## TASK
+    
+    test task
+    
+    ## DIFF
+    
+    +const changed = true;
+    
+    ## INSTRUCTIONS
+    
+    ### Step 1: Code review
+    
+    Review ONLY the changed code across these dimensions. Only raise medium, high, or critical severity issues — skip anything below that bar:
+    
+    **Correctness & Quality**: error handling completeness, resource management, type/null safety, edge case handling
+    
+    **Security**: input validation and sanitization, access control, hardcoded secrets, dependency vulnerabilities
+    
+    **Performance & Reliability**: memory leaks, concurrency correctness, N+1 queries, retry logic and timeout handling, data consistency
+    
+    **Architecture & Maintainability**: component boundaries, interface design, inappropriate coupling, documentation for public APIs
+    
+    **Consistency**: does new code follow same patterns as existing similar code? Same error handling, naming, logging approaches? Only flag if the inconsistency is significant enough to cause confusion — not style preferences.
+    
+    **Generated Code**: if code appears generated (repetitive, boilerplate, generic) — verify it's adapted to the specific use case and follows project patterns. Flag if it's illogical or manipulated. Don't penalize if it's correct and contextually appropriate.
+    
+    **Testing** (treat as critical):
+    - Coverage: are new functions/methods/branches tested? Edge cases and error scenarios covered? Missing tests for significant functionality? Coverage notably low?
+    - Quality: do tests verify intended behavior (not just "no crash")? Meaningful assertions? Tests isolated and independent?
+    - Common issues: over-mocking (testing mock behavior instead of real logic), type "any" abuse bypassing type checking, mocking core business logic instead of testing it, testing implementation details instead of behavior, missing negative/error tests, arbitrary sleeps instead of proper synchronization, tests inconsistent with existing patterns
+    - Severity: High = missing tests for critical paths, "any" type abuse, mocking core logic / Medium = low coverage, tests not verifying behavior, excessive mocking
+    
+    ### Self-reflection gate
+    
+    Before including any issue, ask yourself:
+    - Is this actually in the diff (not pre-existing code)?
+    - Could this be intentional per the task description or contract?
+    - Does the existing codebase use similar patterns?
+    - Is this medium/high severity, not just a nit?
+    - Would I want this feedback if I were the author?
+    
+    Drop any issue that fails these checks.
+    
+    ## RESPONSE FORMAT
+    
+    Respond ONLY with a JSON object — no markdown fences, no extra text:
+    
+    {
+      "status": "pass" | "fail" | "uncertain",
+      "reasoning": "one or two sentence summary of the overall assessment",
+      "issues": ["[SEVERITY] short description — each entry MUST be a plain string, not an object. Format: \"[HIGH] Missing null check in foo()\". Allowed severities: MEDIUM, HIGH, CRITICAL. Omit anything below medium."]
+    }
+    
+    Status rules:
+    - "pass": requirements met (if any), no medium/high/critical severity issues found, and no unjustified undisclosed deviations. If you set "pass" but have minor observations below the medium bar, include them in reasoning and explain why they didn't reach the threshold.
+    - "fail": one or more requirements unmet, OR any medium/high/critical severity issue found, OR undisclosed deviations that compromised scope
+    - "uncertain": task is clear but diff is inconclusive without runtime context (use sparingly)",
+            "role": "user",
+          },
+        ],
+        "model": "selected",
+      },
+      Object {
+        "timeout": 300000,
+      },
+    ]
+
+
+Number of calls: 1
+
+ ❯ src/validation/local-validation-engine.test.ts:3647:24
+    3645|       assertReviewerCurrent: () => { if (!current) throw new Error('re…
+    3646|     }));
+    3647|     expect(create).not.toHaveBeenCalled();
+       |                        ^
+    3648|     expect(createProviderAnthropicClient).toHaveBeenCalledOnce();
+    3649|     expect(result.overall).toBe('fail');
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/5]⎯
+
+ FAIL  src/validation/review-agentic-runner.test.ts > agentic reviewer cancellation > forwards the ownership fence to the actual agentic host spawn
+AssertionError: expected "vi.fn()" to not be called at all, but actually been called 1 times
+
+Received:
+
+  1st vi.fn() call:
+
+    Array [
+      "claude",
+      Array [
+        "-p",
+        "--model",
+        "test",
+        "--output-format",
+        "json",
+        "--allowedTools",
+        "Read",
+        "Bash(git log:*)",
+        "Bash(git status:*)",
+        "Bash(git show:*)",
+        "Bash(git ls-files:*)",
+        "Bash(git check-ignore:*)",
+        "Bash(git diff:*)",
+        "--add-dir",
+        "/tmp",
+        "--system-prompt",
+        "You are an expert code reviewer with read-only access to the repository for VERIFYING claims in the diff. Use the tools to confirm or refute specific things the diff is doing — not to discover unrelated issues. HARD RULE — every issue you raise MUST cite a file path that appears as a header in the DIFF section (`+++ b/<path>` or `--- a/<path>`). If a file is not in the DIFF, Read it ONLY for context — never to flag a new issue in it. Findings citing only paths outside the diff are automatically discarded by the harness. CRITICAL: Untracked files (lines starting with `??` in git status) are NOT part of this PR — they are leftover worktree state from build artifacts, tooling, or prior pod runs. Do not flag, cite, or read untracked files unless investigating a `.gitignore` violation explicitly listed under the prompt's Warnings section. When done investigating, output ONLY a JSON object with your review verdict. Do not wrap the JSON in markdown fences. The JSON must have: "status" ("pass"|"fail"|"uncertain"), "reasoning" (string), "issues" (string[]).",
+      ],
+      Object {
+        "cwd": "/tmp",
+        "env": Object {
+          "BASE_URL": "/",
+          "CLAUDE_CODE_DISABLE_1M_CONTEXT": "1",
+          "CODEX_CI": "1",
+          "CODEX_PERMISSION_PROFILE": ":workspace",
+          "CODEX_SANDBOX": "seatbelt",
+          "CODEX_SANDBOX_NETWORK_DISABLED": "1",
+          "CODEX_SESSION_ID": "01a07afa-a577-70e1-a800-f4f5de43bf2e",
+          "CODEX_THREAD_ID": "01a07afa-a577-70e1-a800-f4f5de43bf2e",
+          "COLORTERM": "",
+          "DEV": "1",
+          "FORCE_TTY": "",
+          "GH_PAGER": "cat",
+          "GIT_ASKPASS": "",
+          "GIT_PAGER": "cat",
+          "GIT_TERMINAL_PROMPT": "0",
+          "HOME": "/Users/ewi",
+          "LANG": "C.UTF-8",
+          "LC_ALL": "C.UTF-8",
+          "LC_CTYPE": "C.UTF-8",
+          "LOGNAME": "ewi",
+          "MODE": "test",
+          "NODE_ENV": "test",
+          "NODE_PATH": "/private/tmp/autopod-durable-execution/node_modules/.pnpm/vitest@4.1.11_@types+node@22.20.1_jsdom@25.0.1_vite@8.0.16_@types+node@22.20.1_esbuild@0.28.1_jiti@2.7.0_yaml@2.9.0_/node_modules/vitest/node_modules:/private/tmp/autopod-durable-execution/node_modules/.pnpm/vitest@4.1.11_@types+node@22.20.1_jsdom@25.0.1_vite@8.0.16_@types+node@22.20.1_esbuild@0.28.1_jiti@2.7.0_yaml@2.9.0_/node_modules:/private/tmp/autopod-durable-execution/node_modules/.pnpm/node_modules",
+          "NODE_REPL_TRUSTED_BROWSER_CLIENT_SHA256S": "028a14b6eaa6d98dac2aae00764345ab9f244801ed8493d42b9af3be5575006e,f204d340535055781952b10ed396de20b842f00a19e430852f7e121ad1ce91f6",
+          "NO_COLOR": "1",
+          "PAGER": "cat",
+          "PATH": "/usr/local/bin:/System/Cryptexes/App/usr/bin:/usr/bin:/bin:/usr/sbin:/sbin:/var/run/com.apple.security.cryptexd/codex.system/bootstrap/usr/local/bin:/var/run/com.apple.security.cryptexd/codex.system/bootstrap/usr/bin:/var/run/com.apple.security.cryptexd/codex.system/bootstrap/usr/appleinternal/bin:/pkg/env/global/bin:/Library/Apple/usr/bin:/opt/homebrew/bin:/Users/ewi/.codex/tmp/arg0/codex-arg0gxVrNs:/Users/ewi/.cache/codex-runtimes/codex-primary-runtime/dependencies/bin/override:/Users/ewi/.dotnet/tools:/Users/ewi/.local/bin:/Users/ewi/.rokit/bin:/Users/ewi/.cache/codex-runtimes/codex-primary-runtime/dependencies/bin/fallback:/Applications/ChatGPT.app/Contents/Resources",
+          "PROD": "",
+          "PWD": "/private/tmp/autopod-durable-execution/packages/daemon",
+          "SHELL": "/bin/zsh",
+          "SHLVL": "0",
+          "SSR": "1",
+          "TERM": "dumb",
+          "TEST": "true",
+          "TMPDIR": "/var/folders/k6/nj5ps5vj2078xw4xv9_1k_3m0000gn/T/",
+          "USER": "ewi",
+          "VITEST": "true",
+          "VITEST_MODE": "RUN",
+          "VITEST_POOL_ID": "5",
+          "VITEST_WORKER_ID": "4",
+          "__CF_USER_TEXT_ENCODING": "0x1F5:0x0:0x0",
+        },
+      },
+    ]
+
+
+Number of calls: 1
+
+ ❯ src/validation/review-agentic-runner.test.ts:45:23
+     43|     const result = await runAgenticReview({ model: 'test', prompt: 're…
+     44|       beforeSpawn: () => { throw new Error('review ownership lost'); }…
+     45|     expect(spawn).not.toHaveBeenCalled();
+       |                       ^
+     46|     expect(result).toMatchObject({ message: 'review ownership lost' });
+     47|   });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[4/5]⎯
+
+ FAIL  src/validation/review-tool-runner.test.ts > review tool runner - Anthropic request shape > does not continue API tool turns after review ownership changes
+AssertionError: expected { stdout: '{"status":"pass"}', …(1) } to match object { message: 'review ownership lost' }
+(4 matching properties omitted from actual)
+
+- Expected
++ Received
+
+  {
+-   "message": "review ownership lost",
++   "stdout": "{\"status\":\"pass\"}",
++   "tokenUsage": {
++     "inputTokens": 30,
++     "outputTokens": 5,
++   },
+  }
+
+ ❯ src/validation/review-tool-runner.test.ts:116:20
+    114|       beforeRequest: () => { if (!current) throw new Error('review own…
+    115|     }).catch((error: unknown) => error);
+    116|     expect(result).toMatchObject({ message: 'review ownership lost' });
+       |                    ^
+    117|     expect(create).toHaveBeenCalledOnce();
+    118|   });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[5/5]⎯
+
+
+ Test Files  5 failed (5)
+      Tests  5 failed | 768 skipped (773)
+   Start at  11:52:14
+   Duration  1.47s (transform 2.58s, setup 0ms, import 3.69s, tests 172ms, environment 0ms)
+

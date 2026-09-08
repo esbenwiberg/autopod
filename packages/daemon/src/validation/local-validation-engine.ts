@@ -3639,6 +3639,7 @@ async function runTaskReview(
     | Extract<Awaited<ReturnType<typeof createProviderAnthropicClient>>, { ok: true }>
     | undefined;
   const getBoundProvider = async () => {
+    config.assertReviewerCurrent?.();
     if (boundProvider) return boundProvider;
     const selected = await createProviderAnthropicClient(
       {
@@ -3649,6 +3650,7 @@ async function runTaskReview(
       },
       log ?? noopLogger,
     );
+    config.assertReviewerCurrent?.();
     if (!selected.ok) throw new Error(`Reviewer provider unavailable: ${selected.reason}`);
     boundProvider = selected;
     return selected;
@@ -3758,11 +3760,13 @@ async function runTaskReview(
             await getBoundProvider(),
             prompt,
             reviewTimeout,
+            config.assertReviewerCurrent,
           );
           stdout = providerReview.stdout;
           tier1TokenUsage = providerReview.tokenUsage;
         } else {
           const claudeReview = await runClaudeCli({
+            beforeSpawn: config.assertReviewerCurrent,
             model: config.reviewerModel,
             input: prompt,
             timeout: reviewTimeout,
@@ -3867,6 +3871,7 @@ async function runTaskReview(
 
     try {
       const tier2Result = await runToolUseReview({
+        beforeRequest: config.assertReviewerCurrent,
         model: config.reviewerModel,
         prompt,
         worktreePath,
@@ -3921,6 +3926,7 @@ async function runTaskReview(
 
         try {
           const tier3Result = await runAgenticReview({
+            beforeSpawn: config.assertReviewerCurrent,
             model: config.reviewerModel,
             prompt,
             worktreePath,
@@ -4153,10 +4159,12 @@ async function runProfileBoundAnthropicReview(
   llm: Extract<Awaited<ReturnType<typeof createProviderAnthropicClient>>, { ok: true }>,
   prompt: string,
   timeout: number,
+  assertCurrent?: () => void,
 ): Promise<{
   stdout: string;
   tokenUsage?: { inputTokens: number; outputTokens: number; cachedInputTokens?: number };
 }> {
+  assertCurrent?.();
   const response = await llm.client.messages.create(
     {
       model: llm.model,

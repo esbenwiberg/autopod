@@ -13995,6 +13995,36 @@ describe('PodManager', () => {
       },
     );
 
+    it('binds non-container reviewer launch ownership to the actual validation invocation', async () => {
+      const ctx = createTestContext();
+      const manager = createPodManager(ctx.deps);
+      const pod = manager.createSession(
+        { profileName: 'test-profile', task: 'Fence host and API review' },
+        'operator',
+      );
+      ctx.podRepo.update(pod.id, {
+        status: 'running',
+        containerId: 'ctr-1',
+        worktreePath: '/tmp/worktree/abc',
+      });
+      let guard: (() => void) | undefined;
+      vi.mocked(ctx.validationEngine.validate).mockImplementation(async (config) => {
+        guard = config.assertReviewerCurrent;
+        guard?.();
+        ctx.podRepo.update(pod.id, { status: 'running', containerId: 'replacement-container' });
+        return makeValidationResult({ podId: pod.id, attempt: 1 });
+      });
+      await manager.triggerValidation(pod.id);
+      expect(guard).toBeTypeOf('function');
+      expect(guard).toThrow(/superseded/i);
+      expect(manager.getSession(pod.id)).toMatchObject({
+        status: 'running',
+        containerId: 'replacement-container',
+      });
+      expect(ctx.containerManager.stop).not.toHaveBeenCalled();
+      expect(ctx.runtime.resume).not.toHaveBeenCalled();
+    });
+
     it.each([undefined, 'model', 'runtime'] as const)(
       'binds actual reviewer launch preflight and rejects changed %s',
       async (changed) => {

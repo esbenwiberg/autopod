@@ -47,6 +47,8 @@ export interface ToolUseReviewConfig {
   worktreePath: string;
   timeout: number;
   maxToolCalls?: number;
+  /** Trusted ownership fence before provider dispatch and each local tool operation. */
+  beforeRequest?: () => void;
   /** Anthropic API key. If not provided, uses ANTHROPIC_API_KEY env var. */
   apiKey?: string;
   /** Already resolved provider endpoint/auth and exact dispatch model. Never falls back to daemon auth. */
@@ -75,6 +77,7 @@ export async function runToolUseReview(
 
   // Tool-use loop: keep sending messages until the model returns text-only or we hit limits
   while (true) {
+    config.beforeRequest?.();
     if (Date.now() >= deadline) {
       throw new Error(`Tier 2 review timed out after ${config.timeout}ms`);
     }
@@ -134,6 +137,7 @@ export async function runToolUseReview(
     // Execute each tool and gather results
     const toolResults: ToolResultBlockParam[] = [];
     for (const toolUse of toolUseBlocks) {
+      config.beforeRequest?.();
       const result = await executeToolCall(
         toolUse.name,
         toolUse.input as Record<string, unknown>,
