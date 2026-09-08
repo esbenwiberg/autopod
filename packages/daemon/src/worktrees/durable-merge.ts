@@ -21,10 +21,6 @@ export async function reconcileMerge(
 ): Promise<MergePrResult> {
   journal.check(pod, entry);
   if (entry.state === 'merged' && entry.result?.merged) return entry.result;
-  if (!entry.attemptId)
-    return mergeReconciliation(
-      'The PR merged without a recorded request; reconcile its external disposition.',
-    );
   const status =
     observedStatus ??
     (await provider.getPrStatus({
@@ -44,7 +40,8 @@ export async function reconcileMerge(
       observedAt: new Date().toISOString(),
     },
   };
-  journal.observe(entry.attemptId, result, 'provider_lookup');
+  if (entry.attemptId) journal.observe(entry.attemptId, result, 'provider_lookup');
+  else journal.observeDisposition(entry.id, result);
   journal.check(pod, entry);
   return result;
 }

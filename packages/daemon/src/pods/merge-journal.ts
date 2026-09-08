@@ -39,6 +39,7 @@ export interface MergeJournal {
   find(pod: Pod): MergeJournalEntry | null;
   check(pod: Pod, entry: MergeJournalEntry): void;
   claim(pod: Pod, publicationPod: Pod, publicationId: string, config: MergePrConfig): string;
+  observeDisposition(intentId: string, result: MergePrResult): void;
   observe(
     attemptId: string,
     result: MergePrResult,
@@ -140,9 +141,12 @@ export function createMergeJournal(db: Database.Database): MergeJournal {
         .prepare(
           'SELECT disposition, result FROM merge_observations WHERE attempt_id = ? ORDER BY sequence DESC LIMIT 1',
         )
-        .get(attempt?.id ?? null)) as
-      | { disposition: 'pending' | 'merged'; result: string }
-      | undefined;
+        .get(attempt?.id ?? null) ??
+      db
+        .prepare(
+          'SELECT disposition, result FROM merge_disposition_observations WHERE intent_id = ?',
+        )
+        .get(row.id)) as { disposition: 'pending' | 'merged'; result: string } | undefined;
     return {
       id: row.id,
       publicationId: row.publicationId,
@@ -216,8 +220,12 @@ export function createMergeJournal(db: Database.Database): MergeJournal {
       return mergeReconciliation(
         'The earlier merge is already scheduled; reconcile its disposition.',
       );
-    if (prior && entry(prior).state === 'merged')
-      return mergeReconciliation('This merge is already confirmed.');
+    const confirmed = db
+      .prepare(`SELECT i.id FROM merge_intents i WHERE i.pr_identity = ?
+      AND (EXISTS (SELECT 1 FROM merge_observations o WHERE o.intent_id = i.id AND o.disposition = 'merged')
+        OR EXISTS (SELECT 1 FROM merge_disposition_observations o WHERE o.intent_id = i.id)) LIMIT 1`)
+      .get(resource);
+    if (confirmed) return mergeReconciliation('This merge is already confirmed.');
     const uncertain = db
       .prepare(
         'SELECT a.id FROM merge_attempts a JOIN merge_intents i ON i.id = a.intent_id WHERE i.pr_identity = ? AND NOT EXISTS (SELECT 1 FROM merge_observations o WHERE o.attempt_id = a.id) LIMIT 1',
@@ -284,6 +292,47 @@ export function createMergeJournal(db: Database.Database): MergeJournal {
           return attemptId;
         })
         .immediate();
+    },
+    observeDisposition(intentId, result) {
+      if (db.inTransaction)
+        return mergeReconciliation('Merge disposition cannot share an uncommitted transaction.');
+      db.transaction(() => {
+        const row = db.prepare(`SELECT ${columns} FROM merge_intents WHERE id = ?`).get(intentId) as
+          | IntentRow
+          | undefined;
+        if (
+          !row ||
+          result.merged !== true ||
+          result.autoMergeScheduled !== false ||
+          !result.source ||
+          !Number.isFinite(Date.parse(result.source.observedAt))
+        )
+          return mergeReconciliation('The provider did not confirm the planned source and target.');
+        if (db.prepare('SELECT 1 FROM merge_attempts WHERE intent_id = ? LIMIT 1').get(intentId))
+          return mergeReconciliation(
+            'A merge request was admitted; reconcile that request instead.',
+          );
+        const request = requestFrom(row);
+        assertMergeSource(request.config.expectedHeadSha, result.source.headSha);
+        assertMergeTarget(request.config.expectedTarget, result.source.target);
+        const canonical: MergePrResult = {
+          merged: true,
+          autoMergeScheduled: false,
+          source: {
+            headSha: result.source.headSha,
+            target: { ...request.config.expectedTarget },
+            observedAt: result.source.observedAt,
+          },
+        };
+        // Keep a historical fact even if the worker disappears during lookup.
+        // Consuming it still requires current authority and retained source checks.
+        db.prepare(`INSERT OR IGNORE INTO merge_disposition_observations
+          (intent_id, disposition, evidence, result, observed_at) VALUES (?, 'merged', 'provider_lookup', ?, ?)`).run(
+          intentId,
+          JSON.stringify(canonical),
+          new Date().toISOString(),
+        );
+      }).immediate();
     },
     observe(attemptId, result, evidence) {
       if (db.inTransaction)

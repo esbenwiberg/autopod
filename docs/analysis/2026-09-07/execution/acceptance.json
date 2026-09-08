@@ -182,7 +182,8 @@
         "packages/daemon/src/worktrees/github-url-identity.ts",
         "packages/daemon/src/db/migrations/161_merge_journal.sql",
         "packages/daemon/src/pods/merge-journal.ts",
-        "packages/daemon/src/worktrees/durable-merge.ts"
+        "packages/daemon/src/worktrees/durable-merge.ts",
+        "packages/daemon/src/db/migrations/162_merge_disposition.sql"
       ],
       "tests": [
         "packages/daemon/src/pods/completion-journal.test.ts",
@@ -262,12 +263,13 @@
         "receipts/checkpoint-44-validation-identity.json",
         "checkpoint-45.md: planned delivery before review, removal of unbound polling, explicit validation recovery and mobile recovery notice; external dispositions and broader acceptance remain partial",
         "receipts/checkpoint-45-full-validation.txt",
-        "receipts/checkpoint-45-validation-identity.json"
+        "receipts/checkpoint-45-validation-identity.json",
+        "checkpoint-46.md: source-bound merged observations without invented requests; distinct canonical PR and admission counts with local operator proof; broader acceptance remains partial"
       ],
       "prerequisites": [
         "PR creation intent/reconciliation implemented locally; broader finalization side effects and operator override remain."
       ],
-      "remaining": "Entered artifact collection survives restart with sources retained; generation/cycle-bound integrity receipts and in-process duplicate coordination are implemented. Independent source inventory, fsync/power-loss proof, orphan snapshot/DB-path reconciliation, interactive duplicates, other reply boundaries and broader durable finalization side effects remain. Interactive completion now stops before push/cleanup when sync and archive fallback fail or a branch container lacks its host worktree; the source remains retryable. Duplicate concurrent interactive requests, cancellation fences, restart/durable side-effect receipts and complete source-inventory proof remain. Concurrent interactive completions now coalesce in process, conflicting promotion/generation requests fail closed, and current source/lifecycle/decision ownership is checked across push and container release boundaries. This is not durable cross-process idempotency, cancellation of already-dispatched external operations, or complete post-completion side-effect accounting."
+      "remaining": "Entered artifact collection survives restart with sources retained; generation/cycle-bound integrity receipts and in-process duplicate coordination are implemented. Independent source inventory, fsync/power-loss proof, orphan snapshot/DB-path reconciliation, interactive duplicates, other reply boundaries and broader durable finalization side effects remain. Interactive completion now stops before push/cleanup when sync and archive fallback fail or a branch container lacks its host worktree; the source remains retryable. Duplicate concurrent interactive requests, cancellation fences, restart/durable side-effect receipts and complete source-inventory proof remain. Concurrent interactive completions now coalesce in process, conflicting promotion/generation requests fail closed, and current source/lifecycle/decision ownership is checked across push and container release boundaries. This is not durable cross-process idempotency, cancellation of already-dispatched external operations, or complete post-completion side-effect accounting. Checkpoint 46 verifies planned merged disposition and separate request/PR counts locally. Legacy missing source history, closed disposition, broader durable cleanup and native/live interaction remain outstanding."
     },
     {
       "id": "W1.4",
@@ -920,12 +922,15 @@
         "packages/daemon/src/pods/task-execution-ledger.ts",
         "packages/daemon/src/db/migrations/152_task_executions.sql",
         "packages/daemon/src/pods/pod-manager.ts",
-        "packages/shared/src/types/task-execution.ts"
+        "packages/shared/src/types/task-execution.ts",
+        "packages/daemon/src/db/migrations/162_merge_disposition.sql",
+        "packages/daemon/src/pods/merge-journal.ts"
       ],
       "tests": [
         "packages/daemon/src/pods/models-aggregator.test.ts",
         "packages/daemon/src/pods/task-execution-ledger.test.ts",
-        "packages/daemon/src/pods/pod-manager.test.ts"
+        "packages/daemon/src/pods/pod-manager.test.ts",
+        "packages/daemon/src/pods/merge-journal.test.ts"
       ],
       "evidence": [
         "receipts/diagnostics-baseline-red.txt",
@@ -937,19 +942,26 @@
         "receipts/checkpoint-3-affected.txt",
         "checkpoint-30.md: retained failed approval delivery, explicit HTTP error/retry, review gate and original lifecycle guards; wider durability remains partial",
         "checkpoint-33.md: transactional durable decision admission and confirmed merge observations; operator disposition projection and broader delivery receipts remain partial",
-        "checkpoint-34.md: bounded latest-recorded PR disposition in task/cost API, CLI, mobile browser and native source/client tests; native UI/live and wider delivery acceptance remain partial"
+        "checkpoint-34.md: bounded latest-recorded PR disposition in task/cost API, CLI, mobile browser and native source/client tests; native UI/live and wider delivery acceptance remain partial",
+        "checkpoint-46.md: source-bound merged observations without invented requests; distinct canonical PR and admission counts with local operator proof; broader acceptance remains partial"
       ],
       "prerequisites": [],
-      "remaining": "Distinct task/pod/run/provider/validation units implemented. Durable logical delivery receipts remain."
+      "remaining": "Distinct task/pod/run/provider/validation units implemented. Durable logical delivery receipts remain. Checkpoint 46 verifies planned merged disposition and separate request/PR counts locally. Legacy missing source history, closed disposition, broader durable cleanup and native/live interaction remain outstanding."
     },
     {
       "id": "W4.2",
       "requirement": "Executed pass/fail, skipped, unavailable, waived, no-change, cancelled, external and unresolved outcomes remain explicit",
-      "status": "unverified",
-      "implementation": [],
-      "tests": [],
-      "evidence": [],
-      "prerequisites": []
+      "status": "partial",
+      "implementation": [
+        "packages/daemon/src/db/migrations/162_merge_disposition.sql",
+        "packages/daemon/src/pods/merge-journal.ts"
+      ],
+      "tests": ["packages/daemon/src/pods/merge-journal.test.ts"],
+      "evidence": [
+        "checkpoint-46.md: source-bound merged observations without invented requests; distinct canonical PR and admission counts with local operator proof; broader acceptance remains partial"
+      ],
+      "prerequisites": [],
+      "remaining": " Checkpoint 46 verifies planned merged disposition and separate request/PR counts locally. Legacy missing source history, closed disposition, broader durable cleanup and native/live interaction remain outstanding."
     },
     {
       "id": "W4.3",
@@ -1126,7 +1138,9 @@
         "packages/daemon/src/pods/pod-cost-breakdown.ts",
         "packages/daemon/src/pods/cost-reconciliation.ts",
         "packages/shared/src/types/pod.ts",
-        "packages/daemon/src/pods/cost-pod-projection.ts"
+        "packages/daemon/src/pods/cost-pod-projection.ts",
+        "packages/daemon/src/db/migrations/162_merge_disposition.sql",
+        "packages/daemon/src/pods/merge-journal.ts"
       ],
       "tests": [
         "packages/desktop/Tests/AutopodUITests/ModelsSimulatorTests.swift",
@@ -1138,7 +1152,8 @@
         "packages/desktop/Tests/AutopodClientTests/PodCostBreakdownResponseTests.swift",
         "packages/daemon/src/pods/task-retry-ledger.test.ts",
         "packages/mobile-web/src/components/TaskRetryPanel.test.tsx",
-        "packages/desktop/Tests/AutopodClientTests/TaskRetryClientTests.swift"
+        "packages/desktop/Tests/AutopodClientTests/TaskRetryClientTests.swift",
+        "packages/daemon/src/pods/merge-journal.test.ts"
       ],
       "evidence": [
         "receipts/checkpoint-1-desktop.txt",
@@ -1188,12 +1203,13 @@
         "receipts/checkpoint-25-validation-identity.json",
         "checkpoint-26.md: stored subtotals, unavailable attribution, source estimates, API/CLI/mobile/native test evidence; live and native interaction remain unverified",
         "checkpoint-27.md: bounded phase projections, local malformed-contract per-pod HTTP 500 regression, CLI/mobile/native checks; live root cause and native interaction remain unverified",
-        "checkpoint-35.md"
+        "checkpoint-35.md",
+        "checkpoint-46.md: source-bound merged observations without invented requests; distinct canonical PR and admission counts with local operator proof; broader acceptance remains partial"
       ],
       "prerequisites": [
         "Selected mobile flows and new health CLI have local interaction proof. Desktop has compilation and tests only. Remaining operator flows, physical device and live evidence are outstanding."
       ],
-      "remaining": "Task projection and current mobile interaction verified locally. Actual desktop interaction and remaining changed operator flows remain. Incomplete known prior spending now blocks further budgeted agent consumption. Future spending reservations, unrecorded legacy work, phase accounting and native/live verification remain. Checkpoint 24 adds durable sandbox startup retries, legacy allowance lower bounds, stage-scoped one-use decisions, measured startup time and local operator proof. Provider retries after first runtime event, repository rework, complete historical reconstruction, phase billing, native interaction and live acceptance remain. Checkpoint 25 reconciles corrected provider totals in task, per-pod and fleet APIs, including recorded zero. Phase attribution, legacy estimates, telemetry completeness, operator presentation and live proof remain."
+      "remaining": "Task projection and current mobile interaction verified locally. Actual desktop interaction and remaining changed operator flows remain. Incomplete known prior spending now blocks further budgeted agent consumption. Future spending reservations, unrecorded legacy work, phase accounting and native/live verification remain. Checkpoint 24 adds durable sandbox startup retries, legacy allowance lower bounds, stage-scoped one-use decisions, measured startup time and local operator proof. Provider retries after first runtime event, repository rework, complete historical reconstruction, phase billing, native interaction and live acceptance remain. Checkpoint 25 reconciles corrected provider totals in task, per-pod and fleet APIs, including recorded zero. Phase attribution, legacy estimates, telemetry completeness, operator presentation and live proof remain. Checkpoint 46 verifies planned merged disposition and separate request/PR counts locally. Legacy missing source history, closed disposition, broader durable cleanup and native/live interaction remain outstanding."
     },
     {
       "id": "W5.1",
@@ -1685,5 +1701,5 @@
       "prerequisites": []
     }
   ],
-  "lastCheckpoint": "checkpoint-45.md"
+  "lastCheckpoint": "checkpoint-46.md"
 }

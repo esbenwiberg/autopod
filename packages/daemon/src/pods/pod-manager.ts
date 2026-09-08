@@ -11747,16 +11747,34 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
       if (pod.prUrl && podRepo.mergeJournal) {
         try {
           const entry = podRepo.mergeJournal.find(pod);
+          const provider = entry ? prManagerFactory?.(profileStore.get(pod.profileName)) : null;
+          const observedStatus =
+            entry &&
+            provider &&
+            (entry.state === 'planned' ||
+              (entry.state === 'pending' && !entry.result?.autoMergeScheduled))
+              ? await provider.getPrStatus({
+                  prUrl: entry.request.config.prUrl,
+                  worktreePath: pod.worktreePath ?? undefined,
+                })
+              : undefined;
+          assertApprovalCurrent(pod);
           if (
             entry &&
-            ((entry.state !== 'pending' && entry.state !== 'planned') ||
+            (observedStatus?.merged ||
+              (entry.state !== 'pending' && entry.state !== 'planned') ||
               entry.result?.autoMergeScheduled)
           ) {
             if (options.squash !== undefined && entry.request.config.squash !== options.squash)
               mergeReconciliation('An earlier admitted merge uses a different method.');
-            const provider = prManagerFactory?.(profileStore.get(pod.profileName));
             if (!provider) mergeReconciliation('The original merge provider is unavailable.');
-            const result = await reconcileMerge(podRepo.mergeJournal, pod, entry, provider);
+            const result = await reconcileMerge(
+              podRepo.mergeJournal,
+              pod,
+              entry,
+              provider,
+              observedStatus,
+            );
             assertApprovalCurrent(pod);
             await inspectRetainedMergeSource(
               podRepo.mergeJournal,

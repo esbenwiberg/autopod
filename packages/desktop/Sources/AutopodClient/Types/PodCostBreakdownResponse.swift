@@ -77,6 +77,7 @@ public struct TaskExecutionSummary: Codable, Equatable, Sendable {
   public let providerAttemptCount: Int
   public let validationExecutionCount: Int
   public let delivery: TaskDeliverySummaryResponse?
+  public let merge: TaskMergeSummaryResponse?
   public let tokenBudget: Int?
   public let budgetCheck: TaskBudgetCheckResponse?
   public let recordedInputTokens: Int
@@ -123,4 +124,15 @@ public struct CostEvidenceDiagnostic: Codable, Equatable, Sendable {
   public let podId: String
   public let code: String
   public let message: String
+}
+
+public struct TaskMergeSummaryResponse: Codable, Equatable, Sendable {
+  public let prCount: Int
+  public let requestCount: Int
+  public let mergedPrCount: Int
+  public let mergedWithoutRecordedRequestCount: Int
+  public let unresolvedPrCount: Int
+  public let scope: String
+  public let basis: String
+  public let liveVerified: Bool
 }

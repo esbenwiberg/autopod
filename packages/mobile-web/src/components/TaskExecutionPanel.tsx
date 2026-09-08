@@ -49,6 +49,22 @@ export function TaskExecutionPanel({ podId, revision }: { podId: string; revisio
               ? `Last recorded PR status: ${data.delivery.disposition.openCount} open · ${data.delivery.disposition.mergedCount} merged · ${data.delivery.disposition.closedCount} closed · ${data.delivery.disposition.unavailableCount} unavailable`
               : 'PR disposition observations unavailable.'}
           </p>
+          {data.merge ? (
+            <>
+              <p>
+                Source-bound merges: {data.merge.mergedPrCount} merged PRs ·{' '}
+                {data.merge.requestCount} recorded requests · {data.merge.unresolvedPrCount}{' '}
+                unresolved of {data.merge.prCount} PRs
+              </p>
+              <p>
+                {data.merge.mergedWithoutRecordedRequestCount} merged PRs observed with no recorded
+                request; merge actor is not inferred.
+              </p>
+              <p className="muted">Source-bound journal only; historical PR URLs excluded.</p>
+            </>
+          ) : (
+            <p>Source-bound merge evidence unavailable.</p>
+          )}
           <p className="muted">Current provider status unverified.</p>
           <p>
             Recorded tokens: {data.recordedInputTokens + data.recordedOutputTokens} /{' '}

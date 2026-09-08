@@ -27,6 +27,19 @@ export interface TaskExecutionSummary {
       liveVerified: false;
     };
   };
+  /** Canonical PRs with a source-bound intent in this task. No reconstruction from pod status. */
+  merge?: {
+    prCount: number;
+    /** Actual durable admissions for this task, including repeated acknowledged attempts. */
+    requestCount: number;
+    mergedPrCount: number;
+    /** No request recorded for that PR in any task when its merge was observed. Does not identify an actor. */
+    mergedWithoutRecordedRequestCount: number;
+    unresolvedPrCount: number;
+    scope: 'source-bound-journal-only';
+    basis: 'last-recorded';
+    liveVerified: false;
+  };
   tokenBudget: number | null;
   /** Admission check of recorded usage; this does not reserve future provider spending. */
   budgetCheck?: {

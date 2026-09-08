@@ -55,6 +55,20 @@ it.each([true, false])(
               ],
             },
             telemetry: 'partial',
+            ...(hasDisposition
+              ? {
+                  merge: {
+                    prCount: 2,
+                    requestCount: 3,
+                    mergedPrCount: 1,
+                    mergedWithoutRecordedRequestCount: 1,
+                    unresolvedPrCount: 1,
+                    scope: 'source-bound-journal-only',
+                    basis: 'last-recorded',
+                    liveVerified: false,
+                  },
+                }
+              : {}),
             delivery: {
               intentCount: 2,
               receiptCount: 1,
@@ -106,6 +120,15 @@ it.each([true, false])(
           ? 'Last recorded PR status: 0 open · 1 merged · 0 closed · 0 unavailable'
           : 'PR disposition observations unavailable.',
       );
+      expect(container.textContent).toContain(
+        hasDisposition
+          ? 'Source-bound merges: 1 merged PRs · 3 recorded requests · 1 unresolved of 2 PRs'
+          : 'Source-bound merge evidence unavailable.',
+      );
+      if (hasDisposition)
+        expect(container.textContent).toContain(
+          '1 merged PRs observed with no recorded request; merge actor is not inferred.',
+        );
       expect(container.textContent).toContain('Current provider status unverified.');
       expect(container.textContent).toContain('historical PR URLs are not reconstructed receipts');
       expect(fetch).toHaveBeenLastCalledWith('/pods/fix/task-execution', expect.anything());

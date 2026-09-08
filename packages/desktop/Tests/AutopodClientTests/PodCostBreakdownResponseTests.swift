@@ -70,18 +70,25 @@ import Testing
     "tokenBudget": 100, "recordedInputTokens": 10, "recordedOutputTokens": 5,
     "recordedCostUsd": 0.5, "infrastructureCostUsd": null, "telemetry": "partial",
     "diagnostics": [],
+    "merge": { "prCount": 2, "requestCount": 3, "mergedPrCount": 1, "mergedWithoutRecordedRequestCount": 1, "unresolvedPrCount": 1, "scope": "source-bound-journal-only", "basis": "last-recorded", "liveVerified": false },
     "budgetCheck": { "status": "unavailable", "reason": "Task token accounting incomplete; reconcile prior execution telemetry." }
   }
   """.data(using: .utf8)!
   let response = try JSONDecoder().decode(TaskExecutionSummary.self, from: json)
   #expect(response.recordedInputTokens + response.recordedOutputTokens == 15)
   #expect(response.tokenBudget == 100)
+  #expect(response.merge?.requestCount == 3)
+  #expect(response.merge?.mergedPrCount == 1)
+  #expect(response.merge?.mergedWithoutRecordedRequestCount == 1)
+  #expect(response.merge?.liveVerified == false)
   #expect(response.budgetCheck?.status == "unavailable")
   #expect(response.budgetCheck?.reason.contains("reconcile prior execution telemetry") == true)
   var legacy = try #require(JSONSerialization.jsonObject(with: json) as? [String: Any])
   legacy.removeValue(forKey: "budgetCheck")
+  legacy.removeValue(forKey: "merge")
   let old = try JSONDecoder().decode(TaskExecutionSummary.self, from: JSONSerialization.data(withJSONObject: legacy))
   #expect(old.budgetCheck == nil)
+  #expect(old.merge == nil)
 }
 
 @Test func costEvidenceRetainsEstimatesAndConflictingStoredAmounts() throws {

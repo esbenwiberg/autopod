@@ -725,6 +725,16 @@ export function registerPodCommands(program: Command, getClient: () => AutopodCl
             ? `Last recorded PR status: ${disposition.openCount} open · ${disposition.mergedCount} merged · ${disposition.closedCount} closed · ${disposition.unavailableCount} unavailable`
             : 'PR disposition observations unavailable.',
         );
+        if (task.merge) {
+          const merge = task.merge;
+          console.log(
+            `Source-bound merges: ${merge.mergedPrCount} merged PRs · ${merge.requestCount} recorded requests · ${merge.unresolvedPrCount} unresolved of ${merge.prCount} PRs`,
+          );
+          console.log(
+            `${merge.mergedWithoutRecordedRequestCount} merged PRs observed with no recorded request; merge actor is not inferred.`,
+          );
+          console.log('Source-bound journal only; historical PR URLs excluded.');
+        } else console.log('Source-bound merge evidence unavailable.');
         console.log('Current provider status unverified.');
         console.log(
           `${chalk.bold('Task tokens:')} ${task.recordedInputTokens + task.recordedOutputTokens}/${task.tokenBudget ?? 'no configured limit'}`,

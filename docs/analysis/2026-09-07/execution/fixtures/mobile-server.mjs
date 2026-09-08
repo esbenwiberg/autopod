@@ -184,7 +184,9 @@ if (startupRetryFixture) {
   retryState.interruptedCount = 0;
   retryState.latest = { id: 'local-startup-failure', outcome: 'transient' };
 }
-const deliveryDispositionFixture = process.env.FIXTURE_MODE === 'delivery-disposition';
+const deliveryDispositionFixture = ['delivery-disposition', 'merge-disposition'].includes(
+  process.env.FIXTURE_MODE,
+);
 let deliveryDispositionReads = 0;
 const missingSourceFixture = process.env.FIXTURE_MODE === 'approval-source-missing';
 const normalDeliveryFixture = process.env.FIXTURE_MODE === 'approval-delivery';
@@ -597,6 +599,20 @@ const server = createServer(async (req, res) => {
             ],
           },
       infrastructureCostUsd: null,
+      ...(process.env.FIXTURE_MODE === 'merge-disposition' && deliveryDispositionReads > 1
+        ? {
+            merge: {
+              prCount: 2,
+              requestCount: 3,
+              mergedPrCount: 1,
+              mergedWithoutRecordedRequestCount: 1,
+              unresolvedPrCount: 1,
+              scope: 'source-bound-journal-only',
+              basis: 'last-recorded',
+              liveVerified: false,
+            },
+          }
+        : {}),
       telemetry: 'partial',
       delivery: {
         intentCount: 2,

@@ -1,0 +1,30 @@
+{
+  "scope": "Built mobile app with synthetic localhost fixture; no live provider or daemon acceptance",
+  "observedAt": "2026-09-08T05:23:22.590731+00:00",
+  "url": "http://127.0.0.1:65341/mobile/#/pod/local-fixture",
+  "tabId": "25",
+  "before": "Source-bound merge evidence unavailable.",
+  "action": "Clicked Refresh task accounting once",
+  "after": [
+    "Source-bound merges: 1 merged PRs \u00b7 3 recorded requests \u00b7 1 unresolved of 2 PRs",
+    "1 merged PRs observed with no recorded request; merge actor is not inferred.",
+    "Source-bound journal only; historical PR URLs excluded.",
+    "Current provider status unverified."
+  ],
+  "serverReceipt": {
+    "reads": 2,
+    "action": "read-delivery-disposition",
+    "scope": "local fixture only"
+  },
+  "cleanup": {
+    "tabClosed": true,
+    "remainingTabs": [],
+    "serverSession": 56455,
+    "exitCode": 1,
+    "termination": "Ctrl-C"
+  },
+  "limitations": [
+    "Independent synthetic settlement, preflight, budget and cost panels were not accepted as current evidence.",
+    "No native desktop interaction or live acceptance."
+  ]
+}

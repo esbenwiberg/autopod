@@ -492,6 +492,20 @@ it.each([true, false])(
         ],
       },
       telemetry: 'partial',
+      ...(hasDisposition
+        ? {
+            merge: {
+              prCount: 2,
+              requestCount: 3,
+              mergedPrCount: 1,
+              mergedWithoutRecordedRequestCount: 1,
+              unresolvedPrCount: 1,
+              scope: 'source-bound-journal-only',
+              basis: 'last-recorded',
+              liveVerified: false,
+            },
+          }
+        : {}),
       diagnostics: [],
       delivery: {
         intentCount: 2,
@@ -566,6 +580,15 @@ it.each([true, false])(
           ? 'Last recorded PR status: 0 open · 1 merged · 0 closed · 0 unavailable'
           : 'PR disposition observations unavailable.',
       );
+      expect(output).toContain(
+        hasDisposition
+          ? 'Source-bound merges: 1 merged PRs · 3 recorded requests · 1 unresolved of 2 PRs'
+          : 'Source-bound merge evidence unavailable.',
+      );
+      if (hasDisposition)
+        expect(output).toContain(
+          '1 merged PRs observed with no recorded request; merge actor is not inferred.',
+        );
       expect(output).toContain('Current provider status unverified.');
       expect(output).toContain(
         'Task token accounting incomplete; reconcile prior execution telemetry.',
@@ -578,6 +601,7 @@ it.each([true, false])(
       const structured = JSON.parse(stdout.mock.calls.map((call) => String(call[0])).join(''));
       expect(structured.taskExecution.costEvidence).toEqual(task.costEvidence);
       expect(structured.taskExecution.delivery).toEqual(task.delivery);
+      expect(structured.taskExecution.merge).toEqual(task.merge);
       expect(paths).toEqual([
         '/pods/abcd1234',
         '/pods/abcd1234/task-execution',

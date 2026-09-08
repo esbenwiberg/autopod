@@ -5008,6 +5008,104 @@ describe('PodManager', () => {
   });
 
   describe('approveSession', () => {
+    it.each(['local-source', 'provider-source', 'decision'] as const)(
+      'retains a planned externally merged PR when %s prevents acceptance',
+      async (fault) => {
+        vi.useFakeTimers();
+        try {
+          const ctx = createTestContext();
+          const manager = createPodManager(ctx.deps);
+          const pod = manager.createSession(
+            { profileName: 'test-profile', task: 'Guard external disposition' },
+            'user-1',
+          );
+          ctx.podRepo.update(
+            pod.id,
+            validatedPodUpdates(pod.id, { containerId: 'retained-source', filesChanged: 1 }),
+          );
+          const status = seedPollDelivery(ctx, pod.id, true);
+          if (fault === 'provider-source')
+            vi.mocked(ctx.prManager.getPrStatus).mockResolvedValue({
+              ...status,
+              headSha: 'c'.repeat(40),
+            });
+          if (fault === 'local-source') {
+            if (!ctx.worktreeManager.inspectSource)
+              throw new Error('Missing fixture source inspection');
+            vi.mocked(ctx.worktreeManager.inspectSource).mockResolvedValue({
+              branch: pod.branch,
+              commitSha: 'c'.repeat(40),
+              treeSha: 'b'.repeat(40),
+              worktreeClean: true,
+            });
+          }
+          if (fault === 'decision')
+            ctx.db.prepare("UPDATE pods SET pending_escalation = '{}' WHERE id = ?").run(pod.id);
+          vi.clearAllTimers();
+          const restarted = createPodManager(ctx.deps);
+          await vi.advanceTimersByTimeAsync(0);
+          expect(restarted.getSession(pod.id)).toMatchObject({
+            status: 'merge_pending',
+            containerId: 'retained-source',
+            completedAt: null,
+          });
+          expect(ctx.prManager.mergePr).not.toHaveBeenCalled();
+          expect(ctx.containerManager.kill).not.toHaveBeenCalled();
+          expect(ctx.worktreeManager.pushBranch).not.toHaveBeenCalled();
+          expect(ctx.db.prepare('SELECT count(*) AS n FROM merge_attempts').get()).toEqual({
+            n: 0,
+          });
+          expect(
+            ctx.db.prepare('SELECT count(*) AS n FROM merge_disposition_observations').get(),
+          ).toEqual({ n: fault === 'local-source' ? 1 : 0 });
+        } finally {
+          vi.useRealTimers();
+        }
+      },
+    );
+
+    it.each(['restart', 'approval'] as const)(
+      'reconciles a planned PR merged during downtime without a provider mutation or recorded request (%s)',
+      async (path) => {
+        vi.useFakeTimers();
+        try {
+          const ctx = createTestContext();
+          const original = createPodManager(ctx.deps);
+          const pod = original.createSession(
+            { profileName: 'test-profile', task: 'Observe planned merge' },
+            'user-1',
+          );
+          ctx.podRepo.update(
+            pod.id,
+            validatedPodUpdates(pod.id, { containerId: 'retained-source', filesChanged: 1 }),
+          );
+          seedPollDelivery(ctx, pod.id, true);
+          vi.clearAllTimers();
+          if (path === 'approval') ctx.podRepo.update(pod.id, { status: 'validated' });
+          const restarted = createPodManager(ctx.deps);
+          if (path === 'approval') await restarted.approveSession(pod.id);
+          await vi.advanceTimersByTimeAsync(0);
+          expect(restarted.getSession(pod.id).status).toBe('complete');
+          expect(ctx.prManager.mergePr).not.toHaveBeenCalled();
+          expect(ctx.worktreeManager.pushBranch).not.toHaveBeenCalled();
+          expect(ctx.worktreeManager.rebaseOntoBase).not.toHaveBeenCalled();
+          expect(ctx.runtime.spawn).not.toHaveBeenCalled();
+          expect(ctx.db.prepare('SELECT count(*) AS n FROM merge_attempts').get()).toEqual({
+            n: 0,
+          });
+          expect(
+            ctx.db.prepare('SELECT count(*) AS n FROM merge_disposition_observations').get(),
+          ).toEqual({ n: 1 });
+          const kills = vi.mocked(ctx.containerManager.kill).mock.calls.length;
+          createPodManager(ctx.deps);
+          await vi.advanceTimersByTimeAsync(60000);
+          expect(ctx.containerManager.kill).toHaveBeenCalledTimes(kills);
+        } finally {
+          vi.useRealTimers();
+        }
+      },
+    );
+
     it('retains externally merged PR source without publishing or inventing a daemon merge', async () => {
       const ctx = createTestContext();
       const manager = createPodManager(ctx.deps);

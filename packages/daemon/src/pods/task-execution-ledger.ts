@@ -258,6 +258,29 @@ export function createTaskExecutionLedger(db: Database.Database): TaskExecutionL
       closedCount: number;
       unavailableCount: number;
     };
+    // Scalar-only aggregation: count each canonical PR once across linked executions.
+    // A source-bound observation proves disposition, never who caused it.
+    const merge = db
+      .prepare(`WITH resources AS (
+      SELECT i.pr_identity AS pr, MAX(
+        EXISTS (SELECT 1 FROM merge_observations o WHERE o.intent_id = i.id AND o.disposition = 'merged')
+        OR EXISTS (SELECT 1 FROM merge_disposition_observations o WHERE o.intent_id = i.id)
+      ) AS merged FROM merge_intents i WHERE i.task_id = ? GROUP BY i.pr_identity
+    ) SELECT COUNT(*) AS prCount, COALESCE(SUM(merged), 0) AS mergedPrCount,
+      COALESCE(SUM(NOT merged), 0) AS unresolvedPrCount,
+      COALESCE(SUM(merged AND NOT EXISTS (
+        SELECT 1 FROM merge_attempts a JOIN merge_intents i ON i.id = a.intent_id WHERE i.pr_identity = resources.pr
+      )), 0) AS mergedWithoutRecordedRequestCount,
+      (SELECT COUNT(*) FROM merge_attempts a JOIN merge_intents i ON i.id = a.intent_id WHERE i.task_id = ?) AS requestCount
+      FROM resources`)
+      .get(identity.taskId, identity.taskId) as Pick<
+      NonNullable<TaskExecutionSummary['merge']>,
+      | 'prCount'
+      | 'mergedPrCount'
+      | 'unresolvedPrCount'
+      | 'mergedWithoutRecordedRequestCount'
+      | 'requestCount'
+    >;
     const root = db
       .prepare('SELECT token_budget AS budget FROM pods WHERE id = ?')
       .get(identity.rootPodId) as { budget: number | null } | undefined;
@@ -304,6 +327,12 @@ export function createTaskExecutionLedger(db: Database.Database): TaskExecutionL
           basis: 'last-recorded',
           liveVerified: false,
         },
+      },
+      merge: {
+        ...merge,
+        scope: 'source-bound-journal-only',
+        basis: 'last-recorded',
+        liveVerified: false,
       },
       recordedInputTokens,
       recordedOutputTokens,

@@ -79,6 +79,137 @@ function fixture(
 }
 
 describe('durable merge journal', () => {
+  it('counts duplicate source-bound dispositions for one canonical PR once and isolates intentional reruns', () => {
+    const f = fixture();
+    try {
+      const first = f.journal.plan(f.pod, f.publicationPod, f.publicationId, f.config);
+      const second = f.journal.plan(f.pod, f.publicationPod, f.publicationId, {
+        ...f.config,
+        squash: true,
+      });
+      expect(first.id).not.toBe(second.id);
+      f.journal.observeDisposition(first.id, f.result);
+      f.journal.observeDisposition(second.id, f.result);
+      const snapshot = f.repo.taskExecutions?.snapshot(f.pod.id);
+      expect(snapshot?.merge).toEqual({
+        prCount: 1,
+        requestCount: 0,
+        mergedPrCount: 1,
+        mergedWithoutRecordedRequestCount: 1,
+        unresolvedPrCount: 0,
+        scope: 'source-bound-journal-only',
+        basis: 'last-recorded',
+        liveVerified: false,
+      });
+      expect(snapshot?.delivery?.receiptCount).toBe(0);
+      expect(snapshot?.agentRunCount).toBe(0);
+      expect(
+        f.db.prepare('SELECT count(*) AS n FROM merge_disposition_observations').get(),
+      ).toEqual({ n: 2 });
+      f.repo.insert({
+        id: 'independent',
+        profileName: 'test-profile',
+        task: 'Intentional rerun',
+        model: 'model',
+        runtime: 'codex',
+        branch: 'feature',
+        userId: 'user',
+        status: 'validated',
+        executionTarget: 'local',
+        maxValidationAttempts: 3,
+        skipValidation: false,
+        outputMode: 'pr',
+      });
+      expect(f.repo.taskExecutions?.snapshot('independent').merge).toMatchObject({
+        prCount: 0,
+        requestCount: 0,
+        mergedPrCount: 0,
+      });
+    } finally {
+      f.db.close();
+    }
+  });
+
+  it('retains a source-bound merged observation across disk restart without inventing a request', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'autopod-merge-disposition-'));
+    const path = join(dir, 'journal.db');
+    let db = new Database(path);
+    try {
+      db.pragma('foreign_keys = ON');
+      runMigrations(db, new URL('../db/migrations', import.meta.url).pathname, logger);
+      const f = fixture(db);
+      const planned = f.journal.plan(f.pod, f.publicationPod, f.publicationId, f.config);
+      db.close();
+      db = new Database(path);
+      const restarted = createMergeJournal(db);
+      restarted.observeDisposition(planned.id, f.result);
+      restarted.observeDisposition(planned.id, f.result);
+      db.close();
+      db = new Database(path);
+      const recovered = createMergeJournal(db);
+      expect(recovered.find(f.pod)).toMatchObject({
+        state: 'merged',
+        attemptId: null,
+        result: f.result,
+      });
+      expect(db.prepare('SELECT count(*) AS n FROM merge_attempts').get()).toEqual({ n: 0 });
+      expect(db.prepare('SELECT count(*) AS n FROM merge_observations').get()).toEqual({ n: 0 });
+      expect(db.prepare('SELECT count(*) AS n FROM merge_disposition_observations').get()).toEqual({
+        n: 1,
+      });
+      expect(() =>
+        db.prepare('UPDATE merge_disposition_observations SET result = result').run(),
+      ).toThrow('immutable');
+      expect(() => recovered.claim(f.pod, f.publicationPod, f.publicationId, f.config)).toThrow(
+        'already confirmed',
+      );
+      const repo = createPodRepository(db);
+      repo.incrementLifecycleGeneration(f.pod.id);
+      const current = repo.getOrThrow(f.pod.id);
+      const publications = createSourcePublicationLedger(db);
+      const publicationId = publications.admit(current, f.proof);
+      publications.confirm(current, publicationId, f.proof);
+      expect(() => recovered.claim(current, current, publicationId, f.config)).toThrow(
+        'already confirmed',
+      );
+      expect(repo.taskExecutions?.snapshot(f.pod.id).merge).toMatchObject({
+        prCount: 1,
+        requestCount: 0,
+        mergedPrCount: 1,
+        mergedWithoutRecordedRequestCount: 1,
+        unresolvedPrCount: 0,
+      });
+      expect(db.pragma('integrity_check')).toEqual([{ integrity_check: 'ok' }]);
+      expect(db.pragma('foreign_key_check')).toEqual([]);
+    } finally {
+      if (db.open) db.close();
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it.each(['missing-source', 'wrong-head', 'wrong-target', 'pending', 'admitted'] as const)(
+    'rejects unproven or misclassified planned disposition (%s)',
+    (change) => {
+      const f = fixture();
+      try {
+        const planned = f.journal.plan(f.pod, f.publicationPod, f.publicationId, f.config);
+        if (change === 'admitted')
+          f.journal.claim(f.pod, f.publicationPod, f.publicationId, f.config);
+        const result = structuredClone(f.result);
+        if (change === 'missing-source') result.source = undefined;
+        if (change === 'wrong-head' && result.source) result.source.headSha = 'c'.repeat(40);
+        if (change === 'wrong-target' && result.source) result.source.target.baseBranch = 'other';
+        if (change === 'pending') result.merged = false;
+        expect(() => f.journal.observeDisposition(planned.id, result)).toThrow();
+        expect(
+          f.db.prepare('SELECT count(*) AS n FROM merge_disposition_observations').get(),
+        ).toEqual({ n: 0 });
+      } finally {
+        f.db.close();
+      }
+    },
+  );
+
   it('persists a planned source binding without inventing an attempt, then admits exactly one request', () => {
     const f = fixture();
     try {
@@ -246,6 +377,13 @@ describe('durable merge journal', () => {
       f.journal.observe(second, f.result, 'merge_response');
       f.journal.observe(first, f.result, 'provider_lookup');
       expect(f.journal.find(f.pod)?.state).toBe('merged');
+      expect(f.repo.taskExecutions?.snapshot(f.pod.id).merge).toMatchObject({
+        prCount: 1,
+        requestCount: 2,
+        mergedPrCount: 1,
+        mergedWithoutRecordedRequestCount: 0,
+        unresolvedPrCount: 0,
+      });
       expect(f.db.prepare('SELECT count(*) AS n FROM merge_attempts').get()).toEqual({ n: 2 });
       expect(
         f.db

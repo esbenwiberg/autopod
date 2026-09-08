@@ -40,6 +40,13 @@ public struct SessionCostCard: View {
                     } else {
                         Text("PR disposition observations unavailable.").font(.caption).foregroundStyle(.secondary)
                     }
+                    if let merge = task.merge {
+                        Text("Source-bound merges: \(merge.mergedPrCount) merged PRs · \(merge.requestCount) recorded requests · \(merge.unresolvedPrCount) unresolved of \(merge.prCount) PRs")
+                        Text("\(merge.mergedWithoutRecordedRequestCount) merged PRs observed with no recorded request; merge actor is not inferred.")
+                        Text("Source-bound journal only; historical PR URLs excluded.").font(.caption).foregroundStyle(.secondary)
+                    } else {
+                        Text("Source-bound merge evidence unavailable.").font(.caption).foregroundStyle(.secondary)
+                    }
                     Text("Current provider status unverified.").font(.caption).foregroundStyle(.secondary)
                     Text("Stored task cost subtotal: \(formatCost(task.recordedCostUsd)) · \(task.telemetry) telemetry")
                     CostEvidenceView(evidence: task.costEvidence)

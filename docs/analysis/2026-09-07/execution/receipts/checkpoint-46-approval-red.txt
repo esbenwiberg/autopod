@@ -1,0 +1,28 @@
+
+ RUN  v4.1.11 /private/tmp/autopod-durable-execution/packages/daemon
+
+ ❯ src/pods/pod-manager.test.ts (520 tests | 1 failed | 518 skipped) 139ms
+       × reconciles a planned PR merged during downtime without a provider mutation or recorded request (approval) 80ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/pods/pod-manager.test.ts > PodManager > approveSession > reconciles a planned PR merged during downtime without a provider mutation or recorded request (approval)
+AutopodError: Approval delivery failed. The PR has an external disposition without a confirmed daemon merge. Reconcile it before publishing retained source. Original resources retained; repair delivery and retry approval.
+ ❯ failDelivery src/pods/pod-manager.ts:11949:15
+    11947|         assertApprovalCurrent({ ...pod, status: 'validated' });
+    11948|         emitActivityError(podId, reason, false);
+    11949|         throw new AutopodError(reason, 'APPROVAL_DELIVERY_FAILED', 502…
+       |               ^
+    11950|       };
+    11951|
+ ❯ Object.approveSession src/pods/pod-manager.ts:12009:13
+ ❯ src/pods/pod-manager.test.ts:5028:34
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 1 passed | 518 skipped (520)
+   Start at  07:16:41
+   Duration  1.42s (transform 821ms, setup 0ms, import 1.17s, tests 139ms, environment 0ms)
+
