@@ -57,7 +57,7 @@ function input() {
   };
 }
 
-it('accepts one exact report-only sandbox request and rejects broader activation', () => {
+it('accepts one exact bounded input and rejects broader activation', () => {
   const { f, value } = input();
   try {
     const parsed = parseManagedAcceptanceConfig(JSON.stringify(value));
@@ -74,6 +74,19 @@ it('accepts one exact report-only sandbox request and rejects broader activation
       },
     ];
     resign(inputRequest);
+    const secondInputRequest = structuredClone(inputRequest);
+    secondInputRequest.inputArtifacts.push({
+      name: 'other',
+      backendArtifactId: 'other-artifact',
+      manifestSha256: `sha256:${'c'.repeat(64)}`,
+      mountPath: '/inputs/other',
+      access: 'read',
+    });
+    resign(secondInputRequest);
+    expect(
+      parseManagedAcceptanceConfig(JSON.stringify({ ...value, request: inputRequest }))?.request
+        .inputArtifacts,
+    ).toEqual(inputRequest.inputArtifacts);
     const broadArtifactRequest = structuredClone(value.request);
     broadArtifactRequest.outputs.artifacts.limits.maxTotalBytes = 32 * 1024;
     resign(broadArtifactRequest);
@@ -82,13 +95,145 @@ it('accepts one exact report-only sandbox request and rejects broader activation
       { ...value, token: 'secret' },
       { ...value, image: 'registry.example/autopod/self:latest' },
       { ...value, mirror: { ...value.mirror, path: 'relative' } },
-      { ...value, request: inputRequest },
+      { ...value, request: secondInputRequest },
       { ...value, request: broadArtifactRequest },
     ]) {
       expect(() => parseManagedAcceptanceConfig(JSON.stringify(changed))).toThrow(
         'managed-acceptance-config-invalid',
       );
     }
+  } finally {
+    f.close();
+  }
+});
+
+it('requires the reviewed input to be a small committed artifact owned by the installation', () => {
+  const { f, value } = input();
+  try {
+    const request = structuredClone(value.request);
+    request.inputArtifacts = [
+      {
+        name: 'research',
+        backendArtifactId: 'artifact-one',
+        manifestSha256: `sha256:${'b'.repeat(64)}`,
+        mountPath: '/inputs/research',
+        access: 'read',
+      },
+    ];
+    resign(request);
+    const reviewedInput = request.inputArtifacts[0];
+    if (!reviewedInput) throw new Error('expected-input');
+    const config = parseManagedAcceptanceConfig(JSON.stringify({ ...value, request }));
+    if (!config) throw new Error('expected-config');
+    const manager = {
+      ensureManagedContainer: async () => 'sandbox',
+      extractManagedOutput: async () => {},
+    } as never;
+    const dependencies = {
+      db: f.db,
+      databasePath: '/data/autopod/autopod.db',
+      manager,
+      providerAccounts: {
+        get: () => ({
+          id: request.route.providerAccountId,
+          name: 'fixture',
+          provider: 'openai',
+          credentials: {
+            provider: 'openai',
+            authMode: 'chatgpt',
+            authJson: JSON.stringify({
+              auth_mode: 'chatgpt',
+              tokens: { access_token: 'fixture-token', account_id: 'chatgpt-account' },
+            }),
+          },
+          failoverPolicy: null,
+          createdAt: '',
+          updatedAt: '',
+          lastAuthenticatedAt: null,
+          lastUsedAt: null,
+        }),
+      } as never,
+    };
+    expect(() => composeManagedAcceptance(config, cli, dependencies)).toThrow(
+      'managed-acceptance-input-invalid',
+    );
+
+    const upstream = f.request;
+    f.db
+      .prepare(
+        `INSERT INTO managed_pods (
+          pod_id,dispatcher_installation_id,dispatcher_attempt_id,managed_start_key,
+          execution_spec_digest,profile_snapshot_digest,grant_id,grant_revision,
+          effective_grant_digest,request_json,handle_json,state,revoked,stop_requested,
+          observed_exit,cleanup,created_at
+        ) VALUES (?,?,?,?,?,?,?,?,?,?,?,'complete',0,0,1,'observed',?)`,
+      )
+      .run(
+        'managed-upstream',
+        config.installationId,
+        upstream.dispatcherAttemptId,
+        upstream.startKey,
+        upstream.executionSpecDigest,
+        upstream.profileSnapshot.snapshotDigest,
+        upstream.effectiveGrant.grantId,
+        upstream.effectiveGrant.revision,
+        upstream.effectiveGrant.digest,
+        canonical(upstream),
+        '{}',
+        100,
+      );
+    f.db
+      .prepare(
+        `INSERT INTO artifact_exports (
+          artifact_id,pod_id,dispatcher_attempt_id,execution_spec_digest,status,
+          manifest_json,manifest_sha256,bundle_sha256,bundle_bytes,blob_manifest_name,
+          blob_bundle_name,file_count,total_bytes,error_code,error_detail,created_at,
+          committed_at,receipt_json
+        ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+      )
+      .run(
+        'artifact-one',
+        'managed-upstream',
+        upstream.dispatcherAttemptId,
+        upstream.executionSpecDigest,
+        'committed',
+        '{}',
+        reviewedInput.manifestSha256,
+        `sha256:${'a'.repeat(64)}`,
+        Buffer.from('bundle'),
+        'managed-pods/managed-upstream/artifact-one/manifest.json',
+        'managed-pods/managed-upstream/artifact-one/bundle.tar.gz',
+        1,
+        1,
+        null,
+        null,
+        100,
+        100,
+        '{}',
+      );
+    const runtime = composeManagedAcceptance(config, cli, dependencies);
+    expect(runtime.components.service.health().enabled).toBe(true);
+    runtime.close();
+
+    f.db.prepare('UPDATE managed_pods SET dispatcher_installation_id=?').run('other-installation');
+    expect(() => composeManagedAcceptance(config, cli, dependencies)).toThrow(
+      'managed-acceptance-input-invalid',
+    );
+    f.db.prepare('UPDATE managed_pods SET dispatcher_installation_id=?').run(config.installationId);
+    f.db.prepare('UPDATE artifact_exports SET manifest_sha256=?').run(`sha256:${'0'.repeat(64)}`);
+    expect(() => composeManagedAcceptance(config, cli, dependencies)).toThrow(
+      'managed-acceptance-input-invalid',
+    );
+    f.db
+      .prepare('UPDATE artifact_exports SET manifest_sha256=?,file_count=2')
+      .run(reviewedInput.manifestSha256);
+    expect(() => composeManagedAcceptance(config, cli, dependencies)).toThrow(
+      'managed-acceptance-input-invalid',
+    );
+    f.db.prepare('UPDATE artifact_exports SET file_count=1,total_bytes=?').run(16 * 1024 + 1);
+    expect(() => composeManagedAcceptance(config, cli, dependencies)).toThrow(
+      'managed-acceptance-input-invalid',
+    );
   } finally {
     f.close();
   }
