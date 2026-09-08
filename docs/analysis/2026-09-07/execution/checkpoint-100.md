@@ -11,3 +11,5 @@ CLI uses the actual HTTP client to verify saving a nudge and pending-receipt wor
 The final accessibility check replaced the notice div with a semantic block output; its mobile interaction tests passed again. Required clean full validation follows. Next: normal attached ask_human response loss still bypasses queued guidance, durable cleanup/reconciliation ownership, remaining retained metrics/denominators, final matched benchmark and release/rollback packet. All six workstreams remain tracked; required native/live/backup/sandbox acceptance remains unverified.
 
 Text receipts have trailing whitespace normalized; raw receipts remain in /private/tmp.
+
+The initial clean pipeline on bd4c78047af595c0ad63be4809364e23b308475d passed build, configured typechecks, tests (5369 daemon passed, one existing skip), dependency audit and secret scan. Lint found three formatter errors in the acceptance ledger and MCP test files. Those formatting-only fixes are applied; the initial run and expanded diagnostics are retained before a complete rerun.

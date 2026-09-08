@@ -275,12 +275,10 @@ describe('operator-message interlock', () => {
     ]) {
       toolRegistrations.length = 0;
       const bridge = makeBridge({
-        readOperatorGuidance: vi
-          .fn()
-          .mockReturnValue({
-            deliveryId: '00000000-0000-4000-8000-000000000001',
-            messages: ['first', 'second'],
-          }),
+        readOperatorGuidance: vi.fn().mockReturnValue({
+          deliveryId: '00000000-0000-4000-8000-000000000001',
+          messages: ['first', 'second'],
+        }),
       });
       createEscalationMcpServer({ podId: 'sess-1', bridge });
       const inputs: Record<string, unknown> = {

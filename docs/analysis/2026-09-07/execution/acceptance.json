@@ -1279,9 +1279,7 @@
       "status": "unverified",
       "implementation": [],
       "tests": [],
-      "evidence": [
-        "checkpoint-93.md"
-      ],
+      "evidence": ["checkpoint-93.md"],
       "prerequisites": [
         "Prepare exact sandbox image, resource/configuration identity, commands, success/failure oracle and estimated spend; obtain explicit canary authorization and record the actual result."
       ]
@@ -1507,12 +1505,8 @@
       "id": "W4.5",
       "requirement": "Live broad history/cost API root cause proven before claiming production repair",
       "status": "unverified",
-      "implementation": [
-        "packages/daemon/src/pods/throughput-aggregator.ts"
-      ],
-      "tests": [
-        "packages/daemon/src/pods/throughput-aggregator.test.ts"
-      ],
+      "implementation": ["packages/daemon/src/pods/throughput-aggregator.ts"],
+      "tests": ["packages/daemon/src/pods/throughput-aggregator.test.ts"],
       "evidence": [
         "receipts/live-api-baseline.jsonl",
         "receipts/live-vm-inspection-failed.json",
@@ -2165,9 +2159,7 @@
         "packages/daemon/src/db/reconcile-native-checkpoint.ts",
         "packages/daemon/src/db/reconcile-native-checkpoint-cli.ts"
       ],
-      "tests": [
-        "packages/daemon/src/db/reconcile-native-checkpoint.test.ts"
-      ],
+      "tests": ["packages/daemon/src/db/reconcile-native-checkpoint.test.ts"],
       "evidence": [
         "checkpoint-48.md: current tracking-branch migration collision reproduced and resolved with byte-preserving native renumbering, managed upgrade tests and copy-only checkpoint reconciliation; production acceptance remains unverified",
         "receipts/checkpoint-48-full-validation.txt",
@@ -2512,9 +2504,7 @@
       "status": "unverified",
       "implementation": [],
       "tests": [],
-      "evidence": [
-        "checkpoint-93.md"
-      ],
+      "evidence": ["checkpoint-93.md"],
       "prerequisites": [
         "After remaining local implementation, freeze the candidate diff and exact source/image/target identities; prepare release/rollback steps, backup safeguards, bounded canary scope and estimated spend before asking for publication/deployment/canary authority."
       ]
@@ -2525,9 +2515,7 @@
       "status": "unverified",
       "implementation": [],
       "tests": [],
-      "evidence": [
-        "checkpoint-93.md"
-      ],
+      "evidence": ["checkpoint-93.md"],
       "prerequisites": [
         "Finish independent local work, reconcile every criterion with final-source receipts and unresolved external prerequisites, then produce the closure report. The goal remains incomplete while required native/live acceptance is unverified."
       ]

@@ -459,12 +459,10 @@ describe('checkMessages', () => {
 
   it('returns JSON with hasMessage true and message content when queued', async () => {
     const bridge = makeBridge({
-      readOperatorGuidance: vi
-        .fn()
-        .mockReturnValue({
-          deliveryId: '00000000-0000-4000-8000-000000000001',
-          messages: ['please stop'],
-        }),
+      readOperatorGuidance: vi.fn().mockReturnValue({
+        deliveryId: '00000000-0000-4000-8000-000000000001',
+        messages: ['please stop'],
+      }),
     });
 
     const result = await checkMessages('sess-1', bridge);
