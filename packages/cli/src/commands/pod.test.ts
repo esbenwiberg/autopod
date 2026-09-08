@@ -1370,3 +1370,42 @@ it.each([false, true])(
     }
   },
 );
+
+it('shows a retained recovery hint through actual status HTTP without implying worker settlement', async () => {
+  const note =
+    'Recovery paused: task execution or cleanup ownership remains unresolved. Source and resources are retained.';
+  const pod = {
+    ...(await createMockClient().getSession('abcd1234')),
+    status: 'running',
+    lastRecoveryTrigger: 'restart',
+    lastCorrectionMessage: note,
+  };
+  const requests: string[] = [];
+  const server = createServer((req, res) => {
+    requests.push(`${req.method} ${req.url}`);
+    res.setHeader('Content-Type', 'application/json');
+    if (req.url === '/pods/abcd1234') res.end(JSON.stringify(pod));
+    else {
+      res.statusCode = 503;
+      res.end('{}');
+    }
+  });
+  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+  const address = server.address();
+  if (!address || typeof address === 'string') throw new Error('Missing port');
+  const client = new AutopodClient({
+    baseUrl: `http://127.0.0.1:${address.port}`,
+    getToken: async () => 'synthetic',
+  });
+  const output = vi.spyOn(console, 'log').mockImplementation(() => {});
+  try {
+    const program = new Command();
+    registerPodCommands(program, () => client);
+    await program.parseAsync(['node', 'ap', 'status', 'abcd1234']);
+    expect(output.mock.calls.flat().join('\n')).toContain(note);
+    expect(requests.every((r) => r.startsWith('GET '))).toBe(true);
+  } finally {
+    output.mockRestore();
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+  }
+});

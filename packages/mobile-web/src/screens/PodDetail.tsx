@@ -95,6 +95,7 @@ export function PodDetail(): JSX.Element {
   }
 
   const data = pod;
+  const recoveryNote = data.lastRecoveryTrigger ? data.lastCorrectionMessage : null;
   const recoveryReason =
     data.status === 'merge_pending'
       ? data.mergeBlockReason
@@ -114,10 +115,11 @@ export function PodDetail(): JSX.Element {
         {data.profileName} · {data.runtime} · {data.model}
       </p>
 
-      {recoveryReason ? (
+      {recoveryReason || recoveryNote ? (
         <section className="info-panel" aria-label="Recovery details">
           <h2>Recovery details</h2>
-          <p>{recoveryReason}</p>
+          {recoveryReason && <p>{recoveryReason}</p>}
+          {recoveryNote && recoveryNote !== recoveryReason && <p>{recoveryNote}</p>}
         </section>
       ) : null}
       {data.recordDiagnostics?.length ? (

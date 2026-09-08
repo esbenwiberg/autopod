@@ -94,3 +94,60 @@ it.each([
     }
   },
 );
+
+it.each(['running', 'killing'] as const)(
+  'shows the saved unresolved recovery hint without changing %s or launching work',
+  async (status) => {
+    const note =
+      'Recovery paused: task execution or cleanup ownership remains unresolved. Source and resources are retained.';
+    const pod = {
+      id: 'retained',
+      task: 'Preserve original task',
+      profileName: 'fixture',
+      runtime: 'copilot',
+      model: 'fixture',
+      status,
+      lastRecoveryTrigger: 'restart',
+      lastCorrectionMessage: note,
+      options: { agentMode: 'auto', output: 'pr', validate: true },
+      pendingEscalation: null,
+      lastValidationResult: null,
+    } as Pod;
+    const initial = usePodsStore.getState();
+    usePodsStore.setState({ pods: [pod] });
+    const fetch = vi
+      .spyOn(globalThis, 'fetch')
+      .mockImplementation(async (url) =>
+        String(url).endsWith('/pods/retained')
+          ? new Response(JSON.stringify(pod))
+          : String(url).endsWith('/validations') || String(url).includes('/events')
+            ? new Response('[]')
+            : new Response('{}', { status: 503 }),
+      );
+    const container = document.createElement('div');
+    document.body.append(container);
+    const root = createRoot(container);
+    try {
+      await act(async () =>
+        root.render(
+          <MemoryRouter initialEntries={['/pods/retained']}>
+            <Routes>
+              <Route path="/pods/:id" element={<PodDetail />} />
+            </Routes>
+          </MemoryRouter>,
+        ),
+      );
+      expect(container.textContent).toContain(note);
+      expect(container.textContent).toContain('Preserve original task');
+      expect(usePodsStore.getState().pods[0]?.status).toBe(status);
+      expect(
+        fetch.mock.calls.every(([, options]) => !options?.method || options.method === 'GET'),
+      ).toBe(true);
+    } finally {
+      act(() => root.unmount());
+      container.remove();
+      fetch.mockRestore();
+      usePodsStore.setState(initial);
+    }
+  },
+);

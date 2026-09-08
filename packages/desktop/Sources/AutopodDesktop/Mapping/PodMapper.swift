@@ -78,6 +78,17 @@ public enum PodMapper {
       advisoryBrowserQaEnabled: response.options.advisoryBrowserQaEnabled,
       promotable: response.options.promotable
     )
+    let recoveryNote: String? = response.lastRecoveryTrigger != nil ? response.lastCorrectionMessage : nil
+    let evidenceDiagnostic: String? = response.recordDiagnostics.flatMap { records in
+      records.isEmpty ? nil : "Saved evidence unavailable in this view: " + records.map { "\($0.field) (\($0.code))" }.joined(separator: ", ")
+    }
+    let latestActivity: String? = recoveryNote
+      ?? response.finalization?.operatorSummary
+      ?? evidenceDiagnostic
+      ?? response.progressSummary
+      ?? response.lastCorrectionMessage
+      ?? response.mergeBlockReason
+      ?? response.failureReason
     return Pod(
       id: response.id,
       status: PodStatus(rawValue: response.status) ?? .queued,
@@ -101,12 +112,7 @@ public enum PodMapper {
       escalationQuestion: response.pendingEscalationSummary,
       containerUrl: response.previewUrl.flatMap(URL.init(string:)),
       hasWebUi: response.hasWebUi,
-      latestActivity: response.finalization?.operatorSummary
-        ?? response.recordDiagnostics.flatMap { $0.isEmpty ? nil : "Saved evidence unavailable in this view: " + $0.map { "\($0.field) (\($0.code))" }.joined(separator: ", ") }
-        ?? response.progressSummary
-        ?? response.lastCorrectionMessage
-        ?? response.mergeBlockReason
-        ?? response.failureReason,
+      latestActivity: latestActivity,
       errorSummary: response.failureReason,
       inputTokens: response.inputTokens ?? 0,
       outputTokens: response.outputTokens ?? 0,
@@ -454,7 +460,8 @@ public enum PodMapper {
     let evidenceDiagnostic: String? = response.recordDiagnostics.flatMap { records in
       records.isEmpty ? nil : "Saved evidence unavailable in this view: " + records.map { "\($0.field) (\($0.code))" }.joined(separator: ", ")
     }
-    let latestActivity: String? = evidenceDiagnostic
+    let latestActivity: String? = (response.lastRecoveryTrigger != nil ? response.lastCorrectionMessage : nil)
+      ?? evidenceDiagnostic
       ?? response.finalization?.operatorSummary
       ?? response.failureReason
       ?? response.mergeBlockReason

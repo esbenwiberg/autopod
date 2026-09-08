@@ -97,6 +97,7 @@ public struct CompactPodResponse: Codable, Sendable {
   public let failureReason: String?
   public let mergeBlockReason: String?
   public let lastCorrectionMessage: String?
+  public let lastRecoveryTrigger: String?
   public let pendingEscalationSummary: String?
   public let progressSummary: String?
   public let inputTokens: Int?
@@ -202,6 +203,7 @@ public struct SessionResponse: Codable, Sendable {
   public let linkedSessionId: String?
   public let taskSummary: TaskSummaryResponse?
   public let lastCorrectionMessage: String?
+  public let lastRecoveryTrigger: String?
   public let profileSnapshot: ProfileResponse?
   // Series fields (optional for back-compat with pre-#88 responses).
   public let dependsOnPodId: String?
@@ -274,7 +276,7 @@ public struct SessionResponse: Codable, Sendable {
     case pod = "options"
     case baseBranch, recoveryWorktreePath, lastHeartbeatAt
     case inputTokens, outputTokens, costUsd, tokenTelemetryAccuracy, commitCount, lastCommitAt
-    case linkedPodId, linkedSessionId, taskSummary, lastCorrectionMessage, profileSnapshot
+    case linkedPodId, linkedSessionId, taskSummary, lastCorrectionMessage, lastRecoveryTrigger, profileSnapshot
     case dependsOnPodId, dependsOnPodIds, seriesId, seriesName, seriesDescription, seriesDesign, dependencyStartedAt
     case artifactsPath
     case requireSidecars, sidecarContainerIds, testRunBranches

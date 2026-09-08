@@ -8,6 +8,7 @@ import {
 } from './artifact-finalization-recovery.js';
 import type { EventBus } from './event-bus.js';
 import type { PodRepository } from './pod-repository.js';
+import { retainUnresolvedReconciliation } from './reconciliation-ownership.js';
 import type { ValidationRepository } from './validation-repository.js';
 
 export type ReconcileTrigger = 'restart' | 'wake';
@@ -64,11 +65,18 @@ export async function reconcileLocalSessions(
     'handoff',
   ] as const;
 
+  const visited = new Set<string>();
   for (const status of orphanStatuses) {
     const pods = podRepo.list({ status });
     const localSessions = pods.filter((s) => s.executionTarget === 'local');
 
     for (const pod of localSessions) {
+      if (visited.has(pod.id)) continue;
+      visited.add(pod.id);
+      if (retainUnresolvedReconciliation(pod.id, podRepo, deps.trigger)) {
+        result.skipped.push(pod.id);
+        continue;
+      }
       try {
         const current = podRepo.getOrThrow(pod.id);
         if (current.status !== status || current.executionTarget !== 'local') continue;

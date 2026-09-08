@@ -56,6 +56,7 @@ export const COMPACT_POD_COLUMNS = [
   'lines_added',
   'lines_removed',
   'lifecycle_generation',
+  'last_recovery_trigger',
   'validation_attempts',
   'substr(CAST(task AS TEXT), 1, 2000) AS task',
   'substr(brief_title, 1, 160) AS brief_title',

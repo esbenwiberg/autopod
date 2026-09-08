@@ -1,0 +1,69 @@
+
+ RUN  v4.1.11 /private/tmp/autopod-durable-execution/packages/daemon
+
+ ❯ src/pods/local-reconciler.test.ts (34 tests | 2 failed | 32 skipped) 126ms
+     × retains unresolved worker ownership during actual restart reconciliation 78ms
+     × retains unresolved deletion ownership during actual restart reconciliation 48ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 2 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/pods/local-reconciler.test.ts > reconcileLocalSessions > retains unresolved worker ownership during actual restart reconciliation
+AssertionError: expected { recovered: [ …(2) ], …(2) } to deeply equal { recovered: [], killed: [], …(1) }
+
+- Expected
++ Received
+
+  {
+    "killed": [],
+-   "recovered": [],
+-   "skipped": [
++   "recovered": [
++     "owned-restart",
+      "owned-restart",
+    ],
++   "skipped": [],
+  }
+
+ ❯ src/pods/local-reconciler.test.ts:170:22
+    168|       const before = podRepo.getOrThrow('owned-restart');
+    169|       const result = await reconcileLocalSessions(deps);
+    170|       expect(result).toEqual({ recovered: [], killed: [], skipped: ['o…
+       |                      ^
+    171|       expect(containerManager.kill).not.toHaveBeenCalled();
+    172|       expect(cleanupPodResources).not.toHaveBeenCalled();
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/2]⎯
+
+ FAIL  src/pods/local-reconciler.test.ts > reconcileLocalSessions > retains unresolved deletion ownership during actual restart reconciliation
+AssertionError: expected { recovered: [], …(2) } to deeply equal { recovered: [], killed: [], …(1) }
+
+- Expected
++ Received
+
+  {
+-   "killed": [],
+-   "recovered": [],
+-   "skipped": [
++   "killed": [
+      "owned-restart",
+    ],
++   "recovered": [],
++   "skipped": [],
+  }
+
+ ❯ src/pods/local-reconciler.test.ts:170:22
+    168|       const before = podRepo.getOrThrow('owned-restart');
+    169|       const result = await reconcileLocalSessions(deps);
+    170|       expect(result).toEqual({ recovered: [], killed: [], skipped: ['o…
+       |                      ^
+    171|       expect(containerManager.kill).not.toHaveBeenCalled();
+    172|       expect(cleanupPodResources).not.toHaveBeenCalled();
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/2]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  2 failed | 32 skipped (34)
+   Start at  22:46:55
+   Duration  470ms (transform 164ms, setup 0ms, import 244ms, tests 126ms, environment 0ms)
+

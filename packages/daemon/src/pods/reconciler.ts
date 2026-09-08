@@ -8,6 +8,7 @@ import {
 } from './artifact-finalization-recovery.js';
 import type { EventBus } from './event-bus.js';
 import type { PodRepository } from './pod-repository.js';
+import { retainUnresolvedReconciliation } from './reconciliation-ownership.js';
 
 export interface ReconcilerDependencies {
   podRepo: PodRepository;
@@ -57,6 +58,7 @@ export async function reconcileSandboxSessions(deps: ReconcilerDependencies): Pr
   logger.info({ count: sandboxSessions.length }, 'Reconciling sandbox pods');
 
   for (const pod of sandboxSessions) {
+    if (retainUnresolvedReconciliation(pod.id, podRepo)) continue;
     try {
       await reconcileSession(pod, deps);
     } catch (err) {

@@ -703,6 +703,7 @@ export interface CompactPod {
   failureReason: string | null;
   mergeBlockReason: string | null;
   lastCorrectionMessage: string | null;
+  lastRecoveryTrigger?: 'wake' | 'restart' | null;
   pendingEscalationSummary: string | null;
   progressSummary: string | null;
   inputTokens: number;

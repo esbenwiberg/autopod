@@ -277,6 +277,19 @@ if (guidanceReceiptFixture)
     failureReason: null,
     task: '[Local fixture] Save guidance pending worker receipt',
   };
+if (process.env.FIXTURE_MODE === 'reconciliation-ownership') {
+  pod = {
+    ...pod,
+    runtime: 'copilot',
+    status: 'running',
+    pendingEscalation: null,
+    finalization: null,
+    task: '[Local fixture] Preserve unresolved restart ownership',
+    lastRecoveryTrigger: 'restart',
+    lastCorrectionMessage:
+      'Recovery paused: task execution or cleanup ownership remains unresolved. Source and resources are retained. Verify the original execution/resource identity and observed termination before retrying; restart or elapsed time is not proof.',
+  };
+}
 const workerDeadlineFixture = process.env.FIXTURE_MODE === 'worker-deadline';
 const workerTransientFixture =
   process.env.FIXTURE_MODE === 'worker-transient' || workerDeadlineFixture;

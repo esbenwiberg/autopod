@@ -794,6 +794,8 @@ export function registerPodCommands(program: Command, getClient: () => AutopodCl
       console.log(`${chalk.bold('Profile:')}      ${s.profileName}`);
       console.log(`${chalk.bold('Status:')}       ${formatStatus(s.status)}`);
       if (s.failureReason) console.log(`${chalk.bold('Failure:')} ${s.failureReason}`);
+      if (s.lastRecoveryTrigger && s.lastCorrectionMessage)
+        console.log(`${chalk.bold('Recovery note:')} ${s.lastCorrectionMessage}`);
       if (s.taskExecution) {
         const task = s.taskExecution;
         console.log(`${chalk.bold('Logical task:')} ${task.taskId} (${task.podCount} pods)`);

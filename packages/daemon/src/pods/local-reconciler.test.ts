@@ -134,6 +134,54 @@ function makeFailingValidationResult(podId: string, attempt = 1): ValidationResu
 }
 
 describe('reconcileLocalSessions', () => {
+  it.each(['worker', 'deletion'] as const)(
+    'retains unresolved %s ownership during actual restart reconciliation',
+    async (kind) => {
+      const { deps, podRepo, containerManager, cleanupPodResources, enqueuedSessions } =
+        createReconcilerDeps();
+      mockedAccess.mockResolvedValue(undefined);
+      podRepo.insert({
+        id: 'owned-restart',
+        profileName: 'test-profile',
+        task: 'Retain unresolved owner',
+        status: kind === 'deletion' ? 'killing' : 'running',
+        model: 'model',
+        runtime: 'copilot',
+        executionTarget: 'local',
+        branch: 'retained',
+        userId: 'operator',
+        maxValidationAttempts: 3,
+        skipValidation: false,
+        outputMode: 'pr',
+      });
+      podRepo.update('owned-restart', {
+        containerId: 'original-container',
+        worktreePath: '/tmp/retained-work',
+      });
+      if (kind === 'worker')
+        podRepo.taskExecutions?.beginRun('owned-restart', 1, 1, {
+          runtime: 'copilot',
+          model: 'model',
+          providerAccountId: null,
+        });
+      else podRepo.deletionOwnership?.acquire('owned-restart', 'configuration');
+      const before = podRepo.getOrThrow('owned-restart');
+      const result = await reconcileLocalSessions(deps);
+      expect(result).toEqual({ recovered: [], killed: [], skipped: ['owned-restart'] });
+      expect(containerManager.kill).not.toHaveBeenCalled();
+      expect(cleanupPodResources).not.toHaveBeenCalled();
+      expect(enqueuedSessions).toEqual([]);
+      const after = podRepo.getOrThrow('owned-restart');
+      expect(after).toMatchObject({
+        status: before.status,
+        containerId: before.containerId,
+        worktreePath: before.worktreePath,
+        lifecycleGeneration: before.lifecycleGeneration,
+      });
+      expect(after.lastCorrectionMessage).toContain('ownership remains unresolved');
+    },
+  );
+
   it.each([false, true])(
     'retains interrupted artifact collection after restart (published=%s)',
     async (published) => {
@@ -350,7 +398,8 @@ describe('reconcileLocalSessions', () => {
 
     const result = await reconcileLocalSessions(deps);
 
-    expect(result.recovered).toContain('ses-1');
+    expect(result.recovered).toEqual(['ses-1']);
+    expect(enqueuedSessions).toEqual(['ses-1']);
     expect(result.killed).not.toContain('ses-1');
 
     // Pod should be re-queued with counter reset

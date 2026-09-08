@@ -177,6 +177,7 @@ function compactPod(
     failureReason: compactText(pod.failureReason),
     mergeBlockReason: compactText(pod.mergeBlockReason),
     lastCorrectionMessage: compactText(pod.lastCorrectionMessage),
+    lastRecoveryTrigger: pod.lastRecoveryTrigger,
     pendingEscalationSummary: compactText(pod.pendingEscalation?.question),
     progressSummary: reviewProgress
       ? reviewProgressSummary(reviewProgress)

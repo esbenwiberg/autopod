@@ -37,6 +37,8 @@ import AutopodUI
     "profileName": "my-app",
     "task": "Add OAuth login",
     "status": "running",
+    "lastRecoveryTrigger": "restart",
+    "lastCorrectionMessage": "Recovery paused: task execution ownership remains unresolved.",
     "model": "opus",
     "runtime": "claude",
     "executionTarget": "local",
@@ -87,6 +89,8 @@ import AutopodUI
 
   #expect(pod.id == "feat-oauth-a1b2")
   #expect(pod.status == .running)
+  #expect(pod.latestActivity == "Recovery paused: task execution ownership remains unresolved.")
+  #expect(pod.plan?.summary == "Add OAuth flow")
   #expect(pod.outputMode == .pr)
   #expect(pod.branch == "feat/oauth")
   #expect(pod.task == "Add OAuth login")
