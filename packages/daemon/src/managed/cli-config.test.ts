@@ -30,7 +30,7 @@ it('startup remains absent by default; explicit config is strict and forbids dev
   );
   expect(() => parseManagedCliConfig('secret', false)).toThrow('managed-cli-config-invalid');
 });
-it('executable dark composition cannot start or replace a runtime for existing managed attempts', async () => {
+it('dark composition permits terminal history but cannot replace a live runtime', async () => {
   const f = fixture();
   try {
     const config = parseManagedCliConfig(JSON.stringify(input), false);
@@ -43,13 +43,17 @@ it('executable dark composition cannot start or replace a runtime for existing m
       'disabled',
     );
     expect(f.launches()).toBe(0);
-    const old = f.db.prepare.bind(f.db);
-    f.db.prepare = ((sql: string) =>
-      sql === 'SELECT COUNT(*) AS n FROM managed_pods'
-        ? { get: () => ({ n: 1 }) }
-        : old(sql)) as typeof f.db.prepare;
+    await expect(
+      f.service().start('installation-one', f.request, 'after-reservation'),
+    ).rejects.toThrow('injected-after-reservation');
     expect(() => composeDarkManagedCli(config, f.db, '/data/autopod/autopod.db')).toThrow(
       'runtime-composition-required',
+    );
+    f.db
+      .prepare("UPDATE managed_pods SET revoked=1,stop_requested=1,observed_exit=1,state='killed'")
+      .run();
+    expect(composeDarkManagedCli(config, f.db, '/data/autopod/autopod.db')?.config.enabled).toBe(
+      false,
     );
   } finally {
     f.close();

@@ -18,52 +18,59 @@ export interface SourceEnrollment {
   /** Trusted isolated Git repository per pod; never the user's ordinary checkout. */
   workspace(podId: string): string;
 }
+export function managedGitArguments(
+  cwd: string,
+  trustedDirectories: readonly string[] = [],
+): string[] {
+  for (const directory of trustedDirectories)
+    if (!path.isAbsolute(directory) || /[\0\r\n*]/.test(directory))
+      throw new Error('managed-git-safe-directory-invalid');
+  const safeDirectories = [
+    path.resolve(cwd),
+    ...trustedDirectories.map((item) => path.resolve(item)),
+  ];
+  return [
+    '--no-pager',
+    ...[...new Set(safeDirectories)].flatMap((directory) => ['-c', `safe.directory=${directory}`]),
+    '-c',
+    'core.hooksPath=/dev/null',
+    '-c',
+    'core.fsmonitor=false',
+    '-c',
+    'credential.helper=',
+    '-c',
+    'protocol.ext.allow=never',
+    '-c',
+    'http.followRedirects=false',
+  ];
+}
 export async function managedGit(
   cwd: string,
   args: string[],
   credential?: { url: string; token: string },
+  trustedDirectories: readonly string[] = [],
 ): Promise<string> {
   try {
-    const result = await exec(
-      'git',
-      [
-        '--no-pager',
-        // Only this trusted per-attempt checkout may be owned by the worker UID.
-        '-c',
-        `safe.directory=${path.resolve(cwd)}`,
-        '-c',
-        'core.hooksPath=/dev/null',
-        '-c',
-        'core.fsmonitor=false',
-        '-c',
-        'credential.helper=',
-        '-c',
-        'protocol.ext.allow=never',
-        '-c',
-        'http.followRedirects=false',
-        ...args,
-      ],
-      {
-        cwd,
-        maxBuffer: MAX_CANDIDATE_BYTES,
-        timeout: 60000,
-        env: {
-          PATH: process.env.PATH,
-          HOME: '/nonexistent',
-          GIT_CONFIG_NOSYSTEM: '1',
-          GIT_CONFIG_GLOBAL: '/dev/null',
-          GIT_TERMINAL_PROMPT: '0',
-          GIT_NO_REPLACE_OBJECTS: '1',
-          ...(credential
-            ? {
-                GIT_CONFIG_COUNT: '1',
-                GIT_CONFIG_KEY_0: `http.${credential.url}.extraHeader`,
-                GIT_CONFIG_VALUE_0: `Authorization: Bearer ${credential.token}`,
-              }
-            : {}),
-        },
+    const result = await exec('git', [...managedGitArguments(cwd, trustedDirectories), ...args], {
+      cwd,
+      maxBuffer: MAX_CANDIDATE_BYTES,
+      timeout: 60000,
+      env: {
+        PATH: process.env.PATH,
+        HOME: '/nonexistent',
+        GIT_CONFIG_NOSYSTEM: '1',
+        GIT_CONFIG_GLOBAL: '/dev/null',
+        GIT_TERMINAL_PROMPT: '0',
+        GIT_NO_REPLACE_OBJECTS: '1',
+        ...(credential
+          ? {
+              GIT_CONFIG_COUNT: '1',
+              GIT_CONFIG_KEY_0: `http.${credential.url}.extraHeader`,
+              GIT_CONFIG_VALUE_0: `Authorization: Bearer ${credential.token}`,
+            }
+          : {}),
       },
-    );
+    });
     return result.stdout.trim();
   } catch {
     throw new Error('managed-git-operation-failed');
