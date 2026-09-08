@@ -44,8 +44,13 @@ export function composeDarkManagedCli(
   databasePath: string,
 ) {
   if (!config) return undefined;
-  // This initial composition cannot replace a real runtime for existing delegated attempts.
-  const count = db.prepare('SELECT COUNT(*) AS n FROM managed_pods').get() as { n: number };
+  // Dark composition may serve durable history that has no remaining runtime work, but cannot
+  // replace a runtime that still requires observation, stopping, verification, or cleanup.
+  const count = db
+    .prepare(
+      "SELECT COUNT(*) AS n FROM managed_pods WHERE observed_exit=0 OR (runtime_ref IS NOT NULL AND cleanup<>'observed')",
+    )
+    .get() as { n: number };
   if (count.n !== 0) throw new Error('managed-cli-runtime-composition-required');
   const unavailable = async (): Promise<never> => {
     throw new Error('managed-runtime-not-configured');
