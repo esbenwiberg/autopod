@@ -260,7 +260,9 @@
         "checkpoint-44.md: journal-aware polling and cross-generation admission guards; legacy unjournaled polling, complete cleanup and operator acceptance remain partial",
         "receipts/checkpoint-44-full-validation.txt",
         "receipts/checkpoint-44-validation-identity.json",
-        "checkpoint-45.md: planned delivery before review, removal of unbound polling, explicit validation recovery and mobile recovery notice; external dispositions and broader acceptance remain partial"
+        "checkpoint-45.md: planned delivery before review, removal of unbound polling, explicit validation recovery and mobile recovery notice; external dispositions and broader acceptance remain partial",
+        "receipts/checkpoint-45-full-validation.txt",
+        "receipts/checkpoint-45-validation-identity.json"
       ],
       "prerequisites": [
         "PR creation intent/reconciliation implemented locally; broader finalization side effects and operator override remain."
