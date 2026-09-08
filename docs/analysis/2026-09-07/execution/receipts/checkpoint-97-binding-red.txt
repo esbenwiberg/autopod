@@ -1,0 +1,40 @@
+
+ RUN  v4.1.11 /private/tmp/autopod-durable-execution/packages/daemon
+
+ ❯ src/pods/pod-manager.test.ts (625 tests | 1 failed | 624 skipped) 166ms
+     × admits the explicitly selected profile primary after a recorded fallback authentication failure 165ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/pods/pod-manager.test.ts > PodManager > admits the explicitly selected profile primary after a recorded fallback authentication failure
+AssertionError: promise rejected "AutopodError: worker provider binding cha… { …(2) }" instead of resolving
+ ❯ src/pods/pod-manager.test.ts:4929:7
+    4927|           })(),
+    4928|         ),
+    4929|       ).resolves.toBe('completed');
+       |       ^
+    4930|       expect(pulled).toBe(true);
+    4931|       expect(ctx.podRepo.workerRetries?.state(pod.id).authorizations).…
+
+Caused by: AutopodError: worker provider binding changed; explicitly reconcile the authorized provider before retrying
+ ❯ evaluate src/pods/task-retry-ledger.ts:226:15
+ ❯ Object.<anonymous> src/pods/task-retry-ledger.ts:281:11
+ ❯ Object.sqliteTransaction [as admit] ../../node_modules/.pnpm/better-sqlite3@11.10.0/node_modules/better-sqlite3/lib/methods/transaction.js:65:24
+ ❯ src/pods/pod-manager.ts:10932:38
+ ❯ src/db/unit-of-work.ts:20:25
+ ❯ sqliteTransaction ../../node_modules/.pnpm/better-sqlite3@11.10.0/node_modules/better-sqlite3/lib/methods/transaction.js:65:24
+ ❯ Object.atomically src/db/unit-of-work.ts:24:10
+ ❯ atomicPodChange src/db/unit-of-work.ts:47:33
+ ❯ Object.consumeAgentEvents src/pods/pod-manager.ts:10908:29
+ ❯ src/pods/pod-manager.test.ts:4918:17
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯
+Serialized Error: { code: 'TASK_RETRY_BINDING_CHANGED', statusCode: 409 }
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 624 skipped (625)
+   Start at  20:06:19
+   Duration  1.61s (transform 930ms, setup 0ms, import 1.34s, tests 166ms, environment 0ms)
+

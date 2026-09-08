@@ -1,0 +1,37 @@
+
+ RUN  v4.1.11 /private/tmp/autopod-durable-execution/packages/daemon
+
+ ❯ src/pods/pod-manager.test.ts (625 tests | 1 failed | 624 skipped) 148ms
+     × admits the explicitly selected profile primary after a recorded fallback authentication failure 147ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/pods/pod-manager.test.ts > PodManager > admits the explicitly selected profile primary after a recorded fallback authentication failure
+AssertionError: promise rejected "Error: Execution binding cannot change fo…" instead of resolving
+ ❯ src/pods/pod-manager.test.ts:4928:7
+    4926|           })(),
+    4927|         ),
+    4928|       ).resolves.toBe('completed');
+       |       ^
+    4929|       expect(pulled).toBe(true);
+    4930|       expect(ctx.podRepo.workerRetries?.state(pod.id).authorizations).…
+
+Caused by: Error: Execution binding cannot change for an existing run
+ ❯ Object.<anonymous> src/pods/task-execution-ledger.ts:522:17
+ ❯ Object.sqliteTransaction [as beginRun] ../../node_modules/.pnpm/better-sqlite3@11.10.0/node_modules/better-sqlite3/lib/methods/transaction.js:65:24
+ ❯ src/pods/pod-manager.ts:10921:44
+ ❯ src/db/unit-of-work.ts:20:25
+ ❯ sqliteTransaction ../../node_modules/.pnpm/better-sqlite3@11.10.0/node_modules/better-sqlite3/lib/methods/transaction.js:65:24
+ ❯ Object.atomically src/db/unit-of-work.ts:24:10
+ ❯ atomicPodChange src/db/unit-of-work.ts:47:33
+ ❯ Object.consumeAgentEvents src/pods/pod-manager.ts:10908:29
+ ❯ src/pods/pod-manager.test.ts:4917:17
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 624 skipped (625)
+   Start at  20:05:12
+   Duration  1.61s (transform 955ms, setup 0ms, import 1.36s, tests 148ms, environment 0ms)
+

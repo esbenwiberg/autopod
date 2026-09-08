@@ -1248,6 +1248,7 @@ export function podRoutes(
       const result = await podManager.continueProvider(
         podId,
         body.primary ? 'profile-primary' : body.target,
+        humanActor(request),
       );
       return { ok: true, action: result.action };
     } catch (err) {

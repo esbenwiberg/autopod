@@ -35,6 +35,8 @@ export interface TaskRetryAuthorization {
   reason: string;
   createdAt: string;
   usedByAttemptId: string | null;
+  /** Exact worker provider binding explicitly selected during operator recovery. */
+  targetBindingHash?: string;
 }
 export interface TaskRetryState {
   taskId: string;

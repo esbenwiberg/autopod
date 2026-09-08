@@ -43,6 +43,7 @@ export interface TaskRetryLedger {
     requestKey: string,
     reason: string,
     actor: OperatorActor,
+    targetBindingHash?: string,
   ): TaskRetryAuthorization;
 }
 const keys: Array<keyof TaskRetryIdentity> = [
@@ -122,6 +123,7 @@ export function createTaskRetryLedger(
     reason: row.reason as string,
     createdAt: row.created_at as string,
     usedByAttemptId: (row.attempt_id as string | null) ?? null,
+    ...(row.target_binding_hash ? { targetBindingHash: row.target_binding_hash as string } : {}),
   });
   const authorizationSelect =
     'SELECT a.*, u.attempt_id FROM task_retry_authorizations a LEFT JOIN task_retry_authorization_uses u ON u.authorization_id = a.id';
@@ -222,20 +224,24 @@ export function createTaskRetryLedger(
       (prior.outcome !== 'pass' || stage === 'codex_interruption') &&
       (stage !== 'worker' || workerFailure !== null)
     ) {
-      if (prior.binding_hash !== bindingHash)
-        throw new TaskRetryBlockedError(
-          `${label} provider binding changed; explicitly reconcile the authorized provider before retrying`,
-          'TASK_RETRY_BINDING_CHANGED',
-        );
       const old = JSON.parse(prior.identity as string) as TaskRetryIdentity;
       const changed = keys.some(
         (key) => validHash(old[key]) && validHash(identity[key]) && old[key] !== identity[key],
       );
       const grant = db
         .prepare(
-          `${authorizationSelect} WHERE a.pod_id = ? AND a.failure_id = ? AND u.attempt_id IS NULL ORDER BY a.created_at, a.id LIMIT 1`,
+          `${authorizationSelect} WHERE a.pod_id = ? AND a.failure_id = ? AND u.attempt_id IS NULL
+          AND ((a.target_binding_hash IS NULL AND ? = ?) OR (a.stage = 'worker' AND a.target_binding_hash = ?))
+          ORDER BY a.created_at, a.id LIMIT 1`,
         )
-        .get(podId, prior.id) as Record<string, unknown> | undefined;
+        .get(podId, prior.id, prior.binding_hash, bindingHash, bindingHash) as
+        | Record<string, unknown>
+        | undefined;
+      if (prior.binding_hash !== bindingHash && grant?.target_binding_hash !== bindingHash)
+        throw new TaskRetryBlockedError(
+          `${label} provider binding changed; explicitly reconcile the authorized provider before retrying`,
+          'TASK_RETRY_BINDING_CHANGED',
+        );
       if (grant) {
         retryKind = 'override';
         useAuthorization = grant.id as string;
@@ -386,8 +392,16 @@ export function createTaskRetryLedger(
         .run(new Date().toISOString(), stage).changes;
     },
     authorize: db.transaction(
-      (podId: string, requestKey: string, reason: string, actor: OperatorActor) => {
+      (
+        podId: string,
+        requestKey: string,
+        reason: string,
+        actor: OperatorActor,
+        targetBindingHash?: string,
+      ) => {
         if (
+          (targetBindingHash !== undefined &&
+            (stage !== 'worker' || !validHash(targetBindingHash))) ||
           actor.type !== 'human' ||
           !actor.userId ||
           !requestKey ||
@@ -410,6 +424,7 @@ export function createTaskRetryLedger(
           if (
             recorded.podId !== podId ||
             recorded.stage !== stage ||
+            recorded.targetBindingHash !== targetBindingHash ||
             recorded.reason !== reason ||
             JSON.stringify(recorded.actor) !== JSON.stringify(actor)
           )
@@ -431,7 +446,7 @@ export function createTaskRetryLedger(
           );
         const id = randomUUID();
         db.prepare(
-          `INSERT INTO task_retry_authorizations(id,request_key,task_id,pod_id,stage,failure_id,actor,reason,created_at) VALUES (?,?,?,?,'${stage}',?,?,?,?)`,
+          `INSERT INTO task_retry_authorizations(id,request_key,task_id,pod_id,stage,failure_id,actor,reason,created_at,target_binding_hash) VALUES (?,?,?,?,'${stage}',?,?,?,?,?)`,
         ).run(
           id,
           requestKey,
@@ -441,6 +456,7 @@ export function createTaskRetryLedger(
           JSON.stringify(actor),
           reason,
           new Date().toISOString(),
+          targetBindingHash ?? null,
         );
         return authorization(
           db.prepare(`${authorizationSelect} WHERE a.id = ?`).get(id) as Record<string, unknown>,

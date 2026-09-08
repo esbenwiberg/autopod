@@ -1,0 +1,30 @@
+
+ RUN  v4.1.11 /private/tmp/autopod-durable-execution/packages/daemon
+
+ ❯ src/pods/pod-manager.test.ts (625 tests | 1 failed | 624 skipped) 97ms
+     × admits the explicitly selected profile primary after a recorded fallback authentication failure 95ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/pods/pod-manager.test.ts > PodManager > admits the explicitly selected profile primary after a recorded fallback authentication failure
+Error: profileReference must identify a persisted pod profile snapshot by hash
+ ❯ assertProfileReference src/pods/provider-attempt-repository.ts:124:11
+    122| function assertProfileReference(reference: string): void {
+    123|   if (!PROFILE_REFERENCE_PATTERN.test(reference)) {
+    124|     throw new Error('profileReference must identify a persisted pod pr…
+       |           ^
+    125|   }
+    126| }
+ ❯ src/pods/provider-attempt-repository.ts:262:9
+ ❯ sqliteTransaction ../../node_modules/.pnpm/better-sqlite3@11.10.0/node_modules/better-sqlite3/lib/methods/transaction.js:65:24
+ ❯ Object.open src/pods/provider-attempt-repository.ts:273:8
+ ❯ src/pods/pod-manager.test.ts:4886:14
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 624 skipped (625)
+   Start at  20:04:13
+   Duration  1.60s (transform 979ms, setup 0ms, import 1.39s, tests 97ms, environment 0ms)
+

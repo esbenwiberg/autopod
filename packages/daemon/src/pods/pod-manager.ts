@@ -1646,6 +1646,7 @@ export interface PodManager {
   continueProvider(
     podId: string,
     target?: ProviderFailoverTarget | 'profile-primary',
+    actor?: OperatorActor,
   ): Promise<{ action: 'same-provider' | 'alternate-provider' | 'primary-provider' }>;
   /**
    * Operator admin override: force-transition a `failed` pod to `complete`,
@@ -17381,8 +17382,16 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
     async continueProvider(
       podId: string,
       requestedTarget?: ProviderFailoverTarget | 'profile-primary',
+      actor: OperatorActor = { type: 'automation', id: 'direct-pod-manager' },
     ): Promise<{ action: 'same-provider' | 'alternate-provider' | 'primary-provider' }> {
+      assertExecutionTerminationVerified(podId);
       const pod = podRepo.getOrThrow(podId);
+      if (podRepo.taskExecutions?.hasActiveRun(podId))
+        throw new AutopodError(
+          'A worker in this task must settle before provider continuation',
+          'TASK_AGENT_RUN_ACTIVE',
+          409,
+        );
       const primaryRecovery = requestedTarget === 'profile-primary';
       const pausedProviderLimit = pod.status === 'paused' && pod.pauseReason === 'provider_limit';
       if (primaryRecovery && pod.status !== 'failed') {
@@ -17512,6 +17521,21 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
             409,
           );
         }
+      }
+      const retryState = podRepo.workerRetries?.state(podId);
+      if (retryState?.retryFailure && retryState.latest) {
+        const targetBindingHash = workerBindingHash({
+          runtime: target.runtime,
+          model: target.model,
+          providerAccountId: target.providerAccountId,
+        });
+        podRepo.workerRetries?.authorize(
+          podId,
+          `provider-recovery:${podId}:${retryState.latest.id}:${targetBindingHash}`,
+          `Operator selected ${target.runtime}/${target.model} on account ${target.providerAccountId} after worker failure.`,
+          actor,
+          targetBindingHash,
+        );
       }
       if (pod.containerId) {
         try {

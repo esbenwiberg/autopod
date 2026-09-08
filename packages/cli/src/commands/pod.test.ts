@@ -1151,3 +1151,78 @@ it('cost reads a deleted exact ID without requiring a live-list lookup and prese
     await new Promise<void>((resolve) => server.close(() => resolve()));
   }
 });
+
+it('sends profile-primary recovery through HTTP and inspects its target-bound worker permission', async () => {
+  const calls: Array<{ path: string; body: string }> = [];
+  const server = createServer(async (request, response) => {
+    let body = '';
+    for await (const chunk of request) body += String(chunk);
+    const route = request.url ?? '';
+    calls.push({ path: route, body });
+    response.setHeader('Content-Type', 'application/json');
+    response.end(
+      JSON.stringify(
+        route.endsWith('/continue-provider')
+          ? { ok: true, action: 'primary-provider' }
+          : route.includes('/retry-state')
+            ? {
+                taskId: 'task',
+                stage: 'worker',
+                backoffsMs: [],
+                admissionCount: 1,
+                executedCount: 1,
+                transientRetryCount: 0,
+                measuredDurationMs: 0,
+                interruptedCount: 0,
+                latest: { id: 'auth-failure', outcome: 'nonretryable' },
+                authorizations: [
+                  {
+                    id: 'target-grant',
+                    targetBindingHash: 'a'.repeat(64),
+                    reason:
+                      'Operator selected claude/opus on account primary after worker failure.',
+                    usedByAttemptId: null,
+                  },
+                ],
+                telemetry: 'partial',
+              }
+            : { id: 'abcd1234' },
+      ),
+    );
+  });
+  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+  const address = server.address();
+  if (!address || typeof address === 'string') throw new Error('Missing fixture port');
+  const client = new AutopodClient({
+    baseUrl: `http://127.0.0.1:${address.port}`,
+    getToken: async () => 'synthetic',
+  });
+  const output = vi.spyOn(console, 'log').mockImplementation(() => {});
+  const stdout = vi.spyOn(process.stdout, 'write').mockImplementation(() => true);
+  const run = async (args: string[]) => {
+    const program = new Command();
+    program.exitOverride();
+    registerPodCommands(program, () => client);
+    await program.parseAsync(['node', 'ap', ...args]);
+  };
+  try {
+    await run(['continue-provider', 'abcd1234', '--primary']);
+    await run(['retry-state', 'abcd1234', '--stage', 'worker', '--json']);
+    const sent = calls.filter((c) => c.path.endsWith('/continue-provider'));
+    expect(sent).toHaveLength(1);
+    expect(JSON.parse(sent[0]?.body ?? '{}')).toEqual({ primary: true });
+    expect(calls.some((c) => c.path.endsWith('/resume') || c.path.endsWith('/validate'))).toBe(
+      false,
+    );
+    expect(stdout.mock.calls.map(([chunk]) => String(chunk)).join('')).toContain(
+      'Operator selected claude/opus on account primary after worker failure.',
+    );
+    expect(stdout.mock.calls.map(([chunk]) => String(chunk)).join('')).toContain(
+      'targetBindingHash',
+    );
+  } finally {
+    output.mockRestore();
+    stdout.mockRestore();
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+  }
+});

@@ -1,0 +1,58 @@
+
+ RUN  v4.1.11 /private/tmp/autopod-durable-execution/packages/daemon
+
+ ❯ src/pods/pod-manager.test.ts (625 tests | 1 failed | 624 skipped) 140ms
+     × admits the explicitly selected profile primary after a recorded fallback authentication failure 140ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/pods/pod-manager.test.ts > PodManager > admits the explicitly selected profile primary after a recorded fallback authentication failure
+AssertionError: expected [ { …(11) } ] to deep equally contain ObjectContaining{…}
+
+- Expected:
+ObjectContaining {
+  "actor": {
+    "type": "human",
+    "userId": "recovery-operator",
+  },
+  "failureId": "7eae8a44-dae8-4668-b1a5-9b94473e91d9",
+  "usedByAttemptId": Any<String>,
+}
+
++ Received:
+[
+  {
+    "actor": {
+      "displayName": "Operator",
+      "type": "human",
+      "userId": "recovery-operator",
+    },
+    "createdAt": "2026-09-08T18:08:21.827Z",
+    "failureId": "7eae8a44-dae8-4668-b1a5-9b94473e91d9",
+    "id": "d899efee-0493-47f8-a79c-d2dd75bdf56b",
+    "podId": "surrounding-vicuna",
+    "reason": "Operator selected claude/opus on account source after worker failure.",
+    "requestKey": "provider-recovery:surrounding-vicuna:7eae8a44-dae8-4668-b1a5-9b94473e91d9:5c4dc839bb8e4ed9ce5609b5209acf21fcebbb6e22e1860a0ccf85bb498001c7",
+    "stage": "worker",
+    "targetBindingHash": "5c4dc839bb8e4ed9ce5609b5209acf21fcebbb6e22e1860a0ccf85bb498001c7",
+    "taskId": "task:148d085c-bfeb-41a4-a80d-c3b3f101d5e1",
+    "usedByAttemptId": "07929b63-b98d-4111-84e5-72cfa8a015f3",
+  },
+]
+
+ ❯ src/pods/pod-manager.test.ts:4931:71
+    4929|       ).resolves.toBe('completed');
+    4930|       expect(pulled).toBe(true);
+    4931|       expect(ctx.podRepo.workerRetries?.state(pod.id).authorizations).…
+       |                                                                       ^
+    4932|         expect.objectContaining({
+    4933|           actor: { type: 'human', userId: 'recovery-operator' },
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 624 skipped (625)
+   Start at  20:08:20
+   Duration  1.54s (transform 909ms, setup 0ms, import 1.30s, tests 140ms, environment 0ms)
+

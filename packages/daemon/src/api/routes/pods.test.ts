@@ -3909,6 +3909,9 @@ describe('POST /pods/:podId/continue-provider', () => {
     vi.clearAllMocks();
     db = createTestDb();
     app = Fastify({ logger: false });
+    app.addHook('preHandler', async (request) => {
+      request.user = { oid: 'fixture-operator', name: 'Operator' };
+    });
     const podRepo = createPodRepository(db);
     const eventRepo = createEventRepository(db);
     const escalationRepo = createEscalationRepository(db);
@@ -3942,7 +3945,11 @@ describe('POST /pods/:podId/continue-provider', () => {
 
     expect(response.statusCode).toBe(200);
     expect(response.json()).toEqual({ ok: true, action: 'primary-provider' });
-    expect(continueProvider).toHaveBeenCalledWith('failed-pod', 'profile-primary');
+    expect(continueProvider).toHaveBeenCalledWith('failed-pod', 'profile-primary', {
+      type: 'human',
+      userId: 'fixture-operator',
+      displayName: 'Operator',
+    });
   });
 
   it('preserves explicit-target paused continuation', async () => {
@@ -3956,7 +3963,11 @@ describe('POST /pods/:podId/continue-provider', () => {
     });
 
     expect(response.statusCode).toBe(200);
-    expect(continueProvider).toHaveBeenCalledWith('paused-pod', target);
+    expect(continueProvider).toHaveBeenCalledWith('paused-pod', target, {
+      type: 'human',
+      userId: 'fixture-operator',
+      displayName: 'Operator',
+    });
   });
 
   it('rejects ambiguous primary and explicit target requests', async () => {

@@ -4852,6 +4852,135 @@ describe('PodManager', () => {
     expect(ctx.enqueuedSessions).toEqual([]);
   });
 
+  it.each(['active', 'unverified'] as const)(
+    'blocks provider continuation while a task worker is %s',
+    async (mode) => {
+      const ctx = createTestContext();
+      const manager = createPodManager(ctx.deps);
+      const pod = manager.createSession(
+        { profileName: 'test-profile', task: 'Keep unresolved worker' },
+        'operator',
+      );
+      ctx.podRepo.update(pod.id, {
+        status: 'failed',
+        containerId: 'retained-container',
+        worktreePath: '/tmp/retained-source',
+      });
+      const run = ctx.podRepo.taskExecutions?.beginRun(pod.id, 1, 1, {
+        runtime: pod.runtime,
+        model: pod.model,
+        providerAccountId: null,
+      });
+      if (!run) throw new Error('Missing active worker');
+      if (mode === 'unverified') ctx.podRepo.taskExecutions?.retainUnverifiedRun(run);
+      const before = manager.getSession(pod.id);
+      await expect(
+        manager.continueProvider(pod.id, 'profile-primary', { type: 'human', userId: 'operator' }),
+      ).rejects.toMatchObject({
+        code:
+          mode === 'unverified' ? 'TASK_EXECUTION_TERMINATION_UNVERIFIED' : 'TASK_AGENT_RUN_ACTIVE',
+      });
+      expect(manager.getSession(pod.id)).toEqual(before);
+      expect(ctx.containerManager.kill).not.toHaveBeenCalled();
+      expect(ctx.db.prepare('SELECT ended_at FROM task_agent_runs WHERE id = ?').get(run)).toEqual({
+        ended_at: null,
+      });
+    },
+  );
+
+  it('admits the explicitly selected profile primary after a recorded fallback authentication failure', async () => {
+    const ctx = createTestContext();
+    const attempts = createProviderAttemptRepository(ctx.db);
+    ctx.deps.providerAttemptRepo = attempts;
+    insertProviderAccount(ctx.db, 'source', 'anthropic', {
+      provider: 'anthropic',
+      apiKey: 'source-key',
+    });
+    insertProviderAccount(ctx.db, 'target', 'openai', { provider: 'openai', apiKey: 'target-key' });
+    linkProfileToProviderAccount(ctx.db, 'test-profile', 'source');
+    ctx.deps.providerAccountStore = createProviderAccountStore(ctx.db);
+    const manager = createPodManager(ctx.deps);
+    const pod = manager.createSession(
+      { profileName: 'test-profile', task: 'Recover fallback authentication' },
+      'operator',
+    );
+    ctx.podRepo.update(pod.id, {
+      status: 'failed',
+      worktreePath: `/tmp/worktree/${pod.id}`,
+      runtime: 'codex',
+      model: 'gpt-next',
+      providerAccountIdSnapshot: 'target',
+      providerIdSnapshot: 'max',
+    });
+    ctx.podRepo.completionJournal?.begin(ctx.podRepo.getOrThrow(pod.id));
+    const failed = ctx.podRepo.taskExecutions?.beginRun(pod.id, 1, 1, {
+      runtime: 'codex',
+      model: 'gpt-next',
+      providerAccountId: 'target',
+    });
+    if (!failed) throw new Error('Missing failed worker');
+    ctx.podRepo.taskExecutions?.finishRun(failed, 'failed', 'auth');
+    attempts.open({
+      podId: pod.id,
+      provider: 'max',
+      providerAccountId: 'target',
+      runtime: 'codex',
+      model: 'gpt-next',
+      profileReference: `pod:${pod.id}@profile-snapshot#abcdef3`,
+      profileSnapshot: { name: 'test-profile' },
+    });
+    const beforeRecovery = manager.getSession(pod.id);
+    await expect(manager.continueProvider(pod.id, 'profile-primary')).rejects.toMatchObject({
+      code: 'INVALID_INPUT',
+    });
+    expect(manager.getSession(pod.id)).toEqual(beforeRecovery);
+    const app = Fastify();
+    app.setErrorHandler(errorHandler);
+    authPlugin(app, {
+      validateToken: async () => ({ oid: 'recovery-operator', name: 'Operator' }),
+    } as never);
+    podRoutes(app, manager, ctx.eventRepo, undefined, ctx.podRepo);
+    try {
+      const response = await app.inject({
+        method: 'POST',
+        url: `/pods/${pod.id}/continue-provider`,
+        headers: { authorization: 'Bearer synthetic' },
+        payload: { primary: true },
+      });
+      expect(response.statusCode, response.body).toBe(200);
+      expect(manager.getSession(pod.id)).toMatchObject({
+        status: 'queued',
+        runtime: 'claude',
+        model: 'opus',
+        providerAccountIdSnapshot: 'source',
+      });
+      let pulled = false;
+      await expect(
+        manager.consumeAgentEvents(
+          pod.id,
+          (async function* () {
+            pulled = true;
+            yield {
+              type: 'complete',
+              timestamp: new Date().toISOString(),
+              result: 'Recovered on explicit primary',
+            } as const;
+          })(),
+        ),
+      ).resolves.toBe('completed');
+      expect(pulled).toBe(true);
+      expect(ctx.podRepo.workerRetries?.state(pod.id).authorizations).toContainEqual(
+        expect.objectContaining({
+          actor: { type: 'human', userId: 'recovery-operator', displayName: 'Operator' },
+          failureId: failed,
+          usedByAttemptId: expect.any(String),
+        }),
+      );
+    } finally {
+      await app.close();
+    }
+  });
+
   it('provider-failover-pauses without mutating rejected operator continuations', async () => {
     const makeContext = () => {
       const ctx = createTestContext();

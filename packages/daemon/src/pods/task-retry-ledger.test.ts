@@ -632,3 +632,181 @@ it('does not mint a new worker allowance for legacy transient history without a 
     db.close();
   }
 });
+
+it('scopes worker provider reconciliation to its exact target and preserves it across reopen', () => {
+  const { db, repo } = fixture();
+  const original = { runtime: 'codex', model: 'model', providerAccountId: 'original' };
+  const target = { runtime: 'claude', model: 'other-model', providerAccountId: 'selected' };
+  const failed = repo.taskExecutions?.beginRun('root', 1, 1, original);
+  if (!failed || !repo.workerRetries) throw new Error('Missing worker retries');
+  repo.taskExecutions?.finishRun(failed, 'failed', 'auth');
+  const ledger = repo.workerRetries;
+  const actor = { type: 'human' as const, userId: 'operator' };
+  const generic = ledger.authorize('fix', 'generic-retry', 'Retry original provider', actor);
+  expect(() =>
+    ledger.assertCanAdmit('fix', 1, unavailableWorkerInputs, workerBindingHash(target), []),
+  ).toThrow('binding changed');
+  const scoped = ledger.authorize(
+    'fix',
+    'target-recovery',
+    'Use the selected provider',
+    actor,
+    workerBindingHash(target),
+  );
+  expect(
+    ledger.authorize(
+      'fix',
+      'target-recovery',
+      'Use the selected provider',
+      actor,
+      workerBindingHash(target),
+    ).id,
+  ).toBe(scoped.id);
+  expect(() =>
+    ledger.authorize(
+      'fix',
+      'target-recovery',
+      'Use the selected provider',
+      actor,
+      workerBindingHash(original),
+    ),
+  ).toThrow('different authorization');
+  expect(() =>
+    ledger.assertCanAdmit(
+      'fix',
+      1,
+      unavailableWorkerInputs,
+      workerBindingHash({ ...target, model: 'third-model' }),
+      [],
+    ),
+  ).toThrow('binding changed');
+  // Simulate an older daemon selecting this grant without understanding its new target column.
+  expect(() =>
+    db.transaction(() => {
+      db.prepare(`INSERT INTO task_retry_attempts(id,task_id,pod_id,execution_id,generation,stage,identity,binding_hash,retry_kind,previous_failure_id,admitted_at,not_before)
+      SELECT 'old-daemon-retry',task_id,'fix',?,1,'worker',identity,binding_hash,'override',id,admitted_at,not_before
+      FROM task_retry_attempts WHERE id = ?`).run(
+        repo.taskExecutions?.snapshot('fix').executionId,
+        failed,
+      );
+      db.prepare(
+        'INSERT INTO task_retry_authorization_uses(authorization_id,attempt_id) VALUES (?,?)',
+      ).run(scoped.id, 'old-daemon-retry');
+    })(),
+  ).toThrow('target binding or scope mismatch');
+  expect(ledger.state('fix').admissionCount).toBe(1);
+  repo.delete('root');
+  const dir = mkdtempSync(join(tmpdir(), 'worker-binding-retry-'));
+  const file = join(dir, 'state.db');
+  writeFileSync(file, db.serialize());
+  db.close();
+  const reopened = new Database(file);
+  try {
+    const next = createPodRepository(reopened);
+    const retries = next.workerRetries;
+    if (!retries) throw new Error('Missing worker retries');
+    const id = next.taskExecutions?.beginRun('fix', 1, 1, target);
+    if (!id) throw new Error('Missing worker run');
+    expect(
+      retries.admit('fix', 1, unavailableWorkerInputs, workerBindingHash(target), [], id).retryKind,
+    ).toBe('override');
+    retries.start(id);
+    next.taskExecutions?.finishRun(id, 'failed', 'auth');
+    retries.finish(id, 'nonretryable', 5);
+    const grants = retries.state('fix').authorizations;
+    expect(grants.find((g) => g.id === scoped.id)?.usedByAttemptId).toBe(id);
+    expect(grants.find((g) => g.id === generic.id)?.usedByAttemptId).toBeNull();
+    expect(() =>
+      retries.assertCanAdmit('fix', 1, unavailableWorkerInputs, workerBindingHash(target), []),
+    ).toThrow('authentication');
+    expect(() =>
+      reopened
+        .prepare('UPDATE task_retry_authorizations SET target_binding_hash = ? WHERE id = ?')
+        .run(workerBindingHash(original), scoped.id),
+    ).toThrow('immutable');
+    expect(reopened.pragma('integrity_check', { simple: true })).toBe('ok');
+  } finally {
+    reopened.close();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+it('upgrades schema 177 without broadening an existing worker permission', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'worker-binding-upgrade-'));
+  const migrations = resolve(import.meta.dirname, '../db/migrations');
+  for (const file of readdirSync(migrations))
+    if (Number.parseInt(file, 10) <= 177) copyFileSync(join(migrations, file), join(dir, file));
+  const db = new Database(join(dir, 'state.db'));
+  try {
+    db.pragma('foreign_keys = ON');
+    runMigrations(db, dir, logger);
+    insertTestProfile(db);
+    const repo = createPodRepository(db);
+    repo.insert({
+      id: 'root',
+      profileName: 'test-profile',
+      task: 'Retain old permission',
+      status: 'running',
+      model: 'model',
+      runtime: 'codex',
+      executionTarget: 'local',
+      branch: 'root',
+      userId: 'operator',
+      maxValidationAttempts: 3,
+      skipValidation: false,
+      outputMode: 'pr',
+    });
+    const bound = { runtime: 'codex', model: 'model', providerAccountId: null };
+    const run = repo.taskExecutions?.beginRun('root', 1, 1, bound);
+    if (!run || !repo.workerRetries) throw new Error('Missing worker ledger');
+    repo.workerRetries.admit('root', 1, unavailableWorkerInputs, workerBindingHash(bound), [], run);
+    repo.workerRetries.start(run);
+    repo.taskExecutions?.finishRun(run, 'failed', 'auth');
+    repo.workerRetries.finish(run, 'nonretryable', 11);
+    const actor = { type: 'human' as const, userId: 'operator' };
+    const taskId = repo.taskExecutions?.snapshot('root').taskId;
+    db.prepare(`INSERT INTO task_retry_authorizations(id,request_key,task_id,pod_id,stage,failure_id,actor,reason,created_at)
+      VALUES ('legacy','legacy-key',?,'root','worker',?,?,'Retry original provider','2026-09-08T10:00:00Z')`).run(
+      taskId,
+      run,
+      JSON.stringify(actor),
+    );
+    const before = db.prepare('SELECT * FROM task_retry_authorizations').get();
+    const failures = db.prepare('SELECT * FROM task_retry_attempts').all();
+    runMigrations(db, migrations, logger);
+    expect(db.prepare('SELECT * FROM task_retry_authorizations').get()).toEqual({
+      ...(before as object),
+      target_binding_hash: null,
+    });
+    expect(db.prepare('SELECT * FROM task_retry_attempts').all()).toEqual(failures);
+    const ledger = createPodRepository(db).workerRetries;
+    if (!ledger) throw new Error('Missing upgraded worker ledger');
+    expect(ledger.authorize('root', 'legacy-key', 'Retry original provider', actor)).toMatchObject({
+      id: 'legacy',
+    });
+    ledger.assertCanAdmit('root', 1, unavailableWorkerInputs, workerBindingHash(bound), []);
+    expect(() =>
+      ledger.assertCanAdmit(
+        'root',
+        1,
+        unavailableWorkerInputs,
+        workerBindingHash({ ...bound, model: 'other' }),
+        [],
+      ),
+    ).toThrow('binding changed');
+    expect(() =>
+      ledger.authorize(
+        'root',
+        'legacy-key',
+        'Retry original provider',
+        actor,
+        workerBindingHash({ ...bound, model: 'other' }),
+      ),
+    ).toThrow('different authorization');
+    expect(db.pragma('foreign_key_check')).toEqual([]);
+    expect(db.pragma('integrity_check', { simple: true })).toBe('ok');
+  } finally {
+    db.close();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
