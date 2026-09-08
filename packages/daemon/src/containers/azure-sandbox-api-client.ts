@@ -118,6 +118,8 @@ interface DiskImageKey {
 }
 
 interface SandboxResponse {
+  egressPolicy?: SandboxEgressPolicy & { rules?: unknown[] };
+  labels?: Record<string, string>;
   id?: string;
   state?: string;
   sourcesRef?: { diskImage?: { id?: string } };
@@ -215,12 +217,51 @@ export class AzureSandboxApiClient implements SandboxApiClient {
     );
   }
 
+  /** Prepare the exact immutable managed image before issuing a short-lived worker grant. */
+  async prepareManagedImage(image: string): Promise<string> {
+    if (!/@sha256:[a-f0-9]{64}$/.test(image)) throw new Error('managed-image-digest-required');
+    await this.ensureSandboxGroup();
+    return requiredId(await this.ensureDiskImage(image), 'disk image');
+  }
+
   async createSandbox(options: CreateSandboxOptions): Promise<string> {
+    if (options.managedSpecDigest) managedDigestLabel(options.managedSpecDigest);
     await this.ensureSandboxGroup();
     const diskImage = await this.ensureDiskImage(options.image);
     const diskImageId = requiredId(diskImage, 'disk image');
     const sandbox = await this.createSandboxFromDiskImage(diskImageId, options);
     return requiredId(sandbox, 'sandbox');
+  }
+
+  async findManagedSandbox(podId: string, specDigest: string): Promise<string | null> {
+    const encodedDigest = managedDigestLabel(specDigest);
+    const response = await this.requestData<
+      | SandboxResponse[]
+      | {
+          value?: SandboxResponse[];
+          items?: SandboxResponse[];
+          nextLink?: string;
+        }
+    >('GET', `${this.groupPath()}/sandboxes`);
+    // The live preview endpoint returns a plain array; older fixtures use envelopes.
+    // A truncated or unknown list shape cannot prove absence.
+    if (
+      !Array.isArray(response) &&
+      (response.nextLink || (!Array.isArray(response.value) && !Array.isArray(response.items)))
+    )
+      throw new Error('managed-sandbox-discovery-unavailable');
+    const items = Array.isArray(response) ? response : (response.value ?? response.items ?? []);
+    if (items.some((item) => !item || typeof item !== 'object' || Array.isArray(item)))
+      throw new Error('managed-sandbox-discovery-unavailable');
+    const matches = items.filter((item) => item.labels?.podId === podId);
+    if (
+      matches.length > 1 ||
+      (matches[0] &&
+        matches[0].labels?.executionSpecDigest !== specDigest &&
+        matches[0].labels?.executionSpecDigest !== encodedDigest)
+    )
+      throw new Error('managed-sandbox-identity-conflict');
+    return matches[0] ? requiredId(matches[0], 'sandbox') : null;
   }
 
   async destroy(sandboxId: string): Promise<void> {
@@ -684,6 +725,18 @@ export class AzureSandboxApiClient implements SandboxApiClient {
       json: toWireEgressPolicy(policy),
       okStatuses: [200, 201, 204],
     });
+    if (policy.trafficInspection === 'Full') {
+      // SDK get_egress_policy reads the parent sandbox, not GET /egresspolicy.
+      const observed = (await this.getSandbox(sandboxId)).egressPolicy;
+      if (
+        !observed ||
+        observed.trafficInspection !== 'Full' ||
+        observed.defaultAction !== policy.defaultAction ||
+        (observed.rules?.length ?? 0) > 0 ||
+        JSON.stringify(observed.hostRules ?? []) !== JSON.stringify(policy.hostRules)
+      )
+        throw new Error('managed-sandbox-egress-unconfirmed');
+    }
   }
 
   async addPort(
@@ -1037,8 +1090,16 @@ export class AzureSandboxApiClient implements SandboxApiClient {
           },
           environment: options.env ?? {},
           egressPolicy: toWireEgressPolicy(options.egressPolicy),
-          labels: { purpose: 'autopod-sandbox', managedBy: 'autopod', podId: options.podId },
+          labels: {
+            purpose: 'autopod-sandbox',
+            managedBy: 'autopod',
+            podId: options.podId,
+            ...(options.managedSpecDigest
+              ? { executionSpecDigest: managedDigestLabel(options.managedSpecDigest) }
+              : {}),
+          },
         },
+        singleAttempt: Boolean(options.managedSpecDigest),
         timeoutMs: CREATE_REQUEST_TIMEOUT_MS,
       },
     );
@@ -1191,7 +1252,7 @@ export class AzureSandboxApiClient implements SandboxApiClient {
         if (timeout) clearTimeout(timeout);
       }
 
-      if (response.status === 429 && attempt < this.retryMaxAttempts) {
+      if (response.status === 429 && !options.singleAttempt && attempt < this.retryMaxAttempts) {
         const waitMs = Math.min(
           await retryAfterMs(response, attempt, this.retryBaseDelayMs),
           this.retryMaxDelayMs,
@@ -1207,6 +1268,7 @@ export class AzureSandboxApiClient implements SandboxApiClient {
       if (
         plane === 'data' &&
         response.status === 403 &&
+        !options.singleAttempt &&
         attempt < this.retryMaxAttempts &&
         (await response.clone().text()).trim() === ''
       ) {
@@ -1247,6 +1309,7 @@ export class AzureSandboxApiClient implements SandboxApiClient {
         plane === 'data' &&
         method === 'GET' &&
         [502, 503, 504].includes(response.status) &&
+        !options.singleAttempt &&
         attempt < this.retryMaxAttempts
       ) {
         const waitMs = Math.min(
@@ -1364,10 +1427,11 @@ export class AzureSandboxApiClient implements SandboxApiClient {
 }
 
 interface RequestOptions {
+  singleAttempt?: boolean;
   params?: Record<string, string | undefined>;
   headers?: Record<string, string>;
   json?: unknown;
-  body?: BodyInit;
+  body?: RequestInit['body'];
   okStatuses?: number[];
   timeoutMs?: number;
   raw?: boolean;
@@ -1408,9 +1472,11 @@ function userAssignedIdentity(resourceId: string): {
 function toWireEgressPolicy(policy: SandboxEgressPolicy): {
   defaultAction: 'Allow' | 'Deny';
   hostRules?: Array<{ pattern: string; action: 'Allow' | 'Deny' }>;
+  trafficInspection?: 'Full';
 } {
   return {
     defaultAction: policy.defaultAction,
+    ...(policy.trafficInspection ? { trafficInspection: policy.trafficInspection } : {}),
     ...(policy.hostRules.length > 0 ? { hostRules: policy.hostRules } : {}),
   };
 }
@@ -1654,4 +1720,11 @@ async function retryAfterMs(response: Response, attempt: number, baseMs: number)
     // Fall through to backoff.
   }
   return baseMs * 2 ** (attempt - 1);
+}
+
+// Full 256-bit digest, losslessly encoded in 45 label-safe characters. The fixed
+// alphanumeric ends also handle base64url values beginning/ending in '-' or '_'.
+function managedDigestLabel(digest: string): string {
+  if (!/^sha256:[a-f0-9]{64}$/.test(digest)) throw new Error('invalid-managed-spec-digest');
+  return `s${Buffer.from(digest.slice(7), 'hex').toString('base64url')}s`;
 }

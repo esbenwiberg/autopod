@@ -9,6 +9,10 @@
     ".": {
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js"
+    },
+    "./managed": {
+      "types": "./dist/managed.d.ts",
+      "import": "./dist/managed.js"
     }
   },
   "scripts": {

@@ -16,6 +16,8 @@ import type { ImageBuilder } from '../images/index.js';
 import type { AuthModule } from '../interfaces/index.js';
 import type { WorktreeManager } from '../interfaces/worktree-manager.js';
 import type { IssueWatcherRepository } from '../issue-watcher/issue-watcher-repository.js';
+import type { ManagedComponentsConfig } from '../managed/bootstrap.js';
+import { type ManagedUserBinding, registerManagedUserRoutes } from '../managed/user-auth.js';
 import type {
   ContainerManagerFactory,
   EscalationRepository,
@@ -73,6 +75,8 @@ import './types.js';
 
 export interface ServerDependencies {
   authModule: AuthModule;
+  /** Absent by default; adding routes never enables starts implicitly. */
+  managed?: { config: ManagedComponentsConfig; bindings: readonly ManagedUserBinding[] };
   podManager: PodManager;
   profileStore: ProfileStore;
   providerAccountStore?: ProviderAccountStore;
@@ -149,6 +153,12 @@ export async function createServer(deps: ServerDependencies): Promise<FastifyIns
   await rateLimitPlugin(app);
   authPlugin(app, deps.authModule, deps.sessionTokenIssuer);
   requestLoggerPlugin(app);
+  const managed = deps.managed;
+  if (managed) {
+    await app.register(async (managedApp) => {
+      registerManagedUserRoutes(managedApp, managed.config, deps.authModule, managed.bindings);
+    });
+  }
 
   // WebSocket support
   await app.register(websocket);

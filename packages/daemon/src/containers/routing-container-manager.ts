@@ -1,3 +1,4 @@
+import type { ArtifactOutput } from '@autopod/shared';
 import type { ExecutionTarget } from '@autopod/shared';
 import type {
   ContainerManager,
@@ -52,6 +53,16 @@ export class RoutingContainerManager implements ContainerManager {
 
   readFileBinary(containerId: string, path: string): Promise<Buffer> {
     return this.delegate(containerId).readFileBinary(containerId, path);
+  }
+
+  extractManagedOutput(
+    containerId: string,
+    staging: string,
+    output: ArtifactOutput,
+  ): Promise<void> {
+    const manager = this.delegate(containerId);
+    if (!manager.extractManagedOutput) throw new Error('managed-output-unavailable');
+    return manager.extractManagedOutput(containerId, staging, output);
   }
 
   extractDirectoryFromContainer(

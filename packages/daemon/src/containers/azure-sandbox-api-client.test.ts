@@ -1125,3 +1125,140 @@ function diskImageLabelsFor(image: string, sourceDigest: string): Record<string,
 function testHash(value: string, length: number): string {
   return createHash('sha256').update(value).digest('hex').slice(0, length);
 }
+
+it.each(['array', 'value', 'items'])(
+  'managed discovery supports %s without duplicating identity',
+  async (shape) => {
+    const row = {
+      id: 'sandbox-one',
+      labels: { podId: 'managed-one', executionSpecDigest: `sha256:${'a'.repeat(64)}` },
+    };
+    const body = shape === 'array' ? [row] : { [shape]: [row] };
+    const { client, requests } = makeClient([{ status: 200, body }]);
+    expect(await client.findManagedSandbox('managed-one', `sha256:${'a'.repeat(64)}`)).toBe(
+      'sandbox-one',
+    );
+    expect(requests).toHaveLength(1);
+    expect(requests[0]?.init?.method).toBe('GET');
+  },
+);
+it.each([
+  null,
+  {},
+  { value: [], nextLink: 'more' },
+  [null],
+  [{ id: 'one', labels: { podId: 'managed-one', executionSpecDigest: 'other' } }],
+  [
+    {
+      id: 'one',
+      labels: { podId: 'managed-one', executionSpecDigest: `sha256:${'a'.repeat(64)}` },
+    },
+    {
+      id: 'two',
+      labels: { podId: 'managed-one', executionSpecDigest: `sha256:${'a'.repeat(64)}` },
+    },
+  ],
+])(
+  'managed discovery fails closed on unknown, truncated or conflicting responses',
+  async (body) => {
+    const { client } = makeClient([{ status: 200, body }]);
+    await expect(
+      client.findManagedSandbox('managed-one', `sha256:${'a'.repeat(64)}`),
+    ).rejects.toThrow();
+  },
+);
+
+it('managed image staging refuses a mutable tag before any credential or network effects', async () => {
+  const { client, requests } = makeClient([]);
+  await expect(client.prepareManagedImage('registry/image:latest')).rejects.toThrow(
+    'digest-required',
+  );
+  expect(requests).toEqual([]);
+});
+
+it('managed create uses a lossless label-safe digest and restart discovery accepts it', async () => {
+  const digest = `sha256:${'f'.repeat(64)}`;
+  const { client, requests } = makeClient(
+    [
+      { status: 200, body: [] },
+      { status: 200, body: { id: 'disk' } },
+      { status: 200, body: { id: 'disk', status: { state: 'Ready' } } },
+      { status: 200, body: { id: 'sandbox' } },
+      { status: 200, body: { id: 'sandbox', state: 'Running' } },
+    ],
+    { assumeGroupExists: true },
+  );
+  await client.createSandbox({
+    image: `registry.example/image@sha256:${'b'.repeat(64)}`,
+    podId: 'managed-one',
+    managedSpecDigest: digest,
+    tier: 'S',
+    egressPolicy: { defaultAction: 'Deny', hostRules: [] },
+  });
+  const create = requests.find((r) => r.url.includes('/sandboxes?'));
+  const label = JSON.parse(String(create?.init?.body)).labels.executionSpecDigest;
+  expect(label).toMatch(/^[A-Za-z0-9][A-Za-z0-9_-]{0,61}[A-Za-z0-9]$/);
+  expect(Buffer.from(label.slice(1, -1), 'base64url').toString('hex')).toBe(digest.slice(7));
+  const restart = makeClient([
+    {
+      status: 200,
+      body: [{ id: 'sandbox', labels: { podId: 'managed-one', executionSpecDigest: label } }],
+    },
+  ]).client;
+  expect(await restart.findManagedSandbox('managed-one', digest)).toBe('sandbox');
+  const conflict = makeClient([
+    {
+      status: 200,
+      body: [{ id: 'sandbox', labels: { podId: 'managed-one', executionSpecDigest: label } }],
+    },
+  ]).client;
+  await expect(
+    conflict.findManagedSandbox('managed-one', `sha256:${'e'.repeat(64)}`),
+  ).rejects.toThrow('identity-conflict');
+});
+it('invalid managed digest is refused before credentials or creation', async () => {
+  const { client, requests } = makeClient([]);
+  await expect(
+    client.createSandbox({
+      image: 'image',
+      podId: 'managed-one',
+      managedSpecDigest: 'invalid',
+      tier: 'S',
+      egressPolicy: { defaultAction: 'Deny', hostRules: [] },
+    }),
+  ).rejects.toThrow('invalid-managed-spec-digest');
+  expect(requests).toHaveLength(0);
+});
+
+it('managed Full inspection is sent and read back before acceptance', async () => {
+  const policy = {
+    defaultAction: 'Deny' as const,
+    hostRules: [],
+    trafficInspection: 'Full' as const,
+  };
+  const { client, requests } = makeClient([
+    { status: 204 },
+    { status: 200, body: { egressPolicy: policy } },
+  ]);
+  await client.updateEgress('one', policy);
+  expect(JSON.parse(String(requests[0]?.init?.body))).toEqual({
+    defaultAction: 'Deny',
+    trafficInspection: 'Full',
+  });
+  expect(requests[1]?.init?.method).toBe('GET');
+  expect(requests[1]?.url).not.toContain('/egresspolicy');
+});
+it.each([
+  { defaultAction: 'Deny', trafficInspection: 'None' },
+  { defaultAction: 'Allow', trafficInspection: 'Full' },
+  {
+    defaultAction: 'Deny',
+    trafficInspection: 'Full',
+    hostRules: [{ pattern: '*', action: 'Allow' }],
+  },
+])('managed egress readback drift fails closed', async (body) => {
+  const { client } = makeClient([{ status: 204 }, { status: 200, body: { egressPolicy: body } }]);
+  await expect(
+    client.updateEgress('one', { defaultAction: 'Deny', hostRules: [], trafficInspection: 'Full' }),
+  ).rejects.toThrow('egress-unconfirmed');
+});

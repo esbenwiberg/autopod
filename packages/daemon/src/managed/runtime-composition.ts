@@ -1,0 +1,199 @@
+import path from 'node:path';
+import type { ManagedPodRequest, Route } from '@autopod/shared';
+import type { ContainerManager, ContainerSpawnConfig } from '../interfaces/container-manager.js';
+import { type ManagedComponentsConfig, managedComponents } from './bootstrap.js';
+import type { BoundedProviderTransport } from './bounded-provider.js';
+import { canonical } from './canonical.js';
+import { ManagedContainerRuntime } from './container-runtime.js';
+import type { ManagedPodRow } from './managed-service.js';
+import { ManagedProviderGateway } from './provider-gateway.js';
+import { ManagedQuotaFeed } from './quota-feed.js';
+import { type ManagedRepositoryMirror, ManagedWorkspaces } from './workspaces.js';
+
+export interface ManagedWorkerProviderChannel {
+  /** Prove the reviewed command uses only this gateway and cannot reach a direct provider. */
+  preflight(request: ManagedPodRequest): Promise<void>;
+  /** Trusted host binding. The worker cannot select installation, pod, revision or route. */
+  attach(binding: {
+    podId: string;
+    runtimeRef: string;
+    stateRoot: string;
+    invoke: (
+      key: string,
+      prompt: string,
+      maximumTokens: number,
+    ) => ReturnType<ManagedProviderGateway['invoke']>;
+  }): Promise<() => void>;
+}
+export interface ManagedRuntimeBinding {
+  route: Route;
+  manager: ContainerManager;
+  image: string;
+  command: readonly string[];
+  transport: BoundedProviderTransport;
+  channel: ManagedWorkerProviderChannel;
+  maximumRequests?: number;
+  /** Reviewed target networking; volumes, environment and identity are supplied below. */
+  network(request: ManagedPodRequest): Pick<ContainerSpawnConfig, 'firewallScript' | 'networkName'>;
+}
+export interface ManagedRuntimeCompositionConfig extends Omit<ManagedComponentsConfig, 'runtime'> {
+  mirrors: readonly ManagedRepositoryMirror[];
+  bindings: readonly ManagedRuntimeBinding[];
+}
+
+/** Library composition only: never discovers credentials, changes native config or starts a listener.
+ * The selected runtime's channel is a reviewed deployment input, not inferred from a profile name.
+ */
+export function composeManagedRuntime(config: ManagedRuntimeCompositionConfig) {
+  const identities = config.bindings.map((binding) => canonical(binding.route));
+  if (new Set(identities).size !== identities.length) throw new Error('managed-route-ambiguous');
+  const bindings = config.bindings.map((binding) => ({
+    ...binding,
+    route: structuredClone(binding.route),
+    command: [...binding.command],
+  }));
+  let closed = false;
+  const channels = new Map<string, () => void>();
+  const pending = new Map<string, Promise<void>>();
+  const rowFor = (ref: string) =>
+    config.db.prepare('SELECT * FROM managed_pods WHERE runtime_ref=?').get(ref) as
+      | ManagedPodRow
+      | undefined;
+  const workspaces = new ManagedWorkspaces(
+    config.db,
+    path.join(config.stateRoot, 'workspaces'),
+    config.mirrors,
+  );
+  const attach = async (index: number, podId: string, ref: string, root: string) => {
+    if (closed) throw new Error('managed-composition-closed');
+    if (channels.has(podId)) return;
+    const existing = pending.get(podId);
+    if (existing) return existing;
+    const run = async () => {
+      const row = rowFor(ref);
+      const binding = bindings[index]!;
+      if (!row || row.pod_id !== podId || root !== `/run/dispatcher-${podId}`)
+        throw new Error('managed-channel-binding');
+      components.service.requireActive(row);
+      const request = JSON.parse(row.request_json) as ManagedPodRequest;
+      if (canonical(request.route) !== canonical(binding.route))
+        throw new Error('managed-channel-route');
+      gateways[index]!.preflight(request);
+      await binding.channel.preflight(request);
+      const stop = await binding.channel.attach({
+        podId,
+        runtimeRef: ref,
+        stateRoot: root,
+        invoke: (key, prompt, maximumTokens) =>
+          gateways[index]!.invoke(
+            row.dispatcher_installation_id,
+            podId,
+            row.grant_revision,
+            key,
+            prompt,
+            maximumTokens,
+          ),
+      });
+      try {
+        if (closed) throw new Error('managed-composition-closed');
+        components.service.requireActive(
+          components.service.row(row.dispatcher_installation_id, podId),
+        );
+        await feeds[index]!.attach(row.dispatcher_installation_id, podId, ref, root);
+        if (closed) throw new Error('managed-composition-closed');
+        channels.set(podId, stop);
+      } catch (error) {
+        feeds[index]!.detach(podId);
+        stop();
+        throw error;
+      }
+    };
+    const task = run();
+    pending.set(podId, task);
+    try {
+      await task;
+    } finally {
+      pending.delete(podId);
+    }
+  };
+  const runtime = new ManagedContainerRuntime(
+    bindings.map((binding, index) => ({
+      route: binding.route,
+      manager: binding.manager,
+      image: binding.image,
+      command: binding.command,
+      quotaReady: async (request) => {
+        if (closed) throw new Error('managed-composition-closed');
+        gateways[index]!.preflight(request);
+        await binding.channel.preflight(request);
+        return true;
+      },
+      prepare: async (podId, request) => {
+        const volumes = await workspaces.prepare(podId, request);
+        for (const input of components.service.inputs!.mounts(podId))
+          volumes.push({ host: input.hostPath, container: input.containerPath, readOnly: true });
+        return {
+          ...binding.network(request),
+          podId,
+          image: binding.image,
+          env: {},
+          exposeHostGateway: false,
+          allowedHosts: [...request.effectiveGrant.scope.network.destinations],
+          networkPolicyMode: request.effectiveGrant.scope.network.destinations.length
+            ? ('restricted' as const)
+            : ('deny-all' as const),
+          volumes,
+          workingDir: request.outputs.artifacts.mode === 'none' ? '/tmp' : '/output',
+        };
+      },
+      attachQuota: (podId, ref, root) => attach(index, podId, ref, root),
+    })),
+    (ref) => {
+      const row = rowFor(ref);
+      return row
+        ? {
+            request: JSON.parse(row.request_json) as ManagedPodRequest,
+            podId: row.pod_id,
+            createdAt: row.created_at,
+          }
+        : null;
+    },
+  );
+  const components = managedComponents({ ...config, runtime });
+  const gateways = bindings.map(
+    (binding) =>
+      new ManagedProviderGateway(components.service, binding.transport, binding.maximumRequests),
+  );
+  const feeds = bindings.map(
+    (binding) => new ManagedQuotaFeed(components.service, binding.manager),
+  );
+  return {
+    ...components,
+    runtime,
+    workspaces,
+    /** Reattach leases/channels to durable identities; never allocate or restart a worker. */
+    async resume() {
+      if (!components.service.enabled) throw new Error('managed-lane-disabled');
+      if (closed) throw new Error('managed-composition-closed');
+      const rows = config.db
+        .prepare('SELECT * FROM managed_pods WHERE runtime_ref IS NOT NULL AND observed_exit=0')
+        .all() as ManagedPodRow[];
+      for (const row of rows) {
+        if (row.revoked || row.stop_requested || components.service.expired(row)) continue;
+        const request = JSON.parse(row.request_json) as ManagedPodRequest;
+        const index = bindings.findIndex(
+          (binding) => canonical(binding.route) === canonical(request.route),
+        );
+        if (index < 0) throw new Error('managed-resume-route-unavailable');
+        await attach(index, row.pod_id, row.runtime_ref!, `/run/dispatcher-${row.pod_id}`);
+      }
+    },
+    close() {
+      closed = true;
+      for (const gateway of gateways) gateway.close();
+      for (const feed of feeds) feed.close();
+      for (const stop of channels.values()) stop();
+      channels.clear();
+    },
+  };
+}
