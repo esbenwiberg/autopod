@@ -63,10 +63,7 @@
         "destinations": []
       },
       "identityBindings": [],
-      "allowedEffects": [
-        "repository.read",
-        "artifact.write"
-      ]
+      "allowedEffects": ["repository.read", "artifact.write"]
     },
     "budget": {
       "expiresAt": 4102444800,
@@ -101,10 +98,7 @@
         "destinations": []
       },
       "identityBindings": [],
-      "allowedEffects": [
-        "repository.read",
-        "artifact.write"
-      ]
+      "allowedEffects": ["repository.read", "artifact.write"]
     },
     "budget": {
       "expiresAt": 4102444800,
@@ -175,10 +169,7 @@
           "destinations": []
         },
         "identityBindings": [],
-        "allowedEffects": [
-          "repository.read",
-          "artifact.write"
-        ]
+        "allowedEffects": ["repository.read", "artifact.write"]
       },
       "budget": {
         "expiresAt": 4102444800,
@@ -214,10 +205,7 @@
           "destinations": []
         },
         "identityBindings": [],
-        "allowedEffects": [
-          "repository.read",
-          "artifact.write"
-        ]
+        "allowedEffects": ["repository.read", "artifact.write"]
       },
       "budget": {
         "expiresAt": 4102444800,
@@ -249,12 +237,8 @@
       "artifacts": {
         "mode": "required",
         "root": "/output",
-        "requiredPaths": [
-          "research.md"
-        ],
-        "include": [
-          "**/*"
-        ],
+        "requiredPaths": ["research.md"],
+        "include": ["**/*"],
         "exclude": [],
         "limits": {
           "maxFiles": 5000,

@@ -1,5 +1,5 @@
-import type { ArtifactOutput } from '@autopod/shared';
 import type { Readable, Writable } from 'node:stream';
+import type { ArtifactOutput } from '@autopod/shared';
 
 export interface ContainerSpawnConfig {
   image: string;

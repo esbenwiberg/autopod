@@ -1,5 +1,3 @@
-import type { ArtifactOutput } from '@autopod/shared';
-import { extractManagedDockerOutput } from '../managed/output-extraction.js';
 import {
   cpSync,
   linkSync,
@@ -14,6 +12,7 @@ import {
 import { basename, dirname, join } from 'node:path';
 import { PassThrough, Writable } from 'node:stream';
 import { fileURLToPath } from 'node:url';
+import type { ArtifactOutput } from '@autopod/shared';
 import Dockerode from 'dockerode';
 import type { Logger } from 'pino';
 import * as tar from 'tar-stream';
@@ -24,6 +23,7 @@ import type {
   ExecResult,
   StreamingExecResult,
 } from '../interfaces/container-manager.js';
+import { extractManagedDockerOutput } from '../managed/output-extraction.js';
 import {
   DOCKER_CALL_TIMEOUTS,
   DockerCallTimeoutError,
