@@ -1,3 +1,5 @@
+import { AsyncLocalStorage } from 'node:async_hooks';
+import { randomUUID } from 'node:crypto';
 import type {
   ActionDefinition,
   ActionPolicy,
@@ -6,9 +8,16 @@ import type {
 } from '@autopod/shared';
 import { collectPiiPatternNames, processContentDeep } from '@autopod/shared';
 import type { Logger } from 'pino';
+import type { SsrfCheckResult } from '../api/ssrf-guard.js';
 import type { PodRepository } from '../pods/pod-repository.js';
 import type { ProfileStore } from '../profiles/index.js';
 import type { SafetyEventsRepository } from '../safety/safety-events-repository.js';
+import {
+  ActionBoundaryError,
+  actionLogger,
+  redactActionValue,
+  safeFailure,
+} from './action-diagnostics.js';
 import type { ActionRegistry } from './action-registry.js';
 import type { ActionAuditRepository } from './audit-repository.js';
 import { createGenericHttpHandler } from './generic-http-handler.js';
@@ -40,7 +49,7 @@ export interface ActionEngineDependencies {
    * `assertPublicUrl` (rejects private/loopback/metadata addresses). Tests
    * that hit a localhost mock server may pass a permissive override.
    */
-  ssrfGuard?: (url: string) => Promise<{ ok: boolean; reason?: string }>;
+  ssrfGuard?: (url: string) => Promise<SsrfCheckResult>;
   /** Optional — required only when the `test-pipeline` or `deploy` handler is used. */
   podRepo?: PodRepository;
   /** Optional — required only when the `test-pipeline` or `deploy` handler is used. */
@@ -60,14 +69,30 @@ export function createActionEngine(deps: ActionEngineDependencies): ActionEngine
     podRepo,
     profileStore,
   } = deps;
-  const log = logger.child({ component: 'action-engine' });
+  const diagnosticSecrets = new AsyncLocalStorage<Set<string>>();
+  const log = actionLogger(logger.child({ component: 'action-engine' }), () =>
+    diagnosticSecrets.getStore(),
+  );
+  const recordSecret = <T extends string | undefined>(value: T): T => {
+    if (value) diagnosticSecrets.getStore()?.add(value);
+    return value;
+  };
 
   // Create handler instances
   const handlerConfig: HandlerConfig = {
     logger: log,
-    getSecret,
-    getGitHubToken,
-    getAzureDevOpsToken,
+    getSecret: (ref) => {
+      try {
+        return recordSecret(getSecret(ref));
+      } catch {
+        throw new ActionBoundaryError('credentials_unavailable');
+      }
+    },
+    getGitHubToken: getGitHubToken ? async () => recordSecret(await getGitHubToken()) : undefined,
+    getAzureDevOpsToken: getAzureDevOpsToken
+      ? async () => recordSecret(await getAzureDevOpsToken())
+      : undefined,
+    recordSecret,
     ssrfGuard,
   };
   const handlers: Record<string, ActionHandler> = {
@@ -82,7 +107,7 @@ export function createActionEngine(deps: ActionEngineDependencies): ActionEngine
       logger: log,
       podRepo,
       profileStore,
-      getAzureDevOpsToken,
+      getAzureDevOpsToken: async () => recordSecret(await getAzureDevOpsToken()),
     });
   }
   if (podRepo && profileStore) {
@@ -95,180 +120,194 @@ export function createActionEngine(deps: ActionEngineDependencies): ActionEngine
 
   return {
     async execute(request: ActionRequest, policy: ActionPolicy): Promise<ActionResponse> {
-      const { podId, actionName, params } = request;
+      return diagnosticSecrets.run(new Set<string>(), async () => {
+        const { podId, actionName, params } = request;
 
-      // 1. Resolve the action definition
-      const action = registry.getAction(actionName, policy);
-      if (!action) {
-        log.warn({ podId, actionName }, 'Action not found or not enabled');
-        return {
-          success: false,
-          error: `Action '${actionName}' not found or not enabled for this profile`,
-          sanitized: false,
-          quarantined: false,
-        };
-      }
-
-      // 2. Check overrides (approval required, resource restrictions)
-      // Collect ALL active (non-disabled) overrides for this action and merge their constraints.
-      // Multiple overrides per action are used to grant access to several specific repos —
-      // using .find() would only honour the first one and silently block the rest.
-      const activeOverrides = (policy.actionOverrides ?? []).filter(
-        (o) => o.action === actionName && !o.disabled,
-      );
-      const requiresApproval = activeOverrides.some((o) => o.requiresApproval);
-      const allAllowedResources = activeOverrides.flatMap((o) => o.allowedResources ?? []);
-
-      if (requiresApproval && !request.skipApprovalCheck) {
-        return {
-          success: false,
-          error: `Action '${actionName}' requires human approval. This check should be handled by the MCP layer — if you see this, the approval flow was bypassed.`,
-          sanitized: false,
-          quarantined: false,
-        };
-      }
-      if (allAllowedResources.length > 0) {
-        // Build the most-specific resource identifier available.
-        // ADO actions pass org + project + repo as separate params; combine them so
-        // allowedResources patterns like "365projectum/TeamPlanner@V3@" can match
-        // against calls that specify any repo within that org/project.
-        const resource =
-          buildResourceId(params) ??
-          (params.scope as string) ?? // Azure RBAC PIM role actions
-          (params.group_id as string); // Azure PIM group actions
-        if (!resource) {
-          // allowedResources is set but the action carries no repo/org identifier —
-          // deny to prevent bypassing resource restrictions via resource-agnostic params.
-          log.warn(
-            { podId, actionName },
-            'allowedResources set but action has no repo/org param — denying',
-          );
+        // 1. Resolve the action definition
+        const action = registry.getAction(actionName, policy);
+        if (!action) {
+          log.warn({ podId, actionName }, 'Action not found or not enabled');
           return {
             success: false,
-            error: `Action '${actionName}' is blocked: allowedResources is configured but no resource identifier was provided`,
+            error: `Action '${actionName}' not found or not enabled for this profile`,
             sanitized: false,
             quarantined: false,
           };
         }
-        if (!matchesResource(resource, allAllowedResources)) {
+
+        // 2. Check overrides (approval required, resource restrictions)
+        // Collect ALL active (non-disabled) overrides for this action and merge their constraints.
+        // Multiple overrides per action are used to grant access to several specific repos —
+        // using .find() would only honour the first one and silently block the rest.
+        const activeOverrides = (policy.actionOverrides ?? []).filter(
+          (o) => o.action === actionName && !o.disabled,
+        );
+        const requiresApproval = activeOverrides.some((o) => o.requiresApproval);
+        const allAllowedResources = activeOverrides.flatMap((o) => o.allowedResources ?? []);
+
+        if (requiresApproval && !request.skipApprovalCheck) {
           return {
             success: false,
-            error: `Action '${actionName}' not allowed for resource '${resource}'`,
+            error: `Action '${actionName}' requires human approval. This check should be handled by the MCP layer — if you see this, the approval flow was bypassed.`,
             sanitized: false,
             quarantined: false,
           };
         }
-      }
+        if (allAllowedResources.length > 0) {
+          // Build the most-specific resource identifier available.
+          // ADO actions pass org + project + repo as separate params; combine them so
+          // allowedResources patterns like "365projectum/TeamPlanner@V3@" can match
+          // against calls that specify any repo within that org/project.
+          const resource =
+            buildResourceId(params) ??
+            (params.scope as string) ?? // Azure RBAC PIM role actions
+            (params.group_id as string); // Azure PIM group actions
+          if (!resource) {
+            // allowedResources is set but the action carries no repo/org identifier —
+            // deny to prevent bypassing resource restrictions via resource-agnostic params.
+            log.warn(
+              { podId, actionName },
+              'allowedResources set but action has no repo/org param — denying',
+            );
+            return {
+              success: false,
+              error: `Action '${actionName}' is blocked: allowedResources is configured but no resource identifier was provided`,
+              sanitized: false,
+              quarantined: false,
+            };
+          }
+          if (!matchesResource(resource, allAllowedResources)) {
+            return {
+              success: false,
+              error: `Action '${actionName}' not allowed for resource '${resource}'`,
+              sanitized: false,
+              quarantined: false,
+            };
+          }
+        }
 
-      // 3. Validate required params
-      const validationError = validateParams(action, params);
-      if (validationError) {
-        return { success: false, error: validationError, sanitized: false, quarantined: false };
-      }
+        // 3. Validate required params
+        const validationError = validateParams(action, params);
+        if (validationError) {
+          return { success: false, error: validationError, sanitized: false, quarantined: false };
+        }
 
-      // 4. Apply defaults for optional params
-      const resolvedParams = applyDefaults(action, params);
+        // 4. Apply defaults for optional params
+        const resolvedParams = applyDefaults(action, params);
 
-      // 5. Dispatch to handler
-      const handler = handlers[action.handler];
-      if (!handler) {
-        return {
-          success: false,
-          error: `No handler registered for '${action.handler}'`,
-          sanitized: false,
-          quarantined: false,
-        };
-      }
+        // 5. Dispatch to handler
+        const handler = handlers[action.handler];
+        if (!handler) {
+          return {
+            success: false,
+            error: `No handler registered for '${action.handler}'`,
+            sanitized: false,
+            quarantined: false,
+          };
+        }
 
-      let rawData: unknown;
-      try {
-        rawData = await handler.execute(action, resolvedParams, {
-          podId,
-          approvalContext: request.approvalContext,
-        });
-      } catch (err) {
-        const message = err instanceof Error ? err.message : String(err);
-        log.error({ err, podId, actionName }, 'Action handler failed');
-
-        auditRepo.insert({
-          podId,
-          actionName,
-          params: sanitizeParamsForAudit(resolvedParams),
-          responseSummary: `ERROR: ${message.slice(0, 200)}`,
-          piiDetected: false,
-          quarantineScore: 0,
-        });
-
-        return { success: false, error: message, sanitized: false, quarantined: false };
-      }
-
-      // 6. Process content (quarantine → PII sanitize)
-      const {
-        result: processedData,
-        sanitized,
-        quarantined,
-        threats,
-      } = processContentDeep(
-        rawData,
-        {
-          sanitization: policy.sanitization,
-          quarantine: policy.quarantine,
-        },
-        action.response.redactFields,
-      );
-
-      const threatScore = threats.length > 0 ? Math.max(...threats.map((t) => t.severity)) : 0;
-
-      // Derive PII pattern names from the raw response (before sanitization).
-      const rawText = typeof rawData === 'string' ? rawData : JSON.stringify(rawData);
-      const piiCategories = sanitized ? collectPiiPatternNames(rawText) : null;
-
-      // Post-sanitize text for payload_excerpt (first 256 chars)
-      const processedText =
-        typeof processedData === 'string' ? processedData : JSON.stringify(processedData);
-      const payloadExcerpt = processedText.slice(0, 256);
-
-      // Write injection safety_events rows (one per threat)
-      if (safetyEventsRepo) {
-        for (const threat of threats) {
-          safetyEventsRepo.insert({
+        let rawData: unknown;
+        try {
+          rawData = await handler.execute(action, resolvedParams, {
             podId,
-            source: 'action_response',
-            kind: 'injection',
-            patternName: threat.pattern,
-            severity: threat.severity,
-            payloadExcerpt,
+            approvalContext: request.approvalContext,
           });
+        } catch (err) {
+          const failure = safeFailure(err);
+          const diagnosticId = randomUUID();
+          const message = `Action '${actionName}' failed: ${failure.message} (${failure.category}; diagnostic ${diagnosticId})`;
+          log.error(
+            { podId, actionName, diagnosticId, category: failure.category, status: failure.status },
+            'Action handler failed',
+          );
+          auditRepo.insert({
+            podId,
+            actionName,
+            params: redactActionValue(resolvedParams, diagnosticSecrets.getStore()) as Record<
+              string,
+              unknown
+            >,
+            responseSummary: message,
+            piiDetected: false,
+            quarantineScore: 0,
+          });
+          // All raw failure detail is withheld, independent of optional PII policy.
+          // We did not classify its content as PII or injection, so do not invent
+          // piiDetected/quarantine findings in the audit record.
+          return { success: false, error: message, sanitized: true, quarantined: false };
         }
-        // Write PII safety_events rows (one per matched pattern)
-        if (piiCategories && piiCategories.length > 0) {
-          for (const patternName of piiCategories) {
+
+        // 6. Process content (quarantine → PII sanitize)
+        const {
+          result: processedData,
+          sanitized,
+          quarantined,
+          threats,
+        } = processContentDeep(
+          rawData,
+          {
+            sanitization: policy.sanitization,
+            quarantine: policy.quarantine,
+          },
+          action.response.redactFields,
+        );
+
+        const threatScore = threats.length > 0 ? Math.max(...threats.map((t) => t.severity)) : 0;
+
+        // Derive PII pattern names from the raw response (before sanitization).
+        const rawText = typeof rawData === 'string' ? rawData : JSON.stringify(rawData);
+        const piiCategories = sanitized ? collectPiiPatternNames(rawText) : null;
+
+        // Post-sanitize text for payload_excerpt (first 256 chars)
+        const processedText =
+          typeof processedData === 'string' ? processedData : JSON.stringify(processedData);
+        const payloadExcerpt = processedText.slice(0, 256);
+
+        // Write injection safety_events rows (one per threat)
+        if (safetyEventsRepo) {
+          for (const threat of threats) {
             safetyEventsRepo.insert({
               podId,
               source: 'action_response',
-              kind: 'pii',
-              patternName,
-              severity: null,
+              kind: 'injection',
+              patternName: threat.pattern,
+              severity: threat.severity,
               payloadExcerpt,
             });
           }
+          // Write PII safety_events rows (one per matched pattern)
+          if (piiCategories && piiCategories.length > 0) {
+            for (const patternName of piiCategories) {
+              safetyEventsRepo.insert({
+                podId,
+                source: 'action_response',
+                kind: 'pii',
+                patternName,
+                severity: null,
+                payloadExcerpt,
+              });
+            }
+          }
         }
-      }
 
-      // 7. Audit log
-      auditRepo.insert({
-        podId,
-        actionName,
-        params: sanitizeParamsForAudit(resolvedParams),
-        responseSummary: summarizeResponse(processedData),
-        piiDetected: sanitized,
-        quarantineScore: threatScore,
-        piiCategories: piiCategories ?? null,
+        // 7. Audit log
+        auditRepo.insert({
+          podId,
+          actionName,
+          params: redactActionValue(resolvedParams, diagnosticSecrets.getStore()) as Record<
+            string,
+            unknown
+          >,
+          responseSummary: summarizeResponse(processedData),
+          piiDetected: sanitized,
+          quarantineScore: threatScore,
+          piiCategories: piiCategories ?? null,
+        });
+
+        log.info({ podId, actionName, sanitized, quarantined, threatScore }, 'Action executed');
+
+        return { success: true, data: processedData, sanitized, quarantined };
       });
-
-      log.info({ podId, actionName, sanitized, quarantined, threatScore }, 'Action executed');
-
-      return { success: true, data: processedData, sanitized, quarantined };
     },
 
     getAvailableActions(policy: ActionPolicy): ActionDefinition[] {
@@ -315,23 +354,6 @@ function applyDefaults(
     }
   }
   return resolved;
-}
-
-const SENSITIVE_PARAM_PATTERN = /token|password|secret|pat|key|credential|auth|bearer|api[_-]?key/i;
-
-/** Remove potentially sensitive values from params before audit logging */
-function sanitizeParamsForAudit(params: Record<string, unknown>): Record<string, unknown> {
-  const sanitized: Record<string, unknown> = {};
-  for (const [key, value] of Object.entries(params)) {
-    if (SENSITIVE_PARAM_PATTERN.test(key)) {
-      sanitized[key] = '[redacted]';
-    } else if (typeof value === 'string' && value.length > 500) {
-      sanitized[key] = `${value.slice(0, 100)}... [truncated]`;
-    } else {
-      sanitized[key] = value;
-    }
-  }
-  return sanitized;
 }
 
 /**

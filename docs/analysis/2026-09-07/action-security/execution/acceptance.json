@@ -1,0 +1,177 @@
+{
+  "baseline": "2d5456edac542a99d27f12eb1dbd16e5ad8c2c2a",
+  "criteria": [
+    {
+      "id": "W1.1",
+      "requirement": "Final URL, protocol, host and complete DNS answer validation including equivalent IP representations",
+      "status": "verified",
+      "evidence": [
+        "receipts/http-destination-red.txt",
+        "receipts/http-destination-green.txt",
+        "receipts/http-destination-source.json",
+        "receipts/final-boundary-green.txt",
+        "receipts/final-boundary-source.json",
+        "receipts/final-full-validation.txt",
+        "receipts/final-validation-identity.json"
+      ]
+    },
+    {
+      "id": "W1.2",
+      "requirement": "Validated addresses bound to real connection with TLS hostname verification preserved",
+      "status": "verified",
+      "evidence": [
+        "receipts/http-destination-red.txt",
+        "receipts/http-destination-green.txt",
+        "receipts/http-destination-source.json",
+        "receipts/final-boundary-green.txt",
+        "receipts/final-boundary-source.json",
+        "receipts/final-full-validation.txt",
+        "receipts/final-validation-identity.json"
+      ]
+    },
+    {
+      "id": "W1.3",
+      "requirement": "Bounded redirect policy with no cross-origin credentials or forbidden connection attempts",
+      "status": "verified",
+      "evidence": [
+        "receipts/http-destination-red.txt",
+        "receipts/http-destination-green.txt",
+        "receipts/http-destination-source.json",
+        "receipts/final-boundary-green.txt",
+        "receipts/final-boundary-source.json",
+        "receipts/final-full-validation.txt",
+        "receipts/final-validation-identity.json"
+      ]
+    },
+    {
+      "id": "W2.1",
+      "requirement": "Deadline spans DNS, connection, headers and body; caller abort and resource cleanup",
+      "status": "verified",
+      "evidence": [
+        "receipts/http-resilience-red.txt",
+        "receipts/http-resilience-green.txt",
+        "receipts/http-resilience-source.json",
+        "receipts/final-boundary-green.txt",
+        "receipts/final-boundary-source.json",
+        "receipts/final-full-validation.txt",
+        "receipts/final-validation-identity.json"
+      ]
+    },
+    {
+      "id": "W2.2",
+      "requirement": "Streaming decoded byte limits on success and error responses independent of Content-Length",
+      "status": "verified",
+      "evidence": [
+        "receipts/http-resilience-red.txt",
+        "receipts/http-resilience-green.txt",
+        "receipts/http-resilience-source.json",
+        "receipts/final-boundary-green.txt",
+        "receipts/final-boundary-source.json",
+        "receipts/final-full-validation.txt",
+        "receipts/final-validation-identity.json"
+      ]
+    },
+    {
+      "id": "W2.3",
+      "requirement": "Fixed local timing and byte fixture matrix plus all affected handler compatibility tests",
+      "status": "verified",
+      "evidence": [
+        "receipts/http-resilience-red.txt",
+        "receipts/http-resilience-green.txt",
+        "receipts/http-resilience-source.json",
+        "receipts/final-boundary-green.txt",
+        "receipts/final-boundary-source.json",
+        "receipts/final-full-validation.txt",
+        "receipts/final-validation-identity.json"
+      ]
+    },
+    {
+      "id": "W3.1",
+      "requirement": "Synthetic secrets absent from actual logs, audit persistence, action and tool failure responses",
+      "status": "verified",
+      "evidence": [
+        "receipts/action-failures-red.txt",
+        "receipts/action-failures-green.txt",
+        "receipts/action-failures-source.json",
+        "receipts/final-boundary-green.txt",
+        "receipts/final-boundary-source.json",
+        "receipts/final-full-validation.txt",
+        "receipts/final-validation-identity.json"
+      ]
+    },
+    {
+      "id": "W3.2",
+      "requirement": "Safe useful failure diagnostics and truthful sanitization/quarantine metadata",
+      "status": "verified",
+      "evidence": [
+        "receipts/action-failures-red.txt",
+        "receipts/action-failures-green.txt",
+        "receipts/action-failures-source.json",
+        "receipts/final-boundary-green.txt",
+        "receipts/final-boundary-source.json",
+        "receipts/final-full-validation.txt",
+        "receipts/final-validation-identity.json"
+      ]
+    },
+    {
+      "id": "W3.3",
+      "requirement": "Audit integrity and approval/resource denials preserve zero side effects",
+      "status": "verified",
+      "evidence": [
+        "receipts/action-failures-red.txt",
+        "receipts/action-failures-green.txt",
+        "receipts/action-failures-source.json",
+        "receipts/final-boundary-green.txt",
+        "receipts/final-boundary-source.json",
+        "receipts/final-full-validation.txt",
+        "receipts/final-validation-identity.json"
+      ]
+    },
+    {
+      "id": "W4.1",
+      "requirement": "Reproductions, exact source receipts, scoped commits and overlap checks",
+      "status": "verified",
+      "evidence": [
+        "progress.md",
+        "receipts/http-resilience-source.json",
+        "receipts/http-destination-source.json",
+        "receipts/action-failures-source.json",
+        "receipts/final-boundary-source.json",
+        "receipts/final-full-validation.txt",
+        "receipts/final-validation-identity.json"
+      ]
+    },
+    {
+      "id": "W4.2",
+      "requirement": "Action integration and local HTTP/TLS evidence; required full validation pipeline",
+      "status": "verified",
+      "evidence": [
+        "receipts/checkpoint-3-full-validation.txt",
+        "receipts/checkpoint-3-validation-identity.json",
+        "prerequisites/README.md",
+        "receipts/final-full-validation.txt",
+        "receipts/final-validation-identity.json"
+      ]
+    },
+    {
+      "id": "W4.3",
+      "requirement": "Final diff review and criterion-by-criterion closure",
+      "status": "verified",
+      "evidence": [
+        "closure.md",
+        "receipts/final-full-validation.txt",
+        "receipts/final-validation-identity.json"
+      ]
+    }
+  ],
+  "goalComplete": true,
+  "finalTestedSource": "d98d7b6bdfd254f49b260193cd65581b2b97d83f",
+  "validation": {
+    "command": "./scripts/validate.sh",
+    "exitCode": 0,
+    "testsPassed": 5129,
+    "testsSkipped": 1,
+    "audit": "No known vulnerabilities found",
+    "sourceCleanBeforeAndAfter": true
+  }
+}

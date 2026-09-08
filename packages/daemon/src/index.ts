@@ -31,6 +31,7 @@ import type {
 } from './images/warm-image-maintenance.js';
 import type { AuthModule } from './interfaces/index.js';
 import type { ContainerManager } from './interfaces/index.js';
+import { composeDarkManagedCli, parseManagedCliConfig } from './managed/cli-config.js';
 import {
   createNotificationService,
   createRateLimiter,
@@ -205,6 +206,11 @@ const perfClearTimer = setInterval(() => {
 perfClearTimer.unref();
 
 // Database
+const managedCliConfig = parseManagedCliConfig(
+  process.env.AUTOPOD_MANAGED_CLI,
+  process.env.AUTOPOD_ALLOW_DEV_AUTH === '1',
+);
+
 const db = createDatabase(DB_PATH, logger);
 
 // Migrations
@@ -1061,6 +1067,7 @@ await podsitterService.start().catch((err) => {
 // Server
 const app = await createServer({
   authModule,
+  managed: composeDarkManagedCli(managedCliConfig, db, DB_PATH),
   podManager,
   profileStore,
   providerAccountStore,

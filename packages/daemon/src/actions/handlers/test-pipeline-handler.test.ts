@@ -126,12 +126,11 @@ describe('test-pipeline handler', () => {
       podRepo,
       profileStore: makeProfileStore(),
     });
-    (globalThis.fetch as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
-      ok: true,
-      headers: new Map(),
-      text: async () =>
+    (globalThis.fetch as ReturnType<typeof vi.fn>).mockResolvedValueOnce(
+      new Response(
         JSON.stringify({ id: 555, _links: { web: { href: 'https://dev.azure.com/run/555' } } }),
-    });
+      ),
+    );
 
     const out = (await handler.execute(runAction, {}, { podId: 'pod-1' })) as {
       runId: number;
@@ -202,10 +201,8 @@ describe('test-pipeline handler', () => {
       podRepo: makePodRepo(),
       profileStore: makeProfileStore(),
     });
-    (globalThis.fetch as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
-      ok: true,
-      headers: new Map(),
-      text: async () =>
+    (globalThis.fetch as ReturnType<typeof vi.fn>).mockResolvedValueOnce(
+      new Response(
         JSON.stringify({
           id: 555,
           state: 'completed',
@@ -214,7 +211,8 @@ describe('test-pipeline handler', () => {
           finishedDate: '2026-01-01T10:02:30Z',
           _links: { web: { href: 'https://dev.azure.com/run/555' } },
         }),
-    });
+      ),
+    );
     const out = (await handler.execute(statusAction, { run_id: 555 }, { podId: 'pod-1' })) as {
       status: string;
       durationSeconds?: number;

@@ -1,4 +1,5 @@
 import type { ActionDefinition } from '@autopod/shared';
+import { ActionHttpError } from '../action-diagnostics.js';
 import type { ActionHandler, HandlerConfig } from './handler.js';
 import { fetchWithTimeout, pickFields, pickFieldsArray, readSafeJson } from './handler.js';
 
@@ -28,8 +29,7 @@ export function createAdoHandler(config: HandlerConfig): ActionHandler {
     });
 
     if (!response.ok) {
-      const body = await response.text().catch(() => '');
-      throw new Error(`ADO API ${response.status}: ${body.slice(0, 200)}`);
+      throw new ActionHttpError(response.status, 'ADO API');
     }
 
     return readSafeJson(response);
@@ -48,8 +48,7 @@ export function createAdoHandler(config: HandlerConfig): ActionHandler {
     });
 
     if (!response.ok) {
-      const text = await response.text().catch(() => '');
-      throw new Error(`ADO API ${response.status}: ${text.slice(0, 200)}`);
+      throw new ActionHttpError(response.status, 'ADO API');
     }
 
     return readSafeJson(response);

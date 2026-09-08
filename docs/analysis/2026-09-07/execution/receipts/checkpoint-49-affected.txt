@@ -1,0 +1,57 @@
+
+ RUN  v4.1.11 /private/tmp/autopod-durable-execution/packages/daemon
+
+ ❯ src/managed/artifact-migration.test.ts (3 tests | 2 failed) 180ms
+   × upgrades legacy rows without changing historical artifacts and reopens idempotently 80ms
+   × 151 and 152 preserve native rows and old managed schema on a real 150 upgrade and replay 99ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 2 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/managed/artifact-migration.test.ts > upgrades legacy rows without changing historical artifacts and reopens idempotently
+AssertionError: expected { version: 176 } to deeply equal { version: 152 }
+
+- Expected
++ Received
+
+  {
+-   "version": 152,
++   "version": 176,
+  }
+
+ ❯ src/managed/artifact-migration.test.ts:18:19
+     16|   runMigrations(db, directory, pino({ level: 'silent' }));
+     17|   const version = db.prepare('SELECT max(version) AS version FROM sche…
+     18|   expect(version).toEqual({ version: 152 });
+       |                   ^
+     19|   expect(
+     20|     (db.prepare('PRAGMA table_info(pods)').all() as { name: string }[]…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/2]⎯
+
+ FAIL  src/managed/artifact-migration.test.ts > 151 and 152 preserve native rows and old managed schema on a real 150 upgrade and replay
+AssertionError: expected { version: 176 } to deeply equal { version: 152 }
+
+- Expected
++ Received
+
+  {
+-   "version": 152,
++   "version": 176,
+  }
+
+ ❯ src/managed/artifact-migration.test.ts:68:84
+     66|     expect(db.prepare('SELECT * FROM managed_provider_requests').all()…
+     67|     expect(db.pragma('quick_check')).toEqual([{ quick_check: 'ok' }]);
+     68|     expect(db.prepare('SELECT max(version) AS version FROM schema_vers…
+       |                                                                                    ^
+     69|       version: 152,
+     70|     });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/2]⎯
+
+
+ Test Files  1 failed | 67 passed (68)
+      Tests  2 failed | 1364 passed | 1 skipped (1367)
+   Start at  08:16:48
+   Duration  30.47s (transform 4.92s, setup 0ms, import 14.67s, tests 69.57s, environment 5ms)
+

@@ -1,0 +1,12 @@
+{
+  "extends": "./tsconfig.json",
+  "include": [
+    "src/managed/**/*.ts",
+    "src/api/routes/managed-artifacts.ts",
+    "src/api/routes/managed-pods.ts",
+    "src/managed.ts",
+    "src/test-utils/managed-contract-bridge.ts",
+    "src/test-utils/codex-channel-acceptance.ts"
+  ],
+  "exclude": []
+}

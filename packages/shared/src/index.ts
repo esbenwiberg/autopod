@@ -643,3 +643,5 @@ export type {
   ExecutionProvenance,
   ExecutionProvenanceInput,
 } from './types/execution-provenance.js';
+export * from './types/managed-pod.js';
+export * from './managed-protocol.js';

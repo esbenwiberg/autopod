@@ -12,9 +12,10 @@ import { readFile } from 'node:fs/promises';
 import { dirname, join, posix } from 'node:path';
 import { Readable, Writable } from 'node:stream';
 import { createGzip } from 'node:zlib';
-import { AutopodError } from '@autopod/shared';
+import { type ArtifactOutput, AutopodError } from '@autopod/shared';
+import type Database from 'better-sqlite3';
 import type { Logger } from 'pino';
-import { type Headers as TarHeaders, type Pack as TarPack, pack as tarPack } from 'tar-stream';
+import { type Pack as TarPack, pack as tarPack } from 'tar-stream';
 import type {
   ContainerExecutionMetadata,
   ContainerManager,
@@ -27,6 +28,10 @@ import type {
   TerminalSession,
   TerminalSessionOptions,
 } from '../interfaces/container-manager.js';
+import {
+  SANDBOX_OUTPUT_INVENTORY,
+  extractManagedSandboxOutput,
+} from '../managed/output-extraction.js';
 import { AzureSandboxApiClient } from './azure-sandbox-api-client.js';
 import {
   CGROUP_EXECUTION_METADATA_PROBE,
@@ -44,6 +49,8 @@ import {
 } from './sandbox-api-client.js';
 
 export interface SandboxContainerManagerOptions {
+  /** Explicit managed-mode ledger; native spawn remains unchanged. */
+  managedDatabase?: Database.Database;
   /** Tier used when a spawn carries no `memoryBytes` hint (default: 'L'). */
   defaultTier?: SandboxResourceTier;
   /** Test seam for exercising multi-part archive uploads. */
@@ -105,6 +112,7 @@ export class SandboxContainerManager implements ContainerManager {
   private readonly defaultTier: SandboxResourceTier;
   private readonly volumeUploadChunkBytes: number;
   private readonly egressPolicies = new Map<string, ReturnType<typeof egressPolicyForMode>>();
+  private readonly managedDatabase?: Database.Database;
 
   constructor(
     client: SandboxApiClient,
@@ -112,6 +120,7 @@ export class SandboxContainerManager implements ContainerManager {
     options: SandboxContainerManagerOptions = {},
   ) {
     this.client = client;
+    this.managedDatabase = options.managedDatabase;
     this.logger = logger;
     this.defaultTier = options.defaultTier ?? 'L';
     this.volumeUploadChunkBytes = Math.max(
@@ -214,6 +223,89 @@ export class SandboxContainerManager implements ContainerManager {
     return sandboxId;
   }
 
+  async ensureManagedContainer(config: ContainerSpawnConfig): Promise<string> {
+    const db = this.managedDatabase;
+    const digest = config.managedSpecDigest;
+    if (
+      !db ||
+      !digest ||
+      !this.client.findManagedSandbox ||
+      !config.image.includes('@sha256:') ||
+      (config.memoryBytes && config.memoryBytes > SANDBOX_TIER_MEMORY_BYTES.L)
+    )
+      throw new Error('managed-sandbox-enforcement-unavailable');
+    assertRegistryQualifiedImage(config.image);
+    const prior = db
+      .prepare('SELECT * FROM managed_sandbox_allocations WHERE pod_id=?')
+      .get(config.podId) as
+      | { spec_digest: string; sandbox_id: string | null; phase: string }
+      | undefined;
+    if (prior && prior.spec_digest !== digest) throw new Error('managed-sandbox-identity-conflict');
+    let id = await this.client.findManagedSandbox(config.podId, digest);
+    if (prior?.sandbox_id && id !== prior.sandbox_id)
+      throw new Error('managed-sandbox-identity-missing');
+    const policy = {
+      ...egressPolicyForMode(config.networkPolicyMode, config.allowedHosts ?? []),
+      trafficInspection: 'Full' as const,
+    };
+    if (!id) {
+      const claimed = db
+        .prepare(
+          "INSERT OR IGNORE INTO managed_sandbox_allocations(pod_id,spec_digest,phase) VALUES (?,?,'creating')",
+        )
+        .run(config.podId, digest).changes;
+      if (!claimed) throw new Error('managed-sandbox-create-uncertain');
+      id = await this.client.createSandbox({
+        podId: config.podId,
+        managedSpecDigest: digest,
+        image: config.image,
+        tier: pickSandboxTier(config.memoryBytes, this.defaultTier),
+        egressPolicy: policy,
+        env: config.env,
+      });
+    }
+    db.prepare(
+      "UPDATE managed_sandbox_allocations SET sandbox_id=?,phase=CASE WHEN phase='ready' THEN phase ELSE 'created' END WHERE pod_id=? AND spec_digest=?",
+    ).run(id, config.podId, digest);
+    config.onCreated?.(id);
+    if (prior?.phase === 'ready') return id;
+    if ((await this.client.getStatus(id)) !== 'running')
+      throw new Error('managed-sandbox-not-running');
+    await this.client.updateEgress(id, policy);
+    for (const volume of config.volumes ?? [])
+      if (!existsSync(volume.host)) throw new Error('managed-sandbox-volume-missing');
+    await this.uploadVolumes(id, config.volumes ?? []);
+    const readonly = (config.volumes ?? [])
+      .filter((volume) => volume.readOnly)
+      .map((volume) => volume.container);
+    const hardened = await this.client.exec(
+      id,
+      [
+        'python3',
+        '-c',
+        `import os,stat,sys
+for root in sys.argv[1:]:
+ if not root.startswith(('/inputs/','/repositories/')): raise RuntimeError('invalid readonly root')
+ parent=os.path.dirname(root)
+ if os.path.islink(parent) or os.path.islink(root): raise RuntimeError('unsafe readonly root')
+ os.chown(parent,0,0);os.chmod(parent,0o755)
+ for directory,dirs,files in os.walk(root,followlinks=False):
+  os.chown(directory,0,0);os.chmod(directory,0o555)
+  for name in files+dirs:
+   file=os.path.join(directory,name);os.chown(file,0,0,follow_symlinks=False)
+   if not os.path.islink(file): os.chmod(file,0o555 if os.path.isdir(file) else (0o555 if os.stat(file).st_mode & 0o111 else 0o444))
+`,
+        ...readonly,
+      ],
+      { user: 'root' },
+    );
+    if (hardened.exitCode !== 0) throw new Error('managed-sandbox-readonly-unavailable');
+    db.prepare("UPDATE managed_sandbox_allocations SET phase='ready' WHERE pod_id=?").run(
+      config.podId,
+    );
+    return id;
+  }
+
   async kill(containerId: string): Promise<void> {
     try {
       await this.client.destroy(containerId);
@@ -262,6 +354,34 @@ export class SandboxContainerManager implements ContainerManager {
 
   async readFileBinary(containerId: string, path: string): Promise<Buffer> {
     return this.client.readFile(containerId, path);
+  }
+
+  async extractManagedOutput(
+    containerId: string,
+    staging: string,
+    output: ArtifactOutput,
+  ): Promise<void> {
+    const result = await this.client.exec(containerId, [
+      'python3',
+      '-c',
+      SANDBOX_OUTPUT_INVENTORY,
+      String(output.limits.maxFiles),
+      String(output.limits.maxFileBytes),
+      String(output.limits.maxTotalBytes),
+    ]);
+    if (result.exitCode !== 0) throw new Error('artifact-inventory-unavailable');
+    let inventory: unknown;
+    try {
+      inventory = JSON.parse(result.stdout);
+    } catch {
+      throw new Error('artifact-invalid-inventory');
+    }
+    await extractManagedSandboxOutput(
+      inventory,
+      (name) => this.client.readFile(containerId, name),
+      staging,
+      output,
+    );
   }
 
   async extractDirectoryFromContainer(
@@ -620,6 +740,8 @@ interface SandboxVolumeArchive {
   content: Buffer;
   entries: number;
 }
+
+type TarHeaders = Parameters<TarPack['entry']>[0];
 
 async function createSandboxVolumeArchive(rootPath: string): Promise<SandboxVolumeArchive> {
   const pack = tarPack();

@@ -1,0 +1,12 @@
+{
+  "sourceCommit": "83c561e69413c71f1195f436621d2a150162af10",
+  "authorization": "User: Go on, 2026-09-08",
+  "files": {
+    "package.json": "af9ff8c9ff5d88d4a101e4150c291570644d9757",
+    "packages/cli/package.json": "6204b7a1a542459c80a3e209673e76df8c40e1ee",
+    "packages/daemon/package.json": "36540744466deca25b9f7d9c6ecf6972320bbe97",
+    "packages/mobile-web/package.json": "0a59bb37a7dc3517aa4522f2f93ecb0f2d9f8bb6",
+    "packages/shared/package.json": "5adcb044c02540751e8f2bfb95d14394f9018d5c",
+    "pnpm-lock.yaml": "06d4dacec6f30a26ebdbd84583442a55d6c0fd49"
+  }
+}

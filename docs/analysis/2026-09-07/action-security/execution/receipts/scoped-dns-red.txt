@@ -1,0 +1,32 @@
+
+ RUN  v4.1.10 /Users/ewi/.codex/worktrees/46f5/autopod/packages/daemon
+
+ ❯ src/api/ssrf-guard.test.ts (59 tests | 1 failed | 57 skipped) 7ms
+     × rejects malformed or scoped resolver address fe80::1%lo0 without throwing 4ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/api/ssrf-guard.test.ts > assertPublicUrl > rejects malformed or scoped resolver address fe80::1%lo0 without throwing
+AssertionError: promise rejected "TypeError: Invalid URL { …(2) }" instead of resolving
+ ❯ src/api/ssrf-guard.test.ts:94:7
+     92|       await expect(
+     93|         assertPublicUrl('https://fixture.invalid', { resolver: async (…
+     94|       ).resolves.toMatchObject({ ok: false });
+       |       ^
+     95|     },
+     96|   );
+
+Caused by: TypeError: Invalid URL
+ ❯ isPrivateIPv6 src/api/ssrf-guard.ts:47:17
+ ❯ isPrivateIp src/api/ssrf-guard.ts:67:29
+ ❯ assertPublicUrl src/api/ssrf-guard.ts:182:9
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯
+Serialized Error: { code: 'ERR_INVALID_URL', input: 'http://[fe80::1%lo0]/' }
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 1 passed | 57 skipped (59)
+   Start at  23:39:52
+   Duration  120ms (transform 16ms, setup 0ms, import 24ms, tests 7ms, environment 0ms)

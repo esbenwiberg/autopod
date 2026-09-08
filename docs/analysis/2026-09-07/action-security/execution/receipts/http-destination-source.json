@@ -1,0 +1,14 @@
+{
+  "baseCommit": "7f22725313afd87a7f4de1bb7e26c4acb2ef755e",
+  "sourceHashes": {
+    "packages/daemon/src/actions/pinned-http-transport.ts": "9ea9457122bf5aa2e1de3baf8de177257e93e049578e78105f05c5faf2213961",
+    "packages/daemon/src/actions/generic-http-handler.ts": "a4640a0bd16319cadd309f303f925d01b7202558c72f7967811dc8d25dbf8a65",
+    "packages/daemon/src/actions/http-destination.test.ts": "2ac1c2fcfbdd2fab1897b242d359576d3277e72eaee044f829c24ae02be55c8d",
+    "packages/daemon/src/actions/pinned-http-transport.test.ts": "45049b5de73d2f2ba1d08b8932f5dec80e65f707c8fbff5d3416a1d86ba5699f",
+    "packages/daemon/src/actions/handlers/http-resilience.test.ts": "967b9b28f335d85549d4da1b05045e4f61e75caabb7c07e33777cdb55fcfbeb2",
+    "packages/daemon/src/actions/handlers/handler.ts": "8003692c4dd427936adf767f75418223f12d100be860351cc3f571137ed4411f",
+    "packages/daemon/src/api/ssrf-guard.ts": "430be9f59c2ae2956f9b4e004f5154855a900fb709528508ec815e6eb7b77481"
+  },
+  "result": "112 passed across 6 files; workspace build passed (daemon executed, 6 cached tasks)",
+  "baselineReproduction": "http-destination-red.txt: 7 failures on prior production source; only fixture timing cases use 60ms, other requests 1000ms"
+}

@@ -39,6 +39,7 @@ export default defineConfig({
   define: { __AUTOPOD_RELEASE__: JSON.stringify(release) },
   entry: [
     'src/index.ts',
+    'src/managed.ts',
     'src/db/verify-backup-cli.ts',
     'src/db/reconcile-native-checkpoint-cli.ts',
   ],
@@ -59,6 +60,10 @@ export default defineConfig({
     );
     mkdirSync('dist/actions/defaults', { recursive: true });
     cpSync('src/actions/defaults', 'dist/actions/defaults', { recursive: true });
+    mkdirSync('dist/runtime', { recursive: true });
+    cpSync('src/managed/runtime/supervisor.py', 'dist/runtime/supervisor.py');
+    cpSync('src/managed/runtime/codex_channel.py', 'dist/runtime/codex_channel.py');
+    cpSync('src/managed/runtime/codex_worker.py', 'dist/runtime/codex_worker.py');
     mkdirSync('dist/containers', { recursive: true });
     cpSync('src/containers/seccomp-profile.json', 'dist/containers/seccomp-profile.json');
     mkdirSync('dist/images', { recursive: true });

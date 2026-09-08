@@ -1,0 +1,540 @@
+{
+  "Route": {
+    "providerAccountId": "fixture",
+    "model": "fixture",
+    "reasoning": "none",
+    "runtime": "codex",
+    "executionTarget": "local"
+  },
+  "RepositoryScope": {
+    "enrollmentId": "fixture",
+    "remote": "fixture",
+    "baseRevision": "0000000000000000000000000000000000000000",
+    "access": "read",
+    "branchNamespace": "fixture"
+  },
+  "IdentityBinding": {
+    "alias": "fixture",
+    "bindingDigest": "sha256:0000000000000000000000000000000000000000000000000000000000000000"
+  },
+  "Budget": {
+    "expiresAt": 1,
+    "maxTokens": 1,
+    "maxDurationSeconds": 1
+  },
+  "NetworkScope": {
+    "profileId": "fixture",
+    "destinations": []
+  },
+  "Scope": {
+    "repositories": [],
+    "network": {
+      "profileId": "fixture",
+      "destinations": []
+    },
+    "identityBindings": [],
+    "allowedEffects": []
+  },
+  "EffectiveGrant": {
+    "schemaVersion": 1,
+    "grantId": "fixture",
+    "revision": 1,
+    "dispatcherAttemptId": "attempt-research",
+    "profileSnapshotDigest": "sha256:858d9e250807713697978867a0581f7430cbc43eab7f5a78d760d9871ee041fd",
+    "route": {
+      "providerAccountId": "fixture-account",
+      "model": "fixture-model",
+      "reasoning": "none",
+      "runtime": "codex",
+      "executionTarget": "local"
+    },
+    "scope": {
+      "repositories": [
+        {
+          "enrollmentId": "fixture-repo",
+          "remote": "fixture-remote",
+          "baseRevision": "0000000000000000000000000000000000000000",
+          "access": "read",
+          "branchNamespace": "dispatcher/workers/"
+        }
+      ],
+      "network": {
+        "profileId": "fixture",
+        "destinations": []
+      },
+      "identityBindings": [],
+      "allowedEffects": ["repository.read", "artifact.write"]
+    },
+    "budget": {
+      "expiresAt": 4102444800,
+      "maxTokens": 50000,
+      "maxDurationSeconds": 7200
+    },
+    "digest": "sha256:c8478fce593ff5a1906d4ef131ead4ec8831137efbf25eaed64000ddf93df4b1"
+  },
+  "ProfileSnapshot": {
+    "profileId": "fixture",
+    "profileVersion": 1,
+    "snapshotDigest": "sha256:858d9e250807713697978867a0581f7430cbc43eab7f5a78d760d9871ee041fd",
+    "route": {
+      "providerAccountId": "fixture-account",
+      "model": "fixture-model",
+      "reasoning": "none",
+      "runtime": "codex",
+      "executionTarget": "local"
+    },
+    "scope": {
+      "repositories": [
+        {
+          "enrollmentId": "fixture-repo",
+          "remote": "fixture-remote",
+          "baseRevision": "0000000000000000000000000000000000000000",
+          "access": "read",
+          "branchNamespace": "dispatcher/workers/"
+        }
+      ],
+      "network": {
+        "profileId": "fixture",
+        "destinations": []
+      },
+      "identityBindings": [],
+      "allowedEffects": ["repository.read", "artifact.write"]
+    },
+    "budget": {
+      "expiresAt": 4102444800,
+      "maxTokens": 50000,
+      "maxDurationSeconds": 7200
+    }
+  },
+  "ArtifactOutput": {
+    "mode": "none",
+    "root": "/output",
+    "requiredPaths": [],
+    "include": [],
+    "exclude": [],
+    "limits": {
+      "maxFiles": 1,
+      "maxFileBytes": 1,
+      "maxTotalBytes": 1
+    },
+    "links": {
+      "allowSymlinks": false,
+      "allowHardlinks": false
+    }
+  },
+  "SourceOutput": {
+    "mode": "none",
+    "repository": "fixture",
+    "remote": "fixture",
+    "head": "fixture",
+    "base": "fixture"
+  },
+  "ArtifactInput": {
+    "name": "research",
+    "backendArtifactId": "fixture",
+    "manifestSha256": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+    "mountPath": "/inputs/research",
+    "access": "read"
+  },
+  "ManagedPodRequest": {
+    "schemaVersion": 1,
+    "managedMode": true,
+    "dispatcherJobId": "job-research",
+    "dispatcherAttemptId": "attempt-research",
+    "startKey": "start-research",
+    "executionSpecDigest": "sha256:35afdb752f9d637b8adf4120721282b57d343126d012218244d27215db963234",
+    "profileSnapshot": {
+      "profileId": "fixture",
+      "profileVersion": 1,
+      "snapshotDigest": "sha256:858d9e250807713697978867a0581f7430cbc43eab7f5a78d760d9871ee041fd",
+      "route": {
+        "providerAccountId": "fixture-account",
+        "model": "fixture-model",
+        "reasoning": "none",
+        "runtime": "codex",
+        "executionTarget": "local"
+      },
+      "scope": {
+        "repositories": [
+          {
+            "enrollmentId": "fixture-repo",
+            "remote": "fixture-remote",
+            "baseRevision": "0000000000000000000000000000000000000000",
+            "access": "read",
+            "branchNamespace": "dispatcher/workers/"
+          }
+        ],
+        "network": {
+          "profileId": "fixture",
+          "destinations": []
+        },
+        "identityBindings": [],
+        "allowedEffects": ["repository.read", "artifact.write"]
+      },
+      "budget": {
+        "expiresAt": 4102444800,
+        "maxTokens": 50000,
+        "maxDurationSeconds": 7200
+      }
+    },
+    "effectiveGrant": {
+      "schemaVersion": 1,
+      "grantId": "fixture",
+      "revision": 1,
+      "dispatcherAttemptId": "attempt-research",
+      "profileSnapshotDigest": "sha256:858d9e250807713697978867a0581f7430cbc43eab7f5a78d760d9871ee041fd",
+      "route": {
+        "providerAccountId": "fixture-account",
+        "model": "fixture-model",
+        "reasoning": "none",
+        "runtime": "codex",
+        "executionTarget": "local"
+      },
+      "scope": {
+        "repositories": [
+          {
+            "enrollmentId": "fixture-repo",
+            "remote": "fixture-remote",
+            "baseRevision": "0000000000000000000000000000000000000000",
+            "access": "read",
+            "branchNamespace": "dispatcher/workers/"
+          }
+        ],
+        "network": {
+          "profileId": "fixture",
+          "destinations": []
+        },
+        "identityBindings": [],
+        "allowedEffects": ["repository.read", "artifact.write"]
+      },
+      "budget": {
+        "expiresAt": 4102444800,
+        "maxTokens": 50000,
+        "maxDurationSeconds": 7200
+      },
+      "digest": "sha256:c8478fce593ff5a1906d4ef131ead4ec8831137efbf25eaed64000ddf93df4b1"
+    },
+    "task": {
+      "kind": "research",
+      "objective": "fixture",
+      "contextBundleDigest": "sha256:0000000000000000000000000000000000000000000000000000000000000000"
+    },
+    "route": {
+      "providerAccountId": "fixture-account",
+      "model": "fixture-model",
+      "reasoning": "none",
+      "runtime": "codex",
+      "executionTarget": "local"
+    },
+    "outputs": {
+      "source": {
+        "mode": "none",
+        "repository": "fixture",
+        "remote": "fixture",
+        "head": "fixture",
+        "base": "fixture"
+      },
+      "artifacts": {
+        "mode": "required",
+        "root": "/output",
+        "requiredPaths": ["research.md"],
+        "include": ["**/*"],
+        "exclude": [],
+        "limits": {
+          "maxFiles": 5000,
+          "maxFileBytes": 536870912,
+          "maxTotalBytes": 2147483648
+        },
+        "links": {
+          "allowSymlinks": false,
+          "allowHardlinks": false
+        }
+      }
+    },
+    "inputArtifacts": [],
+    "validation": {
+      "suite": "fixture",
+      "verifierPolicy": "fixture"
+    }
+  },
+  "ManagedPodHandle": {
+    "schemaVersion": 1,
+    "podId": "fixture",
+    "dispatcherInstallationId": "fixture",
+    "dispatcherAttemptId": "fixture",
+    "acceptedExecutionSpecDigest": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+    "profileSnapshotDigest": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+    "grantId": "fixture",
+    "grantRevision": 1,
+    "effectiveGrantDigest": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+    "route": {
+      "providerAccountId": "fixture",
+      "model": "fixture",
+      "reasoning": "none",
+      "runtime": "codex",
+      "executionTarget": "local"
+    },
+    "createdAt": 1,
+    "initialCursor": "fixture"
+  },
+  "ArtifactFile": {
+    "path": "fixture",
+    "size": 1,
+    "sha256": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+    "mediaType": "fixture"
+  },
+  "ArtifactManifest": {
+    "schemaVersion": 1,
+    "artifactId": "fixture",
+    "podId": "fixture",
+    "dispatcherAttemptId": "fixture",
+    "executionSpecDigest": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+    "createdAt": 1,
+    "files": [],
+    "fileCount": 1,
+    "totalBytes": 1,
+    "bundle": {
+      "format": "tar.gz",
+      "size": 1,
+      "sha256": "sha256:0000000000000000000000000000000000000000000000000000000000000000"
+    }
+  },
+  "ArtifactReceipt": {
+    "schemaVersion": 1,
+    "artifactId": "fixture",
+    "podId": "fixture",
+    "dispatcherAttemptId": "fixture",
+    "executionSpecDigest": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+    "manifestSha256": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+    "bundleSha256": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+    "fileCount": 1,
+    "totalBytes": 1,
+    "status": "committed"
+  },
+  "SourceCandidateReceipt": {
+    "schemaVersion": 1,
+    "candidateId": "fixture",
+    "podId": "fixture",
+    "dispatcherAttemptId": "fixture",
+    "executionSpecDigest": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+    "repository": "fixture",
+    "remote": "fixture",
+    "head": "fixture",
+    "base": "fixture",
+    "expectedOldCommit": "0000000000000000000000000000000000000000",
+    "newCommit": "0000000000000000000000000000000000000000",
+    "evidenceDigest": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+    "candidateDigest": "sha256:0000000000000000000000000000000000000000000000000000000000000000"
+  },
+  "VerificationReceipt": {
+    "schemaVersion": 1,
+    "verificationId": "fixture",
+    "dispatcherAttemptId": "fixture",
+    "executionSpecDigest": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+    "candidateDigest": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+    "newCommit": "0000000000000000000000000000000000000000",
+    "evidenceDigest": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+    "verifierPolicy": "fixture",
+    "verifierIdentity": "fixture",
+    "status": "passed",
+    "verifiedAt": 1,
+    "receiptDigest": "sha256:0000000000000000000000000000000000000000000000000000000000000000"
+  },
+  "FinalizeSourceDeliveryRequest": {
+    "schemaVersion": 1,
+    "dispatcherInstallationId": "fixture",
+    "dispatcherAttemptId": "fixture",
+    "executionSpecDigest": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+    "candidateDigest": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+    "verificationReceipt": {
+      "schemaVersion": 1,
+      "verificationId": "fixture",
+      "dispatcherAttemptId": "fixture",
+      "executionSpecDigest": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+      "candidateDigest": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+      "newCommit": "0000000000000000000000000000000000000000",
+      "evidenceDigest": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+      "verifierPolicy": "fixture",
+      "verifierIdentity": "fixture",
+      "status": "passed",
+      "verifiedAt": 1,
+      "receiptDigest": "sha256:0000000000000000000000000000000000000000000000000000000000000000"
+    },
+    "grantId": "fixture",
+    "grantRevision": 1,
+    "operation": "commit",
+    "repository": "fixture",
+    "remote": "fixture",
+    "head": "fixture",
+    "base": "fixture",
+    "expectedOldCommit": "0000000000000000000000000000000000000000",
+    "newCommit": "0000000000000000000000000000000000000000",
+    "draft": true,
+    "bodyDigest": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+    "operationKey": "fixture"
+  },
+  "SourceDeliveryReceipt": {
+    "schemaVersion": 1,
+    "dispatcherAttemptId": "fixture",
+    "executionSpecDigest": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+    "candidateDigest": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+    "verificationReceiptDigest": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+    "operationKey": "fixture",
+    "requestDigest": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+    "operation": "commit",
+    "repository": "fixture",
+    "remote": "fixture",
+    "head": "fixture",
+    "base": "fixture",
+    "oldCommit": "0000000000000000000000000000000000000000",
+    "newCommit": "0000000000000000000000000000000000000000",
+    "draft": true,
+    "bodyDigest": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+    "pullRequestId": 1,
+    "status": "delivered"
+  },
+  "FinalizeSourceDeliveryResponse": {
+    "schemaVersion": 1,
+    "status": "delivered",
+    "receipts": [],
+    "reason": "fixture"
+  },
+  "ValidationEvidence": {
+    "schemaVersion": 1,
+    "evidenceId": "fixture",
+    "dispatcherAttemptId": "fixture",
+    "kind": "worker-claim",
+    "name": "fixture",
+    "status": "passed",
+    "digest": "sha256:0000000000000000000000000000000000000000000000000000000000000000"
+  },
+  "ManagedPodEvent": {
+    "schemaVersion": 1,
+    "eventId": "fixture",
+    "podId": "fixture",
+    "dispatcherAttemptId": "fixture",
+    "cursor": "fixture",
+    "kind": "queued",
+    "createdAt": 1,
+    "evidence": []
+  },
+  "ManagedPodResult": {
+    "schemaVersion": 1,
+    "handle": {
+      "schemaVersion": 1,
+      "podId": "fixture",
+      "dispatcherInstallationId": "fixture",
+      "dispatcherAttemptId": "fixture",
+      "acceptedExecutionSpecDigest": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+      "profileSnapshotDigest": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+      "grantId": "fixture",
+      "grantRevision": 1,
+      "effectiveGrantDigest": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+      "route": {
+        "providerAccountId": "fixture",
+        "model": "fixture",
+        "reasoning": "none",
+        "runtime": "codex",
+        "executionTarget": "local"
+      },
+      "createdAt": 1,
+      "initialCursor": "fixture"
+    },
+    "state": "queued",
+    "artifacts": [],
+    "candidates": [],
+    "source": [],
+    "evidence": [],
+    "limitations": [],
+    "revoked": false,
+    "observedExit": false,
+    "cleanup": "not-requested"
+  },
+  "ManagedPodError": {
+    "schemaVersion": 1,
+    "code": "fixture",
+    "retryable": false,
+    "requestId": "fixture"
+  },
+  "DriverHealth": {
+    "schemaVersion": 1,
+    "backendId": "fixture",
+    "protocol": "managed-pod-v1",
+    "build": 1,
+    "minimumDispatcherBuild": 1,
+    "minimumAutoPodBuild": 1,
+    "capabilities": [],
+    "targets": [],
+    "enabled": false
+  },
+  "FollowUpEnvelope": {
+    "schemaVersion": 1,
+    "dispatcherAttemptId": "fixture",
+    "grantId": "fixture",
+    "grantRevision": 1,
+    "message": "fixture"
+  },
+  "ControlRequest": {
+    "schemaVersion": 1,
+    "dispatcherAttemptId": "fixture",
+    "grantId": "fixture",
+    "grantRevision": 1,
+    "operation": "stop"
+  },
+  "ControlResult": {
+    "schemaVersion": 1,
+    "accepted": false,
+    "revoked": false,
+    "stopRequested": false,
+    "observedExit": false,
+    "cleanup": "not-requested"
+  },
+  "ManagedObservation": {
+    "schemaVersion": 1,
+    "cursor": "0",
+    "events": [],
+    "result": {
+      "schemaVersion": 1,
+      "handle": {
+        "schemaVersion": 1,
+        "podId": "fixture",
+        "dispatcherInstallationId": "fixture",
+        "dispatcherAttemptId": "fixture",
+        "acceptedExecutionSpecDigest": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+        "profileSnapshotDigest": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+        "grantId": "fixture",
+        "grantRevision": 1,
+        "effectiveGrantDigest": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+        "route": {
+          "providerAccountId": "fixture",
+          "model": "fixture",
+          "reasoning": "none",
+          "runtime": "codex",
+          "executionTarget": "local"
+        },
+        "createdAt": 1,
+        "initialCursor": "fixture"
+      },
+      "state": "queued",
+      "artifacts": [],
+      "candidates": [],
+      "source": [],
+      "evidence": [],
+      "limitations": [],
+      "revoked": false,
+      "observedExit": false,
+      "cleanup": "not-requested"
+    }
+  },
+  "HardTokenBudget": {
+    "expiresAt": 1,
+    "maxTokens": 1,
+    "maxDurationSeconds": 1
+  },
+  "RequestTimeBudget": {
+    "mode": "request-time",
+    "expiresAt": 2000000000,
+    "maxProviderRequests": 1,
+    "maxDurationSeconds": 180
+  }
+}

@@ -1,0 +1,21 @@
+{
+  "baseCommit": "37d37673eea95aaee1e3a75a60845e7e6b8075f4",
+  "sourceHashes": {
+    "packages/daemon/src/actions/action-engine.ts": "87c24ff57061cee13a276cd72f3d56a20897fd87ebcbb33d00423ee41ba471ab",
+    "packages/daemon/src/actions/action-integration.test.ts": "2bd48953ab7c141ea5e1572bae63ea92446fc124ab03818aee55c829927a6711",
+    "packages/daemon/src/actions/generic-http-handler.ts": "5de6c8fadd9656e654495b6f9a1a25c4c82cd4a31a4b64f37658629bfb60141c",
+    "packages/daemon/src/actions/handlers/ado-handler.ts": "cabfc96e63840df478ac8519116eaa8aee08495bbc0a277e402d6fe4bcc11ccf",
+    "packages/daemon/src/actions/handlers/azure-logs-handler.ts": "06e31a5be4e2baba54c6ccdee55945d9eba174a1438eaf7cb19f9e0a0caa65c6",
+    "packages/daemon/src/actions/handlers/azure-pim-handler.ts": "0a241613c639b83bf2821f40b24c2ef63c45a3d02aeb20c6234143d92f272fe0",
+    "packages/daemon/src/actions/handlers/github-handler.ts": "34c7890c652d83873608fd0652311d11c1c01182c9458ed7a21fbf7901f5018a",
+    "packages/daemon/src/actions/handlers/handler.ts": "420805fc44d60362e842661f58d3c8c5579828df378b483c5890e408db820f8e",
+    "packages/daemon/src/actions/handlers/http-resilience.test.ts": "c64992b417b8bd85c234fbb4b628e5ba260b855ad195e1d4ba3497da12e01490",
+    "packages/daemon/src/actions/handlers/test-pipeline-handler.ts": "dd0fa0089f114bb531fe9cb6db5dcc08e0786add022948e1bc381bea8dd19581",
+    "packages/daemon/src/actions/http-destination.test.ts": "2c58d8debf8da7177e386deb91cc5a59da4c045cbf5f5443100463ab215f20cb",
+    "packages/daemon/src/actions/pinned-http-transport.test.ts": "f51dbb8cb12e5da030e06b8dfe978b12146c646995eeb66976c9c0300ffbfabb",
+    "packages/daemon/src/actions/pinned-http-transport.ts": "780d0b06987f6120bb39cccb0cbee7b30efbdfe9b313145071842fe66d12926c",
+    "packages/daemon/src/actions/action-diagnostics.ts": "fdb2aa6790b12c4bef27040b1c0e3493e4e4bcc9e8cf9b535bc45d2af844b93b"
+  },
+  "red": "3 failure leaks reproduced; 2 denial checks already passed",
+  "green": "276 passed across 17 action and SSRF test files; actual package MCP formatter, SQLite audit and pino output inspected"
+}

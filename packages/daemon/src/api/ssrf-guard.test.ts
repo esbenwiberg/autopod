@@ -86,6 +86,15 @@ describe('isPrivateUrl', () => {
 });
 
 describe('assertPublicUrl', () => {
+  it.each(['fe80::1%lo0', 'not-an-address'])(
+    'rejects malformed or scoped resolver address %s without throwing',
+    async (address) => {
+      await expect(
+        assertPublicUrl('https://fixture.invalid', { resolver: async () => [address] }),
+      ).resolves.toMatchObject({ ok: false });
+    },
+  );
+
   it('rejects malformed URL without DNS', async () => {
     const result = await assertPublicUrl('not a url', {
       resolver: () => {

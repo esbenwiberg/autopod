@@ -1,5 +1,8 @@
 import type { ActionDefinition } from '@autopod/shared';
 import type { Logger } from 'pino';
+import type { SsrfCheckResult } from '../../api/ssrf-guard.js';
+import { ActionBoundaryError } from '../action-diagnostics.js';
+import type { PinnedHttpTransport } from '../pinned-http-transport.js';
 
 /**
  * Common interface for all action handlers.
@@ -38,7 +41,11 @@ export interface HandlerConfig {
    * Defaults to `assertPublicUrl` from `api/ssrf-guard.ts`. Override in tests
    * that hit a localhost mock server.
    */
-  ssrfGuard?: (url: string) => Promise<{ ok: boolean; reason?: string }>;
+  ssrfGuard?: (url: string) => Promise<SsrfCheckResult>;
+  /** Trusted dependency injection only; never selected from request/profile input. */
+  httpTransport?: PinnedHttpTransport;
+  /** Record resolved credentials only in the current action's diagnostic scope. */
+  recordSecret?: (secret: string) => void;
 }
 
 /**
@@ -109,51 +116,134 @@ export function resolveResultPath(obj: unknown, resultPath: string | undefined):
 }
 
 const DEFAULT_TIMEOUT = 15_000;
-/** Reject responses larger than this to prevent memory exhaustion. */
-const MAX_RESPONSE_BYTES = 2 * 1024 * 1024; // 2 MB
+/** Limit decoded bytes, including errors and chunked responses. */
+const MAX_RESPONSE_BYTES = 2 * 1024 * 1024;
+
+function responseTooLarge(): Error {
+  return new ActionBoundaryError('response_too_large');
+}
+
+/** Consume at most the limit, cancelling the upstream stream on every failure. */
+async function readBoundedBody(response: Response, signal?: AbortSignal): Promise<Uint8Array> {
+  const reader = response.body?.getReader();
+  if (!reader) {
+    signal?.throwIfAborted();
+    return new Uint8Array();
+  }
+  const abort = () => {
+    void reader.cancel().catch(() => {});
+  };
+  signal?.addEventListener('abort', abort, { once: true });
+  try {
+    signal?.throwIfAborted();
+    const contentLength = response.headers.get('content-length');
+    if (contentLength !== null && Number(contentLength) > MAX_RESPONSE_BYTES) {
+      throw responseTooLarge();
+    }
+    const chunks: Uint8Array[] = [];
+    let size = 0;
+    for (;;) {
+      const { done, value } = await reader.read();
+      signal?.throwIfAborted();
+      if (done) break;
+      size += value.byteLength;
+      if (size > MAX_RESPONSE_BYTES) throw responseTooLarge();
+      chunks.push(value);
+    }
+    const bytes = new Uint8Array(size);
+    let offset = 0;
+    for (const chunk of chunks) {
+      bytes.set(chunk, offset);
+      offset += chunk.byteLength;
+    }
+    return bytes;
+  } catch (error) {
+    await reader.cancel().catch(() => {});
+    throw error;
+  } finally {
+    signal?.removeEventListener('abort', abort);
+    reader.releaseLock();
+  }
+}
 
 /**
- * Fetch with timeout support.
+ * Resolve only after the bounded body is received. Every caller, including
+ * error/text consumers, gets the same full-request deadline and byte limit.
  */
 export async function fetchWithTimeout(
   url: string,
   init: RequestInit & { timeout?: number },
+  transport: (url: string, init: RequestInit) => Promise<Response> = fetch,
 ): Promise<Response> {
-  const timeout = init.timeout ?? DEFAULT_TIMEOUT;
+  const { timeout = DEFAULT_TIMEOUT, signal: callerSignal, ...requestInit } = init;
+  if (!Number.isFinite(timeout) || timeout <= 0 || timeout > 2_147_483_647) {
+    throw new Error('Invalid HTTP action timeout');
+  }
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeout);
+  const signal = callerSignal
+    ? AbortSignal.any([controller.signal, callerSignal])
+    : controller.signal;
+  const timer = setTimeout(() => controller.abort(new ActionBoundaryError('timeout')), timeout);
 
   try {
-    const response = await fetch(url, {
-      ...init,
-      headers: {
-        'Accept-Language': 'en-US',
-        ...init.headers,
+    signal.throwIfAborted();
+    const response = await withAbort(
+      transport(url, {
+        ...requestInit,
+        headers: {
+          'Accept-Language': 'en-US',
+          ...init.headers,
+        },
+        signal,
+      }),
+      signal,
+      (late) => {
+        void late.body?.cancel().catch(() => {});
       },
-      signal: controller.signal,
+    );
+    const bytes = await readBoundedBody(response, signal);
+    const buffered = new Response(response.body === null ? null : bytes, {
+      status: response.status,
+      statusText: response.statusText,
+      headers: response.headers,
     });
-    return response;
+    // Preserve useful transport metadata without exposing an unbounded stream.
+    Object.defineProperties(buffered, {
+      url: { value: response.url },
+      redirected: { value: response.redirected },
+      type: { value: response.type },
+    });
+    return buffered;
   } finally {
     clearTimeout(timer);
   }
 }
 
-/**
- * Parse JSON from a response while enforcing a size limit.
- * Throws if the response body exceeds MAX_RESPONSE_BYTES.
- */
+/** Also enforce streaming byte bounds for responses supplied by other callers. */
 export async function readSafeJson(response: Response): Promise<unknown> {
-  const contentLength = response.headers.get('content-length');
-  if (contentLength !== null && Number.parseInt(contentLength, 10) > MAX_RESPONSE_BYTES) {
-    throw new Error(
-      `Response too large (${contentLength} bytes, limit ${MAX_RESPONSE_BYTES}). Use more specific query parameters to reduce results.`,
-    );
+  const bytes = await readBoundedBody(response);
+  try {
+    return JSON.parse(new TextDecoder().decode(bytes));
+  } catch {
+    throw new ActionBoundaryError('invalid_response');
   }
-  const text = await response.text();
-  if (text.length > MAX_RESPONSE_BYTES) {
-    throw new Error(
-      `Response too large (${text.length} chars, limit ${MAX_RESPONSE_BYTES}). Use more specific query parameters to reduce results.`,
-    );
-  }
-  return JSON.parse(text);
+}
+
+/** Abort pending DNS/transport work promptly; clean up a response arriving late. */
+export function withAbort<T>(
+  work: Promise<T>,
+  signal: AbortSignal,
+  onLate?: (value: T) => void,
+): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const abort = () => reject(signal.reason);
+    signal.addEventListener('abort', abort, { once: true });
+    if (signal.aborted) abort();
+    work
+      .then((value) => {
+        if (signal.aborted) onLate?.(value);
+        else resolve(value);
+      }, reject)
+      .finally(() => signal.removeEventListener('abort', abort));
+  });
 }

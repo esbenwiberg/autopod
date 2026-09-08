@@ -1,4 +1,5 @@
 import { lookup } from 'node:dns/promises';
+import { isIP } from 'node:net';
 
 /**
  * SSRF guard.
@@ -10,9 +11,9 @@ import { lookup } from 'node:dns/promises';
  *      A/AAAA record points at a private/loopback/link-local/metadata range. Defeats
  *      the trivial DNS pointer attack ("evil.com → 169.254.169.254").
  *
- * Residual gap: a fully active DNS-rebinding attacker can still flip the record
- * between our pre-check and the actual `fetch()`. Closing that requires pinning
- * the IP into the request via a custom undici dispatcher; tracked as a follow-up.
+ * This validator alone does not pin a connection. Generic HTTP actions bind
+ * the returned addresses with pinned-http-transport; other consumers must
+ * enforce their own connection-time policy.
  *
  * The hostname/IP rules below cover:
  *  - IPv4 loopback (127/8), this-network (0/8), private (10/8, 172.16/12, 192.168/16),
@@ -41,11 +42,17 @@ function isPrivateIPv4(ip: string): boolean {
 }
 
 function isPrivateIPv6(ip: string): boolean {
-  const lower = ip.toLowerCase();
+  // WHATWG URL normalization collapses expanded IPv6 and converts dotted
+  // mapped IPv4 to hexadecimal groups. Validate both through one representation.
+  const lower = new URL(`http://[${ip}]/`).hostname.slice(1, -1).toLowerCase();
   if (lower === '::' || lower === '::1') return true;
   // IPv4-mapped IPv6 (::ffff:<v4>) — re-validate the embedded IPv4.
-  const v4mapped = lower.match(/^::ffff:(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})$/);
-  if (v4mapped?.[1]) return isPrivateIPv4(v4mapped[1]);
+  const v4mapped = lower.match(/^::ffff:([0-9a-f]{1,4}):([0-9a-f]{1,4})$/);
+  if (v4mapped?.[1] && v4mapped[2]) {
+    const high = Number.parseInt(v4mapped[1], 16);
+    const low = Number.parseInt(v4mapped[2], 16);
+    return isPrivateIPv4(`${high >> 8}.${high & 255}.${low >> 8}.${low & 255}`);
+  }
   // ULA fc00::/7 — first byte is fc or fd.
   if (/^f[cd][0-9a-f]{2}:/.test(lower)) return true;
   // Link-local fe80::/10 — first 10 bits are 1111111010, so the first three hex
@@ -56,6 +63,8 @@ function isPrivateIPv6(ip: string): boolean {
 
 /** Returns true for any private/loopback IPv4 or IPv6 literal. */
 export function isPrivateIp(ip: string): boolean {
+  if (!isIP(ip)) return false; // Hostnames are not IP literals.
+  if (ip.includes('%')) return true; // Scoped interfaces are never public destinations.
   return ip.includes(':') ? isPrivateIPv6(ip) : isPrivateIPv4(ip);
 }
 
@@ -102,7 +111,7 @@ export function isPrivateUrl(rawUrl: string): boolean {
   if (!hostname) return true;
   if (isMetadataHostname(hostname)) return true;
   if (/^\d+\.\d+\.\d+\.\d+$/.test(hostname)) return isPrivateIPv4(hostname);
-  if (hostname.includes(':')) return isPrivateIPv6(hostname);
+  if (hostname.includes(':')) return isPrivateIp(hostname);
   return false;
 }
 
@@ -143,6 +152,8 @@ export async function assertPublicUrl(
     return { ok: false, reason: `unsupported protocol: ${parsed.protocol}` };
   }
 
+  if (parsed.username || parsed.password)
+    return { ok: false, reason: 'URL credentials are not supported' };
   const hostname = parsed.hostname.replace(/^\[|\]$/g, '');
   if (!hostname) return { ok: false, reason: 'missing hostname' };
 
@@ -169,7 +180,7 @@ export async function assertPublicUrl(
   }
 
   for (const address of addresses) {
-    if (isPrivateIp(address)) {
+    if (!isIP(address) || isPrivateIp(address)) {
       return { ok: false, reason: `resolved to private address: ${address}` };
     }
   }

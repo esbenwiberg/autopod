@@ -1,0 +1,311 @@
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
+import type { ArtifactOutput, FollowUpEnvelope, ManagedPodRequest, Route } from '@autopod/shared';
+import type { ContainerManager, ContainerSpawnConfig } from '../interfaces/container-manager.js';
+import { canonical } from './canonical.js';
+import type { ManagedRuntimePort } from './managed-service.js';
+
+export interface ReviewedContainerBoundary {
+  route: Route;
+  manager: ContainerManager;
+  image: string;
+  /** Literal reviewed command including the exact model/reasoning; no user-selected executable. */
+  command: readonly string[];
+  /** Trusted worktree provisioning and scope-derived network enforcement. */
+  prepare(podId: string, request: ManagedPodRequest): Promise<ContainerSpawnConfig>;
+  /** Account-bound provider gateway checks quota before each request and persists trusted usage. */
+  sendMessage?(runtimeRef: string, message: FollowUpEnvelope, key: string): Promise<void>;
+  quotaReady(request: ManagedPodRequest): Promise<boolean>;
+  attachQuota(
+    podId: string,
+    runtimeRef: string,
+    stateRoot: string,
+    request: ManagedPodRequest,
+  ): Promise<void>;
+}
+
+const ROOT_WRITE = `import os,sys
+p=sys.argv[1]; os.makedirs(os.path.dirname(p),mode=0o700,exist_ok=True)
+fd=os.open(p,os.O_WRONLY|os.O_CREAT|os.O_TRUNC,0o600)
+with os.fdopen(fd,'w') as f: f.write(sys.argv[2]); f.flush(); os.fsync(f.fileno())
+`;
+
+export const WORKER_WRITABLE = `import os,stat,sys
+def prepare(fd):
+ for name in os.listdir(fd):
+  item=os.stat(name,dir_fd=fd,follow_symlinks=False)
+  if stat.S_ISLNK(item.st_mode): continue
+  child=os.open(name,os.O_RDONLY|os.O_NOFOLLOW|os.O_NONBLOCK,dir_fd=fd)
+  try:
+   actual=os.fstat(child)
+   if stat.S_ISDIR(actual.st_mode): prepare(child)
+   elif stat.S_ISREG(actual.st_mode) and actual.st_nlink==1:
+    os.fchown(child,1000,1000);os.fchmod(child,0o700 if actual.st_mode & 0o111 else 0o600)
+   else: raise RuntimeError('unsafe writable entry')
+  finally: os.close(child)
+ os.fchown(fd,1000,1000);os.fchmod(fd,0o700)
+for root in sys.argv[1:]:
+ if root != '/output' and not (root.startswith('/repositories/') and len(root.split('/')) == 3): raise RuntimeError('invalid writable root')
+ if os.path.realpath(root) != root: raise RuntimeError('unsafe writable root')
+ parent=os.stat(os.path.dirname(root))
+ if parent.st_uid!=0 or parent.st_mode & 0o022: raise RuntimeError('unsafe writable parent')
+ fd=os.open(root,os.O_RDONLY|os.O_DIRECTORY|os.O_NOFOLLOW)
+ try: prepare(fd)
+ finally: os.close(fd)
+`;
+
+/** Concrete mechanics reuse AutoPod container managers, with a trusted detached guard. */
+export class ManagedContainerRuntime implements ManagedRuntimePort {
+  private readonly known = new Map<string, ReviewedContainerBoundary>();
+  constructor(
+    private readonly boundaries: readonly ReviewedContainerBoundary[],
+    private readonly lookup: (
+      ref: string,
+    ) => { request: ManagedPodRequest; podId: string; createdAt: number } | null,
+    private readonly supervisorSource = readFileSync(
+      fileURLToPath(new URL('./runtime/supervisor.py', import.meta.url)),
+      'utf8',
+    ),
+  ) {}
+
+  private boundary(request: ManagedPodRequest): ReviewedContainerBoundary {
+    const matches = this.boundaries.filter(
+      (binding) => canonical(binding.route) === canonical(request.route),
+    );
+    if (matches.length !== 1) throw new Error('managed-route-unavailable');
+    return matches[0]!;
+  }
+  async preflight(request: ManagedPodRequest): Promise<void> {
+    const boundary = this.boundary(request);
+    if (
+      !boundary.manager.ensureManagedContainer ||
+      !boundary.manager.extractManagedOutput ||
+      !boundary.command.includes(request.route.model) ||
+      (request.route.reasoning !== 'none' && !boundary.command.includes(request.route.reasoning)) ||
+      !boundary.image.includes('@sha256:') ||
+      !(await boundary.quotaReady(request)) ||
+      process.env.AUTOPOD_FAIL_OPEN_FIREWALL === '1'
+    ) {
+      throw new Error('managed-enforcement-unavailable');
+    }
+    // Cloud identities require a separate concrete destination-scoped broker; do not inherit them.
+    if (request.effectiveGrant.scope.identityBindings.length)
+      throw new Error('managed-identity-broker-unavailable');
+  }
+  async ensure(
+    podId: string,
+    request: ManagedPodRequest,
+    checkpoint: (ref: string) => void,
+    fault?: string,
+  ): Promise<{ runtimeRef: string }> {
+    await this.preflight(request);
+    const boundary = this.boundary(request);
+    const config = await boundary.prepare(podId, request);
+    const scope = request.effectiveGrant.scope;
+    if (
+      config.podId !== podId ||
+      config.image !== boundary.image ||
+      Object.keys(config.env).length ||
+      config.exposeHostGateway !== false ||
+      canonical([...(config.allowedHosts ?? [])].sort()) !==
+        canonical([...scope.network.destinations].sort()) ||
+      config.networkPolicyMode !== (scope.network.destinations.length ? 'restricted' : 'deny-all')
+    ) {
+      throw new Error('managed-runtime-scope-mismatch');
+    }
+    if (
+      request.route.executionTarget === 'local' &&
+      (!config.firewallScript || !config.networkName)
+    ) {
+      throw new Error('managed-network-enforcement-unavailable');
+    }
+    const volumes = config.volumes ?? [];
+    for (const repository of scope.repositories) {
+      const mount = volumes.find(
+        (volume) => volume.container === `/repositories/${repository.enrollmentId}`,
+      );
+      if (!mount || mount.readOnly !== (repository.access === 'read'))
+        throw new Error('managed-repository-mount-mismatch');
+    }
+    if (
+      request.outputs.artifacts.mode !== 'none' &&
+      !volumes.some((volume) => volume.container === '/output' && !volume.readOnly)
+    ) {
+      throw new Error('managed-output-mount-required');
+    }
+    const allowedMounts = new Set([
+      '/output',
+      ...scope.repositories.map((repo) => `/repositories/${repo.enrollmentId}`),
+      ...request.inputArtifacts.map((input) => input.mountPath),
+    ]);
+    if (
+      volumes.some((volume) => !allowedMounts.has(volume.container)) ||
+      request.inputArtifacts.some(
+        (input) =>
+          !volumes.some((volume) => volume.container === input.mountPath && volume.readOnly),
+      )
+    ) {
+      throw new Error('managed-inherited-mount-forbidden');
+    }
+    const allocate = boundary.manager.ensureManagedContainer;
+    if (!allocate) throw new Error('managed-allocation-unavailable');
+    const runtimeRef = await allocate.call(boundary.manager, {
+      ...config,
+      managedSpecDigest: request.executionSpecDigest,
+      onCreated: checkpoint,
+    });
+    checkpoint(runtimeRef);
+    this.known.set(runtimeRef, boundary);
+    if (fault === 'after-runtime-identity') throw new Error('injected-after-runtime-identity');
+    const writable = volumes.filter((volume) => !volume.readOnly).map((volume) => volume.container);
+    if (writable.length) {
+      const prepared = await boundary.manager.execInContainer(
+        runtimeRef,
+        ['python3', '-c', WORKER_WRITABLE, ...writable],
+        { user: 'root' },
+      );
+      if (prepared.exitCode !== 0) throw new Error('managed-writable-mount-unavailable');
+    }
+    const root = `/run/dispatcher-${podId}`;
+    const write = async (name: string, value: string) => {
+      const result = await boundary.manager.execInContainer(
+        runtimeRef,
+        ['python3', '-c', ROOT_WRITE, `${root}/${name}`, value],
+        { user: 'root' },
+      );
+      if (result.exitCode !== 0) throw new Error('managed-supervisor-provisioning-failed');
+    };
+    const grant = request.effectiveGrant;
+    await write('supervisor.py', this.supervisorSource);
+    await write(
+      'launch.json',
+      canonical({
+        expiresAt: Math.min(
+          grant.budget.expiresAt,
+          this.resolve(runtimeRef).createdAt + grant.budget.maxDurationSeconds,
+        ),
+        maxDurationSeconds: grant.budget.maxDurationSeconds,
+        specDigest: request.executionSpecDigest,
+        ...('maxTokens' in grant.budget
+          ? { maxTokens: grant.budget.maxTokens }
+          : { budgetMode: 'request-time' }),
+        requireQuotaReceipt: true,
+        workerUid: 1000,
+        workerGid: 1000,
+        environment: { PATH: '/usr/local/bin:/usr/bin:/bin', HOME: '/tmp', TMPDIR: '/tmp' },
+        cwd: config.workingDir ?? '/output',
+        argv: [...boundary.command, '--', request.task.objective],
+      }),
+    );
+    await boundary.attachQuota(podId, runtimeRef, root, request);
+    const result = await boundary.manager.execInContainer(
+      runtimeRef,
+      ['python3', `${root}/supervisor.py`, root, '--detach'],
+      { user: 'root' },
+    );
+    if (result.exitCode !== 0) throw new Error('managed-supervisor-start-failed');
+    if (fault === 'after-agent-start') throw new Error('injected-after-agent-start');
+    return { runtimeRef };
+  }
+  private resolve(ref: string) {
+    const record = this.lookup(ref);
+    if (!record) throw new Error('managed-runtime-unbound');
+    return { ...record, boundary: this.known.get(ref) ?? this.boundary(record.request) };
+  }
+  async observe(
+    ref: string,
+  ): Promise<{ state: 'running' | 'stopped' | 'unknown'; consumedTokens: number }> {
+    const { boundary, podId } = this.resolve(ref);
+    const result = await boundary.manager.execInContainer(
+      ref,
+      [
+        'python3',
+        '-c',
+        'import pathlib,sys; print(pathlib.Path(sys.argv[1]).read_text())',
+        `/run/dispatcher-${podId}/execution.json`,
+      ],
+      { user: 'root' },
+    );
+    if (result.exitCode !== 0) {
+      const state = await boundary.manager.getStatus(ref);
+      return {
+        state:
+          state === 'deleted' ||
+          (state === 'stopped' && this.resolve(ref).request.route.executionTarget === 'local')
+            ? 'stopped'
+            : 'unknown',
+        consumedTokens: 0,
+      };
+    }
+    try {
+      const receipt = JSON.parse(result.stdout) as {
+        observedExit: boolean;
+        state: string;
+        consumedTokens: number;
+        specDigest: string;
+      };
+      if (
+        receipt.specDigest !== this.resolve(ref).request.executionSpecDigest ||
+        !Number.isSafeInteger(receipt.consumedTokens)
+      )
+        throw new Error('binding');
+      return {
+        state: receipt.observedExit
+          ? 'stopped'
+          : receipt.state === 'running'
+            ? 'running'
+            : 'unknown',
+        consumedTokens: receipt.consumedTokens,
+      };
+    } catch {
+      throw new Error('managed-runtime-receipt-invalid');
+    }
+  }
+  async extractOutput(ref: string, staging: string, output: ArtifactOutput): Promise<void> {
+    const { boundary } = this.resolve(ref);
+    if ((await this.observe(ref)).state !== 'stopped')
+      throw new Error('artifact-writer-still-active');
+    if (!boundary.manager.extractManagedOutput) throw new Error('managed-output-unavailable');
+    await boundary.manager.extractManagedOutput(ref, staging, output);
+  }
+  async send(ref: string, message: FollowUpEnvelope, key: string): Promise<void> {
+    const { boundary } = this.resolve(ref);
+    if (!boundary.sendMessage) throw new Error('managed-follow-up-unavailable');
+    await boundary.sendMessage(ref, message, key);
+  }
+  async cleanup(ref: string): Promise<boolean> {
+    const { boundary } = this.resolve(ref);
+    if ((await this.observe(ref)).state !== 'stopped')
+      throw new Error('managed-cleanup-before-exit');
+    await boundary.manager.kill(ref);
+    return (await boundary.manager.getStatus(ref)) === 'deleted';
+  }
+  async stop(ref: string): Promise<void> {
+    const { boundary, podId } = this.resolve(ref);
+    await boundary.manager.execInContainer(
+      ref,
+      ['python3', '-c', ROOT_WRITE, `/run/dispatcher-${podId}/revoked`, 'true'],
+      { user: 'root' },
+    );
+    const observed = await boundary.manager.execInContainer(
+      ref,
+      [
+        'python3',
+        '-c',
+        `import json,pathlib,sys,time
+p=pathlib.Path(sys.argv[1]);deadline=time.monotonic()+3
+while time.monotonic()<deadline:
+ try:
+  if json.loads(p.read_text()).get('observedExit'):sys.exit(0)
+ except (OSError,ValueError):pass
+ time.sleep(0.05)
+sys.exit(1)
+`,
+        `/run/dispatcher-${podId}/execution.json`,
+      ],
+      { user: 'root' },
+    );
+    if (observed.exitCode !== 0) throw new Error('managed-stop-not-yet-observed');
+    // Keep the empty runtime available for output extraction; cleanup destroys it later.
+  }
+}

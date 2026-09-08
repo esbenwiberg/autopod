@@ -1,5 +1,6 @@
 import type { ActionDefinition } from '@autopod/shared';
 import { getAzureToken } from '../../providers/azure-token.js';
+import { ActionHttpError } from '../action-diagnostics.js';
 import type { ActionHandler, HandlerConfig } from './handler.js';
 import { fetchWithTimeout, readSafeJson } from './handler.js';
 
@@ -65,7 +66,7 @@ export function createAzureLogsHandler(config: HandlerConfig): ActionHandler {
           continue;
         }
 
-        throw new Error(`Azure Monitor ${response.status}: ${body.slice(0, 200)}`);
+        throw new ActionHttpError(response.status, 'Azure Monitor');
       }
 
       const data = (await readSafeJson(response)) as {

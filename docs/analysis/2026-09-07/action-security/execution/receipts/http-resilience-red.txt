@@ -1,0 +1,160 @@
+Baseline production source: 2d5456edac542a99d27f12eb1dbd16e5ad8c2c2a. New regression tests only. Long fixture payload lines truncated below; assertions and counts retained.
+
+ RUN  v4.1.10 /Users/ewi/.codex/worktrees/46f5/autopod/packages/daemon
+
+ ❯ src/actions/handlers/http-resilience.test.ts (10 tests | 8 failed) 3777ms
+     × enforces the complete deadline and closes the socket: stalled body 1209ms
+     × enforces the complete deadline and closes the socket: slow chunks 1202ms
+     × preserves caller cancellation during body consumption 1205ms
+     × bounds chunked response bytes for status 200 9ms
+     × bounds chunked response bytes for status 503 8ms
+     × bounds decompressed response bytes 15ms
+     × counts UTF-8 bytes rather than JavaScript characters 5ms
+     × stops reading and cancels an oversized stream before its end 2ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 8 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/actions/handlers/http-resilience.test.ts > action HTTP transport resource bounds > enforces the complete deadline and closes the socket: stalled body
+AssertionError: promise resolved "'[]'" instead of rejecting
+
+- Expected:
+Error {
+  "message": "rejected promise",
+}
+
++ Received:
+"[]"
+
+ ❯ src/actions/handlers/http-resilience.test.ts:54:7
+     52|       await expect(
+     53|         fetchWithTimeout(url, { timeout: 60 }).then((response) => resp…
+     54|       ).rejects.toThrow();
+       |       ^
+     55|       expect(performance.now() - started).toBeLessThan(1_000);
+     56|       await vi.waitFor(() => expect(socketClosed).toBe(true));
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/8]⎯
+
+ FAIL  src/actions/handlers/http-resilience.test.ts > action HTTP transport resource bounds > enforces the complete deadline and closes the socket: slow chunks
+AssertionError: promise resolved "'[                                    …'" instead of rejecting
+
+- Expected:
+Error {
+  "message": "rejected promise",
+}
+
++ Received:
+"[                                                                                                         ]"
+
+ ❯ src/actions/handlers/http-resilience.test.ts:54:7
+     52|       await expect(
+     53|         fetchWithTimeout(url, { timeout: 60 }).then((response) => resp…
+     54|       ).rejects.toThrow();
+       |       ^
+     55|       expect(performance.now() - started).toBeLessThan(1_000);
+     56|       await vi.waitFor(() => expect(socketClosed).toBe(true));
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/8]⎯
+
+ FAIL  src/actions/handlers/http-resilience.test.ts > action HTTP transport resource bounds > preserves caller cancellation during body consumption
+AssertionError: promise resolved "'[]'" instead of rejecting
+
+- Expected:
+Error {
+  "message": "rejected promise",
+}
+
++ Received:
+"[]"
+
+ ❯ src/actions/handlers/http-resilience.test.ts:76:5
+     74|     await expect(
+     75|       fetchWithTimeout(url, { timeout: 2_000, signal: controller.signa…
+     76|     ).rejects.toThrow();
+       |     ^
+     77|     await vi.waitFor(() => expect(closed).toBe(true));
+     78|   });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/8]⎯
+
+ FAIL  src/actions/handlers/http-resilience.test.ts > action HTTP transport resource bounds > bounds chunked response bytes for status 200
+ FAIL  src/actions/handlers/http-resilience.test.ts > action HTTP transport resource bounds > bounds chunked response bytes for status 503
+AssertionError: promise resolved "'xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx…'" instead of rejecting
+
+- Expected:
+Error {
+  "message": "rejected promise",
+}
+
++ Received:
+"xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx [fixture payload truncated]
+
+ ❯ src/actions/handlers/http-resilience.test.ts:86:65
+     84|       res.end('x');
+     85|     });
+     86|     await expect(fetchWithTimeout(url, {}).then((r) => r.text())).reje…
+       |                                                                 ^
+     87|   });
+     88|
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[4/8]⎯
+
+ FAIL  src/actions/handlers/http-resilience.test.ts > action HTTP transport resource bounds > bounds decompressed response bytes
+AssertionError: promise resolved "'xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx…'" instead of rejecting
+
+- Expected:
+Error {
+  "message": "rejected promise",
+}
+
++ Received:
+"xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx [fixture payload truncated]
+
+ ❯ src/actions/handlers/http-resilience.test.ts:95:65
+     93|       res.end(body);
+     94|     });
+     95|     await expect(fetchWithTimeout(url, {}).then((r) => r.text())).reje…
+       |                                                                 ^
+     96|   });
+     97|
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[5/8]⎯
+
+ FAIL  src/actions/handlers/http-resilience.test.ts > action HTTP transport resource bounds > counts UTF-8 bytes rather than JavaScript characters
+AssertionError: promise resolved "'ééééééééééééééééééééééééééééééééééééé…'" instead of rejecting
+
+- Expected:
+Error {
+  "message": "rejected promise",
+}
+
++ Received:
+"ééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééé [fixture payload truncated]
+
+ ❯ src/actions/handlers/http-resilience.test.ts:100:40
+     98|   it('counts UTF-8 bytes rather than JavaScript characters', async () …
+     99|     const response = new Response(JSON.stringify('é'.repeat(LIMIT / 2)…
+    100|     await expect(readSafeJson(response)).rejects.toThrow(/too large/i);
+       |                                        ^
+    101|   });
+    102|
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[6/8]⎯
+
+ FAIL  src/actions/handlers/http-resilience.test.ts > action HTTP transport resource bounds > stops reading and cancels an oversized stream before its end
+AssertionError: expected 100 to be less than 40
+ ❯ src/actions/handlers/http-resilience.test.ts:119:19
+    117|     );
+    118|     await expect(readSafeJson(response)).rejects.toThrow(/too large/i);
+    119|     expect(pulls).toBeLessThan(40);
+       |                   ^
+    120|     expect(cancelled).toBe(true);
+    121|   });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[7/8]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  8 failed | 2 passed (10)
+   Start at  23:10:51
+   Duration  3.92s (transform 15ms, setup 0ms, import 41ms, tests 3.78s, environment 0ms)

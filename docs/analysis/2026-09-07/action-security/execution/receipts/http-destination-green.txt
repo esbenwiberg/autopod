@@ -1,0 +1,8 @@
+
+ RUN  v4.1.10 /Users/ewi/.codex/worktrees/46f5/autopod/packages/daemon
+
+
+ Test Files  6 passed (6)
+      Tests  112 passed (112)
+   Start at  23:19:24
+   Duration  1.15s (transform 297ms, setup 0ms, import 641ms, tests 1.60s, environment 0ms)

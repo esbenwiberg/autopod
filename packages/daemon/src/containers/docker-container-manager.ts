@@ -12,6 +12,7 @@ import {
 import { basename, dirname, join } from 'node:path';
 import { PassThrough, Writable } from 'node:stream';
 import { fileURLToPath } from 'node:url';
+import type { ArtifactOutput } from '@autopod/shared';
 import Dockerode from 'dockerode';
 import type { Logger } from 'pino';
 import * as tar from 'tar-stream';
@@ -23,6 +24,7 @@ import type {
   ExecResult,
   StreamingExecResult,
 } from '../interfaces/container-manager.js';
+import { extractManagedDockerOutput } from '../managed/output-extraction.js';
 import {
   DOCKER_CALL_TIMEOUTS,
   DockerCallTimeoutError,
@@ -255,6 +257,31 @@ export class DockerContainerManager implements ContainerManager {
     }
   }
 
+  async ensureManagedContainer(config: ContainerSpawnConfig): Promise<string> {
+    if (!config.managedSpecDigest) throw new Error('managed-spec-required');
+    const container = this.docker.getContainer(`autopod-${config.podId}`);
+    try {
+      const observed = await container.inspect();
+      if (observed.Config.Labels?.['dispatcher.spec-digest'] !== config.managedSpecDigest) {
+        throw new Error('managed-container-binding-conflict');
+      }
+      config.onCreated?.(observed.Id);
+      if (!observed.State.Running) await container.start();
+      if (!config.firewallScript) throw new Error('managed-firewall-required');
+      await this.refreshFirewall(observed.Id, config.firewallScript);
+      return observed.Id;
+    } catch (error) {
+      if (!isExpectedDockerError(error, [404])) throw error;
+    }
+    try {
+      return await this.spawn(config);
+    } catch (error) {
+      // A concurrent creator wins the deterministic name. Never remove it or replace it.
+      if (!isExpectedDockerError(error, [409])) throw error;
+      return this.ensureManagedContainer(config);
+    }
+  }
+
   async spawn(config: ContainerSpawnConfig): Promise<string> {
     const containerName = `autopod-${config.podId}`;
     const env = Object.entries(config.env).map(([k, v]) => `${k}=${v}`);
@@ -338,10 +365,17 @@ export class DockerContainerManager implements ContainerManager {
       }
     }
 
-    const container = await createContainerWithStaleRetry(
+    const create = config.managedSpecDigest
+      ? (_docker: Dockerode, options: Dockerode.ContainerCreateOptions) =>
+          this.docker.createContainer(options)
+      : createContainerWithStaleRetry;
+    const container = await create(
       this.docker,
       {
         Image: config.image,
+        ...(config.managedSpecDigest
+          ? { Labels: { 'dispatcher.spec-digest': config.managedSpecDigest } }
+          : {}),
         name: containerName,
         Env: env,
         Cmd: ['sleep', 'infinity'],
@@ -673,6 +707,23 @@ export class DockerContainerManager implements ContainerManager {
 
       (archiveStream as NodeJS.ReadableStream).pipe(extract);
     });
+  }
+
+  async extractManagedOutput(
+    containerId: string,
+    staging: string,
+    output: ArtifactOutput,
+  ): Promise<void> {
+    const archive = await boundedDockerCall(
+      this.docker.getContainer(containerId).getArchive({ path: '/output' }),
+      {
+        label: 'managed-output',
+        timeoutMs: DOCKER_CALL_TIMEOUTS.getArchive,
+        logger: this.logger,
+        containerId,
+      },
+    );
+    await extractManagedDockerOutput(archive, staging, output);
   }
 
   async extractDirectoryFromContainer(
@@ -1018,7 +1069,7 @@ export class DockerContainerManager implements ContainerManager {
     return {
       stdout: stdoutStream,
       stderr: stderrStream,
-      ...(attachStdin && { stdin: muxStream as unknown as NodeJS.WritableStream }),
+      ...(attachStdin && { stdin: muxStream as unknown as Writable }),
       exitCode,
       kill,
     };
