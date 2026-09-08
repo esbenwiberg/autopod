@@ -98,3 +98,18 @@ public struct ScanRepairDispatch: Codable, Sendable {
   public let selectionId: String
   public let podId: String
 }
+
+public struct ScanReportSummary: Codable, Identifiable, Sendable {
+  public let id: String
+  public let jobId: String
+  public let status: String
+  public let createdAt: String
+  public let completedAt: String?
+  public let findingCount: Int?
+  public let judgmentStatus: String?
+  public let diagnostics: [String]
+}
+public struct ScanReportPage: Codable, Sendable {
+  public let items: [ScanReportSummary]
+  public let nextCursor: String?
+}

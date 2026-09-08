@@ -2,6 +2,7 @@ import type { DispatchPreflightEvidence, ExecutionProvenance } from '@autopod/sh
 import type {
   ScanRepairDispatch,
   ScanReportDetail,
+  ScanReportPage,
   ScanTriageDecision,
   ScanTriageRequest,
   ScheduledScanReport,
@@ -665,6 +666,12 @@ export class AutopodClient {
     return this.request<Pod | ScheduledScanReport>('POST', `/scheduled-jobs/${id}/trigger`);
   }
 
+  async listScanReportPage(jobId: string, before?: string): Promise<ScanReportPage> {
+    return this.request(
+      'GET',
+      `/scheduled-jobs/${encodeURIComponent(jobId)}/report-page${before ? `?before=${encodeURIComponent(before)}` : ''}`,
+    );
+  }
   async listScanReports(jobId: string): Promise<ScheduledScanReport[]> {
     return this.request('GET', `/scheduled-jobs/${encodeURIComponent(jobId)}/reports`);
   }

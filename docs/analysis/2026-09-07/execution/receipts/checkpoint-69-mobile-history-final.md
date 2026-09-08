@@ -1,0 +1,31 @@
+- main [ref=e3]:
+  - link "← Back" [ref=e4] [cursor=pointer]:
+    - /url: "#/"
+  - heading "Scan reports" [level=1] [ref=e6]
+  - paragraph [ref=e7]: Reports retain findings for review. A repair starts only from a recorded human selection.
+  - generic [ref=e8]:
+    - text: Report schedule
+    - combobox "Report schedule" [ref=e9]:
+      - option "Choose a schedule"
+      - option "Local dependency and secret scan" [selected]
+  - generic [ref=e10]:
+    - paragraph [ref=e11]: main → work · secrets, dependencies
+    - paragraph [ref=e12]: "Disabled · 0 9 * * * · Judgment: none"
+    - paragraph [ref=e13]: Supported npm lockfiles are checked with the public npm advisory service.
+    - button "Collect report now" [ref=e14] [cursor=pointer]
+  - button "Refresh report history" [ref=e15] [cursor=pointer]
+  - region "Reports" [ref=e16]:
+    - link [ref=e18] [cursor=pointer]:
+      - /url: "#/scan-report/report-fixture"
+      - strong [ref=e19]: incomplete
+      - paragraph [ref=e20]: 2026-09-07T10:00:00Z
+      - paragraph [ref=e21]: 1 observed findings · judgment not_requested
+      - text: Review findings →
+    - link [ref=e23] [cursor=pointer]:
+      - /url: "#/scan-report/report-old-fixture"
+      - strong [ref=e24]: incomplete
+      - paragraph [ref=e25]: 2026-09-06T10:00:00Z
+      - paragraph [ref=e26]: Unknown observed findings · judgment unavailable
+      - paragraph [ref=e27]: Finding count unavailable; inspect report evidence.
+      - text: Review findings →
+    - paragraph [ref=e28]: End of available report history.

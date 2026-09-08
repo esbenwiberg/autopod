@@ -1,11 +1,15 @@
-import type { ScheduledJob, ScheduledScanReport } from '@autopod/shared';
-import { useEffect, useState } from 'react';
+import type { ScanReportPage, ScanReportSummary, ScheduledJob } from '@autopod/shared';
+import { useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { apiFetch } from '../lib/api.js';
 
 export function ScanReports() {
   const [jobs, setJobs] = useState<ScheduledJob[]>([]);
-  const [reports, setReports] = useState<ScheduledScanReport[]>([]);
+  const [reports, setReports] = useState<ScanReportSummary[]>([]);
+  const [cursor, setCursor] = useState<string | null>(null);
+  const generation = useRef(0);
+  const [refreshKey, setRefreshKey] = useState(0);
+  const [loading, setLoading] = useState(false);
   const [jobId, setJobId] = useState('');
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
@@ -25,31 +29,73 @@ export function ScanReports() {
       active = false;
     };
   }, []);
+  // biome-ignore lint/correctness/useExhaustiveDependencies: The explicit refresh action reloads the same schedule.
   useEffect(() => {
-    let active = true;
+    const owner = ++generation.current;
     setReports([]);
-    if (jobId)
-      apiFetch<ScheduledScanReport[]>(`/scheduled-jobs/${encodeURIComponent(jobId)}/reports`)
-        .then((items) => {
-          if (active) setReports(items);
+    setCursor(null);
+    setError('');
+    setLoading(false);
+    if (jobId) {
+      setLoading(true);
+      apiFetch<ScanReportPage>(`/scheduled-jobs/${encodeURIComponent(jobId)}/report-page`)
+        .then((page) => {
+          if (generation.current === owner) {
+            setReports(page.items);
+            setCursor(page.nextCursor);
+          }
         })
         .catch((err: Error) => {
-          if (active) setError(err.message);
+          if (generation.current === owner) setError(err.message);
+        })
+        .finally(() => {
+          if (generation.current === owner) setLoading(false);
         });
+    }
     return () => {
-      active = false;
+      generation.current++;
     };
-  }, [jobId]);
+  }, [jobId, refreshKey]);
+  async function older() {
+    if (!cursor || loading) return;
+    const owner = generation.current;
+    setLoading(true);
+    setError('');
+    try {
+      const page = await apiFetch<ScanReportPage>(
+        `/scheduled-jobs/${encodeURIComponent(jobId)}/report-page?before=${encodeURIComponent(cursor)}`,
+      );
+      if (generation.current !== owner) return;
+      setReports((previous) => [
+        ...previous,
+        ...page.items.filter((item) => !previous.some((old) => old.id === item.id)),
+      ]);
+      setCursor(page.nextCursor);
+    } catch (err) {
+      if (generation.current === owner) setError((err as Error).message);
+    } finally {
+      if (generation.current === owner) setLoading(false);
+    }
+  }
   const job = jobs.find((item) => item.id === jobId);
   async function run() {
     setBusy(true);
     setError('');
+    const owner = ++generation.current;
+    setLoading(true);
     try {
       await apiFetch(`/scheduled-jobs/${encodeURIComponent(jobId)}/trigger`, { method: 'POST' });
-      setReports(await apiFetch(`/scheduled-jobs/${encodeURIComponent(jobId)}/reports`));
+      const page = await apiFetch<ScanReportPage>(
+        `/scheduled-jobs/${encodeURIComponent(jobId)}/report-page`,
+      );
+      if (generation.current === owner) {
+        setReports(page.items);
+        setCursor(page.nextCursor);
+      }
     } catch (err) {
       setError((err as Error).message);
     } finally {
+      if (generation.current === owner) setLoading(false);
       setBusy(false);
     }
   }
@@ -110,19 +156,43 @@ export function ScanReports() {
           </button>
         </section>
       )}
+      <button
+        type="button"
+        className="action-btn"
+        disabled={!jobId || loading || busy}
+        onClick={() => setRefreshKey((value) => value + 1)}
+      >
+        Refresh report history
+      </button>
       <section className="pod-list" aria-label="Reports">
         {reports.map((report) => (
           <Link className="pod-card" key={report.id} to={`/scan-report/${report.id}`}>
             <strong>{report.status.replaceAll('_', ' ')}</strong>
             <p>{report.createdAt}</p>
             <p>
-              {report.collection?.findings.length ?? 'Unknown'} observed findings · judgment{' '}
-              {report.judgment.status}
+              {report.findingCount ?? 'Unknown'} observed findings · judgment{' '}
+              {report.judgmentStatus ?? 'unavailable'}
             </p>
+            {report.diagnostics.map((diagnostic) => (
+              <p key={diagnostic}>{diagnostic}</p>
+            ))}
             <span>Review findings →</span>
           </Link>
         ))}
-        {!reports.length && <p className="empty">No reports loaded.</p>}
+        {!reports.length && (
+          <p className="empty">{loading ? 'Loading reports…' : 'No reports loaded.'}</p>
+        )}
+        {cursor && (
+          <button
+            type="button"
+            className="action-btn"
+            disabled={loading || busy}
+            onClick={() => void older()}
+          >
+            Load older reports
+          </button>
+        )}
+        {reports.length > 0 && !cursor && !loading && <p>End of available report history.</p>}
       </section>
     </main>
   );

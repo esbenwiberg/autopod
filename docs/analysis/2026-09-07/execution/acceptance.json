@@ -1488,7 +1488,8 @@
         "receipts/scheduled-mobile-final-tests.txt",
         "receipts/scheduled-mobile-browser.json",
         "receipts/scheduled-desktop-window-tests.txt",
-        "receipts/live-scheduled-metadata.json"
+        "receipts/live-scheduled-metadata.json",
+        "checkpoint-69.md"
       ],
       "prerequisites": [
         "Required native desktop interaction remains unverified.",
@@ -1662,7 +1663,8 @@
         "checkpoint-61.md",
         "checkpoint-62.md",
         "checkpoint-65.md",
-        "checkpoint-67.md"
+        "checkpoint-67.md",
+        "checkpoint-69.md"
       ],
       "prerequisites": [],
       "remaining": "Coding, validation/retry, review-only and completion recovery provenance are locally implemented. Sandbox effective cgroup resources are read without substituting requests; image and network identity remain unavailable. Checkpoint 51 adds preflight to direct agent Resume and missing-session fallback paths. Side effects after execution begins, actual reviewer CLI identity, complete receipt history/operator coverage, native interaction and live acceptance remain outstanding."
@@ -1919,7 +1921,8 @@
         "checkpoint-35.md",
         "checkpoint-61.md",
         "checkpoint-64.md",
-        "checkpoint-67.md"
+        "checkpoint-67.md",
+        "checkpoint-69.md"
       ],
       "prerequisites": [
         "Selected mobile flows and new health CLI have local interaction proof. Desktop has compilation and tests only. Remaining operator flows, physical device and live evidence are outstanding."
@@ -1944,7 +1947,7 @@
       "prerequisites": []
     }
   ],
-  "lastCheckpoint": "checkpoint-68.md",
+  "lastCheckpoint": "checkpoint-69.md",
   "migrationLineage": {
     "managedBaseline": "142-152; exact bytes from tracking commit cba763ba0bb3d65cb4c055e00033016ba1d5c646",
     "nativeCurrent": "164-176; byte-preserving move of unpublished native 151-163",

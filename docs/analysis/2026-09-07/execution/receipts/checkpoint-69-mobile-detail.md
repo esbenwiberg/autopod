@@ -1,0 +1,30 @@
+- main [ref=e29]:
+  - link "← Scan reports" [ref=e30] [cursor=pointer]:
+    - /url: "#/scan-reports"
+  - heading "Report review" [level=1] [ref=e32]
+  - generic [ref=e33]:
+    - heading "incomplete" [level=2] [ref=e34]
+    - paragraph [ref=e35]: 2026-09-07T10:00:00Z · Report completion is separate from patch delivery.
+    - paragraph [ref=e36]: main → work
+    - group [ref=e37]:
+      - generic "Exact source and files" [ref=e38]
+    - paragraph [ref=e39]: "secrets: failed · Unknown findings · Synthetic scanner failure; no clean result available."
+    - paragraph [ref=e40]: "dependencies: completed · 1 findings"
+    - paragraph [ref=e41]: "Judgment: not_requested"
+  - generic [ref=e42]:
+    - heading "Unresolved findings (1)" [level=2] [ref=e43]
+    - paragraph [ref=e44]: Includes earlier findings still awaiting resolution. Selecting a repair does not mark it fixed.
+    - generic [ref=e45]:
+      - checkbox "high · packages/example/package-lock.json Synthetic dependency finding for local interaction proof. unresolved · fixture-finding-stable-identity" [ref=e46]
+      - generic [ref=e47]:
+        - strong [ref=e48]: high · packages/example/package-lock.json
+        - text: Synthetic dependency finding for local interaction proof.
+        - generic [ref=e49]: unresolved · fixture-finding-stable-identity
+    - generic [ref=e50]:
+      - text: Reason
+      - textbox "Reason" [ref=e51]
+    - generic [ref=e52]:
+      - button "Defer" [disabled] [ref=e53]
+      - button "Record resolution" [disabled] [ref=e54]
+      - button "Record repair selection" [disabled] [ref=e55]
+  - heading "Recorded decisions" [level=2] [ref=e57]

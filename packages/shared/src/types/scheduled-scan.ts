@@ -122,3 +122,20 @@ export interface ScanRepairDispatch {
   selectionId: string;
   podId: string;
 }
+
+/** Bounded history projection; detail and triage remain separate reads/actions. */
+export interface ScanReportSummary {
+  id: string;
+  jobId: string;
+  status: ScheduledScanReport['status'];
+  createdAt: string;
+  completedAt: string | null;
+  findingCount: number | null;
+  judgmentStatus: ScheduledScanReport['judgment']['status'] | null;
+  diagnostics: string[];
+}
+export interface ScanReportPage {
+  items: ScanReportSummary[];
+  /** Last report identity in this page; scoped to its schedule, ordered by time then ID. */
+  nextCursor: string | null;
+}

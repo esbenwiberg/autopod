@@ -17,6 +17,10 @@ export function scanReportRoutes(app: FastifyInstance, scans: ScanOperatorServic
   app.get('/scheduled-jobs/:id/reports', async (request) =>
     scans.list((request.params as { id: string }).id),
   );
+  app.get('/scheduled-jobs/:id/report-page', async (request) => {
+    const query = z.object({ before: z.string().uuid().optional() }).strict().parse(request.query);
+    return scans.page((request.params as { id: string }).id, query.before);
+  });
   app.get('/scan-reports/:id', async (request) =>
     scans.detail((request.params as { id: string }).id),
   );

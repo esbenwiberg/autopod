@@ -212,6 +212,17 @@ export function registerScheduleCommands(program: Command, getClient: () => Auto
       console.log(JSON.stringify(await getClient().listScanReports(jobId), null, 2)),
     );
   schedule
+    .command('report-page <jobId>')
+    .description(
+      'Read a bounded report history page; pass nextCursor with --before for older reports',
+    )
+    .option('--before <cursor>', 'Cursor from the previous page')
+    .action(async (jobId: string, opts: { before?: string }) =>
+      console.log(
+        JSON.stringify(await getClient().listScanReportPage(jobId, opts.before), null, 2),
+      ),
+    );
+  schedule
     .command('report <reportId>')
     .description('Review scanner completeness, unresolved findings and durable human decisions')
     .action(async (reportId: string) =>

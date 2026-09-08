@@ -4287,6 +4287,26 @@ describe('PodManager', () => {
         reason: 'Fix only this finding',
       };
       try {
+        const history = await app.inject({
+          method: 'GET',
+          url: '/scheduled-jobs/scan-job/report-page',
+          headers,
+        });
+        expect(history.statusCode).toBe(200);
+        expect(history.json()).toMatchObject({
+          items: [{ id: report.id, findingCount: 2, judgmentStatus: 'not_requested' }],
+          nextCursor: null,
+        });
+        expect(history.json().items[0]).not.toHaveProperty('collection');
+        expect(
+          (
+            await app.inject({
+              method: 'GET',
+              url: '/scheduled-jobs/scan-job/report-page?before=not-a-cursor',
+              headers,
+            })
+          ).statusCode,
+        ).toBe(400);
         const denied = await app.inject({
           method: 'POST',
           url: `/scan-reports/${report.id}/triage`,

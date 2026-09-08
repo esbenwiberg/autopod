@@ -259,7 +259,7 @@ public actor DaemonAPI {
   /// (push + open PR if validation already passed, otherwise re-run validation).
   /// Returns the action the daemon took, so the UI can confirm what happened.
   public func getExecutionProvenance(_ id: String) async throws -> ExecutionProvenanceResponse {
-    try await request("GET", "/pods/\(id)/execution-provenance?schemaVersion=2")
+    try await request("GET", "/pods/\(id)/execution-provenance", query: ["schemaVersion": "2"])
   }
   public func getDispatchPreflight(_ id: String) async throws -> DispatchPreflightResponse {
     try await request("GET", "/pods/\(id)/dispatch-preflight")
@@ -850,6 +850,9 @@ public actor DaemonAPI {
     let _: EmptyResponse = try await request("DELETE", "/scheduled-job-templates/\(id)")
   }
 
+  public func listScanReportPage(_ jobId: String, before: String? = nil) async throws -> ScanReportPage {
+    return try await request("GET", "/scheduled-jobs/\(jobId)/report-page", query: before.map { ["before": $0] } ?? [:])
+  }
   public func listScanReports(_ jobId: String) async throws -> [ScheduledScanReport] {
     try await request("GET", "/scheduled-jobs/\(jobId)/reports")
   }

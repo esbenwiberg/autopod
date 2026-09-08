@@ -1,6 +1,8 @@
 import { randomUUID } from 'node:crypto';
 import {
   AutopodError,
+  type ScanReportPage,
+  type ScanReportSummary,
   type ScanTriageDecision,
   type ScheduledScanCollection,
   type ScheduledScanFinding,
@@ -15,6 +17,7 @@ export interface ScanReportRepository {
   get(id: string): ScheduledScanReport;
   claim(id: string, owner: string): boolean;
   list(jobId: string): ScheduledScanReport[];
+  page(jobId: string, before?: string): ScanReportPage;
   decisions(reportId: string): Array<ScanTriageDecision & { repairPodId: string | null }>;
   finish(id: string, collection: ScheduledScanCollection): ScheduledScanReport;
   setJudgment(id: string, judgment: ScheduledScanReport['judgment']): void;
@@ -127,6 +130,70 @@ export function createScanReportRepository(db: Database.Database): ScanReportRep
       );
       return get(id);
     }),
+    page(jobId, before) {
+      const anchor = before
+        ? (db
+            .prepare('SELECT created_at FROM scheduled_scan_reports WHERE job_id = ? AND id = ?')
+            .get(jobId, before) as { created_at: string } | undefined)
+        : undefined;
+      if (before !== undefined && !anchor)
+        throw new AutopodError(
+          'Report cursor is not available in this schedule; refresh history.',
+          'SCAN_CURSOR_INVALID',
+          400,
+        );
+      const rows = db
+        .prepare(`SELECT id, job_id, status, created_at, completed_at,
+        CASE WHEN json_valid(collection) THEN CASE WHEN json_type(collection, '$.findings') = 'array' THEN json_array_length(collection, '$.findings') END END AS finding_count,
+        CASE WHEN json_valid(judgment) THEN CASE WHEN json_type(judgment, '$.status') = 'text' THEN json_extract(judgment, '$.status') END END AS judgment_status
+        FROM scheduled_scan_reports WHERE job_id = ?
+        AND (? IS NULL OR created_at < ? OR (created_at = ? AND id < ?))
+        ORDER BY created_at DESC, id DESC LIMIT 21`)
+        .all(
+          jobId,
+          before ?? null,
+          anchor?.created_at ?? null,
+          anchor?.created_at ?? null,
+          before ?? null,
+        ) as Array<{
+        id: string;
+        job_id: string;
+        status: ScanReportSummary['status'];
+        created_at: string;
+        completed_at: string | null;
+        finding_count: number | null;
+        judgment_status: string | null;
+      }>;
+      const items = rows.slice(0, 20).map((row) => {
+        const judgmentStatus = [
+          'not_requested',
+          'skipped_empty',
+          'pending',
+          'complete',
+          'unavailable',
+        ].includes(row.judgment_status ?? '')
+          ? (row.judgment_status as ScanReportSummary['judgmentStatus'])
+          : null;
+        return {
+          id: row.id,
+          jobId: row.job_id,
+          status: row.status,
+          createdAt: row.created_at,
+          completedAt: row.completed_at,
+          findingCount: row.finding_count,
+          judgmentStatus,
+          diagnostics: [
+            ...(row.finding_count === null
+              ? ['Finding count unavailable; inspect report evidence.']
+              : []),
+            ...(judgmentStatus === null
+              ? ['Judgment summary unavailable; inspect report evidence.']
+              : []),
+          ],
+        };
+      });
+      return { items, nextCursor: rows.length > 20 ? (items.at(-1)?.id ?? null) : null };
+    },
     list(jobId) {
       return (
         db

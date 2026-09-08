@@ -1,4 +1,4 @@
-import { copyFileSync, mkdtempSync, readdirSync, rmSync } from 'node:fs';
+import { copyFileSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { ScheduledScanCollection, ScheduledScanPolicy } from '@autopod/shared';
@@ -38,6 +38,66 @@ const collection: ScheduledScanCollection = {
 };
 
 describe('scheduled scan reports independent of worker lifetime', () => {
+  it('pages beyond 100 reports with stable ties and excludes newer insertions from continuation', () => {
+    let db = createTestDb();
+    const directory = mkdtempSync(join(tmpdir(), 'scan-history-page-'));
+    const repo = createScanReportRepository(db);
+    try {
+      const ids = Array.from({ length: 121 }, (_, i) => repo.begin('job', `page-${i}`, policy).id)
+        .sort()
+        .reverse();
+      db.prepare("UPDATE scheduled_scan_reports SET created_at = '2026-09-07T00:00:00Z'").run();
+      let page = repo.page('job');
+      expect(page.items).toHaveLength(20);
+      expect(page.items[0]).not.toHaveProperty('collection');
+      const actual = page.items.map((item) => item.id);
+      repo.begin('job', 'newer-after-first-page', policy);
+      const file = join(directory, 'state.db');
+      writeFileSync(file, db.serialize());
+      db.close();
+      db = new Database(file);
+      while (page.nextCursor) {
+        page = createScanReportRepository(db).page('job', page.nextCursor);
+        actual.push(...page.items.map((item) => item.id));
+        if (actual.length > 121) throw new Error('Pagination repeated an earlier page');
+      }
+      expect(actual).toEqual(ids);
+      const reopened = createScanReportRepository(db);
+      const foreign = reopened.begin('other-job', 'foreign-cursor', policy);
+      expect(() => reopened.page('job', foreign.id)).toThrow(/cursor/i);
+      expect(() => reopened.page('job', 'missing')).toThrow(/cursor/i);
+    } finally {
+      db.close();
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
+  it('projects malformed report summaries without exporting payloads or manufacturing zero findings', () => {
+    const db = createTestDb();
+    const repo = createScanReportRepository(db);
+    try {
+      const report = repo.begin('job', 'malformed-summary', policy);
+      db.prepare('UPDATE scheduled_scan_reports SET collection = ?, judgment = ? WHERE id = ?').run(
+        '{broken-private-payload',
+        '[]',
+        report.id,
+      );
+      const page = repo.page('job');
+      expect(page.items[0]).toMatchObject({
+        id: report.id,
+        findingCount: null,
+        judgmentStatus: null,
+      });
+      expect(page.items[0]?.diagnostics).toHaveLength(2);
+      expect(JSON.stringify(page)).not.toContain('private-payload');
+      expect(
+        db.prepare('SELECT collection FROM scheduled_scan_reports WHERE id = ?').get(report.id),
+      ).toEqual({ collection: '{broken-private-payload' });
+    } finally {
+      db.close();
+    }
+  });
+
   it.each([139, 154])(
     'upgrades existing schema %s while preserving legacy records and durable report recovery',
     async (version) => {

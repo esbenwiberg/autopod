@@ -25,15 +25,48 @@ import Testing
   #expect(receipt.kind == "repair_dispatch"); #expect(receipt.podId == "repair")
 }
 
+@Test func scanHistoryClientFollowsExplicitPageCursor() async throws {
+  let configuration = URLSessionConfiguration.ephemeral
+  configuration.protocolClasses = [ScanFixtureProtocol.self]
+  let api = DaemonAPI(baseURL: URL(string: "https://scan-fixture.invalid")!, token: "synthetic", session: URLSession(configuration: configuration))
+  let page = try await api.listScanReportPage("job")
+  #expect(page.nextCursor == "cursor")
+  let older = try await api.listScanReportPage("job", before: page.nextCursor)
+  #expect(older.nextCursor == nil)
+  #expect(older.items.first?.findingCount == nil)
+  #expect(older.items.first?.status == "incomplete")
+}
+
+@Test func apiProvenanceClientSendsVersionAsQueryParameter() async throws {
+  let configuration = URLSessionConfiguration.ephemeral
+  configuration.protocolClasses = [ScanFixtureProtocol.self]
+  let api = DaemonAPI(baseURL: URL(string: "https://scan-fixture.invalid")!, token: "synthetic", session: URLSession(configuration: configuration))
+  let result = try await api.getExecutionProvenance("pod")
+  #expect(result.latest == nil)
+}
+
 private final class ScanFixtureProtocol: URLProtocol, @unchecked Sendable {
   override class func canInit(with request: URLRequest) -> Bool { request.url?.host == "scan-fixture.invalid" }
   override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
   override func startLoading() {
     let path = request.url!.path
+    if path.contains("execution-provenance") {
+      #expect(path == "/pods/pod/execution-provenance")
+      #expect(request.url?.query == "schemaVersion=2")
+    }
     let finding = #"{"id":"finding","scanner":"secrets","ruleId":"fixture","file":"source.ts","severity":"high","summary":"Redacted fixture","disposition":"unresolved"}"#
     let report = #"{"kind":"scan_report","id":"report","jobId":"job","status":"incomplete","policy":{"version":1,"baseRef":"main","headRef":"main","scanners":["secrets"],"judgment":"none","windowHours":24},"collection":{"repository":"fixture","files":[],"stacks":[],"scanners":[{"scanner":"secrets","status":"failed","findingCount":null}],"findings":[],"diagnostics":["Scanner unavailable"]},"judgment":{"status":"not_requested"},"createdAt":"2026-09-07T10:00:00Z","completedAt":"2026-09-07T10:01:00Z"}"#
     let body: String
-    if path.hasSuffix("/trigger") { body = report }
+    if path.hasSuffix("/execution-provenance") {
+      #expect(request.url?.query == "schemaVersion=2")
+      body = #"{"latest":null}"#
+    }
+    else if path.hasSuffix("/report-page") {
+      #expect(request.httpMethod == "GET")
+      if request.url?.query == "before=cursor" { body = #"{"items":[{"id":"old","jobId":"job","status":"incomplete","createdAt":"today","findingCount":null,"judgmentStatus":null,"diagnostics":["Unavailable summary"]}],"nextCursor":null}"# }
+      else { body = #"{"items":[],"nextCursor":"cursor"}"# }
+    }
+    else if path.hasSuffix("/trigger") { body = report }
     else if path.hasSuffix("/triage") {
       #expect(request.httpMethod == "POST")
       body = #"{"id":"selection","findingIds":["finding"],"action":"select_repair","reason":"Human selection","actor":{"type":"human","userId":"operator"},"createdAt":"2026-09-07T10:02:00Z"}"#

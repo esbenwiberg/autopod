@@ -21,6 +21,7 @@ export function createScanOperatorService(deps: {
 }) {
   return {
     list: (jobId: string) => deps.reports.list(jobId),
+    page: (jobId: string, before?: string) => deps.reports.page(jobId, before),
     detail(reportId: string): ScanReportDetail {
       return {
         report: deps.reports.get(reportId),

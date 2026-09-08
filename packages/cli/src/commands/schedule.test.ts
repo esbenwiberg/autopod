@@ -22,6 +22,41 @@ describe('schedule command', () => {
     vi.restoreAllMocks();
   });
 
+  it('reads report history pages over HTTP and forwards the explicit continuation cursor', async () => {
+    const requests: string[] = [];
+    const server = createServer((req, res) => {
+      requests.push(req.url ?? '');
+      res.setHeader('content-type', 'application/json');
+      res.end(JSON.stringify({ items: [], nextCursor: null }));
+    });
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+    const address = server.address();
+    if (!address || typeof address === 'string') throw new Error('No test port');
+    const client = new AutopodClient({
+      baseUrl: `http://127.0.0.1:${address.port}`,
+      getToken: async () => 'fixture',
+    });
+    const output = vi.spyOn(console, 'log').mockImplementation(() => {});
+    try {
+      await createProgram(client).parseAsync([
+        'node',
+        'ap',
+        'schedule',
+        'report-page',
+        'job',
+        '--before',
+        'cursor',
+      ]);
+      expect(requests).toEqual(['/scheduled-jobs/job/report-page?before=cursor']);
+      expect(JSON.parse(String(output.mock.calls[0]?.[0]))).toEqual({
+        items: [],
+        nextCursor: null,
+      });
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+  });
+
   it('passes template field definitions when creating a template', async () => {
     const createScheduledJobTemplate = vi.fn(
       async (req: CreateScheduledJobTemplateRequest): Promise<ScheduledJobTemplate> => ({

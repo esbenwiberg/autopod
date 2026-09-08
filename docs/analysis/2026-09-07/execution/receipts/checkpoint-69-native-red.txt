@@ -1,0 +1,25 @@
+[1/1] Compiling plugin GenerateManual
+[2/2] Compiling plugin GenerateDoccReference
+Building for debugging...
+[2/7] Write sources
+[3/7] Write swift-version--58304C5D6DBC2206.txt
+[5/7] Compiling AutopodClientTests ScheduledScanTests.swift
+[6/7] Emitting module AutopodClientTests
+[6/8] Write Objects.LinkFileList
+[7/8] Linking AutopodDesktopPackageTests
+Build complete! (2.77s)
+Test Suite 'Selected tests' started at 2026-09-08 12:38:32.237.
+Test Suite 'AutopodDesktopPackageTests.xctest' started at 2026-09-08 12:38:32.242.
+Test Suite 'AutopodDesktopPackageTests.xctest' passed at 2026-09-08 12:38:32.242.
+	 Executed 0 tests, with 0 failures (0 unexpected) in 0.000 (0.000) seconds
+Test Suite 'Selected tests' passed at 2026-09-08 12:38:32.242.
+	 Executed 0 tests, with 0 failures (0 unexpected) in 0.000 (0.005) seconds
+◇ Test run started.
+↳ Testing Library Version: 1902
+↳ Target Platform: arm64e-apple-macos14.0
+◇ Test scanHistoryClientFollowsExplicitPageCursor() started.
+◇ Test apiProvenanceClientSendsVersionAsQueryParameter() started.
+✔ Test apiProvenanceClientSendsVersionAsQueryParameter() passed after 0.005 seconds.
+✘ Test scanHistoryClientFollowsExplicitPageCursor() recorded an issue at ScheduledScanTests.swift:28:2: Caught error: .decodingError("DecodingError.keyNotFound: Key \'items\' not found in keyed decoding container. Debug description: No value associated with key CodingKeys(stringValue: \"items\", intValue: nil) (\"items\").")
+✘ Test scanHistoryClientFollowsExplicitPageCursor() failed after 0.005 seconds with 1 issue.
+✘ Test run with 2 tests in 0 suites failed after 0.006 seconds with 1 issue.

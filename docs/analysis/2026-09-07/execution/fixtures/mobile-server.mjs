@@ -527,6 +527,30 @@ const server = createServer(async (req, res) => {
     return json({ ok: true, action: startupRetryFixture ? 'retry-agent' : 'revalidate' });
   }
   if (pathname === '/scheduled-jobs') return json([scanJob]);
+  if (pathname === '/scheduled-jobs/scan-fixture/report-page') {
+    const older = new URL(req.url, 'http://localhost').searchParams.has('before');
+    return json({
+      items: [
+        {
+          id: older ? 'report-old-fixture' : scanReport.id,
+          jobId: scanJob.id,
+          status: 'incomplete',
+          createdAt: older ? '2026-09-06T10:00:00Z' : scanReport.createdAt,
+          completedAt: scanReport.completedAt,
+          findingCount: older ? null : 1,
+          judgmentStatus: older ? null : 'not_requested',
+          diagnostics: older ? ['Finding count unavailable; inspect report evidence.'] : [],
+        },
+      ],
+      nextCursor: older ? null : scanReport.id,
+    });
+  }
+  if (pathname === '/scan-reports/report-old-fixture')
+    return json({
+      report: { ...scanReport, id: 'report-old-fixture' },
+      unresolved: [scanFinding],
+      decisions: [],
+    });
   if (pathname === '/scheduled-jobs/scan-fixture/reports') return json([scanReport]);
   if (pathname === '/scheduled-jobs/scan-fixture/trigger') return json(scanReport);
   if (pathname === '/scan-reports/report-fixture')

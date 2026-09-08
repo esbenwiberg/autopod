@@ -5,7 +5,10 @@ struct ScanInboxView: View {
   let job: ScheduledJob
   let api: DaemonAPI
   @Environment(\.dismiss) private var dismiss
-  @State private var reports: [ScheduledScanReport] = []
+  @State private var reports: [ScanReportSummary] = []
+  @State private var nextCursor: String?
+  @State private var pageGeneration = 0
+  @State private var loadingReports = false
   @State private var detail: ScanReportDetail?
   @State private var reportId = ""
   @State private var selected: Set<String> = []
@@ -44,7 +47,8 @@ struct ScanInboxView: View {
           Text("Choose report").tag("")
           ForEach(reports) { report in Text("\(report.createdAt) · \(report.status)").tag(report.id) }
         }.disabled(busy)
-        Button("Refresh") { Task { await refresh() } }.disabled(busy)
+        Button("Refresh") { Task { await refresh() } }.disabled(busy || loadingReports)
+        if nextCursor != nil { Button("Load older reports") { Task { await loadOlderReports() } }.disabled(busy || loadingReports) }
       }
       ScrollView {
         if let detail {
@@ -121,8 +125,27 @@ struct ScanInboxView: View {
       .task(id: reportId) { await loadDetail(restoreDraft: true) }
   }
   private func refresh() async {
-    do { reports = try await api.listScanReports(job.id); if reportId.isEmpty { reportId = reports.first?.id ?? "" }; error = "" }
-    catch { self.error = error.localizedDescription }
+    pageGeneration += 1; let owner = pageGeneration
+    loadingReports = true
+    defer { if owner == pageGeneration { loadingReports = false } }
+    do {
+      let page = try await api.listScanReportPage(job.id)
+      guard owner == pageGeneration, !Task.isCancelled else { return }
+      reports = page.items; nextCursor = page.nextCursor
+      if reportId.isEmpty { reportId = reports.first?.id ?? "" }; error = ""
+    } catch { if owner == pageGeneration { self.error = error.localizedDescription } }
+  }
+  private func loadOlderReports() async {
+    guard let cursor = nextCursor, !loadingReports else { return }
+    let owner = pageGeneration; loadingReports = true
+    defer { if owner == pageGeneration { loadingReports = false } }
+    do {
+      let page = try await api.listScanReportPage(job.id, before: cursor)
+      guard owner == pageGeneration, !Task.isCancelled else { return }
+      let existing = Set(reports.map(\.id))
+      reports.append(contentsOf: page.items.filter { !existing.contains($0.id) })
+      nextCursor = page.nextCursor; error = ""
+    } catch { if owner == pageGeneration { self.error = error.localizedDescription } }
   }
   private func loadDetail(restoreDraft: Bool) async {
     guard !reportId.isEmpty else { detail = nil; return }
