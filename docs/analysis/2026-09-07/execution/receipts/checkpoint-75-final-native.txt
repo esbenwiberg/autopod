@@ -1,0 +1,28 @@
+[1/1] Compiling plugin GenerateManual
+[2/2] Compiling plugin GenerateDoccReference
+Building for debugging...
+[2/7] Write sources
+[3/7] Write swift-version--58304C5D6DBC2206.txt
+[5/9] Emitting module AutopodDesktop
+[6/9] Compiling AutopodDesktop ScanInboxView.swift
+[6/11] Write Objects.LinkFileList
+[8/11] Linking AutopodDesktopExe
+[9/11] Linking AutopodDesktopPackageTests
+[10/11] Applying AutopodDesktopExe
+Build complete! (3.80s)
+Test Suite 'Selected tests' started at 2026-09-08 14:44:22.772.
+Test Suite 'AutopodDesktopPackageTests.xctest' started at 2026-09-08 14:44:22.779.
+Test Suite 'AutopodDesktopPackageTests.xctest' passed at 2026-09-08 14:44:22.779.
+	 Executed 0 tests, with 0 failures (0 unexpected) in 0.000 (0.000) seconds
+Test Suite 'Selected tests' passed at 2026-09-08 14:44:22.779.
+	 Executed 0 tests, with 0 failures (0 unexpected) in 0.000 (0.007) seconds
+◇ Test run started.
+↳ Testing Library Version: 1902
+↳ Target Platform: arm64e-apple-macos14.0
+◇ Test scheduledScanClientPreservesIncompleteStatusAndExplicitHumanSelection() started.
+◇ Test scanReviewClientUsesIndependentFindingAndDecisionCursors() started.
+◇ Test unavailableReportFieldsPreserveRecordedStatusWithoutInventingEvidence() started.
+✔ Test unavailableReportFieldsPreserveRecordedStatusWithoutInventingEvidence() passed after 0.001 seconds.
+✔ Test scanReviewClientUsesIndependentFindingAndDecisionCursors() passed after 0.006 seconds.
+✔ Test scheduledScanClientPreservesIncompleteStatusAndExplicitHumanSelection() passed after 0.006 seconds.
+✔ Test run with 3 tests in 0 suites passed after 0.007 seconds.

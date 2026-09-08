@@ -108,12 +108,18 @@ export interface ScanTriageDecision {
   reason: string;
   createdAt: string;
 }
+export interface ScanReportView extends Omit<ScheduledScanReport, 'policy' | 'judgment'> {
+  policy: ScheduledScanPolicy | null;
+  judgment: ScheduledScanReport['judgment'] | null;
+  evidenceDiagnostics: string[];
+}
+
 export interface ScanReportDetail {
   diagnostics?: ScanRecordDiagnostic[];
   /** Present on paginated operator review responses. */
   unresolvedNextCursor?: string | null;
   decisionsNextCursor?: string | null;
-  report: ScheduledScanReport;
+  report: ScanReportView;
   unresolved: Array<ScheduledScanFinding & { disposition: 'unresolved' | 'deferred' }>;
   decisions: Array<ScanTriageDecision & { repairPodId: string | null }>;
 }
@@ -146,7 +152,7 @@ export interface ScanReportPage {
 
 /** Unreadable stored evidence is excluded from selectable items, never discarded. */
 export interface ScanRecordDiagnostic {
-  kind: 'finding' | 'decision';
+  kind: 'finding' | 'decision' | 'report';
   recordId: string;
   message: string;
 }

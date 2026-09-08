@@ -6,6 +6,7 @@ import Database from 'better-sqlite3';
 import { describe, expect, it, vi } from 'vitest';
 import { runMigrations } from '../db/migrate.js';
 import { createTestDb, insertTestProfile, logger } from '../test-utils/mock-helpers.js';
+import { createScanOperatorService } from './scan-operator-service.js';
 import { createScanReportRepository } from './scan-report-repository.js';
 
 const policy: ScheduledScanPolicy = {
@@ -38,6 +39,115 @@ const collection: ScheduledScanCollection = {
 };
 
 describe('scheduled scan reports independent of worker lifetime', () => {
+  it.each([
+    ['policy', JSON.stringify({ ...policy, version: 2 })],
+    ['policy', JSON.stringify({ ...policy, extra: 'x'.repeat(70_000) })],
+    ['collection', JSON.stringify({ ...collection, files: {} })],
+    ['collection', JSON.stringify({ ...collection, diagnostics: ['x'.repeat(2 * 1024 * 1024)] })],
+    ['judgment', JSON.stringify({ status: 'complete', usage: { inputTokens: -1 } })],
+    ['judgment', JSON.stringify({ status: 'complete', text: 'x'.repeat(140_000) })],
+  ] as const)(
+    'projects unsupported or oversized report %s as unavailable (%#)',
+    (field, payload) => {
+      const db = createTestDb();
+      const reports = createScanReportRepository(db);
+      try {
+        const report = reports.begin('job', 'bounded-report', policy);
+        db.prepare(`UPDATE scheduled_scan_reports SET ${field} = ? WHERE id = ?`).run(
+          payload,
+          report.id,
+        );
+        const view = reports.view(report.id);
+        expect(view[field]).toBeNull();
+        expect(view.evidenceDiagnostics.length).toBeGreaterThan(0);
+        expect(JSON.stringify(view).length).toBeLessThan(10_000);
+        expect(() => reports.get(report.id)).toThrow(/evidence unavailable/i);
+        expect(
+          db
+            .prepare(`SELECT ${field} AS value FROM scheduled_scan_reports WHERE id = ?`)
+            .get(report.id),
+        ).toEqual({ value: payload });
+      } finally {
+        db.close();
+      }
+    },
+  );
+
+  it.each(['policy', 'collection', 'judgment'] as const)(
+    'keeps a malformed report %s readable without granting action authority',
+    (field) => {
+      const db = createTestDb();
+      const reports = createScanReportRepository(db);
+      const service = createScanOperatorService({
+        reports,
+        jobs: {} as never,
+        profiles: {} as never,
+        pods: {} as never,
+      });
+      try {
+        const report = reports.begin('job', `bad-report-${field}`, policy);
+        db.prepare('UPDATE scheduled_scan_reports SET collection = ? WHERE id = ?').run(
+          JSON.stringify(collection),
+          report.id,
+        );
+        db.prepare(
+          `UPDATE scheduled_scan_reports SET ${field} = ?, status = 'complete', completed_at = ? WHERE id = ?`,
+        ).run('{private-malformed', new Date().toISOString(), report.id);
+        const result = service.review(report.id);
+        expect(result.report[field]).toBeNull();
+        expect(result.report.status).toBe('complete');
+        expect(service.detail(report.id).report[field]).toBeNull();
+        expect(service.list('job').find((item) => item.id === report.id)?.[field]).toBeNull();
+        expect(result.report.evidenceDiagnostics.length).toBeGreaterThan(0);
+        expect(JSON.stringify(result)).not.toContain('private-malformed');
+        expect(() => reports.get(report.id)).toThrow(/evidence unavailable/i);
+        expect(() =>
+          service.triage({
+            reportId: report.id,
+            requestKey: 'blocked-report',
+            findingIds: ['stable-finding'],
+            action: 'select_repair',
+            reason: 'No authority from malformed evidence',
+            actor: { type: 'human', userId: 'operator' },
+          }),
+        ).toThrow(/evidence unavailable/i);
+        expect(
+          db
+            .prepare(`SELECT ${field} AS value FROM scheduled_scan_reports WHERE id = ?`)
+            .get(report.id),
+        ).toEqual({ value: '{private-malformed' });
+      } finally {
+        db.close();
+      }
+    },
+  );
+
+  it('does not widen a missing report collection into another repository in the same job', () => {
+    const db = createTestDb();
+    const reports = createScanReportRepository(db);
+    const service = createScanOperatorService({
+      reports,
+      jobs: {} as never,
+      profiles: {} as never,
+      pods: {} as never,
+    });
+    try {
+      const older = reports.begin('job', 'other-repo', policy);
+      reports.finish(older.id, collection);
+      const pending = reports.begin('job', 'no-scope', policy);
+      const detail = service.review(pending.id);
+      expect(detail.unresolved).toHaveLength(0);
+      expect(detail.diagnostics).toEqual(
+        expect.arrayContaining([expect.objectContaining({ kind: 'report', recordId: pending.id })]),
+      );
+      expect(() => reports.selectedUnresolved(pending.id, ['stable-finding'])).toThrow(
+        /scope unavailable/i,
+      );
+    } finally {
+      db.close();
+    }
+  });
+
   it('preserves recorded human actor key order and reason bytes on an idempotent replay', () => {
     const db = createTestDb();
     const repo = createScanReportRepository(db);
@@ -395,7 +505,9 @@ describe('scheduled scan reports independent of worker lifetime', () => {
         expect(repo.recoverInterrupted()).toBe(1);
         expect(repo.get(interrupted.id).status).toBe('incomplete');
         expect(repo.get(report.id).collection).toEqual(collection);
-        expect(repo.unresolved(interrupted.id)).toHaveLength(1);
+        expect(() => repo.unresolved(interrupted.id)).toThrow(/scope unavailable/i);
+        expect(repo.unresolvedPage(interrupted.id).diagnostics?.[0]?.kind).toBe('report');
+        expect(repo.unresolved(report.id)).toHaveLength(1);
         expect(
           db.prepare("SELECT last_validation_result FROM pods WHERE id = 'legacy'").get(),
         ).toEqual({ last_validation_result: '{malformed legacy json' });
@@ -437,7 +549,10 @@ describe('scheduled scan reports independent of worker lifetime', () => {
       const interrupted = repo.begin('job', 'run4', policy);
       repo.recoverInterrupted();
       expect(repo.get(interrupted.id).status).toBe('incomplete');
-      expect(repo.unresolved(interrupted.id)).toHaveLength(1);
+      expect(() => repo.unresolved(interrupted.id)).toThrow(/scope unavailable/i);
+      expect(repo.unresolvedPage(interrupted.id).diagnostics?.[0]?.kind).toBe('report');
+      expect(repo.unresolved(first.id)).toHaveLength(1);
+      expect(repo.unresolved(first.id)[0]?.line).toBe(10);
       expect(db.prepare('SELECT COUNT(*) AS n FROM pods').get()).toEqual({ n: 0 });
     } finally {
       db.close();

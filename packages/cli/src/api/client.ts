@@ -5,6 +5,7 @@ import type {
   ScanRepairDispatch,
   ScanReportDetail,
   ScanReportPage,
+  ScanReportView,
   ScanTriageDecision,
   ScanTriageRequest,
   ScheduledScanReport,
@@ -674,7 +675,7 @@ export class AutopodClient {
       `/scheduled-jobs/${encodeURIComponent(jobId)}/report-page${before ? `?before=${encodeURIComponent(before)}` : ''}`,
     );
   }
-  async listScanReports(jobId: string): Promise<ScheduledScanReport[]> {
+  async listScanReports(jobId: string): Promise<ScanReportView[]> {
     return this.request('GET', `/scheduled-jobs/${encodeURIComponent(jobId)}/reports`);
   }
   async getScanReportReview(reportId: string): Promise<ScanReportDetail> {

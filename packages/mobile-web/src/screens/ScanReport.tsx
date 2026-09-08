@@ -179,6 +179,9 @@ export function ScanReport() {
     detail?.diagnostics?.filter((item) => item.kind === 'finding').map((item) => item.recordId) ??
       [],
   );
+  const reportUnavailable = !!detail?.report.evidenceDiagnostics?.length;
+  const scopeUnavailable =
+    !detail?.report.collection || detail.report.collection.repository === 'unavailable';
   return (
     <main className="scan-report">
       <Link to="/scan-reports" className="back-link">
@@ -198,10 +201,27 @@ export function ScanReport() {
       ) : (
         <>
           <section className="scan-card">
-            <h2>{detail.report.status.replaceAll('_', ' ')}</h2>
+            <h2>
+              {reportUnavailable
+                ? 'Report evidence unavailable'
+                : detail.report.status.replaceAll('_', ' ')}
+            </h2>
+            {reportUnavailable && (
+              <>
+                <p>
+                  Recorded status: {detail.report.status.replaceAll('_', ' ')}. A clean result
+                  cannot be verified.
+                </p>
+                {detail.report.evidenceDiagnostics.map((message) => (
+                  <p key={message}>{message}</p>
+                ))}
+              </>
+            )}
             <p>{detail.report.createdAt} · Report completion is separate from patch delivery.</p>
             <p>
-              {detail.report.policy.baseRef} → {detail.report.policy.headRef}
+              {detail.report.policy
+                ? `${detail.report.policy.baseRef} → ${detail.report.policy.headRef}`
+                : 'Policy unavailable'}
             </p>
             <details>
               <summary>Exact source and files</summary>
@@ -232,9 +252,9 @@ export function ScanReport() {
                 {scanner.diagnostic ? ` · ${scanner.diagnostic}` : ''}
               </p>
             ))}
-            <p>Judgment: {detail.report.judgment.status}</p>
-            {detail.report.judgment.text && <p>{detail.report.judgment.text}</p>}
-            {detail.report.judgment.usage && (
+            <p>Judgment: {detail.report.judgment?.status ?? 'unavailable'}</p>
+            {detail.report.judgment?.text && <p>{detail.report.judgment.text}</p>}
+            {detail.report.judgment?.usage && (
               <p>
                 {detail.report.judgment.usage.model} ·{' '}
                 {detail.report.judgment.usage.inputTokens +
@@ -291,7 +311,12 @@ export function ScanReport() {
               <label className="scan-finding" key={finding.id}>
                 <input
                   type="checkbox"
-                  disabled={busy || (selected.length >= 100 && !selected.includes(finding.id))}
+                  disabled={
+                    busy ||
+                    reportUnavailable ||
+                    scopeUnavailable ||
+                    (selected.length >= 100 && !selected.includes(finding.id))
+                  }
                   checked={selected.includes(finding.id)}
                   onChange={(event) =>
                     setSelected(
@@ -346,6 +371,8 @@ export function ScanReport() {
                   key={action}
                   disabled={
                     busy ||
+                    reportUnavailable ||
+                    scopeUnavailable ||
                     !selected.length ||
                     !reason.trim() ||
                     selected.some((id) => unavailableFindings.has(id))
@@ -386,7 +413,10 @@ export function ScanReport() {
                       type="button"
                       className="action-btn action-primary"
                       disabled={
-                        busy || decision.findingIds.some((id) => unavailableFindings.has(id))
+                        busy ||
+                        reportUnavailable ||
+                        scopeUnavailable ||
+                        decision.findingIds.some((id) => unavailableFindings.has(id))
                       }
                       onClick={() => void repair(decision.id)}
                     >

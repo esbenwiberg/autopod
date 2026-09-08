@@ -19,28 +19,37 @@ export function createScanOperatorService(deps: {
   profiles: ProfileStore;
   pods: PodManager;
 }) {
+  const review = (reportId: string): ScanReportDetail => {
+    const findings = deps.reports.unresolvedPage(reportId);
+    const decisions = deps.reports.decisionPage(reportId);
+    return {
+      report: deps.reports.view(reportId),
+      unresolved: findings.items,
+      decisions: decisions.items,
+      diagnostics: [...(findings.diagnostics ?? []), ...(decisions.diagnostics ?? [])],
+      unresolvedNextCursor: findings.nextCursor,
+      decisionsNextCursor: decisions.nextCursor,
+    };
+  };
   return {
     list: (jobId: string) => deps.reports.list(jobId),
     page: (jobId: string, before?: string) => deps.reports.page(jobId, before),
     detail(reportId: string): ScanReportDetail {
-      return {
-        report: deps.reports.get(reportId),
-        unresolved: deps.reports.unresolved(reportId),
-        decisions: deps.reports.decisions(reportId),
-      };
+      try {
+        return {
+          report: { ...deps.reports.get(reportId), evidenceDiagnostics: [] },
+          unresolved: deps.reports.unresolved(reportId),
+          decisions: deps.reports.decisions(reportId),
+        };
+      } catch (error) {
+        if (!(error instanceof AutopodError) || error.code !== 'SCAN_RECONCILIATION_REQUIRED')
+          throw error;
+        // Legacy detail keeps its healthy bounds. Unavailable evidence returns
+        // the explicit paged view and continuation cursors rather than a 500.
+        return review(reportId);
+      }
     },
-    review(reportId: string): ScanReportDetail {
-      const findings = deps.reports.unresolvedPage(reportId);
-      const decisions = deps.reports.decisionPage(reportId);
-      return {
-        report: deps.reports.get(reportId),
-        unresolved: findings.items,
-        decisions: decisions.items,
-        diagnostics: [...(findings.diagnostics ?? []), ...(decisions.diagnostics ?? [])],
-        unresolvedNextCursor: findings.nextCursor,
-        decisionsNextCursor: decisions.nextCursor,
-      };
-    },
+    review,
     findings: deps.reports.unresolvedPage,
     decisions: deps.reports.decisionPage,
     triage: deps.reports.triage,

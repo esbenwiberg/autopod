@@ -4528,6 +4528,55 @@ describe('PodManager', () => {
           payload: { selectionId: malformedSelection },
         });
         expect(badRepair.statusCode).toBe(409);
+        const unreadableReport = reports.begin('scan-job', 'malformed-policy', report.policy);
+        ctx.db
+          .prepare(
+            "UPDATE scheduled_scan_reports SET policy = '{private-malformed', status = 'complete', completed_at = ? WHERE id = ?",
+          )
+          .run(new Date().toISOString(), unreadableReport.id);
+        const badReportRead = await app.inject({
+          method: 'GET',
+          url: `/scan-reports/${unreadableReport.id}/review`,
+          headers,
+        });
+        expect(badReportRead.statusCode).toBe(200);
+        expect(badReportRead.json().report).toMatchObject({
+          policy: null,
+          status: 'complete',
+          collection: null,
+        });
+        expect(badReportRead.json().report.evidenceDiagnostics.length).toBeGreaterThan(0);
+        expect(badReportRead.json().unresolved).toHaveLength(0);
+        expect(badReportRead.body).not.toContain('private-malformed');
+        const legacyBadDetail = await app.inject({
+          method: 'GET',
+          url: `/scan-reports/${unreadableReport.id}`,
+          headers,
+        });
+        expect(legacyBadDetail.statusCode).toBe(200);
+        expect(legacyBadDetail.json().report.policy).toBeNull();
+        const legacyList = await app.inject({
+          method: 'GET',
+          url: '/scheduled-jobs/scan-job/reports',
+          headers,
+        });
+        expect(legacyList.statusCode).toBe(200);
+        expect(
+          legacyList.json().find((item: { id: string }) => item.id === unreadableReport.id).policy,
+        ).toBeNull();
+        expect(
+          legacyList.json().find((item: { id: string }) => item.id === report.id).policy,
+        ).toEqual(report.policy);
+        expect(legacyList.body).not.toContain('private-malformed');
+
+        const badReportTriage = await app.inject({
+          method: 'POST',
+          url: `/scan-reports/${unreadableReport.id}/triage`,
+          headers,
+          payload: { ...input, requestKey: 'malformed-report-selection' },
+        });
+        expect(badReportTriage.statusCode).toBe(409);
+
         expect(ctx.enqueuedSessions).toEqual([]);
         expect(ctx.db.prepare('SELECT COUNT(*) AS n FROM scheduled_scan_repairs').get()).toEqual({
           n: 0,

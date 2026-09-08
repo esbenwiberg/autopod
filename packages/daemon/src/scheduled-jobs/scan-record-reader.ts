@@ -16,7 +16,7 @@ export const scanDecisionProjection = `t.id, t.request_key, t.report_id, t.actio
   CASE WHEN length(CAST(t.actor AS BLOB)) <= 16384 THEN t.actor END AS actor,
   CASE WHEN length(CAST(t.reason AS BLOB)) <= 16000 THEN t.reason END AS reason`;
 const identity = z.string().min(1).max(200);
-const findingSchema = z.object({
+export const scanFindingSchema = z.object({
   id: identity,
   scanner: z.enum(['secrets', 'dependencies']),
   ruleId: z.string().min(1).max(1000),
@@ -39,7 +39,7 @@ const selectedIds = z
   .refine((ids) => new Set(ids).size === ids.length);
 
 export function scanRecordDiagnostic(
-  kind: ScanRecordDiagnostic['kind'],
+  kind: 'finding' | 'decision',
   id: string,
 ): ScanRecordDiagnostic {
   return {
@@ -48,7 +48,7 @@ export function scanRecordDiagnostic(
     message: `${kind === 'finding' ? 'Finding' : 'Decision'} evidence unavailable: malformed, oversized or inconsistent stored record. It remains stored and cannot authorize a repair; reconcile the original evidence.`,
   };
 }
-function unavailable(kind: ScanRecordDiagnostic['kind'], id: string): AutopodError {
+function unavailable(kind: 'finding' | 'decision', id: string): AutopodError {
   return new AutopodError(
     `${scanRecordDiagnostic(kind, id).message} Record: ${id.slice(0, 200)}`,
     'SCAN_RECONCILIATION_REQUIRED',
@@ -65,7 +65,7 @@ export function readScanFinding(row: {
   disposition: string;
 }): ScanFindingPage['items'][number] {
   try {
-    const finding = findingSchema.parse(json(row.finding));
+    const finding = scanFindingSchema.parse(json(row.finding));
     if (finding.id !== row.id) throw new Error('Finding identity mismatch');
     const disposition = z.enum(['unresolved', 'deferred']).parse(row.disposition);
     return { ...finding, disposition };

@@ -62,9 +62,10 @@ public struct ScheduledScanReport: Codable, Identifiable, Sendable {
   public let id: String
   public let jobId: String
   public let status: String
-  public let policy: ScheduledScanPolicy
+  public let policy: ScheduledScanPolicy?
   public let collection: ScheduledScanCollection?
-  public let judgment: Judgment
+  public let judgment: Judgment?
+  public let evidenceDiagnostics: [String]?
   public let createdAt: String
   public let completedAt: String?
 }

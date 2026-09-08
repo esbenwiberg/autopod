@@ -6,6 +6,7 @@ import {
   type ScanRecordDiagnostic,
   type ScanReportPage,
   type ScanReportSummary,
+  type ScanReportView,
   type ScanTriageDecision,
   type ScheduledScanCollection,
   type ScheduledScanFinding,
@@ -20,13 +21,15 @@ import {
   scanFindingProjection,
   scanRecordDiagnostic,
 } from './scan-record-reader.js';
+import { readScanReport, scanReportProjection } from './scan-report-reader.js';
 
 export type { ScanTriageDecision } from '@autopod/shared';
 export interface ScanReportRepository {
   begin(jobId: string, runKey: string, policy: ScheduledScanPolicy): ScheduledScanReport;
   get(id: string): ScheduledScanReport;
+  view(id: string): ScanReportView;
   claim(id: string, owner: string): boolean;
-  list(jobId: string): ScheduledScanReport[];
+  list(jobId: string): ScanReportView[];
   page(jobId: string, before?: string): ScanReportPage;
   unresolvedPage(reportId: string, after?: string): ScanFindingPage;
   selectedUnresolved(reportId: string, ids: string[]): ScanFindingPage['items'];
@@ -44,26 +47,33 @@ export interface ScanReportRepository {
 }
 
 export function createScanReportRepository(db: Database.Database): ScanReportRepository {
-  const get = (id: string): ScheduledScanReport => {
-    const row = db.prepare('SELECT * FROM scheduled_scan_reports WHERE id = ?').get(id) as
-      | Record<string, unknown>
-      | undefined;
+  const view = (id: string): ScanReportView => {
+    const row = db
+      .prepare(`SELECT ${scanReportProjection} FROM scheduled_scan_reports WHERE id = ?`)
+      .get(id) as Record<string, unknown> | undefined;
     if (!row) throw new AutopodError('Scan report not found', 'NOT_FOUND', 404);
-    return {
-      kind: 'scan_report',
-      id,
-      jobId: row.job_id as string,
-      status: row.status as ScheduledScanReport['status'],
-      policy: JSON.parse(row.policy as string),
-      collection: row.collection ? JSON.parse(row.collection as string) : null,
-      judgment: JSON.parse(row.judgment as string),
-      createdAt: row.created_at as string,
-      completedAt: row.completed_at as string | null,
-    };
+    return readScanReport(row);
+  };
+  const get = (id: string): ScheduledScanReport => {
+    const report = view(id);
+    if (report.evidenceDiagnostics.length || !report.policy || !report.judgment)
+      throw new AutopodError(
+        'Scan report evidence unavailable; use the paged report review to inspect diagnostics and reconcile the original evidence before acting.',
+        'SCAN_RECONCILIATION_REQUIRED',
+        409,
+      );
+    const { evidenceDiagnostics: _diagnostics, ...stored } = report;
+    return { ...stored, policy: report.policy, judgment: report.judgment };
   };
   const decision = readScanDecision;
   const unresolved = (reportId: string) => {
     const report = get(reportId);
+    if (!report.collection || report.collection.repository === 'unavailable')
+      throw new AutopodError(
+        'Scan report scope unavailable; inspect the paged review before enumerating findings',
+        'SCAN_RECONCILIATION_REQUIRED',
+        409,
+      );
     const rows = db
       .prepare(`SELECT DISTINCT ${scanFindingProjection} FROM scheduled_scan_findings f
       JOIN scheduled_scan_occurrences o ON o.finding_id = f.id JOIN scheduled_scan_reports r ON r.id = o.report_id
@@ -85,6 +95,12 @@ export function createScanReportRepository(db: Database.Database): ScanReportRep
     if (!ids.length || ids.length > 100 || ids.some((id) => !id || id.length > 200))
       throw new AutopodError('Select 1 to 100 bounded finding IDs', 'INVALID_INPUT', 400);
     const report = get(reportId);
+    if (!report.collection || report.collection.repository === 'unavailable')
+      throw new AutopodError(
+        'Scan report scope unavailable; collect exact repository evidence before recording a decision',
+        'SCAN_RECONCILIATION_REQUIRED',
+        409,
+      );
     const rows = db
       .prepare(`SELECT ${scanFindingProjection} FROM scheduled_scan_findings f
       WHERE f.disposition != 'resolved' AND f.id IN (${ids.map(() => '?').join(',')})
@@ -111,10 +127,24 @@ export function createScanReportRepository(db: Database.Database): ScanReportRep
   };
   return {
     get,
+    view,
     selectedUnresolved,
     getDecision,
     unresolvedPage(reportId, after) {
-      const report = get(reportId);
+      const report = view(reportId);
+      if (!report.collection || report.collection.repository === 'unavailable')
+        return {
+          items: [],
+          nextCursor: null,
+          diagnostics: [
+            {
+              kind: 'report',
+              recordId: reportId,
+              message:
+                'Collection scope unavailable. Findings have not been enumerated; no clean result is verified. Open an earlier report with recorded repository evidence to review retained findings.',
+            },
+          ],
+        };
       if (after !== undefined && (!after || after.length > 200))
         throw new AutopodError('Invalid finding cursor', 'SCAN_CURSOR_INVALID', 400);
       const scope =
@@ -158,7 +188,7 @@ export function createScanReportRepository(db: Database.Database): ScanReportRep
       return { items, diagnostics, nextCursor: rows.length > 50 ? (rows[49]?.id ?? null) : null };
     },
     decisionPage(reportId, before) {
-      get(reportId);
+      view(reportId);
       const anchor = before
         ? (db
             .prepare('SELECT rowid FROM scheduled_scan_triage WHERE report_id = ? AND id = ?')
@@ -257,8 +287,8 @@ export function createScanReportRepository(db: Database.Database): ScanReportRep
         );
       const rows = db
         .prepare(`SELECT id, job_id, status, created_at, completed_at,
-        CASE WHEN json_valid(collection) THEN CASE WHEN json_type(collection, '$.findings') = 'array' THEN json_array_length(collection, '$.findings') END END AS finding_count,
-        CASE WHEN json_valid(judgment) THEN CASE WHEN json_type(judgment, '$.status') = 'text' THEN json_extract(judgment, '$.status') END END AS judgment_status
+        CASE WHEN length(CAST(collection AS BLOB)) <= 2097152 THEN CASE WHEN json_valid(collection) THEN CASE WHEN json_type(collection, '$.findings') = 'array' THEN json_array_length(collection, '$.findings') END END END AS finding_count,
+        CASE WHEN length(CAST(judgment AS BLOB)) <= 131072 THEN CASE WHEN json_valid(judgment) THEN CASE WHEN json_type(judgment, '$.status') = 'text' THEN json_extract(judgment, '$.status') END END END AS judgment_status
         FROM scheduled_scan_reports WHERE job_id = ?
         AND (? IS NULL OR created_at < ? OR (created_at = ? AND id < ?))
         ORDER BY created_at DESC, id DESC LIMIT 21`)
@@ -314,7 +344,7 @@ export function createScanReportRepository(db: Database.Database): ScanReportRep
             'SELECT id FROM scheduled_scan_reports WHERE job_id = ? ORDER BY created_at DESC, id DESC LIMIT 100',
           )
           .all(jobId) as Array<{ id: string }>
-      ).map((row) => get(row.id));
+      ).map((row) => view(row.id));
     },
     finish: db.transaction((id: string, collection: ScheduledScanCollection) => {
       const report = get(id);
@@ -494,7 +524,17 @@ export function createScanReportRepository(db: Database.Database): ScanReportRep
         if (existing) return existing.pod_id;
         // createSession is synchronous on this SQLite connection. The pod and
         // dispatch receipt commit together; selection survives a failed launch.
-        const podId = create(decision(row));
+        const selected = decision(row);
+        const eligible = new Set(
+          selectedUnresolved(selected.reportId, selected.findingIds).map((finding) => finding.id),
+        );
+        if (selected.findingIds.some((id) => !eligible.has(id)))
+          throw new AutopodError(
+            'Selected findings changed disposition; review a new selection',
+            'SCAN_RECONCILIATION_REQUIRED',
+            409,
+          );
+        const podId = create(selected);
         if (!db.prepare('SELECT id FROM pods WHERE id = ?').get(podId))
           throw new Error('Repair pod was not durably created on this database');
         db.prepare(

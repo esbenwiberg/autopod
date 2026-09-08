@@ -363,3 +363,93 @@ it('keeps an unreadable retained selection visible but requires removing it befo
     container.remove();
   }
 });
+
+it.each(['malformed', 'missing-scope'])(
+  'renders unavailable report evidence and refuses actions (%s)',
+  async (mode) => {
+    localStorage.setItem(
+      'autopod-scan-triage:bad-report',
+      JSON.stringify({
+        requestKey: 'retained',
+        action: 'select_repair',
+        findingIds: ['finding'],
+        reason: 'Retained decision draft',
+      }),
+    );
+    const fetch = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          report: {
+            id: 'bad-report',
+            status: mode === 'malformed' ? 'complete' : 'incomplete',
+            policy: mode === 'malformed' ? null : { baseRef: 'main', headRef: 'work' },
+            collection: null,
+            judgment: null,
+            createdAt: 'today',
+            evidenceDiagnostics:
+              mode === 'malformed'
+                ? [
+                    'Policy evidence unavailable',
+                    'Collection evidence unavailable',
+                    'Judgment evidence unavailable',
+                  ]
+                : [],
+          },
+          unresolved: [
+            {
+              id: 'finding',
+              severity: 'high',
+              file: 'source.ts',
+              summary: 'Earlier readable finding',
+              disposition: 'unresolved',
+            },
+          ],
+          decisions: [
+            {
+              id: 'selection',
+              action: 'select_repair',
+              findingIds: ['finding'],
+              reason: 'Prior human selection',
+              createdAt: 'yesterday',
+              repairPodId: null,
+            },
+          ],
+        }),
+      ),
+    );
+    const container = document.createElement('div');
+    document.body.append(container);
+    const root = createRoot(container);
+    try {
+      await act(async () =>
+        root.render(
+          <MemoryRouter initialEntries={['/scan-report/bad-report']}>
+            <Routes>
+              <Route path="/scan-report/:id" element={<ScanReport />} />
+            </Routes>
+          </MemoryRouter>,
+        ),
+      );
+      if (mode === 'malformed') {
+        expect(container.textContent).toContain('Report evidence unavailable');
+        expect(container.textContent).toContain('Recorded status: complete');
+        expect(container.textContent).toContain('A clean result cannot be verified');
+        expect(container.textContent).toContain('Policy unavailable');
+      } else expect(container.textContent).toContain('incomplete');
+      expect(container.textContent).toContain('Judgment: unavailable');
+      for (const label of ['Record repair selection', 'Launch selected repair']) {
+        const button = [...container.querySelectorAll('button')].find(
+          (item) => item.textContent === label,
+        );
+        expect(button?.disabled).toBe(true);
+      }
+      expect((container.querySelector('input[type="checkbox"]') as HTMLInputElement).disabled).toBe(
+        true,
+      );
+      expect(fetch).toHaveBeenCalledTimes(1);
+    } finally {
+      await act(async () => root.unmount());
+      container.remove();
+    }
+  },
+);

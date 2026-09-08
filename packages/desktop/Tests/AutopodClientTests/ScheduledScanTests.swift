@@ -106,3 +106,10 @@ private final class ScanFixtureProtocol: URLProtocol, @unchecked Sendable {
   #expect(judgment.usage?.inputTokens == 25); #expect(judgment.usage?.outputTokens == 7)
   #expect(judgment.usage?.costUsd == nil); #expect(judgment.usage?.durationMs == 14500)
 }
+
+@Test func unavailableReportFieldsPreserveRecordedStatusWithoutInventingEvidence() throws {
+  let data = Data(#"{"kind":"scan_report","id":"report","jobId":"job","status":"complete","policy":null,"collection":null,"judgment":null,"createdAt":"today","completedAt":"today","evidenceDiagnostics":["Policy evidence unavailable","Collection evidence unavailable","Judgment evidence unavailable"]}"#.utf8)
+  let report = try JSONDecoder().decode(ScheduledScanReport.self, from: data)
+  #expect(report.status == "complete"); #expect(report.policy == nil); #expect(report.collection == nil); #expect(report.judgment == nil)
+  #expect(report.evidenceDiagnostics?.count == 3)
+}

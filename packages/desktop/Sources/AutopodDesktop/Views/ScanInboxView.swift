@@ -55,9 +55,15 @@ struct ScanInboxView: View {
       ScrollView {
         if let detail, detail.report.id == reportId {
           VStack(alignment: .leading, spacing: 12) {
-            Text(detail.report.status.replacingOccurrences(of: "_", with: " ")).font(.headline)
+            let unavailable = !(detail.report.evidenceDiagnostics ?? []).isEmpty
+            let scopeUnavailable = detail.report.collection == nil || detail.report.collection?.repository == "unavailable"
+            Text(unavailable ? "Report evidence unavailable" : detail.report.status.replacingOccurrences(of: "_", with: " ")).font(.headline)
+            if unavailable {
+              Text("Recorded status: \(detail.report.status). A clean result cannot be verified.")
+              ForEach(detail.report.evidenceDiagnostics ?? [], id: \.self) { Text($0) }
+            }
             Text("Report completion is separate from patch delivery.")
-            Text("\(detail.report.policy.baseRef) → \(detail.report.policy.headRef)")
+            if let policy = detail.report.policy { Text("\(policy.baseRef) → \(policy.headRef)") } else { Text("Policy unavailable") }
             if let collection = detail.report.collection {
               DisclosureGroup("Exact source and files") {
                 Text(collection.repository)
@@ -71,9 +77,9 @@ struct ScanInboxView: View {
                 Text("\(scanner.scanner): \(scanner.status) · \(scanner.findingCount.map(String.init) ?? "Unknown") findings\(scanner.diagnostic.map { " · \($0)" } ?? "")")
               }
             }
-            Text("Judgment: \(detail.report.judgment.status)")
-            if let text = detail.report.judgment.text { Text(text) }
-            if let usage = detail.report.judgment.usage {
+            Text("Judgment: \(detail.report.judgment?.status ?? "unavailable")")
+            if let text = detail.report.judgment?.text { Text(text) }
+            if let usage = detail.report.judgment?.usage {
               Text("\(usage.model) · \(usage.inputTokens + usage.outputTokens) recorded tokens · cost \(usage.costUsd.map { String(format: "$%.4f", $0) } ?? "unavailable")").font(.caption)
             }
             Divider()
@@ -101,7 +107,7 @@ struct ScanInboxView: View {
                   Text(finding.summary)
                   Text("\(finding.disposition ?? "unresolved") · \(finding.id)").font(.caption)
                 }
-              }.toggleStyle(.checkbox).disabled(busy || (selected.count >= 100 && !selected.contains(finding.id)))
+              }.toggleStyle(.checkbox).disabled(busy || unavailable || scopeUnavailable || (selected.count >= 100 && !selected.contains(finding.id)))
             }
             if detail.unresolvedNextCursor != nil { Button("Load more findings") { Task { await loadReviewPage(findings: true) } }.disabled(busy || loadingReviewPage) }
             Text("\(selected.count) / 100 findings selected")
@@ -110,7 +116,7 @@ struct ScanInboxView: View {
               Button("Defer") { Task { await triage("defer") } }
               Button("Record resolution") { Task { await triage("resolve") } }
               Button("Record repair selection") { Task { await triage("select_repair") } }
-            }.disabled(busy || selected.isEmpty || (detail.diagnostics ?? []).contains(where: { $0.kind == "finding" && selected.contains($0.recordId) }) || reason.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            }.disabled(busy || unavailable || scopeUnavailable || selected.isEmpty || (detail.diagnostics ?? []).contains(where: { $0.kind == "finding" && selected.contains($0.recordId) }) || reason.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
             Divider()
             Text("Recorded decisions").font(.headline)
             ForEach(detail.decisions) { decision in
@@ -121,7 +127,7 @@ struct ScanInboxView: View {
                 ForEach(decision.findingIds, id: \.self) { id in Text(detail.unresolved.first(where: { $0.id == id })?.file ?? id).font(.caption) }
                 if let podId = decision.repairPodId { Text("Repair pod: \(podId) · dispatch receipt") }
                 else if decision.action == "select_repair" {
-                  Button("Launch selected repair") { Task { await launch(decision.id) } }.disabled(busy || (detail.diagnostics ?? []).contains(where: { $0.kind == "finding" && decision.findingIds.contains($0.recordId) }))
+                  Button("Launch selected repair") { Task { await launch(decision.id) } }.disabled(busy || unavailable || scopeUnavailable || (detail.diagnostics ?? []).contains(where: { $0.kind == "finding" && decision.findingIds.contains($0.recordId) }))
                 }
               }.padding(.vertical, 4)
             }

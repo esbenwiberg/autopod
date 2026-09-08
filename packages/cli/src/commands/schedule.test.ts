@@ -65,6 +65,13 @@ describe('schedule command', () => {
       res.setHeader('content-type', 'application/json');
       res.end(
         JSON.stringify({
+          report: {
+            status: 'complete',
+            policy: null,
+            collection: null,
+            judgment: null,
+            evidenceDiagnostics: ['Policy evidence unavailable'],
+          },
           items: [],
           nextCursor: 'stored-row-cursor',
           diagnostics: [
@@ -108,6 +115,12 @@ describe('schedule command', () => {
       expect(output.mock.calls).toHaveLength(3);
       for (const call of output.mock.calls)
         expect(JSON.parse(String(call[0]))).toMatchObject({
+          report: {
+            status: 'complete',
+            policy: null,
+            judgment: null,
+            evidenceDiagnostics: ['Policy evidence unavailable'],
+          },
           nextCursor: 'stored-row-cursor',
           diagnostics: [{ recordId: 'unreadable-row', message: 'Finding evidence unavailable' }],
         });

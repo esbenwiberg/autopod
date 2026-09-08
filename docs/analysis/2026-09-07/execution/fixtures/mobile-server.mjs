@@ -611,6 +611,34 @@ const server = createServer(async (req, res) => {
   if (pathname === '/scheduled-jobs/scan-fixture/reports') return json([scanReport]);
   if (pathname === '/scheduled-jobs/scan-fixture/trigger') return json(scanReport);
   if (
+    process.env.FIXTURE_MODE === 'unreadable-report' &&
+    pathname === '/scan-reports/report-fixture/review'
+  ) {
+    return json({
+      report: {
+        ...scanReport,
+        status: 'complete',
+        policy: null,
+        collection: null,
+        judgment: null,
+        evidenceDiagnostics: [
+          'Policy evidence unavailable: malformed stored record. Reconcile original evidence before acting.',
+          'Collection evidence unavailable: no clean result can be verified.',
+          'Judgment evidence unavailable: malformed stored record.',
+        ],
+      },
+      unresolved: [],
+      decisions: [],
+      diagnostics: [
+        {
+          kind: 'report',
+          recordId: scanReport.id,
+          message: 'Collection scope unavailable. Findings have not been enumerated.',
+        },
+      ],
+    });
+  }
+  if (
     process.env.FIXTURE_MODE === 'unreadable-triage' &&
     pathname === '/scan-reports/report-fixture/review'
   ) {
