@@ -3,7 +3,63 @@ import { access, mkdir, mkdtemp, realpath, rm, writeFile } from 'node:fs/promise
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { expect, it } from 'vitest';
-import { managedGit, managedGitArguments, managedGitConfigContents } from './source-git.js';
+import {
+  ManagedGitBroker,
+  managedGit,
+  managedGitArguments,
+  managedGitAuthorizationHeader,
+  managedGitConfigContents,
+} from './source-git.js';
+
+it('uses an explicit GitHub Basic transport without changing the bearer default', () => {
+  expect(
+    managedGitAuthorizationHeader({
+      url: 'https://github.com/example/private.git',
+      token: 'short-lived-token',
+    }),
+  ).toBe('Authorization: Bearer short-lived-token');
+  expect(
+    managedGitAuthorizationHeader({
+      url: 'https://github.com/example/private.git',
+      token: 'short-lived-token',
+      mode: 'github-basic',
+    }),
+  ).toBe(
+    `Authorization: Basic ${Buffer.from('x-access-token:short-lived-token').toString('base64')}`,
+  );
+  expect(() =>
+    managedGitAuthorizationHeader({
+      url: 'https://dev.azure.com/example/private',
+      token: 'short-lived-token',
+      mode: 'github-basic',
+    }),
+  ).toThrow('managed-git-credential-mode-mismatch');
+  expect(() =>
+    managedGitAuthorizationHeader({
+      url: 'https://github.com/example/private.git',
+      token: 'invalid\ntoken',
+      mode: 'github-basic',
+    }),
+  ).toThrow('managed-git-credential-invalid');
+});
+
+it('rejects a GitHub credential mode enrolled for another provider', () => {
+  const broker = new ManagedGitBroker([
+    {
+      repository: 'fixture',
+      remote: 'origin',
+      remoteUrl: 'https://dev.azure.com/example/private',
+      base: 'main',
+      baseCommit: 'a'.repeat(40),
+      branchNamespace: 'worker/',
+      credentialMode: 'github-basic',
+      workspace: () => '/attempt',
+    },
+  ]);
+  expect(() =>
+    broker.binding({ repository: 'fixture', remote: 'origin', head: 'worker/one', base: 'main' }),
+  ).toThrow('source-credential-mode-mismatch');
+});
 
 it('pins each reviewed local source in command and inherited config trust', async () => {
   expect(managedGitArguments('/attempt root', ['/reviewed mirror']).slice(0, 5)).toEqual([
