@@ -31,6 +31,10 @@ import type {
 } from './images/warm-image-maintenance.js';
 import type { AuthModule } from './interfaces/index.js';
 import type { ContainerManager } from './interfaces/index.js';
+import {
+  composeManagedAcceptance,
+  parseManagedAcceptanceConfig,
+} from './managed/acceptance-config.js';
 import { composeDarkManagedCli, parseManagedCliConfig } from './managed/cli-config.js';
 import {
   createNotificationService,
@@ -109,6 +113,9 @@ const PORT = Number.parseInt(process.env.PORT || '3100', 10);
 const HOST = process.env.HOST ?? '127.0.0.1';
 const MCP_BASE_URL = resolveMcpBaseUrl();
 const DB_PATH = process.env.DB_PATH ?? './autopod.db';
+const managedAcceptanceConfig = parseManagedAcceptanceConfig(
+  process.env.AUTOPOD_MANAGED_ACCEPTANCE,
+);
 const MAX_CONCURRENCY = Number.parseInt(process.env.MAX_CONCURRENCY ?? '3', 10);
 const SANDBOX_TERMINAL_REAPER_INTERVAL_MS = parsePositiveInterval(
   process.env.SANDBOX_TERMINAL_REAPER_INTERVAL_MS,
@@ -606,6 +613,7 @@ if (SANDBOX_SUBSCRIPTION_ID && SANDBOX_RESOURCE_GROUP) {
       tier: SANDBOX_TIER,
     },
     logger,
+    { managedDatabase: db },
   );
   logger.info(
     {
@@ -1014,10 +1022,20 @@ await podsitterService.start().catch((err) => {
   logger.error({ err }, 'Podsitter startup reconciliation failed');
 });
 
+const managedRuntime = managedAcceptanceConfig
+  ? composeManagedAcceptance(managedAcceptanceConfig, managedCliConfig, {
+      db,
+      databasePath: DB_PATH,
+      manager: sandboxContainerManager,
+      providerAccounts: providerAccountStore,
+    })
+  : undefined;
+if (managedRuntime) await managedRuntime.resume();
+
 // Server
 const app = await createServer({
   authModule,
-  managed: composeDarkManagedCli(managedCliConfig, db, DB_PATH),
+  managed: managedRuntime ?? composeDarkManagedCli(managedCliConfig, db, DB_PATH),
   podManager,
   profileStore,
   providerAccountStore,
@@ -1238,6 +1256,9 @@ async function shutdown(signal: string) {
 
   // Stop backup manager (must precede db.close)
   backupManager.stop();
+
+  // Close request-time provider gateways before their durable database closes.
+  managedRuntime?.close();
 
   // Close database
   db.close();
