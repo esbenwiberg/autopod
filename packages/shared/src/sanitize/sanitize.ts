@@ -15,6 +15,10 @@ export function sanitize(text: string, config: DataSanitizationConfig): string {
   let result = text;
   for (const pattern of PII_PATTERNS) {
     if (!pattern.presets.includes(preset)) continue;
+    // Every email match requires @. Avoid quadratic failed searches through
+    // long code/review text with no address; retain the exact existing matcher
+    // and allowed-domain behavior whenever an address could be present.
+    if (pattern.name === 'email' && !result.includes('@')) continue;
 
     try {
       result = result.replace(pattern.regex, (match) => {
