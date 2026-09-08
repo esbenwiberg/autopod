@@ -40,6 +40,87 @@ function fixture() {
 const binding = { runtime: 'codex', model: 'model', providerAccountId: 'account' };
 
 describe('task-wide execution accounting', () => {
+  it('records immutable container ownership instead of inferring it from the current pod', () => {
+    const { db, repo } = fixture();
+    try {
+      repo.update('root', { containerId: 'original-container', tokenBudget: null });
+      const resource = { containerId: 'original-container', executionTarget: 'local' as const };
+      const id = repo.taskExecutions?.beginRun('root', 1, 1, { ...binding, resource });
+      repo.update('root', { containerId: 'replacement-container' });
+      const row = db.prepare('SELECT binding FROM task_agent_runs WHERE id = ?').get(id) as {
+        binding: string;
+      };
+      expect(JSON.parse(row.binding)).toMatchObject({ version: 2, resource });
+      expect(() =>
+        repo.taskExecutions?.beginRun('root', 1, 1, {
+          ...binding,
+          resource: { containerId: 'replacement-container', executionTarget: 'local' },
+        }),
+      ).toThrow(/binding/i);
+    } finally {
+      db.close();
+    }
+  });
+
+  it('rejects a resource identity that does not own the current lifecycle before creating a run', () => {
+    const { db, repo } = fixture();
+    try {
+      repo.update('root', { containerId: 'current-container', tokenBudget: null });
+      expect(() =>
+        repo.taskExecutions?.beginRun('root', 1, 1, {
+          ...binding,
+          resource: { containerId: 'stale-container', executionTarget: 'local' },
+        }),
+      ).toThrow(/resource.*binding/i);
+      expect(db.prepare('SELECT COUNT(*) AS count FROM task_agent_runs').get()).toEqual({
+        count: 0,
+      });
+    } finally {
+      db.close();
+    }
+  });
+
+  it.each([
+    JSON.stringify(binding),
+    'unreadable legacy binding',
+    ' '.repeat(16385),
+    JSON.stringify({
+      ...binding,
+      version: 99,
+      resource: { containerId: 'old', executionTarget: 'local' },
+    }),
+    JSON.stringify({
+      ...binding,
+      version: 2,
+      resource: { containerId: null, executionTarget: 'local' },
+    }),
+    JSON.stringify({
+      ...binding,
+      version: 2,
+      resource: { containerId: 'old\u001b', executionTarget: 'local' },
+    }),
+  ])('keeps historical resource ownership unavailable for unverified binding %#', (raw) => {
+    const { db, repo } = fixture();
+    try {
+      repo.update('root', { containerId: 'current-replacement' });
+      db.prepare(
+        "INSERT INTO task_agent_runs(id,pod_id,generation,cycle,binding,started_at) VALUES ('old','root',1,1,?,'2026-09-07T00:00:00Z')",
+      ).run(raw);
+      const diagnostics = repo.taskExecutions?.snapshot('fix').diagnostics.join('\n');
+      expect(diagnostics).toContain(
+        '1 unsettled worker run blocks another task run; live execution state unverified.',
+      );
+      expect(diagnostics).toContain('Oldest unsettled run resource ownership unavailable');
+      expect(diagnostics).not.toContain('current-replacement');
+      expect(db.prepare("SELECT binding FROM task_agent_runs WHERE id = 'old'").get()).toEqual({
+        binding: raw,
+      });
+      expect(() => repo.taskExecutions?.beginRun('fix', 1, 1, binding)).toThrow(/still active/);
+    } finally {
+      db.close();
+    }
+  });
+
   it('projects latest recorded PR dispositions across linked pods without inflating receipts or parsing legacy bodies', () => {
     const { db, repo } = fixture();
     try {
@@ -164,9 +245,13 @@ describe('task-wide execution accounting', () => {
 
   it('retains exclusive task admission across database reopen and releases it only on settlement', () => {
     const { db, repo } = fixture();
-    repo.update('root', { tokenBudget: null });
+    repo.update('root', { tokenBudget: null, containerId: 'original-container' });
     repo.update('rerun', { tokenBudget: null });
-    const run = repo.taskExecutions?.beginRun('root', 1, 1, binding);
+    const ownedBinding = {
+      ...binding,
+      resource: { containerId: 'original-container', executionTarget: 'local' as const },
+    };
+    const run = repo.taskExecutions?.beginRun('root', 1, 1, ownedBinding);
     if (!run) throw new Error('Missing run');
     const dir = mkdtempSync(path.join(tmpdir(), 'outer-admission-'));
     const file = path.join(dir, 'state.db');
@@ -180,9 +265,21 @@ describe('task-wide execution accounting', () => {
       if (!a || !b) throw new Error('Missing ledger');
       expect(() => b.beginRun('fix', 1, 1, binding)).toThrow(/still active/);
       expect(() => b.beginRun('root', 1, 2, binding)).toThrow(/still active/);
-      expect(b.beginRun('root', 1, 1, binding)).toBe(run);
+      expect(b.beginRun('root', 1, 1, ownedBinding)).toBe(run);
+      first
+        .prepare("UPDATE pods SET container_id = 'replacement-container' WHERE id = 'root'")
+        .run();
+      expect(b.snapshot('fix').diagnostics.join('\n')).toContain(
+        'Oldest unsettled run recorded local container original-container',
+      );
+      expect(b.snapshot('fix').diagnostics.join('\n')).not.toContain('replacement-container');
+      expect(b.snapshot('rerun').diagnostics.join('\n')).not.toContain('unsettled worker');
+      expect(() =>
+        first.prepare("UPDATE task_agent_runs SET binding = '{}' WHERE id = ?").run(run),
+      ).toThrow(/immutable/);
       expect(b.beginRun('rerun', 1, 1, binding)).toEqual(expect.any(String));
       a.finishRun(run, 'completed', null);
+      expect(b.snapshot('fix').diagnostics.join('\n')).not.toContain('unsettled worker');
       expect(b.beginRun('fix', 1, 1, binding)).toEqual(expect.any(String));
       expect(first.prepare('SELECT COUNT(*) AS count FROM task_agent_runs').get()).toEqual({
         count: 3,

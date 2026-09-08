@@ -10877,6 +10877,10 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
               runtime: currentPod.runtime,
               model: currentPod.model,
               providerAccountId: currentProfile.providerAccountId ?? null,
+              resource: {
+                containerId: currentPod.containerId,
+                executionTarget: currentPod.executionTarget,
+              },
             });
           }
           const providerOrdinal = ensureProviderAttempt(currentPod, currentProfile)?.ordinal;

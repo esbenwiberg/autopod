@@ -1,0 +1,9 @@
+
+ RUN  v4.1.11 /private/tmp/autopod-durable-execution/packages/cli
+
+
+ Test Files  1 passed (1)
+      Tests  34 passed (34)
+   Start at  16:47:26
+   Duration  415ms (transform 125ms, setup 0ms, import 237ms, tests 88ms, environment 0ms)
+

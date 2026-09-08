@@ -1,0 +1,21 @@
+- generic [ref=e30]:
+  - heading "Task accounting" [level=2] [ref=e31]
+  - paragraph [ref=e112]: "Logical task: task:local-original"
+  - paragraph [ref=e113]: "Execution: execution:local-fixture"
+  - paragraph [ref=e114]: 2 pods · 3 recorded agent runs · 4 provider attempts · 5 validations
+  - paragraph [ref=e115]: 1 PR receipts · 1 unresolved of 2 intents
+  - paragraph [ref=e116]: Durable ledger only; historical PR URLs are not reconstructed receipts.
+  - paragraph [ref=e117]: PR disposition observations unavailable.
+  - paragraph [ref=e118]: Source-bound merge evidence unavailable.
+  - paragraph [ref=e119]: Current provider status unverified.
+  - paragraph [ref=e120]: "Recorded tokens: 100 / 100"
+  - paragraph [ref=e121]: "Stored task cost subtotal: $1.2500 · partial telemetry"
+  - paragraph [ref=e122]: Billing unverified; stored amounts can include estimates.
+  - paragraph [ref=e123]: "Known estimates: $0.5000 · 1 identified phases with unavailable cost · 1 pods with conflicting attribution"
+  - paragraph [ref=e124]: "local-original: Stored phase costs conflict; no proportional allocation applied."
+  - paragraph [ref=e125]: 2 additional cost diagnostics omitted.
+  - paragraph [ref=e126]: Recorded task tokens have reached the configured limit.
+  - paragraph [ref=e127]: Infrastructure cost unavailable
+  - paragraph [ref=e128]: 1 unsettled worker runs block another task run; live execution state unverified.
+  - paragraph [ref=e129]: Oldest unsettled run recorded local container original-container; this reference does not prove process termination or a unique remote instance.
+  - button "Refresh task accounting" [ref=e33]

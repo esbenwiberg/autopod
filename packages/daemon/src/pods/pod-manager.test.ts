@@ -2523,6 +2523,13 @@ describe('PodManager', () => {
       const first = manager.consumeAgentEvents(
         created.id,
         (async function* () {
+          const recorded = ctx.db
+            .prepare('SELECT binding FROM task_agent_runs WHERE pod_id = ?')
+            .get(created.id) as { binding: string };
+          expect(JSON.parse(recorded.binding)).toMatchObject({
+            version: 2,
+            resource: { containerId: 'owned-container', executionTarget: created.executionTarget },
+          });
           entered.resolve();
           await release.promise;
           yield {

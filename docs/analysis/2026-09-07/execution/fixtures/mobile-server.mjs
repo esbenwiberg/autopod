@@ -917,7 +917,14 @@ const server = createServer(async (req, res) => {
             }
           : {}),
       },
-      diagnostics: ['Infrastructure cost unavailable'],
+      diagnostics:
+        process.env.FIXTURE_MODE === 'unsettled-run'
+          ? [
+              'Infrastructure cost unavailable',
+              '1 unsettled worker run blocks another task run; live execution state unverified.',
+              'Oldest unsettled run recorded local container original-container; this reference does not prove process termination or a unique remote instance.',
+            ]
+          : ['Infrastructure cost unavailable'],
     });
   if (req.method === 'GET' && pathname === '/pods') return json([pod]);
   if (req.method === 'GET' && pathname === '/pods/local-fixture') return json(pod);

@@ -88,7 +88,11 @@ it.each([true, false])(
                   }
                 : {}),
             },
-            diagnostics: ['Infrastructure cost unavailable'],
+            diagnostics: [
+              'Infrastructure cost unavailable',
+              '1 unsettled worker run blocks another task run; live execution state unverified.',
+              'Oldest unsettled run recorded local container original-container; this reference does not prove process termination or a unique remote instance.',
+            ],
           }),
           { status: 200 },
         ),
@@ -97,6 +101,12 @@ it.each([true, false])(
         container.querySelector('button')?.click();
       });
       expect(container.textContent).toContain('logical-original');
+      expect(container.textContent).toContain(
+        '1 unsettled worker run blocks another task run; live execution state unverified.',
+      );
+      expect(container.textContent).toContain(
+        'Oldest unsettled run recorded local container original-container',
+      );
       expect(container.textContent).toContain(
         '2 pods · 3 recorded agent runs · 4 provider attempts · 5 validations',
       );

@@ -503,6 +503,11 @@ describe('GET /pods/:podId provider-attempt projection', () => {
   it('exposes bounded task accounting even when unrelated large pod evidence is malformed', async () => {
     insertPod(db, { id: 'task-accounting', status: 'running', completedAt: undefined });
     createPodRepository(db).taskExecutions?.register('task-accounting');
+    const retainedBinding = `unreadable historical binding${'x'.repeat(32768)}`;
+    db.prepare(
+      "INSERT INTO task_agent_runs(id,pod_id,generation,cycle,binding,started_at) VALUES ('historical-run','task-accounting',1,1,?,'2026-09-07')",
+    ).run(retainedBinding);
+
     db.prepare(
       "UPDATE pods SET task_summary = 'broken', input_tokens = 9, output_tokens = 1 WHERE id = 'task-accounting'",
     ).run();
@@ -533,6 +538,16 @@ describe('GET /pods/:podId provider-attempt projection', () => {
       telemetry: 'partial',
     });
     expect(JSON.stringify(response.json())).not.toContain('broken');
+    expect(response.json().diagnostics).toContain(
+      '1 unsettled worker run blocks another task run; live execution state unverified.',
+    );
+    expect(response.json().diagnostics).toContain(
+      'Oldest unsettled run resource ownership unavailable; current pod resource is not historical evidence.',
+    );
+    expect(response.body.length).toBeLessThan(16384);
+    expect(
+      db.prepare("SELECT binding FROM task_agent_runs WHERE id = 'historical-run'").get(),
+    ).toEqual({ binding: retainedBinding });
   });
 
   it('provider-attempt returns ordered redacted attempts and ledger projections', async () => {

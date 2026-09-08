@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { AutopodError, type TaskExecutionSummary } from '@autopod/shared';
+import { AutopodError, type ExecutionTarget, type TaskExecutionSummary } from '@autopod/shared';
 import type Database from 'better-sqlite3';
 import { COST_PHASE_COLUMNS } from './cost-pod-projection.js';
 import {
@@ -17,7 +17,21 @@ export interface ExecutionBinding {
   runtime: string;
   model: string;
   providerAccountId: string | null;
+  /** Supplied by the dispatch owner, never reconstructed from a later pod snapshot. */
+  resource?: { containerId: string | null; executionTarget: ExecutionTarget };
 }
+function isContainerReference(value: unknown): value is string {
+  return (
+    typeof value === 'string' &&
+    value.length > 0 &&
+    value.length <= 1024 &&
+    Array.from(value).every((char) => {
+      const code = char.charCodeAt(0);
+      return code >= 32 && (code < 127 || code > 159);
+    })
+  );
+}
+
 export interface TaskExecutionLedger {
   register(podId: string): void;
   snapshot(podId: string): TaskExecutionSummary;
@@ -229,6 +243,42 @@ export function createTaskExecutionLedger(db: Database.Database): TaskExecutionL
       TaskExecutionSummary,
       'agentRunCount' | 'failedRunCount' | 'transientFailureCount'
     >;
+    const unsettledCount = (
+      db
+        .prepare(`SELECT COUNT(*) AS count FROM task_agent_runs r
+      JOIN task_executions e ON e.pod_id = r.pod_id WHERE e.task_id = ? AND r.ended_at IS NULL`)
+        .get(identity.taskId) as { count: number }
+    ).count;
+    if (unsettledCount > 0) {
+      diagnostics.push(
+        `${unsettledCount} unsettled worker ${unsettledCount === 1 ? 'run blocks' : 'runs block'} another task run; live execution state unverified.`,
+      );
+      // Read one bounded retained record. Current pod resource fields cannot establish
+      // ownership of an older execution after replacement or restart.
+      const oldest = db
+        .prepare(`SELECT CASE WHEN length(CAST(r.binding AS BLOB)) <= 16384 THEN r.binding END AS binding
+        FROM task_agent_runs r JOIN task_executions e ON e.pod_id = r.pod_id
+        WHERE e.task_id = ? AND r.ended_at IS NULL ORDER BY r.started_at, r.id LIMIT 1`)
+        .get(identity.taskId) as { binding: string | null };
+      let resource: ExecutionBinding['resource'];
+      try {
+        const parsed = oldest.binding ? JSON.parse(oldest.binding) : null;
+        if (
+          parsed?.version === 2 &&
+          ['local', 'sandbox'].includes(parsed.resource?.executionTarget) &&
+          isContainerReference(parsed.resource?.containerId)
+        ) {
+          resource = parsed.resource;
+        }
+      } catch {
+        /* Retain malformed source; diagnostics cannot claim ownership. */
+      }
+      diagnostics.push(
+        resource
+          ? `Oldest unsettled run recorded ${resource.executionTarget} container ${resource.containerId}; this reference does not prove process termination or a unique remote instance.`
+          : 'Oldest unsettled run resource ownership unavailable; current pod resource is not historical evidence.',
+      );
+    }
     const count = (table: 'provider_attempts' | 'validations'): number =>
       (
         db
@@ -380,12 +430,31 @@ export function createTaskExecutionLedger(db: Database.Database): TaskExecutionL
         runtime: binding.runtime,
         model: binding.model,
         providerAccountId: binding.providerAccountId,
+        ...(binding.resource && {
+          version: 2,
+          resource: {
+            containerId: binding.resource.containerId,
+            executionTarget: binding.resource.executionTarget,
+          },
+        }),
       });
       const current = db
-        .prepare('SELECT lifecycle_generation AS generation FROM pods WHERE id = ?')
-        .get(podId) as { generation: number } | undefined;
+        .prepare(`SELECT lifecycle_generation AS generation, container_id AS containerId,
+          execution_target AS executionTarget FROM pods WHERE id = ?`)
+        .get(podId) as
+        | { generation: number; containerId: string | null; executionTarget: string }
+        | undefined;
       if (current?.generation !== generation)
         throw new Error('Stale lifecycle cannot start a task run');
+      if (
+        binding.resource &&
+        (binding.resource.containerId !== current.containerId ||
+          binding.resource.executionTarget !== current.executionTarget ||
+          !['local', 'sandbox'].includes(binding.resource.executionTarget) ||
+          (binding.resource.containerId !== null &&
+            !isContainerReference(binding.resource.containerId)))
+      )
+        throw new Error('Resource execution binding does not match the current lifecycle');
       if (hasUnansweredDecision(db, podId))
         throw new AutopodError(
           'An unanswered human decision must be resolved before starting another worker.',

@@ -507,7 +507,11 @@ it.each([true, false])(
             },
           }
         : {}),
-      diagnostics: [],
+      diagnostics: [
+        'Infrastructure cost unavailable',
+        '1 unsettled worker run blocks another task run; live execution state unverified.',
+        'Oldest unsettled run recorded local container original-container; this reference does not prove process termination or a unique remote instance.',
+      ],
       delivery: {
         intentCount: 2,
         receiptCount: 1,
@@ -571,6 +575,10 @@ it.each([true, false])(
       await command().parseAsync(['node', 'ap', 'status', 'abcd1234']);
       const output = log.mock.calls.map((call) => call.join(' ')).join('\n');
       expect(output).toContain('Stored task cost subtotal:');
+      expect(output).toContain(
+        '1 unsettled worker run blocks another task run; live execution state unverified.',
+      );
+      expect(output).toContain('Oldest unsettled run recorded local container original-container');
       expect(output).toContain(
         'Codex execution termination is unverified; retain completion and source before another execution.',
       );
