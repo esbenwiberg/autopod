@@ -1,0 +1,33 @@
+{
+  "scope": "Local built mobile application with synthetic fixture responses; no live daemon or provider acceptance",
+  "observedAt": "2026-09-08T05:03:37.356146+00:00",
+  "url": "http://127.0.0.1:65340/mobile/#/pod/local-fixture",
+  "tabId": "24",
+  "before": {
+    "status": "failed",
+    "visibleReason": "Delivery history is unavailable. Original resources retained. Use Resume to revalidate the retained source before approving delivery.",
+    "visibleAction": "Resume"
+  },
+  "action": "Clicked existing Resume button once",
+  "after": {
+    "status": "validated",
+    "recoveryReasonRemoved": true,
+    "visibleActions": ["Approve", "Reject"],
+    "mergeRequested": false
+  },
+  "serverReceipt": {
+    "action": "resume-legacy-validation",
+    "workerStarts": 0,
+    "merges": 0
+  },
+  "cleanup": {
+    "tabClosed": true,
+    "remainingTabs": [],
+    "serverSession": 27349,
+    "exitCode": 130
+  },
+  "limitations": [
+    "Other fixture metadata panels contain independent test data and were not accepted as current accounting, preflight or budget evidence.",
+    "No native desktop, device, paid provider, deployment or live lifecycle acceptance."
+  ]
+}

@@ -79,6 +79,24 @@ function fixture(
 }
 
 describe('durable merge journal', () => {
+  it('persists a planned source binding without inventing an attempt, then admits exactly one request', () => {
+    const f = fixture();
+    try {
+      const planned = f.journal.plan(f.pod, f.publicationPod, f.publicationId, f.config);
+      expect(planned).toMatchObject({ state: 'planned', attemptId: null, result: null });
+      expect(f.db.prepare('SELECT count(*) AS n FROM merge_attempts').get()).toEqual({ n: 0 });
+      const reopened = createMergeJournal(f.db);
+      expect(reopened.find(f.pod)).toEqual(planned);
+      expect(reopened.plan(f.pod, f.publicationPod, f.publicationId, f.config).id).toBe(planned.id);
+      const attemptId = reopened.claim(f.pod, f.publicationPod, f.publicationId, f.config);
+      expect(reopened.find(f.pod)).toMatchObject({ id: planned.id, state: 'admitted', attemptId });
+      expect(f.db.prepare('SELECT count(*) AS n FROM merge_intents').get()).toEqual({ n: 1 });
+      expect(f.db.prepare('SELECT count(*) AS n FROM merge_attempts').get()).toEqual({ n: 1 });
+    } finally {
+      f.db.close();
+    }
+  });
+
   it('retains ambiguous admission across independent connections and close/reopen, then records one immutable confirmation', () => {
     const dir = mkdtempSync(join(tmpdir(), 'autopod-merge-journal-'));
     const path = join(dir, 'journal.db');
@@ -87,7 +105,18 @@ describe('durable merge journal', () => {
       db.pragma('foreign_keys = ON');
       runMigrations(db, new URL('../db/migrations', import.meta.url).pathname, logger);
       const f = fixture(db);
-      const attempt = f.journal.claim(f.pod, f.publicationPod, f.publicationId, f.config);
+      const planned = f.journal.plan(f.pod, f.publicationPod, f.publicationId, f.config);
+      db.close();
+      db = new Database(path);
+      db.pragma('foreign_keys = ON');
+      const beforeAdmission = createMergeJournal(db);
+      expect(beforeAdmission.find(f.pod)).toMatchObject({
+        id: planned.id,
+        state: 'planned',
+        attemptId: null,
+      });
+      expect(db.prepare('SELECT count(*) AS n FROM merge_attempts').get()).toEqual({ n: 0 });
+      const attempt = beforeAdmission.claim(f.pod, f.publicationPod, f.publicationId, f.config);
       const second = new Database(path);
       try {
         expect(() =>

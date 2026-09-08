@@ -24,12 +24,18 @@ interface MergeRequest {
 export interface MergeJournalEntry {
   id: string;
   publicationId: string;
-  attemptId: string;
+  attemptId: string | null;
   request: MergeRequest;
-  state: 'admitted' | 'pending' | 'merged';
+  state: 'planned' | 'admitted' | 'pending' | 'merged';
   result: MergePrResult | null;
 }
 export interface MergeJournal {
+  plan(
+    pod: Pod,
+    publicationPod: Pod,
+    publicationId: string,
+    config: MergePrConfig,
+  ): MergeJournalEntry;
   find(pod: Pod): MergeJournalEntry | null;
   check(pod: Pod, entry: MergeJournalEntry): void;
   claim(pod: Pod, publicationPod: Pod, publicationId: string, config: MergePrConfig): string;
@@ -125,7 +131,6 @@ export function createMergeJournal(db: Database.Database): MergeJournal {
     const attempt = db
       .prepare('SELECT id FROM merge_attempts WHERE intent_id = ? ORDER BY sequence DESC LIMIT 1')
       .get(row.id) as { id: string } | undefined;
-    if (!attempt) return mergeReconciliation('Merge admission is missing.');
     const observation = (db
       .prepare(
         "SELECT disposition, result FROM merge_observations WHERE intent_id = ? AND disposition = 'merged'",
@@ -135,17 +140,118 @@ export function createMergeJournal(db: Database.Database): MergeJournal {
         .prepare(
           'SELECT disposition, result FROM merge_observations WHERE attempt_id = ? ORDER BY sequence DESC LIMIT 1',
         )
-        .get(attempt.id)) as { disposition: 'pending' | 'merged'; result: string } | undefined;
+        .get(attempt?.id ?? null)) as
+      | { disposition: 'pending' | 'merged'; result: string }
+      | undefined;
     return {
       id: row.id,
       publicationId: row.publicationId,
-      attemptId: attempt.id,
+      attemptId: attempt?.id ?? null,
       request: requestFrom(row),
-      state: observation?.disposition ?? 'admitted',
+      state: observation?.disposition ?? (attempt ? 'admitted' : 'planned'),
       result: observation ? (JSON.parse(observation.result) as MergePrResult) : null,
     };
   }
+  function prepare(
+    pod: Pod,
+    publicationPod: Pod,
+    publicationId: string,
+    config: MergePrConfig,
+  ): IntentRow {
+    if (
+      !['merging', 'merge_pending'].includes(pod.status) ||
+      !pod.prUrl ||
+      !config.expectedHeadSha ||
+      !config.expectedTarget
+    )
+      return mergeReconciliation(
+        'Merge admission requires a current lifecycle and complete source identity.',
+      );
+    const source = publications.confirmedForMerge(publicationPod, pod, publicationId);
+    if (prIdentity(pod.prUrl) !== prIdentity(config.prUrl))
+      return mergeReconciliation('The requested PR is no longer assigned to this lifecycle.');
+    assertMergeSource(source.commitSha, config.expectedHeadSha);
+    assertMergeRepository(config.expectedTarget, source.repository);
+    assertMergeTarget(config.expectedTarget, {
+      repository: source.repository,
+      branch: source.branch,
+      baseBranch: pod.baseBranch ?? config.expectedTarget.baseBranch,
+    });
+    const task = db
+      .prepare(
+        'SELECT i.task_id AS taskId FROM source_publication_intents i JOIN task_executions e ON e.task_id = i.task_id WHERE i.id = ? AND e.pod_id = ?',
+      )
+      .get(publicationId, pod.id) as { taskId: string } | undefined;
+    if (!task) return mergeReconciliation('The logical task changed after source publication.');
+    const request: MergeRequest = {
+      publicationPrUrl: publicationPod.prUrl,
+      config: {
+        prUrl: config.prUrl,
+        expectedHeadSha: source.commitSha,
+        expectedTarget: {
+          repository: source.repository,
+          branch: source.branch,
+          baseBranch: config.expectedTarget.baseBranch,
+        },
+        squash: config.squash === true,
+      },
+    };
+    const resource = prIdentity(config.prUrl);
+    const hash = createHash('sha256')
+      .update(JSON.stringify([publicationId, request]))
+      .digest('hex');
+    const prior = db.prepare(`SELECT ${columns} FROM merge_intents WHERE identity = ?`).get(hash) as
+      | IntentRow
+      | undefined;
+    const scheduled = db
+      .prepare(
+        `SELECT i.id FROM merge_intents i JOIN merge_observations o ON o.intent_id = i.id
+     WHERE i.pr_identity = ? AND o.disposition = 'pending'
+       AND json_extract(o.result, '$.autoMergeScheduled') = 1
+       AND NOT EXISTS (SELECT 1 FROM merge_observations done
+         WHERE done.intent_id = i.id AND done.disposition = 'merged') LIMIT 1`,
+      )
+      .get(resource);
+    if (scheduled)
+      return mergeReconciliation(
+        'The earlier merge is already scheduled; reconcile its disposition.',
+      );
+    if (prior && entry(prior).state === 'merged')
+      return mergeReconciliation('This merge is already confirmed.');
+    const uncertain = db
+      .prepare(
+        'SELECT a.id FROM merge_attempts a JOIN merge_intents i ON i.id = a.intent_id WHERE i.pr_identity = ? AND NOT EXISTS (SELECT 1 FROM merge_observations o WHERE o.attempt_id = a.id) LIMIT 1',
+      )
+      .get(resource);
+    if (uncertain)
+      return mergeReconciliation(
+        'An earlier merge request is still ambiguous; no duplicate mutation was admitted.',
+      );
+    const id = prior?.id ?? randomUUID();
+    if (!prior)
+      db.prepare(
+        'INSERT INTO merge_intents(id, identity, publication_id, pod_id, task_id, generation, pr_identity, request, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+      ).run(
+        id,
+        hash,
+        publicationId,
+        pod.id,
+        task.taskId,
+        pod.lifecycleGeneration,
+        resource,
+        JSON.stringify(request),
+        new Date().toISOString(),
+      );
+    return { id, publicationId, request: JSON.stringify(request) };
+  }
   return {
+    plan(pod, publicationPod, publicationId, config) {
+      if (db.inTransaction)
+        return mergeReconciliation('Merge planning cannot share an uncommitted transaction.');
+      return db
+        .transaction(() => entry(prepare(pod, publicationPod, publicationId, config)))
+        .immediate();
+    },
     find(pod) {
       const row = db
         .prepare(
@@ -168,91 +274,7 @@ export function createMergeJournal(db: Database.Database): MergeJournal {
         return mergeReconciliation('Merge admission cannot share an uncommitted transaction.');
       return db
         .transaction(() => {
-          if (
-            !['merging', 'merge_pending'].includes(pod.status) ||
-            !pod.prUrl ||
-            !config.expectedHeadSha ||
-            !config.expectedTarget
-          )
-            return mergeReconciliation(
-              'Merge admission requires a current lifecycle and complete source identity.',
-            );
-          const source = publications.confirmedForMerge(publicationPod, pod, publicationId);
-          if (prIdentity(pod.prUrl) !== prIdentity(config.prUrl))
-            return mergeReconciliation('The requested PR is no longer assigned to this lifecycle.');
-          assertMergeSource(source.commitSha, config.expectedHeadSha);
-          assertMergeRepository(config.expectedTarget, source.repository);
-          assertMergeTarget(config.expectedTarget, {
-            repository: source.repository,
-            branch: source.branch,
-            baseBranch: pod.baseBranch ?? config.expectedTarget.baseBranch,
-          });
-          const task = db
-            .prepare(
-              'SELECT i.task_id AS taskId FROM source_publication_intents i JOIN task_executions e ON e.task_id = i.task_id WHERE i.id = ? AND e.pod_id = ?',
-            )
-            .get(publicationId, pod.id) as { taskId: string } | undefined;
-          if (!task)
-            return mergeReconciliation('The logical task changed after source publication.');
-          const request: MergeRequest = {
-            publicationPrUrl: publicationPod.prUrl,
-            config: {
-              prUrl: config.prUrl,
-              expectedHeadSha: source.commitSha,
-              expectedTarget: {
-                repository: source.repository,
-                branch: source.branch,
-                baseBranch: config.expectedTarget.baseBranch,
-              },
-              squash: config.squash === true,
-            },
-          };
-          const resource = prIdentity(config.prUrl);
-          const hash = createHash('sha256')
-            .update(JSON.stringify([publicationId, request]))
-            .digest('hex');
-          const prior = db
-            .prepare(`SELECT ${columns} FROM merge_intents WHERE identity = ?`)
-            .get(hash) as IntentRow | undefined;
-          const scheduled = db
-            .prepare(
-              `SELECT i.id FROM merge_intents i JOIN merge_observations o ON o.intent_id = i.id
-             WHERE i.pr_identity = ? AND o.disposition = 'pending'
-               AND json_extract(o.result, '$.autoMergeScheduled') = 1
-               AND NOT EXISTS (SELECT 1 FROM merge_observations done
-                 WHERE done.intent_id = i.id AND done.disposition = 'merged') LIMIT 1`,
-            )
-            .get(resource);
-          if (scheduled)
-            return mergeReconciliation(
-              'The earlier merge is already scheduled; reconcile its disposition.',
-            );
-          if (prior && entry(prior).state === 'merged')
-            return mergeReconciliation('This merge is already confirmed.');
-          const uncertain = db
-            .prepare(
-              'SELECT a.id FROM merge_attempts a JOIN merge_intents i ON i.id = a.intent_id WHERE i.pr_identity = ? AND NOT EXISTS (SELECT 1 FROM merge_observations o WHERE o.attempt_id = a.id) LIMIT 1',
-            )
-            .get(resource);
-          if (uncertain)
-            return mergeReconciliation(
-              'An earlier merge request is still ambiguous; no duplicate mutation was admitted.',
-            );
-          const id = prior?.id ?? randomUUID();
-          if (!prior)
-            db.prepare(
-              'INSERT INTO merge_intents(id, identity, publication_id, pod_id, task_id, generation, pr_identity, request, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
-            ).run(
-              id,
-              hash,
-              publicationId,
-              pod.id,
-              task.taskId,
-              pod.lifecycleGeneration,
-              resource,
-              JSON.stringify(request),
-              new Date().toISOString(),
-            );
+          const { id } = prepare(pod, publicationPod, publicationId, config);
           const attemptId = randomUUID();
           db.prepare('INSERT INTO merge_attempts(id, intent_id, admitted_at) VALUES (?, ?, ?)').run(
             attemptId,

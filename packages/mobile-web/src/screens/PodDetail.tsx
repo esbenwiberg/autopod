@@ -95,6 +95,12 @@ export function PodDetail(): JSX.Element {
   }
 
   const data = pod;
+  const recoveryReason =
+    data.status === 'merge_pending'
+      ? data.mergeBlockReason
+      : ['failed', 'validated', 'review_required'].includes(data.status)
+        ? (data.failureReason ?? data.mergeBlockReason)
+        : null;
 
   return (
     <main>
@@ -108,6 +114,12 @@ export function PodDetail(): JSX.Element {
         {data.profileName} · {data.runtime} · {data.model}
       </p>
 
+      {recoveryReason ? (
+        <section className="info-panel" aria-label="Recovery details">
+          <h2>Recovery details</h2>
+          <p>{recoveryReason}</p>
+        </section>
+      ) : null}
       {data.recordDiagnostics?.length ? (
         <section role="alert" className="error">
           Saved evidence unavailable:{' '}

@@ -433,8 +433,8 @@ function createMockPrManager(): PrManager {
     })),
     mergePr: vi.fn(mockPrMerge),
     getPrStatus: vi.fn(async () => ({
-      merged: true,
-      open: false,
+      merged: false,
+      open: true,
       blockReason: null,
       ciFailures: [],
       reviewComments: [],
@@ -1005,6 +1005,51 @@ function createTestContext(
     pendingOverrideRepo,
     deps,
   };
+}
+
+/** Synthetic published source/admission for poll ownership fault tests. */
+function seedPollDelivery(ctx: TestContext, id: string, planned = false) {
+  const original = ctx.podRepo.getOrThrow(id);
+  ctx.podRepo.update(id, {
+    status: 'merge_pending',
+    worktreePath: original.worktreePath ?? '/tmp/poll-source',
+    prUrl: original.prUrl ?? 'https://github.com/org/repo/pull/42',
+  });
+  const pod = ctx.podRepo.getOrThrow(id);
+  const publications = ctx.podRepo.sourcePublications;
+  const journal = ctx.podRepo.mergeJournal;
+  if (!publications || !journal) throw new Error('Missing durable fixture repositories');
+  const proof = {
+    repository: 'https://github.com/org/repo',
+    branch: pod.branch,
+    commitSha: 'a'.repeat(40),
+    treeSha: 'b'.repeat(40),
+    worktreeClean: true as const,
+    remoteRef: `refs/heads/${pod.branch}`,
+    observedRemoteCommitSha: 'a'.repeat(40),
+    observedAt: new Date().toISOString(),
+  };
+  const publicationId = publications.admit(pod, proof);
+  publications.confirm(pod, publicationId, proof);
+  const target = { repository: proof.repository, branch: pod.branch, baseBranch: 'main' };
+  const config = {
+    prUrl: pod.prUrl ?? '',
+    expectedHeadSha: proof.commitSha,
+    expectedTarget: target,
+  };
+  if (planned) journal.plan(pod, pod, publicationId, config);
+  else journal.claim(pod, pod, publicationId, config);
+  const status = {
+    merged: true,
+    open: false,
+    blockReason: null,
+    ciFailures: [],
+    reviewComments: [],
+    headSha: proof.commitSha,
+    sourceTarget: target,
+  };
+  vi.mocked(ctx.prManager.getPrStatus).mockResolvedValue(status);
+  return status;
 }
 
 describe('PodManager', () => {
@@ -4515,6 +4560,81 @@ describe('PodManager', () => {
   });
 
   describe('merge poll lifecycle', () => {
+    it.each(['open', 'merged', 'unavailable'])(
+      'retains legacy pending delivery for explicit validation recovery (%s)',
+      async (external) => {
+        vi.useFakeTimers();
+        try {
+          const ctx = createTestContext();
+          const manager = createPodManager(ctx.deps);
+          const pod = manager.createSession(
+            { profileName: 'test-profile', task: 'Recover missing delivery history' },
+            'user-1',
+          );
+          ctx.podRepo.update(
+            pod.id,
+            validatedPodUpdates(pod.id, {
+              status: 'merge_pending',
+              worktreePath: '/tmp/legacy-delivery',
+              containerId: 'legacy-source',
+              filesChanged: 1,
+              prUrl: 'https://github.com/org/repo/pull/42',
+            }),
+          );
+          if (external === 'unavailable')
+            vi.mocked(ctx.prManager.getPrStatus).mockRejectedValue(
+              new Error('provider unavailable'),
+            );
+          else
+            vi.mocked(ctx.prManager.getPrStatus).mockResolvedValue({
+              merged: external === 'merged',
+              open: external === 'open',
+              blockReason: null,
+              ciFailures: [],
+              reviewComments: [],
+              reviewDecision: 'APPROVED',
+            });
+          createPodManager(ctx.deps);
+          await vi.advanceTimersByTimeAsync(120_000);
+          expect(manager.getSession(pod.id)).toMatchObject({
+            status: 'failed',
+            worktreePath: '/tmp/legacy-delivery',
+            containerId: 'legacy-source',
+            completedAt: null,
+            failureReason: expect.stringContaining('Resume'),
+          });
+          expect(ctx.containerManager.kill).not.toHaveBeenCalled();
+          expect(ctx.prManager.mergePr).not.toHaveBeenCalled();
+          expect(ctx.worktreeManager.pushBranch).not.toHaveBeenCalled();
+          expect(ctx.worktreeManager.rebaseOntoBase).not.toHaveBeenCalled();
+          expect(ctx.db.prepare('SELECT count(*) AS n FROM merge_attempts').get()).toEqual({
+            n: 0,
+          });
+          if (external === 'open') {
+            expect(await manager.resumePod(pod.id)).toEqual({ action: 'revalidate' });
+            expect(manager.getSession(pod.id)).toMatchObject({
+              status: 'validated',
+              failureReason: null,
+            });
+            expect(ctx.validationEngine.validate).toHaveBeenCalled();
+            expect(ctx.prManager.mergePr).not.toHaveBeenCalled();
+            await expect(manager.approveSession(pod.id)).rejects.toMatchObject({
+              code: 'READINESS_REASON_REQUIRED',
+            });
+            await manager.approveSession(pod.id, {
+              reason: 'Fixture operator reviewed retained source after revalidation',
+            });
+            expect(manager.getSession(pod.id).status).toBe('complete');
+            expect(ctx.prManager.mergePr).toHaveBeenCalledTimes(1);
+          }
+          expect(ctx.runtime.spawn).not.toHaveBeenCalled();
+          expect(ctx.runtime.resume).not.toHaveBeenCalled();
+        } finally {
+          vi.useRealTimers();
+        }
+      },
+    );
+
     it.each([
       { disposition: 'admitted', merged: false, dirty: false },
       { disposition: 'scheduled', merged: false, dirty: false },
@@ -4639,6 +4759,7 @@ describe('PodManager', () => {
           { profileName: 'test-profile', task: 'Replace polling owner' },
           'user-1',
         );
+        const statusEvidence = seedPollDelivery(ctx, pod.id);
         const profile = ctx.deps.profileStore.get('test-profile');
         vi.mocked(ctx.deps.profileStore.get).mockReturnValue({
           ...profile,
@@ -4654,6 +4775,7 @@ describe('PodManager', () => {
           .mockImplementationOnce(async () => {
             await gate.promise;
             return {
+              ...statusEvidence,
               merged: true,
               open: false,
               blockReason: null,
@@ -4711,9 +4833,11 @@ describe('PodManager', () => {
             prUrl: 'https://github.com/org/repo/pull/42',
             containerId: 'poll-container',
           });
+          const statusEvidence = seedPollDelivery(ctx, pod.id, step === 'merge');
           vi.mocked(ctx.prManager.getPrStatus).mockImplementationOnce(async () => {
             if (step === 'status') await gate.promise;
             return {
+              ...statusEvidence,
               merged: step !== 'merge',
               open: step === 'merge',
               blockReason: null,
@@ -4723,9 +4847,10 @@ describe('PodManager', () => {
             };
           });
           if (step === 'merge')
-            vi.mocked(ctx.prManager.mergePr).mockImplementationOnce(async () => {
+            vi.mocked(ctx.prManager.mergePr).mockImplementationOnce(async (config) => {
+              config.onPrepared?.();
               await gate.promise;
-              return { merged: true, autoMergeScheduled: false };
+              return mockPrMerge({ ...config, onPrepared: undefined });
             });
           if (step === 'cleanup')
             vi.mocked(ctx.containerManager.kill).mockImplementationOnce(async () => {
@@ -4776,6 +4901,7 @@ describe('PodManager', () => {
             prUrl: 'https://github.com/org/repo/pull/42',
             containerId: 'poll-container',
           });
+          const statusEvidence = seedPollDelivery(ctx, pod.id, false);
           const completed: string[] = [];
           ctx.eventBus.subscribe((event) => {
             if (
@@ -4790,6 +4916,7 @@ describe('PodManager', () => {
             if (step === 'pr-replaced')
               ctx.podRepo.update(pod.id, { prUrl: 'https://github.com/org/repo/pull/43' });
             return {
+              ...statusEvidence,
               merged: true,
               open: false,
               blockReason: null,
@@ -4824,6 +4951,7 @@ describe('PodManager', () => {
             worktreePath: '/tmp/old-poll',
             containerId: 'old-poll-container',
           });
+          const statusEvidence = seedPollDelivery(ctx, pod.id, false);
           const replace = () => {
             ctx.podRepo.incrementLifecycleGeneration(pod.id);
             ctx.podRepo.update(pod.id, {
@@ -4850,6 +4978,7 @@ describe('PodManager', () => {
           vi.mocked(ctx.prManager.getPrStatus).mockImplementationOnce(async () => {
             if (['merged', 'closed', 'open'].includes(step)) replace();
             return {
+              ...statusEvidence,
               merged: !['closed', 'open'].includes(step),
               open: step === 'open',
               blockReason: 'Old status',
@@ -4879,6 +5008,130 @@ describe('PodManager', () => {
   });
 
   describe('approveSession', () => {
+    it('retains externally merged PR source without publishing or inventing a daemon merge', async () => {
+      const ctx = createTestContext();
+      const manager = createPodManager(ctx.deps);
+      const pod = manager.createSession(
+        { profileName: 'test-profile', task: 'Reconcile external disposition' },
+        'user-1',
+      );
+      ctx.podRepo.update(
+        pod.id,
+        validatedPodUpdates(pod.id, {
+          worktreePath: '/tmp/external-merge',
+          containerId: 'external-source',
+          filesChanged: 1,
+          prUrl: 'https://github.com/org/repo/pull/42',
+        }),
+      );
+      vi.mocked(ctx.prManager.getPrStatus).mockResolvedValue({
+        merged: true,
+        open: false,
+        blockReason: null,
+        ciFailures: [],
+        reviewComments: [],
+      });
+      await expect(manager.approveSession(pod.id)).rejects.toMatchObject({
+        code: 'APPROVAL_DELIVERY_FAILED',
+      });
+      expect(manager.getSession(pod.id)).toMatchObject({
+        status: 'validated',
+        containerId: 'external-source',
+        completedAt: null,
+      });
+      expect(ctx.worktreeManager.pushBranch).not.toHaveBeenCalled();
+      expect(ctx.worktreeManager.rebaseOntoBase).not.toHaveBeenCalled();
+      expect(ctx.prManager.mergePr).not.toHaveBeenCalled();
+      expect(ctx.containerManager.kill).not.toHaveBeenCalled();
+      expect(ctx.db.prepare('SELECT count(*) AS n FROM merge_attempts').get()).toEqual({ n: 0 });
+    });
+
+    it.each(['existing', 'new'])(
+      'persists the source binding before waiting for review and resumes a first merge after restart (%s)',
+      async (path) => {
+        vi.useFakeTimers();
+        try {
+          const ctx = createTestContext();
+          const manager = createPodManager(ctx.deps);
+          const pod = manager.createSession(
+            { profileName: 'test-profile', task: 'Wait on durable review' },
+            'user-1',
+          );
+          ctx.podRepo.update(
+            pod.id,
+            validatedPodUpdates(pod.id, {
+              worktreePath: '/tmp/planned-merge',
+              containerId: 'planned-source',
+              filesChanged: 1,
+              ...(path === 'existing' ? { prUrl: 'https://github.com/org/repo/pull/42' } : {}),
+            }),
+          );
+          vi.mocked(ctx.prManager.getPrStatus).mockResolvedValue({
+            merged: false,
+            open: true,
+            blockReason: 'Review required',
+            reviewDecision: 'REVIEW_REQUIRED',
+            ciFailures: [],
+            reviewComments: [],
+          });
+          await manager.approveSession(pod.id, { squash: true });
+          await vi.advanceTimersByTimeAsync(0);
+          const pending = manager.getSession(pod.id);
+          expect(pending.status).toBe('merge_pending');
+          expect(ctx.podRepo.mergeJournal?.find(pending)).toMatchObject({
+            state: 'planned',
+            attemptId: null,
+            request: { config: { squash: true } },
+          });
+          expect(ctx.prManager.mergePr).not.toHaveBeenCalled();
+          expect(ctx.db.prepare('SELECT count(*) AS n FROM merge_attempts').get()).toEqual({
+            n: 0,
+          });
+          const pushes =
+            vi.mocked(ctx.worktreeManager.pushBranch).mock.calls.length +
+            vi.mocked(ctx.worktreeManager.mergeBranch).mock.calls.length;
+          const rebases = vi.mocked(ctx.worktreeManager.rebaseOntoBase).mock.calls.length;
+          vi.clearAllTimers(); // Prior process has exited; recreate only its persisted state.
+          const target = {
+            repository: 'https://github.com/org/repo',
+            branch: pod.branch,
+            baseBranch: 'main',
+          };
+          vi.mocked(ctx.prManager.getPrStatus).mockResolvedValue({
+            merged: false,
+            open: true,
+            blockReason: null,
+            reviewDecision: 'APPROVED',
+            ciFailures: [],
+            reviewComments: [],
+            headSha: 'a'.repeat(40),
+            sourceTarget: target,
+          });
+          createPodManager(ctx.deps);
+          await vi.advanceTimersByTimeAsync(0);
+          expect(ctx.prManager.mergePr).toHaveBeenCalledTimes(1);
+          expect(ctx.prManager.mergePr).toHaveBeenCalledWith(
+            expect.objectContaining({
+              expectedHeadSha: 'a'.repeat(40),
+              expectedTarget: target,
+              squash: true,
+            }),
+          );
+          expect(ctx.db.prepare('SELECT count(*) AS n FROM merge_attempts').get()).toEqual({
+            n: 1,
+          });
+          expect(
+            vi.mocked(ctx.worktreeManager.pushBranch).mock.calls.length +
+              vi.mocked(ctx.worktreeManager.mergeBranch).mock.calls.length,
+          ).toBe(pushes);
+          expect(ctx.worktreeManager.rebaseOntoBase).toHaveBeenCalledTimes(rebases);
+          expect(ctx.runtime.spawn).not.toHaveBeenCalled();
+        } finally {
+          vi.useRealTimers();
+        }
+      },
+    );
+
     it.each(
       ['existing', 'new'].flatMap((path) =>
         ['clean', 'dirty', 'changed-head'].map((sourceState) => ({ path, sourceState })),
@@ -5229,10 +5482,10 @@ describe('PodManager', () => {
               alreadyUpToDate: false,
               conflicts: ['src/source.ts'],
             });
-          // A stale provider PR can look fully merged while local source is still unpublished.
+          // Publication fails while the initial PR observation is open.
           vi.mocked(ctx.prManager.getPrStatus).mockResolvedValue({
-            merged: true,
-            open: false,
+            merged: false,
+            open: true,
             blockReason: null,
             ciFailures: [],
             reviewComments: [],
@@ -5255,10 +5508,17 @@ describe('PodManager', () => {
             failureReason: expect.stringContaining('retry approval'),
           });
           expect(transitions).not.toContain('merge_pending');
+          vi.mocked(ctx.prManager.getPrStatus).mockResolvedValue({
+            merged: true,
+            open: false,
+            blockReason: null,
+            ciFailures: [],
+            reviewComments: [],
+          });
           const restarted = createPodManager(ctx.deps);
           await vi.advanceTimersByTimeAsync(120_000);
           expect(restarted.getSession(pod.id).status).toBe('validated');
-          expect(ctx.prManager.getPrStatus).not.toHaveBeenCalled();
+          expect(ctx.prManager.getPrStatus).toHaveBeenCalledTimes(1);
           expect(ctx.prManager.mergePr).not.toHaveBeenCalled();
           expect(ctx.containerManager.kill).not.toHaveBeenCalled();
           expect(completed).toEqual([]);
@@ -5730,7 +5990,7 @@ describe('PodManager', () => {
     });
 
     it.each(['missing', 'existing'] as const)(
-      'polls and merges a clean PR without maintaining the %s parent worktree after merge',
+      'requires retained source and avoids post-merge maintenance (%s parent worktree)',
       async (worktree) => {
         vi.useFakeTimers();
         try {
@@ -5746,8 +6006,17 @@ describe('PodManager', () => {
             worktreePath:
               worktree === 'existing' ? '/private/tmp' : `/tmp/autopod-missing-parent-${pod.id}`,
           });
+          const statusEvidence = seedPollDelivery(ctx, pod.id, true);
+          if (worktree === 'missing') {
+            const inspect = ctx.worktreeManager.inspectSource;
+            if (!inspect) throw new Error('Missing inspection fixture');
+            vi.mocked(inspect).mockRejectedValue(
+              new Error('ENOENT: retained worktree unavailable'),
+            );
+          }
           vi.mocked(ctx.prManager.getPrStatus)
             .mockResolvedValueOnce({
+              ...statusEvidence,
               merged: false,
               open: true,
               blockReason: null,
@@ -5756,28 +6025,32 @@ describe('PodManager', () => {
               reviewDecision: 'APPROVED',
             })
             .mockResolvedValueOnce({
+              ...statusEvidence,
               merged: true,
               open: false,
               blockReason: null,
               ciFailures: [],
               reviewComments: [],
             });
-          vi.mocked(ctx.prManager.mergePr).mockResolvedValueOnce({
-            merged: true,
-            autoMergeScheduled: false,
-          });
-
           // A fresh manager resumes merge polling for persisted merge_pending pods.
           createPodManager(ctx.deps);
           await vi.advanceTimersByTimeAsync(0);
 
-          expect(ctx.prManager.mergePr).toHaveBeenCalledWith({
-            prUrl: 'https://github.com/org/repo/pull/42',
-          });
+          if (worktree === 'existing')
+            expect(ctx.prManager.mergePr).toHaveBeenCalledWith(
+              expect.objectContaining({
+                prUrl: 'https://github.com/org/repo/pull/42',
+                expectedHeadSha: statusEvidence.headSha,
+                expectedTarget: statusEvidence.sourceTarget,
+              }),
+            );
+          else expect(ctx.prManager.mergePr).not.toHaveBeenCalled();
           expect(ctx.worktreeManager.rebaseOntoBase).not.toHaveBeenCalled();
 
           await vi.advanceTimersByTimeAsync(60_000);
-          expect(manager.getSession(pod.id).status).toBe('complete');
+          expect(manager.getSession(pod.id).status).toBe(
+            worktree === 'existing' ? 'complete' : 'merge_pending',
+          );
           expect(ctx.worktreeManager.rebaseOntoBase).not.toHaveBeenCalled();
           expect(ctx.worktreeManager.pushBranch).not.toHaveBeenCalled();
         } finally {

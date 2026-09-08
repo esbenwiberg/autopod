@@ -205,6 +205,19 @@ if (approvalPreservationFixture)
     worktreePath: missingSourceFixture ? null : '/local-fixture/preserved-worktree',
     containerId: 'local-preserved-container',
   };
+const legacyDeliveryFixture = process.env.FIXTURE_MODE === 'legacy-delivery-recovery';
+if (legacyDeliveryFixture)
+  pod = {
+    ...pod,
+    status: 'failed',
+    pendingEscalation: null,
+    recordDiagnostics: [],
+    finalization: null,
+    task: '[Local fixture] Revalidate retained legacy delivery',
+    failureReason:
+      'Delivery history is unavailable. Original resources retained. Use Resume to revalidate the retained source before approving delivery.',
+    mergeBlockReason: null,
+  };
 const costPayloadLimitFixture = process.env.FIXTURE_MODE === 'cost-payload-limit';
 const taskBudgetFixture = process.env.TASK_BUDGET_FIXTURE === '1' || costPayloadLimitFixture;
 const savedSnapshotRecovery = process.env.ARTIFACT_SNAPSHOT_FIXTURE === '1';
@@ -376,6 +389,24 @@ const server = createServer(async (req, res) => {
     return json(grant);
   }
   if (req.method === 'POST' && pathname === '/pods/local-fixture/resume') {
+    if (legacyDeliveryFixture) {
+      pod = {
+        ...pod,
+        status: 'validated',
+        failureReason: null,
+        mergeBlockReason: null,
+        updatedAt: new Date().toISOString(),
+      };
+      console.log(
+        JSON.stringify({
+          scope: 'local fixture only',
+          action: 'resume-legacy-validation',
+          workerStarts: 0,
+          merges: 0,
+        }),
+      );
+      return json({ ok: true, action: 'revalidate' });
+    }
     if (artifactRecovery) {
       artifactRetryCount++;
       console.log(

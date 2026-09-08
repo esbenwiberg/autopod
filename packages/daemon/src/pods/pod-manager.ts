@@ -4364,12 +4364,23 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
             assertCurrent();
           }
         };
-        const pollCredential = (profile: Profile) =>
-          pollOperation(() => resolveGitCredential(profile));
         assertCurrent();
         const profile = profileStore.get(pod.profileName);
         const prManager = prManagerFactory ? prManagerFactory(profile) : null;
         if (!prManager) {
+          ownership.stop();
+          return;
+        }
+
+        const journal = podRepo.mergeJournal;
+        const entry = journal?.find(pod);
+        if (!journal || !entry) {
+          assertCurrent();
+          const reason =
+            'Delivery history is unavailable. Original resources retained. Use Resume to revalidate the retained source before approving delivery.';
+          transition(pod, 'failed', { failureReason: reason, mergeBlockReason: reason });
+          assertCurrent({ status: 'failed' });
+          emitActivityStatus(podId, reason);
           ownership.stop();
           return;
         }
@@ -4380,68 +4391,65 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           }),
         );
 
-        // A durable admission must be reconciled before any subsequent mutation.
-        // Legacy rows without an admission retain their separate recovery path.
-        let journaled = false;
+        // Reconcile the planned or admitted source before any subsequent mutation.
         try {
-          const journal = podRepo.mergeJournal;
-          const entry = journal?.find(pod);
-          if (journal && entry) {
-            journaled = true;
-            if (status.merged) {
-              await pollOperation(() => reconcileMerge(journal, pod, entry, prManager, status));
-              await pollOperation(() =>
-                inspectRetainedMergeSource(
-                  journal,
-                  podRepo.sourcePublications,
-                  pod,
-                  entry,
-                  worktreeManager,
-                ),
+          if (status.merged) {
+            await pollOperation(() => reconcileMerge(journal, pod, entry, prManager, status));
+            await pollOperation(() =>
+              inspectRetainedMergeSource(
+                journal,
+                podRepo.sourcePublications,
+                pod,
+                entry,
+                worktreeManager,
+              ),
+            );
+          } else {
+            if (
+              (entry.state !== 'pending' && entry.state !== 'planned') ||
+              entry.result?.autoMergeScheduled ||
+              !status.open
+            )
+              mergeReconciliation(
+                'The earlier merge requires source-bound provider reconciliation; original resources retained.',
               );
-            } else {
-              if (entry.state !== 'pending' || entry.result?.autoMergeScheduled || !status.open)
-                mergeReconciliation(
-                  'The earlier merge requires source-bound provider reconciliation; original resources retained.',
+            const source = await pollOperation(() =>
+              inspectRetainedMergeSource(
+                journal,
+                podRepo.sourcePublications,
+                pod,
+                entry,
+                worktreeManager,
+              ),
+            );
+            if (!status.ciFailures.length && !status.reviewComments.length) {
+              const reviewOk = !status.reviewDecision || status.reviewDecision === 'APPROVED';
+              if (reviewOk)
+                await mergeQueue.enqueueMerge(
+                  entry.request.config.expectedTarget.repository,
+                  entry.request.config.expectedTarget.baseBranch,
+                  async () => {
+                    assertCurrent();
+                    const result = await pollOperation(() =>
+                      mergePublishedSource(
+                        journal,
+                        pod,
+                        { ...pod, prUrl: entry.request.publicationPrUrl },
+                        source,
+                        prManager,
+                        {
+                          ...entry.request.config,
+                          worktreePath: pod.worktreePath,
+                          onPrepared: () => assertCurrent(),
+                        },
+                      ),
+                    );
+                    return result.merged;
+                  },
                 );
-              const source = await pollOperation(() =>
-                inspectRetainedMergeSource(
-                  journal,
-                  podRepo.sourcePublications,
-                  pod,
-                  entry,
-                  worktreeManager,
-                ),
-              );
-              if (!status.ciFailures.length && !status.reviewComments.length) {
-                const reviewOk = !status.reviewDecision || status.reviewDecision === 'APPROVED';
-                if (reviewOk)
-                  await mergeQueue.enqueueMerge(
-                    entry.request.config.expectedTarget.repository,
-                    entry.request.config.expectedTarget.baseBranch,
-                    async () => {
-                      assertCurrent();
-                      const result = await pollOperation(() =>
-                        mergePublishedSource(
-                          journal,
-                          pod,
-                          { ...pod, prUrl: entry.request.publicationPrUrl },
-                          source,
-                          prManager,
-                          {
-                            ...entry.request.config,
-                            worktreePath: pod.worktreePath,
-                            onPrepared: () => assertCurrent(),
-                          },
-                        ),
-                      );
-                      return result.merged;
-                    },
-                  );
-                // A later poll confirms cleanup. Never rebase or push over an
-                // admitted request; a changed source needs its own validation.
-                return;
-              }
+              // A later poll confirms cleanup. Never rebase or push over an
+              // admitted request; a changed source needs its own validation.
+              return;
             }
           }
         } catch (error) {
@@ -4532,110 +4540,6 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
             fixFeedbackRepo.enqueue(podId, summary);
           }
           await pollOperation(async () => maybeSpawnFixSession(podId, status));
-        } else {
-          // PR is clean — actively re-attempt the merge so the poller is not
-          // purely observational. The `status.merged` branch above handles the
-          // transition to `complete` on a subsequent tick once the merge lands.
-          const reviewOk = !status.reviewDecision || status.reviewDecision === 'APPROVED';
-          if (reviewOk && pod.prUrl) {
-            const baseBranch = pod.baseBranch ?? profile.defaultBranch ?? 'main';
-            const prUrl = pod.prUrl;
-            try {
-              const merged = await mergeQueue.enqueueMerge(
-                profile.repoUrl ?? null,
-                baseBranch,
-                async () => {
-                  const result = await pollOperation(async () => prManager.mergePr({ prUrl }));
-                  if (result.merged) emitActivityStatus(podId, 'PR merged by poller');
-                  return result.merged;
-                },
-              );
-              // The next status observation confirms completion. Do not rebase
-              // or push a branch after the provider has already merged its PR.
-              if (merged) return;
-            } catch (err) {
-              assertCurrent();
-              logger.debug({ err, podId }, 'Merge poller active merge attempt failed');
-            }
-          }
-        }
-
-        // Self-heal stale branch: if a sibling pod merged while we were waiting
-        // for review/CI, our branch is now behind origin/<base> and the platform
-        // auto-merge will park indefinitely. Rebase + force-push so the existing
-        // auto-merge can pick up the rebased branch on its next attempt.
-        // `rebaseOntoBase` short-circuits to alreadyUpToDate=true when the base
-        // hasn't advanced, so this is a single fetch in the steady state.
-        // Serialized with approveSession via the merge queue so two pods on the
-        // same base never race.
-        if (!journaled && pod.worktreePath && pod.branch) {
-          try {
-            await pollOperation(async () => access(pod.worktreePath));
-          } catch (err) {
-            assertCurrent();
-            const code = (err as NodeJS.ErrnoException).code;
-            if (code === 'ENOENT' || code === 'ENOTDIR') {
-              logger.info(
-                { podId, worktreePath: pod.worktreePath },
-                'Merge poller: parent worktree no longer exists — skipping branch self-heal',
-              );
-              return;
-            }
-            logger.warn({ err, podId }, 'Merge poller worktree check failed');
-            emitActivityStatus(
-              podId,
-              `Self-heal worktree check failed: ${err instanceof Error ? err.message : String(err)}`,
-            );
-            return;
-          }
-
-          try {
-            const baseBranch = pod.baseBranch ?? profile.defaultBranch ?? 'main';
-            const queueKey = MergeQueue.keyFor(profile.repoUrl ?? null, baseBranch);
-            const worktreePath = pod.worktreePath;
-            const branch = pod.branch;
-            await mergeQueue.run(queueKey, async () => {
-              assertCurrent();
-              const result = await pollOperation(async () =>
-                worktreeManager.rebaseOntoBase({
-                  worktreePath,
-                  baseBranch,
-                  pat: await pollCredential(profile),
-                }),
-              );
-              if (!result.rebased) {
-                const blockReason = formatRebaseConflictReason(baseBranch, result.conflicts);
-                if (blockReason !== pod.mergeBlockReason) {
-                  podRepo.update(podId, { mergeBlockReason: blockReason });
-                  emitActivityStatus(podId, `Merge pending: ${blockReason}`);
-                  logger.info(
-                    { podId, baseBranch, conflicts: result.conflicts },
-                    'Merge poller: rebase produced conflicts — manual resolution required',
-                  );
-                }
-                return;
-              }
-              if (!result.alreadyUpToDate) {
-                await pollOperation(async () =>
-                  worktreeManager.pushBranch(worktreePath, branch, {
-                    force: true,
-                    pat: await pollCredential(profile),
-                  }),
-                );
-                logger.info(
-                  { podId, baseBranch },
-                  'Merge poller: rebased stale branch and force-pushed onto latest base',
-                );
-              }
-            });
-          } catch (err) {
-            assertCurrent();
-            logger.warn({ err, podId }, 'Merge poller self-heal rebase/push failed');
-            emitActivityStatus(
-              podId,
-              `Self-heal rebase failed: ${err instanceof Error ? err.message : String(err)}`,
-            );
-          }
         }
       } catch (err) {
         logger.debug({ err, podId }, 'Merge polling failed, skipping cycle');
@@ -11843,7 +11747,11 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
       if (pod.prUrl && podRepo.mergeJournal) {
         try {
           const entry = podRepo.mergeJournal.find(pod);
-          if (entry && (entry.state !== 'pending' || entry.result?.autoMergeScheduled)) {
+          if (
+            entry &&
+            ((entry.state !== 'pending' && entry.state !== 'planned') ||
+              entry.result?.autoMergeScheduled)
+          ) {
             if (options.squash !== undefined && entry.request.config.squash !== options.squash)
               mergeReconciliation('An earlier admitted merge uses a different method.');
             const provider = prManagerFactory?.(profileStore.get(pod.profileName));
@@ -12059,6 +11967,29 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           config,
         );
       };
+      const planApprovalSource = (
+        publication: Awaited<ReturnType<typeof publishApprovalBranch>>,
+        prUrl: string,
+        baseBranch: string,
+      ) => {
+        assertApprovalCurrent(mergingAnchor);
+        if (!podRepo.mergeJournal) mergeReconciliation('Durable merge planning is unavailable.');
+        return podRepo.mergeJournal.plan(
+          podRepo.getOrThrow(podId),
+          mergingAnchor,
+          publication.publicationId,
+          {
+            prUrl,
+            expectedHeadSha: publication.commitSha,
+            expectedTarget: {
+              repository: publication.repository,
+              branch: publication.branch,
+              baseBranch,
+            },
+            squash: options.squash,
+          },
+        );
+      };
       if (recoveredMerge) {
         emitActivityStatus(
           podId,
@@ -12069,6 +12000,22 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         const queueKey = MergeQueue.keyFor(approveProfile.repoUrl, mergeBaseBranch);
         const worktreePath = pod.worktreePath;
         const prUrl = pod.prUrl;
+
+        try {
+          const initialStatus = await deliveryOperation(() =>
+            prManager.getPrStatus({ prUrl, worktreePath }),
+          );
+          if (initialStatus.merged || !initialStatus.open)
+            failDelivery(
+              'The PR has an external disposition without a confirmed daemon merge. Reconcile it before publishing retained source.',
+            );
+        } catch (error) {
+          // failDelivery already moved the original lifecycle back to validated.
+          if (error instanceof AutopodError && error.code === 'APPROVAL_DELIVERY_FAILED')
+            throw error;
+          assertApprovalCurrent(mergingAnchor);
+          failDelivery('The current PR disposition is unavailable.');
+        }
 
         // Outcome of the queued critical section. We do state transitions outside
         // the queue so the lock is released as quickly as possible.
@@ -12164,6 +12111,8 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
               }
             }
 
+            planApprovalSource(publishedSource, prUrl, mergeBaseBranch);
+
             // Daemon-side approval gate: check the PR's review decision before attempting
             // to merge. If the platform reports that a review is still required or changes
             // were requested, enter merge_pending and let the poller wait for approval.
@@ -12173,6 +12122,12 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
               const prStatus = await deliveryOperation(async () =>
                 prManager.getPrStatus({ prUrl, worktreePath }),
               );
+              if (prStatus.merged || !prStatus.open)
+                return {
+                  kind: 'merge_failed',
+                  reason:
+                    'The PR changed external disposition before merge admission; reconcile the retained source.',
+                };
               if (prStatus.reviewDecision && prStatus.reviewDecision !== 'APPROVED') {
                 const blockReason = `Waiting for PR review approval (current decision: ${prStatus.reviewDecision})`;
                 logger.info(
@@ -12328,9 +12283,14 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           assertApprovalCurrent(mergingAnchor);
           podRepo.update(podId, { prUrl: newPrUrl });
           emitActivityStatus(podId, `PR created: ${newPrUrl}`);
+          planApprovalSource(publishedSource, newPrUrl, baseBranch);
           const reviewStatus = await deliveryOperation(async () =>
             prManager.getPrStatus({ prUrl: newPrUrl, worktreePath: pod.worktreePath }),
           );
+          if (reviewStatus.merged || !reviewStatus.open)
+            mergeReconciliation(
+              'The PR has an external disposition without a recorded daemon merge.',
+            );
           if (reviewStatus.reviewDecision && reviewStatus.reviewDecision !== 'APPROVED') {
             const blockReason = `Waiting for PR review approval (current decision: ${reviewStatus.reviewDecision})`;
             transition(s2, 'merge_pending', { mergeBlockReason: blockReason });

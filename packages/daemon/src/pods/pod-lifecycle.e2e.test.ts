@@ -51,8 +51,8 @@ function createMockPrManager(): PrManager {
     })),
     mergePr: vi.fn(mockPrMerge),
     getPrStatus: vi.fn(async () => ({
-      merged: true,
-      open: false,
+      merged: false,
+      open: true,
       blockReason: null,
       ciFailures: [],
       reviewComments: [],
