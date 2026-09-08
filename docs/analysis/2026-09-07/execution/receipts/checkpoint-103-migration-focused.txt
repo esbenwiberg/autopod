@@ -1,0 +1,94 @@
+
+ RUN  v4.1.11 /private/tmp/autopod-durable-execution/packages/daemon
+
+ ❯ src/db/reconcile-native-checkpoint.test.ts (3 tests | 3 failed) 5975ms
+   × reconciles exact checkpoint 151 only in a new verified copy 1714ms
+   × reconciles exact checkpoint 158 only in a new verified copy 2451ms
+   × reconciles exact checkpoint 163 only in a new verified copy 1809ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 3 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/db/reconcile-native-checkpoint.test.ts > reconciles exact checkpoint 151 only in a new verified copy
+AssertionError: expected { status: 'verified-copy', …(8) } to match object { status: 'verified-copy', …(4) }
+(4 matching properties omitted from actual)
+
+- Expected
++ Received
+
+  {
+    "activated": false,
+    "fromVersion": 151,
+    "retainedRowsVerified": true,
+    "status": "verified-copy",
+-   "toVersion": 182,
++   "toVersion": 181,
+  }
+
+ ❯ src/db/reconcile-native-checkpoint.test.ts:88:26
+     86|       );
+     87|       expect(statSync(cliOutput).mode & 0o777).toBe(0o600);
+     88|       expect(cliReceipt).toMatchObject({
+       |                          ^
+     89|         status: 'verified-copy',
+     90|         fromVersion: version,
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/3]⎯
+
+ FAIL  src/db/reconcile-native-checkpoint.test.ts > reconciles exact checkpoint 158 only in a new verified copy
+AssertionError: expected { status: 'verified-copy', …(8) } to match object { status: 'verified-copy', …(4) }
+(4 matching properties omitted from actual)
+
+- Expected
++ Received
+
+  {
+    "activated": false,
+    "fromVersion": 158,
+    "retainedRowsVerified": true,
+    "status": "verified-copy",
+-   "toVersion": 182,
++   "toVersion": 181,
+  }
+
+ ❯ src/db/reconcile-native-checkpoint.test.ts:88:26
+     86|       );
+     87|       expect(statSync(cliOutput).mode & 0o777).toBe(0o600);
+     88|       expect(cliReceipt).toMatchObject({
+       |                          ^
+     89|         status: 'verified-copy',
+     90|         fromVersion: version,
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/3]⎯
+
+ FAIL  src/db/reconcile-native-checkpoint.test.ts > reconciles exact checkpoint 163 only in a new verified copy
+AssertionError: expected { status: 'verified-copy', …(8) } to match object { status: 'verified-copy', …(4) }
+(4 matching properties omitted from actual)
+
+- Expected
++ Received
+
+  {
+    "activated": false,
+    "fromVersion": 163,
+    "retainedRowsVerified": true,
+    "status": "verified-copy",
+-   "toVersion": 182,
++   "toVersion": 181,
+  }
+
+ ❯ src/db/reconcile-native-checkpoint.test.ts:88:26
+     86|       );
+     87|       expect(statSync(cliOutput).mode & 0o777).toBe(0o600);
+     88|       expect(cliReceipt).toMatchObject({
+       |                          ^
+     89|         status: 'verified-copy',
+     90|         fromVersion: version,
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/3]⎯
+
+
+ Test Files  1 failed | 2 passed (3)
+      Tests  3 failed | 4 passed (7)
+   Start at  22:17:47
+   Duration  6.71s (transform 1.52s, setup 0ms, import 2.29s, tests 6.34s, environment 0ms)
+

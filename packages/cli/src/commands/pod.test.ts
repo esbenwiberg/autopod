@@ -1085,6 +1085,44 @@ it('propagates an HTTP Resume termination conflict without printing accepted exe
   }
 });
 
+it.each(['resume', 'rework'] as const)(
+  'propagates an HTTP %s cleanup conflict without printing accepted execution',
+  async (action) => {
+    const message =
+      'Pod deletion cleanup ownership is unresolved. Retain its resources and reconcile the saved cleanup attempt before retrying or starting work.';
+    const requests: string[] = [];
+    const server = createServer((req, res) => {
+      requests.push(`${req.method} ${req.url}`);
+      res.setHeader('content-type', 'application/json');
+      res.statusCode = 409;
+      res.end(JSON.stringify({ error: 'POD_DELETE_CLEANUP_UNVERIFIED', message }));
+    });
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+    const address = server.address();
+    if (!address || typeof address === 'string') throw new Error('Missing fixture port');
+    const client = new AutopodClient({
+      baseUrl: `http://127.0.0.1:${address.port}`,
+      getToken: async () => 'local-fixture-only',
+    });
+    const log = vi.spyOn(console, 'log').mockImplementation(() => {});
+    try {
+      const program = new Command();
+      registerPodCommands(program, () => client);
+      await expect(program.parseAsync(['node', 'ap', action, 'abcd1234'])).rejects.toMatchObject({
+        message,
+        statusCode: 409,
+      });
+      expect(requests).toEqual([
+        `POST /pods/abcd1234/${action === 'resume' ? 'resume' : 'validate'}`,
+      ]);
+      expect(log).not.toHaveBeenCalled();
+    } finally {
+      log.mockRestore();
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+  },
+);
+
 it('cost reads a deleted exact ID without requiring a live-list lookup and preserves JSON evidence', async () => {
   const payload = {
     podId: 'deleted-root',

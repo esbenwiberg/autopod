@@ -5,7 +5,7 @@ import Testing
 import AutopodUI
 
 @MainActor
-@Test(arguments: ["resume", "validate", "revalidate", "delete", "delete-cleanup"])
+@Test(arguments: ["resume", "validate", "revalidate", "delete", "delete-cleanup", "delete-ownership"])
 func unverifiedTerminationActionsRetainFailedState(action: String) async throws {
   let configuration = URLSessionConfiguration.ephemeral
   configuration.protocolClasses = [UnverifiedTerminationProtocol.self]
@@ -18,12 +18,12 @@ func unverifiedTerminationActionsRetainFailedState(action: String) async throws 
   switch action {
   case "resume": await handler.resume(action)
   case "validate": await handler.rework(action)
-  case "delete", "delete-cleanup": await handler.deletePod(action)
+  case "delete", "delete-cleanup", "delete-ownership": await handler.deletePod(action)
   default: await handler.revalidate(action)
   }
-  let expected = action == "delete-cleanup" ? "deletion cleanup is unverified" : (action == "delete" ? "unsettled worker execution" : "unverified process termination")
+  let expected = action == "delete-ownership" ? "cleanup ownership is unresolved" : action == "delete-cleanup" ? "deletion cleanup is unverified" : (action == "delete" ? "unsettled worker execution" : "unverified process termination")
   #expect(handler.lastError?.contains(expected) == true)
-  #expect(handler.lastError?.contains(action == "delete-cleanup" ? "reconcile resource and pod state" : "Retain its source and resources") == true)
+  #expect(handler.lastError?.contains(action == "delete-ownership" ? "reconcile the saved cleanup attempt" : action == "delete-cleanup" ? "reconcile resource and pod state" : "Retain its source and resources") == true)
   #expect(handler.lastError?.contains("{\"error\"") == false)
   #expect(handler.pendingAction == nil)
   #expect(store.pods.count == 1)
@@ -40,14 +40,16 @@ private final class UnverifiedTerminationProtocol: URLProtocol, @unchecked Senda
     let deleting = action.hasPrefix("delete")
     #expect(request.httpMethod == (deleting ? "DELETE" : "POST"))
     #expect(request.url!.path == (deleting ? "/pods/\(action)" : "/pods/\(action)/\(action)"))
-    let message = action == "delete-cleanup"
+    let message = action == "delete-ownership"
+      ? "Pod deletion cleanup ownership is unresolved. Retain its resources and reconcile the saved cleanup attempt before retrying or starting work."
+      : action == "delete-cleanup"
       ? "Pod deletion cleanup is unverified at sidecars. Delete was not completed by this cleanup; reconcile resource and pod state before retrying."
       : action == "delete"
       ? "This logical task has an unsettled worker execution. Retain its source and resources; reconcile the execution before deleting a pod or its task evidence."
       : "A worker in this logical task has unverified process termination. Retain its source and resources; reconcile termination before Resume, Rework, validation or delivery."
     let payload = action == "resume"
       ? ["error": message, "code": "TASK_EXECUTION_TERMINATION_UNVERIFIED"]
-      : ["error": action == "delete-cleanup" ? "POD_DELETE_CLEANUP_UNVERIFIED" : (action == "delete" ? "TASK_EXECUTION_UNSETTLED" : "TASK_EXECUTION_TERMINATION_UNVERIFIED"), "message": message]
+      : ["error": action == "delete-cleanup" || action == "delete-ownership" ? "POD_DELETE_CLEANUP_UNVERIFIED" : (action == "delete" ? "TASK_EXECUTION_UNSETTLED" : "TASK_EXECUTION_TERMINATION_UNVERIFIED"), "message": message]
     let data = try! JSONSerialization.data(withJSONObject: payload)
     client?.urlProtocol(self, didReceive: HTTPURLResponse(url: request.url!, statusCode: 409,
       httpVersion: nil, headerFields: ["Content-Type": "application/json"])!, cacheStoragePolicy: .notAllowed)

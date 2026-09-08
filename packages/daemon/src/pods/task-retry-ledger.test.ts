@@ -757,9 +757,12 @@ it('upgrades schema 177 without broadening an existing worker permission', () =>
     const executions = createTaskExecutionLedger(db);
     executions.register('root');
     const bound = { runtime: 'codex', model: 'model', providerAccountId: null };
-    const run = executions.beginRun('root', 1, 1, bound);
-    if (!run) throw new Error('Missing worker ledger');
-    executions.finishRun(run, 'failed', 'auth');
+    const run = 'legacy-auth-run';
+    db.prepare(`INSERT INTO task_agent_runs(id,pod_id,generation,cycle,binding,started_at,ended_at,outcome,failure_category)
+      VALUES (?,'root',1,1,?,'2026-09-08T09:00:00Z','2026-09-08T09:01:00Z','failed','auth')`).run(
+      run,
+      JSON.stringify(bound),
+    );
     // Build the exact old-schema row without calling a newer ledger writer.
     db.prepare(`INSERT INTO task_retry_attempts(id,task_id,pod_id,execution_id,generation,stage,identity,binding_hash,admitted_at,not_before,started_at,ended_at,outcome,measured_duration_ms)
       SELECT r.id,e.task_id,r.pod_id,e.execution_id,r.generation,'worker',?,?,r.started_at,r.started_at,r.started_at,r.ended_at,'nonretryable',11
@@ -900,13 +903,12 @@ it('upgrades schema 178 without inventing provider deadlines for older worker ev
     ).run();
     const executions = createTaskExecutionLedger(db);
     executions.register('legacy');
-    const run = executions.beginRun('legacy', 1, 1, {
-      runtime: 'codex',
-      model: 'model',
-      providerAccountId: null,
-    });
-    if (!run) throw new Error('Missing run');
-    executions.finishRun(run, 'failed', 'transient');
+    const run = 'legacy-transient-run';
+    db.prepare(`INSERT INTO task_agent_runs(id,pod_id,generation,cycle,binding,started_at,ended_at,outcome,failure_category)
+      VALUES (?,'legacy',1,1,?,'2026-09-08T09:00:00Z','2026-09-08T09:01:00Z','failed','transient')`).run(
+      run,
+      JSON.stringify({ runtime: 'codex', model: 'model', providerAccountId: null }),
+    );
     createTaskRetryLedger(db, 'worker').state('legacy');
     const before = db.prepare('SELECT * FROM task_retry_attempts WHERE id=?').get(run) as Record<
       string,

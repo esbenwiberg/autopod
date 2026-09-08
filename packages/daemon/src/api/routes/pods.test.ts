@@ -3405,6 +3405,7 @@ describe('POST /pods/:podId/spawn-fix', () => {
     const podId = insertMergePendingPod();
     const repo = createPodRepository(db);
     repo.update(podId, { status: 'failed', sidecarContainerIds: { database: 'owned-sidecar' } });
+    repo.taskExecutions?.register(podId);
     const response = await app.inject({
       method: 'DELETE',
       url: `/pods/${podId}`,
@@ -3416,6 +3417,30 @@ describe('POST /pods/:podId/spawn-fix', () => {
       message: expect.stringContaining('sidecars'),
     });
     expect(repo.getOrThrow(podId).sidecarContainerIds).toEqual({ database: 'owned-sidecar' });
+  });
+
+  it('rejects Delete and Rework through HTTP while a durable deletion attempt is unresolved', async () => {
+    const podId = insertMergePendingPod();
+    const repo = createPodRepository(db);
+    repo.update(podId, { status: 'failed' });
+    repo.taskExecutions?.register(podId);
+    repo.deletionOwnership?.acquire(podId, 'saved-configuration');
+    const before = db.prepare('SELECT * FROM pods WHERE id=?').get(podId);
+    for (const [method, url] of [
+      ['DELETE', `/pods/${podId}`],
+      ['POST', `/pods/${podId}/validate`],
+    ] as const) {
+      const response = await app.inject({ method, url, headers: authHeaders });
+      expect(response.statusCode).toBe(409);
+      expect(response.json()).toMatchObject({
+        error: 'POD_DELETE_CLEANUP_UNVERIFIED',
+        message: expect.stringContaining('cleanup ownership is unresolved'),
+      });
+      expect(db.prepare('SELECT * FROM pods WHERE id=?').get(podId)).toEqual(before);
+    }
+    expect(
+      db.prepare('SELECT count(*) AS count FROM task_agent_runs WHERE pod_id=?').get(podId),
+    ).toEqual({ count: 0 });
   });
 
   it('queues three back-to-back messages onto one canonical fix pod', async () => {

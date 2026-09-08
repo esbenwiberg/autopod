@@ -161,6 +161,51 @@ it.each(['Resume', 'Rework'] as const)(
   },
 );
 
+it.each(['Resume', 'Rework'] as const)(
+  'retains failed state and readable cleanup ownership guidance after %s is rejected',
+  async (action) => {
+    const pod = { id: 'unverified', status: 'failed', options: { output: 'pr' } } as Pod;
+    const initial = usePodsStore.getState();
+    usePodsStore.setState({ pods: [pod] });
+    const message =
+      'Pod deletion cleanup ownership is unresolved. Retain its resources and reconcile the saved cleanup attempt before retrying or starting work.';
+    const fetch = vi
+      .spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify(
+            action === 'Resume'
+              ? { error: message, code: 'POD_DELETE_CLEANUP_UNVERIFIED' }
+              : { error: 'POD_DELETE_CLEANUP_UNVERIFIED', message },
+          ),
+          { status: 409 },
+        ),
+      );
+    const container = document.createElement('div');
+    document.body.append(container);
+    const root = createRoot(container);
+    try {
+      await act(async () => {
+        root.render(<ActionBar pod={pod} />);
+      });
+      await act(async () => {
+        Array.from(container.querySelectorAll('button'))
+          .find((button) => button.textContent === action)
+          ?.click();
+      });
+      expect(fetch).toHaveBeenCalledTimes(1);
+      expect(container.textContent).toContain(message);
+      expect(container.textContent).not.toContain('{"error"');
+      expect(usePodsStore.getState().pods[0]).toEqual(pod);
+    } finally {
+      act(() => root.unmount());
+      container.remove();
+      fetch.mockRestore();
+      usePodsStore.setState(initial);
+    }
+  },
+);
+
 it('reports saved guidance only after acceptance and clears that notice on a failed next send', async () => {
   const pod = { id: 'guidance', status: 'running' } as Pod;
   const fetch = vi

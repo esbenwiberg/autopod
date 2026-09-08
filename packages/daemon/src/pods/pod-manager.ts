@@ -198,6 +198,7 @@ import {
 } from './continuation-preflight.js';
 import { buildCorrectionMessage } from './correction-context.js';
 import { runDeletionCleanup } from './deletion-cleanup.js';
+import { deletionOwnershipError } from './deletion-ownership.js';
 import { dispatchRequestHash } from './dispatch-preflight-ledger.js';
 import { persistCompletionReply, persistEscalation } from './escalation-coordinator.js';
 import type { EscalationRepository } from './escalation-repository.js';
@@ -2193,6 +2194,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
   }
 
   function assertExecutionTerminationVerified(podId: string): void {
+    podRepo.deletionOwnership?.assertTaskAvailable(podId);
     assertTaskExecutionTerminationVerified(podRepo.taskExecutions, podId);
   }
 
@@ -3609,6 +3611,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
     podId: string,
     strict = false,
     assertCurrent?: () => void,
+    retainMetadata = false,
   ): Promise<void> {
     assertCurrent?.();
     if (!sidecarManager) {
@@ -3642,7 +3645,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
       throw new AggregateError(failures, `Failed to clean up sidecars for pod ${podId}`);
     }
     assertCurrent?.();
-    podRepo.update(podId, { sidecarContainerIds: null });
+    if (!retainMetadata) podRepo.update(podId, { sidecarContainerIds: null });
   }
 
   /** Delete any branches this pod pushed to the test repo via
@@ -3652,7 +3655,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
    */
   async function cleanupTestRunBranches(
     podId: string,
-    options?: { strict: boolean; assertCurrent: () => void },
+    options?: { strict: boolean; assertCurrent: () => void; retainMetadata?: boolean },
   ): Promise<void> {
     options?.assertCurrent();
     let current: Pod;
@@ -3707,7 +3710,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
     options?.assertCurrent();
     if (options?.strict && results.some((result) => result.status === 'rejected'))
       throw new Error('Test branch cleanup incomplete');
-    podRepo.update(podId, { testRunBranches: null });
+    if (!options?.retainMetadata) podRepo.update(podId, { testRunBranches: null });
   }
 
   /** Active auto-stop timers for preview containers, keyed by podId. */
@@ -13252,6 +13255,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
     },
 
     async killSession(podId: string): Promise<void> {
+      podRepo.deletionOwnership?.assertTaskAvailable(podId);
       clearPreviewTimer(podId);
       await stopSandboxPreviewProxy(podId);
       stopMergePolling(podId);
@@ -15935,6 +15939,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           409,
         );
       }
+      const configuration = JSON.stringify(profileStore.get(pod.profileName).testPipeline ?? null);
       const assertOwnership = () => {
         const current = podRepo.getOrThrow(podId);
         if (
@@ -15943,7 +15948,8 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           current.containerId !== pod.containerId ||
           current.executionTarget !== pod.executionTarget ||
           current.worktreePath !== pod.worktreePath ||
-          current.runtime !== pod.runtime
+          current.runtime !== pod.runtime ||
+          JSON.stringify(profileStore.get(pod.profileName).testPipeline ?? null) !== configuration
         ) {
           throw new AutopodError(
             'Pod deletion cleanup ownership changed. Reconcile resource and pod state before retrying Delete.',
@@ -15953,6 +15959,11 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         }
         podRepo.taskExecutions?.assertCanDelete(podId);
       };
+      const claim = podRepo.deletionOwnership?.acquire(
+        podId,
+        createHash('sha256').update(configuration).digest('hex'),
+      );
+      if (!claim) throw deletionOwnershipError();
       const runtimeStateDirs: Partial<Record<string, (id: string) => Promise<void>>> = {
         claude: cleanupClaudeState,
         codex: cleanupCodexState,
@@ -15968,7 +15979,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           },
           {
             name: 'sidecars',
-            run: (assertCurrent) => killSidecarsForPod(podId, true, assertCurrent),
+            run: (assertCurrent) => killSidecarsForPod(podId, true, assertCurrent, true),
           },
           {
             name: 'container',
@@ -15980,7 +15991,8 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           { name: 'network', run: () => destroyPodNetwork(podId, true) },
           {
             name: 'test branches',
-            run: (assertCurrent) => cleanupTestRunBranches(podId, { strict: true, assertCurrent }),
+            run: (assertCurrent) =>
+              cleanupTestRunBranches(podId, { strict: true, assertCurrent, retainMetadata: true }),
           },
           {
             name: 'worktree',
@@ -15996,15 +16008,18 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           },
         ],
         assertOwnership,
+        25_000,
+        claim,
       );
       assertOwnership();
       pendingUpdateFromBaseIntents.delete(podId);
       forceWithLeaseAllowances.delete(podId);
-      podRepo.delete(podId);
+      claim.finish(() => podRepo.delete(podId));
       logger.info({ podId }, 'Pod deleted');
     },
 
     async startPreview(podId: string): Promise<{ previewUrl: string }> {
+      podRepo.deletionOwnership?.assertTaskAvailable(podId);
       const pod = podRepo.getOrThrow(podId);
 
       if (!pod.containerId) {
@@ -16140,6 +16155,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
     },
 
     async stopPreview(podId: string): Promise<void> {
+      podRepo.deletionOwnership?.assertTaskAvailable(podId);
       clearPreviewTimer(podId);
       await stopSandboxPreviewProxy(podId);
       const pod = podRepo.getOrThrow(podId);
@@ -17639,6 +17655,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
       reason?: string,
       actor: OperatorActor = { type: 'automation', id: 'direct-pod-manager' },
     ): Promise<void> {
+      podRepo.deletionOwnership?.assertTaskAvailable(podId);
       const pod = podRepo.getOrThrow(podId);
       if (pod.status === 'complete') {
         throw new AutopodError(`Pod ${podId} is already complete`, 'INVALID_STATE', 409);

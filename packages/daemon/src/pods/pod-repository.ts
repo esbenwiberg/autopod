@@ -41,6 +41,7 @@ import {
   type CompactPodSource,
 } from './compact-pod-projection.js';
 import { hasUnansweredDecision } from './decision-admission.js';
+import { type DeletionOwnership, createDeletionOwnership } from './deletion-ownership.js';
 import {
   type DispatchPreflightLedger,
   createDispatchPreflightLedger,
@@ -265,6 +266,7 @@ export interface PodRepository extends Partial<UnitOfWork> {
   sourcePublications?: SourcePublicationLedger;
   mergeJournal?: MergeJournal;
   taskExecutions?: TaskExecutionLedger;
+  deletionOwnership?: DeletionOwnership;
   completionJournal?: CompletionJournal;
   hasUnansweredDecision?(podId: string): boolean;
   insert(pod: NewPod): void;
@@ -666,6 +668,7 @@ export function createPodRepository(db: Database.Database): PodRepository {
   const completionJournal = createCompletionJournal(db);
   const dispatchPreflight = createDispatchPreflightLedger(db);
   const taskExecutions = createTaskExecutionLedger(db);
+  const deletionOwnership = createDeletionOwnership(db);
   const archiveTaskHistory = createTaskHistoryArchive(db);
   function listRows(
     filters?: PodFilters,
@@ -744,6 +747,7 @@ export function createPodRepository(db: Database.Database): PodRepository {
     sourcePublications: createSourcePublicationLedger(db),
     mergeJournal: createMergeJournal(db),
     taskExecutions,
+    deletionOwnership,
     insert: db.transaction((pod: NewPod): void => {
       // Keep legacy output_mode and new pod columns in sync.
       const podOpts: PodOptions = pod.options ?? podOptionsFromOutputMode(pod.outputMode);
@@ -855,6 +859,19 @@ export function createPodRepository(db: Database.Database): PodRepository {
     },
 
     update(id: string, changes: PodUpdates): void {
+      if (
+        [
+          'status',
+          'containerId',
+          'executionTarget',
+          'worktreePath',
+          'runtime',
+          'profileName',
+          'sidecarContainerIds',
+          'testRunBranches',
+        ].some((field) => Object.hasOwn(changes, field))
+      )
+        deletionOwnership.assertTaskAvailable(id);
       const setClauses: string[] = [];
       const params: Record<string, unknown> = { id };
 
@@ -1253,6 +1270,7 @@ export function createPodRepository(db: Database.Database): PodRepository {
     },
 
     incrementLifecycleGeneration(id: string): number {
+      deletionOwnership.assertTaskAvailable(id);
       const result = db
         .prepare(
           'UPDATE pods SET lifecycle_generation = lifecycle_generation + 1, updated_at = ? WHERE id = ?',

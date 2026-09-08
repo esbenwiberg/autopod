@@ -1,4 +1,5 @@
 import { AutopodError } from '@autopod/shared';
+import type { DeletionClaim } from './deletion-ownership.js';
 
 export interface DeletionCleanupStep {
   name: string;
@@ -10,6 +11,7 @@ export async function runDeletionCleanup(
   steps: DeletionCleanupStep[],
   assertOwnership: () => void,
   timeoutMs = 25_000,
+  claim?: DeletionClaim,
 ): Promise<void> {
   let active = true;
   let stepName = 'admission';
@@ -23,6 +25,7 @@ export async function runDeletionCleanup(
   const assertCurrent = () => {
     if (!active || performance.now() >= deadline) throw failure();
     assertOwnership();
+    claim?.assertCurrent();
   };
   let timer: ReturnType<typeof setTimeout> | undefined;
   try {
@@ -30,10 +33,12 @@ export async function runDeletionCleanup(
       for (const step of steps) {
         stepName = step.name;
         assertCurrent();
+        if (claim?.hasCompleted(step.name)) continue;
         await step.run(assertCurrent);
+        claim?.completeStep(step.name);
         assertCurrent();
       }
-    })();
+    })().finally(() => claim?.settle());
     await Promise.race([
       work,
       new Promise<never>((_, reject) => {

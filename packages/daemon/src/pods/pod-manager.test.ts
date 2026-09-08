@@ -2238,13 +2238,20 @@ describe('PodManager', () => {
         await vi.advanceTimersByTimeAsync(0);
         expect(ctx.containerManager.kill).toHaveBeenCalledWith('retained-container');
         if (fault === 'timeout') await vi.advanceTimersByTimeAsync(25001);
-        if (fault === 'superseded') ctx.podRepo.incrementLifecycleGeneration(pod.id);
+        if (fault === 'superseded')
+          expect(() => ctx.podRepo.incrementLifecycleGeneration(pod.id)).toThrow(
+            'cleanup ownership is unresolved',
+          );
         if (fault === 'task-admitted')
-          ctx.podRepo.taskExecutions?.beginRun(pod.id, pod.lifecycleGeneration, 1, {
-            runtime: pod.runtime,
-            model: pod.model,
-            providerAccountId: null,
-          });
+          expect(() =>
+            ctx.podRepo.taskExecutions?.beginRun(pod.id, pod.lifecycleGeneration, 1, {
+              runtime: pod.runtime,
+              model: pod.model,
+              providerAccountId: null,
+            }),
+          ).toThrow('cleanup ownership is unresolved');
+        if (fault === 'superseded' || fault === 'task-admitted')
+          await vi.advanceTimersByTimeAsync(25001);
         release();
         expect(await result).toMatchObject({ code: 'POD_DELETE_CLEANUP_UNVERIFIED' });
         await vi.advanceTimersByTimeAsync(0);

@@ -1139,6 +1139,7 @@ export function podRoutes(
   // POST /pods/:podId/validate — trigger validation (agent rework on failure)
   app.post('/pods/:podId/validate', async (request, reply) => {
     const { podId } = request.params as { podId: string };
+    podRepo?.deletionOwnership?.assertTaskAvailable(podId);
     assertTaskExecutionTerminationVerified(podRepo?.taskExecutions, podId);
     const pod = podManager.getSession(podId);
     const isTerminalRework = ['failed', 'review_required', 'killed', 'validated'].includes(
