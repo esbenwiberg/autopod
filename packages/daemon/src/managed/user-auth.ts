@@ -1,6 +1,13 @@
+import type Database from 'better-sqlite3';
 import type { FastifyInstance, FastifyRequest } from 'fastify';
 import type { AuthModule } from '../interfaces/auth-module.js';
-import { type ManagedComponentsConfig, registerManagedRoutes } from './bootstrap.js';
+import type { ArtifactStore } from './artifact-store.js';
+import {
+  type ManagedComponentsConfig,
+  type managedComponents,
+  registerManagedComponentRoutes,
+  registerManagedRoutes,
+} from './bootstrap.js';
 
 export interface ManagedUserBinding {
   issuer: string;
@@ -55,4 +62,22 @@ export function registerManagedUserRoutes(
   bindings: readonly ManagedUserBinding[],
 ) {
   return registerManagedRoutes(app, config, managedUserAuthenticator(auth, bindings));
+}
+
+/** Mount an existing runtime composition so API routes and worker gateways share one service. */
+export function registerManagedUserComponentRoutes(
+  app: FastifyInstance,
+  components: ReturnType<typeof managedComponents>,
+  db: Database.Database,
+  store: ArtifactStore,
+  auth: AuthModule,
+  bindings: readonly ManagedUserBinding[],
+) {
+  return registerManagedComponentRoutes(
+    app,
+    components,
+    db,
+    store,
+    managedUserAuthenticator(auth, bindings),
+  );
 }

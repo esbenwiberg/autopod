@@ -95,6 +95,16 @@ export function registerManagedRoutes(
   authenticate: (request: FastifyRequest) => Promise<string | null>,
 ) {
   const components = managedComponents(config);
+  return registerManagedComponentRoutes(app, components, config.db, config.store, authenticate);
+}
+
+export function registerManagedComponentRoutes(
+  app: import('fastify').FastifyInstance,
+  components: ReturnType<typeof managedComponents>,
+  db: Database.Database,
+  store: ArtifactStore,
+  authenticate: (request: FastifyRequest) => Promise<string | null>,
+) {
   managedPodRoutes(app, {
     service: components.service,
     authenticate,
@@ -102,11 +112,11 @@ export function registerManagedRoutes(
   });
   managedArtifactRoutes(app, {
     exports: components.exports,
-    store: config.store,
+    store,
     authorize: async (request, id) => {
       const installation = await authenticate(request);
       if (!installation) return false;
-      return !!config.db
+      return !!db
         .prepare(`SELECT 1 FROM artifact_exports JOIN managed_pods USING(pod_id)
       WHERE artifact_id=? AND dispatcher_installation_id=?`)
         .get(id, installation);

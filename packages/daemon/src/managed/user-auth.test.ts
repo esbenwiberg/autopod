@@ -4,7 +4,12 @@ import type { FastifyRequest } from 'fastify';
 import { expect, it, vi } from 'vitest';
 import { fixture } from '../test-utils/managed-fixture.js';
 import { MemoryArtifactStore } from './artifact-store.js';
-import { managedUserAuthenticator, registerManagedUserRoutes } from './user-auth.js';
+import { managedComponents } from './bootstrap.js';
+import {
+  managedUserAuthenticator,
+  registerManagedUserComponentRoutes,
+  registerManagedUserRoutes,
+} from './user-auth.js';
 const binding = {
   issuer: 'https://issuer/tenant/',
   audience: 'api://autopod',
@@ -140,4 +145,39 @@ it('accepts an explicitly enrolled Entra CLI user without an application-role cl
     [binding],
   );
   expect(await auth(request)).toBe('installation-one');
+});
+
+it('mounts routes on the supplied component service', async () => {
+  const f = fixture();
+  const app = Fastify();
+  try {
+    const store = new MemoryArtifactStore();
+    const components = managedComponents({
+      db: f.db,
+      admission: f.admission,
+      runtime: f.runtime,
+      store,
+      stateRoot: '/fixture',
+      enabled: true,
+    });
+    registerManagedUserComponentRoutes(
+      app,
+      components,
+      f.db,
+      store,
+      { validateToken: async () => claims() },
+      [binding],
+    );
+    const response = await app.inject({
+      method: 'GET',
+      url: '/managed/health',
+      headers: { authorization: 'Bearer fixture' },
+    });
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toMatchObject({ enabled: true });
+    expect(components.service.health().enabled).toBe(true);
+  } finally {
+    await app.close();
+    f.close();
+  }
 });

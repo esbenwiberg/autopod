@@ -136,6 +136,7 @@ export class SandboxContainerManager implements ContainerManager {
   static withAzureClient(
     config: SandboxContainerManagerConfig,
     logger: Logger,
+    options: Omit<SandboxContainerManagerOptions, 'defaultTier'> = {},
   ): SandboxContainerManager {
     const client = new AzureSandboxApiClient(
       {
@@ -150,7 +151,10 @@ export class SandboxContainerManager implements ContainerManager {
       },
       logger,
     );
-    return new SandboxContainerManager(client, logger, { defaultTier: config.tier ?? 'L' });
+    return new SandboxContainerManager(client, logger, {
+      ...options,
+      defaultTier: config.tier ?? 'L',
+    });
   }
 
   async spawn(config: ContainerSpawnConfig): Promise<string> {
