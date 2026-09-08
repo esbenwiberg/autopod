@@ -13,6 +13,7 @@ func retryClientPreservesUnknownExecutionAndSeparateAuthorization(stage: String)
   let state = try await api.getRetryState("pod", stage: stage)
   #expect(state.stage == stage)
   #expect(state.authorizationRequired == true)
+  #expect(state.retryFailure == "transient")
   #expect(state.executedCount == 3)
   #expect(state.admissionCount == 4)
   #expect(state.latest?.outcome == "unknown")
@@ -41,7 +42,7 @@ private final class RetryFixtureProtocol: URLProtocol, @unchecked Sendable {
     if path.hasSuffix("retry-state") {
       #expect(request.httpMethod == "GET")
       body =
-        #"{"taskId":"task","stage":"validation","backoffsMs":[1000,5000],"admissionCount":4,"executedCount":3,"transientRetryCount":2,"measuredDurationMs":15,"interruptedCount":1,"latest":{"id":"failed","outcome":"unknown","startedAt":null,"endedAt":"2026-09-07T10:00:00Z","measuredDurationMs":null},"authorizations":[],"authorizationRequired":true,"telemetry":"partial"}"#
+        #"{"taskId":"task","stage":"validation","backoffsMs":[1000,5000],"admissionCount":4,"executedCount":3,"transientRetryCount":2,"measuredDurationMs":15,"interruptedCount":1,"latest":{"id":"failed","outcome":"unknown","startedAt":null,"endedAt":"2026-09-07T10:00:00Z","measuredDurationMs":null},"authorizations":[],"retryFailure":"transient","authorizationRequired":true,"telemetry":"partial"}"#
         .replacingOccurrences(
           of: "\"stage\":\"validation\"",
           with:

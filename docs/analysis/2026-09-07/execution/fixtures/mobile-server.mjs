@@ -266,7 +266,8 @@ if (uncollectedGuidanceFixture) {
     finalization: { ...pod.finalization, phase: 'awaiting_human', pendingDecisionId: null },
   };
 }
-const workerAuthFixture = process.env.FIXTURE_MODE === 'worker-auth';
+const workerTransientFixture = process.env.FIXTURE_MODE === 'worker-transient';
+const workerAuthFixture = process.env.FIXTURE_MODE === 'worker-auth' || workerTransientFixture;
 if (workerAuthFixture) {
   pod = {
     ...pod,
@@ -291,6 +292,23 @@ if (workerAuthFixture) {
     interruptedCount: 0,
     authorizationRequired: true,
     latest: { id: 'local-unstarted-retry', outcome: 'unknown', startedAt: null },
+  });
+}
+if (workerTransientFixture) {
+  pod = {
+    ...pod,
+    task: '[Local fixture] Retry a throttled worker within the task allowance',
+    failureReason:
+      'Provider throttled. One recorded task retry remains; Resume waits for its cooldown.',
+  };
+  Object.assign(retryState, {
+    retryFailure: 'transient',
+    authorizationRequired: false,
+    backoffsMs: [1000],
+    admissionCount: 1,
+    executedCount: 1,
+    transientRetryCount: 0,
+    latest: { id: 'local-throttled', outcome: 'transient' },
   });
 }
 const codexRecoveryFixture = process.env.FIXTURE_MODE === 'codex-recovery';
@@ -543,6 +561,33 @@ const server = createServer(async (req, res) => {
         authorizations: [],
       });
     return json(retryState);
+  }
+  if (
+    workerTransientFixture &&
+    req.method === 'POST' &&
+    pathname === '/pods/local-fixture/resume'
+  ) {
+    Object.assign(retryState, {
+      admissionCount: 2,
+      executedCount: 2,
+      transientRetryCount: 1,
+      authorizationRequired: true,
+      latest: { id: 'local-retry-throttled', outcome: 'transient' },
+    });
+    pod = {
+      ...pod,
+      failureReason:
+        'Task retry allowance exhausted. Inspect the provider and record one permission to retry again.',
+    };
+    console.log(
+      JSON.stringify({
+        scope: 'local fixture only',
+        action: 'resume-worker',
+        admitted: 2,
+        executed: 2,
+      }),
+    );
+    return json({ ok: true, action: 'restart-agent' });
   }
   if (req.method === 'POST' && pathname === '/pods/local-fixture/retry-authorizations') {
     let body = '';

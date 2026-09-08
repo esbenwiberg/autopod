@@ -12,6 +12,7 @@ public struct TaskRetryState: Codable, Sendable {
   public let latest: TaskRetryAttempt?
   public let authorizations: [TaskRetryAuthorization]
   public let authorizationRequired: Bool?
+  public let retryFailure: String?
   public let telemetry: String
 }
 public struct TaskRetryAttempt: Codable, Sendable {

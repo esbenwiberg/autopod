@@ -95,7 +95,7 @@ export function TaskRetryPanel({
   const failed =
     state?.latest?.outcome != null &&
     (stage === 'worker'
-      ? state.authorizationRequired === true
+      ? state.authorizationRequired === true || state.retryFailure === 'transient'
       : state.latest.outcome !== 'pass' || stage === 'codex_interruption');
   const resumable = status === 'failed' || status === 'review_required';
   return (
@@ -124,8 +124,7 @@ export function TaskRetryPanel({
           </p>
           <p>
             {stage !== 'codex_interruption' &&
-              stage !== 'worker' &&
-              `${state.transientRetryCount} / ${state.backoffsMs?.length ?? 0} automatic transient retries · `}
+              `${state.transientRetryCount} / ${state.backoffsMs?.length ?? 0} ${stage === 'worker' ? 'transient retry admissions' : 'automatic transient retries'} · `}
             {state.measuredDurationMs} ms measured · {state.interruptedCount} interrupted with
             unknown duration.
           </p>
@@ -138,8 +137,9 @@ export function TaskRetryPanel({
           )}
           {stage === 'worker' && (
             <p>
-              Repeated worker authentication failures require a recorded human authorization. Worker
-              elapsed time overlaps phase measurements; usage is not counted again.
+              Repeated worker authentication failures require a recorded human authorization.
+              Classified throttling and provider outages use the persisted task allowance and
+              cooldown. Worker elapsed time overlaps phase measurements; usage is not counted again.
             </p>
           )}
           <p>Latest outcome: {state.latest?.outcome ?? 'none'} · partial telemetry.</p>
@@ -163,20 +163,28 @@ export function TaskRetryPanel({
           )}
           {failed && resumable && (
             <>
-              <label>
-                Reason for one extra retry
-                <textarea
-                  value={reason}
-                  disabled={busy || pending !== null}
-                  onChange={(event) => setReason(event.target.value)}
-                  maxLength={4000}
-                />
-              </label>
-              <button type="button" disabled={busy || !reason.trim()} onClick={() => void record()}>
-                {pending
-                  ? 'Retry recording the same authorization'
-                  : 'Record one retry authorization'}
-              </button>
+              {(stage !== 'worker' || state.authorizationRequired === true || pending !== null) && (
+                <>
+                  <label>
+                    Reason for one extra retry
+                    <textarea
+                      value={reason}
+                      disabled={busy || pending !== null}
+                      onChange={(event) => setReason(event.target.value)}
+                      maxLength={4000}
+                    />
+                  </label>
+                  <button
+                    type="button"
+                    disabled={busy || !reason.trim()}
+                    onClick={() => void record()}
+                  >
+                    {pending
+                      ? 'Retry recording the same authorization'
+                      : 'Record one retry authorization'}
+                  </button>
+                </>
+              )}
               <button type="button" disabled={busy} onClick={() => void resume()}>
                 Resume{' '}
                 {stage === 'codex_interruption'

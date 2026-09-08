@@ -29,22 +29,23 @@ struct TaskRetryCard: View {
               "\(state.executedCount) executed / \(state.admissionCount) admitted \(stage == "codex_interruption" ? "Codex interruption recoveries" : stage == "validation" ? "validations" : stage == "worker" ? "worker runs" : "sandbox startups") across this task"
             )
             Text(
-              (stage == "codex_interruption" || stage == "worker") ? "\(state.measuredDurationMs) ms measured" : "\(state.transientRetryCount) / \(state.backoffsMs?.count ?? 0) automatic transient retries · \(state.measuredDurationMs) ms measured"
+              (stage == "codex_interruption") ? "\(state.measuredDurationMs) ms measured" : "\(state.transientRetryCount) / \(state.backoffsMs?.count ?? 0) \(stage == "worker" ? "transient retry admissions" : "automatic transient retries") · \(state.measuredDurationMs) ms measured"
             )
             Text(
               "\(state.interruptedCount) interrupted with unknown duration · \(state.telemetry) telemetry"
             )
             if stage == "codex_interruption" { Text("One automatic inner recovery per logical task; further recoveries require recorded human authorization. Duration overlaps the enclosing agent run; usage is not counted again.") }
-            if stage == "worker" { Text("Repeated worker authentication failures require a recorded human authorization. Worker elapsed time overlaps phase measurements; usage is not counted again.") }
+            if stage == "worker" { Text("Repeated worker authentication failures require a recorded human authorization. Classified throttling and provider outages use the persisted task allowance and cooldown. Worker elapsed time overlaps phase measurements; usage is not counted again.") }
             Text("Latest outcome: \(state.latest?.outcome ?? "none")")
             ForEach(state.authorizations) { grant in
               Text(
                 "\(grant.usedByAttemptId != nil ? "Consumed" : grant.failureId == state.latest?.id ? (stage == "codex_interruption" ? "Available for latest recovery" : "Available for latest failure") : "Superseded"): \(grant.reason)"
               ).font(.caption)
             }
-            if let outcome = state.latest?.outcome, (stage == "worker" ? state.authorizationRequired == true : outcome != "pass" || stage == "codex_interruption"),
+            if let outcome = state.latest?.outcome, (stage == "worker" ? state.authorizationRequired == true || state.retryFailure == "transient" : outcome != "pass" || stage == "codex_interruption"),
               status == "failed" || status == "review_required"
             {
+              if stage != "worker" || state.authorizationRequired == true || pending != nil {
               TextField("Reason for one extra retry", text: $reason, axis: .vertical)
                 .textFieldStyle(.roundedBorder).disabled(busy || pending != nil)
               Button(
@@ -52,6 +53,7 @@ struct TaskRetryCard: View {
                   ? "Record one retry authorization" : "Retry recording the same authorization"
               ) { Task { await record() } }
               .disabled(busy || reason.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+              }
               Button(stage == "codex_interruption" ? "Resume task" : stage == "validation" ? "Resume validation" : stage == "worker" ? "Resume worker" : "Resume sandbox startup") {
                 Task {
                   busy = true

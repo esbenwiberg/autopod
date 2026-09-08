@@ -509,3 +509,126 @@ it('does not claim legacy worker reservations executed without terminal executio
     db.close();
   }
 });
+
+it.each([{ backoffs: [] }, { backoffs: [0] }])(
+  'preserves frozen worker transient allowance $backoffs across disk reopen and deletion',
+  ({ backoffs }) => {
+    const { db, repo } = fixture();
+    const bound = { runtime: 'codex', model: 'model', providerAccountId: null };
+    const run = repo.taskExecutions?.beginRun('root', 1, 1, bound);
+    if (!run || !repo.workerRetries) throw new Error('Missing worker ledger');
+    repo.workerRetries.admit(
+      'root',
+      1,
+      unavailableWorkerInputs,
+      workerBindingHash(bound),
+      backoffs,
+      run,
+    );
+    repo.workerRetries.start(run);
+    repo.taskExecutions?.finishRun(run, 'failed', 'transient');
+    repo.workerRetries.finish(run, 'transient', 10);
+    if (backoffs.length) {
+      const next = repo.taskExecutions?.beginRun('fix', 1, 1, bound);
+      if (!next) throw new Error('Missing retry run');
+      repo.workerRetries.admit(
+        'fix',
+        1,
+        unavailableWorkerInputs,
+        workerBindingHash(bound),
+        [0, 0],
+        next,
+      );
+      repo.workerRetries.start(next);
+      repo.taskExecutions?.finishRun(next, 'failed', 'provider_unavailable');
+      repo.workerRetries.finish(next, 'transient', 15);
+    }
+    repo.delete('root');
+    const dir = mkdtempSync(join(tmpdir(), 'worker-transient-retry-'));
+    const file = join(dir, 'state.db');
+    writeFileSync(file, db.serialize());
+    db.close();
+    const reopened = new Database(file);
+    try {
+      reopened.pragma('foreign_keys = ON');
+      const next = createPodRepository(reopened);
+      const ledger = next.workerRetries;
+      if (!ledger) throw new Error('Missing worker retries');
+      expect(ledger.state('fix')).toMatchObject({
+        backoffsMs: backoffs,
+        transientRetryCount: backoffs.length,
+        admissionCount: 1 + backoffs.length,
+        executedCount: 1 + backoffs.length,
+        authorizationRequired: true,
+        retryFailure: 'transient',
+      });
+      expect(() =>
+        ledger.assertCanAdmit(
+          'fix',
+          1,
+          unavailableWorkerInputs,
+          workerBindingHash(bound),
+          [0, 0, 0],
+        ),
+      ).toThrow('budget exhausted');
+      ledger.authorize('fix', 'one-retry', 'Provider checked', {
+        type: 'human',
+        userId: 'operator',
+      });
+      expect(() =>
+        ledger.assertCanAdmit(
+          'fix',
+          1,
+          unavailableWorkerInputs,
+          workerBindingHash({ ...bound, providerAccountId: 'other-account' }),
+          [0, 0],
+        ),
+      ).toThrow('binding changed');
+      expect(ledger.state('fix').authorizations[0]?.usedByAttemptId).toBeNull();
+      expect(ledger.state('rerun').admissionCount).toBe(0);
+      expect(reopened.pragma('integrity_check', { simple: true })).toBe('ok');
+    } finally {
+      reopened.close();
+      rmSync(dir, { recursive: true, force: true });
+    }
+  },
+);
+
+it('does not mint a new worker allowance for legacy transient history without a persisted policy', () => {
+  const { db, repo } = fixture();
+  try {
+    const bound = { runtime: 'codex', model: 'model', providerAccountId: null };
+    const run = repo.taskExecutions?.beginRun('root', 1, 1, bound);
+    if (!run || !repo.workerRetries) throw new Error('Missing worker ledger');
+    repo.taskExecutions?.finishRun(run, 'failed', 'transient');
+    const ledger = repo.workerRetries;
+    expect(ledger.state('fix')).toMatchObject({
+      backoffsMs: null,
+      admissionCount: 1,
+      retryFailure: 'transient',
+      authorizationRequired: true,
+    });
+    expect(() =>
+      ledger.assertCanAdmit(
+        'fix',
+        1,
+        unavailableWorkerInputs,
+        workerBindingHash(bound),
+        [1000, 5000],
+      ),
+    ).toThrow('budget exhausted');
+    ledger.authorize('fix', 'legacy-worker', 'Inspect legacy task before one retry', {
+      type: 'human',
+      userId: 'operator',
+    });
+    const next = repo.taskExecutions?.beginRun('fix', 1, 1, bound);
+    if (!next) throw new Error('Missing retry run');
+    expect(
+      ledger.admit('fix', 1, unavailableWorkerInputs, workerBindingHash(bound), [1000, 5000], next)
+        .retryKind,
+    ).toBe('override');
+    expect(ledger.state('fix').backoffsMs).toEqual([]);
+  } finally {
+    db.close();
+  }
+});

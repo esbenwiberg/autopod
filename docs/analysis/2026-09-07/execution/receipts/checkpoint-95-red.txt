@@ -1,0 +1,37 @@
+
+ RUN  v4.1.11 /private/tmp/autopod-durable-execution/packages/daemon
+
+ ❯ src/pods/pod-manager.test.ts (619 tests | 2 failed | 617 skipped) 160ms
+     × bounds classified outer worker transient retries across manager reconstruction and linked work 100ms
+     × bounds classified outer worker provider_unavailable retries across manager reconstruction and linked work 59ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 2 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/pods/pod-manager.test.ts > PodManager > bounds classified outer worker transient retries across manager reconstruction and linked work
+ FAIL  src/pods/pod-manager.test.ts > PodManager > bounds classified outer worker provider_unavailable retries across manager reconstruction and linked work
+AssertionError: promise resolved "'failed'" instead of rejecting
+
+- Expected:
+Error {
+  "message": "rejected promise",
+}
+
++ Received:
+"failed"
+
+ ❯ src/pods/pod-manager.test.ts:3133:66
+    3131|       const restarted = createPodManager(ctx.deps);
+    3132|       expect(await restarted.consumeAgentEvents(fix.id, failed())).toB…
+    3133|       await expect(restarted.consumeAgentEvents(fix.id, failed())).rej…
+       |                                                                  ^
+    3134|       expect(pulls).toBe(2);
+    3135|       expect(ctx.podRepo.workerRetries?.state(fix.id)).toMatchObject({…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/2]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  2 failed | 617 skipped (619)
+   Start at  19:35:09
+   Duration  2.00s (transform 1.21s, setup 0ms, import 1.70s, tests 160ms, environment 0ms)
+

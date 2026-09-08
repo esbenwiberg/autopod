@@ -141,3 +141,47 @@ it('shows accounting without retry controls while a separate human decision is p
     act(() => root.unmount());
   }
 });
+
+it('shows remaining worker cooldown allowance with Resume and no required permission form', async () => {
+  const state = {
+    taskId: 'task',
+    stage: 'worker',
+    admissionCount: 1,
+    executedCount: 1,
+    transientRetryCount: 0,
+    backoffsMs: [1000, 5000],
+    measuredDurationMs: 10,
+    interruptedCount: 0,
+    retryFailure: 'transient',
+    authorizationRequired: false,
+    latest: { id: 'throttled', outcome: 'transient' },
+    authorizations: [],
+  };
+  let resumes = 0;
+  vi.spyOn(globalThis, 'fetch').mockImplementation(async (url) => {
+    if (String(url).endsWith('/resume')) {
+      resumes++;
+      return new Response(JSON.stringify({ ok: true }));
+    }
+    return new Response(JSON.stringify(state));
+  });
+  const container = document.createElement('div');
+  const root = createRoot(container);
+  try {
+    await act(async () =>
+      root.render(
+        <TaskRetryPanel podId="throttled" stage="worker" status="failed" revision="failed" />,
+      ),
+    );
+    expect(container.textContent).toContain('0 / 2 transient retry admissions');
+    expect(container.querySelector('textarea')).toBeNull();
+    const button = [...container.querySelectorAll('button')].find(
+      (b) => b.textContent === 'Resume worker',
+    );
+    expect(button).toBeTruthy();
+    await act(async () => button?.click());
+    expect(resumes).toBe(1);
+  } finally {
+    act(() => root.unmount());
+  }
+});

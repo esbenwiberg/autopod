@@ -1,0 +1,3 @@
+http://127.0.0.1:55979/mobile/
+{"scope":"local fixture only","action":"resume-worker","admitted":2,"executed":2}
+{"scope":"local fixture only","action":"retry-authorization","stage":"worker","requestKey":"b33be672-6147-41f8-81f5-eab44b0d798b"}

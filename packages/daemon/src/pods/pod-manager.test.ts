@@ -3109,6 +3109,151 @@ describe('PodManager', () => {
     },
   );
 
+  it.each(['transient', 'provider_unavailable'] as const)(
+    'bounds classified outer worker %s retries across manager reconstruction and linked work',
+    async (category) => {
+      const ctx = createTestContext();
+      ctx.deps.workerInfrastructureRetryBackoffMs = [0];
+      const manager = createPodManager(ctx.deps);
+      const root = manager.createSession(
+        { profileName: 'test-profile', task: 'Bound provider retries' },
+        'operator',
+      );
+      ctx.podRepo.update(root.id, { status: 'running', containerId: 'root-container' });
+      let pulls = 0;
+      const failed = async function* () {
+        pulls++;
+        yield {
+          type: 'error',
+          timestamp: new Date().toISOString(),
+          fatal: true,
+          message: 'Provider temporarily unavailable',
+          classification: {
+            category,
+            definitive: false,
+            sanitizedMessage: 'Provider temporarily unavailable',
+          },
+        } as const;
+      };
+      expect(await manager.consumeAgentEvents(root.id, failed())).toBe('failed');
+      const fix = manager.createSession(
+        { profileName: 'test-profile', task: 'Bound provider retries', linkedPodId: root.id },
+        'operator',
+      );
+      ctx.podRepo.update(fix.id, { status: 'running', containerId: 'fix-container' });
+      // Changing the configured allowance after the first run cannot reset the task policy.
+      ctx.deps.workerInfrastructureRetryBackoffMs = [0, 0, 0];
+      const restarted = createPodManager(ctx.deps);
+      expect(await restarted.consumeAgentEvents(fix.id, failed())).toBe('failed');
+      await expect(restarted.consumeAgentEvents(fix.id, failed())).rejects.toMatchObject({
+        code: 'TASK_RETRY_RECONCILIATION_REQUIRED',
+      });
+      expect(pulls).toBe(2);
+      expect(ctx.podRepo.workerRetries?.state(fix.id)).toMatchObject({
+        backoffsMs: [0],
+        admissionCount: 2,
+        executedCount: 2,
+        transientRetryCount: 1,
+        authorizationRequired: true,
+        latest: { outcome: 'transient' },
+      });
+      ctx.podRepo.workerRetries?.authorize(
+        fix.id,
+        `extend-${category}`,
+        'Provider inspected; one retry',
+        { type: 'human', userId: 'operator' },
+      );
+      expect(await restarted.consumeAgentEvents(fix.id, failed())).toBe('failed');
+      expect(pulls).toBe(3);
+      await expect(restarted.consumeAgentEvents(fix.id, failed())).rejects.toMatchObject({
+        code: 'TASK_RETRY_RECONCILIATION_REQUIRED',
+      });
+      expect(pulls).toBe(3);
+    },
+  );
+
+  it.each(['early-wake', 'stalled-clock', 'superseded', 'human-decision'] as const)(
+    'checks the persisted outer worker cooldown before iterator entry: %s',
+    async (mode) => {
+      const ctx = createTestContext();
+      ctx.deps.workerInfrastructureRetryBackoffMs = [1000];
+      const manager = createPodManager(ctx.deps);
+      const pod = manager.createSession(
+        { profileName: 'test-profile', task: 'Wait before retry' },
+        'operator',
+      );
+      ctx.podRepo.update(pod.id, { status: 'running', containerId: 'owned-container' });
+      vi.useFakeTimers({ toFake: ['Date'] });
+      let pulls = 0;
+      try {
+        await manager.consumeAgentEvents(
+          pod.id,
+          (async function* () {
+            yield {
+              type: 'error',
+              timestamp: new Date().toISOString(),
+              fatal: true,
+              message: 'Throttled',
+              classification: {
+                category: 'transient',
+                definitive: false,
+                sanitizedMessage: 'Throttled',
+              },
+            } as const;
+          })(),
+        );
+        let wakes = 0;
+        ctx.deps.workerInfrastructureRetryDelay = vi.fn(async (delay) => {
+          expect(pulls).toBe(0);
+          expect(ctx.podRepo.workerRetries?.state(pod.id).executedCount).toBe(1);
+          wakes++;
+          if (mode !== 'stalled-clock')
+            vi.setSystemTime(Date.now() + delay - (mode === 'early-wake' && wakes === 1 ? 1 : 0));
+          if (mode === 'superseded')
+            ctx.podRepo.update(pod.id, { containerId: 'replacement-container' });
+          if (mode === 'human-decision')
+            ctx.db
+              .prepare('UPDATE pods SET pending_escalation = ? WHERE id = ?')
+              .run(
+                JSON.stringify({ id: 'late-decision', payload: { question: 'Continue?' } }),
+                pod.id,
+              );
+        });
+        const result = manager.consumeAgentEvents(
+          pod.id,
+          (async function* () {
+            pulls++;
+            yield {
+              type: 'complete',
+              timestamp: new Date().toISOString(),
+              result: 'Preserved work',
+            } as const;
+          })(),
+        );
+        if (mode === 'early-wake') {
+          await expect(result).resolves.toBe('completed');
+          expect(wakes).toBe(2);
+          expect(pulls).toBe(1);
+        } else {
+          if (mode === 'superseded') await expect(result).resolves.toBe('stopped');
+          else await expect(result).rejects.toThrow();
+          expect(pulls).toBe(0);
+          expect(ctx.podRepo.workerRetries?.state(pod.id)).toMatchObject({
+            executedCount: 1,
+            latest: { startedAt: null, measuredDurationMs: null },
+          });
+          if (mode === 'stalled-clock') expect(wakes).toBe(3);
+          if (mode === 'superseded')
+            expect(ctx.podRepo.getOrThrow(pod.id).containerId).toBe('replacement-container');
+          if (mode === 'human-decision')
+            expect(ctx.podRepo.getOrThrow(pod.id).pendingEscalation?.id).toBe('late-decision');
+        }
+      } finally {
+        vi.useRealTimers();
+      }
+    },
+  );
+
   it('retains the worker auth guard after committed initialization fails before iterator entry', async () => {
     const ctx = createTestContext();
     const manager = createPodManager(ctx.deps);

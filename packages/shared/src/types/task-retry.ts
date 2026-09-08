@@ -49,5 +49,7 @@ export interface TaskRetryState {
   authorizations: TaskRetryAuthorization[];
   /** Worker retry permission is still required, including unstarted retries of that failure. */
   authorizationRequired?: boolean;
+  /** Governing classified worker failure, including unstarted retry ancestry. */
+  retryFailure?: 'auth' | 'transient' | null;
   telemetry: 'partial';
 }

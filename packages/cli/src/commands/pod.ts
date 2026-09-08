@@ -345,14 +345,14 @@ export function registerPodCommands(program: Command, getClient: () => AutopodCl
         );
         if (value.stage === 'worker')
           console.log(
-            'Repeated worker authentication failures require a recorded human authorization. Worker elapsed time overlaps phase measurements; usage is not counted again.',
+            'Repeated worker authentication failures require a recorded human authorization. Classified throttling and provider outages use the persisted task allowance and cooldown. Worker elapsed time overlaps phase measurements; usage is not counted again.',
           );
         if (value.stage === 'codex_interruption')
           console.log(
             'One automatic inner recovery per logical task; further recoveries require recorded human authorization. These durations overlap the enclosing agent run; usage is not counted again.',
           );
         console.log(
-          `${value.stage === 'codex_interruption' || value.stage === 'worker' ? '' : `${value.transientRetryCount}/${value.backoffsMs?.length ?? 0} automatic transient retries; `}${value.measuredDurationMs} ms measured; ${value.interruptedCount} interrupted with unknown duration`,
+          `${value.stage === 'codex_interruption' ? '' : `${value.transientRetryCount}/${value.backoffsMs?.length ?? 0} ${value.stage === 'worker' ? 'transient retry admissions' : 'automatic transient retries'}; `}${value.measuredDurationMs} ms measured; ${value.interruptedCount} interrupted with unknown duration`,
         );
         console.log(
           `Latest outcome: ${value.latest?.outcome ?? 'none'}; telemetry: ${value.telemetry}`,

@@ -2,6 +2,8 @@ import { createHash } from 'node:crypto';
 import { AutopodError } from '@autopod/shared';
 import type Database from 'better-sqlite3';
 
+export const WORKER_RETRY_BACKOFFS_MS = [1_000, 5_000] as const;
+
 export const unavailableWorkerInputs = {
   source: null,
   contract: null,
@@ -77,7 +79,10 @@ export function retainWorkerRetryHistory(
             ? 'cancelled'
             : row.failure_category === 'auth'
               ? 'nonretryable'
-              : 'unknown';
+              : row.failure_category === 'transient' ||
+                  row.failure_category === 'provider_unavailable'
+                ? 'transient'
+                : 'unknown';
       insert.run(
         row.id,
         taskId,
@@ -88,7 +93,10 @@ export function retainWorkerRetryHistory(
         bindingHash,
         row.started_at,
         row.started_at,
-        row.outcome === 'completed' || row.failure_category === 'auth' ? row.started_at : null,
+        row.outcome === 'completed' ||
+          ['auth', 'transient', 'provider_unavailable'].includes(row.failure_category ?? '')
+          ? row.started_at
+          : null,
         row.ended_at,
         outcome,
       );
@@ -97,8 +105,11 @@ export function retainWorkerRetryHistory(
 }
 
 /** Unstarted retry reservations cannot supersede the failure they were allowed to retry. */
-export function isWorkerAuthenticationFailure(db: Database.Database, runId: unknown): boolean {
-  if (typeof runId !== 'string') return false;
+export function workerRetryFailure(
+  db: Database.Database,
+  runId: unknown,
+): 'auth' | 'transient' | null {
+  if (typeof runId !== 'string') return null;
   const read = db.prepare(`SELECT a.task_id, a.started_at, a.previous_failure_id,
     r.outcome AS run_outcome, r.failure_category
     FROM task_retry_attempts a LEFT JOIN retained_task_agent_runs r ON r.id = a.id
@@ -119,10 +130,14 @@ export function isWorkerAuthenticationFailure(db: Database.Database, runId: unkn
       | undefined;
     if (!row || (taskId !== undefined && row.task_id !== taskId)) break;
     taskId = row.task_id;
-    if (row.run_outcome === 'failed' && row.failure_category === 'auth') return true;
-    if (row.started_at !== null) return false;
+    if (row.run_outcome === 'failed') {
+      if (row.failure_category === 'auth') return 'auth';
+      if (row.failure_category === 'transient' || row.failure_category === 'provider_unavailable')
+        return 'transient';
+    }
+    if (row.started_at !== null) return null;
     current = row.previous_failure_id;
-    if (current === null) return false;
+    if (current === null) return null;
   }
   throw new AutopodError(
     'Worker retry ancestry requires reconciliation',

@@ -11,7 +11,7 @@ import {
 } from '@autopod/shared';
 import type Database from 'better-sqlite3';
 import { hasUnansweredDecision } from './decision-admission.js';
-import { isWorkerAuthenticationFailure, retainWorkerRetryHistory } from './worker-retry-history.js';
+import { retainWorkerRetryHistory, workerRetryFailure } from './worker-retry-history.js';
 
 export class TaskRetryBlockedError extends AutopodError {
   constructor(message: string, code = 'TASK_RETRY_RECONCILIATION_REQUIRED') {
@@ -142,6 +142,7 @@ export function createTaskRetryLedger(
         `${authorizationSelect} WHERE a.task_id = ? AND a.stage = ? ORDER BY a.created_at DESC LIMIT 100`,
       )
       .all(taskId, stage) as Array<Record<string, unknown>>;
+    const workerFailure = stage === 'worker' && last ? workerRetryFailure(db, last.id) : null;
     return {
       taskId,
       stage,
@@ -154,7 +155,13 @@ export function createTaskRetryLedger(
       latest: last ? attempt(last) : null,
       authorizations: decisions.map(authorization),
       ...(stage === 'worker'
-        ? { authorizationRequired: last ? isWorkerAuthenticationFailure(db, last.id) : false }
+        ? {
+            retryFailure: workerFailure,
+            authorizationRequired:
+              workerFailure === 'auth' ||
+              (workerFailure === 'transient' &&
+                (counts.retries ?? 0) >= (policy ? JSON.parse(policy.backoffs).length : 0)),
+          }
         : {}),
       telemetry: 'partial',
     };
@@ -195,7 +202,11 @@ export function createTaskRetryLedger(
         : 0;
     if (!Number.isSafeInteger(legacyUsed) || legacyUsed < 0)
       throw new TaskRetryBlockedError('Legacy startup retry accounting requires reconciliation');
-    const effectiveBackoffs = task.backoffsMs ?? backoffs.slice(legacyUsed);
+    // Historical worker runs predate a recorded automatic allowance. Do not grant
+    // a fresh budget just because retry policy was not persisted by that release.
+    const effectiveBackoffs =
+      task.backoffsMs ??
+      (stage === 'worker' && task.admissionCount > 0 ? [] : backoffs.slice(legacyUsed));
     const prior = latest(member.taskId);
     let retryKind: TaskRetryAttempt['retryKind'] = null;
     let useAuthorization: string | undefined;
@@ -205,10 +216,11 @@ export function createTaskRetryLedger(
         `A ${label} admission is already active for this logical task`,
         'TASK_RETRY_IN_PROGRESS',
       );
+    const workerFailure = stage === 'worker' && prior ? workerRetryFailure(db, prior.id) : null;
     if (
       prior &&
       (prior.outcome !== 'pass' || stage === 'codex_interruption') &&
-      (stage !== 'worker' || isWorkerAuthenticationFailure(db, prior.id))
+      (stage !== 'worker' || workerFailure !== null)
     ) {
       if (prior.binding_hash !== bindingHash)
         throw new TaskRetryBlockedError(
@@ -227,7 +239,7 @@ export function createTaskRetryLedger(
       if (grant) {
         retryKind = 'override';
         useAuthorization = grant.id as string;
-      } else if (stage === 'worker') {
+      } else if (stage === 'worker' && workerFailure === 'auth') {
         throw new TaskRetryBlockedError(
           'Unchanged or unverified worker authentication failure; reconcile credentials and record a human retry authorization before another worker execution.',
         );
@@ -235,7 +247,7 @@ export function createTaskRetryLedger(
         throw new TaskRetryBlockedError(
           'Automatic task-wide Codex interruption recovery allowance consumed; inspect retained session/results and record a human retry authorization before allowing another inner recovery.',
         );
-      } else if (prior.outcome === 'transient') {
+      } else if (prior.outcome === 'transient' || workerFailure === 'transient') {
         const delay = effectiveBackoffs[task.transientRetryCount];
         if (delay === undefined)
           throw new TaskRetryBlockedError(
@@ -409,9 +421,9 @@ export function createTaskRetryLedger(
           return recorded;
         }
         const failure = latest(member.taskId);
-        if (stage === 'worker' && !isWorkerAuthenticationFailure(db, failure?.id ?? null))
+        if (stage === 'worker' && workerRetryFailure(db, failure?.id ?? null) === null)
           throw new TaskRetryBlockedError(
-            'A recorded worker authentication failure is required for this authorization',
+            'A recorded worker authentication or transient provider failure is required for this authorization',
           );
         if (!failure?.ended_at || (failure.outcome === 'pass' && stage !== 'codex_interruption'))
           throw new TaskRetryBlockedError(

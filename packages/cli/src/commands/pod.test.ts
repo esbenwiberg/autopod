@@ -694,6 +694,8 @@ it.each(['validation', 'sandbox_startup', 'codex_interruption', 'worker'] as con
         ),
       ).toBe(true);
       expect(output.mock.calls.flat().join('\n')).toContain('3 executed / 4 admitted');
+      if (stage === 'worker')
+        expect(output.mock.calls.flat().join('\n')).toContain('2/2 transient retry admissions');
       await run([
         'authorize-retry',
         '--stage',

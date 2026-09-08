@@ -275,7 +275,11 @@ import { assertTaskExecutionTerminationVerified } from './task-execution-ledger.
 import { TaskRetryBlockedError } from './task-retry-ledger.js';
 import { ValidationSupersededError, captureValidationOwnership } from './validation-ownership.js';
 import type { ValidationRepository } from './validation-repository.js';
-import { unavailableWorkerInputs, workerBindingHash } from './worker-retry-history.js';
+import {
+  WORKER_RETRY_BACKOFFS_MS,
+  unavailableWorkerInputs,
+  workerBindingHash,
+} from './worker-retry-history.js';
 import type { WorkspaceCheckpointController } from './workspace-checkpoint-controller.js';
 import {
   buildBashrcHintBlock,
@@ -1405,6 +1409,10 @@ export interface PodManagerDependencies {
   sandboxInfrastructureRecoveryDelay?: (delayMs: number) => Promise<void>;
   /** Persisted task-wide sandbox startup policy; defaults to one 30-second retry. */
   sandboxInfrastructureRetryBackoffMs?: readonly number[];
+  /** Persisted task-wide allowance for classified outer worker infrastructure retries. */
+  workerInfrastructureRetryBackoffMs?: readonly number[];
+  /** Test seam for the persisted worker cooldown. */
+  workerInfrastructureRetryDelay?: (delayMs: number) => Promise<void>;
   /** Test seam for bounding best-effort sandbox runtime-session extraction. */
   sandboxRuntimeSessionSyncTimeoutMs?: number;
   /** Safety events repository for writing per-pattern detection rows. */
@@ -10893,6 +10901,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
       let taskRunId: string | undefined;
       let workerAdmissionId: string | undefined;
       let workerStartedAt: number | undefined;
+      let workerNotBefore: string | undefined;
       try {
         const initialized = atomicPodChange(podRepo, () => {
           const currentPod = podRepo.getOrThrow(podId);
@@ -10927,7 +10936,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
                   model: currentPod.model,
                   providerAccountId: currentProfile.providerAccountId ?? null,
                 }),
-                [],
+                [...(deps.workerInfrastructureRetryBackoffMs ?? WORKER_RETRY_BACKOFFS_MS)],
                 runId,
               )
             : undefined;
@@ -10938,6 +10947,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         attemptProfile = initialized.currentProfile;
         taskRunId = initialized.runId;
         workerAdmissionId = initialized.workerAdmission?.id;
+        workerNotBefore = initialized.workerAdmission?.notBefore;
         runOwner.providerOrdinal = initialized.providerOrdinal;
         seenCompleteEvents = persistedAgentCompleteEventKeys(deps.eventRepo, podId);
         activeAgentRuns.set(podId, runOwner);
@@ -10963,6 +10973,23 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         if (!ownsRun()) {
           outcome = 'stopped';
           return outcome;
+        }
+        if (workerNotBefore && Date.parse(workerNotBefore) > Date.now()) {
+          await waitForRetryBackoff(
+            workerNotBefore,
+            deps.workerInfrastructureRetryDelay ?? sleep,
+            () => {
+              if (!ownsRun() || pauseIntents.has(podId))
+                throw new TaskRetryBlockedError(
+                  'Worker admission was cancelled or superseded during cooldown',
+                );
+            },
+          );
+          if (!ownsRun() || pauseIntents.has(podId))
+            throw new TaskRetryBlockedError(
+              'Worker admission was cancelled or superseded before execution',
+            );
+          resolveEffectiveBoundProfile(podRepo.getOrThrow(podId));
         }
         if (workerAdmissionId) podRepo.workerRetries?.start(workerAdmissionId);
         workerStartedAt = performance.now();
@@ -11386,7 +11413,10 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
                         ? 'cancelled'
                         : terminalClassification?.category === 'auth'
                           ? 'nonretryable'
-                          : 'unknown',
+                          : terminalClassification?.category === 'transient' ||
+                              terminalClassification?.category === 'provider_unavailable'
+                            ? 'transient'
+                            : 'unknown',
                   workerStartedAt === undefined || executionTerminationUnverified
                     ? null
                     : Math.max(0, Math.round(performance.now() - workerStartedAt)),
