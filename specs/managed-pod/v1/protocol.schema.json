@@ -22,46 +22,27 @@
         },
         "reasoning": {
           "type": "string",
-          "enum": [
-            "none",
-            "low",
-            "medium",
-            "high",
-            "xhigh"
-          ],
+          "enum": ["none", "low", "medium", "high", "xhigh"],
           "not": {
             "pattern": "(Bearer\\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?://[^/\\s]+:[^/\\s]+@|[?&](?:sig|token|access_token)=)"
           }
         },
         "runtime": {
           "type": "string",
-          "enum": [
-            "codex",
-            "claude",
-            "copilot"
-          ],
+          "enum": ["codex", "claude", "copilot"],
           "not": {
             "pattern": "(Bearer\\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?://[^/\\s]+:[^/\\s]+@|[?&](?:sig|token|access_token)=)"
           }
         },
         "executionTarget": {
           "type": "string",
-          "enum": [
-            "local",
-            "sandbox"
-          ],
+          "enum": ["local", "sandbox"],
           "not": {
             "pattern": "(Bearer\\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?://[^/\\s]+:[^/\\s]+@|[?&](?:sig|token|access_token)=)"
           }
         }
       },
-      "required": [
-        "providerAccountId",
-        "model",
-        "reasoning",
-        "runtime",
-        "executionTarget"
-      ]
+      "required": ["providerAccountId", "model", "reasoning", "runtime", "executionTarget"]
     },
     "RepositoryScope": {
       "type": "object",
@@ -90,10 +71,7 @@
         },
         "access": {
           "type": "string",
-          "enum": [
-            "read",
-            "write"
-          ],
+          "enum": ["read", "write"],
           "not": {
             "pattern": "(Bearer\\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?://[^/\\s]+:[^/\\s]+@|[?&](?:sig|token|access_token)=)"
           }
@@ -106,13 +84,7 @@
           }
         }
       },
-      "required": [
-        "enrollmentId",
-        "remote",
-        "baseRevision",
-        "access",
-        "branchNamespace"
-      ]
+      "required": ["enrollmentId", "remote", "baseRevision", "access", "branchNamespace"]
     },
     "IdentityBinding": {
       "type": "object",
@@ -133,10 +105,7 @@
           }
         }
       },
-      "required": [
-        "alias",
-        "bindingDigest"
-      ]
+      "required": ["alias", "bindingDigest"]
     },
     "HardTokenBudget": {
       "type": "object",
@@ -158,11 +127,7 @@
           "maximum": 9007199254740991
         }
       },
-      "required": [
-        "expiresAt",
-        "maxTokens",
-        "maxDurationSeconds"
-      ]
+      "required": ["expiresAt", "maxTokens", "maxDurationSeconds"]
     },
     "RequestTimeBudget": {
       "type": "object",
@@ -188,12 +153,7 @@
           "maximum": 180
         }
       },
-      "required": [
-        "mode",
-        "expiresAt",
-        "maxProviderRequests",
-        "maxDurationSeconds"
-      ]
+      "required": ["mode", "expiresAt", "maxProviderRequests", "maxDurationSeconds"]
     },
     "Budget": {
       "oneOf": [
@@ -228,10 +188,7 @@
           "maxItems": 5000
         }
       },
-      "required": [
-        "profileId",
-        "destinations"
-      ]
+      "required": ["profileId", "destinations"]
     },
     "Scope": {
       "type": "object",
@@ -276,12 +233,7 @@
           "maxItems": 5000
         }
       },
-      "required": [
-        "repositories",
-        "network",
-        "identityBindings",
-        "allowedEffects"
-      ]
+      "required": ["repositories", "network", "identityBindings", "allowedEffects"]
     },
     "EffectiveGrant": {
       "type": "object",
@@ -376,14 +328,7 @@
           "$ref": "#/$defs/Budget"
         }
       },
-      "required": [
-        "profileId",
-        "profileVersion",
-        "snapshotDigest",
-        "route",
-        "scope",
-        "budget"
-      ]
+      "required": ["profileId", "profileVersion", "snapshotDigest", "route", "scope", "budget"]
     },
     "ArtifactOutput": {
       "type": "object",
@@ -391,11 +336,7 @@
       "properties": {
         "mode": {
           "type": "string",
-          "enum": [
-            "none",
-            "optional",
-            "required"
-          ],
+          "enum": ["none", "optional", "required"],
           "not": {
             "pattern": "(Bearer\\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?://[^/\\s]+:[^/\\s]+@|[?&](?:sig|token|access_token)=)"
           }
@@ -458,11 +399,7 @@
               "maximum": 9007199254740991
             }
           },
-          "required": [
-            "maxFiles",
-            "maxFileBytes",
-            "maxTotalBytes"
-          ]
+          "required": ["maxFiles", "maxFileBytes", "maxTotalBytes"]
         },
         "links": {
           "type": "object",
@@ -475,21 +412,10 @@
               "const": false
             }
           },
-          "required": [
-            "allowSymlinks",
-            "allowHardlinks"
-          ]
+          "required": ["allowSymlinks", "allowHardlinks"]
         }
       },
-      "required": [
-        "mode",
-        "root",
-        "requiredPaths",
-        "include",
-        "exclude",
-        "limits",
-        "links"
-      ]
+      "required": ["mode", "root", "requiredPaths", "include", "exclude", "limits", "links"]
     },
     "SourceOutput": {
       "type": "object",
@@ -497,12 +423,7 @@
       "properties": {
         "mode": {
           "type": "string",
-          "enum": [
-            "none",
-            "commit",
-            "branch",
-            "draft-pr"
-          ],
+          "enum": ["none", "commit", "branch", "draft-pr"],
           "not": {
             "pattern": "(Bearer\\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?://[^/\\s]+:[^/\\s]+@|[?&](?:sig|token|access_token)=)"
           }
@@ -536,13 +457,7 @@
           }
         }
       },
-      "required": [
-        "mode",
-        "repository",
-        "remote",
-        "head",
-        "base"
-      ]
+      "required": ["mode", "repository", "remote", "head", "base"]
     },
     "ArtifactInput": {
       "type": "object",
@@ -580,13 +495,7 @@
           "const": "read"
         }
       },
-      "required": [
-        "name",
-        "backendArtifactId",
-        "manifestSha256",
-        "mountPath",
-        "access"
-      ]
+      "required": ["name", "backendArtifactId", "manifestSha256", "mountPath", "access"]
     },
     "ManagedPodRequest": {
       "type": "object",
@@ -667,11 +576,7 @@
               }
             }
           },
-          "required": [
-            "kind",
-            "objective",
-            "contextBundleDigest"
-          ]
+          "required": ["kind", "objective", "contextBundleDigest"]
         },
         "route": {
           "$ref": "#/$defs/Route"
@@ -687,10 +592,7 @@
               "$ref": "#/$defs/ArtifactOutput"
             }
           },
-          "required": [
-            "source",
-            "artifacts"
-          ]
+          "required": ["source", "artifacts"]
         },
         "inputArtifacts": {
           "type": "array",
@@ -718,10 +620,7 @@
               }
             }
           },
-          "required": [
-            "suite",
-            "verifierPolicy"
-          ]
+          "required": ["suite", "verifierPolicy"]
         }
       },
       "required": [
@@ -863,12 +762,7 @@
           }
         }
       },
-      "required": [
-        "path",
-        "size",
-        "sha256",
-        "mediaType"
-      ]
+      "required": ["path", "size", "sha256", "mediaType"]
     },
     "ArtifactManifest": {
       "type": "object",
@@ -947,11 +841,7 @@
               }
             }
           },
-          "required": [
-            "format",
-            "size",
-            "sha256"
-          ]
+          "required": ["format", "size", "sha256"]
         }
       },
       "required": [
@@ -1216,10 +1106,7 @@
         },
         "status": {
           "type": "string",
-          "enum": [
-            "passed",
-            "failed"
-          ],
+          "enum": ["passed", "failed"],
           "not": {
             "pattern": "(Bearer\\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?://[^/\\s]+:[^/\\s]+@|[?&](?:sig|token|access_token)=)"
           }
@@ -1303,11 +1190,7 @@
         },
         "operation": {
           "type": "string",
-          "enum": [
-            "commit",
-            "branch",
-            "draft-pr"
-          ],
+          "enum": ["commit", "branch", "draft-pr"],
           "not": {
             "pattern": "(Bearer\\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?://[^/\\s]+:[^/\\s]+@|[?&](?:sig|token|access_token)=)"
           }
@@ -1444,11 +1327,7 @@
         },
         "operation": {
           "type": "string",
-          "enum": [
-            "commit",
-            "branch",
-            "draft-pr"
-          ],
+          "enum": ["commit", "branch", "draft-pr"],
           "not": {
             "pattern": "(Bearer\\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?://[^/\\s]+:[^/\\s]+@|[?&](?:sig|token|access_token)=)"
           }
@@ -1543,11 +1422,7 @@
         },
         "status": {
           "type": "string",
-          "enum": [
-            "delivered",
-            "pending",
-            "rejected"
-          ],
+          "enum": ["delivered", "pending", "rejected"],
           "not": {
             "pattern": "(Bearer\\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?://[^/\\s]+:[^/\\s]+@|[?&](?:sig|token|access_token)=)"
           }
@@ -1567,12 +1442,7 @@
           }
         }
       },
-      "required": [
-        "schemaVersion",
-        "status",
-        "receipts",
-        "reason"
-      ]
+      "required": ["schemaVersion", "status", "receipts", "reason"]
     },
     "ValidationEvidence": {
       "type": "object",
@@ -1597,12 +1467,7 @@
         },
         "kind": {
           "type": "string",
-          "enum": [
-            "worker-claim",
-            "runtime-fact",
-            "validation",
-            "limitation"
-          ],
+          "enum": ["worker-claim", "runtime-fact", "validation", "limitation"],
           "not": {
             "pattern": "(Bearer\\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?://[^/\\s]+:[^/\\s]+@|[?&](?:sig|token|access_token)=)"
           }
@@ -1616,12 +1481,7 @@
         },
         "status": {
           "type": "string",
-          "enum": [
-            "passed",
-            "failed",
-            "observed",
-            "not-run"
-          ],
+          "enum": ["passed", "failed", "observed", "not-run"],
           "not": {
             "pattern": "(Bearer\\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?://[^/\\s]+:[^/\\s]+@|[?&](?:sig|token|access_token)=)"
           }
@@ -1803,11 +1663,7 @@
         },
         "cleanup": {
           "type": "string",
-          "enum": [
-            "not-requested",
-            "requested",
-            "observed"
-          ],
+          "enum": ["not-requested", "requested", "observed"],
           "not": {
             "pattern": "(Bearer\\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?://[^/\\s]+:[^/\\s]+@|[?&](?:sig|token|access_token)=)"
           }
@@ -1852,12 +1708,7 @@
           }
         }
       },
-      "required": [
-        "schemaVersion",
-        "code",
-        "retryable",
-        "requestId"
-      ]
+      "required": ["schemaVersion", "code", "retryable", "requestId"]
     },
     "DriverHealth": {
       "type": "object",
@@ -1906,10 +1757,7 @@
           "type": "array",
           "items": {
             "type": "string",
-            "enum": [
-              "local",
-              "sandbox"
-            ],
+            "enum": ["local", "sandbox"],
             "not": {
               "pattern": "(Bearer\\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?://[^/\\s]+:[^/\\s]+@|[?&](?:sig|token|access_token)=)"
             }
@@ -1966,13 +1814,7 @@
           }
         }
       },
-      "required": [
-        "schemaVersion",
-        "dispatcherAttemptId",
-        "grantId",
-        "grantRevision",
-        "message"
-      ]
+      "required": ["schemaVersion", "dispatcherAttemptId", "grantId", "grantRevision", "message"]
     },
     "ControlRequest": {
       "type": "object",
@@ -2001,25 +1843,13 @@
         },
         "operation": {
           "type": "string",
-          "enum": [
-            "stop",
-            "pause",
-            "resume",
-            "revoke",
-            "cleanup"
-          ],
+          "enum": ["stop", "pause", "resume", "revoke", "cleanup"],
           "not": {
             "pattern": "(Bearer\\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?://[^/\\s]+:[^/\\s]+@|[?&](?:sig|token|access_token)=)"
           }
         }
       },
-      "required": [
-        "schemaVersion",
-        "dispatcherAttemptId",
-        "grantId",
-        "grantRevision",
-        "operation"
-      ]
+      "required": ["schemaVersion", "dispatcherAttemptId", "grantId", "grantRevision", "operation"]
     },
     "ControlResult": {
       "type": "object",
@@ -2042,11 +1872,7 @@
         },
         "cleanup": {
           "type": "string",
-          "enum": [
-            "not-requested",
-            "requested",
-            "observed"
-          ],
+          "enum": ["not-requested", "requested", "observed"],
           "not": {
             "pattern": "(Bearer\\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?://[^/\\s]+:[^/\\s]+@|[?&](?:sig|token|access_token)=)"
           }
@@ -2064,12 +1890,7 @@
     "ManagedObservation": {
       "type": "object",
       "additionalProperties": false,
-      "required": [
-        "schemaVersion",
-        "cursor",
-        "events",
-        "result"
-      ],
+      "required": ["schemaVersion", "cursor", "events", "result"],
       "properties": {
         "schemaVersion": {
           "const": 1
