@@ -1,7 +1,7 @@
 import { expect, it } from 'vitest';
 import { requestTimeFixture, resign } from '../test-utils/managed-fixture.js';
 import { composeManagedAcceptance, parseManagedAcceptanceConfig } from './acceptance-config.js';
-import { digest } from './canonical.js';
+import { canonical, digest } from './canonical.js';
 
 const cli = {
   bindings: [
@@ -99,6 +99,36 @@ it('composes one service and rejects a changed request before runtime allocation
   try {
     const config = parseManagedAcceptanceConfig(JSON.stringify(value));
     if (!config) throw new Error('expected-config');
+    const historical = structuredClone(config.request);
+    historical.dispatcherJobId = 'historical-job';
+    historical.dispatcherAttemptId = 'historical-attempt';
+    historical.startKey = 'historical-start';
+    historical.effectiveGrant.grantId = 'historical-grant';
+    historical.effectiveGrant.dispatcherAttemptId = historical.dispatcherAttemptId;
+    resign(historical);
+    f.db
+      .prepare(
+        `INSERT INTO managed_pods (
+          pod_id,dispatcher_installation_id,dispatcher_attempt_id,managed_start_key,
+          execution_spec_digest,profile_snapshot_digest,grant_id,grant_revision,
+          effective_grant_digest,request_json,handle_json,state,revoked,stop_requested,
+          observed_exit,created_at
+        ) VALUES (?,?,?,?,?,?,?,?,?,?,?,'killed',1,1,1,?)`,
+      )
+      .run(
+        'managed-historical',
+        config.installationId,
+        historical.dispatcherAttemptId,
+        historical.startKey,
+        historical.executionSpecDigest,
+        historical.profileSnapshot.snapshotDigest,
+        historical.effectiveGrant.grantId,
+        historical.effectiveGrant.revision,
+        historical.effectiveGrant.digest,
+        canonical(historical),
+        '{}',
+        100,
+      );
     const manager = {
       ensureManagedContainer: async () => 'sandbox',
       extractManagedOutput: async () => {},
@@ -140,6 +170,15 @@ it('composes one service and rejects a changed request before runtime allocation
       runtime.components.service.preflight(changed, config.installationId),
     ).rejects.toThrow('managed-request-not-reviewed');
     runtime.close();
+    f.db.prepare("UPDATE managed_pods SET observed_exit=0,state='queued'").run();
+    expect(() =>
+      composeManagedAcceptance(config, cli, {
+        db: f.db,
+        databasePath: '/data/autopod/autopod.db',
+        manager,
+        providerAccounts: {} as never,
+      }),
+    ).toThrow('managed-acceptance-existing-attempt-conflict');
   } finally {
     f.close();
   }
