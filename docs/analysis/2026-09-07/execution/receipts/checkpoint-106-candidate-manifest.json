@@ -1,0 +1,1547 @@
+{
+  "base": "c0e5a5b4617d131257e2c448f2259b645ac351ee",
+  "candidate": "90a61141a6a8ed6205aae144bbb99f8c9f0f9ec5",
+  "scope": "all changed non-docs paths",
+  "changedPaths": [
+    {
+      "path": ".claude/skills/plan-feature/SKILL.md",
+      "candidateBlob": "cf5be3447b5564f582b0e3fab0d6ce5c9d98bf23"
+    },
+    {
+      "path": ".claude/skills/prep/SKILL.md",
+      "candidateBlob": "db7c1e3b3c019852f6dbbae182dbef28ca57828e"
+    },
+    {
+      "path": "packages/cli/src/api/client.ts",
+      "candidateBlob": "2d985348932af6deef938250d18cd8ee7e664635"
+    },
+    {
+      "path": "packages/cli/src/commands/daemon.ts",
+      "candidateBlob": "d1ae87368d1826edea4be3b91d555fb10ca20135"
+    },
+    {
+      "path": "packages/cli/src/commands/pod.test.ts",
+      "candidateBlob": "9a780401b1145667f0d82e76c2fc65032a43c184"
+    },
+    {
+      "path": "packages/cli/src/commands/pod.ts",
+      "candidateBlob": "ee555e10c8b8a2a73f54873e736c0b80527e1e09"
+    },
+    {
+      "path": "packages/cli/src/commands/schedule.test.ts",
+      "candidateBlob": "ea876780180047cf9a80aae842918e7b008061f5"
+    },
+    {
+      "path": "packages/cli/src/commands/schedule.ts",
+      "candidateBlob": "862b472c346cbb13c4054f030c37436861838db8"
+    },
+    {
+      "path": "packages/cli/src/commands/series.test.ts",
+      "candidateBlob": "ab97db97385c334896e17ccccf75eb4e3d593d7b"
+    },
+    {
+      "path": "packages/cli/src/commands/session.test.ts",
+      "candidateBlob": "f3b300b599b4649fde476c06ef1b9c423030e805"
+    },
+    {
+      "path": "packages/cli/src/commands/spec.test.ts",
+      "candidateBlob": "df0209211f1389c75b3a361665cc097d3c0af80d"
+    },
+    {
+      "path": "packages/cli/src/commands/workspace.test.ts",
+      "candidateBlob": "ac8d39b5b4d4f911ecc0a99e5ba63cbef2bfc1fa"
+    },
+    {
+      "path": "packages/daemon/src/api/routes/files.test.ts",
+      "candidateBlob": "04a26310d13aa8bcfdf92a5177cde45d8913cee6"
+    },
+    {
+      "path": "packages/daemon/src/api/routes/files.ts",
+      "candidateBlob": "e368d081b7f1ac25af27b8e75ebbf30ad35abdcb"
+    },
+    {
+      "path": "packages/daemon/src/api/routes/health.test.ts",
+      "candidateBlob": "342d2517f1d609f6ccf413273a3d2c0dcf082029"
+    },
+    {
+      "path": "packages/daemon/src/api/routes/health.ts",
+      "candidateBlob": "d150782b972dd8ed97833a914bc81fed8b8c7d81"
+    },
+    {
+      "path": "packages/daemon/src/api/routes/pods.test.ts",
+      "candidateBlob": "661bf4e33de29f053e9518837a70447d5c296413"
+    },
+    {
+      "path": "packages/daemon/src/api/routes/pods.ts",
+      "candidateBlob": "6a51c9fc5caedb070e1de15817805541ab738921"
+    },
+    {
+      "path": "packages/daemon/src/api/routes/scan-reports.ts",
+      "candidateBlob": "d75a0db7e9330f6015be9e05e54789d1b4438f76"
+    },
+    {
+      "path": "packages/daemon/src/api/routes/scheduled-jobs.ts",
+      "candidateBlob": "2361843dde620843504ca7940efb3657513cbac2"
+    },
+    {
+      "path": "packages/daemon/src/api/server.ts",
+      "candidateBlob": "b4c620bfa36e5ba7c59866a91a1a208149a1b5d9"
+    },
+    {
+      "path": "packages/daemon/src/containers/cgroup-execution-metadata.test.ts",
+      "candidateBlob": "d434d4d0fdd56a302a20b991278b08678b929f57"
+    },
+    {
+      "path": "packages/daemon/src/containers/cgroup-execution-metadata.ts",
+      "candidateBlob": "c5da5f42c5cf02e4866dba9204db78204846cb34"
+    },
+    {
+      "path": "packages/daemon/src/containers/directory-extraction-ownership.ts",
+      "candidateBlob": "cc79eaa4c90a5905ee5a1cb3042edcfd81b69b54"
+    },
+    {
+      "path": "packages/daemon/src/containers/docker-container-manager.test.ts",
+      "candidateBlob": "fbe08e342da75f400a7916368ce6ea4173338851"
+    },
+    {
+      "path": "packages/daemon/src/containers/docker-container-manager.ts",
+      "candidateBlob": "e7fa206e9030a73f624bc3df0572258b7d311063"
+    },
+    {
+      "path": "packages/daemon/src/containers/exec-exit-evidence.ts",
+      "candidateBlob": "886228a554e8261f9d3749e9862a9228d83ff341"
+    },
+    {
+      "path": "packages/daemon/src/containers/routing-container-manager.test.ts",
+      "candidateBlob": "85ae9500d05af58218f0dec530279aeee5fd3185"
+    },
+    {
+      "path": "packages/daemon/src/containers/routing-container-manager.ts",
+      "candidateBlob": "7776e4e4ca5ccae2def488bbad710df6d8897828"
+    },
+    {
+      "path": "packages/daemon/src/containers/sandbox-container-manager.test.ts",
+      "candidateBlob": "14d47989356e5ccea229a998b79314230c85c618"
+    },
+    {
+      "path": "packages/daemon/src/containers/sandbox-container-manager.ts",
+      "candidateBlob": "90a18025e77c3ea0e9b649a1832c5835333972b3"
+    },
+    {
+      "path": "packages/daemon/src/db/backup-verification.ts",
+      "candidateBlob": "d51a322c84aeef5f70875e7db1714732e112ee0d"
+    },
+    {
+      "path": "packages/daemon/src/db/backup.test.ts",
+      "candidateBlob": "c0eec4dab80f02c401d05f0ba5519643f61e8abc"
+    },
+    {
+      "path": "packages/daemon/src/db/backup.ts",
+      "candidateBlob": "360c2e15e4d1dd23362b249a9631f97588ea16a3"
+    },
+    {
+      "path": "packages/daemon/src/db/cutover-backup.test.ts",
+      "candidateBlob": "aae6bde711ae1e56689d59704d541a614938da5c"
+    },
+    {
+      "path": "packages/daemon/src/db/cutover-backup.ts",
+      "candidateBlob": "b1a818d96d05933f29ab1179c7c5a09016bcbd76"
+    },
+    {
+      "path": "packages/daemon/src/db/fixtures/managed-migrations/142_managed_artifact_exports.sql",
+      "candidateBlob": "30cf1edeb460358a389601c714b89f8aa3b285eb"
+    },
+    {
+      "path": "packages/daemon/src/db/fixtures/managed-migrations/143_managed_pods.sql",
+      "candidateBlob": "3f6c24ae0dacb54270c50b29991a0d92835e4129"
+    },
+    {
+      "path": "packages/daemon/src/db/fixtures/managed-migrations/144_managed_provider_allowances.sql",
+      "candidateBlob": "e004adae0f76d64ea0fc6aab85edb7174ce7d2ca"
+    },
+    {
+      "path": "packages/daemon/src/db/fixtures/managed-migrations/145_managed_events_controls.sql",
+      "candidateBlob": "12160b935fd0bf8448c5090a4eba94bbaa495d7c"
+    },
+    {
+      "path": "packages/daemon/src/db/fixtures/managed-migrations/146_managed_results.sql",
+      "candidateBlob": "894931c4f0d6e2e02d455ec37f8c36b33cff9a18"
+    },
+    {
+      "path": "packages/daemon/src/db/fixtures/managed-migrations/147_managed_inputs.sql",
+      "candidateBlob": "37096e37aa896e82a701e72b5bffa84644d5a18e"
+    },
+    {
+      "path": "packages/daemon/src/db/fixtures/managed-migrations/148_managed_source.sql",
+      "candidateBlob": "f8d71e1f88cbd86de0f049b5e906d1d6f360bb85"
+    },
+    {
+      "path": "packages/daemon/src/db/fixtures/managed-migrations/149_managed_sandbox_allocations.sql",
+      "candidateBlob": "e3b58b1ccd7e01047312e93c1619a7f455e8d84d"
+    },
+    {
+      "path": "packages/daemon/src/db/fixtures/managed-migrations/150_managed_workspaces.sql",
+      "candidateBlob": "96f01ba534ad51b8a5b185e891bdd04635bcef05"
+    },
+    {
+      "path": "packages/daemon/src/db/fixtures/managed-migrations/151_managed_provider_requests.sql",
+      "candidateBlob": "bcef7a6c1a176fbc6b1ef5927a7aed45cbbbff4e"
+    },
+    {
+      "path": "packages/daemon/src/db/fixtures/managed-migrations/152_managed_request_usage.sql",
+      "candidateBlob": "7805db0a93e7b5940b5b6fa4f91857942e034c46"
+    },
+    {
+      "path": "packages/daemon/src/db/fixtures/native-reliability-151-163/151_completion_journal.sql",
+      "candidateBlob": "a86826aa33bd8a7b0e99685d1e973951a4e201c4"
+    },
+    {
+      "path": "packages/daemon/src/db/fixtures/native-reliability-151-163/152_task_executions.sql",
+      "candidateBlob": "ab5e469a4653f2a851a07281b3040f7108bf595a"
+    },
+    {
+      "path": "packages/daemon/src/db/fixtures/native-reliability-151-163/153_validation_phase_evidence.sql",
+      "candidateBlob": "172c892cece6b990da164d677b8d87365cf2e5af"
+    },
+    {
+      "path": "packages/daemon/src/db/fixtures/native-reliability-151-163/154_delivery_intents.sql",
+      "candidateBlob": "15dede9aea8b3d46b3ddf84854845a0bf87db688"
+    },
+    {
+      "path": "packages/daemon/src/db/fixtures/native-reliability-151-163/155_scheduled_scan_reports.sql",
+      "candidateBlob": "3b6f70456188eeed23028ceab9f450aaf01dfa88"
+    },
+    {
+      "path": "packages/daemon/src/db/fixtures/native-reliability-151-163/156_task_retry_admission.sql",
+      "candidateBlob": "afd3578fca795e6440addc0e41ab94ded05462fe"
+    },
+    {
+      "path": "packages/daemon/src/db/fixtures/native-reliability-151-163/157_dispatch_preflight.sql",
+      "candidateBlob": "72cc196e4efce81487dab14b6811cb384240604e"
+    },
+    {
+      "path": "packages/daemon/src/db/fixtures/native-reliability-151-163/158_execution_provenance.sql",
+      "candidateBlob": "9dd9dde7762b16358762e08cfc41a84909411eb0"
+    },
+    {
+      "path": "packages/daemon/src/db/fixtures/native-reliability-151-163/159_decision_recovery.sql",
+      "candidateBlob": "d23e32d90996ec7e7c3f33f7efe5c933f5c9d7ab"
+    },
+    {
+      "path": "packages/daemon/src/db/fixtures/native-reliability-151-163/160_source_publications.sql",
+      "candidateBlob": "90c95c93c75c376881f810c57dea8162b954c95f"
+    },
+    {
+      "path": "packages/daemon/src/db/fixtures/native-reliability-151-163/161_merge_journal.sql",
+      "candidateBlob": "1f59342d280e447916a7e4ad4e7189fb266a73e7"
+    },
+    {
+      "path": "packages/daemon/src/db/fixtures/native-reliability-151-163/162_merge_disposition.sql",
+      "candidateBlob": "fd0413f12d30cadd08a39573c82f565bf0f9f683"
+    },
+    {
+      "path": "packages/daemon/src/db/fixtures/native-reliability-151-163/163_merge_status_observations.sql",
+      "candidateBlob": "9117a1fcb08ddd032fe388a5d9fc7f2fced6a857"
+    },
+    {
+      "path": "packages/daemon/src/db/managed-migration-compatibility.test.ts",
+      "candidateBlob": "494d97d3a85cda382bf914f009586e5f33ad8297"
+    },
+    {
+      "path": "packages/daemon/src/db/migrate.test.ts",
+      "candidateBlob": "6fe833514d1e91f5f9f15cd49e315a318699739c"
+    },
+    {
+      "path": "packages/daemon/src/db/migrate.ts",
+      "candidateBlob": "fa81893dbb47079faf0a2e94df18819b2df64538"
+    },
+    {
+      "path": "packages/daemon/src/db/migrations/164_completion_journal.sql",
+      "candidateBlob": "a86826aa33bd8a7b0e99685d1e973951a4e201c4"
+    },
+    {
+      "path": "packages/daemon/src/db/migrations/165_task_executions.sql",
+      "candidateBlob": "ab5e469a4653f2a851a07281b3040f7108bf595a"
+    },
+    {
+      "path": "packages/daemon/src/db/migrations/166_validation_phase_evidence.sql",
+      "candidateBlob": "172c892cece6b990da164d677b8d87365cf2e5af"
+    },
+    {
+      "path": "packages/daemon/src/db/migrations/167_delivery_intents.sql",
+      "candidateBlob": "15dede9aea8b3d46b3ddf84854845a0bf87db688"
+    },
+    {
+      "path": "packages/daemon/src/db/migrations/168_scheduled_scan_reports.sql",
+      "candidateBlob": "3b6f70456188eeed23028ceab9f450aaf01dfa88"
+    },
+    {
+      "path": "packages/daemon/src/db/migrations/169_task_retry_admission.sql",
+      "candidateBlob": "afd3578fca795e6440addc0e41ab94ded05462fe"
+    },
+    {
+      "path": "packages/daemon/src/db/migrations/170_dispatch_preflight.sql",
+      "candidateBlob": "72cc196e4efce81487dab14b6811cb384240604e"
+    },
+    {
+      "path": "packages/daemon/src/db/migrations/171_execution_provenance.sql",
+      "candidateBlob": "9dd9dde7762b16358762e08cfc41a84909411eb0"
+    },
+    {
+      "path": "packages/daemon/src/db/migrations/172_decision_recovery.sql",
+      "candidateBlob": "d23e32d90996ec7e7c3f33f7efe5c933f5c9d7ab"
+    },
+    {
+      "path": "packages/daemon/src/db/migrations/173_source_publications.sql",
+      "candidateBlob": "90c95c93c75c376881f810c57dea8162b954c95f"
+    },
+    {
+      "path": "packages/daemon/src/db/migrations/174_merge_journal.sql",
+      "candidateBlob": "1f59342d280e447916a7e4ad4e7189fb266a73e7"
+    },
+    {
+      "path": "packages/daemon/src/db/migrations/175_merge_disposition.sql",
+      "candidateBlob": "fd0413f12d30cadd08a39573c82f565bf0f9f683"
+    },
+    {
+      "path": "packages/daemon/src/db/migrations/176_merge_status_observations.sql",
+      "candidateBlob": "9117a1fcb08ddd032fe388a5d9fc7f2fced6a857"
+    },
+    {
+      "path": "packages/daemon/src/db/migrations/177_task_history_archive.sql",
+      "candidateBlob": "86da03188ff5268b8c5a4b4d27eab98bb702fbc7"
+    },
+    {
+      "path": "packages/daemon/src/db/migrations/178_worker_retry_binding_authorization.sql",
+      "candidateBlob": "730a27a9c5fa370b73e5e62a888d5db00457d0a1"
+    },
+    {
+      "path": "packages/daemon/src/db/migrations/179_worker_retry_deadlines.sql",
+      "candidateBlob": "ef2aadee8b9f101cfd98b0e7f3041f529df69b7e"
+    },
+    {
+      "path": "packages/daemon/src/db/migrations/180_operator_guidance_delivery.sql",
+      "candidateBlob": "5c91b0790eb0106af8bd6adc77ac8688b049f3f8"
+    },
+    {
+      "path": "packages/daemon/src/db/migrations/181_retained_history_events.sql",
+      "candidateBlob": "69b7be3618325ef9d5d07686a94eb0384a696597"
+    },
+    {
+      "path": "packages/daemon/src/db/migrations/182_deletion_cleanup_ownership.sql",
+      "candidateBlob": "958ff74cd3d7b4a2933e8691d5f353636dc4134f"
+    },
+    {
+      "path": "packages/daemon/src/db/reconcile-native-checkpoint-cli.ts",
+      "candidateBlob": "0f4f10db38fecb0d78fffe7604d42e217b395568"
+    },
+    {
+      "path": "packages/daemon/src/db/reconcile-native-checkpoint.test.ts",
+      "candidateBlob": "b147a318c792eae731379524dbc4f82c2a06d110"
+    },
+    {
+      "path": "packages/daemon/src/db/reconcile-native-checkpoint.ts",
+      "candidateBlob": "5168a427a1acf809f5788ad181836f846879d095"
+    },
+    {
+      "path": "packages/daemon/src/db/unit-of-work.test.ts",
+      "candidateBlob": "b0e859879968f982b9e9b1a3a99b4cc7d3b86637"
+    },
+    {
+      "path": "packages/daemon/src/db/unit-of-work.ts",
+      "candidateBlob": "22bdf23b5e39b247733cec3e09b14e2318a5792a"
+    },
+    {
+      "path": "packages/daemon/src/db/verify-backup-cli.ts",
+      "candidateBlob": "dba25f4b31f1c8f0f4053f4376217f264d99c73b"
+    },
+    {
+      "path": "packages/daemon/src/e2e.test.ts",
+      "candidateBlob": "f4cacb6703308208359bffb2e9636239dfbd1f37"
+    },
+    {
+      "path": "packages/daemon/src/history/history-exporter.ts",
+      "candidateBlob": "4b96a2a60229f3ded16e94f210f9dfbfaca940cf"
+    },
+    {
+      "path": "packages/daemon/src/history/history-pod-projection.ts",
+      "candidateBlob": "4776ce2fff7654a31a53a4122a46981f851fda77"
+    },
+    {
+      "path": "packages/daemon/src/history/history-record-shapes.ts",
+      "candidateBlob": "267f274d91e2df3982ad57d584ed412b4f33e2d0"
+    },
+    {
+      "path": "packages/daemon/src/history/retained-history-read.ts",
+      "candidateBlob": "c021ca6e8b9fad5c35ec30d393d440827f56b101"
+    },
+    {
+      "path": "packages/daemon/src/index.ts",
+      "candidateBlob": "0533a67ab53e550ff52b4be11bb580f069e63717"
+    },
+    {
+      "path": "packages/daemon/src/integration.test.ts",
+      "candidateBlob": "0d3df61b4ad3a0d7833e153d5494246fde225aca"
+    },
+    {
+      "path": "packages/daemon/src/interfaces/container-manager.ts",
+      "candidateBlob": "9e8ee2a0e155725b67ff47a9027887f5e9b08281"
+    },
+    {
+      "path": "packages/daemon/src/interfaces/pr-manager.ts",
+      "candidateBlob": "bf5897bb4881eea27c57f5f5ce8789a2a3ec2ece"
+    },
+    {
+      "path": "packages/daemon/src/interfaces/reviewer-launch.ts",
+      "candidateBlob": "bed7c3ca82e2111a4a518d3a4712a1c2f25aee0f"
+    },
+    {
+      "path": "packages/daemon/src/interfaces/validation-engine.ts",
+      "candidateBlob": "2b47347ec256d5f3bb477d19ac6124a0e159b9ac"
+    },
+    {
+      "path": "packages/daemon/src/interfaces/worktree-manager.ts",
+      "candidateBlob": "2d8506fc8d3d0e0675f2fc9e2a71a401f0b02f05"
+    },
+    {
+      "path": "packages/daemon/src/managed/artifact-migration.test.ts",
+      "candidateBlob": "55b7e0c02678c8857269a7ab567e32182741cd89"
+    },
+    {
+      "path": "packages/daemon/src/managed/supervisor.test.ts",
+      "candidateBlob": "97f204fc8a3898f8f0b16a3fba1a80a9b02fe6bc"
+    },
+    {
+      "path": "packages/daemon/src/pods/artifact-finalization-recovery.ts",
+      "candidateBlob": "eede35c05179285b2df4420102ff6280ab48c13f"
+    },
+    {
+      "path": "packages/daemon/src/pods/artifact-preservation.test.ts",
+      "candidateBlob": "227b1d508a5f668363164ec25bc3dedec232d586"
+    },
+    {
+      "path": "packages/daemon/src/pods/artifact-preservation.ts",
+      "candidateBlob": "c5f6b5245481c2d66bf6d238b203023ac6a6e716"
+    },
+    {
+      "path": "packages/daemon/src/pods/artifact-snapshot-receipt.test.ts",
+      "candidateBlob": "865306cca33fe57069f44018988f522062143458"
+    },
+    {
+      "path": "packages/daemon/src/pods/artifact-snapshot-receipt.ts",
+      "candidateBlob": "1ed8375097c33f1bccf3a4a3750d08feddcdda13"
+    },
+    {
+      "path": "packages/daemon/src/pods/attached-reply-delivery.test.ts",
+      "candidateBlob": "05735cb3bef8b6437efa28a6064e02f111a777c6"
+    },
+    {
+      "path": "packages/daemon/src/pods/compact-pod-projection.ts",
+      "candidateBlob": "db6c5434866cebdae7fd6cc66cfc3344fbcaedcd"
+    },
+    {
+      "path": "packages/daemon/src/pods/completion-journal.test.ts",
+      "candidateBlob": "8dd7027da3ce760431d28a44a98bc76d3e0cdb75"
+    },
+    {
+      "path": "packages/daemon/src/pods/completion-journal.ts",
+      "candidateBlob": "583e882df143772d7e8520b2a586b54e5ec1ff0c"
+    },
+    {
+      "path": "packages/daemon/src/pods/continuation-preflight.ts",
+      "candidateBlob": "0edb11f88cad82f4f498c39dca1325c5b94d9dff"
+    },
+    {
+      "path": "packages/daemon/src/pods/cost-aggregation.test.ts",
+      "candidateBlob": "d8a994abe82c35f089918d61ab0917eb89bfa760"
+    },
+    {
+      "path": "packages/daemon/src/pods/cost-aggregation.ts",
+      "candidateBlob": "ac305a79511f62fa872651e8c2ee9e634d51d16e"
+    },
+    {
+      "path": "packages/daemon/src/pods/cost-pod-projection.ts",
+      "candidateBlob": "fa95d84fcb240f9b2fc570b503726f793b0b0c74"
+    },
+    {
+      "path": "packages/daemon/src/pods/cost-reconciliation.ts",
+      "candidateBlob": "d7b3be7a0c45e4b12cf0bdb5fed47e7cd60d200d"
+    },
+    {
+      "path": "packages/daemon/src/pods/decision-admission.ts",
+      "candidateBlob": "d8cc49dc2b85bc1f60f9336f422fddc65ea0a1c2"
+    },
+    {
+      "path": "packages/daemon/src/pods/deletion-cleanup.ts",
+      "candidateBlob": "07398c08d62cba8181f44ca0f26f3a5c8b187434"
+    },
+    {
+      "path": "packages/daemon/src/pods/deletion-ownership.test.ts",
+      "candidateBlob": "ba773a38e6c84552f9bb2289aadbd336a005615e"
+    },
+    {
+      "path": "packages/daemon/src/pods/deletion-ownership.ts",
+      "candidateBlob": "a5cd8176acbb7495adbc801c0069ebed4049f40b"
+    },
+    {
+      "path": "packages/daemon/src/pods/delivery-ledger.ts",
+      "candidateBlob": "68b0279dcebc59a75b727832ef5ccbf9341bc859"
+    },
+    {
+      "path": "packages/daemon/src/pods/dispatch-preflight-ledger.test.ts",
+      "candidateBlob": "201c86005c76f8bf059557dfcfacf288254b6329"
+    },
+    {
+      "path": "packages/daemon/src/pods/dispatch-preflight-ledger.ts",
+      "candidateBlob": "c9687abef542fce5f71f3af5cd65259868578175"
+    },
+    {
+      "path": "packages/daemon/src/pods/dispatch-rerun-request.ts",
+      "candidateBlob": "d82c62a2711913064bce90392c453165606e09e8"
+    },
+    {
+      "path": "packages/daemon/src/pods/escalation-coordinator.ts",
+      "candidateBlob": "bc6966f42fa8d44fbef571a6a456c1f068ef9866"
+    },
+    {
+      "path": "packages/daemon/src/pods/escalation-repository.ts",
+      "candidateBlob": "ed158980e24d0483c9c12288e62d8bc5752fc00e"
+    },
+    {
+      "path": "packages/daemon/src/pods/event-repository.ts",
+      "candidateBlob": "a503e1962697f5c5ccd6a6c98e25bb775a715f04"
+    },
+    {
+      "path": "packages/daemon/src/pods/execution-preflight.test.ts",
+      "candidateBlob": "dcb4baa201634084598033e1adb5ed3618a7e70b"
+    },
+    {
+      "path": "packages/daemon/src/pods/execution-preflight.ts",
+      "candidateBlob": "692071fde82d6195497ecb400873e2dac4aceb4c"
+    },
+    {
+      "path": "packages/daemon/src/pods/execution-provenance-ledger.test.ts",
+      "candidateBlob": "9901139c1665743765d517e1c01defa1f4f1c4bf"
+    },
+    {
+      "path": "packages/daemon/src/pods/execution-provenance-ledger.ts",
+      "candidateBlob": "f3e8343ce4d0f148808f81b12d1e495b18195495"
+    },
+    {
+      "path": "packages/daemon/src/pods/host-reviewer-provenance.integration.test.ts",
+      "candidateBlob": "ca85b85a24b860fd0b476874c6e0976560886920"
+    },
+    {
+      "path": "packages/daemon/src/pods/interactive-completion-coordinator.ts",
+      "candidateBlob": "8508c8e053cc08e9ed25523bf7f534ef8913cf0b"
+    },
+    {
+      "path": "packages/daemon/src/pods/local-reconciler.test.ts",
+      "candidateBlob": "adab259de3f12cffbb07b66984ad5b3915fff492"
+    },
+    {
+      "path": "packages/daemon/src/pods/local-reconciler.ts",
+      "candidateBlob": "316d1e744a831df12c71d26908124fe0b5abf162"
+    },
+    {
+      "path": "packages/daemon/src/pods/merge-identity-projection.ts",
+      "candidateBlob": "a1abd2d852918c98728d034bebe302c63bfbf1d5"
+    },
+    {
+      "path": "packages/daemon/src/pods/merge-journal.test.ts",
+      "candidateBlob": "3759558b0e300848497d0a24b7dff7190e72b208"
+    },
+    {
+      "path": "packages/daemon/src/pods/merge-journal.ts",
+      "candidateBlob": "7ea8f8929f185eea8df755db83619263b03d6e34"
+    },
+    {
+      "path": "packages/daemon/src/pods/models-aggregator.test.ts",
+      "candidateBlob": "ce18159ed1c2fbe7b516b5a0e5dcd54a8ec4df4a"
+    },
+    {
+      "path": "packages/daemon/src/pods/models-aggregator.ts",
+      "candidateBlob": "30df868ac6b8bfe130c66bf7f3fcf74ca933be78"
+    },
+    {
+      "path": "packages/daemon/src/pods/nudge-repository.ts",
+      "candidateBlob": "3fd00622c8be5411e5babba3a31e4fff2734aad1"
+    },
+    {
+      "path": "packages/daemon/src/pods/operator-guidance-delivery.test.ts",
+      "candidateBlob": "b9d3f34b8119d680541c9e906ee4257c31547609"
+    },
+    {
+      "path": "packages/daemon/src/pods/operator-guidance-delivery.ts",
+      "candidateBlob": "86ac6b44c59ebf0e3fdcfa750360f9b3ba3f482c"
+    },
+    {
+      "path": "packages/daemon/src/pods/pod-bridge-impl.ts",
+      "candidateBlob": "1a29c18e29ff4f2cf084b6ee3a9adb3f1b0dc5a9"
+    },
+    {
+      "path": "packages/daemon/src/pods/pod-bridge-task-summary.test.ts",
+      "candidateBlob": "069a3c0bcecdf050ec6613593ec4f606c35e99f0"
+    },
+    {
+      "path": "packages/daemon/src/pods/pod-cost-breakdown.ts",
+      "candidateBlob": "16cd3cda585cd27ef913f7138e04fd19d0bab6b4"
+    },
+    {
+      "path": "packages/daemon/src/pods/pod-lifecycle.e2e.test.ts",
+      "candidateBlob": "0224befb35d1c11826bb8f694cd10ff2b407b446"
+    },
+    {
+      "path": "packages/daemon/src/pods/pod-manager.test.ts",
+      "candidateBlob": "4f50eb5890ea4ac645065cbf39efd4798e3e4783"
+    },
+    {
+      "path": "packages/daemon/src/pods/pod-manager.ts",
+      "candidateBlob": "fa578de181eaf1adce50b6203d27b98134944fa1"
+    },
+    {
+      "path": "packages/daemon/src/pods/pod-repository.ts",
+      "candidateBlob": "8be1535c22797ea2317c44085a0e6498f0ec627f"
+    },
+    {
+      "path": "packages/daemon/src/pods/polling-coordinator.test.ts",
+      "candidateBlob": "93d4737486c927dbba34f02bf5a17a0dcd85a9ec"
+    },
+    {
+      "path": "packages/daemon/src/pods/polling-coordinator.ts",
+      "candidateBlob": "063863a735d5ba5a07125f13a0c768514a2ae959"
+    },
+    {
+      "path": "packages/daemon/src/pods/progress-event-repository.ts",
+      "candidateBlob": "b036e27df6d7655915763e096dc5b4a82055da6c"
+    },
+    {
+      "path": "packages/daemon/src/pods/provider-attempt-repository.test.ts",
+      "candidateBlob": "81adffbf7c80731dcce3556551ecc83e5b0cc4fe"
+    },
+    {
+      "path": "packages/daemon/src/pods/provider-attempt-repository.ts",
+      "candidateBlob": "14dac87a4e4a785460e4ae421a0d8d741b0d2e86"
+    },
+    {
+      "path": "packages/daemon/src/pods/provider-usage-projection.ts",
+      "candidateBlob": "8ed40209f4d45781e7ef52ec5b666802b8041c1f"
+    },
+    {
+      "path": "packages/daemon/src/pods/reconciler.test.ts",
+      "candidateBlob": "663c6a460b54d43bd7a0effaf99799dd53f9d7b3"
+    },
+    {
+      "path": "packages/daemon/src/pods/reconciler.ts",
+      "candidateBlob": "07e073db3cbaa55d21993e4d40fc80dccdf47c3b"
+    },
+    {
+      "path": "packages/daemon/src/pods/reconciliation-ownership.ts",
+      "candidateBlob": "5fa0548fcbaf5934f88dd06f1361141d51bb0b6b"
+    },
+    {
+      "path": "packages/daemon/src/pods/registry-injector.test.ts",
+      "candidateBlob": "c4f7abd0efe9c680e9a86ac60a1a929361d5e93f"
+    },
+    {
+      "path": "packages/daemon/src/pods/registry-injector.ts",
+      "candidateBlob": "76050852826605768c0f886224301ce6de09e395"
+    },
+    {
+      "path": "packages/daemon/src/pods/reliability-aggregator.test.ts",
+      "candidateBlob": "bd23a4ccc3b5d8098ec207fcc73d6f47dd471ae0"
+    },
+    {
+      "path": "packages/daemon/src/pods/reliability-aggregator.ts",
+      "candidateBlob": "1c2246c024907cbd70561d69ed16b57b291fbfee"
+    },
+    {
+      "path": "packages/daemon/src/pods/required-command-preflight.test.ts",
+      "candidateBlob": "58a95c03853a7b2daafe8f09c045df26905a520c"
+    },
+    {
+      "path": "packages/daemon/src/pods/required-command-preflight.ts",
+      "candidateBlob": "e9f2dfbfe0d1afaf40d45ccbd638e8fc375cff87"
+    },
+    {
+      "path": "packages/daemon/src/pods/retained-analytics.test.ts",
+      "candidateBlob": "f5263ea1f22844d990501a2d3023ddd8b6476e6c"
+    },
+    {
+      "path": "packages/daemon/src/pods/retained-history-upgrade.test.ts",
+      "candidateBlob": "4ff65b1b01a1730d4c019e68448e3cd9285c6d77"
+    },
+    {
+      "path": "packages/daemon/src/pods/retry-backoff-wait.test.ts",
+      "candidateBlob": "abdea0bc5f684534dbb51fadb1844ab619fc60bc"
+    },
+    {
+      "path": "packages/daemon/src/pods/retry-backoff-wait.ts",
+      "candidateBlob": "1bf4cec589821b4508cafb2a0684bee11cfed0f1"
+    },
+    {
+      "path": "packages/daemon/src/pods/retry-duration-evidence.test.ts",
+      "candidateBlob": "f9c8b05122783ee3d7bf58da12afdfeb78a13c5b"
+    },
+    {
+      "path": "packages/daemon/src/pods/reviewer-api-provenance.ts",
+      "candidateBlob": "c8e42c84890c50ea84dc3ba3f4e385856281a34e"
+    },
+    {
+      "path": "packages/daemon/src/pods/sandbox-startup-admission.ts",
+      "candidateBlob": "ca56565e9f452c84703e91ae0b4f09aee558179c"
+    },
+    {
+      "path": "packages/daemon/src/pods/sandbox-terminal-reaper.test.ts",
+      "candidateBlob": "013062a2a16e16152a952e5de2974534aaa81afc"
+    },
+    {
+      "path": "packages/daemon/src/pods/sandbox-terminal-reaper.ts",
+      "candidateBlob": "1436d2dcb731fa174a21cd9c8290ca16bc6e55d3"
+    },
+    {
+      "path": "packages/daemon/src/pods/source-publication-ledger.test.ts",
+      "candidateBlob": "a59de163ce697745c1f11ca9ec1b03f80132db57"
+    },
+    {
+      "path": "packages/daemon/src/pods/source-publication-ledger.ts",
+      "candidateBlob": "0bd67581d363d7ff8756128df573cbb470a42231"
+    },
+    {
+      "path": "packages/daemon/src/pods/system-instructions-generator.ts",
+      "candidateBlob": "5fbab47a8650d057e96dc409f075e7475f62614d"
+    },
+    {
+      "path": "packages/daemon/src/pods/task-execution-ledger.test.ts",
+      "candidateBlob": "d4ea20d4263c0f9c53da92de2773d6e14ea3027c"
+    },
+    {
+      "path": "packages/daemon/src/pods/task-execution-ledger.ts",
+      "candidateBlob": "1ebb223db9c80e97165f3ab000dddd2a481dbfd3"
+    },
+    {
+      "path": "packages/daemon/src/pods/task-history-archive.ts",
+      "candidateBlob": "da79954271de05eb909dc09575322f23a5059488"
+    },
+    {
+      "path": "packages/daemon/src/pods/task-retry-ledger.test.ts",
+      "candidateBlob": "3820489f1853b19b33def8a68fd0b81f09503e7c"
+    },
+    {
+      "path": "packages/daemon/src/pods/task-retry-ledger.ts",
+      "candidateBlob": "3fb065852c88bfd4c794b1771d6e7f82e7204b0a"
+    },
+    {
+      "path": "packages/daemon/src/pods/throughput-aggregator.test.ts",
+      "candidateBlob": "e0b707c31beccf8bb03e88cc944fa2b736db19dd"
+    },
+    {
+      "path": "packages/daemon/src/pods/throughput-aggregator.ts",
+      "candidateBlob": "79c2dff4db65bd6b6636572e9e0abf599004d6ed"
+    },
+    {
+      "path": "packages/daemon/src/pods/validation-coverage.ts",
+      "candidateBlob": "94ff2b18eb1ae787b02a0d5aa8998389cf05dcc3"
+    },
+    {
+      "path": "packages/daemon/src/pods/validation-ownership.ts",
+      "candidateBlob": "1645148ba2e92a9d78d249f46db847caed301dda"
+    },
+    {
+      "path": "packages/daemon/src/pods/validation-repository.test.ts",
+      "candidateBlob": "fb1504039066e4d7416a7043d4395d281768a814"
+    },
+    {
+      "path": "packages/daemon/src/pods/validation-repository.ts",
+      "candidateBlob": "d0192fdd5c618c377410ebeea2f550a7c50694f8"
+    },
+    {
+      "path": "packages/daemon/src/pods/worker-retry-deadline.test.ts",
+      "candidateBlob": "b91469271a3c4309788d285b1ce83fa8ef368c20"
+    },
+    {
+      "path": "packages/daemon/src/pods/worker-retry-deadline.ts",
+      "candidateBlob": "61a93c323e5868ef0820f86c89ef9d4e6e7d1f47"
+    },
+    {
+      "path": "packages/daemon/src/pods/worker-retry-history.ts",
+      "candidateBlob": "cf7a3c1c562fe0af5ab5414c83091c15b252c99b"
+    },
+    {
+      "path": "packages/daemon/src/podsitter/podsitter-repository.test.ts",
+      "candidateBlob": "463f34bc207198cedbf619c7032e2b28d55eefcd"
+    },
+    {
+      "path": "packages/daemon/src/profiles/profile-store.test.ts",
+      "candidateBlob": "dc4f1dc5428e21bce28e500664cd11fc7557f30c"
+    },
+    {
+      "path": "packages/daemon/src/profiles/profile-store.ts",
+      "candidateBlob": "3b3158a176aaae231e842e624170efa57e20f45e"
+    },
+    {
+      "path": "packages/daemon/src/release.ts",
+      "candidateBlob": "ff121f6026cf0ec2fd1b67721cc1cb58061b24e4"
+    },
+    {
+      "path": "packages/daemon/src/routes-extended.test.ts",
+      "candidateBlob": "c1850ababe5832558de9b199818177edcc5ac3e7"
+    },
+    {
+      "path": "packages/daemon/src/runtimes/agent-cli-preflight.ts",
+      "candidateBlob": "b69ffd41c54912ccd755c7a401598db79ac75025"
+    },
+    {
+      "path": "packages/daemon/src/runtimes/bounded-stderr.test.ts",
+      "candidateBlob": "3706a1260bb5007e847ba0e607519adb4cd0bc5f"
+    },
+    {
+      "path": "packages/daemon/src/runtimes/bounded-stderr.ts",
+      "candidateBlob": "d05c1bd6c10f84f38a5e049d850f0c291d9cc311"
+    },
+    {
+      "path": "packages/daemon/src/runtimes/build-input-identity.test.ts",
+      "candidateBlob": "5efa0b551a49281aca412be07f31a01c6e8c45e2"
+    },
+    {
+      "path": "packages/daemon/src/runtimes/build-input-identity.ts",
+      "candidateBlob": "24bc12d12addb08cb02a36bae91fb92499d28ac2"
+    },
+    {
+      "path": "packages/daemon/src/runtimes/claude-runtime.test.ts",
+      "candidateBlob": "36b2654396d17c1658b70b5f2804fe494e71a309"
+    },
+    {
+      "path": "packages/daemon/src/runtimes/claude-runtime.ts",
+      "candidateBlob": "94a2c8be2c55cffc8b18de618ac3e7ecb17fd4c7"
+    },
+    {
+      "path": "packages/daemon/src/runtimes/codex-recovery-admission.ts",
+      "candidateBlob": "03e39196de1e70688a5a26617ea7a6cd31f121ef"
+    },
+    {
+      "path": "packages/daemon/src/runtimes/codex-runtime.test.ts",
+      "candidateBlob": "6e125f43f0fad07e7bf8f0cc3e0ef1e62ee302e9"
+    },
+    {
+      "path": "packages/daemon/src/runtimes/codex-runtime.ts",
+      "candidateBlob": "44b516062c1cf944495a0f98773e2dd2fd776dd4"
+    },
+    {
+      "path": "packages/daemon/src/runtimes/copilot-runtime.test.ts",
+      "candidateBlob": "d9531d667514bd35d133866bb9c38a0ac7b02060"
+    },
+    {
+      "path": "packages/daemon/src/runtimes/copilot-runtime.ts",
+      "candidateBlob": "b5d5cb440207264c95975079f156b9b0969d7aa1"
+    },
+    {
+      "path": "packages/daemon/src/runtimes/copilot-stderr.test.ts",
+      "candidateBlob": "207783698aa905f0c1be384ef36c9d30abc41491"
+    },
+    {
+      "path": "packages/daemon/src/runtimes/finite-runtime-exit.test.ts",
+      "candidateBlob": "4ff5713781742500b4d4b984ded88381167541a6"
+    },
+    {
+      "path": "packages/daemon/src/runtimes/host-cli-provenance.ts",
+      "candidateBlob": "82d5684c7e84fe238925430813098e72ae567252"
+    },
+    {
+      "path": "packages/daemon/src/runtimes/observed-runtime-exit.ts",
+      "candidateBlob": "7564d74f3a0d5aa1006c5cf75d419b9d4708ac47"
+    },
+    {
+      "path": "packages/daemon/src/runtimes/provider-error-classifier.test.ts",
+      "candidateBlob": "4287209a1cbabb84ebb1691a9a3567096562bfdd"
+    },
+    {
+      "path": "packages/daemon/src/runtimes/provider-error-classifier.ts",
+      "candidateBlob": "7bc63d632db2b410a6faa1368d4ff2bb60a5f43b"
+    },
+    {
+      "path": "packages/daemon/src/runtimes/run-claude-cli.test.ts",
+      "candidateBlob": "b394316f0733e78d90a3656b52c9f9d9a23d3458"
+    },
+    {
+      "path": "packages/daemon/src/runtimes/run-claude-cli.ts",
+      "candidateBlob": "7f3d5852a1a581270840a8878893c364c2296cfd"
+    },
+    {
+      "path": "packages/daemon/src/runtimes/runtime-config-capability.test.ts",
+      "candidateBlob": "42ef4299eabc6a6566edc4d773a221ec50c74249"
+    },
+    {
+      "path": "packages/daemon/src/runtimes/runtime-config-capability.ts",
+      "candidateBlob": "55c7b11730d9b9877d7772b101fa23c581f54f06"
+    },
+    {
+      "path": "packages/daemon/src/scheduled-jobs/npm-lock-audit.test.ts",
+      "candidateBlob": "67cbc35bd7ea0046914f7e05431fd2195622bfe5"
+    },
+    {
+      "path": "packages/daemon/src/scheduled-jobs/npm-lock-audit.ts",
+      "candidateBlob": "5ad7571a28075dbb5c941692ff6566230bc4fab9"
+    },
+    {
+      "path": "packages/daemon/src/scheduled-jobs/scan-collector.test.ts",
+      "candidateBlob": "3b5a11683cfcc346e465b905ab336140386448c0"
+    },
+    {
+      "path": "packages/daemon/src/scheduled-jobs/scan-collector.ts",
+      "candidateBlob": "5bd77956ba2e819340839d3736fbb66030c4fdf0"
+    },
+    {
+      "path": "packages/daemon/src/scheduled-jobs/scan-coordinator.ts",
+      "candidateBlob": "76d1404ab1153f46cd09902a648afc0f486de00e"
+    },
+    {
+      "path": "packages/daemon/src/scheduled-jobs/scan-judge.test.ts",
+      "candidateBlob": "de8ebf118c5e027164231e3f441a7e46a3977f7d"
+    },
+    {
+      "path": "packages/daemon/src/scheduled-jobs/scan-judge.ts",
+      "candidateBlob": "1998e53f7a8c7f6326159109cd79a29a5fbbfd22"
+    },
+    {
+      "path": "packages/daemon/src/scheduled-jobs/scan-operator-service.ts",
+      "candidateBlob": "dc20fe565c89dcf1f4bf89623a2af053616d083f"
+    },
+    {
+      "path": "packages/daemon/src/scheduled-jobs/scan-record-reader.ts",
+      "candidateBlob": "ebfbb30b439c0e3b6a2a49b8d4bd0293718f47fc"
+    },
+    {
+      "path": "packages/daemon/src/scheduled-jobs/scan-report-reader.ts",
+      "candidateBlob": "c8f56138a91f4bd6df5a2837a8dc22c0ff677ba5"
+    },
+    {
+      "path": "packages/daemon/src/scheduled-jobs/scan-report-repository.test.ts",
+      "candidateBlob": "ceeb9592c28e29b16c44be49d681e2ea65fd1b10"
+    },
+    {
+      "path": "packages/daemon/src/scheduled-jobs/scan-report-repository.ts",
+      "candidateBlob": "81ef8d62dfce94244a9470cb27847af3cd15353f"
+    },
+    {
+      "path": "packages/daemon/src/scheduled-jobs/scheduled-job-manager.test.ts",
+      "candidateBlob": "dbcea404aa7a6b15674fca2d291441bf095955c1"
+    },
+    {
+      "path": "packages/daemon/src/scheduled-jobs/scheduled-job-manager.ts",
+      "candidateBlob": "86d12fd7cb89423c918b3111d513b23a709ec5d1"
+    },
+    {
+      "path": "packages/daemon/src/scheduled-jobs/scheduled-job-repository.ts",
+      "candidateBlob": "737cbda7e37b982745e9cc70ac09b753696a448d"
+    },
+    {
+      "path": "packages/daemon/src/security/dependency-compatibility.test.ts",
+      "candidateBlob": "0cb2faeac1b91a7ffa6dd63f93e6441f56e7b4bb"
+    },
+    {
+      "path": "packages/daemon/src/test-utils/mock-helpers.ts",
+      "candidateBlob": "3ed78bfddb97dbd711984f5077d0df5739a53bee"
+    },
+    {
+      "path": "packages/daemon/src/validation/container-reviewer-runner.test.ts",
+      "candidateBlob": "53bf423e85f193ed4413a3cf1844cc842857bc7b"
+    },
+    {
+      "path": "packages/daemon/src/validation/container-reviewer-runner.ts",
+      "candidateBlob": "4e8e42e664b69e29c57810d6ca4e41f6c8f8b994"
+    },
+    {
+      "path": "packages/daemon/src/validation/local-validation-engine.test.ts",
+      "candidateBlob": "5310ef686c664c3509d0e3510db93e6ac1c57860"
+    },
+    {
+      "path": "packages/daemon/src/validation/local-validation-engine.ts",
+      "candidateBlob": "a8f0174794da29330ec8cb90048ffaf8171cf28c"
+    },
+    {
+      "path": "packages/daemon/src/validation/retry-identity.test.ts",
+      "candidateBlob": "fe9b94e9eef413e6df7c981d4143419591ace658"
+    },
+    {
+      "path": "packages/daemon/src/validation/retry-identity.ts",
+      "candidateBlob": "b210447c27929c95351978bd1f2b15dc2d714ada"
+    },
+    {
+      "path": "packages/daemon/src/validation/review-agentic-runner.test.ts",
+      "candidateBlob": "1e92de8be2a464390aef723256a31ae7c498f80c"
+    },
+    {
+      "path": "packages/daemon/src/validation/review-agentic-runner.ts",
+      "candidateBlob": "57bbd8d5f0837722c6bd5407266875ef844c756c"
+    },
+    {
+      "path": "packages/daemon/src/validation/review-codex-runner.test.ts",
+      "candidateBlob": "c0e49211ab57cb733df8fcdbd2db5979ae3f28bf"
+    },
+    {
+      "path": "packages/daemon/src/validation/review-codex-runner.ts",
+      "candidateBlob": "9e203630ef37ee7005fc8b9a6d89133f292b7308"
+    },
+    {
+      "path": "packages/daemon/src/validation/review-tool-runner.test.ts",
+      "candidateBlob": "0cec0a05e669e887fe05931f84276c480e1b391c"
+    },
+    {
+      "path": "packages/daemon/src/validation/review-tool-runner.ts",
+      "candidateBlob": "59804569f3d4769845e08561434c175816ef153b"
+    },
+    {
+      "path": "packages/daemon/src/validation/reviewer-api-budget.ts",
+      "candidateBlob": "5bd4e3899040e9b8aee94508cb816f19dc960d4d"
+    },
+    {
+      "path": "packages/daemon/src/validation/reviewer-launch-preflight.ts",
+      "candidateBlob": "51a07377a42bc3f42ea3e133343c513e7316b641"
+    },
+    {
+      "path": "packages/daemon/src/validation/run-with-evidence.test.ts",
+      "candidateBlob": "06b67049a88a1f71aa2f88d4f8edc83170c094c8"
+    },
+    {
+      "path": "packages/daemon/src/validation/run-with-evidence.ts",
+      "candidateBlob": "9f5d6840a03e40d2f2a2ae0eb879e3f7f52b5265"
+    },
+    {
+      "path": "packages/daemon/src/validation/validation-evidence-cache.test.ts",
+      "candidateBlob": "d013f0390394bdb31e682d1f84f2516ffa70c29d"
+    },
+    {
+      "path": "packages/daemon/src/validation/validation-evidence-cache.ts",
+      "candidateBlob": "dad16b428e682cc1f13be45d0e2a4b8247adb408"
+    },
+    {
+      "path": "packages/daemon/src/validation/validation-evidence-engine.test.ts",
+      "candidateBlob": "f9e38ac750d97f5de97152ca9e1a8703fb892e41"
+    },
+    {
+      "path": "packages/daemon/src/validation/validation-identity-collector.test.ts",
+      "candidateBlob": "997b1ddba1de927dee789a140bc6df5e9c8f15ef"
+    },
+    {
+      "path": "packages/daemon/src/validation/validation-identity-collector.ts",
+      "candidateBlob": "fc27927cbcb750cda5be712077f1a0bf6929b2c7"
+    },
+    {
+      "path": "packages/daemon/src/worktrees/ado-pr-manager.test.ts",
+      "candidateBlob": "7a09dcc8dd081cdfdee24dadc3dee33c742e56b1"
+    },
+    {
+      "path": "packages/daemon/src/worktrees/ado-pr-manager.ts",
+      "candidateBlob": "435e263dfd12765d0a72311026f2ab7071b02708"
+    },
+    {
+      "path": "packages/daemon/src/worktrees/contract-base-preflight.test.ts",
+      "candidateBlob": "4d690878ef105179a56bff512af05bfa6e600d3c"
+    },
+    {
+      "path": "packages/daemon/src/worktrees/contract-base-preflight.ts",
+      "candidateBlob": "1b98a6cbe9f212d262e2e5900718362b30ece6bc"
+    },
+    {
+      "path": "packages/daemon/src/worktrees/durable-merge.ts",
+      "candidateBlob": "f36d5d5c28931e5732feb132cead61563c54d820"
+    },
+    {
+      "path": "packages/daemon/src/worktrees/durable-pr-manager.test.ts",
+      "candidateBlob": "98de3e1586a06afef54425b99cb29ef838a9ded5"
+    },
+    {
+      "path": "packages/daemon/src/worktrees/durable-pr-manager.ts",
+      "candidateBlob": "0510a1ded5834b2e906bc7e7f03cf38897d60b03"
+    },
+    {
+      "path": "packages/daemon/src/worktrees/durable-source-publication.ts",
+      "candidateBlob": "b5c54a42c47c6732f4bea966eb6bdff496669ccc"
+    },
+    {
+      "path": "packages/daemon/src/worktrees/github-url-identity.ts",
+      "candidateBlob": "4188e49261e4bfd173671aa5851d4e8bee0b8cdc"
+    },
+    {
+      "path": "packages/daemon/src/worktrees/local-worktree-manager.git.test.ts",
+      "candidateBlob": "a9372d7c5ef52db3d8edd91227f5f1592f3ffe65"
+    },
+    {
+      "path": "packages/daemon/src/worktrees/local-worktree-manager.test.ts",
+      "candidateBlob": "6f049f4d32540bde3d059b50f409b361efb9c78d"
+    },
+    {
+      "path": "packages/daemon/src/worktrees/local-worktree-manager.ts",
+      "candidateBlob": "bc5df3c27e51c9a9b5383513728aa5d8e3bbae76"
+    },
+    {
+      "path": "packages/daemon/src/worktrees/merge-pr-identity.ts",
+      "candidateBlob": "956436597936f8243aa7d44ed19c6e749637307b"
+    },
+    {
+      "path": "packages/daemon/src/worktrees/merge-source-identity.ts",
+      "candidateBlob": "7c7c984cf86c86a0f18eb155d7e77fc3d684c195"
+    },
+    {
+      "path": "packages/daemon/src/worktrees/pr-manager.test.ts",
+      "candidateBlob": "95f254d24d9a76acec9fb7ace06386dfda840ec5"
+    },
+    {
+      "path": "packages/daemon/src/worktrees/pr-manager.ts",
+      "candidateBlob": "1c80a10acbaefc003eb4e74aab63e78b8a3c2b8d"
+    },
+    {
+      "path": "packages/daemon/tsup.config.ts",
+      "candidateBlob": "bc633daf65d4f25b61785101b5361c35f0300404"
+    },
+    {
+      "path": "packages/desktop/Sources/AutopodClient/DaemonAPI.swift",
+      "candidateBlob": "3137ce9b5c700d54083d6df41a364d1adda62e86"
+    },
+    {
+      "path": "packages/desktop/Sources/AutopodClient/Types/ContractTypes.swift",
+      "candidateBlob": "e06f6f715271ac42f8af4e287232ff6c8940087f"
+    },
+    {
+      "path": "packages/desktop/Sources/AutopodClient/Types/CostAnalyticsResponse.swift",
+      "candidateBlob": "8ce6fab99fcb02d17efd2e4c140033eec8caa892"
+    },
+    {
+      "path": "packages/desktop/Sources/AutopodClient/Types/DaemonHealthSnapshot.swift",
+      "candidateBlob": "0b0bc71becf7c68ab282a77f8cdc57c66167f4b6"
+    },
+    {
+      "path": "packages/desktop/Sources/AutopodClient/Types/DispatchPreflight.swift",
+      "candidateBlob": "802f7ed0bc95d7c2437c0913605a12ddaca9a742"
+    },
+    {
+      "path": "packages/desktop/Sources/AutopodClient/Types/EventTypes.swift",
+      "candidateBlob": "df88cfab8948faed4f7a825ffba74824eb845c1e"
+    },
+    {
+      "path": "packages/desktop/Sources/AutopodClient/Types/ExecutionProvenance.swift",
+      "candidateBlob": "186bfde04b252bf75e6f2abaf6b6bdc9a9cc267f"
+    },
+    {
+      "path": "packages/desktop/Sources/AutopodClient/Types/ModelsAnalyticsResponse.swift",
+      "candidateBlob": "c971f59301eed0dd12dd8185159770dc44c8ff3c"
+    },
+    {
+      "path": "packages/desktop/Sources/AutopodClient/Types/PodCostBreakdownResponse.swift",
+      "candidateBlob": "2815e42ba51179ca97091f8b0e52ab6449d2e6c3"
+    },
+    {
+      "path": "packages/desktop/Sources/AutopodClient/Types/PodResponse.swift",
+      "candidateBlob": "b14c60702991021e090f546d3e6642a9ec2b3092"
+    },
+    {
+      "path": "packages/desktop/Sources/AutopodClient/Types/ReliabilityAnalyticsResponse.swift",
+      "candidateBlob": "508c7987f3c75241097e035d2bd5ce5f10db2231"
+    },
+    {
+      "path": "packages/desktop/Sources/AutopodClient/Types/ScheduledJobTypes.swift",
+      "candidateBlob": "a2cf896d335498275302042f88a4eb84583b4601"
+    },
+    {
+      "path": "packages/desktop/Sources/AutopodClient/Types/ScheduledScanTypes.swift",
+      "candidateBlob": "96790971364380214494c448f31aad7109436265"
+    },
+    {
+      "path": "packages/desktop/Sources/AutopodClient/Types/TaskRetryState.swift",
+      "candidateBlob": "1345c7525e7c654e3aea5f8e60e21393038b169c"
+    },
+    {
+      "path": "packages/desktop/Sources/AutopodClient/Types/ThroughputAnalyticsResponse.swift",
+      "candidateBlob": "c1077ff3bda9230b4c44c5793c95d7c0783affb1"
+    },
+    {
+      "path": "packages/desktop/Sources/AutopodClient/Types/ValidationResponse.swift",
+      "candidateBlob": "a765e8d99785a669d5698532358866fad18c2329"
+    },
+    {
+      "path": "packages/desktop/Sources/AutopodDesktop/Mapping/PodMapper.swift",
+      "candidateBlob": "663f0949a6d187af0c56689ca1229e9752b9b335"
+    },
+    {
+      "path": "packages/desktop/Sources/AutopodDesktop/Stores/ActionHandler.swift",
+      "candidateBlob": "4abe19ae92bfa935dbba58051ef71da82d8303b5"
+    },
+    {
+      "path": "packages/desktop/Sources/AutopodDesktop/Stores/EventStream.swift",
+      "candidateBlob": "87b552e0473deb1ef7bd5f3d1be4974f4d519c09"
+    },
+    {
+      "path": "packages/desktop/Sources/AutopodDesktop/Views/AppRootView.swift",
+      "candidateBlob": "fa9565af91006ae0ca785c8776ec7aa3b61523d0"
+    },
+    {
+      "path": "packages/desktop/Sources/AutopodDesktop/Views/ScanInboxView.swift",
+      "candidateBlob": "4443133e89d2bac795aa6d2b10ea41032dc0a96c"
+    },
+    {
+      "path": "packages/desktop/Sources/AutopodDesktop/Views/SettingsView.swift",
+      "candidateBlob": "5b51d64f5314f12024cec5f5a1a1535aad5ecc5f"
+    },
+    {
+      "path": "packages/desktop/Sources/AutopodUI/Models/AgentEvent.swift",
+      "candidateBlob": "2197ed3435a6cc696baf35dffac2ad0bc5cddbea"
+    },
+    {
+      "path": "packages/desktop/Sources/AutopodUI/Models/Pod.swift",
+      "candidateBlob": "68a984438aca630c5a61da7e569cdbc867d8fd43"
+    },
+    {
+      "path": "packages/desktop/Sources/AutopodUI/Models/PodActions.swift",
+      "candidateBlob": "d3ba244a851ece8016a5c8c0d313c11c9220c904"
+    },
+    {
+      "path": "packages/desktop/Sources/AutopodUI/Views/Analytics/AnalyticsView.swift",
+      "candidateBlob": "07cd7506f459d342895022844feca7b907592b4b"
+    },
+    {
+      "path": "packages/desktop/Sources/AutopodUI/Views/Analytics/CostDrillView.swift",
+      "candidateBlob": "d8ea6642da0bccd8e0199f542edddb21f7e9fd0f"
+    },
+    {
+      "path": "packages/desktop/Sources/AutopodUI/Views/Analytics/ModelsDrillView.swift",
+      "candidateBlob": "f6784c219415d326374977be05ea9ee679a19a8b"
+    },
+    {
+      "path": "packages/desktop/Sources/AutopodUI/Views/Analytics/ModelsSimulator.swift",
+      "candidateBlob": "a25dbe10179d6aeedd44c0a65e86d1862e9e0c51"
+    },
+    {
+      "path": "packages/desktop/Sources/AutopodUI/Views/Analytics/ReliabilityDrillView.swift",
+      "candidateBlob": "afa3f0a21734122f47dc740ab5d3826f44dc7029"
+    },
+    {
+      "path": "packages/desktop/Sources/AutopodUI/Views/Analytics/ThroughputDrillView.swift",
+      "candidateBlob": "f0185bb2e8c508f8099bcff66bb2c95c9c31dc2a"
+    },
+    {
+      "path": "packages/desktop/Sources/AutopodUI/Views/Cards/PodCardFinal.swift",
+      "candidateBlob": "4ac153fb2da505f53866e2476f4ea2cdb5e8878e"
+    },
+    {
+      "path": "packages/desktop/Sources/AutopodUI/Views/Detail/SummaryTab.swift",
+      "candidateBlob": "f39be0d3699a59183bb03ff0fcdae86b724a3ff6"
+    },
+    {
+      "path": "packages/desktop/Sources/AutopodUI/Views/Detail/ValidationTab.swift",
+      "candidateBlob": "d8fcc8115dde6e9af97b47741f01e0b193091a0c"
+    },
+    {
+      "path": "packages/desktop/Sources/AutopodUI/Views/Features/FeatureOverviewView.swift",
+      "candidateBlob": "2a46f7fe59a72936972769c459c54b6b18ffcb82"
+    },
+    {
+      "path": "packages/desktop/Sources/AutopodUI/Views/Features/SalesPitchView.swift",
+      "candidateBlob": "c4915133aa48125e8c39b71b837789491886c622"
+    },
+    {
+      "path": "packages/desktop/Sources/AutopodUI/Views/ScheduledJobs/ScheduledJobRow.swift",
+      "candidateBlob": "d321c2045bc16e24a22c7e924f00417472f85a08"
+    },
+    {
+      "path": "packages/desktop/Sources/AutopodUI/Views/ScheduledJobs/ScheduledJobsView.swift",
+      "candidateBlob": "1758f08c75581f4926ef9387e8275d56f7a86c5c"
+    },
+    {
+      "path": "packages/desktop/Sources/AutopodUI/Views/Shared/CostEvidenceView.swift",
+      "candidateBlob": "6d30338379e84e7a6ca39dded48894ed55dfcf1b"
+    },
+    {
+      "path": "packages/desktop/Sources/AutopodUI/Views/Shared/DispatchPreflightCard.swift",
+      "candidateBlob": "ae71690f738bbe54895526cc14ea7f5ce91efaf5"
+    },
+    {
+      "path": "packages/desktop/Sources/AutopodUI/Views/Shared/SessionCostCard.swift",
+      "candidateBlob": "aa9221045df9701ee37a1b168cc78e57680f1c72"
+    },
+    {
+      "path": "packages/desktop/Sources/AutopodUI/Views/Shared/TaskRetryCard.swift",
+      "candidateBlob": "34942c91ed4cf56a2ecc57b96ce3ed08a4ff0d0d"
+    },
+    {
+      "path": "packages/desktop/Sources/AutopodUI/Views/Shell/MainView.swift",
+      "candidateBlob": "66a4c6f42e1abd089ce03064444ffe487d63089c"
+    },
+    {
+      "path": "packages/desktop/Tests/AutopodClientTests/ApprovalPreservationTests.swift",
+      "candidateBlob": "c52c322c45ae2bd4bd343cfdf2e8574992b8072a"
+    },
+    {
+      "path": "packages/desktop/Tests/AutopodClientTests/CostAnalyticsResponseTests.swift",
+      "candidateBlob": "b4380973a305a5017e8c60eaff0df6e994fd8311"
+    },
+    {
+      "path": "packages/desktop/Tests/AutopodClientTests/DaemonAPITests.swift",
+      "candidateBlob": "f3f1c5062599ed9b83a5b941bb9ba0420e1393d2"
+    },
+    {
+      "path": "packages/desktop/Tests/AutopodClientTests/DispatchPreflightTests.swift",
+      "candidateBlob": "767e1ddd1252b4a7a2fe6c8489fb091e7c166bee"
+    },
+    {
+      "path": "packages/desktop/Tests/AutopodClientTests/FactWaiverRefreshTests.swift",
+      "candidateBlob": "7a6e1f91cc0850ea9ce72d318b78253a9ccfadf7"
+    },
+    {
+      "path": "packages/desktop/Tests/AutopodClientTests/PodCostBreakdownResponseTests.swift",
+      "candidateBlob": "aefe67b12c27f389a2f89a058b1ceb4cc09fd8c8"
+    },
+    {
+      "path": "packages/desktop/Tests/AutopodClientTests/PodMapperTests.swift",
+      "candidateBlob": "8ed55cb9f13477d3ff04af9c6ee44f6defa5e24d"
+    },
+    {
+      "path": "packages/desktop/Tests/AutopodClientTests/RetainedAnalyticsTests.swift",
+      "candidateBlob": "0662aec107acc4f058c6e5d1c473dffb661246ca"
+    },
+    {
+      "path": "packages/desktop/Tests/AutopodClientTests/RetryDurationEvidenceTests.swift",
+      "candidateBlob": "ea7f59cc419889c041b0794b29ed81c13616ef6a"
+    },
+    {
+      "path": "packages/desktop/Tests/AutopodClientTests/ScheduledScanTests.swift",
+      "candidateBlob": "e57bd0a1b063957fb8614db580e434f6ca311013"
+    },
+    {
+      "path": "packages/desktop/Tests/AutopodClientTests/TaskRetryClientTests.swift",
+      "candidateBlob": "c6ecb335358202539292168ebd2158b421b412fb"
+    },
+    {
+      "path": "packages/desktop/Tests/AutopodClientTests/UnverifiedTerminationActionTests.swift",
+      "candidateBlob": "f33aeb750deae43012dfdf107fc53cec128fe992"
+    },
+    {
+      "path": "packages/desktop/Tests/AutopodUITests/ModelsSimulatorTests.swift",
+      "candidateBlob": "0315404f0bdbeed25f111ee3b851ef1051339ed2"
+    },
+    {
+      "path": "packages/escalation-mcp/src/pod-bridge.ts",
+      "candidateBlob": "20bbc105a57c3bd320f80962096220cabf2ad271"
+    },
+    {
+      "path": "packages/escalation-mcp/src/server.test.ts",
+      "candidateBlob": "520d9013a54c50cf5ab55f090cfc8c6c0dc75ffb"
+    },
+    {
+      "path": "packages/escalation-mcp/src/server.ts",
+      "candidateBlob": "7c2c7087f867bcf12a2c9d8d786ab8a9a32837f5"
+    },
+    {
+      "path": "packages/escalation-mcp/src/tools/check-messages.ts",
+      "candidateBlob": "352c7de6bae469bc6b8c40bda7b58ea8e941d9a0"
+    },
+    {
+      "path": "packages/escalation-mcp/src/tools/escalation-tools.test.ts",
+      "candidateBlob": "fb03e9582017550d144b8b824499938afca7c6b3"
+    },
+    {
+      "path": "packages/escalation-mcp/src/tools/operator-message-interlock.ts",
+      "candidateBlob": "c4ba3707a3b2e883b23133c01f4bd0ecdb2695cd"
+    },
+    {
+      "path": "packages/escalation-mcp/src/tools/validate-locally.test.ts",
+      "candidateBlob": "099ce6dd983dd74a5c55d2f241bb6896945a8a43"
+    },
+    {
+      "path": "packages/mobile-web/src/App.tsx",
+      "candidateBlob": "17e7bbe105f18090e88b2be35c257dde8f7666f7"
+    },
+    {
+      "path": "packages/mobile-web/src/components/ActionBar.test.tsx",
+      "candidateBlob": "5d8773b43fdf35da3c05cf20b0bfa483d462c5ca"
+    },
+    {
+      "path": "packages/mobile-web/src/components/ActionBar.tsx",
+      "candidateBlob": "5e5b283ca08d4b2a05fda234b46a2ba75f844ad9"
+    },
+    {
+      "path": "packages/mobile-web/src/components/DispatchPreflightPanel.test.tsx",
+      "candidateBlob": "b8e47ca61e0b7644f90b6ec35070db28dbe5e786"
+    },
+    {
+      "path": "packages/mobile-web/src/components/DispatchPreflightPanel.tsx",
+      "candidateBlob": "0349469d2f3f4354cd92bf3d1ceeae726f649668"
+    },
+    {
+      "path": "packages/mobile-web/src/components/EscalationCard.test.tsx",
+      "candidateBlob": "ec9204b7433404893aaca49c9bac2652a7e32bd1"
+    },
+    {
+      "path": "packages/mobile-web/src/components/EscalationCard.tsx",
+      "candidateBlob": "c68ecc4cd6d70fdac6856682504647735df630e1"
+    },
+    {
+      "path": "packages/mobile-web/src/components/PodCard.tsx",
+      "candidateBlob": "db2a9e6f7c7c1e1a708f05d2d10d21d7138693a0"
+    },
+    {
+      "path": "packages/mobile-web/src/components/TaskExecutionPanel.test.tsx",
+      "candidateBlob": "c6f77a40a5bb7fa39367f37d872aec1a6cd29dea"
+    },
+    {
+      "path": "packages/mobile-web/src/components/TaskExecutionPanel.tsx",
+      "candidateBlob": "4754d91a89e1b828278467fd248964caa11426c6"
+    },
+    {
+      "path": "packages/mobile-web/src/components/TaskRetryPanel.test.tsx",
+      "candidateBlob": "6880fa7c36f7a33c9e512bb17917b8e25d3cbf17"
+    },
+    {
+      "path": "packages/mobile-web/src/components/TaskRetryPanel.tsx",
+      "candidateBlob": "3a0d46a60aca7e64b839a4d305f6ec6608fe7445"
+    },
+    {
+      "path": "packages/mobile-web/src/components/ValidationSummary.test.tsx",
+      "candidateBlob": "dc08f320811ec5ac4c8cbeb1d27f241326c07329"
+    },
+    {
+      "path": "packages/mobile-web/src/components/ValidationSummary.tsx",
+      "candidateBlob": "7d444724514cea2e503801c4804bd4ce51e60f0b"
+    },
+    {
+      "path": "packages/mobile-web/src/lib/api.test.ts",
+      "candidateBlob": "2976c31b1076b4af98db07589529ecf5f41e2629"
+    },
+    {
+      "path": "packages/mobile-web/src/lib/api.ts",
+      "candidateBlob": "bb5f8f58cfea836d8f750944c4866ff7bc1b6a12"
+    },
+    {
+      "path": "packages/mobile-web/src/lib/pod-actions.test.ts",
+      "candidateBlob": "f480f241c8a783f3dde954041045c2472a981282"
+    },
+    {
+      "path": "packages/mobile-web/src/lib/pod-actions.ts",
+      "candidateBlob": "00c48f297ddf3e9de2895a666f88e47067791227"
+    },
+    {
+      "path": "packages/mobile-web/src/screens/About.tsx",
+      "candidateBlob": "406961079151cc9ed07d16fc75afdab3fbaf6dd5"
+    },
+    {
+      "path": "packages/mobile-web/src/screens/Landing.tsx",
+      "candidateBlob": "26bb25140124fd5aea2c2093a5aceca5e92249a9"
+    },
+    {
+      "path": "packages/mobile-web/src/screens/PodDetail.test.tsx",
+      "candidateBlob": "78d03ff1c7759510fb6b8811122a637dcdd1053a"
+    },
+    {
+      "path": "packages/mobile-web/src/screens/PodDetail.tsx",
+      "candidateBlob": "1716d367b2c89a57b99122dba8f1fababde06f16"
+    },
+    {
+      "path": "packages/mobile-web/src/screens/ScanReport.test.tsx",
+      "candidateBlob": "d1d57eb1293e9c75cbe28cb6efca3a87bcf66378"
+    },
+    {
+      "path": "packages/mobile-web/src/screens/ScanReport.tsx",
+      "candidateBlob": "f841e8a4e555eecce0ca27077663350391d1c94e"
+    },
+    {
+      "path": "packages/mobile-web/src/screens/ScanReports.test.tsx",
+      "candidateBlob": "3b26f884d026362351e90f51b7acc42e11821b7e"
+    },
+    {
+      "path": "packages/mobile-web/src/screens/ScanReports.tsx",
+      "candidateBlob": "e0fa407dd03f124d4e4369f30f06bf2c21d9b758"
+    },
+    {
+      "path": "packages/mobile-web/src/styles.css",
+      "candidateBlob": "24238742e777dec87d94a451ec74435ff9010080"
+    },
+    {
+      "path": "packages/shared/src/contract.test.ts",
+      "candidateBlob": "c4153050f41da0d1dae7a50ea835295e2f7f7c34"
+    },
+    {
+      "path": "packages/shared/src/contract.ts",
+      "candidateBlob": "21ad4dfd53f2e9d03f2664eb2e9abd882c8eebfc"
+    },
+    {
+      "path": "packages/shared/src/index.ts",
+      "candidateBlob": "18bcaab97efc179c98da6a99be5cc5ce1ceb0b64"
+    },
+    {
+      "path": "packages/shared/src/sanitize/sanitize.ts",
+      "candidateBlob": "a281e92ae7c203d78917c55ae1de1d2c0f8ebf1a"
+    },
+    {
+      "path": "packages/shared/src/schemas/pod.schema.ts",
+      "candidateBlob": "7394c3a8880a2ebe84f36e549db63276d9ca7d69"
+    },
+    {
+      "path": "packages/shared/src/types/analytics.ts",
+      "candidateBlob": "c303c9e6553609927eab8769f4493bac994d5a7b"
+    },
+    {
+      "path": "packages/shared/src/types/contract.ts",
+      "candidateBlob": "08511d625f7a3fb6f53a7ca307a4097b862562e1"
+    },
+    {
+      "path": "packages/shared/src/types/dispatch-preflight.ts",
+      "candidateBlob": "4e0fad5e533ba7af1ea76fa43bf43f6009c7a290"
+    },
+    {
+      "path": "packages/shared/src/types/events.ts",
+      "candidateBlob": "45f4a346b13f8586646dbbba7bfba2ad3f4eadb9"
+    },
+    {
+      "path": "packages/shared/src/types/execution-provenance.ts",
+      "candidateBlob": "6dd00e02f632abd76ff2d92f1f66e3a97c3636f1"
+    },
+    {
+      "path": "packages/shared/src/types/operator-guidance.ts",
+      "candidateBlob": "ac79d97bfb9eaf30f5b2434152a8c92eb30e420b"
+    },
+    {
+      "path": "packages/shared/src/types/pod.ts",
+      "candidateBlob": "bb025fb47d468200fa23825303bf0ec54753747c"
+    },
+    {
+      "path": "packages/shared/src/types/release.ts",
+      "candidateBlob": "b3e9873ae75536c52443ff5ba3364c000bd015f9"
+    },
+    {
+      "path": "packages/shared/src/types/runtime.ts",
+      "candidateBlob": "bd10e235921dc820f4b994627d0c3afba2a51df1"
+    },
+    {
+      "path": "packages/shared/src/types/scheduled-job.ts",
+      "candidateBlob": "09d81bf49be6506ce63f95e6011b1b9cf5ee0a7b"
+    },
+    {
+      "path": "packages/shared/src/types/scheduled-scan.ts",
+      "candidateBlob": "4562722362200e2ae56f62eaf715b77ab17bec85"
+    },
+    {
+      "path": "packages/shared/src/types/task-execution.ts",
+      "candidateBlob": "6763f0731ebbae344e97a23bfc2915d6075618ba"
+    },
+    {
+      "path": "packages/shared/src/types/task-retry.ts",
+      "candidateBlob": "adfb6958feebd5866b082505d7922d156263c2c7"
+    },
+    {
+      "path": "packages/shared/src/types/validation-evidence.ts",
+      "candidateBlob": "731d0aa56b82b2c5e92e0800b28f8d1ba6bf0f0d"
+    },
+    {
+      "path": "packages/shared/src/types/validation.ts",
+      "candidateBlob": "7745288e0da386f8230b83068b59e2f6ba4c4ce8"
+    },
+    {
+      "path": "turbo.json",
+      "candidateBlob": "8f3ad88d58391091bb1c75cdfc4200db014722b9"
+    }
+  ],
+  "goalSha256": "3dc5e753db8ec664ea8ed1a93b1150c936ea53cbc8e9f8a0def05113dfd1e481",
+  "inspectionPayloadSha256": "9667ba6c73e2c43c00906bb8fd4240720dbeeee17d29ede69cef58f0ab2cfe3a",
+  "patchFormat": "git diff --binary --unified=0; applying this review patch requires git apply --unidiff-zero against the exact base",
+  "patchSha256": "02af0cb69b1db571aa5d7aabda7bac017c888491902b02540da018bd5dbd865b"
+}
