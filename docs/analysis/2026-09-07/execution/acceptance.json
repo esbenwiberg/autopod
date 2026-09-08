@@ -268,7 +268,9 @@
         "checkpoint-46.md: source-bound merged observations without invented requests; distinct canonical PR and admission counts with local operator proof; broader acceptance remains partial",
         "receipts/checkpoint-46-full-validation.txt",
         "receipts/checkpoint-46-validation-identity.json",
-        "checkpoint-47.md: durable closed/open source observations, retained-source recovery and separate closed counts with local CLI/mobile proof; wider acceptance remains partial"
+        "checkpoint-47.md: durable closed/open source observations, retained-source recovery and separate closed counts with local CLI/mobile proof; wider acceptance remains partial",
+        "receipts/checkpoint-47-full-validation.txt",
+        "receipts/checkpoint-47-validation-identity.json"
       ],
       "prerequisites": [
         "PR creation intent/reconciliation implemented locally; broader finalization side effects and operator override remain."
@@ -951,7 +953,9 @@
         "checkpoint-46.md: source-bound merged observations without invented requests; distinct canonical PR and admission counts with local operator proof; broader acceptance remains partial",
         "receipts/checkpoint-46-full-validation.txt",
         "receipts/checkpoint-46-validation-identity.json",
-        "checkpoint-47.md: durable closed/open source observations, retained-source recovery and separate closed counts with local CLI/mobile proof; wider acceptance remains partial"
+        "checkpoint-47.md: durable closed/open source observations, retained-source recovery and separate closed counts with local CLI/mobile proof; wider acceptance remains partial",
+        "receipts/checkpoint-47-full-validation.txt",
+        "receipts/checkpoint-47-validation-identity.json"
       ],
       "prerequisites": [],
       "remaining": "Distinct task/pod/run/provider/validation units implemented. Durable logical delivery receipts remain. Checkpoint 46 verifies planned merged disposition and separate request/PR counts locally. Legacy missing source history, closed disposition, broader durable cleanup and native/live interaction remain outstanding. Checkpoint 47 verifies source-bound closure, reopening and planned/acknowledged recovery locally; ambiguous prior requests, legacy unbound evidence, durable cleanup and native/live interaction remain outstanding."
@@ -970,7 +974,9 @@
         "checkpoint-46.md: source-bound merged observations without invented requests; distinct canonical PR and admission counts with local operator proof; broader acceptance remains partial",
         "receipts/checkpoint-46-full-validation.txt",
         "receipts/checkpoint-46-validation-identity.json",
-        "checkpoint-47.md: durable closed/open source observations, retained-source recovery and separate closed counts with local CLI/mobile proof; wider acceptance remains partial"
+        "checkpoint-47.md: durable closed/open source observations, retained-source recovery and separate closed counts with local CLI/mobile proof; wider acceptance remains partial",
+        "receipts/checkpoint-47-full-validation.txt",
+        "receipts/checkpoint-47-validation-identity.json"
       ],
       "prerequisites": [],
       "remaining": " Checkpoint 46 verifies planned merged disposition and separate request/PR counts locally. Legacy missing source history, closed disposition, broader durable cleanup and native/live interaction remain outstanding. Checkpoint 47 verifies source-bound closure, reopening and planned/acknowledged recovery locally; ambiguous prior requests, legacy unbound evidence, durable cleanup and native/live interaction remain outstanding."
@@ -1220,7 +1226,9 @@
         "checkpoint-46.md: source-bound merged observations without invented requests; distinct canonical PR and admission counts with local operator proof; broader acceptance remains partial",
         "receipts/checkpoint-46-full-validation.txt",
         "receipts/checkpoint-46-validation-identity.json",
-        "checkpoint-47.md: durable closed/open source observations, retained-source recovery and separate closed counts with local CLI/mobile proof; wider acceptance remains partial"
+        "checkpoint-47.md: durable closed/open source observations, retained-source recovery and separate closed counts with local CLI/mobile proof; wider acceptance remains partial",
+        "receipts/checkpoint-47-full-validation.txt",
+        "receipts/checkpoint-47-validation-identity.json"
       ],
       "prerequisites": [
         "Selected mobile flows and new health CLI have local interaction proof. Desktop has compilation and tests only. Remaining operator flows, physical device and live evidence are outstanding."
