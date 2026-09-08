@@ -6503,7 +6503,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         ...blockingResult,
         advisoryBrowserQa: advisoryResult,
       };
-      if (validationId) validationRepo?.updateResult(validationId, storedResult);
+      if (validationId) validationRepo?.updateAdvisoryResult(podId, validationId, advisoryResult);
 
       const currentResult = current.lastValidationResult ?? blockingResult;
       if (validationId && validationRepo?.getLatest(podId)?.id !== validationId) {
@@ -6587,7 +6587,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
       // Always persist the advisory result into validation history regardless of
       // whether a newer validation attempt has superseded the live lastValidationResult.
       const storedResult = { ...blockingResult, advisoryBrowserQa: advisoryResult };
-      if (validationId) validationRepo?.updateResult(validationId, storedResult);
+      if (validationId) validationRepo?.updateAdvisoryResult(podId, validationId, advisoryResult);
 
       const currentResult = current.lastValidationResult ?? blockingResult;
       if (validationId && validationRepo?.getLatest(podId)?.id !== validationId) {

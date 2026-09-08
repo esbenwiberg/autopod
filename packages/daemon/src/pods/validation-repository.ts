@@ -17,6 +17,12 @@ export interface StoredValidation {
 export interface ValidationRepository {
   insert(podId: string, attempt: number, result: ValidationResult): StoredValidation;
   updateResult(validationId: string, result: ValidationResult): boolean;
+  /** Attach advisory evidence without replacing deterministic, review or waiver evidence. */
+  updateAdvisoryResult(
+    podId: string,
+    validationId: string,
+    result: NonNullable<ValidationResult['advisoryBrowserQa']>,
+  ): boolean;
   getForSession(podId: string): StoredValidation[];
   getLatest(podId: string): StoredValidation | null;
   getLatestReviewBatch(podId: string): ReviewBatchResult | undefined;
@@ -80,6 +86,18 @@ export function createValidationRepository(db: Database.Database): ValidationRep
           validationId,
           result: JSON.stringify(result),
         });
+      return info.changes > 0;
+    },
+
+    updateAdvisoryResult(podId, validationId, result): boolean {
+      // One SQL mutation merges into the latest retained bytes, including evidence
+      // attached while asynchronous QA ran. Malformed legacy rows remain untouched.
+      const info = db
+        .prepare(`UPDATE validations
+        SET result = json_set(result, '$.advisoryBrowserQa', json(@advisory))
+        WHERE id = @validationId AND pod_id = @podId
+          AND CASE WHEN json_valid(result) THEN json_type(result) = 'object' ELSE 0 END`)
+        .run({ podId, validationId, advisory: JSON.stringify(result) });
       return info.changes > 0;
     },
 

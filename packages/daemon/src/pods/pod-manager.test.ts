@@ -11594,6 +11594,51 @@ describe('PodManager', () => {
       });
     });
 
+    it('advisory completion preserves validation evidence attached while QA is running', async () => {
+      const ctx = createTestContext();
+      const manager = createPodManager(ctx.deps);
+      const advisory = ctx.validationEngine.runAdvisoryBrowserQa;
+      if (!advisory) throw new Error('Missing advisory fixture');
+      const pod = manager.createSession(
+        {
+          profileName: 'test-profile',
+          task: 'Preserve late evidence',
+          options: { advisoryBrowserQaEnabled: true },
+        },
+        'user-1',
+      );
+      ctx.podRepo.update(pod.id, {
+        status: 'running',
+        containerId: 'ctr-1',
+        worktreePath: '/tmp/wt',
+      });
+      const advisoryResult = {
+        status: 'pass' as const,
+        reasoning: 'QA finished',
+        observations: [],
+        screenshots: [],
+        durationMs: 10,
+      };
+      let retained: ValidationResult | undefined;
+      vi.mocked(advisory).mockImplementation(
+        async (_config, _blockingResult, _progress, _signal, callbacks) => {
+          const row = ctx.validationRepo.getLatest(pod.id);
+          if (!row) throw new Error('Missing original validation');
+          retained = { ...row.result, reviewSkipReason: 'Retained independent evidence marker' };
+          ctx.validationRepo.updateResult(row.id, retained);
+          callbacks?.onPhaseCompleted?.('advisory', 'pass', advisoryResult);
+          return advisoryResult;
+        },
+      );
+      await manager.triggerValidation(pod.id);
+      expect(retained).toBeDefined();
+      expect(ctx.validationRepo.getLatest(pod.id)?.result).toEqual({
+        ...retained,
+        advisoryBrowserQa: advisoryResult,
+      });
+      expect(ctx.validationRepo.getForSession(pod.id)).toHaveLength(1);
+    });
+
     it('readiness refresh updates after deferred advisory finishes', async () => {
       const ctx = createTestContext({ overall: 'pass' });
       const manager = createPodManager(ctx.deps);
@@ -13704,112 +13749,154 @@ describe('PodManager', () => {
       },
     );
 
-    it('runs recurring-finding auto-hoist without the prior review ledger', async () => {
-      const ctx = createTestContext();
-      const manager = createPodManager(ctx.deps);
-      const pod = manager.createSession(
-        { profileName: 'test-profile', task: 'Fix stale review feedback' },
-        'user-1',
-      );
-      const finding = {
-        id: 'initial-stale-finding',
-        source: 'initial-review' as const,
-        issue: 'A stale finding',
-      };
-      const reviewBatch = (id: string, reviewedHead: string, currentSourceIds: string[]) => ({
-        id,
-        diffHash: `${id}-diff`,
-        reviewedHead,
-        promptVersion: 'review-council-v1',
-        schemaVersion: 'structured-finding-v2',
-        model: 'reviewer',
-        axes: [],
-        candidates: [finding],
-        initialFindings: [finding],
-        accepted: [finding],
-        rejected: [],
-        merged: [],
-        synthesis: 'model' as const,
-        durationMs: 1,
-        quality: 'healthy' as const,
-        ledger: [
+    it.each([false, true])(
+      'runs recurring-finding auto-hoist without the prior review ledger (advisory=%s)',
+      async (advisoryEnabled) => {
+        const ctx = createTestContext();
+        const manager = createPodManager(ctx.deps);
+        const pod = manager.createSession(
           {
-            semanticId: 'review:stale-finding',
-            finding,
-            state: 'open' as const,
-            priorSourceIds: ['initial-stale-finding'],
-            currentSourceIds,
+            profileName: 'test-profile',
+            task: 'Fix stale review feedback',
+            options: { advisoryBrowserQaEnabled: advisoryEnabled },
           },
-        ],
-      });
-      const failedReview = (attempt: number, batchId: string, currentSourceIds: string[]) =>
-        makeValidationResult({
-          podId: pod.id,
-          attempt,
-          overall: 'fail',
-          taskReview: {
-            status: 'fail',
-            reasoning: 'Historical ledger entry remains open',
-            issues: ['A stale finding'],
-            model: 'reviewer',
-            screenshots: [],
-            diff: '+change',
-            reviewBatch: reviewBatch(batchId, `${attempt}`.repeat(40), currentSourceIds),
-          },
-        });
-
-      ctx.validationRepo.insert(pod.id, 1, failedReview(1, 'attempt-1', ['initial-stale-finding']));
-      ctx.podRepo.update(pod.id, {
-        status: 'running',
-        containerId: 'ctr-1',
-        worktreePath: '/tmp/worktree/abc',
-        validationAttempts: 1,
-      });
-      vi.mocked(ctx.validationEngine.validate).mockImplementation(async (config) => {
-        if (!config.reviewOnly) return failedReview(2, 'attempt-2', []);
-        if (config.priorReviewBatch) return failedReview(2, 'deep-contaminated', []);
-        return makeValidationResult({
-          podId: pod.id,
-          attempt: 2,
-          overall: 'pass',
-          taskReview: {
-            status: 'pass',
-            reasoning: 'Independent deep review found no issue',
-            issues: [],
-            model: 'reviewer',
-            screenshots: [],
-            diff: '+change',
-            reviewBatch: {
-              ...reviewBatch('deep-independent', '2'.repeat(40), []),
-              candidates: [],
-              initialFindings: [],
-              accepted: [],
-              ledger: [],
+          'user-1',
+        );
+        const finding = {
+          id: 'initial-stale-finding',
+          source: 'initial-review' as const,
+          issue: 'A stale finding',
+        };
+        const reviewBatch = (id: string, reviewedHead: string, currentSourceIds: string[]) => ({
+          id,
+          diffHash: `${id}-diff`,
+          reviewedHead,
+          promptVersion: 'review-council-v1',
+          schemaVersion: 'structured-finding-v2',
+          model: 'reviewer',
+          axes: [],
+          candidates: [finding],
+          initialFindings: [finding],
+          accepted: [finding],
+          rejected: [],
+          merged: [],
+          synthesis: 'model' as const,
+          durationMs: 1,
+          quality: 'healthy' as const,
+          ledger: [
+            {
+              semanticId: 'review:stale-finding',
+              finding,
+              state: 'open' as const,
+              priorSourceIds: ['initial-stale-finding'],
+              currentSourceIds,
             },
-          },
+          ],
         });
-      });
+        const failedReview = (attempt: number, batchId: string, currentSourceIds: string[]) =>
+          makeValidationResult({
+            podId: pod.id,
+            attempt,
+            overall: 'fail',
+            taskReview: {
+              status: 'fail',
+              reasoning: 'Historical ledger entry remains open',
+              issues: ['A stale finding'],
+              model: 'reviewer',
+              screenshots: [],
+              diff: '+change',
+              reviewBatch: reviewBatch(batchId, `${attempt}`.repeat(40), currentSourceIds),
+            },
+          });
 
-      await manager.triggerValidation(pod.id);
+        ctx.validationRepo.insert(
+          pod.id,
+          1,
+          failedReview(1, 'attempt-1', ['initial-stale-finding']),
+        );
+        ctx.podRepo.update(pod.id, {
+          status: 'running',
+          containerId: 'ctr-1',
+          worktreePath: '/tmp/worktree/abc',
+          validationAttempts: 1,
+        });
+        vi.mocked(ctx.validationEngine.validate).mockImplementation(async (config) => {
+          if (!config.reviewOnly) return failedReview(2, 'attempt-2', []);
+          if (config.priorReviewBatch) return failedReview(2, 'deep-contaminated', []);
+          return makeValidationResult({
+            podId: pod.id,
+            attempt: 2,
+            overall: 'pass',
+            taskReview: {
+              status: 'pass',
+              reasoning: 'Independent deep review found no issue',
+              issues: [],
+              model: 'reviewer',
+              screenshots: [],
+              diff: '+change',
+              reviewBatch: {
+                ...reviewBatch('deep-independent', '2'.repeat(40), []),
+                candidates: [],
+                initialFindings: [],
+                accepted: [],
+                ledger: [],
+              },
+            },
+          });
+        });
 
-      const deepConfig = vi.mocked(ctx.validationEngine.validate).mock.calls[1]?.[0];
-      expect(deepConfig).toMatchObject({
-        reviewOnly: true,
-        reviewDepth: 'deep',
-        councilOnly: true,
-      });
-      expect(deepConfig?.priorReviewBatch).toBeUndefined();
-      expect(manager.getSession(pod.id).status).toBe('validated');
-      expect(manager.getSession(pod.id).pendingEscalation).toBeNull();
-      expect(
-        manager.getSession(pod.id).lastValidationResult?.taskReview?.reviewBatch?.adjudication,
-      ).toEqual({
-        kind: 'recurrence-hoist',
-        originalReviewBatchId: 'attempt-2',
-        candidateFindingIds: ['review:stale-finding'],
-        confirmedFindingIds: [],
-      });
-    });
+        const advisory = ctx.validationEngine.runAdvisoryBrowserQa;
+        if (!advisory) throw new Error('Missing advisory fixture');
+        const advisoryResult = {
+          status: 'pass' as const,
+          reasoning: 'Reviewed accepted result',
+          observations: [],
+          screenshots: [],
+          durationMs: 10,
+        };
+        vi.mocked(advisory).mockImplementation(async (config, blockingResult) =>
+          config.advisoryBrowserQaEnabled && blockingResult.overall === 'pass'
+            ? advisoryResult
+            : null,
+        );
+        await manager.triggerValidation(pod.id);
+
+        const deepConfig = vi.mocked(ctx.validationEngine.validate).mock.calls[1]?.[0];
+        expect(deepConfig).toMatchObject({
+          reviewOnly: true,
+          reviewDepth: 'deep',
+          councilOnly: true,
+        });
+        expect(deepConfig?.priorReviewBatch).toBeUndefined();
+        expect(manager.getSession(pod.id).status).toBe('validated');
+        expect(manager.getSession(pod.id).pendingEscalation).toBeNull();
+        if (advisoryEnabled) {
+          expect(advisory).toHaveBeenCalledWith(
+            expect.any(Object),
+            expect.objectContaining({ overall: 'pass' }),
+            expect.any(Function),
+            undefined,
+            expect.any(Object),
+          );
+          expect(manager.getSession(pod.id).lastValidationResult?.advisoryBrowserQa).toEqual(
+            advisoryResult,
+          );
+          expect(ctx.validationRepo.getLatest(pod.id)?.result).toMatchObject({
+            overall: 'pass',
+            advisoryBrowserQa: advisoryResult,
+            taskReview: { reviewBatch: { adjudication: { kind: 'recurrence-hoist' } } },
+          });
+        }
+        expect(
+          manager.getSession(pod.id).lastValidationResult?.taskReview?.reviewBatch?.adjudication,
+        ).toEqual({
+          kind: 'recurrence-hoist',
+          originalReviewBatchId: 'attempt-2',
+          candidateFindingIds: ['review:stale-finding'],
+          confirmedFindingIds: [],
+        });
+      },
+    );
 
     it('escalates only recurring findings independently confirmed by deep review', async () => {
       const ctx = createTestContext();

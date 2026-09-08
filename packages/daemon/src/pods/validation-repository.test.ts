@@ -49,6 +49,70 @@ function makeResult(podId: string, attempt: number): ValidationResult {
 }
 
 describe('ValidationRepository', () => {
+  it('attaches advisory evidence only to the exact retained record without rewriting other results', () => {
+    const db = setupDb();
+    try {
+      db.prepare(`INSERT INTO pods (id, profile_name, task, model, runtime, branch, user_id)
+        VALUES ('advisory-pod', 'test-profile', 'test task', 'opus', 'claude', 'main', 'user-1')`).run();
+      const repo = createValidationRepository(db);
+      const failed = {
+        ...makeResult('advisory-pod', 1),
+        overall: 'fail' as const,
+        reviewSkipReason: 'Preserve recorded failure independently of an operator waiver',
+      };
+      const first = repo.insert('advisory-pod', 1, failed);
+      const newest = repo.insert('advisory-pod', 1, makeResult('advisory-pod', 1));
+      const advisory = {
+        status: 'pass' as const,
+        reasoning: 'Advisory only',
+        observations: [],
+        screenshots: [],
+        durationMs: 10,
+      };
+      expect(repo.updateAdvisoryResult('different-pod', first.id, advisory)).toBe(false);
+      expect(repo.updateAdvisoryResult('advisory-pod', 'missing-id', advisory)).toBe(false);
+      expect(repo.updateAdvisoryResult('advisory-pod', first.id, advisory)).toBe(true);
+      expect(
+        createValidationRepository(db).updateAdvisoryResult('advisory-pod', first.id, advisory),
+      ).toBe(true);
+      expect(repo.getForSession('advisory-pod')).toEqual([
+        { ...first, result: { ...failed, advisoryBrowserQa: advisory } },
+        newest,
+      ]);
+      expect(repo.getLatest('advisory-pod')).toEqual(newest);
+    } finally {
+      db.close();
+    }
+  });
+
+  it.each(['{broken', 'null', '[]', '42'])(
+    'leaves unsupported legacy validation payload %s untouched when attaching advisory evidence',
+    (legacy) => {
+      const db = setupDb();
+      try {
+        db.prepare(`INSERT INTO pods (id, profile_name, task, model, runtime, branch, user_id)
+          VALUES ('legacy-advisory', 'test-profile', 'test task', 'opus', 'claude', 'main', 'user-1')`).run();
+        const repo = createValidationRepository(db);
+        const record = repo.insert('legacy-advisory', 1, makeResult('legacy-advisory', 1));
+        db.prepare('UPDATE validations SET result = ? WHERE id = ?').run(legacy, record.id);
+        expect(
+          repo.updateAdvisoryResult('legacy-advisory', record.id, {
+            status: 'pass',
+            reasoning: 'No fabricated replacement',
+            observations: [],
+            screenshots: [],
+            durationMs: 10,
+          }),
+        ).toBe(false);
+        expect(db.prepare('SELECT result FROM validations WHERE id = ?').get(record.id)).toEqual({
+          result: legacy,
+        });
+      } finally {
+        db.close();
+      }
+    },
+  );
+
   it('finds the latest prior review batch across intervening no-review attempts', () => {
     const db = setupDb();
     db.prepare(

@@ -97,7 +97,8 @@
         "packages/daemon/src/pods/task-execution-ledger.ts",
         "packages/daemon/src/pods/task-retry-ledger.ts",
         "packages/daemon/src/pods/interactive-completion-coordinator.ts",
-        "packages/daemon/src/pods/pod-repository.ts"
+        "packages/daemon/src/pods/pod-repository.ts",
+        "packages/daemon/src/pods/validation-repository.ts"
       ],
       "tests": [
         "packages/daemon/src/pods/completion-journal.test.ts",
@@ -113,7 +114,8 @@
         "packages/daemon/src/pods/task-execution-ledger.test.ts",
         "packages/daemon/src/pods/task-retry-ledger.test.ts",
         "packages/daemon/src/runtimes/codex-runtime.test.ts",
-        "packages/daemon/src/runtimes/stream-grace.test.ts"
+        "packages/daemon/src/runtimes/stream-grace.test.ts",
+        "packages/daemon/src/pods/validation-repository.test.ts"
       ],
       "evidence": [
         "receipts/journal-migration.txt",
@@ -151,7 +153,8 @@
         "receipts/interactive-coordination-red.txt",
         "receipts/interactive-coordination-final.txt",
         "receipts/checkpoint-23-full-validation.txt",
-        "receipts/checkpoint-23-validation-identity.json"
+        "receipts/checkpoint-23-validation-identity.json",
+        "checkpoint-57.md"
       ],
       "prerequisites": [],
       "remaining": "Entered artifact collection survives restart with sources retained; generation/cycle-bound integrity receipts and in-process duplicate coordination are implemented. Independent source inventory, fsync/power-loss proof, orphan snapshot/DB-path reconciliation, interactive duplicates, other reply boundaries and broader durable finalization side effects remain. New worker/cycle and validation admission now preserve pending decisions, including older unresolved cycles in the current generation. Historical missing payload recovery and stream/MCP delivery acknowledgment remain. Codex now observes summary events before Spawn/Resume launch and disposes each invocation listener. This closes the local launch/stream attachment race, not durable delivery acknowledgment across all runtimes or daemon restart. Concurrent interactive completions now coalesce in process, conflicting promotion/generation requests fail closed, and current source/lifecycle/decision ownership is checked across push and container release boundaries. This is not durable cross-process idempotency, cancellation of already-dispatched external operations, or complete post-completion side-effect accounting."
@@ -311,7 +314,8 @@
         "packages/daemon/src/pods/local-reconciler.ts",
         "packages/daemon/src/pods/reconciler.ts",
         "packages/daemon/src/pods/interactive-completion-coordinator.ts",
-        "packages/daemon/src/pods/pod-repository.ts"
+        "packages/daemon/src/pods/pod-repository.ts",
+        "packages/daemon/src/pods/validation-repository.ts"
       ],
       "tests": [
         "packages/daemon/src/pods/artifact-preservation.test.ts",
@@ -320,7 +324,8 @@
         "packages/daemon/src/pods/artifact-snapshot-receipt.test.ts",
         "packages/daemon/src/pods/sandbox-terminal-reaper.test.ts",
         "packages/daemon/src/pods/local-reconciler.test.ts",
-        "packages/daemon/src/pods/reconciler.test.ts"
+        "packages/daemon/src/pods/reconciler.test.ts",
+        "packages/daemon/src/pods/validation-repository.test.ts"
       ],
       "evidence": [
         "checkpoint-15.md",
@@ -341,7 +346,8 @@
         "receipts/interactive-coordination-red.txt",
         "receipts/interactive-coordination-final.txt",
         "receipts/checkpoint-23-full-validation.txt",
-        "receipts/checkpoint-23-validation-identity.json"
+        "receipts/checkpoint-23-validation-identity.json",
+        "checkpoint-57.md"
       ],
       "prerequisites": [],
       "remaining": "Entered artifact collection survives restart with sources retained; generation/cycle-bound integrity receipts and in-process duplicate coordination are implemented. Independent source inventory, fsync/power-loss proof, orphan snapshot/DB-path reconciliation, interactive duplicates, other reply boundaries and broader durable finalization side effects remain. Interactive completion now stops before push/cleanup when sync and archive fallback fail or a branch container lacks its host worktree; the source remains retryable. Duplicate concurrent interactive requests, cancellation fences, restart/durable side-effect receipts and complete source-inventory proof remain. Concurrent interactive completions now coalesce in process, conflicting promotion/generation requests fail closed, and current source/lifecycle/decision ownership is checked across push and container release boundaries. This is not durable cross-process idempotency, cancellation of already-dispatched external operations, or complete post-completion side-effect accounting."
@@ -727,7 +733,8 @@
         "receipts/checkpoint-18-full-validation.txt",
         "receipts/checkpoint-21-full-validation.txt",
         "receipts/checkpoint-21-validation-identity.json",
-        "checkpoint-56.md"
+        "checkpoint-56.md",
+        "checkpoint-57.md"
       ],
       "prerequisites": [],
       "remaining": "Current source retains frozen identity, independently addressable substantive findings, bounded closure chunks, fail-closed unavailable axes/closure, and immutable validation history. Existing local regression coverage is mapped; final committed pipeline and deployed-byte verification remain separate requirements."
@@ -1007,11 +1014,13 @@
         "packages/daemon/src/db/migrations/175_merge_disposition.sql",
         "packages/daemon/src/pods/merge-journal.ts",
         "packages/daemon/src/db/migrations/176_merge_status_observations.sql",
-        "packages/daemon/src/pods/validation-ownership.ts"
+        "packages/daemon/src/pods/validation-ownership.ts",
+        "packages/daemon/src/pods/validation-repository.ts"
       ],
       "tests": [
         "packages/daemon/src/pods/merge-journal.test.ts",
-        "packages/daemon/src/pods/pod-manager.test.ts"
+        "packages/daemon/src/pods/pod-manager.test.ts",
+        "packages/daemon/src/pods/validation-repository.test.ts"
       ],
       "evidence": [
         "checkpoint-46.md: source-bound merged observations without invented requests; distinct canonical PR and admission counts with local operator proof; broader acceptance remains partial",
@@ -1020,7 +1029,8 @@
         "checkpoint-47.md: durable closed/open source observations, retained-source recovery and separate closed counts with local CLI/mobile proof; wider acceptance remains partial",
         "receipts/checkpoint-47-full-validation.txt",
         "receipts/checkpoint-47-validation-identity.json",
-        "checkpoint-55.md"
+        "checkpoint-55.md",
+        "checkpoint-57.md"
       ],
       "prerequisites": [],
       "remaining": " Checkpoint 46 verifies planned merged disposition and separate request/PR counts locally. Legacy missing source history, closed disposition, broader durable cleanup and native/live interaction remain outstanding. Checkpoint 47 verifies source-bound closure, reopening and planned/acknowledged recovery locally; ambiguous prior requests, legacy unbound evidence, durable cleanup and native/live interaction remain outstanding."
@@ -1058,11 +1068,13 @@
       "status": "partial",
       "implementation": [
         "packages/mobile-web/src/components/ValidationSummary.tsx",
-        "packages/daemon/src/pods/validation-ownership.ts"
+        "packages/daemon/src/pods/validation-ownership.ts",
+        "packages/daemon/src/pods/validation-repository.ts"
       ],
       "tests": [
         "packages/mobile-web/src/components/ValidationSummary.test.tsx",
-        "packages/daemon/src/pods/pod-manager.test.ts"
+        "packages/daemon/src/pods/pod-manager.test.ts",
+        "packages/daemon/src/pods/validation-repository.test.ts"
       ],
       "evidence": [
         "receipts/mobile-evidence-history-red.txt",
@@ -1070,7 +1082,8 @@
         "receipts/checkpoint-4-mobile.txt",
         "receipts/delivery-mobile-browser.json",
         "checkpoint-55.md",
-        "checkpoint-56.md"
+        "checkpoint-56.md",
+        "checkpoint-57.md"
       ],
       "prerequisites": [],
       "remaining": "Mobile preserves sequence history and unmatched latest snapshot; backend waiver/history and durable delivery reconciliation remain."
@@ -1104,12 +1117,14 @@
         "packages/daemon/src/pods/completion-journal.ts",
         "packages/shared/src/types/pod.ts",
         "packages/daemon/src/pods/cost-reconciliation.ts",
-        "packages/daemon/src/pods/cost-pod-projection.ts"
+        "packages/daemon/src/pods/cost-pod-projection.ts",
+        "packages/daemon/src/pods/validation-repository.ts"
       ],
       "tests": [
         "docs/analysis/2026-09-07/diagnostics.test.ts",
         "packages/daemon/src/pods/cost-aggregation.test.ts",
-        "packages/daemon/src/api/routes/pods.test.ts"
+        "packages/daemon/src/api/routes/pods.test.ts",
+        "packages/daemon/src/pods/validation-repository.test.ts"
       ],
       "evidence": [
         "receipts/history-cost-api.txt",
@@ -1117,7 +1132,8 @@
         "receipts/compact-projection-red.txt",
         "receipts/compact-projection-final.txt",
         "checkpoint-26.md: stored subtotals, unavailable attribution, source estimates, API/CLI/mobile/native test evidence; live and native interaction remain unverified",
-        "checkpoint-27.md: bounded phase projections, local malformed-contract per-pod HTTP 500 regression, CLI/mobile/native checks; live root cause and native interaction remain unverified"
+        "checkpoint-27.md: bounded phase projections, local malformed-contract per-pod HTTP 500 regression, CLI/mobile/native checks; live root cause and native interaction remain unverified",
+        "checkpoint-57.md"
       ],
       "prerequisites": [],
       "remaining": "Dedicated compact SQLite projection bounds task/text excerpts and four display JSON fields before Node materialization, excludes unrelated evidence, and marks truncated finalization output without changing storage. Paginated rows retain existing keyset/limit rules. Legacy full/nonpaginated reads and review-event hydration are not globally memory bounded; historical live failure cause, final source and live verification remain."
@@ -1808,7 +1824,7 @@
       "prerequisites": []
     }
   ],
-  "lastCheckpoint": "checkpoint-56.md",
+  "lastCheckpoint": "checkpoint-57.md",
   "migrationLineage": {
     "managedBaseline": "142-152; exact bytes from tracking commit cba763ba0bb3d65cb4c055e00033016ba1d5c646",
     "nativeCurrent": "164-176; byte-preserving move of unpublished native 151-163",
