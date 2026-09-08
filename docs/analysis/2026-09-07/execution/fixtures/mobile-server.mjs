@@ -97,6 +97,45 @@ if (['retry', 'dispatch'].includes(process.env.FIXTURE_MODE))
     finalization: { ...pod.finalization, phase: 'ready', pendingDecisionId: null },
     lastValidationResult: { ...successfulValidation, overall: 'fail' },
   };
+if (process.env.FIXTURE_MODE === 'foundry-review-unavailable') {
+  const reason =
+    'Review failed: Foundry tool review unavailable on the selected provider binding; reconcile it before retry.';
+  const blocked = {
+    ...successfulValidation,
+    attempt: 2,
+    timestamp: '2026-09-08T09:00:00Z',
+    overall: 'fail',
+    reviewSkipKind: 'review-failed',
+    reviewSkipReason: reason,
+    reviewTokenUsage: { inputTokens: 100, outputTokens: 10 },
+    taskReview: {
+      status: 'fail',
+      model: 'local-foundry-fixture',
+      reasoning: reason,
+      issues: ['Retained initial finding from the completed review'],
+      screenshots: [],
+      tokenUsage: { inputTokens: 100, outputTokens: 10 },
+    },
+  };
+  pod = {
+    ...pod,
+    task: '[Local fixture] Inspect unavailable Foundry deep review',
+    status: 'review_required',
+    pendingEscalation: null,
+    recordDiagnostics: [],
+    finalization: { ...pod.finalization, phase: 'ready', pendingDecisionId: null },
+    lastValidationResult: blocked,
+  };
+  validationHistory.push({
+    id: 'v13',
+    podId: pod.id,
+    attempt: 2,
+    sequence: 13,
+    cycle: 1,
+    createdAt: blocked.timestamp,
+    result: blocked,
+  });
+}
 const scanJob = {
   id: 'scan-fixture',
   name: 'Local dependency and secret scan',

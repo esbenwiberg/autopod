@@ -49,6 +49,8 @@ export interface ToolUseReviewConfig {
   maxToolCalls?: number;
   /** Anthropic API key. If not provided, uses ANTHROPIC_API_KEY env var. */
   apiKey?: string;
+  /** Already resolved provider endpoint/auth and exact dispatch model. Never falls back to daemon auth. */
+  providerClient?: { client: Pick<Anthropic, 'messages'>; model: string };
 }
 
 /**
@@ -61,9 +63,8 @@ export async function runToolUseReview(
   const maxToolCalls = config.maxToolCalls ?? DEFAULT_MAX_TOOL_CALLS;
   const deadline = Date.now() + config.timeout;
 
-  const client = new Anthropic({
-    apiKey: config.apiKey,
-  });
+  const client = config.providerClient?.client ?? new Anthropic({ apiKey: config.apiKey });
+  const model = config.providerClient?.model ?? resolveModelId(config.model);
 
   const tools = getToolDefinitions();
   const messages: MessageParam[] = [{ role: 'user', content: config.prompt }];
@@ -82,7 +83,7 @@ export async function runToolUseReview(
 
     const response: Message = await client.messages.create(
       {
-        model: resolveModelId(config.model),
+        model,
         max_tokens: 8192,
         messages,
         tools,

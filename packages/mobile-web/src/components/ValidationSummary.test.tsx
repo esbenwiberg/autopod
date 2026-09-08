@@ -163,6 +163,45 @@ describe('ValidationSummary', () => {
     button.dispatchEvent(new MouseEvent('click', { bubbles: true }));
   }
 
+  it('shows unavailable reviewer execution as failed and keeps prior finding history', async () => {
+    const reason =
+      'Review failed: Foundry tool review unavailable on the selected provider binding; reconcile it before retry.';
+    const current = result({
+      overall: 'fail',
+      reviewSkipKind: 'review-failed',
+      reviewSkipReason: reason,
+      taskReview: {
+        status: 'fail',
+        reasoning: reason,
+        issues: ['Retained prior finding'],
+        model: 'selected',
+        screenshots: [],
+      },
+    });
+    await act(async () => {
+      root.render(<ValidationSummary history={[stored(1, result()), stored(2, current)]} />);
+    });
+    expect(container.textContent).toContain(reason);
+    expect(rowsFor(current).find((row) => row.label === 'review')).toMatchObject({
+      status: 'fail',
+      note: reason,
+    });
+    await act(async () => {
+      clickByText('Show previous 1 attempt');
+    });
+    expect(container.textContent).toContain('Validation #1');
+    expect(current.taskReview?.issues).toEqual(['Retained prior finding']);
+    expect(
+      rowsFor(
+        result({
+          overall: 'fail',
+          reviewSkipKind: 'review-failed',
+          reviewSkipReason: 'Reviewer termination could not be confirmed',
+        }),
+      ).find((row) => row.label === 'review')?.status,
+    ).toBe('fail');
+  });
+
   it('shows only the latest validation attempt by default', async () => {
     await act(async () => {
       root.render(

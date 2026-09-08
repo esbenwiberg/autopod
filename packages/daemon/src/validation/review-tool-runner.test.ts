@@ -3,6 +3,7 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { promisify } from 'node:util';
+import type Anthropic from '@anthropic-ai/sdk';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const execFileAsync = promisify(execFile);
@@ -27,6 +28,76 @@ vi.mock('@anthropic-ai/sdk', () => ({
 describe('review tool runner - Anthropic request shape', () => {
   afterEach(() => {
     anthropicMocks.messagesCreate.mockReset();
+  });
+
+  it('uses the supplied provider client and resolved model without default authentication', async () => {
+    const response = {
+      content: [{ type: 'text', text: '{"status":"pass"}' }],
+      stop_reason: 'end_turn',
+      usage: { input_tokens: 12, output_tokens: 3 },
+    };
+    anthropicMocks.messagesCreate.mockResolvedValue(response);
+    const create = vi.fn().mockResolvedValue(response);
+    const { runToolUseReview } = await import('./review-tool-runner.js');
+    const result = await runToolUseReview({
+      model: 'configured-alias',
+      prompt: 'review',
+      worktreePath: process.cwd(),
+      timeout: 1000,
+      apiKey: 'unrelated-default-key',
+      providerClient: {
+        model: 'resolved-deployment',
+        client: { messages: { create } } as unknown as Anthropic,
+      },
+    });
+    expect(create).toHaveBeenCalledOnce();
+    expect(create.mock.calls[0]?.[0]).toMatchObject({ model: 'resolved-deployment' });
+    expect(anthropicMocks.messagesCreate).not.toHaveBeenCalled();
+    expect(result.tokenUsage).toEqual({ inputTokens: 12, outputTokens: 3 });
+  });
+
+  it('retains the selected client and model across actual tool turns', async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), 'review-bound-turn-'));
+    try {
+      await fs.writeFile(path.join(root, 'evidence.txt'), 'selected repo evidence');
+      const create = vi
+        .fn()
+        .mockResolvedValueOnce({
+          content: [
+            { type: 'tool_use', id: 'read1', name: 'read_file', input: { path: 'evidence.txt' } },
+          ],
+          stop_reason: 'tool_use',
+          usage: { input_tokens: 10, output_tokens: 2 },
+        })
+        .mockResolvedValueOnce({
+          content: [{ type: 'text', text: '{"status":"pass"}' }],
+          stop_reason: 'end_turn',
+          usage: { input_tokens: 20, output_tokens: 3 },
+        });
+      const { runToolUseReview } = await import('./review-tool-runner.js');
+      const result = await runToolUseReview({
+        model: 'configured',
+        prompt: 'review',
+        worktreePath: root,
+        timeout: 1000,
+        providerClient: {
+          model: 'selected-deployment',
+          client: { messages: { create } } as unknown as Anthropic,
+        },
+      });
+      expect(create).toHaveBeenCalledTimes(2);
+      expect(create.mock.calls.map(([body]) => body.model)).toEqual([
+        'selected-deployment',
+        'selected-deployment',
+      ]);
+      expect(JSON.stringify(create.mock.calls[1]?.[0].messages)).toContain(
+        'selected repo evidence',
+      );
+      expect(anthropicMocks.messagesCreate).not.toHaveBeenCalled();
+      expect(result.tokenUsage).toEqual({ inputTokens: 30, outputTokens: 5 });
+    } finally {
+      await fs.rm(root, { recursive: true, force: true });
+    }
   });
 
   it('passes timeout as an SDK option instead of an API body field', async () => {

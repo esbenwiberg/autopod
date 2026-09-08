@@ -94,17 +94,24 @@ export function rowsFor(result: ValidationResult): Row[] {
       note: failedFacts > 0 ? `${failedFacts} failed` : undefined,
     });
   }
+  const reviewerUnavailable =
+    result.reviewSkipKind === 'review-failed' || result.reviewSkipKind === 'review-timeout';
   if (result.taskReview) {
     rows.push({
       label: 'review',
       status: result.taskReview.status,
-      note:
-        result.taskReview.status !== 'pass'
+      note: reviewerUnavailable
+        ? firstLine(result.reviewSkipReason ?? result.taskReview.reasoning, 512)
+        : result.taskReview.status !== 'pass'
           ? (result.taskReview.issues[0] ?? firstLine(result.taskReview.reasoning))
           : undefined,
     });
   } else if (result.reviewSkipReason) {
-    rows.push({ label: 'review', status: 'skip', note: result.reviewSkipReason });
+    rows.push({
+      label: 'review',
+      status: reviewerUnavailable ? 'fail' : 'skip',
+      note: result.reviewSkipReason,
+    });
   }
   return rows;
 }
@@ -251,13 +258,13 @@ function labelForStatus(status: PhaseStatus): string {
   return status === 'pending_human' ? 'pending' : status;
 }
 
-function firstLine(text: string): string | undefined {
+function firstLine(text: string, limit = 96): string | undefined {
   const line = text
     .split(/\r?\n/)
     .map((item) => item.trim())
     .find(Boolean);
   if (!line) return undefined;
-  return line.length > 96 ? `${line.slice(0, 95).trimEnd()}...` : line;
+  return line.length > limit ? `${line.slice(0, limit - 1).trimEnd()}...` : line;
 }
 
 function formatDuration(durationMs: number): string {

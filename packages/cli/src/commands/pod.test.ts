@@ -925,3 +925,58 @@ it.each(['Branch preservation', 'Approval delivery', 'Source reconciliation'])(
     }
   },
 );
+
+it('shows the unavailable-review reason through real status HTTP and preserves findings in JSON', async () => {
+  const reason =
+    'Review failed: Foundry tool review unavailable on the selected provider binding; reconcile it before retry.';
+  const pod = {
+    ...(await createMockClient().getSession('abcd1234')),
+    status: 'review_required',
+    lastValidationResult: {
+      overall: 'fail',
+      attempt: 2,
+      reviewSkipKind: 'review-failed',
+      reviewSkipReason: reason,
+      taskReview: { status: 'fail', reasoning: reason, issues: ['Retained original finding'] },
+    },
+  };
+  const requests: string[] = [];
+  const server = createServer((request, response) => {
+    requests.push(`${request.method} ${request.url}`);
+    response.setHeader('content-type', 'application/json');
+    if (request.method === 'GET' && request.url === '/pods/abcd1234')
+      response.end(JSON.stringify(pod));
+    else {
+      response.statusCode = 404;
+      response.end('{}');
+    }
+  });
+  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+  const address = server.address();
+  if (!address || typeof address === 'string') throw new Error('No fixture port');
+  const client = new AutopodClient({
+    baseUrl: `http://127.0.0.1:${address.port}`,
+    getToken: async () => 'local-fixture-only',
+  });
+  const output = vi.spyOn(console, 'log').mockImplementation(() => {});
+  const stdout = vi.spyOn(process.stdout, 'write').mockImplementation(() => true);
+  try {
+    const command = () => {
+      const program = new Command();
+      registerPodCommands(program, () => client);
+      return program;
+    };
+    await command().parseAsync(['node', 'ap', 'status', 'abcd1234']);
+    expect(output.mock.calls.flat().join('\n')).toContain(reason);
+    output.mockClear();
+    await command().parseAsync(['node', 'ap', 'status', 'abcd1234', '--json']);
+    const json = JSON.parse(stdout.mock.calls.map(([chunk]) => String(chunk)).join(''));
+    expect(json.lastValidationResult.taskReview.issues).toEqual(['Retained original finding']);
+    expect(json.lastValidationResult.reviewSkipKind).toBe('review-failed');
+    expect(requests.every((request) => request.startsWith('GET '))).toBe(true);
+  } finally {
+    output.mockRestore();
+    stdout.mockRestore();
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+  }
+});

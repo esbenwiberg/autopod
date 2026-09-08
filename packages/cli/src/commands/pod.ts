@@ -856,6 +856,10 @@ export function registerPodCommands(program: Command, getClient: () => AutopodCl
       if (s.lastValidationResult) {
         const vr = s.lastValidationResult;
         const color = vr.overall === 'pass' ? chalk.green : chalk.red;
+        if (vr.reviewSkipKind === 'review-failed' || vr.reviewSkipKind === 'review-timeout')
+          console.log(
+            chalk.red((vr.reviewSkipReason ?? 'Reviewer execution unavailable.').slice(0, 1024)),
+          );
         for (const [phase, evidence] of [
           ['lint', vr.lint?.reusedEvidence],
           ['test', vr.test?.reusedEvidence],

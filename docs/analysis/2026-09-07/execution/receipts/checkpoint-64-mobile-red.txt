@@ -1,0 +1,30 @@
+
+ RUN  v4.1.11 /private/tmp/autopod-durable-execution/packages/mobile-web
+
+ ❯ src/components/ValidationSummary.test.tsx (9 tests | 1 failed | 8 skipped) 21ms
+     × shows unavailable reviewer execution as failed and keeps prior finding history 20ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/components/ValidationSummary.test.tsx > ValidationSummary > shows unavailable reviewer execution as failed and keeps prior finding history
+AssertionError: expected 'Validation resultsValidation #1Jan 1,…' to contain 'Foundry tool review unavailable on th…'
+
+Expected: "Foundry tool review unavailable on the selected provider binding; reconcile it before retry."
+Received: "Validation resultsValidation #1Jan 1, 11:00 AM · 1.2 s · Legacy attempt numberfailbuildpasshealthpasspages (0)skipNo page checks executedreviewfailRetained prior findingShow previous 1 attempt"
+
+ ❯ src/components/ValidationSummary.test.tsx:171:35
+    169|       taskReview: { status: 'fail', reasoning: reason, issues: ['Retai…
+    170|     await act(async () => { root.render(<ValidationSummary history={[s…
+    171|     expect(container.textContent).toContain(reason);
+       |                                   ^
+    172|     expect(rowsFor(current).find((row) => row.label === 'review')).toM…
+    173|     await act(async () => { clickByText('Show previous 1 attempt'); });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 8 skipped (9)
+   Start at  11:40:31
+   Duration  412ms (transform 23ms, setup 11ms, import 35ms, tests 21ms, environment 254ms)
+

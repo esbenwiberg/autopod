@@ -3632,6 +3632,94 @@ human_review: []
     expect(runToolUseReview).not.toHaveBeenCalled();
   });
 
+  it.each(['pass', 'uncertain', 'unavailable'] as const)(
+    'keeps deep Foundry review bound when tool review is %s',
+    async (toolOutcome) => {
+      const worktreePath = await fs.mkdtemp(path.join(os.tmpdir(), 'autopod-foundry-review-'));
+      try {
+        const create = vi.fn().mockResolvedValue({
+          content: [
+            {
+              type: 'text',
+              text: JSON.stringify({
+                status: 'pass',
+                reasoning: 'initial foundry review',
+                issues: ['initial concern'],
+              }),
+            },
+          ],
+          usage: { input_tokens: 100, output_tokens: 10 },
+        });
+        const client = { messages: { create } };
+        vi.mocked(createProviderAnthropicClient).mockResolvedValue({
+          ok: true,
+          client,
+          model: 'resolved-foundry-model',
+        } as Awaited<ReturnType<typeof createProviderAnthropicClient>>);
+        vi.mocked(runToolUseReview).mockImplementation(async (config) => {
+          expect(config.providerClient).toMatchObject({ client, model: 'resolved-foundry-model' });
+          expect(config.apiKey).toBeUndefined();
+          if (toolOutcome === 'unavailable') throw new Error('selected foundry client unavailable');
+          return {
+            stdout: JSON.stringify({
+              status: toolOutcome,
+              reasoning: 'tool review',
+              issues: ['tool concern'],
+            }),
+            tokenUsage: { inputTokens: 200, outputTokens: 20 },
+          };
+        });
+        vi.mocked(runAgenticReview).mockResolvedValue({
+          stdout: JSON.stringify({ status: 'pass', reasoning: 'unbound host verdict', issues: [] }),
+        });
+        const result = await createLocalValidationEngine(stubContainerManager()).validate(
+          baseConfig({
+            reviewerProvider: 'foundry',
+            reviewerProviderCredentials: {
+              provider: 'foundry',
+              endpoint: 'https://foundry.example',
+              projectId: 'test',
+              apiKey: 'selected-test-key',
+              apiSurface: 'anthropic',
+            },
+            reviewerModel: 'configured-foundry-model',
+            reviewerApiKey: 'unrelated-default-key',
+            reviewDepth: 'deep',
+            validationSuite: toolOutcome === 'pass' ? 'deterministic' : 'full',
+            worktreePath,
+            diff: '+const changed = true;',
+          }),
+        );
+        expect(runToolUseReview).toHaveBeenCalledOnce();
+        expect(vi.mocked(runToolUseReview).mock.calls[0]?.[0].providerClient).toMatchObject({
+          client,
+          model: 'resolved-foundry-model',
+        });
+        expect(vi.mocked(runToolUseReview).mock.calls[0]?.[0].apiKey).toBeUndefined();
+        expect(runClaudeCli).not.toHaveBeenCalled();
+        expect(runAgenticReview).not.toHaveBeenCalled();
+        expect(createProviderAnthropicClient).toHaveBeenCalledOnce();
+        expect(create.mock.calls[0]?.[0]).toMatchObject({ model: 'resolved-foundry-model' });
+        if (toolOutcome !== 'pass') {
+          expect(result.overall).toBe('fail');
+          expect(result.taskReview?.status).toBe('fail');
+          expect(result.taskReview?.reasoning).toMatch(/Foundry.*(?:unavailable|binding)/);
+          expect(result.reviewSkipKind).toBe('review-failed');
+          expect(result.reviewSkipReason).toMatch(/Foundry.*(?:unavailable|binding)/);
+          expect(result.reviewTokenUsage).toMatchObject({
+            inputTokens: toolOutcome === 'unavailable' ? 100 : 300,
+          });
+          expect(result.taskReview?.issues).toContain(
+            toolOutcome === 'unavailable' ? 'initial concern' : 'tool concern',
+          );
+          expect(runContainerReviewer).not.toHaveBeenCalled();
+        }
+      } finally {
+        await fs.rm(worktreePath, { recursive: true, force: true });
+      }
+    },
+  );
+
   it('keeps Foundry Anthropic validation Review on daemon provider auth', async () => {
     const messagesCreate = vi.fn().mockResolvedValue({
       content: [

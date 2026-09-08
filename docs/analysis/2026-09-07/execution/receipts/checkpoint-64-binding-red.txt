@@ -1,0 +1,58 @@
+
+ RUN  v4.1.11 /private/tmp/autopod-durable-execution/packages/daemon
+
+ ❯ src/validation/review-tool-runner.test.ts (15 tests | 1 failed | 14 skipped) 8ms
+     × uses the supplied provider client and resolved model without default authentication 7ms
+ ❯ src/validation/local-validation-engine.test.ts (161 tests | 3 failed | 158 skipped) 222ms
+     × keeps deep Foundry review bound when tool review is pass 47ms
+     × keeps deep Foundry review bound when tool review is uncertain 84ms
+     × keeps deep Foundry review bound when tool review is unavailable 90ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 4 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/validation/local-validation-engine.test.ts > validate() — facts + review gate > keeps deep Foundry review bound when tool review is pass
+ FAIL  src/validation/local-validation-engine.test.ts > validate() — facts + review gate > keeps deep Foundry review bound when tool review is uncertain
+ FAIL  src/validation/local-validation-engine.test.ts > validate() — facts + review gate > keeps deep Foundry review bound when tool review is unavailable
+AssertionError: expected undefined to match object { Object (client, model) }
+
+- Expected:
+{
+  "client": {
+    "messages": {
+      "create": [Function Mock],
+    },
+  },
+  "model": "resolved-foundry-model",
+}
+
++ Received:
+undefined
+
+ ❯ src/validation/local-validation-engine.test.ts:3660:77
+    3658|       }));
+    3659|       expect(runToolUseReview).toHaveBeenCalledOnce();
+    3660|       expect(vi.mocked(runToolUseReview).mock.calls[0]?.[0].providerCl…
+       |                                                                             ^
+    3661|       expect(vi.mocked(runToolUseReview).mock.calls[0]?.[0].apiKey).to…
+    3662|       expect(runClaudeCli).not.toHaveBeenCalled();
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/4]⎯
+
+ FAIL  src/validation/review-tool-runner.test.ts > review tool runner - Anthropic request shape > uses the supplied provider client and resolved model without default authentication
+AssertionError: expected "vi.fn()" to be called once, but got 0 times
+ ❯ src/validation/review-tool-runner.test.ts:43:20
+     41|       providerClient: { model: 'resolved-deployment', client: { messag…
+     42|     });
+     43|     expect(create).toHaveBeenCalledOnce();
+       |                    ^
+     44|     expect(create.mock.calls[0]?.[0]).toMatchObject({ model: 'resolved…
+     45|     expect(anthropicMocks.messagesCreate).not.toHaveBeenCalled();
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/4]⎯
+
+
+ Test Files  2 failed (2)
+      Tests  4 failed | 172 skipped (176)
+   Start at  11:36:10
+   Duration  799ms (transform 429ms, setup 0ms, import 569ms, tests 230ms, environment 0ms)
+

@@ -1,0 +1,166 @@
+- main [ref=f1e3]:
+  - link "← Back" [ref=f1e4] [cursor=pointer]:
+    - /url: "#/"
+  - generic [ref=f1e5]:
+    - generic [ref=f1e6]: local-fixture
+    - generic [ref=f1e7]: review required
+  - heading "[Local fixture] Inspect unavailable Foundry deep review" [level=1] [ref=f1e8]
+  - paragraph [ref=f1e9]: local-fixture · codex · fixture-model
+  - generic [ref=f1e10]:
+    - heading "Worker settlement" [level=2] [ref=f1e11]
+    - paragraph [ref=f1e12]: "Agent settled at 2026-09-07T10:09:00Z. Source preservation: 2026-09-07T10:10:00Z."
+    - paragraph [ref=f1e13]: "Next stage: ready."
+  - generic [ref=f1e14]:
+    - heading "Dispatch preflight" [level=2] [ref=f1e15]
+    - paragraph [ref=f1e78]: review_required · 2026-09-07T15:00:00Z
+    - paragraph [ref=f1e79]: github.com/example/repo · main
+    - paragraph [ref=f1e80]:
+      - text: "Fresh base:"
+      - code [ref=f1e81]: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+    - paragraph [ref=f1e82]:
+      - text: "Equivalent work:"
+      - link "prior-fixture" [ref=f1e83] [cursor=pointer]:
+        - /url: "#/pod/prior-fixture"
+      - text: · validated · dispatch_receipt
+    - heading "Execution environment" [level=3] [ref=f1e17]
+    - paragraph [ref=f1e84]: validation preflight blocked · generation 1 · 2026-09-07T16:30:00Z
+    - paragraph [ref=f1e85]: "Configured worker: codex CLI 0.144.4 · fixture-model"
+    - paragraph [ref=f1e86]: "Provider: fixture-provider · account: not recorded"
+    - paragraph [ref=f1e87]: "Daemon: unverified"
+    - paragraph [ref=f1e88]:
+      - text: "Image:"
+      - code [ref=f1e89]: unverified
+    - paragraph [ref=f1e90]:
+      - text: "Validation implementation:"
+      - code [ref=f1e91]: unverified
+    - paragraph [ref=f1e92]:
+      - text: "Contract:"
+      - code [ref=f1e93]: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+    - paragraph [ref=f1e94]: "Memory: unverified bytes · CPU: unverified"
+    - paragraph [ref=f1e95]: "fact:compile: dotnet · missing"
+    - paragraph [ref=f1e96]: Required launcher dotnet is missing. Reconcile the image or declared command before validation.
+    - paragraph [ref=f1e97]: Actual image digest is unverified.
+    - paragraph [ref=f1e98]: Effective memory capacity is unverified.
+    - paragraph [ref=f1e19]: To intentionally repeat this request, provide a reason. This creates a distinct task and may run a coding agent. Fresh contract, provider, and environment checks still apply.
+    - generic [ref=f1e20]:
+      - text: Reason for intentional rerun
+      - textbox "Reason for intentional rerun" [ref=f1e21]
+    - button "Create intentional rerun" [disabled] [ref=f1e22]
+  - generic [ref=f1e23]:
+    - heading "Validation retry budget" [level=2] [ref=f1e24]
+    - paragraph [ref=f1e99]: 3 executed / 4 admitted validations across this task.
+    - paragraph [ref=f1e100]: 2 / 2 automatic transient retries · 1875 ms measured · 1 interrupted with unknown duration.
+    - paragraph [ref=f1e101]: "Latest outcome: unknown · partial telemetry."
+    - generic [ref=f1e102]:
+      - text: Reason for one extra retry
+      - textbox "Reason for one extra retry" [ref=f1e103]
+    - button "Record one retry authorization" [disabled] [ref=f1e104]
+    - button "Resume validation" [ref=f1e105]
+    - button "Refresh retry accounting" [ref=f1e25]
+  - generic [ref=f1e26]:
+    - heading "Task accounting" [level=2] [ref=f1e27]
+    - paragraph [ref=f1e106]: "Logical task: task:local-original"
+    - paragraph [ref=f1e107]: "Execution: execution:local-fixture"
+    - paragraph [ref=f1e108]: 2 pods · 3 recorded agent runs · 4 provider attempts · 5 validations
+    - paragraph [ref=f1e109]: 1 PR receipts · 1 unresolved of 2 intents
+    - paragraph [ref=f1e110]: Durable ledger only; historical PR URLs are not reconstructed receipts.
+    - paragraph [ref=f1e111]: PR disposition observations unavailable.
+    - paragraph [ref=f1e112]: Source-bound merge evidence unavailable.
+    - paragraph [ref=f1e113]: Current provider status unverified.
+    - paragraph [ref=f1e114]: "Recorded tokens: 100 / 100"
+    - paragraph [ref=f1e115]: "Stored task cost subtotal: $1.2500 · partial telemetry"
+    - paragraph [ref=f1e116]: Billing unverified; stored amounts can include estimates.
+    - paragraph [ref=f1e117]: "Known estimates: $0.5000 · 1 identified phases with unavailable cost · 1 pods with conflicting attribution"
+    - paragraph [ref=f1e118]: "local-original: Stored phase costs conflict; no proportional allocation applied."
+    - paragraph [ref=f1e119]: 2 additional cost diagnostics omitted.
+    - paragraph [ref=f1e120]: Recorded task tokens have reached the configured limit.
+    - paragraph [ref=f1e121]: Infrastructure cost unavailable
+    - button "Refresh task accounting" [ref=f1e29]
+  - generic [ref=f1e30]:
+    - heading "Validation results" [level=2] [ref=f1e31]
+    - generic [ref=f1e32]:
+      - article [ref=f1e122]:
+        - generic [ref=f1e123]:
+          - generic [ref=f1e124]:
+            - generic [ref=f1e125]: "Validation #13"
+            - generic [ref=f1e126]: Sep 8, 11:00 AM · 100 ms · Attempt 2, cycle 2
+          - generic [ref=f1e127]: fail
+        - list [ref=f1e128]:
+          - listitem [ref=f1e129]:
+            - generic [ref=f1e130]: build
+            - generic [ref=f1e131]: pass
+          - listitem [ref=f1e132]:
+            - generic [ref=f1e133]: health
+            - generic [ref=f1e134]: skip
+          - listitem [ref=f1e135]:
+            - generic [ref=f1e136]: test
+            - generic [ref=f1e137]: pass
+            - generic [ref=f1e138]: Reused local-evidence-1; executed 2026-09-07T09:00:00Z
+          - listitem [ref=f1e139]:
+            - generic [ref=f1e140]: pages (0)
+            - generic [ref=f1e141]: skip
+            - generic [ref=f1e142]: No page checks executed
+          - listitem [ref=f1e143]:
+            - generic [ref=f1e144]: review
+            - generic [ref=f1e145]: fail
+            - generic [ref=f1e146]: "Review failed: Foundry tool review unavailable on the selected provider binding; reconcile it before retry."
+      - article [ref=f1e148]:
+        - generic [ref=f1e149]:
+          - generic [ref=f1e150]:
+            - generic [ref=f1e151]: "Validation #12"
+            - generic [ref=f1e152]: Sep 7, 12:10 PM · 100 ms · Attempt 1, cycle 2
+          - generic [ref=f1e153]: pass
+        - list [ref=f1e154]:
+          - listitem [ref=f1e155]:
+            - generic [ref=f1e156]: build
+            - generic [ref=f1e157]: pass
+          - listitem [ref=f1e158]:
+            - generic [ref=f1e159]: health
+            - generic [ref=f1e160]: skip
+          - listitem [ref=f1e161]:
+            - generic [ref=f1e162]: test
+            - generic [ref=f1e163]: pass
+            - generic [ref=f1e164]: Reused local-evidence-1; executed 2026-09-07T09:00:00Z
+          - listitem [ref=f1e165]:
+            - generic [ref=f1e166]: pages (0)
+            - generic [ref=f1e167]: skip
+            - generic [ref=f1e168]: No page checks executed
+      - article [ref=f1e169]:
+        - generic [ref=f1e170]:
+          - generic [ref=f1e171]:
+            - generic [ref=f1e172]: "Validation #11"
+            - generic [ref=f1e173]: Sep 7, 11:00 AM · 100 ms · Attempt 1, cycle 1
+          - generic [ref=f1e174]: fail
+        - list [ref=f1e175]:
+          - listitem [ref=f1e176]:
+            - generic [ref=f1e177]: build
+            - generic [ref=f1e178]: pass
+          - listitem [ref=f1e179]:
+            - generic [ref=f1e180]: health
+            - generic [ref=f1e181]: skip
+          - listitem [ref=f1e182]:
+            - generic [ref=f1e183]: test
+            - generic [ref=f1e184]: fail
+          - listitem [ref=f1e185]:
+            - generic [ref=f1e186]: pages (0)
+            - generic [ref=f1e187]: skip
+            - generic [ref=f1e188]: No page checks executed
+    - button "Hide previous attempts" [active] [ref=f1e189] [cursor=pointer]
+  - generic [ref=f1e58]:
+    - button "Approve" [ref=f1e59] [cursor=pointer]
+    - button "Reject" [ref=f1e60] [cursor=pointer]
+    - button "Extend (+3)" [ref=f1e61] [cursor=pointer]
+    - button "Spawn fix" [ref=f1e62] [cursor=pointer]
+    - button "Kill" [ref=f1e63] [cursor=pointer]
+  - generic [ref=f1e64]:
+    - checkbox "Skip validation on next pass" [ref=f1e65]
+    - generic [ref=f1e66]: Skip validation on next pass
+  - region "Task details" [ref=f1e67]:
+    - article [ref=f1e68]:
+      - generic [ref=f1e70]:
+        - generic [ref=f1e71]: Task
+        - heading "Task" [level=2] [ref=f1e72]
+        - paragraph [ref=f1e74]: "[Local fixture] Inspect unavailable Foundry deep review"
+  - generic [ref=f1e75]:
+    - heading "Recent activity" [level=2] [ref=f1e76]
+    - paragraph [ref=f1e77]: No activity yet.

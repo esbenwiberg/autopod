@@ -787,7 +787,7 @@ export function createLocalValidationEngine(
           const useCanonicalCouncil =
             config.validationSuite === 'full' &&
             (config.priorReviewBatch !== undefined || config.councilOnly === true);
-          let reviewRun = useCanonicalCouncil
+          let reviewRun: Awaited<ReturnType<typeof runTaskReview>> = useCanonicalCouncil
             ? {
                 result: {
                   status: 'pass' as const,
@@ -829,7 +829,7 @@ export function createLocalValidationEngine(
           reviewSkipReason = reviewRun.skipReason;
           // Every full-suite review ends with one canonical frozen council. On
           // retries this is the first and only stochastic review authority.
-          if (taskReview && config.validationSuite === 'full') {
+          if (taskReview && !reviewRun.bindingUnavailable && config.validationSuite === 'full') {
             const reviewedHead = await readReviewHead(config.worktreePath, config.startCommitSha);
             const frozenDiff = boundedReviewPacketString(config.diff, 1_000_000);
             const packet = createFrozenReviewPacket({
@@ -1145,7 +1145,7 @@ export function createLocalValidationEngine(
             };
             reviewTokenUsage = taskReview?.tokenUsage;
           }
-          if (taskReview === null && reviewRun.skipReason) {
+          if ((taskReview === null || reviewRun.bindingUnavailable) && reviewRun.skipReason) {
             reviewSkipKind = classifyReviewSkipKind(reviewRun.skipReason);
           }
         }
@@ -3609,6 +3609,8 @@ async function runTaskReview(
 ): Promise<{
   result: TaskReviewResult | null;
   skipReason?: string;
+  /** A required provider-bound path could not run; a council must not erase this failure. */
+  bindingUnavailable?: true;
   tokenUsage?: {
     inputTokens: number;
     outputTokens: number;
@@ -3633,6 +3635,47 @@ async function runTaskReview(
   const reviewTimeout = config.reviewTimeout ?? 300_000;
   const reviewDepth = config.reviewDepth ?? 'auto';
   const reviewRunner = resolveReviewRunner(config);
+  let boundProvider:
+    | Extract<Awaited<ReturnType<typeof createProviderAnthropicClient>>, { ok: true }>
+    | undefined;
+  const getBoundProvider = async () => {
+    if (boundProvider) return boundProvider;
+    const selected = await createProviderAnthropicClient(
+      {
+        provider: config.reviewerProvider,
+        credentials: config.reviewerProviderCredentials,
+        model: config.reviewerModel ?? 'claude-haiku-4-5',
+        profileName: config.podId,
+      },
+      log ?? noopLogger,
+    );
+    if (!selected.ok) throw new Error(`Reviewer provider unavailable: ${selected.reason}`);
+    boundProvider = selected;
+    return selected;
+  };
+  const bindingUnavailable = (
+    parsed: ReturnType<typeof parseReviewJson>,
+    tokenUsage: TaskReviewResult['tokenUsage'],
+    reason: string,
+  ): Awaited<ReturnType<typeof runTaskReview>> => ({
+    bindingUnavailable: true,
+    skipReason: `Review failed: ${reason}`,
+    result: {
+      status: 'fail',
+      reasoning: `${reason}${parsed ? ` ${parsed.reasoning}` : ''}`,
+      issues: parsed?.issues ?? [],
+      firstGateFindings: persistedFirstGateFindings(parsed?.firstGateFindings),
+      firstGateOverflow: parsed?.firstGateOverflow,
+      model: config.reviewerModel ?? 'auto',
+      screenshots: [],
+      diff: config.diff,
+      requirementsCheck: parsed?.requirementsCheck,
+      deviationsAssessment: parsed?.deviationsAssessment,
+      tokenUsage,
+    },
+    tokenUsage,
+  });
+
   if (reviewRunner === 'unsupported') {
     return {
       result: null,
@@ -3712,10 +3755,9 @@ async function runTaskReview(
           tier1TokenUsage = containerReview.tokenUsage;
         } else if (shouldUseProfileBoundAnthropicReviewer(config)) {
           const providerReview = await runProfileBoundAnthropicReview(
-            config,
+            await getBoundProvider(),
             prompt,
             reviewTimeout,
-            log,
           );
           stdout = providerReview.stdout;
           tier1TokenUsage = providerReview.tokenUsage;
@@ -3829,7 +3871,9 @@ async function runTaskReview(
         prompt,
         worktreePath,
         timeout: reviewTimeout,
-        apiKey: config.reviewerApiKey,
+        ...(shouldUseProfileBoundAnthropicReviewer(config)
+          ? { providerClient: await getBoundProvider() }
+          : { apiKey: config.reviewerApiKey }),
       });
 
       const tier2Parsed = applyDiffFilterToParsed(
@@ -3867,6 +3911,12 @@ async function runTaskReview(
       // ── Tier 3: Agentic review (still uncertain) ────────────────────
       let allTierTokenUsage = accumulatedTokenUsage;
       if (tier2Parsed?.status === 'uncertain') {
+        if (shouldUseProfileBoundAnthropicReviewer(config))
+          return bindingUnavailable(
+            tier2Parsed,
+            accumulatedTokenUsage,
+            'Foundry agentic review unavailable: the selected provider binding has no configured host CLI route. Reconcile the reviewer binding before deeper review.',
+          );
         log?.info('Tier 2 returned uncertain, escalating to Tier 3 agentic review');
 
         try {
@@ -3944,6 +3994,12 @@ async function runTaskReview(
         tokenUsage: allTierTokenUsage,
       };
     } catch (err) {
+      if (shouldUseProfileBoundAnthropicReviewer(config))
+        return bindingUnavailable(
+          tier1Parsed,
+          tier1TokenUsage,
+          'Foundry tool review unavailable on the selected provider binding; reconcile it before retry.',
+        );
       if (err instanceof ClaudeCliError && err.kind === 'termination-failed')
         return {
           result: null,
@@ -4012,6 +4068,7 @@ async function runTaskReview(
 function isReviewInfrastructureFailure(
   reviewRun: Awaited<ReturnType<typeof runTaskReview>>,
 ): boolean {
+  if (reviewRun.bindingUnavailable) return false;
   if (reviewRun.result?.reviewBatch?.infrastructureUnavailable) return true;
   if (reviewRun.result !== null || !reviewRun.skipReason) return false;
   return (
@@ -4093,27 +4150,13 @@ function canReuseCachedPreSubmitForTier1(
 }
 
 async function runProfileBoundAnthropicReview(
-  config: ValidationEngineConfig,
+  llm: Extract<Awaited<ReturnType<typeof createProviderAnthropicClient>>, { ok: true }>,
   prompt: string,
   timeout: number,
-  log?: Logger,
 ): Promise<{
   stdout: string;
   tokenUsage?: { inputTokens: number; outputTokens: number; cachedInputTokens?: number };
 }> {
-  const llm = await createProviderAnthropicClient(
-    {
-      provider: config.reviewerProvider,
-      credentials: config.reviewerProviderCredentials,
-      model: config.reviewerModel ?? 'claude-haiku-4-5',
-      profileName: config.podId,
-    },
-    log ?? noopLogger,
-  );
-  if (!llm.ok) {
-    throw new Error(`Reviewer provider unavailable: ${llm.reason}`);
-  }
-
   const response = await llm.client.messages.create(
     {
       model: llm.model,

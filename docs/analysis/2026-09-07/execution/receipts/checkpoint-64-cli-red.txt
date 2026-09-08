@@ -1,0 +1,49 @@
+
+ RUN  v4.1.11 /private/tmp/autopod-durable-execution/packages/cli
+
+ ❯ src/commands/pod.test.ts (30 tests | 1 failed | 29 skipped) 21ms
+   × shows the unavailable-review reason through real status HTTP and preserves findings in JSON 20ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/commands/pod.test.ts > shows the unavailable-review reason through real status HTTP and preserves findings in JSON
+AssertionError: expected 'Pod abcd1234\n───────────────────────…' to contain 'Review failed: Foundry tool review un…'
+
+- Expected
++ Received
+
+- Review failed: Foundry tool review unavailable on the selected provider binding; reconcile it before retry.
++ Pod abcd1234
++ ──────────────────────────────────────────────────
++ Profile:      test
++ Status:       ⚠ Needs Review
++ Task accounting unavailable
++ Readiness: pending/unavailable
++ Task:         do things
++ Model:        opus
++ Runtime:      claude
++ Branch:       ap/abcd1234
++ Duration:     23553h 44m
++ Validations:  1/3
++ Suite:        full
++ Escalations:  0
++ Changes:      5 files (+100 -20)
++
++ Last validation: FAIL (full, attempt 2)
+
+ ❯ src/commands/pod.test.ts:948:49
+    946|     const command = () => { const program = new Command(); registerPod…
+    947|     await command().parseAsync(['node', 'ap', 'status', 'abcd1234']);
+    948|     expect(output.mock.calls.flat().join('\n')).toContain(reason);
+       |                                                 ^
+    949|     output.mockClear();
+    950|     await command().parseAsync(['node', 'ap', 'status', 'abcd1234', '-…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 29 skipped (30)
+   Start at  11:44:34
+   Duration  387ms (transform 149ms, setup 0ms, import 277ms, tests 21ms, environment 0ms)
+
