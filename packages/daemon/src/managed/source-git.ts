@@ -8,6 +8,12 @@ import type { FinalizeSourceDeliveryRequest, SourceCandidateReceipt } from '@aut
 const exec = promisify(execFile);
 export const ZERO_COMMIT = '0'.repeat(40);
 export const MAX_CANDIDATE_BYTES = 64 * 1024 * 1024;
+export type ManagedGitCredentialMode = 'bearer' | 'github-basic';
+export interface ManagedGitCredential {
+  url: string;
+  token: string;
+  mode?: ManagedGitCredentialMode;
+}
 export interface SourceEnrollment {
   repository: string;
   remote: string;
@@ -15,6 +21,8 @@ export interface SourceEnrollment {
   base: string;
   baseCommit: string;
   branchNamespace: string;
+  /** Explicit transport mode. Omission preserves the existing bearer behavior. */
+  credentialMode?: ManagedGitCredentialMode;
   /** Trusted isolated Git repository per pod; never the user's ordinary checkout. */
   workspace(podId: string): string;
 }
@@ -56,10 +64,20 @@ export function managedGitArguments(
     'http.followRedirects=false',
   ];
 }
+export function managedGitAuthorizationHeader(credential: ManagedGitCredential): string {
+  if (!credential.token || /[\0\r\n]/.test(credential.token))
+    throw new Error('managed-git-credential-invalid');
+  if ((credential.mode ?? 'bearer') === 'bearer')
+    return `Authorization: Bearer ${credential.token}`;
+  const url = new URL(credential.url);
+  if (url.protocol !== 'https:' || url.hostname !== 'github.com' || url.port)
+    throw new Error('managed-git-credential-mode-mismatch');
+  return `Authorization: Basic ${Buffer.from(`x-access-token:${credential.token}`).toString('base64')}`;
+}
 export async function managedGit(
   cwd: string,
   args: string[],
-  credential?: { url: string; token: string },
+  credential?: ManagedGitCredential,
   trustedDirectories: readonly string[] = [],
 ): Promise<string> {
   const configRoot = await mkdtemp(path.join(tmpdir(), 'autopod-managed-git-config-'));
@@ -86,7 +104,7 @@ export async function managedGit(
           ? {
               GIT_CONFIG_COUNT: '1',
               GIT_CONFIG_KEY_0: `http.${credential.url}.extraHeader`,
-              GIT_CONFIG_VALUE_0: `Authorization: Bearer ${credential.token}`,
+              GIT_CONFIG_VALUE_0: managedGitAuthorizationHeader(credential),
             }
           : {}),
       },
@@ -128,7 +146,9 @@ export class ManagedGitBroker {
     return managedGit(
       cwd,
       args,
-      credential ? { url: binding.remoteUrl, token: credential.token } : undefined,
+      credential
+        ? { url: binding.remoteUrl, token: credential.token, mode: binding.credentialMode }
+        : undefined,
     );
   }
   binding(source: {
@@ -158,6 +178,8 @@ export class ManagedGitBroker {
       const url = new URL(binding.remoteUrl);
       if (url.protocol !== 'https:' || url.username || url.password || url.search || url.hash)
         throw new Error('source-remote-invalid');
+      if (binding.credentialMode === 'github-basic' && (url.hostname !== 'github.com' || url.port))
+        throw new Error('source-credential-mode-mismatch');
     }
     return binding;
   }

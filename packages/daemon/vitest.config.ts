@@ -51,6 +51,7 @@ export default defineConfig({
     passWithNoTests: true,
     exclude: [
       '**/node_modules/**',
+      '**/.turbo/**',
       '**/.autopod-data/**',
       ...(shouldSkipDbTests() ? dbTestPatterns : []),
     ],
