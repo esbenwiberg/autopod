@@ -17,6 +17,7 @@ import {
   createPodQueue,
   createPodRepository,
 } from './pods/index.js';
+import { createNudgeRepository } from './pods/nudge-repository.js';
 import { createProfileStore } from './profiles/index.js';
 
 const migrationsDir = path.resolve(import.meta.dirname, 'db/migrations');
@@ -206,6 +207,7 @@ describe('Integration', () => {
     podManager = createPodManager({
       podRepo,
       escalationRepo,
+      nudgeRepo: createNudgeRepository(db),
       fixFeedbackRepo,
       profileStore,
       eventBus,
