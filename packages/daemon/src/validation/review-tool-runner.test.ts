@@ -1,5 +1,6 @@
 import { execFile } from 'node:child_process';
 import fs from 'node:fs/promises';
+import { createServer } from 'node:http';
 import os from 'node:os';
 import path from 'node:path';
 import { promisify } from 'node:util';
@@ -88,7 +89,7 @@ describe('review tool runner - Anthropic request shape', () => {
         },
       });
       expect(create).toHaveBeenCalledTimes(2);
-      expect(beforeRequest).toHaveBeenCalledTimes(3);
+      expect(beforeRequest).toHaveBeenCalledTimes(5);
       expect(create.mock.calls.map(([body]) => body.model)).toEqual([
         'selected-deployment',
         'selected-deployment',
@@ -141,8 +142,225 @@ describe('review tool runner - Anthropic request shape', () => {
         if (!current) throw new Error('review ownership lost');
       },
     }).catch((error: unknown) => error);
-    expect(result).toMatchObject({ message: 'review ownership lost' });
+    expect(result).toMatchObject({
+      message: 'review ownership lost',
+      kind: 'ownership-lost',
+      tokenUsage: { inputTokens: 10, outputTokens: 2 },
+    });
     expect(create).toHaveBeenCalledOnce();
+  });
+
+  it('allows one final request without tools and stops if the model requests more tools', async () => {
+    const tool = (id: string) => ({
+      type: 'tool_use',
+      id,
+      name: 'read_file',
+      input: { path: 'absent-fixture.txt' },
+    });
+    const usage = { input_tokens: 10, output_tokens: 2 };
+    const create = vi
+      .fn()
+      .mockResolvedValueOnce({
+        content: [tool('one'), tool('two')],
+        stop_reason: 'tool_use',
+        usage,
+      })
+      .mockResolvedValueOnce({ content: [tool('three')], stop_reason: 'tool_use', usage })
+      .mockResolvedValue({
+        content: [{ type: 'text', text: '{"status":"pass"}' }],
+        stop_reason: 'end_turn',
+        usage,
+      });
+    const { runToolUseReview } = await import('./review-tool-runner.js');
+    const result = await runToolUseReview({
+      model: 'selected',
+      prompt: 'review',
+      worktreePath: process.cwd(),
+      timeout: 1000,
+      maxToolCalls: 1,
+      providerClient: {
+        model: 'selected',
+        client: { messages: { create } } as unknown as Anthropic,
+      },
+    }).catch((error: unknown) => error);
+    expect(result).toMatchObject({
+      kind: 'budget-exhausted',
+      tokenUsage: { inputTokens: 20, outputTokens: 4 },
+    });
+    expect(create).toHaveBeenCalledTimes(2);
+    expect(create.mock.calls[1]?.[0].tools).toBeUndefined();
+    expect(create.mock.calls[1]?.[0].messages.at(-1)?.content).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ type: 'tool_result', tool_use_id: 'one' }),
+        expect.objectContaining({ type: 'tool_result', tool_use_id: 'two', is_error: true }),
+      ]),
+    );
+  });
+
+  it('retains known usage when a later API request fails and disables implicit SDK retry', async () => {
+    const create = vi
+      .fn()
+      .mockResolvedValueOnce({
+        content: [
+          {
+            type: 'tool_use',
+            id: 'read1',
+            name: 'read_file',
+            input: { path: 'absent-fixture.txt' },
+          },
+        ],
+        stop_reason: 'tool_use',
+        usage: { input_tokens: 12, output_tokens: 3 },
+      })
+      .mockRejectedValue(new Error('second request transport failed'));
+    const { runToolUseReview } = await import('./review-tool-runner.js');
+    const result = await runToolUseReview({
+      model: 'selected',
+      prompt: 'review',
+      worktreePath: process.cwd(),
+      timeout: 1000,
+      providerClient: {
+        model: 'selected',
+        client: { messages: { create } } as unknown as Anthropic,
+      },
+    }).catch((error: unknown) => error);
+    expect(result).toMatchObject({
+      kind: 'provider-error',
+      tokenUsage: { inputTokens: 12, outputTokens: 3 },
+    });
+    expect(create).toHaveBeenCalledTimes(2);
+    for (const [, options] of create.mock.calls) expect(options).toMatchObject({ maxRetries: 0 });
+  });
+
+  it.each([-1, 1.5, Number.NaN, Number.POSITIVE_INFINITY])(
+    'rejects invalid tool budgets before dispatch: %s',
+    async (maxToolCalls) => {
+      const create = vi.fn().mockResolvedValue({
+        content: [{ type: 'text', text: '{}' }],
+        stop_reason: 'end_turn',
+        usage: { input_tokens: 0, output_tokens: 0 },
+      });
+      const { runToolUseReview } = await import('./review-tool-runner.js');
+      const result = await runToolUseReview({
+        model: 'selected',
+        prompt: 'review',
+        worktreePath: process.cwd(),
+        timeout: 1000,
+        maxToolCalls,
+        providerClient: {
+          model: 'selected',
+          client: { messages: { create } } as unknown as Anthropic,
+        },
+      }).catch((error: unknown) => error);
+      expect(result).toMatchObject({ message: expect.stringMatching(/tool budget/i) });
+      expect(create).not.toHaveBeenCalled();
+    },
+  );
+
+  it('retains a late response measurement but does not accept a verdict after the deadline', async () => {
+    vi.useFakeTimers({ toFake: ['performance', 'setTimeout', 'clearTimeout'] });
+    try {
+      const create = vi.fn().mockImplementation(async () => {
+        vi.advanceTimersByTime(1001);
+        return {
+          content: [{ type: 'text', text: '{"status":"pass"}' }],
+          stop_reason: 'end_turn',
+          usage: { input_tokens: 12, output_tokens: 3 },
+        };
+      });
+      const { runToolUseReview } = await import('./review-tool-runner.js');
+      const result = await runToolUseReview({
+        model: 'selected',
+        prompt: 'review',
+        worktreePath: process.cwd(),
+        timeout: 1000,
+        providerClient: {
+          model: 'selected',
+          client: { messages: { create } } as unknown as Anthropic,
+        },
+      }).catch((error: unknown) => error);
+      expect(result).toMatchObject({
+        kind: 'timeout',
+        tokenUsage: { inputTokens: 12, outputTokens: 3 },
+      });
+      expect(create).toHaveBeenCalledOnce();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it.each([0, 1])('accepts a final verdict within a tool budget of %s', async (maxToolCalls) => {
+    const usage = { input_tokens: 4, output_tokens: 1 };
+    const create = vi.fn();
+    if (maxToolCalls)
+      create.mockResolvedValueOnce({
+        content: [
+          { type: 'tool_use', id: 'one', name: 'read_file', input: { path: 'absent-fixture.txt' } },
+        ],
+        stop_reason: 'tool_use',
+        usage,
+      });
+    create.mockResolvedValue({
+      content: [{ type: 'text', text: '{"status":"uncertain"}' }],
+      stop_reason: 'end_turn',
+      usage,
+    });
+    const { runToolUseReview } = await import('./review-tool-runner.js');
+    const result = await runToolUseReview({
+      model: 'selected',
+      prompt: 'review',
+      worktreePath: process.cwd(),
+      timeout: 1000,
+      maxToolCalls,
+      providerClient: {
+        model: 'selected',
+        client: { messages: { create } } as unknown as Anthropic,
+      },
+    });
+    expect(result.stdout).toBe('{"status":"uncertain"}');
+    expect(create).toHaveBeenCalledTimes(maxToolCalls + 1);
+    expect(create.mock.calls.at(-1)?.[0].tools).toBeUndefined();
+    expect(result.tokenUsage).toEqual({
+      inputTokens: 4 * (maxToolCalls + 1),
+      outputTokens: maxToolCalls + 1,
+    });
+  });
+
+  it('sends one real SDK HTTP request on a retryable provider error', async () => {
+    let requests = 0;
+    const server = createServer((_request, response) => {
+      requests++;
+      response.writeHead(503, { 'content-type': 'application/json', 'retry-after': '0' });
+      response.end(
+        JSON.stringify({
+          type: 'error',
+          error: { type: 'api_error', message: 'local fixture unavailable' },
+        }),
+      );
+    });
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+    const address = server.address();
+    if (!address || typeof address === 'string') throw new Error('Missing fixture port');
+    try {
+      const sdk = await vi.importActual<typeof import('@anthropic-ai/sdk')>('@anthropic-ai/sdk');
+      const client = new sdk.default({
+        apiKey: 'local-fixture-only',
+        baseURL: `http://127.0.0.1:${address.port}`,
+      });
+      const { runToolUseReview } = await import('./review-tool-runner.js');
+      const result = await runToolUseReview({
+        model: 'selected',
+        prompt: 'local fixture',
+        worktreePath: process.cwd(),
+        timeout: 1000,
+        providerClient: { client, model: 'selected' },
+      }).catch((error: unknown) => error);
+      expect(result).toMatchObject({ kind: 'provider-error' });
+      expect(requests).toBe(1);
+      expect((result as { tokenUsage?: unknown }).tokenUsage).toBeUndefined();
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
   });
 
   it('passes timeout as an SDK option instead of an API body field', async () => {

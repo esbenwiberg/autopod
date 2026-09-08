@@ -474,7 +474,9 @@
         "packages/daemon/src/pods/pod-repository.ts",
         "packages/daemon/src/index.ts",
         "packages/daemon/src/pods/validation-ownership.ts",
-        "packages/daemon/src/pods/provider-attempt-repository.ts"
+        "packages/daemon/src/pods/provider-attempt-repository.ts",
+        "packages/daemon/src/validation/review-tool-runner.ts",
+        "packages/daemon/src/validation/local-validation-engine.ts"
       ],
       "tests": [
         "packages/daemon/src/pods/task-execution-ledger.test.ts",
@@ -520,7 +522,8 @@
         "receipts/checkpoint-24-validation-identity.json",
         "checkpoint-54.md: ambiguous validation-feedback turns are not automatically replayed; known idempotent Codex setup retry retained; task-wide provider/rework admission remains unfinished",
         "checkpoint-55.md",
-        "checkpoint-59.md"
+        "checkpoint-59.md",
+        "checkpoint-66.md"
       ],
       "prerequisites": [],
       "remaining": "Validation admission identity and pinned cumulative transient allowance persist across Resume, restart and linked fix pods. Task-wide agent/repository-rework limits, cumulative provider/sandbox recovery and audited token-budget extensions still require integration; historical pre-ledger retries are not reconstructed. Incomplete known prior spending now blocks further budgeted agent consumption. This does not reserve future spend or reconstruct unrecorded legacy work; task-wide provider/rework admission and phase reconciliation remain. Checkpoint 24 adds durable sandbox startup retries, legacy allowance lower bounds, stage-scoped one-use decisions, measured startup time and local operator proof. Provider retries after first runtime event, repository rework, complete historical reconstruction, phase billing, native interaction and live acceptance remain."
@@ -542,7 +545,9 @@
         "packages/daemon/src/pods/sandbox-startup-admission.ts",
         "packages/daemon/src/pods/pod-repository.ts",
         "packages/daemon/src/index.ts",
-        "packages/daemon/src/pods/validation-ownership.ts"
+        "packages/daemon/src/pods/validation-ownership.ts",
+        "packages/daemon/src/validation/review-tool-runner.ts",
+        "packages/daemon/src/validation/local-validation-engine.ts"
       ],
       "tests": [
         "packages/daemon/src/pods/task-retry-ledger.test.ts",
@@ -572,7 +577,8 @@
         "receipts/checkpoint-24-full-validation.txt",
         "receipts/checkpoint-24-validation-identity.json",
         "checkpoint-54.md: ambiguous validation-feedback turns are not automatically replayed; known idempotent Codex setup retry retained; task-wide provider/rework admission remains unfinished",
-        "checkpoint-55.md"
+        "checkpoint-55.md",
+        "checkpoint-66.md"
       ],
       "prerequisites": [],
       "remaining": "Actual validation repeat admission requires known changed source/contract/commands/environment/implementation or one-use authenticated human authorization. Agent-rework admission and explicit provider-rebinding reconciliation remain; unavailable identity never proves change. Checkpoint 24 adds durable sandbox startup retries, legacy allowance lower bounds, stage-scoped one-use decisions, measured startup time and local operator proof. Provider retries after first runtime event, repository rework, complete historical reconstruction, phase billing, native interaction and live acceptance remain."
@@ -600,7 +606,8 @@
         "packages/daemon/src/validation/review-codex-runner.ts",
         "packages/daemon/src/runtimes/run-claude-cli.ts",
         "packages/daemon/src/validation/review-agentic-runner.ts",
-        "packages/daemon/src/validation/local-validation-engine.ts"
+        "packages/daemon/src/validation/local-validation-engine.ts",
+        "packages/daemon/src/validation/review-tool-runner.ts"
       ],
       "tests": [
         "packages/daemon/src/pods/task-retry-ledger.test.ts",
@@ -632,7 +639,8 @@
         "checkpoint-52.md: obsolete event consumers stop before replacement finalization, with separate retained terminal outcomes; already-dispatched filesystem work and broader acceptance remain partial",
         "checkpoint-54.md: ambiguous validation-feedback turns are not automatically replayed; known idempotent Codex setup retry retained; task-wide provider/rework admission remains unfinished",
         "checkpoint-62.md",
-        "checkpoint-63.md"
+        "checkpoint-63.md",
+        "checkpoint-66.md"
       ],
       "prerequisites": [],
       "remaining": "Validation infrastructure/reviewer failure admission uses persisted bounded backoff under unchanged captured provider/account/model. Other provider/sandbox retry paths and explicit authorized binding changes still require reconciliation. Checkpoint 24 adds durable sandbox startup retries, legacy allowance lower bounds, stage-scoped one-use decisions, measured startup time and local operator proof. Provider retries after first runtime event, repository rework, complete historical reconstruction, phase billing, native interaction and live acceptance remain."
@@ -1094,7 +1102,8 @@
         "checkpoint-55.md",
         "checkpoint-57.md",
         "checkpoint-58.md",
-        "checkpoint-64.md"
+        "checkpoint-64.md",
+        "checkpoint-66.md"
       ],
       "prerequisites": [],
       "remaining": " Checkpoint 46 verifies planned merged disposition and separate request/PR counts locally. Legacy missing source history, closed disposition, broader durable cleanup and native/live interaction remain outstanding. Checkpoint 47 verifies source-bound closure, reopening and planned/acknowledged recovery locally; ambiguous prior requests, legacy unbound evidence, durable cleanup and native/live interaction remain outstanding."
@@ -1272,7 +1281,8 @@
         "checkpoint-26.md: stored subtotals, unavailable attribution, source estimates, API/CLI/mobile/native test evidence; live and native interaction remain unverified",
         "checkpoint-27.md: bounded phase projections, local malformed-contract per-pod HTTP 500 regression, CLI/mobile/native checks; live root cause and native interaction remain unverified",
         "checkpoint-64.md",
-        "checkpoint-63.md"
+        "checkpoint-63.md",
+        "checkpoint-66.md"
       ],
       "prerequisites": [],
       "remaining": "Effective corrected provider ledger is authoritative; pod totals are legacy fallback; harness phases added once. Missing billing and earlier run identity remain explicit. Incomplete known prior spending now blocks further budgeted agent consumption. Future spending reservations, unrecorded legacy work, phase accounting and native/live verification remain. Checkpoint 25 reconciles corrected provider totals in task, per-pod and fleet APIs, including recorded zero. Phase attribution, legacy estimates, telemetry completeness, operator presentation and live proof remain."
@@ -1927,7 +1937,7 @@
       "prerequisites": []
     }
   ],
-  "lastCheckpoint": "checkpoint-65.md",
+  "lastCheckpoint": "checkpoint-66.md",
   "migrationLineage": {
     "managedBaseline": "142-152; exact bytes from tracking commit cba763ba0bb3d65cb4c055e00033016ba1d5c646",
     "nativeCurrent": "164-176; byte-preserving move of unpublished native 151-163",

@@ -31,7 +31,7 @@ import {
 } from './local-validation-engine.js';
 import { runAgenticReview } from './review-agentic-runner.js';
 import { CodexReviewError, runCodexReview } from './review-codex-runner.js';
-import { runToolUseReview } from './review-tool-runner.js';
+import { ToolReviewError, runToolUseReview } from './review-tool-runner.js';
 
 const containerReviewerDelegate = vi.hoisted(() => ({
   actual: undefined as typeof runContainerReviewer | undefined,
@@ -3643,6 +3643,47 @@ human_review: []
     expect(runToolUseReview).not.toHaveBeenCalled();
   });
 
+  it.each(['budget-exhausted', 'provider-error', 'ownership-lost'] as const)(
+    'does not replay or erase a tool-review %s and retains measured usage',
+    async (kind) => {
+      const worktreePath = await fs.mkdtemp(path.join(os.tmpdir(), 'autopod-tool-budget-'));
+      try {
+        vi.mocked(runClaudeCli).mockResolvedValue({
+          stdout: JSON.stringify({
+            status: 'pass',
+            reasoning: 'initial review',
+            issues: ['Retained initial concern'],
+          }),
+          tokenUsage: { inputTokens: 100, outputTokens: 10 },
+        });
+        vi.mocked(runToolUseReview).mockRejectedValue(
+          new ToolReviewError(kind, 'bounded reviewer stop', { inputTokens: 12, outputTokens: 3 }),
+        );
+        const result = await createLocalValidationEngine(stubContainerManager()).validate(
+          baseConfig({
+            reviewerModel: 'test',
+            reviewDepth: 'deep',
+            validationSuite: 'full',
+            worktreePath,
+            diff: '+const changed = true;',
+          }),
+        );
+        expect(result.overall).toBe('fail');
+        expect(result.taskReview?.status).toBe('fail');
+        expect(result.taskReview?.issues).toContain('Retained initial concern');
+        expect(result.reviewSkipKind).toBe('review-failed');
+        expect(result.reviewSkipReason).toContain('Tool review unavailable');
+        expect(result.reviewTokenUsage).toMatchObject({ inputTokens: 112, outputTokens: 13 });
+        expect(runToolUseReview).toHaveBeenCalledOnce();
+        expect(runClaudeCli).toHaveBeenCalledOnce();
+        expect(runAgenticReview).not.toHaveBeenCalled();
+        expect(runContainerReviewer).not.toHaveBeenCalled();
+      } finally {
+        await fs.rm(worktreePath, { recursive: true, force: true });
+      }
+    },
+  );
+
   it('does not dispatch a provider request after client acquisition loses review ownership', async () => {
     let current = true;
     const create = vi.fn().mockResolvedValue({
@@ -3857,7 +3898,7 @@ human_review: []
           },
         ],
       },
-      { timeout: 300_000 },
+      { timeout: 300_000, maxRetries: 0 },
     );
     expect(vi.mocked(cm.execInContainer)).toHaveBeenCalledTimes(1);
     expect(vi.mocked(cm.execInContainer).mock.calls[0]?.[1].join(' ')).toContain(

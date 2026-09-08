@@ -60,7 +60,7 @@ import {
   reconcileReviewLedger,
 } from './review-ledger.js';
 import { reviewClosureOutputContract } from './review-structured-output.js';
-import { runToolUseReview } from './review-tool-runner.js';
+import { ToolReviewError, runToolUseReview } from './review-tool-runner.js';
 import { runWithValidationEvidence } from './run-with-evidence.js';
 import type { ValidationEvidenceCache } from './validation-evidence-cache.js';
 
@@ -829,7 +829,11 @@ export function createLocalValidationEngine(
           reviewSkipReason = reviewRun.skipReason;
           // Every full-suite review ends with one canonical frozen council. On
           // retries this is the first and only stochastic review authority.
-          if (taskReview && !reviewRun.bindingUnavailable && config.validationSuite === 'full') {
+          if (
+            taskReview &&
+            !reviewRun.requiredReviewUnavailable &&
+            config.validationSuite === 'full'
+          ) {
             const reviewedHead = await readReviewHead(config.worktreePath, config.startCommitSha);
             const frozenDiff = boundedReviewPacketString(config.diff, 1_000_000);
             const packet = createFrozenReviewPacket({
@@ -1145,7 +1149,10 @@ export function createLocalValidationEngine(
             };
             reviewTokenUsage = taskReview?.tokenUsage;
           }
-          if ((taskReview === null || reviewRun.bindingUnavailable) && reviewRun.skipReason) {
+          if (
+            (taskReview === null || reviewRun.requiredReviewUnavailable) &&
+            reviewRun.skipReason
+          ) {
             reviewSkipKind = classifyReviewSkipKind(reviewRun.skipReason);
           }
         }
@@ -3610,7 +3617,7 @@ async function runTaskReview(
   result: TaskReviewResult | null;
   skipReason?: string;
   /** A required provider-bound path could not run; a council must not erase this failure. */
-  bindingUnavailable?: true;
+  requiredReviewUnavailable?: true;
   tokenUsage?: {
     inputTokens: number;
     outputTokens: number;
@@ -3655,12 +3662,12 @@ async function runTaskReview(
     boundProvider = selected;
     return selected;
   };
-  const bindingUnavailable = (
+  const requiredReviewUnavailable = (
     parsed: ReturnType<typeof parseReviewJson>,
     tokenUsage: TaskReviewResult['tokenUsage'],
     reason: string,
   ): Awaited<ReturnType<typeof runTaskReview>> => ({
-    bindingUnavailable: true,
+    requiredReviewUnavailable: true,
     skipReason: `Review failed: ${reason}`,
     result: {
       status: 'fail',
@@ -3917,7 +3924,7 @@ async function runTaskReview(
       let allTierTokenUsage = accumulatedTokenUsage;
       if (tier2Parsed?.status === 'uncertain') {
         if (shouldUseProfileBoundAnthropicReviewer(config))
-          return bindingUnavailable(
+          return requiredReviewUnavailable(
             tier2Parsed,
             accumulatedTokenUsage,
             'Foundry agentic review unavailable: the selected provider binding has no configured host CLI route. Reconcile the reviewer binding before deeper review.',
@@ -4000,8 +4007,14 @@ async function runTaskReview(
         tokenUsage: allTierTokenUsage,
       };
     } catch (err) {
+      if (err instanceof ToolReviewError)
+        return requiredReviewUnavailable(
+          tier1Parsed,
+          combineReviewTokenUsage(config.reviewerModel, tier1TokenUsage, err.tokenUsage),
+          `Tool review unavailable (${err.kind}); reconcile the review before retry. Known usage is a subtotal; interrupted request usage is unverified.`,
+        );
       if (shouldUseProfileBoundAnthropicReviewer(config))
-        return bindingUnavailable(
+        return requiredReviewUnavailable(
           tier1Parsed,
           tier1TokenUsage,
           'Foundry tool review unavailable on the selected provider binding; reconcile it before retry.',
@@ -4074,7 +4087,7 @@ async function runTaskReview(
 function isReviewInfrastructureFailure(
   reviewRun: Awaited<ReturnType<typeof runTaskReview>>,
 ): boolean {
-  if (reviewRun.bindingUnavailable) return false;
+  if (reviewRun.requiredReviewUnavailable) return false;
   if (reviewRun.result?.reviewBatch?.infrastructureUnavailable) return true;
   if (reviewRun.result !== null || !reviewRun.skipReason) return false;
   return (
@@ -4171,7 +4184,7 @@ async function runProfileBoundAnthropicReview(
       max_tokens: 8192,
       messages: [{ role: 'user', content: prompt }],
     },
-    { timeout },
+    { timeout, maxRetries: 0 },
   );
   const stdout = response.content
     .filter((block): block is Extract<(typeof response.content)[number], { type: 'text' }> => {
