@@ -6,6 +6,7 @@ import { registerAuthCommands } from './commands/auth.js';
 import { registerDaemonCommands } from './commands/daemon.js';
 import { registerDesktopCommands } from './commands/desktop.js';
 import { registerHistoryCommands } from './commands/history.js';
+import { registerManagedCommands } from './commands/managed.js';
 import { registerMobileCommands } from './commands/mobile.js';
 import { registerPodCommands } from './commands/pod.js';
 import { registerPodsitterCommands } from './commands/podsitter.js';
@@ -46,6 +47,7 @@ function getClient(): AutopodClient {
 
 // Register all commands
 registerAuthCommands(program);
+registerManagedCommands(program);
 registerDaemonCommands(program);
 registerDesktopCommands(program);
 registerProfileCommands(program, getClient);

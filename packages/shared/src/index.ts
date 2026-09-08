@@ -599,3 +599,6 @@ export type {
   ModelsAnalyticsResponse,
   MemoryAnalyticsResponse,
 } from './types/analytics.js';
+
+export * from './types/managed-pod.js';
+export * from './managed-protocol.js';

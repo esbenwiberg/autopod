@@ -1,0 +1,2097 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://dispatcher.internal/contracts/managed-pod/v1",
+  "$defs": {
+    "Route": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "providerAccountId": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._/-]{0,199}$",
+          "not": {
+            "pattern": "(Bearer\\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?://[^/\\s]+:[^/\\s]+@|[?&](?:sig|token|access_token)=)"
+          }
+        },
+        "model": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._/-]{0,199}$",
+          "not": {
+            "pattern": "(Bearer\\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?://[^/\\s]+:[^/\\s]+@|[?&](?:sig|token|access_token)=)"
+          }
+        },
+        "reasoning": {
+          "type": "string",
+          "enum": [
+            "none",
+            "low",
+            "medium",
+            "high",
+            "xhigh"
+          ],
+          "not": {
+            "pattern": "(Bearer\\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?://[^/\\s]+:[^/\\s]+@|[?&](?:sig|token|access_token)=)"
+          }
+        },
+        "runtime": {
+          "type": "string",
+          "enum": [
+            "codex",
+            "claude",
+            "copilot"
+          ],
+          "not": {
+            "pattern": "(Bearer\\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?://[^/\\s]+:[^/\\s]+@|[?&](?:sig|token|access_token)=)"
+          }
+        },
+        "executionTarget": {
+          "type": "string",
+          "enum": [
+            "local",
+            "sandbox"
+          ],
+          "not": {
+            "pattern": "(Bearer\\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?://[^/\\s]+:[^/\\s]+@|[?&](?:sig|token|access_token)=)"
+          }
+        }
+      },
+      "required": [
+        "providerAccountId",
+        "model",
+        "reasoning",
+        "runtime",
+        "executionTarget"
+      ]
+    },
+    "RepositoryScope": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "enrollmentId": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._/-]{0,199}$",
+          "not": {
+            "pattern": "(Bearer\\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?://[^/\\s]+:[^/\\s]+@|[?&](?:sig|token|access_token)=)"
+          }
+        },
+        "remote": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._/-]{0,199}$",
+          "not": {
+            "pattern": "(Bearer\\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?://[^/\\s]+:[^/\\s]+@|[?&](?:sig|token|access_token)=)"
+          }
+        },
+        "baseRevision": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{40}$",
+          "not": {
+            "pattern": "(Bearer\\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?://[^/\\s]+:[^/\\s]+@|[?&](?:sig|token|access_token)=)"
+          }
+        },
+        "access": {
+          "type": "string",
+          "enum": [
+            "read",
+            "write"
+          ],
+          "not": {
+            "pattern": "(Bearer\\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?://[^/\\s]+:[^/\\s]+@|[?&](?:sig|token|access_token)=)"
+          }
+        },
+        "branchNamespace": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._/-]{0,199}$",
+          "not": {
+            "pattern": "(Bearer\\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?://[^/\\s]+:[^/\\s]+@|[?&](?:sig|token|access_token)=)"
+          }
+        }
+      },
+      "required": [
+        "enrollmentId",
+        "remote",
+        "baseRevision",
+        "access",
+        "branchNamespace"
+      ]
+    },
+    "IdentityBinding": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "alias": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._/-]{0,199}$",
+          "not": {
+            "pattern": "(Bearer\\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?://[^/\\s]+:[^/\\s]+@|[?&](?:sig|token|access_token)=)"
+          }
+        },
+        "bindingDigest": {
+          "type": "string",
+          "pattern": "^sha256:[a-f0-9]{64}$",
+          "not": {
+            "pattern": "(Bearer\\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?://[^/\\s]+:[^/\\s]+@|[?&](?:sig|token|access_token)=)"
+          }
+        }
+      },
+      "required": [
+        "alias",
+        "bindingDigest"
+      ]
+    },
+    "HardTokenBudget": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "expiresAt": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "maxTokens": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "maxDurationSeconds": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        }
+      },
+      "required": [
+        "expiresAt",
+        "maxTokens",
+        "maxDurationSeconds"
+      ]
+    },
+    "RequestTimeBudget": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "mode": {
+          "const": "request-time",
+          "type": "string"
+        },
+        "expiresAt": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "maxProviderRequests": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 1
+        },
+        "maxDurationSeconds": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 180
+        }
+      },
+      "required": [
+        "mode",
+        "expiresAt",
+        "maxProviderRequests",
+        "maxDurationSeconds"
+      ]
+    },
+    "Budget": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/HardTokenBudget"
+        },
+        {
+          "$ref": "#/$defs/RequestTimeBudget"
+        }
+      ]
+    },
+    "NetworkScope": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "profileId": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._/-]{0,199}$",
+          "not": {
+            "pattern": "(Bearer\\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?://[^/\\s]+:[^/\\s]+@|[?&](?:sig|token|access_token)=)"
+          }
+        },
+        "destinations": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._/-]{0,199}$",
+            "not": {
+              "pattern": "(Bearer\\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?://[^/\\s]+:[^/\\s]+@|[?&](?:sig|token|access_token)=)"
+            }
+          },
+          "maxItems": 5000
+        }
+      },
+      "required": [
+        "profileId",
+        "destinations"
+      ]
+    },
+    "Scope": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "repositories": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/RepositoryScope"
+          },
+          "maxItems": 5000
+        },
+        "network": {
+          "$ref": "#/$defs/NetworkScope"
+        },
+        "identityBindings": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/IdentityBinding"
+          },
+          "maxItems": 5000
+        },
+        "allowedEffects": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": [
+              "repository.read",
+              "repository.write",
+              "test.run",
+              "artifact.write",
+              "web.public-read",
+              "git.commit",
+              "git.push.worker-branch",
+              "pull-request.create-draft",
+              "pull-request.update-draft"
+            ],
+            "not": {
+              "pattern": "(Bearer\\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?://[^/\\s]+:[^/\\s]+@|[?&](?:sig|token|access_token)=)"
+            }
+          },
+          "maxItems": 5000
+        }
+      },
+      "required": [
+        "repositories",
+        "network",
+        "identityBindings",
+        "allowedEffects"
+      ]
+    },
+    "EffectiveGrant": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "schemaVersion": {
+          "const": 1
+        },
+        "grantId": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._/-]{0,199}$",
+          "not": {
+            "pattern": "(Bearer\\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?://[^/\\s]+:[^/\\s]+@|[?&](?:sig|token|access_token)=)"
+          }
+        },
+        "revision": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "dispatcherAttemptId": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._/-]{0,199}$",
+          "not": {
+            "pattern": "(Bearer\\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?://[^/\\s]+:[^/\\s]+@|[?&](?:sig|token|access_token)=)"
+          }
+        },
+        "profileSnapshotDigest": {
+          "type": "string",
+          "pattern": "^sha256:[a-f0-9]{64}$",
+          "not": {
+            "pattern": "(Bearer\\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?://[^/\\s]+:[^/\\s]+@|[?&](?:sig|token|access_token)=)"
+          }
+        },
+        "route": {
+          "$ref": "#/$defs/Route"
+        },
+        "scope": {
+          "$ref": "#/$defs/Scope"
+        },
+        "budget": {
+          "$ref": "#/$defs/Budget"
+        },
+        "digest": {
+          "type": "string",
+          "pattern": "^sha256:[a-f0-9]{64}$",
+          "not": {
+            "pattern": "(Bearer\\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?://[^/\\s]+:[^/\\s]+@|[?&](?:sig|token|access_token)=)"
+          }
+        }
+      },
+      "required": [
+        "schemaVersion",
+        "grantId",
+        "revision",
+        "dispatcherAttemptId",
+        "profileSnapshotDigest",
+        "route",
+        "scope",
+        "budget",
+        "digest"
+      ]
+    },
+    "ProfileSnapshot": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "profileId": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._/-]{0,199}$",
+          "not": {
+            "pattern": "(Bearer\\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?://[^/\\s]+:[^/\\s]+@|[?&](?:sig|token|access_token)=)"
+          }
+        },
+        "profileVersion": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "snapshotDigest": {
+          "type": "string",
+          "pattern": "^sha256:[a-f0-9]{64}$",
+          "not": {
+            "pattern": "(Bearer\\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?://[^/\\s]+:[^/\\s]+@|[?&](?:sig|token|access_token)=)"
+          }
+        },
+        "route": {
+          "$ref": "#/$defs/Route"
+        },
+        "scope": {
+          "$ref": "#/$defs/Scope"
+        },
+        "budget": {
+          "$ref": "#/$defs/Budget"
+        }
+      },
+      "required": [
+        "profileId",
+        "profileVersion",
+        "snapshotDigest",
+        "route",
+        "scope",
+        "budget"
+      ]
+    },
+    "ArtifactOutput": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "mode": {
+          "type": "string",
+          "enum": [
+            "none",
+            "optional",
+            "required"
+          ],
+          "not": {
+            "pattern": "(Bearer\\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?://[^/\\s]+:[^/\\s]+@|[?&](?:sig|token|access_token)=)"
+          }
+        },
+        "root": {
+          "const": "/output"
+        },
+        "requiredPaths": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._/-]{0,199}$",
+            "not": {
+              "pattern": "(Bearer\\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?://[^/\\s]+:[^/\\s]+@|[?&](?:sig|token|access_token)=)"
+            }
+          },
+          "maxItems": 5000
+        },
+        "include": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 4096,
+            "not": {
+              "pattern": "(Bearer\\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?://[^/\\s]+:[^/\\s]+@|[?&](?:sig|token|access_token)=)"
+            }
+          },
+          "maxItems": 5000
+        },
+        "exclude": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 4096,
+            "not": {
+              "pattern": "(Bearer\\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?://[^/\\s]+:[^/\\s]+@|[?&](?:sig|token|access_token)=)"
+            }
+          },
+          "maxItems": 5000
+        },
+        "limits": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "maxFiles": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            "maxFileBytes": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            "maxTotalBytes": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            }
+          },
+          "required": [
+            "maxFiles",
+            "maxFileBytes",
+            "maxTotalBytes"
+          ]
+        },
+        "links": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "allowSymlinks": {
+              "const": false
+            },
+            "allowHardlinks": {
+              "const": false
+            }
+          },
+          "required": [
+            "allowSymlinks",
+            "allowHardlinks"
+          ]
+        }
+      },
+      "required": [
+        "mode",
+        "root",
+        "requiredPaths",
+        "include",
+        "exclude",
+        "limits",
+        "links"
+      ]
+    },
+    "SourceOutput": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "mode": {
+          "type": "string",
+          "enum": [
+            "none",
+            "commit",
+            "branch",
+            "draft-pr"
+          ],
+          "not": {
+            "pattern": "(Bearer\\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?://[^/\\s]+:[^/\\s]+@|[?&](?:sig|token|access_token)=)"
+          }
+        },
+        "repository": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._/-]{0,199}$",
+          "not": {
+            "pattern": "(Bearer\\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?://[^/\\s]+:[^/\\s]+@|[?&](?:sig|token|access_token)=)"
+          }
+        },
+        "remote": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._/-]{0,199}$",
+          "not": {
+            "pattern": "(Bearer\\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?://[^/\\s]+:[^/\\s]+@|[?&](?:sig|token|access_token)=)"
+          }
+        },
+        "head": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._/-]{0,199}$",
+          "not": {
+            "pattern": "(Bearer\\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?://[^/\\s]+:[^/\\s]+@|[?&](?:sig|token|access_token)=)"
+          }
+        },
+        "base": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._/-]{0,199}$",
+          "not": {
+            "pattern": "(Bearer\\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?://[^/\\s]+:[^/\\s]+@|[?&](?:sig|token|access_token)=)"
+          }
+        }
+      },
+      "required": [
+        "mode",
+        "repository",
+        "remote",
+        "head",
+        "base"
+      ]
+    },
+    "ArtifactInput": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "type": "string",
+          "pattern": "^[A-Za-z][A-Za-z0-9_-]{0,63}$",
+          "not": {
+            "pattern": "(Bearer\\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?://[^/\\s]+:[^/\\s]+@|[?&](?:sig|token|access_token)=)"
+          }
+        },
+        "backendArtifactId": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._/-]{0,199}$",
+          "not": {
+            "pattern": "(Bearer\\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?://[^/\\s]+:[^/\\s]+@|[?&](?:sig|token|access_token)=)"
+          }
+        },
+        "manifestSha256": {
+          "type": "string",
+          "pattern": "^sha256:[a-f0-9]{64}$",
+          "not": {
+            "pattern": "(Bearer\\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?://[^/\\s]+:[^/\\s]+@|[?&](?:sig|token|access_token)=)"
+          }
+        },
+        "mountPath": {
+          "type": "string",
+          "pattern": "^/inputs/[A-Za-z0-9_-]+$",
+          "not": {
+            "pattern": "(Bearer\\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?://[^/\\s]+:[^/\\s]+@|[?&](?:sig|token|access_token)=)"
+          }
+        },
+        "access": {
+          "const": "read"
+        }
+      },
+      "required": [
+        "name",
+        "backendArtifactId",
+        "manifestSha256",
+        "mountPath",
+        "access"
+      ]
+    },
+    "ManagedPodRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "schemaVersion": {
+          "const": 1
+        },
+        "managedMode": {
+          "const": true
+        },
+        "dispatcherJobId": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._/-]{0,199}$",
+          "not": {
+            "pattern": "(Bearer\\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?://[^/\\s]+:[^/\\s]+@|[?&](?:sig|token|access_token)=)"
+          }
+        },
+        "dispatcherAttemptId": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._/-]{0,199}$",
+          "not": {
+            "pattern": "(Bearer\\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?://[^/\\s]+:[^/\\s]+@|[?&](?:sig|token|access_token)=)"
+          }
+        },
+        "startKey": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._/-]{0,199}$",
+          "not": {
+            "pattern": "(Bearer\\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?://[^/\\s]+:[^/\\s]+@|[?&](?:sig|token|access_token)=)"
+          }
+        },
+        "executionSpecDigest": {
+          "type": "string",
+          "pattern": "^sha256:[a-f0-9]{64}$",
+          "not": {
+            "pattern": "(Bearer\\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?://[^/\\s]+:[^/\\s]+@|[?&](?:sig|token|access_token)=)"
+          }
+        },
+        "profileSnapshot": {
+          "$ref": "#/$defs/ProfileSnapshot"
+        },
+        "effectiveGrant": {
+          "$ref": "#/$defs/EffectiveGrant"
+        },
+        "task": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "kind": {
+              "type": "string",
+              "enum": [
+                "research",
+                "planning",
+                "implementation",
+                "verification",
+                "review",
+                "report",
+                "custom"
+              ],
+              "not": {
+                "pattern": "(Bearer\\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?://[^/\\s]+:[^/\\s]+@|[?&](?:sig|token|access_token)=)"
+              }
+            },
+            "objective": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 4096,
+              "not": {
+                "pattern": "(Bearer\\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?://[^/\\s]+:[^/\\s]+@|[?&](?:sig|token|access_token)=)"
+              }
+            },
+            "contextBundleDigest": {
+              "type": "string",
+              "pattern": "^sha256:[a-f0-9]{64}$",
+              "not": {
+                "pattern": "(Bearer\\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?://[^/\\s]+:[^/\\s]+@|[?&](?:sig|token|access_token)=)"
+              }
+            }
+          },
+          "required": [
+            "kind",
+            "objective",
+            "contextBundleDigest"
+          ]
+        },
+        "route": {
+          "$ref": "#/$defs/Route"
+        },
+        "outputs": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "source": {
+              "$ref": "#/$defs/SourceOutput"
+            },
+            "artifacts": {
+              "$ref": "#/$defs/ArtifactOutput"
+            }
+          },
+          "required": [
+            "source",
+            "artifacts"
+          ]
+        },
+        "inputArtifacts": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ArtifactInput"
+          },
+          "maxItems": 5000
+        },
+        "validation": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "suite": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._/-]{0,199}$",
+              "not": {
+                "pattern": "(Bearer\\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?://[^/\\s]+:[^/\\s]+@|[?&](?:sig|token|access_token)=)"
+              }
+            },
+            "verifierPolicy": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._/-]{0,199}$",
+              "not": {
+                "pattern": "(Bearer\\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?://[^/\\s]+:[^/\\s]+@|[?&](?:sig|token|access_token)=)"
+              }
+            }
+          },
+          "required": [
+            "suite",
+            "verifierPolicy"
+          ]
+        }
+      },
+      "required": [
+        "schemaVersion",
+        "managedMode",
+        "dispatcherJobId",
+        "dispatcherAttemptId",
+        "startKey",
+        "executionSpecDigest",
+        "profileSnapshot",
+        "effectiveGrant",
+        "task",
+        "route",
+        "outputs",
+        "inputArtifacts",
+        "validation"
+      ]
+    },
+    "ManagedPodHandle": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "schemaVersion": {
+          "const": 1
+        },
+        "podId": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._/-]{0,199}$",
+          "not": {
+            "pattern": "(Bearer\\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?://[^/\\s]+:[^/\\s]+@|[?&](?:sig|token|access_token)=)"
+          }
+        },
+        "dispatcherInstallationId": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._/-]{0,199}$",
+          "not": {
+            "pattern": "(Bearer\\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?://[^/\\s]+:[^/\\s]+@|[?&](?:sig|token|access_token)=)"
+          }
+        },
+        "dispatcherAttemptId": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._/-]{0,199}$",
+          "not": {
+            "pattern": "(Bearer\\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?://[^/\\s]+:[^/\\s]+@|[?&](?:sig|token|access_token)=)"
+          }
+        },
+        "acceptedExecutionSpecDigest": {
+          "type": "string",
+          "pattern": "^sha256:[a-f0-9]{64}$",
+          "not": {
+            "pattern": "(Bearer\\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?://[^/\\s]+:[^/\\s]+@|[?&](?:sig|token|access_token)=)"
+          }
+        },
+        "profileSnapshotDigest": {
+          "type": "string",
+          "pattern": "^sha256:[a-f0-9]{64}$",
+          "not": {
+            "pattern": "(Bearer\\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?://[^/\\s]+:[^/\\s]+@|[?&](?:sig|token|access_token)=)"
+          }
+        },
+        "grantId": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._/-]{0,199}$",
+          "not": {
+            "pattern": "(Bearer\\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?://[^/\\s]+:[^/\\s]+@|[?&](?:sig|token|access_token)=)"
+          }
+        },
+        "grantRevision": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "effectiveGrantDigest": {
+          "type": "string",
+          "pattern": "^sha256:[a-f0-9]{64}$",
+          "not": {
+            "pattern": "(Bearer\\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?://[^/\\s]+:[^/\\s]+@|[?&](?:sig|token|access_token)=)"
+          }
+        },
+        "route": {
+          "$ref": "#/$defs/Route"
+        },
+        "createdAt": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "initialCursor": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._/-]{0,199}$",
+          "not": {
+            "pattern": "(Bearer\\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?://[^/\\s]+:[^/\\s]+@|[?&](?:sig|token|access_token)=)"
+          }
+        }
+      },
+      "required": [
+        "schemaVersion",
+        "podId",
+        "dispatcherInstallationId",
+        "dispatcherAttemptId",
+        "acceptedExecutionSpecDigest",
+        "profileSnapshotDigest",
+        "grantId",
+        "grantRevision",
+        "effectiveGrantDigest",
+        "route",
+        "createdAt",
+        "initialCursor"
+      ]
+    },
+    "ArtifactFile": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "path": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._/-]{0,199}$",
+          "not": {
+            "pattern": "(Bearer\\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?://[^/\\s]+:[^/\\s]+@|[?&](?:sig|token|access_token)=)"
+          }
+        },
+        "size": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "sha256": {
+          "type": "string",
+          "pattern": "^sha256:[a-f0-9]{64}$",
+          "not": {
+            "pattern": "(Bearer\\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?://[^/\\s]+:[^/\\s]+@|[?&](?:sig|token|access_token)=)"
+          }
+        },
+        "mediaType": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 4096,
+          "not": {
+            "pattern": "(Bearer\\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?://[^/\\s]+:[^/\\s]+@|[?&](?:sig|token|access_token)=)"
+          }
+        }
+      },
+      "required": [
+        "path",
+        "size",
+        "sha256",
+        "mediaType"
+      ]
+    },
+    "ArtifactManifest": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "schemaVersion": {
+          "const": 1
+        },
+        "artifactId": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._/-]{0,199}$",
+          "not": {
+            "pattern": "(Bearer\\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?://[^/\\s]+:[^/\\s]+@|[?&](?:sig|token|access_token)=)"
+          }
+        },
+        "podId": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._/-]{0,199}$",
+          "not": {
+            "pattern": "(Bearer\\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?://[^/\\s]+:[^/\\s]+@|[?&](?:sig|token|access_token)=)"
+          }
+        },
+        "dispatcherAttemptId": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._/-]{0,199}$",
+          "not": {
+            "pattern": "(Bearer\\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?://[^/\\s]+:[^/\\s]+@|[?&](?:sig|token|access_token)=)"
+          }
+        },
+        "executionSpecDigest": {
+          "type": "string",
+          "pattern": "^sha256:[a-f0-9]{64}$",
+          "not": {
+            "pattern": "(Bearer\\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?://[^/\\s]+:[^/\\s]+@|[?&](?:sig|token|access_token)=)"
+          }
+        },
+        "createdAt": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "files": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ArtifactFile"
+          },
+          "maxItems": 5000
+        },
+        "fileCount": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "totalBytes": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "bundle": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "format": {
+              "const": "tar.gz"
+            },
+            "size": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            "sha256": {
+              "type": "string",
+              "pattern": "^sha256:[a-f0-9]{64}$",
+              "not": {
+                "pattern": "(Bearer\\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?://[^/\\s]+:[^/\\s]+@|[?&](?:sig|token|access_token)=)"
+              }
+            }
+          },
+          "required": [
+            "format",
+            "size",
+            "sha256"
+          ]
+        }
+      },
+      "required": [
+        "schemaVersion",
+        "artifactId",
+        "podId",
+        "dispatcherAttemptId",
+        "executionSpecDigest",
+        "createdAt",
+        "files",
+        "fileCount",
+        "totalBytes",
+        "bundle"
+      ]
+    },
+    "ArtifactReceipt": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "schemaVersion": {
+          "const": 1
+        },
+        "artifactId": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._/-]{0,199}$",
+          "not": {
+            "pattern": "(Bearer\\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?://[^/\\s]+:[^/\\s]+@|[?&](?:sig|token|access_token)=)"
+          }
+        },
+        "podId": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._/-]{0,199}$",
+          "not": {
+            "pattern": "(Bearer\\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?://[^/\\s]+:[^/\\s]+@|[?&](?:sig|token|access_token)=)"
+          }
+        },
+        "dispatcherAttemptId": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._/-]{0,199}$",
+          "not": {
+            "pattern": "(Bearer\\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?://[^/\\s]+:[^/\\s]+@|[?&](?:sig|token|access_token)=)"
+          }
+        },
+        "executionSpecDigest": {
+          "type": "string",
+          "pattern": "^sha256:[a-f0-9]{64}$",
+          "not": {
+            "pattern": "(Bearer\\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?://[^/\\s]+:[^/\\s]+@|[?&](?:sig|token|access_token)=)"
+          }
+        },
+        "manifestSha256": {
+          "type": "string",
+          "pattern": "^sha256:[a-f0-9]{64}$",
+          "not": {
+            "pattern": "(Bearer\\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?://[^/\\s]+:[^/\\s]+@|[?&](?:sig|token|access_token)=)"
+          }
+        },
+        "bundleSha256": {
+          "type": "string",
+          "pattern": "^sha256:[a-f0-9]{64}$",
+          "not": {
+            "pattern": "(Bearer\\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?://[^/\\s]+:[^/\\s]+@|[?&](?:sig|token|access_token)=)"
+          }
+        },
+        "fileCount": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "totalBytes": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "status": {
+          "const": "committed"
+        }
+      },
+      "required": [
+        "schemaVersion",
+        "artifactId",
+        "podId",
+        "dispatcherAttemptId",
+        "executionSpecDigest",
+        "manifestSha256",
+        "bundleSha256",
+        "fileCount",
+        "totalBytes",
+        "status"
+      ]
+    },
+    "SourceCandidateReceipt": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "schemaVersion": {
+          "const": 1
+        },
+        "candidateId": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._/-]{0,199}$",
+          "not": {
+            "pattern": "(Bearer\\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?://[^/\\s]+:[^/\\s]+@|[?&](?:sig|token|access_token)=)"
+          }
+        },
+        "podId": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._/-]{0,199}$",
+          "not": {
+            "pattern": "(Bearer\\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?://[^/\\s]+:[^/\\s]+@|[?&](?:sig|token|access_token)=)"
+          }
+        },
+        "dispatcherAttemptId": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._/-]{0,199}$",
+          "not": {
+            "pattern": "(Bearer\\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?://[^/\\s]+:[^/\\s]+@|[?&](?:sig|token|access_token)=)"
+          }
+        },
+        "executionSpecDigest": {
+          "type": "string",
+          "pattern": "^sha256:[a-f0-9]{64}$",
+          "not": {
+            "pattern": "(Bearer\\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?://[^/\\s]+:[^/\\s]+@|[?&](?:sig|token|access_token)=)"
+          }
+        },
+        "repository": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._/-]{0,199}$",
+          "not": {
+            "pattern": "(Bearer\\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?://[^/\\s]+:[^/\\s]+@|[?&](?:sig|token|access_token)=)"
+          }
+        },
+        "remote": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._/-]{0,199}$",
+          "not": {
+            "pattern": "(Bearer\\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?://[^/\\s]+:[^/\\s]+@|[?&](?:sig|token|access_token)=)"
+          }
+        },
+        "head": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._/-]{0,199}$",
+          "not": {
+            "pattern": "(Bearer\\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?://[^/\\s]+:[^/\\s]+@|[?&](?:sig|token|access_token)=)"
+          }
+        },
+        "base": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._/-]{0,199}$",
+          "not": {
+            "pattern": "(Bearer\\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?://[^/\\s]+:[^/\\s]+@|[?&](?:sig|token|access_token)=)"
+          }
+        },
+        "expectedOldCommit": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{40}$",
+          "not": {
+            "pattern": "(Bearer\\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?://[^/\\s]+:[^/\\s]+@|[?&](?:sig|token|access_token)=)"
+          }
+        },
+        "newCommit": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{40}$",
+          "not": {
+            "pattern": "(Bearer\\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?://[^/\\s]+:[^/\\s]+@|[?&](?:sig|token|access_token)=)"
+          }
+        },
+        "evidenceDigest": {
+          "type": "string",
+          "pattern": "^sha256:[a-f0-9]{64}$",
+          "not": {
+            "pattern": "(Bearer\\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?://[^/\\s]+:[^/\\s]+@|[?&](?:sig|token|access_token)=)"
+          }
+        },
+        "candidateDigest": {
+          "type": "string",
+          "pattern": "^sha256:[a-f0-9]{64}$",
+          "not": {
+            "pattern": "(Bearer\\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?://[^/\\s]+:[^/\\s]+@|[?&](?:sig|token|access_token)=)"
+          }
+        }
+      },
+      "required": [
+        "schemaVersion",
+        "candidateId",
+        "podId",
+        "dispatcherAttemptId",
+        "executionSpecDigest",
+        "repository",
+        "remote",
+        "head",
+        "base",
+        "expectedOldCommit",
+        "newCommit",
+        "evidenceDigest",
+        "candidateDigest"
+      ]
+    },
+    "VerificationReceipt": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "schemaVersion": {
+          "const": 1
+        },
+        "verificationId": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._/-]{0,199}$",
+          "not": {
+            "pattern": "(Bearer\\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?://[^/\\s]+:[^/\\s]+@|[?&](?:sig|token|access_token)=)"
+          }
+        },
+        "dispatcherAttemptId": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._/-]{0,199}$",
+          "not": {
+            "pattern": "(Bearer\\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?://[^/\\s]+:[^/\\s]+@|[?&](?:sig|token|access_token)=)"
+          }
+        },
+        "executionSpecDigest": {
+          "type": "string",
+          "pattern": "^sha256:[a-f0-9]{64}$",
+          "not": {
+            "pattern": "(Bearer\\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?://[^/\\s]+:[^/\\s]+@|[?&](?:sig|token|access_token)=)"
+          }
+        },
+        "candidateDigest": {
+          "type": "string",
+          "pattern": "^sha256:[a-f0-9]{64}$",
+          "not": {
+            "pattern": "(Bearer\\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?://[^/\\s]+:[^/\\s]+@|[?&](?:sig|token|access_token)=)"
+          }
+        },
+        "newCommit": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{40}$",
+          "not": {
+            "pattern": "(Bearer\\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?://[^/\\s]+:[^/\\s]+@|[?&](?:sig|token|access_token)=)"
+          }
+        },
+        "evidenceDigest": {
+          "type": "string",
+          "pattern": "^sha256:[a-f0-9]{64}$",
+          "not": {
+            "pattern": "(Bearer\\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?://[^/\\s]+:[^/\\s]+@|[?&](?:sig|token|access_token)=)"
+          }
+        },
+        "verifierPolicy": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._/-]{0,199}$",
+          "not": {
+            "pattern": "(Bearer\\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?://[^/\\s]+:[^/\\s]+@|[?&](?:sig|token|access_token)=)"
+          }
+        },
+        "verifierIdentity": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._/-]{0,199}$",
+          "not": {
+            "pattern": "(Bearer\\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?://[^/\\s]+:[^/\\s]+@|[?&](?:sig|token|access_token)=)"
+          }
+        },
+        "status": {
+          "type": "string",
+          "enum": [
+            "passed",
+            "failed"
+          ],
+          "not": {
+            "pattern": "(Bearer\\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?://[^/\\s]+:[^/\\s]+@|[?&](?:sig|token|access_token)=)"
+          }
+        },
+        "verifiedAt": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "receiptDigest": {
+          "type": "string",
+          "pattern": "^sha256:[a-f0-9]{64}$",
+          "not": {
+            "pattern": "(Bearer\\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?://[^/\\s]+:[^/\\s]+@|[?&](?:sig|token|access_token)=)"
+          }
+        }
+      },
+      "required": [
+        "schemaVersion",
+        "verificationId",
+        "dispatcherAttemptId",
+        "executionSpecDigest",
+        "candidateDigest",
+        "newCommit",
+        "evidenceDigest",
+        "verifierPolicy",
+        "verifierIdentity",
+        "status",
+        "verifiedAt",
+        "receiptDigest"
+      ]
+    },
+    "FinalizeSourceDeliveryRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "schemaVersion": {
+          "const": 1
+        },
+        "dispatcherInstallationId": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._/-]{0,199}$",
+          "not": {
+            "pattern": "(Bearer\\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?://[^/\\s]+:[^/\\s]+@|[?&](?:sig|token|access_token)=)"
+          }
+        },
+        "dispatcherAttemptId": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._/-]{0,199}$",
+          "not": {
+            "pattern": "(Bearer\\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?://[^/\\s]+:[^/\\s]+@|[?&](?:sig|token|access_token)=)"
+          }
+        },
+        "executionSpecDigest": {
+          "type": "string",
+          "pattern": "^sha256:[a-f0-9]{64}$",
+          "not": {
+            "pattern": "(Bearer\\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?://[^/\\s]+:[^/\\s]+@|[?&](?:sig|token|access_token)=)"
+          }
+        },
+        "candidateDigest": {
+          "type": "string",
+          "pattern": "^sha256:[a-f0-9]{64}$",
+          "not": {
+            "pattern": "(Bearer\\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?://[^/\\s]+:[^/\\s]+@|[?&](?:sig|token|access_token)=)"
+          }
+        },
+        "verificationReceipt": {
+          "$ref": "#/$defs/VerificationReceipt"
+        },
+        "grantId": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._/-]{0,199}$",
+          "not": {
+            "pattern": "(Bearer\\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?://[^/\\s]+:[^/\\s]+@|[?&](?:sig|token|access_token)=)"
+          }
+        },
+        "grantRevision": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "operation": {
+          "type": "string",
+          "enum": [
+            "commit",
+            "branch",
+            "draft-pr"
+          ],
+          "not": {
+            "pattern": "(Bearer\\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?://[^/\\s]+:[^/\\s]+@|[?&](?:sig|token|access_token)=)"
+          }
+        },
+        "repository": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._/-]{0,199}$",
+          "not": {
+            "pattern": "(Bearer\\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?://[^/\\s]+:[^/\\s]+@|[?&](?:sig|token|access_token)=)"
+          }
+        },
+        "remote": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._/-]{0,199}$",
+          "not": {
+            "pattern": "(Bearer\\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?://[^/\\s]+:[^/\\s]+@|[?&](?:sig|token|access_token)=)"
+          }
+        },
+        "head": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._/-]{0,199}$",
+          "not": {
+            "pattern": "(Bearer\\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?://[^/\\s]+:[^/\\s]+@|[?&](?:sig|token|access_token)=)"
+          }
+        },
+        "base": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._/-]{0,199}$",
+          "not": {
+            "pattern": "(Bearer\\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?://[^/\\s]+:[^/\\s]+@|[?&](?:sig|token|access_token)=)"
+          }
+        },
+        "expectedOldCommit": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{40}$",
+          "not": {
+            "pattern": "(Bearer\\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?://[^/\\s]+:[^/\\s]+@|[?&](?:sig|token|access_token)=)"
+          }
+        },
+        "newCommit": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{40}$",
+          "not": {
+            "pattern": "(Bearer\\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?://[^/\\s]+:[^/\\s]+@|[?&](?:sig|token|access_token)=)"
+          }
+        },
+        "draft": {
+          "const": true
+        },
+        "bodyDigest": {
+          "type": "string",
+          "pattern": "^sha256:[a-f0-9]{64}$",
+          "not": {
+            "pattern": "(Bearer\\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?://[^/\\s]+:[^/\\s]+@|[?&](?:sig|token|access_token)=)"
+          }
+        },
+        "operationKey": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._/-]{0,199}$",
+          "not": {
+            "pattern": "(Bearer\\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?://[^/\\s]+:[^/\\s]+@|[?&](?:sig|token|access_token)=)"
+          }
+        }
+      },
+      "required": [
+        "schemaVersion",
+        "dispatcherInstallationId",
+        "dispatcherAttemptId",
+        "executionSpecDigest",
+        "candidateDigest",
+        "verificationReceipt",
+        "grantId",
+        "grantRevision",
+        "operation",
+        "repository",
+        "remote",
+        "head",
+        "base",
+        "expectedOldCommit",
+        "newCommit",
+        "draft",
+        "bodyDigest",
+        "operationKey"
+      ]
+    },
+    "SourceDeliveryReceipt": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "schemaVersion": {
+          "const": 1
+        },
+        "dispatcherAttemptId": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._/-]{0,199}$",
+          "not": {
+            "pattern": "(Bearer\\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?://[^/\\s]+:[^/\\s]+@|[?&](?:sig|token|access_token)=)"
+          }
+        },
+        "executionSpecDigest": {
+          "type": "string",
+          "pattern": "^sha256:[a-f0-9]{64}$",
+          "not": {
+            "pattern": "(Bearer\\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?://[^/\\s]+:[^/\\s]+@|[?&](?:sig|token|access_token)=)"
+          }
+        },
+        "candidateDigest": {
+          "type": "string",
+          "pattern": "^sha256:[a-f0-9]{64}$",
+          "not": {
+            "pattern": "(Bearer\\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?://[^/\\s]+:[^/\\s]+@|[?&](?:sig|token|access_token)=)"
+          }
+        },
+        "verificationReceiptDigest": {
+          "type": "string",
+          "pattern": "^sha256:[a-f0-9]{64}$",
+          "not": {
+            "pattern": "(Bearer\\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?://[^/\\s]+:[^/\\s]+@|[?&](?:sig|token|access_token)=)"
+          }
+        },
+        "operationKey": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._/-]{0,199}$",
+          "not": {
+            "pattern": "(Bearer\\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?://[^/\\s]+:[^/\\s]+@|[?&](?:sig|token|access_token)=)"
+          }
+        },
+        "requestDigest": {
+          "type": "string",
+          "pattern": "^sha256:[a-f0-9]{64}$",
+          "not": {
+            "pattern": "(Bearer\\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?://[^/\\s]+:[^/\\s]+@|[?&](?:sig|token|access_token)=)"
+          }
+        },
+        "operation": {
+          "type": "string",
+          "enum": [
+            "commit",
+            "branch",
+            "draft-pr"
+          ],
+          "not": {
+            "pattern": "(Bearer\\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?://[^/\\s]+:[^/\\s]+@|[?&](?:sig|token|access_token)=)"
+          }
+        },
+        "repository": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._/-]{0,199}$",
+          "not": {
+            "pattern": "(Bearer\\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?://[^/\\s]+:[^/\\s]+@|[?&](?:sig|token|access_token)=)"
+          }
+        },
+        "remote": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._/-]{0,199}$",
+          "not": {
+            "pattern": "(Bearer\\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?://[^/\\s]+:[^/\\s]+@|[?&](?:sig|token|access_token)=)"
+          }
+        },
+        "head": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._/-]{0,199}$",
+          "not": {
+            "pattern": "(Bearer\\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?://[^/\\s]+:[^/\\s]+@|[?&](?:sig|token|access_token)=)"
+          }
+        },
+        "base": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._/-]{0,199}$",
+          "not": {
+            "pattern": "(Bearer\\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?://[^/\\s]+:[^/\\s]+@|[?&](?:sig|token|access_token)=)"
+          }
+        },
+        "oldCommit": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{40}$",
+          "not": {
+            "pattern": "(Bearer\\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?://[^/\\s]+:[^/\\s]+@|[?&](?:sig|token|access_token)=)"
+          }
+        },
+        "newCommit": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{40}$",
+          "not": {
+            "pattern": "(Bearer\\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?://[^/\\s]+:[^/\\s]+@|[?&](?:sig|token|access_token)=)"
+          }
+        },
+        "draft": {
+          "const": true
+        },
+        "bodyDigest": {
+          "type": "string",
+          "pattern": "^sha256:[a-f0-9]{64}$",
+          "not": {
+            "pattern": "(Bearer\\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?://[^/\\s]+:[^/\\s]+@|[?&](?:sig|token|access_token)=)"
+          }
+        },
+        "pullRequestId": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "status": {
+          "const": "delivered"
+        }
+      },
+      "required": [
+        "schemaVersion",
+        "dispatcherAttemptId",
+        "executionSpecDigest",
+        "candidateDigest",
+        "verificationReceiptDigest",
+        "operationKey",
+        "requestDigest",
+        "operation",
+        "repository",
+        "remote",
+        "head",
+        "base",
+        "oldCommit",
+        "newCommit",
+        "draft",
+        "bodyDigest",
+        "pullRequestId",
+        "status"
+      ]
+    },
+    "FinalizeSourceDeliveryResponse": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "schemaVersion": {
+          "const": 1
+        },
+        "status": {
+          "type": "string",
+          "enum": [
+            "delivered",
+            "pending",
+            "rejected"
+          ],
+          "not": {
+            "pattern": "(Bearer\\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?://[^/\\s]+:[^/\\s]+@|[?&](?:sig|token|access_token)=)"
+          }
+        },
+        "receipts": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/SourceDeliveryReceipt"
+          },
+          "maxItems": 5000
+        },
+        "reason": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._/-]{0,199}$",
+          "not": {
+            "pattern": "(Bearer\\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?://[^/\\s]+:[^/\\s]+@|[?&](?:sig|token|access_token)=)"
+          }
+        }
+      },
+      "required": [
+        "schemaVersion",
+        "status",
+        "receipts",
+        "reason"
+      ]
+    },
+    "ValidationEvidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "schemaVersion": {
+          "const": 1
+        },
+        "evidenceId": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._/-]{0,199}$",
+          "not": {
+            "pattern": "(Bearer\\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?://[^/\\s]+:[^/\\s]+@|[?&](?:sig|token|access_token)=)"
+          }
+        },
+        "dispatcherAttemptId": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._/-]{0,199}$",
+          "not": {
+            "pattern": "(Bearer\\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?://[^/\\s]+:[^/\\s]+@|[?&](?:sig|token|access_token)=)"
+          }
+        },
+        "kind": {
+          "type": "string",
+          "enum": [
+            "worker-claim",
+            "runtime-fact",
+            "validation",
+            "limitation"
+          ],
+          "not": {
+            "pattern": "(Bearer\\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?://[^/\\s]+:[^/\\s]+@|[?&](?:sig|token|access_token)=)"
+          }
+        },
+        "name": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._/-]{0,199}$",
+          "not": {
+            "pattern": "(Bearer\\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?://[^/\\s]+:[^/\\s]+@|[?&](?:sig|token|access_token)=)"
+          }
+        },
+        "status": {
+          "type": "string",
+          "enum": [
+            "passed",
+            "failed",
+            "observed",
+            "not-run"
+          ],
+          "not": {
+            "pattern": "(Bearer\\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?://[^/\\s]+:[^/\\s]+@|[?&](?:sig|token|access_token)=)"
+          }
+        },
+        "digest": {
+          "type": "string",
+          "pattern": "^sha256:[a-f0-9]{64}$",
+          "not": {
+            "pattern": "(Bearer\\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?://[^/\\s]+:[^/\\s]+@|[?&](?:sig|token|access_token)=)"
+          }
+        }
+      },
+      "required": [
+        "schemaVersion",
+        "evidenceId",
+        "dispatcherAttemptId",
+        "kind",
+        "name",
+        "status",
+        "digest"
+      ]
+    },
+    "ManagedPodEvent": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "schemaVersion": {
+          "const": 1
+        },
+        "eventId": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._/-]{0,199}$",
+          "not": {
+            "pattern": "(Bearer\\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?://[^/\\s]+:[^/\\s]+@|[?&](?:sig|token|access_token)=)"
+          }
+        },
+        "podId": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._/-]{0,199}$",
+          "not": {
+            "pattern": "(Bearer\\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?://[^/\\s]+:[^/\\s]+@|[?&](?:sig|token|access_token)=)"
+          }
+        },
+        "dispatcherAttemptId": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._/-]{0,199}$",
+          "not": {
+            "pattern": "(Bearer\\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?://[^/\\s]+:[^/\\s]+@|[?&](?:sig|token|access_token)=)"
+          }
+        },
+        "cursor": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._/-]{0,199}$",
+          "not": {
+            "pattern": "(Bearer\\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?://[^/\\s]+:[^/\\s]+@|[?&](?:sig|token|access_token)=)"
+          }
+        },
+        "kind": {
+          "type": "string",
+          "enum": [
+            "queued",
+            "provisioning",
+            "running",
+            "awaiting_input",
+            "paused",
+            "validating",
+            "validated",
+            "review_required",
+            "failed",
+            "killing",
+            "killed",
+            "complete",
+            "revoked",
+            "cleanup",
+            "follow-up"
+          ],
+          "not": {
+            "pattern": "(Bearer\\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?://[^/\\s]+:[^/\\s]+@|[?&](?:sig|token|access_token)=)"
+          }
+        },
+        "createdAt": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "evidence": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ValidationEvidence"
+          },
+          "maxItems": 5000
+        }
+      },
+      "required": [
+        "schemaVersion",
+        "eventId",
+        "podId",
+        "dispatcherAttemptId",
+        "cursor",
+        "kind",
+        "createdAt",
+        "evidence"
+      ]
+    },
+    "ManagedPodResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "schemaVersion": {
+          "const": 1
+        },
+        "handle": {
+          "$ref": "#/$defs/ManagedPodHandle"
+        },
+        "state": {
+          "type": "string",
+          "enum": [
+            "queued",
+            "provisioning",
+            "running",
+            "awaiting_input",
+            "paused",
+            "validating",
+            "validated",
+            "review_required",
+            "failed",
+            "killing",
+            "killed",
+            "complete"
+          ],
+          "not": {
+            "pattern": "(Bearer\\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?://[^/\\s]+:[^/\\s]+@|[?&](?:sig|token|access_token)=)"
+          }
+        },
+        "artifacts": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ArtifactReceipt"
+          },
+          "maxItems": 5000
+        },
+        "candidates": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/SourceCandidateReceipt"
+          },
+          "maxItems": 5000
+        },
+        "source": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/SourceDeliveryReceipt"
+          },
+          "maxItems": 5000
+        },
+        "evidence": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ValidationEvidence"
+          },
+          "maxItems": 5000
+        },
+        "limitations": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._/-]{0,199}$",
+            "not": {
+              "pattern": "(Bearer\\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?://[^/\\s]+:[^/\\s]+@|[?&](?:sig|token|access_token)=)"
+            }
+          },
+          "maxItems": 5000
+        },
+        "revoked": {
+          "type": "boolean"
+        },
+        "observedExit": {
+          "type": "boolean"
+        },
+        "cleanup": {
+          "type": "string",
+          "enum": [
+            "not-requested",
+            "requested",
+            "observed"
+          ],
+          "not": {
+            "pattern": "(Bearer\\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?://[^/\\s]+:[^/\\s]+@|[?&](?:sig|token|access_token)=)"
+          }
+        }
+      },
+      "required": [
+        "schemaVersion",
+        "handle",
+        "state",
+        "artifacts",
+        "candidates",
+        "source",
+        "evidence",
+        "limitations",
+        "revoked",
+        "observedExit",
+        "cleanup"
+      ]
+    },
+    "ManagedPodError": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "schemaVersion": {
+          "const": 1
+        },
+        "code": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._/-]{0,199}$",
+          "not": {
+            "pattern": "(Bearer\\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?://[^/\\s]+:[^/\\s]+@|[?&](?:sig|token|access_token)=)"
+          }
+        },
+        "retryable": {
+          "type": "boolean"
+        },
+        "requestId": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._/-]{0,199}$",
+          "not": {
+            "pattern": "(Bearer\\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?://[^/\\s]+:[^/\\s]+@|[?&](?:sig|token|access_token)=)"
+          }
+        }
+      },
+      "required": [
+        "schemaVersion",
+        "code",
+        "retryable",
+        "requestId"
+      ]
+    },
+    "DriverHealth": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "schemaVersion": {
+          "const": 1
+        },
+        "backendId": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._/-]{0,199}$",
+          "not": {
+            "pattern": "(Bearer\\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?://[^/\\s]+:[^/\\s]+@|[?&](?:sig|token|access_token)=)"
+          }
+        },
+        "protocol": {
+          "const": "managed-pod-v1"
+        },
+        "build": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "minimumDispatcherBuild": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "minimumAutoPodBuild": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "capabilities": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._/-]{0,199}$",
+            "not": {
+              "pattern": "(Bearer\\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?://[^/\\s]+:[^/\\s]+@|[?&](?:sig|token|access_token)=)"
+            }
+          },
+          "maxItems": 5000
+        },
+        "targets": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": [
+              "local",
+              "sandbox"
+            ],
+            "not": {
+              "pattern": "(Bearer\\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?://[^/\\s]+:[^/\\s]+@|[?&](?:sig|token|access_token)=)"
+            }
+          },
+          "maxItems": 5000
+        },
+        "enabled": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "schemaVersion",
+        "backendId",
+        "protocol",
+        "build",
+        "minimumDispatcherBuild",
+        "minimumAutoPodBuild",
+        "capabilities",
+        "targets",
+        "enabled"
+      ]
+    },
+    "FollowUpEnvelope": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "schemaVersion": {
+          "const": 1
+        },
+        "dispatcherAttemptId": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._/-]{0,199}$",
+          "not": {
+            "pattern": "(Bearer\\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?://[^/\\s]+:[^/\\s]+@|[?&](?:sig|token|access_token)=)"
+          }
+        },
+        "grantId": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._/-]{0,199}$",
+          "not": {
+            "pattern": "(Bearer\\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?://[^/\\s]+:[^/\\s]+@|[?&](?:sig|token|access_token)=)"
+          }
+        },
+        "grantRevision": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "message": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 4096,
+          "not": {
+            "pattern": "(Bearer\\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?://[^/\\s]+:[^/\\s]+@|[?&](?:sig|token|access_token)=)"
+          }
+        }
+      },
+      "required": [
+        "schemaVersion",
+        "dispatcherAttemptId",
+        "grantId",
+        "grantRevision",
+        "message"
+      ]
+    },
+    "ControlRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "schemaVersion": {
+          "const": 1
+        },
+        "dispatcherAttemptId": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._/-]{0,199}$",
+          "not": {
+            "pattern": "(Bearer\\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?://[^/\\s]+:[^/\\s]+@|[?&](?:sig|token|access_token)=)"
+          }
+        },
+        "grantId": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._/-]{0,199}$",
+          "not": {
+            "pattern": "(Bearer\\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?://[^/\\s]+:[^/\\s]+@|[?&](?:sig|token|access_token)=)"
+          }
+        },
+        "grantRevision": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "operation": {
+          "type": "string",
+          "enum": [
+            "stop",
+            "pause",
+            "resume",
+            "revoke",
+            "cleanup"
+          ],
+          "not": {
+            "pattern": "(Bearer\\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?://[^/\\s]+:[^/\\s]+@|[?&](?:sig|token|access_token)=)"
+          }
+        }
+      },
+      "required": [
+        "schemaVersion",
+        "dispatcherAttemptId",
+        "grantId",
+        "grantRevision",
+        "operation"
+      ]
+    },
+    "ControlResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "schemaVersion": {
+          "const": 1
+        },
+        "accepted": {
+          "type": "boolean"
+        },
+        "revoked": {
+          "type": "boolean"
+        },
+        "stopRequested": {
+          "type": "boolean"
+        },
+        "observedExit": {
+          "type": "boolean"
+        },
+        "cleanup": {
+          "type": "string",
+          "enum": [
+            "not-requested",
+            "requested",
+            "observed"
+          ],
+          "not": {
+            "pattern": "(Bearer\\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?://[^/\\s]+:[^/\\s]+@|[?&](?:sig|token|access_token)=)"
+          }
+        }
+      },
+      "required": [
+        "schemaVersion",
+        "accepted",
+        "revoked",
+        "stopRequested",
+        "observedExit",
+        "cleanup"
+      ]
+    },
+    "ManagedObservation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schemaVersion",
+        "cursor",
+        "events",
+        "result"
+      ],
+      "properties": {
+        "schemaVersion": {
+          "const": 1
+        },
+        "cursor": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._/-]{0,199}$",
+          "not": {
+            "pattern": "(Bearer\\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?://[^/\\s]+:[^/\\s]+@|[?&](?:sig|token|access_token)=)"
+          }
+        },
+        "events": {
+          "type": "array",
+          "maxItems": 100,
+          "items": {
+            "$ref": "#/$defs/ManagedPodEvent"
+          }
+        },
+        "result": {
+          "$ref": "#/$defs/ManagedPodResult"
+        }
+      }
+    }
+  }
+}

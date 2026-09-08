@@ -30,6 +30,8 @@ export interface SandboxEgressRule {
 export interface SandboxEgressPolicy {
   defaultAction: 'Allow' | 'Deny';
   hostRules: SandboxEgressRule[];
+  /** Managed attempts require inspection of HTTP and non-HTTP traffic. */
+  trafficInspection?: 'Full';
 }
 
 export interface SandboxRegistryCredentials {
@@ -38,6 +40,8 @@ export interface SandboxRegistryCredentials {
 }
 
 export interface CreateSandboxOptions {
+  /** Managed mode binds Azure discovery to this immutable execution spec. */
+  managedSpecDigest?: string;
   image: string;
   tier: SandboxResourceTier;
   egressPolicy: SandboxEgressPolicy;
@@ -162,6 +166,8 @@ export class SandboxInfrastructureError extends Error {
 }
 
 export interface SandboxApiClient {
+  /** Exact label discovery. Missing support fails closed for managed starts. */
+  findManagedSandbox?(podId: string, specDigest: string): Promise<string | null>;
   /** Provision a sandbox from an OCI image with an initial egress policy. Returns its id. */
   createSandbox(options: CreateSandboxOptions): Promise<string>;
   /** Delete a sandbox. Should be idempotent — a missing sandbox is treated as already destroyed. */

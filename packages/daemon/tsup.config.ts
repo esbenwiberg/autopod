@@ -2,7 +2,7 @@ import { cpSync, mkdirSync } from 'node:fs';
 import { defineConfig } from 'tsup';
 
 export default defineConfig({
-  entry: ['src/index.ts'],
+  entry: ['src/index.ts', 'src/managed.ts'],
   format: ['esm'],
   dts: true,
   clean: true,
@@ -14,6 +14,10 @@ export default defineConfig({
     cpSync('src/db/migrations', 'dist/db/migrations', { recursive: true });
     mkdirSync('dist/actions/defaults', { recursive: true });
     cpSync('src/actions/defaults', 'dist/actions/defaults', { recursive: true });
+    mkdirSync('dist/runtime', { recursive: true });
+    cpSync('src/managed/runtime/supervisor.py', 'dist/runtime/supervisor.py');
+    cpSync('src/managed/runtime/codex_channel.py', 'dist/runtime/codex_channel.py');
+    cpSync('src/managed/runtime/codex_worker.py', 'dist/runtime/codex_worker.py');
     mkdirSync('dist/containers', { recursive: true });
     cpSync('src/containers/seccomp-profile.json', 'dist/containers/seccomp-profile.json');
     mkdirSync('dist/images', { recursive: true });

@@ -1,7 +1,9 @@
+import type { ArtifactOutput } from '@autopod/shared';
 import type { Readable, Writable } from 'node:stream';
 
 export interface ContainerSpawnConfig {
   image: string;
+  managedSpecDigest?: string;
   podId: string;
   env: Record<string, string>;
   /** Initial working directory for the container process. Defaults to /workspace. */
@@ -107,6 +109,13 @@ export interface TerminalSession {
 }
 
 export interface ContainerManager {
+  ensureManagedContainer?(config: ContainerSpawnConfig): Promise<string>;
+  /** Strict managed /output extraction; unavailable implementations fail preflight. */
+  extractManagedOutput?(
+    containerId: string,
+    staging: string,
+    output: ArtifactOutput,
+  ): Promise<void>;
   /**
    * Whether `execStreaming()` supports long-lived stdout/stderr streams for agent runtimes.
    * Omitted means supported for legacy/test managers; buffered-only managers must set false.
