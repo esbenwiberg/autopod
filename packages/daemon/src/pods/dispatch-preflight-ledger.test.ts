@@ -79,7 +79,7 @@ describe('dispatch admission against immutable execution evidence', () => {
     f.repo.insert(request('first'));
     const first = f.ledger.inspect('first', 1, repository, 'main', base);
     f.repo.insert(request('second'));
-    f.db.prepare('DELETE FROM pods WHERE id = ?').run('first');
+    f.repo.delete('first');
     const dir = mkdtempSync(join(tmpdir(), 'dispatch-restart-'));
     writeFileSync(join(dir, 'state.db'), f.db.serialize());
     f.db.close();

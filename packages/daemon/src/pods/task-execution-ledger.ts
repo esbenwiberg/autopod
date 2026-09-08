@@ -75,7 +75,7 @@ export function createTaskExecutionLedger(db: Database.Database): TaskExecutionL
     db
       .prepare(`
     SELECT e.task_id AS taskId, e.execution_id AS executionId, t.root_pod_id AS rootPodId
-    FROM task_executions e JOIN logical_tasks t ON t.id = e.task_id WHERE e.pod_id = ?
+    FROM retained_task_executions e JOIN logical_tasks t ON t.id = e.task_id WHERE e.pod_id = ?
   `)
       .get(podId) as Membership | undefined;
   const register = db.transaction((podId: string) => {
@@ -129,7 +129,7 @@ export function createTaskExecutionLedger(db: Database.Database): TaskExecutionL
     let incompleteSpending = false;
     const rows = db
       .prepare(`SELECT p.id, p.input_tokens, p.output_tokens, p.cost_usd,
-      ${COST_PHASE_COLUMNS}, p.token_telemetry_accuracy FROM task_executions e JOIN pods p ON p.id = e.pod_id
+      ${COST_PHASE_COLUMNS}, p.token_telemetry_accuracy, p.history_archived FROM retained_task_executions e JOIN retained_pods p ON p.id = e.pod_id
       WHERE e.task_id = ?`)
       .all(identity.taskId) as Array<{
       id: string;
@@ -139,6 +139,7 @@ export function createTaskExecutionLedger(db: Database.Database): TaskExecutionL
       phase_token_usage: string | null;
       phase_token_usage_oversized: number | null;
       token_telemetry_accuracy: string;
+      history_archived: number;
     }>;
     const number = (value: unknown, id: string): number => {
       if (typeof value === 'number' && Number.isFinite(value) && value >= 0) return value;
@@ -147,7 +148,7 @@ export function createTaskExecutionLedger(db: Database.Database): TaskExecutionL
       return 0;
     };
     for (const row of rows) {
-      const attempts = readProviderUsage(db, row.id);
+      const attempts = readProviderUsage(db, row.id, true);
       // The corrected append-only provider ledger is authoritative when present.
       // The pod row is a legacy fallback, never an additional bucket of provider spend.
       const agent =
@@ -160,7 +161,7 @@ export function createTaskExecutionLedger(db: Database.Database): TaskExecutionL
             };
       const priorRuns = (
         db
-          .prepare('SELECT COUNT(*) AS count FROM task_agent_runs WHERE pod_id = ?')
+          .prepare('SELECT COUNT(*) AS count FROM retained_task_agent_runs WHERE pod_id = ?')
           .get(row.id) as {
           count: number;
         }
@@ -169,6 +170,7 @@ export function createTaskExecutionLedger(db: Database.Database): TaskExecutionL
       // Existing runs, settled segments and positive usage demonstrate prior work.
       const priorWork =
         priorRuns > 0 ||
+        (row.history_archived === 1 && attempts.count > 0) ||
         (attempts.settledCount ?? 0) > 0 ||
         row.input_tokens > 0 ||
         row.output_tokens > 0 ||
@@ -253,19 +255,24 @@ export function createTaskExecutionLedger(db: Database.Database): TaskExecutionL
         incompleteSpending = true;
       }
     }
+    const archivedCount = rows.filter((row) => row.history_archived === 1).length;
+    if (archivedCount > 0)
+      diagnostics.push(
+        `${archivedCount} deleted pod ${archivedCount === 1 ? 'record retains' : 'records retain'} task accounting and execution evidence.`,
+      );
     const counts = db
       .prepare(`SELECT COUNT(*) AS agentRunCount,
       COALESCE(SUM(outcome = 'failed'), 0) AS failedRunCount,
       COALESCE(SUM(outcome = 'failed' AND failure_category IN ('transient','provider_unavailable')), 0) AS transientFailureCount
-      FROM task_agent_runs r JOIN task_executions e ON e.pod_id = r.pod_id WHERE e.task_id = ?`)
+      FROM retained_task_agent_runs r JOIN retained_task_executions e ON e.pod_id = r.pod_id WHERE e.task_id = ?`)
       .get(identity.taskId) as Pick<
       TaskExecutionSummary,
       'agentRunCount' | 'failedRunCount' | 'transientFailureCount'
     >;
     const unsettledCount = (
       db
-        .prepare(`SELECT COUNT(*) AS count FROM task_agent_runs r
-      JOIN task_executions e ON e.pod_id = r.pod_id WHERE e.task_id = ? AND r.ended_at IS NULL`)
+        .prepare(`SELECT COUNT(*) AS count FROM retained_task_agent_runs r
+      JOIN retained_task_executions e ON e.pod_id = r.pod_id WHERE e.task_id = ? AND r.ended_at IS NULL`)
         .get(identity.taskId) as { count: number }
     ).count;
     if (unsettledCount > 0) {
@@ -276,7 +283,7 @@ export function createTaskExecutionLedger(db: Database.Database): TaskExecutionL
       // ownership of an older execution after replacement or restart.
       const oldest = db
         .prepare(`SELECT CASE WHEN length(CAST(r.binding AS BLOB)) <= 16384 THEN r.binding END AS binding
-        FROM task_agent_runs r JOIN task_executions e ON e.pod_id = r.pod_id
+        FROM retained_task_agent_runs r JOIN retained_task_executions e ON e.pod_id = r.pod_id
         WHERE e.task_id = ? AND r.ended_at IS NULL ORDER BY r.started_at, r.id LIMIT 1`)
         .get(identity.taskId) as { binding: string | null };
       let resource: ExecutionBinding['resource'];
@@ -301,8 +308,8 @@ export function createTaskExecutionLedger(db: Database.Database): TaskExecutionL
     const count = (table: 'provider_attempts' | 'validations'): number =>
       (
         db
-          .prepare(`SELECT COUNT(*) AS n FROM ${table} r
-      JOIN task_executions e ON e.pod_id = r.pod_id WHERE e.task_id = ?`)
+          .prepare(`SELECT COUNT(*) AS n FROM retained_${table} r
+      JOIN retained_task_executions e ON e.pod_id = r.pod_id WHERE e.task_id = ?`)
           .get(identity.taskId) as { n: number }
       ).n;
     // Aggregate scalar receipt metadata only. Large/malformed legacy result
@@ -364,7 +371,7 @@ export function createTaskExecutionLedger(db: Database.Database): TaskExecutionL
     if (mergeIdentityUnavailable)
       diagnostics.push('Merge identity unavailable; reconcile retained journal records');
     const root = db
-      .prepare('SELECT token_budget AS budget FROM pods WHERE id = ?')
+      .prepare('SELECT token_budget AS budget FROM retained_pods WHERE id = ?')
       .get(identity.rootPodId) as { budget: number | null } | undefined;
     if (!root) diagnostics.push('Task budget source unavailable');
     const budgetCheck: NonNullable<TaskExecutionSummary['budgetCheck']> = !root

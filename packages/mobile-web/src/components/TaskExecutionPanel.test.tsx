@@ -90,6 +90,7 @@ it.each([true, false])(
             },
             diagnostics: [
               'Infrastructure cost unavailable',
+              '1 deleted pod record retains task accounting and execution evidence.',
               '1 unsettled worker run blocks another task run; live execution state unverified.',
               'Oldest unsettled run recorded local container original-container; this reference does not prove process termination or a unique remote instance.',
             ],
@@ -101,6 +102,9 @@ it.each([true, false])(
         container.querySelector('button')?.click();
       });
       expect(container.textContent).toContain('logical-original');
+      expect(container.textContent).toContain(
+        '1 deleted pod record retains task accounting and execution evidence.',
+      );
       expect(container.textContent).toContain(
         '1 unsettled worker run blocks another task run; live execution state unverified.',
       );

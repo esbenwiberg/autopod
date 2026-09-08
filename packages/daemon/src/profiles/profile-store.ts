@@ -39,6 +39,7 @@ import {
 import type Database from 'better-sqlite3';
 import pino from 'pino';
 import type { CredentialsCipher } from '../crypto/credentials-cipher.js';
+import { createPodRepository } from '../pods/pod-repository.js';
 import { resolveInheritance, validateInheritanceChain } from './inheritance.js';
 
 const logger = pino({ name: 'autopod' }).child({ component: 'profiles' });
@@ -928,7 +929,7 @@ export function createProfileStore(
       return this.get(name);
     },
 
-    delete(name: string): void {
+    delete: db.transaction((name: string): void => {
       // Verify profile exists
       fetchRaw(name);
 
@@ -956,14 +957,16 @@ export function createProfileStore(
         );
       }
 
-      // Clean up completed/killed pods before deleting (FK constraint)
-      db.prepare(
-        `DELETE FROM pods WHERE profile_name = ? AND status IN ('complete', 'killed')`,
-      ).run(name);
+      // Archive task evidence through the same transactional path as operator Delete.
+      const podRepo = createPodRepository(db);
+      const terminal = db
+        .prepare("SELECT id FROM pods WHERE profile_name = ? AND status IN ('complete', 'killed')")
+        .all(name) as { id: string }[];
+      for (const pod of terminal) podRepo.delete(pod.id);
 
       db.prepare('DELETE FROM profiles WHERE name = ?').run(name);
       logger.info({ name }, 'Profile deleted');
-    },
+    }),
 
     exists(name: string): boolean {
       const row = db.prepare('SELECT 1 FROM profiles WHERE name = ?').get(name);

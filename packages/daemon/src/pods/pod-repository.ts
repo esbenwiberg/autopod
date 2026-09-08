@@ -247,6 +247,7 @@ import { type DeliveryLedger, createDeliveryLedger } from './delivery-ledger.js'
 import { type MergeJournal, createMergeJournal } from './merge-journal.js';
 
 import { type TaskExecutionLedger, createTaskExecutionLedger } from './task-execution-ledger.js';
+import { createTaskHistoryArchive } from './task-history-archive.js';
 
 import { COST_POD_COLUMNS, type PodCostSource } from './cost-pod-projection.js';
 
@@ -661,6 +662,7 @@ export function createPodRepository(db: Database.Database): PodRepository {
   const completionJournal = createCompletionJournal(db);
   const dispatchPreflight = createDispatchPreflightLedger(db);
   const taskExecutions = createTaskExecutionLedger(db);
+  const archiveTaskHistory = createTaskHistoryArchive(db);
   function listRows(filters?: PodFilters, columns = '*'): Iterable<Record<string, unknown>> {
     const whereClauses: string[] = [];
     const params: Record<string, unknown> = {};
@@ -1316,6 +1318,7 @@ export function createPodRepository(db: Database.Database): PodRepository {
 
     delete: db.transaction((id: string): void => {
       taskExecutions.assertCanDelete(id);
+      archiveTaskHistory(id);
       // Null out self-referential FKs from other pods before deleting.
       // These were added without ON DELETE SET NULL (SQLite can't ALTER COLUMN),
       // so we nullify them at the application level.

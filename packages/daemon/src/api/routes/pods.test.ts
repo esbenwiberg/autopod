@@ -550,6 +550,36 @@ describe('GET /pods/:podId provider-attempt projection', () => {
     ).toEqual({ binding: retainedBinding });
   });
 
+  it('exposes deleted root accounting through the surviving child task endpoint', async () => {
+    insertPod(db, { id: 'history-root', status: 'complete' });
+    insertPod(db, { id: 'history-fix', status: 'failed' });
+    db.prepare("UPDATE pods SET linked_pod_id = 'history-root' WHERE id = 'history-fix'").run();
+    db.prepare(
+      "UPDATE pods SET input_tokens = 90, output_tokens = 10, cost_usd = 2, token_budget = 100, token_telemetry_accuracy = 'complete', phase_token_usage = '{}' WHERE id = 'history-root'",
+    ).run();
+    const repo = createPodRepository(db);
+    repo.taskExecutions?.register('history-fix');
+    const before = await app.inject({ method: 'GET', url: '/pods/history-fix/task-execution' });
+    repo.delete('history-root');
+    const after = await app.inject({ method: 'GET', url: '/pods/history-fix/task-execution' });
+    expect(before.statusCode).toBe(200);
+    expect(after.statusCode).toBe(200);
+    expect(after.json()).toMatchObject({
+      taskId: before.json().taskId,
+      rootPodId: 'history-root',
+      podCount: 2,
+      recordedInputTokens: 90,
+      recordedOutputTokens: 10,
+      recordedCostUsd: 2,
+      tokenBudget: 100,
+      budgetCheck: { status: 'exhausted' },
+    });
+    expect(after.json().diagnostics).toContain(
+      '1 deleted pod record retains task accounting and execution evidence.',
+    );
+    expect(after.body.length).toBeLessThan(16384);
+  });
+
   it('provider-attempt returns ordered redacted attempts and ledger projections', async () => {
     insertPod(db, { id: 'provider-attempt-pod', status: 'running', completedAt: undefined });
     db.prepare(`

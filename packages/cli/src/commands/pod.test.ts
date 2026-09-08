@@ -509,6 +509,7 @@ it.each([true, false])(
         : {}),
       diagnostics: [
         'Infrastructure cost unavailable',
+        '1 deleted pod record retains task accounting and execution evidence.',
         '1 unsettled worker run blocks another task run; live execution state unverified.',
         'Oldest unsettled run recorded local container original-container; this reference does not prove process termination or a unique remote instance.',
       ],
@@ -575,6 +576,9 @@ it.each([true, false])(
       await command().parseAsync(['node', 'ap', 'status', 'abcd1234']);
       const output = log.mock.calls.map((call) => call.join(' ')).join('\n');
       expect(output).toContain('Stored task cost subtotal:');
+      expect(output).toContain(
+        '1 deleted pod record retains task accounting and execution evidence.',
+      );
       expect(output).toContain(
         '1 unsettled worker run blocks another task run; live execution state unverified.',
       );

@@ -374,6 +374,210 @@ describe('task-wide execution accounting', () => {
         depends_on_pod_ids: '["rerun"]',
       });
       expect(repo.getOrThrow('rerun').id).toBe('rerun');
+      for (const table of [
+        'task_history_deletions',
+        'task_history_pods',
+        'task_history_task_executions',
+      ])
+        expect(db.prepare(`SELECT COUNT(*) AS count FROM ${table}`).get()).toEqual({ count: 0 });
+    } finally {
+      db.close();
+    }
+  });
+
+  it('retains settled linked run accounting and spent budget after deleting the fix pod', () => {
+    const { db, repo } = fixture();
+    try {
+      const run = repo.taskExecutions?.beginRun('fix', 1, 1, binding);
+      if (!run) throw new Error('Missing run');
+      repo.taskExecutions?.finishRun(run, 'failed', 'auth');
+      repo.update('fix', {
+        status: 'failed',
+        inputTokens: 90,
+        outputTokens: 10,
+        costUsd: 2,
+        tokenTelemetryAccuracy: 'complete',
+        phaseTokenUsage: {},
+      });
+      db.prepare(
+        "INSERT INTO validations(id, pod_id, attempt, result, sequence) VALUES ('retained-validation', 'fix', 1, 'malformed-original', 1)",
+      ).run();
+      const before = repo.taskExecutions?.snapshot('root');
+      repo.delete('fix');
+      const after = repo.taskExecutions?.snapshot('root');
+      expect(after).toMatchObject({
+        taskId: before?.taskId,
+        podCount: 2,
+        agentRunCount: 1,
+        failedRunCount: 1,
+        validationExecutionCount: 1,
+        recordedInputTokens: 90,
+        recordedOutputTokens: 10,
+        recordedCostUsd: 2,
+        budgetCheck: { status: 'exhausted' },
+      });
+      expect(() => repo.taskExecutions?.beginRun('root', 1, 1, binding)).toThrow(
+        /budget exhausted/,
+      );
+    } finally {
+      db.close();
+    }
+  });
+
+  it('retains the deleted task root budget and original membership of its surviving child', () => {
+    const { db, repo } = fixture();
+    try {
+      repo.update('root', {
+        status: 'complete',
+        inputTokens: 100,
+        tokenTelemetryAccuracy: 'complete',
+        phaseTokenUsage: {},
+      });
+      const before = repo.taskExecutions?.snapshot('fix');
+      repo.delete('root');
+      expect(repo.getOrThrow('fix').linkedPodId).toBeNull();
+      expect(repo.taskExecutions?.snapshot('fix')).toMatchObject({
+        taskId: before?.taskId,
+        rootPodId: 'root',
+        tokenBudget: 100,
+        recordedInputTokens: 100,
+        podCount: 2,
+        budgetCheck: { status: 'exhausted' },
+      });
+      expect(() => repo.taskExecutions?.beginRun('fix', 1, 1, binding)).toThrow(/budget exhausted/);
+    } finally {
+      db.close();
+    }
+  });
+
+  it('retains corrected usage, raw evidence, and original binding through deletion and database reopen', () => {
+    const { db, repo } = fixture();
+    repo.update('root', { tokenBudget: 100, containerId: 'original-container' });
+    const run = repo.taskExecutions?.beginRun('root', 1, 1, {
+      ...binding,
+      resource: { containerId: 'original-container', executionTarget: 'local' },
+    });
+    if (!run) throw new Error('Missing run');
+    repo.taskExecutions?.finishRun(run, 'failed', 'auth');
+    db.prepare(`INSERT INTO provider_attempts (pod_id, ordinal, provider, runtime, model, profile_reference, profile_snapshot,
+      started_at, ended_at, outcome, input_tokens, output_tokens, cost_usd)
+      VALUES ('root', 1, 'openai', 'codex', 'model', 'pod:root@profile-snapshot#abcdef1', 'raw-profile',
+        '2026-09-07T00:00:00Z', '2026-09-07T00:01:00Z', 'completed', 200, 50, 5)`).run();
+    db.prepare(`INSERT INTO provider_attempt_telemetry_corrections
+      (pod_id, ordinal, input_tokens, output_tokens, cost_usd, source, reason, corrected_at)
+      VALUES ('root', 1, 90, 10, 2, 'codex_rollout', 'original correction', '2026-09-07T00:02:00Z')`).run();
+    db.prepare(
+      "INSERT INTO validations(id,pod_id,attempt,result,sequence) VALUES ('raw-validation','root',1,'malformed-original',1)",
+    ).run();
+    repo.update('root', {
+      status: 'complete',
+      inputTokens: 200,
+      outputTokens: 50,
+      costUsd: 5,
+      tokenTelemetryAccuracy: 'repaired',
+      phaseTokenUsage: {},
+    });
+    const tables = [
+      'pods',
+      'task_executions',
+      'task_agent_runs',
+      'provider_attempts',
+      'provider_attempt_telemetry_corrections',
+      'validations',
+    ];
+    const original = tables.map((table) =>
+      db
+        .prepare(`SELECT * FROM ${table} WHERE ${table === 'pods' ? 'id' : 'pod_id'} = ?`)
+        .all('root'),
+    );
+    const taskId = repo.taskExecutions?.snapshot('fix').taskId;
+    repo.delete('root');
+    const dir = mkdtempSync(path.join(tmpdir(), 'retained-task-'));
+    const file = path.join(dir, 'state.db');
+    writeFileSync(file, db.serialize());
+    db.close();
+    const restored = new Database(file);
+    try {
+      restored.pragma('foreign_keys = ON');
+      const next = createPodRepository(restored);
+      expect(next.taskExecutions?.snapshot('fix')).toMatchObject({
+        taskId,
+        rootPodId: 'root',
+        podCount: 2,
+        agentRunCount: 1,
+        failedRunCount: 1,
+        providerAttemptCount: 1,
+        validationExecutionCount: 1,
+        recordedInputTokens: 90,
+        recordedOutputTokens: 10,
+        recordedCostUsd: 2,
+        tokenBudget: 100,
+        budgetCheck: { status: 'exhausted' },
+      });
+      expect(next.taskExecutions?.snapshot('fix').diagnostics).toContain(
+        '1 deleted pod record retains task accounting and execution evidence.',
+      );
+      for (const [index, table] of tables.entries()) {
+        expect(restored.prepare(`SELECT * FROM task_history_${table}`).all()).toEqual(
+          original[index],
+        );
+        expect(() => restored.prepare(`DELETE FROM task_history_${table}`).run()).toThrow(
+          /immutable/,
+        );
+      }
+      expect(() =>
+        restored.prepare("UPDATE task_history_pods SET task = 'rewritten'").run(),
+      ).toThrow(/immutable/);
+      expect(() => restored.prepare('DELETE FROM task_history_deletions').run()).toThrow(
+        /immutable/,
+      );
+      expect(() =>
+        restored
+          .prepare("INSERT INTO pods SELECT * FROM task_history_pods WHERE id = 'root'")
+          .run(),
+      ).toThrow(/distinct execution/);
+      expect(() => next.taskExecutions?.beginRun('root', 1, 1, binding)).toThrow();
+      expect(() => next.taskExecutions?.beginRun('fix', 1, 1, binding)).toThrow(/budget exhausted/);
+      expect(restored.pragma('integrity_check', { simple: true })).toBe('ok');
+      expect(restored.pragma('foreign_key_check')).toEqual([]);
+    } finally {
+      restored.close();
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it.each(['broken', 'x'.repeat(65537)])(
+    'keeps archived malformed phase accounting unavailable %#',
+    (raw) => {
+      const { db, repo } = fixture();
+      try {
+        db.prepare("UPDATE pods SET phase_token_usage = ? WHERE id = 'root'").run(raw);
+        repo.delete('root');
+        const summary = repo.taskExecutions?.snapshot('fix');
+        expect(summary?.budgetCheck.status).toBe('unavailable');
+        expect(JSON.stringify(summary).length).toBeLessThan(16384);
+        expect(
+          db.prepare("SELECT phase_token_usage FROM task_history_pods WHERE id = 'root'").get(),
+        ).toEqual({ phase_token_usage: raw });
+        expect(() => repo.taskExecutions?.beginRun('fix', 1, 1, binding)).toThrow(/incomplete/);
+      } finally {
+        db.close();
+      }
+    },
+  );
+
+  it('does not turn an archived zero-use open provider segment into a fresh task budget', () => {
+    const { db, repo } = fixture();
+    try {
+      db.prepare(`INSERT INTO provider_attempts (pod_id,ordinal,provider,runtime,model,profile_reference,profile_snapshot,started_at)
+        VALUES ('root',1,'openai','codex','model','fixture','{}','2026-09-07')`).run();
+      repo.delete('root');
+      expect(repo.taskExecutions?.snapshot('fix')).toMatchObject({
+        providerAttemptCount: 1,
+        tokenBudget: 100,
+        budgetCheck: { status: 'unavailable' },
+      });
+      expect(() => repo.taskExecutions?.beginRun('fix', 1, 1, binding)).toThrow(/incomplete/);
     } finally {
       db.close();
     }
@@ -489,7 +693,7 @@ describe('task-wide execution accounting', () => {
     }
   });
 
-  it.each([139, 141, 152, 164])(
+  it.each([139, 141, 152, 164, 176])(
     'upgrades schema %s with existing linked work and unresolved legacy lineage',
     (version) => {
       const dir = mkdtempSync(path.join(tmpdir(), 'task-upgrade-'));
@@ -513,6 +717,18 @@ describe('task-wide execution accounting', () => {
             parent,
           );
         }
+        if (version >= 165) {
+          db.prepare(
+            "INSERT INTO logical_tasks(id,root_pod_id,created_at) VALUES ('original-task','root','2026-09-07')",
+          ).run();
+          for (const [id, parent] of [
+            ['root', null],
+            ['fix', 'root'],
+          ])
+            db.prepare(
+              "INSERT INTO task_executions(pod_id,execution_id,task_id,parent_pod_id,created_at) VALUES (?,?,'original-task',?,'2026-09-07')",
+            ).run(id, `original-${id}`, parent);
+        }
         runMigrations(db, migrations, logger);
         const repo = createPodRepository(db);
         const root = repo.taskExecutions?.snapshot('root');
@@ -523,6 +739,16 @@ describe('task-wide execution accounting', () => {
           agentRunCount: 0,
         });
         expect(() => repo.taskExecutions?.snapshot('orphan')).toThrow('identity is unavailable');
+        repo.update('root', { tokenBudget: 20 });
+        repo.delete('root');
+        expect(repo.taskExecutions?.snapshot('fix')).toMatchObject({
+          taskId: root?.taskId,
+          rootPodId: 'root',
+          podCount: 2,
+          recordedInputTokens: 20,
+          tokenBudget: 20,
+        });
+        expect(repo.getOrThrow('fix').linkedPodId).toBeNull();
         expect(db.pragma('integrity_check', { simple: true })).toBe('ok');
         expect(db.pragma('foreign_key_check')).toEqual([]);
       } finally {

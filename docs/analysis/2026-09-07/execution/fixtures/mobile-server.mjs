@@ -959,7 +959,12 @@ const server = createServer(async (req, res) => {
               '1 unsettled worker run blocks another task run; live execution state unverified.',
               'Oldest unsettled run recorded local container original-container; this reference does not prove process termination or a unique remote instance.',
             ]
-          : ['Infrastructure cost unavailable'],
+          : process.env.FIXTURE_MODE === 'archived-task'
+            ? [
+                'Infrastructure cost unavailable',
+                '1 deleted pod record retains task accounting and execution evidence.',
+              ]
+            : ['Infrastructure cost unavailable'],
     });
   if (req.method === 'GET' && pathname === '/pods') return json([pod]);
   if (req.method === 'GET' && pathname === '/pods/local-fixture') return json(pod);

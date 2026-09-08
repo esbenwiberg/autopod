@@ -130,7 +130,7 @@ it.each([undefined, 'worker', 'reviewer', 'api', 'legacy-api', 'host'] as const)
     db.pragma('foreign_keys = ON');
     try {
       expect(createPodRepository(db).executionProvenance?.latest('pod')).toEqual(saved);
-      db.prepare("DELETE FROM pods WHERE id = 'pod'").run();
+      createPodRepository(db).delete('pod');
       expect(createPodRepository(db).executionProvenance?.latest('pod')).toBeNull();
       expect(db.prepare('SELECT count(*) AS count FROM execution_provenance').get()).toEqual({
         count: 1,

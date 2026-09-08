@@ -1,0 +1,160 @@
+
+ RUN  v4.1.11 /private/tmp/autopod-durable-execution/packages/daemon
+
+{"level":30,"time":1788885735824,"pid":86854,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"my-app","msg":"Profile created"}
+ ❯ src/pods/task-execution-ledger.test.ts (34 tests | 1 failed) 1637ms
+     × upgrades schema 176 with existing linked work and unresolved legacy lineage 67ms
+{"level":30,"time":1788885735868,"pid":86854,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"my-app","msg":"Profile created"}
+{"level":30,"time":1788885735909,"pid":86854,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"my-app","msg":"Profile created"}
+{"level":30,"time":1788885735951,"pid":86854,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"parent","msg":"Profile created"}
+{"level":30,"time":1788885735951,"pid":86854,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"child","msg":"Profile created"}
+{"level":30,"time":1788885736033,"pid":86854,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"my-app","msg":"Profile created"}
+{"level":30,"time":1788885736074,"pid":86854,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"my-app","msg":"Profile created"}
+{"level":30,"time":1788885736116,"pid":86854,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"my-app","msg":"Profile created"}
+{"level":30,"time":1788885736200,"pid":86854,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"my-app","msg":"Profile created"}
+{"level":30,"time":1788885736284,"pid":86854,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"parent","msg":"Profile created"}
+{"level":30,"time":1788885736284,"pid":86854,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"child","msg":"Profile created"}
+{"level":30,"time":1788885736325,"pid":86854,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"parent","msg":"Profile created"}
+{"level":30,"time":1788885736325,"pid":86854,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"child","msg":"Profile created"}
+{"level":30,"time":1788885736367,"pid":86854,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"my-app","msg":"Profile created"}
+{"level":30,"time":1788885736408,"pid":86854,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"my-app","msg":"Profile created"}
+{"level":30,"time":1788885736448,"pid":86854,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"parent","msg":"Profile created"}
+{"level":30,"time":1788885736449,"pid":86854,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"child","msg":"Profile created"}
+{"level":30,"time":1788885736530,"pid":86854,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"parent","msg":"Profile created"}
+{"level":30,"time":1788885736530,"pid":86854,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"child","msg":"Profile created"}
+{"level":30,"time":1788885736570,"pid":86854,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"parent","msg":"Profile created"}
+{"level":30,"time":1788885736570,"pid":86854,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"child","msg":"Profile created"}
+{"level":30,"time":1788885736612,"pid":86854,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"app-a","msg":"Profile created"}
+{"level":30,"time":1788885736612,"pid":86854,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"app-b","msg":"Profile created"}
+{"level":30,"time":1788885736653,"pid":86854,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"parent","msg":"Profile created"}
+{"level":30,"time":1788885736654,"pid":86854,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"child","msg":"Profile created"}
+{"level":30,"time":1788885736693,"pid":86854,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"my-app","msg":"Profile created"}
+{"level":30,"time":1788885736694,"pid":86854,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"my-app","fields":["reasoningEffort"],"msg":"Profile updated"}
+{"level":30,"time":1788885736694,"pid":86854,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"parent","msg":"Profile created"}
+{"level":30,"time":1788885736694,"pid":86854,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"child","msg":"Profile created"}
+{"level":30,"time":1788885736694,"pid":86854,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"child","fields":["reasoningEffort"],"msg":"Profile updated"}
+{"level":30,"time":1788885736734,"pid":86854,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"my-app","msg":"Profile created"}
+{"level":30,"time":1788885736735,"pid":86854,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"my-app","fields":["buildCommand"],"msg":"Profile updated"}
+{"level":30,"time":1788885736783,"pid":86854,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"my-app","msg":"Profile created"}
+{"level":30,"time":1788885736783,"pid":86854,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"my-app","fields":["buildCommand"],"msg":"Profile updated"}
+{"level":30,"time":1788885736878,"pid":86854,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"my-app","msg":"Profile created"}
+{"level":30,"time":1788885736878,"pid":86854,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"my-app","fields":["buildCommand"],"msg":"Profile updated"}
+{"level":30,"time":1788885736919,"pid":86854,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"my-app","msg":"Profile created"}
+{"level":30,"time":1788885736920,"pid":86854,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"my-app","fields":["agentDonePrompt"],"msg":"Profile updated"}
+{"level":30,"time":1788885736920,"pid":86854,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"my-app","fields":["agentDonePrompt"],"msg":"Profile updated"}
+{"level":30,"time":1788885736965,"pid":86854,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"my-app","msg":"Profile created"}
+{"level":30,"time":1788885737009,"pid":86854,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"my-app","msg":"Profile created"}
+{"level":30,"time":1788885737049,"pid":86854,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"my-app","msg":"Profile created"}
+{"level":30,"time":1788885737050,"pid":86854,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"my-app","fields":["codeIntelligence"],"msg":"Profile updated"}
+{"level":30,"time":1788885737091,"pid":86854,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"my-app","msg":"Profile created"}
+{"level":30,"time":1788885737091,"pid":86854,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"my-app","fields":["codeIntelligence"],"msg":"Profile updated"}
+{"level":30,"time":1788885737132,"pid":86854,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"my-app","msg":"Profile created"}
+{"level":30,"time":1788885737133,"pid":86854,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"my-app","fields":["reviewerModel"],"msg":"Profile updated"}
+{"level":30,"time":1788885737173,"pid":86854,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"my-app","msg":"Profile created"}
+{"level":30,"time":1788885737173,"pid":86854,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"my-app","fields":["validationSetupCommand"],"msg":"Profile updated"}
+{"level":30,"time":1788885737173,"pid":86854,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"my-app","fields":["validationSetupCommand"],"msg":"Profile updated"}
+{"level":30,"time":1788885737213,"pid":86854,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"my-app","msg":"Profile created"}
+{"level":30,"time":1788885737254,"pid":86854,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"my-app","msg":"Profile created"}
+{"level":30,"time":1788885737254,"pid":86854,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"my-app","fields":["skipValidationPhases"],"msg":"Profile updated"}
+{"level":30,"time":1788885737255,"pid":86854,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"my-app","fields":["skipValidationPhases"],"msg":"Profile updated"}
+{"level":30,"time":1788885737295,"pid":86854,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"my-app","msg":"Profile created"}
+{"level":30,"time":1788885737295,"pid":86854,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"my-app","fields":["pod"],"msg":"Profile updated"}
+{"level":30,"time":1788885737295,"pid":86854,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"my-app","fields":["pod"],"msg":"Profile updated"}
+{"level":30,"time":1788885737336,"pid":86854,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"my-app","msg":"Profile created"}
+{"level":30,"time":1788885737377,"pid":86854,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"my-app","msg":"Profile created"}
+{"level":30,"time":1788885737418,"pid":86854,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"my-app","msg":"Profile created"}
+{"level":30,"time":1788885737418,"pid":86854,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"my-app","fields":["mergePollIntervalSec"],"msg":"Profile updated"}
+{"level":30,"time":1788885737461,"pid":86854,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"my-app","msg":"Profile created"}
+{"level":30,"time":1788885737461,"pid":86854,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"my-app","fields":["pod"],"msg":"Profile updated"}
+{"level":30,"time":1788885737461,"pid":86854,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"my-app","fields":["pod"],"msg":"Profile updated"}
+{"level":30,"time":1788885737503,"pid":86854,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"parent","msg":"Profile created"}
+{"level":30,"time":1788885737504,"pid":86854,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"child","msg":"Profile created"}
+{"level":30,"time":1788885737504,"pid":86854,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"child","fields":["hasWebUi","issueWatcherEnabled","trustedSource"],"msg":"Profile updated"}
+{"level":30,"time":1788885737546,"pid":86854,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"parent","msg":"Profile created"}
+{"level":30,"time":1788885737546,"pid":86854,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"child","msg":"Profile created"}
+{"level":30,"time":1788885737546,"pid":86854,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"child","fields":["customInstructions"],"msg":"Profile updated"}
+{"level":30,"time":1788885737585,"pid":86854,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"parent","msg":"Profile created"}
+{"level":30,"time":1788885737586,"pid":86854,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"child","msg":"Profile created"}
+{"level":30,"time":1788885737586,"pid":86854,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"child","fields":["customInstructions"],"msg":"Profile updated"}
+{"level":30,"time":1788885737625,"pid":86854,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"my-app","msg":"Profile created"}
+{"level":30,"time":1788885737625,"pid":86854,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"my-app","tag":"autopod/my-app:latest","builtAt":"2026-04-27T10:00:00.000Z","msg":"Profile warm image updated"}
+{"level":30,"time":1788885737664,"pid":86854,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"my-app","msg":"Profile created"}
+{"level":30,"time":1788885737664,"pid":86854,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"my-app","tag":"autopod/my-app:latest","builtAt":"2026-09-08T16:42:17.664Z","msg":"Profile warm image updated"}
+{"level":30,"time":1788885737742,"pid":86854,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"my-app","msg":"Profile created"}
+{"level":30,"time":1788885737743,"pid":86854,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"my-app","msg":"Profile deleted"}
+{"level":30,"time":1788885737820,"pid":86854,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"my-app","msg":"Profile created"}
+{"level":30,"time":1788885737859,"pid":86854,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"my-app","msg":"Profile created"}
+{"level":30,"time":1788885737860,"pid":86854,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"my-app","msg":"Profile deleted"}
+{"level":30,"time":1788885737898,"pid":86854,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"my-app","msg":"Profile created"}
+{"level":30,"time":1788885737940,"pid":86854,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"parent","msg":"Profile created"}
+{"level":30,"time":1788885737940,"pid":86854,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"child","msg":"Profile created"}
+{"level":30,"time":1788885737979,"pid":86854,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"my-app","msg":"Profile created"}
+{"level":30,"time":1788885738057,"pid":86854,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"my-app","msg":"Profile created"}
+{"level":30,"time":1788885738096,"pid":86854,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"my-app","msg":"Profile created"}
+{"level":30,"time":1788885738135,"pid":86854,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"my-app","msg":"Profile created"}
+{"level":30,"time":1788885738173,"pid":86854,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"my-app","msg":"Profile created"}
+{"level":30,"time":1788885738212,"pid":86854,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"my-app","msg":"Profile created"}
+{"level":30,"time":1788885738255,"pid":86854,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"my-app","msg":"Profile created"}
+{"level":30,"time":1788885738295,"pid":86854,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"my-app","msg":"Profile created"}
+{"level":30,"time":1788885738339,"pid":86854,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"my-app","msg":"Profile created"}
+{"level":30,"time":1788885738378,"pid":86854,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"my-app","msg":"Profile created"}
+{"level":30,"time":1788885738417,"pid":86854,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"my-app","msg":"Profile created"}
+{"level":30,"time":1788885738417,"pid":86854,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"my-app","fields":["buildEnv"],"msg":"Profile updated"}
+{"level":30,"time":1788885738417,"pid":86854,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"my-app","fields":["buildEnv"],"msg":"Profile updated"}
+{"level":30,"time":1788885738456,"pid":86854,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"my-app","msg":"Profile created"}
+{"level":30,"time":1788885738456,"pid":86854,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"my-app","fields":["privateRegistries","registryPat"],"msg":"Profile updated"}
+{"level":30,"time":1788885738495,"pid":86854,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"my-app","msg":"Profile created"}
+{"level":30,"time":1788885738495,"pid":86854,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"my-app","fields":["githubPatExpiresAt","registryPatExpiresAt"],"msg":"Profile updated"}
+{"level":30,"time":1788885738495,"pid":86854,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"my-app","fields":["githubPatExpiresAt","registryPatExpiresAt"],"msg":"Profile updated"}
+{"level":30,"time":1788885738534,"pid":86854,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"grandparent","msg":"Profile created"}
+{"level":30,"time":1788885738534,"pid":86854,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"parent","msg":"Profile created"}
+{"level":30,"time":1788885738535,"pid":86854,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"child","msg":"Profile created"}
+{"level":30,"time":1788885738574,"pid":86854,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"owner","msg":"Profile created"}
+{"level":30,"time":1788885738614,"pid":86854,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"parent","msg":"Profile created"}
+{"level":30,"time":1788885738614,"pid":86854,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"child","msg":"Profile created"}
+{"level":30,"time":1788885738653,"pid":86854,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"base","msg":"Profile created"}
+{"level":30,"time":1788885738653,"pid":86854,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"middle","msg":"Profile created"}
+{"level":30,"time":1788885738653,"pid":86854,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"leaf","msg":"Profile created"}
+{"level":30,"time":1788885738692,"pid":86854,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"base","msg":"Profile created"}
+{"level":30,"time":1788885738692,"pid":86854,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"middle","msg":"Profile created"}
+{"level":30,"time":1788885738692,"pid":86854,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"leaf","msg":"Profile created"}
+{"level":30,"time":1788885738731,"pid":86854,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"my-app","msg":"Profile created"}
+{"level":30,"time":1788885738731,"pid":86854,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"my-app","fields":["providerAccountId"],"msg":"Profile updated"}
+{"level":30,"time":1788885738731,"pid":86854,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"my-app","fields":["providerAccountId"],"msg":"Profile updated"}
+{"level":30,"time":1788885738770,"pid":86854,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"base","msg":"Profile created"}
+{"level":30,"time":1788885738770,"pid":86854,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"middle","msg":"Profile created"}
+{"level":30,"time":1788885738770,"pid":86854,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"leaf","msg":"Profile created"}
+{"level":30,"time":1788885738809,"pid":86854,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"base","msg":"Profile created"}
+{"level":30,"time":1788885738809,"pid":86854,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"middle","msg":"Profile created"}
+{"level":30,"time":1788885738810,"pid":86854,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"leaf","msg":"Profile created"}
+{"level":30,"time":1788885738848,"pid":86854,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"my-app","msg":"Profile created"}
+{"level":30,"time":1788885738889,"pid":86854,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"my-app","msg":"Profile created"}
+{"level":30,"time":1788885738929,"pid":86854,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"my-app","msg":"Profile created"}
+{"level":30,"time":1788885738968,"pid":86854,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"base","msg":"Profile created"}
+{"level":30,"time":1788885738968,"pid":86854,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"middle","msg":"Profile created"}
+{"level":30,"time":1788885738968,"pid":86854,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"leaf","msg":"Profile created"}
+{"level":30,"time":1788885739007,"pid":86854,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"my-app","msg":"Profile created"}
+{"level":30,"time":1788885739007,"pid":86854,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"my-app","fields":["providerFailover"],"msg":"Profile updated"}
+{"level":30,"time":1788885739008,"pid":86854,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"my-app","fields":["providerFailover"],"msg":"Profile updated"}
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/pods/task-execution-ledger.test.ts > task-wide execution accounting > upgrades schema 176 with existing linked work and unresolved legacy lineage
+AutopodError: Task identity is unavailable; reconcile legacy lineage before execution
+ ❯ Object.snapshot src/pods/task-execution-ledger.ts:119:13
+    117|     const identity = membership(podId);
+    118|     if (!identity)
+    119|       throw new AutopodError(
+       |             ^
+    120|         'Task identity is unavailable; reconcile legacy lineage before…
+    121|         'TASK_IDENTITY_UNAVAILABLE',
+ ❯ src/pods/task-execution-ledger.test.ts:722:43
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed | 1 passed (2)
+      Tests  1 failed | 112 passed (113)
+   Start at  18:42:15
+   Duration  3.56s (transform 242ms, setup 0ms, import 407ms, tests 4.88s, environment 0ms)
+

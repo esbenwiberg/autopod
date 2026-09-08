@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { createPodRepository } from '../pods/pod-repository.js';
 import { createProviderAccountStore } from '../provider-accounts/provider-account-store.js';
 import { createTestDb, insertTestProfile } from '../test-utils/mock-helpers.js';
 import { createPodsitterRepository } from './podsitter-repository.js';
@@ -749,7 +750,7 @@ describe('PodsitterRepository', () => {
       completed_at: expect.any(String),
     });
 
-    expect(() => db.prepare("DELETE FROM pods WHERE id = 'pod-1'").run()).not.toThrow();
+    expect(() => createPodRepository(db).delete('pod-1')).not.toThrow();
     expect(db.prepare('SELECT COUNT(*) AS count FROM podsitter_attention').get()).toEqual({
       count: 0,
     });

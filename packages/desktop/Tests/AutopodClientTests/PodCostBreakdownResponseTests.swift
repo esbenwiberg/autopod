@@ -69,13 +69,14 @@ import Testing
     "providerAttemptCount": 1, "validationExecutionCount": 0,
     "tokenBudget": 100, "recordedInputTokens": 10, "recordedOutputTokens": 5,
     "recordedCostUsd": 0.5, "infrastructureCostUsd": null, "telemetry": "partial",
-    "diagnostics": ["1 unsettled worker run blocks another task run; live execution state unverified.", "Oldest unsettled run resource ownership unavailable; current pod resource is not historical evidence."],
+    "diagnostics": ["1 deleted pod record retains task accounting and execution evidence.", "1 unsettled worker run blocks another task run; live execution state unverified.", "Oldest unsettled run resource ownership unavailable; current pod resource is not historical evidence."],
     "merge": { "closedPrCount": 1, "prCount": 3, "requestCount": 3, "mergedPrCount": 1, "mergedWithoutRecordedRequestCount": 1, "unresolvedPrCount": 1, "scope": "source-bound-journal-only", "basis": "last-recorded", "liveVerified": false },
     "budgetCheck": { "status": "unavailable", "reason": "Task token accounting incomplete; reconcile prior execution telemetry." }
   }
   """.data(using: .utf8)!
   let response = try JSONDecoder().decode(TaskExecutionSummary.self, from: json)
-  #expect(response.diagnostics.first == "1 unsettled worker run blocks another task run; live execution state unverified.")
+  #expect(response.diagnostics.contains("1 deleted pod record retains task accounting and execution evidence."))
+  #expect(response.diagnostics[1] == "1 unsettled worker run blocks another task run; live execution state unverified.")
   #expect(response.diagnostics.last?.contains("current pod resource is not historical evidence") == true)
   #expect(response.recordedInputTokens + response.recordedOutputTokens == 15)
   #expect(response.tokenBudget == 100)

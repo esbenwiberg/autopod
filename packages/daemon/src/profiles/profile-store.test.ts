@@ -3,6 +3,7 @@ import path from 'node:path';
 import { ProfileExistsError, ProfileNotFoundError } from '@autopod/shared';
 import Database from 'better-sqlite3';
 import { beforeEach, describe, expect, it } from 'vitest';
+import { createPodRepository } from '../pods/pod-repository.js';
 import { type ProfileStore, createProfileStore } from './profile-store.js';
 
 const migrationsDir = path.resolve(import.meta.dirname, '../db/migrations');
@@ -735,6 +736,33 @@ describe('ProfileStore', () => {
       // completed pods should be auto-cleaned and not block deletion
       expect(() => store.delete('my-app')).not.toThrow();
       expect(store.exists('my-app')).toBe(false);
+      expect(db.prepare("SELECT task FROM task_history_pods WHERE id = 'sess1'").get()).toEqual({
+        task: 'do stuff',
+      });
+    });
+
+    it('rolls back earlier pod archival when another terminal pod has an unsettled run', () => {
+      store.create(validInput);
+      const repo = createPodRepository(db);
+      for (const id of ['first', 'second']) {
+        db.prepare(`INSERT INTO pods(id,profile_name,task,status,model,runtime,branch,user_id)
+          VALUES (?,'my-app','original','complete','opus','claude','main','user1')`).run(id);
+        repo.taskExecutions?.register(id);
+      }
+      repo.taskExecutions?.beginRun('second', 1, 1, {
+        runtime: 'claude',
+        model: 'opus',
+        providerAccountId: null,
+      });
+      expect(() => store.delete('my-app')).toThrow(/unsettled/);
+      expect(store.exists('my-app')).toBe(true);
+      expect(db.prepare('SELECT COUNT(*) AS count FROM pods').get()).toEqual({ count: 2 });
+      expect(db.prepare('SELECT COUNT(*) AS count FROM task_history_deletions').get()).toEqual({
+        count: 0,
+      });
+      expect(db.prepare('SELECT COUNT(*) AS count FROM task_history_pods').get()).toEqual({
+        count: 0,
+      });
     });
 
     it('should throw when other profiles extend this one', () => {

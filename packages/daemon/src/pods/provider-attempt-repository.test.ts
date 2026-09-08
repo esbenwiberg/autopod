@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import Database from 'better-sqlite3';
 import { describe, expect, it } from 'vitest';
 import { createTestDb, insertTestProfile } from '../test-utils/mock-helpers.js';
+import { createPodRepository } from './pod-repository.js';
 import { createProviderAttemptRepository } from './provider-attempt-repository.js';
 
 function seedPod(db: ReturnType<typeof createTestDb>, id = 'attempt-pod'): void {
@@ -311,7 +312,7 @@ describe('provider attempt repository', () => {
     expect(() =>
       db.prepare("DELETE FROM provider_attempts WHERE pod_id = 'attempt-pod'").run(),
     ).toThrow(/cannot be deleted directly/);
-    expect(() => db.prepare("DELETE FROM pods WHERE id = 'attempt-pod'").run()).not.toThrow();
+    expect(() => createPodRepository(db).delete('attempt-pod')).not.toThrow();
     expect(repository.list('attempt-pod')).toEqual([]);
   });
 
