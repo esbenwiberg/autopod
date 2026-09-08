@@ -1,0 +1,35 @@
+
+ RUN  v4.1.11 /private/tmp/autopod-durable-execution/packages/daemon
+
+ ❯ src/pods/provider-attempt-repository.test.ts (9 tests | 2 failed | 7 skipped) 144ms
+     × rejects stale ordinal update without changing a replacement attempt 81ms
+     × rejects stale ordinal close without changing a replacement attempt 62ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 2 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/pods/provider-attempt-repository.test.ts > provider attempt repository > rejects stale ordinal update without changing a replacement attempt
+ FAIL  src/pods/provider-attempt-repository.test.ts > provider attempt repository > rejects stale ordinal close without changing a replacement attempt
+AssertionError: expected [Function] to throw an error
+
+- Expected:
+null
+
++ Received:
+undefined
+
+ ❯ src/pods/provider-attempt-repository.test.ts:57:9
+     55|           ? repository.updateActive(input.podId, stale)
+     56|           : repository.close(input.podId, { ...stale, outcome: 'comple…
+     57|       ).toThrow(/superseded/i);
+       |         ^
+     58|       expect(replacementRepository.listRaw(input.podId)).toEqual(befor…
+     59|       expect(replacementRepository.getActive(input.podId)).toEqual(rep…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/2]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  2 failed | 7 skipped (9)
+   Start at  10:21:47
+   Duration  570ms (transform 189ms, setup 0ms, import 289ms, tests 144ms, environment 0ms)
+

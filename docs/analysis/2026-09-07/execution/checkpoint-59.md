@@ -1,0 +1,13 @@
+# Checkpoint 59: durable provider segment ownership
+
+Two repository RED cases demonstrated that stale usage updates and closes changed a newer active provider attempt. Three actual consumeAgentEvents RED cases demonstrated that late completion, transport error and stream end could finalize a replacement even when pod lifecycle generation, container and provider configuration were unchanged.
+
+Provider updates and closes now accept a checked expected ordinal and condition their SQLite writes on that immutable segment. Update-and-read executes in one transaction; close retains its transaction and append-only historical protections. Stale writes raise STALE_PROVIDER_ATTEMPT without modifying the replacement. Existing callers without an expected ordinal retain their current-active semantics; manager closes additionally bind the exact active row they read.
+
+The event consumer captures the exact attempt returned during setup and checks durable active ordinal along with lifecycle and in-process invocation ownership. Usage and terminal writes carry that ordinal. Controlled native-session rotation transfers ownership only for the owning invocation and exact newly opened segment, refusing to adopt an intervening active attempt. Claude missing-session fallback verifies its owner before clearing the stale ID and again before launching after asynchronous preparation. A superseded final close stops control without replacing observed historical run outcomes.
+
+Twenty-two focused cases passed, including stale writes across two SQLite connections, invalid ordinal rejection, late streams, replacement during session synchronization, final-close write contention, quota continuation and actual Claude fresh-session fallback. The final four affected suites passed 627 tests. Build and configured DTS passed before the final narrow fallback guard; the committed-source full pipeline below verifies the complete final change. All original append-only identity and accounting assertions remain. No migration or public API field was added.
+
+These checks protect provider attempt mutation and local stream control; they do not establish a transaction spanning every pod update/event publication, cross-process exactly-once usage, provider retry/rework admission, spending reservation or remote process termination. Already launched session-state extraction still targets shared recovery paths. All six workstreams remain partial, including live/operator acceptance. Next isolate session-state extraction and publication from replacement generations and timed-out writers, then continue outstanding retry/accounting/provenance requirements.
+
+The required full pipeline on the exact committed source is pending; no full-pass claim is made here.

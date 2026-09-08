@@ -1481,9 +1481,14 @@ describe('PodManager', () => {
       expect(ctx.containerManager.extractDirectoryFromContainer).toHaveBeenCalled();
     });
   });
-  it.each(['end', 'error', 'complete'] as const)(
-    'does not finalize a replacement from an old stream %s',
-    async (ending) => {
+  it.each(
+    ['end', 'error', 'complete'].flatMap((ending) => [
+      { ending, sameLifecycle: false },
+      { ending, sameLifecycle: true },
+    ]),
+  )(
+    'does not finalize a replacement from an old stream $ending sameLifecycle=$sameLifecycle',
+    async ({ ending, sameLifecycle }) => {
       const ctx = createTestContext(undefined, {
         defaultRuntime: 'codex',
         executionTarget: 'sandbox',
@@ -1509,6 +1514,9 @@ describe('PodManager', () => {
               type: 'complete',
               timestamp: new Date().toISOString(),
               result: 'Old completion',
+              totalInputTokens: 100,
+              totalOutputTokens: 50,
+              costUsd: 2,
             } as const;
         })(),
         0,
@@ -1524,8 +1532,10 @@ describe('PodManager', () => {
         outputTokens: 0,
         costUsd: 0,
       });
-      ctx.podRepo.incrementLifecycleGeneration(pod.id);
-      ctx.podRepo.update(pod.id, { containerId: 'replacement', status: 'running' });
+      if (!sameLifecycle) {
+        ctx.podRepo.incrementLifecycleGeneration(pod.id);
+        ctx.podRepo.update(pod.id, { containerId: 'replacement', status: 'running' });
+      }
       const replacement = attempts.open({
         podId: pod.id,
         provider: old.provider,
@@ -1537,19 +1547,28 @@ describe('PodManager', () => {
       });
       release.resolve();
       await expect(consuming).resolves.toBe('stopped');
-      expect(attempts.getActive(pod.id)?.ordinal).toBe(replacement.ordinal);
+      expect(attempts.getActive(pod.id)).toEqual(replacement);
+      expect(attempts.listRaw(pod.id)[0]).toMatchObject({ outcome: 'aborted', inputTokens: 0 });
       expect(ctx.containerManager.extractDirectoryFromContainer).not.toHaveBeenCalled();
       expect(ctx.podRepo.getOrThrow(pod.id)).toMatchObject({
         status: 'running',
-        containerId: 'replacement',
+        containerId: sameLifecycle ? 'old-container' : 'replacement',
         taskSummary: null,
+        inputTokens: 0,
+        outputTokens: 0,
+        costUsd: 0,
       });
     },
   );
 
-  it.each([false, true])(
-    'rechecks ownership after session synchronization and preserves the observed failure=%s',
-    async (fatal) => {
+  it.each(
+    [false, true].flatMap((fatal) => [
+      { fatal, sameLifecycle: false },
+      { fatal, sameLifecycle: true },
+    ]),
+  )(
+    'rechecks ownership after session synchronization failure=$fatal sameLifecycle=$sameLifecycle',
+    async ({ fatal, sameLifecycle }) => {
       const ctx = createTestContext(undefined, {
         defaultRuntime: 'codex',
         executionTarget: 'sandbox',
@@ -1578,8 +1597,11 @@ describe('PodManager', () => {
             outputTokens: 0,
             costUsd: 0,
           });
-          ctx.podRepo.incrementLifecycleGeneration(pod.id);
-          ctx.podRepo.update(pod.id, { containerId: 'replacement', status: 'running' });
+          if (!sameLifecycle) ctx.podRepo.incrementLifecycleGeneration(pod.id);
+          ctx.podRepo.update(pod.id, {
+            containerId: sameLifecycle ? 'old-container' : 'replacement',
+            status: 'running',
+          });
           replacementOrdinal = attempts.open({
             podId: pod.id,
             provider: old.provider,
@@ -1614,7 +1636,7 @@ describe('PodManager', () => {
       expect(attempts.getActive(pod.id)?.ordinal).toBe(replacementOrdinal);
       expect(ctx.podRepo.getOrThrow(pod.id)).toMatchObject({
         status: 'running',
-        containerId: 'replacement',
+        containerId: sameLifecycle ? 'old-container' : 'replacement',
       });
       // Preserve the observed old completion even though control must not settle the new lifecycle.
       expect(
@@ -1622,6 +1644,78 @@ describe('PodManager', () => {
       ).toEqual({ outcome: fatal ? 'failed' : 'completed' });
     },
   );
+
+  it('stops cleanly if durable provider ownership changes at the final close write', async () => {
+    const ctx = createTestContext();
+    const attempts = createProviderAttemptRepository(ctx.db);
+    const otherController = createProviderAttemptRepository(ctx.db);
+    ctx.deps.providerAttemptRepo = attempts;
+    const manager = createPodManager(ctx.deps);
+    const created = manager.createSession(
+      { profileName: 'test-profile', task: 'Fence close write', skipValidation: true },
+      'operator',
+    );
+    ctx.podRepo.update(created.id, { status: 'running', containerId: 'same-container' });
+    const close = attempts.close.bind(attempts);
+    let replacementOrdinal = 0;
+    vi.spyOn(attempts, 'close').mockImplementationOnce((podId, input) => {
+      const active = otherController.getActive(podId);
+      const profileSnapshot = otherController.getActiveProfileSnapshot(podId);
+      if (!active || !profileSnapshot) throw new Error('Missing attempt');
+      otherController.close(podId, {
+        nativeSessionId: null,
+        outcome: 'aborted',
+        inputTokens: active.inputTokens,
+        outputTokens: active.outputTokens,
+        costUsd: active.costUsd,
+      });
+      replacementOrdinal = otherController.open({
+        podId,
+        provider: active.provider,
+        providerAccountId: active.providerAccountId,
+        runtime: active.runtime,
+        model: active.model,
+        profileReference: active.profileReference,
+        profileSnapshot,
+      }).ordinal;
+      return close(podId, input);
+    });
+    await expect(
+      manager.consumeAgentEvents(
+        created.id,
+        (async function* () {
+          yield {
+            type: 'complete',
+            timestamp: new Date().toISOString(),
+            result: 'Observed completion',
+            totalInputTokens: 5,
+            totalOutputTokens: 2,
+            costUsd: 0.1,
+          } as const;
+        })(),
+      ),
+    ).resolves.toBe('stopped');
+    expect(attempts.getActive(created.id)).toMatchObject({
+      ordinal: replacementOrdinal,
+      endedAt: null,
+      inputTokens: 0,
+      outputTokens: 0,
+      costUsd: 0,
+    });
+    expect(attempts.listRaw(created.id)[0]).toMatchObject({
+      outcome: 'aborted',
+      inputTokens: 5,
+      outputTokens: 2,
+      costUsd: 0.1,
+    });
+    expect(
+      ctx.db.prepare('SELECT outcome FROM task_agent_runs WHERE pod_id = ?').get(created.id),
+    ).toEqual({ outcome: 'completed' });
+    expect(ctx.podRepo.getOrThrow(created.id)).toMatchObject({
+      status: 'running',
+      containerId: 'same-container',
+    });
+  });
 
   it('does not begin a task run or consume events for an already superseded lifecycle', async () => {
     const ctx = createTestContext();

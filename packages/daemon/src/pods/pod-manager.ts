@@ -31,6 +31,7 @@ import type {
   PrivateRegistry,
   Profile,
   ProviderAccountProvider,
+  ProviderAttempt,
   ProviderCredentials,
   ProviderFailoverTarget,
   ProviderFailureClassification,
@@ -211,7 +212,10 @@ import { type PollOwnership, createPollingCoordinator } from './polling-coordina
 import { type PreflightConflict, findPreflightConflicts } from './preflight.js';
 import { buildSupervisorCommand, parseStatus } from './preview-supervisor.js';
 import type { ProgressEventRepository } from './progress-event-repository.js';
-import type { ProviderAttemptRepository } from './provider-attempt-repository.js';
+import {
+  type ProviderAttemptRepository,
+  ProviderAttemptSupersededError,
+} from './provider-attempt-repository.js';
 import { resolveProviderPreflight } from './provider-preflight.js';
 import type { QualityScoreRepository } from './quality-score-repository.js';
 import { createReadinessService } from './readiness-review.js';
@@ -2026,9 +2030,13 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
     return reasoningEffortFromSnapshot(snapshot) ?? profile.reasoningEffort ?? 'auto';
   }
 
-  function ensureProviderAttempt(pod: Pod, profile: Profile): void {
+  function ensureProviderAttempt(
+    pod: Pod,
+    profile: Profile,
+    requireNew = false,
+  ): ProviderAttempt | null {
     const repository = deps.providerAttemptRepo;
-    if (!repository) return;
+    if (!repository) return null;
     const active = repository.getActive(pod.id);
     const profileSnapshot =
       (active && repository.getActiveProfileSnapshot(pod.id)) ??
@@ -2039,6 +2047,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
       profile,
     );
     if (active) {
+      if (requireNew) throw new ProviderAttemptSupersededError();
       const identityMatches =
         active.provider === provider &&
         active.providerAccountId === profile.providerAccountId &&
@@ -2048,13 +2057,13 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
       if (!identityMatches) {
         throw new Error(`Active provider attempt identity mismatch for pod ${pod.id}`);
       }
-      return;
+      return active;
     }
     if (
       repository.list(pod.id).length === 0 &&
       (pod.inputTokens > 0 || pod.outputTokens > 0 || pod.costUsd > 0)
     ) {
-      repository.open({
+      const legacyAttempt = repository.open({
         podId: pod.id,
         provider,
         providerAccountId: profile.providerAccountId,
@@ -2065,6 +2074,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         startedAt: pod.startedAt ?? pod.createdAt,
       });
       repository.close(pod.id, {
+        expectedOrdinal: legacyAttempt.ordinal,
         nativeSessionId: nativeSessionId(pod),
         endedAt: new Date().toISOString(),
         outcome: 'completed',
@@ -2073,7 +2083,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         costUsd: pod.costUsd,
       });
     }
-    repository.open({
+    return repository.open({
       podId: pod.id,
       provider,
       providerAccountId: profile.providerAccountId,
@@ -2088,9 +2098,20 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
     pod: Pod,
     profile: Profile,
     hadActiveAttempt: boolean,
+    expectedRunToken?: symbol,
   ): boolean {
     const repository = deps.providerAttemptRepo;
     const active = repository?.getActive(pod.id);
+    if (expectedRunToken !== undefined) {
+      const owner = activeAgentRuns.get(pod.id);
+      if (
+        owner?.token !== expectedRunToken ||
+        !owner.isCurrent?.() ||
+        (repository && (!active || owner.providerOrdinal !== active.ordinal))
+      ) {
+        throw new ProviderAttemptSupersededError();
+      }
+    }
     if (!repository || !active || !hadActiveAttempt) return false;
     const preceding = repository
       .list(pod.id)
@@ -2104,13 +2125,18 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
     if (isUnstartedProviderContinuation) return false;
 
     repository.close(pod.id, {
+      expectedOrdinal: active.ordinal,
       nativeSessionId: active.nativeSessionId,
       outcome: 'aborted',
       inputTokens: active.inputTokens,
       outputTokens: active.outputTokens,
       costUsd: active.costUsd,
     });
-    ensureProviderAttempt(pod, profile);
+    const replacement = ensureProviderAttempt(pod, profile, true);
+    if (expectedRunToken !== undefined) {
+      const owner = activeAgentRuns.get(pod.id);
+      if (owner?.token === expectedRunToken) owner.providerOrdinal = replacement?.ordinal;
+    }
     return true;
   }
 
@@ -2119,12 +2145,17 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
     outcome: 'completed' | 'failed' | 'aborted' | 'quota_exhausted',
     classification: ProviderFailureClassification | null = null,
     handoffReference: string | null = null,
+    expectedOrdinal?: number,
   ): void {
     const repository = deps.providerAttemptRepo;
     const active = repository?.getActive(podId);
-    if (!repository || !active) return;
+    if (!repository) return;
+    if (expectedOrdinal !== undefined && active?.ordinal !== expectedOrdinal)
+      throw new ProviderAttemptSupersededError();
+    if (!active) return;
     const pod = podRepo.getOrThrow(podId);
     repository.close(podId, {
+      expectedOrdinal: expectedOrdinal ?? active.ordinal,
       nativeSessionId: nativeSessionId(pod),
       outcome,
       classification,
@@ -3629,7 +3660,10 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
   const coordinateInteractiveCompletion =
     createInteractiveCompletionCoordinator<Awaited<ReturnType<PodManager['completeSession']>>>();
   const pauseIntents = new Map<string, symbol>();
-  const activeAgentRuns = new Map<string, { token: symbol; settled: Promise<void> }>();
+  const activeAgentRuns = new Map<
+    string,
+    { token: symbol; settled: Promise<void>; providerOrdinal?: number; isCurrent?: () => boolean }
+  >();
   const activeAgentRunResolvers = new Map<string, { token: symbol; resolve: () => void }>();
   const PAUSE_QUIESCENCE_TIMEOUT_MS = 10_000;
 
@@ -10213,6 +10247,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           const loggerRef = logger;
           const profileRef = profile;
           events = (async function* resumeWithFallback() {
+            const fallbackRunToken = activeAgentRuns.get(podId)?.token;
             try {
               yield* runtimeRef.resume(podId, continuationPrompt, containerIdRef, secretEnvRef);
             } catch (err) {
@@ -10223,12 +10258,28 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
               );
               // Clear the stale ID so any future recovery on this pod doesn't
               // loop trying to resume the same nonexistent conversation.
-              podRepoRef.update(podId, { claudeSessionId: null });
+              if (
+                !fallbackRunToken ||
+                activeAgentRuns.get(podId)?.token !== fallbackRunToken ||
+                !activeAgentRuns.get(podId)?.isCurrent?.()
+              )
+                throw new ProviderAttemptSupersededError();
               if (!providerAttemptRotated) {
-                rotateProviderAttemptForFreshSegment(podRef, profileRef, hadActiveProviderAttempt);
+                rotateProviderAttemptForFreshSegment(
+                  podRef,
+                  profileRef,
+                  hadActiveProviderAttempt,
+                  fallbackRunToken,
+                );
               }
+              podRepoRef.update(podId, { claudeSessionId: null });
               const recoveryTask = await buildRecoveryTask(podRef, safeWorktreePath);
               await recordContinuationProvenance(podRef, containerIdRef);
+              if (
+                activeAgentRuns.get(podId)?.token !== fallbackRunToken ||
+                !activeAgentRuns.get(podId)?.isCurrent?.()
+              )
+                throw new ProviderAttemptSupersededError();
               yield* runtimeRef.spawn({
                 podId,
                 task: recoveryTask,
@@ -10600,7 +10651,16 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
       const runSettled = new Promise<void>((resolve) => {
         resolveRunSettled = resolve;
       });
-      activeAgentRuns.set(podId, { token: runToken, settled: runSettled });
+      const runOwner: {
+        token: symbol;
+        settled: Promise<void>;
+        providerOrdinal?: number;
+        isCurrent?: () => boolean;
+      } = {
+        token: runToken,
+        settled: runSettled,
+      };
+      activeAgentRuns.set(podId, runOwner);
       activeAgentRunResolvers.set(podId, { token: runToken, resolve: resolveRunSettled });
       const settleActiveRun = (): void => {
         resolveRunSettled();
@@ -10610,7 +10670,12 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         activeAgentRuns.delete(podId);
       };
       const ownsRun = () =>
-        activeAgentRuns.get(podId)?.token === runToken && ownsExpectedLifecycle();
+        activeAgentRuns.get(podId)?.token === runToken &&
+        ownsExpectedLifecycle() &&
+        (!deps.providerAttemptRepo ||
+          (runOwner.providerOrdinal !== undefined &&
+            deps.providerAttemptRepo.getActive(podId)?.ordinal === runOwner.providerOrdinal));
+      runOwner.isCurrent = ownsRun;
       let superseded = false;
       let eventError: unknown;
       let hasEventError = false;
@@ -10641,7 +10706,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
             },
           );
         }
-        ensureProviderAttempt(attemptPod, attemptProfile);
+        runOwner.providerOrdinal = ensureProviderAttempt(attemptPod, attemptProfile)?.ordinal;
         seenCompleteEvents = persistedAgentCompleteEventKeys(deps.eventRepo, podId);
         startCommitPolling(podId);
       } catch (err) {
@@ -10753,7 +10818,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
               // runtime can accept the requested resume yet report a replacement
               // native session. Close the old segment before recording the new ID
               // instead of attempting to rewrite historical execution identity.
-              rotateProviderAttemptForFreshSegment(sessionPod, attemptProfile, true);
+              rotateProviderAttemptForFreshSegment(sessionPod, attemptProfile, true, runToken);
             }
             const sessionUpdate: PodUpdates = {};
             if (sessionPod.runtime === 'claude') sessionUpdate.claudeSessionId = event.sessionId;
@@ -10763,6 +10828,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
             const activeAttempt = deps.providerAttemptRepo?.getActive(podId);
             if (activeAttempt) {
               deps.providerAttemptRepo?.updateActive(podId, {
+                expectedOrdinal: runOwner.providerOrdinal,
                 nativeSessionId: event.sessionId,
                 inputTokens: activeAttempt.inputTokens,
                 outputTokens: activeAttempt.outputTokens,
@@ -10829,6 +10895,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
             const activeAttempt = deps.providerAttemptRepo?.getActive(podId);
             if (activeAttempt) {
               deps.providerAttemptRepo?.updateActive(podId, {
+                expectedOrdinal: runOwner.providerOrdinal,
                 nativeSessionId: nativeSessionId(podRepo.getOrThrow(podId)),
                 inputTokens: activeAttempt.inputTokens + (event.totalInputTokens ?? 0),
                 outputTokens: activeAttempt.outputTokens + (event.totalOutputTokens ?? 0),
@@ -11002,6 +11069,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
                   'quota_exhausted',
                   terminalClassification,
                   PROVIDER_FAILOVER_HANDOFF_PATH,
+                  runOwner.providerOrdinal,
                 );
                 await handleProviderLimit(podId, terminalClassification);
               } else if (
@@ -11009,9 +11077,15 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
                 outcome === 'failed' &&
                 terminalClassification
               ) {
-                closeProviderAttempt(podId, 'failed', terminalClassification);
+                closeProviderAttempt(
+                  podId,
+                  'failed',
+                  terminalClassification,
+                  null,
+                  runOwner.providerOrdinal,
+                );
               } else if (outcome === 'paused' || current.status === 'paused') {
-                closeProviderAttempt(podId, 'aborted');
+                closeProviderAttempt(podId, 'aborted', null, null, runOwner.providerOrdinal);
               } else if (outcome === 'completed' || outcome === 'failed') {
                 const classification =
                   outcome === 'failed'
@@ -11022,8 +11096,20 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
                         retryAfter: null,
                       })
                     : null;
-                closeProviderAttempt(podId, outcome, classification);
+                closeProviderAttempt(
+                  podId,
+                  outcome,
+                  classification,
+                  null,
+                  runOwner.providerOrdinal,
+                );
               }
+            }
+          } catch (err) {
+            if (err instanceof ProviderAttemptSupersededError) superseded = true;
+            else {
+              eventError = err;
+              hasEventError = true;
             }
           } finally {
             try {
