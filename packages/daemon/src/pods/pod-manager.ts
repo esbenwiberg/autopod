@@ -2901,13 +2901,8 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
     return mcpServers;
   }
 
-  async function syncSandboxRuntimeSessionState(podId: string): Promise<void> {
-    let pod: Pod;
-    try {
-      pod = podRepo.getOrThrow(podId);
-    } catch {
-      return;
-    }
+  async function syncSandboxRuntimeSessionState(pod: Pod): Promise<void> {
+    const podId = pod.id;
     if (pod.executionTarget !== 'sandbox' || !pod.containerId) return;
 
     const statePaths =
@@ -10476,6 +10471,31 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
       attempt = 0,
       lifecycle?: { generation: number; containerId: string | null },
     ): Promise<AgentRunOutcome> {
+      const initialPod = podRepo.getOrThrow(podId);
+      const expected = lifecycle
+        ? { ...lifecycle }
+        : {
+            generation: initialPod.lifecycleGeneration,
+            containerId: initialPod.containerId,
+          };
+      const ownsExpectedLifecycle = (): boolean => {
+        try {
+          const current = podRepo.getOrThrow(podId);
+          return (
+            current.lifecycleGeneration === expected.generation &&
+            current.containerId === expected.containerId &&
+            current.runtime === initialPod.runtime &&
+            current.model === initialPod.model &&
+            current.providerIdSnapshot === initialPod.providerIdSnapshot &&
+            current.providerAccountIdSnapshot === initialPod.providerAccountIdSnapshot &&
+            current.executionTarget === initialPod.executionTarget &&
+            current.worktreePath === initialPod.worktreePath
+          );
+        } catch {
+          return false;
+        }
+      };
+      if (!ownsExpectedLifecycle()) return 'stopped';
       const runToken = Symbol(podId);
       let resolveRunSettled: () => void = () => {};
       const runSettled = new Promise<void>((resolve) => {
@@ -10484,12 +10504,17 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
       activeAgentRuns.set(podId, { token: runToken, settled: runSettled });
       activeAgentRunResolvers.set(podId, { token: runToken, resolve: resolveRunSettled });
       const settleActiveRun = (): void => {
+        resolveRunSettled();
         const activeResolver = activeAgentRunResolvers.get(podId);
         if (activeResolver?.token !== runToken) return;
-        activeResolver.resolve();
         activeAgentRunResolvers.delete(podId);
         activeAgentRuns.delete(podId);
       };
+      const ownsRun = () =>
+        activeAgentRuns.get(podId)?.token === runToken && ownsExpectedLifecycle();
+      let superseded = false;
+      let eventError: unknown;
+      let hasEventError = false;
       let attemptPod: Pod;
       let attemptProfile: Profile;
       let seenCompleteEvents: Set<string>;
@@ -10528,12 +10553,13 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
       // Legacy/injected managers without the ledger retain the historical empty-stream
       // completion behavior. Production always injects the ledger and fails closed.
       let outcome: AgentRunOutcome = deps.providerAttemptRepo ? 'failed' : 'completed';
+      let observedTerminalOutcome: 'completed' | 'failed' | null = null;
       let terminalClassification: ProviderFailureClassification | null = null;
       try {
         for await (const event of events) {
-          if (lifecycle && !ownsLifecycle(podId, lifecycle.generation, lifecycle.containerId)) {
+          if (!ownsRun()) {
             logger.info(
-              { podId, containerId: lifecycle.containerId, generation: lifecycle.generation },
+              { podId, containerId: expected.containerId, generation: expected.generation },
               'Stopped processing stale lifecycle agent events',
             );
             outcome = 'stopped';
@@ -10646,6 +10672,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
             }
           } else if (event.type === 'complete') {
             outcome = 'completed';
+            observedTerminalOutcome = 'completed';
             podRepo.completionJournal?.settle(podRepo.getOrThrow(podId), event.result);
             // Accumulate token counts and cost cumulatively across all runs in this pod
             const currentSession = podRepo.getOrThrow(podId);
@@ -10721,6 +10748,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
                 });
               }
               outcome = 'failed';
+              observedTerminalOutcome = 'failed';
               break;
             }
 
@@ -10775,6 +10803,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
                     transition(s, 'failed', { completedAt: new Date().toISOString() });
                   }
                   outcome = 'failed';
+                  observedTerminalOutcome = 'failed';
                 } else {
                   // Soft policy: pause and await user approval
                   const s = podRepo.getOrThrow(podId);
@@ -10824,13 +10853,19 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
               }
             }
             outcome = 'failed';
+            observedTerminalOutcome = 'failed';
             break;
           } else if (event.type === 'tool_use' || event.type === 'file_change') {
             touchHeartbeat(podId);
           }
         }
       } catch (err) {
+        if (!ownsRun()) {
+          outcome = 'stopped';
+          return outcome;
+        }
         outcome = 'failed';
+        observedTerminalOutcome = 'failed';
         terminalClassification = {
           category: 'unknown',
           definitive: false,
@@ -10840,62 +10875,77 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           ),
           retryAfter: null,
         };
-        throw err;
+        eventError = err;
+        hasEventError = true;
       } finally {
-        if (pauseIntents.has(podId)) outcome = 'paused';
+        if (!ownsRun()) {
+          superseded = true;
+          // No terminal event was accepted for this run after it lost ownership.
+          outcome = 'stopped';
+        } else if (pauseIntents.has(podId)) outcome = 'paused';
+        // An accepted old completion is historical evidence even when control
+        // must stop before touching a replacement lifecycle.
+        const recordedOutcome = superseded ? (observedTerminalOutcome ?? outcome) : outcome;
         try {
-          await syncSandboxRuntimeSessionState(podId);
+          if (!superseded) await syncSandboxRuntimeSessionState(attemptPod);
         } finally {
           try {
-            const current = podRepo.getOrThrow(podId);
-            const providerLimit =
-              current.pauseReason === 'provider_limit' &&
-              terminalClassification?.category === 'quota_exhausted' &&
-              terminalClassification.definitive;
-            if (providerLimit) {
-              closeProviderAttempt(
-                podId,
-                'quota_exhausted',
-                terminalClassification,
-                PROVIDER_FAILOVER_HANDOFF_PATH,
-              );
-              await handleProviderLimit(podId, terminalClassification);
-            } else if (
-              current.pauseReason === 'provider_limit' &&
-              outcome === 'failed' &&
-              terminalClassification
-            ) {
-              closeProviderAttempt(podId, 'failed', terminalClassification);
-            } else if (outcome === 'paused' || current.status === 'paused') {
-              closeProviderAttempt(podId, 'aborted');
-            } else if (outcome === 'completed' || outcome === 'failed') {
-              const classification =
-                outcome === 'failed'
-                  ? (terminalClassification ?? {
-                      category: 'unknown',
-                      definitive: false,
-                      sanitizedMessage: 'Provider attempt ended without classified evidence',
-                      retryAfter: null,
-                    })
-                  : null;
-              closeProviderAttempt(podId, outcome, classification);
+            if (!ownsRun()) superseded = true;
+            if (!superseded) {
+              const current = podRepo.getOrThrow(podId);
+              const providerLimit =
+                current.pauseReason === 'provider_limit' &&
+                terminalClassification?.category === 'quota_exhausted' &&
+                terminalClassification.definitive;
+              if (providerLimit) {
+                closeProviderAttempt(
+                  podId,
+                  'quota_exhausted',
+                  terminalClassification,
+                  PROVIDER_FAILOVER_HANDOFF_PATH,
+                );
+                await handleProviderLimit(podId, terminalClassification);
+              } else if (
+                current.pauseReason === 'provider_limit' &&
+                outcome === 'failed' &&
+                terminalClassification
+              ) {
+                closeProviderAttempt(podId, 'failed', terminalClassification);
+              } else if (outcome === 'paused' || current.status === 'paused') {
+                closeProviderAttempt(podId, 'aborted');
+              } else if (outcome === 'completed' || outcome === 'failed') {
+                const classification =
+                  outcome === 'failed'
+                    ? (terminalClassification ?? {
+                        category: 'unknown',
+                        definitive: false,
+                        sanitizedMessage: 'Provider attempt ended without classified evidence',
+                        retryAfter: null,
+                      })
+                    : null;
+                closeProviderAttempt(podId, outcome, classification);
+              }
             }
           } finally {
             try {
               if (taskRunId)
                 podRepo.taskExecutions?.finishRun(
                   taskRunId,
-                  outcome,
+                  recordedOutcome,
                   terminalClassification?.category ?? null,
                 );
             } finally {
-              stopCommitPolling(podId);
-              lastEventWriteAt.delete(podId);
+              if (activeAgentRuns.get(podId)?.token === runToken) {
+                stopCommitPolling(podId);
+                lastEventWriteAt.delete(podId);
+              }
               settleActiveRun();
             }
           }
         }
       }
+      if (superseded) return 'stopped';
+      if (hasEventError) throw eventError;
       return outcome;
     },
 
@@ -11586,6 +11636,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
             primeRuntimeForResume(pod, runtime, pod.containerId, resumeEnv);
             const events = runtime.resume(podId, correctionMessage, pod.containerId, resumeEnv);
             const outcome = await this.consumeAgentEvents(podId, events, pod.validationAttempts);
+            if (outcome === 'stopped') return;
             await persistRuntimeCredentialsForPod(
               podId,
               'Failed to persist rotated credentials after override-guidance resume',
@@ -11685,6 +11736,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           });
           outcome = await this.consumeAgentEvents(podId, recoveryEvents, pod.validationAttempts);
         }
+        if (outcome === 'stopped') return;
         await persistRuntimeCredentialsForPod(
           podId,
           'Failed to persist rotated credentials after human-message resume',
@@ -12533,6 +12585,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           events,
           deriveAgentAttempt(pod.phaseTokenUsage),
         );
+        if (outcome === 'stopped') return;
         await persistRuntimeCredentialsForPod(
           podId,
           'Failed to persist rotated credentials after rejection resume',
@@ -14523,6 +14576,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
               );
             }
           }
+          if (outcome === 'stopped') return;
           await persistRuntimeCredentialsForPod(
             podId,
             'Failed to persist rotated credentials after validation-feedback resume',

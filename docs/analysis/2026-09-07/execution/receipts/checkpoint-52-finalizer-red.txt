@@ -1,0 +1,111 @@
+
+ RUN  v4.1.11 /private/tmp/autopod-durable-execution/packages/daemon
+
+ ❯ src/pods/pod-manager.test.ts (537 tests | 5 failed | 532 skipped) 853ms
+     × does not finalize a replacement from an old stream end 258ms
+     × does not finalize a replacement from an old stream error 234ms
+     × does not finalize a replacement from an old stream complete 113ms
+     × rechecks ownership after session synchronization before closing a provider attempt 118ms
+     × does not begin a task run or consume events for an already superseded lifecycle 123ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 5 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/pods/pod-manager.test.ts > PodManager > does not finalize a replacement from an old stream end
+AssertionError: expected 'failed' to be 'stopped' // Object.is equality
+
+Expected: "stopped"
+Received: "failed"
+
+ ❯ src/pods/pod-manager.test.ts:1539:29
+    1537|       });
+    1538|       release.resolve();
+    1539|       await expect(consuming).resolves.toBe('stopped');
+       |                             ^
+    1540|       expect(attempts.getActive(pod.id)?.ordinal).toBe(replacement.ord…
+    1541|       expect(ctx.containerManager.extractDirectoryFromContainer).not.t…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/5]⎯
+
+ FAIL  src/pods/pod-manager.test.ts > PodManager > does not finalize a replacement from an old stream error
+AssertionError: promise rejected "Error: old transport ended late" instead of resolving
+ ❯ src/pods/pod-manager.test.ts:1539:29
+    1537|       });
+    1538|       release.resolve();
+    1539|       await expect(consuming).resolves.toBe('stopped');
+       |                             ^
+    1540|       expect(attempts.getActive(pod.id)?.ordinal).toBe(replacement.ord…
+    1541|       expect(ctx.containerManager.extractDirectoryFromContainer).not.t…
+
+Caused by: Error: old transport ended late
+ ❯ src/pods/pod-manager.test.ts:1506:41
+ ❯ Object.consumeAgentEvents src/pods/pod-manager.ts:10533:26
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/5]⎯
+
+ FAIL  src/pods/pod-manager.test.ts > PodManager > does not finalize a replacement from an old stream complete
+AssertionError: expected "vi.fn()" to not be called at all, but actually been called 1 times
+
+Received:
+
+  1st vi.fn() call:
+
+    Array [
+      "replacement",
+      "/home/autopod/.codex/sessions",
+      "/Users/ewi/.autopod/codex-state/intelligent-lynx",
+    ]
+
+
+Number of calls: 1
+
+ ❯ src/pods/pod-manager.test.ts:1541:70
+    1539|       await expect(consuming).resolves.toBe('stopped');
+    1540|       expect(attempts.getActive(pod.id)?.ordinal).toBe(replacement.ord…
+    1541|       expect(ctx.containerManager.extractDirectoryFromContainer).not.t…
+       |                                                                      ^
+    1542|       expect(ctx.podRepo.getOrThrow(pod.id)).toMatchObject({
+    1543|         status: 'running',
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/5]⎯
+
+ FAIL  src/pods/pod-manager.test.ts > PodManager > rechecks ownership after session synchronization before closing a provider attempt
+AssertionError: expected 'completed' to be 'stopped' // Object.is equality
+
+Expected: "stopped"
+Received: "completed"
+
+ ❯ src/pods/pod-manager.test.ts:1604:21
+    1602|       { generation: pod.lifecycleGeneration, containerId: pod.containe…
+    1603|     );
+    1604|     expect(outcome).toBe('stopped');
+       |                     ^
+    1605|     expect(attempts.getActive(pod.id)?.ordinal).toBe(replacementOrdina…
+    1606|     expect(ctx.podRepo.getOrThrow(pod.id)).toMatchObject({
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[4/5]⎯
+
+ FAIL  src/pods/pod-manager.test.ts > PodManager > does not begin a task run or consume events for an already superseded lifecycle
+AssertionError: expected true to be false // Object.is equality
+
+- Expected
++ Received
+
+- false
++ true
+
+ ❯ src/pods/pod-manager.test.ts:1642:22
+    1640|     );
+    1641|     expect(outcome).toBe('stopped');
+    1642|     expect(consumed).toBe(false);
+       |                      ^
+    1643|     expect(ctx.podRepo.taskExecutions?.snapshot(old.id).agentRunCount)…
+    1644|   });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[5/5]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  5 failed | 532 skipped (537)
+   Start at  08:48:43
+   Duration  5.70s (transform 3.46s, setup 0ms, import 4.52s, tests 853ms, environment 0ms)
+

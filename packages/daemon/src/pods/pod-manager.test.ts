@@ -1481,6 +1481,178 @@ describe('PodManager', () => {
       expect(ctx.containerManager.extractDirectoryFromContainer).toHaveBeenCalled();
     });
   });
+  it.each(['end', 'error', 'complete'] as const)(
+    'does not finalize a replacement from an old stream %s',
+    async (ending) => {
+      const ctx = createTestContext(undefined, {
+        defaultRuntime: 'codex',
+        executionTarget: 'sandbox',
+        warmImageTag: 'example.azurecr.io/autopod/test:immutable',
+      });
+      const attempts = createProviderAttemptRepository(ctx.db);
+      ctx.deps.providerAttemptRepo = attempts;
+      const manager = createPodManager(ctx.deps);
+      const created = manager.createSession(
+        { profileName: 'test-profile', task: 'Retain replacement', skipValidation: true },
+        'operator',
+      );
+      ctx.podRepo.update(created.id, { status: 'running', containerId: 'old-container' });
+      const pod = ctx.podRepo.getOrThrow(created.id);
+      const release = deferred<void>();
+      const consuming = manager.consumeAgentEvents(
+        pod.id,
+        (async function* () {
+          await release.promise;
+          if (ending === 'error') throw new Error('old transport ended late');
+          if (ending === 'complete')
+            yield {
+              type: 'complete',
+              timestamp: new Date().toISOString(),
+              result: 'Old completion',
+            } as const;
+        })(),
+        0,
+        { generation: pod.lifecycleGeneration, containerId: pod.containerId },
+      );
+      const old = attempts.getActive(pod.id);
+      const profileSnapshot = attempts.getActiveProfileSnapshot(pod.id);
+      if (!old || !profileSnapshot) throw new Error('Missing active attempt');
+      attempts.close(pod.id, {
+        nativeSessionId: null,
+        outcome: 'aborted',
+        inputTokens: 0,
+        outputTokens: 0,
+        costUsd: 0,
+      });
+      ctx.podRepo.incrementLifecycleGeneration(pod.id);
+      ctx.podRepo.update(pod.id, { containerId: 'replacement', status: 'running' });
+      const replacement = attempts.open({
+        podId: pod.id,
+        provider: old.provider,
+        providerAccountId: old.providerAccountId,
+        runtime: old.runtime,
+        model: old.model,
+        profileReference: old.profileReference,
+        profileSnapshot,
+      });
+      release.resolve();
+      await expect(consuming).resolves.toBe('stopped');
+      expect(attempts.getActive(pod.id)?.ordinal).toBe(replacement.ordinal);
+      expect(ctx.containerManager.extractDirectoryFromContainer).not.toHaveBeenCalled();
+      expect(ctx.podRepo.getOrThrow(pod.id)).toMatchObject({
+        status: 'running',
+        containerId: 'replacement',
+        taskSummary: null,
+      });
+    },
+  );
+
+  it.each([false, true])(
+    'rechecks ownership after session synchronization and preserves the observed failure=%s',
+    async (fatal) => {
+      const ctx = createTestContext(undefined, {
+        defaultRuntime: 'codex',
+        executionTarget: 'sandbox',
+        warmImageTag: 'example.azurecr.io/autopod/test:immutable',
+      });
+      const attempts = createProviderAttemptRepository(ctx.db);
+      ctx.deps.providerAttemptRepo = attempts;
+      const manager = createPodManager(ctx.deps);
+      const created = manager.createSession(
+        { profileName: 'test-profile', task: 'Fence final callbacks', skipValidation: true },
+        'operator',
+      );
+      ctx.podRepo.update(created.id, { status: 'running', containerId: 'old-container' });
+      const pod = ctx.podRepo.getOrThrow(created.id);
+      let replacementOrdinal = 0;
+      vi.mocked(ctx.containerManager.extractDirectoryFromContainer).mockImplementationOnce(
+        async (containerId) => {
+          expect(containerId).toBe('old-container');
+          const old = attempts.getActive(pod.id);
+          const profileSnapshot = attempts.getActiveProfileSnapshot(pod.id);
+          if (!old || !profileSnapshot) throw new Error('Missing active attempt');
+          attempts.close(pod.id, {
+            nativeSessionId: null,
+            outcome: 'aborted',
+            inputTokens: 0,
+            outputTokens: 0,
+            costUsd: 0,
+          });
+          ctx.podRepo.incrementLifecycleGeneration(pod.id);
+          ctx.podRepo.update(pod.id, { containerId: 'replacement', status: 'running' });
+          replacementOrdinal = attempts.open({
+            podId: pod.id,
+            provider: old.provider,
+            providerAccountId: old.providerAccountId,
+            runtime: old.runtime,
+            model: old.model,
+            profileReference: old.profileReference,
+            profileSnapshot,
+          }).ordinal;
+        },
+      );
+      const outcome = await manager.consumeAgentEvents(
+        pod.id,
+        (async function* () {
+          yield {
+            type: 'complete',
+            timestamp: new Date().toISOString(),
+            result: 'Actually finished old work',
+          } as const;
+          if (fatal)
+            yield {
+              type: 'error',
+              timestamp: new Date().toISOString(),
+              message: 'A subsequent owned event failed',
+              fatal: true,
+            } as const;
+        })(),
+        0,
+        { generation: pod.lifecycleGeneration, containerId: pod.containerId },
+      );
+      expect(outcome).toBe('stopped');
+      expect(attempts.getActive(pod.id)?.ordinal).toBe(replacementOrdinal);
+      expect(ctx.podRepo.getOrThrow(pod.id)).toMatchObject({
+        status: 'running',
+        containerId: 'replacement',
+      });
+      // Preserve the observed old completion even though control must not settle the new lifecycle.
+      expect(
+        ctx.db.prepare('SELECT outcome FROM task_agent_runs WHERE pod_id = ?').get(pod.id),
+      ).toEqual({ outcome: fatal ? 'failed' : 'completed' });
+    },
+  );
+
+  it('does not begin a task run or consume events for an already superseded lifecycle', async () => {
+    const ctx = createTestContext();
+    const manager = createPodManager(ctx.deps);
+    const created = manager.createSession(
+      { profileName: 'test-profile', task: 'Fence event admission' },
+      'operator',
+    );
+    ctx.podRepo.update(created.id, { status: 'running', containerId: 'old-container' });
+    const old = ctx.podRepo.getOrThrow(created.id);
+    ctx.podRepo.incrementLifecycleGeneration(old.id);
+    ctx.podRepo.update(old.id, { containerId: 'replacement' });
+    let consumed = false;
+    const outcome = await manager.consumeAgentEvents(
+      old.id,
+      (async function* () {
+        consumed = true;
+        yield {
+          type: 'complete',
+          timestamp: new Date().toISOString(),
+          result: 'Stale result',
+        } as const;
+      })(),
+      0,
+      { generation: old.lifecycleGeneration, containerId: old.containerId },
+    );
+    expect(outcome).toBe('stopped');
+    expect(consumed).toBe(false);
+    expect(ctx.podRepo.taskExecutions?.snapshot(old.id).agentRunCount).toBe(0);
+  });
+
   it('quiesces a paused Codex run before allowing resume', async () => {
     const ctx = createTestContext(undefined, { defaultRuntime: 'codex' });
     const attempts = createProviderAttemptRepository(ctx.db);
