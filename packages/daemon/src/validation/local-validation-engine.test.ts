@@ -3684,6 +3684,187 @@ human_review: []
     },
   );
 
+  it('bounds selected reviewer acquisition and never revives dispatch when it settles late', async () => {
+    let release:
+      | ((value: Awaited<ReturnType<typeof createProviderAnthropicClient>>) => void)
+      | undefined;
+    const create = vi.fn().mockResolvedValue({
+      content: [{ type: 'text', text: '{"status":"pass","reasoning":"late","issues":[]}' }],
+      usage: { input_tokens: 10, output_tokens: 2 },
+    });
+    vi.mocked(createProviderAnthropicClient).mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          release = resolve;
+        }),
+    );
+    const record = vi.fn();
+    const pending = createLocalValidationEngine(stubContainerManager()).validate(
+      baseConfig({
+        reviewerProvider: 'foundry',
+        reviewerProviderCredentials: {
+          provider: 'foundry',
+          endpoint: 'https://foundry.example',
+          projectId: 'test',
+          apiKey: 'fixture',
+          apiSurface: 'anthropic',
+        },
+        reviewerModel: 'selected',
+        reviewTimeout: 20,
+        validationSuite: 'full',
+        diff: '+const changed = true;',
+        recordReviewerApiDispatch: record,
+      }),
+    );
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const result = await Promise.race([
+      pending,
+      new Promise<null>((resolve) => {
+        timer = setTimeout(() => resolve(null), 500);
+      }),
+    ]);
+    if (timer) clearTimeout(timer);
+    release?.({ ok: true, client: { messages: { create } }, model: 'selected' } as Awaited<
+      ReturnType<typeof createProviderAnthropicClient>
+    >);
+    await pending;
+    expect(result).not.toBeNull();
+    expect(result?.overall).toBe('fail');
+    expect(result?.reviewSkipReason).toContain('acquisition');
+    expect(create).not.toHaveBeenCalled();
+    expect(record).not.toHaveBeenCalled();
+    expect(createProviderAnthropicClient).toHaveBeenCalledOnce();
+    expect(runContainerReviewer).not.toHaveBeenCalled();
+    expect(runToolUseReview).not.toHaveBeenCalled();
+    expect(runClaudeCli).not.toHaveBeenCalled();
+  });
+
+  it('charges selected client acquisition and earlier API tiers against one review deadline', async () => {
+    const worktreePath = await fs.mkdtemp(path.join(os.tmpdir(), 'review-acquisition-budget-'));
+    let elapsed = 0;
+    vi.spyOn(performance, 'now').mockImplementation(() => elapsed);
+    const create = vi.fn().mockImplementation(async () => {
+      elapsed = 950;
+      return {
+        content: [{ type: 'text', text: '{"status":"pass","reasoning":"first pass","issues":[]}' }],
+        usage: { input_tokens: 10, output_tokens: 2 },
+      };
+    });
+    vi.mocked(createProviderAnthropicClient).mockImplementation(async () => {
+      elapsed = 900;
+      return { ok: true, client: { messages: { create } }, model: 'selected' } as Awaited<
+        ReturnType<typeof createProviderAnthropicClient>
+      >;
+    });
+    vi.mocked(runToolUseReview).mockResolvedValue({
+      stdout: '{"status":"pass","reasoning":"deep pass","issues":[]}',
+      tokenUsage: { inputTokens: 20, outputTokens: 3 },
+    });
+    try {
+      const result = await createLocalValidationEngine(stubContainerManager()).validate(
+        baseConfig({
+          reviewerProvider: 'foundry',
+          reviewerProviderCredentials: {
+            provider: 'foundry',
+            endpoint: 'https://foundry.example',
+            projectId: 'test',
+            apiKey: 'fixture',
+            apiSurface: 'anthropic',
+          },
+          reviewerModel: 'selected',
+          reviewTimeout: 1000,
+          reviewDepth: 'deep',
+          worktreePath,
+          validationSuite: 'deterministic',
+          diff: '+const changed = true;',
+        }),
+      );
+      expect(create).toHaveBeenCalledOnce();
+      expect(create.mock.calls[0]?.[1]).toMatchObject({ timeout: 100, maxRetries: 0 });
+      expect(runToolUseReview).toHaveBeenCalledWith(expect.objectContaining({ timeout: 50 }));
+      expect(result.overall).toBe('pass');
+      expect(result.reviewTokenUsage).toMatchObject({ inputTokens: 30, outputTokens: 5 });
+    } finally {
+      vi.restoreAllMocks();
+      await fs.rm(worktreePath, { recursive: true, force: true });
+    }
+  });
+
+  it.each([
+    'acquisition-expired',
+    'receipt-expired',
+    'tier-two-expired',
+    'standard-response-expired',
+    'invalid-budget',
+  ] as const)(
+    'refuses selected API continuation for %s and retains measured earlier usage',
+    async (mode) => {
+      const worktreePath = await fs.mkdtemp(path.join(os.tmpdir(), 'review-api-expired-'));
+      let elapsed = 0;
+      vi.spyOn(performance, 'now').mockImplementation(() => elapsed);
+      const create = vi.fn().mockImplementation(async () => {
+        elapsed = 1001;
+        return {
+          content: [
+            {
+              type: 'text',
+              text: '{"status":"pass","reasoning":"initial evidence","issues":["Retained initial finding"]}',
+            },
+          ],
+          usage: { input_tokens: 10, output_tokens: 2 },
+        };
+      });
+      vi.mocked(createProviderAnthropicClient).mockImplementation(async () => {
+        if (mode === 'acquisition-expired') elapsed = 1001;
+        return { ok: true, client: { messages: { create } }, model: 'selected' } as Awaited<
+          ReturnType<typeof createProviderAnthropicClient>
+        >;
+      });
+      const record = vi.fn(() => {
+        if (mode === 'receipt-expired') elapsed = 1001;
+      });
+      try {
+        const result = await createLocalValidationEngine(stubContainerManager()).validate(
+          baseConfig({
+            reviewerProvider: 'foundry',
+            reviewerProviderCredentials: {
+              provider: 'foundry',
+              endpoint: 'https://foundry.example',
+              projectId: 'test',
+              apiKey: 'fixture',
+              apiSurface: 'anthropic',
+            },
+            reviewerModel: 'selected',
+            reviewTimeout: mode === 'invalid-budget' ? 0 : 1000,
+            reviewDepth: mode === 'standard-response-expired' ? 'standard' : 'deep',
+            worktreePath,
+            validationSuite: 'full',
+            diff: '+const changed = true;',
+            recordReviewerApiDispatch: record,
+          }),
+        );
+        expect(result.overall).toBe('fail');
+        expect(result.reviewSkipReason).toContain('deadline exhausted');
+        expect(runToolUseReview).not.toHaveBeenCalled();
+        expect(runContainerReviewer).not.toHaveBeenCalled();
+        expect(runAgenticReview).not.toHaveBeenCalled();
+        expect(createProviderAnthropicClient).toHaveBeenCalledTimes(
+          mode === 'invalid-budget' ? 0 : 1,
+        );
+        expect(create).toHaveBeenCalledTimes(
+          ['tier-two-expired', 'standard-response-expired'].includes(mode) ? 1 : 0,
+        );
+        if (['tier-two-expired', 'standard-response-expired'].includes(mode)) {
+          expect(result.reviewTokenUsage).toMatchObject({ inputTokens: 10, outputTokens: 2 });
+          expect(result.taskReview?.issues).toContain('Retained initial finding');
+        } else expect(result.reviewTokenUsage).toBeUndefined();
+      } finally {
+        vi.restoreAllMocks();
+        await fs.rm(worktreePath, { recursive: true, force: true });
+      }
+    },
+  );
+
   it('does not dispatch a provider request after client acquisition loses review ownership', async () => {
     let current = true;
     const create = vi.fn().mockResolvedValue({
@@ -3904,8 +4085,10 @@ human_review: []
           },
         ],
       },
-      { timeout: 300_000, maxRetries: 0 },
+      { timeout: expect.any(Number), maxRetries: 0 },
     );
+    expect(messagesCreate.mock.calls[0]?.[1].timeout).toBeGreaterThan(0);
+    expect(messagesCreate.mock.calls[0]?.[1].timeout).toBeLessThanOrEqual(300_000);
     expect(vi.mocked(cm.execInContainer)).toHaveBeenCalledTimes(1);
     expect(vi.mocked(cm.execInContainer).mock.calls[0]?.[1].join(' ')).toContain(
       'git reset --hard HEAD',

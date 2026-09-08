@@ -61,6 +61,7 @@ import {
 } from './review-ledger.js';
 import { reviewClosureOutputContract } from './review-structured-output.js';
 import { ToolReviewError, runToolUseReview } from './review-tool-runner.js';
+import { ReviewerApiDeadlineError, reviewerApiBudget } from './reviewer-api-budget.js';
 import { runWithValidationEvidence } from './run-with-evidence.js';
 import type { ValidationEvidenceCache } from './validation-evidence-cache.js';
 
@@ -3640,6 +3641,7 @@ async function runTaskReview(
   const diffIsTruncated = config.diff?.includes('⚠ DIFF TRUNCATED:') ?? false;
   const prompt = buildReviewPrompt(config, reviewContext);
   const reviewTimeout = config.reviewTimeout ?? 300_000;
+  const apiBudget = reviewerApiBudget(reviewTimeout);
   const reviewDepth = config.reviewDepth ?? 'auto';
   const reviewRunner = resolveReviewRunner(config);
   let boundProvider:
@@ -3648,14 +3650,16 @@ async function runTaskReview(
   const getBoundProvider = async () => {
     config.assertReviewerCurrent?.();
     if (boundProvider) return boundProvider;
-    const selected = await createProviderAnthropicClient(
-      {
-        provider: config.reviewerProvider,
-        credentials: config.reviewerProviderCredentials,
-        model: config.reviewerModel ?? 'claude-haiku-4-5',
-        profileName: config.podId,
-      },
-      log ?? noopLogger,
+    const selected = await apiBudget.acquire(() =>
+      createProviderAnthropicClient(
+        {
+          provider: config.reviewerProvider,
+          credentials: config.reviewerProviderCredentials,
+          model: config.reviewerModel ?? 'claude-haiku-4-5',
+          profileName: config.podId,
+        },
+        log ?? noopLogger,
+      ),
     );
     config.assertReviewerCurrent?.();
     if (!selected.ok) throw new Error(`Reviewer provider unavailable: ${selected.reason}`);
@@ -3766,7 +3770,7 @@ async function runTaskReview(
           const providerReview = await runProfileBoundAnthropicReview(
             await getBoundProvider(),
             prompt,
-            reviewTimeout,
+            () => apiBudget.remaining(),
             config.assertReviewerCurrent,
             config.recordReviewerApiDispatch,
           );
@@ -3790,6 +3794,15 @@ async function runTaskReview(
           log,
           1,
         );
+        if (shouldUseProfileBoundAnthropicReviewer(config)) {
+          try {
+            apiBudget.remaining('API response');
+          } catch (err) {
+            if (err instanceof ReviewerApiDeadlineError)
+              return requiredReviewUnavailable(tier1Parsed, tier1TokenUsage, err.message);
+            throw err;
+          }
+        }
         if (!tier1Parsed) {
           log?.warn({ rawOutput: stdout.slice(0, 500) }, 'failed to parse task review response');
           return {
@@ -3878,15 +3891,18 @@ async function runTaskReview(
     log?.info(tier2Reason);
 
     try {
+      const selectedProvider = shouldUseProfileBoundAnthropicReviewer(config)
+        ? await getBoundProvider()
+        : undefined;
       const tier2Result = await runToolUseReview({
         beforeRequest: config.assertReviewerCurrent,
         model: config.reviewerModel,
         prompt,
         worktreePath,
-        timeout: reviewTimeout,
-        ...(shouldUseProfileBoundAnthropicReviewer(config)
+        timeout: selectedProvider ? apiBudget.remaining() : reviewTimeout,
+        ...(selectedProvider
           ? {
-              providerClient: await getBoundProvider(),
+              providerClient: selectedProvider,
               onDispatch: config.recordReviewerApiDispatch,
             }
           : { apiKey: config.reviewerApiKey }),
@@ -4011,6 +4027,8 @@ async function runTaskReview(
         tokenUsage: allTierTokenUsage,
       };
     } catch (err) {
+      if (err instanceof ReviewerApiDeadlineError)
+        return requiredReviewUnavailable(tier1Parsed, tier1TokenUsage, err.message);
       if (err instanceof ToolReviewError)
         return requiredReviewUnavailable(
           tier1Parsed,
@@ -4056,6 +4074,8 @@ async function runTaskReview(
       };
     }
   } catch (err) {
+    if (err instanceof ReviewerApiDeadlineError)
+      return requiredReviewUnavailable(null, undefined, err.message);
     if (
       err instanceof ClaudeCliError ||
       err instanceof CodexReviewError ||
@@ -4175,7 +4195,7 @@ function canReuseCachedPreSubmitForTier1(
 async function runProfileBoundAnthropicReview(
   llm: Extract<Awaited<ReturnType<typeof createProviderAnthropicClient>>, { ok: true }>,
   prompt: string,
-  timeout: number,
+  timeout: number | (() => number),
   assertCurrent?: () => void,
   onDispatch?: (model: string) => void,
 ): Promise<{
@@ -4191,7 +4211,7 @@ async function runProfileBoundAnthropicReview(
       max_tokens: 8192,
       messages: [{ role: 'user', content: prompt }],
     },
-    { timeout, maxRetries: 0 },
+    { timeout: typeof timeout === 'function' ? timeout() : timeout, maxRetries: 0 },
   );
   const stdout = response.content
     .filter((block): block is Extract<(typeof response.content)[number], { type: 'text' }> => {
