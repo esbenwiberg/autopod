@@ -1653,6 +1653,164 @@ describe('PodManager', () => {
     expect(ctx.podRepo.taskExecutions?.snapshot(old.id).agentRunCount).toBe(0);
   });
 
+  it.each(['replaced', 'stopped'] as const)(
+    'does not publish late starting HEAD after commit polling is %s',
+    async (ending) => {
+      const ctx = createTestContext();
+      const manager = createPodManager(ctx.deps);
+      const created = manager.createSession(
+        { profileName: 'test-profile', task: 'Fence commit observations' },
+        'operator',
+      );
+      ctx.podRepo.update(created.id, { status: 'running', containerId: 'old-container' });
+      const head = deferred<{ stdout: string; stderr: string; exitCode: number }>();
+      const headStarted = deferred<void>();
+      const finish = deferred<void>();
+      const original = vi.mocked(ctx.containerManager.execInContainer).getMockImplementation();
+      if (!original) throw new Error('Missing command fixture');
+      vi.mocked(ctx.containerManager.execInContainer).mockImplementation(
+        async (id, cmd, options) => {
+          if (cmd.join(' ') === 'git rev-parse HEAD') {
+            headStarted.resolve();
+            return head.promise;
+          }
+          return original(id, cmd, options);
+        },
+      );
+      const consuming = manager.consumeAgentEvents(
+        created.id,
+        (async function* () {
+          await finish.promise;
+          yield {
+            type: 'complete',
+            timestamp: new Date().toISOString(),
+            result: 'Finished',
+          } as const;
+        })(),
+      );
+      await headStarted.promise;
+      if (ending === 'replaced') {
+        ctx.podRepo.incrementLifecycleGeneration(created.id);
+        ctx.podRepo.update(created.id, { containerId: 'replacement' });
+      } else {
+        finish.resolve();
+        await consuming;
+      }
+      ctx.podRepo.update(created.id, { startCommitSha: 'new-start', commitCount: 9 });
+      head.resolve({ stdout: 'old-start\n', stderr: '', exitCode: 0 });
+      await new Promise<void>((resolve) => setImmediate(resolve));
+      const observed = ctx.podRepo.getOrThrow(created.id);
+      const countCalls = vi
+        .mocked(ctx.containerManager.execInContainer)
+        .mock.calls.filter(([, cmd]) => cmd[1] === 'rev-list');
+      finish.resolve();
+      await consuming;
+      expect(observed).toMatchObject({ startCommitSha: 'new-start', commitCount: 9 });
+      expect(countCalls).toHaveLength(0);
+    },
+  );
+
+  it('does not publish late commit counts into a replacement lifecycle', async () => {
+    const ctx = createTestContext();
+    const manager = createPodManager(ctx.deps);
+    const pod = manager.createSession(
+      { profileName: 'test-profile', task: 'Keep replacement commit metadata' },
+      'operator',
+    );
+    ctx.podRepo.update(pod.id, {
+      status: 'running',
+      containerId: 'old-container',
+      startCommitSha: 'old-start',
+    });
+    const count = deferred<{ stdout: string; stderr: string; exitCode: number }>();
+    const countStarted = deferred<void>();
+    const finish = deferred<void>();
+    const original = vi.mocked(ctx.containerManager.execInContainer).getMockImplementation();
+    if (!original) throw new Error('Missing command fixture');
+    vi.mocked(ctx.containerManager.execInContainer).mockImplementation(async (id, cmd, options) => {
+      if (cmd[1] === 'rev-list') {
+        countStarted.resolve();
+        return count.promise;
+      }
+      if (cmd[1] === 'log') return { stdout: '2026-09-01T00:00:00Z', stderr: '', exitCode: 0 };
+      return original(id, cmd, options);
+    });
+    const consuming = manager.consumeAgentEvents(
+      pod.id,
+      (async function* () {
+        await finish.promise;
+        yield {
+          type: 'status',
+          timestamp: new Date().toISOString(),
+          message: 'Polling fixture ended',
+        } as const;
+      })(),
+    );
+    await countStarted.promise;
+    ctx.podRepo.incrementLifecycleGeneration(pod.id);
+    ctx.podRepo.update(pod.id, {
+      containerId: 'replacement',
+      commitCount: 9,
+      lastCommitAt: '2026-09-08T00:00:00Z',
+    });
+    count.resolve({ stdout: '2', stderr: '', exitCode: 0 });
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    const observed = ctx.podRepo.getOrThrow(pod.id);
+    finish.resolve();
+    await consuming;
+    expect(observed).toMatchObject({ commitCount: 9, lastCommitAt: '2026-09-08T00:00:00Z' });
+  });
+
+  it('serializes commit polling ticks while a prior command remains in flight', async () => {
+    vi.useFakeTimers();
+    const count = deferred<{ stdout: string; stderr: string; exitCode: number }>();
+    const finish = deferred<void>();
+    let consuming: Promise<unknown> | undefined;
+    try {
+      const ctx = createTestContext();
+      const manager = createPodManager(ctx.deps);
+      const pod = manager.createSession(
+        { profileName: 'test-profile', task: 'Bound commit polling' },
+        'operator',
+      );
+      ctx.podRepo.update(pod.id, {
+        status: 'running',
+        containerId: 'ctr-1',
+        startCommitSha: 'start',
+      });
+      const original = vi.mocked(ctx.containerManager.execInContainer).getMockImplementation();
+      if (!original) throw new Error('Missing command fixture');
+      vi.mocked(ctx.containerManager.execInContainer).mockImplementation(
+        async (id, cmd, options) => {
+          if (cmd[1] === 'rev-list') return count.promise;
+          return original(id, cmd, options);
+        },
+      );
+      consuming = manager.consumeAgentEvents(
+        pod.id,
+        (async function* () {
+          await finish.promise;
+          yield {
+            type: 'status',
+            timestamp: new Date().toISOString(),
+            message: 'Polling fixture ended',
+          } as const;
+        })(),
+      );
+      await vi.advanceTimersByTimeAsync(180_000);
+      expect(
+        vi
+          .mocked(ctx.containerManager.execInContainer)
+          .mock.calls.filter(([, cmd]) => cmd[1] === 'rev-list'),
+      ).toHaveLength(1);
+    } finally {
+      count.resolve({ stdout: '0', stderr: '', exitCode: 0 });
+      finish.resolve();
+      await consuming;
+      vi.useRealTimers();
+    }
+  });
+
   it('quiesces a paused Codex run before allowing resume', async () => {
     const ctx = createTestContext(undefined, { defaultRuntime: 'codex' });
     const attempts = createProviderAttemptRepository(ctx.db);

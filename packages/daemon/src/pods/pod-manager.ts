@@ -3603,7 +3603,9 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
   const previewTimers = new Map<string, ReturnType<typeof setTimeout>>();
 
   /** Active commit polling intervals, keyed by podId. */
-  const commitPollers = new Map<string, ReturnType<typeof setInterval>>();
+  const commitPolling = createPollingCoordinator((err, podId) =>
+    logger.debug({ err, podId }, 'Commit polling failed, skipping cycle'),
+  );
 
   const COMMIT_POLL_INTERVAL_MS = 60_000;
 
@@ -4586,80 +4588,95 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
   // Resume merge polling on startup
   resumeMergePolling();
 
-  /** Start polling git commit count inside a running container. */
+  /** Start polling git commit count inside one owned lifecycle and container. */
   function startCommitPolling(podId: string): void {
-    stopCommitPolling(podId);
-
-    /** Capture the starting HEAD SHA so we only count commits the agent makes. */
-    const captureStartSha = async () => {
-      try {
-        const pod = podRepo.getOrThrow(podId);
-        if (pod.startCommitSha || !pod.containerId) return;
-        const cm = containerManagerFactory.get(pod.executionTarget);
-        const shaResult = await cm.execInContainer(pod.containerId, ['git', 'rev-parse', 'HEAD'], {
-          cwd: '/workspace',
-          timeout: 5_000,
-        });
-        if (shaResult.exitCode === 0 && shaResult.stdout.trim()) {
-          podRepo.update(podId, { startCommitSha: shaResult.stdout.trim() });
+    const expected = podRepo.getOrThrow(podId);
+    let captureAttempted = false;
+    commitPolling.start(podId, COMMIT_POLL_INTERVAL_MS, async (ownership) => {
+      const current = (): Pod | null => {
+        try {
+          const pod = podRepo.getOrThrow(podId);
+          if (
+            ownership.isCurrent() &&
+            pod.status === 'running' &&
+            pod.containerId &&
+            pod.lifecycleGeneration === expected.lifecycleGeneration &&
+            pod.containerId === expected.containerId &&
+            pod.executionTarget === expected.executionTarget &&
+            pod.worktreePath === expected.worktreePath &&
+            pod.branch === expected.branch &&
+            pod.baseBranch === expected.baseBranch
+          )
+            return pod;
+        } catch {
+          /* Deleted or replaced pods have no polling authority. */
         }
-      } catch {
-        logger.debug({ podId }, 'Failed to capture start commit SHA');
-      }
-    };
-
-    const poll = async () => {
-      try {
-        const pod = podRepo.getOrThrow(podId);
-        if (!pod.containerId || pod.status !== 'running') {
-          stopCommitPolling(podId);
-          return;
-        }
-        // Use startCommitSha if available; fall back to baseBranch for old pods
-        const exclusionRef = pod.startCommitSha ?? pod.baseBranch ?? 'main';
-        const cm = containerManagerFactory.get(pod.executionTarget);
-        const [countResult, timeResult] = await Promise.all([
-          cm.execInContainer(
-            pod.containerId,
-            ['git', 'rev-list', '--count', 'HEAD', `^${exclusionRef}`],
-            { cwd: '/workspace', timeout: 5_000 },
-          ),
-          cm.execInContainer(pod.containerId, ['git', 'log', '-1', '--format=%cI'], {
-            cwd: '/workspace',
-            timeout: 5_000,
-          }),
-        ]);
-        const commitCount = Number.parseInt(countResult.stdout.trim(), 10) || 0;
-        const lastCommitAt = timeResult.exitCode === 0 ? timeResult.stdout.trim() : null;
-        podRepo.update(podId, { commitCount, lastCommitAt });
-        if (pod.executionTarget === 'sandbox') {
-          const decision = await deps.workspaceCheckpointController?.poll(podId);
-          if (decision?.degraded) {
-            emitActivityStatus(
-              podId,
-              'Durability degraded — retaining sandbox until checkpoint succeeds.',
+        ownership.stop();
+        return null;
+      };
+      let pod = current();
+      if (!pod?.containerId) return;
+      const cm = containerManagerFactory.get(pod.executionTarget);
+      if (!captureAttempted) {
+        captureAttempted = true;
+        if (!pod.startCommitSha) {
+          try {
+            const shaResult = await cm.execInContainer(
+              pod.containerId,
+              ['git', 'rev-parse', 'HEAD'],
+              {
+                cwd: '/workspace',
+                timeout: 5_000,
+              },
             );
+            pod = current();
+            if (!pod) return;
+            if (!pod.startCommitSha && shaResult.exitCode === 0 && shaResult.stdout.trim())
+              podRepo.update(podId, { startCommitSha: shaResult.stdout.trim() });
+          } catch {
+            if (!current()) return;
+            logger.debug({ podId }, 'Failed to capture start commit SHA');
           }
         }
-      } catch {
-        // Silently skip — container may be busy or gone
-        logger.debug({ podId }, 'Commit polling failed, skipping cycle');
       }
-    };
-    // Capture starting SHA first, then run first poll immediately
-    captureStartSha().then(() => poll());
-    const interval = setInterval(poll, COMMIT_POLL_INTERVAL_MS);
-    interval.unref();
-    commitPollers.set(podId, interval);
+      pod = current();
+      if (!pod?.containerId) return;
+      // Use the captured starting SHA; retain the existing legacy base fallback.
+      const exclusionRef = pod.startCommitSha ?? pod.baseBranch ?? 'main';
+      const [countResult, timeResult] = await Promise.all([
+        cm.execInContainer(
+          pod.containerId,
+          ['git', 'rev-list', '--count', 'HEAD', `^${exclusionRef}`],
+          {
+            cwd: '/workspace',
+            timeout: 5_000,
+          },
+        ),
+        cm.execInContainer(pod.containerId, ['git', 'log', '-1', '--format=%cI'], {
+          cwd: '/workspace',
+          timeout: 5_000,
+        }),
+      ]);
+      const observed = current();
+      if (!observed || observed.startCommitSha !== pod.startCommitSha) return;
+      const commitCount = Number.parseInt(countResult.stdout.trim(), 10) || 0;
+      const lastCommitAt = timeResult.exitCode === 0 ? timeResult.stdout.trim() : null;
+      podRepo.update(podId, { commitCount, lastCommitAt });
+      if (pod.executionTarget === 'sandbox') {
+        const decision = await deps.workspaceCheckpointController?.poll(podId);
+        if (!current()) return;
+        if (decision?.degraded)
+          emitActivityStatus(
+            podId,
+            'Durability degraded — retaining sandbox until checkpoint succeeds.',
+          );
+      }
+    });
   }
 
-  /** Stop commit polling for a pod. */
+  /** Stop only the currently registered poller; pending callbacks lose authority. */
   function stopCommitPolling(podId: string): void {
-    const interval = commitPollers.get(podId);
-    if (interval) {
-      clearInterval(interval);
-      commitPollers.delete(podId);
-    }
+    commitPolling.stop(podId);
   }
 
   /** Cancel and remove an auto-stop timer for a pod if one exists. */
