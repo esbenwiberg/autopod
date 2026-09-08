@@ -2385,10 +2385,11 @@
         "receipts/checkpoint-92-cli.txt",
         "checkpoint-93.md",
         "checkpoint-94.md",
-        "checkpoint-95.md"
+        "checkpoint-95.md",
+        "checkpoint-96.md"
       ],
       "prerequisites": [
-        "Latest full pipeline passed clean 2f3549e5dbc818c7624fd09e19cbd00f915b68b9. Run required checks again after further implementation on final source; retain separate platform proof and every unrun requirement."
+        "Latest full pipeline passed clean 041edd98544015ebfece4c2db83c93343f1f23b6. Run required checks again after further implementation on final source; retain separate platform proof and every unrun requirement."
       ]
     },
     {
