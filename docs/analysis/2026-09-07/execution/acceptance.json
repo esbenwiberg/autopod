@@ -1343,12 +1343,8 @@
       "id": "W4.5",
       "requirement": "Live broad history/cost API root cause proven before claiming production repair",
       "status": "unverified",
-      "implementation": [
-        "packages/daemon/src/pods/throughput-aggregator.ts"
-      ],
-      "tests": [
-        "packages/daemon/src/pods/throughput-aggregator.test.ts"
-      ],
+      "implementation": ["packages/daemon/src/pods/throughput-aggregator.ts"],
+      "tests": ["packages/daemon/src/pods/throughput-aggregator.test.ts"],
       "evidence": [
         "receipts/live-api-baseline.jsonl",
         "receipts/live-vm-inspection-failed.json",
@@ -1939,9 +1935,7 @@
         "packages/daemon/src/db/reconcile-native-checkpoint.ts",
         "packages/daemon/src/db/reconcile-native-checkpoint-cli.ts"
       ],
-      "tests": [
-        "packages/daemon/src/db/reconcile-native-checkpoint.test.ts"
-      ],
+      "tests": ["packages/daemon/src/db/reconcile-native-checkpoint.test.ts"],
       "evidence": [
         "checkpoint-48.md: current tracking-branch migration collision reproduced and resolved with byte-preserving native renumbering, managed upgrade tests and copy-only checkpoint reconciliation; production acceptance remains unverified",
         "receipts/checkpoint-48-full-validation.txt",
@@ -1958,9 +1952,7 @@
         "packages/daemon/src/db/backup.ts",
         "packages/daemon/src/db/backup-verification.ts"
       ],
-      "tests": [
-        "packages/daemon/src/db/backup.test.ts"
-      ],
+      "tests": ["packages/daemon/src/db/backup.test.ts"],
       "evidence": [
         "receipts/backup-red.txt",
         "receipts/backup-restore-green.txt",
@@ -1978,9 +1970,7 @@
         "packages/daemon/src/db/backup-verification.ts",
         "packages/daemon/src/db/verify-backup-cli.ts"
       ],
-      "tests": [
-        "packages/daemon/src/db/backup.test.ts"
-      ],
+      "tests": ["packages/daemon/src/db/backup.test.ts"],
       "evidence": [
         "receipts/backup-health-cli-green.txt",
         "receipts/backup-scope-red.txt",
