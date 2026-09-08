@@ -36,6 +36,7 @@ export function createScanOperatorService(deps: {
         report: deps.reports.get(reportId),
         unresolved: findings.items,
         decisions: decisions.items,
+        diagnostics: [...(findings.diagnostics ?? []), ...(decisions.diagnostics ?? [])],
         unresolvedNextCursor: findings.nextCursor,
         decisionsNextCursor: decisions.nextCursor,
       };

@@ -1,0 +1,28 @@
+
+ RUN  v4.1.11 /private/tmp/autopod-durable-execution/packages/daemon
+
+ ❯ src/scheduled-jobs/scan-report-repository.test.ts (16 tests | 1 failed | 15 skipped) 71ms
+     × preserves recorded human actor key order and reason bytes on an idempotent replay 70ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/scheduled-jobs/scan-report-repository.test.ts > scheduled scan reports independent of worker lifetime > preserves recorded human actor key order and reason bytes on an idempotent replay
+AutopodError: Triage request key already records a different decision
+ ❯ Object.<anonymous> src/scheduled-jobs/scan-report-repository.ts:440:17
+    438|           recorded.reason !== input.reason
+    439|         )
+    440|           throw new AutopodError(
+       |                 ^
+    441|             'Triage request key already records a different decision',
+    442|             'CONFLICT',
+ ❯ Object.sqliteTransaction [as triage] ../../node_modules/.pnpm/better-sqlite3@11.10.0/node_modules/better-sqlite3/lib/methods/transaction.js:65:24
+ ❯ src/scheduled-jobs/scan-report-repository.test.ts:47:19
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 15 skipped (16)
+   Start at  14:26:22
+   Duration  412ms (transform 154ms, setup 0ms, import 230ms, tests 71ms, environment 0ms)
+

@@ -52,8 +52,10 @@ import Testing
   #expect(review.unresolved.count == 1)
   let findings = try await api.getScanFindings("report", after: "finding")
   #expect(findings.nextCursor == nil)
+  #expect(findings.diagnostics?.first?.recordId == "unreadable-finding")
   let decisions = try await api.getScanDecisions("report", before: "decision")
   #expect(decisions.nextCursor == nil)
+  #expect(decisions.diagnostics?.first?.recordId == "unreadable-decision")
 }
 
 private final class ScanFixtureProtocol: URLProtocol, @unchecked Sendable {
@@ -69,9 +71,9 @@ private final class ScanFixtureProtocol: URLProtocol, @unchecked Sendable {
     let report = #"{"kind":"scan_report","id":"report","jobId":"job","status":"incomplete","policy":{"version":1,"baseRef":"main","headRef":"main","scanners":["secrets"],"judgment":"none","windowHours":24},"collection":{"repository":"fixture","files":[],"stacks":[],"scanners":[{"scanner":"secrets","status":"failed","findingCount":null}],"findings":[],"diagnostics":["Scanner unavailable"]},"judgment":{"status":"not_requested"},"createdAt":"2026-09-07T10:00:00Z","completedAt":"2026-09-07T10:01:00Z"}"#
     let body: String
     if path.hasSuffix("/findings") {
-      #expect(request.url?.query == "after=finding"); body = #"{"items":[],"nextCursor":null}"#
+      #expect(request.url?.query == "after=finding"); body = #"{"items":[],"nextCursor":null,"diagnostics":[{"kind":"finding","recordId":"unreadable-finding","message":"Finding evidence unavailable"}]}"#
     } else if path.hasSuffix("/decisions") {
-      #expect(request.url?.query == "before=decision"); body = #"{"items":[],"nextCursor":null}"#
+      #expect(request.url?.query == "before=decision"); body = #"{"items":[],"nextCursor":null,"diagnostics":[{"kind":"decision","recordId":"unreadable-decision","message":"Decision evidence unavailable"}]}"#
     } else if path.hasSuffix("/execution-provenance") {
       #expect(request.url?.query == "schemaVersion=2")
       body = #"{"latest":null}"#

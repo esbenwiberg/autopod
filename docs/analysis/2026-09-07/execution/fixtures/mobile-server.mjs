@@ -611,6 +611,32 @@ const server = createServer(async (req, res) => {
   if (pathname === '/scheduled-jobs/scan-fixture/reports') return json([scanReport]);
   if (pathname === '/scheduled-jobs/scan-fixture/trigger') return json(scanReport);
   if (
+    process.env.FIXTURE_MODE === 'unreadable-triage' &&
+    pathname === '/scan-reports/report-fixture/review'
+  ) {
+    return json({
+      report: scanReport,
+      unresolved: [],
+      decisions: [],
+      diagnostics: [
+        {
+          kind: 'finding',
+          recordId: 'unreadable-finding-fixture',
+          message:
+            'Finding evidence unavailable: malformed stored record. It remains stored and cannot authorize a repair.',
+        },
+        {
+          kind: 'decision',
+          recordId: 'unreadable-decision-fixture',
+          message:
+            'Decision evidence unavailable: malformed stored record. Reconcile the original evidence.',
+        },
+      ],
+      unresolvedNextCursor: 'unreadable-finding-fixture',
+      decisionsNextCursor: '00000000-0000-4000-8000-000000000074',
+    });
+  }
+  if (
     pathname === '/scan-reports/report-fixture/review' ||
     pathname === '/scan-reports/report-old-fixture/review'
   ) {

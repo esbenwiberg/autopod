@@ -77,9 +77,21 @@ struct ScanInboxView: View {
               Text("\(usage.model) · \(usage.inputTokens + usage.outputTokens) recorded tokens · cost \(usage.costUsd.map { String(format: "$%.4f", $0) } ?? "unavailable")").font(.caption)
             }
             Divider()
+            if let diagnostics = detail.diagnostics, !diagnostics.isEmpty {
+              Text("Some review records are unavailable").font(.headline)
+              Text("Loaded counts exclude these records. They remain stored and have not been resolved.")
+              ForEach(diagnostics, id: \.self) { item in Text("\(item.recordId) · \(item.message)") }
+            }
             Text("Unresolved findings (\(detail.unresolved.count) loaded)").font(.headline)
             Text("Includes earlier unresolved findings. A repair selection does not mark them fixed.")
             if let pending { Text("Decision retained for retry: \(pending.action)").foregroundStyle(.orange) }
+            if (detail.diagnostics ?? []).contains(where: { $0.kind == "finding" && selected.contains($0.recordId) }) {
+              Button("Remove unavailable selections") {
+                let unavailable = Set((detail.diagnostics ?? []).filter { $0.kind == "finding" }.map(\.recordId))
+                selected.subtract(unavailable); pending = nil; UserDefaults.standard.removeObject(forKey: draftKey)
+                message = "Unavailable selections removed from this local draft. Recorded decisions remain in history."
+              }.disabled(busy)
+            }
             ForEach(detail.unresolved) { finding in
               Toggle(isOn: Binding(get: { selected.contains(finding.id) }, set: { value in
                 if value { selected.insert(finding.id) } else { selected.remove(finding.id) }
@@ -98,7 +110,7 @@ struct ScanInboxView: View {
               Button("Defer") { Task { await triage("defer") } }
               Button("Record resolution") { Task { await triage("resolve") } }
               Button("Record repair selection") { Task { await triage("select_repair") } }
-            }.disabled(busy || selected.isEmpty || reason.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            }.disabled(busy || selected.isEmpty || (detail.diagnostics ?? []).contains(where: { $0.kind == "finding" && selected.contains($0.recordId) }) || reason.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
             Divider()
             Text("Recorded decisions").font(.headline)
             ForEach(detail.decisions) { decision in
@@ -109,7 +121,7 @@ struct ScanInboxView: View {
                 ForEach(decision.findingIds, id: \.self) { id in Text(detail.unresolved.first(where: { $0.id == id })?.file ?? id).font(.caption) }
                 if let podId = decision.repairPodId { Text("Repair pod: \(podId) · dispatch receipt") }
                 else if decision.action == "select_repair" {
-                  Button("Launch selected repair") { Task { await launch(decision.id) } }.disabled(busy)
+                  Button("Launch selected repair") { Task { await launch(decision.id) } }.disabled(busy || (detail.diagnostics ?? []).contains(where: { $0.kind == "finding" && decision.findingIds.contains($0.recordId) }))
                 }
               }.padding(.vertical, 4)
             }
@@ -178,11 +190,13 @@ struct ScanInboxView: View {
         guard owner == reviewGeneration, requested == reportId, !Task.isCancelled else { return }
         let existing = Set(detail?.unresolved.map(\.id) ?? [])
         detail?.unresolved.append(contentsOf: page.items.filter { !existing.contains($0.id) }); detail?.unresolvedNextCursor = page.nextCursor
+        detail?.diagnostics = (detail?.diagnostics ?? []) + (page.diagnostics ?? [])
       } else {
         let page = try await api.getScanDecisions(requested, before: cursor)
         guard owner == reviewGeneration, requested == reportId, !Task.isCancelled else { return }
         let existing = Set(detail?.decisions.map(\.id) ?? [])
         detail?.decisions.append(contentsOf: page.items.filter { !existing.contains($0.id) }); detail?.decisionsNextCursor = page.nextCursor
+        detail?.diagnostics = (detail?.diagnostics ?? []) + (page.diagnostics ?? [])
       }
     } catch { if owner == reviewGeneration { self.error = error.localizedDescription } }
   }

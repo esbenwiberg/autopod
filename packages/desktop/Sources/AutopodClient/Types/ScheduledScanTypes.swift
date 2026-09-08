@@ -88,7 +88,13 @@ public struct ScanTriageDecision: Codable, Identifiable, Sendable {
   public let createdAt: String
   public let repairPodId: String?
 }
+public struct ScanRecordDiagnostic: Codable, Sendable, Hashable {
+  public let kind: String
+  public let recordId: String
+  public let message: String
+}
 public struct ScanReportDetail: Codable, Sendable {
+  public var diagnostics: [ScanRecordDiagnostic]?
   public let report: ScheduledScanReport
   public var unresolved: [ScheduledScanFinding]
   public var decisions: [ScanTriageDecision]
@@ -117,10 +123,12 @@ public struct ScanReportPage: Codable, Sendable {
 }
 
 public struct ScanFindingPage: Codable, Sendable {
+  public let diagnostics: [ScanRecordDiagnostic]?
   public let items: [ScheduledScanFinding]
   public let nextCursor: String?
 }
 public struct ScanDecisionPage: Codable, Sendable {
+  public let diagnostics: [ScanRecordDiagnostic]?
   public let items: [ScanTriageDecision]
   public let nextCursor: String?
 }

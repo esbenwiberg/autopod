@@ -109,6 +109,7 @@ export interface ScanTriageDecision {
   createdAt: string;
 }
 export interface ScanReportDetail {
+  diagnostics?: ScanRecordDiagnostic[];
   /** Present on paginated operator review responses. */
   unresolvedNextCursor?: string | null;
   decisionsNextCursor?: string | null;
@@ -143,11 +144,20 @@ export interface ScanReportPage {
   nextCursor: string | null;
 }
 
+/** Unreadable stored evidence is excluded from selectable items, never discarded. */
+export interface ScanRecordDiagnostic {
+  kind: 'finding' | 'decision';
+  recordId: string;
+  message: string;
+}
+
 export interface ScanFindingPage {
+  diagnostics?: ScanRecordDiagnostic[];
   items: Array<ScheduledScanFinding & { disposition: 'unresolved' | 'deferred' }>;
   nextCursor: string | null;
 }
 export interface ScanDecisionPage {
+  diagnostics?: ScanRecordDiagnostic[];
   items: Array<ScanTriageDecision & { repairPodId: string | null }>;
   nextCursor: string | null;
 }

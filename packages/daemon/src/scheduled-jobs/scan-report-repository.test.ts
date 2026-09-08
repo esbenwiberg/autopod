@@ -38,6 +38,164 @@ const collection: ScheduledScanCollection = {
 };
 
 describe('scheduled scan reports independent of worker lifetime', () => {
+  it('preserves recorded human actor key order and reason bytes on an idempotent replay', () => {
+    const db = createTestDb();
+    const repo = createScanReportRepository(db);
+    try {
+      const report = repo.begin('job', 'ordered-actor', policy);
+      repo.finish(report.id, collection);
+      const input = {
+        reportId: report.id,
+        requestKey: 'same-original-order',
+        findingIds: ['stable-finding'],
+        action: 'select_repair' as const,
+        actor: { userId: 'operator', type: 'human' as const, displayName: 'Operator' },
+        reason: '  Preserve the original reason  ',
+      };
+      const first = repo.triage(input);
+      expect(repo.triage(input)).toEqual(first);
+      expect(repo.getDecision(report.id, first.id).reason).toBe(input.reason);
+    } finally {
+      db.close();
+    }
+  });
+
+  it.each([
+    '{private-broken',
+    JSON.stringify({ ...collection.findings[0], id: 'forged' }),
+    JSON.stringify({ ...collection.findings[0], severity: 'unknown' }),
+    JSON.stringify({ ...collection.findings[0], summary: 's'.repeat(70_000) }),
+  ])('isolates unreadable finding evidence and refuses its authority (%#)', (payload) => {
+    const db = createTestDb();
+    const repo = createScanReportRepository(db);
+    try {
+      const report = repo.begin('job', 'bad-finding', policy);
+      repo.finish(report.id, collection);
+      db.prepare('UPDATE scheduled_scan_findings SET finding = ? WHERE id = ?').run(
+        payload,
+        'stable-finding',
+      );
+      const page = repo.unresolvedPage(report.id);
+      expect(page.items).toEqual([]);
+      expect(page.diagnostics).toEqual([
+        {
+          kind: 'finding',
+          recordId: 'stable-finding',
+          message: expect.stringContaining('unavailable'),
+        },
+      ]);
+      expect(JSON.stringify(page)).not.toContain('private-broken');
+      expect(() => repo.selectedUnresolved(report.id, ['stable-finding'])).toThrow(/unavailable/i);
+      expect(() =>
+        repo.triage({
+          reportId: report.id,
+          requestKey: 'no-authority',
+          findingIds: ['stable-finding'],
+          action: 'select_repair',
+          actor: { type: 'human', userId: 'operator' },
+          reason: 'Cannot authorize missing evidence',
+        }),
+      ).toThrow(/unavailable/i);
+      expect(db.prepare('SELECT COUNT(*) AS n FROM scheduled_scan_triage').get()).toEqual({ n: 0 });
+      expect(db.prepare('SELECT finding FROM scheduled_scan_findings').get()).toEqual({
+        finding: payload,
+      });
+    } finally {
+      db.close();
+    }
+  });
+
+  it('continues after an entirely unreadable finding page across database reopen', () => {
+    let db = createTestDb();
+    const directory = mkdtempSync(join(tmpdir(), 'scan-bad-page-'));
+    try {
+      const repo = createScanReportRepository(db);
+      const report = repo.begin('job', 'bad-page', policy);
+      const fixture = collection.findings[0];
+      if (!fixture) throw new Error('Missing finding fixture');
+      repo.finish(report.id, {
+        ...collection,
+        findings: Array.from({ length: 51 }, (_, i) => ({
+          ...fixture,
+          id: `f-${String(i).padStart(3, '0')}`,
+        })),
+      });
+      db.prepare(
+        "UPDATE scheduled_scan_findings SET finding = '{invalid' WHERE id < 'f-050'",
+      ).run();
+      const first = repo.unresolvedPage(report.id);
+      expect(first.items).toEqual([]);
+      expect(first.diagnostics).toHaveLength(50);
+      expect(first.nextCursor).toBe('f-049');
+      const file = join(directory, 'state.db');
+      writeFileSync(file, db.serialize());
+      db.close();
+      db = new Database(file);
+      const reopened = createScanReportRepository(db);
+      const next = reopened.unresolvedPage(report.id, first.nextCursor ?? undefined);
+      expect(next.items.map((item) => item.id)).toEqual(['f-050']);
+      expect(next.nextCursor).toBeNull();
+      expect(
+        db
+          .prepare("SELECT COUNT(*) AS n FROM scheduled_scan_findings WHERE finding = '{invalid'")
+          .get(),
+      ).toEqual({ n: 50 });
+      expect(db.pragma('foreign_key_check')).toEqual([]);
+    } finally {
+      db.close();
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
+  it('isolates unreadable decision rows, preserves their page cursor and refuses a repair', () => {
+    const db = createTestDb();
+    const repo = createScanReportRepository(db);
+    try {
+      const report = repo.begin('job', 'bad-decisions', policy);
+      repo.finish(report.id, collection);
+      const healthy = repo.triage({
+        reportId: report.id,
+        requestKey: 'healthy',
+        findingIds: ['stable-finding'],
+        action: 'defer',
+        actor: { type: 'human', userId: 'operator' },
+        reason: 'Keep the original decision',
+      });
+      for (let i = 0; i < 25; i++)
+        db.prepare(
+          'INSERT INTO scheduled_scan_triage(id,request_key,report_id,finding_ids,action,actor,reason,created_at) VALUES (?,?,?,?,?,?,?,?)',
+        ).run(
+          `bad-${i}`,
+          `bad-${i}`,
+          report.id,
+          i === 0 ? '{}' : '["stable-finding"]',
+          'select_repair',
+          i === 0 ? '{"type":"human","userId":"operator"}' : '{private-broken',
+          'Retained unreadable evidence',
+          new Date().toISOString(),
+        );
+      const page = repo.decisionPage(report.id);
+      expect(page.items).toEqual([]);
+      expect(page.diagnostics).toHaveLength(25);
+      expect(page.nextCursor).toBe('bad-0');
+      expect(
+        repo.decisionPage(report.id, page.nextCursor ?? undefined).items.map((item) => item.id),
+      ).toEqual([healthy.id]);
+      const create = vi.fn(() => 'never');
+      expect(() => repo.getDecision(report.id, 'bad-0')).toThrow(/unavailable/i);
+      expect(() => repo.launchRepair('bad-0', create)).toThrow(/unavailable/i);
+      expect(create).not.toHaveBeenCalled();
+      expect(db.prepare('SELECT COUNT(*) AS n FROM scheduled_scan_triage').get()).toEqual({
+        n: 26,
+      });
+      expect(db.prepare('SELECT COUNT(*) AS n FROM scheduled_scan_repairs').get()).toEqual({
+        n: 0,
+      });
+    } finally {
+      db.close();
+    }
+  });
+
   it('pages beyond 100 reports with stable ties and excludes newer insertions from continuation', () => {
     let db = createTestDb();
     const directory = mkdtempSync(join(tmpdir(), 'scan-history-page-'));

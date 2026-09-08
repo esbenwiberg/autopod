@@ -76,6 +76,7 @@ export function ScanReport() {
           previous
             ? {
                 ...previous,
+                diagnostics: [...(previous.diagnostics ?? []), ...(page.diagnostics ?? [])],
                 unresolved: [
                   ...previous.unresolved,
                   ...page.items.filter(
@@ -95,6 +96,7 @@ export function ScanReport() {
           previous
             ? {
                 ...previous,
+                diagnostics: [...(previous.diagnostics ?? []), ...(page.diagnostics ?? [])],
                 decisions: [
                   ...previous.decisions,
                   ...page.items.filter(
@@ -173,6 +175,10 @@ export function ScanReport() {
       if (owner === viewGeneration.current) setBusy(false);
     }
   }
+  const unavailableFindings = new Set(
+    detail?.diagnostics?.filter((item) => item.kind === 'finding').map((item) => item.recordId) ??
+      [],
+  );
   return (
     <main className="scan-report">
       <Link to="/scan-reports" className="back-link">
@@ -240,6 +246,19 @@ export function ScanReport() {
               </p>
             )}
           </section>
+          {!!detail.diagnostics?.length && (
+            <section className="scan-card" role="alert">
+              <h2>Some review records are unavailable</h2>
+              <p>
+                Loaded counts exclude these records. They remain stored and have not been resolved.
+              </p>
+              {detail.diagnostics.map((item) => (
+                <p key={`${item.kind}:${item.recordId}`}>
+                  <strong>{item.recordId}</strong> · {item.message}
+                </p>
+              ))}
+            </section>
+          )}
           <section className="scan-card">
             <h2>Unresolved findings ({detail.unresolved.length} loaded)</h2>
             <p>
@@ -250,6 +269,23 @@ export function ScanReport() {
               <output>
                 A decision is retained for retry: {pending.action.replaceAll('_', ' ')}.
               </output>
+            )}
+            {selected.some((id) => unavailableFindings.has(id)) && (
+              <button
+                type="button"
+                className="action-btn"
+                disabled={busy}
+                onClick={() => {
+                  localStorage.removeItem(storageKey);
+                  setPending(null);
+                  setSelected(selected.filter((id) => !unavailableFindings.has(id)));
+                  setMessage(
+                    'Unavailable selections removed from this local draft. Recorded decisions remain in history.',
+                  );
+                }}
+              >
+                Remove unavailable selections
+              </button>
             )}
             {detail.unresolved.map((finding) => (
               <label className="scan-finding" key={finding.id}>
@@ -308,7 +344,12 @@ export function ScanReport() {
                   type="button"
                   className="action-btn"
                   key={action}
-                  disabled={busy || !selected.length || !reason.trim()}
+                  disabled={
+                    busy ||
+                    !selected.length ||
+                    !reason.trim() ||
+                    selected.some((id) => unavailableFindings.has(id))
+                  }
                   onClick={() => void triage(action)}
                 >
                   {action === 'select_repair'
@@ -344,7 +385,9 @@ export function ScanReport() {
                     <button
                       type="button"
                       className="action-btn action-primary"
-                      disabled={busy}
+                      disabled={
+                        busy || decision.findingIds.some((id) => unavailableFindings.has(id))
+                      }
                       onClick={() => void repair(decision.id)}
                     >
                       Launch selected repair

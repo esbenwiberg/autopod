@@ -173,9 +173,33 @@ it('loads independent finding and decision pages while preserving a selected fin
     const path = String(url);
     requests.push(path);
     if (path.includes('/findings?'))
-      return new Response(JSON.stringify({ items: [finding('later')], nextCursor: null }));
+      return new Response(
+        JSON.stringify({
+          items: [finding('later')],
+          nextCursor: null,
+          diagnostics: [
+            {
+              kind: 'finding',
+              recordId: 'unreadable-finding',
+              message: 'Finding evidence unavailable',
+            },
+          ],
+        }),
+      );
     if (path.includes('/decisions?'))
-      return new Response(JSON.stringify({ items: [decision], nextCursor: null }));
+      return new Response(
+        JSON.stringify({
+          items: [decision],
+          nextCursor: null,
+          diagnostics: [
+            {
+              kind: 'decision',
+              recordId: 'unreadable-decision',
+              message: 'Decision evidence unavailable',
+            },
+          ],
+        }),
+      );
     return new Response(JSON.stringify(detail));
   });
   const container = document.createElement('div');
@@ -200,6 +224,9 @@ it('loads independent finding and decision pages while preserving a selected fin
     await click('Load more findings');
     await click('Load older decisions');
     expect(container.textContent).toContain('Unresolved findings (2 loaded)');
+    expect(container.textContent).toContain('unreadable-finding');
+    expect(container.textContent).toContain('unreadable-decision');
+    expect(container.textContent).toContain('Loaded counts exclude these records');
     const boxes = [...container.querySelectorAll('input[type="checkbox"]')] as HTMLInputElement[];
     expect(boxes.map((box) => box.checked)).toEqual([false, true]);
     expect(container.textContent).toContain('Earlier human decision');
@@ -274,6 +301,63 @@ it('never appends an old report page after navigation to another report', async 
     );
     expect(container.textContent).not.toContain('Old report finding');
     expect(container.textContent).toContain('Unresolved findings (0 loaded)');
+  } finally {
+    await act(async () => root.unmount());
+    container.remove();
+  }
+});
+
+it('keeps an unreadable retained selection visible but requires removing it before another decision', async () => {
+  localStorage.setItem(
+    'autopod-scan-triage:bad',
+    JSON.stringify({
+      requestKey: 'old-key',
+      action: 'select_repair',
+      findingIds: ['bad-finding'],
+      reason: 'Original reason',
+    }),
+  );
+  const fetch = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+    new Response(
+      JSON.stringify({
+        report: {
+          id: 'bad',
+          status: 'complete',
+          createdAt: 'today',
+          policy: { baseRef: 'main', headRef: 'work' },
+          collection: null,
+          judgment: { status: 'not_requested' },
+        },
+        unresolved: [],
+        decisions: [],
+        diagnostics: [
+          { kind: 'finding', recordId: 'bad-finding', message: 'Finding evidence unavailable' },
+        ],
+      }),
+    ),
+  );
+  const container = document.createElement('div');
+  document.body.append(container);
+  const root = createRoot(container);
+  try {
+    await act(async () =>
+      root.render(
+        <MemoryRouter initialEntries={['/scan-report/bad']}>
+          <Routes>
+            <Route path="/scan-report/:id" element={<ScanReport />} />
+          </Routes>
+        </MemoryRouter>,
+      ),
+    );
+    const button = (label: string) =>
+      [...container.querySelectorAll('button')].find((item) => item.textContent === label);
+    expect(container.textContent).toContain('bad-finding');
+    expect(container.querySelectorAll('input[type="checkbox"]')).toHaveLength(0);
+    expect(button('Record repair selection')?.disabled).toBe(true);
+    await act(async () => button('Remove unavailable selections')?.click());
+    expect(container.textContent).toContain('Recorded decisions remain in history');
+    expect(localStorage.getItem('autopod-scan-triage:bad')).toBeNull();
+    expect(fetch).toHaveBeenCalledTimes(1);
   } finally {
     await act(async () => root.unmount());
     container.remove();

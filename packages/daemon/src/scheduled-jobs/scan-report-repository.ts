@@ -3,6 +3,7 @@ import {
   AutopodError,
   type ScanDecisionPage,
   type ScanFindingPage,
+  type ScanRecordDiagnostic,
   type ScanReportPage,
   type ScanReportSummary,
   type ScanTriageDecision,
@@ -12,6 +13,13 @@ import {
   type ScheduledScanReport,
 } from '@autopod/shared';
 import type Database from 'better-sqlite3';
+import {
+  readScanDecision,
+  readScanFinding,
+  scanDecisionProjection,
+  scanFindingProjection,
+  scanRecordDiagnostic,
+} from './scan-record-reader.js';
 
 export type { ScanTriageDecision } from '@autopod/shared';
 export interface ScanReportRepository {
@@ -53,44 +61,32 @@ export function createScanReportRepository(db: Database.Database): ScanReportRep
       completedAt: row.completed_at as string | null,
     };
   };
-  const decision = (row: Record<string, unknown>): ScanTriageDecision => ({
-    id: row.id as string,
-    requestKey: row.request_key as string,
-    reportId: row.report_id as string,
-    findingIds: JSON.parse(row.finding_ids as string),
-    action: row.action as ScanTriageDecision['action'],
-    actor: JSON.parse(row.actor as string),
-    reason: row.reason as string,
-    createdAt: row.created_at as string,
-  });
+  const decision = readScanDecision;
   const unresolved = (reportId: string) => {
     const report = get(reportId);
     const rows = db
-      .prepare(`SELECT DISTINCT f.finding, f.disposition FROM scheduled_scan_findings f
+      .prepare(`SELECT DISTINCT ${scanFindingProjection} FROM scheduled_scan_findings f
       JOIN scheduled_scan_occurrences o ON o.finding_id = f.id JOIN scheduled_scan_reports r ON r.id = o.report_id
       WHERE r.job_id = ? AND f.disposition != 'resolved' AND (? IS NULL OR f.repository = ?) ORDER BY f.id LIMIT 1001`)
       .all(
         report.jobId,
         report.collection?.repository ?? null,
         report.collection?.repository ?? null,
-      ) as Array<{ finding: string; disposition: 'unresolved' | 'deferred' }>;
+      ) as Array<{ id: string; finding: string | null; disposition: 'unresolved' | 'deferred' }>;
     if (rows.length > 1000)
       throw new AutopodError(
         'Triage scope exceeds 1000 findings; paginate or narrow the job',
         'SCAN_SCOPE_TOO_LARGE',
         409,
       );
-    return rows.map((row) => ({
-      ...(JSON.parse(row.finding) as ScheduledScanFinding),
-      disposition: row.disposition,
-    }));
+    return rows.map(readScanFinding);
   };
   const selectedUnresolved = (reportId: string, ids: string[]): ScanFindingPage['items'] => {
     if (!ids.length || ids.length > 100 || ids.some((id) => !id || id.length > 200))
       throw new AutopodError('Select 1 to 100 bounded finding IDs', 'INVALID_INPUT', 400);
     const report = get(reportId);
     const rows = db
-      .prepare(`SELECT f.finding, f.disposition FROM scheduled_scan_findings f
+      .prepare(`SELECT ${scanFindingProjection} FROM scheduled_scan_findings f
       WHERE f.disposition != 'resolved' AND f.id IN (${ids.map(() => '?').join(',')})
       AND (? IS NULL OR f.repository = ?)
       AND EXISTS (SELECT 1 FROM scheduled_scan_occurrences o JOIN scheduled_scan_reports r ON r.id = o.report_id WHERE o.finding_id = f.id AND r.job_id = ?)`)
@@ -99,17 +95,14 @@ export function createScanReportRepository(db: Database.Database): ScanReportRep
         report.collection?.repository ?? null,
         report.collection?.repository ?? null,
         report.jobId,
-      ) as Array<{ finding: string; disposition: 'unresolved' | 'deferred' }>;
-    return rows.map((row) => ({
-      ...(JSON.parse(row.finding) as ScheduledScanFinding),
-      disposition: row.disposition,
-    }));
+      ) as Array<{ id: string; finding: string | null; disposition: 'unresolved' | 'deferred' }>;
+    return rows.map(readScanFinding);
   };
   const getDecision = (reportId: string, id: string): ScanDecisionPage['items'][number] => {
     get(reportId);
     const row = db
       .prepare(
-        'SELECT t.*, r.pod_id AS repair_pod_id FROM scheduled_scan_triage t LEFT JOIN scheduled_scan_repairs r ON r.selection_id = t.id WHERE t.report_id = ? AND t.id = ?',
+        `SELECT ${scanDecisionProjection}, r.pod_id AS repair_pod_id FROM scheduled_scan_triage t LEFT JOIN scheduled_scan_repairs r ON r.selection_id = t.id WHERE t.report_id = ? AND t.id = ?`,
       )
       .get(reportId, id) as Record<string, unknown> | undefined;
     if (!row)
@@ -144,18 +137,25 @@ export function createScanReportRepository(db: Database.Database): ScanReportRep
         );
       const rows = db
         .prepare(
-          `SELECT f.id, f.finding, f.disposition FROM scheduled_scan_findings f WHERE f.disposition != 'resolved' AND ${scope} AND (? IS NULL OR f.id > ?) ORDER BY f.id LIMIT 51`,
+          `SELECT ${scanFindingProjection} FROM scheduled_scan_findings f WHERE f.disposition != 'resolved' AND ${scope} AND (? IS NULL OR f.id > ?) ORDER BY f.id LIMIT 51`,
         )
         .all(...bindings, after ?? null, after ?? null) as Array<{
         id: string;
-        finding: string;
+        finding: string | null;
         disposition: 'unresolved' | 'deferred';
       }>;
-      const items = rows.slice(0, 50).map((row) => ({
-        ...(JSON.parse(row.finding) as ScheduledScanFinding),
-        disposition: row.disposition,
-      }));
-      return { items, nextCursor: rows.length > 50 ? (items.at(-1)?.id ?? null) : null };
+      const diagnostics: ScanRecordDiagnostic[] = [];
+      const items: ScanFindingPage['items'] = [];
+      for (const row of rows.slice(0, 50)) {
+        try {
+          items.push(readScanFinding(row));
+        } catch (error) {
+          if (!(error instanceof AutopodError) || error.code !== 'SCAN_RECONCILIATION_REQUIRED')
+            throw error;
+          diagnostics.push(scanRecordDiagnostic('finding', row.id));
+        }
+      }
+      return { items, diagnostics, nextCursor: rows.length > 50 ? (rows[49]?.id ?? null) : null };
     },
     decisionPage(reportId, before) {
       get(reportId);
@@ -172,15 +172,27 @@ export function createScanReportRepository(db: Database.Database): ScanReportRep
         );
       const rows = db
         .prepare(
-          'SELECT t.*, r.pod_id AS repair_pod_id FROM scheduled_scan_triage t LEFT JOIN scheduled_scan_repairs r ON r.selection_id = t.id WHERE t.report_id = ? AND (? IS NULL OR t.rowid < ?) ORDER BY t.rowid DESC LIMIT 26',
+          `SELECT ${scanDecisionProjection}, r.pod_id AS repair_pod_id FROM scheduled_scan_triage t LEFT JOIN scheduled_scan_repairs r ON r.selection_id = t.id WHERE t.report_id = ? AND (? IS NULL OR t.rowid < ?) ORDER BY t.rowid DESC LIMIT 26`,
         )
         .all(reportId, anchor?.rowid ?? null, anchor?.rowid ?? null) as Array<
         Record<string, unknown>
       >;
-      const items = rows
-        .slice(0, 25)
-        .map((row) => ({ ...decision(row), repairPodId: row.repair_pod_id as string | null }));
-      return { items, nextCursor: rows.length > 25 ? (items.at(-1)?.id ?? null) : null };
+      const diagnostics: ScanRecordDiagnostic[] = [];
+      const items: ScanDecisionPage['items'] = [];
+      for (const row of rows.slice(0, 25)) {
+        try {
+          items.push({ ...decision(row), repairPodId: row.repair_pod_id as string | null });
+        } catch (error) {
+          if (!(error instanceof AutopodError) || error.code !== 'SCAN_RECONCILIATION_REQUIRED')
+            throw error;
+          diagnostics.push(scanRecordDiagnostic('decision', row.id as string));
+        }
+      }
+      return {
+        items,
+        diagnostics,
+        nextCursor: rows.length > 25 ? ((rows[24]?.id as string | undefined) ?? null) : null,
+      };
     },
     claim(id, owner) {
       return (
@@ -195,7 +207,7 @@ export function createScanReportRepository(db: Database.Database): ScanReportRep
     decisions(reportId) {
       get(reportId);
       const rows = db
-        .prepare(`SELECT t.*, r.pod_id AS repair_pod_id FROM scheduled_scan_triage t
+        .prepare(`SELECT ${scanDecisionProjection}, r.pod_id AS repair_pod_id FROM scheduled_scan_triage t
         LEFT JOIN scheduled_scan_repairs r ON r.selection_id = t.id
         WHERE t.report_id = ? ORDER BY t.created_at, t.id LIMIT 1000`)
         .all(reportId) as Array<Record<string, unknown>>;
@@ -412,7 +424,9 @@ export function createScanReportRepository(db: Database.Database): ScanReportRep
       if (!ids.length || ids.length > 100)
         throw new AutopodError('Select 1 to 100 findings', 'INVALID_INPUT', 400);
       const previous = db
-        .prepare('SELECT * FROM scheduled_scan_triage WHERE request_key = ?')
+        .prepare(
+          `SELECT ${scanDecisionProjection} FROM scheduled_scan_triage t WHERE t.request_key = ?`,
+        )
         .get(input.requestKey) as Record<string, unknown> | undefined;
       if (previous) {
         const recorded = decision(previous);
@@ -466,7 +480,7 @@ export function createScanReportRepository(db: Database.Database): ScanReportRep
     launchRepair: db.transaction(
       (selectionId: string, create: (decision: ScanTriageDecision) => string) => {
         const row = db
-          .prepare('SELECT * FROM scheduled_scan_triage WHERE id = ?')
+          .prepare(`SELECT ${scanDecisionProjection} FROM scheduled_scan_triage t WHERE t.id = ?`)
           .get(selectionId) as Record<string, unknown> | undefined;
         if (!row || row.action !== 'select_repair')
           throw new AutopodError(

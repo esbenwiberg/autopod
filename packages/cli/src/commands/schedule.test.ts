@@ -63,7 +63,19 @@ describe('schedule command', () => {
       expect(req.method).toBe('GET');
       requests.push(req.url ?? '');
       res.setHeader('content-type', 'application/json');
-      res.end(JSON.stringify({ items: [], nextCursor: null }));
+      res.end(
+        JSON.stringify({
+          items: [],
+          nextCursor: 'stored-row-cursor',
+          diagnostics: [
+            {
+              kind: 'finding',
+              recordId: 'unreadable-row',
+              message: 'Finding evidence unavailable',
+            },
+          ],
+        }),
+      );
     });
     await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
     const address = server.address();
@@ -72,7 +84,7 @@ describe('schedule command', () => {
       baseUrl: `http://127.0.0.1:${address.port}`,
       getToken: async () => 'fixture',
     });
-    vi.spyOn(console, 'log').mockImplementation(() => {});
+    const output = vi.spyOn(console, 'log').mockImplementation(() => {});
     try {
       await createProgram(client).parseAsync(['node', 'ap', 'schedule', 'review', 'report']);
       await createProgram(client).parseAsync([
@@ -93,6 +105,12 @@ describe('schedule command', () => {
         '--before',
         'decision',
       ]);
+      expect(output.mock.calls).toHaveLength(3);
+      for (const call of output.mock.calls)
+        expect(JSON.parse(String(call[0]))).toMatchObject({
+          nextCursor: 'stored-row-cursor',
+          diagnostics: [{ recordId: 'unreadable-row', message: 'Finding evidence unavailable' }],
+        });
       expect(requests).toEqual([
         '/scan-reports/report/review',
         '/scan-reports/report/findings?after=finding',

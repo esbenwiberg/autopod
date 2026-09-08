@@ -4471,6 +4471,68 @@ describe('PodManager', () => {
         });
         expect(more.statusCode).toBe(200);
         expect(more.json().items[0].id).toBe('bulk-0050');
+        ctx.db
+          .prepare(
+            "UPDATE scheduled_scan_findings SET finding = '{unreadable-private' WHERE id = 'bulk-0050'",
+          )
+          .run();
+        const malformedSelection = '00000000-0000-4000-8000-000000000074';
+        ctx.db
+          .prepare(
+            'INSERT INTO scheduled_scan_triage(id, request_key, report_id, finding_ids, action, actor, reason, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+          )
+          .run(
+            malformedSelection,
+            'unreadable-decision',
+            report.id,
+            '["selected"]',
+            'select_repair',
+            '{unreadable-private',
+            'Original decision retained',
+            new Date().toISOString(),
+          );
+        const damagedPage = await app.inject({
+          method: 'GET',
+          url: `/scan-reports/${report.id}/findings?after=bulk-0049`,
+          headers,
+        });
+        expect(damagedPage.statusCode).toBe(200);
+        expect(damagedPage.json().items).toHaveLength(49);
+        expect(damagedPage.json().diagnostics[0]).toMatchObject({
+          kind: 'finding',
+          recordId: 'bulk-0050',
+        });
+        const damagedReview = await app.inject({
+          method: 'GET',
+          url: `/scan-reports/${report.id}/review`,
+          headers,
+        });
+        expect(damagedReview.statusCode).toBe(200);
+        expect(damagedReview.json().decisions).toHaveLength(24);
+        expect(damagedReview.json().diagnostics[0]).toMatchObject({
+          kind: 'decision',
+          recordId: malformedSelection,
+        });
+        expect(damagedReview.body).not.toContain('unreadable-private');
+        const badTriage = await app.inject({
+          method: 'POST',
+          url: `/scan-reports/${report.id}/triage`,
+          headers,
+          payload: { ...input, requestKey: 'bad-finding', findingIds: ['bulk-0050'] },
+        });
+        expect(badTriage.statusCode).toBe(409);
+        const badRepair = await app.inject({
+          method: 'POST',
+          url: `/scan-reports/${report.id}/repairs`,
+          headers,
+          payload: { selectionId: malformedSelection },
+        });
+        expect(badRepair.statusCode).toBe(409);
+        expect(ctx.enqueuedSessions).toEqual([]);
+        expect(ctx.db.prepare('SELECT COUNT(*) AS n FROM scheduled_scan_repairs').get()).toEqual({
+          n: 0,
+        });
+
         const denied = await app.inject({
           method: 'POST',
           url: `/scan-reports/${report.id}/triage`,
