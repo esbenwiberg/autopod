@@ -1288,6 +1288,143 @@ describe('PodManager', () => {
       await app.close();
     }
   });
+  it.each([true, false])(
+    'rechecks an early sandbox cooldown wake with durable ledger=%s',
+    async (durable) => {
+      const ctx = createTestContext(undefined, {
+        executionTarget: 'sandbox',
+        warmImageTag: 'registry.azurecr.io/startup:latest',
+      });
+      if (!durable) ctx.podRepo.sandboxStartupRetries = undefined;
+      ctx.deps.sandboxInfrastructureRetryBackoffMs = [50];
+      ctx.deps.requeueSessionAfterCurrent = vi.fn();
+      vi.mocked(ctx.containerManager.spawn).mockRejectedValue(
+        new SandboxInfrastructureError(403, {}),
+      );
+      const manager = createPodManager(ctx.deps);
+      const pod = manager.createSession(
+        { profileName: 'test-profile', task: 'Wait for the persisted startup deadline' },
+        'operator',
+      );
+      vi.useFakeTimers({ toFake: ['Date'] });
+      let wakes = 0;
+      ctx.deps.sandboxInfrastructureRecoveryDelay = vi.fn(async (delay) => {
+        expect(ctx.containerManager.spawn).toHaveBeenCalledOnce();
+        vi.setSystemTime(Date.now() + delay - (wakes++ === 0 ? 1 : 0));
+      });
+      try {
+        await manager.processPod(pod.id);
+        const deadline = durable
+          ? Date.now() + 50
+          : Date.parse(ctx.podRepo.getOrThrow(pod.id).infrastructureFailure?.retryNotBefore ?? '');
+        await manager.processPod(pod.id);
+        expect(wakes).toBe(2);
+        expect(Date.now()).toBe(deadline);
+        expect(ctx.containerManager.spawn).toHaveBeenCalledTimes(2);
+        expect(ctx.runtime.spawn).not.toHaveBeenCalled();
+        if (durable)
+          expect(ctx.podRepo.sandboxStartupRetries?.state(pod.id)).toMatchObject({
+            admissionCount: 2,
+            executedCount: 2,
+            transientRetryCount: 1,
+          });
+      } finally {
+        vi.useRealTimers();
+      }
+    },
+  );
+
+  it.each([true, false])(
+    'bounds a stalled sandbox cooldown clock with durable ledger=%s',
+    async (durable) => {
+      const ctx = createTestContext(undefined, {
+        executionTarget: 'sandbox',
+        warmImageTag: 'registry.azurecr.io/startup:latest',
+      });
+      if (!durable) ctx.podRepo.sandboxStartupRetries = undefined;
+      ctx.deps.sandboxInfrastructureRetryBackoffMs = [50];
+      ctx.deps.requeueSessionAfterCurrent = vi.fn();
+      vi.mocked(ctx.containerManager.spawn).mockRejectedValue(
+        new SandboxInfrastructureError(403, {}),
+      );
+      ctx.deps.sandboxInfrastructureRecoveryDelay = vi.fn(async () => {});
+      const manager = createPodManager(ctx.deps);
+      const pod = manager.createSession(
+        { profileName: 'test-profile', task: 'Do not allocate before the deadline' },
+        'operator',
+      );
+      vi.useFakeTimers({ toFake: ['Date'] });
+      try {
+        await manager.processPod(pod.id);
+        await manager.processPod(pod.id);
+        expect(ctx.deps.sandboxInfrastructureRecoveryDelay).toHaveBeenCalledTimes(3);
+        expect(ctx.containerManager.spawn).toHaveBeenCalledOnce();
+        expect(ctx.runtime.spawn).not.toHaveBeenCalled();
+        expect(ctx.podRepo.getOrThrow(pod.id)).toMatchObject({
+          status: 'failed',
+          failureReason: expect.stringContaining('reconcile the clock'),
+        });
+        if (durable)
+          expect(ctx.podRepo.sandboxStartupRetries?.state(pod.id)).toMatchObject({
+            admissionCount: 2,
+            executedCount: 1,
+            latest: { outcome: 'cancelled', startedAt: null, measuredDurationMs: null },
+          });
+      } finally {
+        vi.useRealTimers();
+      }
+    },
+  );
+
+  it.each([true, false])(
+    'retains a new pending decision during sandbox cooldown with durable ledger=%s',
+    async (durable) => {
+      const ctx = createTestContext(undefined, {
+        executionTarget: 'sandbox',
+        warmImageTag: 'registry.azurecr.io/startup:latest',
+      });
+      if (!durable) ctx.podRepo.sandboxStartupRetries = undefined;
+      ctx.deps.sandboxInfrastructureRetryBackoffMs = [50];
+      ctx.deps.requeueSessionAfterCurrent = vi.fn();
+      vi.mocked(ctx.containerManager.spawn).mockRejectedValue(
+        new SandboxInfrastructureError(403, {}),
+      );
+      const manager = createPodManager(ctx.deps);
+      const pod = manager.createSession(
+        { profileName: 'test-profile', task: 'Preserve the new human decision' },
+        'operator',
+      );
+      let preserved: ReturnType<typeof ctx.podRepo.getOrThrow> | undefined;
+      ctx.deps.sandboxInfrastructureRecoveryDelay = vi.fn(async () => {
+        ctx.podRepo.update(pod.id, {
+          status: 'awaiting_input',
+          pendingEscalation: {
+            id: 'new-decision',
+            podId: pod.id,
+            type: 'ask_human',
+            payload: { question: 'New decision during cooldown' },
+            timestamp: new Date().toISOString(),
+            response: null,
+          },
+        });
+        preserved = ctx.podRepo.getOrThrow(pod.id);
+      });
+      await manager.processPod(pod.id);
+      await manager.processPod(pod.id);
+      expect(preserved).toBeDefined();
+      expect(ctx.podRepo.getOrThrow(pod.id)).toEqual(preserved);
+      expect(ctx.deps.sandboxInfrastructureRecoveryDelay).toHaveBeenCalledOnce();
+      expect(ctx.containerManager.spawn).toHaveBeenCalledOnce();
+      expect(ctx.runtime.spawn).not.toHaveBeenCalled();
+      if (durable)
+        expect(ctx.podRepo.sandboxStartupRetries?.state(pod.id)).toMatchObject({
+          admissionCount: 2,
+          executedCount: 1,
+          latest: { outcome: 'unknown', startedAt: null, measuredDurationMs: null },
+        });
+    },
+  );
+
   it('retains consumed sandbox cooldown admission when a newer lifecycle interrupts before allocation', async () => {
     const ctx = createTestContext(undefined, {
       executionTarget: 'sandbox',

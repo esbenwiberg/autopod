@@ -92,7 +92,8 @@
         "checkpoint-63.md",
         "checkpoint-65.md",
         "checkpoint-72.md",
-        "checkpoint-73.md"
+        "checkpoint-73.md",
+        "checkpoint-77.md"
       ],
       "prerequisites": [],
       "remaining": "Normal replies are atomic, retained in bounded recovery context, and fence older completion events. New unanswered decisions remain actionable. Attached MCP delivery acknowledgment, delayed concurrent stream ordering, other response boundaries, historical orphan questions and broader finalization side effects remain. New worker/cycle and validation admission now preserve pending decisions, including older unresolved cycles in the current generation. Historical missing payload recovery and stream/MCP delivery acknowledgment remain. Codex now observes summary events before Spawn/Resume launch and disposes each invocation listener. This closes the local launch/stream attachment race, not durable delivery acknowledgment across all runtimes or daemon restart. Concurrent interactive completions now coalesce in process, conflicting promotion/generation requests fail closed, and current source/lifecycle/decision ownership is checked across push and container release boundaries. This is not durable cross-process idempotency, cancellation of already-dispatched external operations, or complete post-completion side-effect accounting."
@@ -600,7 +601,8 @@
         "checkpoint-55.md",
         "checkpoint-66.md",
         "checkpoint-68.md",
-        "checkpoint-72.md"
+        "checkpoint-72.md",
+        "checkpoint-77.md"
       ],
       "prerequisites": [],
       "remaining": "Actual validation repeat admission requires known changed source/contract/commands/environment/implementation or one-use authenticated human authorization. Agent-rework admission and explicit provider-rebinding reconciliation remain; unavailable identity never proves change. Checkpoint 24 adds durable sandbox startup retries, legacy allowance lower bounds, stage-scoped one-use decisions, measured startup time and local operator proof. Provider retries after first runtime event, repository rework, complete historical reconstruction, phase billing, native interaction and live acceptance remain."
@@ -1009,7 +1011,8 @@
       "evidence": [
         "receipts/registry-preflight-red.txt",
         "receipts/registry-preflight-green.txt",
-        "receipts/config-capability-tests.txt"
+        "receipts/config-capability-tests.txt",
+        "checkpoint-77.md"
       ],
       "prerequisites": []
     },
@@ -2059,7 +2062,7 @@
       "prerequisites": []
     }
   ],
-  "lastCheckpoint": "checkpoint-76.md",
+  "lastCheckpoint": "checkpoint-77.md",
   "migrationLineage": {
     "managedBaseline": "142-152; exact bytes from tracking commit cba763ba0bb3d65cb4c055e00033016ba1d5c646",
     "nativeCurrent": "164-176; byte-preserving move of unpublished native 151-163",

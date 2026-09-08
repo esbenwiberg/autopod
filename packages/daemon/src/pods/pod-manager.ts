@@ -8216,6 +8216,15 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         emitActivityStatus(podId, message);
       }
 
+      const assertStartupCurrent = (): void => {
+        const current = podRepo.getOrThrow(podId);
+        if (
+          current.lifecycleGeneration !== lifecycleGeneration ||
+          (current.status !== 'queued' && current.status !== 'handoff')
+        )
+          throw new AgentContinuationSupersededError();
+      };
+
       try {
         const retryNotBefore = pod.infrastructureFailure?.retryNotBefore;
         if (
@@ -8224,12 +8233,14 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           pod.infrastructureFailure.recoveryDisposition === 'automatic_retry_scheduled' &&
           retryNotBefore
         ) {
-          const delayMs = Math.max(0, new Date(retryNotBefore).getTime() - Date.now());
-          if (delayMs > 0) {
+          if (Date.parse(retryNotBefore) > Date.now())
             emitStatus('Waiting for Azure sandbox recovery cooldown…');
-            await (deps.sandboxInfrastructureRecoveryDelay ?? sleep)(delayMs);
-          }
-          if (!ownsLifecycle(podId, lifecycleGeneration, null)) return;
+          await waitForRetryBackoff(
+            retryNotBefore,
+            deps.sandboxInfrastructureRecoveryDelay ?? sleep,
+            assertStartupCurrent,
+          );
+          assertStartupCurrent();
           pod = podRepo.getOrThrow(podId);
           if (pod.status !== 'queued') return;
         }
@@ -8584,12 +8595,14 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
             [...(deps.sandboxInfrastructureRetryBackoffMs ?? [30_000])],
           );
           startupAdmission = { id: admission.id, started: null };
-          const waitMs = Math.max(0, Date.parse(admission.notBefore) - Date.now());
-          if (waitMs > 0) {
+          if (Date.parse(admission.notBefore) > Date.now())
             emitStatus('Waiting for task-wide sandbox startup cooldown…');
-            await (deps.sandboxInfrastructureRecoveryDelay ?? sleep)(waitMs);
-          }
-          if (!ownsLifecycle(podId, lifecycleGeneration, null)) return;
+          await waitForRetryBackoff(
+            admission.notBefore,
+            deps.sandboxInfrastructureRecoveryDelay ?? sleep,
+            assertStartupCurrent,
+          );
+          assertStartupCurrent();
           ledger.start(admission.id);
           startupAdmission.started = performance.now();
         }
