@@ -19312,6 +19312,151 @@ describe('PodManager', () => {
       expect(result.phaseTokenUsage?.agent_rework_1).toBeUndefined();
     });
   });
+  describe('validation admission lifecycle ownership', () => {
+    it.each(['trigger', 'revalidate'] as const)(
+      '%s cancels an admitted retry when its container changes during backoff',
+      async (entry) => {
+        const ctx = createTestContext();
+        ctx.deps.validationInfrastructureRetryBackoffMs = [10000];
+        const manager = createPodManager(ctx.deps);
+        const pod = manager.createSession(
+          { profileName: 'test-profile', task: 'Fence persisted retry delay' },
+          'user-1',
+        );
+        ctx.podRepo.update(pod.id, {
+          status: entry === 'trigger' ? 'running' : 'failed',
+          containerId: 'ctr-1',
+          worktreePath: '/tmp/wt',
+        });
+        vi.mocked(ctx.validationEngine.validate)
+          .mockResolvedValueOnce(validationInfrastructureFailureResult())
+          .mockResolvedValueOnce(makeValidationResult());
+        let waited = false;
+        vi.mocked(sleep).mockImplementation(async (delay) => {
+          if (typeof delay === 'number' && delay > 9000) {
+            waited = true;
+            ctx.podRepo.update(pod.id, {
+              status: 'running',
+              containerId: 'replacement-container',
+              failureReason: 'replacement-owned-reason',
+            });
+          }
+        });
+        try {
+          if (entry === 'trigger') await manager.triggerValidation(pod.id);
+          else await manager.revalidateSession(pod.id, { force: true });
+          expect(waited).toBe(true);
+          expect(ctx.validationEngine.validate).toHaveBeenCalledTimes(1);
+          expect(ctx.podRepo.taskRetries?.state(pod.id)).toMatchObject({
+            admissionCount: 2,
+            executedCount: 1,
+            latest: { outcome: 'cancelled', startedAt: null, measuredDurationMs: null },
+          });
+          expect(manager.getSession(pod.id)).toMatchObject({
+            status: 'running',
+            containerId: 'replacement-container',
+            failureReason: 'replacement-owned-reason',
+          });
+          expect(ctx.containerManager.stop).not.toHaveBeenCalled();
+        } finally {
+          vi.mocked(sleep).mockImplementation(() => Promise.resolve());
+        }
+      },
+    );
+    it.each([
+      ['trigger', false],
+      ['trigger', true],
+      ['revalidate', false],
+      ['revalidate', true],
+    ] as const)(
+      '%s does not start checks after replacement during retry identity capture (reject=%s)',
+      async (entry, rejectCapture) => {
+        const ctx = createTestContext();
+        const capture = ctx.deps.captureRetryIdentity;
+        if (!capture) throw new Error('Missing retry identity fixture');
+        vi.spyOn(ctx.eventBus, 'emit');
+        const manager = createPodManager(ctx.deps);
+        const pod = manager.createSession(
+          { profileName: 'test-profile', task: 'Fence validation admission' },
+          'user-1',
+        );
+        ctx.podRepo.update(pod.id, {
+          status: entry === 'trigger' ? 'running' : 'failed',
+          containerId: 'ctr-1',
+          worktreePath: '/tmp/wt',
+        });
+        ctx.deps.captureRetryIdentity = async (config) => {
+          const identity = await capture(config);
+          ctx.podRepo.update(pod.id, {
+            status: 'running',
+            containerId: 'replacement-container',
+            failureReason: 'replacement-owned-reason',
+          });
+          if (rejectCapture) throw new Error('superseded identity probe failed');
+          return identity;
+        };
+        if (entry === 'trigger') await manager.triggerValidation(pod.id);
+        else await manager.revalidateSession(pod.id, { force: true });
+        expect(ctx.validationEngine.validate).not.toHaveBeenCalled();
+        expect(ctx.podRepo.taskRetries?.state(pod.id).admissionCount).toBe(0);
+        expect(manager.getSession(pod.id)).toMatchObject({
+          status: 'running',
+          containerId: 'replacement-container',
+          failureReason: 'replacement-owned-reason',
+        });
+        expect(ctx.validationRepo.getForSession(pod.id)).toHaveLength(0);
+        expect(ctx.containerManager.stop).not.toHaveBeenCalled();
+        expect(ctx.containerManager.kill).not.toHaveBeenCalled();
+      },
+    );
+
+    it.each(['trigger', 'revalidate'] as const)(
+      '%s retains the old executed outcome without publishing into a replacement',
+      async (entry) => {
+        const ctx = createTestContext();
+        vi.spyOn(ctx.eventBus, 'emit');
+        const manager = createPodManager(ctx.deps);
+        const pod = manager.createSession(
+          { profileName: 'test-profile', task: 'Fence late validation result' },
+          'user-1',
+        );
+        ctx.podRepo.update(pod.id, {
+          status: entry === 'trigger' ? 'running' : 'failed',
+          containerId: 'ctr-1',
+          worktreePath: '/tmp/wt',
+        });
+        vi.mocked(ctx.validationEngine.validate).mockImplementationOnce(
+          async (_config, onProgress, _signal, callbacks) => {
+            ctx.podRepo.incrementLifecycleGeneration(pod.id);
+            ctx.podRepo.update(pod.id, {
+              status: 'running',
+              containerId: 'replacement-container',
+              failureReason: 'replacement-owned-reason',
+            });
+            vi.mocked(ctx.eventBus.emit).mockClear();
+            onProgress?.('superseded progress');
+            callbacks?.onPhaseStarted?.('test');
+            callbacks?.onPhaseCompleted?.('test', 'pass', { status: 'pass', duration: 1 });
+            return makeValidationResult();
+          },
+        );
+        if (entry === 'trigger') await manager.triggerValidation(pod.id);
+        else await manager.revalidateSession(pod.id, { force: true });
+        expect(manager.getSession(pod.id)).toMatchObject({
+          status: 'running',
+          containerId: 'replacement-container',
+          failureReason: 'replacement-owned-reason',
+        });
+        expect(ctx.podRepo.taskRetries?.state(pod.id)).toMatchObject({
+          executedCount: 1,
+          latest: { outcome: 'pass' },
+        });
+        expect(ctx.validationRepo.getForSession(pod.id)).toHaveLength(0);
+        expect(ctx.eventBus.emit).not.toHaveBeenCalled();
+        expect(ctx.containerManager.stop).not.toHaveBeenCalled();
+      },
+    );
+  });
 });
 
 // ---------------------------------------------------------------------------

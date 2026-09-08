@@ -256,6 +256,7 @@ import {
 } from './state-machine.js';
 import { generateSystemInstructions } from './system-instructions-generator.js';
 import { TaskRetryBlockedError } from './task-retry-ledger.js';
+import { ValidationSupersededError, captureValidationOwnership } from './validation-ownership.js';
 import type { ValidationRepository } from './validation-repository.js';
 import type { WorkspaceCheckpointController } from './workspace-checkpoint-controller.js';
 import {
@@ -7161,9 +7162,10 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
   async function recordValidationProvenance(
     config: Parameters<ValidationEngine['validate']>[0],
     purpose: 'validation' | 'review' = 'validation',
+    assertCurrent?: () => Pod,
   ): Promise<void> {
     if (!podRepo.executionProvenance) return;
-    const pod = podRepo.getOrThrow(config.podId);
+    const pod = assertCurrent?.() ?? podRepo.getOrThrow(config.podId);
     const profile = resolveEffectiveBoundProfile(pod);
     const skips = new Set(config.skipPhases ?? []);
     const provenance = await inspectExecutionPreflight(
@@ -7191,6 +7193,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
       },
       purpose,
     );
+    if (assertCurrent) resolveEffectiveBoundProfile(assertCurrent());
     provenance.contractHash = createHash('sha256')
       .update(JSON.stringify(config.contract ?? null))
       .digest('hex');
@@ -7202,13 +7205,26 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
       );
   }
 
+  function ownValidation(expectedPod: Pod, validationController: AbortController) {
+    return captureValidationOwnership(expectedPod, {
+      readCurrent: () => podRepo.getOrThrow(expectedPod.id),
+      isCurrentInvocation: () =>
+        validationAbortControllers.get(expectedPod.id) === validationController,
+      hasPendingDecision: () =>
+        podRepo.hasUnansweredDecision?.(expectedPod.id) ??
+        Boolean(podRepo.getOrThrow(expectedPod.id).pendingEscalation),
+    });
+  }
+
   async function validateWithInfrastructureRetries(
     validationConfig: Parameters<ValidationEngine['validate']>[0],
     validationController: AbortController,
     callbacks: Parameters<ValidationEngine['validate']>[3],
     logMessage: string,
+    ownership: ReturnType<typeof captureValidationOwnership>,
   ): Promise<ValidationResult> {
     const { podId, attempt } = validationConfig;
+    ownership.assertCurrent();
     const cm = containerManagerFactory.get(
       validationConfig.executionTarget ?? podRepo.getOrThrow(podId).executionTarget,
     );
@@ -7220,68 +7236,90 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
     const infrastructureBackoffs = deps.validationInfrastructureRetryBackoffMs ?? [1_000, 5_000];
     const retryLedger = podRepo.taskRetries;
     const runValidation = async (): Promise<ValidationResult> => {
-      const pod = podRepo.getOrThrow(podId);
-      await recordValidationProvenance(validationConfig);
-      const identity = retryLedger
-        ? await (deps.captureRetryIdentity?.(validationConfig) ??
-            captureValidationRetryIdentity(cm, validationConfig))
-        : null;
-      const bindingHash = createHash('sha256')
-        .update(
-          JSON.stringify({
-            runtime: pod.runtime,
-            model: pod.model,
-            provider: pod.providerIdSnapshot,
-            account: pod.providerAccountIdSnapshot,
-            reviewerModel: validationConfig.reviewerModel ?? null,
-            reviewerProvider: validationConfig.reviewerProvider ?? null,
-          }),
-        )
-        .digest('hex');
-      const admission =
-        retryLedger && identity
-          ? retryLedger.admit(podId, pod.lifecycleGeneration, identity, bindingHash, [
-              ...infrastructureBackoffs,
-            ])
-          : null;
-      if (admission && retryLedger) {
-        try {
-          const waitMs = Math.max(0, Date.parse(admission.notBefore) - Date.now());
-          if (waitMs > 0) await sleep(waitMs);
-          if (validationController.signal.aborted)
-            throw new TaskRetryBlockedError('Validation admission cancelled before execution');
-          retryLedger.start(admission.id);
-        } catch (err) {
-          retryLedger.finish(admission.id, 'cancelled', null);
-          throw err;
-        }
-      }
-      const started = performance.now();
-      let result: ValidationResult;
       try {
-        result = await validationEngine.validate(
-          validationConfig,
-          (phase) => emitActivityStatus(podId, phase),
-          validationController.signal,
-          callbacks,
-        );
-      } catch (validateErr) {
-        logger.error({ err: validateErr, podId, attempt }, logMessage);
-        result = makeUnexpectedValidationFailureResult(podId, attempt, validateErr);
+        const pod = ownership.assertCurrent();
+        await recordValidationProvenance(validationConfig, 'validation', ownership.assertCurrent);
+        const identity = retryLedger
+          ? await (deps.captureRetryIdentity?.(validationConfig) ??
+              captureValidationRetryIdentity(cm, validationConfig))
+          : null;
+        resolveEffectiveBoundProfile(ownership.assertCurrent());
+        const bindingHash = createHash('sha256')
+          .update(
+            JSON.stringify({
+              runtime: pod.runtime,
+              model: pod.model,
+              provider: pod.providerIdSnapshot,
+              account: pod.providerAccountIdSnapshot,
+              reviewerModel: validationConfig.reviewerModel ?? null,
+              reviewerProvider: validationConfig.reviewerProvider ?? null,
+            }),
+          )
+          .digest('hex');
+        const admission =
+          retryLedger && identity
+            ? retryLedger.admit(podId, pod.lifecycleGeneration, identity, bindingHash, [
+                ...infrastructureBackoffs,
+              ])
+            : null;
+        if (admission && retryLedger) {
+          try {
+            const waitMs = Math.max(0, Date.parse(admission.notBefore) - Date.now());
+            if (waitMs > 0) await sleep(waitMs);
+            resolveEffectiveBoundProfile(ownership.assertCurrent());
+            if (validationController.signal.aborted)
+              throw new TaskRetryBlockedError('Validation admission cancelled before execution');
+            retryLedger.start(admission.id);
+          } catch (err) {
+            retryLedger.finish(admission.id, 'cancelled', null);
+            throw err;
+          }
+        }
+        const started = performance.now();
+        let result: ValidationResult;
+        try {
+          result = await validationEngine.validate(
+            validationConfig,
+            (phase) => {
+              if (ownership.isCurrent()) emitActivityStatus(podId, phase);
+            },
+            validationController.signal,
+            {
+              onPhaseStarted: (...args) => {
+                if (ownership.isCurrent()) callbacks?.onPhaseStarted?.(...args);
+              },
+              onPhaseCompleted: (...args) => {
+                if (ownership.isCurrent()) callbacks?.onPhaseCompleted?.(...args);
+              },
+              onReviewProgress: (...args) => {
+                if (ownership.isCurrent()) callbacks?.onReviewProgress?.(...args);
+              },
+            },
+          );
+        } catch (validateErr) {
+          logger.error({ err: validateErr, podId, attempt }, logMessage);
+          result = makeUnexpectedValidationFailureResult(podId, attempt, validateErr);
+        }
+        if (admission && retryLedger)
+          retryLedger.finish(
+            admission.id,
+            validationController.signal.aborted
+              ? 'cancelled'
+              : result.overall === 'pass'
+                ? 'pass'
+                : result.infrastructureFailure?.retryable ||
+                    isReviewInfrastructureOnlyFailure(result)
+                  ? 'transient'
+                  : 'nonretryable',
+            Math.round(performance.now() - started),
+          );
+        // Settle the exact historical admission before discarding a superseded result.
+        ownership.assertCurrent();
+        return result;
+      } catch (err) {
+        ownership.assertCurrent();
+        throw err;
       }
-      if (admission && retryLedger)
-        retryLedger.finish(
-          admission.id,
-          validationController.signal.aborted
-            ? 'cancelled'
-            : result.overall === 'pass'
-              ? 'pass'
-              : result.infrastructureFailure?.retryable || isReviewInfrastructureOnlyFailure(result)
-                ? 'transient'
-                : 'nonretryable',
-          Math.round(performance.now() - started),
-        );
-      return result;
     };
 
     let result = await runValidation();
@@ -13741,15 +13779,19 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         let result: Awaited<ReturnType<typeof validationEngine.validate>>;
         const validationController = new AbortController();
         validationAbortControllers.set(podId, validationController);
+        const ownership = ownValidation(pod, validationController);
         try {
           result = await validateWithInfrastructureRetries(
             validationConfig,
             validationController,
             buildPhaseEventCallbacks(podId),
             'Validation engine threw unexpectedly',
+            ownership,
           );
+          ownership.assertCurrent();
         } finally {
-          validationAbortControllers.delete(podId);
+          if (validationAbortControllers.get(podId) === validationController)
+            validationAbortControllers.delete(podId);
         }
 
         if (!ownsLifecycle(podId, lifecycleGeneration, lifecycleContainerId)) {
@@ -14629,7 +14671,11 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           }
         }
       } catch (err) {
-        if (err instanceof AgentContinuationSupersededError) return;
+        if (
+          err instanceof AgentContinuationSupersededError ||
+          err instanceof ValidationSupersededError
+        )
+          return;
         logger.error({ err, podId }, 'Validation error');
         const s2 = podRepo.getOrThrow(podId);
         if (err instanceof TaskRetryBlockedError) {
@@ -14942,15 +14988,19 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         let result: Awaited<ReturnType<typeof validationEngine.validate>>;
         const revalidateController = new AbortController();
         validationAbortControllers.set(podId, revalidateController);
+        const ownership = ownValidation(pod, revalidateController);
         try {
           result = await validateWithInfrastructureRetries(
             validationConfig,
             revalidateController,
             buildPhaseEventCallbacks(podId),
             'Revalidation engine threw unexpectedly',
+            ownership,
           );
+          ownership.assertCurrent();
         } finally {
-          validationAbortControllers.delete(podId);
+          if (validationAbortControllers.get(podId) === revalidateController)
+            validationAbortControllers.delete(podId);
         }
 
         emitActivityStatus(podId, 'Validation checks finished — finalizing result…');
@@ -15226,6 +15276,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
 
         return { newCommits, result: 'fail' };
       } catch (err) {
+        if (err instanceof ValidationSupersededError) return { newCommits, result: 'fail' };
         logger.error({ err, podId }, 'Revalidation error');
         const s2 = podRepo.getOrThrow(podId);
         if (err instanceof TaskRetryBlockedError) {

@@ -1,0 +1,65 @@
+
+ RUN  v4.1.11 /private/tmp/autopod-durable-execution/packages/daemon
+
+ ❯ src/pods/pod-manager.test.ts (552 tests | 2 failed | 550 skipped) 148ms
+       × trigger does not start checks after replacement during retry identity capture (reject=true) 93ms
+       × revalidate does not start checks after replacement during retry identity capture (reject=true) 53ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 2 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/pods/pod-manager.test.ts > PodManager > validation admission lifecycle ownership > trigger does not start checks after replacement during retry identity capture (reject=true)
+AssertionError: expected { id: 'obliged-wombat', …(113) } to match object { status: 'running', …(2) }
+(124 matching properties omitted from actual)
+
+- Expected
++ Received
+
+  {
+    "containerId": "replacement-container",
+-   "failureReason": "replacement-owned-reason",
+-   "status": "running",
++   "failureReason": "Validation failed before checks could complete: superseded identity probe failed",
++   "status": "failed",
+  }
+
+ ❯ src/pods/pod-manager.test.ts:19397:44
+    19395|         expect(ctx.validationEngine.validate).not.toHaveBeenCalled();
+    19396|         expect(ctx.podRepo.taskRetries?.state(pod.id).admissionCount).…
+    19397|         expect(manager.getSession(pod.id)).toMatchObject({
+       |                                            ^
+    19398|           status: 'running',
+    19399|           containerId: 'replacement-container',
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/2]⎯
+
+ FAIL  src/pods/pod-manager.test.ts > PodManager > validation admission lifecycle ownership > revalidate does not start checks after replacement during retry identity capture (reject=true)
+AssertionError: expected { id: 'straight-dove', …(113) } to match object { status: 'running', …(2) }
+(124 matching properties omitted from actual)
+
+- Expected
++ Received
+
+  {
+    "containerId": "replacement-container",
+-   "failureReason": "replacement-owned-reason",
+-   "status": "running",
++   "failureReason": "Validation failed before checks could complete: superseded identity probe failed",
++   "status": "failed",
+  }
+
+ ❯ src/pods/pod-manager.test.ts:19397:44
+    19395|         expect(ctx.validationEngine.validate).not.toHaveBeenCalled();
+    19396|         expect(ctx.podRepo.taskRetries?.state(pod.id).admissionCount).…
+    19397|         expect(manager.getSession(pod.id)).toMatchObject({
+       |                                            ^
+    19398|           status: 'running',
+    19399|           containerId: 'replacement-container',
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/2]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  2 failed | 550 skipped (552)
+   Start at  09:30:39
+   Duration  2.04s (transform 1.15s, setup 0ms, import 1.66s, tests 148ms, environment 0ms)
+
