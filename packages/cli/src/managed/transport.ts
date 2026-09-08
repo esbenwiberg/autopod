@@ -70,7 +70,10 @@ export async function managedRequest(
     body,
     redirect: 'error',
     signal: AbortSignal.timeout(60_000),
-    headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+    headers: {
+      Authorization: `Bearer ${token}`,
+      ...(body === undefined ? {} : { 'Content-Type': 'application/json' }),
+    },
   });
   if (!response.ok || !response.body) throw new Error('managed-request-unavailable');
   const reader = response.body.getReader();
