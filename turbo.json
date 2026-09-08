@@ -8,7 +8,8 @@
     },
     "test": {
       "dependsOn": ["build"],
-      "outputs": []
+      "outputs": [],
+      "env": ["VITEST_MAX_WORKERS"]
     },
     "typecheck": {
       "dependsOn": ["^build"],
@@ -25,7 +26,7 @@
     },
     "@autopod/daemon#test": {
       "dependsOn": ["build"],
-      "env": ["SKIP_DB_TESTS"],
+      "env": ["SKIP_DB_TESTS", "VITEST_MAX_WORKERS"],
       "outputs": []
     },
     "@autopod/daemon#dev": {

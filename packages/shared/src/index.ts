@@ -624,6 +624,8 @@ export type {
 export type {
   ScanTriageDecision,
   ScanReportDetail,
+  ScanReportView,
+  ScanRecordDiagnostic,
   ScanReportSummary,
   ScanReportPage,
   ScanFindingPage,
