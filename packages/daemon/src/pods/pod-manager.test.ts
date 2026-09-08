@@ -13971,7 +13971,75 @@ describe('PodManager', () => {
       expect(ctx.runtime.resume).not.toHaveBeenCalled();
     });
 
-    it('retries a transient sandbox timeout before abandoning validation-feedback resume', async () => {
+    it.each(['before-event', 'after-event'] as const)(
+      'does not replay an uncertain validation-feedback turn after timeout %s',
+      async (timing) => {
+        const ctx = createTestContext(
+          { overall: 'fail' },
+          { executionTarget: 'sandbox', warmImageTag: 'example.azurecr.io/autopod/test:immutable' },
+        );
+        ctx.db
+          .prepare('UPDATE profiles SET max_validation_attempts = 2 WHERE name = ?')
+          .run('test-profile');
+        ctx.runtime.resume = vi
+          .fn()
+          .mockImplementationOnce(async function* (): AsyncIterable<AgentEvent> {
+            if (timing === 'after-event')
+              yield {
+                type: 'status',
+                timestamp: new Date().toISOString(),
+                message: 'Worker accepted feedback',
+              };
+            throw new AutopodError('sandbox transport timed out', 'AZURE_SANDBOX_TIMEOUT', 504);
+          })
+          .mockImplementationOnce(async function* (): AsyncIterable<AgentEvent> {
+            yield {
+              type: 'complete',
+              timestamp: new Date().toISOString(),
+              result: 'An unwanted repeated turn',
+            };
+          });
+        const attempts = createProviderAttemptRepository(ctx.db);
+        ctx.deps.providerAttemptRepo = attempts;
+        const manager = createPodManager(ctx.deps);
+        const pod = manager.createSession(
+          { profileName: 'test-profile', task: 'Retain uncertain turn' },
+          'operator',
+        );
+        ctx.podRepo.update(pod.id, {
+          status: 'running',
+          containerId: 'ctr-1',
+          worktreePath: '/tmp/worktree/abc',
+          startCommitSha: 'abc1234567890abcdef1234567890abcdef1234',
+        });
+        await manager.triggerValidation(pod.id);
+        expect(ctx.runtime.resume).toHaveBeenCalledTimes(1);
+        expect(attempts.list(pod.id)).toHaveLength(1);
+        expect(attempts.list(pod.id)[0]?.classification).toMatchObject({
+          category: 'unknown',
+          definitive: false,
+        });
+        expect(ctx.podRepo.taskExecutions?.snapshot(pod.id)).toMatchObject({
+          agentRunCount: 1,
+          failedRunCount: 1,
+          providerAttemptCount: 1,
+        });
+        expect(ctx.runtime.spawn).not.toHaveBeenCalled();
+        expect(ctx.containerManager.kill).not.toHaveBeenCalled();
+        expect(ctx.validationRepo.getForSession(pod.id)).toHaveLength(1);
+        expect(ctx.podRepo.getOrThrow(pod.id)).toMatchObject({
+          status: 'failed',
+          containerId: 'ctr-1',
+          worktreePath: '/tmp/worktree/abc',
+          failureReason: expect.stringContaining('unverified execution outcome'),
+        });
+        expect(activityMessages(ctx, pod.id)).not.toContain(
+          'Sandbox resume transport timed out — retrying agent feedback…',
+        );
+      },
+    );
+
+    it('retains an unobserved sandbox continuation when its iterator times out', async () => {
       const ctx = createTestContext(
         { overall: 'fail' },
         {
@@ -14017,9 +14085,10 @@ describe('PodManager', () => {
 
       await manager.triggerValidation(pod.id);
 
-      expect(ctx.runtime.resume).toHaveBeenCalledTimes(2);
-      expect(manager.getSession(pod.id).status).toBe('review_required');
-      expect(activityMessages(ctx, pod.id)).toContain(
+      expect(ctx.runtime.resume).toHaveBeenCalledTimes(1);
+      expect(manager.getSession(pod.id).status).toBe('failed');
+      expect(manager.getSession(pod.id).failureReason).toContain('unverified execution outcome');
+      expect(activityMessages(ctx, pod.id)).not.toContain(
         'Sandbox resume transport timed out — retrying agent feedback…',
       );
     });
