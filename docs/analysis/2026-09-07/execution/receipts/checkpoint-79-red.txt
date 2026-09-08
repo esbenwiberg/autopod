@@ -1,0 +1,39 @@
+
+ RUN  v4.1.11 /private/tmp/autopod-durable-execution/packages/daemon
+
+ ❯ src/pods/pod-manager.test.ts (592 tests | 3 failed | 589 skipped) 182ms
+     × rejects overlapping outer execution without superseding the active run: same-manager 84ms
+     × rejects overlapping outer execution without superseding the active run: second-manager 54ms
+     × rejects overlapping outer execution without superseding the active run: linked-pod 44ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 3 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/pods/pod-manager.test.ts > PodManager > rejects overlapping outer execution without superseding the active run: same-manager
+ FAIL  src/pods/pod-manager.test.ts > PodManager > rejects overlapping outer execution without superseding the active run: second-manager
+ FAIL  src/pods/pod-manager.test.ts > PodManager > rejects overlapping outer execution without superseding the active run: linked-pod
+AssertionError: promise resolved "'completed'" instead of rejecting
+
+- Expected:
+Error {
+  "message": "rejected promise",
+}
+
++ Received:
+"completed"
+
+ ❯ src/pods/pod-manager.test.ts:2523:14
+    2521|           replayed = true;
+    2522|           yield { type: 'complete', timestamp: new Date().toISOString(…
+    2523|         })())).rejects.toMatchObject({ code: 'TASK_AGENT_RUN_ACTIVE' }…
+       |              ^
+    2524|         expect(replayed).toBe(false);
+    2525|         expect(ctx.db.prepare('SELECT * FROM pod_finalizations ORDER B…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/3]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  3 failed | 589 skipped (592)
+   Start at  15:26:28
+   Duration  1.94s (transform 1.12s, setup 0ms, import 1.53s, tests 182ms, environment 0ms)
+

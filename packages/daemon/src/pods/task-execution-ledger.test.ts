@@ -162,6 +162,40 @@ describe('task-wide execution accounting', () => {
     }
   });
 
+  it('retains exclusive task admission across database reopen and releases it only on settlement', () => {
+    const { db, repo } = fixture();
+    repo.update('root', { tokenBudget: null });
+    repo.update('rerun', { tokenBudget: null });
+    const run = repo.taskExecutions?.beginRun('root', 1, 1, binding);
+    if (!run) throw new Error('Missing run');
+    const dir = mkdtempSync(path.join(tmpdir(), 'outer-admission-'));
+    const file = path.join(dir, 'state.db');
+    writeFileSync(file, db.serialize());
+    db.close();
+    const first = new Database(file);
+    const second = new Database(file);
+    try {
+      const a = createPodRepository(first).taskExecutions;
+      const b = createPodRepository(second).taskExecutions;
+      if (!a || !b) throw new Error('Missing ledger');
+      expect(() => b.beginRun('fix', 1, 1, binding)).toThrow(/still active/);
+      expect(() => b.beginRun('root', 1, 2, binding)).toThrow(/still active/);
+      expect(b.beginRun('root', 1, 1, binding)).toBe(run);
+      expect(b.beginRun('rerun', 1, 1, binding)).toEqual(expect.any(String));
+      a.finishRun(run, 'completed', null);
+      expect(b.beginRun('fix', 1, 1, binding)).toEqual(expect.any(String));
+      expect(first.prepare('SELECT COUNT(*) AS count FROM task_agent_runs').get()).toEqual({
+        count: 3,
+      });
+      expect(first.pragma('integrity_check')).toEqual([{ integrity_check: 'ok' }]);
+      expect(first.pragma('foreign_key_check')).toEqual([]);
+    } finally {
+      first.close();
+      second.close();
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   it('retains task/run identity through restart and linked fixes while intentional reruns remain distinct', () => {
     const { db, repo } = fixture();
     // This case tests lineage and settlement with no configured spending cap.

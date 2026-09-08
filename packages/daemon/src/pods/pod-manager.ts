@@ -101,6 +101,7 @@ import {
   sidecarPodEnv,
 } from '../containers/sidecar-resolver.js';
 import type { PodTokenIssuer } from '../crypto/pod-tokens.js';
+import { atomicPodChange } from '../db/unit-of-work.js';
 import type { DaemonGitHubAuth } from '../github/daemon-github-auth.js';
 import { createHistoryExporter } from '../history/history-exporter.js';
 import {
@@ -10788,8 +10789,6 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         token: runToken,
         settled: runSettled,
       };
-      activeAgentRuns.set(podId, runOwner);
-      activeAgentRunResolvers.set(podId, { token: runToken, resolve: resolveRunSettled });
       const settleActiveRun = (): void => {
         resolveRunSettled();
         const activeResolver = activeAgentRunResolvers.get(podId);
@@ -10812,30 +10811,35 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
       let seenCompleteEvents: Set<string>;
       let taskRunId: string | undefined;
       try {
-        attemptPod = podRepo.getOrThrow(podId);
-        podRepo.completionJournal?.begin(attemptPod);
-        attemptProfile = resolveEffectiveBoundProfile(attemptPod);
-        if (podRepo.taskExecutions) {
-          podRepo.taskExecutions.register(podId);
-          const cycle = podRepo.completionJournal?.get(
-            podId,
-            attemptPod.lifecycleGeneration,
-          )?.cycle;
-          if (cycle === undefined)
-            throw new Error('Task execution requires a durable completion cycle');
-          taskRunId = podRepo.taskExecutions.beginRun(
-            podId,
-            attemptPod.lifecycleGeneration,
-            cycle,
-            {
-              runtime: attemptPod.runtime,
-              model: attemptPod.model,
-              providerAccountId: attemptProfile.providerAccountId ?? null,
-            },
-          );
-        }
-        runOwner.providerOrdinal = ensureProviderAttempt(attemptPod, attemptProfile)?.ordinal;
+        const initialized = atomicPodChange(podRepo, () => {
+          const currentPod = podRepo.getOrThrow(podId);
+          const currentProfile = resolveEffectiveBoundProfile(currentPod);
+          podRepo.completionJournal?.begin(currentPod);
+          let runId: string | undefined;
+          if (podRepo.taskExecutions) {
+            podRepo.taskExecutions.register(podId);
+            const cycle = podRepo.completionJournal?.get(
+              podId,
+              currentPod.lifecycleGeneration,
+            )?.cycle;
+            if (cycle === undefined)
+              throw new Error('Task execution requires a durable completion cycle');
+            runId = podRepo.taskExecutions.beginRun(podId, currentPod.lifecycleGeneration, cycle, {
+              runtime: currentPod.runtime,
+              model: currentPod.model,
+              providerAccountId: currentProfile.providerAccountId ?? null,
+            });
+          }
+          const providerOrdinal = ensureProviderAttempt(currentPod, currentProfile)?.ordinal;
+          return { currentPod, currentProfile, runId, providerOrdinal };
+        });
+        attemptPod = initialized.currentPod;
+        attemptProfile = initialized.currentProfile;
+        taskRunId = initialized.runId;
+        runOwner.providerOrdinal = initialized.providerOrdinal;
         seenCompleteEvents = persistedAgentCompleteEventKeys(deps.eventRepo, podId);
+        activeAgentRuns.set(podId, runOwner);
+        activeAgentRunResolvers.set(podId, { token: runToken, resolve: resolveRunSettled });
         startCommitPolling(podId);
       } catch (err) {
         if (taskRunId) podRepo.taskExecutions?.finishRun(taskRunId, 'failed', 'initialization');

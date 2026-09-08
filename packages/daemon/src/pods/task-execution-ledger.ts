@@ -394,6 +394,18 @@ export function createTaskExecutionLedger(db: Database.Database): TaskExecutionL
           throw new Error('Execution binding cannot change for an existing run');
         return prior.id;
       }
+      const active = db
+        .prepare(`SELECT r.pod_id AS podId
+        FROM task_agent_runs r JOIN task_executions e ON e.pod_id = r.pod_id
+        WHERE e.task_id = (SELECT task_id FROM task_executions WHERE pod_id = ?)
+          AND r.ended_at IS NULL LIMIT 1`)
+        .get(podId) as { podId: string } | undefined;
+      if (active)
+        throw new AutopodError(
+          `A worker run is still active for this logical task (${active.podId}); wait for its observed settlement or reconcile the retained execution before starting another worker.`,
+          'TASK_AGENT_RUN_ACTIVE',
+          409,
+        );
       const task = snapshot(podId);
       if (task.diagnostics.includes('Task budget source unavailable'))
         throw new AutopodError(

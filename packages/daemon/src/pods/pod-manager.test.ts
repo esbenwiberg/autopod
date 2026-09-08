@@ -2496,6 +2496,119 @@ describe('PodManager', () => {
     expect(ctx.podRepo.taskExecutions?.snapshot(pod.id).agentRunCount).toBe(0);
   });
 
+  it.each(['same-manager', 'second-manager', 'linked-pod'] as const)(
+    'rejects overlapping outer execution without superseding the active run: %s',
+    async (route) => {
+      const ctx = createTestContext();
+      const manager = createPodManager(ctx.deps);
+      const created = manager.createSession(
+        { profileName: 'test-profile', task: 'One active outer execution' },
+        'operator',
+      );
+      ctx.podRepo.update(created.id, { status: 'running', containerId: 'owned-container' });
+      const other =
+        route === 'linked-pod'
+          ? manager.createSession(
+              { profileName: 'test-profile', task: 'Linked repair', linkedPodId: created.id },
+              'operator',
+            )
+          : created;
+      if (route === 'linked-pod')
+        ctx.podRepo.update(other.id, { status: 'running', containerId: 'linked-container' });
+      const entered = deferred<void>();
+      const release = deferred<void>();
+      let replayed = false;
+      const first = manager.consumeAgentEvents(
+        created.id,
+        (async function* () {
+          entered.resolve();
+          await release.promise;
+          yield {
+            type: 'complete',
+            timestamp: new Date().toISOString(),
+            result: 'Original run survived duplicate admission',
+          } as const;
+        })(),
+      );
+      await Promise.race([
+        entered.promise,
+        first.then(() => {
+          throw new Error('Original stream ended before entering');
+        }),
+      ]);
+      const before = ctx.db.prepare('SELECT * FROM pod_finalizations ORDER BY pod_id, cycle').all();
+      const second = route === 'second-manager' ? createPodManager(ctx.deps) : manager;
+      try {
+        await expect(
+          second.consumeAgentEvents(
+            other.id,
+            (async function* () {
+              replayed = true;
+              yield {
+                type: 'complete',
+                timestamp: new Date().toISOString(),
+                result: 'Duplicate provider dispatch',
+              } as const;
+            })(),
+          ),
+        ).rejects.toMatchObject({ code: 'TASK_AGENT_RUN_ACTIVE' });
+        expect(replayed).toBe(false);
+        expect(
+          ctx.db.prepare('SELECT * FROM pod_finalizations ORDER BY pod_id, cycle').all(),
+        ).toEqual(before);
+        expect(ctx.db.prepare('SELECT COUNT(*) AS count FROM task_agent_runs').get()).toEqual({
+          count: 1,
+        });
+      } finally {
+        release.resolve();
+        await first;
+      }
+      expect(await first).toBe('completed');
+      expect(
+        ctx.db.prepare('SELECT outcome FROM task_agent_runs WHERE pod_id = ?').all(created.id),
+      ).toEqual([{ outcome: 'completed' }]);
+    },
+  );
+
+  it('rolls back completion cycle and task admission when provider segment initialization fails', async () => {
+    const ctx = createTestContext();
+    const attempts = createProviderAttemptRepository(ctx.db);
+    ctx.deps.providerAttemptRepo = attempts;
+    const manager = createPodManager(ctx.deps);
+    const pod = manager.createSession(
+      { profileName: 'test-profile', task: 'Atomic run initialization' },
+      'operator',
+    );
+    ctx.podRepo.update(pod.id, { status: 'running', containerId: 'owned-container' });
+    const before = ctx.podRepo.getOrThrow(pod.id);
+    vi.spyOn(attempts, 'open').mockImplementationOnce(() => {
+      throw new Error('fixture provider initialization failure');
+    });
+    let entered = false;
+    await expect(
+      manager.consumeAgentEvents(
+        pod.id,
+        (async function* () {
+          entered = true;
+          yield {
+            type: 'complete',
+            timestamp: new Date().toISOString(),
+            result: 'must not dispatch',
+          } as const;
+        })(),
+      ),
+    ).rejects.toThrow('fixture provider initialization failure');
+    expect(entered).toBe(false);
+    expect(ctx.podRepo.getOrThrow(pod.id)).toEqual(before);
+    expect(ctx.db.prepare('SELECT COUNT(*) AS count FROM pod_finalizations').get()).toEqual({
+      count: 0,
+    });
+    expect(ctx.db.prepare('SELECT COUNT(*) AS count FROM task_agent_runs').get()).toEqual({
+      count: 0,
+    });
+    expect(attempts.list(pod.id)).toEqual([]);
+  });
+
   it('does not retain an active run when event-consumer initialization fails', async () => {
     const ctx = createTestContext(undefined, { defaultRuntime: 'codex' });
     const runtime = ctx.runtime as Runtime & { suspend: ReturnType<typeof vi.fn> };
