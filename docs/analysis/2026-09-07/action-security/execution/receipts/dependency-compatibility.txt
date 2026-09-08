@@ -1,0 +1,15 @@
+RUN  v4.1.11 /Users/ewi/.codex/worktrees/46f5/autopod/packages/daemon
+
+ ✓ src/api/plugins/mobile-static.test.ts > mobileStaticPlugin > serves index.html at /mobile/ 68ms
+ ✓ src/api/plugins/mobile-static.test.ts > mobileStaticPlugin > serves arbitrary files in the dist root 2ms
+ ✓ src/api/plugins/mobile-static.test.ts > mobileStaticPlugin > serves nested built asset files 2ms
+ ✓ src/api/plugins/mobile-static.test.ts > mobileStaticPlugin > returns 404 for unknown paths (HashRouter — no SPA-shell fallback) 2ms
+ ✓ src/api/plugins/mobile-static.test.ts > mobileStaticPlugin > skips the mount with a warning when the dist dir is missing 1ms
+ ✓ src/actions/dependency-compatibility.test.ts > security dependency overrides against their consuming APIs > loads Transformers and resizes raw pixels through its actual Sharp dependency offline 3ms
+ ✓ src/actions/dependency-compatibility.test.ts > security dependency overrides against their consuming APIs > extracts an ONNX package entry with the patched zip API 9ms
+ ✓ src/actions/dependency-compatibility.test.ts > security dependency overrides against their consuming APIs > retains CommonJS uuid.v4 used by the existing MSAL authentication client 5ms
+
+ Test Files  2 passed (2)
+      Tests  8 passed (8)
+   Start at  07:08:14
+   Duration  1.84s (transform 58ms, setup 0ms, import 1.81s, tests 93ms, environment 0ms)

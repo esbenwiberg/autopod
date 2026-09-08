@@ -1,0 +1,10 @@
+RUN  v4.1.11 /Users/ewi/.codex/worktrees/46f5/autopod/packages/mobile-web
+
+ ✓ src/App.router-compatibility.test.tsx > retains real App navigation and back links with the upgraded hash router 25ms
+ ✓ src/App.router-compatibility.test.tsx > renders a direct hash route on mount 3ms
+ ✓ src/App.router-compatibility.test.tsx > replaces an unknown hash route with the home route 2ms
+
+ Test Files  1 passed (1)
+      Tests  3 passed (3)
+   Start at  07:08:48
+   Duration  508ms (transform 67ms, setup 13ms, import 96ms, tests 31ms, environment 276ms)
