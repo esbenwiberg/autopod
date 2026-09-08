@@ -264,7 +264,9 @@
         "checkpoint-45.md: planned delivery before review, removal of unbound polling, explicit validation recovery and mobile recovery notice; external dispositions and broader acceptance remain partial",
         "receipts/checkpoint-45-full-validation.txt",
         "receipts/checkpoint-45-validation-identity.json",
-        "checkpoint-46.md: source-bound merged observations without invented requests; distinct canonical PR and admission counts with local operator proof; broader acceptance remains partial"
+        "checkpoint-46.md: source-bound merged observations without invented requests; distinct canonical PR and admission counts with local operator proof; broader acceptance remains partial",
+        "receipts/checkpoint-46-full-validation.txt",
+        "receipts/checkpoint-46-validation-identity.json"
       ],
       "prerequisites": [
         "PR creation intent/reconciliation implemented locally; broader finalization side effects and operator override remain."
@@ -943,7 +945,9 @@
         "checkpoint-30.md: retained failed approval delivery, explicit HTTP error/retry, review gate and original lifecycle guards; wider durability remains partial",
         "checkpoint-33.md: transactional durable decision admission and confirmed merge observations; operator disposition projection and broader delivery receipts remain partial",
         "checkpoint-34.md: bounded latest-recorded PR disposition in task/cost API, CLI, mobile browser and native source/client tests; native UI/live and wider delivery acceptance remain partial",
-        "checkpoint-46.md: source-bound merged observations without invented requests; distinct canonical PR and admission counts with local operator proof; broader acceptance remains partial"
+        "checkpoint-46.md: source-bound merged observations without invented requests; distinct canonical PR and admission counts with local operator proof; broader acceptance remains partial",
+        "receipts/checkpoint-46-full-validation.txt",
+        "receipts/checkpoint-46-validation-identity.json"
       ],
       "prerequisites": [],
       "remaining": "Distinct task/pod/run/provider/validation units implemented. Durable logical delivery receipts remain. Checkpoint 46 verifies planned merged disposition and separate request/PR counts locally. Legacy missing source history, closed disposition, broader durable cleanup and native/live interaction remain outstanding."
@@ -958,7 +962,9 @@
       ],
       "tests": ["packages/daemon/src/pods/merge-journal.test.ts"],
       "evidence": [
-        "checkpoint-46.md: source-bound merged observations without invented requests; distinct canonical PR and admission counts with local operator proof; broader acceptance remains partial"
+        "checkpoint-46.md: source-bound merged observations without invented requests; distinct canonical PR and admission counts with local operator proof; broader acceptance remains partial",
+        "receipts/checkpoint-46-full-validation.txt",
+        "receipts/checkpoint-46-validation-identity.json"
       ],
       "prerequisites": [],
       "remaining": " Checkpoint 46 verifies planned merged disposition and separate request/PR counts locally. Legacy missing source history, closed disposition, broader durable cleanup and native/live interaction remain outstanding."
@@ -1204,7 +1210,9 @@
         "checkpoint-26.md: stored subtotals, unavailable attribution, source estimates, API/CLI/mobile/native test evidence; live and native interaction remain unverified",
         "checkpoint-27.md: bounded phase projections, local malformed-contract per-pod HTTP 500 regression, CLI/mobile/native checks; live root cause and native interaction remain unverified",
         "checkpoint-35.md",
-        "checkpoint-46.md: source-bound merged observations without invented requests; distinct canonical PR and admission counts with local operator proof; broader acceptance remains partial"
+        "checkpoint-46.md: source-bound merged observations without invented requests; distinct canonical PR and admission counts with local operator proof; broader acceptance remains partial",
+        "receipts/checkpoint-46-full-validation.txt",
+        "receipts/checkpoint-46-validation-identity.json"
       ],
       "prerequisites": [
         "Selected mobile flows and new health CLI have local interaction proof. Desktop has compilation and tests only. Remaining operator flows, physical device and live evidence are outstanding."
