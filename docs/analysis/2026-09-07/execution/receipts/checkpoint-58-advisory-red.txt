@@ -1,0 +1,202 @@
+
+ RUN  v4.1.11 /private/tmp/autopod-durable-execution/packages/daemon
+
+ ❯ src/pods/pod-manager.test.ts (561 tests | 3 failed | 558 skipped) 233ms
+       × trigger retains late advisory history without publishing or stopping a replacement 121ms
+       × revalidate retains late advisory history without publishing or stopping a replacement 46ms
+       × does not launch an advisory run superseded while waiting for the shared QA slot 64ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 3 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/pods/pod-manager.test.ts > PodManager > triggerValidation > trigger retains late advisory history without publishing or stopping a replacement
+AssertionError: expected "emit" to not be called at all, but actually been called 4 times
+
+Received:
+
+  1st emit call:
+
+    Array [
+      Object {
+        "_eventId": 18,
+        "event": Object {
+          "message": "Old advisory progress",
+          "timestamp": "2026-09-08T07:56:06.082Z",
+          "type": "status",
+        },
+        "podId": "eldest-catfish",
+        "timestamp": "2026-09-08T07:56:06.082Z",
+        "type": "pod.agent_activity",
+      },
+    ]
+
+  2nd emit call:
+
+    Array [
+      Object {
+        "_eventId": 19,
+        "phase": "advisory",
+        "podId": "eldest-catfish",
+        "timestamp": "2026-09-08T07:56:06.082Z",
+        "type": "pod.validation_phase_started",
+      },
+    ]
+
+  3rd emit call:
+
+    Array [
+      Object {
+        "_eventId": 20,
+        "advisoryResult": Object {
+          "durationMs": 10,
+          "observations": Array [],
+          "reasoning": "Old execution finished",
+          "screenshots": Array [],
+          "status": "pass",
+          "tokenUsage": Object {
+            "costUsd": 0.01,
+            "inputTokens": 30,
+            "outputTokens": 4,
+          },
+        },
+        "phase": "advisory",
+        "phaseStatus": "pass",
+        "podId": "eldest-catfish",
+        "timestamp": "2026-09-08T07:56:06.082Z",
+        "type": "pod.validation_phase_completed",
+      },
+    ]
+
+  4th emit call:
+
+    Array [
+      Object {
+        "_eventId": 21,
+        "event": Object {
+          "message": "Stopping post-validation container…",
+          "timestamp": "2026-09-08T07:56:06.083Z",
+          "type": "status",
+        },
+        "podId": "eldest-catfish",
+        "timestamp": "2026-09-08T07:56:06.083Z",
+        "type": "pod.agent_activity",
+      },
+    ]
+
+
+Number of calls: 4
+
+ ❯ src/pods/pod-manager.test.ts:11633:26
+    11631|         // Cumulative known spend belongs to the same immutable pod/ta…
+    11632|         expect(manager.getSession(pod.id).phaseTokenUsage?.advisory).t…
+    11633|         expect(emit).not.toHaveBeenCalled();
+       |                          ^
+    11634|         expect(ctx.containerManager.stop).not.toHaveBeenCalled();
+    11635|         expect(ctx.containerManager.kill).not.toHaveBeenCalled();
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/3]⎯
+
+ FAIL  src/pods/pod-manager.test.ts > PodManager > triggerValidation > revalidate retains late advisory history without publishing or stopping a replacement
+AssertionError: expected "emit" to not be called at all, but actually been called 4 times
+
+Received:
+
+  1st emit call:
+
+    Array [
+      Object {
+        "_eventId": 16,
+        "event": Object {
+          "message": "Old advisory progress",
+          "timestamp": "2026-09-08T07:56:06.138Z",
+          "type": "status",
+        },
+        "podId": "mean-rodent",
+        "timestamp": "2026-09-08T07:56:06.138Z",
+        "type": "pod.agent_activity",
+      },
+    ]
+
+  2nd emit call:
+
+    Array [
+      Object {
+        "_eventId": 17,
+        "phase": "advisory",
+        "podId": "mean-rodent",
+        "timestamp": "2026-09-08T07:56:06.138Z",
+        "type": "pod.validation_phase_started",
+      },
+    ]
+
+  3rd emit call:
+
+    Array [
+      Object {
+        "_eventId": 18,
+        "advisoryResult": Object {
+          "durationMs": 10,
+          "observations": Array [],
+          "reasoning": "Old execution finished",
+          "screenshots": Array [],
+          "status": "pass",
+          "tokenUsage": Object {
+            "costUsd": 0.01,
+            "inputTokens": 30,
+            "outputTokens": 4,
+          },
+        },
+        "phase": "advisory",
+        "phaseStatus": "pass",
+        "podId": "mean-rodent",
+        "timestamp": "2026-09-08T07:56:06.138Z",
+        "type": "pod.validation_phase_completed",
+      },
+    ]
+
+  4th emit call:
+
+    Array [
+      Object {
+        "_eventId": 19,
+        "event": Object {
+          "message": "Stopping post-validation container…",
+          "timestamp": "2026-09-08T07:56:06.138Z",
+          "type": "status",
+        },
+        "podId": "mean-rodent",
+        "timestamp": "2026-09-08T07:56:06.138Z",
+        "type": "pod.agent_activity",
+      },
+    ]
+
+
+Number of calls: 4
+
+ ❯ src/pods/pod-manager.test.ts:11633:26
+    11631|         // Cumulative known spend belongs to the same immutable pod/ta…
+    11632|         expect(manager.getSession(pod.id).phaseTokenUsage?.advisory).t…
+    11633|         expect(emit).not.toHaveBeenCalled();
+       |                          ^
+    11634|         expect(ctx.containerManager.stop).not.toHaveBeenCalled();
+    11635|         expect(ctx.containerManager.kill).not.toHaveBeenCalled();
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/3]⎯
+
+ FAIL  src/pods/pod-manager.test.ts > PodManager > triggerValidation > does not launch an advisory run superseded while waiting for the shared QA slot
+AssertionError: expected "vi.fn()" to be called 1 times, but got 2 times
+ ❯ src/pods/pod-manager.test.ts:11664:24
+    11662|       slot.resolve({ status: 'pass', reasoning: 'First run finished', …
+    11663|       await Promise.all([firstRun, secondRun]);
+    11664|       expect(advisory).toHaveBeenCalledTimes(1);
+       |                        ^
+    11665|       expect(manager.getSession(second.id)).toMatchObject({ status: 'r…
+    11666|         containerId: 'replacement-container', failureReason: 'replacem…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/3]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  3 failed | 558 skipped (561)
+   Start at  09:56:04
+   Duration  1.58s (transform 860ms, setup 0ms, import 1.25s, tests 233ms, environment 0ms)
+

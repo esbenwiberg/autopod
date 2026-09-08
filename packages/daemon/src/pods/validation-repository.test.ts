@@ -80,6 +80,9 @@ describe('ValidationRepository', () => {
         newest,
       ]);
       expect(repo.getLatest('advisory-pod')).toEqual(newest);
+      expect(repo.isLatestForPod('advisory-pod', first.id)).toBe(false);
+      expect(repo.isLatestForPod('advisory-pod', newest.id)).toBe(true);
+      expect(repo.isLatestForPod('different-pod', newest.id)).toBe(false);
     } finally {
       db.close();
     }
@@ -95,6 +98,7 @@ describe('ValidationRepository', () => {
         const repo = createValidationRepository(db);
         const record = repo.insert('legacy-advisory', 1, makeResult('legacy-advisory', 1));
         db.prepare('UPDATE validations SET result = ? WHERE id = ?').run(legacy, record.id);
+        expect(repo.isLatestForPod('legacy-advisory', record.id)).toBe(true);
         expect(
           repo.updateAdvisoryResult('legacy-advisory', record.id, {
             status: 'pass',

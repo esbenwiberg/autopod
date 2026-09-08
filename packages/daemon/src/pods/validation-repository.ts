@@ -25,6 +25,7 @@ export interface ValidationRepository {
   ): boolean;
   getForSession(podId: string): StoredValidation[];
   getLatest(podId: string): StoredValidation | null;
+  isLatestForPod(podId: string, validationId: string): boolean;
   getLatestReviewBatch(podId: string): ReviewBatchResult | undefined;
 }
 
@@ -106,6 +107,13 @@ export function createValidationRepository(db: Database.Database): ValidationRep
         .prepare('SELECT * FROM validations WHERE pod_id = ? ORDER BY sequence ASC')
         .all(podId) as Record<string, unknown>[];
       return rows.map(rowToStoredValidation);
+    },
+
+    isLatestForPod(podId, validationId): boolean {
+      const row = db
+        .prepare('SELECT id FROM validations WHERE pod_id = ? ORDER BY sequence DESC LIMIT 1')
+        .get(podId) as { id: string } | undefined;
+      return row?.id === validationId;
     },
 
     getLatest(podId: string): StoredValidation | null {

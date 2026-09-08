@@ -14,6 +14,7 @@ export class ValidationSupersededError extends AutopodError {
 export function captureValidationOwnership(
   expected: Pod,
   deps: {
+    statuses?: readonly Pod['status'][];
     readCurrent(): Pod;
     isCurrentInvocation(): boolean;
     hasPendingDecision(): boolean;
@@ -44,7 +45,7 @@ export function captureValidationOwnership(
       throw new ValidationSupersededError();
     }
     if (
-      current.status !== 'validating' ||
+      !(deps.statuses ?? ['validating']).includes(current.status) ||
       identity(current) !== captured ||
       !deps.isCurrentInvocation() ||
       deps.hasPendingDecision()

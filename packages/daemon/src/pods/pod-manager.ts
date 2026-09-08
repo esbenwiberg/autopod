@@ -6479,39 +6479,69 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
     };
   }
 
+  function advisoryPublicationOwnership(
+    expectedPod: Pod,
+    blockingResult: ValidationResult,
+    validationId: string | undefined,
+    ownsInvocation: () => boolean = () => true,
+  ) {
+    return captureValidationOwnership(expectedPod, {
+      statuses: ['validated'],
+      readCurrent: () => podRepo.getOrThrow(expectedPod.id),
+      hasPendingDecision: () =>
+        podRepo.hasUnansweredDecision?.(expectedPod.id) ??
+        Boolean(podRepo.getOrThrow(expectedPod.id).pendingEscalation),
+      isCurrentInvocation: () => {
+        if (!ownsInvocation()) return false;
+        try {
+          return (
+            podRepo.getOrThrow(expectedPod.id).lastValidationResult?.attempt ===
+              blockingResult.attempt &&
+            (!validationId ||
+              !validationRepo ||
+              validationRepo.isLatestForPod(expectedPod.id, validationId))
+          );
+        } catch {
+          return false;
+        }
+      },
+    });
+  }
+
   async function runAdvisoryAfterValidation(
     podId: string,
     validationConfig: Parameters<ValidationEngine['validate']>[0],
     blockingResult: ValidationResult,
     validationId: string | undefined,
+    expectedPod: Pod,
   ): Promise<ValidationResult> {
     if (!validationEngine.runAdvisoryBrowserQa) {
       return blockingResult;
     }
+
+    let registered = false;
+    const ownership = advisoryPublicationOwnership(
+      expectedPod,
+      blockingResult,
+      validationId,
+      () => !registered || advisoryRuns.get(podId) === run,
+    );
+    ownership.assertCurrent();
 
     const mergeAdvisoryResult = (
       advisoryResult: ValidationResult['advisoryBrowserQa'],
     ): ValidationResult => {
       if (!advisoryResult) return blockingResult;
 
-      const current = podRepo.getOrThrow(podId);
-      if (current.status === 'killed' || current.status === 'killing') {
-        return blockingResult;
-      }
-
       const storedResult = {
         ...blockingResult,
         advisoryBrowserQa: advisoryResult,
       };
       if (validationId) validationRepo?.updateAdvisoryResult(podId, validationId, advisoryResult);
+      if (!ownership.isCurrent()) return storedResult;
+      const current = podRepo.getOrThrow(podId);
 
       const currentResult = current.lastValidationResult ?? blockingResult;
-      if (validationId && validationRepo?.getLatest(podId)?.id !== validationId) {
-        return storedResult;
-      }
-      if (currentResult.attempt !== blockingResult.attempt) {
-        return storedResult;
-      }
 
       const mergedResult = {
         ...currentResult,
@@ -6528,23 +6558,23 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         emitActivityStatus(podId, 'Waiting for advisory browser QA slot…');
         await acquireAdvisoryQaSlot();
         try {
-          const beforeAdvisory = podRepo.getOrThrow(podId);
-          if (beforeAdvisory.status === 'killed' || beforeAdvisory.status === 'killing') {
-            return blockingResult;
-          }
+          ownership.assertCurrent();
           const callbacks = buildPhaseEventCallbacks(podId);
           advisoryResult = await validationEngine.runAdvisoryBrowserQa(
             validationConfig,
             blockingResult,
-            (phase) => emitActivityStatus(podId, phase),
+            (phase) => {
+              if (ownership.isCurrent()) emitActivityStatus(podId, phase);
+            },
             undefined,
             {
-              ...callbacks,
+              ...ownedValidationCallbacks(ownership, callbacks),
               onPhaseCompleted: (phase, phaseStatus, phaseResult) => {
                 if (phase === 'advisory') {
                   mergeAdvisoryResult(phaseResult as ValidationResult['advisoryBrowserQa']);
                 }
-                callbacks.onPhaseCompleted?.(phase, phaseStatus, phaseResult);
+                if (ownership.isCurrent())
+                  callbacks.onPhaseCompleted?.(phase, phaseStatus, phaseResult);
               },
             },
           );
@@ -6552,17 +6582,20 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           releaseAdvisoryQaSlot();
         }
       } catch (err) {
+        ownership.assertCurrent();
         logger.warn({ err, podId }, 'Advisory browser QA failed after validation');
         emitActivityStatus(podId, 'Advisory browser QA failed — continuing');
         return blockingResult;
       }
 
-      if (!advisoryResult) return blockingResult;
-
-      const current = podRepo.getOrThrow(podId);
-      if (current.status === 'killed' || current.status === 'killing') {
+      if (!advisoryResult) {
+        ownership.assertCurrent();
         return blockingResult;
       }
+
+      // This is cumulative observed usage for the original immutable pod/task,
+      // not authority to publish into the current lifecycle or release it.
+      const current = podRepo.getOrThrow(podId);
 
       if (advisoryResult.tokenUsage) {
         const existingUsage = current.phaseTokenUsage ?? {};
@@ -6586,16 +6619,9 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
 
       // Always persist the advisory result into validation history regardless of
       // whether a newer validation attempt has superseded the live lastValidationResult.
-      const storedResult = { ...blockingResult, advisoryBrowserQa: advisoryResult };
       if (validationId) validationRepo?.updateAdvisoryResult(podId, validationId, advisoryResult);
-
+      ownership.assertCurrent();
       const currentResult = current.lastValidationResult ?? blockingResult;
-      if (validationId && validationRepo?.getLatest(podId)?.id !== validationId) {
-        return storedResult;
-      }
-      if (currentResult.attempt !== blockingResult.attempt) {
-        return storedResult;
-      }
 
       const mergedResult = {
         ...currentResult,
@@ -6607,8 +6633,12 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
     })();
 
     advisoryRuns.set(podId, run);
+    registered = true;
     try {
       return await run;
+    } catch (err) {
+      ownership.assertCurrent();
+      throw err;
     } finally {
       if (advisoryRuns.get(podId) === run) {
         advisoryRuns.delete(podId);
@@ -14550,7 +14580,14 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
               validationConfig.advisoryBrowserQaEnabled && !!validationEngine.runAdvisoryBrowserQa,
           });
           maybeTriggerDependents(validatedPod);
-          await runAdvisoryAfterValidation(podId, validationConfig, result, validationRecord?.id);
+          await runAdvisoryAfterValidation(
+            podId,
+            validationConfig,
+            result,
+            validationRecord?.id,
+            validatedPod,
+          );
+          advisoryPublicationOwnership(validatedPod, result, validationRecord?.id).assertCurrent();
           const postAdvisoryPod = podRepo.getOrThrow(podId);
           if (isTerminalState(postAdvisoryPod.status) || postAdvisoryPod.status === 'killing') {
             return;
@@ -15225,7 +15262,18 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
               validationConfig.advisoryBrowserQaEnabled && !!validationEngine.runAdvisoryBrowserQa,
           });
           maybeTriggerDependents(revalidatedPod);
-          await runAdvisoryAfterValidation(podId, validationConfig, result, validationRecord?.id);
+          await runAdvisoryAfterValidation(
+            podId,
+            validationConfig,
+            result,
+            validationRecord?.id,
+            revalidatedPod,
+          );
+          advisoryPublicationOwnership(
+            revalidatedPod,
+            result,
+            validationRecord?.id,
+          ).assertCurrent();
           const postAdvisoryPod = podRepo.getOrThrow(podId);
           if (isTerminalState(postAdvisoryPod.status) || postAdvisoryPod.status === 'killing') {
             return { newCommits, result: 'pass' };

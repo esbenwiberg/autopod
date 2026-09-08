@@ -11594,6 +11594,128 @@ describe('PodManager', () => {
       });
     });
 
+    it.each([
+      ['trigger', false],
+      ['trigger', true],
+      ['revalidate', false],
+      ['revalidate', true],
+    ] as const)(
+      '%s retains late advisory history without publishing or stopping a replacement (reject=%s)',
+      async (entry, rejectAdvisory) => {
+        const ctx = createTestContext();
+        const emit = vi.spyOn(ctx.eventBus, 'emit');
+        const manager = createPodManager(ctx.deps);
+        const advisory = ctx.validationEngine.runAdvisoryBrowserQa;
+        if (!advisory) throw new Error('Missing advisory fixture');
+        const pod = manager.createSession(
+          {
+            profileName: 'test-profile',
+            task: 'Retain owned QA',
+            options: { advisoryBrowserQaEnabled: true },
+          },
+          'user-1',
+        );
+        ctx.podRepo.update(pod.id, {
+          status: entry === 'trigger' ? 'running' : 'failed',
+          containerId: 'ctr-1',
+          worktreePath: '/tmp/wt',
+        });
+        const replacement = makeValidationResult({ podId: pod.id, attempt: 1 });
+        const replacementReadiness = makeReadinessReview('ready', 'Replacement readiness');
+        const advisoryResult = {
+          status: 'pass' as const,
+          reasoning: 'Old execution finished',
+          observations: [],
+          screenshots: [],
+          durationMs: 10,
+          tokenUsage: { inputTokens: 30, outputTokens: 4, costUsd: 0.01 },
+        };
+        vi.mocked(advisory).mockImplementation(
+          async (_config, _result, onProgress, _signal, callbacks) => {
+            ctx.podRepo.incrementLifecycleGeneration(pod.id);
+            ctx.podRepo.update(pod.id, {
+              status: 'running',
+              containerId: 'replacement-container',
+              lastValidationResult: replacement,
+              readinessReview: replacementReadiness,
+              failureReason: 'replacement-owned-reason',
+            });
+            emit.mockClear();
+            if (rejectAdvisory) throw new Error('Superseded advisory failed');
+            onProgress?.('Old advisory progress');
+            callbacks?.onPhaseStarted?.('advisory');
+            callbacks?.onPhaseCompleted?.('advisory', 'pass', advisoryResult);
+            return advisoryResult;
+          },
+        );
+        if (entry === 'trigger') await manager.triggerValidation(pod.id);
+        else await manager.revalidateSession(pod.id, { force: true });
+        expect(manager.getSession(pod.id)).toMatchObject({
+          status: 'running',
+          containerId: 'replacement-container',
+          lastValidationResult: replacement,
+          readinessReview: replacementReadiness,
+          failureReason: 'replacement-owned-reason',
+        });
+        expect(ctx.validationRepo.getLatest(pod.id)?.result.advisoryBrowserQa).toEqual(
+          rejectAdvisory ? undefined : advisoryResult,
+        );
+        // Cumulative known spend belongs to the same immutable pod/task, even after a new lifecycle.
+        expect(manager.getSession(pod.id).phaseTokenUsage?.advisory).toEqual(
+          rejectAdvisory ? undefined : advisoryResult.tokenUsage,
+        );
+        expect(emit).not.toHaveBeenCalled();
+        expect(ctx.containerManager.stop).not.toHaveBeenCalled();
+        expect(ctx.containerManager.kill).not.toHaveBeenCalled();
+        expect(ctx.runtime.resume).not.toHaveBeenCalled();
+      },
+    );
+
+    it('does not launch an advisory run superseded while waiting for the shared QA slot', async () => {
+      const ctx = createTestContext();
+      const manager = createPodManager(ctx.deps);
+      const advisory = ctx.validationEngine.runAdvisoryBrowserQa;
+      if (!advisory) throw new Error('Missing advisory fixture');
+      const slot = deferred<NonNullable<ValidationResult['advisoryBrowserQa']>>();
+      vi.mocked(advisory).mockImplementation(() => slot.promise);
+      const create = (task: string, containerId: string) => {
+        const pod = manager.createSession(
+          { profileName: 'test-profile', task, options: { advisoryBrowserQaEnabled: true } },
+          'user-1',
+        );
+        ctx.podRepo.update(pod.id, { status: 'running', containerId, worktreePath: '/tmp/wt' });
+        return pod;
+      };
+      const first = create('Hold advisory slot', 'first-container');
+      const second = create('Fence queued advisory', 'second-container');
+      const firstRun = manager.triggerValidation(first.id);
+      await waitForAssertion(() => expect(advisory).toHaveBeenCalledTimes(1));
+      const secondRun = manager.triggerValidation(second.id);
+      await waitForAssertion(() => expect(manager.getSession(second.id).status).toBe('validated'));
+      ctx.podRepo.incrementLifecycleGeneration(second.id);
+      ctx.podRepo.update(second.id, {
+        status: 'running',
+        containerId: 'replacement-container',
+        failureReason: 'replacement-owned-reason',
+      });
+      slot.resolve({
+        status: 'pass',
+        reasoning: 'First run finished',
+        observations: [],
+        screenshots: [],
+        durationMs: 10,
+      });
+      await Promise.all([firstRun, secondRun]);
+      expect(advisory).toHaveBeenCalledTimes(1);
+      expect(manager.getSession(second.id)).toMatchObject({
+        status: 'running',
+        containerId: 'replacement-container',
+        failureReason: 'replacement-owned-reason',
+      });
+      expect(ctx.containerManager.stop).not.toHaveBeenCalledWith('replacement-container');
+      expect(ctx.validationRepo.getLatest(second.id)?.result.advisoryBrowserQa).toBeUndefined();
+    });
+
     it('advisory completion preserves validation evidence attached while QA is running', async () => {
       const ctx = createTestContext();
       const manager = createPodManager(ctx.deps);
