@@ -265,9 +265,13 @@ export function createTaskExecutionLedger(db: Database.Database): TaskExecutionL
       SELECT i.pr_identity AS pr, MAX(
         EXISTS (SELECT 1 FROM merge_observations o WHERE o.intent_id = i.id AND o.disposition = 'merged')
         OR EXISTS (SELECT 1 FROM merge_disposition_observations o WHERE o.intent_id = i.id)
-      ) AS merged FROM merge_intents i WHERE i.task_id = ? GROUP BY i.pr_identity
+      ) AS merged,
+      (SELECT o.disposition FROM merge_status_observations o JOIN merge_intents observed ON observed.id = o.intent_id
+        WHERE observed.pr_identity = i.pr_identity AND observed.task_id = i.task_id ORDER BY o.sequence DESC LIMIT 1) AS lastStatus
+      FROM merge_intents i WHERE i.task_id = ? GROUP BY i.pr_identity
     ) SELECT COUNT(*) AS prCount, COALESCE(SUM(merged), 0) AS mergedPrCount,
-      COALESCE(SUM(NOT merged), 0) AS unresolvedPrCount,
+      COALESCE(SUM(NOT merged AND lastStatus = 'closed'), 0) AS closedPrCount,
+      COALESCE(SUM(NOT merged AND COALESCE(lastStatus, 'open') != 'closed'), 0) AS unresolvedPrCount,
       COALESCE(SUM(merged AND NOT EXISTS (
         SELECT 1 FROM merge_attempts a JOIN merge_intents i ON i.id = a.intent_id WHERE i.pr_identity = resources.pr
       )), 0) AS mergedWithoutRecordedRequestCount,
@@ -277,6 +281,7 @@ export function createTaskExecutionLedger(db: Database.Database): TaskExecutionL
       NonNullable<TaskExecutionSummary['merge']>,
       | 'prCount'
       | 'mergedPrCount'
+      | 'closedPrCount'
       | 'unresolvedPrCount'
       | 'mergedWithoutRecordedRequestCount'
       | 'requestCount'

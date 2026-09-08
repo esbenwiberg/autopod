@@ -33,6 +33,8 @@ export interface TaskExecutionSummary {
     /** Actual durable admissions for this task, including repeated acknowledged attempts. */
     requestCount: number;
     mergedPrCount: number;
+    /** Last source-bound status was closed without merge; unavailable on older servers. */
+    closedPrCount?: number;
     /** No request recorded for that PR in any task when its merge was observed. Does not identify an actor. */
     mergedWithoutRecordedRequestCount: number;
     unresolvedPrCount: number;

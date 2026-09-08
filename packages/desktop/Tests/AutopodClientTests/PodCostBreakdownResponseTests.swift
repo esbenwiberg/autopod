@@ -70,7 +70,7 @@ import Testing
     "tokenBudget": 100, "recordedInputTokens": 10, "recordedOutputTokens": 5,
     "recordedCostUsd": 0.5, "infrastructureCostUsd": null, "telemetry": "partial",
     "diagnostics": [],
-    "merge": { "prCount": 2, "requestCount": 3, "mergedPrCount": 1, "mergedWithoutRecordedRequestCount": 1, "unresolvedPrCount": 1, "scope": "source-bound-journal-only", "basis": "last-recorded", "liveVerified": false },
+    "merge": { "closedPrCount": 1, "prCount": 3, "requestCount": 3, "mergedPrCount": 1, "mergedWithoutRecordedRequestCount": 1, "unresolvedPrCount": 1, "scope": "source-bound-journal-only", "basis": "last-recorded", "liveVerified": false },
     "budgetCheck": { "status": "unavailable", "reason": "Task token accounting incomplete; reconcile prior execution telemetry." }
   }
   """.data(using: .utf8)!
@@ -78,12 +78,19 @@ import Testing
   #expect(response.recordedInputTokens + response.recordedOutputTokens == 15)
   #expect(response.tokenBudget == 100)
   #expect(response.merge?.requestCount == 3)
+  #expect(response.merge?.closedPrCount == 1)
   #expect(response.merge?.mergedPrCount == 1)
   #expect(response.merge?.mergedWithoutRecordedRequestCount == 1)
   #expect(response.merge?.liveVerified == false)
   #expect(response.budgetCheck?.status == "unavailable")
   #expect(response.budgetCheck?.reason.contains("reconcile prior execution telemetry") == true)
   var legacy = try #require(JSONSerialization.jsonObject(with: json) as? [String: Any])
+  var olderMerge = try #require(legacy["merge"] as? [String: Any])
+  olderMerge.removeValue(forKey: "closedPrCount")
+  legacy["merge"] = olderMerge
+  let olderMergeResponse = try JSONDecoder().decode(TaskExecutionSummary.self, from: JSONSerialization.data(withJSONObject: legacy))
+  #expect(olderMergeResponse.merge?.mergedPrCount == 1)
+  #expect(olderMergeResponse.merge?.closedPrCount == nil)
   legacy.removeValue(forKey: "budgetCheck")
   legacy.removeValue(forKey: "merge")
   let old = try JSONDecoder().decode(TaskExecutionSummary.self, from: JSONSerialization.data(withJSONObject: legacy))

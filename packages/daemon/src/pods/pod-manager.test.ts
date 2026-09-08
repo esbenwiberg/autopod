@@ -5008,6 +5008,140 @@ describe('PodManager', () => {
   });
 
   describe('approveSession', () => {
+    it('retains validated source when approval observes a closed planned PR and offers the available approval recovery', async () => {
+      const ctx = createTestContext();
+      const manager = createPodManager(ctx.deps);
+      const pod = manager.createSession(
+        { profileName: 'test-profile', task: 'Closed during approval' },
+        'user-1',
+      );
+      ctx.podRepo.update(
+        pod.id,
+        validatedPodUpdates(pod.id, { containerId: 'approval-source', filesChanged: 1 }),
+      );
+      const status = seedPollDelivery(ctx, pod.id, true);
+      ctx.podRepo.update(pod.id, { status: 'validated' });
+      vi.mocked(ctx.prManager.getPrStatus).mockResolvedValue({
+        ...status,
+        merged: false,
+        open: false,
+      });
+      await expect(manager.approveSession(pod.id)).rejects.toMatchObject({
+        code: 'APPROVAL_DELIVERY_FAILED',
+      });
+      expect(manager.getSession(pod.id)).toMatchObject({
+        status: 'validated',
+        containerId: 'approval-source',
+        failureReason: expect.stringContaining('retry approval'),
+      });
+      expect(ctx.prManager.mergePr).not.toHaveBeenCalled();
+      expect(ctx.worktreeManager.pushBranch).not.toHaveBeenCalled();
+      expect(ctx.containerManager.kill).not.toHaveBeenCalled();
+      vi.mocked(ctx.prManager.getPrStatus).mockResolvedValue({
+        ...status,
+        merged: false,
+        open: true,
+      });
+      await manager.approveSession(pod.id);
+      expect(manager.getSession(pod.id).status).toBe('complete');
+      expect(ctx.prManager.mergePr).toHaveBeenCalledTimes(1);
+    });
+
+    it.each(['planned', 'admitted', 'acknowledged'] as const)(
+      'retains a closed PR and stops polling without inventing merge acceptance (%s)',
+      async (state) => {
+        const planned = state === 'planned';
+        const retryable = state !== 'admitted';
+        vi.useFakeTimers();
+        try {
+          const ctx = createTestContext();
+          const manager = createPodManager(ctx.deps);
+          const pod = manager.createSession(
+            { profileName: 'test-profile', task: 'Retain closed PR' },
+            'user-1',
+          );
+          ctx.podRepo.update(
+            pod.id,
+            validatedPodUpdates(pod.id, { containerId: 'closed-source', filesChanged: 1 }),
+          );
+          const status = seedPollDelivery(ctx, pod.id, planned);
+          if (state === 'acknowledged') {
+            const journal = ctx.podRepo.mergeJournal;
+            const attemptId = journal?.find(ctx.podRepo.getOrThrow(pod.id))?.attemptId;
+            if (!journal || !attemptId) throw new Error('Missing fixture admission');
+            journal.observe(
+              attemptId,
+              { merged: false, autoMergeScheduled: false },
+              'merge_response',
+            );
+          }
+          vi.mocked(ctx.prManager.getPrStatus).mockResolvedValue({
+            ...status,
+            merged: false,
+            open: false,
+            blockReason: 'Closed by provider',
+          });
+          vi.clearAllTimers();
+          const restarted = createPodManager(ctx.deps);
+          await vi.advanceTimersByTimeAsync(0);
+          expect(restarted.getSession(pod.id)).toMatchObject({
+            status: 'failed',
+            containerId: 'closed-source',
+            completedAt: null,
+          });
+          expect(restarted.getSession(pod.id).failureReason).toContain(
+            retryable ? 'Reopen the existing PR' : 'recorded merge request remains unresolved',
+          );
+          expect(ctx.prManager.mergePr).not.toHaveBeenCalled();
+          expect(ctx.worktreeManager.pushBranch).not.toHaveBeenCalled();
+          expect(ctx.containerManager.kill).not.toHaveBeenCalled();
+          expect(
+            ctx.db.prepare('SELECT count(*) AS n FROM merge_status_observations').get(),
+          ).toEqual({ n: 1 });
+          const reads = vi.mocked(ctx.prManager.getPrStatus).mock.calls.length;
+          await vi.advanceTimersByTimeAsync(120000);
+          expect(ctx.prManager.getPrStatus).toHaveBeenCalledTimes(reads);
+          expect(ctx.podRepo.taskExecutions?.snapshot(pod.id).merge).toMatchObject({
+            closedPrCount: 1,
+            mergedPrCount: 0,
+            requestCount: planned ? 0 : 1,
+          });
+          // A human reopens the provider PR outside this fixture. Resume only validates.
+          vi.mocked(ctx.prManager.getPrStatus).mockResolvedValue({
+            ...status,
+            merged: false,
+            open: true,
+            blockReason: null,
+          });
+          expect(await restarted.resumePod(pod.id)).toEqual({ action: 'revalidate' });
+          expect(restarted.getSession(pod.id).status).toBe('validated');
+          expect(ctx.validationEngine.validate).toHaveBeenCalled();
+          expect(ctx.prManager.mergePr).not.toHaveBeenCalled();
+          const approval = restarted.approveSession(pod.id, {
+            reason: 'Synthetic operator reviewed the reopened PR after retained-source validation',
+          });
+          if (retryable) {
+            await approval;
+            expect(restarted.getSession(pod.id).status).toBe('complete');
+            expect(ctx.prManager.mergePr).toHaveBeenCalledTimes(1);
+            expect(ctx.podRepo.taskExecutions?.snapshot(pod.id).merge).toMatchObject({
+              closedPrCount: 0,
+              mergedPrCount: 1,
+              requestCount: planned ? 1 : 2,
+            });
+          } else {
+            await expect(approval).rejects.toMatchObject({ code: 'APPROVAL_DELIVERY_FAILED' });
+            expect(ctx.prManager.mergePr).not.toHaveBeenCalled();
+            expect(ctx.containerManager.kill).not.toHaveBeenCalled();
+          }
+          expect(ctx.runtime.spawn).not.toHaveBeenCalled();
+          expect(ctx.runtime.resume).not.toHaveBeenCalled();
+        } finally {
+          vi.useRealTimers();
+        }
+      },
+    );
+
     it.each(['local-source', 'provider-source', 'decision'] as const)(
       'retains a planned externally merged PR when %s prevents acceptance',
       async (fault) => {

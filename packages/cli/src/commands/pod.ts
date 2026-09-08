@@ -733,6 +733,7 @@ export function registerPodCommands(program: Command, getClient: () => AutopodCl
           console.log(
             `${merge.mergedWithoutRecordedRequestCount} merged PRs observed with no recorded request; merge actor is not inferred.`,
           );
+          console.log(`Last recorded closed PRs: ${merge.closedPrCount ?? 'unavailable'}`);
           console.log('Source-bound journal only; historical PR URLs excluded.');
         } else console.log('Source-bound merge evidence unavailable.');
         console.log('Current provider status unverified.');

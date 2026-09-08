@@ -1,7 +1,12 @@
 import { createHash, randomUUID } from 'node:crypto';
 import type { Pod } from '@autopod/shared';
 import type Database from 'better-sqlite3';
-import type { MergePrConfig, MergePrResult, MergePrTarget } from '../interfaces/pr-manager.js';
+import type {
+  MergePrConfig,
+  MergePrResult,
+  MergePrTarget,
+  PrMergeStatus,
+} from '../interfaces/pr-manager.js';
 import { parseGitHubPrUrl } from '../worktrees/github-url-identity.js';
 import {
   assertMergeRepository,
@@ -28,6 +33,7 @@ export interface MergeJournalEntry {
   request: MergeRequest;
   state: 'planned' | 'admitted' | 'pending' | 'merged';
   result: MergePrResult | null;
+  prDisposition?: 'open' | 'closed';
 }
 export interface MergeJournal {
   plan(
@@ -40,6 +46,7 @@ export interface MergeJournal {
   check(pod: Pod, entry: MergeJournalEntry): void;
   claim(pod: Pod, publicationPod: Pod, publicationId: string, config: MergePrConfig): string;
   observeDisposition(intentId: string, result: MergePrResult): void;
+  observeStatus(intentId: string, status: PrMergeStatus): void;
   observe(
     attemptId: string,
     result: MergePrResult,
@@ -147,9 +154,15 @@ export function createMergeJournal(db: Database.Database): MergeJournal {
           'SELECT disposition, result FROM merge_disposition_observations WHERE intent_id = ?',
         )
         .get(row.id)) as { disposition: 'pending' | 'merged'; result: string } | undefined;
+    const status = db
+      .prepare(
+        'SELECT o.disposition, o.intent_id AS intentId FROM merge_status_observations o JOIN merge_intents i ON i.id = o.intent_id WHERE i.pr_identity = (SELECT pr_identity FROM merge_intents WHERE id = ?) ORDER BY o.sequence DESC LIMIT 1',
+      )
+      .get(row.id) as { disposition: 'open' | 'closed' } | undefined;
     return {
       id: row.id,
       publicationId: row.publicationId,
+      ...(status ? { prDisposition: status.disposition } : {}),
       attemptId: attempt?.id ?? null,
       request: requestFrom(row),
       state: observation?.disposition ?? (attempt ? 'admitted' : 'planned'),
@@ -226,6 +239,14 @@ export function createMergeJournal(db: Database.Database): MergeJournal {
         OR EXISTS (SELECT 1 FROM merge_disposition_observations o WHERE o.intent_id = i.id)) LIMIT 1`)
       .get(resource);
     if (confirmed) return mergeReconciliation('This merge is already confirmed.');
+    const lastStatus = db
+      .prepare(`SELECT o.disposition FROM merge_status_observations o
+      JOIN merge_intents i ON i.id = o.intent_id WHERE i.pr_identity = ? ORDER BY o.sequence DESC LIMIT 1`)
+      .get(resource) as { disposition: string } | undefined;
+    if (lastStatus?.disposition === 'closed')
+      return mergeReconciliation(
+        'The PR was observed closed; reconcile its source-bound status before another request.',
+      );
     const uncertain = db
       .prepare(
         'SELECT a.id FROM merge_attempts a JOIN merge_intents i ON i.id = a.intent_id WHERE i.pr_identity = ? AND NOT EXISTS (SELECT 1 FROM merge_observations o WHERE o.attempt_id = a.id) LIMIT 1',
@@ -292,6 +313,43 @@ export function createMergeJournal(db: Database.Database): MergeJournal {
           return attemptId;
         })
         .immediate();
+    },
+    observeStatus(intentId, status) {
+      if (db.inTransaction)
+        return mergeReconciliation('PR status cannot share an uncommitted transaction.');
+      db.transaction(() => {
+        const row = db.prepare(`SELECT ${columns} FROM merge_intents WHERE id = ?`).get(intentId) as
+          | IntentRow
+          | undefined;
+        if (
+          !row ||
+          status.merged !== false ||
+          typeof status.open !== 'boolean' ||
+          !status.headSha ||
+          !status.sourceTarget
+        )
+          return mergeReconciliation(
+            'The provider did not confirm the planned PR source and target.',
+          );
+        const request = requestFrom(row);
+        assertMergeSource(request.config.expectedHeadSha, status.headSha);
+        assertMergeTarget(request.config.expectedTarget, status.sourceTarget);
+        const disposition = status.open ? 'open' : 'closed';
+        const last = db
+          .prepare(
+            'SELECT o.disposition, o.intent_id AS intentId FROM merge_status_observations o JOIN merge_intents i ON i.id = o.intent_id WHERE i.pr_identity = (SELECT pr_identity FROM merge_intents WHERE id = ?) ORDER BY o.sequence DESC LIMIT 1',
+          )
+          .get(intentId) as { disposition: string; intentId: string } | undefined;
+        if (last?.disposition === disposition && last.intentId === intentId) return;
+        db.prepare(
+          'INSERT INTO merge_status_observations (intent_id, disposition, source, observed_at) VALUES (?, ?, ?, ?)',
+        ).run(
+          intentId,
+          disposition,
+          JSON.stringify({ headSha: status.headSha, target: { ...request.config.expectedTarget } }),
+          new Date().toISOString(),
+        );
+      }).immediate();
     },
     observeDisposition(intentId, result) {
       if (db.inTransaction)

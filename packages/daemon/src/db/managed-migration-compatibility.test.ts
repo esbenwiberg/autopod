@@ -44,6 +44,7 @@ it('upgrades the independently deployed managed schema without skipping native r
       'merge_attempts',
       'merge_observations',
       'merge_disposition_observations',
+      'merge_status_observations',
       'scheduled_scan_reports',
       'task_retry_attempts',
       'execution_dispatch_bindings',

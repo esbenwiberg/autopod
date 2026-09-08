@@ -79,6 +79,101 @@ function fixture(
 }
 
 describe('durable merge journal', () => {
+  it('requires a fresh source-bound reopening across equivalent intents for the same PR', () => {
+    const f = fixture();
+    try {
+      const first = f.journal.plan(f.pod, f.publicationPod, f.publicationId, f.config);
+      const second = f.journal.plan(f.pod, f.publicationPod, f.publicationId, {
+        ...f.config,
+        squash: true,
+      });
+      const status = {
+        merged: false,
+        open: false,
+        headSha: f.proof.commitSha,
+        sourceTarget: f.config.expectedTarget,
+        blockReason: null,
+        ciFailures: [],
+        reviewComments: [],
+      };
+      f.journal.observeStatus(second.id, { ...status, open: true });
+      f.journal.observeStatus(first.id, status);
+      expect(f.journal.find(f.pod)).toMatchObject({ id: second.id, prDisposition: 'closed' });
+      expect(() =>
+        f.journal.claim(f.pod, f.publicationPod, f.publicationId, { ...f.config, squash: true }),
+      ).toThrow('closed');
+      f.journal.observeStatus(second.id, { ...status, open: true });
+      expect(f.journal.find(f.pod)).toMatchObject({ id: second.id, prDisposition: 'open' });
+      f.journal.claim(f.pod, f.publicationPod, f.publicationId, { ...f.config, squash: true });
+      expect(f.db.prepare('SELECT count(*) AS n FROM merge_attempts').get()).toEqual({ n: 1 });
+    } finally {
+      f.db.close();
+    }
+  });
+
+  it('preserves closed and reopened source observations without treating closure as merge or retry permission', () => {
+    const f = fixture();
+    try {
+      const planned = f.journal.plan(f.pod, f.publicationPod, f.publicationId, f.config);
+      const status = {
+        merged: false,
+        open: false,
+        headSha: f.proof.commitSha,
+        sourceTarget: f.config.expectedTarget,
+        blockReason: 'Closed',
+        ciFailures: [],
+        reviewComments: [],
+      };
+      f.journal.observeStatus(planned.id, status);
+      f.journal.observeStatus(planned.id, status);
+      const reopened = createMergeJournal(f.db);
+      expect(reopened.find(f.pod)).toMatchObject({
+        state: 'planned',
+        prDisposition: 'closed',
+        attemptId: null,
+      });
+      expect(f.repo.taskExecutions?.snapshot(f.pod.id).merge).toMatchObject({
+        mergedPrCount: 0,
+        closedPrCount: 1,
+        unresolvedPrCount: 0,
+        requestCount: 0,
+      });
+      expect(() => reopened.claim(f.pod, f.publicationPod, f.publicationId, f.config)).toThrow(
+        'closed',
+      );
+      reopened.observeStatus(planned.id, { ...status, open: true });
+      expect(f.repo.taskExecutions?.snapshot(f.pod.id).merge).toMatchObject({
+        mergedPrCount: 0,
+        closedPrCount: 0,
+        unresolvedPrCount: 1,
+      });
+      const attempt = reopened.claim(f.pod, f.publicationPod, f.publicationId, f.config);
+      reopened.observeStatus(planned.id, status);
+      reopened.observeStatus(planned.id, { ...status, open: true });
+      expect(() => reopened.claim(f.pod, f.publicationPod, f.publicationId, f.config)).toThrow(
+        'ambiguous',
+      );
+      expect(reopened.find(f.pod)).toMatchObject({
+        attemptId: attempt,
+        state: 'admitted',
+        prDisposition: 'open',
+      });
+      expect(
+        f.db.prepare('SELECT disposition FROM merge_status_observations ORDER BY sequence').all(),
+      ).toEqual([
+        { disposition: 'closed' },
+        { disposition: 'open' },
+        { disposition: 'closed' },
+        { disposition: 'open' },
+      ]);
+      expect(() =>
+        f.db.prepare('UPDATE merge_status_observations SET observed_at = observed_at').run(),
+      ).toThrow('immutable');
+    } finally {
+      f.db.close();
+    }
+  });
+
   it('counts duplicate source-bound dispositions for one canonical PR once and isolates intentional reruns', () => {
     const f = fixture();
     try {
@@ -97,6 +192,7 @@ describe('durable merge journal', () => {
         mergedPrCount: 1,
         mergedWithoutRecordedRequestCount: 1,
         unresolvedPrCount: 0,
+        closedPrCount: 0,
         scope: 'source-bound-journal-only',
         basis: 'last-recorded',
         liveVerified: false,
@@ -142,8 +238,29 @@ describe('durable merge journal', () => {
       db.close();
       db = new Database(path);
       const restarted = createMergeJournal(db);
-      restarted.observeDisposition(planned.id, f.result);
-      restarted.observeDisposition(planned.id, f.result);
+      const closed = {
+        merged: false,
+        open: false,
+        headSha: f.proof.commitSha,
+        sourceTarget: f.config.expectedTarget,
+        blockReason: null,
+        ciFailures: [],
+        reviewComments: [],
+      };
+      restarted.observeStatus(planned.id, closed);
+      db.close();
+      db = new Database(path);
+      const afterClosure = createMergeJournal(db);
+      expect(afterClosure.find(f.pod)).toMatchObject({ state: 'planned', prDisposition: 'closed' });
+      expect(() =>
+        afterClosure.observeStatus(planned.id, { ...closed, open: true, headSha: 'c'.repeat(40) }),
+      ).toThrow();
+      expect(() => afterClosure.claim(f.pod, f.publicationPod, f.publicationId, f.config)).toThrow(
+        'closed',
+      );
+      afterClosure.observeStatus(planned.id, { ...closed, open: true });
+      afterClosure.observeDisposition(planned.id, f.result);
+      afterClosure.observeDisposition(planned.id, f.result);
       db.close();
       db = new Database(path);
       const recovered = createMergeJournal(db);

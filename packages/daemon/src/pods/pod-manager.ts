@@ -160,6 +160,7 @@ import { buildValidationContextEnv } from '../validation/validation-context-env.
 import { createValidationIdentityCollector } from '../validation/validation-identity-collector.js';
 import { pushCommitsToBareViaStagingRef } from '../worktrees/bare-push.js';
 import {
+  closedPrRecoveryReason,
   inspectRetainedMergeSource,
   mergePublishedSource,
   reconcileMerge,
@@ -4405,6 +4406,17 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
               ),
             );
           } else {
+            if (status.open === false) {
+              journal.observeStatus(entry.id, status);
+              assertCurrent();
+              const reason = closedPrRecoveryReason(entry);
+              transition(pod, 'failed', { failureReason: reason, mergeBlockReason: reason });
+              assertCurrent({ status: 'failed' });
+              emitActivityStatus(podId, reason);
+              ownership.stop();
+              return;
+            }
+            if (entry.prDisposition === 'closed') journal.observeStatus(entry.id, status);
             if (
               (entry.state !== 'pending' && entry.state !== 'planned') ||
               entry.result?.autoMergeScheduled ||
@@ -4496,22 +4508,6 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           assertCurrent({ allowRemovedContainer: true, status: 'complete' });
           ownership.stop();
           maybeTriggerDependents(mergedPod);
-          return;
-        }
-
-        if (!status.open) {
-          emitActivityStatus(
-            podId,
-            `PR closed without merging: ${status.blockReason ?? 'unknown reason'}`,
-          );
-          assertCurrent();
-          transition(pod, 'failed', { mergeBlockReason: status.blockReason });
-          logger.warn(
-            { podId, prUrl: pod.prUrl, reason: status.blockReason },
-            'Merge polling: PR closed — pod failed',
-          );
-          assertCurrent({ status: 'failed' });
-          ownership.stop();
           return;
         }
 
@@ -11759,6 +11755,15 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
                 })
               : undefined;
           assertApprovalCurrent(pod);
+          if (
+            entry &&
+            observedStatus?.merged === false &&
+            (observedStatus.open === false || entry.prDisposition === 'closed')
+          ) {
+            podRepo.mergeJournal.observeStatus(entry.id, observedStatus);
+            if (!observedStatus.open)
+              mergeReconciliation(closedPrRecoveryReason(entry, pod.status));
+          }
           if (
             entry &&
             (observedStatus?.merged ||

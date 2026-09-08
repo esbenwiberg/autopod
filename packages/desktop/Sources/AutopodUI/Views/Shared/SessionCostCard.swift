@@ -43,6 +43,7 @@ public struct SessionCostCard: View {
                     if let merge = task.merge {
                         Text("Source-bound merges: \(merge.mergedPrCount) merged PRs · \(merge.requestCount) recorded requests · \(merge.unresolvedPrCount) unresolved of \(merge.prCount) PRs")
                         Text("\(merge.mergedWithoutRecordedRequestCount) merged PRs observed with no recorded request; merge actor is not inferred.")
+                        Text("Last recorded closed PRs: \(merge.closedPrCount.map(String.init) ?? "unavailable")")
                         Text("Source-bound journal only; historical PR URLs excluded.").font(.caption).foregroundStyle(.secondary)
                     } else {
                         Text("Source-bound merge evidence unavailable.").font(.caption).foregroundStyle(.secondary)

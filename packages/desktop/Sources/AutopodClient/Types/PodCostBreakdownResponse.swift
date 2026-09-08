@@ -130,6 +130,7 @@ public struct TaskMergeSummaryResponse: Codable, Equatable, Sendable {
   public let prCount: Int
   public let requestCount: Int
   public let mergedPrCount: Int
+  public let closedPrCount: Int?
   public let mergedWithoutRecordedRequestCount: Int
   public let unresolvedPrCount: Int
   public let scope: String

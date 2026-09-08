@@ -60,6 +60,7 @@ export function TaskExecutionPanel({ podId, revision }: { podId: string; revisio
                 {data.merge.mergedWithoutRecordedRequestCount} merged PRs observed with no recorded
                 request; merge actor is not inferred.
               </p>
+              <p>Last recorded closed PRs: {data.merge.closedPrCount ?? 'unavailable'}</p>
               <p className="muted">Source-bound journal only; historical PR URLs excluded.</p>
             </>
           ) : (

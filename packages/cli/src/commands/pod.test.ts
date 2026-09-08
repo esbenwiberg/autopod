@@ -495,7 +495,8 @@ it.each([true, false])(
       ...(hasDisposition
         ? {
             merge: {
-              prCount: 2,
+              closedPrCount: 1,
+              prCount: 3,
               requestCount: 3,
               mergedPrCount: 1,
               mergedWithoutRecordedRequestCount: 1,
@@ -582,13 +583,14 @@ it.each([true, false])(
       );
       expect(output).toContain(
         hasDisposition
-          ? 'Source-bound merges: 1 merged PRs · 3 recorded requests · 1 unresolved of 2 PRs'
+          ? 'Source-bound merges: 1 merged PRs · 3 recorded requests · 1 unresolved of 3 PRs'
           : 'Source-bound merge evidence unavailable.',
       );
       if (hasDisposition)
         expect(output).toContain(
           '1 merged PRs observed with no recorded request; merge actor is not inferred.',
         );
+      if (hasDisposition) expect(output).toContain('Last recorded closed PRs: 1');
       expect(output).toContain('Current provider status unverified.');
       expect(output).toContain(
         'Task token accounting incomplete; reconcile prior execution telemetry.',

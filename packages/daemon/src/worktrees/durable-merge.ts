@@ -11,6 +11,21 @@ import type { SourcePublicationLedger } from '../pods/source-publication-ledger.
 import type { ConfirmedSourcePublication } from './durable-source-publication.js';
 import { mergeReconciliation } from './merge-source-identity.js';
 
+export function closedPrRecoveryReason(
+  entry: MergeJournalEntry,
+  status: Pod['status'] = 'merge_pending',
+): string {
+  const recovery =
+    entry.state === 'merged'
+      ? 'A source-bound merge is already recorded; reconcile the conflicting provider status before cleanup.'
+      : entry.state === 'admitted' || entry.result?.autoMergeScheduled
+        ? 'The recorded merge request remains unresolved; reconcile that request before retrying delivery.'
+        : status === 'validated'
+          ? 'Reopen the existing PR, then retry approval of the retained validated source.'
+          : 'Reopen the existing PR, then use Resume to revalidate retained source before approving delivery.';
+  return `PR closed without merging. Original resources retained. ${recovery}`;
+}
+
 /** An open/absent PR response never proves that an ambiguous mutation failed. */
 export async function reconcileMerge(
   journal: MergeJournal,
@@ -27,6 +42,11 @@ export async function reconcileMerge(
       prUrl: entry.request.config.prUrl,
       worktreePath: pod.worktreePath ?? undefined,
     }));
+  if (status.merged === false && status.open === false) {
+    journal.observeStatus(entry.id, status);
+    journal.check(pod, entry);
+    return mergeReconciliation(closedPrRecoveryReason(entry, pod.status));
+  }
   if (status.merged !== true || !status.headSha || !status.sourceTarget)
     return mergeReconciliation(
       'The earlier merge is not confirmed for its admitted source and target.',

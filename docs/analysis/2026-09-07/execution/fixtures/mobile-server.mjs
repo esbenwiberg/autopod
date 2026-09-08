@@ -184,9 +184,11 @@ if (startupRetryFixture) {
   retryState.interruptedCount = 0;
   retryState.latest = { id: 'local-startup-failure', outcome: 'transient' };
 }
-const deliveryDispositionFixture = ['delivery-disposition', 'merge-disposition'].includes(
-  process.env.FIXTURE_MODE,
-);
+const deliveryDispositionFixture = [
+  'delivery-disposition',
+  'merge-disposition',
+  'closed-merge',
+].includes(process.env.FIXTURE_MODE);
 let deliveryDispositionReads = 0;
 const missingSourceFixture = process.env.FIXTURE_MODE === 'approval-source-missing';
 const normalDeliveryFixture = process.env.FIXTURE_MODE === 'approval-delivery';
@@ -219,6 +221,16 @@ if (legacyDeliveryFixture)
     failureReason:
       'Delivery history is unavailable. Original resources retained. Use Resume to revalidate the retained source before approving delivery.',
     mergeBlockReason: null,
+  };
+const closedMergeFixture = process.env.FIXTURE_MODE === 'closed-merge';
+if (closedMergeFixture)
+  pod = {
+    ...pod,
+    status: 'failed',
+    pendingEscalation: null,
+    task: '[Local fixture] Retained closed PR',
+    failureReason:
+      'PR closed without merging. Original resources retained. Reopen the existing PR, then use Resume to revalidate retained source before approving delivery.',
   };
 const costPayloadLimitFixture = process.env.FIXTURE_MODE === 'cost-payload-limit';
 const taskBudgetFixture = process.env.TASK_BUDGET_FIXTURE === '1' || costPayloadLimitFixture;
@@ -598,6 +610,21 @@ const server = createServer(async (req, res) => {
               },
             ],
           },
+      ...(closedMergeFixture && deliveryDispositionReads > 1
+        ? {
+            merge: {
+              prCount: 1,
+              requestCount: 0,
+              mergedPrCount: 0,
+              closedPrCount: 1,
+              mergedWithoutRecordedRequestCount: 0,
+              unresolvedPrCount: 0,
+              scope: 'source-bound-journal-only',
+              basis: 'last-recorded',
+              liveVerified: false,
+            },
+          }
+        : {}),
       infrastructureCostUsd: null,
       ...(process.env.FIXTURE_MODE === 'merge-disposition' && deliveryDispositionReads > 1
         ? {
@@ -623,8 +650,8 @@ const server = createServer(async (req, res) => {
           ? {
               disposition: {
                 openCount: 0,
-                mergedCount: 1,
-                closedCount: 0,
+                mergedCount: closedMergeFixture ? 0 : 1,
+                closedCount: closedMergeFixture ? 1 : 0,
                 unavailableCount: 0,
                 basis: 'last-recorded',
                 liveVerified: false,
