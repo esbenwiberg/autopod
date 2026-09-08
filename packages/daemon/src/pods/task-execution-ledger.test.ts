@@ -338,6 +338,47 @@ describe('task-wide execution accounting', () => {
     }
   });
 
+  it.each(['root', 'fix'])('does not erase %s with an unsettled linked execution', (podId) => {
+    const { db, repo } = fixture();
+    try {
+      repo.update('root', { tokenBudget: null });
+      repo.taskExecutions?.beginRun('fix', 1, 1, binding);
+      repo.update('fix', { status: 'failed' });
+      expect(() => repo.delete(podId)).toThrow(/unsettled.*execution/i);
+      expect(repo.getOrThrow('fix').id).toBe('fix');
+      expect(repo.taskExecutions?.snapshot('root').agentRunCount).toBe(1);
+      expect(() => repo.taskExecutions?.beginRun('root', 1, 1, binding)).toThrow(/still active/);
+    } finally {
+      db.close();
+    }
+  });
+
+  it('rolls back reference cleanup when the final pod deletion fails', () => {
+    const { db, repo } = fixture();
+    try {
+      db.prepare(
+        "UPDATE pods SET fix_pod_id = 'rerun', depends_on_pod_id = 'rerun', depends_on_pod_ids = '[\"rerun\"]' WHERE id = 'root'",
+      ).run();
+      db.exec(`CREATE TRIGGER reject_test_delete BEFORE DELETE ON pods
+        WHEN OLD.id = 'rerun' BEGIN SELECT RAISE(ABORT, 'fixture deletion failure'); END`);
+      expect(() => repo.delete('rerun')).toThrow('fixture deletion failure');
+      expect(
+        db
+          .prepare(
+            'SELECT fix_pod_id, depends_on_pod_id, depends_on_pod_ids FROM pods WHERE id = ?',
+          )
+          .get('root'),
+      ).toEqual({
+        fix_pod_id: 'rerun',
+        depends_on_pod_id: 'rerun',
+        depends_on_pod_ids: '["rerun"]',
+      });
+      expect(repo.getOrThrow('rerun').id).toBe('rerun');
+    } finally {
+      db.close();
+    }
+  });
+
   it('retains task/run identity through restart and linked fixes while intentional reruns remain distinct', () => {
     const { db, repo } = fixture();
     // This case tests lineage and settlement with no configured spending cap.

@@ -1,0 +1,26 @@
+
+ RUN  v4.1.11 /private/tmp/autopod-durable-execution/packages/daemon
+
+ ❯ src/pods/task-execution-ledger.test.ts (25 tests | 1 failed | 24 skipped) 92ms
+     × does not erase an unsettled linked execution and thereby clear the task admission guard 91ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/pods/task-execution-ledger.test.ts > task-wide execution accounting > does not erase an unsettled linked execution and thereby clear the task admission guard
+TypeError: repo.get is not a function
+ ❯ src/pods/task-execution-ledger.test.ts:348:19
+    346|       repo.update('fix', { status: 'failed' });
+    347|       expect(() => repo.delete('fix')).toThrow(/unsettled.*execution/i…
+    348|       expect(repo.get('fix')).not.toBeNull();
+       |                   ^
+    349|       expect(repo.taskExecutions?.snapshot('root').agentRunCount).toBe…
+    350|       expect(() => repo.taskExecutions?.beginRun('root', 1, 1, binding…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed | 1 passed (2)
+      Tests  1 failed | 1 passed | 629 skipped (631)
+   Start at  17:36:19
+   Duration  1.70s (transform 1.35s, setup 0ms, import 2.13s, tests 152ms, environment 0ms)
+

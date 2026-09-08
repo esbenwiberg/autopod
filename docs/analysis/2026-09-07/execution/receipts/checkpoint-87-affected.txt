@@ -1,0 +1,67 @@
+
+ RUN  v4.1.11 /private/tmp/autopod-durable-execution/packages/daemon
+
+ ❯ src/pods/task-execution-ledger.test.ts (25 tests | 1 failed) 1361ms
+     × does not erase an unsettled linked execution and thereby clear the task admission guard 62ms
+ ❯ src/pods/pod-manager.test.ts (606 tests | 2 failed) 33764ms
+       × records legacy API provenance before real SDK HTTP dispatch and fences stale replay 5030ms
+       × starts a daemon host-port preview proxy for sandbox pods 43ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 3 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/pods/pod-manager.test.ts > PodManager > triggerValidation > records legacy API provenance before real SDK HTTP dispatch and fences stale replay
+Error: Test timed out in 5000ms.
+If this is a long-running test, pass a timeout value as the last argument or configure it globally with "testTimeout".
+ ❯ src/pods/pod-manager.test.ts:15019:5
+    15017|     });
+    15018|
+    15019|     it('records legacy API provenance before real SDK HTTP dispatch an…
+       |     ^
+    15020|       const ctx = createTestContext();
+    15021|       ctx.db
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/3]⎯
+
+ FAIL  src/pods/pod-manager.test.ts > PodManager > triggerValidation — loud-fail on push > starts a daemon host-port preview proxy for sandbox pods
+Error: listen EPERM: operation not permitted 0.0.0.0:46633
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/3]⎯
+
+ FAIL  src/pods/task-execution-ledger.test.ts > task-wide execution accounting > does not erase an unsettled linked execution and thereby clear the task admission guard
+TypeError: repo.get is not a function
+ ❯ src/pods/task-execution-ledger.test.ts:348:19
+    346|       repo.update('fix', { status: 'failed' });
+    347|       expect(() => repo.delete('fix')).toThrow(/unsettled.*execution/i…
+    348|       expect(repo.getOrThrow('fix').id).toBe('fix');
+       |                   ^
+    349|       expect(repo.taskExecutions?.snapshot('root').agentRunCount).toBe…
+    350|       expect(() => repo.taskExecutions?.beginRun('root', 1, 1, binding…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/3]⎯
+
+⎯⎯⎯⎯⎯⎯ Unhandled Errors ⎯⎯⎯⎯⎯⎯
+
+Vitest caught 1 unhandled error during the test run.
+This might cause false positive tests. Resolve unhandled errors to make sure your tests are not affected.
+
+⎯⎯⎯⎯⎯ Uncaught Exception ⎯⎯⎯⎯⎯
+Error: listen EPERM: operation not permitted 127.0.0.1
+ ❯ Server.setupListenHandle [as _listen2] node:net:1987:21
+ ❯ listenInCluster node:net:2066:12
+ ❯ node:net:2275:7
+ ❯ processTicksAndRejections node:internal/process/task_queues:90:21
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯
+Serialized Error: { code: 'EPERM', errno: -1, syscall: 'listen', address: '127.0.0.1' }
+This error originated in "src/pods/pod-manager.test.ts" test file. It doesn't mean the error was thrown inside the file itself, but while it was running.
+The latest test that might've caused the error is "records legacy API provenance before real SDK HTTP dispatch and fences stale replay". It might mean one of the following:
+- The error was thrown, while Vitest was running this test.
+- If the error occurred after the test had been completed, this was the last documented test before it was thrown.
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯
+
+
+ Test Files  2 failed | 3 passed (5)
+      Tests  3 failed | 723 passed (726)
+     Errors  1 error
+   Start at  17:40:37
+   Duration  36.04s (transform 1.45s, setup 0ms, import 2.40s, tests 39.64s, environment 0ms)
+

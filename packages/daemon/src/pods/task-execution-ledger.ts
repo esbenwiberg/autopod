@@ -37,6 +37,8 @@ export interface TaskExecutionLedger {
   snapshot(podId: string): TaskExecutionSummary;
   /** Unsettled durable evidence; not proof that a provider process is still alive. */
   hasActiveRun(podId: string): boolean;
+  /** Prevent application deletion from erasing unresolved ownership anywhere in this task. */
+  assertCanDelete(podId: string): void;
   /** Across this logical task, including retained failed runs in linked pods. */
   hasUnverifiedTermination(podId: string): boolean;
   beginRun(podId: string, generation: number, cycle: number, binding: ExecutionBinding): string;
@@ -442,6 +444,20 @@ export function createTaskExecutionLedger(db: Database.Database): TaskExecutionL
           .prepare('SELECT 1 FROM task_agent_runs WHERE pod_id = ? AND ended_at IS NULL LIMIT 1')
           .get(podId),
       ),
+    assertCanDelete(podId) {
+      const retained = db
+        .prepare(`SELECT 1 FROM task_agent_runs r
+        JOIN task_executions e ON e.pod_id = r.pod_id
+        WHERE e.task_id = (SELECT task_id FROM task_executions WHERE pod_id = ?)
+          AND r.ended_at IS NULL LIMIT 1`)
+        .get(podId);
+      if (retained)
+        throw new AutopodError(
+          'This logical task has an unsettled worker execution. Retain its source and resources; reconcile the execution before deleting a pod or its task evidence.',
+          'TASK_EXECUTION_UNSETTLED',
+          409,
+        );
+    },
     hasUnverifiedTermination: (podId) =>
       Boolean(
         db

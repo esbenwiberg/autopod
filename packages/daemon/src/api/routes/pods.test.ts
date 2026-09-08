@@ -3310,6 +3310,35 @@ describe('POST /pods/:podId/spawn-fix', () => {
     return podId;
   }
 
+  it('returns a readable 409 and retains evidence on repeated deletion of an unsettled task', async () => {
+    const podId = insertMergePendingPod();
+    const repo = createPodRepository(db);
+    repo.update(podId, { status: 'failed', tokenBudget: null });
+    repo.taskExecutions?.register(podId);
+    const pod = repo.getOrThrow(podId);
+    repo.taskExecutions?.beginRun(podId, pod.lifecycleGeneration, 1, {
+      runtime: pod.runtime,
+      model: pod.model,
+      providerAccountId: null,
+    });
+    const unauthenticated = await app.inject({ method: 'DELETE', url: `/pods/${podId}` });
+    expect(unauthenticated.statusCode).toBe(401);
+    for (let repeat = 0; repeat < 2; repeat++) {
+      const res = await app.inject({
+        method: 'DELETE',
+        url: `/pods/${podId}`,
+        headers: authHeaders,
+      });
+      expect(res.statusCode).toBe(409);
+      expect(res.json()).toMatchObject({
+        error: 'TASK_EXECUTION_UNSETTLED',
+        message: expect.stringContaining('unsettled worker execution'),
+      });
+      expect(repo.getOrThrow(podId)).toMatchObject({ status: 'failed', worktreePath: '/tmp/wt/x' });
+      expect(repo.taskExecutions?.hasActiveRun(podId)).toBe(true);
+    }
+  });
+
   it('queues three back-to-back messages onto one canonical fix pod', async () => {
     const podId = insertMergePendingPod();
 

@@ -15786,6 +15786,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
     },
 
     async deleteSession(podId: string): Promise<void> {
+      podRepo.taskExecutions?.assertCanDelete(podId);
       clearPreviewTimer(podId);
       await stopSandboxPreviewProxy(podId);
       const pod = podRepo.getOrThrow(podId);

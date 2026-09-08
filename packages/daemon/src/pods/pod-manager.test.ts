@@ -1994,6 +1994,36 @@ describe('PodManager', () => {
     expect(ctx.containerManager.execStreaming).toHaveBeenCalledTimes(1);
   });
 
+  it('rejects deletion of an unsettled execution before failed cleanup can erase its evidence', async () => {
+    const ctx = createTestContext();
+    const manager = createPodManager(ctx.deps);
+    const pod = manager.createSession(
+      { profileName: 'test-profile', task: 'Retain unresolved execution' },
+      'operator',
+    );
+    ctx.podRepo.update(pod.id, {
+      status: 'running',
+      containerId: 'retained-container',
+      tokenBudget: null,
+    });
+    ctx.podRepo.taskExecutions?.beginRun(pod.id, 1, 1, {
+      runtime: pod.runtime,
+      model: pod.model,
+      providerAccountId: null,
+    });
+    ctx.podRepo.update(pod.id, { status: 'failed', worktreePath: '/tmp/retained-source' });
+    vi.mocked(ctx.containerManager.kill).mockRejectedValue(
+      new Error('Container removal unavailable'),
+    );
+    await expect(manager.deleteSession(pod.id)).rejects.toMatchObject({
+      code: 'TASK_EXECUTION_UNSETTLED',
+    });
+    expect(ctx.containerManager.kill).not.toHaveBeenCalled();
+    expect(ctx.worktreeManager.cleanup).not.toHaveBeenCalled();
+    expect(ctx.podRepo.taskExecutions?.hasActiveRun(pod.id)).toBe(true);
+    expect(ctx.podRepo.getOrThrow(pod.id).worktreePath).toBe('/tmp/retained-source');
+  });
+
   it.each(['thrown', 'fatal-event', 'advisory-event'] as const)(
     'retains explicit unverified termination from %s before admitting linked work',
     async (failure) => {

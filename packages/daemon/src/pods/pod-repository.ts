@@ -1314,7 +1314,8 @@ export function createPodRepository(db: Database.Database): PodRepository {
       return rows.map(rowToSession);
     },
 
-    delete(id: string): void {
+    delete: db.transaction((id: string): void => {
+      taskExecutions.assertCanDelete(id);
       // Null out self-referential FKs from other pods before deleting.
       // These were added without ON DELETE SET NULL (SQLite can't ALTER COLUMN),
       // so we nullify them at the application level.
@@ -1335,7 +1336,7 @@ export function createPodRepository(db: Database.Database): PodRepository {
       ).run(id, id);
       const result = db.prepare('DELETE FROM pods WHERE id = ?').run(id);
       if (result.changes === 0) throw new PodNotFoundError(id);
-    },
+    }),
 
     countByStatusAndProfile(status: PodStatus, profileName: string): number {
       const row = db

@@ -5,7 +5,7 @@ import Testing
 import AutopodUI
 
 @MainActor
-@Test(arguments: ["resume", "validate", "revalidate"])
+@Test(arguments: ["resume", "validate", "revalidate", "delete"])
 func unverifiedTerminationActionsRetainFailedState(action: String) async throws {
   let configuration = URLSessionConfiguration.ephemeral
   configuration.protocolClasses = [UnverifiedTerminationProtocol.self]
@@ -18,9 +18,10 @@ func unverifiedTerminationActionsRetainFailedState(action: String) async throws 
   switch action {
   case "resume": await handler.resume(action)
   case "validate": await handler.rework(action)
+  case "delete": await handler.deletePod(action)
   default: await handler.revalidate(action)
   }
-  #expect(handler.lastError?.contains("unverified process termination") == true)
+  #expect(handler.lastError?.contains(action == "delete" ? "unsettled worker execution" : "unverified process termination") == true)
   #expect(handler.lastError?.contains("Retain its source and resources") == true)
   #expect(handler.lastError?.contains("{\"error\"") == false)
   #expect(handler.pendingAction == nil)
@@ -35,12 +36,14 @@ private final class UnverifiedTerminationProtocol: URLProtocol, @unchecked Senda
   override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
   override func startLoading() {
     let action = request.url!.pathComponents[2]
-    #expect(request.httpMethod == "POST")
-    #expect(request.url!.path == "/pods/\(action)/\(action)")
-    let message = "A worker in this logical task has unverified process termination. Retain its source and resources; reconcile termination before Resume, Rework, validation or delivery."
+    #expect(request.httpMethod == (action == "delete" ? "DELETE" : "POST"))
+    #expect(request.url!.path == (action == "delete" ? "/pods/delete" : "/pods/\(action)/\(action)"))
+    let message = action == "delete"
+      ? "This logical task has an unsettled worker execution. Retain its source and resources; reconcile the execution before deleting a pod or its task evidence."
+      : "A worker in this logical task has unverified process termination. Retain its source and resources; reconcile termination before Resume, Rework, validation or delivery."
     let payload = action == "resume"
       ? ["error": message, "code": "TASK_EXECUTION_TERMINATION_UNVERIFIED"]
-      : ["error": "TASK_EXECUTION_TERMINATION_UNVERIFIED", "message": message]
+      : ["error": action == "delete" ? "TASK_EXECUTION_UNSETTLED" : "TASK_EXECUTION_TERMINATION_UNVERIFIED", "message": message]
     let data = try! JSONSerialization.data(withJSONObject: payload)
     client?.urlProtocol(self, didReceive: HTTPURLResponse(url: request.url!, statusCode: 409,
       httpVersion: nil, headerFields: ["Content-Type": "application/json"])!, cacheStoragePolicy: .notAllowed)
