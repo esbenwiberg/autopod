@@ -12095,30 +12095,20 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
 
         const authMessage = await performCredentialInjection(podId, payload.service);
 
-        escalationRepo.update(pod.pendingEscalation.id, {
-          respondedAt: new Date().toISOString(),
-          respondedBy: legacyRespondedBy(actor),
-          actor,
-          response: 'approved',
-        });
-
         const escalationId = pod.pendingEscalation.id;
-        transition(pod, 'running', { pendingEscalation: null });
-        emitActivityStatus(podId, `Credential injected for ${payload.service} — resuming agent…`);
-
-        const resolveResult = deps.pendingRequestsByPod
-          ?.get(podId)
-          ?.resolveWithState(escalationId, authMessage);
-        if (resolveResult?.detached) {
-          nudgeRepo.queue(
-            podId,
-            buildDetachedMcpFallbackMessage(pod.pendingEscalation.type, authMessage),
-          );
-          emitActivityStatus(
-            podId,
-            'MCP response stream was closed — queued credential result for check_messages',
-          );
-        }
+        const pending = deps.pendingRequestsByPod?.get(podId);
+        const savedResult = pending?.isDetached(escalationId)
+          ? buildDetachedMcpFallbackMessage(pod.pendingEscalation.type, authMessage)
+          : authMessage;
+        persistCompletionReply(podRepo, pod, message, actor, () => {
+          transition(pod, 'running', { pendingEscalation: null });
+          nudgeRepo.queue(podId, savedResult);
+        });
+        emitActivityStatus(
+          podId,
+          `Credential injected for ${payload.service}; result saved pending worker acknowledgment.`,
+        );
+        pending?.resolveWithState(escalationId, authMessage);
         return;
       }
 
@@ -12213,7 +12203,8 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           !pendingForSession.isDetached(decisionId),
       );
       const retainedRun = podRepo.taskExecutions?.hasActiveRun(podId) ?? activeAgentRuns.has(podId);
-      const queueForRetainedRun = retainedRun && !attachedWaiter;
+      // An attached waiter is not proof that the MCP response reached the worker.
+      const queueForRetainedRun = retainedRun || attachedWaiter;
       const queuedReply =
         pod.pendingEscalation && pendingForSession?.isDetached(pod.pendingEscalation.id)
           ? buildDetachedMcpFallbackMessage(pod.pendingEscalation.type, message)

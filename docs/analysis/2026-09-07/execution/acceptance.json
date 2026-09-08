@@ -50,7 +50,8 @@
         "packages/mobile-web/src/components/TaskRetryPanel.tsx",
         "packages/daemon/src/pods/operator-guidance-delivery.ts",
         "packages/daemon/src/db/migrations/180_operator_guidance_delivery.sql",
-        "packages/escalation-mcp/src/tools/check-messages.ts"
+        "packages/escalation-mcp/src/tools/check-messages.ts",
+        "packages/escalation-mcp/src/server.ts"
       ],
       "tests": [
         "packages/daemon/src/pods/pod-lifecycle.e2e.test.ts",
@@ -79,7 +80,8 @@
         "packages/daemon/src/runtimes/copilot-stderr.test.ts",
         "packages/mobile-web/src/components/TaskRetryPanel.test.tsx",
         "packages/desktop/Tests/AutopodClientTests/TaskRetryClientTests.swift",
-        "packages/daemon/src/pods/operator-guidance-delivery.test.ts"
+        "packages/daemon/src/pods/operator-guidance-delivery.test.ts",
+        "packages/daemon/src/pods/attached-reply-delivery.test.ts"
       ],
       "evidence": [
         "receipts/settlement-red.txt",
@@ -148,10 +150,11 @@
         "receipts/checkpoint-86-build.txt",
         "checkpoint-93.md",
         "checkpoint-96.md",
-        "checkpoint-100.md"
+        "checkpoint-100.md",
+        "checkpoint-101.md"
       ],
       "prerequisites": [
-        "Replace destructive message collection with acknowledged delivery on the actual MCP/recovery paths; replay lost responses and late guidance at settlement."
+        "Retain final-source lifecycle/receipt regressions and verify final supported operator flows. Checkpoints 100-101 prove acknowledged delivery for queued guidance and attached human/blocker/credential-result responses, including response loss and disk reopen."
       ],
       "remaining": "Normal replies are atomic, retained in bounded recovery context, and fence older completion events. New unanswered decisions remain actionable. Attached MCP delivery acknowledgment, delayed concurrent stream ordering, other response boundaries, historical orphan questions and broader finalization side effects remain. New worker/cycle and validation admission now preserve pending decisions, including older unresolved cycles in the current generation. Historical missing payload recovery and stream/MCP delivery acknowledgment remain. Codex now observes summary events before Spawn/Resume launch and disposes each invocation listener. This closes the local launch/stream attachment race, not durable delivery acknowledgment across all runtimes or daemon restart. Concurrent interactive completions now coalesce in process, conflicting promotion/generation requests fail closed, and current source/lifecycle/decision ownership is checked across push and container release boundaries. This is not durable cross-process idempotency, cancellation of already-dispatched external operations, or complete post-completion side-effect accounting."
     },
@@ -190,7 +193,9 @@
         "packages/mobile-web/src/components/TaskRetryPanel.tsx",
         "packages/daemon/src/pods/operator-guidance-delivery.ts",
         "packages/daemon/src/db/migrations/180_operator_guidance_delivery.sql",
-        "packages/escalation-mcp/src/tools/check-messages.ts"
+        "packages/escalation-mcp/src/tools/check-messages.ts",
+        "packages/daemon/src/pods/pod-bridge-impl.ts",
+        "packages/escalation-mcp/src/server.ts"
       ],
       "tests": [
         "packages/daemon/src/pods/completion-journal.test.ts",
@@ -215,7 +220,8 @@
         "packages/mobile-web/src/components/TaskRetryPanel.test.tsx",
         "packages/cli/src/commands/pod.test.ts",
         "packages/desktop/Tests/AutopodClientTests/TaskRetryClientTests.swift",
-        "packages/daemon/src/pods/operator-guidance-delivery.test.ts"
+        "packages/daemon/src/pods/operator-guidance-delivery.test.ts",
+        "packages/daemon/src/pods/attached-reply-delivery.test.ts"
       ],
       "evidence": [
         "receipts/journal-migration.txt",
@@ -263,7 +269,8 @@
         "receipts/checkpoint-91-fault-api-tests.txt",
         "checkpoint-93.md",
         "checkpoint-96.md",
-        "checkpoint-100.md"
+        "checkpoint-100.md",
+        "checkpoint-101.md"
       ],
       "prerequisites": [
         "Close durable cleanup ownership and verified stale-execution reconciliation; retain source and decisions throughout restart and failed reconciliation."
@@ -500,7 +507,9 @@
         "packages/daemon/src/pods/interactive-completion-coordinator.ts",
         "packages/daemon/src/pods/pod-repository.ts",
         "packages/daemon/src/pods/validation-ownership.ts",
-        "packages/daemon/src/pods/deletion-cleanup.ts"
+        "packages/daemon/src/pods/deletion-cleanup.ts",
+        "packages/daemon/src/pods/pod-bridge-impl.ts",
+        "packages/escalation-mcp/src/server.ts"
       ],
       "tests": [
         "packages/daemon/src/db/unit-of-work.test.ts",
@@ -513,7 +522,8 @@
         "packages/daemon/src/pods/local-reconciler.test.ts",
         "packages/daemon/src/pods/reconciler.test.ts",
         "packages/daemon/src/pods/task-execution-ledger.test.ts",
-        "packages/daemon/src/pods/task-retry-ledger.test.ts"
+        "packages/daemon/src/pods/task-retry-ledger.test.ts",
+        "packages/daemon/src/pods/attached-reply-delivery.test.ts"
       ],
       "evidence": [
         "receipts/escalation-atomicity-red.txt",
@@ -546,7 +556,8 @@
         "checkpoint-56.md",
         "checkpoint-58.md",
         "checkpoint-88.md",
-        "checkpoint-93.md"
+        "checkpoint-93.md",
+        "checkpoint-101.md"
       ],
       "prerequisites": [
         "Complete the remaining reply delivery and cleanup/reconciliation ownership in cohesive modules; existing extraction is not proof of those unfinished guarantees."
@@ -690,7 +701,7 @@
         "checkpoint-99.md"
       ],
       "prerequisites": [
-        "Complete outer worker governance for unknown/nonretryable failures beyond authentication. Checkpoints 94-96 prove scoped auth permission, cumulative typed transient allowance across reconstruction/linked work and the actual Rework API path with preserved source; generic Resume intentionally retains validation-only behavior."
+        "Retain final-source task-wide worker admission and operator-flow checks. Checkpoints 94-99 cover authentication and unknown failures, conservative legacy inputs, persisted backoff/provider deadlines, authorized target binding and actual worker Rework. Visible native and authorized live acceptance remain unverified."
       ],
       "remaining": "Validation admission identity and pinned cumulative transient allowance persist across Resume, restart and linked fix pods. Task-wide agent/repository-rework limits, cumulative provider/sandbox recovery and audited token-budget extensions still require integration; historical pre-ledger retries are not reconstructed. Incomplete known prior spending now blocks further budgeted agent consumption. This does not reserve future spend or reconstruct unrecorded legacy work; task-wide provider/rework admission and phase reconciliation remain. Checkpoint 24 adds durable sandbox startup retries, legacy allowance lower bounds, stage-scoped one-use decisions, measured startup time and local operator proof. Provider retries after first runtime event, repository rework, complete historical reconstruction, phase billing, native interaction and live acceptance remain."
     },
@@ -764,7 +775,7 @@
         "checkpoint-99.md"
       ],
       "prerequisites": [
-        "Extend proven worker authentication admission to other nonretryable failures using recorded relevant conditions or explicit human permission; do not infer missing historic identities or silently rebind providers."
+        "Retain final-source task-wide worker admission and operator-flow checks. Checkpoints 94-99 cover authentication and unknown failures, conservative legacy inputs, persisted backoff/provider deadlines, authorized target binding and actual worker Rework. Visible native and authorized live acceptance remain unverified."
       ],
       "remaining": "Actual validation repeat admission requires known changed source/contract/commands/environment/implementation or one-use authenticated human authorization. Agent-rework admission and explicit provider-rebinding reconciliation remain; unavailable identity never proves change. Checkpoint 24 adds durable sandbox startup retries, legacy allowance lower bounds, stage-scoped one-use decisions, measured startup time and local operator proof. Provider retries after first runtime event, repository rework, complete historical reconstruction, phase billing, native interaction and live acceptance remain."
     },
@@ -2319,7 +2330,7 @@
         "checkpoint-93.md"
       ],
       "prerequisites": [
-        "Before any further migration or release candidate, refresh branch numbering inventory. Representative upgrades and copy-only checkpoint conversion through schema 177 passed checkpoint 91; no deployment compatibility is inferred from local tests."
+        "Before any further migration or release candidate, refresh branch numbering inventory. Local upgrades through schema 180 passed checkpoint 100; this is not deployed compatibility evidence."
       ],
       "remaining": "Managed 142-150 definitions retained as inert baseline; unpublished native additions renumbered 151-158. Combined schema upgrade preserves native/managed data locally. Exact remote migration-byte verification awaits approved read-only inspection; no live migration was performed. Checkpoint 48 verifies managed 150/152 upgrades and copy-only conversion of exact unpublished native checkpoint schemas 151/158/163. Live backup scope/freshness, deployed bytes and activation remain unverified; checkpoint 49 integrates and fully validates main f646cfcc locally; current deployed-source verification remains outstanding."
     },
@@ -2413,7 +2424,7 @@
         "checkpoint-96.md"
       ],
       "prerequisites": [
-        "Latest full pipeline passed clean 041edd98544015ebfece4c2db83c93343f1f23b6. Run required checks again after further implementation on final source; retain separate platform proof and every unrun requirement."
+        "Latest full pipeline passed clean 8765e27f087bea3c216810f098560e9417670138. Run required checks after checkpoint 101 and at final source; retain separate platform proof and every unrun requirement."
       ]
     },
     {
@@ -2521,7 +2532,7 @@
       ]
     }
   ],
-  "lastCheckpoint": "checkpoint-100.md",
+  "lastCheckpoint": "checkpoint-101.md",
   "migrationLineage": {
     "managedBaseline": "142-152; exact bytes from tracking commit cba763ba0bb3d65cb4c055e00033016ba1d5c646",
     "nativeCurrent": "164-179; byte-preserving native lineage, retained task history 177, exact worker binding authorization 178 and provider retry deadlines 179",

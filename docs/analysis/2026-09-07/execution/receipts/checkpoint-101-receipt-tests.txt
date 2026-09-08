@@ -1,0 +1,35 @@
+
+ RUN  v4.1.11 /private/tmp/autopod-durable-execution/packages/daemon
+
+ ❯ src/pods/attached-reply-delivery.test.ts (9 tests | 6 failed) 4759ms
+   × retains the actual attached 'ask_human' reply with 'received' delivery 172ms
+   × retains the actual attached 'ask_human' reply with 'storage-failure' delivery 171ms
+   × retains the actual attached 'report_blocker' reply with 'received' delivery 156ms
+   × retains the actual attached 'report_blocker' reply with 'storage-failure' delivery 165ms
+   × retains the actual attached 'request_credential' reply with 'received' delivery 252ms
+   × retains the actual attached 'request_credential' reply with 'storage-failure' delivery 447ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 6 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/pods/attached-reply-delivery.test.ts > retains the actual attached 'ask_human' reply with 'received' delivery
+ FAIL  src/pods/attached-reply-delivery.test.ts > retains the actual attached 'ask_human' reply with 'storage-failure' delivery
+ FAIL  src/pods/attached-reply-delivery.test.ts > retains the actual attached 'report_blocker' reply with 'received' delivery
+ FAIL  src/pods/attached-reply-delivery.test.ts > retains the actual attached 'report_blocker' reply with 'storage-failure' delivery
+ FAIL  src/pods/attached-reply-delivery.test.ts > retains the actual attached 'request_credential' reply with 'received' delivery
+ FAIL  src/pods/attached-reply-delivery.test.ts > retains the actual attached 'request_credential' reply with 'storage-failure' delivery
+Error: Missing appended guidance receipt
+ ❯ src/pods/attached-reply-delivery.test.ts:155:43
+    153|         throw new Error('Missing successful tool content');
+    154|       const text = delivered.content[1]?.text;
+    155|       if (typeof text !== 'string') throw new Error('Missing appended …
+       |                                           ^
+    156|       const receipt = JSON.parse(text);
+    157|       expect(receipt.completedTool).toBe(tool);
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/6]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  6 failed | 3 passed (9)
+   Start at  21:32:10
+   Duration  6.57s (transform 1.05s, setup 0ms, import 1.57s, tests 4.76s, environment 0ms)

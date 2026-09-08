@@ -1130,7 +1130,7 @@ export function registerPodCommands(program: Command, getClient: () => AutopodCl
       const client = getClient();
       const resolvedId = await resolvePodId(client, id);
       await withSpinner('Sending message...', () => client.sendMessage(resolvedId, message));
-      console.log(chalk.green('Message sent.'));
+      console.log(chalk.green('Message recorded.'));
     });
 
   // ap approve

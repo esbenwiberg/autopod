@@ -45,6 +45,29 @@ export function createEscalationMcpServer(deps: EscalationMcpDeps): {
     version: '0.0.1',
   });
 
+  function responseWithGuidance(response: string, tool: string) {
+    const guidance = bridge.readOperatorGuidance(podId);
+    return {
+      content: [
+        { type: 'text' as const, text: response },
+        ...(guidance
+          ? [
+              {
+                type: 'text' as const,
+                text: JSON.stringify({
+                  deliveryId: guidance.deliveryId,
+                  operatorMessages: guidance.messages,
+                  completedTool: tool,
+                  instruction:
+                    'The tool call has returned. After receiving all saved messages, acknowledge_messages with this deliveryId and apply the guidance. Do not repeat an already completed action or treat this receipt as new approval.',
+                }),
+              },
+            ]
+          : []),
+      ],
+    };
+  }
+
   server.tool(
     'ask_human',
     'Ask a human for help, clarification, or a decision. Use when you are uncertain or blocked.',
@@ -58,7 +81,7 @@ export function createEscalationMcpServer(deps: EscalationMcpDeps): {
     },
     async (input) => {
       const response = await askHuman(podId, input, bridge, pendingRequests);
-      return { content: [{ type: 'text' as const, text: response }] };
+      return responseWithGuidance(response, 'ask_human');
     },
   );
 
@@ -92,7 +115,7 @@ export function createEscalationMcpServer(deps: EscalationMcpDeps): {
     },
     async (input) => {
       const response = await reportBlocker(podId, input, bridge, pendingRequests);
-      return { content: [{ type: 'text' as const, text: response }] };
+      return responseWithGuidance(response, 'report_blocker');
     },
   );
 
@@ -277,7 +300,7 @@ export function createEscalationMcpServer(deps: EscalationMcpDeps): {
     },
     async (input) => {
       const response = await requestCredential(podId, input, bridge, pendingRequests);
-      return { content: [{ type: 'text' as const, text: response }] };
+      return responseWithGuidance(response, 'request_credential');
     },
   );
 

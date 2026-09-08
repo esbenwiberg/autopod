@@ -1,0 +1,35 @@
+
+ RUN  v4.1.11 /private/tmp/autopod-durable-execution/packages/daemon
+
+ ❯ src/pods/attached-reply-delivery.test.ts (9 tests | 1 failed | 8 skipped) 217ms
+   × retains the actual attached 'ask_human' reply with 'received' delivery 217ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/pods/attached-reply-delivery.test.ts > retains the actual attached 'ask_human' reply with 'received' delivery
+AssertionError: expected undefined to deeply equal { type: 'human', …(1) }
+
+- Expected:
+{
+  "id": "fixture-operator",
+  "type": "human",
+}
+
++ Received:
+undefined
+
+ ❯ src/pods/attached-reply-delivery.test.ts:140:71
+    138|         .join('\n'),
+    139|     ).not.toContain('fixture-only-credential');
+    140|     expect(ctx.escalationRepo.getOrThrow(decisionId).response?.actor).…
+       |                                                                       ^
+    141|       type: 'human',
+    142|       id: 'fixture-operator',
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 8 skipped (9)
+   Start at  21:34:45
+   Duration  2.14s (transform 1.15s, setup 0ms, import 1.79s, tests 217ms, environment 0ms)

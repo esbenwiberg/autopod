@@ -1232,35 +1232,43 @@ it('sends profile-primary recovery through HTTP and inspects its target-bound wo
   }
 });
 
-it('sends a nudge through HTTP and reports saved guidance as awaiting worker receipt', async () => {
-  const requests: Array<{ url: string; body: string }> = [];
-  const server = createServer(async (request, response) => {
-    let body = '';
-    for await (const chunk of request) body += chunk;
-    requests.push({ url: request.url ?? '', body });
-    response.setHeader('content-type', 'application/json');
-    response.end(JSON.stringify({ ok: true }));
-  });
-  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
-  const address = server.address();
-  if (!address || typeof address === 'string') throw new Error('Missing fixture port');
-  const client = new AutopodClient({
-    baseUrl: `http://127.0.0.1:${address.port}`,
-    getToken: async () => 'local-fixture-only',
-  });
-  const log = vi.spyOn(console, 'log').mockImplementation(() => {});
-  try {
-    const program = new Command();
-    registerPodCommands(program, () => client);
-    await program.parseAsync(['node', 'ap', 'nudge', 'abcd1234', 'Preserve source']);
-    expect(requests).toEqual([
-      { url: '/pods/abcd1234/nudge', body: JSON.stringify({ message: 'Preserve source' }) },
-    ]);
-    expect(log.mock.calls.flat().join('\n')).toContain(
-      'Nudge saved. It remains pending until the worker acknowledges receipt.',
-    );
-  } finally {
-    log.mockRestore();
-    await new Promise<void>((resolve) => server.close(() => resolve()));
-  }
-});
+it.each(['nudge', 'tell'] as const)(
+  'sends %s through HTTP and reports recorded operator input',
+  async (command) => {
+    const requests: Array<{ url: string; body: string }> = [];
+    const server = createServer(async (request, response) => {
+      let body = '';
+      for await (const chunk of request) body += chunk;
+      requests.push({ url: request.url ?? '', body });
+      response.setHeader('content-type', 'application/json');
+      response.end(JSON.stringify({ ok: true }));
+    });
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+    const address = server.address();
+    if (!address || typeof address === 'string') throw new Error('Missing fixture port');
+    const client = new AutopodClient({
+      baseUrl: `http://127.0.0.1:${address.port}`,
+      getToken: async () => 'local-fixture-only',
+    });
+    const log = vi.spyOn(console, 'log').mockImplementation(() => {});
+    try {
+      const program = new Command();
+      registerPodCommands(program, () => client);
+      await program.parseAsync(['node', 'ap', command, 'abcd1234', 'Preserve source']);
+      expect(requests).toEqual([
+        {
+          url: `/pods/abcd1234/${command === 'nudge' ? 'nudge' : 'message'}`,
+          body: JSON.stringify({ message: 'Preserve source' }),
+        },
+      ]);
+      expect(log.mock.calls.flat().join('\n')).toContain(
+        command === 'nudge'
+          ? 'Nudge saved. It remains pending until the worker acknowledges receipt.'
+          : 'Message recorded.',
+      );
+    } finally {
+      log.mockRestore();
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+  },
+);

@@ -1,0 +1,36 @@
+
+ RUN  v4.1.11 /private/tmp/autopod-durable-execution/packages/daemon
+
+ ❯ src/pods/attached-reply-delivery.test.ts (3 tests | 3 failed) 2742ms
+   × retains the actual attached ask_human reply when its MCP response is dropped 1269ms
+   × retains the actual attached report_blocker reply when its MCP response is dropped 753ms
+   × retains the actual attached request_credential reply when its MCP response is dropped 719ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 3 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/pods/attached-reply-delivery.test.ts > retains the actual attached ask_human reply when its MCP response is dropped
+ FAIL  src/pods/attached-reply-delivery.test.ts > retains the actual attached report_blocker reply when its MCP response is dropped
+ FAIL  src/pods/attached-reply-delivery.test.ts > retains the actual attached request_credential reply when its MCP response is dropped
+AssertionError: expected false to be true // Object.is equality
+
+- Expected
++ Received
+
+- true
++ false
+
+ ❯ src/pods/attached-reply-delivery.test.ts:98:48
+     96|       expect(await reply).toBe('lost');
+     97|       expect(dropped).toBe(true);
+     98|       expect(ctx.nudgeRepo.hasPending(pod.id)).toBe(true);
+       |                                                ^
+     99|       expect(
+    100|         ctx.nudgeRepo
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/3]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  3 failed (3)
+   Start at  21:30:05
+   Duration  4.09s (transform 766ms, setup 0ms, import 1.23s, tests 2.74s, environment 0ms)

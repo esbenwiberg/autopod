@@ -22,11 +22,12 @@ import type {
   Profile,
   ReviewFeedbackResponseItem,
 } from '@autopod/shared';
-import { MAX_DIFF_LENGTH, generateId } from '@autopod/shared';
+import { AutopodError, MAX_DIFF_LENGTH, generateId } from '@autopod/shared';
 import type { Logger } from 'pino';
 import type { ActionEngine } from '../actions/action-engine.js';
 import { resolveEffectiveActionPolicy } from '../actions/policy-resolver.js';
 import { isPrivateIp } from '../api/ssrf-guard.js';
+import { atomicPodChange } from '../db/unit-of-work.js';
 import type { ContainerManager } from '../interfaces/container-manager.js';
 import type { WorktreeManager } from '../interfaces/worktree-manager.js';
 import type { ProfileStore } from '../profiles/index.js';
@@ -147,7 +148,23 @@ export function createSessionBridge(deps: SessionBridgeDependencies): PodBridge 
     },
 
     resolveEscalation(escalationId: string, response: EscalationResponse): void {
-      escalationRepo.update(escalationId, response);
+      atomicPodChange(podRepo, () => {
+        const recorded = escalationRepo.getOrThrow(escalationId).response;
+        if (recorded) {
+          if (
+            recorded.response !== response.response ||
+            recorded.respondedBy !== response.respondedBy
+          )
+            throw new AutopodError(
+              'This escalation already has a different recorded response.',
+              'ESCALATION_RESPONSE_CONFLICT',
+              409,
+            );
+          // The waiter finishing is not a second decision or a new responder.
+          return;
+        }
+        escalationRepo.update(escalationId, response);
+      });
       logger.info({ escalationId }, 'Escalation resolved');
     },
 
