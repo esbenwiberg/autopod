@@ -832,6 +832,31 @@ describe('SandboxContainerManager', () => {
       expect(code).toBe(7);
     });
 
+    it('retains an observed native exit despite a subsequent transport error', async () => {
+      const client = new StreamingFakeClient();
+      vi.spyOn(client, 'execStream').mockImplementation(async function* () {
+        yield { stdout: 'retained', exitCode: 7 };
+        throw new Error('transport closed after exit');
+      });
+      const mgr = new SandboxContainerManager(client, logger);
+      const id = await mgr.spawn(baseConfig);
+      const stream = await mgr.execStreaming(id, ['cmd']);
+      await expect(stream.exitCode).resolves.toBe(7);
+      await expect(readStream(stream.stdout)).resolves.toBe('retained');
+    });
+
+    it('does not fabricate a zero exit when the native stream ends without an exit frame', async () => {
+      const client = new StreamingFakeClient();
+      vi.spyOn(client, 'execStream').mockImplementation(async function* () {
+        yield { stdout: 'retained output' };
+      });
+      const mgr = new SandboxContainerManager(client, logger);
+      const id = await mgr.spawn(baseConfig);
+      const stream = await mgr.execStreaming(id, ['cmd']);
+      await expect(stream.exitCode).rejects.toMatchObject({ code: 'EXEC_EXIT_UNVERIFIED' });
+      await expect(readStream(stream.stdout)).resolves.toBe('retained output');
+    });
+
     it('execStreaming exposes writable stdin for native streams', async () => {
       const client = new StreamingFakeClient();
       const mgr = new SandboxContainerManager(client, logger);
@@ -858,7 +883,7 @@ describe('SandboxContainerManager', () => {
       await stream.kill();
 
       await expect(output).resolves.toBe('');
-      await expect(stream.exitCode).resolves.toBe(0);
+      await expect(stream.exitCode).rejects.toMatchObject({ code: 'EXEC_EXIT_UNVERIFIED' });
       expect(client.cancelCalls).toBe(1);
     });
 
@@ -880,7 +905,7 @@ describe('SandboxContainerManager', () => {
 
       await expect(stream.kill()).rejects.toThrow('remote termination was not verified');
 
-      await expect(stream.exitCode).resolves.toBe(1);
+      await expect(stream.exitCode).rejects.toMatchObject({ code: 'EXEC_EXIT_UNVERIFIED' });
       await expect(stdout).resolves.toBe('started');
       await expect(stderr).resolves.toBe('');
       expect(stdoutErrors).toEqual([]);

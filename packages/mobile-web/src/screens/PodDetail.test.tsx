@@ -6,11 +6,16 @@ import { expect, it, vi } from 'vitest';
 import { usePodsStore } from '../store/pods.js';
 import { PodDetail } from './PodDetail.js';
 
-it.each(['failed', 'merge_pending'] as const)(
+it.each([
+  { status: 'failed', unverified: false },
+  { status: 'merge_pending', unverified: false },
+  { status: 'failed', unverified: true },
+] as const)(
   'shows retained delivery recovery and waits for explicit action (%s)',
-  async (status) => {
-    const reason =
-      status === 'failed'
+  async ({ status, unverified }) => {
+    const reason = unverified
+      ? 'Codex execution termination is unverified; retain completion and source before another execution.'
+      : status === 'failed'
         ? 'Delivery history is unavailable. Original resources retained. Use Resume to revalidate the retained source before approving delivery.'
         : 'Merge reconciliation required. Original resources retained.';
     const pod = {
@@ -66,7 +71,7 @@ it.each(['failed', 'merge_pending'] as const)(
       });
       expect(container.textContent).toContain(reason);
       expect(mutations).toEqual([]);
-      if (status === 'failed') {
+      if (status === 'failed' && !unverified) {
         await act(async () => {
           [...container.querySelectorAll('button')]
             .find((button) => button.textContent === 'Resume')

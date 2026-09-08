@@ -264,6 +264,19 @@ if (codexRecoveryFixture) {
     latest: { id: 'local-recovery', outcome: 'pass' },
   });
 }
+if (process.env.FIXTURE_MODE === 'unverified-exit') {
+  pod = {
+    ...pod,
+    status: 'failed',
+    runtime: 'codex',
+    pendingEscalation: null,
+    finalization: null,
+    lastValidationResult: null,
+    task: '[Local fixture] Retained completion with unverified termination',
+    failureReason:
+      'Codex execution termination is unverified; retain completion and source, and reconcile before validation or another execution.',
+  };
+}
 const deliveryDispositionFixture = [
   'delivery-disposition',
   'merge-disposition',

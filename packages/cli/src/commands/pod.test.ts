@@ -538,6 +538,9 @@ it.each([true, false])(
         res.end(
           JSON.stringify({
             ...pod,
+            status: 'failed',
+            failureReason:
+              'Codex execution termination is unverified; retain completion and source before another execution.',
             lastValidationResult: {
               overall: 'pass',
               attempt: 1,
@@ -568,6 +571,9 @@ it.each([true, false])(
       await command().parseAsync(['node', 'ap', 'status', 'abcd1234']);
       const output = log.mock.calls.map((call) => call.join(' ')).join('\n');
       expect(output).toContain('Stored task cost subtotal:');
+      expect(output).toContain(
+        'Codex execution termination is unverified; retain completion and source before another execution.',
+      );
       expect(output).toContain('Billing unverified');
       expect(output).toContain(
         'Known estimates: $0.5000; 1 identified phases with unavailable cost; 1 pods with conflicting attribution',

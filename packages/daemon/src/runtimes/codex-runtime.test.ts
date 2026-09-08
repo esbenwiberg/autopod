@@ -516,7 +516,7 @@ describe('CodexRuntime', () => {
           expect.objectContaining({ type: 'complete', result: 'Work is complete.' }),
           expect.objectContaining({
             type: 'error',
-            message: expect.stringContaining('proceeding to validation'),
+            message: expect.stringContaining('Codex exited with code 1 after task completion'),
             fatal: false,
           }),
         ]),
@@ -644,12 +644,46 @@ describe('CodexRuntime', () => {
       }
     });
 
-    it('terminates the stalled exec but proceeds to validation when exit never resolves after task_complete', async () => {
-      // Emit the parser's `complete` event then deliberately leave stdout open
-      // and the exit code unresolved. The grace timer ends stdout; the runtime
-      // kills the exec as best-effort insurance but must NOT fail closed — we
-      // already have terminal completion proof, so the pod proceeds to
-      // validation (a stalled exit code is not lost work).
+    it('retains completion but refuses validation when stalled exec termination is unverified', async () => {
+      const previous = process.env.AUTOPOD_EXIT_CODE_TIMEOUT_MS;
+      process.env.AUTOPOD_EXIT_CODE_TIMEOUT_MS = '10';
+      const handle = createMockHandle();
+      vi.mocked(handle.kill).mockRejectedValue(new Error('process group remains alive'));
+      (handle.stdout as PassThrough).end(
+        `${JSON.stringify({ id: 'complete', msg: { type: 'task_complete', turn_id: 't1', last_agent_message: 'Retain completed source' } })}\n`,
+      );
+      const cm = createMockContainerManager(handle);
+      const events: AgentEvent[] = [];
+      try {
+        for await (const event of new CodexRuntime(logger, cm, createMockPodRepo()).spawn({
+          podId: 'pod',
+          task: 'Task',
+          model: 'model',
+          reasoningEffort: 'auto',
+          workDir: '/workspace',
+          containerId: 'container-123',
+          env: {},
+        }))
+          events.push(event);
+        expect(events).toEqual(
+          expect.arrayContaining([
+            expect.objectContaining({ type: 'complete', result: 'Retain completed source' }),
+            expect.objectContaining({
+              type: 'error',
+              fatal: true,
+              message: expect.stringContaining('termination is unverified'),
+            }),
+          ]),
+        );
+        expect(cm.execStreaming).toHaveBeenCalledTimes(1);
+      } finally {
+        restoreEnv('AUTOPOD_EXIT_CODE_TIMEOUT_MS', previous);
+      }
+    });
+
+    it('preserves completion and proceeds only after verified kill resolves a stalled exec', async () => {
+      // The initial exit wait stalls; this fixture's kill verifies termination
+      // and resolves the owned exit. Preserve its completion for validation.
       process.env.AUTOPOD_POST_COMPLETE_GRACE_MS = '50';
       process.env.AUTOPOD_EXIT_CODE_TIMEOUT_MS = '50';
 
@@ -1905,6 +1939,58 @@ describe('CodexRuntime', () => {
         );
       },
     );
+    it.each([true, false])(
+      'requires verified kill before recovering an unobserved exit (verified=%s)',
+      async (verified) => {
+        const first = createMockHandle();
+        first.exitCode = Promise.reject(
+          new AutopodError('Unobserved exit', 'EXEC_EXIT_UNVERIFIED', 409),
+        );
+        void first.exitCode.catch(() => {});
+        vi.mocked(first.kill).mockImplementation(async () => {
+          if (!verified) throw new Error('termination unverified');
+        });
+        (first.stdout as PassThrough).end(
+          `${JSON.stringify({ id: 'abort', msg: { type: 'turn_aborted', reason: 'interrupted', turn_id: 't1' } })}\n`,
+        );
+        const second = createMockHandle();
+        (second.stdout as PassThrough).end(
+          `${JSON.stringify({ id: 'complete', msg: { type: 'task_complete', turn_id: 't2', last_agent_message: 'Recovered' } })}\n`,
+        );
+        (second as StreamingExecResult & { finish(code: number): void }).finish(0);
+        const cm = createMockContainerManager(first);
+        vi.mocked(cm.execStreaming).mockResolvedValueOnce(first).mockResolvedValueOnce(second);
+        const repo = createMockPodRepo('session-123');
+        const events: AgentEvent[] = [];
+        for await (const event of new CodexRuntime(logger, cm, repo).resume(
+          'pod',
+          'Continue',
+          'container-123',
+        ))
+          events.push(event);
+        expect(first.kill).toHaveBeenCalledTimes(1);
+        expect(cm.execStreaming).toHaveBeenCalledTimes(verified ? 2 : 1);
+        if (verified)
+          expect(events).toEqual(
+            expect.arrayContaining([
+              expect.objectContaining({ type: 'complete', result: 'Recovered' }),
+            ]),
+          );
+        else {
+          expect(events).toEqual(
+            expect.arrayContaining([
+              expect.objectContaining({
+                type: 'error',
+                fatal: true,
+                message: expect.stringContaining('could not be terminated safely'),
+              }),
+            ]),
+          );
+          expect(repo.codexInterruptionRetries?.admit).not.toHaveBeenCalled();
+        }
+      },
+    );
+
     it('automatically resumes one interrupted Codex turn', async () => {
       const firstHandle = createMockHandle();
       const recoveryHandle = createMockHandle();
@@ -2377,7 +2463,7 @@ describe('CodexRuntime', () => {
       }
     });
 
-    it('recovers live progress and proceeds to validation when the sandbox exec never exits', async () => {
+    it('preserves recovered rollout completion after verified sandbox exec termination', async () => {
       const previousStateDir = process.env.AUTOPOD_CODEX_STATE_DIR;
       const previousIdleRecovery = process.env.AUTOPOD_CODEX_SANDBOX_IDLE_RECOVERY_MS;
       const previousExitTimeout = process.env.AUTOPOD_EXIT_CODE_TIMEOUT_MS;
@@ -2492,7 +2578,7 @@ describe('CodexRuntime', () => {
           expect.objectContaining({
             type: 'error',
             fatal: false,
-            message: expect.stringContaining('proceeding to validation'),
+            message: expect.stringContaining('process-group termination verified'),
           }),
         ]),
       );

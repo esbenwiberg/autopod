@@ -84,7 +84,9 @@ export interface StreamingExecResult {
   stdout: Readable;
   stderr: Readable;
   stdin?: Writable;
+  /** Resolves only for an observed process exit; missing/transport evidence rejects. */
   exitCode: Promise<number>;
+  /** Resolves only after verified termination; closing a transport is insufficient. */
   kill(): Promise<void>;
 }
 

@@ -1475,17 +1475,18 @@ private let minimalSessionJson = """
   #expect(workers.interrupted == 1)
 }
 
-@Test func mapsPersistedFailureReasonAfterRefreshWithoutValidation() throws {
+@Test(arguments: ["Agent failed: Codex CLI 0.144.3 is incompatible", "Codex execution termination is unverified; retain completion and source before another execution."])
+func mapsPersistedFailureReasonAfterRefreshWithoutValidation(reason: String) throws {
   let json = (minimalSessionJson
     .replacingOccurrences(of: #""status": "running""#, with: #""status": "failed""#)
     + #", "failureReason": "Agent failed: Codex CLI 0.144.3 is incompatible" }"#
-  ).data(using: .utf8)!
+  ).replacingOccurrences(of: "Agent failed: Codex CLI 0.144.3 is incompatible", with: reason).data(using: .utf8)!
 
   let response = try JSONDecoder().decode(SessionResponse.self, from: json)
   let pod = PodMapper.map(response)
 
-  #expect(pod.errorSummary == "Agent failed: Codex CLI 0.144.3 is incompatible")
-  #expect(pod.latestActivity == "Agent failed: Codex CLI 0.144.3 is incompatible")
+  #expect(pod.errorSummary == reason)
+  #expect(pod.latestActivity == reason)
 }
 
 @Test func mapperMapsValidationInfrastructureWithoutClaimingTestsFailed() throws {

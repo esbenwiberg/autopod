@@ -1,0 +1,64 @@
+
+ RUN  v4.1.11 /private/tmp/autopod-durable-execution/packages/daemon
+
+ ❯ src/runtimes/codex-runtime.test.ts (81 tests | 1 failed) 1791ms
+       × proceeds to validation when Codex exits non-zero after terminal completion 22ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/runtimes/codex-runtime.test.ts > CodexRuntime > spawn > proceeds to validation when Codex exits non-zero after terminal completion
+AssertionError: expected [ { type: 'status', …(3) }, …(3) ] to deeply equal ArrayContaining{…}
+
+- Expected
++ Received
+
+- ArrayContaining [
+-   ObjectContaining {
++ [
++   {
++     "message": "Codex session ready",
++     "sessionId": "completed-exit-one",
++     "timestamp": "2026-09-08T11:54:14.882Z",
++     "type": "status",
++   },
++   {
++     "isRaw": false,
++     "text": "Work is complete.",
++     "timestamp": "2026-09-08T11:54:14.882Z",
++     "type": "reasoning",
++   },
++   {
++     "cachedInputTokens": 0,
++     "costUsd": 0,
+      "result": "Work is complete.",
++     "timestamp": "2026-09-08T11:54:14.882Z",
++     "totalInputTokens": 10,
++     "totalOutputTokens": 5,
+      "type": "complete",
+    },
+-   ObjectContaining {
++   {
+      "fatal": false,
+-     "message": StringContaining "process-group termination verified",
++     "message": "Codex exited with code 1 after task completion — proceeding to validation",
++     "timestamp": "2026-09-08T11:54:14.882Z",
+      "type": "error",
+    },
+  ]
+
+ ❯ src/runtimes/codex-runtime.test.ts:514:22
+    512|       }
+    513|
+    514|       expect(events).toEqual(
+       |                      ^
+    515|         expect.arrayContaining([
+    516|           expect.objectContaining({ type: 'complete', result: 'Work is…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed | 7 passed (8)
+      Tests  1 failed | 927 passed | 1 skipped (929)
+   Start at  13:54:12
+   Duration  42.70s (transform 6.11s, setup 0ms, import 10.67s, tests 44.20s, environment 1ms)
+

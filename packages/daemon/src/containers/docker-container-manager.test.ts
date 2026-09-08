@@ -58,7 +58,7 @@ function createMockExec(exitCode = 0) {
   return {
     exec: {
       start: vi.fn().mockResolvedValue(muxStream),
-      inspect: vi.fn().mockResolvedValue({ ExitCode: exitCode }),
+      inspect: vi.fn().mockResolvedValue({ Running: false, ExitCode: exitCode }),
     },
     stream: muxStream,
   };
@@ -866,7 +866,7 @@ describe('DockerContainerManager', () => {
       const muxStream = createMockMuxStream('hello world', '');
       const mockExec = {
         start: vi.fn().mockResolvedValue(muxStream),
-        inspect: vi.fn().mockResolvedValue({ ExitCode: 0 }),
+        inspect: vi.fn().mockResolvedValue({ Running: false, ExitCode: 0 }),
       };
       container.exec.mockResolvedValue(mockExec);
 
@@ -880,7 +880,7 @@ describe('DockerContainerManager', () => {
       const muxStream = createMockMuxStream();
       const mockExec = {
         start: vi.fn().mockResolvedValue(muxStream),
-        inspect: vi.fn().mockResolvedValue({ ExitCode: 0 }),
+        inspect: vi.fn().mockResolvedValue({ Running: false, ExitCode: 0 }),
       };
       container.exec.mockResolvedValue(mockExec);
 
@@ -895,7 +895,7 @@ describe('DockerContainerManager', () => {
       const muxStream = createMockMuxStream();
       const mockExec = {
         start: vi.fn().mockResolvedValue(muxStream),
-        inspect: vi.fn().mockResolvedValue({ ExitCode: 0 }),
+        inspect: vi.fn().mockResolvedValue({ Running: false, ExitCode: 0 }),
       };
       container.exec.mockResolvedValue(mockExec);
 
@@ -920,7 +920,7 @@ describe('DockerContainerManager', () => {
       const muxStream = createMockMuxStream();
       const mockExec = {
         start: vi.fn().mockResolvedValue(muxStream),
-        inspect: vi.fn().mockResolvedValue({ ExitCode: 0 }),
+        inspect: vi.fn().mockResolvedValue({ Running: false, ExitCode: 0 }),
       };
       container.exec.mockResolvedValue(mockExec);
 
@@ -934,7 +934,7 @@ describe('DockerContainerManager', () => {
       const muxStream = createMockMuxStream('', 'error occurred');
       const mockExec = {
         start: vi.fn().mockResolvedValue(muxStream),
-        inspect: vi.fn().mockResolvedValue({ ExitCode: 1 }),
+        inspect: vi.fn().mockResolvedValue({ Running: false, ExitCode: 1 }),
       };
       container.exec.mockResolvedValue(mockExec);
 
@@ -944,11 +944,21 @@ describe('DockerContainerManager', () => {
       expect(result.stderr).toBe('error occurred');
     });
 
+    it('does not authorize buffered success while the exec inspection still reports running', async () => {
+      const muxStream = createMockMuxStream();
+      container.exec.mockResolvedValue({
+        start: vi.fn().mockResolvedValue(muxStream),
+        inspect: vi.fn().mockResolvedValue({ Running: true, ExitCode: 0 }),
+      });
+      const result = await manager.execInContainer('abc123', ['termination-proof']);
+      expect(result.exitCode).not.toBe(0);
+    });
+
     it('defaults to exit code 1 when ExitCode is null', async () => {
       const muxStream = createMockMuxStream();
       const mockExec = {
         start: vi.fn().mockResolvedValue(muxStream),
-        inspect: vi.fn().mockResolvedValue({ ExitCode: null }),
+        inspect: vi.fn().mockResolvedValue({ Running: false, ExitCode: null }),
       };
       container.exec.mockResolvedValue(mockExec);
 
@@ -963,7 +973,7 @@ describe('DockerContainerManager', () => {
       const muxStream = createMockMuxStream();
       const mockExec = {
         start: vi.fn().mockResolvedValue(muxStream),
-        inspect: vi.fn().mockResolvedValue({ ExitCode: 0 }),
+        inspect: vi.fn().mockResolvedValue({ Running: false, ExitCode: 0 }),
       };
       container.exec.mockResolvedValue(mockExec);
 
@@ -984,11 +994,35 @@ describe('DockerContainerManager', () => {
   // ─── execStreaming() ────────────────────────────────────
 
   describe('execStreaming()', () => {
+    it.each(['inspection-failed', 'still-running', 'missing-code'] as const)(
+      'does not fabricate an observed streaming exit when %s',
+      async (failure) => {
+        const muxStream = new PassThrough();
+        const inspect = vi.fn();
+        if (failure === 'inspection-failed')
+          inspect.mockRejectedValue(new Error('transport unavailable'));
+        else
+          inspect.mockResolvedValue(
+            failure === 'still-running'
+              ? { Running: true, ExitCode: 0 }
+              : { Running: false, ExitCode: null },
+          );
+        container.exec.mockResolvedValue({ start: vi.fn().mockResolvedValue(muxStream), inspect });
+        const result = await manager.execStreaming('abc123', ['cmd']);
+        const observed = expect(result.exitCode).rejects.toMatchObject({
+          code: 'EXEC_EXIT_UNVERIFIED',
+        });
+        muxStream.resume();
+        muxStream.end();
+        await observed;
+      },
+    );
+
     it('returns stdout/stderr streams and exit code promise', async () => {
       const muxStream = new PassThrough();
       const mockExec = {
         start: vi.fn().mockResolvedValue(muxStream),
-        inspect: vi.fn().mockResolvedValue({ ExitCode: 0 }),
+        inspect: vi.fn().mockResolvedValue({ Running: false, ExitCode: 0 }),
       };
       container.exec.mockResolvedValue(mockExec);
 
@@ -1013,7 +1047,7 @@ describe('DockerContainerManager', () => {
       const muxStream = new PassThrough();
       const mockExec = {
         start: vi.fn().mockResolvedValue(muxStream),
-        inspect: vi.fn().mockResolvedValue({ ExitCode: 0 }),
+        inspect: vi.fn().mockResolvedValue({ Running: false, ExitCode: 0 }),
       };
       container.exec.mockResolvedValue(mockExec);
 
@@ -1037,7 +1071,7 @@ describe('DockerContainerManager', () => {
       const muxStream = new PassThrough();
       const mockExec = {
         start: vi.fn().mockResolvedValue(muxStream),
-        inspect: vi.fn().mockResolvedValue({ ExitCode: 0 }),
+        inspect: vi.fn().mockResolvedValue({ Running: false, ExitCode: 0 }),
       };
       container.exec.mockResolvedValue(mockExec);
 
@@ -1062,7 +1096,7 @@ describe('DockerContainerManager', () => {
       const muxStream = new PassThrough();
       const mockExec = {
         start: vi.fn().mockResolvedValue(muxStream),
-        inspect: vi.fn().mockResolvedValue({ ExitCode: 0 }),
+        inspect: vi.fn().mockResolvedValue({ Running: false, ExitCode: 0 }),
       };
       container.exec.mockResolvedValue(mockExec);
 
@@ -1081,7 +1115,7 @@ describe('DockerContainerManager', () => {
       const muxStream = new PassThrough();
       const mockExec = {
         start: vi.fn().mockResolvedValue(muxStream),
-        inspect: vi.fn().mockResolvedValue({ ExitCode: 1 }),
+        inspect: vi.fn().mockResolvedValue({ Running: false, ExitCode: 1 }),
       };
       container.exec.mockResolvedValue(mockExec);
       const terminate = vi
@@ -1104,7 +1138,7 @@ describe('DockerContainerManager', () => {
       const muxStream = new PassThrough();
       const mockExec = {
         start: vi.fn().mockResolvedValue(muxStream),
-        inspect: vi.fn().mockResolvedValue({ ExitCode: 1 }),
+        inspect: vi.fn().mockResolvedValue({ Running: false, ExitCode: 1 }),
       };
       container.exec.mockResolvedValue(mockExec);
       vi.spyOn(manager, 'execInContainer').mockResolvedValue({
@@ -1184,7 +1218,7 @@ describe('DockerContainerManager', () => {
 
       const mockExec = {
         start: vi.fn().mockResolvedValue(muxStream),
-        inspect: vi.fn().mockResolvedValue({ ExitCode: 0 }),
+        inspect: vi.fn().mockResolvedValue({ Running: false, ExitCode: 0 }),
       };
       container.exec.mockResolvedValue(mockExec);
 

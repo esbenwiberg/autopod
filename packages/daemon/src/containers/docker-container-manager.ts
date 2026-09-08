@@ -38,6 +38,7 @@ import {
   createContainerWithStaleRetry,
   isExpectedDockerError,
 } from './docker-helpers.js';
+import { isObservedExitCode, unverifiedExecExit } from './exec-exit-evidence.js';
 
 const _dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -923,7 +924,12 @@ export class DockerContainerManager implements ContainerManager {
         logger: this.logger,
         containerId,
       });
-      exitCode = inspection.ExitCode ?? 1;
+      // A success code authorizes callers such as verified process-group kill.
+      // Never manufacture that success while inspection still reports running.
+      exitCode =
+        inspection.Running === false && isObservedExitCode(inspection.ExitCode)
+          ? inspection.ExitCode
+          : 1;
     } catch (err: unknown) {
       if (err instanceof DockerCallTimeoutError) {
         this.logger.warn(
@@ -1019,14 +1025,11 @@ export class DockerContainerManager implements ContainerManager {
       },
     );
 
-    // Resolve exit code once the stream closes and we can inspect the exec.
-    // Listen to 'end', 'error', and 'close' — destroy() only emits 'close'.
-    // The inspect call is bounded so a wedged daemon can't pin the exit-code
-    // promise forever; on timeout we fall back to exit code 1, which the
-    // runtime layer's awaitExitCodeBounded then surfaces as a non-fatal error.
+    // A closed transport triggers inspection, not proof of process exit. Keep
+    // missing/failed inspection distinct from an observed nonzero exit.
     const containerIdForLog = containerId;
     const logger = this.logger;
-    const exitCode = new Promise<number>((resolve) => {
+    const exitCode = new Promise<number>((resolve, reject) => {
       let resolved = false;
       const checkExit = async () => {
         if (resolved) return;
@@ -1038,9 +1041,11 @@ export class DockerContainerManager implements ContainerManager {
             logger,
             containerId: containerIdForLog,
           });
-          resolve(inspection.ExitCode ?? 1);
+          if (inspection.Running !== false || !isObservedExitCode(inspection.ExitCode)) {
+            reject(unverifiedExecExit());
+          } else resolve(inspection.ExitCode);
         } catch {
-          resolve(1);
+          reject(unverifiedExecExit());
         }
       };
 
@@ -1050,6 +1055,10 @@ export class DockerContainerManager implements ContainerManager {
       // destroy() emits 'close' but not 'end' — must handle this too
       mux.on('close', checkExit);
     });
+
+    // Consumers can drain stdout before awaiting exit; retain rejection without
+    // creating an unhandled rejection during that interval. Awaiting still rejects.
+    void exitCode.catch(() => {});
 
     const kill = async () => {
       try {

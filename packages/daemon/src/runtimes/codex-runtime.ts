@@ -512,12 +512,19 @@ export class CodexRuntime implements Runtime {
     podId: string,
     handle: StreamingExecResult,
   ): Promise<boolean> {
-    const exitResult = await awaitExitCodeBounded(handle.exitCode, {
-      runtimeName: 'codex-runtime',
-      podId,
-      logger: this.logger,
-    });
-    if (!exitResult.timedOut) return true;
+    try {
+      const exitResult = await awaitExitCodeBounded(handle.exitCode, {
+        runtimeName: 'codex-runtime',
+        podId,
+        logger: this.logger,
+      });
+      if (!exitResult.timedOut) return true;
+    } catch {
+      this.logger.warn(
+        { podId },
+        'Interrupted exec exit is unverified; requiring verified process-group termination',
+      );
+    }
 
     const killResult = await settlePromiseWithin(handle.kill(), stalledExecKillTimeoutMs());
     if (killResult.status === 'fulfilled') return true;
@@ -948,7 +955,7 @@ export class CodexRuntime implements Runtime {
       runtimeName: 'codex-runtime',
       podId,
       logger: this.logger,
-    });
+    }).catch(() => ({ code: null, timedOut: true }));
 
     if (exitResult.timedOut) {
       const killResult = await settlePromiseWithin(handle.kill(), stalledExecKillTimeoutMs());
@@ -963,18 +970,16 @@ export class CodexRuntime implements Runtime {
           'Failed to terminate stalled Codex exec after unresolved exit code',
         );
       }
-      // Work is done when sawComplete is true — we have terminal completion
-      // proof (from the stream or recovered rollout). A stalled exit code at
-      // that point is not a reason to discard completed work: we kill the exec
-      // as best-effort insurance and proceed to validation. Only an unresolved
-      // exit code *without* completion proof is fatal (genuinely incomplete).
       return {
         type: 'error',
         timestamp: new Date().toISOString(),
-        message: outputState.sawComplete
-          ? 'Codex exit code did not resolve after task completion — terminated stalled exec, proceeding to validation'
-          : 'Codex exit code did not resolve before task completion — refusing to mark pod complete',
-        fatal: !outputState.sawComplete,
+        message:
+          killResult.status !== 'fulfilled'
+            ? 'Codex execution termination is unverified; retain completion and source, and reconcile before validation or another execution.'
+            : outputState.sawComplete
+              ? 'Codex exit code did not resolve; process-group termination verified. Retained completion can proceed to validation.'
+              : 'Codex exit code did not resolve before task completion — refusing to mark pod complete',
+        fatal: killResult.status !== 'fulfilled' || !outputState.sawComplete,
       };
     }
 

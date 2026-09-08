@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { Readable } from 'node:stream';
 import type {
   AgentEvent,
   EscalationRequest,
@@ -27,6 +28,7 @@ import Database from 'better-sqlite3';
 import pino from 'pino';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { SandboxContainerManager } from '../containers/sandbox-container-manager.js';
+import { CodexRuntime } from '../runtimes/codex-runtime.js';
 import {
   mockBranchPublication,
   mockCommittedPublication,
@@ -1542,6 +1544,67 @@ describe('PodManager', () => {
       expect(ctx.containerManager.extractDirectoryFromContainer).toHaveBeenCalled();
     });
   });
+  it('retains actual Codex completion evidence but does not validate or deliver after unverified termination', async () => {
+    const ctx = createTestContext(undefined, { defaultRuntime: 'codex' });
+    const attempts = createProviderAttemptRepository(ctx.db);
+    ctx.deps.providerAttemptRepo = attempts;
+    const manager = createPodManager(ctx.deps);
+    const created = manager.createSession(
+      { profileName: 'test-profile', task: 'Retain completion while termination is unknown' },
+      'operator',
+    );
+    // Seed the owned running lifecycle in this local repository fixture.
+    ctx.podRepo.update(created.id, { status: 'running', containerId: 'owned-container' });
+    const pod = ctx.podRepo.getOrThrow(created.id);
+    const exitCode = Promise.reject(
+      new AutopodError('Unobserved exit', 'EXEC_EXIT_UNVERIFIED', 409),
+    );
+    void exitCode.catch(() => {});
+    const kill = vi.fn(async () => {
+      throw new Error('termination not verified');
+    });
+    vi.mocked(ctx.containerManager.execStreaming).mockResolvedValue({
+      stdout: Readable.from([
+        `${JSON.stringify({ id: 'complete', msg: { type: 'task_complete', turn_id: 't1', last_agent_message: 'Retain this source summary' } })}\n`,
+      ]),
+      stderr: Readable.from([]),
+      exitCode,
+      kill,
+    });
+    const runtime = new CodexRuntime(pino({ level: 'silent' }), ctx.containerManager, ctx.podRepo);
+    const outcome = await manager.consumeAgentEvents(
+      pod.id,
+      runtime.spawn({
+        podId: pod.id,
+        task: pod.task,
+        model: pod.model,
+        reasoningEffort: 'auto',
+        workDir: '/workspace',
+        containerId: 'owned-container',
+        env: {},
+      }),
+      0,
+      { generation: pod.lifecycleGeneration, containerId: pod.containerId },
+    );
+    expect(outcome).toBe('failed');
+    expect(ctx.validationEngine.validate).not.toHaveBeenCalled();
+    expect(ctx.prManager.createPr).not.toHaveBeenCalled();
+    expect(attempts.list(pod.id).at(-1)?.outcome).toBe('failed');
+    expect(ctx.eventRepo.getForSession(pod.id, { type: 'pod.agent_activity', latest: 20 })).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          payload: expect.objectContaining({
+            event: expect.objectContaining({
+              type: 'complete',
+              result: 'Retain this source summary',
+            }),
+          }),
+        }),
+      ]),
+    );
+    expect(ctx.podRepo.getOrThrow(pod.id).failureReason).toContain('termination is unverified');
+  });
+
   it.each(
     ['end', 'error', 'complete'].flatMap((ending) => [
       { ending, sameLifecycle: false },

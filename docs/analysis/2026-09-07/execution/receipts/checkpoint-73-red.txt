@@ -1,0 +1,120 @@
+
+ RUN  v4.1.11 /private/tmp/autopod-durable-execution/packages/daemon
+
+ ❯ src/containers/docker-container-manager.test.ts (90 tests | 3 failed | 87 skipped) 10ms
+       × does not fabricate an observed streaming exit when inspection-failed 7ms
+       × does not fabricate an observed streaming exit when still-running 1ms
+       × does not fabricate an observed streaming exit when missing-code 0ms
+ ❯ src/containers/sandbox-container-manager.test.ts (44 tests | 1 failed | 43 skipped) 6ms
+       × does not fabricate a zero exit when the native stream ends without an exit frame 5ms
+ ❯ src/runtimes/codex-runtime.test.ts (79 tests | 1 failed | 78 skipped) 24ms
+       × retains completion but refuses validation when stalled exec termination is unverified 22ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 5 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/containers/docker-container-manager.test.ts > DockerContainerManager > execStreaming() > does not fabricate an observed streaming exit when inspection-failed
+ FAIL  src/containers/docker-container-manager.test.ts > DockerContainerManager > execStreaming() > does not fabricate an observed streaming exit when missing-code
+AssertionError: promise resolved "1" instead of rejecting
+
+- Expected:
+Error {
+  "message": "rejected promise",
+}
+
++ Received:
+1
+
+ ❯ src/containers/docker-container-manager.test.ts:1002:48
+    1000|         container.exec.mockResolvedValue({ start: vi.fn().mockResolved…
+    1001|         const result = await manager.execStreaming('abc123', ['cmd']);
+    1002|         const observed = expect(result.exitCode).rejects.toMatchObject…
+       |                                                ^
+    1003|           code: 'EXEC_EXIT_UNVERIFIED',
+    1004|         });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/5]⎯
+
+ FAIL  src/containers/docker-container-manager.test.ts > DockerContainerManager > execStreaming() > does not fabricate an observed streaming exit when still-running
+AssertionError: promise resolved "+0" instead of rejecting
+
+- Expected:
+Error {
+  "message": "rejected promise",
+}
+
++ Received:
+0
+
+ ❯ src/containers/docker-container-manager.test.ts:1002:48
+    1000|         container.exec.mockResolvedValue({ start: vi.fn().mockResolved…
+    1001|         const result = await manager.execStreaming('abc123', ['cmd']);
+    1002|         const observed = expect(result.exitCode).rejects.toMatchObject…
+       |                                                ^
+    1003|           code: 'EXEC_EXIT_UNVERIFIED',
+    1004|         });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/5]⎯
+
+ FAIL  src/containers/sandbox-container-manager.test.ts > SandboxContainerManager > exec > does not fabricate a zero exit when the native stream ends without an exit frame
+AssertionError: promise resolved "+0" instead of rejecting
+
+- Expected:
+Error {
+  "message": "rejected promise",
+}
+
++ Received:
+0
+
+ ❯ src/containers/sandbox-container-manager.test.ts:843:35
+    841|       const id = await mgr.spawn(baseConfig);
+    842|       const stream = await mgr.execStreaming(id, ['cmd']);
+    843|       await expect(stream.exitCode).rejects.toMatchObject({ code: 'EXE…
+       |                                   ^
+    844|       await expect(readStream(stream.stdout)).resolves.toBe('retained …
+    845|     });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/5]⎯
+
+ FAIL  src/runtimes/codex-runtime.test.ts > CodexRuntime > spawn > retains completion but refuses validation when stalled exec termination is unverified
+AssertionError: expected [ { type: 'complete', …(3) }, …(1) ] to deeply equal ArrayContaining{…}
+
+- Expected
++ Received
+
+- ArrayContaining [
+-   ObjectContaining {
++ [
++   {
++     "costUsd": 0,
+      "result": "Retain completed source",
++     "timestamp": "2026-09-08T11:45:42.923Z",
+      "type": "complete",
+    },
+-   ObjectContaining {
+-     "fatal": true,
+-     "message": StringContaining "termination is unverified",
++   {
++     "fatal": false,
++     "message": "Codex exit code did not resolve after task completion — terminated stalled exec, proceeding to validation",
++     "timestamp": "2026-09-08T11:45:42.936Z",
+      "type": "error",
+    },
+  ]
+
+ ❯ src/runtimes/codex-runtime.test.ts:668:24
+    666|         }))
+    667|           events.push(event);
+    668|         expect(events).toEqual(
+       |                        ^
+    669|           expect.arrayContaining([
+    670|             expect.objectContaining({ type: 'complete', result: 'Retai…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[4/5]⎯
+
+
+ Test Files  3 failed (3)
+      Tests  5 failed | 208 skipped (213)
+   Start at  13:45:42
+   Duration  585ms (transform 632ms, setup 0ms, import 1.22s, tests 39ms, environment 0ms)
+

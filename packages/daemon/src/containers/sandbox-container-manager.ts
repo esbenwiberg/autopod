@@ -40,6 +40,7 @@ import {
   parseCgroupExecutionMetadata,
 } from './cgroup-execution-metadata.js';
 import { assertDirectoryExtractionCurrent } from './directory-extraction-ownership.js';
+import { isObservedExitCode, unverifiedExecExit } from './exec-exit-evidence.js';
 import type { SandboxPortAuth } from './sandbox-api-client.js';
 import {
   SANDBOX_TIER_MEMORY_BYTES,
@@ -560,14 +561,14 @@ for root in sys.argv[1:]:
     };
 
     const exitCode = (async () => {
-      let code = 0;
+      let code: number | undefined;
       try {
         // biome-ignore lint/style/noNonNullAssertion: guarded by caller (execStream defined)
         for await (const chunk of this.client.execStream!(containerId, command, streamOptions)) {
+          if (isObservedExitCode(chunk.exitCode)) code = chunk.exitCode;
           if (cancelled) break;
           if (chunk.stdout) stdout.push(chunk.stdout);
           if (chunk.stderr) stderr.push(chunk.stderr);
-          if (chunk.exitCode != null) code = chunk.exitCode;
         }
       } catch (err) {
         // kill() may already have finalized the public streams while remote
@@ -577,12 +578,15 @@ for root in sys.argv[1:]:
         if (!streamsFinalized && !stderr.destroyed && !stderr.readableEnded) {
           stderr.push(String(err instanceof Error ? err.message : err));
         }
-        code = 1;
+        if (code === undefined) throw unverifiedExecExit();
       } finally {
         finalizeStreams();
       }
+      if (code === undefined) throw unverifiedExecExit();
       return code;
     })();
+
+    void exitCode.catch(() => {});
 
     return {
       stdout,
