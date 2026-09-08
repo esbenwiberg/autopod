@@ -116,6 +116,11 @@ public final class ActionHandler {
         guard let self else { throw URLError(.notConnectedToInternet) }
         return try await self.api.authorizeRetry(id, request: input)
       },
+      reworkRetry: { [weak self] id in
+        guard let self else { throw URLError(.notConnectedToInternet) }
+        try await self.api.triggerValidation(id)
+        await self.podStore.refreshSession(id)
+      },
       resumeRetry: { [weak self] id in
         guard let self else { throw URLError(.notConnectedToInternet) }
         _ = try await self.api.resumePod(id)

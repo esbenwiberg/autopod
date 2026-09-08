@@ -725,8 +725,12 @@ it.each(['validation', 'sandbox_startup', 'codex_interruption', 'worker'] as con
         reason: 'External condition verified',
         ...(stage === 'validation' ? {} : { stage }),
       });
-      await run(['resume', 'abcd1234']);
-      expect(calls.filter((call) => call.path.endsWith('resume'))).toHaveLength(1);
+      await run([stage === 'worker' ? 'rework' : 'resume', 'abcd1234']);
+      expect(
+        calls.filter((call) => call.path.endsWith(stage === 'worker' ? 'validate' : 'resume')),
+      ).toHaveLength(1);
+      if (stage === 'worker')
+        expect(calls.filter((call) => call.path.endsWith('resume'))).toHaveLength(0);
       expect(output.mock.calls.flat().join('\n')).toContain('Inspect status and retry-state');
     } finally {
       output.mockRestore();

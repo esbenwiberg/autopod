@@ -1,0 +1,33 @@
+
+ RUN  v4.1.11 /private/tmp/autopod-durable-execution/packages/daemon
+
+ ❯ src/pods/pod-manager.test.ts (624 tests | 1 failed | 623 skipped) 133ms
+     × rejects unauthorized worker Rework before HTTP acceptance or resource teardown 133ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/pods/pod-manager.test.ts > PodManager > rejects unauthorized worker Rework before HTTP acceptance or resource teardown
+AssertionError: {"ok":true,"accepted":true}: expected 202 to be 409 // Object.is equality
+
+- Expected
++ Received
+
+- 409
++ 202
+
+ ❯ src/pods/pod-manager.test.ts:1336:50
+    1334|         headers: { authorization: 'Bearer synthetic' },
+    1335|       });
+    1336|       expect(response.statusCode, response.body).toBe(409);
+       |                                                  ^
+    1337|       expect(response.json().code).toBe('TASK_RETRY_RECONCILIATION_REQ…
+    1338|       expect(ctx.podRepo.getOrThrow(pod.id)).toMatchObject({
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 623 skipped (624)
+   Start at  19:51:04
+   Duration  1.58s (transform 932ms, setup 0ms, import 1.34s, tests 133ms, environment 0ms)
+

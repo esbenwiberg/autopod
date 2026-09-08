@@ -27,8 +27,12 @@ func retryClientPreservesUnknownExecutionAndSeparateAuthorization(stage: String)
   let duplicate = try await api.authorizeRetry("pod", request: input)
   #expect(first.id == duplicate.id)
   #expect(first.usedByAttemptId == nil)
-  let resumed = try await api.resumePod("pod")
-  #expect(resumed.action == "revalidate")
+  if stage == "worker" {
+    try await api.triggerValidation("pod")
+  } else {
+    let resumed = try await api.resumePod("pod")
+    #expect(resumed.action == "revalidate")
+  }
 }
 
 private final class RetryFixtureProtocol: URLProtocol, @unchecked Sendable {
@@ -52,6 +56,9 @@ private final class RetryFixtureProtocol: URLProtocol, @unchecked Sendable {
       #expect(request.httpMethod == "POST")
       body =
         #"{"id":"grant","requestKey":"stable-key","failureId":"failed","reason":"External condition checked","createdAt":"2026-09-07T10:01:00Z","usedByAttemptId":null}"#
+    } else if path.hasSuffix("/validate") {
+      #expect(request.httpMethod == "POST")
+      body = #"{"ok":true,"accepted":true}"#
     } else {
       #expect(path.hasSuffix("/resume"))
       #expect(request.httpMethod == "POST")

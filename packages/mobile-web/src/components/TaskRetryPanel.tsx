@@ -70,7 +70,9 @@ export function TaskRetryPanel({
       setPending(null);
       setReason('');
       setState(await apiFetch<TaskRetryState>(statePath));
-      setMessage('One retry authorization recorded. Resume is a separate action.');
+      setMessage(
+        `One retry authorization recorded. ${stage === 'worker' ? 'Rework' : 'Resume'} is a separate action.`,
+      );
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
@@ -81,10 +83,12 @@ export function TaskRetryPanel({
     setBusy(true);
     setError('');
     try {
-      await apiFetch(`/pods/${podId}/resume`, { method: 'POST' });
+      await apiFetch(`/pods/${podId}/${stage === 'worker' ? 'validate' : 'resume'}`, {
+        method: 'POST',
+      });
       setState(await apiFetch<TaskRetryState>(statePath));
       setMessage(
-        'Resume requested. Refresh to inspect whether execution was admitted and completed.',
+        `${stage === 'worker' ? 'Rework' : 'Resume'} requested. Refresh to inspect whether execution was admitted and completed.`,
       );
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
@@ -186,7 +190,7 @@ export function TaskRetryPanel({
                 </>
               )}
               <button type="button" disabled={busy} onClick={() => void resume()}>
-                Resume{' '}
+                {stage === 'worker' ? 'Rework' : 'Resume'}{' '}
                 {stage === 'codex_interruption'
                   ? 'task'
                   : stage === 'validation'

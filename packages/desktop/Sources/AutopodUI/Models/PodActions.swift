@@ -74,6 +74,7 @@ public struct PodActions: Sendable {
   public var createIntentionalRerun: @MainActor @Sendable (IntentionalRerunDraft) async throws -> String
   public var loadRetryState: @MainActor @Sendable (String, String) async throws -> TaskRetryState
   public var authorizeRetry: @MainActor @Sendable (String, TaskRetryAuthorizationRequest) async throws -> TaskRetryAuthorization
+  public var reworkRetry: @MainActor @Sendable (String) async throws -> Void
   public var resumeRetry: @MainActor @Sendable (String) async throws -> Void
   public var resume: @MainActor @Sendable (String) async -> Void
   /// Recover a worktree-compromised pod. Returns the daemon's response
@@ -167,6 +168,7 @@ public struct PodActions: Sendable {
     createIntentionalRerun: @escaping @MainActor @Sendable (IntentionalRerunDraft) async throws -> String = { _ in throw URLError(.unsupportedURL) },
     loadRetryState: @escaping @MainActor @Sendable (String, String) async throws -> TaskRetryState = { _, _ in throw URLError(.unsupportedURL) },
     authorizeRetry: @escaping @MainActor @Sendable (String, TaskRetryAuthorizationRequest) async throws -> TaskRetryAuthorization = { _, _ in throw URLError(.unsupportedURL) },
+    reworkRetry: @escaping @MainActor @Sendable (String) async throws -> Void = { _ in throw URLError(.unsupportedURL) },
     resumeRetry: @escaping @MainActor @Sendable (String) async throws -> Void = { _ in throw URLError(.unsupportedURL) },
     resume: @escaping @MainActor @Sendable (String) async -> Void = { _ in },
     recoverWorktree: @escaping @MainActor @Sendable (String) async -> RecoverWorktreeResponse? = { _ in nil },
@@ -221,6 +223,7 @@ public struct PodActions: Sendable {
     self.createIntentionalRerun = createIntentionalRerun
     self.loadRetryState = loadRetryState
     self.authorizeRetry = authorizeRetry
+    self.reworkRetry = reworkRetry
     self.resumeRetry = resumeRetry
     self.resume = resume
     self.recoverWorktree = recoverWorktree

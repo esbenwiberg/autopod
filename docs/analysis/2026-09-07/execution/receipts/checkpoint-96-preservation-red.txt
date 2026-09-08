@@ -1,0 +1,35 @@
+
+ RUN  v4.1.11 /private/tmp/autopod-durable-execution/packages/daemon
+
+ ❯ src/pods/pod-manager.test.ts (624 tests | 1 failed | 623 skipped) 165ms
+     × rejects unauthorized worker Rework before HTTP acceptance or resource teardown 164ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/pods/pod-manager.test.ts > PodManager > rejects unauthorized worker Rework before HTTP acceptance or resource teardown
+AssertionError: expected [ 'broad-pinniped' ] to deeply equal []
+
+- Expected
++ Received
+
+- []
++ [
++   "broad-pinniped",
++ ]
+
+ ❯ src/pods/pod-manager.test.ts:1345:36
+    1343|       });
+    1344|       expect(ctx.containerManager.kill).not.toHaveBeenCalled();
+    1345|       expect(ctx.enqueuedSessions).toEqual([]);
+       |                                    ^
+    1346|       const grantResponse = await app.inject({
+    1347|         method: 'POST',
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 623 skipped (624)
+   Start at  19:54:10
+   Duration  1.92s (transform 1.15s, setup 0ms, import 1.63s, tests 165ms, environment 0ms)
+

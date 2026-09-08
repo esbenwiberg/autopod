@@ -1,0 +1,56 @@
+
+ RUN  v4.1.11 /private/tmp/autopod-durable-execution/packages/mobile-web
+
+ ❯ src/components/TaskRetryPanel.test.tsx (6 tests | 2 failed) 43ms
+   × preserves one worker authorization through lost response and reload without implicitly resuming 6ms
+   × shows remaining worker cooldown allowance with Resume and no required permission form 1ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 2 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/components/TaskRetryPanel.test.tsx > preserves one worker authorization through lost response and reload without implicitly resuming
+AssertionError: expected undefined to be truthy
+
+- Expected:
+true
+
++ Received:
+undefined
+
+ ❯ src/components/TaskRetryPanel.test.tsx:65:24
+     63|           (entry) => entry.textContent === label,
+     64|         );
+     65|         expect(button).toBeTruthy();
+       |                        ^
+     66|         button?.click();
+     67|       });
+ ❯ process.env.NODE_ENV.exports.act ../../node_modules/.pnpm/react@19.2.8/node_modules/react/cjs/react.development.js:814:22
+ ❯ click src/components/TaskRetryPanel.test.tsx:61:7
+ ❯ src/components/TaskRetryPanel.test.tsx:93:13
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/2]⎯
+
+ FAIL  src/components/TaskRetryPanel.test.tsx > shows remaining worker cooldown allowance with Resume and no required permission form
+AssertionError: expected undefined to be truthy
+
+- Expected:
+true
+
++ Received:
+undefined
+
+ ❯ src/components/TaskRetryPanel.test.tsx:183:20
+    181|       (b) => b.textContent === 'Rework worker',
+    182|     );
+    183|     expect(button).toBeTruthy();
+       |                    ^
+    184|     await act(async () => button?.click());
+    185|     expect(resumes).toBe(1);
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/2]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  2 failed | 4 passed (6)
+   Start at  19:51:04
+   Duration  487ms (transform 26ms, setup 11ms, import 41ms, tests 43ms, environment 297ms)
+

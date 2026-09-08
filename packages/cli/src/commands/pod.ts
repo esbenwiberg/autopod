@@ -398,11 +398,24 @@ export function registerPodCommands(program: Command, getClient: () => AutopodCl
         );
         withJsonOutput(opts, grant, (value) =>
           console.log(
-            `Recorded ${value.id}. Run ap resume ${resolved} to request execution; normal lifecycle and binding checks still apply.`,
+            `Recorded ${value.id}. Run ap ${opts.stage === 'worker' ? 'rework' : 'resume'} ${resolved} to request execution; normal lifecycle and binding checks still apply.`,
           ),
         );
       },
     );
+  program
+    .command('rework <id>')
+    .description(
+      'Request agent rework from preserved work; recorded retry permission and binding checks still apply',
+    )
+    .option('--json', 'Output JSON')
+    .action(async (id: string, opts: { json?: boolean }) => {
+      const client = getClient();
+      await client.triggerValidation(await resolvePodId(client, id));
+      withJsonOutput(opts, { ok: true, requested: 'rework' }, () =>
+        console.log('Rework requested. Inspect status and retry-state for execution outcome.'),
+      );
+    });
   program
     .command('resume <id>')
     .description(

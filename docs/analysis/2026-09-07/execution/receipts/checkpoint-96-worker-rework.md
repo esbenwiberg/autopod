@@ -1,0 +1,13 @@
+- generic [ref=e54] [box=16,29,343,732]:
+  - heading "Worker execution" [level=2] [ref=e55] [box=33,46,309,28]
+  - status [ref=e125] [box=33,86,309,57]: Rework requested. Refresh to inspect whether execution was admitted and completed.
+  - paragraph [ref=e56] [box=33,155,309,38]: 2 executed / 2 admitted worker runs across this task.
+  - paragraph [ref=e57] [box=33,205,309,57]: 1 / 1 transient retry admissions · 150 ms measured · 0 interrupted with unknown duration.
+  - paragraph [ref=e58] [box=33,274,309,133]: Repeated worker authentication failures require a recorded human authorization. Classified throttling and provider outages use the persisted task allowance and cooldown. Worker elapsed time overlaps phase measurements; usage is not counted again.
+  - paragraph [ref=e59] [box=33,419,309,38]: "Latest outcome: transient · partial telemetry."
+  - generic [ref=e126] [box=33,469,309,107]:
+    - text: Reason for one extra retry
+    - textbox "Reason for one extra retry" [ref=e127] [box=33,496,309,80]
+  - button "Record one retry authorization" [disabled] [ref=e128] [box=33,588,309,44]
+  - button "Rework worker" [ref=e60] [box=33,644,309,44]
+  - button "Refresh retry accounting" [ref=e61] [box=33,700,309,44]

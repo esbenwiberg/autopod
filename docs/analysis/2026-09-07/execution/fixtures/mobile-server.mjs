@@ -299,7 +299,7 @@ if (workerTransientFixture) {
     ...pod,
     task: '[Local fixture] Retry a throttled worker within the task allowance',
     failureReason:
-      'Provider throttled. One recorded task retry remains; Resume waits for its cooldown.',
+      'Provider throttled. One recorded task retry remains; Rework waits for its cooldown.',
   };
   Object.assign(retryState, {
     retryFailure: 'transient',
@@ -565,7 +565,7 @@ const server = createServer(async (req, res) => {
   if (
     workerTransientFixture &&
     req.method === 'POST' &&
-    pathname === '/pods/local-fixture/resume'
+    pathname === '/pods/local-fixture/validate'
   ) {
     Object.assign(retryState, {
       admissionCount: 2,
@@ -582,7 +582,7 @@ const server = createServer(async (req, res) => {
     console.log(
       JSON.stringify({
         scope: 'local fixture only',
-        action: 'resume-worker',
+        action: 'rework-worker',
         admitted: 2,
         executed: 2,
       }),

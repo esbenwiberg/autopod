@@ -1292,6 +1292,116 @@ describe('PodManager', () => {
       await app.close();
     }
   });
+  it('rejects unauthorized worker Rework before HTTP acceptance or resource teardown', async () => {
+    const ctx = createTestContext();
+    const manager = createPodManager(ctx.deps);
+    const pod = manager.createSession(
+      { profileName: 'test-profile', task: 'Preserve failed worker source' },
+      'operator',
+    );
+    const sourceDir = fs.mkdtempSync(path.join(os.tmpdir(), 'worker-rework-'));
+    fs.writeFileSync(path.join(sourceDir, 'work.txt'), 'Retain human and worker changes');
+    ctx.podRepo.update(pod.id, {
+      status: 'running',
+      containerId: 'owned-container',
+      worktreePath: sourceDir,
+    });
+    await manager.consumeAgentEvents(
+      pod.id,
+      (async function* () {
+        yield {
+          type: 'error',
+          timestamp: new Date().toISOString(),
+          fatal: true,
+          message: 'Authentication rejected',
+          classification: {
+            category: 'auth',
+            definitive: false,
+            sanitizedMessage: 'Authentication rejected',
+          },
+        } as const;
+      })(),
+    );
+    ctx.enqueuedSessions.length = 0;
+    const before = ctx.podRepo.getOrThrow(pod.id);
+    const app = Fastify();
+    app.setErrorHandler(errorHandler);
+    authPlugin(app, {
+      validateToken: async () => ({ oid: 'operator', name: 'Operator' }),
+    } as never);
+    podRoutes(app, manager, ctx.eventRepo, undefined, ctx.podRepo);
+    try {
+      const response = await app.inject({
+        method: 'POST',
+        url: `/pods/${pod.id}/validate`,
+        headers: { authorization: 'Bearer synthetic' },
+      });
+      expect(response.statusCode, response.body).toBe(409);
+      expect(response.json().error).toBe('TASK_RETRY_RECONCILIATION_REQUIRED');
+      await expect(manager.triggerValidation(pod.id, { force: true })).rejects.toMatchObject({
+        code: 'TASK_RETRY_RECONCILIATION_REQUIRED',
+      });
+      expect(ctx.podRepo.getOrThrow(pod.id)).toMatchObject({
+        lifecycleGeneration: before.lifecycleGeneration,
+        containerId: before.containerId,
+        worktreePath: before.worktreePath,
+        status: 'failed',
+      });
+      expect(ctx.containerManager.kill).not.toHaveBeenCalled();
+      expect(ctx.enqueuedSessions).toEqual([]);
+      const grantResponse = await app.inject({
+        method: 'POST',
+        url: `/pods/${pod.id}/retry-authorizations`,
+        headers: { authorization: 'Bearer synthetic' },
+        payload: {
+          stage: 'worker',
+          requestKey: 'rework-permission',
+          reason: 'Credentials repaired; rework preserved source',
+        },
+      });
+      expect(grantResponse.statusCode).toBe(201);
+      expect(
+        (
+          await app.inject({
+            method: 'POST',
+            url: `/pods/${pod.id}/validate`,
+            headers: { authorization: 'Bearer synthetic' },
+          })
+        ).statusCode,
+      ).toBe(202);
+      await vi.waitFor(() => expect(ctx.enqueuedSessions).toContain(pod.id));
+      expect(ctx.podRepo.getOrThrow(pod.id)).toMatchObject({
+        status: 'queued',
+        worktreePath: before.worktreePath,
+        recoveryWorktreePath: before.worktreePath,
+      });
+      expect(
+        ctx.podRepo.workerRetries?.state(pod.id).authorizations[0]?.usedByAttemptId,
+      ).toBeNull();
+      ctx.podRepo.update(pod.id, { status: 'running', containerId: 'replacement-container' });
+      expect(
+        await manager.consumeAgentEvents(
+          pod.id,
+          (async function* () {
+            yield {
+              type: 'complete',
+              timestamp: new Date().toISOString(),
+              result: 'Reworked preserved source',
+            } as const;
+          })(),
+        ),
+      ).toBe('completed');
+      expect(ctx.podRepo.workerRetries?.state(pod.id)).toMatchObject({
+        admissionCount: 2,
+        executedCount: 2,
+        latest: { retryKind: 'override', outcome: 'pass' },
+      });
+    } finally {
+      await app.close();
+      fs.rmSync(sourceDir, { recursive: true, force: true });
+    }
+  });
+
   it('records authenticated idempotent worker retry permission without dispatching', async () => {
     const ctx = createTestContext();
     const manager = createPodManager(ctx.deps);

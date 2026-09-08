@@ -44,7 +44,7 @@ it.each(['validation', 'sandbox_startup', 'codex_interruption', 'worker'] as con
         if (bodies.length === 1) throw new Error('Response lost after commit');
         return new Response(JSON.stringify(state.authorizations[0]));
       }
-      if (String(url).endsWith('/resume')) {
+      if (String(url).endsWith(stage === 'worker' ? '/validate' : '/resume')) {
         resumes++;
         return new Response(JSON.stringify({ ok: true, action: 'revalidate' }));
       }
@@ -96,11 +96,13 @@ it.each(['validation', 'sandbox_startup', 'codex_interruption', 'worker'] as con
           : stage === 'validation'
             ? 'Resume validation'
             : stage === 'worker'
-              ? 'Resume worker'
+              ? 'Rework worker'
               : 'Resume sandbox startup',
       );
       expect(resumes).toBe(1);
-      expect(container.textContent).toContain('Resume requested.');
+      expect(container.textContent).toContain(
+        stage === 'worker' ? 'Rework requested.' : 'Resume requested.',
+      );
     } finally {
       act(() => root.unmount());
       container.remove();
@@ -159,7 +161,7 @@ it('shows remaining worker cooldown allowance with Resume and no required permis
   };
   let resumes = 0;
   vi.spyOn(globalThis, 'fetch').mockImplementation(async (url) => {
-    if (String(url).endsWith('/resume')) {
+    if (String(url).endsWith('/validate')) {
       resumes++;
       return new Response(JSON.stringify({ ok: true }));
     }
@@ -176,7 +178,7 @@ it('shows remaining worker cooldown allowance with Resume and no required permis
     expect(container.textContent).toContain('0 / 2 transient retry admissions');
     expect(container.querySelector('textarea')).toBeNull();
     const button = [...container.querySelectorAll('button')].find(
-      (b) => b.textContent === 'Resume worker',
+      (b) => b.textContent === 'Rework worker',
     );
     expect(button).toBeTruthy();
     await act(async () => button?.click());

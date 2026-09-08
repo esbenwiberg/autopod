@@ -1148,6 +1148,7 @@ export function podRoutes(
       await podManager.triggerValidation(podId, { force: true });
       return { ok: true };
     }
+    podManager.assertCanRework(podId);
     if (!reworkRuns.has(podId)) {
       const run = podManager
         .triggerValidation(podId, { force: true })

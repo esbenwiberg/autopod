@@ -1522,6 +1522,8 @@ export interface PodManager {
     targetOutput: 'pr' | 'branch' | 'artifact' | 'none',
     options?: { instructions?: string; skipAgent?: boolean },
   ): Promise<void>;
+  /** Check worker retry permission before Rework can tear down or enqueue resources. */
+  assertCanRework(podId: string): void;
   triggerValidation(
     podId: string,
     options?: { force?: boolean; validationOnly?: boolean },
@@ -13841,6 +13843,26 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
       await destroyPodNetwork(podId, true);
     },
 
+    assertCanRework(podId: string): void {
+      assertExecutionTerminationVerified(podId);
+      const pod = podRepo.getOrThrow(podId);
+      if (pod.options.agentMode === 'interactive') return;
+      const retries = podRepo.workerRetries;
+      if (!retries?.state(podId).retryFailure) return;
+      const profile = resolveEffectiveBoundProfile(pod);
+      retries.assertCanAdmit(
+        podId,
+        pod.lifecycleGeneration,
+        unavailableWorkerInputs,
+        workerBindingHash({
+          runtime: pod.runtime,
+          model: pod.model,
+          providerAccountId: profile.providerAccountId ?? null,
+        }),
+        [...(deps.workerInfrastructureRetryBackoffMs ?? WORKER_RETRY_BACKOFFS_MS)],
+      );
+    },
+
     async triggerValidation(
       podId: string,
       options?: { force?: boolean; validationOnly?: boolean },
@@ -13893,6 +13915,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
       // Interactive pods can always be re-provisioned: no agent, no validation, no worktree required.
       const isInteractive = pod.options.agentMode === 'interactive';
       if (force && fromTerminal && (pod.worktreePath || isInteractive || !pod.containerId)) {
+        this.assertCanRework(podId);
         emitActivityStatus(podId, 'Re-provisioning pod with fresh container…');
 
         // Fence stale validation and agent cleanup before awaiting any teardown.
@@ -13932,6 +13955,9 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
 
         const failedBeforeAgentWork =
           pod.status === 'failed' &&
+          // A recorded worker reservation is enough to retain its existing source.
+          // Missing session/token/summary telemetry does not prove no work happened.
+          (podRepo.workerRetries?.state(podId).admissionCount ?? 0) === 0 &&
           pod.validationAttempts === 0 &&
           pod.lastValidationResult === null &&
           pod.taskSummary === null &&

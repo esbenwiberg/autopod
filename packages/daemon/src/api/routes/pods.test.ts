@@ -1764,6 +1764,7 @@ describe('GET /pods/analytics/memory', () => {
       sendMessage: vi.fn(),
       getValidationHistory: vi.fn().mockReturnValue([]),
       triggerValidation: vi.fn(),
+      assertCanRework: vi.fn(),
       revalidateSession: vi.fn(),
       extendAttempts: vi.fn(),
       extendPrAttempts: vi.fn(),

@@ -54,17 +54,18 @@ struct TaskRetryCard: View {
               ) { Task { await record() } }
               .disabled(busy || reason.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
               }
-              Button(stage == "codex_interruption" ? "Resume task" : stage == "validation" ? "Resume validation" : stage == "worker" ? "Resume worker" : "Resume sandbox startup") {
+              Button(stage == "codex_interruption" ? "Resume task" : stage == "validation" ? "Resume validation" : stage == "worker" ? "Rework worker" : "Resume sandbox startup") {
                 Task {
                   busy = true
                   error = ""
                   message = ""
                   defer { busy = false }
                   do {
-                    try await actions.resumeRetry(podId)
+                    if stage == "worker" { try await actions.reworkRetry(podId) }
+                    else { try await actions.resumeRetry(podId) }
                     await refresh()
                     message =
-                      "Resume requested. Refresh to inspect admission and execution outcome."
+                      "\(stage == "worker" ? "Rework" : "Resume") requested. Refresh to inspect admission and execution outcome."
                   } catch { self.error = error.localizedDescription }
                 }
               }.disabled(busy)
@@ -114,7 +115,7 @@ struct TaskRetryCard: View {
       pending = nil
       reason = ""
       await refresh()
-      message = "One retry authorization recorded. Resume is a separate action."
+      message = "One retry authorization recorded. \(stage == "worker" ? "Rework" : "Resume") is a separate action."
     } catch { self.error = error.localizedDescription }
   }
 }

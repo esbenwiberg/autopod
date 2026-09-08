@@ -1,0 +1,39 @@
+
+ RUN  v4.1.11 /private/tmp/autopod-durable-execution/packages/daemon
+
+ ❯ src/pods/pod-manager.test.ts (624 tests | 1 failed | 623 skipped) 145ms
+     × rejects unauthorized worker Rework before HTTP acceptance or resource teardown 144ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/pods/pod-manager.test.ts > PodManager > rejects unauthorized worker Rework before HTTP acceptance or resource teardown
+AssertionError: expected { id: 'urgent-grouse', …(113) } to match object { status: 'queued', …(2) }
+(124 matching properties omitted from actual)
+
+- Expected
++ Received
+
+  {
+-   "recoveryWorktreePath": "/var/folders/k6/nj5ps5vj2078xw4xv9_1k_3m0000gn/T/worker-rework-Zsz5Is",
++   "recoveryWorktreePath": null,
+    "status": "queued",
+-   "worktreePath": "/var/folders/k6/nj5ps5vj2078xw4xv9_1k_3m0000gn/T/worker-rework-Zsz5Is",
++   "worktreePath": null,
+  }
+
+ ❯ src/pods/pod-manager.test.ts:1370:46
+    1368|       ).toBe(202);
+    1369|       await vi.waitFor(() => expect(ctx.enqueuedSessions).toContain(po…
+    1370|       expect(ctx.podRepo.getOrThrow(pod.id)).toMatchObject({
+       |                                              ^
+    1371|         status: 'queued',
+    1372|         worktreePath: before.worktreePath,
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 623 skipped (624)
+   Start at  19:54:52
+   Duration  1.55s (transform 915ms, setup 0ms, import 1.29s, tests 145ms, environment 0ms)
+
