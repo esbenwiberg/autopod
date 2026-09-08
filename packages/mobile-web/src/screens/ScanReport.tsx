@@ -233,7 +233,7 @@ export function ScanReport() {
                 {detail.report.judgment.usage.model} ·{' '}
                 {detail.report.judgment.usage.inputTokens +
                   detail.report.judgment.usage.outputTokens}{' '}
-                tokens · Cost:{' '}
+                recorded tokens · Cost:{' '}
                 {detail.report.judgment.usage.costUsd === null
                   ? 'unavailable'
                   : `$${detail.report.judgment.usage.costUsd.toFixed(4)}`}

@@ -1,0 +1,33 @@
+- main [ref=e3]:
+  - link "← Scan reports" [ref=e4] [cursor=pointer]:
+    - /url: "#/scan-reports"
+  - heading "Report review" [level=1] [ref=e6]
+  - generic [ref=e7]:
+    - heading "incomplete" [level=2] [ref=e8]
+    - paragraph [ref=e9]: 2026-09-07T10:00:00Z · Report completion is separate from patch delivery.
+    - paragraph [ref=e10]: main → work
+    - group [ref=e11]:
+      - generic "Exact source and files" [ref=e12]
+    - paragraph [ref=e13]: "secrets: failed · Unknown findings · Synthetic scanner failure; no clean result available."
+    - paragraph [ref=e14]: "dependencies: completed · 1 findings"
+    - paragraph [ref=e15]: "Judgment: unavailable"
+    - paragraph [ref=e16]: Judgment output was incomplete or exceeded its bound. Deterministic evidence and human triage remain available. Known response usage is retained; billing is unverified.
+    - paragraph [ref=e17]: "fixture-bound-model · 32 recorded tokens · Cost: unavailable"
+  - generic [ref=e18]:
+    - heading "Unresolved findings (1 loaded)" [level=2] [ref=e19]
+    - paragraph [ref=e20]: Includes earlier findings still awaiting resolution. Selecting a repair does not mark it fixed.
+    - generic [ref=e21]:
+      - checkbox "high · packages/example/package-lock.json Synthetic dependency finding for local interaction proof. unresolved · fixture-finding-stable-identity" [ref=e22]
+      - generic [ref=e23]:
+        - strong [ref=e24]: high · packages/example/package-lock.json
+        - text: Synthetic dependency finding for local interaction proof.
+        - generic [ref=e25]: unresolved · fixture-finding-stable-identity
+    - paragraph [ref=e26]: 0 / 100 findings selected. Select up to 100 findings per decision.
+    - generic [ref=e27]:
+      - text: Reason
+      - textbox "Reason" [ref=e28]
+    - generic [ref=e29]:
+      - button "Defer" [disabled] [ref=e30]
+      - button "Record resolution" [disabled] [ref=e31]
+      - button "Record repair selection" [disabled] [ref=e32]
+  - heading "Recorded decisions" [level=2] [ref=e34]

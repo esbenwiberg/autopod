@@ -189,6 +189,21 @@ const scanReport = {
   },
   judgment: { status: 'not_requested' },
 };
+if (process.env.FIXTURE_MODE === 'judgment-unavailable') {
+  scanReport.judgment = {
+    status: 'unavailable',
+    text: 'Judgment output was incomplete or exceeded its bound. Deterministic evidence and human triage remain available. Known response usage is retained; billing is unverified.',
+    usage: {
+      inputTokens: 25,
+      outputTokens: 7,
+      costUsd: null,
+      durationMs: 14500,
+      model: 'fixture-bound-model',
+      provider: 'max',
+      providerAccountId: null,
+    },
+  };
+}
 const scanDecisions = [];
 const retryState = {
   taskId: 'local-task',

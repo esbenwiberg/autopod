@@ -2,14 +2,19 @@ import { execFileSync } from 'node:child_process';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import type { ScheduledJob, ScheduledScanPolicy } from '@autopod/shared';
+import type { Profile, ScheduledJob, ScheduledScanPolicy } from '@autopod/shared';
+import Database from 'better-sqlite3';
 import pino from 'pino';
 import { describe, expect, it, vi } from 'vitest';
+import { createProviderAnthropicClient } from '../providers/llm-client.js';
 import type { Detector } from '../security/detectors/detector.js';
 import { createTestDb } from '../test-utils/mock-helpers.js';
 import { collectScheduledScan } from './scan-collector.js';
 import { createScanCoordinator } from './scan-coordinator.js';
+import { createBoundedScanJudge } from './scan-judge.js';
 import { createScanReportRepository } from './scan-report-repository.js';
+
+vi.mock('../providers/llm-client.js', () => ({ createProviderAnthropicClient: vi.fn() }));
 
 const policy: ScheduledScanPolicy = {
   version: 1,
@@ -150,6 +155,74 @@ describe('exact deterministic scheduled delta collector', () => {
       rmSync(f.dir, { recursive: true, force: true });
     }
   });
+  it('persists unavailable judgment response usage through coordinator completion and disk reopen', async () => {
+    const f = fixture();
+    let db = createTestDb();
+    const reports = createScanReportRepository(db);
+    const create = vi.fn().mockResolvedValue({
+      content: [{ type: 'text', text: 'Unfinished judgment output' }],
+      stop_reason: 'max_tokens',
+      usage: { input_tokens: 25, output_tokens: 7 },
+    });
+    vi.mocked(createProviderAnthropicClient).mockResolvedValue({
+      ok: true,
+      model: 'bound-model',
+      client: { messages: { create } },
+    } as never);
+    const judge = createBoundedScanJudge(
+      {
+        name: 'fixture',
+        modelProvider: 'max',
+        defaultModel: 'bound-model',
+        providerCredentials: { provider: 'max', oauthToken: 'synthetic-fixture' },
+      } as Profile,
+      {},
+      pino({ level: 'silent' }),
+    );
+    const coordinator = createScanCoordinator({
+      reports,
+      prepare: async () => ({
+        workdir: f.dir,
+        repository: 'fixture',
+        judge,
+        cleanup: async () => {},
+      }),
+      logger: pino({ level: 'silent' }),
+    });
+    try {
+      writeFileSync(join(f.dir, 'source.ts'), 'Changed source for bounded judgment');
+      f.commit();
+      const report = await coordinator.collect(
+        {
+          id: 'job',
+          scan: { ...policy, scanners: ['dependencies'], judgment: 'bounded' },
+        } as ScheduledJob,
+        'usage-run',
+      );
+      expect(report.judgment).toMatchObject({
+        status: 'unavailable',
+        usage: {
+          inputTokens: 25,
+          outputTokens: 7,
+          costUsd: null,
+          provider: 'max',
+          model: 'bound-model',
+        },
+      });
+      expect(report.judgment.text).not.toContain('Unfinished judgment output');
+      const file = join(f.dir, 'receipt.db');
+      writeFileSync(file, db.serialize());
+      db.close();
+      db = new Database(file);
+      expect(createScanReportRepository(db).get(report.id).judgment).toEqual(report.judgment);
+      expect(create).toHaveBeenCalledOnce();
+      expect(db.prepare('SELECT count(*) AS n FROM pods').get()).toEqual({ n: 0 });
+    } finally {
+      db.close();
+      rmSync(f.dir, { recursive: true, force: true });
+    }
+  });
+
   it('persists the real Git report before judgment, deduplicates collection, and keeps interrupted judgment terminal', async () => {
     const f = fixture();
     const db = createTestDb();

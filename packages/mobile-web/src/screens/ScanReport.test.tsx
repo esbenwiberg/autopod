@@ -40,7 +40,11 @@ it('retains a human selection through lost response and reload, and requires a s
         diagnostics: ['One scanner failed'],
         scanners: [{ scanner: 'dependencies', status: 'failed', findingCount: null }],
       },
-      judgment: { status: 'unavailable' },
+      judgment: {
+        status: 'unavailable',
+        text: 'Judgment output incomplete; known usage retained.',
+        usage: { model: 'fixture-model', inputTokens: 25, outputTokens: 7, costUsd: null },
+      },
     },
     unresolved: [finding],
     decisions: [] as (typeof decision)[],
@@ -111,6 +115,8 @@ it('retains a human selection through lost response and reload, and requires a s
     await click('Launch selected repair');
     expect(repairs).toBe(1);
     expect(container.textContent).toContain('Delivery remains unverified');
+    expect(container.textContent).toContain('32 recorded tokens');
+    expect(container.textContent).toContain('Cost: unavailable');
     expect(container.textContent).toContain('Unresolved findings (1 loaded)');
     expect(container.querySelector('a[href="/pod/repair-one"]')).not.toBeNull();
   } finally {

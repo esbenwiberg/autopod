@@ -74,7 +74,7 @@ struct ScanInboxView: View {
             Text("Judgment: \(detail.report.judgment.status)")
             if let text = detail.report.judgment.text { Text(text) }
             if let usage = detail.report.judgment.usage {
-              Text("\(usage.model) · \(usage.inputTokens + usage.outputTokens) tokens · cost \(usage.costUsd.map { String(format: "$%.4f", $0) } ?? "unavailable")").font(.caption)
+              Text("\(usage.model) · \(usage.inputTokens + usage.outputTokens) recorded tokens · cost \(usage.costUsd.map { String(format: "$%.4f", $0) } ?? "unavailable")").font(.caption)
             }
             Divider()
             Text("Unresolved findings (\(detail.unresolved.count) loaded)").font(.headline)

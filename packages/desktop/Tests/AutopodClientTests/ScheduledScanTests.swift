@@ -96,3 +96,11 @@ private final class ScanFixtureProtocol: URLProtocol, @unchecked Sendable {
   }
   override func stopLoading() {}
 }
+
+@Test func unavailableScanJudgmentPreservesKnownUsage() throws {
+  let data = Data(#"{"status":"unavailable","text":"Output incomplete; known usage retained.","usage":{"inputTokens":25,"outputTokens":7,"costUsd":null,"durationMs":14500,"model":"bound-model","provider":"max","providerAccountId":null}}"#.utf8)
+  let judgment = try JSONDecoder().decode(ScheduledScanReport.Judgment.self, from: data)
+  #expect(judgment.status == "unavailable")
+  #expect(judgment.usage?.inputTokens == 25); #expect(judgment.usage?.outputTokens == 7)
+  #expect(judgment.usage?.costUsd == nil); #expect(judgment.usage?.durationMs == 14500)
+}
