@@ -11980,23 +11980,36 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
       }
 
       // ── Normal escalation responses ───────────────────────────────────
+      const pendingForSession = deps.pendingRequestsByPod?.get(podId);
+      const decisionId = pod.pendingEscalation?.id;
+      const attachedWaiter = Boolean(
+        decisionId &&
+          pendingForSession?.hasPending(decisionId) &&
+          !pendingForSession.isDetached(decisionId),
+      );
+      const retainedRun = podRepo.taskExecutions?.hasActiveRun(podId) ?? activeAgentRuns.has(podId);
+      const queueForRetainedRun = retainedRun && !attachedWaiter;
+      const queuedReply =
+        pod.pendingEscalation && pendingForSession?.isDetached(pod.pendingEscalation.id)
+          ? buildDetachedMcpFallbackMessage(pod.pendingEscalation.type, message)
+          : message;
       persistCompletionReply(podRepo, pod, message, actor, () => {
         transition(pod, 'running', { pendingEscalation: null });
+        if (queueForRetainedRun) nudgeRepo.queue(podId, queuedReply);
       });
-      emitActivityStatus(podId, 'Human replied — resuming agent…');
+      emitActivityStatus(podId, 'Human reply recorded.');
 
       // If the pod was blocked on an ask_human MCP call, resolve the pending request.
       // A still-attached MCP stream can deliver the response directly. If the
       // stream detached, resume the agent with the same fallback text queued for
       // check_messages so a dead or errored Codex turn is not stranded forever.
       let resumeMessage = message;
-      const pendingForSession = deps.pendingRequestsByPod?.get(podId);
       if (pendingForSession && pod.pendingEscalation?.id) {
         const resolveResult = pendingForSession.resolveWithState(pod.pendingEscalation.id, message);
         if (resolveResult.resolved) {
           if (resolveResult.detached) {
             resumeMessage = buildDetachedMcpFallbackMessage(pod.pendingEscalation.type, message);
-            nudgeRepo.queue(podId, resumeMessage);
+            if (!queueForRetainedRun) nudgeRepo.queue(podId, resumeMessage);
             emitActivityStatus(
               podId,
               'MCP response stream was closed — queued human reply for check_messages',
@@ -12007,6 +12020,14 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
             return;
           }
         }
+      }
+
+      if (queueForRetainedRun) {
+        emitActivityStatus(
+          podId,
+          'Human reply saved for check_messages while the prior run is unresolved.',
+        );
+        return;
       }
 
       emitActivityStatus(podId, 'Resuming agent with message…');

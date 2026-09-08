@@ -21,6 +21,8 @@ export interface ExecutionBinding {
 export interface TaskExecutionLedger {
   register(podId: string): void;
   snapshot(podId: string): TaskExecutionSummary;
+  /** Unsettled durable evidence; not proof that a provider process is still alive. */
+  hasActiveRun(podId: string): boolean;
   beginRun(podId: string, generation: number, cycle: number, binding: ExecutionBinding): string;
   finishRun(
     id: string,
@@ -367,6 +369,12 @@ export function createTaskExecutionLedger(db: Database.Database): TaskExecutionL
   return {
     register,
     snapshot,
+    hasActiveRun: (podId) =>
+      Boolean(
+        db
+          .prepare('SELECT 1 FROM task_agent_runs WHERE pod_id = ? AND ended_at IS NULL LIMIT 1')
+          .get(podId),
+      ),
     beginRun: db.transaction((podId, generation, cycle, binding) => {
       const encoded = JSON.stringify({
         runtime: binding.runtime,

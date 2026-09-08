@@ -59,7 +59,7 @@ describe('active database backup provenance', () => {
       .run();
     const initial = createPodRepository(source);
     initial.taskExecutions?.register('root');
-    initial.taskExecutions?.beginRun('root', 1, 1, {
+    const initialRun = initial.taskExecutions?.beginRun('root', 1, 1, {
       runtime: 'codex',
       model: 'model',
       providerAccountId: null,
@@ -73,7 +73,10 @@ describe('active database backup provenance', () => {
     await manager.runOnce();
     const receipt = manager.getStatus().latest;
     if (!receipt) throw new Error('Expected full-schema backup');
-    createPodRepository(active).taskExecutions?.beginRun('root', 1, 2, {
+    if (!initialRun) throw new Error('Missing initial run');
+    const liveLedger = createPodRepository(active).taskExecutions;
+    liveLedger?.finishRun(initialRun, 'completed', null);
+    liveLedger?.beginRun('root', 1, 2, {
       runtime: 'codex',
       model: 'model',
       providerAccountId: null,

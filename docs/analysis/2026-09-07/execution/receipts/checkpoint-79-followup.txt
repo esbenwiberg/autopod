@@ -1,0 +1,33 @@
+
+ RUN  v4.1.11 /private/tmp/autopod-durable-execution/packages/daemon
+
+ ❯ src/e2e.test.ts (11 tests | 1 failed) 1054ms
+     × delivers the human reply to the retained worker and completes without overlapping Resume 116ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/e2e.test.ts > E2E: escalation flow > delivers the human reply to the retained worker and completes without overlapping Resume
+AssertionError: expected undefined to be 'Use CSS variables please' // Object.is equality
+
+- Expected:
+"Use CSS variables please"
+
++ Received:
+undefined
+
+ ❯ src/e2e.test.ts:273:58
+    271|     expect(final.status).toBe('validated');
+    272|     expect(runtime.resume).not.toHaveBeenCalled();
+    273|     expect(vi.mocked(runtime.resume).mock.calls[0]?.[1]).toBe('Use CSS…
+       |                                                          ^
+    274|   });
+    275| });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed | 3 passed (4)
+      Tests  1 failed | 625 passed (626)
+   Start at  15:36:29
+   Duration  29.20s (transform 2.49s, setup 0ms, import 3.86s, tests 30.02s, environment 0ms)
+

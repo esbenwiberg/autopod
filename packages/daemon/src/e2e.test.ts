@@ -202,51 +202,26 @@ describe('E2E: validation failure with retry', () => {
 // ---------------------------------------------------------------------------
 
 describe('E2E: escalation flow', () => {
-  it('pauses on escalation, resumes after human message, completes', async () => {
-    // The spawn generator will be consumed by processPod. It yields an
-    // escalation event which transitions the pod to awaiting_input. The
-    // generator then returns, so processPod proceeds to handleCompletion.
-    // Because the pod is in awaiting_input (not terminal and not running),
-    // handleCompletion sees a non-terminal state and tries triggerValidation --
-    // but state machine won't allow awaiting_input -> validating. So we need
-    // processPod's catch to handle the invalid transition gracefully.
-    //
-    // Actually, looking at the code more carefully: after consumeAgentEvents
-    // finishes (generator done), handleCompletion is called. The pod is in
-    // awaiting_input at that point. handleCompletion calls triggerValidation
-    // which calls transition(pod, 'validating') -- but awaiting_input ->
-    // validating is NOT a valid transition. This will throw, and the catch
-    // block will try to kill the pod.
-    //
-    // The real-world flow is that when an escalation happens, the runtime's
-    // spawn generator BLOCKS (yields escalation, then waits). The generator
-    // only returns after the escalation is resolved via sendMessage, which
-    // calls runtime.resume.
-    //
-    // To simulate this properly, we need the spawn generator to yield the
-    // escalation event and then never return (hang). The sendMessage call
-    // resumes execution via runtime.resume.
-    //
-    // We achieve this by making spawn yield escalation + then block on a
-    // promise that never resolves. processPod's consumeAgentEvents will
-    // hang. We run processPod in the background, then call sendMessage.
-
+  it('delivers the human reply to the retained worker and completes without overlapping Resume', async () => {
+    // The original worker remains open at its escalation. A detached/absent
+    // MCP waiter uses the durable check_messages queue, not a second worker.
     let resolveSpawnBlock!: () => void;
     const spawnBlock = new Promise<void>((r) => {
       resolveSpawnBlock = r;
     });
 
-    // We need a reference to the pod id before creating the runtime, but
-    // we do not know it yet. We will capture it from the spawn call.
-    let capturedSessionId = '';
-
     const runtime = createMockRuntime({
       spawn: vi.fn(async function* (config): AsyncIterable<AgentEvent> {
-        capturedSessionId = config.podId;
         yield statusEvent('Thinking...');
         yield escalationEvent(config.podId, 'Should I use CSS variables or Tailwind?');
         // Block until sendMessage resolves the escalation
         await spawnBlock;
+        expect(ctx.nudgeRepo.consumeNext(config.podId)).toEqual({
+          hasMessage: true,
+          message: 'Use CSS variables please',
+        });
+        yield statusEvent('Using CSS variables as instructed');
+        yield completeEvent('Dark mode implemented with CSS variables');
       }),
       resume: vi.fn(async function* (): AsyncIterable<AgentEvent> {
         yield statusEvent('Using CSS variables as instructed');
@@ -279,20 +254,39 @@ describe('E2E: escalation flow', () => {
     expect(awaitingSession.pendingEscalation).not.toBeNull();
     expect(awaitingSession.escalationCount).toBe(1);
 
-    // Human responds -- this transitions awaiting_input -> running and resumes
-    // the agent via runtime.resume
+    const enqueue = vi.spyOn(ctx.nudgeRepo, 'queue').mockImplementationOnce(() => {
+      throw new Error('fixture reply enqueue failed');
+    });
+    await expect(manager.sendMessage(pod.id, 'Use CSS variables please')).rejects.toThrow(
+      'fixture reply enqueue failed',
+    );
+    expect(manager.getSession(pod.id).pendingEscalation).toEqual(awaitingSession.pendingEscalation);
+    expect(manager.getSession(pod.id).status).toBe('awaiting_input');
+    expect(ctx.nudgeRepo.listPending(pod.id)).toEqual([]);
+    expect(
+      ctx.db
+        .prepare('SELECT COUNT(*) AS count FROM completion_decisions WHERE pod_id = ?')
+        .get(pod.id),
+    ).toEqual({ count: 0 });
+    enqueue.mockRestore();
+    // Persist the reply and queue it for the existing worker.
     await manager.sendMessage(pod.id, 'Use CSS variables please');
+    expect(ctx.nudgeRepo.listPending(pod.id).map((entry) => entry.message)).toEqual([
+      'Use CSS variables please',
+    ]);
 
     // Unblock the original spawn generator so processPod can finish
     resolveSpawnBlock();
     await processPromise;
 
-    // After sendMessage completes its own cycle (resume -> handleCompletion ->
-    // validate -> validated), the pod should be validated
+    // The original worker consumes the durable answer before validation.
     const final = manager.getSession(pod.id);
     expect(final.status).toBe('validated');
-    expect(runtime.resume).toHaveBeenCalledTimes(1);
-    expect(vi.mocked(runtime.resume).mock.calls[0]?.[1]).toBe('Use CSS variables please');
+    expect(runtime.resume).not.toHaveBeenCalled();
+    expect(ctx.nudgeRepo.listPending(pod.id)).toEqual([]);
+    expect(
+      ctx.db.prepare('SELECT response FROM completion_decisions WHERE pod_id = ?').all(pod.id),
+    ).toEqual([{ response: 'Use CSS variables please' }]);
   });
 });
 
