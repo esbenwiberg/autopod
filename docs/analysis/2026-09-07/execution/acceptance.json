@@ -2468,7 +2468,7 @@
         "checkpoint-103.md"
       ],
       "prerequisites": [
-        "Latest clean full pipeline passed 08f620b4856551f0322dd70e192a914e4267f3f7 (checkpoint 102; 5389 daemon tests passed, one existing skip). Run the required pipeline on final source; retain platform-specific and unrun acceptance separately."
+        "Latest clean full pipeline passed a1f62f63f45a0c2614b45498c338e0a0ea52057c (checkpoint 103; 5396 daemon tests passed, one existing skip). Run the required pipeline on final source; retain platform-specific and unrun acceptance separately."
       ]
     },
     {
