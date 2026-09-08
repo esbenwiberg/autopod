@@ -23,7 +23,7 @@ import { loadOrCreateKey } from './crypto/credentials-cipher.js';
 import { createPodTokenIssuer } from './crypto/pod-tokens.js';
 import { createDbBackupManager } from './db/backup.js';
 import { createDatabase } from './db/connection.js';
-import { runMigrations } from './db/migrate.js';
+import { runMigrationsWithBackups } from './db/migrate.js';
 import { GhCliDaemonGitHubAuth } from './github/daemon-github-auth.js';
 import type {
   WarmImageMaintenanceJob,
@@ -220,7 +220,7 @@ const migrationsDir =
     path.join(__dirname, '..', 'src', 'db', 'migrations'),
   ].find((dir) => fs.existsSync(dir)) ?? path.join(__dirname, '..', 'src', 'db', 'migrations');
 
-runMigrations(db, migrationsDir, logger, DB_PATH);
+await runMigrationsWithBackups(db, migrationsDir, logger, DB_PATH);
 
 const backupManager = createDbBackupManager(db, DB_PATH, logger, {
   intervalMs: process.env.AUTOPOD_BACKUP_INTERVAL_MS

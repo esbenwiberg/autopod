@@ -1,92 +1,27 @@
+import { createHash } from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import type Database from 'better-sqlite3';
 import type { Logger } from 'pino';
+import { assertActiveDatabasePath, snapshotBeforeCutover } from './cutover-backup.js';
 
-/**
- * Migration versions that require a pre-migration DB snapshot, mapped to a
- * filename suffix for the backup.  Add a new entry here whenever a migration
- * does a hard-to-reverse destructive change (column drop, table rename, etc.).
- */
+/** Destructive cutovers require a verified pre-migration online backup. */
 const CUTOVER_MIGRATIONS: Record<number, string> = {
   91: 'pre-screenshot-cutover',
   99: 'pre-single-fix-pod',
 };
 
-/**
- * Copy the live SQLite DB to `backups/<timestamp>-<suffix>.db`
- * before applying a cutover migration.  The backup directory is the existing
- * convention at `packages/daemon/backups/`.
- *
- * Skips the copy when `dbPath === ':memory:'` (in-memory test databases).
- * Throws (fail-closed) if the copy fails so the migration does not proceed.
- */
-function snapshotBeforeCutover(dbPath: string, logger: Logger, suffix: string): void {
-  if (dbPath === ':memory:') {
-    logger.debug('Skipping pre-cutover snapshot for in-memory DB');
-    return;
-  }
-
-  // Resolve the backups directory relative to the DB file's location
-  // (works for both source-tree runs and the compiled dist layout).
-  const dbDir = path.dirname(path.resolve(dbPath));
-  // Walk up until we find a 'backups' sibling, capped at 4 levels.
-  // In practice: ./autopod.db → find packages/daemon/backups/ or /data/backups/
-  let backupsDir: string | undefined;
-  let candidate = dbDir;
-  for (let i = 0; i < 5; i++) {
-    const try_ = path.join(candidate, 'backups');
-    if (fs.existsSync(try_)) {
-      backupsDir = try_;
-      break;
-    }
-    const parent = path.dirname(candidate);
-    if (parent === candidate) break;
-    candidate = parent;
-  }
-
-  if (!backupsDir) {
-    // Fall back to a `backups/` directory next to the DB file
-    backupsDir = path.join(dbDir, 'backups');
-    fs.mkdirSync(backupsDir, { recursive: true });
-  }
-
-  const ts = new Date().toISOString().replace(/[:.]/g, '-');
-  const backupPath = path.join(backupsDir, `${ts}-${suffix}.db`);
-
-  logger.info({ dbPath, backupPath }, 'Copying DB before cutover migration');
-  try {
-    fs.copyFileSync(dbPath, backupPath);
-    logger.info({ backupPath, suffix }, 'Pre-cutover DB snapshot written');
-  } catch (err) {
-    logger.error(
-      { err, dbPath, backupPath, suffix },
-      'Failed to snapshot DB before cutover migration',
-    );
-    throw err; // fail closed — do not apply migration
-  }
-}
-
-export function runMigrations(
-  db: Database.Database,
-  migrationsDir: string,
-  logger: Logger,
-  dbPath = ':memory:',
-): void {
-  // Ensure schema_version table exists (bootstrap)
-  db.exec(`
-    CREATE TABLE IF NOT EXISTS schema_version (
-      version INTEGER PRIMARY KEY,
-      applied_at TEXT NOT NULL DEFAULT (datetime('now'))
-    );
-  `);
-
-  // Get current version
-  const row = db.prepare('SELECT MAX(version) as version FROM schema_version').get() as
-    | { version: number | null }
-    | undefined;
-  const currentVersion = row?.version ?? 0;
-
+function inspectMigrations(db: Database.Database, migrationsDir: string) {
+  const hasVersions = db
+    .prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='schema_version'")
+    .get();
+  const currentVersion = hasVersions
+    ? ((
+        db.prepare('SELECT MAX(version) AS version FROM schema_version').get() as {
+          version: number | null;
+        }
+      ).version ?? 0)
+    : 0;
   // Find migration files
   const files = fs
     .readdirSync(migrationsDir)
@@ -134,13 +69,80 @@ export function runMigrations(
     if (version > currentVersion) pendingVersions.add(version);
   }
 
-  // Snapshot before any pending cutover migration that requires it
-  for (const [version, suffix] of Object.entries(CUTOVER_MIGRATIONS)) {
-    if (pendingVersions.has(Number(version))) {
-      snapshotBeforeCutover(dbPath, logger, suffix);
-    }
-  }
+  const sqlByFile = new Map(
+    files.map((file) => [file, fs.readFileSync(path.join(migrationsDir, file), 'utf8')]),
+  );
+  const fingerprint = createHash('sha256')
+    .update(JSON.stringify([currentVersion, [...sqlByFile]]))
+    .digest('hex');
+  const hasData = Boolean(
+    db
+      .prepare(
+        "SELECT 1 FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' AND name != 'schema_version' LIMIT 1",
+      )
+      .get(),
+  );
+  const cutovers = Object.entries(CUTOVER_MIGRATIONS).filter(([version]) =>
+    pendingVersions.has(Number(version)),
+  );
+  return { currentVersion, files, sqlByFile, fingerprint, cutovers, hasData };
+}
+type MigrationPlan = ReturnType<typeof inspectMigrations>;
 
+/** Synchronous use remains available for in-memory, empty and non-cutover upgrades. */
+export function runMigrations(
+  db: Database.Database,
+  migrationsDir: string,
+  logger: Logger,
+  dbPath = db.name,
+): void {
+  assertActiveDatabasePath(db, dbPath);
+  const plan = inspectMigrations(db, migrationsDir);
+  if (!db.memory && plan.hasData && plan.cutovers.length)
+    throw new Error(
+      'Destructive migration requires runMigrationsWithBackups for the active database; source retained unchanged',
+    );
+  applyMigrations(db, plan, logger);
+}
+
+/** Daemon startup awaits verified online backups before applying any pending migration. */
+export async function runMigrationsWithBackups(
+  db: Database.Database,
+  migrationsDir: string,
+  logger: Logger,
+  dbPath = db.name,
+): Promise<void> {
+  assertActiveDatabasePath(db, dbPath);
+  if (db.inTransaction) throw new Error('Migrations require a database outside a transaction');
+  const plan = inspectMigrations(db, migrationsDir);
+  const sourceState = () =>
+    JSON.stringify([
+      db.pragma('data_version', { simple: true }),
+      db.pragma('schema_version', { simple: true }),
+      db.prepare('SELECT total_changes() AS changes').get(),
+    ]);
+  const before = sourceState();
+  if (!db.memory && plan.hasData) {
+    for (const [, suffix] of plan.cutovers) await snapshotBeforeCutover(db, dbPath, logger, suffix);
+  }
+  if (
+    sourceState() !== before ||
+    inspectMigrations(db, migrationsDir).fingerprint !== plan.fingerprint
+  )
+    throw new Error(
+      'Database or migration source changed during cutover backup; source retained without migration',
+    );
+  applyMigrations(db, plan, logger);
+}
+
+function applyMigrations(db: Database.Database, plan: MigrationPlan, logger: Logger): void {
+  const { files, currentVersion, sqlByFile } = plan;
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS schema_version (
+      version INTEGER PRIMARY KEY,
+      applied_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+  `);
   let applied = 0;
   let latestAppliedVersion = currentVersion;
 
@@ -156,7 +158,8 @@ export function runMigrations(
       continue;
     }
 
-    const sql = fs.readFileSync(path.join(migrationsDir, file), 'utf-8');
+    const sql = sqlByFile.get(file);
+    if (sql === undefined) throw new Error('Migration plan source unavailable');
 
     // PRAGMA foreign_keys = OFF/ON must be set at the connection level — they are
     // silently ignored when executed inside a transaction. Detect migrations that
