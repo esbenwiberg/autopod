@@ -8223,6 +8223,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           (current.status !== 'queued' && current.status !== 'handoff')
         )
           throw new AgentContinuationSupersededError();
+        resolveEffectiveBoundProfile(current);
       };
 
       try {

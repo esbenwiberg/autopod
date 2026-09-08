@@ -1425,6 +1425,89 @@ describe('PodManager', () => {
     },
   );
 
+  it.each(['retained', 'deleted', 'provider-changed'] as const)(
+    'reconciles the authorized account after sandbox startup cooldown: %s',
+    async (accountState) => {
+      const firstId = 'cooldown-first';
+      const secondId = 'cooldown-second';
+      const credentials = {
+        provider: 'openai',
+        authMode: 'api-key',
+        apiKey: 'synthetic-local-key',
+      } satisfies ProviderCredentials;
+      const ctx = createTestContext(undefined, {
+        executionTarget: 'sandbox',
+        warmImageTag: 'registry.azurecr.io/startup:latest',
+        defaultRuntime: 'codex',
+        defaultModel: 'gpt-5',
+        modelProvider: 'openai',
+      });
+      insertProviderAccount(ctx.db, firstId, 'openai', credentials);
+      insertProviderAccount(ctx.db, secondId, 'openai', credentials);
+      linkProfileToProviderAccount(ctx.db, 'test-profile', firstId);
+      const accounts = new Map([
+        [firstId, createMutableProviderAccountStore(firstId, 'openai', credentials).get(firstId)],
+        [
+          secondId,
+          createMutableProviderAccountStore(secondId, 'openai', credentials).get(secondId),
+        ],
+      ]);
+      ctx.deps.providerAccountStore = {
+        touchLastUsed: vi.fn(),
+        get: vi.fn((id: string) => {
+          const account = accounts.get(id);
+          if (!account) throw new Error('missing fixture account');
+          return account;
+        }),
+      } as unknown as ProviderAccountStore;
+      ctx.deps.sandboxInfrastructureRetryBackoffMs = [50];
+      ctx.deps.requeueSessionAfterCurrent = vi.fn();
+      vi.mocked(ctx.containerManager.spawn).mockRejectedValue(
+        new SandboxInfrastructureError(403, {}),
+      );
+      const manager = createPodManager(ctx.deps);
+      const pod = manager.createSession(
+        { profileName: 'test-profile', task: 'Keep cooldown provider authority' },
+        'operator',
+      );
+      vi.useFakeTimers({ toFake: ['Date'] });
+      ctx.deps.sandboxInfrastructureRecoveryDelay = vi.fn(async (delay) => {
+        linkProfileToProviderAccount(ctx.db, 'test-profile', secondId);
+        if (accountState === 'deleted') accounts.delete(firstId);
+        if (accountState === 'provider-changed') {
+          const first = accounts.get(firstId);
+          if (first) accounts.set(firstId, { ...first, provider: 'anthropic' });
+        }
+        vi.setSystemTime(Date.now() + delay);
+      });
+      try {
+        await manager.processPod(pod.id);
+        await manager.processPod(pod.id);
+        expect(ctx.deps.sandboxInfrastructureRecoveryDelay).toHaveBeenCalledOnce();
+        expect(ctx.containerManager.spawn).toHaveBeenCalledTimes(
+          accountState === 'retained' ? 2 : 1,
+        );
+        expect(ctx.runtime.spawn).not.toHaveBeenCalled();
+        expect(ctx.podRepo.getOrThrow(pod.id).providerAccountIdSnapshot).toBe(firstId);
+        expect(ctx.deps.providerAccountStore.get).not.toHaveBeenCalledWith(secondId);
+        if (accountState !== 'retained') {
+          expect(ctx.podRepo.getOrThrow(pod.id)).toMatchObject({
+            status: 'failed',
+            failureReason: expect.stringMatching(
+              /provider account.*unavailable|provider.*identity/i,
+            ),
+          });
+          expect(ctx.podRepo.sandboxStartupRetries?.state(pod.id)).toMatchObject({
+            executedCount: 1,
+            latest: { outcome: 'cancelled', startedAt: null, measuredDurationMs: null },
+          });
+        }
+      } finally {
+        vi.useRealTimers();
+      }
+    },
+  );
+
   it('retains consumed sandbox cooldown admission when a newer lifecycle interrupts before allocation', async () => {
     const ctx = createTestContext(undefined, {
       executionTarget: 'sandbox',
