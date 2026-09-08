@@ -90,7 +90,7 @@ export async function runToolUseReview(
     throw new ToolReviewError('invalid-budget', 'Invalid review tool budget or timeout');
   const deadline = performance.now() + config.timeout;
   const client = config.providerClient?.client ?? new Anthropic({ apiKey: config.apiKey });
-  const model = config.providerClient?.model ?? resolveModelId(config.model);
+  const model = config.providerClient?.model ?? resolveToolReviewModelId(config.model);
   const tools = getToolDefinitions();
   const messages: MessageParam[] = [{ role: 'user', content: config.prompt }];
   let toolCallCount = 0;
@@ -441,7 +441,7 @@ async function toolSearchFiles(
 // ── Model ID resolution ───────────────────────────────────────────────────────
 
 /** Maps short model names (used in profiles) to full Anthropic model IDs */
-function resolveModelId(model: string): string {
+export function resolveToolReviewModelId(model: string): string {
   const aliases: Record<string, string> = {
     sonnet: 'claude-sonnet-4-6',
     opus: 'claude-opus-4-7',

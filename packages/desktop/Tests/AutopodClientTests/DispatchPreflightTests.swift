@@ -70,3 +70,12 @@ import Testing
   #expect(record.runtimeLabel == "Provider API · dispatch model resolved")
   #expect(record.imageLabel == "not applicable")
 }
+
+@Test func legacyApiProvenancePreservesUnknownAccountAndDispatchDiagnostic() throws {
+  let raw = Data(#"{"version":2,"surface":"provider-api","dispatchModel":"legacy-resolved","subject":"reviewer","purpose":"review","executionId":"exec","generation":1,"checkedAt":"today","status":"checked","runtime":null,"model":"alias","providerId":null,"providerAccountId":null,"contractHash":"hash","release":{"source":"unavailable"},"capabilities":{"streamingExec":"unverified"},"commands":{"requirements":[],"unresolvedSources":[],"deferredArtifacts":[],"explicitDependencies":false},"diagnostics":[{"code":"REVIEWER_LEGACY_API_DISPATCH_PREFLIGHT","detail":"Legacy daemon API-key client prepared; provider and account unverified."}]}"#.utf8)
+  let record = try JSONDecoder().decode(ExecutionProvenance.self, from: raw)
+  #expect(record.providerId == nil); #expect(record.providerAccountId == nil)
+  #expect(record.runtimeLabel == "Provider API · dispatch model legacy-resolved")
+  #expect(record.imageLabel == "not applicable")
+  #expect(record.diagnostics.first?.code == "REVIEWER_LEGACY_API_DISPATCH_PREFLIGHT")
+}

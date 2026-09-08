@@ -1,0 +1,47 @@
+{
+  "id": "local-legacy-api-reviewer",
+  "version": 2,
+  "podId": "local-fixture",
+  "taskId": "task-local",
+  "executionId": "execution-local",
+  "generation": 1,
+  "checkedAt": "2026-09-07T16:30:00Z",
+  "status": "checked",
+  "runtime": null,
+  "model": "local-reviewer-model",
+  "providerId": null,
+  "providerAccountId": null,
+  "release": {
+    "commitSha": null,
+    "dirty": null,
+    "builtAt": null,
+    "source": "unavailable"
+  },
+  "cliPath": null,
+  "cliVersion": null,
+  "imageDigest": null,
+  "contractHash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "validationImplementationHash": null,
+  "capabilities": {
+    "streamingExec": "unverified",
+    "memoryLimitBytes": null,
+    "cpuLimit": null,
+    "networkMode": null
+  },
+  "commands": {
+    "requirements": [],
+    "unresolvedSources": [],
+    "deferredArtifacts": [],
+    "explicitDependencies": false
+  },
+  "diagnostics": [
+    {
+      "code": "REVIEWER_LEGACY_API_DISPATCH_PREFLIGHT",
+      "detail": "Local fixture: legacy daemon API-key client prepared for dispatch. Provider, endpoint and account identity are unverified; this receipt does not establish the worker profile binding or prove a provider response, billed execution or completion. CLI and container image are not applicable; API client version and remote capabilities are unverified."
+    }
+  ],
+  "purpose": "review",
+  "subject": "reviewer",
+  "surface": "provider-api",
+  "dispatchModel": "resolved-local-model"
+}

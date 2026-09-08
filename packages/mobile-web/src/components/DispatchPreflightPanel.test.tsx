@@ -9,7 +9,7 @@ afterEach(() => {
   vi.restoreAllMocks();
   localStorage.clear();
 });
-it.each([undefined, 'reviewer', 'api'] as const)(
+it.each([undefined, 'reviewer', 'api', 'legacy-api'] as const)(
   'retains the complete rerun through reload while labeling provenance subject=%s',
   async (subject) => {
     const draft = {
@@ -37,12 +37,12 @@ it.each([undefined, 'reviewer', 'api'] as const)(
               status: 'blocked',
               purpose: subject ? 'review' : 'validation',
               subject: subject ? 'reviewer' : undefined,
-              providerId: subject ? 'anthropic' : null,
-              providerAccountId: subject ? 'review-account' : null,
+              providerId: subject && subject !== 'legacy-api' ? 'anthropic' : null,
+              providerAccountId: subject && subject !== 'legacy-api' ? 'review-account' : null,
               generation: 1,
               checkedAt: 'today',
-              runtime: subject === 'api' ? null : 'codex',
-              ...(subject === 'api'
+              runtime: subject === 'api' || subject === 'legacy-api' ? null : 'codex',
+              ...(subject === 'api' || subject === 'legacy-api'
                 ? { version: 2, surface: 'provider-api', dispatchModel: 'resolved-model' }
                 : {}),
               cliVersion: '0.144.4',
@@ -57,8 +57,14 @@ it.each([undefined, 'reviewer', 'api'] as const)(
               },
               diagnostics: [
                 {
-                  code: 'PREFLIGHT_COMMAND_UNAVAILABLE',
-                  detail: 'Required launcher dotnet is missing.',
+                  code:
+                    subject === 'legacy-api'
+                      ? 'REVIEWER_LEGACY_API_DISPATCH_PREFLIGHT'
+                      : 'PREFLIGHT_COMMAND_UNAVAILABLE',
+                  detail:
+                    subject === 'legacy-api'
+                      ? 'Legacy daemon API-key client prepared; provider and account unverified.'
+                      : 'Required launcher dotnet is missing.',
                 },
               ],
             },
@@ -112,15 +118,19 @@ it.each([undefined, 'reviewer', 'api'] as const)(
         `${subject ? 'review' : 'validation'} preflight blocked`,
       );
       expect(container.textContent).toContain(
-        subject === 'api'
+        subject === 'api' || subject === 'legacy-api'
           ? 'Reviewer: Provider API'
           : `${subject ? 'Reviewer' : 'Configured worker'}: codex CLI 0.144.4`,
       );
       expect(container.textContent).toContain(
-        subject
+        subject && subject !== 'legacy-api'
           ? 'Provider: anthropic · account: review-account'
           : 'Provider: unverified · account: not recorded',
       );
+      if (subject === 'legacy-api')
+        expect(container.textContent).toContain(
+          'Legacy daemon API-key client prepared; provider and account unverified.',
+        );
       expect(container.textContent).toContain('dotnet · missing');
       expect(container.textContent).toContain('Memory: unverified bytes');
       await click();

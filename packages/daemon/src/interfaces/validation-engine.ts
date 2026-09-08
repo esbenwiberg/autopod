@@ -22,6 +22,8 @@ export interface ValidationEngineConfig {
   assertReviewerCurrent?: () => void;
   /** Trusted receipt writer for the selected profile API client, before each request. */
   recordReviewerApiDispatch?: (dispatchModel: string) => void;
+  /** Legacy daemon API-key path; provider/account identity is not established. */
+  recordLegacyReviewerApiDispatch?: (dispatchModel: string) => void;
   /** Trusted collector, not a client-provided hash. Missing identity always executes checks. */
   captureEvidenceIdentity?: () => Promise<
     import('@autopod/shared').ValidationInputIdentity | undefined

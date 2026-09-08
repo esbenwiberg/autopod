@@ -3905,7 +3905,7 @@ async function runTaskReview(
               providerClient: selectedProvider,
               onDispatch: config.recordReviewerApiDispatch,
             }
-          : { apiKey: config.reviewerApiKey }),
+          : { apiKey: config.reviewerApiKey, onDispatch: config.recordLegacyReviewerApiDispatch }),
       });
 
       const tier2Parsed = applyDiffFilterToParsed(

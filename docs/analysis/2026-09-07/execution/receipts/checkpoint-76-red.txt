@@ -1,0 +1,50 @@
+
+ RUN  v4.1.11 /private/tmp/autopod-durable-execution/packages/daemon
+
+ ❯ src/validation/local-validation-engine.test.ts (173 tests | 1 failed | 172 skipped) 149ms
+     × records legacy API preparation independently of selected profile provenance 148ms
+ ❯ src/pods/pod-manager.test.ts (580 tests | 1 failed | 579 skipped) 134ms
+       × records legacy API provenance before real SDK HTTP dispatch and fences stale replay 133ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 2 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/pods/pod-manager.test.ts > PodManager > triggerValidation > records legacy API provenance before real SDK HTTP dispatch and fences stale replay
+AssertionError: expected false to be true // Object.is equality
+
+- Expected
++ Received
+
+- true
++ false
+
+ ❯ src/pods/pod-manager.test.ts:14420:24
+    14418|         });
+    14419|         await manager.triggerValidation(pod.id);
+    14420|         expect(proved).toBe(true);
+       |                        ^
+    14421|         await expect(replay?.()).rejects.toThrow(/superseded/i);
+    14422|         expect(observed).toHaveLength(1);
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/2]⎯
+
+ FAIL  src/validation/local-validation-engine.test.ts > validate() — facts + review gate > records legacy API preparation independently of selected profile provenance
+AssertionError: expected "vi.fn()" to be called with arguments: [ 'review-model' ]
+
+Number of calls: 0
+
+ ❯ src/validation/local-validation-engine.test.ts:3706:28
+    3704|       }));
+    3705|       expect(runToolUseReview).toHaveBeenCalledOnce();
+    3706|       expect(legacyRecord).toHaveBeenCalledWith('review-model');
+       |                            ^
+    3707|       expect(selectedRecord).not.toHaveBeenCalled();
+    3708|     } finally { await fs.rm(worktreePath, { recursive: true, force: tr…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/2]⎯
+
+
+ Test Files  2 failed (2)
+      Tests  2 failed | 751 skipped (753)
+   Start at  15:01:42
+   Duration  2.22s (transform 1.97s, setup 0ms, import 3.01s, tests 283ms, environment 0ms)
+

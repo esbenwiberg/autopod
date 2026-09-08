@@ -3684,6 +3684,41 @@ human_review: []
     },
   );
 
+  it('records legacy API preparation independently of selected profile provenance', async () => {
+    const worktreePath = await fs.mkdtemp(path.join(os.tmpdir(), 'autopod-legacy-receipt-'));
+    const legacyRecord = vi.fn();
+    const selectedRecord = vi.fn();
+    try {
+      vi.mocked(runClaudeCli).mockResolvedValue({
+        stdout: JSON.stringify({ status: 'pass', reasoning: 'initial', issues: [] }),
+      });
+      vi.mocked(runToolUseReview).mockImplementation(async (config) => {
+        expect(config.onDispatch).toBe(legacyRecord);
+        config.onDispatch?.('review-model');
+        return {
+          stdout: JSON.stringify({ status: 'pass', reasoning: 'tool verdict', issues: [] }),
+        };
+      });
+      await createLocalValidationEngine(stubContainerManager()).validate(
+        baseConfig({
+          reviewerModel: 'review-model',
+          reviewDepth: 'deep',
+          validationSuite: 'full',
+          reviewerApiKey: 'synthetic-local-key',
+          worktreePath,
+          diff: '+const changed = true;',
+          recordLegacyReviewerApiDispatch: legacyRecord,
+          recordReviewerApiDispatch: selectedRecord,
+        }),
+      );
+      expect(runToolUseReview).toHaveBeenCalledOnce();
+      expect(legacyRecord).toHaveBeenCalledWith('review-model');
+      expect(selectedRecord).not.toHaveBeenCalled();
+    } finally {
+      await fs.rm(worktreePath, { recursive: true, force: true });
+    }
+  });
+
   it('bounds selected reviewer acquisition and never revives dispatch when it settles late', async () => {
     let release:
       | ((value: Awaited<ReturnType<typeof createProviderAnthropicClient>>) => void)

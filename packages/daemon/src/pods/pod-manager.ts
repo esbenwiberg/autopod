@@ -154,6 +154,7 @@ import { applyOverrides } from '../validation/override-applicator.js';
 import { captureValidationRetryIdentity } from '../validation/retry-identity.js';
 import { parseDiffFilePaths } from '../validation/review-context-builder.js';
 import { addTokenUsage } from '../validation/review-synthesizer.js';
+import { resolveToolReviewModelId } from '../validation/review-tool-runner.js';
 import { publishScreenshotArtifacts } from '../validation/screenshot-artifacts.js';
 import {
   buildGitHubImageUrl,
@@ -240,7 +241,7 @@ import {
   validateRegistryFiles,
 } from './registry-injector.js';
 import { waitForRetryBackoff } from './retry-backoff-wait.js';
-import { reviewerApiProvenance } from './reviewer-api-provenance.js';
+import { legacyReviewerApiProvenance, reviewerApiProvenance } from './reviewer-api-provenance.js';
 import { addRuntimeNetworkDefaults } from './runtime-network-defaults.js';
 import {
   resolveEffectiveReviewerProfile,
@@ -7324,15 +7325,14 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
     config: Parameters<ValidationEngine['validate']>[0],
     ownership: ReturnType<typeof captureValidationOwnership>,
   ): Parameters<ValidationEngine['validate']>[0] {
-    return {
-      ...config,
-      assertReviewerCurrent: () => {
-        resolveEffectiveBoundProfile(ownership.assertCurrent());
-      },
-      recordReviewerApiDispatch: (dispatchModel) => {
+    function recordApiDispatch(
+      provenance: typeof reviewerApiProvenance,
+      resolveModel: (model: string) => string,
+    ) {
+      return (dispatchModel: string) => {
         const pod = ownership.assertCurrent();
         resolveEffectiveBoundProfile(pod);
-        if (dispatchModel !== resolveAnthropicModelId(config.reviewerModel ?? 'auto'))
+        if (dispatchModel !== resolveModel(config.reviewerModel ?? 'auto'))
           throw new TaskRetryBlockedError(
             'Reviewer API dispatch identity differs from the frozen validation configuration.',
           );
@@ -7343,9 +7343,20 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         podRepo.executionProvenance.record(
           pod.id,
           pod.lifecycleGeneration,
-          reviewerApiProvenance(config, dispatchModel),
+          provenance(config, dispatchModel),
         );
+      };
+    }
+    return {
+      ...config,
+      assertReviewerCurrent: () => {
+        resolveEffectiveBoundProfile(ownership.assertCurrent());
       },
+      recordReviewerApiDispatch: recordApiDispatch(reviewerApiProvenance, resolveAnthropicModelId),
+      recordLegacyReviewerApiDispatch: recordApiDispatch(
+        legacyReviewerApiProvenance,
+        resolveToolReviewModelId,
+      ),
       beforeReviewerLaunch: async (identity) => {
         resolveEffectiveBoundProfile(ownership.assertCurrent());
         const selectedRuntime = resolveContainerReviewer({

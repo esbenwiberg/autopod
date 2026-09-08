@@ -1,0 +1,27 @@
+[0/1] Planning build
+[1/1] Compiling plugin GenerateManual
+[2/2] Compiling plugin GenerateDoccReference
+Building for debugging...
+[2/7] Write sources
+[3/7] Write swift-version--58304C5D6DBC2206.txt
+[5/7] Compiling AutopodClientTests DispatchPreflightTests.swift
+[6/7] Emitting module AutopodClientTests
+[6/8] Write Objects.LinkFileList
+[7/8] Linking AutopodDesktopPackageTests
+Build complete! (5.62s)
+Test Suite 'Selected tests' started at 2026-09-08 15:05:08.440.
+Test Suite 'AutopodDesktopPackageTests.xctest' started at 2026-09-08 15:05:08.447.
+Test Suite 'AutopodDesktopPackageTests.xctest' passed at 2026-09-08 15:05:08.447.
+	 Executed 0 tests, with 0 failures (0 unexpected) in 0.000 (0.000) seconds
+Test Suite 'Selected tests' passed at 2026-09-08 15:05:08.447.
+	 Executed 0 tests, with 0 failures (0 unexpected) in 0.000 (0.007) seconds
+◇ Test run started.
+↳ Testing Library Version: 1902
+↳ Target Platform: arm64e-apple-macos14.0
+◇ Test apiProvenanceClientSendsVersionAsQueryParameter() started.
+◇ Test apiProvenanceDoesNotRequireOrDisplayCliIdentity() started.
+◇ Test legacyApiProvenancePreservesUnknownAccountAndDispatchDiagnostic() started.
+✔ Test apiProvenanceDoesNotRequireOrDisplayCliIdentity() passed after 0.001 seconds.
+✔ Test legacyApiProvenancePreservesUnknownAccountAndDispatchDiagnostic() passed after 0.001 seconds.
+✔ Test apiProvenanceClientSendsVersionAsQueryParameter() passed after 0.006 seconds.
+✔ Test run with 3 tests in 0 suites passed after 0.006 seconds.

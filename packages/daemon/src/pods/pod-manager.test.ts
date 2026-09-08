@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto';
 import fs from 'node:fs';
+import { createServer } from 'node:http';
 import os from 'node:os';
 import path from 'node:path';
 import { Readable } from 'node:stream';
@@ -35,6 +36,7 @@ import {
   mockPrMerge,
   mockSourceSnapshot,
 } from '../test-utils/mock-helpers.js';
+import { runToolUseReview } from '../validation/review-tool-runner.js';
 import { createSessionBridge } from './pod-bridge-impl.js';
 
 // Mock child_process so we can control deriveBareRepoPath and recovery-context git calls
@@ -14373,6 +14375,100 @@ describe('PodManager', () => {
       expect(record).toBeTypeOf('function');
       expect(() => record?.('review-model')).toThrow(/superseded/i);
       expect(ctx.runtime.resume).not.toHaveBeenCalled();
+    });
+
+    it('records legacy API provenance before real SDK HTTP dispatch and fences stale replay', async () => {
+      const ctx = createTestContext();
+      ctx.db
+        .prepare("UPDATE profiles SET reviewer_model = ? WHERE name = 'test-profile'")
+        .run('sonnet');
+      const manager = createPodManager(ctx.deps);
+      const pod = manager.createSession(
+        { profileName: 'test-profile', task: 'Legacy API receipt' },
+        'operator',
+      );
+      ctx.podRepo.update(pod.id, {
+        status: 'running',
+        containerId: 'ctr-1',
+        worktreePath: '/tmp/worktree/abc',
+      });
+      const observed: unknown[] = [];
+      const server = createServer((_request, response) => {
+        observed.push(ctx.podRepo.executionProvenance?.latest(pod.id));
+        response.setHeader('content-type', 'application/json');
+        response.end(
+          JSON.stringify({
+            id: 'local-message',
+            type: 'message',
+            role: 'assistant',
+            model: 'claude-sonnet-4-6',
+            content: [{ type: 'text', text: 'local fixture verdict' }],
+            stop_reason: 'end_turn',
+            stop_sequence: null,
+            usage: { input_tokens: 3, output_tokens: 2 },
+          }),
+        );
+      });
+      await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+      const address = server.address();
+      if (!address || typeof address === 'string') throw new Error('No fixture port');
+      const prior = process.env.ANTHROPIC_BASE_URL;
+      process.env.ANTHROPIC_BASE_URL = `http://127.0.0.1:${address.port}`;
+      let replay: (() => Promise<unknown>) | undefined;
+      let proved = false;
+      try {
+        vi.mocked(ctx.validationEngine.validate).mockImplementation(async (config) => {
+          expect(config.recordLegacyReviewerApiDispatch).toBeTypeOf('function');
+          expect(() => config.recordLegacyReviewerApiDispatch?.('different-model')).toThrow(
+            /identity/i,
+          );
+          replay = () =>
+            runToolUseReview({
+              model: 'sonnet',
+              prompt: 'Local fixture only',
+              worktreePath: '/tmp',
+              timeout: 2000,
+              apiKey: 'synthetic-local-key',
+              beforeRequest: config.assertReviewerCurrent,
+              onDispatch: config.recordLegacyReviewerApiDispatch,
+            });
+          const result = await replay();
+          expect(result).toMatchObject({
+            stdout: 'local fixture verdict',
+            tokenUsage: { inputTokens: 3, outputTokens: 2 },
+          });
+          expect(observed).toHaveLength(1);
+          expect(observed[0]).toMatchObject({
+            version: 2,
+            surface: 'provider-api',
+            subject: 'reviewer',
+            purpose: 'review',
+            runtime: null,
+            model: 'sonnet',
+            dispatchModel: 'claude-sonnet-4-6',
+            providerId: null,
+            providerAccountId: null,
+            cliVersion: null,
+            imageDigest: null,
+            diagnostics: [{ code: 'REVIEWER_LEGACY_API_DISPATCH_PREFLIGHT' }],
+          });
+          proved = true;
+          ctx.podRepo.update(pod.id, { status: 'running', containerId: 'replacement-container' });
+          return makeValidationResult({ podId: pod.id, attempt: 1 });
+        });
+        await manager.triggerValidation(pod.id);
+        await expect(
+          vi.mocked(ctx.validationEngine.validate).mock.results[0]?.value,
+        ).resolves.toBeDefined();
+        expect(proved).toBe(true);
+        await expect(replay?.()).rejects.toThrow(/superseded/i);
+        expect(observed).toHaveLength(1);
+        expect(ctx.runtime.resume).not.toHaveBeenCalled();
+      } finally {
+        if (prior === undefined) Reflect.deleteProperty(process.env, 'ANTHROPIC_BASE_URL');
+        else process.env.ANTHROPIC_BASE_URL = prior;
+        await new Promise<void>((resolve) => server.close(() => resolve()));
+      }
     });
 
     it('binds non-container reviewer launch ownership to the actual validation invocation', async () => {

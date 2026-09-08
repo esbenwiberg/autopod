@@ -1209,7 +1209,8 @@
         "checkpoint-57.md",
         "checkpoint-58.md",
         "checkpoint-59.md",
-        "checkpoint-72.md"
+        "checkpoint-72.md",
+        "checkpoint-76.md"
       ],
       "prerequisites": [],
       "remaining": "Mobile preserves sequence history and unmatched latest snapshot; backend waiver/history and durable delivery reconciliation remain."
@@ -1754,10 +1755,11 @@
         "checkpoint-62.md",
         "checkpoint-65.md",
         "checkpoint-67.md",
-        "checkpoint-69.md"
+        "checkpoint-69.md",
+        "checkpoint-76.md"
       ],
       "prerequisites": [],
-      "remaining": "Coding, validation/retry, review-only and completion recovery provenance are locally implemented. Sandbox effective cgroup resources are read without substituting requests; image and network identity remain unavailable. Checkpoint 51 adds preflight to direct agent Resume and missing-session fallback paths. Side effects after execution begins, actual reviewer CLI identity, complete receipt history/operator coverage, native interaction and live acceptance remain outstanding."
+      "remaining": "Coding, validation/retry, review-only and completion recovery provenance are locally implemented. Sandbox effective cgroup resources are read without substituting requests; image and network identity remain unavailable. Checkpoint 51 adds preflight to direct agent Resume and missing-session fallback paths. Side effects after execution begins, actual reviewer CLI identity, complete receipt history/operator coverage, native interaction and live acceptance remain outstanding. Checkpoint 76 adds legacy Tier 2 API preparation with explicitly unverified provider/account and actual-adapter model resolution; host CLI preparation, SDK identity and gated native/live acceptance remain outstanding."
     },
     {
       "id": "W6.2",
@@ -1779,7 +1781,8 @@
         "checkpoint-48.md: current tracking-branch migration collision reproduced and resolved with byte-preserving native renumbering, managed upgrade tests and copy-only checkpoint reconciliation; production acceptance remains unverified",
         "receipts/checkpoint-48-full-validation.txt",
         "receipts/checkpoint-48-validation-identity.json",
-        "checkpoint-61.md"
+        "checkpoint-61.md",
+        "checkpoint-76.md"
       ],
       "prerequisites": [],
       "remaining": " Checkpoint 48 verifies managed 150/152 upgrades and copy-only conversion of exact unpublished native checkpoint schemas 151/158/163. Live backup scope/freshness, deployed bytes and activation remain unverified; checkpoint 49 integrates and fully validates main f646cfcc locally; current deployed-source verification remains outstanding."
@@ -2056,7 +2059,7 @@
       "prerequisites": []
     }
   ],
-  "lastCheckpoint": "checkpoint-75.md",
+  "lastCheckpoint": "checkpoint-76.md",
   "migrationLineage": {
     "managedBaseline": "142-152; exact bytes from tracking commit cba763ba0bb3d65cb4c055e00033016ba1d5c646",
     "nativeCurrent": "164-176; byte-preserving move of unpublished native 151-163",

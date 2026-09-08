@@ -35,7 +35,7 @@ const input: ExecutionProvenanceInput = {
   },
   diagnostics: [{ code: 'PREFLIGHT_RUNTIME_UNAVAILABLE', detail: 'CLI version unknown' }],
 };
-it.each([undefined, 'worker', 'reviewer', 'api'] as const)(
+it.each([undefined, 'worker', 'reviewer', 'api', 'legacy-api'] as const)(
   'retains subject=%s failed provenance through restart and deletion without changing receipts',
   (subject) => {
     const f = createTestDb();
@@ -58,8 +58,20 @@ it.each([undefined, 'worker', 'reviewer', 'api'] as const)(
     const saved = repo.executionProvenance?.record('pod', 1, {
       ...input,
       purpose: 'review',
-      subject: subject === 'api' ? 'reviewer' : subject,
-      ...(subject === 'api'
+      ...(subject === 'legacy-api'
+        ? {
+            providerId: null,
+            providerAccountId: null,
+            diagnostics: [
+              {
+                code: 'REVIEWER_LEGACY_API_DISPATCH_PREFLIGHT',
+                detail: 'Legacy API preparation only; provider/account unverified.',
+              },
+            ],
+          }
+        : {}),
+      subject: subject === 'api' || subject === 'legacy-api' ? 'reviewer' : subject,
+      ...(subject === 'api' || subject === 'legacy-api'
         ? ({
             version: 2,
             surface: 'provider-api',

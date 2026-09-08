@@ -47,3 +47,22 @@ export function reviewerApiProvenance(
     ],
   };
 }
+
+/** The legacy SDK may inherit an endpoint from the environment; no profile identity is asserted. */
+export function legacyReviewerApiProvenance(
+  config: ValidationEngineConfig,
+  dispatchModel: string,
+): ExecutionProvenanceInput {
+  return {
+    ...reviewerApiProvenance(config, dispatchModel),
+    providerId: null,
+    providerAccountId: null,
+    diagnostics: [
+      {
+        code: 'REVIEWER_LEGACY_API_DISPATCH_PREFLIGHT',
+        detail:
+          'Legacy daemon API-key client prepared for dispatch. Provider, endpoint and account identity are unverified; this receipt does not establish the worker profile binding or prove a provider response, billed execution or completion. CLI and container image are not applicable; API client version and remote capabilities are unverified.',
+      },
+    ],
+  };
+}

@@ -799,7 +799,7 @@ it('sends the same explicit rerun decision through the actual CLI HTTP client an
   }
 });
 
-it.each([undefined, 'reviewer', 'api'] as const)(
+it.each([undefined, 'reviewer', 'api', 'legacy-api'] as const)(
   'reads subject=%s provenance through the real HTTP client with legacy and reviewer identity',
   async (subject) => {
     const server = createServer((request, response) => {
@@ -813,13 +813,13 @@ it.each([undefined, 'reviewer', 'api'] as const)(
                   status: 'blocked',
                   purpose: subject ? 'review' : 'validation',
                   subject: subject ? 'reviewer' : undefined,
-                  providerId: subject ? 'anthropic' : null,
-                  providerAccountId: subject ? 'review-account' : null,
+                  providerId: subject && subject !== 'legacy-api' ? 'anthropic' : null,
+                  providerAccountId: subject && subject !== 'legacy-api' ? 'review-account' : null,
                   checkedAt: 'today',
                   executionId: 'execution',
                   generation: 1,
-                  runtime: subject === 'api' ? null : 'codex',
-                  ...(subject === 'api'
+                  runtime: subject === 'api' || subject === 'legacy-api' ? null : 'codex',
+                  ...(subject === 'api' || subject === 'legacy-api'
                     ? { version: 2, surface: 'provider-api', dispatchModel: 'resolved-model' }
                     : {}),
                   model: 'fixture',
@@ -836,8 +836,14 @@ it.each([undefined, 'reviewer', 'api'] as const)(
                   },
                   diagnostics: [
                     {
-                      code: 'PREFLIGHT_COMMAND_UNAVAILABLE',
-                      detail: 'Required launcher is missing',
+                      code:
+                        subject === 'legacy-api'
+                          ? 'REVIEWER_LEGACY_API_DISPATCH_PREFLIGHT'
+                          : 'PREFLIGHT_COMMAND_UNAVAILABLE',
+                      detail:
+                        subject === 'legacy-api'
+                          ? 'Legacy daemon API-key client prepared; provider and account unverified.'
+                          : 'Required launcher is missing',
                     },
                   ],
                 },
@@ -861,23 +867,27 @@ it.each([undefined, 'reviewer', 'api'] as const)(
       const output = log.mock.calls.flat().join('\n');
       expect(output).toContain(`${subject ? 'review' : 'validation'} preflight blocked`);
       expect(output).toContain(
-        subject === 'api'
+        subject === 'api' || subject === 'legacy-api'
           ? 'Reviewer: Provider API'
           : `${subject ? 'Reviewer' : 'Configured worker'}: codex CLI 0.144.4`,
       );
       expect(output).toContain(
-        subject
+        subject && subject !== 'legacy-api'
           ? 'Provider anthropic; account review-account'
           : 'Provider unverified; account not recorded',
       );
       expect(output).toContain('Memory unverified bytes; CPU unverified');
       expect(output).toContain(
-        `Daemon unverified; image ${subject === 'api' ? 'not applicable' : 'unverified'}`,
+        `Daemon unverified; image ${subject === 'api' || subject === 'legacy-api' ? 'not applicable' : 'unverified'}`,
       );
-      if (subject === 'api') {
+      if (subject === 'api' || subject === 'legacy-api') {
         expect(output).toContain('dispatch model resolved-model');
         expect(output).not.toContain('CLI');
       }
+      if (subject === 'legacy-api')
+        expect(output).toContain(
+          'Legacy daemon API-key client prepared; provider and account unverified.',
+        );
       expect(output).toContain('dotnet missing');
     } finally {
       log.mockRestore();
