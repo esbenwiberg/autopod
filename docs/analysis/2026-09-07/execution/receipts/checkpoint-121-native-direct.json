@@ -1,0 +1,117 @@
+{
+  "applicationCandidate": "15900d9e08a7e4ca786a6ad11ff81820fda14de4",
+  "preparedAtHead": "2fef6c4096733b72040a994e67a6f4a03a24c9b7",
+  "method": "Direct CUA supported macOS app interactions with synthetic loopback HTTP; no provider calls",
+  "nativeAppFiles": [
+    {
+      "path": "Contents/Info.plist",
+      "bytes": 1260,
+      "sha256": "011a9255d9d3d1f80587e7d6431baeb83895e71837fdb7d51181862531105e65"
+    },
+    {
+      "path": "Contents/MacOS/AcceptanceApp",
+      "bytes": 59328,
+      "sha256": "81987f0fc1c5cb5b5c5e24cf73551e121fd2d2579e59b3e5ffc900c102016729"
+    },
+    {
+      "path": "Contents/MacOS/AcceptanceApp.debug.dylib",
+      "bytes": 87867712,
+      "sha256": "91a9c023c1bec28c34fe13c379cdd866f65097bb2d90421fe2e166f9c6643147"
+    },
+    {
+      "path": "Contents/MacOS/__preview.dylib",
+      "bytes": 34800,
+      "sha256": "a8980d18052103ae53d942c86d24f874919eb05af16b38ce152abe22ce3782f9"
+    },
+    {
+      "path": "Contents/PkgInfo",
+      "bytes": 8,
+      "sha256": "82502191c9484b04d685374f9879a0066069c49b8acae7a04b01d38d07e8eca0"
+    },
+    {
+      "path": "Contents/Resources/SwiftTerm_SwiftTerm.bundle/Contents/Info.plist",
+      "bytes": 1130,
+      "sha256": "1bd23aef3ec197dd41d8c964e1894eddc0050f676a9b11f8172b6c1aa7c93388"
+    },
+    {
+      "path": "Contents/Resources/SwiftTerm_SwiftTerm.bundle/Contents/Resources/default.metallib",
+      "bytes": 32644,
+      "sha256": "f50db7f0cb926dd25cd6917849eee8cf09bc8c7c6903ca26ea9ac8080026214e"
+    },
+    {
+      "path": "Contents/_CodeSignature/CodeResources",
+      "bytes": 3304,
+      "sha256": "f83bcf871d0d594d893f0f8a9d6c7eabb15de6d7b94f8d1dc68272b5f89c369b"
+    }
+  ],
+  "fixtureFiles": [
+    {
+      "path": "mobile-server.mjs",
+      "sha256": "6e5954919ec9dae9c0f73177fdc148c0c626eb332206034a5f98b8588fd985fc"
+    },
+    {
+      "path": "native-matrix/native-matrix-proxy.mjs",
+      "sha256": "c7d7f16e334e0707d351815ffdf6e60338a6ac1e4149bda5987ca1d559a07b35"
+    },
+    {
+      "path": "guidance-ack-events.json",
+      "sha256": "cb6f7971a5714334100f813038fd582b481579580f68778bff533b27f4c4076f"
+    },
+    {
+      "path": "populated-provenance.json",
+      "sha256": "46a93bfd2a0da11425ee308f71e8dbbba8988823f86731a3c61a385b56c4a1b2"
+    },
+    {
+      "path": "retained-throughput.json",
+      "sha256": "3caaf27f876a17e48e3755cf579082ea7ecc356faf5f81e163b2c8c65a61f218"
+    }
+  ],
+  "cases": [
+    {
+      "case": "Retained fleet navigation",
+      "result": "pass",
+      "observed": [
+        "Analytics > Throughput loads recorded two-pod cohort",
+        "Clicking heatmap cell opens two recorded outcomes",
+        "Existing pod has enabled navigation",
+        "Deleted failed pod is labelled Deleted \u00b7 retained and disabled",
+        "Completed pod time shown as 2m; no merge-time relabelling"
+      ],
+      "scope": "Synthetic throughput cohort and retained navigation. Other analytics endpoints were intentionally absent and are not claimed as passing in this case."
+    },
+    {
+      "case": "Populated execution provenance",
+      "result": "pass",
+      "observed": [
+        "Work > Task displays coding preflight checked and configured Codex CLI 0.144.4",
+        "Recorded fixture-provider / fixture-account shown",
+        "Synthetic daemon SHA, image digest, contract and validation implementation hashes shown",
+        "Memory 4294967296 bytes / CPU 2.0 and available dotnet requirement shown",
+        "Synthetic-only diagnostic remains visible"
+      ],
+      "scope": "Known-valued native presentation, paired with prior missingness and host-reviewer views; not hosted source, image, CLI or capability attestation"
+    },
+    {
+      "case": "Guidance receipt presentation",
+      "result": "pass",
+      "observed": [
+        "Running task Logs show check_messages and acknowledge_messages",
+        "Expanding check_messages shows saved guidance and complete delivery ID",
+        "Expanding acknowledgement shows acknowledged true with matching delivery ID",
+        "Read instruction says receipt does not approve decisions or resume work",
+        "Task remains running; no application-of-guidance or completion claim"
+      ],
+      "scope": "Recorded tool-receipt display. Backend receipt durability and generation guard tests are separate retained evidence; this does not prove the worker applied guidance or treated it as approval"
+    }
+  ],
+  "screenshots": "Task-owned app/window screenshots observed in conversation; not exported as local PNGs",
+  "fixtureIntegrityChecks": 12,
+  "postVerificationCleanup": "Mac locked after all three cases during attempted app quit; no verification was interrupted. No new unlock is needed for completed native criteria. Task-owned server cleanup is recorded separately.",
+  "hostedExecuted": false,
+  "serverCleanup": {
+    "proxyPid": 33663,
+    "childPid": 37544,
+    "bothObservedExited": true,
+    "appQuit": "Mac relocked after all native verification; app quit was not executed"
+  }
+}

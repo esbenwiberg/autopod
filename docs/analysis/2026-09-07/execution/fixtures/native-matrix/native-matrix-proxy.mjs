@@ -23,6 +23,8 @@ const modes = new Set([
   'historical-waiver',
   'empty-scan',
   'closed-merge',
+  'populated-provenance',
+  'guidance-acknowledged',
 ]);
 const podDefaults = {
   title: 'Local acceptance fixture',

@@ -309,7 +309,7 @@ if (uncollectedGuidanceFixture) {
   };
 }
 const guidanceReceiptFixture = process.env.FIXTURE_MODE === 'guidance-receipt';
-if (guidanceReceiptFixture)
+if (guidanceReceiptFixture || process.env.FIXTURE_MODE === 'guidance-acknowledged')
   pod = {
     ...pod,
     status: 'running',
@@ -602,15 +602,17 @@ const server = createServer(async (req, res) => {
       latest: JSON.parse(
         await readFile(
           new URL(
-            process.env.FIXTURE_MODE === 'host-reviewer-provenance'
-              ? './host-reviewer-provenance.json'
-              : process.env.FIXTURE_MODE === 'legacy-api-reviewer-provenance'
-                ? './legacy-api-reviewer-provenance.json'
-                : process.env.FIXTURE_MODE === 'api-reviewer-provenance'
-                  ? './api-reviewer-provenance.json'
-                  : process.env.FIXTURE_MODE === 'reviewer-provenance'
-                    ? './reviewer-provenance.json'
-                    : './execution-provenance.json',
+            process.env.FIXTURE_MODE === 'populated-provenance'
+              ? './populated-provenance.json'
+              : process.env.FIXTURE_MODE === 'host-reviewer-provenance'
+                ? './host-reviewer-provenance.json'
+                : process.env.FIXTURE_MODE === 'legacy-api-reviewer-provenance'
+                  ? './legacy-api-reviewer-provenance.json'
+                  : process.env.FIXTURE_MODE === 'api-reviewer-provenance'
+                    ? './api-reviewer-provenance.json'
+                    : process.env.FIXTURE_MODE === 'reviewer-provenance'
+                      ? './reviewer-provenance.json'
+                      : './execution-provenance.json',
             import.meta.url,
           ),
           'utf8',
@@ -1269,11 +1271,20 @@ const server = createServer(async (req, res) => {
               ]
             : ['Infrastructure cost unavailable'],
     });
+  if (process.env.FIXTURE_MODE === 'archived-task' && pathname === '/pods/analytics/throughput')
+    return json(
+      JSON.parse(await readFile(new URL('./retained-throughput.json', import.meta.url), 'utf8')),
+    );
   if (req.method === 'GET' && pathname === '/pods') return json([pod]);
   if (req.method === 'GET' && pathname === '/pods/local-fixture') return json(pod);
   if (req.method === 'GET' && pathname === '/pods/local-fixture/validations')
     return json(validationHistory);
-  if (req.method === 'GET' && pathname === '/pods/local-fixture/events') return json([]);
+  if (req.method === 'GET' && pathname === '/pods/local-fixture/events')
+    return json(
+      process.env.FIXTURE_MODE === 'guidance-acknowledged'
+        ? JSON.parse(await readFile(new URL('./guidance-ack-events.json', import.meta.url), 'utf8'))
+        : [],
+    );
   if (req.method === 'POST' && pathname === '/pods/local-fixture/message') {
     let body = '';
     for await (const chunk of req) body += chunk;

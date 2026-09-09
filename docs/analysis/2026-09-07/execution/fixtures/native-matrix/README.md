@@ -22,3 +22,6 @@ The default twelve cases passed together at checkpoint 115. Unique session URL p
 If activation fails or a system authentication prompt is active, stop UI interaction and wait for the operator to resolve it. Never enter credentials or dismiss security prompts through the harness. Stop only the exact task-owned proxy/app processes after inspecting their identities, and verify their exit and listener removal.
 
 This synthetic UI facility complements backend lifecycle and API regressions. It does not establish deployed source, live provider disposition, worker acknowledgement or actual-image capability. See the current acceptance ledger and checkpoint receipts for those boundaries.
+
+
+Checkpoint 121 update: supplemental cases have separate direct-CUA proof in checkpoints 117/119, and the remaining worker/waiver/empty-scan/closed-disposition/fleet/provenance/guidance cases have direct proof in checkpoints 120/121. The twelve-case XCTest receipt remains twelve cases; later direct interactions must not be relabelled as XCTest passes. New proxy modes include historical-waiver, empty-scan, closed-merge, populated-provenance and guidance-acknowledged. The acceptance ledger and direct receipts are authoritative for case/source boundaries.

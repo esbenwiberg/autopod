@@ -1,5 +1,7 @@
 # Partial closure report
 
+Current update: [checkpoint 121](checkpoint-121.md) verifies the remaining listed native presentation cases. W4.8/G.4 operator interaction requirements and all W5 criteria are verified within recorded scope. The remaining required gates concern hosted-copy compatibility, loaded release, historical API causality and actual-image capability; the goal remains incomplete.
+
 Current update: [checkpoint 120](checkpoint-120.md) passes four further native gates after unlock and closes the remaining workstream-5 criterion prerequisites. All six W5 criteria are verified within their required local/supported-surface scope. Other native and external requirements remain open; no whole-goal completion or hosted action is claimed.
 
 Current update: [checkpoint 119](checkpoint-119.md) verifies native reviewer provenance presentation and prepares three further fixture cases with nine passing HTTP integrity checks. Those native cases remain unrun while the Mac is locked. The checkpoint-118 hosted-copy action awaits explicit approval.

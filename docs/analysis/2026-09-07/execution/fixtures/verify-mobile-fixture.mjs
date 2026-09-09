@@ -131,3 +131,24 @@ await withFixture('historical-waiver', async (post) => {
   const history = (await post('/pods/local-fixture/validations', {}, 'GET')).body;
   assert.equal(history[0].result.test.status, 'fail');
 });
+
+await withFixture('populated-provenance', async (post) => {
+  const receipt = (await post('/pods/local-fixture/execution-provenance', {}, 'GET')).body.latest;
+  assert.equal(receipt.release.commitSha, 'e'.repeat(40));
+  assert.equal(receipt.imageDigest, `sha256:${'c'.repeat(64)}`);
+  assert.equal(receipt.capabilities.memoryLimitBytes, 4294967296);
+});
+await withFixture('archived-task', async (post) => {
+  const response = (await post('/pods/analytics/throughput', {}, 'GET')).body;
+  assert.equal(response.cohort.filter((p) => p.historyArchived).length, 1);
+  assert.equal(response.summary.backlog, 0);
+});
+await withFixture('guidance-acknowledged', async (post) => {
+  const events = (await post('/pods/local-fixture/events', {}, 'GET')).body;
+  const saved = JSON.parse(events[0].output);
+  const acknowledged = JSON.parse(events[1].output);
+  assert.equal(saved.deliveryId, acknowledged.deliveryId);
+  assert.equal(acknowledged.acknowledged, true);
+  assert.equal(acknowledged.applied, undefined);
+  assert.equal((await post('/pods/local-fixture', {}, 'GET')).body.status, 'running');
+});

@@ -1,0 +1,36 @@
+{
+  "summary": {
+    "podsPerDay": 0.06666666666666667,
+    "podsPerDaySparkline": [
+      {
+        "day": "2026-09-09",
+        "count": 2
+      }
+    ],
+    "podsPerDayDelta": {
+      "value": 0,
+      "direction": "flat"
+    },
+    "mttmSeconds": 120,
+    "backlog": 0
+  },
+  "cohort": [
+    {
+      "historyArchived": true,
+      "podId": "deleted-fixture",
+      "profile": "local-fixture",
+      "status": "failed",
+      "completedAt": "2026-09-09T17:00:00Z"
+    },
+    {
+      "historyArchived": false,
+      "podId": "local-fixture",
+      "profile": "local-fixture",
+      "status": "complete",
+      "completedAt": "2026-09-09T17:05:00Z"
+    }
+  ],
+  "cohortTruncated": false,
+  "queueDepth": [],
+  "timeInStatus": []
+}

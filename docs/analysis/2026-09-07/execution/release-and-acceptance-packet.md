@@ -1,6 +1,6 @@
 # Release and remaining acceptance packet
 
-Updated September 9, checkpoint 120. This packet supersedes the dated approval requests in checkpoints 106–110. Their raw receipts remain retained. It is a local review artifact; it does not authorize publication, deployment, restart, cloud access changes or a paid canary. The goal remains incomplete.
+Updated September 9, checkpoint 121. This packet supersedes the dated approval requests in checkpoints 106–110. Their raw receipts remain retained. It is a local review artifact; it does not authorize publication, deployment, restart, cloud access changes or a paid canary. The goal remains incomplete.
 
 ## Current tested candidate
 
@@ -22,7 +22,7 @@ The service used release directory `c0e5a5b4`, while its checkout reported `2523
 
 The targeted historical journal read found 47 disk-full errors and 369 other errors, none correlated with the failing history/cost requests. Only successful route statuses were classified. An archived trace from the actual failing requests is still needed for the historical causal claim. Do not substitute another generic aggregate read or infer causality from later maintenance.
 
-## Native acceptance in progress
+## Required native acceptance verified
 
 Checkpoint 115 passed twelve native cases together on unchanged application source `f93dd4d9`: cost/duration coverage, detail guidance disclosure, failed-reply retention, saved guidance without an acknowledgement claim, unavailable provider disposition, intentional rerun recovery with old-error clearance, unavailable readiness with approval disabled, retained task accounting, exact scan source/human-selected repair, unverified-termination refusal, failed/pass/failed validation history, and one-use validation retry authorization. [Source-bound receipt](receipts/checkpoint-115-native-identity.json). Five built-mobile fault paths passed at checkpoint 113.
 
@@ -32,7 +32,7 @@ Checkpoint 117 adds five direct native flows: refreshed recorded merged disposit
 
 Checkpoint 119 verifies native reviewer CLI/contract presentation with explicit missing provider/account/daemon/resource identity. Checkpoint 120, after the user unlocked the Mac, verifies worker reauthorization/rework consumption, empty delta, historical waiver with failed execution retained, and recorded closed disposition. [Direct receipt](receipts/checkpoint-120-native-direct.json). All workstream-5 criteria are now verified within the required local/supported-surface scope, using earlier actual scheduler/collector/durable report tests plus native policy/report/triage checks.
 
-Remaining native acceptance covers retained fleet navigation, guidance acknowledgement presentation and populated execution release/image/capability fields. Current UI access works. Native synthetic receipts never attest hosted source or provider execution. The checkpoint-118 hosted-copy execution request remains pending explicit approval.
+Checkpoint 121 verifies the remaining listed native cases: retained deleted fleet navigation, guidance receipt history and populated execution release/image/resource fields. [App/fixture-bound receipt](receipts/checkpoint-121-native-direct.json). Native interaction prerequisites are closed within recorded scope; synthetic receipts never attest hosted source or provider execution. The Mac relocked during cleanup after all checks passed and is no longer blocking these criteria. The checkpoint-118 hosted-copy execution request remains pending explicit approval.
 
 ## Remaining sandbox access and paid-canary gate
 
@@ -50,7 +50,7 @@ Candidate migrations through 182 are locally covered, including representative m
 
 Before a publication/deployment request:
 
-1. Finish native acceptance and freeze exact source/build artifact identities. Refresh main and migration prefixes, integrate only supported changes, and rerun required checks if source changes.
+1. Native acceptance and exact local app/source identities are recorded through checkpoint 121. Refresh main and migration prefixes, integrate only supported changes, and rerun required checks if source changes.
 2. Resolve actual loaded/rollback source and prove candidate compatibility against the verified database copy. Prepare exact build/upload/verification commands and data handling before approval.
 3. Establish no restart-blocking pods through existing drain/API/DB safeguards. Reconcile worker and cleanup ownership with trustworthy original resource identity and observed terminal exit. Time, restart, guessed PIDs or unknown cloud status do not release claims.
 4. Produce a fresh WAL-aware cutover backup and verify intended scope/freshness, isolated restoration and headroom (two copies plus reserve). Keep sampled historical restore acceptance distinct from this fresh cutover gate.
