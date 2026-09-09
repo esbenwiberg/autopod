@@ -22,6 +22,8 @@ export interface ManagedComponentsConfig {
   stateRoot: string;
   /** Explicit reviewed enablement; omitting it always keeps starts dark. */
   enabled?: boolean;
+  /** Capabilities proven by the selected reviewed runtime composition. */
+  runtimeCapabilities?: readonly ('managed-agent-session-v1' | 'managed-github-read-v1')[];
   source?: {
     git: ManagedGitBroker;
     drafts?: DraftBroker;
@@ -35,6 +37,7 @@ export function managedComponents(config: ManagedComponentsConfig) {
     config.runtime,
     undefined,
     config.enabled ?? false,
+    config.runtimeCapabilities ?? [],
   );
   const controls = new ManagedControls(service);
   const exports = new ArtifactExports(config.db, config.store);

@@ -7,6 +7,8 @@ import type { ManagedRuntimePort } from './managed-service.js';
 
 export interface ReviewedContainerBoundary {
   route: Route;
+  profileId?: string;
+  identityBinding?: { alias: string; bindingDigest: string };
   manager: ContainerManager;
   image: string;
   /** Literal reviewed command including the exact model/reasoning; no user-selected executable. */
@@ -70,7 +72,10 @@ export class ManagedContainerRuntime implements ManagedRuntimePort {
 
   private boundary(request: ManagedPodRequest): ReviewedContainerBoundary {
     const matches = this.boundaries.filter(
-      (binding) => canonical(binding.route) === canonical(request.route),
+      (binding) =>
+        canonical(binding.route) === canonical(request.route) &&
+        (binding.profileId === undefined ||
+          binding.profileId === request.profileSnapshot.profileId),
     );
     if (matches.length !== 1) throw new Error('managed-route-unavailable');
     return matches[0]!;
@@ -88,8 +93,13 @@ export class ManagedContainerRuntime implements ManagedRuntimePort {
     ) {
       throw new Error('managed-enforcement-unavailable');
     }
-    // Cloud identities require a separate concrete destination-scoped broker; do not inherit them.
-    if (request.effectiveGrant.scope.identityBindings.length)
+    const identities = request.effectiveGrant.scope.identityBindings;
+    if (
+      identities.length > 0 &&
+      (!boundary.identityBinding ||
+        identities.length !== 1 ||
+        canonical(identities[0]) !== canonical(boundary.identityBinding))
+    )
       throw new Error('managed-identity-broker-unavailable');
   }
   async ensure(

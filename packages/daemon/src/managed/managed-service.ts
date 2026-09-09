@@ -65,6 +65,7 @@ export class ManagedPodService {
     readonly runtime: ManagedRuntimePort,
     readonly now: () => number = () => Math.floor(Date.now() / 1000),
     readonly enabled = false,
+    readonly runtimeCapabilities: readonly string[] = [],
   ) {}
 
   health(): DriverHealth {
@@ -88,6 +89,7 @@ export class ManagedPodService {
         ...(this.source
           ? ['source-finalize-v1', ...(this.source.drafts ? ['source-draft-pr-v1'] : [])]
           : []),
+        ...this.runtimeCapabilities,
       ],
       targets: [...this.admission.targets],
       enabled: this.enabled,

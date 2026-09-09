@@ -150,3 +150,17 @@ it('strips both generations of advertised tools and message IDs before the provi
   expect(normalized.input).toEqual(request.input);
   expect(normalized.reasoning).toEqual({ effort: 'low' });
 });
+
+it('preserves bounded Codex tool traffic only for the explicit agent channel', () => {
+  const { route, request } = setup();
+  const tool = { type: 'function', name: 'shell', description: 'local shell', parameters: {} };
+  const normalized = codexInput(
+    route,
+    JSON.stringify({ ...request, tools: [tool], tool_choice: 'auto', parallel_tool_calls: false }),
+    true,
+  );
+  expect(normalized.tools).toEqual([tool]);
+  expect(normalized.input).toEqual(request.input);
+  expect(normalized.store).toBe(false);
+  expect(normalized.truncation).toBe('disabled');
+});

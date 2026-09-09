@@ -15,20 +15,22 @@ if worker_root.is_symlink() or worker_root.stat().st_uid!=0 or worker_root.stat(
 worker=worker_root/'codex_worker.py'
 if worker.is_symlink() or (worker.exists() and worker.read_text()!=sys.argv[4]):raise RuntimeError('immutable-worker')
 worker.write_text(sys.argv[4]);os.chmod(worker,0o555)
+if len(sys.argv)>5 and sys.argv[5]:
+ gh=worker_root/'gh';gh.write_text(sys.argv[5]);os.chmod(gh,0o555);(root/'github-enabled').touch()
 (root/'channel-closed').unlink(missing_ok=True)
 with open(os.devnull,'wb') as sink: subprocess.Popen(['python3',str(file),str(root),'4187',sys.argv[3]],stdin=subprocess.DEVNULL,stdout=sink,stderr=sink,start_new_session=True)
 `;
 const READ = `import json,pathlib,sys
-root=pathlib.Path(sys.argv[1]);p=root/'channel-request.json';response=root/'channel-response.json'
+root=pathlib.Path(sys.argv[1]);prefix=sys.argv[2];p=root/(prefix+'request.json');response=root/(prefix+'response.json')
 if p.exists():
  if p.stat().st_size>270000: raise RuntimeError('size')
  request=json.loads(p.read_text())
  if not response.exists() or json.loads(response.read_text()).get('ticket')!=request['ticket']:print(p.read_text())
 `;
 const WRITE = `import json,os,pathlib,sys
-root=pathlib.Path(sys.argv[1]);p=root/'channel-response.json';temp=root/'channel-response.tmp'
-value={'digest':sys.argv[2],'ok':sys.argv[3]=='true','body':sys.argv[4],'ticket':sys.argv[5]}
-request=json.loads((root/'channel-request.json').read_text())
+root=pathlib.Path(sys.argv[1]);prefix=sys.argv[2];p=root/(prefix+'response.json');temp=root/(prefix+'response.tmp')
+value={'digest':sys.argv[3],'ok':sys.argv[4]=='true','body':sys.argv[5],'ticket':sys.argv[6]}
+request=json.loads((root/(prefix+'request.json')).read_text())
 if request['ticket']!=value['ticket'] or request['digest']!=value['digest']:raise RuntimeError('delivery-binding')
 if p.exists() and json.loads(p.read_text()).get('ticket')==value['ticket']:
  if json.loads(p.read_text())!=value:raise RuntimeError('replay-conflict')
@@ -43,14 +45,29 @@ export class ContainerCodexChannel implements ManagedWorkerProviderChannel {
   private readonly route: Route;
   private readonly source: string;
   private readonly worker: string;
+  private readonly githubCli: string;
   constructor(
     private readonly manager: ContainerManager,
     route: Route,
     private readonly maximumTokens: number,
+    private readonly options: {
+      mode?: 'report' | 'agent';
+      maximumDurationSeconds?: number;
+      githubRead?: { alias: string; bindingDigest: string };
+    } = {},
   ) {
     this.route = structuredClone(route);
     this.source = readFileSync(new URL('./runtime/codex_channel.py', import.meta.url), 'utf8');
-    this.worker = readFileSync(new URL('./runtime/codex_worker.py', import.meta.url), 'utf8');
+    this.worker = readFileSync(
+      new URL(
+        options.mode === 'agent' ? './runtime/codex_agent_worker.py' : './runtime/codex_worker.py',
+        import.meta.url,
+      ),
+      'utf8',
+    );
+    this.githubCli = options.githubRead
+      ? readFileSync(new URL('./runtime/github_cli.py', import.meta.url), 'utf8')
+      : '';
     if (!Number.isSafeInteger(maximumTokens) || (maximumTokens !== 0 && maximumTokens < 2))
       throw new Error('managed-codex-budget-invalid');
   }
@@ -59,15 +76,27 @@ export class ContainerCodexChannel implements ManagedWorkerProviderChannel {
       throw new Error('managed-codex-route-mismatch');
     if (
       request.effectiveGrant.scope.network.destinations.length ||
-      request.effectiveGrant.scope.identityBindings.length ||
       ('maxTokens' in request.effectiveGrant.budget
         ? this.maximumTokens < 2 || this.maximumTokens >= request.effectiveGrant.budget.maxTokens
         : this.maximumTokens !== 0)
     )
       throw new Error('managed-codex-boundary-unavailable');
-    if (request.effectiveGrant.budget.maxDurationSeconds > 180)
+    const identities = request.effectiveGrant.scope.identityBindings;
+    if (
+      (identities.length > 0 || this.options.githubRead) &&
+      (!this.options.githubRead ||
+        identities.length !== 1 ||
+        identities[0]?.alias !== this.options.githubRead.alias ||
+        identities[0]?.bindingDigest !== this.options.githubRead.bindingDigest ||
+        !request.effectiveGrant.scope.allowedEffects.includes('github.issue.read'))
+    )
+      throw new Error('managed-codex-identity-boundary-unavailable');
+    const maximumDuration =
+      this.options.mode === 'agent' ? (this.options.maximumDurationSeconds ?? 3600) : 180;
+    if (request.effectiveGrant.budget.maxDurationSeconds > maximumDuration)
       throw new Error('managed-codex-canary-duration');
-    if (request.outputs.source.mode !== 'none') throw new Error('managed-codex-report-only');
+    if (this.options.mode !== 'agent' && request.outputs.source.mode !== 'none')
+      throw new Error('managed-codex-report-only');
   }
   async attach(
     binding: Parameters<ManagedWorkerProviderChannel['attach']>[0],
@@ -98,7 +127,13 @@ export class ContainerCodexChannel implements ManagedWorkerProviderChannel {
       )
     )
       throw new Error('managed-codex-cli-incompatible');
-    await exec(INSTALL, this.source, '180', this.worker);
+    await exec(
+      INSTALL,
+      this.source,
+      String(this.options.mode === 'agent' ? (this.options.maximumDurationSeconds ?? 3600) : 180),
+      this.worker,
+      this.githubCli,
+    );
     for (let attempt = 0; attempt < 30; attempt++) {
       const ready = await exec(
         "import urllib.request; print(urllib.request.urlopen('http://127.0.0.1:4187/health',timeout=1).status)",
@@ -108,12 +143,13 @@ export class ContainerCodexChannel implements ManagedWorkerProviderChannel {
       await new Promise((resolve) => setTimeout(resolve, 100));
     }
     let stopped = false;
-    let active = false;
+    let activeProvider = false;
+    let activeGitHub = false;
     const poll = async () => {
-      if (stopped || active) return;
-      active = true;
+      if (stopped || activeProvider) return;
+      activeProvider = true;
       try {
-        const raw = await exec(READ);
+        const raw = await exec(READ, 'channel-');
         if (!raw.trim() || stopped) return;
         const request = JSON.parse(raw) as { digest: string; body: string; ticket: string };
         if (
@@ -124,11 +160,14 @@ export class ContainerCodexChannel implements ManagedWorkerProviderChannel {
           request.digest !== sha256(request.body).slice(7)
         )
           throw new Error('managed-codex-request-invalid');
-        codexInput(this.route, request.body);
-        const response = await binding.invoke('codex-report-one', request.body, this.maximumTokens);
+        codexInput(this.route, request.body, this.options.mode === 'agent');
+        const operation =
+          this.options.mode === 'agent' ? `codex-${request.digest}` : 'codex-report-one';
+        const response = await binding.invoke(operation, request.body, this.maximumTokens);
         if (stopped) return;
         await exec(
           WRITE,
+          'channel-',
           request.digest,
           String(response.state === 'observed'),
           response.state === 'observed' ? response.value : '',
@@ -142,12 +181,31 @@ export class ContainerCodexChannel implements ManagedWorkerProviderChannel {
           "import pathlib,sys; (pathlib.Path(sys.argv[1])/'channel-closed').touch()",
         ).catch(() => {});
       } finally {
-        active = false;
+        activeProvider = false;
+      }
+    };
+    const pollGitHub = async () => {
+      if (stopped || activeGitHub || !this.options.githubRead || !binding.invokeGitHub) return;
+      activeGitHub = true;
+      try {
+        const raw = await exec(READ, 'github-');
+        if (!raw.trim() || stopped) return;
+        const request = JSON.parse(raw) as { digest: string; body: string; ticket: string };
+        if (request.digest !== sha256(request.body).slice(7))
+          throw new Error('managed-github-request-invalid');
+        const value = await binding.invokeGitHub(`github-${request.digest}`, request.body);
+        await exec(WRITE, 'github-', request.digest, 'true', value, request.ticket);
+      } catch {
+        stopped = true;
+        clearInterval(timer);
+      } finally {
+        activeGitHub = false;
       }
     };
     const timer = setInterval(
       () => {
         void poll();
+        void pollGitHub();
       },
       this.route.executionTarget === 'sandbox' ? 1000 : 100,
     );
@@ -160,6 +218,42 @@ export class ContainerCodexChannel implements ManagedWorkerProviderChannel {
       );
     };
   }
+}
+
+/** Reviewed full-agent command; mounts and grant determine read/write authority. */
+export function codexAgentCommand(
+  route: Route,
+  enrollmentId: string,
+  artifactPath: string,
+  writable: boolean,
+  inputNames: readonly string[] = [],
+  githubRepository?: string,
+): readonly string[] {
+  if (
+    route.runtime !== 'codex' ||
+    !/^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/.test(enrollmentId) ||
+    !/^[A-Za-z][A-Za-z0-9_.-]{0,127}$/.test(artifactPath) ||
+    inputNames.some((name) => !/^[A-Za-z][A-Za-z0-9_-]{0,63}$/.test(name)) ||
+    (githubRepository !== undefined && !/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(githubRepository))
+  )
+    throw new Error('managed-codex-command-binding');
+  const command = [
+    'python3',
+    '/opt/dispatcher/codex_worker.py',
+    '--model',
+    route.model,
+    '--reasoning',
+    route.reasoning,
+    '--repository',
+    `/repositories/${enrollmentId}`,
+    '--output',
+    `/output/${artifactPath}`,
+    '--sandbox',
+    writable ? 'workspace-write' : 'read-only',
+  ];
+  for (const name of inputNames) command.push('--input-root', `/inputs/${name}`);
+  if (githubRepository) command.push('--github-repository', githubRepository);
+  return command;
 }
 
 /** Reviewed fixed command; the runtime appends the objective after --. */

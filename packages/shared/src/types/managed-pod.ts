@@ -111,8 +111,8 @@ export const RequestTimeBudgetSchema = z
   .object({
     mode: z.literal('request-time'),
     expiresAt: z.number().int().min(0).max(9007199254740991),
-    maxProviderRequests: z.number().int().min(1).max(1),
-    maxDurationSeconds: z.number().int().min(1).max(180),
+    maxProviderRequests: z.number().int().min(1).max(100),
+    maxDurationSeconds: z.number().int().min(1).max(3600),
   })
   .strict();
 export type RequestTimeBudget = z.infer<typeof RequestTimeBudgetSchema>;
@@ -160,6 +160,9 @@ export const ScopeSchema = z
           'test.run',
           'artifact.write',
           'web.public-read',
+          'github.issue.read',
+          'github.pull-request.read',
+          'github.code.read',
           'git.commit',
           'git.push.worker-branch',
           'pull-request.create-draft',

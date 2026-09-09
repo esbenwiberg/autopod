@@ -145,12 +145,12 @@
         "maxProviderRequests": {
           "type": "integer",
           "minimum": 1,
-          "maximum": 1
+          "maximum": 100
         },
         "maxDurationSeconds": {
           "type": "integer",
           "minimum": 1,
-          "maximum": 180
+          "maximum": 3600
         }
       },
       "required": ["mode", "expiresAt", "maxProviderRequests", "maxDurationSeconds"]
@@ -221,6 +221,9 @@
               "test.run",
               "artifact.write",
               "web.public-read",
+              "github.issue.read",
+              "github.pull-request.read",
+              "github.code.read",
               "git.commit",
               "git.push.worker-branch",
               "pull-request.create-draft",
