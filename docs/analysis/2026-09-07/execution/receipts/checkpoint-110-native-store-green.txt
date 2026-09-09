@@ -1,0 +1,29 @@
+[1/1] Compiling plugin GenerateManual
+[2/2] Compiling plugin GenerateDoccReference
+Building for debugging...
+[2/7] Write sources
+[3/7] Write swift-version--58304C5D6DBC2206.txt
+[5/9] Compiling AutopodDesktop ActionHandler.swift
+[6/9] Emitting module AutopodDesktop
+[6/11] Write Objects.LinkFileList
+[8/11] Linking AutopodDesktopExe
+[9/11] Linking AutopodDesktopPackageTests
+[10/11] Applying AutopodDesktopExe
+Build complete! (5.63s)
+Test Suite 'Selected tests' started at 2026-09-09 09:12:52.085.
+Test Suite 'AutopodDesktopPackageTests.xctest' started at 2026-09-09 09:12:52.095.
+Test Suite 'AutopodDesktopPackageTests.xctest' passed at 2026-09-09 09:12:52.095.
+	 Executed 0 tests, with 0 failures (0 unexpected) in 0.000 (0.000) seconds
+Test Suite 'Selected tests' passed at 2026-09-09 09:12:52.095.
+	 Executed 0 tests, with 0 failures (0 unexpected) in 0.000 (0.011) seconds
+◇ Test run started.
+↳ Testing Library Version: 1902
+↳ Target Platform: arm64e-apple-macos14.0
+◇ Test replyRetainsDecisionUntilServerStateIsObserved(outcome:) started.
+◇ Test case passing 1 argument outcome → "failure" to replyRetainsDecisionUntilServerStateIsObserved(outcome:) started.
+◇ Test case passing 1 argument outcome → "unavailable" to replyRetainsDecisionUntilServerStateIsObserved(outcome:) started.
+◇ Test case passing 1 argument outcome → "awaiting_input" to replyRetainsDecisionUntilServerStateIsObserved(outcome:) started.
+◇ Test case passing 1 argument outcome → "validating" to replyRetainsDecisionUntilServerStateIsObserved(outcome:) started.
+◇ Test case passing 1 argument outcome → "running" to replyRetainsDecisionUntilServerStateIsObserved(outcome:) started.
+✔ Test replyRetainsDecisionUntilServerStateIsObserved(outcome:) with 5 test cases passed after 0.025 seconds.
+✔ Test run with 1 test in 0 suites passed after 0.025 seconds.

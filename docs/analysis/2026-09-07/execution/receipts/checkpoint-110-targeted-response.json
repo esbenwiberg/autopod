@@ -1,0 +1,10 @@
+{
+  "value": [
+    {
+      "code": "ProvisioningState/succeeded",
+      "displayStatus": "Provisioning succeeded",
+      "level": "Info",
+      "message": "Enable succeeded: \n[stdout]\n{\"observedAtUTC\":\"2026-09-09T06:56:19.881699+00:00\",\"pid\":113976,\"release\":\"/opt/autopod/releases/c0e5a5b4\",\"checkoutSha\":\"2523ed7b91ecefa1729dfbc177612e76cd90b548\",\"checkoutRead\":{\"exit\":0,\"incomplete\":null,\"bytesRead\":41,\"byteLimit\":8192},\"trackedCheckoutDirty\":true,\"loadedBytesAttested\":false,\"activeDatabaseMatched\":true,\"affectedProfiles\":{\"profiles\":[{\"name\":\"luumi\",\"extends\":null,\"target\":\"local\",\"runtime\":\"codex\",\"warmImageTag\":\"ewiautopodacr.azurecr.io/autopod/luumi:latest\"},{\"name\":\"dataverse-harness\",\"extends\":null,\"target\":\"sandbox\",\"runtime\":\"codex\",\"warmImageTag\":\"ewiautopodacr.azurecr.io/autopod/dataverse-harness:latest\"},{\"name\":\"teamplanner-pr-read\",\"extends\":\"teamplanner-base\",\"target\":null,\"runtime\":null,\"warmImageTag\":\"ewiautopodacr.azurecr.io/autopod/teamplanner-pr-read:latest\"},{\"name\":\"teamplanner-base\",\"extends\":null,\"target\":\"local\",\"runtime\":\"claude\",\"warmImageTag\":\"ewiautopodacr.azurecr.io/autopod/teamplanner-base:latest\"}],\"missing\":[],\"unvisitedParents\":0},\"historicalErrors\":{\"exit\":0,\"incomplete\":null,\"bytesRead\":493195,\"byteLimit\":2097152,\"parsedLines\":687,\"unparsedLines\":16,\"statusCounts\":{\"/pods:200\":3,\"/pods/analytics/cost:200\":1},\"groups\":[{\"kind\":\"OTHER_ERROR\",\"endpoint\":\"unattributed\",\"attribution\":\"none\",\"detail\":\"unspecified\",\"count\":369,\"firstTime\":1788781796363,\"lastTime\":1788825114016},{\"kind\":\"SQLITE_FULL\",\"endpoint\":\"unattributed\",\"attribution\":\"none\",\"detail\":\"disk_full\",\"count\":47,\"firstTime\":1788781795948,\"lastTime\":1788786515299}],\"rootCauseAutomaticallyVerified\":false},\"processIdentityStableAtEnd\":true,\"omittedErrorGroupsForTransport\":0,\"omittedProfilesForTransport\":0}\n\n[stderr]\n"
+    }
+  ]
+}

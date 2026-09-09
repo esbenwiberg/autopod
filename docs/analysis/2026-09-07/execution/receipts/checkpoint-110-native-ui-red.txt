@@ -1,0 +1,16 @@
+Selected task-owned test events; full private Xcode logs remain under /private/tmp/autopod-native-acceptance-110/.
+Test Suite 'Selected tests' started at 2026-09-09 09:10:52.098.
+Test Suite 'NativeInteractionTests.xctest' started at 2026-09-09 09:10:52.098.
+Test Suite 'NativeInteractionTests' started at 2026-09-09 09:10:52.098.
+Test Case '-[NativeInteractionTests.NativeInteractionTests testFailedReplyRetainsDecision]' started.
+    t =     5.54s Click "Keep report only" Button
+    t =     7.92s Added attachment named 'native-failed-reply-decision-state'
+/tmp/autopod-native-acceptance-110/Tests/NativeInteractionTests.swift:62: error: -[NativeInteractionTests.NativeInteractionTests testFailedReplyRetainsDecision] : XCTAssertTrue failed - A failed reply must leave the unanswered decision actionable
+/tmp/autopod-native-acceptance-110/Tests/NativeInteractionTests.swift:63: error: -[NativeInteractionTests.NativeInteractionTests testFailedReplyRetainsDecision] : XCTAssertTrue failed - A failed reply must not claim the worker is running
+Test Case '-[NativeInteractionTests.NativeInteractionTests testFailedReplyRetainsDecision]' failed (9.202 seconds).
+Test Suite 'NativeInteractionTests' failed at 2026-09-09 09:11:01.301.
+	 Executed 1 test, with 2 failures (0 unexpected) in 9.202 (9.203) seconds
+Test Suite 'NativeInteractionTests.xctest' failed at 2026-09-09 09:11:01.301.
+	 Executed 1 test, with 2 failures (0 unexpected) in 9.202 (9.203) seconds
+Test Suite 'Selected tests' failed at 2026-09-09 09:11:01.302.
+	 Executed 1 test, with 2 failures (0 unexpected) in 9.202 (9.204) seconds

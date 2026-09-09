@@ -192,10 +192,11 @@ public final class ActionHandler {
 
   public func reply(_ podId: String, message: String) async {
     pendingAction = "reply-\(podId)"
-    podStore.setEscalation(podId, question: nil)
-    podStore.updateStatus(podId, to: .running)
     do {
       try await api.sendMessage(podId, message: message)
+      // A reply may leave another decision pending or advance into validation.
+      // Keep the observed state until the daemon confirms its actual disposition.
+      await podStore.refreshSession(podId)
     } catch {
       lastError = error.localizedDescription
     }

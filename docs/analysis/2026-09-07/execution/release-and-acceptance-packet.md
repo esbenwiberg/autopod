@@ -1,5 +1,7 @@
 # Release and remaining acceptance packet
 
+Latest update: [checkpoint 110](checkpoint-110.md) fulfills the targeted hosted read, pins the affected sandbox image and records the release-label/dirty-checkout mismatch. Native UI interaction now works: a real failed-reply bug was reproduced and fixed. The application candidate has changed after the old 90a61141 packet; full validation and remaining native acceptance continue. No sandbox/role/publication/deployment authority is implied.
+
 Latest update: [checkpoint 109](checkpoint-109.md) fulfills the approved runtime discovery, records the configured North Europe sandbox group, one profile image digest and historical disk-full errors, and documents the refused data-plane read. Ten-row API success does not prove broad-list availability. The next approval request is only section A of [targeted acceptance prerequisites](targeted-acceptance-prerequisites.md); access, actual-image canary and native acceptance remain separate. Earlier statements below are dated evidence.
 
 Update: the metadata action below was approved and executed once on September 9; see [checkpoint 107](checkpoint-107.md). It identified the active DB and main release migration files. [The next verification packet](next-verification-packet.md) supersedes the fulfilled metadata approval request. Remaining pre-inspection statements below are dated September 8; deployment and paid-canary authority remain absent.

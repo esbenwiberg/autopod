@@ -1,0 +1,14 @@
+Selected task-owned test events; full private Xcode logs remain under /private/tmp/autopod-native-acceptance-110/.
+Test Suite 'Selected tests' started at 2026-09-09 09:13:18.205.
+Test Suite 'NativeInteractionTests.xctest' started at 2026-09-09 09:13:18.205.
+Test Suite 'NativeInteractionTests' started at 2026-09-09 09:13:18.205.
+Test Case '-[NativeInteractionTests.NativeInteractionTests testFailedReplyRetainsDecision]' started.
+    t =     7.57s Click "Keep report only" Button
+    t =    10.11s Added attachment named 'native-failed-reply-decision-state'
+Test Case '-[NativeInteractionTests.NativeInteractionTests testFailedReplyRetainsDecision]' passed (12.016 seconds).
+Test Suite 'NativeInteractionTests' passed at 2026-09-09 09:13:30.222.
+	 Executed 1 test, with 0 failures (0 unexpected) in 12.016 (12.017) seconds
+Test Suite 'NativeInteractionTests.xctest' passed at 2026-09-09 09:13:30.222.
+	 Executed 1 test, with 0 failures (0 unexpected) in 12.016 (12.017) seconds
+Test Suite 'Selected tests' passed at 2026-09-09 09:13:30.222.
+	 Executed 1 test, with 0 failures (0 unexpected) in 12.016 (12.018) seconds

@@ -1,0 +1,50 @@
+name: AutopodAcceptance110
+options:
+  bundleIdPrefix: com.autopod.acceptance110
+  deploymentTarget:
+    macOS: "15.0"
+packages:
+  AutopodDesktop:
+    path: __SOURCE_ROOT__/packages/desktop
+targets:
+  AcceptanceApp:
+    type: application
+    platform: macOS
+    sources:
+      - path: __SOURCE_ROOT__/packages/desktop/Autopod/AutopodXcodeApp.swift
+    dependencies:
+      - package: AutopodDesktop
+        product: AutopodUI
+      - package: AutopodDesktop
+        product: AutopodClient
+      - package: AutopodDesktop
+        product: AutopodDesktop
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.autopod.acceptance110.app
+        GENERATE_INFOPLIST_FILE: YES
+        INFOPLIST_KEY_CFBundleDisplayName: Autopod Acceptance 110
+        SWIFT_VERSION: "6.0"
+        CODE_SIGN_IDENTITY: "-"
+        CODE_SIGNING_ALLOWED: YES
+  NativeInteractionTests:
+    type: bundle.ui-testing
+    platform: macOS
+    sources: [Tests]
+    dependencies:
+      - target: AcceptanceApp
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.autopod.acceptance110.tests
+        GENERATE_INFOPLIST_FILE: YES
+        SWIFT_VERSION: "6.0"
+        CODE_SIGN_IDENTITY: "-"
+        CODE_SIGNING_ALLOWED: YES
+schemes:
+  Acceptance:
+    build:
+      targets:
+        AcceptanceApp: all
+        NativeInteractionTests: [test]
+    test:
+      targets: [NativeInteractionTests]

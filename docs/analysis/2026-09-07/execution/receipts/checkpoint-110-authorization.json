@@ -1,0 +1,9 @@
+{
+  "approval": "go on!",
+  "approvedScope": "Section A of targeted-acceptance-prerequisites.md at 4f5dcfa2",
+  "fulfilled": true,
+  "invocations": 1,
+  "paidCanaryAuthorized": false,
+  "roleAssignmentAuthorized": false,
+  "nativeTests": "Authorized local reversible development and regression tests against synthetic loopback data only"
+}

@@ -1,0 +1,20 @@
+{
+  "baselineApplicationSource": "90a61141a6a8ed6205aae144bbb99f8c9f0f9ec5",
+  "beforeFixHead": "4f5dcfa2703114daa378854a4c7a3059501311b1",
+  "changedApplicationFile": "packages/desktop/Sources/AutopodDesktop/Stores/ActionHandler.swift",
+  "changedFileSha256": "789124ca52f07a3129469bcee46036c99431bacb4a7a06b8bfa584df0f401fdb",
+  "nativeSourceEntry": "packages/desktop/Autopod/AutopodXcodeApp.swift",
+  "isolatedBundleId": "com.autopod.acceptance110.app",
+  "fixtureUpstreamPort": 31991,
+  "nativeProxyPort": 31992,
+  "productionRequests": 0,
+  "storeCases": 5,
+  "uiRed": "Two assertion failures: question no longer actionable and status incorrectly running",
+  "uiGreen": "Same native click/failure/dismiss sequence passed both assertions",
+  "screenshotScope": "Test app window only; both images visually inspected",
+  "limits": [
+    "Only failed-reply native scenario verified; broader operator interactions remain",
+    "Earlier UI fixture and selector failures are not application regressions",
+    "Xcode full recording and global interruption logs are not published"
+  ]
+}

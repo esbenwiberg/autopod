@@ -1,5 +1,7 @@
 # Targeted remaining acceptance prerequisites
 
+Latest update: [checkpoint 110](checkpoint-110.md) fulfills the targeted hosted read, pins the affected sandbox image and records the release-label/dirty-checkout mismatch. Native UI interaction now works: a real failed-reply bug was reproduced and fixed. The application candidate has changed after the old 90a61141 packet; full validation and remaining native acceptance continue. No sandbox/role/publication/deployment authority is implied.
+
 Checkpoint 109 fulfilled the approved runtime discovery. It established the configured sandbox group, one current profile image digest and historical disk-full errors. It did not establish the historical API cause, affected profiles' images or canary access. **Only section A below requests a new approval. Sections B and C describe prerequisites; approving A does not grant roles or authorize a paid canary.**
 
 ## A. Requested: one focused read on the pinned VM
