@@ -94,3 +94,19 @@ import Testing
   #expect(timeoutSummary?.subtitle == "The reviewer timed out before producing a verdict.")
   #expect(reviewInfrastructureSummaryCopy(for: nil) == nil)
 }
+
+@Test func reviewFailureRetainsActionableReasonAlongsideFindings() {
+  let reason = "Foundry tool review unavailable on the selected provider binding; reconcile it before retry."
+  let checks = ValidationChecks(
+    smoke: true,
+    review: false,
+    reviewIssues: ["Retained finding from the completed review"],
+    reviewReasoning: reason,
+    reviewSkipReason: reason,
+    reviewSkipKind: "review-failed"
+  )
+  let presentation = reviewPhasePresentation(progress: nil, checks: checks, council: nil)
+  #expect(presentation.status == .failed)
+  #expect(presentation.failureLabel.contains(reason))
+  #expect(checks.reviewIssues == ["Retained finding from the completed review"])
+}

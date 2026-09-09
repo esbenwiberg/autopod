@@ -112,6 +112,7 @@ if (process.env.FIXTURE_MODE === 'foundry-review-unavailable') {
     taskReview: {
       status: 'fail',
       model: 'local-foundry-fixture',
+      diff: 'Synthetic retained diff for local review acceptance.',
       reasoning: reason,
       issues: ['Retained initial finding from the completed review'],
       screenshots: [],

@@ -100,11 +100,17 @@ public func reviewPhasePresentation(
       ? "Review infrastructure failed"
       : "Review flagged issues"
   }
+  let reviewInfrastructureFailure = checks?.infrastructureFailure?.phase == ValidationPhase.review.rawValue
+  let recordedFailureReason = (checks?.reviewSkipKind == "review-failed"
+    || checks?.reviewSkipKind == "review-timeout" || reviewInfrastructureFailure)
+    ? (checks?.reviewSkipReason ?? (reviewInfrastructureFailure ? checks?.infrastructureFailure?.message : nil))
+    : nil
+  let failureReason = recordedFailureReason?.trimmingCharacters(in: .whitespacesAndNewlines)
   return ReviewPhasePresentation(
     status: status,
     councilUnavailableReason: council?.infrastructureUnavailable == true
       ? "infrastructure unavailable" : nil,
-    failureLabel: failureLabel
+    failureLabel: failureReason.flatMap { $0.isEmpty ? nil : "\(failureLabel)\n\($0)" } ?? failureLabel
   )
 }
 
