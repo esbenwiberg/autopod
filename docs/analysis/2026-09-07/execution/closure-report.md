@@ -1,6 +1,6 @@
 # Partial closure report
 
-Current update: [checkpoint 114](checkpoint-114.md) clears the observed stale native rerun error after a successful receipt. Swift passes; the new visual assertion is unrun while native activation is unavailable. Required exact-candidate checks and native/external acceptance remain open.
+Current update: [checkpoint 114](checkpoint-114.md) clears the observed stale native rerun error after a successful receipt. The clean full pipeline and 356 Swift tests pass on `f93dd4d9`; the new visual assertion is unrun while native activation is unavailable. Native/external acceptance remains open.
 
 Current update: [checkpoint 113](checkpoint-113.md) records clean `3aa939d5` full validation, the same-source negative matched replay and five renewed mobile fault-path interactions. It narrows the historical fixture warning after an evidence audit. Remaining native and external acceptance is still required; the goal is incomplete.
 

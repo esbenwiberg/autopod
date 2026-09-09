@@ -2551,7 +2551,7 @@
     {
       "id": "G.3",
       "requirement": "All affected suites and full repository validation pipeline pass on exact recorded commits",
-      "status": "partial",
+      "status": "verified",
       "implementation": [
         "packages/daemon/src/scheduled-jobs/scan-record-reader.ts",
         "packages/daemon/src/scheduled-jobs/scan-report-repository.ts",
@@ -2647,7 +2647,7 @@
         "checkpoint-114.md"
       ],
       "prerequisites": [
-        "Clean checkpoint-114 native error-clear change requires full pipeline. Swift 356 tests passed after the change."
+        "Clean f93dd4d9 full pipeline passed; Swift 356 tests passed after the one-line native rerun correction. Native interaction acceptance is tracked separately and remains incomplete."
       ],
       "verificationScope": "Local exact-source acceptance only; does not promote live, native, canary or whole-goal status.",
       "finalSourceEvidence": "90a61141a6a8ed6205aae144bbb99f8c9f0f9ec5; see checkpoint-106.md for executed checks, carried forward surface proof and limits."
