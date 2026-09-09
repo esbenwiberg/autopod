@@ -1,0 +1,28 @@
+{
+  "status": "isolated_restore_verified",
+  "creationProvenanceVerified": false,
+  "scope": "Existing backup restore and current database schema/watermark comparison; no invented creation receipt.",
+  "backupBytes": 877150208,
+  "backupSha256": "3624d3be6ef845f4dded1b84be7bbe38891ca9d3b469c43db166e4dcdd473c68",
+  "copiedChecksumMatches": true,
+  "integrityOk": true,
+  "foreignKeysOk": true,
+  "rollbackWriteProbeOk": true,
+  "backupFingerprint": {
+    "schemaSha256": "c0fefbf5c2be3861b7eea37a9b9f0e911c5e0845f56484d47201ed528e958ae7",
+    "watermarkSha256": "063f8bc703388770c8a6cb266e0f1eb48c33f8f39b241c6ed89f7f166280a93f",
+    "tableCount": 48
+  },
+  "activeFingerprint": {
+    "schemaSha256": "c0fefbf5c2be3861b7eea37a9b9f0e911c5e0845f56484d47201ed528e958ae7",
+    "watermarkSha256": "063f8bc703388770c8a6cb266e0f1eb48c33f8f39b241c6ed89f7f166280a93f",
+    "tableCount": 48
+  },
+  "schemasMatch": true,
+  "watermarksMatch": true,
+  "watermarksAreFullContentEquality": false,
+  "isolatedDirectoryRemoved": true,
+  "backupFile": "1788930281287.db",
+  "observedAtUTC": "2026-09-09T05:19:16.374486+00:00",
+  "activeIdentityStableAtEnd": true
+}

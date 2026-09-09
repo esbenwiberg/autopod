@@ -1,0 +1,10 @@
+{
+  "approval": "Approevd",
+  "interpretedAs": "Approved",
+  "approvedPacket": "next-verification-packet.md at 62673bd2",
+  "scope": ["One bounded on-VM sampled backup restore", "Four fixed authenticated API GETs"],
+  "fulfilled": true,
+  "additionalDiscoveryApproval": "pending",
+  "deploymentAuthorized": false,
+  "paidCanaryAuthorized": false
+}

@@ -1,5 +1,7 @@
 # Partial closure report
 
+Latest update: [checkpoint 108](checkpoint-108.md) records the approved successful on-VM sampled restore, matching active schema/watermark signatures, observed temporary-copy removal and four successful authenticated API reads. Those approval requests are fulfilled. Remaining runtime/canary discovery is prepared [separately](runtime-and-canary-discovery-packet.md); historical root cause, actual-image capability and visible native interaction are still outstanding. Earlier baseline sections below remain dated evidence.
+
 Latest evidence: [checkpoint 107](checkpoint-107.md) records the approved successful guest inspection, verified active database and matching main migration-file manifest. Backup content/restore and loaded-runtime identities remain unverified. The next specific requests are in [the verification packet](next-verification-packet.md); the September 8 baseline below remains dated evidence.
 
 All six workstreams have local implementations and regression evidence. Required current hosted provenance/root-cause evidence, actual-image capability acceptance, intended-database backup verification and visible native interaction remain outstanding. **The goal is not complete.**

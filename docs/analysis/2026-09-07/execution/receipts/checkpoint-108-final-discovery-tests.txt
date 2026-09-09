@@ -1,0 +1,8 @@
+test_image_reference_and_label_limits (__main__.MetadataFilters) ... ok
+test_only_selected_environment_fields_leave_memory (__main__.MetadataFilters) ... ok
+test_registry_credentials_and_query_values_are_not_exported (__main__.MetadataFilters) ... ok
+
+----------------------------------------------------------------------
+Ran 3 tests in 0.000s
+
+OK

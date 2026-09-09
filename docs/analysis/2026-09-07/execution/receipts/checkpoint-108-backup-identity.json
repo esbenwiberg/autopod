@@ -1,0 +1,13 @@
+{
+  "authorizedBy": "User Approevd in response to checkpoint 107 next-verification packet",
+  "target": {
+    "id": "/subscriptions/06bb959b-9458-41a6-bdf5-77cc12feaab9/resourceGroups/ewi-sandboxes/providers/Microsoft.Compute/virtualMachines/autopod-daemon",
+    "location": "swedencentral",
+    "vmId": "3addc9bc-4812-4892-98d6-c40d5ab893c0"
+  },
+  "startedAtUTC": "2026-09-09T05:19:00.673490+00:00",
+  "payloadSha256": "e9db196c9f1e639b98822d26b6553c180cadb1ba3f6775a48274834a1c1edd03",
+  "attempt": 1,
+  "cliExitCode": 0,
+  "endedAtUTC": "2026-09-09T05:19:33.298360+00:00"
+}
