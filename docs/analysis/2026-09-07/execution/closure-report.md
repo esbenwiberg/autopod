@@ -1,5 +1,7 @@
 # Partial closure report
 
+Current update: [checkpoint 114](checkpoint-114.md) clears the observed stale native rerun error after a successful receipt. Swift passes; the new visual assertion is unrun while native activation is unavailable. Required exact-candidate checks and native/external acceptance remain open.
+
 Current update: [checkpoint 113](checkpoint-113.md) records clean `3aa939d5` full validation, the same-source negative matched replay and five renewed mobile fault-path interactions. It narrows the historical fixture warning after an evidence audit. Remaining native and external acceptance is still required; the goal is incomplete.
 
 Current update: [checkpoint 112](checkpoint-112.md) fixes native retry-card loading and corrects the synthetic HTTP fault injector. Four additional individual native interaction cases passed; expanded scan interaction remains unverified. Affected older mobile fault-response claims require renewed proof. [Checkpoint 111](checkpoint-111.md) records a clean full pipeline pass on `f55a04d6`; subsequent native changes require renewed full validation. The dated tables below do not supersede the current [acceptance ledger](acceptance.json). The goal remains incomplete.

@@ -75,6 +75,7 @@ struct DispatchPreflightCard: View {
       UserDefaults.standard.set(try JSONEncoder().encode(draft), forKey: draftKey); pending = draft
       created = try await actions.createIntentionalRerun(draft)
       UserDefaults.standard.removeObject(forKey: draftKey); pending = nil
+      error = ""
     } catch { self.error = error.localizedDescription }
   }
 }

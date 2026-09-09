@@ -102,6 +102,7 @@ final class MatrixTests: XCTestCase {
     retry.click()
     let created = app.staticTexts.matching(NSPredicate(format:"value CONTAINS %@", "Distinct execution created: same-fixture-rerun"))
     XCTAssertTrue(created.firstMatch.waitForExistence(timeout:10))
+    XCTAssertFalse(app.staticTexts.matching(NSPredicate(format:"value CONTAINS %@", "Response unavailable after recording the simulated rerun")).firstMatch.exists, "A successful retry must clear the previous request error")
     let image = XCTAttachment(screenshot: app.windows.firstMatch.screenshot())
     image.name = "native-idempotent-rerun"
     image.lifetime = .keepAlways
