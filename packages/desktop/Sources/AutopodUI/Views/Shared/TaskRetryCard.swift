@@ -18,7 +18,9 @@ struct TaskRetryCard: View {
   }
   private var stageLabel: String { stage == "codex_interruption" ? "Codex interruption recovery" : stage == "validation" ? "Validation" : stage == "worker" ? "Worker" : "Sandbox startup" }
   var body: some View {
-    Group {
+    // Keep a mounted container while evidence is loading. An empty Group has no
+    // view lifecycle, so its task never loads the conditionally visible stages.
+    VStack(alignment: .leading, spacing: 0) {
       if stage == "validation" || (state?.admissionCount ?? 0) > 0 || !error.isEmpty {
         VStack(alignment: .leading, spacing: 10) {
           Text(stage == "codex_interruption" ? "Codex recovery allowance" : stage == "worker" ? "Worker execution" : "\(stageLabel) retry budget").font(.headline)

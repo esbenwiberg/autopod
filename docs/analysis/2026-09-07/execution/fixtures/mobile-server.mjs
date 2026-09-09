@@ -1,6 +1,7 @@
 import { readFile } from 'node:fs/promises';
 import { createServer } from 'node:http';
 import { extname, resolve } from 'node:path';
+import { isDeepStrictEqual } from 'node:util';
 const dist = resolve('packages/mobile-web/dist');
 const successfulValidation = {
   podId: 'local-fixture',
@@ -497,7 +498,7 @@ let rerunDecision = null;
 let rerunResponseLost = false;
 const server = createServer(async (req, res) => {
   const pathname = new URL(req.url, 'http://localhost').pathname;
-  const json = (value, status = 200) => {
+  const json = (value, status = res.statusCode) => {
     res.statusCode = status;
     res.setHeader('content-type', 'application/json');
     res.end(JSON.stringify(value));
@@ -600,7 +601,7 @@ const server = createServer(async (req, res) => {
     let body = '';
     for await (const chunk of req) body += chunk;
     const request = JSON.parse(body);
-    if (rerunDecision && JSON.stringify(rerunDecision) !== JSON.stringify(request)) {
+    if (rerunDecision && !isDeepStrictEqual(rerunDecision, request)) {
       res.statusCode = 409;
       return json({ message: 'Different request after lost response' });
     }

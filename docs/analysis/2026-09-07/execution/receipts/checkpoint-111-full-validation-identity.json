@@ -1,0 +1,12 @@
+{
+  "sourceCommit": "f55a04d69766c28a7388dc1293be801f154ac8ec",
+  "beforeStatus": "",
+  "startedAtUTC": "2026-09-09T07:26:34.983009+00:00",
+  "testEnvironment": {
+    "VITEST_MAX_WORKERS": "4"
+  },
+  "exitCode": 0,
+  "afterHead": "f55a04d69766c28a7388dc1293be801f154ac8ec",
+  "afterStatus": "",
+  "endedAtUTC": "2026-09-09T07:28:58.556716+00:00"
+}

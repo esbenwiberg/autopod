@@ -156,7 +156,8 @@
         "checkpoint-101.md",
         "checkpoint-106.md",
         "closure-report.md",
-        "checkpoint-110.md"
+        "checkpoint-110.md",
+        "checkpoint-112.md"
       ],
       "prerequisites": [
         "Actual failed-reply native interaction is now reproduced and fixed with visible before/after evidence. Other late-decision/guidance operator flows remain to be exercised through the now-working Xcode UI facility."
@@ -736,7 +737,8 @@
         "checkpoint-98.md",
         "checkpoint-99.md",
         "checkpoint-106.md",
-        "closure-report.md"
+        "closure-report.md",
+        "checkpoint-112.md"
       ],
       "prerequisites": [
         "Visible native retry/Rework interaction and deployed provenance remain unverified. Task identity, cumulative allowance and reconstruction/linked-pod checks passed at final source."
@@ -813,7 +815,8 @@
         "checkpoint-98.md",
         "checkpoint-99.md",
         "checkpoint-106.md",
-        "closure-report.md"
+        "closure-report.md",
+        "checkpoint-112.md"
       ],
       "prerequisites": [
         "Visible native retry authorization/binding interaction remains unverified. Final-source unchanged-failure and changed-condition/override regressions passed."
@@ -1008,7 +1011,8 @@
         "checkpoint-95.md",
         "checkpoint-104.md",
         "checkpoint-106.md",
-        "closure-report.md"
+        "closure-report.md",
+        "checkpoint-112.md"
       ],
       "prerequisites": [
         "Visible native cost/duration interaction remains unverified. No billing-backed infrastructure measurement is available; stored subtotals and non-additive duration completeness remain labelled. No additional billing collection requirement is inferred."
@@ -1208,7 +1212,8 @@
         "receipts/dispatch-native-contract-green.txt",
         "checkpoint-93.md",
         "checkpoint-106.md",
-        "closure-report.md"
+        "closure-report.md",
+        "checkpoint-112.md"
       ],
       "prerequisites": [
         "Visible native intentional-rerun interaction remains unverified. Final-source equivalent-work and distinct-identity regressions passed; asynchronous ownership/preflight boundaries are summarized in closure."
@@ -1814,7 +1819,8 @@
         "checkpoint-93.md",
         "checkpoint-104.md",
         "checkpoint-106.md",
-        "closure-report.md"
+        "closure-report.md",
+        "checkpoint-112.md"
       ],
       "prerequisites": [
         "Visible native cost/phase interaction remains unverified. Final-source task/phase/attempt/fleet accounting checks passed; billing and unavailable infrastructure cost remain explicitly unverified rather than invented."
@@ -1951,7 +1957,8 @@
         "checkpoint-105.md",
         "checkpoint-106.md",
         "closure-report.md",
-        "checkpoint-110.md"
+        "checkpoint-110.md",
+        "checkpoint-112.md"
       ],
       "prerequisites": [
         "Xcode native UI interaction now works under an isolated app identity and synthetic loopback fixture. Failed-reply decision retention has actual RED/GREEN window proof; remaining native operator workflows still require interaction checks. Existing CLI/built-mobile evidence is retained."
@@ -2064,7 +2071,8 @@
         "checkpoint-75.md",
         "checkpoint-93.md",
         "checkpoint-106.md",
-        "closure-report.md"
+        "closure-report.md",
+        "checkpoint-112.md"
       ],
       "prerequisites": [
         "Visible native scan/report/triage interaction remains unverified. Final-source actual scheduling, deterministic collection, exact delta, incomplete-run, durable finding and human-selected repair regressions passed. A live schedule conversion or paid judgment cohort is not added as a prerequisite; any future such action needs its own authorization."
@@ -2191,7 +2199,8 @@
         "checkpoint-75.md",
         "checkpoint-93.md",
         "checkpoint-106.md",
-        "closure-report.md"
+        "closure-report.md",
+        "checkpoint-112.md"
       ],
       "prerequisites": [
         "Visible native scan/report/triage interaction remains unverified. Final-source actual scheduling, deterministic collection, exact delta, incomplete-run, durable finding and human-selected repair regressions passed. A live schedule conversion or paid judgment cohort is not added as a prerequisite; any future such action needs its own authorization."
@@ -2622,10 +2631,11 @@
         "checkpoint-105.md",
         "checkpoint-106.md",
         "closure-report.md",
-        "checkpoint-110.md"
+        "checkpoint-110.md",
+        "checkpoint-112.md"
       ],
       "prerequisites": [
-        "The new native Reply fix passed all five focused store/API cases and the actual native regression; all 356 Swift tests passed. The required repository pipeline must run at the new clean committed source; the previous 90a61141 pipeline remains historical exact-source evidence."
+        "Clean f55a04d6 full pipeline passed (checkpoint 111). Checkpoint 112 native candidate requires its own clean full pipeline. Swift 356 tests passed after retry and copy changes."
       ],
       "verificationScope": "Local exact-source acceptance only; does not promote live, native, canary or whole-goal status.",
       "finalSourceEvidence": "90a61141a6a8ed6205aae144bbb99f8c9f0f9ec5; see checkpoint-106.md for executed checks, carried forward surface proof and limits."
@@ -2712,10 +2722,12 @@
         "checkpoint-105.md",
         "checkpoint-106.md",
         "closure-report.md",
-        "checkpoint-110.md"
+        "checkpoint-110.md",
+        "checkpoint-112.md"
       ],
       "prerequisites": [
-        "Xcode native UI interaction now works under an isolated app identity and synthetic loopback fixture. Failed-reply decision retention has actual RED/GREEN window proof; remaining native operator workflows still require interaction checks. Existing CLI/built-mobile evidence is retained."
+        "Xcode native UI interaction now works under an isolated app identity and synthetic loopback fixture. Failed-reply decision retention has actual RED/GREEN window proof; remaining native operator workflows still require interaction checks. Existing CLI/built-mobile evidence is retained.",
+        "Checkpoint 112 preserves four individual native case passes; scan control interaction remains unverified. Renew post-checkpoint-99 mobile fault-response proof affected by fixture status overwrites."
       ],
       "finalSourceEvidence": "90a61141a6a8ed6205aae144bbb99f8c9f0f9ec5; see checkpoint-106.md for executed checks, carried forward surface proof and limits."
     },
@@ -2755,7 +2767,8 @@
         "checkpoint-107.md",
         "checkpoint-108.md",
         "checkpoint-109.md",
-        "checkpoint-110.md"
+        "checkpoint-110.md",
+        "checkpoint-112.md"
       ],
       "prerequisites": [
         "All 43 criteria remain mapped. Native failed-reply proof now exists; other native flows, historical root cause, actual-image capability and remaining release/upgrade provenance remain outstanding. Required full pipeline at the updated candidate is pending. The goal is incomplete."
@@ -2763,7 +2776,7 @@
       "finalSourceEvidence": "90a61141a6a8ed6205aae144bbb99f8c9f0f9ec5; see checkpoint-106.md for executed checks, carried forward surface proof and limits."
     }
   ],
-  "lastCheckpoint": "checkpoint-110.md",
+  "lastCheckpoint": "checkpoint-112.md",
   "migrationLineage": {
     "managedBaseline": "142-152; exact bytes from tracking commit cba763ba0bb3d65cb4c055e00033016ba1d5c646",
     "nativeCurrent": "164-182; native durable lifecycle/accounting/provenance, retained task history 177, exact worker binding 178, deadlines 179, guidance acknowledgement 180, retained history events 181 and cleanup ownership 182",
