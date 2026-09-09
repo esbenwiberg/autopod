@@ -42,7 +42,7 @@ The historical estimate is $0.018 compute for five minutes; it is **not a total 
 
 ## Actual database compatibility and rollout preparation
 
-Candidate migrations through 182 are locally covered, including representative managed/native lineage upgrades and immutable claim/history rules. The on-disk hosted migration manifest and sampled restore do not prove an upgrade of the actual intended database to this candidate. Prepare a bounded on-VM, private-copy upgrade verification with the candidate build and exact source/backup identities. Keep database contents on the VM; export only bounded verdict/provenance data. Any candidate upload, copy/upgrade execution and output handling require a concrete separately approved packet. Never migrate or replace the active database as an acceptance experiment.
+Candidate migrations through 182 are locally covered, including representative managed/native lineage upgrades and immutable claim/history rules. The on-disk hosted migration manifest and sampled restore do not prove an upgrade of the actual intended database to this candidate. The [isolated upgrade packet](isolated-upgrade-verification-packet.md) now has a packaged actual candidate runner and eight passing local copy/fault/CLI tests. Seal its bounded on-VM transport/watchdog/cleanup wrapper and exact source/backup identities before requesting execution approval. Keep database contents on the VM; export only bounded verdict/provenance data. Any candidate upload, copy/upgrade execution and output handling require a concrete separately approved packet. Never migrate or replace the active database as an acceptance experiment.
 
 Before a publication/deployment request:
 

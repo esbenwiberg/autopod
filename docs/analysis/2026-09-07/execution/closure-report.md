@@ -1,5 +1,7 @@
 # Partial closure report
 
+Current update: [checkpoint 116](checkpoint-116.md) adds eight passing local snapshot-upgrade verifier/CLI tests and a packaged actual migration runner. The supplemental native harness compiles, but interaction and hosted-copy execution remain unverified.
+
 Current update: [checkpoint 115](checkpoint-115.md) verifies twelve native interactions together on `f93dd4d9`, including scan selection, rerun error clearance and failed/pass/failed history. The [current release packet](release-and-acceptance-packet.md) and 388-path candidate manifest supersede earlier proposals. Remaining native and external acceptance is open; the supplemental native runner is currently blocked by macOS authentication. All earlier “Current/Latest” paragraphs and baseline tables below describe dated evidence.
 
 Current update: [checkpoint 114](checkpoint-114.md) clears the observed stale native rerun error after a successful receipt. The clean full pipeline and 356 Swift tests pass on `f93dd4d9`; the new visual assertion is unrun while native activation is unavailable. Native/external acceptance remains open.

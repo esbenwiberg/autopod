@@ -1,0 +1,8 @@
+{
+  "status": "build_for_testing_passed",
+  "applicationSource": "f93dd4d9a66bcf0a4ad174d0efc378d931239faf",
+  "project": "/private/tmp/autopod-native-repro-check-115/AutopodAcceptance110.xcodeproj",
+  "logSha256": "e86cbef77e8c4847e8ad66aaead989705afe12b31c73d9678d05add52122ca99",
+  "supplementalInteraction": "unverified; runner initialization was blocked by macOS system authentication",
+  "doesNotSupersedeTwelvePassedInteractions": true
+}
