@@ -1,0 +1,3 @@
+http://127.0.0.1:31995/mobile/
+{"action":"intentional-rerun","requestKey":"ac536efc-4c9b-446f-9edd-1b45abf59bc6","reason":"Recheck the same contract after environment repair","simulated":true}
+{"action":"intentional-rerun","requestKey":"ac536efc-4c9b-446f-9edd-1b45abf59bc6","reason":"Recheck the same contract after environment repair","simulated":true}

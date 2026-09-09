@@ -1,5 +1,7 @@
 # Partial closure report
 
+Current update: [checkpoint 113](checkpoint-113.md) records clean `3aa939d5` full validation, the same-source negative matched replay and five renewed mobile fault-path interactions. It narrows the historical fixture warning after an evidence audit. Remaining native and external acceptance is still required; the goal is incomplete.
+
 Current update: [checkpoint 112](checkpoint-112.md) fixes native retry-card loading and corrects the synthetic HTTP fault injector. Four additional individual native interaction cases passed; expanded scan interaction remains unverified. Affected older mobile fault-response claims require renewed proof. [Checkpoint 111](checkpoint-111.md) records a clean full pipeline pass on `f55a04d6`; subsequent native changes require renewed full validation. The dated tables below do not supersede the current [acceptance ledger](acceptance.json). The goal remains incomplete.
 
 Latest update: [checkpoint 110](checkpoint-110.md) fulfills the targeted hosted read, pins the affected sandbox image and records the release-label/dirty-checkout mismatch. Native UI interaction now works: a real failed-reply bug was reproduced and fixed. The application candidate has changed after the old 90a61141 packet; full validation and remaining native acceptance continue. No sandbox/role/publication/deployment authority is implied.
