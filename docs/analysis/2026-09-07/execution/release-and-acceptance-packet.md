@@ -1,13 +1,13 @@
 # Release and remaining acceptance packet
 
-Updated September 9, checkpoint 115. This packet supersedes the dated approval requests in checkpoints 106–110. Their raw receipts remain retained. It is a local review artifact; it does not authorize publication, deployment, restart, cloud access changes or a paid canary. The goal remains incomplete.
+Updated September 9, checkpoint 117. This packet supersedes the dated approval requests in checkpoints 106–110. Their raw receipts remain retained. It is a local review artifact; it does not authorize publication, deployment, restart, cloud access changes or a paid canary. The goal remains incomplete.
 
 ## Current tested candidate
 
-- Application source: `f93dd4d9a66bcf0a4ad174d0efc378d931239faf`, isolated branch `codex/durable-execution-contract` at `/private/tmp/autopod-durable-execution`. Later receipt-only commit `ec791bac20b5ecf0a723eeae62215bc072e560d4` has identical application source.
-- [Current non-documentation patch](receipts/checkpoint-115-candidate-code.diff) and [base/candidate blob manifest](receipts/checkpoint-115-candidate-manifest.json). Comparison base `c0e5a5b4617d131257e2c448f2259b645ac351ee` is the historical integrated main from checkpoint 106, **not a fresh remote-main assertion**. Refresh main and migration numbering before any publication proposal. The patch uses `--binary --unified=0`; applying it requires the exact base and `git apply --unidiff-zero`.
+- Application source: `15900d9e08a7e4ca786a6ad11ff81820fda14de4`, isolated branch `codex/durable-execution-contract` at `/private/tmp/autopod-durable-execution`.
+- [Current non-documentation patch](receipts/checkpoint-117-candidate-code.diff) and [base/candidate blob manifest](receipts/checkpoint-117-candidate-manifest.json). Comparison base `c0e5a5b4617d131257e2c448f2259b645ac351ee` is the historical integrated main from checkpoint 106, **not a fresh remote-main assertion**. Refresh main and migration numbering before any publication proposal. The patch uses `--binary --unified=0`; applying it requires the exact base and `git apply --unidiff-zero`.
 - Governing contract SHA-256: `3dc5e753db8ec664ea8ed1a93b1150c936ea53cbc8e9f8a0def05113dfd1e481`; unchanged from the original checkout. Unrelated original checkout changes remain excluded.
-- [Clean full pipeline](receipts/checkpoint-114-full-validation-identity.json) passed on `f93dd4d9`; install, lint, configured build/type checks, tests, audit and secret scan passed. Fourteen of fifteen Turbo results were cached. Native Swift freshly passed 356 tests in eight suites. One moderate dependency advisory remains.
+- [Clean full pipeline](receipts/checkpoint-117-full-validation-identity.json) passed on `15900d9e`; install, lint, configured build/type checks, tests, audit and secret scan passed. Fourteen of fifteen Turbo results were cached. Native Swift freshly passed 357 tests in eight suites. One moderate dependency advisory remains.
 - [Matched replay](receipts/checkpoint-112-validation-replay.json): 667.521167 ms baseline versus 1,921.298583 ms reuse, zero escaped seeded defects, unchanged coverage. The 25% speed target is unsupported on this local fixture. The subsequent one-line native error-clear change does not touch benchmark source/inputs. No live speed claim.
 
 ## Completed inspections; do not request them again
@@ -28,7 +28,9 @@ Checkpoint 115 passed twelve native cases together on unchanged application sour
 
 The scan disclosure failure was a harness click-coordinate miss; its actual visible arrow is offset from its accessibility frame. The history failures were incorrect menu/control and expected-text selectors. Neither required a product change. The native rerun correction now has actual GREEN interaction proof.
 
-Remaining native acceptance includes approval failure/recovery, worker binding reconciliation, guidance acknowledgement presentation, historical waiver and refreshed provider disposition, scan policy persistence and retained fleet navigation. Three supplemental native cases are not accepted: their first run was interrupted, and the resumed runner failed initialization with macOS reporting that system authentication was running. The twelve completed cases are unaffected. Only task-owned app-window images are retained; narrow content wrapping is not represented as a layout audit pass.
+Checkpoint 117 adds five direct native flows: refreshed recorded merged disposition with current provider status still unverified; unresolved restart ownership warning; actionable reviewer reason alongside retained findings; approval preservation/retry; and scan policy saving, retained report navigation and quit/relaunch persistence. [Direct receipt](receipts/checkpoint-117-native-direct.json). The reviewer reason required a product correction; the clean pipeline and 357 Swift tests pass on 15900d9e. The supplemental XCTest runner timed out before any case, but supported direct CUA interactions worked after the usage limit cleared.
+
+Remaining native acceptance includes worker binding reconciliation, guidance acknowledgement presentation, historical waiver, recorded closed disposition, empty-delta report, retained fleet navigation and populated execution provenance. Screenshots were observed only from the task-owned app/window. Narrow wrapping is not a layout audit pass.
 
 ## Remaining sandbox access and paid-canary gate
 

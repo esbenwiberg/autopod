@@ -29,11 +29,11 @@ async function withFixture(mode, check) {
       }),
     ]);
     clearTimeout(startup);
-    const post = async (path, body = {}) => {
+    const post = async (path, body = {}, method = 'POST') => {
       const response = await fetch(`http://127.0.0.1:${port}${path}`, {
-        method: 'POST',
+        method,
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify(body),
+        body: method === 'GET' ? undefined : JSON.stringify(body),
         signal: AbortSignal.timeout(5000),
       });
       return { status: response.status, body: await response.json() };
@@ -75,4 +75,25 @@ await withFixture('unverified-termination', async (post) => {
 });
 await withFixture('worker-deadline', async (post) => {
   assert.equal((await post('/pods/local-fixture/validate')).status, 409);
+});
+await withFixture('dispatch', async (request) => {
+  const scan = {
+    version: 1,
+    baseRef: 'main',
+    headRef: 'main',
+    scanners: ['secrets'],
+    judgment: 'none',
+    windowHours: 24,
+  };
+  const saved = await request('/scheduled-jobs/scan-fixture', { scan }, 'PUT');
+  assert.equal(saved.status, 200);
+  assert.equal(saved.body.enabled, false);
+  const jobs = await request('/scheduled-jobs', {}, 'GET');
+  assert.deepEqual(jobs.body[0].scan, scan);
+  const old = await request('/scan-reports/report-old-fixture', {}, 'GET');
+  assert.equal(old.body.report.policy.headRef, 'work');
+  assert.equal(
+    (await request('/scheduled-jobs/scan-fixture', { scan, enabled: true }, 'PUT')).status,
+    400,
+  );
 });

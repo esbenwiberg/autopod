@@ -143,6 +143,14 @@ const scanJob = {
   name: 'Local dependency and secret scan',
   profileName: 'local-fixture',
   enabled: false,
+  templateId: 'fixture-template',
+  templateName: 'Fixture scan',
+  task: 'Collect exact delta',
+  fieldValues: {},
+  nextRunAt: '2026-09-10T09:00:00Z',
+  catchupPending: false,
+  createdAt: '2026-09-07T09:00:00Z',
+  updatedAt: '2026-09-07T09:00:00Z',
   cronExpression: '0 9 * * *',
   scan: {
     version: 1,
@@ -450,6 +458,14 @@ if (approvalPreservationFixture)
     branch: 'local-preserved-branch',
     worktreePath: missingSourceFixture ? null : '/local-fixture/preserved-worktree',
     containerId: 'local-preserved-container',
+    readinessReview: {
+      status: 'ready',
+      summary: 'Synthetic validation is ready for the local approval-recovery check.',
+      computedAt: '2026-09-09T10:00:00Z',
+      scope: 'pod',
+      areas: [],
+      findings: [],
+    },
   };
 const legacyDeliveryFixture = process.env.FIXTURE_MODE === 'legacy-delivery-recovery';
 if (legacyDeliveryFixture)
@@ -529,7 +545,7 @@ const server = createServer(async (req, res) => {
         : normalDeliveryFixture
           ? 'Approval delivery failed. Branch push did not complete. Original resources retained; repair delivery and retry approval.'
           : 'Branch preservation failed. Original resources retained; repair the branch or remote access and retry approval.';
-      pod = { ...pod, failureReason: message };
+      pod = { ...pod, failureReason: message, updatedAt: new Date().toISOString() };
       res.statusCode = missingSourceFixture ? 409 : 502;
       return json({
         error: missingSourceFixture
@@ -544,6 +560,7 @@ const server = createServer(async (req, res) => {
       ...pod,
       status: 'complete',
       failureReason: null,
+      updatedAt: new Date().toISOString(),
       ...(missingSourceFixture ? { worktreePath: '/local-fixture/restored-worktree' } : {}),
     };
     return json({ ok: true });
@@ -824,6 +841,43 @@ const server = createServer(async (req, res) => {
       }),
     );
     return json({ ok: true, action: startupRetryFixture ? 'retry-agent' : 'revalidate' });
+  }
+  if (pathname === '/scheduled-jobs/scan-fixture' && req.method === 'PUT') {
+    let body = '';
+    for await (const chunk of req) body += chunk;
+    const payload = JSON.parse(body);
+    const scan = payload.scan;
+    if (
+      Object.keys(payload).some((key) => key !== 'scan') ||
+      scan?.version !== 1 ||
+      typeof scan.baseRef !== 'string' ||
+      !scan.baseRef ||
+      typeof scan.headRef !== 'string' ||
+      !scan.headRef ||
+      !Array.isArray(scan.scanners) ||
+      scan.scanners.length === 0 ||
+      scan.scanners.some((name) => !['secrets', 'dependencies'].includes(name)) ||
+      !['none', 'bounded'].includes(scan.judgment) ||
+      (scan.windowHours != null &&
+        (scan.baseRef !== scan.headRef ||
+          !Number.isInteger(scan.windowHours) ||
+          scan.windowHours < 1 ||
+          scan.windowHours > 720))
+    ) {
+      return json({ error: 'invalid_synthetic_scan_policy' }, 400);
+    }
+    // Replace rather than mutate the object retained by the earlier report.
+    scanJob.scan = scan;
+    scanJob.updatedAt = new Date().toISOString();
+    console.log(
+      JSON.stringify({
+        scope: 'local fixture only',
+        action: 'save-scan-policy',
+        scan,
+        enabled: scanJob.enabled,
+      }),
+    );
+    return json(scanJob);
   }
   if (pathname === '/scheduled-jobs') return json([scanJob]);
   if (pathname === '/scheduled-jobs/scan-fixture/report-page') {
