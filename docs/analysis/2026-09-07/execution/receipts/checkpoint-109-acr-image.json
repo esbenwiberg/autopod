@@ -1,0 +1,14 @@
+{
+  "observedDateUTC": "2026-09-09",
+  "command": "az acr manifest show-metadata --registry ewiautopodacr --name autopod/autopod-self:latest (fixed metadata projection)",
+  "exitCode": 0,
+  "profile": "autopod-self",
+  "reference": "ewiautopodacr.azurecr.io/autopod/autopod-self:latest",
+  "digest": "sha256:50cad20e0085219a1cc442301c8cd476b8f33ba397b3fdfc7d43d36283461259",
+  "createdTime": "2026-06-29T08:14:52.4285559Z",
+  "lastUpdateTime": "2026-08-30T14:11:24.4499886Z",
+  "imageSize": null,
+  "architecture": null,
+  "os": null,
+  "isVerifiedAffectedProfileImage": false
+}

@@ -1,0 +1,12 @@
+{
+  "executed": false,
+  "approval": "pending",
+  "payload": "fixtures/inspect-targeted-acceptance-metadata.py",
+  "sha256": "de05e8b555390dcc316500c00f8e664c5e369482f200bec6fa1b2262f3346a4a",
+  "guestTimeLimitSeconds": 60,
+  "outputLimitBytes": 3500,
+  "invocationsRequested": 1,
+  "scope": "Section A of targeted-acceptance-prerequisites.md only",
+  "paidCanaryAuthorized": false,
+  "roleAssignmentAuthorized": false
+}

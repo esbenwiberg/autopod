@@ -1,0 +1,13 @@
+{
+  "queriedRoleName": "Container Apps SandboxGroup Data Owner",
+  "roleDefinitionId": "c24cf47c-5077-412d-a19c-45202126392c",
+  "assignableScopes": ["/"],
+  "actions": [],
+  "dataActions": [
+    "Microsoft.App/sandboxGroups/*/read",
+    "Microsoft.App/sandboxGroups/*/write",
+    "Microsoft.App/sandboxGroups/*/delete",
+    "Microsoft.App/sandboxGroups/*/action"
+  ],
+  "roleAssigned": false
+}

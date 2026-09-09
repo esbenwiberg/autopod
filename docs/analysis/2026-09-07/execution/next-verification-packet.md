@@ -1,5 +1,7 @@
 # Next verification proposal after approved inspection
 
+Latest update: [checkpoint 109](checkpoint-109.md) fulfills the approved runtime discovery, records the configured North Europe sandbox group, one profile image digest and historical disk-full errors, and documents the refused data-plane read. Ten-row API success does not prove broad-list availability. The next approval request is only section A of [targeted acceptance prerequisites](targeted-acceptance-prerequisites.md); access, actual-image canary and native acceptance remain separate. Earlier statements below are dated evidence.
+
 Latest update: [checkpoint 108](checkpoint-108.md) records the approved successful on-VM sampled restore, matching active schema/watermark signatures, observed temporary-copy removal and four successful authenticated API reads. Those approval requests are fulfilled. Remaining runtime/canary discovery is prepared [separately](runtime-and-canary-discovery-packet.md); historical root cause, actual-image capability and visible native interaction are still outstanding. Earlier baseline sections below remain dated evidence.
 
 The one approved checkpoint-106 metadata inspection succeeded on September 9 at 04:54 UTC. This packet proposes the next bounded checks; **they are not yet authorized or executed**. No publication, deployment, service restart, provider call, canary or live pod mutation is included.

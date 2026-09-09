@@ -1,5 +1,7 @@
 # Partial closure report
 
+Latest update: [checkpoint 109](checkpoint-109.md) fulfills the approved runtime discovery, records the configured North Europe sandbox group, one profile image digest and historical disk-full errors, and documents the refused data-plane read. Ten-row API success does not prove broad-list availability. The next approval request is only section A of [targeted acceptance prerequisites](targeted-acceptance-prerequisites.md); access, actual-image canary and native acceptance remain separate. Earlier statements below are dated evidence.
+
 Latest update: [checkpoint 108](checkpoint-108.md) records the approved successful on-VM sampled restore, matching active schema/watermark signatures, observed temporary-copy removal and four successful authenticated API reads. Those approval requests are fulfilled. Remaining runtime/canary discovery is prepared [separately](runtime-and-canary-discovery-packet.md); historical root cause, actual-image capability and visible native interaction are still outstanding. Earlier baseline sections below remain dated evidence.
 
 Latest evidence: [checkpoint 107](checkpoint-107.md) records the approved successful guest inspection, verified active database and matching main migration-file manifest. Backup content/restore and loaded-runtime identities remain unverified. The next specific requests are in [the verification packet](next-verification-packet.md); the September 8 baseline below remains dated evidence.

@@ -1,0 +1,11 @@
+test_aggregates_all_matches_without_transport_sample_bias (test_targeted_acceptance_metadata.TargetedMetadata) ... ok
+test_correlates_only_same_process_request_nearby (test_targeted_acceptance_metadata.TargetedMetadata) ... ok
+test_cross_process_stale_and_ambiguous_requests_do_not_attribute (test_targeted_acceptance_metadata.TargetedMetadata) ... ok
+test_named_profiles_follow_parents_without_selecting_unrelated_data (test_targeted_acceptance_metadata.TargetedMetadata) ... ok
+test_projection_caps_parent_chain_and_rejects_credential_image (test_targeted_acceptance_metadata.TargetedMetadata) ... ok
+test_unknown_errors_and_malformed_lines_never_export_content (test_targeted_acceptance_metadata.TargetedMetadata) ... ok
+
+----------------------------------------------------------------------
+Ran 6 tests in 0.002s
+
+OK

@@ -1,0 +1,10 @@
+{
+  "approval": "Approved",
+  "approvedPacket": "runtime-and-canary-discovery-packet.md at 50b6250f",
+  "scope": "One pinned bounded VM metadata invocation",
+  "fulfilled": true,
+  "invocations": 1,
+  "paidCanaryAuthorized": false,
+  "cloudAccessChangesAuthorized": false,
+  "publicationOrDeploymentAuthorized": false
+}

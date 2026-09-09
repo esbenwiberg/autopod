@@ -1,0 +1,16 @@
+{
+  "observedAtUTC": "2026-09-09T05:59:29.500575+00:00",
+  "scope": "/subscriptions/06bb959b-9458-41a6-bdf5-77cc12feaab9/resourceGroups/ewi-sandboxes/providers/Microsoft.App/sandboxGroups/autopod-spike-neu",
+  "directAndInheritedAssignmentQueryExit": 0,
+  "groupMembershipsIncluded": false,
+  "assignments": [
+    {
+      "role": "Azure ContainerApps Session Executor",
+      "scope": "/subscriptions/06bb959b-9458-41a6-bdf5-77cc12feaab9/resourceGroups/ewi-sandboxes"
+    },
+    {
+      "role": "Contributor",
+      "scope": "/subscriptions/06bb959b-9458-41a6-bdf5-77cc12feaab9/resourceGroups/ewi-sandboxes"
+    }
+  ]
+}

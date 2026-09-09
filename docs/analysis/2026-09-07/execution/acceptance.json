@@ -1298,10 +1298,11 @@
         "checkpoint-93.md",
         "checkpoint-106.md",
         "closure-report.md",
-        "checkpoint-108.md"
+        "checkpoint-108.md",
+        "checkpoint-109.md"
       ],
       "prerequisites": [
-        "Run the required actual-image capability canary after exact target/configuration/spend discovery and explicit authorization; local semantics and denied-capability checks passed."
+        "The required affected-image capability canary remains unrun. Resolve the specific affected profile image, obtain data-plane access and finish the total spend/command/oracle packet before explicit paid-canary authorization. Local semantics and denied-capability checks passed."
       ],
       "finalSourceEvidence": "90a61141a6a8ed6205aae144bbb99f8c9f0f9ec5; see checkpoint-106.md for executed checks, carried forward surface proof and limits."
     },
@@ -1365,10 +1366,11 @@
         "checkpoint-106.md",
         "closure-report.md",
         "release-and-acceptance-packet.md",
-        "checkpoint-108.md"
+        "checkpoint-108.md",
+        "checkpoint-109.md"
       ],
       "prerequisites": [
-        "Three sandbox groups were identified read-only; actual daemon configuration and warmed profile images remain unknown. Approve the prepared discovery metadata scope, then finish exact image/digest/tier/commands/oracle/spend before requesting and executing the required capability canary."
+        "Actual configuration is autopod-spike-neu/northeurope. Only autopod-self survived the bounded profile export; its ACR digest is resolved but is not proven to be the affected image. Targeted affected-profile discovery is prepared and unapproved. Disk-image read returned Forbidden; an appropriately authorized data-plane identity is required. Five-minute L compute estimate is $0.018; total spend remains incomplete."
       ],
       "finalSourceEvidence": "90a61141a6a8ed6205aae144bbb99f8c9f0f9ec5; see checkpoint-106.md for executed checks, carried forward surface proof and limits."
     },
@@ -1640,10 +1642,11 @@
         "closure-report.md",
         "release-and-acceptance-packet.md",
         "checkpoint-107.md",
-        "checkpoint-108.md"
+        "checkpoint-108.md",
+        "checkpoint-109.md"
       ],
       "prerequisites": [
-        "The four specifically approved hosted API reads ran successfully (all HTTP 200), resolving the checkpoint-107 API approval blocker and disproving a current broad failure on those routes. Historical September 7 root cause remains unproven; the bounded historical-error read in runtime-and-canary-discovery-packet.md is prepared but unapproved/unrun."
+        "Current cost API and ten-row pod reads returned 200; the ten-row reads do not test the historically failing broad list. September 7 journal confirms thirty retained SQLITE_FULL errors, but seventeen other matches were omitted and endpoints are unattributed. Root cause remains unproven. Targeted aggregate/error correlation is prepared in targeted-acceptance-prerequisites.md and awaits approval."
       ],
       "remaining": "Cost and compact-history APIs now return 200 after independently authorized maintenance. Actual historical failure cause is not established. Bounded read-only SSH metadata/log inspection awaits explicit payload-egress approval after auto-review rejection.",
       "finalSourceEvidence": "90a61141a6a8ed6205aae144bbb99f8c9f0f9ec5; see checkpoint-106.md for executed checks, carried forward surface proof and limits."
@@ -2279,10 +2282,11 @@
         "checkpoint-106.md",
         "closure-report.md",
         "checkpoint-107.md",
-        "checkpoint-108.md"
+        "checkpoint-108.md",
+        "checkpoint-109.md"
       ],
       "prerequisites": [
-        "Current process/release directory and migration manifest match the c0e5a5b4 release layout. Loaded bundle, actual runtime CLI/image and capabilities remain unverified; obtain those identities and the required authorized actual-image canary."
+        "Current service cwd, on-disk entry SHA-256, host Node version, configured group/region and one profile ACR digest are recorded. Checkout SHA/dirty are unavailable; loaded source, affected image, sandbox CLI and capabilities remain unverified. Obtain targeted checkout/profile metadata and the authorized actual-image canary."
       ],
       "remaining": "Coding, validation/retry, review-only and completion recovery provenance are locally implemented. Sandbox effective cgroup resources are read without substituting requests; image and network identity remain unavailable. Checkpoint 51 adds preflight to direct agent Resume and missing-session fallback paths. Side effects after execution begins, actual reviewer CLI identity, complete receipt history/operator coverage, native interaction and live acceptance remain outstanding. Checkpoint 76 adds legacy Tier 2 API preparation with explicitly unverified provider/account and actual-adapter model resolution; host CLI credentials/remote model identity, SDK identity and gated native/live acceptance remain outstanding. Checkpoint 82 records observed host CLI path/version at dispatch with explicit unknown credentials/model resolution; hung filesystem metadata, binary/transitive identity, live rollout and native interaction remain unverified.",
       "finalSourceEvidence": "90a61141a6a8ed6205aae144bbb99f8c9f0f9ec5; see checkpoint-106.md for executed checks, carried forward surface proof and limits."
@@ -2715,10 +2719,11 @@
         "closure-report.md",
         "release-and-acceptance-packet.md",
         "checkpoint-107.md",
-        "checkpoint-108.md"
+        "checkpoint-108.md",
+        "checkpoint-109.md"
       ],
       "prerequisites": [
-        "Approved metadata, sampled restore and four authenticated API reads are complete. The next bounded runtime/configuration/profile-image/historical-error metadata scope is prepared in runtime-and-canary-discovery-packet.md. Exact canary image/digest/tier/pricing and loaded rollback provenance still need discovery before deployment/canary approval."
+        "Approved inspection, sampled restore, fixed authenticated API reads and runtime/configuration discovery are fulfilled. Targeted affected-profile/release/error aggregation is prepared. Data-plane access was refused; no role changes occurred. Compute estimate is established but affected disk-image identity and total spend remain open. Publication/deployment/canary authority is absent."
       ],
       "finalSourceEvidence": "90a61141a6a8ed6205aae144bbb99f8c9f0f9ec5; see checkpoint-106.md for executed checks, carried forward surface proof and limits."
     },
@@ -2735,15 +2740,16 @@
         "closure-report.md",
         "release-and-acceptance-packet.md",
         "checkpoint-107.md",
-        "checkpoint-108.md"
+        "checkpoint-108.md",
+        "checkpoint-109.md"
       ],
       "prerequisites": [
-        "The closure report and all 43 criterion mappings are prepared. Required native/live/canary/real-backup acceptance remains outstanding, so this is partial closure and the goal is not complete."
+        "All 43 criteria remain mapped. Actual sampled-backup restoration is verified; native interactions, historical API cause, actual-image capability and remaining deployed-source/upgrade provenance remain outstanding. The goal is incomplete."
       ],
       "finalSourceEvidence": "90a61141a6a8ed6205aae144bbb99f8c9f0f9ec5; see checkpoint-106.md for executed checks, carried forward surface proof and limits."
     }
   ],
-  "lastCheckpoint": "checkpoint-108.md",
+  "lastCheckpoint": "checkpoint-109.md",
   "migrationLineage": {
     "managedBaseline": "142-152; exact bytes from tracking commit cba763ba0bb3d65cb4c055e00033016ba1d5c646",
     "nativeCurrent": "164-182; native durable lifecycle/accounting/provenance, retained task history 177, exact worker binding 178, deadlines 179, guidance acknowledgement 180, retained history events 181 and cleanup ownership 182",

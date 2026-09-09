@@ -1,0 +1,14 @@
+{
+  "authorizedBy": "User Approved after checkpoint 108 runtime-and-canary discovery packet",
+  "target": {
+    "id": "/subscriptions/06bb959b-9458-41a6-bdf5-77cc12feaab9/resourceGroups/ewi-sandboxes/providers/Microsoft.Compute/virtualMachines/autopod-daemon",
+    "location": "swedencentral",
+    "vmId": "3addc9bc-4812-4892-98d6-c40d5ab893c0"
+  },
+  "startedAtUTC": "2026-09-09T05:53:45.737385+00:00",
+  "payloadSha256": "3de783887d6572dab162a19513baacbf47e2c85f7c231e96d86e00d620cc22bd",
+  "wrapperSha256": "bbc31534537dd3f635d403fe8e23083f500953aacecded675c9a2a767f92b2ed",
+  "attempt": 1,
+  "cliExitCode": 0,
+  "endedAtUTC": "2026-09-09T05:54:18.065056+00:00"
+}

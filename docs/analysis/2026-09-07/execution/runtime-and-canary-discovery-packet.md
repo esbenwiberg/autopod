@@ -1,5 +1,7 @@
 # Runtime, image and historical-error metadata proposal
 
+Status update: this exact payload was approved and executed once in [checkpoint 109](checkpoint-109.md). Its request is fulfilled. The original proposal text below is preserved as dated scope; [the targeted prerequisite packet](targeted-acceptance-prerequisites.md) contains the new, separate request.
+
 The checkpoint-107 approved actions are complete: the sampled restore passed and its temporary copy was removed; all four authenticated routes returned 200. This is a separate, proposed metadata read to resolve the next prerequisites. **It has not run and is not yet approved.**
 
 [Exact payload](fixtures/inspect-runtime-and-canary-metadata.py), SHA-256 pinned in [the manifest](receipts/checkpoint-108-discovery-manifest.json). Three local tests verify selected-environment filtering, suppression of registry credentials/query strings, and bounded image/label validation. No production environment or profile data was used in those tests.

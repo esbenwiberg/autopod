@@ -1,0 +1,221 @@
+{
+  "observedAtUTC": "2026-09-09T05:53:50.097465+00:00",
+  "pid": 113976,
+  "cwd": "/opt/autopod/releases/c0e5a5b4/packages/daemon",
+  "checkoutSha": null,
+  "trackedCheckoutDirty": null,
+  "onDiskEntryBundleSha256": "e5980c6742b1dfd681cedfd215d83af2f2ef97b2935cb929fdda301eb034b0e8",
+  "loadedBytesAttested": false,
+  "nodeVersion": "v22.23.1",
+  "configuredTarget": {
+    "AZURE_SUBSCRIPTION_ID": "06bb959b-9458-41a6-bdf5-77cc12feaab9",
+    "AZURE_RESOURCE_GROUP": "ewi-sandboxes",
+    "AZURE_SANDBOX_LOCATION": "northeurope",
+    "AZURE_SANDBOX_GROUP": "autopod-spike-neu",
+    "ACR_REGISTRY_HOST": "ewiautopodacr.azurecr.io"
+  },
+  "activeDatabaseMatched": true,
+  "profileInventoryMoreThan20": true,
+  "profileImages": [
+    {
+      "name": "autopod-self",
+      "extends": null,
+      "target": "sandbox",
+      "runtime": "codex",
+      "warmImageTag": "ewiautopodacr.azurecr.io/autopod/autopod-self:latest"
+    }
+  ],
+  "historicalErrors": {
+    "exit": 0,
+    "incomplete": null,
+    "bytesRead": 493195,
+    "byteLimit": 2097152,
+    "unparsedLines": 16,
+    "matchingCount": 47,
+    "errors": [
+      {
+        "time": 1788782216354,
+        "kind": "SQLITE_FULL",
+        "detail": "disk_full",
+        "endpoint": null
+      },
+      {
+        "time": 1788782276069,
+        "kind": "SQLITE_FULL",
+        "detail": "disk_full",
+        "endpoint": null
+      },
+      {
+        "time": 1788782276488,
+        "kind": "SQLITE_FULL",
+        "detail": "disk_full",
+        "endpoint": null
+      },
+      {
+        "time": 1788782336081,
+        "kind": "SQLITE_FULL",
+        "detail": "disk_full",
+        "endpoint": null
+      },
+      {
+        "time": 1788782336255,
+        "kind": "SQLITE_FULL",
+        "detail": "disk_full",
+        "endpoint": null
+      },
+      {
+        "time": 1788782355041,
+        "kind": "SQLITE_FULL",
+        "detail": "disk_full",
+        "endpoint": null
+      },
+      {
+        "time": 1788782396102,
+        "kind": "SQLITE_FULL",
+        "detail": "disk_full",
+        "endpoint": null
+      },
+      {
+        "time": 1788782396389,
+        "kind": "SQLITE_FULL",
+        "detail": "disk_full",
+        "endpoint": null
+      },
+      {
+        "time": 1788782456107,
+        "kind": "SQLITE_FULL",
+        "detail": "disk_full",
+        "endpoint": null
+      },
+      {
+        "time": 1788782456394,
+        "kind": "SQLITE_FULL",
+        "detail": "disk_full",
+        "endpoint": null
+      },
+      {
+        "time": 1788782516137,
+        "kind": "SQLITE_FULL",
+        "detail": "disk_full",
+        "endpoint": null
+      },
+      {
+        "time": 1788782516394,
+        "kind": "SQLITE_FULL",
+        "detail": "disk_full",
+        "endpoint": null
+      },
+      {
+        "time": 1788782576154,
+        "kind": "SQLITE_FULL",
+        "detail": "disk_full",
+        "endpoint": null
+      },
+      {
+        "time": 1788782577024,
+        "kind": "SQLITE_FULL",
+        "detail": "disk_full",
+        "endpoint": null
+      },
+      {
+        "time": 1788782636183,
+        "kind": "SQLITE_FULL",
+        "detail": "disk_full",
+        "endpoint": null
+      },
+      {
+        "time": 1788782636525,
+        "kind": "SQLITE_FULL",
+        "detail": "disk_full",
+        "endpoint": null
+      },
+      {
+        "time": 1788782655046,
+        "kind": "SQLITE_FULL",
+        "detail": "disk_full",
+        "endpoint": null
+      },
+      {
+        "time": 1788782696200,
+        "kind": "SQLITE_FULL",
+        "detail": "disk_full",
+        "endpoint": null
+      },
+      {
+        "time": 1788782696493,
+        "kind": "SQLITE_FULL",
+        "detail": "disk_full",
+        "endpoint": null
+      },
+      {
+        "time": 1788782756229,
+        "kind": "SQLITE_FULL",
+        "detail": "disk_full",
+        "endpoint": null
+      },
+      {
+        "time": 1788782756462,
+        "kind": "SQLITE_FULL",
+        "detail": "disk_full",
+        "endpoint": null
+      },
+      {
+        "time": 1788782816233,
+        "kind": "SQLITE_FULL",
+        "detail": "disk_full",
+        "endpoint": null
+      },
+      {
+        "time": 1788782816871,
+        "kind": "SQLITE_FULL",
+        "detail": "disk_full",
+        "endpoint": null
+      },
+      {
+        "time": 1788782876303,
+        "kind": "SQLITE_FULL",
+        "detail": "disk_full",
+        "endpoint": null
+      },
+      {
+        "time": 1788782876499,
+        "kind": "SQLITE_FULL",
+        "detail": "disk_full",
+        "endpoint": null
+      },
+      {
+        "time": 1788782918603,
+        "kind": "SQLITE_FULL",
+        "detail": "disk_full",
+        "endpoint": null
+      },
+      {
+        "time": 1788783815857,
+        "kind": "SQLITE_FULL",
+        "detail": "disk_full",
+        "endpoint": null
+      },
+      {
+        "time": 1788784719023,
+        "kind": "SQLITE_FULL",
+        "detail": "disk_full",
+        "endpoint": null
+      },
+      {
+        "time": 1788785615271,
+        "kind": "SQLITE_FULL",
+        "detail": "disk_full",
+        "endpoint": null
+      },
+      {
+        "time": 1788786515299,
+        "kind": "SQLITE_FULL",
+        "detail": "disk_full",
+        "endpoint": null
+      }
+    ],
+    "absenceProvesRootCause": false
+  },
+  "omittedProfilesForTransport": 19,
+  "omittedErrorsForTransport": 17
+}
