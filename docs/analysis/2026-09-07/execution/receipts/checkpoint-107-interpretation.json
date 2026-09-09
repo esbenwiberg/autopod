@@ -1,0 +1,20 @@
+{
+  "candidate": "90a61141a6a8ed6205aae144bbb99f8c9f0f9ec5",
+  "comparedMain": "c0e5a5b4617d131257e2c448f2259b645ac351ee",
+  "observedMigrationFileCount": 150,
+  "mainMigrationFileCount": 150,
+  "observedMigrationManifestSha256": "28b186d8c880404746b42d8c00ce88431aa63038fe3770ed51237ea20bdd4a99",
+  "mainMigrationManifestSha256": "28b186d8c880404746b42d8c00ce88431aa63038fe3770ed51237ea20bdd4a99",
+  "migrationManifestMatchesMain": true,
+  "loadedBundleIdentityProved": false,
+  "workingDirectoryIsInsideCurrentRelease": true,
+  "latestBackupFile": "1788929381287.db",
+  "latestBackupMtimeUTC": "2026-09-09T04:49:43.717580+00:00",
+  "latestBackupFileAgeSecondsAtInspection": 261.32223534584045,
+  "backupContentFreshnessProved": false,
+  "backupRestoreExecuted": false,
+  "twoCopiesPlus128MiBBytes": 1888518144,
+  "availableBytes": 139200618496,
+  "headroomObservationPass": true,
+  "headroomIsReservation": false
+}

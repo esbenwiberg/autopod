@@ -1,5 +1,7 @@
 # Partial closure report
 
+Latest evidence: [checkpoint 107](checkpoint-107.md) records the approved successful guest inspection, verified active database and matching main migration-file manifest. Backup content/restore and loaded-runtime identities remain unverified. The next specific requests are in [the verification packet](next-verification-packet.md); the September 8 baseline below remains dated evidence.
+
 All six workstreams have local implementations and regression evidence. Required current hosted provenance/root-cause evidence, actual-image capability acceptance, intended-database backup verification and visible native interaction remain outstanding. **The goal is not complete.**
 
 The governing goal file is unchanged. [Acceptance ledger](acceptance.json) maps every one of 43 criteria to implementation, tests, evidence and current prerequisites. [Release and remaining acceptance packet](release-and-acceptance-packet.md) is the concrete next-action proposal, with no implicit production or publication authority.

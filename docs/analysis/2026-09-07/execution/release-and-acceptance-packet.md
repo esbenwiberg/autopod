@@ -1,5 +1,7 @@
 # Release and remaining acceptance packet
 
+Update: the metadata action below was approved and executed once on September 9; see [checkpoint 107](checkpoint-107.md). It identified the active DB and main release migration files. [The next verification packet](next-verification-packet.md) supersedes the fulfilled metadata approval request. Remaining pre-inspection statements below are dated September 8; deployment and paid-canary authority remain absent.
+
 Prepared 2026-09-08. This is a reviewable proposal, not deployment authorization or a release receipt. The implementation is preserved locally; the goal remains incomplete.
 
 ## Frozen candidate and concrete diff

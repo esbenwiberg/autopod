@@ -1,0 +1,204 @@
+{
+  "payloadVersion": 2,
+  "observedAt": "2026-09-09T04:54:05.039815+00:00",
+  "service": {
+    "pid": 113976,
+    "state": {
+      "exit": 0,
+      "incomplete": null,
+      "bytesRead": 7,
+      "byteLimit": 8192,
+      "active": true
+    },
+    "cwd": "/opt/autopod/releases/c0e5a5b4/packages/daemon",
+    "cwdAllowed": true
+  },
+  "currentRelease": "/opt/autopod/releases/c0e5a5b4",
+  "currentMatchesProcessCwd": false,
+  "databaseAdmission": {
+    "approvedPath": "/data/autopod/autopod.db",
+    "openDescriptorMatch": true,
+    "sqliteDescriptorCount": 3,
+    "fdInventoryTruncated": false
+  },
+  "database": {
+    "path": "/data/autopod/autopod.db",
+    "device": 2049,
+    "inode": 13107203,
+    "bytes": 877150208,
+    "schemaVersion": 152,
+    "appliedCount": 150,
+    "podCount": 886,
+    "quickCheckOk": true
+  },
+  "migrationFiles": [
+    {
+      "name": "152_managed_request_usage.sql",
+      "bytes": 194,
+      "sha256": "3088facee7ec5f0c06796a26ab0f5c2c2da00df5e9b1ac141200e18686c48094"
+    }
+  ],
+  "migrationInventoryTruncated": false,
+  "backupInventory": [
+    {
+      "root": "/data/autopod/backups",
+      "exists": true,
+      "truncated": false,
+      "latestFiles": [
+        {
+          "name": "1788929381287.db",
+          "bytes": 877150208,
+          "mtimeEpoch": 1788929383.7175796
+        },
+        {
+          "name": "1788928481287.db",
+          "bytes": 877150208,
+          "mtimeEpoch": 1788928483.686369
+        },
+        {
+          "name": "1788927581287.db",
+          "bytes": 877150208,
+          "mtimeEpoch": 1788927583.7063348
+        },
+        {
+          "name": "1788926681286.db",
+          "bytes": 877150208,
+          "mtimeEpoch": 1788926684.2192786
+        },
+        {
+          "name": "1788880865588.db-journal",
+          "bytes": 512,
+          "mtimeEpoch": 1788880865.60817
+        },
+        {
+          "name": "1788880858599.db-journal",
+          "bytes": 512,
+          "mtimeEpoch": 1788880858.6197932
+        },
+        {
+          "name": "1788880851833.db-journal",
+          "bytes": 512,
+          "mtimeEpoch": 1788880851.853908
+        },
+        {
+          "name": "1788880844856.db-journal",
+          "bytes": 512,
+          "mtimeEpoch": 1788880844.8767347
+        },
+        {
+          "name": "1788880838092.db-journal",
+          "bytes": 512,
+          "mtimeEpoch": 1788880838.1123435
+        },
+        {
+          "name": "1788880831340.db-journal",
+          "bytes": 512,
+          "mtimeEpoch": 1788880831.3608305
+        },
+        {
+          "name": "1788880824580.db-journal",
+          "bytes": 512,
+          "mtimeEpoch": 1788880824.6006
+        },
+        {
+          "name": "1788880817827.db-journal",
+          "bytes": 512,
+          "mtimeEpoch": 1788880817.847637
+        },
+        {
+          "name": "1788880811077.db-journal",
+          "bytes": 512,
+          "mtimeEpoch": 1788880811.0974853
+        },
+        {
+          "name": "1788880804259.db-journal",
+          "bytes": 512,
+          "mtimeEpoch": 1788880804.2796764
+        },
+        {
+          "name": "1788874546586.db-journal",
+          "bytes": 512,
+          "mtimeEpoch": 1788874546.6074018
+        },
+        {
+          "name": "1788874539593.db-journal",
+          "bytes": 512,
+          "mtimeEpoch": 1788874539.6148655
+        },
+        {
+          "name": "1788874532837.db-journal",
+          "bytes": 512,
+          "mtimeEpoch": 1788874532.8587797
+        },
+        {
+          "name": "1788874525859.db-journal",
+          "bytes": 512,
+          "mtimeEpoch": 1788874525.8800511
+        },
+        {
+          "name": "1788874518830.db-journal",
+          "bytes": 512,
+          "mtimeEpoch": 1788874518.851535
+        },
+        {
+          "name": "1788874512070.db-journal",
+          "bytes": 512,
+          "mtimeEpoch": 1788874512.0915208
+        }
+      ]
+    },
+    {
+      "root": "/data/autopod/managed/backups",
+      "exists": true,
+      "truncated": false,
+      "latestFiles": [
+        {
+          "name": "20260907T121816Z-migration-receipt.json",
+          "bytes": 390,
+          "mtimeEpoch": 1788783510.464468
+        },
+        {
+          "name": "20260907T121816Z-pre-managed-141.db.gz",
+          "bytes": 203909054,
+          "mtimeEpoch": 1788783505.1313925
+        }
+      ]
+    },
+    {
+      "root": "/home/ewi/.autopod/backups",
+      "exists": false
+    }
+  ],
+  "filesystems": [
+    {
+      "path": "/",
+      "capacityBytes": 265147105280,
+      "availableBytes": 139200618496
+    },
+    {
+      "path": "/data/autopod",
+      "capacityBytes": 265147105280,
+      "availableBytes": 139200618496
+    }
+  ],
+  "logEvidence": {
+    "exit": 0,
+    "incomplete": null,
+    "bytesRead": 611960,
+    "byteLimit": 2097152,
+    "unparsedLines": 481,
+    "matchingCount": 0,
+    "errors": [],
+    "absenceDoesNotProveApiHealth": true
+  },
+  "serviceIdentityStableAtEnd": true,
+  "databaseIdentityStableAtEnd": true,
+  "transport": {
+    "byteLimit": 3500,
+    "omittedMigrationFiles": 149,
+    "omittedBackupFiles": 0,
+    "omittedErrors": 0
+  },
+  "migrationManifestSha256": "28b186d8c880404746b42d8c00ce88431aa63038fe3770ed51237ea20bdd4a99",
+  "migrationFileCount": 150
+}

@@ -1,0 +1,17 @@
+{
+  "executed": false,
+  "proposedActions": [
+    "One bounded on-VM sampled backup restore",
+    "Four fixed authenticated API GETs"
+  ],
+  "files": [
+    {
+      "path": "fixtures/verify-hosted-backup-sample.py",
+      "sha256": "e9db196c9f1e639b98822d26b6553c180cadb1ba3f6775a48274834a1c1edd03"
+    },
+    {
+      "path": "fixtures/check-hosted-api-status.py",
+      "sha256": "e2c951d2c61363fda022eca3cbd0edc82dc2aad9ab41b010507b59c5f551c705"
+    }
+  ]
+}

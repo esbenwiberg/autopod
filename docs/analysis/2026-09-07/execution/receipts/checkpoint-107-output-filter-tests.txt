@@ -1,0 +1,8 @@
+test_incomplete_inspection_stays_incomplete (__main__.OutputFilter) ... ok
+test_large_metadata_is_bounded_with_explicit_omissions (__main__.OutputFilter) ... ok
+test_unreducible_output_reports_limit_instead_of_truncating_json (__main__.OutputFilter) ... ok
+
+----------------------------------------------------------------------
+Ran 3 tests in 0.022s
+
+OK

@@ -1,0 +1,7 @@
+{
+  "action": "Four fixed bearer-authenticated hosted API GETs; retain status/timing/bytes only",
+  "status": "not-executed-auto-review-rejected",
+  "reason": "Potentially sensitive pod and cost response retrieval was outside the specific approved guest metadata payload.",
+  "retryAttempted": false,
+  "preparedProposal": "next-verification-packet.md"
+}
