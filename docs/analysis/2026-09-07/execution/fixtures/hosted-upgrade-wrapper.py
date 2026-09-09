@@ -24,8 +24,8 @@ SNAPSHOT = Path('/data/autopod/backups/1788930281287.db')
 SNAPSHOT_BYTES = 877150208
 SNAPSHOT_HASH = '3624d3be6ef845f4dded1b84be7bbe38891ca9d3b469c43db166e4dcdd473c68'
 SERVICE_CWD = Path('/opt/autopod/releases/c0e5a5b4/packages/daemon')
-CANDIDATE = '15900d9e08a7e4ca786a6ad11ff81820fda14de4'
-MIGRATIONS_HASH = '42a8de63d87b6096c7cabec6b0273c673d3a96c894108853d88acf5fe02da8f7'
+CANDIDATE = '4e73cd8ce88e44cdb5c2d8d0a89447b819fa5a39'
+MIGRATIONS_HASH = '0413c2b3502ce14cf74d164ac6fc474b91143101fd8599d4fea27c91ebb733bf'
 ARTIFACTS = {'candidate-migrations.mjs', 'verify-upgrade-copy.mjs', 'verify-upgrade-copy-cli.mjs'}
 
 
@@ -137,11 +137,11 @@ def private_run(files, parent, modules, node, snapshot, snapshot_hash, timeout=3
                     'isolatedDirectoryRemoved')
         require(code == 0 and raw.get('status') == 'isolated_upgrade_verified', 'child_verdict')
         require(raw.get('activeDatabaseOpened') is False and
-                raw.get('beforeVersion') == 152 and raw.get('afterVersion') == 182 and
+                raw.get('beforeVersion') == 152 and raw.get('afterVersion') == 183 and
                 raw.get('snapshotSha256') == snapshot_hash and
                 raw.get('migrationSha256') == MIGRATIONS_HASH and
                 all(raw.get(key) is True for key in required), 'child_evidence')
-        result.update(status='isolated_upgrade_verified', beforeVersion=152, afterVersion=182,
+        result.update(status='isolated_upgrade_verified', beforeVersion=152, afterVersion=183,
                       snapshotSha256=snapshot_hash, migrationSha256=MIGRATIONS_HASH,
                       **{key: True for key in required})
     except Exception:

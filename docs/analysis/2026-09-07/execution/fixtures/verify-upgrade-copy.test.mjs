@@ -66,7 +66,7 @@ test('actual candidate upgrades a managed-152 copy and preserves original data',
     const receipt = verifyUpgradeCopy(options);
     assert.equal(receipt.status, 'isolated_upgrade_verified');
     assert.equal(receipt.beforeVersion, 152);
-    assert.equal(receipt.afterVersion, 182);
+    assert.equal(receipt.afterVersion, 183);
     assert.equal(receipt.retainedOriginalColumnsAndRows, true);
     assert.equal(receipt.taskBackfillOk, true);
     assert.equal(receipt.isolatedDirectoryRemoved, true);

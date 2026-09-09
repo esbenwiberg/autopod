@@ -1,5 +1,7 @@
 # Partial closure report
 
+Current update: [checkpoint 122](checkpoint-122.md) integrates current main, fixes the reproduced old-native-182 upgrade gap with bridge migration 183, and passes clean full validation on `4e73cd8c`. All mapped client interactions retain their unchanged-source scope. The refreshed hosted-copy packet supersedes checkpoint 118 and awaits explicit execution approval. Historical API causality, loaded release identity and actual-image acceptance remain outstanding. The goal is incomplete. Earlier update paragraphs below are dated history.
+
 Current update: [checkpoint 121](checkpoint-121.md) verifies the remaining listed native presentation cases. W4.8/G.4 operator interaction requirements and all W5 criteria are verified within recorded scope. The remaining required gates concern hosted-copy compatibility, loaded release, historical API causality and actual-image capability; the goal remains incomplete.
 
 Current update: [checkpoint 120](checkpoint-120.md) passes four further native gates after unlock and closes the remaining workstream-5 criterion prerequisites. All six W5 criteria are verified within their required local/supported-surface scope. Other native and external requirements remain open; no whole-goal completion or hosted action is claimed.

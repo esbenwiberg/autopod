@@ -129,8 +129,8 @@ export function verifyUpgradeCopy({
     runMigrations(db, migrationsDir, logger, output);
     invariant(Date.now() <= deadline, 'time_limit');
     invariant(
-      db.prepare('SELECT MAX(version) AS version FROM schema_version').get().version === 182,
-      'expected_candidate_182',
+      db.prepare('SELECT MAX(version) AS version FROM schema_version').get().version === 183,
+      'expected_candidate_183',
     );
     invariant(retainedRows(db, tables, deadline) === retainedBefore, 'retained_content_changed');
     invariant(db.pragma('integrity_check', { simple: true }) === 'ok', 'after_integrity');
@@ -161,7 +161,7 @@ export function verifyUpgradeCopy({
       status: 'isolated_upgrade_verified',
       activeDatabaseOpened: false,
       beforeVersion: 152,
-      afterVersion: 182,
+      afterVersion: 183,
       retainedTableCount: tables.length,
       retainedOriginalColumnsAndRows: true,
       comparison: 'count and SHA256 multiset per original table',
