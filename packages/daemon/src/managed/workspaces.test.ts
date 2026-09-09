@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process';
-import { lstatSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { lstatSync, mkdtempSync, readFileSync, readlinkSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import type { ManagedPodRequest } from '@autopod/shared';
@@ -25,6 +25,7 @@ it('provisions isolated source copies and preserves attempt work on restart with
     git(mirror, 'config', 'user.name', 'Fixture');
     git(mirror, 'config', 'user.email', 'fixture@example.invalid');
     writeFileSync(path.join(mirror, 'answer.txt'), 'base\n');
+    writeFileSync(path.join(mirror, '.gitignore'), 'node_modules\n');
     git(mirror, 'add', '.');
     git(mirror, 'commit', '-m', 'base');
     const base = git(mirror, 'rev-parse', 'HEAD');
@@ -38,12 +39,22 @@ it('provisions isolated source copies and preserves attempt work on restart with
     scope.baseRevision = base;
     scope.access = 'write';
     const mirrors = [
-      { enrollmentId: scope.enrollmentId, path: mirror, remote: scope.remote, baseRevision: base },
+      {
+        enrollmentId: scope.enrollmentId,
+        path: mirror,
+        remote: scope.remote,
+        baseRevision: base,
+        dependencyCachePath: '/opt/autopod-managed/fixture/node_modules',
+      },
     ];
     const manager = () => new ManagedWorkspaces(db, path.join(root, 'attempts'), mirrors);
     const volumes = await manager().prepare('managed-one', request);
     const work = volumes[0]!.host;
     expect(lstatSync(path.join(work, '.git')).isDirectory()).toBe(true);
+    expect(lstatSync(path.join(work, 'node_modules')).isSymbolicLink()).toBe(true);
+    expect(readlinkSync(path.join(work, 'node_modules'))).toBe(
+      '/opt/autopod-managed/fixture/node_modules',
+    );
     expect(git(work, 'remote')).toBe('');
     writeFileSync(path.join(work, 'answer.txt'), 'changed\n');
     expect(await manager().prepare('managed-one', request)).toEqual(volumes);

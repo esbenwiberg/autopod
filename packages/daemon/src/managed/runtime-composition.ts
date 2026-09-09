@@ -35,6 +35,8 @@ export interface ManagedRuntimeBinding {
   manager: ContainerManager;
   image: string;
   command: readonly string[];
+  /** Image-internal immutable dependency tree linked from the reviewed repository checkout. */
+  dependencyCache?: { enrollmentId: string; path: string };
   transport: BoundedProviderTransport;
   channel: ManagedWorkerProviderChannel;
   maximumRequests?: number;
@@ -156,6 +158,7 @@ export function composeManagedRuntime(config: ManagedRuntimeCompositionConfig) {
       manager: binding.manager,
       image: binding.image,
       command: binding.command,
+      dependencyCache: binding.dependencyCache,
       quotaReady: async (request) => {
         if (closed) throw new Error('managed-composition-closed');
         gateways[index]!.preflight(request);

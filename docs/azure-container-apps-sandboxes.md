@@ -303,6 +303,26 @@ ap profile warm <profile> --rebuild
 
 When ACR is configured, the image builder stores the ACR-qualified tag on the profile. When ACR is missing, it stores a local Docker tag; Docker pods can use that, but sandbox pods reject it before provisioning.
 
+The reviewed Dispatcher profile-set lane uses a narrower image than native AutoPod profiles. It
+contains only the Codex CLI and the exact portfolio dependency tree; it does not install the other
+native agent CLIs. Build it from an exact repository commit and immutable tag:
+
+```bash
+node scripts/publish-managed-codex-image.mjs \
+  --registry <registry>.azurecr.io \
+  --repository-url https://github.com/context-and/portfolio-simulation \
+  --base-revision <40-hex-commit> \
+  --tag dispatcher-voice-<immutable-suffix>
+```
+
+The command submits one `linux/amd64` ACR build, waits for success, verifies the manifest, and
+returns a digest-pinned image reference. The paired managed profile document must bind
+`mirror.dependencyCachePath` to
+`/opt/autopod-managed/portfolio-simulation/node_modules`. AutoPod creates only an ignored symlink
+inside its isolated attempt checkout and verifies that the image-owned target is a root-owned,
+non-writable directory before the worker starts. This keeps dependency installation out of the
+deny-all runtime network path.
+
 ACR warm-image builds force `linux/amd64`, because the Sandboxes preview rejects `linux/arm64` images even when they are otherwise valid OCI images.
 
 Daemons with `ACR_REGISTRY_URL` configured also run a daemon-native warm-image maintenance

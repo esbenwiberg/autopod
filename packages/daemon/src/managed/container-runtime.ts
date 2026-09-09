@@ -13,6 +13,8 @@ export interface ReviewedContainerBoundary {
   image: string;
   /** Literal reviewed command including the exact model/reasoning; no user-selected executable. */
   command: readonly string[];
+  /** Exact dependency cache expected behind the repository's node_modules link. */
+  dependencyCache?: { enrollmentId: string; path: string };
   /** Trusted worktree provisioning and scope-derived network enforcement. */
   prepare(podId: string, request: ManagedPodRequest): Promise<ContainerSpawnConfig>;
   /** Account-bound provider gateway checks quota before each request and persists trusted usage. */
@@ -175,6 +177,32 @@ export class ManagedContainerRuntime implements ManagedRuntimePort {
         { user: 'root' },
       );
       if (prepared.exitCode !== 0) throw new Error('managed-writable-mount-unavailable');
+    }
+    if (boundary.dependencyCache) {
+      const { enrollmentId, path: cachePath } = boundary.dependencyCache;
+      if (
+        !scope.repositories.some((repository) => repository.enrollmentId === enrollmentId) ||
+        !/^\/opt\/autopod-managed\/[A-Za-z0-9_.-]+\/node_modules$/.test(cachePath)
+      )
+        throw new Error('managed-dependency-cache-binding');
+      const verified = await boundary.manager.execInContainer(
+        runtimeRef,
+        [
+          'python3',
+          '-c',
+          `import os,stat,sys
+link,target=sys.argv[1:]
+item=os.lstat(link)
+actual=os.stat(target)
+if not stat.S_ISLNK(item.st_mode) or os.readlink(link)!=target: raise RuntimeError('link')
+if not stat.S_ISDIR(actual.st_mode) or actual.st_uid!=0 or actual.st_mode & 0o022: raise RuntimeError('target')
+`,
+          `/repositories/${enrollmentId}/node_modules`,
+          cachePath,
+        ],
+        { user: 'root' },
+      );
+      if (verified.exitCode !== 0) throw new Error('managed-dependency-cache-unavailable');
     }
     const root = `/run/dispatcher-${podId}`;
     const write = async (name: string, value: string) => {
