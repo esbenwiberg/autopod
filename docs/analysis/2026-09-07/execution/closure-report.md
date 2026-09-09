@@ -1,5 +1,7 @@
 # Partial closure report
 
+Current update: [checkpoint 118](checkpoint-118.md) seals the source-only hosted-copy upgrade payload and passes eight wrapper plus eight candidate-copy checks locally. Hosted execution still requires approval; it has not been run.
+
 Current update: [checkpoint 117](checkpoint-117.md) fixes hidden native reviewer reasons and verifies five direct native flows. Clean full validation and 357 Swift tests pass on `15900d9e`. The current release packet supersedes earlier native-blocker and candidate statements. Remaining native and external acceptance is open.
 
 Current update: [checkpoint 116](checkpoint-116.md) adds eight passing local snapshot-upgrade verifier/CLI tests and a packaged actual migration runner. The supplemental native harness compiles, but interaction and hosted-copy execution remain unverified.

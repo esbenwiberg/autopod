@@ -2567,7 +2567,8 @@
         "checkpoint-106.md",
         "closure-report.md",
         "checkpoint-107.md",
-        "checkpoint-116.md"
+        "checkpoint-116.md",
+        "checkpoint-118.md"
       ],
       "prerequisites": [
         "Actual intended DB reports schema maximum 152 and 150 applied-version rows; its on-disk migration manifest matches main c0e5a5b4. This does not prove all applied values or isolated upgrade compatibility. Preserve local unique numbering through 182, verify actual-copy compatibility and refresh branch inventory before publication.",
@@ -2793,10 +2794,11 @@
         "checkpoint-110.md",
         "checkpoint-115.md",
         "checkpoint-116.md",
-        "checkpoint-117.md"
+        "checkpoint-117.md",
+        "checkpoint-118.md"
       ],
       "prerequisites": [
-        "The current f93dd4d9 candidate patch and 388-path blob manifest are prepared. Refresh main/migration inventory before publication. Actual-copy upgrade, loaded rollback identity, data-plane access and total canary cost remain open; no cloud/publication/deployment authority is implied."
+        "Checkpoint 118 exact source-only upload/isolated-copy upgrade packet is locally verified and awaiting explicit execution approval. No hosted upgrade/deployment/publication or paid canary has occurred. Remaining release and sandbox prerequisites are in the release packet."
       ],
       "finalSourceEvidence": "15900d9e08a7e4ca786a6ad11ff81820fda14de4; clean full pipeline and 357 Swift tests; direct native case/source boundaries in checkpoint-117 receipt."
     },
@@ -2821,7 +2823,8 @@
         "checkpoint-114.md",
         "checkpoint-115.md",
         "checkpoint-116.md",
-        "checkpoint-117.md"
+        "checkpoint-117.md",
+        "checkpoint-118.md"
       ],
       "prerequisites": [
         "All 43 criteria remain mapped. Latest source and direct native evidence are in checkpoint 117. Remaining native and external acceptance is not promoted to PASS."
@@ -2829,7 +2832,7 @@
       "finalSourceEvidence": "15900d9e08a7e4ca786a6ad11ff81820fda14de4; clean full pipeline and 357 Swift tests; direct native case/source boundaries in checkpoint-117 receipt."
     }
   ],
-  "lastCheckpoint": "checkpoint-117.md",
+  "lastCheckpoint": "checkpoint-118.md",
   "migrationLineage": {
     "managedBaseline": "142-152; exact bytes from tracking commit cba763ba0bb3d65cb4c055e00033016ba1d5c646",
     "nativeCurrent": "164-182; native durable lifecycle/accounting/provenance, retained task history 177, exact worker binding 178, deadlines 179, guidance acknowledgement 180, retained history events 181 and cleanup ownership 182",

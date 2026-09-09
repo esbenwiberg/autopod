@@ -1,6 +1,6 @@
 # Release and remaining acceptance packet
 
-Updated September 9, checkpoint 117. This packet supersedes the dated approval requests in checkpoints 106–110. Their raw receipts remain retained. It is a local review artifact; it does not authorize publication, deployment, restart, cloud access changes or a paid canary. The goal remains incomplete.
+Updated September 9, checkpoint 118. This packet supersedes the dated approval requests in checkpoints 106–110. Their raw receipts remain retained. It is a local review artifact; it does not authorize publication, deployment, restart, cloud access changes or a paid canary. The goal remains incomplete.
 
 ## Current tested candidate
 
@@ -44,7 +44,7 @@ The historical estimate is $0.018 compute for five minutes; it is **not a total 
 
 ## Actual database compatibility and rollout preparation
 
-Candidate migrations through 182 are locally covered, including representative managed/native lineage upgrades and immutable claim/history rules. The on-disk hosted migration manifest and sampled restore do not prove an upgrade of the actual intended database to this candidate. The [isolated upgrade packet](isolated-upgrade-verification-packet.md) now has a packaged actual candidate runner and eight passing local copy/fault/CLI tests. Seal its bounded on-VM transport/watchdog/cleanup wrapper and exact source/backup identities before requesting execution approval. Keep database contents on the VM; export only bounded verdict/provenance data. Any candidate upload, copy/upgrade execution and output handling require a concrete separately approved packet. Never migrate or replace the active database as an acceptance experiment.
+Candidate migrations through 182 are locally covered, including representative managed/native lineage upgrades and immutable claim/history rules. The on-disk hosted migration manifest and sampled restore do not prove an upgrade of the actual intended database to this candidate. The [isolated upgrade packet](isolated-upgrade-verification-packet.md) now has a packaged actual candidate runner and eight passing local copy/fault/CLI tests. Checkpoint 118 seals the bounded transport/watchdog/cleanup wrapper and exact source/backup identities, with eight additional passing local wrapper tests. Its exact source upload and isolated-copy execution remain pending explicit approval. Keep database contents on the VM; export only bounded verdict/provenance data. Any candidate upload, copy/upgrade execution and output handling require a concrete separately approved packet. Never migrate or replace the active database as an acceptance experiment.
 
 Before a publication/deployment request:
 

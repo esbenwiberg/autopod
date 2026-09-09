@@ -6,7 +6,7 @@ import path from 'node:path';
 import { migrationHash } from './verify-upgrade-copy.mjs';
 
 const root = process.cwd();
-const candidate = 'f93dd4d9a66bcf0a4ad174d0efc378d931239faf';
+const candidate = '15900d9e08a7e4ca786a6ad11ff81820fda14de4';
 const output = process.argv[2];
 if (!output || !path.isAbsolute(output)) throw new Error('New absolute output directory required');
 execFileSync(

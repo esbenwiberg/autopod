@@ -1,0 +1,37 @@
+{
+  "applicationCandidate": "15900d9e08a7e4ca786a6ad11ff81820fda14de4",
+  "preparedAtHead": "c4c968db9a3b231fb162f3e913872e097350e557",
+  "sourceInputs": [
+    {
+      "file": "packages/daemon/src/db/backup-verification.ts",
+      "sha256": "e91bc5bf8c86a756a37c98fbc683c6a78240d47e8e4347eb3b150a5acaa08777"
+    },
+    {
+      "file": "packages/daemon/src/db/cutover-backup.ts",
+      "sha256": "8a3b4104f761b0e8c7c591afc3f287b749ce710de42a6e72d70b3c4cc8d8eccf"
+    },
+    {
+      "file": "packages/daemon/src/db/migrate.ts",
+      "sha256": "48dfb7b173c388f3612e907667b988512a2ec0f83cb3c44aa7460bd0c0b47bc9"
+    }
+  ],
+  "artifacts": [
+    {
+      "file": "candidate-migrations.mjs",
+      "sha256": "3bd702926ed2724c88a98795a13c3106e528b27d9ec015447f1f92a78e3d0698"
+    },
+    {
+      "file": "verify-upgrade-copy.mjs",
+      "sha256": "d82fdc50fab7545614bea9e557ad92a8de813ea71dfdce7a1e3eb20212b489de"
+    },
+    {
+      "file": "verify-upgrade-copy-cli.mjs",
+      "sha256": "f9558a5ba7190c93f4246df29075ea66fd3e11bfe1f3a213dbab2d299d3371f5"
+    }
+  ],
+  "migrationSha256": "42a8de63d87b6096c7cabec6b0273c673d3a96c894108853d88acf5fe02da8f7",
+  "nativeDependencyBundled": false,
+  "nativeDependency": "Compatible target-host better-sqlite3 required; no installation authorized",
+  "hostedExecuted": false,
+  "authority": "Local preparation only; hosted upload and execution require separate approval"
+}

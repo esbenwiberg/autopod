@@ -1,0 +1,13 @@
+test_actual_candidate_upgrade_inside_outer_wrapper (__main__.WrapperTests) ... ok
+test_decompression_limit (__main__.WrapperTests) ... ok
+test_hung_child_cleanup_and_cleanup_failure_stays_incomplete (__main__.WrapperTests) ... ok
+test_malformed_child_output_redacted_and_private_directory_removed (__main__.WrapperTests) ... ok
+test_output_limit_and_no_inherited_secret (__main__.WrapperTests) ... ok
+test_package_hash_and_traversal_refusals (__main__.WrapperTests) ... ok
+test_tampered_migration_and_artifact_refused (__main__.WrapperTests) ... ok
+test_watchdog_reaps_hung_process (__main__.WrapperTests) ... ok
+
+----------------------------------------------------------------------
+Ran 8 tests in 1.687s
+
+OK
