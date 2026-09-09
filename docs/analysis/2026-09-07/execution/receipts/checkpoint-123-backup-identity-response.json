@@ -1,0 +1,10 @@
+{
+  "value": [
+    {
+      "code": "ProvisioningState/succeeded",
+      "displayStatus": "Provisioning succeeded",
+      "level": "Info",
+      "message": "Enable succeeded: \n[stdout]\n{\"status\":\"backup_metadata_observed\",\"activeDatabaseOpened\":false,\"privateCopyCreated\":false,\"approvedSnapshotExists\":false,\"candidates\":[{\"path\":\"/data/autopod/backups/1788982545717.db\",\"bytes\":877150208,\"mtime\":1788982548695260539,\"singleLink\":true,\"sidecarsAbsent\":true,\"sha256\":\"126489a4fdc690888999dd487677774e000be00ba878b93e087d9e36c8fb28fc\",\"schemaMaximum\":153,\"identityStable\":true},{\"path\":\"/data/autopod/backups/1788981645716.db\",\"bytes\":877150208,\"mtime\":1788981648146869289,\"singleLink\":true,\"sidecarsAbsent\":true},{\"path\":\"/data/autopod/backups/1788980745715.db\",\"bytes\":877150208,\"mtime\":1788980748171673596,\"singleLink\":true,\"sidecarsAbsent\":true}],\"availableScratchBytes\":139110006784}\n\n[stderr]\n"
+    }
+  ]
+}

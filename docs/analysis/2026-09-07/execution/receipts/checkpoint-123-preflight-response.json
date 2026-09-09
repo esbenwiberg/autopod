@@ -1,0 +1,10 @@
+{
+  "value": [
+    {
+      "code": "ProvisioningState/succeeded",
+      "displayStatus": "Provisioning succeeded",
+      "level": "Info",
+      "message": "Enable succeeded: \n[stdout]\n{\"status\":\"incomplete\",\"phase\":\"service_identity\",\"activeDatabaseOpened\":false,\"privateCopyCreated\":false,\"failureCode\":\"service_cwd_changed\"}\n\n[stderr]\n"
+    }
+  ]
+}

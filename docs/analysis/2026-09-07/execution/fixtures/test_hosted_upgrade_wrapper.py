@@ -105,13 +105,29 @@ class WrapperTests(unittest.TestCase):
             self.assertTrue(pathlib.Path(result['cleanupPendingPath']).is_dir())
             self.assertNotIn('synthetic private detail', json.dumps(result))
 
+    def test_changed_service_refusal_is_actionable_and_never_creates_private_copy(self):
+        with patch.object(w, 'service_identity', side_effect=ValueError('service_cwd_changed')), \
+                patch.object(w, 'private_run') as run:
+            result = w.main(*payload(package_entries()))
+        self.assertEqual(result['failureCode'], 'service_cwd_changed')
+        self.assertEqual(result['phase'], 'service_identity')
+        run.assert_not_called()
+
+    def test_unknown_preflight_error_cannot_export_private_text(self):
+        with patch.object(w, 'service_identity', side_effect=ValueError('synthetic-private-value')), \
+                patch.object(w, 'private_run') as run:
+            result = w.main(*payload(package_entries()))
+        self.assertEqual(result['failureCode'], 'invalid_preflight_data')
+        self.assertNotIn('synthetic-private-value', json.dumps(result))
+        run.assert_not_called()
+
     def test_actual_candidate_upgrade_inside_outer_wrapper(self):
         with tempfile.TemporaryDirectory() as tmp:
             directory = pathlib.Path(tmp)
             baseline = directory / 'baseline'
             baseline.mkdir()
             for source in (PACKAGE / 'migrations').glob('*.sql'):
-                if int(source.name.split('_')[0]) <= 152:
+                if int(source.name.split('_')[0]) <= w.SNAPSHOT_VERSION:
                     shutil.copyfile(source, baseline / source.name)
             snapshot = directory / 'snapshot.db'
             setup = """const {createRequire}=await import('node:module');

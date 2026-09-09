@@ -20,12 +20,12 @@ const cli = path.join(
   'verify-upgrade-copy-cli.mjs',
 );
 
-function fixture(run) {
+function fixture(run, baselineVersion = 152) {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'upgrade-copy-test-'));
   const baseline = path.join(directory, 'baseline');
   fs.mkdirSync(baseline);
   for (const name of fs.readdirSync(migrationsDir)) {
-    if (Number.parseInt(name, 10) <= 152)
+    if (Number.parseInt(name, 10) <= baselineVersion)
       fs.copyFileSync(path.join(migrationsDir, name), path.join(baseline, name));
   }
   const snapshot = path.join(directory, 'snapshot.db');
@@ -167,3 +167,55 @@ test('packaged CLI refuses missing arguments without raw exception output', () =
   assert.deepEqual(JSON.parse(result.stdout), { status: 'incomplete', phase: 'initialization' });
   assert.equal(result.stderr, '');
 });
+
+test('actual candidate upgrades a managed-153 copy with explicit matching lineage', () =>
+  fixture((options) => {
+    const receipt = verifyUpgradeCopy({ ...options, expectedBeforeVersion: 153 });
+    assert.equal(receipt.status, 'isolated_upgrade_verified');
+    assert.equal(receipt.beforeVersion, 153);
+    assert.equal(receipt.afterVersion, 183);
+    assert.equal(receipt.retainedOriginalColumnsAndRows, true);
+    assert.equal(receipt.isolatedDirectoryRemoved, true);
+  }, 153));
+
+test('changed snapshot lineage refuses before invoking candidate migrations', () =>
+  fixture((options) => {
+    let invoked = false;
+    const receipt = verifyUpgradeCopy({
+      ...options,
+      expectedBeforeVersion: 153,
+      runMigrations() {
+        invoked = true;
+      },
+    });
+    assert.equal(receipt.status, 'incomplete');
+    assert.equal(invoked, false);
+    assert.equal(receipt.isolatedDirectoryRemoved, true);
+  }));
+
+test('packaged CLI requires the explicit managed-153 snapshot identity', () =>
+  fixture((options) => {
+    const result = spawnSync(
+      process.execPath,
+      [
+        cli,
+        '--snapshot',
+        options.snapshot,
+        '--snapshot-sha256',
+        options.expectedSnapshotHash,
+        '--snapshot-version',
+        '153',
+        '--migrations',
+        options.migrationsDir,
+        '--migrations-sha256',
+        options.expectedMigrationHash,
+        '--scratch',
+        options.scratchParent,
+      ],
+      { encoding: 'utf8', timeout: 10000 },
+    );
+    assert.equal(result.status, 0, result.stderr);
+    const receipt = JSON.parse(result.stdout);
+    assert.equal(receipt.beforeVersion, 153);
+    assert.equal(receipt.status, 'isolated_upgrade_verified');
+  }, 153));

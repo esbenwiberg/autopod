@@ -1,0 +1,10 @@
+{
+  "value": [
+    {
+      "code": "ProvisioningState/succeeded",
+      "displayStatus": "Provisioning succeeded",
+      "level": "Info",
+      "message": "Enable succeeded: \n[stdout]\n{\"status\":\"incomplete\",\"activeDatabaseOpened\":false,\"privateCopyCreated\":false,\"servicePid\":125941,\"serviceCwd\":\"/opt/autopod/releases/ca92847a/packages/daemon\",\"serviceCwdMatchesApproved\":false,\"activeDevice\":2049,\"activeInode\":13107203,\"activeIdentityMatchesApproved\":true,\"serviceHasActiveDescriptor\":true,\"nodeVersion\":\"v22.23.1\"}\n\n[stderr]\n"
+    }
+  ]
+}

@@ -20,10 +20,11 @@ from pathlib import Path
 
 ACTIVE = Path('/data/autopod/autopod.db')
 ACTIVE_ID = (2049, 13107203)
-SNAPSHOT = Path('/data/autopod/backups/1788930281287.db')
+SNAPSHOT = Path('/data/autopod/backups/1788982545717.db')
 SNAPSHOT_BYTES = 877150208
-SNAPSHOT_HASH = '3624d3be6ef845f4dded1b84be7bbe38891ca9d3b469c43db166e4dcdd473c68'
-SERVICE_CWD = Path('/opt/autopod/releases/c0e5a5b4/packages/daemon')
+SNAPSHOT_VERSION = 153
+SNAPSHOT_HASH = '126489a4fdc690888999dd487677774e000be00ba878b93e087d9e36c8fb28fc'
+SERVICE_CWD = Path('/opt/autopod/releases/ca92847a/packages/daemon')
 CANDIDATE = '4e73cd8ce88e44cdb5c2d8d0a89447b819fa5a39'
 MIGRATIONS_HASH = '0413c2b3502ce14cf74d164ac6fc474b91143101fd8599d4fea27c91ebb733bf'
 ARTIFACTS = {'candidate-migrations.mjs', 'verify-upgrade-copy.mjs', 'verify-upgrade-copy-cli.mjs'}
@@ -127,6 +128,7 @@ def private_run(files, parent, modules, node, snapshot, snapshot_hash, timeout=3
         (directory / 'node_modules').symlink_to(modules, target_is_directory=True)
         argv = [str(node), '--max-old-space-size=256', str(directory / 'verify-upgrade-copy-cli.mjs'),
                 '--snapshot', str(snapshot), '--snapshot-sha256', snapshot_hash,
+                '--snapshot-version', str(SNAPSHOT_VERSION),
                 '--migrations', str(directory / 'migrations'), '--migrations-sha256', MIGRATIONS_HASH,
                 '--scratch', str(directory)]
         code, output = bounded_process(argv, directory, timeout)
@@ -137,11 +139,11 @@ def private_run(files, parent, modules, node, snapshot, snapshot_hash, timeout=3
                     'isolatedDirectoryRemoved')
         require(code == 0 and raw.get('status') == 'isolated_upgrade_verified', 'child_verdict')
         require(raw.get('activeDatabaseOpened') is False and
-                raw.get('beforeVersion') == 152 and raw.get('afterVersion') == 183 and
+                raw.get('beforeVersion') == SNAPSHOT_VERSION and raw.get('afterVersion') == 183 and
                 raw.get('snapshotSha256') == snapshot_hash and
                 raw.get('migrationSha256') == MIGRATIONS_HASH and
                 all(raw.get(key) is True for key in required), 'child_evidence')
-        result.update(status='isolated_upgrade_verified', beforeVersion=152, afterVersion=183,
+        result.update(status='isolated_upgrade_verified', beforeVersion=SNAPSHOT_VERSION, afterVersion=183,
                       snapshotSha256=snapshot_hash, migrationSha256=MIGRATIONS_HASH,
                       **{key: True for key in required})
     except Exception:
@@ -188,17 +190,22 @@ def main(encoded, expected_hash):
     signal.alarm(420)
     try:
         files = unpack_payload(encoded, expected_hash)
+        result['phase'] = 'service_identity'
         pid, node = service_identity()
+        result['phase'] = 'snapshot_identity'
         before = SNAPSHOT.lstat()
         require(stat.S_ISREG(before.st_mode) and before.st_nlink == 1 and
                 before.st_size == SNAPSHOT_BYTES and SNAPSHOT.resolve() == SNAPSHOT,
                 'snapshot_identity')
         require(not Path(str(SNAPSHOT) + '-wal').exists() and
                 not Path(str(SNAPSHOT) + '-journal').exists(), 'snapshot_sidecar')
+        result['phase'] = 'snapshot_hash'
         require(file_hash(SNAPSHOT) == SNAPSHOT_HASH, 'snapshot_hash')
+        result['phase'] = 'headroom'
         space = os.statvfs(ACTIVE.parent)
         require(space.f_bavail * space.f_frsize > 3 * SNAPSHOT_BYTES + 256 * 1024**2,
                 'headroom')
+        result['phase'] = 'native_dependency'
         # No daemon import. Probe the existing service's dependency in memory.
         probe = """const fs=require('fs'),crypto=require('crypto');
 const D=require('better-sqlite3');const db=new D(':memory:');
@@ -228,8 +235,21 @@ console.log(JSON.stringify({node:process.version,sqlite:version,
                                                                    after.st_size, after.st_mtime_ns)
         if not result['serviceAndActiveIdentityStable'] or not result['snapshotIdentityStable']:
             result['status'] = 'incomplete'
+    except ValueError as error:
+        allowed = {'transport_limit', 'transport_hash', 'expanded_limit', 'entry_limit',
+                   'missing_artifact', 'entry_name', 'file_limit', 'candidate_identity',
+                   'native_dependency', 'artifact_inventory', 'artifact_hash', 'migration_hash',
+                   'service_pid', 'service_inactive', 'service_cwd_changed', 'active_identity',
+                   'descriptor_limit', 'active_descriptor', 'snapshot_identity',
+                   'snapshot_sidecar', 'snapshot_hash', 'headroom', 'node_or_abi_changed',
+                   'dependency_version', 'module_location', 'service_changed',
+                   'process_timeout', 'process_output_limit'}
+        result.update(status='incomplete', failureCode=str(error) if str(error) in allowed
+                      else 'invalid_preflight_data')
+    except FileNotFoundError:
+        result.update(status='incomplete', failureCode='required_path_missing')
     except Exception:
-        result['status'] = 'incomplete'
+        result.update(status='incomplete', failureCode='unclassified_preflight_failure')
     finally:
         signal.alarm(0)
     print(json.dumps(result, separators=(',', ':')))

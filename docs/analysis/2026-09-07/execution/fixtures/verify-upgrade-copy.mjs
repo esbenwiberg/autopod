@@ -75,12 +75,14 @@ export function verifyUpgradeCopy({
   expectedMigrationHash,
   scratchParent,
   maxMs = 240000,
+  expectedBeforeVersion = 152,
 }) {
   let directory;
   let db;
   let result = { status: 'incomplete', activeDatabaseOpened: false };
   const deadline = Date.now() + maxMs;
   try {
+    invariant([152, 153].includes(expectedBeforeVersion), 'snapshot_version_required');
     invariant(/^[a-f0-9]{64}$/.test(expectedSnapshotHash), 'snapshot_hash_required');
     invariant(/^[a-f0-9]{64}$/.test(expectedMigrationHash), 'migration_hash_required');
     const before = fs.lstatSync(snapshot);
@@ -110,7 +112,7 @@ export function verifyUpgradeCopy({
     const beforeVersion = db
       .prepare('SELECT MAX(version) AS version FROM schema_version')
       .get().version;
-    invariant(beforeVersion === 152, 'expected_managed_152');
+    invariant(beforeVersion === expectedBeforeVersion, 'snapshot_version_mismatch');
     const tables = db
       .prepare(
         "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' AND name != 'schema_version' ORDER BY name",
@@ -160,7 +162,7 @@ export function verifyUpgradeCopy({
     result = {
       status: 'isolated_upgrade_verified',
       activeDatabaseOpened: false,
-      beforeVersion: 152,
+      beforeVersion,
       afterVersion: 183,
       retainedTableCount: tables.length,
       retainedOriginalColumnsAndRows: true,

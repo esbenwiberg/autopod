@@ -1,6 +1,6 @@
 # Release and remaining acceptance packet
 
-Updated September 9, checkpoint 122. This packet supersedes the dated approval requests in checkpoints 106–118. Their raw receipts remain retained. It is a local review artifact; it does not authorize publication, deployment, restart, cloud access changes or a paid canary. The goal remains incomplete.
+Updated September 9, checkpoint 123. This packet supersedes the dated approval requests in checkpoints 106–122. Their raw receipts remain retained. It is a local review artifact; it does not authorize publication, deployment, restart, cloud access changes or a paid canary. The goal remains incomplete.
 
 ## Current tested candidate
 
@@ -22,6 +22,8 @@ The service used release directory `c0e5a5b4`, while its checkout reported `2523
 
 The targeted historical journal read found 47 disk-full errors and 369 other errors, none correlated with the failing history/cost requests. Only successful route statuses were classified. An archived trace from the actual failing requests is still needed for the historical causal claim. Do not substitute another generic aggregate read or infer causality from later maintenance.
 
+Checkpoint 123 observes service PID 125941 in `/opt/autopod/releases/ca92847a/packages/daemon`, Node v22.23.1 and the same intended active database inode held by the service. The old backup is absent. New snapshot `/data/autopod/backups/1788982545717.db` is 877,150,208 bytes, stable, schema 153, SHA-256 `126489a4fdc690888999dd487677774e000be00ba878b93e087d9e36c8fb28fc`; available scratch was 139,110,006,784 bytes. These observations supersede the old directory/backup identities, but do not attest loaded bundle bytes or fresh active-row equivalence. See [execution receipt](receipts/checkpoint-123-hosted-execution.json).
+
 ## Required native acceptance verified
 
 Checkpoint 115 passed twelve native cases together on unchanged application source `f93dd4d9`: cost/duration coverage, detail guidance disclosure, failed-reply retention, saved guidance without an acknowledgement claim, unavailable provider disposition, intentional rerun recovery with old-error clearance, unavailable readiness with approval disabled, retained task accounting, exact scan source/human-selected repair, unverified-termination refusal, failed/pass/failed validation history, and one-use validation retry authorization. [Source-bound receipt](receipts/checkpoint-115-native-identity.json). Five built-mobile fault paths passed at checkpoint 113.
@@ -32,7 +34,7 @@ Checkpoint 117 adds five direct native flows: refreshed recorded merged disposit
 
 Checkpoint 119 verifies native reviewer CLI/contract presentation with explicit missing provider/account/daemon/resource identity. Checkpoint 120, after the user unlocked the Mac, verifies worker reauthorization/rework consumption, empty delta, historical waiver with failed execution retained, and recorded closed disposition. [Direct receipt](receipts/checkpoint-120-native-direct.json). All workstream-5 criteria are now verified within the required local/supported-surface scope, using earlier actual scheduler/collector/durable report tests plus native policy/report/triage checks.
 
-Checkpoint 121 verifies the remaining listed native cases: retained deleted fleet navigation, guidance receipt history and populated execution release/image/resource fields. [App/fixture-bound receipt](receipts/checkpoint-121-native-direct.json). Native interaction prerequisites are closed within recorded scope; synthetic receipts never attest hosted source or provider execution. The Mac relocked during cleanup after all checks passed and is no longer blocking these criteria. The checkpoint-122 hosted-copy execution request remains pending explicit approval.
+Checkpoint 121 verifies the remaining listed native cases: retained deleted fleet navigation, guidance receipt history and populated execution release/image/resource fields. [App/fixture-bound receipt](receipts/checkpoint-121-native-direct.json). Native interaction prerequisites are closed within recorded scope; synthetic receipts never attest hosted source or provider execution. The Mac relocked during cleanup after all checks passed and is no longer blocking these criteria. The approved checkpoint-122 hosted-copy attempt refused before copy at checkpoint 123. The current service cwd is ca92847a and the old snapshot has been removed. The updated checkpoint-123 packet requires approval of its replacement snapshot and release identity.
 
 ## Remaining sandbox access and paid-canary gate
 
@@ -46,7 +48,7 @@ The historical estimate is $0.018 compute for five minutes; it is **not a total 
 
 ## Actual database compatibility and rollout preparation
 
-Candidate migrations through 183 are locally covered, including representative managed/native lineage upgrades and immutable claim/history rules. The on-disk hosted migration manifest and sampled restore do not prove an upgrade of the actual intended database to this candidate. The [isolated upgrade packet](isolated-upgrade-verification-packet.md) now has a packaged actual candidate runner and eight passing local copy/fault/CLI tests. Checkpoint 122 refreshes the bounded transport/watchdog/cleanup wrapper and exact source/backup identities, with eight additional passing local wrapper tests. Its exact source upload and isolated-copy execution remain pending explicit approval. Keep database contents on the VM; export only bounded verdict/provenance data. Any candidate upload, copy/upgrade execution and output handling require a concrete separately approved packet. Never migrate or replace the active database as an acceptance experiment.
+Candidate migrations through 183 are locally covered, including representative managed/native lineage upgrades and immutable claim/history rules. The on-disk hosted migration manifest and sampled restore do not prove an upgrade of the actual intended database to this candidate. The [isolated upgrade packet](isolated-upgrade-verification-packet.md) has the unchanged candidate migration runner and eleven passing local copy/fault/CLI tests. Checkpoint 123 records the approved checkpoint-122 preflight refusal and refreshes the replacement snapshot/release identities. Eleven copy/CLI and ten wrapper tests pass locally, including strict explicit schema-153 admission and fixed-code error redaction. The replacement packet awaits explicit approval; no candidate copy was migrated on the host. Keep database contents on the VM; export only bounded verdict/provenance data. Any candidate upload, copy/upgrade execution and output handling require a concrete separately approved packet. Never migrate or replace the active database as an acceptance experiment.
 
 Before a publication/deployment request:
 

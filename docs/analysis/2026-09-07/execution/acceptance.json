@@ -161,13 +161,15 @@
         "checkpoint-113.md",
         "checkpoint-115.md",
         "checkpoint-117.md",
-        "checkpoint-121.md"
+        "checkpoint-121.md",
+        "checkpoint-120.md"
       ],
       "prerequisites": [
-        "Native failed-reply retention and saving guidance with an explicit pending-acknowledgement warning pass on f93dd4d9. Actual acknowledgement/late-decision presentation and approval-recovery interaction remain open."
+        "Mapped native failed-reply retention, pending and acknowledged guidance, late/retained decisions and approval recovery are verified through CP115/117/120/121. Current loaded hosted source remains unverified under W6.1."
       ],
-      "remaining": "Normal replies are atomic, retained in bounded recovery context, and fence older completion events. New unanswered decisions remain actionable. Attached MCP delivery acknowledgment, delayed concurrent stream ordering, other response boundaries, historical orphan questions and broader finalization side effects remain. New worker/cycle and validation admission now preserve pending decisions, including older unresolved cycles in the current generation. Historical missing payload recovery and stream/MCP delivery acknowledgment remain. Codex now observes summary events before Spawn/Resume launch and disposes each invocation listener. This closes the local launch/stream attachment race, not durable delivery acknowledgment across all runtimes or daemon restart. Concurrent interactive completions now coalesce in process, conflicting promotion/generation requests fail closed, and current source/lifecycle/decision ownership is checked across push and container release boundaries. This is not durable cross-process idempotency, cancellation of already-dispatched external operations, or complete post-completion side-effect accounting.",
-      "finalSourceEvidence": "15900d9e08a7e4ca786a6ad11ff81820fda14de4; clean full pipeline and 357 Swift tests; direct native case/source boundaries in checkpoint-117 receipt."
+      "finalSourceEvidence": "15900d9e08a7e4ca786a6ad11ff81820fda14de4; clean full pipeline and 357 Swift tests; direct native case/source boundaries in checkpoint-117 receipt.",
+      "historicalProgressNotes": "Normal replies are atomic, retained in bounded recovery context, and fence older completion events. New unanswered decisions remain actionable. Attached MCP delivery acknowledgment, delayed concurrent stream ordering, other response boundaries, historical orphan questions and broader finalization side effects remain. New worker/cycle and validation admission now preserve pending decisions, including older unresolved cycles in the current generation. Historical missing payload recovery and stream/MCP delivery acknowledgment remain. Codex now observes summary events before Spawn/Resume launch and disposes each invocation listener. This closes the local launch/stream attachment race, not durable delivery acknowledgment across all runtimes or daemon restart. Concurrent interactive completions now coalesce in process, conflicting promotion/generation requests fail closed, and current source/lifecycle/decision ownership is checked across push and container release boundaries. This is not durable cross-process idempotency, cancellation of already-dispatched external operations, or complete post-completion side-effect accounting.\nMapped native failed-reply retention, pending and acknowledged guidance, late/retained decisions and approval recovery are verified through CP115/117/120/121. Current loaded hosted source remains unverified under W6.1.",
+      "remaining": "Mapped native failed-reply retention, pending and acknowledged guidance, late/retained decisions and approval recovery are verified through CP115/117/120/121. Current loaded hosted source remains unverified under W6.1."
     },
     {
       "id": "W1.2",
@@ -297,8 +299,9 @@
       "prerequisites": [
         "Verify intended live source/resource identity. Releasing any particular abandoned execution/cleanup claim requires trustworthy original identity and observed termination; restart or elapsed time is not proof."
       ],
-      "remaining": "Entered artifact collection survives restart with sources retained; generation/cycle-bound integrity receipts and in-process duplicate coordination are implemented. Independent source inventory, fsync/power-loss proof, orphan snapshot/DB-path reconciliation, interactive duplicates, other reply boundaries and broader durable finalization side effects remain. New worker/cycle and validation admission now preserve pending decisions, including older unresolved cycles in the current generation. Historical missing payload recovery and stream/MCP delivery acknowledgment remain. Codex now observes summary events before Spawn/Resume launch and disposes each invocation listener. This closes the local launch/stream attachment race, not durable delivery acknowledgment across all runtimes or daemon restart. Concurrent interactive completions now coalesce in process, conflicting promotion/generation requests fail closed, and current source/lifecycle/decision ownership is checked across push and container release boundaries. This is not durable cross-process idempotency, cancellation of already-dispatched external operations, or complete post-completion side-effect accounting.",
-      "finalSourceEvidence": "15900d9e08a7e4ca786a6ad11ff81820fda14de4; clean full pipeline and 357 Swift tests; direct native case/source boundaries in checkpoint-117 receipt."
+      "remaining": "Verify intended live source/resource identity. Releasing any particular abandoned execution/cleanup claim requires trustworthy original identity and observed termination; restart or elapsed time is not proof.",
+      "finalSourceEvidence": "15900d9e08a7e4ca786a6ad11ff81820fda14de4; clean full pipeline and 357 Swift tests; direct native case/source boundaries in checkpoint-117 receipt.",
+      "historicalProgressNotes": "Entered artifact collection survives restart with sources retained; generation/cycle-bound integrity receipts and in-process duplicate coordination are implemented. Independent source inventory, fsync/power-loss proof, orphan snapshot/DB-path reconciliation, interactive duplicates, other reply boundaries and broader durable finalization side effects remain. New worker/cycle and validation admission now preserve pending decisions, including older unresolved cycles in the current generation. Historical missing payload recovery and stream/MCP delivery acknowledgment remain. Codex now observes summary events before Spawn/Resume launch and disposes each invocation listener. This closes the local launch/stream attachment race, not durable delivery acknowledgment across all runtimes or daemon restart. Concurrent interactive completions now coalesce in process, conflicting promotion/generation requests fail closed, and current source/lifecycle/decision ownership is checked across push and container release boundaries. This is not durable cross-process idempotency, cancellation of already-dispatched external operations, or complete post-completion side-effect accounting."
     },
     {
       "id": "W1.3",
@@ -454,8 +457,9 @@
       "prerequisites": [
         "Verify intended live ownership before releasing unresolved claims. Final-source durable finalization/duplicate/ambiguous-delivery regressions passed; no provider side effect is inferred from an absent response."
       ],
-      "remaining": "Entered artifact collection survives restart with sources retained; generation/cycle-bound integrity receipts and in-process duplicate coordination are implemented. Independent source inventory, fsync/power-loss proof, orphan snapshot/DB-path reconciliation, interactive duplicates, other reply boundaries and broader durable finalization side effects remain. Interactive completion now stops before push/cleanup when sync and archive fallback fail or a branch container lacks its host worktree; the source remains retryable. Duplicate concurrent interactive requests, cancellation fences, restart/durable side-effect receipts and complete source-inventory proof remain. Concurrent interactive completions now coalesce in process, conflicting promotion/generation requests fail closed, and current source/lifecycle/decision ownership is checked across push and container release boundaries. This is not durable cross-process idempotency, cancellation of already-dispatched external operations, or complete post-completion side-effect accounting. Checkpoint 46 verifies planned merged disposition and separate request/PR counts locally. Legacy missing source history, closed disposition, broader durable cleanup and native/live interaction remain outstanding. Checkpoint 47 verifies source-bound closure, reopening and planned/acknowledged recovery locally; ambiguous prior requests, legacy unbound evidence, durable cleanup and native/live interaction remain outstanding. Checkpoint 48 verifies managed 150/152 upgrades and copy-only conversion of exact unpublished native checkpoint schemas 151/158/163. Live backup scope/freshness, deployed bytes and activation remain unverified; checkpoint 49 integrates and fully validates main f646cfcc locally; current deployed-source verification remains outstanding.",
-      "finalSourceEvidence": "90a61141a6a8ed6205aae144bbb99f8c9f0f9ec5; see checkpoint-106.md for executed checks, carried forward surface proof and limits."
+      "remaining": "Verify intended live ownership before releasing unresolved claims. Final-source durable finalization/duplicate/ambiguous-delivery regressions passed; no provider side effect is inferred from an absent response.",
+      "finalSourceEvidence": "90a61141a6a8ed6205aae144bbb99f8c9f0f9ec5; see checkpoint-106.md for executed checks, carried forward surface proof and limits.",
+      "historicalProgressNotes": "Entered artifact collection survives restart with sources retained; generation/cycle-bound integrity receipts and in-process duplicate coordination are implemented. Independent source inventory, fsync/power-loss proof, orphan snapshot/DB-path reconciliation, interactive duplicates, other reply boundaries and broader durable finalization side effects remain. Interactive completion now stops before push/cleanup when sync and archive fallback fail or a branch container lacks its host worktree; the source remains retryable. Duplicate concurrent interactive requests, cancellation fences, restart/durable side-effect receipts and complete source-inventory proof remain. Concurrent interactive completions now coalesce in process, conflicting promotion/generation requests fail closed, and current source/lifecycle/decision ownership is checked across push and container release boundaries. This is not durable cross-process idempotency, cancellation of already-dispatched external operations, or complete post-completion side-effect accounting. Checkpoint 46 verifies planned merged disposition and separate request/PR counts locally. Legacy missing source history, closed disposition, broader durable cleanup and native/live interaction remain outstanding. Checkpoint 47 verifies source-bound closure, reopening and planned/acknowledged recovery locally; ambiguous prior requests, legacy unbound evidence, durable cleanup and native/live interaction remain outstanding. Checkpoint 48 verifies managed 150/152 upgrades and copy-only conversion of exact unpublished native checkpoint schemas 151/158/163. Live backup scope/freshness, deployed bytes and activation remain unverified; checkpoint 49 integrates and fully validates main f646cfcc locally; current deployed-source verification remains outstanding."
     },
     {
       "id": "W1.4",
@@ -514,13 +518,15 @@
         "checkpoint-113.md",
         "checkpoint-115.md",
         "checkpoint-117.md",
-        "checkpoint-120.md"
+        "checkpoint-120.md",
+        "checkpoint-121.md"
       ],
       "prerequisites": [
-        "Native unavailable provider disposition and failed/pass/failed validation history pass. Refreshed recorded provider disposition and approval-recovery interaction remain open; no current external disposition is inferred."
+        "Mapped native validation history, recorded merged/closed disposition and approval recovery pass through CP115/117/120. Provider status remains explicitly unverified where there is no current provider observation; current loaded hosted source remains unverified under W6.1."
       ],
-      "remaining": "Entered artifact collection survives restart with sources retained; generation/cycle-bound integrity receipts and in-process duplicate coordination are implemented. Independent source inventory, fsync/power-loss proof, orphan snapshot/DB-path reconciliation, interactive duplicates, other reply boundaries and broader durable finalization side effects remain. Interactive completion now stops before push/cleanup when sync and archive fallback fail or a branch container lacks its host worktree; the source remains retryable. Duplicate concurrent interactive requests, cancellation fences, restart/durable side-effect receipts and complete source-inventory proof remain. Concurrent interactive completions now coalesce in process, conflicting promotion/generation requests fail closed, and current source/lifecycle/decision ownership is checked across push and container release boundaries. This is not durable cross-process idempotency, cancellation of already-dispatched external operations, or complete post-completion side-effect accounting.",
-      "finalSourceEvidence": "15900d9e08a7e4ca786a6ad11ff81820fda14de4; clean full pipeline and 357 Swift tests; direct native case/source boundaries in checkpoint-117 receipt."
+      "finalSourceEvidence": "15900d9e08a7e4ca786a6ad11ff81820fda14de4; clean full pipeline and 357 Swift tests; direct native case/source boundaries in checkpoint-117 receipt.",
+      "historicalProgressNotes": "Entered artifact collection survives restart with sources retained; generation/cycle-bound integrity receipts and in-process duplicate coordination are implemented. Independent source inventory, fsync/power-loss proof, orphan snapshot/DB-path reconciliation, interactive duplicates, other reply boundaries and broader durable finalization side effects remain. Interactive completion now stops before push/cleanup when sync and archive fallback fail or a branch container lacks its host worktree; the source remains retryable. Duplicate concurrent interactive requests, cancellation fences, restart/durable side-effect receipts and complete source-inventory proof remain. Concurrent interactive completions now coalesce in process, conflicting promotion/generation requests fail closed, and current source/lifecycle/decision ownership is checked across push and container release boundaries. This is not durable cross-process idempotency, cancellation of already-dispatched external operations, or complete post-completion side-effect accounting.\nMapped native validation history, recorded merged/closed disposition and approval recovery pass through CP115/117/120. Provider status remains explicitly unverified where there is no current provider observation; current loaded hosted source remains unverified under W6.1.",
+      "remaining": "Mapped native validation history, recorded merged/closed disposition and approval recovery pass through CP115/117/120. Provider status remains explicitly unverified where there is no current provider observation; current loaded hosted source remains unverified under W6.1."
     },
     {
       "id": "W1.5",
@@ -608,8 +614,9 @@
       "prerequisites": [
         "Current deployed module/byte identity remains unverified under the live provenance gate; local cohesion and final-source regression audit are recorded in the closure report."
       ],
-      "remaining": "Entered artifact collection survives restart with sources retained; generation/cycle-bound integrity receipts and in-process duplicate coordination are implemented. Independent source inventory, fsync/power-loss proof, orphan snapshot/DB-path reconciliation, interactive duplicates, other reply boundaries and broader durable finalization side effects remain. New worker/cycle and validation admission now preserve pending decisions, including older unresolved cycles in the current generation. Historical missing payload recovery and stream/MCP delivery acknowledgment remain. Concurrent interactive completions now coalesce in process, conflicting promotion/generation requests fail closed, and current source/lifecycle/decision ownership is checked across push and container release boundaries. This is not durable cross-process idempotency, cancellation of already-dispatched external operations, or complete post-completion side-effect accounting.",
-      "finalSourceEvidence": "90a61141a6a8ed6205aae144bbb99f8c9f0f9ec5; see checkpoint-106.md for executed checks, carried forward surface proof and limits."
+      "remaining": "Current deployed module/byte identity remains unverified under the live provenance gate; local cohesion and final-source regression audit are recorded in the closure report.",
+      "finalSourceEvidence": "90a61141a6a8ed6205aae144bbb99f8c9f0f9ec5; see checkpoint-106.md for executed checks, carried forward surface proof and limits.",
+      "historicalProgressNotes": "Entered artifact collection survives restart with sources retained; generation/cycle-bound integrity receipts and in-process duplicate coordination are implemented. Independent source inventory, fsync/power-loss proof, orphan snapshot/DB-path reconciliation, interactive duplicates, other reply boundaries and broader durable finalization side effects remain. New worker/cycle and validation admission now preserve pending decisions, including older unresolved cycles in the current generation. Historical missing payload recovery and stream/MCP delivery acknowledgment remain. Concurrent interactive completions now coalesce in process, conflicting promotion/generation requests fail closed, and current source/lifecycle/decision ownership is checked across push and container release boundaries. This is not durable cross-process idempotency, cancellation of already-dispatched external operations, or complete post-completion side-effect accounting."
     },
     {
       "id": "W2.1",
@@ -751,13 +758,15 @@
         "checkpoint-112.md",
         "checkpoint-113.md",
         "checkpoint-115.md",
-        "checkpoint-120.md"
+        "checkpoint-120.md",
+        "checkpoint-121.md"
       ],
       "prerequisites": [
-        "Native validation Resume refusal, one recorded authorization and separate consumption pass. Worker Rework/binding variants and deployed provenance remain open."
+        "Native validation authorization/consumption and worker reauthorization/Rework binding pass through CP115/120. Current deployed source remains unverified under W6.1."
       ],
-      "remaining": "Validation admission identity and pinned cumulative transient allowance persist across Resume, restart and linked fix pods. Task-wide agent/repository-rework limits, cumulative provider/sandbox recovery and audited token-budget extensions still require integration; historical pre-ledger retries are not reconstructed. Incomplete known prior spending now blocks further budgeted agent consumption. This does not reserve future spend or reconstruct unrecorded legacy work; task-wide provider/rework admission and phase reconciliation remain. Checkpoint 24 adds durable sandbox startup retries, legacy allowance lower bounds, stage-scoped one-use decisions, measured startup time and local operator proof. Provider retries after first runtime event, repository rework, complete historical reconstruction, phase billing, native interaction and live acceptance remain.",
-      "finalSourceEvidence": "f93dd4d9a66bcf0a4ad174d0efc378d931239faf; checkpoint-114 full pipeline and checkpoint-115 native interactions; application source unchanged."
+      "finalSourceEvidence": "f93dd4d9a66bcf0a4ad174d0efc378d931239faf; checkpoint-114 full pipeline and checkpoint-115 native interactions; application source unchanged.",
+      "historicalProgressNotes": "Validation admission identity and pinned cumulative transient allowance persist across Resume, restart and linked fix pods. Task-wide agent/repository-rework limits, cumulative provider/sandbox recovery and audited token-budget extensions still require integration; historical pre-ledger retries are not reconstructed. Incomplete known prior spending now blocks further budgeted agent consumption. This does not reserve future spend or reconstruct unrecorded legacy work; task-wide provider/rework admission and phase reconciliation remain. Checkpoint 24 adds durable sandbox startup retries, legacy allowance lower bounds, stage-scoped one-use decisions, measured startup time and local operator proof. Provider retries after first runtime event, repository rework, complete historical reconstruction, phase billing, native interaction and live acceptance remain.\nNative validation authorization/consumption and worker reauthorization/Rework binding pass through CP115/120. Current deployed source remains unverified under W6.1.",
+      "remaining": "Native validation authorization/consumption and worker reauthorization/Rework binding pass through CP115/120. Current deployed source remains unverified under W6.1."
     },
     {
       "id": "W2.2",
@@ -832,13 +841,15 @@
         "checkpoint-112.md",
         "checkpoint-113.md",
         "checkpoint-115.md",
-        "checkpoint-120.md"
+        "checkpoint-120.md",
+        "checkpoint-121.md"
       ],
       "prerequisites": [
-        "Native one-use validation authorization passes; worker authorization/binding interaction remains open. Final-source unchanged-failure and changed-condition checks are retained."
+        "Native validation and worker one-use authorization/consumption pass through CP115/120; unchanged-failure and changed-condition regression checks are retained. Current deployed source remains unverified under W6.1."
       ],
-      "remaining": "Actual validation repeat admission requires known changed source/contract/commands/environment/implementation or one-use authenticated human authorization. Agent-rework admission and explicit provider-rebinding reconciliation remain; unavailable identity never proves change. Checkpoint 24 adds durable sandbox startup retries, legacy allowance lower bounds, stage-scoped one-use decisions, measured startup time and local operator proof. Provider retries after first runtime event, repository rework, complete historical reconstruction, phase billing, native interaction and live acceptance remain.",
-      "finalSourceEvidence": "f93dd4d9a66bcf0a4ad174d0efc378d931239faf; checkpoint-114 full pipeline and checkpoint-115 native interactions; application source unchanged."
+      "finalSourceEvidence": "f93dd4d9a66bcf0a4ad174d0efc378d931239faf; checkpoint-114 full pipeline and checkpoint-115 native interactions; application source unchanged.",
+      "historicalProgressNotes": "Actual validation repeat admission requires known changed source/contract/commands/environment/implementation or one-use authenticated human authorization. Agent-rework admission and explicit provider-rebinding reconciliation remain; unavailable identity never proves change. Checkpoint 24 adds durable sandbox startup retries, legacy allowance lower bounds, stage-scoped one-use decisions, measured startup time and local operator proof. Provider retries after first runtime event, repository rework, complete historical reconstruction, phase billing, native interaction and live acceptance remain.\nNative validation and worker one-use authorization/consumption pass through CP115/120; unchanged-failure and changed-condition regression checks are retained. Current deployed source remains unverified under W6.1.",
+      "remaining": "Native validation and worker one-use authorization/consumption pass through CP115/120; unchanged-failure and changed-condition regression checks are retained. Current deployed source remains unverified under W6.1."
     },
     {
       "id": "W2.3",
@@ -912,13 +923,16 @@
         "checkpoint-99.md",
         "checkpoint-106.md",
         "closure-report.md",
-        "checkpoint-113.md"
+        "checkpoint-113.md",
+        "checkpoint-120.md",
+        "checkpoint-121.md"
       ],
       "prerequisites": [
-        "Visible native recovery interaction and actual deployed provider identity remain unverified. Fixed bounded backoff and observed retry deadlines passed final-source checks; missing historical deadlines remain unavailable."
+        "Native recovery interaction passes through CP115/120. Actual deployed provider identity remains unverified under W6.1; missing historical deadlines remain unavailable."
       ],
-      "remaining": "Current worker authentication/unknown failures require reconciliation; typed transient failures use persisted task allowance and observed provider cooldown. Legacy policies do not acquire new allowance. Quota continuation retains its separate configured failover policy. Broader provider flow integration, unavailable historical billing and final native/live acceptance remain.",
-      "finalSourceEvidence": "90a61141a6a8ed6205aae144bbb99f8c9f0f9ec5; see checkpoint-106.md for executed checks, carried forward surface proof and limits."
+      "finalSourceEvidence": "90a61141a6a8ed6205aae144bbb99f8c9f0f9ec5; see checkpoint-106.md for executed checks, carried forward surface proof and limits.",
+      "historicalProgressNotes": "Current worker authentication/unknown failures require reconciliation; typed transient failures use persisted task allowance and observed provider cooldown. Legacy policies do not acquire new allowance. Quota continuation retains its separate configured failover policy. Broader provider flow integration, unavailable historical billing and final native/live acceptance remain.\nNative recovery interaction passes through CP115/120. Actual deployed provider identity remains unverified under W6.1; missing historical deadlines remain unavailable.",
+      "remaining": "Native recovery interaction passes through CP115/120. Actual deployed provider identity remains unverified under W6.1; missing historical deadlines remain unavailable."
     },
     {
       "id": "W2.4",
@@ -1035,8 +1049,9 @@
       "prerequisites": [
         "Native cost duration-completeness and non-additive stage warnings pass. Missing billing evidence remains unavailable; no new billing-collection requirement is inferred."
       ],
-      "remaining": "Actual engine wall duration is recorded once per executed validation admission; waiting and interrupted unknown duration are separate. Complete cross-phase cost/time reconciliation and available infrastructure billing remain. Native interaction and live acceptance are unverified. Incomplete known prior spending now blocks further budgeted agent consumption. Future spending reservations, unrecorded legacy work, phase accounting and native/live verification remain. Checkpoint 24 adds durable sandbox startup retries, legacy allowance lower bounds, stage-scoped one-use decisions, measured startup time and local operator proof. Provider retries after first runtime event, repository rework, complete historical reconstruction, phase billing, native interaction and live acceptance remain. Checkpoint 25 reconciles corrected provider totals in task, per-pod and fleet APIs, including recorded zero. Phase attribution, legacy estimates, telemetry completeness, operator presentation and live proof remain.",
-      "finalSourceEvidence": "f93dd4d9a66bcf0a4ad174d0efc378d931239faf; checkpoint-114 full pipeline and checkpoint-115 native interactions; application source unchanged."
+      "remaining": "Native cost duration-completeness and non-additive stage warnings pass. Missing billing evidence remains unavailable; no new billing-collection requirement is inferred.",
+      "finalSourceEvidence": "f93dd4d9a66bcf0a4ad174d0efc378d931239faf; checkpoint-114 full pipeline and checkpoint-115 native interactions; application source unchanged.",
+      "historicalProgressNotes": "Actual engine wall duration is recorded once per executed validation admission; waiting and interrupted unknown duration are separate. Complete cross-phase cost/time reconciliation and available infrastructure billing remain. Native interaction and live acceptance are unverified. Incomplete known prior spending now blocks further budgeted agent consumption. Future spending reservations, unrecorded legacy work, phase accounting and native/live verification remain. Checkpoint 24 adds durable sandbox startup retries, legacy allowance lower bounds, stage-scoped one-use decisions, measured startup time and local operator proof. Provider retries after first runtime event, repository rework, complete historical reconstruction, phase billing, native interaction and live acceptance remain. Checkpoint 25 reconciles corrected provider totals in task, per-pod and fleet APIs, including recorded zero. Phase attribution, legacy estimates, telemetry completeness, operator presentation and live proof remain."
     },
     {
       "id": "W2.5",
@@ -1073,9 +1088,10 @@
         "closure-report.md"
       ],
       "prerequisites": [],
-      "remaining": "Local exact-input reuse proved; actual Docker/supported operator interaction and exact final source verification remain. Complete hermetic read set is an explicit contract obligation.",
+      "remaining": "",
       "verificationScope": "Local exact-source acceptance only; does not promote live, native, canary or whole-goal status.",
-      "finalSourceEvidence": "90a61141a6a8ed6205aae144bbb99f8c9f0f9ec5; see checkpoint-106.md for executed checks, carried forward surface proof and limits."
+      "finalSourceEvidence": "90a61141a6a8ed6205aae144bbb99f8c9f0f9ec5; see checkpoint-106.md for executed checks, carried forward surface proof and limits.",
+      "historicalProgressNotes": "Local exact-input reuse proved; actual Docker/supported operator interaction and exact final source verification remain. Complete hermetic read set is an explicit contract obligation."
     },
     {
       "id": "W2.6",
@@ -1106,13 +1122,16 @@
         "checkpoint-93.md",
         "checkpoint-106.md",
         "closure-report.md",
-        "checkpoint-117.md"
+        "checkpoint-117.md",
+        "checkpoint-120.md",
+        "checkpoint-121.md"
       ],
       "prerequisites": [
-        "Visible native historical finding/waiver/outcome interaction remains unverified; final-source frozen finding and closure regressions passed."
+        "Native historical findings, retained failed execution and human-waiver presentation pass through CP117/120. Frozen finding/closure regression proof is retained; deployed source remains unverified under W6.1."
       ],
-      "remaining": "Current source retains frozen identity, independently addressable substantive findings, bounded closure chunks, fail-closed unavailable axes/closure, and immutable validation history. Existing local regression coverage is mapped; final committed pipeline and deployed-byte verification remain separate requirements.",
-      "finalSourceEvidence": "15900d9e08a7e4ca786a6ad11ff81820fda14de4; clean full pipeline and 357 Swift tests; direct native case/source boundaries in checkpoint-117 receipt."
+      "finalSourceEvidence": "15900d9e08a7e4ca786a6ad11ff81820fda14de4; clean full pipeline and 357 Swift tests; direct native case/source boundaries in checkpoint-117 receipt.",
+      "historicalProgressNotes": "Current source retains frozen identity, independently addressable substantive findings, bounded closure chunks, fail-closed unavailable axes/closure, and immutable validation history. Existing local regression coverage is mapped; final committed pipeline and deployed-byte verification remain separate requirements.\nNative historical findings, retained failed execution and human-waiver presentation pass through CP117/120. Frozen finding/closure regression proof is retained; deployed source remains unverified under W6.1.",
+      "remaining": "Native historical findings, retained failed execution and human-waiver presentation pass through CP117/120. Frozen finding/closure regression proof is retained; deployed source remains unverified under W6.1."
     },
     {
       "id": "W2.7",
@@ -1141,9 +1160,10 @@
         "checkpoint-113.md"
       ],
       "prerequisites": [],
-      "remaining": "Clean committed local replay at 18e5bd37 measured -190.90 percent reduction (631.75 ms baseline, 1837.78 ms candidate), zero escaped seeded defects in both modes and unchanged coverage. The 25 percent target is unsupported for this short-check workload. Representative live comparison requires bounded authorization; no general workload improvement is claimed.",
+      "remaining": "",
       "verificationScope": "Local exact-source acceptance only; does not promote live, native, canary or whole-goal status.",
-      "finalSourceEvidence": "90a61141a6a8ed6205aae144bbb99f8c9f0f9ec5; see checkpoint-106.md for executed checks, carried forward surface proof and limits."
+      "finalSourceEvidence": "90a61141a6a8ed6205aae144bbb99f8c9f0f9ec5; see checkpoint-106.md for executed checks, carried forward surface proof and limits.",
+      "historicalProgressNotes": "Clean committed local replay at 18e5bd37 measured -190.90 percent reduction (631.75 ms baseline, 1837.78 ms candidate), zero escaped seeded defects in both modes and unchanged coverage. The 25 percent target is unsupported for this short-check workload. Representative live comparison requires bounded authorization; no general workload improvement is claimed."
     },
     {
       "id": "W3.1",
@@ -1189,8 +1209,9 @@
       "prerequisites": [
         "Verify deployed strict-fetch bytes under the current live provenance gate; final-source actual-base declaration regressions passed."
       ],
-      "remaining": "Fresh-fetch actual-base receipts, exact task/contract equivalent-work admission, frozen repository/base binding and authenticated idempotent distinct reruns proven locally. Native interaction and live dispatch acceptance remain unverified. Required command/resource preflight and per-execution provenance remain separate unfinished criteria.",
-      "finalSourceEvidence": "90a61141a6a8ed6205aae144bbb99f8c9f0f9ec5; see checkpoint-106.md for executed checks, carried forward surface proof and limits."
+      "remaining": "Verify deployed strict-fetch bytes under the current live provenance gate; final-source actual-base declaration regressions passed.",
+      "finalSourceEvidence": "90a61141a6a8ed6205aae144bbb99f8c9f0f9ec5; see checkpoint-106.md for executed checks, carried forward surface proof and limits.",
+      "historicalProgressNotes": "Fresh-fetch actual-base receipts, exact task/contract equivalent-work admission, frozen repository/base binding and authenticated idempotent distinct reruns proven locally. Native interaction and live dispatch acceptance remain unverified. Required command/resource preflight and per-execution provenance remain separate unfinished criteria."
     },
     {
       "id": "W3.2",
@@ -1241,8 +1262,9 @@
       "prerequisites": [
         "Native intentional rerun preserves one immutable failed request and receives a distinct execution on retry; the old request error clears on success. Current deployed source remains unverified under W6.1."
       ],
-      "remaining": "Fresh-fetch actual-base receipts, exact task/contract equivalent-work admission, frozen repository/base binding and authenticated idempotent distinct reruns proven locally. Native interaction and live dispatch acceptance remain unverified. Required command/resource preflight and per-execution provenance remain separate unfinished criteria.",
-      "finalSourceEvidence": "f93dd4d9a66bcf0a4ad174d0efc378d931239faf; checkpoint-114 full pipeline and checkpoint-115 native interactions; application source unchanged."
+      "remaining": "Native intentional rerun preserves one immutable failed request and receives a distinct execution on retry; the old request error clears on success. Current deployed source remains unverified under W6.1.",
+      "finalSourceEvidence": "f93dd4d9a66bcf0a4ad174d0efc378d931239faf; checkpoint-114 full pipeline and checkpoint-115 native interactions; application source unchanged.",
+      "historicalProgressNotes": "Fresh-fetch actual-base receipts, exact task/contract equivalent-work admission, frozen repository/base binding and authenticated idempotent distinct reruns proven locally. Native interaction and live dispatch acceptance remain unverified. Required command/resource preflight and per-execution provenance remain separate unfinished criteria."
     },
     {
       "id": "W3.3",
@@ -1306,8 +1328,9 @@
       "prerequisites": [
         "Actual-image capability acceptance remains gated by W3.6. Final-source required-command/resource/provider and continuation admission checks passed."
       ],
-      "remaining": "Coding, validation/retry, review-only and completion recovery provenance are locally implemented. Sandbox effective cgroup resources are read without substituting requests; image and network identity remain unavailable. Checkpoint 51 adds preflight to direct agent Resume and missing-session fallback paths. Side effects after execution begins, actual reviewer CLI identity, complete receipt history/operator coverage, native interaction and live acceptance remain outstanding.",
-      "finalSourceEvidence": "90a61141a6a8ed6205aae144bbb99f8c9f0f9ec5; see checkpoint-106.md for executed checks, carried forward surface proof and limits."
+      "remaining": "Actual-image capability acceptance remains gated by W3.6. Final-source required-command/resource/provider and continuation admission checks passed.",
+      "finalSourceEvidence": "90a61141a6a8ed6205aae144bbb99f8c9f0f9ec5; see checkpoint-106.md for executed checks, carried forward surface proof and limits.",
+      "historicalProgressNotes": "Coding, validation/retry, review-only and completion recovery provenance are locally implemented. Sandbox effective cgroup resources are read without substituting requests; image and network identity remain unavailable. Checkpoint 51 adds preflight to direct agent Resume and missing-session fallback paths. Side effects after execution begins, actual reviewer CLI identity, complete receipt history/operator coverage, native interaction and live acceptance remain outstanding."
     },
     {
       "id": "W3.4",
@@ -1331,12 +1354,16 @@
         "checkpoint-106.md",
         "closure-report.md",
         "checkpoint-108.md",
-        "checkpoint-109.md"
+        "checkpoint-109.md",
+        "checkpoint-120.md",
+        "checkpoint-121.md"
       ],
       "prerequisites": [
-        "The required affected-image capability canary remains unrun. Resolve the specific affected profile image, obtain data-plane access and finish the total spend/command/oracle packet before explicit paid-canary authorization. Local semantics and denied-capability checks passed."
+        "Actual affected dataverse-harness image is pinned in CP110, but the required capability canary remains unrun. Obtain intended-group data-plane access and finish the ready-disk-image identity, total spend and command/oracle packet before paid-canary authorization."
       ],
-      "finalSourceEvidence": "90a61141a6a8ed6205aae144bbb99f8c9f0f9ec5; see checkpoint-106.md for executed checks, carried forward surface proof and limits."
+      "finalSourceEvidence": "90a61141a6a8ed6205aae144bbb99f8c9f0f9ec5; see checkpoint-106.md for executed checks, carried forward surface proof and limits.",
+      "remaining": "Actual affected dataverse-harness image is pinned in CP110, but the required capability canary remains unrun. Obtain intended-group data-plane access and finish the ready-disk-image identity, total spend and command/oracle packet before paid-canary authorization.",
+      "historicalProgressNotes": "Actual affected dataverse-harness image is pinned in CP110, but the required capability canary remains unrun. Obtain intended-group data-plane access and finish the ready-disk-image identity, total spend and command/oracle packet before paid-canary authorization."
     },
     {
       "id": "W3.5",
@@ -1382,13 +1409,15 @@
         "closure-report.md",
         "checkpoint-117.md",
         "checkpoint-119.md",
-        "checkpoint-120.md"
+        "checkpoint-120.md",
+        "checkpoint-121.md"
       ],
       "prerequisites": [
-        "Verify current deployed provider identity and visible native reconciliation errors; final-source mutable-profile rejection and frozen-binding checks passed."
+        "Native provider reconciliation and worker binding errors pass through CP119/120. Current deployed provider identity remains unverified; final-source mutable-profile rejection/frozen-binding checks are retained."
       ],
-      "remaining": "Fresh-fetch actual-base receipts, exact task/contract equivalent-work admission, frozen repository/base binding and authenticated idempotent distinct reruns proven locally. Native interaction and live dispatch acceptance remain unverified. Required command/resource preflight and per-execution provenance remain separate unfinished criteria.",
-      "finalSourceEvidence": "15900d9e08a7e4ca786a6ad11ff81820fda14de4; clean full pipeline and 357 Swift tests; direct native case/source boundaries in checkpoint-117 receipt."
+      "finalSourceEvidence": "15900d9e08a7e4ca786a6ad11ff81820fda14de4; clean full pipeline and 357 Swift tests; direct native case/source boundaries in checkpoint-117 receipt.",
+      "historicalProgressNotes": "Fresh-fetch actual-base receipts, exact task/contract equivalent-work admission, frozen repository/base binding and authenticated idempotent distinct reruns proven locally. Native interaction and live dispatch acceptance remain unverified. Required command/resource preflight and per-execution provenance remain separate unfinished criteria.\nNative provider reconciliation and worker binding errors pass through CP119/120. Current deployed provider identity remains unverified; final-source mutable-profile rejection/frozen-binding checks are retained.",
+      "remaining": "Native provider reconciliation and worker binding errors pass through CP119/120. Current deployed provider identity remains unverified; final-source mutable-profile rejection/frozen-binding checks are retained."
     },
     {
       "id": "W3.6",
@@ -1484,13 +1513,15 @@
         "closure-report.md",
         "checkpoint-115.md",
         "checkpoint-117.md",
-        "checkpoint-120.md"
+        "checkpoint-120.md",
+        "checkpoint-121.md"
       ],
       "prerequisites": [
-        "Native task/pod/agent/provider/validation/receipt units and retained deleted-pod accounting pass. Refreshed provider disposition and actual retained fleet navigation remain open; hosted evidence is tracked separately."
+        "Native task/pod/provider/validation/receipt units, recorded merged/closed disposition and retained deleted-fleet navigation pass through CP115/117/120/121. Current deployed source remains unverified under W6.1."
       ],
-      "remaining": "Distinct task/pod/run/provider/validation units implemented. Durable logical delivery receipts remain. Checkpoint 46 verifies planned merged disposition and separate request/PR counts locally. Legacy missing source history, closed disposition, broader durable cleanup and native/live interaction remain outstanding. Checkpoint 47 verifies source-bound closure, reopening and planned/acknowledged recovery locally; ambiguous prior requests, legacy unbound evidence, durable cleanup and native/live interaction remain outstanding.",
-      "finalSourceEvidence": "15900d9e08a7e4ca786a6ad11ff81820fda14de4; clean full pipeline and 357 Swift tests; direct native case/source boundaries in checkpoint-117 receipt."
+      "finalSourceEvidence": "15900d9e08a7e4ca786a6ad11ff81820fda14de4; clean full pipeline and 357 Swift tests; direct native case/source boundaries in checkpoint-117 receipt.",
+      "historicalProgressNotes": "Distinct task/pod/run/provider/validation units implemented. Durable logical delivery receipts remain. Checkpoint 46 verifies planned merged disposition and separate request/PR counts locally. Legacy missing source history, closed disposition, broader durable cleanup and native/live interaction remain outstanding. Checkpoint 47 verifies source-bound closure, reopening and planned/acknowledged recovery locally; ambiguous prior requests, legacy unbound evidence, durable cleanup and native/live interaction remain outstanding.\nNative task/pod/provider/validation/receipt units, recorded merged/closed disposition and retained deleted-fleet navigation pass through CP115/117/120/121. Current deployed source remains unverified under W6.1.",
+      "remaining": "Native task/pod/provider/validation/receipt units, recorded merged/closed disposition and retained deleted-fleet navigation pass through CP115/117/120/121. Current deployed source remains unverified under W6.1."
     },
     {
       "id": "W4.2",
@@ -1537,10 +1568,11 @@
         "checkpoint-121.md"
       ],
       "prerequisites": [
-        "Native failed/pass/failed history and unavailable-readiness refusal pass. Historical waiver and other remaining outcome interactions are still open."
+        "Mapped native history, readiness, historical waiver and disposition outcomes pass through CP115/117/120. Current deployed source remains unverified under W6.1."
       ],
-      "remaining": " Checkpoint 46 verifies planned merged disposition and separate request/PR counts locally. Legacy missing source history, closed disposition, broader durable cleanup and native/live interaction remain outstanding. Checkpoint 47 verifies source-bound closure, reopening and planned/acknowledged recovery locally; ambiguous prior requests, legacy unbound evidence, durable cleanup and native/live interaction remain outstanding.",
-      "finalSourceEvidence": "f93dd4d9a66bcf0a4ad174d0efc378d931239faf; checkpoint-114 full pipeline and checkpoint-115 native interactions; application source unchanged."
+      "finalSourceEvidence": "f93dd4d9a66bcf0a4ad174d0efc378d931239faf; checkpoint-114 full pipeline and checkpoint-115 native interactions; application source unchanged.",
+      "historicalProgressNotes": "Checkpoint 46 verifies planned merged disposition and separate request/PR counts locally. Legacy missing source history, closed disposition, broader durable cleanup and native/live interaction remain outstanding. Checkpoint 47 verifies source-bound closure, reopening and planned/acknowledged recovery locally; ambiguous prior requests, legacy unbound evidence, durable cleanup and native/live interaction remain outstanding.\nMapped native history, readiness, historical waiver and disposition outcomes pass through CP115/117/120. Current deployed source remains unverified under W6.1.",
+      "remaining": "Mapped native history, readiness, historical waiver and disposition outcomes pass through CP115/117/120. Current deployed source remains unverified under W6.1."
     },
     {
       "id": "W4.3",
@@ -1575,13 +1607,15 @@
         "checkpoint-102.md",
         "checkpoint-106.md",
         "closure-report.md",
-        "checkpoint-120.md"
+        "checkpoint-120.md",
+        "checkpoint-121.md"
       ],
       "prerequisites": [
-        "Visible native denominator/delivery interaction and current deployed bytes remain unverified. Final-source distinct logical delivery and retained cohorts passed."
+        "Native denominator/recorded-delivery views and retained cohorts pass through CP117/120/121. Current deployed source remains unverified under W6.1."
       ],
-      "remaining": "Distinct task receipt counts now use durable unique PR evidence; historical analytics still use explicitly labelled legacy URL measures. Wider outcome/denominator reconciliation remains.",
-      "finalSourceEvidence": "90a61141a6a8ed6205aae144bbb99f8c9f0f9ec5; see checkpoint-106.md for executed checks, carried forward surface proof and limits."
+      "finalSourceEvidence": "90a61141a6a8ed6205aae144bbb99f8c9f0f9ec5; see checkpoint-106.md for executed checks, carried forward surface proof and limits.",
+      "historicalProgressNotes": "Distinct task receipt counts now use durable unique PR evidence; historical analytics still use explicitly labelled legacy URL measures. Wider outcome/denominator reconciliation remains.\nNative denominator/recorded-delivery views and retained cohorts pass through CP117/120/121. Current deployed source remains unverified under W6.1.",
+      "remaining": "Native denominator/recorded-delivery views and retained cohorts pass through CP117/120/121. Current deployed source remains unverified under W6.1."
     },
     {
       "id": "W4.4",
@@ -1667,10 +1701,11 @@
         "checkpoint-121.md"
       ],
       "prerequisites": [
-        "Native history alternation preserves the earlier failure after viewing a later pass. Historical waiver and refreshed delivery-disposition interaction remain open."
+        "Native failed/pass/failed history, waiver with failure retained and recorded merged/closed disposition pass through CP115/117/120. Current deployed source remains unverified under W6.1."
       ],
-      "remaining": "Mobile preserves sequence history and unmatched latest snapshot; backend waiver/history and durable delivery reconciliation remain.",
-      "finalSourceEvidence": "15900d9e08a7e4ca786a6ad11ff81820fda14de4; clean full pipeline and 357 Swift tests; direct native case/source boundaries in checkpoint-117 receipt."
+      "finalSourceEvidence": "15900d9e08a7e4ca786a6ad11ff81820fda14de4; clean full pipeline and 357 Swift tests; direct native case/source boundaries in checkpoint-117 receipt.",
+      "historicalProgressNotes": "Mobile preserves sequence history and unmatched latest snapshot; backend waiver/history and durable delivery reconciliation remain.\nNative failed/pass/failed history, waiver with failure retained and recorded merged/closed disposition pass through CP115/117/120. Current deployed source remains unverified under W6.1.",
+      "remaining": "Native failed/pass/failed history, waiver with failure retained and recorded merged/closed disposition pass through CP115/117/120. Current deployed source remains unverified under W6.1."
     },
     {
       "id": "W4.5",
@@ -1696,8 +1731,9 @@
       "prerequisites": [
         "The approved targeted journal read completed without transport omissions: 47 disk-full and 369 other errors, none attributable to the failing routes; only 200 statuses were classified. Current ten-row/cost availability is recorded but historical broad-list/cost cause is still unproven. An archived error/request trace from the actual failing requests is the missing evidence; do not infer a cause from subsequent disk expansion/migration/recovery."
       ],
-      "remaining": "Cost and compact-history APIs now return 200 after independently authorized maintenance. Actual historical failure cause is not established. Bounded read-only SSH metadata/log inspection awaits explicit payload-egress approval after auto-review rejection.",
-      "finalSourceEvidence": "90a61141a6a8ed6205aae144bbb99f8c9f0f9ec5; see checkpoint-106.md for executed checks, carried forward surface proof and limits."
+      "remaining": "The approved targeted journal read completed without transport omissions: 47 disk-full and 369 other errors, none attributable to the failing routes; only 200 statuses were classified. Current ten-row/cost availability is recorded but historical broad-list/cost cause is still unproven. An archived error/request trace from the actual failing requests is the missing evidence; do not infer a cause from subsequent disk expansion/migration/recovery.",
+      "finalSourceEvidence": "90a61141a6a8ed6205aae144bbb99f8c9f0f9ec5; see checkpoint-106.md for executed checks, carried forward surface proof and limits.",
+      "historicalProgressNotes": "Cost and compact-history APIs now return 200 after independently authorized maintenance. Actual historical failure cause is not established. Bounded read-only SSH metadata/log inspection awaits explicit payload-egress approval after auto-review rejection."
     },
     {
       "id": "W4.6",
@@ -1780,8 +1816,9 @@
       "prerequisites": [
         "Inspect actual production failure evidence under W4.5 before claiming hosted repair. Final-source realistic-size malformed-row, bounded-projection and snapshot-export checks passed."
       ],
-      "remaining": "Dedicated compact SQLite projection bounds task/text excerpts and four display JSON fields before Node materialization, excludes unrelated evidence, and marks truncated finalization output without changing storage. Paginated rows retain existing keyset/limit rules. Legacy full/nonpaginated reads and review-event hydration are not globally memory bounded; historical live failure cause, final source and live verification remain.",
-      "finalSourceEvidence": "90a61141a6a8ed6205aae144bbb99f8c9f0f9ec5; see checkpoint-106.md for executed checks, carried forward surface proof and limits."
+      "remaining": "Inspect actual production failure evidence under W4.5 before claiming hosted repair. Final-source realistic-size malformed-row, bounded-projection and snapshot-export checks passed.",
+      "finalSourceEvidence": "90a61141a6a8ed6205aae144bbb99f8c9f0f9ec5; see checkpoint-106.md for executed checks, carried forward surface proof and limits.",
+      "historicalProgressNotes": "Dedicated compact SQLite projection bounds task/text excerpts and four display JSON fields before Node materialization, excludes unrelated evidence, and marks truncated finalization output without changing storage. Paginated rows retain existing keyset/limit rules. Legacy full/nonpaginated reads and review-event hydration are not globally memory bounded; historical live failure cause, final source and live verification remain."
     },
     {
       "id": "W4.7",
@@ -1863,8 +1900,9 @@
       "prerequisites": [
         "Native task accounting and missing/non-additive stage duration evidence pass. Phase/attempt/fleet evidence retains its recorded API/client/test scope; unavailable infrastructure billing remains unverified."
       ],
-      "remaining": "Effective corrected provider ledger is authoritative; pod totals are legacy fallback; harness phases added once. Missing billing and earlier run identity remain explicit. Incomplete known prior spending now blocks further budgeted agent consumption. Future spending reservations, unrecorded legacy work, phase accounting and native/live verification remain. Checkpoint 25 reconciles corrected provider totals in task, per-pod and fleet APIs, including recorded zero. Phase attribution, legacy estimates, telemetry completeness, operator presentation and live proof remain.",
-      "finalSourceEvidence": "f93dd4d9a66bcf0a4ad174d0efc378d931239faf; checkpoint-114 full pipeline and checkpoint-115 native interactions; application source unchanged."
+      "remaining": "Native task accounting and missing/non-additive stage duration evidence pass. Phase/attempt/fleet evidence retains its recorded API/client/test scope; unavailable infrastructure billing remains unverified.",
+      "finalSourceEvidence": "f93dd4d9a66bcf0a4ad174d0efc378d931239faf; checkpoint-114 full pipeline and checkpoint-115 native interactions; application source unchanged.",
+      "historicalProgressNotes": "Effective corrected provider ledger is authoritative; pod totals are legacy fallback; harness phases added once. Missing billing and earlier run identity remain explicit. Incomplete known prior spending now blocks further budgeted agent consumption. Future spending reservations, unrecorded legacy work, phase accounting and native/live verification remain. Checkpoint 25 reconciles corrected provider totals in task, per-pod and fleet APIs, including recorded zero. Phase attribution, legacy estimates, telemetry completeness, operator presentation and live proof remain."
     },
     {
       "id": "W4.8",
@@ -2047,8 +2085,9 @@
         "checkpoint-120.md"
       ],
       "prerequisites": [],
-      "remaining": "No outstanding acceptance for this criterion within the approved local implementation and supported-surface scope. Unsupported collectors remain explicitly incomplete; no live paid judgment cohort or schedule conversion is required.",
-      "finalSourceEvidence": "15900d9e08a7e4ca786a6ad11ff81820fda14de4; CP117 clean full pipeline; CP115/117/120 native scan policy, retained reports, exact/empty scope and human triage interactions."
+      "remaining": "",
+      "finalSourceEvidence": "15900d9e08a7e4ca786a6ad11ff81820fda14de4; CP117 clean full pipeline; CP115/117/120 native scan policy, retained reports, exact/empty scope and human triage interactions.",
+      "historicalProgressNotes": "No outstanding acceptance for this criterion within the approved local implementation and supported-surface scope. Unsupported collectors remain explicitly incomplete; no live paid judgment cohort or schedule conversion is required."
     },
     {
       "id": "W5.2",
@@ -2081,8 +2120,9 @@
         "checkpoint-120.md"
       ],
       "prerequisites": [],
-      "remaining": "No outstanding acceptance for this criterion within the approved local implementation and supported-surface scope. Unsupported collectors remain explicitly incomplete; no live paid judgment cohort or schedule conversion is required.",
-      "finalSourceEvidence": "15900d9e08a7e4ca786a6ad11ff81820fda14de4; CP117 clean full pipeline; CP115/117/120 native scan policy, retained reports, exact/empty scope and human triage interactions."
+      "remaining": "",
+      "finalSourceEvidence": "15900d9e08a7e4ca786a6ad11ff81820fda14de4; CP117 clean full pipeline; CP115/117/120 native scan policy, retained reports, exact/empty scope and human triage interactions.",
+      "historicalProgressNotes": "No outstanding acceptance for this criterion within the approved local implementation and supported-surface scope. Unsupported collectors remain explicitly incomplete; no live paid judgment cohort or schedule conversion is required."
     },
     {
       "id": "W5.3",
@@ -2123,8 +2163,9 @@
         "checkpoint-120.md"
       ],
       "prerequisites": [],
-      "remaining": "No outstanding acceptance for this criterion within the approved local implementation and supported-surface scope. Unsupported collectors remain explicitly incomplete; no live paid judgment cohort or schedule conversion is required.",
-      "finalSourceEvidence": "15900d9e08a7e4ca786a6ad11ff81820fda14de4; CP117 clean full pipeline; CP115/117/120 native scan policy, retained reports, exact/empty scope and human triage interactions."
+      "remaining": "",
+      "finalSourceEvidence": "15900d9e08a7e4ca786a6ad11ff81820fda14de4; CP117 clean full pipeline; CP115/117/120 native scan policy, retained reports, exact/empty scope and human triage interactions.",
+      "historicalProgressNotes": "No outstanding acceptance for this criterion within the approved local implementation and supported-surface scope. Unsupported collectors remain explicitly incomplete; no live paid judgment cohort or schedule conversion is required."
     },
     {
       "id": "W5.4",
@@ -2163,8 +2204,9 @@
         "checkpoint-120.md"
       ],
       "prerequisites": [],
-      "remaining": "No outstanding acceptance for this criterion within the approved local implementation and supported-surface scope. Unsupported collectors remain explicitly incomplete; no live paid judgment cohort or schedule conversion is required.",
-      "finalSourceEvidence": "15900d9e08a7e4ca786a6ad11ff81820fda14de4; CP117 clean full pipeline; CP115/117/120 native scan policy, retained reports, exact/empty scope and human triage interactions."
+      "remaining": "",
+      "finalSourceEvidence": "15900d9e08a7e4ca786a6ad11ff81820fda14de4; CP117 clean full pipeline; CP115/117/120 native scan policy, retained reports, exact/empty scope and human triage interactions.",
+      "historicalProgressNotes": "No outstanding acceptance for this criterion within the approved local implementation and supported-surface scope. Unsupported collectors remain explicitly incomplete; no live paid judgment cohort or schedule conversion is required."
     },
     {
       "id": "W5.5",
@@ -2206,8 +2248,9 @@
         "checkpoint-120.md"
       ],
       "prerequisites": [],
-      "remaining": "No outstanding acceptance for this criterion within the approved local implementation and supported-surface scope. Unsupported collectors remain explicitly incomplete; no live paid judgment cohort or schedule conversion is required.",
-      "finalSourceEvidence": "15900d9e08a7e4ca786a6ad11ff81820fda14de4; CP117 clean full pipeline; CP115/117/120 native scan policy, retained reports, exact/empty scope and human triage interactions."
+      "remaining": "",
+      "finalSourceEvidence": "15900d9e08a7e4ca786a6ad11ff81820fda14de4; CP117 clean full pipeline; CP115/117/120 native scan policy, retained reports, exact/empty scope and human triage interactions.",
+      "historicalProgressNotes": "No outstanding acceptance for this criterion within the approved local implementation and supported-surface scope. Unsupported collectors remain explicitly incomplete; no live paid judgment cohort or schedule conversion is required."
     },
     {
       "id": "W5.6",
@@ -2253,8 +2296,9 @@
         "checkpoint-120.md"
       ],
       "prerequisites": [],
-      "remaining": "No outstanding acceptance for this criterion within the approved local implementation and supported-surface scope. Unsupported collectors remain explicitly incomplete; no live paid judgment cohort or schedule conversion is required.",
-      "finalSourceEvidence": "15900d9e08a7e4ca786a6ad11ff81820fda14de4; CP117 clean full pipeline; CP115/117/120 native scan policy, retained reports, exact/empty scope and human triage interactions."
+      "remaining": "",
+      "finalSourceEvidence": "15900d9e08a7e4ca786a6ad11ff81820fda14de4; CP117 clean full pipeline; CP115/117/120 native scan policy, retained reports, exact/empty scope and human triage interactions.",
+      "historicalProgressNotes": "No outstanding acceptance for this criterion within the approved local implementation and supported-surface scope. Unsupported collectors remain explicitly incomplete; no live paid judgment cohort or schedule conversion is required."
     },
     {
       "id": "W6.1",
@@ -2350,13 +2394,15 @@
         "checkpoint-109.md",
         "checkpoint-110.md",
         "checkpoint-119.md",
-        "checkpoint-121.md"
+        "checkpoint-121.md",
+        "checkpoint-123.md"
       ],
       "prerequisites": [
-        "Actual release directory c0e5a5b4 contains Git HEAD 2523ed7b with tracked changes. Incremental deployment can preserve copied Git metadata, so directory/checkout identity is not loaded-code proof. Affected image digest and host Node are recorded; actual sandbox CLI/capability and final intended release provenance remain unverified."
+        "CP123 observes running service directory /opt/autopod/releases/ca92847a/packages/daemon, unchanged active DB device/inode 2049/13107203 held by the service, and Node v22.23.1. This is directory/process identity, not attestation of loaded bundle bytes or actual sandbox CLI/capabilities. Those requirements remain unverified."
       ],
-      "remaining": "Coding, validation/retry, review-only and completion recovery provenance are locally implemented. Sandbox effective cgroup resources are read without substituting requests; image and network identity remain unavailable. Checkpoint 51 adds preflight to direct agent Resume and missing-session fallback paths. Side effects after execution begins, actual reviewer CLI identity, complete receipt history/operator coverage, native interaction and live acceptance remain outstanding. Checkpoint 76 adds legacy Tier 2 API preparation with explicitly unverified provider/account and actual-adapter model resolution; host CLI credentials/remote model identity, SDK identity and gated native/live acceptance remain outstanding. Checkpoint 82 records observed host CLI path/version at dispatch with explicit unknown credentials/model resolution; hung filesystem metadata, binary/transitive identity, live rollout and native interaction remain unverified.",
-      "finalSourceEvidence": "90a61141a6a8ed6205aae144bbb99f8c9f0f9ec5; see checkpoint-106.md for executed checks, carried forward surface proof and limits."
+      "remaining": "CP123 observes running service directory /opt/autopod/releases/ca92847a/packages/daemon, unchanged active DB device/inode 2049/13107203 held by the service, and Node v22.23.1. This is directory/process identity, not attestation of loaded bundle bytes or actual sandbox CLI/capabilities. Those requirements remain unverified.",
+      "finalSourceEvidence": "90a61141a6a8ed6205aae144bbb99f8c9f0f9ec5; see checkpoint-106.md for executed checks, carried forward surface proof and limits.",
+      "historicalProgressNotes": "Coding, validation/retry, review-only and completion recovery provenance are locally implemented. Sandbox effective cgroup resources are read without substituting requests; image and network identity remain unavailable. Checkpoint 51 adds preflight to direct agent Resume and missing-session fallback paths. Side effects after execution begins, actual reviewer CLI identity, complete receipt history/operator coverage, native interaction and live acceptance remain outstanding. Checkpoint 76 adds legacy Tier 2 API preparation with explicitly unverified provider/account and actual-adapter model resolution; host CLI credentials/remote model identity, SDK identity and gated native/live acceptance remain outstanding. Checkpoint 82 records observed host CLI path/version at dispatch with explicit unknown credentials/model resolution; hung filesystem metadata, binary/transitive identity, live rollout and native interaction remain unverified."
     },
     {
       "id": "W6.2",
@@ -2390,13 +2436,15 @@
         "checkpoint-117.md",
         "checkpoint-119.md",
         "checkpoint-121.md",
-        "checkpoint-122.md"
+        "checkpoint-122.md",
+        "checkpoint-123.md"
       ],
       "prerequisites": [
-        "Native missing-readiness/approval guard and both missing/populated execution-provenance views are verified. Actual loaded hosted source and required release/runtime identity remain unverified; HTTP 200 and synthetic fields do not satisfy that gate."
+        "CP123 observes running service directory /opt/autopod/releases/ca92847a/packages/daemon, unchanged active DB device/inode 2049/13107203 held by the service, and Node v22.23.1. This is directory/process identity, not attestation of loaded bundle bytes or actual sandbox CLI/capabilities. Those requirements remain unverified."
       ],
-      "remaining": " Checkpoint 48 verifies managed 150/152 upgrades and copy-only conversion of exact unpublished native checkpoint schemas 151/158/163. Live backup scope/freshness, deployed bytes and activation remain unverified; checkpoint 49 integrates and fully validates main f646cfcc locally; current deployed-source verification remains outstanding.",
-      "finalSourceEvidence": "15900d9e08a7e4ca786a6ad11ff81820fda14de4; clean full pipeline and 357 Swift tests; direct native case/source boundaries in checkpoint-117 receipt."
+      "remaining": "CP123 observes running service directory /opt/autopod/releases/ca92847a/packages/daemon, unchanged active DB device/inode 2049/13107203 held by the service, and Node v22.23.1. This is directory/process identity, not attestation of loaded bundle bytes or actual sandbox CLI/capabilities. Those requirements remain unverified.",
+      "finalSourceEvidence": "15900d9e08a7e4ca786a6ad11ff81820fda14de4; clean full pipeline and 357 Swift tests; direct native case/source boundaries in checkpoint-117 receipt.",
+      "historicalProgressNotes": "Checkpoint 48 verifies managed 150/152 upgrades and copy-only conversion of exact unpublished native checkpoint schemas 151/158/163. Live backup scope/freshness, deployed bytes and activation remain unverified; checkpoint 49 integrates and fully validates main f646cfcc locally; current deployed-source verification remains outstanding."
     },
     {
       "id": "W6.3",
@@ -2420,9 +2468,10 @@
         "checkpoint-122.md"
       ],
       "prerequisites": [],
-      "remaining": " Checkpoint 48 verifies managed 150/152 upgrades and copy-only conversion of exact unpublished native checkpoint schemas 151/158/163. Live backup scope/freshness, deployed bytes and activation remain unverified; checkpoint 49 integrates and fully validates main f646cfcc locally; current deployed-source verification remains outstanding.",
+      "remaining": "",
       "finalSourceEvidence": "90a61141a6a8ed6205aae144bbb99f8c9f0f9ec5; see checkpoint-106.md for executed checks, carried forward surface proof and limits.",
-      "verificationScope": "Observed intended active DB identity plus one recent standard backup with matching 48-table schema/watermark signatures. Not full row equality or retroactive creation-receipt proof."
+      "verificationScope": "Observed intended active DB identity plus one recent standard backup with matching 48-table schema/watermark signatures. Not full row equality or retroactive creation-receipt proof.",
+      "historicalProgressNotes": "Checkpoint 48 verifies managed 150/152 upgrades and copy-only conversion of exact unpublished native checkpoint schemas 151/158/163. Live backup scope/freshness, deployed bytes and activation remain unverified; checkpoint 49 integrates and fully validates main f646cfcc locally; current deployed-source verification remains outstanding."
     },
     {
       "id": "W6.4",
@@ -2453,9 +2502,10 @@
         "checkpoint-108.md"
       ],
       "prerequisites": [],
-      "remaining": "New version-2 receipts cover every actual SQLite table. Version-1 subset verification stays explicit. Hosted backup freshness and restore acceptance remain unverified.",
+      "remaining": "",
       "finalSourceEvidence": "90a61141a6a8ed6205aae144bbb99f8c9f0f9ec5; see checkpoint-106.md for executed checks, carried forward surface proof and limits.",
-      "verificationScope": "Local freshness/headroom implementation and safeguard regressions, observed hosted headroom, and actual sampled-restore freshness/headroom admission. Not authorization or a reservation for future cutover."
+      "verificationScope": "Local freshness/headroom implementation and safeguard regressions, observed hosted headroom, and actual sampled-restore freshness/headroom admission. Not authorization or a reservation for future cutover.",
+      "historicalProgressNotes": "New version-2 receipts cover every actual SQLite table. Version-1 subset verification stays explicit. Hosted backup freshness and restore acceptance remain unverified."
     },
     {
       "id": "W6.5",
@@ -2486,9 +2536,10 @@
         "checkpoint-108.md"
       ],
       "prerequisites": [],
-      "remaining": "New version-2 receipts cover every actual SQLite table. Version-1 subset verification stays explicit. Hosted backup freshness and restore acceptance remain unverified.",
+      "remaining": "",
       "finalSourceEvidence": "90a61141a6a8ed6205aae144bbb99f8c9f0f9ec5; see checkpoint-106.md for executed checks, carried forward surface proof and limits.",
-      "verificationScope": "Actual one-backup isolated restore, checksum/integrity/foreign keys, rollback-only private write, active-schema/watermark comparison and observed private-copy removal. Creation provenance remains explicitly unavailable."
+      "verificationScope": "Actual one-backup isolated restore, checksum/integrity/foreign keys, rollback-only private write, active-schema/watermark comparison and observed private-copy removal. Creation provenance remains explicitly unavailable.",
+      "historicalProgressNotes": "New version-2 receipts cover every actual SQLite table. Version-1 subset verification stays explicit. Hosted backup freshness and restore acceptance remain unverified."
     },
     {
       "id": "G.1",
@@ -2534,10 +2585,11 @@
         "checkpoint-99.md",
         "checkpoint-106.md",
         "closure-report.md",
-        "checkpoint-107.md"
+        "checkpoint-107.md",
+        "checkpoint-123.md"
       ],
       "prerequisites": [
-        "Current release directory and complete migration-file manifest correspond to main c0e5a5b4. Loaded bundle/safeguard bytes remain unverified; local final-source regression evidence is unchanged."
+        "CP123 observes running service directory /opt/autopod/releases/ca92847a/packages/daemon, unchanged active DB device/inode 2049/13107203 held by the service, and Node v22.23.1. This is directory/process identity, not attestation of loaded bundle bytes or actual sandbox CLI/capabilities. Those requirements remain unverified."
       ],
       "finalSourceEvidence": "90a61141a6a8ed6205aae144bbb99f8c9f0f9ec5; see checkpoint-106.md for executed checks, carried forward surface proof and limits."
     },
@@ -2588,14 +2640,15 @@
         "closure-report.md",
         "checkpoint-107.md",
         "checkpoint-116.md",
-        "checkpoint-118.md"
+        "checkpoint-118.md",
+        "checkpoint-123.md"
       ],
       "prerequisites": [
-        "Actual intended DB reports schema maximum 152 and 150 applied-version rows; its on-disk migration manifest matches main c0e5a5b4. This does not prove all applied values or isolated upgrade compatibility. Preserve local unique numbering through 182, verify actual-copy compatibility and refresh branch inventory before publication.",
-        "Checkpoint 116 packages the actual candidate migration runner and verifies eight synthetic copy/fault/CLI cases. The historical intended-database snapshot has not been upgraded; the final bounded hosted transport/watchdog/cleanup approval payload remains to be sealed."
+        "CP122 integrated main b75fbf0b and verified managed 150/152/153 plus prior native migrations through 183. CP123 approved hosted-copy attempt refused before copy: service release changed and pinned backup was removed. Newly observed schema-153 snapshot is pinned in the updated packet; its isolated candidate upgrade remains unverified."
       ],
-      "remaining": "Managed 142-150 definitions retained as inert baseline; unpublished native additions renumbered 151-158. Combined schema upgrade preserves native/managed data locally. Exact remote migration-byte verification awaits approved read-only inspection; no live migration was performed. Checkpoint 48 verifies managed 150/152 upgrades and copy-only conversion of exact unpublished native checkpoint schemas 151/158/163. Live backup scope/freshness, deployed bytes and activation remain unverified; checkpoint 49 integrates and fully validates main f646cfcc locally; current deployed-source verification remains outstanding.",
-      "finalSourceEvidence": "90a61141a6a8ed6205aae144bbb99f8c9f0f9ec5; see checkpoint-106.md for executed checks, carried forward surface proof and limits."
+      "remaining": "CP122 integrated main b75fbf0b and verified managed 150/152/153 plus prior native migrations through 183. CP123 approved hosted-copy attempt refused before copy: service release changed and pinned backup was removed. Newly observed schema-153 snapshot is pinned in the updated packet; its isolated candidate upgrade remains unverified.",
+      "finalSourceEvidence": "90a61141a6a8ed6205aae144bbb99f8c9f0f9ec5; see checkpoint-106.md for executed checks, carried forward surface proof and limits.",
+      "historicalProgressNotes": "Managed 142-150 definitions retained as inert baseline; unpublished native additions renumbered 151-158. Combined schema upgrade preserves native/managed data locally. Exact remote migration-byte verification awaits approved read-only inspection; no live migration was performed. Checkpoint 48 verifies managed 150/152 upgrades and copy-only conversion of exact unpublished native checkpoint schemas 151/158/163. Live backup scope/freshness, deployed bytes and activation remain unverified; checkpoint 49 integrates and fully validates main f646cfcc locally; current deployed-source verification remains outstanding."
     },
     {
       "id": "G.3",
@@ -2820,10 +2873,11 @@
         "checkpoint-117.md",
         "checkpoint-118.md",
         "checkpoint-121.md",
-        "checkpoint-122.md"
+        "checkpoint-122.md",
+        "checkpoint-123.md"
       ],
       "prerequisites": [
-        "Checkpoint 118 exact source-only upload/isolated-copy upgrade packet is locally verified and awaiting explicit execution approval. No hosted upgrade/deployment/publication or paid canary has occurred. Remaining release and sandbox prerequisites are in the release packet."
+        "CP122 hosted-copy approval was executed once and refused in preflight. CP123 replacement packet pins observed release ca92847a and new schema-153 backup; explicit approval of the replacement inputs is pending. No deployment/publication or paid canary occurred; loaded/rollback identity and sandbox requirements remain in the release packet."
       ],
       "finalSourceEvidence": "15900d9e08a7e4ca786a6ad11ff81820fda14de4; clean full pipeline and 357 Swift tests; direct native case/source boundaries in checkpoint-117 receipt."
     },
@@ -2853,7 +2907,8 @@
         "checkpoint-119.md",
         "checkpoint-120.md",
         "checkpoint-121.md",
-        "checkpoint-122.md"
+        "checkpoint-122.md",
+        "checkpoint-123.md"
       ],
       "prerequisites": [
         "All 43 criteria remain mapped. W5 and mapped operator interactions are verified. Hosted snapshot compatibility, loaded-source evidence, historical API causality and actual-image capability remain outstanding; whole-goal completion is not claimed."
@@ -2861,7 +2916,7 @@
       "finalSourceEvidence": "15900d9e08a7e4ca786a6ad11ff81820fda14de4; clean full pipeline and 357 Swift tests; direct native case/source boundaries in checkpoint-117 receipt."
     }
   ],
-  "lastCheckpoint": "checkpoint-122.md",
+  "lastCheckpoint": "checkpoint-123.md",
   "migrationLineage": {
     "managedBaseline": "142-153; authoritative managed migration 153 preserved from main b75fbf0b7e2c4ea455838a6e4df6537665a7a8cc",
     "nativeCurrent": "164-183; prior native 182 upgraded by idempotent managed GitHub reads bridge 183; representative managed 150/152/153 and copy-only native lineage verified",
