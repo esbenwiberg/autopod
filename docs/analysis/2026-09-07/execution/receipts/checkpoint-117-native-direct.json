@@ -98,9 +98,7 @@
         "baseRef": "main",
         "judgment": "none",
         "headRef": "main",
-        "scanners": [
-          "secrets"
-        ],
+        "scanners": ["secrets"],
         "windowHours": 24,
         "version": 1
       },

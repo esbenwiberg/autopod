@@ -10,6 +10,6 @@ CREATE TABLE IF NOT EXISTS managed_github_reads (
   FOREIGN KEY (pod_id) REFERENCES managed_pods(pod_id)
 );
 
--- Record 153 only after its definition has executed; fresh managed databases
+-- Record 153 only after its definition has executed. Fresh managed databases
 -- already have this row and keep their original application timestamp.
 INSERT OR IGNORE INTO schema_version(version) VALUES (153);
