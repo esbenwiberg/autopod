@@ -1,8 +1,10 @@
 # Bounded managed provider composition
 
-The native CLI lane remains dark unless startup receives both the existing strict
-`AUTOPOD_MANAGED_CLI` binding and a complete `AUTOPOD_MANAGED_ACCEPTANCE`
-single-job contract. Importing `dist/managed.js` does not start a listener, discover
+The native CLI lane remains dark unless startup receives the existing strict
+`AUTOPOD_MANAGED_CLI` binding and exactly one reviewed runtime contract:
+`AUTOPOD_MANAGED_ACCEPTANCE` for the retained single-job canary or
+`AUTOPOD_MANAGED_PROFILE_SET` for the additive Voice RPI route. Supplying both is
+an error. Importing `dist/managed.js` does not start a listener, discover
 credentials, select an account or launch a worker.
 
 `composeManagedRuntime` connects independent pinned Git copies, verified artifact
@@ -91,6 +93,43 @@ still enforces expiry and stale/revoked quota leases in both modes. Request/time
 mode alone does not stop based on token count. Abort never proves remote generation
 ceased. An uncertain request is never retried or replaced.
 
+## Reviewed Voice RPI profile set
+
+`AUTOPOD_MANAGED_PROFILE_SET` is a secretless, strict startup document generated
+alongside Dispatcher's Voice configuration. It binds one installation, one exact
+mirror revision, one digest-pinned worker image, and up to eight profile snapshots.
+Each stage fixes its task kind, sole artifact path, ordered input names, and source
+mode. Startup rejects duplicate profile IDs or digests, mutable images, relative
+mirrors, route or revision drift, network destinations, widened identity bindings,
+and source stages without the reviewed source broker. No profile is inferred from
+model, account, runtime, target, or repository values.
+
+The agent channel admits request/time profiles only. It preserves the Codex
+Responses tool protocol across several bounded provider requests while continuing
+to replace the route, disable truncation and retries, and keep provider credentials
+on the daemon host. The container has denied external egress and receives a fresh
+home. Read-only stages mount the exact mirror read-only; a source-producing stage
+gets only its attempt workspace. Dispatcher remains responsible for sequencing
+research, plan, implementation, verification, artifact lineage, completion,
+notifications, and the final source-delivery decision.
+
+An optional GitHub issue-read binding installs a credential-free `gh` subset in
+the worker. It supports issue view, issue search, and issue-comment reads for one
+exact `owner/repo`. Requests cross a separate loopback spool into a durable host
+journal. The gateway rechecks installation, pod, grant revision, revocation,
+effect, identity digest, and repository before resolving daemon GitHub auth. It
+uses GET only, refuses redirects, bounds responses to 1 MiB even without a
+Content-Length header, and never stores or forwards the reusable token. Cached
+responses are returned only under still-active authority.
+
+Source delivery keeps the existing freeze, independent verification, and
+idempotent finalization path. The worker can create a local commit in its isolated
+attempt workspace but receives no GitHub credential and cannot push. AutoPod
+freezes the candidate; Dispatcher verifies it with its configured verifier and
+requests finalization using the digest of one reviewed draft body. The host broker
+then rechecks the candidate and grant before the exact worker branch and draft are
+created.
+
 ## Deployment boundary
 
 `AUTOPOD_MANAGED_ACCEPTANCE` has no general enable flag. It contains one canonical
@@ -109,6 +148,12 @@ managed Sandbox ledger and Azure Blob store, resumes matching durable work befor
 listener starts, and closes provider gateways before the database. Removing the
 acceptance environment value and restarting returns the CLI lane to dark behavior.
 Source validation is separate from deployment and live Dispatcher/provider evidence.
+
+The profile-set route is also absent by default. Its environment document enables
+only the listed snapshots and exact mirror revision. Removing the variable and
+restarting returns managed execution to the dark CLI composition. Structural,
+build, and deterministic provider tests do not establish paid-provider, Azure,
+installed Voice, microphone/device, or long-session acceptance.
 
 ## Concrete report-only Codex channel
 

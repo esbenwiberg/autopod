@@ -2,7 +2,7 @@ import { expect, it, vi } from 'vitest';
 import type { ContainerManager } from '../interfaces/container-manager.js';
 import { fixture } from '../test-utils/managed-fixture.js';
 import { sha256 } from './canonical.js';
-import { ContainerCodexChannel, codexReportCommand } from './codex-channel.js';
+import { ContainerCodexChannel, codexAgentCommand, codexReportCommand } from './codex-channel.js';
 function setup() {
   const f = fixture();
   const request = structuredClone(f.request);
@@ -41,6 +41,37 @@ it('rejects an incompatible immutable-image Codex CLI before installing helpers'
   ).rejects.toThrow('cli-incompatible');
   expect(exec).toHaveBeenCalledTimes(1);
   expect(exec.mock.calls[0]).toEqual(['ref', ['codex', 'exec', '--help'], { user: 'root' }]);
+});
+
+it('admits a longer source-producing agent only through its explicit reviewed mode', async () => {
+  const { request, exec } = setup();
+  request.effectiveGrant.budget = {
+    mode: 'request-time',
+    expiresAt: 4_102_444_800,
+    maxProviderRequests: 8,
+    maxDurationSeconds: 900,
+  };
+  request.outputs.source.mode = 'draft-pr';
+  // Use the actual manager-shaped fixture rather than exposing provider credentials.
+  const manager = { execInContainer: exec } as unknown as ContainerManager;
+  const reviewed = new ContainerCodexChannel(manager, request.route, 0, {
+    mode: 'agent',
+    maximumDurationSeconds: 900,
+  });
+  await expect(reviewed.preflight(request)).resolves.toBeUndefined();
+  expect(
+    codexAgentCommand(request.route, 'fixture-repo', 'implementation.md', true, ['research']),
+  ).toContain('/inputs/research');
+  expect(
+    codexAgentCommand(
+      request.route,
+      'fixture-repo',
+      'investigation.md',
+      false,
+      [],
+      'context-and/portfolio-simulation',
+    ),
+  ).toContain('context-and/portfolio-simulation');
 });
 
 it.each([false, true])('polls one digest-bound request; tampered=%s', async (tampered) => {
@@ -98,6 +129,93 @@ it.each([false, true])('polls one digest-bound request; tampered=%s', async (tam
     expect(codexReportCommand(request.route, 'fixture-repo', 'research')).toContain(
       '/inputs/research',
     );
+  } finally {
+    close?.();
+    vi.useRealTimers();
+  }
+});
+
+it('routes sequential agent requests and an independently bound GitHub read', async () => {
+  vi.useFakeTimers();
+  const { request, exec } = setup();
+  const identity = { alias: 'portfolio-read', bindingDigest: `sha256:${'b'.repeat(64)}` };
+  request.effectiveGrant.budget = {
+    mode: 'request-time',
+    expiresAt: 4_102_444_800,
+    maxProviderRequests: 8,
+    maxDurationSeconds: 900,
+  };
+  request.effectiveGrant.scope.identityBindings = [identity];
+  request.effectiveGrant.scope.allowedEffects.push('github.issue.read');
+  const channel = new ContainerCodexChannel(
+    { execInContainer: exec } as unknown as ContainerManager,
+    request.route,
+    0,
+    { mode: 'agent', maximumDurationSeconds: 900, githubRead: identity },
+  );
+  const providerBodies = ['first', 'second'].map((content) =>
+    JSON.stringify({
+      model: request.route.model,
+      input: [{ role: 'user', content }],
+      reasoning: { effort: request.route.reasoning },
+      stream: true,
+      store: false,
+    }),
+  );
+  const expectedBodies = [...providerBodies];
+  let githubRead = false;
+  const writes: string[][] = [];
+  exec.mockImplementation(async (_ref, argv) => {
+    if (argv[0] === 'codex')
+      return { exitCode: 0, stdout: '--ephemeral --output-last-message --sandbox', stderr: '' };
+    const code = argv[2] ?? '';
+    if (code.includes('urllib.request')) return { exitCode: 0, stdout: '204', stderr: '' };
+    if (code.includes('p.stat().st_size')) {
+      const prefix = argv[4];
+      const body =
+        prefix === 'github-'
+          ? githubRead
+            ? undefined
+            : '{"operation":"issue-view"}'
+          : providerBodies.shift();
+      if (prefix === 'github-' && body) githubRead = true;
+      if (!body) return { exitCode: 0, stdout: '', stderr: '' };
+      return {
+        exitCode: 0,
+        stdout: JSON.stringify({
+          body,
+          digest: sha256(body).slice(7),
+          ticket: prefix === 'github-' ? 'c'.repeat(36) : `${providerBodies.length}`.repeat(36),
+        }),
+        stderr: '',
+      };
+    }
+    if (code.includes('delivery-binding')) writes.push(argv);
+    return { exitCode: 0, stdout: '', stderr: '' };
+  });
+  const invoke = vi.fn(async () => ({ state: 'observed' as const, value: 'data: ok\n\n' }));
+  const invokeGitHub = vi.fn(async () => '{"number":42}');
+  let close: (() => void) | undefined;
+  try {
+    await channel.preflight(request);
+    close = await channel.attach({
+      podId: 'managed-one',
+      runtimeRef: 'ref',
+      stateRoot: '/run/dispatcher-managed-one',
+      invoke,
+      invokeGitHub,
+    });
+    await vi.advanceTimersByTimeAsync(2_100);
+    expect(invoke).toHaveBeenCalledTimes(2);
+    expect(invoke.mock.calls.map((call) => call[0])).toEqual([
+      `codex-${sha256(expectedBodies[0] ?? '').slice(7)}`,
+      `codex-${sha256(expectedBodies[1] ?? '').slice(7)}`,
+    ]);
+    expect(invokeGitHub).toHaveBeenCalledWith(
+      `github-${sha256('{"operation":"issue-view"}').slice(7)}`,
+      '{"operation":"issue-view"}',
+    );
+    expect(writes.some((argv) => argv[4] === 'github-')).toBe(true);
   } finally {
     close?.();
     vi.useRealTimers();

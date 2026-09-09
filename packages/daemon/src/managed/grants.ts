@@ -23,6 +23,8 @@ export interface ManagedAdmission {
   targets: readonly ('local' | 'sandbox')[];
   /** Optional single-job boundary. When present, no other request can be admitted. */
   expectedRequest?: ManagedPodRequest;
+  /** Additional reviewed profile contract over task, inputs, outputs and verifier. */
+  requestPolicy?: (request: ManagedPodRequest) => void;
 }
 function checkDigest(value: object, field: string): void {
   const record = value as Record<string, unknown>;
@@ -84,6 +86,7 @@ export function admitManagedRequest(
 ): void {
   if (policy.expectedRequest && canonical(request) !== canonical(policy.expectedRequest))
     throw new Error('managed-request-not-reviewed');
+  policy.requestPolicy?.(request);
   const profile = policy.profiles.get(request.profileSnapshot.snapshotDigest);
   if (!profile || canonical(profile) !== canonical(request.profileSnapshot))
     throw new Error('managed-profile-not-reviewed');

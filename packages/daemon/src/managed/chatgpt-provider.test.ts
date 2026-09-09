@@ -55,6 +55,47 @@ it('uses exactly one pinned ChatGPT request and reports real returned usage with
   expect(body.tools).toEqual([]);
   expect(body.store).toBe(false);
 });
+
+it('returns validated tool-call SSE unchanged for the explicit agent transport', async () => {
+  const x = setup();
+  const functionCall = {
+    id: 'call-item',
+    type: 'function_call',
+    call_id: 'call-one',
+    name: 'shell',
+    arguments: '{"command":"pwd"}',
+    status: 'completed',
+  };
+  x.response.output = [functionCall] as never;
+  const body = `data: ${JSON.stringify({ type: 'response.output_item.done', output_index: 0, item: functionCall })}\n\ndata: ${JSON.stringify({ type: 'response.completed', response: x.response })}\n\n`;
+  x.fetcher.mockResolvedValue(
+    new Response(body, { headers: { 'content-type': 'text/event-stream' } }),
+  );
+  const agent = new ChatGptReportTransport(
+    x.route,
+    'account-one',
+    x.credential,
+    x.fetcher,
+    x.diagnostic,
+    'agent',
+  );
+  const result = await agent.generate(
+    x.route,
+    JSON.stringify({
+      model: x.route.model,
+      input: [{ role: 'user', content: 'Inspect.' }],
+      reasoning: { effort: x.route.reasoning },
+      tools: [{ type: 'function', name: 'shell', parameters: {} }],
+      stream: true,
+      store: false,
+    }),
+    0,
+    new AbortController().signal,
+    () => {},
+  );
+  expect(result.value).toBe(body);
+  expect(result.consumedTokens).toBe(5010);
+});
 it.each(['identity', 'mode', 'token'])('rejects credential %s before HTTP', async (kind) => {
   const x = setup();
   const c = await x.credential();

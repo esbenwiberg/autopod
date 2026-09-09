@@ -1,6 +1,6 @@
 """Root-owned, per-container loopback endpoint. No provider network or credentials.
 
-The daemon retrieves one bounded request through trusted exec and publishes its
+The daemon retrieves bounded requests through trusted exec and publishes each
 response. The worker cannot access this root-owned spool or refresh its quota lease.
 """
 import fcntl
@@ -63,7 +63,8 @@ def serve(root, port, lifetime):
 
         def handle_post(self):
             self.connection.settimeout(5)
-            if self.path != '/v1/responses' or self.headers.get('Authorization') or self.headers.get('Transfer-Encoding'):
+            github = self.path == '/github'
+            if self.path not in ('/v1/responses', '/github') or self.headers.get('Authorization') or self.headers.get('Transfer-Encoding'):
                 self.reply(403)
                 return
             try:
@@ -74,20 +75,19 @@ def serve(root, port, lifetime):
                 if len(data) != length:
                     raise ValueError('truncated')
                 raw = data.decode('utf8')
+                prefix = 'github-' if github else 'channel-'
+                if github and not (root / 'github-enabled').exists():
+                    self.reply(403)
+                    return
                 request = {'digest': hashlib.sha256(data).hexdigest(), 'body': raw, 'ticket': str(uuid.uuid4())}
-                if (root / 'channel-request.json').exists():
-                    prior = json.loads((root / 'channel-request.json').read_text())
-                    if prior['digest'] != request['digest'] or prior['body'] != raw:
-                        self.reply(409)
-                        return
                 # Each HTTP delivery needs a fresh host authority check. Only provider
                 # execution is replayed from the durable gateway journal.
-                atomic(root / 'channel-request.json', request)
+                atomic(root / (prefix + 'request.json'), request)
                 while time.monotonic() < deadline:
                     if (root / 'revoked').exists() or (root / 'channel-closed').exists():
                         self.reply(410)
                         return
-                    response = root / 'channel-response.json'
+                    response = root / (prefix + 'response.json')
                     if response.exists():
                         result = json.loads(response.read_text())
                         if result.get('ticket') != request['ticket']:
@@ -123,4 +123,4 @@ if __name__ == '__main__':
     if root.is_symlink() or not root.is_dir() or root.stat().st_uid != os.getuid() or root.stat().st_mode & 0o077:
         raise RuntimeError('channel-root-not-private')
     os.umask(0o077)
-    serve(root, int(sys.argv[2]), min(180, max(1, int(sys.argv[3]))))
+    serve(root, int(sys.argv[2]), min(3600, max(1, int(sys.argv[3]))))
