@@ -1,0 +1,3 @@
+Supplemental run: not accepted; no interaction result.
+	NativeInteractionTests-Runner (35398) encountered an error (The test runner failed to initialize for UI testing. (Underlying Error: Authentication canceled. System authentication is running.))
+** TEST FAILED **

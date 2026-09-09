@@ -1,12 +1,14 @@
 # Targeted remaining acceptance prerequisites
 
+**Current status (checkpoint 115): Section A was approved and completed in checkpoint 110. It is retained below as a historical payload description, not a new approval request.** The affected image is now pinned to dataverse-harness digest `sha256:4b836cdabc71ffd40aef564b65b6b16564c5312770130bc59251a732078c9d77`. Sections B/C still require access and a finalized separately approved canary. The current [release packet](release-and-acceptance-packet.md) supersedes stale source and prerequisite statements below.
+
 Latest update: [checkpoint 110](checkpoint-110.md) fulfills the targeted hosted read, pins the affected sandbox image and records the release-label/dirty-checkout mismatch. Native UI interaction now works: a real failed-reply bug was reproduced and fixed. The application candidate has changed after the old 90a61141 packet; full validation and remaining native acceptance continue. No sandbox/role/publication/deployment authority is implied.
 
-Checkpoint 109 fulfilled the approved runtime discovery. It established the configured sandbox group, one current profile image digest and historical disk-full errors. It did not establish the historical API cause, affected profiles' images or canary access. **Only section A below requests a new approval. Sections B and C describe prerequisites; approving A does not grant roles or authorize a paid canary.**
+Checkpoint 109 fulfilled the approved runtime discovery. It established the configured sandbox group, one current profile image digest and historical disk-full errors. It did not establish the historical API cause, affected profiles' images or canary access. Section A describes the already fulfilled approval. Sections B and C describe separate remaining prerequisites; the completed approval did not grant roles or authorize a paid canary.
 
-## A. Requested: one focused read on the pinned VM
+## A. Completed: one focused read on the pinned VM
 
-[Exact payload](fixtures/inspect-targeted-acceptance-metadata.py), pinned in [the manifest](receipts/checkpoint-109-targeted-manifest.json). It is prepared and locally tested, **unrun and unapproved**.
+[Exact payload](fixtures/inspect-targeted-acceptance-metadata.py), pinned in [the manifest](receipts/checkpoint-109-targeted-manifest.json). It was locally tested, explicitly approved and executed once in checkpoint 110.
 
 Target: VM `autopod-daemon`, immutable VM ID `3addc9bc-4812-4892-98d6-c40d5ab893c0`, subscription `06bb959b-9458-41a6-bdf5-77cc12feaab9`, resource group `ewi-sandboxes`. Recheck ARM identity before one Azure Run Command invocation. Guest time limit 60 seconds, exported JSON at most 3,500 bytes. Additional provider/sandbox spend **$0**; existing VM billing continues.
 

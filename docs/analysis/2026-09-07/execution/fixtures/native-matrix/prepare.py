@@ -7,6 +7,7 @@ parser = argparse.ArgumentParser()
 parser.add_argument('output', type=Path)
 parser.add_argument('--upstream-port', type=int, default=31993)
 parser.add_argument('--proxy-port', type=int, default=31994)
+parser.add_argument('--include-supplemental', action='store_true', help='Include three pending acceptance cases')
 args = parser.parse_args()
 assert 1024 <= args.upstream_port <= 65535 and 1024 <= args.proxy_port <= 65535
 assert args.upstream_port != args.proxy_port
@@ -20,7 +21,10 @@ for template, target in [('project.template.yml','project.yml'), ('MatrixTests.s
     value = (here/template).read_text().replace('__SOURCE_ROOT__', str(root))
     value = value.replace('31993',str(args.upstream_port)).replace('31994',str(args.proxy_port))
     (out/target).write_text(value)
+if args.include_supplemental:
+    value = (here/'SupplementalMatrixTests.swift').read_text().replace('31994', str(args.proxy_port))
+    (out/'Tests/SupplementalMatrixTests.swift').write_text(value)
 subprocess.run(['xcodegen','generate','--spec',str(out/'project.yml'),'--project',str(out)],check=True)
 print('Prepared local-only UI test project at ' + str(out))
 print('Start generated native-matrix-proxy.mjs; it owns its loopback fixture child')
-print('Run selected NativeInteractionTests/MatrixTests cases; scan interaction is still unverified')
+print('Run NativeInteractionTests/MatrixTests; scope and remaining cases are recorded in the current acceptance ledger')

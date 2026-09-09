@@ -1,5 +1,7 @@
 # Partial closure report
 
+Current update: [checkpoint 115](checkpoint-115.md) verifies twelve native interactions together on `f93dd4d9`, including scan selection, rerun error clearance and failed/pass/failed history. The [current release packet](release-and-acceptance-packet.md) and 388-path candidate manifest supersede earlier proposals. Remaining native and external acceptance is open; the supplemental native runner is currently blocked by macOS authentication. All earlier “Current/Latest” paragraphs and baseline tables below describe dated evidence.
+
 Current update: [checkpoint 114](checkpoint-114.md) clears the observed stale native rerun error after a successful receipt. The clean full pipeline and 356 Swift tests pass on `f93dd4d9`; the new visual assertion is unrun while native activation is unavailable. Native/external acceptance remains open.
 
 Current update: [checkpoint 113](checkpoint-113.md) records clean `3aa939d5` full validation, the same-source negative matched replay and five renewed mobile fault-path interactions. It narrows the historical fixture warning after an evidence audit. Remaining native and external acceptance is still required; the goal is incomplete.

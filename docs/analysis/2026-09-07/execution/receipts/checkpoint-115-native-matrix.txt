@@ -1,0 +1,36 @@
+Test Suite 'All tests' started at 2026-09-09 12:14:20.020.
+Test Suite 'NativeInteractionTests.xctest' started at 2026-09-09 12:14:20.021.
+Test Suite 'MatrixTests' started at 2026-09-09 12:14:20.021.
+Test Case '-[NativeInteractionTests.MatrixTests testCostTree]' started.
+Test Case '-[NativeInteractionTests.MatrixTests testCostTree]' passed (14.291 seconds).
+Test Case '-[NativeInteractionTests.MatrixTests testDetailGuidanceDisclosure]' started.
+Test Case '-[NativeInteractionTests.MatrixTests testDetailGuidanceDisclosure]' passed (12.078 seconds).
+Test Case '-[NativeInteractionTests.MatrixTests testFailedReplyStillRetainsDecision]' started.
+Test Case '-[NativeInteractionTests.MatrixTests testFailedReplyStillRetainsDecision]' passed (12.169 seconds).
+Test Case '-[NativeInteractionTests.MatrixTests testGuidanceSendDoesNotClaimAcknowledgement]' started.
+Test Case '-[NativeInteractionTests.MatrixTests testGuidanceSendDoesNotClaimAcknowledgement]' passed (15.160 seconds).
+Test Case '-[NativeInteractionTests.MatrixTests testHistoricalDeliveryDisposition]' started.
+Test Case '-[NativeInteractionTests.MatrixTests testHistoricalDeliveryDisposition]' passed (16.610 seconds).
+Test Case '-[NativeInteractionTests.MatrixTests testIntentionalRerunRetainsRequest]' started.
+Test Case '-[NativeInteractionTests.MatrixTests testIntentionalRerunRetainsRequest]' passed (18.008 seconds).
+Test Case '-[NativeInteractionTests.MatrixTests testReadinessUnavailableDoesNotApprove]' started.
+Test Case '-[NativeInteractionTests.MatrixTests testReadinessUnavailableDoesNotApprove]' passed (9.851 seconds).
+Test Case '-[NativeInteractionTests.MatrixTests testRetainedTaskAccounting]' started.
+Test Case '-[NativeInteractionTests.MatrixTests testRetainedTaskAccounting]' passed (12.753 seconds).
+Test Case '-[NativeInteractionTests.MatrixTests testScanSelectionBoundary]' started.
+            StaticText, 0xba08c57c0, {{1035.0, 1022.0}, {48.0, 13.0}}, value: Test Suite
+            StaticText, 0xba0e45b80, {{1035.0, 1022.0}, {48.0, 13.0}}, value: Test Suite
+Test Case '-[NativeInteractionTests.MatrixTests testScanSelectionBoundary]' passed (22.349 seconds).
+Test Case '-[NativeInteractionTests.MatrixTests testUnverifiedTerminationRefusesResume]' started.
+Test Case '-[NativeInteractionTests.MatrixTests testUnverifiedTerminationRefusesResume]' passed (15.029 seconds).
+Test Case '-[NativeInteractionTests.MatrixTests testValidationHistoryKeepsEarlierFailure]' started.
+Test Case '-[NativeInteractionTests.MatrixTests testValidationHistoryKeepsEarlierFailure]' passed (22.547 seconds).
+Test Case '-[NativeInteractionTests.MatrixTests testValidationRetryAuthorization]' started.
+Test Case '-[NativeInteractionTests.MatrixTests testValidationRetryAuthorization]' passed (20.205 seconds).
+Test Suite 'MatrixTests' passed at 2026-09-09 12:17:31.077.
+	 Executed 12 tests, with 0 failures (0 unexpected) in 191.049 (191.056) seconds
+Test Suite 'NativeInteractionTests.xctest' passed at 2026-09-09 12:17:31.079.
+	 Executed 12 tests, with 0 failures (0 unexpected) in 191.049 (191.059) seconds
+Test Suite 'All tests' passed at 2026-09-09 12:17:31.080.
+	 Executed 12 tests, with 0 failures (0 unexpected) in 191.049 (191.060) seconds
+** TEST SUCCEEDED **
