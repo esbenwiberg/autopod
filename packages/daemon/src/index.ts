@@ -37,6 +37,10 @@ import {
 } from './managed/acceptance-config.js';
 import { composeDarkManagedCli, parseManagedCliConfig } from './managed/cli-config.js';
 import {
+  composeManagedProfileSet,
+  parseManagedProfileSetConfig,
+} from './managed/profile-set-config.js';
+import {
   createNotificationService,
   createRateLimiter,
   createTeamsAdapter,
@@ -122,6 +126,11 @@ const DB_PATH = process.env.DB_PATH ?? './autopod.db';
 const managedAcceptanceConfig = parseManagedAcceptanceConfig(
   process.env.AUTOPOD_MANAGED_ACCEPTANCE,
 );
+const managedProfileSetConfig = parseManagedProfileSetConfig(
+  process.env.AUTOPOD_MANAGED_PROFILE_SET,
+);
+if (managedAcceptanceConfig && managedProfileSetConfig)
+  throw new Error('managed-runtime-config-ambiguous');
 const MAX_CONCURRENCY = Number.parseInt(process.env.MAX_CONCURRENCY ?? '3', 10);
 const SANDBOX_TERMINAL_REAPER_INTERVAL_MS = parsePositiveInterval(
   process.env.SANDBOX_TERMINAL_REAPER_INTERVAL_MS,
@@ -1081,7 +1090,15 @@ const managedRuntime = managedAcceptanceConfig
       manager: sandboxContainerManager,
       providerAccounts: providerAccountStore,
     })
-  : undefined;
+  : managedProfileSetConfig
+    ? composeManagedProfileSet(managedProfileSetConfig, managedCliConfig, {
+        db,
+        databasePath: DB_PATH,
+        manager: sandboxContainerManager,
+        providerAccounts: providerAccountStore,
+        githubAuth,
+      })
+    : undefined;
 if (managedRuntime) await managedRuntime.resume();
 
 // Server

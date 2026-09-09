@@ -64,6 +64,8 @@ export default defineConfig({
     cpSync('src/managed/runtime/supervisor.py', 'dist/runtime/supervisor.py');
     cpSync('src/managed/runtime/codex_channel.py', 'dist/runtime/codex_channel.py');
     cpSync('src/managed/runtime/codex_worker.py', 'dist/runtime/codex_worker.py');
+    cpSync('src/managed/runtime/codex_agent_worker.py', 'dist/runtime/codex_agent_worker.py');
+    cpSync('src/managed/runtime/github_cli.py', 'dist/runtime/github_cli.py');
     mkdirSync('dist/containers', { recursive: true });
     cpSync('src/containers/seccomp-profile.json', 'dist/containers/seccomp-profile.json');
     mkdirSync('dist/images', { recursive: true });

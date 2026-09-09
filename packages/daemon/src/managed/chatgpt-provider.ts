@@ -60,6 +60,7 @@ export class ChatGptReportTransport implements BoundedProviderTransport {
     private readonly credential: () => Promise<ChatGptCredential>,
     private readonly transport: typeof fetch = fetch,
     private readonly onFailure?: (diagnostic: ChatGptFailureDiagnostic) => void,
+    private readonly mode: 'report' | 'agent' = 'report',
   ) {
     if (!/^[A-Za-z0-9_-]{1,200}$/.test(chatgptAccountId))
       throw new Error('managed-account-binding-invalid');
@@ -68,7 +69,7 @@ export class ChatGptReportTransport implements BoundedProviderTransport {
       route,
       chatgptAccountId,
       endpoint: 'https://chatgpt.com/backend-api/codex/responses',
-      protocol: 'codex-report-request-time-v1',
+      protocol: mode === 'agent' ? 'codex-agent-request-time-v1' : 'codex-report-request-time-v1',
     });
   }
   preflight(route: Route) {
@@ -87,7 +88,7 @@ export class ChatGptReportTransport implements BoundedProviderTransport {
       throw new Error('managed-provider-budget-mode-mismatch');
     let phase: ChatGptFailurePhase = 'request';
     try {
-      const normalized = codexInput(route, prompt);
+      const normalized = codexInput(route, prompt, this.mode === 'agent');
       const { truncation: _truncation, ...input } = normalized;
       signal.throwIfAborted();
       assertActive();
@@ -118,7 +119,10 @@ export class ChatGptReportTransport implements BoundedProviderTransport {
         body: JSON.stringify({
           ...input,
           instructions:
-            input.instructions ?? 'Return the requested factual report only. Do not call tools.',
+            input.instructions ??
+            (this.mode === 'agent'
+              ? 'Follow the reviewed task using only locally available tools.'
+              : 'Return the requested factual report only. Do not call tools.'),
           stream: true,
           store: false,
         }),
@@ -142,6 +146,7 @@ export class ChatGptReportTransport implements BoundedProviderTransport {
       const decoder = new TextDecoder('utf-8', { fatal: true });
       let buffer = '';
       let bytes = 0;
+      const chunks: Uint8Array[] = [];
       let completed: unknown;
       let completionSeen = false;
       const completedItems: z.infer<typeof responseSchema>['output'] = [];
@@ -168,7 +173,7 @@ export class ChatGptReportTransport implements BoundedProviderTransport {
           event.type.startsWith('response.output')
         )
           throw new Error('incomplete');
-        if (event.type === 'response.output_item.done') {
+        if (this.mode === 'report' && event.type === 'response.output_item.done') {
           const itemEvent = completedItemSchema.parse(event);
           if (
             itemEvent.output_index !== completedItems.length ||
@@ -196,6 +201,7 @@ export class ChatGptReportTransport implements BoundedProviderTransport {
           if (part.done) break;
           bytes += part.value.byteLength;
           if (bytes > 1024 * 1024) throw new Error('response-limit');
+          chunks.push(part.value);
           buffer += decoder.decode(part.value, { stream: true });
           let newline = buffer.indexOf('\n');
           while (newline >= 0) {
@@ -212,6 +218,28 @@ export class ChatGptReportTransport implements BoundedProviderTransport {
       signal.throwIfAborted();
       assertActive();
       phase = 'response-schema';
+      if (this.mode === 'agent') {
+        const result = z
+          .object({
+            model: z.string(),
+            status: z.literal('completed'),
+            usage: z.object({
+              input_tokens: z.number().int().nonnegative().safe(),
+              output_tokens: z.number().int().nonnegative().safe(),
+              total_tokens: z.number().int().nonnegative().safe(),
+            }),
+          })
+          .passthrough()
+          .parse(completed);
+        if (
+          result.model !== route.model ||
+          result.usage.total_tokens !== result.usage.input_tokens + result.usage.output_tokens
+        )
+          throw new Error('usage');
+        const value = Buffer.concat(chunks).toString('utf8');
+        if (!value || Buffer.byteLength(value) > 65536) throw new Error('output-size');
+        return { value, consumedTokens: result.usage.total_tokens };
+      }
       const result = responseSchema.parse(completed);
       if (completedItems.length) {
         if (result.output.length) {

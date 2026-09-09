@@ -24,7 +24,7 @@ const toolsSchema = z
 const requestSchema = z
   .object({
     model: z.string(),
-    input: z.array(z.union([messageSchema, toolsSchema])).min(1),
+    input: z.array(z.record(z.string(), z.unknown())).min(1).max(512),
     instructions: z.string().optional(),
     reasoning: z
       .object({
@@ -49,7 +49,7 @@ const requestSchema = z
   })
   .strict();
 /** Single report turn only. No tools, files, remote URLs, continuations or worker-selected route. */
-export function codexInput(route: Route, raw: string) {
+export function codexInput(route: Route, raw: string, allowTools = false) {
   const request = requestSchema.parse(JSON.parse(raw));
   if (
     route.runtime !== 'codex' ||
@@ -57,13 +57,33 @@ export function codexInput(route: Route, raw: string) {
     request.reasoning?.effort !== route.reasoning
   )
     throw new Error('managed-codex-route-mismatch');
+  if (allowTools) {
+    return {
+      model: route.model,
+      input: request.input,
+      ...(request.instructions === undefined ? {} : { instructions: request.instructions }),
+      reasoning: {
+        effort: route.reasoning,
+        ...(request.reasoning?.summary ? { summary: request.reasoning.summary } : {}),
+      },
+      tools: request.tools ?? [],
+      tool_choice: request.tool_choice ?? 'auto',
+      parallel_tool_calls: request.parallel_tool_calls ?? false,
+      stream: true,
+      store: false,
+      truncation: 'disabled',
+      ...(request.text ? { text: request.text } : {}),
+      ...(request.include ? { include: request.include } : {}),
+    };
+  }
   // Codex versions encode tool declarations either at the top level or in an
   // additional_tools input item. This explicitly report-only channel strips both.
-  const input = request.input.flatMap((item) =>
-    item.type === 'additional_tools'
+  const input = request.input.flatMap((unknownItem) => {
+    const item = z.union([messageSchema, toolsSchema]).parse(unknownItem);
+    return item.type === 'additional_tools'
       ? []
-      : [{ role: item.role, content: item.content, ...(item.type ? { type: item.type } : {}) }],
-  );
+      : [{ role: item.role, content: item.content, ...(item.type ? { type: item.type } : {}) }];
+  });
   if (!input.length) throw new Error('managed-codex-messages-required');
   return {
     model: route.model,

@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs';
 import type { ManagedPodRequest } from '@autopod/shared';
 import { expect, it, vi } from 'vitest';
 import type { ContainerManager, ContainerSpawnConfig } from '../interfaces/container-manager.js';
-import { ManagedContainerRuntime } from './container-runtime.js';
+import { ManagedContainerRuntime, type ReviewedContainerBoundary } from './container-runtime.js';
 
 function fixture() {
   const request: ManagedPodRequest = JSON.parse(
@@ -35,7 +35,7 @@ function fixture() {
       { host: '/fixture/output', container: '/output', readOnly: false },
     ],
   };
-  const binding = {
+  const binding: ReviewedContainerBoundary = {
     route: request.route,
     manager,
     image: config.image,
@@ -102,5 +102,35 @@ it('writable preparation failure prevents worker and channel startup', async () 
     'managed-writable-mount-unavailable',
   );
   expect(f.exec).toHaveBeenCalledTimes(1);
+  expect(f.binding.attachQuota).not.toHaveBeenCalled();
+});
+
+it('verifies the reviewed image dependency cache before starting the worker', async () => {
+  const f = fixture();
+  f.binding.dependencyCache = {
+    enrollmentId: 'fixture-repo',
+    path: '/opt/autopod-managed/fixture/node_modules',
+  };
+  await f.runtime.ensure('pod-one', f.request, () => {});
+  const cacheCall = f.exec.mock.calls[1] as unknown as [string, string[], unknown];
+  expect(cacheCall[1].slice(-2)).toEqual([
+    '/repositories/fixture-repo/node_modules',
+    '/opt/autopod-managed/fixture/node_modules',
+  ]);
+  expect(cacheCall[2]).toEqual({ user: 'root' });
+  expect(f.binding.attachQuota).toHaveBeenCalledTimes(1);
+});
+
+it('does not start a worker when the reviewed dependency cache is absent or mutable', async () => {
+  const f = fixture();
+  f.binding.dependencyCache = {
+    enrollmentId: 'fixture-repo',
+    path: '/opt/autopod-managed/fixture/node_modules',
+  };
+  f.exec.mockResolvedValueOnce({ exitCode: 0, stdout: '', stderr: '' });
+  f.exec.mockResolvedValueOnce({ exitCode: 1, stdout: '', stderr: 'mutable' });
+  await expect(f.runtime.ensure('pod-one', f.request, () => {})).rejects.toThrow(
+    'managed-dependency-cache-unavailable',
+  );
   expect(f.binding.attachQuota).not.toHaveBeenCalled();
 });

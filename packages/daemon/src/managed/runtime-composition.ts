@@ -1,10 +1,12 @@
 import path from 'node:path';
 import type { ManagedPodRequest, Route } from '@autopod/shared';
+import type { DaemonGitHubAuth } from '../github/daemon-github-auth.js';
 import type { ContainerManager, ContainerSpawnConfig } from '../interfaces/container-manager.js';
 import { type ManagedComponentsConfig, managedComponents } from './bootstrap.js';
 import type { BoundedProviderTransport } from './bounded-provider.js';
 import { canonical } from './canonical.js';
 import { ManagedContainerRuntime } from './container-runtime.js';
+import { type ManagedGitHubReadConfig, ManagedGitHubReadGateway } from './github-read-gateway.js';
 import type { ManagedPodRow } from './managed-service.js';
 import { ManagedProviderGateway } from './provider-gateway.js';
 import { ManagedQuotaFeed } from './quota-feed.js';
@@ -23,16 +25,26 @@ export interface ManagedWorkerProviderChannel {
       prompt: string,
       maximumTokens: number,
     ) => ReturnType<ManagedProviderGateway['invoke']>;
+    invokeGitHub?: (key: string, request: string) => Promise<string>;
   }): Promise<() => void>;
 }
 export interface ManagedRuntimeBinding {
   route: Route;
+  /** Optional stage binding when several reviewed profiles share one exact route. */
+  profileId?: string;
   manager: ContainerManager;
   image: string;
   command: readonly string[];
+  /** Image-internal immutable dependency tree linked from the reviewed repository checkout. */
+  dependencyCache?: { enrollmentId: string; path: string };
   transport: BoundedProviderTransport;
   channel: ManagedWorkerProviderChannel;
   maximumRequests?: number;
+  githubRead?: {
+    config: ManagedGitHubReadConfig;
+    auth: DaemonGitHubAuth;
+    transport?: typeof fetch;
+  };
   /** Reviewed target networking; volumes, environment and identity are supplied below. */
   network(request: ManagedPodRequest): Pick<ContainerSpawnConfig, 'firewallScript' | 'networkName'>;
 }
@@ -45,7 +57,12 @@ export interface ManagedRuntimeCompositionConfig extends Omit<ManagedComponentsC
  * The selected runtime's channel is a reviewed deployment input, not inferred from a profile name.
  */
 export function composeManagedRuntime(config: ManagedRuntimeCompositionConfig) {
-  const identities = config.bindings.map((binding) => canonical(binding.route));
+  const identities = config.bindings.map((binding) =>
+    canonical({
+      route: binding.route,
+      profileId: binding.profileId ?? null,
+    }),
+  );
   if (new Set(identities).size !== identities.length) throw new Error('managed-route-ambiguous');
   const bindings = config.bindings.map((binding) => ({
     ...binding,
@@ -93,6 +110,18 @@ export function composeManagedRuntime(config: ManagedRuntimeCompositionConfig) {
             prompt,
             maximumTokens,
           ),
+        ...(githubGateways[index]
+          ? {
+              invokeGitHub: (key: string, request: string) =>
+                githubGateways[index]!.invoke(
+                  row.dispatcher_installation_id,
+                  podId,
+                  row.grant_revision,
+                  key,
+                  request,
+                ),
+            }
+          : {}),
       });
       try {
         if (closed) throw new Error('managed-composition-closed');
@@ -119,9 +148,17 @@ export function composeManagedRuntime(config: ManagedRuntimeCompositionConfig) {
   const runtime = new ManagedContainerRuntime(
     bindings.map((binding, index) => ({
       route: binding.route,
+      profileId: binding.profileId,
+      identityBinding: binding.githubRead
+        ? {
+            alias: binding.githubRead.config.alias,
+            bindingDigest: binding.githubRead.config.bindingDigest,
+          }
+        : undefined,
       manager: binding.manager,
       image: binding.image,
       command: binding.command,
+      dependencyCache: binding.dependencyCache,
       quotaReady: async (request) => {
         if (closed) throw new Error('managed-composition-closed');
         gateways[index]!.preflight(request);
@@ -164,6 +201,16 @@ export function composeManagedRuntime(config: ManagedRuntimeCompositionConfig) {
     (binding) =>
       new ManagedProviderGateway(components.service, binding.transport, binding.maximumRequests),
   );
+  const githubGateways = bindings.map((binding) =>
+    binding.githubRead
+      ? new ManagedGitHubReadGateway(
+          components.service,
+          binding.githubRead.config,
+          binding.githubRead.auth,
+          binding.githubRead.transport,
+        )
+      : undefined,
+  );
   const feeds = bindings.map(
     (binding) => new ManagedQuotaFeed(components.service, binding.manager),
   );
@@ -182,7 +229,10 @@ export function composeManagedRuntime(config: ManagedRuntimeCompositionConfig) {
         if (row.revoked || row.stop_requested || components.service.expired(row)) continue;
         const request = JSON.parse(row.request_json) as ManagedPodRequest;
         const index = bindings.findIndex(
-          (binding) => canonical(binding.route) === canonical(request.route),
+          (binding) =>
+            canonical(binding.route) === canonical(request.route) &&
+            (binding.profileId === undefined ||
+              binding.profileId === request.profileSnapshot.profileId),
         );
         if (index < 0) throw new Error('managed-resume-route-unavailable');
         await attach(index, row.pod_id, row.runtime_ref!, `/run/dispatcher-${row.pod_id}`);

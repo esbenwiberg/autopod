@@ -4,7 +4,7 @@
   "packageManager": "pnpm@9.15.4",
   "scripts": {
     "build": "turbo run build",
-    "test": "turbo run test && bash scripts/deploy-hosted-daemon.test.sh && bash scripts/cleanup-hosted-daemon.test.sh",
+    "test": "turbo run test && node --test scripts/*.test.mjs && bash scripts/deploy-hosted-daemon.test.sh && bash scripts/cleanup-hosted-daemon.test.sh",
     "typecheck": "turbo run typecheck",
     "lint": "biome check .",
     "format:check": "biome format .",

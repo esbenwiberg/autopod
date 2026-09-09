@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { lstat, mkdir, rename, rm } from 'node:fs/promises';
+import { lstat, mkdir, readlink, rename, rm, symlink } from 'node:fs/promises';
 import path from 'node:path';
 import type { ManagedPodRequest } from '@autopod/shared';
 import type Database from 'better-sqlite3';
@@ -11,6 +11,8 @@ export interface ManagedRepositoryMirror {
   path: string;
   remote: string;
   baseRevision: string;
+  /** Reviewed read-only dependency tree baked into the immutable worker image. */
+  dependencyCachePath?: string;
 }
 
 /** Independent Git copies: no shared .git file, hardlinks, credentials, or user-checkout writes. */
@@ -41,6 +43,11 @@ export class ManagedWorkspaces {
         mirror.baseRevision !== repository.baseRevision
       )
         throw new Error('managed-workspace-enrollment-mismatch');
+      if (
+        mirror.dependencyCachePath &&
+        !/^\/opt\/autopod-managed\/[A-Za-z0-9_.-]+\/node_modules$/.test(mirror.dependencyCachePath)
+      )
+        throw new Error('managed-workspace-dependency-cache-invalid');
       const destination = path.join(directory, repository.enrollmentId);
       const prior = this.db
         .prepare('SELECT * FROM managed_workspaces WHERE pod_id=? AND repository_id=?')
@@ -95,9 +102,34 @@ export class ManagedWorkspaces {
           (await managedGit(destination, ['rev-parse', 'HEAD'])) !== repository.baseRevision
         )
           throw new Error('managed-workspace-unverified');
+        if (mirror.dependencyCachePath) {
+          const link = path.join(destination, 'node_modules');
+          try {
+            await symlink(mirror.dependencyCachePath, link, 'dir');
+          } catch (error) {
+            if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
+            if (
+              !(await lstat(link)).isSymbolicLink() ||
+              (await readlink(link)) !== mirror.dependencyCachePath
+            )
+              throw new Error('managed-workspace-dependency-cache-conflict');
+          }
+          if ((await managedGit(destination, ['check-ignore', 'node_modules'])) !== 'node_modules')
+            throw new Error('managed-workspace-dependency-cache-not-ignored');
+        }
         this.db
           .prepare("UPDATE managed_workspaces SET state='ready' WHERE pod_id=? AND repository_id=?")
           .run(podId, repository.enrollmentId);
+      }
+      if (mirror.dependencyCachePath) {
+        const link = path.join(destination, 'node_modules');
+        if (
+          !(await lstat(link)).isSymbolicLink() ||
+          (await readlink(link)) !== mirror.dependencyCachePath
+        )
+          throw new Error('managed-workspace-dependency-cache-unverified');
+        if ((await managedGit(destination, ['check-ignore', 'node_modules'])) !== 'node_modules')
+          throw new Error('managed-workspace-dependency-cache-not-ignored');
       }
       volumes.push({
         host: destination,

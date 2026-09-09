@@ -24,6 +24,8 @@ export * from './managed/codex-wire.js';
 
 export * from './managed/chatgpt-provider.js';
 export * from './managed/acceptance-config.js';
+export * from './managed/profile-set-config.js';
+export * from './managed/github-read-gateway.js';
 
 export { AzureSandboxApiClient } from './containers/azure-sandbox-api-client.js';
 export { SandboxContainerManager } from './containers/sandbox-container-manager.js';

@@ -8,6 +8,8 @@ export const MANAGED_CAPABILITIES = [
   'artifact-input-v1',
   'source-draft-pr-v1',
   'source-finalize-v1',
+  'managed-agent-session-v1',
+  'managed-github-read-v1',
 ] as const;
 
 /** Public failures contain a stable code, never raw Zod input or credentials. */

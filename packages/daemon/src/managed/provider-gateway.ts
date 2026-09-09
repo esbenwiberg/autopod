@@ -190,8 +190,10 @@ export class ManagedProviderGateway {
                   )
                   .run(observed.consumedTokens, podId, key);
                 this.service.db
-                  .prepare('UPDATE managed_pods SET consumed_tokens=? WHERE pod_id=?')
-                  .run(observed.consumedTokens, podId);
+                  .prepare(`UPDATE managed_pods SET consumed_tokens=(
+                    SELECT coalesce(sum(actual_tokens),0) FROM managed_provider_requests
+                    WHERE pod_id=? AND actual_tokens IS NOT NULL) WHERE pod_id=?`)
+                  .run(podId, podId);
               })
               .immediate();
             return { state: 'observed' as const, value: observed.value };

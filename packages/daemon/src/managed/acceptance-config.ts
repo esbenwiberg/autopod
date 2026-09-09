@@ -111,7 +111,7 @@ export function parseManagedAcceptanceConfig(
   }
 }
 
-function chatGptCredential(
+export function chatGptCredential(
   providerAccounts: ManagedProviderAccountReader,
   accountId: string,
 ): ChatGptCredential {
