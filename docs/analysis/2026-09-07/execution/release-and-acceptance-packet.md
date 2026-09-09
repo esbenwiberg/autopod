@@ -1,6 +1,6 @@
 # Release and remaining acceptance packet
 
-Updated September 9, checkpoint 119. This packet supersedes the dated approval requests in checkpoints 106–110. Their raw receipts remain retained. It is a local review artifact; it does not authorize publication, deployment, restart, cloud access changes or a paid canary. The goal remains incomplete.
+Updated September 9, checkpoint 120. This packet supersedes the dated approval requests in checkpoints 106–110. Their raw receipts remain retained. It is a local review artifact; it does not authorize publication, deployment, restart, cloud access changes or a paid canary. The goal remains incomplete.
 
 ## Current tested candidate
 
@@ -30,9 +30,9 @@ The scan disclosure failure was a harness click-coordinate miss; its actual visi
 
 Checkpoint 117 adds five direct native flows: refreshed recorded merged disposition with current provider status still unverified; unresolved restart ownership warning; actionable reviewer reason alongside retained findings; approval preservation/retry; and scan policy saving, retained report navigation and quit/relaunch persistence. [Direct receipt](receipts/checkpoint-117-native-direct.json). The reviewer reason required a product correction; the clean pipeline and 357 Swift tests pass on 15900d9e. The supplemental XCTest runner timed out before any case, but supported direct CUA interactions worked after the usage limit cleared.
 
-Checkpoint 119 additionally verifies the native host reviewer CLI/contract display and explicit unverified provider/account/daemon/resource fields. This is synthetic presentation proof only. The Mac locked again before the next case; the pending manual-unlock request is current. New worker/waiver/empty-scan fixture checks pass, but their UI cases remain unrun.
+Checkpoint 119 verifies native reviewer CLI/contract presentation with explicit missing provider/account/daemon/resource identity. Checkpoint 120, after the user unlocked the Mac, verifies worker reauthorization/rework consumption, empty delta, historical waiver with failed execution retained, and recorded closed disposition. [Direct receipt](receipts/checkpoint-120-native-direct.json). All workstream-5 criteria are now verified within the required local/supported-surface scope, using earlier actual scheduler/collector/durable report tests plus native policy/report/triage checks.
 
-Remaining native acceptance includes worker binding reconciliation, guidance acknowledgement presentation, historical waiver, recorded closed disposition, empty-delta report, retained fleet navigation and populated execution provenance. Screenshots were observed only from the task-owned app/window. Narrow wrapping is not a layout audit pass.
+Remaining native acceptance covers retained fleet navigation, guidance acknowledgement presentation and populated execution release/image/capability fields. Current UI access works. Native synthetic receipts never attest hosted source or provider execution. The checkpoint-118 hosted-copy execution request remains pending explicit approval.
 
 ## Remaining sandbox access and paid-canary gate
 

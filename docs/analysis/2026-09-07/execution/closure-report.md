@@ -1,5 +1,7 @@
 # Partial closure report
 
+Current update: [checkpoint 120](checkpoint-120.md) passes four further native gates after unlock and closes the remaining workstream-5 criterion prerequisites. All six W5 criteria are verified within their required local/supported-surface scope. Other native and external requirements remain open; no whole-goal completion or hosted action is claimed.
+
 Current update: [checkpoint 119](checkpoint-119.md) verifies native reviewer provenance presentation and prepares three further fixture cases with nine passing HTTP integrity checks. Those native cases remain unrun while the Mac is locked. The checkpoint-118 hosted-copy action awaits explicit approval.
 
 Current update: [checkpoint 118](checkpoint-118.md) seals the source-only hosted-copy upgrade payload and passes eight wrapper plus eight candidate-copy checks locally. Hosted execution still requires approval; it has not been run.
