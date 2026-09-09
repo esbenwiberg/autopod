@@ -19,13 +19,11 @@ RUN npm install -g "@openai/codex@${CODEX_VERSION}" \
     && codex exec --help >/dev/null
 
 WORKDIR /opt/autopod-managed/portfolio-simulation
+ADD source.tar ./
+LABEL org.opencontainers.image.source="${REPOSITORY_URL}" \
+      org.opencontainers.image.revision="${BASE_REVISION}"
 RUN test -n "${REPOSITORY_URL}" \
     && printf '%s' "${BASE_REVISION}" | grep -Eq '^[a-f0-9]{40}$' \
-    && git init --quiet \
-    && git remote add source "${REPOSITORY_URL}" \
-    && git fetch --quiet --depth 1 source "${BASE_REVISION}" \
-    && git checkout --quiet --detach FETCH_HEAD \
-    && test "$(git rev-parse HEAD)" = "${BASE_REVISION}" \
     && npm ci \
     && npm run build:smoke \
     && rm -rf .git dist \

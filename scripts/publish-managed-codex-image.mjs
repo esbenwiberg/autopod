@@ -45,7 +45,13 @@ export function createManagedImagePlan({ registry, repositoryUrl, baseRevision, 
 
 export async function publishManagedImage(
   plan,
-  { dryRun = false, runAz = defaultRunAz, pollIntervalMs = 5000, timeoutMs = 60 * 60 * 1000 } = {},
+  {
+    dryRun = false,
+    runAz = defaultRunAz,
+    pollIntervalMs = 5000,
+    timeoutMs = 60 * 60 * 1000,
+    sourceRepository,
+  } = {},
 ) {
   const buildArgs = [
     'acr',
@@ -72,6 +78,7 @@ export async function publishManagedImage(
 
   const context = fs.mkdtempSync(path.join(tmpdir(), 'autopod-managed-image-'));
   try {
+    prepareSourceArchive(plan, sourceRepository, context);
     fs.copyFileSync(path.join(ROOT, DOCKERFILE), path.join(context, 'Dockerfile'));
     const queued = parseQueued(runAz(buildArgs, context));
     const runId =
@@ -140,6 +147,29 @@ export async function publishManagedImage(
   }
 }
 
+export function prepareSourceArchive(plan, sourceRepository, context) {
+  if (!sourceRepository || !path.isAbsolute(sourceRepository))
+    throw new Error('absolute source repository required');
+  const git = (args) => {
+    const result = spawnSync('git', ['-C', sourceRepository, ...args], {
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+    if (result.error || result.status !== 0) throw new Error('source repository validation failed');
+    return result.stdout.trim();
+  };
+  if (git(['remote', 'get-url', 'origin']) !== plan.repositoryUrl)
+    throw new Error('source repository origin mismatch');
+  if (git(['rev-parse', `${plan.baseRevision}^{commit}`]) !== plan.baseRevision)
+    throw new Error('source revision mismatch');
+  git([
+    'archive',
+    '--format=tar',
+    `--output=${path.join(context, 'source.tar')}`,
+    plan.baseRevision,
+  ]);
+}
+
 function defaultRunAz(args, cwd) {
   const result = spawnSync('az', args, {
     cwd,
@@ -168,6 +198,7 @@ function parseArgs(argv) {
   for (let i = 0; i < argv.length; i++) {
     const name = argv[i];
     if (name === '--dry-run') args.dryRun = true;
+    else if (name === '--source-repository') args.sourceRepository = argv[++i];
     else if (name === '--registry') args.registry = argv[++i];
     else if (name === '--repository-url') args.repositoryUrl = argv[++i];
     else if (name === '--base-revision') args.baseRevision = argv[++i];
@@ -180,7 +211,7 @@ function parseArgs(argv) {
 if (path.resolve(process.argv[1] ?? '') === fileURLToPath(import.meta.url)) {
   const args = parseArgs(process.argv.slice(2));
   const plan = createManagedImagePlan(args);
-  publishManagedImage(plan, { dryRun: args.dryRun }).then(
+  publishManagedImage(plan, { dryRun: args.dryRun, sourceRepository: args.sourceRepository }).then(
     (result) => process.stdout.write(`${JSON.stringify(result)}\n`),
     (error) => {
       process.stderr.write(`ERROR: ${error instanceof Error ? error.message : String(error)}\n`);

@@ -311,10 +311,14 @@ native agent CLIs. Build it from an exact repository commit and immutable tag:
 node scripts/publish-managed-codex-image.mjs \
   --registry <registry>.azurecr.io \
   --repository-url https://github.com/context-and/portfolio-simulation \
+  --source-repository /absolute/path/to/portfolio-simulation \
   --base-revision <40-hex-commit> \
   --tag dispatcher-voice-<immutable-suffix>
 ```
 
+The command validates the local origin and archives only the exact committed revision. Dirty
+working files, untracked files, and Git credential configuration are excluded. The archive is
+uploaded to the selected ACR build context; no GitHub credential is supplied to the build.
 The command submits one `linux/amd64` ACR build, waits for success, verifies the manifest, and
 returns a digest-pinned image reference. The paired managed profile document must bind
 `mirror.dependencyCachePath` to
