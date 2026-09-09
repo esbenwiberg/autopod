@@ -46,6 +46,10 @@ const mirrorSchema = z
     path: z.string().min(1).max(4096),
     remote: id,
     baseRevision: z.string().regex(/^[a-f0-9]{40}$/),
+    dependencyCachePath: z
+      .string()
+      .regex(/^\/opt\/autopod-managed\/[A-Za-z0-9_.-]+\/node_modules$/)
+      .optional(),
   })
   .strict();
 const sourceSchema = z
@@ -328,6 +332,14 @@ export function composeManagedProfileSet(
           stage.inputNames,
           githubRead?.repository,
         ),
+        ...(config.mirror.dependencyCachePath
+          ? {
+              dependencyCache: {
+                enrollmentId: config.mirror.enrollmentId,
+                path: config.mirror.dependencyCachePath,
+              },
+            }
+          : {}),
         transport: new ChatGptReportTransport(
           route,
           initial.chatgptAccountId,

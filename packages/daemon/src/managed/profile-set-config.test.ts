@@ -37,6 +37,7 @@ function input() {
       path: '/data/mirrors/fixture.git',
       remote: repository.remote,
       baseRevision: repository.baseRevision,
+      dependencyCachePath: '/opt/autopod-managed/fixture/node_modules',
     },
     image:
       'registry.example/autopod/worker@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
@@ -100,6 +101,7 @@ it('rejects widened, ambiguous, or incomplete profile-set bindings', () => {
       { ...value, image: 'registry.example/autopod/worker:latest' },
       { ...value, mirror: { ...value.mirror, path: 'relative' } },
       { ...value, mirror: { ...value.mirror, baseRevision: 'f'.repeat(40) } },
+      { ...value, mirror: { ...value.mirror, dependencyCachePath: '/workspace/node_modules' } },
       { ...value, profiles: [profile, profile] },
       withIdentity,
       {

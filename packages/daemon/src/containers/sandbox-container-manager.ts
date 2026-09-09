@@ -762,7 +762,7 @@ async function createSandboxVolumeArchive(rootPath: string): Promise<SandboxVolu
       await addTarEntry(pack, { ...common, type: 'directory' });
       entries++;
       for (const entry of readdirSync(hostPath).sort()) {
-        if (shouldSkipUploadedVolumeEntry(entry)) continue;
+        if (shouldSkipUploadedVolumeEntry(hostPath, entry)) continue;
         await addPath(join(hostPath, entry), posix.join(archivePath, entry));
       }
       return;
@@ -790,7 +790,7 @@ async function createSandboxVolumeArchive(rootPath: string): Promise<SandboxVolu
 
   try {
     for (const entry of readdirSync(rootPath).sort()) {
-      if (shouldSkipUploadedVolumeEntry(entry)) continue;
+      if (shouldSkipUploadedVolumeEntry(rootPath, entry)) continue;
       await addPath(join(rootPath, entry), entry);
     }
     pack.finalize();
@@ -861,9 +861,9 @@ function parseSandboxEgressRefresh(script: string): ReturnType<typeof egressPoli
   return null;
 }
 
-function shouldSkipUploadedVolumeEntry(entry: string): boolean {
+function shouldSkipUploadedVolumeEntry(parent: string, entry: string): boolean {
   return (
-    entry === 'node_modules' ||
+    (entry === 'node_modules' && !lstatSync(join(parent, entry)).isSymbolicLink()) ||
     entry.startsWith('.autopod-sync-') ||
     entry.startsWith('.autopod-extract-')
   );

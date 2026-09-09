@@ -525,6 +525,27 @@ describe('SandboxContainerManager', () => {
       }
     });
 
+    it('preserves a reviewed node_modules symlink while excluding dependency directories', async () => {
+      const hostDir = mkdtempSync(join(tmpdir(), 'sandbox-dependency-link-'));
+      try {
+        writeFileSync(join(hostDir, 'package.json'), '{}');
+        symlinkSync(
+          '/opt/autopod-managed/portfolio-simulation/node_modules',
+          join(hostDir, 'node_modules'),
+        );
+        const client = new FakeSandboxApiClient();
+        const id = await new SandboxContainerManager(client, logger).spawn({
+          ...baseConfig,
+          volumes: [{ host: hostDir, container: '/repositories/portfolio' }],
+        });
+        expect(
+          client.sandboxes.get(id)?.files.get('/repositories/portfolio/node_modules')?.toString(),
+        ).toBe('/opt/autopod-managed/portfolio-simulation/node_modules');
+      } finally {
+        rmSync(hostDir, { recursive: true, force: true });
+      }
+    });
+
     it('retries a volume archive when a live Git pack entry disappears during traversal', async () => {
       const hostDir = mkdtempSync(join(tmpdir(), 'sandbox-upload-race-'));
       try {
