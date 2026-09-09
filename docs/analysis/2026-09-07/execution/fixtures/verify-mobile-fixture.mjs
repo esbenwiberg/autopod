@@ -97,3 +97,37 @@ await withFixture('dispatch', async (request) => {
     400,
   );
 });
+
+await withFixture('worker-auth', async (post) => {
+  assert.equal((await post('/pods/local-fixture/validate')).status, 409);
+  const grant = await post('/pods/local-fixture/retry-authorizations', {
+    stage: 'worker',
+    reason: 'Synthetic original binding reconciled',
+    requestKey: 'worker-one',
+  });
+  assert.equal(grant.status, 200);
+  assert.equal((await post('/pods/local-fixture/validate')).status, 200);
+  const state = await post('/pods/local-fixture/retry-state?stage=worker', {}, 'GET');
+  assert.equal(state.body.authorizations[0].usedByAttemptId, 'local-worker-authorized');
+  assert.equal(state.body.executedCount, 2);
+  assert.equal((await post('/pods/local-fixture/validate')).status, 409);
+});
+await withFixture('empty-scan', async (post) => {
+  const detail = (await post('/scan-reports/report-fixture/review', {}, 'GET')).body;
+  assert.equal(detail.report.status, 'empty_delta');
+  assert.deepEqual(detail.report.collection.files, []);
+  assert.equal(detail.report.collection.baseSha, detail.report.collection.headSha);
+  assert.deepEqual(detail.unresolved, []);
+  assert.equal(detail.report.judgment.status, 'skipped_empty');
+  assert.equal(
+    (await post('/scheduled-jobs/scan-fixture/report-page', {}, 'GET')).body.items[0].findingCount,
+    0,
+  );
+});
+await withFixture('historical-waiver', async (post) => {
+  const pod = (await post('/pods/local-fixture', {}, 'GET')).body;
+  assert.ok(pod.validationWaiver.reason);
+  assert.equal(pod.lastValidationResult.test.status, 'fail');
+  const history = (await post('/pods/local-fixture/validations', {}, 'GET')).body;
+  assert.equal(history[0].result.test.status, 'fail');
+});

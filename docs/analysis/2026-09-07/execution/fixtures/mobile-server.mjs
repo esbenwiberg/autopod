@@ -138,6 +138,24 @@ if (process.env.FIXTURE_MODE === 'foundry-review-unavailable') {
     result: blocked,
   });
 }
+if (process.env.FIXTURE_MODE === 'historical-waiver') {
+  pod = {
+    ...pod,
+    status: 'complete',
+    pendingEscalation: null,
+    recordDiagnostics: [],
+    task: '[Local fixture] Retain failed execution after human waiver',
+    lastValidationResult: validationHistory[0].result,
+    validationWaiver: {
+      waivedAt: '2026-09-07T10:20:00Z',
+      waivedBy: 'fixture-reviewer',
+      reason: 'Accepted synthetic test exception for this retained source',
+      attempt: 1,
+      failedPhases: ['test'],
+      failedFactIds: ['fixture-test'],
+    },
+  };
+}
 const scanJob = {
   id: 'scan-fixture',
   name: 'Local dependency and secret scan',
@@ -199,6 +217,20 @@ const scanReport = {
   },
   judgment: { status: 'not_requested' },
 };
+const emptyScanFixture = process.env.FIXTURE_MODE === 'empty-scan';
+if (emptyScanFixture) {
+  scanReport.status = 'empty_delta';
+  scanReport.collection.headSha = scanReport.collection.baseSha;
+  scanReport.collection.files = [];
+  scanReport.collection.findings = [];
+  scanReport.collection.scanners = scanReport.collection.scanners.map((scanner) => ({
+    scanner: scanner.scanner,
+    version: scanner.version,
+    status: 'skipped_empty',
+    findingCount: 0,
+  }));
+  scanReport.judgment = { status: 'skipped_empty' };
+}
 if (process.env.FIXTURE_MODE === 'judgment-unavailable') {
   scanReport.judgment = {
     status: 'unavailable',
@@ -708,6 +740,44 @@ const server = createServer(async (req, res) => {
     );
     return json({ ok: true, action: 'restart-agent' });
   }
+  if (
+    process.env.FIXTURE_MODE === 'worker-auth' &&
+    req.method === 'POST' &&
+    pathname === '/pods/local-fixture/validate'
+  ) {
+    const grant = retryState.authorizations.find(
+      (entry) =>
+        entry.stage === 'worker' &&
+        entry.failureId === retryState.latest.id &&
+        !entry.usedByAttemptId,
+    );
+    if (!grant)
+      return json(
+        {
+          error: 'TASK_RETRY_RECONCILIATION_REQUIRED',
+          message:
+            'Worker authentication retry requires a recorded authorization after reconciling the original provider binding. No worker started.',
+        },
+        409,
+      );
+    grant.usedByAttemptId = 'local-worker-authorized';
+    Object.assign(retryState, {
+      admissionCount: 3,
+      executedCount: 2,
+      authorizationRequired: false,
+      latest: { id: 'local-worker-authorized', outcome: 'pass' },
+    });
+    console.log(
+      JSON.stringify({
+        scope: 'local fixture only',
+        action: 'rework-authorized-worker',
+        stage: 'worker',
+        usedByAttemptId: grant.usedByAttemptId,
+        providerBindingChanged: false,
+      }),
+    );
+    return json({ ok: true, action: 'restart-agent' });
+  }
   if (req.method === 'POST' && pathname === '/pods/local-fixture/retry-authorizations') {
     let body = '';
     for await (const chunk of req) body += chunk;
@@ -887,11 +957,11 @@ const server = createServer(async (req, res) => {
         {
           id: older ? 'report-old-fixture' : scanReport.id,
           jobId: scanJob.id,
-          status: 'incomplete',
+          status: scanReport.status,
           createdAt: older ? '2026-09-06T10:00:00Z' : scanReport.createdAt,
           completedAt: scanReport.completedAt,
-          findingCount: older ? null : 1,
-          judgmentStatus: older ? null : 'not_requested',
+          findingCount: emptyScanFixture ? 0 : older ? null : 1,
+          judgmentStatus: emptyScanFixture ? 'skipped_empty' : older ? null : 'not_requested',
           diagnostics: older ? ['Finding count unavailable; inspect report evidence.'] : [],
         },
       ],
@@ -901,7 +971,7 @@ const server = createServer(async (req, res) => {
   if (pathname === '/scan-reports/report-old-fixture')
     return json({
       report: { ...scanReport, id: 'report-old-fixture' },
-      unresolved: [scanFinding],
+      unresolved: emptyScanFixture ? [] : [scanFinding],
       decisions: [],
     });
   if (pathname === '/scheduled-jobs/scan-fixture/reports') return json([scanReport]);
@@ -968,7 +1038,7 @@ const server = createServer(async (req, res) => {
       report: pathname.includes('report-old-fixture')
         ? { ...scanReport, id: 'report-old-fixture' }
         : scanReport,
-      unresolved: [scanFinding],
+      unresolved: emptyScanFixture ? [] : [scanFinding],
       decisions: scanDecisions,
       unresolvedNextCursor: process.env.FIXTURE_MODE === 'paged-triage' ? scanFinding.id : null,
       decisionsNextCursor:
@@ -1003,7 +1073,11 @@ const server = createServer(async (req, res) => {
       nextCursor: null,
     });
   if (pathname === '/scan-reports/report-fixture')
-    return json({ report: scanReport, unresolved: [scanFinding], decisions: scanDecisions });
+    return json({
+      report: scanReport,
+      unresolved: emptyScanFixture ? [] : [scanFinding],
+      decisions: scanDecisions,
+    });
   if (req.method === 'POST' && pathname === '/scan-reports/report-fixture/triage') {
     let body = '';
     for await (const chunk of req) body += chunk;

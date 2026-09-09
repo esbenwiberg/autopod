@@ -20,6 +20,9 @@ const modes = new Set([
   'legacy-delivery-recovery',
   'unverified-exit',
   'host-reviewer-provenance',
+  'historical-waiver',
+  'empty-scan',
+  'closed-merge',
 ]);
 const podDefaults = {
   title: 'Local acceptance fixture',

@@ -1,0 +1,9 @@
+# Checkpoint 119: reviewer provenance and remaining native fixtures
+
+The actual native Work > Task view displayed the synthetic host reviewer CLI/version/path and contract identity while preserving provider/account/daemon/resource unknowns and image not-applicable status. The diagnostic explicitly avoids a review-completion or billing claim. Two task-owned app screenshots were observed in the task conversation, including the scrolled provenance fields. [Bounded receipt](receipts/checkpoint-119-native-provenance.json). This is operator presentation proof; it does not attest any hosted CLI or loaded bundle.
+
+Three synthetic modes now support the next native cases: worker authentication retry refuses before an authorization and consumes a worker-stage grant once; historical waiver retains the executed failing result; empty scan reports equal source SHAs, no files/findings and skipped-empty collectors/judgment. The native proxy allows those cases and the existing closed-disposition variant. Nine HTTP fixture-integrity cases pass. These new cases have not yet been executed through the native UI.
+
+The Mac locked again during the next-case reset. No security settings were changed and the pending unlock request remains sufficient; do not repeatedly ask for the same authorization. The separately prepared checkpoint-118 hosted-copy action is pending its explicit approval. Application source is unchanged from clean tested 15900d9e; only acceptance fixtures and evidence changed.
+
+Next: once the Mac is unlocked, run worker reauthorization, historical waiver, empty scan and closed disposition, then finish remaining retained-fleet/guidance/populated-release coverage. Once the exact isolated-copy action is approved, verify its pinned hashes/VM identity and execute once. Sandbox data-plane access, historical failing-request trace and loaded-release evidence remain independent external prerequisites. The goal is incomplete.

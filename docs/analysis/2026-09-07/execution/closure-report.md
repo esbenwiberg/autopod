@@ -1,5 +1,7 @@
 # Partial closure report
 
+Current update: [checkpoint 119](checkpoint-119.md) verifies native reviewer provenance presentation and prepares three further fixture cases with nine passing HTTP integrity checks. Those native cases remain unrun while the Mac is locked. The checkpoint-118 hosted-copy action awaits explicit approval.
+
 Current update: [checkpoint 118](checkpoint-118.md) seals the source-only hosted-copy upgrade payload and passes eight wrapper plus eight candidate-copy checks locally. Hosted execution still requires approval; it has not been run.
 
 Current update: [checkpoint 117](checkpoint-117.md) fixes hidden native reviewer reasons and verifies five direct native flows. Clean full validation and 357 Swift tests pass on `15900d9e`. The current release packet supersedes earlier native-blocker and candidate statements. Remaining native and external acceptance is open.
