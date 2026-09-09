@@ -1,8 +1,8 @@
 # Partial closure report
 
-Current checkpoint: [123](checkpoint-123.md). All six workstreams have local implementation and regression evidence. Required native/CLI/mobile interactions are verified within their recorded scope. The goal remains incomplete because hosted compatibility, loaded-source identity, historical API causality and actual-image capability evidence remain outstanding.
+Current checkpoint: [124](checkpoint-124.md). All six workstreams have local implementation and regression evidence. Required native/CLI/mobile interactions are verified within their recorded scope. The goal remains incomplete because loaded-source identity, historical API causality and actual-image capability evidence remain outstanding.
 
-The approved checkpoint-122 hosted-copy check ran once and refused during preflight. The running release changed to `ca92847a`, and its pinned backup no longer exists. No private copy was created and the active database was not opened. Read-only diagnostics pinned the new schema-153 snapshot. The [replacement packet](isolated-upgrade-verification-packet.md) is prepared and awaits approval of the changed inputs. Azure command success did not satisfy the verifier's acceptance criteria.
+The explicitly approved replacement hosted-copy check passed at checkpoint 124: the actual pinned snapshot migrated privately from schema 153 to 183 with original rows/columns preserved, integrity/FK/backfill/write checks passing, unchanged input, stable service identity and both private directories removed. [Result](receipts/checkpoint-124-hosted-result.json). The earlier changed-input refusal is retained separately. No active database migration or service restart occurred, and no copy-execution approval remains pending.
 
 ## Exact candidate and verification
 
@@ -21,7 +21,7 @@ The [matched local replay](receipts/checkpoint-122-validation-replay.json) measu
 | 3. Dispatch and environment | Strict fresh refs, actual-base declarations, equivalent-work/rerun identity, provider/resource/command admission, atomic config installation and supported NuGet semantics; native reconciliation. | Intended-image capability canary and actual sandbox CLI/resource/provider identity. Data-plane access remains refused in the last observation. |
 | 4. Metrics, history and views | Distinct units/denominators, retained histories and waivers, bounded malformed-row projections, telemetry reconciliation and supported operator interactions. | Evidence from the actual historical failing history/cost requests; current successful responses do not establish their cause. Loaded source remains separate. |
 | 5. Scheduled collection and triage | Actual scheduler exact-window collection, empty/incomplete distinctions, stable durable findings/reports, human-selected repairs and native policy/report/triage interaction. | None within the required recorded local/supported-surface scope. No paid cohort or live schedule conversion was added to the contract. |
-| 6. Release and backup provenance | Per-execution/readiness fields, freshness/headroom/restore tooling, representative managed/native upgrades through 183, historical intended DB/backup scope and isolated restore, native provenance presentation. | Replacement snapshot candidate upgrade; actual loaded/rollback source and sandbox runtime identity; fresh cutover backup if deployment is authorized. |
+| 6. Release and backup provenance | Per-execution/readiness fields, freshness/headroom/restore tooling, representative managed/native upgrades through 183, historical intended DB/backup scope and isolated restore, actual hosted snapshot candidate upgrade and native provenance presentation. | Actual loaded/rollback source and sandbox runtime identity; fresh cutover backup if deployment is authorized. |
 
 ## Evidence boundaries
 
@@ -31,9 +31,9 @@ Worker admission creates task/run/retry/provider identity atomically before cons
 
 Accounting preserves units and missingness: provider corrections replace duplicate legacy totals; phase attribution conflicts remain visible; stored agent plus harness subtotals are not relabelled billing truth. Duration evidence reports valid/invalid/missing records and overlapping stage scope instead of adding overlapping intervals into invented wall time. Historical cohorts and export records survive pod deletion; live backlog remains a live-resource count. Final-source tests cover representative malformed sizes, WAL read snapshots, unsafe duration aggregates, retained task budgets and one logical delivery across duplicate source-bound observations.
 
-Current service directory, Node version and active inode are observed metadata, not attestation of all loaded JavaScript bytes. The new backup is hash/schema pinned but has not yet passed isolated restore or active-row freshness comparison. Historical CP108 restore evidence remains valid only for its original sampled input. No symlink-only rollback is treated as safe after new durable writes.
+Current service directory, Node version and active inode are observed metadata, not attestation of all loaded JavaScript bytes. The new backup passed the exact isolated candidate upgrade/restore checks; active-row freshness at a future cutover remains separate. Historical CP108 restore evidence remains valid only for its original sampled input. No symlink-only rollback is treated as safe after new durable writes.
 
-The [release packet](release-and-acceptance-packet.md) records exact targets, authority, cleanup/rollback rules and remaining sandbox spend/access prerequisites. The [acceptance ledger](acceptance.json) maps every criterion to implementation, tests, evidence and current prerequisites. Its `historicalProgressNotes` retain dated implementation progress without presenting already-completed native checks as current blockers. The [prior report](receipts/checkpoint-123-prior-closure-report.md) and all checkpoint receipts are retained as dated history.
+The [release packet](release-and-acceptance-packet.md) records exact targets, authority, cleanup/rollback rules and remaining sandbox spend/access prerequisites. The [acceptance ledger](acceptance.json) maps every criterion to implementation, tests, evidence and current prerequisites. Its `historicalProgressNotes` retain dated implementation progress without presenting already-completed native checks as current blockers. The [historical report through checkpoint 122](receipts/checkpoint-123-prior-closure-report.md) and all checkpoint receipts are retained as dated history.
 
 ## Criterion status
 
@@ -77,7 +77,7 @@ The [release packet](release-and-acceptance-packet.md) records exact targets, au
 | W6.4 | Freshness and disk headroom checks added while preserving cleanup/deployment safeguards | verified |
 | W6.5 | Sampled backup restores in isolation with freshness and integrity verification | verified |
 | G.1 | Historical strict fetch, validation-only recovery, bounded review, ledgers, history sequences, Codex transport/OAuth, ADO auth and guarded deployment retain regression coverage and deployment status evidence | partial |
-| G.2 | Migration numbering checked against current branches and representative prior database upgrades verified | partial |
+| G.2 | Migration numbering checked against current branches and representative prior database upgrades verified | verified |
 | G.3 | All affected suites and full repository validation pipeline pass on exact recorded commits | verified |
 | G.4 | Desktop/mobile/CLI supported-surface interactions verified; compilation alone is insufficient | verified |
 | G.5 | Deployment/rollback identities, canary scope and spend prepared before requesting gated actions | partial |

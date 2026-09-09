@@ -1356,13 +1356,14 @@
         "checkpoint-108.md",
         "checkpoint-109.md",
         "checkpoint-120.md",
-        "checkpoint-121.md"
+        "checkpoint-121.md",
+        "checkpoint-124.md"
       ],
       "prerequisites": [
-        "Actual affected dataverse-harness image is pinned in CP110, but the required capability canary remains unrun. Obtain intended-group data-plane access and finish the ready-disk-image identity, total spend and command/oracle packet before paid-canary authorization."
+        "CP124 fresh GET on intended group autopod-spike-neu/northeurope still returns 403. The affected dataverse-harness digest is pinned; appropriate group data-plane access is required before resolving its ready disk image and finalizing total spend/commands/oracles for a separately authorized canary. No role grant or sandbox allocation is authorized."
       ],
       "finalSourceEvidence": "90a61141a6a8ed6205aae144bbb99f8c9f0f9ec5; see checkpoint-106.md for executed checks, carried forward surface proof and limits.",
-      "remaining": "Actual affected dataverse-harness image is pinned in CP110, but the required capability canary remains unrun. Obtain intended-group data-plane access and finish the ready-disk-image identity, total spend and command/oracle packet before paid-canary authorization.",
+      "remaining": "CP124 fresh GET on intended group autopod-spike-neu/northeurope still returns 403. The affected dataverse-harness digest is pinned; appropriate group data-plane access is required before resolving its ready disk image and finalizing total spend/commands/oracles for a separately authorized canary. No role grant or sandbox allocation is authorized.",
       "historicalProgressNotes": "Actual affected dataverse-harness image is pinned in CP110, but the required capability canary remains unrun. Obtain intended-group data-plane access and finish the ready-disk-image identity, total spend and command/oracle packet before paid-canary authorization."
     },
     {
@@ -1432,12 +1433,14 @@
         "release-and-acceptance-packet.md",
         "checkpoint-108.md",
         "checkpoint-109.md",
-        "checkpoint-110.md"
+        "checkpoint-110.md",
+        "checkpoint-124.md"
       ],
       "prerequisites": [
-        "The actual current affected Codex sandbox profile is dataverse-harness, image digest sha256:4b836cdabc71ffd40aef564b65b6b16564c5312770130bc59251a732078c9d77. Group autopod-spike-neu/northeurope. Data-plane access is refused; no role grant or paid canary is authorized. Finish exact disk-image reuse/import and total-spend packet after authorized access is supplied."
+        "CP124 fresh GET on intended group autopod-spike-neu/northeurope still returns 403. The affected dataverse-harness digest is pinned; appropriate group data-plane access is required before resolving its ready disk image and finalizing total spend/commands/oracles for a separately authorized canary. No role grant or sandbox allocation is authorized."
       ],
-      "finalSourceEvidence": "90a61141a6a8ed6205aae144bbb99f8c9f0f9ec5; see checkpoint-106.md for executed checks, carried forward surface proof and limits."
+      "finalSourceEvidence": "90a61141a6a8ed6205aae144bbb99f8c9f0f9ec5; see checkpoint-106.md for executed checks, carried forward surface proof and limits.",
+      "remaining": "CP124 fresh GET on intended group autopod-spike-neu/northeurope still returns 403. The affected dataverse-harness digest is pinned; appropriate group data-plane access is required before resolving its ready disk image and finalizing total spend/commands/oracles for a separately authorized canary. No role grant or sandbox allocation is authorized."
     },
     {
       "id": "W4.1",
@@ -2395,12 +2398,13 @@
         "checkpoint-110.md",
         "checkpoint-119.md",
         "checkpoint-121.md",
-        "checkpoint-123.md"
+        "checkpoint-123.md",
+        "checkpoint-124.md"
       ],
       "prerequisites": [
-        "CP123 observes running service directory /opt/autopod/releases/ca92847a/packages/daemon, unchanged active DB device/inode 2049/13107203 held by the service, and Node v22.23.1. This is directory/process identity, not attestation of loaded bundle bytes or actual sandbox CLI/capabilities. Those requirements remain unverified."
+        "CP124 service/active identity remained stable during the successful copy check. Current public health returned 200 without a release field; directory ca92847a and compatible Node/SQLite are not loaded-bundle attestation. Actual sandbox CLI/image capabilities and loaded/rollback source remain unverified."
       ],
-      "remaining": "CP123 observes running service directory /opt/autopod/releases/ca92847a/packages/daemon, unchanged active DB device/inode 2049/13107203 held by the service, and Node v22.23.1. This is directory/process identity, not attestation of loaded bundle bytes or actual sandbox CLI/capabilities. Those requirements remain unverified.",
+      "remaining": "CP124 service/active identity remained stable during the successful copy check. Current public health returned 200 without a release field; directory ca92847a and compatible Node/SQLite are not loaded-bundle attestation. Actual sandbox CLI/image capabilities and loaded/rollback source remain unverified.",
       "finalSourceEvidence": "90a61141a6a8ed6205aae144bbb99f8c9f0f9ec5; see checkpoint-106.md for executed checks, carried forward surface proof and limits.",
       "historicalProgressNotes": "Coding, validation/retry, review-only and completion recovery provenance are locally implemented. Sandbox effective cgroup resources are read without substituting requests; image and network identity remain unavailable. Checkpoint 51 adds preflight to direct agent Resume and missing-session fallback paths. Side effects after execution begins, actual reviewer CLI identity, complete receipt history/operator coverage, native interaction and live acceptance remain outstanding. Checkpoint 76 adds legacy Tier 2 API preparation with explicitly unverified provider/account and actual-adapter model resolution; host CLI credentials/remote model identity, SDK identity and gated native/live acceptance remain outstanding. Checkpoint 82 records observed host CLI path/version at dispatch with explicit unknown credentials/model resolution; hung filesystem metadata, binary/transitive identity, live rollout and native interaction remain unverified."
     },
@@ -2437,12 +2441,13 @@
         "checkpoint-119.md",
         "checkpoint-121.md",
         "checkpoint-122.md",
-        "checkpoint-123.md"
+        "checkpoint-123.md",
+        "checkpoint-124.md"
       ],
       "prerequisites": [
-        "CP123 observes running service directory /opt/autopod/releases/ca92847a/packages/daemon, unchanged active DB device/inode 2049/13107203 held by the service, and Node v22.23.1. This is directory/process identity, not attestation of loaded bundle bytes or actual sandbox CLI/capabilities. Those requirements remain unverified."
+        "CP124 service/active identity remained stable during the successful copy check. Current public health returned 200 without a release field; directory ca92847a and compatible Node/SQLite are not loaded-bundle attestation. Actual sandbox CLI/image capabilities and loaded/rollback source remain unverified."
       ],
-      "remaining": "CP123 observes running service directory /opt/autopod/releases/ca92847a/packages/daemon, unchanged active DB device/inode 2049/13107203 held by the service, and Node v22.23.1. This is directory/process identity, not attestation of loaded bundle bytes or actual sandbox CLI/capabilities. Those requirements remain unverified.",
+      "remaining": "CP124 service/active identity remained stable during the successful copy check. Current public health returned 200 without a release field; directory ca92847a and compatible Node/SQLite are not loaded-bundle attestation. Actual sandbox CLI/image capabilities and loaded/rollback source remain unverified.",
       "finalSourceEvidence": "15900d9e08a7e4ca786a6ad11ff81820fda14de4; clean full pipeline and 357 Swift tests; direct native case/source boundaries in checkpoint-117 receipt.",
       "historicalProgressNotes": "Checkpoint 48 verifies managed 150/152 upgrades and copy-only conversion of exact unpublished native checkpoint schemas 151/158/163. Live backup scope/freshness, deployed bytes and activation remain unverified; checkpoint 49 integrates and fully validates main f646cfcc locally; current deployed-source verification remains outstanding."
     },
@@ -2465,7 +2470,8 @@
         "release-and-acceptance-packet.md",
         "checkpoint-107.md",
         "checkpoint-108.md",
-        "checkpoint-122.md"
+        "checkpoint-122.md",
+        "checkpoint-124.md"
       ],
       "prerequisites": [],
       "remaining": "",
@@ -2586,17 +2592,19 @@
         "checkpoint-106.md",
         "closure-report.md",
         "checkpoint-107.md",
-        "checkpoint-123.md"
+        "checkpoint-123.md",
+        "checkpoint-124.md"
       ],
       "prerequisites": [
-        "CP123 observes running service directory /opt/autopod/releases/ca92847a/packages/daemon, unchanged active DB device/inode 2049/13107203 held by the service, and Node v22.23.1. This is directory/process identity, not attestation of loaded bundle bytes or actual sandbox CLI/capabilities. Those requirements remain unverified."
+        "CP124 service/active identity remained stable during the successful copy check. Current public health returned 200 without a release field; directory ca92847a and compatible Node/SQLite are not loaded-bundle attestation. Actual sandbox CLI/image capabilities and loaded/rollback source remain unverified."
       ],
-      "finalSourceEvidence": "90a61141a6a8ed6205aae144bbb99f8c9f0f9ec5; see checkpoint-106.md for executed checks, carried forward surface proof and limits."
+      "finalSourceEvidence": "90a61141a6a8ed6205aae144bbb99f8c9f0f9ec5; see checkpoint-106.md for executed checks, carried forward surface proof and limits.",
+      "remaining": "CP124 service/active identity remained stable during the successful copy check. Current public health returned 200 without a release field; directory ca92847a and compatible Node/SQLite are not loaded-bundle attestation. Actual sandbox CLI/image capabilities and loaded/rollback source remain unverified."
     },
     {
       "id": "G.2",
       "requirement": "Migration numbering checked against current branches and representative prior database upgrades verified",
-      "status": "partial",
+      "status": "verified",
       "implementation": [
         "packages/daemon/src/db/migrations/164_completion_journal.sql",
         "packages/daemon/src/db/migrate.ts",
@@ -2641,14 +2649,14 @@
         "checkpoint-107.md",
         "checkpoint-116.md",
         "checkpoint-118.md",
-        "checkpoint-123.md"
+        "checkpoint-123.md",
+        "checkpoint-124.md"
       ],
-      "prerequisites": [
-        "CP122 integrated main b75fbf0b and verified managed 150/152/153 plus prior native migrations through 183. CP123 approved hosted-copy attempt refused before copy: service release changed and pinned backup was removed. Newly observed schema-153 snapshot is pinned in the updated packet; its isolated candidate upgrade remains unverified."
-      ],
-      "remaining": "CP122 integrated main b75fbf0b and verified managed 150/152/153 plus prior native migrations through 183. CP123 approved hosted-copy attempt refused before copy: service release changed and pinned backup was removed. Newly observed schema-153 snapshot is pinned in the updated packet; its isolated candidate upgrade remains unverified.",
-      "finalSourceEvidence": "90a61141a6a8ed6205aae144bbb99f8c9f0f9ec5; see checkpoint-106.md for executed checks, carried forward surface proof and limits.",
-      "historicalProgressNotes": "Managed 142-150 definitions retained as inert baseline; unpublished native additions renumbered 151-158. Combined schema upgrade preserves native/managed data locally. Exact remote migration-byte verification awaits approved read-only inspection; no live migration was performed. Checkpoint 48 verifies managed 150/152 upgrades and copy-only conversion of exact unpublished native checkpoint schemas 151/158/163. Live backup scope/freshness, deployed bytes and activation remain unverified; checkpoint 49 integrates and fully validates main f646cfcc locally; current deployed-source verification remains outstanding."
+      "prerequisites": [],
+      "remaining": "",
+      "finalSourceEvidence": "4e73cd8ce88e44cdb5c2d8d0a89447b819fa5a39; CP122 local main/migration regressions and CP124 exact hosted copy proof.",
+      "historicalProgressNotes": "Managed 142-150 definitions retained as inert baseline; unpublished native additions renumbered 151-158. Combined schema upgrade preserves native/managed data locally. Exact remote migration-byte verification awaits approved read-only inspection; no live migration was performed. Checkpoint 48 verifies managed 150/152 upgrades and copy-only conversion of exact unpublished native checkpoint schemas 151/158/163. Live backup scope/freshness, deployed bytes and activation remain unverified; checkpoint 49 integrates and fully validates main f646cfcc locally; current deployed-source verification remains outstanding.",
+      "verificationScope": "Current-main local migration inventory and representative managed/native regressions through schema 183, plus actual pinned hosted schema-153 snapshot copied/upgraded to candidate 4e73cd8c with row/column preservation, integrity, FK, backfill, unchanged input and cleanup. Recheck branch inventory before future publication; fresh cutover backup remains separate."
     },
     {
       "id": "G.3",
@@ -2874,12 +2882,14 @@
         "checkpoint-118.md",
         "checkpoint-121.md",
         "checkpoint-122.md",
-        "checkpoint-123.md"
+        "checkpoint-123.md",
+        "checkpoint-124.md"
       ],
       "prerequisites": [
-        "CP122 hosted-copy approval was executed once and refused in preflight. CP123 replacement packet pins observed release ca92847a and new schema-153 backup; explicit approval of the replacement inputs is pending. No deployment/publication or paid canary occurred; loaded/rollback identity and sandbox requirements remain in the release packet."
+        "CP124 completed the explicitly approved CP123 hosted-copy verification and cleanup. No further snapshot approval is pending. Deployment/rollback loaded-source identities, fresh cutover/drain safeguards and intended-image sandbox access/canary scope/spend remain required before separate deployment or paid-canary approval."
       ],
-      "finalSourceEvidence": "15900d9e08a7e4ca786a6ad11ff81820fda14de4; clean full pipeline and 357 Swift tests; direct native case/source boundaries in checkpoint-117 receipt."
+      "finalSourceEvidence": "15900d9e08a7e4ca786a6ad11ff81820fda14de4; clean full pipeline and 357 Swift tests; direct native case/source boundaries in checkpoint-117 receipt.",
+      "remaining": "CP124 completed the explicitly approved CP123 hosted-copy verification and cleanup. No further snapshot approval is pending. Deployment/rollback loaded-source identities, fresh cutover/drain safeguards and intended-image sandbox access/canary scope/spend remain required before separate deployment or paid-canary approval."
     },
     {
       "id": "G.6",
@@ -2908,15 +2918,17 @@
         "checkpoint-120.md",
         "checkpoint-121.md",
         "checkpoint-122.md",
-        "checkpoint-123.md"
+        "checkpoint-123.md",
+        "checkpoint-124.md"
       ],
       "prerequisites": [
-        "All 43 criteria remain mapped. W5 and mapped operator interactions are verified. Hosted snapshot compatibility, loaded-source evidence, historical API causality and actual-image capability remain outstanding; whole-goal completion is not claimed."
+        "All 43 criteria remain mapped. W5, mapped operator interactions and exact hosted snapshot compatibility are verified. Loaded-source identity, historical API causality and actual-image capability remain outstanding; whole-goal completion is not claimed."
       ],
-      "finalSourceEvidence": "15900d9e08a7e4ca786a6ad11ff81820fda14de4; clean full pipeline and 357 Swift tests; direct native case/source boundaries in checkpoint-117 receipt."
+      "finalSourceEvidence": "15900d9e08a7e4ca786a6ad11ff81820fda14de4; clean full pipeline and 357 Swift tests; direct native case/source boundaries in checkpoint-117 receipt.",
+      "remaining": "All 43 criteria remain mapped. W5, mapped operator interactions and exact hosted snapshot compatibility are verified. Loaded-source identity, historical API causality and actual-image capability remain outstanding; whole-goal completion is not claimed."
     }
   ],
-  "lastCheckpoint": "checkpoint-123.md",
+  "lastCheckpoint": "checkpoint-124.md",
   "migrationLineage": {
     "managedBaseline": "142-153; authoritative managed migration 153 preserved from main b75fbf0b7e2c4ea455838a6e4df6537665a7a8cc",
     "nativeCurrent": "164-183; prior native 182 upgraded by idempotent managed GitHub reads bridge 183; representative managed 150/152/153 and copy-only native lineage verified",
