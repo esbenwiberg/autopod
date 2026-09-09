@@ -27,7 +27,7 @@
   },
   "pnpm": {
     "overrides": {
-      "@huggingface/transformers>sharp": "0.35.0",
+      "@huggingface/transformers>sharp": "0.35.4",
       "onnxruntime-node>adm-zip": "0.6.0",
       "@azure/msal-node@2>uuid": "11.1.1",
       "esbuild@>=0.27.3 <0.28.1": "0.28.1"

@@ -1,0 +1,9 @@
+Scope: all 9 workspace projects
+Lockfile is up to date, resolution step is skipped
+Progress: resolved 1, reused 0, downloaded 0, added 0
+Packages: +4
+++++
+Progress: resolved 4, reused 0, downloaded 2, added 2
+Progress: resolved 4, reused 1, downloaded 3, added 4, done
+
+Done in 2.3s
