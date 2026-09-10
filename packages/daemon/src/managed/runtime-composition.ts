@@ -1,5 +1,5 @@
 import path from 'node:path';
-import type { ManagedPodRequest, Route } from '@autopod/shared';
+import type { FollowUpEnvelope, ManagedPodRequest, Route } from '@autopod/shared';
 import type { DaemonGitHubAuth } from '../github/daemon-github-auth.js';
 import type { ContainerManager, ContainerSpawnConfig } from '../interfaces/container-manager.js';
 import { type ManagedComponentsConfig, managedComponents } from './bootstrap.js';
@@ -27,6 +27,13 @@ export interface ManagedWorkerProviderChannel {
     ) => ReturnType<ManagedProviderGateway['invoke']>;
     invokeGitHub?: (key: string, request: string) => Promise<string>;
   }): Promise<() => void>;
+  /** Queue one digest-bound follow-up inside the already-bound runtime. */
+  send?(
+    runtimeRef: string,
+    stateRoot: string,
+    message: FollowUpEnvelope,
+    key: string,
+  ): Promise<void>;
 }
 export interface ManagedRuntimeBinding {
   route: Route;
@@ -184,6 +191,17 @@ export function composeManagedRuntime(config: ManagedRuntimeCompositionConfig) {
         };
       },
       attachQuota: (podId, ref, root) => attach(index, podId, ref, root),
+      ...(binding.channel.send
+        ? {
+            sendMessage: (ref: string, message: FollowUpEnvelope, key: string) => {
+              const row = rowFor(ref);
+              if (!row) throw new Error('managed-channel-binding');
+              const send = binding.channel.send;
+              if (!send) throw new Error('managed-follow-up-unavailable');
+              return send(ref, `/run/dispatcher-${row.pod_id}`, message, key);
+            },
+          }
+        : {}),
     })),
     (ref) => {
       const row = rowFor(ref);

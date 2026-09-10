@@ -1,5 +1,5 @@
 import { readFileSync } from 'node:fs';
-import type { ManagedPodRequest, Route } from '@autopod/shared';
+import type { FollowUpEnvelope, ManagedPodRequest, Route } from '@autopod/shared';
 import type { ContainerManager } from '../interfaces/container-manager.js';
 import { canonical, sha256 } from './canonical.js';
 import { codexInput } from './codex-wire.js';
@@ -36,6 +36,18 @@ if p.exists() and json.loads(p.read_text()).get('ticket')==value['ticket']:
  if json.loads(p.read_text())!=value:raise RuntimeError('replay-conflict')
 else:
  with temp.open('w') as f:json.dump(value,f,ensure_ascii=False);f.flush();os.fsync(f.fileno())
+ os.replace(temp,p)
+`;
+const SEND = `import json,os,pathlib,re,sys
+root=pathlib.Path(sys.argv[1]);key=sys.argv[2];raw=sys.argv[3]
+if not re.fullmatch(r'[A-Za-z0-9_-]{1,200}',key):raise RuntimeError('key')
+value=json.loads(raw)
+if not isinstance(value,dict) or set(value)!=set(['schemaVersion','dispatcherAttemptId','grantId','grantRevision','message']):raise RuntimeError('envelope')
+p=root/('followup-'+key+'.json');temp=root/('followup-'+key+'.tmp')
+if p.exists():
+ if json.loads(p.read_text())!=value:raise RuntimeError('replay-conflict')
+else:
+ with temp.open('w') as f:json.dump(value,f,ensure_ascii=False,separators=(',',':'));f.flush();os.fsync(f.fileno())
  os.replace(temp,p)
 `;
 /** Concrete container loopback -> root spool -> trusted exec -> attempt gateway channel.
@@ -98,6 +110,16 @@ export class ContainerCodexChannel implements ManagedWorkerProviderChannel {
     if (this.options.mode !== 'agent' && request.outputs.source.mode !== 'none')
       throw new Error('managed-codex-report-only');
   }
+  async send(runtimeRef: string, stateRoot: string, message: FollowUpEnvelope, key: string) {
+    if (!/^\/run\/dispatcher-managed-[A-Za-z0-9-]+$/.test(stateRoot))
+      throw new Error('managed-codex-follow-up-binding');
+    const result = await this.manager.execInContainer(
+      runtimeRef,
+      ['python3', '-c', SEND, stateRoot, key, canonical(message)],
+      { user: 'root' },
+    );
+    if (result.exitCode !== 0) throw new Error('managed-codex-follow-up-unavailable');
+  }
   async attach(
     binding: Parameters<ManagedWorkerProviderChannel['attach']>[0],
   ): Promise<() => void> {
@@ -120,11 +142,16 @@ export class ContainerCodexChannel implements ManagedWorkerProviderChannel {
       ['codex', 'exec', '--help'],
       { user: 'root' },
     );
+    const resumeCapability = await this.manager.execInContainer(
+      binding.runtimeRef,
+      ['codex', 'exec', 'resume', '--help'],
+      { user: 'root' },
+    );
     if (
       capability.exitCode !== 0 ||
-      !['--ephemeral', '--output-last-message', '--sandbox'].every((flag) =>
-        capability.stdout.includes(flag),
-      )
+      !['--output-last-message', '--sandbox'].every((flag) => capability.stdout.includes(flag)) ||
+      resumeCapability.exitCode !== 0 ||
+      !['--last', '--output-last-message'].every((flag) => resumeCapability.stdout.includes(flag))
     )
       throw new Error('managed-codex-cli-incompatible');
     await exec(

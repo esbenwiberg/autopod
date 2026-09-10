@@ -178,43 +178,67 @@ it('cleanup requires observed exit and committed required artifacts, then retrie
     f.close();
   }
 });
-it('cleanup releases a terminal runtime after required artifact export failed irrecoverably', async () => {
+it.each(['artifact-export-incomplete', 'agent-runtime-failed'])(
+  'cleanup releases a terminal runtime after %s makes required export impossible',
+  async (limitation) => {
+    const f = fixture();
+    try {
+      const service = f.service();
+      const controls = new ManagedControls(service);
+      const handle = await service.start('installation-one', f.request);
+      const request = {
+        schemaVersion: 1,
+        dispatcherAttemptId: f.request.dispatcherAttemptId,
+        grantId: f.request.effectiveGrant.grantId,
+        grantRevision: 1,
+        operation: 'cleanup',
+      };
+      f.runtime.cleanup = async () => true;
+      await controls.control(
+        'installation-one',
+        handle.podId,
+        { ...request, operation: 'stop' },
+        'stop',
+      );
+      await service.enforceExpiry();
+      service.db
+        .prepare(`INSERT INTO managed_results (pod_id,limitations_json) VALUES (?,?)
+      ON CONFLICT(pod_id) DO UPDATE SET limitations_json=excluded.limitations_json`)
+        .run(handle.podId, JSON.stringify([limitation]));
+
+      const result = await controls.control(
+        'installation-one',
+        handle.podId,
+        request,
+        'cleanup-after-export-failure',
+      );
+
+      expect(result.cleanup).toBe('observed');
+      expect(
+        service.db.prepare('SELECT 1 FROM artifact_exports WHERE pod_id=?').get(handle.podId),
+      ).toBeUndefined();
+    } finally {
+      f.close();
+    }
+  },
+);
+
+it('projects only bounded provider failure diagnostics into ordinary status', async () => {
   const f = fixture();
   try {
     const service = f.service();
     const controls = new ManagedControls(service);
     const handle = await service.start('installation-one', f.request);
-    const request = {
-      schemaVersion: 1,
-      dispatcherAttemptId: f.request.dispatcherAttemptId,
-      grantId: f.request.effectiveGrant.grantId,
-      grantRevision: 1,
-      operation: 'cleanup',
-    };
-    f.runtime.cleanup = async () => true;
-    await controls.control(
-      'installation-one',
-      handle.podId,
-      { ...request, operation: 'stop' },
-      'stop',
-    );
-    await service.enforceExpiry();
     service.db
-      .prepare(`INSERT INTO managed_results (pod_id,limitations_json) VALUES (?,?)
-      ON CONFLICT(pod_id) DO UPDATE SET limitations_json=excluded.limitations_json`)
-      .run(handle.podId, '["artifact-export-incomplete"]');
+      .prepare(`INSERT INTO managed_provider_requests
+        (pod_id,operation_key,request_digest,transport_digest,grant_revision,state,response_json,
+         failure_phase,failure_reason,failure_http_status)
+        VALUES (?,?,?,?,?,'reserved',NULL,'http','http',429)`)
+      .run(handle.podId, 'provider-one', 'request-digest', 'transport-digest', 1);
 
-    const result = await controls.control(
-      'installation-one',
-      handle.podId,
-      request,
-      'cleanup-after-export-failure',
+    expect(controls.observe('installation-one', handle.podId, '0').result.limitations).toContain(
+      'provider-http-http-429',
     );
-
-    expect(result.cleanup).toBe('observed');
-    expect(
-      service.db.prepare('SELECT 1 FROM artifact_exports WHERE pod_id=?').get(handle.podId),
-    ).toBeUndefined();
   } finally {
     f.close();
   }

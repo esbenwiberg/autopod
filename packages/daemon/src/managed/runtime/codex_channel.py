@@ -9,6 +9,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
 import os
 from pathlib import Path
+import re
 import threading
 import time
 import uuid
@@ -53,7 +54,27 @@ def serve(root, port, lifetime):
                 pass
 
         def do_GET(self):
-            self.reply(204 if self.path == '/health' else 404)
+            if self.path == '/health':
+                self.reply(204)
+                return
+            if self.path != '/followups':
+                self.reply(404)
+                return
+            try:
+                for item in sorted(root.glob('followup-*.json')):
+                    key = item.name[len('followup-'):-len('.json')]
+                    if not re.fullmatch(r'[A-Za-z0-9_-]{1,200}', key) or (root / ('followup-' + key + '.ack')).exists():
+                        continue
+                    value = json.loads(item.read_text())
+                    message = value.get('message')
+                    if not isinstance(message, str) or not 0 < len(message.encode()) <= 4096:
+                        raise ValueError('followup')
+                    body = json.dumps({'key': key, 'message': message}, ensure_ascii=False, separators=(',', ':')).encode()
+                    self.reply(200, body)
+                    return
+                self.reply(204)
+            except (OSError, ValueError, KeyError):
+                self.reply(400)
 
         def do_POST(self):
             if not serial.acquire(blocking=False):
@@ -66,6 +87,18 @@ def serve(root, port, lifetime):
 
         def handle_post(self):
             self.connection.settimeout(5)
+            if self.path.startswith('/followups/'):
+                key = self.path[len('/followups/'):]
+                if not re.fullmatch(r'[A-Za-z0-9_-]{1,200}', key) or self.headers.get('Content-Length') not in (None, '0'):
+                    self.reply(403)
+                    return
+                item = root / ('followup-' + key + '.json')
+                if not item.exists():
+                    self.reply(404)
+                    return
+                atomic(root / ('followup-' + key + '.ack'), {'observed': True})
+                self.reply(204)
+                return
             github = self.path == '/github'
             if self.path not in ('/v1/responses', '/github') or self.headers.get('Authorization') or self.headers.get('Transfer-Encoding'):
                 self.reply(403)

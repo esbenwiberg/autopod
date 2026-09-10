@@ -65,7 +65,9 @@ All routes require the authenticated installation. Artifact reads also enforce o
 
 Stop acceptance, observed worker exit and observed cleanup are distinct facts.
 Cleanup waits for required artifact exports and any promised source candidate to
-be frozen. Source delivery can then recover without the worker or its workspace.
+be frozen. If the runtime exits nonzero before any artifact can exist, the bounded
+`agent-runtime-failed` result permits cleanup while preserving that failure truth.
+Source delivery can then recover without the worker or its workspace.
 An uncertain Sandbox create never allocates a replacement. Suspension is not exit.
 A missing authoritative PR result never authorizes creating another PR.
 

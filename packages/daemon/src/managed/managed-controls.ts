@@ -66,6 +66,20 @@ export class ManagedControls {
           source_json: string;
         }
       | undefined;
+    const limitations = stored ? (JSON.parse(stored.limitations_json) as string[]) : [];
+    const providerFailure = this.service.db
+      .prepare(`SELECT failure_phase,failure_reason,failure_http_status
+        FROM managed_provider_requests WHERE pod_id=? AND failure_phase IS NOT NULL
+        ORDER BY rowid DESC LIMIT 1`)
+      .get(podId) as
+      | { failure_phase: string; failure_reason: string; failure_http_status: number | null }
+      | undefined;
+    if (providerFailure) {
+      const status = providerFailure.failure_http_status ?? 'none';
+      limitations.push(
+        `provider-${providerFailure.failure_phase}-${providerFailure.failure_reason}-${status}`,
+      );
+    }
     const result: ManagedPodResult = {
       schemaVersion: 1,
       handle: JSON.parse(row.handle_json) as ManagedPodHandle,
@@ -74,7 +88,7 @@ export class ManagedControls {
       candidates: stored ? JSON.parse(stored.candidates_json) : [],
       source: stored ? JSON.parse(stored.source_json) : [],
       evidence: stored ? JSON.parse(stored.evidence_json) : [],
-      limitations: stored ? JSON.parse(stored.limitations_json) : [],
+      limitations: [...new Set(limitations)],
       revoked: Boolean(row.revoked),
       observedExit: Boolean(row.observed_exit),
       cleanup: row.cleanup as ManagedPodResult['cleanup'],
@@ -126,13 +140,18 @@ export class ManagedControls {
       cleanup: row.cleanup as ControlResult['cleanup'],
     };
   }
-  private artifactExportFailed(podId: string): boolean {
+  private artifactExportImpossible(podId: string): boolean {
     const stored = this.service.db
       .prepare('SELECT limitations_json FROM managed_results WHERE pod_id=?')
       .get(podId) as { limitations_json: string } | undefined;
     if (!stored) return false;
     const limitations = JSON.parse(stored.limitations_json) as unknown;
-    return Array.isArray(limitations) && limitations.includes('artifact-export-incomplete');
+    return (
+      Array.isArray(limitations) &&
+      limitations.some((value) =>
+        ['artifact-export-incomplete', 'agent-runtime-failed'].includes(String(value)),
+      )
+    );
   }
   async control(
     installation: string,
@@ -162,7 +181,7 @@ export class ManagedControls {
           if (
             row.runtime_ref &&
             spec.outputs.artifacts.mode === 'required' &&
-            !this.artifactExportFailed(podId) &&
+            !this.artifactExportImpossible(podId) &&
             !this.service.db
               .prepare("SELECT 1 FROM artifact_exports WHERE pod_id=? AND status='committed'")
               .get(podId)

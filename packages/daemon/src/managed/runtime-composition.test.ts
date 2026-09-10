@@ -54,6 +54,7 @@ function setup(target: 'local' | 'sandbox' = 'local', mode: 'api-key' | 'chatgpt
   let attached: Parameters<ManagedWorkerProviderChannel['attach']>[0] | undefined;
   const channel = {
     preflight: vi.fn(async () => {}),
+    send: vi.fn(async () => {}),
     attach: vi.fn(async (binding: Parameters<ManagedWorkerProviderChannel['attach']>[0]) => {
       attached = binding;
       return vi.fn();
@@ -202,6 +203,27 @@ it('a missing channel enforcement contract fails before allocation', async () =>
   const c = x.create(true);
   await expect(c.service.start('installation', x.request)).rejects.toThrow('channel-unavailable');
   expect(x.ensure).not.toHaveBeenCalled();
+});
+it('routes a standard managed follow-up through the concrete bound channel', async () => {
+  const x = setup();
+  const c = x.create(true);
+  const handle = await c.service.start('installation', x.request);
+  const message = {
+    schemaVersion: 1 as const,
+    dispatcherAttemptId: x.request.dispatcherAttemptId,
+    grantId: x.request.effectiveGrant.grantId,
+    grantRevision: 1,
+    message: 'Include falsifying evidence.',
+  };
+
+  await c.controls.send('installation', handle.podId, message, 'follow-one');
+
+  expect(x.channel.send).toHaveBeenCalledWith(
+    'runtime-one',
+    `/run/dispatcher-${handle.podId}`,
+    message,
+    'follow-one',
+  );
 });
 it('rejects ambiguous routes and closes the bound callback', async () => {
   const x = setup();
