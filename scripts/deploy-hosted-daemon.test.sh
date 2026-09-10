@@ -218,3 +218,22 @@ grep -qF 'STAGED cafebabe' "$tmp/stage-only-out"
 [ ! -e "$tmp/restarted" ]
 [ "$(readlink "$tmp/current")" = "$tmp/releases/deadbeef" ]
 [ -e "$tmp/drain-removed" ]
+
+# The config loader evaluates tsup.config while its generated sibling exists.
+# That transient file must not mark a clean build dirty; actual source still must.
+provenance="$tmp/provenance"
+mkdir -p "$provenance/packages/daemon/src" "$provenance/packages/shared"
+cp "$(dirname "$script")/../.gitignore" "$provenance/.gitignore"
+printf 'export default {};\n' >"$provenance/packages/daemon/tsup.config.ts"
+git -C "$provenance" init -q
+git -C "$provenance" add .
+git -C "$provenance" -c user.name=fixture -c user.email=fixture@example.invalid -c core.hooksPath=/dev/null commit -qm fixture
+printf 'generated config\n' >"$provenance/packages/daemon/tsup.config.bundled_abc123.mjs"
+printf 'parallel generated config\n' >"$provenance/packages/shared/tsup.config.bundled_xyz789.cjs"
+[ -z "$(git -C "$provenance" status --porcelain -- packages)" ] || { echo 'generated config falsely marks release dirty' >&2; exit 1; }
+printf 'real source\n' >"$provenance/packages/daemon/src/new-source.ts"
+[ -n "$(git -C "$provenance" status --porcelain -- packages)" ]
+rm "$provenance/packages/daemon/src/new-source.ts"
+printf 'actual config change\n' >>"$provenance/packages/daemon/tsup.config.ts"
+[ -n "$(git -C "$provenance" status --porcelain -- packages)" ]
+echo 'Build provenance generated-file and real-source checks passed.'

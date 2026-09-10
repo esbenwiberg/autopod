@@ -32,3 +32,7 @@ packages/desktop/Autopod.xcodeproj/xcuserdata/
 packages/desktop/Autopod.xcodeproj/project.xcworkspace/
 investigations/
 report.html
+
+# Temporary config modules exist while tsup captures build provenance.
+packages/*/tsup.config.bundled_*.mjs
+packages/*/tsup.config.bundled_*.cjs
