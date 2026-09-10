@@ -142,6 +142,13 @@ export class ManagedProviderGateway {
         const count = this.service.db
           .prepare('SELECT count(*) AS n FROM managed_provider_requests WHERE pod_id=?')
           .get(podId) as { n: number };
+        const current = assertActive();
+        if (
+          requestTime &&
+          budget.maxObservedTokens !== undefined &&
+          current.consumed_tokens >= budget.maxObservedTokens
+        )
+          throw new Error('managed-provider-observed-token-stop');
         if (
           count.n >=
           Math.min(
@@ -152,7 +159,6 @@ export class ManagedProviderGateway {
           throw new Error('managed-provider-request-limit');
         // The detached supervisor treats fully reserved quota as exhausted. Keep one
         // token unreserved so an in-flight request cannot stop its own worker.
-        const current = assertActive();
         if ('maxTokens' in budget && current.consumed_tokens + maximumTokens >= budget.maxTokens)
           throw new Error('managed-provider-budget-headroom-required');
         this.service.db

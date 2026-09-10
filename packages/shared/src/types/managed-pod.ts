@@ -112,6 +112,7 @@ export const RequestTimeBudgetSchema = z
     mode: z.literal('request-time'),
     expiresAt: z.number().int().min(0).max(9007199254740991),
     maxProviderRequests: z.number().int().min(1).max(100),
+    maxObservedTokens: z.number().int().min(1).max(9007199254740991).optional(),
     maxDurationSeconds: z.number().int().min(1).max(3600),
   })
   .strict();
@@ -1448,6 +1449,10 @@ export const ManagedPodResultSchema = z
     revoked: z.boolean(),
     observedExit: z.boolean(),
     cleanup: z.enum(['not-requested', 'requested', 'observed']),
+    providerRequests: z.number().int().min(0).max(100).optional(),
+    consumedTokens: z.number().int().min(0).max(9007199254740991).optional(),
+    tokenUsageKnown: z.boolean().optional(),
+    exitCode: z.number().int().min(-2147483648).max(2147483647).optional(),
   })
   .strict();
 export type ManagedPodResult = z.infer<typeof ManagedPodResultSchema>;

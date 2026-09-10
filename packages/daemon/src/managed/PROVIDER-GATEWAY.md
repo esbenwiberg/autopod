@@ -87,11 +87,20 @@ exceed 4,096; neither its tokens nor the worker deadline are a hard financial ca
 The durable claim enforces the single request across concurrency/restart/replay.
 Fresh authority is required before any delivery, including cached responses.
 
+An optional `maxObservedTokens` narrows a reviewed request-time profile. Usage is
+known only after a provider response, so this is a durable stop threshold rather
+than a hard financial cap: AutoPod delivers the response that crosses the
+threshold and denies the next new request. One in-flight request may overshoot.
+The backend advertises `request-time-observed-token-stop-v1`; an older backend
+fails Dispatcher preflight instead of ignoring the field. Managed status exposes
+only the bounded request count, measured tokens, usage completeness, and terminal
+exit code. It never returns provider payloads, worker logs, or credentials.
+
 The existing hard-token API transport and allowance broker remain unchanged in
 meaning; they reject request/time transport substitution. The worker supervisor
 still enforces expiry and stale/revoked quota leases in both modes. Request/time
-mode alone does not stop based on token count. Abort never proves remote generation
-ceased. An uncertain request is never retried or replaced.
+mode without `maxObservedTokens` does not stop based on token count. Abort never
+proves remote generation ceased. An uncertain request is never retried or replaced.
 
 ## Reviewed Voice RPI profile set
 

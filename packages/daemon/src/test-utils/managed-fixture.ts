@@ -55,6 +55,7 @@ export function fixture(): ManagedFixture {
     '152_managed_request_usage.sql',
     '153_managed_github_reads.sql',
     '184_managed_provider_failure_diagnostics.sql',
+    '185_managed_runtime_exit_code.sql',
   ]) {
     db.exec(readFileSync(new URL(`../db/migrations/${migration}`, import.meta.url), 'utf8'));
   }
@@ -129,11 +130,15 @@ export function fixture(): ManagedFixture {
 }
 
 /** Explicit reviewed request/time fixture; old hard-token examples stay unchanged. */
-export function requestTimeFixture(): ManagedFixture {
+export function requestTimeFixture(
+  maxProviderRequests = 1,
+  maxObservedTokens = 10000,
+): ManagedFixture {
   const f = fixture();
   const budget = {
     mode: 'request-time' as const,
-    maxProviderRequests: 1,
+    maxProviderRequests,
+    maxObservedTokens,
     maxDurationSeconds: 180,
     expiresAt: 400,
   };

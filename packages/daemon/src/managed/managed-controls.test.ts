@@ -243,3 +243,23 @@ it('projects only bounded provider failure diagnostics into ordinary status', as
     f.close();
   }
 });
+
+it('persists and projects a terminal runtime exit code without reading worker logs', async () => {
+  const f = fixture();
+  try {
+    const service = f.service();
+    const controls = new ManagedControls(service);
+    const handle = await service.start('installation-one', f.request);
+    f.runtime.observe = async () => ({ state: 'stopped', consumedTokens: 42, exitCode: 17 });
+
+    await service.enforceExpiry();
+
+    expect(controls.observe('installation-one', handle.podId, '0').result).toMatchObject({
+      observedExit: true,
+      consumedTokens: 42,
+      exitCode: 17,
+    });
+  } finally {
+    f.close();
+  }
+});
