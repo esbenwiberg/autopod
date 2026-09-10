@@ -42,10 +42,13 @@ const failureReasons = new Set([
   'artifact-size',
   'output-size',
 ]);
+const REPORT_MAXIMUM_RESPONSE_BYTES = 64 * 1024;
+const AGENT_MAXIMUM_RESPONSE_BYTES = 1024 * 1024;
 /** One host request under an explicit request/time grant; never a hard token/cost cap. */
 export class ChatGptReportTransport implements BoundedProviderTransport {
   readonly budgetMode = 'request-time' as const;
   readonly maximumPromptBytes = 128 * 1024;
+  readonly maximumResponseBytes: number;
   readonly bindingDigest: string;
   private readonly route: Route;
   constructor(
@@ -59,11 +62,14 @@ export class ChatGptReportTransport implements BoundedProviderTransport {
     if (!/^[A-Za-z0-9_-]{1,200}$/.test(chatgptAccountId))
       throw new Error('managed-account-binding-invalid');
     this.route = structuredClone(route);
+    this.maximumResponseBytes =
+      mode === 'agent' ? AGENT_MAXIMUM_RESPONSE_BYTES : REPORT_MAXIMUM_RESPONSE_BYTES;
     this.bindingDigest = digest({
       route,
       chatgptAccountId,
       endpoint: 'https://chatgpt.com/backend-api/codex/responses',
-      protocol: mode === 'agent' ? 'codex-agent-request-time-v1' : 'codex-report-request-time-v1',
+      protocol: mode === 'agent' ? 'codex-agent-request-time-v2' : 'codex-report-request-time-v1',
+      maximumResponseBytes: this.maximumResponseBytes,
     });
   }
   preflight(route: Route) {
@@ -196,7 +202,7 @@ export class ChatGptReportTransport implements BoundedProviderTransport {
           const part = await reader.read();
           if (part.done) break;
           bytes += part.value.byteLength;
-          if (bytes > 1024 * 1024) throw new Error('response-limit');
+          if (bytes > AGENT_MAXIMUM_RESPONSE_BYTES) throw new Error('response-limit');
           chunks.push(part.value);
           buffer += decoder.decode(part.value, { stream: true });
           let newline = buffer.indexOf('\n');
@@ -233,7 +239,8 @@ export class ChatGptReportTransport implements BoundedProviderTransport {
         )
           throw new Error('usage');
         const value = Buffer.concat(chunks).toString('utf8');
-        if (!value || Buffer.byteLength(value) > 65536) throw new Error('output-size');
+        if (!value || Buffer.byteLength(value) > this.maximumResponseBytes)
+          throw new Error('output-size');
         return { value, consumedTokens: result.usage.total_tokens };
       }
       const result = responseSchema.parse(completed);
@@ -265,7 +272,7 @@ export class ChatGptReportTransport implements BoundedProviderTransport {
       if (!text || Buffer.byteLength(text) > 16384) throw new Error('artifact-size');
       phase = 'wire-response';
       const value = codexSse(result);
-      if (Buffer.byteLength(value) > 65536) throw new Error('output-size');
+      if (Buffer.byteLength(value) > this.maximumResponseBytes) throw new Error('output-size');
       return { value, consumedTokens: result.usage.total_tokens };
     } catch (error) {
       // Never publish payloads, tokens, provider messages or schema issue values.

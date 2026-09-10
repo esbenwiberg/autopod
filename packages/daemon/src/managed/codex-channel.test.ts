@@ -1,3 +1,16 @@
+import { spawn } from 'node:child_process';
+import {
+  chmodSync,
+  existsSync,
+  mkdtempSync,
+  readFileSync,
+  renameSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { expect, it, vi } from 'vitest';
 import type { ContainerManager } from '../interfaces/container-manager.js';
 import { fixture } from '../test-utils/managed-fixture.js';
@@ -219,5 +232,45 @@ it('routes sequential agent requests and an independently bound GitHub read', as
   } finally {
     close?.();
     vi.useRealTimers();
+  }
+});
+
+async function waitForJson(path: string): Promise<Record<string, unknown>> {
+  const deadline = Date.now() + 5_000;
+  while (Date.now() < deadline) {
+    if (existsSync(path)) return JSON.parse(readFileSync(path, 'utf8'));
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+  throw new Error(`timed out waiting for ${path}`);
+}
+
+it('the Python loopback channel carries agent SSE above 64 KiB within its hard ceiling', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'autopod-codex-channel-'));
+  chmodSync(root, 0o700);
+  const script = fileURLToPath(new URL('./runtime/codex_channel.py', import.meta.url));
+  const child = spawn('python3', [script, root, '0', '10'], { stdio: 'pipe' });
+  try {
+    const ready = await waitForJson(join(root, 'channel-ready.json'));
+    expect(typeof ready.port).toBe('number');
+    const pending = fetch(`http://127.0.0.1:${ready.port as number}/v1/responses`, {
+      method: 'POST',
+      body: '{}',
+      headers: { 'Content-Type': 'application/json' },
+    });
+    const request = await waitForJson(join(root, 'channel-request.json'));
+    const body = 'x'.repeat(70 * 1024);
+    const responsePath = join(root, 'channel-response.json');
+    const temporary = `${responsePath}.fixture`;
+    writeFileSync(
+      temporary,
+      JSON.stringify({ ticket: request.ticket, digest: request.digest, body, ok: true }),
+    );
+    renameSync(temporary, responsePath);
+    const response = await pending;
+    expect(response.status).toBe(200);
+    expect(await response.text()).toBe(body);
+  } finally {
+    child.kill('SIGTERM');
+    rmSync(root, { recursive: true, force: true });
   }
 });

@@ -43,6 +43,37 @@ it('replays durable output after restart without another provider call', async (
   ).toEqual({ state: 'observed', value: 'facts' });
   expect(x.generate).toHaveBeenCalledTimes(1);
 });
+it('persists and replays a transport-declared agent response above 64 KiB', async () => {
+  const x = await setup();
+  const value = 'x'.repeat(70 * 1024);
+  x.generate.mockResolvedValue({ value, consumedTokens: 30 });
+  x.gateway.close();
+  const transport = { ...x.transport, maximumResponseBytes: 1024 * 1024 };
+  const gateway = new ManagedProviderGateway(x.service, transport);
+  gateways.push(gateway);
+  expect(
+    await gateway.invoke('installation', x.handle.podId, 1, 'request-one', 'Read README', 100),
+  ).toEqual({
+    state: 'observed',
+    value,
+  });
+  gateway.close();
+  f.restart();
+  const replay = new ManagedProviderGateway(f.service(), transport);
+  gateways.push(replay);
+  expect(
+    await replay.invoke('installation', x.handle.podId, 1, 'request-one', 'Read README', 100),
+  ).toEqual({ state: 'observed', value });
+  expect(x.generate).toHaveBeenCalledTimes(1);
+});
+it('rejects a transport response bound above the one MiB channel ceiling', async () => {
+  const x = await setup();
+  x.gateway.close();
+  const transport = { ...x.transport, maximumResponseBytes: 1024 * 1024 + 1 };
+  expect(() => new ManagedProviderGateway(x.service, transport)).toThrow(
+    'managed-provider-output-limit-invalid',
+  );
+});
 it('concurrent duplicate calls reserve once', async () => {
   const x = await setup();
   let finish!: (v: { value: string; consumedTokens: number }) => void;

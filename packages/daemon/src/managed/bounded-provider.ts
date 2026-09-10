@@ -8,6 +8,8 @@ export interface BoundedProviderTransport {
   readonly bindingDigest: string;
   readonly budgetMode?: 'request-time';
   readonly maximumPromptBytes?: number;
+  /** Maximum validated wire response persisted and returned by the trusted gateway. */
+  readonly maximumResponseBytes?: number;
   preflight(route: Route): void;
   generate(
     route: Route,
