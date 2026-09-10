@@ -251,9 +251,11 @@ if not stat.S_ISDIR(actual.st_mode) or actual.st_uid!=0 or actual.st_mode & 0o02
     if (!record) throw new Error('managed-runtime-unbound');
     return { ...record, boundary: this.known.get(ref) ?? this.boundary(record.request) };
   }
-  async observe(
-    ref: string,
-  ): Promise<{ state: 'running' | 'stopped' | 'unknown'; consumedTokens: number }> {
+  async observe(ref: string): Promise<{
+    state: 'running' | 'stopped' | 'unknown';
+    consumedTokens: number;
+    exitCode?: number;
+  }> {
     const { boundary, podId } = this.resolve(ref);
     const result = await boundary.manager.execInContainer(
       ref,
@@ -282,10 +284,12 @@ if not stat.S_ISDIR(actual.st_mode) or actual.st_uid!=0 or actual.st_mode & 0o02
         state: string;
         consumedTokens: number;
         specDigest: string;
+        exitCode?: number;
       };
       if (
         receipt.specDigest !== this.resolve(ref).request.executionSpecDigest ||
-        !Number.isSafeInteger(receipt.consumedTokens)
+        !Number.isSafeInteger(receipt.consumedTokens) ||
+        (receipt.exitCode !== undefined && !Number.isSafeInteger(receipt.exitCode))
       )
         throw new Error('binding');
       return {
@@ -295,6 +299,9 @@ if not stat.S_ISDIR(actual.st_mode) or actual.st_uid!=0 or actual.st_mode & 0o02
             ? 'running'
             : 'unknown',
         consumedTokens: receipt.consumedTokens,
+        ...(receipt.observedExit && receipt.exitCode !== undefined
+          ? { exitCode: receipt.exitCode }
+          : {}),
       };
     } catch {
       throw new Error('managed-runtime-receipt-invalid');
@@ -302,8 +309,10 @@ if not stat.S_ISDIR(actual.st_mode) or actual.st_uid!=0 or actual.st_mode & 0o02
   }
   async extractOutput(ref: string, staging: string, output: ArtifactOutput): Promise<void> {
     const { boundary } = this.resolve(ref);
-    if ((await this.observe(ref)).state !== 'stopped')
-      throw new Error('artifact-writer-still-active');
+    const observed = await this.observe(ref);
+    if (observed.state !== 'stopped') throw new Error('artifact-writer-still-active');
+    if (observed.exitCode !== undefined && observed.exitCode !== 0)
+      throw new Error('managed-agent-exit-failed');
     if (!boundary.manager.extractManagedOutput) throw new Error('managed-output-unavailable');
     await boundary.manager.extractManagedOutput(ref, staging, output);
   }

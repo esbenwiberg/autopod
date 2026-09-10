@@ -161,6 +161,6 @@ it('preserves bounded Codex tool traffic only for the explicit agent channel', (
   );
   expect(normalized.tools).toEqual([tool]);
   expect(normalized.input).toEqual(request.input);
-  expect(normalized.store).toBe(false);
+  expect('store' in normalized ? normalized.store : undefined).toBe(false);
   expect(normalized.truncation).toBe('disabled');
 });

@@ -87,6 +87,42 @@ it('admits a longer source-producing agent only through its explicit reviewed mo
   ).toContain('context-and/portfolio-simulation');
 });
 
+it('installs an agent helper that routes final output through the reviewed Codex capture', async () => {
+  const { request, exec } = setup();
+  request.effectiveGrant.budget = {
+    mode: 'request-time',
+    expiresAt: 4_102_444_800,
+    maxProviderRequests: 8,
+    maxDurationSeconds: 900,
+  };
+  exec.mockImplementation(async (_ref, argv) => {
+    if (argv[0] === 'codex')
+      return { exitCode: 0, stdout: '--ephemeral --output-last-message --sandbox', stderr: '' };
+    if ((argv[2] ?? '').includes('urllib.request'))
+      return { exitCode: 0, stdout: '204', stderr: '' };
+    return { exitCode: 0, stdout: '', stderr: '' };
+  });
+  const channel = new ContainerCodexChannel(
+    { execInContainer: exec } as unknown as ContainerManager,
+    request.route,
+    0,
+    { mode: 'agent', maximumDurationSeconds: 900 },
+  );
+  const close = await channel.attach({
+    podId: 'managed-one',
+    runtimeRef: 'ref',
+    stateRoot: '/run/dispatcher-managed-one',
+    invoke: vi.fn(),
+  });
+  try {
+    const install = exec.mock.calls.find((call) => (call[1][2] ?? '').includes('immutable-worker'));
+    expect(install?.[1][6]).toContain('Return the complete work product as your final response');
+    expect(install?.[1][6]).toContain('Do not edit that output path directly');
+  } finally {
+    close();
+  }
+});
+
 it.each([false, true])('polls one digest-bound request; tampered=%s', async (tampered) => {
   vi.useFakeTimers();
   const { request, exec, channel } = setup();
@@ -206,7 +242,10 @@ it('routes sequential agent requests and an independently bound GitHub read', as
     if (code.includes('delivery-binding')) writes.push(argv);
     return { exitCode: 0, stdout: '', stderr: '' };
   });
-  const invoke = vi.fn(async () => ({ state: 'observed' as const, value: 'data: ok\n\n' }));
+  const invoke = vi.fn(async (_key: string, _prompt: string, _maximumTokens: number) => ({
+    state: 'observed' as const,
+    value: 'data: ok\n\n',
+  }));
   const invokeGitHub = vi.fn(async () => '{"number":42}');
   let close: (() => void) | undefined;
   try {

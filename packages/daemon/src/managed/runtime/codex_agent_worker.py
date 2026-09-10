@@ -45,7 +45,8 @@ with tempfile.TemporaryDirectory(prefix='managed-codex-') as temporary:
     instructions.write_text(
         'Work only in the supplied repository and output directory. Follow repository instructions. '
         'Do not use network access. Do not push, merge, publish, deploy, or access credentials. '
-        f'Write the final work product to {output}. '
+        f'Return the complete work product as your final response; the reviewed Codex launcher '
+        f'captures that response at {output}. Do not edit that output path directly. '
         + (f'For GitHub issue reads only, use the credential-free gh helper with --repo {args.github_repository}. '
            if args.github_repository else '')
         + ('Commit only the files you intentionally changed after required checks pass. '
