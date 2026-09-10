@@ -76,3 +76,34 @@ it('missing required output becomes one visible limitation, without completion o
     await rm(root, { recursive: true, force: true });
   }
 });
+
+it('reports a nonzero managed agent exit separately from artifact export failure', async () => {
+  const f = fixture();
+  const root = await realpath(await mkdtemp(path.join(tmpdir(), 'managed-pipeline-')));
+  try {
+    const service = f.service();
+    const controls = new ManagedControls(service);
+    const pipeline = new ManagedArtifactPipeline(
+      service,
+      new ArtifactExports(f.db, new MemoryArtifactStore()),
+      root,
+      controls,
+    );
+    f.runtime.extractOutput = async () => {
+      throw new Error('managed-agent-exit-failed');
+    };
+    const handle = await service.start('installation-one', f.request);
+    await f.runtime.stop(handle.podId);
+    await service.enforceExpiry();
+    await pipeline.tick();
+
+    const result = controls.observe('installation-one', handle.podId, '0').result;
+    expect(result.state).toBe('review_required');
+    expect(result.limitations).toEqual(['agent-runtime-failed']);
+    expect(result.artifacts).toEqual([]);
+    expect(f.launches()).toBe(1);
+  } finally {
+    f.close();
+    await rm(root, { recursive: true, force: true });
+  }
+});

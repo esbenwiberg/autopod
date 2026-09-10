@@ -53,8 +53,13 @@ it('accepts a secretless exact profile set and enforces stage inputs and outputs
     const policy = profileSetRequestPolicy(parsed);
     expect(() => policy(request)).not.toThrow();
     for (const changed of [
-      { task: { ...request.task, kind: 'planning' } },
-      { outputs: { ...request.outputs, source: { ...request.outputs.source, mode: 'branch' } } },
+      { task: { ...request.task, kind: 'planning' as const } },
+      {
+        outputs: {
+          ...request.outputs,
+          source: { ...request.outputs.source, mode: 'branch' as const },
+        },
+      },
       {
         outputs: {
           ...request.outputs,

@@ -49,6 +49,9 @@ export default defineConfig({
   test: {
     globals: true,
     passWithNoTests: true,
+    // SQLite migration fixtures perform real close/reopen work. Keep CI from
+    // oversubscribing its shared disk and tripping Vitest's per-test timeout.
+    maxWorkers: 4,
     exclude: [
       '**/node_modules/**',
       '**/.turbo/**',

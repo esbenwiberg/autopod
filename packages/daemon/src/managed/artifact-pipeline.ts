@@ -82,15 +82,23 @@ export class ManagedArtifactPipeline {
           )
           .run(podId);
       });
-    } catch {
+    } catch (error) {
+      const limitation =
+        error instanceof Error && error.message === 'managed-agent-exit-failed'
+          ? 'agent-runtime-failed'
+          : `${stage}-incomplete`;
       this.service.db
         .prepare(`INSERT INTO managed_results (pod_id,limitations_json) VALUES (?,?)
         ON CONFLICT(pod_id) DO UPDATE SET limitations_json=excluded.limitations_json`)
-        .run(podId, canonical([`${stage}-incomplete`]));
+        .run(podId, canonical([limitation]));
       this.service.db
         .prepare("UPDATE managed_pods SET state='review_required' WHERE pod_id=?")
         .run(podId);
-      throw new Error(`managed-${stage}-incomplete`);
+      throw new Error(
+        limitation === 'agent-runtime-failed'
+          ? 'managed-agent-runtime-failed'
+          : `managed-${stage}-incomplete`,
+      );
     }
   }
   async tick(): Promise<void> {

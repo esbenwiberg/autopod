@@ -134,3 +134,24 @@ it('does not start a worker when the reviewed dependency cache is absent or muta
   );
   expect(f.binding.attachQuota).not.toHaveBeenCalled();
 });
+
+it('does not export artifacts after a nonzero managed agent exit', async () => {
+  const f = fixture();
+  await f.runtime.ensure('pod-one', f.request, () => {});
+  f.exec.mockResolvedValueOnce({
+    exitCode: 0,
+    stdout: JSON.stringify({
+      observedExit: true,
+      state: 'exited',
+      consumedTokens: 12,
+      specDigest: f.request.executionSpecDigest,
+      exitCode: 1,
+    }),
+    stderr: '',
+  });
+
+  await expect(
+    f.runtime.extractOutput('container-one', '/staging', f.request.outputs.artifacts),
+  ).rejects.toThrow('managed-agent-exit-failed');
+  expect(f.binding.manager.extractManagedOutput).not.toHaveBeenCalled();
+});

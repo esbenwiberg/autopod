@@ -25,9 +25,11 @@ export interface ManagedRuntimePort {
     checkpoint: (runtimeRef: string) => void,
     fault?: string,
   ): Promise<{ runtimeRef: string }>;
-  observe(
-    runtimeRef: string,
-  ): Promise<{ state: 'running' | 'stopped' | 'unknown'; consumedTokens: number }>;
+  observe(runtimeRef: string): Promise<{
+    state: 'running' | 'stopped' | 'unknown';
+    consumedTokens: number;
+    exitCode?: number;
+  }>;
   stop(runtimeRef: string): Promise<void>;
   send?(runtimeRef: string, message: FollowUpEnvelope, key: string): Promise<void>;
   cleanup?(runtimeRef: string): Promise<boolean>;
