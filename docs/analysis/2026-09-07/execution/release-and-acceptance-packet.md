@@ -1,8 +1,8 @@
-# Release and remaining acceptance packet
+# Completed release and acceptance packet
 
-Current at checkpoint 136. The approved rollout and required bounded canaries have executed. No routine operational approval remains pending. [Full checkpoint](checkpoint-136.md), [acceptance ledger](acceptance.json).
+Current at checkpoint 137. The approved rollout and required bounded canaries have executed. The user explicitly accepted the historical API cause as unknown; all six workstreams are closed under that amendment. [Operational proof](checkpoint-136.md), [final closure](checkpoint-137.md), [acceptance ledger](acceptance.json).
 
-Active release is `425ff91cd5e6347b32d21b69804ea4c02008bc8e`, validation implementation hash `5ae52d1edc946a2a740fb4bd9b4bf8106936aa4ba4ff35a004e366497a6da956`, PID 157498, schema 183. The full required local pipeline and hosted reviewer/browser prewarm passed. Exact clean build identity was verified in actual staged modules and then in loaded hosted health. [Final service/database identity](receipts/checkpoint-136-final-post-inspect.json).
+The final CP136 hosted inspection verified release `425ff91cd5e6347b32d21b69804ea4c02008bc8e`, validation implementation hash `5ae52d1edc946a2a740fb4bd9b4bf8106936aa4ba4ff35a004e366497a6da956`, PID 157498, schema 183. The full required local pipeline and hosted reviewer/browser prewarm passed. Exact clean build identity was verified in actual staged modules and then in loaded hosted health. [Final service/database identity](receipts/checkpoint-136-final-post-inspect.json).
 
 Target remains subscription `06bb959b-9458-41a6-bdf5-77cc12feaab9`, resource group `ewi-sandboxes`, VM `autopod-daemon`, immutable VM ID `3addc9bc-4812-4892-98d6-c40d5ab893c0`. Current link is `/opt/autopod/current`; service `autopod-daemon` runs as ewi. Intended active database `/data/autopod/autopod.db` retains device/inode 2049/13107203.
 
@@ -14,4 +14,4 @@ All automatic dispatch settings are restored with pendingOperations=0. The newer
 
 Recovery remains forward-first: preserve active database/WAL, new records, prior/current releases and fresh backup receipts. A bare symlink downgrade to the old schema-153 writer is unsafe. Any compatible fallback requires its own observed-worker-exit and state-preservation gates. Do not replay archived create/cutover fixtures against current production without fresh checks.
 
-Only the historical W4.5 causal requirement remains substantively open. Existing retained sources lack the September 7 failing request trace. Current API success and synthetic malformed-JSON reproductions do not supply that causal evidence. Whole-goal closure therefore requires a separately retained causal trace or explicit user amendment accepting the historical cause as unknown. Further paid canaries or repeat deployment cannot satisfy that missing historical evidence. [Dated prior operational packet](receipts/checkpoint-136-prior-release-and-acceptance-packet.md).
+W4.5 is accepted with the explicit user-approved amendment: the September 7 failure cause remains unknown because the required logs were not retained; current API behavior is verified. This closes the remaining scope requirement without claiming historical causal proof. No other criterion is waived. Product source, deployment and operational state are unchanged by this documentation-only closeout. [Approval receipt](receipts/checkpoint-137-user-amendment.json). [Dated prior operational packet](receipts/checkpoint-136-prior-release-and-acceptance-packet.md).

@@ -1,8 +1,8 @@
-# Partial closure report
+# Final closure report
 
-Current checkpoint: [136](checkpoint-136.md). All six workstreams have implementation and mapped evidence. The ledger has 41 verified criteria and two partial entries: historical API causality (W4.5), and whole-goal closure dependent on it (G.6). Whole-goal completion is not claimed.
+Current checkpoint: [137](checkpoint-137.md). The goal is complete under the explicitly amended contract. All six workstreams have implementation and mapped evidence: 42 criteria are verified, and W4.5 is accepted with the user-approved historical-causality amendment. No required acceptance remains outstanding. The historical cause remains unknown and is not labeled verified. [Exact approval and scope](receipts/checkpoint-137-user-amendment.json).
 
-Production runs clean release `425ff91cd5e6347b32d21b69804ea4c02008bc8e`, PID 157498, schema 183. Exact loaded health identity, process cwd/current link, fresh all-table backup and isolated restore, database integrity/FKs and zero service restarts through the smoke are verified. [Hosted rollout and final acceptance](checkpoint-136.md), [final process/database](receipts/checkpoint-136-final-post-inspect.json).
+The final CP136 hosted inspection verified clean release `425ff91cd5e6347b32d21b69804ea4c02008bc8e`, PID 157498, schema 183. Exact loaded health identity, process cwd/current link, fresh all-table backup and isolated restore, database integrity/FKs and zero service restarts through the smoke are verified. [Hosted rollout and final acceptance](checkpoint-136.md), [final process/database](receipts/checkpoint-136-final-post-inspect.json).
 
 The required pipeline passed on that exact product source: 6,390 package tests, one existing platform skip, 11 standalone Node tests and required shell/install/build/type/lint/audit/secret checks; 8/15 test tasks were cached and one moderate dependency advisory remains. Full staging passed mandatory reviewer/browser prewarm and actual built-module semantic checks. The implementation branch is `codex/durable-execution-contract`; main remains integrated at `b75fbf0b7e2c4ea455838a6e4df6537665a7a8cc`, with no main merge performed. [Validation identity](receipts/checkpoint-135-full-validation-identity.json), [stage evidence](receipts/checkpoint-136-stage.txt).
 
@@ -17,13 +17,13 @@ Both CP136 canary sandboxes have provider GET404 proof within the ten-minute tar
 | 1. Completion, decisions, delivery | Durable manager/MCP fault regressions, native decision/recovery flows, hosted summary persistence and crash containment. | None within recorded required scope. |
 | 2. Retries, budgets, evidence reuse | Durable retry identity/cooldown/binding, exact evidence reuse, frozen reviews, current budget retention and pause, cost completeness and supported client interactions. | None within recorded required scope. |
 | 3. Dispatch and environment | Fresh refs/base checks, explicit reruns, frozen binding, actual image configuration/registry/resource/streaming capabilities and immutable import. | None within recorded required scope. |
-| 4. Metrics, history, views | Bounded hosted history, cost/phase reconciliation, distinct units/delivery, retained failures/waivers, native/CLI/mobile interactions. | Actual September 7 historical failure cause remains unknown. |
+| 4. Metrics, history, views | Bounded hosted history, cost/phase reconciliation, distinct units/delivery, retained failures/waivers, native/CLI/mobile interactions. | None under the approved amendment; historical cause disclosed as unknown. |
 | 5. Scheduled scans and triage | Exact-window collection, empty/incomplete distinction, durable reports/findings, human-selected repair paths and supported interactions. | None within recorded required scope. |
 | 6. Release and backups | Exact clean loaded source and image/CLI provenance, fresh backup/isolated restore, prior schema 153-to-183 upgrade and current unchanged-183 lineage, integrity/FKs and readiness views. | None within recorded required scope. |
 
 Prior 357 Swift tests and mapped native/mobile/CLI interactions retain their exact source boundaries. CP135 changed shared request parsing and a type comment, not the client UI implementation. The matched local benchmark remains 613.435166 ms baseline versus 1764.543375 ms reuse, with zero escaped seeded defects and unchanged coverage. The 25% target is unsupported; no live speed gain is claimed. [Complete criterion evidence](acceptance.json).
 
-The remaining historical requirement cannot be established from the available retained sources: pre-report journal is empty, inspected current syslog did not contain the failing requests, and the fully read older archive ends August 23. Neither the malformed-JSON fixture nor current healthy APIs proves that cause. Closure needs a separately retained request-correlated causal trace, or an explicit amendment accepting the historical cause as unknown. No further rollout or canary approval is pending, and another canary cannot reconstruct this missing history.
+The historical cause remains unknown: pre-report journal is empty, inspected current syslog did not contain the failing requests, and the fully read older archive ends August 23. Neither the malformed-JSON fixture nor current healthy APIs proves that cause. The user explicitly approved accepting this limitation for W4.5. Current API verification remains required and is supported by CP136; all other acceptance requirements remain unchanged. [Contract amendment](../goal-prompt.md), [approval receipt](receipts/checkpoint-137-user-amendment.json).
 
 The [release packet](release-and-acceptance-packet.md) records current identities, completed acceptance and forward-recovery safeguards. Preserve post-cutover database/WAL and new records; a bare downgrade to the old schema-153 writer is unsafe. Previous failed MCP transport and Azure403 receipts remain failures, with no claim that this successful rerun explains their causes. [Dated prior closure](receipts/checkpoint-136-prior-closure-report.md).
 
@@ -53,7 +53,7 @@ The [release packet](release-and-acceptance-packet.md) records current identitie
 | W4.2 | Executed pass/fail, skipped, unavailable, waived, no-change, cancelled, external and unresolved outcomes remain explicit | verified |
 | W4.3 | First-pass and delivery denominators require evidence; one logical delivery counts once | verified |
 | W4.4 | Latest validation, history, waivers and delivery reconcile without rewriting failures | verified |
-| W4.5 | Live broad history/cost API root cause proven before claiming production repair | partial |
+| W4.5 | September 7 history/cost failure cause remains unknown because the required logs were not retained; current API behavior is verified. | accepted_with_amendment |
 | W4.6 | Bounded projections and per-record diagnostics preserve healthy rows with malformed legacy records and realistic payload sizes | verified |
 | W4.7 | Task/phase/attempt cost totals reconcile with explicit telemetry completeness | verified |
 | W4.8 | Affected APIs, shared contracts, CLI, desktop and mobile updated and interactions verified | verified |
@@ -73,4 +73,4 @@ The [release packet](release-and-acceptance-packet.md) records current identitie
 | G.3 | All affected suites and full repository validation pipeline pass on exact recorded commits | verified |
 | G.4 | Desktop/mobile/CLI supported-surface interactions verified; compilation alone is insufficient | verified |
 | G.5 | Deployment/rollback identities, canary scope and spend prepared before requesting gated actions | verified |
-| G.6 | Final closure maps every recommendation to implementation/tests/evidence/prerequisites; no unverified acceptance treated as PASS | partial |
+| G.6 | Final closure maps every recommendation to implementation/tests/evidence/prerequisites; no unverified acceptance treated as PASS | verified |

@@ -67,3 +67,12 @@ Build a reproducible matched benchmark with fixed tasks, source, environment, an
 The goal is complete only when all six workstreams are implemented or shown already satisfied by current evidence, required checks pass, operator flows are verified, and every required acceptance claim has the appropriate proof. An unrun test, unavailable platform, pending deployment, or unauthorized canary is an outstanding requirement, not completion. Produce a final closure report with the acceptance ledger, changed code, exact tested commits, test receipts, measured outcomes, deployment/live evidence where authorized, and residual risks.
 
 At each checkpoint, record what changed, what the evidence proves, and the next unfinished criterion. Continue from that state across turns. If progress is genuinely blocked after reasonable alternatives, finish all independent work, preserve the partial implementation, and report the exact remaining blocker and smallest action needed to proceed. A budget limit, summary, draft PR, or partial milestone is not achievement of the goal.
+
+
+Approved amendment — 2026-09-10
+
+The user explicitly approved this precise amendment to the historical history/cost failure-causality requirement (W4.5):
+
+> September 7 history/cost failure cause remains unknown because the required logs were not retained; current API behavior is verified.
+
+This amendment supersedes only the requirement to establish the September 7 historical cause before closure. Retain the unknown cause as a disclosed limitation; do not claim retrospective diagnosis or turn malformed-JSON fixtures into causal proof. All current API, implementation, regression, operator, deployment and other acceptance requirements remain in force. The original contract above and earlier failed/partial receipts remain historical evidence. Approval and scope are recorded in [checkpoint 137](execution/checkpoint-137.md) and its [approval receipt](execution/receipts/checkpoint-137-user-amendment.json).

@@ -1786,8 +1786,8 @@
     },
     {
       "id": "W4.5",
-      "requirement": "Live broad history/cost API root cause proven before claiming production repair",
-      "status": "partial",
+      "requirement": "September 7 history/cost failure cause remains unknown because the required logs were not retained; current API behavior is verified.",
+      "status": "accepted_with_amendment",
       "implementation": [
         "packages/daemon/src/pods/throughput-aggregator.ts"
       ],
@@ -1812,14 +1812,18 @@
         "checkpoint-134.md",
         "checkpoint-136.md",
         "receipts/checkpoint-136-acceptance-result.json",
-        "receipts/checkpoint-136-final-post-inspect.json"
+        "receipts/checkpoint-136-final-post-inspect.json",
+        "checkpoint-137.md",
+        "receipts/checkpoint-137-user-amendment.json"
       ],
-      "prerequisites": [
-        "Retained pre-report journal is empty; current syslog has 406 Node JSON records but no failing request/error trace, and the fully read older archive ends August 23. A separately retained request-correlated trace is required; historical cause remains unknown."
-      ],
-      "remaining": "Retained pre-report journal is empty; current syslog has 406 Node JSON records but no failing request/error trace, and the fully read older archive ends August 23. A separately retained request-correlated trace is required; historical cause remains unknown.",
-      "finalSourceEvidence": "90a61141a6a8ed6205aae144bbb99f8c9f0f9ec5; see checkpoint-106.md for executed checks, carried forward surface proof and limits.",
-      "historicalProgressNotes": "Cost and compact-history APIs now return 200 after independently authorized maintenance. Actual historical failure cause is not established. Bounded read-only SSH metadata/log inspection awaits explicit payload-egress approval after auto-review rejection."
+      "prerequisites": [],
+      "remaining": "",
+      "finalSourceEvidence": "425ff91cd5e6347b32d21b69804ea4c02008bc8e; CP136 hosted history and cost/phase API verification. Historical causality was not established and is accepted as unknown by explicit CP137 amendment.",
+      "historicalProgressNotes": "Cost and compact-history APIs now return 200 after independently authorized maintenance. Actual historical failure cause is not established. Bounded read-only SSH metadata/log inspection awaits explicit payload-egress approval after auto-review rejection.",
+      "originalRequirement": "Live broad history/cost API root cause proven before claiming production repair",
+      "historicalRootCause": "unknown",
+      "scopeAmendment": "historical-api-causality-2026-09-10",
+      "verificationScope": "Current behavior verified by CP136. Historical root cause remains unknown; accepted by scope amendment, not verified retrospectively."
     },
     {
       "id": "W4.6",
@@ -3043,7 +3047,7 @@
     {
       "id": "G.6",
       "requirement": "Final closure maps every recommendation to implementation/tests/evidence/prerequisites; no unverified acceptance treated as PASS",
-      "status": "partial",
+      "status": "verified",
       "implementation": [],
       "tests": [],
       "evidence": [
@@ -3077,16 +3081,16 @@
         "receipts/checkpoint-135-full-validation-identity.json",
         "checkpoint-136.md",
         "receipts/checkpoint-136-acceptance-result.json",
-        "receipts/checkpoint-136-final-post-inspect.json"
+        "receipts/checkpoint-136-final-post-inspect.json",
+        "checkpoint-137.md",
+        "receipts/checkpoint-137-user-amendment.json"
       ],
-      "prerequisites": [
-        "All implementation and required current local/client/hosted proofs are mapped. Only W4.5 historical September 7 history/cost failure causality remains unverified; provide a separately retained request-correlated trace or explicitly amend that criterion to accept the historical cause as unknown."
-      ],
-      "finalSourceEvidence": "15900d9e08a7e4ca786a6ad11ff81820fda14de4; clean full pipeline and 357 Swift tests; direct native case/source boundaries in checkpoint-117 receipt.",
-      "remaining": "All implementation and required current local/client/hosted proofs are mapped. Only W4.5 historical September 7 history/cost failure causality remains unverified; provide a separately retained request-correlated trace or explicitly amend that criterion to accept the historical cause as unknown."
+      "prerequisites": [],
+      "finalSourceEvidence": "All 43 criteria remain mapped: 42 verified, W4.5 explicitly accepted with amendment. Product425ff91c retains CP135 full validation and CP136 hosted proof; no unverified historical cause is labeled PASS.",
+      "remaining": ""
     }
   ],
-  "lastCheckpoint": "checkpoint-136.md",
+  "lastCheckpoint": "checkpoint-137.md",
   "migrationLineage": {
     "managedBaseline": "142-153; authoritative managed migration 153 preserved from main b75fbf0b7e2c4ea455838a6e4df6537665a7a8cc",
     "nativeCurrent": "164-183; prior native 182 upgraded by idempotent managed GitHub reads bridge 183; representative managed 150/152/153 and copy-only native lineage verified",
@@ -3094,5 +3098,21 @@
   },
   "currentApplicationCandidate": "425ff91cd5e6347b32d21b69804ea4c02008bc8e",
   "currentReleaseCandidate": "425ff91cd5e6347b32d21b69804ea4c02008bc8e",
-  "currentDeployedRelease": "425ff91cd5e6347b32d21b69804ea4c02008bc8e"
+  "currentDeployedRelease": "425ff91cd5e6347b32d21b69804ea4c02008bc8e",
+  "scopeAmendments": [
+    {
+      "id": "historical-api-causality-2026-09-10",
+      "criterion": "W4.5",
+      "evidence": "receipts/checkpoint-137-user-amendment.json"
+    }
+  ],
+  "completion": {
+    "status": "complete",
+    "basis": "42 verified criteria and W4.5 explicitly accepted with the approved historical-causality amendment",
+    "outstandingCriteria": [],
+    "historicalRootCause": "unknown",
+    "checkpoint": "checkpoint-137.md",
+    "productSource": "425ff91cd5e6347b32d21b69804ea4c02008bc8e",
+    "scope": "All six workstreams under the original contract plus the explicit W4.5 amendment"
+  }
 }

@@ -1,0 +1,22 @@
+{
+  "status": "passed",
+  "verifiedCriteria": 42,
+  "acceptedWithAmendment": [
+    "W4.5"
+  ],
+  "outstandingCriteria": [],
+  "historicalRootCause": "unknown",
+  "productSourceUnchangedFrom": "425ff91cd5e6347b32d21b69804ea4c02008bc8e",
+  "priorFullValidationAndHostedReceiptsChecked": true,
+  "finalDocumentLinksExist": true,
+  "credentialPatternScan": "passed",
+  "documentSHA256": {
+    "goal-prompt.md": "132a4fd2ec0efad618c574444ca0ee0a2df7a38184dd9985473869197214fa92",
+    "execution/acceptance.json": "ce2a8688989a40f99fa2f1a7494d3c227997e95691c181fb2244c67782515d05",
+    "execution/checkpoint-137.md": "8ca667cc2ed61fb9bf6907a6816db5848dbdb3e09beae35a98e700c03f7adccf",
+    "execution/closure-report.md": "5cf35c38188a853f3971b940b3f0fe84c1d752afa7855aea49bb37bd057eda9d",
+    "execution/release-and-acceptance-packet.md": "837af9faea2a3cf83a95ccd96225bf32683c63809b51b5b736b4c0b4a366ece5",
+    "execution/receipts/checkpoint-137-user-amendment.json": "6eee05dc38d15c1fdc11e3b09a23eeca974d88dc07d813a4db302e1d5e250b63"
+  },
+  "scope": "Documentation-only closeout; no new tests, deployment or live runtime evidence claimed"
+}
