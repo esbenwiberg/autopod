@@ -27,12 +27,26 @@ cat >"$tmp/bin/curl" <<'EOF'
 #!/usr/bin/env bash
 case "$*" in
   *'/pods'*) echo "${DEPLOY_TEST_PODS_JSON:-[]}" ;;
-  *'hosted-deploy-drain'*) echo '{"active":{"expiresAt":"2099-01-01T00:00:00.000Z"}}' ;;
+  *'hosted-deploy-drain'*)
+    if [[ "$*" == *'-X DELETE'* ]]; then echo removed >"$DEPLOY_TEST_DRAIN_REMOVED"; fi
+    echo '{"active":{"expiresAt":"2099-01-01T00:00:00.000Z"}}' ;;
   *'127.0.0.1:3100/health'*)
     count=$(cat "$DEPLOY_TEST_HEALTH_COUNT" 2>/dev/null || echo 0)
     count=$((count + 1)); echo "$count" >"$DEPLOY_TEST_HEALTH_COUNT"
     if [ "$count" -le "${DEPLOY_TEST_HEALTH_FAILURES:-0}" ]; then exit 7; fi
     echo '{"status":"ok"}'
+    ;;
+  *'/health'*)
+    if [[ "$*" == *'%{http_code}'* ]]; then echo 200; exit 0; fi
+    python3 - <<'PYRELEASE'
+import json,os
+mode=os.environ.get('DEPLOY_TEST_RELEASE_MODE','valid')
+r={'commitSha':'cafebabecafebabecafebabecafebabecafebabe','dirty':False,'source':'build','validationImplementationHash':'a'*64}
+if mode=='wrong':r['commitSha']='b'*40
+if mode=='dirty':r['dirty']=True
+if mode=='unavailable':r['validationImplementationHash']=None
+print(json.dumps({'status':'ok',**({'release':r} if mode!='missing' else {})}))
+PYRELEASE
     ;;
   *) echo 200 ;;
 esac
@@ -103,12 +117,14 @@ run_deploy() {
     DEPLOY_TEST_HEALTH_COUNT="$tmp/health-count" \
     DEPLOY_TEST_HEALTH_FAILURES="${DEPLOY_TEST_HEALTH_FAILURES:-0}" \
     DEPLOY_TEST_TRUNCATE_REMOTE="${DEPLOY_TEST_TRUNCATE_REMOTE:-0}" \
+    DEPLOY_TEST_RELEASE_MODE="${DEPLOY_TEST_RELEASE_MODE:-valid}" \
+    DEPLOY_TEST_DRAIN_REMOVED="$tmp/drain-removed" \
     bash "$script" --target cafebabe --yes --skip-playwright-prewarm "$@"
 }
 
 reset_fixture() {
   ln -sfn "$tmp/releases/deadbeef" "$tmp/current"
-  rm -f "$tmp/restarted" "$tmp/az-count" "$tmp/health-count"
+  rm -f "$tmp/restarted" "$tmp/az-count" "$tmp/health-count" "$tmp/drain-removed"
 }
 
 # The first API snapshot is empty, but the atomic VM gate sees one pod just
@@ -167,3 +183,27 @@ fi
 grep -qF 'SERVICE_ACTIVE_OK' "$tmp/truncated-out"
 grep -qF 'LOCAL_HEALTH_FINAL_OK' "$tmp/truncated-out"
 grep -qF 'DEPLOYED deadbeef -> cafebabe' "$tmp/truncated-out"
+
+# Source identity must be verified before releasing maintenance admission.
+reset_fixture
+if ! run_deploy --verify-release >"$tmp/release-valid-out" 2>&1; then
+  cat "$tmp/release-valid-out" >&2
+  exit 1
+fi
+grep -qF RELEASE_IDENTITY_OK "$tmp/release-valid-out"
+[ -e "$tmp/drain-removed" ]
+for mode in wrong dirty missing unavailable; do
+  reset_fixture
+  if DEPLOY_TEST_RELEASE_MODE="$mode" run_deploy --verify-release >"$tmp/release-$mode-out" 2>&1; then
+    echo "deployment incorrectly accepted $mode release identity" >&2
+    exit 1
+  fi
+  grep -qF 'release identity was not verified' "$tmp/release-$mode-out"
+  [ -e "$tmp/restarted" ]
+  [ ! -e "$tmp/drain-removed" ]
+done
+# A known pre-swap refusal can release the drain without opening a failed release.
+reset_fixture
+if DEPLOY_TEST_PODS_JSON='[{"status":"running"}]' run_deploy --verify-release >"$tmp/release-blocked-out" 2>&1; then exit 1; fi
+[ ! -e "$tmp/restarted" ]
+echo 'Hosted deployment release verification tests passed.'
