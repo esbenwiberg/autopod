@@ -1,7 +1,11 @@
 import type { Route } from '@autopod/shared';
 import { z } from 'zod';
-import type { BoundedProviderTransport, ProviderCredential } from './bounded-provider.js';
-import { responseSchema } from './bounded-provider.js';
+import type {
+  BoundedProviderTransport,
+  ManagedProviderFailureDiagnostic,
+  ProviderCredential,
+} from './bounded-provider.js';
+import { ManagedProviderFailure, responseSchema } from './bounded-provider.js';
 import { canonical, digest } from './canonical.js';
 import { codexInput, codexSse } from './codex-wire.js';
 
@@ -19,18 +23,8 @@ export type ChatGptFailurePhase =
   | 'usage'
   | 'artifact'
   | 'wire-response';
-export interface ChatGptFailureDiagnostic {
+export interface ChatGptFailureDiagnostic extends ManagedProviderFailureDiagnostic {
   phase: ChatGptFailurePhase;
-  reason:
-    | 'account'
-    | 'http'
-    | 'incomplete'
-    | 'duplicate-completion'
-    | 'response-limit'
-    | 'usage'
-    | 'artifact-size'
-    | 'output-size'
-    | 'unclassified';
 }
 const completedItemSchema = z.object({
   output_index: z.number().int().nonnegative().safe(),
@@ -87,6 +81,7 @@ export class ChatGptReportTransport implements BoundedProviderTransport {
     if (maximumTokens !== 0 || Buffer.byteLength(prompt) > this.maximumPromptBytes)
       throw new Error('managed-provider-budget-mode-mismatch');
     let phase: ChatGptFailurePhase = 'request';
+    let httpStatus: number | null = null;
     try {
       const normalized = codexInput(route, prompt, this.mode === 'agent');
       const { truncation: _truncation, ...input } = normalized;
@@ -127,6 +122,7 @@ export class ChatGptReportTransport implements BoundedProviderTransport {
           store: false,
         }),
       });
+      httpStatus = response.status;
       // The pinned ChatGPT endpoint can omit Content-Type (live canary 014).
       // Only the missing-header case joins SSE parsing; a declared different
       // media type is still refused. Completion, model, usage and byte limits
@@ -277,12 +273,13 @@ export class ChatGptReportTransport implements BoundedProviderTransport {
         error instanceof Error && failureReasons.has(error.message)
           ? (error.message as ChatGptFailureDiagnostic['reason'])
           : 'unclassified';
+      const diagnostic = { phase, reason, httpStatus };
       try {
-        this.onFailure?.({ phase, reason });
+        this.onFailure?.(diagnostic);
       } catch {
         /* Diagnostics cannot alter outcome. */
       }
-      throw new Error('managed-chatgpt-request-unavailable');
+      throw new ManagedProviderFailure(diagnostic, 'managed-chatgpt-request-unavailable');
     }
   }
 }

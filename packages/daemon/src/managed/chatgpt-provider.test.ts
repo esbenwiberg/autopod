@@ -165,7 +165,11 @@ it('failure diagnostics never retain a transport error payload or change failure
     throw new Error('observer-error');
   });
   await expect(x.call()).rejects.toThrow('managed-chatgpt-request-unavailable');
-  expect(x.diagnostic).toHaveBeenCalledExactlyOnceWith({ phase: 'http', reason: 'unclassified' });
+  expect(x.diagnostic).toHaveBeenCalledExactlyOnceWith({
+    phase: 'http',
+    reason: 'unclassified',
+    httpStatus: null,
+  });
   expect(x.fetcher).toHaveBeenCalledTimes(1);
 });
 it('successful generation does not emit failure diagnostics', async () => {
@@ -218,6 +222,7 @@ it.each(['application/json', 'text/html', 'text/event-stream-malformed', ''])(
     );
     await expect(x.call()).rejects.toThrow('managed-chatgpt-request-unavailable');
     expect(x.diagnostic.mock.calls[0]?.[0].phase).toBe('http');
+    expect(x.diagnostic.mock.calls[0]?.[0].httpStatus).toBe(200);
   },
 );
 it('accepts case-insensitive SSE media type with parameters', async () => {

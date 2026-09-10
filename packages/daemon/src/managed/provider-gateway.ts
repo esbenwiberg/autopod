@@ -1,5 +1,6 @@
 import type { ManagedPodRequest } from '@autopod/shared';
 import type { BoundedProviderTransport } from './bounded-provider.js';
+import { ManagedProviderFailure } from './bounded-provider.js';
 import { digest } from './canonical.js';
 import type { ManagedPodService } from './managed-service.js';
 import { ManagedQuotaBroker } from './quota-broker.js';
@@ -31,6 +32,19 @@ export class ManagedProviderGateway {
         .get()
     )
       throw new Error('managed-provider-journal-migration-required');
+    const columns = new Set(
+      (
+        service.db.prepare('PRAGMA table_info(managed_provider_requests)').all() as {
+          name: string;
+        }[]
+      ).map((column) => column.name),
+    );
+    if (
+      !['failure_phase', 'failure_reason', 'failure_http_status'].every((column) =>
+        columns.has(column),
+      )
+    )
+      throw new Error('managed-provider-diagnostic-migration-required');
   }
   preflight(request: ManagedPodRequest): void {
     if (this.closed) throw new Error('managed-provider-gateway-closed');
@@ -226,7 +240,17 @@ export class ManagedProviderGateway {
           .immediate();
       }
       return result;
-    } catch {
+    } catch (error) {
+      if (error instanceof ManagedProviderFailure) {
+        const { phase, reason, httpStatus } = error.diagnostic;
+        this.service.db
+          .prepare(
+            `UPDATE managed_provider_requests
+             SET failure_phase=?,failure_reason=?,failure_http_status=?
+             WHERE pod_id=? AND operation_key=? AND state='reserved'`,
+          )
+          .run(phase, reason, httpStatus, podId, key);
+      }
       throw new Error('managed-provider-attempt-unavailable');
     } finally {
       clearInterval(watch);
