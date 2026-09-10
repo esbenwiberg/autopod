@@ -1,0 +1,29 @@
+{
+  "checkpoint": 130,
+  "candidate": "4e73cd8ce88e44cdb5c2d8d0a89447b819fa5a39",
+  "bundleSHA256": "159ffce46631ab9f3f0b58641f04ea67f5736cdeaf5d756ec98cd28f26ecb3dc",
+  "approvedContractSHA256": "de789a82f29feb13ca22bd8b4f521f8dd6a792bd6b98860055f48ed799163a43",
+  "approvedRunnerSHA256": "d6af39b9ec03631ef5fe097c8d7868e69ad3e89c90a263500583c54afd7c2783",
+  "sandboxReachedRunning": true,
+  "allocationMetadataMatched": true,
+  "runtimeProbeExit": 127,
+  "specificMissingCommandKnown": false,
+  "configOrStreamChecksExecuted": false,
+  "sandboxAndImageDeletionVerified": true,
+  "creationThroughCleanupMs": 19433,
+  "providerCalls": 0,
+  "nugetEvidence": "local SDK10/public feed; not actual teamplanner/private feed",
+  "newAttemptAuthorization": "pending",
+  "files": {
+    "fixtures/canary-130-contract.json": "e9060ad05d37af2b2ae84e7dec256ebd000ed6a6c90445c39b11fe88f3ebdab6",
+    "fixtures/run-canary-130-new-attempt.mjs": "0727edbbaf16ccd24635f4919a077990401857c1598628bbc74425a5490bf3fa",
+    "fixtures/test-canary-130-new-attempt.mjs": "50ebf246b7070fd445580a4b6b73ed4aac367771f6d84d34863a3d61950e4519",
+    "fixtures/inspect-pinned-image-config.py": "568b99741ba9cd9d9d86f7b79d8abc93cf5b81f66901d6cce1d9f2c2df2e4741",
+    "fixtures/verify-local-nuget-130.py": "de443b2329aa47c4fc60e9f67007162f33d4b7905f5461da15e361e64293a871",
+    "receipts/checkpoint-130-live-attempt.json": "6ed2d0c5ee91ed05d5ff4c9abccedb873cfca56d9a719710007b2744939d9b97",
+    "receipts/checkpoint-130-image-config.json": "aba8ce961d1dae9e3966297b88c49f233f18f47eef1915deb8b5d0f1d1ad8922",
+    "receipts/checkpoint-130-local-nuget.json": "23fd22e0a3411323bed4fd56aec24bee415e80343fb30b54855de9054f54f257",
+    "receipts/checkpoint-130-historical-case-mapping.json": "09b92d36deeba6e14f8287b04863d09ad4eb319d80f897e19679c09828ae0e07"
+  },
+  "applicationCodeUnchanged": true
+}

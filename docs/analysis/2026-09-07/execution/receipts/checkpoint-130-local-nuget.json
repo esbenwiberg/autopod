@@ -1,0 +1,13 @@
+{
+  "observedAt": "2026-09-10T06:22:43.768910+00:00",
+  "scope": "local macOS SDK/public NuGet only; not teamplanner image/private feed acceptance",
+  "modelCalls": 0,
+  "sandboxCreates": 0,
+  "sdkVersion": "10.0.400",
+  "legacyCommandExit": 1,
+  "supportedHelp": true,
+  "explicitPublicSourceListed": true,
+  "searchExit": 0,
+  "validSearchResult": true,
+  "passed": true
+}

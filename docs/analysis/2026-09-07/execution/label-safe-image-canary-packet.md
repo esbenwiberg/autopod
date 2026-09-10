@@ -1,5 +1,7 @@
 # Label-safe canary metadata: additional attempt proposal
 
+**CP130 update:** this approval was used; sandbox creation succeeded and resources matched, but the aggregate runtime check exited127. Both resources were deleted and absence verified. The [separated capability packet](separated-capability-canary-packet.md) supersedes the consumed request; local NuGet command evidence is distinct from image acceptance.
+
 **Prepared, not approved or executed.** CP129 proved the exact image can import successfully: the CP128-approved request returned HTTP 200 after 106.283 seconds, and disk image `2e5553f6-139b-4684-a2dd-2e18b1068164` reached Ready with the expected nonce/digest. Sandbox creation returned HTTP 400 before allocating any observed sandbox. After three complete empty sandbox inventories, the owned image was deleted and GET returned 404; final inventory was the original 16 images and zero sandboxes. [Attempt](receipts/checkpoint-129-live-attempt.json), [cleanup](receipts/checkpoint-129-cleanup.json).
 
 ## Supported correction and uncertainty

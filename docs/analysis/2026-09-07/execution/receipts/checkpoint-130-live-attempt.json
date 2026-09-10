@@ -1,0 +1,177 @@
+{
+  "startedAt": "2026-09-10T06:14:37.673Z",
+  "contractSHA256": "de789a82f29feb13ca22bd8b4f521f8dd6a792bd6b98860055f48ed799163a43",
+  "candidate": "4e73cd8ce88e44cdb5c2d8d0a89447b819fa5a39",
+  "nonce": "autopod-cp129-20260910-a8d2f31c",
+  "runnerSHA256": "d6af39b9ec03631ef5fe097c8d7868e69ad3e89c90a263500583c54afd7c2783",
+  "bundleSHA256": "159ffce46631ab9f3f0b58641f04ea67f5736cdeaf5d756ec98cd28f26ecb3dc",
+  "status": "failed",
+  "events": [
+    {
+      "at": "2026-09-10T06:14:41.848Z",
+      "kind": "preflight_passed"
+    },
+    {
+      "at": "2026-09-10T06:14:42.043Z",
+      "kind": "acr_exchange_intent"
+    },
+    {
+      "at": "2026-09-10T06:14:42.142Z",
+      "kind": "acr_exchange_response",
+      "httpStatus": 200
+    },
+    {
+      "at": "2026-09-10T06:14:42.143Z",
+      "kind": "disk_create_intent"
+    },
+    {
+      "at": "2026-09-10T06:16:47.341Z",
+      "kind": "disk_create_response",
+      "httpStatus": 200
+    },
+    {
+      "at": "2026-09-10T06:16:47.349Z",
+      "kind": "disk_identified",
+      "id": "44df2972-a79b-4b32-b36d-f7fc520d3dae"
+    },
+    {
+      "at": "2026-09-10T06:16:47.458Z",
+      "kind": "disk_state",
+      "state": "Ready"
+    },
+    {
+      "at": "2026-09-10T06:16:47.459Z",
+      "kind": "sandbox_create_intent"
+    },
+    {
+      "at": "2026-09-10T06:16:49.279Z",
+      "kind": "sandbox_create_response",
+      "httpStatus": 200
+    },
+    {
+      "at": "2026-09-10T06:16:49.280Z",
+      "kind": "sandbox_identified",
+      "id": "b23ce518-30cf-4cf3-a115-d3afcedf8d3b"
+    },
+    {
+      "at": "2026-09-10T06:16:49.325Z",
+      "kind": "sandbox_state",
+      "state": "Running"
+    },
+    {
+      "at": "2026-09-10T06:16:49.327Z",
+      "kind": "check_started",
+      "check": "identity"
+    },
+    {
+      "at": "2026-09-10T06:16:49.535Z",
+      "kind": "check_finished",
+      "check": "identity",
+      "passed": false,
+      "exitCode": 127
+    },
+    {
+      "at": "2026-09-10T06:16:49.536Z",
+      "kind": "execution_stopped",
+      "stage": "capability",
+      "code": "check_failed_identity"
+    },
+    {
+      "at": "2026-09-10T06:16:49.590Z",
+      "kind": "sandbox_delete_intent",
+      "id": "b23ce518-30cf-4cf3-a115-d3afcedf8d3b"
+    },
+    {
+      "at": "2026-09-10T06:16:56.462Z",
+      "kind": "sandbox_delete_response",
+      "httpStatus": 200
+    },
+    {
+      "at": "2026-09-10T06:17:01.565Z",
+      "kind": "http_refusal",
+      "httpStatus": 404,
+      "registryMention": false,
+      "authenticationMention": false,
+      "permissionMention": false,
+      "labelMention": false,
+      "formatOrLengthMention": false,
+      "resourceMention": false,
+      "egressMention": false,
+      "errorValueShape": "undefined"
+    },
+    {
+      "at": "2026-09-10T06:17:01.566Z",
+      "kind": "sandbox_removed",
+      "id": "b23ce518-30cf-4cf3-a115-d3afcedf8d3b"
+    },
+    {
+      "at": "2026-09-10T06:17:01.666Z",
+      "kind": "disk_delete_intent",
+      "id": "44df2972-a79b-4b32-b36d-f7fc520d3dae"
+    },
+    {
+      "at": "2026-09-10T06:17:01.785Z",
+      "kind": "disk_delete_response",
+      "httpStatus": 202
+    },
+    {
+      "at": "2026-09-10T06:17:06.889Z",
+      "kind": "http_refusal",
+      "httpStatus": 404,
+      "registryMention": false,
+      "authenticationMention": false,
+      "permissionMention": false,
+      "labelMention": false,
+      "formatOrLengthMention": false,
+      "resourceMention": true,
+      "egressMention": false,
+      "errorValueShape": "undefined"
+    },
+    {
+      "at": "2026-09-10T06:17:06.890Z",
+      "kind": "disk_removed",
+      "id": "44df2972-a79b-4b32-b36d-f7fc520d3dae"
+    }
+  ],
+  "checks": {
+    "identity": {
+      "passed": false,
+      "exitCode": 127,
+      "diagnostics": {
+        "permissionDenied": false,
+        "commandNotFound": true,
+        "missingPath": false
+      }
+    }
+  },
+  "providerCalls": 0,
+  "preflight": {
+    "sourceUnchanged": true,
+    "principalMatched": true,
+    "groupMatched": true,
+    "pullIdentityMatched": true,
+    "sourceDigestMatched": true,
+    "nonceAbsent": true,
+    "diskCount": 16,
+    "sandboxCount": 0
+  },
+  "diskCreateIntent": true,
+  "diskId": "44df2972-a79b-4b32-b36d-f7fc520d3dae",
+  "sandboxCreateIntent": true,
+  "sandboxCreateStarted": 1789021007459,
+  "sandboxId": "b23ce518-30cf-4cf3-a115-d3afcedf8d3b",
+  "resourceMetadata": {
+    "cpu": "2000m",
+    "memory": "4096Mi",
+    "disk": "40960Mi"
+  },
+  "failure": {
+    "stage": "capability",
+    "code": "check_failed_identity"
+  },
+  "sandboxRemoved": true,
+  "diskRemoved": true,
+  "finishedAt": "2026-09-10T06:17:06.892Z",
+  "allCreatedResourcesRemoved": true,
+  "sandboxAllocationThroughCleanupMs": 19433
+}

@@ -1366,13 +1366,15 @@
         "checkpoint-128.md",
         "full-window-image-canary-packet.md",
         "checkpoint-129.md",
-        "label-safe-image-canary-packet.md"
+        "label-safe-image-canary-packet.md",
+        "checkpoint-130.md",
+        "separated-capability-canary-packet.md"
       ],
       "prerequisites": [
-        "CP129 exact image import succeeded (200, Ready, 106.283 seconds). One sandbox create returned 400; no capability checks ran. Three complete empty sandbox inventories and exact owned-image DELETE/GET404 verified cleanup. Raw digest sandbox label mismatch with candidate safe encoding corrected locally; precise Azure 400 cause remains unconfirmed. Additional label-safe attempt requires explicit approval; no known task resource remains."
+        "CP130 exact sandbox reached Running and API allocation matched 2vCPU/4GiB/40GiB; first aggregate identity command exited127/command-not-found. Specific command unrecorded. Both resources GET404 cleanup verified. Historical mapping separates dataverse Codex ownership from teamplanner NuGet. Supported NuGet commands pass on local SDK10/public feed only; actual teamplanner image/private feed unverified. Named-gate Codex-only canary prepared with deny-all egress; additional attempt requires approval."
       ],
       "finalSourceEvidence": "90a61141a6a8ed6205aae144bbb99f8c9f0f9ec5; see checkpoint-106.md for executed checks, carried forward surface proof and limits.",
-      "remaining": "CP129 exact image import succeeded (200, Ready, 106.283 seconds). One sandbox create returned 400; no capability checks ran. Three complete empty sandbox inventories and exact owned-image DELETE/GET404 verified cleanup. Raw digest sandbox label mismatch with candidate safe encoding corrected locally; precise Azure 400 cause remains unconfirmed. Additional label-safe attempt requires explicit approval; no known task resource remains.",
+      "remaining": "CP130 exact sandbox reached Running and API allocation matched 2vCPU/4GiB/40GiB; first aggregate identity command exited127/command-not-found. Specific command unrecorded. Both resources GET404 cleanup verified. Historical mapping separates dataverse Codex ownership from teamplanner NuGet. Supported NuGet commands pass on local SDK10/public feed only; actual teamplanner image/private feed unverified. Named-gate Codex-only canary prepared with deny-all egress; additional attempt requires approval.",
       "historicalProgressNotes": "Actual affected dataverse-harness image is pinned in CP110, but the required capability canary remains unrun. Obtain intended-group data-plane access and finish the ready-disk-image identity, total spend and command/oracle packet before paid-canary authorization."
     },
     {
@@ -1452,13 +1454,15 @@
         "checkpoint-128.md",
         "full-window-image-canary-packet.md",
         "checkpoint-129.md",
-        "label-safe-image-canary-packet.md"
+        "label-safe-image-canary-packet.md",
+        "checkpoint-130.md",
+        "separated-capability-canary-packet.md"
       ],
       "prerequisites": [
-        "CP129 exact image import succeeded (200, Ready, 106.283 seconds). One sandbox create returned 400; no capability checks ran. Three complete empty sandbox inventories and exact owned-image DELETE/GET404 verified cleanup. Raw digest sandbox label mismatch with candidate safe encoding corrected locally; precise Azure 400 cause remains unconfirmed. Additional label-safe attempt requires explicit approval; no known task resource remains."
+        "CP130 exact sandbox reached Running and API allocation matched 2vCPU/4GiB/40GiB; first aggregate identity command exited127/command-not-found. Specific command unrecorded. Both resources GET404 cleanup verified. Historical mapping separates dataverse Codex ownership from teamplanner NuGet. Supported NuGet commands pass on local SDK10/public feed only; actual teamplanner image/private feed unverified. Named-gate Codex-only canary prepared with deny-all egress; additional attempt requires approval."
       ],
       "finalSourceEvidence": "90a61141a6a8ed6205aae144bbb99f8c9f0f9ec5; see checkpoint-106.md for executed checks, carried forward surface proof and limits.",
-      "remaining": "CP129 exact image import succeeded (200, Ready, 106.283 seconds). One sandbox create returned 400; no capability checks ran. Three complete empty sandbox inventories and exact owned-image DELETE/GET404 verified cleanup. Raw digest sandbox label mismatch with candidate safe encoding corrected locally; precise Azure 400 cause remains unconfirmed. Additional label-safe attempt requires explicit approval; no known task resource remains."
+      "remaining": "CP130 exact sandbox reached Running and API allocation matched 2vCPU/4GiB/40GiB; first aggregate identity command exited127/command-not-found. Specific command unrecorded. Both resources GET404 cleanup verified. Historical mapping separates dataverse Codex ownership from teamplanner NuGet. Supported NuGet commands pass on local SDK10/public feed only; actual teamplanner image/private feed unverified. Named-gate Codex-only canary prepared with deny-all egress; additional attempt requires approval."
     },
     {
       "id": "W4.1",
@@ -2912,13 +2916,15 @@
         "checkpoint-128.md",
         "full-window-image-canary-packet.md",
         "checkpoint-129.md",
-        "label-safe-image-canary-packet.md"
+        "label-safe-image-canary-packet.md",
+        "checkpoint-130.md",
+        "separated-capability-canary-packet.md"
       ],
       "prerequisites": [
-        "CP128 approval consumed: image imported and removed after sandbox400; no runtime checks ran. CP129 same-scope additional attempt prepared with lossless sandbox digest label, fresh nonce, redacted diagnostics, cleanup proof and unchanged cost uncertainty. Explicit approval pending; separate release/rollback and cutover requirements retained."
+        "CP129 approval consumed; sandbox created, runtime probe failed, exact cleanup verified. CP130 corrected case mapping and named-gate Codex capability packet prepared; unchanged resource/cost envelope, deny-all egress, explicit approval pending. Local public NuGet semantics verified separately; image/private-feed and deployment/rollback prerequisites retained."
       ],
       "finalSourceEvidence": "15900d9e08a7e4ca786a6ad11ff81820fda14de4; clean full pipeline and 357 Swift tests; direct native case/source boundaries in checkpoint-117 receipt.",
-      "remaining": "CP128 approval consumed: image imported and removed after sandbox400; no runtime checks ran. CP129 same-scope additional attempt prepared with lossless sandbox digest label, fresh nonce, redacted diagnostics, cleanup proof and unchanged cost uncertainty. Explicit approval pending; separate release/rollback and cutover requirements retained."
+      "remaining": "CP129 approval consumed; sandbox created, runtime probe failed, exact cleanup verified. CP130 corrected case mapping and named-gate Codex capability packet prepared; unchanged resource/cost envelope, deny-all egress, explicit approval pending. Local public NuGet semantics verified separately; image/private-feed and deployment/rollback prerequisites retained."
     },
     {
       "id": "G.6",
@@ -2958,7 +2964,7 @@
       "remaining": "All 43 criteria remain mapped. W5, mapped operator interactions and exact hosted snapshot compatibility are verified. Loaded-source identity, historical API causality and actual-image capability remain outstanding; whole-goal completion is not claimed."
     }
   ],
-  "lastCheckpoint": "checkpoint-129.md",
+  "lastCheckpoint": "checkpoint-130.md",
   "migrationLineage": {
     "managedBaseline": "142-153; authoritative managed migration 153 preserved from main b75fbf0b7e2c4ea455838a6e4df6537665a7a8cc",
     "nativeCurrent": "164-183; prior native 182 upgraded by idempotent managed GitHub reads bridge 183; representative managed 150/152/153 and copy-only native lineage verified",

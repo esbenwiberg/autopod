@@ -1,5 +1,7 @@
 # Release and remaining acceptance packet
 
+**CP130 update:** this approval was used; sandbox creation succeeded and resources matched, but the aggregate runtime check exited127. Both resources were deleted and absence verified. The [separated capability packet](separated-capability-canary-packet.md) supersedes the consumed request; local NuGet command evidence is distinct from image acceptance.
+
 **CP129 update:** the approved full-window import succeeded. Sandbox creation returned 400; the task-owned image was deleted and absence verified. No runtime checks ran. The [label-safe additional-attempt proposal](label-safe-image-canary-packet.md) supersedes the consumed request; exact rejection cause remains unconfirmed.
 
 **CP128 update:** the corrected request was approved and used once. ACR exchange succeeded; the image PUT hit an erroneous local 60-second timeout. No task resource was observed in repeated inventories through/past the ten-minute window. The [full-window proposal](full-window-image-canary-packet.md) replaces this consumed request; hidden conversion remains uncertain and no retry is authorized.
