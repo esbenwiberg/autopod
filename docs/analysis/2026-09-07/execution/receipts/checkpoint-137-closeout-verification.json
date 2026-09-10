@@ -1,9 +1,7 @@
 {
   "status": "passed",
   "verifiedCriteria": 42,
-  "acceptedWithAmendment": [
-    "W4.5"
-  ],
+  "acceptedWithAmendment": ["W4.5"],
   "outstandingCriteria": [],
   "historicalRootCause": "unknown",
   "productSourceUnchangedFrom": "425ff91cd5e6347b32d21b69804ea4c02008bc8e",

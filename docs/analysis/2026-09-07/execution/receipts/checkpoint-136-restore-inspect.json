@@ -1,11 +1,6 @@
 {
   "at": "2026-09-10T09:50:20.406300+00:00",
-  "operations": [
-    "drain",
-    "podsitter",
-    "watcher:teamplanner-agent",
-    "job:4AbxtWzo"
-  ],
+  "operations": ["drain", "podsitter", "watcher:teamplanner-agent", "job:4AbxtWzo"],
   "jobs": [
     {
       "id": "4AbxtWzo",

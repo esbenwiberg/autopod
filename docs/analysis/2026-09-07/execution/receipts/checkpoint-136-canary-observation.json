@@ -6,11 +6,7 @@
   "infrastructureRecoveryCount": 0,
   "error": null,
   "summaryMarkerPresent": true,
-  "summaryKeys": [
-    "actualSummary",
-    "how",
-    "deviations"
-  ],
+  "summaryKeys": ["actualSummary", "how", "deviations"],
   "taskAccounting": {
     "tokenBudget": 32000,
     "budgetCheck": {

@@ -1788,12 +1788,8 @@
       "id": "W4.5",
       "requirement": "September 7 history/cost failure cause remains unknown because the required logs were not retained; current API behavior is verified.",
       "status": "accepted_with_amendment",
-      "implementation": [
-        "packages/daemon/src/pods/throughput-aggregator.ts"
-      ],
-      "tests": [
-        "packages/daemon/src/pods/throughput-aggregator.test.ts"
-      ],
+      "implementation": ["packages/daemon/src/pods/throughput-aggregator.ts"],
+      "tests": ["packages/daemon/src/pods/throughput-aggregator.test.ts"],
       "evidence": [
         "receipts/live-api-baseline.jsonl",
         "receipts/live-vm-inspection-failed.json",
@@ -2568,9 +2564,7 @@
         "packages/daemon/src/db/reconcile-native-checkpoint.ts",
         "packages/daemon/src/db/reconcile-native-checkpoint-cli.ts"
       ],
-      "tests": [
-        "packages/daemon/src/db/reconcile-native-checkpoint.test.ts"
-      ],
+      "tests": ["packages/daemon/src/db/reconcile-native-checkpoint.test.ts"],
       "evidence": [
         "checkpoint-48.md: current tracking-branch migration collision reproduced and resolved with byte-preserving native renumbering, managed upgrade tests and copy-only checkpoint reconciliation; production acceptance remains unverified",
         "receipts/checkpoint-48-full-validation.txt",
