@@ -1,0 +1,16 @@
+[
+  {
+    "id": "/subscriptions/06bb959b-9458-41a6-bdf5-77cc12feaab9/resourceGroups/ewi-sandboxes/providers/Microsoft.Authorization/roleAssignments/82b0274f-df2b-4fab-b5c6-b97966abb31d",
+    "principalId": "cef0aeed-b5d3-442e-b5d7-85e0526bd5e7",
+    "principalType": "User",
+    "roleDefinitionId": "/subscriptions/06bb959b-9458-41a6-bdf5-77cc12feaab9/providers/Microsoft.Authorization/roleDefinitions/0fb8eba5-a2bb-4abe-b1c1-49dfad359bb0",
+    "scope": "/subscriptions/06bb959b-9458-41a6-bdf5-77cc12feaab9/resourceGroups/ewi-sandboxes"
+  },
+  {
+    "id": "/subscriptions/06bb959b-9458-41a6-bdf5-77cc12feaab9/resourceGroups/ewi-sandboxes/providers/Microsoft.Authorization/roleAssignments/246c5e8c-8e7d-4e51-8e1e-936d09baf0b1",
+    "principalId": "cef0aeed-b5d3-442e-b5d7-85e0526bd5e7",
+    "principalType": "User",
+    "roleDefinitionId": "/subscriptions/06bb959b-9458-41a6-bdf5-77cc12feaab9/providers/Microsoft.Authorization/roleDefinitions/b24988ac-6180-42a0-ab88-20f7382dd24c",
+    "scope": "/subscriptions/06bb959b-9458-41a6-bdf5-77cc12feaab9/resourceGroups/ewi-sandboxes"
+  }
+]

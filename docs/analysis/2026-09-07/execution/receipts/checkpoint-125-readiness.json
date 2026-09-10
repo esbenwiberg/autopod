@@ -1,0 +1,11 @@
+{
+  "observedAtUTC": "2026-09-10T04:52:40.765807+00:00",
+  "mutations": false,
+  "health": { "status": 200, "releaseFieldPresent": false },
+  "sandboxDiskImages": {
+    "status": 403,
+    "group": "autopod-spike-neu",
+    "sourceDigest": "sha256:4b836cdabc71ffd40aef564b65b6b16564c5312770130bc59251a732078c9d77",
+    "matches": []
+  }
+}

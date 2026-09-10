@@ -1,8 +1,10 @@
 # Partial closure report
 
-Current checkpoint: [124](checkpoint-124.md). All six workstreams have local implementation and regression evidence. Required native/CLI/mobile interactions are verified within their recorded scope. The goal remains incomplete because loaded-source identity, historical API causality and actual-image capability evidence remain outstanding.
+Current checkpoint: [125](checkpoint-125.md). All six workstreams have local implementation and regression evidence. Required native/CLI/mobile interactions are verified within their recorded scope. The goal remains incomplete because loaded-source identity, historical API causality and actual-image capability evidence remain outstanding.
 
 The explicitly approved replacement hosted-copy check passed at checkpoint 124: the actual pinned snapshot migrated privately from schema 153 to 183 with original rows/columns preserved, integrity/FK/backfill/write checks passing, unchanged input, stable service identity and both private directories removed. [Result](receipts/checkpoint-124-hosted-result.json). The earlier changed-input refusal is retained separately. No active database migration or service restart occurred, and no copy-execution approval remains pending.
+
+The September 10 refresh still returns sandbox HTTP 403. Effective permissions confirm the current account cannot grant itself the missing data role. The [exact administrator handoff](sandbox-access-handoff.md) is ready; no role grant or credential switch was attempted. Health remains HTTP 200 without release identity.
 
 ## Exact candidate and verification
 
