@@ -672,7 +672,7 @@ describe('Integration', () => {
           payload: { profileName: 'test-app', task: 'Bounded task', tokenBudget },
         });
         expect(created.statusCode).toBe(201);
-        const expected = tokenBudget ?? 48000;
+        const expected = tokenBudget === undefined ? 48000 : tokenBudget;
         expect(created.json().tokenBudget).toBe(expected);
         expect(createPodRepository(db).getOrThrow(created.json().id).tokenBudget).toBe(expected);
         const accounting = await app.inject({
@@ -682,7 +682,8 @@ describe('Integration', () => {
         });
         expect(accounting.statusCode).toBe(200);
         expect(accounting.json().tokenBudget).toBe(expected);
-        expect(accounting.json().budgetCheck.status).not.toBe('unlimited');
+        if (expected === null) expect(accounting.json().budgetCheck.status).toBe('unlimited');
+        else expect(accounting.json().budgetCheck.status).not.toBe('unlimited');
       },
     );
 

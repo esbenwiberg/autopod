@@ -598,7 +598,7 @@ export interface CreatePodRequest {
   pimGroups?: PimGroupConfig[];
   /** Existing PR URL to carry forward (used for fix pods — skips PR creation) */
   prUrl?: string | null;
-  /** Override the profile's token budget for this pod. null = inherit from profile. */
+  /** Override the profile's token budget. Omit to inherit; explicit null disables the limit. */
   tokenBudget?: number | null;
   /**
    * Reference repos to clone read-only into the container. Mount paths are
