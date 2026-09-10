@@ -1,7 +1,7 @@
 import type { Command } from 'commander';
 import * as config from '../config/config-store.js';
 import { readCredentials } from '../config/credential-store.js';
-import { managedRequest } from '../managed/transport.js';
+import { managedErrorCode, managedRequest } from '../managed/transport.js';
 
 /** Machine bridge: protocol on stdin/stdout, never tokens in arguments or output. */
 export function registerManagedCommands(program: Command) {
@@ -38,7 +38,8 @@ export function registerManagedCommands(program: Command) {
           JSON.parse(Buffer.concat(chunks).toString('utf8')),
         );
         process.stdout.write(`${JSON.stringify(result)}\n`);
-      } catch {
+      } catch (error) {
+        process.stdout.write(`${JSON.stringify({ error: { code: managedErrorCode(error) } })}\n`);
         process.stderr.write(
           'managed-request-unavailable; check the pinned connection and ap login\n',
         );

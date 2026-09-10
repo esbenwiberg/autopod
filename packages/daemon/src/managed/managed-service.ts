@@ -31,6 +31,7 @@ export interface ManagedRuntimePort {
   stop(runtimeRef: string): Promise<void>;
   send?(runtimeRef: string, message: FollowUpEnvelope, key: string): Promise<void>;
   cleanup?(runtimeRef: string): Promise<boolean>;
+  cleanupUnallocated?(podId: string, request: ManagedPodRequest): Promise<boolean>;
   extractOutput?(runtimeRef: string, staging: string, output: ArtifactOutput): Promise<void>;
 }
 export interface ManagedPodRow {
@@ -79,6 +80,7 @@ export class ManagedPodService {
       capabilities: [
         'managed-pod-v1',
         'external-start-idempotency-v1',
+        'managed-attempt-lookup-v1',
         ...(this.artifactPipeline ? ['artifact-export-v1'] : []),
         'effective-grant-v1',
         'request-time-budget-v1',
@@ -251,6 +253,27 @@ export class ManagedPodService {
     this.starts.set(row.pod_id, promise);
     try {
       return await promise;
+    } catch (error) {
+      // Persist only reviewed categories, never exception text, Git output, or credentials.
+      const allowed = new Set([
+        'managed-git-operation-failed',
+        'managed-workspace-enrollment-mismatch',
+        'managed-workspace-dependency-cache-conflict',
+        'managed-workspace-dependency-cache-not-ignored',
+        'managed-sandbox-enforcement-unavailable',
+        'managed-sandbox-create-uncertain',
+        'managed-dependency-cache-unavailable',
+        'managed-writable-mount-unavailable',
+      ]);
+      const code =
+        error instanceof Error && allowed.has(error.message)
+          ? error.message
+          : 'managed-launch-unconfirmed';
+      this.db
+        .prepare(`INSERT INTO managed_results(pod_id,limitations_json) VALUES (?,?)
+        ON CONFLICT(pod_id) DO UPDATE SET limitations_json=excluded.limitations_json`)
+        .run(row.pod_id, canonical([code]));
+      throw error;
     } finally {
       this.starts.delete(row.pod_id);
     }
@@ -260,7 +283,9 @@ export class ManagedPodService {
     const row = this.lookup(installation, request.startKey);
     if (!row) return null;
     this.assertBinding(row, request);
-    if (row.runtime_ref && row.state !== 'queued')
+    // Terminal reservations remain inspectable after expiry, even if allocation never completed.
+    // Recovering their identity must not re-admit or restart the expired grant.
+    if (row.observed_exit || (row.runtime_ref && row.state !== 'queued'))
       return JSON.parse(row.handle_json) as ManagedPodHandle;
     return this.start(installation, request);
   }

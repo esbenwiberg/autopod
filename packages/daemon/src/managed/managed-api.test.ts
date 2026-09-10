@@ -63,3 +63,84 @@ it('authenticated start, passive observation and control preserve exact installa
     f.close();
   }
 });
+
+it('serializes an absent managed attempt as JSON null for the CLI', async () => {
+  const f = fixture();
+  const app = Fastify();
+  managedPodRoutes(app, { service: f.service(), authenticate: async () => 'installation-one' });
+  try {
+    const response = await app.inject({
+      method: 'POST',
+      url: '/managed/reconcile-start',
+      payload: f.request,
+    });
+    expect(response.statusCode).toBe(200);
+    expect(response.body).toBe('null');
+    expect(response.headers['content-type']).toContain('application/json');
+    expect(f.launches()).toBe(0);
+  } finally {
+    await app.close();
+    f.close();
+  }
+});
+
+it('passively looks up an attempt within its authenticated installation after expiry', async () => {
+  const f = fixture();
+  const app = Fastify();
+  managedPodRoutes(app, {
+    service: f.service(),
+    authenticate: async (request) =>
+      request.headers['x-fixture-auth'] === 'other' ? 'other' : 'installation-one',
+  });
+  try {
+    const url = `/managed/attempts/${f.request.dispatcherAttemptId}`;
+    expect((await app.inject({ method: 'GET', url })).json()).toBeNull();
+    await expect(
+      f.service().start('installation-one', f.request, 'after-reservation'),
+    ).rejects.toThrow();
+    f.advance(4102444801);
+    await f.service().enforceExpiry();
+    const response = await app.inject({ method: 'GET', url });
+    expect(response.json().dispatcherAttemptId).toBe(f.request.dispatcherAttemptId);
+    expect(
+      (await app.inject({ method: 'GET', url, headers: { 'x-fixture-auth': 'other' } })).json(),
+    ).toBeNull();
+    expect(f.launches()).toBe(0);
+  } finally {
+    await app.close();
+    f.close();
+  }
+});
+
+it('cleans an expired unallocated reservation only with explicit runtime absence proof', async () => {
+  const f = fixture();
+  const app = Fastify();
+  const service = f.service();
+  managedPodRoutes(app, { service, authenticate: async () => 'installation-one' });
+  try {
+    await expect(
+      service.start('installation-one', f.request, 'after-reservation'),
+    ).rejects.toThrow();
+    f.advance(4102444801);
+    await service.enforceExpiry();
+    const handle = await service.reconcileStart('installation-one', f.request);
+    const call = {
+      method: 'POST' as const,
+      url: `/managed/pods/${handle?.podId}/control/cleanup-unallocated`,
+      payload: {
+        schemaVersion: 1,
+        dispatcherAttemptId: f.request.dispatcherAttemptId,
+        grantId: f.request.effectiveGrant.grantId,
+        grantRevision: 1,
+        operation: 'cleanup',
+      },
+    };
+    expect((await app.inject(call)).statusCode).toBe(409);
+    f.runtime.cleanupUnallocated = async () => true;
+    expect((await app.inject(call)).json().cleanup).toBe('observed');
+    expect(f.launches()).toBe(0);
+  } finally {
+    await app.close();
+    f.close();
+  }
+});

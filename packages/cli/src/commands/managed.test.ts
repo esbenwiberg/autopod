@@ -58,9 +58,21 @@ it('CLI redacts malformed input and unusable login, with no network or credentia
   const fetcher = vi.fn();
   vi.stubGlobal('fetch', fetcher);
   const result = await run('{"method":"GET","path":"/managed/health"}');
-  expect(result.out).toEqual([]);
+  expect(JSON.parse(result.out.join(''))).toEqual({ error: { code: 'managed-login-required' } });
   expect(result.errors.join('')).toContain('managed-request-unavailable');
   expect(result.errors.join('')).not.toContain(state.token);
   expect(fetcher).not.toHaveBeenCalled();
+  expect(process.exitCode).toBe(1);
+});
+
+it('returns a safe machine error category without service body or credentials', async () => {
+  state.token = `fixture.${Buffer.from(JSON.stringify({ iss: 'https://issuer/', aud: 'api://autopod', oid: 'owner', exp: Date.now() / 1000 + 60 })).toString('base64url')}.signature`;
+  vi.stubGlobal(
+    'fetch',
+    vi.fn(async () => new Response('Bearer reusable-secret', { status: 409 })),
+  );
+  const result = await run('{"method":"POST","path":"/managed/reconcile-start","body":{}}');
+  expect(JSON.parse(result.out.join(''))).toEqual({ error: { code: 'managed-http-conflict' } });
+  expect(JSON.stringify(result)).not.toContain('reusable-secret');
   expect(process.exitCode).toBe(1);
 });
