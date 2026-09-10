@@ -1,4 +1,4 @@
-import { readFile, readdir, stat } from 'node:fs/promises';
+import { readFile, readdir, realpath, stat } from 'node:fs/promises';
 import path from 'node:path';
 import type { FastifyInstance } from 'fastify';
 import type { ContainerManager } from '../../interfaces/container-manager.js';
@@ -69,7 +69,9 @@ export function filesRoutes(
 
     const extensions = parseExtensions(query.ext);
 
-    if (containerManagerFactory && pod.containerId) {
+    const publishedArtifact =
+      pod.status === 'complete' && pod.options?.output === 'artifact' ? pod.artifactsPath : null;
+    if (containerManagerFactory && pod.containerId && !publishedArtifact) {
       const cm = containerManagerFactory.get(pod.executionTarget);
       const fromContainer = await tryListFromContainer(cm, pod.containerId, extensions);
       if (fromContainer) {
@@ -78,7 +80,7 @@ export function filesRoutes(
       }
     }
 
-    const rootPath = pod.worktreePath ?? pod.artifactsPath;
+    const rootPath = publishedArtifact ?? pod.worktreePath ?? pod.artifactsPath;
     if (!rootPath) {
       reply.status(404);
       return { error: 'No files available for this pod' };
@@ -111,7 +113,9 @@ export function filesRoutes(
 
     const isBinary = isBinaryPath(relPath);
 
-    if (containerManagerFactory && pod.containerId) {
+    const publishedArtifact =
+      pod.status === 'complete' && pod.options?.output === 'artifact' ? pod.artifactsPath : null;
+    if (containerManagerFactory && pod.containerId && !publishedArtifact) {
       const cm = containerManagerFactory.get(pod.executionTarget);
       const fromContainer = await tryReadFromContainer(cm, pod.containerId, relPath, isBinary);
       if (fromContainer === 'too-large') {
@@ -123,7 +127,7 @@ export function filesRoutes(
       }
     }
 
-    const rootPath = pod.worktreePath ?? pod.artifactsPath;
+    const rootPath = publishedArtifact ?? pod.worktreePath ?? pod.artifactsPath;
     if (!rootPath) {
       reply.status(404);
       return { error: 'No files available for this pod' };
@@ -138,8 +142,15 @@ export function filesRoutes(
     }
 
     let stats: Awaited<ReturnType<typeof stat>>;
+    let readPath: string;
     try {
-      stats = await stat(resolved);
+      const canonicalRoot = await realpath(root);
+      readPath = await realpath(resolved);
+      if (readPath !== canonicalRoot && !readPath.startsWith(`${canonicalRoot}${path.sep}`)) {
+        reply.status(403);
+        return { error: 'file resolves outside the pod root' };
+      }
+      stats = await stat(readPath);
     } catch {
       reply.status(404);
       return { error: 'file not found' };
@@ -155,7 +166,7 @@ export function filesRoutes(
     }
 
     if (isBinary) {
-      const buf = await readFile(resolved);
+      const buf = await readFile(readPath);
       return {
         path: path.relative(root, resolved),
         content: buf.toString('base64'),
@@ -164,7 +175,7 @@ export function filesRoutes(
       } satisfies ContentResponse;
     }
 
-    const content = await readFile(resolved, 'utf8');
+    const content = await readFile(readPath, 'utf8');
     return {
       path: path.relative(root, resolved),
       content,

@@ -34,7 +34,13 @@ export interface ValidationResult {
   validationSuite?: ValidationSuite;
   setup?: SetupResult;
   smoke: SmokeResult;
-  test?: { status: 'pass' | 'fail' | 'skip'; duration: number; stdout?: string; stderr?: string };
+  test?: {
+    status: 'pass' | 'fail' | 'skip';
+    duration: number;
+    stdout?: string;
+    stderr?: string;
+    reusedEvidence?: import('./validation-evidence.js').ReusedValidationEvidence;
+  };
   lint?: LintResult;
   sast?: SastResult;
   factValidation?: FactValidationResult | null;
@@ -89,6 +95,7 @@ export interface BuildResult {
 }
 
 export interface LintResult {
+  reusedEvidence?: import('./validation-evidence.js').ReusedValidationEvidence;
   status: 'pass' | 'fail' | 'skip';
   output: string;
   duration: number;

@@ -1,0 +1,61 @@
+
+ RUN  v4.1.11 /private/tmp/autopod-durable-execution/packages/daemon
+
+ ❯ src/pods/pod-manager.test.ts (425 tests | 2 failed | 423 skipped) 114ms
+         × keeps automatic artifact completion unresolved when extraction fails 74ms
+         × retains interactive artifacts and the container when extraction fails 40ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 2 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/pods/pod-manager.test.ts > PodManager > workspace pods > completeSession > keeps automatic artifact completion unresolved when extraction fails
+AssertionError: expected { id: 'normal-jackal', …(113) } to match object { status: 'failed', …(2) }
+(117 matching properties omitted from actual)
+
+- Expected
++ Received
+
+  {
+-   "artifactsPath": null,
++   "artifactsPath": "/private/tmp/autopod-durable-execution/packages/daemon/.autopod-data/artifacts/normal-jackal",
+    "containerId": "container-abc",
+-   "status": "failed",
++   "status": "complete",
+  }
+
+ ❯ src/pods/pod-manager.test.ts:12885:44
+    12883|         vi.mocked(ctx.containerManager.extractDirectoryFromContainer).…
+    12884|         await manager.handleCompletion(pod.id);
+    12885|         expect(manager.getSession(pod.id)).toMatchObject({status: 'fai…
+       |                                            ^
+    12886|         expect(ctx.containerManager.kill).not.toHaveBeenCalled();
+    12887|         expect(ctx.worktreeManager.pushBranch).not.toHaveBeenCalled();
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/2]⎯
+
+ FAIL  src/pods/pod-manager.test.ts > PodManager > workspace pods > completeSession > retains interactive artifacts and the container when extraction fails
+AssertionError: promise resolved "{ pushError: undefined }" instead of rejecting
+
+- Expected
++ Received
+
+- Error {
+-   "message": "rejected promise",
++ {
++   "pushError": undefined,
+  }
+
+ ❯ src/pods/pod-manager.test.ts:12918:53
+    12916|         });
+    12917|
+    12918|         await expect(manager.completeSession(pod.id)).rejects.toThrow(…
+       |                                                     ^
+    12919|         const retained = manager.getSession(pod.id);
+    12920|         expect(retained.status).toBe('running');
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/2]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  2 failed | 423 skipped (425)
+   Start at  17:54:35
+   Duration  1.45s (transform 858ms, setup 0ms, import 1.22s, tests 114ms, environment 0ms)

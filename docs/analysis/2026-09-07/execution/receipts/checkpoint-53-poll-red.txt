@@ -1,0 +1,88 @@
+
+ RUN  v4.1.11 /private/tmp/autopod-durable-execution/packages/daemon
+
+ ❯ src/pods/pod-manager.test.ts (541 tests | 3 failed | 538 skipped) 220ms
+     × does not publish late starting HEAD after commit polling is replaced 106ms
+     × does not publish late starting HEAD after commit polling is stopped 61ms
+     × does not publish late commit counts into a replacement lifecycle 52ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 3 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/pods/pod-manager.test.ts > PodManager > does not publish late starting HEAD after commit polling is replaced
+AssertionError: expected { id: 'economic-impala', …(113) } to match object { startCommitSha: 'new-start', …(1) }
+(118 matching properties omitted from actual)
+
+- Expected
++ Received
+
+  {
+-   "commitCount": 9,
+-   "startCommitSha": "new-start",
++   "commitCount": 0,
++   "startCommitSha": "old-start",
+  }
+
+ ❯ src/pods/pod-manager.test.ts:1708:24
+    1706|       finish.resolve();
+    1707|       await consuming;
+    1708|       expect(observed).toMatchObject({ startCommitSha: 'new-start', co…
+       |                        ^
+    1709|       expect(countCalls).toHaveLength(0);
+    1710|     },
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/3]⎯
+
+ FAIL  src/pods/pod-manager.test.ts > PodManager > does not publish late starting HEAD after commit polling is stopped
+AssertionError: expected { id: 'qualified-vicuna', …(113) } to match object { startCommitSha: 'new-start', …(1) }
+(125 matching properties omitted from actual)
+
+- Expected
++ Received
+
+  {
+-   "commitCount": 9,
+-   "startCommitSha": "new-start",
++   "commitCount": 0,
++   "startCommitSha": "old-start",
+  }
+
+ ❯ src/pods/pod-manager.test.ts:1708:24
+    1706|       finish.resolve();
+    1707|       await consuming;
+    1708|       expect(observed).toMatchObject({ startCommitSha: 'new-start', co…
+       |                        ^
+    1709|       expect(countCalls).toHaveLength(0);
+    1710|     },
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/3]⎯
+
+ FAIL  src/pods/pod-manager.test.ts > PodManager > does not publish late commit counts into a replacement lifecycle
+AssertionError: expected { id: 'opposite-mosquito', …(113) } to match object { commitCount: 9, …(1) }
+(118 matching properties omitted from actual)
+
+- Expected
++ Received
+
+  {
+-   "commitCount": 9,
+-   "lastCommitAt": "2026-09-08T00:00:00Z",
++   "commitCount": 2,
++   "lastCommitAt": "2026-09-01T00:00:00Z",
+  }
+
+ ❯ src/pods/pod-manager.test.ts:1756:22
+    1754|     finish.resolve();
+    1755|     await consuming;
+    1756|     expect(observed).toMatchObject({ commitCount: 9, lastCommitAt: '20…
+       |                      ^
+    1757|   });
+    1758|
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/3]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  3 failed | 538 skipped (541)
+   Start at  08:59:12
+   Duration  2.01s (transform 1.14s, setup 0ms, import 1.64s, tests 220ms, environment 0ms)
+

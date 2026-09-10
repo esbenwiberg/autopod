@@ -31,6 +31,7 @@ import type {
   PrivateRegistry,
   Profile,
   ProviderAccountProvider,
+  ProviderAttempt,
   ProviderCredentials,
   ProviderFailoverTarget,
   ProviderFailureClassification,
@@ -50,6 +51,7 @@ import type {
   SpawnFixResponse,
   SpecFile,
   StdioInjectedMcpServer,
+  TaskRetryIdentity,
   TaskReviewResult,
   TaskSummary,
   UpdateFromBaseResponse,
@@ -99,6 +101,7 @@ import {
   sidecarPodEnv,
 } from '../containers/sidecar-resolver.js';
 import type { PodTokenIssuer } from '../crypto/pod-tokens.js';
+import { atomicPodChange } from '../db/unit-of-work.js';
 import type { DaemonGitHubAuth } from '../github/daemon-github-auth.js';
 import { createHistoryExporter } from '../history/history-exporter.js';
 import {
@@ -114,6 +117,7 @@ import type {
   ValidationEngine,
   WorktreeManager,
 } from '../interfaces/index.js';
+import type { ReviewerLaunchIdentity } from '../interfaces/reviewer-launch.js';
 import type { ProfileStore } from '../profiles/index.js';
 import { assertNoExpiredPat } from '../profiles/pat-expiry.js';
 import type { ProviderAccountStore } from '../provider-accounts/index.js';
@@ -129,6 +133,7 @@ import type {
   ProfileLlmClientResult,
   ProviderEnvResult,
 } from '../providers/index.js';
+import { resolveAnthropicModelId } from '../providers/llm-client.js';
 import { createProfileMemoryReviewer } from '../providers/memory-reviewer.js';
 import { RUNTIME_TELEMETRY_OPT_OUT_ENV } from '../runtime-env.js';
 import { type ClaudeRuntime, ResumeSessionNotFoundError } from '../runtimes/claude-runtime.js';
@@ -144,10 +149,13 @@ import {
   ensureCodexStateDir,
 } from '../runtimes/codex-state-store.js';
 import type { PiRuntime } from '../runtimes/pi-runtime.js';
+import { resolveContainerReviewer } from '../validation/container-reviewer-runner.js';
 import { detectRecurringFindings, extractFindings } from '../validation/finding-fingerprint.js';
 import { applyOverrides } from '../validation/override-applicator.js';
+import { captureValidationRetryIdentity } from '../validation/retry-identity.js';
 import { parseDiffFilePaths } from '../validation/review-context-builder.js';
 import { addTokenUsage } from '../validation/review-synthesizer.js';
+import { resolveToolReviewModelId } from '../validation/review-tool-runner.js';
 import { publishScreenshotArtifacts } from '../validation/screenshot-artifacts.js';
 import {
   buildGitHubImageUrl,
@@ -155,7 +163,16 @@ import {
   collectScreenshots,
 } from '../validation/screenshot-collector.js';
 import { buildValidationContextEnv } from '../validation/validation-context-env.js';
+import { createValidationIdentityCollector } from '../validation/validation-identity-collector.js';
 import { pushCommitsToBareViaStagingRef } from '../worktrees/bare-push.js';
+import {
+  closedPrRecoveryReason,
+  inspectRetainedMergeSource,
+  mergePublishedSource,
+  reconcileMerge,
+} from '../worktrees/durable-merge.js';
+import { createDurablePrManagerFactory } from '../worktrees/durable-pr-manager.js';
+import { publishCommittedSource, publishSource } from '../worktrees/durable-source-publication.js';
 import { graftHostTreeOntoBase } from '../worktrees/graft-reconcile.js';
 import {
   DeletionGuardError,
@@ -164,6 +181,7 @@ import {
   GitTransientFetchError,
 } from '../worktrees/local-worktree-manager.js';
 import { MergeQueue } from '../worktrees/merge-queue.js';
+import { mergeReconciliation } from '../worktrees/merge-source-identity.js';
 import { transferCommitToContainer } from '../worktrees/sandbox-reconcile.js';
 import {
   type SandboxWorkspaceCheckpointArgs,
@@ -171,30 +189,47 @@ import {
   checkpointSandboxWorkspace,
 } from '../worktrees/sandbox-workspace-checkpoint.js';
 import { agentToolingCachePaths } from './agent-tooling-cache-paths.js';
+import { hasInterruptedArtifactCollection } from './artifact-finalization-recovery.js';
+import { collectArtifactSnapshot } from './artifact-preservation.js';
+import { verifyArtifactSnapshot } from './artifact-snapshot-receipt.js';
+import {
+  AgentContinuationSupersededError,
+  preflightAgentContinuation,
+} from './continuation-preflight.js';
 import { buildCorrectionMessage } from './correction-context.js';
+import { runDeletionCleanup } from './deletion-cleanup.js';
+import { deletionOwnershipError } from './deletion-ownership.js';
+import { dispatchRequestHash } from './dispatch-preflight-ledger.js';
+import { persistCompletionReply, persistEscalation } from './escalation-coordinator.js';
 import type { EscalationRepository } from './escalation-repository.js';
 import type { EventBus } from './event-bus.js';
 import type { EventRepository } from './event-repository.js';
+import { inspectExecutionPreflight } from './execution-preflight.js';
 import { formatFeedback } from './feedback-formatter.js';
 import type { FixFeedbackRepository } from './fix-feedback-repository.js';
 import { mergeClaudeMdSections, mergeMcpServers, mergeSkills } from './injection-merger.js';
+import { createInteractiveCompletionCoordinator } from './interactive-completion-coordinator.js';
 import { reconcileLocalSessions } from './local-reconciler.js';
 import type { MemoryRepository } from './memory-repository.js';
 import { prefilterMemories, selectRelevantMemories } from './memory-selector.js';
 import type { MemoryUsageRepository } from './memory-usage-repository.js';
 import type { NudgeRepository } from './nudge-repository.js';
 import type { PodRepository, PodStats, PodUpdates } from './pod-repository.js';
+import { type PollOwnership, createPollingCoordinator } from './polling-coordinator.js';
 import { type PreflightConflict, findPreflightConflicts } from './preflight.js';
 import { buildSupervisorCommand, parseStatus } from './preview-supervisor.js';
 import type { ProgressEventRepository } from './progress-event-repository.js';
-import type { ProviderAttemptRepository } from './provider-attempt-repository.js';
+import {
+  type ProviderAttemptRepository,
+  ProviderAttemptSupersededError,
+} from './provider-attempt-repository.js';
 import { resolveProviderPreflight } from './provider-preflight.js';
 import type { QualityScoreRepository } from './quality-score-repository.js';
 import { createReadinessService } from './readiness-review.js';
 import {
-  buildContinuationPrompt,
-  buildRecoveryTask,
-  buildReworkTask,
+  buildContinuationPrompt as buildContinuationPromptFromWorktree,
+  buildRecoveryTask as buildRecoveryTaskFromWorktree,
+  buildReworkTask as buildReworkTaskFromWorktree,
   hasPendingProviderContinuation,
   writeProviderFailoverHandoff,
 } from './recovery-context.js';
@@ -208,6 +243,12 @@ import {
   ensureNuGetCredentialProvider,
   validateRegistryFiles,
 } from './registry-injector.js';
+import { waitForRetryBackoff } from './retry-backoff-wait.js';
+import {
+  legacyReviewerApiProvenance,
+  reviewerApiProvenance,
+  reviewerHostCliProvenance,
+} from './reviewer-api-provenance.js';
 import { addRuntimeNetworkDefaults } from './runtime-network-defaults.js';
 import {
   resolveEffectiveReviewerProfile,
@@ -217,6 +258,7 @@ import {
   resolveReviewerProvider,
 } from './runtime-resolver.js';
 import { type SandboxPreviewProxy, startSandboxPreviewProxy } from './sandbox-preview-proxy.js';
+import { sandboxStartupRetryInput } from './sandbox-startup-admission.js';
 import { resolveSections } from './section-resolver.js';
 import { resolveSkills } from './skill-resolver.js';
 import {
@@ -230,7 +272,16 @@ import {
   validateTransition,
 } from './state-machine.js';
 import { generateSystemInstructions } from './system-instructions-generator.js';
+import { assertTaskExecutionTerminationVerified } from './task-execution-ledger.js';
+import { TaskRetryBlockedError } from './task-retry-ledger.js';
+import { ValidationSupersededError, captureValidationOwnership } from './validation-ownership.js';
 import type { ValidationRepository } from './validation-repository.js';
+import { workerRetryDeadline } from './worker-retry-deadline.js';
+import {
+  WORKER_RETRY_BACKOFFS_MS,
+  unavailableWorkerInputs,
+  workerBindingHash,
+} from './worker-retry-history.js';
 import type { WorkspaceCheckpointController } from './workspace-checkpoint-controller.js';
 import {
   buildBashrcHintBlock,
@@ -1255,76 +1306,6 @@ function mergeOverrides(
   return [...map.values()];
 }
 
-const AGENT_CLI_BY_RUNTIME: Record<Pod['runtime'], string> = {
-  claude: 'claude',
-  codex: 'codex',
-  copilot: 'copilot',
-  pi: 'pi',
-};
-
-const MIN_CODEX_CLI_VERSION = '0.144.4';
-
-function parseCliVersion(output: string): [number, number, number] | null {
-  const match = output.match(/\b(\d+)\.(\d+)\.(\d+)\b/);
-  if (!match) return null;
-  return [Number(match[1]), Number(match[2]), Number(match[3])];
-}
-
-function isVersionBelow(
-  version: [number, number, number],
-  minimum: [number, number, number],
-): boolean {
-  for (let index = 0; index < version.length; index += 1) {
-    const current = version[index] ?? 0;
-    const required = minimum[index] ?? 0;
-    if (current !== required) return current < required;
-  }
-  return false;
-}
-
-async function verifyAgentCli(
-  containerManager: ContainerManager,
-  containerId: string,
-  runtime: Pod['runtime'],
-): Promise<string> {
-  const cli = AGENT_CLI_BY_RUNTIME[runtime];
-  const result = await containerManager.execInContainer(
-    containerId,
-    ['sh', '-lc', `command -v ${cli}`],
-    { timeout: 10_000 },
-  );
-
-  if (result.exitCode !== 0) {
-    const detail = (result.stderr || result.stdout).trim();
-    throw new Error(
-      `Agent CLI missing: ${cli} is not installed in this image. Rebuild the ${runtime} base/warm image.${detail ? ` ${detail}` : ''}`,
-    );
-  }
-
-  if (runtime === 'codex') {
-    const versionResult = await containerManager.execInContainer(
-      containerId,
-      ['codex', '--version'],
-      { timeout: 10_000 },
-    );
-    const output = (versionResult.stdout || versionResult.stderr).trim();
-    const version = parseCliVersion(output);
-    const minimum = parseCliVersion(MIN_CODEX_CLI_VERSION);
-    if (versionResult.exitCode !== 0 || !version || !minimum) {
-      throw new Error(
-        `Unable to verify the Codex CLI version${output ? ` (${output})` : ''}. Rebuild the codex base/warm image with Codex CLI ${MIN_CODEX_CLI_VERSION} or newer.`,
-      );
-    }
-    if (isVersionBelow(version, minimum)) {
-      throw new Error(
-        `Codex CLI ${version.join('.')} is incompatible; Autopod requires ${MIN_CODEX_CLI_VERSION} or newer. Rebuild the codex base/warm image.`,
-      );
-    }
-  }
-
-  return result.stdout.trim();
-}
-
 export interface ContainerManagerFactory {
   get(target: ExecutionTarget): ContainerManager;
 }
@@ -1420,10 +1401,20 @@ export interface PodManagerDependencies {
     args: SandboxWorkspaceCheckpointArgs,
   ) => Promise<WorkspaceCheckpointResult>;
   workspaceCheckpointController?: WorkspaceCheckpointController;
-  /** Bounded run-level retries for typed validation infrastructure failures. */
+  /** Trusted identity capture seam; production captures actual container inputs. */
+  captureRetryIdentity?: (
+    config: Parameters<ValidationEngine['validate']>[0],
+  ) => Promise<TaskRetryIdentity>;
+  /** Task-wide automatic retries for typed validation infrastructure failures. */
   validationInfrastructureRetryBackoffMs?: readonly number[];
   /** Test seam for the durable fresh-sandbox recovery cooldown. */
   sandboxInfrastructureRecoveryDelay?: (delayMs: number) => Promise<void>;
+  /** Persisted task-wide sandbox startup policy; defaults to one 30-second retry. */
+  sandboxInfrastructureRetryBackoffMs?: readonly number[];
+  /** Persisted task-wide allowance for classified outer worker infrastructure retries. */
+  workerInfrastructureRetryBackoffMs?: readonly number[];
+  /** Test seam for the persisted worker cooldown. */
+  workerInfrastructureRetryDelay?: (delayMs: number) => Promise<void>;
   /** Test seam for bounding best-effort sandbox runtime-session extraction. */
   sandboxRuntimeSessionSyncTimeoutMs?: number;
   /** Safety events repository for writing per-pattern detection rows. */
@@ -1455,7 +1446,12 @@ export interface ApproveAllSkippedPod {
 }
 
 export interface PodManager {
-  createSession(request: CreatePodRequest, userId: string, creator?: PodCreator): Pod;
+  createSession(
+    request: CreatePodRequest,
+    userId: string,
+    creator?: PodCreator,
+    actor?: OperatorActor,
+  ): Pod;
   processPod(podId: string): Promise<void>;
   consumeAgentEvents(
     podId: string,
@@ -1528,6 +1524,8 @@ export interface PodManager {
     targetOutput: 'pr' | 'branch' | 'artifact' | 'none',
     options?: { instructions?: string; skipAgent?: boolean },
   ): Promise<void>;
+  /** Check worker retry permission before Rework can tear down or enqueue resources. */
+  assertCanRework(podId: string): void;
   triggerValidation(
     podId: string,
     options?: { force?: boolean; validationOnly?: boolean },
@@ -1641,7 +1639,7 @@ export interface PodManager {
    * failed on infra. Throws when the pod isn't in a recoverable state.
    */
   resumePod(podId: string): Promise<{
-    action: 'retry-pr' | 'revalidate' | 'retry-fix-delivery' | 'retry-agent';
+    action: 'retry-pr' | 'revalidate' | 'retry-fix-delivery' | 'retry-agent' | 'collect-artifacts';
   }>;
   /**
    * Continue a provider-limit pause, or explicitly recover a failed pod on the
@@ -1650,6 +1648,7 @@ export interface PodManager {
   continueProvider(
     podId: string,
     target?: ProviderFailoverTarget | 'profile-primary',
+    actor?: OperatorActor,
   ): Promise<{ action: 'same-provider' | 'alternate-provider' | 'primary-provider' }>;
   /**
    * Operator admin override: force-transition a `failed` pod to `complete`,
@@ -1727,19 +1726,22 @@ function agentPhaseBucketKey(attempt: number): 'agent_initial' | `agent_rework_$
 function hasLatestPersistedAgentTerminalEventComplete(
   eventRepo: EventRepository | undefined,
   podId: string,
+  afterEventId = 0,
 ): boolean {
   if (!eventRepo) return false;
   let latestTerminalEvent: 'complete' | 'error' | null = null;
+  let terminalEventId = 0;
   for (const event of eventRepo.getForSession(podId)) {
     if (event.payload.type !== 'pod.agent_activity') continue;
     const agentEvent = event.payload.event;
     if (agentEvent.type === 'complete') {
       latestTerminalEvent = 'complete';
+      terminalEventId = event.id;
     } else if (agentEvent.type === 'error' && agentEvent.fatal) {
       latestTerminalEvent = 'error';
     }
   }
-  return latestTerminalEvent === 'complete';
+  return latestTerminalEvent === 'complete' && terminalEventId > afterEventId;
 }
 
 function agentCompleteEventKey(event: Extract<AgentEvent, { type: 'complete' }>): string {
@@ -1887,7 +1889,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
     validationEngine,
     networkManager,
     sidecarManager,
-    prManagerFactory,
+    prManagerFactory: rawPrManagerFactory,
     enqueueSession,
     clearStuckQueueEntry,
     mcpBaseUrl,
@@ -1902,6 +1904,10 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
     safetyEventsRepo,
     qualityScoreRepo,
   } = deps;
+  const prManagerFactory =
+    rawPrManagerFactory && podRepo.deliveryLedger
+      ? createDurablePrManagerFactory(podRepo.deliveryLedger, rawPrManagerFactory)
+      : rawPrManagerFactory;
   const hostFetchRetryTimers = new Map<string, ReturnType<typeof setTimeout>>();
 
   function scheduleHostFetchRetry(pod: Pod, error: GitTransientFetchError): void {
@@ -2051,9 +2057,13 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
     return reasoningEffortFromSnapshot(snapshot) ?? profile.reasoningEffort ?? 'auto';
   }
 
-  function ensureProviderAttempt(pod: Pod, profile: Profile): void {
+  function ensureProviderAttempt(
+    pod: Pod,
+    profile: Profile,
+    requireNew = false,
+  ): ProviderAttempt | null {
     const repository = deps.providerAttemptRepo;
-    if (!repository) return;
+    if (!repository) return null;
     const active = repository.getActive(pod.id);
     const profileSnapshot =
       (active && repository.getActiveProfileSnapshot(pod.id)) ??
@@ -2064,6 +2074,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
       profile,
     );
     if (active) {
+      if (requireNew) throw new ProviderAttemptSupersededError();
       const identityMatches =
         active.provider === provider &&
         active.providerAccountId === profile.providerAccountId &&
@@ -2073,13 +2084,13 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
       if (!identityMatches) {
         throw new Error(`Active provider attempt identity mismatch for pod ${pod.id}`);
       }
-      return;
+      return active;
     }
     if (
       repository.list(pod.id).length === 0 &&
       (pod.inputTokens > 0 || pod.outputTokens > 0 || pod.costUsd > 0)
     ) {
-      repository.open({
+      const legacyAttempt = repository.open({
         podId: pod.id,
         provider,
         providerAccountId: profile.providerAccountId,
@@ -2090,6 +2101,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         startedAt: pod.startedAt ?? pod.createdAt,
       });
       repository.close(pod.id, {
+        expectedOrdinal: legacyAttempt.ordinal,
         nativeSessionId: nativeSessionId(pod),
         endedAt: new Date().toISOString(),
         outcome: 'completed',
@@ -2098,7 +2110,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         costUsd: pod.costUsd,
       });
     }
-    repository.open({
+    return repository.open({
       podId: pod.id,
       provider,
       providerAccountId: profile.providerAccountId,
@@ -2113,9 +2125,20 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
     pod: Pod,
     profile: Profile,
     hadActiveAttempt: boolean,
+    expectedRunToken?: symbol,
   ): boolean {
     const repository = deps.providerAttemptRepo;
     const active = repository?.getActive(pod.id);
+    if (expectedRunToken !== undefined) {
+      const owner = activeAgentRuns.get(pod.id);
+      if (
+        owner?.token !== expectedRunToken ||
+        !owner.isCurrent?.() ||
+        (repository && (!active || owner.providerOrdinal !== active.ordinal))
+      ) {
+        throw new ProviderAttemptSupersededError();
+      }
+    }
     if (!repository || !active || !hadActiveAttempt) return false;
     const preceding = repository
       .list(pod.id)
@@ -2129,13 +2152,18 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
     if (isUnstartedProviderContinuation) return false;
 
     repository.close(pod.id, {
+      expectedOrdinal: active.ordinal,
       nativeSessionId: active.nativeSessionId,
       outcome: 'aborted',
       inputTokens: active.inputTokens,
       outputTokens: active.outputTokens,
       costUsd: active.costUsd,
     });
-    ensureProviderAttempt(pod, profile);
+    const replacement = ensureProviderAttempt(pod, profile, true);
+    if (expectedRunToken !== undefined) {
+      const owner = activeAgentRuns.get(pod.id);
+      if (owner?.token === expectedRunToken) owner.providerOrdinal = replacement?.ordinal;
+    }
     return true;
   }
 
@@ -2144,12 +2172,17 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
     outcome: 'completed' | 'failed' | 'aborted' | 'quota_exhausted',
     classification: ProviderFailureClassification | null = null,
     handoffReference: string | null = null,
+    expectedOrdinal?: number,
   ): void {
     const repository = deps.providerAttemptRepo;
     const active = repository?.getActive(podId);
-    if (!repository || !active) return;
+    if (!repository) return;
+    if (expectedOrdinal !== undefined && active?.ordinal !== expectedOrdinal)
+      throw new ProviderAttemptSupersededError();
+    if (!active) return;
     const pod = podRepo.getOrThrow(podId);
     repository.close(podId, {
+      expectedOrdinal: expectedOrdinal ?? active.ordinal,
       nativeSessionId: nativeSessionId(pod),
       outcome,
       classification,
@@ -2158,6 +2191,42 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
       costUsd: active.costUsd,
       handoffReference,
     });
+  }
+
+  function assertExecutionTerminationVerified(podId: string): void {
+    podRepo.deletionOwnership?.assertTaskAvailable(podId);
+    assertTaskExecutionTerminationVerified(podRepo.taskExecutions, podId);
+  }
+
+  function assertGuidanceCollected(podId: string): void {
+    if (nudgeRepo.hasPending(podId))
+      throw new AutopodError(
+        'This pod has uncollected human guidance. Use Rework to let a worker read check_messages, acknowledge its receipt, and apply the saved guidance before validation or delivery.',
+        'UNCOLLECTED_HUMAN_GUIDANCE',
+        409,
+      );
+  }
+
+  function appendDecisionContext(pod: Pod, task: string): string {
+    return (
+      task +
+      (podRepo.completionJournal?.recoveryContext(pod) ?? '') +
+      (nudgeRepo.hasPending(pod.id)
+        ? '\n\nUncollected human guidance remains in check_messages. Read all queued messages, acknowledge each deliveryId with acknowledge_messages, reconcile them with the preserved work, and apply them before reporting completion.'
+        : '')
+    );
+  }
+
+  async function buildRecoveryTask(pod: Pod, worktreePath: string): Promise<string> {
+    return appendDecisionContext(pod, await buildRecoveryTaskFromWorktree(pod, worktreePath));
+  }
+
+  async function buildContinuationPrompt(pod: Pod, worktreePath: string): Promise<string> {
+    return appendDecisionContext(pod, await buildContinuationPromptFromWorktree(pod, worktreePath));
+  }
+
+  async function buildReworkTask(pod: Pod, worktreePath: string, reason: string): Promise<string> {
+    return appendDecisionContext(pod, await buildReworkTaskFromWorktree(pod, worktreePath, reason));
   }
 
   function hasDurableAgentExecutionEvidence(pod: Pod): boolean {
@@ -2243,7 +2312,26 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
       });
       return false;
     }
-    if (capturedPod.infrastructureRecoveryCount >= 1) {
+    const startupLedger = podRepo.sandboxStartupRetries;
+    let exhausted = capturedPod.infrastructureRecoveryCount >= 1;
+    if (startupLedger) {
+      const input = sandboxStartupRetryInput(capturedPod);
+      try {
+        startupLedger.assertCanAdmit(
+          podId,
+          capturedPod.lifecycleGeneration,
+          input.identity,
+          input.bindingHash,
+          [...(deps.sandboxInfrastructureRetryBackoffMs ?? [30_000])],
+        );
+        exhausted = false;
+      } catch (admissionError) {
+        if (!(admissionError instanceof TaskRetryBlockedError)) throw admissionError;
+        exhausted = true;
+        emitActivityStatus(podId, admissionError.message);
+      }
+    }
+    if (exhausted) {
       podRepo.update(podId, {
         infrastructureFailure: sandboxInfrastructureFailure(
           error,
@@ -2291,7 +2379,9 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
       return false;
     }
 
-    const retryNotBefore = new Date(Date.now() + 30_000).toISOString();
+    const startupState = startupLedger?.state(podId);
+    const delay = startupState?.backoffsMs?.[startupState.transientRetryCount] ?? 30_000;
+    const retryNotBefore = new Date(Date.now() + delay).toISOString();
     closeProviderAttempt(podId, 'aborted');
     await killSidecarsForPod(podId);
     await destroyPodNetwork(podId);
@@ -2305,7 +2395,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
     podRepo.update(podId, {
       containerId: null,
       recoveryWorktreePath: afterCleanup.worktreePath,
-      infrastructureRecoveryCount: 1,
+      infrastructureRecoveryCount: capturedPod.infrastructureRecoveryCount + 1,
       infrastructureFailure: sandboxInfrastructureFailure(
         error,
         phase,
@@ -2320,7 +2410,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
     if (queued.status !== 'queued') podRepo.update(podId, { status: 'queued' });
     emitActivityStatus(
       podId,
-      'Azure sandbox was unavailable before agent execution; retrying once with a fresh sandbox.',
+      'Azure sandbox was unavailable before agent execution; retrying within the task startup budget.',
     );
     if (deps.requeueSessionAfterCurrent) {
       deps.requeueSessionAfterCurrent(podId);
@@ -2497,16 +2587,14 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
   function resolveEffectiveBoundProfile(pod: Pod): Profile {
     const profile = profileStore.get(pod.profileName);
     const repository = deps.providerAttemptRepo;
-    if (!repository) return profile;
-
-    const activeAttempt = repository.getActive(pod.id);
+    const activeAttempt = repository?.getActive(pod.id);
     if (activeAttempt) {
       if (activeAttempt.runtime !== pod.runtime || activeAttempt.model !== pod.model) {
         throw new Error(`Active provider attempt identity mismatch for pod ${pod.id}`);
       }
     }
 
-    const latestAttempt = repository.list(pod.id).at(-1);
+    const latestAttempt = repository?.list(pod.id).at(-1);
     if (
       !activeAttempt &&
       latestAttempt &&
@@ -2522,6 +2610,28 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
       );
     }
     const boundAttempt = activeAttempt ?? latestAttempt;
+    // Before the first attempt, the creation snapshot is the authority. Editing
+    // a shared profile must not move already queued work to a different account.
+    if (!boundAttempt && pod.providerAccountIdSnapshot) {
+      let account: ReturnType<ProviderAccountStore['get']> | undefined;
+      try {
+        account = providerAccountStore?.get(pod.providerAccountIdSnapshot);
+      } catch {
+        // Convert deleted-account lookup failures into an actionable binding error.
+      }
+      if (!account || account.provider !== pod.providerIdSnapshot) {
+        throw new AutopodError(
+          'Queued provider account is unavailable or its provider identity changed; restore the authorized account or explicitly select a new target before retrying',
+          'INVALID_PROVIDER_TARGET',
+          409,
+        );
+      }
+      return profileForProviderTarget(profile, {
+        providerAccountId: pod.providerAccountIdSnapshot,
+        runtime: pod.runtime,
+        model: pod.model,
+      });
+    }
     if (!boundAttempt?.providerAccountId) {
       const hasUnreconciledBinding =
         (pod.providerAccountIdSnapshot !== null &&
@@ -2791,6 +2901,18 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
     }
   }
 
+  async function recordContinuationProvenance(pod: Pod, containerId: string): Promise<void> {
+    await preflightAgentContinuation(pod, containerId, {
+      containerManager: containerManagerFactory.get(pod.executionTarget),
+      readCurrent: () => podRepo.getOrThrow(pod.id),
+      hasPendingDecision: () =>
+        podRepo.hasUnansweredDecision?.(pod.id) ??
+        Boolean(podRepo.getOrThrow(pod.id).pendingEscalation),
+      resolveProfile: resolveEffectiveBoundProfile,
+      provenance: podRepo.executionProvenance,
+    });
+  }
+
   function primeRuntimeForResume(
     pod: Pod,
     runtime: Runtime,
@@ -2858,13 +2980,8 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
     return mcpServers;
   }
 
-  async function syncSandboxRuntimeSessionState(podId: string): Promise<void> {
-    let pod: Pod;
-    try {
-      pod = podRepo.getOrThrow(podId);
-    } catch {
-      return;
-    }
+  async function syncSandboxRuntimeSessionState(pod: Pod, ownsRun: () => boolean): Promise<void> {
+    const podId = pod.id;
     if (pod.executionTarget !== 'sandbox' || !pod.containerId) return;
 
     const statePaths =
@@ -2881,20 +2998,30 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           : null;
     if (!statePaths) return;
 
+    const controller = new AbortController();
+    const assertCurrent = () => {
+      if (!ownsRun()) throw new ProviderAttemptSupersededError();
+    };
     let timer: ReturnType<typeof setTimeout> | undefined;
     try {
       const cm = containerManagerFactory.get(pod.executionTarget);
       const timeoutMs = deps.sandboxRuntimeSessionSyncTimeoutMs ?? 30_000;
       await Promise.race([
-        cm.extractDirectoryFromContainer(pod.containerId, statePaths.container, statePaths.host),
+        cm.extractDirectoryFromContainer(
+          pod.containerId,
+          statePaths.container,
+          statePaths.host,
+          undefined,
+          { signal: controller.signal, assertCurrent },
+        ),
         new Promise<never>((_resolve, reject) => {
-          timer = setTimeout(
-            () =>
-              reject(
-                new Error(`Sandbox runtime session state sync timed out after ${timeoutMs}ms`),
-              ),
-            timeoutMs,
-          );
+          timer = setTimeout(() => {
+            const error = new Error(
+              `Sandbox runtime session state sync timed out after ${timeoutMs}ms`,
+            );
+            controller.abort(error);
+            reject(error);
+          }, timeoutMs);
         }),
       ]);
     } catch (err) {
@@ -2903,6 +3030,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         'Failed to sync sandbox runtime session state — future recovery may restart fresh',
       );
     } finally {
+      controller.abort();
       if (timer) clearTimeout(timer);
     }
   }
@@ -3011,6 +3139,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
     pod: Pod,
     options: { waitForAdvisory?: boolean } = {},
   ): Promise<ApprovalReadiness> {
+    assertGuidanceCollected(pod.id);
     const advisoryRun = advisoryRuns.get(pod.id);
     let podReview = readinessService.refreshPodReadiness(pod.id, {
       advisoryQaInFlight: Boolean(advisoryRun),
@@ -3194,7 +3323,9 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
     pod: Pod,
     label: string,
     mode: 'kill' | 'stop' = 'kill',
+    assertReleaseAllowed?: () => void,
   ): Promise<void> {
+    assertReleaseAllowed?.();
     const targetContainerId = pod.containerId;
     if (!targetContainerId) return;
     logger.info(
@@ -3203,6 +3334,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
     );
     const ownsSharedResources = ownsLifecycle(pod.id, pod.lifecycleGeneration, targetContainerId);
     if (ownsSharedResources) await stopSandboxPreviewProxy(pod.id);
+    assertReleaseAllowed?.();
     if (ownsSharedResources && mode === 'kill' && deps.beforeContainerCleanup) {
       let extractionTimer: ReturnType<typeof setTimeout> | undefined;
       await Promise.race([
@@ -3225,9 +3357,11 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         }),
       ]);
     }
+    assertReleaseAllowed?.();
     // Stop denial receiver before killing/stopping the container so the
     // long-running socat exec gets a clean shutdown signal.
     if (ownsSharedResources) await stopHaproxyDenyReceiver(pod.id);
+    assertReleaseAllowed?.();
     const cm = containerManagerFactory.get(pod.executionTarget);
     const op = mode === 'kill' ? cm.kill(targetContainerId) : cm.stop(targetContainerId);
     let timer: ReturnType<typeof setTimeout> | undefined;
@@ -3251,6 +3385,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         }, CONTAINER_CLEANUP_TIMEOUT_MS);
       }),
     ]);
+    assertReleaseAllowed?.();
     if (mode === 'kill' && deleted && pod.executionTarget === 'sandbox') {
       const current = podRepo.getOrThrow(pod.id);
       if (
@@ -3472,8 +3607,18 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
    *  the most recent `sidecarContainerIds` even if the caller's snapshot is
    *  stale. No-ops if the pod never spawned any, or if no SidecarManager is
    *  configured (older deployments). Best-effort unless `strict` is requested. */
-  async function killSidecarsForPod(podId: string, strict = false): Promise<void> {
-    if (!sidecarManager) return;
+  async function killSidecarsForPod(
+    podId: string,
+    strict = false,
+    assertCurrent?: () => void,
+    retainMetadata = false,
+  ): Promise<void> {
+    assertCurrent?.();
+    if (!sidecarManager) {
+      if (strict && Object.keys(podRepo.getOrThrow(podId).sidecarContainerIds ?? {}).length > 0)
+        throw new Error('Sidecar cleanup capability unavailable');
+      return;
+    }
     let current: Pod;
     try {
       current = podRepo.getOrThrow(podId);
@@ -3499,7 +3644,8 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
     if (failures.length > 0 && strict) {
       throw new AggregateError(failures, `Failed to clean up sidecars for pod ${podId}`);
     }
-    podRepo.update(podId, { sidecarContainerIds: null });
+    assertCurrent?.();
+    if (!retainMetadata) podRepo.update(podId, { sidecarContainerIds: null });
   }
 
   /** Delete any branches this pod pushed to the test repo via
@@ -3507,7 +3653,11 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
    *  branches are logged, not thrown. Cleared from the DB afterwards so a
    *  cron-level sweep can see "this pod has no pending test branches".
    */
-  async function cleanupTestRunBranches(podId: string): Promise<void> {
+  async function cleanupTestRunBranches(
+    podId: string,
+    options?: { strict: boolean; assertCurrent: () => void; retainMetadata?: boolean },
+  ): Promise<void> {
+    options?.assertCurrent();
     let current: Pod;
     try {
       current = podRepo.getOrThrow(podId);
@@ -3519,20 +3669,24 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
     const profile = profileStore.get(current.profileName);
     const cfg = profile.testPipeline;
     if (!cfg || !cfg.enabled || !deps.azureDevOpsAuth) {
+      if (options?.strict) throw new Error('Test branch cleanup capability unavailable');
       podRepo.update(podId, { testRunBranches: null });
       return;
     }
     const token = await deps.azureDevOpsAuth.getToken();
+    options?.assertCurrent();
     const origin = new URL(cfg.testRepo).origin;
     if (!current.worktreePath) {
       // No worktree to run git from. Can't delete; leave a daily sweep to reap.
+      if (options?.strict) throw new Error('Test branch worktree unavailable');
       logger.warn({ podId, branches }, 'Cannot cleanup test-run branches — pod has no worktree');
       podRepo.update(podId, { testRunBranches: null });
       return;
     }
-    await Promise.allSettled(
+    const results = await Promise.allSettled(
       branches.map(async (branch) => {
         try {
+          options?.assertCurrent();
           await execFileAsync(
             'git',
             ['-C', current.worktreePath as string, 'push', cfg.testRepo, '--delete', branch],
@@ -3549,22 +3703,29 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           );
         } catch (err) {
           logger.warn({ err, podId, branch }, 'Failed to delete test-run branch');
+          if (options?.strict) throw err;
         }
       }),
     );
-    podRepo.update(podId, { testRunBranches: null });
+    options?.assertCurrent();
+    if (options?.strict && results.some((result) => result.status === 'rejected'))
+      throw new Error('Test branch cleanup incomplete');
+    if (!options?.retainMetadata) podRepo.update(podId, { testRunBranches: null });
   }
 
   /** Active auto-stop timers for preview containers, keyed by podId. */
   const previewTimers = new Map<string, ReturnType<typeof setTimeout>>();
 
   /** Active commit polling intervals, keyed by podId. */
-  const commitPollers = new Map<string, ReturnType<typeof setInterval>>();
+  const commitPolling = createPollingCoordinator((err, podId) =>
+    logger.debug({ err, podId }, 'Commit polling failed, skipping cycle'),
+  );
 
   const COMMIT_POLL_INTERVAL_MS = 60_000;
 
-  /** Active merge polling intervals, keyed by podId. */
-  const mergePollers = new Map<string, ReturnType<typeof setInterval>>();
+  const mergePolling = createPollingCoordinator((err, podId) =>
+    logger.debug({ err, podId }, 'Merge polling operation failed'),
+  );
 
   const DEFAULT_MERGE_POLL_INTERVAL_MS = 60_000;
 
@@ -3576,8 +3737,15 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
   // One immutable checkpoint per pod makes duplicate requests observationally identical.
   const sandboxCheckpointRuns = new Map<string, Promise<WorkspaceCheckpointResult>>();
   const infrastructureResumeRuns = new Map<string, Promise<void>>();
+  const artifactResumeRuns = new Map<string, Promise<void>>();
+  const artifactCompletionRuns = new Map<string, Promise<void>>();
+  const coordinateInteractiveCompletion =
+    createInteractiveCompletionCoordinator<Awaited<ReturnType<PodManager['completeSession']>>>();
   const pauseIntents = new Map<string, symbol>();
-  const activeAgentRuns = new Map<string, { token: symbol; settled: Promise<void> }>();
+  const activeAgentRuns = new Map<
+    string,
+    { token: symbol; settled: Promise<void>; providerOrdinal?: number; isCurrent?: () => boolean }
+  >();
   const activeAgentRunResolvers = new Map<string, { token: symbol; resolve: () => void }>();
   const PAUSE_QUIESCENCE_TIMEOUT_MS = 10_000;
 
@@ -3623,15 +3791,17 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
     pod: Pod,
     label: string,
     mode: 'kill' | 'stop' = 'kill',
+    assertReleaseAllowed?: () => void,
   ): Promise<void> {
+    assertGuidanceCollected(pod.id);
     const advisoryRun = advisoryRuns.get(pod.id);
     if (!advisoryRun) {
-      return cleanupContainer(pod, label, mode);
+      return cleanupContainer(pod, label, mode, assertReleaseAllowed);
     }
 
     emitActivityStatus(pod.id, 'Keeping container running until advisory browser QA finishes…');
     void advisoryRun
-      .finally(() => cleanupContainer(pod, label, mode))
+      .finally(() => cleanupContainer(pod, label, mode, assertReleaseAllowed))
       .catch((err) =>
         logger.warn(
           { err, podId: pod.id, label, mode },
@@ -4126,6 +4296,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
    * Never calls `prManager.mergePr` — that would race the parent's poller.
    */
   async function completeFixPodAfterPush(fixPod: Pod): Promise<void> {
+    assertGuidanceCollected(fixPod.id);
     const podId = fixPod.id;
     const profile = profileStore.get(fixPod.profileName);
     const baseBranch = fixPod.baseBranch ?? profile.defaultBranch ?? 'main';
@@ -4287,40 +4458,166 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
 
   /** Start polling PR merge status for a pod in merge_pending state. */
   function startMergePolling(podId: string): void {
-    stopMergePolling(podId);
+    const generation = podRepo.getOrThrow(podId).lifecycleGeneration;
 
-    const poll = async () => {
+    const poll = async (ownership: PollOwnership) => {
       try {
         const pod = podRepo.getOrThrow(podId);
-        if (pod.status !== 'merge_pending') {
-          stopMergePolling(podId);
+        if (pod.status !== 'merge_pending' || pod.lifecycleGeneration !== generation) {
+          ownership.stop();
           return;
         }
 
         if (!pod.prUrl) {
-          stopMergePolling(podId);
+          ownership.stop();
           return;
         }
 
+        const assertCurrent = (
+          options: { allowRemovedContainer?: boolean; status?: PodStatus } = {},
+        ) => {
+          if (!ownership.isCurrent())
+            throw new AutopodError('Merge polling ownership was replaced.', 'STALE_APPROVAL', 409);
+          assertApprovalCurrent(
+            { ...pod, status: options.status ?? pod.status },
+            { allowRemovedContainer: options.allowRemovedContainer },
+          );
+          if (podRepo.getOrThrow(podId).prUrl !== pod.prUrl)
+            throw new AutopodError(
+              'Merge polling was superseded by another PR.',
+              'STALE_APPROVAL',
+              409,
+            );
+        };
+        const pollOperation = async <T>(operation: () => Promise<T>): Promise<T> => {
+          assertCurrent();
+          try {
+            return await operation();
+          } finally {
+            assertCurrent();
+          }
+        };
+        assertCurrent();
         const profile = profileStore.get(pod.profileName);
         const prManager = prManagerFactory ? prManagerFactory(profile) : null;
         if (!prManager) {
-          stopMergePolling(podId);
+          ownership.stop();
           return;
         }
 
-        const status = await prManager.getPrStatus({
-          prUrl: pod.prUrl,
-        });
+        const journal = podRepo.mergeJournal;
+        const entry = journal?.find(pod);
+        if (!journal || !entry) {
+          assertCurrent();
+          const reason =
+            'Delivery history is unavailable. Original resources retained. Use Resume to revalidate the retained source before approving delivery.';
+          transition(pod, 'failed', { failureReason: reason, mergeBlockReason: reason });
+          assertCurrent({ status: 'failed' });
+          emitActivityStatus(podId, reason);
+          ownership.stop();
+          return;
+        }
+
+        const status = await pollOperation(async () =>
+          prManager.getPrStatus({
+            prUrl: pod.prUrl,
+          }),
+        );
+
+        // Reconcile the planned or admitted source before any subsequent mutation.
+        try {
+          if (status.merged) {
+            await pollOperation(() => reconcileMerge(journal, pod, entry, prManager, status));
+            await pollOperation(() =>
+              inspectRetainedMergeSource(
+                journal,
+                podRepo.sourcePublications,
+                pod,
+                entry,
+                worktreeManager,
+              ),
+            );
+          } else {
+            if (status.open === false) {
+              journal.observeStatus(entry.id, status);
+              assertCurrent();
+              const reason = closedPrRecoveryReason(entry);
+              transition(pod, 'failed', { failureReason: reason, mergeBlockReason: reason });
+              assertCurrent({ status: 'failed' });
+              emitActivityStatus(podId, reason);
+              ownership.stop();
+              return;
+            }
+            if (entry.prDisposition === 'closed') journal.observeStatus(entry.id, status);
+            if (
+              (entry.state !== 'pending' && entry.state !== 'planned') ||
+              entry.result?.autoMergeScheduled ||
+              !status.open
+            )
+              mergeReconciliation(
+                'The earlier merge requires source-bound provider reconciliation; original resources retained.',
+              );
+            const source = await pollOperation(() =>
+              inspectRetainedMergeSource(
+                journal,
+                podRepo.sourcePublications,
+                pod,
+                entry,
+                worktreeManager,
+              ),
+            );
+            if (!status.ciFailures.length && !status.reviewComments.length) {
+              const reviewOk = !status.reviewDecision || status.reviewDecision === 'APPROVED';
+              if (reviewOk)
+                await mergeQueue.enqueueMerge(
+                  entry.request.config.expectedTarget.repository,
+                  entry.request.config.expectedTarget.baseBranch,
+                  async () => {
+                    assertCurrent();
+                    const result = await pollOperation(() =>
+                      mergePublishedSource(
+                        journal,
+                        pod,
+                        { ...pod, prUrl: entry.request.publicationPrUrl },
+                        source,
+                        prManager,
+                        {
+                          ...entry.request.config,
+                          worktreePath: pod.worktreePath,
+                          onPrepared: () => assertCurrent(),
+                        },
+                      ),
+                    );
+                    return result.merged;
+                  },
+                );
+              // A later poll confirms cleanup. Never rebase or push over an
+              // admitted request; a changed source needs its own validation.
+              return;
+            }
+          }
+        } catch (error) {
+          assertCurrent();
+          const reason = `Merge reconciliation required. ${error instanceof Error ? error.message : String(error)}`;
+          if (pod.mergeBlockReason !== reason) {
+            podRepo.update(podId, { mergeBlockReason: reason });
+            emitActivityStatus(podId, reason);
+          }
+          return;
+        }
 
         if (status.merged) {
           emitActivityStatus(podId, 'PR merged successfully');
-          await cleanupContainer(pod, 'pr-merged-complete');
+          await cleanupContainer(pod, 'pr-merged-complete', 'kill', () =>
+            assertCurrent({ allowRemovedContainer: true }),
+          );
+          assertCurrent({ allowRemovedContainer: true });
           const mergedPod = transition(pod, 'complete', {
             completedAt: new Date().toISOString(),
             mergeBlockReason: null,
           });
 
+          assertCurrent({ allowRemovedContainer: true, status: 'complete' });
           eventBus.emit({
             type: 'pod.completed',
             timestamp: new Date().toISOString(),
@@ -4340,22 +4637,9 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           });
 
           logger.info({ podId, prUrl: pod.prUrl }, 'Merge polling: PR merged — pod complete');
-          stopMergePolling(podId);
+          assertCurrent({ allowRemovedContainer: true, status: 'complete' });
+          ownership.stop();
           maybeTriggerDependents(mergedPod);
-          return;
-        }
-
-        if (!status.open) {
-          emitActivityStatus(
-            podId,
-            `PR closed without merging: ${status.blockReason ?? 'unknown reason'}`,
-          );
-          transition(pod, 'failed', { mergeBlockReason: status.blockReason });
-          logger.warn(
-            { podId, prUrl: pod.prUrl, reason: status.blockReason },
-            'Merge polling: PR closed — pod failed',
-          );
-          stopMergePolling(podId);
           return;
         }
 
@@ -4376,101 +4660,14 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         // 391 rows across ~46h. Skip the enqueue when the latest queued summary
         // is byte-identical to the one we'd add. A new failure signature still
         // gets through.
+        assertCurrent();
         if (status.ciFailures.length > 0 || status.reviewComments.length > 0) {
           const summary = buildActionableFailureSummary(status, profile);
           const latest = fixFeedbackRepo.peekLatest(podId);
           if (latest?.message !== summary) {
             fixFeedbackRepo.enqueue(podId, summary);
           }
-          await maybeSpawnFixSession(podId, status);
-        } else {
-          // PR is clean — actively re-attempt the merge so the poller is not
-          // purely observational. The `status.merged` branch above handles the
-          // transition to `complete` on a subsequent tick once the merge lands.
-          const reviewOk = !status.reviewDecision || status.reviewDecision === 'APPROVED';
-          if (reviewOk && pod.prUrl) {
-            const baseBranch = pod.baseBranch ?? profile.defaultBranch ?? 'main';
-            const prUrl = pod.prUrl;
-            try {
-              await mergeQueue.enqueueMerge(profile.repoUrl ?? null, baseBranch, async () => {
-                const result = await prManager.mergePr({ prUrl });
-                if (result.merged) emitActivityStatus(podId, 'PR merged by poller');
-              });
-            } catch (err) {
-              logger.debug({ err, podId }, 'Merge poller active merge attempt failed');
-            }
-          }
-        }
-
-        // Self-heal stale branch: if a sibling pod merged while we were waiting
-        // for review/CI, our branch is now behind origin/<base> and the platform
-        // auto-merge will park indefinitely. Rebase + force-push so the existing
-        // auto-merge can pick up the rebased branch on its next attempt.
-        // `rebaseOntoBase` short-circuits to alreadyUpToDate=true when the base
-        // hasn't advanced, so this is a single fetch in the steady state.
-        // Serialized with approveSession via the merge queue so two pods on the
-        // same base never race.
-        if (pod.worktreePath && pod.branch) {
-          try {
-            await access(pod.worktreePath);
-          } catch (err) {
-            const code = (err as NodeJS.ErrnoException).code;
-            if (code === 'ENOENT' || code === 'ENOTDIR') {
-              logger.info(
-                { podId, worktreePath: pod.worktreePath },
-                'Merge poller: parent worktree no longer exists — skipping branch self-heal',
-              );
-              return;
-            }
-            logger.warn({ err, podId }, 'Merge poller worktree check failed');
-            emitActivityStatus(
-              podId,
-              `Self-heal worktree check failed: ${err instanceof Error ? err.message : String(err)}`,
-            );
-            return;
-          }
-
-          try {
-            const baseBranch = pod.baseBranch ?? profile.defaultBranch ?? 'main';
-            const queueKey = MergeQueue.keyFor(profile.repoUrl ?? null, baseBranch);
-            const worktreePath = pod.worktreePath;
-            const branch = pod.branch;
-            await mergeQueue.run(queueKey, async () => {
-              const result = await worktreeManager.rebaseOntoBase({
-                worktreePath,
-                baseBranch,
-                pat: await resolveGitCredential(profile),
-              });
-              if (!result.rebased) {
-                const blockReason = formatRebaseConflictReason(baseBranch, result.conflicts);
-                if (blockReason !== pod.mergeBlockReason) {
-                  podRepo.update(podId, { mergeBlockReason: blockReason });
-                  emitActivityStatus(podId, `Merge pending: ${blockReason}`);
-                  logger.info(
-                    { podId, baseBranch, conflicts: result.conflicts },
-                    'Merge poller: rebase produced conflicts — manual resolution required',
-                  );
-                }
-                return;
-              }
-              if (!result.alreadyUpToDate) {
-                await worktreeManager.pushBranch(worktreePath, branch, {
-                  force: true,
-                  pat: await resolveGitCredential(profile),
-                });
-                logger.info(
-                  { podId, baseBranch },
-                  'Merge poller: rebased stale branch and force-pushed onto latest base',
-                );
-              }
-            });
-          } catch (err) {
-            logger.warn({ err, podId }, 'Merge poller self-heal rebase/push failed');
-            emitActivityStatus(
-              podId,
-              `Self-heal rebase failed: ${err instanceof Error ? err.message : String(err)}`,
-            );
-          }
+          await pollOperation(async () => maybeSpawnFixSession(podId, status));
         }
       } catch (err) {
         logger.debug({ err, podId }, 'Merge polling failed, skipping cycle');
@@ -4490,20 +4687,12 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
       // Pod or profile gone — let poll() decide what to do on its first tick.
     }
 
-    // Run first poll immediately
-    poll();
-    const interval = setInterval(poll, pollIntervalMs);
-    interval.unref();
-    mergePollers.set(podId, interval);
+    mergePolling.start(podId, pollIntervalMs, poll);
   }
 
   /** Stop merge polling for a pod. */
   function stopMergePolling(podId: string): void {
-    const interval = mergePollers.get(podId);
-    if (interval) {
-      clearInterval(interval);
-      mergePollers.delete(podId);
-    }
+    mergePolling.stop(podId);
   }
 
   /** Resume merge polling for any pods left in merge_pending state (e.g. after daemon restart). */
@@ -4518,80 +4707,95 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
   // Resume merge polling on startup
   resumeMergePolling();
 
-  /** Start polling git commit count inside a running container. */
+  /** Start polling git commit count inside one owned lifecycle and container. */
   function startCommitPolling(podId: string): void {
-    stopCommitPolling(podId);
-
-    /** Capture the starting HEAD SHA so we only count commits the agent makes. */
-    const captureStartSha = async () => {
-      try {
-        const pod = podRepo.getOrThrow(podId);
-        if (pod.startCommitSha || !pod.containerId) return;
-        const cm = containerManagerFactory.get(pod.executionTarget);
-        const shaResult = await cm.execInContainer(pod.containerId, ['git', 'rev-parse', 'HEAD'], {
-          cwd: '/workspace',
-          timeout: 5_000,
-        });
-        if (shaResult.exitCode === 0 && shaResult.stdout.trim()) {
-          podRepo.update(podId, { startCommitSha: shaResult.stdout.trim() });
+    const expected = podRepo.getOrThrow(podId);
+    let captureAttempted = false;
+    commitPolling.start(podId, COMMIT_POLL_INTERVAL_MS, async (ownership) => {
+      const current = (): Pod | null => {
+        try {
+          const pod = podRepo.getOrThrow(podId);
+          if (
+            ownership.isCurrent() &&
+            pod.status === 'running' &&
+            pod.containerId &&
+            pod.lifecycleGeneration === expected.lifecycleGeneration &&
+            pod.containerId === expected.containerId &&
+            pod.executionTarget === expected.executionTarget &&
+            pod.worktreePath === expected.worktreePath &&
+            pod.branch === expected.branch &&
+            pod.baseBranch === expected.baseBranch
+          )
+            return pod;
+        } catch {
+          /* Deleted or replaced pods have no polling authority. */
         }
-      } catch {
-        logger.debug({ podId }, 'Failed to capture start commit SHA');
-      }
-    };
-
-    const poll = async () => {
-      try {
-        const pod = podRepo.getOrThrow(podId);
-        if (!pod.containerId || pod.status !== 'running') {
-          stopCommitPolling(podId);
-          return;
-        }
-        // Use startCommitSha if available; fall back to baseBranch for old pods
-        const exclusionRef = pod.startCommitSha ?? pod.baseBranch ?? 'main';
-        const cm = containerManagerFactory.get(pod.executionTarget);
-        const [countResult, timeResult] = await Promise.all([
-          cm.execInContainer(
-            pod.containerId,
-            ['git', 'rev-list', '--count', 'HEAD', `^${exclusionRef}`],
-            { cwd: '/workspace', timeout: 5_000 },
-          ),
-          cm.execInContainer(pod.containerId, ['git', 'log', '-1', '--format=%cI'], {
-            cwd: '/workspace',
-            timeout: 5_000,
-          }),
-        ]);
-        const commitCount = Number.parseInt(countResult.stdout.trim(), 10) || 0;
-        const lastCommitAt = timeResult.exitCode === 0 ? timeResult.stdout.trim() : null;
-        podRepo.update(podId, { commitCount, lastCommitAt });
-        if (pod.executionTarget === 'sandbox') {
-          const decision = await deps.workspaceCheckpointController?.poll(podId);
-          if (decision?.degraded) {
-            emitActivityStatus(
-              podId,
-              'Durability degraded — retaining sandbox until checkpoint succeeds.',
+        ownership.stop();
+        return null;
+      };
+      let pod = current();
+      if (!pod?.containerId) return;
+      const cm = containerManagerFactory.get(pod.executionTarget);
+      if (!captureAttempted) {
+        captureAttempted = true;
+        if (!pod.startCommitSha) {
+          try {
+            const shaResult = await cm.execInContainer(
+              pod.containerId,
+              ['git', 'rev-parse', 'HEAD'],
+              {
+                cwd: '/workspace',
+                timeout: 5_000,
+              },
             );
+            pod = current();
+            if (!pod) return;
+            if (!pod.startCommitSha && shaResult.exitCode === 0 && shaResult.stdout.trim())
+              podRepo.update(podId, { startCommitSha: shaResult.stdout.trim() });
+          } catch {
+            if (!current()) return;
+            logger.debug({ podId }, 'Failed to capture start commit SHA');
           }
         }
-      } catch {
-        // Silently skip — container may be busy or gone
-        logger.debug({ podId }, 'Commit polling failed, skipping cycle');
       }
-    };
-    // Capture starting SHA first, then run first poll immediately
-    captureStartSha().then(() => poll());
-    const interval = setInterval(poll, COMMIT_POLL_INTERVAL_MS);
-    interval.unref();
-    commitPollers.set(podId, interval);
+      pod = current();
+      if (!pod?.containerId) return;
+      // Use the captured starting SHA; retain the existing legacy base fallback.
+      const exclusionRef = pod.startCommitSha ?? pod.baseBranch ?? 'main';
+      const [countResult, timeResult] = await Promise.all([
+        cm.execInContainer(
+          pod.containerId,
+          ['git', 'rev-list', '--count', 'HEAD', `^${exclusionRef}`],
+          {
+            cwd: '/workspace',
+            timeout: 5_000,
+          },
+        ),
+        cm.execInContainer(pod.containerId, ['git', 'log', '-1', '--format=%cI'], {
+          cwd: '/workspace',
+          timeout: 5_000,
+        }),
+      ]);
+      const observed = current();
+      if (!observed || observed.startCommitSha !== pod.startCommitSha) return;
+      const commitCount = Number.parseInt(countResult.stdout.trim(), 10) || 0;
+      const lastCommitAt = timeResult.exitCode === 0 ? timeResult.stdout.trim() : null;
+      podRepo.update(podId, { commitCount, lastCommitAt });
+      if (pod.executionTarget === 'sandbox') {
+        const decision = await deps.workspaceCheckpointController?.poll(podId);
+        if (!current()) return;
+        if (decision?.degraded)
+          emitActivityStatus(
+            podId,
+            'Durability degraded — retaining sandbox until checkpoint succeeds.',
+          );
+      }
+    });
   }
 
-  /** Stop commit polling for a pod. */
+  /** Stop only the currently registered poller; pending callbacks lose authority. */
   function stopCommitPolling(podId: string): void {
-    const interval = commitPollers.get(podId);
-    if (interval) {
-      clearInterval(interval);
-      commitPollers.delete(podId);
-    }
+    commitPolling.stop(podId);
   }
 
   /** Cancel and remove an auto-stop timer for a pod if one exists. */
@@ -6393,39 +6597,70 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
     };
   }
 
+  function advisoryPublicationOwnership(
+    expectedPod: Pod,
+    blockingResult: ValidationResult,
+    validationId: string | undefined,
+    ownsInvocation: () => boolean = () => true,
+  ) {
+    return captureValidationOwnership(expectedPod, {
+      statuses: ['validated'],
+      readCurrent: () => podRepo.getOrThrow(expectedPod.id),
+      hasPendingDecision: () =>
+        nudgeRepo.hasPending(expectedPod.id) ||
+        (podRepo.hasUnansweredDecision?.(expectedPod.id) ??
+          Boolean(podRepo.getOrThrow(expectedPod.id).pendingEscalation)),
+      isCurrentInvocation: () => {
+        if (!ownsInvocation()) return false;
+        try {
+          return (
+            podRepo.getOrThrow(expectedPod.id).lastValidationResult?.attempt ===
+              blockingResult.attempt &&
+            (!validationId ||
+              !validationRepo ||
+              validationRepo.isLatestForPod(expectedPod.id, validationId))
+          );
+        } catch {
+          return false;
+        }
+      },
+    });
+  }
+
   async function runAdvisoryAfterValidation(
     podId: string,
     validationConfig: Parameters<ValidationEngine['validate']>[0],
     blockingResult: ValidationResult,
     validationId: string | undefined,
+    expectedPod: Pod,
   ): Promise<ValidationResult> {
     if (!validationEngine.runAdvisoryBrowserQa) {
       return blockingResult;
     }
+
+    let registered = false;
+    const ownership = advisoryPublicationOwnership(
+      expectedPod,
+      blockingResult,
+      validationId,
+      () => !registered || advisoryRuns.get(podId) === run,
+    );
+    ownership.assertCurrent();
 
     const mergeAdvisoryResult = (
       advisoryResult: ValidationResult['advisoryBrowserQa'],
     ): ValidationResult => {
       if (!advisoryResult) return blockingResult;
 
-      const current = podRepo.getOrThrow(podId);
-      if (current.status === 'killed' || current.status === 'killing') {
-        return blockingResult;
-      }
-
       const storedResult = {
         ...blockingResult,
         advisoryBrowserQa: advisoryResult,
       };
-      if (validationId) validationRepo?.updateResult(validationId, storedResult);
+      if (validationId) validationRepo?.updateAdvisoryResult(podId, validationId, advisoryResult);
+      if (!ownership.isCurrent()) return storedResult;
+      const current = podRepo.getOrThrow(podId);
 
       const currentResult = current.lastValidationResult ?? blockingResult;
-      if (validationId && validationRepo?.getLatest(podId)?.id !== validationId) {
-        return storedResult;
-      }
-      if (currentResult.attempt !== blockingResult.attempt) {
-        return storedResult;
-      }
 
       const mergedResult = {
         ...currentResult,
@@ -6442,23 +6677,23 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         emitActivityStatus(podId, 'Waiting for advisory browser QA slot…');
         await acquireAdvisoryQaSlot();
         try {
-          const beforeAdvisory = podRepo.getOrThrow(podId);
-          if (beforeAdvisory.status === 'killed' || beforeAdvisory.status === 'killing') {
-            return blockingResult;
-          }
+          ownership.assertCurrent();
           const callbacks = buildPhaseEventCallbacks(podId);
           advisoryResult = await validationEngine.runAdvisoryBrowserQa(
             validationConfig,
             blockingResult,
-            (phase) => emitActivityStatus(podId, phase),
+            (phase) => {
+              if (ownership.isCurrent()) emitActivityStatus(podId, phase);
+            },
             undefined,
             {
-              ...callbacks,
+              ...ownedValidationCallbacks(ownership, callbacks),
               onPhaseCompleted: (phase, phaseStatus, phaseResult) => {
                 if (phase === 'advisory') {
                   mergeAdvisoryResult(phaseResult as ValidationResult['advisoryBrowserQa']);
                 }
-                callbacks.onPhaseCompleted?.(phase, phaseStatus, phaseResult);
+                if (ownership.isCurrent())
+                  callbacks.onPhaseCompleted?.(phase, phaseStatus, phaseResult);
               },
             },
           );
@@ -6466,17 +6701,20 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           releaseAdvisoryQaSlot();
         }
       } catch (err) {
+        ownership.assertCurrent();
         logger.warn({ err, podId }, 'Advisory browser QA failed after validation');
         emitActivityStatus(podId, 'Advisory browser QA failed — continuing');
         return blockingResult;
       }
 
-      if (!advisoryResult) return blockingResult;
-
-      const current = podRepo.getOrThrow(podId);
-      if (current.status === 'killed' || current.status === 'killing') {
+      if (!advisoryResult) {
+        ownership.assertCurrent();
         return blockingResult;
       }
+
+      // This is cumulative observed usage for the original immutable pod/task,
+      // not authority to publish into the current lifecycle or release it.
+      const current = podRepo.getOrThrow(podId);
 
       if (advisoryResult.tokenUsage) {
         const existingUsage = current.phaseTokenUsage ?? {};
@@ -6500,16 +6738,9 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
 
       // Always persist the advisory result into validation history regardless of
       // whether a newer validation attempt has superseded the live lastValidationResult.
-      const storedResult = { ...blockingResult, advisoryBrowserQa: advisoryResult };
-      if (validationId) validationRepo?.updateResult(validationId, storedResult);
-
+      if (validationId) validationRepo?.updateAdvisoryResult(podId, validationId, advisoryResult);
+      ownership.assertCurrent();
       const currentResult = current.lastValidationResult ?? blockingResult;
-      if (validationId && validationRepo?.getLatest(podId)?.id !== validationId) {
-        return storedResult;
-      }
-      if (currentResult.attempt !== blockingResult.attempt) {
-        return storedResult;
-      }
 
       const mergedResult = {
         ...currentResult,
@@ -6521,8 +6752,12 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
     })();
 
     advisoryRuns.set(podId, run);
+    registered = true;
     try {
       return await run;
+    } catch (err) {
+      ownership.assertCurrent();
+      throw err;
     } finally {
       if (advisoryRuns.get(podId) === run) {
         advisoryRuns.delete(podId);
@@ -6560,12 +6795,12 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
       },
       response: null,
     };
-    escalationRepo.insert(escalation);
-    podRepo.update(podId, {
-      pendingEscalation: escalation,
-      escalationCount: pod.escalationCount + 1,
+    persistEscalation(podRepo, escalationRepo, escalation, () => {
+      transition(pod, 'awaiting_input', {
+        pendingEscalation: escalation,
+        escalationCount: pod.escalationCount + 1,
+      });
     });
-    transition(pod, 'awaiting_input');
     emitActivityStatus(
       podId,
       `Push blocked — ${err.service} credentials missing or unauthorized. Repair daemon authentication and resume.`,
@@ -6596,6 +6831,209 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
       `Worktree out of sync with container — ${err.deletionCount} phantom deletions blocked. Do not retry PR; work may still live in the container.`,
     );
     return true;
+  }
+
+  function ownsArtifactCompletion(
+    pod: Pod,
+    allowRemovedContainer = false,
+    allowQueuedGuidance = false,
+  ): boolean {
+    const current = podRepo.getOrThrow(pod.id);
+    return (
+      current.lifecycleGeneration === pod.lifecycleGeneration &&
+      (current.containerId === pod.containerId ||
+        (allowRemovedContainer && current.containerId === null)) &&
+      current.status === 'running' &&
+      current.pendingEscalation === null &&
+      (allowQueuedGuidance || !nudgeRepo.hasPending(pod.id))
+    );
+  }
+
+  function failInteractivePreservation(pod: Pod, reason: string): never {
+    const failureReason = `Workspace preservation failed. ${reason} Original resources retained; repair synchronization and retry completion.`;
+    if (ownsArtifactCompletion(pod)) {
+      podRepo.update(pod.id, { failureReason });
+      emitActivityError(pod.id, failureReason, false);
+    }
+    throw new AutopodError(failureReason, 'WORKSPACE_PRESERVATION_FAILED', 502);
+  }
+
+  function assertApprovalCurrent(
+    pod: Pod,
+    options: { allowRemovedContainer?: boolean; allowComplete?: boolean } = {},
+  ): void {
+    assertExecutionTerminationVerified(pod.id);
+    const current = podRepo.getOrThrow(pod.id);
+    if (
+      current.lifecycleGeneration !== pod.lifecycleGeneration ||
+      (current.status !== pod.status &&
+        !(options.allowComplete && current.status === 'complete')) ||
+      current.options.agentMode !== pod.options.agentMode ||
+      current.options.output !== pod.options.output ||
+      current.branch !== pod.branch ||
+      current.baseBranch !== pod.baseBranch ||
+      current.executionTarget !== pod.executionTarget ||
+      current.worktreePath !== pod.worktreePath ||
+      (current.containerId !== pod.containerId &&
+        !(options.allowRemovedContainer && current.containerId === null))
+    )
+      throw new AutopodError(
+        'Approval was superseded; the current lifecycle and resources are retained.',
+        'STALE_APPROVAL',
+        409,
+      );
+    assertGuidanceCollected(pod.id);
+    if (podRepo.hasUnansweredDecision?.(pod.id))
+      throw new AutopodError(
+        'An unanswered human decision blocks approval.',
+        'PENDING_HUMAN_DECISION',
+        409,
+      );
+  }
+
+  function failBranchPreservation(pod: Pod): never {
+    assertApprovalCurrent(pod);
+    const reason =
+      'Branch preservation failed. Original resources retained; repair the branch or remote access and retry approval.';
+    podRepo.update(pod.id, { failureReason: reason });
+    emitActivityError(pod.id, reason, false);
+    throw new AutopodError(reason, 'BRANCH_PRESERVATION_FAILED', 502);
+  }
+
+  function assertInteractiveCompletionCurrent(pod: Pod, allowRemovedContainer = false): void {
+    assertGuidanceCollected(pod.id);
+    const current = podRepo.getOrThrow(pod.id);
+    if (
+      current.lifecycleGeneration !== pod.lifecycleGeneration ||
+      current.status !== 'running' ||
+      current.options.agentMode !== 'interactive' ||
+      current.options.output !== pod.options.output ||
+      current.branch !== pod.branch ||
+      current.baseBranch !== pod.baseBranch ||
+      current.executionTarget !== pod.executionTarget ||
+      current.worktreePath !== pod.worktreePath ||
+      (current.containerId !== pod.containerId &&
+        !(allowRemovedContainer && current.containerId === null))
+    )
+      throw new AutopodError(
+        'Workspace completion was superseded; the current lifecycle and resources are retained.',
+        'STALE_WORKSPACE_COMPLETION',
+        409,
+      );
+    if (
+      podRepo.hasUnansweredDecision?.(pod.id) ??
+      Boolean(current.pendingEscalation || current.finalization?.pendingDecisionId)
+    )
+      throw new AutopodError(
+        'An unanswered human decision must be resolved before completing this workspace.',
+        'HUMAN_DECISION_PENDING',
+        409,
+      );
+  }
+
+  async function preserveArtifacts(pod: Pod): Promise<string> {
+    const dataDir = process.env.DATA_DIR ?? path.join(process.cwd(), '.autopod-data');
+    const artifactRoot = path.join(dataDir, 'artifacts', pod.id);
+    if (
+      pod.finalization?.phase === 'preserving' &&
+      pod.finalization.sourcePreservedAt &&
+      pod.artifactsPath
+    ) {
+      await verifyArtifactSnapshot(
+        pod.artifactsPath,
+        artifactRoot,
+        pod.lifecycleGeneration,
+        pod.finalization.cycle,
+      );
+      if (!ownsArtifactCompletion(pod))
+        throw new AutopodError(
+          'Artifact finalization was superseded.',
+          'STALE_ARTIFACT_COLLECTION',
+          409,
+        );
+      return pod.artifactsPath;
+    }
+    podRepo.completionJournal?.mark(pod, 'preserving');
+    emitActivityStatus(pod.id, 'Collecting artifacts…');
+    try {
+      const artifactsPath = await collectArtifactSnapshot({
+        containerManager: containerManagerFactory.get(pod.executionTarget),
+        containerId: pod.containerId,
+        artifactRoot,
+        generation: pod.lifecycleGeneration,
+        cycle: pod.finalization?.cycle ?? 0,
+        isCurrent: () => ownsArtifactCompletion(pod),
+      });
+      if (!ownsArtifactCompletion(pod))
+        throw new AutopodError(
+          'Artifact collection belongs to an older lifecycle; current resources retained.',
+          'STALE_ARTIFACT_COLLECTION',
+          409,
+        );
+      podRepo.update(pod.id, { artifactsPath });
+      podRepo.completionJournal?.mark(pod, 'preserving', true);
+      return artifactsPath;
+    } catch (err) {
+      if (ownsArtifactCompletion(pod)) {
+        const failureReason =
+          'Artifact preservation failed. Original container retained; retry collection before completing.';
+        podRepo.update(pod.id, { failureReason });
+        emitActivityError(pod.id, failureReason, false);
+      }
+      throw err;
+    }
+  }
+
+  async function finalizeArtifactPod(pod: Pod): Promise<void> {
+    const podId = pod.id;
+    if (!ownsArtifactCompletion(pod)) return;
+    await syncSandboxSeriesHandover(podId);
+    const profile = profileStore.get(pod.profileName);
+    const dataDir = process.env.DATA_DIR ?? path.join(process.cwd(), '.autopod-data');
+    let artifactsPath: string;
+    try {
+      artifactsPath = await preserveArtifacts(pod);
+    } catch {
+      if (ownsArtifactCompletion(pod)) {
+        transition(podRepo.getOrThrow(podId), 'failed');
+      }
+      return;
+    }
+
+    // If profile has a destination repo: lazy-clone, copy artifacts, push branch (best-effort)
+    if (profile.repoUrl) {
+      const repoBranch = pod.branch ?? `research/${podId}`;
+      try {
+        emitActivityStatus(podId, 'Pushing artifact branch…');
+        const tempWorktreeParent = path.join(dataDir, 'artifact-worktrees');
+        await mkdir(tempWorktreeParent, { recursive: true });
+        const pat = await resolveGitCredential(profile);
+        const worktreeResult = await worktreeManager.create({
+          repoUrl: profile.repoUrl,
+          branch: repoBranch,
+          baseBranch: pod.baseBranch ?? profile.defaultBranch ?? 'main',
+          pat,
+        });
+        // Copy artifacts into the worktree (cp -a copies contents, trailing /. required)
+        await execFileAsync('cp', ['-a', `${artifactsPath}/.`, `${worktreeResult.worktreePath}/`]);
+        await worktreeManager.commitPendingChanges(
+          worktreeResult.worktreePath,
+          `research: ${pod.task.slice(0, 72)}`,
+          { maxDeletions: 1000 },
+        );
+        if (!ownsArtifactCompletion(pod)) return;
+        await worktreeManager.pushBranch(worktreeResult.worktreePath, repoBranch);
+        logger.info({ podId, branch: repoBranch }, 'Artifact branch pushed');
+      } catch (err) {
+        logger.warn({ err, podId }, 'Failed to push artifact branch — artifacts available via API');
+      }
+    }
+
+    // Transition to complete — skip validation entirely
+    if (!ownsArtifactCompletion(pod)) return;
+    await cleanupContainer(pod, 'artifact-complete');
+    if (!ownsArtifactCompletion(pod, true)) return;
+    transition(podRepo.getOrThrow(podId), 'complete');
   }
 
   function parkOnWorktreeSyncFailure(podId: string, reason: string): void {
@@ -6661,6 +7099,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
    * + returns the new PR URL on success.
    */
   async function pushAndCreatePr(pod: Pod, callerLabel: string): Promise<string> {
+    assertGuidanceCollected(pod.id);
     const podId = pod.id;
     if (!pod.worktreePath) {
       throw new AutopodError(
@@ -6782,13 +7221,19 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
       recordNotReportedMemoryUsage(pod.id);
     }
     podRepo.update(pod.id, updates);
-    eventBus.emit({
-      type: 'pod.status_changed',
-      timestamp: new Date().toISOString(),
-      podId: pod.id,
-      previousStatus,
-      newStatus: to,
-    });
+    if (to === 'complete') podRepo.completionJournal?.mark(pod, 'finished');
+    else if (to === 'validating') podRepo.completionJournal?.mark(pod, 'finalizing');
+    const publish = () => {
+      eventBus.emit({
+        type: 'pod.status_changed',
+        timestamp: new Date().toISOString(),
+        podId: pod.id,
+        previousStatus,
+        newStatus: to,
+      });
+    };
+    if (podRepo.afterCommit) podRepo.afterCommit(publish);
+    else publish();
     if (to === 'validated' || to === 'review_required' || to === 'failed') {
       refreshReadiness(pod.id);
     }
@@ -6872,39 +7317,319 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
     };
   }
 
+  async function recordValidationProvenance(
+    config: Parameters<ValidationEngine['validate']>[0],
+    purpose: 'validation' | 'review' = 'validation',
+    assertCurrent?: () => Pod,
+    reviewerLaunch?: ReviewerLaunchIdentity,
+  ): Promise<void> {
+    if (!podRepo.executionProvenance) return;
+    const pod = assertCurrent?.() ?? podRepo.getOrThrow(config.podId);
+    const profile = resolveEffectiveBoundProfile(pod);
+    const skips = new Set(config.skipPhases ?? []);
+    // Prepared independent councils use their fixed runner resolver. Actual CLI
+    // launches supply identity from the dispatch path after prompt preparation.
+    const reviewerRuntime =
+      purpose === 'review'
+        ? (reviewerLaunch?.runtime ??
+          resolveContainerReviewer({
+            modelProvider: config.reviewerProvider ?? 'anthropic',
+            providerCredentials: config.reviewerProviderCredentials ?? null,
+          }))
+        : null;
+    if (
+      purpose === 'review' &&
+      ((!config.councilOnly && !reviewerLaunch) || typeof reviewerRuntime !== 'string')
+    )
+      throw new TaskRetryBlockedError(
+        'Independent council reviewer runtime is unsupported or unverified; reconcile its selected provider before review.',
+      );
+    const executionPod =
+      reviewerRuntime && typeof reviewerRuntime === 'string'
+        ? {
+            ...pod,
+            runtime: reviewerRuntime,
+            model: config.reviewerModel ?? 'auto',
+            providerIdSnapshot: config.reviewerProvider ?? 'anthropic',
+            providerAccountIdSnapshot: config.reviewerProviderAccountId ?? null,
+          }
+        : pod;
+    const provenance = await inspectExecutionPreflight(
+      containerManagerFactory.get(pod.executionTarget),
+      config.containerId,
+      {
+        ...executionPod,
+        skipValidation: false,
+        options: { ...pod.options, validate: true },
+        contract:
+          skips.has('facts') && config.contract
+            ? { ...config.contract, requiredFacts: [] }
+            : config.contract,
+      },
+      {
+        ...profile,
+        buildCommand: skips.has('build') ? '' : config.buildCommand,
+        startCommand: skips.has('health') && skips.has('pages') ? '' : config.startCommand,
+        testCommand: skips.has('test') ? undefined : config.testCommand,
+        lintCommand: skips.has('lint') ? undefined : config.lintCommand,
+        sastCommand: skips.has('sast') ? undefined : config.sastCommand,
+        validationSetupCommand: skips.has('setup') ? undefined : config.validationSetupCommand,
+        buildWorkDir: config.buildWorkDir ?? null,
+        buildEnv: config.extraExecEnv ?? null,
+      },
+      purpose,
+      purpose === 'review' ? 'reviewer' : 'worker',
+    );
+    if (assertCurrent) resolveEffectiveBoundProfile(assertCurrent());
+    provenance.contractHash = createHash('sha256')
+      .update(JSON.stringify(config.contract ?? null))
+      .digest('hex');
+    if (reviewerLaunch)
+      provenance.diagnostics.push({
+        code: 'REVIEWER_LAUNCH_PREFLIGHT',
+        detail:
+          'Selected container reviewer checked at its CLI launch boundary; this preflight does not prove execution completion.',
+      });
+    podRepo.executionProvenance.record(pod.id, pod.lifecycleGeneration, provenance);
+    if (provenance.status === 'blocked')
+      throw new TaskRetryBlockedError(
+        provenance.diagnostics.find((item) => item.code.startsWith('PREFLIGHT_'))?.detail ??
+          'Validation environment requires reconciliation',
+      );
+  }
+
+  function withReviewerLaunchPreflight(
+    config: Parameters<ValidationEngine['validate']>[0],
+    ownership: ReturnType<typeof captureValidationOwnership>,
+  ): Parameters<ValidationEngine['validate']>[0] {
+    function recordApiDispatch(
+      provenance: typeof reviewerApiProvenance,
+      resolveModel: (model: string) => string,
+    ) {
+      return (dispatchModel: string) => {
+        const pod = ownership.assertCurrent();
+        resolveEffectiveBoundProfile(pod);
+        if (dispatchModel !== resolveModel(config.reviewerModel ?? 'auto'))
+          throw new TaskRetryBlockedError(
+            'Reviewer API dispatch identity differs from the frozen validation configuration.',
+          );
+        if (!podRepo.executionProvenance)
+          throw new TaskRetryBlockedError(
+            'Reviewer API provenance is unavailable; reconcile the execution ledger.',
+          );
+        podRepo.executionProvenance.record(
+          pod.id,
+          pod.lifecycleGeneration,
+          provenance(config, dispatchModel),
+        );
+      };
+    }
+    return {
+      ...config,
+      assertReviewerCurrent: () => {
+        resolveEffectiveBoundProfile(ownership.assertCurrent());
+      },
+      recordReviewerApiDispatch: recordApiDispatch(reviewerApiProvenance, resolveAnthropicModelId),
+      recordLegacyReviewerApiDispatch: recordApiDispatch(
+        legacyReviewerApiProvenance,
+        resolveToolReviewModelId,
+      ),
+      recordHostReviewerDispatch: (evidence) => {
+        const pod = ownership.assertCurrent();
+        resolveEffectiveBoundProfile(pod);
+        if (evidence.model !== (config.reviewerModel ?? 'auto'))
+          throw new TaskRetryBlockedError(
+            'Host reviewer model differs from the frozen validation configuration.',
+          );
+        if (!podRepo.executionProvenance)
+          throw new TaskRetryBlockedError(
+            'Host reviewer provenance ledger is unavailable; reconcile before dispatch.',
+          );
+        podRepo.executionProvenance.record(
+          pod.id,
+          pod.lifecycleGeneration,
+          reviewerHostCliProvenance(config, evidence),
+        );
+      },
+      beforeReviewerLaunch: async (identity) => {
+        resolveEffectiveBoundProfile(ownership.assertCurrent());
+        const selectedRuntime = resolveContainerReviewer({
+          modelProvider: config.reviewerProvider ?? 'anthropic',
+          providerCredentials: config.reviewerProviderCredentials ?? null,
+        });
+        if (
+          identity.podId !== config.podId ||
+          identity.containerId !== config.containerId ||
+          identity.model !== (config.reviewerModel ?? 'auto') ||
+          identity.runtime !== selectedRuntime
+        )
+          throw new TaskRetryBlockedError(
+            'Reviewer launch identity differs from the frozen validation configuration.',
+          );
+        await recordValidationProvenance(config, 'review', ownership.assertCurrent, identity);
+        return () => {
+          resolveEffectiveBoundProfile(ownership.assertCurrent());
+        };
+      },
+    };
+  }
+
+  function claimValidation(expectedPod: Pod, validationController: AbortController) {
+    assertExecutionTerminationVerified(expectedPod.id);
+    let claimed = false;
+    const ownership = captureValidationOwnership(expectedPod, {
+      readCurrent: () => podRepo.getOrThrow(expectedPod.id),
+      isCurrentInvocation: () =>
+        !podRepo.taskExecutions?.hasUnverifiedTermination(expectedPod.id) &&
+        (claimed
+          ? validationAbortControllers.get(expectedPod.id) === validationController
+          : !validationAbortControllers.has(expectedPod.id)),
+      hasPendingDecision: () =>
+        nudgeRepo.hasPending(expectedPod.id) ||
+        (podRepo.hasUnansweredDecision?.(expectedPod.id) ??
+          Boolean(podRepo.getOrThrow(expectedPod.id).pendingEscalation)),
+    });
+    ownership.assertCurrent();
+    validationAbortControllers.set(expectedPod.id, validationController);
+    claimed = true;
+    return ownership;
+  }
+
+  function ownedValidationCallbacks(
+    ownership: ReturnType<typeof captureValidationOwnership>,
+    callbacks: Parameters<ValidationEngine['validate']>[3],
+  ): NonNullable<Parameters<ValidationEngine['validate']>[3]> {
+    return {
+      onPhaseStarted: (...args) => {
+        if (ownership.isCurrent()) callbacks?.onPhaseStarted?.(...args);
+      },
+      onPhaseCompleted: (...args) => {
+        if (ownership.isCurrent()) callbacks?.onPhaseCompleted?.(...args);
+      },
+      onReviewProgress: (...args) => {
+        if (ownership.isCurrent()) callbacks?.onReviewProgress?.(...args);
+      },
+    };
+  }
+
   async function validateWithInfrastructureRetries(
     validationConfig: Parameters<ValidationEngine['validate']>[0],
     validationController: AbortController,
     callbacks: Parameters<ValidationEngine['validate']>[3],
     logMessage: string,
+    ownership: ReturnType<typeof captureValidationOwnership>,
   ): Promise<ValidationResult> {
     const { podId, attempt } = validationConfig;
+    ownership.assertCurrent();
+    const cm = containerManagerFactory.get(
+      validationConfig.executionTarget ?? podRepo.getOrThrow(podId).executionTarget,
+    );
+    validationConfig.captureEvidenceIdentity ??= createValidationIdentityCollector(
+      cm,
+      validationConfig,
+    );
 
+    const infrastructureBackoffs = deps.validationInfrastructureRetryBackoffMs ?? [1_000, 5_000];
+    const retryLedger = podRepo.taskRetries;
     const runValidation = async (): Promise<ValidationResult> => {
       try {
-        return await validationEngine.validate(
-          validationConfig,
-          (phase) => emitActivityStatus(podId, phase),
-          validationController.signal,
-          callbacks,
-        );
-      } catch (validateErr) {
-        logger.error({ err: validateErr, podId, attempt }, logMessage);
-        return makeUnexpectedValidationFailureResult(podId, attempt, validateErr);
+        const pod = ownership.assertCurrent();
+        await recordValidationProvenance(validationConfig, 'validation', ownership.assertCurrent);
+        const identity = retryLedger
+          ? await (deps.captureRetryIdentity?.(validationConfig) ??
+              captureValidationRetryIdentity(cm, validationConfig))
+          : null;
+        resolveEffectiveBoundProfile(ownership.assertCurrent());
+        const bindingHash = createHash('sha256')
+          .update(
+            JSON.stringify({
+              runtime: pod.runtime,
+              model: pod.model,
+              provider: pod.providerIdSnapshot,
+              account: pod.providerAccountIdSnapshot,
+              reviewerModel: validationConfig.reviewerModel ?? null,
+              reviewerProvider: validationConfig.reviewerProvider ?? null,
+            }),
+          )
+          .digest('hex');
+        const admission =
+          retryLedger && identity
+            ? retryLedger.admit(podId, pod.lifecycleGeneration, identity, bindingHash, [
+                ...infrastructureBackoffs,
+              ])
+            : null;
+        if (admission && retryLedger) {
+          try {
+            await waitForRetryBackoff(admission.notBefore, sleep, () => {
+              ownership.assertCurrent();
+              if (validationController.signal.aborted)
+                throw new TaskRetryBlockedError('Validation admission cancelled during cooldown');
+            });
+            resolveEffectiveBoundProfile(ownership.assertCurrent());
+            if (validationController.signal.aborted)
+              throw new TaskRetryBlockedError('Validation admission cancelled before execution');
+            retryLedger.start(admission.id);
+          } catch (err) {
+            retryLedger.finish(admission.id, 'cancelled', null);
+            throw err;
+          }
+        }
+        const started = performance.now();
+        let result: ValidationResult;
+        try {
+          result = await validationEngine.validate(
+            withReviewerLaunchPreflight(validationConfig, ownership),
+            (phase) => {
+              if (ownership.isCurrent()) emitActivityStatus(podId, phase);
+            },
+            validationController.signal,
+            ownedValidationCallbacks(ownership, callbacks),
+          );
+        } catch (validateErr) {
+          logger.error({ err: validateErr, podId, attempt }, logMessage);
+          result = makeUnexpectedValidationFailureResult(podId, attempt, validateErr);
+        }
+        if (admission && retryLedger)
+          retryLedger.finish(
+            admission.id,
+            validationController.signal.aborted
+              ? 'cancelled'
+              : result.overall === 'pass'
+                ? 'pass'
+                : result.infrastructureFailure?.retryable ||
+                    isReviewInfrastructureOnlyFailure(result)
+                  ? 'transient'
+                  : 'nonretryable',
+            Math.round(performance.now() - started),
+          );
+        // Settle the exact historical admission before discarding a superseded result.
+        ownership.assertCurrent();
+        return result;
+      } catch (err) {
+        ownership.assertCurrent();
+        throw err;
       }
     };
 
     let result = await runValidation();
-    const infrastructureBackoffs = deps.validationInfrastructureRetryBackoffMs ?? [1_000, 5_000];
     for (const [index, waitMs] of infrastructureBackoffs.entries()) {
       if (!result.infrastructureFailure?.retryable || validationController.signal.aborted) break;
       emitActivityStatus(
         podId,
         `${validationInfrastructureFailureLabel(result)} — retrying validation without agent rework (${index + 1}/${infrastructureBackoffs.length})`,
       );
-      if (waitMs > 0) await sleep(waitMs);
+      if (!retryLedger && waitMs > 0) await sleep(waitMs);
       if (validationController.signal.aborted) break;
-      result = await runValidation();
+      try {
+        result = await runValidation();
+      } catch (err) {
+        if (!(err instanceof TaskRetryBlockedError)) throw err;
+        // Preserve the result of work that actually executed before the next
+        // admission was denied. The caller still records and parks that failure.
+        emitActivityStatus(podId, err.message);
+        podRepo.update(podId, { failureReason: err.message });
+        break;
+      }
     }
 
     if (isReviewInfrastructureOnlyFailure(result)) {
@@ -6915,6 +7640,24 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
     }
 
     return result;
+  }
+
+  async function parkOnRetryAdmission(pod: Pod, error: TaskRetryBlockedError): Promise<void> {
+    if (pod.status !== 'validating') return;
+    emitActivityStatus(pod.id, error.message);
+    transition(pod, 'review_required', { failureReason: error.message });
+    podRepo.update(pod.id, { validationAttempts: Math.max(0, pod.validationAttempts - 1) });
+    if (pod.containerId) {
+      try {
+        await stopSandboxPreviewProxy(pod.id);
+        await containerManagerFactory.get(pod.executionTarget).stop(pod.containerId);
+      } catch (err) {
+        logger.warn(
+          { err, podId: pod.id },
+          'Failed to stop container after retry admission was denied',
+        );
+      }
+    }
   }
 
   async function parkOnValidationInfrastructureFailure(
@@ -7088,7 +7831,24 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
   }
 
   return {
-    createSession(request: CreatePodRequest, userId: string, creator?: PodCreator): Pod {
+    createSession(
+      request: CreatePodRequest,
+      userId: string,
+      creator?: PodCreator,
+      actor?: OperatorActor,
+    ): Pod {
+      if (request.intentionalRerun && (actor?.type !== 'human' || actor.userId !== userId))
+        throw new AutopodError(
+          'Intentional rerun requires an authenticated human decision',
+          'UNAUTHORIZED_RERUN',
+          403,
+        );
+      if (request.intentionalRerun) {
+        if (!podRepo.dispatchPreflight)
+          throw new AutopodError('Durable rerun admission unavailable', 'RERUN_UNAVAILABLE', 503);
+        const existing = podRepo.dispatchPreflight.findRerun(request, userId);
+        if (existing) return podRepo.getOrThrow(existing);
+      }
       const profile = profileStore.get(request.profileName);
       assertNoExpiredPat(profile);
       const providerPreflight = resolveProviderPreflight(profile, request.runtime, request.model, {
@@ -7325,6 +8085,9 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
             maxValidationAttempts: profile.maxValidationAttempts ?? 3,
             skipValidation,
             contract: request.contract ?? null,
+            intentionalRerun: request.intentionalRerun,
+            dispatchRepository: profile.repoUrl,
+            rerunRequestHash: request.intentionalRerun ? dispatchRequestHash(request) : undefined,
             options: resolvedPod,
             outputMode: effectiveOutputMode,
             startBranch: effectiveStartBranch !== effectiveBaseBranch ? effectiveStartBranch : null,
@@ -7392,66 +8155,70 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
 
       const pod = podRepo.getOrThrow(id);
 
-      eventBus.emit({
-        type: 'pod.created',
-        timestamp: new Date().toISOString(),
-        pod: {
-          id: pod.id,
-          profileName: pod.profileName,
-          task: pod.task,
-          status: pod.status,
-          model: pod.model,
-          runtime: pod.runtime,
-          branch: pod.branch,
-          baseBranch: pod.baseBranch,
-          duration: null,
-          filesChanged: pod.filesChanged,
-          createdAt: pod.createdAt,
-        },
-      });
-
-      // Emit the preflight overlap warning (computed before insert above) now
-      // that the new pod has an ID. The `block` policy already short-circuited
-      // earlier; reaching this point means the policy is `warn` or unset.
-      if (preflightConflicts.length > 0) {
+      const publishCommittedPod = () => {
         eventBus.emit({
-          type: 'pod.preflight_overlap',
+          type: 'pod.created',
           timestamp: new Date().toISOString(),
-          podId: id,
-          conflicts: preflightConflicts.map((c) => ({
-            conflictingPodId: c.conflictingPodId,
-            conflictingPodTask: c.conflictingPodTask,
-            conflictingPodStatus: c.conflictingPodStatus,
-            overlappingGlobs: c.overlappingGlobs,
-          })),
+          pod: {
+            id: pod.id,
+            profileName: pod.profileName,
+            task: pod.task,
+            status: pod.status,
+            model: pod.model,
+            runtime: pod.runtime,
+            branch: pod.branch,
+            baseBranch: pod.baseBranch,
+            duration: null,
+            filesChanged: pod.filesChanged,
+            createdAt: pod.createdAt,
+          },
         });
-        logger.warn(
+
+        // Emit the preflight overlap warning (computed before insert above) now
+        // that the new pod has an ID. The `block` policy already short-circuited
+        // earlier; reaching this point means the policy is `warn` or unset.
+        if (preflightConflicts.length > 0) {
+          eventBus.emit({
+            type: 'pod.preflight_overlap',
+            timestamp: new Date().toISOString(),
+            podId: id,
+            conflicts: preflightConflicts.map((c) => ({
+              conflictingPodId: c.conflictingPodId,
+              conflictingPodTask: c.conflictingPodTask,
+              conflictingPodStatus: c.conflictingPodStatus,
+              overlappingGlobs: c.overlappingGlobs,
+            })),
+          });
+          logger.warn(
+            {
+              podId: id,
+              conflictingPodIds: preflightConflicts.map((c) => c.conflictingPodId),
+            },
+            'Pod created with preflight overlap on in-flight pods — possible merge conflict',
+          );
+        }
+
+        // Dependent pods must not start until their predecessors reach `validated`;
+        // maybeTriggerDependents() will enqueue them at that point. A pod counts
+        // as dependent if either the new multi-parent array or the legacy single
+        // field is populated.
+        const hasDeps = (request.dependsOnPodIds?.length ?? 0) > 0 || !!request.dependsOnPodId;
+        if (!hasDeps) {
+          enqueueSession(id);
+        }
+        logger.info(
           {
             podId: id,
-            conflictingPodIds: preflightConflicts.map((c) => c.conflictingPodId),
+            profile: request.profileName,
+            branch: pod.branch,
+            baseBranch: pod.baseBranch,
+            startBranch: pod.startBranch,
           },
-          'Pod created with preflight overlap on in-flight pods — possible merge conflict',
+          'Pod created',
         );
-      }
-
-      // Dependent pods must not start until their predecessors reach `validated`;
-      // maybeTriggerDependents() will enqueue them at that point. A pod counts
-      // as dependent if either the new multi-parent array or the legacy single
-      // field is populated.
-      const hasDeps = (request.dependsOnPodIds?.length ?? 0) > 0 || !!request.dependsOnPodId;
-      if (!hasDeps) {
-        enqueueSession(id);
-      }
-      logger.info(
-        {
-          podId: id,
-          profile: request.profileName,
-          branch: pod.branch,
-          baseBranch: pod.baseBranch,
-          startBranch: pod.startBranch,
-        },
-        'Pod created',
-      );
+      };
+      if (podRepo.afterInsertCommitted) podRepo.afterInsertCommitted(pod.id, publishCommittedPod);
+      else publishCommittedPod();
       return pod;
     },
 
@@ -7518,6 +8285,18 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
       let visibleFailurePhase: OperatorFailurePhase = 'setup';
       let runtimeEventObserved = false;
       const stagedReferenceArchivePaths = new Set<string>();
+      let startupAdmission: { id: string; started: number | null } | undefined;
+      const finishStartup = (outcome: import('@autopod/shared').TaskRetryOutcome): void => {
+        if (!startupAdmission) return;
+        podRepo.sandboxStartupRetries?.finish(
+          startupAdmission.id,
+          outcome,
+          startupAdmission.started === null || outcome === 'unknown'
+            ? null
+            : Math.round(performance.now() - startupAdmission.started),
+        );
+        startupAdmission = undefined;
+      };
 
       // Defense-in-depth: processPod must only run for pods in queued/handoff state.
       // The queue's activeIds dedup prevents most races, but this guard ensures
@@ -7534,19 +8313,32 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         emitActivityStatus(podId, message);
       }
 
+      const assertStartupCurrent = (): void => {
+        const current = podRepo.getOrThrow(podId);
+        if (
+          current.lifecycleGeneration !== lifecycleGeneration ||
+          (current.status !== 'queued' && current.status !== 'handoff')
+        )
+          throw new AgentContinuationSupersededError();
+        resolveEffectiveBoundProfile(current);
+      };
+
       try {
         const retryNotBefore = pod.infrastructureFailure?.retryNotBefore;
         if (
+          !podRepo.sandboxStartupRetries &&
           pod.infrastructureFailure?.source === 'azure-sandbox' &&
           pod.infrastructureFailure.recoveryDisposition === 'automatic_retry_scheduled' &&
           retryNotBefore
         ) {
-          const delayMs = Math.max(0, new Date(retryNotBefore).getTime() - Date.now());
-          if (delayMs > 0) {
+          if (Date.parse(retryNotBefore) > Date.now())
             emitStatus('Waiting for Azure sandbox recovery cooldown…');
-            await (deps.sandboxInfrastructureRecoveryDelay ?? sleep)(delayMs);
-          }
-          if (!ownsLifecycle(podId, lifecycleGeneration, null)) return;
+          await waitForRetryBackoff(
+            retryNotBefore,
+            deps.sandboxInfrastructureRecoveryDelay ?? sleep,
+            assertStartupCurrent,
+          );
+          assertStartupCurrent();
           pod = podRepo.getOrThrow(podId);
           if (pod.status !== 'queued') return;
         }
@@ -7828,6 +8620,27 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
               podRepo.update(podId, { infrastructureFailure: null });
               pod = podRepo.getOrThrow(podId);
             }
+            if (!isRecovery && !pod.skipAgent && pod.options.agentMode !== 'interactive') {
+              emitStatus('Checking contract declarations against fetched base…');
+              const baseEvidence = await worktreeManager.inspectContractBase(
+                worktreePath,
+                pod.baseBranch ?? profile.defaultBranch ?? 'main',
+                pod.contract?.requiredFacts ?? [],
+              );
+              const dispatchEvidence = podRepo.dispatchPreflight?.inspect(
+                podId,
+                pod.lifecycleGeneration,
+                profile.repoUrl,
+                pod.baseBranch ?? profile.defaultBranch ?? 'main',
+                baseEvidence.baseCommitSha,
+              );
+              if (dispatchEvidence?.status === 'review_required')
+                throw new AutopodError(
+                  `Equivalent active or recent work requires review: ${dispatchEvidence.conflicts.map((entry) => entry.podId).join(', ')}. Reconcile the existing execution or create an intentional rerun with a recorded reason.`,
+                  'EQUIVALENT_WORK_REVIEW_REQUIRED',
+                  409,
+                );
+            }
             const materializedStartSha = await materializeSpecFiles(
               worktreePath,
               pod.specFiles,
@@ -7869,6 +8682,28 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         // A fresh repository must be materialized from authenticated remote refs
         // before entering provisioning. Recovery pods intentionally retain their
         // surviving worktree semantics and do not pass through this gate.
+        if (pod.executionTarget === 'sandbox' && podRepo.sandboxStartupRetries) {
+          const ledger = podRepo.sandboxStartupRetries;
+          const input = sandboxStartupRetryInput(pod);
+          const admission = ledger.admit(
+            podId,
+            lifecycleGeneration,
+            input.identity,
+            input.bindingHash,
+            [...(deps.sandboxInfrastructureRetryBackoffMs ?? [30_000])],
+          );
+          startupAdmission = { id: admission.id, started: null };
+          if (Date.parse(admission.notBefore) > Date.now())
+            emitStatus('Waiting for task-wide sandbox startup cooldown…');
+          await waitForRetryBackoff(
+            admission.notBefore,
+            deps.sandboxInfrastructureRecoveryDelay ?? sleep,
+            assertStartupCurrent,
+          );
+          assertStartupCurrent();
+          ledger.start(admission.id);
+          startupAdmission.started = performance.now();
+        }
         pod = transition(podRepo.getOrThrow(podId), 'provisioning', provisioningUpdates);
         podRepo.update(podId, { profileSnapshot: profile });
         if (!pod.networkPolicyResolved) {
@@ -8974,6 +9809,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           }
 
           logger.info({ podId }, 'Workspace pod running — awaiting manual attach');
+          finishStartup('pass');
           return;
         }
 
@@ -9437,6 +10273,15 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         // Clear the one-shot flag *before* handing off so a future failed →
         // resume cycle re-runs the agent normally.
         if (pod.skipAgent) {
+          const preservedProvenance = await inspectExecutionPreflight(
+            containerManager,
+            containerId,
+            pod,
+            profile,
+            'completion',
+          );
+          podRepo.executionProvenance?.record(podId, pod.lifecycleGeneration, preservedProvenance);
+          finishStartup('pass');
           podRepo.update(podId, { skipAgent: false });
           if (isFreshContainerValidationOnly) {
             emitStatus('Skipping agent — running validation only…');
@@ -9459,8 +10304,21 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           isRecovery &&
           !isInfrastructureRecovery &&
           !isRework &&
-          hasLatestPersistedAgentTerminalEventComplete(deps.eventRepo, podId)
+          hasLatestPersistedAgentTerminalEventComplete(
+            deps.eventRepo,
+            podId,
+            podRepo.completionJournal?.replyWatermark(podId) ?? 0,
+          )
         ) {
+          const recoveredProvenance = await inspectExecutionPreflight(
+            containerManager,
+            containerId,
+            pod,
+            profile,
+            'completion',
+          );
+          podRepo.executionProvenance?.record(podId, pod.lifecycleGeneration, recoveredProvenance);
+          finishStartup('pass');
           emitStatus('Agent already finished before recovery — resuming completion…');
           logger.info(
             { podId, worktreePath },
@@ -9475,14 +10333,31 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         emitStatus(
           `Starting worker: provider=${profile.modelProvider ?? 'anthropic'}, runtime=${pod.runtime}, model=${pod.model}`,
         );
-        try {
-          const cliPath = await verifyAgentCli(containerManager, containerId, pod.runtime);
-          logger.info({ podId, runtime: pod.runtime, cliPath }, 'Agent CLI preflight passed');
-        } catch (err) {
-          const message = err instanceof Error ? err.message : String(err);
+        const provenance = await inspectExecutionPreflight(
+          containerManager,
+          containerId,
+          pod,
+          profile,
+        );
+        podRepo.executionProvenance?.record(podId, pod.lifecycleGeneration, provenance);
+        if (provenance.status === 'blocked') {
+          const failure = provenance.diagnostics.find(
+            (item) =>
+              item.code.startsWith('PREFLIGHT_') || item.code === 'STREAMING_EXEC_UNSUPPORTED',
+          );
+          const message = failure?.detail ?? 'Execution preflight requires reconciliation';
           emitStatus(message);
-          throw err;
+          throw new AutopodError(message, failure?.code ?? 'EXECUTION_PREFLIGHT_BLOCKED', 409);
         }
+        logger.info(
+          {
+            podId,
+            runtime: pod.runtime,
+            cliPath: provenance.cliPath,
+            cliVersion: provenance.cliVersion,
+          },
+          'Agent CLI preflight passed',
+        );
 
         emitStatus('Spawning agent…');
         const runtime = runtimeRegistry.get(pod.runtime);
@@ -9597,6 +10472,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           const loggerRef = logger;
           const profileRef = profile;
           events = (async function* resumeWithFallback() {
+            const fallbackRunToken = activeAgentRuns.get(podId)?.token;
             try {
               yield* runtimeRef.resume(podId, continuationPrompt, containerIdRef, secretEnvRef);
             } catch (err) {
@@ -9607,11 +10483,28 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
               );
               // Clear the stale ID so any future recovery on this pod doesn't
               // loop trying to resume the same nonexistent conversation.
-              podRepoRef.update(podId, { claudeSessionId: null });
+              if (
+                !fallbackRunToken ||
+                activeAgentRuns.get(podId)?.token !== fallbackRunToken ||
+                !activeAgentRuns.get(podId)?.isCurrent?.()
+              )
+                throw new ProviderAttemptSupersededError();
               if (!providerAttemptRotated) {
-                rotateProviderAttemptForFreshSegment(podRef, profileRef, hadActiveProviderAttempt);
+                rotateProviderAttemptForFreshSegment(
+                  podRef,
+                  profileRef,
+                  hadActiveProviderAttempt,
+                  fallbackRunToken,
+                );
               }
+              podRepoRef.update(podId, { claudeSessionId: null });
               const recoveryTask = await buildRecoveryTask(podRef, safeWorktreePath);
+              await recordContinuationProvenance(podRef, containerIdRef);
+              if (
+                activeAgentRuns.get(podId)?.token !== fallbackRunToken ||
+                !activeAgentRuns.get(podId)?.isCurrent?.()
+              )
+                throw new ProviderAttemptSupersededError();
               yield* runtimeRef.spawn({
                 podId,
                 task: recoveryTask,
@@ -9692,7 +10585,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           // Normal path
           events = runtime.spawn({
             podId,
-            task: pod.task,
+            task: appendDecisionContext(pod, pod.task),
             model: pod.model,
             reasoningEffort,
             workDir: '/workspace',
@@ -9707,7 +10600,10 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         visibleFailurePhase = 'agent';
         const observedEvents = (async function* () {
           for await (const event of events) {
-            if (!runtimeEventObserved) podRepo.update(podId, { infrastructureFailure: null });
+            if (!runtimeEventObserved) {
+              finishStartup('pass');
+              podRepo.update(podId, { infrastructureFailure: null });
+            }
             runtimeEventObserved = true;
             yield event;
           }
@@ -9740,6 +10636,21 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           await preserveSandboxAfterAgentFailure(podId, 'fatal agent exit');
         }
       } catch (err) {
+        if (err instanceof AgentContinuationSupersededError) return;
+        if (startupAdmission) {
+          const current = podRepo.getOrThrow(podId);
+          const safeTransient =
+            err instanceof SandboxInfrastructureError &&
+            !runtimeEventObserved &&
+            (current.skipAgent || !hasDurableAgentExecutionEvidence(current));
+          finishStartup(
+            startupAdmission.started === null
+              ? 'cancelled'
+              : safeTransient
+                ? 'transient'
+                : 'nonretryable',
+          );
+        }
         if (!ownsLifecycle(podId, lifecycleGeneration, null)) {
           logger.info(
             { podId, generation: lifecycleGeneration },
@@ -9794,10 +10705,11 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
               },
               response: null,
             };
-            escalationRepo.insert(escalation);
-            transition(current, 'awaiting_input', {
-              pendingEscalation: escalation,
-              escalationCount: current.escalationCount + 1,
+            persistEscalation(podRepo, escalationRepo, escalation, () => {
+              transition(current, 'awaiting_input', {
+                pendingEscalation: escalation,
+                escalationCount: current.escalationCount + 1,
+              });
             });
             emitActivityStatus(
               podId,
@@ -9921,6 +10833,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           /* swallow — best effort */
         }
       } finally {
+        finishStartup('unknown');
         await Promise.all(
           [...stagedReferenceArchivePaths].map((archivePath) => rm(archivePath, { force: true })),
         );
@@ -9933,45 +10846,171 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
       attempt = 0,
       lifecycle?: { generation: number; containerId: string | null },
     ): Promise<AgentRunOutcome> {
+      const initialPod = podRepo.getOrThrow(podId);
+      const expected = lifecycle
+        ? { ...lifecycle }
+        : {
+            generation: initialPod.lifecycleGeneration,
+            containerId: initialPod.containerId,
+          };
+      const ownsExpectedLifecycle = (): boolean => {
+        try {
+          const current = podRepo.getOrThrow(podId);
+          return (
+            current.lifecycleGeneration === expected.generation &&
+            current.containerId === expected.containerId &&
+            current.runtime === initialPod.runtime &&
+            current.model === initialPod.model &&
+            current.providerIdSnapshot === initialPod.providerIdSnapshot &&
+            current.providerAccountIdSnapshot === initialPod.providerAccountIdSnapshot &&
+            current.executionTarget === initialPod.executionTarget &&
+            current.worktreePath === initialPod.worktreePath
+          );
+        } catch {
+          return false;
+        }
+      };
+      if (!ownsExpectedLifecycle()) return 'stopped';
       const runToken = Symbol(podId);
       let resolveRunSettled: () => void = () => {};
       const runSettled = new Promise<void>((resolve) => {
         resolveRunSettled = resolve;
       });
-      activeAgentRuns.set(podId, { token: runToken, settled: runSettled });
-      activeAgentRunResolvers.set(podId, { token: runToken, resolve: resolveRunSettled });
+      const runOwner: {
+        token: symbol;
+        settled: Promise<void>;
+        providerOrdinal?: number;
+        isCurrent?: () => boolean;
+      } = {
+        token: runToken,
+        settled: runSettled,
+      };
       const settleActiveRun = (): void => {
+        resolveRunSettled();
         const activeResolver = activeAgentRunResolvers.get(podId);
         if (activeResolver?.token !== runToken) return;
-        activeResolver.resolve();
         activeAgentRunResolvers.delete(podId);
         activeAgentRuns.delete(podId);
       };
+      const ownsRun = () =>
+        activeAgentRuns.get(podId)?.token === runToken &&
+        ownsExpectedLifecycle() &&
+        (!deps.providerAttemptRepo ||
+          (runOwner.providerOrdinal !== undefined &&
+            deps.providerAttemptRepo.getActive(podId)?.ordinal === runOwner.providerOrdinal));
+      runOwner.isCurrent = ownsRun;
+      let superseded = false;
+      let eventError: unknown;
+      let hasEventError = false;
       let attemptPod: Pod;
       let attemptProfile: Profile;
       let seenCompleteEvents: Set<string>;
+      let taskRunId: string | undefined;
+      let workerAdmissionId: string | undefined;
+      let workerStartedAt: number | undefined;
+      let workerNotBefore: string | undefined;
       try {
-        attemptPod = podRepo.getOrThrow(podId);
-        attemptProfile = resolveEffectiveBoundProfile(attemptPod);
-        ensureProviderAttempt(attemptPod, attemptProfile);
+        const initialized = atomicPodChange(podRepo, () => {
+          const currentPod = podRepo.getOrThrow(podId);
+          const currentProfile = resolveEffectiveBoundProfile(currentPod);
+          podRepo.completionJournal?.begin(currentPod);
+          let runId: string | undefined;
+          if (podRepo.taskExecutions) {
+            podRepo.taskExecutions.register(podId);
+            const cycle = podRepo.completionJournal?.get(
+              podId,
+              currentPod.lifecycleGeneration,
+            )?.cycle;
+            if (cycle === undefined)
+              throw new Error('Task execution requires a durable completion cycle');
+            runId = podRepo.taskExecutions.beginRun(podId, currentPod.lifecycleGeneration, cycle, {
+              runtime: currentPod.runtime,
+              model: currentPod.model,
+              providerAccountId: currentProfile.providerAccountId ?? null,
+              resource: {
+                containerId: currentPod.containerId,
+                executionTarget: currentPod.executionTarget,
+              },
+            });
+          }
+          const workerAdmission = runId
+            ? podRepo.workerRetries?.admit(
+                podId,
+                currentPod.lifecycleGeneration,
+                unavailableWorkerInputs,
+                workerBindingHash({
+                  runtime: currentPod.runtime,
+                  model: currentPod.model,
+                  providerAccountId: currentProfile.providerAccountId ?? null,
+                }),
+                [...(deps.workerInfrastructureRetryBackoffMs ?? WORKER_RETRY_BACKOFFS_MS)],
+                runId,
+              )
+            : undefined;
+          const providerOrdinal = ensureProviderAttempt(currentPod, currentProfile)?.ordinal;
+          return { currentPod, currentProfile, runId, providerOrdinal, workerAdmission };
+        });
+        attemptPod = initialized.currentPod;
+        attemptProfile = initialized.currentProfile;
+        taskRunId = initialized.runId;
+        workerAdmissionId = initialized.workerAdmission?.id;
+        workerNotBefore = initialized.workerAdmission?.notBefore;
+        runOwner.providerOrdinal = initialized.providerOrdinal;
         seenCompleteEvents = persistedAgentCompleteEventKeys(deps.eventRepo, podId);
+        activeAgentRuns.set(podId, runOwner);
+        activeAgentRunResolvers.set(podId, { token: runToken, resolve: resolveRunSettled });
         startCommitPolling(podId);
       } catch (err) {
+        if (taskRunId) podRepo.taskExecutions?.finishRun(taskRunId, 'failed', 'initialization');
+        if (workerAdmissionId) podRepo.workerRetries?.finish(workerAdmissionId, 'unknown', null);
         settleActiveRun();
         throw err;
       }
       // Legacy/injected managers without the ledger retain the historical empty-stream
       // completion behavior. Production always injects the ledger and fails closed.
       let outcome: AgentRunOutcome = deps.providerAttemptRepo ? 'failed' : 'completed';
+      let observedTerminalOutcome: 'completed' | 'failed' | null = null;
       let terminalClassification: ProviderFailureClassification | null = null;
+      let executionTerminationUnverified = false;
+      let workerEventObserved = false;
+      let providerRetryNotBefore: string | null = null;
+      const retainUnverifiedTermination = () => {
+        executionTerminationUnverified = true;
+        if (taskRunId) podRepo.taskExecutions?.retainUnverifiedRun(taskRunId);
+      };
       try {
+        if (!ownsRun()) {
+          outcome = 'stopped';
+          return outcome;
+        }
+        if (workerNotBefore && Date.parse(workerNotBefore) > Date.now()) {
+          await waitForRetryBackoff(
+            workerNotBefore,
+            deps.workerInfrastructureRetryDelay ?? sleep,
+            () => {
+              if (!ownsRun() || pauseIntents.has(podId))
+                throw new TaskRetryBlockedError(
+                  'Worker admission was cancelled or superseded during cooldown',
+                );
+            },
+          );
+          if (!ownsRun() || pauseIntents.has(podId))
+            throw new TaskRetryBlockedError(
+              'Worker admission was cancelled or superseded before execution',
+            );
+          resolveEffectiveBoundProfile(podRepo.getOrThrow(podId));
+        }
+        if (workerAdmissionId) podRepo.workerRetries?.start(workerAdmissionId);
+        workerStartedAt = performance.now();
         for await (const event of events) {
-          if (lifecycle && !ownsLifecycle(podId, lifecycle.generation, lifecycle.containerId)) {
+          workerEventObserved = true;
+          if (!ownsRun()) {
             logger.info(
-              { podId, containerId: lifecycle.containerId, generation: lifecycle.generation },
+              { podId, containerId: expected.containerId, generation: expected.generation },
               'Stopped processing stale lifecycle agent events',
             );
-            return 'stopped';
+            outcome = 'stopped';
+            return outcome;
           }
           if (pauseIntents.has(podId)) {
             outcome = 'paused';
@@ -10062,7 +11101,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
               // runtime can accept the requested resume yet report a replacement
               // native session. Close the old segment before recording the new ID
               // instead of attempting to rewrite historical execution identity.
-              rotateProviderAttemptForFreshSegment(sessionPod, attemptProfile, true);
+              rotateProviderAttemptForFreshSegment(sessionPod, attemptProfile, true, runToken);
             }
             const sessionUpdate: PodUpdates = {};
             if (sessionPod.runtime === 'claude') sessionUpdate.claudeSessionId = event.sessionId;
@@ -10072,6 +11111,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
             const activeAttempt = deps.providerAttemptRepo?.getActive(podId);
             if (activeAttempt) {
               deps.providerAttemptRepo?.updateActive(podId, {
+                expectedOrdinal: runOwner.providerOrdinal,
                 nativeSessionId: event.sessionId,
                 inputTokens: activeAttempt.inputTokens,
                 outputTokens: activeAttempt.outputTokens,
@@ -10080,6 +11120,8 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
             }
           } else if (event.type === 'complete') {
             outcome = 'completed';
+            observedTerminalOutcome = 'completed';
+            podRepo.completionJournal?.settle(podRepo.getOrThrow(podId), event.result);
             // Accumulate token counts and cost cumulatively across all runs in this pod
             const currentSession = podRepo.getOrThrow(podId);
             const newInputTokens = currentSession.inputTokens + (event.totalInputTokens ?? 0);
@@ -10136,6 +11178,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
             const activeAttempt = deps.providerAttemptRepo?.getActive(podId);
             if (activeAttempt) {
               deps.providerAttemptRepo?.updateActive(podId, {
+                expectedOrdinal: runOwner.providerOrdinal,
                 nativeSessionId: nativeSessionId(podRepo.getOrThrow(podId)),
                 inputTokens: activeAttempt.inputTokens + (event.totalInputTokens ?? 0),
                 outputTokens: activeAttempt.outputTokens + (event.totalOutputTokens ?? 0),
@@ -10154,12 +11197,16 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
                 });
               }
               outcome = 'failed';
+              observedTerminalOutcome = 'failed';
               break;
             }
 
             // Token budget enforcement — only when token data is available
-            const effectiveBudget = currentSession.tokenBudget;
-            const totalUsed = newInputTokens + newOutputTokens;
+            const taskUsage = podRepo.taskExecutions?.snapshot(podId);
+            const effectiveBudget = taskUsage ? taskUsage.tokenBudget : currentSession.tokenBudget;
+            const totalUsed = taskUsage
+              ? taskUsage.recordedInputTokens + taskUsage.recordedOutputTokens
+              : newInputTokens + newOutputTokens;
             if (effectiveBudget !== null && effectiveBudget > 0 && totalUsed > 0) {
               const profile = profileStore.get(currentSession.profileName);
               const warnAt = profile.tokenBudgetWarnAt ?? 0.8;
@@ -10205,6 +11252,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
                     transition(s, 'failed', { completedAt: new Date().toISOString() });
                   }
                   outcome = 'failed';
+                  observedTerminalOutcome = 'failed';
                 } else {
                   // Soft policy: pause and await user approval
                   const s = podRepo.getOrThrow(podId);
@@ -10225,7 +11273,11 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
                 'Token budget set but runtime emits no token data — budget not enforced',
               );
             }
-          } else if (event.type === 'error' && event.fatal) {
+          } else if (
+            event.type === 'error' &&
+            (event.fatal || event.executionTermination === 'unverified')
+          ) {
+            if (event.executionTermination === 'unverified') retainUnverifiedTermination();
             const pod = podRepo.getOrThrow(podId);
             terminalClassification =
               event.classification ??
@@ -10235,6 +11287,14 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
                 sanitizedMessage: sanitizeFailureReason(event.message, 'Agent failed'),
                 retryAfter: null,
               } satisfies ProviderFailureClassification);
+            if (
+              terminalClassification.category === 'transient' ||
+              terminalClassification.category === 'provider_unavailable'
+            )
+              providerRetryNotBefore = workerRetryDeadline(
+                terminalClassification.retryAfter,
+                Date.now(),
+              );
             if (canFail(pod.status)) {
               const failureReason = sanitizeFailureReason(event.message, 'Agent failed');
               emitActivityStatus(podId, failureReason);
@@ -10254,15 +11314,30 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
               }
             }
             outcome = 'failed';
+            observedTerminalOutcome = 'failed';
             break;
           } else if (event.type === 'tool_use' || event.type === 'file_change') {
             touchHeartbeat(podId);
           }
         }
       } catch (err) {
+        if (err instanceof AutopodError && err.code === 'EXEC_EXIT_UNVERIFIED')
+          retainUnverifiedTermination();
+        if (!ownsRun()) {
+          outcome = 'stopped';
+          return outcome;
+        }
         outcome = 'failed';
+        observedTerminalOutcome = 'failed';
         terminalClassification = {
-          category: 'unknown',
+          // Preserve the typed pre-agent sandbox recovery path. Other thrown
+          // failures do not acquire an automatic worker retry allowance.
+          category:
+            err instanceof SandboxInfrastructureError &&
+            !workerEventObserved &&
+            !hasDurableAgentExecutionEvidence(attemptPod)
+              ? 'transient'
+              : 'unknown',
           definitive: false,
           sanitizedMessage: sanitizeFailureReason(
             err instanceof Error ? err.message : String(err),
@@ -10270,53 +11345,123 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           ),
           retryAfter: null,
         };
-        throw err;
+        providerRetryNotBefore = null;
+        eventError = err;
+        hasEventError = true;
       } finally {
-        if (pauseIntents.has(podId)) outcome = 'paused';
+        if (!ownsRun()) {
+          superseded = true;
+          // No terminal event was accepted for this run after it lost ownership.
+          outcome = 'stopped';
+        } else if (pauseIntents.has(podId)) outcome = 'paused';
+        // An accepted old completion is historical evidence even when control
+        // must stop before touching a replacement lifecycle.
+        const recordedOutcome = superseded ? (observedTerminalOutcome ?? outcome) : outcome;
         try {
-          await syncSandboxRuntimeSessionState(podId);
+          if (!superseded) await syncSandboxRuntimeSessionState(attemptPod, ownsRun);
         } finally {
           try {
-            const current = podRepo.getOrThrow(podId);
-            const providerLimit =
-              current.pauseReason === 'provider_limit' &&
-              terminalClassification?.category === 'quota_exhausted' &&
-              terminalClassification.definitive;
-            if (providerLimit) {
-              closeProviderAttempt(
-                podId,
-                'quota_exhausted',
-                terminalClassification,
-                PROVIDER_FAILOVER_HANDOFF_PATH,
-              );
-              await handleProviderLimit(podId, terminalClassification);
-            } else if (
-              current.pauseReason === 'provider_limit' &&
-              outcome === 'failed' &&
-              terminalClassification
-            ) {
-              closeProviderAttempt(podId, 'failed', terminalClassification);
-            } else if (outcome === 'paused' || current.status === 'paused') {
-              closeProviderAttempt(podId, 'aborted');
-            } else if (outcome === 'completed' || outcome === 'failed') {
-              const classification =
-                outcome === 'failed'
-                  ? (terminalClassification ?? {
-                      category: 'unknown',
-                      definitive: false,
-                      sanitizedMessage: 'Provider attempt ended without classified evidence',
-                      retryAfter: null,
-                    })
-                  : null;
-              closeProviderAttempt(podId, outcome, classification);
+            if (!ownsRun()) superseded = true;
+            if (!superseded) {
+              const current = podRepo.getOrThrow(podId);
+              const providerLimit =
+                current.pauseReason === 'provider_limit' &&
+                terminalClassification?.category === 'quota_exhausted' &&
+                terminalClassification.definitive;
+              if (providerLimit) {
+                closeProviderAttempt(
+                  podId,
+                  'quota_exhausted',
+                  terminalClassification,
+                  PROVIDER_FAILOVER_HANDOFF_PATH,
+                  runOwner.providerOrdinal,
+                );
+                await handleProviderLimit(podId, terminalClassification);
+              } else if (
+                current.pauseReason === 'provider_limit' &&
+                outcome === 'failed' &&
+                terminalClassification
+              ) {
+                closeProviderAttempt(
+                  podId,
+                  'failed',
+                  terminalClassification,
+                  null,
+                  runOwner.providerOrdinal,
+                );
+              } else if (outcome === 'paused' || current.status === 'paused') {
+                closeProviderAttempt(podId, 'aborted', null, null, runOwner.providerOrdinal);
+              } else if (outcome === 'completed' || outcome === 'failed') {
+                const classification =
+                  outcome === 'failed'
+                    ? (terminalClassification ?? {
+                        category: 'unknown',
+                        definitive: false,
+                        sanitizedMessage: 'Provider attempt ended without classified evidence',
+                        retryAfter: null,
+                      })
+                    : null;
+                closeProviderAttempt(
+                  podId,
+                  outcome,
+                  classification,
+                  null,
+                  runOwner.providerOrdinal,
+                );
+              }
+            }
+          } catch (err) {
+            if (err instanceof ProviderAttemptSupersededError) superseded = true;
+            else {
+              eventError = err;
+              hasEventError = true;
             }
           } finally {
-            stopCommitPolling(podId);
-            lastEventWriteAt.delete(podId);
-            settleActiveRun();
+            try {
+              if (taskRunId) {
+                if (executionTerminationUnverified)
+                  podRepo.taskExecutions?.retainUnverifiedRun(taskRunId);
+                else
+                  podRepo.taskExecutions?.finishRun(
+                    taskRunId,
+                    recordedOutcome,
+                    terminalClassification?.category ?? null,
+                  );
+              }
+              if (workerAdmissionId)
+                podRepo.workerRetries?.finish(
+                  workerAdmissionId,
+                  executionTerminationUnverified
+                    ? 'unknown'
+                    : recordedOutcome === 'completed'
+                      ? 'pass'
+                      : recordedOutcome === 'paused' || recordedOutcome === 'stopped'
+                        ? 'cancelled'
+                        : terminalClassification?.category === 'auth'
+                          ? 'nonretryable'
+                          : terminalClassification?.category === 'transient' ||
+                              terminalClassification?.category === 'provider_unavailable'
+                            ? 'transient'
+                            : 'unknown',
+                  workerStartedAt === undefined || executionTerminationUnverified
+                    ? null
+                    : Math.max(0, Math.round(performance.now() - workerStartedAt)),
+                  executionTerminationUnverified || recordedOutcome !== 'failed'
+                    ? null
+                    : providerRetryNotBefore,
+                );
+            } finally {
+              if (activeAgentRuns.get(podId)?.token === runToken) {
+                stopCommitPolling(podId);
+                lastEventWriteAt.delete(podId);
+              }
+              settleActiveRun();
+            }
           }
         }
       }
+      if (superseded) return 'stopped';
+      if (hasEventError) throw eventError;
       return outcome;
     },
 
@@ -10336,72 +11481,71 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         return;
       }
 
-      await syncSandboxSeriesHandover(podId);
-
-      // Artifact pods: extract /workspace, optionally push branch, skip validation entirely
-      if (pod.options.output === 'artifact') {
-        const profile = profileStore.get(pod.profileName);
-        const dataDir = process.env.DATA_DIR ?? path.join(process.cwd(), '.autopod-data');
-        const artifactsPath = path.join(dataDir, 'artifacts', podId);
-
-        await mkdir(artifactsPath, { recursive: true });
-
-        if (pod.containerId) {
-          const cm = containerManagerFactory.get(pod.executionTarget);
+      // Worker settlement cannot discharge an unanswered human decision. Preserve
+      // the workspace while retaining the waiter, even if its HTTP stream expired.
+      if (pod.status === 'awaiting_input' || pod.pendingEscalation) {
+        const settlement = podRepo.completionJournal?.settle(pod);
+        if (!settlement?.sourcePreservedAt && pod.containerId && pod.worktreePath) {
           try {
-            emitActivityStatus(podId, 'Collecting artifacts…');
-            await cm.extractDirectoryFromContainer(pod.containerId, '/workspace', artifactsPath);
-            logger.info({ podId, artifactsPath }, 'Artifacts extracted from container');
+            await preservePodWorkspace(pod, 'waiting for human decision after agent settlement');
+            podRepo.completionJournal?.mark(pod, 'awaiting_human', true);
           } catch (err) {
-            logger.warn(
+            logger.error(
               { err, podId },
-              'Failed to extract artifacts — pod will complete with empty artifact store',
+              'Pending-decision workspace preservation failed; retaining worker resources',
             );
           }
         }
-
-        podRepo.update(podId, { artifactsPath });
-
-        // If profile has a destination repo: lazy-clone, copy artifacts, push branch (best-effort)
-        if (profile.repoUrl) {
-          const repoBranch = pod.branch ?? `research/${podId}`;
-          try {
-            emitActivityStatus(podId, 'Pushing artifact branch…');
-            const tempWorktreeParent = path.join(dataDir, 'artifact-worktrees');
-            await mkdir(tempWorktreeParent, { recursive: true });
-            const pat = await resolveGitCredential(profile);
-            const worktreeResult = await worktreeManager.create({
-              repoUrl: profile.repoUrl,
-              branch: repoBranch,
-              baseBranch: pod.baseBranch ?? profile.defaultBranch ?? 'main',
-              pat,
-            });
-            // Copy artifacts into the worktree (cp -a copies contents, trailing /. required)
-            await execFileAsync('cp', [
-              '-a',
-              `${artifactsPath}/.`,
-              `${worktreeResult.worktreePath}/`,
-            ]);
-            await worktreeManager.commitPendingChanges(
-              worktreeResult.worktreePath,
-              `research: ${pod.task.slice(0, 72)}`,
-              { maxDeletions: 1000 },
-            );
-            await worktreeManager.pushBranch(worktreeResult.worktreePath, repoBranch);
-            logger.info({ podId, branch: repoBranch }, 'Artifact branch pushed');
-          } catch (err) {
-            logger.warn(
-              { err, podId },
-              'Failed to push artifact branch — artifacts available via API',
-            );
-          }
-        }
-
-        // Transition to complete — skip validation entirely
-        await cleanupContainer(pod, 'artifact-complete');
-        transition(pod, 'complete');
+        emitActivityStatus(
+          podId,
+          'Agent settled; human decision remains unanswered. Review the pending question before continuing.',
+        );
         return;
       }
+
+      if (nudgeRepo.hasPending(podId)) {
+        // A recorded answer is not proof that the settled worker collected it.
+        // Preserve source but retain the queue and resources for explicit Rework.
+        podRepo.completionJournal?.settle(pod);
+        let preserved = false;
+        let preservationFailure = '';
+        try {
+          if (pod.containerId && pod.worktreePath) {
+            await preservePodWorkspace(pod, 'uncollected human guidance after agent settlement');
+            preserved = true;
+          }
+        } catch (err) {
+          preservationFailure = ` Workspace preservation failed: ${err instanceof Error ? err.message : String(err)}.`;
+          logger.error(
+            { err, podId },
+            'Uncollected-guidance preservation failed; retaining resources',
+          );
+        }
+        if (!ownsArtifactCompletion(pod, false, true)) return;
+        const current = podRepo.getOrThrow(podId);
+        const reason = `Worker settled with uncollected human guidance. Use Rework to read check_messages, acknowledge its receipt, and apply the saved guidance before validation or delivery.${preservationFailure} Original resources and guidance retained.`;
+        atomicPodChange(podRepo, () => {
+          podRepo.completionJournal?.mark(current, 'awaiting_human', preserved);
+          transition(current, 'failed', { failureReason: reason });
+        });
+        emitActivityStatus(podId, reason);
+        return;
+      }
+
+      if (pod.options.output === 'artifact') {
+        const key = `${pod.id}:${pod.lifecycleGeneration}:${pod.finalization?.cycle ?? 0}`;
+        const pending = artifactCompletionRuns.get(key);
+        if (pending) return pending;
+        const completion = Promise.resolve().then(() => finalizeArtifactPod(pod));
+        artifactCompletionRuns.set(key, completion);
+        try {
+          await completion;
+        } finally {
+          if (artifactCompletionRuns.get(key) === completion) artifactCompletionRuns.delete(key);
+        }
+        return;
+      }
+      await syncSandboxSeriesHandover(podId);
 
       // Sync workspace back to host worktree before any host-side git reads
       // Sandboxes are deliberately different: a verified Git checkpoint is the
@@ -10954,30 +12098,20 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
 
         const authMessage = await performCredentialInjection(podId, payload.service);
 
-        escalationRepo.update(pod.pendingEscalation.id, {
-          respondedAt: new Date().toISOString(),
-          respondedBy: legacyRespondedBy(actor),
-          actor,
-          response: 'approved',
-        });
-
         const escalationId = pod.pendingEscalation.id;
-        transition(pod, 'running', { pendingEscalation: null });
-        emitActivityStatus(podId, `Credential injected for ${payload.service} — resuming agent…`);
-
-        const resolveResult = deps.pendingRequestsByPod
-          ?.get(podId)
-          ?.resolveWithState(escalationId, authMessage);
-        if (resolveResult?.detached) {
-          nudgeRepo.queue(
-            podId,
-            buildDetachedMcpFallbackMessage(pod.pendingEscalation.type, authMessage),
-          );
-          emitActivityStatus(
-            podId,
-            'MCP response stream was closed — queued credential result for check_messages',
-          );
-        }
+        const pending = deps.pendingRequestsByPod?.get(podId);
+        const savedResult = pending?.isDetached(escalationId)
+          ? buildDetachedMcpFallbackMessage(pod.pendingEscalation.type, authMessage)
+          : authMessage;
+        persistCompletionReply(podRepo, pod, message, actor, () => {
+          transition(pod, 'running', { pendingEscalation: null });
+          nudgeRepo.queue(podId, savedResult);
+        });
+        emitActivityStatus(
+          podId,
+          `Credential injected for ${payload.service}; result saved pending worker acknowledgment.`,
+        );
+        pending?.resolveWithState(escalationId, authMessage);
         return;
       }
 
@@ -11033,9 +12167,11 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
             const resumeEnv = await getResumeEnv(pod);
             const runtime = runtimeRegistry.get(pod.runtime);
             if (!pod.containerId) throw new Error(`Pod ${podId} has no container`);
+            await recordContinuationProvenance(pod, pod.containerId);
             primeRuntimeForResume(pod, runtime, pod.containerId, resumeEnv);
             const events = runtime.resume(podId, correctionMessage, pod.containerId, resumeEnv);
             const outcome = await this.consumeAgentEvents(podId, events, pod.validationAttempts);
+            if (outcome === 'stopped') return;
             await persistRuntimeCredentialsForPod(
               podId,
               'Failed to persist rotated credentials after override-guidance resume',
@@ -11044,6 +12180,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
               await this.handleCompletion(podId);
             }
           } catch (err) {
+            if (err instanceof AgentContinuationSupersededError) throw err;
             logger.error({ err, podId }, 'Failed to resume agent after override guidance');
             const s = podRepo.getOrThrow(podId);
             if (!isTerminalState(s.status)) {
@@ -11061,21 +12198,37 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
       }
 
       // ── Normal escalation responses ───────────────────────────────────
-      emitActivityStatus(podId, 'Human replied — resuming agent…');
-      transition(pod, 'running', { pendingEscalation: null });
+      const pendingForSession = deps.pendingRequestsByPod?.get(podId);
+      const decisionId = pod.pendingEscalation?.id;
+      const attachedWaiter = Boolean(
+        decisionId &&
+          pendingForSession?.hasPending(decisionId) &&
+          !pendingForSession.isDetached(decisionId),
+      );
+      const retainedRun = podRepo.taskExecutions?.hasActiveRun(podId) ?? activeAgentRuns.has(podId);
+      // An attached waiter is not proof that the MCP response reached the worker.
+      const queueForRetainedRun = retainedRun || attachedWaiter;
+      const queuedReply =
+        pod.pendingEscalation && pendingForSession?.isDetached(pod.pendingEscalation.id)
+          ? buildDetachedMcpFallbackMessage(pod.pendingEscalation.type, message)
+          : message;
+      persistCompletionReply(podRepo, pod, message, actor, () => {
+        transition(pod, 'running', { pendingEscalation: null });
+        if (queueForRetainedRun) nudgeRepo.queue(podId, queuedReply);
+      });
+      emitActivityStatus(podId, 'Human reply recorded.');
 
       // If the pod was blocked on an ask_human MCP call, resolve the pending request.
       // A still-attached MCP stream can deliver the response directly. If the
       // stream detached, resume the agent with the same fallback text queued for
       // check_messages so a dead or errored Codex turn is not stranded forever.
       let resumeMessage = message;
-      const pendingForSession = deps.pendingRequestsByPod?.get(podId);
       if (pendingForSession && pod.pendingEscalation?.id) {
         const resolveResult = pendingForSession.resolveWithState(pod.pendingEscalation.id, message);
         if (resolveResult.resolved) {
           if (resolveResult.detached) {
             resumeMessage = buildDetachedMcpFallbackMessage(pod.pendingEscalation.type, message);
-            nudgeRepo.queue(podId, resumeMessage);
+            if (!queueForRetainedRun) nudgeRepo.queue(podId, resumeMessage);
             emitActivityStatus(
               podId,
               'MCP response stream was closed — queued human reply for check_messages',
@@ -11086,6 +12239,14 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
             return;
           }
         }
+      }
+
+      if (queueForRetainedRun) {
+        emitActivityStatus(
+          podId,
+          'Human reply saved for check_messages while the prior run is unresolved.',
+        );
+        return;
       }
 
       emitActivityStatus(podId, 'Resuming agent with message…');
@@ -11100,6 +12261,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           podRepo.update(podId, { lastRecoveryTrigger: null });
           emitActivityStatus(podId, 'Resuming preserved sandbox after daemon restart…');
         }
+        await recordContinuationProvenance(pod, pod.containerId);
         const mcpServers = primeRuntimeForResume(pod, runtime, pod.containerId, resumeEnv);
         let outcome: AgentRunOutcome;
         try {
@@ -11113,9 +12275,11 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
             podId,
             'Saved Claude session was unavailable — starting a fresh recovery worker in the preserved sandbox…',
           );
+          const recoveryTask = await buildRecoveryTask(podRepo.getOrThrow(podId), pod.worktreePath);
+          await recordContinuationProvenance(pod, pod.containerId);
           const recoveryEvents = runtime.spawn({
             podId,
-            task: await buildRecoveryTask(podRepo.getOrThrow(podId), pod.worktreePath),
+            task: recoveryTask,
             model: pod.model,
             reasoningEffort: resolvedReasoningEffort(
               resolveEffectiveBoundProfile(pod),
@@ -11129,6 +12293,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           });
           outcome = await this.consumeAgentEvents(podId, recoveryEvents, pod.validationAttempts);
         }
+        if (outcome === 'stopped') return;
         await persistRuntimeCredentialsForPod(
           podId,
           'Failed to persist rotated credentials after human-message resume',
@@ -11137,6 +12302,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           await this.handleCompletion(podId);
         }
       } catch (err) {
+        if (err instanceof AgentContinuationSupersededError) throw err;
         logger.error({ err, podId }, 'Failed to resume agent after message');
         const s = podRepo.getOrThrow(podId);
         if (!isTerminalState(s.status)) {
@@ -11161,6 +12327,111 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
       const readiness = await resolveApprovalReadiness(pod, { waitForAdvisory: true });
       const approvalReason = assertApprovalAllowed(podId, readiness, options);
       const isWorkspacePod = pod.options?.agentMode === 'interactive';
+      const publishApprovalBranch = async (
+        anchor: Pod,
+        pushOptions?: { force?: boolean; pat?: string },
+      ) => {
+        assertApprovalCurrent(anchor);
+        const ledger = podRepo.sourcePublications;
+        const repository = profileStore.get(anchor.profileName).repoUrl;
+        if (!ledger || !repository)
+          throw new AutopodError(
+            'Durable source publication is unavailable; retain resources and reconcile delivery.',
+            'SOURCE_PUBLICATION_RECONCILIATION_REQUIRED',
+            409,
+          );
+        return publishSource(ledger, anchor, repository, worktreeManager, pushOptions);
+      };
+      const commitAndPublishApprovalBranch = (
+        anchor: Pod,
+        config: Parameters<WorktreeManager['mergeBranch']>[0],
+      ) => {
+        assertApprovalCurrent(anchor);
+        const ledger = podRepo.sourcePublications;
+        const repository = profileStore.get(anchor.profileName).repoUrl;
+        if (!ledger || !repository)
+          throw new AutopodError(
+            'Durable source publication is unavailable; retain resources and reconcile delivery.',
+            'SOURCE_PUBLICATION_RECONCILIATION_REQUIRED',
+            409,
+          );
+        return publishCommittedSource(ledger, anchor, repository, worktreeManager, config);
+      };
+      assertApprovalCurrent(pod);
+      if (pod.options.output === 'pr' || pod.options.output === 'branch') {
+        const missingIdentity = !pod.worktreePath?.trim()
+          ? 'Worktree identity is unavailable.'
+          : !pod.branch?.trim()
+            ? 'Branch identity is unavailable.'
+            : null;
+        if (missingIdentity) {
+          const reason = `Approval delivery failed. ${missingIdentity} Original resources retained; repair delivery and retry approval.`;
+          podRepo.update(podId, { failureReason: reason });
+          emitActivityError(podId, reason, false);
+          throw new AutopodError(reason, 'DELIVERY_RECONCILIATION_REQUIRED', 409);
+        }
+      }
+
+      let recoveredMerge = false;
+      if (pod.prUrl && podRepo.mergeJournal) {
+        try {
+          const entry = podRepo.mergeJournal.find(pod);
+          const provider = entry ? prManagerFactory?.(profileStore.get(pod.profileName)) : null;
+          const observedStatus =
+            entry &&
+            provider &&
+            (entry.state === 'planned' ||
+              (entry.state === 'pending' && !entry.result?.autoMergeScheduled))
+              ? await provider.getPrStatus({
+                  prUrl: entry.request.config.prUrl,
+                  worktreePath: pod.worktreePath ?? undefined,
+                })
+              : undefined;
+          assertApprovalCurrent(pod);
+          if (
+            entry &&
+            observedStatus?.merged === false &&
+            (observedStatus.open === false || entry.prDisposition === 'closed')
+          ) {
+            podRepo.mergeJournal.observeStatus(entry.id, observedStatus);
+            if (!observedStatus.open)
+              mergeReconciliation(closedPrRecoveryReason(entry, pod.status));
+          }
+          if (
+            entry &&
+            (observedStatus?.merged ||
+              (entry.state !== 'pending' && entry.state !== 'planned') ||
+              entry.result?.autoMergeScheduled)
+          ) {
+            if (options.squash !== undefined && entry.request.config.squash !== options.squash)
+              mergeReconciliation('An earlier admitted merge uses a different method.');
+            if (!provider) mergeReconciliation('The original merge provider is unavailable.');
+            const result = await reconcileMerge(
+              podRepo.mergeJournal,
+              pod,
+              entry,
+              provider,
+              observedStatus,
+            );
+            assertApprovalCurrent(pod);
+            await inspectRetainedMergeSource(
+              podRepo.mergeJournal,
+              podRepo.sourcePublications,
+              pod,
+              entry,
+              worktreeManager,
+            );
+            assertApprovalCurrent(pod);
+            recoveredMerge = result.merged;
+          }
+        } catch (error) {
+          assertApprovalCurrent(pod);
+          const reason = `Approval delivery failed. ${error instanceof Error ? error.message : String(error)} Original resources retained; reconcile delivery before retrying approval.`;
+          podRepo.update(podId, { failureReason: reason });
+          emitActivityError(podId, reason, false);
+          throw new AutopodError(reason, 'APPROVAL_DELIVERY_FAILED', 502);
+        }
+      }
 
       // No-change fast-path: skip PR creation and complete directly.
       // Workspace pods are excluded — their human edits live in the container until
@@ -11171,6 +12442,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
       // a failed/reworked run, so only suppress the branch push when the whole
       // branch is proven empty against its base.
       if (!isWorkspacePod && pod.worktreePath && !pod.prUrl) {
+        assertApprovalCurrent(pod);
         let trulyNoChanges = false;
         let branchHasAccumulatedChanges: boolean | null = null;
         try {
@@ -11183,6 +12455,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
             baseBranchForStats,
             sinceCommit,
           );
+          assertApprovalCurrent(pod);
           if (
             stats.filesChanged !== pod.filesChanged ||
             stats.linesAdded !== pod.linesAdded ||
@@ -11209,6 +12482,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
             }
           }
         } catch (err) {
+          assertApprovalCurrent(pod);
           logger.warn(
             { err, podId },
             'getDiffStats failed in approveSession; falling back to normal merge path',
@@ -11216,6 +12490,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           trulyNoChanges = false;
         }
 
+        assertApprovalCurrent(pod);
         if (trulyNoChanges) {
           const shouldPushBranch = branchHasAccumulatedChanges !== false;
           emitActivityStatus(
@@ -11224,31 +12499,52 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
               ? 'No new changes to merge — pushing existing branch and completing pod'
               : 'No changes to merge — completing without branch push',
           );
-          if (shouldPushBranch && pod.branch) {
+          if (shouldPushBranch) {
+            if (!pod.branch) failBranchPreservation(pod);
             try {
               const useForce = forceWithLeaseAllowances.has(podId);
               if (useForce) {
-                await worktreeManager.pushBranch(pod.worktreePath, pod.branch, { force: true });
+                await publishApprovalBranch(pod, { force: true });
               } else {
-                await worktreeManager.pushBranch(pod.worktreePath, pod.branch);
+                await publishApprovalBranch(pod);
               }
-              forceWithLeaseAllowances.delete(podId);
             } catch (err) {
               logger.warn(
                 { err, podId },
-                'Branch push failed in no-changes fast-path; continuing to complete',
+                'Branch preservation failed in no-changes approval; retaining resources',
               );
+              failBranchPreservation(pod);
             }
+            assertApprovalCurrent(pod);
+            forceWithLeaseAllowances.delete(podId);
           } else {
             forceWithLeaseAllowances.delete(podId);
           }
+          // transition publishes status synchronously and returns the current row.
+          // A listener can replace that row; retain the original approval identity.
+          const approvedAnchor: Pod = { ...pod, status: 'approved' };
+          const mergingAnchor: Pod = { ...pod, status: 'merging' };
           const s1 = transition(pod, 'approved');
+          assertApprovalCurrent(approvedAnchor);
           persistReadinessApproval(podId, readiness, actor, approvalReason);
+          assertApprovalCurrent(approvedAnchor);
           const s2 = transition(s1, 'merging');
-          await cleanupContainerAfterAdvisorySettles(pod, 'approve-no-changes');
+          assertApprovalCurrent(mergingAnchor);
+          await cleanupContainerAfterAdvisorySettles(s2, 'approve-no-changes', 'kill', () =>
+            assertApprovalCurrent(mergingAnchor, {
+              allowRemovedContainer: true,
+              allowComplete: true,
+            }),
+          );
+          assertApprovalCurrent(mergingAnchor, { allowRemovedContainer: true });
           const noChangePod = transition(s2, 'complete', {
             completedAt: new Date().toISOString(),
+            ...(pod.failureReason?.startsWith('Branch preservation failed.') ||
+            pod.failureReason?.startsWith('Approval delivery failed.')
+              ? { failureReason: null }
+              : {}),
           });
+          assertApprovalCurrent({ ...pod, status: 'complete' }, { allowRemovedContainer: true });
           eventBus.emit({
             type: 'pod.completed',
             timestamp: new Date().toISOString(),
@@ -11270,186 +12566,301 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
             { podId, branchPushed: shouldPushBranch },
             'Pod approved with no changes — completed without PR',
           );
+          assertApprovalCurrent({ ...pod, status: 'complete' }, { allowRemovedContainer: true });
           maybeTriggerDependents(noChangePod);
           return;
         }
       }
 
+      assertApprovalCurrent(pod);
       emitActivityStatus(podId, 'Approved — merging changes…');
+      assertApprovalCurrent(pod);
+      const approvedAnchor: Pod = { ...pod, status: 'approved' };
+      const mergingAnchor: Pod = { ...pod, status: 'merging' };
       const s1 = transition(pod, 'approved');
+      assertApprovalCurrent(approvedAnchor);
       persistReadinessApproval(podId, readiness, actor, approvalReason);
+      assertApprovalCurrent(approvedAnchor);
       const s2 = transition(s1, 'merging');
+      assertApprovalCurrent(mergingAnchor);
+
+      // Keep the captured generation across waits, including rejected operations.
+      // A stale callback must not enter a recovery catch for a replacement pod.
+      const deliveryOperation = async <T>(operation: () => Promise<T>): Promise<T> => {
+        assertApprovalCurrent(mergingAnchor);
+        try {
+          return await operation();
+        } finally {
+          assertApprovalCurrent(mergingAnchor);
+        }
+      };
+      const deliveryCredential = (profile: Profile) =>
+        deliveryOperation(() => resolveGitCredential(profile));
+      const failDelivery = (detail: string): never => {
+        assertApprovalCurrent(mergingAnchor);
+        const reason = `Approval delivery failed. ${detail} Original resources retained; repair delivery and retry approval.`;
+        transition(mergingAnchor, 'validated', { failureReason: reason });
+        assertApprovalCurrent({ ...pod, status: 'validated' });
+        emitActivityError(podId, reason, false);
+        throw new AutopodError(reason, 'APPROVAL_DELIVERY_FAILED', 502);
+      };
 
       // Merge the PR if one was created, otherwise fall back to branch push
       const approveProfile = profileStore.get(pod.profileName);
       const prManager = prManagerFactory ? prManagerFactory(approveProfile) : null;
-      if (pod.prUrl && prManager && pod.worktreePath) {
+      const mergeApprovalSource = (
+        publication: Awaited<ReturnType<typeof publishApprovalBranch>>,
+        provider: PrManager,
+        config: Parameters<PrManager['mergePr']>[0],
+      ) => {
+        if (!podRepo.mergeJournal) mergeReconciliation('Durable merge admission is unavailable.');
+        return mergePublishedSource(
+          podRepo.mergeJournal,
+          podRepo.getOrThrow(podId),
+          mergingAnchor,
+          publication,
+          provider,
+          config,
+        );
+      };
+      const planApprovalSource = (
+        publication: Awaited<ReturnType<typeof publishApprovalBranch>>,
+        prUrl: string,
+        baseBranch: string,
+      ) => {
+        assertApprovalCurrent(mergingAnchor);
+        if (!podRepo.mergeJournal) mergeReconciliation('Durable merge planning is unavailable.');
+        return podRepo.mergeJournal.plan(
+          podRepo.getOrThrow(podId),
+          mergingAnchor,
+          publication.publicationId,
+          {
+            prUrl,
+            expectedHeadSha: publication.commitSha,
+            expectedTarget: {
+              repository: publication.repository,
+              branch: publication.branch,
+              baseBranch,
+            },
+            squash: options.squash,
+          },
+        );
+      };
+      if (recoveredMerge) {
+        emitActivityStatus(
+          podId,
+          'Earlier merge confirmed from durable source and target evidence',
+        );
+      } else if (pod.prUrl && prManager && pod.worktreePath) {
         const mergeBaseBranch = pod.baseBranch ?? approveProfile.defaultBranch ?? 'main';
         const queueKey = MergeQueue.keyFor(approveProfile.repoUrl, mergeBaseBranch);
         const worktreePath = pod.worktreePath;
         const prUrl = pod.prUrl;
-        const branch = pod.branch ?? '';
+
+        try {
+          const initialStatus = await deliveryOperation(() =>
+            prManager.getPrStatus({ prUrl, worktreePath }),
+          );
+          if (initialStatus.merged || !initialStatus.open)
+            failDelivery(
+              'The PR has an external disposition without a confirmed daemon merge. Reconcile it before publishing retained source.',
+            );
+        } catch (error) {
+          // failDelivery already moved the original lifecycle back to validated.
+          if (error instanceof AutopodError && error.code === 'APPROVAL_DELIVERY_FAILED')
+            throw error;
+          assertApprovalCurrent(mergingAnchor);
+          failDelivery('The current PR disposition is unavailable.');
+        }
 
         // Outcome of the queued critical section. We do state transitions outside
         // the queue so the lock is released as quickly as possible.
         type MergeOutcome =
           | { kind: 'merged' }
           | { kind: 'merge_pending'; blockReason: string }
-          | { kind: 'merge_failed' };
+          | { kind: 'merge_failed'; reason: string };
 
-        const outcome = await mergeQueue.run<MergeOutcome>(queueKey, async () => {
-          // Fix pods make commits in the container but rely on the agent to push.
-          // Push explicitly here before attempting to complete the PR so any local
-          // commits the agent forgot (or failed) to push are flushed to the remote.
-          // Pass the PAT so we don't depend on the in-memory cache, which is
-          // evicted whenever any sibling worktree on the same bare repo is
-          // cleaned up (local-worktree-manager.ts cleanup()).
-          const useForce = forceWithLeaseAllowances.has(podId);
-          try {
-            await worktreeManager.pushBranch(worktreePath, branch, {
-              pat: await resolveGitCredential(approveProfile),
-              ...(useForce ? { force: true } : {}),
-            });
-            forceWithLeaseAllowances.delete(podId);
-            emitActivityStatus(podId, 'Branch pushed');
-          } catch (pushErr) {
-            const reason = pushErr instanceof Error ? pushErr.message : String(pushErr);
-            const blockReason = `Push to origin failed: ${reason}`;
-            logger.warn(
-              { err: pushErr, podId },
-              'Pre-merge push failed — entering merge_pending instead of merging stale origin',
-            );
-            return { kind: 'merge_pending', blockReason };
-          }
-
-          // Pre-merge rebase onto latest origin/<base>. Catches conflicts
-          // *before* the PR merge attempt so an agent (or fix pod) gets to
-          // resolve them while it still has full task context, instead of
-          // discovering the conflict via GitHub's merge gate after the fact.
-          // Runs inside the merge queue so the rebase always sees the freshly
-          // merged state of any preceding pod on the same base.
-          emitActivityStatus(podId, `Rebasing onto origin/${mergeBaseBranch}…`);
-          const rebaseResult = await worktreeManager.rebaseOntoBase({
-            worktreePath,
-            baseBranch: mergeBaseBranch,
-            pat: await resolveGitCredential(approveProfile),
-          });
-
-          if (!rebaseResult.rebased) {
-            const blockReason = formatRebaseConflictReason(mergeBaseBranch, rebaseResult.conflicts);
-            logger.info(
-              {
-                podId,
-                prUrl,
-                baseBranch: mergeBaseBranch,
-                conflicts: rebaseResult.conflicts,
-              },
-              'Pre-merge rebase produced conflicts — entering merge_pending for manual resolution',
-            );
-            return { kind: 'merge_pending', blockReason };
-          }
-
-          // Rebase rewrote history → force-push so origin/<branch> matches our
-          // new HEAD. Skip the push when the rebase was a no-op (already up to
-          // date) since we already pushed above.
-          if (!rebaseResult.alreadyUpToDate) {
+        const outcome = await mergeQueue
+          .run<MergeOutcome>(queueKey, async () => {
+            assertApprovalCurrent(mergingAnchor);
+            // Fix pods make commits in the container but rely on the agent to push.
+            // Push explicitly here before attempting to complete the PR so any local
+            // commits the agent forgot (or failed) to push are flushed to the remote.
+            // Pass the PAT so we don't depend on the in-memory cache, which is
+            // evicted whenever any sibling worktree on the same bare repo is
+            // cleaned up (local-worktree-manager.ts cleanup()).
+            let publishedSource: Awaited<ReturnType<typeof publishApprovalBranch>>;
+            const useForce = forceWithLeaseAllowances.has(podId);
             try {
-              await worktreeManager.pushBranch(worktreePath, branch, {
-                force: true,
-                pat: await resolveGitCredential(approveProfile),
-              });
-              emitActivityStatus(podId, 'Rebased branch pushed');
+              publishedSource = await deliveryOperation(async () =>
+                publishApprovalBranch(mergingAnchor, {
+                  pat: await deliveryCredential(approveProfile),
+                  ...(useForce ? { force: true } : {}),
+                }),
+              );
+              forceWithLeaseAllowances.delete(podId);
+              emitActivityStatus(podId, 'Branch pushed');
             } catch (pushErr) {
+              assertApprovalCurrent(mergingAnchor);
               const reason = pushErr instanceof Error ? pushErr.message : String(pushErr);
-              const blockReason = `Force-push after rebase failed: ${reason}`;
+              const blockReason = `Push to origin failed: ${reason}`;
               logger.warn(
                 { err: pushErr, podId },
-                'Force-push after rebase failed — entering merge_pending instead of merging stale origin',
+                'Pre-merge push failed — retaining source for explicit approval retry',
               );
-              return { kind: 'merge_pending', blockReason };
+              return { kind: 'merge_failed', reason: blockReason };
             }
-          }
 
-          // Daemon-side approval gate: check the PR's review decision before attempting
-          // to merge. If the platform reports that a review is still required or changes
-          // were requested, enter merge_pending and let the poller wait for approval.
-          // This ensures the daemon never bypasses required review gates even when
-          // GitHub auto-merge is enabled.
-          try {
-            const prStatus = await prManager.getPrStatus({ prUrl, worktreePath });
-            if (prStatus.reviewDecision && prStatus.reviewDecision !== 'APPROVED') {
-              const blockReason = `Waiting for PR review approval (current decision: ${prStatus.reviewDecision})`;
+            // Pre-merge rebase onto latest origin/<base>. Catches conflicts
+            // *before* the PR merge attempt so an agent (or fix pod) gets to
+            // resolve them while it still has full task context, instead of
+            // discovering the conflict via GitHub's merge gate after the fact.
+            // Runs inside the merge queue so the rebase always sees the freshly
+            // merged state of any preceding pod on the same base.
+            emitActivityStatus(podId, `Rebasing onto origin/${mergeBaseBranch}…`);
+            const rebaseResult = await deliveryOperation(async () =>
+              worktreeManager.rebaseOntoBase({
+                worktreePath,
+                baseBranch: mergeBaseBranch,
+                pat: await deliveryCredential(approveProfile),
+              }),
+            );
+
+            if (!rebaseResult.rebased) {
+              const blockReason = formatRebaseConflictReason(
+                mergeBaseBranch,
+                rebaseResult.conflicts,
+              );
               logger.info(
-                { podId, prUrl, reviewDecision: prStatus.reviewDecision },
-                'Merge deferred — PR requires explicit approval before daemon will merge',
+                {
+                  podId,
+                  prUrl,
+                  baseBranch: mergeBaseBranch,
+                  conflicts: rebaseResult.conflicts,
+                },
+                'Pre-merge rebase produced conflicts — retaining source for manual resolution',
               );
-              return { kind: 'merge_pending', blockReason };
+              return { kind: 'merge_failed', reason: blockReason };
             }
-          } catch (statusErr) {
-            // Non-fatal: if we can't determine review status, proceed with the merge attempt
-            logger.warn(
-              { err: statusErr, podId, prUrl },
-              'Failed to check PR review decision before merge — proceeding anyway',
-            );
-          }
 
-          emitActivityStatus(podId, `Merging PR: ${prUrl}`);
-          try {
-            const mergeResult = await prManager.mergePr({
-              worktreePath,
-              prUrl,
-              squash: options?.squash,
-            });
-
-            if (mergeResult.merged) {
-              return { kind: 'merged' };
+            // Rebase rewrote history → force-push so origin/<branch> matches our
+            // new HEAD. Skip the push when the rebase was a no-op (already up to
+            // date) since we already pushed above.
+            if (!rebaseResult.alreadyUpToDate) {
+              try {
+                publishedSource = await deliveryOperation(async () =>
+                  publishApprovalBranch(mergingAnchor, {
+                    force: true,
+                    pat: await deliveryCredential(approveProfile),
+                  }),
+                );
+                emitActivityStatus(podId, 'Rebased branch pushed');
+              } catch (pushErr) {
+                assertApprovalCurrent(mergingAnchor);
+                const reason = pushErr instanceof Error ? pushErr.message : String(pushErr);
+                const blockReason = `Force-push after rebase failed: ${reason}`;
+                logger.warn(
+                  { err: pushErr, podId },
+                  'Force-push after rebase failed — retaining source for explicit approval retry',
+                );
+                return { kind: 'merge_failed', reason: blockReason };
+              }
             }
-            // Merge didn't complete immediately — enter merge_pending state
-            const initialStatus = await prManager.getPrStatus({ prUrl, worktreePath });
-            const blockReason = initialStatus.blockReason ?? 'Waiting for merge conditions';
-            logger.info(
-              {
-                podId,
-                prUrl,
-                blockReason,
-                autoMerge: mergeResult.autoMergeScheduled,
-              },
-              'Pod approved — merge pending',
-            );
-            return { kind: 'merge_pending', blockReason };
-          } catch (err) {
-            logger.error({ err, podId, prUrl }, 'Failed to merge PR');
-            // Merge command failed — check if the PR is blocked by checks/reviews
+
+            planApprovalSource(publishedSource, prUrl, mergeBaseBranch);
+
+            // Daemon-side approval gate: check the PR's review decision before attempting
+            // to merge. If the platform reports that a review is still required or changes
+            // were requested, enter merge_pending and let the poller wait for approval.
+            // This ensures the daemon never bypasses required review gates even when
+            // GitHub auto-merge is enabled.
             try {
-              const fallbackStatus = await prManager.getPrStatus({ prUrl, worktreePath });
-              if (fallbackStatus.open && !fallbackStatus.merged) {
-                const blockReason =
-                  fallbackStatus.blockReason ?? 'Merge failed — waiting for conditions';
+              const prStatus = await deliveryOperation(async () =>
+                prManager.getPrStatus({ prUrl, worktreePath }),
+              );
+              if (prStatus.merged || !prStatus.open)
+                return {
+                  kind: 'merge_failed',
+                  reason:
+                    'The PR changed external disposition before merge admission; reconcile the retained source.',
+                };
+              if (prStatus.reviewDecision && prStatus.reviewDecision !== 'APPROVED') {
+                const blockReason = `Waiting for PR review approval (current decision: ${prStatus.reviewDecision})`;
                 logger.info(
-                  { podId, prUrl, blockReason },
-                  'Merge failed but PR is open — entering merge_pending',
+                  { podId, prUrl, reviewDecision: prStatus.reviewDecision },
+                  'Merge deferred — PR requires explicit approval before daemon will merge',
                 );
                 return { kind: 'merge_pending', blockReason };
               }
             } catch (statusErr) {
+              assertApprovalCurrent(mergingAnchor);
+              // Unknown review evidence cannot authorize a merge.
               logger.warn(
-                { err: statusErr, podId },
-                'Failed to check PR status after merge failure',
+                { err: statusErr, podId, prUrl },
+                'Failed to check PR review decision before merge — retaining resources',
               );
+              return { kind: 'merge_failed', reason: 'PR review status is unavailable.' };
             }
-            return { kind: 'merge_failed' };
-          }
-        });
 
+            emitActivityStatus(podId, `Merging PR: ${prUrl}`);
+            try {
+              const mergeResult = await deliveryOperation(async () =>
+                mergeApprovalSource(publishedSource, prManager, {
+                  onPrepared: () => assertApprovalCurrent(mergingAnchor),
+                  expectedHeadSha: publishedSource.commitSha,
+                  expectedTarget: {
+                    repository: publishedSource.repository,
+                    branch: publishedSource.branch,
+                    baseBranch: mergeBaseBranch,
+                  },
+                  worktreePath,
+                  prUrl,
+                  squash: options?.squash,
+                }),
+              );
+
+              if (mergeResult.merged) {
+                return { kind: 'merged' };
+              }
+              // Merge didn't complete immediately — enter merge_pending state
+              const initialStatus = await deliveryOperation(async () =>
+                prManager.getPrStatus({ prUrl, worktreePath }),
+              );
+              const blockReason = initialStatus.blockReason ?? 'Waiting for merge conditions';
+              logger.info(
+                {
+                  podId,
+                  prUrl,
+                  blockReason,
+                  autoMerge: mergeResult.autoMergeScheduled,
+                },
+                'Pod approved — merge pending',
+              );
+              return { kind: 'merge_pending', blockReason };
+            } catch (err) {
+              assertApprovalCurrent(mergingAnchor);
+              logger.error({ err, podId, prUrl }, 'Failed to merge PR');
+              return { kind: 'merge_failed', reason: 'PR merge could not be confirmed.' };
+            }
+          })
+          .catch((err): MergeOutcome => {
+            assertApprovalCurrent(mergingAnchor);
+            logger.error({ err, podId }, 'Approval delivery operation failed; retaining resources');
+            return { kind: 'merge_failed', reason: 'PR preparation did not complete.' };
+          });
+
+        assertApprovalCurrent(mergingAnchor);
         if (outcome.kind === 'merged') {
           emitActivityStatus(podId, 'PR merged successfully');
         } else if (outcome.kind === 'merge_pending') {
           emitActivityStatus(podId, `Merge pending: ${outcome.blockReason}`);
+          assertApprovalCurrent(mergingAnchor);
           transition(s2, 'merge_pending', { mergeBlockReason: outcome.blockReason });
+          assertApprovalCurrent({ ...pod, status: 'merge_pending' });
           startMergePolling(podId);
           return;
         } else {
-          emitActivityStatus(podId, 'PR merge failed — pod still completing');
+          failDelivery(outcome.reason);
         }
       } else if (!pod.prUrl && prManager && pod.worktreePath && pod.options?.output !== 'branch') {
         // PR creation failed during validation — retry it now
@@ -11457,47 +12868,53 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         let retryPrUrl: string | null = null;
         try {
           const retryProfile = profileStore.get(pod.profileName);
-          await worktreeManager.mergeBranch({
-            worktreePath: pod.worktreePath,
-            // Push the feature branch up so the PR can be opened against the resolved base.
-            targetBranch: pod.branch,
-            // Pass the PAT explicitly — approval retry runs post-container, so the
-            // in-memory PAT cache may be cold after a daemon restart.
-            pat: await resolveGitCredential(retryProfile),
-            // Post-container retry: sync-back already happened (or failed silently) upstream;
-            // belt-and-suspenders autocommit here must not commit a phantom mass-deletion.
-            maxDeletions: 0,
-            // Provide pod task as context for any auto-generated commit message.
-            podTask: pod.task,
-            profile: retryProfile,
-            podModel: pod.model,
-          });
+          const publishedSource = await deliveryOperation(async () =>
+            commitAndPublishApprovalBranch(mergingAnchor, {
+              worktreePath: pod.worktreePath,
+              // Push the feature branch up so the PR can be opened against the resolved base.
+              targetBranch: pod.branch,
+              // Pass the PAT explicitly — approval retry runs post-container, so the
+              // in-memory PAT cache may be cold after a daemon restart.
+              pat: await deliveryCredential(retryProfile),
+              // Post-container retry: sync-back already happened (or failed silently) upstream;
+              // belt-and-suspenders autocommit here must not commit a phantom mass-deletion.
+              maxDeletions: 0,
+              // Provide pod task as context for any auto-generated commit message.
+              podTask: pod.task,
+              profile: retryProfile,
+              podModel: pod.model,
+            }),
+          );
           const baseBranch = resolvePrBaseBranch(pod, retryProfile);
-          await ensurePrBaseBranchOnOrigin(pod, retryProfile, baseBranch, 'approval_retry');
-          const createResult = await prManager.createPr({
-            // biome-ignore lint/style/noNonNullAssertion: worktreePath is non-null in approval retry — pods reach approved only after successful validation which requires a worktree
-            worktreePath: pod.worktreePath!,
-            repoUrl: retryProfile.repoUrl ?? undefined,
-            branch: pod.branch,
-            baseBranch,
-            podId,
-            task: pod.task,
-            profileName: pod.profileName,
-            profile: retryProfile,
-            podModel: pod.model,
-            handoffInstructions: pod.handoffInstructions ?? undefined,
-            validationResult: null,
-            validationWaiver: pod.validationWaiver,
-            filesChanged: pod.filesChanged,
-            linesAdded: pod.linesAdded,
-            linesRemoved: pod.linesRemoved,
-            previewUrl: pod.previewUrl,
-            screenshots: [],
-            taskSummary: pod.taskSummary ?? undefined,
-            seriesDescription: pod.seriesDescription ?? undefined,
-            seriesName: pod.seriesName ?? undefined,
-            securityFindings: getLatestPushFindings(podId),
-          });
+          await deliveryOperation(async () =>
+            ensurePrBaseBranchOnOrigin(pod, retryProfile, baseBranch, 'approval_retry'),
+          );
+          const createResult = await deliveryOperation(async () =>
+            prManager.createPr({
+              // biome-ignore lint/style/noNonNullAssertion: worktreePath is non-null in approval retry — pods reach approved only after successful validation which requires a worktree
+              worktreePath: pod.worktreePath!,
+              repoUrl: retryProfile.repoUrl ?? undefined,
+              branch: pod.branch,
+              baseBranch,
+              podId,
+              task: pod.task,
+              profileName: pod.profileName,
+              profile: retryProfile,
+              podModel: pod.model,
+              handoffInstructions: pod.handoffInstructions ?? undefined,
+              validationResult: null,
+              validationWaiver: pod.validationWaiver,
+              filesChanged: pod.filesChanged,
+              linesAdded: pod.linesAdded,
+              linesRemoved: pod.linesRemoved,
+              previewUrl: pod.previewUrl,
+              screenshots: [],
+              taskSummary: pod.taskSummary ?? undefined,
+              seriesDescription: pod.seriesDescription ?? undefined,
+              seriesName: pod.seriesName ?? undefined,
+              securityFindings: getLatestPushFindings(podId),
+            }),
+          );
           const newPrUrl = createResult.url;
           retryPrUrl = newPrUrl;
           if (createResult.usedFallback) {
@@ -11519,78 +12936,116 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
             );
             emitActivityStatus(podId, `PR ${which} used template fallback: ${reason}`);
           }
+          assertApprovalCurrent(mergingAnchor);
           podRepo.update(podId, { prUrl: newPrUrl });
           emitActivityStatus(podId, `PR created: ${newPrUrl}`);
-          const retryMergeResult = await prManager.mergePr({
-            worktreePath: pod.worktreePath,
-            prUrl: newPrUrl,
-            squash: options?.squash,
-          });
+          planApprovalSource(publishedSource, newPrUrl, baseBranch);
+          const reviewStatus = await deliveryOperation(async () =>
+            prManager.getPrStatus({ prUrl: newPrUrl, worktreePath: pod.worktreePath }),
+          );
+          if (reviewStatus.merged || !reviewStatus.open)
+            mergeReconciliation(
+              'The PR has an external disposition without a recorded daemon merge.',
+            );
+          if (reviewStatus.reviewDecision && reviewStatus.reviewDecision !== 'APPROVED') {
+            const blockReason = `Waiting for PR review approval (current decision: ${reviewStatus.reviewDecision})`;
+            transition(s2, 'merge_pending', { mergeBlockReason: blockReason });
+            assertApprovalCurrent({ ...pod, status: 'merge_pending' });
+            startMergePolling(podId);
+            return;
+          }
+          const retryMergeResult = await deliveryOperation(async () =>
+            mergeApprovalSource(publishedSource, prManager, {
+              onPrepared: () => assertApprovalCurrent(mergingAnchor),
+              expectedHeadSha: publishedSource.commitSha,
+              expectedTarget: {
+                repository: publishedSource.repository,
+                branch: publishedSource.branch,
+                baseBranch,
+              },
+              worktreePath: pod.worktreePath,
+              prUrl: newPrUrl,
+              squash: options?.squash,
+            }),
+          );
           if (retryMergeResult.merged) {
             emitActivityStatus(podId, 'PR merged successfully');
           } else {
-            const retryStatus = await prManager.getPrStatus({
-              prUrl: newPrUrl,
-              worktreePath: pod.worktreePath,
-            });
+            const retryStatus = await deliveryOperation(async () =>
+              prManager.getPrStatus({
+                prUrl: newPrUrl,
+                worktreePath: pod.worktreePath,
+              }),
+            );
             const blockReason = retryStatus.blockReason ?? 'Waiting for merge conditions';
             emitActivityStatus(podId, `Merge pending: ${blockReason}`);
+            assertApprovalCurrent(mergingAnchor);
             transition(s2, 'merge_pending', { mergeBlockReason: blockReason });
+            assertApprovalCurrent({ ...pod, status: 'merge_pending' });
             startMergePolling(podId);
             return;
           }
         } catch (err) {
+          assertApprovalCurrent(mergingAnchor);
           logger.error({ err, podId }, 'Failed to create/merge PR during approval');
           if (handleDeletionGuardError(podId, err)) {
-            transition(s2, 'validated');
-            return;
+            failDelivery('Source synchronization was rejected by the deletion guard.');
           }
           const message = err instanceof Error ? err.message : String(err);
-          if (retryPrUrl) {
-            const blockReason = `Merge after PR creation failed: ${message}`;
-            emitActivityStatus(podId, `Merge pending: ${blockReason}`);
-            transition(s2, 'merge_pending', { mergeBlockReason: blockReason });
-            startMergePolling(podId);
-            return;
-          }
+          if (retryPrUrl)
+            failDelivery(`Merge after PR creation could not be confirmed: ${message}`);
           emitActivityStatus(podId, `PR creation failed: ${message} — pod returned to validated`);
-          transition(s2, 'validated');
-          return;
+          failDelivery('PR creation did not complete.');
         }
       } else if (pod.worktreePath) {
         // Fallback: no PR manager configured — push branch directly
         emitActivityStatus(podId, 'Pushing branch…');
         try {
           const profile = profileStore.get(pod.profileName);
-          await worktreeManager.mergeBranch({
-            worktreePath: pod.worktreePath,
-            // Push the feature branch up to origin — no PR manager configured, so this is the
-            // last step. Pushing onto profile.defaultBranch would force-push the feature work
-            // straight onto main, which is never what we want.
-            targetBranch: pod.branch,
-            // Pass the PAT explicitly — fallback push runs post-container, so the
-            // in-memory PAT cache may be cold after a daemon restart.
-            pat: await resolveGitCredential(profile),
-            // Post-container fallback push: don't let a stale worktree commit a phantom mass-delete.
-            maxDeletions: 0,
-            podTask: pod.task,
-            profile,
-            podModel: pod.model,
-          });
+          await deliveryOperation(async () =>
+            commitAndPublishApprovalBranch(mergingAnchor, {
+              worktreePath: pod.worktreePath,
+              // Push the feature branch up to origin — no PR manager configured, so this is the
+              // last step. Pushing onto profile.defaultBranch would force-push the feature work
+              // straight onto main, which is never what we want.
+              targetBranch: pod.branch,
+              // Pass the PAT explicitly — fallback push runs post-container, so the
+              // in-memory PAT cache may be cold after a daemon restart.
+              pat: await deliveryCredential(profile),
+              // Post-container fallback push: don't let a stale worktree commit a phantom mass-delete.
+              maxDeletions: 0,
+              podTask: pod.task,
+              profile,
+              podModel: pod.model,
+            }),
+          );
           emitActivityStatus(podId, 'Branch pushed successfully');
         } catch (err) {
+          assertApprovalCurrent(mergingAnchor);
           logger.error({ err, podId }, 'Failed to push branch during approval');
           if (!handleDeletionGuardError(podId, err)) {
             const message = err instanceof Error ? err.message : String(err);
-            emitActivityStatus(podId, `Branch push failed: ${message} — pod still completing`);
+            emitActivityStatus(podId, `Branch push failed: ${message} — resources retained`);
           }
+          failDelivery('Branch push did not complete.');
         }
       }
 
-      emitActivityStatus(podId, 'Pod complete');
-      await cleanupContainerAfterAdvisorySettles(pod, 'approve-complete');
-      const completedPod = transition(s2, 'complete', { completedAt: new Date().toISOString() });
+      assertApprovalCurrent(mergingAnchor);
+      await cleanupContainerAfterAdvisorySettles(s2, 'approve-complete', 'kill', () =>
+        assertApprovalCurrent(mergingAnchor, { allowRemovedContainer: true, allowComplete: true }),
+      );
+      assertApprovalCurrent(mergingAnchor, { allowRemovedContainer: true });
+      const completedPod = transition(s2, 'complete', {
+        completedAt: new Date().toISOString(),
+        ...(pod.failureReason?.startsWith('Approval delivery failed.')
+          ? { failureReason: null }
+          : {}),
+      });
+      assertApprovalCurrent({ ...pod, status: 'complete' }, { allowRemovedContainer: true });
 
+      emitActivityStatus(podId, 'Pod complete');
+      assertApprovalCurrent({ ...pod, status: 'complete' }, { allowRemovedContainer: true });
       eventBus.emit({
         type: 'pod.completed',
         timestamp: new Date().toISOString(),
@@ -11610,6 +13065,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
       });
 
       logger.info({ podId, prUrl: pod.prUrl }, 'Pod approved and completed');
+      assertApprovalCurrent({ ...pod, status: 'complete' }, { allowRemovedContainer: true });
       maybeTriggerDependents(completedPod);
     },
 
@@ -11678,6 +13134,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         // Resume agent with rejection feedback
         const resumeEnv = await getResumeEnv(pod);
         const runtime = runtimeRegistry.get(pod.runtime);
+        await recordContinuationProvenance(pod, pod.containerId);
         primeRuntimeForResume(pod, runtime, pod.containerId, resumeEnv);
         const events = runtime.resume(podId, rejectionMessage, pod.containerId, resumeEnv);
         const outcome = await this.consumeAgentEvents(
@@ -11685,6 +13142,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           events,
           deriveAgentAttempt(pod.phaseTokenUsage),
         );
+        if (outcome === 'stopped') return;
         await persistRuntimeCredentialsForPod(
           podId,
           'Failed to persist rotated credentials after rejection resume',
@@ -11694,6 +13152,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         }
       } catch (err) {
         // Roll back to failed — don't leave the pod stuck in 'running' with no agent
+        if (err instanceof AgentContinuationSupersededError) throw err;
         logger.error({ err, podId }, 'Failed to resume agent after rejection');
         const s = podRepo.getOrThrow(podId);
         if (!isTerminalState(s.status)) {
@@ -11796,6 +13255,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
     },
 
     async killSession(podId: string): Promise<void> {
+      podRepo.deletionOwnership?.assertTaskAvailable(podId);
       clearPreviewTimer(podId);
       await stopSandboxPreviewProxy(podId);
       stopMergePolling(podId);
@@ -12036,214 +13496,219 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
       },
     ): Promise<{ pushError?: string; promotedTo?: 'pr' | 'branch' | 'artifact' | 'none' }> {
       const pod = podRepo.getOrThrow(podId);
-
-      if (pod.options.agentMode !== 'interactive') {
-        throw new AutopodError(
-          'Only interactive pods can be completed via this endpoint',
-          'INVALID_OUTPUT_MODE',
-          400,
-        );
-      }
-
-      if (pod.status !== 'running') {
-        throw new AutopodError(
-          `Cannot complete pod in status '${pod.status}' — must be 'running'`,
-          'INVALID_STATE',
-          409,
-        );
-      }
-
-      // If caller asked us to promote (e.g. `ap complete <id> --pr`), hand off
-      // into the agent-driven flow instead of just pushing + completing.
-      if (options?.promoteTo && options.promoteTo !== 'branch') {
-        await this.promoteToAuto(podId, options.promoteTo, {
-          instructions: options.instructions,
-          skipAgent: options.skipAgent,
-        });
-        return { promotedTo: options.promoteTo };
-      }
-
-      let pushError: string | undefined;
-
-      if (pod.options.output === 'artifact') {
-        // Artifact pods: tar-stream /workspace out to the host data dir and
-        // complete. Mirrors the auto-mode path in processPod (~line 2362), minus
-        // the optional branch push — if the user picked `artifact` they want a
-        // file drop, not a PR. To get a branch in the same motion, promote
-        // via `ap complete <id> --pr`.
-        const dataDir = process.env.DATA_DIR ?? path.join(process.cwd(), '.autopod-data');
-        const artifactsPath = path.join(dataDir, 'artifacts', podId);
-        await mkdir(artifactsPath, { recursive: true });
-
-        if (pod.containerId) {
-          const cm = containerManagerFactory.get(pod.executionTarget);
-          try {
-            emitActivityStatus(podId, 'Collecting artifacts…');
-            await cm.extractDirectoryFromContainer(pod.containerId, '/workspace', artifactsPath);
-            logger.info({ podId, artifactsPath }, 'Artifacts extracted from container');
-          } catch (err) {
-            logger.warn(
-              { err, podId },
-              'Failed to extract artifacts — completing with empty artifact store',
-            );
-          }
-        }
-
-        podRepo.update(podId, { artifactsPath });
-      } else {
-        // Sync workspace changes back to host worktree before pushing
-        let workspaceSyncOk = true;
-        if (pod.containerId && pod.worktreePath) {
-          try {
-            const cm = containerManagerFactory.get(pod.executionTarget);
-            await syncWorkspaceBack(
-              pod.containerId,
-              pod.worktreePath,
-              cm,
-              podId,
-              pod.executionTarget,
-            );
-          } catch (err) {
-            workspaceSyncOk = false;
-            logger.warn({ err, podId }, 'Failed to sync workspace before push');
-          }
-        }
-
-        // Push the branch to origin before completing, then clean up the worktree.
-        // Only remove the worktree if push succeeds — don't lose uncommitted work.
-        if (pod.worktreePath) {
-          try {
-            // Pre-push security scan for workspace-pod auto-push. The engine
-            // rewrites block→escalate for workspace pods at the push checkpoint
-            // so the human at the keyboard sees the warning rather than a hard
-            // fail; runPushCheckpointScan only throws when block stays a block,
-            // which happens for non-workspace pods (handled at validating entry).
-            const pushScanProfile = profileStore.get(pod.profileName);
-            await runPushCheckpointScan(pod, pushScanProfile);
-            // Refuse to push a workspace pod directly to the default branch — this almost
-            // always means the user passed `--branch main` by mistake. fixManually() pods
-            // have linkedPodId set and are explicitly exempt.
-            const completionBaseBranch = pod.baseBranch ?? pushScanProfile?.defaultBranch ?? 'main';
-            if (!pod.linkedPodId && pod.branch === completionBaseBranch) {
-              throw new AutopodError(
-                `Refusing to push workspace pod directly to default branch '${pod.branch}'. Use ap complete <id> --pr or check out a feature branch first.`,
-                'INVALID_STATE',
-                409,
-              );
-            }
-            // mergeBranch auto-commits any remaining uncommitted changes before pushing.
-            // If sync-back failed, the host worktree may be missing files the index still
-            // references — tighten the deletion guard so a ghost mass-delete cannot ship.
-            const rawTask = pod.task?.trim() ?? '';
-            const commitMessage =
-              rawTask.length > 0
-                ? rawTask.length > 72
-                  ? `${rawTask.slice(0, 69)}...`
-                  : rawTask
-                : 'chore: workspace session complete';
-            await worktreeManager.mergeBranch({
-              worktreePath: pod.worktreePath,
-              targetBranch: pod.branch ?? 'HEAD',
-              // Pass the PAT explicitly — workspace pods auto-push on container exit,
-              // possibly hours/days after the worktree was created. The in-memory PAT
-              // cache may be cold after a daemon restart in between.
-              pat: await resolveGitCredential(pushScanProfile),
-              maxDeletions: workspaceSyncOk ? 100 : 0,
-              commitMessage,
-            });
-            logger.info({ podId, branch: pod.branch }, 'Workspace branch pushed to origin');
-            // Safe to clean up — work is in origin
-            try {
-              await worktreeManager.cleanup(pod.worktreePath);
-              logger.info({ podId }, 'Workspace worktree cleaned up');
-            } catch (err) {
-              logger.warn({ err, podId }, 'Failed to cleanup workspace worktree');
-            }
-          } catch (err) {
-            pushError = err instanceof Error ? err.message : String(err);
-            logger.warn(
-              { err, podId },
-              'Failed to push workspace branch — completing anyway, worktree preserved',
-            );
-            handleDeletionGuardError(podId, err);
-          }
-        }
-      }
-
-      emitActivityStatus(podId, 'Pod complete');
-      await cleanupContainer(pod, 'workspace-complete');
-      transition(pod, 'complete', { completedAt: new Date().toISOString() });
-
-      // Deactivate PIM groups on pod completion
-      if (pod.pimGroups?.length && pod.userId) {
-        try {
-          const { createPimClient } = await import('../actions/handlers/azure-pim-handler.js');
-          const pimClient = createPimClient(deps.getSecret, logger);
-          for (const group of pod.pimGroups) {
-            try {
-              await pimClient.deactivate(group.groupId, pod.userId);
-              logger.info({ podId, groupId: group.groupId }, 'PIM group deactivated');
-            } catch (err) {
-              logger.warn(
-                { err, podId, groupId: group.groupId },
-                'PIM deactivation failed — continuing',
-              );
-            }
-          }
-        } catch (err) {
-          logger.warn({ err, podId }, 'Failed to load PIM client for deactivation');
-        }
-      }
-
-      eventBus.emit({
-        type: 'pod.completed',
-        timestamp: new Date().toISOString(),
-        podId,
-        finalStatus: 'complete',
-        summary: {
-          id: podId,
-          profileName: pod.profileName,
-          task: pod.task,
-          status: 'complete',
-          model: pod.model,
-          runtime: pod.runtime,
-          duration: pod.startedAt ? Date.now() - new Date(pod.startedAt).getTime() : null,
-          filesChanged: pod.filesChanged,
-          createdAt: pod.createdAt,
-        },
-      });
-
-      // Auto-revalidate linked worker pod if this workspace was a fix
-      if (pod.linkedPodId && !pushError) {
-        try {
-          const linked = podRepo.getOrThrow(pod.linkedPodId);
-          if (linked.status === 'failed' || linked.status === 'review_required') {
-            logger.info(
-              { workspaceId: podId, workerId: pod.linkedPodId },
-              'Workspace completed — auto-revalidating linked worker',
-            );
-            emitActivityStatus(
-              pod.linkedPodId,
-              `Linked workspace ${podId} completed — pulling changes and revalidating…`,
-            );
-            // Fire and forget — don't block workspace completion on revalidation
-            this.revalidateSession(pod.linkedPodId).catch((err) => {
-              logger.warn(
-                { err, workspaceId: podId, workerId: pod.linkedPodId },
-                'Auto-revalidation of linked worker failed',
-              );
-            });
-          }
-        } catch (err) {
-          logger.warn(
-            { err, podId, linkedPodId: pod.linkedPodId },
-            'Failed to check linked pod for auto-revalidation',
+      return coordinateInteractiveCompletion(pod, options, async () => {
+        if (pod.options.agentMode !== 'interactive') {
+          throw new AutopodError(
+            'Only interactive pods can be completed via this endpoint',
+            'INVALID_OUTPUT_MODE',
+            400,
           );
         }
-      }
 
-      logger.info({ podId, pushError }, 'Workspace pod completed');
-      return { pushError };
+        if (pod.status !== 'running') {
+          throw new AutopodError(
+            `Cannot complete pod in status '${pod.status}' — must be 'running'`,
+            'INVALID_STATE',
+            409,
+          );
+        }
+
+        assertInteractiveCompletionCurrent(pod);
+
+        // If caller asked us to promote (e.g. `ap complete <id> --pr`), hand off
+        // into the agent-driven flow instead of just pushing + completing.
+        if (options?.promoteTo && options.promoteTo !== 'branch') {
+          await this.promoteToAuto(podId, options.promoteTo, {
+            instructions: options.instructions,
+            skipAgent: options.skipAgent,
+          });
+          return { promotedTo: options.promoteTo };
+        }
+
+        let pushError: string | undefined;
+
+        if (pod.options.output === 'artifact') {
+          // An interactive completion remains retryable if copying fails. No source
+          // cleanup or terminal success can run before the snapshot is published.
+          await preserveArtifacts(pod);
+        } else {
+          // Sync workspace changes back to host worktree before pushing
+          if (pod.containerId && !pod.worktreePath && pod.options.output !== 'none')
+            failInteractivePreservation(pod, 'The host worktree is unavailable.');
+          if (pod.containerId && pod.worktreePath) {
+            try {
+              const cm = containerManagerFactory.get(pod.executionTarget);
+              await syncWorkspaceBack(
+                pod.containerId,
+                pod.worktreePath,
+                cm,
+                podId,
+                pod.executionTarget,
+              );
+            } catch (err) {
+              logger.warn({ err, podId }, 'Failed to sync workspace before push');
+              failInteractivePreservation(
+                pod,
+                'Neither workspace synchronization nor archive fallback succeeded.',
+              );
+            }
+          }
+
+          assertInteractiveCompletionCurrent(pod);
+
+          // Push the branch to origin before completing, then clean up the worktree.
+          // Only remove the worktree if push succeeds — don't lose uncommitted work.
+          if (pod.worktreePath) {
+            try {
+              // Pre-push security scan for workspace-pod auto-push. The engine
+              // rewrites block→escalate for workspace pods at the push checkpoint
+              // so the human at the keyboard sees the warning rather than a hard
+              // fail; runPushCheckpointScan only throws when block stays a block,
+              // which happens for non-workspace pods (handled at validating entry).
+              const pushScanProfile = profileStore.get(pod.profileName);
+              await runPushCheckpointScan(pod, pushScanProfile);
+              assertInteractiveCompletionCurrent(pod);
+              // Refuse to push a workspace pod directly to the default branch — this almost
+              // always means the user passed `--branch main` by mistake. fixManually() pods
+              // have linkedPodId set and are explicitly exempt.
+              const completionBaseBranch =
+                pod.baseBranch ?? pushScanProfile?.defaultBranch ?? 'main';
+              if (!pod.linkedPodId && pod.branch === completionBaseBranch) {
+                throw new AutopodError(
+                  `Refusing to push workspace pod directly to default branch '${pod.branch}'. Use ap complete <id> --pr or check out a feature branch first.`,
+                  'INVALID_STATE',
+                  409,
+                );
+              }
+              // mergeBranch auto-commits any remaining uncommitted changes before pushing.
+              // Sync-back must succeed before this point; retain the normal deletion guard.
+              const rawTask = pod.task?.trim() ?? '';
+              const commitMessage =
+                rawTask.length > 0
+                  ? rawTask.length > 72
+                    ? `${rawTask.slice(0, 69)}...`
+                    : rawTask
+                  : 'chore: workspace session complete';
+              const pushCredential = await resolveGitCredential(pushScanProfile);
+              assertInteractiveCompletionCurrent(pod);
+              await worktreeManager.mergeBranch({
+                worktreePath: pod.worktreePath,
+                targetBranch: pod.branch ?? 'HEAD',
+                // Pass the PAT explicitly — workspace pods auto-push on container exit,
+                // possibly hours/days after the worktree was created. The in-memory PAT
+                // cache may be cold after a daemon restart in between.
+                pat: pushCredential,
+                maxDeletions: 100,
+                commitMessage,
+              });
+              assertInteractiveCompletionCurrent(pod);
+              logger.info({ podId, branch: pod.branch }, 'Workspace branch pushed to origin');
+              // Safe to clean up — work is in origin
+              try {
+                await worktreeManager.cleanup(pod.worktreePath);
+                logger.info({ podId }, 'Workspace worktree cleaned up');
+              } catch (err) {
+                logger.warn({ err, podId }, 'Failed to cleanup workspace worktree');
+              }
+            } catch (err) {
+              assertInteractiveCompletionCurrent(pod);
+              pushError = err instanceof Error ? err.message : String(err);
+              logger.warn(
+                { err, podId },
+                'Failed to push workspace branch — completing anyway, worktree preserved',
+              );
+              handleDeletionGuardError(podId, err);
+            }
+          }
+        }
+
+        assertInteractiveCompletionCurrent(pod);
+        emitActivityStatus(podId, 'Pod complete');
+        await cleanupContainer(pod, 'workspace-complete', 'kill', () =>
+          assertInteractiveCompletionCurrent(pod),
+        );
+        assertInteractiveCompletionCurrent(pod, true);
+        const completingPod = podRepo.getOrThrow(podId);
+        transition(completingPod, 'complete', {
+          completedAt: new Date().toISOString(),
+          ...(completingPod.failureReason?.startsWith('Workspace preservation failed.')
+            ? { failureReason: null }
+            : {}),
+        });
+
+        // Deactivate PIM groups on pod completion
+        if (pod.pimGroups?.length && pod.userId) {
+          try {
+            const { createPimClient } = await import('../actions/handlers/azure-pim-handler.js');
+            const pimClient = createPimClient(deps.getSecret, logger);
+            for (const group of pod.pimGroups) {
+              try {
+                await pimClient.deactivate(group.groupId, pod.userId);
+                logger.info({ podId, groupId: group.groupId }, 'PIM group deactivated');
+              } catch (err) {
+                logger.warn(
+                  { err, podId, groupId: group.groupId },
+                  'PIM deactivation failed — continuing',
+                );
+              }
+            }
+          } catch (err) {
+            logger.warn({ err, podId }, 'Failed to load PIM client for deactivation');
+          }
+        }
+
+        if (podRepo.getOrThrow(podId).lifecycleGeneration !== pod.lifecycleGeneration)
+          return { pushError };
+        eventBus.emit({
+          type: 'pod.completed',
+          timestamp: new Date().toISOString(),
+          podId,
+          finalStatus: 'complete',
+          summary: {
+            id: podId,
+            profileName: pod.profileName,
+            task: pod.task,
+            status: 'complete',
+            model: pod.model,
+            runtime: pod.runtime,
+            duration: pod.startedAt ? Date.now() - new Date(pod.startedAt).getTime() : null,
+            filesChanged: pod.filesChanged,
+            createdAt: pod.createdAt,
+          },
+        });
+
+        // Auto-revalidate linked worker pod if this workspace was a fix
+        if (pod.linkedPodId && !pushError) {
+          try {
+            const linked = podRepo.getOrThrow(pod.linkedPodId);
+            if (linked.status === 'failed' || linked.status === 'review_required') {
+              logger.info(
+                { workspaceId: podId, workerId: pod.linkedPodId },
+                'Workspace completed — auto-revalidating linked worker',
+              );
+              emitActivityStatus(
+                pod.linkedPodId,
+                `Linked workspace ${podId} completed — pulling changes and revalidating…`,
+              );
+              // Fire and forget — don't block workspace completion on revalidation
+              this.revalidateSession(pod.linkedPodId).catch((err) => {
+                logger.warn(
+                  { err, workspaceId: podId, workerId: pod.linkedPodId },
+                  'Auto-revalidation of linked worker failed',
+                );
+              });
+            }
+          } catch (err) {
+            logger.warn(
+              { err, podId, linkedPodId: pod.linkedPodId },
+              'Failed to check linked pod for auto-revalidation',
+            );
+          }
+        }
+
+        logger.info({ podId, pushError }, 'Workspace pod completed');
+        return { pushError };
+      });
     },
 
     async syncWorkspaceBranch(
@@ -12397,10 +13862,31 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
       await destroyPodNetwork(podId, true);
     },
 
+    assertCanRework(podId: string): void {
+      assertExecutionTerminationVerified(podId);
+      const pod = podRepo.getOrThrow(podId);
+      if (pod.options.agentMode === 'interactive') return;
+      const retries = podRepo.workerRetries;
+      if (!retries?.state(podId).retryFailure) return;
+      const profile = resolveEffectiveBoundProfile(pod);
+      retries.assertCanAdmit(
+        podId,
+        pod.lifecycleGeneration,
+        unavailableWorkerInputs,
+        workerBindingHash({
+          runtime: pod.runtime,
+          model: pod.model,
+          providerAccountId: profile.providerAccountId ?? null,
+        }),
+        [...(deps.workerInfrastructureRetryBackoffMs ?? WORKER_RETRY_BACKOFFS_MS)],
+      );
+    },
+
     async triggerValidation(
       podId: string,
       options?: { force?: boolean; validationOnly?: boolean },
     ): Promise<void> {
+      assertExecutionTerminationVerified(podId);
       const pod = podRepo.getOrThrow(podId);
       const lifecycleGeneration = pod.lifecycleGeneration;
       const lifecycleContainerId = pod.containerId;
@@ -12448,6 +13934,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
       // Interactive pods can always be re-provisioned: no agent, no validation, no worktree required.
       const isInteractive = pod.options.agentMode === 'interactive';
       if (force && fromTerminal && (pod.worktreePath || isInteractive || !pod.containerId)) {
+        this.assertCanRework(podId);
         emitActivityStatus(podId, 'Re-provisioning pod with fresh container…');
 
         // Fence stale validation and agent cleanup before awaiting any teardown.
@@ -12487,6 +13974,9 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
 
         const failedBeforeAgentWork =
           pod.status === 'failed' &&
+          // A recorded worker reservation is enough to retain its existing source.
+          // Missing session/token/summary telemetry does not prove no work happened.
+          (podRepo.workerRetries?.state(podId).admissionCount ?? 0) === 0 &&
           pod.validationAttempts === 0 &&
           pod.lastValidationResult === null &&
           pod.taskSummary === null &&
@@ -12543,7 +14033,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           completedAt: null,
           failureReason: null,
           infrastructureFailure: null,
-          infrastructureRecoveryCount: 0,
+          infrastructureRecoveryCount: pod.infrastructureRecoveryCount,
           ...(failedBeforeAgentWork
             ? {
                 filesChanged: 0,
@@ -12573,6 +14063,8 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         );
         return;
       }
+
+      assertGuidanceCollected(podId);
 
       // Pre-push security scan: inspect the diff for secrets / PII / injection
       // before running validation. block decision throws and the pod's outer
@@ -12793,6 +14285,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           sastTimeout: (profile.sastTimeout ?? 300) * 1_000,
           reviewerModel: resolveReviewerModel(reviewerProfile, logger),
           reviewerProvider: resolveReviewerProvider(reviewerProfile),
+          reviewerProviderAccountId: reviewerProfile.providerAccountId ?? null,
           reviewerProviderCredentials,
           ...(reviewerExecEnv ? { reviewerExecEnv } : {}),
           contract: pod.contract ?? undefined,
@@ -12816,16 +14309,19 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
 
         let result: Awaited<ReturnType<typeof validationEngine.validate>>;
         const validationController = new AbortController();
-        validationAbortControllers.set(podId, validationController);
+        const ownership = claimValidation(pod, validationController);
         try {
           result = await validateWithInfrastructureRetries(
             validationConfig,
             validationController,
             buildPhaseEventCallbacks(podId),
             'Validation engine threw unexpectedly',
+            ownership,
           );
+          ownership.assertCurrent();
         } finally {
-          validationAbortControllers.delete(podId);
+          if (validationAbortControllers.get(podId) === validationController)
+            validationAbortControllers.delete(podId);
         }
 
         if (!ownsLifecycle(podId, lifecycleGeneration, lifecycleContainerId)) {
@@ -13097,34 +14593,46 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
               const candidateIds = new Set(reviewCandidates.map((finding) => finding.id));
               const candidateFindingIds = [...candidateIds].sort();
               const originalReviewBatchId = effectiveResult.taskReview?.reviewBatch?.id;
+              const councilController = new AbortController();
+              const councilOwnership = claimValidation(pod, councilController);
               try {
-                const reviewOnly = await validationEngine.validate(
-                  {
-                    ...validationConfig,
-                    reviewDepth: 'deep',
-                    reviewOnly: true,
-                    councilOnly: true,
-                    preSubmitReview: null,
-                    // This is an independent adjudication of the current bytes,
-                    // not another ledger-reconciliation pass. Reusing the prior
-                    // batch here can carry the same historical finding into both
-                    // opinions without either reviewer rediscovering the defect.
-                    priorReviewBatch: undefined,
-                    skipPhases: [
-                      'setup',
-                      'lint',
-                      'sast',
-                      'build',
-                      'test',
-                      'health',
-                      'pages',
-                      'facts',
-                    ],
-                  },
-                  (phase) => emitActivityStatus(podId, phase),
-                  validationController.signal,
-                  buildPhaseEventCallbacks(podId),
+                const reviewConfig: Parameters<ValidationEngine['validate']>[0] = {
+                  ...validationConfig,
+                  reviewDepth: 'deep',
+                  reviewOnly: true,
+                  councilOnly: true,
+                  preSubmitReview: null,
+                  // This is an independent adjudication of the current bytes,
+                  // not another ledger-reconciliation pass. Reusing the prior
+                  // batch here can carry the same historical finding into both
+                  // opinions without either reviewer rediscovering the defect.
+                  priorReviewBatch: undefined,
+                  skipPhases: [
+                    'setup',
+                    'lint',
+                    'sast',
+                    'build',
+                    'test',
+                    'health',
+                    'pages',
+                    'facts',
+                  ],
+                };
+                await recordValidationProvenance(
+                  reviewConfig,
+                  'review',
+                  councilOwnership.assertCurrent,
                 );
+                councilOwnership.assertCurrent();
+                const reviewOnly = await validationEngine.validate(
+                  withReviewerLaunchPreflight(reviewConfig, councilOwnership),
+                  (phase) => {
+                    if (councilOwnership.isCurrent()) emitActivityStatus(podId, phase);
+                  },
+                  councilController.signal,
+                  ownedValidationCallbacks(councilOwnership, buildPhaseEventCallbacks(podId)),
+                );
+                councilOwnership.assertCurrent();
                 if (
                   isReviewInfrastructureOnlyFailure(reviewOnly) ||
                   reviewOnly.taskReview?.reviewBatch?.quality !== 'healthy'
@@ -13207,8 +14715,12 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
                   validationRepo?.updateResult(validationRecord.id, hoistedResult);
                 }
               } catch (err) {
+                councilOwnership.assertCurrent();
                 hoistError = err;
                 logger.warn({ err, podId }, 'Auto-hoist deeper review failed');
+              } finally {
+                if (validationAbortControllers.get(podId) === councilController)
+                  validationAbortControllers.delete(podId);
               }
 
               // The review call is asynchronous: honor a concurrent kill or
@@ -13279,12 +14791,12 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
                     response: null,
                   };
 
-                  escalationRepo.insert(escalation);
-                  podRepo.update(podId, {
-                    pendingEscalation: escalation,
-                    escalationCount: s2.escalationCount + 1,
+                  persistEscalation(podRepo, escalationRepo, escalation, () => {
+                    transition(s2, 'awaiting_input', {
+                      pendingEscalation: escalation,
+                      escalationCount: s2.escalationCount + 1,
+                    });
                   });
-                  transition(s2, 'awaiting_input');
 
                   logger.info(
                     {
@@ -13555,7 +15067,14 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
               validationConfig.advisoryBrowserQaEnabled && !!validationEngine.runAdvisoryBrowserQa,
           });
           maybeTriggerDependents(validatedPod);
-          await runAdvisoryAfterValidation(podId, validationConfig, result, validationRecord?.id);
+          await runAdvisoryAfterValidation(
+            podId,
+            validationConfig,
+            result,
+            validationRecord?.id,
+            validatedPod,
+          );
+          advisoryPublicationOwnership(validatedPod, result, validationRecord?.id).assertCurrent();
           const postAdvisoryPod = podRepo.getOrThrow(podId);
           if (isTerminalState(postAdvisoryPod.status) || postAdvisoryPod.status === 'killing') {
             return;
@@ -13635,37 +15154,29 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           // Transition back to running for retry
           transition(s2, 'running');
 
-          // Resume the agent with correction feedback. Azure's data-plane can time out before
-          // an idempotent sandbox resume setup command reaches Codex; retry that pre-turn
-          // transport failure once rather than marking the pod failed without agent rework.
+          // Only the runtime may retry a known idempotent setup command.
+          // Replaying a whole turn after a timeout is unsafe even before the
+          // first event: the provider may have accepted execution already.
           const resumeEnv = await getResumeEnv(s2);
           const runtime = runtimeRegistry.get(s2.runtime);
           if (!s2.containerId) throw new Error(`Pod ${podId} has no container`);
           let outcome: AgentRunOutcome;
-          for (let resumeAttempt = 1; ; resumeAttempt++) {
-            emitActivityStatus(
-              podId,
-              resumeAttempt === 1
-                ? 'Agent working on fixes…'
-                : 'Sandbox resume transport timed out — retrying agent feedback…',
-            );
-            try {
-              primeRuntimeForResume(s2, runtime, s2.containerId, resumeEnv);
-              const events = runtime.resume(podId, correctionMessage, s2.containerId, resumeEnv);
-              outcome = await this.consumeAgentEvents(podId, events, attempt);
-              break;
-            } catch (error) {
-              const retryableSandboxTimeout =
-                s2.executionTarget === 'sandbox' &&
-                error instanceof AutopodError &&
-                error.code === 'AZURE_SANDBOX_TIMEOUT';
-              if (!retryableSandboxTimeout || resumeAttempt >= 2) throw error;
-              logger.warn(
-                { error, podId, attempt, resumeAttempt },
-                'Sandbox validation-feedback resume timed out before agent completion — retrying',
+          emitActivityStatus(podId, 'Agent working on fixes…');
+          try {
+            await recordContinuationProvenance(s2, s2.containerId);
+            primeRuntimeForResume(s2, runtime, s2.containerId, resumeEnv);
+            const events = runtime.resume(podId, correctionMessage, s2.containerId, resumeEnv);
+            outcome = await this.consumeAgentEvents(podId, events, attempt);
+          } catch (error) {
+            if (error instanceof AutopodError && error.code === 'AZURE_SANDBOX_TIMEOUT')
+              throw new AutopodError(
+                'Agent continuation timed out with an unverified execution outcome. No automatic replay was started; retained workspace and provider history require reconciliation before another turn.',
+                'CONTINUATION_OUTCOME_UNVERIFIED',
+                409,
               );
-            }
+            throw error;
           }
+          if (outcome === 'stopped') return;
           await persistRuntimeCredentialsForPod(
             podId,
             'Failed to persist rotated credentials after validation-feedback resume',
@@ -13711,8 +15222,17 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           }
         }
       } catch (err) {
+        if (
+          err instanceof AgentContinuationSupersededError ||
+          err instanceof ValidationSupersededError
+        )
+          return;
         logger.error({ err, podId }, 'Validation error');
         const s2 = podRepo.getOrThrow(podId);
+        if (err instanceof TaskRetryBlockedError) {
+          await parkOnRetryAdmission(s2, err);
+          return;
+        }
 
         if (isParkedHostPushRecovery(s2)) {
           logger.info({ podId, status: s2.status }, 'Validation error already parked for retry');
@@ -13751,6 +15271,8 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
       podId: string,
       options?: { force?: boolean },
     ): Promise<{ newCommits: boolean; result: 'pass' | 'fail' }> {
+      assertExecutionTerminationVerified(podId);
+      assertGuidanceCollected(podId);
       const pod = podRepo.getOrThrow(podId);
       const force = options?.force ?? false;
       if (pod.status !== 'failed' && pod.status !== 'review_required') {
@@ -13999,6 +15521,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           sastTimeout: (profile.sastTimeout ?? 300) * 1_000,
           reviewerModel: resolveReviewerModel(reviewerProfile, logger),
           reviewerProvider: resolveReviewerProvider(reviewerProfile),
+          reviewerProviderAccountId: reviewerProfile.providerAccountId ?? null,
           reviewerProviderCredentials,
           ...(reviewerExecEnv ? { reviewerExecEnv } : {}),
           contract: pod.contract ?? undefined,
@@ -14018,16 +15541,19 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
 
         let result: Awaited<ReturnType<typeof validationEngine.validate>>;
         const revalidateController = new AbortController();
-        validationAbortControllers.set(podId, revalidateController);
+        const ownership = claimValidation(pod, revalidateController);
         try {
           result = await validateWithInfrastructureRetries(
             validationConfig,
             revalidateController,
             buildPhaseEventCallbacks(podId),
             'Revalidation engine threw unexpectedly',
+            ownership,
           );
+          ownership.assertCurrent();
         } finally {
-          validationAbortControllers.delete(podId);
+          if (validationAbortControllers.get(podId) === revalidateController)
+            validationAbortControllers.delete(podId);
         }
 
         emitActivityStatus(podId, 'Validation checks finished — finalizing result…');
@@ -14226,7 +15752,18 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
               validationConfig.advisoryBrowserQaEnabled && !!validationEngine.runAdvisoryBrowserQa,
           });
           maybeTriggerDependents(revalidatedPod);
-          await runAdvisoryAfterValidation(podId, validationConfig, result, validationRecord?.id);
+          await runAdvisoryAfterValidation(
+            podId,
+            validationConfig,
+            result,
+            validationRecord?.id,
+            revalidatedPod,
+          );
+          advisoryPublicationOwnership(
+            revalidatedPod,
+            result,
+            validationRecord?.id,
+          ).assertCurrent();
           const postAdvisoryPod = podRepo.getOrThrow(podId);
           if (isTerminalState(postAdvisoryPod.status) || postAdvisoryPod.status === 'killing') {
             return { newCommits, result: 'pass' };
@@ -14303,8 +15840,13 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
 
         return { newCommits, result: 'fail' };
       } catch (err) {
+        if (err instanceof ValidationSupersededError) return { newCommits, result: 'fail' };
         logger.error({ err, podId }, 'Revalidation error');
         const s2 = podRepo.getOrThrow(podId);
+        if (err instanceof TaskRetryBlockedError) {
+          await parkOnRetryAdmission(s2, err);
+          return { newCommits, result: 'fail' };
+        }
         const failureReason = sanitizeFailureReason(
           err,
           'Validation failed before checks could complete',
@@ -14383,8 +15925,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
     },
 
     async deleteSession(podId: string): Promise<void> {
-      clearPreviewTimer(podId);
-      await stopSandboxPreviewProxy(podId);
+      podRepo.taskExecutions?.assertCanDelete(podId);
       const pod = podRepo.getOrThrow(podId);
       const deletable =
         isTerminalState(pod.status) ||
@@ -14398,68 +15939,87 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           409,
         );
       }
-
-      // Cap cleanup so a hung Docker stop or slow worktree rm-rf can't blow
-      // past the desktop's 30s URLSession timeout and leave the pod undeletable.
-      // Mirror killSession's pattern: best-effort cleanup, always finalize the row.
-      const DELETE_TIMEOUT_MS = 25_000;
-      const cleanup = async () => {
-        try {
-          await killSidecarsForPod(podId);
-        } catch (err) {
-          logger.warn({ err, podId }, 'Failed to kill sidecars during delete');
+      const configuration = JSON.stringify(profileStore.get(pod.profileName).testPipeline ?? null);
+      const assertOwnership = () => {
+        const current = podRepo.getOrThrow(podId);
+        if (
+          current.lifecycleGeneration !== pod.lifecycleGeneration ||
+          current.status !== pod.status ||
+          current.containerId !== pod.containerId ||
+          current.executionTarget !== pod.executionTarget ||
+          current.worktreePath !== pod.worktreePath ||
+          current.runtime !== pod.runtime ||
+          JSON.stringify(profileStore.get(pod.profileName).testPipeline ?? null) !== configuration
+        ) {
+          throw new AutopodError(
+            'Pod deletion cleanup ownership changed. Reconcile resource and pod state before retrying Delete.',
+            'POD_DELETE_CLEANUP_UNVERIFIED',
+            409,
+          );
         }
-        try {
-          await cleanupTestRunBranches(podId);
-        } catch (err) {
-          logger.warn({ err, podId }, 'Failed to cleanup test branches during delete');
-        }
-        if (pod.containerId) {
-          try {
-            const cm = containerManagerFactory.get(pod.executionTarget);
-            await cm.kill(pod.containerId);
-          } catch (err) {
-            logger.warn({ err, podId }, 'Failed to kill container during delete');
-          }
-        }
-        try {
-          await destroyPodNetwork(podId);
-        } catch (err) {
-          logger.warn({ err, podId }, 'Failed to destroy network during delete');
-        }
-        if (pod.worktreePath) {
-          try {
-            await worktreeManager.cleanup(pod.worktreePath);
-          } catch (err) {
-            logger.warn({ err, podId }, 'Failed to cleanup worktree during delete');
-          }
-        }
-        const runtimeStateDirs: Partial<Record<string, (id: string) => Promise<void>>> = {
-          claude: cleanupClaudeState,
-          codex: cleanupCodexState,
-        };
-        await runtimeStateDirs[pod.runtime]?.(podId)?.catch((err) => {
-          logger.warn({ err, podId }, `Failed to cleanup ${pod.runtime} state dir during delete`);
-        });
+        podRepo.taskExecutions?.assertCanDelete(podId);
       };
-
-      await Promise.race([
-        cleanup(),
-        new Promise<void>((resolve) =>
-          setTimeout(() => {
-            logger.warn({ podId }, 'Delete cleanup timed out — finalizing');
-            resolve();
-          }, DELETE_TIMEOUT_MS),
-        ),
-      ]);
-
+      const claim = podRepo.deletionOwnership?.acquire(
+        podId,
+        createHash('sha256').update(configuration).digest('hex'),
+      );
+      if (!claim) throw deletionOwnershipError();
+      const runtimeStateDirs: Partial<Record<string, (id: string) => Promise<void>>> = {
+        claude: cleanupClaudeState,
+        codex: cleanupCodexState,
+      };
+      await runDeletionCleanup(
+        [
+          {
+            name: 'preview',
+            run: async () => {
+              clearPreviewTimer(podId);
+              await stopSandboxPreviewProxy(podId);
+            },
+          },
+          {
+            name: 'sidecars',
+            run: (assertCurrent) => killSidecarsForPod(podId, true, assertCurrent, true),
+          },
+          {
+            name: 'container',
+            run: async () => {
+              if (pod.containerId)
+                await containerManagerFactory.get(pod.executionTarget).kill(pod.containerId);
+            },
+          },
+          { name: 'network', run: () => destroyPodNetwork(podId, true) },
+          {
+            name: 'test branches',
+            run: (assertCurrent) =>
+              cleanupTestRunBranches(podId, { strict: true, assertCurrent, retainMetadata: true }),
+          },
+          {
+            name: 'worktree',
+            run: async () => {
+              if (pod.worktreePath) await worktreeManager.cleanup(pod.worktreePath);
+            },
+          },
+          {
+            name: 'runtime state',
+            run: async () => {
+              await runtimeStateDirs[pod.runtime]?.(podId);
+            },
+          },
+        ],
+        assertOwnership,
+        25_000,
+        claim,
+      );
+      assertOwnership();
       pendingUpdateFromBaseIntents.delete(podId);
       forceWithLeaseAllowances.delete(podId);
-      podRepo.delete(podId);
+      claim.finish(() => podRepo.delete(podId));
       logger.info({ podId }, 'Pod deleted');
     },
 
     async startPreview(podId: string): Promise<{ previewUrl: string }> {
+      podRepo.deletionOwnership?.assertTaskAvailable(podId);
       const pod = podRepo.getOrThrow(podId);
 
       if (!pod.containerId) {
@@ -14595,6 +16155,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
     },
 
     async stopPreview(podId: string): Promise<void> {
+      podRepo.deletionOwnership?.assertTaskAvailable(podId);
       clearPreviewTimer(podId);
       await stopSandboxPreviewProxy(podId);
       const pod = podRepo.getOrThrow(podId);
@@ -14980,9 +16541,13 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
       actor: OperatorActor = { type: 'automation', id: 'direct-pod-manager' },
     ): Promise<{ newCommits: boolean; result: 'pass' | 'fail' }> {
       const pod = podRepo.getOrThrow(podId);
-      const canRevalidateImmediately = pod.status === 'failed' || pod.status === 'review_required';
+      const isSettled = pod.status === 'failed' || pod.status === 'review_required';
+      const canRevalidateImmediately =
+        isSettled &&
+        !nudgeRepo.hasPending(podId) &&
+        !podRepo.taskExecutions?.hasUnverifiedTermination(podId);
       const canRecordForActiveRun = pod.status === 'running' || pod.status === 'validating';
-      if (!canRevalidateImmediately && !canRecordForActiveRun) {
+      if (!isSettled && !canRecordForActiveRun) {
         throw new AutopodError(
           `Cannot approve fact waiver for pod ${podId} in status ${pod.status} — only running, validating, failed, or review_required pods`,
           'INVALID_STATE',
@@ -15575,10 +17140,86 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
       logger.info({ podId, prUrl: newPrUrl }, 'PR created via retryCreatePr');
     },
 
-    async resumePod(
-      podId: string,
-    ): Promise<{ action: 'retry-pr' | 'revalidate' | 'retry-fix-delivery' | 'retry-agent' }> {
+    async resumePod(podId: string): Promise<{
+      action:
+        | 'retry-pr'
+        | 'revalidate'
+        | 'retry-fix-delivery'
+        | 'retry-agent'
+        | 'collect-artifacts';
+    }> {
+      assertExecutionTerminationVerified(podId);
+      assertGuidanceCollected(podId);
+      const pendingCollection = artifactResumeRuns.get(podId);
+      if (pendingCollection) {
+        await pendingCollection;
+        return { action: 'collect-artifacts' };
+      }
       const pod = podRepo.getOrThrow(podId);
+      if (pod.status === 'failed' && hasInterruptedArtifactCollection(pod)) {
+        if (!pod.finalization?.sourcePreservedAt && !pod.containerId)
+          throw new AutopodError(
+            'Artifact source container is unavailable. Restore the preserved source before retrying collection.',
+            'ARTIFACT_SOURCE_UNAVAILABLE',
+            409,
+          );
+        const collection = Promise.resolve().then(async () => {
+          if (pod.finalization?.sourcePreservedAt) {
+            const dataDir = process.env.DATA_DIR ?? path.join(process.cwd(), '.autopod-data');
+            await verifyArtifactSnapshot(
+              pod.artifactsPath ?? '',
+              path.join(dataDir, 'artifacts', pod.id),
+              pod.lifecycleGeneration,
+              pod.finalization.cycle,
+            );
+          }
+          const current = podRepo.getOrThrow(podId);
+          if (
+            !ownsLifecycle(podId, pod.lifecycleGeneration, pod.containerId) ||
+            current.status !== 'failed' ||
+            current.pendingEscalation
+          )
+            throw new AutopodError(
+              'Artifact retry was superseded; current lifecycle retained.',
+              'STALE_ARTIFACT_COLLECTION',
+              409,
+            );
+          transition(current, 'running', { failureReason: null });
+          emitActivityStatus(
+            podId,
+            'Resume: retrying artifact collection from the settled worker…',
+          );
+          await this.handleCompletion(podId);
+          const collected = podRepo.getOrThrow(podId);
+          if (
+            collected.lifecycleGeneration === pod.lifecycleGeneration &&
+            collected.status === 'failed' &&
+            !collected.finalization?.sourcePreservedAt
+          )
+            throw new AutopodError(
+              collected.failureReason ??
+                'Artifact preservation failed. Original container retained.',
+              'ARTIFACT_PRESERVATION_FAILED',
+              502,
+            );
+          if (
+            collected.lifecycleGeneration !== pod.lifecycleGeneration ||
+            collected.status !== 'complete'
+          )
+            throw new AutopodError(
+              'Artifact completion remains unresolved. Refresh the pod and reconcile its current lifecycle.',
+              'ARTIFACT_COMPLETION_UNRESOLVED',
+              409,
+            );
+        });
+        artifactResumeRuns.set(podId, collection);
+        try {
+          await collection;
+        } finally {
+          artifactResumeRuns.delete(podId);
+        }
+        return { action: 'collect-artifacts' };
+      }
       if (isRetryableFixDeliveryFailure(pod)) {
         if (!pod.worktreePath) {
           throw new AutopodError(
@@ -15607,9 +17248,13 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         lastValidationResult !== null &&
         (lastValidationResult.infrastructureFailure !== undefined ||
           isReviewInfrastructureOnlyFailure(lastValidationResult));
-      if (pod.status !== 'failed' && !isInfrastructureReviewResume) {
+      const hasSettledRetryFailure =
+        pod.status === 'review_required' &&
+        podRepo.taskRetries?.state(podId).latest?.outcome != null &&
+        podRepo.taskRetries?.state(podId).latest?.outcome !== 'pass';
+      if (pod.status !== 'failed' && !isInfrastructureReviewResume && !hasSettledRetryFailure) {
         throw new AutopodError(
-          `Cannot resume pod ${podId} in status ${pod.status} — only failed or infrastructure-blocked review_required pods can be resumed`,
+          `Cannot resume pod ${podId} in status ${pod.status} — only failed pods or review_required pods with a recorded validation failure can be resumed`,
           'INVALID_STATE',
           409,
         );
@@ -15617,6 +17262,19 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
       if (isInfrastructureReviewResume && infrastructureResumeRuns.has(podId)) {
         logger.info({ podId }, 'Coalesced duplicate validation infrastructure Resume');
         return { action: 'revalidate' };
+      }
+      if (pod.executionTarget === 'sandbox' && podRepo.sandboxStartupRetries) {
+        const latest = podRepo.sandboxStartupRetries.state(podId).latest;
+        if (latest && latest.outcome !== 'pass') {
+          const input = sandboxStartupRetryInput(pod);
+          podRepo.sandboxStartupRetries.assertCanAdmit(
+            podId,
+            pod.lifecycleGeneration,
+            input.identity,
+            input.bindingHash,
+            [...(deps.sandboxInfrastructureRetryBackoffMs ?? [30_000])],
+          );
+        }
       }
       if (!pod.worktreePath) {
         throw new AutopodError(
@@ -15683,7 +17341,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
             recoveryDisposition: 'automatic_retry_scheduled',
             retryNotBefore: null,
           },
-          infrastructureRecoveryCount: 0,
+          infrastructureRecoveryCount: pod.infrastructureRecoveryCount,
           failureReason: null,
           completedAt: null,
           skipAgent: isSafeValidationOnlyInfrastructureResume,
@@ -15754,8 +17412,16 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
     async continueProvider(
       podId: string,
       requestedTarget?: ProviderFailoverTarget | 'profile-primary',
+      actor: OperatorActor = { type: 'automation', id: 'direct-pod-manager' },
     ): Promise<{ action: 'same-provider' | 'alternate-provider' | 'primary-provider' }> {
+      assertExecutionTerminationVerified(podId);
       const pod = podRepo.getOrThrow(podId);
+      if (podRepo.taskExecutions?.hasActiveRun(podId))
+        throw new AutopodError(
+          'A worker in this task must settle before provider continuation',
+          'TASK_AGENT_RUN_ACTIVE',
+          409,
+        );
       const primaryRecovery = requestedTarget === 'profile-primary';
       const pausedProviderLimit = pod.status === 'paused' && pod.pauseReason === 'provider_limit';
       if (primaryRecovery && pod.status !== 'failed') {
@@ -15886,6 +17552,21 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           );
         }
       }
+      const retryState = podRepo.workerRetries?.state(podId);
+      if (retryState?.retryFailure && retryState.latest) {
+        const targetBindingHash = workerBindingHash({
+          runtime: target.runtime,
+          model: target.model,
+          providerAccountId: target.providerAccountId,
+        });
+        podRepo.workerRetries?.authorize(
+          podId,
+          `provider-recovery:${podId}:${retryState.latest.id}:${targetBindingHash}`,
+          `Operator selected ${target.runtime}/${target.model} on account ${target.providerAccountId} after worker failure.`,
+          actor,
+          targetBindingHash,
+        );
+      }
       if (pod.containerId) {
         try {
           await runtimeRegistry.get(pod.runtime).abort(podId);
@@ -15974,6 +17655,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
       reason?: string,
       actor: OperatorActor = { type: 'automation', id: 'direct-pod-manager' },
     ): Promise<void> {
+      podRepo.deletionOwnership?.assertTaskAvailable(podId);
       const pod = podRepo.getOrThrow(podId);
       if (pod.status === 'complete') {
         throw new AutopodError(`Pod ${podId} is already complete`, 'INVALID_STATE', 409);

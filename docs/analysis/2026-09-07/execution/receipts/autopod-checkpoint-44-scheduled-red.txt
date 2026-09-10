@@ -1,0 +1,32 @@
+
+ RUN  v4.1.11 /private/tmp/autopod-durable-execution/packages/daemon
+
+ ❯ src/pods/merge-journal.test.ts (13 tests | 1 failed | 12 skipped) 48ms
+     × does not bypass a scheduled merge by creating a new lifecycle publication 47ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/pods/merge-journal.test.ts > durable merge journal > does not bypass a scheduled merge by creating a new lifecycle publication
+AssertionError: expected [Function] to throw an error
+
+- Expected:
+null
+
++ Received:
+undefined
+
+ ❯ src/pods/merge-journal.test.ts:169:81
+    167|       const newPublication = publications.admit(current, f.proof);
+    168|       publications.confirm(current, newPublication, f.proof);
+    169|       expect(() => f.journal.claim(current, current, newPublication, f…
+       |                                                                                 ^
+    170|         'already scheduled',
+    171|       );
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 12 skipped (13)
+   Start at  01:31:20
+   Duration  293ms (transform 98ms, setup 0ms, import 155ms, tests 48ms, environment 0ms)

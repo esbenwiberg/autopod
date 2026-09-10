@@ -1,0 +1,19 @@
+
+ RUN  v4.1.11 /private/tmp/autopod-durable-execution/packages/daemon
+
+ ❯ src/pods/source-publication-ledger.test.ts (0 test)
+
+⎯⎯⎯⎯⎯⎯ Failed Suites 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/pods/source-publication-ledger.test.ts [ src/pods/source-publication-ledger.test.ts ]
+Error: Cannot find module './source-publication-ledger.js' imported from /private/tmp/autopod-durable-execution/packages/daemon/src/pods/source-publication-ledger.test.ts
+ ❯ src/pods/source-publication-ledger.test.ts:6:1
+
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  no tests
+   Start at  23:37:44
+   Duration  282ms (transform 111ms, setup 0ms, import 0ms, tests 0ms, environment 0ms)

@@ -1,0 +1,28 @@
+{
+  "capturedAt": "2026-09-07T12:22:12.965341+00:00",
+  "scope": "Built local mobile app against explicit synthetic HTTP fixture; no provider, real pod or hosted mutation",
+  "fixture": "fixtures/mobile-server.mjs",
+  "requestedViewport": {
+    "width": 390,
+    "height": 844
+  },
+  "measuredDomWidth": 375,
+  "measuredContentWidth": 375,
+  "steps": [
+    "Opened report inbox and selected incomplete report",
+    "Verified failed scanner count remained Unknown and unresolved finding visible",
+    "Selected one finding and entered a reason",
+    "Recorded repair selection; explicit Launch selected repair remained separate",
+    "Reloaded and verified recorded selection and selected file persisted",
+    "Clicked simulated repair launch; receipt link appeared while unresolved count stayed 1",
+    "Phone-width screenshot exposed misuse of two-column task card class; replaced with dedicated block scan-card",
+    "Rebuilt and visually verified top and bottom of report: readable headings, full-width buttons, exact selected file and receipt link",
+    "Read-only DOM check confirmed no horizontal overflow",
+    "Reset viewport and closed temporary tab"
+  ],
+  "limitations": [
+    "Browser fixture does not prove production scanners or actual dispatch; separate real Git and actual pod-manager API tests supply local backend evidence",
+    "Native desktop interaction remains unverified",
+    "No screenshot file exported; screenshots were visually inspected in tool output"
+  ]
+}

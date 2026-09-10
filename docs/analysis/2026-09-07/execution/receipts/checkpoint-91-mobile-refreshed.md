@@ -1,0 +1,128 @@
+- main [ref=e3] [box=0,-3343,375,4672]:
+  - link "← Back" [ref=e4] [cursor=pointer] [box=16,-3327,49,25]:
+    - /url: "#/"
+  - generic [ref=e5] [box=16,-3294,343,18]:
+    - generic [ref=e6] [box=16,-3293,106,16]: local-fixture
+    - generic [ref=e7] [box=260,-3294,100,18]: awaiting input
+  - heading "[Local fixture] Review findings after settlement" [level=1] [ref=e8] [box=16,-3267,343,46]
+  - paragraph [ref=e9] [box=16,-3208,343,15]: local-fixture · codex · fixture-model
+  - alert [ref=e10] [box=16,-3177,343,72]: "Saved evidence unavailable: lastValidationResult (invalid_json). Resolve the record before relying on it for an action."
+  - generic [ref=e11] [box=16,-3089,343,232]:
+    - heading "Worker settlement" [level=2] [ref=e12] [box=16,-3069,343,28]
+    - paragraph [ref=e13] [box=16,-2993,343,38]: "Agent settled at 2026-09-07T10:09:00Z. Source preservation: 2026-09-07T10:10:00Z."
+    - paragraph [ref=e14] [box=16,-2911,343,38]: Human decision remains unanswered. Reply to the pending question before continuation.
+  - generic [ref=e15] [box=16,-2841,343,1082]:
+    - heading "Dispatch preflight" [level=2] [ref=e16] [box=33,-2824,309,28]
+    - paragraph [ref=e17] [box=33,-2784,309,19]: review_required · 2026-09-07T15:00:00Z
+    - paragraph [ref=e18] [box=33,-2753,309,19]: github.com/example/repo · main
+    - paragraph [ref=e19] [box=33,-2722,309,38]:
+      - text: "Fresh base:"
+      - code [ref=e20] [box=33,-2719,302,37]: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+    - paragraph [ref=e21] [box=33,-2672,309,38]:
+      - text: "Equivalent work:"
+      - link "prior-fixture" [ref=e22] [cursor=pointer] [box=156,-2672,86,19]:
+        - /url: "#/pod/prior-fixture"
+      - text: · validated · dispatch_receipt
+    - heading "Execution environment" [level=3] [ref=e23] [box=33,-2603,309,22]
+    - paragraph [ref=e24] [box=33,-2550,309,38]: validation preflight blocked · generation 1 · 2026-09-07T16:30:00Z
+    - paragraph [ref=e25] [box=33,-2500,309,38]: "Configured worker: codex CLI 0.144.4 · fixture-model"
+    - paragraph [ref=e26] [box=33,-2450,309,38]: "Provider: fixture-provider · account: not recorded"
+    - paragraph [ref=e27] [box=33,-2400,309,19]: "Daemon: unverified"
+    - paragraph [ref=e28] [box=33,-2369,309,19]:
+      - text: "Image:"
+      - code [ref=e29] [box=86,-2367,86,18]: unverified
+    - paragraph [ref=e30] [box=33,-2338,309,19]:
+      - text: "Validation implementation:"
+      - code [ref=e31] [box=229,-2336,86,18]: unverified
+    - paragraph [ref=e32] [box=33,-2307,309,38]:
+      - text: "Contract:"
+      - code [ref=e33] [box=33,-2305,308,37]: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+    - paragraph [ref=e34] [box=33,-2257,309,38]: "Memory: unverified bytes · CPU: unverified"
+    - paragraph [ref=e35] [box=33,-2207,309,19]: "fact:compile: dotnet · missing"
+    - paragraph [ref=e36] [box=33,-2176,309,57]: Required launcher dotnet is missing. Reconcile the image or declared command before validation.
+    - paragraph [ref=e37] [box=33,-2107,309,19]: Actual image digest is unverified.
+    - paragraph [ref=e38] [box=33,-2076,309,19]: Effective memory capacity is unverified.
+    - paragraph [ref=e39] [box=33,-2045,309,95]: To intentionally repeat this request, provide a reason. This creates a distinct task and may run a coding agent. Fresh contract, provider, and environment checks still apply.
+    - generic [ref=e40] [box=33,-1938,309,107]:
+      - text: Reason for intentional rerun
+      - textbox "Reason for intentional rerun" [ref=e41] [box=33,-1911,309,80]
+    - button "Create intentional rerun" [disabled] [ref=e42] [box=33,-1819,309,44]
+  - generic [ref=e43] [box=16,-1742,343,356]:
+    - heading "Validation retry budget" [level=2] [ref=e44] [box=33,-1725,309,28]
+    - paragraph [ref=e45] [box=33,-1685,309,38]: 3 executed / 4 admitted validations across this task.
+    - paragraph [ref=e46] [box=33,-1635,309,57]: 2 / 2 automatic transient retries · 1875 ms measured · 1 interrupted with unknown duration.
+    - paragraph [ref=e47] [box=33,-1566,309,38]: "Latest outcome: unknown · partial telemetry."
+    - paragraph [ref=e48] [box=33,-1516,309,57]: Retry actions are available when this pod is failed or requires review. Pending human decisions remain separate.
+    - button "Refresh retry accounting" [ref=e49] [box=33,-1447,309,44]
+  - generic [ref=e50] [box=16,-1370,343,444]:
+    - heading "Codex recovery allowance" [level=2] [ref=e51] [box=33,-1353,309,28]
+    - paragraph [ref=e52] [box=33,-1313,309,38]: 3 executed / 4 admitted Codex interruption recoveries across this task.
+    - paragraph [ref=e53] [box=33,-1263,309,38]: 1875 ms measured · 1 interrupted with unknown duration.
+    - paragraph [ref=e54] [box=33,-1213,309,95]: One automatic inner recovery per logical task; further recoveries require recorded human authorization. Duration overlaps the enclosing agent run; usage is not counted again.
+    - paragraph [ref=e55] [box=33,-1106,309,38]: "Latest outcome: unknown · partial telemetry."
+    - paragraph [ref=e56] [box=33,-1056,309,57]: Retry actions are available when this pod is failed or requires review. Pending human decisions remain separate.
+    - button "Refresh retry accounting" [ref=e57] [box=33,-987,309,44]
+  - generic [ref=e58] [box=16,-910,343,1343]:
+    - heading "Task accounting" [level=2] [ref=e59] [box=16,-890,343,28]
+    - paragraph [ref=e127] [box=16,-815,343,19]: "Logical task: task:local-original"
+    - paragraph [ref=e128] [box=16,-752,343,19]: "Execution: execution:local-fixture"
+    - paragraph [ref=e129] [box=16,-689,343,38]: 2 pods · 3 recorded agent runs · 4 provider attempts · 5 validations
+    - paragraph [ref=e130] [box=16,-607,343,19]: 1 PR receipts · 1 unresolved of 2 intents
+    - paragraph [ref=e131] [box=16,-544,343,38]: Durable ledger only; historical PR URLs are not reconstructed receipts.
+    - paragraph [ref=e132] [box=16,-462,343,19]: PR disposition observations unavailable.
+    - paragraph [ref=e133] [box=16,-399,343,19]: Source-bound merge evidence unavailable.
+    - paragraph [ref=e134] [box=16,-336,343,19]: Current provider status unverified.
+    - paragraph [ref=e135] [box=16,-273,343,19]: "Recorded tokens: 100 / 100"
+    - paragraph [ref=e136] [box=16,-210,343,38]: "Stored task cost subtotal: $1.2500 · partial telemetry"
+    - paragraph [ref=e137] [box=16,-128,343,38]: Billing unverified; stored amounts can include estimates.
+    - paragraph [ref=e138] [box=16,-46,343,57]: "Known estimates: $0.5000 · 1 identified phases with unavailable cost · 1 pods with conflicting attribution"
+    - paragraph [ref=e139] [box=16,55,343,38]: "local-original: Stored phase costs conflict; no proportional allocation applied."
+    - paragraph [ref=e140] [box=16,137,343,19]: 2 additional cost diagnostics omitted.
+    - paragraph [ref=e141] [box=16,200,343,38]: Recorded task tokens have reached the configured limit.
+    - paragraph [ref=e142] [box=16,282,343,19]: Infrastructure cost unavailable
+    - paragraph [ref=e143] [box=16,345,343,38]: 1 deleted pod record retains task accounting and execution evidence.
+    - button "Refresh task accounting" [active] [ref=e77] [box=16,411,343,22]
+  - generic [ref=e78] [box=16,449,343,309]:
+    - generic [ref=e79] [box=33,464,309,19]:
+      - generic [ref=e80] [box=33,465,100,18]: awaiting input
+      - generic [ref=e81] [box=141,464,132,19]: Agent needs input
+    - generic [ref=e82] [box=33,491,309,19]: Which finding should be repaired?
+    - generic [ref=e83] [box=33,520,309,81]:
+      - button "Repair finding A" [ref=e84] [cursor=pointer] [box=33,520,309,37]
+      - button "Keep report only" [ref=e85] [cursor=pointer] [box=33,563,309,37]
+    - textbox "Type your answer…" [ref=e86] [box=33,610,309,80]
+    - button "Send" [disabled] [ref=e88] [box=33,706,309,37]
+  - generic [ref=e89] [box=16,774,343,273]:
+    - heading "Validation results" [level=2] [ref=e90] [box=16,774,343,18]
+    - article [ref=e92] [box=16,800,343,215]:
+      - generic [ref=e93] [box=31,813,312,33]:
+        - generic [ref=e94] [box=31,813,248,33]:
+          - generic [ref=e95] [box=31,813,248,17]: "Validation #12"
+          - generic [ref=e96] [box=31,832,248,14]: Sep 7, 12:10 PM · 100 ms · Attempt 1, cycle 2
+        - generic [ref=e97] [box=300,813,44,18]: pass
+      - list [ref=e98] [box=31,855,312,147]:
+        - listitem [ref=e99] [box=31,855,312,18]:
+          - generic [ref=e100] [box=31,856,96,16]: build
+          - generic [ref=e101] [box=135,855,44,18]: pass
+        - listitem [ref=e102] [box=31,878,312,18]:
+          - generic [ref=e103] [box=31,879,96,16]: health
+          - generic [ref=e104] [box=135,878,41,18]: skip
+        - listitem [ref=e105] [box=31,901,312,55]:
+          - generic [ref=e106] [box=31,902,96,16]: test
+          - generic [ref=e107] [box=135,901,44,18]: pass
+          - generic [ref=e108] [box=31,927,312,29]: Reused local-evidence-1; executed 2026-09-07T09:00:00Z
+        - listitem [ref=e109] [box=31,961,312,41]:
+          - generic [ref=e110] [box=31,962,96,16]: pages (0)
+          - generic [ref=e111] [box=135,961,41,18]: skip
+          - generic [ref=e112] [box=31,987,312,15]: No page checks executed
+    - button "Show previous 1 attempt" [ref=e113] [cursor=pointer] [box=16,1024,160,22]
+  - button "Kill" [ref=e115] [cursor=pointer] [box=16,1063,343,37]
+  - region "Task details" [ref=e116] [box=16,1116,343,92]:
+    - article [ref=e117] [box=16,1116,343,92]:
+      - generic [ref=e119] [box=20,1117,338,90]:
+        - generic [ref=e120] [box=34,1129,311,14]: Task
+        - heading "Task" [level=2] [ref=e121] [box=34,1148,311,20]
+        - paragraph [ref=e123] [box=34,1174,311,21]: "[Local fixture] Review findings after settlement"
+  - generic [ref=e124] [box=16,1228,343,53]:
+    - heading "Recent activity" [level=2] [ref=e125] [box=16,1228,343,18]
+    - paragraph [ref=e126] [box=16,1262,343,19]: No activity yet.

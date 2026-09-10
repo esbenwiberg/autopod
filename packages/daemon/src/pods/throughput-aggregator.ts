@@ -60,6 +60,7 @@ function queueIntersectWhere(): string {
 // ── Internal types ────────────────────────────────────────────────────────────
 
 interface CohortRow {
+  historyArchived: number;
   id: string;
   profileName: string;
   status: string;
@@ -108,11 +109,25 @@ function computeQueueDepth(pods: QueuePodRow[], days: number): QueueDepthBucket[
   const windowStartMs = nowMs - days * 86_400_000;
   const windowStartHourMs = Math.floor(windowStartMs / 3_600_000) * 3_600_000;
 
-  // Convert pod timestamps to ms once to avoid repeated Date parsing per sample.
-  const podTimes = pods.map((p) => ({
-    createdAtMs: new Date(p.createdAt).getTime(),
-    startedAtMs: p.startedAt ? new Date(p.startedAt).getTime() : null,
-  }));
+  // Each queue interval contributes +1 at its first included minute sample and
+  // -1 at its first excluded sample. Keep the same minute boundaries and the
+  // exclusive startedAt endpoint without revisiting every pod at every sample.
+  const sampleCount = days * 24 * 60;
+  const changes = new Float64Array(sampleCount + 1);
+  for (const pod of pods) {
+    const created = new Date(pod.createdAt).getTime();
+    const started = pod.startedAt ? new Date(pod.startedAt).getTime() : null;
+    if (!Number.isFinite(created) || (started !== null && !Number.isFinite(started))) continue;
+    const first = Math.max(0, Math.ceil((created - windowStartHourMs) / 60_000));
+    const end =
+      started === null
+        ? sampleCount
+        : Math.min(sampleCount, Math.ceil((started - windowStartHourMs) / 60_000));
+    if (first >= end || first >= sampleCount) continue;
+    changes[first] = (changes[first] ?? 0) + 1;
+    changes[end] = (changes[end] ?? 0) - 1;
+  }
+  let depth = 0;
 
   const buckets: QueueDepthBucket[] = [];
 
@@ -125,13 +140,7 @@ function computeQueueDepth(pods: QueuePodRow[], days: number): QueueDepthBucket[
 
     // Sample at 60 minute boundaries within the hour.
     for (let m = 0; m < 60; m++) {
-      const tMs = hourStartMs + m * 60_000;
-      let depth = 0;
-      for (const pod of podTimes) {
-        if (pod.createdAtMs <= tMs && (pod.startedAtMs === null || pod.startedAtMs > tMs)) {
-          depth++;
-        }
-      }
+      depth += changes[i * 60 + m] ?? 0;
       if (depth > maxDepth) maxDepth = depth;
       totalDepth += depth;
     }
@@ -210,12 +219,12 @@ export function computeThroughputAnalytics(
   // Used for: podsPerDay, sparkline, delta, mttmSeconds, cohort[], timeInStatus[].
   const cohortRows = db
     .prepare(
-      `SELECT id,
+      `SELECT id, history_archived AS historyArchived,
               profile_name  AS profileName,
               status,
               completed_at  AS completedAt,
               created_at    AS createdAt
-       FROM pods
+       FROM retained_pods p
        WHERE ${terminalCohortWhere()}
        ORDER BY completed_at DESC`,
     )
@@ -246,7 +255,7 @@ export function computeThroughputAnalytics(
   const priorRow = db
     .prepare(
       `SELECT COUNT(*) AS count
-       FROM pods
+       FROM retained_pods p
        WHERE output_mode != 'workspace'
          AND status IN ('complete', 'killed', 'failed')
          AND completed_at >= datetime('now', '-' || @priorDays || ' days')
@@ -269,6 +278,7 @@ export function computeThroughputAnalytics(
   const cohortSlice = cohortTruncated ? cohortRows.slice(0, COHORT_CAP) : cohortRows;
   const cohort = cohortSlice.map((p) => ({
     podId: p.id,
+    ...(p.historyArchived === 1 ? { historyArchived: true } : {}),
     profile: p.profileName,
     status: p.status as 'complete' | 'killed' | 'failed',
     completedAt: p.completedAt,
@@ -278,7 +288,7 @@ export function computeThroughputAnalytics(
   const queuePods = db
     .prepare(
       `SELECT created_at AS createdAt, started_at AS startedAt
-       FROM pods
+       FROM retained_pods p
        WHERE ${queueIntersectWhere()}`,
     )
     .all({ days }) as QueuePodRow[];
@@ -290,11 +300,11 @@ export function computeThroughputAnalytics(
   const statusEvents = db
     .prepare(
       `SELECT pod_id    AS podId,
-              json_extract(payload, '$.newStatus') AS newStatus,
+              CASE WHEN json_valid(payload) THEN json_extract(payload, '$.newStatus') END AS newStatus,
               created_at AS createdAt
-       FROM events
+       FROM retained_events
        WHERE type = 'pod.status_changed'
-         AND pod_id IN (SELECT id FROM pods WHERE ${terminalCohortWhere()})
+         AND pod_id IN (SELECT id FROM retained_pods WHERE ${terminalCohortWhere()})
        ORDER BY pod_id, created_at`,
     )
     .all({ days }) as StatusEventRow[];

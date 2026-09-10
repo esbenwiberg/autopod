@@ -1,10 +1,13 @@
 import { readFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import type { BackupHealth } from '@autopod/shared';
 import type Database from 'better-sqlite3';
 import type Dockerode from 'dockerode';
 import type { FastifyInstance } from 'fastify';
+import type { DbBackupManager } from '../../db/backup.js';
 import type { PodQueue } from '../../pods/index.js';
+import { daemonRelease } from '../../release.js';
 import type { ModelManager } from '../../security/model-manager.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -44,6 +47,7 @@ export interface HealthDeps {
   maxConcurrency?: number;
   modelManager?: ModelManager;
   securityMlEnabled?: boolean;
+  backupManager?: DbBackupManager;
 }
 
 export function healthRoutes(app: FastifyInstance, deps: HealthDeps = {}): void {
@@ -60,9 +64,27 @@ export function healthRoutes(app: FastifyInstance, deps: HealthDeps = {}): void 
     }
 
     const start = performance.now();
+    let backup: BackupHealth = { state: 'unavailable' };
+    try {
+      const backupStatus = deps.backupManager?.getStatus();
+      if (backupStatus)
+        backup = {
+          state: backupStatus.state as BackupHealth['state'],
+          sourceIdentity: backupStatus.sourceIdentity,
+          ageMs: backupStatus.ageMs,
+          lastCompletedAt: backupStatus.latest?.completedAt ?? null,
+          availableBytes: backupStatus.availableBytes,
+          requiredBytes: backupStatus.requiredBytes,
+          snapshotIntegrity: backupStatus.latest ? 'verified' : 'unverified',
+        };
+    } catch {
+      backup = { state: 'failed' };
+    }
     const response = {
       status: 'ok',
+      backup,
       version: VERSION,
+      release: daemonRelease,
       timestamp: new Date().toISOString(),
       requestDurationMs: 0,
     };
@@ -115,8 +137,16 @@ export function healthRoutes(app: FastifyInstance, deps: HealthDeps = {}): void 
       (securityMlStatus.injection === 'failed' || securityMlStatus.pii === 'failed');
 
     return {
-      status: securityMlDegraded ? 'degraded' : 'ok',
+      status:
+        securityMlDegraded ||
+        (db && !dbConnected) ||
+        (docker && !dockerConnected) ||
+        (deps.backupManager && backup.state !== 'fresh')
+          ? 'degraded'
+          : 'ok',
+      backup,
       version: VERSION,
+      release: daemonRelease,
       uptime_seconds: Math.floor(process.uptime()),
       docker: {
         connected: dockerConnected,
@@ -142,7 +172,7 @@ export function healthRoutes(app: FastifyInstance, deps: HealthDeps = {}): void 
   });
 
   app.get('/version', { config: { auth: false } }, async () => {
-    return { version: VERSION };
+    return { version: VERSION, release: daemonRelease };
   });
 
   if (onShutdown) {

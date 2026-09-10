@@ -1,0 +1,29 @@
+
+ RUN  v4.1.10 /private/tmp/autopod-durable-execution/packages/daemon
+
+ ❯ src/pods/pod-manager.test.ts (413 tests | 1 failed | 412 skipped) 75ms
+       × reviews equivalent active work after fresh fetch before starting another coding agent 75ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/pods/pod-manager.test.ts > PodManager > processPod > reviews equivalent active work after fresh fetch before starting another coding agent
+AssertionError: expected 'failed' to be 'validated' // Object.is equality
+
+Expected: "validated"
+Received: "failed"
+
+ ❯ src/pods/pod-manager.test.ts:5530:51
+    5528|       const first = manager.createSession(request, 'operator');
+    5529|       await manager.processPod(first.id);
+    5530|       expect(manager.getSession(first.id).status).toBe('validated');
+       |                                                   ^
+    5531|       const second = manager.createSession(request, 'operator');
+    5532|       await manager.processPod(second.id);
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 412 skipped (413)
+   Start at  15:25:16
+   Duration  1.15s (transform 616ms, setup 0ms, import 969ms, tests 75ms, environment 0ms)

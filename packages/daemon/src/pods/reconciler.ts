@@ -2,8 +2,13 @@ import { access } from 'node:fs/promises';
 import type { Pod } from '@autopod/shared';
 import type { Logger } from 'pino';
 import type { SandboxContainerManager } from '../containers/sandbox-container-manager.js';
+import {
+  ARTIFACT_RESTART_REASON,
+  hasInterruptedArtifactCollection,
+} from './artifact-finalization-recovery.js';
 import type { EventBus } from './event-bus.js';
 import type { PodRepository } from './pod-repository.js';
+import { retainUnresolvedReconciliation } from './reconciliation-ownership.js';
 
 export interface ReconcilerDependencies {
   podRepo: PodRepository;
@@ -34,10 +39,14 @@ export async function reconcileSandboxSessions(deps: ReconcilerDependencies): Pr
   const sandboxSessions = candidateStatuses.flatMap((status) =>
     podRepo
       .list({ status })
+      .map((pod) => podRepo.getOrThrow(pod.id))
       .filter(
         (pod) =>
+          pod.status === status &&
           pod.executionTarget === 'sandbox' &&
-          (pod.status === 'provisioning' || Boolean(pod.containerId)),
+          (pod.status === 'provisioning' ||
+            Boolean(pod.containerId) ||
+            hasInterruptedArtifactCollection(pod)),
       ),
   );
 
@@ -49,6 +58,7 @@ export async function reconcileSandboxSessions(deps: ReconcilerDependencies): Pr
   logger.info({ count: sandboxSessions.length }, 'Reconciling sandbox pods');
 
   for (const pod of sandboxSessions) {
+    if (retainUnresolvedReconciliation(pod.id, podRepo)) continue;
     try {
       await reconcileSession(pod, deps);
     } catch (err) {
@@ -63,6 +73,10 @@ export async function reconcileSandboxSessions(deps: ReconcilerDependencies): Pr
 
 async function reconcileSession(pod: Pod, deps: ReconcilerDependencies): Promise<void> {
   const { sandboxContainerManager, podRepo, eventBus, logger } = deps;
+  if (hasInterruptedArtifactCollection(pod)) {
+    parkSession(pod, 'failed', ARTIFACT_RESTART_REASON, podRepo, eventBus);
+    return;
+  }
   if (pod.status === 'provisioning') {
     await recoverInterruptedProvisioning(pod, deps);
     return;
@@ -101,6 +115,16 @@ async function reconcileSession(pod: Pod, deps: ReconcilerDependencies): Promise
     }
 
     case 'deleted': {
+      if (pod.pendingEscalation) {
+        parkSession(
+          pod,
+          'failed',
+          'Sandbox is unavailable; the unanswered decision and saved work remain for operator recovery.',
+          podRepo,
+          eventBus,
+        );
+        return;
+      }
       logger.warn({ podId: pod.id, containerId }, 'Sandbox was deleted, marking pod killed');
       markSessionFailed(pod, podRepo, eventBus, logger);
       break;
@@ -195,7 +219,7 @@ function parkSession(
 ): void {
   const previousStatus = pod.status;
   podRepo.update(pod.id, {
-    status,
+    status: pod.pendingEscalation ? 'awaiting_input' : status,
     pauseReason:
       status === 'paused'
         ? pod.status === 'paused'
@@ -204,7 +228,9 @@ function parkSession(
         : null,
     lastCorrectionMessage: reason,
     ...(status === 'paused' ? { lastRecoveryTrigger: 'restart' as const } : {}),
-    ...(status === 'failed' ? { completedAt: new Date().toISOString() } : {}),
+    ...(status === 'failed' && !pod.pendingEscalation
+      ? { completedAt: new Date().toISOString() }
+      : {}),
   });
 
   const timestamp = new Date().toISOString();
@@ -213,7 +239,7 @@ function parkSession(
     timestamp,
     podId: pod.id,
     previousStatus,
-    newStatus: status,
+    newStatus: pod.pendingEscalation ? 'awaiting_input' : status,
   });
   eventBus.emit({
     type: 'pod.agent_activity',

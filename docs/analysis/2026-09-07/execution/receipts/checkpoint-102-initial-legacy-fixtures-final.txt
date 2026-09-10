@@ -1,0 +1,25 @@
+
+ RUN  v4.1.11 /private/tmp/autopod-durable-execution/packages/daemon
+
+ ❯ src/pods/task-retry-ledger.test.ts (24 tests | 1 failed) 2833ms
+   × retains provider cooldowns through deletion and disk reopen without consuming early permission 97ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/pods/task-retry-ledger.test.ts > retains provider cooldowns through deletion and disk reopen without consuming early permission
+ReferenceError: executions is not defined
+ ❯ src/pods/task-retry-ledger.test.ts:827:15
+    825|   const bound = { runtime: 'codex', model: 'model', providerAccountId:…
+    826|   const deadline = new Date(Date.now() + 3_600_000).toISOString();
+    827|   const run = executions.beginRun('root', 1, 1, bound);
+       |               ^
+    828|   const ledger = repo.workerRetries;
+    829|   if (!run || !ledger) throw new Error('Missing worker ledger');
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 23 passed (24)
+   Start at  22:05:22
+   Duration  3.46s (transform 281ms, setup 0ms, import 426ms, tests 2.83s, environment 0ms)

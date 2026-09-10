@@ -1,0 +1,68 @@
+
+ RUN  v4.1.11 /private/tmp/autopod-durable-execution/packages/daemon
+
+ ❯ src/scheduled-jobs/scan-judge.test.ts (7 tests | 5 failed | 2 skipped) 6ms
+     × ends a hung credential acquisition without reviving a late judgment request 4ms
+     × retains measured usage when judgment output is truncated 0ms
+     × retains measured usage when judgment output is oversized 0ms
+     × retains measured usage when judgment output is empty 1ms
+     × retains measured usage when judgment output is late 0ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 5 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/scheduled-jobs/scan-judge.test.ts > bounded report judgment without worker authority > ends a hung credential acquisition without reviving a late judgment request
+AssertionError: expected false to be true // Object.is equality
+
+- Expected
++ Received
+
+- true
++ false
+
+ ❯ src/scheduled-jobs/scan-judge.test.ts:29:21
+     27|     release?.({ ok: true, client: { messages: { create } }, model: 'bo…
+     28|     await pending;
+     29|     expect(bounded).toBe(true); expect(create).not.toHaveBeenCalled();
+       |                     ^
+     30|     expect(createProviderAnthropicClient).toHaveBeenCalledOnce();
+     31|   });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/5]⎯
+
+ FAIL  src/scheduled-jobs/scan-judge.test.ts > bounded report judgment without worker authority > retains measured usage when judgment output is truncated
+ FAIL  src/scheduled-jobs/scan-judge.test.ts > bounded report judgment without worker authority > retains measured usage when judgment output is oversized
+Error: Judgment output incomplete
+ ❯ src/scheduled-jobs/scan-judge.ts:56:13
+     54|       .join('\n');
+     55|     if (!text || text.length > 16000 || response.stop_reason === 'max_…
+     56|       throw new Error('Judgment output incomplete');
+       |             ^
+     57|     return {
+     58|       status: 'complete',
+ ❯ src/scheduled-jobs/scan-judge.test.ts:39:20
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/5]⎯
+
+ FAIL  src/scheduled-jobs/scan-judge.test.ts > bounded report judgment without worker authority > retains measured usage when judgment output is empty
+ FAIL  src/scheduled-jobs/scan-judge.test.ts > bounded report judgment without worker authority > retains measured usage when judgment output is late
+AssertionError: expected 'complete' to be 'unavailable' // Object.is equality
+
+Expected: "unavailable"
+Received: "complete"
+
+ ❯ src/scheduled-jobs/scan-judge.test.ts:40:27
+     38|     vi.mocked(createProviderAnthropicClient).mockImplementation(async …
+     39|     const result = await createBoundedScanJudge(profile, {}, logger)('…
+     40|     expect(result.status).toBe('unavailable');
+       |                           ^
+     41|     expect(result.usage).toMatchObject({ inputTokens: 10, outputTokens…
+     42|     expect(create.mock.calls[0]?.[1]).toMatchObject({ timeout: 1000, m…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/5]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  5 failed | 2 skipped (7)
+   Start at  13:03:28
+   Duration  289ms (transform 97ms, setup 0ms, import 162ms, tests 6ms, environment 0ms)
+

@@ -1,0 +1,53 @@
+
+> @autopod/daemon@0.0.1 build /private/tmp/autopod-durable-execution/packages/daemon
+> tsup
+
+CLI Building entry: src/index.ts, src/db/verify-backup-cli.ts
+CLI Using tsconfig: tsconfig.json
+CLI tsup v8.5.1
+CLI Using tsup config: /private/tmp/autopod-durable-execution/packages/daemon/tsup.config.ts
+CLI Target: es2022
+CLI Cleaning output folder
+ESM Build start
+ESM dist/sleep-detector-L3CQFZLP.js                5.00 KB
+ESM dist/db/verify-backup-cli.js                   1.08 KB
+ESM dist/azure-pim-handler-37W72SS2.js             221.00 B
+ESM dist/chunk-DJ4KDQP3.js                         17.99 KB
+ESM dist/reconciler-KZONDHPT.js                    7.24 KB
+ESM dist/sandbox-container-manager-AJD4NDBR.js     257.00 B
+ESM dist/chunk-HGDG2PZU.js                         4.03 KB
+ESM dist/chunk-RXSPALML.js                         64.55 KB
+ESM dist/local-reconciler-MZTKYUDK.js              184.00 B
+ESM dist/acr-client-WHLU2RNF.js                    6.81 KB
+ESM dist/chunk-XI7TSX2Y.js                         24.07 KB
+ESM dist/image-builder-WZMPAY47.js                 4.79 KB
+ESM dist/warm-image-maintenance-E6MOYZLN.js        3.68 KB
+ESM dist/chunk-M5OHQI2Z.js                         283.00 B
+ESM dist/chunk-X6XXXSQW.js                         9.64 KB
+ESM dist/mock-container-manager-KKJNVK7L.js        1.01 KB
+ESM dist/sleep-detector-L3CQFZLP.js.map            10.08 KB
+ESM dist/azure-pim-handler-37W72SS2.js.map         71.00 B
+ESM dist/db/verify-backup-cli.js.map               1.77 KB
+ESM dist/chunk-DJ4KDQP3.js.map                     38.50 KB
+ESM dist/sandbox-container-manager-AJD4NDBR.js.map 71.00 B
+ESM dist/local-reconciler-MZTKYUDK.js.map          71.00 B
+ESM dist/reconciler-KZONDHPT.js.map                14.01 KB
+ESM dist/chunk-XI7TSX2Y.js.map                     52.29 KB
+ESM dist/index.js                                  2.21 MB
+ESM dist/chunk-RXSPALML.js.map                     139.35 KB
+ESM dist/acr-client-WHLU2RNF.js.map                12.27 KB
+ESM dist/image-builder-WZMPAY47.js.map             10.20 KB
+ESM dist/chunk-HGDG2PZU.js.map                     7.82 KB
+ESM dist/warm-image-maintenance-E6MOYZLN.js.map    7.64 KB
+ESM dist/chunk-X6XXXSQW.js.map                     21.88 KB
+ESM dist/chunk-M5OHQI2Z.js.map                     296.00 B
+ESM dist/mock-container-manager-KKJNVK7L.js.map    1.86 KB
+ESM dist/index.js.map                              4.35 MB
+ESM ⚡️ Build success in 117ms
+DTS Build start
+DTS ⚡️ Build success in 2673ms
+DTS dist/index.d.ts                13.00 B
+DTS dist/db/verify-backup-cli.d.ts 13.00 B
+
+> @autopod/daemon@0.0.1 postbuild /private/tmp/autopod-durable-execution/packages/daemon
+> mkdir -p dist/db dist/actions && cp -R src/db/migrations dist/db/ && cp -R src/actions/defaults dist/actions/

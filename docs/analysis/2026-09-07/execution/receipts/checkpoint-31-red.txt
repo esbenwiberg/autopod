@@ -1,0 +1,141 @@
+
+ RUN  v4.1.11 /private/tmp/autopod-durable-execution/packages/daemon
+
+ ❯ src/pods/pod-manager.test.ts (476 tests | 5 failed | 471 skipped) 250ms
+       × preserves a replacement lifecycle after a late poll merged 85ms
+       × preserves a replacement lifecycle after a late poll closed 44ms
+       × preserves a replacement lifecycle after a late poll open 40ms
+       × preserves a replacement lifecycle after a late poll cleanup 42ms
+       × preserves a replacement lifecycle after a late poll complete-callback 39ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 5 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/pods/pod-manager.test.ts > PodManager > merge poll lifecycle > preserves a replacement lifecycle after a late poll merged
+AssertionError: expected { id: 'expected-clownfish', …(113) } to match object { status: 'running', …(3) }
+(116 matching properties omitted from actual)
+
+- Expected
++ Received
+
+  {
+    "containerId": "new-poll-container",
+-   "mergeBlockReason": "Replacement reason",
+-   "status": "running",
++   "mergeBlockReason": null,
++   "status": "complete",
+    "worktreePath": "/tmp/new-poll",
+  }
+
+ ❯ src/pods/pod-manager.test.ts:4564:46
+    4562|           createPodManager(ctx.deps);
+    4563|           await vi.advanceTimersByTimeAsync(0);
+    4564|           expect(manager.getSession(pod.id)).toMatchObject({
+       |                                              ^
+    4565|             status: 'running',
+    4566|             containerId: 'new-poll-container',
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/5]⎯
+
+ FAIL  src/pods/pod-manager.test.ts > PodManager > merge poll lifecycle > preserves a replacement lifecycle after a late poll closed
+AssertionError: expected { id: 'distinct-haddock', …(113) } to match object { status: 'running', …(3) }
+(123 matching properties omitted from actual)
+
+- Expected
++ Received
+
+  {
+    "containerId": "new-poll-container",
+-   "mergeBlockReason": "Replacement reason",
+-   "status": "running",
++   "mergeBlockReason": "Old status",
++   "status": "failed",
+    "worktreePath": "/tmp/new-poll",
+  }
+
+ ❯ src/pods/pod-manager.test.ts:4564:46
+    4562|           createPodManager(ctx.deps);
+    4563|           await vi.advanceTimersByTimeAsync(0);
+    4564|           expect(manager.getSession(pod.id)).toMatchObject({
+       |                                              ^
+    4565|             status: 'running',
+    4566|             containerId: 'new-poll-container',
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/5]⎯
+
+ FAIL  src/pods/pod-manager.test.ts > PodManager > merge poll lifecycle > preserves a replacement lifecycle after a late poll open
+AssertionError: expected { id: 'solid-tarsier', …(113) } to match object { status: 'running', …(3) }
+(116 matching properties omitted from actual)
+
+- Expected
++ Received
+
+  {
+    "containerId": "new-poll-container",
+-   "mergeBlockReason": "Replacement reason",
++   "mergeBlockReason": "Old status",
+    "status": "running",
+    "worktreePath": "/tmp/new-poll",
+  }
+
+ ❯ src/pods/pod-manager.test.ts:4564:46
+    4562|           createPodManager(ctx.deps);
+    4563|           await vi.advanceTimersByTimeAsync(0);
+    4564|           expect(manager.getSession(pod.id)).toMatchObject({
+       |                                              ^
+    4565|             status: 'running',
+    4566|             containerId: 'new-poll-container',
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/5]⎯
+
+ FAIL  src/pods/pod-manager.test.ts > PodManager > merge poll lifecycle > preserves a replacement lifecycle after a late poll cleanup
+AssertionError: expected { id: 'nutty-tick', …(113) } to match object { status: 'running', …(3) }
+(116 matching properties omitted from actual)
+
+- Expected
++ Received
+
+  {
+    "containerId": "new-poll-container",
+-   "mergeBlockReason": "Replacement reason",
+-   "status": "running",
++   "mergeBlockReason": null,
++   "status": "complete",
+    "worktreePath": "/tmp/new-poll",
+  }
+
+ ❯ src/pods/pod-manager.test.ts:4564:46
+    4562|           createPodManager(ctx.deps);
+    4563|           await vi.advanceTimersByTimeAsync(0);
+    4564|           expect(manager.getSession(pod.id)).toMatchObject({
+       |                                              ^
+    4565|             status: 'running',
+    4566|             containerId: 'new-poll-container',
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[4/5]⎯
+
+ FAIL  src/pods/pod-manager.test.ts > PodManager > merge poll lifecycle > preserves a replacement lifecycle after a late poll complete-callback
+AssertionError: expected [ 'fuzzy-basilisk' ] to deeply equal []
+
+- Expected
++ Received
+
+- []
++ [
++   "fuzzy-basilisk",
++ ]
+
+ ❯ src/pods/pod-manager.test.ts:4574:29
+    4572|             expect(ctx.containerManager.kill).not.toHaveBeenCalled();
+    4573|           expect(ctx.prManager.mergePr).not.toHaveBeenCalled();
+    4574|           expect(completed).toEqual([]);
+       |                             ^
+    4575|         } finally {
+    4576|           vi.useRealTimers();
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[5/5]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  5 failed | 471 skipped (476)
+   Start at  22:14:05
+   Duration  1.44s (transform 734ms, setup 0ms, import 1.09s, tests 250ms, environment 0ms)

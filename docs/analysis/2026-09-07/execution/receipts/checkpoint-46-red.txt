@@ -1,0 +1,66 @@
+
+ RUN  v4.1.11 /private/tmp/autopod-durable-execution/packages/daemon
+
+ ❯ src/pods/merge-journal.test.ts (23 tests | 6 failed | 17 skipped) 368ms
+     × retains a source-bound merged observation across disk restart without inventing a request 153ms
+     × rejects unproven or misclassified planned disposition (missing-source) 50ms
+     × rejects unproven or misclassified planned disposition (wrong-head) 41ms
+     × rejects unproven or misclassified planned disposition (wrong-target) 41ms
+     × rejects unproven or misclassified planned disposition (pending) 42ms
+     × rejects unproven or misclassified planned disposition (admitted) 42ms
+ ❯ src/pods/pod-manager.test.ts (519 tests | 1 failed | 518 skipped) 62ms
+       × reconciles a planned PR merged during downtime without a provider mutation or recorded request 61ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 7 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/pods/merge-journal.test.ts > durable merge journal > retains a source-bound merged observation across disk restart without inventing a request
+TypeError: restarted.observeDisposition is not a function
+ ❯ src/pods/merge-journal.test.ts:94:17
+     92|       db = new Database(path);
+     93|       const restarted = createMergeJournal(db);
+     94|       restarted.observeDisposition(planned.id, f.result);
+       |                 ^
+     95|       restarted.observeDisposition(planned.id, f.result);
+     96|       db.close();
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/7]⎯
+
+ FAIL  src/pods/merge-journal.test.ts > durable merge journal > rejects unproven or misclassified planned disposition (missing-source)
+ FAIL  src/pods/merge-journal.test.ts > durable merge journal > rejects unproven or misclassified planned disposition (wrong-head)
+ FAIL  src/pods/merge-journal.test.ts > durable merge journal > rejects unproven or misclassified planned disposition (wrong-target)
+ FAIL  src/pods/merge-journal.test.ts > durable merge journal > rejects unproven or misclassified planned disposition (pending)
+ FAIL  src/pods/merge-journal.test.ts > durable merge journal > rejects unproven or misclassified planned disposition (admitted)
+SqliteError: no such table: merge_disposition_observations
+ ❯ Database.prepare ../../node_modules/.pnpm/better-sqlite3@11.10.0/node_modules/better-sqlite3/lib/methods/wrappers.js:5:21
+ ❯ src/pods/merge-journal.test.ts:132:21
+    130|         if (change === 'pending') result.merged = false;
+    131|         expect(() => f.journal.observeDisposition(planned.id, result))…
+    132|         expect(f.db.prepare('SELECT count(*) AS n FROM merge_dispositi…
+       |                     ^
+    133|       } finally { f.db.close(); }
+    134|     },
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/7]⎯
+
+ FAIL  src/pods/pod-manager.test.ts > PodManager > approveSession > reconciles a planned PR merged during downtime without a provider mutation or recorded request
+AssertionError: expected 'merge_pending' to be 'complete' // Object.is equality
+
+Expected: "complete"
+Received: "merge_pending"
+
+ ❯ src/pods/pod-manager.test.ts:5022:53
+    5020|         const restarted = createPodManager(ctx.deps);
+    5021|         await vi.advanceTimersByTimeAsync(0);
+    5022|         expect(restarted.getSession(pod.id).status).toBe('complete');
+       |                                                     ^
+    5023|         expect(ctx.prManager.mergePr).not.toHaveBeenCalled();
+    5024|         expect(ctx.worktreeManager.pushBranch).not.toHaveBeenCalled();
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/7]⎯
+
+
+ Test Files  2 failed (2)
+      Tests  7 failed | 535 skipped (542)
+   Start at  07:13:19
+   Duration  1.27s (transform 1.08s, setup 0ms, import 1.53s, tests 430ms, environment 0ms)
+

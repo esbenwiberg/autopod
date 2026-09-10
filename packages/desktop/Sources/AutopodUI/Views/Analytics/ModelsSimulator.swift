@@ -60,30 +60,33 @@ public func projectFleet(
     let tgtPods = target.podCount + redirected
     let srcComplete = source.completeCount - redirectedComplete
     let tgtComplete = target.completeCount + redirectedComplete
+    let redirectedDeliveries = Int(floor(Double(source.deliveredPrCount ?? 0) * redirectFraction))
+    let srcDeliveries = (source.deliveredPrCount ?? 0) - redirectedDeliveries
+    let tgtDeliveries = (target.deliveredPrCount ?? 0) + redirectedDeliveries
     let srcScored = source.scoredCount - redirectedScored
     let tgtScored = target.scoredCount + redirectedScored
 
-    // $/PR — weight by completeCount, not podCount.
-    // Virtual totalCostUsd = dollarPerPr × newCompleteCount for source' and target'.
+    // $/PR — weight by deliveredPrCount, not podCount.
+    // Virtual totalCostUsd = dollarPerPr × newDeliveryCount for source' and target'.
     // If either eligible model has null dollarPerPr (shouldn't happen; eligible strips <unknown>),
     // bail out and return nil so the table shows "—".
     let dpr: Double?
-    if let srcDpr = source.dollarPerPr, let tgtDpr = target.dollarPerPr {
+    if source.deliveredPrCount != nil, target.deliveredPrCount != nil, let srcDpr = source.dollarPerPr, let tgtDpr = target.dollarPerPr {
         var num = 0.0, den = 0.0
         for row in eligible {
             if row.model == source.model {
-                if srcComplete > 0 {
-                    num += srcDpr * Double(srcComplete)
-                    den += Double(srcComplete)
+                if srcDeliveries > 0 {
+                    num += srcDpr * Double(srcDeliveries)
+                    den += Double(srcDeliveries)
                 }
             } else if row.model == target.model {
-                if tgtComplete > 0 {
-                    num += tgtDpr * Double(tgtComplete)
-                    den += Double(tgtComplete)
+                if tgtDeliveries > 0 {
+                    num += tgtDpr * Double(tgtDeliveries)
+                    den += Double(tgtDeliveries)
                 }
-            } else if let c = row.totalCostUsd, row.completeCount > 0 {
+            } else if let c = row.totalCostUsd {
                 num += c
-                den += Double(row.completeCount)
+                den += Double(row.deliveredPrCount ?? 0)
             }
         }
         dpr = den > 0 ? num / den : nil
@@ -161,9 +164,11 @@ public func projectFleet(
 /// of totalCostUsd from dollarPerPr (which would introduce precision drift at 0%).
 private func fleetBaseline(_ eligible: [PerModelAggregate]) -> SimulatedFleet {
     var cNum = 0.0, cDen = 0.0
+    let completeDeliveryTelemetry = eligible.allSatisfy { $0.deliveredPrCount != nil }
     for row in eligible {
-        if let c = row.totalCostUsd, row.completeCount > 0 {
-            cNum += c; cDen += Double(row.completeCount)
+        if let c = row.totalCostUsd {
+            cNum += c
+            cDen += Double(row.deliveredPrCount ?? 0)
         }
     }
 
@@ -188,7 +193,7 @@ private func fleetBaseline(_ eligible: [PerModelAggregate]) -> SimulatedFleet {
     for row in eligible { eNum += row.escalationRate * Double(row.podCount); eDen += Double(row.podCount) }
 
     return SimulatedFleet(
-        dollarPerPr: cDen > 0 ? cNum / cDen : nil,
+        dollarPerPr: completeDeliveryTelemetry && cDen > 0 ? cNum / cDen : nil,
         avgQuality: qDen > 0 ? qNum / qDen : nil,
         successRate: sDen > 0 ? sNum / sDen : 0,
         meanTtmSeconds: tDen > 0 ? tNum / tDen : nil,

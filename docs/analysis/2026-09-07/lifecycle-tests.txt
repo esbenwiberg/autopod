@@ -1,0 +1,8 @@
+
+ RUN  v4.1.10 /Users/ewi/repos/autopod
+
+
+ Test Files  2 passed (2)
+      Tests  44 passed | 506 skipped (550)
+   Start at  09:01:34
+   Duration  2.16s (transform 1.09s, setup 0ms, import 1.81s, tests 1.02s, environment 0ms)

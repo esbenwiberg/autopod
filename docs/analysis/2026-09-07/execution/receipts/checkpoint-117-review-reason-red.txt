@@ -1,0 +1,24 @@
+[0/1] Planning build
+[1/1] Compiling plugin GenerateManual
+[2/2] Compiling plugin GenerateDoccReference
+Building for debugging...
+[2/7] Write sources
+[3/7] Write swift-version--58304C5D6DBC2206.txt
+[5/7] Emitting module AutopodUITests
+[6/7] Compiling AutopodUITests ValidationChecksTests.swift
+[6/8] Write Objects.LinkFileList
+[7/8] Linking AutopodDesktopPackageTests
+Build complete! (6.30s)
+Test Suite 'Selected tests' started at 2026-09-09 19:40:48.739.
+Test Suite 'AutopodDesktopPackageTests.xctest' started at 2026-09-09 19:40:48.745.
+Test Suite 'AutopodDesktopPackageTests.xctest' passed at 2026-09-09 19:40:48.745.
+	 Executed 0 tests, with 0 failures (0 unexpected) in 0.000 (0.000) seconds
+Test Suite 'Selected tests' passed at 2026-09-09 19:40:48.745.
+	 Executed 0 tests, with 0 failures (0 unexpected) in 0.000 (0.006) seconds
+◇ Test run started.
+↳ Testing Library Version: 1902
+↳ Target Platform: arm64e-apple-macos14.0
+◇ Test reviewFailureRetainsActionableReasonAlongsideFindings() started.
+✘ Test reviewFailureRetainsActionableReasonAlongsideFindings() recorded an issue at ValidationChecksTests.swift:110:3: Expectation failed: (presentation.failureLabel → "Review infrastructure failed").contains(reason → "Foundry tool review unavailable on the selected provider binding; reconcile it before retry.")
+✘ Test reviewFailureRetainsActionableReasonAlongsideFindings() failed after 0.001 seconds with 1 issue.
+✘ Test run with 1 test in 0 suites failed after 0.001 seconds with 1 issue.

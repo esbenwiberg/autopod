@@ -1,0 +1,56 @@
+
+ RUN  v4.1.11 /private/tmp/autopod-durable-execution/packages/daemon
+
+ ❯ src/pods/task-execution-ledger.test.ts (25 tests | 1 failed | 24 skipped) 92ms
+     × does not erase an unsettled linked execution and thereby clear the task admission guard 91ms
+ ❯ src/pods/pod-manager.test.ts (606 tests | 1 failed | 605 skipped) 89ms
+     × rejects deletion of an unsettled execution before failed cleanup can erase its evidence 88ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 2 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/pods/pod-manager.test.ts > PodManager > rejects deletion of an unsettled execution before failed cleanup can erase its evidence
+AssertionError: promise resolved "undefined" instead of rejecting
+
+- Expected:
+Error {
+  "message": "rejected promise",
+}
+
++ Received:
+undefined
+
+ ❯ src/pods/pod-manager.test.ts:2005:47
+    2003|     ctx.podRepo.update(pod.id, { status: 'failed', worktreePath: '/tmp…
+    2004|     vi.mocked(ctx.containerManager.kill).mockRejectedValue(new Error('…
+    2005|     await expect(manager.deleteSession(pod.id)).rejects.toMatchObject(…
+       |                                               ^
+    2006|     expect(ctx.containerManager.kill).not.toHaveBeenCalled();
+    2007|     expect(ctx.worktreeManager.cleanup).not.toHaveBeenCalled();
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/2]⎯
+
+ FAIL  src/pods/task-execution-ledger.test.ts > task-wide execution accounting > does not erase an unsettled linked execution and thereby clear the task admission guard
+AssertionError: expected [Function] to throw an error
+
+- Expected:
+null
+
++ Received:
+undefined
+
+ ❯ src/pods/task-execution-ledger.test.ts:347:40
+    345|       repo.taskExecutions?.beginRun('fix', 1, 1, binding);
+    346|       repo.update('fix', { status: 'failed' });
+    347|       expect(() => repo.delete('fix')).toThrow(/unsettled.*execution/i…
+       |                                        ^
+    348|       expect(repo.get('fix')).not.toBeNull();
+    349|       expect(repo.taskExecutions?.snapshot('root').agentRunCount).toBe…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/2]⎯
+
+
+ Test Files  2 failed (2)
+      Tests  2 failed | 629 skipped (631)
+   Start at  17:34:55
+   Duration  1.66s (transform 1.37s, setup 0ms, import 2.06s, tests 181ms, environment 0ms)
+

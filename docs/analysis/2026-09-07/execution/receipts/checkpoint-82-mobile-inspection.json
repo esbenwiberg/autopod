@@ -1,0 +1,17 @@
+{
+  "scope": "built mobile local fixture; separate manager/local process proof",
+  "viewport": {
+    "width": 390,
+    "height": 844
+  },
+  "hostCliLabel": "Host claude CLI 2.9.1",
+  "path": "/fixture/claude",
+  "provider": "unverified",
+  "account": "not recorded",
+  "image": "not applicable",
+  "screenshotInspected": true,
+  "mutatingRequests": 0,
+  "browserClosed": true,
+  "fixtureExitCode": 130,
+  "nativeInteraction": "unverified"
+}

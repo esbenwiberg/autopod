@@ -1,0 +1,2 @@
+Hosted deployment release verification tests passed.
+Build provenance generated-file and real-source checks passed.

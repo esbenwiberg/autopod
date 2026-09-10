@@ -1,0 +1,10 @@
+{
+  "value": [
+    {
+      "code": "ProvisioningState/succeeded",
+      "displayStatus": "Provisioning succeeded",
+      "level": "Info",
+      "message": "Enable succeeded: \n[stdout]\n{\"admissionCounts\": {\"pods\": 0, \"managed\": 2, \"systemRuns\": 0, \"schedules\": 0, \"watchers\": 0, \"podsitter\": 0}}\n{\"status\": \"cutover_incomplete\", \"errorClass\": \"AssertionError\", \"stopped\": false, \"activationAttempted\": false}\n\n[stderr]\n"
+    }
+  ]
+}

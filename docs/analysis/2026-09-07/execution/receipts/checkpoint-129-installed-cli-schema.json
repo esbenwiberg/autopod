@@ -1,0 +1,189 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "properties": {
+    "cmd": {
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "customerVnetConnectionName": {
+      "type": "string"
+    },
+    "disk": {
+      "description": "Public disk image name.",
+      "type": "string"
+    },
+    "diskId": {
+      "description": "Private disk image ID.",
+      "type": "string"
+    },
+    "egressPolicy": {
+      "properties": {
+        "defaultAction": {
+          "enum": ["Allow", "Deny"],
+          "type": "string"
+        },
+        "hostRules": {
+          "items": {
+            "properties": {
+              "action": {
+                "type": "string"
+              },
+              "pattern": {
+                "type": "string"
+              }
+            },
+            "required": ["pattern", "action"],
+            "type": "object"
+          },
+          "type": "array"
+        },
+        "rules": {
+          "items": {
+            "type": "object"
+          },
+          "type": "array"
+        },
+        "trafficInspection": {
+          "enum": ["Legacy", "Full", "Partial", "None"],
+          "type": "string"
+        }
+      },
+      "required": ["defaultAction"],
+      "type": "object"
+    },
+    "entrypoint": {
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "environment": {
+      "additionalProperties": {
+        "type": "string"
+      },
+      "type": "object"
+    },
+    "gatewayConnections": {
+      "description": "Gateway connections to attach (data-plane: resourceId only). Max 10.",
+      "items": {
+        "properties": {
+          "resourceId": {
+            "type": "string"
+          }
+        },
+        "required": ["resourceId"],
+        "type": "object"
+      },
+      "type": "array"
+    },
+    "labels": {
+      "additionalProperties": {
+        "type": "string"
+      },
+      "type": "object"
+    },
+    "lifecycle": {
+      "properties": {
+        "autoDeletePolicy": {
+          "properties": {
+            "deleteIntervalInSeconds": {
+              "minimum": 0,
+              "type": "integer"
+            },
+            "enabled": {
+              "type": "boolean"
+            }
+          },
+          "required": ["enabled"],
+          "type": "object"
+        },
+        "autoSuspendPolicy": {
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            },
+            "interval": {
+              "minimum": 0,
+              "type": "integer"
+            },
+            "mode": {
+              "type": "string"
+            }
+          },
+          "required": ["enabled", "interval"],
+          "type": "object"
+        }
+      },
+      "type": "object"
+    },
+    "ports": {
+      "items": {
+        "properties": {
+          "auth": {
+            "properties": {
+              "anonymous": {
+                "type": "boolean"
+              }
+            },
+            "type": "object"
+          },
+          "name": {
+            "type": "string"
+          },
+          "port": {
+            "maximum": 65535,
+            "minimum": 1,
+            "type": "integer"
+          }
+        },
+        "required": ["port"],
+        "type": "object"
+      },
+      "type": "array"
+    },
+    "resources": {
+      "properties": {
+        "cpu": {
+          "type": "string"
+        },
+        "disk": {
+          "type": "string"
+        },
+        "memory": {
+          "type": "string"
+        }
+      },
+      "required": ["cpu", "memory"],
+      "type": "object"
+    },
+    "snapshot": {
+      "description": "Snapshot ID.",
+      "type": "string"
+    },
+    "vmmType": {
+      "type": "string"
+    },
+    "volumes": {
+      "items": {
+        "properties": {
+          "mountpoint": {
+            "type": "string"
+          },
+          "readOnly": {
+            "type": "boolean"
+          },
+          "volumeName": {
+            "type": "string"
+          }
+        },
+        "required": ["volumeName", "mountpoint"],
+        "type": "object"
+      },
+      "type": "array"
+    }
+  },
+  "title": "ACA Sandbox Manifest",
+  "type": "object"
+}

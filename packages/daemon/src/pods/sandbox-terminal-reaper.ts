@@ -49,6 +49,13 @@ export class SandboxTerminalReaper {
       return;
     }
     const containerId = pod.containerId;
+    const generation = pod.lifecycleGeneration;
+    const status = pod.status;
+    // A repository checkpoint is not a published artifact snapshot. The artifact
+    // completion path owns collection and cleanup; preserve its retry source.
+    if (pod.status === 'failed' && (pod.options?.output === 'artifact' || pod.pendingEscalation)) {
+      return;
+    }
     if (pod.status === 'failed') {
       try {
         await this.deps.preserveWorkspace(pod.id);
@@ -59,6 +66,16 @@ export class SandboxTerminalReaper {
         );
         return;
       }
+    }
+    const beforeDelete = this.deps.podRepo.getOrThrow(pod.id);
+    if (
+      beforeDelete.lifecycleGeneration !== generation ||
+      beforeDelete.containerId !== containerId ||
+      beforeDelete.executionTarget !== 'sandbox' ||
+      beforeDelete.status !== status ||
+      beforeDelete.pendingEscalation
+    ) {
+      return;
     }
     try {
       const deleted = await this.destroyWithinDeadline(containerId);
@@ -71,7 +88,12 @@ export class SandboxTerminalReaper {
       }
       // Avoid clearing a newly assigned container if an operator revived the pod mid-sweep.
       const current = this.deps.podRepo.getOrThrow(pod.id);
-      if (current.containerId === containerId && current.executionTarget === 'sandbox') {
+      if (
+        current.lifecycleGeneration === generation &&
+        current.containerId === containerId &&
+        current.executionTarget === 'sandbox' &&
+        current.status === status
+      ) {
         this.deps.podRepo.update(
           pod.id,
           current.status === 'failed'

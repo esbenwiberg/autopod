@@ -1,0 +1,6 @@
+{
+  "status": "paused",
+  "operations": 4,
+  "scheduleWindowPreserved": true,
+  "podsitterBindingAndAuthorizationPreserved": true
+}

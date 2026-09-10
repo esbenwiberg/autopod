@@ -1,6 +1,13 @@
 import type { Readable, Writable } from 'node:stream';
 import type { ArtifactOutput } from '@autopod/shared';
 
+/** Guard publication of a collected directory after asynchronous extraction. */
+export interface DirectoryExtractionOptions {
+  signal?: AbortSignal;
+  /** Synchronous ownership check immediately before collection and publication; throws if stale. */
+  assertCurrent?: () => void;
+}
+
 export interface ContainerSpawnConfig {
   image: string;
   managedSpecDigest?: string;
@@ -77,7 +84,9 @@ export interface StreamingExecResult {
   stdout: Readable;
   stderr: Readable;
   stdin?: Writable;
+  /** Resolves only for an observed process exit; missing/transport evidence rejects. */
   exitCode: Promise<number>;
+  /** Resolves only after verified termination; closing a transport is insufficient. */
   kill(): Promise<void>;
 }
 
@@ -108,7 +117,16 @@ export interface TerminalSession {
   close(): void;
 }
 
+export interface ContainerExecutionMetadata {
+  imageDigest: string | null;
+  memoryLimitBytes: number | null;
+  cpuLimit: number | null;
+  networkMode: string | null;
+}
+
 export interface ContainerManager {
+  /** Read actual backend identity; unsupported metadata remains unavailable. */
+  getExecutionMetadata?(containerId: string): Promise<ContainerExecutionMetadata>;
   ensureManagedContainer?(config: ContainerSpawnConfig): Promise<string>;
   /** Strict managed /output extraction; unavailable implementations fail preflight. */
   extractManagedOutput?(
@@ -137,8 +155,8 @@ export interface ContainerManager {
   readFileBinary(containerId: string, path: string): Promise<Buffer>;
   /**
    * Extract a directory from a container (works on stopped containers) to a host path.
-   * Clears the host directory contents first (skipping any entries in `excludes`),
-   * then extracts the container directory (skipping entries matching `excludes`).
+   * Collects into staging before mirroring the host directory (preserving `excludes`).
+   * Guarded extraction stages outside the host directory and checks ownership before publication.
    * Bare `excludes` entries such as `node_modules` match any path segment; entries
    * with slashes match that relative path and its descendants.
    */
@@ -147,6 +165,7 @@ export interface ContainerManager {
     containerPath: string,
     hostPath: string,
     excludes?: string[],
+    options?: DirectoryExtractionOptions,
   ): Promise<void>;
   getStatus(containerId: string): Promise<'running' | 'stopped' | 'deleted' | 'unknown'>;
   execInContainer(

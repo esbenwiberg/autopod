@@ -1,0 +1,37 @@
+- main [ref=e3]:
+  - link "← Scan reports" [ref=e4] [cursor=pointer]:
+    - /url: "#/scan-reports"
+  - heading "Report review" [level=1] [ref=e6]
+  - generic [ref=e7]:
+    - heading "incomplete" [level=2] [ref=e8]
+    - paragraph [ref=e9]: 2026-09-07T10:00:00Z · Report completion is separate from patch delivery.
+    - paragraph [ref=e10]: main → work
+    - group [ref=e11]:
+      - generic "Exact source and files" [ref=e12]
+    - paragraph [ref=e13]: "secrets: failed · Unknown findings · Synthetic scanner failure; no clean result available."
+    - paragraph [ref=e14]: "dependencies: completed · 1 findings"
+    - paragraph [ref=e15]: "Judgment: not_requested"
+  - alert [ref=e16]:
+    - heading "Some review records are unavailable" [level=2] [ref=e17]
+    - paragraph [ref=e18]: Loaded counts exclude these records. They remain stored and have not been resolved.
+    - paragraph [ref=e19]:
+      - strong [ref=e20]: unreadable-finding-fixture
+      - text: "· Finding evidence unavailable: malformed stored record. It remains stored and cannot authorize a repair."
+    - paragraph [ref=e21]:
+      - strong [ref=e22]: unreadable-decision-fixture
+      - text: "· Decision evidence unavailable: malformed stored record. Reconcile the original evidence."
+  - generic [ref=e23]:
+    - heading "Unresolved findings (0 loaded)" [level=2] [ref=e24]
+    - paragraph [ref=e25]: Includes earlier findings still awaiting resolution. Selecting a repair does not mark it fixed.
+    - button "Load more findings" [ref=e26] [cursor=pointer]
+    - paragraph [ref=e27]: 0 / 100 findings selected. Select up to 100 findings per decision.
+    - generic [ref=e28]:
+      - text: Reason
+      - textbox "Reason" [ref=e29]
+    - generic [ref=e30]:
+      - button "Defer" [disabled] [ref=e31]
+      - button "Record resolution" [disabled] [ref=e32]
+      - button "Record repair selection" [disabled] [ref=e33]
+  - generic [ref=e34]:
+    - heading "Recorded decisions" [level=2] [ref=e35]
+    - button "Load older decisions" [ref=e36] [cursor=pointer]

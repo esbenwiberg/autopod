@@ -1,0 +1,76 @@
+
+ RUN  v4.1.11 /private/tmp/autopod-durable-execution/packages/daemon
+
+ ❯ src/worktrees/local-worktree-manager.test.ts (125 tests | 4 failed) 25ms
+       × pushes with explicit HEAD:refs/heads/<branch> refspec when branch matches 5ms
+       × pins a force push lease to the remote-tracking branch OID 0ms
+       × skips a force push when the authenticated remote branch already matches HEAD 0ms
+       × does not confuse a suffix-matching remote branch with the target branch 0ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 4 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/worktrees/local-worktree-manager.test.ts > LocalWorktreeManager > pushBranch > pushes with explicit HEAD:refs/heads/<branch> refspec when branch matches
+AutopodError: Source publication requires reconciliation. Commit or tree identity is unavailable. Original resources must be retained.
+ ❯ requireEvidence src/worktrees/local-worktree-manager.ts:1392:15
+    1390|     const requireEvidence = (condition: boolean, detail: string): void…
+    1391|       if (!condition)
+    1392|         throw new AutopodError(
+       |               ^
+    1393|           `Source publication requires reconciliation. ${detail} Origi…
+    1394|           'SOURCE_PUBLICATION_RECONCILIATION_REQUIRED',
+ ❯ readSource src/worktrees/local-worktree-manager.ts:1404:7
+ ❯ LocalWorktreeManager.pushBranch src/worktrees/local-worktree-manager.ts:1415:20
+ ❯ src/worktrees/local-worktree-manager.test.ts:1313:7
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/4]⎯
+
+ FAIL  src/worktrees/local-worktree-manager.test.ts > LocalWorktreeManager > pushBranch > pins a force push lease to the remote-tracking branch OID
+AutopodError: Source publication requires reconciliation. Commit or tree identity is unavailable. Original resources must be retained.
+ ❯ requireEvidence src/worktrees/local-worktree-manager.ts:1392:15
+    1390|     const requireEvidence = (condition: boolean, detail: string): void…
+    1391|       if (!condition)
+    1392|         throw new AutopodError(
+       |               ^
+    1393|           `Source publication requires reconciliation. ${detail} Origi…
+    1394|           'SOURCE_PUBLICATION_RECONCILIATION_REQUIRED',
+ ❯ readSource src/worktrees/local-worktree-manager.ts:1404:7
+ ❯ LocalWorktreeManager.pushBranch src/worktrees/local-worktree-manager.ts:1415:20
+ ❯ src/worktrees/local-worktree-manager.test.ts:1346:7
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/4]⎯
+
+ FAIL  src/worktrees/local-worktree-manager.test.ts > LocalWorktreeManager > pushBranch > skips a force push when the authenticated remote branch already matches HEAD
+AutopodError: Source publication requires reconciliation. Commit or tree identity is unavailable. Original resources must be retained.
+ ❯ requireEvidence src/worktrees/local-worktree-manager.ts:1392:15
+    1390|     const requireEvidence = (condition: boolean, detail: string): void…
+    1391|       if (!condition)
+    1392|         throw new AutopodError(
+       |               ^
+    1393|           `Source publication requires reconciliation. ${detail} Origi…
+    1394|           'SOURCE_PUBLICATION_RECONCILIATION_REQUIRED',
+ ❯ readSource src/worktrees/local-worktree-manager.ts:1404:7
+ ❯ LocalWorktreeManager.pushBranch src/worktrees/local-worktree-manager.ts:1415:20
+ ❯ src/worktrees/local-worktree-manager.test.ts:1381:7
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/4]⎯
+
+ FAIL  src/worktrees/local-worktree-manager.test.ts > LocalWorktreeManager > pushBranch > does not confuse a suffix-matching remote branch with the target branch
+AutopodError: Source publication requires reconciliation. Commit or tree identity is unavailable. Original resources must be retained.
+ ❯ requireEvidence src/worktrees/local-worktree-manager.ts:1392:15
+    1390|     const requireEvidence = (condition: boolean, detail: string): void…
+    1391|       if (!condition)
+    1392|         throw new AutopodError(
+       |               ^
+    1393|           `Source publication requires reconciliation. ${detail} Origi…
+    1394|           'SOURCE_PUBLICATION_RECONCILIATION_REQUIRED',
+ ❯ readSource src/worktrees/local-worktree-manager.ts:1404:7
+ ❯ LocalWorktreeManager.pushBranch src/worktrees/local-worktree-manager.ts:1415:20
+ ❯ src/worktrees/local-worktree-manager.test.ts:1426:7
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[4/4]⎯
+
+
+ Test Files  1 failed | 1 passed (2)
+      Tests  4 failed | 125 passed (129)
+   Start at  23:30:52
+   Duration  3.35s (transform 292ms, setup 0ms, import 496ms, tests 3.02s, environment 0ms)

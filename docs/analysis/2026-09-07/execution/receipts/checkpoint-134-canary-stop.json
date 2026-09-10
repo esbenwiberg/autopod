@@ -1,0 +1,6 @@
+{
+  "at": "2026-09-10T09:09:28.177857+00:00",
+  "status": "killed",
+  "containerId": "12b21a50-930d-4a0c-8e3a-d99f872e73b4",
+  "scope": "End only the completed canary workload and request its normal cleanup; retain events and failed MCP outcome."
+}

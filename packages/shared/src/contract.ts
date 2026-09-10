@@ -54,7 +54,7 @@ const factSchema = z
       'custom-command',
     ]),
     artifact: z
-      .object({ path: text(500), change: z.enum(['create', 'update', 'touch']) })
+      .object({ path: text(500), change: z.enum(['create', 'update', 'delete', 'touch']) })
       .passthrough(),
     command: text(1000),
   })
@@ -71,6 +71,40 @@ export const specContractV1Schema = z
     scenarios: list(scenarioSchema),
     requiredFacts: list(factSchema),
     humanReview: list(reviewSchema),
+    executionRequirements: z
+      .object({
+        version: z.literal(1),
+        executables: z
+          .array(
+            z
+              .string()
+              .min(1)
+              .max(256)
+              .regex(/^[A-Za-z0-9_./+:][A-Za-z0-9_./+:-]*$/),
+          )
+          .min(1)
+          .max(64),
+        minimumMemoryBytes: z
+          .number()
+          .int()
+          .positive()
+          .max(1024 ** 4)
+          .optional(),
+        minimumCpu: z.number().positive().max(1024).optional(),
+      })
+      .strict()
+      .optional(),
+    validationEvidence: z
+      .object({
+        version: z.literal(1),
+        hermetic: z.literal(true),
+        toolchainFiles: z.array(text(500)).min(1).max(100),
+        dependencyPaths: z.array(text(500)).max(100),
+        environmentFiles: z.array(text(500)).max(100),
+        environmentRevision: z.string().regex(/^[a-f0-9]{64}$/),
+      })
+      .strict()
+      .optional(),
   })
   .passthrough();
 
@@ -102,7 +136,7 @@ export function inspectSpecContract(input: unknown, source = 'contract'): Contra
       let hint = 'Provide the required value in the documented contract-v1 format.';
       if (/^requiredFacts\.\d+\.artifact\.change$/.test(path)) {
         code = 'CONTRACT_ARTIFACT_CHANGE_INVALID';
-        hint = 'Use one of create, update, or touch.';
+        hint = 'Use one of create, update, delete, or touch.';
       } else if (/^requiredFacts\.\d+\.proves$/.test(path)) {
         code = 'CONTRACT_PROVES_EMPTY';
         hint = 'List at least one declared scenario id.';
@@ -291,6 +325,10 @@ export function inspectSpecContractYaml(
           scenarios: raw.scenarios,
           requiredFacts: raw.required_facts,
           humanReview: raw.human_review ?? [],
+          ...(raw.validation_evidence ? { validationEvidence: raw.validation_evidence } : {}),
+          ...(raw.execution_requirements
+            ? { executionRequirements: raw.execution_requirements }
+            : {}),
         }
       : raw;
   return inspectSpecContract(mapped, source);

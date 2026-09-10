@@ -1,0 +1,43 @@
+
+ RUN  v4.1.10 /private/tmp/autopod-durable-execution/packages/daemon
+
+ ❯ src/pods/pod-manager.test.ts (418 tests | 2 failed) 17504ms
+       × recovers from live container when workspace sync fails before validation 51ms
+       × resets a stale validation container to host HEAD instead of mirroring it back 50ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 2 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/pods/pod-manager.test.ts > PodManager > triggerValidation > recovers from live container when workspace sync fails before validation
+AssertionError: expected 'review_required' to be 'validated' // Object.is equality
+
+Expected: "validated"
+Received: "review_required"
+
+ ❯ src/pods/pod-manager.test.ts:9286:29
+    9284|       const result = manager.getSession(pod.id);
+    9285|       expect(result.worktreeCompromised).toBe(false);
+    9286|       expect(result.status).toBe('validated');
+       |                             ^
+    9287|       expect(ctx.validationEngine.validate).toHaveBeenCalled();
+    9288|       expect(
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/2]⎯
+
+ FAIL  src/pods/pod-manager.test.ts > PodManager > triggerValidation > resets a stale validation container to host HEAD instead of mirroring it back
+AssertionError: expected "vi.fn()" to be called at least once
+ ❯ src/pods/pod-manager.test.ts:9418:45
+    9416|       );
+    9417|       expect(firstDestructiveSyncIndex === -1 || resetIndex < firstDes…
+    9418|       expect(ctx.validationEngine.validate).toHaveBeenCalled();
+       |                                             ^
+    9419|     });
+    9420|
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/2]⎯
+
+
+ Test Files  1 failed | 2 passed (3)
+      Tests  2 failed | 449 passed (451)
+   Start at  16:52:54
+   Duration  18.49s (transform 1.35s, setup 0ms, import 2.18s, tests 18.95s, environment 0ms)
+

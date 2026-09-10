@@ -1,0 +1,79 @@
+{
+  "observedAt": "2026-09-10T09:06:07.205597+00:00",
+  "id": "middle-tahr",
+  "status": "validated",
+  "error": null,
+  "summaryMarkerPresent": false,
+  "summaryKeys": [],
+  "taskAccounting": {
+    "agentRunCount": 1,
+    "providerAttemptCount": 1,
+    "recordedInputTokens": 26970,
+    "recordedOutputTokens": 224,
+    "recordedCostUsd": 0.068994,
+    "delivery": {
+      "intentCount": 0,
+      "receiptCount": 0,
+      "unresolvedCount": 0,
+      "scope": "durable-receipts-only",
+      "disposition": {
+        "openCount": 0,
+        "mergedCount": 0,
+        "closedCount": 0,
+        "unavailableCount": 0,
+        "basis": "last-recorded",
+        "liveVerified": false
+      }
+    },
+    "telemetry": "partial"
+  },
+  "provenance": {
+    "latest": {
+      "version": 1,
+      "purpose": "coding",
+      "subject": "worker",
+      "status": "checked",
+      "runtime": "codex",
+      "model": "gpt-5.6-sol",
+      "providerId": "openai",
+      "providerAccountId": "openai-private",
+      "release": {
+        "validationImplementationHash": "bf48e54c580a7774d64fdb5801536cb499766007da0fd53d6db2571e2a12b2a3",
+        "commitSha": "089442b63e5827894da40c91c764b47ff4562073",
+        "dirty": false,
+        "builtAt": "2026-09-10T08:53:21.494Z",
+        "source": "build"
+      },
+      "cliPath": "/usr/local/bin/codex",
+      "cliVersion": "0.144.4",
+      "imageDigest": null,
+      "contractHash": "74234e98afe7498fb5daf1f36ac2d78acc339464f950703b8c019892f982b90b",
+      "validationImplementationHash": "bf48e54c580a7774d64fdb5801536cb499766007da0fd53d6db2571e2a12b2a3",
+      "capabilities": {
+        "streamingExec": "supported",
+        "memoryLimitBytes": 4294967296,
+        "cpuLimit": 2,
+        "networkMode": null
+      },
+      "commands": {
+        "requirements": [],
+        "unresolvedSources": [],
+        "deferredArtifacts": [],
+        "explicitDependencies": false
+      },
+      "diagnostics": [
+        {
+          "code": "IMAGE_IDENTITY_UNAVAILABLE",
+          "detail": "Actual image digest is unverified."
+        }
+      ],
+      "id": "6650e274-9983-4bc3-9494-77a8e2fcc272",
+      "podId": "middle-tahr",
+      "taskId": "task:2fb7ebe4-f658-4f20-8ef7-e996491c273c",
+      "executionId": "execution:3863910e-21b8-4b24-abb0-02bea3c48692",
+      "generation": 1,
+      "checkedAt": "2026-09-10T09:05:24.041Z"
+    }
+  },
+  "containerId": "12b21a50-930d-4a0c-8e3a-d99f872e73b4"
+}

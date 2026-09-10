@@ -1,0 +1,14 @@
+{
+  "observedAt": "2026-09-08T21:16:35.891121+00:00",
+  "url": "https://autopod-daemon-ewi.swedencentral.cloudapp.azure.com/health",
+  "httpStatus": 200,
+  "bytes": 97,
+  "status": "ok",
+  "version": "0.0.1",
+  "releaseFieldsPresent": {
+    "release": false,
+    "daemonSha": false,
+    "imageDigest": false,
+    "readiness": false
+  }
+}

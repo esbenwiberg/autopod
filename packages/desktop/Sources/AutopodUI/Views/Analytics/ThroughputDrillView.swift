@@ -320,6 +320,7 @@ private struct ThroughputHeatmapSectionView: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
+                if pod.historyArchived == true { Text("Deleted · retained").font(.caption2).foregroundStyle(.secondary) }
                 Spacer()
                 throughputStatusBadge(pod.status)
                 Text(analyticsRelativeDate(pod.completedAt))
@@ -331,6 +332,7 @@ private struct ThroughputHeatmapSectionView: View {
         }
         .buttonStyle(.plain)
         .contentShape(Rectangle())
+        .disabled(pod.historyArchived == true)
     }
 
     private func throughputStatusBadge(_ status: ThroughputPodStatus) -> some View {

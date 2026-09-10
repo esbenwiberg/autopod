@@ -1,0 +1,32 @@
+
+ RUN  v4.1.10 /private/tmp/autopod-durable-execution/packages/daemon
+
+ ❯ src/pods/task-retry-ledger.test.ts (3 tests | 1 failed) 474ms
+     × enforces persisted backoff, generation and honest interrupted execution accounting 113ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/pods/task-retry-ledger.test.ts > durable task validation retry admission > enforces persisted backoff, generation and honest interrupted execution accounting
+AssertionError: expected [Function] to throw an error
+
+- Expected:
+null
+
++ Received:
+undefined
+
+ ❯ src/pods/task-retry-ledger.test.ts:153:43
+    151|       const next = ledger.admit('root', 1, identity, binding, [0]);
+    152|       repo.update('root', { lifecycleGeneration: 2 });
+    153|       expect(() => ledger.start(next.id)).toThrow('stale execution');
+       |                                           ^
+    154|       expect(() => ledger.admit('root', 1, identity, binding, [0])).to…
+    155|     } finally {
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed | 1 passed (2)
+      Tests  1 failed | 3 passed (4)
+   Start at  14:50:32
+   Duration  1.65s (transform 357ms, setup 0ms, import 663ms, tests 1.76s, environment 0ms)

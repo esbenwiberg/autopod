@@ -1,0 +1,35 @@
+{
+  "scope": "Built mobile app with synthetic localhost fixture; no live provider or daemon acceptance",
+  "observedAt": "2026-09-08T05:39:17.297511+00:00",
+  "url": "http://127.0.0.1:65342/mobile/#/pod/local-fixture",
+  "tabId": "26",
+  "before": {
+    "status": "failed",
+    "notice": "PR closed without merging. Original resources retained. Reopen the existing PR, then use Resume to revalidate retained source before approving delivery.",
+    "availableAction": "Resume",
+    "mergeEvidence": "unavailable"
+  },
+  "action": "Clicked Refresh task accounting once; no Resume, approval or provider mutation",
+  "after": [
+    "Source-bound merges: 0 merged PRs \u00b7 0 recorded requests \u00b7 0 unresolved of 1 PRs",
+    "Last recorded closed PRs: 1",
+    "Current provider status unverified."
+  ],
+  "serverReceipt": {
+    "reads": 2,
+    "action": "read-delivery-disposition",
+    "scope": "local fixture only"
+  },
+  "cleanup": {
+    "tabClosed": true,
+    "remainingTabs": [],
+    "serverSession": 96814,
+    "exitCode": 1,
+    "termination": "Ctrl-C"
+  },
+  "limitations": [
+    "Independent synthetic settlement, preflight, validation, budget and cost panels were not accepted as current evidence.",
+    "Actual Resume and approval recovery were exercised in daemon integration tests; no browser mutation claimed.",
+    "No native desktop interaction or live acceptance."
+  ]
+}

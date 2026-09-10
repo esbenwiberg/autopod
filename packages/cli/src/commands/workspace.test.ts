@@ -1,10 +1,11 @@
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { createServer } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { MAX_HANDOFF_INSTRUCTIONS_LENGTH, type Pod } from '@autopod/shared';
 import { Command } from 'commander';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { AutopodClient } from '../api/client.js';
+import { AutopodClient } from '../api/client.js';
 import { registerWorkspaceCommands, resolveHandoffInstructions } from './workspace.js';
 
 vi.mock('ora', () => ({
@@ -53,6 +54,85 @@ function makePod(overrides: Partial<Pod> = {}): Pod {
     ...overrides,
   } as Pod;
 }
+
+it.each([
+  {
+    code: 'WORKSPACE_PRESERVATION_FAILED',
+    status: 502,
+    message:
+      'Workspace preservation failed. Original resources retained; repair synchronization and retry completion.',
+  },
+  {
+    code: 'COMPLETION_IN_PROGRESS',
+    status: 409,
+    message:
+      'Another completion request is still settling for this workspace. Retry after it finishes.',
+  },
+  {
+    code: 'HUMAN_DECISION_PENDING',
+    status: 409,
+    message: 'An unanswered human decision must be resolved before completing this workspace.',
+  },
+  {
+    code: 'STALE_WORKSPACE_COMPLETION',
+    status: 409,
+    message:
+      'Workspace completion was superseded; the current lifecycle and resources are retained.',
+  },
+])(
+  'keeps $code visible and completes only after an explicit CLI retry',
+  async ({ code, status, message }) => {
+    let completions = 0;
+    const pod = makePod({
+      status: 'running',
+      containerId: 'ctr-source',
+      worktreePath: '/fixture/worktree',
+    });
+    const server = createServer((request, response) => {
+      response.setHeader('content-type', 'application/json');
+      if (request.method === 'POST' && request.url === '/pods/abcd1234/complete') {
+        completions++;
+        if (completions === 1) {
+          response.statusCode = status;
+          response.end(JSON.stringify({ error: message, code }));
+        } else response.end(JSON.stringify({ ok: true }));
+      } else if (request.method === 'GET' && request.url === '/pods/abcd1234') {
+        response.end(JSON.stringify(pod));
+      } else if (request.method === 'GET' && request.url === '/pods') {
+        response.end(JSON.stringify([pod]));
+      } else {
+        response.statusCode = 404;
+        response.end('{}');
+      }
+    });
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+    const address = server.address();
+    if (!address || typeof address === 'string') throw new Error('Missing fixture port');
+    const client = new AutopodClient({
+      baseUrl: `http://127.0.0.1:${address.port}`,
+      getToken: async () => 'local-fixture-only',
+    });
+    const log = vi.spyOn(console, 'log').mockImplementation(() => {});
+    const command = () => {
+      const program = new Command();
+      registerWorkspaceCommands(program, () => client);
+      return program;
+    };
+    try {
+      await expect(command().parseAsync(['node', 'ap', 'complete', 'abcd1234'])).rejects.toThrow(
+        message,
+      );
+      expect(completions).toBe(1);
+      expect(log.mock.calls.flat().join(' ')).not.toContain('Pod complete.');
+      await command().parseAsync(['node', 'ap', 'complete', 'abcd1234']);
+      expect(completions).toBe(2);
+      expect(log.mock.calls.flat().join(' ')).toContain('Pod complete. Branch pushed to origin.');
+    } finally {
+      log.mockRestore();
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+  },
+);
 
 function createMockClient() {
   return {

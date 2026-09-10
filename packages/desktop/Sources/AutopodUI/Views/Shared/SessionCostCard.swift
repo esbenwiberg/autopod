@@ -13,13 +13,50 @@ public struct SessionCostCard: View {
             HStack(spacing: 8) {
                 Image(systemName: "dollarsign.circle")
                     .foregroundStyle(.green)
-                Text("Session Cost")
+                Text("Session Cost Subtotal")
                     .font(.system(.headline).weight(.semibold))
                     .lineLimit(1)
                 Spacer()
                 Text(formatCost(breakdown.totalCostUsd))
                     .font(.system(size: 18, weight: .semibold, design: .monospaced))
                     .monospacedDigit()
+            }
+
+            CostEvidenceView(evidence: breakdown.costEvidence)
+
+            if let task = breakdown.taskExecution {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("Task accounting").font(.headline)
+                    Text(task.taskId).font(.caption).textSelection(.enabled)
+                    Text("\(task.podCount) pods · \(task.agentRunCount) recorded agent runs · \(task.providerAttemptCount) provider attempts · \(task.validationExecutionCount) validations")
+                    if let delivery = task.delivery {
+                        Text("\(delivery.receiptCount) PR receipts · \(delivery.unresolvedCount) unresolved of \(delivery.intentCount) intents")
+                        Text("Durable ledger only; historical PR URLs excluded.").font(.caption).foregroundStyle(.secondary)
+                    } else {
+                        Text("PR receipts unavailable").font(.caption).foregroundStyle(.secondary)
+                    }
+                    if let disposition = task.delivery?.disposition {
+                        Text("Last recorded PR status: \(disposition.openCount) open · \(disposition.mergedCount) merged · \(disposition.closedCount) closed · \(disposition.unavailableCount) unavailable")
+                    } else {
+                        Text("PR disposition observations unavailable.").font(.caption).foregroundStyle(.secondary)
+                    }
+                    if let merge = task.merge {
+                        Text("Source-bound merges: \(merge.mergedPrCount) merged PRs · \(merge.requestCount) recorded requests · \(merge.unresolvedPrCount) unresolved of \(merge.prCount) PRs")
+                        Text("\(merge.mergedWithoutRecordedRequestCount) merged PRs observed with no recorded request; merge actor is not inferred.")
+                        Text("Last recorded closed PRs: \(merge.closedPrCount.map(String.init) ?? "unavailable")")
+                        Text("Source-bound journal only; historical PR URLs excluded.").font(.caption).foregroundStyle(.secondary)
+                    } else {
+                        Text("Source-bound merge evidence unavailable.").font(.caption).foregroundStyle(.secondary)
+                    }
+                    Text("Current provider status unverified.").font(.caption).foregroundStyle(.secondary)
+                    Text("Stored task cost subtotal: \(formatCost(task.recordedCostUsd)) · \(task.telemetry) telemetry")
+                    CostEvidenceView(evidence: task.costEvidence)
+                    Text("Task tokens: \(task.recordedInputTokens + task.recordedOutputTokens) / \(task.tokenBudget.map(String.init) ?? "no configured limit")")
+                    Text(task.budgetCheck?.reason ?? "Task budget admission evidence unavailable.")
+                    ForEach(task.diagnostics, id: \.self) { Text($0).font(.caption).foregroundStyle(.secondary) }
+                }
+            } else {
+                Text("Task accounting unavailable").font(.caption).foregroundStyle(.secondary)
             }
 
             costBar
@@ -119,7 +156,12 @@ public struct SessionCostCard: View {
 
             Spacer(minLength: 12)
 
-            Text(formatCost(segment.costUsd))
+            VStack(alignment: .trailing, spacing: 2) {
+                Text(segment.attribution == "unavailable" ? "Unavailable" : formatCost(segment.costUsd))
+                if segment.attribution == "unavailable", let stored = segment.storedCostUsd {
+                    Text("Stored: \(formatCost(stored))").font(.caption2)
+                }
+            }
                 .font(.system(.subheadline, design: .monospaced).weight(.semibold))
                 .foregroundStyle(isZero ? .secondary : .primary)
                 .monospacedDigit()

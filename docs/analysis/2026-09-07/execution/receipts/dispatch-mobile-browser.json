@@ -1,0 +1,34 @@
+{
+  "date": "2026-09-07",
+  "mode": "local simulated API with actual built mobile UI",
+  "browser": "Codex in-app browser",
+  "route": "http://127.0.0.1:60057/mobile/#/pod/local-fixture",
+  "nativeInteraction": "unverified - native CUA surfaces disabled",
+  "checks": [
+    {
+      "step": "Inspect dispatch evidence",
+      "observed": "review_required; exact repository, main, 40-character base SHA; equivalent prior pod link"
+    },
+    {
+      "step": "First socket-disconnect simulation",
+      "observed": "Browser repeated POST automatically; both carried key 1893f9ac-6411-4dfd-9645-c9ec7add3902; same-fixture-rerun returned"
+    },
+    {
+      "step": "Explicit unavailable response after simulated record",
+      "observed": "HTTP 503 displayed; reason disabled; Retry the same rerun request available"
+    },
+    {
+      "step": "Reload and retry",
+      "observed": "Frozen reason restored; both server requests carried a77cb4e5-4754-4915-b77d-f2a1ccaaf17b and identical reason; one result same-fixture-rerun shown"
+    },
+    {
+      "step": "Phone layout",
+      "observed": "Requested viewport390x844; window.innerWidth390; document scrollWidth375; no horizontal overflow; screenshot inspected"
+    },
+    {
+      "step": "Cleanup",
+      "observed": "Viewport reset, tab6 closed, local server stopped"
+    }
+  ],
+  "scopeLimit": "Fixture records are simulated. Actual SQLite/manager/authenticated API tests separately prove admission and idempotency. No real provider/worker/native interaction/live deployment acceptance."
+}

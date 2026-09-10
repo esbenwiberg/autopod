@@ -1,0 +1,37 @@
+
+ RUN  v4.1.11 /private/tmp/autopod-durable-execution/packages/daemon
+
+ ❯ src/pods/pod-manager.test.ts (598 tests | 1 failed | 597 skipped) 85ms
+     × retains actual Codex completion evidence but does not validate or deliver after unverified termination 85ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/pods/pod-manager.test.ts > PodManager > retains actual Codex completion evidence but does not validate or deliver after unverified termination
+AssertionError: expected AutopodError: Pod architectural-grouse ha… { …(2) } to match object { Object (code) }
+(2 matching properties omitted from actual)
+
+- Expected
++ Received
+
+- {
+-   "code": "TASK_EXECUTION_TERMINATION_UNVERIFIED",
++ AutopodError {
++   "code": "INVALID_STATE",
+  }
+
+ ❯ src/pods/pod-manager.test.ts:1836:29
+    1834|       () => manager.triggerValidation(pod.id, { force: true }),
+    1835|       () => manager.revalidateSession(pod.id, { force: true }),
+    1836|     ]) await expect(action()).rejects.toMatchObject({ code: 'TASK_EXEC…
+       |                             ^
+    1837|     expect(ctx.podRepo.getOrThrow(pod.id)).toEqual(beforeReconciliatio…
+    1838|     expect(ctx.containerManager.kill).not.toHaveBeenCalled();
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 597 skipped (598)
+   Start at  17:01:18
+   Duration  1.43s (transform 859ms, setup 0ms, import 1.24s, tests 85ms, environment 0ms)
+

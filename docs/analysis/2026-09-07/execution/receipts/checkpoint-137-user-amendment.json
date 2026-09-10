@@ -1,0 +1,15 @@
+{
+  "id": "historical-api-causality-2026-09-10",
+  "recordedAt": "2026-09-10T10:38:19Z",
+  "threadId": "01a07afa-a577-70e1-a800-f4f5de43bf2e",
+  "criterion": "W4.5",
+  "proposedAmendment": "September 7 history/cost failure cause remains unknown because the required logs were not retained; current API behavior is verified.",
+  "approvalPrompt": "Do you approve that specific amendment?",
+  "userResponse": "approve",
+  "authority": "Explicit user approval immediately following the quoted amendment in this task",
+  "scope": "Accept the historical cause as unknown while retaining verified current API behavior. No other requirement is waived or changed.",
+  "historicalRootCause": "unknown",
+  "currentApiEvidence": "receipts/checkpoint-136-acceptance-result.json",
+  "priorLedgerCommit": "c1b903ca6fc7fd8ceab9ab0c00d1ac312194d620",
+  "disposition": "accepted_with_amendment"
+}

@@ -1,6 +1,7 @@
 import type {
   AgentMode,
   ExecutionTarget,
+  IntentionalRerun,
   NetworkPolicyMode,
   OperatorActor,
   OutputMode,
@@ -32,9 +33,34 @@ import {
   readinessReviewSchema,
 } from '@autopod/shared';
 import type Database from 'better-sqlite3';
+import { type UnitOfWork, createUnitOfWork } from '../db/unit-of-work.js';
 import { extractFindings } from '../validation/finding-fingerprint.js';
+import {
+  COMPACT_JSON_FIELDS,
+  COMPACT_POD_COLUMNS,
+  type CompactPodSource,
+} from './compact-pod-projection.js';
+import { hasUnansweredDecision } from './decision-admission.js';
+import { type DeletionOwnership, createDeletionOwnership } from './deletion-ownership.js';
+import {
+  type DispatchPreflightLedger,
+  createDispatchPreflightLedger,
+} from './dispatch-preflight-ledger.js';
+import {
+  type ExecutionProvenanceLedger,
+  createExecutionProvenanceLedger,
+} from './execution-provenance-ledger.js';
+import { type ProviderUsageProjection, readProviderUsage } from './provider-usage-projection.js';
+import {
+  type SourcePublicationLedger,
+  createSourcePublicationLedger,
+} from './source-publication-ledger.js';
+import { type TaskRetryLedger, createTaskRetryLedger } from './task-retry-ledger.js';
 
 export interface NewPod {
+  intentionalRerun?: IntentionalRerun;
+  dispatchRepository?: string;
+  rerunRequestHash?: string;
   id: string;
   profileName: string;
   task: string;
@@ -217,13 +243,48 @@ export interface PodStats {
   byStatus: Record<PodStatus, number>;
 }
 
-export interface PodRepository {
+import { type CompletionJournal, createCompletionJournal } from './completion-journal.js';
+import { type DeliveryLedger, createDeliveryLedger } from './delivery-ledger.js';
+import { type MergeJournal, createMergeJournal } from './merge-journal.js';
+
+import { HISTORY_JSON_FIELDS, HISTORY_POD_COLUMNS } from '../history/history-pod-projection.js';
+import { type TaskExecutionLedger, createTaskExecutionLedger } from './task-execution-ledger.js';
+import { createTaskHistoryArchive } from './task-history-archive.js';
+
+import { COST_POD_COLUMNS, type PodCostSource } from './cost-pod-projection.js';
+
+export interface PodRepository extends Partial<UnitOfWork> {
+  taskRetries?: TaskRetryLedger;
+  sandboxStartupRetries?: TaskRetryLedger;
+  codexInterruptionRetries?: TaskRetryLedger;
+  workerRetries?: TaskRetryLedger;
+  dispatchPreflight?: DispatchPreflightLedger;
+  executionProvenance?: ExecutionProvenanceLedger;
+  /** Defer external publication while an enclosing SQLite transaction is pending. */
+  afterInsertCommitted?(id: string, effect: () => void): void;
+  deliveryLedger?: DeliveryLedger;
+  sourcePublications?: SourcePublicationLedger;
+  mergeJournal?: MergeJournal;
+  taskExecutions?: TaskExecutionLedger;
+  deletionOwnership?: DeletionOwnership;
+  completionJournal?: CompletionJournal;
+  hasUnansweredDecision?(podId: string): boolean;
   insert(pod: NewPod): void;
   getOrThrow(id: string): Pod;
   update(id: string, changes: PodUpdates): void;
   incrementLifecycleGeneration(id: string): number;
   delete(id: string): void;
   list(filters?: PodFilters): Pod[];
+  /** Historical operator projection, including retained deleted pods. */
+  listForHistory?(filters?: PodFilters): Pod[];
+  /** Operator reads only: preserve healthy records and explicitly identify unreadable JSON. */
+  listForDisplay?(filters?: PodFilters): Pod[];
+  /** Compact operator projection: bounded display JSON, no full control-plane evidence. */
+  listCompactForDisplay?(filters?: PodFilters): CompactPodSource[];
+  /** Bounded cost projection; never materializes contracts, prompts or validation payloads. */
+  listCostRecords?(completedSince: string): PodCostSource[];
+  getCostRecord?(podId: string): PodCostSource;
+  getProviderUsage?(podId: string): ProviderUsageProjection;
   /** All pods whose status is not terminal (`complete` / `killed`). */
   listNonTerminal(): Pod[];
   countByStatusAndProfile(status: PodStatus, profileName: string): number;
@@ -480,9 +541,214 @@ function rowToSession(row: Record<string, unknown>): Pod {
   };
 }
 
+/** A display projection is never used for state transitions or approval decisions. */
+function rowToDisplaySession(source: Record<string, unknown>): Pod {
+  const row = { ...source };
+  const diagnostics: NonNullable<Pod['recordDiagnostics']> = [];
+  const arrayFields = new Set([
+    'does_not_touch',
+    'pim_groups',
+    'reference_repos',
+    'require_sidecars',
+    'spec_context_files',
+    'spec_files',
+    'test_run_branches',
+    'touches',
+    'validation_overrides',
+  ]);
+  for (const field of [
+    'contract',
+    'deploy_baseline_hashes',
+    'does_not_touch',
+    'infrastructure_failure',
+    'last_validation_result',
+    'pending_escalation',
+    'phase_token_usage',
+    'pim_groups',
+    'plan',
+    'pre_submit_review',
+    'profile_snapshot',
+    'progress',
+    'readiness_review',
+    'reference_repos',
+    'require_sidecars',
+    'sidecar_container_ids',
+    'skip_validation_actor',
+    'spec_context_files',
+    'spec_files',
+    'task_summary',
+    'test_run_branches',
+    'touches',
+    'validation_overrides',
+    'validation_waiver',
+  ]) {
+    if (row[field] === null || row[field] === undefined || row[field] === '') continue;
+    try {
+      const value: unknown = JSON.parse(String(row[field]));
+      if (value === null) continue;
+      if (typeof value !== 'object' || Array.isArray(value) !== arrayFields.has(field)) {
+        diagnostics.push({ field, code: 'invalid_shape' });
+        row[field] = null;
+      }
+    } catch {
+      diagnostics.push({ field, code: 'invalid_json' });
+      row[field] = null;
+    }
+  }
+  if (row.task_summary) {
+    const summary = JSON.parse(String(row.task_summary)) as Record<string, unknown> | null;
+    if (
+      summary &&
+      ['actualSummary', 'how'].some(
+        (key) =>
+          summary[key] !== undefined && summary[key] !== null && typeof summary[key] !== 'string',
+      )
+    ) {
+      diagnostics.push({ field: 'task_summary', code: 'invalid_shape' });
+      row.task_summary = null;
+    }
+  }
+  for (const [field, keys] of [
+    ['pending_escalation', ['question']],
+    ['progress', ['phase', 'description']],
+  ] as const) {
+    if (!row[field]) continue;
+    const value = JSON.parse(String(row[field])) as Record<string, unknown>;
+    if (value && keys.some((key) => typeof value[key] !== 'string')) {
+      diagnostics.push({ field, code: 'invalid_shape' });
+      row[field] = null;
+    }
+  }
+  // Keep unknown or malformed cost telemetry explicit, never NaN or invented zero phase costs.
+  if (row.phase_token_usage) {
+    const phases = JSON.parse(String(row.phase_token_usage)) as Record<string, unknown>;
+    if (
+      phases &&
+      Object.values(phases).some((value) => {
+        if (!value || typeof value !== 'object' || Array.isArray(value)) return true;
+        const bucket = value as Record<string, unknown>;
+        return (
+          ['inputTokens', 'outputTokens'].some(
+            (key) =>
+              typeof bucket[key] !== 'number' ||
+              !Number.isFinite(bucket[key]) ||
+              (bucket[key] as number) < 0,
+          ) ||
+          (bucket.costUsd !== undefined &&
+            (typeof bucket.costUsd !== 'number' ||
+              !Number.isFinite(bucket.costUsd) ||
+              bucket.costUsd < 0))
+        );
+      })
+    ) {
+      diagnostics.push({ field: 'phase_token_usage', code: 'invalid_shape' });
+      row.phase_token_usage = null;
+    }
+  }
+  return { ...rowToSession(row), recordDiagnostics: diagnostics };
+}
+
+function rowToCostSource(row: Record<string, unknown>): PodCostSource {
+  // Display decoding diagnoses corrupt siblings; reconciliation needs raw values
+  // to preserve healthy costs and report unavailable phases independently.
+  const rawPhases = row.phase_token_usage;
+  const pod = rowToDisplaySession(row);
+  let phaseTokenUsage: unknown = null;
+  try {
+    phaseTokenUsage = rawPhases ? JSON.parse(String(rawPhases)) : null;
+  } catch {
+    /* already diagnosed */
+  }
+  if (row.phase_token_usage_oversized)
+    pod.recordDiagnostics?.push({ field: 'phase_token_usage', code: 'size_limit' });
+  return { ...pod, phaseTokenUsage, historyArchived: row.history_archived === 1 };
+}
+
 export function createPodRepository(db: Database.Database): PodRepository {
+  const completionJournal = createCompletionJournal(db);
+  const dispatchPreflight = createDispatchPreflightLedger(db);
+  const taskExecutions = createTaskExecutionLedger(db);
+  const deletionOwnership = createDeletionOwnership(db);
+  const archiveTaskHistory = createTaskHistoryArchive(db);
+  function listRows(
+    filters?: PodFilters,
+    columns = '*',
+    table: 'pods' | 'retained_pods' = 'pods',
+  ): Iterable<Record<string, unknown>> {
+    const whereClauses: string[] = [];
+    const params: Record<string, unknown> = {};
+
+    if (filters?.profileName !== undefined) {
+      whereClauses.push('profile_name = @profileName');
+      params.profileName = filters.profileName;
+    }
+    if (filters?.status !== undefined) {
+      const statuses = Array.isArray(filters.status) ? filters.status : [filters.status];
+      const placeholders = statuses.map((status, index) => {
+        const key = `status${index}`;
+        params[key] = status;
+        return `@${key}`;
+      });
+      whereClauses.push(`status IN (${placeholders.join(', ')})`);
+    }
+    if (filters?.userId !== undefined) {
+      whereClauses.push('user_id = @userId');
+      params.userId = filters.userId;
+    }
+    if (filters?.since !== undefined) {
+      whereClauses.push('created_at >= @since');
+      params.since = filters.since;
+    }
+    if (filters?.before !== undefined) {
+      whereClauses.push(
+        '(created_at < @beforeCreatedAt OR (created_at = @beforeCreatedAt AND id < @beforeId))',
+      );
+      params.beforeCreatedAt = filters.before.createdAt;
+      params.beforeId = filters.before.id;
+    }
+
+    const where = whereClauses.length > 0 ? `WHERE ${whereClauses.join(' AND ')}` : '';
+    const limit = filters?.limit === undefined ? '' : ' LIMIT @limit';
+    if (filters?.limit !== undefined) params.limit = filters.limit;
+    return db
+      .prepare(`SELECT ${columns} FROM ${table} ${where} ORDER BY created_at DESC, id DESC${limit}`)
+      .iterate(params) as Iterable<Record<string, unknown>>;
+  }
+
   return {
-    insert(pod: NewPod): void {
+    ...createUnitOfWork(db),
+    afterInsertCommitted(id, effect) {
+      if (!db.inTransaction) {
+        effect();
+        return;
+      }
+      // SQLite transactions are synchronous. The next event-loop turn observes
+      // the outer commit or rollback, before publishing or starting any worker.
+      const execution = db
+        .prepare('SELECT execution_id FROM task_executions WHERE pod_id = ?')
+        .get(id) as { execution_id: string } | undefined;
+      setImmediate(() => {
+        if (!db.open || !execution) return;
+        const committed = db
+          .prepare('SELECT execution_id FROM task_executions WHERE pod_id = ?')
+          .get(id) as { execution_id: string } | undefined;
+        if (committed?.execution_id === execution.execution_id) effect();
+      });
+    },
+    taskRetries: createTaskRetryLedger(db),
+    sandboxStartupRetries: createTaskRetryLedger(db, 'sandbox_startup'),
+    codexInterruptionRetries: createTaskRetryLedger(db, 'codex_interruption'),
+    workerRetries: createTaskRetryLedger(db, 'worker'),
+    dispatchPreflight,
+    executionProvenance: createExecutionProvenanceLedger(db),
+    completionJournal,
+    hasUnansweredDecision: (podId) => hasUnansweredDecision(db, podId),
+    deliveryLedger: createDeliveryLedger(db),
+    sourcePublications: createSourcePublicationLedger(db),
+    mergeJournal: createMergeJournal(db),
+    taskExecutions,
+    deletionOwnership,
+    insert: db.transaction((pod: NewPod): void => {
       // Keep legacy output_mode and new pod columns in sync.
       const podOpts: PodOptions = pod.options ?? podOptionsFromOutputMode(pod.outputMode);
       const legacyOutputMode: OutputMode = pod.options
@@ -572,17 +838,40 @@ export function createPodRepository(db: Database.Database): PodRepository {
         autoApprove: pod.autoApprove ? 1 : 0,
         disableAskHuman: pod.disableAskHuman ? 1 : 0,
       });
-    },
+      taskExecutions.register(pod.id);
+      dispatchPreflight.registerRequest(pod.id, pod.dispatchRepository);
+      if (pod.intentionalRerun)
+        dispatchPreflight.registerRerun(
+          pod.id,
+          pod.intentionalRerun,
+          pod.userId,
+          pod.rerunRequestHash ?? '',
+        );
+    }),
 
     getOrThrow(id: string): Pod {
       const row = db.prepare('SELECT * FROM pods WHERE id = ?').get(id) as
         | Record<string, unknown>
         | undefined;
       if (!row) throw new PodNotFoundError(id);
-      return rowToSession(row);
+      const pod = rowToSession(row);
+      return { ...pod, finalization: completionJournal.get(pod.id, pod.lifecycleGeneration) };
     },
 
     update(id: string, changes: PodUpdates): void {
+      if (
+        [
+          'status',
+          'containerId',
+          'executionTarget',
+          'worktreePath',
+          'runtime',
+          'profileName',
+          'sidecarContainerIds',
+          'testRunBranches',
+        ].some((field) => Object.hasOwn(changes, field))
+      )
+        deletionOwnership.assertTaskAvailable(id);
       const setClauses: string[] = [];
       const params: Record<string, unknown> = { id };
 
@@ -981,6 +1270,7 @@ export function createPodRepository(db: Database.Database): PodRepository {
     },
 
     incrementLifecycleGeneration(id: string): number {
+      deletionOwnership.assertTaskAvailable(id);
       const result = db
         .prepare(
           'UPDATE pods SET lifecycle_generation = lifecycle_generation + 1, updated_at = ? WHERE id = ?',
@@ -995,46 +1285,55 @@ export function createPodRepository(db: Database.Database): PodRepository {
     },
 
     list(filters?: PodFilters): Pod[] {
-      const whereClauses: string[] = [];
-      const params: Record<string, unknown> = {};
+      return Array.from(listRows(filters), rowToSession);
+    },
 
-      if (filters?.profileName !== undefined) {
-        whereClauses.push('profile_name = @profileName');
-        params.profileName = filters.profileName;
-      }
-      if (filters?.status !== undefined) {
-        const statuses = Array.isArray(filters.status) ? filters.status : [filters.status];
-        const placeholders = statuses.map((status, index) => {
-          const key = `status${index}`;
-          params[key] = status;
-          return `@${key}`;
-        });
-        whereClauses.push(`status IN (${placeholders.join(', ')})`);
-      }
-      if (filters?.userId !== undefined) {
-        whereClauses.push('user_id = @userId');
-        params.userId = filters.userId;
-      }
-      if (filters?.since !== undefined) {
-        whereClauses.push('created_at >= @since');
-        params.since = filters.since;
-      }
-      if (filters?.before !== undefined) {
-        whereClauses.push(
-          '(created_at < @beforeCreatedAt OR (created_at = @beforeCreatedAt AND id < @beforeId))',
-        );
-        params.beforeCreatedAt = filters.before.createdAt;
-        params.beforeId = filters.before.id;
-      }
+    listForHistory(filters?: PodFilters): Pod[] {
+      return Array.from(listRows(filters, HISTORY_POD_COLUMNS, 'retained_pods'), (row) => {
+        const pod = rowToDisplaySession(row);
+        for (const field of HISTORY_JSON_FIELDS)
+          if (row[`${field}_oversized`]) pod.recordDiagnostics?.push({ field, code: 'size_limit' });
+        return pod;
+      });
+    },
 
-      const where = whereClauses.length > 0 ? `WHERE ${whereClauses.join(' AND ')}` : '';
-      const limit = filters?.limit === undefined ? '' : ' LIMIT @limit';
-      if (filters?.limit !== undefined) params.limit = filters.limit;
+    listCompactForDisplay(filters?: PodFilters): CompactPodSource[] {
+      return Array.from(listRows(filters, COMPACT_POD_COLUMNS), (row) => {
+        const pod = rowToDisplaySession(row);
+        for (const field of COMPACT_JSON_FIELDS) {
+          if (row[`${field}_oversized`]) pod.recordDiagnostics?.push({ field, code: 'size_limit' });
+        }
+        return {
+          ...pod,
+          finalization: completionJournal.getForDisplay?.(pod.id, pod.lifecycleGeneration) ?? null,
+        };
+      });
+    },
+
+    listForDisplay(filters?: PodFilters): Pod[] {
+      return Array.from(listRows(filters), (row) => {
+        const pod = rowToDisplaySession(row);
+        return { ...pod, finalization: completionJournal.get(pod.id, pod.lifecycleGeneration) };
+      });
+    },
+
+    getProviderUsage: (podId) => readProviderUsage(db, podId, true),
+
+    getCostRecord(podId: string): PodCostSource {
+      const row = db
+        .prepare(`SELECT ${COST_POD_COLUMNS}, history_archived FROM retained_pods WHERE id = ?`)
+        .get(podId) as Record<string, unknown> | undefined;
+      if (!row) throw new PodNotFoundError(podId);
+      return rowToCostSource(row);
+    },
+
+    listCostRecords(completedSince: string): PodCostSource[] {
       const rows = db
-        .prepare(`SELECT * FROM pods ${where} ORDER BY created_at DESC, id DESC${limit}`)
-        .all(params) as Record<string, unknown>[];
-
-      return rows.map(rowToSession);
+        .prepare(`SELECT ${COST_POD_COLUMNS}, history_archived FROM retained_pods WHERE status IN ('complete','killed','failed','rejected')
+          AND agent_mode != 'interactive' AND completed_at >= ?
+        ORDER BY completed_at, id`)
+        .iterate(completedSince) as Iterable<Record<string, unknown>>;
+      return Array.from(rows, rowToCostSource);
     },
 
     listNonTerminalPodIds(): string[] {
@@ -1053,7 +1352,9 @@ export function createPodRepository(db: Database.Database): PodRepository {
       return rows.map(rowToSession);
     },
 
-    delete(id: string): void {
+    delete: db.transaction((id: string): void => {
+      taskExecutions.assertCanDelete(id);
+      archiveTaskHistory(id);
       // Null out self-referential FKs from other pods before deleting.
       // These were added without ON DELETE SET NULL (SQLite can't ALTER COLUMN),
       // so we nullify them at the application level.
@@ -1074,7 +1375,7 @@ export function createPodRepository(db: Database.Database): PodRepository {
       ).run(id, id);
       const result = db.prepare('DELETE FROM pods WHERE id = ?').run(id);
       if (result.changes === 0) throw new PodNotFoundError(id);
-    },
+    }),
 
     countByStatusAndProfile(status: PodStatus, profileName: string): number {
       const row = db

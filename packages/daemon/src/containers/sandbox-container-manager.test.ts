@@ -5,6 +5,7 @@ import {
   mkdirSync,
   mkdtempSync,
   readFileSync,
+  readdirSync,
   rmSync,
   symlinkSync,
   writeFileSync,
@@ -16,7 +17,7 @@ import { gunzipSync } from 'node:zlib';
 import pino from 'pino';
 import { extract as tarExtract } from 'tar-stream';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { ContainerSpawnConfig } from '../interfaces/container-manager.js';
+import type { ContainerManager, ContainerSpawnConfig } from '../interfaces/container-manager.js';
 import { AzureSandboxApiClient } from './azure-sandbox-api-client.js';
 import type {
   CreateSandboxOptions,
@@ -448,19 +449,16 @@ describe('SandboxContainerManager', () => {
       expect(client.created[0]?.tier).toBe('M');
     });
 
-    it('warns when the request exceeds the largest tier instead of clamping silently', async () => {
+    it('rejects memory beyond supported sandbox capacity before allocating a worker', async () => {
       const client = new FakeSandboxApiClient();
-      const warn = vi.fn();
-      const loudLogger = { ...logger, warn } as unknown as typeof logger;
-      await new SandboxContainerManager(client, loudLogger).spawn({
-        ...baseConfig,
-        memoryBytes: 10 * 1024 * 1024 * 1024,
-      });
-      expect(client.created[0]?.tier).toBe('L');
-      expect(warn).toHaveBeenCalledWith(
-        expect.objectContaining({ requestedMemoryGb: 10, grantedMemoryGb: 4, tier: 'L' }),
-        expect.stringContaining('exceeds the largest sandbox tier'),
-      );
+      await expect(
+        new SandboxContainerManager(client, logger).spawn({
+          ...baseConfig,
+          memoryBytes: 10 * 1024 * 1024 * 1024,
+        }),
+      ).rejects.toThrow('requested 10 GiB');
+      expect(client.created).toHaveLength(0);
+      expect(client.execCalls).toHaveLength(0);
     });
 
     it('does not warn when the request fits inside a tier', async () => {
@@ -855,6 +853,31 @@ describe('SandboxContainerManager', () => {
       expect(code).toBe(7);
     });
 
+    it('retains an observed native exit despite a subsequent transport error', async () => {
+      const client = new StreamingFakeClient();
+      vi.spyOn(client, 'execStream').mockImplementation(async function* () {
+        yield { stdout: 'retained', exitCode: 7 };
+        throw new Error('transport closed after exit');
+      });
+      const mgr = new SandboxContainerManager(client, logger);
+      const id = await mgr.spawn(baseConfig);
+      const stream = await mgr.execStreaming(id, ['cmd']);
+      await expect(stream.exitCode).resolves.toBe(7);
+      await expect(readStream(stream.stdout)).resolves.toBe('retained');
+    });
+
+    it('does not fabricate a zero exit when the native stream ends without an exit frame', async () => {
+      const client = new StreamingFakeClient();
+      vi.spyOn(client, 'execStream').mockImplementation(async function* () {
+        yield { stdout: 'retained output' };
+      });
+      const mgr = new SandboxContainerManager(client, logger);
+      const id = await mgr.spawn(baseConfig);
+      const stream = await mgr.execStreaming(id, ['cmd']);
+      await expect(stream.exitCode).rejects.toMatchObject({ code: 'EXEC_EXIT_UNVERIFIED' });
+      await expect(readStream(stream.stdout)).resolves.toBe('retained output');
+    });
+
     it('execStreaming exposes writable stdin for native streams', async () => {
       const client = new StreamingFakeClient();
       const mgr = new SandboxContainerManager(client, logger);
@@ -881,7 +904,7 @@ describe('SandboxContainerManager', () => {
       await stream.kill();
 
       await expect(output).resolves.toBe('');
-      await expect(stream.exitCode).resolves.toBe(0);
+      await expect(stream.exitCode).rejects.toMatchObject({ code: 'EXEC_EXIT_UNVERIFIED' });
       expect(client.cancelCalls).toBe(1);
     });
 
@@ -903,7 +926,7 @@ describe('SandboxContainerManager', () => {
 
       await expect(stream.kill()).rejects.toThrow('remote termination was not verified');
 
-      await expect(stream.exitCode).resolves.toBe(1);
+      await expect(stream.exitCode).rejects.toMatchObject({ code: 'EXEC_EXIT_UNVERIFIED' });
       await expect(stdout).resolves.toBe('started');
       await expect(stderr).resolves.toBe('');
       expect(stdoutErrors).toEqual([]);
@@ -947,6 +970,101 @@ describe('SandboxContainerManager', () => {
   });
 
   describe('extractDirectoryFromContainer', () => {
+    it.each(['abort', 'supersede'] as const)(
+      'does not publish an extracted snapshot after %s',
+      async (reason) => {
+        const hostDir = mkdtempSync(join(tmpdir(), 'sandbox-owned-extract-'));
+        const client = new FakeSandboxApiClient();
+        const mgr = new SandboxContainerManager(client, logger);
+        const id = await mgr.spawn(baseConfig);
+        const controller = new AbortController();
+        let current = true;
+        let release!: () => void;
+        let started!: () => void;
+        const pending = new Promise<void>((resolve) => {
+          release = resolve;
+        });
+        const entered = new Promise<void>((resolve) => {
+          started = resolve;
+        });
+        const read = client.readFile.bind(client);
+        vi.spyOn(client, 'readFile').mockImplementationOnce(async (...args) => {
+          started();
+          await pending;
+          return read(...args);
+        });
+        try {
+          writeFileSync(join(hostDir, 'session.jsonl'), 'current history');
+          client.seedFile(id, '/state/session.jsonl', Buffer.from('late history'));
+          const extraction = mgr.extractDirectoryFromContainer(id, '/state', hostDir, undefined, {
+            signal: controller.signal,
+            assertCurrent() {
+              if (!current) throw new Error('superseded extraction');
+            },
+          });
+          await entered;
+          if (reason === 'abort') controller.abort(new Error('aborted extraction'));
+          else current = false;
+          release();
+          await expect(extraction).rejects.toThrow(/aborted extraction|superseded extraction/);
+          expect(readFileSync(join(hostDir, 'session.jsonl'), 'utf-8')).toBe('current history');
+        } finally {
+          release();
+          rmSync(hostDir, { recursive: true, force: true });
+        }
+      },
+    );
+
+    it('retains a newer published snapshot while a superseded collector is still writing', async () => {
+      const root = mkdtempSync(join(tmpdir(), 'sandbox-overlap-extract-'));
+      const hostDir = join(root, 'current');
+      const client = new FakeSandboxApiClient();
+      const mgr = new SandboxContainerManager(client, logger);
+      const oldId = await mgr.spawn(baseConfig);
+      const newId = await mgr.spawn(baseConfig);
+      let current = true;
+      let release!: () => void;
+      let started!: () => void;
+      const pending = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      const entered = new Promise<void>((resolve) => {
+        started = resolve;
+      });
+      const read = client.readFile.bind(client);
+      vi.spyOn(client, 'readFile').mockImplementationOnce(async (...args) => {
+        started();
+        await pending;
+        return read(...args);
+      });
+      try {
+        client.seedFile(oldId, '/state/session.jsonl', Buffer.from('old history'));
+        client.seedFile(newId, '/state/session.jsonl', Buffer.from('new history'));
+        const old = mgr.extractDirectoryFromContainer(oldId, '/state', hostDir, undefined, {
+          assertCurrent() {
+            if (!current) throw new Error('superseded extraction');
+          },
+        });
+        await entered;
+        current = false;
+        await mgr.extractDirectoryFromContainer(newId, '/state', hostDir, undefined, {
+          assertCurrent() {},
+        });
+        expect(readFileSync(join(hostDir, 'session.jsonl'), 'utf-8')).toBe('new history');
+        // Old collection still has its own staging; the new mirror did not remove it.
+        expect(
+          readdirSync(root).filter((entry) => entry.startsWith('.autopod-owned-extract-')),
+        ).toHaveLength(1);
+        release();
+        await expect(old).rejects.toThrow('superseded extraction');
+        expect(readFileSync(join(hostDir, 'session.jsonl'), 'utf-8')).toBe('new history');
+        expect(readdirSync(root)).toEqual(['current']);
+      } finally {
+        release();
+        rmSync(root, { recursive: true, force: true });
+      }
+    });
+
     it('mirrors a sandbox directory back to the host through list/read', async () => {
       const hostDir = mkdtempSync(join(tmpdir(), 'sandbox-extract-'));
       const client = new FakeSandboxApiClient();
@@ -976,30 +1094,39 @@ describe('SandboxContainerManager', () => {
       }
     });
 
-    it('round-trips runtime state through extract and next spawn', async () => {
-      const hostDir = mkdtempSync(join(tmpdir(), 'sandbox-runtime-state-'));
-      const client = new FakeSandboxApiClient();
-      const mgr = new SandboxContainerManager(client, logger);
-      const firstId = await mgr.spawn(baseConfig);
-      const containerPath = '/home/autopod/.codex/sessions';
-      const rolloutPath = `${containerPath}/2026/07/12/rollout-thread-123.jsonl`;
+    it.each([false, true])(
+      'round-trips runtime state through extract and next spawn guarded=%s',
+      async (guarded) => {
+        const hostDir = mkdtempSync(join(tmpdir(), 'sandbox-runtime-state-'));
+        const client = new FakeSandboxApiClient();
+        const mgr = new SandboxContainerManager(client, logger);
+        const firstId = await mgr.spawn(baseConfig);
+        const containerPath = '/home/autopod/.codex/sessions';
+        const rolloutPath = `${containerPath}/2026/07/12/rollout-thread-123.jsonl`;
 
-      try {
-        client.seedFile(firstId, rolloutPath, Buffer.from('{"type":"session_meta"}\n'));
+        try {
+          client.seedFile(firstId, rolloutPath, Buffer.from('{"type":"session_meta"}\n'));
 
-        await mgr.extractDirectoryFromContainer(firstId, containerPath, hostDir);
-        const secondId = await mgr.spawn({
-          ...baseConfig,
-          volumes: [{ host: hostDir, container: containerPath }],
-        });
+          await mgr.extractDirectoryFromContainer(
+            firstId,
+            containerPath,
+            hostDir,
+            undefined,
+            guarded ? { signal: new AbortController().signal, assertCurrent() {} } : undefined,
+          );
+          const secondId = await mgr.spawn({
+            ...baseConfig,
+            volumes: [{ host: hostDir, container: containerPath }],
+          });
 
-        expect(client.sandboxes.get(secondId)?.files.get(rolloutPath)?.toString('utf-8')).toBe(
-          '{"type":"session_meta"}\n',
-        );
-      } finally {
-        rmSync(hostDir, { recursive: true, force: true });
-      }
-    });
+          expect(client.sandboxes.get(secondId)?.files.get(rolloutPath)?.toString('utf-8')).toBe(
+            '{"type":"session_meta"}\n',
+          );
+        } finally {
+          rmSync(hostDir, { recursive: true, force: true });
+        }
+      },
+    );
   });
 
   describe('withAzureClient', () => {
@@ -1030,3 +1157,157 @@ function relativeSandboxPath(parent: string, child: string): string {
   const relative = posix.relative(normalizeSandboxPath(parent), normalizeSandboxPath(child));
   return relative && !relative.startsWith('..') ? relative : '';
 }
+
+it('captures actual sandbox cgroup limits without substituting spawn hints or inventing image identity', async () => {
+  const client = new FakeSandboxApiClient(() => ({
+    exitCode: 0,
+    stdout: '{"memoryLimitBytes":2147483648,"cpuLimit":0.5}',
+    stderr: '',
+  }));
+  const manager: ContainerManager = new SandboxContainerManager(client, logger);
+  const id = await manager.spawn({
+    image: 'example.azurecr.io/test:latest',
+    podId: 'metadata',
+    env: {},
+    memoryBytes: 4 * 1024 ** 3,
+  });
+  expect(await manager.getExecutionMetadata?.(id)).toEqual({
+    imageDigest: null,
+    memoryLimitBytes: 2147483648,
+    cpuLimit: 0.5,
+    networkMode: null,
+  });
+  expect(client.execCalls.at(-1)?.command.slice(0, 2)).toEqual(['node', '-e']);
+});
+
+it('reads the observed sandbox allocation after restart when the VM has no cgroup limits', async () => {
+  const requests: string[] = [];
+  const client = new AzureSandboxApiClient(
+    {
+      subscriptionId: 'sub-1',
+      resourceGroup: 'rg-1',
+      location: 'northeurope',
+      sandboxGroup: 'group-1',
+      assumeGroupExists: true,
+      credential: {
+        async getToken() {
+          return { token: 'fixture-token' };
+        },
+      },
+      retry: { maxAttempts: 1 },
+      fetch: async (input, init) => {
+        requests.push(`${init?.method} ${new URL(input).pathname}`);
+        const body =
+          init?.method === 'GET'
+            ? {
+                id: 'sandbox-observed',
+                state: 'Running',
+                resources: { cpu: '2000m', memory: '4096Mi', disk: '40960Mi' },
+              }
+            : { exitCode: 0, stdout: '{"memoryLimitBytes":null,"cpuLimit":null}', stderr: '' };
+        return new Response(JSON.stringify(body), { status: 200 });
+      },
+    },
+    logger,
+  );
+  const manager = new SandboxContainerManager(client, logger);
+  expect(await manager.getExecutionMetadata('sandbox-observed')).toEqual({
+    imageDigest: null,
+    memoryLimitBytes: 4294967296,
+    cpuLimit: 2,
+    networkMode: null,
+  });
+  expect(requests.some((request) => request.endsWith('/sandboxes/sandbox-observed'))).toBe(true);
+});
+
+it.each([false, true])(
+  'retains stricter cgroup limits when allocation lookup fails=%s',
+  async (fails) => {
+    const client = Object.assign(
+      new FakeSandboxApiClient(() => ({
+        exitCode: 0,
+        stdout: '{"memoryLimitBytes":2147483648,"cpuLimit":0.5}',
+        stderr: '',
+      })),
+      {
+        getResourceAllocation: async () => {
+          if (fails) throw new Error('provider unavailable');
+          return { memoryLimitBytes: 4294967296, cpuLimit: 2 };
+        },
+      },
+    );
+    const manager = new SandboxContainerManager(client, logger);
+    const id = await manager.spawn({
+      image: 'example.azurecr.io/test:latest',
+      podId: 'strict-limits',
+      env: {},
+    });
+    expect(await manager.getExecutionMetadata(id)).toEqual({
+      imageDigest: null,
+      memoryLimitBytes: 2147483648,
+      cpuLimit: 0.5,
+      networkMode: null,
+    });
+  },
+);
+
+it.each([
+  'pinned',
+  'tag',
+  'wrong-sandbox',
+  'wrong-disk',
+  'wrong-digest',
+  'not-ready',
+  'missing-reference',
+])('records only provider-linked immutable image identity: %s', async (scenario) => {
+  const digest = `sha256:${'a'.repeat(64)}`;
+  const client = new AzureSandboxApiClient(
+    {
+      subscriptionId: 'sub',
+      resourceGroup: 'rg',
+      location: 'northeurope',
+      assumeGroupExists: true,
+      credential: {
+        async getToken() {
+          return { token: 'fixture' };
+        },
+      },
+      retry: { maxAttempts: 1 },
+      fetch: async (input, init) => {
+        const isDisk = new URL(input).pathname.includes('/diskimages/');
+        const body =
+          init?.method === 'POST'
+            ? { exitCode: 0, stdout: '{}', stderr: '' }
+            : isDisk
+              ? {
+                  id: scenario === 'wrong-disk' ? 'different-disk' : 'actual-disk',
+                  status: { state: scenario === 'not-ready' ? 'Creating' : 'Ready' },
+                  image: {
+                    base:
+                      scenario === 'tag'
+                        ? 'registry.test/image:latest'
+                        : `registry.test/image@${digest}`,
+                  },
+                  labels: {
+                    managedBy: 'autopod',
+                    sourceDigest: scenario === 'wrong-digest' ? `sha256:${'b'.repeat(64)}` : digest,
+                  },
+                }
+              : {
+                  id: scenario === 'wrong-sandbox' ? 'different-sandbox' : 'actual-sandbox',
+                  state: 'Running',
+                  resources: { cpu: '2000m', memory: '4096Mi' },
+                  ...(scenario === 'missing-reference'
+                    ? {}
+                    : { sourcesRef: { diskImage: { id: 'actual-disk' } } }),
+                };
+        return new Response(JSON.stringify(body), { status: 200 });
+      },
+    },
+    logger,
+  );
+  const manager = new SandboxContainerManager(client, logger);
+  expect((await manager.getExecutionMetadata('actual-sandbox')).imageDigest).toBe(
+    scenario === 'pinned' ? digest : null,
+  );
+});

@@ -1,0 +1,14 @@
+{
+  "authorizedBy": "User go on! after checkpoint 109 section A approval request",
+  "target": {
+    "id": "/subscriptions/06bb959b-9458-41a6-bdf5-77cc12feaab9/resourceGroups/ewi-sandboxes/providers/Microsoft.Compute/virtualMachines/autopod-daemon",
+    "location": "swedencentral",
+    "vmId": "3addc9bc-4812-4892-98d6-c40d5ab893c0"
+  },
+  "startedAtUTC": "2026-09-09T06:56:13.112445+00:00",
+  "payloadSha256": "de05e8b555390dcc316500c00f8e664c5e369482f200bec6fa1b2262f3346a4a",
+  "wrapperSha256": "18e2c96881730e798b0deb30d69086b5c73bafeb5e8f03748a40e6b2347490dd",
+  "attempt": 1,
+  "cliExitCode": 0,
+  "endedAtUTC": "2026-09-09T06:56:45.824103+00:00"
+}

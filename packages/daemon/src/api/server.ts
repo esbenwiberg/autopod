@@ -11,6 +11,7 @@ import { build as buildPrettyStream } from 'pino-pretty';
 import type { ActionRegistry } from '../actions/action-registry.js';
 import type { ActionAuditRepository } from '../actions/audit-repository.js';
 import type { PodTokenIssuer } from '../crypto/pod-tokens.js';
+import type { DbBackupManager } from '../db/backup.js';
 import type { DaemonGitHubAuth } from '../github/daemon-github-auth.js';
 import type { ImageBuilder } from '../images/index.js';
 import type { AuthModule } from '../interfaces/index.js';
@@ -46,6 +47,7 @@ import type { ProfileStore } from '../profiles/index.js';
 import type { ProviderAccountStore } from '../provider-accounts/index.js';
 import type { AzureDevOpsAuth } from '../providers/azure-devops-auth.js';
 import type { SafetyEventsRepository } from '../safety/safety-events-repository.js';
+import type { ScanOperatorService } from '../scheduled-jobs/scan-operator-service.js';
 import type { ScheduledJobManager } from '../scheduled-jobs/scheduled-job-manager.js';
 import { errorHandler } from './error-handler.js';
 import { mcpHandler } from './mcp-handler.js';
@@ -68,6 +70,7 @@ import { podRoutes } from './routes/pods.js';
 import { podsitterRoutes } from './routes/podsitter.js';
 import { profileRoutes } from './routes/profiles.js';
 import { providerAccountRoutes } from './routes/provider-accounts.js';
+import { scanReportRoutes } from './routes/scan-reports.js';
 import { scheduledJobRoutes } from './routes/scheduled-jobs.js';
 import { screenshotRoutes } from './routes/screenshots.js';
 import { seriesRoutes } from './routes/series.js';
@@ -120,6 +123,7 @@ export interface ServerDependencies {
   memoryUsageRepo?: MemoryUsageRepository;
   pendingOverrideRepo?: PendingOverrideRepository;
   scheduledJobManager?: ScheduledJobManager;
+  scanOperatorService?: ScanOperatorService;
   safetyEventsRepo?: SafetyEventsRepository;
   issueWatcherRepo?: IssueWatcherRepository;
   screenshotStore?: ScreenshotStore;
@@ -129,6 +133,7 @@ export interface ServerDependencies {
   onShutdown?: () => void;
   modelManager?: import('../security/model-manager.js').ModelManager;
   securityMlEnabled?: boolean;
+  backupManager?: DbBackupManager;
 }
 
 export async function createServer(deps: ServerDependencies): Promise<FastifyInstance> {
@@ -192,6 +197,7 @@ export async function createServer(deps: ServerDependencies): Promise<FastifyIns
     maxConcurrency: deps.maxConcurrency,
     modelManager: deps.modelManager,
     securityMlEnabled: deps.securityMlEnabled,
+    backupManager: deps.backupManager,
   });
   podRoutes(
     app,
@@ -247,6 +253,7 @@ export async function createServer(deps: ServerDependencies): Promise<FastifyIns
   }
 
   // Scheduled jobs routes
+  if (deps.scanOperatorService) scanReportRoutes(app, deps.scanOperatorService);
   if (deps.scheduledJobManager) {
     scheduledJobRoutes(app, deps.scheduledJobManager);
   }

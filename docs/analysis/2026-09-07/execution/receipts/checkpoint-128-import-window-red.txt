@@ -1,0 +1,17 @@
+{"kind":"preflight_passed"}
+{"kind":"acr_exchange_intent"}
+{"kind":"acr_exchange_response","httpStatus":200}
+{"kind":"disk_create_intent"}
+{"kind":"disk_reconcile"}
+{"kind":"execution_stopped","stage":"image_import","code":"create_reconciliation_unresolved"}
+{"kind":"disk_cleanup_unresolved"}
+{"status":"failed","allCreatedResourcesRemoved":false,"failure":{"stage":"image_import","code":"create_reconciliation_unresolved"}}
+file:///private/tmp/autopod-canary-128-timeout-test.mjs:26
+ const result=JSON.parse(fs.readFileSync(journal));if(exchanges!==1||JSON.stringify(result).includes('fixture-only-acr-token')||result.allCreatedResourcesRemoved!==true||creates.diskimages!==1||creates.sandboxes!==1||removed.join(',')!=='sandboxes,diskimages'||result.status!==(scenario==='success'?'verified':'failed'))throw new Error('dry_run_failed_'+scenario);
+                                                                                                                                                                                                                                                                                                                                      ^
+
+Error: dry_run_failed_success
+    at file:///private/tmp/autopod-canary-128-timeout-test.mjs:26:327
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+
+Node.js v24.18.0

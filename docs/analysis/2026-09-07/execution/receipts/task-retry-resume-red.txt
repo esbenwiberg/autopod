@@ -1,0 +1,25 @@
+
+ RUN  v4.1.10 /private/tmp/autopod-durable-execution/packages/daemon
+
+ ❯ src/pods/pod-manager.test.ts (410 tests | 1 failed | 409 skipped) 85ms
+       × does not renew an exhausted task-wide transient validation budget through Resume and manager restart 84ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/pods/pod-manager.test.ts > PodManager > triggerValidation > does not renew an exhausted task-wide transient validation budget through Resume and manager restart
+AssertionError: expected "vi.fn()" to be called 3 times, but got 6 times
+ ❯ src/pods/pod-manager.test.ts:9702:45
+    9700|       await manager.resumePod(pod.id);
+    9701|       await revalidate.mock.results[0]?.value;
+    9702|       expect(ctx.validationEngine.validate).toHaveBeenCalledTimes(3);
+       |                                             ^
+    9703|       expect(manager.getSession(pod.id).status).toBe('review_required'…
+    9704|       expect(manager.getSession(pod.id).failureReason).toContain('retr…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 409 skipped (410)
+   Start at  14:34:08
+   Duration  1.33s (transform 652ms, setup 0ms, import 1.11s, tests 85ms, environment 0ms)

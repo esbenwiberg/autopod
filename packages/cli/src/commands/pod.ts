@@ -230,6 +230,214 @@ function resolveContractPath(specRoot: string): string {
 }
 
 export function registerPodCommands(program: Command, getClient: () => AutopodClient): void {
+  program
+    .command('execution-provenance <id>')
+    .description('Inspect recorded runtime, image, build, resource and command preflight evidence')
+    .option('--json', 'Output JSON')
+    .action(async (id: string, opts: { json?: boolean }) => {
+      const client = getClient();
+      const data = await client.getExecutionProvenance(await resolvePodId(client, id));
+      withJsonOutput(opts, data, ({ latest }) => {
+        if (!latest) {
+          console.log('Execution provenance unavailable for this execution.');
+          return;
+        }
+        console.log(
+          `${latest.purpose ?? 'coding'} preflight ${latest.status} at ${latest.checkedAt}; execution ${latest.executionId}, generation ${latest.generation}`,
+        );
+        console.log(
+          `${latest.subject === 'reviewer' ? 'Reviewer' : 'Configured worker'}: ${latest.surface === 'provider-api' ? `Provider API; dispatch model ${latest.dispatchModel}` : `${latest.surface === 'host-cli' ? 'Host ' : ''}${latest.runtime} CLI ${latest.cliVersion ?? 'unverified'}`}; model ${latest.model}`,
+        );
+        if (latest.surface === 'host-cli')
+          console.log(`Executable: ${latest.cliPath ?? 'unverified'}`);
+        console.log(
+          `Provider ${latest.providerId ?? 'unverified'}; account ${latest.providerAccountId ?? 'not recorded'}`,
+        );
+        console.log(
+          `Daemon ${latest.release.commitSha ?? 'unverified'}${latest.release.dirty ? ' (modified source)' : ''}; image ${latest.surface === 'provider-api' || latest.surface === 'host-cli' ? 'not applicable' : (latest.imageDigest ?? 'unverified')}`,
+        );
+        console.log(
+          `Contract ${latest.contractHash}; validation implementation ${latest.validationImplementationHash ?? 'unverified'}`,
+        );
+        console.log(
+          `Memory ${latest.capabilities.memoryLimitBytes ?? 'unverified'} bytes; CPU ${latest.capabilities.cpuLimit ?? 'unverified'}`,
+        );
+        for (const command of latest.commands.requirements)
+          console.log(
+            `${command.source}: ${command.executable} ${command.available === null ? 'unverified' : command.available ? 'available' : 'missing'}`,
+          );
+        for (const diagnostic of latest.diagnostics)
+          console.log(`${diagnostic.code}: ${diagnostic.detail}`);
+      });
+    });
+  program
+    .command('rerun <id>')
+    .description(
+      'Create an intentional distinct task using the prior request; all preflight gates still apply',
+    )
+    .requiredOption('--reason <reason>', 'Human reason for intentionally repeating this work')
+    .requiredOption('--request-key <key>', 'Stable key; reuse after a lost response')
+    .option('--json', 'Output JSON')
+    .action(async (id: string, opts: { reason: string; requestKey: string; json?: boolean }) => {
+      const client = getClient();
+      const source = await resolvePodId(client, id);
+      if (!opts.reason.trim()) throw new Error('Intentional rerun requires a human reason');
+      const request = await client.getRerunTemplate(source);
+      const pod = await client.createSession({
+        ...request,
+        intentionalRerun: {
+          ofPodId: source,
+          reason: opts.reason.trim(),
+          requestKey: opts.requestKey,
+        },
+      });
+      withJsonOutput(opts, pod, (value) =>
+        console.log(
+          `Distinct task ${value.id}: ${value.status}. Inspect dispatch-preflight and status for the outcome.`,
+        ),
+      );
+    });
+  program
+    .command('dispatch-preflight <id>')
+    .description('Inspect fresh base, equivalent work, and intentional rerun evidence')
+    .option('--json', 'Output JSON')
+    .action(async (id: string, opts: { json?: boolean }) => {
+      const client = getClient();
+      const state = await client.getDispatchPreflight(await resolvePodId(client, id));
+      withJsonOutput(opts, state, ({ latest }) => {
+        if (!latest) {
+          console.log('Dispatch preflight not recorded for this execution.');
+          return;
+        }
+        console.log(
+          `${latest.status}: ${latest.repository} ${latest.baseBranch} @ ${latest.baseCommitSha}`,
+        );
+        console.log(`Execution ${latest.executionId}; checked ${latest.checkedAt}`);
+        for (const conflict of latest.conflicts)
+          console.log(`${conflict.podId}: ${conflict.status} (${conflict.evidence})`);
+        if (latest.rerun)
+          console.log(`Intentional rerun of ${latest.rerun.ofPodId}: ${latest.rerun.reason}`);
+      });
+    });
+  program
+    .command('retry-state <id>')
+    .description('Inspect task-wide stage admissions and retry authorizations')
+    .option(
+      '--stage <stage>',
+      'validation, sandbox_startup, codex_interruption or worker',
+      'validation',
+    )
+    .option('--json', 'Output JSON')
+    .action(async (id: string, opts: { json?: boolean; stage: string }) => {
+      if (
+        opts.stage !== 'validation' &&
+        opts.stage !== 'sandbox_startup' &&
+        opts.stage !== 'codex_interruption' &&
+        opts.stage !== 'worker'
+      )
+        throw new Error('Stage must be validation, sandbox_startup, codex_interruption or worker');
+      const client = getClient();
+      const resolved = await resolvePodId(client, id);
+      const state = await client.getRetryState(resolved, opts.stage);
+      withJsonOutput(opts, state, (value) => {
+        console.log(
+          `Task ${value.taskId}: ${value.executedCount} executed / ${value.admissionCount} admitted ${value.stage === 'codex_interruption' ? 'Codex interruption recoveries' : value.stage === 'sandbox_startup' ? 'sandbox startups' : value.stage === 'worker' ? 'worker runs' : 'validations'}`,
+        );
+        if (value.stage === 'worker')
+          console.log(
+            'Repeated worker failures with unknown causes or rejected authentication require a recorded human authorization. Classified throttling and provider outages use the persisted task allowance and cooldown. Worker elapsed time overlaps phase measurements; usage is not counted again.',
+          );
+        if (value.stage === 'worker' && value.latest?.providerRetryNotBefore)
+          console.log(`Provider retry not before: ${value.latest.providerRetryNotBefore}`);
+        if (value.stage === 'codex_interruption')
+          console.log(
+            'One automatic inner recovery per logical task; further recoveries require recorded human authorization. These durations overlap the enclosing agent run; usage is not counted again.',
+          );
+        console.log(
+          `${value.stage === 'codex_interruption' ? '' : `${value.transientRetryCount}/${value.backoffsMs?.length ?? 0} ${value.stage === 'worker' ? 'transient retry admissions' : 'automatic transient retries'}; `}${value.measuredDurationMs === null ? 'Measured duration unavailable' : `${value.measuredDurationMs} ms measured`}; ${value.interruptedCount} interrupted with unknown duration`,
+        );
+        console.log(
+          value.durationEvidence
+            ? `${value.durationEvidence.measuredRecordCount} measured records; ${value.durationEvidence.unavailableRecordCount} records without duration; ${value.durationEvidence.pendingRecordCount} pending. Stage durations can overlap; do not add them.`
+            : 'Duration coverage unavailable from this daemon. Stage durations can overlap; do not add them.',
+        );
+        console.log(
+          `Latest outcome: ${value.latest?.outcome ?? 'none'}; telemetry: ${value.telemetry}`,
+        );
+        for (const grant of value.authorizations)
+          console.log(
+            `${grant.id}: ${grant.usedByAttemptId ? 'consumed' : `recorded for failure ${grant.failureId}`} — ${grant.reason}`,
+          );
+      });
+    });
+  program
+    .command('authorize-retry <id>')
+    .description('Record one human retry authorization; Resume is a separate action')
+    .requiredOption('--reason <text>', 'Reason for repeating the failed stage')
+    .requiredOption('--request-key <key>', 'Stable key; reuse after an uncertain response')
+    .option(
+      '--stage <stage>',
+      'validation, sandbox_startup, codex_interruption or worker',
+      'validation',
+    )
+    .option('--json', 'Output JSON')
+    .action(
+      async (
+        id: string,
+        opts: { reason: string; requestKey: string; json?: boolean; stage: string },
+      ) => {
+        if (
+          opts.stage !== 'validation' &&
+          opts.stage !== 'sandbox_startup' &&
+          opts.stage !== 'codex_interruption' &&
+          opts.stage !== 'worker'
+        )
+          throw new Error(
+            'Stage must be validation, sandbox_startup, codex_interruption or worker',
+          );
+        const client = getClient();
+        const resolved = await resolvePodId(client, id);
+        const grant = await client.authorizeRetry(
+          resolved,
+          opts.requestKey,
+          opts.reason,
+          opts.stage,
+        );
+        withJsonOutput(opts, grant, (value) =>
+          console.log(
+            `Recorded ${value.id}. Run ap ${opts.stage === 'worker' ? 'rework' : 'resume'} ${resolved} to request execution; normal lifecycle and binding checks still apply.`,
+          ),
+        );
+      },
+    );
+  program
+    .command('rework <id>')
+    .description(
+      'Request agent rework from preserved work; recorded retry permission and binding checks still apply',
+    )
+    .option('--json', 'Output JSON')
+    .action(async (id: string, opts: { json?: boolean }) => {
+      const client = getClient();
+      await client.triggerValidation(await resolvePodId(client, id));
+      withJsonOutput(opts, { ok: true, requested: 'rework' }, () =>
+        console.log('Rework requested. Inspect status and retry-state for execution outcome.'),
+      );
+    });
+  program
+    .command('resume <id>')
+    .description(
+      'Resume artifact collection, delivery or validation using the existing task budget and provider binding',
+    )
+    .option('--json', 'Output JSON')
+    .action(async (id: string, opts: { json?: boolean }) => {
+      const client = getClient();
+      const result = await client.resumePod(await resolvePodId(client, id));
+      withJsonOutput(opts, result, (value) =>
+        console.log(
+          `Resume requested: ${value.action}. Inspect status and retry-state for execution outcome.`,
+        ),
+      );
+    });
   // ap run
   program
     .command('run <profile> <task>')
@@ -240,6 +448,9 @@ export function registerPodCommands(program: Command, getClient: () => AutopodCl
     .option('-b, --branch <branch>', 'Target branch name')
     .option('--branch-prefix <prefix>', 'Override branch prefix (e.g. hotfix/)')
     .option('--start-branch <branch>', 'Branch/ref to start from while targeting --base-branch')
+    .option('--rerun-of <id>', 'Explicitly repeat this prior pod as a distinct task')
+    .option('--rerun-reason <reason>', 'Human reason for intentionally repeating equivalent work')
+    .option('--rerun-request-key <key>', 'Stable decision key; reuse it after a lost response')
     .option('--base-branch <branch>', 'Branch from a specific base (e.g. workspace output)')
     .option('--skip-validation', 'Skip validation phase')
     .option('--validation-suite <suite>', validationSuiteHelp)
@@ -261,6 +472,9 @@ export function registerPodCommands(program: Command, getClient: () => AutopodCl
           branchPrefix?: string;
           startBranch?: string;
           baseBranch?: string;
+          rerunOf?: string;
+          rerunReason?: string;
+          rerunRequestKey?: string;
           skipValidation?: boolean;
           validationSuite?: string;
           sidecar: string[];
@@ -281,6 +495,7 @@ export function registerPodCommands(program: Command, getClient: () => AutopodCl
             branchPrefix: opts.branchPrefix,
             startBranch: opts.startBranch,
             baseBranch: opts.baseBranch,
+            intentionalRerun: parseIntentionalRerun(opts),
             skipValidation: opts.skipValidation,
             options: validationSuite ? { validationSuite } : undefined,
             requireSidecars: opts.sidecar.length > 0 ? opts.sidecar : undefined,
@@ -316,6 +531,9 @@ export function registerPodCommands(program: Command, getClient: () => AutopodCl
     .option('-b, --branch <branch>', 'Target branch name')
     .option('--branch-prefix <prefix>', 'Override branch prefix (e.g. hotfix/)')
     .option('--start-branch <branch>', 'Branch/ref to start from while targeting --base-branch')
+    .option('--rerun-of <id>', 'Explicitly repeat this prior pod as a distinct task')
+    .option('--rerun-reason <reason>', 'Human reason for intentionally repeating equivalent work')
+    .option('--rerun-request-key <key>', 'Stable decision key; reuse it after a lost response')
     .option('--base-branch <branch>', 'Branch from a specific base')
     .option(
       '-s, --sidecar <name>',
@@ -351,6 +569,9 @@ export function registerPodCommands(program: Command, getClient: () => AutopodCl
           branchPrefix?: string;
           startBranch?: string;
           baseBranch?: string;
+          rerunOf?: string;
+          rerunReason?: string;
+          rerunRequestKey?: string;
           sidecar: string[];
           refRepo: string[];
           refFromProfile: string[];
@@ -414,6 +635,7 @@ export function registerPodCommands(program: Command, getClient: () => AutopodCl
             branchPrefix: opts.branchPrefix,
             startBranch: opts.startBranch,
             baseBranch: opts.baseBranch,
+            intentionalRerun: parseIntentionalRerun(opts),
             options: podOptions,
             requireSidecars: opts.sidecar.length > 0 ? opts.sidecar : undefined,
             referenceRepos,
@@ -503,6 +725,13 @@ export function registerPodCommands(program: Command, getClient: () => AutopodCl
               return;
             }
             console.log(renderTable(data, compactPodColumns));
+            for (const pod of data)
+              for (const diagnostic of pod.recordDiagnostics ?? [])
+                console.log(
+                  chalk.yellow(
+                    `${pod.id}: Evidence unavailable in this view: ${diagnostic.field} (${diagnostic.code})`,
+                  ),
+                );
           });
           return;
         }
@@ -519,17 +748,117 @@ export function registerPodCommands(program: Command, getClient: () => AutopodCl
       },
     );
 
+  // Exact IDs also address retained accounting after a pod leaves the live list.
+  program
+    .command('cost <id>')
+    .description('Read recorded cost by exact pod ID, including deleted pods with retained history')
+    .option('--json', 'Output as JSON')
+    .action(async (id: string, opts: { json?: boolean }) => {
+      const value = await getClient().getPodCost(id);
+      withJsonOutput(opts, value, (cost) => {
+        console.log(`Pod ${cost.podId} stored cost subtotal: $${cost.totalCostUsd.toFixed(4)}`);
+        console.log(`Recorded tokens: ${cost.inputTokens + cost.outputTokens}`);
+        console.log('Billing unverified; stored amounts can include estimates.');
+        for (const segment of cost.segments)
+          console.log(`${segment.label}: $${segment.costUsd.toFixed(4)} (${segment.attribution})`);
+        if (cost.costEvidence) {
+          for (const item of cost.costEvidence.diagnostics)
+            console.log(`${item.podId}: ${item.message}`);
+          if (cost.costEvidence.omittedDiagnosticCount > 0)
+            console.log(
+              `${cost.costEvidence.omittedDiagnosticCount} additional cost diagnostics omitted.`,
+            );
+        } else console.log('Cost provenance unavailable.');
+        if (cost.taskExecution) {
+          console.log(
+            `Logical task: ${cost.taskExecution.taskId} (${cost.taskExecution.podCount} pods)`,
+          );
+          console.log(
+            `Stored task cost subtotal: $${cost.taskExecution.recordedCostUsd.toFixed(4)}`,
+          );
+          for (const diagnostic of cost.taskExecution.diagnostics) console.log(diagnostic);
+        } else console.log('Task accounting unavailable.');
+      });
+    });
+
   // ap status
   async function statusAction(id: string, opts: { json?: boolean }): Promise<void> {
     const client = getClient();
     const resolvedId = await resolvePodId(client, id);
     const pod = await client.getSession(resolvedId);
 
-    withJsonOutput(opts, pod, (s) => {
+    const taskExecution = await client.getTaskExecution(resolvedId).catch(() => null);
+    withJsonOutput(opts, { ...pod, taskExecution }, (s) => {
       console.log(chalk.bold.cyan(`Pod ${s.id}`));
       console.log(chalk.dim('─'.repeat(50)));
       console.log(`${chalk.bold('Profile:')}      ${s.profileName}`);
       console.log(`${chalk.bold('Status:')}       ${formatStatus(s.status)}`);
+      if (s.failureReason) console.log(`${chalk.bold('Failure:')} ${s.failureReason}`);
+      if (s.lastRecoveryTrigger && s.lastCorrectionMessage)
+        console.log(`${chalk.bold('Recovery note:')} ${s.lastCorrectionMessage}`);
+      if (s.taskExecution) {
+        const task = s.taskExecution;
+        console.log(`${chalk.bold('Logical task:')} ${task.taskId} (${task.podCount} pods)`);
+        console.log(`${chalk.bold('Execution:')} ${task.executionId}`);
+        console.log(
+          `${chalk.bold('Task runs:')} ${task.agentRunCount} recorded agent runs, ${task.providerAttemptCount} provider attempts, ${task.validationExecutionCount} validations`,
+        );
+        console.log(
+          task.delivery
+            ? `${chalk.bold('PR receipts:')} ${task.delivery.receiptCount} confirmed, ${task.delivery.unresolvedCount} unresolved of ${task.delivery.intentCount} intents (durable ledger only; historical URLs excluded)`
+            : `${chalk.bold('PR receipts:')} unavailable`,
+        );
+        const disposition = task.delivery?.disposition;
+        console.log(
+          disposition
+            ? `Last recorded PR status: ${disposition.openCount} open · ${disposition.mergedCount} merged · ${disposition.closedCount} closed · ${disposition.unavailableCount} unavailable`
+            : 'PR disposition observations unavailable.',
+        );
+        if (task.merge) {
+          const merge = task.merge;
+          console.log(
+            `Source-bound merges: ${merge.mergedPrCount} merged PRs · ${merge.requestCount} recorded requests · ${merge.unresolvedPrCount} unresolved of ${merge.prCount} PRs`,
+          );
+          console.log(
+            `${merge.mergedWithoutRecordedRequestCount} merged PRs observed with no recorded request; merge actor is not inferred.`,
+          );
+          console.log(`Last recorded closed PRs: ${merge.closedPrCount ?? 'unavailable'}`);
+          console.log('Source-bound journal only; historical PR URLs excluded.');
+        } else console.log('Source-bound merge evidence unavailable.');
+        console.log('Current provider status unverified.');
+        console.log(
+          `${chalk.bold('Task tokens:')} ${task.recordedInputTokens + task.recordedOutputTokens}/${task.tokenBudget ?? 'no configured limit'}`,
+        );
+        console.log(
+          `${chalk.bold('Stored task cost subtotal:')} $${task.recordedCostUsd.toFixed(4)} (${task.telemetry} telemetry)`,
+        );
+        console.log('Billing unverified; stored amounts can include estimates.');
+        if (task.costEvidence) {
+          const evidence = task.costEvidence;
+          console.log(
+            `Known estimates: $${evidence.knownEstimatedCostUsd.toFixed(4)}; ${evidence.unavailablePhaseCount} identified phases with unavailable cost; ${evidence.conflictingPodCount} pods with conflicting attribution`,
+          );
+          for (const item of evidence.diagnostics) console.log(`${item.podId}: ${item.message}`);
+          if (evidence.omittedDiagnosticCount > 0)
+            console.log(`${evidence.omittedDiagnosticCount} additional cost diagnostics omitted.`);
+        } else console.log('Cost provenance unavailable.');
+
+        for (const diagnostic of task.diagnostics) console.log(chalk.dim(diagnostic));
+        console.log(task.budgetCheck?.reason ?? 'Task budget admission evidence unavailable.');
+      } else console.log(chalk.yellow('Task accounting unavailable'));
+      if (s.finalization?.agentSettledAt) {
+        console.log(`${chalk.bold('Agent settled:')} ${s.finalization.agentSettledAt}`);
+        console.log(`${chalk.bold('Finalization:')} ${s.finalization.phase}`);
+        console.log(
+          `${chalk.bold('Source saved:')} ${s.finalization.sourcePreservedAt ?? 'not verified'}`,
+        );
+        if (s.finalization.pendingDecisionId)
+          console.log(
+            'Human decision remains unanswered; respond to the pending question before continuation.',
+          );
+      }
+      for (const diagnostic of s.recordDiagnostics ?? [])
+        console.log(chalk.yellow(`Record unavailable: ${diagnostic.field} (${diagnostic.code})`));
       console.log(formatReadinessLine(s));
       console.log(`${chalk.bold('Task:')}         ${s.task}`);
       console.log(`${chalk.bold('Model:')}        ${s.model}`);
@@ -613,6 +942,19 @@ export function registerPodCommands(program: Command, getClient: () => AutopodCl
       if (s.lastValidationResult) {
         const vr = s.lastValidationResult;
         const color = vr.overall === 'pass' ? chalk.green : chalk.red;
+        if (vr.reviewSkipKind === 'review-failed' || vr.reviewSkipKind === 'review-timeout')
+          console.log(
+            chalk.red((vr.reviewSkipReason ?? 'Reviewer execution unavailable.').slice(0, 1024)),
+          );
+        for (const [phase, evidence] of [
+          ['lint', vr.lint?.reusedEvidence],
+          ['test', vr.test?.reusedEvidence],
+        ] as const) {
+          if (evidence)
+            console.log(
+              `${phase}: reused receipt ${evidence.receiptId}; originally executed ${evidence.originalExecutedAt} (${evidence.originalDurationMs} ms)`,
+            );
+        }
         console.log(
           `\n${chalk.bold('Last validation:')} ${color(vr.overall.toUpperCase())} (${vr.validationSuite ?? s.options?.validationSuite ?? 'full'}, attempt ${vr.attempt})`,
         );
@@ -740,7 +1082,9 @@ export function registerPodCommands(program: Command, getClient: () => AutopodCl
       const client = getClient();
       const resolvedId = await resolvePodId(client, id);
       await withSpinner('Sending nudge...', () => client.nudgeSession(resolvedId, message));
-      console.log(chalk.green('Nudge queued. Agent will see it on next check_messages call.'));
+      console.log(
+        chalk.green('Nudge saved. It remains pending until the worker acknowledges receipt.'),
+      );
     });
 
   // ap kick
@@ -793,7 +1137,7 @@ export function registerPodCommands(program: Command, getClient: () => AutopodCl
       const client = getClient();
       const resolvedId = await resolvePodId(client, id);
       await withSpinner('Sending message...', () => client.sendMessage(resolvedId, message));
-      console.log(chalk.green('Message sent.'));
+      console.log(chalk.green('Message recorded.'));
     });
 
   // ap approve
@@ -944,6 +1288,9 @@ export function registerPodCommands(program: Command, getClient: () => AutopodCl
     .option('-b, --branch <branch>', 'target branch name')
     .option('--branch-prefix <prefix>', 'override branch prefix (e.g. hotfix/)')
     .option('--start-branch <branch>', 'branch/ref to start from while targeting --base-branch')
+    .option('--rerun-of <id>', 'Explicitly repeat this prior pod as a distinct task')
+    .option('--rerun-reason <reason>', 'Human reason for intentionally repeating equivalent work')
+    .option('--rerun-request-key <key>', 'Stable decision key; reuse it after a lost response')
     .option('--base-branch <branch>', 'branch from a specific base')
     .option('--skip-validation', 'skip validation phase')
     .option('--validation-suite <suite>', validationSuiteHelp)
@@ -969,6 +1316,9 @@ export function registerPodCommands(program: Command, getClient: () => AutopodCl
           branchPrefix?: string;
           startBranch?: string;
           baseBranch?: string;
+          rerunOf?: string;
+          rerunReason?: string;
+          rerunRequestKey?: string;
           skipValidation?: boolean;
           validationSuite?: string;
           sidecar: string[];
@@ -1040,6 +1390,7 @@ export function registerPodCommands(program: Command, getClient: () => AutopodCl
             branchPrefix: opts.branchPrefix,
             startBranch: opts.startBranch,
             baseBranch: opts.baseBranch,
+            intentionalRerun: parseIntentionalRerun(opts),
             specFiles,
             specContextFiles,
             skipValidation: opts.skipValidation,
@@ -1202,4 +1553,21 @@ function formatLogEvent(
     default:
       console.log(`${ts} ${chalk.dim(JSON.stringify(event))}`);
   }
+}
+
+function parseIntentionalRerun(opts: {
+  rerunOf?: string;
+  rerunReason?: string;
+  rerunRequestKey?: string;
+}) {
+  if (!opts.rerunOf && !opts.rerunReason && !opts.rerunRequestKey) return undefined;
+  if (!opts.rerunOf || !opts.rerunReason?.trim() || !opts.rerunRequestKey)
+    throw new Error(
+      'Intentional rerun requires --rerun-of, --rerun-reason, and --rerun-request-key. Reuse the same key after a lost response.',
+    );
+  return {
+    ofPodId: opts.rerunOf,
+    reason: opts.rerunReason.trim(),
+    requestKey: opts.rerunRequestKey,
+  };
 }

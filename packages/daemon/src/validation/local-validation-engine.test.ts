@@ -12,7 +12,7 @@ import type {
 } from '../interfaces/validation-engine.js';
 import { createValidationRepository } from '../pods/validation-repository.js';
 import { createProviderAnthropicClient } from '../providers/llm-client.js';
-import { runClaudeCli } from '../runtimes/run-claude-cli.js';
+import { ClaudeCliError, runClaudeCli } from '../runtimes/run-claude-cli.js';
 import { createTestDb, insertTestProfile } from '../test-utils/mock-helpers.js';
 import { runContainerReviewer } from './container-reviewer-runner.js';
 import type { HostBrowserRunner } from './host-browser-runner.js';
@@ -31,7 +31,7 @@ import {
 } from './local-validation-engine.js';
 import { runAgenticReview } from './review-agentic-runner.js';
 import { CodexReviewError, runCodexReview } from './review-codex-runner.js';
-import { runToolUseReview } from './review-tool-runner.js';
+import { ToolReviewError, runToolUseReview } from './review-tool-runner.js';
 
 const containerReviewerDelegate = vi.hoisted(() => ({
   actual: undefined as typeof runContainerReviewer | undefined,
@@ -138,18 +138,89 @@ index 0000000..3333333
     expect(artifactChangeSatisfied(diff, 'Client/src', 'create')).toBe(false);
   });
 
+  it('requires a deletion diff for delete declarations', () => {
+    expect(artifactChangeSatisfied(diff, 'Client/src/Foo.ts', 'delete')).toBe(false);
+    expect(
+      artifactChangeSatisfied(
+        'diff --git a/obsolete.ts b/obsolete.ts\ndeleted file mode 100644\n--- a/obsolete.ts\n+++ /dev/null',
+        'obsolete.ts',
+        'delete',
+      ),
+    ).toBe(true);
+  });
+
   it('treats touch as an existence-only change requirement', () => {
     expect(artifactChangeSatisfied('', 'Client/src', 'touch')).toBe(true);
   });
 });
 
 describe('required fact execution', () => {
+  it.each([
+    { presenceExit: 1, commandExit: 0, passed: true },
+    { presenceExit: 0, commandExit: 0, passed: false },
+    { presenceExit: 2, commandExit: 0, passed: false },
+    { presenceExit: 1, commandExit: 1, passed: false },
+  ])(
+    'verifies deletion and the required command with no invented absence: %j',
+    async ({ presenceExit, commandExit, passed }) => {
+      const cm = {
+        execInContainer: vi.fn(async (_id: string, command: string[]) => {
+          const shell = command[2] ?? '';
+          if (shell.includes('test -e')) return { stdout: '', stderr: '', exitCode: presenceExit };
+          return {
+            stdout: '',
+            stderr: '',
+            exitCode: shell === 'node verify-removal.mjs' ? commandExit : 0,
+          };
+        }),
+      } as unknown as ContainerManager;
+      const engine = createLocalValidationEngine(cm);
+      const result = await engine.validate({
+        podId: 'deletion',
+        containerId: 'fixture',
+        previewUrl: '',
+        buildCommand: '',
+        startCommand: '',
+        healthPath: '/',
+        healthTimeout: 1,
+        smokePages: [],
+        attempt: 1,
+        task: 'Remove obsolete file',
+        hasWebUi: false,
+        skipPhases: ['setup', 'lint', 'sast', 'build', 'test', 'health', 'pages', 'review'],
+        diff: 'diff --git a/obsolete.ts b/obsolete.ts\ndeleted file mode 100644\n--- a/obsolete.ts\n+++ /dev/null',
+        contract: {
+          contractVersion: 1,
+          title: 'Remove obsolete',
+          dependsOn: [],
+          scenarios: [],
+          humanReview: [],
+          requiredFacts: [
+            {
+              id: 'removal',
+              proves: [],
+              kind: 'custom-command',
+              artifact: { path: 'obsolete.ts', change: 'delete' },
+              command: 'node verify-removal.mjs',
+            },
+          ],
+        },
+      });
+      expect(result.factValidation?.results[0]?.passed).toBe(passed);
+    },
+  );
+
   async function validateBrowserFact(options: {
     hostBrowserRunner?: HostBrowserRunner;
     command?: string;
     setupWorktree?: (worktreePath: string) => Promise<void>;
   }) {
     const worktreePath = await fs.mkdtemp(path.join(os.tmpdir(), 'autopod-fact-host-'));
+    // These real npm fixtures use only local packages; registry/audit latency is not under test.
+    await fs.writeFile(
+      path.join(worktreePath, '.npmrc'),
+      'offline=true\naudit=false\nfund=false\nupdate-notifier=false\n',
+    );
     await options.setupWorktree?.(worktreePath);
     const execCommands: string[] = [];
     const containerManager = {
@@ -293,7 +364,7 @@ human_review: []
 
     expect(result.factValidation?.status).toBe('pass');
     expect(result.factValidation?.results[0]?.stdout).toBe('host-fact');
-  });
+  }, 30_000);
 
   it('installs host dependencies when node_modules exists but is incomplete', async () => {
     const hostBrowserRunner: HostBrowserRunner = {
@@ -1098,19 +1169,38 @@ describe('validate() — hasWebUi gating', () => {
   }
 
   it('provider-compatible council completes five axes and synthesis', async () => {
-    vi.mocked(runCodexReview).mockResolvedValue({
-      stdout: JSON.stringify({ status: 'pass', reasoning: 'clean', issues: [] }),
-      tokenUsage: { inputTokens: 100, outputTokens: 20 },
-    });
-    vi.mocked(runContainerReviewer).mockImplementation(async ({ prompt, outputContract }) => {
-      expect(outputContract).toBeDefined();
+    const launchGuard = vi.fn();
+    const beforeReviewerLaunch = vi.fn(
+      async (_identity: import('../interfaces/reviewer-launch.js').ReviewerLaunchIdentity) =>
+        launchGuard,
+    );
+    vi.mocked(runCodexReview).mockImplementation(async (config) => {
+      const guard = await config.beforeLaunch?.({
+        podId: config.podId,
+        containerId: config.containerId,
+        runtime: 'codex',
+        model: config.model,
+      });
+      guard?.();
       return {
-        stdout: prompt.includes('synthesizer')
-          ? JSON.stringify({ decisions: [] })
-          : JSON.stringify({ findings: [] }),
-        tokenUsage: { inputTokens: 10, outputTokens: 2 },
+        stdout: JSON.stringify({ status: 'pass', reasoning: 'clean', issues: [] }),
+        tokenUsage: { inputTokens: 100, outputTokens: 20 },
       };
     });
+    vi.mocked(runContainerReviewer).mockImplementation(
+      async ({ prompt, outputContract, beforeLaunch, podId, containerId, model }) => {
+        if (!containerId) throw new Error('Missing reviewer container');
+        const guard = await beforeLaunch?.({ podId, containerId, runtime: 'codex', model });
+        guard?.();
+        expect(outputContract).toBeDefined();
+        return {
+          stdout: prompt.includes('synthesizer')
+            ? JSON.stringify({ decisions: [] })
+            : JSON.stringify({ findings: [] }),
+          tokenUsage: { inputTokens: 10, outputTokens: 2 },
+        };
+      },
+    );
 
     const progress: NonNullable<ValidationPhaseCallbacks['onReviewProgress']> extends (
       value: infer T,
@@ -1119,6 +1209,7 @@ describe('validate() — hasWebUi gating', () => {
       : never = [];
     const result = await createLocalValidationEngine(stubContainerManager()).validate(
       baseConfig({
+        beforeReviewerLaunch,
         reviewerModel: 'gpt-5.6-sol',
         reviewerProvider: 'openai',
         diff: changedDiff,
@@ -1133,6 +1224,13 @@ describe('validate() — hasWebUi gating', () => {
     );
 
     expect(runContainerReviewer).toHaveBeenCalledTimes(6);
+    expect(beforeReviewerLaunch).toHaveBeenCalledTimes(7);
+    expect(launchGuard).toHaveBeenCalledTimes(7);
+    expect(
+      beforeReviewerLaunch.mock.calls.every(
+        (call) => call[0].runtime === 'codex' && call[0].model === 'gpt-5.6-sol',
+      ),
+    ).toBe(true);
     expect(result.taskReview?.reviewBatch).toMatchObject({
       quality: 'healthy',
       synthesis: 'model',
@@ -1475,6 +1573,11 @@ describe('validate() — hasWebUi gating', () => {
     const podId = 'sandbox-review-ledger';
     let reviewNow = 1_000_000;
     const nowSpy = vi.spyOn(Date, 'now').mockImplementation(() => reviewNow);
+    const launchGuard = vi.fn();
+    const beforeReviewerLaunch = vi.fn(
+      async (_identity: import('../interfaces/reviewer-launch.js').ReviewerLaunchIdentity) =>
+        launchGuard,
+    );
     let closureTimeout: number | undefined;
     let closureAttempts = 0;
     const closureContracts: Array<string | undefined> = [];
@@ -1518,7 +1621,10 @@ describe('validate() — hasWebUi gating', () => {
       await git('reset', '--hard', snapshotB);
 
       vi.mocked(runContainerReviewer).mockImplementation(
-        async ({ prompt, timeout, outputContract }) => {
+        async ({ prompt, timeout, outputContract, beforeLaunch, podId, containerId, model }) => {
+          if (!containerId) throw new Error('Missing reviewer container');
+          const guard = await beforeLaunch?.({ podId, containerId, runtime: 'claude', model });
+          guard?.();
           if (prompt.includes('closure verifier')) {
             closureTimeout = timeout;
             closureAttempts++;
@@ -1570,6 +1676,7 @@ describe('validate() — hasWebUi gating', () => {
       };
       const result = await createLocalValidationEngine(stubContainerManager()).validate(
         baseConfig({
+          beforeReviewerLaunch,
           podId,
           reviewerModel: 'claude-sonnet-4-6',
           diff: changedDiff,
@@ -1590,6 +1697,8 @@ describe('validate() — hasWebUi gating', () => {
       expect(result.taskReview?.reviewBatch?.closureVerification?.status).toBe('completed');
       expect(closureTimeout).toBe(100);
       expect(closureAttempts).toBe(2);
+      expect(beforeReviewerLaunch).toHaveBeenCalledTimes(8);
+      expect(launchGuard).toHaveBeenCalledTimes(8);
       expect(closureContracts).toEqual(['review-closure-v1', 'review-closure-v1']);
       expect(result.taskReview?.reviewBatch?.ledger).toEqual([
         expect.objectContaining({
@@ -3069,6 +3178,75 @@ human_review: []
     expect(result.taskReview?.status).toBe('pass');
   });
 
+  it('does not replay Codex when its structured termination failure mentions timeout', async () => {
+    vi.mocked(runCodexReview).mockRejectedValue(
+      new CodexReviewError({
+        kind: 'termination-failed',
+        message: 'timeout: remote reviewer kill did not complete',
+      }),
+    );
+    const result = await createLocalValidationEngine(stubContainerManager()).validate(
+      baseConfig({
+        reviewerModel: 'test',
+        reviewerProvider: 'openai',
+        validationSuite: 'deterministic',
+        diff: '+const changed = true;',
+      }),
+    );
+    expect(result.overall).toBe('fail');
+    expect(result.taskReview).toBeNull();
+    expect(result.reviewSkipReason).toMatch(/termination could not be confirmed/);
+    expect(runCodexReview).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([1, 3])(
+    'does not retry or accept an earlier verdict after tier %s termination is unconfirmed',
+    async (tier) => {
+      const worktreePath = await fs.mkdtemp(path.join(os.tmpdir(), 'autopod-review-termination-'));
+      try {
+        const failure = new ClaudeCliError({
+          kind: 'termination-failed',
+          model: 'test',
+          exitCode: null,
+          signal: null,
+          stderr: '',
+          stdoutPreview: '',
+          durationMs: 10100,
+        });
+        if (tier === 1) vi.mocked(runClaudeCli).mockRejectedValue(failure);
+        else {
+          vi.mocked(runClaudeCli).mockResolvedValue({
+            stdout: JSON.stringify({ status: 'pass', reasoning: 'tier1', issues: [] }),
+            tokenUsage: { inputTokens: 100, outputTokens: 10 },
+          });
+          vi.mocked(runToolUseReview).mockResolvedValue({
+            stdout: JSON.stringify({ status: 'uncertain', reasoning: 'need more', issues: [] }),
+            tokenUsage: { inputTokens: 200, outputTokens: 20 },
+          });
+          vi.mocked(runAgenticReview).mockRejectedValue(failure);
+        }
+        const result = await createLocalValidationEngine(stubContainerManager()).validate(
+          baseConfig({
+            reviewerModel: 'test',
+            reviewDepth: 'deep',
+            validationSuite: 'deterministic',
+            worktreePath,
+            diff: '+const changed = true;',
+          }),
+        );
+        expect(result.overall).toBe('fail');
+        expect(result.taskReview).toBeNull();
+        expect(result.reviewSkipReason).toMatch(/termination could not be confirmed/);
+        expect(runClaudeCli).toHaveBeenCalledTimes(1);
+        expect(runAgenticReview).toHaveBeenCalledTimes(tier === 3 ? 1 : 0);
+        if (tier === 3)
+          expect(result.reviewTokenUsage).toMatchObject({ inputTokens: 300, outputTokens: 30 });
+      } finally {
+        await fs.rm(worktreePath, { recursive: true, force: true });
+      }
+    },
+  );
+
   it('retries only Review after reviewer infrastructure failure', async () => {
     const reviewPass = JSON.stringify({
       status: 'pass',
@@ -3253,10 +3431,14 @@ human_review: []
         costUsd: 0.012,
       },
     });
+    const assertReviewerCurrent = vi.fn();
+    const recordHostDispatch = vi.fn();
     const engine = createLocalValidationEngine(stubContainerManager());
 
     const result = await engine.validate(
       baseConfig({
+        assertReviewerCurrent,
+        recordHostReviewerDispatch: recordHostDispatch,
         reviewerModel: 'claude-sonnet-4-6',
         reviewDepth: 'deep',
         worktreePath,
@@ -3280,6 +3462,15 @@ human_review: []
     });
     expect(result.taskReview?.tokenUsage?.costUsd).toBeGreaterThan(0);
     expect(runAgenticReview).toHaveBeenCalledTimes(1);
+    expect(runClaudeCli).toHaveBeenCalledWith(
+      expect.objectContaining({ beforeSpawn: assertReviewerCurrent, recordHostDispatch }),
+    );
+    expect(runToolUseReview).toHaveBeenCalledWith(
+      expect.objectContaining({ beforeRequest: assertReviewerCurrent }),
+    );
+    expect(runAgenticReview).toHaveBeenCalledWith(
+      expect.objectContaining({ beforeSpawn: assertReviewerCurrent, recordHostDispatch }),
+    );
   });
 
   it('retains structured overflow when Tier 3 falls back to Tier 2', async () => {
@@ -3459,6 +3650,389 @@ human_review: []
     expect(runToolUseReview).not.toHaveBeenCalled();
   });
 
+  it.each(['budget-exhausted', 'provider-error', 'ownership-lost'] as const)(
+    'does not replay or erase a tool-review %s and retains measured usage',
+    async (kind) => {
+      const worktreePath = await fs.mkdtemp(path.join(os.tmpdir(), 'autopod-tool-budget-'));
+      try {
+        vi.mocked(runClaudeCli).mockResolvedValue({
+          stdout: JSON.stringify({
+            status: 'pass',
+            reasoning: 'initial review',
+            issues: ['Retained initial concern'],
+          }),
+          tokenUsage: { inputTokens: 100, outputTokens: 10 },
+        });
+        vi.mocked(runToolUseReview).mockRejectedValue(
+          new ToolReviewError(kind, 'bounded reviewer stop', { inputTokens: 12, outputTokens: 3 }),
+        );
+        const result = await createLocalValidationEngine(stubContainerManager()).validate(
+          baseConfig({
+            reviewerModel: 'test',
+            reviewDepth: 'deep',
+            validationSuite: 'full',
+            worktreePath,
+            diff: '+const changed = true;',
+          }),
+        );
+        expect(result.overall).toBe('fail');
+        expect(result.taskReview?.status).toBe('fail');
+        expect(result.taskReview?.issues).toContain('Retained initial concern');
+        expect(result.reviewSkipKind).toBe('review-failed');
+        expect(result.reviewSkipReason).toContain('Tool review unavailable');
+        expect(result.reviewTokenUsage).toMatchObject({ inputTokens: 112, outputTokens: 13 });
+        expect(runToolUseReview).toHaveBeenCalledOnce();
+        expect(runClaudeCli).toHaveBeenCalledOnce();
+        expect(runAgenticReview).not.toHaveBeenCalled();
+        expect(runContainerReviewer).not.toHaveBeenCalled();
+      } finally {
+        await fs.rm(worktreePath, { recursive: true, force: true });
+      }
+    },
+  );
+
+  it('records legacy API preparation independently of selected profile provenance', async () => {
+    const worktreePath = await fs.mkdtemp(path.join(os.tmpdir(), 'autopod-legacy-receipt-'));
+    const legacyRecord = vi.fn();
+    const selectedRecord = vi.fn();
+    try {
+      vi.mocked(runClaudeCli).mockResolvedValue({
+        stdout: JSON.stringify({ status: 'pass', reasoning: 'initial', issues: [] }),
+      });
+      vi.mocked(runToolUseReview).mockImplementation(async (config) => {
+        expect(config.onDispatch).toBe(legacyRecord);
+        config.onDispatch?.('review-model');
+        return {
+          stdout: JSON.stringify({ status: 'pass', reasoning: 'tool verdict', issues: [] }),
+        };
+      });
+      await createLocalValidationEngine(stubContainerManager()).validate(
+        baseConfig({
+          reviewerModel: 'review-model',
+          reviewDepth: 'deep',
+          validationSuite: 'full',
+          reviewerApiKey: 'synthetic-local-key',
+          worktreePath,
+          diff: '+const changed = true;',
+          recordLegacyReviewerApiDispatch: legacyRecord,
+          recordReviewerApiDispatch: selectedRecord,
+        }),
+      );
+      expect(runToolUseReview).toHaveBeenCalledOnce();
+      expect(legacyRecord).toHaveBeenCalledWith('review-model');
+      expect(selectedRecord).not.toHaveBeenCalled();
+    } finally {
+      await fs.rm(worktreePath, { recursive: true, force: true });
+    }
+  });
+
+  it('bounds selected reviewer acquisition and never revives dispatch when it settles late', async () => {
+    let release:
+      | ((value: Awaited<ReturnType<typeof createProviderAnthropicClient>>) => void)
+      | undefined;
+    const create = vi.fn().mockResolvedValue({
+      content: [{ type: 'text', text: '{"status":"pass","reasoning":"late","issues":[]}' }],
+      usage: { input_tokens: 10, output_tokens: 2 },
+    });
+    vi.mocked(createProviderAnthropicClient).mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          release = resolve;
+        }),
+    );
+    const record = vi.fn();
+    const pending = createLocalValidationEngine(stubContainerManager()).validate(
+      baseConfig({
+        reviewerProvider: 'foundry',
+        reviewerProviderCredentials: {
+          provider: 'foundry',
+          endpoint: 'https://foundry.example',
+          projectId: 'test',
+          apiKey: 'fixture',
+          apiSurface: 'anthropic',
+        },
+        reviewerModel: 'selected',
+        reviewTimeout: 20,
+        validationSuite: 'full',
+        diff: '+const changed = true;',
+        recordReviewerApiDispatch: record,
+      }),
+    );
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const result = await Promise.race([
+      pending,
+      new Promise<null>((resolve) => {
+        timer = setTimeout(() => resolve(null), 500);
+      }),
+    ]);
+    if (timer) clearTimeout(timer);
+    release?.({ ok: true, client: { messages: { create } }, model: 'selected' } as Awaited<
+      ReturnType<typeof createProviderAnthropicClient>
+    >);
+    await pending;
+    expect(result).not.toBeNull();
+    expect(result?.overall).toBe('fail');
+    expect(result?.reviewSkipReason).toContain('acquisition');
+    expect(create).not.toHaveBeenCalled();
+    expect(record).not.toHaveBeenCalled();
+    expect(createProviderAnthropicClient).toHaveBeenCalledOnce();
+    expect(runContainerReviewer).not.toHaveBeenCalled();
+    expect(runToolUseReview).not.toHaveBeenCalled();
+    expect(runClaudeCli).not.toHaveBeenCalled();
+  });
+
+  it('charges selected client acquisition and earlier API tiers against one review deadline', async () => {
+    const worktreePath = await fs.mkdtemp(path.join(os.tmpdir(), 'review-acquisition-budget-'));
+    let elapsed = 0;
+    vi.spyOn(performance, 'now').mockImplementation(() => elapsed);
+    const create = vi.fn().mockImplementation(async () => {
+      elapsed = 950;
+      return {
+        content: [{ type: 'text', text: '{"status":"pass","reasoning":"first pass","issues":[]}' }],
+        usage: { input_tokens: 10, output_tokens: 2 },
+      };
+    });
+    vi.mocked(createProviderAnthropicClient).mockImplementation(async () => {
+      elapsed = 900;
+      return { ok: true, client: { messages: { create } }, model: 'selected' } as Awaited<
+        ReturnType<typeof createProviderAnthropicClient>
+      >;
+    });
+    vi.mocked(runToolUseReview).mockResolvedValue({
+      stdout: '{"status":"pass","reasoning":"deep pass","issues":[]}',
+      tokenUsage: { inputTokens: 20, outputTokens: 3 },
+    });
+    try {
+      const result = await createLocalValidationEngine(stubContainerManager()).validate(
+        baseConfig({
+          reviewerProvider: 'foundry',
+          reviewerProviderCredentials: {
+            provider: 'foundry',
+            endpoint: 'https://foundry.example',
+            projectId: 'test',
+            apiKey: 'fixture',
+            apiSurface: 'anthropic',
+          },
+          reviewerModel: 'selected',
+          reviewTimeout: 1000,
+          reviewDepth: 'deep',
+          worktreePath,
+          validationSuite: 'deterministic',
+          diff: '+const changed = true;',
+        }),
+      );
+      expect(create).toHaveBeenCalledOnce();
+      expect(create.mock.calls[0]?.[1]).toMatchObject({ timeout: 100, maxRetries: 0 });
+      expect(runToolUseReview).toHaveBeenCalledWith(expect.objectContaining({ timeout: 50 }));
+      expect(result.overall).toBe('pass');
+      expect(result.reviewTokenUsage).toMatchObject({ inputTokens: 30, outputTokens: 5 });
+    } finally {
+      vi.restoreAllMocks();
+      await fs.rm(worktreePath, { recursive: true, force: true });
+    }
+  });
+
+  it.each([
+    'acquisition-expired',
+    'receipt-expired',
+    'tier-two-expired',
+    'standard-response-expired',
+    'invalid-budget',
+  ] as const)(
+    'refuses selected API continuation for %s and retains measured earlier usage',
+    async (mode) => {
+      const worktreePath = await fs.mkdtemp(path.join(os.tmpdir(), 'review-api-expired-'));
+      let elapsed = 0;
+      vi.spyOn(performance, 'now').mockImplementation(() => elapsed);
+      const create = vi.fn().mockImplementation(async () => {
+        elapsed = 1001;
+        return {
+          content: [
+            {
+              type: 'text',
+              text: '{"status":"pass","reasoning":"initial evidence","issues":["Retained initial finding"]}',
+            },
+          ],
+          usage: { input_tokens: 10, output_tokens: 2 },
+        };
+      });
+      vi.mocked(createProviderAnthropicClient).mockImplementation(async () => {
+        if (mode === 'acquisition-expired') elapsed = 1001;
+        return { ok: true, client: { messages: { create } }, model: 'selected' } as Awaited<
+          ReturnType<typeof createProviderAnthropicClient>
+        >;
+      });
+      const record = vi.fn(() => {
+        if (mode === 'receipt-expired') elapsed = 1001;
+      });
+      try {
+        const result = await createLocalValidationEngine(stubContainerManager()).validate(
+          baseConfig({
+            reviewerProvider: 'foundry',
+            reviewerProviderCredentials: {
+              provider: 'foundry',
+              endpoint: 'https://foundry.example',
+              projectId: 'test',
+              apiKey: 'fixture',
+              apiSurface: 'anthropic',
+            },
+            reviewerModel: 'selected',
+            reviewTimeout: mode === 'invalid-budget' ? 0 : 1000,
+            reviewDepth: mode === 'standard-response-expired' ? 'standard' : 'deep',
+            worktreePath,
+            validationSuite: 'full',
+            diff: '+const changed = true;',
+            recordReviewerApiDispatch: record,
+          }),
+        );
+        expect(result.overall).toBe('fail');
+        expect(result.reviewSkipReason).toContain('deadline exhausted');
+        expect(runToolUseReview).not.toHaveBeenCalled();
+        expect(runContainerReviewer).not.toHaveBeenCalled();
+        expect(runAgenticReview).not.toHaveBeenCalled();
+        expect(createProviderAnthropicClient).toHaveBeenCalledTimes(
+          mode === 'invalid-budget' ? 0 : 1,
+        );
+        expect(create).toHaveBeenCalledTimes(
+          ['tier-two-expired', 'standard-response-expired'].includes(mode) ? 1 : 0,
+        );
+        if (['tier-two-expired', 'standard-response-expired'].includes(mode)) {
+          expect(result.reviewTokenUsage).toMatchObject({ inputTokens: 10, outputTokens: 2 });
+          expect(result.taskReview?.issues).toContain('Retained initial finding');
+        } else expect(result.reviewTokenUsage).toBeUndefined();
+      } finally {
+        vi.restoreAllMocks();
+        await fs.rm(worktreePath, { recursive: true, force: true });
+      }
+    },
+  );
+
+  it('does not dispatch a provider request after client acquisition loses review ownership', async () => {
+    let current = true;
+    const create = vi.fn().mockResolvedValue({
+      content: [
+        { type: 'text', text: '{"status":"pass","reasoning":"stale verdict","issues":[]}' },
+      ],
+      usage: { input_tokens: 10, output_tokens: 2 },
+    });
+    vi.mocked(createProviderAnthropicClient).mockImplementation(async () => {
+      current = false;
+      return { ok: true, client: { messages: { create } }, model: 'selected' } as Awaited<
+        ReturnType<typeof createProviderAnthropicClient>
+      >;
+    });
+    const result = await createLocalValidationEngine(stubContainerManager()).validate(
+      baseConfig({
+        reviewerProvider: 'foundry',
+        reviewerProviderCredentials: {
+          provider: 'foundry',
+          endpoint: 'https://foundry.example',
+          projectId: 'test',
+          apiKey: 'fixture-only',
+          apiSurface: 'anthropic',
+        },
+        reviewerModel: 'selected',
+        validationSuite: 'deterministic',
+        diff: '+const changed = true;',
+        assertReviewerCurrent: () => {
+          if (!current) throw new Error('review ownership lost');
+        },
+      }),
+    );
+    expect(create).not.toHaveBeenCalled();
+    expect(createProviderAnthropicClient).toHaveBeenCalledOnce();
+    expect(result.overall).toBe('fail');
+    expect(runClaudeCli).not.toHaveBeenCalled();
+  });
+
+  it.each(['pass', 'uncertain', 'unavailable'] as const)(
+    'keeps deep Foundry review bound when tool review is %s',
+    async (toolOutcome) => {
+      const worktreePath = await fs.mkdtemp(path.join(os.tmpdir(), 'autopod-foundry-review-'));
+      try {
+        const create = vi.fn().mockResolvedValue({
+          content: [
+            {
+              type: 'text',
+              text: JSON.stringify({
+                status: 'pass',
+                reasoning: 'initial foundry review',
+                issues: ['initial concern'],
+              }),
+            },
+          ],
+          usage: { input_tokens: 100, output_tokens: 10 },
+        });
+        const client = { messages: { create } };
+        vi.mocked(createProviderAnthropicClient).mockResolvedValue({
+          ok: true,
+          client,
+          model: 'resolved-foundry-model',
+        } as Awaited<ReturnType<typeof createProviderAnthropicClient>>);
+        vi.mocked(runToolUseReview).mockImplementation(async (config) => {
+          expect(config.providerClient).toMatchObject({ client, model: 'resolved-foundry-model' });
+          expect(config.apiKey).toBeUndefined();
+          if (toolOutcome === 'unavailable') throw new Error('selected foundry client unavailable');
+          return {
+            stdout: JSON.stringify({
+              status: toolOutcome,
+              reasoning: 'tool review',
+              issues: ['tool concern'],
+            }),
+            tokenUsage: { inputTokens: 200, outputTokens: 20 },
+          };
+        });
+        vi.mocked(runAgenticReview).mockResolvedValue({
+          stdout: JSON.stringify({ status: 'pass', reasoning: 'unbound host verdict', issues: [] }),
+        });
+        const result = await createLocalValidationEngine(stubContainerManager()).validate(
+          baseConfig({
+            reviewerProvider: 'foundry',
+            reviewerProviderCredentials: {
+              provider: 'foundry',
+              endpoint: 'https://foundry.example',
+              projectId: 'test',
+              apiKey: 'selected-test-key',
+              apiSurface: 'anthropic',
+            },
+            reviewerModel: 'configured-foundry-model',
+            reviewerApiKey: 'unrelated-default-key',
+            reviewDepth: 'deep',
+            validationSuite: toolOutcome === 'pass' ? 'deterministic' : 'full',
+            worktreePath,
+            diff: '+const changed = true;',
+          }),
+        );
+        expect(runToolUseReview).toHaveBeenCalledOnce();
+        expect(vi.mocked(runToolUseReview).mock.calls[0]?.[0].providerClient).toMatchObject({
+          client,
+          model: 'resolved-foundry-model',
+        });
+        expect(vi.mocked(runToolUseReview).mock.calls[0]?.[0].apiKey).toBeUndefined();
+        expect(runClaudeCli).not.toHaveBeenCalled();
+        expect(runAgenticReview).not.toHaveBeenCalled();
+        expect(createProviderAnthropicClient).toHaveBeenCalledOnce();
+        expect(create.mock.calls[0]?.[0]).toMatchObject({ model: 'resolved-foundry-model' });
+        if (toolOutcome !== 'pass') {
+          expect(result.overall).toBe('fail');
+          expect(result.taskReview?.status).toBe('fail');
+          expect(result.taskReview?.reasoning).toMatch(/Foundry.*(?:unavailable|binding)/);
+          expect(result.reviewSkipKind).toBe('review-failed');
+          expect(result.reviewSkipReason).toMatch(/Foundry.*(?:unavailable|binding)/);
+          expect(result.reviewTokenUsage).toMatchObject({
+            inputTokens: toolOutcome === 'unavailable' ? 100 : 300,
+          });
+          expect(result.taskReview?.issues).toContain(
+            toolOutcome === 'unavailable' ? 'initial concern' : 'tool concern',
+          );
+          expect(runContainerReviewer).not.toHaveBeenCalled();
+        }
+      } finally {
+        await fs.rm(worktreePath, { recursive: true, force: true });
+      }
+    },
+  );
+
   it('keeps Foundry Anthropic validation Review on daemon provider auth', async () => {
     const messagesCreate = vi.fn().mockResolvedValue({
       content: [
@@ -3482,11 +4056,15 @@ human_review: []
       client: { messages: { create: messagesCreate } },
       model: 'claude-sonnet-4-6',
     } as Awaited<ReturnType<typeof createProviderAnthropicClient>>);
+    const assertReviewerCurrent = vi.fn();
+    const recordReviewerApiDispatch = vi.fn();
     const cm = stubContainerManager();
     const engine = createLocalValidationEngine(cm);
 
     const result = await engine.validate(
       baseConfig({
+        assertReviewerCurrent,
+        recordReviewerApiDispatch,
         reviewerProvider: 'foundry',
         reviewerProviderCredentials: {
           provider: 'foundry',
@@ -3517,6 +4095,11 @@ human_review: []
       },
     });
     expect(result.overall).toBe('pass');
+    expect(assertReviewerCurrent).toHaveBeenCalledTimes(4);
+    expect(recordReviewerApiDispatch).toHaveBeenCalledWith('claude-sonnet-4-6');
+    expect(recordReviewerApiDispatch.mock.invocationCallOrder[0]).toBeLessThan(
+      messagesCreate.mock.invocationCallOrder[0] ?? 0,
+    );
     expect(vi.mocked(runClaudeCli)).not.toHaveBeenCalled();
     expect(createProviderAnthropicClient).toHaveBeenCalledWith(
       {
@@ -3544,8 +4127,10 @@ human_review: []
           },
         ],
       },
-      { timeout: 300_000 },
+      { timeout: expect.any(Number), maxRetries: 0 },
     );
+    expect(messagesCreate.mock.calls[0]?.[1].timeout).toBeGreaterThan(0);
+    expect(messagesCreate.mock.calls[0]?.[1].timeout).toBeLessThanOrEqual(300_000);
     expect(vi.mocked(cm.execInContainer)).toHaveBeenCalledTimes(1);
     expect(vi.mocked(cm.execInContainer).mock.calls[0]?.[1].join(' ')).toContain(
       'git reset --hard HEAD',

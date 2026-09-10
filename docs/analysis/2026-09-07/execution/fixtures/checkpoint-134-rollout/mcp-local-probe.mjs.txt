@@ -1,0 +1,6 @@
+import { mcpHandler, Fastify } from './mcp-local.mjs';
+const app=Fastify({logger:false});const reports=[];
+const bridge={getLinkedPodId:()=>null,readOperatorGuidance:()=>null,getAvailableActions:()=>[],reportTaskSummary:(...v)=>reports.push(v)};
+mcpHandler(app,bridge,new Map(),{warn(){},error(...v){console.log('serverError',v[1],v[0]?.err?.message);},debug(){}});
+const address=await app.listen({host:'127.0.0.1',port:0});const out=[];
+try{for (const method of ['initialize','tools/list','tools/call']) {const params=method==='initialize'?{protocolVersion:'2025-03-26',capabilities:{},clientInfo:{name:'bounded-probe',version:'1'}}:method==='tools/call'?{name:'report_task_summary',arguments:{actualSummary:'LOCAL_ONLY_MCP_PROBE',deviations:[]}}:{};const res=await fetch(address+'/mcp/local-only',{method:'POST',headers:{'Content-Type':'application/json',Accept:'application/json, text/event-stream'},body:JSON.stringify({jsonrpc:'2.0',id:1,method,params}),signal:AbortSignal.timeout(5000)});const raw=await res.text();out.push({method,status:res.status,bodyLength:raw.length,registered:raw.includes('Task summary registered'),rpcError:raw.includes('"error":')});}console.log(JSON.stringify({out,reports}));}finally {await app.close();}

@@ -1,0 +1,114 @@
+{
+  "staged-receipt": {
+    "sha": "988d7c9dc425587e31f2f600a0ce97090e00df0f",
+    "identities": [
+      {
+        "name": "chunk-OFTACDJU.js",
+        "release": {
+          "validationImplementationHash": "4cf84eaedeccff9e613f09ed86bc29a819f2301a91321b021b52bdfc854c78a6",
+          "commitSha": "988d7c9dc425587e31f2f600a0ce97090e00df0f",
+          "dirty": false,
+          "builtAt": "2026-09-10T08:29:22.552Z",
+          "source": "build"
+        }
+      }
+    ],
+    "resourceMethodChunks": ["chunk-YXCZIAJ5.js"],
+    "checkoutClean": true,
+    "statusPaths": [],
+    "entryHash": "f953ffabe0e566e7187612aa4c7f3484f5f9e8604a3bcfd384c24a6274b7e692"
+  },
+  "backup-receipt": {
+    "status": "fresh_backup_and_upgrade_verified",
+    "candidate": "988d7c9dc425587e31f2f600a0ce97090e00df0f",
+    "snapshot": "/data/autopod/backups/2026-09-10T08-33-36-306Z-3b27bb8f-878d-430e-933b-0393b6439680-goal-133-cutover.db",
+    "sourceIdentity": "b83381edf3ef5680b72552b656f77f927605a1568be55f2177d8946cd99deade",
+    "sha256": "d9362c2ce3964dfa42436dc87ab25ca5ffb573153c1801a038b480e00f6f5185",
+    "watermarkScope": "all_tables",
+    "tableCount": 49,
+    "activeMatchesSnapshotWatermark": true,
+    "upgrade": {
+      "status": "isolated_upgrade_verified",
+      "activeDatabaseOpened": false,
+      "beforeVersion": 153,
+      "afterVersion": 183,
+      "retainedTableCount": 47,
+      "retainedOriginalColumnsAndRows": true,
+      "comparison": "count and SHA256 multiset per original table",
+      "integrityOk": true,
+      "foreignKeysOk": true,
+      "taskBackfillOk": true,
+      "rollbackWriteProbeOk": true,
+      "inputHashUnchanged": true,
+      "snapshotSha256": "d9362c2ce3964dfa42436dc87ab25ca5ffb573153c1801a038b480e00f6f5185",
+      "migrationSha256": "0413c2b3502ce14cf74d164ac6fc474b91143101fd8599d4fea27c91ebb733bf",
+      "isolatedDirectoryRemoved": true
+    },
+    "verifiedAt": "2026-09-10T08:34:13.976Z"
+  },
+  "pre-stop": {
+    "counts": {
+      "pods": 0,
+      "managed": 0,
+      "systemRuns": 0,
+      "schedules": 0,
+      "watchers": 0,
+      "podsitter": 0
+    },
+    "oldPid": 125941,
+    "oldRelease": "/opt/autopod/releases/ca92847a",
+    "candidate": "988d7c9dc425587e31f2f600a0ce97090e00df0f",
+    "at": "2026-09-10T08:33:36.205110+00:00"
+  },
+  "stopped": {
+    "observedExitedPid": 125941,
+    "at": "2026-09-10T08:33:36.251112+00:00"
+  },
+  "activated": {
+    "status": "activated",
+    "release": {
+      "validationImplementationHash": "4cf84eaedeccff9e613f09ed86bc29a819f2301a91321b021b52bdfc854c78a6",
+      "commitSha": "988d7c9dc425587e31f2f600a0ce97090e00df0f",
+      "dirty": false,
+      "builtAt": "2026-09-10T08:29:22.552Z",
+      "source": "build"
+    },
+    "schemaMaximum": 183,
+    "pid": 133591,
+    "oldPidObservedExited": true,
+    "backup": "/data/autopod/backups/2026-09-10T08-33-36-306Z-3b27bb8f-878d-430e-933b-0393b6439680-goal-133-cutover.db",
+    "at": "2026-09-10T08:34:16.050768+00:00"
+  },
+  "database": {
+    "schemaMaximum": 183,
+    "integrity": "ok",
+    "foreignKeyErrors": 0,
+    "pods": 886,
+    "taskExecutions": 886,
+    "drainExists": 1
+  },
+  "recentErrors": [
+    {
+      "type": "FastifyError",
+      "message": "Body cannot be empty when content-type is set to 'application/json'",
+      "code": "FST_ERR_CTP_EMPTY_JSON_BODY",
+      "frames": [
+        "    at Parser.defaultJsonParser [as fn] (/opt/autopod/releases/988d7c9d/node_modules/.pnpm/fastify@5.12.3/node_modules/fastify/lib/content-type-parser.js:319:12)",
+        "    at IncomingMessage.onEnd (/opt/autopod/releases/988d7c9d/node_modules/.pnpm/fastify@5.12.3/node_modules/fastify/lib/content-type-parser.js:305:27)",
+        "    at IncomingMessage.emit (node:events:519:28)",
+        "    at endReadableNT (node:internal/streams/readable:1698:12)"
+      ]
+    },
+    {
+      "type": "FastifyError",
+      "message": "Body cannot be empty when content-type is set to 'application/json'",
+      "code": "FST_ERR_CTP_EMPTY_JSON_BODY",
+      "frames": [
+        "    at Parser.defaultJsonParser [as fn] (/opt/autopod/releases/988d7c9d/node_modules/.pnpm/fastify@5.12.3/node_modules/fastify/lib/content-type-parser.js:319:12)",
+        "    at IncomingMessage.onEnd (/opt/autopod/releases/988d7c9d/node_modules/.pnpm/fastify@5.12.3/node_modules/fastify/lib/content-type-parser.js:305:27)",
+        "    at IncomingMessage.emit (node:events:519:28)",
+        "    at endReadableNT (node:internal/streams/readable:1698:12)"
+      ]
+    }
+  ]
+}

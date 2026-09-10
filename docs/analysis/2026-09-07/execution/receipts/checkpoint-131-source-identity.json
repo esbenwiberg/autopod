@@ -1,0 +1,22 @@
+{
+  "observedAt": "2026-09-10T07:19:11.005030+00:00",
+  "candidate": "9abf64b1d199f71f79190b6fc667d899fdc1559e",
+  "retainedProof": {
+    "clientSources": {
+      "priorSource": "15900d9e08a7e4ca786a6ad11ff81820fda14de4",
+      "paths": ["packages/cli", "packages/mobile-web", "packages/desktop"],
+      "unchanged": true
+    },
+    "migrationAndBackup": {
+      "priorSource": "4e73cd8ce88e44cdb5c2d8d0a89447b819fa5a39",
+      "paths": ["packages/daemon/src/db"],
+      "unchanged": true
+    },
+    "nugetValidator": {
+      "priorSource": "4e73cd8ce88e44cdb5c2d8d0a89447b819fa5a39",
+      "paths": ["packages/daemon/src/pods/registry-injector.ts"],
+      "unchanged": true
+    }
+  },
+  "applicationDiffAfterCandidate": []
+}

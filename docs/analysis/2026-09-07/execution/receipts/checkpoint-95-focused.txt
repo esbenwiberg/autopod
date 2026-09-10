@@ -1,0 +1,45 @@
+
+ RUN  v4.1.11 /private/tmp/autopod-durable-execution/packages/daemon
+
+ ❯ src/pods/task-retry-ledger.test.ts (15 tests | 2 failed | 10 skipped) 259ms
+   × preserves frozen worker transient allowance undefined across disk reopen and deletion 45ms
+   × preserves frozen worker transient allowance 0 across disk reopen and deletion 45ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 2 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/pods/task-retry-ledger.test.ts > preserves frozen worker transient allowance undefined across disk reopen and deletion
+TypeError: Cannot read properties of undefined (reading 'length')
+ ❯ evaluate src/pods/task-retry-ledger.ts:192:16
+    190|       throw new TaskRetryBlockedError('Invalid trusted retry input ide…
+    191|     if (
+    192|       backoffs.length > 10 ||
+       |                ^
+    193|       backoffs.some((value) => !Number.isSafeInteger(value) || value <…
+    194|     )
+ ❯ Object.<anonymous> src/pods/task-retry-ledger.ts:282:11
+ ❯ Object.sqliteTransaction [as admit] ../../node_modules/.pnpm/better-sqlite3@11.10.0/node_modules/better-sqlite3/lib/methods/transaction.js:65:24
+ ❯ src/pods/task-retry-ledger.test.ts:520:24
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/2]⎯
+
+ FAIL  src/pods/task-retry-ledger.test.ts > preserves frozen worker transient allowance 0 across disk reopen and deletion
+TypeError: backoffs.some is not a function
+ ❯ evaluate src/pods/task-retry-ledger.ts:193:16
+    191|     if (
+    192|       backoffs.length > 10 ||
+    193|       backoffs.some((value) => !Number.isSafeInteger(value) || value <…
+       |                ^
+    194|     )
+    195|       throw new TaskRetryBlockedError('Invalid task retry backoff poli…
+ ❯ Object.<anonymous> src/pods/task-retry-ledger.ts:282:11
+ ❯ Object.sqliteTransaction [as admit] ../../node_modules/.pnpm/better-sqlite3@11.10.0/node_modules/better-sqlite3/lib/methods/transaction.js:65:24
+ ❯ src/pods/task-retry-ledger.test.ts:520:24
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/2]⎯
+
+
+ Test Files  1 failed | 1 passed (2)
+      Tests  2 failed | 31 passed | 605 skipped (638)
+   Start at  19:39:57
+   Duration  2.80s (transform 1.27s, setup 0ms, import 1.80s, tests 1.68s, environment 0ms)
+

@@ -1,0 +1,55 @@
+
+ RUN  v4.1.11 /private/tmp/autopod-durable-execution/packages/daemon
+
+ ❯ src/db/migrate.test.ts (29 tests | 2 failed | 27 skipped) 17ms
+     × backs up committed WAL content before destructive migration, including implicit rowids 12ms
+     × rejects a cutover backup path that does not identify the open database 4ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 2 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/db/migrate.test.ts > runMigrations — migration 091 (drop screenshot blobs) > backs up committed WAL content before destructive migration, including implicit rowids
+AssertionError: expected { screenshots: '["screenshotBlob=="]' } to deeply equal { screenshots: '["committed-in-wal"]' }
+
+- Expected
++ Received
+
+  {
+-   "screenshots": "[\"committed-in-wal\"]",
++   "screenshots": "[\"screenshotBlob==\"]",
+  }
+
+ ❯ src/db/migrate.test.ts:460:99
+    458|       const restored = new Database(path.join(backups, file as string)…
+    459|       try {
+    460|         expect(restored.prepare('SELECT screenshots FROM validations W…
+       |                                                                                                   ^
+    461|         expect(restored.prepare('SELECT rowid, value FROM retained_ord…
+    462|         expect(restored.pragma('integrity_check')).toEqual([{ integrit…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/2]⎯
+
+ FAIL  src/db/migrate.test.ts > runMigrations — migration 091 (drop screenshot blobs) > rejects a cutover backup path that does not identify the open database
+AssertionError: expected [Function] to throw an error
+
+- Expected:
+null
+
++ Received:
+undefined
+
+ ❯ src/db/migrate.test.ts:474:73
+    472|     const other = new Database(unrelated); other.exec('CREATE TABLE un…
+    473|     try {
+    474|       expect(() => runMigrations(db, migrationsDir, logger, unrelated)…
+       |                                                                         ^
+    475|       expect(hasColumn(db, 'validations', 'screenshots')).toBe(true);
+    476|     } finally { db.close(); }
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/2]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  2 failed | 27 skipped (29)
+   Start at  18:06:33
+   Duration  269ms (transform 90ms, setup 0ms, import 158ms, tests 17ms, environment 0ms)
+

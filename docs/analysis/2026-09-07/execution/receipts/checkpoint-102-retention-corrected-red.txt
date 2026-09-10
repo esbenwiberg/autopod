@@ -1,0 +1,39 @@
+
+ RUN  v4.1.11 /private/tmp/autopod-durable-execution/packages/daemon
+
+ ❯ src/pods/retained-analytics.test.ts (3 tests | 1 failed) 169ms
+   × retains exported pod and validation observations after actual deletion 48ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/pods/retained-analytics.test.ts > retains exported pod and validation observations after actual deletion
+AssertionError: expected { totalSessions: 1, …(2) } to deeply equal { totalSessions: 2, …(2) }
+
+- Expected
++ Received
+
+  {
+    "byStatus": {
+      "complete": 1,
+-     "failed": 1,
+    },
+    "totalCost": 0,
+-   "totalSessions": 2,
++   "totalSessions": 1,
+  }
+
+ ❯ src/pods/retained-analytics.test.ts:90:25
+     88|     ctx.podRepo.delete('failure');
+     89|     const after = ctx.exporter.export({ limit: 10 });
+     90|     expect(after.stats).toEqual(before.stats);
+       |                         ^
+     91|     const exported = new Database(after.dbBuffer);
+     92|     try {
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 2 passed (3)
+   Start at  21:43:43
+   Duration  534ms (transform 168ms, setup 0ms, import 257ms, tests 169ms, environment 0ms)

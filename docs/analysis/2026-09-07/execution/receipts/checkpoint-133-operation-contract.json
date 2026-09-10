@@ -1,0 +1,36 @@
+{
+  "authorization": "User: approved for all that! go",
+  "scope": [
+    "branch publication",
+    "staging and browser/reviewer prewarm",
+    "temporary pause and restore of the one enabled schedule, one issue watcher and Podsitter",
+    "observed idle daemon stop",
+    "fresh WAL-aware backup and isolated restore/153-to-183 verification",
+    "pinned release activation and read-only acceptance",
+    "goal-scoped canaries under continuing authority"
+  ],
+  "candidate": "988d7c9dc425587e31f2f600a0ce97090e00df0f",
+  "previousHostedCommit": "ca92847a64aa11d58b5a43ca29659262fe85ada9",
+  "vmId": "3addc9bc-4812-4892-98d6-c40d5ab893c0",
+  "database": "/data/autopod/autopod.db",
+  "budget": {
+    "newVmResources": 0,
+    "modelCallsForRollout": 0,
+    "minimumRequiredFreeBytes": 10737418240,
+    "cutoverDeadlineSeconds": 600,
+    "buildsAttempted": 2,
+    "incrementalBilling": "Existing VM and disk; network/cache costs unmeasured. No model or sandbox calls for the rollout itself."
+  },
+  "recovery": "Before activation, preserve active database and prior source; restart old service only after confirming no candidate writes. After activation preserve database/WAL and prefer forward repair. Never use an unproven symlink-only schema downgrade.",
+  "historicalApiCause": "unknown; no claim that missing trace was recovered",
+  "files": {
+    "acceptance.py": "bd978e1034b16bcf9dd0e7f1f7878574a9fe3eb0ae5af7220486496696c66153",
+    "backup.mjs": "377a9bee175709864d1e018d2c223fdad9906261cc301ce0ac6a7c9c10268c66",
+    "cutover-library.mjs": "672b55f7d106a05a018b27c1aa200cc1649735d11f3743cc644c4e74eefe3cde",
+    "cutover.py": "6de84eb5243ccce3bd77a457a1eddf0fc9df46a511bfdfd6ef13514693622024",
+    "dispatch.py": "cf95a71e81f63ea0d6276a7498510b9d64ca3747bc8adcc27fddef31e512e50c",
+    "prepare.sh": "3e0835f13d7b7a128d63fb62ad5626c1b1fb6d39987ea68117b593e2d9b54e1f",
+    "staged-inspect.sh": "a34cb38341daac1b2e045ae56593dfd43b4f08149dec06dbcd3a96a1e57a6d7a",
+    "test-dispatch.py": "10fafd87060867387327b819391b2b54a25c40689989324b080286e2dd44f90b"
+  }
+}

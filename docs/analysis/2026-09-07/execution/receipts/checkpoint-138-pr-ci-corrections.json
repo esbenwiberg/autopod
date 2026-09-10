@@ -1,0 +1,42 @@
+{
+  "pr": "https://github.com/esbenwiberg/autopod/pull/333",
+  "changes": "Four JSON formatting corrections and eight exact historical false-positive exclusions for verified local-fixture UUIDs; product and deployed source unchanged",
+  "jsonDocuments": [
+    {
+      "path": "docs/analysis/2026-09-07/execution/acceptance.json",
+      "previousSHA256": "ce2a8688989a40f99fa2f1a7494d3c227997e95691c181fb2244c67782515d05",
+      "formattedSHA256": "469d2d7292fc5e665b3a2a50130862a6bb3c227f9d3b4edd54fc3ff346ee9d79",
+      "parsedValueUnchanged": true
+    },
+    {
+      "path": "docs/analysis/2026-09-07/execution/receipts/checkpoint-136-canary-observation.json",
+      "previousSHA256": "c3611578b5589930fd513613db91e14c8c69a542d19fecb4019d928f266e63a1",
+      "formattedSHA256": "95bdf276e9a7a94059f705393c93b02830a6e6b15dec2768b1133ebf8ccf6ffa",
+      "parsedValueUnchanged": true
+    },
+    {
+      "path": "docs/analysis/2026-09-07/execution/receipts/checkpoint-136-restore-inspect.json",
+      "previousSHA256": "18a4397350db05a56977ff9098d499781f83c0d3416fda674c237cf7bec3bcd8",
+      "formattedSHA256": "01bc2b38f7bffa8caf0d875adea7a23cae4b0f65b260f72c68c0f2e839fe9514",
+      "parsedValueUnchanged": true
+    },
+    {
+      "path": "docs/analysis/2026-09-07/execution/receipts/checkpoint-137-closeout-verification.json",
+      "previousSHA256": "6ddf5ce024b28a43632247e8703fc334ff37deb4e886203516ea082035792560",
+      "formattedSHA256": "e6fad50fcf82bf4a4e0df3f2071a0423e8e5cc632894f36a34c18a776b77a323",
+      "parsedValueUnchanged": true
+    }
+  ],
+  "gitleaks": {
+    "version": "8.30.1",
+    "scope": "origin/main..HEAD",
+    "result": "passed",
+    "findings": 0,
+    "exactIgnoredFindings": 8
+  },
+  "lint": {
+    "command": "node_modules/.bin/biome check .",
+    "exitCode": 0
+  },
+  "historicalReceiptPolicy": "Original byte identities remain available at7d672de9; JSON formatting does not change measured data. CP137 receipt hashes describe the pre-format document version."
+}

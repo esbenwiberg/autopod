@@ -1,0 +1,12 @@
+{
+  "approval": "Approved",
+  "scope": "One prepared guest metadata inspection via Azure Run Command, following checkpoint 106 approval question",
+  "payloadSha256": "9667ba6c73e2c43c00906bb8fd4240720dbeeee17d29ede69cef58f0ab2cfe3a",
+  "maximumApprovedOutputBytes": 65536,
+  "actualTransportOutputLimitBytes": 3500,
+  "productionChangesAuthorized": false,
+  "paidCanaryAuthorized": false,
+  "publicationAuthorized": false,
+  "outputFilter": "fixtures/inspection-output-filter.py",
+  "outputLimitSource": "https://learn.microsoft.com/en-us/azure/virtual-machines/linux/run-command"
+}

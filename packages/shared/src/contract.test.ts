@@ -34,7 +34,7 @@ required_facts:
   - id: broken
     proves: []
     kind: unit-test
-    artifact: { path: test.ts, change: delete }
+    artifact: { path: test.ts, change: unsupported }
     command: npx pnpm --filter shared test -- contract.test.ts
   - id: too-long
     proves: [${'x'.repeat(129)}]
@@ -59,6 +59,44 @@ required_facts:
     expect(result.diagnostics.map((d) => d.path)).toEqual(
       expect.arrayContaining(['requiredFacts.0.artifact.change', 'requiredFacts.0.proves']),
     );
+  });
+
+  it('retains the explicit complete validation input manifest and rejects incomplete identities', () => {
+    const manifest = {
+      version: 1,
+      hermetic: true,
+      toolchainFiles: ['tools/compiler'],
+      dependencyPaths: ['node_modules'],
+      environmentFiles: [],
+      environmentRevision: 'a'.repeat(64),
+    };
+    expect(
+      inspectSpecContract({ ...validDomainContract(), validationEvidence: manifest }).contract
+        ?.validationEvidence,
+    ).toEqual(manifest);
+    for (const invalid of [
+      { ...manifest, hermetic: false },
+      { ...manifest, toolchainFiles: [] },
+      { ...manifest, environmentRevision: 'mutable' },
+      { ...manifest, dependencyPaths: undefined },
+    ]) {
+      expect(
+        inspectSpecContract({ ...validDomainContract(), validationEvidence: invalid }).diagnostics
+          .length,
+      ).toBeGreaterThan(0);
+    }
+  });
+
+  it('accepts an explicit delete declaration', () => {
+    const contract = validDomainContract();
+    const result = inspectSpecContract({
+      ...contract,
+      requiredFacts: [
+        { ...contract.requiredFacts[0], artifact: { path: 'obsolete.ts', change: 'delete' } },
+      ],
+    });
+    expect(result.diagnostics).toEqual([]);
+    expect(result.contract?.requiredFacts[0]?.artifact.change).toBe('delete');
   });
 
   it('accepts the corrected Luumi counterpart', () => {
@@ -307,4 +345,50 @@ human_review: []
     const result = inspectSpecContract({ ...validDomainContract(), ...replacement });
     expect(result.diagnostics.map((diagnostic) => diagnostic.code)).toContain(expectedCode);
   });
+});
+
+it('preserves explicit execution requirements in YAML and rejects unsafe executable and resource declarations', () => {
+  const requirements = {
+    version: 1,
+    executables: ['node', 'dotnet'],
+    minimumMemoryBytes: 2147483648,
+    minimumCpu: 2,
+  };
+  expect(
+    inspectSpecContract({ ...validDomainContract(), executionRequirements: requirements }).contract
+      ?.executionRequirements,
+  ).toEqual(requirements);
+  expect(
+    inspectSpecContract({
+      ...validDomainContract(),
+      executionRequirements: { ...requirements, executables: ['-v'] },
+    }).diagnostics.length,
+  ).toBeGreaterThan(0);
+  expect(
+    inspectSpecContract({
+      ...validDomainContract(),
+      executionRequirements: { ...requirements, minimumCpu: -1 },
+    }).diagnostics.length,
+  ).toBeGreaterThan(0);
+  const parsed = inspectSpecContractYaml(`contract_version: 1
+title: Environment
+scenarios:
+  - id: scenario
+    given: [input]
+    when: [compiled]
+    then: [verified]
+required_facts:
+  - id: fact
+    proves: [scenario]
+    kind: custom-command
+    artifact: {path: result.ts, change: create}
+    command: node result.ts
+execution_requirements:
+  version: 1
+  executables: [node, dotnet]
+  minimumMemoryBytes: 2147483648
+  minimumCpu: 2
+`);
+  expect(parsed.diagnostics).toEqual([]);
+  expect(parsed.contract?.executionRequirements).toEqual(requirements);
 });

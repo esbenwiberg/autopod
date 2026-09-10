@@ -1,0 +1,300 @@
+./packages/shared/src/types/managed-pod.test.ts:27:39 lint/style/noNonNullAssertion ━━━━━━━━━━━━━━━━
+
+  ! Forbidden non-null assertion.
+  
+    25 │       'https://user:password@example.test/repo',
+    26 │     ]) {
+  > 27 │       const request = structuredClone(examples.ManagedPodRequest!);
+       │                                       ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    28 │       (request.task as Record<string, unknown>).objective = objective;
+    29 │       expect(protocol.ManagedPodRequestSchema.safeParse(request).success).toBe(false);
+  
+
+./packages/daemon/src/managed/artifact-collector.ts:26:18 lint/style/noNonNullAssertion ━━━━━━━━━━━━
+
+  ! Forbidden non-null assertion.
+  
+    24 │   let regex = '';
+    25 │   for (let i = 0; i < pattern.length; i++) {
+  > 26 │     const char = pattern[i]!;
+       │                  ^^^^^^^^^^^
+    27 │     if (pattern.slice(i, i + 3) === '**/') {
+    28 │       regex += '(?:.*/)?';
+  
+
+./packages/daemon/src/managed/artifact-inputs.test.ts:20:21 lint/style/noNonNullAssertion ━━━━━━━━━━
+
+  ! Forbidden non-null assertion.
+  
+    18 │     await mkdir(output);
+    19 │     await writeFile(path.join(output, 'research.md'), '# Exact research');
+  > 20 │     const receipt = (await new ArtifactExports(f.db, store).export(
+       │                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  > 21 │       {
+        ...
+  > 28 │       true,
+  > 29 │     ))!;
+       │     ^^^
+    30 │     const plan = structuredClone(f.request);
+    31 │     plan.dispatcherAttemptId = 'planning-attempt';
+  
+
+./packages/daemon/src/managed/artifact-inputs.test.ts:46:5 lint/style/noNonNullAssertion ━━━━━━━━━━━
+
+  ! Forbidden non-null assertion.
+  
+    44 │     service.inputs = new ManagedArtifactInputs(f.db, store, path.join(root, 'inputs'));
+    45 │     const wrong = structuredClone(plan);
+  > 46 │     wrong.inputArtifacts[0]!.manifestSha256 = `sha256:${'0'.repeat(64)}`;
+       │     ^^^^^^^^^^^^^^^^^^^^^^^^
+    47 │     resign(wrong);
+    48 │     await expect(service.start('installation-one', wrong)).rejects.toThrow('digest-mismatch');
+  
+
+./packages/daemon/src/managed/artifact-inputs.test.ts:54:21 lint/style/noNonNullAssertion ━━━━━━━━━━
+
+  ! Forbidden non-null assertion.
+  
+    52 │     );
+    53 │     const handle = await service.start('installation-one', resign(plan));
+  > 54 │     const mounted = service.inputs.mounts(handle.podId)[0]!;
+       │                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    55 │     expect(mounted.readOnly).toBe(true);
+    56 │     expect((await stat(path.join(mounted.hostPath, 'research.md'))).mode & 0o222).toBe(0);
+  
+
+./packages/daemon/src/managed/artifact-inputs.test.ts:68:5 lint/style/noNonNullAssertion ━━━━━━━━━━━
+
+  ! Forbidden non-null assertion.
+  
+    66 │       service.inputs.prepare(service.row('installation-one', handle.podId), plan),
+    67 │     ).rejects.toThrow('tree-mutated');
+  > 68 │     plan.inputArtifacts[0]!.manifestSha256 = `sha256:${'1'.repeat(64)}`;
+       │     ^^^^^^^^^^^^^^^^^^^^^^^
+    69 │     await expect(service.start('installation-one', resign(plan))).rejects.toThrow('start-conflict');
+    70 │   } finally {
+  
+
+./packages/daemon/src/managed/artifacts.test.ts:205:21 lint/style/noNonNullAssertion ━━━━━━━━━━━━━━━
+
+  ! Forbidden non-null assertion.
+  
+    203 │     const { root, directory, db } = await setup();
+    204 │     const store = new MemoryArtifactStore();
+  > 205 │     const receipt = (await new ArtifactExports(db, store).export(
+        │                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  > 206 │       binding,
+  > 207 │       directory,
+  > 208 │       output,
+  > 209 │       true,
+  > 210 │     ))!;
+        │     ^^^
+    211 │     const input = {
+    212 │       name: 'research',
+  
+
+./packages/daemon/src/managed/artifacts.test.ts:234:20 lint/style/noNonNullAssertion ━━━━━━━━━━━━━━━
+
+  ! Forbidden non-null assertion.
+  
+    232 │     const changed: ArtifactManifest = {
+    233 │       ...manifest,
+  > 234 │       files: [{ ...manifest.files[0]!, path: '../outside' }],
+        │                    ^^^^^^^^^^^^^^^^^^
+    235 │     };
+    236 │     await expect(verifyBundle(changed, bundle)).rejects.toThrow('artifact-invalid-manifest');
+  
+
+./packages/daemon/src/managed/artifacts.test.ts:243:21 lint/style/noNonNullAssertion ━━━━━━━━━━━━━━━
+
+  ! Forbidden non-null assertion.
+  
+    241 │     const store = new MemoryArtifactStore();
+    242 │     const exports = new ArtifactExports(db, store);
+  > 243 │     const receipt = (await exports.export(binding, directory, output, true))!;
+        │                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    244 │     const app = Fastify();
+    245 │     managedArtifactRoutes(app, {
+  
+
+./packages/daemon/src/managed/chatgpt-provider.test.ts:77:30 lint/style/noNonNullAssertion ━━━━━━━━━━
+
+  ! Forbidden non-null assertion.
+  
+    75 │     if (kind === 'missing-usage') Object.assign(x.response, { usage: null });
+    76 │     if (kind === 'model') x.response.model = 'other';
+  > 77 │     if (kind === 'oversize') x.response.output[0]!.content[0]!.text = 'x'.repeat(16385);
+       │                              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    78 │     if (['duplicate', 'failure', 'http'].includes(kind))
+    79 │       x.fetcher.mockImplementation(
+  
+
+./packages/daemon/src/managed/chatgpt-provider.test.ts:77:30 lint/style/noNonNullAssertion  FIXABLE  ━━━━━━━━━━
+
+  ! Forbidden non-null assertion.
+  
+    75 │     if (kind === 'missing-usage') Object.assign(x.response, { usage: null });
+    76 │     if (kind === 'model') x.response.model = 'other';
+  > 77 │     if (kind === 'oversize') x.response.output[0]!.content[0]!.text = 'x'.repeat(16385);
+       │                              ^^^^^^^^^^^^^^^^^^^^^
+    78 │     if (['duplicate', 'failure', 'http'].includes(kind))
+    79 │       x.fetcher.mockImplementation(
+  
+  i Unsafe fix: Replace with optional chain operator ?. This operator includes runtime checks, so it is safer than the compile-only non-null assertion operator
+  
+     75  75 │       if (kind === 'missing-usage') Object.assign(x.response, { usage: null });
+     76  76 │       if (kind === 'model') x.response.model = 'other';
+     77     │ - ····if·(kind·===·'oversize')·x.response.output[0]!.content[0]!.text·=·'x'.repeat(16385);
+         77 │ + ····if·(kind·===·'oversize')·x.response.output[0]?.content[0]!.text·=·'x'.repeat(16385);
+     78  78 │       if (['duplicate', 'failure', 'http'].includes(kind))
+     79  79 │         x.fetcher.mockImplementation(
+  
+
+./packages/daemon/src/managed/container-runtime.test.ts:68:29 lint/style/noNonNullAssertion ━━━━━━━━━━
+
+  ! Forbidden non-null assertion.
+  
+    66 │   await f.runtime.ensure('pod-one', f.request, () => {});
+    67 │   const launchCall = f.exec.mock.calls[2] as unknown as [string, string[]];
+  > 68 │   const launch = JSON.parse(launchCall[1][4]!);
+       │                             ^^^^^^^^^^^^^^^^^
+    69 │   expect(launch.argv.slice(-2)).toEqual(['--', '--model=unreviewed-model']);
+    70 │   expect(launch.argv.slice(0, -2)).toEqual(f.binding.command);
+  
+
+./packages/daemon/src/managed/container-runtime.ts:76:12 lint/style/noNonNullAssertion ━━━━━━━━━━━━━
+
+  ! Forbidden non-null assertion.
+  
+    74 │     );
+    75 │     if (matches.length !== 1) throw new Error('managed-route-unavailable');
+  > 76 │     return matches[0]!;
+       │            ^^^^^^^^^^^
+    77 │   }
+    78 │   async preflight(request: ManagedPodRequest): Promise<void> {
+  
+
+./packages/daemon/src/managed/quota-feed.test.ts:30:23 lint/style/noNonNullAssertion ━━━━━━━━━━━━━━━
+
+  ! Forbidden non-null assertion.
+  
+    28 │     const call = exec.mock.calls.at(-1) as unknown as [string, string[], { user: string }];
+    29 │     expect(call[2]).toEqual({ user: 'root' });
+  > 30 │     expect(JSON.parse(call[1][4]!)).toMatchObject({
+       │                       ^^^^^^^^^^^
+    31 │       revoked: true,
+    32 │       specDigest: f.request.executionSpecDigest,
+  
+
+./packages/daemon/src/managed/sandbox-managed.test.ts:31:15 lint/style/noNonNullAssertion ━━━━━━━━━━
+
+  ! Forbidden non-null assertion.
+  
+    29 │       creates++;
+    30 │       expect(options.egressPolicy.trafficInspection).toBe('Full');
+  > 31 │       bound = options.managedSpecDigest!;
+       │               ^^^^^^^^^^^^^^^^^^^^^^^^^^
+    32 │       id = 'sandbox-one';
+    33 │       if (lose) {
+  
+
+./packages/daemon/src/managed/runtime-composition.ts:74:23 lint/style/noNonNullAssertion ━━━━━━━━━━━
+
+  ! Forbidden non-null assertion.
+  
+    72 │     const run = async () => {
+    73 │       const row = rowFor(ref);
+  > 74 │       const binding = bindings[index]!;
+       │                       ^^^^^^^^^^^^^^^^
+    75 │       if (!row || row.pod_id !== podId || root !== `/run/dispatcher-${podId}`)
+    76 │         throw new Error('managed-channel-binding');
+  
+
+./packages/daemon/src/managed/runtime-composition.ts:81:7 lint/style/noNonNullAssertion  FIXABLE  ━━━━━━━━━━
+
+  ! Forbidden non-null assertion.
+  
+    79 │       if (canonical(request.route) !== canonical(binding.route))
+    80 │         throw new Error('managed-channel-route');
+  > 81 │       gateways[index]!.preflight(request);
+       │       ^^^^^^^^^^^^^^^^
+    82 │       await binding.channel.preflight(request);
+    83 │       const stop = await binding.channel.attach({
+  
+  i Unsafe fix: Replace with optional chain operator ?. This operator includes runtime checks, so it is safer than the compile-only non-null assertion operator
+  
+     79  79 │         if (canonical(request.route) !== canonical(binding.route))
+     80  80 │           throw new Error('managed-channel-route');
+     81     │ - ······gateways[index]!.preflight(request);
+         81 │ + ······gateways[index]?.preflight(request);
+     82  82 │         await binding.channel.preflight(request);
+     83  83 │         const stop = await binding.channel.attach({
+  
+
+./packages/daemon/src/managed/runtime-composition.ts:88:11 lint/style/noNonNullAssertion  FIXABLE  ━━━━━━━━━━
+
+  ! Forbidden non-null assertion.
+  
+    86 │         stateRoot: root,
+    87 │         invoke: (key, prompt, maximumTokens) =>
+  > 88 │           gateways[index]!.invoke(
+       │           ^^^^^^^^^^^^^^^^
+    89 │             row.dispatcher_installation_id,
+    90 │             podId,
+  
+  i Unsafe fix: Replace with optional chain operator ?. This operator includes runtime checks, so it is safer than the compile-only non-null assertion operator
+  
+     86  86 │           stateRoot: root,
+     87  87 │           invoke: (key, prompt, maximumTokens) =>
+     88     │ - ··········gateways[index]!.invoke(
+         88 │ + ··········gateways[index]?.invoke(
+     89  89 │               row.dispatcher_installation_id,
+     90  90 │               podId,
+  
+
+./packages/daemon/src/managed/runtime-composition.ts:102:15 lint/style/noNonNullAssertion  FIXABLE  ━━━━━━━━━━
+
+  ! Forbidden non-null assertion.
+  
+    100 │           components.service.row(row.dispatcher_installation_id, podId),
+    101 │         );
+  > 102 │         await feeds[index]!.attach(row.dispatcher_installation_id, podId, ref, root);
+        │               ^^^^^^^^^^^^^
+    103 │         if (closed) throw new Error('managed-composition-closed');
+    104 │         channels.set(podId, stop);
+  
+  i Unsafe fix: Replace with optional chain operator ?. This operator includes runtime checks, so it is safer than the compile-only non-null assertion operator
+  
+    100 100 │             components.service.row(row.dispatcher_installation_id, podId),
+    101 101 │           );
+    102     │ - ········await·feeds[index]!.attach(row.dispatcher_installation_id,·podId,·ref,·root);
+        102 │ + ········await·feeds[index]?.attach(row.dispatcher_installation_id,·podId,·ref,·root);
+    103 103 │           if (closed) throw new Error('managed-composition-closed');
+    104 104 │           channels.set(podId, stop);
+  
+
+./packages/daemon/src/managed/runtime-composition.ts:106:9 lint/style/noNonNullAssertion  FIXABLE  ━━━━━━━━━━
+
+  ! Forbidden non-null assertion.
+  
+    104 │         channels.set(podId, stop);
+    105 │       } catch (error) {
+  > 106 │         feeds[index]!.detach(podId);
+        │         ^^^^^^^^^^^^^
+    107 │         stop();
+    108 │         throw error;
+  
+  i Unsafe fix: Replace with optional chain operator ?. This operator includes runtime checks, so it is safer than the compile-only non-null assertion operator
+  
+    104 104 │           channels.set(podId, stop);
+    105 105 │         } catch (error) {
+    106     │ - ········feeds[index]!.detach(podId);
+        106 │ + ········feeds[index]?.detach(podId);
+    107 107 │           stop();
+    108 108 │           throw error;
+  
+
+The number of diagnostics exceeds the number allowed by Biome.
+Diagnostics not shown: 18.
+Checked 1065 files in 433ms. No fixes applied.
+Found 38 warnings.

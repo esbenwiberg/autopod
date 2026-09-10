@@ -1,0 +1,25 @@
+
+ RUN  v4.1.11 /private/tmp/autopod-durable-execution/packages/daemon
+
+ ❯ src/db/reconcile-native-checkpoint.test.ts (0 test)
+
+⎯⎯⎯⎯⎯⎯ Failed Suites 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/db/reconcile-native-checkpoint.test.ts [ src/db/reconcile-native-checkpoint.test.ts ]
+Error: Cannot find module './reconcile-native-checkpoint.js' imported from /private/tmp/autopod-durable-execution/packages/daemon/src/db/reconcile-native-checkpoint.test.ts
+ ❯ src/db/reconcile-native-checkpoint.test.ts:8:1
+      6| import { insertTestProfile, logger } from '../test-utils/mock-helpers.…
+      7| import { runMigrations } from './migrate.js';
+      8| import { reconcileNativeCheckpoint } from './reconcile-native-checkpoi…
+       | ^
+      9|
+     10| it.each([151, 158, 163])('reconciles exact checkpoint %s only in a new…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  no tests
+   Start at  07:53:01
+   Duration  276ms (transform 112ms, setup 0ms, import 0ms, tests 0ms, environment 0ms)
+

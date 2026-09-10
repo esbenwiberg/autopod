@@ -1,0 +1,58 @@
+
+ RUN  v4.1.11 /private/tmp/autopod-durable-execution/packages/daemon
+
+ ❯ src/pods/pod-manager.test.ts (433 tests | 2 failed | 431 skipped) 114ms
+         × retains the interactive source and retries completion when workspace synchronization failed 74ms
+         × does not discard an interactive branch container when its host worktree is unavailable 39ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 2 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/pods/pod-manager.test.ts > PodManager > workspace pods > completeSession > retains the interactive source and retries completion when workspace synchronization failed
+AssertionError: promise resolved "{ pushError: undefined }" instead of rejecting
+
+- Expected
++ Received
+
+- Error {
+-   "message": "rejected promise",
++ {
++   "pushError": undefined,
+  }
+
+ ❯ src/pods/pod-manager.test.ts:12836:53
+    12834|         vi.mocked(ctx.containerManager.execInContainer).mockRejectedVa…
+    12835|         vi.mocked(ctx.containerManager.extractDirectoryFromContainer).…
+    12836|         await expect(manager.completeSession(pod.id)).rejects.toMatchO…
+       |                                                     ^
+    12837|         expect(manager.getSession(pod.id)).toMatchObject({ status: 'ru…
+    12838|         expect(ctx.worktreeManager.mergeBranch).not.toHaveBeenCalled();
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/2]⎯
+
+ FAIL  src/pods/pod-manager.test.ts > PodManager > workspace pods > completeSession > does not discard an interactive branch container when its host worktree is unavailable
+AssertionError: promise resolved "{ pushError: undefined }" instead of rejecting
+
+- Expected
++ Received
+
+- Error {
+-   "message": "rejected promise",
++ {
++   "pushError": undefined,
+  }
+
+ ❯ src/pods/pod-manager.test.ts:12857:53
+    12855|         const pod = manager.createSession({ profileName: 'test-profile…
+    12856|         ctx.podRepo.update(pod.id, { status: 'running', containerId: '…
+    12857|         await expect(manager.completeSession(pod.id)).rejects.toMatchO…
+       |                                                     ^
+    12858|         expect(manager.getSession(pod.id)).toMatchObject({ status: 'ru…
+    12859|         expect(ctx.containerManager.kill).not.toHaveBeenCalled();
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/2]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  2 failed | 431 skipped (433)
+   Start at  19:48:07
+   Duration  1.30s (transform 718ms, setup 0ms, import 1.07s, tests 114ms, environment 0ms)

@@ -1,0 +1,23 @@
+[1/1] Compiling plugin GenerateManual
+[2/2] Compiling plugin GenerateDoccReference
+Building for debugging...
+[2/7] Write sources
+[3/7] Write swift-version--58304C5D6DBC2206.txt
+[5/7] Compiling AutopodClientTests DispatchPreflightTests.swift
+[6/7] Emitting module AutopodClientTests
+[6/8] Write Objects.LinkFileList
+[7/8] Linking AutopodDesktopPackageTests
+Build complete! (2.99s)
+Test Suite 'Selected tests' started at 2026-09-07 16:03:31.083.
+Test Suite 'AutopodDesktopPackageTests.xctest' started at 2026-09-07 16:03:31.089.
+Test Suite 'AutopodDesktopPackageTests.xctest' passed at 2026-09-07 16:03:31.089.
+	 Executed 0 tests, with 0 failures (0 unexpected) in 0.000 (0.000) seconds
+Test Suite 'Selected tests' passed at 2026-09-07 16:03:31.089.
+	 Executed 0 tests, with 0 failures (0 unexpected) in 0.000 (0.006) seconds
+◇ Test run started.
+↳ Testing Library Version: 1902
+↳ Target Platform: arm64e-apple-macos14.0
+◇ Test rerunTemplateSurvivesDurableDraftWithoutApprovalOrLineage() started.
+✘ Test rerunTemplateSurvivesDurableDraftWithoutApprovalOrLineage() recorded an issue at DispatchPreflightTests.swift:15:3: Expectation failed: ((json["contract"] as? [String: Any])?["futurePolicy"] → nil) != nil
+✘ Test rerunTemplateSurvivesDurableDraftWithoutApprovalOrLineage() failed after 0.001 seconds with 1 issue.
+✘ Test run with 1 test in 0 suites failed after 0.001 seconds with 1 issue.

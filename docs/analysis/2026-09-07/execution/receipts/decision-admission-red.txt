@@ -1,0 +1,55 @@
+
+ RUN  v4.1.11 /private/tmp/autopod-durable-execution/packages/daemon
+
+ ❯ src/pods/completion-journal.test.ts (6 tests | 1 failed | 5 skipped) 62ms
+     × cannot hide an unanswered earlier cycle behind a new admission 62ms
+ ❯ src/pods/pod-manager.test.ts (431 tests | 1 failed | 430 skipped) 65ms
+     × does not open a new completion cycle or consume a worker while a decision is unanswered 64ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 2 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/pods/completion-journal.test.ts > durable completion journal > cannot hide an unanswered earlier cycle behind a new admission
+AssertionError: expected [Function] to throw an error
+
+- Expected:
+null
+
++ Received:
+undefined
+
+ ❯ src/pods/completion-journal.test.ts:37:79
+     35|       db.prepare("UPDATE pods SET status = 'running', pending_escalati…
+     36|       db.prepare("INSERT INTO pod_finalizations(pod_id,generation,cycl…
+     37|       expect(() => repo.completionJournal?.begin(repo.getOrThrow('sett…
+       |                                                                               ^
+     38|       expect(db.prepare('SELECT COUNT(*) AS count FROM pod_finalizatio…
+     39|       expect(db.prepare('SELECT pending_decision_id AS decision FROM p…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/2]⎯
+
+ FAIL  src/pods/pod-manager.test.ts > PodManager > does not open a new completion cycle or consume a worker while a decision is unanswered
+AssertionError: promise resolved "'completed'" instead of rejecting
+
+- Expected:
+Error {
+  "message": "rejected promise",
+}
+
++ Received:
+"completed"
+
+ ❯ src/pods/pod-manager.test.ts:1505:10
+    1503|       consumed = true;
+    1504|       yield { type: 'complete', timestamp: new Date().toISOString(), r…
+    1505|     })())).rejects.toMatchObject({ code: 'HUMAN_DECISION_PENDING' });
+       |          ^
+    1506|     expect(consumed).toBe(false);
+    1507|     expect(ctx.podRepo.getOrThrow(pod.id).finalization).toEqual(before…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/2]⎯
+
+
+ Test Files  2 failed (2)
+      Tests  2 failed | 435 skipped (437)
+   Start at  19:00:11
+   Duration  1.21s (transform 988ms, setup 0ms, import 1.43s, tests 127ms, environment 0ms)

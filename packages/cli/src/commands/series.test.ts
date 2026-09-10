@@ -190,7 +190,7 @@ describe('series commands', () => {
     createdDirs.push(specRoot);
     writeFileSync(
       join(specRoot, 'briefs', '01-first', 'contract.yaml'),
-      contractYaml.replace('change: create', 'change: delete'),
+      contractYaml.replace('change: create', 'change: invalid-operation'),
     );
     vi.spyOn(console, 'error').mockImplementation(() => {});
     vi.spyOn(process, 'exit').mockImplementation((() => {

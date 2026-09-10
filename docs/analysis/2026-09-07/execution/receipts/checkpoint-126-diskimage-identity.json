@@ -1,0 +1,23 @@
+{
+  "observedAtUTC": "2026-09-10T05:06:24.615743+00:00",
+  "sourceImage": "ewiautopodacr.azurecr.io/autopod/dataverse-harness:latest",
+  "historicalSourceDigest": "sha256:4b836cdabc71ffd40aef564b65b6b16564c5312770130bc59251a732078c9d77",
+  "sourceImageHash": "5870153ff7a06654",
+  "mutations": false,
+  "matches": [
+    {
+      "id": "ffa87d90-ec0e-4493-bbd4-14b4fe5f83ac",
+      "state": "Ready",
+      "sourceDigest": "sha256:5048481ae49a653586f000ea6366df5a6f5bb7d4ecd13bbfaf02dbd2be9ba661",
+      "sourceImageHashMatches": true,
+      "managedByAutopod": true,
+      "name": "autopod-5870153ff7a06654-33f52ca1b069"
+    }
+  ],
+  "httpStatus": 200,
+  "responseShape": "array",
+  "paginationPresent": false,
+  "entryCount": 16,
+  "truncated": false,
+  "status": "metadata_observed"
+}

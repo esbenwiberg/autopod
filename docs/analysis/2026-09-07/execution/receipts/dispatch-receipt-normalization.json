@@ -1,0 +1,110 @@
+[
+  {
+    "file": "dispatch-cli-tests.txt",
+    "beforeSha256": "4d6bf2a1e8466a473401f68a249120f8749dce1d4064564107421a0181e51546",
+    "afterSha256": "b92c819b2da27e25bdc987cbd8043fb9ea7db3bb7f178b8c5e1f27b13423db04",
+    "change": "Trailing whitespace and final blank lines only"
+  },
+  {
+    "file": "dispatch-api-diagnostic-body.txt",
+    "beforeSha256": "76183f82e88e0d9a812d6c3fe283e9c4747779813744ca43b67da4e4fb49ae03",
+    "afterSha256": "15eda48f44369f1ad2138688cd1139382cd11f5d994df7965d666bd5b31484cf",
+    "change": "Trailing whitespace and final blank lines only"
+  },
+  {
+    "file": "equivalent-dispatch-red.txt",
+    "beforeSha256": "9f1a49cb0214d1ad2fcd1a9bfdeac8ee1b5e9706d4c02b03961da8d44e2f24bc",
+    "afterSha256": "dbcd1cc673b7568b19a60ca5d7f5afba4a68a454b14507af9007e81bce52f8cd",
+    "change": "Trailing whitespace and final blank lines only"
+  },
+  {
+    "file": "dispatch-build.txt",
+    "beforeSha256": "8b8480fa374e2a7de361a82a75ea7bb6ccd44ce58f0b9c6055e92d25d00fbc34",
+    "afterSha256": "25855166b3fd90b77797cb5c724226635d1318bd012d4c0232ae7b4dd372fc5f",
+    "change": "Trailing whitespace and final blank lines only"
+  },
+  {
+    "file": "dispatch-mobile-tests.txt",
+    "beforeSha256": "c739c6496576f9439a7fb41fc5862b88ac64c4b6d707595a5faafd094927579d",
+    "afterSha256": "fb34ad07aa34301a569df4756af8a52a7f6aa6e89461cf8490ea7cdf77154f47",
+    "change": "Trailing whitespace and final blank lines only"
+  },
+  {
+    "file": "dispatch-api-corrected-fixture.txt",
+    "beforeSha256": "e5be2b9733332d8a061deaae5a0d0ecc9b7a0f23c33158c0d60463227f1b38f3",
+    "afterSha256": "f6967205fc7dcb24a10b8f1260ca70684183a4a5969e6d1c665bff8a0d97d5ff",
+    "change": "Trailing whitespace and final blank lines only"
+  },
+  {
+    "file": "dispatch-durable-tests.txt",
+    "beforeSha256": "d64bfa7a230212096d120d2b7782abf003b261caa20679f8d815eba2aa7d3ae6",
+    "afterSha256": "235c1046ade87ce399ffeb21fdcfc3470d48de99d48a9b82473201b1c7d13a3a",
+    "change": "Trailing whitespace and final blank lines only"
+  },
+  {
+    "file": "equivalent-dispatch-fixture-initial.txt",
+    "beforeSha256": "59d3d7f84259e56dac937e244b207646cd455baba898afd6de1f151f57f10459",
+    "afterSha256": "6939b1a94c02e06cf00b825fc716aa38a03a3500ec00b39a1395ff1db67b2092",
+    "change": "Trailing whitespace and final blank lines only"
+  },
+  {
+    "file": "dispatch-api-tests.txt",
+    "beforeSha256": "648f3d40c6d8b57228b7f1565632408fa0d75129a3b95f44160d91bec1ce4af4",
+    "afterSha256": "4e37a98d281f547aa691e7e1367736865a2f08acaf301d68815121b90416b34d",
+    "change": "Trailing whitespace and final blank lines only"
+  },
+  {
+    "file": "dispatch-integration-tests.txt",
+    "beforeSha256": "172c2d82ad301de85fa23c5c1ed8d64a1af58e2cb7329757f7b1e392fc9d1d16",
+    "afterSha256": "d1fdbb430161759e9b9958c2e59890ba5ef75b49de39d1f740c1746c45af7904",
+    "change": "Trailing whitespace and final blank lines only"
+  },
+  {
+    "file": "dispatch-api-diagnostic.txt",
+    "beforeSha256": "3caa22125110713ac6b50c0a3a845837f5b5096ca236fada230c7176091c73d7",
+    "afterSha256": "260b6e88b5f8654a55cf521905565975abf3a9eeca1b7ae0b6b4d09a8c12f3ba",
+    "change": "Trailing whitespace and final blank lines only"
+  },
+  {
+    "file": "equivalent-dispatch-first-green.txt",
+    "beforeSha256": "e2385755bafc67c43d44384375393c6d5d4523bcd89c4cff058c27dcab309ffd",
+    "afterSha256": "441cf44fcc4927724c108716d416063f27578bfb5ca0c8886b3bbdedeb1ceeac",
+    "change": "Trailing whitespace and final blank lines only"
+  },
+  {
+    "file": "dispatch-api-corrected.txt",
+    "beforeSha256": "49defc4c34b6b925e43af7d805bae6c2a9e0c9f6d4c6286446a74ce6db4c96cb",
+    "afterSha256": "340a7b4316041e15a0721a89db86c085a134e64113001f35e64454ff242c48b0",
+    "change": "Trailing whitespace and final blank lines only"
+  },
+  {
+    "file": "equivalent-dispatch-rerun.txt",
+    "beforeSha256": "1ff3acddb272cf56128df07b44d0b25078fd946971705b0996472d7ea703dfd2",
+    "afterSha256": "3b179e71608656d07e8838a8fbf707014f3dc764527f9b2a74af7ad4a2034d91",
+    "change": "Trailing whitespace and final blank lines only"
+  },
+  {
+    "file": "dispatch-integration-tests-unsandboxed.txt",
+    "beforeSha256": "9b5b3bf95e459ff154512fff81771b1aff1e6073ea6de86cc5a9139aed320f23",
+    "afterSha256": "750f3f66f54054fab22ce4ac7c6479b29ce91fe0d6e67c28c34307fb157a2b02",
+    "change": "Trailing whitespace and final blank lines only"
+  },
+  {
+    "file": "dispatch-affected-final.txt",
+    "beforeSha256": "ebc740fee3134bd88d3829b54b9a7613cb594d8baa1b5e4b3e250ac6789ac091",
+    "afterSha256": "31076ee8ace4256fa3409637dd13a1b5c2dab41ee66559b9ca9ddf7f1130a3ba",
+    "change": "Trailing whitespace and final blank lines only"
+  },
+  {
+    "file": "dispatch-api-final.txt",
+    "beforeSha256": "214e7515ed0a69c4fa6f4900ec500ba76cc1e57fba83a714d371f2ca27a37972",
+    "afterSha256": "0c2273d2e019d55ebf608e0944114f362e9b7f38004fc903537496f44a036019",
+    "change": "Trailing whitespace and final blank lines only"
+  },
+  {
+    "file": "dispatch-final-admission.txt",
+    "beforeSha256": "3efa29357f3eac247eefdf2dc55f6e05b6c5c8b912cbcb071107d460d7b872f8",
+    "afterSha256": "bf93f4a779dd1e4e40caf7c94bafb73f6352cf138d61960ede86ea6b81c94db2",
+    "change": "Trailing whitespace and final blank lines only"
+  }
+]

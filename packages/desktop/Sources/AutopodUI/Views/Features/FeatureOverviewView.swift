@@ -338,7 +338,7 @@ public enum FeatureCategory: String, CaseIterable, Identifiable {
         case .issueWatcher:
             "Label a GitHub or ADO issue autopod and the daemon spawns a pod, posts progress comments back to the issue, and updates labels automatically through the pod lifecycle."
         case .analyticsDashboard:
-            "Fleet metrics across 7 dimensions: cost by phase/model, outcome quality + first-pass completion, throughput + MTTM, safety events + quarantine scores, process-health scores, escalation patterns, and model performance."
+            "Fleet metrics across 7 dimensions: cost by phase/model, outcome quality + first-pass completion, throughput + completed pod time, safety events + quarantine scores, process-health scores, escalation patterns, and model performance."
         }
     }
 
@@ -407,7 +407,7 @@ public enum FeatureCategory: String, CaseIterable, Identifiable {
         case .issueWatcher:
             "Daemon polls GitHub and ADO issues every 60 seconds on profiles with issueWatcherEnabled. When a trigger label is found, the issue title and body are sanitized (PII stripped, injection quarantine applied) and a pod is spawned. The trigger label is replaced with autopod:in-progress. Agent escalations are posted as issue comments. On pod completion, the label updates to autopod:done or autopod:failed and a summary comment is posted."
         case .analyticsDashboard:
-            "Seven fleet analytics dashboards, each queryable over a configurable time window (default 30 days, max 365). Cost tracks spend by phase (agent_initial, agent_rework, review, plan_eval) and by profile+model, with top-10 pods and waste (killed/failed). Outcome Quality tracks first-pass completion, funnel drop-offs, and validation-stage failures. Throughput tracks pods/day, MTTM, and time-in-status percentiles. Safety tracks PII+injection events, quarantine score histogram, network policy distribution, and audit chain integrity. Process Health tracks versioned observable trajectory scores (0–100) per pod. Escalations track counts by type and profile. Models tracks runtime/model performance and simulator inputs."
+            "Seven fleet analytics dashboards, each queryable over a configurable time window (default 30 days, max 365). Cost tracks spend by phase (agent_initial, agent_rework, review, plan_eval) and by profile+model, with top-10 pods and waste (killed/failed). Outcome Quality tracks first-pass completion, funnel drop-offs, and validation-stage failures. Throughput tracks pods/day, completed pod time, and time-in-status percentiles. Safety tracks PII+injection events, quarantine score histogram, network policy distribution, and audit chain integrity. Process Health tracks versioned observable trajectory scores (0–100) per pod. Escalations track counts by type and profile. Models tracks runtime/model performance and simulator inputs."
         }
     }
 
@@ -536,7 +536,8 @@ public enum FeatureCategory: String, CaseIterable, Identifiable {
                 "report_plan — Fire-and-forget: submits plan summary + steps",
                 "report_progress — Fire-and-forget: reports phase transitions (currentPhase/totalPhases)",
                 "report_task_summary — Fire-and-forget: captures actual work vs plan deviations",
-                "check_messages — Non-blocking: polls for pending nudge/tell messages without pausing",
+                "check_messages — Reads saved guidance without consuming it",
+                "acknowledge_messages — Confirms receipt for the current worker; does not approve decisions",
                 "validate_in_browser — Blocking: LLM generates Playwright script → executes on host → returns screenshot evidence",
                 "trigger_revalidation — Workspace pods only: re-runs validation on linked failed worker",
                 "memory_suggest — Proposes a memory for human approval (global/profile/pod scope)",
@@ -655,7 +656,7 @@ public enum FeatureCategory: String, CaseIterable, Identifiable {
                 "Terminal cohort: non-workspace pods, final status (complete|killed|failed), completed in window",
                 "Cost: total USD, daily sparkline, deltaVsPrior, byPhase (agent_initial/rework/review/plan_eval), byProfileModel, top10, waste",
                 "Outcome Quality (reliability route): firstPassRate (0 rework), sparkline, funnel bands + drops with topPods, stageFailures table, profileHeatmap",
-                "Throughput: podsPerDay sparkline, MTTM (mean time to merge), queue depth by hour (max + mean), time-in-status percentiles (p25/p50/p75/p90/max)",
+                "Throughput: podsPerDay sparkline, mean completed pod elapsed time, queue depth by hour (max + mean), time-in-status percentiles (p25/p50/p75/p90/max)",
                 "Safety: PII + injection event counts by kind/pattern/source, quarantine histogram (10 buckets 0.0–1.0), network policy distribution, audit chain integrity",
                 "Process Health (quality route): versioned score 0–100 per pod from inspection discipline, blind-modification rate, stop phrases, human interruptions, and churn rate",
                 "Escalations: total by type, by profile, daily sparkline",

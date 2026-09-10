@@ -1,0 +1,44 @@
+
+ RUN  v4.1.10 /private/tmp/autopod-durable-execution
+
+ ❯ packages/daemon/src/pods/task-execution-ledger.test.ts (4 tests | 2 failed) 463ms
+     × retains task/run identity through restart and linked fixes while intentional reruns remain distinct 306ms
+     × counts parent agent work and harness phases once and blocks a linked fix before further spending 55ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 2 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  packages/daemon/src/pods/task-execution-ledger.test.ts > task-wide execution accounting > retains task/run identity through restart and linked fixes while intentional reruns remain distinct
+Error: Stale lifecycle cannot start a task run
+ ❯ Object.<anonymous> packages/daemon/src/pods/task-execution-ledger.ts:109:53
+    107|       }
+    108|       const current = db.prepare('SELECT lifecycle_generation AS gener…
+    109|       if (current?.generation !== generation) throw new Error('Stale l…
+       |                                                     ^
+    110|       const task = snapshot(podId);
+    111|       if (task.tokenBudget !== null && task.tokenBudget > 0 && task.re…
+ ❯ Object.sqliteTransaction [as beginRun] node_modules/.pnpm/better-sqlite3@11.10.0/node_modules/better-sqlite3/lib/methods/transaction.js:65:24
+ ❯ packages/daemon/src/pods/task-execution-ledger.test.ts:31:24
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/2]⎯
+
+ FAIL  packages/daemon/src/pods/task-execution-ledger.test.ts > task-wide execution accounting > counts parent agent work and harness phases once and blocks a linked fix before further spending
+AssertionError: expected [Function] to throw error including 'Task token budget' but got 'Stale lifecycle cannot start a task r…'
+
+Expected: "Task token budget"
+Received: "Stale lifecycle cannot start a task run"
+
+ ❯ packages/daemon/src/pods/task-execution-ledger.test.ts:60:73
+     58|         podCount: 2, infrastructureCostUsd: null,
+     59|       });
+     60|       expect(() => repo.taskExecutions!.beginRun('fix', 0, 1, binding)…
+       |                                                                         ^
+     61|       expect(repo.taskExecutions!.snapshot('fix').agentRunCount).toBe(…
+     62|     } finally { db.close(); }
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/2]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  2 failed | 2 passed (4)
+   Start at  11:56:17
+   Duration  819ms (transform 116ms, setup 0ms, import 242ms, tests 463ms, environment 0ms)

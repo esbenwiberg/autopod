@@ -1,0 +1,2 @@
+http://127.0.0.1:31995/mobile/
+{"scope":"local fixture only","action":"provider-cooldown-blocked"}

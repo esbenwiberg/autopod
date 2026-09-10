@@ -1,0 +1,53 @@
+
+ RUN  v4.1.10 /private/tmp/autopod-durable-execution/packages/daemon
+
+ ❯ src/db/migrate.test.ts (27 tests | 1 failed | 26 skipped) 10ms
+   × rejects duplicate numeric migration prefixes before applying any business migration 9ms
+ ❯ src/db/managed-migration-compatibility.test.ts (1 test | 1 failed) 107ms
+   × upgrades the independently deployed managed schema without skipping native reliability tables or changing managed data 107ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 2 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/db/managed-migration-compatibility.test.ts > upgrades the independently deployed managed schema without skipping native reliability tables or changing managed data
+AssertionError: expected undefined to deeply equal { name: 'pod_finalizations' }
+
+- Expected:
+{
+  "name": "pod_finalizations",
+}
+
++ Received:
+undefined
+
+ ❯ src/db/managed-migration-compatibility.test.ts:45:9
+     43|       expect(
+     44|         db.prepare("SELECT name FROM sqlite_master WHERE type='table' …
+     45|       ).toEqual({ name: table });
+       |         ^
+     46|     expect(db.prepare('SELECT * FROM managed_workspaces').all()).toEqu…
+     47|     expect(db.prepare('SELECT * FROM managed_source_candidates').all()…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/2]⎯
+
+ FAIL  src/db/migrate.test.ts > rejects duplicate numeric migration prefixes before applying any business migration
+AssertionError: expected [Function] to throw error including 'Migration prefix collision' but got 'UNIQUE constraint failed: schema_vers…'
+
+Expected: "Migration prefix collision"
+Received: "UNIQUE constraint failed: schema_version.version"
+
+ ❯ src/db/migrate.test.ts:932:51
+    930|     fs.writeFileSync(path.join(root, '001_alpha.sql'), 'CREATE TABLE a…
+    931|     fs.writeFileSync(path.join(root, '001_beta.sql'), 'CREATE TABLE be…
+    932|     expect(() => runMigrations(db, root, logger)).toThrow('Migration p…
+       |                                                   ^
+    933|     expect(
+    934|       db
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/2]⎯
+
+
+ Test Files  2 failed (2)
+      Tests  2 failed | 26 skipped (28)
+   Start at  17:23:40
+   Duration  384ms (transform 184ms, setup 0ms, import 317ms, tests 117ms, environment 0ms)
+

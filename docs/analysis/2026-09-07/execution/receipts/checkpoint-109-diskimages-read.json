@@ -1,0 +1,18 @@
+{
+  "observedDateUTC": "2026-09-09",
+  "method": "GET",
+  "url": "https://management.northeurope.azuredevcompute.io/subscriptions/06bb959b-9458-41a6-bdf5-77cc12feaab9/resourceGroups/ewi-sandboxes/sandboxGroups/autopod-spike-neu/diskimages?api-version=2026-02-01-preview",
+  "tokenResource": "https://dynamicsessions.io/",
+  "requestedProjection": [
+    "id",
+    "status.state",
+    "labels.sourceDigest",
+    "labels.sourceImageHash",
+    "labels.name"
+  ],
+  "attempts": 1,
+  "cliExitCode": 1,
+  "result": "Forbidden",
+  "diskImagesObserved": false,
+  "accessOrResourceChanges": false
+}

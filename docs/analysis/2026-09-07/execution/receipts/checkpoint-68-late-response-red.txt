@@ -1,0 +1,26 @@
+
+ RUN  v4.1.11 /private/tmp/autopod-durable-execution/packages/daemon
+
+ ❯ src/validation/local-validation-engine.test.ts (172 tests | 1 failed | 171 skipped) 82ms
+     × refuses selected API continuation for standard-response-expired and retains measured earlier usage 82ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/validation/local-validation-engine.test.ts > validate() — facts + review gate > refuses selected API continuation for standard-response-expired and retains measured earlier usage
+AssertionError: the given combination of arguments (undefined and string) is invalid for this assertion. You can use an array, a map, an object, a set, a string, or a weakset instead of a string
+ ❯ src/validation/local-validation-engine.test.ts:3847:41
+    3845|         );
+    3846|         expect(result.overall).toBe('fail');
+    3847|         expect(result.reviewSkipReason).toContain('deadline exhausted'…
+       |                                         ^
+    3848|         expect(runToolUseReview).not.toHaveBeenCalled();
+    3849|         expect(runContainerReviewer).not.toHaveBeenCalled();
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 171 skipped (172)
+   Start at  12:28:41
+   Duration  627ms (transform 307ms, setup 0ms, import 444ms, tests 82ms, environment 0ms)
+

@@ -1,0 +1,4 @@
+{"path": "/health?detail=full", "status": 200, "bytes": 266, "body": {"status": "ok", "version": "0.0.1", "uptime_seconds": 1189664, "docker": {"connected": true, "containers_running": 4}, "database": {"connected": true, "migrations_applied": 139}, "queue": {"active_sessions": 0, "queued_sessions": 0, "max_concurrency": 5}, "security_ml": {"enabled": false}}}
+{"path": "/pods?compact=true&limit=10", "status": 200, "bytes": 31358}
+{"path": "/pods?compact=true&limit=100", "status": 200, "bytes": 359555}
+{"path": "/pods/analytics/cost?days=30", "status": 500, "bytes": 65, "errorCode": null, "errorType": "INTERNAL_ERROR"}

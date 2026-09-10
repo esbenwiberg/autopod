@@ -1,0 +1,35 @@
+
+ RUN  v4.1.11 /private/tmp/autopod-durable-execution/packages/daemon
+
+ ❯ src/validation/container-reviewer-runner.test.ts (14 tests | 1 failed | 13 skipped) 8ms
+     × bounds a stalled reviewer preflight and never launches it after timeout 7ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/validation/container-reviewer-runner.test.ts > reviewer launch ownership > bounds a stalled reviewer preflight and never launches it after timeout
+AssertionError: expected undefined to match object { kind: 'timeout' }
+
+- Expected:
+{
+  "kind": "timeout",
+}
+
++ Received:
+undefined
+
+ ❯ src/validation/container-reviewer-runner.test.ts:84:21
+     82|       });
+     83|       await vi.advanceTimersByTimeAsync(26);
+     84|       expect(error).toMatchObject({ kind: 'timeout' });
+       |                     ^
+     85|       release(() => {});
+     86|       await expect(pending).rejects.toThrow(/preflight.*timed out/i);
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 13 skipped (14)
+   Start at  11:06:43
+   Duration  430ms (transform 113ms, setup 0ms, import 157ms, tests 8ms, environment 0ms)
+

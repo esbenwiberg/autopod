@@ -1,0 +1,32 @@
+
+ RUN  v4.1.10 /private/tmp/autopod-durable-execution
+
+ ❯ packages/daemon/src/validation/validation-evidence-engine.test.ts (2 tests | 1 failed) 161ms
+     × reuses only matching successful lint/test evidence and still executes build on every run 121ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  packages/daemon/src/validation/validation-evidence-engine.test.ts > actual validation engine evidence reuse > reuses only matching successful lint/test evidence and still executes build on every run
+AssertionError: expected 2 to be 1 // Object.is equality
+
+- Expected
++ Received
+
+- 1
++ 2
+
+ ❯ packages/daemon/src/validation/validation-evidence-engine.test.ts:61:38
+     59|       expect(second.overall).toBe('pass');
+     60|       expect(count('node build.cjs')).toBe(2);
+     61|       expect(count('node lint.cjs')).toBe(1);
+       |                                      ^
+     62|       expect(count('node test.cjs')).toBe(1);
+     63|       expect(second.test?.reusedEvidence?.receiptId).toBeTruthy();
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 1 passed (2)
+   Start at  12:28:06
+   Duration  1.07s (transform 493ms, setup 0ms, import 778ms, tests 161ms, environment 0ms)

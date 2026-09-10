@@ -1,0 +1,9 @@
+test_copy_checks_and_private_write_leave_originals_unchanged (__main__.IsolatedSample) ... ok
+test_corrupt_backup_is_incomplete_and_copy_is_removed (__main__.IsolatedSample) ... ok
+test_foreign_key_failure_cannot_pass_integrity_alone (__main__.IsolatedSample) ... ok
+test_valid_restore_does_not_hide_newer_active_data (__main__.IsolatedSample) ... ok
+
+----------------------------------------------------------------------
+Ran 4 tests in 0.011s
+
+OK

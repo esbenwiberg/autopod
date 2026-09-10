@@ -1,0 +1,29 @@
+
+ RUN  v4.1.11 /private/tmp/autopod-durable-execution/packages/daemon
+
+ ❯ src/pods/pod-manager.test.ts (482 tests | 1 failed) 24318ms
+       × polls and merges a clean PR when the parent worktree is stale 47ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/pods/pod-manager.test.ts > PodManager > approveSession > polls and merges a clean PR when the parent worktree is stale
+AssertionError: expected 'merge_pending' to be 'complete' // Object.is equality
+
+Expected: "complete"
+Received: "merge_pending"
+
+ ❯ src/pods/pod-manager.test.ts:5102:51
+    5100|
+    5101|         await vi.advanceTimersByTimeAsync(60_000);
+    5102|         expect(manager.getSession(pod.id).status).toBe('complete');
+       |                                                   ^
+    5103|       } finally {
+    5104|         vi.useRealTimers();
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed | 2 passed (3)
+      Tests  1 failed | 513 passed (514)
+   Start at  22:27:19
+   Duration  26.90s (transform 3.61s, setup 0ms, import 5.12s, tests 28.06s, environment 0ms)

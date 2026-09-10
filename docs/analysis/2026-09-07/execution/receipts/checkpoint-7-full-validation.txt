@@ -1,0 +1,2519 @@
+
+▸ Installing dependencies
+Already up to date
+
+Done in 433ms
+  ✓ Dependencies installed
+
+▸ Linting
+
+> autopod@ lint /private/tmp/autopod-durable-execution
+> biome check .
+
+./docs/analysis/2026-09-07/execution/acceptance.json format ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  × Formatter would have printed the following content:
+
+     17  17 │           "packages/daemon/src/pods/pod-bridge-task-summary.test.ts"
+     18  18 │         ],
+     19     │ - ······"evidence":·[
+     20     │ - ········"receipts/settlement-red.txt",
+     21     │ - ········"receipts/settlement-first-green.txt"
+     22     │ - ······],
+         19 │ + ······"evidence":·["receipts/settlement-red.txt",·"receipts/settlement-first-green.txt"],
+     23  20 │         "prerequisites": []
+     24  21 │       },
+    ······· │
+    290 287 │         "requirement": "Matched reproducible benchmark measures 25 percent target and seeded defect escape with fixed coverage; local and live separated",
+    291 288 │         "status": "partial",
+    292     │ - ······"implementation":·[
+    293     │ - ········"docs/analysis/2026-09-07/execution/benchmarks/validation-replay.test.ts"
+    294     │ - ······],
+    295     │ - ······"tests":·[
+    296     │ - ········"docs/analysis/2026-09-07/execution/benchmarks/validation-replay.test.ts"
+    297     │ - ······],
+        289 │ + ······"implementation":·["docs/analysis/2026-09-07/execution/benchmarks/validation-replay.test.ts"],
+        290 │ + ······"tests":·["docs/analysis/2026-09-07/execution/benchmarks/validation-replay.test.ts"],
+    298 291 │         "evidence": [
+    299 292 │           "receipts/validation-replay-benchmark-initial.json",
+    ······· │
+    383 376 │         "requirement": "Queued provider binding survives mutable profile changes with actionable reconciliation errors",
+    384 377 │         "status": "partial",
+    385     │ - ······"implementation":·[
+    386     │ - ········"packages/daemon/src/pods/pod-manager.ts"
+    387     │ - ······],
+    388     │ - ······"tests":·[
+    389     │ - ········"packages/daemon/src/pods/pod-manager.test.ts"
+    390     │ - ······],
+    391     │ - ······"evidence":·[
+    392     │ - ········"receipts/queue-binding-red.txt",
+    393     │ - ········"receipts/queue-binding-green.txt"
+    394     │ - ······],
+        378 │ + ······"implementation":·["packages/daemon/src/pods/pod-manager.ts"],
+        379 │ + ······"tests":·["packages/daemon/src/pods/pod-manager.test.ts"],
+        380 │ + ······"evidence":·["receipts/queue-binding-red.txt",·"receipts/queue-binding-green.txt"],
+    395 381 │         "prerequisites": []
+    396 382 │       },
+    ······· │
+    471 457 │         "requirement": "Latest validation, history, waivers and delivery reconcile without rewriting failures",
+    472 458 │         "status": "partial",
+    473     │ - ······"implementation":·[
+    474     │ - ········"packages/mobile-web/src/components/ValidationSummary.tsx"
+    475     │ - ······],
+    476     │ - ······"tests":·[
+    477     │ - ········"packages/mobile-web/src/components/ValidationSummary.test.tsx"
+    478     │ - ······],
+        459 │ + ······"implementation":·["packages/mobile-web/src/components/ValidationSummary.tsx"],
+        460 │ + ······"tests":·["packages/mobile-web/src/components/ValidationSummary.test.tsx"],
+    479 461 │         "evidence": [
+    480 462 │           "receipts/mobile-evidence-history-red.txt",
+    ······· │
+    492 474 │         "implementation": [],
+    493 475 │         "tests": [],
+    494     │ - ······"evidence":·[
+    495     │ - ········"receipts/live-api-baseline.jsonl",
+    496     │ - ········"receipts/live-vm-inspection-failed.json"
+    497     │ - ······],
+        476 │ + ······"evidence":·["receipts/live-api-baseline.jsonl",·"receipts/live-vm-inspection-failed.json"],
+    498 477 │         "prerequisites": [
+    499 478 │           "Await read-only Azure command (exec session 29869) for actual release and sanitized log evidence; no production root cause claimed."
+    ······· │
+    515 494 │           "packages/daemon/src/api/routes/pods.test.ts"
+    516 495 │         ],
+    517     │ - ······"evidence":·[
+    518     │ - ········"receipts/history-cost-api.txt"
+    519     │ - ······],
+        496 │ + ······"evidence":·["receipts/history-cost-api.txt"],
+    520 497 │         "prerequisites": []
+    521 498 │       },
+    ······· │
+    795 772 │           "packages/daemon/tsup.config.ts"
+    796 773 │         ],
+    797     │ - ······"tests":·[
+    798     │ - ········"packages/daemon/src/api/routes/health.test.ts"
+    799     │ - ······],
+    800     │ - ······"evidence":·[
+    801     │ - ········"receipts/backup-health-cli-green.txt"
+    802     │ - ······],
+        774 │ + ······"tests":·["packages/daemon/src/api/routes/health.test.ts"],
+        775 │ + ······"evidence":·["receipts/backup-health-cli-green.txt"],
+    803 776 │         "prerequisites": []
+    804 777 │       },
+    ······· │
+    820 793 │           "packages/daemon/src/db/backup-verification.ts"
+    821 794 │         ],
+    822     │ - ······"tests":·[
+    823     │ - ········"packages/daemon/src/db/backup.test.ts"
+    824     │ - ······],
+        795 │ + ······"tests":·["packages/daemon/src/db/backup.test.ts"],
+    825 796 │         "evidence": [
+    826 797 │           "receipts/backup-red.txt",
+    ······· │
+    840 811 │           "packages/daemon/src/db/verify-backup-cli.ts"
+    841 812 │         ],
+    842     │ - ······"tests":·[
+    843     │ - ········"packages/daemon/src/db/backup.test.ts"
+    844     │ - ······],
+        813 │ + ······"tests":·["packages/daemon/src/db/backup.test.ts"],
+    845 814 │         "evidence": [
+    846 815 │           "receipts/backup-health-cli-green.txt",
+    ······· │
+    864 833 │         "requirement": "Migration numbering checked against current branches and representative prior database upgrades verified",
+    865 834 │         "status": "partial",
+    866     │ - ······"implementation":·[
+    867     │ - ········"packages/daemon/src/db/migrations/142_completion_journal.sql"
+    868     │ - ······],
+    869     │ - ······"tests":·[
+    870     │ - ········"packages/daemon/src/pods/completion-journal.test.ts"
+    871     │ - ······],
+    872     │ - ······"evidence":·[
+    873     │ - ········"receipts/journal-migration.txt"
+    874     │ - ······],
+        835 │ + ······"implementation":·["packages/daemon/src/db/migrations/142_completion_journal.sql"],
+        836 │ + ······"tests":·["packages/daemon/src/pods/completion-journal.test.ts"],
+        837 │ + ······"evidence":·["receipts/journal-migration.txt"],
+    875 838 │         "prerequisites": []
+    876 839 │       },
+
+
+./docs/analysis/2026-09-07/execution/receipts/validation-replay-benchmark-initial.json format ━━━━━━━━━━
+
+  × Formatter would have printed the following content:
+
+     11  11 │     "coverage": {
+     12  12 │       "assertionsPerTestExecution": 5,
+     13     │ - ····"configuredPhases":·[
+     14     │ - ······"lint",
+     15     │ - ······"build",
+     16     │ - ······"test"
+     17     │ - ····],
+         13 │ + ····"configuredPhases":·["lint",·"build",·"test"],
+     18  14 │       "unchangedAcrossModes": true,
+     19  15 │       "excludedInBothModes": [
+    ······· │
+     28  24 │     "reductionPercent": -168.98027820818245,
+     29  25 │     "targetMet": false,
+     30     │ - ··"seededDefects":·[
+     31     │ - ····"off-by-one",
+     32     │ - ····"missing-zero-boundary"
+     33     │ - ··],
+         26 │ + ··"seededDefects":·["off-by-one",·"missing-zero-boundary"],
+     34  27 │     "baselineEscapes": 0,
+     35  28 │     "candidateEscapes": 0,
+
+
+./docs/analysis/2026-09-07/execution/receipts/validation-replay-benchmark.json format ━━━━━━━━━━━━━━
+
+  × Formatter would have printed the following content:
+
+     11  11 │     "coverage": {
+     12  12 │       "assertionsPerTestExecution": 5,
+     13     │ - ····"configuredPhases":·[
+     14     │ - ······"lint",
+     15     │ - ······"build",
+     16     │ - ······"test"
+     17     │ - ····],
+         13 │ + ····"configuredPhases":·["lint",·"build",·"test"],
+     18  14 │       "unchangedAcrossModes": true,
+     19  15 │       "excludedInBothModes": [
+    ······· │
+     28  24 │     "reductionPercent": -185.2180145808434,
+     29  25 │     "targetMet": false,
+     30     │ - ··"seededDefects":·[
+     31     │ - ····"off-by-one",
+     32     │ - ····"missing-zero-boundary"
+     33     │ - ··],
+         26 │ + ··"seededDefects":·["off-by-one",·"missing-zero-boundary"],
+     34  27 │     "baselineEscapes": 0,
+     35  28 │     "candidateEscapes": 0,
+
+
+./docs/analysis/2026-09-07/execution/fixtures/mobile-server.mjs:53:1 lint/style/useConst  FIXABLE  ━━━━━━━━━━
+
+  × This let declares a variable that is only assigned once.
+
+    51 │ const scanFinding = { id: 'fixture-finding-stable-identity', scanner: 'dependencies', ruleId: 'fixture-advisory', file: 'packages/example/package-lock.json', severity: 'high', summary: 'Synthetic dependency finding for local interaction proof.', disposition: 'unresolved' };
+    52 │ const scanReport = { kind: 'scan_report', id: 'report-fixture', jobId: scanJob.id, status: 'incomplete', createdAt: '2026-09-07T10:00:00Z', completedAt: '2026-09-07T10:01:00Z', policy: scanJob.scan, collection: { version: 1, repository: 'https://github.com/example/local-fixture.git', baseSha: 'a'.repeat(40), headSha: 'b'.repeat(40), files: [{ path: scanFinding.file, change: 'modified' }], scanners: [{ scanner: 'secrets', version: 'fixture-v1', status: 'failed', findingCount: null, diagnostic: 'Synthetic scanner failure; no clean result available.' }, { scanner: 'dependencies', version: 'fixture-v1', status: 'completed', findingCount: 1 }], diagnostics: [], findings: [scanFinding], stacks: ['node'] }, judgment: { status: 'not_requested' } };
+  > 53 │ let scanDecisions = [];
+       │ ^^^
+    54 │ const retryState = { taskId: 'local-task', stage: 'validation', backoffsMs: [1000, 5000], admissionCount: 4, executedCount: 3, transientRetryCount: 2, measuredDurationMs: 1875, interruptedCount: 1, latest: { id: 'local-failure', outcome: 'unknown' }, authorizations: [], telemetry: 'partial' };
+    55 │ const server = createServer(async (req, res) => {
+
+  i 'scanDecisions' is never reassigned.
+
+    51 │ const scanFinding = { id: 'fixture-finding-stable-identity', scanner: 'dependencies', ruleId: 'fixture-advisory', file: 'packages/example/package-lock.json', severity: 'high', summary: 'Synthetic dependency finding for local interaction proof.', disposition: 'unresolved' };
+    52 │ const scanReport = { kind: 'scan_report', id: 'report-fixture', jobId: scanJob.id, status: 'incomplete', createdAt: '2026-09-07T10:00:00Z', completedAt: '2026-09-07T10:01:00Z', policy: scanJob.scan, collection: { version: 1, repository: 'https://github.com/example/local-fixture.git', baseSha: 'a'.repeat(40), headSha: 'b'.repeat(40), files: [{ path: scanFinding.file, change: 'modified' }], scanners: [{ scanner: 'secrets', version: 'fixture-v1', status: 'failed', findingCount: null, diagnostic: 'Synthetic scanner failure; no clean result available.' }, { scanner: 'dependencies', version: 'fixture-v1', status: 'completed', findingCount: 1 }], diagnostics: [], findings: [scanFinding], stacks: ['node'] }, judgment: { status: 'not_requested' } };
+  > 53 │ let scanDecisions = [];
+       │     ^^^^^^^^^^^^^
+    54 │ const retryState = { taskId: 'local-task', stage: 'validation', backoffsMs: [1000, 5000], admissionCount: 4, executedCount: 3, transientRetryCount: 2, measuredDurationMs: 1875, interruptedCount: 1, latest: { id: 'local-failure', outcome: 'unknown' }, authorizations: [], telemetry: 'partial' };
+    55 │ const server = createServer(async (req, res) => {
+
+  i Safe fix: Use const instead.
+
+     51  51 │   const scanFinding = { id: 'fixture-finding-stable-identity', scanner: 'dependencies', ruleId: 'fixture-advisory', file: 'packages/example/package-lock.json', severity: 'high', summary: 'Synthetic dependency finding for local interaction proof.', disposition: 'unresolved' };
+     52  52 │   const scanReport = { kind: 'scan_report', id: 'report-fixture', jobId: scanJob.id, status: 'incomplete', createdAt: '2026-09-07T10:00:00Z', completedAt: '2026-09-07T10:01:00Z', policy: scanJob.scan, collection: { version: 1, repository: 'https://github.com/example/local-fixture.git', baseSha: 'a'.repeat(40), headSha: 'b'.repeat(40), files: [{ path: scanFinding.file, change: 'modified' }], scanners: [{ scanner: 'secrets', version: 'fixture-v1', status: 'failed', findingCount: null, diagnostic: 'Synthetic scanner failure; no clean result available.' }, { scanner: 'dependencies', version: 'fixture-v1', status: 'completed', findingCount: 1 }], diagnostics: [], findings: [scanFinding], stacks: ['node'] }, judgment: { status: 'not_requested' } };
+     53     │ - let·scanDecisions·=·[];
+         53 │ + const·scanDecisions·=·[];
+     54  54 │   const retryState = { taskId: 'local-task', stage: 'validation', backoffsMs: [1000, 5000], admissionCount: 4, executedCount: 3, transientRetryCount: 2, measuredDurationMs: 1875, interruptedCount: 1, latest: { id: 'local-failure', outcome: 'unknown' }, authorizations: [], telemetry: 'partial' };
+     55  55 │   const server = createServer(async (req, res) => {
+
+
+./docs/analysis/2026-09-07/execution/fixtures/mobile-server.mjs format ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  × Formatter would have printed the following content:
+
+      4   4 │   const dist = resolve('packages/mobile-web/dist');
+      5   5 │   const successfulValidation = {
+      6     │ - ··podId:·'local-fixture',·attempt:·1,·timestamp:·'2026-09-07T10:10:00Z',·overall:·'pass',·duration:·100,
+      7     │ - ··smoke:·{·status:·'pass',·build:·{·status:·'pass',·output:·'',·duration:·100·},·health:·{·status:·'skip',·url:·'',·responseCode:·null,·duration:·0·},·pages:·[]·},
+      8     │ - ··test:·{·status:·'pass',·duration:·0,·output:·'',·reusedEvidence:·{·receiptId:·'local-evidence-1',·identityHash:·'a'.repeat(64),·originalPodId:·'local-original',·originalExecutedAt:·'2026-09-07T09:00:00Z',·originalDurationMs:·1200·}·},·taskReview:·null,
+          6 │ + ··podId:·'local-fixture',
+          7 │ + ··attempt:·1,
+          8 │ + ··timestamp:·'2026-09-07T10:10:00Z',
+          9 │ + ··overall:·'pass',
+         10 │ + ··duration:·100,
+         11 │ + ··smoke:·{
+         12 │ + ····status:·'pass',
+         13 │ + ····build:·{·status:·'pass',·output:·'',·duration:·100·},
+         14 │ + ····health:·{·status:·'skip',·url:·'',·responseCode:·null,·duration:·0·},
+         15 │ + ····pages:·[],
+         16 │ + ··},
+         17 │ + ··test:·{
+         18 │ + ····status:·'pass',
+         19 │ + ····duration:·0,
+         20 │ + ····output:·'',
+         21 │ + ····reusedEvidence:·{
+         22 │ + ······receiptId:·'local-evidence-1',
+         23 │ + ······identityHash:·'a'.repeat(64),
+         24 │ + ······originalPodId:·'local-original',
+         25 │ + ······originalExecutedAt:·'2026-09-07T09:00:00Z',
+         26 │ + ······originalDurationMs:·1200,
+         27 │ + ····},
+         28 │ + ··},
+         29 │ + ··taskReview:·null,
+      9  30 │   };
+     10  31 │   const validationHistory = [
+     11     │ - ··{·id:·'v11',·podId:·'local-fixture',·attempt:·1,·sequence:·11,·cycle:·0,·createdAt:·'2026-09-07T09:00:00Z',·result:·{·...successfulValidation,·overall:·'fail',·timestamp:·'2026-09-07T09:00:00Z',·test:·{·status:·'fail',·duration:·1200,·output:·'Seeded·defect·detected'·}·}·},
+     12     │ - ··{·id:·'v12',·podId:·'local-fixture',·attempt:·1,·sequence:·12,·cycle:·1,·createdAt:·successfulValidation.timestamp,·result:·successfulValidation·},
+         32 │ + ··{
+         33 │ + ····id:·'v11',
+         34 │ + ····podId:·'local-fixture',
+         35 │ + ····attempt:·1,
+         36 │ + ····sequence:·11,
+         37 │ + ····cycle:·0,
+         38 │ + ····createdAt:·'2026-09-07T09:00:00Z',
+         39 │ + ····result:·{
+         40 │ + ······...successfulValidation,
+         41 │ + ······overall:·'fail',
+         42 │ + ······timestamp:·'2026-09-07T09:00:00Z',
+         43 │ + ······test:·{·status:·'fail',·duration:·1200,·output:·'Seeded·defect·detected'·},
+         44 │ + ····},
+         45 │ + ··},
+         46 │ + ··{
+         47 │ + ····id:·'v12',
+         48 │ + ····podId:·'local-fixture',
+         49 │ + ····attempt:·1,
+         50 │ + ····sequence:·12,
+         51 │ + ····cycle:·1,
+         52 │ + ····createdAt:·successfulValidation.timestamp,
+         53 │ + ····result:·successfulValidation,
+         54 │ + ··},
+     13  55 │   ];
+     14  56 │   let pod = {
+    ······· │
+     47  89 │     },
+     48  90 │   };
+     49     │ - if·(process.env.FIXTURE_MODE·===·'retry')·pod·=·{·...pod,·status:·'review_required',·pendingEscalation:·null,·recordDiagnostics:·[],·finalization:·{·...pod.finalization,·phase:·'ready',·pendingDecisionId:·null·},·lastValidationResult:·{·...successfulValidation,·overall:·'fail'·}·};
+     50     │ - const·scanJob·=·{·id:·'scan-fixture',·name:·'Local·dependency·and·secret·scan',·profileName:·'local-fixture',·enabled:·false,·cronExpression:·'0·9·*·*·*',·scan:·{·version:·1,·baseRef:·'main',·headRef:·'work',·scanners:·['secrets',·'dependencies'],·judgment:·'none'·}·};
+     51     │ - const·scanFinding·=·{·id:·'fixture-finding-stable-identity',·scanner:·'dependencies',·ruleId:·'fixture-advisory',·file:·'packages/example/package-lock.json',·severity:·'high',·summary:·'Synthetic·dependency·finding·for·local·interaction·proof.',·disposition:·'unresolved'·};
+     52     │ - const·scanReport·=·{·kind:·'scan_report',·id:·'report-fixture',·jobId:·scanJob.id,·status:·'incomplete',·createdAt:·'2026-09-07T10:00:00Z',·completedAt:·'2026-09-07T10:01:00Z',·policy:·scanJob.scan,·collection:·{·version:·1,·repository:·'https://github.com/example/local-fixture.git',·baseSha:·'a'.repeat(40),·headSha:·'b'.repeat(40),·files:·[{·path:·scanFinding.file,·change:·'modified'·}],·scanners:·[{·scanner:·'secrets',·version:·'fixture-v1',·status:·'failed',·findingCount:·null,·diagnostic:·'Synthetic·scanner·failure;·no·clean·result·available.'·},·{·scanner:·'dependencies',·version:·'fixture-v1',·status:·'completed',·findingCount:·1·}],·diagnostics:·[],·findings:·[scanFinding],·stacks:·['node']·},·judgment:·{·status:·'not_requested'·}·};
+         91 │ + if·(process.env.FIXTURE_MODE·===·'retry')
+         92 │ + ··pod·=·{
+         93 │ + ····...pod,
+         94 │ + ····status:·'review_required',
+         95 │ + ····pendingEscalation:·null,
+         96 │ + ····recordDiagnostics:·[],
+         97 │ + ····finalization:·{·...pod.finalization,·phase:·'ready',·pendingDecisionId:·null·},
+         98 │ + ····lastValidationResult:·{·...successfulValidation,·overall:·'fail'·},
+         99 │ + ··};
+        100 │ + const·scanJob·=·{
+        101 │ + ··id:·'scan-fixture',
+        102 │ + ··name:·'Local·dependency·and·secret·scan',
+        103 │ + ··profileName:·'local-fixture',
+        104 │ + ··enabled:·false,
+        105 │ + ··cronExpression:·'0·9·*·*·*',
+        106 │ + ··scan:·{
+        107 │ + ····version:·1,
+        108 │ + ····baseRef:·'main',
+        109 │ + ····headRef:·'work',
+        110 │ + ····scanners:·['secrets',·'dependencies'],
+        111 │ + ····judgment:·'none',
+        112 │ + ··},
+        113 │ + };
+        114 │ + const·scanFinding·=·{
+        115 │ + ··id:·'fixture-finding-stable-identity',
+        116 │ + ··scanner:·'dependencies',
+        117 │ + ··ruleId:·'fixture-advisory',
+        118 │ + ··file:·'packages/example/package-lock.json',
+        119 │ + ··severity:·'high',
+        120 │ + ··summary:·'Synthetic·dependency·finding·for·local·interaction·proof.',
+        121 │ + ··disposition:·'unresolved',
+        122 │ + };
+        123 │ + const·scanReport·=·{
+        124 │ + ··kind:·'scan_report',
+        125 │ + ··id:·'report-fixture',
+        126 │ + ··jobId:·scanJob.id,
+        127 │ + ··status:·'incomplete',
+        128 │ + ··createdAt:·'2026-09-07T10:00:00Z',
+        129 │ + ··completedAt:·'2026-09-07T10:01:00Z',
+        130 │ + ··policy:·scanJob.scan,
+        131 │ + ··collection:·{
+        132 │ + ····version:·1,
+        133 │ + ····repository:·'https://github.com/example/local-fixture.git',
+        134 │ + ····baseSha:·'a'.repeat(40),
+        135 │ + ····headSha:·'b'.repeat(40),
+        136 │ + ····files:·[{·path:·scanFinding.file,·change:·'modified'·}],
+        137 │ + ····scanners:·[
+        138 │ + ······{
+        139 │ + ········scanner:·'secrets',
+        140 │ + ········version:·'fixture-v1',
+        141 │ + ········status:·'failed',
+        142 │ + ········findingCount:·null,
+        143 │ + ········diagnostic:·'Synthetic·scanner·failure;·no·clean·result·available.',
+        144 │ + ······},
+        145 │ + ······{·scanner:·'dependencies',·version:·'fixture-v1',·status:·'completed',·findingCount:·1·},
+        146 │ + ····],
+        147 │ + ····diagnostics:·[],
+        148 │ + ····findings:·[scanFinding],
+        149 │ + ····stacks:·['node'],
+        150 │ + ··},
+        151 │ + ··judgment:·{·status:·'not_requested'·},
+        152 │ + };
+     53 153 │   let scanDecisions = [];
+     54     │ - const·retryState·=·{·taskId:·'local-task',·stage:·'validation',·backoffsMs:·[1000,·5000],·admissionCount:·4,·executedCount:·3,·transientRetryCount:·2,·measuredDurationMs:·1875,·interruptedCount:·1,·latest:·{·id:·'local-failure',·outcome:·'unknown'·},·authorizations:·[],·telemetry:·'partial'·};
+        154 │ + const·retryState·=·{
+        155 │ + ··taskId:·'local-task',
+        156 │ + ··stage:·'validation',
+        157 │ + ··backoffsMs:·[1000,·5000],
+        158 │ + ··admissionCount:·4,
+        159 │ + ··executedCount:·3,
+        160 │ + ··transientRetryCount:·2,
+        161 │ + ··measuredDurationMs:·1875,
+        162 │ + ··interruptedCount:·1,
+        163 │ + ··latest:·{·id:·'local-failure',·outcome:·'unknown'·},
+        164 │ + ··authorizations:·[],
+        165 │ + ··telemetry:·'partial',
+        166 │ + };
+     55 167 │   const server = createServer(async (req, res) => {
+     56 168 │     const pathname = new URL(req.url, 'http://localhost').pathname;
+    ······· │
+     61 173 │     if (pathname === '/pods/local-fixture/retry-state') return json(retryState);
+     62 174 │     if (req.method === 'POST' && pathname === '/pods/local-fixture/retry-authorizations') {
+     63     │ - ····let·body·=·'';·for·await·(const·chunk·of·req)·body·+=·chunk;
+        175 │ + ····let·body·=·'';
+        176 │ + ····for·await·(const·chunk·of·req)·body·+=·chunk;
+     64 177 │       const input = JSON.parse(body);
+     65 178 │       let grant = retryState.authorizations.find((entry) => entry.requestKey === input.requestKey);
+  116 more lines truncated
+
+
+Checked 845 files in 410ms. No fixes applied.
+Found 5 errors.
+check ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  × Some errors were emitted while running checks.
+
+
+ ELIFECYCLE  Command failed with exit code 1.
+  ✗ Lint failed
+
+▸ Building
+
+> autopod@ build /private/tmp/autopod-durable-execution
+> turbo run build
+
+• turbo 2.10.4
+
+   • Packages in scope: @autopod/cli, @autopod/daemon, @autopod/e2e, @autopod/escalation-mcp, @autopod/mobile-web, @autopod/pi-worker, @autopod/shared, @autopod/validator
+   • Running build in 8 packages
+   • Remote caching disabled, using shared worktree cache
+
+@autopod/shared:build: cache hit, replaying logs 9ff9b37778aafcd3
+@autopod/pi-worker:build: cache hit, replaying logs 0226b42f5501413f
+@autopod/shared:build:
+@autopod/shared:build: > @autopod/shared@0.0.1 build /private/tmp/autopod-durable-execution/packages/shared
+@autopod/shared:build: > tsup
+@autopod/shared:build:
+@autopod/shared:build: CLI Building entry: src/index.ts
+@autopod/shared:build: CLI Using tsconfig: tsconfig.json
+@autopod/shared:build: CLI tsup v8.5.1
+@autopod/shared:build: CLI Using tsup config: /private/tmp/autopod-durable-execution/packages/shared/tsup.config.ts
+@autopod/shared:build: CLI Target: es2022
+@autopod/shared:build: ESM Build start
+@autopod/shared:build: ESM dist/index.js     112.75 KB
+@autopod/shared:build: ESM dist/index.js.map 233.70 KB
+@autopod/shared:build: ESM ⚡️ Build success in 13ms
+@autopod/shared:build: DTS Build start
+@autopod/shared:build: DTS ⚡️ Build success in 961ms
+@autopod/shared:build: DTS dist/index.d.ts 753.22 KB
+@autopod/pi-worker:build:
+@autopod/pi-worker:build: > @autopod/pi-worker@0.0.1 build /Users/ewi/repos/autopod/packages/pi-worker
+@autopod/pi-worker:build: > tsup src/index.ts --format esm --dts
+@autopod/pi-worker:build:
+@autopod/pi-worker:build: CLI Building entry: src/index.ts
+@autopod/pi-worker:build: CLI Using tsconfig: tsconfig.json
+@autopod/pi-worker:build: CLI tsup v8.5.1
+@autopod/pi-worker:build: CLI Target: es2022
+@autopod/pi-worker:build: ESM Build start
+@autopod/pi-worker:build: ESM dist/index.js 15.17 KB
+@autopod/pi-worker:build: ESM ⚡️ Build success in 119ms
+@autopod/pi-worker:build: DTS Build start
+@autopod/pi-worker:build: DTS ⚡️ Build success in 2163ms
+@autopod/pi-worker:build: DTS dist/index.d.ts 5.25 KB
+@autopod/escalation-mcp:build: cache hit, replaying logs 20cc0ff65baf27a8
+@autopod/validator:build: cache hit, replaying logs b73a57938694874f
+@autopod/escalation-mcp:build:
+@autopod/escalation-mcp:build: > @autopod/escalation-mcp@0.0.1 build /private/tmp/autopod-durable-execution/packages/escalation-mcp
+@autopod/validator:build:
+@autopod/validator:build: > @autopod/validator@0.0.1 build /private/tmp/autopod-durable-execution/packages/validator
+@autopod/validator:build: > tsup
+@autopod/validator:build:
+@autopod/validator:build: CLI Building entry: src/index.ts
+@autopod/validator:build: CLI Using tsconfig: tsconfig.json
+@autopod/validator:build: CLI tsup v8.5.1
+@autopod/validator:build: CLI Using tsup config: /private/tmp/autopod-durable-execution/packages/validator/tsup.config.ts
+@autopod/validator:build: CLI Target: es2022
+@autopod/validator:build: CLI Cleaning output folder
+@autopod/validator:build: ESM Build start
+@autopod/validator:build: ESM dist/index.js     9.58 KB
+@autopod/validator:build: ESM dist/index.js.map 13.63 KB
+@autopod/validator:build: ESM ⚡️ Build success in 21ms
+@autopod/validator:build: DTS Build start
+@autopod/validator:build: DTS ⚡️ Build success in 265ms
+@autopod/validator:build: DTS dist/index.d.ts 1.04 KB
+@autopod/escalation-mcp:build: > tsup
+@autopod/escalation-mcp:build:
+@autopod/escalation-mcp:build: CLI Building entry: src/index.ts
+@autopod/escalation-mcp:build: CLI Using tsconfig: tsconfig.json
+@autopod/escalation-mcp:build: CLI tsup v8.5.1
+@autopod/escalation-mcp:build: CLI Using tsup config: /private/tmp/autopod-durable-execution/packages/escalation-mcp/tsup.config.ts
+@autopod/escalation-mcp:build: CLI Target: es2022
+@autopod/escalation-mcp:build: ESM Build start
+@autopod/cli:build: cache miss, executing 9b5ce04d46c2ecee
+@autopod/mobile-web:build: cache miss, executing 5980ca544abb9737
+@autopod/escalation-mcp:build: ESM dist/index.js     41.67 KB
+@autopod/escalation-mcp:build: ESM dist/index.js.map 82.30 KB
+@autopod/escalation-mcp:build: ESM ⚡️ Build success in 37ms
+@autopod/escalation-mcp:build: DTS Build start
+@autopod/escalation-mcp:build: DTS ⚡️ Build success in 653ms
+@autopod/escalation-mcp:build: DTS dist/index.d.ts 15.12 KB
+@autopod/daemon:build: cache bypass, force executing c1a4b8b12a07455b
+@autopod/mobile-web:build:
+@autopod/mobile-web:build: > @autopod/mobile-web@0.0.1 build /private/tmp/autopod-durable-execution/packages/mobile-web
+@autopod/mobile-web:build: > vite build
+@autopod/mobile-web:build:
+@autopod/daemon:build:
+@autopod/daemon:build: > @autopod/daemon@0.0.1 build /private/tmp/autopod-durable-execution/packages/daemon
+@autopod/daemon:build: > tsup
+@autopod/daemon:build:
+@autopod/cli:build:
+@autopod/cli:build: > @autopod/cli@0.0.1 build /private/tmp/autopod-durable-execution/packages/cli
+@autopod/cli:build: > tsup
+@autopod/cli:build:
+@autopod/cli:build: CLI Building entry: src/index.ts
+@autopod/cli:build: CLI Using tsconfig: tsconfig.json
+@autopod/cli:build: CLI tsup v8.5.1
+@autopod/cli:build: CLI Using tsup config: /private/tmp/autopod-durable-execution/packages/cli/tsup.config.ts
+@autopod/cli:build: CLI Target: es2022
+@autopod/cli:build: CLI Cleaning output folder
+@autopod/cli:build: ESM Build start
+@autopod/cli:build: ESM dist/index.js     233.45 KB
+@autopod/cli:build: ESM dist/index.js.map 456.11 KB
+@autopod/cli:build: ESM ⚡️ Build success in 20ms
+@autopod/daemon:build: CLI Building entry: src/index.ts, src/db/verify-backup-cli.ts
+@autopod/daemon:build: CLI Using tsconfig: tsconfig.json
+@autopod/daemon:build: CLI tsup v8.5.1
+@autopod/daemon:build: CLI Using tsup config: /private/tmp/autopod-durable-execution/packages/daemon/tsup.config.ts
+@autopod/daemon:build: CLI Target: es2022
+@autopod/daemon:build: CLI Cleaning output folder
+@autopod/daemon:build: ESM Build start
+@autopod/daemon:build: ESM dist/db/verify-backup-cli.js                   1.08 KB
+@autopod/daemon:build: ESM dist/warm-image-maintenance-I3RZPCSK.js        3.68 KB
+@autopod/daemon:build: ESM dist/chunk-HGDG2PZU.js                         4.03 KB
+@autopod/daemon:build: ESM dist/reconciler-2EZ7PEQY.js                    7.24 KB
+@autopod/daemon:build: ESM dist/sleep-detector-GDV62IB2.js                5.00 KB
+@autopod/daemon:build: ESM dist/azure-pim-handler-IKNZH4XN.js             221.00 B
+@autopod/daemon:build: ESM dist/sandbox-container-manager-7OJNQVSF.js     257.00 B
+@autopod/daemon:build: ESM dist/chunk-RXSPALML.js                         64.55 KB
+@autopod/daemon:build: ESM dist/local-reconciler-SUB7ARPV.js              184.00 B
+@autopod/daemon:build: ESM dist/mock-container-manager-NFN5UPQY.js        1.01 KB
+@autopod/daemon:build: ESM dist/chunk-X6XXXSQW.js                         9.64 KB
+@autopod/daemon:build: ESM dist/chunk-DJ4KDQP3.js                         17.99 KB
+@autopod/daemon:build: ESM dist/acr-client-V7GW75QZ.js                    6.81 KB
+@autopod/daemon:build: ESM dist/image-builder-O7BG7E5J.js                 4.79 KB
+@autopod/daemon:build: ESM dist/chunk-XI7TSX2Y.js                         24.07 KB
+@autopod/daemon:build: ESM dist/chunk-BLZNFOW3.js                         283.00 B
+@autopod/daemon:build: ESM dist/db/verify-backup-cli.js.map               1.77 KB
+@autopod/daemon:build: ESM dist/index.js                                  2.27 MB
+@autopod/daemon:build: ESM dist/sleep-detector-GDV62IB2.js.map            10.08 KB
+@autopod/daemon:build: ESM dist/warm-image-maintenance-I3RZPCSK.js.map    7.64 KB
+@autopod/daemon:build: ESM dist/chunk-HGDG2PZU.js.map                     7.82 KB
+@autopod/daemon:build: ESM dist/sandbox-container-manager-7OJNQVSF.js.map 71.00 B
+@autopod/daemon:build: ESM dist/azure-pim-handler-IKNZH4XN.js.map         71.00 B
+@autopod/daemon:build: ESM dist/local-reconciler-SUB7ARPV.js.map          71.00 B
+@autopod/daemon:build: ESM dist/chunk-RXSPALML.js.map                     139.35 KB
+@autopod/daemon:build: ESM dist/reconciler-2EZ7PEQY.js.map                14.01 KB
+@autopod/daemon:build: ESM dist/mock-container-manager-NFN5UPQY.js.map    1.86 KB
+@autopod/daemon:build: ESM dist/chunk-X6XXXSQW.js.map                     21.88 KB
+@autopod/daemon:build: ESM dist/chunk-BLZNFOW3.js.map                     296.00 B
+@autopod/daemon:build: ESM dist/chunk-DJ4KDQP3.js.map                     38.50 KB
+@autopod/daemon:build: ESM dist/chunk-XI7TSX2Y.js.map                     52.29 KB
+@autopod/daemon:build: ESM dist/acr-client-V7GW75QZ.js.map                12.27 KB
+@autopod/daemon:build: ESM dist/image-builder-O7BG7E5J.js.map             10.20 KB
+@autopod/daemon:build: ESM dist/index.js.map                              4.46 MB
+@autopod/daemon:build: ESM ⚡️ Build success in 115ms
+@autopod/daemon:build: DTS Build start
+@autopod/mobile-web:build: vite v6.4.3 building for production...
+@autopod/mobile-web:build: transforming...
+@autopod/mobile-web:build: ✓ 63 modules transformed.
+@autopod/mobile-web:build: rendering chunks...
+@autopod/mobile-web:build: computing gzip size...
+@autopod/mobile-web:build: dist/index.html                   0.93 kB │ gzip:  0.42 kB
+@autopod/mobile-web:build: dist/assets/index-BseO5KHj.css   12.51 kB │ gzip:  2.92 kB
+@autopod/mobile-web:build: dist/assets/index-CizUmV9p.js   270.48 kB │ gzip: 84.78 kB │ map: 1,450.96 kB
+@autopod/mobile-web:build: ✓ built in 733ms
+@autopod/daemon:build: DTS ⚡️ Build success in 3150ms
+@autopod/daemon:build: DTS dist/index.d.ts                13.00 B
+@autopod/daemon:build: DTS dist/db/verify-backup-cli.d.ts 13.00 B
+@autopod/daemon:build:
+@autopod/daemon:build: > @autopod/daemon@0.0.1 postbuild /private/tmp/autopod-durable-execution/packages/daemon
+@autopod/daemon:build: > mkdir -p dist/db dist/actions && cp -R src/db/migrations dist/db/ && cp -R src/actions/defaults dist/actions/
+@autopod/daemon:build:
+
+ Tasks:    7 successful, 7 total
+Cached:    4 cached, 7 total
+  Time:    4.584s
+
+  ✓ Build passed
+
+▸ Typechecking
+
+> autopod@ typecheck /private/tmp/autopod-durable-execution
+> turbo run typecheck
+
+• turbo 2.10.4
+
+   • Packages in scope: @autopod/cli, @autopod/daemon, @autopod/e2e, @autopod/escalation-mcp, @autopod/mobile-web, @autopod/pi-worker, @autopod/shared, @autopod/validator
+   • Running typecheck in 8 packages
+   • Remote caching disabled, using shared worktree cache
+
+@autopod/shared:build: cache hit, replaying logs 9ff9b37778aafcd3
+@autopod/shared:build:
+@autopod/shared:build: > @autopod/shared@0.0.1 build /private/tmp/autopod-durable-execution/packages/shared
+@autopod/shared:build: > tsup
+@autopod/shared:build:
+@autopod/shared:typecheck: cache miss, executing 886667b49c6fd2ec
+@autopod/shared:build: CLI Building entry: src/index.ts
+@autopod/shared:build: CLI Using tsconfig: tsconfig.json
+@autopod/shared:build: CLI tsup v8.5.1
+@autopod/shared:build: CLI Using tsup config: /private/tmp/autopod-durable-execution/packages/shared/tsup.config.ts
+@autopod/shared:build: CLI Target: es2022
+@autopod/shared:build: ESM Build start
+@autopod/shared:build: ESM dist/index.js     112.75 KB
+@autopod/shared:build: ESM dist/index.js.map 233.70 KB
+@autopod/shared:build: ESM ⚡️ Build success in 13ms
+@autopod/shared:build: DTS Build start
+@autopod/shared:build: DTS ⚡️ Build success in 961ms
+@autopod/shared:build: DTS dist/index.d.ts 753.22 KB
+@autopod/escalation-mcp:typecheck: cache miss, executing f31076655715359d
+@autopod/validator:typecheck: cache miss, executing ac4ab58051709919
+@autopod/e2e:typecheck: cache hit, replaying logs 11bfdced8868b55d
+@autopod/cli:typecheck: cache miss, executing f16b3d9c354c1fd3
+@autopod/e2e:typecheck:
+@autopod/e2e:typecheck: > @autopod/e2e@0.0.1 typecheck /Users/ewi/repos/autopod/e2e
+@autopod/e2e:typecheck: > echo 'No e2e TypeScript sources yet'
+@autopod/e2e:typecheck:
+@autopod/e2e:typecheck: No e2e TypeScript sources yet
+@autopod/escalation-mcp:build: cache hit, replaying logs 20cc0ff65baf27a8
+@autopod/validator:build: cache hit, replaying logs b73a57938694874f
+@autopod/escalation-mcp:build:
+@autopod/escalation-mcp:build: > @autopod/escalation-mcp@0.0.1 build /private/tmp/autopod-durable-execution/packages/escalation-mcp
+@autopod/pi-worker:typecheck: cache hit, replaying logs 2256fbe6cecc744d
+@autopod/escalation-mcp:build: > tsup
+@autopod/escalation-mcp:build:
+@autopod/validator:build:
+@autopod/validator:build: > @autopod/validator@0.0.1 build /private/tmp/autopod-durable-execution/packages/validator
+@autopod/validator:build: > tsup
+@autopod/validator:build:
+@autopod/validator:build: CLI Building entry: src/index.ts
+@autopod/validator:build: CLI Using tsconfig: tsconfig.json
+@autopod/validator:build: CLI tsup v8.5.1
+@autopod/validator:build: CLI Using tsup config: /private/tmp/autopod-durable-execution/packages/validator/tsup.config.ts
+@autopod/validator:build: CLI Target: es2022
+@autopod/validator:build: CLI Cleaning output folder
+@autopod/validator:build: ESM Build start
+@autopod/validator:build: ESM dist/index.js     9.58 KB
+@autopod/validator:build: ESM dist/index.js.map 13.63 KB
+@autopod/validator:build: ESM ⚡️ Build success in 21ms
+@autopod/validator:build: DTS Build start
+@autopod/validator:build: DTS ⚡️ Build success in 265ms
+@autopod/validator:build: DTS dist/index.d.ts 1.04 KB
+@autopod/pi-worker:typecheck:
+@autopod/pi-worker:typecheck: > @autopod/pi-worker@0.0.1 typecheck /Users/ewi/repos/autopod/packages/pi-worker
+@autopod/pi-worker:typecheck: > tsc --noEmit --project tsconfig.typecheck.json
+@autopod/pi-worker:typecheck:
+@autopod/escalation-mcp:build: CLI Building entry: src/index.ts
+@autopod/escalation-mcp:build: CLI Using tsconfig: tsconfig.json
+@autopod/escalation-mcp:build: CLI tsup v8.5.1
+@autopod/escalation-mcp:build: CLI Using tsup config: /private/tmp/autopod-durable-execution/packages/escalation-mcp/tsup.config.ts
+@autopod/mobile-web:typecheck: cache miss, executing f10d31397443a254
+@autopod/escalation-mcp:build: CLI Target: es2022
+@autopod/escalation-mcp:build: ESM Build start
+@autopod/escalation-mcp:build: ESM dist/index.js     41.67 KB
+@autopod/escalation-mcp:build: ESM dist/index.js.map 82.30 KB
+@autopod/escalation-mcp:build: ESM ⚡️ Build success in 37ms
+@autopod/escalation-mcp:build: DTS Build start
+@autopod/escalation-mcp:build: DTS ⚡️ Build success in 653ms
+@autopod/escalation-mcp:build: DTS dist/index.d.ts 15.12 KB
+@autopod/daemon:typecheck: cache miss, executing a397110076e56da6
+@autopod/validator:typecheck:
+@autopod/validator:typecheck: > @autopod/validator@0.0.1 typecheck /private/tmp/autopod-durable-execution/packages/validator
+@autopod/validator:typecheck: > tsc --noEmit --project tsconfig.typecheck.json
+@autopod/validator:typecheck:
+@autopod/cli:typecheck:
+@autopod/cli:typecheck: > @autopod/cli@0.0.1 typecheck /private/tmp/autopod-durable-execution/packages/cli
+@autopod/cli:typecheck: > tsc --noEmit --project tsconfig.typecheck.json
+@autopod/cli:typecheck:
+@autopod/escalation-mcp:typecheck:
+@autopod/escalation-mcp:typecheck: > @autopod/escalation-mcp@0.0.1 typecheck /private/tmp/autopod-durable-execution/packages/escalation-mcp
+@autopod/escalation-mcp:typecheck: > tsc --noEmit --project tsconfig.typecheck.json
+@autopod/escalation-mcp:typecheck:
+@autopod/shared:typecheck:
+@autopod/shared:typecheck: > @autopod/shared@0.0.1 typecheck /private/tmp/autopod-durable-execution/packages/shared
+@autopod/shared:typecheck: > tsc --noEmit --project tsconfig.typecheck.json
+@autopod/shared:typecheck:
+@autopod/daemon:typecheck:
+@autopod/daemon:typecheck: > @autopod/daemon@0.0.1 typecheck /private/tmp/autopod-durable-execution/packages/daemon
+@autopod/daemon:typecheck: > AUTOPOD_TYPECHECK=1 tsup --dts-only --out-dir .turbo/typecheck
+@autopod/daemon:typecheck:
+@autopod/mobile-web:typecheck:
+@autopod/mobile-web:typecheck: > @autopod/mobile-web@0.0.1 typecheck /private/tmp/autopod-durable-execution/packages/mobile-web
+@autopod/mobile-web:typecheck: > tsc --noEmit --project tsconfig.typecheck.json
+@autopod/mobile-web:typecheck:
+@autopod/daemon:typecheck: CLI Building entry: src/index.ts, src/db/verify-backup-cli.ts
+@autopod/daemon:typecheck: CLI Using tsconfig: tsconfig.json
+@autopod/daemon:typecheck: CLI tsup v8.5.1
+@autopod/daemon:typecheck: CLI Using tsup config: /private/tmp/autopod-durable-execution/packages/daemon/tsup.config.ts
+@autopod/daemon:typecheck: DTS Build start
+@autopod/daemon:typecheck: DTS ⚡️ Build success in 3395ms
+@autopod/daemon:typecheck: DTS .turbo/typecheck/index.d.ts                13.00 B
+@autopod/daemon:typecheck: DTS .turbo/typecheck/db/verify-backup-cli.d.ts 13.00 B
+
+ Tasks:    11 successful, 11 total
+Cached:    5 cached, 11 total
+  Time:    4.383s
+
+  ✓ Typecheck passed
+
+▸ Testing
+
+> autopod@ test /private/tmp/autopod-durable-execution
+> turbo run test && bash scripts/deploy-hosted-daemon.test.sh && bash scripts/cleanup-hosted-daemon.test.sh
+
+• turbo 2.10.4
+
+   • Packages in scope: @autopod/cli, @autopod/daemon, @autopod/e2e, @autopod/escalation-mcp, @autopod/mobile-web, @autopod/pi-worker, @autopod/shared, @autopod/validator
+   • Running test in 8 packages
+   • Remote caching disabled, using shared worktree cache
+
+@autopod/shared:build: cache hit, replaying logs 9ff9b37778aafcd3
+@autopod/shared:build:
+@autopod/shared:build: > @autopod/shared@0.0.1 build /private/tmp/autopod-durable-execution/packages/shared
+@autopod/shared:build: > tsup
+@autopod/shared:build:
+@autopod/shared:build: CLI Building entry: src/index.ts
+@autopod/shared:build: CLI Using tsconfig: tsconfig.json
+@autopod/shared:build: CLI tsup v8.5.1
+@autopod/shared:build: CLI Using tsup config: /private/tmp/autopod-durable-execution/packages/shared/tsup.config.ts
+@autopod/shared:build: CLI Target: es2022
+@autopod/shared:build: ESM Build start
+@autopod/shared:build: ESM dist/index.js     112.75 KB
+@autopod/shared:build: ESM dist/index.js.map 233.70 KB
+@autopod/shared:build: ESM ⚡️ Build success in 13ms
+@autopod/shared:build: DTS Build start
+@autopod/shared:build: DTS ⚡️ Build success in 961ms
+@autopod/shared:build: DTS dist/index.d.ts 753.22 KB
+@autopod/shared:test: cache miss, executing 2fffdc8165eba229
+@autopod/pi-worker:build: cache hit, replaying logs 0226b42f5501413f
+@autopod/mobile-web:build: cache hit, replaying logs 5980ca544abb9737
+@autopod/pi-worker:build:
+@autopod/pi-worker:build: > @autopod/pi-worker@0.0.1 build /Users/ewi/repos/autopod/packages/pi-worker
+@autopod/pi-worker:build: > tsup src/index.ts --format esm --dts
+@autopod/pi-worker:build:
+@autopod/pi-worker:build: CLI Building entry: src/index.ts
+@autopod/pi-worker:build: CLI Using tsconfig: tsconfig.json
+@autopod/pi-worker:build: CLI tsup v8.5.1
+@autopod/pi-worker:build: CLI Target: es2022
+@autopod/pi-worker:build: ESM Build start
+@autopod/pi-worker:build: ESM dist/index.js 15.17 KB
+@autopod/pi-worker:build: ESM ⚡️ Build success in 119ms
+@autopod/pi-worker:build: DTS Build start
+@autopod/pi-worker:build: DTS ⚡️ Build success in 2163ms
+@autopod/pi-worker:build: DTS dist/index.d.ts 5.25 KB
+@autopod/mobile-web:build:
+@autopod/mobile-web:build: > @autopod/mobile-web@0.0.1 build /private/tmp/autopod-durable-execution/packages/mobile-web
+@autopod/mobile-web:build: > vite build
+@autopod/mobile-web:build:
+@autopod/mobile-web:build: vite v6.4.3 building for production...
+@autopod/mobile-web:build: transforming...
+@autopod/mobile-web:build: ✓ 63 modules transformed.
+@autopod/mobile-web:build: rendering chunks...
+@autopod/mobile-web:build: computing gzip size...
+@autopod/mobile-web:build: dist/index.html                   0.93 kB │ gzip:  0.42 kB
+@autopod/mobile-web:build: dist/assets/index-BseO5KHj.css   12.51 kB │ gzip:  2.92 kB
+@autopod/mobile-web:build: dist/assets/index-CizUmV9p.js   270.48 kB │ gzip: 84.78 kB │ map: 1,450.96 kB
+@autopod/mobile-web:build: ✓ built in 733ms
+@autopod/escalation-mcp:build: cache hit, replaying logs 20cc0ff65baf27a8
+@autopod/cli:build: cache hit, replaying logs 9b5ce04d46c2ecee
+@autopod/escalation-mcp:build:
+@autopod/escalation-mcp:build: > @autopod/escalation-mcp@0.0.1 build /private/tmp/autopod-durable-execution/packages/escalation-mcp
+@autopod/validator:build: cache hit, replaying logs b73a57938694874f
+@autopod/e2e:test: cache hit, replaying logs 3c1e2267d1988e52
+@autopod/validator:build:
+@autopod/validator:build: > @autopod/validator@0.0.1 build /private/tmp/autopod-durable-execution/packages/validator
+@autopod/validator:build: > tsup
+@autopod/validator:build:
+@autopod/validator:build: CLI Building entry: src/index.ts
+@autopod/validator:build: CLI Using tsconfig: tsconfig.json
+@autopod/validator:build: CLI tsup v8.5.1
+@autopod/validator:build: CLI Using tsup config: /private/tmp/autopod-durable-execution/packages/validator/tsup.config.ts
+@autopod/validator:build: CLI Target: es2022
+@autopod/validator:build: CLI Cleaning output folder
+@autopod/validator:build: ESM Build start
+@autopod/validator:build: ESM dist/index.js     9.58 KB
+@autopod/validator:build: ESM dist/index.js.map 13.63 KB
+@autopod/validator:build: ESM ⚡️ Build success in 21ms
+@autopod/validator:build: DTS Build start
+@autopod/validator:build: DTS ⚡️ Build success in 265ms
+@autopod/validator:build: DTS dist/index.d.ts 1.04 KB
+@autopod/escalation-mcp:build: > tsup
+@autopod/escalation-mcp:build:
+@autopod/cli:build:
+@autopod/cli:build: > @autopod/cli@0.0.1 build /private/tmp/autopod-durable-execution/packages/cli
+@autopod/escalation-mcp:build: CLI Building entry: src/index.ts
+@autopod/cli:build: > tsup
+@autopod/cli:build:
+@autopod/cli:build: CLI Building entry: src/index.ts
+@autopod/escalation-mcp:build: CLI Using tsconfig: tsconfig.json
+@autopod/escalation-mcp:build: CLI tsup v8.5.1
+@autopod/escalation-mcp:build: CLI Using tsup config: /private/tmp/autopod-durable-execution/packages/escalation-mcp/tsup.config.ts
+@autopod/cli:build: CLI Using tsconfig: tsconfig.json
+@autopod/cli:build: CLI tsup v8.5.1
+@autopod/cli:build: CLI Using tsup config: /private/tmp/autopod-durable-execution/packages/cli/tsup.config.ts
+@autopod/cli:build: CLI Target: es2022
+@autopod/escalation-mcp:build: CLI Target: es2022
+@autopod/escalation-mcp:build: ESM Build start
+@autopod/cli:build: CLI Cleaning output folder
+@autopod/cli:build: ESM Build start
+@autopod/cli:build: ESM dist/index.js     233.45 KB
+@autopod/cli:build: ESM dist/index.js.map 456.11 KB
+@autopod/cli:build: ESM ⚡️ Build success in 20ms
+@autopod/e2e:test:
+@autopod/e2e:test: > @autopod/e2e@0.0.1 test /Users/ewi/repos/autopod/e2e
+@autopod/e2e:test: > echo 'No e2e tests yet'
+@autopod/e2e:test:
+@autopod/e2e:test: No e2e tests yet
+@autopod/mobile-web:test: cache miss, executing c4de09e3297e6f7a
+@autopod/escalation-mcp:build: ESM dist/index.js     41.67 KB
+@autopod/escalation-mcp:build: ESM dist/index.js.map 82.30 KB
+@autopod/escalation-mcp:build: ESM ⚡️ Build success in 37ms
+@autopod/escalation-mcp:build: DTS Build start
+@autopod/escalation-mcp:build: DTS ⚡️ Build success in 653ms
+@autopod/escalation-mcp:build: DTS dist/index.d.ts 15.12 KB
+@autopod/validator:test: cache miss, executing 597f7d4356e1bf02
+@autopod/cli:test: cache miss, executing 49da10756dd6ef2a
+@autopod/daemon:build: cache bypass, force executing c1a4b8b12a07455b
+@autopod/pi-worker:test: cache hit, replaying logs df36411d65392296
+@autopod/escalation-mcp:test: cache miss, executing b8e16fb25faf68bb
+@autopod/pi-worker:test:
+@autopod/pi-worker:test: > @autopod/pi-worker@0.0.1 test /Users/ewi/repos/autopod/packages/pi-worker
+@autopod/pi-worker:test: > vitest run
+@autopod/pi-worker:test:
+@autopod/pi-worker:test:
+@autopod/pi-worker:test:  RUN  v4.1.10 /Users/ewi/repos/autopod/packages/pi-worker
+@autopod/pi-worker:test:
+@autopod/pi-worker:test:  ✓ src/worker-extension.test.ts (7 tests) 9ms
+@autopod/pi-worker:test:  ✓ src/mcp-bridge.test.ts (2 tests) 5394ms
+@autopod/pi-worker:test:      ✓ forwards HTTP and stdio tools with headers, schemas, arguments, and distinct results  2132ms
+@autopod/pi-worker:test:      ✓ cancels long-running calls without applying a short default timeout  3257ms
+@autopod/pi-worker:test:
+@autopod/pi-worker:test:  Test Files  2 passed (2)
+@autopod/pi-worker:test:       Tests  9 passed (9)
+@autopod/pi-worker:test:    Start at  10:34:19
+@autopod/pi-worker:test:    Duration  11.04s (transform 2.31s, setup 0ms, import 3.57s, tests 5.40s, environment 0ms)
+@autopod/pi-worker:test:
+@autopod/shared:test:
+@autopod/shared:test: > @autopod/shared@0.0.1 test /private/tmp/autopod-durable-execution/packages/shared
+@autopod/shared:test: > vitest run
+@autopod/shared:test:
+@autopod/daemon:build:
+@autopod/daemon:build: > @autopod/daemon@0.0.1 build /private/tmp/autopod-durable-execution/packages/daemon
+@autopod/daemon:build: > tsup
+@autopod/daemon:build:
+@autopod/escalation-mcp:test:
+@autopod/escalation-mcp:test: > @autopod/escalation-mcp@0.0.1 test /private/tmp/autopod-durable-execution/packages/escalation-mcp
+@autopod/escalation-mcp:test: > vitest run
+@autopod/escalation-mcp:test:
+@autopod/cli:test:
+@autopod/cli:test: > @autopod/cli@0.0.1 test /private/tmp/autopod-durable-execution/packages/cli
+@autopod/cli:test: > vitest run
+@autopod/cli:test:
+@autopod/mobile-web:test:
+@autopod/mobile-web:test: > @autopod/mobile-web@0.0.1 test /private/tmp/autopod-durable-execution/packages/mobile-web
+@autopod/mobile-web:test: > vitest run
+@autopod/mobile-web:test:
+@autopod/validator:test:
+@autopod/validator:test: > @autopod/validator@0.0.1 test /private/tmp/autopod-durable-execution/packages/validator
+@autopod/validator:test: > vitest run
+@autopod/validator:test:
+@autopod/daemon:build: CLI Building entry: src/index.ts, src/db/verify-backup-cli.ts
+@autopod/daemon:build: CLI Using tsconfig: tsconfig.json
+@autopod/daemon:build: CLI tsup v8.5.1
+@autopod/daemon:build: CLI Using tsup config: /private/tmp/autopod-durable-execution/packages/daemon/tsup.config.ts
+@autopod/daemon:build: CLI Target: es2022
+@autopod/daemon:build: CLI Cleaning output folder
+@autopod/daemon:build: ESM Build start
+@autopod/daemon:build: ESM dist/sleep-detector-WB7BTUZG.js                5.00 KB
+@autopod/daemon:build: ESM dist/warm-image-maintenance-5JYDHURI.js        3.68 KB
+@autopod/daemon:build: ESM dist/chunk-DJ4KDQP3.js                         17.99 KB
+@autopod/daemon:build: ESM dist/chunk-HGDG2PZU.js                         4.03 KB
+@autopod/daemon:build: ESM dist/reconciler-4LDAADTZ.js                    7.24 KB
+@autopod/daemon:build: ESM dist/db/verify-backup-cli.js                   1.08 KB
+@autopod/daemon:build: ESM dist/mock-container-manager-R75LUTQL.js        1.01 KB
+@autopod/daemon:build: ESM dist/image-builder-TBQSFEZO.js                 4.79 KB
+@autopod/daemon:build: ESM dist/chunk-XI7TSX2Y.js                         24.07 KB
+@autopod/daemon:build: ESM dist/azure-pim-handler-J2H2ZIQV.js             221.00 B
+@autopod/daemon:build: ESM dist/sandbox-container-manager-HESC5PWK.js     257.00 B
+@autopod/daemon:build: ESM dist/chunk-X6XXXSQW.js                         9.64 KB
+@autopod/daemon:build: ESM dist/local-reconciler-SFRTSHIH.js              184.00 B
+@autopod/daemon:build: ESM dist/chunk-NCN6JVHC.js                         283.00 B
+@autopod/daemon:build: ESM dist/acr-client-YREN67AV.js                    6.81 KB
+@autopod/daemon:build: ESM dist/chunk-RXSPALML.js                         64.55 KB
+@autopod/daemon:build: ESM dist/warm-image-maintenance-5JYDHURI.js.map    7.64 KB
+@autopod/daemon:build: ESM dist/sleep-detector-WB7BTUZG.js.map            10.08 KB
+@autopod/daemon:build: ESM dist/chunk-DJ4KDQP3.js.map                     38.50 KB
+@autopod/daemon:build: ESM dist/image-builder-TBQSFEZO.js.map             10.20 KB
+@autopod/daemon:build: ESM dist/reconciler-4LDAADTZ.js.map                14.01 KB
+@autopod/daemon:build: ESM dist/db/verify-backup-cli.js.map               1.77 KB
+@autopod/daemon:build: ESM dist/index.js                                  2.27 MB
+@autopod/daemon:build: ESM dist/mock-container-manager-R75LUTQL.js.map    1.86 KB
+@autopod/daemon:build: ESM dist/chunk-XI7TSX2Y.js.map                     52.29 KB
+@autopod/daemon:build: ESM dist/chunk-HGDG2PZU.js.map                     7.82 KB
+@autopod/daemon:build: ESM dist/sandbox-container-manager-HESC5PWK.js.map 71.00 B
+@autopod/daemon:build: ESM dist/chunk-X6XXXSQW.js.map                     21.88 KB
+@autopod/daemon:build: ESM dist/chunk-NCN6JVHC.js.map                     296.00 B
+@autopod/daemon:build: ESM dist/azure-pim-handler-J2H2ZIQV.js.map         71.00 B
+@autopod/daemon:build: ESM dist/local-reconciler-SFRTSHIH.js.map          71.00 B
+@autopod/daemon:build: ESM dist/acr-client-YREN67AV.js.map                12.27 KB
+@autopod/daemon:build: ESM dist/chunk-RXSPALML.js.map                     139.35 KB
+@autopod/daemon:build: ESM dist/index.js.map                              4.46 MB
+@autopod/daemon:build: ESM ⚡️ Build success in 177ms
+@autopod/shared:test:
+@autopod/shared:test:  RUN  v4.1.10 /private/tmp/autopod-durable-execution/packages/shared
+@autopod/shared:test:
+@autopod/daemon:build: DTS Build start
+@autopod/escalation-mcp:test:
+@autopod/escalation-mcp:test:  RUN  v4.1.10 /private/tmp/autopod-durable-execution/packages/escalation-mcp
+@autopod/escalation-mcp:test:
+@autopod/shared:test:  ✓ src/skills/skill-frontmatter.test.ts (3 tests) 9ms
+@autopod/shared:test:  ✓ src/schemas/injection.schema.test.ts (1 test) 2ms
+@autopod/escalation-mcp:test:  ✓ src/tools/validate-locally.test.ts (13 tests) 5ms
+@autopod/shared:test:  ✓ src/evidence.test.ts (2 tests) 9ms
+@autopod/cli:test:
+@autopod/cli:test:  RUN  v4.1.10 /private/tmp/autopod-durable-execution/packages/cli
+@autopod/cli:test:
+@autopod/escalation-mcp:test:  ✓ src/pending-requests.test.ts (9 tests) 10ms
+@autopod/shared:test:  ✓ src/sanitize/sanitize.test.ts (42 tests) 8ms
+@autopod/shared:test:  ✓ src/contract.test.ts (20 tests) 52ms
+@autopod/shared:test:  ✓ src/series/parse-briefs.test.ts (22 tests) 90ms
+@autopod/escalation-mcp:test:  ✓ src/tools/pre-submit-review.test.ts (6 tests) 6ms
+@autopod/shared:test:  ✓ src/schemas/pod.schema.test.ts (15 tests) 11ms
+@autopod/shared:test:  ✓ src/schemas/profile.schema.test.ts (26 tests) 16ms
+@autopod/shared:test:  ✓ src/sanitize/patterns.test.ts (111 tests) 8ms
+@autopod/shared:test:  ✓ src/provider-catalog/provider-catalog.test.ts (19 tests) 8ms
+@autopod/mobile-web:test:
+@autopod/mobile-web:test:  RUN  v4.1.10 /private/tmp/autopod-durable-execution/packages/mobile-web
+@autopod/mobile-web:test:
+@autopod/shared:test:  ✓ src/constants.test.ts (7 tests) 3ms
+@autopod/shared:test:  ✓ src/types/pod-options.test.ts (5 tests) 4ms
+@autopod/shared:test:  ✓ src/sanitize/quarantine.test.ts (20 tests) 7ms
+@autopod/shared:test:  ✓ src/sanitize/processor.test.ts (37 tests) 7ms
+@autopod/escalation-mcp:test:  ✓ src/tools/validate-in-browser.test.ts (34 tests) 9ms
+@autopod/shared:test:  ✓ src/pricing/index.test.ts (29 tests) 6ms
+@autopod/escalation-mcp:test:  ✓ src/tools/escalation-tools.test.ts (25 tests) 13ms
+@autopod/escalation-mcp:test:  ✓ src/server.test.ts (8 tests) 585ms
+@autopod/escalation-mcp:test:      ✓ registers report_plan memory intent schema and passes accepted values to the bridge  575ms
+@autopod/escalation-mcp:test:  ✓ src/tools/actions.test.ts (16 tests) 106ms
+@autopod/escalation-mcp:test:
+@autopod/escalation-mcp:test:  Test Files  7 passed (7)
+@autopod/escalation-mcp:test:       Tests  111 passed (111)
+@autopod/escalation-mcp:test:    Start at  15:13:38
+@autopod/escalation-mcp:test:    Duration  1.02s (transform 1.99s, setup 0ms, import 2.14s, tests 733ms, environment 0ms)
+@autopod/escalation-mcp:test:
+@autopod/validator:test:
+@autopod/validator:test:  RUN  v4.1.10 /private/tmp/autopod-durable-execution/packages/validator
+@autopod/validator:test:
+@autopod/shared:test:  ✓ src/types/readiness.test.ts (4 tests) 3ms
+@autopod/shared:test:
+@autopod/shared:test:  Test Files  16 passed (16)
+@autopod/shared:test:       Tests  363 passed (363)
+@autopod/shared:test:    Start at  15:13:38
+@autopod/shared:test:    Duration  1.20s (transform 1.43s, setup 0ms, import 2.52s, tests 244ms, environment 1ms)
+@autopod/shared:test:
+@autopod/cli:test:
+@autopod/cli:test: Terminal closed: Pod not found
+@autopod/cli:test:  ✓ src/utils/remote-terminal.test.ts (5 tests) 272ms
+@autopod/cli:test:  ✓ src/commands/desktop.test.ts (7 tests) 11ms
+@autopod/cli:test: error: required option '--target <account:runtime:model>' not specified
+@autopod/validator:test:  ✓ src/parse-results.test.ts (8 tests) 7ms
+@autopod/validator:test:  ✓ src/playwright-script.test.ts (8 tests) 7ms
+@autopod/validator:test:
+@autopod/validator:test:  Test Files  2 passed (2)
+@autopod/validator:test:       Tests  16 passed (16)
+@autopod/validator:test:    Start at  15:13:39
+@autopod/validator:test:    Duration  723ms (transform 299ms, setup 0ms, import 466ms, tests 14ms, environment 0ms)
+@autopod/validator:test:
+@autopod/cli:test: stdout | src/commands/series.test.ts > series commands > exposes local spec files as runtime context for series creation by default
+@autopod/cli:test:
+@autopod/cli:test: Creating series "autopod-cli-series-4hZKFi" with 1 pods...
+@autopod/cli:test:
+@autopod/cli:test:
+@autopod/cli:test: stdout | src/commands/series.test.ts > series commands > exposes local spec files as runtime context for series creation by default
+@autopod/cli:test:
+@autopod/cli:test: Series created: series-1
+@autopod/cli:test:
+@autopod/cli:test:   Name:    feature
+@autopod/cli:test:   PR mode: single
+@autopod/cli:test:   Auto-approve: no
+@autopod/cli:test:   Pods:
+@autopod/cli:test:
+@autopod/cli:test:     abcd1234  Build the first piece.  ○ Queued
+@autopod/cli:test:
+@autopod/cli:test: Track progress: ap series status series-1
+@autopod/cli:test:
+@autopod/cli:test:
+@autopod/cli:test: stdout | src/commands/series.test.ts > series commands > accepts contract.yml for series creation
+@autopod/cli:test:
+@autopod/cli:test: Creating series "autopod-cli-series-Gv7Lkf" with 1 pods...
+@autopod/cli:test:
+@autopod/cli:test:
+@autopod/cli:test: stdout | src/commands/series.test.ts > series commands > accepts contract.yml for series creation
+@autopod/cli:test:
+@autopod/cli:test: Series created: series-1
+@autopod/cli:test:
+@autopod/cli:test:   Name:    feature
+@autopod/cli:test:   PR mode: single
+@autopod/cli:test:   Auto-approve: no
+@autopod/cli:test:   Pods:
+@autopod/cli:test:
+@autopod/cli:test:     abcd1234  Build the first piece.  ○ Queued
+@autopod/cli:test:
+@autopod/cli:test: Track progress: ap series status series-1
+@autopod/cli:test:
+@autopod/cli:test:
+@autopod/cli:test: stdout | src/commands/session.test.ts > pod commands > registers run command that calls createSession
+@autopod/cli:test: Pod abcd1234 created.
+@autopod/cli:test: Profile:  test
+@autopod/cli:test: Status:   ○ Queued
+@autopod/cli:test: Branch:   ap/abcd1234
+@autopod/cli:test: Target:   undefined
+@autopod/cli:test: Suite:    full
+@autopod/cli:test: Track progress: ap status abcd1234
+@autopod/cli:test:
+@autopod/cli:test: stdout | src/commands/series.test.ts > series commands > includes local spec files for series creation when opted in
+@autopod/cli:test:
+@autopod/cli:test: Creating series "autopod-cli-series-ai0PoL" with 1 pods...
+@autopod/cli:test:
+@autopod/cli:test:
+@autopod/cli:test: stdout | src/commands/series.test.ts > series commands > includes local spec files for series creation when opted in
+@autopod/cli:test:
+@autopod/cli:test: Series created: series-1
+@autopod/cli:test:
+@autopod/cli:test:   Name:    feature
+@autopod/cli:test:   PR mode: single
+@autopod/cli:test:   Auto-approve: no
+@autopod/cli:test:   Pods:
+@autopod/cli:test:
+@autopod/cli:test:     abcd1234  Build the first piece.  ○ Queued
+@autopod/cli:test:
+@autopod/cli:test: Track progress: ap series status series-1
+@autopod/cli:test:
+@autopod/cli:test:
+@autopod/cli:test: stdout | src/commands/series.test.ts > series commands > can disable runtime spec context for series creation
+@autopod/cli:test:
+@autopod/cli:test: Creating series "autopod-cli-series-CVuSKp" with 1 pods...
+@autopod/cli:test:
+@autopod/cli:test:
+@autopod/cli:test: stdout | src/commands/series.test.ts > series commands > can disable runtime spec context for series creation
+@autopod/cli:test:
+@autopod/cli:test: Series created: series-1
+@autopod/cli:test:
+@autopod/cli:test:   Name:    feature
+@autopod/cli:test:   PR mode: single
+@autopod/cli:test:   Auto-approve: no
+@autopod/cli:test:   Pods:
+@autopod/cli:test:
+@autopod/cli:test:     abcd1234  Build the first piece.  ○ Queued
+@autopod/cli:test:
+@autopod/cli:test: Track progress: ap series status series-1
+@autopod/cli:test:
+@autopod/cli:test:
+@autopod/cli:test: stdout | src/commands/pod.test.ts > continue-provider command > preserves paused provider-limit continuation
+@autopod/cli:test: Pod positive-urial provider continuation queued.
+@autopod/cli:test:
+@autopod/cli:test: stdout | src/commands/session.test.ts > pod commands > passes --sidecar flags as requireSidecars on run
+@autopod/cli:test: Pod abcd1234 created.
+@autopod/cli:test: Profile:  test
+@autopod/cli:test: Status:   ○ Queued
+@autopod/cli:test: Branch:   ap/abcd1234
+@autopod/cli:test: Target:   undefined
+@autopod/cli:test: Suite:    full
+@autopod/cli:test: Track progress: ap status abcd1234
+@autopod/cli:test:
+@autopod/cli:test: stdout | src/commands/pod.test.ts > ls command > ls since forwards a duration filter as an ISO timestamp
+@autopod/cli:test: No pods found.
+@autopod/cli:test:
+@autopod/cli:test: stdout | src/commands/session.test.ts > pod commands > accepts multiple --sidecar flags on start
+@autopod/cli:test: Pod abcd1234 created.
+@autopod/cli:test: Profile:  test
+@autopod/cli:test: Status:   ○ Queued
+@autopod/cli:test: Branch:   ap/abcd1234
+@autopod/cli:test: Target:   undefined
+@autopod/cli:test: Pod:      auto → pr
+@autopod/cli:test: Suite:    full
+@autopod/cli:test: Track progress: ap status abcd1234
+@autopod/cli:test:
+@autopod/cli:test: stdout | src/commands/session.test.ts > pod commands > omits requireSidecars when no --sidecar flags are passed
+@autopod/cli:test: Pod abcd1234 created.
+@autopod/cli:test: Profile:  test
+@autopod/cli:test: Status:   ○ Queued
+@autopod/cli:test: Branch:   ap/abcd1234
+@autopod/cli:test: Target:   undefined
+@autopod/cli:test: Suite:    full
+@autopod/cli:test: Track progress: ap status abcd1234
+@autopod/cli:test:
+@autopod/cli:test: stdout | src/commands/session.test.ts > pod commands > passes --ref-repo and --ref-from-profile flags as referenceRepos on start
+@autopod/cli:test: Pod abcd1234 created.
+@autopod/cli:test: Profile:  test
+@autopod/cli:test: Status:   ○ Queued
+@autopod/cli:test: Branch:   ap/abcd1234
+@autopod/cli:test: Target:   undefined
+@autopod/cli:test: Pod:      auto → pr
+@autopod/cli:test: Suite:    full
+@autopod/cli:test: Track progress: ap status abcd1234
+@autopod/cli:test:
+@autopod/cli:test: stdout | src/commands/pod.test.ts > update-from-base command > registers update-from-base <id>
+@autopod/cli:test: Validation is stopping. Update from base will run before the next validation step.
+@autopod/cli:test:
+@autopod/cli:test: stdout | src/commands/pod.test.ts > update-from-base command > resolves short ID before calling updateFromBase
+@autopod/cli:test: Validation is stopping. Update from base will run before the next validation step.
+@autopod/cli:test:
+@autopod/cli:test:  ✓ src/commands/workspace.test.ts (21 tests) 20ms
+@autopod/cli:test: stdout | src/commands/series.test.ts > series commands > does not construct a client or dispatch when canonical preflight fails
+@autopod/cli:test:
+@autopod/cli:test: Creating series "autopod-cli-series-EL3N1O" with 1 pods...
+@autopod/cli:test:
+@autopod/cli:test:
+@autopod/cli:test: stdout | src/commands/series.test.ts > series commands > does not construct a client or dispatch when canonical preflight fails
+@autopod/cli:test:
+@autopod/cli:test: Series created: series-1
+@autopod/cli:test:
+@autopod/cli:test:   Name:    feature
+@autopod/cli:test:   PR mode: single
+@autopod/cli:test:   Auto-approve: no
+@autopod/cli:test:   Pods:
+@autopod/cli:test:
+@autopod/cli:test:     abcd1234  Build the first piece.  ○ Queued
+@autopod/cli:test:
+@autopod/cli:test: Track progress: ap series status series-1
+@autopod/cli:test:
+@autopod/cli:test:
+@autopod/cli:test:  ✓ src/commands/provider-catalog.test.ts (5 tests) 38ms
+@autopod/cli:test: stdout | src/commands/session.test.ts > pod commands > exposes local spec files as runtime context for --spec pod creation by default
+@autopod/cli:test: Pod abcd1234 created.
+@autopod/cli:test: Profile:  test
+@autopod/cli:test: Status:   ○ Queued
+@autopod/cli:test: Branch:   ap/abcd1234
+@autopod/cli:test: Target:   undefined
+@autopod/cli:test: Suite:    full
+@autopod/cli:test: Track progress: ap status abcd1234
+@autopod/cli:test:
+@autopod/cli:test: stdout | src/commands/session.test.ts > pod commands > accepts contract.yml for --spec pod creation
+@autopod/cli:test: Pod abcd1234 created.
+@autopod/cli:test: Profile:  test
+@autopod/cli:test: Status:   ○ Queued
+@autopod/cli:test: Branch:   ap/abcd1234
+@autopod/cli:test: Target:   undefined
+@autopod/cli:test: Suite:    full
+@autopod/cli:test: Track progress: ap status abcd1234
+@autopod/cli:test:
+@autopod/cli:test: stdout | src/commands/session.test.ts > pod commands > includes local spec files for --spec pod creation when opted in
+@autopod/cli:test: Pod abcd1234 created.
+@autopod/cli:test: Profile:  test
+@autopod/cli:test: Status:   ○ Queued
+@autopod/cli:test: Branch:   ap/abcd1234
+@autopod/cli:test: Target:   undefined
+@autopod/cli:test: Suite:    full
+@autopod/cli:test: Track progress: ap status abcd1234
+@autopod/cli:test:
+@autopod/cli:test: stdout | src/commands/session.test.ts > pod commands > can disable runtime spec context for --spec pod creation
+@autopod/cli:test: Pod abcd1234 created.
+@autopod/cli:test: Profile:  test
+@autopod/cli:test: Status:   ○ Queued
+@autopod/cli:test: Branch:   ap/abcd1234
+@autopod/cli:test: Target:   undefined
+@autopod/cli:test: Suite:    full
+@autopod/cli:test: Track progress: ap status abcd1234
+@autopod/cli:test:
+@autopod/cli:test: stdout | src/commands/session.test.ts > pod commands > omits referenceRepos when no ref flags are passed
+@autopod/cli:test: Pod abcd1234 created.
+@autopod/cli:test: Profile:  test
+@autopod/cli:test: Status:   ○ Queued
+@autopod/cli:test: Branch:   ap/abcd1234
+@autopod/cli:test: Target:   undefined
+@autopod/cli:test: Pod:      auto → pr
+@autopod/cli:test: Suite:    full
+@autopod/cli:test: Track progress: ap status abcd1234
+@autopod/cli:test:
+@autopod/cli:test: stdout | src/commands/session.test.ts > pod commands > registers ls command that calls listSessions
+@autopod/cli:test: No pods found.
+@autopod/cli:test:
+@autopod/cli:test:  ❯ src/commands/series.test.ts (6 tests | 1 failed) 49ms
+@autopod/cli:test:      ✓ exposes local spec files as runtime context for series creation by default 12ms
+@autopod/cli:test:      ✓ rejects symlinked files in series spec context 4ms
+@autopod/cli:test:      ✓ accepts contract.yml for series creation 3ms
+@autopod/cli:test:      ✓ includes local spec files for series creation when opted in 2ms
+@autopod/cli:test:      ✓ can disable runtime spec context for series creation 4ms
+@autopod/cli:test:      × does not construct a client or dispatch when canonical preflight fails 24ms
+@autopod/cli:test: stdout | src/commands/session.test.ts > pod commands > registers ls command with filters
+@autopod/cli:test: No pods found.
+@autopod/cli:test:
+@autopod/cli:test: []
+@autopod/cli:test: stdout | src/commands/session.test.ts > pod commands > renders compact records without requiring JSON
+@autopod/cli:test: [2m┌──────────[22m[2m┬────────────────[22m[2m┬──────────────────[22m[2m┬──────────────────────────────────────────[22m[2m┬──────────┐[22m
+@autopod/cli:test: [2m│[22m[36m ID       [39m[2m│[22m[36m Profile        [39m[2m│[22m[36m Status           [39m[2m│[22m[36m Title                                    [39m[2m│[22m[36m Duration [39m[2m│[22m
+@autopod/cli:test: [2m├──────────[22m[2m┼────────────────[22m[2m┼──────────────────[22m[2m┼──────────────────────────────────────────[22m[2m┼──────────┤[22m
+@autopod/cli:test: [2m│[22m compact1 [2m│[22m test           [2m│[22m ◉ Running        [2m│[22m Compact title                            [2m│[22m -        [2m│[22m
+@autopod/cli:test: [2m└──────────[22m[2m┴────────────────[22m[2m┴──────────────────[22m[2m┴──────────────────────────────────────────[22m[2m┴──────────┘[22m
+@autopod/cli:test:
+@autopod/cli:test:  ✓ src/commands/spec.test.ts (7 tests) 74ms
+@autopod/cli:test: stdout | src/commands/session.test.ts > pod commands > registers tell command that calls sendMessage
+@autopod/cli:test: Message sent.
+@autopod/cli:test:
+@autopod/cli:test: stdout | src/commands/session.test.ts > pod commands > registers approve command that calls approveSession
+@autopod/cli:test: Pod abcd1234 approved.
+@autopod/cli:test:
+@autopod/cli:test: stdout | src/commands/session.test.ts > pod commands > passes approve reason to the daemon client
+@autopod/cli:test: Pod abcd1234 approved.
+@autopod/cli:test:
+@autopod/cli:test: stdout | src/commands/session.test.ts > pod commands > registers reject command that calls rejectSession
+@autopod/cli:test: Pod abcd1234 rejected with feedback.
+@autopod/cli:test:
+@autopod/cli:test: stdout | src/commands/session.test.ts > pod commands > registers kill command that calls killSession
+@autopod/cli:test: Pod abcd1234 killed.
+@autopod/cli:test:
+@autopod/cli:test: stdout | src/commands/session.test.ts > pod commands > registers approve --all-validated
+@autopod/cli:test: Approved: a, b
+@autopod/cli:test:
+@autopod/cli:test: stdout | src/commands/session.test.ts > pod commands > registers kill --all-failed
+@autopod/cli:test: Killed 1 pod(s): c
+@autopod/cli:test:
+@autopod/cli:test:  ❯ src/commands/session.test.ts (25 tests | 1 failed) 79ms
+@autopod/cli:test:      ✓ registers run command that calls createSession 10ms
+@autopod/cli:test:      ✓ passes --sidecar flags as requireSidecars on run 3ms
+@autopod/cli:test:      ✓ accepts multiple --sidecar flags on start 1ms
+@autopod/cli:test:      ✓ omits requireSidecars when no --sidecar flags are passed 1ms
+@autopod/cli:test:      ✓ passes --ref-repo and --ref-from-profile flags as referenceRepos on start 2ms
+@autopod/cli:test:      ✓ exposes local spec files as runtime context for --spec pod creation by default 7ms
+@autopod/cli:test:      ✓ rejects symlinked files in --spec pod context 3ms
+@autopod/cli:test:      ✓ accepts contract.yml for --spec pod creation 3ms
+@autopod/cli:test:      ✓ includes local spec files for --spec pod creation when opted in 2ms
+@autopod/cli:test:      ✓ can disable runtime spec context for --spec pod creation 2ms
+@autopod/cli:test:      ✓ omits referenceRepos when no ref flags are passed 1ms
+@autopod/cli:test:      ✓ registers ls command that calls listSessions 1ms
+@autopod/cli:test:      ✓ registers ls command with filters 0ms
+@autopod/cli:test:      ✓ passes bounded compact multi-status options to the client 0ms
+@autopod/cli:test:      ✓ renders compact records without requiring JSON 7ms
+@autopod/cli:test:      ✓ rejects a non-positive ls limit with an actionable error 0ms
+@autopod/cli:test:      × registers status command that calls getSession 28ms
+@autopod/cli:test:      ✓ registers tell command that calls sendMessage 1ms
+@autopod/cli:test:      ✓ registers approve command that calls approveSession 0ms
+@autopod/cli:test:      ✓ passes approve reason to the daemon client 0ms
+@autopod/cli:test:      ✓ registers reject command that calls rejectSession 0ms
+@autopod/cli:test:      ✓ registers kill command that calls killSession 0ms
+@autopod/cli:test:      ✓ registers approve --all-validated 0ms
+@autopod/cli:test:      ✓ prints approve all readiness skipped pods 0ms
+@autopod/cli:test:      ✓ registers kill --all-failed 3ms
+@autopod/cli:test:  ✓ src/commands/pod.test.ts (20 tests) 177ms
+@autopod/mobile-web:test:  ✓ src/lib/pod-display.test.ts (5 tests) 4ms
+@autopod/mobile-web:test:  ✓ src/lib/token.test.ts (10 tests) 12ms
+@autopod/mobile-web:test:  ✓ src/lib/api.test.ts (8 tests) 7ms
+@autopod/mobile-web:test:  ✓ src/lib/pod-filters.test.ts (5 tests) 8ms
+@autopod/mobile-web:test:  ✓ src/components/ActivityList.test.tsx (3 tests) 22ms
+@autopod/cli:test:  ✓ src/commands/schedule.test.ts (4 tests) 163ms
+@autopod/mobile-web:test:  ✓ src/components/TaskRetryPanel.test.tsx (2 tests) 193ms
+@autopod/cli:test: stderr | src/config/config-store.test.ts > ConfigStore > falls back to defaults on invalid config
+@autopod/cli:test: Warning: Invalid config at /tmp/autopod-test-1788786820770/.autopod/config.yaml, using defaults
+@autopod/cli:test:
+@autopod/cli:test:  ✓ src/auth/msal-cache.test.ts (4 tests) 5ms
+@autopod/cli:test:  ✓ src/commands/mobile.test.ts (6 tests) 66ms
+@autopod/cli:test:  ✓ src/config/config-store.test.ts (6 tests) 76ms
+@autopod/cli:test: stderr | src/commands/profile.test.ts > profile commands > leaves profile credentials unchanged when Pi auth has the wrong provider
+@autopod/cli:test:
+@autopod/cli:test: Pi auth.json did not contain credentials for provider "openai-codex".
+@autopod/cli:test:
+@autopod/mobile-web:test: stderr | src/screens/ScanReport.test.tsx > retains a human selection through lost response and reload, and requires a separate repair launch
+@autopod/mobile-web:test: ⚠️ React Router Future Flag Warning: React Router will begin wrapping state updates in `React.startTransition` in v7. You can use the `v7_startTransition` future flag to opt-in early. For more information, see https://reactrouter.com/v6/upgrading/future#v7_starttransition.
+@autopod/mobile-web:test: ⚠️ React Router Future Flag Warning: Relative route resolution within Splat routes is changing in v7. You can use the `v7_relativeSplatPath` future flag to opt-in early. For more information, see https://reactrouter.com/v6/upgrading/future#v7_relativesplatpath.
+@autopod/mobile-web:test:
+@autopod/mobile-web:test:  ✓ src/components/ValidationSummary.test.tsx (8 tests) 138ms
+@autopod/mobile-web:test:  ✓ src/screens/ScanReport.test.tsx (1 test) 197ms
+@autopod/mobile-web:test:  ✓ src/components/EscalationCard.test.tsx (9 tests) 239ms
+@autopod/cli:test:  ✓ src/api/client.test.ts (33 tests) 21ms
+@autopod/cli:test: - Fetching daemon-native Podsitter status...
+@autopod/cli:test: ✔ Fetching daemon-native Podsitter status...
+@autopod/cli:test: - Fetching daemon-native Podsitter status...
+@autopod/cli:test: ✔ Fetching daemon-native Podsitter status...
+@autopod/cli:test: - Fetching Podsitter decisions...
+@autopod/cli:test: ✔ Fetching Podsitter decisions...
+@autopod/cli:test: - Fetching Podsitter decisions...
+@autopod/cli:test: ✔ Fetching Podsitter decisions...
+@autopod/cli:test:  ✓ src/commands/podsitter.test.ts (5 tests) 32ms
+@autopod/cli:test:  ✓ src/commands/provider-account.test.ts (14 tests) 1390ms
+@autopod/cli:test:      ✓ captures exactly the requested Pi provider into a provider account  335ms
+@autopod/cli:test:      ✓ leaves provider account credentials unchanged when Pi auth is malformed  447ms
+@autopod/cli:test:      ✓ leaves provider account credentials unchanged when Pi login is cancelled  319ms
+@autopod/cli:test: stderr | src/commands/profile.test.ts > profile commands > leaves profile credentials unchanged when Pi auth is malformed
+@autopod/cli:test:
+@autopod/cli:test: Pi auth.json was not valid JSON.
+@autopod/cli:test:
+@autopod/cli:test:  ✓ src/utils/truncate.test.ts (8 tests) 9ms
+@autopod/cli:test:  ✓ src/commands/auth.test.ts (3 tests) 27ms
+@autopod/cli:test:  ✓ src/utils/id-resolver.test.ts (5 tests) 4ms
+@autopod/cli:test:  ✓ src/output/colors.test.ts (8 tests) 17ms
+@autopod/cli:test:  ✓ src/auth/token-refresh.test.ts (1 test) 6ms
+@autopod/cli:test:  ✓ src/utils/error-handler.test.ts (8 tests) 4ms
+@autopod/cli:test:  ✓ src/auth/token-manager.test.ts (5 tests) 3ms
+@autopod/cli:test: stderr | src/commands/profile.test.ts > profile commands > leaves profile credentials unchanged when the selected Pi credential is empty
+@autopod/cli:test:
+@autopod/cli:test: Pi credential for provider "anthropic" was malformed.
+@autopod/cli:test:
+@autopod/mobile-web:test:  ✓ src/lib/pod-actions.test.ts (22 tests) 18ms
+@autopod/mobile-web:test:  ✓ src/lib/task-markdown.test.ts (4 tests) 3ms
+@autopod/cli:test: stderr | src/commands/profile.test.ts > profile commands > leaves profile credentials unchanged when Pi login is cancelled
+@autopod/cli:test:
+@autopod/cli:test: pi exited with code 130
+@autopod/cli:test:
+@autopod/cli:test: stderr | src/commands/profile.test.ts > profile commands > leaves profile credentials unchanged when the Pi executable is missing
+@autopod/cli:test:
+@autopod/cli:test: Pi CLI not found. Install @earendil-works/pi-coding-agent@0.80.6 and retry.
+@autopod/cli:test:
+@autopod/cli:test:  ✓ src/commands/profile.test.ts (21 tests) 1465ms
+@autopod/cli:test:      ✓ leaves profile credentials unchanged when Pi auth has the wrong provider  330ms
+@autopod/cli:test:      ✓ leaves profile credentials unchanged when Pi auth is malformed  325ms
+@autopod/cli:test:
+@autopod/cli:test: ⎯⎯⎯⎯⎯⎯⎯ Failed Tests 2 ⎯⎯⎯⎯⎯⎯⎯
+@autopod/cli:test:
+@autopod/cli:test:  FAIL  src/commands/series.test.ts > series commands > does not construct a client or dispatch when canonical preflight fails
+@autopod/cli:test: AssertionError: promise resolved "Command{ _events: {}, …(43), …(2) }" instead of rejecting
+@autopod/cli:test:
+@autopod/cli:test: - Expected
+@autopod/cli:test: + Received
+@autopod/cli:test:
+@autopod/cli:test: - Error {
+@autopod/cli:test: -   "message": "rejected promise",
+@autopod/cli:test: + Command {
+@autopod/cli:test: +   "_actionHandler": null,
+@autopod/cli:test: +   "_addImplicitHelpCommand": undefined,
+@autopod/cli:test: +   "_aliases": [],
+@autopod/cli:test: +   "_allowExcessArguments": false,
+@autopod/cli:test: +   "_allowUnknownOption": false,
+@autopod/cli:test: +   "_args": [],
+@autopod/cli:test: +   "_argsDescription": undefined,
+@autopod/cli:test: +   "_combineFlagAndOptionalValue": true,
+@autopod/cli:test: +   "_defaultCommandGroup": undefined,
+@autopod/cli:test: +   "_defaultCommandName": null,
+@autopod/cli:test: +   "_defaultOptionGroup": undefined,
+@autopod/cli:test: +   "_description": "",
+@autopod/cli:test: +   "_enablePositionalOptions": false,
+@autopod/cli:test: +   "_events": {},
+@autopod/cli:test: +   "_eventsCount": 0,
+@autopod/cli:test: +   "_executableDir": null,
+@autopod/cli:test: +   "_executableFile": null,
+@autopod/cli:test: +   "_executableHandler": false,
+@autopod/cli:test: +   "_exitCallback": [Function anonymous],
+@autopod/cli:test: +   "_helpCommand": undefined,
+@autopod/cli:test: +   "_helpConfiguration": {},
+@autopod/cli:test: +   "_helpGroupHeading": undefined,
+@autopod/cli:test: +   "_helpOption": undefined,
+@autopod/cli:test: +   "_hidden": false,
+@autopod/cli:test: +   "_lifeCycleHooks": {},
+@autopod/cli:test: +   "_maxListeners": undefined,
+@autopod/cli:test: +   "_name": "ap",
+@autopod/cli:test: +   "_optionValueSources": {},
+@autopod/cli:test: +   "_optionValues": {},
+@autopod/cli:test: +   "_outputConfiguration": {
+@autopod/cli:test: +     "getErrHasColors": [Function getErrHasColors],
+@autopod/cli:test: +     "getErrHelpWidth": [Function getErrHelpWidth],
+@autopod/cli:test: +     "getOutHasColors": [Function getOutHasColors],
+@autopod/cli:test: +     "getOutHelpWidth": [Function getOutHelpWidth],
+@autopod/cli:test: +     "outputError": [Function outputError],
+@autopod/cli:test: +     "stripColor": [Function stripColor],
+@autopod/cli:test: +     "writeErr": [Function writeErr],
+@autopod/cli:test: +     "writeOut": [Function writeOut],
+@autopod/cli:test: +   },
+@autopod/cli:test: +   "_passThroughOptions": false,
+@autopod/cli:test: +   "_savedState": {
+@autopod/cli:test: +     "_name": "",
+@autopod/cli:test: +     "_optionValueSources": {},
+@autopod/cli:test: +     "_optionValues": {},
+@autopod/cli:test: +   },
+@autopod/cli:test: +   "_scriptPath": "ap",
+@autopod/cli:test: +   "_showHelpAfterError": false,
+@autopod/cli:test: +   "_showSuggestionAfterError": true,
+@autopod/cli:test: +   "_storeOptionsAsProperties": false,
+@autopod/cli:test: +   "_summary": "",
+@autopod/cli:test: +   "args": [
+@autopod/cli:test: +     "series",
+@autopod/cli:test: +     "create",
+@autopod/cli:test: +     "/tmp/autopod-cli-series-EL3N1O",
+@autopod/cli:test: +     "--profile",
+@autopod/cli:test: +     "test",
+@autopod/cli:test: +   ],
+@autopod/cli:test: +   "commands": [
+@autopod/cli:test: +     Command {
+@autopod/cli:test: +       "_actionHandler": null,
+@autopod/cli:test: +       "_addImplicitHelpCommand": undefined,
+@autopod/cli:test: +       "_aliases": [],
+@autopod/cli:test: +       "_allowExcessArguments": false,
+@autopod/cli:test: +       "_allowUnknownOption": false,
+@autopod/cli:test: +       "_args": [],
+@autopod/cli:test: +       "_argsDescription": undefined,
+@autopod/cli:test: +       "_combineFlagAndOptionalValue": true,
+@autopod/cli:test: +       "_defaultCommandGroup": undefined,
+@autopod/cli:test: +       "_defaultCommandName": null,
+@autopod/cli:test: +       "_defaultOptionGroup": undefined,
+@autopod/cli:test: +       "_description": "Manage series of pods",
+@autopod/cli:test: +       "_enablePositionalOptions": false,
+@autopod/cli:test: +       "_events": {},
+@autopod/cli:test: +       "_eventsCount": 0,
+@autopod/cli:test: +       "_executableDir": null,
+@autopod/cli:test: +       "_executableFile": null,
+@autopod/cli:test: +       "_executableHandler": false,
+@autopod/cli:test: +       "_exitCallback": [Function anonymous],
+@autopod/cli:test: +       "_helpCommand": undefined,
+@autopod/cli:test: +       "_helpConfiguration": {},
+@autopod/cli:test: +       "_helpGroupHeading": undefined,
+@autopod/cli:test: +       "_helpOption": undefined,
+@autopod/cli:test: +       "_hidden": false,
+@autopod/cli:test: +       "_lifeCycleHooks": {},
+@autopod/cli:test: +       "_maxListeners": undefined,
+@autopod/cli:test: +       "_name": "series",
+@autopod/cli:test: +       "_optionValueSources": {},
+@autopod/cli:test: +       "_optionValues": {},
+@autopod/cli:test: +       "_outputConfiguration": {
+@autopod/cli:test: +         "getErrHasColors": [Function getErrHasColors],
+@autopod/cli:test: +         "getErrHelpWidth": [Function getErrHelpWidth],
+@autopod/cli:test: +         "getOutHasColors": [Function getOutHasColors],
+@autopod/cli:test: +         "getOutHelpWidth": [Function getOutHelpWidth],
+@autopod/cli:test: +         "outputError": [Function outputError],
+@autopod/cli:test: +         "stripColor": [Function stripColor],
+@autopod/cli:test: +         "writeErr": [Function writeErr],
+@autopod/cli:test: +         "writeOut": [Function writeOut],
+@autopod/cli:test: +       },
+@autopod/cli:test: +       "_passThroughOptions": false,
+@autopod/cli:test: +       "_savedState": {
+@autopod/cli:test: +         "_name": "series",
+@autopod/cli:test: +         "_optionValueSources": {},
+@autopod/cli:test: +         "_optionValues": {},
+@autopod/cli:test: +       },
+@autopod/cli:test: +       "_scriptPath": null,
+@autopod/cli:test: +       "_showHelpAfterError": false,
+@autopod/cli:test: +       "_showSuggestionAfterError": true,
+@autopod/cli:test: +       "_storeOptionsAsProperties": false,
+@autopod/cli:test: +       "_summary": "",
+@autopod/cli:test: +       "args": [
+@autopod/cli:test: +         "create",
+@autopod/cli:test: +         "/tmp/autopod-cli-series-EL3N1O",
+@autopod/cli:test: +         "--profile",
+@autopod/cli:test: +         "test",
+@autopod/cli:test: +       ],
+@autopod/cli:test: +       "commands": [
+@autopod/cli:test: +         Command {
+@autopod/cli:test: +           "_actionHandler": [Function listener],
+@autopod/cli:test: +           "_addImplicitHelpCommand": undefined,
+@autopod/cli:test: +           "_aliases": [],
+@autopod/cli:test: +           "_allowExcessArguments": false,
+@autopod/cli:test: +           "_allowUnknownOption": false,
+@autopod/cli:test: +           "_args": [
+@autopod/cli:test: +             Argument {
+@autopod/cli:test: +               "_name": "folder",
+@autopod/cli:test: +               "argChoices": undefined,
+@autopod/cli:test: +               "defaultValue": undefined,
+@autopod/cli:test: +               "defaultValueDescription": undefined,
+@autopod/cli:test: +               "description": "",
+@autopod/cli:test: +               "parseArg": undefined,
+@autopod/cli:test: +               "required": true,
+@autopod/cli:test: +               "variadic": false,
+@autopod/cli:test: +             },
+@autopod/cli:test: +           ],
+@autopod/cli:test: +           "_argsDescription": undefined,
+@autopod/cli:test: +           "_combineFlagAndOptionalValue": true,
+@autopod/cli:test: +           "_defaultCommandGroup": undefined,
+@autopod/cli:test: +           "_defaultCommandName": null,
+@autopod/cli:test: +           "_defaultOptionGroup": undefined,
+@autopod/cli:test: +           "_description": "Create a series of pods from a spec folder (containing purpose.md, design.md, and briefs/).",
+@autopod/cli:test: +           "_enablePositionalOptions": false,
+@autopod/cli:test: +           "_events": {
+@autopod/cli:test: +             "option:auto-approve": [Function anonymous],
+@autopod/cli:test: +             "option:base-branch": [Function anonymous],
+@autopod/cli:test: +             "option:include-specs": [Function anonymous],
+@autopod/cli:test: +             "option:no-spec-context": [Function anonymous],
+@autopod/cli:test: +             "option:pr-mode": [Function anonymous],
+@autopod/cli:test: +             "option:profile": [Function anonymous],
+@autopod/cli:test: +             "option:series-name": [Function anonymous],
+@autopod/cli:test: +             "option:start-branch": [Function anonymous],
+@autopod/cli:test: +           },
+@autopod/cli:test: +           "_eventsCount": 8,
+@autopod/cli:test: +           "_executableDir": null,
+@autopod/cli:test: +           "_executableFile": null,
+@autopod/cli:test: +           "_executableHandler": false,
+@autopod/cli:test: +           "_exitCallback": [Function anonymous],
+@autopod/cli:test: +           "_helpCommand": undefined,
+@autopod/cli:test: +           "_helpConfiguration": {},
+@autopod/cli:test: +           "_helpGroupHeading": undefined,
+@autopod/cli:test: +           "_helpOption": Option {
+@autopod/cli:test: +             "argChoices": undefined,
+@autopod/cli:test: +             "conflictsWith": [],
+@autopod/cli:test: +             "defaultValue": undefined,
+@autopod/cli:test: +             "defaultValueDescription": undefined,
+@autopod/cli:test: +             "description": "display help for command",
+@autopod/cli:test: +             "envVar": undefined,
+@autopod/cli:test: +             "flags": "-h, --help",
+@autopod/cli:test: +             "helpGroupHeading": undefined,
+@autopod/cli:test: +             "hidden": false,
+@autopod/cli:test: +             "implied": undefined,
+@autopod/cli:test: +             "long": "--help",
+@autopod/cli:test: +             "mandatory": false,
+@autopod/cli:test: +             "negate": false,
+@autopod/cli:test: +             "optional": false,
+@autopod/cli:test: +             "parseArg": undefined,
+@autopod/cli:test: +             "presetArg": undefined,
+@autopod/cli:test: +             "required": false,
+@autopod/cli:test: +             "short": "-h",
+@autopod/cli:test: +             "variadic": false,
+@autopod/cli:test: +           },
+@autopod/cli:test: +           "_hidden": false,
+@autopod/cli:test: +           "_lifeCycleHooks": {},
+@autopod/cli:test: +           "_maxListeners": undefined,
+@autopod/cli:test: +           "_name": "create",
+@autopod/cli:test: +           "_optionValueSources": {
+@autopod/cli:test: +             "prMode": "default",
+@autopod/cli:test: +             "profile": "cli",
+@autopod/cli:test: +             "specContext": "default",
+@autopod/cli:test: +           },
+@autopod/cli:test: +           "_optionValues": {
+@autopod/cli:test: +             "prMode": "single",
+@autopod/cli:test: +             "profile": "test",
+@autopod/cli:test: +             "specContext": true,
+@autopod/cli:test: +           },
+@autopod/cli:test: +           "_outputConfiguration": {
+@autopod/cli:test: +             "getErrHasColors": [Function getErrHasColors],
+@autopod/cli:test: +             "getErrHelpWidth": [Function getErrHelpWidth],
+@autopod/cli:test: +             "getOutHasColors": [Function getOutHasColors],
+@autopod/cli:test: +             "getOutHelpWidth": [Function getOutHelpWidth],
+@autopod/cli:test: +             "outputError": [Function outputError],
+@autopod/cli:test: +             "stripColor": [Function stripColor],
+@autopod/cli:test: +             "writeErr": [Function writeErr],
+@autopod/cli:test: +             "writeOut": [Function writeOut],
+@autopod/cli:test: +           },
+@autopod/cli:test: +           "_passThroughOptions": false,
+@autopod/cli:test: +           "_savedState": {
+@autopod/cli:test: +             "_name": "create",
+@autopod/cli:test: +             "_optionValueSources": {
+@autopod/cli:test: +               "prMode": "default",
+@autopod/cli:test: +               "specContext": "default",
+@autopod/cli:test: +             },
+@autopod/cli:test: +             "_optionValues": {
+@autopod/cli:test: +               "prMode": "single",
+@autopod/cli:test: +               "specContext": true,
+@autopod/cli:test: +             },
+@autopod/cli:test: +           },
+@autopod/cli:test: +           "_scriptPath": null,
+@autopod/cli:test: +           "_showHelpAfterError": false,
+@autopod/cli:test: +           "_showSuggestionAfterError": true,
+@autopod/cli:test: +           "_storeOptionsAsProperties": false,
+@autopod/cli:test: +           "_summary": "",
+@autopod/cli:test: +           "args": [
+@autopod/cli:test: +             "/tmp/autopod-cli-series-EL3N1O",
+@autopod/cli:test: +           ],
+@autopod/cli:test: +           "commands": [],
+@autopod/cli:test: +           "options": [
+@autopod/cli:test: +             Option {
+@autopod/cli:test: +               "argChoices": undefined,
+@autopod/cli:test: +               "conflictsWith": [],
+@autopod/cli:test: +               "defaultValue": undefined,
+@autopod/cli:test: +               "defaultValueDescription": undefined,
+@autopod/cli:test: +               "description": "Profile to use for all pods",
+@autopod/cli:test: +               "envVar": undefined,
+@autopod/cli:test: +               "flags": "-p, --profile <name>",
+@autopod/cli:test: +               "helpGroupHeading": undefined,
+@autopod/cli:test: +               "hidden": false,
+@autopod/cli:test: +               "implied": undefined,
+@autopod/cli:test: +               "long": "--profile",
+@autopod/cli:test: +               "mandatory": true,
+@autopod/cli:test: +               "negate": false,
+@autopod/cli:test: +               "optional": false,
+@autopod/cli:test: +               "parseArg": undefined,
+@autopod/cli:test: +               "presetArg": undefined,
+@autopod/cli:test: +               "required": true,
+@autopod/cli:test: +               "short": "-p",
+@autopod/cli:test: +               "variadic": false,
+@autopod/cli:test: +             },
+@autopod/cli:test: +             Option {
+@autopod/cli:test: +               "argChoices": undefined,
+@autopod/cli:test: +               "conflictsWith": [],
+@autopod/cli:test: +               "defaultValue": undefined,
+@autopod/cli:test: +               "defaultValueDescription": undefined,
+@autopod/cli:test: +               "description": "Branch/ref to start root pods from while targeting --base-branch",
+@autopod/cli:test: +               "envVar": undefined,
+@autopod/cli:test: +               "flags": "--start-branch <branch>",
+@autopod/cli:test: +               "helpGroupHeading": undefined,
+@autopod/cli:test: +               "hidden": false,
+@autopod/cli:test: +               "implied": undefined,
+@autopod/cli:test: +               "long": "--start-branch",
+@autopod/cli:test: +               "mandatory": false,
+@autopod/cli:test: +               "negate": false,
+@autopod/cli:test: +               "optional": false,
+@autopod/cli:test: +               "parseArg": undefined,
+@autopod/cli:test: +               "presetArg": undefined,
+@autopod/cli:test: +               "required": true,
+@autopod/cli:test: +               "short": undefined,
+@autopod/cli:test: +               "variadic": false,
+@autopod/cli:test: +             },
+@autopod/cli:test: +             Option {
+@autopod/cli:test: +               "argChoices": undefined,
+@autopod/cli:test: +               "conflictsWith": [],
+@autopod/cli:test: +               "defaultValue": undefined,
+@autopod/cli:test: +               "defaultValueDescription": undefined,
+@autopod/cli:test: +               "description": "Base branch (default: profile default)",
+@autopod/cli:test: +               "envVar": undefined,
+@autopod/cli:test: +               "flags": "-b, --base-branch <branch>",
+@autopod/cli:test: +               "helpGroupHeading": undefined,
+@autopod/cli:test: +               "hidden": false,
+@autopod/cli:test: +               "implied": undefined,
+@autopod/cli:test: +               "long": "--base-branch",
+@autopod/cli:test: +               "mandatory": false,
+@autopod/cli:test: +               "negate": false,
+@autopod/cli:test: +               "optional": false,
+@autopod/cli:test: +               "parseArg": undefined,
+@autopod/cli:test: +               "presetArg": undefined,
+@autopod/cli:test: +               "required": true,
+@autopod/cli:test: +               "short": "-b",
+@autopod/cli:test: +               "variadic": false,
+@autopod/cli:test: +             },
+@autopod/cli:test: +             Option {
+@autopod/cli:test: +               "argChoices": undefined,
+@autopod/cli:test: +               "conflictsWith": [],
+@autopod/cli:test: +               "defaultValue": "single",
+@autopod/cli:test: +               "defaultValueDescription": undefined,
+@autopod/cli:test: +               "description": "PR creation mode: single (one PR for full series), stacked (one PR per pod), none",
+@autopod/cli:test: +               "envVar": undefined,
+@autopod/cli:test: +               "flags": "--pr-mode <mode>",
+@autopod/cli:test: +               "helpGroupHeading": undefined,
+@autopod/cli:test: +               "hidden": false,
+@autopod/cli:test: +               "implied": undefined,
+@autopod/cli:test: +               "long": "--pr-mode",
+@autopod/cli:test: +               "mandatory": false,
+@autopod/cli:test: +               "negate": false,
+@autopod/cli:test: +               "optional": false,
+@autopod/cli:test: +               "parseArg": undefined,
+@autopod/cli:test: +               "presetArg": undefined,
+@autopod/cli:test: +               "required": true,
+@autopod/cli:test: +               "short": undefined,
+@autopod/cli:test: +               "variadic": false,
+@autopod/cli:test: +             },
+@autopod/cli:test: +             Option {
+@autopod/cli:test: +               "argChoices": undefined,
+@autopod/cli:test: +               "conflictsWith": [],
+@autopod/cli:test: +               "defaultValue": undefined,
+@autopod/cli:test: +               "defaultValueDescription": undefined,
+@autopod/cli:test: +               "description": "Override series name (default: derived from folder name)",
+@autopod/cli:test: +               "envVar": undefined,
+@autopod/cli:test: +               "flags": "--series-name <name>",
+@autopod/cli:test: +               "helpGroupHeading": undefined,
+@autopod/cli:test: +               "hidden": false,
+@autopod/cli:test: +               "implied": undefined,
+@autopod/cli:test: +               "long": "--series-name",
+@autopod/cli:test: +               "mandatory": false,
+@autopod/cli:test: +               "negate": false,
+@autopod/cli:test: +               "optional": false,
+@autopod/cli:test: +               "parseArg": undefined,
+@autopod/cli:test: +               "presetArg": undefined,
+@autopod/cli:test: +               "required": true,
+@autopod/cli:test: +               "short": undefined,
+@autopod/cli:test: +               "variadic": false,
+@autopod/cli:test: +             },
+@autopod/cli:test: +             Option {
+@autopod/cli:test: +               "argChoices": undefined,
+@autopod/cli:test: +               "conflictsWith": [],
+@autopod/cli:test: +               "defaultValue": undefined,
+@autopod/cli:test: +               "defaultValueDescription": undefined,
+@autopod/cli:test: +               "description": "Auto-approve each pod once it reaches validated — no human gate",
+@autopod/cli:test: +               "envVar": undefined,
+@autopod/cli:test: +               "flags": "--auto-approve",
+@autopod/cli:test: +               "helpGroupHeading": undefined,
+@autopod/cli:test: +               "hidden": false,
+@autopod/cli:test: +               "implied": undefined,
+@autopod/cli:test: +               "long": "--auto-approve",
+@autopod/cli:test: +               "mandatory": false,
+@autopod/cli:test: +               "negate": false,
+@autopod/cli:test: +               "optional": false,
+@autopod/cli:test: +               "parseArg": undefined,
+@autopod/cli:test: +               "presetArg": undefined,
+@autopod/cli:test: +               "required": false,
+@autopod/cli:test: +               "short": undefined,
+@autopod/cli:test: +               "variadic": false,
+@autopod/cli:test: +             },
+@autopod/cli:test: +             Option {
+@autopod/cli:test: +               "argChoices": undefined,
+@autopod/cli:test: +               "conflictsWith": [],
+@autopod/cli:test: +               "defaultValue": undefined,
+@autopod/cli:test: +               "defaultValueDescription": undefined,
+@autopod/cli:test: +               "description": "commit spec folder files onto root pod branches before agents start",
+@autopod/cli:test: +               "envVar": undefined,
+@autopod/cli:test: +               "flags": "--include-specs",
+@autopod/cli:test: +               "helpGroupHeading": undefined,
+@autopod/cli:test: +               "hidden": false,
+@autopod/cli:test: +               "implied": undefined,
+@autopod/cli:test: +               "long": "--include-specs",
+@autopod/cli:test: +               "mandatory": false,
+@autopod/cli:test: +               "negate": false,
+@autopod/cli:test: +               "optional": false,
+@autopod/cli:test: +               "parseArg": undefined,
+@autopod/cli:test: +               "presetArg": undefined,
+@autopod/cli:test: +               "required": false,
+@autopod/cli:test: +               "short": undefined,
+@autopod/cli:test: +               "variadic": false,
+@autopod/cli:test: +             },
+@autopod/cli:test: +             Option {
+@autopod/cli:test: +               "argChoices": undefined,
+@autopod/cli:test: +               "conflictsWith": [],
+@autopod/cli:test: +               "defaultValue": undefined,
+@autopod/cli:test: +               "defaultValueDescription": undefined,
+@autopod/cli:test: +               "description": "do not expose spec folder files as runtime-only context",
+@autopod/cli:test: +               "envVar": undefined,
+@autopod/cli:test: +               "flags": "--no-spec-context",
+@autopod/cli:test: +               "helpGroupHeading": undefined,
+@autopod/cli:test: +               "hidden": false,
+@autopod/cli:test: +               "implied": undefined,
+@autopod/cli:test: +               "long": "--no-spec-context",
+@autopod/cli:test: +               "mandatory": false,
+@autopod/cli:test: +               "negate": true,
+@autopod/cli:test: +               "optional": false,
+@autopod/cli:test: +               "parseArg": undefined,
+@autopod/cli:test: +               "presetArg": undefined,
+@autopod/cli:test: +               "required": false,
+@autopod/cli:test: +               "short": undefined,
+@autopod/cli:test: +               "variadic": false,
+@autopod/cli:test: +             },
+@autopod/cli:test: +           ],
+@autopod/cli:test: +           "parent": [Circular],
+@autopod/cli:test: +           "processedArgs": [
+@autopod/cli:test: +             "/tmp/autopod-cli-series-EL3N1O",
+@autopod/cli:test: +           ],
+@autopod/cli:test: +           "rawArgs": [],
+@autopod/cli:test: +           "registeredArguments": [
+@autopod/cli:test: +             Argument {
+@autopod/cli:test: +               "_name": "folder",
+@autopod/cli:test: +               "argChoices": undefined,
+@autopod/cli:test: +               "defaultValue": undefined,
+@autopod/cli:test: +               "defaultValueDescription": undefined,
+@autopod/cli:test: +               "description": "",
+@autopod/cli:test: +               "parseArg": undefined,
+@autopod/cli:test: +               "required": true,
+@autopod/cli:test: +               "variadic": false,
+@autopod/cli:test: +             },
+@autopod/cli:test: +           ],
+@autopod/cli:test: +           Symbol(shapeMode): false,
+@autopod/cli:test: +           Symbol(kCapture): false,
+@autopod/cli:test: +         },
+@autopod/cli:test: +         Command {
+@autopod/cli:test: +           "_actionHandler": [Function listener],
+@autopod/cli:test: +           "_addImplicitHelpCommand": undefined,
+@autopod/cli:test: +           "_aliases": [],
+@autopod/cli:test: +           "_allowExcessArguments": false,
+@autopod/cli:test: +           "_allowUnknownOption": false,
+@autopod/cli:test: +           "_args": [
+@autopod/cli:test: +             Argument {
+@autopod/cli:test: +               "_name": "series-id",
+@autopod/cli:test: +               "argChoices": undefined,
+@autopod/cli:test: +               "defaultValue": undefined,
+@autopod/cli:test: +               "defaultValueDescription": undefined,
+@autopod/cli:test: +               "description": "",
+@autopod/cli:test: +               "parseArg": undefined,
+@autopod/cli:test: +               "required": true,
+@autopod/cli:test: +               "variadic": false,
+@autopod/cli:test: +             },
+@autopod/cli:test: +           ],
+@autopod/cli:test: +           "_argsDescription": undefined,
+@autopod/cli:test: +           "_combineFlagAndOptionalValue": true,
+@autopod/cli:test: +           "_defaultCommandGroup": undefined,
+@autopod/cli:test: +           "_defaultCommandName": null,
+@autopod/cli:test: +           "_defaultOptionGroup": undefined,
+@autopod/cli:test: +           "_description": "Show status of a series",
+@autopod/cli:test: +           "_enablePositionalOptions": false,
+@autopod/cli:test: +           "_events": {},
+@autopod/cli:test: +           "_eventsCount": 0,
+@autopod/cli:test: +           "_executableDir": null,
+@autopod/cli:test: +           "_executableFile": null,
+@autopod/cli:test: +           "_executableHandler": false,
+@autopod/cli:test: +           "_exitCallback": [Function anonymous],
+@autopod/cli:test: +           "_helpCommand": undefined,
+@autopod/cli:test: +           "_helpConfiguration": {},
+@autopod/cli:test: +           "_helpGroupHeading": undefined,
+@autopod/cli:test: +           "_helpOption": undefined,
+@autopod/cli:test: +           "_hidden": false,
+@autopod/cli:test: +           "_lifeCycleHooks": {},
+@autopod/cli:test: +           "_maxListeners": undefined,
+@autopod/cli:test: +           "_name": "status",
+@autopod/cli:test: +           "_optionValueSources": {},
+@autopod/cli:test: +           "_optionValues": {},
+@autopod/cli:test: +           "_outputConfiguration": {
+@autopod/cli:test: +             "getErrHasColors": [Function getErrHasColors],
+@autopod/cli:test: +             "getErrHelpWidth": [Function getErrHelpWidth],
+@autopod/cli:test: +             "getOutHasColors": [Function getOutHasColors],
+@autopod/cli:test: +             "getOutHelpWidth": [Function getOutHelpWidth],
+@autopod/cli:test: +             "outputError": [Function outputError],
+@autopod/cli:test: +             "stripColor": [Function stripColor],
+@autopod/cli:test: +             "writeErr": [Function writeErr],
+@autopod/cli:test: +             "writeOut": [Function writeOut],
+@autopod/cli:test: +           },
+@autopod/cli:test: +           "_passThroughOptions": false,
+@autopod/cli:test: +           "_savedState": null,
+@autopod/cli:test: +           "_scriptPath": null,
+@autopod/cli:test: +           "_showHelpAfterError": false,
+@autopod/cli:test: +           "_showSuggestionAfterError": true,
+@autopod/cli:test: +           "_storeOptionsAsProperties": false,
+@autopod/cli:test: +           "_summary": "",
+@autopod/cli:test: +           "args": [],
+@autopod/cli:test: +           "commands": [],
+@autopod/cli:test: +           "options": [],
+@autopod/cli:test: +           "parent": [Circular],
+@autopod/cli:test: +           "processedArgs": [],
+@autopod/cli:test: +           "rawArgs": [],
+@autopod/cli:test: +           "registeredArguments": [
+@autopod/cli:test: +             Argument {
+@autopod/cli:test: +               "_name": "series-id",
+@autopod/cli:test: +               "argChoices": undefined,
+@autopod/cli:test: +               "defaultValue": undefined,
+@autopod/cli:test: +               "defaultValueDescription": undefined,
+@autopod/cli:test: +               "description": "",
+@autopod/cli:test: +               "parseArg": undefined,
+@autopod/cli:test: +               "required": true,
+@autopod/cli:test: +               "variadic": false,
+@autopod/cli:test: +             },
+@autopod/cli:test: +           ],
+@autopod/cli:test: +           Symbol(shapeMode): false,
+@autopod/cli:test: +           Symbol(kCapture): false,
+@autopod/cli:test: +         },
+@autopod/cli:test: +       ],
+@autopod/cli:test: +       "options": [],
+@autopod/cli:test: +       "parent": [Circular],
+@autopod/cli:test: +       "processedArgs": [],
+@autopod/cli:test: +       "rawArgs": [],
+@autopod/cli:test: +       "registeredArguments": [],
+@autopod/cli:test: +       Symbol(shapeMode): false,
+@autopod/cli:test: +       Symbol(kCapture): false,
+@autopod/cli:test: +     },
+@autopod/cli:test: +   ],
+@autopod/cli:test: +   "options": [],
+@autopod/cli:test: +   "parent": null,
+@autopod/cli:test: +   "processedArgs": [],
+@autopod/cli:test: +   "rawArgs": [
+@autopod/cli:test: +     "node",
+@autopod/cli:test: +     "ap",
+@autopod/cli:test: +     "series",
+@autopod/cli:test: +     "create",
+@autopod/cli:test: +     "/tmp/autopod-cli-series-EL3N1O",
+@autopod/cli:test: +     "--profile",
+@autopod/cli:test: +     "test",
+@autopod/cli:test: +   ],
+@autopod/cli:test: +   "registeredArguments": [],
+@autopod/cli:test: +   Symbol(shapeMode): false,
+@autopod/cli:test: +   Symbol(kCapture): false,
+@autopod/cli:test:   }
+@autopod/cli:test:
+@autopod/cli:test:  ❯ src/commands/series.test.ts:202:5
+@autopod/cli:test:     200|     await expect(
+@autopod/cli:test:     201|       program.parseAsync(['node', 'ap', 'series', 'create', specRoot, …
+@autopod/cli:test:     202|     ).rejects.toThrow('process.exit(1)');
+@autopod/cli:test:        |     ^
+@autopod/cli:test:     203|     expect(getClient).not.toHaveBeenCalled();
+@autopod/cli:test:     204|     expect(mockClient.createSeries).not.toHaveBeenCalled();
+@autopod/cli:test:
+@autopod/cli:test: ⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/2]⎯
+@autopod/cli:test:
+@autopod/cli:test:  FAIL  src/commands/session.test.ts > pod commands > registers status command that calls getSession
+@autopod/cli:test: TypeError: client.getTaskExecution is not a function
+@autopod/cli:test:  ❯ Command.statusAction src/commands/pod.ts:583:40
+@autopod/cli:test:     581|     const pod = await client.getSession(resolvedId);
+@autopod/cli:test:     582|
+@autopod/cli:test:     583|     const taskExecution = await client.getTaskExecution(resolvedId).ca…
+@autopod/cli:test:        |                                        ^
+@autopod/cli:test:     584|     withJsonOutput(opts, { ...pod, taskExecution }, (s) => {
+@autopod/cli:test:     585|       console.log(chalk.bold.cyan(`Pod ${s.id}`));
+@autopod/cli:test:  ❯ Command.parseAsync ../../node_modules/.pnpm/commander@15.0.0/node_modules/commander/lib/command.js:1113:5
+@autopod/cli:test:  ❯ src/commands/session.test.ts:374:5
+@autopod/cli:test:
+@autopod/cli:test: ⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/2]⎯
+@autopod/cli:test:
+@autopod/cli:test:
+@autopod/cli:test:  Test Files  2 failed | 21 passed (23)
+@autopod/cli:test:       Tests  2 failed | 225 passed (227)
+@autopod/cli:test:    Start at  15:13:38
+@autopod/cli:test:    Duration  2.81s (transform 5.13s, setup 0ms, import 11.27s, tests 4.01s, environment 6ms)
+@autopod/cli:test:
+@autopod/cli:test:  ELIFECYCLE  Test failed. See above for more details.
+@autopod/mobile-web:test:  ✓ src/lib/ws-client.test.ts (7 tests) 55ms
+@autopod/mobile-web:test:  ✓ src/store/pods.test.ts (10 tests) 6ms
+@autopod/mobile-web:test:  ✓ src/components/TaskExecutionPanel.test.tsx (1 test) 101ms
+@autopod/mobile-web:test:  ELIFECYCLE  Test failed. See above for more details.
+@autopod/daemon:build:
+@autopod/daemon:build: > @autopod/daemon@0.0.1 postbuild /private/tmp/autopod-durable-execution/packages/daemon
+@autopod/daemon:build: > mkdir -p dist/db dist/actions && cp -R src/db/migrations dist/db/ && cp -R src/actions/defaults dist/actions/
+@autopod/daemon:build:
+@autopod/cli#test:  ERROR  command (/private/tmp/autopod-durable-execution/packages/cli) /Users/ewi/.npm/_npx/e6e0ed1aca658cae/node_modules/.bin/pnpm run test exited (1)
+
+ Tasks:    11 successful, 14 total
+Cached:    8 cached, 14 total
+  Time:    4.503s
+Failed:    @autopod/cli#test
+
+ ERROR  run failed: command  exited (1)
+ ELIFECYCLE  Test failed. See above for more details.
+  ✗ Tests failed
+
+▸ Auditing dependencies
+┌─────────────────────┬────────────────────────────────────────────────────────┐
+│ high                │ adm-zip: Crafted ZIP file triggers 4GB memory          │
+│                     │ allocation                                             │
+├─────────────────────┼────────────────────────────────────────────────────────┤
+│ Package             │ adm-zip                                                │
+├─────────────────────┼────────────────────────────────────────────────────────┤
+│ Vulnerable versions │ <0.6.0                                                 │
+├─────────────────────┼────────────────────────────────────────────────────────┤
+│ Patched versions    │ >=0.6.0                                                │
+├─────────────────────┼────────────────────────────────────────────────────────┤
+│ Paths               │ packages/daemon > @huggingface/transformers@4.2.0 >    │
+│                     │ onnxruntime-node@1.24.3 > adm-zip@0.5.17               │
+├─────────────────────┼────────────────────────────────────────────────────────┤
+│ More info           │ https://github.com/advisories/GHSA-xcpc-8h2w-3j85      │
+└─────────────────────┴────────────────────────────────────────────────────────┘
+┌─────────────────────┬────────────────────────────────────────────────────────┐
+│ high                │ brace-expansion: DoS via exponential-time expansion of │
+│                     │ consecutive non-expanding {} groups                    │
+├─────────────────────┼────────────────────────────────────────────────────────┤
+│ Package             │ brace-expansion                                        │
+├─────────────────────┼────────────────────────────────────────────────────────┤
+│ Vulnerable versions │ >=3.0.0 <5.0.7                                         │
+├─────────────────────┼────────────────────────────────────────────────────────┤
+│ Patched versions    │ >=5.0.7                                                │
+├─────────────────────┼────────────────────────────────────────────────────────┤
+│ Paths               │ packages/daemon > @fastify/static@8.3.0 > glob@11.1.0  │
+│                     │ > minimatch@10.2.5 > brace-expansion@5.0.6             │
+├─────────────────────┼────────────────────────────────────────────────────────┤
+│ More info           │ https://github.com/advisories/GHSA-3jxr-9vmj-r5cp      │
+└─────────────────────┴────────────────────────────────────────────────────────┘
+┌─────────────────────┬────────────────────────────────────────────────────────┐
+│ high                │ fast-uri vulnerable to host confusion via literal      │
+│                     │ backslash authority delimiter                          │
+├─────────────────────┼────────────────────────────────────────────────────────┤
+│ Package             │ fast-uri                                               │
+├─────────────────────┼────────────────────────────────────────────────────────┤
+│ Vulnerable versions │ >=4.0.0 <=4.1.0                                        │
+├─────────────────────┼────────────────────────────────────────────────────────┤
+│ Patched versions    │ >=4.1.1                                                │
+├─────────────────────┼────────────────────────────────────────────────────────┤
+│ Paths               │ packages/daemon > fastify@5.10.0 >                     │
+│                     │ @fastify/fast-json-stringify-compiler@5.1.0 >          │
+│                     │ fast-json-stringify@7.0.1 > fast-uri@4.1.0             │
+│                     │                                                        │
+│                     │ packages/daemon > fastify@5.10.0 >                     │
+│                     │ fast-json-stringify@7.0.1 > fast-uri@4.1.0             │
+├─────────────────────┼────────────────────────────────────────────────────────┤
+│ More info           │ https://github.com/advisories/GHSA-v2hh-gcrm-f6hx      │
+└─────────────────────┴────────────────────────────────────────────────────────┘
+┌─────────────────────┬────────────────────────────────────────────────────────┐
+│ high                │ fast-uri vulnerable to host confusion via literal      │
+│                     │ backslash authority delimiter                          │
+├─────────────────────┼────────────────────────────────────────────────────────┤
+│ Package             │ fast-uri                                               │
+├─────────────────────┼────────────────────────────────────────────────────────┤
+│ Vulnerable versions │ >=3.0.0 <=3.1.3                                        │
+├─────────────────────┼────────────────────────────────────────────────────────┤
+│ Patched versions    │ >=3.1.4                                                │
+├─────────────────────┼────────────────────────────────────────────────────────┤
+│ Paths               │ packages/daemon >                                      │
+│                     │ @autopod/escalation-mcp@link:../escalation-mcp >       │
+│                     │ @modelcontextprotocol/sdk@1.29.0 > ajv@8.18.0 >        │
+│                     │ fast-uri@3.1.2                                         │
+│                     │                                                        │
+│                     │ packages/daemon >                                      │
+│                     │ @autopod/escalation-mcp@link:../escalation-mcp >       │
+│                     │ @modelcontextprotocol/sdk@1.29.0 > ajv-formats@3.0.1 > │
+│                     │ ajv@8.18.0 > fast-uri@3.1.2                            │
+│                     │                                                        │
+│                     │ packages/daemon > @modelcontextprotocol/sdk@1.29.0 >   │
+│                     │ ajv@8.18.0 > fast-uri@3.1.2                            │
+│                     │                                                        │
+│                     │ ... Found 13 paths, run `pnpm why fast-uri` for more   │
+│                     │ information                                            │
+├─────────────────────┼────────────────────────────────────────────────────────┤
+│ More info           │ https://github.com/advisories/GHSA-v2hh-gcrm-f6hx      │
+└─────────────────────┴────────────────────────────────────────────────────────┘
+┌─────────────────────┬────────────────────────────────────────────────────────┐
+│ high                │ sharp inherited vulnerabilities in libvips:            │
+│                     │ CVE-2026-33327, CVE-2026-33328, CVE-2026-35590,        │
+│                     │ CVE-2026-35591                                         │
+├─────────────────────┼────────────────────────────────────────────────────────┤
+│ Package             │ sharp                                                  │
+├─────────────────────┼────────────────────────────────────────────────────────┤
+│ Vulnerable versions │ <0.35.0                                                │
+├─────────────────────┼────────────────────────────────────────────────────────┤
+│ Patched versions    │ >=0.35.0                                               │
+├─────────────────────┼────────────────────────────────────────────────────────┤
+│ Paths               │ packages/daemon > @huggingface/transformers@4.2.0 >    │
+│                     │ sharp@0.34.5                                           │
+├─────────────────────┼────────────────────────────────────────────────────────┤
+│ More info           │ https://github.com/advisories/GHSA-f88m-g3jw-g9cj      │
+└─────────────────────┴────────────────────────────────────────────────────────┘
+┌─────────────────────┬────────────────────────────────────────────────────────┐
+│ high                │ find-my-way: DDoS with HTTP2                           │
+├─────────────────────┼────────────────────────────────────────────────────────┤
+│ Package             │ find-my-way                                            │
+├─────────────────────┼────────────────────────────────────────────────────────┤
+│ Vulnerable versions │ <=9.6.0                                                │
+├─────────────────────┼────────────────────────────────────────────────────────┤
+│ Patched versions    │ >=9.7.0                                                │
+├─────────────────────┼────────────────────────────────────────────────────────┤
+│ Paths               │ packages/daemon > fastify@5.10.0 > find-my-way@9.6.0   │
+├─────────────────────┼────────────────────────────────────────────────────────┤
+│ More info           │ https://github.com/advisories/GHSA-c96f-x56v-gq3h      │
+└─────────────────────┴────────────────────────────────────────────────────────┘
+┌─────────────────────┬────────────────────────────────────────────────────────┐
+│ high                │ @fastify/static vulnerable to route guard bypass via   │
+│                     │ path traversal                                         │
+├─────────────────────┼────────────────────────────────────────────────────────┤
+│ Package             │ @fastify/static                                        │
+├─────────────────────┼────────────────────────────────────────────────────────┤
+│ Vulnerable versions │ <=10.1.0                                               │
+├─────────────────────┼────────────────────────────────────────────────────────┤
+│ Patched versions    │ >=10.1.1                                               │
+├─────────────────────┼────────────────────────────────────────────────────────┤
+│ Paths               │ packages/daemon > @fastify/static@8.3.0                │
+├─────────────────────┼────────────────────────────────────────────────────────┤
+│ More info           │ https://github.com/advisories/GHSA-83w8-p2f5-377r      │
+└─────────────────────┴────────────────────────────────────────────────────────┘
+┌─────────────────────┬────────────────────────────────────────────────────────┐
+│ high                │ brace-expansion: DoS via unbounded expansion length    │
+│                     │ causing an out-of-memory process crash                 │
+├─────────────────────┼────────────────────────────────────────────────────────┤
+│ Package             │ brace-expansion                                        │
+├─────────────────────┼────────────────────────────────────────────────────────┤
+│ Vulnerable versions │ >=4.0.0 <5.0.8                                         │
+├─────────────────────┼────────────────────────────────────────────────────────┤
+│ Patched versions    │ >=5.0.8                                                │
+├─────────────────────┼────────────────────────────────────────────────────────┤
+│ Paths               │ packages/daemon > @fastify/static@8.3.0 > glob@11.1.0  │
+│                     │ > minimatch@10.2.5 > brace-expansion@5.0.6             │
+├─────────────────────┼────────────────────────────────────────────────────────┤
+│ More info           │ https://github.com/advisories/GHSA-mh99-v99m-4gvg      │
+└─────────────────────┴────────────────────────────────────────────────────────┘
+┌─────────────────────┬────────────────────────────────────────────────────────┐
+│ high                │ undici vulnerable to cross-user information disclosure │
+│                     │ and parse-time crash via degenerate private cache      │
+│                     │ directives                                             │
+├─────────────────────┼────────────────────────────────────────────────────────┤
+│ Package             │ undici                                                 │
+├─────────────────────┼────────────────────────────────────────────────────────┤
+│ Vulnerable versions │ >=8.0.0 <8.9.0                                         │
+├─────────────────────┼────────────────────────────────────────────────────────┤
+│ Patched versions    │ >=8.9.0                                                │
+├─────────────────────┼────────────────────────────────────────────────────────┤
+│ Paths               │ packages/cli > undici@8.7.0                            │
+├─────────────────────┼────────────────────────────────────────────────────────┤
+│ More info           │ https://github.com/advisories/GHSA-4cwx-7wf7-3272      │
+└─────────────────────┴────────────────────────────────────────────────────────┘
+┌─────────────────────┬────────────────────────────────────────────────────────┐
+│ high                │ fast-uri vulnerable to host confusion via backslash    │
+│                     │ authority introducer                                   │
+├─────────────────────┼────────────────────────────────────────────────────────┤
+│ Package             │ fast-uri                                               │
+├─────────────────────┼────────────────────────────────────────────────────────┤
+│ Vulnerable versions │ >=4.0.0 <4.1.2                                         │
+├─────────────────────┼────────────────────────────────────────────────────────┤
+│ Patched versions    │ >=4.1.2                                                │
+├─────────────────────┼────────────────────────────────────────────────────────┤
+│ Paths               │ packages/daemon > fastify@5.10.0 >                     │
+│                     │ @fastify/fast-json-stringify-compiler@5.1.0 >          │
+│                     │ fast-json-stringify@7.0.1 > fast-uri@4.1.0             │
+│                     │                                                        │
+│                     │ packages/daemon > fastify@5.10.0 >                     │
+│                     │ fast-json-stringify@7.0.1 > fast-uri@4.1.0             │
+├─────────────────────┼────────────────────────────────────────────────────────┤
+│ More info           │ https://github.com/advisories/GHSA-7p8r-x3mc-p8w7      │
+└─────────────────────┴────────────────────────────────────────────────────────┘
+┌─────────────────────┬────────────────────────────────────────────────────────┐
+│ high                │ fast-uri vulnerable to host confusion via backslash    │
+│                     │ authority introducer                                   │
+├─────────────────────┼────────────────────────────────────────────────────────┤
+│ Package             │ fast-uri                                               │
+├─────────────────────┼────────────────────────────────────────────────────────┤
+│ Vulnerable versions │ >=3.0.0 <3.1.5                                         │
+├─────────────────────┼────────────────────────────────────────────────────────┤
+│ Patched versions    │ >=3.1.5                                                │
+├─────────────────────┼────────────────────────────────────────────────────────┤
+│ Paths               │ packages/daemon >                                      │
+│                     │ @autopod/escalation-mcp@link:../escalation-mcp >       │
+│                     │ @modelcontextprotocol/sdk@1.29.0 > ajv@8.18.0 >        │
+│                     │ fast-uri@3.1.2                                         │
+│                     │                                                        │
+│                     │ packages/daemon >                                      │
+│                     │ @autopod/escalation-mcp@link:../escalation-mcp >       │
+│                     │ @modelcontextprotocol/sdk@1.29.0 > ajv-formats@3.0.1 > │
+│                     │ ajv@8.18.0 > fast-uri@3.1.2                            │
+│                     │                                                        │
+│                     │ packages/daemon > @modelcontextprotocol/sdk@1.29.0 >   │
+│                     │ ajv@8.18.0 > fast-uri@3.1.2                            │
+│                     │                                                        │
+│                     │ ... Found 13 paths, run `pnpm why fast-uri` for more   │
+│                     │ information                                            │
+├─────────────────────┼────────────────────────────────────────────────────────┤
+│ More info           │ https://github.com/advisories/GHSA-7p8r-x3mc-p8w7      │
+└─────────────────────┴────────────────────────────────────────────────────────┘
+┌─────────────────────┬────────────────────────────────────────────────────────┐
+│ high                │ ip-address: Address4 decodes leading-zero octets as    │
+│                     │ decimal while resolvers decode them as octal, allowing │
+│                     │ SSRF and trust-boundary bypass                         │
+├─────────────────────┼────────────────────────────────────────────────────────┤
+│ Package             │ ip-address                                             │
+├─────────────────────┼────────────────────────────────────────────────────────┤
+│ Vulnerable versions │ <=10.3.0                                               │
+├─────────────────────┼────────────────────────────────────────────────────────┤
+│ Patched versions    │ >=10.3.1                                               │
+├─────────────────────┼────────────────────────────────────────────────────────┤
+│ Paths               │ packages/daemon >                                      │
+│                     │ @autopod/escalation-mcp@link:../escalation-mcp >       │
+│                     │ @modelcontextprotocol/sdk@1.29.0 >                     │
+│                     │ express-rate-limit@8.3.1 > ip-address@10.1.0           │
+│                     │                                                        │
+│                     │ packages/daemon > @modelcontextprotocol/sdk@1.29.0 >   │
+│                     │ express-rate-limit@8.3.1 > ip-address@10.1.0           │
+│                     │                                                        │
+│                     │ packages/escalation-mcp >                              │
+│                     │ @modelcontextprotocol/sdk@1.29.0 >                     │
+│                     │ express-rate-limit@8.3.1 > ip-address@10.1.0           │
+├─────────────────────┼────────────────────────────────────────────────────────┤
+│ More info           │ https://github.com/advisories/GHSA-mwp4-54f8-5fhr      │
+└─────────────────────┴────────────────────────────────────────────────────────┘
+┌─────────────────────┬────────────────────────────────────────────────────────┐
+│ high                │ brace-expansion: DoS via unbounded intermediate        │
+│                     │ arrays, bypassing the CVE-2026-14257 mitigation        │
+├─────────────────────┼────────────────────────────────────────────────────────┤
+│ Package             │ brace-expansion                                        │
+├─────────────────────┼────────────────────────────────────────────────────────┤
+│ Vulnerable versions │ >=4.0.0 <5.0.9                                         │
+├─────────────────────┼────────────────────────────────────────────────────────┤
+│ Patched versions    │ >=5.0.9                                                │
+├─────────────────────┼────────────────────────────────────────────────────────┤
+│ Paths               │ packages/daemon > @fastify/static@8.3.0 > glob@11.1.0  │
+│                     │ > minimatch@10.2.5 > brace-expansion@5.0.6             │
+├─────────────────────┼────────────────────────────────────────────────────────┤
+│ More info           │ https://github.com/advisories/GHSA-rgw5-rvv9-x895      │
+└─────────────────────┴────────────────────────────────────────────────────────┘
+┌─────────────────────┬────────────────────────────────────────────────────────┐
+│ high                │ nanoid: non-secure generators can loop indefinitely    │
+│                     │ with negative size                                     │
+├─────────────────────┼────────────────────────────────────────────────────────┤
+│ Package             │ nanoid                                                 │
+├─────────────────────┼────────────────────────────────────────────────────────┤
+│ Vulnerable versions │ >=4.0.0 <5.1.16                                        │
+├─────────────────────┼────────────────────────────────────────────────────────┤
+│ Patched versions    │ >=5.1.16                                               │
+├─────────────────────┼────────────────────────────────────────────────────────┤
+│ Paths               │ packages/cli > @autopod/shared@link:../shared >        │
+│                     │ nanoid@5.1.7                                           │
+│                     │                                                        │
+│                     │ packages/daemon >                                      │
+│                     │ @autopod/escalation-mcp@link:../escalation-mcp >       │
+│                     │ @autopod/shared@link:../shared > nanoid@5.1.7          │
+│                     │                                                        │
+│                     │ packages/daemon > @autopod/shared@link:../shared >     │
+│                     │ nanoid@5.1.7                                           │
+│                     │                                                        │
+│                     │ ... Found 8 paths, run `pnpm why nanoid` for more      │
+│                     │ information                                            │
+├─────────────────────┼────────────────────────────────────────────────────────┤
+│ More info           │ https://github.com/advisories/GHSA-28wg-ghj8-5hjv      │
+└─────────────────────┴────────────────────────────────────────────────────────┘
+┌─────────────────────┬────────────────────────────────────────────────────────┐
+│ high                │ nanoid: non-secure generators can loop indefinitely    │
+│                     │ with negative size                                     │
+├─────────────────────┼────────────────────────────────────────────────────────┤
+│ Package             │ nanoid                                                 │
+├─────────────────────┼────────────────────────────────────────────────────────┤
+│ Vulnerable versions │ <3.3.16                                                │
+├─────────────────────┼────────────────────────────────────────────────────────┤
+│ Patched versions    │ >=3.3.16                                               │
+├─────────────────────┼────────────────────────────────────────────────────────┤
+│ Paths               │ packages/mobile-web > @vitejs/plugin-react@4.7.0 >     │
+│                     │ vite@6.4.3 > postcss@8.5.15 > nanoid@3.3.12            │
+│                     │                                                        │
+│                     │ packages/mobile-web > vite@6.4.3 > postcss@8.5.15 >    │
+│                     │ nanoid@3.3.12                                          │
+│                     │                                                        │
+│                     │ packages/mobile-web > vitest@4.1.10 >                  │
+│                     │ @vitest/mocker@4.1.10 > vite@6.4.3 > postcss@8.5.15 >  │
+│                     │ nanoid@3.3.12                                          │
+│                     │                                                        │
+│                     │ ... Found 4 paths, run `pnpm why nanoid` for more      │
+│                     │ information                                            │
+├─────────────────────┼────────────────────────────────────────────────────────┤
+│ More info           │ https://github.com/advisories/GHSA-28wg-ghj8-5hjv      │
+└─────────────────────┴────────────────────────────────────────────────────────┘
+┌─────────────────────┬────────────────────────────────────────────────────────┐
+│ high                │ nanoid: custom generators can loop indefinitely when   │
+│                     │ size is zero                                           │
+├─────────────────────┼────────────────────────────────────────────────────────┤
+│ Package             │ nanoid                                                 │
+├─────────────────────┼────────────────────────────────────────────────────────┤
+│ Vulnerable versions │ <3.3.18                                                │
+├─────────────────────┼────────────────────────────────────────────────────────┤
+│ Patched versions    │ >=3.3.18                                               │
+├─────────────────────┼────────────────────────────────────────────────────────┤
+│ Paths               │ . > vitest@4.1.10 > @vitest/mocker@4.1.10 >            │
+│                     │ vite@8.0.16 > postcss@8.5.18 > nanoid@3.3.16           │
+│                     │                                                        │
+│                     │ . > vitest@4.1.10 > vite@8.0.16 > postcss@8.5.18 >     │
+│                     │ nanoid@3.3.16                                          │
+│                     │                                                        │
+│                     │ packages/cli > tsup@8.5.1 > postcss-load-config@6.0.1  │
+│                     │ > postcss@8.5.18 > nanoid@3.3.16                       │
+│                     │                                                        │
+│                     │ ... Found 30 paths, run `pnpm why nanoid` for more     │
+│                     │ information                                            │
+├─────────────────────┼────────────────────────────────────────────────────────┤
+│ More info           │ https://github.com/advisories/GHSA-2v37-7h3g-55p8      │
+└─────────────────────┴────────────────────────────────────────────────────────┘
+┌─────────────────────┬────────────────────────────────────────────────────────┐
+│ high                │ PostCSS: Path Traversal in Previous Source Map         │
+│                     │ Auto-Loading (sourceMappingURL) leads to Arbitrary     │
+│                     │ .map File Disclosure                                   │
+├─────────────────────┼────────────────────────────────────────────────────────┤
+│ Package             │ postcss                                                │
+├─────────────────────┼────────────────────────────────────────────────────────┤
+│ Vulnerable versions │ <=8.5.17                                               │
+├─────────────────────┼────────────────────────────────────────────────────────┤
+│ Patched versions    │ >=8.5.18                                               │
+├─────────────────────┼────────────────────────────────────────────────────────┤
+│ Paths               │ packages/mobile-web > @vitejs/plugin-react@4.7.0 >     │
+│                     │ vite@6.4.3 > postcss@8.5.15                            │
+│                     │                                                        │
+│                     │ packages/mobile-web > vite@6.4.3 > postcss@8.5.15      │
+│                     │                                                        │
+│                     │ packages/mobile-web > vitest@4.1.10 >                  │
+│                     │ @vitest/mocker@4.1.10 > vite@6.4.3 > postcss@8.5.15    │
+│                     │                                                        │
+│                     │ ... Found 4 paths, run `pnpm why postcss` for more     │
+│                     │ information                                            │
+├─────────────────────┼────────────────────────────────────────────────────────┤
+│ More info           │ https://github.com/advisories/GHSA-r28c-9q8g-f849      │
+└─────────────────────┴────────────────────────────────────────────────────────┘
+┌─────────────────────┬────────────────────────────────────────────────────────┐
+│ high                │ Browserslist: Unbounded memory growth (no cache        │
+│                     │ eviction) via distinct query results, leading to       │
+│                     │ eventual OOM                                           │
+├─────────────────────┼────────────────────────────────────────────────────────┤
+│ Package             │ browserslist                                           │
+├─────────────────────┼────────────────────────────────────────────────────────┤
+│ Vulnerable versions │ <=4.28.6                                               │
+├─────────────────────┼────────────────────────────────────────────────────────┤
+│ Patched versions    │ >=4.28.7                                               │
+├─────────────────────┼────────────────────────────────────────────────────────┤
+│ Paths               │ packages/mobile-web > @vitejs/plugin-react@4.7.0 >     │
+│                     │ @babel/core@7.29.7 >                                   │
+│                     │ @babel/helper-compilation-targets@7.29.7 >             │
+│                     │ browserslist@4.28.2 > update-browserslist-db@1.2.3 >   │
+│                     │ browserslist@4.28.2                                    │
+│                     │                                                        │
+│                     │ packages/mobile-web > @vitejs/plugin-react@4.7.0 >     │
+│                     │ @babel/plugin-transform-react-jsx-self@7.29.7 >        │
+│                     │ @babel/core@7.29.7 >                                   │
+│                     │ @babel/helper-compilation-targets@7.29.7 >             │
+│                     │ browserslist@4.28.2 > update-browserslist-db@1.2.3 >   │
+│                     │ browserslist@4.28.2                                    │
+│                     │                                                        │
+│                     │ packages/mobile-web > @vitejs/plugin-react@4.7.0 >     │
+│                     │ @babel/plugin-transform-react-jsx-source@7.29.7 >      │
+│                     │ @babel/core@7.29.7 >                                   │
+│                     │ @babel/helper-compilation-targets@7.29.7 >             │
+│                     │ browserslist@4.28.2 > update-browserslist-db@1.2.3 >   │
+│                     │ browserslist@4.28.2                                    │
+├─────────────────────┼────────────────────────────────────────────────────────┤
+│ More info           │ https://github.com/advisories/GHSA-c83g-rgw3-j3cx      │
+└─────────────────────┴────────────────────────────────────────────────────────┘
+┌─────────────────────┬────────────────────────────────────────────────────────┐
+│ high                │ Browserslist: Uncaught crash / prototype write via     │
+│                     │ untrusted browserslist-stats.json custom stats         │
+│                     │ (normalizeStats)                                       │
+├─────────────────────┼────────────────────────────────────────────────────────┤
+│ Package             │ browserslist                                           │
+├─────────────────────┼────────────────────────────────────────────────────────┤
+│ Vulnerable versions │ <=4.28.6                                               │
+├─────────────────────┼────────────────────────────────────────────────────────┤
+│ Patched versions    │ >=4.28.7                                               │
+├─────────────────────┼────────────────────────────────────────────────────────┤
+│ Paths               │ packages/mobile-web > @vitejs/plugin-react@4.7.0 >     │
+│                     │ @babel/core@7.29.7 >                                   │
+│                     │ @babel/helper-compilation-targets@7.29.7 >             │
+│                     │ browserslist@4.28.2 > update-browserslist-db@1.2.3 >   │
+│                     │ browserslist@4.28.2                                    │
+│                     │                                                        │
+│                     │ packages/mobile-web > @vitejs/plugin-react@4.7.0 >     │
+│                     │ @babel/plugin-transform-react-jsx-self@7.29.7 >        │
+│                     │ @babel/core@7.29.7 >                                   │
+│                     │ @babel/helper-compilation-targets@7.29.7 >             │
+│                     │ browserslist@4.28.2 > update-browserslist-db@1.2.3 >   │
+│                     │ browserslist@4.28.2                                    │
+│                     │                                                        │
+│                     │ packages/mobile-web > @vitejs/plugin-react@4.7.0 >     │
+│                     │ @babel/plugin-transform-react-jsx-source@7.29.7 >      │
+│                     │ @babel/core@7.29.7 >                                   │
+│                     │ @babel/helper-compilation-targets@7.29.7 >             │
+│                     │ browserslist@4.28.2 > update-browserslist-db@1.2.3 >   │
+│                     │ browserslist@4.28.2                                    │
+├─────────────────────┼────────────────────────────────────────────────────────┤
+│ More info           │ https://github.com/advisories/GHSA-73wf-gq98-2v4g      │
+└─────────────────────┴────────────────────────────────────────────────────────┘
+┌─────────────────────┬────────────────────────────────────────────────────────┐
+│ high                │ nanoid: Integer Overflow or Wraparound                 │
+├─────────────────────┼────────────────────────────────────────────────────────┤
+│ Package             │ nanoid                                                 │
+├─────────────────────┼────────────────────────────────────────────────────────┤
+│ Vulnerable versions │ >=4.0.0 <5.1.11                                        │
+├─────────────────────┼────────────────────────────────────────────────────────┤
+│ Patched versions    │ >=5.1.11                                               │
+├─────────────────────┼────────────────────────────────────────────────────────┤
+│ Paths               │ packages/cli > @autopod/shared@link:../shared >        │
+│                     │ nanoid@5.1.7                                           │
+│                     │                                                        │
+│                     │ packages/daemon >                                      │
+│                     │ @autopod/escalation-mcp@link:../escalation-mcp >       │
+│                     │ @autopod/shared@link:../shared > nanoid@5.1.7          │
+│                     │                                                        │
+│                     │ packages/daemon > @autopod/shared@link:../shared >     │
+│                     │ nanoid@5.1.7                                           │
+│                     │                                                        │
+│                     │ ... Found 8 paths, run `pnpm why nanoid` for more      │
+│                     │ information                                            │
+├─────────────────────┼────────────────────────────────────────────────────────┤
+│ More info           │ https://github.com/advisories/GHSA-xwg4-73v4-xw9w      │
+└─────────────────────┴────────────────────────────────────────────────────────┘
+┌─────────────────────┬────────────────────────────────────────────────────────┐
+│ high                │ fast-uri vulnerable to host confusion via skipped IDN  │
+│                     │ canonicalization on scheme-relative references         │
+├─────────────────────┼────────────────────────────────────────────────────────┤
+│ Package             │ fast-uri                                               │
+├─────────────────────┼────────────────────────────────────────────────────────┤
+│ Vulnerable versions │ >=4.0.1 <4.1.3                                         │
+├─────────────────────┼────────────────────────────────────────────────────────┤
+│ Patched versions    │ >=4.1.3                                                │
+├─────────────────────┼────────────────────────────────────────────────────────┤
+│ Paths               │ packages/daemon > fastify@5.10.0 >                     │
+│                     │ @fastify/fast-json-stringify-compiler@5.1.0 >          │
+│                     │ fast-json-stringify@7.0.1 > fast-uri@4.1.0             │
+│                     │                                                        │
+│                     │ packages/daemon > fastify@5.10.0 >                     │
+│                     │ fast-json-stringify@7.0.1 > fast-uri@4.1.0             │
+├─────────────────────┼────────────────────────────────────────────────────────┤
+│ More info           │ https://github.com/advisories/GHSA-5jgf-p345-68v8      │
+└─────────────────────┴────────────────────────────────────────────────────────┘
+┌─────────────────────┬────────────────────────────────────────────────────────┐
+│ high                │ fast-uri vulnerable to host confusion via skipped IDN  │
+│                     │ canonicalization on scheme-relative references         │
+├─────────────────────┼────────────────────────────────────────────────────────┤
+│ Package             │ fast-uri                                               │
+├─────────────────────┼────────────────────────────────────────────────────────┤
+│ Vulnerable versions │ >=3.1.3 <3.1.6                                         │
+├─────────────────────┼────────────────────────────────────────────────────────┤
+│ Patched versions    │ >=3.1.6                                                │
+├─────────────────────┼────────────────────────────────────────────────────────┤
+│ Paths               │ packages/daemon > fastify@5.10.0 >                     │
+│                     │ @fastify/ajv-compiler@4.0.5 > ajv@8.20.0 >             │
+│                     │ fast-uri@3.1.3                                         │
+│                     │                                                        │
+│                     │ packages/daemon > fastify@5.10.0 >                     │
+│                     │ @fastify/ajv-compiler@4.0.5 > ajv-formats@3.0.1 >      │
+│                     │ ajv@8.20.0 > fast-uri@3.1.3                            │
+│                     │                                                        │
+│                     │ packages/daemon > fastify@5.10.0 >                     │
+│                     │ @fastify/ajv-compiler@4.0.5 > fast-uri@3.1.3           │
+│                     │                                                        │
+│                     │ ... Found 7 paths, run `pnpm why fast-uri` for more    │
+│                     │ information                                            │
+├─────────────────────┼────────────────────────────────────────────────────────┤
+│ More info           │ https://github.com/advisories/GHSA-5jgf-p345-68v8      │
+└─────────────────────┴────────────────────────────────────────────────────────┘
+┌─────────────────────┬────────────────────────────────────────────────────────┐
+│ high                │ fast-uri vulnerable to server-side request forgery via │
+│                     │ malformed IPv6 normalization                           │
+├─────────────────────┼────────────────────────────────────────────────────────┤
+│ Package             │ fast-uri                                               │
+├─────────────────────┼────────────────────────────────────────────────────────┤
+│ Vulnerable versions │ >=4.0.0 <4.1.3                                         │
+├─────────────────────┼────────────────────────────────────────────────────────┤
+│ Patched versions    │ >=4.1.3                                                │
+├─────────────────────┼────────────────────────────────────────────────────────┤
+│ Paths               │ packages/daemon > fastify@5.10.0 >                     │
+│                     │ @fastify/fast-json-stringify-compiler@5.1.0 >          │
+│                     │ fast-json-stringify@7.0.1 > fast-uri@4.1.0             │
+│                     │                                                        │
+│                     │ packages/daemon > fastify@5.10.0 >                     │
+│                     │ fast-json-stringify@7.0.1 > fast-uri@4.1.0             │
+├─────────────────────┼────────────────────────────────────────────────────────┤
+│ More info           │ https://github.com/advisories/GHSA-f65p-4m7j-42xc      │
+└─────────────────────┴────────────────────────────────────────────────────────┘
+┌─────────────────────┬────────────────────────────────────────────────────────┐
+│ high                │ fast-uri vulnerable to server-side request forgery via │
+│                     │ malformed IPv6 normalization                           │
+├─────────────────────┼────────────────────────────────────────────────────────┤
+│ Package             │ fast-uri                                               │
+├─────────────────────┼────────────────────────────────────────────────────────┤
+│ Vulnerable versions │ >=3.0.0 <3.1.6                                         │
+├─────────────────────┼────────────────────────────────────────────────────────┤
+│ Patched versions    │ >=3.1.6                                                │
+├─────────────────────┼────────────────────────────────────────────────────────┤
+│ Paths               │ packages/daemon >                                      │
+│                     │ @autopod/escalation-mcp@link:../escalation-mcp >       │
+│                     │ @modelcontextprotocol/sdk@1.29.0 > ajv@8.18.0 >        │
+│                     │ fast-uri@3.1.2                                         │
+│                     │                                                        │
+│                     │ packages/daemon >                                      │
+│                     │ @autopod/escalation-mcp@link:../escalation-mcp >       │
+│                     │ @modelcontextprotocol/sdk@1.29.0 > ajv-formats@3.0.1 > │
+│                     │ ajv@8.18.0 > fast-uri@3.1.2                            │
+│                     │                                                        │
+│                     │ packages/daemon > @modelcontextprotocol/sdk@1.29.0 >   │
+│                     │ ajv@8.18.0 > fast-uri@3.1.2                            │
+│                     │                                                        │
+│                     │ ... Found 13 paths, run `pnpm why fast-uri` for more   │
+│                     │ information                                            │
+├─────────────────────┼────────────────────────────────────────────────────────┤
+│ More info           │ https://github.com/advisories/GHSA-f65p-4m7j-42xc      │
+└─────────────────────┴────────────────────────────────────────────────────────┘
+┌─────────────────────┬────────────────────────────────────────────────────────┐
+│ high                │ fast-uri vulnerable to server-side request forgery via │
+│                     │ repeated hostname percent-decoding                     │
+├─────────────────────┼────────────────────────────────────────────────────────┤
+│ Package             │ fast-uri                                               │
+├─────────────────────┼────────────────────────────────────────────────────────┤
+│ Vulnerable versions │ >=4.0.0 <4.1.3                                         │
+├─────────────────────┼────────────────────────────────────────────────────────┤
+│ Patched versions    │ >=4.1.3                                                │
+├─────────────────────┼────────────────────────────────────────────────────────┤
+│ Paths               │ packages/daemon > fastify@5.10.0 >                     │
+│                     │ @fastify/fast-json-stringify-compiler@5.1.0 >          │
+│                     │ fast-json-stringify@7.0.1 > fast-uri@4.1.0             │
+│                     │                                                        │
+│                     │ packages/daemon > fastify@5.10.0 >                     │
+│                     │ fast-json-stringify@7.0.1 > fast-uri@4.1.0             │
+├─────────────────────┼────────────────────────────────────────────────────────┤
+│ More info           │ https://github.com/advisories/GHSA-fph4-wmhf-6fwf      │
+└─────────────────────┴────────────────────────────────────────────────────────┘
+┌─────────────────────┬────────────────────────────────────────────────────────┐
+│ high                │ fast-uri vulnerable to server-side request forgery via │
+│                     │ repeated hostname percent-decoding                     │
+├─────────────────────┼────────────────────────────────────────────────────────┤
+│ Package             │ fast-uri                                               │
+├─────────────────────┼────────────────────────────────────────────────────────┤
+│ Vulnerable versions │ >=3.1.2 <3.1.6                                         │
+├─────────────────────┼────────────────────────────────────────────────────────┤
+│ Patched versions    │ >=3.1.6                                                │
+├─────────────────────┼────────────────────────────────────────────────────────┤
+│ Paths               │ packages/daemon >                                      │
+│                     │ @autopod/escalation-mcp@link:../escalation-mcp >       │
+│                     │ @modelcontextprotocol/sdk@1.29.0 > ajv@8.18.0 >        │
+│                     │ fast-uri@3.1.2                                         │
+│                     │                                                        │
+│                     │ packages/daemon >                                      │
+│                     │ @autopod/escalation-mcp@link:../escalation-mcp >       │
+│                     │ @modelcontextprotocol/sdk@1.29.0 > ajv-formats@3.0.1 > │
+│                     │ ajv@8.18.0 > fast-uri@3.1.2                            │
+│                     │                                                        │
+│                     │ packages/daemon > @modelcontextprotocol/sdk@1.29.0 >   │
+│                     │ ajv@8.18.0 > fast-uri@3.1.2                            │
+│                     │                                                        │
+│                     │ ... Found 13 paths, run `pnpm why fast-uri` for more   │
+│                     │ information                                            │
+├─────────────────────┼────────────────────────────────────────────────────────┤
+│ More info           │ https://github.com/advisories/GHSA-fph4-wmhf-6fwf      │
+└─────────────────────┴────────────────────────────────────────────────────────┘
+┌─────────────────────┬────────────────────────────────────────────────────────┐
+│ high                │ fast-uri vulnerable to host confusion via              │
+│                     │ percent-encoded scheme normalization                   │
+├─────────────────────┼────────────────────────────────────────────────────────┤
+│ Package             │ fast-uri                                               │
+├─────────────────────┼────────────────────────────────────────────────────────┤
+│ Vulnerable versions │ >=4.0.0 <4.1.3                                         │
+├─────────────────────┼────────────────────────────────────────────────────────┤
+│ Patched versions    │ >=4.1.3                                                │
+├─────────────────────┼────────────────────────────────────────────────────────┤
+│ Paths               │ packages/daemon > fastify@5.10.0 >                     │
+│                     │ @fastify/fast-json-stringify-compiler@5.1.0 >          │
+│                     │ fast-json-stringify@7.0.1 > fast-uri@4.1.0             │
+│                     │                                                        │
+│                     │ packages/daemon > fastify@5.10.0 >                     │
+│                     │ fast-json-stringify@7.0.1 > fast-uri@4.1.0             │
+├─────────────────────┼────────────────────────────────────────────────────────┤
+│ More info           │ https://github.com/advisories/GHSA-jqff-g426-hqxp      │
+└─────────────────────┴────────────────────────────────────────────────────────┘
+┌─────────────────────┬────────────────────────────────────────────────────────┐
+│ high                │ fast-uri vulnerable to host confusion via              │
+│                     │ percent-encoded scheme normalization                   │
+├─────────────────────┼────────────────────────────────────────────────────────┤
+│ Package             │ fast-uri                                               │
+├─────────────────────┼────────────────────────────────────────────────────────┤
+│ Vulnerable versions │ >=3.0.0 <3.1.6                                         │
+├─────────────────────┼────────────────────────────────────────────────────────┤
+│ Patched versions    │ >=3.1.6                                                │
+├─────────────────────┼────────────────────────────────────────────────────────┤
+│ Paths               │ packages/daemon >                                      │
+│                     │ @autopod/escalation-mcp@link:../escalation-mcp >       │
+│                     │ @modelcontextprotocol/sdk@1.29.0 > ajv@8.18.0 >        │
+│                     │ fast-uri@3.1.2                                         │
+│                     │                                                        │
+│                     │ packages/daemon >                                      │
+│                     │ @autopod/escalation-mcp@link:../escalation-mcp >       │
+│                     │ @modelcontextprotocol/sdk@1.29.0 > ajv-formats@3.0.1 > │
+│                     │ ajv@8.18.0 > fast-uri@3.1.2                            │
+│                     │                                                        │
+│                     │ packages/daemon > @modelcontextprotocol/sdk@1.29.0 >   │
+│                     │ ajv@8.18.0 > fast-uri@3.1.2                            │
+│                     │                                                        │
+│                     │ ... Found 13 paths, run `pnpm why fast-uri` for more   │
+│                     │ information                                            │
+├─────────────────────┼────────────────────────────────────────────────────────┤
+│ More info           │ https://github.com/advisories/GHSA-jqff-g426-hqxp      │
+└─────────────────────┴────────────────────────────────────────────────────────┘
+┌─────────────────────┬────────────────────────────────────────────────────────┐
+│ high                │ fast-uri vulnerable to host confusion via failed IDN   │
+│                     │ canonicalization                                       │
+├─────────────────────┼────────────────────────────────────────────────────────┤
+│ Package             │ fast-uri                                               │
+├─────────────────────┼────────────────────────────────────────────────────────┤
+│ Vulnerable versions │ >=3.0.0 <3.1.3                                         │
+├─────────────────────┼────────────────────────────────────────────────────────┤
+│ Patched versions    │ >=3.1.3                                                │
+├─────────────────────┼────────────────────────────────────────────────────────┤
+│ Paths               │ packages/daemon >                                      │
+│                     │ @autopod/escalation-mcp@link:../escalation-mcp >       │
+│                     │ @modelcontextprotocol/sdk@1.29.0 > ajv@8.18.0 >        │
+│                     │ fast-uri@3.1.2                                         │
+│                     │                                                        │
+│                     │ packages/daemon >                                      │
+│                     │ @autopod/escalation-mcp@link:../escalation-mcp >       │
+│                     │ @modelcontextprotocol/sdk@1.29.0 > ajv-formats@3.0.1 > │
+│                     │ ajv@8.18.0 > fast-uri@3.1.2                            │
+│                     │                                                        │
+│                     │ packages/daemon > @modelcontextprotocol/sdk@1.29.0 >   │
+│                     │ ajv@8.18.0 > fast-uri@3.1.2                            │
+│                     │                                                        │
+│                     │ ... Found 6 paths, run `pnpm why fast-uri` for more    │
+│                     │ information                                            │
+├─────────────────────┼────────────────────────────────────────────────────────┤
+│ More info           │ https://github.com/advisories/GHSA-4c8g-83qw-93j6      │
+└─────────────────────┴────────────────────────────────────────────────────────┘
+64 vulnerabilities found
+Severity: 3 low | 26 moderate | 35 high
+  ✗ Dependency audit failed
+
+▸ Scanning secrets
+
+> autopod@ secret-scan /private/tmp/autopod-durable-execution
+> node scripts/secret-scan.mjs
+
+Secret scan passed.
+  ✓ Secret scan passed
+
+3 check(s) failed.

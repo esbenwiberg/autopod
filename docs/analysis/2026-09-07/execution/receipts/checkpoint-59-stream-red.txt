@@ -1,0 +1,64 @@
+
+ RUN  v4.1.11 /private/tmp/autopod-durable-execution/packages/daemon
+
+ ❯ src/pods/pod-manager.test.ts (566 tests | 3 failed | 560 skipped) 654ms
+     × does not finalize a replacement from an old stream 'end' sameLifecycle=true 159ms
+     × does not finalize a replacement from an old stream 'error' sameLifecycle=true 89ms
+     × does not finalize a replacement from an old stream 'complete' sameLifecycle=true 73ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 3 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/pods/pod-manager.test.ts > PodManager > does not finalize a replacement from an old stream 'end' sameLifecycle=true
+AssertionError: expected 'failed' to be 'stopped' // Object.is equality
+
+Expected: "stopped"
+Received: "failed"
+
+ ❯ src/pods/pod-manager.test.ts:1549:29
+    1547|       });
+    1548|       release.resolve();
+    1549|       await expect(consuming).resolves.toBe('stopped');
+       |                             ^
+    1550|       expect(attempts.getActive(pod.id)).toEqual(replacement);
+    1551|       expect(attempts.listRaw(pod.id)[0]).toMatchObject({ outcome: 'ab…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/3]⎯
+
+ FAIL  src/pods/pod-manager.test.ts > PodManager > does not finalize a replacement from an old stream 'error' sameLifecycle=true
+AssertionError: promise rejected "Error: old transport ended late" instead of resolving
+ ❯ src/pods/pod-manager.test.ts:1549:29
+    1547|       });
+    1548|       release.resolve();
+    1549|       await expect(consuming).resolves.toBe('stopped');
+       |                             ^
+    1550|       expect(attempts.getActive(pod.id)).toEqual(replacement);
+    1551|       expect(attempts.listRaw(pod.id)[0]).toMatchObject({ outcome: 'ab…
+
+Caused by: Error: old transport ended late
+ ❯ src/pods/pod-manager.test.ts:1511:41
+ ❯ Object.consumeAgentEvents src/pods/pod-manager.ts:10658:26
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/3]⎯
+
+ FAIL  src/pods/pod-manager.test.ts > PodManager > does not finalize a replacement from an old stream 'complete' sameLifecycle=true
+AssertionError: expected 'completed' to be 'stopped' // Object.is equality
+
+Expected: "stopped"
+Received: "completed"
+
+ ❯ src/pods/pod-manager.test.ts:1549:29
+    1547|       });
+    1548|       release.resolve();
+    1549|       await expect(consuming).resolves.toBe('stopped');
+       |                             ^
+    1550|       expect(attempts.getActive(pod.id)).toEqual(replacement);
+    1551|       expect(attempts.listRaw(pod.id)[0]).toMatchObject({ outcome: 'ab…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/3]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  3 failed | 3 passed | 560 skipped (566)
+   Start at  10:22:30
+   Duration  4.72s (transform 2.77s, setup 0ms, import 3.85s, tests 654ms, environment 0ms)
+

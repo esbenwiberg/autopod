@@ -1,0 +1,6 @@
+{"mode":"retry","result":"pass","scope":"synthetic fixture integrity"}
+{"mode":"dispatch","result":"pass","scope":"synthetic fixture integrity"}
+{"mode":"approval-preservation","result":"pass","scope":"synthetic fixture integrity"}
+{"mode":"unverified-termination","result":"pass","scope":"synthetic fixture integrity"}
+{"mode":"worker-deadline","result":"pass","scope":"synthetic fixture integrity"}
+{"mode":"dispatch","result":"pass","scope":"synthetic fixture integrity"}

@@ -25,7 +25,7 @@ import type { FastifyInstance } from 'fastify';
 import pino from 'pino';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createServer } from './api/server.js';
-import type { AuthModule } from './interfaces/index.js';
+import type { AuthModule, PrManager } from './interfaces/index.js';
 import {
   createEscalationRepository,
   createEventBus,
@@ -38,6 +38,11 @@ import {
 } from './pods/index.js';
 import { createNudgeRepository } from './pods/nudge-repository.js';
 import { createProfileStore } from './profiles/index.js';
+import {
+  createMockWorktreeManager,
+  createMockContainerManager as createSharedMockContainerManager,
+  mockPrMerge,
+} from './test-utils/mock-helpers.js';
 
 const migrationsDir = path.resolve(import.meta.dirname, 'db/migrations');
 const MIGRATION_FILES = fs
@@ -98,7 +103,7 @@ const validProfileInput = {
   name: 'test-app',
   repoUrl: 'https://github.com/org/repo',
   buildCommand: 'npm run build',
-  startCommand: 'node server.js --port $PORT',
+  startCommand: 'node server.js --port 3000',
 };
 
 const authHeaders = { authorization: 'Bearer test-token' };
@@ -106,25 +111,22 @@ const authHeaders = { authorization: 'Bearer test-token' };
 describe('Extended Route Tests', () => {
   let db: Database.Database;
   let app: FastifyInstance;
+  let approvalPrManager: PrManager | null;
   let containerManager: ReturnType<typeof createMockContainerManager>;
+  let worktreeManager: ReturnType<typeof createMockWorktreeManager>;
 
   function createMockContainerManager() {
+    const manager = createSharedMockContainerManager();
     return {
-      spawn: vi.fn().mockResolvedValue('container-123'),
-      kill: vi.fn().mockResolvedValue(undefined),
-      stop: vi.fn().mockResolvedValue(undefined),
-      start: vi.fn().mockResolvedValue(undefined),
-      refreshFirewall: vi.fn().mockResolvedValue(undefined),
-      writeFile: vi.fn().mockResolvedValue(undefined),
-      readFile: vi.fn().mockResolvedValue(''),
-      getStatus: vi.fn().mockResolvedValue('running' as const),
-      execInContainer: vi.fn().mockResolvedValue({ stdout: '', stderr: '', exitCode: 0 }),
-      execStreaming: vi.fn(),
+      ...manager,
+      spawn: vi.mocked(manager.spawn),
+      execInContainer: vi.mocked(manager.execInContainer),
     };
   }
 
   beforeEach(async () => {
     db = createTestDb();
+    approvalPrManager = null;
     containerManager = createMockContainerManager();
 
     const profileStore = createProfileStore(db);
@@ -137,7 +139,8 @@ describe('Extended Route Tests', () => {
     const eventBus = createEventBus(eventRepo, logger);
     const authModule = createMockAuthModule();
 
-    const worktreeManager = {
+    worktreeManager = {
+      ...createMockWorktreeManager(),
       create: vi.fn().mockResolvedValue({
         worktreePath: '/tmp/wt',
         bareRepoPath: '/tmp/bare.git',
@@ -148,9 +151,7 @@ describe('Extended Route Tests', () => {
         .fn()
         .mockResolvedValue({ filesChanged: 3, linesAdded: 50, linesRemoved: 10 }),
       getDiff: vi.fn().mockResolvedValue('diff --git a/file.ts b/file.ts\n+added line'),
-      mergeBranch: vi.fn().mockResolvedValue(undefined),
       commitFiles: vi.fn().mockResolvedValue(undefined),
-      pushBranch: vi.fn().mockResolvedValue(undefined),
       getCommitLog: vi.fn().mockResolvedValue(''),
     };
 
@@ -219,6 +220,7 @@ describe('Extended Route Tests', () => {
     );
 
     podManager = createPodManager({
+      prManagerFactory: () => approvalPrManager,
       podRepo,
       escalationRepo,
       nudgeRepo,
@@ -281,9 +283,14 @@ describe('Extended Route Tests', () => {
     await vi.waitFor(
       () => {
         const row = db
-          .prepare('SELECT status, container_id AS containerId FROM pods WHERE id = ?')
+          .prepare(
+            'SELECT status, container_id AS containerId, failure_reason AS failureReason FROM pods WHERE id = ?',
+          )
           .get(podId) as { status: string; containerId: string | null } | undefined;
-        expect(row).toMatchObject({ status: 'validated', containerId: 'container-123' });
+        expect(row, JSON.stringify(row)).toMatchObject({
+          status: 'validated',
+          containerId: 'container-123',
+        });
       },
       { timeout: 1000 },
     );
@@ -633,9 +640,9 @@ describe('Extended Route Tests', () => {
       `).run({
         id,
         phaseTokenUsage: JSON.stringify({
-          agent_initial: { inputTokens: 1_000_000, outputTokens: 0 },
-          agent_rework_1: { inputTokens: 1_000_000, outputTokens: 0 },
-          review: { inputTokens: 1_000_000, outputTokens: 0 },
+          agent_initial: { inputTokens: 1_000_000, outputTokens: 0, costUsd: 1.25 },
+          agent_rework_1: { inputTokens: 1_000_000, outputTokens: 0, costUsd: 1.25 },
+          review: { inputTokens: 1_000_000, outputTokens: 0, costUsd: 1.25 },
         }),
       });
     }
@@ -652,7 +659,7 @@ describe('Extended Route Tests', () => {
       expect(res.statusCode).toBe(200);
       const body = res.json();
       expect(body.podId).toBe('pod-cost-1');
-      // totalCostUsd = stored agent cost (10) + harness review cost (1M tokens × $1.25/M for gpt-5 = 1.25)
+      // totalCostUsd = stored agent cost (10) + stored harness review cost (1.25)
       expect(body.totalCostUsd).toBe(11.25);
       expect(body.inputTokens).toBe(3_000_000);
       expect(body.segments.map((segment: { bucket: string }) => segment.bucket)).toEqual([
@@ -910,7 +917,127 @@ describe('Extended Route Tests', () => {
   // -------------------------------------------------------------------------
 
   describe('POST /pods/:id/approve', () => {
+    it.each(['no-changes', 'branch', 'missing-worktree', 'existing-pr-push'] as const)(
+      'returns an actionable error for %s without cleanup and accepts a later explicit approval retry',
+      async (delivery) => {
+        if (delivery === 'existing-pr-push') {
+          approvalPrManager = {
+            createPr: vi.fn(),
+            mergePr: vi.fn().mockImplementation(mockPrMerge),
+            getPrStatus: vi.fn().mockResolvedValue({
+              open: true,
+              merged: false,
+              reviewDecision: 'APPROVED',
+              blockReason: null,
+              ciFailures: [],
+              reviewComments: [],
+            }),
+          };
+          vi.mocked(worktreeManager.rebaseOntoBase).mockResolvedValue({
+            rebased: true,
+            alreadyUpToDate: true,
+            conflicts: [],
+          });
+        }
+        const repo = createPodRepository(db);
+        repo.insert({
+          id: 'approval-preserved',
+          profileName: 'test-app',
+          task: 'Preserve branch',
+          status: 'validated',
+          model: 'model',
+          runtime: 'codex',
+          executionTarget: 'local',
+          branch: 'preserved-branch',
+          userId: 'user-1',
+          maxValidationAttempts: 3,
+          skipValidation: false,
+          outputMode: 'pr',
+          options: {
+            agentMode: 'auto',
+            output: delivery === 'branch' ? 'branch' : 'pr',
+            validate: true,
+            promotable: false,
+          },
+        });
+        repo.update('approval-preserved', {
+          ...(delivery === 'existing-pr-push'
+            ? { prUrl: 'https://github.com/org/repo/pull/42' }
+            : {}),
+          containerId: 'preserved-container',
+          worktreePath: delivery === 'missing-worktree' ? null : '/tmp/preserved-approval',
+          filesChanged: delivery === 'no-changes' ? 0 : 1,
+          lastValidationResult: {
+            podId: 'approval-preserved',
+            attempt: 1,
+            timestamp: new Date().toISOString(),
+            overall: 'pass',
+            duration: 1,
+            taskReview: null,
+            smoke: {
+              status: 'pass',
+              build: { status: 'pass', output: 'ok', duration: 1 },
+              health: { status: 'pass', url: 'http://localhost', responseCode: 200, duration: 1 },
+              pages: [],
+            },
+          },
+        });
+        vi.mocked(worktreeManager.getDiffStats).mockResolvedValue({
+          filesChanged: delivery === 'no-changes' ? 0 : 1,
+          linesAdded: 0,
+          linesRemoved: 0,
+        });
+        (worktreeManager.hasChangesAgainstBase as ReturnType<typeof vi.fn>).mockResolvedValue(true);
+        if (delivery !== 'missing-worktree')
+          vi.mocked(
+            delivery === 'branch' ? worktreeManager.mergeBranch : worktreeManager.pushBranch,
+          ).mockRejectedValueOnce(new Error('remote unavailable'));
+        const first = await app.inject({
+          method: 'POST',
+          url: '/pods/approval-preserved/approve',
+          headers: authHeaders,
+          payload: { reason: 'Reviewed local fixture evidence' },
+        });
+        expect(first.statusCode, first.body).toBe(delivery === 'missing-worktree' ? 409 : 502);
+        expect(first.json()).toMatchObject({
+          error:
+            delivery === 'missing-worktree'
+              ? 'DELIVERY_RECONCILIATION_REQUIRED'
+              : delivery === 'branch' || delivery === 'existing-pr-push'
+                ? 'APPROVAL_DELIVERY_FAILED'
+                : 'BRANCH_PRESERVATION_FAILED',
+          message: expect.stringContaining('retry approval'),
+        });
+        expect(repo.getOrThrow('approval-preserved')).toMatchObject({
+          status: 'validated',
+          containerId: 'preserved-container',
+          worktreePath: delivery === 'missing-worktree' ? null : '/tmp/preserved-approval',
+        });
+        expect(containerManager.kill).not.toHaveBeenCalled();
+        if (delivery === 'missing-worktree')
+          repo.update('approval-preserved', { worktreePath: '/tmp/preserved-approval' });
+        const retry = await app.inject({
+          method: 'POST',
+          url: '/pods/approval-preserved/approve',
+          headers: authHeaders,
+          payload: { reason: 'Remote repaired; retry reviewed local fixture' },
+        });
+        expect(retry.statusCode, retry.body).toBe(200);
+        expect(repo.getOrThrow('approval-preserved')).toMatchObject({
+          status: 'complete',
+          failureReason: null,
+        });
+        expect(
+          delivery === 'no-changes' || delivery === 'existing-pr-push'
+            ? worktreeManager.pushBranch
+            : worktreeManager.mergeBranch,
+        ).toHaveBeenCalledTimes(delivery === 'missing-worktree' ? 1 : 2);
+      },
+    );
+
     it('returns 409 when pod is not in validated state', async () => {
+      // Hold provisioning so the request tests a known, non-actionable state.
+      containerManager.spawn.mockImplementation(() => new Promise(() => {}));
       const createRes = await app.inject({
         method: 'POST',
         url: '/pods',
@@ -946,6 +1073,8 @@ describe('Extended Route Tests', () => {
 
   describe('POST /pods/:id/reject', () => {
     it('returns 409 when pod is not in validated state', async () => {
+      // Hold provisioning so the request tests a known, non-actionable state.
+      containerManager.spawn.mockImplementation(() => new Promise(() => {}));
       const createRes = await app.inject({
         method: 'POST',
         url: '/pods',
@@ -1054,8 +1183,15 @@ describe('Extended Route Tests', () => {
       });
       const podId = createRes.json().id;
 
-      // Force to a terminal state so deletion is allowed
-      db.prepare('UPDATE pods SET status = ? WHERE id = ?').run('killed', podId);
+      // Observe the worker and validation settlement before making it terminal.
+      // Merely changing status while provisioning is pending does not own cleanup.
+      await waitForPodValidated(podId);
+      const killed = await app.inject({
+        method: 'POST',
+        url: `/pods/${podId}/kill`,
+        headers: authHeaders,
+      });
+      expect(killed.statusCode).toBe(200);
 
       const res = await app.inject({
         method: 'DELETE',
@@ -1182,6 +1318,8 @@ describe('Extended Route Tests', () => {
 
   describe('POST /pods/:id/validate', () => {
     it('returns 409 when pod cannot be validated from current state', async () => {
+      // Hold provisioning so the request tests a known, non-actionable state.
+      containerManager.spawn.mockImplementation(() => new Promise(() => {}));
       const createRes = await app.inject({
         method: 'POST',
         url: '/pods',
@@ -1195,8 +1333,8 @@ describe('Extended Route Tests', () => {
         url: `/pods/${podId}/validate`,
         headers: authHeaders,
       });
-      // queued → not in a state that can be force-validated
-      expect([200, 409]).toContain(res.statusCode);
+      // Provisioning cannot be force-validated.
+      expect(res.statusCode).toBe(409);
     });
 
     it('returns 404 for nonexistent pod', async () => {

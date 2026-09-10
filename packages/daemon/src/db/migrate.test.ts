@@ -5,7 +5,7 @@ import Database from 'better-sqlite3';
 import pino from 'pino';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createProfileStore } from '../profiles/profile-store.js';
-import { runMigrations } from './migrate.js';
+import { runMigrations, runMigrationsWithBackups } from './migrate.js';
 
 const logger = pino({ level: 'silent' });
 const MIGRATIONS_DIR = new URL('../../src/db/migrations', import.meta.url).pathname;
@@ -440,7 +440,67 @@ describe('runMigrations — migration 091 (drop screenshot blobs)', () => {
     expect(result.taskReview.screenshots).toEqual([]);
   });
 
-  it('creates a snapshot file before applying 091 for a real DB path', () => {
+  it('backs up committed WAL content before destructive migration, including implicit rowids', async () => {
+    const dbPath = path.join(tmpDir, 'wal.db');
+    const db = new Database(dbPath);
+    db.pragma('journal_mode = WAL');
+    db.pragma('wal_autocheckpoint = 0');
+    buildLegacyDb(db);
+    db.exec(
+      "CREATE TABLE retained_order (value TEXT); INSERT INTO retained_order(rowid, value) VALUES (7, 'first'), (99, 'latest')",
+    );
+    db.pragma('wal_checkpoint(TRUNCATE)');
+    db.prepare('UPDATE validations SET screenshots = ? WHERE id = ?').run(
+      '["committed-in-wal"]',
+      'val-1',
+    );
+    try {
+      expect(fs.statSync(`${dbPath}-wal`).size).toBeGreaterThan(0);
+      await runMigrationsWithBackups(db, migrationsDir, logger, dbPath);
+      const backups = path.join(tmpDir, 'backups');
+      const file = fs
+        .readdirSync(backups)
+        .find((name) => name.endsWith('-pre-screenshot-cutover.db'));
+      expect(file).toBeDefined();
+      const restored = new Database(path.join(backups, file as string), { readonly: true });
+      try {
+        expect(
+          restored.prepare('SELECT screenshots FROM validations WHERE id = ?').get('val-1'),
+        ).toEqual({ screenshots: '["committed-in-wal"]' });
+        expect(
+          restored.prepare('SELECT rowid, value FROM retained_order ORDER BY rowid').all(),
+        ).toEqual([
+          { rowid: 7, value: 'first' },
+          { rowid: 99, value: 'latest' },
+        ]);
+        expect(restored.pragma('integrity_check')).toEqual([{ integrity_check: 'ok' }]);
+      } finally {
+        restored.close();
+      }
+    } finally {
+      db.close();
+    }
+  });
+
+  it('rejects a cutover backup path that does not identify the open database', async () => {
+    const dbPath = path.join(tmpDir, 'active.db');
+    const db = new Database(dbPath);
+    buildLegacyDb(db);
+    const unrelated = path.join(tmpDir, 'unrelated.db');
+    const other = new Database(unrelated);
+    other.exec('CREATE TABLE unrelated(id INTEGER)');
+    other.close();
+    try {
+      await expect(runMigrationsWithBackups(db, migrationsDir, logger, unrelated)).rejects.toThrow(
+        /active database/,
+      );
+      expect(hasColumn(db, 'validations', 'screenshots')).toBe(true);
+    } finally {
+      db.close();
+    }
+  });
+
+  it('creates a snapshot file before applying 091 for a real DB path', async () => {
     const dbPath = path.join(tmpDir, 'autopod.db');
     const backupsDir = path.join(tmpDir, 'backups');
     fs.mkdirSync(backupsDir);
@@ -452,7 +512,7 @@ describe('runMigrations — migration 091 (drop screenshot blobs)', () => {
 
     // Reopen (migrate.ts doesn't close it; we need to pass an open handle + dbPath)
     const db2 = new Database(dbPath);
-    runMigrations(db2, migrationsDir, logger, dbPath);
+    await runMigrationsWithBackups(db2, migrationsDir, logger, dbPath);
     db2.close();
 
     // A snapshot file should exist in the backups dir
@@ -475,17 +535,15 @@ describe('runMigrations — migration 091 (drop screenshot blobs)', () => {
     expect(hasColumn(db, 'validations', 'screenshots')).toBe(false);
   });
 
-  it('does NOT apply migration when snapshot fails (fail-closed)', () => {
+  it('does NOT apply migration when snapshot fails (fail-closed)', async () => {
     const dbPath = path.join(tmpDir, 'autopod.db');
     const db = new Database(dbPath);
     buildLegacyDb(db);
 
-    // Make copyFileSync throw so the snapshot fails
-    vi.spyOn(fs, 'copyFileSync').mockImplementation(() => {
-      throw new Error('disk full');
-    });
-
-    expect(() => runMigrations(db, migrationsDir, logger, dbPath)).toThrow('disk full');
+    vi.spyOn(db, 'backup').mockRejectedValue(new Error('disk full'));
+    await expect(runMigrationsWithBackups(db, migrationsDir, logger, dbPath)).rejects.toThrow(
+      'disk full',
+    );
 
     // Column must still be present — migration was not applied
     expect(hasColumn(db, 'validations', 'screenshots')).toBe(true);
@@ -921,4 +979,27 @@ describe('runMigrations — profile reasoning effort (migration 129)', () => {
       },
     ]);
   });
+});
+
+it('rejects duplicate numeric migration prefixes before applying any business migration', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'migration-prefix-'));
+  const db = new Database(':memory:');
+  try {
+    fs.writeFileSync(path.join(root, '001_alpha.sql'), 'CREATE TABLE alpha (id TEXT);');
+    fs.writeFileSync(path.join(root, '001_beta.sql'), 'CREATE TABLE beta (id TEXT);');
+    expect(() => runMigrations(db, root, logger)).toThrow('Migration prefix collision');
+    expect(
+      db
+        .prepare("SELECT name FROM sqlite_master WHERE type='table' AND name IN ('alpha','beta')")
+        .all(),
+    ).toEqual([]);
+    fs.unlinkSync(path.join(root, '001_beta.sql'));
+    runMigrations(db, root, logger);
+    fs.writeFileSync(path.join(root, '001_beta.sql'), 'CREATE TABLE beta (id TEXT);');
+    expect(() => runMigrations(db, root, logger)).toThrow('Migration prefix collision');
+    expect(db.prepare("SELECT name FROM sqlite_master WHERE name='beta'").get()).toBeUndefined();
+  } finally {
+    db.close();
+    fs.rmSync(root, { recursive: true, force: true });
+  }
 });

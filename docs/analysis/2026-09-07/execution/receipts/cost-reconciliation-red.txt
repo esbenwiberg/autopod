@@ -1,0 +1,32 @@
+
+ RUN  v4.1.11 /private/tmp/autopod-durable-execution/packages/daemon
+
+ ❯ src/pods/task-execution-ledger.test.ts (11 tests | 1 failed | 10 skipped) 66ms
+     × uses corrected provider telemetry instead of adding it to duplicate legacy pod totals 66ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/pods/task-execution-ledger.test.ts > task-wide execution accounting > uses corrected provider telemetry instead of adding it to duplicate legacy pod totals
+AssertionError: expected 1 to be 0.5 // Object.is equality
+
+- Expected
++ Received
+
+- 0.5
++ 1
+
+ ❯ src/pods/task-execution-ledger.test.ts:167:27
+    165|       repo.update('root', {status: 'complete', completedAt: '2026-09-0…
+    166|       const fleet = aggregateCost({podRepo: repo, now: () => new Date(…
+    167|       expect(fleet.total).toBe(repo.taskExecutions?.snapshot('root').r…
+       |                           ^
+    168|
+    169|     } finally {
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 10 skipped (11)
+   Start at  20:41:03
+   Duration  321ms (transform 100ms, setup 0ms, import 158ms, tests 66ms, environment 0ms)

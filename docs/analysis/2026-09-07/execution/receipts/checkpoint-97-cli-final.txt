@@ -1,0 +1,53 @@
+
+ RUN  v4.1.11 /private/tmp/autopod-durable-execution/packages/cli
+
+{
+  "taskId": "task",
+  "stage": "worker",
+  "backoffsMs": [],
+  "admissionCount": 1,
+  "executedCount": 1,
+  "transientRetryCount": 0,
+  "measuredDurationMs": 0,
+  "interruptedCount": 0,
+  "latest": {
+    "id": "auth-failure",
+    "outcome": "nonretryable"
+  },
+  "authorizations": [
+    {
+      "id": "target-grant",
+      "targetBindingHash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "reason": "Operator selected claude/opus on account primary after worker failure.",
+      "usedByAttemptId": null
+    }
+  ],
+  "telemetry": "partial"
+}
+ ❯ src/commands/pod.test.ts (38 tests | 1 failed) 152ms
+   × sends profile-primary recovery through HTTP and inspects its target-bound worker permission 9ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/commands/pod.test.ts > sends profile-primary recovery through HTTP and inspects its target-bound worker permission
+AssertionError: expected 'Pod abcd1234 queued on its profile pr…' to contain 'Operator selected claude/opus on acco…'
+
+Expected: "Operator selected claude/opus on account primary after worker failure."
+Received: "Pod abcd1234 queued on its profile primary provider."
+
+ ❯ src/commands/pod.test.ts:1216:49
+    1214|       false,
+    1215|     );
+    1216|     expect(output.mock.calls.flat().join('\n')).toContain(
+       |                                                 ^
+    1217|       'Operator selected claude/opus on account primary after worker f…
+    1218|     );
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed | 1 passed (2)
+      Tests  1 failed | 41 passed (42)
+   Start at  20:18:36
+   Duration  698ms (transform 243ms, setup 0ms, import 457ms, tests 182ms, environment 0ms)
+

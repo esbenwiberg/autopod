@@ -1,0 +1,24 @@
+{
+  "scope": "actual built mobile bundle against isolated local HTTP fixture; not production or physical phone",
+  "date": "2026-09-07",
+  "sourceHead": "51c2fa3f97046c89996a1d31e186a6e1947d863b",
+  "sourceModified": true,
+  "fixture": "fixtures/mobile-server.mjs",
+  "surface": "Codex in-app browser",
+  "viewport": {
+    "width": 390,
+    "height": 844
+  },
+  "observations": [
+    "Opened pending pod from list",
+    "Task identity and distinct execution displayed",
+    "2 pods, 3 recorded agent runs, 4 provider attempts, 5 validations displayed",
+    "100/100 recorded tokens and $1.2500 partial telemetry displayed",
+    "Infrastructure cost unavailable displayed",
+    "Clicked Refresh task accounting and values returned",
+    "Stopped only local fixture, clicked Refresh; Task accounting unavailable displayed",
+    "Pending human question remained actionable; no answer submitted"
+  ],
+  "visual": "Accounting text and refresh control readable at 390x844; screenshot inspected in tool output, not saved as a file",
+  "cleanup": "Temporary viewport reset; tab closed; local fixture server stopped"
+}

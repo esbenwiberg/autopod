@@ -1,0 +1,25 @@
+
+ RUN  v4.1.11 /private/tmp/autopod-durable-execution/packages/daemon
+
+ ❯ src/runtimes/codex-runtime.test.ts (68 tests | 1 failed | 66 skipped) 325ms
+       × recovers sandbox completion after final task summary when stdout stalls (during-launch) 261ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/runtimes/codex-runtime.test.ts > CodexRuntime > spawn > recovers sandbox completion after final task summary when stdout stalls (during-launch)
+Error: Timed out after 250ms
+ ❯ Timeout.<anonymous> src/runtimes/codex-runtime.test.ts:126:45
+    124| function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
+    125|   return new Promise((resolve, reject) => {
+    126|     const timeout = setTimeout(() => reject(new Error(`Timed out after…
+       |                                             ^
+    127|     promise.then(
+    128|       (value) => {
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 1 passed | 66 skipped (68)
+   Start at  19:38:06
+   Duration  599ms (transform 109ms, setup 0ms, import 170ms, tests 325ms, environment 0ms)

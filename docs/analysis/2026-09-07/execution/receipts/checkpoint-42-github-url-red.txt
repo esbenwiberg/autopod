@@ -1,0 +1,128 @@
+
+ RUN  v4.1.11 /private/tmp/autopod-durable-execution/packages/daemon
+
+ ❯ src/worktrees/pr-manager.test.ts (41 tests | 15 failed | 24 skipped) 8ms
+     × preserves supported exact repository forms: https://github.com/org/repo.name.git 3ms
+     × preserves supported exact repository forms: git@github.com:org/repo.name.git 0ms
+     × preserves supported exact repository forms: ssh://git@github.com/org/repo.name.git 0ms
+     × preserves supported exact repository forms: https://github.com/org/repo.name/ 0ms
+     × rejects ambiguous repository identity: https://evilgithub.com/org/repo 1ms
+     × rejects ambiguous repository identity: https://example.com/github.com/org/repo 0ms
+     × rejects ambiguous repository identity: https://github.com/org/repo?other=1 0ms
+     × rejects ambiguous repository identity: https://github.com/org/%2frepo 0ms
+     × rejects malformed PR addresses before API reads, merge and replies: https://evilgithub.com/org/repo/pull/42 2ms
+     × rejects malformed PR addresses before API reads, merge and replies: https://example.com/github.com/org/repo/pull/42 0ms
+     × rejects malformed PR addresses before API reads, merge and replies: https://github.com/org/repo/pull/42not-a-number 0ms
+     × rejects malformed PR addresses before API reads, merge and replies: https://github.com/org/repo/pull/0 0ms
+     × rejects malformed PR addresses before API reads, merge and replies: https://github.com/org/repo/pull/9007199254740992 0ms
+     × rejects malformed PR addresses before API reads, merge and replies: https://github.com/org/%2frepo/pull/42 0ms
+     × rejects malformed PR addresses before API reads, merge and replies: https://user:password@github.com/org/repo/pull/42 0ms
+
+⎯⎯⎯⎯⎯⎯ Failed Tests 15 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/worktrees/pr-manager.test.ts > GitHub repository and PR URL identity > preserves supported exact repository forms: https://github.com/org/repo.name.git
+Error: Cannot parse GitHub repo URL: https://github.com/org/repo.name.git
+ ❯ Module.parseGitHubRepoUrl src/worktrees/pr-manager.ts:721:26
+    719| export function parseGitHubRepoUrl(repoUrl: string): { owner: string; …
+    720|   const httpsMatch = repoUrl.match(/github\.com[/:]([^/]+)\/([^/.]+?)(…
+    721|   if (!httpsMatch) throw new Error(`Cannot parse GitHub repo URL: ${re…
+       |                          ^
+    722|   return { owner: httpsMatch[1], repo: httpsMatch[2] };
+    723| }
+ ❯ src/worktrees/pr-manager.test.ts:766:12
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/15]⎯
+
+ FAIL  src/worktrees/pr-manager.test.ts > GitHub repository and PR URL identity > preserves supported exact repository forms: git@github.com:org/repo.name.git
+Error: Cannot parse GitHub repo URL: git@github.com:org/repo.name.git
+ ❯ Module.parseGitHubRepoUrl src/worktrees/pr-manager.ts:721:26
+    719| export function parseGitHubRepoUrl(repoUrl: string): { owner: string; …
+    720|   const httpsMatch = repoUrl.match(/github\.com[/:]([^/]+)\/([^/.]+?)(…
+    721|   if (!httpsMatch) throw new Error(`Cannot parse GitHub repo URL: ${re…
+       |                          ^
+    722|   return { owner: httpsMatch[1], repo: httpsMatch[2] };
+    723| }
+ ❯ src/worktrees/pr-manager.test.ts:766:12
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/15]⎯
+
+ FAIL  src/worktrees/pr-manager.test.ts > GitHub repository and PR URL identity > preserves supported exact repository forms: ssh://git@github.com/org/repo.name.git
+Error: Cannot parse GitHub repo URL: ssh://git@github.com/org/repo.name.git
+ ❯ Module.parseGitHubRepoUrl src/worktrees/pr-manager.ts:721:26
+    719| export function parseGitHubRepoUrl(repoUrl: string): { owner: string; …
+    720|   const httpsMatch = repoUrl.match(/github\.com[/:]([^/]+)\/([^/.]+?)(…
+    721|   if (!httpsMatch) throw new Error(`Cannot parse GitHub repo URL: ${re…
+       |                          ^
+    722|   return { owner: httpsMatch[1], repo: httpsMatch[2] };
+    723| }
+ ❯ src/worktrees/pr-manager.test.ts:766:12
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/15]⎯
+
+ FAIL  src/worktrees/pr-manager.test.ts > GitHub repository and PR URL identity > preserves supported exact repository forms: https://github.com/org/repo.name/
+Error: Cannot parse GitHub repo URL: https://github.com/org/repo.name/
+ ❯ Module.parseGitHubRepoUrl src/worktrees/pr-manager.ts:721:26
+    719| export function parseGitHubRepoUrl(repoUrl: string): { owner: string; …
+    720|   const httpsMatch = repoUrl.match(/github\.com[/:]([^/]+)\/([^/.]+?)(…
+    721|   if (!httpsMatch) throw new Error(`Cannot parse GitHub repo URL: ${re…
+       |                          ^
+    722|   return { owner: httpsMatch[1], repo: httpsMatch[2] };
+    723| }
+ ❯ src/worktrees/pr-manager.test.ts:766:12
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[4/15]⎯
+
+ FAIL  src/worktrees/pr-manager.test.ts > GitHub repository and PR URL identity > rejects ambiguous repository identity: https://evilgithub.com/org/repo
+ FAIL  src/worktrees/pr-manager.test.ts > GitHub repository and PR URL identity > rejects ambiguous repository identity: https://example.com/github.com/org/repo
+ FAIL  src/worktrees/pr-manager.test.ts > GitHub repository and PR URL identity > rejects ambiguous repository identity: https://github.com/org/repo?other=1
+ FAIL  src/worktrees/pr-manager.test.ts > GitHub repository and PR URL identity > rejects ambiguous repository identity: https://github.com/org/%2frepo
+AssertionError: expected [Function] to throw an error
+ ❯ src/worktrees/pr-manager.test.ts:774:43
+    772|     'https://github.com:8443/org/repo', 'https://github.com/org/%2frep…
+    773|   ])('rejects ambiguous repository identity: %s', (url) => {
+    774|     expect(() => parseGitHubRepoUrl(url)).toThrow();
+       |                                           ^
+    775|   });
+    776|
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[5/15]⎯
+
+ FAIL  src/worktrees/pr-manager.test.ts > GitHub repository and PR URL identity > rejects malformed PR addresses before API reads, merge and replies: https://evilgithub.com/org/repo/pull/42
+ FAIL  src/worktrees/pr-manager.test.ts > GitHub repository and PR URL identity > rejects malformed PR addresses before API reads, merge and replies: https://example.com/github.com/org/repo/pull/42
+ FAIL  src/worktrees/pr-manager.test.ts > GitHub repository and PR URL identity > rejects malformed PR addresses before API reads, merge and replies: https://github.com/org/repo/pull/42not-a-number
+ FAIL  src/worktrees/pr-manager.test.ts > GitHub repository and PR URL identity > rejects malformed PR addresses before API reads, merge and replies: https://github.com/org/repo/pull/0
+ FAIL  src/worktrees/pr-manager.test.ts > GitHub repository and PR URL identity > rejects malformed PR addresses before API reads, merge and replies: https://github.com/org/repo/pull/9007199254740992
+ FAIL  src/worktrees/pr-manager.test.ts > GitHub repository and PR URL identity > rejects malformed PR addresses before API reads, merge and replies: https://github.com/org/%2frepo/pull/42
+ FAIL  src/worktrees/pr-manager.test.ts > GitHub repository and PR URL identity > rejects malformed PR addresses before API reads, merge and replies: https://user:password@github.com/org/repo/pull/42
+AssertionError: promise resolved "{ headSha: undefined, …(6) }" instead of rejecting
+
+- Expected
++ Received
+
+- Error {
+-   "message": "rejected promise",
++ {
++   "blockReason": null,
++   "ciFailures": [],
++   "headSha": undefined,
++   "merged": true,
++   "open": false,
++   "reviewComments": [],
++   "reviewDecision": "APPROVED",
+  }
+
+ ❯ src/worktrees/pr-manager.test.ts:793:27
+    791|       () => manager.mergePr({ prUrl }),
+    792|       () => manager.replyToReviewFeedback({ prUrl, responses: [] }),
+    793|     ]) await expect(call()).rejects.toMatchObject({ code: 'DELIVERY_RE…
+       |                           ^
+    794|     expect(fetchMock).not.toHaveBeenCalled();
+    795|   });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[6/15]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  15 failed | 2 passed | 24 skipped (41)
+   Start at  00:22:33
+   Duration  308ms (transform 98ms, setup 0ms, import 194ms, tests 8ms, environment 0ms)

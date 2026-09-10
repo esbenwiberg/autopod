@@ -1,0 +1,65 @@
+
+ RUN  v4.1.11 /private/tmp/autopod-durable-execution/packages/daemon
+
+ ❯ src/pods/merge-journal.test.ts (23 tests | 2 failed | 21 skipped) 186ms
+     × retains a source-bound merged observation across disk restart without inventing a request 144ms
+     × separates acknowledged pending attempts from a single confirmed logical merge 41ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 2 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/pods/merge-journal.test.ts > durable merge journal > retains a source-bound merged observation across disk restart without inventing a request
+AssertionError: expected undefined to match object { prCount: 1, requestCount: +0, …(3) }
+
+- Expected:
+{
+  "mergedPrCount": 1,
+  "mergedWithoutRecordedRequestCount": 1,
+  "prCount": 1,
+  "requestCount": 0,
+  "unresolvedPrCount": 0,
+}
+
++ Received:
+undefined
+
+ ❯ src/pods/merge-journal.test.ts:124:61
+    122|         'already confirmed',
+    123|       );
+    124|       expect(repo.taskExecutions?.snapshot(f.pod.id).merge).toMatchObj…
+       |                                                             ^
+    125|         prCount: 1, requestCount: 0, mergedPrCount: 1, mergedWithoutRe…
+    126|       });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/2]⎯
+
+ FAIL  src/pods/merge-journal.test.ts > durable merge journal > separates acknowledged pending attempts from a single confirmed logical merge
+AssertionError: expected undefined to match object { prCount: 1, requestCount: 2, …(3) }
+
+- Expected:
+{
+  "mergedPrCount": 1,
+  "mergedWithoutRecordedRequestCount": 0,
+  "prCount": 1,
+  "requestCount": 2,
+  "unresolvedPrCount": 0,
+}
+
++ Received:
+undefined
+
+ ❯ src/pods/merge-journal.test.ts:325:63
+    323|       f.journal.observe(first, f.result, 'provider_lookup');
+    324|       expect(f.journal.find(f.pod)?.state).toBe('merged');
+    325|       expect(f.repo.taskExecutions?.snapshot(f.pod.id).merge).toMatchO…
+       |                                                               ^
+    326|         prCount: 1, requestCount: 2, mergedPrCount: 1, mergedWithoutRe…
+    327|       });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/2]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  2 failed | 21 skipped (23)
+   Start at  07:15:46
+   Duration  453ms (transform 108ms, setup 0ms, import 172ms, tests 186ms, environment 0ms)
+

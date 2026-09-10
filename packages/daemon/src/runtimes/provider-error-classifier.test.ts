@@ -51,6 +51,17 @@ const quotaFixtures = [
 ] as const;
 
 describe('classifyProviderError', () => {
+  it('treats structured Claude 529 as unavailable without authorizing account failover', () => {
+    expect(
+      classifyProviderError('claude', { status: 529, message: 'API Error: 529 Overloaded' }),
+    ).toMatchObject({ category: 'provider_unavailable', definitive: false });
+    expect(
+      classifyProviderError('codex', { status: 529, message: 'Unrecognized failure' }).category,
+    ).toBe('unknown');
+    expect(classifyProviderError('claude', { status: 529, code: 'invalid_api_key' }).category).toBe(
+      'auth',
+    );
+  });
   it.each(quotaFixtures)(
     'classifies fixture-backed terminal $runtime quota evidence as definitive',
     ({ runtime, evidence }) => {

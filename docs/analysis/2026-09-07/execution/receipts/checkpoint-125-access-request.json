@@ -1,0 +1,18 @@
+{
+  "status": "prepared_not_executed",
+  "principalId": "cef0aeed-b5d3-442e-b5d7-85e0526bd5e7",
+  "principalType": "User",
+  "principalName": "d-ewi@contextand.com",
+  "roleName": "Container Apps SandboxGroup Data Owner",
+  "roleDefinitionId": "c24cf47c-5077-412d-a19c-45202126392c",
+  "scope": "/subscriptions/06bb959b-9458-41a6-bdf5-77cc12feaab9/resourceGroups/ewi-sandboxes/providers/Microsoft.App/sandboxGroups/autopod-spike-neu",
+  "assignmentName": "5c297db9-e883-575b-9ab9-a453bc04e9c7",
+  "assignmentId": "/subscriptions/06bb959b-9458-41a6-bdf5-77cc12feaab9/resourceGroups/ewi-sandboxes/providers/Microsoft.App/sandboxGroups/autopod-spike-neu/providers/Microsoft.Authorization/roleAssignments/5c297db9-e883-575b-9ab9-a453bc04e9c7",
+  "observedCurrentAccountCanAssignRoles": false,
+  "observedDataPlaneStatus": 403,
+  "grantPerformed": false,
+  "permissionImpact": "Read, write, delete and action data permissions for sandbox resources within this one group. Not a read-only grant.",
+  "expiration": "No automatic expiry; remove this exact assignment after authorized acceptance work if it was newly created. Preserve existing assignments.",
+  "resourceSpend": "No sandbox or model allocation in the grant; any canary/import has separate scope/spend approval.",
+  "documentation": "https://learn.microsoft.com/en-us/azure/container-apps/sandboxes-quickstart-bicep"
+}

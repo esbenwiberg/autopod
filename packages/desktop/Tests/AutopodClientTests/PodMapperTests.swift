@@ -37,6 +37,8 @@ import AutopodUI
     "profileName": "my-app",
     "task": "Add OAuth login",
     "status": "running",
+    "lastRecoveryTrigger": "restart",
+    "lastCorrectionMessage": "Recovery paused: task execution ownership remains unresolved.",
     "model": "opus",
     "runtime": "claude",
     "executionTarget": "local",
@@ -87,6 +89,8 @@ import AutopodUI
 
   #expect(pod.id == "feat-oauth-a1b2")
   #expect(pod.status == .running)
+  #expect(pod.latestActivity == "Recovery paused: task execution ownership remains unresolved.")
+  #expect(pod.plan?.summary == "Add OAuth flow")
   #expect(pod.outputMode == .pr)
   #expect(pod.branch == "feat/oauth")
   #expect(pod.task == "Add OAuth login")
@@ -1475,17 +1479,18 @@ private let minimalSessionJson = """
   #expect(workers.interrupted == 1)
 }
 
-@Test func mapsPersistedFailureReasonAfterRefreshWithoutValidation() throws {
+@Test(arguments: ["Agent failed: Codex CLI 0.144.3 is incompatible", "Codex execution termination is unverified; retain completion and source before another execution."])
+func mapsPersistedFailureReasonAfterRefreshWithoutValidation(reason: String) throws {
   let json = (minimalSessionJson
     .replacingOccurrences(of: #""status": "running""#, with: #""status": "failed""#)
     + #", "failureReason": "Agent failed: Codex CLI 0.144.3 is incompatible" }"#
-  ).data(using: .utf8)!
+  ).replacingOccurrences(of: "Agent failed: Codex CLI 0.144.3 is incompatible", with: reason).data(using: .utf8)!
 
   let response = try JSONDecoder().decode(SessionResponse.self, from: json)
   let pod = PodMapper.map(response)
 
-  #expect(pod.errorSummary == "Agent failed: Codex CLI 0.144.3 is incompatible")
-  #expect(pod.latestActivity == "Agent failed: Codex CLI 0.144.3 is incompatible")
+  #expect(pod.errorSummary == reason)
+  #expect(pod.latestActivity == reason)
 }
 
 @Test func mapperMapsValidationInfrastructureWithoutClaimingTestsFailed() throws {
@@ -1572,4 +1577,95 @@ private let minimalSessionJson = """
   #expect(checks.sast == nil)
   #expect(checks.allPassed == false)
   #expect(checks.validationPhaseCount == 9)
+}
+
+@Test func mapsArtifactCollectionRecoveryWithoutReworkAcrossCompactAndDetail() throws {
+  let json = """
+  {
+    "id": "feat-oauth-a1b2",
+    "profileName": "my-app",
+    "task": "Add OAuth login",
+    "status": "failed",
+    "model": "opus",
+    "runtime": "claude",
+    "executionTarget": "local",
+    "branch": "feat/oauth",
+    "containerId": "abc123",
+    "worktreePath": null,
+    "validationAttempts": 0,
+    "maxValidationAttempts": 3,
+    "lastValidationResult": null,
+    "pendingEscalation": null,
+    "escalationCount": 0,
+    "skipValidation": false,
+    "createdAt": "2026-04-01T09:00:00Z",
+    "startedAt": "2026-04-01T09:00:05Z",
+    "runningAt": "2026-04-01T09:00:35Z",
+    "completedAt": null,
+    "updatedAt": "2026-04-01T09:05:00Z",
+    "userId": "user-1",
+    "filesChanged": 5,
+    "linesAdded": 89,
+    "linesRemoved": 12,
+    "previewUrl": "http://localhost:3001",
+    "prUrl": null,
+    "plan": {
+      "summary": "Add OAuth flow",
+      "steps": [
+        "Setup",
+        "Implement"
+      ]
+    },
+    "progress": {
+      "phase": "implementation",
+      "description": "Writing routes",
+      "currentPhase": 3,
+      "totalPhases": 5
+    },
+    "claudeSessionId": null,
+    "outputMode": "pr",
+    "options": {
+      "agentMode": "auto",
+      "output": "artifact",
+      "validate": false,
+      "promotable": false
+    },
+    "baseBranch": null,
+    "recoveryWorktreePath": null,
+    "lastHeartbeatAt": null,
+    "inputTokens": 15000,
+    "outputTokens": 3000,
+    "costUsd": 0.42,
+    "commitCount": 2,
+    "lastCommitAt": null,
+    "title": "Collect report",
+    "hasWebUi": false,
+    "finalization": {
+      "phase": "preserving",
+      "agentSettledAt": "2026-09-07T10:00:00Z",
+      "sourcePreservedAt": null,
+      "pendingDecisionId": null
+    }
+  }
+  """.data(using: .utf8)!
+  let detail = try JSONDecoder().decode(SessionResponse.self, from: json)
+  let compact = try JSONDecoder().decode(CompactPodResponse.self, from: json)
+  #expect(PodMapper.map(detail).artifactCollectionPending)
+  #expect(PodMapper.map(compact).artifactCollectionPending)
+  var finished = try #require(JSONSerialization.jsonObject(with: json) as? [String: Any])
+  var finalization = try #require(finished["finalization"] as? [String: Any])
+  finalization["sourcePreservedAt"] = "2026-09-07T10:01:00Z"
+  finished["finalization"] = finalization
+  let preservedData = try JSONSerialization.data(withJSONObject: finished)
+  #expect(PodMapper.map(try JSONDecoder().decode(SessionResponse.self, from: preservedData)).artifactCollectionPending)
+  #expect(PodMapper.map(try JSONDecoder().decode(CompactPodResponse.self, from: preservedData)).artifactCollectionPending)
+  finished["status"] = "complete"
+  let complete = try JSONDecoder().decode(SessionResponse.self, from: JSONSerialization.data(withJSONObject: finished))
+  #expect(!PodMapper.map(complete).artifactCollectionPending)
+  finished["finalization"] = NSNull()
+  finished["recordDiagnostics"] = [["field": "task_summary", "code": "size_limit"]]
+  let omitted = try JSONSerialization.data(withJSONObject: finished)
+  let message = "Saved evidence unavailable in this view: task_summary (size_limit)"
+  #expect(PodMapper.map(try JSONDecoder().decode(SessionResponse.self, from: omitted)).latestActivity == message)
+  #expect(PodMapper.map(try JSONDecoder().decode(CompactPodResponse.self, from: omitted)).latestActivity == message)
 }

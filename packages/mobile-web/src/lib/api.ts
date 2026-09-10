@@ -45,7 +45,30 @@ export async function apiFetch<T>(path: string, init: RequestInit = {}): Promise
 
   if (!res.ok) {
     const body = await res.text().catch(() => '');
-    throw new ApiError(res.status, body || `HTTP ${res.status}`);
+    let message = body || `HTTP ${res.status}`;
+    try {
+      const error: unknown = JSON.parse(body);
+      if (
+        error !== null &&
+        typeof error === 'object' &&
+        'message' in error &&
+        typeof error.message === 'string' &&
+        error.message.trim()
+      ) {
+        message = error.message;
+      } else if (
+        error !== null &&
+        typeof error === 'object' &&
+        'error' in error &&
+        typeof error.error === 'string' &&
+        error.error.trim()
+      ) {
+        message = error.error;
+      }
+    } catch {
+      // Proxies can return plain text; retain that response when it is not JSON.
+    }
+    throw new ApiError(res.status, message);
   }
 
   // 204 No Content

@@ -1,0 +1,30 @@
+
+ RUN  v4.1.11 /private/tmp/autopod-durable-execution/packages/daemon
+
+ ❯ src/db/managed-migration-compatibility.test.ts (3 tests | 1 failed) 372ms
+   × refuses an unpublished native checkpoint lineage before changing any migration records or retained rows 109ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/db/managed-migration-compatibility.test.ts > refuses an unpublished native checkpoint lineage before changing any migration records or retained rows
+AssertionError: expected [Function] to throw error including 'Unpublished native migration lineage' but got 'table pod_finalizations already exists'
+
+Expected: "Unpublished native migration lineage"
+Received: "table pod_finalizations already exists"
+
+ ❯ src/db/managed-migration-compatibility.test.ts:92:57
+     90|     const rows = db.prepare('SELECT * FROM pods').all();
+     91|     const schema = db.prepare('SELECT type,name,sql FROM sqlite_master…
+     92|     expect(() => runMigrations(db, migrations, logger)).toThrow('Unpub…
+       |                                                         ^
+     93|     expect(db.prepare('SELECT * FROM schema_version ORDER BY version')…
+     94|     expect(db.prepare('SELECT * FROM pods').all()).toEqual(rows);
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 2 passed (3)
+   Start at  07:47:43
+   Duration  674ms (transform 126ms, setup 0ms, import 194ms, tests 372ms, environment 0ms)
+

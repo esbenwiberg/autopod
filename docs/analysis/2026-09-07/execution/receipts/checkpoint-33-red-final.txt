@@ -1,0 +1,60 @@
+
+ RUN  v4.1.11 /private/tmp/autopod-durable-execution/packages/daemon
+
+ ❯ src/worktrees/durable-pr-manager.test.ts (10 tests | 2 failed | 6 skipped) 187ms
+     × does not create while an unanswered earlier decision is hidden by legacy pointer drift 68ms
+     × records only confirmed merge responses as durable disposition: merged 41ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 2 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/worktrees/durable-pr-manager.test.ts > durable PR delivery boundary > does not create while an unanswered earlier decision is hidden by legacy pointer drift
+AssertionError: promise resolved "{ …(2) }" instead of rejecting
+
+- Expected
++ Received
+
+- Error {
+-   "message": "rejected promise",
++ {
++   "url": "https://github.com/org/repo/pull/1",
++   "usedFallback": false,
+  }
+
+ ❯ src/worktrees/durable-pr-manager.test.ts:84:48
+     82|         return null;
+     83|       });
+     84|       await expect(f.manager.createPr(f.config)).rejects.toThrow(/reco…
+       |                                                ^
+     85|       expect(f.provider.createPr).not.toHaveBeenCalled();
+     86|       expect(f.db.prepare('SELECT state FROM delivery_intents').get())…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/2]⎯
+
+ FAIL  src/worktrees/durable-pr-manager.test.ts > durable PR delivery boundary > records only confirmed merge responses as durable disposition: merged
+AssertionError: expected [] to deeply equal [ { disposition: 'merged' } ]
+
+- Expected
++ Received
+
+- [
+-   {
+-     "disposition": "merged",
+-   },
+- ]
++ []
+
+ ❯ src/worktrees/durable-pr-manager.test.ts:124:85
+    122|           await call();
+    123|         }
+    124|         expect(f.db.prepare('SELECT disposition FROM delivery_observat…
+       |                                                                                     ^
+    125|           outcome === 'merged' ? [{ disposition: 'merged' }] : [],
+    126|         );
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/2]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  2 failed | 2 passed | 6 skipped (10)
+   Start at  22:34:09
+   Duration  440ms (transform 104ms, setup 0ms, import 162ms, tests 187ms, environment 0ms)

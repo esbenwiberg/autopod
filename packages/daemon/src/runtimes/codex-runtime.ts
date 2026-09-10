@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import { type Dirent, createReadStream } from 'node:fs';
 import { readdir, stat } from 'node:fs/promises';
 import path from 'node:path';
@@ -6,14 +7,17 @@ import { AutopodError, CONTAINER_HOME_DIR, CONTAINER_USER } from '@autopod/share
 import type {
   AgentEvent,
   ExecutionTarget,
+  Pod,
   ReasoningEffort,
   Runtime,
   SpawnConfig,
+  TaskRetryOutcome,
 } from '@autopod/shared';
 import type { Logger } from 'pino';
 import type { ContainerManager, StreamingExecResult } from '../interfaces/container-manager.js';
 import type { EventBus } from '../pods/event-bus.js';
 import type { PodRepository } from '../pods/pod-repository.js';
+import { admitCodexRecovery } from './codex-recovery-admission.js';
 import { codexStateDirForPod } from './codex-state-store.js';
 import {
   CodexStreamParser,
@@ -21,6 +25,7 @@ import {
   type CodexUsageAccumulator,
   createCodexUsageAccumulator,
 } from './codex-stream-parser.js';
+import { runtimeConfigInstallCommand } from './runtime-config-capability.js';
 import {
   awaitExitCodeBounded,
   withIdleLivenessProbe,
@@ -66,6 +71,7 @@ interface OutputState {
 
 interface SandboxRolloutRecovery {
   containerId: string;
+  taskSummarySignal?: Promise<void>;
 }
 
 interface RolloutCandidate {
@@ -78,6 +84,7 @@ interface RolloutTailState {
   path: string | null;
   offset: number;
   carry: Buffer;
+  notBefore?: number;
 }
 
 function isRecoverableCodexInterruption(event: AgentEvent): event is CodexTurnAbortedEvent {
@@ -149,6 +156,7 @@ export class CodexRuntime implements Runtime {
   }
 
   async *spawn(config: SpawnConfig): AsyncIterable<AgentEvent> {
+    const recoveryOwner = structuredClone(this.podRepo.getOrThrow(config.podId));
     // A fresh spawn must not inherit the prior turn's durable rollout selector.
     // The new thread.started event will repopulate this map before live rollout
     // polling begins, keeping stale completed sessions from closing the new stream.
@@ -184,23 +192,36 @@ export class CodexRuntime implements Runtime {
     });
 
     const shimPath = '/run/autopod/agent-shim.sh';
-    const handle = await this.containerManager.execStreaming(
-      config.containerId,
-      ['sh', shimPath, 'codex', ...args],
-      { cwd: config.workDir, env: config.env },
-    );
+    const summary = this.observeTaskSummary(config.podId, config.executionTarget === 'sandbox');
+    let interrupted: boolean;
+    try {
+      const handle = await this.containerManager.execStreaming(
+        config.containerId,
+        ['sh', shimPath, 'codex', ...args],
+        { cwd: config.workDir, env: config.env },
+      );
 
-    this.handles.set(config.podId, handle);
+      this.handles.set(config.podId, handle);
 
-    const interrupted = yield* this.streamInvocation(
-      handle,
-      config.podId,
-      config.containerId,
-      config.model,
-      config.executionTarget === 'sandbox' ? { containerId: config.containerId } : undefined,
-    );
+      interrupted = yield* this.streamInvocation(
+        handle,
+        config.podId,
+        config.containerId,
+        config.model,
+        config.executionTarget === 'sandbox'
+          ? { containerId: config.containerId, taskSummarySignal: summary.signal }
+          : undefined,
+      );
+    } finally {
+      summary.dispose();
+    }
     if (interrupted) {
-      yield* this.recoverInterruptedTurn(config.podId, config.containerId, config.env);
+      yield* this.recoverInterruptedTurn(
+        config.podId,
+        config.containerId,
+        recoveryOwner,
+        config.env,
+      );
     }
   }
 
@@ -210,9 +231,10 @@ export class CodexRuntime implements Runtime {
     containerId: string,
     env?: Record<string, string>,
     allowInterruptedRecovery = true,
+    beforeRecoveryLaunch?: () => void,
   ): AsyncIterable<AgentEvent> {
     // Prefer in-memory shortcut; fall back to durable DB source across daemon restarts.
-    const pod = this.podRepo.getOrThrow(podId);
+    const pod = structuredClone(this.podRepo.getOrThrow(podId));
 
     // Re-write the Codex config into the (potentially new) container before launching codex.
     // Crash recovery spawns a fresh container that has no config file on disk; without this
@@ -281,25 +303,34 @@ export class CodexRuntime implements Runtime {
     });
 
     const shimPath = '/run/autopod/agent-shim.sh';
-    const handle = await this.containerManager.execStreaming(
-      containerId,
-      ['sh', shimPath, 'codex', ...args],
-      {
-        cwd: '/workspace',
-        ...(env ? { env } : {}),
-      },
-    );
+    const summary = this.observeTaskSummary(podId, pod.executionTarget === 'sandbox');
+    let interrupted: boolean;
+    try {
+      beforeRecoveryLaunch?.();
+      const handle = await this.containerManager.execStreaming(
+        containerId,
+        ['sh', shimPath, 'codex', ...args],
+        {
+          cwd: '/workspace',
+          ...(env ? { env } : {}),
+        },
+      );
 
-    this.handles.set(podId, handle);
+      this.handles.set(podId, handle);
 
-    const interrupted = yield* this.streamInvocation(
-      handle,
-      podId,
-      containerId,
-      pod.model,
-      pod.executionTarget === 'sandbox' ? { containerId } : undefined,
-      rolloutTail,
-    );
+      interrupted = yield* this.streamInvocation(
+        handle,
+        podId,
+        containerId,
+        pod.model,
+        pod.executionTarget === 'sandbox'
+          ? { containerId, taskSummarySignal: summary.signal }
+          : undefined,
+        rolloutTail,
+      );
+    } finally {
+      summary.dispose();
+    }
     if (!interrupted) return;
 
     if (!allowInterruptedRecovery) {
@@ -311,7 +342,7 @@ export class CodexRuntime implements Runtime {
       };
       return;
     }
-    yield* this.recoverInterruptedTurn(podId, containerId, env);
+    yield* this.recoverInterruptedTurn(podId, containerId, pod, env);
   }
 
   async abort(podId: string): Promise<void> {
@@ -457,16 +488,43 @@ export class CodexRuntime implements Runtime {
     }
   }
 
+  /** Subscribe before launch: the worker may report while execStreaming is still opening. */
+  private observeTaskSummary(
+    podId: string,
+    enabled: boolean,
+  ): {
+    signal: Promise<void> | undefined;
+    dispose: () => void;
+  } {
+    if (!enabled || !this.eventBus) return { signal: undefined, dispose: () => {} };
+    let resolveSummary: () => void = () => {};
+    const signal = new Promise<void>((resolve) => {
+      resolveSummary = resolve;
+    });
+    const dispose = this.eventBus.subscribeToSession(podId, (event) => {
+      if (event.type === 'pod.agent_activity' && event.event.type === 'task_summary')
+        resolveSummary();
+    });
+    return { signal, dispose };
+  }
+
   private async settleInterruptedInvocation(
     podId: string,
     handle: StreamingExecResult,
   ): Promise<boolean> {
-    const exitResult = await awaitExitCodeBounded(handle.exitCode, {
-      runtimeName: 'codex-runtime',
-      podId,
-      logger: this.logger,
-    });
-    if (!exitResult.timedOut) return true;
+    try {
+      const exitResult = await awaitExitCodeBounded(handle.exitCode, {
+        runtimeName: 'codex-runtime',
+        podId,
+        logger: this.logger,
+      });
+      if (!exitResult.timedOut) return true;
+    } catch {
+      this.logger.warn(
+        { podId },
+        'Interrupted exec exit is unverified; requiring verified process-group termination',
+      );
+    }
 
     const killResult = await settlePromiseWithin(handle.kill(), stalledExecKillTimeoutMs());
     if (killResult.status === 'fulfilled') return true;
@@ -486,6 +544,7 @@ export class CodexRuntime implements Runtime {
   private async *recoverInterruptedTurn(
     podId: string,
     containerId: string,
+    expected: Pod,
     env?: Record<string, string>,
   ): AsyncIterable<AgentEvent> {
     if (!this.codexSessionIds.get(podId) && !this.podRepo.getOrThrow(podId).codexSessionId) {
@@ -498,12 +557,61 @@ export class CodexRuntime implements Runtime {
       return;
     }
 
-    yield {
-      type: 'status',
-      timestamp: new Date().toISOString(),
-      message: 'Codex turn was interrupted — resuming the same session once',
-    };
-    yield* this.resume(podId, INTERRUPTED_TURN_CONTINUATION, containerId, env, false);
+    let recovery: ReturnType<typeof admitCodexRecovery> | undefined;
+    let outcome: TaskRetryOutcome = 'unknown';
+    try {
+      const sessionId =
+        this.codexSessionIds.get(podId) ?? this.podRepo.getOrThrow(podId).codexSessionId;
+      if (!sessionId) throw new Error('Codex recovery session unavailable');
+      recovery = admitCodexRecovery(
+        this.podRepo,
+        podId,
+        expected,
+        containerId,
+        sessionId,
+        INTERRUPTED_TURN_CONTINUATION,
+      );
+      yield {
+        type: 'status',
+        timestamp: new Date().toISOString(),
+        message: 'Codex turn was interrupted — resuming the same session once',
+      };
+      for await (const event of this.resume(
+        podId,
+        INTERRUPTED_TURN_CONTINUATION,
+        containerId,
+        env,
+        false,
+        () => {
+          if (
+            (this.codexSessionIds.get(podId) ?? this.podRepo.getOrThrow(podId).codexSessionId) !==
+            sessionId
+          )
+            throw new AutopodError(
+              'Codex recovery session was superseded',
+              'STALE_CODEX_RECOVERY',
+              409,
+            );
+          recovery?.beforeLaunch();
+        },
+      )) {
+        if (event.type === 'error' && event.fatal) outcome = 'nonretryable';
+        else if (event.type === 'complete' && outcome !== 'nonretryable') outcome = 'pass';
+        yield event;
+      }
+    } catch (error) {
+      yield {
+        type: 'error',
+        timestamp: new Date().toISOString(),
+        fatal: true,
+        message:
+          error instanceof AutopodError
+            ? error.message
+            : 'Codex interruption recovery failed; reconcile retained session and results before another execution.',
+      };
+    } finally {
+      recovery?.settle(outcome);
+    }
   }
 
   private buildSpawnArgs(config: SpawnConfig): string[] {
@@ -534,25 +642,6 @@ export class CodexRuntime implements Runtime {
       abortLiveRollout.abort();
       abortSummaryGrace.abort();
     });
-    let taskSummaryObserved = false;
-    let resolveTaskSummary: (() => void) | null = null;
-    const taskSummarySignal = new Promise<void>((resolve) => {
-      resolveTaskSummary = resolve;
-    });
-    const unsubscribeTaskSummary =
-      summaryRecovery && this.eventBus
-        ? this.eventBus.subscribeToSession(podId, (event) => {
-            if (
-              taskSummaryObserved ||
-              event.type !== 'pod.agent_activity' ||
-              event.event.type !== 'task_summary'
-            ) {
-              return;
-            }
-            taskSummaryObserved = true;
-            resolveTaskSummary?.();
-          })
-        : null;
     const stdoutIterator = this.parseCodexLines(handle.stdout, podId, seen, outputState, modelHint)[
       Symbol.asyncIterator
     ]();
@@ -567,8 +656,12 @@ export class CodexRuntime implements Runtime {
     let stdoutDone = false;
     let stdoutNext = nextFrom('stdout', stdoutIterator);
     let rolloutNext = nextFrom('rollout', rolloutIterator);
-    let taskSummaryNext = unsubscribeTaskSummary
-      ? taskSummarySignal.then(() => ({ source: 'task-summary' as const }))
+    let taskSummaryObserved = false;
+    let taskSummaryNext = summaryRecovery?.taskSummarySignal
+      ? summaryRecovery.taskSummarySignal.then(() => {
+          taskSummaryObserved = true;
+          return { source: 'task-summary' as const };
+        })
       : neverRuntimeSignal<'task-summary'>();
     let summaryRecoveryNext = neverRuntimeSignal<'summary-recovery'>();
     let lastMergedEventAt = Date.now();
@@ -699,7 +792,6 @@ export class CodexRuntime implements Runtime {
       this.suspensionSignals.delete(podId);
       abortLiveRollout.abort();
       abortSummaryGrace.abort();
-      unsubscribeTaskSummary?.();
       await rolloutIterator.return?.();
     }
 
@@ -863,7 +955,7 @@ export class CodexRuntime implements Runtime {
       runtimeName: 'codex-runtime',
       podId,
       logger: this.logger,
-    });
+    }).catch(() => ({ code: null, timedOut: true }));
 
     if (exitResult.timedOut) {
       const killResult = await settlePromiseWithin(handle.kill(), stalledExecKillTimeoutMs());
@@ -878,18 +970,17 @@ export class CodexRuntime implements Runtime {
           'Failed to terminate stalled Codex exec after unresolved exit code',
         );
       }
-      // Work is done when sawComplete is true — we have terminal completion
-      // proof (from the stream or recovered rollout). A stalled exit code at
-      // that point is not a reason to discard completed work: we kill the exec
-      // as best-effort insurance and proceed to validation. Only an unresolved
-      // exit code *without* completion proof is fatal (genuinely incomplete).
       return {
         type: 'error',
         timestamp: new Date().toISOString(),
-        message: outputState.sawComplete
-          ? 'Codex exit code did not resolve after task completion — terminated stalled exec, proceeding to validation'
-          : 'Codex exit code did not resolve before task completion — refusing to mark pod complete',
-        fatal: !outputState.sawComplete,
+        message:
+          killResult.status !== 'fulfilled'
+            ? 'Codex execution termination is unverified; retain completion and source, and reconcile before validation or another execution.'
+            : outputState.sawComplete
+              ? 'Codex exit code did not resolve; process-group termination verified. Retained completion can proceed to validation.'
+              : 'Codex exit code did not resolve before task completion — refusing to mark pod complete',
+        fatal: killResult.status !== 'fulfilled' || !outputState.sawComplete,
+        ...(killResult.status !== 'fulfilled' && { executionTermination: 'unverified' as const }),
       };
     }
 
@@ -1136,53 +1227,79 @@ export class CodexRuntime implements Runtime {
       sections.push(lines.join('\n'));
     }
 
-    await this.containerManager.writeFile(
-      containerId,
-      MCP_CONFIG_PATH,
-      `${sections.join('\n\n')}\n`,
-    );
-    // On sandbox the files API writes root-owned files and exec runs as a
-    // non-root, non-`autopod` user (the same reason secret files use 0444 and
-    // build binaries are repaired to a+rx). A 0600 `autopod`-only config would
-    // then be unreadable by the reviewer's `codex exec`. Both the native stream
-    // and buffered fallback run as the sandbox-assigned non-root user, so the
-    // pre-submit review dies with "config.toml: Permission denied". Use
-    // world-readable 0644 there; the sandbox is single-tenant and
-    // OPENAI_API_KEY is already 0444.
-    // Docker keeps 0600 (single `autopod` user; exec runs as `autopod`).
-    const configMode = executionTarget === 'sandbox' ? '0644' : '0600';
-    const secureCommand = [
-      'sh',
-      '-c',
-      `chown ${CONTAINER_USER}:${CONTAINER_USER} '${MCP_CONFIG_PATH}' && chmod ${configMode} '${MCP_CONFIG_PATH}'`,
-    ];
+    const uploadPath =
+      executionTarget === 'sandbox'
+        ? `${MCP_CONFIG_PATH}.pending-${randomUUID()}`
+        : MCP_CONFIG_PATH;
+    await this.containerManager.writeFile(containerId, uploadPath, `${sections.join('\n\n')}\n`);
+    const secureCommand =
+      executionTarget === 'sandbox'
+        ? runtimeConfigInstallCommand(uploadPath, MCP_CONFIG_PATH)
+        : [
+            'sh',
+            '-c',
+            `chown ${CONTAINER_USER}:${CONTAINER_USER} '${MCP_CONFIG_PATH}' && chmod 0600 '${MCP_CONFIG_PATH}'`,
+          ];
     const timeout = executionTarget === 'sandbox' ? SANDBOX_CONFIG_COMMAND_TIMEOUT_MS : 5_000;
-    for (let attempt = 1; attempt <= SANDBOX_CONFIG_COMMAND_ATTEMPTS; attempt++) {
-      try {
-        const secureConfig = await this.containerManager.execInContainer(
-          containerId,
-          secureCommand,
-          {
-            timeout,
-            user: 'root',
-          },
-        );
-        if (secureConfig.exitCode !== 0) {
-          throw new Error(
-            `Failed to secure Codex MCP config (exit ${secureConfig.exitCode}): ${secureConfig.stderr}`,
+    try {
+      for (let attempt = 1; attempt <= SANDBOX_CONFIG_COMMAND_ATTEMPTS; attempt++) {
+        try {
+          const secureConfig = await this.containerManager.execInContainer(
+            containerId,
+            secureCommand,
+            {
+              timeout,
+              user: 'root',
+            },
+          );
+          if (secureConfig.exitCode !== 0) {
+            throw new Error(
+              `Failed to secure Codex MCP config (exit ${secureConfig.exitCode}): the image must support readable uploads and atomic writes in the Codex config directory for its effective exec user`,
+            );
+          }
+          if (executionTarget === 'sandbox') {
+            const readable = await this.containerManager.execInContainer(
+              containerId,
+              ['test', '-r', MCP_CONFIG_PATH],
+              { timeout },
+            );
+            if (readable.exitCode !== 0)
+              throw new Error(
+                'Failed to secure Codex MCP config: effective runtime user cannot read the installed config',
+              );
+          }
+          return;
+        } catch (error) {
+          const retryableTimeout =
+            executionTarget === 'sandbox' &&
+            error instanceof AutopodError &&
+            error.code === 'AZURE_SANDBOX_TIMEOUT';
+          if (!retryableTimeout || attempt === SANDBOX_CONFIG_COMMAND_ATTEMPTS) throw error;
+          this.logger.warn(
+            { containerId, attempt, timeout },
+            'Sandbox Codex config ownership timed out — retrying idempotent command',
           );
         }
-        return;
-      } catch (error) {
-        const retryableTimeout =
-          executionTarget === 'sandbox' &&
-          error instanceof AutopodError &&
-          error.code === 'AZURE_SANDBOX_TIMEOUT';
-        if (!retryableTimeout || attempt === SANDBOX_CONFIG_COMMAND_ATTEMPTS) throw error;
-        this.logger.warn(
-          { containerId, attempt, timeout },
-          'Sandbox Codex config ownership timed out — retrying idempotent command',
-        );
+      }
+    } finally {
+      if (executionTarget === 'sandbox') {
+        try {
+          const cleanup = await this.containerManager.execInContainer(
+            containerId,
+            ['rm', '-f', uploadPath],
+            { timeout, user: 'root' },
+          );
+          if (cleanup.exitCode !== 0)
+            this.logger.warn(
+              { containerId },
+              'Could not remove staged Codex config; container cleanup required',
+            );
+        } catch {
+          this.logger.warn(
+            { containerId },
+            'Could not remove staged Codex config; container cleanup required',
+          );
+        }
       }
     }
   }
@@ -1366,7 +1483,25 @@ async function readRolloutDelta(
   const parsed = splitCompleteJsonLines(Buffer.concat([tail.carry, appended]));
   tail.offset = rollout.size;
   tail.carry = parsed.carry;
-  return parsed.complete;
+  if (tail.notBefore === undefined) return parsed.complete;
+  // A mount can expose an empty/partial prior-turn snapshot before filling it.
+  // A byte offset alone cannot distinguish those late old records from this
+  // invocation. Missing or older event time is not current settlement proof.
+  return parsed.complete
+    .split('\n')
+    .filter((line) => {
+      try {
+        const record = JSON.parse(line) as { timestamp?: unknown };
+        const timestamp =
+          typeof record.timestamp === 'string' ? Date.parse(record.timestamp) : Number.NaN;
+        return (
+          Number.isFinite(timestamp) && timestamp >= (tail.notBefore ?? Number.POSITIVE_INFINITY)
+        );
+      } catch {
+        return false;
+      }
+    })
+    .join('\n');
 }
 
 async function readRolloutAppend(pathname: string, start: number, size: number): Promise<Buffer> {
@@ -1434,10 +1569,11 @@ async function createResumeRolloutTail(
   sessionId?: string,
 ): Promise<RolloutTailState> {
   if (!sessionId) return { path: null, offset: 0, carry: Buffer.alloc(0) };
+  const notBefore = Date.now();
   const rollout = await findLatestCodexRollout(codexStateDirForPod(podId), sessionId);
   return rollout
-    ? { path: rollout.path, offset: rollout.size, carry: Buffer.alloc(0) }
-    : { path: null, offset: -1, carry: Buffer.alloc(0) };
+    ? { path: rollout.path, offset: rollout.size, carry: Buffer.alloc(0), notBefore }
+    : { path: null, offset: -1, carry: Buffer.alloc(0), notBefore };
 }
 
 async function collectRolloutFiles(dir: string, candidates: RolloutCandidate[]): Promise<void> {

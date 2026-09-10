@@ -1,0 +1,30 @@
+
+ RUN  v4.1.11 /private/tmp/autopod-durable-execution/packages/mobile-web
+
+ ❯ src/components/TaskExecutionPanel.test.tsx (2 tests | 1 failed) 21ms
+   × keeps unavailable accounting explicit and refreshes delivery observations (available: true) 18ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/components/TaskExecutionPanel.test.tsx > keeps unavailable accounting explicit and refreshes delivery observations (available: true)
+AssertionError: expected 'Task accountingLogical task: logical-…' to contain 'Last recorded closed PRs: 1'
+
+Expected: "Last recorded closed PRs: 1"
+Received: "Task accountingLogical task: logical-originalExecution: fix-execution2 pods · 3 recorded agent runs · 4 provider attempts · 5 validations1 PR receipts · 1 unresolved of 2 intentsDurable ledger only; historical PR URLs are not reconstructed receipts.Last recorded PR status: 0 open · 1 merged · 0 closed · 0 unavailableSource-bound merges: 1 merged PRs · 3 recorded requests · 1 unresolved of 2 PRs1 merged PRs observed with no recorded request; merge actor is not inferred.Source-bound journal only; historical PR URLs excluded.Current provider status unverified.Recorded tokens: 100 / 100Stored task cost subtotal: $1.2500 · partial telemetryBilling unverified; stored amounts can include estimates.Known estimates: $0.5000 · 1 identified phases with unavailable cost · 1 pods with conflicting attributionroot: Stored phase costs conflict; no proportional allocation applied.2 additional cost diagnostics omitted.Task token accounting incomplete; reconcile prior execution telemetry.Infrastructure cost unavailableRefresh task accounting"
+
+ ❯ src/components/TaskExecutionPanel.test.tsx:129:57
+    127|           : 'Source-bound merge evidence unavailable.',
+    128|       );
+    129|       if (hasDisposition) expect(container.textContent).toContain('Las…
+       |                                                         ^
+    130|       if (hasDisposition)
+    131|         expect(container.textContent).toContain(
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 1 passed (2)
+   Start at  07:30:48
+   Duration  423ms (transform 21ms, setup 9ms, import 33ms, tests 21ms, environment 262ms)
+

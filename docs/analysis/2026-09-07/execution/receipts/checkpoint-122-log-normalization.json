@@ -1,0 +1,44 @@
+[
+  {
+    "file": "checkpoint-122-migration-green.txt",
+    "rawSha256": "0704a98a4bc6871e6034fefd2ca18deb45582ce1500813cec92ebd4b2e96c040",
+    "storedSha256": "b1e026a2c9542c3a03487963a54c0e2e4a5b2dadeb251ca54c8f4a7f8f750e21",
+    "normalization": "trailing whitespace and terminal blank lines only"
+  },
+  {
+    "file": "checkpoint-122-migration-red.txt",
+    "rawSha256": "74bd3cba7cb3fbbe1ca0838dfc0f17a3ee8ad31f5ac5687c509213253df7cc40",
+    "storedSha256": "50ca7d77452d19df904dfd88a9715e8bbda0c9cd95ffca98d576ec185337edb7",
+    "normalization": "trailing whitespace and terminal blank lines only"
+  },
+  {
+    "file": "checkpoint-122-validation-replay.txt",
+    "rawSha256": "3c6e6775fc5b868b7eb679c797d597e663ec314a2de1a95f3d596a612459a1bc",
+    "storedSha256": "15aedd1164c9024185a85826c2e483c2e929ddd95a05926e77655ffad162ca0b",
+    "normalization": "trailing whitespace and terminal blank lines only"
+  },
+  {
+    "file": "checkpoint-122-wrapper-tests.txt",
+    "rawSha256": "211f26034257760acab8ce32a708babc8c74aaf2727c5d48915cecc439cd955d",
+    "storedSha256": "211f26034257760acab8ce32a708babc8c74aaf2727c5d48915cecc439cd955d",
+    "normalization": "trailing whitespace and terminal blank lines only"
+  },
+  {
+    "file": "checkpoint-122-full-validation.txt",
+    "rawSha256": "472bf77138d3fcfa8c613fd93bdd502f074b4b99a33291fcbacad839586fc854",
+    "storedSha256": "2779756dfe5c1f123ee52296aaf932974d3b5d88e097f69f317d1428095cd5f0",
+    "normalization": "trailing whitespace and terminal blank lines only"
+  },
+  {
+    "file": "checkpoint-122-copy-tests.txt",
+    "rawSha256": "efcaa53dca1f3d2a90d8958962690da59ddc162e78cce9a420003c3ffb31ecb0",
+    "storedSha256": "efcaa53dca1f3d2a90d8958962690da59ddc162e78cce9a420003c3ffb31ecb0",
+    "normalization": "trailing whitespace and terminal blank lines only"
+  },
+  {
+    "file": "checkpoint-122-migration-fixture-green.txt",
+    "rawSha256": "e609c73fc659dd2d20e23ba43e1b9f8314b21525bc497d46e13afc41a3c022b9",
+    "storedSha256": "2f1ae0cf57c828f6bb8ee86b1e9db490d637461198707f815d0ccec26af284a9",
+    "normalization": "trailing whitespace and terminal blank lines only"
+  }
+]

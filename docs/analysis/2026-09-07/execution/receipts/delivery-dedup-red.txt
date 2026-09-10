@@ -1,0 +1,32 @@
+
+ RUN  v4.1.10 /private/tmp/autopod-durable-execution
+
+ ❯ packages/daemon/src/pods/models-aggregator.test.ts (34 tests | 1 failed | 33 skipped) 119ms
+     × attributes a shared PR delivery once across different model and runtime fix pods 118ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  packages/daemon/src/pods/models-aggregator.test.ts > computeModelsAnalytics > attributes a shared PR delivery once across different model and runtime fix pods
+AssertionError: expected 2 to be 1 // Object.is equality
+
+- Expected
++ Received
+
+- 1
++ 2
+
+ ❯ packages/daemon/src/pods/models-aggregator.test.ts:735:79
+    733|     insertPod(db, { id: 'fix', model: 'gpt-5.6-terra', runtime: 'codex…
+    734|     const actual = computeModelsAnalytics(db, 30);
+    735|     expect(actual.byModel.reduce((n, r) => n + (r.deliveredPrCount ?? …
+       |                                                                               ^
+    736|     expect(actual.byRuntime.reduce((n, r) => n + (r.deliveredPrCount ?…
+    737|   });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 33 skipped (34)
+   Start at  10:39:57
+   Duration  786ms (transform 194ms, setup 0ms, import 297ms, tests 119ms, environment 0ms)

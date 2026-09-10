@@ -1,0 +1,918 @@
+[1/1] Compiling plugin GenerateManual
+[2/2] Compiling plugin GenerateDoccReference
+Building for debugging...
+[2/9] Write sources
+[5/9] Write swift-version--58304C5D6DBC2206.txt
+[7/11] Emitting module AutopodClient
+[8/11] Compiling AutopodClient PodCostBreakdownResponse.swift
+[9/12] Compiling AutopodClient DaemonAPI.swift
+[10/80] Compiling AutopodUI ProfileFieldCatalog.swift
+[11/80] Compiling AutopodUI ProfileListView.swift
+[12/80] Compiling AutopodUI ProviderFailoverEditor.swift
+[13/80] Compiling AutopodUI CreateScheduledJobSheet.swift
+[14/80] Compiling AutopodUI EditScheduledJobSheet.swift
+[15/80] Compiling AutopodUI ScheduledJobRow.swift
+[16/80] Compiling AutopodUI ScheduledJobTemplateSheet.swift
+[17/87] Compiling AutopodUI SessionCostCard.swift
+[18/87] Compiling AutopodUI SessionQualityCard.swift
+[19/87] Compiling AutopodUI StatTile.swift
+[20/87] Compiling AutopodUI StatusDot.swift
+[21/87] Compiling AutopodUI TaskRetryCard.swift
+[22/87] Compiling AutopodUI MainView.swift
+[23/87] Compiling AutopodUI SidebarView.swift
+[24/87] Compiling AutopodUI HistoryView.swift
+[25/87] Compiling AutopodUI MemoryAnalyticsDrillView.swift
+[26/87] Compiling AutopodUI ModelsDrillView.swift
+[27/87] Compiling AutopodUI ModelsSimulator.swift
+[28/87] Compiling AutopodUI QualityDrillView.swift
+[29/87] Compiling AutopodUI ReliabilityDrillView.swift
+[30/87] Compiling AutopodUI SafetyDrillView.swift
+[31/87] Compiling AutopodUI ScheduledJobsView.swift
+[32/87] Compiling AutopodUI PipelineNodeView.swift
+[33/87] Compiling AutopodUI PodActivityPanel.swift
+[34/87] Compiling AutopodUI SeriesListView.swift
+[35/87] Compiling AutopodUI SeriesPipelineView.swift
+[36/87] Compiling AutopodUI ActivityFeedList.swift
+[37/87] Compiling AutopodUI DispatchPreflightCard.swift
+[38/87] Compiling AutopodUI ThroughputDrillView.swift
+[39/87] Compiling AutopodUI PodCardFinal.swift
+[40/87] Compiling AutopodUI CommandPalette.swift
+[41/87] Compiling AutopodUI CreatePodSheet.swift
+[42/87] Compiling AutopodUI CreateSeriesSheet.swift
+[43/87] Compiling AutopodUI SpawnDependentSheet.swift
+[44/87] Compiling AutopodUI ArtifactsTab.swift
+[45/87] Compiling AutopodUI ReviewCouncilView.swift
+[46/87] Compiling AutopodUI SpawnFixSheet.swift
+[47/87] Compiling AutopodUI SummaryTab.swift
+[48/87] Compiling AutopodUI TaskStructuredView.swift
+[49/87] Compiling AutopodUI TerminalTab.swift
+[50/87] Compiling AutopodUI ValidationTab.swift
+[51/87] Compiling AutopodUI FeatureDetailPanelView.swift
+[52/87] Compiling AutopodUI MockData.swift
+[53/87] Compiling AutopodUI Pod.swift
+[54/87] Compiling AutopodUI PodActions.swift
+[55/87] Compiling AutopodUI PreviewPoller.swift
+[56/87] Compiling AutopodUI Profile.swift
+[57/87] Compiling AutopodUI ProviderCatalogEditorLoader.swift
+[58/87] Compiling AutopodUI ProviderCatalogProfileOptions.swift
+[59/87] Compiling AutopodUI ProviderModelSaveEligibility.swift
+[60/87] Compiling AutopodUI DetailPanelView.swift
+[61/87] Compiling AutopodUI DiffTab.swift
+[62/87] Compiling AutopodUI EvidenceTab.swift
+[63/87] Compiling AutopodUI MarkdownTab.swift
+[64/87] Compiling AutopodUI OverviewTab.swift
+[65/87] Compiling AutopodUI ReadinessTab.swift
+[66/87] Compiling AutopodUI RelatedEventsDebugSheet.swift
+[67/87] Compiling AutopodUI ReadinessReview.swift
+[68/87] Compiling AutopodUI ReviewCouncil.swift
+[69/87] Compiling AutopodUI RuntimeModelOptions.swift
+[70/87] Compiling AutopodUI AnalyticsCard.swift
+[71/87] Compiling AutopodUI AnalyticsRightPaneView.swift
+[72/87] Compiling AutopodUI AnalyticsView.swift
+[73/87] Compiling AutopodUI CostDrillView.swift
+[74/87] Compiling AutopodUI EscalationsDrillView.swift
+[75/87] Compiling AutopodUI FeatureOverviewView.swift
+[76/87] Compiling AutopodUI SalesPitchView.swift
+[77/87] Compiling AutopodUI LogPopover.swift
+[78/87] Compiling AutopodUI LogStreamView.swift
+[79/87] Compiling AutopodUI MemoryManagementView.swift
+[80/87] Compiling AutopodUI InheritanceChip.swift
+[81/87] Compiling AutopodUI ProfileEditorView.swift
+[82/87] Emitting module AutopodUI
+[83/125] Compiling AutopodDesktop ProfileStore.swift
+[84/125] Compiling AutopodDesktop ScheduledJobStore.swift
+[85/127] Compiling AutopodDesktop EntraDesktopAuthService.swift
+[86/127] Compiling AutopodDesktop NotificationService.swift
+[87/127] Compiling AutopodDesktop ProfileAuthenticator.swift
+[88/127] Compiling AutopodUITests ValidationHistoryIdentityTests.swift
+[89/127] Compiling AutopodUITests ValidationHistoryRefreshTests.swift
+[90/128] Emitting module AutopodDesktop
+[91/128] Compiling AutopodDesktop PodStore.swift
+[92/128] Compiling AutopodDesktop PodsitterStore.swift
+[93/128] Compiling AutopodDesktop PodMapper.swift
+[94/128] Compiling AutopodDesktop ProfileMapper.swift
+[95/128] Compiling AutopodDesktop MenuBarView.swift
+[96/128] Compiling AutopodDesktop PodsitterSettingsView.swift
+[99/128] Compiling AutopodDesktop EventStream.swift
+[100/128] Compiling AutopodDesktop MemoryStore.swift
+[101/128] Compiling AutopodDesktop TerminalManager.swift
+[102/128] Compiling AutopodDesktop AppRootView.swift
+[103/128] Compiling AutopodUITests ValidationProgressTests.swift
+[104/128] Compiling AutopodDesktop SettingsView.swift
+[105/128] Compiling AutopodDesktop SetupSheet.swift
+[110/128] Compiling AutopodDesktop ProviderAccountsCatalogFailure.swift
+[114/128] Emitting module AutopodUITests
+[115/128] Compiling AutopodDesktop ActionHandler.swift
+[116/128] Compiling AutopodDesktop ConnectionManager.swift
+[117/128] Compiling AutopodDesktop ProviderAccountsSettingsView.swift
+[118/128] Compiling AutopodDesktop ScanInboxView.swift
+[124/160] Emitting module AutopodDesktopExe
+[125/160] Compiling AutopodDesktopExe AutopodApp.swift
+[125/160] Write Objects.LinkFileList
+[127/160] Compiling AutopodDesktopTests ProfileAuthenticatorTests.swift
+[128/160] Emitting module AutopodDesktopTests
+[129/160] Compiling AutopodDesktopTests ProviderAccountsCatalogFailureTests.swift
+[130/160] Compiling AutopodDesktopTests PodsitterStoreTests.swift
+[131/160] Emitting module AutopodClientTests
+[132/162] Compiling AutopodClientTests ActionAuditResponseTests.swift
+[133/162] Compiling AutopodClientTests AnalyticsCardKindTests.swift
+[134/162] Compiling AutopodClientTests AnalyticsWiringTests.swift
+[135/162] Compiling AutopodClientTests ReliabilityAnalyticsResponseTests.swift
+[136/162] Compiling AutopodClientTests ReviewProgressStateTests.swift
+[137/162] Compiling AutopodClientTests EventStreamDedupeTests.swift
+[138/162] Compiling AutopodClientTests EventStreamResyncTests.swift
+[139/162] Compiling AutopodClientTests MemoryResponseTests.swift
+[140/162] Compiling AutopodClientTests DispatchPreflightTests.swift
+[141/162] Compiling AutopodClientTests EscalationsAnalyticsResponseTests.swift
+[142/162] Compiling AutopodClientTests EventSocketControlMessageTests.swift
+[143/162] Compiling AutopodClientTests SafetyAnalyticsResponseTests.swift
+[144/162] Compiling AutopodClientTests ScheduledScanTests.swift
+[145/162] Compiling AutopodClientTests MemoryStoreTests.swift
+[146/162] Compiling AutopodClientTests ModelsAnalyticsResponseTests.swift
+[147/162] Compiling AutopodClientTests PipelineDAGLayoutTests.swift
+[147/162] Linking AutopodDesktopExe
+[148/162] Applying AutopodDesktopExe
+[150/162] Compiling AutopodClientTests TaskRetryClientTests.swift
+[151/162] Compiling AutopodClientTests ThroughputAnalyticsResponseTests.swift
+[152/162] Compiling AutopodClientTests PodsitterAPITests.swift
+[153/162] Compiling AutopodClientTests ProfileMapperTests.swift
+[154/162] Compiling AutopodClientTests QualityAnalyticsResponseTests.swift
+[155/162] Compiling AutopodClientTests ConnectionTests.swift
+/private/tmp/autopod-durable-execution/packages/desktop/Tests/AutopodClientTests/DaemonAPITests.swift:14:13: warning: no 'async' operations occur within 'await' expression
+ 12 |     token: "test-token"
+ 13 |   )
+ 14 |   let url = await api.baseURL
+    |             `- warning: no 'async' operations occur within 'await' expression
+ 15 |   #expect(url.absoluteString == "http://localhost:3000")
+ 16 | }
+[156/162] Compiling AutopodClientTests CostAnalyticsResponseTests.swift
+/private/tmp/autopod-durable-execution/packages/desktop/Tests/AutopodClientTests/DaemonAPITests.swift:14:13: warning: no 'async' operations occur within 'await' expression
+ 12 |     token: "test-token"
+ 13 |   )
+ 14 |   let url = await api.baseURL
+    |             `- warning: no 'async' operations occur within 'await' expression
+ 15 |   #expect(url.absoluteString == "http://localhost:3000")
+ 16 | }
+[157/162] Compiling AutopodClientTests DaemonAPITests.swift
+/private/tmp/autopod-durable-execution/packages/desktop/Tests/AutopodClientTests/DaemonAPITests.swift:14:13: warning: no 'async' operations occur within 'await' expression
+ 12 |     token: "test-token"
+ 13 |   )
+ 14 |   let url = await api.baseURL
+    |             `- warning: no 'async' operations occur within 'await' expression
+ 15 |   #expect(url.absoluteString == "http://localhost:3000")
+ 16 | }
+[158/162] Compiling AutopodClientTests PodCostBreakdownResponseTests.swift
+[159/162] Compiling AutopodClientTests PodMapperTests.swift
+[160/162] Compiling AutopodClientTests PodStoreFleetTests.swift
+[160/162] Write Objects.LinkFileList
+[161/162] Linking AutopodDesktopPackageTests
+Build complete! (27.89s)
+Test Suite 'All tests' started at 2026-09-07 18:53:36.828.
+Test Suite 'AutopodDesktopPackageTests.xctest' started at 2026-09-07 18:53:36.834.
+Test Suite 'PodsitterStoreTests' started at 2026-09-07 18:53:36.834.
+Test Case '-[AutopodDesktopTests.PodsitterStoreTests testActivationAndFullAuthorityValidation]' started.
+Test Case '-[AutopodDesktopTests.PodsitterStoreTests testActivationAndFullAuthorityValidation]' passed (0.004 seconds).
+Test Case '-[AutopodDesktopTests.PodsitterStoreTests testBuiltInOpenAIModelsDoNotDependOnCatalogEntries]' started.
+Test Case '-[AutopodDesktopTests.PodsitterStoreTests testBuiltInOpenAIModelsDoNotDependOnCatalogEntries]' passed (0.001 seconds).
+Test Case '-[AutopodDesktopTests.PodsitterStoreTests testConfigureEnableCheckProbeAndHistory]' started.
+Test Case '-[AutopodDesktopTests.PodsitterStoreTests testConfigureEnableCheckProbeAndHistory]' passed (0.001 seconds).
+Test Case '-[AutopodDesktopTests.PodsitterStoreTests testDisableNowCallsDaemon]' started.
+Test Case '-[AutopodDesktopTests.PodsitterStoreTests testDisableNowCallsDaemon]' passed (0.000 seconds).
+Test Case '-[AutopodDesktopTests.PodsitterStoreTests testOperationalStatesRemainDistinct]' started.
+Test Case '-[AutopodDesktopTests.PodsitterStoreTests testOperationalStatesRemainDistinct]' passed (0.005 seconds).
+Test Case '-[AutopodDesktopTests.PodsitterStoreTests testProviderRuntimeCompatibilityMatchesDaemonAccounts]' started.
+Test Case '-[AutopodDesktopTests.PodsitterStoreTests testProviderRuntimeCompatibilityMatchesDaemonAccounts]' passed (0.000 seconds).
+Test Suite 'PodsitterStoreTests' passed at 2026-09-07 18:53:36.844.
+	 Executed 6 tests, with 0 failures (0 unexpected) in 0.010 (0.010) seconds
+Test Suite 'ProviderAccountsCatalogFailureTests' started at 2026-09-07 18:53:36.844.
+Test Case '-[AutopodDesktopTests.ProviderAccountsCatalogFailureTests testCatalogRefreshFailurePreservesPolicyAndAccounts]' started.
+Test Case '-[AutopodDesktopTests.ProviderAccountsCatalogFailureTests testCatalogRefreshFailurePreservesPolicyAndAccounts]' passed (0.000 seconds).
+Test Suite 'ProviderAccountsCatalogFailureTests' passed at 2026-09-07 18:53:36.845.
+	 Executed 1 test, with 0 failures (0 unexpected) in 0.000 (0.000) seconds
+Test Suite 'ProviderCatalogTests' started at 2026-09-07 18:53:36.845.
+Test Case '-[AutopodUITests.ProviderCatalogTests testCatalogFailurePreservesCurrentSelection]' started.
+Test Case '-[AutopodUITests.ProviderCatalogTests testCatalogFailurePreservesCurrentSelection]' passed (0.000 seconds).
+Test Case '-[AutopodUITests.ProviderCatalogTests testLegacyCatalogProviderUsesOnlySchemaSupportedAdapter]' started.
+Test Case '-[AutopodUITests.ProviderCatalogTests testLegacyCatalogProviderUsesOnlySchemaSupportedAdapter]' passed (0.000 seconds).
+Test Case '-[AutopodUITests.ProviderCatalogTests testProviderModelAllowlistBlocksUnreviewedCatalogModel]' started.
+Test Case '-[AutopodUITests.ProviderCatalogTests testProviderModelAllowlistBlocksUnreviewedCatalogModel]' passed (0.000 seconds).
+Test Case '-[AutopodUITests.ProviderCatalogTests testSwitchingGenericAccountPreservesModelButBlocksSaveUntilCompatible]' started.
+Test Case '-[AutopodUITests.ProviderCatalogTests testSwitchingGenericAccountPreservesModelButBlocksSaveUntilCompatible]' passed (0.000 seconds).
+Test Case '-[AutopodUITests.ProviderCatalogTests testSyntheticProviderAppearsWithSafePresentationAndPolicy]' started.
+Test Case '-[AutopodUITests.ProviderCatalogTests testSyntheticProviderAppearsWithSafePresentationAndPolicy]' passed (0.000 seconds).
+Test Case '-[AutopodUITests.ProviderCatalogTests testSyntheticProviderModelAppearsWithoutSourceEnumeration]' started.
+Test Case '-[AutopodUITests.ProviderCatalogTests testSyntheticProviderModelAppearsWithoutSourceEnumeration]' passed (0.000 seconds).
+Test Suite 'ProviderCatalogTests' passed at 2026-09-07 18:53:36.846.
+	 Executed 6 tests, with 0 failures (0 unexpected) in 0.001 (0.001) seconds
+Test Suite 'AutopodDesktopPackageTests.xctest' passed at 2026-09-07 18:53:36.846.
+	 Executed 13 tests, with 0 failures (0 unexpected) in 0.011 (0.012) seconds
+Test Suite 'All tests' passed at 2026-09-07 18:53:36.846.
+	 Executed 13 tests, with 0 failures (0 unexpected) in 0.011 (0.018) seconds
+◇ Test run started.
+↳ Testing Library Version: 1902
+↳ Target Platform: arm64e-apple-macos14.0
+◇ Test fullRedirectDollarPerPr() started.
+◇ Suite ProfileAuthenticatorTests started.
+◇ Test successRateWeightedByPodCount() started.
+◇ Test healthyCouncilShowsOnlyCanonicalStructuredFindings() started.
+◇ Test pollerRestartIsClean() started.
+◇ Test overflowKeepsRetainedFindingDismissalAndTopLevelWins() started.
+◇ Test claudeModelOptionsUseRoleSpecificOrdering() started.
+◇ Test failoverEligibilityRejectsApiProvidersWithoutAuthenticationEvidence() started.
+◇ Test pollerContinuesOnNonTerminalStatus() started.
+◇ Test memoryWorkbenchFiltersUsageToSelectedMemory() started.
+◇ Test escalationRateWeightedByPodCount() started.
+◇ Test runtimeModelNormalizationResetsIncompatibleSelections() started.
+◇ Test zeroRedirectIdentity() started.
+◇ Test pollerStopsOnTerminalStatus() started.
+◇ Test memoryWorkbenchFiltersActiveMemoriesByScopeAndQuery() started.
+◇ Test reviewCouncilDecodesAndPresentsLedgerLifecycle() started.
+◇ Test failoverModelOptionsUseRuntimeCatalogAndPreserveCompatibleCurrentValue() started.
+◇ Test validationHistoryDoesNotRefreshCurrentOrAlreadyEnrichedAttempt() started.
+◇ Test memoryWorkbenchShowsExtractionAttemptsOnWorkbenchEmptyStates() started.
+◇ Test liveReviewProgressUsesSettledNotCompletedForUnavailableAxes() started.
+◇ Test runtimeModelNormalizationExpandsClaudeAliases() started.
+◇ Test partialPodOptionsDeriveResolvedDefaults() started.
+◇ Test commandPaletteProfileSearchMatchesRepoAndParent() started.
+◇ Test memoryCandidateDecodesUnknownEnumsConservatively() started.
+◇ Test detailTabSelectionFallsBackWhenTerminalIsUnavailable() started.
+◇ Test profileResponseDecodesAdvisoryBrowserQaTrue() started.
+◇ Test validationChecksExcludeAdvisoryQaFromPhaseCounts() started.
+◇ Test reliabilityAnalyticsResponseDecodesRoundTrip() started.
+◇ Test piRuntimeAndProfileContractDecode() started.
+◇ Test loadBearingStatusDecodesAllCases() started.
+◇ Test switchDrillModelsToMemory() started.
+◇ Test profileMapperRoundTripsPortableReasoningEffort(_:) started.
+◇ Test daemonAPIMemoryPathConstruction() started.
+◇ Test profileOverrideCatalogPlacesReasoningEffortBetweenModelsAndRuntime() started.
+◇ Test mapperPreservesScreenshotSetOrdering() started.
+◇ Test mapsWorkspaceSession() started.
+◇ Test launchDeepLinkSkipsSavedConnectionRestoreAtStartup() started.
+◇ Test mapsHasWebUiFalse() started.
+◇ Test derivedReasoningEffortStaysInheritedUntilOverrideIsActivated() started.
+◇ Test keychainRoundTrip() started.
+◇ Suite "EventStreamDedupeTests" started.
+◇ Suite "ValidationHistoryIdentityTests" started.
+◇ Test throughputDeltaDirectionDecodesAllCases() started.
+◇ Test failoverEligibilityRejectsUnauthenticatedAndUnsafeProvider() started.
+◇ Test throughputAnalyticsResponseDecodesTruncatedCohort() started.
+◇ Test memoryCandidateCreatedEventParses() started.
+◇ Test daemonAPINormalizesBearerTokenInput() started.
+◇ Test escalationsRateDeltaDirectionDecodesAllCases() started.
+◇ Test profileMapperWritesReviewerModelToLegacyAskAiModelField() started.
+◇ Test compactPodAPITraversesPagesWithoutDetailRequests() started.
+◇ Test profileMapperRoundTripsProviderFailoverOverride() started.
+◇ Test whitespaceOnlySectionsAreIgnored() started.
+◇ Test heatmapBucketingHandlesDST() started.
+◇ Test plainMarkdownKeepsLegacySingleSectionBehavior() started.
+◇ Test networkPolicyBucketDecodesAllCases() started.
+◇ Test commandPaletteEmptyQueryIncludesCoreActions() started.
+◇ Test createSessionRequestEncodes() started.
+◇ Test threeModelFleetHaikuUnchanged() started.
+◇ Test profileEditorKeepsGitCredentialsOutOfProfileOverrides() started.
+◇ Test decodesTaskSummaryFactDeviations() started.
+◇ Test failoverValidationRejectsRuntimeAuthenticationBoundsAndHops() started.
+◇ Test degradedCouncilDoesNotRestoreFixedFirstGateFinding() started.
+◇ Test mapsHasWebUiMissingDefaultsFalse() started.
+◇ Test diffExpansionPrunerBuildsStableFileKeys() started.
+◇ Test mapsPodConfigFromResponse() started.
+◇ Test leadingTextBecomesTaskSection() started.
+◇ Test decodesAbsentScreenshotFields() started.
+◇ Test cliEntraAccessTokenUsesUnexpiredCliCredentials() started.
+◇ Test escalationsAnalyticsResponseDecodesMinimalPayload() started.
+◇ Test validationInfrastructureFailureBlocksPassWithoutClaimingTestsFailed() started.
+◇ Test profileEditorAgentControlsDoNotWidenTheSheet() started.
+◇ Test reviewFailureLabelDistinguishesInfrastructureFromFindings() started.
+◇ Test actionAuditResponseDecodesRowsAndValidChain() started.
+◇ Test patExpiryStatusClassifiesMissingInvalidSoonAndExpired() started.
+◇ Suite "EventStreamResyncTests" started.
+◇ Test modelsRuntimeKindDecodesAllCases() started.
+◇ Test throughputPodStatusDecodesAllCases() started.
+◇ Test deterministicUnavailableBatchDecodesSafely() started.
+◇ Test decodesScreenshotRefResponse() started.
+◇ Test safetyAnalyticsResponseDecodesFullPayload() started.
+◇ Test costAnalyticsResponseDecodesRoundTrip() started.
+◇ Test analyticsRightPaneRoutesMemoryDrill() started.
+◇ Test legacyMemoryEntryDecodesWithDefaultsAndSessionCompatibility() started.
+◇ Test switchDrillQualityToStatus() started.
+◇ Test failoverValidationRejectsIdentityAndCompletenessErrors() started.
+◇ Test reasoningEffortPickerUsesExactPortableWireValuesAndLabels() started.
+◇ Test seriesPodsDefaultToOverview() started.
+◇ Test profileListDeepLinkResolverUsesExactProfileName() started.
+◇ Test validationResponseDecodesHistoricalWithoutSetup() started.
+◇ Test baseProfileReasoningEffortSelectionPreservesPortableValue() started.
+◇ Test validationPageScreenshotPrefersInlinePageScreenshot() started.
+◇ Test mapsAwaitingInputWithEscalation() started.
+◇ Test profileMapperMapsFalseAdvisoryBrowserQa() started.
+◇ Test legacyReviewPresentationKeepsExistingReasoningAndFindings() started.
+◇ Test memoryWorkbenchGroupsPendingCandidatesByOrigin() started.
+◇ Suite "PipelineDAGLayout" started.
+◇ Test memoryWorkbenchSelectionFallsBackWhenCurrentItemIsNotVisible() started.
+◇ Test profileResponseDefaultsMissingReasoningEffortToAuto() started.
+◇ Test hostedDaemonATSExceptionIsRemovedAndNativeRedirectSchemeIsRegistered() started.
+◇ Suite PodsitterAPITests started.
+◇ Suite PodStoreFleetTests started.
+◇ Suite "EventSocket control messages" started.
+◇ Test modelsAnalyticsResponseDecodesNullQualityAndTtm() started.
+◇ Test profilePatchOmitsNilAdvisoryBrowserQa() started.
+◇ Test infrastructureFailureUsesValidationOnlyResumeAction() started.
+◇ Test safetyEventSourceDecodesAllCases() started.
+◇ Test daemonGitHubAuthStatusRepresentsReadyAndUnavailableStates() started.
+◇ Test reviewCouncilFallsBackToAcceptedFindingsWithoutLedger() started.
+◇ Test profileMapperUsesCanonicalReviewerFallbackWhenReviewerMissing() started.
+◇ Test detailTabSelectionFallsBackWhenSeriesTabIsUnavailable() started.
+◇ Test memoryWorkbenchFormatsScopeProvenanceLabels() started.
+◇ Test agentEventResponseDecodesFirewallReplayFields() started.
+◇ Test sessionProcessHealthMapsUnavailableReasonsToNeutralText() started.
+◇ Test codexModelOptionsPreserveCompatibleCustomCurrentValue() started.
+◇ Test daemonAPIInitializes() started.
+◇ Test seriesReadinessUsesDaemonScopedSnapshotWithoutMembers() started.
+◇ Test profileEditorGeneralSectionDoesNotOverflowSheetWidth() started.
+◇ Test newDerivedProfileActivationUsesParentInsteadOfDraftAutoDefault() started.
+◇ Test legacyReviewDecodesWithoutCouncil() started.
+◇ Test mapsNullRunningAt() started.
+◇ Test commandPaletteProfileSearchReturnsShowAndEditActions() started.
+◇ Test failoverEligibilityRejectsFoundryWithoutRuntimeEvidence() started.
+◇ Test sessionResponseDecodes() started.
+◇ Test decodesAndMapsReadinessReview() started.
+◇ Test finalStatusDecodesAllCases() started.
+◇ Test profileMapperCarriesResolvedFailoverAsReadOnlyPresentationState() started.
+◇ Test pollerCapturesFetchError() started.
+◇ Test unknownHeadingsRenderAsGenericSections() started.
+◇ Test artifactPodsDefaultToEvidence() started.
+◇ Test qualityDeltaDirectionRejectsUnknown() started.
+◇ Test costSparklineDecodes30Elements() started.
+◇ Test profileResponseDecodesValidationSetupCommand() started.
+◇ Test memoryWorkbenchShowsWarningStateForStaleOrHarmfulEvidence() started.
+◇ Test mapsValidationOverrideFindingProvenance() started.
+◇ Test profileOverrideCatalogLabelsSharedBuildTimeoutAsBuildAndSetup() started.
+◇ Test validationProgressCompletesSetupFailureFromPhaseEvent() started.
+◇ Test commandPalettePodSearchUsesMainViewFields() started.
+◇ Test daemonHealthPreservesUnknownAndStaleEvidence() started.
+◇ Test partialMemoryCandidateDecodesWithConservativeDefaults() started.
+◇ Test failoverValidationAcceptsCompleteOrderedTargets() started.
+◇ Test browseRecentSearchUsesFullArchive() started.
+◇ Test memoryWorkbenchRejectsDetailPayloadForDifferentSelection() started.
+◇ Test agentEventResponseDecodesEventId() started.
+◇ Test detailTabSelectionKeepsDiffWhenSwitchingPods() started.
+◇ Test profileResponseDecodes() started.
+◇ Test finalStatusRejectsUnknownString() started.
+◇ Test reviewPresentationPreservesFailedHistoryVerdictWhenCouncilIsUnavailable() started.
+◇ Test memoryWorkbenchUsesPodOriginForApprovedMemoryGroups() started.
+◇ Test retryClientPreservesUnknownExecutionAndSeparateAuthorization() started.
+◇ Test claude5OptionsUseExactLabelsAndStandardPrices() started.
+◇ Test safetyInjectionEntrySeverityNilDecodes() started.
+◇ Test loadBearingStatusRejectsUnknownString() started.
+◇ Test pollerClearsErrorOnSuccess() started.
+◇ Test qualityAnalyticsResponseDecodesRoundTrip() started.
+◇ Test headingCapturesBodyUntilNextHeading() started.
+◇ Test modelsFailureStageCellStageLabelsDecodeCorrectly() started.
+◇ Test case passing 1 argument effort → .high to profileMapperRoundTripsPortableReasoningEffort(_:) started.
+◇ Test case passing 1 argument effort → .medium to profileMapperRoundTripsPortableReasoningEffort(_:) started.
+◇ Test case passing 1 argument effort → .auto to profileMapperRoundTripsPortableReasoningEffort(_:) started.
+◇ Test case passing 1 argument effort → .low to profileMapperRoundTripsPortableReasoningEffort(_:) started.
+◇ Test case passing 1 argument effort → .xhigh to profileMapperRoundTripsPortableReasoningEffort(_:) started.
+◇ Test validationProgressCompletesAdvisoryFailureFromPhaseEvent() started.
+◇ Test daemonConnectionDefaultsLegacyAuthKindToManualToken() started.
+◇ Test reasoningEffortHelpExplainsQualityLatencyAndTokenTradeoff() started.
+◇ Test analyticsSelectPodClearsCardAndNavigates() started.
+◇ Test memoryWorkbenchMergesScopedActiveCacheWithApprovedEntries() started.
+◇ Test intentionalReviewSkipsRemainNeutral() started.
+◇ Test readinessAvailabilityStatusesAreNotApprovable() started.
+◇ Test profileMapperMapsValidationSetupCommand() started.
+◇ Test reviewCouncilActivityCollapsesToLatestSnapshotOnly() started.
+◇ Test failoverEligibilityMapsAuthenticatedProvidersToRuntime() started.
+◇ Test diffExpansionPrunerDropsStaleCommitAndFileKeys() started.
+◇ Test memoryUsageHistoryDecodes() started.
+◇ Test modelsAnalyticsResponseDecodesRoundTrip() started.
+◇ Test reviewCouncilFallsBackToBatchTokenUsage() started.
+◇ Test modelsDollarDeltaDirectionDecodesAllCases() started.
+◇ Test validationProgressPropagatesLiveReviewCouncil() started.
+◇ Test profileOverrideCatalogContainsValidationSetupCommand() started.
+◇ Test toggleOffStatusCard() started.
+◇ Test reviewInfrastructureFailuresFailValidationChecks() started.
+◇ Test analyticsCardKindRawValues() started.
+◇ Test relatedEventReferencesIncludeLinkedFixAndSeriesPodsWithoutDuplicates() started.
+◇ Test dispatchReceiptKeepsReviewRequiredAndMissingEvidenceDistinct() started.
+◇ Test auditChainVerifyResponseDecodesFullPayload() started.
+◇ Test modelsAnalyticsResponseDecodesMinimalPayload() started.
+◇ Test lifecycleCountsGroupingSortingAndCanonicalDismissal() started.
+◇ Test safetyByPodPreCreationDecodes() started.
+◇ Test qualityNullOnTargetYieldsNilProjected() started.
+◇ Test profileModelCellDecodesNullModel() started.
+◇ Test entraCachedTokenHonorsRefreshBuffer() started.
+◇ Test validationPageScreenshotFallsBackToMatchingProofOfWorkSmokeShot() started.
+◇ Test profileMapperEncodesExplicitEmptyFailoverOverrideAndLegacyNil() started.
+◇ Test claudeModelOptionsPreserveExplicitCanonical4xValues(input:) started.
+◇ Test profilePatchIncludesFalseAdvisoryBrowserQa() started.
+◇ Test ttmNullOnTargetContributesNothing() started.
+◇ Test pollerStopsOnStop() started.
+◇ Test toggleOffMemoryCard() started.
+◇ Test codexModelOptionsExposeRepoKnownModels() started.
+◇ Test sessionStatsResponseDecodesBareStatusMap() started.
+◇ Test mapsHasWebUiTrue() started.
+◇ Test modelPricingSummariesCoverPickerModels() started.
+◇ Test auditChainVerifyResponseDecodesWithMismatch() started.
+◇ Test pollerFetchesOnStart() started.
+◇ Test analyticsCardKindHashableRoundTrip() started.
+◇ Test switchingRuntimesPreservesOnlyCompatibleSelections() started.
+◇ Test sessionNestedPartialProfilePodOptionsDecode() started.
+◇ Test piModelsAreProviderQualifiedAndDistinctFromVendorDefaults() started.
+◇ Test daemonAPIUsesDynamicTokenProviderForRequests() started.
+◇ Test bulletsAndInlineCodeArePreserved() started.
+◇ Test historicalAttemptUsesItsOwnFrozenCouncilSnapshot() started.
+◇ Test browseRecentCapsArchiveButKeepsActionablePods() started.
+◇ Test openAiProviderNormalizationCanResetRestrictedCodexModel() started.
+◇ Test scheduledReportEventDoesNotRequireOrInventAWorker() started.
+◇ Test memoryWorkbenchImpactCountsUsageOutcomes() started.
+◇ Test validationResponseDecodesInfrastructureFailureAndHistoricalRowsRemainCompatible() started.
+◇ Test partialRedirectDollarPerPr() started.
+◇ Test failoverModelSelectionDefaultsAndNormalizesWhenRuntimeChanges() started.
+◇ Test throughputAnalyticsResponseDecodesRoundTrip() started.
+◇ Test validationHistoryRefreshesSelectedStaleAttemptAfterAdvisoryCompletion() started.
+◇ Test unknownModelExcludedFromBaseline() started.
+◇ Test degradedCouncilPreservesFallbackFailuresAndFixedResolution() started.
+◇ Test degradedCouncilDoesNotRepeatFirstGateFindingInCanonicalProvenance() started.
+◇ Test relatedEventReferencesAreEmptyForStandalonePods() started.
+◇ Test memoryWorkbenchPrefersCandidateSelectionThenKeepsValidSelection() started.
+◇ Test reviewPresentationPreservesSkippedAndPassedVerdicts() started.
+◇ Test headingsInsideCodeFencesAreNotParsed() started.
+◇ Test derivedReasoningEffortOverrideSelectionDoesNotMutateParent() started.
+◇ Test mapsMissingRunningAt() started.
+◇ Test profileResponseDecodesAdvisoryBrowserQaFalse() started.
+◇ Test memoryStoreAppliesApprovedUpdateCandidateEventToCachedMemory() started.
+◇ Test daemonConnectionNormalizesBareRemoteHostToHTTPS() started.
+◇ Test mapsPrFixContextFromLinkedPodId() started.
+◇ Test reviewProgressEventDecodesAndMapsSettledSemantics() started.
+◇ Test mapsRunningSession() started.
+◇ Test modelsAnalyticsResponseDecodesNullCostFields() started.
+◇ Test daemonConnectionNormalizesBareLocalHostToHTTP() started.
+◇ Test validationResponseDecodes() started.
+◇ Test throughputAnalyticsResponseDecodesMinimalPayload() started.
+◇ Test browseRecentKeepsDirectlySelectedArchivedPod() started.
+◇ Test profileMapperRoundTripsProviderAccountId() started.
+◇ Test podMapperPropagatesCurrentReviewCouncil() started.
+◇ Test mapperMapsValidationInfrastructureWithoutClaimingTestsFailed() started.
+◇ Test podQualityScoreDecodesViaScoresArray() started.
+◇ Test filterPodsReturnsEmptyForAnalytics() started.
+◇ Test podCostBreakdownResponseDecodesRoundTrip() started.
+◇ Test mapperResolvesScreenshotURL() started.
+◇ Test funnelBandRejectsUnknownString() started.
+◇ Test safetyFirewallDenialsDecodeEmptyPayload() started.
+◇ Test profileMapperPreservesInheritedReasoningEffortAsNullPatch() started.
+◇ Test taskAccountingRetainsUnavailableBudgetAdmission() started.
+◇ Test qualitySparklineDecodesNonEmpty() started.
+◇ Test safetyWorktreeSafetyDecodesIncidentPayload() started.
+◇ Test validationStageRejectsUnknownString() started.
+◇ Test legacyProfileEditorDecodesMissingFailoverResolutionAsNil() started.
+◇ Test mapperMapsSetupFailureAsBlockingValidationPhase() started.
+◇ Test reliabilitySparklineDecodes30Elements() started.
+◇ Test safetyDeltaDirectionDecodesAllCases() started.
+◇ Test costDeltaDirectionRejectsUnknownString() started.
+◇ Test memoryStoreHandlesLegacySuggestionEvent() started.
+◇ Test newProfileUsesClaude5AndAutoEffortDefaults() started.
+◇ Test providerAccountFailoverContractDecodesWithoutCredentials() started.
+◇ Test unavailablePodQualityScoreDecodesNullInspectionMetrics() started.
+◇ Test memoryStoreRemovesNonPendingCandidateEvents() started.
+◇ Test emptyFleetPayloadDecodesWithoutThrowing() started.
+◇ Test unknownMemoryScopePreservesWireValue() started.
+◇ Test systemEventParsesFirewallDenied() started.
+◇ Test profileMapperCanonicalizesLegacyProfileModelAliases() started.
+◇ Test podCostBreakdownResponseDecodesNullModel() started.
+◇ Test escalationsAnalyticsResponseDecodesRoundTrip() started.
+◇ Test systemEventParses() started.
+◇ Test memoryCandidateUpdatedEventParses() started.
+◇ Test costDeltaDirectionDecodesAllCases() started.
+◇ Test systemEventParsesSetupPhaseCompletion() started.
+◇ Test topFailureStageTestStringDecodesToTest() started.
+◇ Test mapsParentPrFixContextAndLegacyLinkedSessionId() started.
+◇ Test safetyAnalyticsAuditChainAllNullDecodes() started.
+◇ Test mapsInteractiveArtifactPodWithArtifactsPath() started.
+◇ Test profilePatchClearsNilValidationSetupCommandWithoutDefault() started.
+◇ Test profileEditorDecodesTopLevelFailoverResolutionOptionally() started.
+◇ Test profilePatchIncludesValidationSetupCommandWhenSet() started.
+◇ Test mapsArtifactCollectionRecoveryWithoutReworkAcrossCompactAndDetail() started.
+◇ Test firewallDenialResponseDecodes() started.
+◇ Test dropEntryWithOverflowDecodes() started.
+◇ Test profileResponseDecodesAdvisoryBrowserQaNil() started.
+◇ Test toggleOffCostCard() started.
+◇ Test mapsPersistedFailureReasonAfterRefreshWithoutValidation() started.
+◇ Test mapsRequestCredentialEscalationReason() started.
+◇ Test daemonConnectionLabelWithoutPort() started.
+◇ Test executionProvenanceKeepsValidationPurposeAndSupportsEarlierRecords() started.
+◇ Test switchDrillStatusToCost() started.
+◇ Test extendedMemoryEntryDecodes() started.
+◇ Test daemonConnectionLabel() started.
+◇ Test browseArchiveShowsTheFullLoadedArchive() started.
+◇ Test cliEntraAccessTokenRejectsCredentialsInsideRefreshBuffer() started.
+◇ Test advisoryBrowserQaResponseDecodesSkippedStatus() started.
+◇ Test topFailureStageEmptyStringDecodesToNil() started.
+◇ Test profileMapperMapsNilAdvisoryBrowserQa() started.
+◇ Test podStoreRejectsAStaleReviewSnapshot() started.
+◇ Test funnelBandDecodesAllCases() started.
+◇ Test memoryAnalyticsDecodes() started.
+◇ Test seriesReadinessRollupUsesMemberSnapshots() started.
+◇ Test memoryStoreHandlesCandidateCreatedAndUpdatesInPlace() started.
+◇ Test modelsAnalyticsResponseDecodesUnknownModelRow() started.
+◇ Test safetyEventKindDecodesBothCases() started.
+◇ Test rerunTemplateSurvivesDurableDraftWithoutApprovalOrLineage() started.
+◇ Test createSessionRequestOmitsNilFields() started.
+◇ Test sessionStatsResponseDecodesWrappedByStatusMap() started.
+◇ Test legacyProviderAccountDecodesMissingFailoverPolicyAsNil() started.
+◇ Test analyticsSelectPodWithDifferentSessionId() started.
+◇ Test actionAuditResponseDecodesNullCategoriesAndInvalidChain() started.
+◇ Test qualityDeltaDirectionDecodesAllCases() started.
+◇ Test escalationsAnalyticsUsesDefaultJSONDecoderNoCamelConversion() started.
+◇ Test validationStageDecodesAllCases() started.
+◇ Test modelsAnalyticsResponseUsesDefaultKeyStrategy() started.
+◇ Test askHumanTtrBucketLabelsDecodeByteForByte() started.
+◇ Test profilePatchIncludesTrueAdvisoryBrowserQa() started.
+◇ Test toggleOffQualityCard() started.
+◇ Test switchDrillCostToQuality() started.
+◇ Test mapperMapsAdvisoryQaWithoutAffectingValidationOutcome() started.
+◇ Test nativeContractPreservesDeclaredExecutionRequirements() started.
+◇ Test qualityReasonsDecodesAllFields() started.
+◇ Test escalationsPerProfileSyntheticRowDecodes() started.
+◇ Test profileMapperMapsTrueAdvisoryBrowserQa() started.
+◇ Test scheduledScanClientPreservesIncompleteStatusAndExplicitHumanSelection() started.
+◇ Test qualityDistributionDecodes10Buckets() started.
+✔ Test fullRedirectDollarPerPr() passed after 0.009 seconds.
+✔ Test successRateWeightedByPodCount() passed after 0.009 seconds.
+✔ Test failoverEligibilityRejectsApiProvidersWithoutAuthenticationEvidence() passed after 0.009 seconds.
+◇ Test mapsReworkCyclesSeparatelyFromWorkerExecution() started.
+◇ Test profileMapperPreservesExplicitCanonicalOpus47() started.
+✔ Test escalationRateWeightedByPodCount() passed after 0.009 seconds.
+✔ Test claudeModelOptionsUseRoleSpecificOrdering() passed after 0.010 seconds.
+✔ Test runtimeModelNormalizationResetsIncompatibleSelections() passed after 0.010 seconds.
+◇ Test selectedPiProviderIsTheOnlyCredentialPatched() started.
+✔ Test healthyCouncilShowsOnlyCanonicalStructuredFindings() passed after 0.010 seconds.
+✔ Test runtimeModelNormalizationExpandsClaudeAliases() passed after 0.010 seconds.
+✔ Test zeroRedirectIdentity() passed after 0.010 seconds.
+✔ Test failoverModelOptionsUseRuntimeCatalogAndPreserveCompatibleCurrentValue() passed after 0.010 seconds.
+✔ Test overflowKeepsRetainedFindingDismissalAndTopLevelWins() passed after 0.010 seconds.
+✔ Test liveReviewProgressUsesSettledNotCompletedForUnavailableAxes() passed after 0.010 seconds.
+✔ Test reviewCouncilDecodesAndPresentsLedgerLifecycle() passed after 0.010 seconds.
+✔ Test memoryCandidateDecodesUnknownEnumsConservatively() passed after 0.010 seconds.
+✔ Test profileResponseDecodesAdvisoryBrowserQaTrue() passed after 0.010 seconds.
+✔ Test partialPodOptionsDeriveResolvedDefaults() passed after 0.010 seconds.
+✔ Test loadBearingStatusDecodesAllCases() passed after 0.010 seconds.
+✔ Test validationChecksExcludeAdvisoryQaFromPhaseCounts() passed after 0.010 seconds.
+✔ Test detailTabSelectionFallsBackWhenTerminalIsUnavailable() passed after 0.010 seconds.
+✔ Test profileOverrideCatalogPlacesReasoningEffortBetweenModelsAndRuntime() passed after 0.010 seconds.
+✔ Test validationHistoryDoesNotRefreshCurrentOrAlreadyEnrichedAttempt() passed after 0.011 seconds.
+✔ Test derivedReasoningEffortStaysInheritedUntilOverrideIsActivated() passed after 0.010 seconds.
+✔ Test profileMapperRoundTripsPortableReasoningEffort(_:) with 5 test cases passed after 0.011 seconds.
+◇ Test ordersLegacyFallbackIdsByTimestamp() started.
+◇ Test ordersInterleavedPendingEventsByPersistedId() started.
+◇ Test appendsPendingEventsWithoutDuplicatingIds() started.
+◇ Test repeatedAttemptsUseImmutableHistoryIdentity() started.
+◇ Test mergesHistoricalAndLiveEventsByServerId() started.
+✔ Test throughputDeltaDirectionDecodesAllCases() passed after 0.011 seconds.
+✔ Test failoverEligibilityRejectsUnauthenticatedAndUnsafeProvider() passed after 0.011 seconds.
+◇ Test reworkAndWorkerExecutionHaveDistinctLabels() started.
+✔ Test memoryCandidateCreatedEventParses() passed after 0.011 seconds.
+✔ Test escalationsRateDeltaDirectionDecodesAllCases() passed after 0.011 seconds.
+✔ Test mapsHasWebUiFalse() passed after 0.011 seconds.
+◇ Test case passing 1 argument input → ("claude-opus-4-7", "Opus 4.7") to claudeModelOptionsPreserveExplicitCanonical4xValues(input:) started.
+✔ Test piRuntimeAndProfileContractDecode() passed after 0.011 seconds.
+◇ Test case passing 1 argument input → ("claude-sonnet-4-5", "Sonnet 4.5") to claudeModelOptionsPreserveExplicitCanonical4xValues(input:) started.
+◇ Test case passing 1 argument input → ("claude-opus-4-6", "Opus 4.6") to claudeModelOptionsPreserveExplicitCanonical4xValues(input:) started.
+✔ Test mapsWorkspaceSession() passed after 0.011 seconds.
+✔ Test mapperPreservesScreenshotSetOrdering() passed after 0.012 seconds.
+✔ Test reliabilityAnalyticsResponseDecodesRoundTrip() passed after 0.012 seconds.
+✔ Test profileMapperRoundTripsProviderFailoverOverride() passed after 0.012 seconds.
+✔ Test whitespaceOnlySectionsAreIgnored() passed after 0.012 seconds.
+✔ Test profileMapperWritesReviewerModelToLegacyAskAiModelField() passed after 0.012 seconds.
+✔ Test heatmapBucketingHandlesDST() passed after 0.012 seconds.
+✔ Test daemonAPINormalizesBearerTokenInput() passed after 0.012 seconds.
+✔ Test plainMarkdownKeepsLegacySingleSectionBehavior() passed after 0.012 seconds.
+✔ Test networkPolicyBucketDecodesAllCases() passed after 0.012 seconds.
+✔ Test daemonAPIMemoryPathConstruction() passed after 0.012 seconds.
+✔ Test profileEditorKeepsGitCredentialsOutOfProfileOverrides() passed after 0.012 seconds.
+✔ Test decodesTaskSummaryFactDeviations() passed after 0.012 seconds.
+✔ Test mapsHasWebUiMissingDefaultsFalse() passed after 0.012 seconds.
+✔ Test mapsPodConfigFromResponse() passed after 0.012 seconds.
+✔ Test leadingTextBecomesTaskSection() passed after 0.012 seconds.
+✔ Test diffExpansionPrunerBuildsStableFileKeys() passed after 0.012 seconds.
+✔ Test createSessionRequestEncodes() passed after 0.012 seconds.
+✔ Test failoverValidationRejectsRuntimeAuthenticationBoundsAndHops() passed after 0.012 seconds.
+✔ Test degradedCouncilDoesNotRestoreFixedFirstGateFinding() passed after 0.012 seconds.
+✔ Test decodesAbsentScreenshotFields() passed after 0.012 seconds.
+✔ Test validationInfrastructureFailureBlocksPassWithoutClaimingTestsFailed() passed after 0.012 seconds.
+◇ Test replayTruncationReloadsSelectedPodLogs() started.
+✔ Test threeModelFleetHaikuUnchanged() passed after 0.012 seconds.
+✔ Test reviewFailureLabelDistinguishesInfrastructureFromFindings() passed after 0.012 seconds.
+✔ Test throughputPodStatusDecodesAllCases() passed after 0.013 seconds.
+✔ Test escalationsAnalyticsResponseDecodesMinimalPayload() passed after 0.013 seconds.
+✔ Test decodesScreenshotRefResponse() passed after 0.013 seconds.
+✔ Test legacyMemoryEntryDecodesWithDefaultsAndSessionCompatibility() passed after 0.013 seconds.
+✔ Test patExpiryStatusClassifiesMissingInvalidSoonAndExpired() passed after 0.013 seconds.
+✔ Test actionAuditResponseDecodesRowsAndValidChain() passed after 0.013 seconds.
+✔ Test deterministicUnavailableBatchDecodesSafely() passed after 0.013 seconds.
+✔ Test seriesPodsDefaultToOverview() passed after 0.013 seconds.
+✔ Test cliEntraAccessTokenUsesUnexpiredCliCredentials() passed after 0.013 seconds.
+✔ Test failoverValidationRejectsIdentityAndCompletenessErrors() passed after 0.013 seconds.
+✔ Test reasoningEffortPickerUsesExactPortableWireValuesAndLabels() passed after 0.013 seconds.
+✔ Test validationResponseDecodesHistoricalWithoutSetup() passed after 0.013 seconds.
+✔ Test validationPageScreenshotPrefersInlinePageScreenshot() passed after 0.013 seconds.
+✔ Test modelsRuntimeKindDecodesAllCases() passed after 0.013 seconds.
+✔ Test baseProfileReasoningEffortSelectionPreservesPortableValue() passed after 0.013 seconds.
+✔ Test legacyReviewPresentationKeepsExistingReasoningAndFindings() passed after 0.014 seconds.
+✔ Test costAnalyticsResponseDecodesRoundTrip() passed after 0.014 seconds.
+◇ Test "Unknown parents are dropped rather than crashing" started.
+◇ Test "Fan-out: one parent, three children in a column" started.
+◇ Test "Linear chain: 4 pods in a row" started.
+✔ Test mapsAwaitingInputWithEscalation() passed after 0.014 seconds.
+◇ Test "Diamond: 1 -> {2, 3} -> 4" started.
+✔ Test profileMapperMapsFalseAdvisoryBrowserQa() passed after 0.014 seconds.
+◇ Test "Fan-in: two parents, one merge child" started.
+✔ Test safetyAnalyticsResponseDecodesFullPayload() passed after 0.015 seconds.
+✔ Test profileResponseDefaultsMissingReasoningEffortToAuto() passed after 0.015 seconds.
+◇ Test podStoreLoadsEveryCompactPageAndRemovesPodsMissingFromTheFleet() started.
+◇ Test replayTruncationRequestsRestResync() started.
+✔ Test profilePatchOmitsNilAdvisoryBrowserQa() passed after 0.016 seconds.
+◇ Test decodesStatusWithDistinctAndUnknownStates() started.
+✔ Test safetyEventSourceDecodesAllCases() passed after 0.016 seconds.
+✔ Test daemonGitHubAuthStatusRepresentsReadyAndUnavailableStates() passed after 0.016 seconds.
+✔ Test infrastructureFailureUsesValidationOnlyResumeAction() passed after 0.016 seconds.
+✔ Test modelsAnalyticsResponseDecodesNullQualityAndTtm() passed after 0.016 seconds.
+✔ Test reviewCouncilFallsBackToAcceptedFindingsWithoutLedger() passed after 0.016 seconds.
+✔ Test profileMapperUsesCanonicalReviewerFallbackWhenReviewerMissing() passed after 0.016 seconds.
+✔ Test daemonAPIInitializes() passed after 0.016 seconds.
+✔ Test detailTabSelectionFallsBackWhenSeriesTabIsUnavailable() passed after 0.016 seconds.
+✔ Test agentEventResponseDecodesFirewallReplayFields() passed after 0.016 seconds.
+✔ Test codexModelOptionsPreserveCompatibleCustomCurrentValue() passed after 0.016 seconds.
+✔ Test legacyReviewDecodesWithoutCouncil() passed after 0.016 seconds.
+✔ Test hostedDaemonATSExceptionIsRemovedAndNativeRedirectSchemeIsRegistered() passed after 0.016 seconds.
+✔ Test profileMapperCarriesResolvedFailoverAsReadOnlyPresentationState() passed after 0.016 seconds.
+✔ Test finalStatusDecodesAllCases() passed after 0.016 seconds.
+✔ Test newDerivedProfileActivationUsesParentInsteadOfDraftAutoDefault() passed after 0.016 seconds.
+✔ Test failoverEligibilityRejectsFoundryWithoutRuntimeEvidence() passed after 0.016 seconds.
+✔ Test sessionResponseDecodes() passed after 0.016 seconds.
+✔ Test artifactPodsDefaultToEvidence() passed after 0.016 seconds.
+✔ Test memoryWorkbenchFiltersUsageToSelectedMemory() passed after 0.017 seconds.
+✔ Test unknownHeadingsRenderAsGenericSections() passed after 0.016 seconds.
+✔ Test profileOverrideCatalogLabelsSharedBuildTimeoutAsBuildAndSetup() passed after 0.016 seconds.
+✔ Test profileResponseDecodesValidationSetupCommand() passed after 0.016 seconds.
+✔ Test seriesReadinessUsesDaemonScopedSnapshotWithoutMembers() passed after 0.016 seconds.
+✔ Test validationProgressCompletesSetupFailureFromPhaseEvent() passed after 0.016 seconds.
+✔ Test partialMemoryCandidateDecodesWithConservativeDefaults() passed after 0.016 seconds.
+✔ Test mapsNullRunningAt() passed after 0.016 seconds.
+✔ Test detailTabSelectionKeepsDiffWhenSwitchingPods() passed after 0.016 seconds.
+✔ Test agentEventResponseDecodesEventId() passed after 0.016 seconds.
+✔ Test decodesAndMapsReadinessReview() passed after 0.016 seconds.
+✔ Test daemonHealthPreservesUnknownAndStaleEvidence() passed after 0.016 seconds.
+✔ Test mapsValidationOverrideFindingProvenance() passed after 0.016 seconds.
+✔ Test profileResponseDecodes() passed after 0.016 seconds.
+✔ Test claude5OptionsUseExactLabelsAndStandardPrices() passed after 0.015 seconds.
+✔ Test costSparklineDecodes30Elements() passed after 0.016 seconds.
+✔ Test headingCapturesBodyUntilNextHeading() passed after 0.015 seconds.
+✔ Test modelsFailureStageCellStageLabelsDecodeCorrectly() passed after 0.015 seconds.
+✔ Test safetyInjectionEntrySeverityNilDecodes() passed after 0.015 seconds.
+✔ Test reviewPresentationPreservesFailedHistoryVerdictWhenCouncilIsUnavailable() passed after 0.016 seconds.
+✔ Test validationProgressCompletesAdvisoryFailureFromPhaseEvent() passed after 0.015 seconds.
+✔ Test reasoningEffortHelpExplainsQualityLatencyAndTokenTradeoff() passed after 0.015 seconds.
+✔ Test intentionalReviewSkipsRemainNeutral() passed after 0.014 seconds.
+✔ Test daemonConnectionDefaultsLegacyAuthKindToManualToken() passed after 0.015 seconds.
+✔ Test readinessAvailabilityStatusesAreNotApprovable() passed after 0.014 seconds.
+✔ Test failoverValidationAcceptsCompleteOrderedTargets() passed after 0.016 seconds.
+✔ Test profileMapperMapsValidationSetupCommand() passed after 0.014 seconds.
+✔ Test qualityDeltaDirectionRejectsUnknown() passed after 0.016 seconds.
+✔ Test qualityAnalyticsResponseDecodesRoundTrip() passed after 0.015 seconds.
+✔ Test loadBearingStatusRejectsUnknownString() passed after 0.016 seconds.
+✔ Test diffExpansionPrunerDropsStaleCommitAndFileKeys() passed after 0.014 seconds.
+✔ Test reviewCouncilActivityCollapsesToLatestSnapshotOnly() passed after 0.014 seconds.
+✔ Test failoverEligibilityMapsAuthenticatedProvidersToRuntime() passed after 0.014 seconds.
+✔ Test validationProgressPropagatesLiveReviewCouncil() passed after 0.014 seconds.
+✔ Test analyticsCardKindRawValues() passed after 0.014 seconds.
+✔ Test modelsAnalyticsResponseDecodesRoundTrip() passed after 0.014 seconds.
+✔ Test memoryWorkbenchFiltersActiveMemoriesByScopeAndQuery() passed after 0.018 seconds.
+✔ Test relatedEventReferencesIncludeLinkedFixAndSeriesPodsWithoutDuplicates() passed after 0.014 seconds.
+✔ Test reviewInfrastructureFailuresFailValidationChecks() passed after 0.014 seconds.
+✔ Test reviewCouncilFallsBackToBatchTokenUsage() passed after 0.014 seconds.
+✔ Test profileOverrideCatalogContainsValidationSetupCommand() passed after 0.014 seconds.
+✔ Test auditChainVerifyResponseDecodesFullPayload() passed after 0.014 seconds.
+✔ Test finalStatusRejectsUnknownString() passed after 0.016 seconds.
+✔ Test dispatchReceiptKeepsReviewRequiredAndMissingEvidenceDistinct() passed after 0.014 seconds.
+✔ Test memoryWorkbenchShowsExtractionAttemptsOnWorkbenchEmptyStates() passed after 0.018 seconds.
+✔ Test modelsDollarDeltaDirectionDecodesAllCases() passed after 0.014 seconds.
+✔ Test switchDrillModelsToMemory() passed after 0.018 seconds.
+✔ Test validationPageScreenshotFallsBackToMatchingProofOfWorkSmokeShot() passed after 0.014 seconds.
+✔ Test commandPaletteProfileSearchMatchesRepoAndParent() passed after 0.018 seconds.
+✔ Test qualityNullOnTargetYieldsNilProjected() passed after 0.014 seconds.
+✔ Test safetyByPodPreCreationDecodes() passed after 0.014 seconds.
+✔ Test modelsAnalyticsResponseDecodesMinimalPayload() passed after 0.014 seconds.
+✔ Test entraCachedTokenHonorsRefreshBuffer() passed after 0.014 seconds.
+✔ Test ttmNullOnTargetContributesNothing() passed after 0.013 seconds.
+✔ Test profileMapperEncodesExplicitEmptyFailoverOverrideAndLegacyNil() passed after 0.013 seconds.
+✔ Test lifecycleCountsGroupingSortingAndCanonicalDismissal() passed after 0.014 seconds.
+✔ Test profileModelCellDecodesNullModel() passed after 0.014 seconds.
+✔ Test claudeModelOptionsPreserveExplicitCanonical4xValues(input:) with 3 test cases passed after 0.013 seconds.
+✔ Test auditChainVerifyResponseDecodesWithMismatch() passed after 0.013 seconds.
+✔ Test mapsHasWebUiTrue() passed after 0.013 seconds.
+✔ Test profilePatchIncludesFalseAdvisoryBrowserQa() passed after 0.013 seconds.
+✔ Test piModelsAreProviderQualifiedAndDistinctFromVendorDefaults() passed after 0.013 seconds.
+✔ Test analyticsCardKindHashableRoundTrip() passed after 0.013 seconds.
+✔ Test memoryUsageHistoryDecodes() passed after 0.014 seconds.
+✔ Test sessionNestedPartialProfilePodOptionsDecode() passed after 0.013 seconds.
+✔ Test bulletsAndInlineCodeArePreserved() passed after 0.013 seconds.
+✔ Test codexModelOptionsExposeRepoKnownModels() passed after 0.013 seconds.
+✔ Test sessionStatsResponseDecodesBareStatusMap() passed after 0.013 seconds.
+✔ Test modelPricingSummariesCoverPickerModels() passed after 0.013 seconds.
+✔ Test scheduledReportEventDoesNotRequireOrInventAWorker() passed after 0.013 seconds.
+✔ Test validationResponseDecodesInfrastructureFailureAndHistoricalRowsRemainCompatible() passed after 0.012 seconds.
+✔ Test partialRedirectDollarPerPr() passed after 0.012 seconds.
+✔ Test historicalAttemptUsesItsOwnFrozenCouncilSnapshot() passed after 0.013 seconds.
+✔ Test unknownModelExcludedFromBaseline() passed after 0.012 seconds.
+✔ Test failoverModelSelectionDefaultsAndNormalizesWhenRuntimeChanges() passed after 0.012 seconds.
+✔ Test throughputAnalyticsResponseDecodesRoundTrip() passed after 0.012 seconds.
+✔ Test openAiProviderNormalizationCanResetRestrictedCodexModel() passed after 0.013 seconds.
+✔ Test switchingRuntimesPreservesOnlyCompatibleSelections() passed after 0.013 seconds.
+✔ Test degradedCouncilDoesNotRepeatFirstGateFindingInCanonicalProvenance() passed after 0.012 seconds.
+✔ Test reviewPresentationPreservesSkippedAndPassedVerdicts() passed after 0.012 seconds.
+✔ Test relatedEventReferencesAreEmptyForStandalonePods() passed after 0.012 seconds.
+✔ Test headingsInsideCodeFencesAreNotParsed() passed after 0.012 seconds.
+✔ Test profileResponseDecodesAdvisoryBrowserQaFalse() passed after 0.012 seconds.
+✔ Test degradedCouncilPreservesFallbackFailuresAndFixedResolution() passed after 0.012 seconds.
+✔ Test daemonConnectionNormalizesBareRemoteHostToHTTPS() passed after 0.012 seconds.
+✔ Test validationHistoryRefreshesSelectedStaleAttemptAfterAdvisoryCompletion() passed after 0.013 seconds.
+✔ Test launchDeepLinkSkipsSavedConnectionRestoreAtStartup() passed after 0.018 seconds.
+✔ Test derivedReasoningEffortOverrideSelectionDoesNotMutateParent() passed after 0.012 seconds.
+✔ Test modelsAnalyticsResponseDecodesNullCostFields() passed after 0.012 seconds.
+✔ Test throughputAnalyticsResponseDecodesMinimalPayload() passed after 0.012 seconds.
+✔ Test validationResponseDecodes() passed after 0.012 seconds.
+✔ Test podQualityScoreDecodesViaScoresArray() passed after 0.011 seconds.
+✔ Test profileMapperRoundTripsProviderAccountId() passed after 0.012 seconds.
+✔ Test mapsPrFixContextFromLinkedPodId() passed after 0.012 seconds.
+✔ Test safetyFirewallDenialsDecodeEmptyPayload() passed after 0.011 seconds.
+✔ Test funnelBandRejectsUnknownString() passed after 0.011 seconds.
+✔ Test profileMapperPreservesInheritedReasoningEffortAsNullPatch() passed after 0.011 seconds.
+✔ Test podCostBreakdownResponseDecodesRoundTrip() passed after 0.011 seconds.
+✔ Test safetyWorktreeSafetyDecodesIncidentPayload() passed after 0.011 seconds.
+✔ Test mapperMapsValidationInfrastructureWithoutClaimingTestsFailed() passed after 0.012 seconds.
+✔ Test validationStageRejectsUnknownString() passed after 0.011 seconds.
+✔ Test reviewProgressEventDecodesAndMapsSettledSemantics() passed after 0.012 seconds.
+✔ Test qualitySparklineDecodesNonEmpty() passed after 0.011 seconds.
+✔ Test podMapperPropagatesCurrentReviewCouncil() passed after 0.012 seconds.
+✔ Test mapsRunningSession() passed after 0.012 seconds.
+✔ Test taskAccountingRetainsUnavailableBudgetAdmission() passed after 0.011 seconds.
+✔ Test safetyDeltaDirectionDecodesAllCases() passed after 0.011 seconds.
+✔ Test mapperResolvesScreenshotURL() passed after 0.011 seconds.
+✔ Test legacyProfileEditorDecodesMissingFailoverResolutionAsNil() passed after 0.011 seconds.
+✔ Test newProfileUsesClaude5AndAutoEffortDefaults() passed after 0.011 seconds.
+✔ Test mapperMapsSetupFailureAsBlockingValidationPhase() passed after 0.011 seconds.
+✔ Test providerAccountFailoverContractDecodesWithoutCredentials() passed after 0.011 seconds.
+✔ Test emptyFleetPayloadDecodesWithoutThrowing() passed after 0.011 seconds.
+✔ Test unavailablePodQualityScoreDecodesNullInspectionMetrics() passed after 0.011 seconds.
+✔ Test systemEventParsesFirewallDenied() passed after 0.011 seconds.
+✔ Test costDeltaDirectionRejectsUnknownString() passed after 0.011 seconds.
+✔ Test systemEventParses() passed after 0.011 seconds.
+✔ Test costDeltaDirectionDecodesAllCases() passed after 0.011 seconds.
+✔ Test systemEventParsesSetupPhaseCompletion() passed after 0.011 seconds.
+✔ Test memoryCandidateUpdatedEventParses() passed after 0.011 seconds.
+✔ Test reliabilitySparklineDecodes30Elements() passed after 0.011 seconds.
+✔ Test podCostBreakdownResponseDecodesNullModel() passed after 0.011 seconds.
+✔ Test escalationsAnalyticsResponseDecodesRoundTrip() passed after 0.011 seconds.
+✔ Test profilePatchClearsNilValidationSetupCommandWithoutDefault() passed after 0.011 seconds.
+✔ Test topFailureStageTestStringDecodesToTest() passed after 0.011 seconds.
+✔ Test mapsMissingRunningAt() passed after 0.012 seconds.
+✔ Test profilePatchIncludesValidationSetupCommandWhenSet() passed after 0.011 seconds.
+✔ Test profileMapperCanonicalizesLegacyProfileModelAliases() passed after 0.011 seconds.
+✔ Test mapsInteractiveArtifactPodWithArtifactsPath() passed after 0.011 seconds.
+✔ Test profileResponseDecodesAdvisoryBrowserQaNil() passed after 0.011 seconds.
+✔ Test mapsParentPrFixContextAndLegacyLinkedSessionId() passed after 0.011 seconds.
+✔ Test profileEditorDecodesTopLevelFailoverResolutionOptionally() passed after 0.011 seconds.
+✔ Test dropEntryWithOverflowDecodes() passed after 0.011 seconds.
+✔ Test firewallDenialResponseDecodes() passed after 0.011 seconds.
+✔ Test extendedMemoryEntryDecodes() passed after 0.011 seconds.
+✔ Test daemonConnectionLabelWithoutPort() passed after 0.011 seconds.
+✔ Test advisoryBrowserQaResponseDecodesSkippedStatus() passed after 0.011 seconds.
+✔ Test topFailureStageEmptyStringDecodesToNil() passed after 0.011 seconds.
+✔ Test executionProvenanceKeepsValidationPurposeAndSupportsEarlierRecords() passed after 0.011 seconds.
+✔ Test funnelBandDecodesAllCases() passed after 0.010 seconds.
+✔ Test memoryAnalyticsDecodes() passed after 0.011 seconds.
+✔ Test safetyEventKindDecodesBothCases() passed after 0.010 seconds.
+✔ Test daemonConnectionLabel() passed after 0.011 seconds.
+✔ Test createSessionRequestOmitsNilFields() passed after 0.010 seconds.
+✔ Test sessionStatsResponseDecodesWrappedByStatusMap() passed after 0.011 seconds.
+✔ Test modelsAnalyticsResponseDecodesUnknownModelRow() passed after 0.010 seconds.
+✔ Test legacyProviderAccountDecodesMissingFailoverPolicyAsNil() passed after 0.010 seconds.
+✔ Test actionAuditResponseDecodesNullCategoriesAndInvalidChain() passed after 0.010 seconds.
+✔ Test mapsPersistedFailureReasonAfterRefreshWithoutValidation() passed after 0.011 seconds.
+✔ Test validationStageDecodesAllCases() passed after 0.010 seconds.
+✔ Test qualityDeltaDirectionDecodesAllCases() passed after 0.010 seconds.
+✔ Test profileMapperMapsNilAdvisoryBrowserQa() passed after 0.011 seconds.
+✔ Test modelsAnalyticsResponseUsesDefaultKeyStrategy() passed after 0.011 seconds.
+✔ Test cliEntraAccessTokenRejectsCredentialsInsideRefreshBuffer() passed after 0.011 seconds.
+✔ Test safetyAnalyticsAuditChainAllNullDecodes() passed after 0.011 seconds.
+✔ Test daemonConnectionNormalizesBareLocalHostToHTTP() passed after 0.012 seconds.
+✔ Test qualityReasonsDecodesAllFields() passed after 0.010 seconds.
+✔ Test commandPaletteEmptyQueryIncludesCoreActions() passed after 0.018 seconds.
+✔ Test escalationsPerProfileSyntheticRowDecodes() passed after 0.010 seconds.
+✔ Test escalationsAnalyticsUsesDefaultJSONDecoderNoCamelConversion() passed after 0.011 seconds.
+✔ Test seriesReadinessRollupUsesMemberSnapshots() passed after 0.011 seconds.
+✔ Test askHumanTtrBucketLabelsDecodeByteForByte() passed after 0.011 seconds.
+✔ Test mapsRequestCredentialEscalationReason() passed after 0.011 seconds.
+✔ Test profilePatchIncludesTrueAdvisoryBrowserQa() passed after 0.010 seconds.
+✔ Test rerunTemplateSurvivesDurableDraftWithoutApprovalOrLineage() passed after 0.011 seconds.
+✔ Test nativeContractPreservesDeclaredExecutionRequirements() passed after 0.011 seconds.
+✔ Test qualityDistributionDecodes10Buckets() passed after 0.010 seconds.
+✔ Test mapperMapsAdvisoryQaWithoutAffectingValidationOutcome() passed after 0.010 seconds.
+✔ Test profileMapperPreservesExplicitCanonicalOpus47() passed after 0.010 seconds.
+✔ Test profileMapperMapsTrueAdvisoryBrowserQa() passed after 0.010 seconds.
+✔ Test ordersLegacyFallbackIdsByTimestamp() passed after 0.008 seconds.
+✔ Test ordersInterleavedPendingEventsByPersistedId() passed after 0.008 seconds.
+✔ Test appendsPendingEventsWithoutDuplicatingIds() passed after 0.008 seconds.
+✔ Test mapsArtifactCollectionRecoveryWithoutReworkAcrossCompactAndDetail() passed after 0.011 seconds.
+✔ Test mergesHistoricalAndLiveEventsByServerId() passed after 0.008 seconds.
+✔ Test reworkAndWorkerExecutionHaveDistinctLabels() passed after 0.008 seconds.
+✔ Test repeatedAttemptsUseImmutableHistoryIdentity() passed after 0.008 seconds.
+✔ Test mapsReworkCyclesSeparatelyFromWorkerExecution() passed after 0.010 seconds.
+✔ Test "Unknown parents are dropped rather than crashing" passed after 0.004 seconds.
+✔ Test "Linear chain: 4 pods in a row" passed after 0.004 seconds.
+✔ Test "Diamond: 1 -> {2, 3} -> 4" passed after 0.004 seconds.
+✔ Test "Fan-out: one parent, three children in a column" passed after 0.004 seconds.
+✔ Test "Fan-in: two parents, one merge child" passed after 0.004 seconds.
+✔ Test replayTruncationRequestsRestResync() passed after 0.003 seconds.
+✔ Test daemonAPIUsesDynamicTokenProviderForRequests() passed after 0.014 seconds.
+✔ Test selectedPiProviderIsTheOnlyCredentialPatched() passed after 0.010 seconds.
+✔ Suite "EventStreamDedupeTests" passed after 0.020 seconds.
+✔ Suite "ValidationHistoryIdentityTests" passed after 0.020 seconds.
+✔ Suite "EventSocket control messages" passed after 0.019 seconds.
+✔ Suite "PipelineDAGLayout" passed after 0.019 seconds.
+◇ Test selectedPiProviderCanPatchProviderAccountCredentials() started.
+✔ Test throughputAnalyticsResponseDecodesTruncatedCohort() passed after 0.020 seconds.
+✔ Test compactPodAPITraversesPagesWithoutDetailRequests() passed after 0.020 seconds.
+✔ Test retryClientPreservesUnknownExecutionAndSeparateAuthorization() passed after 0.019 seconds.
+✔ Test selectedPiProviderCanPatchProviderAccountCredentials() passed after 0.001 seconds.
+✔ Test decodesStatusWithDistinctAndUnknownStates() passed after 0.004 seconds.
+◇ Test malformedOrWrongPiProviderDoesNotPatch() started.
+◇ Test requestsConfigurationAndOperationsFromDaemon() started.
+✔ Test malformedOrWrongPiProviderDoesNotPatch() passed after 0.001 seconds.
+◇ Test cancellationWaitsForTerminalBeforeDeletingIsolatedCredentials() started.
+✔ Test scheduledScanClientPreservesIncompleteStatusAndExplicitHumanSelection() passed after 0.012 seconds.
+✔ Test requestsConfigurationAndOperationsFromDaemon() passed after 0.001 seconds.
+◇ Test decisionHistoryExposesOnlyRedactedAuditFields() started.
+✔ Test decisionHistoryExposesOnlyRedactedAuditFields() passed after 0.001 seconds.
+✔ Suite PodsitterAPITests passed after 0.022 seconds.
+✔ Test keychainRoundTrip() passed after 0.067 seconds.
+✔ Test cancellationWaitsForTerminalBeforeDeletingIsolatedCredentials() passed after 0.061 seconds.
+◇ Test cancellationMarkerSurvivesDelayedTerminalLaunch() started.
+✔ Test profileEditorAgentControlsDoNotWidenTheSheet() passed after 0.319 seconds.
+✔ Test switchDrillQualityToStatus() passed after 0.327 seconds.
+✔ Test analyticsRightPaneRoutesMemoryDrill() passed after 0.327 seconds.
+✔ Test profileListDeepLinkResolverUsesExactProfileName() passed after 0.327 seconds.
+✔ Test memoryWorkbenchGroupsPendingCandidatesByOrigin() passed after 0.327 seconds.
+✔ Test memoryWorkbenchSelectionFallsBackWhenCurrentItemIsNotVisible() passed after 0.327 seconds.
+✔ Test memoryWorkbenchFormatsScopeProvenanceLabels() passed after 0.327 seconds.
+✔ Test sessionProcessHealthMapsUnavailableReasonsToNeutralText() passed after 0.327 seconds.
+✔ Test profileEditorGeneralSectionDoesNotOverflowSheetWidth() passed after 0.415 seconds.
+✔ Test commandPaletteProfileSearchReturnsShowAndEditActions() passed after 0.423 seconds.
+✔ Test memoryWorkbenchShowsWarningStateForStaleOrHarmfulEvidence() passed after 0.423 seconds.
+✔ Test commandPalettePodSearchUsesMainViewFields() passed after 0.423 seconds.
+✔ Test browseRecentSearchUsesFullArchive() passed after 0.423 seconds.
+✔ Test memoryWorkbenchRejectsDetailPayloadForDifferentSelection() passed after 0.423 seconds.
+✔ Test analyticsSelectPodClearsCardAndNavigates() passed after 0.422 seconds.
+✔ Test memoryWorkbenchUsesPodOriginForApprovedMemoryGroups() passed after 0.423 seconds.
+✔ Test toggleOffStatusCard() passed after 0.421 seconds.
+✔ Test memoryWorkbenchMergesScopedActiveCacheWithApprovedEntries() passed after 0.422 seconds.
+✔ Test toggleOffMemoryCard() passed after 0.420 seconds.
+✔ Test browseRecentCapsArchiveButKeepsActionablePods() passed after 0.419 seconds.
+✔ Test memoryWorkbenchImpactCountsUsageOutcomes() passed after 0.419 seconds.
+✔ Test memoryWorkbenchPrefersCandidateSelectionThenKeepsValidSelection() passed after 0.419 seconds.
+✔ Test memoryStoreAppliesApprovedUpdateCandidateEventToCachedMemory() passed after 0.419 seconds.
+✔ Test browseRecentKeepsDirectlySelectedArchivedPod() passed after 0.418 seconds.
+✔ Test filterPodsReturnsEmptyForAnalytics() passed after 0.418 seconds.
+✔ Test memoryStoreRemovesNonPendingCandidateEvents() passed after 0.417 seconds.
+✔ Test unknownMemoryScopePreservesWireValue() passed after 0.418 seconds.
+✔ Test toggleOffCostCard() passed after 0.417 seconds.
+✔ Test memoryStoreHandlesLegacySuggestionEvent() passed after 0.417 seconds.
+✔ Test switchDrillStatusToCost() passed after 0.417 seconds.
+✔ Test browseArchiveShowsTheFullLoadedArchive() passed after 0.417 seconds.
+✔ Test podStoreRejectsAStaleReviewSnapshot() passed after 0.417 seconds.
+✔ Test analyticsSelectPodWithDifferentSessionId() passed after 0.417 seconds.
+✔ Test switchDrillCostToQuality() passed after 0.416 seconds.
+✔ Test memoryStoreHandlesCandidateCreatedAndUpdatesInPlace() passed after 0.417 seconds.
+✔ Test toggleOffQualityCard() passed after 0.416 seconds.
+✔ Test pollerStopsOnTerminalStatus() passed after 0.426 seconds.
+✔ Test pollerContinuesOnNonTerminalStatus() passed after 0.426 seconds.
+✔ Test pollerCapturesFetchError() passed after 0.425 seconds.
+✔ Test pollerFetchesOnStart() passed after 0.422 seconds.
+✔ Test pollerRestartIsClean() passed after 0.428 seconds.
+[PodStore] Failed to load pods: decodingError("DecodingError.typeMismatch: expected value of type Dictionary<String, Any>. Debug description: Expected to decode Dictionary<String, Any> but found an array instead.")
+✔ Test pollerClearsErrorOnSuccess() passed after 0.426 seconds.
+✔ Test replayTruncationReloadsSelectedPodLogs() passed after 0.415 seconds.
+✔ Suite "EventStreamResyncTests" passed after 0.428 seconds.
+✔ Test podStoreLoadsEveryCompactPageAndRemovesPodsMissingFromTheFleet() passed after 0.412 seconds.
+◇ Test podStoreKeepsPodInsertedWhileCompactRefreshIsInFlight() started.
+✔ Test pollerStopsOnStop() passed after 0.425 seconds.
+✔ Test podStoreKeepsPodInsertedWhileCompactRefreshIsInFlight() passed after 0.001 seconds.
+◇ Test podStoreKeepsVisibleFleetWhenCompactRefreshFails() started.
+[PodStore] Failed to load pods: networkError("The operation couldn’t be completed. (NSURLErrorDomain error -1004.)")
+✔ Test podStoreKeepsVisibleFleetWhenCompactRefreshFails() passed after 0.001 seconds.
+◇ Test podStoreHydratesSelectedSummaryOnlyOnce() started.
+✔ Test podStoreHydratesSelectedSummaryOnlyOnce() passed after 0.001 seconds.
+✔ Suite PodStoreFleetTests passed after 0.432 seconds.
+✔ Test cancellationMarkerSurvivesDelayedTerminalLaunch() passed after 2.257 seconds.
+✔ Suite ProfileAuthenticatorTests passed after 2.340 seconds.
+✔ Test run with 339 tests in 8 suites passed after 2.341 seconds.

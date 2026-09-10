@@ -1,4 +1,4 @@
-import type { PodQualityScore } from './pod.js';
+import type { CostEvidence, PodQualityScore } from './pod.js';
 
 export interface QualityAnalyticsResponse {
   /** High-level totals over the trailing window. */
@@ -35,6 +35,12 @@ export interface QualityAnalyticsResponse {
 }
 
 export interface CostAnalyticsResponse {
+  costEvidence?: CostEvidence;
+  telemetry?: {
+    completeness: 'recorded' | 'partial';
+    infrastructureCost: 'unavailable';
+    diagnostics: Array<{ podId: string; field: string; code: 'invalid_json' | 'invalid_shape' }>;
+  };
   /** Total effective cost over the trailing window. */
   total: number;
   /** Length always equals `days` from the query. */
@@ -52,6 +58,8 @@ export interface CostAnalyticsResponse {
   }>;
   /** Top 10 most expensive pods in the window. */
   top10: Array<{
+    /** True when the pod was deleted but its accounting was retained. */
+    historyArchived?: boolean;
     podId: string;
     profile: string;
     model: string | null;
@@ -181,6 +189,8 @@ export interface SafetyAnalyticsResponse {
 export type LoadBearingStatus = 'queued' | 'running' | 'validating' | 'awaiting_input';
 
 export interface ThroughputCohortPod {
+  /** Retained history; no live pod resource remains for navigation. */
+  historyArchived?: boolean;
   podId: string;
   profile: string;
   status: 'complete' | 'killed' | 'failed';
@@ -220,7 +230,7 @@ export interface ThroughputAnalyticsResponse {
     podsPerDaySparkline: Array<{ day: string; count: number }>;
     /** Signed difference in mean pods/day vs the immediately-prior window of the same length. */
     podsPerDayDelta: { value: number; direction: 'up' | 'down' | 'flat' };
-    /** Mean time-to-merge in seconds, restricted to status='complete' pods. 0 when none. */
+    /** Legacy wire name: mean created-to-completed elapsed seconds of complete pods, not merge timing. 0 when none. */
     mttmSeconds: number;
     /** Live point-in-time count: pods with status IN ('queued','provisioning'). Window-independent. */
     backlog: number;
@@ -341,7 +351,7 @@ export interface FailureStageCell {
   stage: ValidationStage;
   /** Distinct pods that ran this stage at least once over the trailing window. */
   podsRan: number;
-  /** Distinct pods whose most-recent run of this stage failed. */
+  /** Distinct pods with any executed failure of this stage; later passes do not erase failures. */
   podsFailed: number;
   /** = podsFailed / podsRan when podsRan > 0; else 0. In [0, 1]. */
   failureRate: number;
@@ -357,9 +367,14 @@ export interface FailureStageRow {
 export interface PerModelAggregate {
   /** Canonical model key. For the unknown bucket: literal '<unknown>'. */
   model: string;
-  /** Provider attempts attributed to this model; legacy pods contribute one compatibility row. */
+  /** Distinct terminal pods that used this model. Mixed-model pods participate in each model bucket. */
   podCount: number;
-  /** Attempt outcomes in provider/model views, not logical pod funnel outcomes. */
+  /** Immutable worker attempts; absent only from older daemon responses. Legacy pods do not invent attempts. */
+  providerAttemptCount?: number;
+  completedAttemptCount?: number;
+  /** Distinct recorded PR URLs for complete pods attributed to the final binding. */
+  deliveredPrCount?: number;
+  /** Actual complete pod outcomes, deduplicated within the model; not delivered PRs. */
   completeCount: number;
   killedCount: number;
   failedCount: number;
@@ -367,7 +382,7 @@ export interface PerModelAggregate {
   successRate: number;
   /** SUM(effectiveCostUsd) including killed/failed pods. Null when model === '<unknown>'. */
   totalCostUsd: number | null;
-  /** totalCostUsd / completeCount. Null when completeCount === 0 or model === '<unknown>'. */
+  /** totalCostUsd / deliveredPrCount. Null without recorded delivery or for '<unknown>'. */
   dollarPerPr: number | null;
   scoredCount: number;
   /** Mean process-health score. Legacy wire name retained for compatibility. */
@@ -384,8 +399,13 @@ export interface PerModelAggregate {
 
 export interface PerRuntimeAggregate {
   runtime: string;
-  /** Provider attempts attributed to this runtime; legacy pods contribute one compatibility row. */
+  /** Distinct terminal pods that used this runtime. */
   podCount: number;
+  /** Immutable worker attempts; absent only from older daemon responses. Legacy pods do not invent attempts. */
+  providerAttemptCount?: number;
+  completedAttemptCount?: number;
+  /** Distinct recorded PR URLs for complete pods attributed to the final binding. */
+  deliveredPrCount?: number;
   completeCount: number;
   killedCount: number;
   failedCount: number;

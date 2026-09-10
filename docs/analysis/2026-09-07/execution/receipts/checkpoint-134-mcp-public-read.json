@@ -1,0 +1,19 @@
+{
+  "at": "2026-09-10T09:15:36.111168+00:00",
+  "checks": [
+    {
+      "method": "initialize",
+      "status": 200,
+      "bodyLength": 196,
+      "summaryToolListed": false,
+      "rpcError": false
+    },
+    {
+      "method": "tools/list",
+      "status": 200,
+      "bodyLength": 18570,
+      "summaryToolListed": true,
+      "rpcError": false
+    }
+  ]
+}

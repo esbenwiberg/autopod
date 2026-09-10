@@ -1,0 +1,45 @@
+
+ RUN  v4.1.10 /private/tmp/autopod-durable-execution
+
+ ❯ packages/daemon/src/runtimes/codex-runtime.test.ts (67 tests | 1 failed) 1455ms
+       × skips prior records when the resumed rollout appears after launch 83ms
+ ❯ packages/daemon/src/pods/pod-manager.test.ts (402 tests | 1 failed) 69549ms
+       × starts a daemon host-port preview proxy for sandbox pods 89ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 2 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  packages/daemon/src/runtimes/codex-runtime.test.ts > CodexRuntime > resume > skips prior records when the resumed rollout appears after launch
+AssertionError: expected [ { type: 'complete', …(3) } ] to deeply equal [ ObjectContaining{…} ]
+
+- Expected
++ Received
+
+  [
+    {
+-     "result": "Current late completion.",
++     "costUsd": 0,
++     "result": "Previous late completion.",
++     "timestamp": "2026-07-16T08:00:00.000Z",
++     "type": "complete",
+    },
+  ]
+
+ ❯ packages/daemon/src/runtimes/codex-runtime.test.ts:2115:69
+    2113|         }
+    2114|
+    2115|         expect(events.filter((event) => event.type === 'complete')).to…
+       |                                                                     ^
+    2116|           expect.objectContaining({ result: 'Current late completion.'…
+    2117|         ]);
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/2]⎯
+
+ FAIL  packages/daemon/src/pods/pod-manager.test.ts > PodManager > triggerValidation — loud-fail on push > starts a daemon host-port preview proxy for sandbox pods
+Error: listen EPERM: operation not permitted 0.0.0.0:18579
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/2]⎯
+
+
+ Test Files  2 failed | 3 passed (5)
+      Tests  2 failed | 548 passed (550)
+   Start at  11:11:11
+   Duration  72.70s (transform 4.32s, setup 0ms, import 7.07s, tests 77.88s, environment 0ms)

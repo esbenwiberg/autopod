@@ -54,6 +54,149 @@ function containerManager(
   } as unknown as ContainerManager;
 }
 
+describe('reviewer launch ownership', () => {
+  it.each([30, 120])('keeps the Claude deadline after %sms streaming startup', async (delay) => {
+    vi.useFakeTimers({ toFake: ['performance', 'setTimeout', 'clearTimeout'] });
+    try {
+      const cm = containerManager();
+      const stdout = new PassThrough();
+      const stderr = new PassThrough();
+      let finish!: (code: number) => void;
+      const exitCode = new Promise<number>((resolve) => {
+        finish = resolve;
+      });
+      const kill = vi.fn(async () => {
+        stdout.end();
+        stderr.end();
+        finish(143);
+      });
+      vi.mocked(cm.execStreaming).mockImplementation(async () => {
+        await new Promise<void>((resolve) => setTimeout(resolve, delay));
+        return { stdout, stderr, exitCode, kill };
+      });
+      const pending = runContainerReviewer({
+        podId: 'pod',
+        containerId: 'container',
+        containerManager: cm,
+        profile: profile({}),
+        model: 'review-model',
+        prompt: 'review',
+        timeout: 100,
+        beforeLaunch: async () => () => {},
+      }).catch((error: unknown) => error);
+      await vi.advanceTimersByTimeAsync(Math.max(100, delay) + 1);
+      expect(kill).toHaveBeenCalledOnce();
+      expect(await pending).toMatchObject({ kind: 'timeout' });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('bounds a stalled remote kill request without claiming termination', async () => {
+    vi.useFakeTimers();
+    try {
+      const cm = containerManager();
+      const kill = vi.fn(() => new Promise<void>(() => {}));
+      vi.mocked(cm.execStreaming).mockResolvedValue({
+        stdout: new PassThrough(),
+        stderr: new PassThrough(),
+        exitCode: new Promise<number>(() => {}),
+        kill,
+      });
+      let result: unknown;
+      const pending = runContainerReviewer({
+        podId: 'pod',
+        containerId: 'container',
+        containerManager: cm,
+        profile: profile({}),
+        model: 'review-model',
+        prompt: 'review',
+        timeout: 100,
+      }).catch((error: unknown) => {
+        result = error;
+      });
+      await vi.advanceTimersByTimeAsync(10100);
+      expect(kill).toHaveBeenCalledOnce();
+      expect(result).toMatchObject({ kind: 'termination-failed' });
+      await pending;
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('bounds a stalled reviewer preflight and never launches it after timeout', async () => {
+    vi.useFakeTimers();
+    let release!: (guard: () => void) => void;
+    const cm = containerManager();
+    try {
+      const beforeLaunch = vi.fn(
+        () =>
+          new Promise<() => void>((resolve) => {
+            release = resolve;
+          }),
+      );
+      const pending = runContainerReviewer({
+        podId: 'pod',
+        containerId: 'container',
+        containerManager: cm,
+        profile: profile({}),
+        model: 'review-model',
+        prompt: 'review',
+        timeout: 25,
+        beforeLaunch,
+      });
+      let error: unknown;
+      void pending.catch((value) => {
+        error = value;
+      });
+      await vi.advanceTimersByTimeAsync(26);
+      expect(error).toMatchObject({ kind: 'timeout' });
+      release(() => {});
+      await expect(pending).rejects.toThrow(/preflight.*timed out/i);
+      expect(cm.execStreaming).not.toHaveBeenCalled();
+    } finally {
+      release?.(() => {});
+      vi.useRealTimers();
+    }
+  });
+
+  it.each(['probe-rejected', 'ownership-lost'] as const)(
+    'does not launch Claude after %s',
+    async (failure) => {
+      const cm = containerManager();
+      const beforeLaunch = vi.fn(async () => {
+        expect(cm.writeFile).toHaveBeenCalled();
+        if (failure === 'probe-rejected') throw new Error('review probe rejected');
+        return () => {
+          throw new Error('review ownership lost');
+        };
+      });
+      await expect(
+        runContainerReviewer({
+          podId: 'pod',
+          containerId: 'container',
+          containerManager: cm,
+          profile: profile({}),
+          model: 'review-model',
+          prompt: 'review',
+          timeout: 1000,
+          beforeLaunch,
+        }),
+      ).rejects.toThrow(/review probe rejected|review ownership lost/);
+      expect(beforeLaunch).toHaveBeenCalledWith({
+        podId: 'pod',
+        containerId: 'container',
+        runtime: 'claude',
+        model: 'review-model',
+      });
+      expect(cm.execStreaming).not.toHaveBeenCalled();
+      expect(vi.mocked(cm.execInContainer).mock.calls.every((call) => call[1][0] === 'rm')).toBe(
+        true,
+      );
+    },
+  );
+});
+
 describe('resolveContainerReviewer', () => {
   it('routes OpenAI-surface profiles to Codex and Anthropic-compatible profiles to Claude', () => {
     expect(resolveContainerReviewer(profile({ modelProvider: 'openai' }))).toBe('codex');
@@ -118,7 +261,10 @@ describe('runContainerReviewer', () => {
       exitCode: 0,
     });
 
+    const launchGuard = vi.fn();
+    const beforeLaunch = vi.fn(async () => launchGuard);
     const result = await runContainerReviewer({
+      beforeLaunch,
       podId: 'sess-1',
       containerId: 'container-abc',
       containerManager: cm,
@@ -130,6 +276,13 @@ describe('runContainerReviewer', () => {
     });
 
     expect(result.stdout).toBe('review output\n');
+    expect(beforeLaunch).toHaveBeenCalledWith({
+      podId: 'sess-1',
+      containerId: 'container-abc',
+      runtime: 'claude',
+      model: 'sonnet',
+    });
+    expect(launchGuard).toHaveBeenCalledTimes(1);
     expect(result.tokenUsage).toEqual({
       inputTokens: 7321,
       cachedInputTokens: 3000,

@@ -1,0 +1,123 @@
+{
+  "applicationCandidate": "15900d9e08a7e4ca786a6ad11ff81820fda14de4",
+  "method": "Direct CUA control of the actual locally built macOS app against loopback synthetic HTTP fixtures",
+  "scope": "Native operator interactions only; no hosted, provider, cloud or database-upgrade acceptance",
+  "screenshots": "Task-owned application window and sheet screenshots observed in this task conversation; no local screenshot files exported",
+  "cases": [
+    {
+      "case": "recorded delivery refresh",
+      "source": "f93dd4d9a66bcf0a4ad174d0efc378d931239faf",
+      "result": "pass",
+      "observed": [
+        "Initial PR disposition unavailable",
+        "After fresh cost fetch: 0 open, 1 merged, 0 closed, 0 unavailable",
+        "1 PR receipt and 1 unresolved of 2 intents retained",
+        "Current provider status unverified remains visible"
+      ]
+    },
+    {
+      "case": "restart ownership warning",
+      "source": "f93dd4d9a66bcf0a4ad174d0efc378d931239faf",
+      "result": "pass",
+      "observed": [
+        "Running task retains source branch",
+        "Recovery paused; original execution/resource identity and observed termination required",
+        "Restart or elapsed time is not proof"
+      ]
+    },
+    {
+      "case": "unavailable reviewer reason with retained finding",
+      "source": "15900d9e08a7e4ca786a6ad11ff81820fda14de4",
+      "result": "pass after product correction",
+      "observed": [
+        "Old app hid provider binding reason when retained finding existed",
+        "Regression test failed before fix",
+        "Corrected app shows Foundry tool review unavailable on selected provider binding and reconcile before retry",
+        "Retained initial finding remains visible"
+      ]
+    },
+    {
+      "case": "approval preservation and retry",
+      "source": "15900d9e08a7e4ca786a6ad11ff81820fda14de4",
+      "result": "pass",
+      "observed": [
+        "Ready review permits approval",
+        "First request returns HTTP 502; actionable preservation error displayed",
+        "Task remains validated and approval remains available",
+        "Second request succeeds; refresh shows complete on local-preserved-branch",
+        "No PR delivery claimed"
+      ]
+    },
+    {
+      "case": "scan policy save and retained report navigation",
+      "source": "15900d9e08a7e4ca786a6ad11ff81820fda14de4",
+      "result": "pass",
+      "observed": [
+        "Save main to main rolling 24 hours, secrets only, no judgment",
+        "Schedule remains disabled",
+        "Older report selection retains main to work, incomplete and unresolved findings",
+        "Quit/relaunch without resetting server retains saved policy and disabled schedule",
+        "Report data remains unchanged by editing current policy"
+      ],
+      "limits": "Native reload from in-memory synthetic server; not a server restart or disk persistence proof"
+    }
+  ],
+  "fixtureActionReceipts": [
+    {
+      "scope": "local fixture only",
+      "action": "read-delivery-disposition",
+      "request": 1
+    },
+    {
+      "scope": "local fixture only",
+      "action": "read-delivery-disposition",
+      "request": 2
+    },
+    {
+      "scope": "local fixture only",
+      "action": "approve-preserved-branch",
+      "attempt": 1
+    },
+    {
+      "path": "/pods/local-fixture/approve",
+      "status": 502
+    },
+    {
+      "scope": "local fixture only",
+      "action": "approve-preserved-branch",
+      "attempt": 2
+    },
+    {
+      "path": "/pods/local-fixture/approve",
+      "status": 200
+    },
+    {
+      "scope": "local fixture only",
+      "action": "save-scan-policy",
+      "scan": {
+        "baseRef": "main",
+        "judgment": "none",
+        "headRef": "main",
+        "scanners": ["secrets"],
+        "windowHours": 24,
+        "version": 1
+      },
+      "enabled": false
+    }
+  ],
+  "supplementalXCTest": {
+    "result": "unverified",
+    "reason": "Timed out while enabling automation mode; zero acceptance cases executed",
+    "fallback": "Direct supported CUA app interactions above completed after the usage limit cleared"
+  },
+  "remaining": [
+    "Worker binding reconciliation",
+    "Guidance acknowledgement presentation",
+    "Historical waiver",
+    "Recorded closed disposition",
+    "Empty delta report",
+    "Retained fleet navigation",
+    "Populated execution provenance",
+    "External acceptance gates in release packet"
+  ]
+}

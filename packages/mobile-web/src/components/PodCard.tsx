@@ -31,6 +31,15 @@ export function PodCard({ pod }: Props): JSX.Element {
         <span className="pod-card-id">{shortId(pod.id)}</span>
         <StatusChip status={pod.status} />
       </div>
+      {pod.recordDiagnostics?.length ? (
+        <div role="alert" className="error">
+          Saved evidence unavailable in this view:{' '}
+          {pod.recordDiagnostics.map((d) => `${d.field} (${d.code})`).join(', ')}
+        </div>
+      ) : null}
+      {pod.finalization?.pendingDecisionId && pod.finalization.agentSettledAt ? (
+        <div className="pod-card-preview">Agent settled; human decision still pending.</div>
+      ) : null}
       <div className="pod-card-task">{taskTitle(pod.task)}</div>
       {preview ? <div className="pod-card-preview">{preview}</div> : null}
       <div className="pod-card-signals">

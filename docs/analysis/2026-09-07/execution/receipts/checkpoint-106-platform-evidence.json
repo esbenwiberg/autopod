@@ -1,0 +1,19 @@
+{
+  "candidate": "90a61141a6a8ed6205aae144bbb99f8c9f0f9ec5",
+  "priorReceipt": "linux-process-18e5bd37.txt",
+  "priorSource": "18e5bd37c2421c9768d105eff6863ad067bf7c1a",
+  "scope": "Exact Linux termination function and regression callback remain byte-identical; prior extracted Linux execution receipt is retained. Full Vitest suite still skips this one case on macOS.",
+  "unchanged": true,
+  "rows": [
+    {
+      "path": "packages/daemon/src/containers/docker-container-manager.ts",
+      "prior": "2ec2fae3ba8e3278b26b48a13108bf55b5efbf35f53fc29276931f2f3214d91a",
+      "candidate": "2ec2fae3ba8e3278b26b48a13108bf55b5efbf35f53fc29276931f2f3214d91a"
+    },
+    {
+      "path": "packages/daemon/src/containers/docker-container-manager.test.ts",
+      "prior": "6940e339bb7881b242d5548eab1232e0d4cc4a7c4ade5eb1c6686084e35bc71a",
+      "candidate": "6940e339bb7881b242d5548eab1232e0d4cc4a7c4ade5eb1c6686084e35bc71a"
+    }
+  ]
+}

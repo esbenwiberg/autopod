@@ -89,6 +89,43 @@ public final class ActionHandler {
       },
       spawnFix: { [weak self] id, message in await self?.spawnFixSession(id, userMessage: message) ?? nil },
       retryCreatePr: { [weak self] id in await self?.retryCreatePr(id) },
+      retryDraftScope: api.baseURL.absoluteString,
+      loadExecutionProvenance: { [weak self] id in
+        guard let self else { throw URLError(.notConnectedToInternet) }
+        return try await self.api.getExecutionProvenance(id)
+      },
+      loadDispatchPreflight: { [weak self] id in
+        guard let self else { throw URLError(.notConnectedToInternet) }
+        return try await self.api.getDispatchPreflight(id)
+      },
+      loadRerunTemplate: { [weak self] id in
+        guard let self else { throw URLError(.notConnectedToInternet) }
+        return try await self.api.getRerunTemplate(id)
+      },
+      createIntentionalRerun: { [weak self] request in
+        guard let self else { throw URLError(.notConnectedToInternet) }
+        let response = try await self.api.createIntentionalRerun(request)
+        self.podStore.upsertSession(PodMapper.map(response))
+        return response.id
+      },
+      loadRetryState: { [weak self] id, stage in
+        guard let self else { throw URLError(.notConnectedToInternet) }
+        return try await self.api.getRetryState(id, stage: stage)
+      },
+      authorizeRetry: { [weak self] id, input in
+        guard let self else { throw URLError(.notConnectedToInternet) }
+        return try await self.api.authorizeRetry(id, request: input)
+      },
+      reworkRetry: { [weak self] id in
+        guard let self else { throw URLError(.notConnectedToInternet) }
+        try await self.api.triggerValidation(id)
+        await self.podStore.refreshSession(id)
+      },
+      resumeRetry: { [weak self] id in
+        guard let self else { throw URLError(.notConnectedToInternet) }
+        _ = try await self.api.resumePod(id)
+        await self.podStore.refreshSession(id)
+      },
       resume: { [weak self] id in await self?.resume(id) },
       recoverWorktree: { [weak self] id in await self?.recoverWorktree(id) ?? nil },
       forceComplete: { [weak self] id, reason in await self?.forceComplete(id, reason: reason) },
@@ -155,10 +192,11 @@ public final class ActionHandler {
 
   public func reply(_ podId: String, message: String) async {
     pendingAction = "reply-\(podId)"
-    podStore.setEscalation(podId, question: nil)
-    podStore.updateStatus(podId, to: .running)
     do {
       try await api.sendMessage(podId, message: message)
+      // A reply may leave another decision pending or advance into validation.
+      // Keep the observed state until the daemon confirms its actual disposition.
+      await podStore.refreshSession(podId)
     } catch {
       lastError = error.localizedDescription
     }
@@ -578,6 +616,8 @@ public final class ActionHandler {
   public func approveFactWaiver(_ podId: String, factId: String, reason: String?) async {
     do {
       try await api.approveFactWaiver(podId: podId, factId: factId, reason: reason)
+      let response = try await api.getPod(podId)
+      podStore.upsertSession(PodMapper.map(response))
     } catch {
       lastError = error.localizedDescription
     }

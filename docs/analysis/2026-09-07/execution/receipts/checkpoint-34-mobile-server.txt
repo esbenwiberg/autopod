@@ -1,0 +1,3 @@
+http://127.0.0.1:56013/mobile/
+{"scope":"local fixture only","action":"read-delivery-disposition","request":1}
+{"scope":"local fixture only","action":"read-delivery-disposition","request":2}

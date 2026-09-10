@@ -1,0 +1,36 @@
+
+ RUN  v4.1.11 /private/tmp/autopod-durable-execution/packages/mobile-web
+
+ ❯ src/lib/api.test.ts (9 tests | 1 failed) 11ms
+     × shows the daemon error message and preserves the HTTP status 4ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/lib/api.test.ts > apiFetch > shows the daemon error message and preserves the HTTP status
+AssertionError: expected ApiError: {"error":"ARTIFACT_PRESERVATION… { status: … } to match object { status: 502, …(1) }
+(1 matching property omitted from actual)
+
+- Expected
++ Received
+
+- {
+-   "message": "Artifact preservation failed. Original container retained.",
++ ApiError {
+    "status": 502,
+  }
+
+ ❯ src/lib/api.test.ts:73:64
+     71|     );
+     72|
+     73|     await expect(apiFetch('/pods/x/resume', { method: 'POST' })).rejec…
+       |                                                                ^
+     74|       status: 502,
+     75|       message: 'Artifact preservation failed. Original container retai…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 8 passed (9)
+   Start at  18:15:12
+   Duration  426ms (transform 21ms, setup 14ms, import 16ms, tests 11ms, environment 276ms)

@@ -1,0 +1,43 @@
+
+ RUN  v4.1.11 /private/tmp/autopod-durable-execution/packages/daemon
+
+ ❯ src/pods/pod-manager.test.ts (558 tests | 1 failed | 555 skipped) 261ms
+       × advisory completion preserves validation evidence attached while QA is running 129ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/pods/pod-manager.test.ts > PodManager > triggerValidation > advisory completion preserves validation evidence attached while QA is running
+AssertionError: expected { podId: 'test', attempt: 1, …(7) } to deeply equal { podId: 'test', attempt: 1, …(8) }
+
+- Expected
++ Received
+
+@@ -8,11 +8,10 @@
+    },
+    "attempt": 1,
+    "duration": 5000,
+    "overall": "pass",
+    "podId": "test",
+-   "reviewSkipReason": "Retained independent evidence marker",
+    "smoke": {
+      "build": {
+        "duration": 100,
+        "output": "",
+        "status": "pass",
+
+ ❯ src/pods/pod-manager.test.ts:11618:60
+    11616|       await manager.triggerValidation(pod.id);
+    11617|       expect(retained).toBeDefined();
+    11618|       expect(ctx.validationRepo.getLatest(pod.id)?.result).toEqual({ .…
+       |                                                            ^
+    11619|       expect(ctx.validationRepo.getForSession(pod.id)).toHaveLength(1);
+    11620|     });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 2 passed | 555 skipped (558)
+   Start at  09:47:10
+   Duration  2.46s (transform 1.36s, setup 0ms, import 1.97s, tests 261ms, environment 0ms)
+

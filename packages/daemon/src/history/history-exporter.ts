@@ -4,16 +4,18 @@ import type {
   HistoryExportStats,
   HistoryQuery,
   Pod,
-  PodStatus,
   ValidationResult,
 } from '@autopod/shared';
 import Database from 'better-sqlite3';
 import type { ActionAuditRepository } from '../actions/audit-repository.js';
+import { atomicPodChange } from '../db/unit-of-work.js';
 import type { EscalationRepository } from '../pods/escalation-repository.js';
 import type { EventRepository } from '../pods/event-repository.js';
 import type { PodRepository } from '../pods/pod-repository.js';
 import type { ProgressEventRepository } from '../pods/progress-event-repository.js';
 import type { ValidationRepository } from '../pods/validation-repository.js';
+import { isHistoryObject, isHistoryValidation } from './history-record-shapes.js';
+import type { HistoryDiagnosticSink } from './retained-history-read.js';
 
 export interface HistoryExportResult {
   dbBuffer: Buffer;
@@ -140,46 +142,31 @@ function truncate(str: string, max: number): string {
 export function createHistoryExporter(deps: ExporterDeps) {
   return {
     export(query: HistoryQuery): HistoryExportResult {
-      // 1. Fetch pods with filters
-      const allSessions = deps.podRepo.list({
-        profileName: query.profileName,
-        status: query.failuresOnly ? ('failed' as PodStatus) : undefined,
-      });
+      return atomicPodChange(deps.podRepo, () => {
+        // Bound the selected cohort in SQLite before materializing historical rows.
+        const limit = Number.isFinite(query.limit)
+          ? Math.min(1000, Math.max(1, Math.floor(query.limit as number)))
+          : 100;
+        const list =
+          deps.podRepo.listForHistory?.bind(deps.podRepo) ?? deps.podRepo.list.bind(deps.podRepo);
+        const pods = list({
+          profileName: query.profileName,
+          status: query.failuresOnly ? ['failed', 'killed', 'review_required'] : undefined,
+          since: query.since,
+          limit,
+        });
 
-      let pods = allSessions;
+        // 2. Create in-memory history DB
+        const historyDb = new Database(':memory:');
+        historyDb.exec(HISTORY_DB_SCHEMA);
+        historyDb.exec(
+          'CREATE TABLE record_diagnostics(pod_id TEXT NOT NULL, field TEXT NOT NULL, code TEXT NOT NULL)',
+        );
+        const insertDiagnostic = historyDb.prepare(
+          'INSERT INTO record_diagnostics(pod_id,field,code) VALUES (?,?,?)',
+        );
 
-      // Apply 'since' filter
-      if (query.since) {
-        const sinceDate = new Date(query.since).getTime();
-        pods = pods.filter((s) => new Date(s.createdAt).getTime() >= sinceDate);
-      }
-
-      // Also include killed and review_required pods when filtering failures
-      if (query.failuresOnly) {
-        const additionalStatuses: PodStatus[] = ['killed', 'review_required'];
-        for (const status of additionalStatuses) {
-          const extra = deps.podRepo
-            .list({
-              profileName: query.profileName,
-              status,
-            })
-            .filter(
-              (s) =>
-                !query.since || new Date(s.createdAt).getTime() >= new Date(query.since).getTime(),
-            );
-          pods = [...pods, ...extra];
-        }
-      }
-
-      // Apply limit
-      const limit = query.limit ?? 100;
-      pods = pods.slice(0, limit);
-
-      // 2. Create in-memory history DB
-      const historyDb = new Database(':memory:');
-      historyDb.exec(HISTORY_DB_SCHEMA);
-
-      const insertSession = historyDb.prepare(`
+        const insertSession = historyDb.prepare(`
         INSERT INTO pods (id, profile_name, task, status, model, runtime,
           validation_attempts, max_validation_attempts, rework_reason,
           input_tokens, output_tokens, cost_usd,
@@ -194,138 +181,186 @@ export function createHistoryExporter(deps: ExporterDeps) {
           @createdAt, @startedAt, @completedAt)
       `);
 
-      const insertValidation = historyDb.prepare(`
+        const insertValidation = historyDb.prepare(`
         INSERT INTO validations (pod_id, attempt, overall, failed_phases, build_error,
           review_issues, review_reasoning, created_at)
         VALUES (@podId, @attempt, @overall, @failedPhases, @buildError,
           @reviewIssues, @reviewReasoning, @createdAt)
       `);
 
-      const insertEscalation = historyDb.prepare(`
+        const insertEscalation = historyDb.prepare(`
         INSERT INTO escalations (pod_id, type, question, response, created_at, resolved_at)
         VALUES (@podId, @type, @question, @response, @createdAt, @resolvedAt)
       `);
 
-      const insertError = historyDb.prepare(`
+        const insertError = historyDb.prepare(`
         INSERT INTO errors (pod_id, message, fatal, timestamp)
         VALUES (@podId, @message, @fatal, @timestamp)
       `);
 
-      const insertProgress = historyDb.prepare(`
+        const insertProgress = historyDb.prepare(`
         INSERT INTO progress_events (pod_id, phase, description, current_phase, total_phases, created_at)
         VALUES (@podId, @phase, @description, @currentPhase, @totalPhases, @createdAt)
       `);
 
-      // 3. Populate history DB
-      for (const pod of pods) {
-        insertSession.run({
-          id: pod.id,
-          profileName: pod.profileName,
-          task: truncate(pod.task, 500),
-          status: pod.status,
-          model: pod.model,
-          runtime: pod.runtime,
-          validationAttempts: pod.validationAttempts,
-          maxValidationAttempts: pod.maxValidationAttempts,
-          reworkReason: pod.reworkReason,
-          inputTokens: pod.inputTokens,
-          outputTokens: pod.outputTokens,
-          costUsd: pod.costUsd,
-          filesChanged: pod.filesChanged,
-          linesAdded: pod.linesAdded,
-          linesRemoved: pod.linesRemoved,
-          durationSeconds: computeDurationSeconds(pod),
-          plan: pod.plan ? JSON.stringify(pod.plan) : null,
-          taskSummary: pod.taskSummary ? JSON.stringify(pod.taskSummary) : null,
-          escalationCount: pod.escalationCount,
-          commitCount: pod.commitCount,
-          createdAt: pod.createdAt,
-          startedAt: pod.startedAt,
-          completedAt: pod.completedAt,
-        });
-
-        // Validations
-        const validations = deps.validationRepo.getForSession(pod.id);
-        for (const v of validations) {
-          const failedPhases = extractFailedPhases(v.result);
-          insertValidation.run({
-            podId: pod.id,
-            attempt: v.attempt,
-            overall: v.result.overall,
-            failedPhases: failedPhases.length > 0 ? failedPhases.join(', ') : null,
-            buildError: extractBuildError(v.result),
-            reviewIssues: extractReviewIssues(v.result)
-              ? JSON.stringify(extractReviewIssues(v.result))
-              : null,
-            reviewReasoning: v.result.taskReview?.reasoning
-              ? truncate(v.result.taskReview.reasoning, 1000)
-              : null,
-            createdAt: v.createdAt,
+        // 3. Populate history DB
+        const historyBudget = { remainingBytes: 16 * 1024 * 1024, remainingRows: 10000 };
+        for (const pod of pods) {
+          const diagnostic: HistoryDiagnosticSink = (field, code) => {
+            insertDiagnostic.run(pod.id, field, code);
+          };
+          diagnostic.budget = historyBudget;
+          for (const diagnostic of pod.recordDiagnostics ?? [])
+            insertDiagnostic.run(pod.id, diagnostic.field, diagnostic.code);
+          insertSession.run({
+            id: pod.id,
+            profileName: pod.profileName,
+            task: truncate(pod.task, 500),
+            status: pod.status,
+            model: pod.model,
+            runtime: pod.runtime,
+            validationAttempts: pod.validationAttempts,
+            maxValidationAttempts: pod.maxValidationAttempts,
+            reworkReason: pod.reworkReason,
+            inputTokens: pod.inputTokens,
+            outputTokens: pod.outputTokens,
+            costUsd: pod.costUsd,
+            filesChanged: pod.filesChanged,
+            linesAdded: pod.linesAdded,
+            linesRemoved: pod.linesRemoved,
+            durationSeconds: computeDurationSeconds(pod),
+            plan: pod.plan ? JSON.stringify(pod.plan) : null,
+            taskSummary: pod.taskSummary ? JSON.stringify(pod.taskSummary) : null,
+            escalationCount: pod.escalationCount,
+            commitCount: pod.commitCount,
+            createdAt: pod.createdAt,
+            startedAt: pod.startedAt,
+            completedAt: pod.completedAt,
           });
-        }
 
-        // Escalations
-        const escalations = deps.escalationRepo.listBySession(pod.id);
-        for (const esc of escalations) {
-          const question =
-            'question' in esc.payload
-              ? (esc.payload as { question: string }).question
-              : 'description' in esc.payload
-                ? (esc.payload as { description: string }).description
-                : '';
-          insertEscalation.run({
-            podId: pod.id,
-            type: esc.type,
-            question: truncate(question, 500),
-            response: esc.response ? truncate(JSON.stringify(esc.response), 500) : null,
-            createdAt: esc.createdAt,
-            resolvedAt: esc.resolvedAt,
-          });
-        }
-
-        // Errors (from event stream)
-        const events = deps.eventRepo.getForSession(pod.id);
-        for (const evt of events) {
-          if (evt.type === 'pod.agent_activity') {
-            const activityEvent = evt.payload as AgentActivityEvent;
-            if (activityEvent.event.type === 'error') {
-              const errorEvent = activityEvent.event as AgentErrorEvent;
-              insertError.run({
-                podId: pod.id,
-                message: truncate(errorEvent.message, 500),
-                fatal: errorEvent.fatal ? 1 : 0,
-                timestamp: errorEvent.timestamp,
-              });
+          // Validations
+          const validations = deps.validationRepo.getForSession(pod.id, true, diagnostic);
+          for (const v of validations) {
+            if (!isHistoryValidation(v.result)) {
+              diagnostic(`validations:${v.id.slice(0, 100)}`, 'invalid_shape');
+              continue;
             }
+            const failedPhases = extractFailedPhases(v.result);
+            insertValidation.run({
+              podId: pod.id,
+              attempt: v.attempt,
+              overall: v.result.overall,
+              failedPhases: failedPhases.length > 0 ? failedPhases.join(', ') : null,
+              buildError: extractBuildError(v.result),
+              reviewIssues: extractReviewIssues(v.result)
+                ? JSON.stringify(extractReviewIssues(v.result))
+                : null,
+              reviewReasoning: v.result.taskReview?.reasoning
+                ? truncate(v.result.taskReview.reasoning, 1000)
+                : null,
+              createdAt: v.createdAt,
+            });
+          }
+
+          // Escalations
+          const escalations = deps.escalationRepo.listBySession(pod.id, true, diagnostic);
+          for (const esc of escalations) {
+            if (!isHistoryObject(esc.payload)) {
+              diagnostic('escalations', 'invalid_shape');
+              continue;
+            }
+            const question =
+              'question' in esc.payload
+                ? (esc.payload as { question: string }).question
+                : 'description' in esc.payload
+                  ? (esc.payload as { description: string }).description
+                  : '';
+            if (typeof question !== 'string') {
+              diagnostic('escalations', 'invalid_shape');
+              continue;
+            }
+            insertEscalation.run({
+              podId: pod.id,
+              type: esc.type,
+              question: truncate(question, 500),
+              response: esc.response ? truncate(JSON.stringify(esc.response), 500) : null,
+              createdAt: esc.createdAt,
+              resolvedAt: esc.resolvedAt,
+            });
+          }
+
+          // Errors (from event stream)
+          const events = deps.eventRepo.getForSession(pod.id, {
+            includeRetained: true,
+            diagnostic,
+          });
+          for (const evt of events) {
+            if (evt.type === 'pod.agent_activity') {
+              if (!isHistoryObject(evt.payload) || !isHistoryObject(evt.payload.event)) {
+                diagnostic('events', 'invalid_shape');
+                continue;
+              }
+              const activityEvent = evt.payload as unknown as AgentActivityEvent;
+              if (activityEvent.event.type === 'error') {
+                const errorEvent = activityEvent.event as AgentErrorEvent;
+                if (
+                  typeof errorEvent.message !== 'string' ||
+                  typeof errorEvent.timestamp !== 'string'
+                ) {
+                  diagnostic('events', 'invalid_shape');
+                  continue;
+                }
+                insertError.run({
+                  podId: pod.id,
+                  message: truncate(errorEvent.message, 500),
+                  fatal: errorEvent.fatal ? 1 : 0,
+                  timestamp: errorEvent.timestamp,
+                });
+              }
+            }
+          }
+
+          // Progress events
+          const progressEvents = deps.progressEventRepo.listBySession(pod.id, true, diagnostic);
+          for (const pe of progressEvents) {
+            if (
+              typeof pe.description !== 'string' ||
+              typeof pe.phase !== 'string' ||
+              !Number.isFinite(pe.currentPhase) ||
+              !Number.isFinite(pe.totalPhases)
+            ) {
+              diagnostic('session_progress_events', 'invalid_shape');
+              continue;
+            }
+            insertProgress.run({
+              podId: pod.id,
+              phase: pe.phase,
+              description: truncate(pe.description, 300),
+              currentPhase: pe.currentPhase,
+              totalPhases: pe.totalPhases,
+              createdAt: pe.createdAt,
+            });
           }
         }
 
-        // Progress events
-        const progressEvents = deps.progressEventRepo.listBySession(pod.id);
-        for (const pe of progressEvents) {
-          insertProgress.run({
-            podId: pod.id,
-            phase: pe.phase,
-            description: truncate(pe.description, 300),
-            currentPhase: pe.currentPhase,
-            totalPhases: pe.totalPhases,
-            createdAt: pe.createdAt,
-          });
-        }
-      }
+        // 4. Compute stats
+        const stats = computeStats(pods);
 
-      // 4. Compute stats
-      const stats = computeStats(pods);
+        // 5. Serialize the in-memory DB to a buffer
+        const diagnosticCount = (
+          historyDb.prepare('SELECT COUNT(*) AS count FROM record_diagnostics').get() as {
+            count: number;
+          }
+        ).count;
+        const dbBuffer = Buffer.from(historyDb.serialize());
+        historyDb.close();
 
-      // 5. Serialize the in-memory DB to a buffer
-      const dbBuffer = Buffer.from(historyDb.serialize());
-      historyDb.close();
+        // 6. Generate summary + analysis guide
+        const summary = `${generateSummary(pods, stats)}\nEvidence diagnostics: ${diagnosticCount}. Inspect record_diagnostics for unavailable saved records. Missing evidence is not a pass.\n`;
+        const analysisGuide = generateAnalysisGuide();
 
-      // 6. Generate summary + analysis guide
-      const summary = generateSummary(pods, stats);
-      const analysisGuide = generateAnalysisGuide();
-
-      return { dbBuffer, summary, analysisGuide, stats };
+        return { dbBuffer, summary, analysisGuide, stats };
+      });
     },
   };
 }
@@ -371,17 +406,17 @@ function generateSummary(pods: Pod[], stats: HistoryExportStats): string {
   for (const [name, p] of profiles) {
     const avgVal = p.total > 0 ? (p.valAttempts / p.total).toFixed(1) : '0';
     const rate = p.total > 0 ? ((p.failed / p.total) * 100).toFixed(0) : '0';
-    profileSection += `- **${name}**: ${p.total} pods, ${p.failed} failed (${rate}%), avg ${avgVal} validation attempts, $${p.cost.toFixed(2)} total cost\n`;
+    profileSection += `- **${name}**: ${p.total} pods, ${p.failed} failed (${rate}%), avg ${avgVal} validation attempts, $${p.cost.toFixed(2)} stored cost subtotal (billing unverified)\n`;
   }
 
   return `# Pod History Summary
 
 ## Overview
 - **Total pods**: ${stats.totalSessions}
-- **Completed**: ${completeCount}
+- **Completed pod status**: ${completeCount}
 - **Failed/Killed**: ${failedCount}
 - **Failure rate**: ${failureRate}%
-- **Total cost**: $${stats.totalCost.toFixed(2)}
+- **Stored cost subtotal (billing unverified)**: $${stats.totalCost.toFixed(2)}
 
 ## By Profile
 ${profileSection || '- No profiles found'}
@@ -407,7 +442,7 @@ function generateAnalysisGuide(): string {
 ## Database Schema
 
 ### pods
-Core pod data — one row per pod run.
+Core pod data — one row per selected live or retained deleted pod. This is a pod cohort, not a count of delivered PRs.
 | Column | Type | Description |
 |--------|------|-------------|
 | id | TEXT | Pod ID |
@@ -421,7 +456,7 @@ Core pod data — one row per pod run.
 | rework_reason | TEXT | Why agent was asked to rework (null if N/A) |
 | input_tokens | INT | Input tokens consumed |
 | output_tokens | INT | Output tokens consumed |
-| cost_usd | REAL | Total cost in USD |
+| cost_usd | REAL | Stored cost subtotal in USD; billing and missing measurements remain unverified |
 | files_changed | INT | Number of files modified |
 | lines_added | INT | Lines added |
 | lines_removed | INT | Lines removed |
@@ -472,6 +507,9 @@ Agent-reported phase transitions.
 | description | TEXT | What the agent is doing |
 | current_phase | INT | Current phase number |
 | total_phases | INT | Total phases planned |
+
+### record_diagnostics
+Per-pod field/code entries identify unavailable or oversized saved fields. Omitted evidence is not a pass.
 
 ## Example Queries
 

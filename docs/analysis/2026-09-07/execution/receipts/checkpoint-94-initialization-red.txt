@@ -1,0 +1,44 @@
+
+ RUN  v4.1.11 /private/tmp/autopod-durable-execution/packages/daemon
+
+ ❯ src/pods/pod-manager.test.ts (617 tests | 1 failed | 616 skipped) 111ms
+     × retains the worker auth guard after committed initialization fails before iterator entry 109ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/pods/pod-manager.test.ts > PodManager > retains the worker auth guard after committed initialization fails before iterator entry
+AssertionError: expected { …(11) } to match object { admissionCount: 2, …(3) }
+(22 matching properties omitted from actual)
+
+- Expected
++ Received
+
+  {
+    "admissionCount": 2,
+-   "authorizationRequired": true,
+-   "executedCount": 1,
++   "executedCount": 2,
+    "latest": {
+      "measuredDurationMs": null,
+      "outcome": "unknown",
+-     "startedAt": null,
++     "startedAt": "2026-09-08T17:25:36.458Z",
+    },
+  }
+
+ ❯ src/pods/pod-manager.test.ts:3135:34
+    3133|     await expect(manager.consumeAgentEvents(pod.id, stream())).rejects…
+    3134|     expect(pulls).toBe(0);
+    3135|     expect(ledger.state(pod.id)).toMatchObject({ admissionCount: 2, ex…
+       |                                  ^
+    3136|       authorizationRequired: true, latest: { outcome: 'unknown', start…
+    3137|     const consumed = ledger.state(pod.id).authorizations.find((a) => a…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 616 skipped (617)
+   Start at  19:25:34
+   Duration  2.28s (transform 1.37s, setup 0ms, import 1.97s, tests 111ms, environment 0ms)
+

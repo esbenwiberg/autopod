@@ -44,8 +44,8 @@ function makeBridge(overrides: Partial<PodBridge> = {}): PodBridge {
     reportPlan: vi.fn(),
     reportProgress: vi.fn(),
     reportTaskSummary: vi.fn(),
-    consumeMessages: vi.fn().mockReturnValue({ hasMessage: false }),
-    consumeMessageBatch: vi.fn().mockReturnValue([]),
+    readOperatorGuidance: vi.fn().mockReturnValue(null),
+    acknowledgeOperatorGuidance: vi.fn(),
     actionRequiresApproval: vi.fn().mockReturnValue(false),
     executeAction: vi.fn(),
     getAvailableActions: vi.fn().mockReturnValue([]),
@@ -275,7 +275,10 @@ describe('operator-message interlock', () => {
     ]) {
       toolRegistrations.length = 0;
       const bridge = makeBridge({
-        consumeMessageBatch: vi.fn().mockReturnValue(['first', 'second']),
+        readOperatorGuidance: vi.fn().mockReturnValue({
+          deliveryId: '00000000-0000-4000-8000-000000000001',
+          messages: ['first', 'second'],
+        }),
       });
       createEscalationMcpServer({ podId: 'sess-1', bridge });
       const inputs: Record<string, unknown> = {

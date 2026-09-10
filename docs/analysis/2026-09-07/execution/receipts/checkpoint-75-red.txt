@@ -1,0 +1,81 @@
+
+ RUN  v4.1.11 /private/tmp/autopod-durable-execution/packages/daemon
+
+ ❯ src/scheduled-jobs/scan-report-repository.test.ts (20 tests | 4 failed | 15 skipped) 247ms
+     × keeps a malformed report policy readable without granting action authority 71ms
+     × keeps a malformed report collection readable without granting action authority 45ms
+     × keeps a malformed report judgment readable without granting action authority 44ms
+     × does not widen a missing report collection into another repository in the same job 44ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 4 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/scheduled-jobs/scan-report-repository.test.ts > scheduled scan reports independent of worker lifetime > keeps a malformed report policy readable without granting action authority
+SyntaxError: Expected property name or '}' in JSON at position 1 (line 1 column 2)
+ ❯ get src/scheduled-jobs/scan-report-repository.ts:57:20
+     55|       jobId: row.job_id as string,
+     56|       status: row.status as ScheduledScanReport['status'],
+     57|       policy: JSON.parse(row.policy as string),
+       |                    ^
+     58|       collection: row.collection ? JSON.parse(row.collection as string…
+     59|       judgment: JSON.parse(row.judgment as string),
+ ❯ Object.unresolvedPage src/scheduled-jobs/scan-report-repository.ts:117:22
+ ❯ Object.review src/scheduled-jobs/scan-operator-service.ts:33:37
+ ❯ src/scheduled-jobs/scan-report-repository.test.ts:49:30
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/4]⎯
+
+ FAIL  src/scheduled-jobs/scan-report-repository.test.ts > scheduled scan reports independent of worker lifetime > keeps a malformed report collection readable without granting action authority
+SyntaxError: Expected property name or '}' in JSON at position 1 (line 1 column 2)
+ ❯ get src/scheduled-jobs/scan-report-repository.ts:58:41
+     56|       status: row.status as ScheduledScanReport['status'],
+     57|       policy: JSON.parse(row.policy as string),
+     58|       collection: row.collection ? JSON.parse(row.collection as string…
+       |                                         ^
+     59|       judgment: JSON.parse(row.judgment as string),
+     60|       createdAt: row.created_at as string,
+ ❯ Object.unresolvedPage src/scheduled-jobs/scan-report-repository.ts:117:22
+ ❯ Object.review src/scheduled-jobs/scan-operator-service.ts:33:37
+ ❯ src/scheduled-jobs/scan-report-repository.test.ts:49:30
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/4]⎯
+
+ FAIL  src/scheduled-jobs/scan-report-repository.test.ts > scheduled scan reports independent of worker lifetime > keeps a malformed report judgment readable without granting action authority
+SyntaxError: Expected property name or '}' in JSON at position 1 (line 1 column 2)
+ ❯ get src/scheduled-jobs/scan-report-repository.ts:59:22
+     57|       policy: JSON.parse(row.policy as string),
+     58|       collection: row.collection ? JSON.parse(row.collection as string…
+     59|       judgment: JSON.parse(row.judgment as string),
+       |                      ^
+     60|       createdAt: row.created_at as string,
+     61|       completedAt: row.completed_at as string | null,
+ ❯ Object.unresolvedPage src/scheduled-jobs/scan-report-repository.ts:117:22
+ ❯ Object.review src/scheduled-jobs/scan-operator-service.ts:33:37
+ ❯ src/scheduled-jobs/scan-report-repository.test.ts:49:30
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/4]⎯
+
+ FAIL  src/scheduled-jobs/scan-report-repository.test.ts > scheduled scan reports independent of worker lifetime > does not widen a missing report collection into another repository in the same job
+AssertionError: expected [ { id: 'stable-finding', …(7) } ] to have a length of +0 but got 1
+
+- Expected
++ Received
+
+- 0
++ 1
+
+ ❯ src/scheduled-jobs/scan-report-repository.test.ts:67:33
+     65|       const pending=reports.begin('job','no-scope',policy);
+     66|       const detail=service.review(pending.id);
+     67|       expect(detail.unresolved).toHaveLength(0);
+       |                                 ^
+     68|       expect(detail.diagnostics).toEqual(expect.arrayContaining([expec…
+     69|       expect(() => reports.selectedUnresolved(pending.id,['stable-find…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[4/4]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  4 failed | 1 passed | 15 skipped (20)
+   Start at  14:32:30
+   Duration  640ms (transform 177ms, setup 0ms, import 280ms, tests 247ms, environment 0ms)
+

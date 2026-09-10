@@ -1,0 +1,20 @@
+[
+  {
+    "eventId": 1,
+    "type": "tool_use",
+    "timestamp": "2026-09-09T17:00:00Z",
+    "tool": "check_messages",
+    "input": {},
+    "output": "{\"deliveryId\": \"00000000-0000-4000-8000-000000000120\", \"messages\": [\"Synthetic guidance: retain the failing test evidence.\"], \"instruction\": \"Acknowledge receipt; acknowledgement does not approve decisions or resume work.\"}"
+  },
+  {
+    "eventId": 2,
+    "type": "tool_use",
+    "timestamp": "2026-09-09T17:00:01Z",
+    "tool": "acknowledge_messages",
+    "input": {
+      "deliveryId": "00000000-0000-4000-8000-000000000120"
+    },
+    "output": "{\"acknowledged\": true, \"deliveryId\": \"00000000-0000-4000-8000-000000000120\"}"
+  }
+]

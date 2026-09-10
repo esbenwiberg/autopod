@@ -1,0 +1,73 @@
+
+ RUN  v4.1.11 /private/tmp/autopod-durable-execution/packages/daemon
+
+ ❯ src/worktrees/ado-pr-manager.test.ts (45 tests | 11 failed | 33 skipped) 10ms
+     × rejects mismatched identity before auth, reads, merges or review replies: https://dev.azure.com/otherorg/MyProject/_git/MyRepo/pullrequest/42 6ms
+     × rejects mismatched identity before auth, reads, merges or review replies: https://dev.azure.com/myorg/OtherProject/_git/MyRepo/pullrequest/42 1ms
+     × rejects mismatched identity before auth, reads, merges or review replies: https://dev.azure.com/myorg/MyProject/_git/OtherRepo/pullrequest/42 0ms
+     × rejects mismatched identity before auth, reads, merges or review replies: https://example.com/myorg/MyProject/_git/MyRepo/pullrequest/42 0ms
+     × rejects mismatched identity before auth, reads, merges or review replies: https://dev.azure.com/myorg/MyProject/_git/MyRepo/extra/pullrequest/42 0ms
+     × rejects mismatched identity before auth, reads, merges or review replies: https://dev.azure.com/myorg/MyProject/_git/MyRepo/pullrequest/0 0ms
+     × rejects mismatched identity before auth, reads, merges or review replies: https://dev.azure.com/myorg/MyProject/_git/MyRepo/pullrequest/1.5 0ms
+     × rejects mismatched identity before auth, reads, merges or review replies: https://dev.azure.com/myorg/MyProject/_git/MyRepo/pullrequest/1e2 0ms
+     × rejects mismatched identity before auth, reads, merges or review replies: http://dev.azure.com/myorg/MyProject/_git/MyRepo/pullrequest/42 0ms
+     × rejects mismatched identity before auth, reads, merges or review replies: https://user:password@dev.azure.com/myorg/MyProject/_git/MyRepo/pullrequest/42 0ms
+     × resolves a matching canonical or legacy URL: https://dev.azure.com/myorg/MyProject/_git/MyRepo/pullrequest/42/?view=files#discussion 1ms
+
+⎯⎯⎯⎯⎯⎯ Failed Tests 11 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/worktrees/ado-pr-manager.test.ts > ADO URL repository identity > rejects mismatched identity before auth, reads, merges or review replies: https://dev.azure.com/otherorg/MyProject/_git/MyRepo/pullrequest/42
+ FAIL  src/worktrees/ado-pr-manager.test.ts > ADO URL repository identity > rejects mismatched identity before auth, reads, merges or review replies: https://dev.azure.com/myorg/OtherProject/_git/MyRepo/pullrequest/42
+ FAIL  src/worktrees/ado-pr-manager.test.ts > ADO URL repository identity > rejects mismatched identity before auth, reads, merges or review replies: https://dev.azure.com/myorg/MyProject/_git/OtherRepo/pullrequest/42
+ FAIL  src/worktrees/ado-pr-manager.test.ts > ADO URL repository identity > rejects mismatched identity before auth, reads, merges or review replies: https://example.com/myorg/MyProject/_git/MyRepo/pullrequest/42
+ FAIL  src/worktrees/ado-pr-manager.test.ts > ADO URL repository identity > rejects mismatched identity before auth, reads, merges or review replies: https://dev.azure.com/myorg/MyProject/_git/MyRepo/extra/pullrequest/42
+ FAIL  src/worktrees/ado-pr-manager.test.ts > ADO URL repository identity > rejects mismatched identity before auth, reads, merges or review replies: https://dev.azure.com/myorg/MyProject/_git/MyRepo/pullrequest/0
+ FAIL  src/worktrees/ado-pr-manager.test.ts > ADO URL repository identity > rejects mismatched identity before auth, reads, merges or review replies: https://dev.azure.com/myorg/MyProject/_git/MyRepo/pullrequest/1.5
+ FAIL  src/worktrees/ado-pr-manager.test.ts > ADO URL repository identity > rejects mismatched identity before auth, reads, merges or review replies: https://dev.azure.com/myorg/MyProject/_git/MyRepo/pullrequest/1e2
+ FAIL  src/worktrees/ado-pr-manager.test.ts > ADO URL repository identity > rejects mismatched identity before auth, reads, merges or review replies: http://dev.azure.com/myorg/MyProject/_git/MyRepo/pullrequest/42
+ FAIL  src/worktrees/ado-pr-manager.test.ts > ADO URL repository identity > rejects mismatched identity before auth, reads, merges or review replies: https://user:password@dev.azure.com/myorg/MyProject/_git/MyRepo/pullrequest/42
+AssertionError: promise resolved "{ headSha: undefined, …(5) }" instead of rejecting
+
+- Expected
++ Received
+
+- Error {
+-   "message": "rejected promise",
++ {
++   "blockReason": null,
++   "ciFailures": [],
++   "headSha": undefined,
++   "merged": true,
++   "open": false,
++   "reviewComments": [],
+  }
+
+ ❯ src/worktrees/ado-pr-manager.test.ts:774:27
+    772|       () => manager.mergePr({ prUrl }),
+    773|       () => manager.replyToReviewFeedback({ prUrl, responses: [] }),
+    774|     ]) await expect(call()).rejects.toMatchObject({ code: 'DELIVERY_RE…
+       |                           ^
+    775|     expect(fetchMock).not.toHaveBeenCalled();
+    776|     expect(getToken).not.toHaveBeenCalled();
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/11]⎯
+
+ FAIL  src/worktrees/ado-pr-manager.test.ts > ADO URL repository identity > resolves a matching canonical or legacy URL: https://dev.azure.com/myorg/MyProject/_git/MyRepo/pullrequest/42/?view=files#discussion
+Error: Cannot extract PR ID from URL: https://dev.azure.com/myorg/MyProject/_git/MyRepo/pullrequest/42/?view=files#discussion
+ ❯ AdoPrManager.extractPrId src/worktrees/ado-pr-manager.ts:411:13
+    409|     const prId = prUrl.split('/').at(-1);
+    410|     if (!prId || Number.isNaN(Number(prId))) {
+    411|       throw new Error(`Cannot extract PR ID from URL: ${prUrl}`);
+       |             ^
+    412|     }
+    413|     return prId;
+ ❯ AdoPrManager.getPrStatus src/worktrees/ado-pr-manager.ts:508:23
+ ❯ src/worktrees/ado-pr-manager.test.ts:785:49
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/11]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  11 failed | 1 passed | 33 skipped (45)
+   Start at  00:16:34
+   Duration  287ms (transform 82ms, setup 0ms, import 148ms, tests 10ms, environment 0ms)

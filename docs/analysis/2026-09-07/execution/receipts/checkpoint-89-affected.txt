@@ -1,0 +1,61 @@
+
+ RUN  v4.1.11 /private/tmp/autopod-durable-execution/packages/daemon
+
+{"status":"failed","reason":"Checkpoint schema does not match the retained native lineage"}
+{"status":"failed","reason":"Checkpoint schema does not match the retained native lineage"}
+{"status":"failed","reason":"Checkpoint schema does not match the retained native lineage"}
+ ❯ src/db/reconcile-native-checkpoint.test.ts (3 tests | 3 failed) 3833ms
+   × reconciles exact checkpoint 151 only in a new verified copy 1201ms
+   × reconciles exact checkpoint 158 only in a new verified copy 1229ms
+   × reconciles exact checkpoint 163 only in a new verified copy 1402ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 3 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/db/reconcile-native-checkpoint.test.ts > reconciles exact checkpoint 151 only in a new verified copy
+Error: Command failed: /opt/homebrew/Cellar/node@24/24.18.0/bin/node /private/tmp/autopod-durable-execution/packages/daemon/dist/db/reconcile-native-checkpoint-cli.js --input /var/folders/k6/nj5ps5vj2078xw4xv9_1k_3m0000gn/T/native-reconcile-IpjhGM/input.db --output /var/folders/k6/nj5ps5vj2078xw4xv9_1k_3m0000gn/T/native-reconcile-IpjhGM/cli-output.db
+{"status":"failed","reason":"Checkpoint schema does not match the retained native lineage"}
+
+ ❯ src/db/reconcile-native-checkpoint.test.ts:75:9
+     73|       const cliOutput = join(dir, 'cli-output.db');
+     74|       const cliReceipt = JSON.parse(
+     75|         execFileSync(
+       |         ^
+     76|           process.execPath,
+     77|           [
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/3]⎯
+
+ FAIL  src/db/reconcile-native-checkpoint.test.ts > reconciles exact checkpoint 158 only in a new verified copy
+Error: Command failed: /opt/homebrew/Cellar/node@24/24.18.0/bin/node /private/tmp/autopod-durable-execution/packages/daemon/dist/db/reconcile-native-checkpoint-cli.js --input /var/folders/k6/nj5ps5vj2078xw4xv9_1k_3m0000gn/T/native-reconcile-EUSOxP/input.db --output /var/folders/k6/nj5ps5vj2078xw4xv9_1k_3m0000gn/T/native-reconcile-EUSOxP/cli-output.db
+{"status":"failed","reason":"Checkpoint schema does not match the retained native lineage"}
+
+ ❯ src/db/reconcile-native-checkpoint.test.ts:75:9
+     73|       const cliOutput = join(dir, 'cli-output.db');
+     74|       const cliReceipt = JSON.parse(
+     75|         execFileSync(
+       |         ^
+     76|           process.execPath,
+     77|           [
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/3]⎯
+
+ FAIL  src/db/reconcile-native-checkpoint.test.ts > reconciles exact checkpoint 163 only in a new verified copy
+Error: Command failed: /opt/homebrew/Cellar/node@24/24.18.0/bin/node /private/tmp/autopod-durable-execution/packages/daemon/dist/db/reconcile-native-checkpoint-cli.js --input /var/folders/k6/nj5ps5vj2078xw4xv9_1k_3m0000gn/T/native-reconcile-6tQCtc/input.db --output /var/folders/k6/nj5ps5vj2078xw4xv9_1k_3m0000gn/T/native-reconcile-6tQCtc/cli-output.db
+{"status":"failed","reason":"Checkpoint schema does not match the retained native lineage"}
+
+ ❯ src/db/reconcile-native-checkpoint.test.ts:75:9
+     73|       const cliOutput = join(dir, 'cli-output.db');
+     74|       const cliReceipt = JSON.parse(
+     75|         execFileSync(
+       |         ^
+     76|           process.execPath,
+     77|           [
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/3]⎯
+
+
+ Test Files  1 failed | 3 passed (4)
+      Tests  3 failed | 43 passed (46)
+   Start at  18:10:49
+   Duration  4.30s (transform 605ms, setup 0ms, import 1.00s, tests 5.27s, environment 0ms)
+

@@ -1,0 +1,176 @@
+
+ RUN  v4.1.11 /private/tmp/autopod-durable-execution/packages/daemon
+
+ ❯ src/pods/pod-manager.test.ts (471 tests | 13 failed | 458 skipped) 562ms
+       × rejects a replacement lifecycle during normal approval push 77ms
+       × rejects a replacement lifecycle during normal approval failed-push 40ms
+       × rejects a replacement lifecycle during normal approval existing-push 40ms
+       × rejects a replacement lifecycle during normal approval rebase 38ms
+       × rejects a replacement lifecycle during normal approval create 48ms
+       × rejects a replacement lifecycle during normal approval merge 40ms
+       × rejects a replacement lifecycle during normal approval approved 40ms
+       × rejects a replacement lifecycle during normal approval merging 38ms
+       × rejects a replacement lifecycle during normal approval complete 41ms
+       × does not merge a newly created PR with review status REVIEW_REQUIRED 42ms
+       × does not merge a newly created PR with review status CHANGES_REQUESTED 40ms
+       × does not merge a newly created PR with review status unavailable 39ms
+       × retains delivery after the pre-merge rebase operation rejects 38ms
+
+⎯⎯⎯⎯⎯⎯ Failed Tests 13 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/pods/pod-manager.test.ts > PodManager > approveSession > rejects a replacement lifecycle during normal approval push
+ FAIL  src/pods/pod-manager.test.ts > PodManager > approveSession > rejects a replacement lifecycle during normal approval failed-push
+ FAIL  src/pods/pod-manager.test.ts > PodManager > approveSession > rejects a replacement lifecycle during normal approval existing-push
+ FAIL  src/pods/pod-manager.test.ts > PodManager > approveSession > rejects a replacement lifecycle during normal approval rebase
+ FAIL  src/pods/pod-manager.test.ts > PodManager > approveSession > rejects a replacement lifecycle during normal approval create
+ FAIL  src/pods/pod-manager.test.ts > PodManager > approveSession > rejects a replacement lifecycle during normal approval merge
+ FAIL  src/pods/pod-manager.test.ts > PodManager > approveSession > rejects a replacement lifecycle during normal approval merging
+ FAIL  src/pods/pod-manager.test.ts > PodManager > approveSession > rejects a replacement lifecycle during normal approval complete
+AssertionError: promise resolved "undefined" instead of rejecting
+
+- Expected:
+Error {
+  "message": "rejected promise",
+}
+
++ Received:
+undefined
+
+ ❯ src/pods/pod-manager.test.ts:5118:50
+    5116|         if (event.type === 'pod.completed') completed.push(event.podId…
+    5117|       });
+    5118|       await expect(manager.approveSession(pod.id)).rejects.toMatchObje…
+       |                                                  ^
+    5119|         code: 'STALE_APPROVAL',
+    5120|       });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/13]⎯
+
+ FAIL  src/pods/pod-manager.test.ts > PodManager > approveSession > rejects a replacement lifecycle during normal approval approved
+AssertionError: expected InvalidStateTransitionError: Cannot trans… { …(2) } to match object { code: 'STALE_APPROVAL' }
+(2 matching properties omitted from actual)
+
+- Expected
++ Received
+
+- {
+-   "code": "STALE_APPROVAL",
++ InvalidStateTransitionError {
++   "code": "INVALID_STATE_TRANSITION",
+  }
+
+ ❯ src/pods/pod-manager.test.ts:5118:50
+    5116|         if (event.type === 'pod.completed') completed.push(event.podId…
+    5117|       });
+    5118|       await expect(manager.approveSession(pod.id)).rejects.toMatchObje…
+       |                                                  ^
+    5119|         code: 'STALE_APPROVAL',
+    5120|       });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/13]⎯
+
+ FAIL  src/pods/pod-manager.test.ts > PodManager > approveSession > does not merge a newly created PR with review status REVIEW_REQUIRED
+AssertionError: expected { id: 'maximum-ermine', …(113) } to match object { status: 'merge_pending', …(3) }
+(130 matching properties omitted from actual)
+
+- Expected
++ Received
+
+  {
+-   "completedAt": null,
++   "completedAt": "2026-09-07T20:07:40.383Z",
+    "containerId": "delivery-container",
+    "prUrl": "https://github.com/org/repo/pull/42",
+-   "status": "merge_pending",
++   "status": "complete",
+  }
+
+ ❯ src/pods/pod-manager.test.ts:5164:44
+    5162|           });
+    5163|         await manager.approveSession(pod.id);
+    5164|         expect(manager.getSession(pod.id)).toMatchObject({
+       |                                            ^
+    5165|           status: 'merge_pending',
+    5166|           completedAt: null,
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/13]⎯
+
+ FAIL  src/pods/pod-manager.test.ts > PodManager > approveSession > does not merge a newly created PR with review status CHANGES_REQUESTED
+AssertionError: expected { id: 'deafening-salmon', …(113) } to match object { status: 'merge_pending', …(3) }
+(130 matching properties omitted from actual)
+
+- Expected
++ Received
+
+  {
+-   "completedAt": null,
++   "completedAt": "2026-09-07T20:07:40.423Z",
+    "containerId": "delivery-container",
+    "prUrl": "https://github.com/org/repo/pull/42",
+-   "status": "merge_pending",
++   "status": "complete",
+  }
+
+ ❯ src/pods/pod-manager.test.ts:5164:44
+    5162|           });
+    5163|         await manager.approveSession(pod.id);
+    5164|         expect(manager.getSession(pod.id)).toMatchObject({
+       |                                            ^
+    5165|           status: 'merge_pending',
+    5166|           completedAt: null,
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[4/13]⎯
+
+ FAIL  src/pods/pod-manager.test.ts > PodManager > approveSession > does not merge a newly created PR with review status unavailable
+AssertionError: expected { id: 'supposed-gibbon', …(113) } to match object { status: 'merge_pending', …(3) }
+(130 matching properties omitted from actual)
+
+- Expected
++ Received
+
+  {
+-   "completedAt": null,
++   "completedAt": "2026-09-07T20:07:40.463Z",
+    "containerId": "delivery-container",
+    "prUrl": "https://github.com/org/repo/pull/42",
+-   "status": "merge_pending",
++   "status": "complete",
+  }
+
+ ❯ src/pods/pod-manager.test.ts:5164:44
+    5162|           });
+    5163|         await manager.approveSession(pod.id);
+    5164|         expect(manager.getSession(pod.id)).toMatchObject({
+       |                                            ^
+    5165|           status: 'merge_pending',
+    5166|           completedAt: null,
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[5/13]⎯
+
+ FAIL  src/pods/pod-manager.test.ts > PodManager > approveSession > retains delivery after the pre-merge rebase operation rejects
+AssertionError: expected Error: git unavailable to match object { code: 'APPROVAL_DELIVERY_FAILED' }
+
+- Expected
++ Received
+
+- {
+-   "code": "APPROVAL_DELIVERY_FAILED",
++ Error {
++   "message": "git unavailable",
+  }
+
+ ❯ src/pods/pod-manager.test.ts:5213:50
+    5211|       );
+    5212|       vi.mocked(ctx.worktreeManager.rebaseOntoBase).mockRejectedValue(…
+    5213|       await expect(manager.approveSession(pod.id)).rejects.toMatchObje…
+       |                                                  ^
+    5214|         code: 'APPROVAL_DELIVERY_FAILED',
+    5215|       });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[6/13]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  13 failed | 458 skipped (471)
+   Start at  22:07:38
+   Duration  1.76s (transform 738ms, setup 0ms, import 1.09s, tests 562ms, environment 0ms)

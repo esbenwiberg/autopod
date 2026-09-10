@@ -1,3 +1,16 @@
+import type { DispatchPreflightEvidence, ExecutionProvenance } from '@autopod/shared';
+import type {
+  ScanDecisionPage,
+  ScanFindingPage,
+  ScanRepairDispatch,
+  ScanReportDetail,
+  ScanReportPage,
+  ScanReportView,
+  ScanTriageDecision,
+  ScanTriageRequest,
+  ScheduledScanReport,
+} from '@autopod/shared';
+import type { DaemonHealthSummary } from '@autopod/shared';
 import {
   AuthError,
   AutopodError,
@@ -14,6 +27,7 @@ import type {
   CreateScheduledJobTemplateRequest,
   ModelProvider,
   Pod,
+  PodCostBreakdownResponse,
   PodStatus,
   PodsitterActivation,
   PodsitterBudgets,
@@ -34,6 +48,10 @@ import type {
   ScheduledJobTemplate,
   SpecContract,
   SpecFile,
+  TaskExecutionSummary,
+  TaskRetryAuthorization,
+  TaskRetryStage,
+  TaskRetryState,
   UpdateFromBaseResponse,
   UpdateScheduledJobRequest,
   UpdateScheduledJobTemplateRequest,
@@ -214,6 +232,48 @@ export class AutopodClient {
 
   async getSession(id: string): Promise<Pod> {
     return this.request<Pod>('GET', `/pods/${id}`);
+  }
+
+  async getPodCost(id: string): Promise<PodCostBreakdownResponse> {
+    return this.request('GET', `/pods/${encodeURIComponent(id)}/cost`);
+  }
+
+  async getTaskExecution(id: string): Promise<TaskExecutionSummary> {
+    return this.request('GET', `/pods/${id}/task-execution`);
+  }
+
+  async getExecutionProvenance(id: string): Promise<{ latest: ExecutionProvenance | null }> {
+    return this.request('GET', `/pods/${id}/execution-provenance?schemaVersion=2`);
+  }
+
+  async getRerunTemplate(id: string): Promise<CreatePodRequest> {
+    return this.request('GET', `/pods/${id}/rerun-template`);
+  }
+
+  async getDispatchPreflight(id: string): Promise<{ latest: DispatchPreflightEvidence | null }> {
+    return this.request('GET', `/pods/${id}/dispatch-preflight`);
+  }
+
+  async getRetryState(id: string, stage: TaskRetryStage = 'validation'): Promise<TaskRetryState> {
+    return this.request(
+      'GET',
+      `/pods/${id}/retry-state${stage === 'validation' ? '' : `?stage=${stage}`}`,
+    );
+  }
+  async authorizeRetry(
+    id: string,
+    requestKey: string,
+    reason: string,
+    stage: TaskRetryStage = 'validation',
+  ): Promise<TaskRetryAuthorization> {
+    return this.request('POST', `/pods/${id}/retry-authorizations`, {
+      requestKey,
+      reason,
+      ...(stage === 'validation' ? {} : { stage }),
+    });
+  }
+  async resumePod(id: string): Promise<{ ok: boolean; action: string }> {
+    return this.request('POST', `/pods/${id}/resume`);
   }
 
   async sendMessage(id: string, message: string): Promise<void> {
@@ -602,16 +662,55 @@ export class AutopodClient {
     await this.request<void>('DELETE', `/scheduled-jobs/${id}`);
   }
 
-  async runScheduledJobCatchup(id: string): Promise<Pod> {
-    return this.request<Pod>('POST', `/scheduled-jobs/${id}/catchup`);
+  async runScheduledJobCatchup(id: string): Promise<Pod | ScheduledScanReport> {
+    return this.request<Pod | ScheduledScanReport>('POST', `/scheduled-jobs/${id}/catchup`);
   }
 
   async skipScheduledJobCatchup(id: string): Promise<void> {
     await this.request<void>('DELETE', `/scheduled-jobs/${id}/catchup`);
   }
 
-  async triggerScheduledJob(id: string): Promise<Pod> {
-    return this.request<Pod>('POST', `/scheduled-jobs/${id}/trigger`);
+  async triggerScheduledJob(id: string): Promise<Pod | ScheduledScanReport> {
+    return this.request<Pod | ScheduledScanReport>('POST', `/scheduled-jobs/${id}/trigger`);
+  }
+
+  async listScanReportPage(jobId: string, before?: string): Promise<ScanReportPage> {
+    return this.request(
+      'GET',
+      `/scheduled-jobs/${encodeURIComponent(jobId)}/report-page${before ? `?before=${encodeURIComponent(before)}` : ''}`,
+    );
+  }
+  async listScanReports(jobId: string): Promise<ScanReportView[]> {
+    return this.request('GET', `/scheduled-jobs/${encodeURIComponent(jobId)}/reports`);
+  }
+  async getScanReportReview(reportId: string): Promise<ScanReportDetail> {
+    return this.request('GET', `/scan-reports/${encodeURIComponent(reportId)}/review`);
+  }
+  async getScanFindings(reportId: string, after?: string): Promise<ScanFindingPage> {
+    return this.request(
+      'GET',
+      `/scan-reports/${encodeURIComponent(reportId)}/findings${after ? `?after=${encodeURIComponent(after)}` : ''}`,
+    );
+  }
+  async getScanDecisions(reportId: string, before?: string): Promise<ScanDecisionPage> {
+    return this.request(
+      'GET',
+      `/scan-reports/${encodeURIComponent(reportId)}/decisions${before ? `?before=${encodeURIComponent(before)}` : ''}`,
+    );
+  }
+  async getScanReport(reportId: string): Promise<ScanReportDetail> {
+    return this.request('GET', `/scan-reports/${encodeURIComponent(reportId)}`);
+  }
+  async triageScanReport(
+    reportId: string,
+    request: ScanTriageRequest,
+  ): Promise<ScanTriageDecision> {
+    return this.request('POST', `/scan-reports/${encodeURIComponent(reportId)}/triage`, request);
+  }
+  async launchScanRepair(reportId: string, selectionId: string): Promise<ScanRepairDispatch> {
+    return this.request('POST', `/scan-reports/${encodeURIComponent(reportId)}/repairs`, {
+      selectionId,
+    });
   }
 
   // Bulk
@@ -686,8 +785,8 @@ export class AutopodClient {
   }
 
   // Health
-  async checkHealth(): Promise<{ status: string; version: string }> {
-    return this.request<{ status: string; version: string }>('GET', '/health');
+  async checkHealth(): Promise<DaemonHealthSummary> {
+    return this.request<DaemonHealthSummary>('GET', '/health');
   }
 
   // WebSocket helpers

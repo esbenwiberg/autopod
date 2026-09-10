@@ -1,0 +1,23 @@
+[1/1] Compiling plugin GenerateManual
+[2/2] Compiling plugin GenerateDoccReference
+Building for debugging...
+[2/9] Write sources
+[5/9] Write swift-version--58304C5D6DBC2206.txt
+[7/11] Compiling AutopodClient PodResponse.swift
+[8/11] Emitting module AutopodClient
+[9/12] Compiling AutopodClient DaemonAPI.swift
+[10/14] Emitting module AutopodUI
+[11/20] Compiling AutopodDesktop ScheduledJobStore.swift
+[12/20] Emitting module AutopodUITests
+[13/20] Compiling AutopodDesktop PodStore.swift
+[14/20] Emitting module AutopodDesktop
+[15/20] Compiling AutopodDesktop ActionHandler.swift
+[16/20] Compiling AutopodDesktop PodMapper.swift
+/private/tmp/autopod-durable-execution/packages/desktop/Sources/AutopodDesktop/Mapping/PodMapper.swift:106:147: error: the compiler is unable to type-check this expression in reasonable time; try breaking up the expression into distinct sub-expressions
+104 |       latestActivity: (response.lastRecoveryTrigger != nil ? response.lastCorrectionMessage : nil)
+105 |         ?? response.finalization?.operatorSummary
+106 |         ?? response.recordDiagnostics.flatMap { $0.isEmpty ? nil : "Saved evidence unavailable in this view: " + $0.map { "\($0.field) (\($0.code))" }.joined(separator: ", ") }
+    |                                                                                                                                                   `- error: the compiler is unable to type-check this expression in reasonable time; try breaking up the expression into distinct sub-expressions
+107 |         ?? response.progressSummary
+108 |         ?? response.lastCorrectionMessage
+error: fatalError

@@ -1,0 +1,18 @@
+{
+  "scope": "synthetic local fixture only",
+  "viewport": {
+    "width": 390,
+    "height": 844
+  },
+  "action": "Keep report only",
+  "posts": [
+    {
+      "message": "Keep report only"
+    }
+  ],
+  "observed": "refreshed to running and removed answered escalation without WebSocket events",
+  "backendProof": "Separate E2E requires original worker to consume the durable answer and completes without runtime.resume",
+  "browserClosed": true,
+  "fixtureExitCodeAfterCtrlC": 1,
+  "nativeInteraction": "unverified"
+}

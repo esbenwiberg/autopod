@@ -1,0 +1,50 @@
+
+ RUN  v4.1.11 /private/tmp/autopod-durable-execution/packages/daemon
+
+ ❯ src/pods/pod-manager.test.ts (635 tests | 1 failed | 634 skipped) 117ms
+     × auto-recovers exactly one pre-agent transient sandbox failure and fails closed on unsafe evidence 116ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/pods/pod-manager.test.ts > PodManager > auto-recovers exactly one pre-agent transient sandbox failure and fails closed on unsafe evidence
+AssertionError: expected { id: 'persistent-lobster', …(113) } to match object { status: 'failed', …(2) }
+(193 matching properties omitted from actual)
+
+- Expected
++ Received
+
+  {
+    "infrastructureFailure": {
+-     "recoveryDisposition": "automatic_retry_exhausted",
++     "code": "AZURE_SANDBOX_TRANSIENT_FORBIDDEN",
++     "diagnostics": {
++       "x-ms-request-id": "safe-request-id",
++     },
++     "occurredAt": "2026-09-08T18:36:58.527Z",
++     "phase": "agent",
++     "recoveryDisposition": "automatic_retry_scheduled",
++     "retryNotBefore": "2026-09-08T18:36:58.527Z",
++     "safeAgentRestart": true,
++     "source": "azure-sandbox",
++     "statusCode": 403,
+    },
+    "infrastructureRecoveryCount": 1,
+    "status": "failed",
+  }
+
+ ❯ src/pods/pod-manager.test.ts:1138:48
+    1136|     expect(ctx.containerManager.spawn).toHaveBeenCalledTimes(2);
+    1137|     expect(vi.mocked(ctx.runtime.spawn).mock.calls[1]?.[0]).toMatchObj…
+    1138|     expect(ctx.podRepo.getOrThrow(created.id)).toMatchObject({
+       |                                                ^
+    1139|       status: 'failed',
+    1140|       infrastructureRecoveryCount: 1,
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 634 skipped (635)
+   Start at  20:36:55
+   Duration  2.62s (transform 1.20s, setup 0ms, import 1.72s, tests 117ms, environment 0ms)
+

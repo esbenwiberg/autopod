@@ -1,0 +1,37 @@
+[1/1] Compiling plugin GenerateManual
+[2/2] Compiling plugin GenerateDoccReference
+Building for debugging...
+[2/9] Write sources
+[5/9] Write swift-version--58304C5D6DBC2206.txt
+[7/11] Emitting module AutopodClient
+[8/11] Compiling AutopodClient ScheduledScanTypes.swift
+[9/12] Compiling AutopodClient DaemonAPI.swift
+[10/15] Emitting module AutopodUI
+[11/19] Emitting module AutopodUITests
+[12/19] Compiling AutopodDesktop ScanInboxView.swift
+[13/19] Emitting module AutopodDesktop
+[14/19] Compiling AutopodDesktop AppRootView.swift
+[14/19] Write Objects.LinkFileList
+[16/21] Compiling AutopodClientTests ScheduledScanTests.swift
+[17/21] Emitting module AutopodClientTests
+[17/21] Write Objects.LinkFileList
+[18/21] Linking AutopodDesktopExe
+[19/21] Applying AutopodDesktopExe
+[20/21] Linking AutopodDesktopPackageTests
+Build complete! (8.61s)
+Test Suite 'Selected tests' started at 2026-09-08 14:39:20.567.
+Test Suite 'AutopodDesktopPackageTests.xctest' started at 2026-09-08 14:39:20.573.
+Test Suite 'AutopodDesktopPackageTests.xctest' passed at 2026-09-08 14:39:20.573.
+	 Executed 0 tests, with 0 failures (0 unexpected) in 0.000 (0.000) seconds
+Test Suite 'Selected tests' passed at 2026-09-08 14:39:20.573.
+	 Executed 0 tests, with 0 failures (0 unexpected) in 0.000 (0.006) seconds
+◇ Test run started.
+↳ Testing Library Version: 1902
+↳ Target Platform: arm64e-apple-macos14.0
+◇ Test scheduledScanClientPreservesIncompleteStatusAndExplicitHumanSelection() started.
+◇ Test scanReviewClientUsesIndependentFindingAndDecisionCursors() started.
+◇ Test unavailableReportFieldsPreserveRecordedStatusWithoutInventingEvidence() started.
+✔ Test unavailableReportFieldsPreserveRecordedStatusWithoutInventingEvidence() passed after 0.001 seconds.
+✔ Test scanReviewClientUsesIndependentFindingAndDecisionCursors() passed after 0.007 seconds.
+✔ Test scheduledScanClientPreservesIncompleteStatusAndExplicitHumanSelection() passed after 0.007 seconds.
+✔ Test run with 3 tests in 0 suites passed after 0.007 seconds.

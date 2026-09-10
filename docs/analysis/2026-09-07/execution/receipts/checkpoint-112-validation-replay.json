@@ -1,0 +1,205 @@
+{
+  "version": 2,
+  "scope": "local deterministic replay, actual validation engine and child processes; no production/provider claim",
+  "capturedAt": "2026-09-09T08:10:24.466Z",
+  "sourceHead": "3aa939d5fc97cb94ea1da78e5c531a8785d91631",
+  "sourceModified": false,
+  "sourceStatus": "",
+  "oracleSha256": "887e1eba90b43855ccde380d965390352a23dbdbf3d536e43e690defdbe7856f",
+  "implementationSha256": "17062edd5a05f130656b9a85bcdbe1dcd9352d1ec1aa31e9f25bd4bfa035e5cb",
+  "runtime": "v24.18.0",
+  "host": {
+    "platform": "darwin",
+    "architecture": "arm64",
+    "release": "25.6.0",
+    "cpuModel": "Apple M5",
+    "cpuCount": 10,
+    "memoryBytes": 25769803776
+  },
+  "runtimeExecutableSha256": "72c18e2eeda260f67a5b2b66e96fa9b5ad82864676ebb54925695d87120cae3f",
+  "imageIdentity": "fixture hash of actual Node binary; not a Docker image receipt",
+  "coverage": {
+    "assertionsPerTestExecution": 5,
+    "configuredPhases": ["lint", "build", "test"],
+    "unchangedAcrossModes": true,
+    "excludedInBothModes": [
+      "web health/pages (no web app)",
+      "SAST (not configured)",
+      "AI review (unpaid deterministic replay scope)"
+    ]
+  },
+  "ordering": "alternating AB/BA, one healthy priming pair, four measured healthy pairs, two pairs per seeded defect",
+  "baselineRepeatedMs": 667.5211670000001,
+  "candidateRepeatedMs": 1921.2985829999998,
+  "reductionPercent": -187.82586650169844,
+  "targetMet": false,
+  "seededDefects": ["off-by-one", "missing-zero-boundary"],
+  "baselineEscapes": 0,
+  "candidateEscapes": 0,
+  "cacheHits": 4,
+  "actualBuildCommands": 18,
+  "rows": [
+    {
+      "fixture": "healthy",
+      "mode": "baseline",
+      "round": 0,
+      "elapsedMs": 173.56562500000007,
+      "overall": "pass",
+      "testReused": false,
+      "lintReused": false
+    },
+    {
+      "fixture": "healthy",
+      "mode": "candidate",
+      "round": 0,
+      "elapsedMs": 602.243958,
+      "overall": "pass",
+      "testReused": false,
+      "lintReused": false
+    },
+    {
+      "fixture": "healthy",
+      "mode": "candidate",
+      "round": 1,
+      "elapsedMs": 492.655792,
+      "overall": "pass",
+      "testReused": true,
+      "lintReused": true
+    },
+    {
+      "fixture": "healthy",
+      "mode": "baseline",
+      "round": 1,
+      "elapsedMs": 166.6552079999999,
+      "overall": "pass",
+      "testReused": false,
+      "lintReused": false
+    },
+    {
+      "fixture": "healthy",
+      "mode": "baseline",
+      "round": 2,
+      "elapsedMs": 167.63079199999993,
+      "overall": "pass",
+      "testReused": false,
+      "lintReused": false
+    },
+    {
+      "fixture": "healthy",
+      "mode": "candidate",
+      "round": 2,
+      "elapsedMs": 479.64583300000004,
+      "overall": "pass",
+      "testReused": true,
+      "lintReused": true
+    },
+    {
+      "fixture": "healthy",
+      "mode": "candidate",
+      "round": 3,
+      "elapsedMs": 464.9476249999998,
+      "overall": "pass",
+      "testReused": true,
+      "lintReused": true
+    },
+    {
+      "fixture": "healthy",
+      "mode": "baseline",
+      "round": 3,
+      "elapsedMs": 164.80416700000023,
+      "overall": "pass",
+      "testReused": false,
+      "lintReused": false
+    },
+    {
+      "fixture": "healthy",
+      "mode": "baseline",
+      "round": 4,
+      "elapsedMs": 168.43100000000004,
+      "overall": "pass",
+      "testReused": false,
+      "lintReused": false
+    },
+    {
+      "fixture": "healthy",
+      "mode": "candidate",
+      "round": 4,
+      "elapsedMs": 484.04933299999993,
+      "overall": "pass",
+      "testReused": true,
+      "lintReused": true
+    },
+    {
+      "fixture": "off-by-one",
+      "mode": "baseline",
+      "round": 0,
+      "elapsedMs": 164.7352089999995,
+      "overall": "fail",
+      "testReused": false,
+      "lintReused": false
+    },
+    {
+      "fixture": "off-by-one",
+      "mode": "candidate",
+      "round": 0,
+      "elapsedMs": 577.8525,
+      "overall": "fail",
+      "testReused": false,
+      "lintReused": false
+    },
+    {
+      "fixture": "off-by-one",
+      "mode": "candidate",
+      "round": 1,
+      "elapsedMs": 529.3919999999998,
+      "overall": "fail",
+      "testReused": false,
+      "lintReused": true
+    },
+    {
+      "fixture": "off-by-one",
+      "mode": "baseline",
+      "round": 1,
+      "elapsedMs": 165.93445799999972,
+      "overall": "fail",
+      "testReused": false,
+      "lintReused": false
+    },
+    {
+      "fixture": "missing-zero-boundary",
+      "mode": "baseline",
+      "round": 0,
+      "elapsedMs": 187.86854200000016,
+      "overall": "fail",
+      "testReused": false,
+      "lintReused": false
+    },
+    {
+      "fixture": "missing-zero-boundary",
+      "mode": "candidate",
+      "round": 0,
+      "elapsedMs": 582.4135420000002,
+      "overall": "fail",
+      "testReused": false,
+      "lintReused": false
+    },
+    {
+      "fixture": "missing-zero-boundary",
+      "mode": "candidate",
+      "round": 1,
+      "elapsedMs": 529.1640830000006,
+      "overall": "fail",
+      "testReused": false,
+      "lintReused": true
+    },
+    {
+      "fixture": "missing-zero-boundary",
+      "mode": "baseline",
+      "round": 1,
+      "elapsedMs": 167.37774999999965,
+      "overall": "fail",
+      "testReused": false,
+      "lintReused": false
+    }
+  ]
+}

@@ -1,0 +1,19 @@
+{
+  "scope": "local preparation only; not live canary acceptance",
+  "checks": {
+    "candidateCanarySourceUnchanged": true,
+    "observedAccess200AndCompleteArray": true,
+    "exactDigestMismatch": true,
+    "resourceLimits": true,
+    "supportedNuget": true,
+    "jsonValid": true,
+    "inventoryShape_array": true,
+    "inventoryShape_value": true,
+    "inventoryShape_items": true,
+    "inventoryShape_diskImages": true,
+    "evidenceLinksResolve": true,
+    "diffWhitespace": true
+  },
+  "passed": true,
+  "contractSHA256": "e75a8e1864492d945042530b1ebbf05748e51354adce8afdc4241fa13c709ccd"
+}

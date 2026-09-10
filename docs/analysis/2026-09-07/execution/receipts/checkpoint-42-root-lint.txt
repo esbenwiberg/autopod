@@ -1,0 +1,18 @@
+./packages/daemon/src/worktrees/merge-source-identity.ts format ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  × Formatter would have printed the following content:
+
+    87 87 │         value.length > 1024 ||
+    88 88 │         value.trim() !== value ||
+    89    │ - ······value.includes('\0')·||·value.includes('\r')·||
+       89 │ + ······value.includes('\0')·||
+       90 │ + ······value.includes('\r')·||
+    90 91 │         value.includes('\n') ||
+    91 92 │         observed[field] !== value
+
+
+Checked 955 files in 675ms. No fixes applied.
+Found 1 error.
+check ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  × Some errors were emitted while running checks.

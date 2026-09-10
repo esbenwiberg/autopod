@@ -1,0 +1,311 @@
+{
+  "startedAt": "2026-09-10T06:58:38.875Z",
+  "contractSHA256": "e9060ad05d37af2b2ae84e7dec256ebd000ed6a6c90445c39b11fe88f3ebdab6",
+  "candidate": "4e73cd8ce88e44cdb5c2d8d0a89447b819fa5a39",
+  "nonce": "autopod-cp130-20260910-f54b813e",
+  "runnerSHA256": "0727edbbaf16ccd24635f4919a077990401857c1598628bbc74425a5490bf3fa",
+  "bundleSHA256": "159ffce46631ab9f3f0b58641f04ea67f5736cdeaf5d756ec98cd28f26ecb3dc",
+  "status": "failed",
+  "events": [
+    {
+      "at": "2026-09-10T06:58:42.477Z",
+      "kind": "preflight_passed"
+    },
+    {
+      "at": "2026-09-10T06:58:42.949Z",
+      "kind": "acr_exchange_intent"
+    },
+    {
+      "at": "2026-09-10T06:58:43.048Z",
+      "kind": "acr_exchange_response",
+      "httpStatus": 200
+    },
+    {
+      "at": "2026-09-10T06:58:43.049Z",
+      "kind": "disk_create_intent"
+    },
+    {
+      "at": "2026-09-10T07:00:35.036Z",
+      "kind": "disk_create_response",
+      "httpStatus": 200
+    },
+    {
+      "at": "2026-09-10T07:00:35.041Z",
+      "kind": "disk_identified",
+      "id": "fcc6b2fe-1695-4aa9-96ac-2542185b22ee"
+    },
+    {
+      "at": "2026-09-10T07:00:35.149Z",
+      "kind": "disk_state",
+      "state": "Ready"
+    },
+    {
+      "at": "2026-09-10T07:00:35.150Z",
+      "kind": "sandbox_create_intent"
+    },
+    {
+      "at": "2026-09-10T07:00:36.283Z",
+      "kind": "sandbox_create_response",
+      "httpStatus": 200
+    },
+    {
+      "at": "2026-09-10T07:00:36.284Z",
+      "kind": "sandbox_identified",
+      "id": "58fcd79d-2275-409c-a46a-71b5a95400eb"
+    },
+    {
+      "at": "2026-09-10T07:00:36.329Z",
+      "kind": "sandbox_state",
+      "state": "Running"
+    },
+    {
+      "at": "2026-09-10T07:00:36.332Z",
+      "kind": "check_started",
+      "check": "identityUid"
+    },
+    {
+      "at": "2026-09-10T07:00:36.425Z",
+      "kind": "check_finished",
+      "check": "identityUid",
+      "passed": true,
+      "exitCode": 0
+    },
+    {
+      "at": "2026-09-10T07:00:36.426Z",
+      "kind": "check_started",
+      "check": "identityGid"
+    },
+    {
+      "at": "2026-09-10T07:00:36.501Z",
+      "kind": "check_finished",
+      "check": "identityGid",
+      "passed": true,
+      "exitCode": 0
+    },
+    {
+      "at": "2026-09-10T07:00:36.501Z",
+      "kind": "check_started",
+      "check": "autopodUid"
+    },
+    {
+      "at": "2026-09-10T07:00:36.579Z",
+      "kind": "check_finished",
+      "check": "autopodUid",
+      "passed": true,
+      "exitCode": 0
+    },
+    {
+      "at": "2026-09-10T07:00:36.580Z",
+      "kind": "check_started",
+      "check": "codexPath"
+    },
+    {
+      "at": "2026-09-10T07:00:36.657Z",
+      "kind": "check_finished",
+      "check": "codexPath",
+      "passed": true,
+      "exitCode": 0
+    },
+    {
+      "at": "2026-09-10T07:00:36.661Z",
+      "kind": "check_started",
+      "check": "codexVersion"
+    },
+    {
+      "at": "2026-09-10T07:00:36.844Z",
+      "kind": "check_finished",
+      "check": "codexVersion",
+      "passed": true,
+      "exitCode": 0
+    },
+    {
+      "at": "2026-09-10T07:00:36.848Z",
+      "kind": "check_started",
+      "check": "nodeVersion"
+    },
+    {
+      "at": "2026-09-10T07:00:36.926Z",
+      "kind": "check_finished",
+      "check": "nodeVersion",
+      "passed": true,
+      "exitCode": 0
+    },
+    {
+      "at": "2026-09-10T07:00:36.930Z",
+      "kind": "check_started",
+      "check": "resourceProbe"
+    },
+    {
+      "at": "2026-09-10T07:00:37.014Z",
+      "kind": "check_finished",
+      "check": "resourceProbe",
+      "passed": false,
+      "exitCode": 1
+    },
+    {
+      "at": "2026-09-10T07:00:37.015Z",
+      "kind": "execution_stopped",
+      "stage": "capability",
+      "code": "check_failed_resourceProbe"
+    },
+    {
+      "at": "2026-09-10T07:00:37.066Z",
+      "kind": "sandbox_delete_intent",
+      "id": "58fcd79d-2275-409c-a46a-71b5a95400eb"
+    },
+    {
+      "at": "2026-09-10T07:00:43.731Z",
+      "kind": "sandbox_delete_response",
+      "httpStatus": 200
+    },
+    {
+      "at": "2026-09-10T07:00:48.837Z",
+      "kind": "http_refusal",
+      "httpStatus": 404,
+      "registryMention": false,
+      "authenticationMention": false,
+      "permissionMention": false,
+      "labelMention": false,
+      "formatOrLengthMention": false,
+      "resourceMention": false,
+      "egressMention": false,
+      "errorValueShape": "undefined"
+    },
+    {
+      "at": "2026-09-10T07:00:48.838Z",
+      "kind": "sandbox_removed",
+      "id": "58fcd79d-2275-409c-a46a-71b5a95400eb"
+    },
+    {
+      "at": "2026-09-10T07:00:48.950Z",
+      "kind": "disk_delete_intent",
+      "id": "fcc6b2fe-1695-4aa9-96ac-2542185b22ee"
+    },
+    {
+      "at": "2026-09-10T07:00:50.029Z",
+      "kind": "disk_delete_response",
+      "httpStatus": 202
+    },
+    {
+      "at": "2026-09-10T07:00:55.133Z",
+      "kind": "http_refusal",
+      "httpStatus": 404,
+      "registryMention": false,
+      "authenticationMention": false,
+      "permissionMention": false,
+      "labelMention": false,
+      "formatOrLengthMention": false,
+      "resourceMention": true,
+      "egressMention": false,
+      "errorValueShape": "undefined"
+    },
+    {
+      "at": "2026-09-10T07:00:55.134Z",
+      "kind": "disk_removed",
+      "id": "fcc6b2fe-1695-4aa9-96ac-2542185b22ee"
+    }
+  ],
+  "checks": {
+    "identityUid": {
+      "passed": true,
+      "exitCode": 0,
+      "diagnostics": {
+        "permissionDenied": false,
+        "commandNotFound": false,
+        "missingPath": false
+      }
+    },
+    "identityGid": {
+      "passed": true,
+      "exitCode": 0,
+      "diagnostics": {
+        "permissionDenied": false,
+        "commandNotFound": false,
+        "missingPath": false
+      }
+    },
+    "autopodUid": {
+      "passed": true,
+      "exitCode": 0,
+      "diagnostics": {
+        "permissionDenied": false,
+        "commandNotFound": false,
+        "missingPath": false
+      }
+    },
+    "codexPath": {
+      "passed": true,
+      "exitCode": 0,
+      "diagnostics": {
+        "permissionDenied": false,
+        "commandNotFound": false,
+        "missingPath": false
+      }
+    },
+    "codexVersion": {
+      "passed": true,
+      "exitCode": 0,
+      "diagnostics": {
+        "permissionDenied": false,
+        "commandNotFound": false,
+        "missingPath": false
+      }
+    },
+    "nodeVersion": {
+      "passed": true,
+      "exitCode": 0,
+      "diagnostics": {
+        "permissionDenied": false,
+        "commandNotFound": false,
+        "missingPath": false
+      }
+    },
+    "resourceProbe": {
+      "passed": false,
+      "exitCode": 1,
+      "diagnostics": {
+        "permissionDenied": false,
+        "commandNotFound": false,
+        "missingPath": true
+      }
+    }
+  },
+  "providerCalls": 0,
+  "preflight": {
+    "sourceUnchanged": true,
+    "principalMatched": true,
+    "groupMatched": true,
+    "pullIdentityMatched": true,
+    "sourceDigestMatched": true,
+    "nonceAbsent": true,
+    "diskCount": 16,
+    "sandboxCount": 0
+  },
+  "diskCreateIntent": true,
+  "diskId": "fcc6b2fe-1695-4aa9-96ac-2542185b22ee",
+  "sandboxCreateIntent": true,
+  "sandboxCreateStarted": 1789023635150,
+  "sandboxId": "58fcd79d-2275-409c-a46a-71b5a95400eb",
+  "resourceMetadata": {
+    "cpu": "2000m",
+    "memory": "4096Mi",
+    "disk": "40960Mi"
+  },
+  "runtime": {
+    "execUid": "1000",
+    "execGid": "1000",
+    "autopodUid": "1000",
+    "codexPath": "/usr/local/bin/codex",
+    "codexVersion": "codex-cli 0.144.4",
+    "nodeVersion": "v22.23.2"
+  },
+  "failure": {
+    "stage": "capability",
+    "code": "check_failed_resourceProbe"
+  },
+  "sandboxRemoved": true,
+  "diskRemoved": true,
+  "finishedAt": "2026-09-10T07:00:55.135Z",
+  "allCreatedResourcesRemoved": true,
+  "sandboxAllocationThroughCleanupMs": 19985
+}

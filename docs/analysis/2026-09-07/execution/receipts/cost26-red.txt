@@ -1,0 +1,57 @@
+
+ RUN  v4.1.11 /private/tmp/autopod-durable-execution/packages/daemon
+
+ ❯ src/pods/cost-aggregation.test.ts (44 tests | 2 failed | 42 skipped) 113ms
+     × preserves conflicting stored phase costs without inventing proportional attribution 71ms
+     × does not price unmeasured reviewer usage using the worker model 42ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 2 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/pods/cost-aggregation.test.ts > aggregateCost > preserves conflicting stored phase costs without inventing proportional attribution
+AssertionError: expected { bucket: 'work', label: 'Work', …(4) } to match object { costUsd: +0, storedCostUsd: 3, …(1) }
+(5 matching properties omitted from actual)
+
+- Expected
++ Received
+
+  {
+-   "attribution": "unavailable",
+-   "costUsd": 0,
+-   "storedCostUsd": 3,
++   "costUsd": 1.5,
+  }
+
+ ❯ src/pods/cost-aggregation.test.ts:142:57
+    140|     expect(fleet.total).toBe(2.5);
+    141|     expect(pod.totalCostUsd).toBe(2.5);
+    142|     expect(pod.segments.find(x => x.bucket === 'work')).toMatchObject(…
+       |                                                         ^
+    143|     expect(pod.segments.find(x => x.bucket === 'rework')).toMatchObjec…
+    144|     expect(pod.segments.find(x => x.bucket === 'unattributed')?.costUs…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/2]⎯
+
+ FAIL  src/pods/cost-aggregation.test.ts > aggregateCost > does not price unmeasured reviewer usage using the worker model
+AssertionError: expected 3.25 to be 2 // Object.is equality
+
+- Expected
++ Received
+
+- 2
++ 3.25
+
+ ❯ src/pods/cost-aggregation.test.ts:156:25
+    154|     const fleet = aggregateCost({podRepo, now: nowFn}, {days: 30});
+    155|     const pod = computePodCostBreakdown(podRepo.getOrThrow(id));
+    156|     expect(fleet.total).toBe(2);
+       |                         ^
+    157|     expect(pod.totalCostUsd).toBe(2);
+    158|     expect(pod.segments.find(x => x.bucket === 'validation')).toMatchO…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/2]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  2 failed | 42 skipped (44)
+   Start at  20:56:17
+   Duration  406ms (transform 118ms, setup 0ms, import 190ms, tests 113ms, environment 0ms)

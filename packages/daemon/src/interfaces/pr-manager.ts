@@ -61,7 +61,19 @@ export interface CreatePrConfig {
   handoffInstructions?: string;
 }
 
+export interface MergePrTarget {
+  repository: string;
+  branch: string;
+  baseBranch: string;
+}
+
 export interface MergePrConfig {
+  /** Synchronous final admission after provider preparation/auth, immediately before mutation. */
+  onPrepared?: () => void;
+  /** Exact repository and branches associated with the confirmed source publication. */
+  expectedTarget?: MergePrTarget;
+  /** Confirmed published source commit. Legacy callers without it remain unbound. */
+  expectedHeadSha?: string;
   /** Worktree path for repository-bound implementations; URL-addressed operations may omit it. */
   worktreePath?: string;
   /** PR URL or number to merge */
@@ -70,7 +82,15 @@ export interface MergePrConfig {
   squash?: boolean;
 }
 
+export interface MergeSourceConfirmation {
+  headSha: string;
+  target: MergePrTarget;
+  observedAt: string;
+}
+
 export interface MergePrResult {
+  /** Present only after the adapter verifies the requested source and final target. */
+  source?: MergeSourceConfirmation;
   /** Whether the merge completed immediately */
   merged: boolean;
   /** If not merged, whether auto-merge was scheduled (GitHub) or auto-complete set (ADO) */
@@ -117,6 +137,10 @@ export interface ReviewFeedbackReplyResult {
 }
 
 export interface PrMergeStatus {
+  /** Observed repository/head/base identity; absent when unavailable or a fork is unconfirmed. */
+  sourceTarget?: MergePrTarget;
+  /** Provider-observed source commit; absent when unavailable, never the merge commit. */
+  headSha?: string;
   /** Whether the PR has been merged */
   merged: boolean;
   /** Whether the PR is still open (false = closed/abandoned without merging) */
@@ -151,7 +175,16 @@ export interface CreatePrResult {
   narrativeUsedFallback?: boolean;
 }
 
+export interface FoundPr {
+  url: string;
+  disposition: 'open' | 'merged' | 'closed';
+}
+
 export interface PrManager {
+  /** Bounded, exact repository/head/base lookup across all dispositions. Errors are not absence. */
+  findPr?(
+    config: Pick<CreatePrConfig, 'worktreePath' | 'repoUrl' | 'branch' | 'baseBranch'>,
+  ): Promise<FoundPr | null>;
   createPr(config: CreatePrConfig): Promise<CreatePrResult>;
   mergePr(config: MergePrConfig): Promise<MergePrResult>;
   getPrStatus(config: { prUrl: string; worktreePath?: string }): Promise<PrMergeStatus>;

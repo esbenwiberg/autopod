@@ -1,0 +1,145 @@
+{
+  "status": "verified",
+  "candidate": "425ff91cd5e6347b32d21b69804ea4c02008bc8e",
+  "observedAt": "2026-09-10T10:06:35.181348+00:00",
+  "checks": [
+    {
+      "check": "full-health",
+      "path": "/health?detail=full",
+      "status": "verified",
+      "elapsedMs": 491,
+      "projection": {
+        "release": {
+          "validationImplementationHash": "5ae52d1edc946a2a740fb4bd9b4bf8106936aa4ba4ff35a004e366497a6da956",
+          "commitSha": "425ff91cd5e6347b32d21b69804ea4c02008bc8e",
+          "dirty": false,
+          "builtAt": "2026-09-10T09:39:59.545Z",
+          "source": "build"
+        },
+        "databaseConnected": true,
+        "queue": {
+          "active_sessions": 0,
+          "queued_sessions": 0,
+          "max_concurrency": 5
+        },
+        "healthStatus": "ok",
+        "backup": {
+          "state": "fresh",
+          "sourceIdentity": "b83381edf3ef5680b72552b656f77f927605a1568be55f2177d8946cd99deade",
+          "ageMs": 17153,
+          "lastCompletedAt": "2026-09-10T10:06:16.354Z",
+          "availableBytes": 131521986560,
+          "requiredBytes": 1888518144,
+          "snapshotIntegrity": "verified"
+        },
+        "securityMl": {
+          "enabled": false
+        }
+      }
+    },
+    {
+      "check": "bounded-history",
+      "path": "/pods?limit=10",
+      "status": "verified",
+      "elapsedMs": 308,
+      "projection": {
+        "rows": 10,
+        "diagnosticRows": 0
+      }
+    },
+    {
+      "check": "compact-page",
+      "path": "/pods?compact=true&page=true&limit=10",
+      "status": "verified",
+      "elapsedMs": 189,
+      "projection": {
+        "rows": 10,
+        "hasNext": true
+      }
+    },
+    {
+      "check": "cost-telemetry",
+      "path": "/pods/analytics/cost?days=30",
+      "status": "verified",
+      "elapsedMs": 236,
+      "projection": {
+        "total": 1173.94334565,
+        "phaseTotal": 1173.9433456499999,
+        "phaseSumMatches": true,
+        "telemetryCompleteness": "partial",
+        "infrastructureCost": "unavailable",
+        "diagnosticCount": 0
+      }
+    },
+    {
+      "check": "task-accounting",
+      "path": "/pods/<sample>/task-execution",
+      "status": "verified",
+      "elapsedMs": 130,
+      "projection": {
+        "telemetry": "partial",
+        "deliveryScope": "durable-receipts-only",
+        "recordedDeliveryReceipts": 0,
+        "providerDispositionLiveVerified": false
+      }
+    },
+    {
+      "check": "execution-provenance",
+      "path": "/pods/<sample>/execution-provenance?schemaVersion=2",
+      "status": "verified",
+      "elapsedMs": 125,
+      "projection": {
+        "legacyLatestUnavailable": false
+      }
+    },
+    {
+      "check": "validation-history",
+      "path": "/pods/<sample>/validations",
+      "status": "verified",
+      "elapsedMs": 137,
+      "projection": {
+        "rows": 0
+      }
+    },
+    {
+      "check": "task-accounting",
+      "path": "/pods/<sample>/task-execution",
+      "status": "verified",
+      "elapsedMs": 147,
+      "projection": {
+        "telemetry": "partial",
+        "deliveryScope": "durable-receipts-only",
+        "recordedDeliveryReceipts": 0,
+        "providerDispositionLiveVerified": false
+      }
+    },
+    {
+      "check": "execution-provenance",
+      "path": "/pods/<sample>/execution-provenance?schemaVersion=2",
+      "status": "verified",
+      "elapsedMs": 128,
+      "projection": {
+        "legacyLatestUnavailable": false
+      }
+    },
+    {
+      "check": "validation-history",
+      "path": "/pods/<sample>/validations",
+      "status": "verified",
+      "elapsedMs": 135,
+      "projection": {
+        "rows": 0
+      }
+    },
+    {
+      "check": "scheduled-report-list",
+      "path": "/scheduled-jobs/4AbxtWzo/reports",
+      "status": "verified",
+      "elapsedMs": 126,
+      "projection": {
+        "rows": 0
+      }
+    }
+  ],
+  "historicalFailureCause": "unknown; these current checks are not retrospective diagnosis"
+}

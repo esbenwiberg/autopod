@@ -1,0 +1,26 @@
+
+ RUN  v4.1.11 /private/tmp/autopod-durable-execution/packages/daemon
+
+ ❯ src/pods/pod-manager.test.ts (428 tests | 1 failed | 427 skipped) 94ms
+         × resumes finalization from a verified snapshot after restart without a source container 93ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/pods/pod-manager.test.ts > PodManager > workspace pods > completeSession > resumes finalization from a verified snapshot after restart without a source container
+AutopodError: Pod medieval-wombat has no worktree — cannot resume
+ ❯ Object.resumePod src/pods/pod-manager.ts:16006:15
+    16004|       }
+    16005|       if (!pod.worktreePath) {
+    16006|         throw new AutopodError(
+       |               ^
+    16007|           `Pod ${podId} has no worktree — cannot resume`,
+    16008|           'INVALID_STATE',
+ ❯ src/pods/pod-manager.test.ts:12920:32
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 427 skipped (428)
+   Start at  18:31:54
+   Duration  1.39s (transform 804ms, setup 0ms, import 1.19s, tests 94ms, environment 0ms)

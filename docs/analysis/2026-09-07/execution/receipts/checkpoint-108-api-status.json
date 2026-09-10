@@ -1,0 +1,30 @@
+[
+  {
+    "observedAtUTC": "2026-09-09T05:19:08.777378+00:00",
+    "path": "/health?detail=full",
+    "status": 200,
+    "bytes": 264,
+    "bodyLimitExceeded": false
+  },
+  {
+    "observedAtUTC": "2026-09-09T05:19:08.945819+00:00",
+    "path": "/pods?compact=true&limit=10",
+    "status": 200,
+    "bytes": 30250,
+    "bodyLimitExceeded": false
+  },
+  {
+    "observedAtUTC": "2026-09-09T05:19:09.248891+00:00",
+    "path": "/pods?limit=10",
+    "status": 200,
+    "bytes": 294858,
+    "bodyLimitExceeded": false
+  },
+  {
+    "observedAtUTC": "2026-09-09T05:19:09.540154+00:00",
+    "path": "/pods/analytics/cost?days=30",
+    "status": 200,
+    "bytes": 4588,
+    "bodyLimitExceeded": false
+  }
+]

@@ -67,6 +67,15 @@ public struct PodActions: Sendable {
   public var retryCreatePr: @MainActor @Sendable (String) async -> Void
   /// Token-free recovery for a `failed` pod — pushes + opens PR if validation already passed,
   /// otherwise re-runs validation only (no agent rework). Cheapest possible path forward.
+  public var retryDraftScope: String
+  public var loadExecutionProvenance: @MainActor @Sendable (String) async throws -> ExecutionProvenanceResponse
+  public var loadDispatchPreflight: @MainActor @Sendable (String) async throws -> DispatchPreflightResponse
+  public var loadRerunTemplate: @MainActor @Sendable (String) async throws -> IntentionalRerunDraft
+  public var createIntentionalRerun: @MainActor @Sendable (IntentionalRerunDraft) async throws -> String
+  public var loadRetryState: @MainActor @Sendable (String, String) async throws -> TaskRetryState
+  public var authorizeRetry: @MainActor @Sendable (String, TaskRetryAuthorizationRequest) async throws -> TaskRetryAuthorization
+  public var reworkRetry: @MainActor @Sendable (String) async throws -> Void
+  public var resumeRetry: @MainActor @Sendable (String) async throws -> Void
   public var resume: @MainActor @Sendable (String) async -> Void
   /// Recover a worktree-compromised pod. Returns the daemon's response
   /// (recovered + human-readable message) so the UI can surface the outcome.
@@ -152,6 +161,15 @@ public struct PodActions: Sendable {
     approveFactWaiver: @escaping @MainActor @Sendable (String, String, String?) async -> Void = { _, _, _ in },
     spawnFix: @escaping @MainActor @Sendable (String, String?) async -> SpawnFixResponse? = { _, _ in nil },
     retryCreatePr: @escaping @MainActor @Sendable (String) async -> Void = { _ in },
+    retryDraftScope: String = "preview",
+    loadExecutionProvenance: @escaping @MainActor @Sendable (String) async throws -> ExecutionProvenanceResponse = { _ in throw URLError(.unsupportedURL) },
+    loadDispatchPreflight: @escaping @MainActor @Sendable (String) async throws -> DispatchPreflightResponse = { _ in throw URLError(.unsupportedURL) },
+    loadRerunTemplate: @escaping @MainActor @Sendable (String) async throws -> IntentionalRerunDraft = { _ in throw URLError(.unsupportedURL) },
+    createIntentionalRerun: @escaping @MainActor @Sendable (IntentionalRerunDraft) async throws -> String = { _ in throw URLError(.unsupportedURL) },
+    loadRetryState: @escaping @MainActor @Sendable (String, String) async throws -> TaskRetryState = { _, _ in throw URLError(.unsupportedURL) },
+    authorizeRetry: @escaping @MainActor @Sendable (String, TaskRetryAuthorizationRequest) async throws -> TaskRetryAuthorization = { _, _ in throw URLError(.unsupportedURL) },
+    reworkRetry: @escaping @MainActor @Sendable (String) async throws -> Void = { _ in throw URLError(.unsupportedURL) },
+    resumeRetry: @escaping @MainActor @Sendable (String) async throws -> Void = { _ in throw URLError(.unsupportedURL) },
     resume: @escaping @MainActor @Sendable (String) async -> Void = { _ in },
     recoverWorktree: @escaping @MainActor @Sendable (String) async -> RecoverWorktreeResponse? = { _ in nil },
     forceComplete: @escaping @MainActor @Sendable (String, String?) async -> Void = { _, _ in },
@@ -198,6 +216,15 @@ public struct PodActions: Sendable {
     self.approveFactWaiver = approveFactWaiver
     self.spawnFix = spawnFix
     self.retryCreatePr = retryCreatePr
+    self.retryDraftScope = retryDraftScope
+    self.loadExecutionProvenance = loadExecutionProvenance
+    self.loadDispatchPreflight = loadDispatchPreflight
+    self.loadRerunTemplate = loadRerunTemplate
+    self.createIntentionalRerun = createIntentionalRerun
+    self.loadRetryState = loadRetryState
+    self.authorizeRetry = authorizeRetry
+    self.reworkRetry = reworkRetry
+    self.resumeRetry = resumeRetry
     self.resume = resume
     self.recoverWorktree = recoverWorktree
     self.forceComplete = forceComplete

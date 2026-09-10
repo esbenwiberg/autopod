@@ -1,0 +1,36 @@
+- main [ref=e3]:
+  - link "← Scan reports" [ref=e4] [cursor=pointer]:
+    - /url: "#/scan-reports"
+  - heading "Report review" [level=1] [ref=e6]
+  - generic [ref=e7]:
+    - heading "Report evidence unavailable" [level=2] [ref=e8]
+    - paragraph [ref=e9]: "Recorded status: complete. A clean result cannot be verified."
+    - paragraph [ref=e10]: "Policy evidence unavailable: malformed stored record. Reconcile original evidence before acting."
+    - paragraph [ref=e11]: "Collection evidence unavailable: no clean result can be verified."
+    - paragraph [ref=e12]: "Judgment evidence unavailable: malformed stored record."
+    - paragraph [ref=e13]: 2026-09-07T10:00:00Z · Report completion is separate from patch delivery.
+    - paragraph [ref=e14]: Policy unavailable
+    - group [ref=e15]:
+      - generic "Exact source and files" [active] [ref=e16]
+      - paragraph [ref=e35]: Repository unavailable
+      - paragraph [ref=e36]: "Base: unavailable"
+      - paragraph [ref=e37]: "Head: unavailable"
+    - paragraph [ref=e17]: "Judgment: unavailable"
+  - alert [ref=e18]:
+    - heading "Some review records are unavailable" [level=2] [ref=e19]
+    - paragraph [ref=e20]: Loaded counts exclude these records. They remain stored and have not been resolved.
+    - paragraph [ref=e21]:
+      - strong [ref=e22]: report-fixture
+      - text: · Collection scope unavailable. Findings have not been enumerated.
+  - generic [ref=e23]:
+    - heading "Unresolved findings (0 loaded)" [level=2] [ref=e24]
+    - paragraph [ref=e25]: Includes earlier findings still awaiting resolution. Selecting a repair does not mark it fixed.
+    - paragraph [ref=e26]: 0 / 100 findings selected. Select up to 100 findings per decision.
+    - generic [ref=e27]:
+      - text: Reason
+      - textbox "Reason" [ref=e28]
+    - generic [ref=e29]:
+      - button "Defer" [disabled] [ref=e30]
+      - button "Record resolution" [disabled] [ref=e31]
+      - button "Record repair selection" [disabled] [ref=e32]
+  - heading "Recorded decisions" [level=2] [ref=e34]

@@ -23,7 +23,7 @@ import { loadOrCreateKey } from './crypto/credentials-cipher.js';
 import { createPodTokenIssuer } from './crypto/pod-tokens.js';
 import { createDbBackupManager } from './db/backup.js';
 import { createDatabase } from './db/connection.js';
-import { runMigrations } from './db/migrate.js';
+import { runMigrationsWithBackups } from './db/migrate.js';
 import { GhCliDaemonGitHubAuth } from './github/daemon-github-auth.js';
 import type {
   WarmImageMaintenanceJob,
@@ -90,6 +90,11 @@ import {
   createRuntimeRegistry,
 } from './runtimes/index.js';
 import { createSafetyEventsRepository } from './safety/safety-events-repository.js';
+import { auditNpmLockfile } from './scheduled-jobs/npm-lock-audit.js';
+import { createScanCoordinator } from './scheduled-jobs/scan-coordinator.js';
+import { createBoundedScanJudge } from './scheduled-jobs/scan-judge.js';
+import { createScanOperatorService } from './scheduled-jobs/scan-operator-service.js';
+import { createScanReportRepository } from './scheduled-jobs/scan-report-repository.js';
 import { createScheduledJobManager } from './scheduled-jobs/scheduled-job-manager.js';
 import { createScheduledJobRepository } from './scheduled-jobs/scheduled-job-repository.js';
 import { createScheduledJobScheduler } from './scheduled-jobs/scheduled-job-scheduler.js';
@@ -102,6 +107,7 @@ import {
 import { capLargeStrings } from './util/log-sanitizer.js';
 import { createHostBrowserRunner } from './validation/host-browser-runner.js';
 import { createLocalValidationEngine } from './validation/local-validation-engine.js';
+import { createValidationEvidenceCache } from './validation/validation-evidence-cache.js';
 import { AdoPrManager, parseAdoRepoUrl } from './worktrees/ado-pr-manager.js';
 import { LocalWorktreeManager } from './worktrees/local-worktree-manager.js';
 import { GhPrManager } from './worktrees/pr-manager.js';
@@ -230,7 +236,7 @@ const migrationsDir =
     path.join(__dirname, '..', 'src', 'db', 'migrations'),
   ].find((dir) => fs.existsSync(dir)) ?? path.join(__dirname, '..', 'src', 'db', 'migrations');
 
-runMigrations(db, migrationsDir, logger, DB_PATH);
+await runMigrationsWithBackups(db, migrationsDir, logger, DB_PATH);
 
 const backupManager = createDbBackupManager(db, DB_PATH, logger, {
   intervalMs: process.env.AUTOPOD_BACKUP_INTERVAL_MS
@@ -262,6 +268,10 @@ const podsitterRepo = createPodsitterRepository(db);
 // the same live provider-account credentials the agent authenticates with.
 const llmDeps = { profileStore, providerAccountStore };
 const podRepo = createPodRepository(db);
+podRepo.taskRetries?.recoverInterrupted();
+podRepo.sandboxStartupRetries?.recoverInterrupted();
+podRepo.codexInterruptionRetries?.recoverInterrupted();
+podRepo.workerRetries?.recoverInterrupted();
 const providerAttemptRepo = createProviderAttemptRepository(db);
 const tokenTelemetryRepair = createTokenTelemetryRepair({ db, podRepo, providerAttemptRepo });
 const eventRepo = createEventRepository(db);
@@ -702,6 +712,7 @@ const validationEngine = createLocalValidationEngine(
   logger,
   hostBrowserRunner,
   screenshotStore,
+  createValidationEvidenceCache(db),
 );
 
 const runtimeRegistry = createRuntimeRegistry([
@@ -851,9 +862,50 @@ function makeActionEngine(_profile: import('@autopod/shared').Profile) {
 // Scheduled jobs
 const scheduledJobRepo = createScheduledJobRepository(db);
 const scheduledJobTemplateRepo = createScheduledJobTemplateRepository(db);
+const scanReportRepo = createScanReportRepository(db);
+scanReportRepo.recoverInterrupted();
+const scanCoordinator = createScanCoordinator({
+  reports: scanReportRepo,
+  collector: { auditLockfile: auditNpmLockfile },
+  logger,
+  async prepare(job, reportId) {
+    const profile = profileStore.get(job.profileName);
+    if (!profile.repoUrl || !job.scan) throw new Error('Scan repository or policy unavailable');
+    const repository = new URL(profile.repoUrl);
+    repository.username = '';
+    repository.password = '';
+    repository.search = '';
+    repository.hash = '';
+    if (profile.prProvider !== 'ado' && repository.hostname !== 'github.com')
+      throw new Error('Scan repository host does not match GitHub credential authority');
+    const judge =
+      job.scan.judgment === 'bounded'
+        ? createBoundedScanJudge(profile, llmDeps, logger)
+        : undefined;
+    const pat =
+      profile.prProvider === 'ado'
+        ? await azureDevOpsAuth.getToken()
+        : (await githubAuth.resolveCredential()).token;
+    const workdir = await worktreeManager.create({
+      repoUrl: profile.repoUrl,
+      branch: `autopod/scan-${reportId}`,
+      baseBranch: job.scan.baseRef,
+      startBranch: job.scan.headRef,
+      sessionId: `scan-${reportId}`,
+      pat,
+    });
+    return {
+      workdir: workdir.worktreePath,
+      repository: repository.toString(),
+      judge,
+      cleanup: () => worktreeManager.cleanup(workdir.worktreePath),
+    };
+  },
+});
 const scheduledJobManager = createScheduledJobManager({
   scheduledJobRepo,
   scheduledJobTemplateRepo,
+  scanCoordinator,
   podManager,
   eventBus,
   logger,
@@ -1086,6 +1138,12 @@ const app = await createServer({
   memoryUsageRepo,
   pendingOverrideRepo,
   scheduledJobManager,
+  scanOperatorService: createScanOperatorService({
+    reports: scanReportRepo,
+    jobs: scheduledJobRepo,
+    profiles: profileStore,
+    pods: podManager,
+  }),
   safetyEventsRepo,
   issueWatcherRepo,
   screenshotStore,
@@ -1095,6 +1153,7 @@ const app = await createServer({
   onShutdown: () => void shutdown('API'),
   modelManager,
   securityMlEnabled,
+  backupManager,
 });
 
 const sandboxTerminalReaper = sandboxContainerManager

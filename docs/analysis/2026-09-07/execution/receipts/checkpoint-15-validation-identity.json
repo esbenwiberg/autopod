@@ -1,0 +1,8 @@
+{
+  "commit": "6789690c5718d4b487417758bde9e079b3fd7532",
+  "startingStatus": "",
+  "trackingMain": "2d5456edac542a99d27f12eb1dbd16e5ad8c2c2a",
+  "startedAt": "2026-09-07T16:23:41.024473+00:00",
+  "command": "./scripts/validate.sh",
+  "scope": "Local repository full pipeline; no live acceptance"
+}

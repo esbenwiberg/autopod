@@ -1,0 +1,26 @@
+[1/1] Compiling plugin GenerateManual
+[2/2] Compiling plugin GenerateDoccReference
+Building for debugging...
+[2/7] Write sources
+[3/7] Write swift-version--58304C5D6DBC2206.txt
+[5/7] Compiling AutopodClientTests FactWaiverRefreshTests.swift
+[6/7] Emitting module AutopodClientTests
+[6/8] Write Objects.LinkFileList
+[7/8] Linking AutopodDesktopPackageTests
+Build complete! (2.70s)
+Test Suite 'Selected tests' started at 2026-09-08 16:13:38.942.
+Test Suite 'AutopodDesktopPackageTests.xctest' started at 2026-09-08 16:13:38.947.
+Test Suite 'AutopodDesktopPackageTests.xctest' passed at 2026-09-08 16:13:38.947.
+	 Executed 0 tests, with 0 failures (0 unexpected) in 0.000 (0.000) seconds
+Test Suite 'Selected tests' passed at 2026-09-08 16:13:38.947.
+	 Executed 0 tests, with 0 failures (0 unexpected) in 0.000 (0.005) seconds
+◇ Test run started.
+↳ Testing Library Version: 1902
+↳ Target Platform: arm64e-apple-macos14.0
+◇ Test factWaiverRefreshUsesServerStateWithoutWebSocket(status:) started.
+◇ Test case passing 1 argument status → "running" to factWaiverRefreshUsesServerStateWithoutWebSocket(status:) started.
+◇ Test case passing 1 argument status → "review_required" to factWaiverRefreshUsesServerStateWithoutWebSocket(status:) started.
+◇ Test case passing 1 argument status → "failed" to factWaiverRefreshUsesServerStateWithoutWebSocket(status:) started.
+✘ Test factWaiverRefreshUsesServerStateWithoutWebSocket(status:) recorded an issue with 1 argument status → "running" at FactWaiverRefreshTests.swift:22:3: Expectation failed: (pod.errorSummary → nil) == "Uncollected guidance retained"
+✘ Test factWaiverRefreshUsesServerStateWithoutWebSocket(status:) with 3 test cases failed after 0.034 seconds with 1 issue.
+✘ Test run with 1 test in 0 suites failed after 0.034 seconds with 1 issue.

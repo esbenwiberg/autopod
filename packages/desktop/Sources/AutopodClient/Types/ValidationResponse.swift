@@ -169,6 +169,7 @@ public struct AssertionResultResponse: Codable, Sendable {
 // MARK: - Test
 
 public struct TestResultResponse: Codable, Sendable {
+  public let reusedEvidence: ReusedValidationEvidenceResponse?
   public let status: String
   public let duration: Int
   public let stdout: String?
@@ -178,6 +179,7 @@ public struct TestResultResponse: Codable, Sendable {
 // MARK: - Lint
 
 public struct LintResultResponse: Codable, Sendable {
+  public let reusedEvidence: ReusedValidationEvidenceResponse?
   public let status: String
   public let output: String
   public let duration: Int
@@ -382,4 +384,12 @@ public struct AdvisoryBrowserQaObservationResponse: Codable, Sendable {
   public let details: String?
   public let screenshots: [ScreenshotRefResponse]
   public let suggestedFacts: [String]?
+}
+
+public struct ReusedValidationEvidenceResponse: Codable, Sendable, Equatable {
+  public let receiptId: String
+  public let identityHash: String
+  public let originalPodId: String
+  public let originalExecutedAt: String
+  public let originalDurationMs: Int
 }

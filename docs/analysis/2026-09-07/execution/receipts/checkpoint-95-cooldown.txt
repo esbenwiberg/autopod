@@ -1,0 +1,35 @@
+
+ RUN  v4.1.11 /private/tmp/autopod-durable-execution/packages/daemon
+
+ ❯ src/pods/pod-manager.test.ts (623 tests | 1 failed | 617 skipped) 345ms
+     × checks the persisted outer worker cooldown before iterator entry: superseded 62ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/pods/pod-manager.test.ts > PodManager > checks the persisted outer worker cooldown before iterator entry: superseded
+AssertionError: promise resolved "'stopped'" instead of rejecting
+
+- Expected:
+Error {
+  "message": "rejected promise",
+}
+
++ Received:
+"stopped"
+
+ ❯ src/pods/pod-manager.test.ts:3226:30
+    3224|           expect(pulls).toBe(1);
+    3225|         } else {
+    3226|           await expect(result).rejects.toThrow();
+       |                              ^
+    3227|           expect(pulls).toBe(0);
+    3228|           expect(ctx.podRepo.workerRetries?.state(pod.id)).toMatchObje…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 5 passed | 617 skipped (623)
+   Start at  19:38:26
+   Duration  2.17s (transform 1.15s, setup 0ms, import 1.69s, tests 345ms, environment 0ms)
+

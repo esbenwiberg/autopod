@@ -1,0 +1,43 @@
+
+ RUN  v4.1.11 /private/tmp/autopod-durable-execution/packages/daemon
+
+ ❯ src/scheduled-jobs/scan-report-repository.test.ts (26 tests | 3 failed) 1760ms
+     × upgrades existing schema 139 while preserving legacy records and durable report recovery 128ms
+     × upgrades existing schema 154 while preserving legacy records and durable report recovery 117ms
+     × retains one unresolved identity across changed line locations, empty delta and interrupted collection 46ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 3 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/scheduled-jobs/scan-report-repository.test.ts > scheduled scan reports independent of worker lifetime > upgrades existing schema 139 while preserving legacy records and durable report recovery
+ FAIL  src/scheduled-jobs/scan-report-repository.test.ts > scheduled scan reports independent of worker lifetime > upgrades existing schema 154 while preserving legacy records and durable report recovery
+AutopodError: Scan report scope unavailable; inspect the paged review before enumerating findings
+ ❯ Object.unresolved src/scheduled-jobs/scan-report-repository.ts:72:13
+     70|     const report = get(reportId);
+     71|     if (!report.collection || report.collection.repository === 'unavai…
+     72|       throw new AutopodError('Scan report scope unavailable; inspect t…
+       |             ^
+     73|     const rows = db
+     74|       .prepare(`SELECT DISTINCT ${scanFindingProjection} FROM schedule…
+ ❯ src/scheduled-jobs/scan-report-repository.test.ts:492:21
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/3]⎯
+
+ FAIL  src/scheduled-jobs/scan-report-repository.test.ts > scheduled scan reports independent of worker lifetime > retains one unresolved identity across changed line locations, empty delta and interrupted collection
+AutopodError: Scan report scope unavailable; inspect the paged review before enumerating findings
+ ❯ Object.unresolved src/scheduled-jobs/scan-report-repository.ts:72:13
+     70|     const report = get(reportId);
+     71|     if (!report.collection || report.collection.repository === 'unavai…
+     72|       throw new AutopodError('Scan report scope unavailable; inspect t…
+       |             ^
+     73|     const rows = db
+     74|       .prepare(`SELECT DISTINCT ${scanFindingProjection} FROM schedule…
+ ❯ src/scheduled-jobs/scan-report-repository.test.ts:534:19
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/3]⎯
+
+
+ Test Files  1 failed | 4 passed (5)
+      Tests  3 failed | 641 passed (644)
+   Start at  14:36:27
+   Duration  33.08s (transform 2.46s, setup 0ms, import 3.61s, tests 36.69s, environment 0ms)
+

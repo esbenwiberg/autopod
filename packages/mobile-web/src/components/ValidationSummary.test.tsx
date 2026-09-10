@@ -43,7 +43,7 @@ describe('validation display helpers', () => {
     expect(validationItemsForDisplay([], latest).map((item) => item.result.attempt)).toEqual([2]);
   });
 
-  it('merges history and live latest by attempt in latest-first order', () => {
+  it('retains durable failures when a latest snapshot disagrees with the same display attempt', () => {
     const attemptOne = result({ attempt: 1 });
     const attemptTwo = result({ attempt: 2, overall: 'fail' });
     const newerAttemptTwo = result({ attempt: 2, overall: 'pass' });
@@ -53,8 +53,40 @@ describe('validation display helpers', () => {
       newerAttemptTwo,
     );
 
-    expect(items.map((item) => item.result.attempt)).toEqual([2, 1]);
-    expect(items[0]?.result.overall).toBe('pass');
+    expect(items.map((item) => item.result.attempt)).toEqual([2, 2, 1]);
+    expect(items.map((item) => item.result.overall)).toEqual(['pass', 'fail', 'pass']);
+  });
+
+  it('uses durable history sequence when Resume resets display attempt numbers', () => {
+    const first = {
+      ...stored(3, result({ attempt: 3, overall: 'fail' })),
+      id: 'old',
+      sequence: 3,
+      cycle: 0,
+    };
+    const resumed = { ...stored(1, result({ attempt: 1 })), id: 'resumed', sequence: 4, cycle: 1 };
+    expect(
+      validationItemsForDisplay([first, resumed], resumed.result).map((item) => item.id),
+    ).toEqual(['resumed', 'old']);
+  });
+  it('does not show empty page coverage as a pass and identifies reused test evidence', () => {
+    const rows = rowsFor(
+      result({
+        test: {
+          status: 'pass',
+          duration: 0,
+          reusedEvidence: {
+            receiptId: 'original-receipt',
+            identityHash: 'a'.repeat(64),
+            originalPodId: 'other-pod',
+            originalExecutedAt: '2026-09-07T00:00:00Z',
+            originalDurationMs: 1000,
+          },
+        },
+      }),
+    );
+    expect(rows).toContainEqual(expect.objectContaining({ label: 'pages (0)', status: 'skip' }));
+    expect(rows.find((row) => row.label === 'test')?.note).toContain('Reused');
   });
 
   it('labels infrastructure failure without claiming tests failed', () => {
@@ -130,6 +162,45 @@ describe('ValidationSummary', () => {
     if (!button) throw new Error(`button not found: ${text}`);
     button.dispatchEvent(new MouseEvent('click', { bubbles: true }));
   }
+
+  it('shows unavailable reviewer execution as failed and keeps prior finding history', async () => {
+    const reason =
+      'Review failed: Foundry tool review unavailable on the selected provider binding; reconcile it before retry.';
+    const current = result({
+      overall: 'fail',
+      reviewSkipKind: 'review-failed',
+      reviewSkipReason: reason,
+      taskReview: {
+        status: 'fail',
+        reasoning: reason,
+        issues: ['Retained prior finding'],
+        model: 'selected',
+        screenshots: [],
+      },
+    });
+    await act(async () => {
+      root.render(<ValidationSummary history={[stored(1, result()), stored(2, current)]} />);
+    });
+    expect(container.textContent).toContain(reason);
+    expect(rowsFor(current).find((row) => row.label === 'review')).toMatchObject({
+      status: 'fail',
+      note: reason,
+    });
+    await act(async () => {
+      clickByText('Show previous 1 attempt');
+    });
+    expect(container.textContent).toContain('Validation #1');
+    expect(current.taskReview?.issues).toEqual(['Retained prior finding']);
+    expect(
+      rowsFor(
+        result({
+          overall: 'fail',
+          reviewSkipKind: 'review-failed',
+          reviewSkipReason: 'Reviewer termination could not be confirmed',
+        }),
+      ).find((row) => row.label === 'review')?.status,
+    ).toBe('fail');
+  });
 
   it('shows only the latest validation attempt by default', async () => {
     await act(async () => {

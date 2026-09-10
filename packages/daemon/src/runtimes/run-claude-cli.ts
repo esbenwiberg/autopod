@@ -1,6 +1,12 @@
 import { type ChildProcess, type SpawnOptions, spawn } from 'node:child_process';
+import { type HostCliDispatchEvidence, runWithHostCliProvenance } from './host-cli-provenance.js';
 
-export type ClaudeCliErrorKind = 'non-zero-exit' | 'timeout' | 'spawn-error' | 'maxbuffer';
+export type ClaudeCliErrorKind =
+  | 'non-zero-exit'
+  | 'timeout'
+  | 'spawn-error'
+  | 'maxbuffer'
+  | 'termination-failed';
 
 export interface ClaudeCliErrorFields {
   kind: ClaudeCliErrorKind;
@@ -43,6 +49,8 @@ function buildMessage(fields: ClaudeCliErrorFields): string {
   const stdoutPreview = fields.stdoutPreview.trim().slice(0, 500);
 
   switch (fields.kind) {
+    case 'termination-failed':
+      return `${cmd} termination could not be confirmed after bounded cancellation`;
     case 'timeout':
       return `${cmd} timed out after ${fields.timeoutMs ?? fields.durationMs}ms`;
     case 'maxbuffer':
@@ -95,20 +103,31 @@ export interface ClaudeCliTokenUsage {
  * fields (exit code, signal, stderr, duration) so callers and the UI can
  * tell what actually went wrong rather than guessing from substring matches.
  */
-export function runClaudeCli(opts: {
+export interface ClaudeCliOptions {
+  /** Trusted receipt writer enables host identity verification before reviewer dispatch. */
+  recordHostDispatch?: (evidence: HostCliDispatchEvidence) => void;
   model: string;
   input: string;
   timeout: number;
   maxBuffer?: number;
   /** Test seam — defaults to node's `child_process.spawn`. */
   spawnImpl?: SpawnImpl;
+  /** Execution directory and environment for the selected host runner. */
+  spawnOptions?: SpawnOptions;
+  /** Synchronous ownership check immediately before dispatch; never launches after rejection. */
+  beforeSpawn?: () => void;
   /** Test seam — defaults to `'claude'`. */
   command?: string;
   /** Output format for the default args. JSON lets callers capture cost/token telemetry. */
   outputFormat?: 'text' | 'json';
   /** Test seam — defaults to `['-p', '--model', model, '--output-format', outputFormat]`. */
   args?: readonly string[];
-}): Promise<{ stdout: string; tokenUsage?: ClaudeCliTokenUsage }> {
+}
+
+export function runClaudeCli(
+  opts: ClaudeCliOptions,
+): Promise<{ stdout: string; tokenUsage?: ClaudeCliTokenUsage }> {
+  if (opts.recordHostDispatch) return runWithHostCliProvenance(opts, runClaudeCli);
   const maxBuf = opts.maxBuffer ?? 2 * 1024 * 1024;
   const spawnFn = opts.spawnImpl ?? spawn;
   const command = opts.command ?? 'claude';
@@ -118,14 +137,20 @@ export function runClaudeCli(opts: {
 
   return new Promise((resolve, reject) => {
     let settled = false;
+    let escalationTimer: ReturnType<typeof setTimeout> | undefined;
+    let terminationTimer: ReturnType<typeof setTimeout> | undefined;
     const settle = (fn: () => void) => {
       if (!settled) {
         settled = true;
+        clearTimeout(timer);
+        clearTimeout(escalationTimer);
+        clearTimeout(terminationTimer);
         fn();
       }
     };
 
-    const child = spawnFn(command, args);
+    opts.beforeSpawn?.();
+    const child = spawnFn(command, args, opts.spawnOptions);
 
     if (child.stdin) {
       child.stdin.write(opts.input);
@@ -136,56 +161,86 @@ export function runClaudeCli(opts: {
     let stdout = '';
     let stderr = '';
     let stdoutLen = 0;
-    let maxBufferExceeded = false;
-
-    const timer = setTimeout(() => {
-      child.kill('SIGTERM');
-      settle(() =>
-        reject(
-          new ClaudeCliError({
-            kind: 'timeout',
-            model: opts.model,
-            exitCode: null,
-            signal: 'SIGTERM',
-            stderr,
-            stdoutPreview: stdout.slice(0, 500),
-            durationMs: Date.now() - startTs,
-            timeoutMs: opts.timeout,
-          }),
-        ),
-      );
-    }, opts.timeout);
+    let cancellation: 'timeout' | 'maxbuffer' | undefined;
+    let observedExit: { code: number | null; signal: NodeJS.Signals | null } | undefined;
+    const cancellationError = (
+      kind: ClaudeCliErrorKind,
+      exitCode: number | null = null,
+      signal: NodeJS.Signals | null = null,
+      cause?: unknown,
+    ) =>
+      new ClaudeCliError({
+        kind,
+        model: opts.model,
+        exitCode,
+        signal,
+        stderr,
+        stdoutPreview: stdout.slice(0, 500),
+        durationMs: Date.now() - startTs,
+        timeoutMs: opts.timeout,
+        cause,
+      });
+    const finishCancellation = (code: number | null, signal: NodeJS.Signals | null) => {
+      const reason = cancellation;
+      if (!reason) return;
+      settle(() => reject(cancellationError(reason, code, signal)));
+      // The owned process exited. Descendant-held pipes must not keep this
+      // cancelled collector alive; this does not prove descendant termination.
+      child.stdout?.destroy();
+      child.stderr?.destroy();
+      child.stdin?.destroy();
+    };
+    const cancel = (reason: 'timeout' | 'maxbuffer') => {
+      if (settled || cancellation) return;
+      cancellation = reason;
+      clearTimeout(timer);
+      if (observedExit) {
+        finishCancellation(observedExit.code, observedExit.signal);
+        return;
+      }
+      terminationTimer = setTimeout(() => {
+        settle(() => reject(cancellationError('termination-failed')));
+      }, 10_000);
+      escalationTimer = setTimeout(() => {
+        try {
+          child.kill('SIGKILL');
+        } catch {
+          /* Exit still requires observation. */
+        }
+      }, 5_000);
+      try {
+        child.kill('SIGTERM');
+      } catch (cause) {
+        settle(() => reject(cancellationError('termination-failed', null, null, cause)));
+      }
+    };
+    const timer = setTimeout(() => cancel('timeout'), opts.timeout);
 
     child.stdout?.on('data', (chunk: Buffer) => {
+      if (settled || cancellation) return;
       stdoutLen += chunk.length;
       if (stdoutLen > maxBuf) {
-        maxBufferExceeded = true;
-        child.kill('SIGTERM');
-        settle(() =>
-          reject(
-            new ClaudeCliError({
-              kind: 'maxbuffer',
-              model: opts.model,
-              exitCode: null,
-              signal: 'SIGTERM',
-              stderr,
-              stdoutPreview: stdout.slice(0, 500),
-              durationMs: Date.now() - startTs,
-            }),
-          ),
-        );
+        cancel('maxbuffer');
         return;
       }
       stdout += chunk.toString();
     });
 
     child.stderr?.on('data', (chunk: Buffer) => {
-      stderr += chunk.toString();
+      if (!settled) stderr = (stderr + chunk.toString()).slice(-4_000);
+    });
+
+    child.on('exit', (code, signal) => {
+      observedExit = { code, signal };
+      if (cancellation) finishCancellation(code, signal);
     });
 
     child.on('close', (code, signal) => {
       clearTimeout(timer);
-      if (maxBufferExceeded) return;
+      if (cancellation) {
+        finishCancellation(code, signal);
+        return;
+      }
       if (code === 0) {
         settle(() => resolve(parseClaudeCliStdout(stdout, outputFormat)));
         return;
@@ -206,6 +261,8 @@ export function runClaudeCli(opts: {
     });
 
     child.on('error', (err) => {
+      // A signal-delivery error is not evidence that the child exited.
+      if (cancellation) return;
       clearTimeout(timer);
       settle(() =>
         reject(

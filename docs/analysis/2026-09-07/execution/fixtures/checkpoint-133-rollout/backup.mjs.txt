@@ -1,0 +1,28 @@
+import fs from 'node:fs';
+import path from 'node:path';
+import assert from 'node:assert/strict';
+import Database from 'better-sqlite3';
+import { snapshotBeforeCutover,verifyBackupRestore,databaseIdentity,databaseWatermark,verifyUpgradeCopy,runMigrations,migrationHash } from './cutover-library.mjs';
+const database='/data/autopod/autopod.db';
+const release='/opt/autopod/releases/988d7c9d';
+const ops='/data/autopod/rollout-133';
+const info=fs.statSync(database);assert.equal(info.dev,2049);assert.equal(info.ino,13107203);
+const db=new Database(database,{readonly:true,fileMustExist:true});
+const logger={info(){},warn(){},debug(){},error(){}};
+try {
+ assert.equal(db.prepare('SELECT MAX(version) AS n FROM schema_version').get().n,153);
+ const before=new Set(fs.readdirSync('/data/autopod/backups'));
+ await snapshotBeforeCutover(db,database,logger,'goal-133-cutover');
+ const names=fs.readdirSync('/data/autopod/backups').filter(n=>!before.has(n)&&n.endsWith('-goal-133-cutover.db'));assert.equal(names.length,1);
+ const snapshot=path.join('/data/autopod/backups',names[0]);
+ const verified=await verifyBackupRestore(snapshot,{expectedSourceIdentity:databaseIdentity(database),maxAgeMs:30*60000});
+ assert.equal(verified.watermarkScope,'all_tables');
+ assert.deepEqual(databaseWatermark(db),verified.watermark);
+ const migrations=release+'/packages/daemon/src/db/migrations';
+ const upgrade=verifyUpgradeCopy({Database,runMigrations,snapshot,expectedSnapshotHash:verified.sha256,migrationsDir:migrations,expectedMigrationHash:migrationHash(migrations),scratchParent:ops,expectedBeforeVersion:153,maxMs:240000});
+ assert.equal(upgrade.status,'isolated_upgrade_verified');assert.equal(upgrade.isolatedDirectoryRemoved,true);
+ assert.deepEqual(databaseWatermark(db),verified.watermark);
+ const receipt={status:'fresh_backup_and_upgrade_verified',candidate:'988d7c9dc425587e31f2f600a0ce97090e00df0f',snapshot,sourceIdentity:verified.sourceIdentity,sha256:verified.sha256,watermarkScope:verified.watermarkScope,tableCount:Object.keys(verified.watermark).length,activeMatchesSnapshotWatermark:true,upgrade,verifiedAt:new Date().toISOString()};
+ fs.writeFileSync(ops+'/backup-receipt.json',JSON.stringify(receipt),{flag:'wx',mode:0o600});
+ console.log(JSON.stringify(receipt));
+}finally{db.close();}

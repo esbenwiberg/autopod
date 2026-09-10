@@ -1,0 +1,9 @@
+{
+  "scope": "local label policy; exact Azure 400 cause unconfirmed",
+  "oldRawDigestLabelLength": 71,
+  "oldRawDigestLabelPass": false,
+  "newEncodedDigestLabelLength": 45,
+  "newAllSandboxLabelsPass": true,
+  "digestLosslesslyRecovered": true,
+  "diskLabelPreservesFullDigest": true
+}

@@ -1,0 +1,215 @@
+2d5456ed 2026-08-26 build: harden Turbo task orchestration
+0674b95f 2026-08-24 fix: bind Azure DevOps auth to tenant
+ad6b5366 2026-08-24 fix: use daemon Entra auth for Azure DevOps
+a8d3a595 2026-08-24 fix: allow Codex OAuth token refresh
+24f86cff 2026-08-23 Fix validation history identity and worker accounting
+430884a9 2026-08-23 fix(codex): use HTTP transport in Azure sandboxes
+26e8b07d 2026-08-20 autopod sandbox checkpoint
+a25373c4 2026-08-20 fix(pods): complete strict fetch recovery validation
+6f99b067 2026-08-20 fix(pods): classify initial repository fetch failures
+7a2c5cbe 2026-08-20 test(pods): cover strict remote fetch gate transitions
+ef345dbe 2026-08-20 fix(pods): rehydrate durable host fetch retries
+4fd69318 2026-08-20 fix(pods): require fresh remote refs before provisioning
+5fa80232 2026-08-14 fix(validation): close failed reviewed findings
+c33ada79 2026-08-14 fix(review): enforce structured closure output
+dcb6aba9 2026-08-14 fix(review): accept fenced closure JSON
+1704c149 2026-08-14 fix(review): isolate synthesis budget
+bf21fe42 2026-08-14 fix(review): give finding closure its own budget
+9f9914a8 2026-08-14 fix(review): preserve finding closure budget
+ac08de86 2026-08-14 fix(pods): resume review infrastructure failures
+dfa982b8 2026-08-14 fix(validation): classify degraded review closure
+3cb61e7d 2026-08-14 fix(daemon): harden previews and document recovery
+7a980ce4 2026-08-14 fix(validation): honor waivers during resume
+6439977c 2026-08-14 fix(validation): bound reviewer execution and clarify failures
+5fc75cc0 2026-08-14 fix(podsitter): bound sandbox evidence traffic
+24351a12 2026-08-13 fix(sandbox): preserve validation-only recovery
+8c54bf9a 2026-08-13 fix(daemon): create sandbox PID directory as root
+909debb5 2026-08-13 fix(deploy): verify health after truncated journal output
+889db4a0 2026-08-13 fix(daemon): harden hosted restart recovery
+e883ddca 2026-08-12 fix(validation): freeze repair finding sets
+118c01de 2026-08-12 fix(validation): ignore inherited protected paths
+84e08bd9 2026-08-12 feat(validation): show live review council progress
+022bea12 2026-08-11 fix(quality): retain verified inspection telemetry
+07d04e95 2026-08-11 fix: classify sandbox native memory exhaustion
+be5ec13e 2026-08-11 Fix review closure across sandbox checkpoints (#310)
+e48b1e6e 2026-08-11 feat(ops): add guarded hosted VM cleanup
+47cc835d 2026-08-11 fix(pods): stop validation-only agent retries
+e0150825 2026-08-11 fix: prevent pod completion hangs and ghost cards
+1dadaa26 2026-08-10 fix(validation): pass env during revalidation (#309)
+ca1d6c15 2026-08-10 fix(validation): preserve rebased scope and start env (#308)
+2e8f03c4 2026-08-10 autopod sandbox checkpoint
+10de4715 2026-08-10 fix(pods): avoid pre-agent sandbox checkpoints
+26af2bc1 2026-08-10 fix(pods): harden sandbox recovery safety
+aa1692f1 2026-08-10 fix(pods): recover transient sandbox failures
+ded9cf52 2026-08-10 autopod sandbox checkpoint
+3f98004d 2026-08-10 fix(pods): guard infrastructure recovery persistence
+bb5629d1 2026-08-10 feat(sandbox): persist transient 403 recovery failures
+658a0f8c 2026-08-10 docs(spec): add pod spec files
+ed442100 2026-08-10 fix: classify sandbox OOM as infrastructure (#306)
+c1f49968 2026-08-10 fix(deploy): retry daemon startup health (#305)
+a70648fd 2026-08-10 fix(deploy): honor explicit force restarts (#304)
+250ae3d9 2026-08-10 fix(validation): preserve council authority across retries (#303)
+31a4012c 2026-08-09 autopod sandbox checkpoint
+fe2194ab 2026-08-09 fix(spec): detect cycles despite title errors
+3ee37d7f 2026-08-09 test(series): validate scaffold and dispatch gates
+2ef04c9c 2026-08-09 fix(series): aggregate canonical preflight diagnostics
+7331deb8 2026-08-09 test(contract): cover aggregate semantic diagnostics
+0242282b 2026-08-09 test(spec): cover aggregate diagnostics
+604211dc 2026-08-09 feat(series): add canonical contract preflight
+09051e3a 2026-08-08 autopod sandbox checkpoint
+130c50c8 2026-08-08 fix(pods): reject invalid since calendar dates
+a65a431a 2026-08-08 feat(pods): filter lists by creation recency
+1fd8ab00 2026-08-08 fix(validation): adjudicate recurring findings independently (#299)
+67b61b37 2026-08-08 autopod sandbox checkpoint
+03bed286 2026-08-08 fix(pods): make lifecycle epochs monotonic
+482a6697 2026-08-08 fix(pods): fence stale agent event cleanup
+53d70d54 2026-08-08 fix(podsitter): classify invalid decision output
+15fa4be7 2026-08-08 test(pods): cover lifecycle generation persistence
+5b5634b4 2026-08-08 fix(pods): fence stale rework continuations
+435af724 2026-08-07 autopod sandbox checkpoint
+9612a045 2026-08-07 fix(quality): reject incomplete shell evidence
+8cfa12b0 2026-08-07 fix(quality): reject flattened shell wrappers
+fc612966 2026-08-07 style(quality): satisfy regression lint
+23327981 2026-08-07 test(api): cover Codex quality persistence path
+49a2ee65 2026-08-07 fix(quality): fail closed on malformed Codex argv
+b990fcb7 2026-08-07 autopod sandbox checkpoint
+9a86e727 2026-08-07 fix(quality): close structured evidence gaps
+1df8f24e 2026-08-07 fix(quality): normalize direct Codex argv reads
+43cef675 2026-08-07 fix(quality): reject flattened sh wrappers
+55d83203 2026-08-07 fix(quality): preserve Codex command argv evidence
+4140952c 2026-08-07 feat: Implement the following confirmed Autopod reviewer-council bu... (#297)
+7c492728 2026-08-07 fix(validation): repair reviewer structured output schemas
+08c53819 2026-08-06 autopod sandbox checkpoint
+711fcfe1 2026-08-06 fix(daemon): classify sandbox completion from checkpoint
+026a8eb0 2026-08-06 fix(sandboxes): clear recovered worktree state
+213cbbf3 2026-08-06 fix(sandboxes): harden workspace checkpoint races
+df1e4639 2026-08-05 fix(worktrees): persist checkpoint sequences
+8e4338ff 2026-08-05 fix(worktrees): accept safe checkpoint siblings
+4880c516 2026-08-05 fix(pods): validate fresh recovery containers
+cdb0909c 2026-08-05 fix(images): pin Pilot tmux toolchain
+4b401f1e 2026-08-05 autopod sandbox checkpoint
+c74b4295 2026-08-05 fix(deploy): scope active pod preflight
+cc7ec465 2026-08-05 fix(sandbox): recover committed checkpoints
+56563a5f 2026-08-05 fix(sandbox): bundle checkpoint by named ref
+7cd89ccd 2026-08-05 test(daemon): cover failed sandbox cleanup
+b801fdf8 2026-08-05 fix(daemon): bound terminal sandbox deletes
+a36e3fa9 2026-08-05 fix(daemon): validate sandbox reaper interval
+5639eaa1 2026-08-05 test(daemon): cover sandbox terminal reaper
+6b37978a 2026-08-05 fix(daemon): reap terminal Azure sandboxes
+0fc0c027 2026-08-05 fix(desktop): retain resolved council provenance
+98e9e758 2026-08-05 fix(desktop): reconcile council fallback provenance
+8559cba8 2026-08-05 feat(desktop): clarify review council lifecycle
+e4588794 2026-08-05 fix(validation): preserve canonical merge provenance
+e1581971 2026-08-05 fix(validation): fail closed on synthesis head drift
+136b5242 2026-08-05 style(validation): format council lifecycle checks
+04e22370 2026-08-05 test(validation): cover degraded council fallback
+b8ec6d51 2026-08-05 feat(validation): canonicalize council ledger authority
+e78831a0 2026-08-05 fix(sandbox): fingerprint dirty checkpoint state
+4b9f854e 2026-08-05 feat(sandbox): schedule durable checkpoints
+7bf898ad 2026-08-05 feat(sandbox): add checkpoint durability controller
+4553445b 2026-08-04 test(sandbox): inject verified checkpoint proof
+9c968c2f 2026-08-04 fix(sandbox): checkpoint validation sync
+0e6533d7 2026-08-04 fix(sandbox): guard checkpoint promotion
+4c41859a 2026-08-04 feat(sandbox): checkpoint source delivery
+84e08d88 2026-08-05 fix(validation): block retry after unconfirmed termination
+279feaf9 2026-08-05 fix(validation): confirm Codex termination before retry
+d2a3df40 2026-08-04 test(validation): account for reviewer cleanup
+28c72d71 2026-08-04 fix(validation): align reviewer cli schema contracts
+7cb8f0a5 2026-08-04 fix(validation): tighten structured review parsing
+08cbe88b 2026-08-04 feat(validation): fail close review axis responses
+9ad212bb 2026-08-04 fix(validation): preserve hoisted review history
+fcbf1bda 2026-08-04 fix(validation): await council timeout termination
+384c1bc1 2026-08-04 fix(validation): bound frozen council reviews
+ffbd746b 2026-08-04 docs(spec): add pod spec files
+abd82178 2026-08-04 fix(scripts): restore the executable bit on ten shell scripts
+95194ba3 2026-08-04 fix(desktop): repair two Swift compile errors
+a68fbb41 2026-08-04 fix(scripts): drop the ripgrep dependency from the deploy test
+fd484538 2026-08-04 fix(daemon): publish validation screenshots to a side branch
+769be1b9 2026-08-04 feat(desktop): warn when a memory limit exceeds the execution target
+b877250e 2026-08-04 feat: add node24 stack templates
+e758b45a 2026-08-04 fix(daemon): surface the sandbox memory ceiling to agents and operators
+0eca4b8b 2026-08-04 fix: validate and explain series dependencies
+510d06c6 2026-08-03 chore: remove legacy skills
+28412549 2026-08-04 test(desktop): exercise review status projection
+0de48c7a 2026-08-04 fix(desktop): preserve failed review verdicts
+b2b80c94 2026-08-04 fix(desktop): retain dismiss actions after overflow
+750c4056 2026-08-04 fix(desktop): retain completed live councils
+9c403549 2026-08-04 fix(desktop): show review council axis durations
+954dda02 2026-08-04 fix(desktop): return candidate identity explicitly
+9c437a95 2026-08-04 fix(desktop): fail closed on ambiguous legacy findings
+cf5f2687 2026-08-04 fix(desktop): preserve pre-ledger dismiss actions
+5a9d69ad 2026-08-04 fix(desktop): disclose unavailable axis duration
+d72221d0 2026-08-04 fix(desktop): include rejected decisions in all filter
+8c061d65 2026-08-04 fix(desktop): show combined review token usage
+8b846e6a 2026-08-04 fix(desktop): distinguish council synthesis states
+cd6071a4 2026-08-04 fix(desktop): avoid duplicate council findings
+bcd5e28b 2026-08-04 test(desktop): cover review council data seams
+e098c20b 2026-08-04 fix(desktop): retain council provenance and overflow
+25909cf6 2026-08-04 test(desktop): cover review council presentation
+5c79c211 2026-08-04 feat(desktop): add review council validation view
+23b03082 2026-08-04 test(validation): keep lifecycle fixture lint clean
+841932f9 2026-08-04 test(validation): prove legacy ledger hydration
+8c92ab85 2026-08-04 style(validation): format bounded parser test
+24dd91af 2026-08-04 fix(validation): bound first-gate parsing
+1b781518 2026-08-04 test(validation): keep long identity fixtures bounded
+18ad90a8 2026-08-04 fix(validation): freeze closure repair evidence
+320e443f 2026-08-04 test(validation): prove clean-gate closure lifecycle
+936df16f 2026-08-04 fix(validation): preserve canonical review coverage
+340c5de3 2026-08-04 fix(validation): persist first-gate semantic ids
+c0541032 2026-08-04 fix(validation): stabilize bounded review ids
+7d8a6a86 2026-08-04 fix(validation): retain unique first-gate findings
+29245ce7 2026-08-04 fix(validation): preserve safe review semantic ids
+7c80a442 2026-08-03 fix(validation): preserve overflow fallback state
+52772744 2026-08-03 fix(validation): retain valid first-gate identities
+9243f0af 2026-08-03 fix(validation): make overflow non-overridable
+318c5955 2026-08-03 fix(validation): carry bounded overflow across attempts
+6c9840f0 2026-08-03 fix(validation): persist review overflow provenance
+832b8b04 2026-08-03 fix(validation): harden overflow handling
+adaf0c83 2026-08-03 fix(validation): keep overflow findings fail closed
+e0d17df4 2026-08-03 fix(validation): bound closure and first-gate ledgers
+2f07c486 2026-08-03 fix(validation): retain duplicate rendered semantic IDs
+0665c12f 2026-08-03 fix(validation): fail closed on oversized review sets
+53d9bb88 2026-08-03 fix(validation): preserve blocker and override identities
+5d7b9497 2026-08-03 test(validation): avoid token-shaped fixture literal
+4892a419 2026-08-03 fix(validation): chunk closure verification
+f81674ca 2026-08-03 fix(validation): retain canonical council blockers
+69bf8d38 2026-08-03 fix(validation): harden closure ledger review
+971cca10 2026-08-03 fix(validation): bound closure decisions fail closed
+2c1c1304 2026-08-03 fix(validation): separate semantic and source identities
+820b95cd 2026-08-03 fix(validation): bound closure review lifecycle
+beae7822 2026-08-03 test(validation): align council semantic deduplication
+8111b1d5 2026-08-03 fix(validation): retain latest prior review batch
+380fe7a7 2026-08-03 fix(validation): verify closure proof against repair delta
+fab6d7ce 2026-08-03 test(validation): cover prior council closure trigger
+5b85deb9 2026-08-03 fix(validation): retain first-gate ledger identities
+bb4c24aa 2026-08-03 fix(validation): reject duplicate closure decisions
+8498f697 2026-08-03 feat(validation): reconcile council findings across attempts
+b6b2f0a5 2026-08-03 fix(validation): compare synthesis findings structurally
+18f1a908 2026-08-03 fix(validation): deep-sanitize frozen packet context
+066564a8 2026-08-03 test(validation): prove frozen council packet isolation
+e16c2de3 2026-08-03 fix(validation): derive merged council finding IDs
+e2f75290 2026-08-03 test(validation): avoid token-shaped council fixture
+a8176ec7 2026-08-03 fix(validation): bound frozen council packets
+f99443c7 2026-08-03 fix(validation): hash frozen council diff
+554197fd 2026-08-03 test(validation): prove council provenance triggers
+7ad1079d 2026-08-03 fix(validation): satisfy strict council contracts
+e8c798e7 2026-08-03 fix(validation): redact complete frozen packet
+37d9d0a3 2026-08-03 fix(validation): preserve first-gate review provenance
+f70d4108 2026-08-03 fix(validation): sanitize frozen review packet
+10ebcfa9 2026-08-03 test(validation): cover council synthesis fallback
+c3e9d680 2026-08-03 feat(validation): synthesize frozen council findings
+401b323e 2026-08-03 fix(validation): retain failed first review gate
+37ba330e 2026-08-03 style(validation): format review council
+8e9fcc38 2026-08-03 feat(validation): add frozen review council batches
+d820ed54 2026-08-03 fix(sandbox): retry transient file read failures
+98d50050 2026-08-03 fix(sandbox): retry transient Codex resume setup
+12cbbfd7 2026-08-03 fix(podsitter): precreate system runtime homes
+e2b5badb 2026-08-01 fix(sandbox): preserve deleted status during recovery
+ac0c17df 2026-08-01 fix(deploy): make final pod gate atomic
+527620b8 2026-08-01 fix(recovery): harden hosted deployment safeguards
+b63b394f 2026-08-01 fix(podsitter): skip evidence collection when disabled
+66371f32 2026-08-01 fix(deploy): use VM DB at final gate
+b46d985b 2026-08-01 fix(deploy): fall back to VM gate check
+a552584b 2026-08-01 fix(daemon): guard hosted deploy and sandbox recovery
+81236743 2026-08-01 fix(sandbox): preserve recovery state across restarts
+54b4d219 2026-08-01 fix(sandbox): retry transient empty 403 file writes

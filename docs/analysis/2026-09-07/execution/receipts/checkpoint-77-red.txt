@@ -1,0 +1,50 @@
+
+ RUN  v4.1.11 /private/tmp/autopod-durable-execution/packages/daemon
+
+ ❯ src/pods/pod-manager.test.ts (584 tests | 4 failed | 580 skipped) 235ms
+     × rechecks an early sandbox cooldown wake with durable ledger=true 98ms
+     × rechecks an early sandbox cooldown wake with durable ledger=false 47ms
+     × bounds a stalled sandbox cooldown clock with durable ledger=true 45ms
+     × bounds a stalled sandbox cooldown clock with durable ledger=false 44ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 4 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/pods/pod-manager.test.ts > PodManager > rechecks an early sandbox cooldown wake with durable ledger=true
+ FAIL  src/pods/pod-manager.test.ts > PodManager > rechecks an early sandbox cooldown wake with durable ledger=false
+AssertionError: expected 1 to be 2 // Object.is equality
+
+- Expected
++ Received
+
+- 2
++ 1
+
+ ❯ src/pods/pod-manager.test.ts:1309:21
+    1307|       const deadline = durable ? Date.now() + 50 : Date.parse(ctx.podR…
+    1308|       await manager.processPod(pod.id);
+    1309|       expect(wakes).toBe(2);
+       |                     ^
+    1310|       expect(Date.now()).toBe(deadline);
+    1311|       expect(ctx.containerManager.spawn).toHaveBeenCalledTimes(2);
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/4]⎯
+
+ FAIL  src/pods/pod-manager.test.ts > PodManager > bounds a stalled sandbox cooldown clock with durable ledger=true
+ FAIL  src/pods/pod-manager.test.ts > PodManager > bounds a stalled sandbox cooldown clock with durable ledger=false
+AssertionError: expected "vi.fn()" to be called 3 times, but got 1 times
+ ❯ src/pods/pod-manager.test.ts:1330:59
+    1328|       await manager.processPod(pod.id);
+    1329|       await manager.processPod(pod.id);
+    1330|       expect(ctx.deps.sandboxInfrastructureRecoveryDelay).toHaveBeenCa…
+       |                                                           ^
+    1331|       expect(ctx.containerManager.spawn).toHaveBeenCalledOnce();
+    1332|       expect(ctx.runtime.spawn).not.toHaveBeenCalled();
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/4]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  4 failed | 580 skipped (584)
+   Start at  15:12:18
+   Duration  1.78s (transform 997ms, setup 0ms, import 1.43s, tests 235ms, environment 0ms)
+

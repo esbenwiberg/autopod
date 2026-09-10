@@ -1,0 +1,268 @@
+
+ RUN  v4.1.11 /private/tmp/autopod-durable-execution/packages/daemon
+
+ ❯ src/pods/retained-analytics.test.ts (3 tests | 3 failed) 191ms
+   × retains reliability observations and denominator after actual pod deletion 81ms
+   × retains throughput observations and denominator after actual pod deletion 49ms
+   × retains exported pod and validation observations after actual deletion 60ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 3 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/pods/retained-analytics.test.ts > retains reliability observations and denominator after actual pod deletion
+AssertionError: expected { firstPassRate: 1, …(6) } to deeply equal { firstPassRate: 0.5, …(6) }
+
+- Expected
++ Received
+
+@@ -1,34 +1,34 @@
+  {
+-   "firstPassRate": 0.5,
++   "firstPassRate": 1,
+    "firstPassRateDelta": {
+      "direction": "up",
+-     "value": 50,
++     "value": 100,
+    },
+    "firstPassRateSparkline": [
+      {
+        "day": "2026-09-08",
+-       "rate": 0.5,
++       "rate": 1,
+      },
+    ],
+    "funnel": {
+      "bands": [
+        {
+          "band": "queued",
+-         "count": 2,
++         "count": 1,
+        },
+        {
+          "band": "provisioning",
+          "count": 0,
+        },
+        {
+          "band": "running",
+-         "count": 2,
++         "count": 1,
+        },
+        {
+          "band": "validating",
+-         "count": 2,
++         "count": 1,
+        },
+        {
+          "band": "validated",
+          "count": 0,
+        },
+@@ -43,57 +43,42 @@
+        {
+          "band": "complete",
+          "count": 1,
+        },
+      ],
+-     "drops": [
+-       {
+-         "count": 1,
+-         "from": "validating",
+-         "overflow": 0,
+-         "to": "failed",
+-         "topPods": [
+-           {
+-             "completedAt": "2026-09-08T18:40:14.061Z",
+-             "finalStatus": "failed",
+-             "podId": "failure",
+-             "profile": "test-profile",
+-           },
+-         ],
+-       },
+-     ],
++     "drops": [],
+    },
+    "profileHeatmap": [
+      {
+        "profile": "test-profile",
+        "stages": [
+          {
+-           "failureRate": 0.5,
+-           "podsFailed": 1,
+-           "podsRan": 2,
++           "failureRate": 0,
++           "podsFailed": 0,
++           "podsRan": 1,
+            "stage": "build",
+          },
+          {
+            "failureRate": 0,
+            "podsFailed": 0,
+-           "podsRan": 2,
++           "podsRan": 1,
+            "stage": "health",
+          },
+        ],
+      },
+    ],
+    "stageFailures": [
+      {
+-       "failureRate": 0.5,
+-       "podsFailed": 1,
+-       "podsRan": 2,
++       "failureRate": 0,
++       "podsFailed": 0,
++       "podsRan": 1,
+        "stage": "build",
+      },
+      {
+        "failureRate": 0,
+        "podsFailed": 0,
+-       "podsRan": 2,
++       "podsRan": 1,
+        "stage": "health",
+      },
+      {
+        "failureRate": 0,
+        "podsFailed": 0,
+@@ -131,9 +116,9 @@
+        "stage": "taskReview",
+      },
+    ],
+    "summary": {
+      "avgReworkCount": 0,
+-     "topFailureStage": "build",
+-     "totalPodsInWindow": 2,
++     "topFailureStage": "",
++     "totalPodsInWindow": 1,
+    },
+  }
+
+ ❯ src/pods/retained-analytics.test.ts:75:21
+     73|       ctx.podRepo.delete('failure');
+     74|       const after = measure();
+     75|       expect(after).toEqual(before);
+       |                     ^
+     76|     } finally {
+     77|       ctx.db.close();
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/3]⎯
+
+ FAIL  src/pods/retained-analytics.test.ts > retains throughput observations and denominator after actual pod deletion
+AssertionError: expected { …(5) } to deeply equal { …(5) }
+
+- Expected
++ Received
+
+@@ -4,16 +4,10 @@
+        "completedAt": "2026-09-08T18:40:14.116Z",
+        "podId": "success",
+        "profile": "test-profile",
+        "status": "complete",
+      },
+-     {
+-       "completedAt": "2026-09-08T18:40:14.116Z",
+-       "podId": "failure",
+-       "profile": "test-profile",
+-       "status": "failed",
+-     },
+    ],
+    "cohortTruncated": false,
+    "queueDepth": [
+      {
+        "hour": "2026-09-07T19:00:00Z",
+@@ -125,30 +119,30 @@
+        "max": 0,
+        "mean": 0,
+      },
+      {
+        "hour": "2026-09-08T17:00:00Z",
+-       "max": 2,
+-       "mean": 0.3333333333333333,
++       "max": 1,
++       "mean": 0.16666666666666666,
+      },
+      {
+        "hour": "2026-09-08T18:00:00Z",
+        "max": 0,
+        "mean": 0,
+      },
+    ],
+    "summary": {
+      "backlog": 0,
+      "mttmSeconds": 3600,
+-     "podsPerDay": 2,
++     "podsPerDay": 1,
+      "podsPerDayDelta": {
+        "direction": "up",
+-       "value": 2,
++       "value": 1,
+      },
+      "podsPerDaySparkline": [
+        {
+-         "count": 2,
++         "count": 1,
+          "day": "2026-09-08",
+        },
+      ],
+    },
+    "timeInStatus": [
+@@ -156,29 +150,29 @@
+        "max": 1200,
+        "p25": 1200,
+        "p50": 1200,
+        "p75": 1200,
+        "p90": 1200,
+-       "sampleCount": 2,
++       "sampleCount": 1,
+        "status": "queued",
+      },
+      {
+        "max": 1200,
+        "p25": 1200,
+        "p50": 1200,
+        "p75": 1200,
+        "p90": 1200,
+-       "sampleCount": 2,
++       "sampleCount": 1,
+        "status": "running",
+      },
+      {
+        "max": 1200,
+        "p25": 1200,
+        "p50": 1200,
+        "p75": 1200,
+        "p90": 1200,
+-       "sampleCount": 2,
++       "sampleCount": 1,
+        "status": "validating",
+      },
+      {
+        "max": 0,
+        "p25": 0,
+
+ ❯ src/pods/retained-analytics.test.ts:75:21
+     73|       ctx.podRepo.delete('failure');
+     74|       const after = measure();
+     75|       expect(after).toEqual(before);
+       |                     ^
+     76|     } finally {
+     77|       ctx.db.close();
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/3]⎯
+
+ FAIL  src/pods/retained-analytics.test.ts > retains exported pod and validation observations after actual deletion
+TypeError: Cannot read properties of undefined (reading 'getForSession')
+ ❯ Object.export src/history/history-exporter.ts:287:39
+    285|
+    286|         // Errors (from event stream)
+    287|         const events = deps.eventRepo.getForSession(pod.id);
+       |                                       ^
+    288|         for (const evt of events) {
+    289|           if (evt.type === 'pod.agent_activity') {
+ ❯ src/pods/retained-analytics.test.ts:85:33
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/3]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  3 failed (3)
+   Start at  21:40:13
+   Duration  558ms (transform 167ms, setup 0ms, import 253ms, tests 191ms, environment 0ms)

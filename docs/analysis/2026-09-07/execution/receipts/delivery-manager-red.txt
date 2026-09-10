@@ -1,0 +1,47 @@
+
+ RUN  v4.1.10 /private/tmp/autopod-durable-execution
+
+ ❯ packages/daemon/src/pods/pod-manager.test.ts (406 tests | 2 failed | 404 skipped) 840ms
+       × reconciles a PR created before an ambiguous response across manager restart without another create 205ms
+       × does not repeat an ambiguous PR create when provider lookup cannot confirm a result 619ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 2 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  packages/daemon/src/pods/pod-manager.test.ts > PodManager > retryCreatePr — worktree compromise guard > reconciles a PR created before an ambiguous response across manager restart without another create
+AssertionError: expected "vi.fn()" to be called 1 times, but got 2 times
+ ❯ packages/daemon/src/pods/pod-manager.test.ts:12022:38
+    12020|       const restarted = createPodManager(ctx.deps);
+    12021|       await restarted.retryCreatePr(pod.id);
+    12022|       expect(ctx.prManager.createPr).toHaveBeenCalledTimes(1);
+       |                                      ^
+    12023|       expect(restarted.getSession(pod.id).prUrl).toBe(url);
+    12024|     });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/2]⎯
+
+ FAIL  packages/daemon/src/pods/pod-manager.test.ts > PodManager > retryCreatePr — worktree compromise guard > does not repeat an ambiguous PR create when provider lookup cannot confirm a result
+AssertionError: promise resolved "undefined" instead of rejecting
+
+- Expected:
+Error {
+  "message": "rejected promise",
+}
+
++ Received:
+undefined
+
+ ❯ packages/daemon/src/pods/pod-manager.test.ts:12032:68
+    12030|       vi.mocked(ctx.prManager.createPr).mockRejectedValueOnce(new Erro…
+    12031|       await expect(manager.retryCreatePr(pod.id)).rejects.toThrow();
+    12032|       await expect(createPodManager(ctx.deps).retryCreatePr(pod.id)).r…
+       |                                                                    ^
+    12033|       expect(ctx.prManager.createPr).toHaveBeenCalledTimes(1);
+    12034|     });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/2]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  2 failed | 404 skipped (406)
+   Start at  12:56:26
+   Duration  2.10s (transform 649ms, setup 0ms, import 1.01s, tests 840ms, environment 0ms)

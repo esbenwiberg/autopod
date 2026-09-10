@@ -126,6 +126,7 @@ struct WorkTab: View {
     private var selectedSectionContent: some View {
         switch selectedSection {
         case .task:
+            DispatchPreflightCard(podId: pod.id, actions: actions)
             promptCard
         case .plan:
             if let plan = pod.plan {
@@ -152,6 +153,12 @@ struct WorkTab: View {
                 emptyWorkSection("No process signals yet", icon: "gauge.with.dots.needle.67percent")
             }
         case .cost:
+            if pod.pod.output != .artifact {
+                TaskRetryCard(podId: pod.id, status: pod.status.rawValue, actions: actions)
+            }
+            TaskRetryCard(podId: pod.id, status: pod.status.rawValue, actions: actions, stage: "sandbox_startup")
+            TaskRetryCard(podId: pod.id, status: pod.status.rawValue, actions: actions, stage: "codex_interruption")
+            TaskRetryCard(podId: pod.id, status: pod.status.rawValue, actions: actions, stage: "worker")
             if let cost {
                 SessionCostCard(breakdown: cost)
             } else {

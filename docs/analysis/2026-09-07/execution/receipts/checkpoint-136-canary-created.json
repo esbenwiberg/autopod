@@ -1,0 +1,6 @@
+{
+  "id": "pregnant-hyena",
+  "status": "queued",
+  "requestedTokenBudget": 32000,
+  "elapsedCapSeconds": 600
+}

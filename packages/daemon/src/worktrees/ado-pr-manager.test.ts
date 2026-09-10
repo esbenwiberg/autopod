@@ -88,6 +88,61 @@ vi.mock('./pr-description-generator.js', () => ({
   }),
 }));
 
+describe('ADO delivery lookup', () => {
+  it('uses authenticated exact branch filters and distinguishes merged work without creating a PR', async () => {
+    const fetchMock = makeFetch([
+      {
+        ok: true,
+        body: {
+          value: [
+            {
+              pullRequestId: 42,
+              sourceRefName: 'refs/heads/feature/a',
+              targetRefName: 'refs/heads/main',
+              status: 'completed',
+            },
+          ],
+        },
+      },
+    ]);
+    vi.stubGlobal('fetch', fetchMock);
+    try {
+      const result = await new AdoPrManager(BASE_CONFIG).findPr({
+        worktreePath: '/tmp/local',
+        branch: 'feature/a',
+        baseBranch: 'main',
+      });
+      expect(result).toEqual({ url: PR_URL, disposition: 'merged' });
+      const [url, options] = fetchMock.mock.calls[0] as [string, RequestInit];
+      const params = new URL(url).searchParams;
+      expect(params.get('searchCriteria.status')).toBe('all');
+      expect(params.get('searchCriteria.sourceRefName')).toBe('refs/heads/feature/a');
+      expect(params.get('$top')).toBe('2');
+      expect(options.headers).toMatchObject({ Authorization: 'Bearer daemon-entra-token' });
+      expect(options.method).not.toBe('POST');
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+  it('does not treat malformed or unauthorized lookup as an absent PR', async () => {
+    vi.stubGlobal(
+      'fetch',
+      makeFetch([
+        { ok: true, body: {} },
+        { ok: false, status: 401, body: {} },
+      ]),
+    );
+    try {
+      const manager = new AdoPrManager(BASE_CONFIG);
+      const config = { worktreePath: '/tmp/local', branch: 'feature', baseBranch: 'main' };
+      await expect(manager.findPr(config)).rejects.toThrow('malformed');
+      await expect(manager.findPr(config)).rejects.toThrow();
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+});
+
 describe('parseAdoRepoUrl', () => {
   it('parses dev.azure.com URL', () => {
     const result = parseAdoRepoUrl('https://dev.azure.com/myorg/MyProject/_git/MyRepo');
@@ -132,6 +187,40 @@ describe('AdoPrManager.getPrStatus', () => {
   beforeEach(() => {
     vi.unstubAllGlobals();
   });
+
+  it.each(['matched', 'other-pr', 'fork', 'missing'])(
+    'projects ADO recovery identity only for the requested non-fork PR (%s)',
+    async (scenario) => {
+      vi.stubGlobal(
+        'fetch',
+        makeFetch([
+          {
+            ok: true,
+            body: {
+              status: 'completed',
+              pullRequestId: scenario === 'other-pr' ? 43 : 42,
+              sourceRefName: scenario === 'missing' ? undefined : 'refs/heads/feature',
+              targetRefName: 'refs/heads/main',
+              forkSource: scenario === 'fork' ? {} : undefined,
+              lastMergeSourceCommit: { commitId: 'a'.repeat(40) },
+            },
+          },
+        ]),
+      );
+      const status = await new AdoPrManager(BASE_CONFIG).getPrStatus({ prUrl: PR_URL });
+      expect(status.merged).toBe(true);
+      expect(status.headSha).toBe('a'.repeat(40));
+      expect(status.sourceTarget).toEqual(
+        scenario === 'matched'
+          ? {
+              repository: 'https://dev.azure.com/myorg/MyProject/_git/MyRepo',
+              branch: 'feature',
+              baseBranch: 'main',
+            }
+          : undefined,
+      );
+    },
+  );
 
   it('returns merged:true when PR is completed', async () => {
     vi.stubGlobal('fetch', makeFetch([{ ok: true, body: { status: 'completed' } }]));
@@ -628,4 +717,212 @@ describe('AdoPrManager.createPr — screenshot attachments', () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
     expect(store.read).not.toHaveBeenCalled();
   });
+});
+
+describe('ADO source-bound merge confirmation', () => {
+  it('submits the expected source commit and preserves the source branch', async () => {
+    const sha = 'a'.repeat(40);
+    const fetchMock = makeFetch([
+      { ok: true, body: { lastMergeSourceCommit: { commitId: sha } } },
+      { ok: true, body: { status: 'completed', lastMergeSourceCommit: { commitId: sha } } },
+    ]);
+    vi.stubGlobal('fetch', fetchMock);
+    const result = await new AdoPrManager(BASE_CONFIG).mergePr({
+      prUrl: PR_URL,
+      expectedHeadSha: sha,
+    });
+    expect(result).toEqual({ merged: true, autoMergeScheduled: false });
+    expect(JSON.parse(fetchMock.mock.calls[1]?.[1].body)).toMatchObject({
+      lastMergeSourceCommit: { commitId: sha },
+      completionOptions: { deleteSourceBranch: false },
+    });
+  });
+
+  it.each([undefined, 'b'.repeat(40)])(
+    'refuses ADO mutation when observed source is %s',
+    async (commitId) => {
+      const fetchMock = makeFetch([{ ok: true, body: { lastMergeSourceCommit: { commitId } } }]);
+      vi.stubGlobal('fetch', fetchMock);
+      await expect(
+        new AdoPrManager(BASE_CONFIG).mergePr({
+          prUrl: PR_URL,
+          expectedHeadSha: 'a'.repeat(40),
+        }),
+      ).rejects.toMatchObject({ code: 'DELIVERY_RECONCILIATION_REQUIRED' });
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+    },
+  );
+
+  it.each([
+    {},
+    { status: 'abandoned' },
+    null,
+    { status: 'completed' },
+    { status: 'completed', lastMergeSourceCommit: { commitId: 'b'.repeat(40) } },
+  ])('requires explicit ADO source and completed disposition: %j', async (body) => {
+    const sha = 'a'.repeat(40);
+    const fetchMock = makeFetch([
+      { ok: true, body: { lastMergeSourceCommit: { commitId: sha } } },
+      { ok: true, body },
+    ]);
+    vi.stubGlobal('fetch', fetchMock);
+    await expect(
+      new AdoPrManager(BASE_CONFIG).mergePr({
+        prUrl: PR_URL,
+        expectedHeadSha: sha,
+      }),
+    ).rejects.toMatchObject({ code: 'DELIVERY_RECONCILIATION_REQUIRED' });
+  });
+
+  it('does not invent auto-complete from an active PATCH response', async () => {
+    const sha = 'a'.repeat(40);
+    const fetchMock = makeFetch([
+      { ok: true, body: { lastMergeSourceCommit: { commitId: sha } } },
+      { ok: true, body: { status: 'active' } },
+    ]);
+    vi.stubGlobal('fetch', fetchMock);
+    expect(
+      await new AdoPrManager(BASE_CONFIG).mergePr({ prUrl: PR_URL, expectedHeadSha: sha }),
+    ).toEqual({ merged: false, autoMergeScheduled: false });
+  });
+});
+
+describe('ADO URL repository identity', () => {
+  const wrongUrls = [
+    PR_URL.replace('myorg', 'otherorg'),
+    PR_URL.replace('MyProject', 'OtherProject'),
+    PR_URL.replace('MyRepo', 'OtherRepo'),
+    PR_URL.replace('dev.azure.com', 'example.com'),
+    PR_URL.replace('/pullrequest/', '/extra/pullrequest/'),
+    PR_URL.replace('/42', '/0'),
+    PR_URL.replace('/42', '/1.5'),
+    PR_URL.replace('/42', '/1e2'),
+    PR_URL.replace('https://', 'http://'),
+    PR_URL.replace('https://', 'https://user:password@'),
+  ];
+  it.each(wrongUrls)(
+    'rejects mismatched identity before auth, reads, merges or review replies: %s',
+    async (prUrl) => {
+      const fetchMock = makeFetch([{ ok: true, body: { status: 'completed' } }]);
+      const getToken = vi.fn(async () => 'local-fixture-token');
+      vi.stubGlobal('fetch', fetchMock);
+      const manager = new AdoPrManager({ ...BASE_CONFIG, getToken });
+      for (const call of [
+        () => manager.getPrStatus({ prUrl }),
+        () => manager.mergePr({ prUrl }),
+        () => manager.replyToReviewFeedback({ prUrl, responses: [] }),
+      ])
+        await expect(call()).rejects.toMatchObject({ code: 'DELIVERY_RECONCILIATION_REQUIRED' });
+      expect(fetchMock).not.toHaveBeenCalled();
+      expect(getToken).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each([
+    `${PR_URL}/?view=files#discussion`,
+    '42',
+    'https://myorg.visualstudio.com/MyProject/_git/MyRepo/pullrequest/42',
+  ])('resolves a matching canonical or legacy URL: %s', async (prUrl) => {
+    const fetchMock = makeFetch([{ ok: true, body: { status: 'completed' } }]);
+    vi.stubGlobal('fetch', fetchMock);
+    expect((await new AdoPrManager(BASE_CONFIG).getPrStatus({ prUrl })).merged).toBe(true);
+    expect(fetchMock.mock.calls[0]?.[0]).toBe(
+      'https://dev.azure.com/myorg/MyProject/_apis/git/repositories/MyRepo/pullrequests/42?api-version=7.1',
+    );
+  });
+});
+
+describe('ADO exact source and target branches', () => {
+  it.each(['source', 'base', 'missing'] as const)(
+    'rejects unconfirmed ADO target before PATCH (%s)',
+    async (change) => {
+      const sha = 'a'.repeat(40);
+      const pr = {
+        lastMergeSourceCommit: { commitId: sha },
+        sourceRefName: change === 'source' ? 'refs/heads/other' : 'refs/heads/feature',
+        targetRefName:
+          change === 'base'
+            ? 'refs/heads/release'
+            : change === 'missing'
+              ? undefined
+              : 'refs/heads/main',
+      };
+      const fetchMock = makeFetch([
+        { ok: true, body: pr },
+        { ok: true, body: { ...pr, status: 'completed' } },
+      ]);
+      vi.stubGlobal('fetch', fetchMock);
+      await expect(
+        new AdoPrManager(BASE_CONFIG).mergePr({
+          prUrl: PR_URL,
+          expectedHeadSha: sha,
+          expectedTarget: {
+            repository: 'https://dev.azure.com/myorg/MyProject/_git/MyRepo',
+            branch: 'feature',
+            baseBranch: 'main',
+          },
+        }),
+      ).rejects.toMatchObject({ code: 'DELIVERY_RECONCILIATION_REQUIRED' });
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+    },
+  );
+});
+
+describe('ADO final merge target', () => {
+  it.each([false, true])(
+    'requires matching final branches and supports canonical repository aliases (retargeted=%s)',
+    async (retargeted) => {
+      const sha = 'a'.repeat(40);
+      const pr = {
+        lastMergeSourceCommit: { commitId: sha },
+        sourceRefName: 'refs/heads/feature',
+        targetRefName: 'refs/heads/main',
+      };
+      const fetchMock = makeFetch([
+        { ok: true, body: pr },
+        {
+          ok: true,
+          body: {
+            ...pr,
+            status: 'completed',
+            targetRefName: retargeted ? 'refs/heads/release' : pr.targetRefName,
+          },
+        },
+      ]);
+      vi.stubGlobal('fetch', fetchMock);
+      const call = new AdoPrManager(BASE_CONFIG).mergePr({
+        prUrl: PR_URL,
+        expectedHeadSha: sha,
+        expectedTarget: {
+          repository: 'https://myorg.visualstudio.com/MyProject/_git/MyRepo',
+          branch: 'feature',
+          baseBranch: 'main',
+        },
+      });
+      if (retargeted)
+        await expect(call).rejects.toMatchObject({ code: 'DELIVERY_RECONCILIATION_REQUIRED' });
+      else expect((await call).merged).toBe(true);
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+    },
+  );
+});
+
+it('honors rejected final ADO admission after reading source and before PATCH', async () => {
+  const sha = 'a'.repeat(40);
+  const fetchMock = makeFetch([{ ok: true, body: { lastMergeSourceCommit: { commitId: sha } } }]);
+  vi.stubGlobal('fetch', fetchMock);
+  const getToken = vi.fn(async () => 'local-token');
+  const onPrepared = vi.fn(() => {
+    expect(getToken).toHaveBeenCalledTimes(2);
+    throw new Error('admission rejected');
+  });
+  await expect(
+    new AdoPrManager({ ...BASE_CONFIG, getToken }).mergePr({
+      prUrl: PR_URL,
+      expectedHeadSha: sha,
+      onPrepared,
+    }),
+  ).rejects.toThrow('admission rejected');
+  expect(fetchMock).toHaveBeenCalledTimes(1);
+  expect(onPrepared).toHaveBeenCalledOnce();
 });

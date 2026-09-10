@@ -375,7 +375,11 @@ describe('validateRegistryFiles', () => {
         for (const [key, val] of Object.entries(results)) {
           if (cmdStr.includes(key)) return Promise.resolve(val);
         }
-        return Promise.resolve({ stdout: '', stderr: '', exitCode: 0 });
+        return Promise.resolve({
+          stdout: cmd.includes('--help') ? '--configfile --take --format' : '',
+          stderr: '',
+          exitCode: 0,
+        });
       }),
     } as unknown as ContainerManager;
   }
@@ -387,7 +391,11 @@ describe('validateRegistryFiles', () => {
         stderr: '',
         exitCode: 0,
       },
-      'dotnet nuget search': { stdout: 'No results found.', stderr: '', exitCode: 0 },
+      'dotnet package search __autopod_auth_probe__': {
+        stdout: JSON.stringify({ version: 2, problems: [], searchResult: [] }),
+        stderr: '',
+        exitCode: 0,
+      },
     });
     const files = [{ path: NUGET_CONFIG_PATH, content: '<valid/>' }];
     await expect(validateRegistryFiles(cm, 'ctr-1', files)).resolves.toBeUndefined();
@@ -414,7 +422,7 @@ describe('validateRegistryFiles', () => {
         stderr: '',
         exitCode: 0,
       },
-      'dotnet nuget search': {
+      'dotnet package search __autopod_auth_probe__': {
         stdout:
           'error NU1301: Unable to load the service index for source https://pkgs.dev.azure.com/org/_packaging/feed/nuget/v3/index.json. Response status code does not indicate success: 401 (Unauthorized).',
         stderr: '',
@@ -434,7 +442,7 @@ describe('validateRegistryFiles', () => {
         stderr: '',
         exitCode: 0,
       },
-      'dotnet nuget search': {
+      'dotnet package search __autopod_auth_probe__': {
         stdout: 'Credential provider failed unexpectedly',
         stderr: '',
         exitCode: 1,
@@ -445,6 +453,80 @@ describe('validateRegistryFiles', () => {
       /Registry auth probe failed.*exited 1/,
     );
   });
+
+  it('checks supported capability and passes config paths as literal arguments', async () => {
+    const cm = mockCm({
+      'dotnet package search __autopod_auth_probe__': {
+        stdout: JSON.stringify({ version: 2, problems: [], searchResult: [] }),
+        stderr: '',
+        exitCode: 0,
+      },
+    });
+    const path = '/workspace/a space;false/NuGet.Config';
+    await validateRegistryFiles(cm, 'ctr-1', [{ path, content: '<valid/>' }]);
+    expect(cm.execInContainer).toHaveBeenNthCalledWith(
+      2,
+      'ctr-1',
+      ['dotnet', 'package', 'search', '--help'],
+      expect.any(Object),
+    );
+    expect(cm.execInContainer).toHaveBeenNthCalledWith(
+      3,
+      'ctr-1',
+      [
+        'dotnet',
+        'package',
+        'search',
+        '__autopod_auth_probe__',
+        '--configfile',
+        path,
+        '--take',
+        '1',
+        '--format',
+        'json',
+      ],
+      expect.any(Object),
+    );
+  });
+
+  it('fails before network probing when the image lacks the supported SDK command', async () => {
+    const cm = mockCm({
+      'dotnet package search --help': { stdout: 'Unknown command', stderr: '', exitCode: 1 },
+    });
+    await expect(
+      validateRegistryFiles(cm, 'ctr-1', [{ path: NUGET_CONFIG_PATH, content: '' }]),
+    ).rejects.toThrow(/capability.*8\.0\.2/i);
+    expect(cm.execInContainer).toHaveBeenCalledTimes(2);
+  });
+
+  it('does not infer rejected credentials from an unavailable service index', async () => {
+    const cm = mockCm({
+      'dotnet package search __autopod_auth_probe__': {
+        stdout: 'error NU1301: service index unavailable token=secret-value',
+        stderr: '',
+        exitCode: 1,
+      },
+    });
+    await expect(
+      validateRegistryFiles(cm, 'ctr-1', [{ path: NUGET_CONFIG_PATH, content: '' }]),
+    ).rejects.toThrow(/^Registry feed unavailable:.*authentication is unconfirmed/);
+  });
+
+  it.each([
+    'not JSON',
+    JSON.stringify({ version: 2, problems: [{ text: 'feed timed out' }], searchResult: [] }),
+    JSON.stringify({ version: 2, problems: [] }),
+  ])(
+    'rejects incomplete successful search output without publishing raw provider text: %s',
+    async (stdout) => {
+      const cm = mockCm({
+        'dotnet package search __autopod_auth_probe__': { stdout, stderr: '', exitCode: 0 },
+      });
+      await expect(
+        validateRegistryFiles(cm, 'ctr-1', [{ path: NUGET_CONFIG_PATH, content: '' }]),
+      ).rejects.toThrow(/Registry probe incomplete/);
+    },
+  );
 
   it('throws when npmrc is invalid', async () => {
     const cm = mockCm({
@@ -460,21 +542,29 @@ describe('validateRegistryFiles', () => {
     const cm = mockCm({
       'npm config': { stdout: '', stderr: '', exitCode: 0 },
       'dotnet nuget list': { stdout: 'Sources', stderr: '', exitCode: 0 },
-      'dotnet nuget search': { stdout: 'No results found.', stderr: '', exitCode: 0 },
+      'dotnet package search __autopod_auth_probe__': {
+        stdout: JSON.stringify({ version: 2, problems: [], searchResult: [] }),
+        stderr: '',
+        exitCode: 0,
+      },
     });
     const files = [
       { path: NPM_RC_PATH, content: 'ok' },
       { path: NUGET_CONFIG_PATH, content: 'ok' },
     ];
     await expect(validateRegistryFiles(cm, 'ctr-1', files)).resolves.toBeUndefined();
-    // npm config + dotnet nuget list + dotnet nuget search = 3 calls
-    expect(cm.execInContainer).toHaveBeenCalledTimes(3);
+    // npm parse + NuGet config parse + capability help + JSON search = 4 calls
+    expect(cm.execInContainer).toHaveBeenCalledTimes(4);
   });
 
   it('forwards extraEnv to every execInContainer call so the auth probe sees creds', async () => {
     const cm = mockCm({
       'dotnet nuget list': { stdout: 'Sources', stderr: '', exitCode: 0 },
-      'dotnet nuget search': { stdout: 'No results found.', stderr: '', exitCode: 0 },
+      'dotnet package search __autopod_auth_probe__': {
+        stdout: JSON.stringify({ version: 2, problems: [], searchResult: [] }),
+        stderr: '',
+        exitCode: 0,
+      },
     });
     const files = [{ path: NUGET_CONFIG_PATH, content: '<valid/>' }];
     const env = { VSS_NUGET_EXTERNAL_FEED_ENDPOINTS: '{"endpointCredentials":[]}' };

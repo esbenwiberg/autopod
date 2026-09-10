@@ -1,0 +1,16 @@
+{
+  "criterionCount": 43,
+  "missingReferences": [],
+  "proposalHashVerified": true,
+  "governingGoalHashUnchanged": true,
+  "applicationSourceUnchangedFrom": "90a61141a6a8ed6205aae144bbb99f8c9f0f9ec5",
+  "pythonSyntax": "pass",
+  "targetedFixtureTests": 6,
+  "biome": "pass; 38 existing warnings",
+  "secretScan": "pass",
+  "discoveryResponseComplete": true,
+  "providerMessageBytes": 3491,
+  "approvedDiscoveryInvocations": 1,
+  "proposedFollowupExecuted": false,
+  "goalComplete": false
+}

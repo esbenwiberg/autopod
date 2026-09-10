@@ -1,0 +1,62 @@
+
+ RUN  v4.1.11 /private/tmp/autopod-durable-execution/packages/daemon
+
+ ❯ src/pods/task-execution-ledger.test.ts (17 tests | 2 failed | 15 skipped) 104ms
+     × records immutable container ownership instead of inferring it from the current pod 64ms
+     × rejects a resource identity that does not own the current lifecycle before creating a run 39ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 2 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/pods/task-execution-ledger.test.ts > task-wide execution accounting > records immutable container ownership instead of inferring it from the current pod
+AssertionError: expected { runtime: 'codex', …(2) } to match object { version: 2, resource: { …(2) } }
+(3 matching properties omitted from actual)
+
+- Expected
++ Received
+
+  {
+-   "resource": {
+-     "containerId": "original-container",
+-     "executionTarget": "local",
+-   },
+-   "version": 2,
++   "model": "model",
++   "providerAccountId": "account",
++   "runtime": "codex",
+  }
+
+ ❯ src/pods/task-execution-ledger.test.ts:51:39
+     49|       repo.update('root', { containerId: 'replacement-container' });
+     50|       const row = db.prepare('SELECT binding FROM task_agent_runs WHER…
+     51|       expect(JSON.parse(row.binding)).toMatchObject({ version: 2, reso…
+       |                                       ^
+     52|       expect(() => repo.taskExecutions?.beginRun('root', 1, 1, { ...bi…
+     53|         resource: { containerId: 'replacement-container', executionTar…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/2]⎯
+
+ FAIL  src/pods/task-execution-ledger.test.ts > task-wide execution accounting > rejects a resource identity that does not own the current lifecycle before creating a run
+AssertionError: expected [Function] to throw an error
+
+- Expected:
+null
+
++ Received:
+undefined
+
+ ❯ src/pods/task-execution-ledger.test.ts:64:11
+     62|       expect(() => repo.taskExecutions?.beginRun('root', 1, 1, { ...bi…
+     63|         resource: { containerId: 'stale-container', executionTarget: '…
+     64|       })).toThrow(/resource.*binding/i);
+       |           ^
+     65|       expect(db.prepare('SELECT COUNT(*) AS count FROM task_agent_runs…
+     66|     } finally { db.close(); }
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/2]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  2 failed | 15 skipped (17)
+   Start at  16:39:16
+   Duration  402ms (transform 131ms, setup 0ms, import 204ms, tests 104ms, environment 0ms)
+

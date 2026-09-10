@@ -1,0 +1,27 @@
+{
+  "cost26-red.txt": {
+    "rawPath": "/private/tmp/autopod-phase-cost-red.txt",
+    "rawSha256": "7ea2addd7d21d3926748b0a1820a566ce5007bacea26bc1d30866201c37b7180",
+    "normalization": "trailing whitespace only"
+  },
+  "cost26-daemon.txt": {
+    "rawPath": "/private/tmp/autopod-cost26-focused.txt",
+    "rawSha256": "dc0e4a6e77823cd98d59c806d08c9dc4aae9918531e3a703df10f84d1f91661e",
+    "normalization": "trailing whitespace only"
+  },
+  "cost26-cli.txt": {
+    "rawPath": "/private/tmp/autopod-cost26-cli.txt",
+    "rawSha256": "4b77ed2337204c2a48975317bf1cf848425ec5de04fd9992908e7ee2d72ef173",
+    "normalization": "trailing whitespace only"
+  },
+  "cost26-mobile.txt": {
+    "rawPath": "/private/tmp/autopod-cost26-mobile.txt",
+    "rawSha256": "91df7043e1bb2b521ba8e0d1f2b9a3e292c4cf93bf604d7b6ca40b75b4ce75b8",
+    "normalization": "trailing whitespace only"
+  },
+  "cost26-swift.txt": {
+    "rawPath": "/private/tmp/autopod-cost26-swift.txt",
+    "rawSha256": "df117ecd9a9832672a99c9db4adef60d50e9610d26efc03307e4af003149f1b4",
+    "normalization": "trailing whitespace only"
+  }
+}

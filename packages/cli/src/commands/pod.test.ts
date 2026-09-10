@@ -1,7 +1,8 @@
+import { createServer } from 'node:http';
 import { AutopodError } from '@autopod/shared';
 import { Command } from 'commander';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import type { AutopodClient } from '../api/client.js';
+import { AutopodClient } from '../api/client.js';
 import { registerPodCommands } from './pod.js';
 
 vi.mock('ora', () => ({
@@ -16,6 +17,7 @@ vi.mock('ora', () => ({
 function createMockClient() {
   return {
     listSessions: vi.fn().mockResolvedValue([]),
+    getTaskExecution: vi.fn().mockRejectedValue(new Error('Unavailable on older daemon')),
     getSession: vi.fn().mockResolvedValue({
       id: 'abcd1234',
       profileName: 'test',
@@ -96,6 +98,55 @@ describe('continue-provider command', () => {
   });
 });
 
+it('shows compact evidence omissions through the actual HTTP client and CLI command', async () => {
+  const requests: string[] = [];
+  const server = createServer((request, response) => {
+    requests.push(`${request.method} ${request.url}`);
+    response.setHeader('content-type', 'application/json');
+    response.end(
+      JSON.stringify([
+        {
+          id: 'bounded-list',
+          profileName: 'test',
+          status: 'complete',
+          title: 'Preserved work',
+          startedAt: null,
+          completedAt: null,
+          recordDiagnostics: [{ field: 'task_summary', code: 'size_limit' }],
+        },
+      ]),
+    );
+  });
+  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+  const address = server.address();
+  if (!address || typeof address === 'string') throw new Error('Missing fixture port');
+  const client = new AutopodClient({
+    baseUrl: `http://127.0.0.1:${address.port}`,
+    getToken: async () => 'local-fixture-only',
+  });
+  const log = vi.spyOn(console, 'log').mockImplementation(() => {});
+  try {
+    const program = new Command();
+    registerPodCommands(program, () => client);
+    await program.parseAsync(['node', 'ap', 'ls', '--compact', '--limit', '10']);
+    const output = log.mock.calls.map((call) => call.join(' ')).join('\n');
+    expect(output).toContain('Preserved work');
+    expect(output).toContain(
+      'bounded-list: Evidence unavailable in this view: task_summary (size_limit)',
+    );
+    expect(requests).toHaveLength(1);
+    const request = requests[0];
+    if (!request) throw new Error('CLI did not send its list request');
+    const url = new URL(request.slice(4), 'http://localhost');
+    expect(url.pathname).toBe('/pods');
+    expect(url.searchParams.get('compact')).toBe('true');
+    expect(url.searchParams.get('limit')).toBe('10');
+  } finally {
+    log.mockRestore();
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+  }
+});
+
 describe('ls command', () => {
   let program: Command;
   let mockClient: AutopodClient;
@@ -121,6 +172,33 @@ describe('ls command', () => {
       });
     } finally {
       vi.useRealTimers();
+    }
+  });
+
+  it('prints settled worker evidence without treating pending input as completion', async () => {
+    const baseline = await mockClient.getSession('abcd1234');
+    vi.mocked(mockClient.getSession).mockResolvedValueOnce({
+      ...baseline,
+      status: 'awaiting_input',
+      finalization: {
+        generation: 1,
+        cycle: 1,
+        phase: 'awaiting_human',
+        agentSettledAt: '2026-09-07T08:00:00Z',
+        pendingDecisionId: 'selection',
+        sourcePreservedAt: null,
+        result: 'Report collected',
+      },
+    });
+    const log = vi.spyOn(console, 'log').mockImplementation(() => {});
+    try {
+      await program.parseAsync(['node', 'ap', 'status', 'abcd1234']);
+      const output = log.mock.calls.map((call) => call.join(' ')).join('\n');
+      expect(output).toContain('Agent settled:');
+      expect(output).toContain('not verified');
+      expect(output).toContain('Human decision remains unanswered');
+    } finally {
+      log.mockRestore();
     }
   });
 
@@ -329,6 +407,40 @@ describe('update-from-base command', () => {
     logSpy.mockRestore();
   });
 
+  it('prints task-wide counts and partial cost without treating attempts as delivered PRs', async () => {
+    vi.mocked(mockClient.getTaskExecution).mockResolvedValueOnce({
+      taskId: 'logical-root',
+      executionId: 'fix-execution',
+      rootPodId: 'original',
+      podCount: 2,
+      agentRunCount: 3,
+      failedRunCount: 1,
+      transientFailureCount: 0,
+      providerAttemptCount: 4,
+      validationExecutionCount: 5,
+      tokenBudget: 100,
+      recordedInputTokens: 90,
+      recordedOutputTokens: 10,
+      recordedCostUsd: 1.25,
+      infrastructureCostUsd: null,
+      telemetry: 'partial',
+      diagnostics: ['Infrastructure cost unavailable'],
+    });
+    const log = vi.spyOn(console, 'log').mockImplementation(() => {});
+    try {
+      await program.parseAsync(['node', 'ap', 'status', 'abcd1234']);
+      const output = log.mock.calls.map((call) => call.join(' ')).join('\n');
+      expect(output).toContain('logical-root (2 pods)');
+      expect(output).toContain('3 recorded agent runs, 4 provider attempts, 5 validations');
+      expect(output).toContain('100/100');
+      expect(output).toContain('$1.2500 (partial telemetry)');
+      expect(output).toContain('Infrastructure cost unavailable');
+      expect(output).not.toContain('4 delivered');
+    } finally {
+      log.mockRestore();
+    }
+  });
+
   it('prints readiness pending when missing', async () => {
     const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
 
@@ -338,4 +450,962 @@ describe('update-from-base command', () => {
     expect(output).toContain('Readiness: pending/unavailable');
     logSpy.mockRestore();
   });
+});
+
+it.each([true, false])(
+  'status command renders HTTP delivery accounting and reused evidence (disposition available: %s)',
+  async (hasDisposition) => {
+    const pod = await createMockClient().getSession('abcd1234');
+    const evidence = {
+      receiptId: 'local-receipt',
+      originalExecutedAt: '2026-09-07T10:00:00Z',
+      originalDurationMs: 1200,
+    };
+    const task = {
+      taskId: 'logical-root',
+      executionId: 'execution-fixture',
+      podCount: 2,
+      agentRunCount: 3,
+      providerAttemptCount: 4,
+      validationExecutionCount: 5,
+      recordedInputTokens: 90,
+      recordedOutputTokens: 10,
+      tokenBudget: 100,
+      budgetCheck: {
+        status: 'unavailable',
+        reason: 'Task token accounting incomplete; reconcile prior execution telemetry.',
+      },
+      recordedCostUsd: 1.25,
+      costEvidence: {
+        basis: 'stored_subtotal',
+        billingVerified: false,
+        knownEstimatedCostUsd: 0.5,
+        unavailablePhaseCount: 1,
+        conflictingPodCount: 1,
+        omittedDiagnosticCount: 2,
+        diagnostics: [
+          {
+            podId: 'root',
+            code: 'PHASE_COST_CONFLICT',
+            message: 'Stored phase costs conflict; no proportional allocation applied.',
+          },
+        ],
+      },
+      telemetry: 'partial',
+      ...(hasDisposition
+        ? {
+            merge: {
+              closedPrCount: 1,
+              prCount: 3,
+              requestCount: 3,
+              mergedPrCount: 1,
+              mergedWithoutRecordedRequestCount: 1,
+              unresolvedPrCount: 1,
+              scope: 'source-bound-journal-only',
+              basis: 'last-recorded',
+              liveVerified: false,
+            },
+          }
+        : {}),
+      diagnostics: [
+        'Infrastructure cost unavailable',
+        '1 deleted pod record retains task accounting and execution evidence.',
+        '1 unsettled worker run blocks another task run; live execution state unverified.',
+        'Oldest unsettled run recorded local container original-container; this reference does not prove process termination or a unique remote instance.',
+      ],
+      delivery: {
+        intentCount: 2,
+        receiptCount: 1,
+        unresolvedCount: 1,
+        scope: 'durable-receipts-only',
+        ...(hasDisposition
+          ? {
+              disposition: {
+                openCount: 0,
+                mergedCount: 1,
+                closedCount: 0,
+                unavailableCount: 0,
+                basis: 'last-recorded',
+                liveVerified: false,
+              },
+            }
+          : {}),
+      },
+    };
+    const paths: string[] = [];
+    const server = createServer((req, res) => {
+      paths.push(req.url ?? '');
+      expect(req.method).toBe('GET');
+      expect(req.headers.authorization).toBe('Bearer local-fixture-only');
+      res.setHeader('content-type', 'application/json');
+      if (req.url === '/pods/abcd1234/task-execution') res.end(JSON.stringify(task));
+      else if (req.url === '/pods/abcd1234')
+        res.end(
+          JSON.stringify({
+            ...pod,
+            status: 'failed',
+            failureReason:
+              'Codex execution termination is unverified; retain completion and source before another execution.',
+            lastValidationResult: {
+              overall: 'pass',
+              attempt: 1,
+              test: { reusedEvidence: evidence },
+            },
+          }),
+        );
+      else {
+        res.statusCode = 404;
+        res.end('{}');
+      }
+    });
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+    const address = server.address();
+    if (!address || typeof address === 'string') throw new Error('Missing fixture port');
+    const client = new AutopodClient({
+      baseUrl: `http://127.0.0.1:${address.port}`,
+      getToken: async () => 'local-fixture-only',
+    });
+    const log = vi.spyOn(console, 'log').mockImplementation(() => {});
+    const stdout = vi.spyOn(process.stdout, 'write').mockImplementation(() => true);
+    try {
+      const command = () => {
+        const program = new Command();
+        registerPodCommands(program, () => client);
+        return program;
+      };
+      await command().parseAsync(['node', 'ap', 'status', 'abcd1234']);
+      const output = log.mock.calls.map((call) => call.join(' ')).join('\n');
+      expect(output).toContain('Stored task cost subtotal:');
+      expect(output).toContain(
+        '1 deleted pod record retains task accounting and execution evidence.',
+      );
+      expect(output).toContain(
+        '1 unsettled worker run blocks another task run; live execution state unverified.',
+      );
+      expect(output).toContain('Oldest unsettled run recorded local container original-container');
+      expect(output).toContain(
+        'Codex execution termination is unverified; retain completion and source before another execution.',
+      );
+      expect(output).toContain('Billing unverified');
+      expect(output).toContain(
+        'Known estimates: $0.5000; 1 identified phases with unavailable cost; 1 pods with conflicting attribution',
+      );
+      expect(output).toContain('Stored phase costs conflict; no proportional allocation applied.');
+      expect(output).toContain('2 additional cost diagnostics omitted.');
+      expect(output).toContain('1 confirmed, 1 unresolved of 2 intents');
+      expect(output).toContain('historical URLs excluded');
+      expect(output).toContain(
+        hasDisposition
+          ? 'Last recorded PR status: 0 open · 1 merged · 0 closed · 0 unavailable'
+          : 'PR disposition observations unavailable.',
+      );
+      expect(output).toContain(
+        hasDisposition
+          ? 'Source-bound merges: 1 merged PRs · 3 recorded requests · 1 unresolved of 3 PRs'
+          : 'Source-bound merge evidence unavailable.',
+      );
+      if (hasDisposition)
+        expect(output).toContain(
+          '1 merged PRs observed with no recorded request; merge actor is not inferred.',
+        );
+      if (hasDisposition) expect(output).toContain('Last recorded closed PRs: 1');
+      expect(output).toContain('Current provider status unverified.');
+      expect(output).toContain(
+        'Task token accounting incomplete; reconcile prior execution telemetry.',
+      );
+      expect(output).toContain(
+        'test: reused receipt local-receipt; originally executed 2026-09-07T10:00:00Z (1200 ms)',
+      );
+      log.mockClear();
+      await command().parseAsync(['node', 'ap', 'status', 'abcd1234', '--json']);
+      const structured = JSON.parse(stdout.mock.calls.map((call) => String(call[0])).join(''));
+      expect(structured.taskExecution.costEvidence).toEqual(task.costEvidence);
+      expect(structured.taskExecution.delivery).toEqual(task.delivery);
+      expect(structured.taskExecution.merge).toEqual(task.merge);
+      expect(paths).toEqual([
+        '/pods/abcd1234',
+        '/pods/abcd1234/task-execution',
+        '/pods/abcd1234',
+        '/pods/abcd1234/task-execution',
+      ]);
+    } finally {
+      log.mockRestore();
+      stdout.mockRestore();
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+  },
+);
+
+it.each(['validation', 'sandbox_startup', 'codex_interruption', 'worker'] as const)(
+  'drives %s retry inspection, idempotent authorization and separate Resume through the real HTTP client',
+  async (stage) => {
+    const calls: Array<{ path: string; method: string; body: string }> = [];
+    const server = createServer(async (request, response) => {
+      const chunks: Buffer[] = [];
+      for await (const chunk of request) chunks.push(Buffer.from(chunk));
+      const body = Buffer.concat(chunks).toString();
+      calls.push({ path: request.url ?? '', method: request.method ?? '', body });
+      response.setHeader('Content-Type', 'application/json');
+      response.end(
+        JSON.stringify(
+          request.url?.includes('retry-state')
+            ? {
+                taskId: 'task',
+                stage,
+                executedCount: 3,
+                admissionCount: 4,
+                backoffsMs: [0, 0],
+                transientRetryCount: 2,
+                measuredDurationMs: 15,
+                interruptedCount: 1,
+                latest: { outcome: 'unknown', providerRetryNotBefore: '2026-09-09T12:00:00.000Z' },
+                authorizations: [],
+                telemetry: 'partial',
+              }
+            : request.url?.endsWith('retry-authorizations')
+              ? { id: 'grant', ...JSON.parse(body) }
+              : request.url?.endsWith('resume')
+                ? { ok: true, action: 'revalidate' }
+                : { id: 'abcd1234' },
+        ),
+      );
+    });
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+    const address = server.address();
+    if (!address || typeof address === 'string') throw new Error('No fixture port');
+    const client = new AutopodClient({
+      baseUrl: `http://127.0.0.1:${address.port}`,
+      getToken: async () => 'fixture-token',
+    });
+    const output = vi.spyOn(console, 'log').mockImplementation(() => {});
+    const run = async (args: string[]) => {
+      const program = new Command();
+      program.exitOverride();
+      registerPodCommands(program, () => client);
+      await program.parseAsync(['node', 'ap', ...args]);
+    };
+    try {
+      await run(['retry-state', 'abcd1234', '--stage', stage]);
+      expect(
+        calls.some(
+          (call) =>
+            call.path ===
+            `/pods/abcd1234/retry-state${stage === 'validation' ? '' : `?stage=${stage}`}`,
+        ),
+      ).toBe(true);
+      expect(output.mock.calls.flat().join('\n')).toContain('3 executed / 4 admitted');
+      if (stage === 'worker') {
+        expect(output.mock.calls.flat().join('\n')).toContain('2/2 transient retry admissions');
+        expect(output.mock.calls.flat().join('\n')).toContain('unknown causes');
+        expect(output.mock.calls.flat().join('\n')).toContain(
+          'Provider retry not before: 2026-09-09T12:00:00.000Z',
+        );
+      }
+      await run([
+        'authorize-retry',
+        '--stage',
+        stage,
+        'abcd1234',
+        '--reason',
+        'External condition verified',
+        '--request-key',
+        'stable-key',
+      ]);
+      await run([
+        'authorize-retry',
+        '--stage',
+        stage,
+        'abcd1234',
+        '--reason',
+        'External condition verified',
+        '--request-key',
+        'stable-key',
+      ]);
+      expect(calls.filter((call) => call.path.endsWith('resume'))).toHaveLength(0);
+      const decisions = calls.filter((call) => call.path.endsWith('retry-authorizations'));
+      expect(decisions).toHaveLength(2);
+      expect(decisions[0]?.body).toBe(decisions[1]?.body);
+      expect(JSON.parse(decisions[0]?.body ?? '{}')).toEqual({
+        requestKey: 'stable-key',
+        reason: 'External condition verified',
+        ...(stage === 'validation' ? {} : { stage }),
+      });
+      await run([stage === 'worker' ? 'rework' : 'resume', 'abcd1234']);
+      expect(
+        calls.filter((call) => call.path.endsWith(stage === 'worker' ? 'validate' : 'resume')),
+      ).toHaveLength(1);
+      if (stage === 'worker')
+        expect(calls.filter((call) => call.path.endsWith('resume'))).toHaveLength(0);
+      expect(output.mock.calls.flat().join('\n')).toContain('Inspect status and retry-state');
+    } finally {
+      output.mockRestore();
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+  },
+);
+
+it('sends the same explicit rerun decision through the actual CLI HTTP client and prints dispatch evidence', async () => {
+  const requests: unknown[] = [];
+  const server = createServer(async (request, response) => {
+    response.setHeader('content-type', 'application/json');
+    expect(request.headers.authorization).toBe('Bearer local-fixture-only');
+    if (request.method === 'POST') {
+      const chunks: Buffer[] = [];
+      for await (const chunk of request) chunks.push(Buffer.from(chunk));
+      requests.push(JSON.parse(Buffer.concat(chunks).toString()));
+      response.end(JSON.stringify({ id: 'rerun-id', status: 'queued' }));
+    } else if (request.url?.endsWith('rerun-template'))
+      response.end(
+        JSON.stringify({
+          profileName: 'profile',
+          task: 'Exact original task',
+          contract: { contractVersion: 1 },
+        }),
+      );
+    else if (request.url?.endsWith('dispatch-preflight'))
+      response.end(
+        JSON.stringify({
+          latest: {
+            status: 'review_required',
+            repository: 'host/repo',
+            baseBranch: 'main',
+            baseCommitSha: 'a'.repeat(40),
+            executionId: 'execution',
+            checkedAt: 'today',
+            conflicts: [{ podId: 'other', status: 'running', evidence: 'dispatch_receipt' }],
+            rerun: null,
+          },
+        }),
+      );
+    else response.end(JSON.stringify({ id: 'abcd1234' }));
+  });
+  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+  const address = server.address();
+  if (!address || typeof address === 'string') throw new Error('No fixture port');
+  const client = new AutopodClient({
+    baseUrl: `http://127.0.0.1:${address.port}`,
+    getToken: async () => 'local-fixture-only',
+  });
+  const log = vi.spyOn(console, 'log').mockImplementation(() => {});
+  const command = () => {
+    const program = new Command();
+    registerPodCommands(program, () => client);
+    return program;
+  };
+  try {
+    for (let i = 0; i < 2; i++)
+      await command().parseAsync([
+        'node',
+        'ap',
+        'rerun',
+        'abcd1234',
+        '--reason',
+        'Reviewed independent repeat',
+        '--request-key',
+        'same-key',
+      ]);
+    expect(requests).toHaveLength(2);
+    expect(requests[0]).toEqual(requests[1]);
+    expect(requests[0]).toMatchObject({
+      intentionalRerun: {
+        ofPodId: 'abcd1234',
+        reason: 'Reviewed independent repeat',
+        requestKey: 'same-key',
+      },
+    });
+    await command().parseAsync(['node', 'ap', 'dispatch-preflight', 'abcd1234']);
+    expect(log.mock.calls.flat().join('\n')).toContain('review_required: host/repo main');
+    expect(log.mock.calls.flat().join('\n')).toContain('other: running (dispatch_receipt)');
+  } finally {
+    log.mockRestore();
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+  }
+});
+
+it.each([undefined, 'reviewer', 'api', 'legacy-api', 'host'] as const)(
+  'reads subject=%s provenance through the real HTTP client with legacy and reviewer identity',
+  async (subject) => {
+    const server = createServer((request, response) => {
+      expect(request.method).toBe('GET');
+      response.setHeader('content-type', 'application/json');
+      response.end(
+        JSON.stringify(
+          request.url?.endsWith('execution-provenance?schemaVersion=2')
+            ? {
+                latest: {
+                  status: 'blocked',
+                  purpose: subject ? 'review' : 'validation',
+                  subject: subject ? 'reviewer' : undefined,
+                  providerId:
+                    subject && subject !== 'legacy-api' && subject !== 'host' ? 'anthropic' : null,
+                  providerAccountId:
+                    subject && subject !== 'legacy-api' && subject !== 'host'
+                      ? 'review-account'
+                      : null,
+                  checkedAt: 'today',
+                  executionId: 'execution',
+                  generation: 1,
+                  runtime:
+                    subject === 'api' || subject === 'legacy-api'
+                      ? null
+                      : subject === 'host'
+                        ? 'claude'
+                        : 'codex',
+                  ...(subject === 'api' || subject === 'legacy-api'
+                    ? { version: 2, surface: 'provider-api', dispatchModel: 'resolved-model' }
+                    : {}),
+                  model: 'fixture',
+                  ...(subject === 'host'
+                    ? {
+                        version: 2,
+                        surface: 'host-cli',
+                        dispatchModel: 'fixture',
+                        cliPath: '/fixture/claude',
+                      }
+                    : {}),
+                  cliVersion: '0.144.4',
+                  release: { commitSha: null },
+                  imageDigest: null,
+                  contractHash: 'a'.repeat(64),
+                  validationImplementationHash: null,
+                  capabilities: { memoryLimitBytes: null, cpuLimit: null },
+                  commands: {
+                    requirements: [
+                      { source: 'fact:compile', executable: 'dotnet', available: false },
+                    ],
+                  },
+                  diagnostics: [
+                    {
+                      code:
+                        subject === 'legacy-api'
+                          ? 'REVIEWER_LEGACY_API_DISPATCH_PREFLIGHT'
+                          : 'PREFLIGHT_COMMAND_UNAVAILABLE',
+                      detail:
+                        subject === 'legacy-api'
+                          ? 'Legacy daemon API-key client prepared; provider and account unverified.'
+                          : 'Required launcher is missing',
+                    },
+                  ],
+                },
+              }
+            : { id: 'abcd1234' },
+        ),
+      );
+    });
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+    const address = server.address();
+    if (!address || typeof address === 'string') throw new Error('No port');
+    const client = new AutopodClient({
+      baseUrl: `http://127.0.0.1:${address.port}`,
+      getToken: async () => 'fixture-token',
+    });
+    const log = vi.spyOn(console, 'log').mockImplementation(() => {});
+    try {
+      const program = new Command();
+      registerPodCommands(program, () => client);
+      await program.parseAsync(['node', 'ap', 'execution-provenance', 'abcd1234']);
+      const output = log.mock.calls.flat().join('\n');
+      expect(output).toContain(`${subject ? 'review' : 'validation'} preflight blocked`);
+      expect(output).toContain(
+        subject === 'api' || subject === 'legacy-api'
+          ? 'Reviewer: Provider API'
+          : subject === 'host'
+            ? 'Reviewer: Host claude CLI 0.144.4'
+            : `${subject ? 'Reviewer' : 'Configured worker'}: codex CLI 0.144.4`,
+      );
+      expect(output).toContain(
+        subject && subject !== 'legacy-api' && subject !== 'host'
+          ? 'Provider anthropic; account review-account'
+          : 'Provider unverified; account not recorded',
+      );
+      expect(output).toContain('Memory unverified bytes; CPU unverified');
+      expect(output).toContain(
+        `Daemon unverified; image ${subject === 'api' || subject === 'legacy-api' || subject === 'host' ? 'not applicable' : 'unverified'}`,
+      );
+      if (subject === 'api' || subject === 'legacy-api') {
+        expect(output).toContain('dispatch model resolved-model');
+        expect(output).not.toContain('CLI');
+      }
+      if (subject === 'legacy-api')
+        expect(output).toContain(
+          'Legacy daemon API-key client prepared; provider and account unverified.',
+        );
+      expect(output).toContain('dotnet missing');
+    } finally {
+      log.mockRestore();
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+  },
+);
+
+it.each(['Branch preservation', 'Approval delivery', 'Source reconciliation'])(
+  'does not report approval when %s fails over HTTP and permits explicit retry',
+  async (failure) => {
+    const pod = await createMockClient().getSession('abcd1234');
+    let attempts = 0;
+    const server = createServer((req, res) => {
+      res.setHeader('content-type', 'application/json');
+      if (req.method === 'POST' && req.url === '/pods/abcd1234/approve') {
+        attempts++;
+        if (attempts === 1) {
+          res.statusCode = failure === 'Source reconciliation' ? 409 : 502;
+          res.end(
+            JSON.stringify({
+              error:
+                failure === 'Source reconciliation'
+                  ? 'DELIVERY_RECONCILIATION_REQUIRED'
+                  : failure === 'Branch preservation'
+                    ? 'BRANCH_PRESERVATION_FAILED'
+                    : 'APPROVAL_DELIVERY_FAILED',
+              message: `${failure} failed. Original resources retained; repair remote access and retry approval.`,
+            }),
+          );
+        } else res.end(JSON.stringify({ ok: true }));
+      } else if (req.method === 'GET' && req.url === '/pods/abcd1234') res.end(JSON.stringify(pod));
+      else {
+        res.statusCode = 404;
+        res.end('{}');
+      }
+    });
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+    const address = server.address();
+    if (!address || typeof address === 'string') throw new Error('No fixture address');
+    const client = new AutopodClient({
+      baseUrl: `http://127.0.0.1:${address.port}`,
+      getToken: async () => 'local-fixture-only',
+    });
+    const log = vi.spyOn(console, 'log').mockImplementation(() => {});
+    const command = () => {
+      const program = new Command();
+      registerPodCommands(program, () => client);
+      return program;
+    };
+    try {
+      await expect(command().parseAsync(['node', 'ap', 'approve', 'abcd1234'])).rejects.toThrow(
+        'retry approval',
+      );
+      expect(log.mock.calls.flat().join(' ')).not.toContain('approved.');
+      await command().parseAsync(['node', 'ap', 'approve', 'abcd1234']);
+      expect(log.mock.calls.flat().join(' ')).toContain('Pod abcd1234 approved.');
+      expect(attempts).toBe(2);
+    } finally {
+      log.mockRestore();
+      await new Promise<void>((resolve, reject) =>
+        server.close((error) => (error ? reject(error) : resolve())),
+      );
+    }
+  },
+);
+
+it('shows the unavailable-review reason through real status HTTP and preserves findings in JSON', async () => {
+  const reason =
+    'Review failed: Foundry tool review unavailable on the selected provider binding; reconcile it before retry.';
+  const pod = {
+    ...(await createMockClient().getSession('abcd1234')),
+    status: 'review_required',
+    lastValidationResult: {
+      overall: 'fail',
+      attempt: 2,
+      reviewSkipKind: 'review-failed',
+      reviewSkipReason: reason,
+      taskReview: { status: 'fail', reasoning: reason, issues: ['Retained original finding'] },
+    },
+  };
+  const requests: string[] = [];
+  const server = createServer((request, response) => {
+    requests.push(`${request.method} ${request.url}`);
+    response.setHeader('content-type', 'application/json');
+    if (request.method === 'GET' && request.url === '/pods/abcd1234')
+      response.end(JSON.stringify(pod));
+    else {
+      response.statusCode = 404;
+      response.end('{}');
+    }
+  });
+  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+  const address = server.address();
+  if (!address || typeof address === 'string') throw new Error('No fixture port');
+  const client = new AutopodClient({
+    baseUrl: `http://127.0.0.1:${address.port}`,
+    getToken: async () => 'local-fixture-only',
+  });
+  const output = vi.spyOn(console, 'log').mockImplementation(() => {});
+  const stdout = vi.spyOn(process.stdout, 'write').mockImplementation(() => true);
+  try {
+    const command = () => {
+      const program = new Command();
+      registerPodCommands(program, () => client);
+      return program;
+    };
+    await command().parseAsync(['node', 'ap', 'status', 'abcd1234']);
+    expect(output.mock.calls.flat().join('\n')).toContain(reason);
+    output.mockClear();
+    await command().parseAsync(['node', 'ap', 'status', 'abcd1234', '--json']);
+    const json = JSON.parse(stdout.mock.calls.map(([chunk]) => String(chunk)).join(''));
+    expect(json.lastValidationResult.taskReview.issues).toEqual(['Retained original finding']);
+    expect(json.lastValidationResult.reviewSkipKind).toBe('review-failed');
+    expect(requests.every((request) => request.startsWith('GET '))).toBe(true);
+  } finally {
+    output.mockRestore();
+    stdout.mockRestore();
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+  }
+});
+
+it('propagates an HTTP Resume termination conflict without printing accepted execution', async () => {
+  const message =
+    'A worker in this logical task has unverified process termination. Retain its source and resources; reconcile termination before Resume, Rework, validation or delivery.';
+  const requests: string[] = [];
+  const server = createServer((req, res) => {
+    requests.push(`${req.method} ${req.url}`);
+    res.setHeader('content-type', 'application/json');
+    res.statusCode = 409;
+    res.end(JSON.stringify({ error: message, code: 'TASK_EXECUTION_TERMINATION_UNVERIFIED' }));
+  });
+  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+  const address = server.address();
+  if (!address || typeof address === 'string') throw new Error('Missing fixture port');
+  const client = new AutopodClient({
+    baseUrl: `http://127.0.0.1:${address.port}`,
+    getToken: async () => 'local-fixture-only',
+  });
+  const log = vi.spyOn(console, 'log').mockImplementation(() => {});
+  try {
+    const program = new Command();
+    registerPodCommands(program, () => client);
+    await expect(program.parseAsync(['node', 'ap', 'resume', 'abcd1234'])).rejects.toMatchObject({
+      message,
+      statusCode: 409,
+    });
+    expect(requests).toEqual(['POST /pods/abcd1234/resume']);
+    expect(log).not.toHaveBeenCalled();
+  } finally {
+    log.mockRestore();
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+  }
+});
+
+it.each(['resume', 'rework'] as const)(
+  'propagates an HTTP %s cleanup conflict without printing accepted execution',
+  async (action) => {
+    const message =
+      'Pod deletion cleanup ownership is unresolved. Retain its resources and reconcile the saved cleanup attempt before retrying or starting work.';
+    const requests: string[] = [];
+    const server = createServer((req, res) => {
+      requests.push(`${req.method} ${req.url}`);
+      res.setHeader('content-type', 'application/json');
+      res.statusCode = 409;
+      res.end(JSON.stringify({ error: 'POD_DELETE_CLEANUP_UNVERIFIED', message }));
+    });
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+    const address = server.address();
+    if (!address || typeof address === 'string') throw new Error('Missing fixture port');
+    const client = new AutopodClient({
+      baseUrl: `http://127.0.0.1:${address.port}`,
+      getToken: async () => 'local-fixture-only',
+    });
+    const log = vi.spyOn(console, 'log').mockImplementation(() => {});
+    try {
+      const program = new Command();
+      registerPodCommands(program, () => client);
+      await expect(program.parseAsync(['node', 'ap', action, 'abcd1234'])).rejects.toMatchObject({
+        message,
+        statusCode: 409,
+      });
+      expect(requests).toEqual([
+        `POST /pods/abcd1234/${action === 'resume' ? 'resume' : 'validate'}`,
+      ]);
+      expect(log).not.toHaveBeenCalled();
+    } finally {
+      log.mockRestore();
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+  },
+);
+
+it('cost reads a deleted exact ID without requiring a live-list lookup and preserves JSON evidence', async () => {
+  const payload = {
+    podId: 'deleted-root',
+    model: null,
+    totalCostUsd: 2,
+    inputTokens: 90,
+    outputTokens: 10,
+    segments: [{ label: 'Unattributed', costUsd: 2, attribution: 'unattributed' }],
+    costEvidence: {
+      diagnostics: [
+        {
+          podId: 'deleted-root',
+          code: 'RETAINED_DELETED_POD',
+          message: 'Deleted pod retained in recorded cost totals.',
+        },
+      ],
+      omittedDiagnosticCount: 0,
+    },
+    taskExecution: {
+      taskId: 'original-task',
+      podCount: 2,
+      recordedCostUsd: 3,
+      diagnostics: ['2 deleted pod records retain task accounting and execution evidence.'],
+    },
+  };
+  const paths: string[] = [];
+  const server = createServer((req, res) => {
+    paths.push(req.url ?? '');
+    expect(req.method).toBe('GET');
+    expect(req.headers.authorization).toBe('Bearer local-fixture-only');
+    res.setHeader('content-type', 'application/json');
+    if (req.url === '/pods/deleted-root/cost') res.end(JSON.stringify(payload));
+    else {
+      res.statusCode = 404;
+      res.end('{}');
+    }
+  });
+  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+  const address = server.address();
+  if (!address || typeof address === 'string') throw new Error('Missing fixture port');
+  const client = new AutopodClient({
+    baseUrl: `http://127.0.0.1:${address.port}`,
+    getToken: async () => 'local-fixture-only',
+  });
+  const log = vi.spyOn(console, 'log').mockImplementation(() => {});
+  const stdout = vi.spyOn(process.stdout, 'write').mockImplementation(() => true);
+  try {
+    const command = () => {
+      const program = new Command();
+      registerPodCommands(program, () => client);
+      return program;
+    };
+    await command().parseAsync(['node', 'ap', 'cost', 'deleted-root']);
+    const output = log.mock.calls.map((call) => call.join(' ')).join('\n');
+    expect(output).toContain('Pod deleted-root stored cost subtotal: $2.0000');
+    expect(output).toContain('Recorded tokens: 100');
+    expect(output).toContain('Deleted pod retained in recorded cost totals.');
+    expect(output).toContain('Logical task: original-task (2 pods)');
+    expect(output).toContain('Stored task cost subtotal: $3.0000');
+    expect(output).toContain(
+      '2 deleted pod records retain task accounting and execution evidence.',
+    );
+    await command().parseAsync(['node', 'ap', 'cost', 'deleted-root', '--json']);
+    expect(JSON.parse(stdout.mock.calls.map((call) => String(call[0])).join(''))).toEqual(payload);
+    expect(paths).toEqual(['/pods/deleted-root/cost', '/pods/deleted-root/cost']);
+  } finally {
+    log.mockRestore();
+    stdout.mockRestore();
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+  }
+});
+
+it('sends profile-primary recovery through HTTP and inspects its target-bound worker permission', async () => {
+  const calls: Array<{ path: string; body: string }> = [];
+  const server = createServer(async (request, response) => {
+    let body = '';
+    for await (const chunk of request) body += String(chunk);
+    const route = request.url ?? '';
+    calls.push({ path: route, body });
+    response.setHeader('Content-Type', 'application/json');
+    response.end(
+      JSON.stringify(
+        route.endsWith('/continue-provider')
+          ? { ok: true, action: 'primary-provider' }
+          : route.includes('/retry-state')
+            ? {
+                taskId: 'task',
+                stage: 'worker',
+                backoffsMs: [],
+                admissionCount: 1,
+                executedCount: 1,
+                transientRetryCount: 0,
+                measuredDurationMs: 0,
+                interruptedCount: 0,
+                latest: { id: 'auth-failure', outcome: 'nonretryable' },
+                authorizations: [
+                  {
+                    id: 'target-grant',
+                    targetBindingHash: 'a'.repeat(64),
+                    reason:
+                      'Operator selected claude/opus on account primary after worker failure.',
+                    usedByAttemptId: null,
+                  },
+                ],
+                telemetry: 'partial',
+              }
+            : { id: 'abcd1234' },
+      ),
+    );
+  });
+  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+  const address = server.address();
+  if (!address || typeof address === 'string') throw new Error('Missing fixture port');
+  const client = new AutopodClient({
+    baseUrl: `http://127.0.0.1:${address.port}`,
+    getToken: async () => 'synthetic',
+  });
+  const output = vi.spyOn(console, 'log').mockImplementation(() => {});
+  const stdout = vi.spyOn(process.stdout, 'write').mockImplementation(() => true);
+  const run = async (args: string[]) => {
+    const program = new Command();
+    program.exitOverride();
+    registerPodCommands(program, () => client);
+    await program.parseAsync(['node', 'ap', ...args]);
+  };
+  try {
+    await run(['continue-provider', 'abcd1234', '--primary']);
+    await run(['retry-state', 'abcd1234', '--stage', 'worker', '--json']);
+    const sent = calls.filter((c) => c.path.endsWith('/continue-provider'));
+    expect(sent).toHaveLength(1);
+    expect(JSON.parse(sent[0]?.body ?? '{}')).toEqual({ primary: true });
+    expect(calls.some((c) => c.path.endsWith('/resume') || c.path.endsWith('/validate'))).toBe(
+      false,
+    );
+    expect(stdout.mock.calls.map(([chunk]) => String(chunk)).join('')).toContain(
+      'Operator selected claude/opus on account primary after worker failure.',
+    );
+    expect(stdout.mock.calls.map(([chunk]) => String(chunk)).join('')).toContain(
+      'targetBindingHash',
+    );
+  } finally {
+    output.mockRestore();
+    stdout.mockRestore();
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+  }
+});
+
+it.each(['nudge', 'tell'] as const)(
+  'sends %s through HTTP and reports recorded operator input',
+  async (command) => {
+    const requests: Array<{ url: string; body: string }> = [];
+    const server = createServer(async (request, response) => {
+      let body = '';
+      for await (const chunk of request) body += chunk;
+      requests.push({ url: request.url ?? '', body });
+      response.setHeader('content-type', 'application/json');
+      response.end(JSON.stringify({ ok: true }));
+    });
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+    const address = server.address();
+    if (!address || typeof address === 'string') throw new Error('Missing fixture port');
+    const client = new AutopodClient({
+      baseUrl: `http://127.0.0.1:${address.port}`,
+      getToken: async () => 'local-fixture-only',
+    });
+    const log = vi.spyOn(console, 'log').mockImplementation(() => {});
+    try {
+      const program = new Command();
+      registerPodCommands(program, () => client);
+      await program.parseAsync(['node', 'ap', command, 'abcd1234', 'Preserve source']);
+      expect(requests).toEqual([
+        {
+          url: `/pods/abcd1234/${command === 'nudge' ? 'nudge' : 'message'}`,
+          body: JSON.stringify({ message: 'Preserve source' }),
+        },
+      ]);
+      expect(log.mock.calls.flat().join('\n')).toContain(
+        command === 'nudge'
+          ? 'Nudge saved. It remains pending until the worker acknowledges receipt.'
+          : 'Message recorded.',
+      );
+    } finally {
+      log.mockRestore();
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+  },
+);
+
+it.each([false, true])(
+  'renders unavailable duration evidence through retry-state HTTP (legacy daemon: %s)',
+  async (legacy) => {
+    const state = {
+      taskId: 'task',
+      stage: 'worker',
+      admissionCount: 1,
+      executedCount: 1,
+      transientRetryCount: 0,
+      backoffsMs: [],
+      measuredDurationMs: legacy ? 0 : null,
+      interruptedCount: 0,
+      latest: { id: 'old', outcome: 'pass' },
+      authorizations: [],
+      telemetry: 'partial',
+      ...(!legacy
+        ? {
+            durationEvidence: {
+              measuredRecordCount: 0,
+              unavailableRecordCount: 1,
+              pendingRecordCount: 0,
+              basis: 'stage_elapsed_subtotal',
+              additiveAcrossStages: false,
+            },
+          }
+        : {}),
+    };
+    const requests: string[] = [];
+    const server = createServer((req, res) => {
+      requests.push(`${req.method} ${req.url}`);
+      res.setHeader('Content-Type', 'application/json');
+      res.end(JSON.stringify(state));
+    });
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+    const address = server.address();
+    if (!address || typeof address === 'string') throw new Error('Missing port');
+    const client = new AutopodClient({
+      baseUrl: `http://127.0.0.1:${address.port}`,
+      getToken: async () => 'synthetic',
+    });
+    const output = vi.spyOn(console, 'log').mockImplementation(() => {});
+    try {
+      const program = new Command();
+      registerPodCommands(program, () => client);
+      await program.parseAsync(['node', 'ap', 'retry-state', 'abcd1234', '--stage', 'worker']);
+      const text = output.mock.calls.flat().join('\n');
+      expect(text).toContain(
+        legacy ? 'Duration coverage unavailable from this daemon.' : '1 records without duration',
+      );
+      if (!legacy) expect(text).toContain('Measured duration unavailable');
+      expect(text).toContain('Stage durations can overlap; do not add them.');
+      expect(text).not.toContain('null ms');
+      expect(requests.every((r) => r.startsWith('GET '))).toBe(true);
+    } finally {
+      output.mockRestore();
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+  },
+);
+
+it('shows a retained recovery hint through actual status HTTP without implying worker settlement', async () => {
+  const note =
+    'Recovery paused: task execution or cleanup ownership remains unresolved. Source and resources are retained.';
+  const pod = {
+    ...(await createMockClient().getSession('abcd1234')),
+    status: 'running',
+    lastRecoveryTrigger: 'restart',
+    lastCorrectionMessage: note,
+  };
+  const requests: string[] = [];
+  const server = createServer((req, res) => {
+    requests.push(`${req.method} ${req.url}`);
+    res.setHeader('Content-Type', 'application/json');
+    if (req.url === '/pods/abcd1234') res.end(JSON.stringify(pod));
+    else {
+      res.statusCode = 503;
+      res.end('{}');
+    }
+  });
+  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+  const address = server.address();
+  if (!address || typeof address === 'string') throw new Error('Missing port');
+  const client = new AutopodClient({
+    baseUrl: `http://127.0.0.1:${address.port}`,
+    getToken: async () => 'synthetic',
+  });
+  const output = vi.spyOn(console, 'log').mockImplementation(() => {});
+  try {
+    const program = new Command();
+    registerPodCommands(program, () => client);
+    await program.parseAsync(['node', 'ap', 'status', 'abcd1234']);
+    expect(output.mock.calls.flat().join('\n')).toContain(note);
+    expect(requests.every((r) => r.startsWith('GET '))).toBe(true);
+  } finally {
+    output.mockRestore();
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+  }
 });

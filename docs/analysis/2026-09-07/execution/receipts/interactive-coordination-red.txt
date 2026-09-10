@@ -1,0 +1,106 @@
+
+ RUN  v4.1.11 /private/tmp/autopod-durable-execution/packages/daemon
+
+ ❯ src/pods/pod-manager.test.ts (438 tests | 5 failed | 433 skipped) 305ms
+         × coalesces concurrent interactive branch completion requests 97ms
+         × coalesces concurrent interactive artifact completion requests 60ms
+         × rejects a different promotion while interactive completion is already pending 55ms
+         × retains unanswered input before interactive completion can push or clean up 48ms
+         × does not clean a replacement lifecycle after an interactive push returns 44ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 5 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/pods/pod-manager.test.ts > PodManager > workspace pods > completeSession > coalesces concurrent interactive branch completion requests
+ FAIL  src/pods/pod-manager.test.ts > PodManager > workspace pods > completeSession > coalesces concurrent interactive artifact completion requests
+AssertionError: expected [ 'fulfilled', 'rejected' ] to deeply equal [ 'fulfilled', 'fulfilled' ]
+
+- Expected
++ Received
+
+  [
+    "fulfilled",
+-   "fulfilled",
++   "rejected",
+  ]
+
+ ❯ src/pods/pod-manager.test.ts:12824:66
+    12822|           const results = Promise.allSettled([first, manager.completeS…
+    12823|           gate.resolve();
+    12824|           expect((await results).map((result) => result.status)).toEqu…
+       |                                                                  ^
+    12825|             'fulfilled',
+    12826|             'fulfilled',
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/5]⎯
+
+ FAIL  src/pods/pod-manager.test.ts > PodManager > workspace pods > completeSession > rejects a different promotion while interactive completion is already pending
+AssertionError: promise resolved "{ promotedTo: 'pr' }" instead of rejecting
+
+- Expected
++ Received
+
+- Error {
+-   "message": "rejected promise",
++ {
++   "promotedTo": "pr",
+  }
+
+ ❯ src/pods/pod-manager.test.ts:12850:76
+    12848|         );
+    12849|         try {
+    12850|           await expect(manager.completeSession(pod.id, { promoteTo: 'p…
+       |                                                                            ^
+    12851|             code: 'COMPLETION_IN_PROGRESS',
+    12852|           });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/5]⎯
+
+ FAIL  src/pods/pod-manager.test.ts > PodManager > workspace pods > completeSession > retains unanswered input before interactive completion can push or clean up
+AssertionError: promise resolved "{ pushError: undefined }" instead of rejecting
+
+- Expected
++ Received
+
+- Error {
+-   "message": "rejected promise",
++ {
++   "pushError": undefined,
+  }
+
+ ❯ src/pods/pod-manager.test.ts:12873:53
+    12871|           pendingEscalation: { id: 'pending', question: 'Keep this wor…
+    12872|         });
+    12873|         await expect(manager.completeSession(pod.id)).rejects.toMatchO…
+       |                                                     ^
+    12874|           code: 'HUMAN_DECISION_PENDING',
+    12875|         });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/5]⎯
+
+ FAIL  src/pods/pod-manager.test.ts > PodManager > workspace pods > completeSession > does not clean a replacement lifecycle after an interactive push returns
+AssertionError: promise resolved "{ pushError: undefined }" instead of rejecting
+
+- Expected
++ Received
+
+- Error {
+-   "message": "rejected promise",
++ {
++   "pushError": undefined,
+  }
+
+ ❯ src/pods/pod-manager.test.ts:12897:53
+    12895|           });
+    12896|         });
+    12897|         await expect(manager.completeSession(pod.id)).rejects.toMatchO…
+       |                                                     ^
+    12898|           code: 'STALE_WORKSPACE_COMPLETION',
+    12899|         });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[4/5]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  5 failed | 433 skipped (438)
+   Start at  19:58:37
+   Duration  1.71s (transform 863ms, setup 0ms, import 1.30s, tests 305ms, environment 0ms)

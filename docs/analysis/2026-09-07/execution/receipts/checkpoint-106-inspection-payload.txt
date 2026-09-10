@@ -1,0 +1,18 @@
+test_actual_child_output_is_bounded_and_terminated (__main__.PayloadBoundaries) ... ok
+test_actual_child_timeout_is_observed (__main__.PayloadBoundaries) ... ok
+test_arbitrary_log_values_do_not_leave_vm (__main__.PayloadBoundaries) ... FAIL
+test_inventory_truncation_and_release_allowlist (__main__.PayloadBoundaries) ... ok
+test_json_classification_exports_no_error_text (__main__.PayloadBoundaries) ... ok
+
+======================================================================
+FAIL: test_arbitrary_log_values_do_not_leave_vm (__main__.PayloadBoundaries)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/private/tmp/autopod-durable-execution/docs/analysis/2026-09-07/execution/fixtures/test_read_only_guest_inspection.py", line 22, in test_arbitrary_log_values_do_not_leave_vm
+    self.assertEqual(result, {'time': None, 'kind': 'SQLITE_ERROR',
+AssertionError: None != {'time': None, 'kind': 'SQLITE_ERROR', 'd[41 chars]ods'}
+
+----------------------------------------------------------------------
+Ran 5 tests in 0.069s
+
+FAILED (failures=1)

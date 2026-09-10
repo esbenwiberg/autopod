@@ -1,0 +1,44 @@
+
+ RUN  v4.1.11 /private/tmp/autopod-durable-execution/packages/daemon
+
+ ❯ src/validation/review-tool-runner.test.ts (27 tests | 1 failed | 26 skipped) 14ms
+     × retains the selected client and model across actual tool turns 13ms
+ ❯ src/pods/pod-manager.test.ts (576 tests | 1 failed | 575 skipped) 97ms
+       × records versioned selected API dispatch and rejects stale or mismatched launches 96ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 2 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/pods/pod-manager.test.ts > PodManager > triggerValidation > records versioned selected API dispatch and rejects stale or mismatched launches
+AssertionError: expected undefined to be type of 'function'
+
+Expected: "function"
+Received: "undefined"
+
+ ❯ src/pods/pod-manager.test.ts:14018:22
+    14016|       });
+    14017|       await manager.triggerValidation(pod.id);
+    14018|       expect(record).toBeTypeOf('function');
+       |                      ^
+    14019|       expect(() => record?.('review-model')).toThrow(/superseded/i);
+    14020|       expect(ctx.runtime.resume).not.toHaveBeenCalled();
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/2]⎯
+
+ FAIL  src/validation/review-tool-runner.test.ts > review tool runner - Anthropic request shape > retains the selected client and model across actual tool turns
+AssertionError: expected "vi.fn()" to be called 7 times, but got 5 times
+ ❯ src/validation/review-tool-runner.test.ts:94:29
+     92|       });
+     93|       expect(create).toHaveBeenCalledTimes(2);
+     94|       expect(beforeRequest).toHaveBeenCalledTimes(7);
+       |                             ^
+     95|       expect(onDispatch.mock.calls).toEqual([['selected-deployment'], …
+     96|       expect(create.mock.calls.map(([body]) => body.model)).toEqual([
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/2]⎯
+
+
+ Test Files  2 failed (2)
+      Tests  2 failed | 601 skipped (603)
+   Start at  12:16:13
+   Duration  1.42s (transform 966ms, setup 0ms, import 1.38s, tests 111ms, environment 0ms)
+

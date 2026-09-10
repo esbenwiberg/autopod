@@ -1,0 +1,47 @@
+{
+  "id": "local-legacy-api-reviewer",
+  "version": 2,
+  "podId": "local-fixture",
+  "taskId": "task-local",
+  "executionId": "execution-local",
+  "generation": 1,
+  "checkedAt": "2026-09-07T16:30:00Z",
+  "status": "checked",
+  "runtime": "claude",
+  "model": "local-reviewer-model",
+  "providerId": null,
+  "providerAccountId": null,
+  "release": {
+    "commitSha": null,
+    "dirty": null,
+    "builtAt": null,
+    "source": "unavailable"
+  },
+  "cliPath": "/fixture/claude",
+  "cliVersion": "2.9.1",
+  "imageDigest": null,
+  "contractHash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "validationImplementationHash": null,
+  "capabilities": {
+    "streamingExec": "unverified",
+    "memoryLimitBytes": null,
+    "cpuLimit": null,
+    "networkMode": null
+  },
+  "commands": {
+    "requirements": [],
+    "unresolvedSources": [],
+    "deferredArtifacts": [],
+    "explicitDependencies": false
+  },
+  "diagnostics": [
+    {
+      "code": "REVIEWER_HOST_CLI_DISPATCH_PREFLIGHT",
+      "detail": "Local fixture: host CLI version observed before dispatch. Provider/account identity and resolved remote model are unverified. Container image is not applicable; this receipt does not prove review completion or billing."
+    }
+  ],
+  "purpose": "review",
+  "subject": "reviewer",
+  "surface": "host-cli",
+  "dispatchModel": "resolved-local-model"
+}

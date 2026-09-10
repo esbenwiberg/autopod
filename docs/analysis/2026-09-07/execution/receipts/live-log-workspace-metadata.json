@@ -1,0 +1,10 @@
+[
+  {
+    "id": "/subscriptions/06bb959b-9458-41a6-bdf5-77cc12feaab9/resourceGroups/ewi-sandboxes/providers/Microsoft.OperationalInsights/workspaces/scruffy-shadow-logs",
+    "name": "scruffy-shadow-logs"
+  },
+  {
+    "id": "/subscriptions/06bb959b-9458-41a6-bdf5-77cc12feaab9/resourceGroups/ewi-sandboxes/providers/Microsoft.OperationalInsights/workspaces/dvh-phase5-logs",
+    "name": "dvh-phase5-logs"
+  }
+]

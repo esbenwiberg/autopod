@@ -1,0 +1,34 @@
+
+ RUN  v4.1.10 /private/tmp/autopod-durable-execution
+
+ ❯ packages/daemon/src/db/backup.test.ts (6 tests | 1 failed | 5 skipped) 63ms
+     × includes actual validation, escalation and task execution tables in backup scope receipts 62ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  packages/daemon/src/db/backup.test.ts > active database backup provenance > includes actual validation, escalation and task execution tables in backup scope receipts
+AssertionError: validations: expected undefined to match object { rows: +0 }
+
+- Expected:
+{
+  "rows": 0,
+}
+
++ Received:
+undefined
+
+ ❯ packages/daemon/src/db/backup.test.ts:36:41
+     34|       const watermark = databaseWatermark(db);
+     35|       for (const table of ['validations', 'escalations', 'logical_task…
+     36|         expect(watermark[table], table).toMatchObject({ rows: 0 });
+       |                                         ^
+     37|     } finally { db.close(); }
+     38|   });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 5 skipped (6)
+   Start at  12:08:58
+   Duration  338ms (transform 101ms, setup 0ms, import 174ms, tests 63ms, environment 0ms)

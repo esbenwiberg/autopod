@@ -1,0 +1,15 @@
+{
+  "id": "/subscriptions/06bb959b-9458-41a6-bdf5-77cc12feaab9/resourceGroups/ewi-sandboxes/providers/Microsoft.App/sandboxGroups/autopod-spike-neu",
+  "identity": {
+    "principalId": null,
+    "tenantId": null,
+    "type": "UserAssigned",
+    "userAssignedIdentities": {
+      "/subscriptions/06bb959b-9458-41a6-bdf5-77cc12feaab9/resourcegroups/ewi-sandboxes/providers/Microsoft.ManagedIdentity/userAssignedIdentities/autopod-sandbox-acr-pull": {
+        "clientId": "3936ea41-e8a9-480f-beb4-4413b71082b6",
+        "principalId": "c3003025-3baf-4222-b35f-d82f9eaef56c"
+      }
+    }
+  },
+  "location": "northeurope"
+}

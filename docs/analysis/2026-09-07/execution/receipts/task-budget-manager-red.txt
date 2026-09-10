@@ -1,0 +1,34 @@
+
+ RUN  v4.1.10 /private/tmp/autopod-durable-execution
+
+ ❯ packages/daemon/src/pods/pod-manager.test.ts (404 tests | 1 failed | 403 skipped) 101ms
+     × blocks linked fix agent execution using cumulative task budget before consuming the runtime 100ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  packages/daemon/src/pods/pod-manager.test.ts > PodManager > blocks linked fix agent execution using cumulative task budget before consuming the runtime
+AssertionError: promise resolved "'completed'" instead of rejecting
+
+- Expected:
+Error {
+  "message": "rejected promise",
+}
+
++ Received:
+"completed"
+
+ ❯ packages/daemon/src/pods/pod-manager.test.ts:1388:10
+    1386|       consumed = true;
+    1387|       yield { type: 'complete', timestamp: new Date().toISOString(), r…
+    1388|     })())).rejects.toThrow('Task token budget');
+       |          ^
+    1389|     expect(consumed).toBe(false);
+    1390|     expect(ctx.podRepo.taskExecutions!.snapshot(fix.id).agentRunCount)…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 403 skipped (404)
+   Start at  11:57:24
+   Duration  2.49s (transform 1.40s, setup 0ms, import 2.21s, tests 101ms, environment 0ms)

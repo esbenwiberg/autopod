@@ -1,6 +1,10 @@
 import type { ReviewBatchResult, ValidationResult } from '@autopod/shared';
 import { generateId } from '@autopod/shared';
 import type Database from 'better-sqlite3';
+import {
+  type HistoryDiagnosticSink,
+  readRetainedHistory,
+} from '../history/retained-history-read.js';
 
 export interface StoredValidation {
   id: string;
@@ -17,8 +21,19 @@ export interface StoredValidation {
 export interface ValidationRepository {
   insert(podId: string, attempt: number, result: ValidationResult): StoredValidation;
   updateResult(validationId: string, result: ValidationResult): boolean;
-  getForSession(podId: string): StoredValidation[];
+  /** Attach advisory evidence without replacing deterministic, review or waiver evidence. */
+  updateAdvisoryResult(
+    podId: string,
+    validationId: string,
+    result: NonNullable<ValidationResult['advisoryBrowserQa']>,
+  ): boolean;
+  getForSession(
+    podId: string,
+    includeRetained?: boolean,
+    diagnostic?: HistoryDiagnosticSink,
+  ): StoredValidation[];
   getLatest(podId: string): StoredValidation | null;
+  isLatestForPod(podId: string, validationId: string): boolean;
   getLatestReviewBatch(podId: string): ReviewBatchResult | undefined;
 }
 
@@ -83,11 +98,38 @@ export function createValidationRepository(db: Database.Database): ValidationRep
       return info.changes > 0;
     },
 
-    getForSession(podId: string): StoredValidation[] {
+    updateAdvisoryResult(podId, validationId, result): boolean {
+      // One SQL mutation merges into the latest retained bytes, including evidence
+      // attached while asynchronous QA ran. Malformed legacy rows remain untouched.
+      const info = db
+        .prepare(`UPDATE validations
+        SET result = json_set(result, '$.advisoryBrowserQa', json(@advisory))
+        WHERE id = @validationId AND pod_id = @podId
+          AND CASE WHEN json_valid(result) THEN json_type(result) = 'object' ELSE 0 END`)
+        .run({ podId, validationId, advisory: JSON.stringify(result) });
+      return info.changes > 0;
+    },
+
+    getForSession(
+      podId: string,
+      includeRetained = false,
+      diagnostic?: HistoryDiagnosticSink,
+    ): StoredValidation[] {
+      if (includeRetained && diagnostic)
+        return readRetainedHistory(db, 'validations', podId, rowToStoredValidation, diagnostic);
       const rows = db
-        .prepare('SELECT * FROM validations WHERE pod_id = ? ORDER BY sequence ASC')
+        .prepare(
+          `SELECT * FROM ${includeRetained ? 'retained_validations' : 'validations'} WHERE pod_id = ? ORDER BY sequence ASC`,
+        )
         .all(podId) as Record<string, unknown>[];
       return rows.map(rowToStoredValidation);
+    },
+
+    isLatestForPod(podId, validationId): boolean {
+      const row = db
+        .prepare('SELECT id FROM validations WHERE pod_id = ? ORDER BY sequence DESC LIMIT 1')
+        .get(podId) as { id: string } | undefined;
+      return row?.id === validationId;
     },
 
     getLatest(podId: string): StoredValidation | null {

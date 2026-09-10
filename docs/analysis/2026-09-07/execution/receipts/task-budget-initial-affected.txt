@@ -1,0 +1,27 @@
+
+ RUN  v4.1.11 /private/tmp/autopod-durable-execution/packages/daemon
+
+ ❯ src/pods/task-execution-ledger.test.ts (10 tests | 1 failed) 524ms
+     × retains task/run identity through restart and linked fixes while intentional reruns remain distinct 46ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/pods/task-execution-ledger.test.ts > task-wide execution accounting > retains task/run identity through restart and linked fixes while intentional reruns remain distinct
+AutopodError: Task token accounting incomplete; reconcile prior execution and phase telemetry before starting more budgeted work.
+ ❯ Object.<anonymous> src/pods/task-execution-ledger.ts:301:15
+    299|         );
+    300|       if (task.budgetCheck?.status === 'unavailable')
+    301|         throw new AutopodError(task.budgetCheck.reason, 'TASK_BUDGET_U…
+       |               ^
+    302|       const id = randomUUID();
+    303|       db.prepare(
+ ❯ Object.sqliteTransaction [as beginRun] ../../node_modules/.pnpm/better-sqlite3@11.10.0/node_modules/better-sqlite3/lib/methods/transaction.js:65:24
+ ❯ src/pods/task-execution-ledger.test.ts:81:12
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed | 1 passed (2)
+      Tests  1 failed | 11 passed | 428 skipped (440)
+   Start at  18:49:53
+   Duration  1.28s (transform 1.01s, setup 0ms, import 1.47s, tests 620ms, environment 0ms)

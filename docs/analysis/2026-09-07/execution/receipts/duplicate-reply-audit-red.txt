@@ -1,0 +1,35 @@
+
+ RUN  v4.1.10 /private/tmp/autopod-durable-execution/packages/daemon
+
+ ❯ src/pods/completion-journal.test.ts (3 tests | 1 failed) 180ms
+     × retains settlement and an unanswered decision across a real database close/reopen 62ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/pods/completion-journal.test.ts > durable completion journal > retains settlement and an unanswered decision across a real database close/reopen
+AssertionError: expected { Object (response) } to deeply equal { Object (response) }
+
+- Expected
++ Received
+
+  {
+-   "response": "{\"respondedBy\":\"human\",\"actor\":{\"type\":\"human\",\"userId\":\"reviewer\"},\"response\":\"Select finding A\",\"respondedAt\":\"2026-09-07T15:13:11.227Z\"}",
++   "response": "{\"respondedBy\":\"human\",\"actor\":{\"type\":\"human\",\"userId\":\"another-reviewer\"},\"response\":\"Select finding A\",\"respondedAt\":\"2026-09-07T15:13:11.227Z\"}",
+  }
+
+ ❯ src/pods/completion-journal.test.ts:64:74
+     62|       });
+     63|       expect(reopened.prepare('SELECT * FROM completion_decisions').ge…
+     64|       expect(reopened.prepare('SELECT response FROM escalations').get(…
+       |                                                                          ^
+     65|
+     66|       expect(() =>
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 2 passed (3)
+   Start at  17:13:10
+   Duration  416ms (transform 91ms, setup 0ms, import 147ms, tests 180ms, environment 0ms)
+

@@ -1,0 +1,3 @@
+http://127.0.0.1:56008/mobile/
+{"scope":"local fixture only","action":"retry-authorization","stage":"sandbox_startup","requestKey":"7f748e8c-ce47-4b47-b81d-68a5b0a2ac44"}
+{"scope":"local fixture only","action":"resume-sandbox-startup","simulated":true}

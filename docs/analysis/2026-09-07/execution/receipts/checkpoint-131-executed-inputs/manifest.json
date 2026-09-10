@@ -1,0 +1,130 @@
+{
+  "fixtures/test-canary-nuget-131-new-attempt.mjs": {
+    "archive": "receipts/checkpoint-131-executed-inputs/test-canary-nuget-131-new-attempt.mjs.txt",
+    "sha256": "6ec340ba7511517e583ccb7673b5ef76436b4baf721f07a347269266c9174e4c"
+  },
+  "fixtures/test-canary-129-new-attempt.mjs": {
+    "archive": "receipts/checkpoint-131-executed-inputs/test-canary-129-new-attempt.mjs.txt",
+    "sha256": "e94820b96c527a7bcfc6fedea0b88a7eb35a257dcc334b357e90b109c387f521"
+  },
+  "fixtures/test-canary-130-new-attempt.mjs": {
+    "archive": "receipts/checkpoint-131-executed-inputs/test-canary-130-new-attempt.mjs.txt",
+    "sha256": "50ebf246b7070fd445580a4b6b73ed4aac367771f6d84d34863a3d61950e4519"
+  },
+  "fixtures/test-canary-126-runner.mjs": {
+    "archive": "receipts/checkpoint-131-executed-inputs/test-canary-126-runner.mjs.txt",
+    "sha256": "a68fd590971c22e2dc599dcaf5b3f02352dc9c4fc11c9da626eb47f22d5da8dc"
+  },
+  "fixtures/test-canary-128-new-attempt.mjs": {
+    "archive": "receipts/checkpoint-131-executed-inputs/test-canary-128-new-attempt.mjs.txt",
+    "sha256": "4a213cbeb9485e3df83c5c9b2a8b393387aec91846837486fa639c11024a3281"
+  },
+  "fixtures/test-canary-131-new-attempt.mjs": {
+    "archive": "receipts/checkpoint-131-executed-inputs/test-canary-131-new-attempt.mjs.txt",
+    "sha256": "a6828e8c6a19d851dfd8df7e0dd7179e4c96bad589895d52460297be28af4208"
+  },
+  "fixtures/run-canary-127-replacement.mjs": {
+    "archive": "receipts/checkpoint-131-executed-inputs/run-canary-127-replacement.mjs.txt",
+    "sha256": "dd091bb2e2f5e24dd67dd1d1215fd735f37d365b4bf0816324a87aeb8035ee59"
+  },
+  "fixtures/test-canary-import-window.mjs": {
+    "archive": "receipts/checkpoint-131-executed-inputs/test-canary-import-window.mjs.txt",
+    "sha256": "aa804537dd8a56023993a9c2b4bb78252f836b1d0f4bbebe1915b8aa4b5a993b"
+  },
+  "fixtures/run-canary-nuget-131-new-attempt.mjs": {
+    "archive": "receipts/checkpoint-131-executed-inputs/run-canary-nuget-131-new-attempt.mjs.txt",
+    "sha256": "04df6d3c459507dc75f1bf0946cc5f79e38c49ebef8f9d76019c98f8c5163eee"
+  },
+  "fixtures/run-canary-127-full-import-window.mjs": {
+    "archive": "receipts/checkpoint-131-executed-inputs/run-canary-127-full-import-window.mjs.txt",
+    "sha256": "954a19ce4cd059353ad64b529e8943223ac9d41828c2a52c2a80ae7b88d21a2a"
+  },
+  "fixtures/test-canary-resource-131-new-attempt.mjs": {
+    "archive": "receipts/checkpoint-131-executed-inputs/test-canary-resource-131-new-attempt.mjs.txt",
+    "sha256": "4a96491a668fa56ff42afa72dcb53e6c3eb005b4dad598e12f5802946803d9f6"
+  },
+  "fixtures/run-canary-129-new-attempt.mjs": {
+    "archive": "receipts/checkpoint-131-executed-inputs/run-canary-129-new-attempt.mjs.txt",
+    "sha256": "d6af39b9ec03631ef5fe097c8d7868e69ad3e89c90a263500583c54afd7c2783"
+  },
+  "fixtures/run-canary-130-new-attempt.mjs": {
+    "archive": "receipts/checkpoint-131-executed-inputs/run-canary-130-new-attempt.mjs.txt",
+    "sha256": "0727edbbaf16ccd24635f4919a077990401857c1598628bbc74425a5490bf3fa"
+  },
+  "fixtures/run-canary-128-new-attempt.mjs": {
+    "archive": "receipts/checkpoint-131-executed-inputs/run-canary-128-new-attempt.mjs.txt",
+    "sha256": "748164f6a6425b4c0ff6baf21a6f8aa095cddd92e151e2c61ff590a376f84b11"
+  },
+  "fixtures/test-canary-127-recovery.mjs": {
+    "archive": "receipts/checkpoint-131-executed-inputs/test-canary-127-recovery.mjs.txt",
+    "sha256": "bc32fc713ddca35ec1dbc442ed4216f41ad310ec7052273b16dacbb9dfc1f6e0"
+  },
+  "fixtures/run-canary-131-new-attempt.mjs": {
+    "archive": "receipts/checkpoint-131-executed-inputs/run-canary-131-new-attempt.mjs.txt",
+    "sha256": "388381759b30c45360755f46e548a3232974f42c0dbf3df3b85c23d659d6d529"
+  },
+  "fixtures/test-canary-127-replacement.mjs": {
+    "archive": "receipts/checkpoint-131-executed-inputs/test-canary-127-replacement.mjs.txt",
+    "sha256": "a566a6e08e168f5c0f5db1711952a929b627b17ebfc9cb7c5f46dd9d459460b0"
+  },
+  "fixtures/resume-canary-127-reconciled.mjs": {
+    "archive": "receipts/checkpoint-131-executed-inputs/resume-canary-127-reconciled.mjs.txt",
+    "sha256": "8cd75264960a858537c8b23938f066f4b78c7785989500465223f22128c2857f"
+  },
+  "fixtures/run-canary-126-approved.mjs": {
+    "archive": "receipts/checkpoint-131-executed-inputs/run-canary-126-approved.mjs.txt",
+    "sha256": "259a146982f2e8d18f1b2e1c7c82804c6efabd43715146275292fbcc8857ea86"
+  },
+  "fixtures/run-canary-resource-131-new-attempt.mjs": {
+    "archive": "receipts/checkpoint-131-executed-inputs/run-canary-resource-131-new-attempt.mjs.txt",
+    "sha256": "5ab848875c3e27f5101eeb623ffbb717b1305291d0eb06b39e9cfe2cbfaace8a"
+  },
+  "fixtures/canary-131-contract.json": {
+    "archive": "receipts/checkpoint-131-executed-inputs/canary-131-contract.json.txt",
+    "sha256": "b7c34abce2a8522f400c2f5399960beff0cae5763a94ff1fab72a65768107933"
+  },
+  "fixtures/canary-126-contract.json": {
+    "archive": "receipts/checkpoint-131-executed-inputs/canary-126-contract.json.txt",
+    "sha256": "e75a8e1864492d945042530b1ebbf05748e51354adce8afdc4241fa13c709ccd"
+  },
+  "fixtures/canary-128-contract.json": {
+    "archive": "receipts/checkpoint-131-executed-inputs/canary-128-contract.json.txt",
+    "sha256": "e0b142993993cb700fecefda5c1d64f94145558941c3a0ce22807bf86a6aec0c"
+  },
+  "fixtures/canary-nuget-131-contract.json": {
+    "archive": "receipts/checkpoint-131-executed-inputs/canary-nuget-131-contract.json.txt",
+    "sha256": "c75dd9dcc3bdb2db1dcbddd2abb34f68c89faac1aa0c550c7fd562fff73cdaa7"
+  },
+  "fixtures/canary-129-contract.json": {
+    "archive": "receipts/checkpoint-131-executed-inputs/canary-129-contract.json.txt",
+    "sha256": "de789a82f29feb13ca22bd8b4f521f8dd6a792bd6b98860055f48ed799163a43"
+  },
+  "fixtures/canary-127-contract.json": {
+    "archive": "receipts/checkpoint-131-executed-inputs/canary-127-contract.json.txt",
+    "sha256": "c503745f8b7fb8864493399aff22a89615ee6425320ed6a9f696ff8736a7d6d0"
+  },
+  "fixtures/canary-130-contract.json": {
+    "archive": "receipts/checkpoint-131-executed-inputs/canary-130-contract.json.txt",
+    "sha256": "e9060ad05d37af2b2ae84e7dec256ebd000ed6a6c90445c39b11fe88f3ebdab6"
+  },
+  "fixtures/canary-resource-131-contract.json": {
+    "archive": "receipts/checkpoint-131-executed-inputs/canary-resource-131-contract.json.txt",
+    "sha256": "1277ffb2821d26a26e161ec33f6dee2640f3f42f837a76a3ac82e4020590e5df"
+  },
+  "fixtures/canary-127-entry.ts": {
+    "archive": "receipts/checkpoint-131-executed-inputs/canary-127-entry.ts.txt",
+    "sha256": "ebc50bf7f193a70e4b61ef4bedc247845e14986fff1a75bfcc5a196a0c14a5f0"
+  },
+  "fixtures/canary-resource-131-entry.ts": {
+    "archive": "receipts/checkpoint-131-executed-inputs/canary-resource-131-entry.ts.txt",
+    "sha256": "ec25941574110213e35dfba7845b34fc888c390fdcf7146332503bb2dba114bc"
+  },
+  "fixtures/canary-nuget-131-entry.ts": {
+    "archive": "receipts/checkpoint-131-executed-inputs/canary-nuget-131-entry.ts.txt",
+    "sha256": "7a976bba1dfb5cc1b7b61ec92897285e78bc8f3ac589ff7b5aa8ba749286eef6"
+  },
+  "receipts/checkpoint-129-installed-cli-schema.json": {
+    "archive": "receipts/checkpoint-131-executed-inputs/checkpoint-129-installed-cli-schema.json.txt",
+    "sha256": "aa760f3af4678e8386fe9f4039fc2e9e4756061b3557275b45b9ca2447b492d4"
+  }
+}

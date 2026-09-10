@@ -1,0 +1,10 @@
+{
+  "value": [
+    {
+      "code": "ProvisioningState/succeeded",
+      "displayStatus": "Provisioning succeeded",
+      "level": "Info",
+      "message": "Enable succeeded: \n[stdout]\n{\"at\": \"2026-09-10T09:53:46.979799+00:00\", \"managed\": [{\"pod_id\": \"managed-49cb8e4f-15ca-41d3-b240-95a117ea9562\", \"state\": \"queued\", \"runtime_ref\": null, \"observed_exit\": 0, \"cleanup\": \"not-requested\", \"created_at\": 1789032574, \"expiresAt\": 1789034371, \"duration\": 1800}, {\"pod_id\": \"managed-7274cefa-4d4e-4694-83ac-8efe9c8cd445\", \"state\": \"queued\", \"runtime_ref\": null, \"observed_exit\": 0, \"cleanup\": \"not-requested\", \"created_at\": 1789032954, \"expiresAt\": 1789034751, \"duration\": 1800}], \"allocationColumns\": [\"pod_id\", \"spec_digest\", \"sandbox_id\", \"phase\"], \"allocations\": []}\n\n[stderr]\n"
+    }
+  ]
+}

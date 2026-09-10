@@ -1,0 +1,603 @@
+import { randomUUID } from 'node:crypto';
+import { AutopodError, type ExecutionTarget, type TaskExecutionSummary } from '@autopod/shared';
+import type Database from 'better-sqlite3';
+import { COST_PHASE_COLUMNS } from './cost-pod-projection.js';
+import {
+  appendCostEvidence,
+  emptyCostEvidence,
+  isAgentCostPhase,
+  isHarnessCostPhase,
+  reconcilePodCosts,
+} from './cost-reconciliation.js';
+import { hasUnansweredDecision } from './decision-admission.js';
+import { createDeletionOwnership } from './deletion-ownership.js';
+import { ensureMergeIdentityProjection } from './merge-identity-projection.js';
+import { readProviderUsage } from './provider-usage-projection.js';
+
+export interface ExecutionBinding {
+  runtime: string;
+  model: string;
+  providerAccountId: string | null;
+  /** Supplied by the dispatch owner, never reconstructed from a later pod snapshot. */
+  resource?: { containerId: string | null; executionTarget: ExecutionTarget };
+}
+function isContainerReference(value: unknown): value is string {
+  return (
+    typeof value === 'string' &&
+    value.length > 0 &&
+    value.length <= 1024 &&
+    Array.from(value).every((char) => {
+      const code = char.charCodeAt(0);
+      return code >= 32 && (code < 127 || code > 159);
+    })
+  );
+}
+
+export interface TaskExecutionLedger {
+  register(podId: string): void;
+  snapshot(podId: string): TaskExecutionSummary;
+  /** Unsettled durable evidence; not proof that a provider process is still alive. */
+  hasActiveRun(podId: string): boolean;
+  /** Prevent application deletion from erasing unresolved ownership anywhere in this task. */
+  assertCanDelete(podId: string): void;
+  /** Across this logical task, including retained failed runs in linked pods. */
+  hasUnverifiedTermination(podId: string): boolean;
+  beginRun(podId: string, generation: number, cycle: number, binding: ExecutionBinding): string;
+  /** Record failed execution evidence without releasing its unresolved process claim. */
+  retainUnverifiedRun(id: string): void;
+  finishRun(
+    id: string,
+    outcome: 'completed' | 'failed' | 'paused' | 'stopped',
+    category: string | null,
+  ): void;
+}
+/** Shared synchronous admission check, including before a route acknowledges detached Rework. */
+export function assertTaskExecutionTerminationVerified(
+  ledger: TaskExecutionLedger | undefined,
+  podId: string,
+): void {
+  if (ledger?.hasUnverifiedTermination(podId))
+    throw new AutopodError(
+      'A worker in this logical task has unverified process termination. Retain its source and resources; reconcile termination before Resume, Rework, validation or delivery.',
+      'TASK_EXECUTION_TERMINATION_UNVERIFIED',
+      409,
+    );
+}
+
+interface Membership {
+  taskId: string;
+  executionId: string;
+  rootPodId: string;
+}
+
+export function createTaskExecutionLedger(db: Database.Database): TaskExecutionLedger {
+  ensureMergeIdentityProjection(db);
+  const membership = (podId: string): Membership | undefined =>
+    db
+      .prepare(`
+    SELECT e.task_id AS taskId, e.execution_id AS executionId, t.root_pod_id AS rootPodId
+    FROM retained_task_executions e JOIN logical_tasks t ON t.id = e.task_id WHERE e.pod_id = ?
+  `)
+      .get(podId) as Membership | undefined;
+  const register = db.transaction((podId: string) => {
+    const seen = new Set<string>();
+    const assign = (id: string): Membership => {
+      const existing = membership(id);
+      if (existing) return existing;
+      if (seen.has(id))
+        throw new AutopodError(
+          'Cyclic task lineage requires reconciliation',
+          'TASK_IDENTITY_UNAVAILABLE',
+          409,
+        );
+      seen.add(id);
+      const pod = db
+        .prepare('SELECT linked_pod_id AS parent, created_at AS createdAt FROM pods WHERE id = ?')
+        .get(id) as { parent: string | null; createdAt: string } | undefined;
+      if (!pod)
+        throw new AutopodError(
+          'Missing task ancestor requires reconciliation',
+          'TASK_IDENTITY_UNAVAILABLE',
+          409,
+        );
+      const taskId = pod.parent ? assign(pod.parent).taskId : `task:${randomUUID()}`;
+      if (!pod.parent)
+        db.prepare('INSERT INTO logical_tasks (id, root_pod_id, created_at) VALUES (?, ?, ?)').run(
+          taskId,
+          id,
+          pod.createdAt,
+        );
+      db.prepare(
+        'INSERT INTO task_executions (pod_id, execution_id, task_id, parent_pod_id, created_at) VALUES (?, ?, ?, ?, ?)',
+      ).run(id, `execution:${randomUUID()}`, taskId, pod.parent, pod.createdAt);
+      return membership(id) as Membership;
+    };
+    assign(podId);
+  });
+  function snapshot(podId: string): TaskExecutionSummary {
+    const identity = membership(podId);
+    if (!identity)
+      throw new AutopodError(
+        'Task identity is unavailable; reconcile legacy lineage before execution',
+        'TASK_IDENTITY_UNAVAILABLE',
+        409,
+      );
+    const diagnostics: string[] = [];
+    let recordedInputTokens = 0;
+    let recordedOutputTokens = 0;
+    let recordedCostUsd = 0;
+    const costEvidence = emptyCostEvidence();
+    let incompleteSpending = false;
+    const rows = db
+      .prepare(`SELECT p.id, p.input_tokens, p.output_tokens, p.cost_usd,
+      ${COST_PHASE_COLUMNS}, p.token_telemetry_accuracy, p.history_archived FROM retained_task_executions e JOIN retained_pods p ON p.id = e.pod_id
+      WHERE e.task_id = ?`)
+      .all(identity.taskId) as Array<{
+      id: string;
+      input_tokens: number;
+      output_tokens: number;
+      cost_usd: number;
+      phase_token_usage: string | null;
+      phase_token_usage_oversized: number | null;
+      token_telemetry_accuracy: string;
+      history_archived: number;
+    }>;
+    const number = (value: unknown, id: string): number => {
+      if (typeof value === 'number' && Number.isFinite(value) && value >= 0) return value;
+      diagnostics.push(`${id}: telemetry value unavailable`);
+      incompleteSpending = true;
+      return 0;
+    };
+    for (const row of rows) {
+      const attempts = readProviderUsage(db, row.id, true);
+      // The corrected append-only provider ledger is authoritative when present.
+      // The pod row is a legacy fallback, never an additional bucket of provider spend.
+      const agent =
+        attempts.count > 0
+          ? attempts
+          : {
+              inputTokens: row.input_tokens,
+              outputTokens: row.output_tokens,
+              costUsd: row.cost_usd,
+            };
+      const priorRuns = (
+        db
+          .prepare('SELECT COUNT(*) AS count FROM retained_task_agent_runs WHERE pod_id = ?')
+          .get(row.id) as {
+          count: number;
+        }
+      ).count;
+      // An opened zero-use provider segment can precede the first runtime event.
+      // Existing runs, settled segments and positive usage demonstrate prior work.
+      const priorWork =
+        priorRuns > 0 ||
+        (row.history_archived === 1 && attempts.count > 0) ||
+        (attempts.settledCount ?? 0) > 0 ||
+        row.input_tokens > 0 ||
+        row.output_tokens > 0 ||
+        row.cost_usd > 0 ||
+        (agent.inputTokens ?? 0) > 0 ||
+        (agent.outputTokens ?? 0) > 0 ||
+        (agent.costUsd ?? 0) > 0;
+      recordedInputTokens += number(agent.inputTokens, row.id);
+      recordedOutputTokens += number(agent.outputTokens, row.id);
+      // Parse once for cost reconciliation; keep independent token admission diagnostics below.
+      let rawPhases: unknown = null;
+      try {
+        rawPhases = row.phase_token_usage ? JSON.parse(row.phase_token_usage) : null;
+      } catch {
+        /* reported below */
+      }
+      const cost = reconcilePodCosts(
+        {
+          id: row.id,
+          inputTokens: row.input_tokens,
+          outputTokens: row.output_tokens,
+          costUsd: row.cost_usd,
+          phaseTokenUsage: rawPhases,
+          recordDiagnostics: row.phase_token_usage_oversized
+            ? [{ field: 'phase_token_usage', code: 'size_limit' }]
+            : [],
+        },
+        attempts,
+      );
+      recordedCostUsd += cost.total;
+      appendCostEvidence(costEvidence, cost.evidence);
+      if (
+        attempts.count > 0 &&
+        (attempts.inputTokens !== row.input_tokens ||
+          attempts.outputTokens !== row.output_tokens ||
+          Math.abs((attempts.costUsd ?? 0) - row.cost_usd) > 1e-9)
+      )
+        diagnostics.push(
+          `${row.id}: provider ledger differs from legacy pod totals; corrected ledger used`,
+        );
+      if (
+        row.token_telemetry_accuracy !== 'complete' &&
+        row.token_telemetry_accuracy !== 'repaired'
+      ) {
+        diagnostics.push(`${row.id}: agent telemetry incomplete`);
+        if (priorWork) incompleteSpending = true;
+      }
+      if (row.phase_token_usage_oversized) {
+        diagnostics.push(
+          `${row.id}: phase telemetry exceeds the 64 KiB read limit; stored source preserved`,
+        );
+        incompleteSpending = true;
+      }
+      if (!row.phase_token_usage) {
+        diagnostics.push(`${row.id}: phase telemetry unavailable`);
+        if (priorWork) incompleteSpending = true;
+        continue;
+      }
+      try {
+        const phases: unknown = rawPhases;
+        if (!phases || typeof phases !== 'object' || Array.isArray(phases))
+          throw new Error('Invalid phases');
+        for (const [name, value] of Object.entries(phases)) {
+          // Agent phase buckets attribute the pod total; summing them again double counts it.
+          if (isAgentCostPhase(name)) continue;
+          if (!isHarnessCostPhase(name)) {
+            diagnostics.push(`${row.id}: unrecognized phase telemetry excluded`);
+            incompleteSpending = true;
+            continue;
+          }
+          if (!value || typeof value !== 'object' || Array.isArray(value)) {
+            diagnostics.push(`${row.id}: phase telemetry unreadable`);
+            incompleteSpending = true;
+            continue;
+          }
+          const phase = value as Record<string, unknown>;
+          recordedInputTokens += number(phase.inputTokens, row.id);
+          recordedOutputTokens += number(phase.outputTokens, row.id);
+        }
+      } catch {
+        diagnostics.push(`${row.id}: phase telemetry unreadable`);
+        incompleteSpending = true;
+      }
+    }
+    const archivedCount = rows.filter((row) => row.history_archived === 1).length;
+    if (archivedCount > 0)
+      diagnostics.push(
+        `${archivedCount} deleted pod ${archivedCount === 1 ? 'record retains' : 'records retain'} task accounting and execution evidence.`,
+      );
+    const counts = db
+      .prepare(`SELECT COUNT(*) AS agentRunCount,
+      COALESCE(SUM(outcome = 'failed'), 0) AS failedRunCount,
+      COALESCE(SUM(outcome = 'failed' AND failure_category IN ('transient','provider_unavailable')), 0) AS transientFailureCount
+      FROM retained_task_agent_runs r JOIN retained_task_executions e ON e.pod_id = r.pod_id WHERE e.task_id = ?`)
+      .get(identity.taskId) as Pick<
+      TaskExecutionSummary,
+      'agentRunCount' | 'failedRunCount' | 'transientFailureCount'
+    >;
+    const unsettledCount = (
+      db
+        .prepare(`SELECT COUNT(*) AS count FROM retained_task_agent_runs r
+      JOIN retained_task_executions e ON e.pod_id = r.pod_id WHERE e.task_id = ? AND r.ended_at IS NULL`)
+        .get(identity.taskId) as { count: number }
+    ).count;
+    if (unsettledCount > 0) {
+      diagnostics.push(
+        `${unsettledCount} unsettled worker ${unsettledCount === 1 ? 'run blocks' : 'runs block'} another task run; live execution state unverified.`,
+      );
+      // Read one bounded retained record. Current pod resource fields cannot establish
+      // ownership of an older execution after replacement or restart.
+      const oldest = db
+        .prepare(`SELECT CASE WHEN length(CAST(r.binding AS BLOB)) <= 16384 THEN r.binding END AS binding
+        FROM retained_task_agent_runs r JOIN retained_task_executions e ON e.pod_id = r.pod_id
+        WHERE e.task_id = ? AND r.ended_at IS NULL ORDER BY r.started_at, r.id LIMIT 1`)
+        .get(identity.taskId) as { binding: string | null };
+      let resource: ExecutionBinding['resource'];
+      try {
+        const parsed = oldest.binding ? JSON.parse(oldest.binding) : null;
+        if (
+          parsed?.version === 2 &&
+          ['local', 'sandbox'].includes(parsed.resource?.executionTarget) &&
+          isContainerReference(parsed.resource?.containerId)
+        ) {
+          resource = parsed.resource;
+        }
+      } catch {
+        /* Retain malformed source; diagnostics cannot claim ownership. */
+      }
+      diagnostics.push(
+        resource
+          ? `Oldest unsettled run recorded ${resource.executionTarget} container ${resource.containerId}; this reference does not prove process termination or a unique remote instance.`
+          : 'Oldest unsettled run resource ownership unavailable; current pod resource is not historical evidence.',
+      );
+    }
+    const count = (table: 'provider_attempts' | 'validations'): number =>
+      (
+        db
+          .prepare(`SELECT COUNT(*) AS n FROM retained_${table} r
+      JOIN retained_task_executions e ON e.pod_id = r.pod_id WHERE e.task_id = ?`)
+          .get(identity.taskId) as { n: number }
+      ).n;
+    // Aggregate scalar receipt metadata only. Large/malformed legacy result
+    // bodies are not parsed, and repeated observations never inflate receipts.
+    const delivery = db
+      .prepare(`WITH deliveries AS (
+        SELECT r.id AS receiptId, COALESCE(
+          (SELECT o.disposition FROM delivery_observations o WHERE o.receipt_id = r.id
+            ORDER BY o.sequence DESC LIMIT 1), r.disposition) AS disposition
+        FROM delivery_intents i LEFT JOIN delivery_receipts r ON r.intent_id = i.id
+        WHERE i.task_id = ?
+      ) SELECT COUNT(*) AS intentCount, COUNT(receiptId) AS receiptCount,
+        COALESCE(SUM(receiptId IS NULL), 0) AS unresolvedCount,
+        COALESCE(SUM(disposition = 'open'), 0) AS openCount,
+        COALESCE(SUM(disposition = 'merged'), 0) AS mergedCount,
+        COALESCE(SUM(disposition = 'closed'), 0) AS closedCount,
+        COALESCE(SUM(receiptId IS NOT NULL AND
+          (disposition IS NULL OR disposition NOT IN ('open','merged','closed'))), 0) AS unavailableCount
+      FROM deliveries`)
+      .get(identity.taskId) as {
+      intentCount: number;
+      receiptCount: number;
+      unresolvedCount: number;
+      openCount: number;
+      mergedCount: number;
+      closedCount: number;
+      unavailableCount: number;
+    };
+    // Scalar-only aggregation: count each canonical PR once across linked executions.
+    // A source-bound observation proves disposition, never who caused it.
+    const mergeProjection = db
+      .prepare(`WITH resources AS (
+      SELECT i.pr_identity AS pr, MAX(
+        EXISTS (SELECT 1 FROM merge_observations o WHERE o.intent_id = i.id AND o.disposition = 'merged')
+        OR EXISTS (SELECT 1 FROM merge_disposition_observations o WHERE o.intent_id = i.id)
+      ) AS merged,
+      (SELECT o.disposition FROM merge_status_observations o JOIN canonical_merge_intents observed ON observed.id = o.intent_id
+        WHERE observed.pr_identity = i.pr_identity AND observed.task_id = i.task_id ORDER BY o.sequence DESC LIMIT 1) AS lastStatus
+      FROM canonical_merge_intents i WHERE i.task_id = ? GROUP BY i.pr_identity
+    ) SELECT EXISTS (SELECT 1 FROM canonical_merge_intents WHERE pr_identity IS NULL) AS identityUnavailable,
+      COUNT(*) AS prCount, COALESCE(SUM(merged), 0) AS mergedPrCount,
+      COALESCE(SUM(NOT merged AND lastStatus = 'closed'), 0) AS closedPrCount,
+      COALESCE(SUM(NOT merged AND COALESCE(lastStatus, 'open') != 'closed'), 0) AS unresolvedPrCount,
+      COALESCE(SUM(merged AND NOT EXISTS (
+        SELECT 1 FROM merge_attempts a JOIN canonical_merge_intents i ON i.id = a.intent_id WHERE i.pr_identity = resources.pr
+      )), 0) AS mergedWithoutRecordedRequestCount,
+      (SELECT COUNT(*) FROM merge_attempts a JOIN canonical_merge_intents i ON i.id = a.intent_id WHERE i.task_id = ?) AS requestCount
+      FROM resources`)
+      .get(identity.taskId, identity.taskId) as Pick<
+      NonNullable<TaskExecutionSummary['merge']>,
+      | 'prCount'
+      | 'mergedPrCount'
+      | 'closedPrCount'
+      | 'unresolvedPrCount'
+      | 'mergedWithoutRecordedRequestCount'
+      | 'requestCount'
+    > & { identityUnavailable: number };
+    const { identityUnavailable: mergeIdentityUnavailable, ...merge } = mergeProjection;
+    if (mergeIdentityUnavailable)
+      diagnostics.push('Merge identity unavailable; reconcile retained journal records');
+    const root = db
+      .prepare('SELECT token_budget AS budget FROM retained_pods WHERE id = ?')
+      .get(identity.rootPodId) as { budget: number | null } | undefined;
+    if (!root) diagnostics.push('Task budget source unavailable');
+    const budgetCheck: NonNullable<TaskExecutionSummary['budgetCheck']> = !root
+      ? { status: 'unavailable', reason: 'Task budget source unavailable.' }
+      : root.budget === null || root.budget <= 0
+        ? { status: 'unlimited', reason: 'No task token limit configured.' }
+        : recordedInputTokens + recordedOutputTokens >= root.budget
+          ? {
+              status: 'exhausted',
+              reason: 'Recorded task tokens have reached the configured limit.',
+            }
+          : incompleteSpending
+            ? {
+                status: 'unavailable',
+                reason:
+                  'Task token accounting incomplete; reconcile prior execution and phase telemetry before starting more budgeted work.',
+              }
+            : {
+                status: 'below_recorded_limit',
+                reason:
+                  'Recorded usage is below the task limit. Future provider spending is not reserved.',
+              };
+    // Infrastructure billing is a separate missing measurement, never a fabricated zero.
+    return {
+      ...identity,
+      ...counts,
+      podCount: rows.length,
+      tokenBudget: root?.budget ?? null,
+      budgetCheck,
+      providerAttemptCount: count('provider_attempts'),
+      validationExecutionCount: count('validations'),
+      delivery: {
+        intentCount: delivery.intentCount,
+        receiptCount: delivery.receiptCount,
+        unresolvedCount: delivery.unresolvedCount,
+        scope: 'durable-receipts-only',
+        disposition: {
+          openCount: delivery.openCount,
+          mergedCount: delivery.mergedCount,
+          closedCount: delivery.closedCount,
+          unavailableCount: delivery.unavailableCount,
+          basis: 'last-recorded',
+          liveVerified: false,
+        },
+      },
+      ...(mergeIdentityUnavailable
+        ? {}
+        : {
+            merge: {
+              ...merge,
+              scope: 'source-bound-journal-only' as const,
+              basis: 'last-recorded' as const,
+              liveVerified: false as const,
+            },
+          }),
+      recordedInputTokens,
+      recordedOutputTokens,
+      recordedCostUsd,
+      costEvidence,
+      infrastructureCostUsd: null,
+      telemetry: 'partial',
+      diagnostics: [
+        ...new Set([
+          ...diagnostics,
+          'Infrastructure cost unavailable',
+          'Historical agent runs before the task ledger are not reconstructed',
+        ]),
+      ],
+    };
+  }
+  return {
+    register,
+    snapshot,
+    hasActiveRun: (podId) =>
+      Boolean(
+        db
+          .prepare('SELECT 1 FROM task_agent_runs WHERE pod_id = ? AND ended_at IS NULL LIMIT 1')
+          .get(podId),
+      ),
+    assertCanDelete(podId) {
+      const retained = db
+        .prepare(`SELECT 1 FROM task_agent_runs r
+        JOIN task_executions e ON e.pod_id = r.pod_id
+        WHERE e.task_id = (SELECT task_id FROM task_executions WHERE pod_id = ?)
+          AND r.ended_at IS NULL LIMIT 1`)
+        .get(podId);
+      if (retained)
+        throw new AutopodError(
+          'This logical task has an unsettled worker execution. Retain its source and resources; reconcile the execution before deleting a pod or its task evidence.',
+          'TASK_EXECUTION_UNSETTLED',
+          409,
+        );
+    },
+    hasUnverifiedTermination: (podId) =>
+      Boolean(
+        db
+          .prepare(`SELECT 1 FROM task_agent_runs r
+      JOIN task_executions e ON e.pod_id = r.pod_id
+      WHERE e.task_id = (SELECT task_id FROM task_executions WHERE pod_id = ?)
+        AND r.ended_at IS NULL AND r.failure_category = 'execution_termination_unverified' LIMIT 1`)
+          .get(podId),
+      ),
+    beginRun: db.transaction((podId, generation, cycle, binding) => {
+      createDeletionOwnership(db).assertTaskAvailable(podId);
+      const encoded = JSON.stringify({
+        runtime: binding.runtime,
+        model: binding.model,
+        providerAccountId: binding.providerAccountId,
+        ...(binding.resource && {
+          version: 2,
+          resource: {
+            containerId: binding.resource.containerId,
+            executionTarget: binding.resource.executionTarget,
+          },
+        }),
+      });
+      const current = db
+        .prepare(`SELECT lifecycle_generation AS generation, container_id AS containerId,
+          execution_target AS executionTarget FROM pods WHERE id = ?`)
+        .get(podId) as
+        | { generation: number; containerId: string | null; executionTarget: string }
+        | undefined;
+      if (current?.generation !== generation)
+        throw new Error('Stale lifecycle cannot start a task run');
+      if (
+        binding.resource &&
+        (binding.resource.containerId !== current.containerId ||
+          binding.resource.executionTarget !== current.executionTarget ||
+          !['local', 'sandbox'].includes(binding.resource.executionTarget) ||
+          (binding.resource.containerId !== null &&
+            !isContainerReference(binding.resource.containerId)))
+      )
+        throw new Error('Resource execution binding does not match the current lifecycle');
+      if (hasUnansweredDecision(db, podId))
+        throw new AutopodError(
+          'An unanswered human decision must be resolved before starting another worker.',
+          'HUMAN_DECISION_PENDING',
+          409,
+        );
+      const prior = db
+        .prepare(
+          'SELECT id, binding, failure_category FROM task_agent_runs WHERE pod_id = ? AND generation = ? AND cycle = ?',
+        )
+        .get(podId, generation, cycle) as
+        | { id: string; binding: string; failure_category: string | null }
+        | undefined;
+      if (prior) {
+        if (prior.binding !== encoded)
+          throw new Error('Execution binding cannot change for an existing run');
+        if (prior.failure_category === 'execution_termination_unverified')
+          throw new AutopodError(
+            'Task execution termination remains unverified; reconcile retained resources before replay.',
+            'TASK_AGENT_RUN_ACTIVE',
+            409,
+          );
+        return prior.id;
+      }
+      const active = db
+        .prepare(`SELECT r.pod_id AS podId
+        FROM task_agent_runs r JOIN task_executions e ON e.pod_id = r.pod_id
+        WHERE e.task_id = (SELECT task_id FROM task_executions WHERE pod_id = ?)
+          AND r.ended_at IS NULL LIMIT 1`)
+        .get(podId) as { podId: string } | undefined;
+      if (active)
+        throw new AutopodError(
+          `A worker run is still active for this logical task (${active.podId}); wait for its observed settlement or reconcile the retained execution before starting another worker.`,
+          'TASK_AGENT_RUN_ACTIVE',
+          409,
+        );
+      const task = snapshot(podId);
+      if (task.diagnostics.includes('Task budget source unavailable'))
+        throw new AutopodError(
+          'Task budget source unavailable; reconcile the missing root pod',
+          'TASK_BUDGET_UNAVAILABLE',
+          409,
+        );
+      if (
+        task.tokenBudget !== null &&
+        task.tokenBudget > 0 &&
+        task.recordedInputTokens + task.recordedOutputTokens >= task.tokenBudget
+      )
+        throw new AutopodError(
+          `Task token budget exhausted across ${task.podCount} pods; reconcile or extend the task budget before agent execution`,
+          'TASK_BUDGET_EXHAUSTED',
+          409,
+        );
+      if (task.budgetCheck?.status === 'unavailable')
+        throw new AutopodError(task.budgetCheck.reason, 'TASK_BUDGET_UNAVAILABLE', 409);
+      const id = randomUUID();
+      db.prepare(
+        'INSERT INTO task_agent_runs (id, pod_id, generation, cycle, binding, started_at) VALUES (?, ?, ?, ?, ?, ?)',
+      ).run(id, podId, generation, cycle, encoded, new Date().toISOString());
+      return id;
+    }),
+    retainUnverifiedRun: db.transaction((id) => {
+      const prior = db.prepare('SELECT ended_at FROM task_agent_runs WHERE id = ?').get(id) as
+        | { ended_at: string | null }
+        | undefined;
+      if (!prior) throw new Error('Unknown task run');
+      if (prior.ended_at) throw new Error('Settled task run cannot be rewritten as unresolved');
+      db.prepare(
+        "UPDATE task_agent_runs SET outcome = 'failed', failure_category = 'execution_termination_unverified' WHERE id = ? AND ended_at IS NULL",
+      ).run(id);
+    }),
+    finishRun: db.transaction((id, outcome, category) => {
+      const prior = db
+        .prepare('SELECT ended_at, outcome, failure_category FROM task_agent_runs WHERE id = ?')
+        .get(id) as
+        | { ended_at: string | null; outcome: string | null; failure_category: string | null }
+        | undefined;
+      if (!prior) throw new Error('Unknown task run');
+      if (prior.failure_category === 'execution_termination_unverified')
+        throw new AutopodError(
+          'Task execution termination remains unverified; retained resource reconciliation is required before settlement.',
+          'TASK_AGENT_RUN_ACTIVE',
+          409,
+        );
+      if (prior.ended_at) {
+        if (prior.outcome !== outcome || prior.failure_category !== category)
+          throw new Error('Task run already settled differently');
+        return;
+      }
+      db.prepare(
+        'UPDATE task_agent_runs SET ended_at = ?, outcome = ?, failure_category = ? WHERE id = ?',
+      ).run(new Date().toISOString(), outcome, category, id);
+    }),
+  };
+}

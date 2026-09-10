@@ -1,0 +1,32 @@
+{
+  "candidate": "4e73cd8ce88e44cdb5c2d8d0a89447b819fa5a39",
+  "integratedMain": "b75fbf0b7e2c4ea455838a6e4df6537665a7a8cc",
+  "mainReachableFromCandidate": true,
+  "nativeSurfaceSource": "15900d9e08a7e4ca786a6ad11ff81820fda14de4",
+  "unchangedClientPaths": ["packages/desktop", "packages/mobile-web", "packages/cli"],
+  "clientSourceDiff": "",
+  "migrationCount": 171,
+  "maximumMigration": 183,
+  "migrationSha256": "0413c2b3502ce14cf74d164ac6fc474b91143101fd8599d4fea27c91ebb733bf",
+  "checks": {
+    "packageTestsPassed": 6363,
+    "existingPlatformSkips": 1,
+    "standaloneNodeTestsPassed": 11,
+    "affectedMigrationTestsPassed": 86,
+    "fixtureParserRegressionTestsPassed": 7,
+    "copyTestsPassed": 8,
+    "wrapperTestsPassed": 8,
+    "turboTasksPassed": 15,
+    "turboTasksCached": 13,
+    "swiftTestsCarriedForward": 357,
+    "swiftSuitesCarriedForward": 8
+  },
+  "hostedExecuted": false,
+  "goalComplete": false,
+  "remoteMainObservation": {
+    "ref": "refs/heads/main",
+    "sha": "b75fbf0b7e2c4ea455838a6e4df6537665a7a8cc",
+    "method": "git ls-remote origin refs/heads/main",
+    "observedAt": "2026-09-09T19:36:30.003406+00:00"
+  }
+}

@@ -1,0 +1,15 @@
+{
+  "candidate": "425ff91cd5e6347b32d21b69804ea4c02008bc8e",
+  "pipelineExitCode": 0,
+  "packageTestsPassed": 6390,
+  "packageTestsSkipped": 1,
+  "standaloneNodeTestsPassed": 11,
+  "testTurboTasks": 15,
+  "testTurboCached": 8,
+  "moderateDependencyAdvisories": 1,
+  "rawLogSHA256": "8e9006263d5949893d5e29b89ddee41ff36828faa223a88867c49f3dca590c89",
+  "logSHA256": "4983b0b37ab6fe3e3aa213f2b979baa0a02800ac3bdf005beb79a066cc9b6b85",
+  "rawLogArchive": "checkpoint-135-full-validation-final.raw.txt.gz",
+  "sourceStateAtPipelineStart": "Committed product source, pending checkpoint documentation only",
+  "previousRun": "243a07f9 failed established explicit-null budget override; behavior restored on this candidate"
+}

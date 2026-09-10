@@ -1,0 +1,871 @@
+{
+  "remoteBranchCount": 173,
+  "checked": [
+    {
+      "ref": "refs/heads/advisory-browser-qa-spec",
+      "sha": "b20063c3bed919550ff41ea478d130252f1598c2",
+      "maxMigration": 104
+    },
+    {
+      "ref": "refs/heads/agent/desktop-event-resync",
+      "sha": "dee7a267f01d703cbfe6c7e8d4aef36ce18b5b3f",
+      "maxMigration": 123
+    },
+    {
+      "ref": "refs/heads/agent/fix-codex-event-ordering",
+      "sha": "c8235957ac7a9e6a154236806eaacb91cf2778df",
+      "maxMigration": 120
+    },
+    {
+      "ref": "refs/heads/agent/fix-codex-reviewer-version",
+      "sha": "b927e104c534283f489c10945982cd1f830eaee2",
+      "maxMigration": 120
+    },
+    {
+      "ref": "refs/heads/agent/fix-pod-memory-review",
+      "sha": "1f156ac63cff6d92ff2307c8e0b6868c09bafa00",
+      "maxMigration": 120
+    },
+    {
+      "ref": "refs/heads/agent/fix-review-checkpoint-closure",
+      "sha": "6274a4d0a498763720e6e8702d6627d9f90c92fa",
+      "maxMigration": 139
+    },
+    {
+      "ref": "refs/heads/agent/fix-review-checkpoint-closure-main",
+      "sha": "2a5a65d7804e59923ba1ff7e8a8f5c92e4453d40",
+      "maxMigration": 140
+    },
+    {
+      "ref": "refs/heads/agent/fix-review-council-schemas",
+      "sha": "7c49272848448817e4ac6ceb0c5db926402a58a8",
+      "maxMigration": 137
+    },
+    {
+      "ref": "refs/heads/agent/memory-provenance-labels",
+      "sha": "5c4e215e0dc050f5d39b2d68bd0df8e908a08415",
+      "maxMigration": 122
+    },
+    {
+      "ref": "refs/heads/agent/recover-codex-sandbox-stream",
+      "sha": "915d3de73eadabcacbb98262623541591e8814dd",
+      "maxMigration": 120
+    },
+    {
+      "ref": "refs/heads/agent/surface-codex-pod-failures",
+      "sha": "b71a5ecf3a58cc0fbc09f5566b6d69206913c40a",
+      "maxMigration": 121
+    },
+    {
+      "ref": "refs/heads/agent/surface-prepush-security-findings",
+      "sha": "412435eb5b10534e1cf98b7177c750ee9ee864fb",
+      "maxMigration": 120
+    },
+    {
+      "ref": "refs/heads/autopod/CyKwMbik",
+      "sha": "b1e748b3c50321ffd3add8b337fc8a0e0be26026",
+      "maxMigration": 9
+    },
+    {
+      "ref": "refs/heads/autopod/XZ3srdmY",
+      "sha": "a6341ad07c53d308c57dfb59233a3921479c29c1",
+      "maxMigration": 9
+    },
+    {
+      "ref": "refs/heads/autopod/absolute-jay",
+      "sha": "61dbb705b068a3d79f8f9b1d8da331a4cd57d705",
+      "maxMigration": 25
+    },
+    {
+      "ref": "refs/heads/autopod/automatic-ferret",
+      "sha": "94764a3b0ef77e7a74ae89830858aadb8cb0131f",
+      "maxMigration": 25
+    },
+    {
+      "ref": "refs/heads/autopod/blind-thrush",
+      "sha": "b39b9f251482c2b749f1edf4bd656a74d2bd3e77",
+      "maxMigration": 23
+    },
+    {
+      "ref": "refs/heads/autopod/classic-sole",
+      "sha": "d068be99513c8cf2e60fbb38d1e383cc8cb834ee",
+      "maxMigration": 123
+    },
+    {
+      "ref": "refs/heads/autopod/colorful-boar",
+      "sha": "cdddfea010ed49f2f579894a43ea80822f111bec",
+      "maxMigration": 124
+    },
+    {
+      "ref": "refs/heads/autopod/convenient-vulture",
+      "sha": "9883cabab4d304f80c8ae0e56226b66e1bd475d0",
+      "maxMigration": 24
+    },
+    {
+      "ref": "refs/heads/autopod/easy-aardvark",
+      "sha": "32dce697018107015e72fe568af741c3fe87c2fc",
+      "maxMigration": 25
+    },
+    {
+      "ref": "refs/heads/autopod/encouraging-tahr",
+      "sha": "129f149621b025adb0551b1cf95faf0a9b06efae",
+      "maxMigration": 124
+    },
+    {
+      "ref": "refs/heads/autopod/equivalent-pigeon",
+      "sha": "e1ebb12e3fd422ab7c5b0c43ac37fa60152fbe86",
+      "maxMigration": 24
+    },
+    {
+      "ref": "refs/heads/autopod/financial-crow",
+      "sha": "008eb8b0a4f2fa55ca46e814763c48f707a9eed2",
+      "maxMigration": 23
+    },
+    {
+      "ref": "refs/heads/autopod/gothic-cobra",
+      "sha": "fd0608f4c067149bd471e046fb77de9f58156b15",
+      "maxMigration": 123
+    },
+    {
+      "ref": "refs/heads/autopod/happy-parakeet",
+      "sha": "7abc89797c64cd57d80a0b9a92e9a1766f83e03b",
+      "maxMigration": 127
+    },
+    {
+      "ref": "refs/heads/autopod/harsh-wildcat",
+      "sha": "587a2a4c533665aed839e0c090c0a4963b037385",
+      "maxMigration": 25
+    },
+    {
+      "ref": "refs/heads/autopod/inner-turtle",
+      "sha": "997b96402788732976cbc45f20593853cabf7332",
+      "maxMigration": 104
+    },
+    {
+      "ref": "refs/heads/autopod/interior-aardwolf",
+      "sha": "8bf8d6b4ea0a2ea49852af2a059b185d1377b846",
+      "maxMigration": 39
+    },
+    {
+      "ref": "refs/heads/autopod/lPHn0U8K",
+      "sha": "a7e03cffc0c1e7a7a44bf49e225073db49f44f71",
+      "maxMigration": 9
+    },
+    {
+      "ref": "refs/heads/autopod/latin-flamingo",
+      "sha": "d0f5282a0ff256c75ead30b26026271896a39f88",
+      "maxMigration": 112
+    },
+    {
+      "ref": "refs/heads/autopod/like-horse",
+      "sha": "7c680e19b8de789676fb4b1464c53c2d047a97e2",
+      "maxMigration": 127
+    },
+    {
+      "ref": "refs/heads/autopod/little-clownfish",
+      "sha": "89696dd940c8932ed45689e716784e5afde16a98",
+      "maxMigration": 132
+    },
+    {
+      "ref": "refs/heads/autopod/monthly-tarantula",
+      "sha": "c0d22805198e20b7564144b08b02192f94e2113a",
+      "maxMigration": 24
+    },
+    {
+      "ref": "refs/heads/autopod/muddy-prawn",
+      "sha": "3ae7bce3fe9ca66d898029cd86c056639e32b79f",
+      "maxMigration": 128
+    },
+    {
+      "ref": "refs/heads/autopod/outside-locust",
+      "sha": "859251ab2e94c95c14c61e27248535b05e9261fe",
+      "maxMigration": 25
+    },
+    {
+      "ref": "refs/heads/autopod/passing-koi",
+      "sha": "09f9160e3e7ee0018f26713c96ad936436c3ca46",
+      "maxMigration": 130
+    },
+    {
+      "ref": "refs/heads/autopod/prior-butterfly",
+      "sha": "a08ed1e845ca88d40b285541d671303fbd503541",
+      "maxMigration": 25
+    },
+    {
+      "ref": "refs/heads/autopod/pure-kiwi",
+      "sha": "201cf630328b400590b6cbc2867ca48588304752",
+      "maxMigration": 109
+    },
+    {
+      "ref": "refs/heads/autopod/quick-aardwolf",
+      "sha": "06e3e424d25d170cabb5164ba51848026d029231",
+      "maxMigration": 26
+    },
+    {
+      "ref": "refs/heads/autopod/rolling-leopard",
+      "sha": "08c53819c4cfe9d7b4bea53d3d88abbcb6273422",
+      "maxMigration": 137
+    },
+    {
+      "ref": "refs/heads/autopod/rubber-rhinoceros",
+      "sha": "0b89080461518f64812287cc4377a41771767ecb",
+      "maxMigration": 25
+    },
+    {
+      "ref": "refs/heads/autopod/screenshots/amateur-perch",
+      "sha": "953941efbcf17561cf2bd2de068a73004fc4258d",
+      "maxMigration": 0
+    },
+    {
+      "ref": "refs/heads/autopod/screenshots/costly-grouse",
+      "sha": "87c4fe7160bc3201f3b5f027af9245067c7372f5",
+      "maxMigration": 0
+    },
+    {
+      "ref": "refs/heads/autopod/screenshots/everyday-rattlesnake",
+      "sha": "647a13246c29ed7e4ab3d2114cc7351ff0b11d8c",
+      "maxMigration": 0
+    },
+    {
+      "ref": "refs/heads/autopod/screenshots/mammoth-sparrow",
+      "sha": "c18011f63bca184fe4ed7a3a69b3b7b2a58abed0",
+      "maxMigration": 0
+    },
+    {
+      "ref": "refs/heads/autopod/screenshots/mass-bison",
+      "sha": "aa1accaf608719e4191cc2061f8e21bea1ec9769",
+      "maxMigration": 0
+    },
+    {
+      "ref": "refs/heads/autopod/screenshots/thoughtless-parakeet",
+      "sha": "90cf554299bfa24014aa21d20ffe937e205e83c4",
+      "maxMigration": 0
+    },
+    {
+      "ref": "refs/heads/autopod/secret-urial",
+      "sha": "00b5d09e94f36ffb25d838f65b0d208df03b7146",
+      "maxMigration": 112
+    },
+    {
+      "ref": "refs/heads/autopod/shallow-koala",
+      "sha": "c55d702f4d79b052dbc7db2245ca3b3b512d0a71",
+      "maxMigration": 23
+    },
+    {
+      "ref": "refs/heads/autopod/slim-whale",
+      "sha": "7fa82730dd9f64f8bb02e1a43a111bfe75896b28",
+      "maxMigration": 25
+    },
+    {
+      "ref": "refs/heads/autopod/soviet-owl",
+      "sha": "a721b07ae6f2594d4563592990e59187a82420a0",
+      "maxMigration": 106
+    },
+    {
+      "ref": "refs/heads/autopod/spatial-cockroach",
+      "sha": "7274f483ddf801823ff23dffe68cc7e1d240a11e",
+      "maxMigration": 25
+    },
+    {
+      "ref": "refs/heads/autopod/striking-constrictor",
+      "sha": "36fea3e29127f4a237e03088717907022495d3e8",
+      "maxMigration": 25
+    },
+    {
+      "ref": "refs/heads/autopod/strong-leopon",
+      "sha": "64d727ad87d8ca006761fe0b49996266549158ad",
+      "maxMigration": 109
+    },
+    {
+      "ref": "refs/heads/autopod/unnecessary-pony",
+      "sha": "c4be97ce0bf0d673bfef52cffeda26af240f752e",
+      "maxMigration": 24
+    },
+    {
+      "ref": "refs/heads/claude/acp-approval-restrictions-A4cyh",
+      "sha": "63693b2da4d578c00f78ab2650a875e0c55747a5",
+      "maxMigration": 25
+    },
+    {
+      "ref": "refs/heads/claude/add-autopod-skills-SMveM",
+      "sha": "3d51e2a4c47650f5a5de2ad08dcf264d2369394f",
+      "maxMigration": 89
+    },
+    {
+      "ref": "refs/heads/claude/add-claude-documentation-HS5SL",
+      "sha": "909907dc747f0f62841c9fcae35cc0a81862d971",
+      "maxMigration": 21
+    },
+    {
+      "ref": "refs/heads/claude/add-question-ui-V7OUI",
+      "sha": "3245e2141428173fbad396cd2617f60cb621c33f",
+      "maxMigration": 23
+    },
+    {
+      "ref": "refs/heads/claude/add-screenshots-health-data-ukpKn",
+      "sha": "c56930c1f168e94258ee7c121ee4421872b7eba1",
+      "maxMigration": 65
+    },
+    {
+      "ref": "refs/heads/claude/add-session-token-budgeting-ztUMs",
+      "sha": "d6de1e16c19b5df5cec2c0cf1c3b18cacd2621e0",
+      "maxMigration": 37
+    },
+    {
+      "ref": "refs/heads/claude/agent-context-persistence-IaxQW",
+      "sha": "068b73bd5312cba1bcfe9c78001f4305554384a5",
+      "maxMigration": 108
+    },
+    {
+      "ref": "refs/heads/claude/analyze-test-coverage-FMlZC",
+      "sha": "0ff9d5fc499b7bbd901eeac7948774c030e7b113",
+      "maxMigration": 21
+    },
+    {
+      "ref": "refs/heads/claude/audit-pod-security-Miqay",
+      "sha": "4fc4b15387ce3276b360b3928a9354a11e934608",
+      "maxMigration": 62
+    },
+    {
+      "ref": "refs/heads/claude/autopod-dev-mode-testing-dsHcI",
+      "sha": "f1182fc2896ea9a356fda59c73310ecfd38fce50",
+      "maxMigration": 22
+    },
+    {
+      "ref": "refs/heads/claude/autopod-feature-overview-BGINd",
+      "sha": "d05e9bfdbb26ca1fce73a7ec34438ca13abc221b",
+      "maxMigration": 22
+    },
+    {
+      "ref": "refs/heads/claude/autopod-mobile-support-KyeHS",
+      "sha": "e213b48f42c02198c935f9afffaffe54094255d9",
+      "maxMigration": 18
+    },
+    {
+      "ref": "refs/heads/claude/azure-foundry-integration-WzowL",
+      "sha": "a83eb2ce09a059c96c570b6056dae3a07ac9d5bc",
+      "maxMigration": 65
+    },
+    {
+      "ref": "refs/heads/claude/azure-sandboxes-autopod-eal6aq",
+      "sha": "67c2467b3a77bd88f3e7e8cbc6703bdd0d8d8314",
+      "maxMigration": 118
+    },
+    {
+      "ref": "refs/heads/claude/azure-sandboxes-shell-transport-8q4841",
+      "sha": "8a6eb6588248c1889f79f95a0a76aaa3174c3389",
+      "maxMigration": 120
+    },
+    {
+      "ref": "refs/heads/claude/compare-advisor-mode-GIjOt",
+      "sha": "5a02bc43dfe96e08c5c2d711c80f9fe271747687",
+      "maxMigration": 37
+    },
+    {
+      "ref": "refs/heads/claude/compare-implementations-6np9A",
+      "sha": "e1bc6908d349e0c5a5d8cff2e8a67b7de718497c",
+      "maxMigration": 100
+    },
+    {
+      "ref": "refs/heads/claude/compare-managed-agents-autopod-zYykC",
+      "sha": "991c43a0c5615b8d443097ca996da770b0c5e20f",
+      "maxMigration": 35
+    },
+    {
+      "ref": "refs/heads/claude/compare-tools-autopod-Bl1SL",
+      "sha": "1a1adb8d44ba529bf7c79084738d1b1c26616a62",
+      "maxMigration": 62
+    },
+    {
+      "ref": "refs/heads/claude/debug-pod-validation-TbEDT",
+      "sha": "aedd0c0d7f0e842de4344e31b4c0463af19a30dc",
+      "maxMigration": 21
+    },
+    {
+      "ref": "refs/heads/claude/evaluate-codegraph-integration-ZmQXR",
+      "sha": "895f1e2f55e7820f0bebc68cbc85b684bee380c4",
+      "maxMigration": 66
+    },
+    {
+      "ref": "refs/heads/claude/fix-ap-attach-terminal-6JBbE",
+      "sha": "7fa66f82575d8aad22ec90c644ff118d272ee4bf",
+      "maxMigration": 44
+    },
+    {
+      "ref": "refs/heads/claude/fix-doc-site-logo-GrV9Y",
+      "sha": "c10dfa72549d0d361a94409f43354f05572051c9",
+      "maxMigration": 35
+    },
+    {
+      "ref": "refs/heads/claude/fix-notification-styling-BXg9i",
+      "sha": "40a5ee59284a58512c7ed2b5047e1af13195bdab",
+      "maxMigration": 25
+    },
+    {
+      "ref": "refs/heads/claude/general-session-dWyFi",
+      "sha": "07ae78a1f45fb3e675231c1ce383430e491579dd",
+      "maxMigration": 16
+    },
+    {
+      "ref": "refs/heads/claude/html-plan-feature-output-BukdP",
+      "sha": "fdecc393f91ff81554166f244818d90e244addfb",
+      "maxMigration": 96
+    },
+    {
+      "ref": "refs/heads/claude/hybrid-worker-pod-design-63XSd",
+      "sha": "90307c0a3e97ff9ccd5b6dedda5999c9f2432d0e",
+      "maxMigration": 100
+    },
+    {
+      "ref": "refs/heads/claude/investigate-code-review-73QYX",
+      "sha": "4844fe43895b69297401544f1a1f553d68024e6a",
+      "maxMigration": 25
+    },
+    {
+      "ref": "refs/heads/claude/investigate-devops-github-diff-f6pT2",
+      "sha": "16179d1d16efec1c5f6f3e35b37e431f00a24419",
+      "maxMigration": 25
+    },
+    {
+      "ref": "refs/heads/claude/llm-generated-commit-messages-fUslf",
+      "sha": "2da96fc7fbebac053186c83e168a1a95f8636b8a",
+      "maxMigration": 74
+    },
+    {
+      "ref": "refs/heads/claude/local-aci-sessions-ICG7Q",
+      "sha": "92ce04d2283d95f4c9a03f98c53f44081d43550e",
+      "maxMigration": 18
+    },
+    {
+      "ref": "refs/heads/claude/memory-context-bloat-yAzvp",
+      "sha": "dfb2cb5d11a27728ef35773252fb99df3d53ef8a",
+      "maxMigration": 36
+    },
+    {
+      "ref": "refs/heads/claude/mobile-autopod-control-Qj39k",
+      "sha": "8fcbf42c8aed771d291f10750eb4a03b480a92f7",
+      "maxMigration": 104
+    },
+    {
+      "ref": "refs/heads/claude/mobile-autopod-research-Q6xbO",
+      "sha": "c07563a18764f54944176d5d65327563360cc882",
+      "maxMigration": 38
+    },
+    {
+      "ref": "refs/heads/claude/pim-groups-workspace-pods-JB51H",
+      "sha": "8519618509edeb51e32337dea73347a5e8e9d830",
+      "maxMigration": 30
+    },
+    {
+      "ref": "refs/heads/claude/pod-logs-history-MSb2C",
+      "sha": "57e6c3fe6d87fad6116e05a0dd60d7a008677584",
+      "maxMigration": 28
+    },
+    {
+      "ref": "refs/heads/claude/qa-persistence-discussion-2tLnH",
+      "sha": "a81aca30ebc30023fd5d0cee8d2831269a6110e8",
+      "maxMigration": 89
+    },
+    {
+      "ref": "refs/heads/claude/quick-task-ryP75",
+      "sha": "1ee55b60956fbc3c88a4c3f86160584a5d0c0e7e",
+      "maxMigration": 22
+    },
+    {
+      "ref": "refs/heads/claude/quick-task-tKkwG",
+      "sha": "498d714cd0d99cbb47906639331a72ed498d29b2",
+      "maxMigration": 22
+    },
+    {
+      "ref": "refs/heads/claude/redesign-detail-pane-Zsyjg",
+      "sha": "6bf7d55c3c3e0cdd7ad02446a0369269f5bd71f4",
+      "maxMigration": 65
+    },
+    {
+      "ref": "refs/heads/claude/redesign-pod-types-CmmMe",
+      "sha": "3a6237577e68d8e1d2dc9d9b583c63883910e7fa",
+      "maxMigration": 45
+    },
+    {
+      "ref": "refs/heads/claude/reduce-agent-merge-conflicts-7Cmfu",
+      "sha": "609d907ed59a22c37cb0b707d795f55187fe362f",
+      "maxMigration": 85
+    },
+    {
+      "ref": "refs/heads/claude/remove-tui-c06Nw",
+      "sha": "aa438d839a39bddc3b4a8cee58fb35013fdb7520",
+      "maxMigration": 25
+    },
+    {
+      "ref": "refs/heads/claude/remove-tui-docs-eqvcn",
+      "sha": "bec8a9fd689e098e6b6b2da85c678bdd88667c85",
+      "maxMigration": 35
+    },
+    {
+      "ref": "refs/heads/claude/reorganize-overview-tabs-QsWKu",
+      "sha": "9e56cd8639aa9daf837159f9f135a49172e0a763",
+      "maxMigration": 25
+    },
+    {
+      "ref": "refs/heads/claude/research-ai-coding-agents-C37wX",
+      "sha": "0356ef000f72dcc28e26b31a1fdc3d5417eb449a",
+      "maxMigration": 37
+    },
+    {
+      "ref": "refs/heads/claude/research-feature-splitting-v0tcq",
+      "sha": "a332731902730474c822d4394f108131f625a24d",
+      "maxMigration": 47
+    },
+    {
+      "ref": "refs/heads/claude/research-openai-agents-KIb2H",
+      "sha": "999d26fe05f460421c1f07bfe0ea754b1350a1e9",
+      "maxMigration": 99
+    },
+    {
+      "ref": "refs/heads/claude/review-plan-feature-docs-EizVb",
+      "sha": "092143790a6ade271d6c400b4c89471668421b55",
+      "maxMigration": 68
+    },
+    {
+      "ref": "refs/heads/claude/secure-local-daemon-api-185nB",
+      "sha": "a07a71ab8884fc8d280464c83f8ab1af061c3349",
+      "maxMigration": 21
+    },
+    {
+      "ref": "refs/heads/claude/security-remediation-plan-LYRzz",
+      "sha": "08e47475f76e47ad5e81263537924e9d6b7fdb05",
+      "maxMigration": 62
+    },
+    {
+      "ref": "refs/heads/claude/security-remediation-plan-UrEj3",
+      "sha": "88fb51091b3df94576025978c20035f10203582c",
+      "maxMigration": 65
+    },
+    {
+      "ref": "refs/heads/claude/security-remediation-plan-mBjoI",
+      "sha": "4335879f52121891b0009a90a3549a09e01137d7",
+      "maxMigration": 62
+    },
+    {
+      "ref": "refs/heads/claude/security-remediation-plan-nxwjI",
+      "sha": "8ef636283cbd67596dbfd1acb86149043580fca3",
+      "maxMigration": 62
+    },
+    {
+      "ref": "refs/heads/claude/security-remediation-wave-7-9NjyL",
+      "sha": "80ebd83df44ddad8c88de69f151aaf07a12fe4b9",
+      "maxMigration": 65
+    },
+    {
+      "ref": "refs/heads/claude/security-scan-vulnerabilities-6UBkT",
+      "sha": "3b46bc5c18b315d7fa72c4fd995538f9a25f261e",
+      "maxMigration": 21
+    },
+    {
+      "ref": "refs/heads/claude/squid-proxy-setup-ZkDMq",
+      "sha": "56a81886fd77a59f80b5346dad0fbc815dffc236",
+      "maxMigration": 99
+    },
+    {
+      "ref": "refs/heads/claude/standardize-pod-naming-7Z7E9",
+      "sha": "acafebf20d3d662261eb8eef8a39800de73fd5de",
+      "maxMigration": 46
+    },
+    {
+      "ref": "refs/heads/claude/streamline-review-process-FKoi1",
+      "sha": "fbd6f6d8bed89f3e81ae89d9bfaf8e927f758ea0",
+      "maxMigration": 77
+    },
+    {
+      "ref": "refs/heads/claude/surface-validation-feedback-xTWTX",
+      "sha": "39b5fb1adec73d5abc9671edde68f3cd86eed2e3",
+      "maxMigration": 26
+    },
+    {
+      "ref": "refs/heads/claude/surface-validation-results-UoeqC",
+      "sha": "2cacc0c93fe1a68efc80f1d5516c4889edc3d97e",
+      "maxMigration": 23
+    },
+    {
+      "ref": "refs/heads/claude/task-summary-deviations-K934H",
+      "sha": "a3775f5998383b2810d4edabf16ca0fc2f790859",
+      "maxMigration": 24
+    },
+    {
+      "ref": "refs/heads/claude/test-action-control-plane-9Xvzj",
+      "sha": "2f0652d83cd729d490ff8969c77ffe466556a39d",
+      "maxMigration": 21
+    },
+    {
+      "ref": "refs/heads/claude/update-desktop-docs-sruBA",
+      "sha": "eb9e83e784559dd8678a09084b6566ea87305a7b",
+      "maxMigration": 99
+    },
+    {
+      "ref": "refs/heads/claude/update-docs-interactive-guide-bHLEF",
+      "sha": "c6306eeff04e5b2ac1ea58463b335e139f135f49",
+      "maxMigration": 32
+    },
+    {
+      "ref": "refs/heads/claude/update-readme-docs-YVj1J",
+      "sha": "c24fd07a7bcdfeada3f6435c360da5dc1f2ef881",
+      "maxMigration": 21
+    },
+    {
+      "ref": "refs/heads/codex/advisory-qa-capture-readiness",
+      "sha": "bc7802102ea7f22c657e869535252ef9b048dd8b",
+      "maxMigration": 118
+    },
+    {
+      "ref": "refs/heads/codex/cli-dev-token-local-only",
+      "sha": "0d9f9430d42c57d53767ec37f1a48b24b961f904",
+      "maxMigration": 119
+    },
+    {
+      "ref": "refs/heads/codex/docs-readme-refresh",
+      "sha": "f5f566a23e3341013b1c82204f79c1c2fcc781aa",
+      "maxMigration": 117
+    },
+    {
+      "ref": "refs/heads/codex/enhance-deviation-functionality-for-agents",
+      "sha": "de0ea8063de872197b5be204300b1979148d0601",
+      "maxMigration": 104
+    },
+    {
+      "ref": "refs/heads/codex/evidence-yaml-facts",
+      "sha": "f377488caa3711f658426815197f0277f0797c68",
+      "maxMigration": 101
+    },
+    {
+      "ref": "refs/heads/codex/fix-codex-sandbox-completion",
+      "sha": "c88fb69847cf8fd750a7aa11a406fa5fc4cbe21d",
+      "maxMigration": 120
+    },
+    {
+      "ref": "refs/heads/codex/fix-sandbox-validation-permissions",
+      "sha": "1e1ce7747f322d5713d59bec8823cb59df07b32d",
+      "maxMigration": 120
+    },
+    {
+      "ref": "refs/heads/codex/fix-series-contract-copy",
+      "sha": "10b044d997a1a86410550550d611e3a4fd52c218",
+      "maxMigration": 101
+    },
+    {
+      "ref": "refs/heads/codex/full-pod-id-instructions",
+      "sha": "55c0d5a0f42b9ad2c366ba672d1a7ebb92c69a10",
+      "maxMigration": 118
+    },
+    {
+      "ref": "refs/heads/codex/haproxy-stream-timeout",
+      "sha": "33b1cabbb67ce61eb720532f95093095312b3ed0",
+      "maxMigration": 117
+    },
+    {
+      "ref": "refs/heads/codex/luumi-deno-image",
+      "sha": "513dd569b266721dd9f40b9aad927a3a48d63733",
+      "maxMigration": 138
+    },
+    {
+      "ref": "refs/heads/codex/podsitter-skill-routing",
+      "sha": "cd861671744830a004cbd8c88d1ccb35f7abcc3f",
+      "maxMigration": 118
+    },
+    {
+      "ref": "refs/heads/codex/safety-security-stats",
+      "sha": "080c3d7ecd3f9b521601e5f1802c3b6dfa8963c1",
+      "maxMigration": 118
+    },
+    {
+      "ref": "refs/heads/codex/update-ask_human-timeout-setting",
+      "sha": "f58201e4d30e7e95db5231953b0fe61019690258",
+      "maxMigration": 104
+    },
+    {
+      "ref": "refs/heads/comparable-sparrow-snipe",
+      "sha": "e6f80370b8f5a15b5a825e3204ac70ef5f5dcde9",
+      "maxMigration": 109
+    },
+    {
+      "ref": "refs/heads/dependabot/npm_and_yarn/biomejs/biome-2.5.3",
+      "sha": "77d1848182ec4b380775d39eb8b427016bfa1ffa",
+      "maxMigration": 120
+    },
+    {
+      "ref": "refs/heads/dependabot/npm_and_yarn/fastify/static-10.1.0",
+      "sha": "fb7e2b2c9fd9f27c35192b9595397b0c8cfa8dc7",
+      "maxMigration": 120
+    },
+    {
+      "ref": "refs/heads/dependabot/npm_and_yarn/vite-8.1.4",
+      "sha": "96286ac6f5354d0df8ab18e4c745a34c08857d01",
+      "maxMigration": 123
+    },
+    {
+      "ref": "refs/heads/dependabot/npm_and_yarn/vitejs/plugin-react-6.0.3",
+      "sha": "5fc265a2c2b6bd370eddb3bd41efd86d6fc7e3d0",
+      "maxMigration": 120
+    },
+    {
+      "ref": "refs/heads/detail-pane-redesign",
+      "sha": "2eea077c1d511dea091981ae912133198793ea1b",
+      "maxMigration": 101
+    },
+    {
+      "ref": "refs/heads/feat/detached-mcp-fallback",
+      "sha": "a1a39b4590b87b0d4cf9f89b0ccc053deebb1f25",
+      "maxMigration": 120
+    },
+    {
+      "ref": "refs/heads/feat/sandbox-interactive-shell",
+      "sha": "6585d3b8b597e4ec2cf3a5af119678a1973cff2f",
+      "maxMigration": 120
+    },
+    {
+      "ref": "refs/heads/feature/jolly-otter",
+      "sha": "1cc49b5f105b62c0f60598080e73a4149d22507a",
+      "maxMigration": 3
+    },
+    {
+      "ref": "refs/heads/feature/lazy-condor",
+      "sha": "1d7834aa0956f32940ceae61b50b7e33bb5a66d3",
+      "maxMigration": 10
+    },
+    {
+      "ref": "refs/heads/feature/nutty-stork-2",
+      "sha": "3e64421831e7c74615e72b5a033caef86ebd6bd1",
+      "maxMigration": 12
+    },
+    {
+      "ref": "refs/heads/feature/proud-puma",
+      "sha": "eb92eb15c580563cd5bd70c9f48438281b973ad6",
+      "maxMigration": 2
+    },
+    {
+      "ref": "refs/heads/feature/quiet-crow",
+      "sha": "c6c82a4f2d3654b10b57edb488b2b4ea31eb231c",
+      "maxMigration": 8
+    },
+    {
+      "ref": "refs/heads/feature/rusty-condor",
+      "sha": "2b429cff041ce5a81b1140878d8eece4c1864714",
+      "maxMigration": 15
+    },
+    {
+      "ref": "refs/heads/feature/spicy-sloth",
+      "sha": "0e131166fc558fcbe55fffe8d16ac9bb3c39665c",
+      "maxMigration": 6
+    },
+    {
+      "ref": "refs/heads/feature/witty-sphinx",
+      "sha": "ee765fa4a0af3a7ad80b3b0a52e417876bac4d4a",
+      "maxMigration": 7
+    },
+    {
+      "ref": "refs/heads/fix/cap-container-cpu",
+      "sha": "3376343638c4df66de145ea09b41f218e4114c8c",
+      "maxMigration": 118
+    },
+    {
+      "ref": "refs/heads/fix/chromium-google-egress-noise",
+      "sha": "7df2ca0595a6f5e6f12c6d3ce41e4aa389eb6080",
+      "maxMigration": 117
+    },
+    {
+      "ref": "refs/heads/fix/codex-sandbox-completion",
+      "sha": "b03a90d742ec928ab863dc34d50a3bd38cd67630",
+      "maxMigration": 120
+    },
+    {
+      "ref": "refs/heads/fix/daemon-native-podsitter-stabilization",
+      "sha": "32f6fd42030b33da36149c226c275d81684a3630",
+      "maxMigration": 133
+    },
+    {
+      "ref": "refs/heads/fix/detached-mcp-human-reply",
+      "sha": "8371d48d042edef8a6825833fce357ed4deb8a4a",
+      "maxMigration": 123
+    },
+    {
+      "ref": "refs/heads/fix/force-revalidate-review-required",
+      "sha": "b6ee20c76d3a95d8ec39a726f48860ddfef05188",
+      "maxMigration": 140
+    },
+    {
+      "ref": "refs/heads/fix/pilot-tmux-3.7",
+      "sha": "df1e4639294d679e59922233cabaa9ea25c1bd3a",
+      "maxMigration": 137
+    },
+    {
+      "ref": "refs/heads/fix/readiness-validation-rework-scope",
+      "sha": "2045568dd264a66d43f4636b76059b04ec809f01",
+      "maxMigration": 121
+    },
+    {
+      "ref": "refs/heads/fix/recover-worktree-controller-observe",
+      "sha": "5e881291b454436c1843c696703940f6c2bc4934",
+      "maxMigration": 140
+    },
+    {
+      "ref": "refs/heads/fix/review-closure-infrastructure",
+      "sha": "5fa80232e7f4158c537121e88d0756bbdd117d9e",
+      "maxMigration": 140
+    },
+    {
+      "ref": "refs/heads/fix/sandbox-bulk-volume-upload",
+      "sha": "19d06bbec0a486dc0e36f152b387c728f942fcb4",
+      "maxMigration": 120
+    },
+    {
+      "ref": "refs/heads/fix/sandbox-checkpoint-races",
+      "sha": "213cbbf3f00ef17d57a0ddf5403942092fef0803",
+      "maxMigration": 137
+    },
+    {
+      "ref": "refs/heads/fix/sandbox-exec-stream-and-terminal",
+      "sha": "a2177f05037764250472f397bd697e591871923a",
+      "maxMigration": 120
+    },
+    {
+      "ref": "refs/heads/fix/sandbox-memory-ceiling",
+      "sha": "abd821789efbcc130e720d9fdedae68b3e73491f",
+      "maxMigration": 136
+    },
+    {
+      "ref": "refs/heads/fix/sandbox-reaper-clears-recovery",
+      "sha": "026a8eb080ebda7b48cc85edf7a6354184388536",
+      "maxMigration": 137
+    },
+    {
+      "ref": "refs/heads/fix/sandbox-recovery-history-rewrite",
+      "sha": "5e6fc692876e971d4c22e0154e213c50c8db06ab",
+      "maxMigration": 140
+    },
+    {
+      "ref": "refs/heads/hotfix/checkpoint-named-ref",
+      "sha": "c74b429548b2cac62d5aec5636217f4c9d769a74",
+      "maxMigration": 137
+    },
+    {
+      "ref": "refs/heads/hotfix/compact-cursor-sqlite-timestamp",
+      "sha": "f7975acb148ba1045f13cbeb5427d1f2e23e4422",
+      "maxMigration": 127
+    },
+    {
+      "ref": "refs/heads/operator/pr231-completion",
+      "sha": "e502fe7938ca29406d9ddbe270644d0d32714223",
+      "maxMigration": 127
+    },
+    {
+      "ref": "refs/heads/dependabot/npm_and_yarn/npm-minor-and-patch-0dfcff53f1",
+      "sha": "f1289cde1dbfb7639c141ef4e9f0786e8fbf4a39",
+      "maxMigration": 152
+    },
+    {
+      "ref": "refs/heads/main",
+      "sha": "454256b6dca75b7a4a51e035524a2071488a1226",
+      "maxMigration": 152
+    }
+  ],
+  "missingObjects": []
+}

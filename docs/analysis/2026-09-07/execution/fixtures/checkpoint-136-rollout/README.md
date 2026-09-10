@@ -1,0 +1,1 @@
+Exact bounded operational inputs. Private dispatch restoration state is excluded. These scripts contain pinned live identities and must not be replayed without current authorization and ownership checks. The image probe ran staged candidate code without activating the daemon. Its frozen digest does not assert the current value of the mutable tag.

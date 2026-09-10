@@ -3,6 +3,7 @@ import {
   linkSync,
   lstatSync,
   mkdirSync,
+  mkdtempSync,
   readFileSync,
   readdirSync,
   rmSync,
@@ -17,13 +18,16 @@ import Dockerode from 'dockerode';
 import type { Logger } from 'pino';
 import tar from 'tar-stream';
 import type {
+  ContainerExecutionMetadata,
   ContainerManager,
   ContainerSpawnConfig,
+  DirectoryExtractionOptions,
   ExecOptions,
   ExecResult,
   StreamingExecResult,
 } from '../interfaces/container-manager.js';
 import { extractManagedDockerOutput } from '../managed/output-extraction.js';
+import { assertDirectoryExtractionCurrent } from './directory-extraction-ownership.js';
 import {
   DOCKER_CALL_TIMEOUTS,
   DockerCallTimeoutError,
@@ -34,6 +38,7 @@ import {
   createContainerWithStaleRetry,
   isExpectedDockerError,
 } from './docker-helpers.js';
+import { isObservedExitCode, unverifiedExecExit } from './exec-exit-evidence.js';
 
 const _dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -742,7 +747,9 @@ export class DockerContainerManager implements ContainerManager {
     containerPath: string,
     hostPath: string,
     excludes?: string[],
+    options?: DirectoryExtractionOptions,
   ): Promise<void> {
+    assertDirectoryExtractionCurrent(options);
     const container = this.docker.getContainer(containerId);
     // getArchive works on stopped containers — safe to call after container exits
     const archiveStream = await boundedDockerCall(container.getArchive({ path: containerPath }), {
@@ -752,10 +759,15 @@ export class DockerContainerManager implements ContainerManager {
       containerId,
     });
 
+    assertDirectoryExtractionCurrent(options);
     mkdirSync(hostPath, { recursive: true });
-    removeStaleSyncStagingDirs(hostPath);
+    if (!options) removeStaleSyncStagingDirs(hostPath);
     const stagingBase = `.autopod-extract-${process.pid}-${Date.now()}`;
-    const stagingPath = join(hostPath, stagingBase);
+    // A late collector must never write into the current recovery directory,
+    // or remove staging that belongs to another in-flight extraction.
+    const stagingPath = options
+      ? mkdtempSync(join(dirname(hostPath), '.autopod-owned-extract-'))
+      : join(hostPath, stagingBase);
     mkdirSync(stagingPath, { recursive: true });
 
     // Tar entries are prefixed with the basename of containerPath (e.g. "workspace/")
@@ -845,10 +857,28 @@ export class DockerContainerManager implements ContainerManager {
         (archiveStream as NodeJS.ReadableStream).pipe(extract);
       });
 
-      mirrorStagedDirectory(stagingPath, hostPath, excludes, stagingBase);
+      assertDirectoryExtractionCurrent(options);
+      mirrorStagedDirectory(stagingPath, hostPath, excludes, options ? undefined : stagingBase);
     } finally {
       rmSync(stagingPath, { recursive: true, force: true });
     }
+  }
+
+  async getExecutionMetadata(containerId: string): Promise<ContainerExecutionMetadata> {
+    const info = await boundedDockerCall(this.docker.getContainer(containerId).inspect(), {
+      label: 'container.inspect (execution metadata)',
+      timeoutMs: DOCKER_CALL_TIMEOUTS.inspect,
+      logger: this.logger,
+      containerId,
+    });
+    return {
+      imageDigest: /^sha256:[a-f0-9]{64}$/.test(info.Image) ? info.Image : null,
+      memoryLimitBytes:
+        (info.HostConfig?.Memory ?? 0) > 0 ? (info.HostConfig?.Memory ?? null) : null,
+      cpuLimit:
+        (info.HostConfig?.NanoCpus ?? 0) > 0 ? (info.HostConfig?.NanoCpus ?? 0) / 1e9 : null,
+      networkMode: info.HostConfig?.NetworkMode ?? null,
+    };
   }
 
   async getStatus(containerId: string): Promise<'running' | 'stopped' | 'unknown'> {
@@ -912,7 +942,12 @@ export class DockerContainerManager implements ContainerManager {
         logger: this.logger,
         containerId,
       });
-      exitCode = inspection.ExitCode ?? 1;
+      // A success code authorizes callers such as verified process-group kill.
+      // Never manufacture that success while inspection still reports running.
+      exitCode =
+        inspection.Running === false && isObservedExitCode(inspection.ExitCode)
+          ? inspection.ExitCode
+          : 1;
     } catch (err: unknown) {
       if (err instanceof DockerCallTimeoutError) {
         this.logger.warn(
@@ -1008,14 +1043,11 @@ export class DockerContainerManager implements ContainerManager {
       },
     );
 
-    // Resolve exit code once the stream closes and we can inspect the exec.
-    // Listen to 'end', 'error', and 'close' — destroy() only emits 'close'.
-    // The inspect call is bounded so a wedged daemon can't pin the exit-code
-    // promise forever; on timeout we fall back to exit code 1, which the
-    // runtime layer's awaitExitCodeBounded then surfaces as a non-fatal error.
+    // A closed transport triggers inspection, not proof of process exit. Keep
+    // missing/failed inspection distinct from an observed nonzero exit.
     const containerIdForLog = containerId;
     const logger = this.logger;
-    const exitCode = new Promise<number>((resolve) => {
+    const exitCode = new Promise<number>((resolve, reject) => {
       let resolved = false;
       const checkExit = async () => {
         if (resolved) return;
@@ -1027,9 +1059,11 @@ export class DockerContainerManager implements ContainerManager {
             logger,
             containerId: containerIdForLog,
           });
-          resolve(inspection.ExitCode ?? 1);
+          if (inspection.Running !== false || !isObservedExitCode(inspection.ExitCode)) {
+            reject(unverifiedExecExit());
+          } else resolve(inspection.ExitCode);
         } catch {
-          resolve(1);
+          reject(unverifiedExecExit());
         }
       };
 
@@ -1039,6 +1073,10 @@ export class DockerContainerManager implements ContainerManager {
       // destroy() emits 'close' but not 'end' — must handle this too
       mux.on('close', checkExit);
     });
+
+    // Consumers can drain stdout before awaiting exit; retain rejection without
+    // creating an unhandled rejection during that interval. Awaiting still rejects.
+    void exitCode.catch(() => {});
 
     const kill = async () => {
       try {

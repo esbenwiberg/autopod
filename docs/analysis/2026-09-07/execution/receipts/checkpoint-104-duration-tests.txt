@@ -1,0 +1,30 @@
+
+ RUN  v4.1.11 /private/tmp/autopod-durable-execution/packages/daemon
+
+ ❯ src/pods/retry-duration-evidence.test.ts (4 tests | 2 failed) 333ms
+   × keeps duration coverage through deletion and disk reopen (unsafe sum: false) 78ms
+   × keeps duration coverage through deletion and disk reopen (unsafe sum: true) 66ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 2 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/pods/retry-duration-evidence.test.ts > keeps duration coverage through deletion and disk reopen (unsafe sum: false)
+ FAIL  src/pods/retry-duration-evidence.test.ts > keeps duration coverage through deletion and disk reopen (unsafe sum: true)
+AutopodError: Task retry identity unavailable; reconcile lineage before execution
+ ❯ membership src/pods/task-retry-ledger.ts:89:13
+     87|       .get(podId) as { taskId: string; executionId: string; generation…
+     88|     if (!row)
+     89|       throw new TaskRetryBlockedError(
+       |             ^
+     90|         'Task retry identity unavailable; reconcile lineage before exe…
+     91|       );
+ ❯ Object.state src/pods/task-retry-ledger.ts:143:24
+ ❯ src/pods/retry-duration-evidence.test.ts:77:57
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/2]⎯
+
+
+ Test Files  1 failed | 1 passed (2)
+      Tests  2 failed | 26 passed (28)
+   Start at  22:32:21
+   Duration  3.03s (transform 1.30s, setup 0ms, import 2.13s, tests 2.78s, environment 0ms)
+

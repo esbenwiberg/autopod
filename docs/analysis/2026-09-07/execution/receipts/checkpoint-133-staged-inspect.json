@@ -1,0 +1,10 @@
+{
+  "value": [
+    {
+      "code": "ProvisioningState/succeeded",
+      "displayStatus": "Provisioning succeeded",
+      "level": "Info",
+      "message": "Enable succeeded: \n[stdout]\n{\"sha\":\"622fcbb59964dce80211c545662a59430595f5c0\",\"identities\":[{\"name\":\"chunk-4USRIP3T.js\",\"release\":{\"validationImplementationHash\":\"4cf84eaedeccff9e613f09ed86bc29a819f2301a91321b021b52bdfc854c78a6\",\"commitSha\":\"622fcbb59964dce80211c545662a59430595f5c0\",\"dirty\":true,\"builtAt\":\"2026-09-10T08:20:08.394Z\",\"source\":\"build\"}}],\"resourceMethodChunks\":[\"chunk-YXCZIAJ5.js\"],\"checkoutClean\":true,\"statusPaths\":[],\"entryHash\":\"9972adfd4884a88b3eedfde780a8df76479a8e53f6767f8fd4da8d15e1ce7a43\"}\n\n[stderr]\n"
+    }
+  ]
+}

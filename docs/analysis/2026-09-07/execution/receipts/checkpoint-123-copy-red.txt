@@ -1,0 +1,92 @@
+✔ actual candidate upgrades a managed-152 copy and preserves original data (169.210333ms)
+✔ wrong snapshot hash refuses before migration and retains source (89.010083ms)
+✔ wrong migration identity refuses before migration (93.048833ms)
+✔ WAL sidecar refuses a non-standalone snapshot (97.418375ms)
+✔ seeded migration that changes original retained content is detected and isolated copy removed (126.534167ms)
+✔ migration exceptions export no raw private error text (115.019833ms)
+✔ packaged CLI verifies a synthetic copy with a bounded JSON verdict (197.26875ms)
+✔ packaged CLI refuses missing arguments without raw exception output (55.702083ms)
+✖ actual candidate upgrades a managed-153 copy with explicit matching lineage (108.874042ms)
+✖ changed snapshot lineage refuses before invoking candidate migrations (102.011333ms)
+✖ packaged CLI requires the explicit managed-153 snapshot identity (163.574209ms)
+ℹ tests 11
+ℹ suites 0
+ℹ pass 8
+ℹ fail 3
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 1406.476708
+
+✖ failing tests:
+
+test at docs/analysis/2026-09-07/execution/fixtures/verify-upgrade-copy.test.mjs:172:1
+✖ actual candidate upgrades a managed-153 copy with explicit matching lineage (108.874042ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+  + actual - expected
+
+  + 'incomplete'
+  - 'isolated_upgrade_verified'
+
+      at file:///private/tmp/autopod-durable-execution/docs/analysis/2026-09-07/execution/fixtures/verify-upgrade-copy.test.mjs:175:12
+      at fixture (file:///private/tmp/autopod-durable-execution/docs/analysis/2026-09-07/execution/fixtures/verify-upgrade-copy.test.mjs:50:5)
+      at TestContext.<anonymous> (file:///private/tmp/autopod-durable-execution/docs/analysis/2026-09-07/execution/fixtures/verify-upgrade-copy.test.mjs:173:3)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1325:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:911:18)
+      at Test.postRun (node:internal/test_runner/test:1465:19)
+      at Test.run (node:internal/test_runner/test:1390:12)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:911:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: 'incomplete',
+    expected: 'isolated_upgrade_verified',
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at docs/analysis/2026-09-07/execution/fixtures/verify-upgrade-copy.test.mjs:182:1
+✖ changed snapshot lineage refuses before invoking candidate migrations (102.011333ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+
+  true !== false
+
+      at file:///private/tmp/autopod-durable-execution/docs/analysis/2026-09-07/execution/fixtures/verify-upgrade-copy.test.mjs:189:12
+      at fixture (file:///private/tmp/autopod-durable-execution/docs/analysis/2026-09-07/execution/fixtures/verify-upgrade-copy.test.mjs:50:5)
+      at TestContext.<anonymous> (file:///private/tmp/autopod-durable-execution/docs/analysis/2026-09-07/execution/fixtures/verify-upgrade-copy.test.mjs:183:3)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1325:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:911:18)
+      at Test.postRun (node:internal/test_runner/test:1465:19)
+      at Test.run (node:internal/test_runner/test:1390:12)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:911:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: true,
+    expected: false,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at docs/analysis/2026-09-07/execution/fixtures/verify-upgrade-copy.test.mjs:193:1
+✖ packaged CLI requires the explicit managed-153 snapshot identity (163.574209ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+
+  1 !== 0
+
+      at file:///private/tmp/autopod-durable-execution/docs/analysis/2026-09-07/execution/fixtures/verify-upgrade-copy.test.mjs:200:12
+      at fixture (file:///private/tmp/autopod-durable-execution/docs/analysis/2026-09-07/execution/fixtures/verify-upgrade-copy.test.mjs:50:5)
+      at TestContext.<anonymous> (file:///private/tmp/autopod-durable-execution/docs/analysis/2026-09-07/execution/fixtures/verify-upgrade-copy.test.mjs:194:3)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1325:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:911:18)
+      at Test.postRun (node:internal/test_runner/test:1465:19)
+      at Test.run (node:internal/test_runner/test:1390:12)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:911:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: 1,
+    expected: 0,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }

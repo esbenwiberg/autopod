@@ -1,0 +1,256 @@
+
+ RUN  v4.1.11 /private/tmp/autopod-durable-execution/packages/daemon
+
+{"level":30,"time":1788885795460,"pid":93215,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"my-app","msg":"Profile created"}
+(node:93214) [FSTDEP023] FastifyDeprecation: disableRequestLogging option is deprecated. Use the logController option with disableRequestLogging or isLogDisabled override instead. The disableRequestLogging top-level option will be removed in `fastify@6`.
+(Use `node --trace-warnings ...` to show where the warning was created)
+{"level":30,"time":1788885797300,"pid":93214,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"test-profile","msg":"Profile created"}
+(node:93214) [FSTDEP023] FastifyDeprecation: disableRequestLogging option is deprecated. Use the logController option with disableRequestLogging or isLogDisabled override instead. The disableRequestLogging top-level option will be removed in `fastify@6`.
+{"level":30,"time":1788885797346,"pid":93214,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"test-profile","msg":"Profile created"}
+(node:93214) [FSTDEP023] FastifyDeprecation: disableRequestLogging option is deprecated. Use the logController option with disableRequestLogging or isLogDisabled override instead. The disableRequestLogging top-level option will be removed in `fastify@6`.
+{"level":30,"time":1788885797390,"pid":93214,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"test-profile","msg":"Profile created"}
+(node:93214) [FSTDEP023] FastifyDeprecation: disableRequestLogging option is deprecated. Use the logController option with disableRequestLogging or isLogDisabled override instead. The disableRequestLogging top-level option will be removed in `fastify@6`.
+{"level":30,"time":1788885797438,"pid":93214,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"test-profile","msg":"Profile created"}
+(node:93214) [FSTDEP023] FastifyDeprecation: disableRequestLogging option is deprecated. Use the logController option with disableRequestLogging or isLogDisabled override instead. The disableRequestLogging top-level option will be removed in `fastify@6`.
+{"level":30,"time":1788885797482,"pid":93214,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"test-profile","msg":"Profile created"}
+(node:93214) [FSTDEP023] FastifyDeprecation: disableRequestLogging option is deprecated. Use the logController option with disableRequestLogging or isLogDisabled override instead. The disableRequestLogging top-level option will be removed in `fastify@6`.
+{"level":30,"time":1788885797529,"pid":93214,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"test-profile","msg":"Profile created"}
+(node:93214) [FSTDEP023] FastifyDeprecation: disableRequestLogging option is deprecated. Use the logController option with disableRequestLogging or isLogDisabled override instead. The disableRequestLogging top-level option will be removed in `fastify@6`.
+{"level":30,"time":1788885797570,"pid":93214,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"test-profile","msg":"Profile created"}
+(node:93214) [FSTDEP023] FastifyDeprecation: disableRequestLogging option is deprecated. Use the logController option with disableRequestLogging or isLogDisabled override instead. The disableRequestLogging top-level option will be removed in `fastify@6`.
+{"level":30,"time":1788885797612,"pid":93214,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"test-profile","msg":"Profile created"}
+(node:93214) [FSTDEP023] FastifyDeprecation: disableRequestLogging option is deprecated. Use the logController option with disableRequestLogging or isLogDisabled override instead. The disableRequestLogging top-level option will be removed in `fastify@6`.
+{"level":30,"time":1788885797653,"pid":93214,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"test-profile","msg":"Profile created"}
+{"level":30,"time":1788885797655,"pid":93214,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"test-profile","fields":["providerCredentials","githubPat","openrouterApiKey","registryPat"],"msg":"Profile updated"}
+(node:93214) [FSTDEP023] FastifyDeprecation: disableRequestLogging option is deprecated. Use the logController option with disableRequestLogging or isLogDisabled override instead. The disableRequestLogging top-level option will be removed in `fastify@6`.
+{"level":30,"time":1788885797696,"pid":93214,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"test-profile","msg":"Profile created"}
+(node:93214) [FSTDEP023] FastifyDeprecation: disableRequestLogging option is deprecated. Use the logController option with disableRequestLogging or isLogDisabled override instead. The disableRequestLogging top-level option will be removed in `fastify@6`.
+(node:93214) [FSTDEP023] FastifyDeprecation: disableRequestLogging option is deprecated. Use the logController option with disableRequestLogging or isLogDisabled override instead. The disableRequestLogging top-level option will be removed in `fastify@6`.
+(node:93214) [FSTDEP023] FastifyDeprecation: disableRequestLogging option is deprecated. Use the logController option with disableRequestLogging or isLogDisabled override instead. The disableRequestLogging top-level option will be removed in `fastify@6`.
+(node:93214) [FSTDEP023] FastifyDeprecation: disableRequestLogging option is deprecated. Use the logController option with disableRequestLogging or isLogDisabled override instead. The disableRequestLogging top-level option will be removed in `fastify@6`.
+(node:93214) [FSTDEP023] FastifyDeprecation: disableRequestLogging option is deprecated. Use the logController option with disableRequestLogging or isLogDisabled override instead. The disableRequestLogging top-level option will be removed in `fastify@6`.
+(node:93214) [FSTDEP023] FastifyDeprecation: disableRequestLogging option is deprecated. Use the logController option with disableRequestLogging or isLogDisabled override instead. The disableRequestLogging top-level option will be removed in `fastify@6`.
+(node:93214) [FSTDEP023] FastifyDeprecation: disableRequestLogging option is deprecated. Use the logController option with disableRequestLogging or isLogDisabled override instead. The disableRequestLogging top-level option will be removed in `fastify@6`.
+(node:93214) [FSTDEP023] FastifyDeprecation: disableRequestLogging option is deprecated. Use the logController option with disableRequestLogging or isLogDisabled override instead. The disableRequestLogging top-level option will be removed in `fastify@6`.
+(node:93214) [FSTDEP023] FastifyDeprecation: disableRequestLogging option is deprecated. Use the logController option with disableRequestLogging or isLogDisabled override instead. The disableRequestLogging top-level option will be removed in `fastify@6`.
+(node:93214) [FSTDEP023] FastifyDeprecation: disableRequestLogging option is deprecated. Use the logController option with disableRequestLogging or isLogDisabled override instead. The disableRequestLogging top-level option will be removed in `fastify@6`.
+(node:93214) [FSTDEP023] FastifyDeprecation: disableRequestLogging option is deprecated. Use the logController option with disableRequestLogging or isLogDisabled override instead. The disableRequestLogging top-level option will be removed in `fastify@6`.
+{"level":30,"time":1788885798157,"pid":93214,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"test-profile","msg":"Profile created"}
+(node:93214) [FSTDEP023] FastifyDeprecation: disableRequestLogging option is deprecated. Use the logController option with disableRequestLogging or isLogDisabled override instead. The disableRequestLogging top-level option will be removed in `fastify@6`.
+{"level":30,"time":1788885798205,"pid":93214,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"test-profile","msg":"Profile created"}
+(node:93214) [FSTDEP023] FastifyDeprecation: disableRequestLogging option is deprecated. Use the logController option with disableRequestLogging or isLogDisabled override instead. The disableRequestLogging top-level option will be removed in `fastify@6`.
+{"level":30,"time":1788885798249,"pid":93214,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"test-profile","msg":"Profile created"}
+(node:93214) [FSTDEP023] FastifyDeprecation: disableRequestLogging option is deprecated. Use the logController option with disableRequestLogging or isLogDisabled override instead. The disableRequestLogging top-level option will be removed in `fastify@6`.
+{"level":30,"time":1788885798292,"pid":93214,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"test-profile","msg":"Profile created"}
+(node:93214) [FSTDEP023] FastifyDeprecation: disableRequestLogging option is deprecated. Use the logController option with disableRequestLogging or isLogDisabled override instead. The disableRequestLogging top-level option will be removed in `fastify@6`.
+{"level":30,"time":1788885798334,"pid":93214,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"test-profile","msg":"Profile created"}
+(node:93214) [FSTDEP023] FastifyDeprecation: disableRequestLogging option is deprecated. Use the logController option with disableRequestLogging or isLogDisabled override instead. The disableRequestLogging top-level option will be removed in `fastify@6`.
+{"level":30,"time":1788885798376,"pid":93214,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"test-profile","msg":"Profile created"}
+(node:93214) [FSTDEP023] FastifyDeprecation: disableRequestLogging option is deprecated. Use the logController option with disableRequestLogging or isLogDisabled override instead. The disableRequestLogging top-level option will be removed in `fastify@6`.
+{"level":30,"time":1788885798417,"pid":93214,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"test-profile","msg":"Profile created"}
+(node:93214) [FSTDEP023] FastifyDeprecation: disableRequestLogging option is deprecated. Use the logController option with disableRequestLogging or isLogDisabled override instead. The disableRequestLogging top-level option will be removed in `fastify@6`.
+{"level":30,"time":1788885798462,"pid":93214,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"test-profile","msg":"Profile created"}
+(node:93214) [FSTDEP023] FastifyDeprecation: disableRequestLogging option is deprecated. Use the logController option with disableRequestLogging or isLogDisabled override instead. The disableRequestLogging top-level option will be removed in `fastify@6`.
+{"level":30,"time":1788885798505,"pid":93214,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"test-profile","msg":"Profile created"}
+(node:93214) [FSTDEP023] FastifyDeprecation: disableRequestLogging option is deprecated. Use the logController option with disableRequestLogging or isLogDisabled override instead. The disableRequestLogging top-level option will be removed in `fastify@6`.
+{"level":30,"time":1788885798548,"pid":93214,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"test-profile","msg":"Profile created"}
+(node:93214) [FSTDEP023] FastifyDeprecation: disableRequestLogging option is deprecated. Use the logController option with disableRequestLogging or isLogDisabled override instead. The disableRequestLogging top-level option will be removed in `fastify@6`.
+{"level":30,"time":1788885798589,"pid":93214,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"test-profile","msg":"Profile created"}
+(node:93214) [FSTDEP023] FastifyDeprecation: disableRequestLogging option is deprecated. Use the logController option with disableRequestLogging or isLogDisabled override instead. The disableRequestLogging top-level option will be removed in `fastify@6`.
+{"level":30,"time":1788885798631,"pid":93214,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"test-profile","msg":"Profile created"}
+(node:93214) [FSTDEP023] FastifyDeprecation: disableRequestLogging option is deprecated. Use the logController option with disableRequestLogging or isLogDisabled override instead. The disableRequestLogging top-level option will be removed in `fastify@6`.
+{"level":30,"time":1788885798674,"pid":93214,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"test-profile","msg":"Profile created"}
+(node:93214) [FSTDEP023] FastifyDeprecation: disableRequestLogging option is deprecated. Use the logController option with disableRequestLogging or isLogDisabled override instead. The disableRequestLogging top-level option will be removed in `fastify@6`.
+{"level":30,"time":1788885798715,"pid":93214,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"test-profile","msg":"Profile created"}
+(node:93214) [FSTDEP023] FastifyDeprecation: disableRequestLogging option is deprecated. Use the logController option with disableRequestLogging or isLogDisabled override instead. The disableRequestLogging top-level option will be removed in `fastify@6`.
+{"level":30,"time":1788885798756,"pid":93214,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"test-profile","msg":"Profile created"}
+(node:93214) [FSTDEP023] FastifyDeprecation: disableRequestLogging option is deprecated. Use the logController option with disableRequestLogging or isLogDisabled override instead. The disableRequestLogging top-level option will be removed in `fastify@6`.
+{"level":30,"time":1788885798797,"pid":93214,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"test-profile","msg":"Profile created"}
+(node:93214) [FSTDEP023] FastifyDeprecation: disableRequestLogging option is deprecated. Use the logController option with disableRequestLogging or isLogDisabled override instead. The disableRequestLogging top-level option will be removed in `fastify@6`.
+{"level":30,"time":1788885798838,"pid":93214,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"test-profile","msg":"Profile created"}
+(node:93214) [FSTDEP023] FastifyDeprecation: disableRequestLogging option is deprecated. Use the logController option with disableRequestLogging or isLogDisabled override instead. The disableRequestLogging top-level option will be removed in `fastify@6`.
+{"level":30,"time":1788885798883,"pid":93214,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"test-profile","msg":"Profile created"}
+{"level":30,"time":1788885795505,"pid":93215,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"my-app","msg":"Profile created"}
+{"level":30,"time":1788885795548,"pid":93215,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"my-app","msg":"Profile created"}
+{"level":30,"time":1788885795595,"pid":93215,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"parent","msg":"Profile created"}
+{"level":30,"time":1788885795595,"pid":93215,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"child","msg":"Profile created"}
+{"level":30,"time":1788885795687,"pid":93215,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"my-app","msg":"Profile created"}
+{"level":30,"time":1788885795729,"pid":93215,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"my-app","msg":"Profile created"}
+{"level":30,"time":1788885795771,"pid":93215,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"my-app","msg":"Profile created"}
+{"level":30,"time":1788885795858,"pid":93215,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"my-app","msg":"Profile created"}
+{"level":30,"time":1788885795953,"pid":93215,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"parent","msg":"Profile created"}
+{"level":30,"time":1788885795954,"pid":93215,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"child","msg":"Profile created"}
+{"level":30,"time":1788885795998,"pid":93215,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"parent","msg":"Profile created"}
+{"level":30,"time":1788885795999,"pid":93215,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"child","msg":"Profile created"}
+{"level":30,"time":1788885796042,"pid":93215,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"my-app","msg":"Profile created"}
+{"level":30,"time":1788885796085,"pid":93215,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"my-app","msg":"Profile created"}
+{"level":30,"time":1788885796129,"pid":93215,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"parent","msg":"Profile created"}
+{"level":30,"time":1788885796129,"pid":93215,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"child","msg":"Profile created"}
+{"level":30,"time":1788885796215,"pid":93215,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"parent","msg":"Profile created"}
+{"level":30,"time":1788885796215,"pid":93215,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"child","msg":"Profile created"}
+{"level":30,"time":1788885796266,"pid":93215,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"parent","msg":"Profile created"}
+{"level":30,"time":1788885796266,"pid":93215,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"child","msg":"Profile created"}
+{"level":30,"time":1788885796307,"pid":93215,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"app-a","msg":"Profile created"}
+{"level":30,"time":1788885796307,"pid":93215,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"app-b","msg":"Profile created"}
+{"level":30,"time":1788885796352,"pid":93215,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"parent","msg":"Profile created"}
+{"level":30,"time":1788885796352,"pid":93215,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"child","msg":"Profile created"}
+{"level":30,"time":1788885796397,"pid":93215,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"my-app","msg":"Profile created"}
+{"level":30,"time":1788885796397,"pid":93215,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"my-app","fields":["reasoningEffort"],"msg":"Profile updated"}
+{"level":30,"time":1788885796397,"pid":93215,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"parent","msg":"Profile created"}
+{"level":30,"time":1788885796398,"pid":93215,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"child","msg":"Profile created"}
+{"level":30,"time":1788885796398,"pid":93215,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"child","fields":["reasoningEffort"],"msg":"Profile updated"}
+{"level":30,"time":1788885796447,"pid":93215,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"my-app","msg":"Profile created"}
+{"level":30,"time":1788885796447,"pid":93215,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"my-app","fields":["buildCommand"],"msg":"Profile updated"}
+{"level":30,"time":1788885796491,"pid":93215,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"my-app","msg":"Profile created"}
+{"level":30,"time":1788885796491,"pid":93215,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"my-app","fields":["buildCommand"],"msg":"Profile updated"}
+{"level":30,"time":1788885796577,"pid":93215,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"my-app","msg":"Profile created"}
+{"level":30,"time":1788885796577,"pid":93215,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"my-app","fields":["buildCommand"],"msg":"Profile updated"}
+{"level":30,"time":1788885796621,"pid":93215,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"my-app","msg":"Profile created"}
+{"level":30,"time":1788885796621,"pid":93215,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"my-app","fields":["agentDonePrompt"],"msg":"Profile updated"}
+{"level":30,"time":1788885796621,"pid":93215,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"my-app","fields":["agentDonePrompt"],"msg":"Profile updated"}
+{"level":30,"time":1788885796664,"pid":93215,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"my-app","msg":"Profile created"}
+{"level":30,"time":1788885796707,"pid":93215,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"my-app","msg":"Profile created"}
+{"level":30,"time":1788885796754,"pid":93215,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"my-app","msg":"Profile created"}
+{"level":30,"time":1788885796754,"pid":93215,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"my-app","fields":["codeIntelligence"],"msg":"Profile updated"}
+{"level":30,"time":1788885796797,"pid":93215,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"my-app","msg":"Profile created"}
+{"level":30,"time":1788885796797,"pid":93215,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"my-app","fields":["codeIntelligence"],"msg":"Profile updated"}
+{"level":30,"time":1788885796839,"pid":93215,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"my-app","msg":"Profile created"}
+{"level":30,"time":1788885796839,"pid":93215,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"my-app","fields":["reviewerModel"],"msg":"Profile updated"}
+{"level":30,"time":1788885796882,"pid":93215,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"my-app","msg":"Profile created"}
+{"level":30,"time":1788885796883,"pid":93215,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"my-app","fields":["validationSetupCommand"],"msg":"Profile updated"}
+{"level":30,"time":1788885796883,"pid":93215,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"my-app","fields":["validationSetupCommand"],"msg":"Profile updated"}
+{"level":30,"time":1788885796928,"pid":93215,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"my-app","msg":"Profile created"}
+{"level":30,"time":1788885796973,"pid":93215,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"my-app","msg":"Profile created"}
+{"level":30,"time":1788885796973,"pid":93215,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"my-app","fields":["skipValidationPhases"],"msg":"Profile updated"}
+{"level":30,"time":1788885796973,"pid":93215,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"my-app","fields":["skipValidationPhases"],"msg":"Profile updated"}
+{"level":30,"time":1788885797025,"pid":93215,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"my-app","msg":"Profile created"}
+{"level":30,"time":1788885797025,"pid":93215,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"my-app","fields":["pod"],"msg":"Profile updated"}
+{"level":30,"time":1788885797026,"pid":93215,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"my-app","fields":["pod"],"msg":"Profile updated"}
+{"level":30,"time":1788885797107,"pid":93215,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"my-app","msg":"Profile created"}
+{"level":30,"time":1788885797153,"pid":93215,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"my-app","msg":"Profile created"}
+{"level":30,"time":1788885797203,"pid":93215,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"my-app","msg":"Profile created"}
+{"level":30,"time":1788885797203,"pid":93215,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"my-app","fields":["mergePollIntervalSec"],"msg":"Profile updated"}
+{"level":30,"time":1788885797244,"pid":93215,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"my-app","msg":"Profile created"}
+{"level":30,"time":1788885797244,"pid":93215,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"my-app","fields":["pod"],"msg":"Profile updated"}
+{"level":30,"time":1788885797244,"pid":93215,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"my-app","fields":["pod"],"msg":"Profile updated"}
+{"level":30,"time":1788885797285,"pid":93215,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"parent","msg":"Profile created"}
+{"level":30,"time":1788885797285,"pid":93215,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"child","msg":"Profile created"}
+{"level":30,"time":1788885797286,"pid":93215,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"child","fields":["hasWebUi","issueWatcherEnabled","trustedSource"],"msg":"Profile updated"}
+{"level":30,"time":1788885797329,"pid":93215,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"parent","msg":"Profile created"}
+{"level":30,"time":1788885797329,"pid":93215,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"child","msg":"Profile created"}
+{"level":30,"time":1788885797329,"pid":93215,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"child","fields":["customInstructions"],"msg":"Profile updated"}
+{"level":30,"time":1788885797372,"pid":93215,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"parent","msg":"Profile created"}
+{"level":30,"time":1788885797373,"pid":93215,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"child","msg":"Profile created"}
+{"level":30,"time":1788885797373,"pid":93215,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"child","fields":["customInstructions"],"msg":"Profile updated"}
+{"level":30,"time":1788885797415,"pid":93215,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"my-app","msg":"Profile created"}
+{"level":30,"time":1788885797415,"pid":93215,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"my-app","tag":"autopod/my-app:latest","builtAt":"2026-04-27T10:00:00.000Z","msg":"Profile warm image updated"}
+{"level":30,"time":1788885797458,"pid":93215,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"my-app","msg":"Profile created"}
+{"level":30,"time":1788885797458,"pid":93215,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"my-app","tag":"autopod/my-app:latest","builtAt":"2026-09-08T16:43:17.458Z","msg":"Profile warm image updated"}
+{"level":30,"time":1788885797545,"pid":93215,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"my-app","msg":"Profile created"}
+{"level":30,"time":1788885797547,"pid":93215,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"my-app","msg":"Profile deleted"}
+{"level":30,"time":1788885797627,"pid":93215,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"my-app","msg":"Profile created"}
+{"level":30,"time":1788885797668,"pid":93215,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"my-app","msg":"Profile created"}
+{"level":30,"time":1788885797669,"pid":93215,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"my-app","msg":"Profile deleted"}
+{"level":30,"time":1788885797711,"pid":93215,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"my-app","msg":"Profile created"}
+{"level":30,"time":1788885797753,"pid":93215,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"parent","msg":"Profile created"}
+{"level":30,"time":1788885797753,"pid":93215,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"child","msg":"Profile created"}
+{"level":30,"time":1788885797797,"pid":93215,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"my-app","msg":"Profile created"}
+{"level":30,"time":1788885797889,"pid":93215,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"my-app","msg":"Profile created"}
+{"level":30,"time":1788885797929,"pid":93215,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"my-app","msg":"Profile created"}
+{"level":30,"time":1788885797970,"pid":93215,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"my-app","msg":"Profile created"}
+{"level":30,"time":1788885798011,"pid":93215,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"my-app","msg":"Profile created"}
+{"level":30,"time":1788885798055,"pid":93215,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"my-app","msg":"Profile created"}
+{"level":30,"time":1788885798096,"pid":93215,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"my-app","msg":"Profile created"}
+{"level":30,"time":1788885798139,"pid":93215,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"my-app","msg":"Profile created"}
+{"level":30,"time":1788885798181,"pid":93215,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"my-app","msg":"Profile created"}
+{"level":30,"time":1788885798222,"pid":93215,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"my-app","msg":"Profile created"}
+{"level":30,"time":1788885798263,"pid":93215,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"my-app","msg":"Profile created"}
+{"level":30,"time":1788885798263,"pid":93215,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"my-app","fields":["buildEnv"],"msg":"Profile updated"}
+{"level":30,"time":1788885798263,"pid":93215,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"my-app","fields":["buildEnv"],"msg":"Profile updated"}
+{"level":30,"time":1788885798303,"pid":93215,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"my-app","msg":"Profile created"}
+{"level":30,"time":1788885798303,"pid":93215,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"my-app","fields":["privateRegistries","registryPat"],"msg":"Profile updated"}
+{"level":30,"time":1788885798344,"pid":93215,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"my-app","msg":"Profile created"}
+{"level":30,"time":1788885798344,"pid":93215,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"my-app","fields":["githubPatExpiresAt","registryPatExpiresAt"],"msg":"Profile updated"}
+{"level":30,"time":1788885798344,"pid":93215,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"my-app","fields":["githubPatExpiresAt","registryPatExpiresAt"],"msg":"Profile updated"}
+{"level":30,"time":1788885798385,"pid":93215,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"grandparent","msg":"Profile created"}
+{"level":30,"time":1788885798385,"pid":93215,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"parent","msg":"Profile created"}
+{"level":30,"time":1788885798385,"pid":93215,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"child","msg":"Profile created"}
+{"level":30,"time":1788885798427,"pid":93215,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"owner","msg":"Profile created"}
+{"level":30,"time":1788885798469,"pid":93215,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"parent","msg":"Profile created"}
+{"level":30,"time":1788885798469,"pid":93215,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"child","msg":"Profile created"}
+{"level":30,"time":1788885798510,"pid":93215,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"base","msg":"Profile created"}
+{"level":30,"time":1788885798510,"pid":93215,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"middle","msg":"Profile created"}
+{"level":30,"time":1788885798510,"pid":93215,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"leaf","msg":"Profile created"}
+{"level":30,"time":1788885798551,"pid":93215,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"base","msg":"Profile created"}
+{"level":30,"time":1788885798551,"pid":93215,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"middle","msg":"Profile created"}
+{"level":30,"time":1788885798551,"pid":93215,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"leaf","msg":"Profile created"}
+{"level":30,"time":1788885798596,"pid":93215,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"my-app","msg":"Profile created"}
+{"level":30,"time":1788885798596,"pid":93215,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"my-app","fields":["providerAccountId"],"msg":"Profile updated"}
+{"level":30,"time":1788885798596,"pid":93215,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"my-app","fields":["providerAccountId"],"msg":"Profile updated"}
+{"level":30,"time":1788885798637,"pid":93215,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"base","msg":"Profile created"}
+{"level":30,"time":1788885798638,"pid":93215,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"middle","msg":"Profile created"}
+{"level":30,"time":1788885798638,"pid":93215,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"leaf","msg":"Profile created"}
+{"level":30,"time":1788885798679,"pid":93215,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"base","msg":"Profile created"}
+{"level":30,"time":1788885798679,"pid":93215,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"middle","msg":"Profile created"}
+{"level":30,"time":1788885798679,"pid":93215,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"leaf","msg":"Profile created"}
+{"level":30,"time":1788885798720,"pid":93215,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"my-app","msg":"Profile created"}
+{"level":30,"time":1788885798761,"pid":93215,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"my-app","msg":"Profile created"}
+{"level":30,"time":1788885798802,"pid":93215,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"my-app","msg":"Profile created"}
+{"level":30,"time":1788885798842,"pid":93215,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"base","msg":"Profile created"}
+{"level":30,"time":1788885798843,"pid":93215,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"middle","msg":"Profile created"}
+{"level":30,"time":1788885798843,"pid":93215,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"leaf","msg":"Profile created"}
+{"level":30,"time":1788885798888,"pid":93215,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"my-app","msg":"Profile created"}
+{"level":30,"time":1788885798888,"pid":93215,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"my-app","fields":["providerFailover"],"msg":"Profile updated"}
+{"level":30,"time":1788885798888,"pid":93215,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"my-app","fields":["providerFailover"],"msg":"Profile updated"}
+(node:93214) [FSTDEP023] FastifyDeprecation: disableRequestLogging option is deprecated. Use the logController option with disableRequestLogging or isLogDisabled override instead. The disableRequestLogging top-level option will be removed in `fastify@6`.
+{"level":30,"time":1788885798924,"pid":93214,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"test-profile","msg":"Profile created"}
+(node:93214) [FSTDEP023] FastifyDeprecation: disableRequestLogging option is deprecated. Use the logController option with disableRequestLogging or isLogDisabled override instead. The disableRequestLogging top-level option will be removed in `fastify@6`.
+{"level":30,"time":1788885798964,"pid":93214,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"test-profile","msg":"Profile created"}
+(node:93214) [FSTDEP023] FastifyDeprecation: disableRequestLogging option is deprecated. Use the logController option with disableRequestLogging or isLogDisabled override instead. The disableRequestLogging top-level option will be removed in `fastify@6`.
+{"level":30,"time":1788885799005,"pid":93214,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"test-profile","msg":"Profile created"}
+(node:93214) [FSTDEP023] FastifyDeprecation: disableRequestLogging option is deprecated. Use the logController option with disableRequestLogging or isLogDisabled override instead. The disableRequestLogging top-level option will be removed in `fastify@6`.
+(node:93214) [FSTDEP023] FastifyDeprecation: disableRequestLogging option is deprecated. Use the logController option with disableRequestLogging or isLogDisabled override instead. The disableRequestLogging top-level option will be removed in `fastify@6`.
+(node:93214) [FSTDEP023] FastifyDeprecation: disableRequestLogging option is deprecated. Use the logController option with disableRequestLogging or isLogDisabled override instead. The disableRequestLogging top-level option will be removed in `fastify@6`.
+(node:93214) [FSTDEP023] FastifyDeprecation: disableRequestLogging option is deprecated. Use the logController option with disableRequestLogging or isLogDisabled override instead. The disableRequestLogging top-level option will be removed in `fastify@6`.
+(node:93214) [FSTDEP023] FastifyDeprecation: disableRequestLogging option is deprecated. Use the logController option with disableRequestLogging or isLogDisabled override instead. The disableRequestLogging top-level option will be removed in `fastify@6`.
+(node:93214) [FSTDEP023] FastifyDeprecation: disableRequestLogging option is deprecated. Use the logController option with disableRequestLogging or isLogDisabled override instead. The disableRequestLogging top-level option will be removed in `fastify@6`.
+(node:93214) [FSTDEP023] FastifyDeprecation: disableRequestLogging option is deprecated. Use the logController option with disableRequestLogging or isLogDisabled override instead. The disableRequestLogging top-level option will be removed in `fastify@6`.
+(node:93214) [FSTDEP023] FastifyDeprecation: disableRequestLogging option is deprecated. Use the logController option with disableRequestLogging or isLogDisabled override instead. The disableRequestLogging top-level option will be removed in `fastify@6`.
+(node:93214) [FSTDEP023] FastifyDeprecation: disableRequestLogging option is deprecated. Use the logController option with disableRequestLogging or isLogDisabled override instead. The disableRequestLogging top-level option will be removed in `fastify@6`.
+(node:93214) [FSTDEP023] FastifyDeprecation: disableRequestLogging option is deprecated. Use the logController option with disableRequestLogging or isLogDisabled override instead. The disableRequestLogging top-level option will be removed in `fastify@6`.
+{"level":30,"time":1788885799456,"pid":93214,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"test-profile","msg":"Profile created"}
+(node:93214) [FSTDEP023] FastifyDeprecation: disableRequestLogging option is deprecated. Use the logController option with disableRequestLogging or isLogDisabled override instead. The disableRequestLogging top-level option will be removed in `fastify@6`.
+{"level":30,"time":1788885799499,"pid":93214,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"test-profile","msg":"Profile created"}
+(node:93214) [FSTDEP023] FastifyDeprecation: disableRequestLogging option is deprecated. Use the logController option with disableRequestLogging or isLogDisabled override instead. The disableRequestLogging top-level option will be removed in `fastify@6`.
+{"level":30,"time":1788885799539,"pid":93214,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"test-profile","msg":"Profile created"}
+(node:93214) [FSTDEP023] FastifyDeprecation: disableRequestLogging option is deprecated. Use the logController option with disableRequestLogging or isLogDisabled override instead. The disableRequestLogging top-level option will be removed in `fastify@6`.
+{"level":30,"time":1788885799582,"pid":93214,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"test-profile","msg":"Profile created"}
+(node:93214) [FSTDEP023] FastifyDeprecation: disableRequestLogging option is deprecated. Use the logController option with disableRequestLogging or isLogDisabled override instead. The disableRequestLogging top-level option will be removed in `fastify@6`.
+{"level":30,"time":1788885799621,"pid":93214,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"test-profile","msg":"Profile created"}
+(node:93214) [FSTDEP023] FastifyDeprecation: disableRequestLogging option is deprecated. Use the logController option with disableRequestLogging or isLogDisabled override instead. The disableRequestLogging top-level option will be removed in `fastify@6`.
+{"level":30,"time":1788885799660,"pid":93214,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"test-profile","msg":"Profile created"}
+(node:93214) [FSTDEP023] FastifyDeprecation: disableRequestLogging option is deprecated. Use the logController option with disableRequestLogging or isLogDisabled override instead. The disableRequestLogging top-level option will be removed in `fastify@6`.
+{"level":30,"time":1788885799700,"pid":93214,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"test-profile","msg":"Profile created"}
+(node:93214) [FSTDEP023] FastifyDeprecation: disableRequestLogging option is deprecated. Use the logController option with disableRequestLogging or isLogDisabled override instead. The disableRequestLogging top-level option will be removed in `fastify@6`.
+{"level":30,"time":1788885799740,"pid":93214,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"test-profile","msg":"Profile created"}
+(node:93214) [FSTDEP023] FastifyDeprecation: disableRequestLogging option is deprecated. Use the logController option with disableRequestLogging or isLogDisabled override instead. The disableRequestLogging top-level option will be removed in `fastify@6`.
+{"level":30,"time":1788885799781,"pid":93214,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"test-profile","msg":"Profile created"}
+(node:93214) [FSTDEP023] FastifyDeprecation: disableRequestLogging option is deprecated. Use the logController option with disableRequestLogging or isLogDisabled override instead. The disableRequestLogging top-level option will be removed in `fastify@6`.
+{"level":30,"time":1788885799820,"pid":93214,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"test-profile","msg":"Profile created"}
+(node:93214) [FSTDEP023] FastifyDeprecation: disableRequestLogging option is deprecated. Use the logController option with disableRequestLogging or isLogDisabled override instead. The disableRequestLogging top-level option will be removed in `fastify@6`.
+{"level":30,"time":1788885799863,"pid":93214,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"test-profile","msg":"Profile created"}
+(node:93214) [FSTDEP023] FastifyDeprecation: disableRequestLogging option is deprecated. Use the logController option with disableRequestLogging or isLogDisabled override instead. The disableRequestLogging top-level option will be removed in `fastify@6`.
+{"level":30,"time":1788885799903,"pid":93214,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"test-profile","msg":"Profile created"}
+(node:93214) [FSTDEP023] FastifyDeprecation: disableRequestLogging option is deprecated. Use the logController option with disableRequestLogging or isLogDisabled override instead. The disableRequestLogging top-level option will be removed in `fastify@6`.
+{"level":30,"time":1788885799943,"pid":93214,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"test-profile","msg":"Profile created"}
+(node:93214) [FSTDEP023] FastifyDeprecation: disableRequestLogging option is deprecated. Use the logController option with disableRequestLogging or isLogDisabled override instead. The disableRequestLogging top-level option will be removed in `fastify@6`.
+{"level":30,"time":1788885799982,"pid":93214,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"test-profile","msg":"Profile created"}
+(node:93214) [FSTDEP023] FastifyDeprecation: disableRequestLogging option is deprecated. Use the logController option with disableRequestLogging or isLogDisabled override instead. The disableRequestLogging top-level option will be removed in `fastify@6`.
+(node:93214) [FSTDEP023] FastifyDeprecation: disableRequestLogging option is deprecated. Use the logController option with disableRequestLogging or isLogDisabled override instead. The disableRequestLogging top-level option will be removed in `fastify@6`.
+(node:93214) [FSTDEP023] FastifyDeprecation: disableRequestLogging option is deprecated. Use the logController option with disableRequestLogging or isLogDisabled override instead. The disableRequestLogging top-level option will be removed in `fastify@6`.
+
+ Test Files  3 passed (3)
+      Tests  204 passed (204)
+   Start at  18:43:15
+   Duration  5.19s (transform 928ms, setup 0ms, import 1.70s, tests 9.19s, environment 0ms)
+

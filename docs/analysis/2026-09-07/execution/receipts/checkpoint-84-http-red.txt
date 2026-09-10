@@ -1,0 +1,33 @@
+
+ RUN  v4.1.11 /private/tmp/autopod-durable-execution/packages/daemon
+
+ ❯ src/pods/pod-manager.test.ts (601 tests | 1 failed | 600 skipped) 138ms
+     × retains actual Codex completion evidence but does not validate or deliver after unverified termination 137ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/pods/pod-manager.test.ts > PodManager > retains actual Codex completion evidence but does not validate or deliver after unverified termination
+AssertionError: {"ok":true,"accepted":true}: expected 202 to be 409 // Object.is equality
+
+- Expected
++ Received
+
+- 409
++ 202
+
+ ❯ src/pods/pod-manager.test.ts:1850:52
+    1848|       for (const action of ['resume', 'validate', 'revalidate']) {
+    1849|         const response = await app.inject({ method: 'POST', url: `/pod…
+    1850|         expect(response.statusCode, response.body).toBe(409);
+       |                                                    ^
+    1851|         expect(response.body).toContain('TASK_EXECUTION_TERMINATION_UN…
+    1852|       }
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 600 skipped (601)
+   Start at  17:04:27
+   Duration  1.59s (transform 936ms, setup 0ms, import 1.35s, tests 138ms, environment 0ms)
+

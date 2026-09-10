@@ -1,0 +1,12 @@
+
+ RUN  v4.1.11 /private/tmp/autopod-durable-execution/packages/daemon
+
+(node:25842) [FSTDEP023] FastifyDeprecation: disableRequestLogging option is deprecated. Use the logController option with disableRequestLogging or isLogDisabled override instead. The disableRequestLogging top-level option will be removed in `fastify@6`.
+(Use `node --trace-warnings ...` to show where the warning was created)
+{"level":30,"time":1788882220633,"pid":25842,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"test-profile","msg":"Profile created"}
+
+ Test Files  1 passed (1)
+      Tests  1 passed | 88 skipped (89)
+   Start at  17:43:39
+   Duration  1.34s (transform 682ms, setup 0ms, import 1.15s, tests 92ms, environment 0ms)
+

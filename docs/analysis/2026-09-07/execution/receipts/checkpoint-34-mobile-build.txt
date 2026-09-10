@@ -1,0 +1,13 @@
+
+> @autopod/mobile-web@0.0.1 build /private/tmp/autopod-durable-execution/packages/mobile-web
+> vite build
+
+vite v6.4.3 building for production...
+transforming...
+✓ 72 modules transformed.
+rendering chunks...
+computing gzip size...
+dist/index.html                   0.93 kB │ gzip:  0.41 kB
+dist/assets/index-DcKgCAYr.css   12.59 kB │ gzip:  2.93 kB
+dist/assets/index-CLsGLb1s.js   293.79 kB │ gzip: 92.52 kB │ map: 1,555.87 kB
+✓ built in 647ms

@@ -1,0 +1,14 @@
+- generic [ref=e75] [box=16,58,343,725]:
+  - heading "Worker execution" [level=2] [ref=e76] [box=33,75,309,28]
+  - status [ref=e149] [box=33,115,309,38]: One retry authorization recorded. Resume is a separate action.
+  - paragraph [ref=e77] [box=33,165,309,38]: 1 executed / 2 admitted worker runs across this task.
+  - paragraph [ref=e78] [box=33,215,309,38]: 150 ms measured · 0 interrupted with unknown duration.
+  - paragraph [ref=e79] [box=33,265,309,95]: Repeated worker authentication failures require a recorded human authorization. Worker elapsed time overlaps phase measurements; usage is not counted again.
+  - paragraph [ref=e80] [box=33,372,309,38]: "Latest outcome: unknown · partial telemetry."
+  - paragraph [ref=e150] [box=33,422,309,57]: "Available for latest failure: Local fixture: credentials and failed initialization inspected; permit one worker retry."
+  - generic [ref=e81] [box=33,491,309,107]:
+    - text: Reason for one extra retry
+    - textbox "Reason for one extra retry" [ref=e82] [box=33,518,309,80]
+  - button "Record one retry authorization" [disabled] [ref=e83] [box=33,610,309,44]
+  - button "Resume worker" [ref=e84] [box=33,666,309,44]
+  - button "Refresh retry accounting" [ref=e85] [box=33,722,309,44]

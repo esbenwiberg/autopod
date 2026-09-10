@@ -1,0 +1,26 @@
+
+ RUN  v4.1.11 /private/tmp/autopod-durable-execution/packages/daemon
+
+ ❯ src/pods/pod-manager.test.ts (578 tests | 1 failed | 577 skipped) 141ms
+     × retains actual Codex completion evidence but does not validate or deliver after unverified termination 138ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/pods/pod-manager.test.ts > PodManager > retains actual Codex completion evidence but does not validate or deliver after unverified termination
+TypeError: ctx.podRepo.updateStatus is not a function
+ ❯ src/pods/pod-manager.test.ts:1556:17
+    1554|       'operator',
+    1555|     );
+    1556|     ctx.podRepo.updateStatus(created.id, 'provisioning');
+       |                 ^
+    1557|     ctx.podRepo.updateStatus(created.id, 'running');
+    1558|     ctx.podRepo.update(created.id, { containerId: 'owned-container' });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed | 3 passed (4)
+      Tests  1 failed | 10 passed | 784 skipped (795)
+   Start at  13:49:34
+   Duration  2.41s (transform 3.11s, setup 0ms, import 5.05s, tests 296ms, environment 0ms)
+

@@ -1,0 +1,66 @@
+
+ RUN  v4.1.11 /private/tmp/autopod-durable-execution/packages/cli
+
+{
+  "id": "abcd1234",
+  "profileName": "test",
+  "task": "do things",
+  "status": "review_required",
+  "model": "opus",
+  "runtime": "claude",
+  "branch": "ap/abcd1234",
+  "containerId": "ctr1",
+  "worktreePath": null,
+  "validationAttempts": 1,
+  "maxValidationAttempts": 3,
+  "lastValidationResult": {
+    "overall": "fail",
+    "attempt": 2,
+    "reviewSkipKind": "review-failed",
+    "reviewSkipReason": "Review failed: Foundry tool review unavailable on the selected provider binding; reconcile it before retry.",
+    "taskReview": {
+      "status": "fail",
+      "reasoning": "Review failed: Foundry tool review unavailable on the selected provider binding; reconcile it before retry.",
+      "issues": [
+        "Retained original finding"
+      ]
+    }
+  },
+  "pendingEscalation": null,
+  "escalationCount": 0,
+  "skipValidation": false,
+  "createdAt": "2024-01-01T00:00:00Z",
+  "startedAt": "2024-01-01T00:00:01Z",
+  "completedAt": null,
+  "updatedAt": "2024-01-01T00:00:01Z",
+  "userId": "user1",
+  "filesChanged": 5,
+  "linesAdded": 100,
+  "linesRemoved": 20,
+  "previewUrl": null,
+  "readinessReview": null,
+  "taskExecution": null
+}
+ ❯ src/commands/pod.test.ts (30 tests | 1 failed) 88ms
+   × shows the unavailable-review reason through real status HTTP and preserves findings in JSON 6ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/commands/pod.test.ts > shows the unavailable-review reason through real status HTTP and preserves findings in JSON
+SyntaxError: Unexpected end of JSON input
+ ❯ src/commands/pod.test.ts:972:23
+    970|     output.mockClear();
+    971|     await command().parseAsync(['node', 'ap', 'status', 'abcd1234', '-…
+    972|     const json = JSON.parse(output.mock.calls.flat().join('\n'));
+       |                       ^
+    973|     expect(json.lastValidationResult.taskReview.issues).toEqual(['Reta…
+    974|     expect(json.lastValidationResult.reviewSkipKind).toBe('review-fail…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 29 passed (30)
+   Start at  11:45:04
+   Duration  472ms (transform 155ms, setup 0ms, import 288ms, tests 88ms, environment 0ms)
+

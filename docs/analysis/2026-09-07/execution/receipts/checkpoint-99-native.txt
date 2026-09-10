@@ -1,0 +1,39 @@
+[1/1] Compiling plugin GenerateManual
+[2/2] Compiling plugin GenerateDoccReference
+Building for debugging...
+[2/9] Write sources
+[5/9] Write swift-version--58304C5D6DBC2206.txt
+[7/11] Emitting module AutopodClient
+[8/11] Compiling AutopodClient TaskRetryState.swift
+[9/12] Compiling AutopodClient DaemonAPI.swift
+[10/18] Compiling AutopodUI TaskRetryCard.swift
+[11/18] Compiling AutopodUI PodActions.swift
+[12/18] Emitting module AutopodUI
+[13/18] Compiling AutopodUI SummaryTab.swift
+[14/21] Emitting module AutopodUITests
+[15/21] Compiling AutopodDesktop ActionHandler.swift
+[16/21] Emitting module AutopodDesktop
+[16/21] Write Objects.LinkFileList
+[18/23] Compiling AutopodClientTests TaskRetryClientTests.swift
+[19/23] Emitting module AutopodClientTests
+[19/23] Write Objects.LinkFileList
+[20/23] Linking AutopodDesktopExe
+[21/23] Applying AutopodDesktopExe
+[22/23] Linking AutopodDesktopPackageTests
+Build complete! (15.19s)
+Test Suite 'Selected tests' started at 2026-09-08 20:49:25.200.
+Test Suite 'AutopodDesktopPackageTests.xctest' started at 2026-09-08 20:49:25.208.
+Test Suite 'AutopodDesktopPackageTests.xctest' passed at 2026-09-08 20:49:25.208.
+	 Executed 0 tests, with 0 failures (0 unexpected) in 0.000 (0.000) seconds
+Test Suite 'Selected tests' passed at 2026-09-08 20:49:25.208.
+	 Executed 0 tests, with 0 failures (0 unexpected) in 0.000 (0.008) seconds
+◇ Test run started.
+↳ Testing Library Version: 1902
+↳ Target Platform: arm64e-apple-macos14.0
+◇ Test retryClientPreservesUnknownExecutionAndSeparateAuthorization(stage:) started.
+◇ Test case passing 1 argument stage → "codex_interruption" to retryClientPreservesUnknownExecutionAndSeparateAuthorization(stage:) started.
+◇ Test case passing 1 argument stage → "sandbox_startup" to retryClientPreservesUnknownExecutionAndSeparateAuthorization(stage:) started.
+◇ Test case passing 1 argument stage → "validation" to retryClientPreservesUnknownExecutionAndSeparateAuthorization(stage:) started.
+◇ Test case passing 1 argument stage → "worker" to retryClientPreservesUnknownExecutionAndSeparateAuthorization(stage:) started.
+✔ Test retryClientPreservesUnknownExecutionAndSeparateAuthorization(stage:) with 4 test cases passed after 0.016 seconds.
+✔ Test run with 1 test in 0 suites passed after 0.016 seconds.

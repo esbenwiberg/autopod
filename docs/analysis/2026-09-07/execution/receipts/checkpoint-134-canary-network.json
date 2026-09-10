@@ -1,0 +1,26 @@
+{
+  "networkPolicyResolved": "restricted",
+  "profileNetworkFields": {
+    "networkPolicy": {
+      "enabled": true,
+      "mode": "restricted",
+      "allowedHosts": [
+        "github.com",
+        "api.github.com",
+        "raw.githubusercontent.com",
+        "learn.microsoft.com"
+      ],
+      "allowPackageManagers": true
+    }
+  },
+  "validation": null,
+  "finalization": {
+    "generation": 1,
+    "cycle": 1,
+    "phase": "finalizing",
+    "agentSettledAt": "2026-09-10T09:05:41.722Z",
+    "result": "Autopod report_task_summary MCP tool failed due to a transport error.",
+    "pendingDecisionId": null,
+    "sourcePreservedAt": null
+  }
+}

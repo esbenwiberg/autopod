@@ -1,0 +1,27 @@
+
+ RUN  v4.1.11 /private/tmp/autopod-durable-execution/packages/daemon
+
+ ❯ src/pods/pod-manager.test.ts (517 tests | 1 failed | 493 skipped) 1014ms
+       × retains legacy pending delivery for explicit validation recovery (open) 89ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/pods/pod-manager.test.ts > PodManager > merge poll lifecycle > retains legacy pending delivery for explicit validation recovery (open)
+AutopodError: Approval reason is required for risky Readiness Review on pod other-fish
+ ❯ assertApprovalAllowed src/pods/pod-manager.ts:3090:13
+    3088|     }
+    3089|     if ((readiness.status === 'risky' || readiness.status === 'waived'…
+    3090|       throw new AutopodError(
+       |             ^
+    3091|         `Approval reason is required for ${readiness.status} Readiness…
+    3092|         'READINESS_REASON_REQUIRED',
+ ❯ Object.approveSession src/pods/pod-manager.ts:11699:30
+ ❯ src/pods/pod-manager.test.ts:4621:13
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 23 passed | 493 skipped (517)
+   Start at  01:46:58
+   Duration  2.57s (transform 1.05s, setup 0ms, import 1.45s, tests 1.01s, environment 0ms)

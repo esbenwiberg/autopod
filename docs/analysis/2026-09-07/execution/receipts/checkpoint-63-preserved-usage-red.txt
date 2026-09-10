@@ -1,0 +1,36 @@
+
+ RUN  v4.1.11 /private/tmp/autopod-durable-execution/packages/daemon
+
+ ❯ src/validation/local-validation-engine.test.ts (158 tests | 1 failed | 156 skipped) 57ms
+     × does not retry or accept an earlier verdict after tier 3 termination is unconfirmed 27ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/validation/local-validation-engine.test.ts > validate() — facts + review gate > does not retry or accept an earlier verdict after tier 3 termination is unconfirmed
+AssertionError: expected undefined to match object { inputTokens: 300, outputTokens: 30 }
+
+- Expected:
+{
+  "inputTokens": 300,
+  "outputTokens": 30,
+}
+
++ Received:
+undefined
+
+ ❯ src/validation/local-validation-engine.test.ts:3237:57
+    3235|         expect(runClaudeCli).toHaveBeenCalledTimes(1);
+    3236|         expect(runAgenticReview).toHaveBeenCalledTimes(tier === 3 ? 1 …
+    3237|         if (tier === 3) expect(result.reviewTokenUsage).toMatchObject(…
+       |                                                         ^
+    3238|       } finally {
+    3239|         await fs.rm(worktreePath, { recursive: true, force: true });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 1 passed | 156 skipped (158)
+   Start at  11:29:43
+   Duration  574ms (transform 300ms, setup 0ms, import 423ms, tests 57ms, environment 0ms)
+

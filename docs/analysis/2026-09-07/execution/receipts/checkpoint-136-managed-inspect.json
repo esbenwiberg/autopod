@@ -1,0 +1,10 @@
+{
+  "value": [
+    {
+      "code": "ProvisioningState/succeeded",
+      "displayStatus": "Provisioning succeeded",
+      "level": "Info",
+      "message": "Enable succeeded: \n[stdout]\n{\"at\": \"2026-09-10T09:47:49.487421+00:00\", \"columns\": [\"pod_id\", \"dispatcher_installation_id\", \"dispatcher_attempt_id\", \"managed_start_key\", \"execution_spec_digest\", \"profile_snapshot_digest\", \"managed_mode\", \"grant_id\", \"grant_revision\", \"effective_grant_digest\", \"request_json\", \"handle_json\", \"state\", \"runtime_ref\", \"revoked\", \"stop_requested\", \"observed_exit\", \"cleanup\", \"consumed_tokens\", \"created_at\", \"active_grant_json\"], \"nonterminal\": [{\"pod_id\": \"managed-49cb8e4f-15ca-41d3-b240-95a117ea9562\", \"state\": \"queued\", \"created_at\": 1789032574}, {\"pod_id\": \"managed-7274cefa-4d4e-4694-83ac-8efe9c8cd445\", \"state\": \"queued\", \"created_at\": 1789032954}]}\n\n[stderr]\n"
+    }
+  ]
+}

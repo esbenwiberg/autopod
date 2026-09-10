@@ -1,0 +1,76 @@
+
+ RUN  v4.1.11 /private/tmp/autopod-durable-execution/packages/daemon
+
+ ❯ src/pods/attached-reply-delivery.test.ts (9 tests | 6 failed) 4391ms
+   × retains the actual attached 'ask_human' reply with 'received' delivery 166ms
+   × retains the actual attached 'ask_human' reply with 'storage-failure' delivery 158ms
+   × retains the actual attached 'report_blocker' reply with 'received' delivery 160ms
+   × retains the actual attached 'report_blocker' reply with 'storage-failure' delivery 156ms
+   × retains the actual attached 'request_credential' reply with 'received' delivery 159ms
+   × retains the actual attached 'request_credential' reply with 'storage-failure' delivery 160ms
+ ❯ src/pods/pod-manager.test.ts (638 tests | 2 failed) 61310ms
+       × records legacy API provenance before real SDK HTTP dispatch and fences stale replay 5043ms
+       × starts a daemon host-port preview proxy for sandbox pods 68ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 8 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/pods/attached-reply-delivery.test.ts > retains the actual attached 'ask_human' reply with 'received' delivery
+ FAIL  src/pods/attached-reply-delivery.test.ts > retains the actual attached 'ask_human' reply with 'storage-failure' delivery
+ FAIL  src/pods/attached-reply-delivery.test.ts > retains the actual attached 'report_blocker' reply with 'received' delivery
+ FAIL  src/pods/attached-reply-delivery.test.ts > retains the actual attached 'report_blocker' reply with 'storage-failure' delivery
+ FAIL  src/pods/attached-reply-delivery.test.ts > retains the actual attached 'request_credential' reply with 'received' delivery
+ FAIL  src/pods/attached-reply-delivery.test.ts > retains the actual attached 'request_credential' reply with 'storage-failure' delivery
+Error: Missing appended guidance receipt
+ ❯ src/pods/attached-reply-delivery.test.ts:155:43
+    153|         throw new Error('Missing successful tool content');
+    154|       const text = delivered.content[1]?.text;
+    155|       if (typeof text !== 'string') throw new Error('Missing appended …
+       |                                           ^
+    156|       const receipt = JSON.parse(text);
+    157|       expect(receipt.completedTool).toBe(tool);
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/8]⎯
+
+ FAIL  src/pods/pod-manager.test.ts > PodManager > triggerValidation > records legacy API provenance before real SDK HTTP dispatch and fences stale replay
+Error: Test timed out in 5000ms.
+If this is a long-running test, pass a timeout value as the last argument or configure it globally with "testTimeout".
+ ❯ src/pods/pod-manager.test.ts:15919:5
+    15917|     });
+    15918|
+    15919|     it('records legacy API provenance before real SDK HTTP dispatch an…
+       |     ^
+    15920|       const ctx = createTestContext();
+    15921|       ctx.db
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/8]⎯
+
+ FAIL  src/pods/pod-manager.test.ts > PodManager > triggerValidation — loud-fail on push > starts a daemon host-port preview proxy for sandbox pods
+Error: listen EPERM: operation not permitted 0.0.0.0:35894
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/8]⎯
+
+⎯⎯⎯⎯⎯⎯ Unhandled Errors ⎯⎯⎯⎯⎯⎯
+
+Vitest caught 1 unhandled error during the test run.
+This might cause false positive tests. Resolve unhandled errors to make sure your tests are not affected.
+
+⎯⎯⎯⎯⎯ Uncaught Exception ⎯⎯⎯⎯⎯
+Error: listen EPERM: operation not permitted 127.0.0.1
+ ❯ Server.setupListenHandle [as _listen2] node:net:1987:21
+ ❯ listenInCluster node:net:2066:12
+ ❯ node:net:2275:7
+ ❯ processTicksAndRejections node:internal/process/task_queues:90:21
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯
+Serialized Error: { code: 'EPERM', errno: -1, syscall: 'listen', address: '127.0.0.1' }
+This error originated in "src/pods/pod-manager.test.ts" test file. It doesn't mean the error was thrown inside the file itself, but while it was running.
+The latest test that might've caused the error is "records legacy API provenance before real SDK HTTP dispatch and fences stale replay". It might mean one of the following:
+- The error was thrown, while Vitest was running this test.
+- If the error occurred after the test had been completed, this was the last documented test before it was thrown.
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯
+
+
+ Test Files  2 failed (2)
+      Tests  8 failed | 639 passed (647)
+     Errors  1 error
+   Start at  21:31:37
+   Duration  63.40s (transform 2.08s, setup 0ms, import 3.42s, tests 65.70s, environment 0ms)

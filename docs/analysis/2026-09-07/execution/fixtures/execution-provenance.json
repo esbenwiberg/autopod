@@ -1,0 +1,58 @@
+{
+  "id": "local-provenance",
+  "version": 1,
+  "podId": "local-fixture",
+  "taskId": "task-local",
+  "executionId": "execution-local",
+  "generation": 1,
+  "checkedAt": "2026-09-07T16:30:00Z",
+  "status": "blocked",
+  "runtime": "codex",
+  "model": "fixture-model",
+  "providerId": "fixture-provider",
+  "providerAccountId": null,
+  "release": {
+    "commitSha": null,
+    "dirty": null,
+    "builtAt": null,
+    "source": "unavailable"
+  },
+  "cliPath": "/usr/local/bin/codex",
+  "cliVersion": "0.144.4",
+  "imageDigest": null,
+  "contractHash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "validationImplementationHash": null,
+  "capabilities": {
+    "streamingExec": "unverified",
+    "memoryLimitBytes": null,
+    "cpuLimit": null,
+    "networkMode": null
+  },
+  "commands": {
+    "requirements": [
+      {
+        "source": "fact:compile",
+        "executable": "dotnet",
+        "available": false
+      }
+    ],
+    "unresolvedSources": [],
+    "deferredArtifacts": [],
+    "explicitDependencies": false
+  },
+  "diagnostics": [
+    {
+      "code": "PREFLIGHT_COMMAND_UNAVAILABLE",
+      "detail": "Required launcher dotnet is missing. Reconcile the image or declared command before validation."
+    },
+    {
+      "code": "IMAGE_IDENTITY_UNAVAILABLE",
+      "detail": "Actual image digest is unverified."
+    },
+    {
+      "code": "MEMORY_CAPACITY_UNVERIFIED",
+      "detail": "Effective memory capacity is unverified."
+    }
+  ],
+  "purpose": "validation"
+}

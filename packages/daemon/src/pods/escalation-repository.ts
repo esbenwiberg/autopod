@@ -1,6 +1,10 @@
 import type { EscalationRequest, EscalationResponse, EscalationType } from '@autopod/shared';
 import { EscalationNotFoundError } from '@autopod/shared';
 import type Database from 'better-sqlite3';
+import {
+  type HistoryDiagnosticSink,
+  readRetainedHistory,
+} from '../history/retained-history-read.js';
 
 export interface EscalationRow {
   id: string;
@@ -16,7 +20,11 @@ export interface EscalationRepository {
   insert(escalation: EscalationRequest): void;
   getOrThrow(id: string): EscalationRow;
   update(id: string, response: EscalationResponse): void;
-  listBySession(podId: string): EscalationRow[];
+  listBySession(
+    podId: string,
+    includeRetained?: boolean,
+    diagnostic?: HistoryDiagnosticSink,
+  ): EscalationRow[];
   countBySessionAndType(podId: string, type: EscalationType): number;
   countBySessionAndTypes(podId: string, types: EscalationType[]): number;
 }
@@ -72,9 +80,17 @@ export function createEscalationRepository(db: Database.Database): EscalationRep
       }
     },
 
-    listBySession(podId: string): EscalationRow[] {
+    listBySession(
+      podId: string,
+      includeRetained = false,
+      diagnostic?: HistoryDiagnosticSink,
+    ): EscalationRow[] {
+      if (includeRetained && diagnostic)
+        return readRetainedHistory(db, 'escalations', podId, rowToEscalation, diagnostic);
       const rows = db
-        .prepare('SELECT * FROM escalations WHERE pod_id = ? ORDER BY created_at ASC')
+        .prepare(
+          `SELECT * FROM ${includeRetained ? 'retained_escalations' : 'escalations'} WHERE pod_id = ? ORDER BY created_at ASC`,
+        )
         .all(podId) as Record<string, unknown>[];
       return rows.map(rowToEscalation);
     },

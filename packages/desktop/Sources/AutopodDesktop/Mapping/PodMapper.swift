@@ -78,11 +78,25 @@ public enum PodMapper {
       advisoryBrowserQaEnabled: response.options.advisoryBrowserQaEnabled,
       promotable: response.options.promotable
     )
+    let recoveryNote: String? = response.lastRecoveryTrigger != nil ? response.lastCorrectionMessage : nil
+    let evidenceDiagnostic: String? = response.recordDiagnostics.flatMap { records in
+      records.isEmpty ? nil : "Saved evidence unavailable in this view: " + records.map { "\($0.field) (\($0.code))" }.joined(separator: ", ")
+    }
+    let latestActivity: String? = recoveryNote
+      ?? response.finalization?.operatorSummary
+      ?? evidenceDiagnostic
+      ?? response.progressSummary
+      ?? response.lastCorrectionMessage
+      ?? response.mergeBlockReason
+      ?? response.failureReason
     return Pod(
       id: response.id,
       status: PodStatus(rawValue: response.status) ?? .queued,
       pod: config,
       hasWorktree: response.worktreePath != nil,
+      artifactCollectionPending: response.status == "failed" && response.options.output == "artifact"
+        && response.finalization?.phase == "preserving" && response.finalization?.agentSettledAt != nil
+        && response.finalization?.pendingDecisionId == nil,
       branch: response.branch,
       profileName: response.profileName,
       task: searchableTask.isEmpty ? response.title : searchableTask,
@@ -98,10 +112,7 @@ public enum PodMapper {
       escalationQuestion: response.pendingEscalationSummary,
       containerUrl: response.previewUrl.flatMap(URL.init(string:)),
       hasWebUi: response.hasWebUi,
-      latestActivity: response.progressSummary
-        ?? response.lastCorrectionMessage
-        ?? response.mergeBlockReason
-        ?? response.failureReason,
+      latestActivity: latestActivity,
       errorSummary: response.failureReason,
       inputTokens: response.inputTokens ?? 0,
       outputTokens: response.outputTokens ?? 0,
@@ -306,6 +317,7 @@ public enum PodMapper {
       )
       return ValidationChecks(
         smoke: v.smoke.status == "pass",
+        reusedEvidence: ["lint": v.lint?.reusedEvidence, "test": v.test?.reusedEvidence].compactMapValues { $0 },
         setup: mapTriState(v.setup?.status),
         build: mapTriState(v.smoke.build.status),
         tests: mapTriState(v.test?.status),
@@ -445,7 +457,13 @@ public enum PodMapper {
     let prUrl: URL? = response.prUrl.flatMap { URL(string: $0) }
     let containerUrl: URL? = response.previewUrl.flatMap { URL(string: $0) }
     let hasWebUi: Bool = response.hasWebUi ?? false
-    let latestActivity: String? = response.failureReason
+    let evidenceDiagnostic: String? = response.recordDiagnostics.flatMap { records in
+      records.isEmpty ? nil : "Saved evidence unavailable in this view: " + records.map { "\($0.field) (\($0.code))" }.joined(separator: ", ")
+    }
+    let latestActivity: String? = (response.lastRecoveryTrigger != nil ? response.lastCorrectionMessage : nil)
+      ?? evidenceDiagnostic
+      ?? response.finalization?.operatorSummary
+      ?? response.failureReason
       ?? response.mergeBlockReason
       ?? response.plan?.summary
     let profileSnapshotMapped: Profile? = response.profileSnapshot.map { ProfileMapper.map($0) }
@@ -459,6 +477,9 @@ public enum PodMapper {
       status: status,
       pod: pod,
       hasWorktree: response.worktreePath != nil,
+      artifactCollectionPending: response.status == "failed" && pod.output == .artifact
+        && response.finalization?.phase == "preserving" && response.finalization?.agentSettledAt != nil
+        && response.finalization?.pendingDecisionId == nil,
       branch: response.branch,
       profileName: response.profileName,
       task: response.task,

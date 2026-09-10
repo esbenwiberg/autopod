@@ -21,6 +21,7 @@ import {
  * (e.g. -0.42 means $0.42 cheaper this window vs prior). Desktop formats as %+$.2f/PR.
  */
 import type Database from 'better-sqlite3';
+import { validationCoverage } from './validation-coverage.js';
 
 // ── Constants ──────────────────────────────────────────────────────────────────
 
@@ -72,6 +73,8 @@ interface PodRow {
   inputTokens: number;
   outputTokens: number;
   costUsd: number;
+  prUrl: string | null;
+  deliveryOwnerId?: string;
 }
 
 interface AttributionRow extends PodRow {
@@ -97,19 +100,6 @@ interface ValidationRow {
   result: string;
 }
 
-interface StoredValidationResult {
-  smoke?: {
-    build?: { status?: string };
-    health?: { status?: string };
-    pages?: Array<{ status?: string }>;
-  };
-  test?: { status?: string } | null;
-  lint?: { status?: string } | null;
-  sast?: { status?: string } | null;
-  factValidation?: { status?: string } | null;
-  taskReview?: { status?: string } | null;
-}
-
 type StageAccum = Record<ValidationStage, { ran: Set<string>; failed: Set<string> }>;
 
 function emptyStageAccum(): StageAccum {
@@ -120,6 +110,10 @@ function emptyStageAccum(): StageAccum {
 
 interface ModelAccum {
   podCount: number;
+  podIds: Set<string>;
+  deliveredPrUrls: Set<string>;
+  providerAttemptCount: number;
+  completedAttemptCount: number;
   completeCount: number;
   killedCount: number;
   failedCount: number;
@@ -134,6 +128,10 @@ interface ModelAccum {
 
 interface RuntimeAccum {
   podCount: number;
+  podIds: Set<string>;
+  deliveredPrUrls: Set<string>;
+  providerAttemptCount: number;
+  completedAttemptCount: number;
   completeCount: number;
   killedCount: number;
   failedCount: number;
@@ -147,6 +145,10 @@ interface RuntimeAccum {
 function emptyRuntimeAccum(): RuntimeAccum {
   return {
     podCount: 0,
+    podIds: new Set(),
+    deliveredPrUrls: new Set(),
+    providerAttemptCount: 0,
+    completedAttemptCount: 0,
     completeCount: 0,
     killedCount: 0,
     failedCount: 0,
@@ -178,12 +180,15 @@ function emptyResponse(days: number): ModelsAnalyticsResponse {
     byRuntime: RUNTIMES.map((runtime) => ({
       runtime,
       podCount: 0,
+      providerAttemptCount: 0,
+      completedAttemptCount: 0,
       completeCount: 0,
       killedCount: 0,
       failedCount: 0,
       successRate: 0,
       totalCostUsd: 0,
       dollarPerPr: null,
+      deliveredPrCount: 0,
       scoredCount: 0,
       avgQuality: null,
       meanTtmSeconds: null,
@@ -212,7 +217,8 @@ function cheapestDollarPerPrForWindow(
            AND completed_at >= datetime('now', '-' || @startDays || ' days')
            AND completed_at <  datetime('now', '-' || @endDays   || ' days')
        )
-       SELECT a.model, a.outcome AS status,
+       SELECT a.model, p.status,
+              CASE WHEN a.ordinal = (SELECT MAX(last.ordinal) FROM provider_attempts last WHERE last.pod_id = p.id) AND p.id = (SELECT owner.id FROM pods owner WHERE owner.pr_url = p.pr_url AND owner.status = 'complete' ORDER BY owner.completed_at, owner.id LIMIT 1) THEN p.pr_url END AS prUrl,
               COALESCE(tc.input_tokens, a.input_tokens) AS inputTokens,
               COALESCE(tc.output_tokens, a.output_tokens) AS outputTokens,
               COALESCE(tc.cost_usd, a.cost_usd) AS costUsd
@@ -221,7 +227,7 @@ function cheapestDollarPerPrForWindow(
          ON tc.pod_id = a.pod_id AND tc.ordinal = a.ordinal
        JOIN cohort p ON p.id = a.pod_id
        UNION ALL
-       SELECT p.model, p.status,
+       SELECT p.model, p.status, CASE WHEN p.id = (SELECT owner.id FROM pods owner WHERE owner.pr_url = p.pr_url AND owner.status = 'complete' ORDER BY owner.completed_at, owner.id LIMIT 1) THEN p.pr_url END AS prUrl,
               p.input_tokens AS inputTokens,
               p.output_tokens AS outputTokens,
               p.cost_usd AS costUsd
@@ -230,31 +236,32 @@ function cheapestDollarPerPrForWindow(
     )
     .all({ startDays: startDaysAgo, endDays: endDaysAgo }) as Array<{
     model: string | null;
+    prUrl: string | null;
     status: string;
     inputTokens: number;
     outputTokens: number;
     costUsd: number;
   }>;
 
-  const acc = new Map<string, { totalCost: number; completeCount: number }>();
+  const acc = new Map<string, { totalCost: number; deliveries: Set<string> }>();
   for (const row of rows) {
     const canonical = canonicalModelKey(row.model);
     if (!canonical) continue;
-    const entry = acc.get(canonical) ?? { totalCost: 0, completeCount: 0 };
+    const entry = acc.get(canonical) ?? { totalCost: 0, deliveries: new Set<string>() };
     entry.totalCost += effectiveCostUsd({
       model: canonical,
       inputTokens: row.inputTokens,
       outputTokens: row.outputTokens,
       costUsd: row.costUsd,
     });
-    if (row.status === 'complete' || row.status === 'completed') entry.completeCount++;
+    if (row.status === 'complete' && row.prUrl) entry.deliveries.add(row.prUrl);
     acc.set(canonical, entry);
   }
 
   let cheapest: number | null = null;
   for (const [, data] of acc) {
-    if (data.completeCount < MIN_COST_COHORT_FOR_HEADLINE) continue;
-    const dpr = data.totalCost / data.completeCount;
+    if (data.deliveries.size < MIN_COST_COHORT_FOR_HEADLINE) continue;
+    const dpr = data.totalCost / data.deliveries.size;
     if (cheapest === null || dpr < cheapest) cheapest = dpr;
   }
   return cheapest;
@@ -274,13 +281,30 @@ export function computeModelsAnalytics(
               completed_at AS completedAt,
               input_tokens  AS inputTokens,
               output_tokens AS outputTokens,
-              cost_usd      AS costUsd
+              cost_usd      AS costUsd, pr_url AS prUrl,
+              (SELECT owner.id FROM pods owner WHERE owner.pr_url = pods.pr_url AND owner.status = 'complete'
+               ORDER BY owner.completed_at, owner.id LIMIT 1) AS deliveryOwnerId
        FROM pods
        WHERE ${terminalCohortWhere()}`,
     )
     .all({ days }) as PodRow[];
 
   if (podRows.length === 0) return emptyResponse(days);
+
+  // The earliest completed owner carries the recorded delivery; later repair pods
+  // still contribute cost, but cannot create a second receipt for the same PR.
+  const deliveryOwner = new Map<string, string>();
+  for (const pod of [...podRows].sort(
+    (a, b) => a.completedAt.localeCompare(b.completedAt) || a.id.localeCompare(b.id),
+  )) {
+    if (
+      pod.status === 'complete' &&
+      pod.prUrl &&
+      pod.deliveryOwnerId === pod.id &&
+      !deliveryOwner.has(pod.prUrl)
+    )
+      deliveryOwner.set(pod.prUrl, pod.id);
+  }
 
   // Provider/model attribution is attempt-level when immutable ledger rows
   // exist. Pods without attempts retain their historical compatibility fields.
@@ -291,7 +315,7 @@ export function computeModelsAnalytics(
          FROM pods
          WHERE ${terminalCohortWhere()}
        )
-       SELECT p.id, a.model, a.runtime, p.status,
+       SELECT p.id, a.model, a.runtime, p.status, p.pr_url AS prUrl,
               p.created_at AS createdAt,
               p.completed_at AS completedAt,
               COALESCE(tc.input_tokens, a.input_tokens) AS inputTokens,
@@ -304,7 +328,7 @@ export function computeModelsAnalytics(
          ON tc.pod_id = a.pod_id AND tc.ordinal = a.ordinal
        JOIN cohort p ON p.id = a.pod_id
        UNION ALL
-       SELECT p.id, p.model, p.runtime, p.status,
+       SELECT p.id, p.model, p.runtime, p.status, p.pr_url AS prUrl,
               p.created_at AS createdAt,
               p.completed_at AS completedAt,
               p.input_tokens AS inputTokens,
@@ -337,6 +361,10 @@ export function computeModelsAnalytics(
     if (!m) {
       m = {
         podCount: 0,
+        podIds: new Set(),
+        deliveredPrUrls: new Set(),
+        providerAttemptCount: 0,
+        completedAttemptCount: 0,
         completeCount: 0,
         killedCount: 0,
         failedCount: 0,
@@ -364,7 +392,13 @@ export function computeModelsAnalytics(
     }
 
     const mAccum = getOrCreateModel(canonical);
-    mAccum.podCount++;
+    const firstModelPod = !mAccum.podIds.has(pod.id);
+    if (firstModelPod) {
+      mAccum.podIds.add(pod.id);
+      mAccum.podCount++;
+    }
+    if (pod.attemptOrdinal !== null) mAccum.providerAttemptCount++;
+    if (pod.attemptOutcome === 'completed') mAccum.completedAttemptCount++;
 
     const rtAccum = byRuntimeAccum.get(pod.runtime);
 
@@ -389,42 +423,40 @@ export function computeModelsAnalytics(
 
     mAccum.totalCostUsd += modelCost;
 
-    const attributedStatus =
-      pod.attemptOutcome === 'completed'
-        ? 'complete'
-        : pod.attemptOutcome === 'aborted' && pod.status === 'killed'
-          ? 'killed'
-          : pod.attemptOutcome === null
-            ? pod.status
-            : 'failed';
-
-    if (attributedStatus === 'complete') {
-      mAccum.completeCount++;
-      mAccum.completeCostUsd += modelCost;
-      const ttmSeconds =
-        (new Date(pod.completedAt).getTime() - new Date(pod.createdAt).getTime()) / 1000;
-      mAccum.sumTtmSeconds += ttmSeconds;
-
-      if (rtAccum) {
-        rtAccum.completeCount++;
-        rtAccum.totalCostUsd += rtCost;
-        rtAccum.sumTtmSeconds += ttmSeconds;
+    const isLatest =
+      pod.attemptOrdinal === null || pod.attemptOrdinal === latestOrdinal.get(pod.id);
+    // Cost belongs to attempts. Terminal outcomes belong to distinct participating pods.
+    // A recorded PR is attributed only to the final binding and deduplicated across linked pods.
+    if (pod.status === 'complete') mAccum.completeCostUsd += modelCost;
+    for (const [accum, first] of [
+      [mAccum, firstModelPod],
+      [rtAccum, rtAccum ? !rtAccum.podIds.has(pod.id) : false],
+    ] as const) {
+      if (!accum) continue;
+      if (accum === rtAccum) {
+        accum.totalCostUsd += rtCost;
+        if (pod.attemptOrdinal !== null) accum.providerAttemptCount++;
+        if (pod.attemptOutcome === 'completed') accum.completedAttemptCount++;
+        if (first) {
+          accum.podIds.add(pod.id);
+          accum.podCount++;
+        }
       }
-    } else if (attributedStatus === 'killed') {
-      mAccum.killedCount++;
-      if (rtAccum) {
-        rtAccum.killedCount++;
-        rtAccum.totalCostUsd += rtCost;
-      }
-    } else {
-      mAccum.failedCount++;
-      if (rtAccum) {
-        rtAccum.failedCount++;
-        rtAccum.totalCostUsd += rtCost;
-      }
+      if (
+        isLatest &&
+        pod.status === 'complete' &&
+        pod.prUrl &&
+        deliveryOwner.get(pod.prUrl) === pod.id
+      )
+        accum.deliveredPrUrls.add(pod.prUrl);
+      if (!first) continue;
+      if (pod.status === 'complete') {
+        accum.completeCount++;
+        accum.sumTtmSeconds +=
+          (new Date(pod.completedAt).getTime() - new Date(pod.createdAt).getTime()) / 1000;
+      } else if (pod.status === 'killed') accum.killedCount++;
+      else accum.failedCount++;
     }
-
-    if (rtAccum) rtAccum.podCount++;
   }
 
   // ── Quality query ─────────────────────────────────────────────────────────
@@ -515,41 +547,18 @@ export function computeModelsAnalytics(
     const mAccum = byModelAccum.get(canonical);
     if (!mAccum) continue;
 
-    let parsed: StoredValidationResult;
+    let parsed: unknown;
     try {
-      parsed = JSON.parse(row.result) as StoredValidationResult;
+      parsed = JSON.parse(row.result) as unknown;
     } catch {
       continue;
     }
 
     const sa = mAccum.stageAccum;
 
-    if (parsed.smoke?.build !== undefined) {
-      sa.build.ran.add(row.podId);
-      if (parsed.smoke.build.status === 'fail') sa.build.failed.add(row.podId);
-    }
-    if (parsed.smoke?.health !== undefined) {
-      sa.health.ran.add(row.podId);
-      if (parsed.smoke.health.status === 'fail') sa.health.failed.add(row.podId);
-    }
-    if (parsed.smoke?.pages !== undefined) {
-      sa.smoke.ran.add(row.podId);
-      if (parsed.smoke.pages.some((pg) => pg.status === 'fail')) sa.smoke.failed.add(row.podId);
-    }
-    for (const stage of ['test', 'lint', 'sast'] as const) {
-      const sr = parsed[stage];
-      if (sr !== undefined && sr !== null) {
-        sa[stage].ran.add(row.podId);
-        if (sr.status === 'fail') sa[stage].failed.add(row.podId);
-      }
-    }
-    if (parsed.factValidation !== undefined && parsed.factValidation !== null) {
-      sa.facts.ran.add(row.podId);
-      if (parsed.factValidation.status === 'fail') sa.facts.failed.add(row.podId);
-    }
-    if (parsed.taskReview !== undefined && parsed.taskReview !== null) {
-      sa.taskReview.ran.add(row.podId);
-      if (parsed.taskReview.status === 'fail') sa.taskReview.failed.add(row.podId);
+    for (const { stage, executed, failed } of validationCoverage(parsed)) {
+      if (executed) sa[stage].ran.add(row.podId);
+      if (failed) sa[stage].failed.add(row.podId);
     }
   }
 
@@ -568,9 +577,11 @@ export function computeModelsAnalytics(
   // Sparkline: daily pod count for most-used model only
   const dayBuckets = new Map<string, number>();
   if (mostUsedModel) {
+    const seen = new Set<string>();
     for (const pod of attributionRows) {
       const canonical = canonicalModelKey(pod.model) ?? '<unknown>';
-      if (canonical !== mostUsedModel) continue;
+      if (canonical !== mostUsedModel || seen.has(pod.id)) continue;
+      seen.add(pod.id);
       const day = pod.completedAt.slice(0, 10);
       dayBuckets.set(day, (dayBuckets.get(day) ?? 0) + 1);
     }
@@ -584,8 +595,8 @@ export function computeModelsAnalytics(
   let currentCheapest: { model: string; dpr: number } | null = null;
   for (const [model, accum] of byModelAccum) {
     if (model === '<unknown>') continue;
-    if (accum.completeCount < MIN_COST_COHORT_FOR_HEADLINE) continue;
-    const dpr = accum.totalCostUsd / accum.completeCount;
+    if (accum.deliveredPrUrls.size < MIN_COST_COHORT_FOR_HEADLINE) continue;
+    const dpr = accum.totalCostUsd / accum.deliveredPrUrls.size;
     if (currentCheapest === null || dpr < currentCheapest.dpr) currentCheapest = { model, dpr };
   }
 
@@ -614,13 +625,18 @@ export function computeModelsAnalytics(
       return {
         model,
         podCount: accum.podCount,
+        providerAttemptCount: accum.providerAttemptCount,
+        completedAttemptCount: accum.completedAttemptCount,
+        deliveredPrCount: accum.deliveredPrUrls.size,
         completeCount: accum.completeCount,
         killedCount: accum.killedCount,
         failedCount: accum.failedCount,
         successRate: accum.completeCount / accum.podCount,
         totalCostUsd: isUnknown ? null : accum.totalCostUsd,
         dollarPerPr:
-          isUnknown || accum.completeCount === 0 ? null : accum.totalCostUsd / accum.completeCount,
+          isUnknown || accum.deliveredPrUrls.size === 0
+            ? null
+            : accum.totalCostUsd / accum.deliveredPrUrls.size,
         scoredCount: accum.scoredCount,
         avgQuality: accum.scoredCount > 0 ? accum.scoreSum / accum.scoredCount : null,
         meanTtmSeconds: accum.completeCount > 0 ? accum.sumTtmSeconds / accum.completeCount : null,
@@ -637,15 +653,16 @@ export function computeModelsAnalytics(
     return {
       runtime,
       podCount: accum.podCount,
+      providerAttemptCount: accum.providerAttemptCount,
+      completedAttemptCount: accum.completedAttemptCount,
+      deliveredPrCount: accum.deliveredPrUrls.size,
       completeCount: accum.completeCount,
       killedCount: accum.killedCount,
       failedCount: accum.failedCount,
       successRate: accum.podCount > 0 ? accum.completeCount / accum.podCount : 0,
       totalCostUsd: accum.totalCostUsd,
       dollarPerPr:
-        accum.podCount > 0 && accum.completeCount > 0
-          ? accum.totalCostUsd / accum.completeCount
-          : null,
+        accum.deliveredPrUrls.size > 0 ? accum.totalCostUsd / accum.deliveredPrUrls.size : null,
       scoredCount: accum.scoredCount,
       avgQuality: accum.scoredCount > 0 ? accum.scoreSum / accum.scoredCount : null,
       meanTtmSeconds: accum.completeCount > 0 ? accum.sumTtmSeconds / accum.completeCount : null,

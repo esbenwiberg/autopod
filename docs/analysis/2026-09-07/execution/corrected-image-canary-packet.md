@@ -1,0 +1,32 @@
+# Corrected private-image import and capability canary
+
+**CP128 update:** the corrected request was approved and used once. ACR exchange succeeded; the image PUT hit an erroneous local 60-second timeout. No task resource was observed in repeated inventories through/past the ten-minute window. The [full-window proposal](full-window-image-canary-packet.md) replaces this consumed request; hidden conversion remains uncertain and no retry is authorized.
+
+**Prepared, not authorized or executed.** This replaces the consumed CP126 request. The approved CP126 import was sent once and returned HTTP 401. No sandbox creation was attempted. Three complete follow-up inventories found 16 existing images, zero sandboxes and zero resources with that attempt's nonce. No existing resource was deleted. [Attempt](receipts/checkpoint-127-live-attempt.json), [reconciliation](receipts/checkpoint-127-reconciliation.json).
+
+The CP126 packet incorrectly assumed attached managed identity plus AcrPull was sufficient. The repository already documents that this preview also requires transient `registryCredentials`: [setup requirements](../../../azure-container-apps-sandboxes.md) and [ADR-031](../../../decisions/ADR-031-azure-container-apps-sandboxes-backend.md). The existing candidate's `createDiskImage` obtains these through `resolveAcrRegistryCredentials` even when managed identity is configured. That omission is a confirmed packet defect and is consistent with the 401. The original response body was not retained, so its precise server-side rejection reason is unavailable; do not claim that PIM expired or that another role grant is required.
+
+## Exact additional authorization requested
+
+Authorize **one corrected image import and at most one disposable canary**, including the existing exact-resource cleanup procedure. Keep the same affected digest, group, existing principal, managed identity, resources, commands, public NuGet-only egress, ten-minute image-ready deadline, five-minute sandbox allocation/cleanup target and zero model calls from the [original scope](exact-image-canary-packet.md). The new unique nonce is `autopod-cp127-20260910-1be967ac`. The prior nonce must still have zero matches before execution. This is an additional creation attempt, not an automatic retry under the consumed approval.
+
+The only authentication addition is one call to the **candidate's existing ACR token exchange implementation**:
+
+1. Acquire an Entra access token for `https://containerregistry.azure.net/` using the already bound Azure CLI principal `cef0aeed-b5d3-442e-b5d7-85e0526bd5e7`; verify its principal and audience in memory. No alternate account or identity fallback.
+2. POST once to `https://ewiautopodacr.azurecr.io/oauth2/exchange` with `grant_type=access_token`, `service=ewiautopodacr.azurecr.io` and that token. A 30-second timeout or non-success response stops creation. No token is fetched during preparation.
+3. Add `registryCredentials: { username: "00000000-0000-0000-0000-000000000000", token: <exchange result> }` to the otherwise unchanged import request. Send it only to the already pinned Azure sandbox data endpoint. Keep both tokens in process memory; never write them into the contract, journal, shell argv, terminal output or sandbox environment. The registry token inherits the current identity's registry access; it is not claimed to be cryptographically restricted to this single repository. Use it only for this exact digest import.
+4. Continue with the original candidate upload/config/streaming/NuGet checks and cleanup. The token exchange does not authorize registry writes, a static credential lookup, role changes, image garbage collection or provider calls.
+
+The [JSON contract](fixtures/canary-127-contract.json) uses a non-executable placeholder for the token. The [prepared runner](fixtures/run-canary-127-replacement.mjs) replaces it in memory and invokes the bundled candidate's existing exchange helper directly, avoiding `ensureDiskImage` and its shared-image cleanup. It admits only the exact registry exchange URL, one exchange and the same principal. The runner now retains bounded service error codes and fixed diagnostic booleans; arbitrary server messages remain suppressed. No repeated create is permitted after refusal, timeout or ambiguous response.
+
+## Execution artifacts and local proof
+
+The approved attempt's exact runner, bundle-entry source and operation journal are retained. The replacement runner is syntax checked and locally exercised with mocked network responses for success and runtime failure. These tests invoke the **real bundled candidate token exchange helper**, verify the token is attached to the one import, require one exchange and one create per resource, prove sandbox-first cleanup and assert token absence from receipts. [Local checks](receipts/checkpoint-127-replacement-local-checks.txt). They are runner safety evidence, not live acceptance.
+
+Rebuild the bundle from the unchanged source using the pinned local esbuild executable and retained `canary-127-entry.ts`, with ESM/node output and a `createRequire` banner, to `/private/tmp/autopod-canary-127-candidate.mjs`. Verify candidate source and the [manifest](receipts/checkpoint-127-manifest.json) before execution. Copy the replacement runner to `/private/tmp/autopod-canary-127-replacement-run.mjs` so its relative candidate import resolves; invoke `node /private/tmp/autopod-canary-127-replacement-run.mjs --execute-approved-cp127` only after this additional request is approved. The exclusive replacement journal path prevents rerunning a consumed attempt. Reconciliation and cleanup of an identified owned resource remain authorized even if execution fails.
+
+## Spend and remaining acceptance
+
+The known compute plus one full inter-region transfer estimate remains approximately **$0.053** per corrected attempt, under the same rates and resource/time envelope in CP126. Image conversion, temporary storage, service retries and cleanup overruns remain unpriced. Approval accepts that disclosed uncertainty; no Azure-enforced dollar cap is claimed. The rejected attempt has no observed task resource or sandbox compute; do not invent a billing receipt or assert every possible charge was zero.
+
+Actual-image capability remains unverified. Hosted loaded/rollback source and historical API failure causality remain separate outstanding requirements. The hosted backup upgrade and native interaction proof already passed and will not be repeated to mask this failed import.

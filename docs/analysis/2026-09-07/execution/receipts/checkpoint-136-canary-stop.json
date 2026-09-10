@@ -1,0 +1,7 @@
+{
+  "at": "2026-09-10T10:08:56.327230+00:00",
+  "status": "killed",
+  "containerId": "3cef3850-b1df-47db-b572-5ca793283344",
+  "summaryPreserved": true,
+  "scope": "End only the budget-paused successful MCP smoke and request normal cleanup; retain summary, events and actual token accounting."
+}

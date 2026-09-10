@@ -1,0 +1,21 @@
+{
+  "date": "2026-09-07",
+  "scope": "Local synthetic API fixture served with built mobile app; no provider or live daemon execution",
+  "url": "http://127.0.0.1:60057/mobile/#/pod/local-fixture",
+  "viewport": {
+    "requestedWidth": 390,
+    "height": 844,
+    "innerWidth": 390,
+    "documentWidth": 375,
+    "bodyWidth": 375
+  },
+  "observed": [
+    "Execution environment reports Preflight blocked",
+    "Missing dotnet fact launcher has actionable reconciliation message",
+    "Daemon, image, validation implementation, memory and CPU remain unverified",
+    "64-character contract hash wraps within phone width",
+    "Intentional rerun requires reason and remains a distinct action"
+  ],
+  "nativeInteraction": "unverified: native computer APIs disabled",
+  "cleanup": "Viewport reset, preview tab closed, local fixture server stopped"
+}

@@ -60,7 +60,10 @@ import {
   reconcileReviewLedger,
 } from './review-ledger.js';
 import { reviewClosureOutputContract } from './review-structured-output.js';
-import { runToolUseReview } from './review-tool-runner.js';
+import { ToolReviewError, runToolUseReview } from './review-tool-runner.js';
+import { ReviewerApiDeadlineError, reviewerApiBudget } from './reviewer-api-budget.js';
+import { runWithValidationEvidence } from './run-with-evidence.js';
+import type { ValidationEvidenceCache } from './validation-evidence-cache.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -359,6 +362,7 @@ export function createLocalValidationEngine(
   logger?: Logger,
   hostBrowserRunner?: HostBrowserRunner,
   screenshotStore?: import('../pods/screenshot-store.js').ScreenshotStore,
+  evidenceCache?: ValidationEvidenceCache,
 ): ValidationEngine {
   const log = logger?.child({ component: 'local-validation-engine' });
 
@@ -512,7 +516,13 @@ export function createLocalValidationEngine(
         } else {
           callbacks?.onPhaseStarted?.('lint');
           if (config.lintCommand) onProgress?.('Running lint…');
-          lintResult = await runLint(containerManager, config, log);
+          lintResult = await runWithValidationEvidence(
+            config.podId,
+            'lint',
+            () => runLint(containerManager, config, log),
+            evidenceCache,
+            config.captureEvidenceIdentity,
+          );
         }
         infrastructureFailure = lintResult.infrastructureFailure;
         callbacks?.onPhaseCompleted?.('lint', lintResult.status, lintResult);
@@ -563,7 +573,13 @@ export function createLocalValidationEngine(
           if (buildResult.status === 'pass' && config.testCommand) onProgress?.('Running tests…');
           testResult =
             buildResult.status === 'pass'
-              ? await runTests(containerManager, config, log)
+              ? await runWithValidationEvidence(
+                  config.podId,
+                  'test',
+                  () => runTests(containerManager, config, log),
+                  evidenceCache,
+                  config.captureEvidenceIdentity,
+                )
               : { status: 'skip' as const, duration: 0 };
         }
         infrastructureFailure ??= testResult.infrastructureFailure;
@@ -772,7 +788,7 @@ export function createLocalValidationEngine(
           const useCanonicalCouncil =
             config.validationSuite === 'full' &&
             (config.priorReviewBatch !== undefined || config.councilOnly === true);
-          let reviewRun = useCanonicalCouncil
+          let reviewRun: Awaited<ReturnType<typeof runTaskReview>> = useCanonicalCouncil
             ? {
                 result: {
                   status: 'pass' as const,
@@ -814,7 +830,11 @@ export function createLocalValidationEngine(
           reviewSkipReason = reviewRun.skipReason;
           // Every full-suite review ends with one canonical frozen council. On
           // retries this is the first and only stochastic review authority.
-          if (taskReview && config.validationSuite === 'full') {
+          if (
+            taskReview &&
+            !reviewRun.requiredReviewUnavailable &&
+            config.validationSuite === 'full'
+          ) {
             const reviewedHead = await readReviewHead(config.worktreePath, config.startCommitSha);
             const frozenDiff = boundedReviewPacketString(config.diff, 1_000_000);
             const packet = createFrozenReviewPacket({
@@ -912,6 +932,7 @@ export function createLocalValidationEngine(
               },
               execute: async (prompt, _label, timeoutMs, outputContract) =>
                 runContainerReviewer({
+                  beforeLaunch: config.beforeReviewerLaunch,
                   podId: config.podId,
                   containerId: config.containerId,
                   containerManager,
@@ -928,6 +949,7 @@ export function createLocalValidationEngine(
                 }),
               synthesize: async (prompt, _label, timeoutMs, outputContract) =>
                 runContainerReviewer({
+                  beforeLaunch: config.beforeReviewerLaunch,
                   podId: config.podId,
                   containerId: config.containerId,
                   containerManager,
@@ -978,6 +1000,7 @@ export function createLocalValidationEngine(
                         );
                       }
                       const response = await runContainerReviewer({
+                        beforeLaunch: config.beforeReviewerLaunch,
                         podId: config.podId,
                         containerId: config.containerId,
                         containerManager,
@@ -1127,7 +1150,10 @@ export function createLocalValidationEngine(
             };
             reviewTokenUsage = taskReview?.tokenUsage;
           }
-          if (taskReview === null && reviewRun.skipReason) {
+          if (
+            (taskReview === null || reviewRun.requiredReviewUnavailable) &&
+            reviewRun.skipReason
+          ) {
             reviewSkipKind = classifyReviewSkipKind(reviewRun.skipReason);
           }
         }
@@ -1887,11 +1913,7 @@ async function runFactValidation(
           replacementPath,
           log,
         );
-        const replacementChanged = artifactChangeSatisfied(
-          config.diff,
-          replacementPath,
-          'modified',
-        );
+        const replacementChanged = artifactChangeSatisfied(config.diff, replacementPath, 'update');
         const replacementCmd = await containerManager.execInContainer(
           config.containerId,
           ['sh', '-c', replacement.command],
@@ -1971,7 +1993,7 @@ async function runFactValidation(
         artifact: {
           path: artifactPath,
           change: fact.artifact.change,
-          exists: artifactExists,
+          exists: artifactExists ?? false,
           changed: artifactChanged,
           ...(artifactHash ? { hash: artifactHash } : {}),
         },
@@ -2039,9 +2061,13 @@ async function runFactValidation(
       fact.kind === 'browser-test' && config.worktreePath
         ? await collectHostFactAttachments(config.worktreePath, fact.id, log)
         : await collectFactAttachments(containerManager, config, fact.id, log);
-    const passed = artifactExists && artifactChanged && commandPassed;
+    const presenceSatisfied =
+      fact.artifact.change === 'delete' ? artifactExists === false : artifactExists === true;
+    const passed = presenceSatisfied && artifactChanged && commandPassed;
     const failedReasons = [
-      artifactExists ? null : `artifact ${artifactPath} does not exist`,
+      presenceSatisfied
+        ? null
+        : `artifact ${artifactPath} ${fact.artifact.change === 'delete' ? 'is still present or absence is unverified' : 'does not exist or presence is unverified'}`,
       artifactChanged
         ? null
         : `artifact ${artifactPath} does not satisfy ${fact.artifact.change} requirement`,
@@ -2075,7 +2101,7 @@ async function runFactValidation(
       artifact: {
         path: artifactPath,
         change: fact.artifact.change,
-        exists: artifactExists,
+        exists: artifactExists ?? false,
         changed: artifactChanged,
         ...(artifactHash ? { hash: artifactHash } : {}),
       },
@@ -2520,17 +2546,17 @@ async function artifactExistsInContainer(
   config: ValidationEngineConfig,
   artifactPath: string,
   log?: Logger,
-): Promise<boolean> {
+): Promise<boolean | null> {
   try {
     const result = await containerManager.execInContainer(
       config.containerId,
       ['sh', '-c', `test -e ${shellQuote(`/workspace/${artifactPath}`)}`],
       { cwd: '/workspace', timeout: 10_000 },
     );
-    return result.exitCode === 0;
+    return result.exitCode === 0 ? true : result.exitCode === 1 ? false : null;
   } catch (err) {
     log?.warn({ err, artifactPath }, 'required fact artifact existence check failed');
-    return false;
+    return null;
   }
 }
 
@@ -2659,7 +2685,7 @@ function shellQuote(value: string): string {
 export function artifactChangeSatisfied(
   diff: string,
   path: string,
-  change: 'create' | 'update' | 'touch',
+  change: 'create' | 'update' | 'delete' | 'touch',
 ): boolean {
   if (change === 'touch') return true;
   const normalized = normalizeContractPath(path);
@@ -2667,20 +2693,28 @@ export function artifactChangeSatisfied(
     (entry) => entry.path === normalized || entry.path.startsWith(`${normalized}/`),
   );
   if (change === 'create') return entries.some((entry) => entry.created);
+  if (change === 'delete') return entries.some((entry) => entry.deleted);
   return entries.length > 0;
 }
 
-function parseDiffEntries(diff: string): Array<{ path: string; created: boolean }> {
-  const entries: Array<{ path: string; created: boolean }> = [];
-  let current: { path: string; created: boolean } | null = null;
+function parseDiffEntries(
+  diff: string,
+): Array<{ path: string; created: boolean; deleted: boolean }> {
+  const entries: Array<{ path: string; created: boolean; deleted: boolean }> = [];
+  let current: { path: string; created: boolean; deleted: boolean } | null = null;
   for (const line of diff.split('\n')) {
     const match = /^diff --git a\/(.+) b\/(.+)$/.exec(line);
     if (match) {
-      current = { path: normalizeContractPath(match[2] ?? match[1] ?? ''), created: false };
+      current = {
+        path: normalizeContractPath(match[2] ?? match[1] ?? ''),
+        created: false,
+        deleted: false,
+      };
       entries.push(current);
       continue;
     }
     if (!current) continue;
+    if (line.startsWith('deleted file mode ') || line === '+++ /dev/null') current.deleted = true;
     if (line === 'new file mode' || line.startsWith('new file mode ') || line === '--- /dev/null') {
       current.created = true;
     }
@@ -3583,6 +3617,8 @@ async function runTaskReview(
 ): Promise<{
   result: TaskReviewResult | null;
   skipReason?: string;
+  /** A required provider-bound path could not run; a council must not erase this failure. */
+  requiredReviewUnavailable?: true;
   tokenUsage?: {
     inputTokens: number;
     outputTokens: number;
@@ -3605,8 +3641,54 @@ async function runTaskReview(
   const diffIsTruncated = config.diff?.includes('⚠ DIFF TRUNCATED:') ?? false;
   const prompt = buildReviewPrompt(config, reviewContext);
   const reviewTimeout = config.reviewTimeout ?? 300_000;
+  const apiBudget = reviewerApiBudget(reviewTimeout);
   const reviewDepth = config.reviewDepth ?? 'auto';
   const reviewRunner = resolveReviewRunner(config);
+  let boundProvider:
+    | Extract<Awaited<ReturnType<typeof createProviderAnthropicClient>>, { ok: true }>
+    | undefined;
+  const getBoundProvider = async () => {
+    config.assertReviewerCurrent?.();
+    if (boundProvider) return boundProvider;
+    const selected = await apiBudget.acquire(() =>
+      createProviderAnthropicClient(
+        {
+          provider: config.reviewerProvider,
+          credentials: config.reviewerProviderCredentials,
+          model: config.reviewerModel ?? 'claude-haiku-4-5',
+          profileName: config.podId,
+        },
+        log ?? noopLogger,
+      ),
+    );
+    config.assertReviewerCurrent?.();
+    if (!selected.ok) throw new Error(`Reviewer provider unavailable: ${selected.reason}`);
+    boundProvider = selected;
+    return selected;
+  };
+  const requiredReviewUnavailable = (
+    parsed: ReturnType<typeof parseReviewJson>,
+    tokenUsage: TaskReviewResult['tokenUsage'],
+    reason: string,
+  ): Awaited<ReturnType<typeof runTaskReview>> => ({
+    requiredReviewUnavailable: true,
+    skipReason: `Review failed: ${reason}`,
+    result: {
+      status: 'fail',
+      reasoning: `${reason}${parsed ? ` ${parsed.reasoning}` : ''}`,
+      issues: parsed?.issues ?? [],
+      firstGateFindings: persistedFirstGateFindings(parsed?.firstGateFindings),
+      firstGateOverflow: parsed?.firstGateOverflow,
+      model: config.reviewerModel ?? 'auto',
+      screenshots: [],
+      diff: config.diff,
+      requirementsCheck: parsed?.requirementsCheck,
+      deviationsAssessment: parsed?.deviationsAssessment,
+      tokenUsage,
+    },
+    tokenUsage,
+  });
+
   if (reviewRunner === 'unsupported') {
     return {
       result: null,
@@ -3654,6 +3736,7 @@ async function runTaskReview(
         let stdout: string;
         if (reviewRunner === 'codex') {
           const codexReview = await runCodexReview({
+            beforeLaunch: config.beforeReviewerLaunch,
             podId: config.podId,
             attempt: config.attempt,
             containerId: config.containerId,
@@ -3667,6 +3750,7 @@ async function runTaskReview(
           tier1TokenUsage = codexReview.tokenUsage;
         } else if (reviewRunner === 'container-claude') {
           const containerReview = await runContainerReviewer({
+            beforeLaunch: config.beforeReviewerLaunch,
             podId: config.podId,
             containerId: config.containerId,
             containerManager,
@@ -3684,15 +3768,18 @@ async function runTaskReview(
           tier1TokenUsage = containerReview.tokenUsage;
         } else if (shouldUseProfileBoundAnthropicReviewer(config)) {
           const providerReview = await runProfileBoundAnthropicReview(
-            config,
+            await getBoundProvider(),
             prompt,
-            reviewTimeout,
-            log,
+            () => apiBudget.remaining(),
+            config.assertReviewerCurrent,
+            config.recordReviewerApiDispatch,
           );
           stdout = providerReview.stdout;
           tier1TokenUsage = providerReview.tokenUsage;
         } else {
           const claudeReview = await runClaudeCli({
+            beforeSpawn: config.assertReviewerCurrent,
+            recordHostDispatch: config.recordHostReviewerDispatch,
             model: config.reviewerModel,
             input: prompt,
             timeout: reviewTimeout,
@@ -3708,6 +3795,15 @@ async function runTaskReview(
           log,
           1,
         );
+        if (shouldUseProfileBoundAnthropicReviewer(config)) {
+          try {
+            apiBudget.remaining('API response');
+          } catch (err) {
+            if (err instanceof ReviewerApiDeadlineError)
+              return requiredReviewUnavailable(tier1Parsed, tier1TokenUsage, err.message);
+            throw err;
+          }
+        }
         if (!tier1Parsed) {
           log?.warn({ rawOutput: stdout.slice(0, 500) }, 'failed to parse task review response');
           return {
@@ -3796,12 +3892,21 @@ async function runTaskReview(
     log?.info(tier2Reason);
 
     try {
+      const selectedProvider = shouldUseProfileBoundAnthropicReviewer(config)
+        ? await getBoundProvider()
+        : undefined;
       const tier2Result = await runToolUseReview({
+        beforeRequest: config.assertReviewerCurrent,
         model: config.reviewerModel,
         prompt,
         worktreePath,
-        timeout: reviewTimeout,
-        apiKey: config.reviewerApiKey,
+        timeout: selectedProvider ? apiBudget.remaining() : reviewTimeout,
+        ...(selectedProvider
+          ? {
+              providerClient: selectedProvider,
+              onDispatch: config.recordReviewerApiDispatch,
+            }
+          : { apiKey: config.reviewerApiKey, onDispatch: config.recordLegacyReviewerApiDispatch }),
       });
 
       const tier2Parsed = applyDiffFilterToParsed(
@@ -3839,10 +3944,18 @@ async function runTaskReview(
       // ── Tier 3: Agentic review (still uncertain) ────────────────────
       let allTierTokenUsage = accumulatedTokenUsage;
       if (tier2Parsed?.status === 'uncertain') {
+        if (shouldUseProfileBoundAnthropicReviewer(config))
+          return requiredReviewUnavailable(
+            tier2Parsed,
+            accumulatedTokenUsage,
+            'Foundry agentic review unavailable: the selected provider binding has no configured host CLI route. Reconcile the reviewer binding before deeper review.',
+          );
         log?.info('Tier 2 returned uncertain, escalating to Tier 3 agentic review');
 
         try {
           const tier3Result = await runAgenticReview({
+            beforeSpawn: config.assertReviewerCurrent,
+            recordHostDispatch: config.recordHostReviewerDispatch,
             model: config.reviewerModel,
             prompt,
             worktreePath,
@@ -3880,6 +3993,12 @@ async function runTaskReview(
             };
           }
         } catch (err) {
+          if (err instanceof ClaudeCliError && err.kind === 'termination-failed')
+            return {
+              result: null,
+              skipReason: 'Review failed: reviewer termination could not be confirmed',
+              tokenUsage: accumulatedTokenUsage,
+            };
           log?.warn({ err }, 'Tier 3 agentic review failed, falling back to Tier 2 result');
         }
       }
@@ -3910,6 +4029,26 @@ async function runTaskReview(
         tokenUsage: allTierTokenUsage,
       };
     } catch (err) {
+      if (err instanceof ReviewerApiDeadlineError)
+        return requiredReviewUnavailable(tier1Parsed, tier1TokenUsage, err.message);
+      if (err instanceof ToolReviewError)
+        return requiredReviewUnavailable(
+          tier1Parsed,
+          combineReviewTokenUsage(config.reviewerModel, tier1TokenUsage, err.tokenUsage),
+          `Tool review unavailable (${err.kind}); reconcile the review before retry. Known usage is a subtotal; interrupted request usage is unverified.`,
+        );
+      if (shouldUseProfileBoundAnthropicReviewer(config))
+        return requiredReviewUnavailable(
+          tier1Parsed,
+          tier1TokenUsage,
+          'Foundry tool review unavailable on the selected provider binding; reconcile it before retry.',
+        );
+      if (err instanceof ClaudeCliError && err.kind === 'termination-failed')
+        return {
+          result: null,
+          skipReason: 'Review failed: reviewer termination could not be confirmed',
+          tokenUsage: tier1TokenUsage,
+        };
       log?.warn({ err }, 'Tier 2 tool-use review failed');
       if (!tier1Parsed) {
         // Truncated diff path: no Tier 1 result to fall back to
@@ -3937,6 +4076,8 @@ async function runTaskReview(
       };
     }
   } catch (err) {
+    if (err instanceof ReviewerApiDeadlineError)
+      return requiredReviewUnavailable(null, undefined, err.message);
     if (
       err instanceof ClaudeCliError ||
       err instanceof CodexReviewError ||
@@ -3952,6 +4093,12 @@ async function runTaskReview(
         },
         'task review failed, continuing without review',
       );
+      if (err.kind === 'termination-failed') {
+        return {
+          result: null,
+          skipReason: 'Review failed: reviewer termination could not be confirmed',
+        };
+      }
       if (err.kind === 'timeout') {
         return { result: null, skipReason: `Review timed out: ${err.message}` };
       }
@@ -3966,12 +4113,13 @@ async function runTaskReview(
 function isReviewInfrastructureFailure(
   reviewRun: Awaited<ReturnType<typeof runTaskReview>>,
 ): boolean {
+  if (reviewRun.requiredReviewUnavailable) return false;
   if (reviewRun.result?.reviewBatch?.infrastructureUnavailable) return true;
   if (reviewRun.result !== null || !reviewRun.skipReason) return false;
   return (
     reviewRun.skipReason.startsWith('Review timed out:') ||
     (reviewRun.skipReason.startsWith('Review failed:') &&
-      !/invalid_request_error|unsupported model|model .*not (?:found|available)|remote termination could not be confirmed/i.test(
+      !/invalid_request_error|unsupported model|model .*not (?:found|available)|termination could not be confirmed/i.test(
         reviewRun.skipReason,
       ))
   );
@@ -4047,34 +4195,25 @@ function canReuseCachedPreSubmitForTier1(
 }
 
 async function runProfileBoundAnthropicReview(
-  config: ValidationEngineConfig,
+  llm: Extract<Awaited<ReturnType<typeof createProviderAnthropicClient>>, { ok: true }>,
   prompt: string,
-  timeout: number,
-  log?: Logger,
+  timeout: number | (() => number),
+  assertCurrent?: () => void,
+  onDispatch?: (model: string) => void,
 ): Promise<{
   stdout: string;
   tokenUsage?: { inputTokens: number; outputTokens: number; cachedInputTokens?: number };
 }> {
-  const llm = await createProviderAnthropicClient(
-    {
-      provider: config.reviewerProvider,
-      credentials: config.reviewerProviderCredentials,
-      model: config.reviewerModel ?? 'claude-haiku-4-5',
-      profileName: config.podId,
-    },
-    log ?? noopLogger,
-  );
-  if (!llm.ok) {
-    throw new Error(`Reviewer provider unavailable: ${llm.reason}`);
-  }
-
+  assertCurrent?.();
+  onDispatch?.(llm.model);
+  assertCurrent?.();
   const response = await llm.client.messages.create(
     {
       model: llm.model,
       max_tokens: 8192,
       messages: [{ role: 'user', content: prompt }],
     },
-    { timeout },
+    { timeout: typeof timeout === 'function' ? timeout() : timeout, maxRetries: 0 },
   );
   const stdout = response.content
     .filter((block): block is Extract<(typeof response.content)[number], { type: 'text' }> => {

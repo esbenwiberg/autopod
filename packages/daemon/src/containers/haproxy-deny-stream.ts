@@ -64,15 +64,26 @@ export async function streamHaproxyDenials(
     }
   });
 
-  stream.exitCode.then((code) => {
-    if (stopped) return;
-    if (code !== 0) {
+  // This observer is detached from the pod's worker. Handle transport failure
+  // here without turning an unobserved receiver exit into a successful exit.
+  void stream.exitCode.then(
+    (code) => {
+      if (stopped) return;
+      if (code !== 0) {
+        logger.warn(
+          { containerId, exitCode: code },
+          'haproxy deny receiver exited unexpectedly — denial visibility lost for this pod',
+        );
+      }
+    },
+    (err: unknown) => {
+      if (stopped) return;
       logger.warn(
-        { containerId, exitCode: code },
-        'haproxy deny receiver exited unexpectedly — denial visibility lost for this pod',
+        { err, containerId },
+        'haproxy deny receiver exit unverified — denial visibility lost for this pod',
       );
-    }
-  });
+    },
+  );
 
   return {
     async stop() {

@@ -1,0 +1,20 @@
+[
+  {
+    "file": "checkpoint-123-wrapper-tests.txt",
+    "rawSha256": "bf638fcf8dc38a3be831918106147d1b9d940fb523d2da189dda90d56fad40ab",
+    "storedSha256": "bf638fcf8dc38a3be831918106147d1b9d940fb523d2da189dda90d56fad40ab",
+    "normalization": "trailing whitespace and terminal blank lines only"
+  },
+  {
+    "file": "checkpoint-123-copy-red.txt",
+    "rawSha256": "2d262504459ba4ba7bf33ecb96d2c5ad7ef6a256a12176089deb68eeb60dad0b",
+    "storedSha256": "de6f222ef702fcf0fad35e3488e41850efec239b63b37684572d12dd02db6ed0",
+    "normalization": "trailing whitespace and terminal blank lines only"
+  },
+  {
+    "file": "checkpoint-123-copy-tests.txt",
+    "rawSha256": "b3c51b9d7b9d56eb27a61b37020a9eda42f8e655e4089503bb2b7c5ade66f0cc",
+    "storedSha256": "b3c51b9d7b9d56eb27a61b37020a9eda42f8e655e4089503bb2b7c5ade66f0cc",
+    "normalization": "trailing whitespace and terminal blank lines only"
+  }
+]

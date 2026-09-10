@@ -1,0 +1,30 @@
+
+ RUN  v4.1.11 /private/tmp/autopod-durable-execution/packages/mobile-web
+
+ ❯ src/components/ActionBar.test.tsx (6 tests | 1 failed | 4 skipped) 20ms
+   × retains failed state and readable termination guidance after Resume is rejected 17ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/components/ActionBar.test.tsx > retains failed state and readable termination guidance after Resume is rejected
+AssertionError: expected 'ResumeReworkRebase + revalidateExtend…' not to contain '{"error"'
+
+Expected: "{"error""
+Received: "ResumeReworkRebase + revalidateExtend PR fixes (+3)Spawn fixForce completeKill{"error":"A worker in this logical task has unverified process termination. Retain its source and resources; reconcile termination before Resume, Rework, validation or delivery.","code":"TASK_EXECUTION_TERMINATION_UNVERIFIED"}"
+
+ ❯ src/components/ActionBar.test.tsx:134:39
+    132|     expect(fetch).toHaveBeenCalledTimes(1);
+    133|     expect(container.textContent).toContain(message);
+    134|     expect(container.textContent).not.toContain('{"error"');
+       |                                       ^
+    135|     expect(usePodsStore.getState().pods[0]).toEqual(pod);
+    136|   } finally { act(() => root.unmount()); container.remove(); fetch.moc…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 1 passed | 4 skipped (6)
+   Start at  17:06:27
+   Duration  420ms (transform 30ms, setup 12ms, import 44ms, tests 20ms, environment 250ms)
+

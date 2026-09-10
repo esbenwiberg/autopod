@@ -1,0 +1,36 @@
+[1/1] Compiling plugin GenerateManual
+[2/2] Compiling plugin GenerateDoccReference
+Building for debugging...
+[2/7] Write sources
+[3/7] Write swift-version--58304C5D6DBC2206.txt
+[5/10] Compiling AutopodDesktop PodMapper.swift
+[6/10] Emitting module AutopodDesktop
+[6/10] Write Objects.LinkFileList
+[8/14] Compiling AutopodClientTests DaemonAPITests.swift
+/private/tmp/autopod-durable-execution/packages/desktop/Tests/AutopodClientTests/DaemonAPITests.swift:14:13: warning: no 'async' operations occur within 'await' expression
+ 12 |     token: "test-token"
+ 13 |   )
+ 14 |   let url = await api.baseURL
+    |             `- warning: no 'async' operations occur within 'await' expression
+ 15 |   #expect(url.absoluteString == "http://localhost:3000")
+ 16 | }
+[8/14] Linking AutopodDesktopExe
+[9/14] Applying AutopodDesktopExe
+[11/14] Compiling AutopodClientTests PodMapperTests.swift
+[12/14] Compiling AutopodClientTests ReviewProgressStateTests.swift
+[13/14] Emitting module AutopodClientTests
+[13/15] Write Objects.LinkFileList
+[14/15] Linking AutopodDesktopPackageTests
+Build complete! (4.28s)
+Test Suite 'Selected tests' started at 2026-09-08 22:56:42.092.
+Test Suite 'AutopodDesktopPackageTests.xctest' started at 2026-09-08 22:56:42.098.
+Test Suite 'AutopodDesktopPackageTests.xctest' passed at 2026-09-08 22:56:42.098.
+	 Executed 0 tests, with 0 failures (0 unexpected) in 0.000 (0.000) seconds
+Test Suite 'Selected tests' passed at 2026-09-08 22:56:42.098.
+	 Executed 0 tests, with 0 failures (0 unexpected) in 0.000 (0.006) seconds
+◇ Test run started.
+↳ Testing Library Version: 1902
+↳ Target Platform: arm64e-apple-macos14.0
+◇ Test mapsRunningSession() started.
+✔ Test mapsRunningSession() passed after 0.003 seconds.
+✔ Test run with 1 test in 0 suites passed after 0.003 seconds.

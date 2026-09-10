@@ -1,0 +1,39 @@
+
+ RUN  v4.1.11 /private/tmp/autopod-durable-execution/packages/daemon
+
+ ❯ src/pods/pod-manager.test.ts (615 tests | 3 failed | 612 skipped) 209ms
+     × blocks unchanged nonretryable outer worker replay before pulling another iterator: same-manager 104ms
+     × blocks unchanged nonretryable outer worker replay before pulling another iterator: second-manager 51ms
+     × blocks unchanged nonretryable outer worker replay before pulling another iterator: linked-pod 53ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 3 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/pods/pod-manager.test.ts > PodManager > blocks unchanged nonretryable outer worker replay before pulling another iterator: same-manager
+ FAIL  src/pods/pod-manager.test.ts > PodManager > blocks unchanged nonretryable outer worker replay before pulling another iterator: second-manager
+ FAIL  src/pods/pod-manager.test.ts > PodManager > blocks unchanged nonretryable outer worker replay before pulling another iterator: linked-pod
+AssertionError: promise resolved "'completed'" instead of rejecting
+
+- Expected:
+Error {
+  "message": "rejected promise",
+}
+
++ Received:
+"completed"
+
+ ❯ src/pods/pod-manager.test.ts:2986:7
+    2984|           })(),
+    2985|         ),
+    2986|       ).rejects.toMatchObject({ code: 'TASK_RETRY_RECONCILIATION_REQUI…
+       |       ^
+    2987|       expect(pulled).toBe(false);
+    2988|       expect(ctx.podRepo.taskExecutions?.snapshot(target.id).agentRunC…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/3]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  3 failed | 612 skipped (615)
+   Start at  19:03:06
+   Duration  1.91s (transform 1.10s, setup 0ms, import 1.58s, tests 209ms, environment 0ms)
+

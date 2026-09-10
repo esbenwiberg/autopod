@@ -75,7 +75,21 @@ export type TokenTelemetryAccuracy = 'complete' | 'partial' | 'repaired';
 
 export type PodCostBucket = 'work' | 'rework' | 'validation' | 'advisory' | 'unattributed';
 
+/** Stored amounts may themselves be historical estimates. Never a billing receipt. */
+export interface CostEvidence {
+  basis: 'stored_subtotal';
+  billingVerified: false;
+  knownEstimatedCostUsd: number;
+  /** Recognized phase entries missing a stored amount; unreadable whole payloads have unknown phase counts. */
+  unavailablePhaseCount: number;
+  conflictingPodCount: number;
+  diagnostics: Array<{ podId: string; code: string; message: string }>;
+  omittedDiagnosticCount: number;
+}
+
 export interface PodCostSegment {
+  storedCostUsd?: number | null;
+  attribution?: 'stored' | 'unavailable' | 'unattributed';
   bucket: PodCostBucket;
   label: string;
   costUsd: number;
@@ -85,6 +99,8 @@ export interface PodCostSegment {
 }
 
 export interface PodCostBreakdownResponse {
+  costEvidence?: CostEvidence;
+  taskExecution?: import('./task-execution.js').TaskExecutionSummary | null;
   podId: string;
   model: string | null;
   totalCostUsd: number;
@@ -191,6 +207,24 @@ export interface ValidationWaiver {
 }
 
 export interface Pod {
+  /** Durable worker settlement; this never grants validation or delivery authority. */
+  finalization?: {
+    generation: number;
+    cycle: number;
+    phase: 'running' | 'awaiting_human' | 'ready' | 'preserving' | 'finalizing' | 'finished';
+    agentSettledAt: string | null;
+    result: string | null;
+    /** Compact display excerpt only; the complete durable result remains stored. */
+    resultTruncated?: boolean;
+    pendingDecisionId: string | null;
+    sourcePreservedAt: string | null;
+  } | null;
+  /** Read-only list diagnostics. Raw control-plane reads still reject corrupt state. */
+  recordDiagnostics?: Array<{
+    field: string;
+    code: 'invalid_json' | 'invalid_shape' | 'size_limit';
+  }>;
+
   id: string;
   profileName: string;
   task: string;
@@ -520,6 +554,7 @@ export interface Pod {
 }
 
 export interface CreatePodRequest {
+  intentionalRerun?: import('./dispatch-preflight.js').IntentionalRerun;
   profileName: string;
   task: string;
   model?: string;
@@ -563,7 +598,7 @@ export interface CreatePodRequest {
   pimGroups?: PimGroupConfig[];
   /** Existing PR URL to carry forward (used for fix pods — skips PR creation) */
   prUrl?: string | null;
-  /** Override the profile's token budget for this pod. null = inherit from profile. */
+  /** Override the profile's token budget. Omit to inherit; explicit null disables the limit. */
   tokenBudget?: number | null;
   /**
    * Reference repos to clone read-only into the container. Mount paths are
@@ -634,6 +669,13 @@ export interface PodSummary {
 
 /** Lightweight pod representation for monitoring and discovery consumers. */
 export interface CompactPod {
+  finalization?: Pod['finalization'];
+  /** Read-only list diagnostics. Raw control-plane reads still reject corrupt state. */
+  recordDiagnostics?: Array<{
+    field: string;
+    code: 'invalid_json' | 'invalid_shape' | 'size_limit';
+  }>;
+
   id: string;
   title: string;
   taskExcerpt: string;
@@ -661,6 +703,7 @@ export interface CompactPod {
   failureReason: string | null;
   mergeBlockReason: string | null;
   lastCorrectionMessage: string | null;
+  lastRecoveryTrigger?: 'wake' | 'restart' | null;
   pendingEscalationSummary: string | null;
   progressSummary: string | null;
   inputTokens: number;

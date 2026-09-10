@@ -1,0 +1,34 @@
+
+ RUN  v4.1.11 /private/tmp/autopod-durable-execution/packages/daemon
+
+ ❯ src/pods/pod-manager.test.ts (502 tests | 1 failed | 495 skipped) 338ms
+       × reconciles an ambiguous admitted merge after manager restart without publishing again (new) 55ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/pods/pod-manager.test.ts > PodManager > approveSession > reconciles an ambiguous admitted merge after manager restart without publishing again (new)
+AssertionError: promise resolved "undefined" instead of rejecting
+
+- Expected:
+Error {
+  "message": "rejected promise",
+}
+
++ Received:
+undefined
+
+ ❯ src/pods/pod-manager.test.ts:4800:54
+    4798|             throw new Error('provider response lost after mutation');
+    4799|           });
+    4800|           await expect(manager.approveSession(pod.id)).rejects.toMatch…
+       |                                                      ^
+    4801|             code: 'APPROVAL_DELIVERY_FAILED',
+    4802|           });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 6 passed | 495 skipped (502)
+   Start at  01:03:54
+   Duration  1.83s (transform 863ms, setup 0ms, import 1.35s, tests 338ms, environment 0ms)

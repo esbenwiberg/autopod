@@ -8,6 +8,8 @@ import { Create } from './screens/Create.js';
 import { Landing } from './screens/Landing.js';
 import { PodDetail } from './screens/PodDetail.js';
 import { ScanAgain } from './screens/ScanAgain.js';
+import { ScanReport } from './screens/ScanReport.js';
+import { ScanReports } from './screens/ScanReports.js';
 import { usePodsStore } from './store/pods.js';
 
 export function App(): JSX.Element {
@@ -35,6 +37,8 @@ export function App(): JSX.Element {
         <Route path="/" element={<Landing />} />
         <Route path="/create" element={<Create />} />
         <Route path="/pod/:id" element={<PodDetail />} />
+        <Route path="/scan-reports" element={<ScanReports />} />
+        <Route path="/scan-report/:id" element={<ScanReport />} />
         <Route path="/about" element={<About />} />
         <Route path="/scan-again" element={<ScanAgain />} />
         <Route path="*" element={<Navigate to="/" replace />} />

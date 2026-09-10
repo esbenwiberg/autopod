@@ -36,6 +36,7 @@ public struct AppRootView: View {
     self._showSetup = showSetup
   }
 
+  @State private var scanJob: ScheduledJob?
   @State private var showError = false
   @State private var showAuthRecoveryFailure = false
   @State private var authRecoveryFailureMessage = ""
@@ -232,6 +233,7 @@ public struct AppRootView: View {
       qualityScores: podStore.qualityScores,
       onRunCatchup: { job in Task { try? await scheduledJobStore.runCatchup(job.id) } },
       onSkipCatchup: { job in Task { try? await scheduledJobStore.skipCatchup(job.id) } },
+      onOpenScanReports: { job in scanJob = job },
       onTriggerJob: { job in Task { try? await scheduledJobStore.triggerJob(job.id) } },
       onCreateJob: { req in Task { try? await scheduledJobStore.createJob(req) } },
       onEditJob: { id, req in Task { try? await scheduledJobStore.updateJob(id, req) } },
@@ -324,6 +326,10 @@ public struct AppRootView: View {
       Button("OK") { scheduledJobStore.error = nil }
     } message: {
       Text(scheduledJobStore.error ?? "Unknown error")
+    }
+    .sheet(item: $scanJob) { job in
+      if let api = connectionManager.api { ScanInboxView(job: job, api: api) }
+      else { Text("Connect to the daemon to review scan reports.").padding() }
     }
     .sheet(isPresented: $showSetup) {
       SetupSheet(

@@ -1,0 +1,49 @@
+
+ RUN  v4.1.11 /private/tmp/autopod-durable-execution/packages/daemon
+
+ ❯ src/validation/local-validation-engine.test.ts (167 tests | 2 failed | 165 skipped) 571ms
+     × bounds selected reviewer acquisition and never revives dispatch when it settles late 521ms
+     × charges selected client acquisition and earlier API tiers against one review deadline 50ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 2 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/validation/local-validation-engine.test.ts > validate() — facts + review gate > bounds selected reviewer acquisition and never revives dispatch when it settles late
+AssertionError: expected null not to be null
+ ❯ src/validation/local-validation-engine.test.ts:3701:24
+    3699|     release?.({ ok: true, client: { messages: { create } }, model: 'se…
+    3700|     await pending;
+    3701|     expect(result).not.toBeNull();
+       |                        ^
+    3702|     expect(result?.overall).toBe('fail');
+    3703|     expect(result?.reviewSkipReason).toContain('acquisition');
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/2]⎯
+
+ FAIL  src/validation/local-validation-engine.test.ts > validate() — facts + review gate > charges selected client acquisition and earlier API tiers against one review deadline
+AssertionError: expected { timeout: 1000, maxRetries: +0 } to match object { timeout: 100, maxRetries: +0 }
+
+- Expected
++ Received
+
+  {
+    "maxRetries": 0,
+-   "timeout": 100,
++   "timeout": 1000,
+  }
+
+ ❯ src/validation/local-validation-engine.test.ts:3731:41
+    3729|       }));
+    3730|       expect(create).toHaveBeenCalledOnce();
+    3731|       expect(create.mock.calls[0]?.[1]).toMatchObject({ timeout: 100, …
+       |                                         ^
+    3732|       expect(runToolUseReview).toHaveBeenCalledWith(expect.objectConta…
+    3733|       expect(result.overall).toBe('pass');
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/2]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  2 failed | 165 skipped (167)
+   Start at  12:25:27
+   Duration  1.11s (transform 308ms, setup 0ms, import 444ms, tests 571ms, environment 0ms)
+

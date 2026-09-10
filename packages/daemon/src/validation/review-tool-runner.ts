@@ -47,104 +47,171 @@ export interface ToolUseReviewConfig {
   worktreePath: string;
   timeout: number;
   maxToolCalls?: number;
+  /** Trusted ownership fence before provider dispatch and each local tool operation. */
+  beforeRequest?: () => void;
+  onDispatch?: (model: string) => void;
   /** Anthropic API key. If not provided, uses ANTHROPIC_API_KEY env var. */
   apiKey?: string;
+  /** Already resolved provider endpoint/auth and exact dispatch model. Never falls back to daemon auth. */
+  providerClient?: { client: Pick<Anthropic, 'messages'>; model: string };
 }
 
-/**
- * Runs a review using the Anthropic Messages API with tool use,
- * allowing the reviewer to read files and inspect git state on demand.
- */
+export type ToolReviewFailureKind =
+  | 'invalid-budget'
+  | 'budget-exhausted'
+  | 'timeout'
+  | 'provider-error'
+  | 'ownership-lost';
+
+/** Known usage is a measured subtotal; an interrupted request's usage is unknown. */
+export class ToolReviewError extends Error {
+  constructor(
+    readonly kind: ToolReviewFailureKind,
+    message: string,
+    readonly tokenUsage?: { inputTokens: number; outputTokens: number },
+    cause?: unknown,
+  ) {
+    super(message, { cause });
+    this.name = 'ToolReviewError';
+  }
+}
+
+/** Run at most the configured tool operations and one final request without tools. */
 export async function runToolUseReview(
   config: ToolUseReviewConfig,
 ): Promise<{ stdout: string; tokenUsage?: { inputTokens: number; outputTokens: number } }> {
   const maxToolCalls = config.maxToolCalls ?? DEFAULT_MAX_TOOL_CALLS;
-  const deadline = Date.now() + config.timeout;
-
-  const client = new Anthropic({
-    apiKey: config.apiKey,
-  });
-
+  if (
+    !Number.isSafeInteger(maxToolCalls) ||
+    maxToolCalls < 0 ||
+    !Number.isFinite(config.timeout) ||
+    config.timeout <= 0
+  )
+    throw new ToolReviewError('invalid-budget', 'Invalid review tool budget or timeout');
+  const deadline = performance.now() + config.timeout;
+  const client = config.providerClient?.client ?? new Anthropic({ apiKey: config.apiKey });
+  const model = config.providerClient?.model ?? resolveToolReviewModelId(config.model);
   const tools = getToolDefinitions();
   const messages: MessageParam[] = [{ role: 'user', content: config.prompt }];
-
   let toolCallCount = 0;
+  let finalizing = maxToolCalls === 0;
+  let measuredResponses = 0;
   let totalInputTokens = 0;
   let totalOutputTokens = 0;
-
-  // Tool-use loop: keep sending messages until the model returns text-only or we hit limits
-  while (true) {
-    if (Date.now() >= deadline) {
-      throw new Error(`Tier 2 review timed out after ${config.timeout}ms`);
+  const usage = () =>
+    measuredResponses
+      ? { inputTokens: totalInputTokens, outputTokens: totalOutputTokens }
+      : undefined;
+  const assertOwnership = () => {
+    try {
+      config.beforeRequest?.();
+    } catch (cause) {
+      throw new ToolReviewError(
+        'ownership-lost',
+        cause instanceof Error ? cause.message : 'Review ownership lost',
+        usage(),
+        cause,
+      );
     }
-
-    const remainingMs = deadline - Date.now();
-
-    const response: Message = await client.messages.create(
-      {
-        model: resolveModelId(config.model),
-        max_tokens: 8192,
-        messages,
-        tools,
-        system:
-          'You are an expert code reviewer with access to tools for investigating the repository. ' +
-          'Use the tools to verify claims in the diff when the diff alone is insufficient. ' +
-          'When done investigating, respond with ONLY a JSON object (the review verdict). ' +
-          'Do not wrap the JSON in markdown fences.',
-      },
-      { timeout: remainingMs },
-    );
-
+  };
+  const checkActive = () => {
+    assertOwnership();
+    const remainingMs = Math.floor(deadline - performance.now());
+    if (remainingMs <= 0)
+      throw new ToolReviewError(
+        'timeout',
+        `Tier 2 review timed out after ${config.timeout}ms`,
+        usage(),
+      );
+    return remainingMs;
+  };
+  while (true) {
+    let remainingMs = checkActive();
+    if (config.onDispatch) {
+      try {
+        config.onDispatch(model);
+      } catch (cause) {
+        throw new ToolReviewError(
+          'ownership-lost',
+          cause instanceof Error ? cause.message : 'Dispatch provenance unavailable',
+          usage(),
+          cause,
+        );
+      }
+      remainingMs = checkActive();
+    }
+    let response: Message;
+    try {
+      response = await client.messages.create(
+        {
+          model,
+          max_tokens: 8192,
+          messages,
+          ...(finalizing ? {} : { tools }),
+          system: [
+            'You are an expert code reviewer with access to tools for investigating the repository.',
+            'Use the tools to verify claims in the diff when the diff alone is insufficient.',
+            'When done investigating, respond with ONLY a JSON object (the review verdict).',
+            'Do not wrap the JSON in markdown fences.',
+            ...(finalizing
+              ? [
+                  'The tool budget is exhausted. Provide the final verdict from the evidence already collected; no more tool calls are available.',
+                ]
+              : []),
+          ].join(' '),
+        },
+        { timeout: remainingMs, maxRetries: 0 },
+      );
+    } catch (cause) {
+      throw new ToolReviewError(
+        'provider-error',
+        'Selected reviewer request failed; its provider outcome is unverified.',
+        usage(),
+        cause,
+      );
+    }
+    measuredResponses++;
     totalInputTokens += response.usage.input_tokens;
     totalOutputTokens += response.usage.output_tokens;
-
-    // Check if the model returned any tool-use blocks
+    checkActive();
     const toolUseBlocks = response.content.filter(
       (block): block is ToolUseBlock => block.type === 'tool_use',
     );
-
-    if (toolUseBlocks.length === 0 || response.stop_reason === 'end_turn') {
-      // Model is done — extract the text response
+    if (toolUseBlocks.length === 0) {
       const textBlocks = response.content.filter(
         (block): block is Extract<ContentBlock, { type: 'text' }> => block.type === 'text',
       );
-      const stdout = textBlocks.map((b) => b.text).join('\n');
-      return {
-        stdout,
-        tokenUsage: { inputTokens: totalInputTokens, outputTokens: totalOutputTokens },
-      };
+      return { stdout: textBlocks.map((block) => block.text).join('\n'), tokenUsage: usage() };
     }
+    if (finalizing)
+      throw new ToolReviewError(
+        'budget-exhausted',
+        'Reviewer requested tools after its tool budget was exhausted',
+        usage(),
+      );
 
-    // Execute tool calls
-    toolCallCount += toolUseBlocks.length;
-    if (toolCallCount > maxToolCalls) {
-      // Budget exhausted — ask model for final answer without tools
-      messages.push({ role: 'assistant', content: response.content });
-      messages.push({
-        role: 'user',
-        content: `Tool call budget exhausted (${maxToolCalls} calls used). Please provide your final review verdict now as a JSON object based on what you have gathered so far.`,
-      });
-      continue;
-    }
-
-    // Add assistant message with tool use
     messages.push({ role: 'assistant', content: response.content });
-
-    // Execute each tool and gather results
     const toolResults: ToolResultBlockParam[] = [];
     for (const toolUse of toolUseBlocks) {
+      checkActive();
+      if (toolCallCount >= maxToolCalls) {
+        toolResults.push({
+          type: 'tool_result',
+          tool_use_id: toolUse.id,
+          is_error: true,
+          content: 'Tool budget exhausted. This tool was not executed.',
+        });
+        continue;
+      }
+      toolCallCount++;
       const result = await executeToolCall(
         toolUse.name,
         toolUse.input as Record<string, unknown>,
         config.worktreePath,
       );
-      toolResults.push({
-        type: 'tool_result',
-        tool_use_id: toolUse.id,
-        content: result,
-      });
+      toolResults.push({ type: 'tool_result', tool_use_id: toolUse.id, content: result });
     }
-
+    finalizing = toolCallCount >= maxToolCalls;
     messages.push({ role: 'user', content: toolResults });
   }
 }
@@ -374,7 +441,7 @@ async function toolSearchFiles(
 // ── Model ID resolution ───────────────────────────────────────────────────────
 
 /** Maps short model names (used in profiles) to full Anthropic model IDs */
-function resolveModelId(model: string): string {
+export function resolveToolReviewModelId(model: string): string {
   const aliases: Record<string, string> = {
     sonnet: 'claude-sonnet-4-6',
     opus: 'claude-opus-4-7',

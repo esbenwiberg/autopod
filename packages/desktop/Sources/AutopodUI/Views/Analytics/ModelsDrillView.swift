@@ -105,6 +105,9 @@ struct ModelsDrillView: View {
                     id: m.model,
                     label: m.model,
                     podCount: m.podCount,
+                    attempts: m.providerAttemptCount,
+                    settledAttempts: m.completedAttemptCount,
+                    deliveries: m.deliveredPrCount,
                     successRate: m.successRate,
                     dollarPerPr: m.dollarPerPr,
                     scoredCount: m.scoredCount,
@@ -119,6 +122,9 @@ struct ModelsDrillView: View {
                     id: rt.runtime.rawValue,
                     label: rt.runtime.rawValue,
                     podCount: rt.podCount,
+                    attempts: rt.providerAttemptCount,
+                    settledAttempts: rt.completedAttemptCount,
+                    deliveries: rt.deliveredPrCount,
                     successRate: rt.successRate,
                     dollarPerPr: rt.dollarPerPr,
                     scoredCount: rt.scoredCount,
@@ -408,6 +414,9 @@ private struct LeaderboardRow: Identifiable {
     let id: String
     let label: String
     let podCount: Int
+    let attempts: Int?
+    let settledAttempts: Int?
+    let deliveries: Int?
     let successRate: Double
     let dollarPerPr: Double?
     let scoredCount: Int
@@ -430,6 +439,9 @@ private struct ModelsLeaderboardSectionView: View {
         VStack(alignment: .leading, spacing: 8) {
             Text("Leaderboard")
                 .font(.headline)
+            Text("Pods are distinct within each bucket. Mixed-model tasks appear in multiple buckets. Completion is a lifecycle outcome; $/PR uses distinct recorded deliveries. Historical cohorts do not establish model superiority.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
 
             if rows.isEmpty {
                 Text("No terminal pods in last \(days) days.")
@@ -452,7 +464,7 @@ private struct ModelsLeaderboardSectionView: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
             Text("Pods")
                 .frame(width: 55, alignment: .trailing)
-            Text("Success")
+            Text("Complete")
                 .frame(width: 60, alignment: .trailing)
             Text("$/PR")
                 .frame(width: 58, alignment: .trailing)
@@ -470,6 +482,9 @@ private struct ModelsLeaderboardSectionView: View {
 
     private func leaderboardRow(_ row: LeaderboardRow) -> some View {
         VStack(alignment: .leading, spacing: 2) {
+            Text("Attempts: \(row.attempts.map(String.init) ?? "unavailable") · settled: \(row.settledAttempts.map(String.init) ?? "unavailable") · PRs: \(row.deliveries.map(String.init) ?? "unavailable")")
+                .font(.caption2)
+                .foregroundStyle(.secondary)
             HStack(spacing: 0) {
                 Text(row.label)
                     .font(.body)
@@ -542,7 +557,7 @@ private struct ModelsComparisonSectionView: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
             } else {
-                axisChart(title: "Success Rate", keyPath: \.successRate, format: { "\(Int(round($0 * 100)))%" })
+                axisChart(title: "Pod Completion", keyPath: \.successRate, format: { "\(Int(round($0 * 100)))%" })
                 axisChart(
                     title: "$/PR",
                     items: rows.enumerated().compactMap { i, r in r.dollarPerPr.map { (r, i, $0) } },

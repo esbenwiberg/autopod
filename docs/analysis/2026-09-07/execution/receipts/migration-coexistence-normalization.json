@@ -1,0 +1,20 @@
+[
+  {
+    "path": "docs/analysis/2026-09-07/execution/receipts/migration-coexistence-final.txt",
+    "originalSha256": "4678486169344456fd6b0b885648fd1be2f08bdf5866fe5cced29143e0a8a729",
+    "normalizedSha256": "4678486169344456fd6b0b885648fd1be2f08bdf5866fe5cced29143e0a8a729",
+    "normalization": "rstrip lines and final newline"
+  },
+  {
+    "path": "docs/analysis/2026-09-07/execution/receipts/migration-coexistence-green.txt",
+    "originalSha256": "935ad95149e8162be187607acca38f95e43dd82e8882ed2007fef822309577fe",
+    "normalizedSha256": "935ad95149e8162be187607acca38f95e43dd82e8882ed2007fef822309577fe",
+    "normalization": "rstrip lines and final newline"
+  },
+  {
+    "path": "docs/analysis/2026-09-07/execution/receipts/migration-coexistence-red.txt",
+    "originalSha256": "d5a06eabc882e3808e9b6a80dc905078ac10f329a31a0a5846d55863d48c18b3",
+    "normalizedSha256": "d5a06eabc882e3808e9b6a80dc905078ac10f329a31a0a5846d55863d48c18b3",
+    "normalization": "rstrip lines and final newline"
+  }
+]

@@ -1,0 +1,41 @@
+[1/1] Compiling plugin GenerateManual
+[2/2] Compiling plugin GenerateDoccReference
+Building for debugging...
+[2/9] Write sources
+[5/9] Write swift-version--58304C5D6DBC2206.txt
+[7/11] Emitting module AutopodClient
+[8/11] Compiling AutopodClient ExecutionProvenance.swift
+[9/12] Compiling AutopodClient DaemonAPI.swift
+[10/18] Compiling AutopodUI PodActions.swift
+[11/18] Compiling AutopodUI DispatchPreflightCard.swift
+[12/18] Emitting module AutopodUI
+[13/18] Compiling AutopodUI SummaryTab.swift
+[14/21] Emitting module AutopodUITests
+[15/21] Compiling AutopodDesktop ActionHandler.swift
+[16/21] Emitting module AutopodDesktop
+[16/21] Write Objects.LinkFileList
+[18/23] Compiling AutopodClientTests DispatchPreflightTests.swift
+[19/23] Emitting module AutopodClientTests
+[19/23] Write Objects.LinkFileList
+[20/23] Linking AutopodDesktopExe
+[21/23] Applying AutopodDesktopExe
+[22/23] Linking AutopodDesktopPackageTests
+Build complete! (14.45s)
+Test Suite 'Selected tests' started at 2026-09-08 10:48:22.021.
+Test Suite 'AutopodDesktopPackageTests.xctest' started at 2026-09-08 10:48:22.028.
+Test Suite 'AutopodDesktopPackageTests.xctest' passed at 2026-09-08 10:48:22.028.
+	 Executed 0 tests, with 0 failures (0 unexpected) in 0.000 (0.000) seconds
+Test Suite 'Selected tests' passed at 2026-09-08 10:48:22.029.
+	 Executed 0 tests, with 0 failures (0 unexpected) in 0.000 (0.007) seconds
+◇ Test run started.
+↳ Testing Library Version: 1902
+↳ Target Platform: arm64e-apple-macos14.0
+◇ Test nativeContractPreservesDeclaredExecutionRequirements() started.
+◇ Test executionProvenanceKeepsValidationPurposeAndSupportsEarlierRecords() started.
+◇ Test rerunTemplateSurvivesDurableDraftWithoutApprovalOrLineage() started.
+◇ Test dispatchReceiptKeepsReviewRequiredAndMissingEvidenceDistinct() started.
+✔ Test dispatchReceiptKeepsReviewRequiredAndMissingEvidenceDistinct() passed after 0.001 seconds.
+✔ Test nativeContractPreservesDeclaredExecutionRequirements() passed after 0.001 seconds.
+✔ Test executionProvenanceKeepsValidationPurposeAndSupportsEarlierRecords() passed after 0.001 seconds.
+✔ Test rerunTemplateSurvivesDurableDraftWithoutApprovalOrLineage() passed after 0.001 seconds.
+✔ Test run with 4 tests in 0 suites passed after 0.001 seconds.

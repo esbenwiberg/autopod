@@ -1,0 +1,47 @@
+
+ RUN  v4.1.11 /private/tmp/autopod-durable-execution/packages/mobile-web
+
+ ❯ src/components/TaskExecutionPanel.test.tsx (2 tests | 2 failed) 22ms
+   × keeps unavailable accounting explicit and refreshes delivery observations (available: true) 19ms
+   × keeps unavailable accounting explicit and refreshes delivery observations (available: false) 3ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 2 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/components/TaskExecutionPanel.test.tsx > keeps unavailable accounting explicit and refreshes delivery observations (available: true)
+AssertionError: expected 'Task accountingLogical task: logical-…' to contain 'Source-bound merges: 1 merged PRs · 3…'
+
+Expected: "Source-bound merges: 1 merged PRs · 3 recorded requests · 1 unresolved of 2 PRs"
+Received: "Task accountingLogical task: logical-originalExecution: fix-execution2 pods · 3 recorded agent runs · 4 provider attempts · 5 validations1 PR receipts · 1 unresolved of 2 intentsDurable ledger only; historical PR URLs are not reconstructed receipts.Last recorded PR status: 0 open · 1 merged · 0 closed · 0 unavailableCurrent provider status unverified.Recorded tokens: 100 / 100Stored task cost subtotal: $1.2500 · partial telemetryBilling unverified; stored amounts can include estimates.Known estimates: $0.5000 · 1 identified phases with unavailable cost · 1 pods with conflicting attributionroot: Stored phase costs conflict; no proportional allocation applied.2 additional cost diagnostics omitted.Task token accounting incomplete; reconcile prior execution telemetry.Infrastructure cost unavailableRefresh task accounting"
+
+ ❯ src/components/TaskExecutionPanel.test.tsx:113:37
+    111|           : 'PR disposition observations unavailable.',
+    112|       );
+    113|       expect(container.textContent).toContain(hasDisposition
+       |                                     ^
+    114|         ? 'Source-bound merges: 1 merged PRs · 3 recorded requests · 1…
+    115|         : 'Source-bound merge evidence unavailable.');
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/2]⎯
+
+ FAIL  src/components/TaskExecutionPanel.test.tsx > keeps unavailable accounting explicit and refreshes delivery observations (available: false)
+AssertionError: expected 'Task accountingLogical task: logical-…' to contain 'Source-bound merge evidence unavailab…'
+
+Expected: "Source-bound merge evidence unavailable."
+Received: "Task accountingLogical task: logical-originalExecution: fix-execution2 pods · 3 recorded agent runs · 4 provider attempts · 5 validations1 PR receipts · 1 unresolved of 2 intentsDurable ledger only; historical PR URLs are not reconstructed receipts.PR disposition observations unavailable.Current provider status unverified.Recorded tokens: 100 / 100Stored task cost subtotal: $1.2500 · partial telemetryBilling unverified; stored amounts can include estimates.Known estimates: $0.5000 · 1 identified phases with unavailable cost · 1 pods with conflicting attributionroot: Stored phase costs conflict; no proportional allocation applied.2 additional cost diagnostics omitted.Task token accounting incomplete; reconcile prior execution telemetry.Infrastructure cost unavailableRefresh task accounting"
+
+ ❯ src/components/TaskExecutionPanel.test.tsx:113:37
+    111|           : 'PR disposition observations unavailable.',
+    112|       );
+    113|       expect(container.textContent).toContain(hasDisposition
+       |                                     ^
+    114|         ? 'Source-bound merges: 1 merged PRs · 3 recorded requests · 1…
+    115|         : 'Source-bound merge evidence unavailable.');
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/2]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  2 failed (2)
+   Start at  07:14:51
+   Duration  403ms (transform 23ms, setup 12ms, import 34ms, tests 22ms, environment 244ms)
+

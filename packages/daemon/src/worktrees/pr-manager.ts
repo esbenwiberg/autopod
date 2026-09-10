@@ -6,8 +6,10 @@ import type {
   CiFailureDetail,
   CreatePrConfig,
   CreatePrResult,
+  FoundPr,
   MergePrConfig,
   MergePrResult,
+  MergePrTarget,
   PrManager,
   PrMergeStatus,
   ReviewCommentDetail,
@@ -15,6 +17,17 @@ import type {
   ReviewFeedbackReplyResult,
 } from '../interfaces/pr-manager.js';
 import type { ProfileLlmClientDeps } from '../providers/llm-client.js';
+import { parseGitHubRepoUrl, parseGitHubPrUrl as parsePrUrl } from './github-url-identity.js';
+import {
+  assertMergeRepository,
+  assertMergeSource,
+  assertMergeTarget,
+  confirmedMergeResult,
+  expectedMergeSource,
+  mergeReconciliation,
+  sourceCommit,
+} from './merge-source-identity.js';
+export { parseGitHubRepoUrl } from './github-url-identity.js';
 import { buildPrBody } from './pr-body-builder.js';
 import {
   type PrNarrativeResult,
@@ -291,11 +304,57 @@ export class GhPrManager implements PrManager {
     this.githubAuth = config.githubAuth ?? new GhCliDaemonGitHubAuth();
   }
 
-  private async execGh(args: string[], options: { cwd?: string; timeout: number }) {
+  private async execGh(
+    args: string[],
+    options: { cwd?: string; timeout: number; onPrepared?: () => void },
+  ) {
     const credential = await this.githubAuth.resolveCredential();
     const { GH_TOKEN: _ambientGh, GITHUB_TOKEN: _ambientGitHub, ...hostEnv } = process.env;
     const env = { ...hostEnv, GH_TOKEN: credential.token };
-    return execFileAsync('gh', args, { ...options, env });
+    const { onPrepared, ...execOptions } = options;
+    onPrepared?.();
+    return execFileAsync('gh', args, { ...execOptions, env });
+  }
+
+  async findPr(
+    config: Pick<CreatePrConfig, 'worktreePath' | 'repoUrl' | 'branch' | 'baseBranch'>,
+  ): Promise<FoundPr | null> {
+    const { stdout } = await this.execGh(
+      [
+        'pr',
+        'list',
+        '--state',
+        'all',
+        '--head',
+        config.branch,
+        '--base',
+        config.baseBranch,
+        '--limit',
+        '2',
+        '--json',
+        'url,state,headRefName,baseRefName,isCrossRepository',
+        ...(config.repoUrl ? ['--repo', config.repoUrl] : []),
+      ],
+      { cwd: config.worktreePath, timeout: 30000 },
+    );
+    const rows = JSON.parse(stdout);
+    if (!Array.isArray(rows) || rows.length > 1)
+      throw new Error('PR delivery lookup is ambiguous or malformed');
+    if (!rows.length) return null;
+    const row = rows[0];
+    if (
+      !row ||
+      typeof row.url !== 'string' ||
+      row.headRefName !== config.branch ||
+      row.baseRefName !== config.baseBranch ||
+      row.isCrossRepository !== false ||
+      !['OPEN', 'MERGED', 'CLOSED'].includes(row.state)
+    )
+      throw new Error('PR delivery lookup did not confirm exact repository/head/base');
+    return {
+      url: row.url,
+      disposition: row.state === 'OPEN' ? 'open' : row.state === 'MERGED' ? 'merged' : 'closed',
+    };
   }
 
   async createPr(config: CreatePrConfig): Promise<CreatePrResult> {
@@ -376,13 +435,55 @@ export class GhPrManager implements PrManager {
   }
 
   async mergePr(config: MergePrConfig): Promise<MergePrResult> {
+    const expectedHeadSha = expectedMergeSource(config.expectedHeadSha);
+    if (config.expectedTarget && !expectedHeadSha)
+      mergeReconciliation('An exact merge target requires a confirmed source commit.');
+    const checkTarget = async () => {
+      const requested = parsePrUrl(config.prUrl);
+      assertMergeRepository(
+        config.expectedTarget,
+        `https://github.com/${requested.owner}/${requested.repo}`,
+      );
+      const { stdout } = await this.execGh(
+        [
+          'pr',
+          'view',
+          config.prUrl,
+          '--json',
+          'url,state,headRefOid,headRefName,baseRefName,isCrossRepository',
+        ],
+        { timeout: 15_000 },
+      );
+      const observed = JSON.parse(stdout) as {
+        url?: string;
+        state?: string;
+        headRefOid?: string;
+        headRefName?: string;
+        baseRefName?: string;
+        isCrossRepository?: boolean;
+      } | null;
+      if (!observed?.url || observed.isCrossRepository !== false)
+        mergeReconciliation('The PR source repository is unavailable or differs from its target.');
+      const target = parsePrUrl(observed.url);
+      if (target.number !== requested.number)
+        mergeReconciliation('The provider returned a different PR identity.');
+      assertMergeSource(expectedHeadSha, observed.headRefOid);
+      assertMergeTarget(config.expectedTarget, {
+        repository: `https://github.com/${target.owner}/${target.repo}`,
+        branch: observed.headRefName,
+        baseBranch: observed.baseRefName,
+      });
+      if (!['OPEN', 'CLOSED', 'MERGED'].includes(observed.state ?? ''))
+        mergeReconciliation('The provider PR disposition is unavailable.');
+      return observed.state;
+    };
+    if (config.expectedTarget) await checkTarget();
     const args = [
       'pr',
       'merge',
       config.prUrl,
       config.squash ? '--squash' : '--merge',
-      '--delete-branch',
-      '--auto',
+      ...(expectedHeadSha ? ['--match-head-commit', expectedHeadSha] : ['--auto']),
     ];
 
     this.logger.info(
@@ -393,26 +494,36 @@ export class GhPrManager implements PrManager {
     try {
       await this.execGh(args, {
         timeout: 30_000,
+        onPrepared: config.onPrepared,
       });
     } catch (err) {
       this.logger.error({ err, prUrl: config.prUrl }, 'Failed to merge pull request');
       throw err;
     }
 
+    if (config.expectedTarget) {
+      const state = await checkTarget();
+      if (state === 'CLOSED') mergeReconciliation('The requested PR closed without merging.');
+      return confirmedMergeResult(config, state === 'MERGED', false);
+    }
+
     // Check if the merge completed immediately or auto-merge was scheduled
     const status = await this.getPrStatus({
       prUrl: config.prUrl,
     });
+    assertMergeSource(expectedHeadSha, status.headSha);
     if (status.merged) {
       this.logger.info({ prUrl: config.prUrl }, 'Pull request merged immediately');
-      return { merged: true, autoMergeScheduled: false };
+      return confirmedMergeResult(config, true, false);
     }
 
     this.logger.info(
       { prUrl: config.prUrl, blockReason: status.blockReason },
-      'Auto-merge scheduled — PR not yet mergeable',
+      expectedHeadSha
+        ? 'Source-bound merge remains pending'
+        : 'Auto-merge requested — PR not yet mergeable',
     );
-    return { merged: false, autoMergeScheduled: true };
+    return { merged: false, autoMergeScheduled: expectedHeadSha === undefined };
   }
 
   async getPrStatus(config: { prUrl: string; worktreePath?: string }): Promise<PrMergeStatus> {
@@ -421,7 +532,7 @@ export class GhPrManager implements PrManager {
       'view',
       config.prUrl,
       '--json',
-      'state,mergedAt,statusCheckRollup,reviewDecision,autoMergeRequest',
+      'state,mergedAt,statusCheckRollup,reviewDecision,autoMergeRequest,headRefOid,url,headRefName,baseRefName,isCrossRepository',
     ];
 
     const { stdout } = await this.execGh(args, {
@@ -429,6 +540,11 @@ export class GhPrManager implements PrManager {
     });
 
     const pr = JSON.parse(stdout) as {
+      url?: string;
+      headRefName?: string;
+      baseRefName?: string;
+      isCrossRepository?: boolean;
+      headRefOid?: string;
       state: string;
       mergedAt: string | null;
       statusCheckRollup: Array<{ name: string; status: string; conclusion: string }> | null;
@@ -436,8 +552,26 @@ export class GhPrManager implements PrManager {
       autoMergeRequest: unknown | null;
     };
 
+    let sourceTarget: MergePrTarget | undefined;
+    if (pr.url && pr.headRefName && pr.baseRefName && pr.isCrossRepository === false) {
+      const target = parsePrUrl(pr.url);
+      const requested = parsePrUrl(config.prUrl);
+      if (
+        target.number === requested.number &&
+        target.owner.toLowerCase() === requested.owner.toLowerCase() &&
+        target.repo.toLowerCase() === requested.repo.toLowerCase()
+      )
+        sourceTarget = {
+          repository: `https://github.com/${target.owner}/${target.repo}`,
+          branch: pr.headRefName,
+          baseBranch: pr.baseRefName,
+        };
+    }
+
     if (pr.state === 'MERGED') {
       return {
+        headSha: sourceCommit(pr.headRefOid),
+        sourceTarget,
         merged: true,
         open: false,
         blockReason: null,
@@ -449,6 +583,8 @@ export class GhPrManager implements PrManager {
 
     if (pr.state === 'CLOSED') {
       return {
+        headSha: sourceCommit(pr.headRefOid),
+        sourceTarget,
         merged: false,
         open: false,
         blockReason: 'PR was closed without merging',
@@ -562,6 +698,8 @@ export class GhPrManager implements PrManager {
     }
 
     return {
+      headSha: sourceCommit(pr.headRefOid),
+      sourceTarget,
       merged: false,
       open: true,
       blockReason: reasons.length > 0 ? reasons.join('; ') : 'Waiting for merge conditions',
@@ -654,23 +792,33 @@ export class GhPrManager implements PrManager {
   }
 }
 
+interface GitHubTargetObservation {
+  head?: { sha?: string; ref?: string; repo?: { full_name?: string } | null };
+  base?: { ref?: string; repo?: { full_name?: string } | null };
+}
+function assertGitHubTarget(
+  expected: MergePrTarget | undefined,
+  pr: GitHubTargetObservation | null,
+) {
+  if (!expected) return;
+  assertMergeRepository(
+    expected,
+    pr?.head?.repo?.full_name ? `https://github.com/${pr.head.repo.full_name}` : undefined,
+  );
+  assertMergeTarget(expected, {
+    repository: pr?.base?.repo?.full_name
+      ? `https://github.com/${pr.base.repo.full_name}`
+      : undefined,
+    branch: pr?.head?.ref,
+    baseBranch: pr?.base?.ref,
+  });
+}
+
 export interface GitHubApiPrManagerConfig {
   pat: string;
   logger: Logger;
   /** Stores so PR-body LLM helpers resolve live provider-account credentials. */
   llmDeps?: ProfileLlmClientDeps;
-}
-
-export function parseGitHubRepoUrl(repoUrl: string): { owner: string; repo: string } {
-  const httpsMatch = repoUrl.match(/github\.com[/:]([^/]+)\/([^/.]+?)(?:\.git)?$/);
-  if (!httpsMatch) throw new Error(`Cannot parse GitHub repo URL: ${repoUrl}`);
-  return { owner: httpsMatch[1], repo: httpsMatch[2] };
-}
-
-function parsePrUrl(prUrl: string): { owner: string; repo: string; number: number } {
-  const match = prUrl.match(/github\.com\/([^/]+)\/([^/]+)\/pull\/(\d+)/);
-  if (!match) throw new Error(`Cannot parse PR URL: ${prUrl}`);
-  return { owner: match[1], repo: match[2], number: Number.parseInt(match[3], 10) };
 }
 
 function parseGitHubCommentFeedbackId(feedbackId: string): number | null {
@@ -696,6 +844,42 @@ export class GitHubApiPrManager implements PrManager {
       Accept: 'application/vnd.github+json',
       'X-GitHub-Api-Version': '2022-11-28',
       'Content-Type': 'application/json',
+    };
+  }
+
+  async findPr(
+    config: Pick<CreatePrConfig, 'worktreePath' | 'repoUrl' | 'branch' | 'baseBranch'>,
+  ): Promise<FoundPr | null> {
+    if (!config.repoUrl) throw new Error('repoUrl is required for delivery lookup');
+    const { owner, repo } = parseGitHubRepoUrl(config.repoUrl);
+    const query = new URLSearchParams({
+      state: 'all',
+      head: `${owner}:${config.branch}`,
+      base: config.baseBranch,
+      per_page: '2',
+    });
+    const response = await fetch(`https://api.github.com/repos/${owner}/${repo}/pulls?${query}`, {
+      headers: this.headers,
+      signal: AbortSignal.timeout(30000),
+    });
+    if (!response.ok) throw new Error(`PR delivery lookup failed (HTTP ${response.status})`);
+    const rows = await response.json();
+    if (!Array.isArray(rows) || rows.length > 1)
+      throw new Error('PR delivery lookup is ambiguous or malformed');
+    if (!rows.length) return null;
+    const row = rows[0];
+    if (
+      !row ||
+      typeof row.html_url !== 'string' ||
+      row.head?.ref !== config.branch ||
+      row.base?.ref !== config.baseBranch ||
+      row.head?.repo?.full_name?.toLowerCase() !== `${owner}/${repo}`.toLowerCase() ||
+      !['open', 'closed'].includes(row.state)
+    )
+      throw new Error('PR delivery lookup did not confirm exact repository/head/base');
+    return {
+      url: row.html_url,
+      disposition: row.state === 'open' ? 'open' : row.merged_at ? 'merged' : 'closed',
     };
   }
 
@@ -772,7 +956,12 @@ export class GitHubApiPrManager implements PrManager {
   }
 
   async mergePr(config: MergePrConfig): Promise<MergePrResult> {
+    const expectedHeadSha = expectedMergeSource(config.expectedHeadSha);
     const { owner, repo, number } = parsePrUrl(config.prUrl);
+
+    if (config.expectedTarget && !expectedHeadSha)
+      mergeReconciliation('An exact merge target requires a confirmed source commit.');
+    assertMergeRepository(config.expectedTarget, `https://github.com/${owner}/${repo}`);
 
     this.logger.info(
       { prUrl: config.prUrl, squash: config.squash ?? false },
@@ -789,15 +978,20 @@ export class GitHubApiPrManager implements PrManager {
       const text = await prResponse.text();
       throw new Error(`GitHub API error fetching PR ${prResponse.status}: ${text}`);
     }
-    const pr = (await prResponse.json()) as { head: { ref: string }; node_id: string };
-    const headBranch = pr.head.ref;
+    const pr = (await prResponse.json()) as GitHubTargetObservation | null;
+    assertMergeSource(expectedHeadSha, pr?.head?.sha);
+    assertGitHubTarget(config.expectedTarget, pr);
 
+    config.onPrepared?.();
     const mergeResponse = await fetch(
       `https://api.github.com/repos/${owner}/${repo}/pulls/${number}/merge`,
       {
         method: 'PUT',
         headers: this.headers,
-        body: JSON.stringify({ merge_method: config.squash ? 'squash' : 'merge' }),
+        body: JSON.stringify({
+          merge_method: config.squash ? 'squash' : 'merge',
+          sha: expectedHeadSha,
+        }),
       },
     );
 
@@ -812,20 +1006,28 @@ export class GitHubApiPrManager implements PrManager {
       throw new Error(`GitHub API merge error ${mergeResponse.status}: ${text}`);
     }
 
-    const deleteResponse = await fetch(
-      `https://api.github.com/repos/${owner}/${repo}/git/refs/heads/${headBranch}`,
-      { method: 'DELETE', headers: this.headers },
-    );
+    const confirmation = (await mergeResponse.json()) as { merged?: unknown } | null;
+    if (confirmation?.merged !== true)
+      mergeReconciliation('GitHub did not confirm that the requested merge completed.');
 
-    if (!deleteResponse.ok && deleteResponse.status !== 422) {
-      this.logger.warn(
-        { status: deleteResponse.status, branch: headBranch },
-        'Failed to delete branch after merge',
+    if (config.expectedTarget) {
+      const response = await fetch(
+        `https://api.github.com/repos/${owner}/${repo}/pulls/${number}`,
+        { headers: this.headers },
       );
+      if (!response.ok) mergeReconciliation('The final PR target could not be observed.');
+      const final = (await response.json()) as
+        | (GitHubTargetObservation & { merged?: unknown })
+        | null;
+      if (final?.merged !== true) mergeReconciliation('The final PR disposition is unconfirmed.');
+      assertMergeSource(expectedHeadSha, final.head?.sha);
+      assertGitHubTarget(config.expectedTarget, final);
     }
 
+    // Source branch cleanup requires its own identity and receipt; a successful
+    // merge does not authorize deleting a ref that may since have advanced.
     this.logger.info({ prUrl: config.prUrl }, 'Pull request merged');
-    return { merged: true, autoMergeScheduled: false };
+    return confirmedMergeResult(config, true, false);
   }
 
   async getPrStatus(config: { prUrl: string }): Promise<PrMergeStatus> {
@@ -839,14 +1041,32 @@ export class GitHubApiPrManager implements PrManager {
       throw new Error(`GitHub API error ${response.status}: ${text}`);
     }
 
-    const pr = (await response.json()) as {
+    const pr = (await response.json()) as GitHubTargetObservation & {
+      number?: number;
       state: string;
       merged: boolean;
       head: { sha: string };
     };
+    let sourceTarget: MergePrTarget | undefined;
+    if (pr.number === number && pr.head?.ref && pr.base?.ref && pr.base.repo?.full_name) {
+      const target = {
+        repository: `https://github.com/${pr.base.repo.full_name}`,
+        branch: pr.head.ref,
+        baseBranch: pr.base.ref,
+      };
+      try {
+        assertMergeRepository(target, `https://github.com/${owner}/${repo}`);
+        assertGitHubTarget(target, pr);
+        sourceTarget = target;
+      } catch {
+        /* unavailable identity */
+      }
+    }
 
-    if (pr.merged) {
+    if (pr.merged === true) {
       return {
+        headSha: sourceCommit(pr.head?.sha),
+        sourceTarget,
         merged: true,
         open: false,
         blockReason: null,
@@ -857,6 +1077,8 @@ export class GitHubApiPrManager implements PrManager {
     }
     if (pr.state === 'closed') {
       return {
+        headSha: sourceCommit(pr.head?.sha),
+        sourceTarget,
         merged: false,
         open: false,
         blockReason: 'PR was closed without merging',
@@ -1022,6 +1244,8 @@ export class GitHubApiPrManager implements PrManager {
     }
 
     return {
+      headSha: sourceCommit(pr.head?.sha),
+      sourceTarget,
       merged: false,
       open: true,
       blockReason: reasons.length > 0 ? reasons.join('; ') : 'Waiting for merge conditions',

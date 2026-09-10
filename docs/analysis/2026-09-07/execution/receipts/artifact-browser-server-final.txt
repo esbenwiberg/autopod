@@ -1,0 +1,3 @@
+http://127.0.0.1:58792/mobile/
+{"scope":"local fixture only","action":"collect-artifacts","attempt":1,"workerStarts":0}
+{"scope":"local fixture only","action":"collect-artifacts","attempt":2,"workerStarts":0}

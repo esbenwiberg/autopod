@@ -1,0 +1,10 @@
+{
+  "value": [
+    {
+      "code": "ProvisioningState/succeeded",
+      "displayStatus": "Provisioning succeeded",
+      "level": "Info",
+      "message": "Enable succeeded: \n[stdout]\n{\"service\": {\"MainPID\": \"136112\", \"Result\": \"success\", \"NRestarts\": \"0\", \"ExecMainStartTimestamp\": \"Thu 2026-09-10 09:01:49 UTC\", \"ExecMainCode\": \"0\", \"ExecMainStatus\": \"0\", \"MemoryCurrent\": \"1103478784\", \"MemoryMax\": \"infinity\"}, \"events\": [{\"msg\": \"haproxy deny receiver exit unverified \\u2014 denial visibility lost for this pod\", \"type\": \"AutopodError\", \"code\": \"EXEC_EXIT_UNVERIFIED\", \"message\": \"Streaming exec exit was not observed; verify termination before another execution.\", \"frames\": [\"    at unverifiedExecExit (file:///opt/autopod/releases/089442b6/packages/daemon/dist/chunk-YXCZIAJ5.js:1689:10)\", \"    at file:///opt/autopod/releases/089442b6/packages/daemon/dist/chunk-YXCZIAJ5.js:2077:36\"]}]}\n\n[stderr]\n"
+    }
+  ]
+}

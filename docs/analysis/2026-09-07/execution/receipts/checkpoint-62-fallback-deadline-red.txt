@@ -1,0 +1,26 @@
+
+ RUN  v4.1.11 /private/tmp/autopod-durable-execution/packages/daemon
+
+ ❯ src/validation/review-codex-runner.test.ts (15 tests | 1 failed | 14 skipped) 8ms
+     × subtracts streaming negotiation time before buffered review fallback 7ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/validation/review-codex-runner.test.ts > runCodexReview > subtracts streaming negotiation time before buffered review fallback
+AssertionError: expected 100 to be less than or equal to 70
+ ❯ src/validation/review-codex-runner.test.ts:121:50
+    119|       expect(harness.execs[0]?.command[0]).toBe('sh');
+    120|       expect(harness.execs[0]?.options?.timeout).toBeGreaterThan(0);
+    121|       expect(harness.execs[0]?.options?.timeout).toBeLessThanOrEqual(7…
+       |                                                  ^
+    122|     } finally {
+    123|       vi.useRealTimers();
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 14 skipped (15)
+   Start at  11:13:17
+   Duration  458ms (transform 137ms, setup 0ms, import 221ms, tests 8ms, environment 0ms)
+

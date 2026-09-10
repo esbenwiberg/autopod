@@ -1,0 +1,78 @@
+
+ RUN  v4.1.10 /private/tmp/autopod-durable-execution
+
+ ❯ packages/daemon/src/worktrees/durable-pr-manager.test.ts (5 tests | 5 failed) 366ms
+     × serializes duplicate completion across wrappers and counts one immutable receipt 62ms
+     × blocks stale generations and unanswered human input before provider create 36ms
+     × does not turn lookup failure, unsupported lookup or closed PRs into permission to create 39ms
+     × upgrades schema 139 and reconciles in-flight delivery after actual close/reopen 127ms
+     × upgrades schema 144 and reconciles in-flight delivery after actual close/reopen 102ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 5 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  packages/daemon/src/worktrees/durable-pr-manager.test.ts > durable PR delivery boundary > serializes duplicate completion across wrappers and counts one immutable receipt
+TypeError: Cannot read properties of undefined (reading 'agentMode')
+ ❯ Object.<anonymous> packages/daemon/src/pods/pod-repository.ts:693:28
+    691|         contract: pod.contract ? JSON.stringify(pod.contract) : null,
+    692|         outputMode: legacyOutputMode,
+    693|         agentMode: podOpts.agentMode,
+       |                            ^
+    694|         outputTarget: podOpts.output,
+    695|         validate: podOpts.validate ? 1 : 0,
+ ❯ Object.sqliteTransaction [as insert] node_modules/.pnpm/better-sqlite3@11.10.0/node_modules/better-sqlite3/lib/methods/transaction.js:65:24
+ ❯ fixture packages/daemon/src/worktrees/durable-pr-manager.test.ts:16:20
+ ❯ packages/daemon/src/worktrees/durable-pr-manager.test.ts:50:15
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/5]⎯
+
+ FAIL  packages/daemon/src/worktrees/durable-pr-manager.test.ts > durable PR delivery boundary > blocks stale generations and unanswered human input before provider create
+TypeError: Cannot read properties of undefined (reading 'agentMode')
+ ❯ Object.<anonymous> packages/daemon/src/pods/pod-repository.ts:693:28
+    691|         contract: pod.contract ? JSON.stringify(pod.contract) : null,
+    692|         outputMode: legacyOutputMode,
+    693|         agentMode: podOpts.agentMode,
+       |                            ^
+    694|         outputTarget: podOpts.output,
+    695|         validate: podOpts.validate ? 1 : 0,
+ ❯ Object.sqliteTransaction [as insert] node_modules/.pnpm/better-sqlite3@11.10.0/node_modules/better-sqlite3/lib/methods/transaction.js:65:24
+ ❯ fixture packages/daemon/src/worktrees/durable-pr-manager.test.ts:16:20
+ ❯ packages/daemon/src/worktrees/durable-pr-manager.test.ts:74:15
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/5]⎯
+
+ FAIL  packages/daemon/src/worktrees/durable-pr-manager.test.ts > durable PR delivery boundary > does not turn lookup failure, unsupported lookup or closed PRs into permission to create
+TypeError: Cannot read properties of undefined (reading 'agentMode')
+ ❯ Object.<anonymous> packages/daemon/src/pods/pod-repository.ts:693:28
+    691|         contract: pod.contract ? JSON.stringify(pod.contract) : null,
+    692|         outputMode: legacyOutputMode,
+    693|         agentMode: podOpts.agentMode,
+       |                            ^
+    694|         outputTarget: podOpts.output,
+    695|         validate: podOpts.validate ? 1 : 0,
+ ❯ Object.sqliteTransaction [as insert] node_modules/.pnpm/better-sqlite3@11.10.0/node_modules/better-sqlite3/lib/methods/transaction.js:65:24
+ ❯ fixture packages/daemon/src/worktrees/durable-pr-manager.test.ts:16:20
+ ❯ packages/daemon/src/worktrees/durable-pr-manager.test.ts:92:15
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/5]⎯
+
+ FAIL  packages/daemon/src/worktrees/durable-pr-manager.test.ts > durable PR delivery boundary > upgrades schema 139 and reconciles in-flight delivery after actual close/reopen
+ FAIL  packages/daemon/src/worktrees/durable-pr-manager.test.ts > durable PR delivery boundary > upgrades schema 144 and reconciles in-flight delivery after actual close/reopen
+TypeError: Cannot read properties of undefined (reading 'agentMode')
+ ❯ Object.<anonymous> packages/daemon/src/pods/pod-repository.ts:693:28
+    691|         contract: pod.contract ? JSON.stringify(pod.contract) : null,
+    692|         outputMode: legacyOutputMode,
+    693|         agentMode: podOpts.agentMode,
+       |                            ^
+    694|         outputTarget: podOpts.output,
+    695|         validate: podOpts.validate ? 1 : 0,
+ ❯ Object.sqliteTransaction [as insert] node_modules/.pnpm/better-sqlite3@11.10.0/node_modules/better-sqlite3/lib/methods/transaction.js:65:24
+ ❯ fixture packages/daemon/src/worktrees/durable-pr-manager.test.ts:16:20
+ ❯ packages/daemon/src/worktrees/durable-pr-manager.test.ts:122:19
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[4/5]⎯
+
+
+ Test Files  1 failed | 1 passed (2)
+      Tests  5 failed | 406 passed (411)
+   Start at  13:01:13
+   Duration  17.33s (transform 782ms, setup 0ms, import 1.41s, tests 16.57s, environment 0ms)

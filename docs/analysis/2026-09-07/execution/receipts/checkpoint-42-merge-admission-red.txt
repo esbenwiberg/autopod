@@ -1,0 +1,85 @@
+
+ RUN  v4.1.11 /private/tmp/autopod-durable-execution/packages/daemon
+
+ ❯ src/worktrees/ado-pr-manager.test.ts (52 tests | 1 failed | 51 skipped) 5ms
+   × honors rejected final ADO admission after reading source and before PATCH 5ms
+ ❯ src/worktrees/pr-manager.test.ts (58 tests | 2 failed | 56 skipped) 6ms
+     × honors a rejected final CLI admission before executing a merge 4ms
+     × honors rejected final API admission after reading the source and before PUT 1ms
+ ❯ src/pods/pod-manager.test.ts (499 tests | 1 failed | 497 skipped) 140ms
+       × rechecks lifecycle ownership after provider preparation before merge mutation 50ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 4 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/worktrees/ado-pr-manager.test.ts > honors rejected final ADO admission after reading source and before PATCH
+AssertionError: expected [Function] to throw error including 'admission rejected' but got 'ADO did not confirm that the requeste…'
+
+Expected: "admission rejected"
+Received: "ADO did not confirm that the requested merge completed. Retain source resources and reconcile the PR before retrying delivery."
+
+ ❯ src/worktrees/ado-pr-manager.test.ts:882:106
+    880|   vi.stubGlobal('fetch', fetchMock);
+    881|   const onPrepared = vi.fn(() => { throw new Error('admission rejected…
+    882|   await expect(new AdoPrManager(BASE_CONFIG).mergePr({ prUrl: PR_URL, …
+       |                                                                                                          ^
+    883|     .rejects.toThrow('admission rejected');
+    884|   expect(fetchMock).toHaveBeenCalledTimes(1);
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/4]⎯
+
+ FAIL  src/worktrees/pr-manager.test.ts > GhPrManager > honors a rejected final CLI admission before executing a merge
+AssertionError: expected [Function] to throw error including 'admission rejected' but got 'Unexpected end of JSON input'
+
+Expected: "admission rejected"
+Received: "Unexpected end of JSON input"
+
+ ❯ src/worktrees/pr-manager.test.ts:172:7
+    170|     await expect(new GhPrManager({ logger, githubAuth }).mergePr({
+    171|       prUrl: 'https://github.com/org/repo/pull/42', expectedHeadSha: '…
+    172|     })).rejects.toThrow('admission rejected');
+       |       ^
+    173|     expect(execCalls).toHaveLength(0);
+    174|     expect(onPrepared).toHaveBeenCalledOnce();
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/4]⎯
+
+ FAIL  src/worktrees/pr-manager.test.ts > GitHubApiPrManager > honors rejected final API admission after reading the source and before PUT
+AssertionError: expected [Function] to throw error including 'admission rejected' but got 'GitHub did not confirm that the reque…'
+
+Expected: "admission rejected"
+Received: "GitHub did not confirm that the requested merge completed. Retain source resources and reconcile the PR before retrying delivery."
+
+ ❯ src/worktrees/pr-manager.test.ts:769:7
+    767|     await expect(new GitHubApiPrManager({ pat: 'local-token', logger }…
+    768|       prUrl: 'https://github.com/org/repo/pull/42', expectedHeadSha: s…
+    769|     })).rejects.toThrow('admission rejected');
+       |       ^
+    770|     expect(fetchMock).toHaveBeenCalledTimes(1);
+    771|     expect(onPrepared).toHaveBeenCalledOnce();
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/4]⎯
+
+ FAIL  src/pods/pod-manager.test.ts > PodManager > approveSession > rechecks lifecycle ownership after provider preparation before merge mutation
+AssertionError: expected true to be false // Object.is equality
+
+- Expected
++ Received
+
+- false
++ true
+
+ ❯ src/pods/pod-manager.test.ts:4778:31
+    4776|       });
+    4777|       await expect(manager.approveSession(pod.id)).rejects.toMatchObje…
+    4778|       expect(mutationStarted).toBe(false);
+       |                               ^
+    4779|       expect(ctx.containerManager.kill).not.toHaveBeenCalled();
+    4780|       expect(manager.getSession(pod.id).containerId).toBe('retained-so…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[4/4]⎯
+
+
+ Test Files  3 failed (3)
+      Tests  4 failed | 1 passed | 604 skipped (609)
+   Start at  00:31:40
+   Duration  1.37s (transform 1.40s, setup 0ms, import 1.95s, tests 151ms, environment 0ms)

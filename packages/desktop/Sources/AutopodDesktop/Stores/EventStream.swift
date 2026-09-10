@@ -330,9 +330,9 @@ public final class EventStream {
       scheduledJobStore?.markCatchupPending(jobId)
       NotificationService.shared.notifyMissedJob(jobId: jobId, jobName: jobName, lastRunAt: lastRunAt)
 
-    case .scheduledJobFired(let jobId, _, let podId):
+    case .scheduledJobFired(let jobId, _, let podId, _):
       Task { await scheduledJobStore?.refreshJob(jobId) }
-      Task { await podStore.refreshSession(podId) }
+      if let podId { Task { await podStore.refreshSession(podId) } }
 
     case .firewallDenied(let podId, let timestamp, let sni, let src):
       handleFirewallDenied(podId: podId, timestamp: timestamp, sni: sni, src: src, eventId: raw._eventId)

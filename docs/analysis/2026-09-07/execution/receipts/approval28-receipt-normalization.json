@@ -1,0 +1,57 @@
+{
+  "approval28-red.txt": {
+    "rawPath": "/private/tmp/autopod-approval28-red.txt",
+    "rawSha256": "e1dbaea1107df8175d9dd1850eb51c9064f0d302525d45e15263e30f4efe6264",
+    "normalization": "trailing whitespace and final blank lines only"
+  },
+  "approval28-mobile-red.txt": {
+    "rawPath": "/private/tmp/autopod-approval28-mobile-red.txt",
+    "rawSha256": "ebaa58c020640b631fbc53db2be7b14f5bcea25cd6acdf029479c65efbbb8261",
+    "normalization": "trailing whitespace and final blank lines only"
+  },
+  "approval28-sandboxed.txt": {
+    "rawPath": "/private/tmp/autopod-approval28-affected.txt",
+    "rawSha256": "9b1969b04a8c591b6711dde73175d6abc75a8d73a4eefa4ebe58ab0c42ec242d",
+    "normalization": "trailing whitespace and final blank lines only"
+  },
+  "approval28-affected.txt": {
+    "rawPath": "/private/tmp/autopod-approval28-affected-authorized.txt",
+    "rawSha256": "49db889f4e7eaf5d3bd4874ec963cfc31bedc605f1a2858e9ecba1e00da907ce",
+    "normalization": "trailing whitespace and final blank lines only"
+  },
+  "approval28-missing-branch.txt": {
+    "rawPath": "/private/tmp/autopod-approval28-missing-branch.txt",
+    "rawSha256": "ff94cd63f6894e81a584b83b17e1ac2d284f4c9b4384c25f5f5b46a6b601c871",
+    "normalization": "trailing whitespace and final blank lines only"
+  },
+  "approval28-http.txt": {
+    "rawPath": "/private/tmp/autopod-approval28-http.txt",
+    "rawSha256": "78ac58df194670d341459bac0df68c67607218af751419aa0483dab3e64b63b9",
+    "normalization": "trailing whitespace and final blank lines only"
+  },
+  "approval28-cli.txt": {
+    "rawPath": "/private/tmp/autopod-approval28-cli.txt",
+    "rawSha256": "717630974717dcf10323f960ead04f67679add364a4527c5f4147770c5cd0461",
+    "normalization": "trailing whitespace and final blank lines only"
+  },
+  "approval28-mobile.txt": {
+    "rawPath": "/private/tmp/autopod-approval28-mobile.txt",
+    "rawSha256": "9d096437e61d4105ab46fc270939d5b7342ad20492102f78dc0b7b66ba1aaea6",
+    "normalization": "trailing whitespace and final blank lines only"
+  },
+  "approval28-swift.txt": {
+    "rawPath": "/private/tmp/autopod-approval28-swift.txt",
+    "rawSha256": "2e902128184cf034c75eb903a3786f820395c2f0b09095cc76ec87d887e48fdd",
+    "normalization": "trailing whitespace and final blank lines only"
+  },
+  "approval28-build.txt": {
+    "rawPath": "/private/tmp/autopod-approval28-build.txt",
+    "rawSha256": "2f43d4064675447deebce8f9d2caffd4b326e159a8fcd34922cd86a440cb6f2c",
+    "normalization": "trailing whitespace and final blank lines only"
+  },
+  "approval28-missing-branch-final.txt": {
+    "rawPath": "/private/tmp/autopod-approval28-missing-branch-final.txt",
+    "rawSha256": "da7f537662a398bebe2a08f2be21882243da8b96316eae38ad815f8f2626a9ad",
+    "normalization": "trailing whitespace and final blank lines only"
+  }
+}

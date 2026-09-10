@@ -1,0 +1,96 @@
+{
+  "applicationCandidate": "15900d9e08a7e4ca786a6ad11ff81820fda14de4",
+  "fixtureHead": "26c378c49248baddb0afebe3a0c698a72a8ac1fe",
+  "method": "Direct CUA interaction with actual built macOS app; synthetic HTTP endpoints at 127.0.0.1:31994",
+  "fixtureSha256": "a61e61212081bcf724d1ed89f544331d7c9e9381395aca38e047f898e904f50e",
+  "screenshots": "Task-owned app/window screenshots observed in this task conversation; no local image exports",
+  "cases": [
+    {
+      "case": "Worker retry authorization",
+      "result": "pass",
+      "observed": [
+        "Initial Rework worker returns HTTP 409 with original-provider-binding reconciliation reason and no worker started",
+        "Counts remain 1 executed / 2 admitted",
+        "Record permission shows Available for latest failure; states Rework is a separate action; counts unchanged",
+        "Separate Rework shows 2 executed / 3 admitted, latest pass and Consumed reason; retry controls disappear"
+      ],
+      "scope": "Synthetic worker-stage admission/receipt presentation, not live provider authentication or execution"
+    },
+    {
+      "case": "Empty delta scan",
+      "result": "pass",
+      "observed": [
+        "Scheduled job remains disabled",
+        "Report status empty_delta; Base and Head hashes equal",
+        "No file rows or unresolved findings",
+        "Secrets/dependencies/judgment skipped_empty with zero findings",
+        "Repair decision controls disabled",
+        "Report completion explicitly separate from patch delivery"
+      ],
+      "scope": "Native empty-delta presentation; actual deterministic collection and persisted-report tests are separate retained evidence"
+    },
+    {
+      "case": "Retained human validation waiver",
+      "result": "pass",
+      "observed": [
+        "Completed task shows Approved with validation waiver and recorded human reason/failed fact",
+        "Current test phase remains Tests failed",
+        "Selecting Run 11 / Cycle 1 / Attempt 1 / fail retains the failed menu label and Tests failed alongside the waiver"
+      ],
+      "scope": "Validation/waiver/history presentation only. This fixture inherits an unrelated awaiting-human finalization field from its base; no completion-transition or pending-decision claim is made from this case."
+    },
+    {
+      "case": "Recorded closed PR disposition",
+      "result": "pass",
+      "observed": [
+        "Failed task explains closed without merging; original resources retained and revalidation required",
+        "First cost fetch has unavailable disposition",
+        "After Overview > Work > Cost refresh: 0 open, 0 merged, 1 closed, 0 unavailable",
+        "Source-bound merged PR count remains zero; recorded closed count one",
+        "Current provider status unverified remains visible in accessibility state",
+        "One receipt and one unresolved of two intents remain distinct"
+      ],
+      "scope": "Recorded synthetic disposition, not live provider status or PR mutation"
+    }
+  ],
+  "fixtureActionEvidence": [
+    {
+      "path": "/pods/local-fixture/validate",
+      "status": 409
+    },
+    {
+      "scope": "local fixture only",
+      "action": "retry-authorization",
+      "stage": "worker",
+      "requestKey": "99A5C0C7-D54E-4BEC-8942-C8909BEC55AF"
+    },
+    {
+      "path": "/pods/local-fixture/retry-authorizations",
+      "status": 200
+    },
+    {
+      "scope": "local fixture only",
+      "action": "rework-authorized-worker",
+      "stage": "worker",
+      "usedByAttemptId": "local-worker-authorized",
+      "providerBindingChanged": false
+    },
+    {
+      "path": "/pods/local-fixture/validate",
+      "status": 200
+    },
+    {
+      "scope": "local fixture only",
+      "action": "read-delivery-disposition",
+      "request": 1
+    },
+    {
+      "scope": "local fixture only",
+      "action": "read-delivery-disposition",
+      "request": 2
+    }
+  ],
+  "macLock": "Cleared after user said now; all four cases executed",
+  "hostedUploadApproved": false,
+  "hostedExecuted": false
+}

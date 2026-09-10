@@ -1,3 +1,21 @@
+public struct RecordDiagnosticResponse: Codable, Equatable, Sendable {
+  public let field: String
+  public let code: String
+}
+
+public struct FinalizationResponse: Codable, Sendable {
+  public let phase: String
+  public let agentSettledAt: String?
+  public let pendingDecisionId: String?
+  public let sourcePreservedAt: String?
+
+  public var operatorSummary: String? {
+    guard agentSettledAt != nil else { return nil }
+    let decision = pendingDecisionId == nil ? "Finalization: \(phase)." : "Human decision remains unanswered; reply before continuation."
+    return "Agent settled. \(decision) Source preservation: \(sourcePreservedAt ?? "not verified")."
+  }
+}
+
 import Foundation
 
 // MARK: - Pod config (mirrors packages/shared/src/types/pod.ts)
@@ -50,6 +68,8 @@ public struct CompactPodPageResponse: Codable, Sendable {
 }
 
 public struct CompactPodResponse: Codable, Sendable {
+  public let recordDiagnostics: [RecordDiagnosticResponse]?
+  public let finalization: FinalizationResponse?
   public let id: String
   public let title: String
   public let taskExcerpt: String?
@@ -77,6 +97,7 @@ public struct CompactPodResponse: Codable, Sendable {
   public let failureReason: String?
   public let mergeBlockReason: String?
   public let lastCorrectionMessage: String?
+  public let lastRecoveryTrigger: String?
   public let pendingEscalationSummary: String?
   public let progressSummary: String?
   public let inputTokens: Int?
@@ -128,6 +149,8 @@ public struct ProviderAttemptResponse: Codable, Sendable {
 }
 
 public struct SessionResponse: Codable, Sendable {
+  public let recordDiagnostics: [RecordDiagnosticResponse]?
+  public let finalization: FinalizationResponse?
   public let id: String
   public let profileName: String
   public let task: String
@@ -180,6 +203,7 @@ public struct SessionResponse: Codable, Sendable {
   public let linkedSessionId: String?
   public let taskSummary: TaskSummaryResponse?
   public let lastCorrectionMessage: String?
+  public let lastRecoveryTrigger: String?
   public let profileSnapshot: ProfileResponse?
   // Series fields (optional for back-compat with pre-#88 responses).
   public let dependsOnPodId: String?
@@ -243,7 +267,7 @@ public struct SessionResponse: Codable, Sendable {
   private enum CodingKeys: String, CodingKey {
     case id, profileName, task, status, model, runtime, executionTarget, branch
     case containerId, worktreePath, validationAttempts, maxValidationAttempts, reworkCount
-    case providerAttempts
+    case providerAttempts, recordDiagnostics, finalization
     case lastValidationResult, validationWaiver, lastValidationFindings, pendingEscalation, escalationCount, skipValidation
     case createdAt, startedAt, runningAt, completedAt, failureReason, updatedAt, userId
     case filesChanged, linesAdded, linesRemoved, previewUrl, hasWebUi, prUrl
@@ -252,7 +276,7 @@ public struct SessionResponse: Codable, Sendable {
     case pod = "options"
     case baseBranch, recoveryWorktreePath, lastHeartbeatAt
     case inputTokens, outputTokens, costUsd, tokenTelemetryAccuracy, commitCount, lastCommitAt
-    case linkedPodId, linkedSessionId, taskSummary, lastCorrectionMessage, profileSnapshot
+    case linkedPodId, linkedSessionId, taskSummary, lastCorrectionMessage, lastRecoveryTrigger, profileSnapshot
     case dependsOnPodId, dependsOnPodIds, seriesId, seriesName, seriesDescription, seriesDesign, dependencyStartedAt
     case artifactsPath
     case requireSidecars, sidecarContainerIds, testRunBranches
@@ -517,6 +541,9 @@ public struct BriefPodMetadata: Sendable, Hashable {
 // MARK: - Create pod request
 
 public struct CreateSessionRequest: Codable, Sendable {
+  public var intentionalRerun: IntentionalRerunRequest?
+  public var specContextFiles: [SpecFilePayload]?
+  public var handoffInstructions: String?
   public var profileName: String
   public var task: String
   public var model: String?
@@ -606,7 +633,7 @@ public struct CreateSessionRequest: Codable, Sendable {
     case pod = "options"
     case startBranch, baseBranch, specFiles, branchPrefix, linkedSessionId, pimGroups
     case dependsOnPodIds, seriesId, seriesName, requireSidecars
-    case referenceRepos
+    case referenceRepos, intentionalRerun, specContextFiles, handoffInstructions
   }
 }
 

@@ -1,0 +1,210 @@
+{
+  "operation": "Remove trailing spaces and extra blank EOF lines only; original committed receipts remain available in f69a70fa. No result or event text changed.",
+  "files": [
+    {
+      "path": "docs/analysis/2026-09-07/diagnostics.txt",
+      "originalSha256": "71e89f80fc7dddd4aba610d203eb13d74c2240a459286b2865aa8b8b0a6f1a4f",
+      "normalizedSha256": "0af2366c64adc4af29e7488b34a26ae25a153903f3647ff04823b7dd78a80c25"
+    },
+    {
+      "path": "docs/analysis/2026-09-07/execution/receipts/analytics-initial.txt",
+      "originalSha256": "0d0403c280d34ab8ce3ee577748065d26cbe6ada234d71ff52ccd3dbc44bb9a4",
+      "normalizedSha256": "41a56ecad912bc383dd28aa7d3954e36eac3f5810ff0ba638e14d98608e6f070"
+    },
+    {
+      "path": "docs/analysis/2026-09-07/execution/receipts/analytics-regression.txt",
+      "originalSha256": "c69a3084a68661d0a5cbf55aa797f805dd4cac71c02faf1ddff11684ea6936e4",
+      "normalizedSha256": "bc7d80458e606b525250aa9faf1fa6314ace40bf9e5de8bcd07b790327bd205f"
+    },
+    {
+      "path": "docs/analysis/2026-09-07/execution/receipts/backup-first-green.txt",
+      "originalSha256": "e5b7e31518cf1c676d4758eeaccd4ebcfc5b438293534a1263bcdbe5920fc79c",
+      "normalizedSha256": "84922b8c50db53a112783ab61e0153545a5138e664418956451362aa59dc51fd"
+    },
+    {
+      "path": "docs/analysis/2026-09-07/execution/receipts/backup-health-cli-green.txt",
+      "originalSha256": "441cd40ff422dd3677d60eb8baa594cdeaaefd83deabde256f750d763059b5a4",
+      "normalizedSha256": "37276e4d5f724f5049b226d790eaba238bb0e0228e8070f7f3523c5bf8f1d57a"
+    },
+    {
+      "path": "docs/analysis/2026-09-07/execution/receipts/backup-red.txt",
+      "originalSha256": "9716e2eb1c70fc7ffe737da0eb5622b2877b9718583604ca16965040627c4086",
+      "normalizedSha256": "36265d170c33aac184c3a5718d334e2d259871e0cb47b0d0a1e591d8d7de310b"
+    },
+    {
+      "path": "docs/analysis/2026-09-07/execution/receipts/backup-restore-green.txt",
+      "originalSha256": "40b50b38c930d1a704e0f95246182f1578f3f478c33050334eb62e35f9a09df9",
+      "normalizedSha256": "86be8a2f231ba1f9a3ccbd68ff07062824d2f6f577e41ecbb1f309f653f1740c"
+    },
+    {
+      "path": "docs/analysis/2026-09-07/execution/receipts/checkpoint-1-build.txt",
+      "originalSha256": "86df9b9731761699e0859e81a3f6437476a4150e01657fa2ffa67c1766dfea05",
+      "normalizedSha256": "626f4a18ad7cab43263492d66834c5701956a0e554f1921dbc7fedfd6b74f0de"
+    },
+    {
+      "path": "docs/analysis/2026-09-07/execution/receipts/checkpoint-1-final-tests.txt",
+      "originalSha256": "120ec73891dabf4e8d3e5ab23ebc517d2540ed79bb9f2a3a09d24e1a6039e3cc",
+      "normalizedSha256": "45502d8582af61cffb0ed168b1600802c5ea141ae711283545386fdddccfabe4"
+    },
+    {
+      "path": "docs/analysis/2026-09-07/execution/receipts/checkpoint-1-full-validation.txt",
+      "originalSha256": "449bc83d36b4059a7c707d8846ddeb1837fcf41ebd75aca153802fcebfabb94a",
+      "normalizedSha256": "62a9c4d301f5cea4b1338c5841731dfe3b590428cea180abade55a94f9cc7340"
+    },
+    {
+      "path": "docs/analysis/2026-09-07/execution/receipts/checkpoint-1-suites.txt",
+      "originalSha256": "bbe5e01c753cb8a20c04c274c7439758304422fc6ce66952e34c16da0a272833",
+      "normalizedSha256": "159565a24fd42621dafe994e4111dd22c7d1edcba0c1cfc918e74dd240d4296d"
+    },
+    {
+      "path": "docs/analysis/2026-09-07/execution/receipts/checkpoint-2-build.txt",
+      "originalSha256": "b7e9096f2464d9ffe02cb34325450156cd97346e9e61f023af4a5d60bd75719e",
+      "normalizedSha256": "5d91de9e1dfc1fe41eca5be82087df2f9bbc08bc214c8308f08694d8f949d320"
+    },
+    {
+      "path": "docs/analysis/2026-09-07/execution/receipts/checkpoint-2-final-focused.txt",
+      "originalSha256": "cf4c2e80e64ebe3a61e1429eeb67d6d01cf4907a1b39065c1559a0056de46460",
+      "normalizedSha256": "002d375397e255907b127dd85612205f78f649a4cc8d0952ba1a26c6d9cc6630"
+    },
+    {
+      "path": "docs/analysis/2026-09-07/execution/receipts/checkpoint-2-focused.txt",
+      "originalSha256": "584937c307a4289c1e9948075e151a231e6347eb3bede9f1d5d6cc6158a10818",
+      "normalizedSha256": "95f1fca3881da5e9393a959ad1a7f7c8f96b56778e19e4b641f5787608ac869f"
+    },
+    {
+      "path": "docs/analysis/2026-09-07/execution/receipts/checkpoint-2-lint.txt",
+      "originalSha256": "2f2a4ec2b9dbae5720b2cd720a446e729feab2f9ba88f0fd169ffbf271708193",
+      "normalizedSha256": "92243da495cd5fdda8448323b3b16aff983025d1ac9e26bca2d6efdfb2b8b825"
+    },
+    {
+      "path": "docs/analysis/2026-09-07/execution/receipts/config-capability-tests.txt",
+      "originalSha256": "9012c3e92f0f5f9226af49d77a453ae0327a9ba9dd2e688e43dd04087f82a693",
+      "normalizedSha256": "b2f228ecb91cb2f435323874deef26ef54468d4e6b8c70223411355143163c7e"
+    },
+    {
+      "path": "docs/analysis/2026-09-07/execution/receipts/delivery-dedup-red.txt",
+      "originalSha256": "382c6aa2f7892d0ec8e298f803da8fea91c48cecdbf2717d6223537686211da4",
+      "normalizedSha256": "c5b277c6900fa5f5574f0efea0c7307e4753d294c7c3b3f5f6b361a9db0f4a6e"
+    },
+    {
+      "path": "docs/analysis/2026-09-07/execution/receipts/diagnostics-baseline-red.txt",
+      "originalSha256": "6810a7d95c0e4b8872250090bd7013bfb80adc84a64f9e09ff4f719346e5d96c",
+      "normalizedSha256": "c283e872f6e3d720ff7aa6270d1983324a415230dd6f7e76b4ae0c52d7032f44"
+    },
+    {
+      "path": "docs/analysis/2026-09-07/execution/receipts/diagnostics-partial-green.txt",
+      "originalSha256": "44e27db9bd7d92f199dfa70741be77816d95f64f07e8b03fd5627941135d1b0a",
+      "normalizedSha256": "2bc6aa306cffe78d2d8bce8e9467978383240de6e09d207564e04abe6fe0d23e"
+    },
+    {
+      "path": "docs/analysis/2026-09-07/execution/receipts/diagnostics-red.txt",
+      "originalSha256": "4cee3395fdce6ce76539124868c3d4b8c3845babf6033fd8921d3dcb59ccf256",
+      "normalizedSha256": "129b905710a2c16eb2c3506f3d38a80cedfbf4f78c4baeca5481d95786bb7ded"
+    },
+    {
+      "path": "docs/analysis/2026-09-07/execution/receipts/history-cost-api.txt",
+      "originalSha256": "7b0799fbd94f789e54ae753a8076a0a038797d8fb45606f88e6fe6768a880386",
+      "normalizedSha256": "032396340985166602083ca11678e87f6e0f547001196f701a6c4d94758e7b9e"
+    },
+    {
+      "path": "docs/analysis/2026-09-07/execution/receipts/history-cost-first.txt",
+      "originalSha256": "e98087c479c497f844b0dd4d58f4950ec34bc1d55429b1191293eef2f42ad328",
+      "normalizedSha256": "ed343801dec94e9d7e4552b28963dc148fb711001c903a92249a5cde52afbda1"
+    },
+    {
+      "path": "docs/analysis/2026-09-07/execution/receipts/journal-migration.txt",
+      "originalSha256": "57e6d82e573f1e46689c94d767f1236e32725507748879216d83b22e20e0ebc7",
+      "normalizedSha256": "df3c3211cf569771ebae91a6870c75111e11d847185e4c5b9dd4d0194b4fb2b3"
+    },
+    {
+      "path": "docs/analysis/2026-09-07/execution/receipts/mobile-disconnected-reply-green.txt",
+      "originalSha256": "9160cce6ce4e5eea6b7088172882e3295f67dfb6274d7eeb440164db07f5d10d",
+      "normalizedSha256": "690d35678be7980dc3bdfef5d9aa732f7f8ca5057075cde8e39397d80ad2e450"
+    },
+    {
+      "path": "docs/analysis/2026-09-07/execution/receipts/mobile-disconnected-reply-red.txt",
+      "originalSha256": "4e875af0ee636b62bdf7c96d989b88b30d61efad1717c899b35624f1e59b4da9",
+      "normalizedSha256": "e180bf33df6c21cbe1332adee3ccba9012fcc4557d2101e35e1eba02fe9722cc"
+    },
+    {
+      "path": "docs/analysis/2026-09-07/execution/receipts/model-dedup-green.txt",
+      "originalSha256": "bbda3c34bd4ec5551531ce4260a149fa15e700b48b9573ad6632b4710133f28f",
+      "normalizedSha256": "2e8b32a2df677fecb1a634232d42a52aae0fe3228dac1762085e9e5e3e470e66"
+    },
+    {
+      "path": "docs/analysis/2026-09-07/execution/receipts/preflight-backup-build.txt",
+      "originalSha256": "68b4c8904a27c4827fbda1733b44a88f4996a4cae8871ad613ec3e5ad7e063cf",
+      "normalizedSha256": "4cc5244bc8d5fe30b354aa00f0ac5867bc33f2ac21d01d65c3a98f96a3f9e4fe"
+    },
+    {
+      "path": "docs/analysis/2026-09-07/execution/receipts/preflight-regression-suites.txt",
+      "originalSha256": "16b565b04da8cdbea246c7a1abaa75233acf9a06c33966b80f1e6e48446b3978",
+      "normalizedSha256": "92a9fed7d1a93ed652768bf47c31876ab1dd0c0627ffec8359a9f5626ec6a5d8"
+    },
+    {
+      "path": "docs/analysis/2026-09-07/execution/receipts/queue-binding-first-green.txt",
+      "originalSha256": "6a8ba50d383f551dc5128f62747da1a0ca5f17f025d9e5d1a3de530072c48a41",
+      "normalizedSha256": "06da07c4175ef402d392c00cea370dbd56605aa0e0d7b9cc8ea1ac83de6477e5"
+    },
+    {
+      "path": "docs/analysis/2026-09-07/execution/receipts/queue-binding-green.txt",
+      "originalSha256": "50cc370ff36292d189ef2b37b258ab68c5e37b7ecfc760b4d85bc5c47a8007cc",
+      "normalizedSha256": "8e95f808a68d83fddf21578a2f97e6813a0b04a88a130a942a3a063942a8e175"
+    },
+    {
+      "path": "docs/analysis/2026-09-07/execution/receipts/queue-binding-red.txt",
+      "originalSha256": "0a3b01958339bd81434eb040c2dfde6a58133de4b7d5d67559766c1bf577e9e6",
+      "normalizedSha256": "861ac8f97c831cf301202c1bad852b5501755c4cf3c75fde332f2261f420b754"
+    },
+    {
+      "path": "docs/analysis/2026-09-07/execution/receipts/registry-preflight-green.txt",
+      "originalSha256": "500e43f076eb82caa3faee5b8c6fcbe73fab55a14887d3563d2eaaef528e7a88",
+      "normalizedSha256": "80c63ec4094ec5f1185dea7dc55767aa13ecada3c7fa5bfd4c66c855a18e7af2"
+    },
+    {
+      "path": "docs/analysis/2026-09-07/execution/receipts/registry-preflight-red.txt",
+      "originalSha256": "eedd61cce09dc73f9e6a722176fd1cea37e709aab0e9673b44e0e624321410c2",
+      "normalizedSha256": "af10e4de1bbe9b666327dcf0581992ab3e2d061f874f5b2867b9c7dc940f2d1c"
+    },
+    {
+      "path": "docs/analysis/2026-09-07/execution/receipts/rollout-ordering-green.txt",
+      "originalSha256": "e4b33993f2f13ec46e4f25166714768f3b9efd0b22529faf5015e79f47adcdfc",
+      "normalizedSha256": "b8d97b6856c31eb010bf25a37d9fb36c105a6bfb3816a53083329c332f46e1c7"
+    },
+    {
+      "path": "docs/analysis/2026-09-07/execution/receipts/rollout-ordering-red.txt",
+      "originalSha256": "fa77543f945939c2e58e8f7c34ee75b9e3ce287fa21a6ed7378412dbff33fb96",
+      "normalizedSha256": "980020bb7b53ee6aad71126196971bffae2cd98dc2be1061db102c00268368a0"
+    },
+    {
+      "path": "docs/analysis/2026-09-07/execution/receipts/settlement-first-green.txt",
+      "originalSha256": "d74c144f6b0f247a0b59001e62f0f87a92f4595b967830a2e3e6fb6f38f87b54",
+      "normalizedSha256": "41e5dcaef20fa2ec45f4ccd160282c658c9656f48470c6729e5f2e780d15c595"
+    },
+    {
+      "path": "docs/analysis/2026-09-07/execution/receipts/settlement-red.txt",
+      "originalSha256": "7bd6c1fc93c8312b733deb10b7ab108bbff3f2e2ec1fe83cb1cebfd107306c6a",
+      "normalizedSha256": "639c034bd4906bd715dc32a00f968719ecb8826a18ea99efa6a6486dd7224232"
+    },
+    {
+      "path": "docs/analysis/2026-09-07/execution/receipts/settlement-restart-suites.txt",
+      "originalSha256": "8eb22d9ce5dee9172e36354b435dc47b3073d0b551f92b9352f1eff5451fbd20",
+      "normalizedSha256": "aaa48032a340e71a25ade5048c6f03c27b6b098b259130d3b51ba28a753a206a"
+    },
+    {
+      "path": "docs/analysis/2026-09-07/execution/receipts/workspace-build-initial.txt",
+      "originalSha256": "dd904ae59d20e20ee16bbbd710ab30690bbb49cf56842a5b20a2d2f991ffa0bf",
+      "normalizedSha256": "f3755147d08741e05cf80165fc068ecf7acfc926bfdd594d64926cd2a210fab4"
+    },
+    {
+      "path": "docs/analysis/2026-09-07/lifecycle-tests.txt",
+      "originalSha256": "1805d186d0e9cdddc5af70c28173f40b5434a542a1247ce058aac34af15db070",
+      "normalizedSha256": "84308539cc5dc2dd36b03d93070b37fdecbf7f9179831d48e1756e6de6dd9635"
+    },
+    {
+      "path": "docs/analysis/2026-09-07/regression-tests.txt",
+      "originalSha256": "b93cb85504236541bbf0c58100fc4ff2086b1df060b80f231a398f22f46c08f4",
+      "normalizedSha256": "4fed0efedcd895fadcb1233e0266508839cab74a35e86067932e991001b0a787"
+    }
+  ]
+}

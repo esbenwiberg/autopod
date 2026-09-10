@@ -1,0 +1,59 @@
+
+ RUN  v4.1.11 /private/tmp/autopod-durable-execution/packages/daemon
+
+ ❯ src/pods/pod-manager.test.ts (637 tests | 2 failed | 635 skipped) 171ms
+     × retains the observed provider Retry-After deadline across manager reconstruction: seconds 118ms
+     × retains the observed provider Retry-After deadline across manager reconstruction: utc 53ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 2 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/pods/pod-manager.test.ts > PodManager > retains the observed provider Retry-After deadline across manager reconstruction: seconds
+AssertionError: expected { …(12) } to match object { outcome: 'transient', …(1) }
+(16 matching properties omitted from actual)
+
+- Expected
++ Received
+
+  {
+    "outcome": "transient",
+-   "providerRetryNotBefore": "2026-09-08T18:43:23.609Z",
+  }
+
+ ❯ src/pods/pod-manager.test.ts:3325:66
+    3323|             }} as const;
+    3324|         })());
+    3325|         expect(ctx.podRepo.workerRetries?.state(root.id).latest).toMat…
+       |                                                                  ^
+    3326|           outcome: 'transient', providerRetryNotBefore: deadline,
+    3327|         });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/2]⎯
+
+ FAIL  src/pods/pod-manager.test.ts > PodManager > retains the observed provider Retry-After deadline across manager reconstruction: utc
+AssertionError: expected { …(12) } to match object { outcome: 'transient', …(1) }
+(16 matching properties omitted from actual)
+
+- Expected
++ Received
+
+  {
+    "outcome": "transient",
+-   "providerRetryNotBefore": "2026-09-08T18:43:23.684Z",
+  }
+
+ ❯ src/pods/pod-manager.test.ts:3325:66
+    3323|             }} as const;
+    3324|         })());
+    3325|         expect(ctx.podRepo.workerRetries?.state(root.id).latest).toMat…
+       |                                                                  ^
+    3326|           outcome: 'transient', providerRetryNotBefore: deadline,
+    3327|         });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/2]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  2 failed | 635 skipped (637)
+   Start at  20:43:18
+   Duration  1.91s (transform 1.09s, setup 0ms, import 1.61s, tests 171ms, environment 0ms)
+

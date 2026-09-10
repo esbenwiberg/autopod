@@ -1,0 +1,65 @@
+
+ RUN  v4.1.10 /private/tmp/autopod-durable-execution/packages/daemon
+
+ ❯ src/pods/pod-manager.test.ts (418 tests | 1 failed | 417 skipped) 83ms
+       × blocks a missing required contract launcher before starting a coding agent 82ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/pods/pod-manager.test.ts > PodManager > processPod > blocks a missing required contract launcher before starting a coding agent
+AssertionError: expected "vi.fn()" to not be called at all, but actually been called 1 times
+
+Received:
+
+  1st vi.fn() call:
+
+    Array [
+      Object {
+        "containerId": "container-123",
+        "customInstructions": undefined,
+        "env": Object {
+          "AUTOPOD_BASE_BRANCH": "main",
+          "AUTOPOD_HEAD_BRANCH": "autopod/operational-earthworm",
+          "AUTOPOD_POD_ID": "operational-earthworm",
+          "AUTOPOD_PR_BASE_REF": "origin/main",
+          "AUTOPOD_START_COMMIT_SHA": "abc1234567890abcdef1234567890abcdef1234",
+          "AUTOPOD_VALIDATION_BASE_REF": "abc1234567890abcdef1234567890abcdef1234",
+          "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1",
+          "DISABLE_ERROR_REPORTING": "1",
+          "DISABLE_TELEMETRY": "1",
+          "DO_NOT_TRACK": "1",
+          "NEXT_TELEMETRY_DISABLED": "1",
+          "POD_ID": "operational-earthworm",
+          "VERCEL_TELEMETRY_DISABLED": "1",
+        },
+        "executionTarget": "local",
+        "mcpServers": Array [
+          Object {
+            "headers": undefined,
+            "name": "escalation",
+            "type": "http",
+            "url": "http://localhost:8080/mcp/operational-earthworm",
+          },
+        ],
+        "model": "opus",
+        "podId": "operational-earthworm",
+        "reasoningEffort": "auto",
+        "task": "Use the required compiler",
+        "workDir": "/workspace",
+      },
+    ]
+
+
+Number of calls: 1
+
+ ❯ src/pods/pod-manager.test.ts:5701:37
+
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 417 skipped (418)
+   Start at  16:22:04
+   Duration  1.20s (transform 657ms, setup 0ms, import 1.01s, tests 83ms, environment 0ms)
+

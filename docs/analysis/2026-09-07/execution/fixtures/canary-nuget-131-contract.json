@@ -1,0 +1,121 @@
+{
+  "status": "authorized_by_continuing_canary_approval",
+  "candidate": "4e73cd8ce88e44cdb5c2d8d0a89447b819fa5a39",
+  "nonce": "autopod-nuget131-20260910-41c95e6a",
+  "endpoint": "https://management.northeurope.azuredevcompute.io",
+  "groupPath": "/subscriptions/06bb959b-9458-41a6-bdf5-77cc12feaab9/resourceGroups/ewi-sandboxes/sandboxGroups/autopod-spike-neu",
+  "apiVersion": "2026-02-01-preview",
+  "principalId": "cef0aeed-b5d3-442e-b5d7-85e0526bd5e7",
+  "importBody": {
+    "image": {
+      "base": "ewiautopodacr.azurecr.io/autopod/teamplanner-pr-read@sha256:96c67cb1ca0aa2a23851a4178a31743b61398167dad1e28f0c538f519a795d7c"
+    },
+    "managedIdentityResourceId": "/subscriptions/06bb959b-9458-41a6-bdf5-77cc12feaab9/resourcegroups/ewi-sandboxes/providers/Microsoft.ManagedIdentity/userAssignedIdentities/autopod-sandbox-acr-pull",
+    "labels": {
+      "managedBy": "codex-acceptance",
+      "acceptanceRun": "autopod-nuget131-20260910-41c95e6a",
+      "sourceDigest": "sha256:96c67cb1ca0aa2a23851a4178a31743b61398167dad1e28f0c538f519a795d7c"
+    },
+    "registryCredentials": {
+      "username": "00000000-0000-0000-0000-000000000000",
+      "token": "IN_MEMORY_ACR_EXCHANGE_RESULT_ONLY"
+    }
+  },
+  "sandboxBodyTemplate": {
+    "sourcesRef": {
+      "diskImage": {
+        "id": "REPLACE_ONLY_WITH_VERIFIED_OWNED_READY_DISK_ID"
+      }
+    },
+    "resources": {
+      "cpu": "2000m",
+      "memory": "4096Mi",
+      "disk": "40Gi"
+    },
+    "lifecycle": {
+      "autoSuspendPolicy": {
+        "enabled": true,
+        "interval": 900,
+        "mode": "Memory"
+      }
+    },
+    "environment": {
+      "DOTNET_CLI_TELEMETRY_OPTOUT": "1",
+      "DOTNET_SKIP_FIRST_TIME_EXPERIENCE": "1"
+    },
+    "egressPolicy": {
+      "defaultAction": "Deny",
+      "hostRules": [
+        {
+          "pattern": "api.nuget.org",
+          "action": "Allow"
+        },
+        {
+          "pattern": "azuresearch-usnc.nuget.org",
+          "action": "Allow"
+        },
+        {
+          "pattern": "azuresearch-ussc.nuget.org",
+          "action": "Allow"
+        }
+      ]
+    },
+    "labels": {
+      "managedBy": "codex-acceptance",
+      "acceptanceRun": "autopod-nuget131-20260910-41c95e6a",
+      "sourceDigest": "slsZ8scoKoqI4UaQXijF0O2E5gWfa0eKPDFOPUZp5XXws"
+    }
+  },
+  "limits": {
+    "imageCreateAttempts": 1,
+    "sandboxCreateAttempts": 1,
+    "imageReadyDeadlineSeconds": 600,
+    "sandboxAllocationThroughCleanupTargetSeconds": 300,
+    "workCutoffSecondsAfterCreate": 210,
+    "providerCalls": 0,
+    "commandOutputBytes": 16384,
+    "receiptBytes": 32768,
+    "mutationRetries": 0
+  },
+  "commands": {
+    "identityUid": ["id", "-u"],
+    "dotnetVersion": ["dotnet", "--version"],
+    "prepare": [
+      "sh",
+      "-c",
+      "set -eu; test ! -e \"$1\"; mkdir -m 0755 \"$1\"",
+      "canary",
+      "/tmp/autopod-nuget131-20260910-41c95e6a"
+    ]
+  },
+  "uploads": {
+    "/tmp/autopod-nuget131-20260910-41c95e6a/NuGet.Config": "<?xml version=\"1.0\" encoding=\"utf-8\"?><configuration><packageSources><clear/><add key=\"nuget.org\" value=\"https://api.nuget.org/v3/index.json\"/></packageSources></configuration>\n"
+  },
+  "knownEstimatedUSD": 0.10197617618,
+  "unpriced": [
+    "image conversion",
+    "temporary disk-image storage",
+    "service retries",
+    "cleanup overrun"
+  ],
+  "billingHardCap": false,
+  "priorAttempt": "No Teamplanner image canary previously run. Current registry digest resolved read-only; full config digest verified.",
+  "registryAuth": {
+    "implementation": "packages/daemon/src/containers/azure-sandbox-api-client.ts#resolveAcrRegistryCredentials",
+    "azureResource": "https://containerregistry.azure.net/",
+    "exchangeEndpoint": "https://ewiautopodacr.azurecr.io/oauth2/exchange",
+    "principalId": "cef0aeed-b5d3-442e-b5d7-85e0526bd5e7",
+    "exchanges": 1,
+    "tokenPersistence": false,
+    "credentialFallback": false
+  },
+  "importRequestTimeoutMs": 600000,
+  "sandboxDigestEncoding": {
+    "reference": "packages/daemon/src/containers/azure-sandbox-api-client.ts#managedDigestLabel",
+    "encoding": "s + base64url(sha256 bytes) + s",
+    "length": 45,
+    "lossless": true
+  },
+  "scope": "Current pinned teamplanner-pr-read image, actual candidate validateRegistryFiles, explicit public feed; no private-feed authentication claim.",
+  "resourceScope": "Retain actual resource facts from cgroup v1/v2 and VM proc interfaces. Missing controls remain unavailable. Config/stream checks are independent of resource observation; no model workload runs."
+}

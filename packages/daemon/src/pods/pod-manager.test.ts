@@ -1,9 +1,12 @@
 import { createHash } from 'node:crypto';
 import fs from 'node:fs';
+import { createServer } from 'node:http';
 import os from 'node:os';
 import path from 'node:path';
+import { Readable } from 'node:stream';
 import type {
   AgentEvent,
+  EscalationRequest,
   PodCreatedEvent,
   Profile,
   ProviderAccount,
@@ -25,6 +28,19 @@ import {
 import Database from 'better-sqlite3';
 import pino from 'pino';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { SandboxContainerManager } from '../containers/sandbox-container-manager.js';
+import { ClaudeRuntime } from '../runtimes/claude-runtime.js';
+import { CodexRuntime } from '../runtimes/codex-runtime.js';
+import { CopilotRuntime } from '../runtimes/copilot-runtime.js';
+import {
+  mockBranchPublication,
+  mockCommittedPublication,
+  mockPrMerge,
+  mockSourceSnapshot,
+} from '../test-utils/mock-helpers.js';
+import { runToolUseReview } from '../validation/review-tool-runner.js';
+import { createNudgeRepository } from './nudge-repository.js';
+import { createSessionBridge } from './pod-bridge-impl.js';
 
 // Mock child_process so we can control deriveBareRepoPath and recovery-context git calls
 vi.mock('node:child_process', () => ({
@@ -44,6 +60,11 @@ import { setTimeout as sleep } from 'node:timers/promises';
 import { SandboxInfrastructureError } from '../containers/sandbox-api-client.js';
 
 const mockedExecFile = vi.mocked(execFile);
+import Fastify from 'fastify';
+import { errorHandler } from '../api/error-handler.js';
+import { authPlugin } from '../api/plugins/auth.js';
+import { podRoutes } from '../api/routes/pods.js';
+import { scanReportRoutes } from '../api/routes/scan-reports.js';
 import type {
   ContainerManager,
   PrManager,
@@ -56,6 +77,13 @@ import type { ProviderAccountStore } from '../provider-accounts/index.js';
 import { createProviderAccountStore } from '../provider-accounts/index.js';
 import { createProfileMemoryReviewer } from '../providers/memory-reviewer.js';
 import { ResumeSessionNotFoundError } from '../runtimes/claude-runtime.js';
+import {
+  canonicalScanRepository,
+  createScanOperatorService,
+} from '../scheduled-jobs/scan-operator-service.js';
+import { createScanReportRepository } from '../scheduled-jobs/scan-report-repository.js';
+import { createScheduledJobRepository } from '../scheduled-jobs/scheduled-job-repository.js';
+import { createScheduledJobTemplateRepository } from '../scheduled-jobs/scheduled-job-template-repository.js';
 import {
   DeletionGuardError,
   GitCredentialError,
@@ -323,8 +351,19 @@ function createMockContainerManager(): ContainerManager {
     extractDirectoryFromContainer: vi.fn(async () => {}),
     getStatus: vi.fn(async () => 'running' as const),
     execInContainer: vi.fn(async (_containerId, command) => {
+      if (command[2]?.includes('autopod-command-preflight-v1')) {
+        const names = JSON.parse(command[3] ?? '[]') as string[];
+        return {
+          stdout: JSON.stringify(names.map((executable) => ({ executable, available: true }))),
+          stderr: '',
+          exitCode: 0,
+        };
+      }
       if (command.join(' ') === 'codex --version') {
         return { stdout: 'codex-cli 0.144.4\n', stderr: '', exitCode: 0 };
+      }
+      if (['claude --version', 'copilot --version', 'pi --version'].includes(command.join(' '))) {
+        return { stdout: `${command[0]} 1.0.0\n`, stderr: '', exitCode: 0 };
       }
       return { stdout: '', stderr: '', exitCode: 0 };
     }),
@@ -342,6 +381,14 @@ function createMockContainerManager(): ContainerManager {
 
 function createMockWorktreeManager(): WorktreeManager {
   return {
+    inspectSource: vi.fn(mockSourceSnapshot),
+    inspectContractBase: vi.fn(async (_path, _base, facts) => ({
+      baseCommitSha: 'a'.repeat(40),
+      artifacts: facts.map((fact) => ({
+        path: fact.artifact.path,
+        exists: fact.artifact.change !== 'create',
+      })),
+    })),
     create: vi.fn(async () => ({
       worktreePath: '/tmp/worktree/abc',
       bareRepoPath: '/tmp/bare/abc.git',
@@ -361,11 +408,11 @@ function createMockWorktreeManager(): WorktreeManager {
     hasChangesAgainstBase: vi.fn(async () => true),
     getChangedPathsAgainstBase: vi.fn(async () => ['file.ts']),
     getDiff: vi.fn(async () => 'diff --git a/file.ts b/file.ts\n+added line'),
-    mergeBranch: vi.fn(async () => {}),
+    mergeBranch: vi.fn(mockCommittedPublication),
     commitFiles: vi.fn(async () => {}),
     commitPendingChanges: vi.fn(async () => false),
     commitPendingChangesWithGeneratedMessage: vi.fn(async () => false),
-    pushBranch: vi.fn(async () => {}),
+    pushBranch: vi.fn(mockBranchPublication),
     ensureRemoteBranch: vi.fn(async ({ branch }) => ({ branch, created: false })),
     pullBranch: vi.fn(async () => ({ newCommits: false })),
     rebaseOntoBase: vi.fn(async () => ({ alreadyUpToDate: false, rebased: true, conflicts: [] })),
@@ -386,14 +433,15 @@ function createMockRuntimeRegistry(runtime: Runtime): RuntimeRegistry {
 
 function createMockPrManager(): PrManager {
   return {
+    findPr: vi.fn(async () => null),
     createPr: vi.fn(async () => ({
       url: 'https://github.com/org/repo/pull/42',
       usedFallback: false,
     })),
-    mergePr: vi.fn(async () => ({ merged: true, autoMergeScheduled: false })),
+    mergePr: vi.fn(mockPrMerge),
     getPrStatus: vi.fn(async () => ({
-      merged: true,
-      open: false,
+      merged: false,
+      open: true,
       blockReason: null,
       ciFailures: [],
       reviewComments: [],
@@ -634,8 +682,8 @@ function insertApprovedMemory(
   });
 }
 
-function validationInfrastructureFailureResult(): Partial<ValidationResult> {
-  return {
+function validationInfrastructureFailureResult(): ValidationResult {
+  return makeValidationResult({
     overall: 'fail',
     smoke: {
       status: 'pass',
@@ -660,7 +708,7 @@ function validationInfrastructureFailureResult(): Partial<ValidationResult> {
     taskReview: null,
     reviewSkipKind: 'upstream-failed',
     reviewSkipReason: 'Skipped — validation infrastructure failed',
-  };
+  });
 }
 
 function ordinaryTestFailureResult(): Partial<ValidationResult> {
@@ -891,8 +939,21 @@ function createTestContext(
   const enqueuedSessions: string[] = [];
 
   const deps: PodManagerDependencies = {
+    validationInfrastructureRetryBackoffMs: [0, 0],
+    // This mock runtime represents one changed source tree per agent rework.
+    // Actual Git content capture is covered separately by retry-identity tests.
+    captureRetryIdentity: async () => ({
+      source: createHash('sha256')
+        .update(String(vi.mocked(runtime.resume).mock.calls.length))
+        .digest('hex'),
+      contract: 'a'.repeat(64),
+      commands: 'b'.repeat(64),
+      environment: 'c'.repeat(64),
+      implementation: 'd'.repeat(64),
+    }),
     podRepo,
     escalationRepo,
+    nudgeRepo: createNudgeRepository(db),
     fixFeedbackRepo,
     pendingOverrideRepo,
     eventRepo,
@@ -913,6 +974,7 @@ function createTestContext(
     validationRepo,
     prManagerFactory: () => prManager,
     enqueueSession: (id) => enqueuedSessions.push(id),
+    sandboxInfrastructureRetryBackoffMs: [0],
     mcpBaseUrl: 'http://localhost:8080',
     daemonConfig: { mcpServers: [], claudeMdSections: [] },
     sandboxWorkspaceCheckpoint: vi.fn(async ({ podId, sequence }) => ({
@@ -951,6 +1013,51 @@ function createTestContext(
     pendingOverrideRepo,
     deps,
   };
+}
+
+/** Synthetic published source/admission for poll ownership fault tests. */
+function seedPollDelivery(ctx: TestContext, id: string, planned = false) {
+  const original = ctx.podRepo.getOrThrow(id);
+  ctx.podRepo.update(id, {
+    status: 'merge_pending',
+    worktreePath: original.worktreePath ?? '/tmp/poll-source',
+    prUrl: original.prUrl ?? 'https://github.com/org/repo/pull/42',
+  });
+  const pod = ctx.podRepo.getOrThrow(id);
+  const publications = ctx.podRepo.sourcePublications;
+  const journal = ctx.podRepo.mergeJournal;
+  if (!publications || !journal) throw new Error('Missing durable fixture repositories');
+  const proof = {
+    repository: 'https://github.com/org/repo',
+    branch: pod.branch,
+    commitSha: 'a'.repeat(40),
+    treeSha: 'b'.repeat(40),
+    worktreeClean: true as const,
+    remoteRef: `refs/heads/${pod.branch}`,
+    observedRemoteCommitSha: 'a'.repeat(40),
+    observedAt: new Date().toISOString(),
+  };
+  const publicationId = publications.admit(pod, proof);
+  publications.confirm(pod, publicationId, proof);
+  const target = { repository: proof.repository, branch: pod.branch, baseBranch: 'main' };
+  const config = {
+    prUrl: pod.prUrl ?? '',
+    expectedHeadSha: proof.commitSha,
+    expectedTarget: target,
+  };
+  if (planned) journal.plan(pod, pod, publicationId, config);
+  else journal.claim(pod, pod, publicationId, config);
+  const status = {
+    merged: true,
+    open: false,
+    blockReason: null,
+    ciFailures: [],
+    reviewComments: [],
+    headSha: proof.commitSha,
+    sourceTarget: target,
+  };
+  vi.mocked(ctx.prManager.getPrStatus).mockResolvedValue(status);
+  return status;
 }
 
 describe('PodManager', () => {
@@ -1000,6 +1107,8 @@ describe('PodManager', () => {
       warmImageTag: 'example.azurecr.io/autopod/test-profile:latest',
     });
     ctx.deps.requeueSessionAfterCurrent = vi.fn();
+    // This fixture stubs sleeps; cooldown clock behavior has separate coverage.
+    ctx.deps.workerInfrastructureRetryBackoffMs = [0];
     ctx.deps.sandboxInfrastructureRecoveryDelay = vi.fn(async () => {});
     // biome-ignore lint/correctness/useYield: models an iterator that throws before its first event
     vi.mocked(ctx.runtime.spawn).mockImplementation(async function* () {
@@ -1023,6 +1132,7 @@ describe('PodManager', () => {
       }),
     });
     expect(ctx.deps.requeueSessionAfterCurrent).toHaveBeenCalledWith(created.id);
+    expect(ctx.podRepo.workerRetries?.state(created.id).retryFailure).toBe('transient');
 
     await manager.processPod(created.id);
 
@@ -1034,6 +1144,600 @@ describe('PodManager', () => {
       infrastructureFailure: expect.objectContaining({
         recoveryDisposition: 'automatic_retry_exhausted',
       }),
+    });
+  });
+
+  it('keeps exhausted sandbox startup retries across manager restart and Resume without mutating sources', async () => {
+    const ctx = createTestContext(undefined, {
+      executionTarget: 'sandbox',
+      warmImageTag: 'example.azurecr.io/autopod/test-profile:latest',
+    });
+    ctx.deps.requeueSessionAfterCurrent = vi.fn();
+    ctx.deps.sandboxInfrastructureRecoveryDelay = vi.fn(async () => {});
+    vi.mocked(ctx.containerManager.spawn).mockRejectedValue(
+      new SandboxInfrastructureError(403, {}),
+    );
+    const manager = createPodManager(ctx.deps);
+    const pod = manager.createSession(
+      { profileName: 'test-profile', task: 'Keep the same task startup limit' },
+      'user-1',
+    );
+    await manager.processPod(pod.id);
+    await manager.processPod(pod.id);
+    ctx.podRepo.update(pod.id, { worktreePath: '/tmp/preserved-startup-worktree' });
+    const before = ctx.podRepo.getOrThrow(pod.id);
+    const restarted = createPodManager(ctx.deps);
+    await expect(restarted.resumePod(pod.id)).rejects.toMatchObject({
+      code: 'TASK_RETRY_RECONCILIATION_REQUIRED',
+    });
+    expect(ctx.podRepo.getOrThrow(pod.id)).toEqual(before);
+    expect(ctx.containerManager.spawn).toHaveBeenCalledTimes(2);
+    expect(ctx.runtime.spawn).not.toHaveBeenCalled();
+    expect(ctx.enqueuedSessions.filter((id) => id === pod.id)).toHaveLength(1);
+    const linked = restarted.createSession(
+      { profileName: 'test-profile', task: 'Linked repair', linkedPodId: pod.id },
+      'user-1',
+    );
+    await restarted.processPod(linked.id);
+    expect(ctx.containerManager.spawn).toHaveBeenCalledTimes(2);
+    expect(ctx.podRepo.getOrThrow(linked.id).failureReason).toContain(
+      'startup retry budget exhausted',
+    );
+    const app = Fastify();
+    app.setErrorHandler(errorHandler);
+    authPlugin(app, {
+      validateToken: async () => ({ oid: 'startup-operator', name: 'Operator' }),
+    } as never);
+    podRoutes(app, restarted, ctx.eventRepo, undefined, ctx.podRepo);
+    const headers = { authorization: 'Bearer local-fixture' };
+    try {
+      const payload = {
+        requestKey: 'startup-extra-once',
+        reason: 'Confirmed sandbox service recovered',
+        stage: 'sandbox_startup',
+      };
+      const url = `/pods/${pod.id}/retry-authorizations`;
+      const grant = await app.inject({ method: 'POST', url, headers, payload });
+      expect(grant.statusCode, grant.body).toBe(201);
+      expect(grant.json()).toMatchObject({
+        stage: 'sandbox_startup',
+        actor: { userId: 'startup-operator' },
+      });
+      const duplicate = await app.inject({ method: 'POST', url, headers, payload });
+      expect(duplicate.json().id).toBe(grant.json().id);
+      expect(ctx.containerManager.spawn).toHaveBeenCalledTimes(2);
+      const invalid = await app.inject({
+        method: 'GET',
+        url: `/pods/${pod.id}/retry-state?stage=agent`,
+        headers,
+      });
+      expect(invalid.statusCode).toBe(400);
+      const resume = await app.inject({ method: 'POST', url: `/pods/${pod.id}/resume`, headers });
+      expect(resume.statusCode, resume.body).toBe(200);
+      await restarted.processPod(pod.id);
+      expect(ctx.containerManager.spawn).toHaveBeenCalledTimes(3);
+      expect(ctx.podRepo.getOrThrow(pod.id).status).toBe('failed');
+      const state = await app.inject({
+        method: 'GET',
+        url: `/pods/${pod.id}/retry-state?stage=sandbox_startup`,
+        headers,
+      });
+      expect(state.json()).toMatchObject({
+        stage: 'sandbox_startup',
+        executedCount: 3,
+        transientRetryCount: 1,
+      });
+      expect(state.json().authorizations[0].usedByAttemptId).toBeTruthy();
+      expect(ctx.podRepo.taskRetries?.state(pod.id).admissionCount).toBe(0);
+    } finally {
+      await app.close();
+    }
+  });
+
+  it('exposes durable Codex interruption recovery and idempotent human extension without dispatch', async () => {
+    const ctx = createTestContext();
+    const manager = createPodManager(ctx.deps);
+    const pod = manager.createSession(
+      { profileName: 'test-profile', task: 'Inspect recovery' },
+      'user-1',
+    );
+    const ledger = ctx.podRepo.codexInterruptionRetries;
+    if (!ledger) throw new Error('Missing recovery ledger');
+    const identity = {
+      source: null,
+      contract: null,
+      commands: null,
+      environment: null,
+      implementation: null,
+    };
+    const admission = ledger.admit(pod.id, pod.lifecycleGeneration, identity, 'a'.repeat(64), []);
+    ledger.start(admission.id);
+    ledger.finish(admission.id, 'pass', 10);
+    const app = Fastify();
+    app.setErrorHandler(errorHandler);
+    authPlugin(app, {
+      validateToken: async () => ({ oid: 'recovery-human', name: 'Operator' }),
+    } as never);
+    podRoutes(app, manager, ctx.eventRepo, undefined, ctx.podRepo);
+    const headers = { authorization: 'Bearer synthetic' };
+    try {
+      const state = await app.inject({
+        method: 'GET',
+        url: `/pods/${pod.id}/retry-state?stage=codex_interruption`,
+        headers,
+      });
+      expect(state.statusCode, state.body).toBe(200);
+      expect(state.json()).toMatchObject({
+        stage: 'codex_interruption',
+        admissionCount: 1,
+        executedCount: 1,
+        latest: { outcome: 'pass' },
+      });
+      const url = `/pods/${pod.id}/retry-authorizations`;
+      const payload = {
+        requestKey: 'recovery-extension',
+        reason: 'Inspected previous recovery before extension',
+        stage: 'codex_interruption',
+      };
+      const first = await app.inject({ method: 'POST', url, headers, payload });
+      const duplicate = await app.inject({ method: 'POST', url, headers, payload });
+      expect(first.statusCode, first.body).toBe(201);
+      expect(duplicate.json().id).toBe(first.json().id);
+      expect(first.json()).toMatchObject({
+        actor: { type: 'human', userId: 'recovery-human' },
+        usedByAttemptId: null,
+      });
+      expect(ledger.state(pod.id).admissionCount).toBe(1);
+      expect(ctx.runtime.spawn).not.toHaveBeenCalled();
+      expect(ctx.runtime.resume).not.toHaveBeenCalled();
+      expect(ctx.podRepo.taskRetries?.state(pod.id).admissionCount).toBe(0);
+    } finally {
+      await app.close();
+    }
+  });
+  it.each(['auth', 'unknown'] as const)(
+    'rejects unauthorized worker Rework before HTTP acceptance or resource teardown: %s',
+    async (category) => {
+      const ctx = createTestContext();
+      const manager = createPodManager(ctx.deps);
+      const pod = manager.createSession(
+        { profileName: 'test-profile', task: 'Preserve failed worker source' },
+        'operator',
+      );
+      const sourceDir = fs.mkdtempSync(path.join(os.tmpdir(), 'worker-rework-'));
+      fs.writeFileSync(path.join(sourceDir, 'work.txt'), 'Retain human and worker changes');
+      ctx.podRepo.update(pod.id, {
+        status: 'running',
+        containerId: 'owned-container',
+        worktreePath: sourceDir,
+      });
+      await manager.consumeAgentEvents(
+        pod.id,
+        (async function* () {
+          yield {
+            type: 'error',
+            timestamp: new Date().toISOString(),
+            fatal: true,
+            message: 'Authentication rejected',
+            classification: {
+              category,
+              definitive: false,
+              sanitizedMessage: 'Authentication rejected',
+            },
+          } as const;
+        })(),
+      );
+      ctx.enqueuedSessions.length = 0;
+      const before = ctx.podRepo.getOrThrow(pod.id);
+      const app = Fastify();
+      app.setErrorHandler(errorHandler);
+      authPlugin(app, {
+        validateToken: async () => ({ oid: 'operator', name: 'Operator' }),
+      } as never);
+      podRoutes(app, manager, ctx.eventRepo, undefined, ctx.podRepo);
+      try {
+        const response = await app.inject({
+          method: 'POST',
+          url: `/pods/${pod.id}/validate`,
+          headers: { authorization: 'Bearer synthetic' },
+        });
+        expect(response.statusCode, response.body).toBe(409);
+        expect(response.json().error).toBe('TASK_RETRY_RECONCILIATION_REQUIRED');
+        await expect(manager.triggerValidation(pod.id, { force: true })).rejects.toMatchObject({
+          code: 'TASK_RETRY_RECONCILIATION_REQUIRED',
+        });
+        expect(ctx.podRepo.getOrThrow(pod.id)).toMatchObject({
+          lifecycleGeneration: before.lifecycleGeneration,
+          containerId: before.containerId,
+          worktreePath: before.worktreePath,
+          status: 'failed',
+        });
+        expect(ctx.containerManager.kill).not.toHaveBeenCalled();
+        expect(ctx.enqueuedSessions).toEqual([]);
+        const grantResponse = await app.inject({
+          method: 'POST',
+          url: `/pods/${pod.id}/retry-authorizations`,
+          headers: { authorization: 'Bearer synthetic' },
+          payload: {
+            stage: 'worker',
+            requestKey: 'rework-permission',
+            reason: 'Credentials repaired; rework preserved source',
+          },
+        });
+        expect(grantResponse.statusCode).toBe(201);
+        expect(
+          (
+            await app.inject({
+              method: 'POST',
+              url: `/pods/${pod.id}/validate`,
+              headers: { authorization: 'Bearer synthetic' },
+            })
+          ).statusCode,
+        ).toBe(202);
+        await vi.waitFor(() => expect(ctx.enqueuedSessions).toContain(pod.id));
+        expect(ctx.podRepo.getOrThrow(pod.id)).toMatchObject({
+          status: 'queued',
+          worktreePath: before.worktreePath,
+          recoveryWorktreePath: before.worktreePath,
+        });
+        expect(
+          ctx.podRepo.workerRetries?.state(pod.id).authorizations[0]?.usedByAttemptId,
+        ).toBeNull();
+        ctx.podRepo.update(pod.id, { status: 'running', containerId: 'replacement-container' });
+        expect(
+          await manager.consumeAgentEvents(
+            pod.id,
+            (async function* () {
+              yield {
+                type: 'complete',
+                timestamp: new Date().toISOString(),
+                result: 'Reworked preserved source',
+              } as const;
+            })(),
+          ),
+        ).toBe('completed');
+        expect(ctx.podRepo.workerRetries?.state(pod.id)).toMatchObject({
+          admissionCount: 2,
+          executedCount: 2,
+          latest: { retryKind: 'override', outcome: 'pass' },
+        });
+      } finally {
+        await app.close();
+        fs.rmSync(sourceDir, { recursive: true, force: true });
+      }
+    },
+  );
+
+  it('records authenticated idempotent worker retry permission without dispatching', async () => {
+    const ctx = createTestContext();
+    const manager = createPodManager(ctx.deps);
+    const pod = manager.createSession(
+      { profileName: 'test-profile', task: 'Retained auth failure' },
+      'operator',
+    );
+    const run = ctx.podRepo.taskExecutions?.beginRun(pod.id, 1, 1, {
+      runtime: pod.runtime,
+      model: pod.model,
+      providerAccountId: null,
+    });
+    if (!run) throw new Error('Missing run');
+    ctx.podRepo.taskExecutions?.finishRun(run, 'failed', 'auth');
+    const app = Fastify();
+    app.setErrorHandler(errorHandler);
+    authPlugin(app, {
+      validateToken: async () => ({ oid: 'actual-human', name: 'Operator' }),
+    } as never);
+    podRoutes(app, manager, ctx.eventRepo, undefined, ctx.podRepo);
+    const headers = { authorization: 'Bearer synthetic' };
+    const url = `/pods/${pod.id}/retry-authorizations`;
+    const payload = {
+      requestKey: 'auth-retry',
+      reason: 'Credential repair verified',
+      stage: 'worker',
+    };
+    try {
+      expect((await app.inject({ method: 'POST', url, payload })).statusCode).toBe(401);
+      expect(
+        (
+          await app.inject({
+            method: 'POST',
+            url,
+            headers,
+            payload: { ...payload, actor: { type: 'human', userId: 'forged' } },
+          })
+        ).statusCode,
+      ).toBe(400);
+      const first = await app.inject({ method: 'POST', url, headers, payload });
+      const duplicate = await app.inject({ method: 'POST', url, headers, payload });
+      expect(first.statusCode, first.body).toBe(201);
+      expect(duplicate.json().id).toBe(first.json().id);
+      expect(first.json()).toMatchObject({
+        actor: { type: 'human', userId: 'actual-human' },
+        usedByAttemptId: null,
+        stage: 'worker',
+        failureId: run,
+      });
+      const state = await app.inject({
+        method: 'GET',
+        url: `/pods/${pod.id}/retry-state?stage=worker`,
+        headers,
+      });
+      expect(state.statusCode).toBe(200);
+      expect(state.json()).toMatchObject({
+        admissionCount: 1,
+        executedCount: 1,
+        latest: { outcome: 'nonretryable', measuredDurationMs: null },
+      });
+      expect(ctx.runtime.spawn).not.toHaveBeenCalled();
+      expect(ctx.runtime.resume).not.toHaveBeenCalled();
+    } finally {
+      await app.close();
+    }
+  });
+
+  it.each([true, false])(
+    'rechecks an early sandbox cooldown wake with durable ledger=%s',
+    async (durable) => {
+      const ctx = createTestContext(undefined, {
+        executionTarget: 'sandbox',
+        warmImageTag: 'registry.azurecr.io/startup:latest',
+      });
+      if (!durable) ctx.podRepo.sandboxStartupRetries = undefined;
+      ctx.deps.sandboxInfrastructureRetryBackoffMs = [50];
+      ctx.deps.requeueSessionAfterCurrent = vi.fn();
+      vi.mocked(ctx.containerManager.spawn).mockRejectedValue(
+        new SandboxInfrastructureError(403, {}),
+      );
+      const manager = createPodManager(ctx.deps);
+      const pod = manager.createSession(
+        { profileName: 'test-profile', task: 'Wait for the persisted startup deadline' },
+        'operator',
+      );
+      vi.useFakeTimers({ toFake: ['Date'] });
+      let wakes = 0;
+      ctx.deps.sandboxInfrastructureRecoveryDelay = vi.fn(async (delay) => {
+        expect(ctx.containerManager.spawn).toHaveBeenCalledOnce();
+        vi.setSystemTime(Date.now() + delay - (wakes++ === 0 ? 1 : 0));
+      });
+      try {
+        await manager.processPod(pod.id);
+        const deadline = durable
+          ? Date.now() + 50
+          : Date.parse(ctx.podRepo.getOrThrow(pod.id).infrastructureFailure?.retryNotBefore ?? '');
+        await manager.processPod(pod.id);
+        expect(wakes).toBe(2);
+        expect(Date.now()).toBe(deadline);
+        expect(ctx.containerManager.spawn).toHaveBeenCalledTimes(2);
+        expect(ctx.runtime.spawn).not.toHaveBeenCalled();
+        if (durable)
+          expect(ctx.podRepo.sandboxStartupRetries?.state(pod.id)).toMatchObject({
+            admissionCount: 2,
+            executedCount: 2,
+            transientRetryCount: 1,
+          });
+      } finally {
+        vi.useRealTimers();
+      }
+    },
+  );
+
+  it.each([true, false])(
+    'bounds a stalled sandbox cooldown clock with durable ledger=%s',
+    async (durable) => {
+      const ctx = createTestContext(undefined, {
+        executionTarget: 'sandbox',
+        warmImageTag: 'registry.azurecr.io/startup:latest',
+      });
+      if (!durable) ctx.podRepo.sandboxStartupRetries = undefined;
+      ctx.deps.sandboxInfrastructureRetryBackoffMs = [50];
+      ctx.deps.requeueSessionAfterCurrent = vi.fn();
+      vi.mocked(ctx.containerManager.spawn).mockRejectedValue(
+        new SandboxInfrastructureError(403, {}),
+      );
+      ctx.deps.sandboxInfrastructureRecoveryDelay = vi.fn(async () => {});
+      const manager = createPodManager(ctx.deps);
+      const pod = manager.createSession(
+        { profileName: 'test-profile', task: 'Do not allocate before the deadline' },
+        'operator',
+      );
+      vi.useFakeTimers({ toFake: ['Date'] });
+      try {
+        await manager.processPod(pod.id);
+        await manager.processPod(pod.id);
+        expect(ctx.deps.sandboxInfrastructureRecoveryDelay).toHaveBeenCalledTimes(3);
+        expect(ctx.containerManager.spawn).toHaveBeenCalledOnce();
+        expect(ctx.runtime.spawn).not.toHaveBeenCalled();
+        expect(ctx.podRepo.getOrThrow(pod.id)).toMatchObject({
+          status: 'failed',
+          failureReason: expect.stringContaining('reconcile the clock'),
+        });
+        if (durable)
+          expect(ctx.podRepo.sandboxStartupRetries?.state(pod.id)).toMatchObject({
+            admissionCount: 2,
+            executedCount: 1,
+            latest: { outcome: 'cancelled', startedAt: null, measuredDurationMs: null },
+          });
+      } finally {
+        vi.useRealTimers();
+      }
+    },
+  );
+
+  it.each([true, false])(
+    'retains a new pending decision during sandbox cooldown with durable ledger=%s',
+    async (durable) => {
+      const ctx = createTestContext(undefined, {
+        executionTarget: 'sandbox',
+        warmImageTag: 'registry.azurecr.io/startup:latest',
+      });
+      if (!durable) ctx.podRepo.sandboxStartupRetries = undefined;
+      ctx.deps.sandboxInfrastructureRetryBackoffMs = [50];
+      ctx.deps.requeueSessionAfterCurrent = vi.fn();
+      vi.mocked(ctx.containerManager.spawn).mockRejectedValue(
+        new SandboxInfrastructureError(403, {}),
+      );
+      const manager = createPodManager(ctx.deps);
+      const pod = manager.createSession(
+        { profileName: 'test-profile', task: 'Preserve the new human decision' },
+        'operator',
+      );
+      let preserved: ReturnType<typeof ctx.podRepo.getOrThrow> | undefined;
+      ctx.deps.sandboxInfrastructureRecoveryDelay = vi.fn(async () => {
+        ctx.podRepo.update(pod.id, {
+          status: 'awaiting_input',
+          pendingEscalation: {
+            id: 'new-decision',
+            podId: pod.id,
+            type: 'ask_human',
+            payload: { question: 'New decision during cooldown' },
+            timestamp: new Date().toISOString(),
+            response: null,
+          },
+        });
+        preserved = ctx.podRepo.getOrThrow(pod.id);
+      });
+      await manager.processPod(pod.id);
+      await manager.processPod(pod.id);
+      expect(preserved).toBeDefined();
+      expect(ctx.podRepo.getOrThrow(pod.id)).toEqual(preserved);
+      expect(ctx.deps.sandboxInfrastructureRecoveryDelay).toHaveBeenCalledOnce();
+      expect(ctx.containerManager.spawn).toHaveBeenCalledOnce();
+      expect(ctx.runtime.spawn).not.toHaveBeenCalled();
+      if (durable)
+        expect(ctx.podRepo.sandboxStartupRetries?.state(pod.id)).toMatchObject({
+          admissionCount: 2,
+          executedCount: 1,
+          latest: { outcome: 'unknown', startedAt: null, measuredDurationMs: null },
+        });
+    },
+  );
+
+  it.each(['retained', 'deleted', 'provider-changed'] as const)(
+    'reconciles the authorized account after sandbox startup cooldown: %s',
+    async (accountState) => {
+      const firstId = 'cooldown-first';
+      const secondId = 'cooldown-second';
+      const credentials = {
+        provider: 'openai',
+        authMode: 'api-key',
+        apiKey: 'synthetic-local-key',
+      } satisfies ProviderCredentials;
+      const ctx = createTestContext(undefined, {
+        executionTarget: 'sandbox',
+        warmImageTag: 'registry.azurecr.io/startup:latest',
+        defaultRuntime: 'codex',
+        defaultModel: 'gpt-5',
+        modelProvider: 'openai',
+      });
+      insertProviderAccount(ctx.db, firstId, 'openai', credentials);
+      insertProviderAccount(ctx.db, secondId, 'openai', credentials);
+      linkProfileToProviderAccount(ctx.db, 'test-profile', firstId);
+      const accounts = new Map([
+        [firstId, createMutableProviderAccountStore(firstId, 'openai', credentials).get(firstId)],
+        [
+          secondId,
+          createMutableProviderAccountStore(secondId, 'openai', credentials).get(secondId),
+        ],
+      ]);
+      ctx.deps.providerAccountStore = {
+        touchLastUsed: vi.fn(),
+        get: vi.fn((id: string) => {
+          const account = accounts.get(id);
+          if (!account) throw new Error('missing fixture account');
+          return account;
+        }),
+      } as unknown as ProviderAccountStore;
+      ctx.deps.sandboxInfrastructureRetryBackoffMs = [50];
+      ctx.deps.requeueSessionAfterCurrent = vi.fn();
+      vi.mocked(ctx.containerManager.spawn).mockRejectedValue(
+        new SandboxInfrastructureError(403, {}),
+      );
+      const manager = createPodManager(ctx.deps);
+      const pod = manager.createSession(
+        { profileName: 'test-profile', task: 'Keep cooldown provider authority' },
+        'operator',
+      );
+      vi.useFakeTimers({ toFake: ['Date'] });
+      ctx.deps.sandboxInfrastructureRecoveryDelay = vi.fn(async (delay) => {
+        linkProfileToProviderAccount(ctx.db, 'test-profile', secondId);
+        if (accountState === 'deleted') accounts.delete(firstId);
+        if (accountState === 'provider-changed') {
+          const first = accounts.get(firstId);
+          if (first) accounts.set(firstId, { ...first, provider: 'anthropic' });
+        }
+        vi.setSystemTime(Date.now() + delay);
+      });
+      try {
+        await manager.processPod(pod.id);
+        await manager.processPod(pod.id);
+        expect(ctx.deps.sandboxInfrastructureRecoveryDelay).toHaveBeenCalledOnce();
+        expect(ctx.containerManager.spawn).toHaveBeenCalledTimes(
+          accountState === 'retained' ? 2 : 1,
+        );
+        expect(ctx.runtime.spawn).not.toHaveBeenCalled();
+        expect(ctx.podRepo.getOrThrow(pod.id).providerAccountIdSnapshot).toBe(firstId);
+        expect(ctx.deps.providerAccountStore.get).not.toHaveBeenCalledWith(secondId);
+        if (accountState !== 'retained') {
+          expect(ctx.podRepo.getOrThrow(pod.id)).toMatchObject({
+            status: 'failed',
+            failureReason: expect.stringMatching(
+              /provider account.*unavailable|provider.*identity/i,
+            ),
+          });
+          expect(ctx.podRepo.sandboxStartupRetries?.state(pod.id)).toMatchObject({
+            executedCount: 1,
+            latest: { outcome: 'cancelled', startedAt: null, measuredDurationMs: null },
+          });
+        }
+      } finally {
+        vi.useRealTimers();
+      }
+    },
+  );
+
+  it('retains consumed sandbox cooldown admission when a newer lifecycle interrupts before allocation', async () => {
+    const ctx = createTestContext(undefined, {
+      executionTarget: 'sandbox',
+      warmImageTag: 'registry.azurecr.io/startup:latest',
+    });
+    ctx.deps.sandboxInfrastructureRetryBackoffMs = [30000];
+    ctx.deps.requeueSessionAfterCurrent = vi.fn();
+    vi.mocked(ctx.containerManager.spawn).mockRejectedValue(
+      new SandboxInfrastructureError(403, {}),
+    );
+    const manager = createPodManager(ctx.deps);
+    const pod = manager.createSession(
+      { profileName: 'test-profile', task: 'Interrupt the cooldown' },
+      'user-1',
+    );
+    await manager.processPod(pod.id);
+    const wait = deferred<void>();
+    ctx.deps.sandboxInfrastructureRecoveryDelay = vi.fn(() => wait.promise);
+    const retry = manager.processPod(pod.id);
+    await waitForAssertion(() =>
+      expect(ctx.deps.sandboxInfrastructureRecoveryDelay).toHaveBeenCalledOnce(),
+    );
+    expect(ctx.deps.sandboxInfrastructureRecoveryDelay).toHaveBeenCalledWith(expect.any(Number));
+    const delay = vi.mocked(ctx.deps.sandboxInfrastructureRecoveryDelay).mock.calls[0]?.[0];
+    expect(delay).toBeGreaterThan(25000);
+    const before = ctx.podRepo.sandboxStartupRetries?.state(pod.id);
+    expect(before).toMatchObject({
+      executedCount: 1,
+      admissionCount: 2,
+      transientRetryCount: 1,
+      latest: { startedAt: null },
+    });
+    ctx.podRepo.incrementLifecycleGeneration(pod.id);
+    wait.resolve();
+    await retry;
+    expect(ctx.containerManager.spawn).toHaveBeenCalledOnce();
+    expect(ctx.runtime.spawn).not.toHaveBeenCalled();
+    expect(ctx.podRepo.sandboxStartupRetries?.state(pod.id)).toMatchObject({
+      executedCount: 1,
+      admissionCount: 2,
+      transientRetryCount: 1,
+      interruptedCount: 1,
+      latest: { outcome: 'unknown', measuredDurationMs: null },
     });
   });
 
@@ -1109,7 +1813,7 @@ describe('PodManager', () => {
       infrastructureFailure: expect.objectContaining({
         recoveryDisposition: 'automatic_retry_scheduled',
       }),
-      infrastructureRecoveryCount: 0,
+      infrastructureRecoveryCount: 1,
       recoveryWorktreePath: '/tmp/safe-worktree',
       skipAgent: false,
     });
@@ -1249,6 +1953,858 @@ describe('PodManager', () => {
       expect(ctx.containerManager.extractDirectoryFromContainer).toHaveBeenCalled();
     });
   });
+  it('retains actual Codex completion evidence but does not validate or deliver after unverified termination', async () => {
+    const ctx = createTestContext(undefined, { defaultRuntime: 'codex' });
+    const attempts = createProviderAttemptRepository(ctx.db);
+    ctx.deps.providerAttemptRepo = attempts;
+    const manager = createPodManager(ctx.deps);
+    const created = manager.createSession(
+      { profileName: 'test-profile', task: 'Retain completion while termination is unknown' },
+      'operator',
+    );
+    // Seed the owned running lifecycle in this local repository fixture.
+    ctx.podRepo.update(created.id, { status: 'running', containerId: 'owned-container' });
+    const pod = ctx.podRepo.getOrThrow(created.id);
+    const exitCode = Promise.reject(
+      new AutopodError('Unobserved exit', 'EXEC_EXIT_UNVERIFIED', 409),
+    );
+    void exitCode.catch(() => {});
+    const kill = vi.fn(async () => {
+      throw new Error('termination not verified');
+    });
+    vi.mocked(ctx.containerManager.execStreaming).mockResolvedValue({
+      stdout: Readable.from([
+        `${JSON.stringify({ id: 'complete', msg: { type: 'task_complete', turn_id: 't1', last_agent_message: 'Retain this source summary' } })}\n`,
+      ]),
+      stderr: Readable.from([]),
+      exitCode,
+      kill,
+    });
+    const runtime = new CodexRuntime(pino({ level: 'silent' }), ctx.containerManager, ctx.podRepo);
+    const outcome = await manager.consumeAgentEvents(
+      pod.id,
+      runtime.spawn({
+        podId: pod.id,
+        task: pod.task,
+        model: pod.model,
+        reasoningEffort: 'auto',
+        workDir: '/workspace',
+        containerId: 'owned-container',
+        env: {},
+      }),
+      0,
+      { generation: pod.lifecycleGeneration, containerId: pod.containerId },
+    );
+    expect(outcome).toBe('failed');
+    expect(ctx.validationEngine.validate).not.toHaveBeenCalled();
+    expect(ctx.prManager.createPr).not.toHaveBeenCalled();
+    expect(attempts.list(pod.id).at(-1)?.outcome).toBe('failed');
+    expect(ctx.eventRepo.getForSession(pod.id, { type: 'pod.agent_activity', latest: 20 })).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          payload: expect.objectContaining({
+            event: expect.objectContaining({
+              type: 'complete',
+              result: 'Retain this source summary',
+            }),
+          }),
+        }),
+      ]),
+    );
+    expect(ctx.podRepo.getOrThrow(pod.id).failureReason).toContain('termination is unverified');
+    expect(ctx.podRepo.taskExecutions?.hasActiveRun(pod.id)).toBe(true);
+    const beforeReconciliation = ctx.podRepo.getOrThrow(pod.id);
+    for (const action of [
+      () => manager.resumePod(pod.id),
+      () => manager.triggerValidation(pod.id, { force: true }),
+      () => manager.revalidateSession(pod.id, { force: true }),
+    ])
+      await expect(action()).rejects.toMatchObject({
+        code: 'TASK_EXECUTION_TERMINATION_UNVERIFIED',
+      });
+    expect(ctx.podRepo.getOrThrow(pod.id)).toEqual(beforeReconciliation);
+    expect(ctx.containerManager.kill).not.toHaveBeenCalled();
+    expect(ctx.containerManager.stop).not.toHaveBeenCalled();
+    expect(ctx.worktreeManager.pullBranch).not.toHaveBeenCalled();
+    const app = Fastify();
+    app.setErrorHandler(errorHandler);
+    podRoutes(app, manager, ctx.eventRepo, undefined, ctx.podRepo);
+    try {
+      for (const action of ['resume', 'validate', 'revalidate']) {
+        const response = await app.inject({ method: 'POST', url: `/pods/${pod.id}/${action}` });
+        expect(response.statusCode, response.body).toBe(409);
+        expect(response.body).toContain('TASK_EXECUTION_TERMINATION_UNVERIFIED');
+      }
+    } finally {
+      await app.close();
+    }
+    const nextManager = createPodManager(ctx.deps);
+    let replayed = false;
+    await expect(
+      nextManager.consumeAgentEvents(
+        pod.id,
+        (async function* () {
+          replayed = true;
+          yield {
+            type: 'complete',
+            timestamp: new Date().toISOString(),
+            result: 'Must not replay',
+          } as const;
+        })(),
+      ),
+    ).rejects.toMatchObject({ code: 'TASK_AGENT_RUN_ACTIVE' });
+    expect(replayed).toBe(false);
+    expect(
+      ctx.db
+        .prepare('SELECT ended_at, outcome, failure_category FROM task_agent_runs WHERE pod_id = ?')
+        .get(pod.id),
+    ).toEqual({
+      ended_at: null,
+      outcome: 'failed',
+      failure_category: 'execution_termination_unverified',
+    });
+  });
+
+  it.each(['claude-spawn', 'claude-resume', 'copilot'] as const)(
+    'retains the durable run after actual %s transport loses exit evidence',
+    async (kind) => {
+      const ctx = createTestContext(undefined, {
+        defaultRuntime: kind === 'copilot' ? 'copilot' : 'claude',
+      });
+      ctx.deps.providerAttemptRepo = createProviderAttemptRepository(ctx.db);
+      const manager = createPodManager(ctx.deps);
+      const pod = manager.createSession(
+        { profileName: 'test-profile', task: 'Retain finite runtime output' },
+        'operator',
+      );
+      ctx.podRepo.update(pod.id, { status: 'running', containerId: 'owned-container' });
+      const exitCode = Promise.reject(new Error('Backend disconnected before observing exit'));
+      void exitCode.catch(() => {});
+      vi.mocked(ctx.containerManager.execStreaming).mockResolvedValue({
+        stdout: Readable.from([
+          kind === 'copilot'
+            ? 'Retain this output\n'
+            : `${JSON.stringify({ type: 'result', subtype: 'success', result: 'Retain this output' })}\n`,
+        ]),
+        stderr: Readable.from([]),
+        exitCode,
+        kill: vi.fn(async () => {
+          throw new Error('Termination unverified');
+        }),
+      });
+      const runtime =
+        kind === 'copilot'
+          ? new CopilotRuntime(pino({ level: 'silent' }), ctx.containerManager)
+          : new ClaudeRuntime(pino({ level: 'silent' }), ctx.containerManager);
+      const stream =
+        kind === 'claude-resume'
+          ? runtime.resume(pod.id, 'Continue', 'owned-container')
+          : runtime.spawn({
+              podId: pod.id,
+              task: pod.task,
+              model: pod.model,
+              reasoningEffort: 'auto',
+              workDir: '/workspace',
+              containerId: 'owned-container',
+              env: {},
+            });
+      await expect(manager.consumeAgentEvents(pod.id, stream)).rejects.toMatchObject({
+        code: 'EXEC_EXIT_UNVERIFIED',
+      });
+      expect(ctx.podRepo.taskExecutions?.hasUnverifiedTermination(pod.id)).toBe(true);
+      expect(ctx.podRepo.taskExecutions?.snapshot(pod.id)).toMatchObject({
+        agentRunCount: 1,
+        failedRunCount: 1,
+      });
+      expect(
+        JSON.stringify(
+          ctx.eventRepo.getForSession(pod.id, { type: 'pod.agent_activity', latest: 20 }),
+        ),
+      ).toContain('Retain this output');
+      await expect(createPodManager(ctx.deps).resumePod(pod.id)).rejects.toMatchObject({
+        code: 'TASK_EXECUTION_TERMINATION_UNVERIFIED',
+      });
+      expect(ctx.validationEngine.validate).not.toHaveBeenCalled();
+      expect(ctx.prManager.createPr).not.toHaveBeenCalled();
+      expect(ctx.containerManager.kill).not.toHaveBeenCalled();
+      expect(ctx.containerManager.execStreaming).toHaveBeenCalledTimes(1);
+    },
+  );
+
+  it('records incomplete Copilot stderr without treating a truncated quota line as provider-limit authority', async () => {
+    const ctx = createTestContext(undefined, { defaultRuntime: 'copilot' });
+    const attempts = createProviderAttemptRepository(ctx.db);
+    ctx.deps.providerAttemptRepo = attempts;
+    const manager = createPodManager(ctx.deps);
+    const pod = manager.createSession(
+      { profileName: 'test-profile', task: 'Retain diagnostic uncertainty' },
+      'operator',
+    );
+    ctx.podRepo.update(pod.id, { status: 'running', containerId: 'owned-container' });
+    vi.mocked(ctx.containerManager.execStreaming).mockResolvedValue({
+      stdout: Readable.from(['Retain output\n']),
+      stderr: Readable.from([`${'x'.repeat(100000)}\nYou have exhausted your premium requests.\n`]),
+      exitCode: Promise.resolve(1),
+      kill: vi.fn(async () => {}),
+    });
+    const runtime = new CopilotRuntime(pino({ level: 'silent' }), ctx.containerManager);
+    expect(
+      await manager.consumeAgentEvents(
+        pod.id,
+        runtime.spawn({
+          podId: pod.id,
+          task: pod.task,
+          model: pod.model,
+          reasoningEffort: 'auto',
+          containerId: 'owned-container',
+          workDir: '/workspace',
+          env: {},
+        }),
+      ),
+    ).toBe('failed');
+    expect(ctx.podRepo.getOrThrow(pod.id)).toMatchObject({ status: 'failed', pauseReason: null });
+    expect(attempts.list(pod.id).at(-1)).toMatchObject({
+      outcome: 'failed',
+      classification: { category: 'unknown', definitive: false },
+    });
+    expect(
+      JSON.stringify(
+        ctx.eventRepo.getForSession(pod.id, { type: 'pod.agent_activity', latest: 20 }),
+      ),
+    ).toContain('stderr diagnostics incomplete');
+    expect(ctx.podRepo.taskExecutions?.hasUnverifiedTermination(pod.id)).toBe(false);
+    expect(ctx.validationEngine.validate).not.toHaveBeenCalled();
+    expect(ctx.containerManager.execStreaming).toHaveBeenCalledTimes(1);
+  });
+
+  it('rejects deletion of an unsettled execution before failed cleanup can erase its evidence', async () => {
+    const ctx = createTestContext();
+    const manager = createPodManager(ctx.deps);
+    const pod = manager.createSession(
+      { profileName: 'test-profile', task: 'Retain unresolved execution' },
+      'operator',
+    );
+    ctx.podRepo.update(pod.id, {
+      status: 'running',
+      containerId: 'retained-container',
+      tokenBudget: null,
+    });
+    ctx.podRepo.taskExecutions?.beginRun(pod.id, 1, 1, {
+      runtime: pod.runtime,
+      model: pod.model,
+      providerAccountId: null,
+    });
+    ctx.podRepo.update(pod.id, { status: 'failed', worktreePath: '/tmp/retained-source' });
+    vi.mocked(ctx.containerManager.kill).mockRejectedValue(
+      new Error('Container removal unavailable'),
+    );
+    await expect(manager.deleteSession(pod.id)).rejects.toMatchObject({
+      code: 'TASK_EXECUTION_UNSETTLED',
+    });
+    expect(ctx.containerManager.kill).not.toHaveBeenCalled();
+    expect(ctx.worktreeManager.cleanup).not.toHaveBeenCalled();
+    expect(ctx.podRepo.taskExecutions?.hasActiveRun(pod.id)).toBe(true);
+    expect(ctx.podRepo.getOrThrow(pod.id).worktreePath).toBe('/tmp/retained-source');
+  });
+
+  it.each(['failure', 'timeout', 'superseded', 'task-admitted'] as const)(
+    'retains source and stops later Delete steps after container cleanup %s',
+    async (fault) => {
+      vi.useFakeTimers();
+      const ctx = createTestContext();
+      const manager = createPodManager(ctx.deps);
+      const pod = manager.createSession(
+        { profileName: 'test-profile', task: 'Retain source until cleanup is observed' },
+        'operator',
+      );
+      ctx.podRepo.update(pod.id, {
+        status: 'failed',
+        containerId: 'retained-container',
+        worktreePath: '/tmp/retained-source',
+      });
+      let release = () => {};
+      const pending = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      vi.mocked(ctx.containerManager.kill).mockImplementation(async () => {
+        if (fault === 'failure') throw new Error('Container removal unavailable');
+        await pending;
+      });
+      const result = manager.deleteSession(pod.id).then(
+        () => null,
+        (error: unknown) => error,
+      );
+      try {
+        await vi.advanceTimersByTimeAsync(0);
+        expect(ctx.containerManager.kill).toHaveBeenCalledWith('retained-container');
+        if (fault === 'timeout') await vi.advanceTimersByTimeAsync(25001);
+        if (fault === 'superseded')
+          expect(() => ctx.podRepo.incrementLifecycleGeneration(pod.id)).toThrow(
+            'cleanup ownership is unresolved',
+          );
+        if (fault === 'task-admitted')
+          expect(() =>
+            ctx.podRepo.taskExecutions?.beginRun(pod.id, pod.lifecycleGeneration, 1, {
+              runtime: pod.runtime,
+              model: pod.model,
+              providerAccountId: null,
+            }),
+          ).toThrow('cleanup ownership is unresolved');
+        if (fault === 'superseded' || fault === 'task-admitted')
+          await vi.advanceTimersByTimeAsync(25001);
+        release();
+        expect(await result).toMatchObject({ code: 'POD_DELETE_CLEANUP_UNVERIFIED' });
+        await vi.advanceTimersByTimeAsync(0);
+        expect(ctx.worktreeManager.cleanup).not.toHaveBeenCalled();
+        expect(ctx.podRepo.getOrThrow(pod.id)).toMatchObject({
+          status: 'failed',
+          worktreePath: '/tmp/retained-source',
+        });
+        expect(vi.getTimerCount()).toBe(0);
+      } finally {
+        release();
+        await result;
+        vi.useRealTimers();
+      }
+    },
+  );
+
+  it('deletes a settled pod only after cleanup completes and disposes the deadline', async () => {
+    vi.useFakeTimers();
+    const ctx = createTestContext(undefined, { defaultRuntime: 'copilot' });
+    const manager = createPodManager(ctx.deps);
+    const pod = manager.createSession(
+      { profileName: 'test-profile', task: 'Observed cleanup' },
+      'operator',
+    );
+    ctx.podRepo.update(pod.id, {
+      status: 'failed',
+      containerId: 'owned',
+      worktreePath: '/tmp/owned',
+    });
+    try {
+      await manager.deleteSession(pod.id);
+      expect(ctx.containerManager.kill).toHaveBeenCalledWith('owned');
+      expect(ctx.worktreeManager.cleanup).toHaveBeenCalledWith('/tmp/owned');
+      expect(() => ctx.podRepo.getOrThrow(pod.id)).toThrow(PodNotFoundError);
+      expect(vi.getTimerCount()).toBe(0);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('retains test branch cleanup records and source when its capability is unavailable', async () => {
+    const ctx = createTestContext();
+    const manager = createPodManager(ctx.deps);
+    const pod = manager.createSession(
+      { profileName: 'test-profile', task: 'Retain test cleanup' },
+      'operator',
+    );
+    ctx.podRepo.update(pod.id, {
+      status: 'failed',
+      testRunBranches: ['test/owned'],
+      worktreePath: '/tmp/owned',
+    });
+    await expect(manager.deleteSession(pod.id)).rejects.toMatchObject({
+      code: 'POD_DELETE_CLEANUP_UNVERIFIED',
+      message: expect.stringContaining('test branches'),
+    });
+    expect(ctx.worktreeManager.cleanup).not.toHaveBeenCalled();
+    expect(ctx.podRepo.getOrThrow(pod.id).testRunBranches).toEqual(['test/owned']);
+  });
+
+  it.each(['thrown', 'fatal-event', 'advisory-event'] as const)(
+    'retains explicit unverified termination from %s before admitting linked work',
+    async (failure) => {
+      const ctx = createTestContext();
+      const manager = createPodManager(ctx.deps);
+      const pod = manager.createSession(
+        { profileName: 'test-profile', task: 'Unverified execution' },
+        'operator',
+      );
+      ctx.podRepo.update(pod.id, { status: 'running', containerId: 'original-container' });
+      const stream = manager.consumeAgentEvents(
+        pod.id,
+        (async function* () {
+          if (failure === 'thrown')
+            throw new AutopodError('Termination unverified', 'EXEC_EXIT_UNVERIFIED', 409);
+          yield {
+            type: 'error',
+            timestamp: new Date().toISOString(),
+            message: 'Termination unverified',
+            fatal: failure === 'fatal-event',
+            executionTermination: 'unverified',
+          } as const;
+        })(),
+      );
+      if (failure === 'thrown')
+        await expect(stream).rejects.toMatchObject({ code: 'EXEC_EXIT_UNVERIFIED' });
+      else expect(await stream).toBe('failed');
+      const replacement = createPodManager(ctx.deps);
+      const fix = replacement.createSession(
+        { profileName: 'test-profile', task: 'Linked repair', linkedPodId: pod.id },
+        'operator',
+      );
+      ctx.podRepo.update(fix.id, { status: 'running', containerId: 'new-container' });
+      let entered = false;
+      await expect(
+        replacement.consumeAgentEvents(
+          fix.id,
+          (async function* () {
+            entered = true;
+            yield {
+              type: 'complete',
+              timestamp: new Date().toISOString(),
+              result: 'No replay',
+            } as const;
+          })(),
+        ),
+      ).rejects.toMatchObject({ code: 'TASK_AGENT_RUN_ACTIVE' });
+      expect(entered).toBe(false);
+      expect(ctx.podRepo.taskExecutions?.snapshot(fix.id).diagnostics.join('\n')).toContain(
+        '1 unsettled worker run blocks another task run',
+      );
+      expect(ctx.podRepo.taskExecutions?.hasActiveRun(pod.id)).toBe(true);
+    },
+  );
+
+  it.each(
+    ['end', 'error', 'complete'].flatMap((ending) => [
+      { ending, sameLifecycle: false },
+      { ending, sameLifecycle: true },
+    ]),
+  )(
+    'does not finalize a replacement from an old stream $ending sameLifecycle=$sameLifecycle',
+    async ({ ending, sameLifecycle }) => {
+      const ctx = createTestContext(undefined, {
+        defaultRuntime: 'codex',
+        executionTarget: 'sandbox',
+        warmImageTag: 'example.azurecr.io/autopod/test:immutable',
+      });
+      const attempts = createProviderAttemptRepository(ctx.db);
+      ctx.deps.providerAttemptRepo = attempts;
+      const manager = createPodManager(ctx.deps);
+      const created = manager.createSession(
+        { profileName: 'test-profile', task: 'Retain replacement', skipValidation: true },
+        'operator',
+      );
+      ctx.podRepo.update(created.id, { status: 'running', containerId: 'old-container' });
+      const pod = ctx.podRepo.getOrThrow(created.id);
+      const release = deferred<void>();
+      const consuming = manager.consumeAgentEvents(
+        pod.id,
+        (async function* () {
+          await release.promise;
+          if (ending === 'error') throw new Error('old transport ended late');
+          if (ending === 'complete')
+            yield {
+              type: 'complete',
+              timestamp: new Date().toISOString(),
+              result: 'Old completion',
+              totalInputTokens: 100,
+              totalOutputTokens: 50,
+              costUsd: 2,
+            } as const;
+        })(),
+        0,
+        { generation: pod.lifecycleGeneration, containerId: pod.containerId },
+      );
+      const old = attempts.getActive(pod.id);
+      const profileSnapshot = attempts.getActiveProfileSnapshot(pod.id);
+      if (!old || !profileSnapshot) throw new Error('Missing active attempt');
+      attempts.close(pod.id, {
+        nativeSessionId: null,
+        outcome: 'aborted',
+        inputTokens: 0,
+        outputTokens: 0,
+        costUsd: 0,
+      });
+      if (!sameLifecycle) {
+        ctx.podRepo.incrementLifecycleGeneration(pod.id);
+        ctx.podRepo.update(pod.id, { containerId: 'replacement', status: 'running' });
+      }
+      const replacement = attempts.open({
+        podId: pod.id,
+        provider: old.provider,
+        providerAccountId: old.providerAccountId,
+        runtime: old.runtime,
+        model: old.model,
+        profileReference: old.profileReference,
+        profileSnapshot,
+      });
+      release.resolve();
+      await expect(consuming).resolves.toBe('stopped');
+      expect(attempts.getActive(pod.id)).toEqual(replacement);
+      expect(attempts.listRaw(pod.id)[0]).toMatchObject({ outcome: 'aborted', inputTokens: 0 });
+      expect(ctx.containerManager.extractDirectoryFromContainer).not.toHaveBeenCalled();
+      expect(ctx.podRepo.getOrThrow(pod.id)).toMatchObject({
+        status: 'running',
+        containerId: sameLifecycle ? 'old-container' : 'replacement',
+        taskSummary: null,
+        inputTokens: 0,
+        outputTokens: 0,
+        costUsd: 0,
+      });
+    },
+  );
+
+  it.each(
+    [false, true].flatMap((fatal) => [
+      { fatal, sameLifecycle: false },
+      { fatal, sameLifecycle: true },
+    ]),
+  )(
+    'rechecks ownership after session synchronization failure=$fatal sameLifecycle=$sameLifecycle',
+    async ({ fatal, sameLifecycle }) => {
+      const ctx = createTestContext(undefined, {
+        defaultRuntime: 'codex',
+        executionTarget: 'sandbox',
+        warmImageTag: 'example.azurecr.io/autopod/test:immutable',
+      });
+      const attempts = createProviderAttemptRepository(ctx.db);
+      ctx.deps.providerAttemptRepo = attempts;
+      const manager = createPodManager(ctx.deps);
+      const created = manager.createSession(
+        { profileName: 'test-profile', task: 'Fence final callbacks', skipValidation: true },
+        'operator',
+      );
+      ctx.podRepo.update(created.id, { status: 'running', containerId: 'old-container' });
+      const pod = ctx.podRepo.getOrThrow(created.id);
+      let replacementOrdinal = 0;
+      let initiallyCurrent = false;
+      let replacementRejected = false;
+      vi.mocked(ctx.containerManager.extractDirectoryFromContainer).mockImplementationOnce(
+        async (containerId, _containerPath, _hostPath, _excludes, options) => {
+          if (options?.assertCurrent) {
+            options.assertCurrent();
+            initiallyCurrent = true;
+          }
+          expect(containerId).toBe('old-container');
+          const old = attempts.getActive(pod.id);
+          const profileSnapshot = attempts.getActiveProfileSnapshot(pod.id);
+          if (!old || !profileSnapshot) throw new Error('Missing active attempt');
+          attempts.close(pod.id, {
+            nativeSessionId: null,
+            outcome: 'aborted',
+            inputTokens: 0,
+            outputTokens: 0,
+            costUsd: 0,
+          });
+          if (!sameLifecycle) ctx.podRepo.incrementLifecycleGeneration(pod.id);
+          ctx.podRepo.update(pod.id, {
+            containerId: sameLifecycle ? 'old-container' : 'replacement',
+            status: 'running',
+          });
+          replacementOrdinal = attempts.open({
+            podId: pod.id,
+            provider: old.provider,
+            providerAccountId: old.providerAccountId,
+            runtime: old.runtime,
+            model: old.model,
+            profileReference: old.profileReference,
+            profileSnapshot,
+          }).ordinal;
+          try {
+            options?.assertCurrent?.();
+          } catch {
+            replacementRejected = true;
+          }
+        },
+      );
+      const outcome = await manager.consumeAgentEvents(
+        pod.id,
+        (async function* () {
+          yield {
+            type: 'complete',
+            timestamp: new Date().toISOString(),
+            result: 'Actually finished old work',
+          } as const;
+          if (fatal)
+            yield {
+              type: 'error',
+              timestamp: new Date().toISOString(),
+              message: 'A subsequent owned event failed',
+              fatal: true,
+            } as const;
+        })(),
+        0,
+        { generation: pod.lifecycleGeneration, containerId: pod.containerId },
+      );
+      expect(outcome).toBe('stopped');
+      expect(initiallyCurrent).toBe(true);
+      expect(replacementRejected).toBe(true);
+      expect(attempts.getActive(pod.id)?.ordinal).toBe(replacementOrdinal);
+      expect(ctx.podRepo.getOrThrow(pod.id)).toMatchObject({
+        status: 'running',
+        containerId: sameLifecycle ? 'old-container' : 'replacement',
+      });
+      // Preserve the observed old completion even though control must not settle the new lifecycle.
+      expect(
+        ctx.db.prepare('SELECT outcome FROM task_agent_runs WHERE pod_id = ?').get(pod.id),
+      ).toEqual({ outcome: fatal ? 'failed' : 'completed' });
+    },
+  );
+
+  it('stops cleanly if durable provider ownership changes at the final close write', async () => {
+    const ctx = createTestContext();
+    const attempts = createProviderAttemptRepository(ctx.db);
+    const otherController = createProviderAttemptRepository(ctx.db);
+    ctx.deps.providerAttemptRepo = attempts;
+    const manager = createPodManager(ctx.deps);
+    const created = manager.createSession(
+      { profileName: 'test-profile', task: 'Fence close write', skipValidation: true },
+      'operator',
+    );
+    ctx.podRepo.update(created.id, { status: 'running', containerId: 'same-container' });
+    const close = attempts.close.bind(attempts);
+    let replacementOrdinal = 0;
+    vi.spyOn(attempts, 'close').mockImplementationOnce((podId, input) => {
+      const active = otherController.getActive(podId);
+      const profileSnapshot = otherController.getActiveProfileSnapshot(podId);
+      if (!active || !profileSnapshot) throw new Error('Missing attempt');
+      otherController.close(podId, {
+        nativeSessionId: null,
+        outcome: 'aborted',
+        inputTokens: active.inputTokens,
+        outputTokens: active.outputTokens,
+        costUsd: active.costUsd,
+      });
+      replacementOrdinal = otherController.open({
+        podId,
+        provider: active.provider,
+        providerAccountId: active.providerAccountId,
+        runtime: active.runtime,
+        model: active.model,
+        profileReference: active.profileReference,
+        profileSnapshot,
+      }).ordinal;
+      return close(podId, input);
+    });
+    await expect(
+      manager.consumeAgentEvents(
+        created.id,
+        (async function* () {
+          yield {
+            type: 'complete',
+            timestamp: new Date().toISOString(),
+            result: 'Observed completion',
+            totalInputTokens: 5,
+            totalOutputTokens: 2,
+            costUsd: 0.1,
+          } as const;
+        })(),
+      ),
+    ).resolves.toBe('stopped');
+    expect(attempts.getActive(created.id)).toMatchObject({
+      ordinal: replacementOrdinal,
+      endedAt: null,
+      inputTokens: 0,
+      outputTokens: 0,
+      costUsd: 0,
+    });
+    expect(attempts.listRaw(created.id)[0]).toMatchObject({
+      outcome: 'aborted',
+      inputTokens: 5,
+      outputTokens: 2,
+      costUsd: 0.1,
+    });
+    expect(
+      ctx.db.prepare('SELECT outcome FROM task_agent_runs WHERE pod_id = ?').get(created.id),
+    ).toEqual({ outcome: 'completed' });
+    expect(ctx.podRepo.getOrThrow(created.id)).toMatchObject({
+      status: 'running',
+      containerId: 'same-container',
+    });
+  });
+
+  it('does not begin a task run or consume events for an already superseded lifecycle', async () => {
+    const ctx = createTestContext();
+    const manager = createPodManager(ctx.deps);
+    const created = manager.createSession(
+      { profileName: 'test-profile', task: 'Fence event admission' },
+      'operator',
+    );
+    ctx.podRepo.update(created.id, { status: 'running', containerId: 'old-container' });
+    const old = ctx.podRepo.getOrThrow(created.id);
+    ctx.podRepo.incrementLifecycleGeneration(old.id);
+    ctx.podRepo.update(old.id, { containerId: 'replacement' });
+    let consumed = false;
+    const outcome = await manager.consumeAgentEvents(
+      old.id,
+      (async function* () {
+        consumed = true;
+        yield {
+          type: 'complete',
+          timestamp: new Date().toISOString(),
+          result: 'Stale result',
+        } as const;
+      })(),
+      0,
+      { generation: old.lifecycleGeneration, containerId: old.containerId },
+    );
+    expect(outcome).toBe('stopped');
+    expect(consumed).toBe(false);
+    expect(ctx.podRepo.taskExecutions?.snapshot(old.id).agentRunCount).toBe(0);
+  });
+
+  it.each(['replaced', 'stopped'] as const)(
+    'does not publish late starting HEAD after commit polling is %s',
+    async (ending) => {
+      const ctx = createTestContext();
+      const manager = createPodManager(ctx.deps);
+      const created = manager.createSession(
+        { profileName: 'test-profile', task: 'Fence commit observations' },
+        'operator',
+      );
+      ctx.podRepo.update(created.id, { status: 'running', containerId: 'old-container' });
+      const head = deferred<{ stdout: string; stderr: string; exitCode: number }>();
+      const headStarted = deferred<void>();
+      const finish = deferred<void>();
+      const original = vi.mocked(ctx.containerManager.execInContainer).getMockImplementation();
+      if (!original) throw new Error('Missing command fixture');
+      vi.mocked(ctx.containerManager.execInContainer).mockImplementation(
+        async (id, cmd, options) => {
+          if (cmd.join(' ') === 'git rev-parse HEAD') {
+            headStarted.resolve();
+            return head.promise;
+          }
+          return original(id, cmd, options);
+        },
+      );
+      const consuming = manager.consumeAgentEvents(
+        created.id,
+        (async function* () {
+          await finish.promise;
+          yield {
+            type: 'complete',
+            timestamp: new Date().toISOString(),
+            result: 'Finished',
+          } as const;
+        })(),
+      );
+      await headStarted.promise;
+      if (ending === 'replaced') {
+        ctx.podRepo.incrementLifecycleGeneration(created.id);
+        ctx.podRepo.update(created.id, { containerId: 'replacement' });
+      } else {
+        finish.resolve();
+        await consuming;
+      }
+      ctx.podRepo.update(created.id, { startCommitSha: 'new-start', commitCount: 9 });
+      head.resolve({ stdout: 'old-start\n', stderr: '', exitCode: 0 });
+      await new Promise<void>((resolve) => setImmediate(resolve));
+      const observed = ctx.podRepo.getOrThrow(created.id);
+      const countCalls = vi
+        .mocked(ctx.containerManager.execInContainer)
+        .mock.calls.filter(([, cmd]) => cmd[1] === 'rev-list');
+      finish.resolve();
+      await consuming;
+      expect(observed).toMatchObject({ startCommitSha: 'new-start', commitCount: 9 });
+      expect(countCalls).toHaveLength(0);
+    },
+  );
+
+  it('does not publish late commit counts into a replacement lifecycle', async () => {
+    const ctx = createTestContext();
+    const manager = createPodManager(ctx.deps);
+    const pod = manager.createSession(
+      { profileName: 'test-profile', task: 'Keep replacement commit metadata' },
+      'operator',
+    );
+    ctx.podRepo.update(pod.id, {
+      status: 'running',
+      containerId: 'old-container',
+      startCommitSha: 'old-start',
+    });
+    const count = deferred<{ stdout: string; stderr: string; exitCode: number }>();
+    const countStarted = deferred<void>();
+    const finish = deferred<void>();
+    const original = vi.mocked(ctx.containerManager.execInContainer).getMockImplementation();
+    if (!original) throw new Error('Missing command fixture');
+    vi.mocked(ctx.containerManager.execInContainer).mockImplementation(async (id, cmd, options) => {
+      if (cmd[1] === 'rev-list') {
+        countStarted.resolve();
+        return count.promise;
+      }
+      if (cmd[1] === 'log') return { stdout: '2026-09-01T00:00:00Z', stderr: '', exitCode: 0 };
+      return original(id, cmd, options);
+    });
+    const consuming = manager.consumeAgentEvents(
+      pod.id,
+      (async function* () {
+        await finish.promise;
+        yield {
+          type: 'status',
+          timestamp: new Date().toISOString(),
+          message: 'Polling fixture ended',
+        } as const;
+      })(),
+    );
+    await countStarted.promise;
+    ctx.podRepo.incrementLifecycleGeneration(pod.id);
+    ctx.podRepo.update(pod.id, {
+      containerId: 'replacement',
+      commitCount: 9,
+      lastCommitAt: '2026-09-08T00:00:00Z',
+    });
+    count.resolve({ stdout: '2', stderr: '', exitCode: 0 });
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    const observed = ctx.podRepo.getOrThrow(pod.id);
+    finish.resolve();
+    await consuming;
+    expect(observed).toMatchObject({ commitCount: 9, lastCommitAt: '2026-09-08T00:00:00Z' });
+  });
+
+  it('serializes commit polling ticks while a prior command remains in flight', async () => {
+    vi.useFakeTimers();
+    const count = deferred<{ stdout: string; stderr: string; exitCode: number }>();
+    const finish = deferred<void>();
+    let consuming: Promise<unknown> | undefined;
+    try {
+      const ctx = createTestContext();
+      const manager = createPodManager(ctx.deps);
+      const pod = manager.createSession(
+        { profileName: 'test-profile', task: 'Bound commit polling' },
+        'operator',
+      );
+      ctx.podRepo.update(pod.id, {
+        status: 'running',
+        containerId: 'ctr-1',
+        startCommitSha: 'start',
+      });
+      const original = vi.mocked(ctx.containerManager.execInContainer).getMockImplementation();
+      if (!original) throw new Error('Missing command fixture');
+      vi.mocked(ctx.containerManager.execInContainer).mockImplementation(
+        async (id, cmd, options) => {
+          if (cmd[1] === 'rev-list') return count.promise;
+          return original(id, cmd, options);
+        },
+      );
+      consuming = manager.consumeAgentEvents(
+        pod.id,
+        (async function* () {
+          await finish.promise;
+          yield {
+            type: 'status',
+            timestamp: new Date().toISOString(),
+            message: 'Polling fixture ended',
+          } as const;
+        })(),
+      );
+      await vi.advanceTimersByTimeAsync(180_000);
+      expect(
+        vi
+          .mocked(ctx.containerManager.execInContainer)
+          .mock.calls.filter(([, cmd]) => cmd[1] === 'rev-list'),
+      ).toHaveLength(1);
+    } finally {
+      count.resolve({ stdout: '0', stderr: '', exitCode: 0 });
+      finish.resolve();
+      await consuming;
+      vi.useRealTimers();
+    }
+  });
+
   it('quiesces a paused Codex run before allowing resume', async () => {
     const ctx = createTestContext(undefined, { defaultRuntime: 'codex' });
     const attempts = createProviderAttemptRepository(ctx.db);
@@ -1372,6 +2928,722 @@ describe('PodManager', () => {
     await manager.pauseSession(pod.id);
     expect(runtime.suspend).toHaveBeenCalledTimes(2);
     expect(ctx.podRepo.getOrThrow(pod.id).status).toBe('paused');
+  });
+
+  it('blocks linked fix agent execution using cumulative task budget before consuming the runtime', async () => {
+    const ctx = createTestContext();
+    const manager = createPodManager(ctx.deps);
+    const parent = manager.createSession(
+      { profileName: 'test-profile', task: 'original', tokenBudget: 100 },
+      'user-1',
+    );
+    ctx.podRepo.update(parent.id, { status: 'running', inputTokens: 80, outputTokens: 20 });
+    const fix = manager.createSession(
+      { profileName: 'test-profile', task: 'fix original', linkedPodId: parent.id },
+      'user-1',
+    );
+    ctx.podRepo.update(fix.id, { status: 'running' });
+    let consumed = false;
+    await expect(
+      manager.consumeAgentEvents(
+        fix.id,
+        (async function* () {
+          consumed = true;
+          yield {
+            type: 'complete',
+            timestamp: new Date().toISOString(),
+            result: 'unwanted paid work',
+          } as const;
+        })(),
+      ),
+    ).rejects.toThrow('Task token budget');
+    expect(consumed).toBe(false);
+    expect(ctx.podRepo.taskExecutions?.snapshot(fix.id).agentRunCount).toBe(0);
+  });
+
+  it('blocks a linked fix before provider consumption when prior task spending is incomplete', async () => {
+    const ctx = createTestContext();
+    const manager = createPodManager(ctx.deps);
+    const parent = manager.createSession(
+      { profileName: 'test-profile', task: 'original', tokenBudget: 100 },
+      'user-1',
+    );
+    ctx.podRepo.update(parent.id, {
+      status: 'failed',
+      inputTokens: 10,
+      outputTokens: 5,
+      tokenTelemetryAccuracy: 'partial',
+    });
+    const fix = manager.createSession(
+      { profileName: 'test-profile', task: 'fix original', linkedPodId: parent.id },
+      'user-1',
+    );
+    ctx.podRepo.update(fix.id, { status: 'running' });
+    let consumed = false;
+    await expect(
+      manager.consumeAgentEvents(
+        fix.id,
+        (async function* () {
+          consumed = true;
+          yield {
+            type: 'complete',
+            timestamp: new Date().toISOString(),
+            result: 'unwanted paid work',
+          } as const;
+        })(),
+      ),
+    ).rejects.toMatchObject({ code: 'TASK_BUDGET_UNAVAILABLE' });
+    expect(consumed).toBe(false);
+    expect(ctx.podRepo.taskExecutions?.snapshot(fix.id).agentRunCount).toBe(0);
+  });
+
+  it('does not open a new completion cycle or consume a worker while a decision is unanswered', async () => {
+    const ctx = createTestContext();
+    const manager = createPodManager(ctx.deps);
+    const pod = manager.createSession(
+      { profileName: 'test-profile', task: 'Wait for decision' },
+      'user-1',
+    );
+    ctx.podRepo.update(pod.id, {
+      status: 'awaiting_input',
+      pendingEscalation: {
+        id: 'pending-admission',
+        podId: pod.id,
+        type: 'ask_human',
+        timestamp: new Date().toISOString(),
+        response: null,
+        payload: { question: 'Select the repair' },
+      },
+    });
+    ctx.podRepo.completionJournal?.settle(ctx.podRepo.getOrThrow(pod.id), 'Preserved report');
+    const before = ctx.podRepo.getOrThrow(pod.id);
+    let consumed = false;
+    await expect(
+      manager.consumeAgentEvents(
+        pod.id,
+        (async function* () {
+          consumed = true;
+          yield {
+            type: 'complete',
+            timestamp: new Date().toISOString(),
+            result: 'Unapproved continuation',
+          } as const;
+        })(),
+      ),
+    ).rejects.toMatchObject({ code: 'HUMAN_DECISION_PENDING' });
+    expect(consumed).toBe(false);
+    expect(ctx.podRepo.getOrThrow(pod.id).finalization).toEqual(before.finalization);
+    expect(ctx.podRepo.getOrThrow(pod.id).pendingEscalation).toEqual(before.pendingEscalation);
+    expect(ctx.podRepo.taskExecutions?.snapshot(pod.id).agentRunCount).toBe(0);
+  });
+
+  it.each(['same-manager', 'second-manager', 'linked-pod'] as const)(
+    'rejects overlapping outer execution without superseding the active run: %s',
+    async (route) => {
+      const ctx = createTestContext();
+      const manager = createPodManager(ctx.deps);
+      const created = manager.createSession(
+        { profileName: 'test-profile', task: 'One active outer execution' },
+        'operator',
+      );
+      ctx.podRepo.update(created.id, { status: 'running', containerId: 'owned-container' });
+      const other =
+        route === 'linked-pod'
+          ? manager.createSession(
+              { profileName: 'test-profile', task: 'Linked repair', linkedPodId: created.id },
+              'operator',
+            )
+          : created;
+      if (route === 'linked-pod')
+        ctx.podRepo.update(other.id, { status: 'running', containerId: 'linked-container' });
+      const entered = deferred<void>();
+      const release = deferred<void>();
+      let replayed = false;
+      const first = manager.consumeAgentEvents(
+        created.id,
+        (async function* () {
+          const recorded = ctx.db
+            .prepare('SELECT binding FROM task_agent_runs WHERE pod_id = ?')
+            .get(created.id) as { binding: string };
+          expect(JSON.parse(recorded.binding)).toMatchObject({
+            version: 2,
+            resource: { containerId: 'owned-container', executionTarget: created.executionTarget },
+          });
+          entered.resolve();
+          await release.promise;
+          yield {
+            type: 'complete',
+            timestamp: new Date().toISOString(),
+            result: 'Original run survived duplicate admission',
+          } as const;
+        })(),
+      );
+      await Promise.race([
+        entered.promise,
+        first.then(() => {
+          throw new Error('Original stream ended before entering');
+        }),
+      ]);
+      const before = ctx.db.prepare('SELECT * FROM pod_finalizations ORDER BY pod_id, cycle').all();
+      const second = route === 'second-manager' ? createPodManager(ctx.deps) : manager;
+      try {
+        await expect(
+          second.consumeAgentEvents(
+            other.id,
+            (async function* () {
+              replayed = true;
+              yield {
+                type: 'complete',
+                timestamp: new Date().toISOString(),
+                result: 'Duplicate provider dispatch',
+              } as const;
+            })(),
+          ),
+        ).rejects.toMatchObject({ code: 'TASK_AGENT_RUN_ACTIVE' });
+        expect(replayed).toBe(false);
+        expect(
+          ctx.db.prepare('SELECT * FROM pod_finalizations ORDER BY pod_id, cycle').all(),
+        ).toEqual(before);
+        expect(ctx.db.prepare('SELECT COUNT(*) AS count FROM task_agent_runs').get()).toEqual({
+          count: 1,
+        });
+      } finally {
+        release.resolve();
+        await first;
+      }
+      expect(await first).toBe('completed');
+      expect(
+        ctx.db.prepare('SELECT outcome FROM task_agent_runs WHERE pod_id = ?').all(created.id),
+      ).toEqual([{ outcome: 'completed' }]);
+    },
+  );
+
+  it.each(
+    ['same-manager', 'second-manager', 'linked-pod'].flatMap((route) =>
+      (['auth', 'unknown', 'missing'] as const).map((category) => ({ route, category })),
+    ),
+  )(
+    'blocks unchanged nonretryable outer worker replay before pulling another iterator: $route / $category',
+    async ({ route, category }) => {
+      const ctx = createTestContext();
+      const manager = createPodManager(ctx.deps);
+      const root = manager.createSession(
+        { profileName: 'test-profile', task: 'Original unchanged request' },
+        'operator',
+      );
+      ctx.podRepo.update(root.id, { status: 'running', containerId: 'original-container' });
+      const first = await manager.consumeAgentEvents(
+        root.id,
+        (async function* () {
+          yield {
+            type: 'error',
+            timestamp: new Date().toISOString(),
+            fatal: true,
+            message: 'Authentication rejected',
+            ...(category === 'missing'
+              ? {}
+              : {
+                  classification: {
+                    category,
+                    definitive: false,
+                    sanitizedMessage: 'Worker failed',
+                  },
+                }),
+          } as const;
+        })(),
+      );
+      expect(first).toBe('failed');
+      expect(ctx.podRepo.taskExecutions?.snapshot(root.id).failedRunCount).toBe(1);
+      const target =
+        route === 'linked-pod'
+          ? manager.createSession(
+              {
+                profileName: 'test-profile',
+                task: 'Original unchanged request',
+                linkedPodId: root.id,
+              },
+              'operator',
+            )
+          : root;
+      ctx.podRepo.update(target.id, { status: 'running', containerId: 'original-container' });
+      const next = route === 'second-manager' ? createPodManager(ctx.deps) : manager;
+      let pulled = false;
+      const before = ctx.db.prepare('SELECT * FROM pod_finalizations ORDER BY pod_id, cycle').all();
+      await expect(
+        next.consumeAgentEvents(
+          target.id,
+          (async function* () {
+            pulled = true;
+            yield {
+              type: 'complete',
+              timestamp: new Date().toISOString(),
+              result: 'Unchanged unauthorized retry',
+            } as const;
+          })(),
+        ),
+      ).rejects.toMatchObject({ code: 'TASK_RETRY_RECONCILIATION_REQUIRED' });
+      expect(pulled).toBe(false);
+      expect(ctx.podRepo.taskExecutions?.snapshot(target.id).agentRunCount).toBe(1);
+      expect(
+        ctx.db.prepare('SELECT * FROM pod_finalizations ORDER BY pod_id, cycle').all(),
+      ).toEqual(before);
+      const retries = ctx.podRepo.workerRetries;
+      if (!retries) throw new Error('Missing worker retry ledger');
+      const grant = retries.authorize(
+        target.id,
+        `auth-${route}`,
+        'Credentials inspected; permit one retry',
+        { type: 'human', userId: 'operator' },
+      );
+      expect(
+        retries.authorize(target.id, `auth-${route}`, 'Credentials inspected; permit one retry', {
+          type: 'human',
+          userId: 'operator',
+        }).id,
+      ).toBe(grant.id);
+      expect(retries.state(target.id).admissionCount).toBe(1);
+      await expect(
+        next.consumeAgentEvents(
+          target.id,
+          (async function* () {
+            pulled = true;
+            yield {
+              type: 'error',
+              timestamp: new Date().toISOString(),
+              fatal: true,
+              message: 'Still rejected',
+              classification: {
+                category: category === 'missing' ? 'unknown' : category,
+                definitive: false,
+                sanitizedMessage: 'Still rejected',
+              },
+            } as const;
+          })(),
+        ),
+      ).resolves.toBe('failed');
+      expect(pulled).toBe(true);
+      expect(retries.state(target.id)).toMatchObject({
+        admissionCount: 2,
+        executedCount: 2,
+        latest: {
+          outcome: category === 'auth' ? 'nonretryable' : 'unknown',
+          retryKind: 'override',
+        },
+        authorizationRequired: true,
+        retryFailure: category === 'auth' ? 'auth' : 'unknown',
+      });
+      expect(retries.state(target.id).authorizations[0]?.usedByAttemptId).toBeTruthy();
+      await expect(
+        next.consumeAgentEvents(
+          target.id,
+          (async function* () {
+            pulled = true;
+            yield { type: 'complete', timestamp: new Date().toISOString(), result: '' } as const;
+          })(),
+        ),
+      ).rejects.toMatchObject({ code: 'TASK_RETRY_RECONCILIATION_REQUIRED' });
+    },
+  );
+
+  it.each(['transient', 'provider_unavailable'] as const)(
+    'bounds classified outer worker %s retries across manager reconstruction and linked work',
+    async (category) => {
+      const ctx = createTestContext();
+      ctx.deps.workerInfrastructureRetryBackoffMs = [0];
+      const manager = createPodManager(ctx.deps);
+      const root = manager.createSession(
+        { profileName: 'test-profile', task: 'Bound provider retries' },
+        'operator',
+      );
+      ctx.podRepo.update(root.id, { status: 'running', containerId: 'root-container' });
+      let pulls = 0;
+      const failed = async function* () {
+        pulls++;
+        yield {
+          type: 'error',
+          timestamp: new Date().toISOString(),
+          fatal: true,
+          message: 'Provider temporarily unavailable',
+          classification: {
+            category,
+            definitive: false,
+            sanitizedMessage: 'Provider temporarily unavailable',
+          },
+        } as const;
+      };
+      expect(await manager.consumeAgentEvents(root.id, failed())).toBe('failed');
+      const fix = manager.createSession(
+        { profileName: 'test-profile', task: 'Bound provider retries', linkedPodId: root.id },
+        'operator',
+      );
+      ctx.podRepo.update(fix.id, { status: 'running', containerId: 'fix-container' });
+      // Changing the configured allowance after the first run cannot reset the task policy.
+      ctx.deps.workerInfrastructureRetryBackoffMs = [0, 0, 0];
+      const restarted = createPodManager(ctx.deps);
+      expect(await restarted.consumeAgentEvents(fix.id, failed())).toBe('failed');
+      await expect(restarted.consumeAgentEvents(fix.id, failed())).rejects.toMatchObject({
+        code: 'TASK_RETRY_RECONCILIATION_REQUIRED',
+      });
+      expect(pulls).toBe(2);
+      expect(ctx.podRepo.workerRetries?.state(fix.id)).toMatchObject({
+        backoffsMs: [0],
+        admissionCount: 2,
+        executedCount: 2,
+        transientRetryCount: 1,
+        authorizationRequired: true,
+        latest: { outcome: 'transient' },
+      });
+      ctx.podRepo.workerRetries?.authorize(
+        fix.id,
+        `extend-${category}`,
+        'Provider inspected; one retry',
+        { type: 'human', userId: 'operator' },
+      );
+      expect(await restarted.consumeAgentEvents(fix.id, failed())).toBe('failed');
+      expect(pulls).toBe(3);
+      await expect(restarted.consumeAgentEvents(fix.id, failed())).rejects.toMatchObject({
+        code: 'TASK_RETRY_RECONCILIATION_REQUIRED',
+      });
+      expect(pulls).toBe(3);
+    },
+  );
+
+  it.each(['seconds', 'utc'] as const)(
+    'retains the observed provider Retry-After deadline across manager reconstruction: %s',
+    async (format) => {
+      const ctx = createTestContext();
+      ctx.deps.workerInfrastructureRetryBackoffMs = [1000];
+      const manager = createPodManager(ctx.deps);
+      const root = manager.createSession(
+        { profileName: 'test-profile', task: 'Honor provider retry deadline' },
+        'operator',
+      );
+      ctx.podRepo.update(root.id, { status: 'running', containerId: 'original-container' });
+      vi.useFakeTimers({ toFake: ['Date'] });
+      const observed = Date.now();
+      const deadline = new Date(observed + 3000).toISOString();
+      try {
+        await manager.consumeAgentEvents(
+          root.id,
+          (async function* () {
+            yield {
+              type: 'error',
+              timestamp: new Date().toISOString(),
+              fatal: true,
+              message: 'Provider temporarily throttled',
+              classification: {
+                category: 'transient',
+                definitive: false,
+                sanitizedMessage: 'Throttled',
+                retryAfter: format === 'seconds' ? '3' : deadline,
+              },
+            } as const;
+          })(),
+        );
+        vi.setSystemTime(observed + 1000);
+        const fix = manager.createSession(
+          { profileName: 'test-profile', task: 'Continue', linkedPodId: root.id },
+          'operator',
+        );
+        ctx.podRepo.update(fix.id, { status: 'running', containerId: 'replacement-container' });
+        let pulled = false;
+        ctx.deps.workerInfrastructureRetryDelay = vi.fn(async (delay) => {
+          expect(pulled).toBe(false);
+          expect(delay).toBe(2000);
+          vi.setSystemTime(Date.now() + delay);
+        });
+        const restarted = createPodManager(ctx.deps);
+        expect(
+          await restarted.consumeAgentEvents(
+            fix.id,
+            (async function* () {
+              pulled = true;
+              yield {
+                type: 'complete',
+                timestamp: new Date().toISOString(),
+                result: 'Continued after deadline',
+              } as const;
+            })(),
+          ),
+        ).toBe('completed');
+        expect(pulled).toBe(true);
+        expect(ctx.deps.workerInfrastructureRetryDelay).toHaveBeenCalledTimes(1);
+        expect(ctx.podRepo.workerRetries?.state(fix.id)).toMatchObject({
+          transientRetryCount: 1,
+          admissionCount: 2,
+          latest: { notBefore: deadline, providerRetryNotBefore: deadline },
+        });
+      } finally {
+        vi.useRealTimers();
+      }
+    },
+  );
+
+  it('rejects long provider cooldown before Rework HTTP acceptance and preserves unused permission', async () => {
+    const ctx = createTestContext();
+    const manager = createPodManager(ctx.deps);
+    const pod = manager.createSession(
+      { profileName: 'test-profile', task: 'Wait for provider recovery' },
+      'operator',
+    );
+    ctx.podRepo.update(pod.id, { status: 'running', containerId: 'owned-container' });
+    await manager.consumeAgentEvents(
+      pod.id,
+      (async function* () {
+        yield {
+          type: 'error',
+          fatal: true,
+          timestamp: new Date().toISOString(),
+          message: 'Throttled',
+          classification: {
+            category: 'transient',
+            definitive: false,
+            sanitizedMessage: 'Throttled',
+            retryAfter: '3600',
+          },
+        } as const;
+      })(),
+    );
+    const before = ctx.podRepo.getOrThrow(pod.id);
+    ctx.enqueuedSessions.length = 0;
+    const app = Fastify();
+    app.setErrorHandler(errorHandler);
+    authPlugin(app, {
+      validateToken: async () => ({ oid: 'operator', name: 'Operator' }),
+    } as never);
+    podRoutes(app, manager, ctx.eventRepo, undefined, ctx.podRepo);
+    try {
+      const grant = await app.inject({
+        method: 'POST',
+        url: `/pods/${pod.id}/retry-authorizations`,
+        headers: { authorization: 'Bearer fixture' },
+        payload: {
+          stage: 'worker',
+          requestKey: 'cooldown-permission',
+          reason: 'Inspected provider; retry after cooldown',
+        },
+      });
+      expect(grant.statusCode).toBe(201);
+      const response = await app.inject({
+        method: 'POST',
+        url: `/pods/${pod.id}/validate`,
+        headers: { authorization: 'Bearer fixture' },
+      });
+      expect(response.statusCode, response.body).toBe(409);
+      expect(response.json().error).toBe('TASK_RETRY_BACKOFF_PENDING');
+      expect(response.json().message).toContain('No permission or retry allowance was consumed');
+      expect(ctx.podRepo.getOrThrow(pod.id)).toEqual(before);
+      expect(ctx.containerManager.kill).not.toHaveBeenCalled();
+      expect(ctx.enqueuedSessions).toEqual([]);
+      expect(ctx.podRepo.workerRetries?.state(pod.id)).toMatchObject({
+        admissionCount: 1,
+        transientRetryCount: 0,
+        authorizations: [{ usedByAttemptId: null }],
+      });
+    } finally {
+      await app.close();
+    }
+  });
+
+  it.each(['early-wake', 'stalled-clock', 'superseded', 'human-decision'] as const)(
+    'checks the persisted outer worker cooldown before iterator entry: %s',
+    async (mode) => {
+      const ctx = createTestContext();
+      ctx.deps.workerInfrastructureRetryBackoffMs = [1000];
+      const manager = createPodManager(ctx.deps);
+      const pod = manager.createSession(
+        { profileName: 'test-profile', task: 'Wait before retry' },
+        'operator',
+      );
+      ctx.podRepo.update(pod.id, { status: 'running', containerId: 'owned-container' });
+      vi.useFakeTimers({ toFake: ['Date'] });
+      let pulls = 0;
+      try {
+        await manager.consumeAgentEvents(
+          pod.id,
+          (async function* () {
+            yield {
+              type: 'error',
+              timestamp: new Date().toISOString(),
+              fatal: true,
+              message: 'Throttled',
+              classification: {
+                category: 'transient',
+                definitive: false,
+                sanitizedMessage: 'Throttled',
+              },
+            } as const;
+          })(),
+        );
+        let wakes = 0;
+        ctx.deps.workerInfrastructureRetryDelay = vi.fn(async (delay) => {
+          expect(pulls).toBe(0);
+          expect(ctx.podRepo.workerRetries?.state(pod.id).executedCount).toBe(1);
+          wakes++;
+          if (mode !== 'stalled-clock')
+            vi.setSystemTime(Date.now() + delay - (mode === 'early-wake' && wakes === 1 ? 1 : 0));
+          if (mode === 'superseded')
+            ctx.podRepo.update(pod.id, { containerId: 'replacement-container' });
+          if (mode === 'human-decision')
+            ctx.db
+              .prepare('UPDATE pods SET pending_escalation = ? WHERE id = ?')
+              .run(
+                JSON.stringify({ id: 'late-decision', payload: { question: 'Continue?' } }),
+                pod.id,
+              );
+        });
+        const result = manager.consumeAgentEvents(
+          pod.id,
+          (async function* () {
+            pulls++;
+            yield {
+              type: 'complete',
+              timestamp: new Date().toISOString(),
+              result: 'Preserved work',
+            } as const;
+          })(),
+        );
+        if (mode === 'early-wake') {
+          await expect(result).resolves.toBe('completed');
+          expect(wakes).toBe(2);
+          expect(pulls).toBe(1);
+        } else {
+          if (mode === 'superseded') await expect(result).resolves.toBe('stopped');
+          else await expect(result).rejects.toThrow();
+          expect(pulls).toBe(0);
+          expect(ctx.podRepo.workerRetries?.state(pod.id)).toMatchObject({
+            executedCount: 1,
+            latest: { startedAt: null, measuredDurationMs: null },
+          });
+          if (mode === 'stalled-clock') expect(wakes).toBe(3);
+          if (mode === 'superseded')
+            expect(ctx.podRepo.getOrThrow(pod.id).containerId).toBe('replacement-container');
+          if (mode === 'human-decision')
+            expect(ctx.podRepo.getOrThrow(pod.id).pendingEscalation?.id).toBe('late-decision');
+        }
+      } finally {
+        vi.useRealTimers();
+      }
+    },
+  );
+
+  it.each(['auth', 'unknown'] as const)(
+    'retains the worker %s guard after committed initialization fails before iterator entry',
+    async (category) => {
+      const ctx = createTestContext();
+      const manager = createPodManager(ctx.deps);
+      const pod = manager.createSession(
+        { profileName: 'test-profile', task: 'Preserve auth failure' },
+        'operator',
+      );
+      ctx.podRepo.update(pod.id, { status: 'running', containerId: 'owned-container' });
+      await manager.consumeAgentEvents(
+        pod.id,
+        (async function* () {
+          yield {
+            type: 'error',
+            timestamp: new Date().toISOString(),
+            fatal: true,
+            message: 'Authentication rejected',
+            classification: {
+              category,
+              definitive: true,
+              sanitizedMessage: 'Authentication rejected',
+            },
+          } as const;
+        })(),
+      );
+      const ledger = ctx.podRepo.workerRetries;
+      if (!ledger) throw new Error('Missing worker retries');
+      const actor = { type: 'human' as const, userId: 'operator' };
+      const grant = ledger.authorize(pod.id, 'first-permission', 'Credentials inspected', actor);
+      let pulls = 0;
+      const stream = async function* () {
+        pulls++;
+        yield {
+          type: 'complete',
+          timestamp: new Date().toISOString(),
+          result: 'Preserved work',
+        } as const;
+      };
+      vi.spyOn(ctx.eventRepo, 'getForSession').mockImplementationOnce(() => {
+        throw new Error('fixture event history unavailable');
+      });
+      await expect(manager.consumeAgentEvents(pod.id, stream())).rejects.toThrow(
+        'fixture event history unavailable',
+      );
+      expect(pulls).toBe(0);
+      expect(ledger.state(pod.id)).toMatchObject({
+        admissionCount: 2,
+        executedCount: 1,
+        authorizationRequired: true,
+        latest: { outcome: 'unknown', startedAt: null, measuredDurationMs: null },
+      });
+      const consumed = ledger
+        .state(pod.id)
+        .authorizations.find((a) => a.id === grant.id)?.usedByAttemptId;
+      expect(consumed).toBeTruthy();
+      const restarted = createPodManager(ctx.deps);
+      await expect(restarted.consumeAgentEvents(pod.id, stream())).rejects.toMatchObject({
+        code: 'TASK_RETRY_RECONCILIATION_REQUIRED',
+      });
+      expect(pulls).toBe(0);
+      ledger.authorize(pod.id, 'second-permission', 'Initialization repaired; permit retry', actor);
+      await expect(restarted.consumeAgentEvents(pod.id, stream())).resolves.toBe('completed');
+      expect(pulls).toBe(1);
+      expect(ledger.state(pod.id)).toMatchObject({
+        admissionCount: 3,
+        executedCount: 2,
+        authorizationRequired: false,
+      });
+      expect(
+        ledger.state(pod.id).authorizations.find((a) => a.id === grant.id)?.usedByAttemptId,
+      ).toBe(consumed);
+    },
+  );
+
+  it('rolls back completion cycle and task admission when provider segment initialization fails', async () => {
+    const ctx = createTestContext();
+    const attempts = createProviderAttemptRepository(ctx.db);
+    ctx.deps.providerAttemptRepo = attempts;
+    const manager = createPodManager(ctx.deps);
+    const pod = manager.createSession(
+      { profileName: 'test-profile', task: 'Atomic run initialization' },
+      'operator',
+    );
+    ctx.podRepo.update(pod.id, { status: 'running', containerId: 'owned-container' });
+    const before = ctx.podRepo.getOrThrow(pod.id);
+    vi.spyOn(attempts, 'open').mockImplementationOnce(() => {
+      throw new Error('fixture provider initialization failure');
+    });
+    let entered = false;
+    await expect(
+      manager.consumeAgentEvents(
+        pod.id,
+        (async function* () {
+          entered = true;
+          yield {
+            type: 'complete',
+            timestamp: new Date().toISOString(),
+            result: 'must not dispatch',
+          } as const;
+        })(),
+      ),
+    ).rejects.toThrow('fixture provider initialization failure');
+    expect(entered).toBe(false);
+    expect(ctx.podRepo.getOrThrow(pod.id)).toEqual(before);
+    expect(ctx.db.prepare('SELECT COUNT(*) AS count FROM pod_finalizations').get()).toEqual({
+      count: 0,
+    });
+    expect(ctx.db.prepare('SELECT COUNT(*) AS count FROM task_agent_runs').get()).toEqual({
+      count: 0,
+    });
+    expect(attempts.list(pod.id)).toEqual([]);
+    expect(
+      ctx.db
+        .prepare("SELECT COUNT(*) AS count FROM task_retry_attempts WHERE stage = 'worker'")
+        .get(),
+    ).toEqual({ count: 0 });
   });
 
   it('does not retain an active run when event-consumer initialization fails', async () => {
@@ -2294,13 +4566,15 @@ describe('PodManager', () => {
       outputTokens: 10,
       costUsd: 0.2,
     });
+    const originalExec = vi.mocked(ctx.containerManager.execInContainer).getMockImplementation();
+    if (!originalExec) throw new Error('Missing container fixture');
     vi.mocked(ctx.containerManager.execInContainer).mockImplementation(
-      async (_containerId, command) => {
+      async (containerId, command, options) => {
         const script = command.join(' ');
         if (script.includes('# autopod: provider failover handoff')) {
           return { stdout: '', stderr: '', exitCode: 1 };
         }
-        return { stdout: '', stderr: '', exitCode: 0 };
+        return originalExec(containerId, command, options);
       },
     );
     vi.mocked(ctx.runtime.spawn).mockImplementation(async function* () {
@@ -2742,6 +5016,135 @@ describe('PodManager', () => {
       containerId: 'source-container',
     });
     expect(ctx.enqueuedSessions).toEqual([]);
+  });
+
+  it.each(['active', 'unverified'] as const)(
+    'blocks provider continuation while a task worker is %s',
+    async (mode) => {
+      const ctx = createTestContext();
+      const manager = createPodManager(ctx.deps);
+      const pod = manager.createSession(
+        { profileName: 'test-profile', task: 'Keep unresolved worker' },
+        'operator',
+      );
+      ctx.podRepo.update(pod.id, {
+        status: 'failed',
+        containerId: 'retained-container',
+        worktreePath: '/tmp/retained-source',
+      });
+      const run = ctx.podRepo.taskExecutions?.beginRun(pod.id, 1, 1, {
+        runtime: pod.runtime,
+        model: pod.model,
+        providerAccountId: null,
+      });
+      if (!run) throw new Error('Missing active worker');
+      if (mode === 'unverified') ctx.podRepo.taskExecutions?.retainUnverifiedRun(run);
+      const before = manager.getSession(pod.id);
+      await expect(
+        manager.continueProvider(pod.id, 'profile-primary', { type: 'human', userId: 'operator' }),
+      ).rejects.toMatchObject({
+        code:
+          mode === 'unverified' ? 'TASK_EXECUTION_TERMINATION_UNVERIFIED' : 'TASK_AGENT_RUN_ACTIVE',
+      });
+      expect(manager.getSession(pod.id)).toEqual(before);
+      expect(ctx.containerManager.kill).not.toHaveBeenCalled();
+      expect(ctx.db.prepare('SELECT ended_at FROM task_agent_runs WHERE id = ?').get(run)).toEqual({
+        ended_at: null,
+      });
+    },
+  );
+
+  it('admits the explicitly selected profile primary after a recorded fallback authentication failure', async () => {
+    const ctx = createTestContext();
+    const attempts = createProviderAttemptRepository(ctx.db);
+    ctx.deps.providerAttemptRepo = attempts;
+    insertProviderAccount(ctx.db, 'source', 'anthropic', {
+      provider: 'anthropic',
+      apiKey: 'source-key',
+    });
+    insertProviderAccount(ctx.db, 'target', 'openai', { provider: 'openai', apiKey: 'target-key' });
+    linkProfileToProviderAccount(ctx.db, 'test-profile', 'source');
+    ctx.deps.providerAccountStore = createProviderAccountStore(ctx.db);
+    const manager = createPodManager(ctx.deps);
+    const pod = manager.createSession(
+      { profileName: 'test-profile', task: 'Recover fallback authentication' },
+      'operator',
+    );
+    ctx.podRepo.update(pod.id, {
+      status: 'failed',
+      worktreePath: `/tmp/worktree/${pod.id}`,
+      runtime: 'codex',
+      model: 'gpt-next',
+      providerAccountIdSnapshot: 'target',
+      providerIdSnapshot: 'max',
+    });
+    ctx.podRepo.completionJournal?.begin(ctx.podRepo.getOrThrow(pod.id));
+    const failed = ctx.podRepo.taskExecutions?.beginRun(pod.id, 1, 1, {
+      runtime: 'codex',
+      model: 'gpt-next',
+      providerAccountId: 'target',
+    });
+    if (!failed) throw new Error('Missing failed worker');
+    ctx.podRepo.taskExecutions?.finishRun(failed, 'failed', 'auth');
+    attempts.open({
+      podId: pod.id,
+      provider: 'max',
+      providerAccountId: 'target',
+      runtime: 'codex',
+      model: 'gpt-next',
+      profileReference: `pod:${pod.id}@profile-snapshot#abcdef3`,
+      profileSnapshot: { name: 'test-profile' },
+    });
+    const beforeRecovery = manager.getSession(pod.id);
+    await expect(manager.continueProvider(pod.id, 'profile-primary')).rejects.toMatchObject({
+      code: 'INVALID_INPUT',
+    });
+    expect(manager.getSession(pod.id)).toEqual(beforeRecovery);
+    const app = Fastify();
+    app.setErrorHandler(errorHandler);
+    authPlugin(app, {
+      validateToken: async () => ({ oid: 'recovery-operator', name: 'Operator' }),
+    } as never);
+    podRoutes(app, manager, ctx.eventRepo, undefined, ctx.podRepo);
+    try {
+      const response = await app.inject({
+        method: 'POST',
+        url: `/pods/${pod.id}/continue-provider`,
+        headers: { authorization: 'Bearer synthetic' },
+        payload: { primary: true },
+      });
+      expect(response.statusCode, response.body).toBe(200);
+      expect(manager.getSession(pod.id)).toMatchObject({
+        status: 'queued',
+        runtime: 'claude',
+        model: 'opus',
+        providerAccountIdSnapshot: 'source',
+      });
+      let pulled = false;
+      await expect(
+        manager.consumeAgentEvents(
+          pod.id,
+          (async function* () {
+            pulled = true;
+            yield {
+              type: 'complete',
+              timestamp: new Date().toISOString(),
+              result: 'Recovered on explicit primary',
+            } as const;
+          })(),
+        ),
+      ).resolves.toBe('completed');
+      expect(pulled).toBe(true);
+      expect(ctx.podRepo.workerRetries?.state(pod.id).authorizations).toContainEqual(
+        expect.objectContaining({
+          actor: { type: 'human', userId: 'recovery-operator', displayName: 'Operator' },
+          failureId: failed,
+          usedByAttemptId: expect.any(String),
+        }),
+      );
+    } finally {
+      await app.close();
+    }
   });
 
   it('provider-failover-pauses without mutating rejected operator continuations', async () => {
@@ -3295,6 +5698,11 @@ describe('PodManager', () => {
         'sandbox-123',
         testCase.containerPath,
         path.join(os.homedir(), '.autopod', testCase.hostFolder, pod.id),
+        undefined,
+        expect.objectContaining({
+          signal: expect.any(AbortSignal),
+          assertCurrent: expect.any(Function),
+        }),
       );
     });
 
@@ -3418,6 +5826,10 @@ describe('PodManager', () => {
         await vi.advanceTimersByTimeAsync(25);
         await Promise.resolve();
         expect(outcome).toBe('completed');
+        const extractionOptions = vi.mocked(ctx.containerManager.extractDirectoryFromContainer).mock
+          .calls[0]?.[4];
+        expect(extractionOptions?.signal?.aborted).toBe(true);
+        expect(extractionOptions?.assertCurrent).toBeTypeOf('function');
 
         blockedSync.resolve();
         await consuming;
@@ -3429,6 +5841,373 @@ describe('PodManager', () => {
   });
 
   describe('createSession', () => {
+    it('dispatches exactly one actual pod through authenticated report triage after a lost response', async () => {
+      const ctx = createTestContext();
+      const pods = createPodManager(ctx.deps);
+      const reports = createScanReportRepository(ctx.db);
+      const jobs = createScheduledJobRepository(ctx.db);
+      const templates = createScheduledJobTemplateRepository(ctx.db);
+      templates.insert({ id: 'scan-template', name: 'Scan', prompt: 'Report only' });
+      jobs.insert({
+        id: 'scan-job',
+        templateId: 'scan-template',
+        name: 'Scan',
+        task: 'Report only',
+        profileName: 'test-profile',
+        cronExpression: '0 8 * * *',
+        enabled: false,
+        nextRunAt: '2030-01-01T00:00:00Z',
+        lastRunAt: null,
+        lastPodId: null,
+        catchupPending: false,
+      });
+      const report = reports.begin('scan-job', 'run-once', {
+        version: 1,
+        baseRef: 'main',
+        headRef: 'main',
+        scanners: ['secrets'],
+        judgment: 'none',
+      });
+      reports.finish(report.id, {
+        version: 1,
+        repository: canonicalScanRepository(ctx.profileStore.get('test-profile').repoUrl),
+        baseSha: 'a'.repeat(40),
+        headSha: 'b'.repeat(40),
+        files: [
+          { path: 'selected.ts', change: 'added' },
+          { path: 'unselected.ts', change: 'added' },
+        ],
+        stacks: ['typescript'],
+        scanners: [
+          { scanner: 'secrets', version: 'fixture-v1', status: 'completed', findingCount: 2 },
+        ],
+        findings: ['selected', 'unselected'].map((id) => ({
+          id,
+          file: `${id}.ts`,
+          scanner: 'secrets' as const,
+          ruleId: 'synthetic',
+          severity: 'high' as const,
+          summary: 'Redacted finding',
+        })),
+        diagnostics: [],
+      });
+      const originalCollection = reports.get(report.id).collection;
+      if (!originalCollection) throw new Error('Missing report fixture');
+      const overflowReport = reports.begin('scan-job', 'large-backlog', report.policy);
+      reports.finish(overflowReport.id, {
+        ...originalCollection,
+        findings: Array.from({ length: 1000 }, (_, i) => ({
+          id: `bulk-${String(i).padStart(4, '0')}`,
+          file: 'selected.ts',
+          scanner: 'secrets' as const,
+          ruleId: 'fixture',
+          severity: 'high' as const,
+          summary: 'Historical unresolved fixture',
+        })),
+      });
+      for (let i = 0; i < 1001; i++)
+        reports.triage({
+          reportId: report.id,
+          requestKey: `historical-defer-${i}`,
+          findingIds: ['unselected'],
+          action: 'defer',
+          reason: 'Earlier human decision',
+          actor: { type: 'human', userId: 'human-reviewer' },
+        });
+      const app = Fastify();
+      app.setErrorHandler(errorHandler);
+      authPlugin(app, {
+        validateToken: async (token: string) => {
+          if (token !== 'operator-fixture')
+            throw new AutopodError('Invalid token', 'AUTH_ERROR', 401);
+          return { oid: 'human-reviewer', name: 'Reviewer' };
+        },
+      } as never);
+      scanReportRoutes(
+        app,
+        createScanOperatorService({ reports, jobs, profiles: ctx.profileStore, pods }),
+      );
+      const headers = { authorization: 'Bearer operator-fixture' };
+      const input = {
+        requestKey: 'reused-after-disconnect',
+        findingIds: ['selected'],
+        action: 'select_repair',
+        reason: 'Fix only this finding',
+      };
+      try {
+        const history = await app.inject({
+          method: 'GET',
+          url: '/scheduled-jobs/scan-job/report-page',
+          headers,
+        });
+        expect(history.statusCode).toBe(200);
+        expect(
+          history.json().items.find((item: { id: string }) => item.id === report.id),
+        ).toMatchObject({ findingCount: 2, judgmentStatus: 'not_requested' });
+        expect(history.json().nextCursor).toBeNull();
+        expect(history.json().items[0]).not.toHaveProperty('collection');
+        expect(
+          (
+            await app.inject({
+              method: 'GET',
+              url: '/scheduled-jobs/scan-job/report-page?before=not-a-cursor',
+              headers,
+            })
+          ).statusCode,
+        ).toBe(400);
+        const review = await app.inject({
+          method: 'GET',
+          url: `/scan-reports/${report.id}/review`,
+          headers,
+        });
+        expect(review.statusCode, review.body).toBe(200);
+        expect(review.json().unresolved).toHaveLength(50);
+        expect(review.json().unresolvedNextCursor).toBe('bulk-0049');
+        expect(review.json().decisions).toHaveLength(25);
+        expect(review.json().decisionsNextCursor).toBeTruthy();
+        const more = await app.inject({
+          method: 'GET',
+          url: `/scan-reports/${report.id}/findings?after=bulk-0049`,
+          headers,
+        });
+        expect(more.statusCode).toBe(200);
+        expect(more.json().items[0].id).toBe('bulk-0050');
+        ctx.db
+          .prepare(
+            "UPDATE scheduled_scan_findings SET finding = '{unreadable-private' WHERE id = 'bulk-0050'",
+          )
+          .run();
+        const malformedSelection = '00000000-0000-4000-8000-000000000074';
+        ctx.db
+          .prepare(
+            'INSERT INTO scheduled_scan_triage(id, request_key, report_id, finding_ids, action, actor, reason, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+          )
+          .run(
+            malformedSelection,
+            'unreadable-decision',
+            report.id,
+            '["selected"]',
+            'select_repair',
+            '{unreadable-private',
+            'Original decision retained',
+            new Date().toISOString(),
+          );
+        const damagedPage = await app.inject({
+          method: 'GET',
+          url: `/scan-reports/${report.id}/findings?after=bulk-0049`,
+          headers,
+        });
+        expect(damagedPage.statusCode).toBe(200);
+        expect(damagedPage.json().items).toHaveLength(49);
+        expect(damagedPage.json().diagnostics[0]).toMatchObject({
+          kind: 'finding',
+          recordId: 'bulk-0050',
+        });
+        const damagedReview = await app.inject({
+          method: 'GET',
+          url: `/scan-reports/${report.id}/review`,
+          headers,
+        });
+        expect(damagedReview.statusCode).toBe(200);
+        expect(damagedReview.json().decisions).toHaveLength(24);
+        expect(damagedReview.json().diagnostics[0]).toMatchObject({
+          kind: 'decision',
+          recordId: malformedSelection,
+        });
+        expect(damagedReview.body).not.toContain('unreadable-private');
+        const badTriage = await app.inject({
+          method: 'POST',
+          url: `/scan-reports/${report.id}/triage`,
+          headers,
+          payload: { ...input, requestKey: 'bad-finding', findingIds: ['bulk-0050'] },
+        });
+        expect(badTriage.statusCode).toBe(409);
+        const badRepair = await app.inject({
+          method: 'POST',
+          url: `/scan-reports/${report.id}/repairs`,
+          headers,
+          payload: { selectionId: malformedSelection },
+        });
+        expect(badRepair.statusCode).toBe(409);
+        const unreadableReport = reports.begin('scan-job', 'malformed-policy', report.policy);
+        ctx.db
+          .prepare(
+            "UPDATE scheduled_scan_reports SET policy = '{private-malformed', status = 'complete', completed_at = ? WHERE id = ?",
+          )
+          .run(new Date().toISOString(), unreadableReport.id);
+        const badReportRead = await app.inject({
+          method: 'GET',
+          url: `/scan-reports/${unreadableReport.id}/review`,
+          headers,
+        });
+        expect(badReportRead.statusCode).toBe(200);
+        expect(badReportRead.json().report).toMatchObject({
+          policy: null,
+          status: 'complete',
+          collection: null,
+        });
+        expect(badReportRead.json().report.evidenceDiagnostics.length).toBeGreaterThan(0);
+        expect(badReportRead.json().unresolved).toHaveLength(0);
+        expect(badReportRead.body).not.toContain('private-malformed');
+        const legacyBadDetail = await app.inject({
+          method: 'GET',
+          url: `/scan-reports/${unreadableReport.id}`,
+          headers,
+        });
+        expect(legacyBadDetail.statusCode).toBe(200);
+        expect(legacyBadDetail.json().report.policy).toBeNull();
+        const legacyList = await app.inject({
+          method: 'GET',
+          url: '/scheduled-jobs/scan-job/reports',
+          headers,
+        });
+        expect(legacyList.statusCode).toBe(200);
+        expect(
+          legacyList.json().find((item: { id: string }) => item.id === unreadableReport.id).policy,
+        ).toBeNull();
+        expect(
+          legacyList.json().find((item: { id: string }) => item.id === report.id).policy,
+        ).toEqual(report.policy);
+        expect(legacyList.body).not.toContain('private-malformed');
+
+        const badReportTriage = await app.inject({
+          method: 'POST',
+          url: `/scan-reports/${unreadableReport.id}/triage`,
+          headers,
+          payload: { ...input, requestKey: 'malformed-report-selection' },
+        });
+        expect(badReportTriage.statusCode).toBe(409);
+
+        expect(ctx.enqueuedSessions).toEqual([]);
+        expect(ctx.db.prepare('SELECT COUNT(*) AS n FROM scheduled_scan_repairs').get()).toEqual({
+          n: 0,
+        });
+
+        const denied = await app.inject({
+          method: 'POST',
+          url: `/scan-reports/${report.id}/triage`,
+          payload: input,
+        });
+        expect(denied.statusCode).toBe(401);
+        const forged = await app.inject({
+          method: 'POST',
+          url: `/scan-reports/${report.id}/triage`,
+          headers,
+          payload: { ...input, actor: { type: 'human', userId: 'forged' } },
+        });
+        expect(forged.statusCode).toBe(400);
+        const first = await app.inject({
+          method: 'POST',
+          url: `/scan-reports/${report.id}/triage`,
+          headers,
+          payload: input,
+        });
+        expect(first.statusCode, first.body).toBe(201);
+        expect(first.json().actor.userId).toBe('human-reviewer');
+        const repeated = await app.inject({
+          method: 'POST',
+          url: `/scan-reports/${report.id}/triage`,
+          headers,
+          payload: input,
+        });
+        expect(repeated.json().id).toBe(first.json().id);
+        expect(ctx.enqueuedSessions).toEqual([]);
+        const payload = { selectionId: first.json().id };
+        const dispatch = await app.inject({
+          method: 'POST',
+          url: `/scan-reports/${report.id}/repairs`,
+          headers,
+          payload,
+        });
+        expect(dispatch.statusCode).toBe(201);
+        const retry = await app.inject({
+          method: 'POST',
+          url: `/scan-reports/${report.id}/repairs`,
+          headers,
+          payload,
+        });
+        expect(retry.json()).toEqual(dispatch.json());
+        await new Promise<void>((resolve) => setImmediate(resolve));
+        expect(ctx.enqueuedSessions).toEqual([dispatch.json().podId]);
+        const pod = ctx.podRepo.getOrThrow(dispatch.json().podId);
+        expect(pod.task).toContain('selected.ts');
+        expect(pod.task).not.toContain('unselected.ts');
+        expect(pod.autoApprove).toBe(false);
+        expect(pod.disableAskHuman).toBe(false);
+        expect(pod.userId).toBe('human-reviewer');
+        ctx.podRepo.delete(pod.id);
+        jobs.delete('scan-job');
+        const retained = await app.inject({
+          method: 'GET',
+          url: `/scan-reports/${report.id}/review`,
+          headers,
+        });
+        expect(retained.statusCode).toBe(200);
+        expect(retained.json().decisions[0].repairPodId).toBe(pod.id);
+        expect(retained.json().unresolved).toHaveLength(50);
+        expect(retained.json().unresolvedNextCursor).toBeTruthy();
+        const retainedReceipt = await app.inject({
+          method: 'POST',
+          url: `/scan-reports/${report.id}/repairs`,
+          headers,
+          payload,
+        });
+        expect(retainedReceipt.json()).toEqual(dispatch.json());
+      } finally {
+        await app.close();
+      }
+    });
+
+    it('does not publish a rolled-back insertion when its friendly pod ID is reused before the next turn', async () => {
+      const ctx = createTestContext();
+      const manager = createPodManager(ctx.deps);
+      let original: ReturnType<typeof manager.createSession> | undefined;
+      expect(() =>
+        ctx.db.transaction(() => {
+          original = manager.createSession(
+            { profileName: 'test-profile', task: 'Rolled back selected repair' },
+            'human',
+          );
+          throw new Error('rollback');
+        })(),
+      ).toThrow('rollback');
+      if (!original) throw new Error('Fixture insertion missing');
+      ctx.podRepo.insert({ ...original, task: 'Different execution reusing friendly id' });
+      await new Promise<void>((resolve) => setImmediate(resolve));
+      expect(ctx.enqueuedSessions).toEqual([]);
+    });
+
+    it('publishes and enqueues only committed repair pods after the selection transaction', async () => {
+      const ctx = createTestContext();
+      const manager = createPodManager(ctx.deps);
+      const events = vi.spyOn(ctx.eventBus, 'emit');
+      let rolledBackId = '';
+      expect(() =>
+        ctx.db.transaction(() => {
+          rolledBackId = manager.createSession(
+            { profileName: 'test-profile', task: 'Selected repair' },
+            'human',
+          ).id;
+          expect(ctx.enqueuedSessions).toEqual([]);
+          expect(events).not.toHaveBeenCalledWith(expect.objectContaining({ type: 'pod.created' }));
+          throw new Error('Dispatch receipt write failed');
+        })(),
+      ).toThrow('Dispatch receipt write failed');
+      await new Promise<void>((resolve) => setImmediate(resolve));
+      expect(() => ctx.podRepo.getOrThrow(rolledBackId)).toThrow();
+      expect(ctx.enqueuedSessions).toEqual([]);
+      const pod = ctx.db.transaction(() =>
+        manager.createSession(
+          { profileName: 'test-profile', task: 'Selected repair committed' },
+          'human',
+        ),
+      )();
+      expect(ctx.enqueuedSessions).toEqual([]);
+      await new Promise<void>((resolve) => setImmediate(resolve));
+      expect(ctx.enqueuedSessions).toEqual([pod.id]);
+      expect(events.mock.calls.filter(([event]) => event.type === 'pod.created')).toHaveLength(1);
+    });
+
     it('creates a pod in queued status', () => {
       const ctx = createTestContext();
       const manager = createPodManager(ctx.deps);
@@ -4023,7 +6802,1359 @@ describe('PodManager', () => {
     });
   });
 
+  describe('merge poll lifecycle', () => {
+    it.each(['open', 'merged', 'unavailable'])(
+      'retains legacy pending delivery for explicit validation recovery (%s)',
+      async (external) => {
+        vi.useFakeTimers();
+        try {
+          const ctx = createTestContext();
+          const manager = createPodManager(ctx.deps);
+          const pod = manager.createSession(
+            { profileName: 'test-profile', task: 'Recover missing delivery history' },
+            'user-1',
+          );
+          ctx.podRepo.update(
+            pod.id,
+            validatedPodUpdates(pod.id, {
+              status: 'merge_pending',
+              worktreePath: '/tmp/legacy-delivery',
+              containerId: 'legacy-source',
+              filesChanged: 1,
+              prUrl: 'https://github.com/org/repo/pull/42',
+            }),
+          );
+          if (external === 'unavailable')
+            vi.mocked(ctx.prManager.getPrStatus).mockRejectedValue(
+              new Error('provider unavailable'),
+            );
+          else
+            vi.mocked(ctx.prManager.getPrStatus).mockResolvedValue({
+              merged: external === 'merged',
+              open: external === 'open',
+              blockReason: null,
+              ciFailures: [],
+              reviewComments: [],
+              reviewDecision: 'APPROVED',
+            });
+          createPodManager(ctx.deps);
+          await vi.advanceTimersByTimeAsync(120_000);
+          expect(manager.getSession(pod.id)).toMatchObject({
+            status: 'failed',
+            worktreePath: '/tmp/legacy-delivery',
+            containerId: 'legacy-source',
+            completedAt: null,
+            failureReason: expect.stringContaining('Resume'),
+          });
+          expect(ctx.containerManager.kill).not.toHaveBeenCalled();
+          expect(ctx.prManager.mergePr).not.toHaveBeenCalled();
+          expect(ctx.worktreeManager.pushBranch).not.toHaveBeenCalled();
+          expect(ctx.worktreeManager.rebaseOntoBase).not.toHaveBeenCalled();
+          expect(ctx.db.prepare('SELECT count(*) AS n FROM merge_attempts').get()).toEqual({
+            n: 0,
+          });
+          if (external === 'open') {
+            expect(await manager.resumePod(pod.id)).toEqual({ action: 'revalidate' });
+            expect(manager.getSession(pod.id)).toMatchObject({
+              status: 'validated',
+              failureReason: null,
+            });
+            expect(ctx.validationEngine.validate).toHaveBeenCalled();
+            expect(ctx.prManager.mergePr).not.toHaveBeenCalled();
+            await expect(manager.approveSession(pod.id)).rejects.toMatchObject({
+              code: 'READINESS_REASON_REQUIRED',
+            });
+            await manager.approveSession(pod.id, {
+              reason: 'Fixture operator reviewed retained source after revalidation',
+            });
+            expect(manager.getSession(pod.id).status).toBe('complete');
+            expect(ctx.prManager.mergePr).toHaveBeenCalledTimes(1);
+          }
+          expect(ctx.runtime.spawn).not.toHaveBeenCalled();
+          expect(ctx.runtime.resume).not.toHaveBeenCalled();
+        } finally {
+          vi.useRealTimers();
+        }
+      },
+    );
+
+    it.each([
+      { disposition: 'admitted', merged: false, dirty: false },
+      { disposition: 'scheduled', merged: false, dirty: false },
+      { disposition: 'admitted', merged: true, dirty: false },
+      { disposition: 'admitted', merged: true, dirty: true },
+      { disposition: 'pending', merged: false, dirty: true },
+      { disposition: 'pending', merged: false, dirty: false },
+    ])(
+      'reconciles journaled polling after restart ($disposition, merged=$merged, dirty=$dirty)',
+      async ({ disposition, merged, dirty }) => {
+        vi.useFakeTimers();
+        try {
+          const ctx = createTestContext();
+          const manager = createPodManager(ctx.deps);
+          const created = manager.createSession(
+            { profileName: 'test-profile', task: 'Recover journaled poll' },
+            'user-1',
+          );
+          ctx.podRepo.update(
+            created.id,
+            validatedPodUpdates(created.id, {
+              status: 'merge_pending',
+              prUrl: 'https://github.com/org/repo/pull/42',
+              worktreePath: '/tmp/journaled-poll',
+              containerId: 'retained-source',
+              filesChanged: 1,
+            }),
+          );
+          const pod = ctx.podRepo.getOrThrow(created.id);
+          const publication = ctx.podRepo.sourcePublications;
+          const journal = ctx.podRepo.mergeJournal;
+          if (!publication || !journal) throw new Error('Missing durable test repositories');
+          const source = {
+            repository: 'https://github.com/org/repo',
+            branch: pod.branch,
+            commitSha: 'a'.repeat(40),
+            treeSha: 'b'.repeat(40),
+            remoteRef: `refs/heads/${pod.branch}`,
+            observedRemoteCommitSha: 'a'.repeat(40),
+            worktreeClean: true as const,
+            observedAt: new Date().toISOString(),
+          };
+          const publicationId = publication.admit(pod, source);
+          publication.confirm(pod, publicationId, source);
+          const target = { repository: source.repository, branch: pod.branch, baseBranch: 'main' };
+          const attempt = journal.claim(pod, pod, publicationId, {
+            prUrl: pod.prUrl ?? '',
+            expectedHeadSha: source.commitSha,
+            expectedTarget: target,
+          });
+          if (disposition !== 'admitted')
+            journal.observe(
+              attempt,
+              {
+                merged: false,
+                autoMergeScheduled: disposition === 'scheduled',
+              },
+              'merge_response',
+            );
+          const inspect = ctx.worktreeManager.inspectSource;
+          if (!inspect) throw new Error('Missing source inspection fixture');
+          vi.mocked(inspect).mockResolvedValue({ ...source, worktreeClean: !dirty });
+          vi.mocked(ctx.prManager.getPrStatus).mockResolvedValue({
+            merged,
+            open: !merged,
+            headSha: source.commitSha,
+            sourceTarget: target,
+            blockReason: null,
+            ciFailures: [],
+            reviewComments: [],
+            reviewDecision: 'APPROVED',
+          });
+          createPodManager(ctx.deps);
+          await vi.advanceTimersByTimeAsync(0);
+          if (merged && !dirty) {
+            expect(manager.getSession(pod.id).status).toBe('complete');
+            expect(ctx.containerManager.kill).toHaveBeenCalledTimes(1);
+            expect(
+              ctx.db
+                .prepare(
+                  "SELECT count(*) AS n FROM merge_observations WHERE disposition = 'merged'",
+                )
+                .get(),
+            ).toEqual({ n: 1 });
+          } else {
+            expect(manager.getSession(pod.id)).toMatchObject({
+              status: 'merge_pending',
+              containerId: 'retained-source',
+              completedAt: null,
+            });
+            expect(ctx.containerManager.kill).not.toHaveBeenCalled();
+          }
+          const retries = disposition === 'pending' && !dirty ? 1 : 0;
+          expect(ctx.prManager.mergePr).toHaveBeenCalledTimes(retries);
+          if (retries)
+            expect(ctx.prManager.mergePr).toHaveBeenCalledWith(
+              expect.objectContaining({
+                expectedHeadSha: source.commitSha,
+                expectedTarget: target,
+                onPrepared: expect.any(Function),
+              }),
+            );
+          expect(ctx.worktreeManager.pushBranch).not.toHaveBeenCalled();
+          expect(ctx.worktreeManager.mergeBranch).not.toHaveBeenCalled();
+          expect(ctx.worktreeManager.rebaseOntoBase).not.toHaveBeenCalled();
+          expect(ctx.db.prepare('SELECT count(*) AS n FROM merge_attempts').get()).toEqual({
+            n: 1 + retries,
+          });
+        } finally {
+          vi.useRealTimers();
+        }
+      },
+    );
+
+    it('drains an old poll before a same-generation operator restart', async () => {
+      vi.useFakeTimers();
+      const gate = deferred<void>();
+      try {
+        const ctx = createTestContext();
+        const manager = createPodManager(ctx.deps);
+        const pod = manager.createSession(
+          { profileName: 'test-profile', task: 'Replace polling owner' },
+          'user-1',
+        );
+        const statusEvidence = seedPollDelivery(ctx, pod.id);
+        const profile = ctx.deps.profileStore.get('test-profile');
+        vi.mocked(ctx.deps.profileStore.get).mockReturnValue({
+          ...profile,
+          mergePollIntervalSec: 5,
+        });
+        const failForRetry = () =>
+          ctx.podRepo.update(pod.id, {
+            status: 'failed',
+            mergeBlockReason: 'Max PR fix attempts reached',
+            prUrl: 'https://github.com/org/repo/pull/42',
+          });
+        vi.mocked(ctx.prManager.getPrStatus)
+          .mockImplementationOnce(async () => {
+            await gate.promise;
+            return {
+              ...statusEvidence,
+              merged: true,
+              open: false,
+              blockReason: null,
+              ciFailures: [],
+              reviewComments: [],
+            };
+          })
+          .mockResolvedValueOnce({
+            merged: false,
+            open: true,
+            blockReason: 'Awaiting review',
+            reviewDecision: 'REVIEW_REQUIRED',
+            ciFailures: [],
+            reviewComments: [],
+          });
+        const completed: string[] = [];
+        ctx.eventBus.subscribe((event) => {
+          if (event.type === 'pod.completed') completed.push(event.podId);
+        });
+        failForRetry();
+        await manager.extendPrAttempts(pod.id, 1);
+        await vi.advanceTimersByTimeAsync(0);
+        failForRetry();
+        await manager.extendPrAttempts(pod.id, 1);
+        await vi.advanceTimersByTimeAsync(10_000);
+        expect(ctx.prManager.getPrStatus).toHaveBeenCalledTimes(1);
+        gate.resolve();
+        await vi.advanceTimersByTimeAsync(0);
+        expect(ctx.prManager.getPrStatus).toHaveBeenCalledTimes(2);
+        expect(manager.getSession(pod.id).status).toBe('merge_pending');
+        expect(completed).toEqual([]);
+        await vi.advanceTimersByTimeAsync(5_000);
+        expect(ctx.prManager.getPrStatus).toHaveBeenCalledTimes(3);
+        expect(manager.getSession(pod.id).status).toBe('complete');
+        expect(completed).toEqual([pod.id]);
+      } finally {
+        gate.resolve();
+        vi.useRealTimers();
+      }
+    });
+    it.each(['status', 'merge', 'cleanup'] as const)(
+      'does not overlap merge polls while %s is unresolved',
+      async (step) => {
+        vi.useFakeTimers();
+        const gate = deferred<void>();
+        try {
+          const ctx = createTestContext();
+          const manager = createPodManager(ctx.deps);
+          const pod = manager.createSession(
+            { profileName: 'test-profile', task: 'Serialize delivery observation' },
+            'user-1',
+          );
+          ctx.podRepo.update(pod.id, {
+            status: 'merge_pending',
+            prUrl: 'https://github.com/org/repo/pull/42',
+            containerId: 'poll-container',
+          });
+          const statusEvidence = seedPollDelivery(ctx, pod.id, step === 'merge');
+          vi.mocked(ctx.prManager.getPrStatus).mockImplementationOnce(async () => {
+            if (step === 'status') await gate.promise;
+            return {
+              ...statusEvidence,
+              merged: step !== 'merge',
+              open: step === 'merge',
+              blockReason: null,
+              ciFailures: [],
+              reviewComments: [],
+              reviewDecision: 'APPROVED',
+            };
+          });
+          if (step === 'merge')
+            vi.mocked(ctx.prManager.mergePr).mockImplementationOnce(async (config) => {
+              config.onPrepared?.();
+              await gate.promise;
+              return mockPrMerge({ ...config, onPrepared: undefined });
+            });
+          if (step === 'cleanup')
+            vi.mocked(ctx.containerManager.kill).mockImplementationOnce(async () => {
+              await gate.promise;
+            });
+          const completed: string[] = [];
+          ctx.eventBus.subscribe((event) => {
+            if (event.type === 'pod.completed') completed.push(event.podId);
+          });
+          const profile = ctx.deps.profileStore.get('test-profile');
+          vi.mocked(ctx.deps.profileStore.get).mockReturnValue({
+            ...profile,
+            mergePollIntervalSec: 5,
+          });
+          createPodManager(ctx.deps);
+          await vi.advanceTimersByTimeAsync(0);
+          await vi.advanceTimersByTimeAsync(10_000);
+          expect(ctx.prManager.getPrStatus).toHaveBeenCalledTimes(1);
+          expect(ctx.prManager.mergePr).toHaveBeenCalledTimes(step === 'merge' ? 1 : 0);
+          expect(ctx.containerManager.kill).toHaveBeenCalledTimes(step === 'cleanup' ? 1 : 0);
+          expect(completed).toEqual([]);
+          gate.resolve();
+          await vi.advanceTimersByTimeAsync(0);
+          if (step === 'merge') await vi.advanceTimersByTimeAsync(5_000);
+          expect(manager.getSession(pod.id).status).toBe('complete');
+          expect(completed).toEqual([pod.id]);
+          expect(ctx.containerManager.kill).toHaveBeenCalledTimes(1);
+          expect(ctx.prManager.getPrStatus).toHaveBeenCalledTimes(step === 'merge' ? 2 : 1);
+        } finally {
+          gate.resolve();
+          vi.useRealTimers();
+        }
+      },
+    );
+    it.each(['pr-replaced', 'complete-reopened'] as const)(
+      'does not publish a merge when the same generation is %s',
+      async (step) => {
+        vi.useFakeTimers();
+        try {
+          const ctx = createTestContext();
+          const manager = createPodManager(ctx.deps);
+          const pod = manager.createSession(
+            { profileName: 'test-profile', task: 'Reconcile current PR' },
+            'user-1',
+          );
+          ctx.podRepo.update(pod.id, {
+            status: 'merge_pending',
+            prUrl: 'https://github.com/org/repo/pull/42',
+            containerId: 'poll-container',
+          });
+          const statusEvidence = seedPollDelivery(ctx, pod.id, false);
+          const completed: string[] = [];
+          ctx.eventBus.subscribe((event) => {
+            if (
+              step === 'complete-reopened' &&
+              event.type === 'pod.status_changed' &&
+              event.newStatus === 'complete'
+            )
+              ctx.podRepo.update(pod.id, { status: 'merge_pending' });
+            if (event.type === 'pod.completed') completed.push(event.podId);
+          });
+          vi.mocked(ctx.prManager.getPrStatus).mockImplementationOnce(async () => {
+            if (step === 'pr-replaced')
+              ctx.podRepo.update(pod.id, { prUrl: 'https://github.com/org/repo/pull/43' });
+            return {
+              ...statusEvidence,
+              merged: true,
+              open: false,
+              blockReason: null,
+              ciFailures: [],
+              reviewComments: [],
+            };
+          });
+          createPodManager(ctx.deps);
+          await vi.advanceTimersByTimeAsync(0);
+          expect(manager.getSession(pod.id).status).toBe('merge_pending');
+          expect(completed).toEqual([]);
+          if (step === 'pr-replaced') expect(ctx.containerManager.kill).not.toHaveBeenCalled();
+        } finally {
+          vi.useRealTimers();
+        }
+      },
+    );
+    it.each(['merged', 'closed', 'open', 'cleanup', 'complete-callback'] as const)(
+      'preserves a replacement lifecycle after a late poll %s',
+      async (step) => {
+        vi.useFakeTimers();
+        try {
+          const ctx = createTestContext();
+          const manager = createPodManager(ctx.deps);
+          const pod = manager.createSession(
+            { profileName: 'test-profile', task: 'Fence late poll' },
+            'user-1',
+          );
+          ctx.podRepo.update(pod.id, {
+            status: 'merge_pending',
+            prUrl: 'https://github.com/org/repo/pull/42',
+            worktreePath: '/tmp/old-poll',
+            containerId: 'old-poll-container',
+          });
+          const statusEvidence = seedPollDelivery(ctx, pod.id, false);
+          const replace = () => {
+            ctx.podRepo.incrementLifecycleGeneration(pod.id);
+            ctx.podRepo.update(pod.id, {
+              status: 'running',
+              containerId: 'new-poll-container',
+              worktreePath: '/tmp/new-poll',
+              mergeBlockReason: 'Replacement reason',
+            });
+          };
+          if (step === 'cleanup')
+            ctx.deps.beforeContainerCleanup = async () => {
+              replace();
+            };
+          const completed: string[] = [];
+          ctx.eventBus.subscribe((event) => {
+            if (
+              step === 'complete-callback' &&
+              event.type === 'pod.status_changed' &&
+              event.newStatus === 'complete'
+            )
+              replace();
+            if (event.type === 'pod.completed') completed.push(event.podId);
+          });
+          vi.mocked(ctx.prManager.getPrStatus).mockImplementationOnce(async () => {
+            if (['merged', 'closed', 'open'].includes(step)) replace();
+            return {
+              ...statusEvidence,
+              merged: !['closed', 'open'].includes(step),
+              open: step === 'open',
+              blockReason: 'Old status',
+              ciFailures: [],
+              reviewComments: [],
+              reviewDecision: 'APPROVED',
+            };
+          });
+          createPodManager(ctx.deps);
+          await vi.advanceTimersByTimeAsync(0);
+          expect(manager.getSession(pod.id)).toMatchObject({
+            status: 'running',
+            containerId: 'new-poll-container',
+            worktreePath: '/tmp/new-poll',
+            mergeBlockReason: 'Replacement reason',
+          });
+          expect(ctx.containerManager.kill).not.toHaveBeenCalledWith('new-poll-container');
+          if (step !== 'complete-callback')
+            expect(ctx.containerManager.kill).not.toHaveBeenCalled();
+          expect(ctx.prManager.mergePr).not.toHaveBeenCalled();
+          expect(completed).toEqual([]);
+        } finally {
+          vi.useRealTimers();
+        }
+      },
+    );
+  });
+
   describe('approveSession', () => {
+    it('retains validated source when approval observes a closed planned PR and offers the available approval recovery', async () => {
+      const ctx = createTestContext();
+      const manager = createPodManager(ctx.deps);
+      const pod = manager.createSession(
+        { profileName: 'test-profile', task: 'Closed during approval' },
+        'user-1',
+      );
+      ctx.podRepo.update(
+        pod.id,
+        validatedPodUpdates(pod.id, { containerId: 'approval-source', filesChanged: 1 }),
+      );
+      const status = seedPollDelivery(ctx, pod.id, true);
+      ctx.podRepo.update(pod.id, { status: 'validated' });
+      vi.mocked(ctx.prManager.getPrStatus).mockResolvedValue({
+        ...status,
+        merged: false,
+        open: false,
+      });
+      await expect(manager.approveSession(pod.id)).rejects.toMatchObject({
+        code: 'APPROVAL_DELIVERY_FAILED',
+      });
+      expect(manager.getSession(pod.id)).toMatchObject({
+        status: 'validated',
+        containerId: 'approval-source',
+        failureReason: expect.stringContaining('retry approval'),
+      });
+      expect(ctx.prManager.mergePr).not.toHaveBeenCalled();
+      expect(ctx.worktreeManager.pushBranch).not.toHaveBeenCalled();
+      expect(ctx.containerManager.kill).not.toHaveBeenCalled();
+      vi.mocked(ctx.prManager.getPrStatus).mockResolvedValue({
+        ...status,
+        merged: false,
+        open: true,
+      });
+      await manager.approveSession(pod.id);
+      expect(manager.getSession(pod.id).status).toBe('complete');
+      expect(ctx.prManager.mergePr).toHaveBeenCalledTimes(1);
+    });
+
+    it.each(['planned', 'admitted', 'acknowledged'] as const)(
+      'retains a closed PR and stops polling without inventing merge acceptance (%s)',
+      async (state) => {
+        const planned = state === 'planned';
+        const retryable = state !== 'admitted';
+        vi.useFakeTimers();
+        try {
+          const ctx = createTestContext();
+          const manager = createPodManager(ctx.deps);
+          const pod = manager.createSession(
+            { profileName: 'test-profile', task: 'Retain closed PR' },
+            'user-1',
+          );
+          ctx.podRepo.update(
+            pod.id,
+            validatedPodUpdates(pod.id, { containerId: 'closed-source', filesChanged: 1 }),
+          );
+          const status = seedPollDelivery(ctx, pod.id, planned);
+          if (state === 'acknowledged') {
+            const journal = ctx.podRepo.mergeJournal;
+            const attemptId = journal?.find(ctx.podRepo.getOrThrow(pod.id))?.attemptId;
+            if (!journal || !attemptId) throw new Error('Missing fixture admission');
+            journal.observe(
+              attemptId,
+              { merged: false, autoMergeScheduled: false },
+              'merge_response',
+            );
+          }
+          vi.mocked(ctx.prManager.getPrStatus).mockResolvedValue({
+            ...status,
+            merged: false,
+            open: false,
+            blockReason: 'Closed by provider',
+          });
+          vi.clearAllTimers();
+          const restarted = createPodManager(ctx.deps);
+          await vi.advanceTimersByTimeAsync(0);
+          expect(restarted.getSession(pod.id)).toMatchObject({
+            status: 'failed',
+            containerId: 'closed-source',
+            completedAt: null,
+          });
+          expect(restarted.getSession(pod.id).failureReason).toContain(
+            retryable ? 'Reopen the existing PR' : 'recorded merge request remains unresolved',
+          );
+          expect(ctx.prManager.mergePr).not.toHaveBeenCalled();
+          expect(ctx.worktreeManager.pushBranch).not.toHaveBeenCalled();
+          expect(ctx.containerManager.kill).not.toHaveBeenCalled();
+          expect(
+            ctx.db.prepare('SELECT count(*) AS n FROM merge_status_observations').get(),
+          ).toEqual({ n: 1 });
+          const reads = vi.mocked(ctx.prManager.getPrStatus).mock.calls.length;
+          await vi.advanceTimersByTimeAsync(120000);
+          expect(ctx.prManager.getPrStatus).toHaveBeenCalledTimes(reads);
+          expect(ctx.podRepo.taskExecutions?.snapshot(pod.id).merge).toMatchObject({
+            closedPrCount: 1,
+            mergedPrCount: 0,
+            requestCount: planned ? 0 : 1,
+          });
+          // A human reopens the provider PR outside this fixture. Resume only validates.
+          vi.mocked(ctx.prManager.getPrStatus).mockResolvedValue({
+            ...status,
+            merged: false,
+            open: true,
+            blockReason: null,
+          });
+          expect(await restarted.resumePod(pod.id)).toEqual({ action: 'revalidate' });
+          expect(restarted.getSession(pod.id).status).toBe('validated');
+          expect(ctx.validationEngine.validate).toHaveBeenCalled();
+          expect(ctx.prManager.mergePr).not.toHaveBeenCalled();
+          const approval = restarted.approveSession(pod.id, {
+            reason: 'Synthetic operator reviewed the reopened PR after retained-source validation',
+          });
+          if (retryable) {
+            await approval;
+            expect(restarted.getSession(pod.id).status).toBe('complete');
+            expect(ctx.prManager.mergePr).toHaveBeenCalledTimes(1);
+            expect(ctx.podRepo.taskExecutions?.snapshot(pod.id).merge).toMatchObject({
+              closedPrCount: 0,
+              mergedPrCount: 1,
+              requestCount: planned ? 1 : 2,
+            });
+          } else {
+            await expect(approval).rejects.toMatchObject({ code: 'APPROVAL_DELIVERY_FAILED' });
+            expect(ctx.prManager.mergePr).not.toHaveBeenCalled();
+            expect(ctx.containerManager.kill).not.toHaveBeenCalled();
+          }
+          expect(ctx.runtime.spawn).not.toHaveBeenCalled();
+          expect(ctx.runtime.resume).not.toHaveBeenCalled();
+        } finally {
+          vi.useRealTimers();
+        }
+      },
+    );
+
+    it.each(['local-source', 'provider-source', 'decision'] as const)(
+      'retains a planned externally merged PR when %s prevents acceptance',
+      async (fault) => {
+        vi.useFakeTimers();
+        try {
+          const ctx = createTestContext();
+          const manager = createPodManager(ctx.deps);
+          const pod = manager.createSession(
+            { profileName: 'test-profile', task: 'Guard external disposition' },
+            'user-1',
+          );
+          ctx.podRepo.update(
+            pod.id,
+            validatedPodUpdates(pod.id, { containerId: 'retained-source', filesChanged: 1 }),
+          );
+          const status = seedPollDelivery(ctx, pod.id, true);
+          if (fault === 'provider-source')
+            vi.mocked(ctx.prManager.getPrStatus).mockResolvedValue({
+              ...status,
+              headSha: 'c'.repeat(40),
+            });
+          if (fault === 'local-source') {
+            if (!ctx.worktreeManager.inspectSource)
+              throw new Error('Missing fixture source inspection');
+            vi.mocked(ctx.worktreeManager.inspectSource).mockResolvedValue({
+              branch: pod.branch,
+              commitSha: 'c'.repeat(40),
+              treeSha: 'b'.repeat(40),
+              worktreeClean: true,
+            });
+          }
+          if (fault === 'decision')
+            ctx.db.prepare("UPDATE pods SET pending_escalation = '{}' WHERE id = ?").run(pod.id);
+          vi.clearAllTimers();
+          const restarted = createPodManager(ctx.deps);
+          await vi.advanceTimersByTimeAsync(0);
+          expect(restarted.getSession(pod.id)).toMatchObject({
+            status: 'merge_pending',
+            containerId: 'retained-source',
+            completedAt: null,
+          });
+          expect(ctx.prManager.mergePr).not.toHaveBeenCalled();
+          expect(ctx.containerManager.kill).not.toHaveBeenCalled();
+          expect(ctx.worktreeManager.pushBranch).not.toHaveBeenCalled();
+          expect(ctx.db.prepare('SELECT count(*) AS n FROM merge_attempts').get()).toEqual({
+            n: 0,
+          });
+          expect(
+            ctx.db.prepare('SELECT count(*) AS n FROM merge_disposition_observations').get(),
+          ).toEqual({ n: fault === 'local-source' ? 1 : 0 });
+        } finally {
+          vi.useRealTimers();
+        }
+      },
+    );
+
+    it.each(['restart', 'approval'] as const)(
+      'reconciles a planned PR merged during downtime without a provider mutation or recorded request (%s)',
+      async (path) => {
+        vi.useFakeTimers();
+        try {
+          const ctx = createTestContext();
+          const original = createPodManager(ctx.deps);
+          const pod = original.createSession(
+            { profileName: 'test-profile', task: 'Observe planned merge' },
+            'user-1',
+          );
+          ctx.podRepo.update(
+            pod.id,
+            validatedPodUpdates(pod.id, { containerId: 'retained-source', filesChanged: 1 }),
+          );
+          seedPollDelivery(ctx, pod.id, true);
+          vi.clearAllTimers();
+          if (path === 'approval') ctx.podRepo.update(pod.id, { status: 'validated' });
+          const restarted = createPodManager(ctx.deps);
+          if (path === 'approval') await restarted.approveSession(pod.id);
+          await vi.advanceTimersByTimeAsync(0);
+          expect(restarted.getSession(pod.id).status).toBe('complete');
+          expect(ctx.prManager.mergePr).not.toHaveBeenCalled();
+          expect(ctx.worktreeManager.pushBranch).not.toHaveBeenCalled();
+          expect(ctx.worktreeManager.rebaseOntoBase).not.toHaveBeenCalled();
+          expect(ctx.runtime.spawn).not.toHaveBeenCalled();
+          expect(ctx.db.prepare('SELECT count(*) AS n FROM merge_attempts').get()).toEqual({
+            n: 0,
+          });
+          expect(
+            ctx.db.prepare('SELECT count(*) AS n FROM merge_disposition_observations').get(),
+          ).toEqual({ n: 1 });
+          const kills = vi.mocked(ctx.containerManager.kill).mock.calls.length;
+          createPodManager(ctx.deps);
+          await vi.advanceTimersByTimeAsync(60000);
+          expect(ctx.containerManager.kill).toHaveBeenCalledTimes(kills);
+        } finally {
+          vi.useRealTimers();
+        }
+      },
+    );
+
+    it('retains externally merged PR source without publishing or inventing a daemon merge', async () => {
+      const ctx = createTestContext();
+      const manager = createPodManager(ctx.deps);
+      const pod = manager.createSession(
+        { profileName: 'test-profile', task: 'Reconcile external disposition' },
+        'user-1',
+      );
+      ctx.podRepo.update(
+        pod.id,
+        validatedPodUpdates(pod.id, {
+          worktreePath: '/tmp/external-merge',
+          containerId: 'external-source',
+          filesChanged: 1,
+          prUrl: 'https://github.com/org/repo/pull/42',
+        }),
+      );
+      vi.mocked(ctx.prManager.getPrStatus).mockResolvedValue({
+        merged: true,
+        open: false,
+        blockReason: null,
+        ciFailures: [],
+        reviewComments: [],
+      });
+      await expect(manager.approveSession(pod.id)).rejects.toMatchObject({
+        code: 'APPROVAL_DELIVERY_FAILED',
+      });
+      expect(manager.getSession(pod.id)).toMatchObject({
+        status: 'validated',
+        containerId: 'external-source',
+        completedAt: null,
+      });
+      expect(ctx.worktreeManager.pushBranch).not.toHaveBeenCalled();
+      expect(ctx.worktreeManager.rebaseOntoBase).not.toHaveBeenCalled();
+      expect(ctx.prManager.mergePr).not.toHaveBeenCalled();
+      expect(ctx.containerManager.kill).not.toHaveBeenCalled();
+      expect(ctx.db.prepare('SELECT count(*) AS n FROM merge_attempts').get()).toEqual({ n: 0 });
+    });
+
+    it.each(['existing', 'new'])(
+      'persists the source binding before waiting for review and resumes a first merge after restart (%s)',
+      async (path) => {
+        vi.useFakeTimers();
+        try {
+          const ctx = createTestContext();
+          const manager = createPodManager(ctx.deps);
+          const pod = manager.createSession(
+            { profileName: 'test-profile', task: 'Wait on durable review' },
+            'user-1',
+          );
+          ctx.podRepo.update(
+            pod.id,
+            validatedPodUpdates(pod.id, {
+              worktreePath: '/tmp/planned-merge',
+              containerId: 'planned-source',
+              filesChanged: 1,
+              ...(path === 'existing' ? { prUrl: 'https://github.com/org/repo/pull/42' } : {}),
+            }),
+          );
+          vi.mocked(ctx.prManager.getPrStatus).mockResolvedValue({
+            merged: false,
+            open: true,
+            blockReason: 'Review required',
+            reviewDecision: 'REVIEW_REQUIRED',
+            ciFailures: [],
+            reviewComments: [],
+          });
+          await manager.approveSession(pod.id, { squash: true });
+          await vi.advanceTimersByTimeAsync(0);
+          const pending = manager.getSession(pod.id);
+          expect(pending.status).toBe('merge_pending');
+          expect(ctx.podRepo.mergeJournal?.find(pending)).toMatchObject({
+            state: 'planned',
+            attemptId: null,
+            request: { config: { squash: true } },
+          });
+          expect(ctx.prManager.mergePr).not.toHaveBeenCalled();
+          expect(ctx.db.prepare('SELECT count(*) AS n FROM merge_attempts').get()).toEqual({
+            n: 0,
+          });
+          const pushes =
+            vi.mocked(ctx.worktreeManager.pushBranch).mock.calls.length +
+            vi.mocked(ctx.worktreeManager.mergeBranch).mock.calls.length;
+          const rebases = vi.mocked(ctx.worktreeManager.rebaseOntoBase).mock.calls.length;
+          vi.clearAllTimers(); // Prior process has exited; recreate only its persisted state.
+          const target = {
+            repository: 'https://github.com/org/repo',
+            branch: pod.branch,
+            baseBranch: 'main',
+          };
+          vi.mocked(ctx.prManager.getPrStatus).mockResolvedValue({
+            merged: false,
+            open: true,
+            blockReason: null,
+            reviewDecision: 'APPROVED',
+            ciFailures: [],
+            reviewComments: [],
+            headSha: 'a'.repeat(40),
+            sourceTarget: target,
+          });
+          createPodManager(ctx.deps);
+          await vi.advanceTimersByTimeAsync(0);
+          expect(ctx.prManager.mergePr).toHaveBeenCalledTimes(1);
+          expect(ctx.prManager.mergePr).toHaveBeenCalledWith(
+            expect.objectContaining({
+              expectedHeadSha: 'a'.repeat(40),
+              expectedTarget: target,
+              squash: true,
+            }),
+          );
+          expect(ctx.db.prepare('SELECT count(*) AS n FROM merge_attempts').get()).toEqual({
+            n: 1,
+          });
+          expect(
+            vi.mocked(ctx.worktreeManager.pushBranch).mock.calls.length +
+              vi.mocked(ctx.worktreeManager.mergeBranch).mock.calls.length,
+          ).toBe(pushes);
+          expect(ctx.worktreeManager.rebaseOntoBase).toHaveBeenCalledTimes(rebases);
+          expect(ctx.runtime.spawn).not.toHaveBeenCalled();
+        } finally {
+          vi.useRealTimers();
+        }
+      },
+    );
+
+    it.each(
+      ['existing', 'new'].flatMap((path) =>
+        ['clean', 'dirty', 'changed-head'].map((sourceState) => ({ path, sourceState })),
+      ),
+    )(
+      'reconciles an ambiguous admitted merge after manager restart without publishing again ($path, $sourceState)',
+      async ({ path, sourceState }) => {
+        vi.useFakeTimers();
+        try {
+          const ctx = createTestContext();
+          const manager = createPodManager(ctx.deps);
+          const pod = manager.createSession(
+            { profileName: 'test-profile', task: 'Recover durable merge' },
+            'user-1',
+          );
+          ctx.podRepo.update(
+            pod.id,
+            validatedPodUpdates(pod.id, {
+              worktreePath: '/tmp/durable-merge',
+              containerId: 'merge-source',
+              filesChanged: 2,
+              ...(path === 'existing' ? { prUrl: 'https://github.com/org/repo/pull/42' } : {}),
+            }),
+          );
+          vi.mocked(ctx.prManager.getPrStatus).mockResolvedValue({
+            merged: false,
+            open: true,
+            blockReason: null,
+            reviewDecision: 'APPROVED',
+            ciFailures: [],
+            reviewComments: [],
+          });
+          vi.mocked(ctx.prManager.mergePr).mockImplementationOnce(async (config) => {
+            config.onPrepared?.();
+            throw new Error('provider response lost after mutation');
+          });
+          await expect(manager.approveSession(pod.id)).rejects.toMatchObject({
+            code: 'APPROVAL_DELIVERY_FAILED',
+          });
+          expect(manager.getSession(pod.id)).toMatchObject({
+            status: 'validated',
+            containerId: 'merge-source',
+            completedAt: null,
+          });
+          expect(ctx.db.prepare('SELECT count(*) AS n FROM merge_attempts').get()).toEqual({
+            n: 1,
+          });
+          expect(ctx.db.prepare('SELECT count(*) AS n FROM merge_observations').get()).toEqual({
+            n: 0,
+          });
+          const publications =
+            vi.mocked(ctx.worktreeManager.pushBranch).mock.calls.length +
+            vi.mocked(ctx.worktreeManager.mergeBranch).mock.calls.length;
+          const rebases = vi.mocked(ctx.worktreeManager.rebaseOntoBase).mock.calls.length;
+          const restarted = createPodManager(ctx.deps);
+          await vi.advanceTimersByTimeAsync(120_000);
+          expect(ctx.prManager.mergePr).toHaveBeenCalledTimes(1);
+          expect(ctx.containerManager.kill).not.toHaveBeenCalled();
+          vi.mocked(ctx.prManager.getPrStatus).mockResolvedValue({
+            merged: true,
+            open: false,
+            blockReason: null,
+            ciFailures: [],
+            reviewComments: [],
+            headSha: 'a'.repeat(40),
+            sourceTarget: {
+              repository: 'https://github.com/org/repo',
+              branch: pod.branch,
+              baseBranch: 'main',
+            },
+          });
+          if (sourceState !== 'clean') {
+            const inspectSource = ctx.worktreeManager.inspectSource;
+            if (!inspectSource) throw new Error('Missing source inspection fixture');
+            vi.mocked(inspectSource).mockResolvedValue({
+              branch: pod.branch,
+              commitSha: (sourceState === 'changed-head' ? 'c' : 'a').repeat(40),
+              treeSha: 'b'.repeat(40),
+              worktreeClean: sourceState !== 'dirty',
+            });
+            await expect(restarted.approveSession(pod.id)).rejects.toMatchObject({
+              code: 'APPROVAL_DELIVERY_FAILED',
+            });
+            expect(restarted.getSession(pod.id)).toMatchObject({
+              status: 'validated',
+              completedAt: null,
+              worktreePath: '/tmp/durable-merge',
+              containerId: 'merge-source',
+            });
+            expect(ctx.containerManager.kill).not.toHaveBeenCalled();
+          } else {
+            await restarted.approveSession(pod.id);
+            expect(restarted.getSession(pod.id).status).toBe('complete');
+          }
+          expect(ctx.prManager.mergePr).toHaveBeenCalledTimes(1);
+          expect(
+            vi.mocked(ctx.worktreeManager.pushBranch).mock.calls.length +
+              vi.mocked(ctx.worktreeManager.mergeBranch).mock.calls.length,
+          ).toBe(publications);
+          expect(ctx.worktreeManager.rebaseOntoBase).toHaveBeenCalledTimes(rebases);
+          expect(ctx.db.prepare('SELECT count(*) AS n FROM merge_intents').get()).toEqual({ n: 1 });
+          expect(
+            ctx.db.prepare('SELECT disposition, evidence FROM merge_observations').all(),
+          ).toEqual([{ disposition: 'merged', evidence: 'provider_lookup' }]);
+          expect(ctx.runtime.spawn).not.toHaveBeenCalled();
+        } finally {
+          vi.useRealTimers();
+        }
+      },
+    );
+
+    it('does not treat a legacy merge adapter without durable admission as confirmed delivery', async () => {
+      const ctx = createTestContext();
+      const manager = createPodManager(ctx.deps);
+      const pod = manager.createSession(
+        { profileName: 'test-profile', task: 'Require merge admission' },
+        'user-1',
+      );
+      ctx.podRepo.update(
+        pod.id,
+        validatedPodUpdates(pod.id, {
+          worktreePath: '/tmp/source',
+          containerId: 'source',
+          filesChanged: 2,
+          prUrl: 'https://github.com/org/repo/pull/42',
+        }),
+      );
+      vi.mocked(ctx.prManager.mergePr).mockResolvedValue({
+        merged: true,
+        autoMergeScheduled: false,
+      });
+      await expect(manager.approveSession(pod.id)).rejects.toMatchObject({
+        code: 'APPROVAL_DELIVERY_FAILED',
+      });
+      expect(manager.getSession(pod.id).status).toBe('validated');
+      expect(ctx.containerManager.kill).not.toHaveBeenCalled();
+    });
+
+    it('rechecks lifecycle ownership after provider preparation before merge mutation', async () => {
+      const ctx = createTestContext();
+      const manager = createPodManager(ctx.deps);
+      const pod = manager.createSession(
+        { profileName: 'test-profile', task: 'Fence prepared merge' },
+        'user-1',
+      );
+      ctx.podRepo.update(
+        pod.id,
+        validatedPodUpdates(pod.id, {
+          worktreePath: '/tmp/source',
+          containerId: 'retained-source',
+          filesChanged: 2,
+          prUrl: 'https://github.com/org/repo/pull/42',
+        }),
+      );
+      let mutationStarted = false;
+      vi.mocked(ctx.prManager.mergePr).mockImplementation(async (config) => {
+        ctx.db
+          .prepare('UPDATE pods SET lifecycle_generation = lifecycle_generation + 1 WHERE id = ?')
+          .run(pod.id);
+        config.onPrepared?.();
+        mutationStarted = true;
+        return { merged: true, autoMergeScheduled: false };
+      });
+      await expect(manager.approveSession(pod.id)).rejects.toMatchObject({
+        code: 'STALE_APPROVAL',
+      });
+      expect(mutationStarted).toBe(false);
+      expect(ctx.containerManager.kill).not.toHaveBeenCalled();
+      expect(manager.getSession(pod.id).containerId).toBe('retained-source');
+    });
+
+    it.each(['existing', 'rebased', 'new'] as const)(
+      'binds approval merge to the latest durable publication (%s)',
+      async (path) => {
+        const ctx = createTestContext();
+        const manager = createPodManager(ctx.deps);
+        const pod = manager.createSession(
+          { profileName: 'test-profile', task: 'Bind published source' },
+          'user-1',
+        );
+        ctx.podRepo.update(
+          pod.id,
+          validatedPodUpdates(pod.id, {
+            worktreePath: '/tmp/source',
+            containerId: 'source-container',
+            filesChanged: 2,
+            ...(path === 'new' ? {} : { prUrl: 'https://github.com/org/repo/pull/42' }),
+          }),
+        );
+        let publicationCount = 0;
+        vi.mocked(ctx.worktreeManager.pushBranch).mockImplementation(
+          async (worktree, branch, options) => {
+            const commitSha = String.fromCharCode(97 + publicationCount++).repeat(40);
+            const receipt = {
+              ...(await mockBranchPublication(worktree, branch, {
+                ...options,
+                onPrepared: undefined,
+              })),
+              commitSha,
+              observedRemoteCommitSha: commitSha,
+            };
+            options?.onPrepared?.(receipt);
+            return receipt;
+          },
+        );
+        vi.mocked(ctx.worktreeManager.rebaseOntoBase).mockResolvedValue({
+          rebased: true,
+          alreadyUpToDate: path !== 'rebased',
+          conflicts: [],
+        });
+        await manager.approveSession(pod.id);
+        const sha = (path === 'rebased' ? 'b' : 'a').repeat(40);
+        expect(ctx.prManager.mergePr).toHaveBeenCalledWith(
+          expect.objectContaining({
+            expectedHeadSha: sha,
+            expectedTarget: {
+              repository: 'https://github.com/org/repo',
+              branch: pod.branch,
+              baseBranch: 'main',
+            },
+          }),
+        );
+        const rows = ctx.db
+          .prepare('SELECT receipt FROM source_publication_receipts')
+          .all() as Array<{ receipt: string }>;
+        expect(rows.map((row) => JSON.parse(row.receipt).commitSha)).toContain(sha);
+        expect(rows).toHaveLength(path === 'rebased' ? 2 : 1);
+        expect(manager.getSession(pod.id).status).toBe('complete');
+      },
+    );
+
+    it.each(['pr', 'branch'] as const)(
+      'requires durable commit-and-push proof before completing %s output',
+      async (output) => {
+        const ctx = createTestContext();
+        const manager = createPodManager(ctx.deps);
+        const pod = manager.createSession(
+          {
+            profileName: 'test-profile',
+            task: 'Preserve committed source proof',
+            options: { agentMode: 'auto', output, validate: true },
+          },
+          'user-1',
+        );
+        ctx.podRepo.update(
+          pod.id,
+          validatedPodUpdates(pod.id, {
+            worktreePath: '/tmp/source',
+            containerId: 'retained-source',
+            filesChanged: 2,
+          }),
+        );
+        vi.mocked(ctx.worktreeManager.mergeBranch).mockResolvedValueOnce(undefined);
+        await expect(manager.approveSession(pod.id)).rejects.toMatchObject({
+          code: 'APPROVAL_DELIVERY_FAILED',
+        });
+        expect(manager.getSession(pod.id)).toMatchObject({
+          status: 'validated',
+          containerId: 'retained-source',
+          completedAt: null,
+        });
+        expect(ctx.containerManager.kill).not.toHaveBeenCalled();
+        expect(ctx.prManager.createPr).not.toHaveBeenCalled();
+        expect(ctx.prManager.mergePr).not.toHaveBeenCalled();
+        expect(
+          ctx.db.prepare('SELECT count(*) AS n FROM source_publication_receipts').get(),
+        ).toEqual({ n: 0 });
+        await createPodManager(ctx.deps).approveSession(pod.id);
+        expect(manager.getSession(pod.id)).toMatchObject({
+          status: 'complete',
+          failureReason: null,
+        });
+        expect(
+          ctx.db.prepare('SELECT count(*) AS n FROM source_publication_intents').get(),
+        ).toEqual({ n: 1 });
+        expect(
+          ctx.db.prepare('SELECT count(*) AS n FROM source_publication_receipts').get(),
+        ).toEqual({ n: 1 });
+        expect(ctx.prManager.createPr).toHaveBeenCalledTimes(output === 'pr' ? 1 : 0);
+        expect(ctx.runtime.spawn).not.toHaveBeenCalled();
+      },
+    );
+
+    it('retains resources when a legacy publication adapter supplies no durable evidence', async () => {
+      const ctx = createTestContext();
+      const manager = createPodManager(ctx.deps);
+      const pod = manager.createSession(
+        { profileName: 'test-profile', task: 'Require publication receipt' },
+        'user-1',
+      );
+      ctx.podRepo.update(
+        pod.id,
+        validatedPodUpdates(pod.id, {
+          worktreePath: '/tmp/source',
+          containerId: 'retained-source',
+          filesChanged: 1,
+          prUrl: 'https://github.com/org/repo/pull/42',
+        }),
+      );
+      vi.mocked(ctx.worktreeManager.pushBranch).mockResolvedValue(undefined);
+      await expect(manager.approveSession(pod.id)).rejects.toMatchObject({
+        code: 'APPROVAL_DELIVERY_FAILED',
+      });
+      expect(manager.getSession(pod.id)).toMatchObject({
+        status: 'validated',
+        containerId: 'retained-source',
+        completedAt: null,
+      });
+      expect(ctx.prManager.mergePr).not.toHaveBeenCalled();
+      expect(ctx.containerManager.kill).not.toHaveBeenCalled();
+      expect(ctx.db.prepare('SELECT count(*) AS n FROM source_publication_receipts').get()).toEqual(
+        { n: 0 },
+      );
+    });
+
+    it.each(['initial-push', 'rebased-push', 'rebase-conflict'] as const)(
+      'keeps failed PR preparation out of merge polling across restart (%s)',
+      async (failure) => {
+        vi.useFakeTimers();
+        try {
+          const ctx = createTestContext();
+          const manager = createPodManager(ctx.deps);
+          const pod = manager.createSession(
+            { profileName: 'test-profile', task: 'Preserve unpublished source' },
+            'user-1',
+          );
+          ctx.podRepo.update(
+            pod.id,
+            validatedPodUpdates(pod.id, {
+              worktreePath: '/tmp/unpublished-source',
+              containerId: 'retained-source',
+              filesChanged: 2,
+              prUrl: 'https://github.com/org/repo/pull/42',
+            }),
+          );
+          const push = vi.mocked(ctx.worktreeManager.pushBranch);
+          const rebase = vi.mocked(ctx.worktreeManager.rebaseOntoBase);
+          if (failure === 'initial-push')
+            push.mockRejectedValueOnce(new Error('publication unavailable'));
+          else if (failure === 'rebased-push') {
+            rebase.mockResolvedValueOnce({ rebased: true, alreadyUpToDate: false, conflicts: [] });
+            push
+              .mockImplementationOnce(mockBranchPublication)
+              .mockRejectedValueOnce(new Error('rewritten source unpublished'));
+          } else
+            rebase.mockResolvedValueOnce({
+              rebased: false,
+              alreadyUpToDate: false,
+              conflicts: ['src/source.ts'],
+            });
+          // Publication fails while the initial PR observation is open.
+          vi.mocked(ctx.prManager.getPrStatus).mockResolvedValue({
+            merged: false,
+            open: true,
+            blockReason: null,
+            ciFailures: [],
+            reviewComments: [],
+          });
+          const transitions: string[] = [];
+          const completed: string[] = [];
+          ctx.eventBus.subscribe((event) => {
+            if (event.type === 'pod.status_changed') transitions.push(event.newStatus);
+            if (event.type === 'pod.completed') completed.push(event.podId);
+          });
+          await expect(manager.approveSession(pod.id)).rejects.toMatchObject({
+            code: 'APPROVAL_DELIVERY_FAILED',
+            statusCode: 502,
+          });
+          expect(manager.getSession(pod.id)).toMatchObject({
+            status: 'validated',
+            containerId: 'retained-source',
+            worktreePath: '/tmp/unpublished-source',
+            completedAt: null,
+            failureReason: expect.stringContaining('retry approval'),
+          });
+          expect(transitions).not.toContain('merge_pending');
+          vi.mocked(ctx.prManager.getPrStatus).mockResolvedValue({
+            merged: true,
+            open: false,
+            blockReason: null,
+            ciFailures: [],
+            reviewComments: [],
+          });
+          const restarted = createPodManager(ctx.deps);
+          await vi.advanceTimersByTimeAsync(120_000);
+          expect(restarted.getSession(pod.id).status).toBe('validated');
+          expect(ctx.prManager.getPrStatus).toHaveBeenCalledTimes(1);
+          expect(ctx.prManager.mergePr).not.toHaveBeenCalled();
+          expect(ctx.containerManager.kill).not.toHaveBeenCalled();
+          expect(completed).toEqual([]);
+          vi.mocked(ctx.prManager.getPrStatus).mockResolvedValue({
+            merged: false,
+            open: true,
+            reviewDecision: 'APPROVED',
+            blockReason: null,
+            ciFailures: [],
+            reviewComments: [],
+          });
+          await restarted.approveSession(pod.id);
+          expect(restarted.getSession(pod.id)).toMatchObject({
+            status: 'complete',
+            failureReason: null,
+          });
+          expect(ctx.prManager.mergePr).toHaveBeenCalledTimes(1);
+          expect(ctx.prManager.createPr).not.toHaveBeenCalled();
+          expect(ctx.runtime.spawn).not.toHaveBeenCalled();
+          expect(ctx.runtime.resume).not.toHaveBeenCalled();
+          expect(completed).toEqual([pod.id]);
+        } finally {
+          vi.useRealTimers();
+        }
+      },
+    );
+
+    it.each([
+      { output: 'pr' as const, cachedChanges: 0 },
+      { output: 'pr' as const, cachedChanges: 2 },
+      { output: 'branch' as const, cachedChanges: 0 },
+      { output: 'branch' as const, cachedChanges: 2 },
+    ])(
+      'retains git output without a worktree and retries after repair ($output, cached $cachedChanges)',
+      async ({ output, cachedChanges }) => {
+        const ctx = createTestContext();
+        const manager = createPodManager(ctx.deps);
+        const pod = manager.createSession(
+          {
+            profileName: 'test-profile',
+            task: 'Preserve missing worktree',
+            options: { agentMode: 'auto', output, validate: true },
+          },
+          'user-1',
+        );
+        ctx.podRepo.update(
+          pod.id,
+          validatedPodUpdates(pod.id, {
+            containerId: 'preserved-source',
+            worktreePath: null,
+            filesChanged: cachedChanges,
+          }),
+        );
+        const completed: string[] = [];
+        const transitions: string[] = [];
+        ctx.eventBus.subscribe((event) => {
+          if (event.type === 'pod.status_changed') transitions.push(event.newStatus);
+          if (event.type === 'pod.completed') completed.push(event.podId);
+        });
+        await expect(manager.approveSession(pod.id)).rejects.toMatchObject({
+          code: 'DELIVERY_RECONCILIATION_REQUIRED',
+          statusCode: 409,
+        });
+        expect(manager.getSession(pod.id)).toMatchObject({
+          status: 'validated',
+          containerId: 'preserved-source',
+          worktreePath: null,
+          completedAt: null,
+          failureReason: expect.stringContaining('Worktree'),
+        });
+        expect(ctx.containerManager.kill).not.toHaveBeenCalled();
+        expect(ctx.prManager.createPr).not.toHaveBeenCalled();
+        expect(ctx.prManager.mergePr).not.toHaveBeenCalled();
+        expect(ctx.worktreeManager.mergeBranch).not.toHaveBeenCalled();
+        expect(completed).toEqual([]);
+        expect(transitions).toEqual([]);
+        expect(ctx.worktreeManager.pushBranch).not.toHaveBeenCalled();
+        ctx.podRepo.update(pod.id, { worktreePath: '/tmp/restored-approval' });
+        vi.mocked(ctx.worktreeManager.getDiffStats).mockResolvedValue({
+          filesChanged: 2,
+          linesAdded: 3,
+          linesRemoved: 0,
+        });
+        await createPodManager(ctx.deps).approveSession(pod.id);
+        expect(manager.getSession(pod.id)).toMatchObject({
+          status: 'complete',
+          failureReason: null,
+        });
+        expect(completed).toEqual([pod.id]);
+        expect(ctx.worktreeManager.mergeBranch).toHaveBeenCalledTimes(1);
+        expect(ctx.prManager.createPr).toHaveBeenCalledTimes(output === 'pr' ? 1 : 0);
+        expect(ctx.runtime.spawn).not.toHaveBeenCalled();
+        expect(ctx.runtime.resume).not.toHaveBeenCalled();
+      },
+    );
+
+    it('retains normal git delivery when the branch identity is missing', async () => {
+      const ctx = createTestContext();
+      const manager = createPodManager(ctx.deps);
+      const pod = manager.createSession(
+        { profileName: 'test-profile', task: 'Repair missing branch identity' },
+        'user-1',
+      );
+      ctx.podRepo.update(
+        pod.id,
+        validatedPodUpdates(pod.id, {
+          containerId: 'preserved-source',
+          worktreePath: '/tmp/branch-source',
+          filesChanged: 2,
+        }),
+      );
+      ctx.db.prepare("UPDATE pods SET branch = '' WHERE id = ?").run(pod.id);
+      await expect(manager.approveSession(pod.id)).rejects.toMatchObject({
+        code: 'DELIVERY_RECONCILIATION_REQUIRED',
+        statusCode: 409,
+      });
+      expect(manager.getSession(pod.id)).toMatchObject({
+        status: 'validated',
+        completedAt: null,
+        containerId: 'preserved-source',
+        failureReason: expect.stringContaining('Branch identity'),
+      });
+      expect(ctx.containerManager.kill).not.toHaveBeenCalled();
+      expect(ctx.worktreeManager.mergeBranch).not.toHaveBeenCalled();
+      expect(ctx.prManager.createPr).not.toHaveBeenCalled();
+      ctx.db.prepare('UPDATE pods SET branch = ? WHERE id = ?').run(pod.branch, pod.id);
+      vi.mocked(ctx.worktreeManager.getDiffStats).mockResolvedValue({
+        filesChanged: 0,
+        linesAdded: 0,
+        linesRemoved: 0,
+      });
+      (ctx.worktreeManager.hasChangesAgainstBase as ReturnType<typeof vi.fn>).mockResolvedValue(
+        false,
+      );
+      await createPodManager(ctx.deps).approveSession(pod.id);
+      expect(manager.getSession(pod.id)).toMatchObject({ status: 'complete', failureReason: null });
+      expect(ctx.worktreeManager.pushBranch).not.toHaveBeenCalled();
+      expect(ctx.prManager.createPr).not.toHaveBeenCalled();
+    });
+
+    it('retains explicit ephemeral completion without requiring git delivery', async () => {
+      const ctx = createTestContext();
+      const manager = createPodManager(ctx.deps);
+      const pod = manager.createSession(
+        {
+          profileName: 'test-profile',
+          task: 'Ephemeral checked task',
+          options: { agentMode: 'auto', output: 'none', validate: true },
+        },
+        'user-1',
+      );
+      ctx.podRepo.update(
+        pod.id,
+        validatedPodUpdates(pod.id, { worktreePath: null, filesChanged: 0 }),
+      );
+      await manager.approveSession(pod.id);
+      expect(manager.getSession(pod.id).status).toBe('complete');
+      expect(ctx.worktreeManager.mergeBranch).not.toHaveBeenCalled();
+      expect(ctx.prManager.createPr).not.toHaveBeenCalled();
+    });
+
     it('records human automation and Podsitter actors', async () => {
       const cases = [
         {
@@ -4052,7 +8183,7 @@ describe('PodManager', () => {
           { profileName: 'test-profile', task: `Actor ${testCase.actor.type}` },
           'user-1',
         );
-        ctx.podRepo.update(pod.id, validatedPodUpdates(pod.id));
+        ctx.podRepo.update(pod.id, validatedPodUpdates(pod.id, { worktreePath: '/tmp/wt' }));
 
         await manager.approveSession(pod.id, { actor: testCase.actor });
 
@@ -4084,7 +8215,7 @@ describe('PodManager', () => {
       );
 
       // Move to validated state
-      ctx.podRepo.update(pod.id, validatedPodUpdates(pod.id));
+      ctx.podRepo.update(pod.id, validatedPodUpdates(pod.id, { worktreePath: '/tmp/wt' }));
 
       await manager.approveSession(pod.id);
 
@@ -4101,7 +8232,7 @@ describe('PodManager', () => {
         { profileName: 'test-profile', task: 'Do stuff' },
         'user-1',
       );
-      ctx.podRepo.update(pod.id, validatedPodUpdates(pod.id));
+      ctx.podRepo.update(pod.id, validatedPodUpdates(pod.id, { worktreePath: '/tmp/wt' }));
 
       const events: unknown[] = [];
       ctx.eventBus.subscribe((e) => events.push(e));
@@ -4133,7 +8264,10 @@ describe('PodManager', () => {
           { profileName: 'test-profile', task: `Approve ${testCase.status}` },
           'user-1',
         );
-        ctx.podRepo.update(pod.id, validatedPodUpdates(pod.id, testCase.updates ?? {}));
+        ctx.podRepo.update(
+          pod.id,
+          validatedPodUpdates(pod.id, { worktreePath: '/tmp/wt', ...testCase.updates }),
+        );
         if (testCase.status === 'needs_review') {
           ctx.eventBus.emit({
             type: 'pod.firewall_denied',
@@ -4195,7 +8329,10 @@ describe('PodManager', () => {
       );
 
       for (const pod of [ready, needsReview, risky, waived]) {
-        ctx.podRepo.update(pod.id, validatedPodUpdates(pod.id, { autoApprove: true }));
+        ctx.podRepo.update(
+          pod.id,
+          validatedPodUpdates(pod.id, { autoApprove: true, worktreePath: '/tmp/wt' }),
+        );
       }
       ctx.eventBus.emit({
         type: 'pod.firewall_denied',
@@ -4264,7 +8401,7 @@ describe('PodManager', () => {
         readinessReview: makeReadinessReview('risky', 'Member has a hard release risk.'),
       });
       ctx.podRepo.update(owner.id, {
-        ...validatedPodUpdates(owner.id),
+        ...validatedPodUpdates(owner.id, { worktreePath: '/tmp/wt' }),
         prUrl: 'https://github.com/org/repo/pull/42',
         readinessReview: makeReadinessReview('ready'),
       });
@@ -4312,6 +8449,13 @@ describe('PodManager', () => {
       await manager.approveSession(pod.id);
 
       expect(ctx.prManager.mergePr).toHaveBeenCalledWith({
+        onPrepared: expect.any(Function),
+        expectedHeadSha: 'a'.repeat(40),
+        expectedTarget: {
+          repository: 'https://github.com/org/repo',
+          branch: pod.branch,
+          baseBranch: 'main',
+        },
         worktreePath: '/tmp/wt',
         prUrl: 'https://github.com/org/repo/pull/42',
         squash: undefined,
@@ -4320,56 +8464,75 @@ describe('PodManager', () => {
       expect(ctx.worktreeManager.mergeBranch).not.toHaveBeenCalled();
     });
 
-    it('polls and merges a clean PR when the parent worktree is stale', async () => {
-      vi.useFakeTimers();
-      try {
-        const ctx = createTestContext();
-        const manager = createPodManager(ctx.deps);
-        const pod = manager.createSession(
-          { profileName: 'test-profile', task: 'Do stuff' },
-          'user-1',
-        );
-        ctx.podRepo.update(pod.id, {
-          status: 'merge_pending',
-          prUrl: 'https://github.com/org/repo/pull/42',
-          worktreePath: `/tmp/autopod-missing-parent-${pod.id}`,
-        });
-        vi.mocked(ctx.prManager.getPrStatus)
-          .mockResolvedValueOnce({
-            merged: false,
-            open: true,
-            blockReason: null,
-            ciFailures: [],
-            reviewComments: [],
-            reviewDecision: 'APPROVED',
-          })
-          .mockResolvedValueOnce({
-            merged: true,
-            open: false,
-            blockReason: null,
-            ciFailures: [],
-            reviewComments: [],
+    it.each(['missing', 'existing'] as const)(
+      'requires retained source and avoids post-merge maintenance (%s parent worktree)',
+      async (worktree) => {
+        vi.useFakeTimers();
+        try {
+          const ctx = createTestContext();
+          const manager = createPodManager(ctx.deps);
+          const pod = manager.createSession(
+            { profileName: 'test-profile', task: 'Do stuff' },
+            'user-1',
+          );
+          ctx.podRepo.update(pod.id, {
+            status: 'merge_pending',
+            prUrl: 'https://github.com/org/repo/pull/42',
+            worktreePath:
+              worktree === 'existing' ? '/private/tmp' : `/tmp/autopod-missing-parent-${pod.id}`,
           });
-        vi.mocked(ctx.prManager.mergePr).mockResolvedValueOnce({
-          merged: true,
-          autoMergeScheduled: false,
-        });
+          const statusEvidence = seedPollDelivery(ctx, pod.id, true);
+          if (worktree === 'missing') {
+            const inspect = ctx.worktreeManager.inspectSource;
+            if (!inspect) throw new Error('Missing inspection fixture');
+            vi.mocked(inspect).mockRejectedValue(
+              new Error('ENOENT: retained worktree unavailable'),
+            );
+          }
+          vi.mocked(ctx.prManager.getPrStatus)
+            .mockResolvedValueOnce({
+              ...statusEvidence,
+              merged: false,
+              open: true,
+              blockReason: null,
+              ciFailures: [],
+              reviewComments: [],
+              reviewDecision: 'APPROVED',
+            })
+            .mockResolvedValueOnce({
+              ...statusEvidence,
+              merged: true,
+              open: false,
+              blockReason: null,
+              ciFailures: [],
+              reviewComments: [],
+            });
+          // A fresh manager resumes merge polling for persisted merge_pending pods.
+          createPodManager(ctx.deps);
+          await vi.advanceTimersByTimeAsync(0);
 
-        // A fresh manager resumes merge polling for persisted merge_pending pods.
-        createPodManager(ctx.deps);
-        await vi.advanceTimersByTimeAsync(0);
+          if (worktree === 'existing')
+            expect(ctx.prManager.mergePr).toHaveBeenCalledWith(
+              expect.objectContaining({
+                prUrl: 'https://github.com/org/repo/pull/42',
+                expectedHeadSha: statusEvidence.headSha,
+                expectedTarget: statusEvidence.sourceTarget,
+              }),
+            );
+          else expect(ctx.prManager.mergePr).not.toHaveBeenCalled();
+          expect(ctx.worktreeManager.rebaseOntoBase).not.toHaveBeenCalled();
 
-        expect(ctx.prManager.mergePr).toHaveBeenCalledWith({
-          prUrl: 'https://github.com/org/repo/pull/42',
-        });
-        expect(ctx.worktreeManager.rebaseOntoBase).not.toHaveBeenCalled();
-
-        await vi.advanceTimersByTimeAsync(60_000);
-        expect(manager.getSession(pod.id).status).toBe('complete');
-      } finally {
-        vi.useRealTimers();
-      }
-    });
+          await vi.advanceTimersByTimeAsync(60_000);
+          expect(manager.getSession(pod.id).status).toBe(
+            worktree === 'existing' ? 'complete' : 'merge_pending',
+          );
+          expect(ctx.worktreeManager.rebaseOntoBase).not.toHaveBeenCalled();
+          expect(ctx.worktreeManager.pushBranch).not.toHaveBeenCalled();
+        } finally {
+          vi.useRealTimers();
+        }
+      },
+    );
 
     it('passes squash option to PR merge', async () => {
       const ctx = createTestContext();
@@ -4440,7 +8603,9 @@ describe('PodManager', () => {
       const events: unknown[] = [];
       ctx.eventBus.subscribe((e) => events.push(e));
 
-      await manager.approveSession(pod.id);
+      await expect(manager.approveSession(pod.id)).rejects.toMatchObject({
+        code: 'APPROVAL_DELIVERY_FAILED',
+      });
 
       const result = manager.getSession(pod.id);
       expect(result.status).toBe('validated');
@@ -4464,6 +8629,287 @@ describe('PodManager', () => {
         return [];
       });
       expect(messages).toContain('PR creation failed: gh auth failed — pod returned to validated');
+    });
+
+    it('retains normal branch delivery after push failure and retries after restart', async () => {
+      const ctx = createTestContext();
+      ctx.deps.prManagerFactory = undefined;
+      const manager = createPodManager(ctx.deps);
+      const pod = manager.createSession(
+        { profileName: 'test-profile', task: 'Preserve delivery' },
+        'user-1',
+      );
+      ctx.podRepo.update(
+        pod.id,
+        validatedPodUpdates(pod.id, {
+          worktreePath: '/tmp/delivery',
+          containerId: 'delivery-container',
+          filesChanged: 1,
+        }),
+      );
+      vi.mocked(ctx.worktreeManager.mergeBranch).mockRejectedValueOnce(
+        new Error('remote unavailable'),
+      );
+      const completed: string[] = [];
+      ctx.eventBus.subscribe((event) => {
+        if (event.type === 'pod.completed') completed.push(event.podId);
+      });
+      await expect(manager.approveSession(pod.id)).rejects.toMatchObject({
+        code: 'APPROVAL_DELIVERY_FAILED',
+      });
+      expect(manager.getSession(pod.id)).toMatchObject({
+        status: 'validated',
+        completedAt: null,
+        worktreePath: '/tmp/delivery',
+        containerId: 'delivery-container',
+        failureReason: expect.stringContaining('retry approval'),
+      });
+      expect(ctx.containerManager.kill).not.toHaveBeenCalled();
+      expect(completed).toEqual([]);
+      await createPodManager(ctx.deps).approveSession(pod.id);
+      expect(manager.getSession(pod.id)).toMatchObject({ status: 'complete', failureReason: null });
+      expect(completed).toEqual([pod.id]);
+      expect(ctx.worktreeManager.mergeBranch).toHaveBeenCalledTimes(2);
+      expect(ctx.runtime.spawn).not.toHaveBeenCalled();
+      expect(ctx.prManager.createPr).not.toHaveBeenCalled();
+    });
+
+    it.each(['closed', 'unknown', 'review-unavailable'] as const)(
+      'retains unconfirmed PR delivery when status is %s',
+      async (scenario) => {
+        const ctx = createTestContext();
+        const manager = createPodManager(ctx.deps);
+        const pod = manager.createSession(
+          { profileName: 'test-profile', task: 'Require merge evidence' },
+          'user-1',
+        );
+        ctx.podRepo.update(
+          pod.id,
+          validatedPodUpdates(pod.id, {
+            worktreePath: '/tmp/delivery',
+            containerId: 'delivery-container',
+            filesChanged: 1,
+            prUrl: 'https://github.com/org/repo/pull/42',
+          }),
+        );
+        const status = vi.mocked(ctx.prManager.getPrStatus);
+        if (scenario === 'review-unavailable')
+          status.mockRejectedValue(new Error('status unavailable'));
+        else {
+          status.mockResolvedValueOnce({
+            open: true,
+            merged: false,
+            reviewDecision: 'APPROVED',
+            blockReason: null,
+            ciFailures: [],
+            reviewComments: [],
+          });
+          if (scenario === 'unknown') status.mockRejectedValue(new Error('status unavailable'));
+          else
+            status.mockResolvedValue({
+              open: false,
+              merged: false,
+              blockReason: 'Closed without merge',
+              ciFailures: [],
+              reviewComments: [],
+            });
+        }
+        vi.mocked(ctx.prManager.mergePr).mockRejectedValue(new Error('merge unavailable'));
+        await expect(manager.approveSession(pod.id)).rejects.toMatchObject({
+          code: 'APPROVAL_DELIVERY_FAILED',
+        });
+        expect(manager.getSession(pod.id)).toMatchObject({
+          status: 'validated',
+          completedAt: null,
+          worktreePath: '/tmp/delivery',
+          containerId: 'delivery-container',
+        });
+        expect(ctx.containerManager.kill).not.toHaveBeenCalled();
+        if (scenario === 'review-unavailable') expect(ctx.prManager.mergePr).not.toHaveBeenCalled();
+      },
+    );
+
+    it.each([
+      'push',
+      'failed-push',
+      'existing-push',
+      'rebase',
+      'create',
+      'merge',
+      'approved',
+      'merging',
+      'complete',
+    ] as const)('rejects a replacement lifecycle during normal approval %s', async (step) => {
+      const ctx = createTestContext();
+      const manager = createPodManager(ctx.deps);
+      const pod = manager.createSession(
+        { profileName: 'test-profile', task: 'Fence normal delivery' },
+        'user-1',
+      );
+      ctx.podRepo.update(
+        pod.id,
+        validatedPodUpdates(pod.id, {
+          worktreePath: '/tmp/delivery',
+          containerId: 'delivery-container',
+          filesChanged: 1,
+          prUrl: ['existing-push', 'rebase'].includes(step)
+            ? 'https://github.com/org/repo/pull/42'
+            : null,
+        }),
+      );
+      const replace = () => {
+        ctx.podRepo.incrementLifecycleGeneration(pod.id);
+        ctx.podRepo.update(pod.id, {
+          status: 'running',
+          worktreePath: '/tmp/replacement',
+          containerId: 'replacement-container',
+        });
+      };
+      if (step === 'push')
+        vi.mocked(ctx.worktreeManager.mergeBranch).mockImplementationOnce(async () => {
+          replace();
+        });
+      if (step === 'failed-push')
+        vi.mocked(ctx.worktreeManager.mergeBranch).mockImplementationOnce(async () => {
+          replace();
+          throw new Error('old push rejected');
+        });
+      if (step === 'existing-push')
+        vi.mocked(ctx.worktreeManager.pushBranch).mockImplementationOnce(async () => {
+          replace();
+        });
+      if (step === 'rebase')
+        vi.mocked(ctx.worktreeManager.rebaseOntoBase).mockImplementationOnce(async () => {
+          replace();
+          return { rebased: true, alreadyUpToDate: true, conflicts: [] };
+        });
+      if (step === 'create')
+        vi.mocked(ctx.prManager.createPr).mockImplementationOnce(async () => {
+          replace();
+          return { url: 'https://github.com/org/repo/pull/42', usedFallback: false };
+        });
+      if (step === 'merge')
+        vi.mocked(ctx.prManager.mergePr).mockImplementationOnce(async () => {
+          replace();
+          return { merged: true, autoMergeScheduled: false };
+        });
+      const completed: string[] = [];
+      ctx.eventBus.subscribe((event) => {
+        if (event.type === 'pod.status_changed' && event.newStatus === step) replace();
+        if (event.type === 'pod.completed') completed.push(event.podId);
+      });
+      await expect(manager.approveSession(pod.id)).rejects.toMatchObject({
+        code: 'STALE_APPROVAL',
+      });
+      expect(manager.getSession(pod.id)).toMatchObject({
+        status: 'running',
+        worktreePath: '/tmp/replacement',
+        containerId: 'replacement-container',
+      });
+      expect(completed).toEqual([]);
+      expect(ctx.containerManager.kill).not.toHaveBeenCalledWith('replacement-container');
+      if (step === 'push') expect(ctx.prManager.createPr).not.toHaveBeenCalled();
+      if (step === 'create') {
+        expect(ctx.prManager.mergePr).not.toHaveBeenCalled();
+        expect(manager.getSession(pod.id).prUrl).toBeNull();
+      }
+    });
+
+    it.each(['REVIEW_REQUIRED', 'CHANGES_REQUESTED', 'unavailable'] as const)(
+      'does not merge a newly created PR with review status %s',
+      async (decision) => {
+        const ctx = createTestContext();
+        const manager = createPodManager(ctx.deps);
+        const pod = manager.createSession(
+          { profileName: 'test-profile', task: 'Review new delivery' },
+          'user-1',
+        );
+        ctx.podRepo.update(
+          pod.id,
+          validatedPodUpdates(pod.id, {
+            worktreePath: '/tmp/delivery',
+            containerId: 'delivery-container',
+            filesChanged: 1,
+          }),
+        );
+        if (decision === 'unavailable')
+          vi.mocked(ctx.prManager.getPrStatus).mockRejectedValue(new Error('status unavailable'));
+        else
+          vi.mocked(ctx.prManager.getPrStatus).mockResolvedValue({
+            open: true,
+            merged: false,
+            blockReason: null,
+            ciFailures: [],
+            reviewComments: [],
+            reviewDecision: decision,
+          });
+        if (decision === 'unavailable')
+          await expect(manager.approveSession(pod.id)).rejects.toMatchObject({
+            code: 'APPROVAL_DELIVERY_FAILED',
+          });
+        else await manager.approveSession(pod.id);
+        expect(manager.getSession(pod.id)).toMatchObject({
+          status: decision === 'unavailable' ? 'validated' : 'merge_pending',
+          completedAt: null,
+          containerId: 'delivery-container',
+          prUrl: 'https://github.com/org/repo/pull/42',
+        });
+        expect(ctx.prManager.mergePr).not.toHaveBeenCalled();
+        expect(ctx.containerManager.kill).not.toHaveBeenCalled();
+      },
+    );
+
+    it('retains delivery when an uncertain merge has no durable admission', async () => {
+      const ctx = createTestContext();
+      const manager = createPodManager(ctx.deps);
+      const pod = manager.createSession(
+        { profileName: 'test-profile', task: 'Reconcile merge receipt' },
+        'user-1',
+      );
+      ctx.podRepo.update(
+        pod.id,
+        validatedPodUpdates(pod.id, {
+          worktreePath: '/tmp/delivery',
+          filesChanged: 1,
+          prUrl: 'https://github.com/org/repo/pull/42',
+        }),
+      );
+      vi.mocked(ctx.prManager.mergePr).mockRejectedValue(new Error('connection lost after merge'));
+      await expect(manager.approveSession(pod.id)).rejects.toMatchObject({
+        code: 'APPROVAL_DELIVERY_FAILED',
+      });
+      expect(manager.getSession(pod.id).status).toBe('validated');
+      expect(ctx.containerManager.kill).not.toHaveBeenCalled();
+      expect(ctx.db.prepare('SELECT count(*) AS n FROM merge_attempts').get()).toEqual({ n: 0 });
+    });
+
+    it('retains delivery after the pre-merge rebase operation rejects', async () => {
+      const ctx = createTestContext();
+      const manager = createPodManager(ctx.deps);
+      const pod = manager.createSession(
+        { profileName: 'test-profile', task: 'Preserve failed rebase' },
+        'user-1',
+      );
+      ctx.podRepo.update(
+        pod.id,
+        validatedPodUpdates(pod.id, {
+          worktreePath: '/tmp/delivery',
+          containerId: 'delivery-container',
+          filesChanged: 1,
+          prUrl: 'https://github.com/org/repo/pull/42',
+        }),
+      );
+      vi.mocked(ctx.worktreeManager.rebaseOntoBase).mockRejectedValue(new Error('git unavailable'));
+      await expect(manager.approveSession(pod.id)).rejects.toMatchObject({
+        code: 'APPROVAL_DELIVERY_FAILED',
+      });
+      expect(manager.getSession(pod.id)).toMatchObject({
+        status: 'validated',
+        containerId: 'delivery-container',
+        completedAt: null,
+      });
+      expect(ctx.prManager.mergePr).not.toHaveBeenCalled();
+      expect(ctx.containerManager.kill).not.toHaveBeenCalled();
     });
 
     it('falls back to branch push when no prUrl and no prManager', async () => {
@@ -4618,7 +9064,10 @@ describe('PodManager', () => {
       // Child must not be enqueued yet (waiting for parent)
       expect(ctx.enqueuedSessions).not.toContain(child.id);
 
-      ctx.podRepo.update(parent.id, validatedPodUpdates(parent.id, { branch: 'feature/parent' }));
+      ctx.podRepo.update(
+        parent.id,
+        validatedPodUpdates(parent.id, { branch: 'feature/parent', worktreePath: '/tmp/wt' }),
+      );
       await manager.approveSession(parent.id);
 
       expect(manager.getSession(parent.id).status).toBe('complete');
@@ -4688,7 +9137,7 @@ describe('PodManager', () => {
       // Simulate legacy/corrupted rows created before single-mode branch sharing
       // was enforced at creation time.
       ctx.db.prepare('UPDATE pods SET branch = ? WHERE id = ?').run('feature/child', child.id);
-      ctx.podRepo.update(parent.id, { status: 'failed' });
+      ctx.podRepo.update(parent.id, { status: 'failed', worktreePath: '/tmp/wt' });
       ctx.enqueuedSessions.length = 0;
 
       await manager.forceApprove(parent.id, 'waive infrastructure-only validation issue');
@@ -4922,6 +9371,291 @@ describe('PodManager', () => {
         expect(manager.getSession(pod.id).status).toBe('complete');
       });
 
+      it.each([true, null])(
+        'preserves accumulated work after failed branch push (base evidence %s) and retries without a worker',
+        async (baseEvidence) => {
+          const ctx = createTestContext();
+          const manager = createPodManager(ctx.deps);
+          const pod = manager.createSession(
+            { profileName: 'test-profile', task: 'Preserve accumulated work' },
+            'user-1',
+          );
+          ctx.podRepo.update(
+            pod.id,
+            validatedPodUpdates(pod.id, {
+              worktreePath: '/tmp/preserved-approval',
+              containerId: 'preserved-container',
+              filesChanged: 0,
+            }),
+          );
+          vi.mocked(ctx.worktreeManager.getDiffStats).mockResolvedValue({
+            filesChanged: 0,
+            linesAdded: 0,
+            linesRemoved: 0,
+          });
+          if (baseEvidence === null)
+            (
+              ctx.worktreeManager.hasChangesAgainstBase as ReturnType<typeof vi.fn>
+            ).mockRejectedValue(new Error('base unavailable'));
+          else
+            (
+              ctx.worktreeManager.hasChangesAgainstBase as ReturnType<typeof vi.fn>
+            ).mockResolvedValue(baseEvidence);
+          vi.mocked(ctx.worktreeManager.pushBranch).mockRejectedValueOnce(
+            new Error('remote unavailable'),
+          );
+          const completed: string[] = [];
+          ctx.eventBus.subscribe((event) => {
+            if (event.type === 'pod.completed') completed.push(event.podId);
+          });
+          await expect(manager.approveSession(pod.id)).rejects.toMatchObject({
+            code: 'BRANCH_PRESERVATION_FAILED',
+          });
+          expect(manager.getSession(pod.id)).toMatchObject({
+            status: 'validated',
+            worktreePath: '/tmp/preserved-approval',
+            containerId: 'preserved-container',
+            failureReason: expect.stringContaining('retry approval'),
+          });
+          expect(ctx.containerManager.kill).not.toHaveBeenCalled();
+          expect(completed).toEqual([]);
+          expect(ctx.runtime.spawn).not.toHaveBeenCalled();
+          expect(ctx.runtime.resume).not.toHaveBeenCalled();
+          // A new manager reuses the persisted source and state after a daemon restart.
+          await createPodManager(ctx.deps).approveSession(pod.id);
+          expect(ctx.worktreeManager.pushBranch).toHaveBeenCalledTimes(2);
+          expect(manager.getSession(pod.id)).toMatchObject({
+            status: 'complete',
+            failureReason: null,
+          });
+          expect(completed).toEqual([pod.id]);
+          expect(ctx.runtime.spawn).not.toHaveBeenCalled();
+          expect(ctx.prManager.createPr).not.toHaveBeenCalled();
+        },
+      );
+
+      it('does not complete or clean a replacement generation after approval push settles', async () => {
+        const ctx = createTestContext();
+        const manager = createPodManager(ctx.deps);
+        const pod = manager.createSession(
+          { profileName: 'test-profile', task: 'Protect replacement generation' },
+          'user-1',
+        );
+        ctx.podRepo.update(
+          pod.id,
+          validatedPodUpdates(pod.id, {
+            worktreePath: '/tmp/old-approval',
+            containerId: 'old-container',
+            filesChanged: 0,
+          }),
+        );
+        vi.mocked(ctx.worktreeManager.getDiffStats).mockResolvedValue({
+          filesChanged: 0,
+          linesAdded: 0,
+          linesRemoved: 0,
+        });
+        (ctx.worktreeManager.hasChangesAgainstBase as ReturnType<typeof vi.fn>).mockResolvedValue(
+          true,
+        );
+        vi.mocked(ctx.worktreeManager.pushBranch).mockImplementationOnce(async () => {
+          ctx.podRepo.incrementLifecycleGeneration(pod.id);
+          ctx.podRepo.update(pod.id, {
+            status: 'running',
+            containerId: 'replacement-container',
+            worktreePath: '/tmp/replacement-approval',
+          });
+        });
+        await expect(manager.approveSession(pod.id)).rejects.toMatchObject({
+          code: 'STALE_APPROVAL',
+        });
+        expect(manager.getSession(pod.id)).toMatchObject({
+          status: 'running',
+          containerId: 'replacement-container',
+          worktreePath: '/tmp/replacement-approval',
+        });
+        expect(ctx.containerManager.kill).not.toHaveBeenCalled();
+      });
+
+      it.each(['diff', 'cleanup'] as const)(
+        'retains replacement resources when lifecycle changes during approval %s',
+        async (step) => {
+          const ctx = createTestContext();
+          const replace = async () => {
+            ctx.podRepo.incrementLifecycleGeneration(podId);
+            ctx.podRepo.update(podId, {
+              status: 'running',
+              containerId: 'new-container',
+              worktreePath: '/tmp/new-approval',
+            });
+          };
+          if (step === 'cleanup') ctx.deps.beforeContainerCleanup = replace;
+          const manager = createPodManager(ctx.deps);
+          const podId = manager.createSession(
+            { profileName: 'test-profile', task: 'Fence cleanup' },
+            'user-1',
+          ).id;
+          ctx.podRepo.update(
+            podId,
+            validatedPodUpdates(podId, {
+              worktreePath: '/tmp/old-approval',
+              containerId: 'old-container',
+              filesChanged: 0,
+            }),
+          );
+          vi.mocked(ctx.worktreeManager.getDiffStats).mockImplementation(async () => {
+            if (step === 'diff') await replace();
+            return { filesChanged: 0, linesAdded: 0, linesRemoved: 0 };
+          });
+          (ctx.worktreeManager.hasChangesAgainstBase as ReturnType<typeof vi.fn>).mockResolvedValue(
+            true,
+          );
+          await expect(manager.approveSession(podId)).rejects.toMatchObject({
+            code: 'STALE_APPROVAL',
+          });
+          expect(manager.getSession(podId)).toMatchObject({
+            status: 'running',
+            containerId: 'new-container',
+            worktreePath: '/tmp/new-approval',
+          });
+          expect(ctx.containerManager.kill).not.toHaveBeenCalled();
+          if (step === 'diff') expect(ctx.worktreeManager.pushBranch).not.toHaveBeenCalled();
+        },
+      );
+
+      it('keeps a human decision arriving during approval push actionable', async () => {
+        const ctx = createTestContext();
+        const manager = createPodManager(ctx.deps);
+        const pod = manager.createSession(
+          { profileName: 'test-profile', task: 'Keep decision' },
+          'user-1',
+        );
+        ctx.podRepo.update(
+          pod.id,
+          validatedPodUpdates(pod.id, {
+            worktreePath: '/tmp/approval-decision',
+            containerId: 'decision-container',
+            filesChanged: 0,
+          }),
+        );
+        vi.mocked(ctx.worktreeManager.getDiffStats).mockResolvedValue({
+          filesChanged: 0,
+          linesAdded: 0,
+          linesRemoved: 0,
+        });
+        (ctx.worktreeManager.hasChangesAgainstBase as ReturnType<typeof vi.fn>).mockResolvedValue(
+          true,
+        );
+        vi.mocked(ctx.worktreeManager.pushBranch).mockImplementationOnce(async () => {
+          ctx.db
+            .prepare('UPDATE pods SET pending_escalation = ? WHERE id = ?')
+            .run(JSON.stringify({ id: 'late-decision', question: 'Confirm scope' }), pod.id);
+        });
+        await expect(manager.approveSession(pod.id)).rejects.toMatchObject({
+          code: 'PENDING_HUMAN_DECISION',
+        });
+        expect(manager.getSession(pod.id)).toMatchObject({
+          status: 'validated',
+          pendingEscalation: { id: 'late-decision' },
+        });
+        expect(ctx.containerManager.kill).not.toHaveBeenCalled();
+      });
+
+      it('requires a branch identity before releasing accumulated work', async () => {
+        const ctx = createTestContext();
+        const manager = createPodManager(ctx.deps);
+        const pod = manager.createSession(
+          { profileName: 'test-profile', task: 'Repair missing branch identity' },
+          'user-1',
+        );
+        ctx.podRepo.update(
+          pod.id,
+          validatedPodUpdates(pod.id, {
+            worktreePath: '/tmp/unbound-approval',
+            containerId: 'retained-container',
+            filesChanged: 0,
+          }),
+        );
+        ctx.db.prepare("UPDATE pods SET branch = '' WHERE id = ?").run(pod.id);
+        vi.mocked(ctx.worktreeManager.getDiffStats).mockResolvedValue({
+          filesChanged: 0,
+          linesAdded: 0,
+          linesRemoved: 0,
+        });
+        (ctx.worktreeManager.hasChangesAgainstBase as ReturnType<typeof vi.fn>).mockResolvedValue(
+          true,
+        );
+        await expect(manager.approveSession(pod.id)).rejects.toMatchObject({
+          code: 'DELIVERY_RECONCILIATION_REQUIRED',
+        });
+        expect(manager.getSession(pod.id).status).toBe('validated');
+        expect(ctx.worktreeManager.pushBranch).not.toHaveBeenCalled();
+        expect(ctx.containerManager.kill).not.toHaveBeenCalled();
+        ctx.db.prepare('UPDATE pods SET branch = ? WHERE id = ?').run(pod.branch, pod.id);
+        await manager.approveSession(pod.id);
+        expect(manager.getSession(pod.id)).toMatchObject({
+          status: 'complete',
+          failureReason: null,
+        });
+        expect(ctx.worktreeManager.pushBranch).toHaveBeenCalledTimes(1);
+      });
+
+      it.each(['approved', 'merging', 'complete'] as const)(
+        'does not adopt a lifecycle replaced by the %s status listener',
+        async (phase) => {
+          const ctx = createTestContext();
+          const manager = createPodManager(ctx.deps);
+          const pod = manager.createSession(
+            { profileName: 'test-profile', task: 'Fence reentrant status listener' },
+            'user-1',
+          );
+          ctx.podRepo.update(
+            pod.id,
+            validatedPodUpdates(pod.id, {
+              worktreePath: '/tmp/original-approval',
+              containerId: 'original-container',
+              filesChanged: 0,
+            }),
+          );
+          vi.mocked(ctx.worktreeManager.getDiffStats).mockResolvedValue({
+            filesChanged: 0,
+            linesAdded: 0,
+            linesRemoved: 0,
+          });
+          (ctx.worktreeManager.hasChangesAgainstBase as ReturnType<typeof vi.fn>).mockResolvedValue(
+            true,
+          );
+          const completed: string[] = [];
+          ctx.eventBus.subscribe((event) => {
+            if (
+              event.type === 'pod.status_changed' &&
+              event.podId === pod.id &&
+              event.newStatus === phase
+            ) {
+              ctx.podRepo.incrementLifecycleGeneration(pod.id);
+              ctx.podRepo.update(pod.id, {
+                status: 'running',
+                containerId: 'replacement-container',
+                worktreePath: '/tmp/replacement-approval',
+                readinessReview: null,
+              });
+            }
+            if (event.type === 'pod.completed') completed.push(event.podId);
+          });
+          await expect(manager.approveSession(pod.id)).rejects.toMatchObject({
+            code: 'STALE_APPROVAL',
+          });
+          expect(manager.getSession(pod.id)).toMatchObject({
+            status: 'running',
+            containerId: 'replacement-container',
+            worktreePath: '/tmp/replacement-approval',
+            readinessReview: null,
+          });
+          expect(ctx.containerManager.kill).not.toHaveBeenCalledWith('replacement-container');
+          expect(completed).toEqual([]);
+          if (phase !== 'complete') expect(ctx.containerManager.kill).not.toHaveBeenCalled();
+        },
+      );
+
       it('pushes branch with accumulated work before emitting pod.completed', async () => {
         const ctx = createTestContext();
         const manager = createPodManager(ctx.deps);
@@ -4949,8 +9683,9 @@ describe('PodManager', () => {
         // so the branch is durably on origin if the daemon dies between push and emit.
         const order: string[] = [];
         (ctx.worktreeManager.pushBranch as ReturnType<typeof vi.fn>).mockImplementation(
-          async () => {
+          async (...args: Parameters<typeof mockBranchPublication>) => {
             order.push('push');
+            return mockBranchPublication(...args);
           },
         );
         ctx.eventBus.subscribe((e) => {
@@ -4960,13 +9695,148 @@ describe('PodManager', () => {
 
         await manager.approveSession(pod.id);
 
-        expect(ctx.worktreeManager.pushBranch).toHaveBeenCalledWith('/tmp/wt', pod.branch);
+        expect(ctx.worktreeManager.pushBranch).toHaveBeenCalledWith(
+          '/tmp/wt',
+          pod.branch,
+          expect.objectContaining({
+            onPrepared: expect.any(Function),
+            expectedRepository: 'https://github.com/org/repo',
+          }),
+        );
         expect(order).toEqual(['push', 'completed']);
       });
     });
   });
 
   describe('rejectSession', () => {
+    it('keeps a new unanswered decision actionable when it arrives during resume preflight', async () => {
+      const ctx = createTestContext();
+      const manager = createPodManager(ctx.deps);
+      const pod = manager.createSession(
+        { profileName: 'test-profile', task: 'Keep new decision' },
+        'operator',
+      );
+      ctx.podRepo.update(pod.id, { status: 'validated', containerId: 'ctr-1' });
+      const bridge = createSessionBridge({
+        ...ctx.deps,
+        podManager: manager,
+        pendingRequestsByPod: new Map(),
+      });
+      ctx.containerManager.getExecutionMetadata = vi.fn(async () => {
+        bridge.createEscalation({
+          id: 'new-question',
+          podId: pod.id,
+          type: 'ask_human',
+          timestamp: new Date().toISOString(),
+          payload: { question: 'Approve this change?' },
+          response: null,
+        });
+        return {
+          imageDigest: null,
+          memoryLimitBytes: 10 * 1024 ** 3,
+          cpuLimit: 2,
+          networkMode: null,
+        };
+      });
+      await expect(manager.rejectSession(pod.id, 'Repair selected finding')).rejects.toThrow();
+      expect(ctx.runtime.resume).not.toHaveBeenCalled();
+      expect(ctx.containerManager.kill).not.toHaveBeenCalled();
+      expect(ctx.podRepo.getOrThrow(pod.id)).toMatchObject({
+        status: 'awaiting_input',
+        containerId: 'ctr-1',
+        pendingEscalation: { id: 'new-question' },
+      });
+      expect(ctx.escalationRepo.getOrThrow('new-question').response).toBeNull();
+    });
+
+    it('records fresh runtime provenance before a rejection starts another worker turn', async () => {
+      const ctx = createTestContext();
+      const manager = createPodManager(ctx.deps);
+      const pod = manager.createSession(
+        { profileName: 'test-profile', task: 'Verify resumed environment' },
+        'operator',
+      );
+      ctx.podRepo.update(pod.id, { status: 'validated', containerId: 'ctr-1' });
+      ctx.containerManager.getExecutionMetadata = vi.fn(async () => ({
+        imageDigest: `sha256:${'c'.repeat(64)}`,
+        memoryLimitBytes: 10 * 1024 ** 3,
+        cpuLimit: 2,
+        networkMode: 'bridge',
+      }));
+      const resume = vi.mocked(ctx.runtime.resume).getMockImplementation();
+      if (!resume) throw new Error('Missing runtime fixture');
+      vi.mocked(ctx.runtime.resume).mockImplementation((...args) => {
+        expect(ctx.podRepo.executionProvenance?.latest(pod.id)).toMatchObject({
+          purpose: 'coding',
+          status: 'checked',
+          runtime: 'claude',
+          cliVersion: '1.0.0',
+          imageDigest: `sha256:${'c'.repeat(64)}`,
+        });
+        return resume(...args);
+      });
+      await manager.rejectSession(pod.id, 'Fix selected finding');
+      expect(ctx.runtime.resume).toHaveBeenCalled();
+    });
+
+    it('retains the container and records a blocked resume when the runtime CLI is unavailable', async () => {
+      const ctx = createTestContext();
+      const manager = createPodManager(ctx.deps);
+      const pod = manager.createSession(
+        { profileName: 'test-profile', task: 'Require the actual runtime' },
+        'operator',
+      );
+      ctx.podRepo.update(pod.id, { status: 'validated', containerId: 'ctr-1' });
+      const exec = vi.mocked(ctx.containerManager.execInContainer).getMockImplementation();
+      if (!exec) throw new Error('Missing container fixture');
+      vi.mocked(ctx.containerManager.execInContainer).mockImplementation(
+        async (id, cmd, options) =>
+          cmd.join(' ') === 'claude --version'
+            ? { exitCode: 1, stdout: '', stderr: 'unavailable' }
+            : exec(id, cmd, options),
+      );
+      await expect(manager.rejectSession(pod.id, 'Fix finding')).rejects.toThrow();
+      expect(ctx.runtime.resume).not.toHaveBeenCalled();
+      expect(ctx.containerManager.kill).not.toHaveBeenCalled();
+      expect(ctx.podRepo.getOrThrow(pod.id)).toMatchObject({
+        status: 'failed',
+        containerId: 'ctr-1',
+      });
+      expect(ctx.podRepo.executionProvenance?.latest(pod.id)).toMatchObject({
+        purpose: 'coding',
+        status: 'blocked',
+        cliVersion: null,
+      });
+    });
+
+    it('does not fail or start a replacement lifecycle that arrives during resume preflight', async () => {
+      const ctx = createTestContext();
+      const manager = createPodManager(ctx.deps);
+      const pod = manager.createSession(
+        { profileName: 'test-profile', task: 'Fence resumed worker' },
+        'operator',
+      );
+      ctx.podRepo.update(pod.id, { status: 'validated', containerId: 'ctr-1' });
+      ctx.containerManager.getExecutionMetadata = vi.fn(async () => {
+        ctx.podRepo.incrementLifecycleGeneration(pod.id);
+        ctx.podRepo.update(pod.id, { containerId: 'replacement', status: 'running' });
+        return {
+          imageDigest: null,
+          memoryLimitBytes: 10 * 1024 ** 3,
+          cpuLimit: 2,
+          networkMode: null,
+        };
+      });
+      await expect(manager.rejectSession(pod.id, 'Fix finding')).rejects.toThrow('superseded');
+      expect(ctx.runtime.resume).not.toHaveBeenCalled();
+      expect(ctx.containerManager.kill).not.toHaveBeenCalled();
+      expect(ctx.podRepo.getOrThrow(pod.id)).toMatchObject({
+        status: 'running',
+        containerId: 'replacement',
+      });
+      expect(ctx.podRepo.executionProvenance?.latest(pod.id)).toBeNull();
+    });
+
     it('resumes agent with rejection feedback and completes cycle', async () => {
       // With passing validation, rejection triggers: resume → agent → validation pass → validated
       const ctx = createTestContext();
@@ -5203,8 +10073,10 @@ describe('PodManager', () => {
         oldCredentials,
       );
       ctx.deps.providerAccountStore = providerAccountStore;
+      const originalExec = vi.mocked(ctx.containerManager.execInContainer).getMockImplementation();
+      if (!originalExec) throw new Error('No container fixture');
       vi.mocked(ctx.containerManager.execInContainer).mockImplementation(
-        async (_containerId, command) => {
+        async (containerId, command, options) => {
           const rendered = command.join(' ');
           if (rendered.includes('command -v codex')) {
             return { stdout: '/usr/local/bin/codex\n', stderr: '', exitCode: 0 };
@@ -5212,7 +10084,7 @@ describe('PodManager', () => {
           if (rendered === 'codex --version') {
             return { stdout: 'codex-cli 0.144.4\n', stderr: '', exitCode: 0 };
           }
-          return { stdout: '', stderr: '', exitCode: 0 };
+          return originalExec(containerId, command, options);
         },
       );
       vi.mocked(ctx.containerManager.readFile).mockImplementation(
@@ -5250,51 +10122,419 @@ describe('PodManager', () => {
       );
     });
 
-    it('fails before provisioning when a queued profile changes provider account', async () => {
-      const firstId = 'team-openai-first';
-      const secondId = 'team-openai-second';
-      const credentials = {
-        provider: 'openai',
-        authMode: 'api-key',
-        apiKey: 'test-openai-key',
-      } satisfies ProviderCredentials;
-      const ctx = createTestContext(undefined, {
-        defaultModel: 'gpt-5',
-        defaultRuntime: 'codex',
-        modelProvider: 'openai',
+    it('reviews equivalent active work after fresh fetch before starting another coding agent', async () => {
+      const ctx = createTestContext();
+      const manager = createPodManager(ctx.deps);
+      const request = {
+        profileName: 'test-profile',
+        task: 'Implement the same requested artifact',
+        skipValidation: true,
+        contract: {
+          contractVersion: 1 as const,
+          title: 'Same delivery',
+          dependsOn: [],
+          scenarios: [],
+          humanReview: [],
+          requiredFacts: [
+            {
+              id: 'artifact',
+              proves: [],
+              kind: 'custom-command' as const,
+              artifact: { path: 'same.ts', change: 'create' as const },
+              command: 'node verify.cjs',
+            },
+          ],
+        },
+      };
+      const first = manager.createSession(request, 'operator');
+      await manager.processPod(first.id);
+      expect(manager.getSession(first.id).status).toBe('validated');
+      const second = manager.createSession(request, 'operator');
+      await manager.processPod(second.id);
+      expect(ctx.worktreeManager.create).toHaveBeenCalledTimes(2);
+      expect(ctx.runtime.spawn).toHaveBeenCalledTimes(1);
+      expect(manager.getSession(second.id).status).toBe('failed');
+      expect(manager.getSession(second.id).failureReason).toContain('Equivalent');
+      const rerunRequest = {
+        ...request,
+        intentionalRerun: {
+          requestKey: 'explicit-rerun-1',
+          ofPodId: first.id,
+          reason: 'Independent repeat approved for comparison',
+        },
+      };
+      expect(() => manager.createSession(rerunRequest, 'operator')).toThrow('authenticated human');
+      const rerun = manager.createSession(rerunRequest, 'operator', undefined, {
+        type: 'human',
+        userId: 'operator',
       });
-      insertProviderAccount(ctx.db, firstId, 'openai', credentials);
-      insertProviderAccount(ctx.db, secondId, 'openai', credentials);
-      linkProfileToProviderAccount(ctx.db, 'test-profile', firstId);
-      const accounts = new Map([
-        [firstId, createMutableProviderAccountStore(firstId, 'openai', credentials).get(firstId)],
-        [
-          secondId,
-          createMutableProviderAccountStore(secondId, 'openai', credentials).get(secondId),
-        ],
-      ]);
-      ctx.deps.providerAccountStore = {
-        get: vi.fn((id: string) => {
-          const value = accounts.get(id);
-          if (!value) throw new Error('missing test account');
-          return value;
+      const retry = manager.createSession(rerunRequest, 'operator', undefined, {
+        type: 'human',
+        userId: 'operator',
+      });
+      expect(retry.id).toBe(rerun.id);
+      expect(() =>
+        manager.createSession({ ...rerunRequest, task: 'Changed request' }, 'operator', undefined, {
+          type: 'human',
+          userId: 'operator',
         }),
-      } as ProviderAccountStore;
+      ).toThrow('different request');
+      const restarted = createPodManager(ctx.deps);
+      expect(
+        restarted.createSession(rerunRequest, 'operator', undefined, {
+          type: 'human',
+          userId: 'operator',
+        }).id,
+      ).toBe(rerun.id);
+      await manager.processPod(rerun.id);
+      expect(manager.getSession(rerun.id).status).toBe('validated');
+      expect(ctx.runtime.spawn).toHaveBeenCalledTimes(2);
+      expect(ctx.podRepo.taskExecutions?.snapshot(rerun.id).taskId).not.toBe(
+        ctx.podRepo.taskExecutions?.snapshot(first.id).taskId,
+      );
+      expect(ctx.podRepo.dispatchPreflight?.latest(rerun.id)).toMatchObject({
+        status: 'admitted',
+        baseCommitSha: 'a'.repeat(40),
+        rerun: {
+          ofPodId: first.id,
+          reason: rerunRequest.intentionalRerun.reason,
+          actor: { type: 'human', userId: 'operator' },
+        },
+      });
+    });
+
+    it('creates an authenticated idempotent rerun through the real API without inheriting approval or lineage', async () => {
+      const ctx = createTestContext(undefined, { defaultModel: 'claude-sonnet-5' });
+      const manager = createPodManager(ctx.deps);
+      const original = manager.createSession(
+        { profileName: 'test-profile', task: 'Repeat this exact task', skipValidation: true },
+        'human-reviewer',
+      );
+      await manager.processPod(original.id);
+      const app = Fastify();
+      app.setErrorHandler(errorHandler);
+      authPlugin(app, {
+        validateToken: async (token: string) => {
+          if (token !== 'operator-fixture')
+            throw new AutopodError('Invalid token', 'AUTH_ERROR', 401);
+          return { oid: 'human-reviewer', name: 'Reviewer' };
+        },
+      } as never);
+      podRoutes(app, manager, ctx.eventRepo, undefined, ctx.podRepo);
+      const headers = { authorization: 'Bearer operator-fixture' };
+      try {
+        const template = await app.inject({
+          method: 'GET',
+          url: `/pods/${original.id}/rerun-template`,
+          headers,
+        });
+        expect(template.statusCode, template.body).toBe(200);
+        const request = template.json();
+        expect(request.options.validate).toBe(true);
+        for (const key of [
+          'linkedPodId',
+          'prUrl',
+          'branch',
+          'skipValidation',
+          'validationWaiver',
+          'autoApprove',
+        ])
+          expect(request[key]).toBeUndefined();
+        const payload = {
+          ...request,
+          intentionalRerun: {
+            ofPodId: original.id,
+            reason: 'Independent repeat after review',
+            requestKey: 'rerun-after-lost-response',
+          },
+        };
+        expect((await app.inject({ method: 'POST', url: '/pods', payload })).statusCode).toBe(401);
+        expect(
+          (
+            await app.inject({
+              method: 'POST',
+              url: '/pods',
+              headers,
+              payload: {
+                ...payload,
+                intentionalRerun: {
+                  ...payload.intentionalRerun,
+                  actor: { type: 'human', userId: 'forged' },
+                },
+              },
+            })
+          ).statusCode,
+        ).toBe(400);
+        const first = await app.inject({ method: 'POST', url: '/pods', headers, payload });
+        expect(first.statusCode, first.body).toBe(201);
+        const duplicate = await app.inject({ method: 'POST', url: '/pods', headers, payload });
+        expect(duplicate.statusCode).toBe(201);
+        expect(duplicate.json().id).toBe(first.json().id);
+        expect(ctx.runtime.spawn).toHaveBeenCalledTimes(1);
+        await manager.processPod(first.json().id);
+        const evidence = await app.inject({
+          method: 'GET',
+          url: `/pods/${first.json().id}/dispatch-preflight`,
+          headers,
+        });
+        expect(evidence.json().latest).toMatchObject({
+          status: 'admitted',
+          rerun: { actor: { type: 'human', userId: 'human-reviewer' } },
+        });
+        expect(ctx.runtime.spawn).toHaveBeenCalledTimes(2);
+      } finally {
+        await app.close();
+      }
+    });
+
+    it('blocks a missing required contract launcher before starting a coding agent', async () => {
+      const ctx = createTestContext();
+      const original = vi.mocked(ctx.containerManager.execInContainer).getMockImplementation();
+      if (!original) throw new Error('No container fixture');
+      vi.mocked(ctx.containerManager.execInContainer).mockImplementation(
+        async (id, command, options) => {
+          if (command[2]?.includes('autopod-command-preflight-v1'))
+            return {
+              stdout: JSON.stringify(
+                (JSON.parse(command[3] ?? '[]') as string[]).map((executable) => ({
+                  executable,
+                  available: executable !== 'autopod_missing_compiler',
+                })),
+              ),
+              stderr: '',
+              exitCode: 0,
+            };
+          return original(id, command, options);
+        },
+      );
       const manager = createPodManager(ctx.deps);
       const pod = manager.createSession(
-        { profileName: 'test-profile', task: 'Build widget' },
+        {
+          profileName: 'test-profile',
+          task: 'Use the required compiler',
+          skipValidation: true,
+          contract: {
+            contractVersion: 1,
+            title: 'Compiler preflight',
+            dependsOn: [],
+            scenarios: [
+              // biome-ignore lint/suspicious/noThenProperty: contract scenario assertion
+              { id: 'scenario', given: ['input'], when: ['compiled'], then: ['verified'] },
+            ],
+            requiredFacts: [
+              {
+                id: 'compiler',
+                proves: ['scenario'],
+                kind: 'custom-command',
+                artifact: { path: 'new-test.ts', change: 'create' },
+                command: 'autopod_missing_compiler --verify',
+              },
+            ],
+            humanReview: [],
+          },
+        },
+        'operator',
+      );
+      await manager.processPod(pod.id);
+      expect(ctx.runtime.spawn).not.toHaveBeenCalled();
+      expect(manager.getSession(pod.id).failureReason).toContain('autopod_missing_compiler');
+    });
+
+    it('persists runtime and environment provenance before the coding agent starts', async () => {
+      const ctx = createTestContext();
+      ctx.containerManager.getExecutionMetadata = vi.fn(async () => ({
+        imageDigest: `sha256:${'b'.repeat(64)}`,
+        memoryLimitBytes: 10 * 1024 ** 3,
+        cpuLimit: 2,
+        networkMode: 'bridge',
+      }));
+      const spawn = vi.mocked(ctx.runtime.spawn).getMockImplementation();
+      if (!spawn) throw new Error('No runtime fixture');
+      vi.mocked(ctx.runtime.spawn).mockImplementation((config) => {
+        expect(ctx.podRepo.executionProvenance?.latest(config.podId)).toMatchObject({
+          runtime: 'claude',
+          cliVersion: '1.0.0',
+          imageDigest: `sha256:${'b'.repeat(64)}`,
+          capabilities: { memoryLimitBytes: 10 * 1024 ** 3 },
+          status: 'checked',
+        });
+        return spawn(config);
+      });
+      const manager = createPodManager(ctx.deps);
+      const pod = manager.createSession(
+        {
+          profileName: 'test-profile',
+          task: 'Retain exact execution environment',
+          skipValidation: true,
+        },
+        'operator',
+      );
+      await manager.processPod(pod.id);
+      expect(ctx.runtime.spawn).toHaveBeenCalledTimes(1);
+      expect(manager.getSession(pod.id).status).toBe('validated');
+      expect(ctx.podRepo.executionProvenance?.latest(pod.id)?.executionId).toBe(
+        ctx.podRepo.taskExecutions?.snapshot(pod.id).executionId,
+      );
+    });
+
+    it('refuses an undersized sandbox through the actual adapter before allocating or starting a worker', async () => {
+      const ctx = createTestContext(undefined, {
+        executionTarget: 'sandbox',
+        warmImageTag: 'example.azurecr.io/autopod/test-profile:latest',
+      });
+      const createSandbox = vi.fn();
+      const sandbox = new SandboxContainerManager({ createSandbox } as never, logger);
+      vi.mocked(ctx.containerManager.spawn).mockImplementation((config) => sandbox.spawn(config));
+      const manager = createPodManager(ctx.deps);
+      const pod = manager.createSession(
+        { profileName: 'test-profile', task: 'Require the configured memory' },
+        'operator',
+      );
+      await manager.processPod(pod.id);
+      expect(ctx.containerManager.spawn).toHaveBeenCalledTimes(1);
+      expect(createSandbox).not.toHaveBeenCalled();
+      expect(ctx.runtime.spawn).not.toHaveBeenCalled();
+      expect(manager.getSession(pod.id).failureReason).toContain('requested 10 GiB');
+    });
+
+    it('does not start a coding agent when its runtime version cannot be verified', async () => {
+      const ctx = createTestContext();
+      const execute = vi.mocked(ctx.containerManager.execInContainer).getMockImplementation();
+      if (!execute) throw new Error('No container fixture');
+      vi.mocked(ctx.containerManager.execInContainer).mockImplementation(
+        async (id, command, options) =>
+          command.join(' ') === 'claude --version'
+            ? { exitCode: 1, stdout: '', stderr: 'version unavailable' }
+            : execute(id, command, options),
+      );
+      const manager = createPodManager(ctx.deps);
+      const pod = manager.createSession(
+        { profileName: 'test-profile', task: 'Require verifiable runtime' },
+        'operator',
+      );
+      await manager.processPod(pod.id);
+      expect(ctx.runtime.spawn).not.toHaveBeenCalled();
+      expect(manager.getSession(pod.id).failureReason).toContain('version');
+      expect(ctx.podRepo.executionProvenance?.latest(pod.id)).toMatchObject({
+        status: 'blocked',
+        cliVersion: null,
+        diagnostics: expect.arrayContaining([
+          expect.objectContaining({ code: 'PREFLIGHT_RUNTIME_UNAVAILABLE' }),
+        ]),
+      });
+    });
+
+    it('stops stale contracts after fresh worktree creation and before container provisioning', async () => {
+      const ctx = createTestContext();
+      const check = vi
+        .fn()
+        .mockRejectedValue(
+          new AutopodError(
+            'Stale contract requires review: artifact already exists',
+            'STALE_CONTRACT',
+            409,
+          ),
+        );
+      Object.assign(ctx.worktreeManager, { inspectContractBase: check });
+      const manager = createPodManager(ctx.deps);
+      const pod = manager.createSession(
+        {
+          profileName: 'test-profile',
+          task: 'Create declared artifact',
+          skipValidation: true,
+          contract: {
+            contractVersion: 1,
+            title: 'Existing artifact',
+            dependsOn: [],
+            scenarios: [],
+            humanReview: [],
+            requiredFacts: [
+              {
+                id: 'f1',
+                proves: [],
+                kind: 'custom-command',
+                artifact: { path: 'existing.ts', change: 'create' },
+                command: 'node verify.mjs',
+              },
+            ],
+          },
+        },
         'user-1',
       );
-
-      linkProfileToProviderAccount(ctx.db, 'test-profile', secondId);
       await manager.processPod(pod.id);
-
       expect(manager.getSession(pod.id).status).toBe('failed');
-      expect(manager.getSession(pod.id).failureReason).toContain(
-        'Selected provider account changed after pod creation',
+      expect(manager.getSession(pod.id).failureReason).toContain('Stale contract requires review');
+      expect(check).toHaveBeenCalledWith('/tmp/worktree/abc', 'main', pod.contract?.requiredFacts);
+      expect(vi.mocked(ctx.worktreeManager.create).mock.invocationCallOrder[0]).toBeLessThan(
+        check.mock.invocationCallOrder[0],
       );
       expect(ctx.containerManager.spawn).not.toHaveBeenCalled();
     });
+
+    it.each(['retained', 'deleted', 'provider-changed'] as const)(
+      'reconciles the authorized queued account after a profile edit: %s',
+      async (accountState) => {
+        const firstId = 'team-openai-first';
+        const secondId = 'team-openai-second';
+        const credentials = {
+          provider: 'openai',
+          authMode: 'api-key',
+          apiKey: 'test-openai-key',
+        } satisfies ProviderCredentials;
+        const ctx = createTestContext(undefined, {
+          defaultModel: 'gpt-5',
+          defaultRuntime: 'codex',
+          modelProvider: 'openai',
+        });
+        insertProviderAccount(ctx.db, firstId, 'openai', credentials);
+        insertProviderAccount(ctx.db, secondId, 'openai', credentials);
+        linkProfileToProviderAccount(ctx.db, 'test-profile', firstId);
+        const accounts = new Map([
+          [firstId, createMutableProviderAccountStore(firstId, 'openai', credentials).get(firstId)],
+          [
+            secondId,
+            createMutableProviderAccountStore(secondId, 'openai', credentials).get(secondId),
+          ],
+        ]);
+        ctx.deps.providerAccountStore = {
+          touchLastUsed: vi.fn(),
+          get: vi.fn((id: string) => {
+            const value = accounts.get(id);
+            if (!value) throw new Error('missing test account');
+            return value;
+          }),
+        } as ProviderAccountStore;
+        const manager = createPodManager(ctx.deps);
+        const pod = manager.createSession(
+          { profileName: 'test-profile', task: 'Build widget', skipValidation: true },
+          'user-1',
+        );
+
+        linkProfileToProviderAccount(ctx.db, 'test-profile', secondId);
+        if (accountState === 'deleted') accounts.delete(firstId);
+        if (accountState === 'provider-changed') {
+          const first = accounts.get(firstId);
+          if (first) accounts.set(firstId, { ...first, provider: 'anthropic' });
+        }
+        await manager.processPod(pod.id);
+        if (accountState !== 'retained') {
+          expect(manager.getSession(pod.id).status).toBe('failed');
+          expect(manager.getSession(pod.id).failureReason).toContain(
+            'Queued provider account is unavailable',
+          );
+          expect(ctx.containerManager.spawn).not.toHaveBeenCalled();
+          return;
+        }
+
+        expect(
+          manager.getSession(pod.id).status,
+          manager.getSession(pod.id).failureReason ?? undefined,
+        ).toBe('validated');
+        expect(manager.getSession(pod.id).providerAccountIdSnapshot).toBe(firstId);
+        expect(ctx.containerManager.spawn).toHaveBeenCalled();
+        expect(ctx.deps.providerAccountStore.get).not.toHaveBeenCalledWith(secondId);
+      },
+    );
 
     it('recovers and rewrites fresh Codex auth.json for resume env from provider account', async () => {
       const accountId = 'team-openai';
@@ -5910,7 +11150,7 @@ describe('PodManager', () => {
         );
       } finally {
         if (previousDataDir === undefined) {
-          process.env.DATA_DIR = undefined;
+          Reflect.deleteProperty(process.env, 'DATA_DIR');
         } else {
           process.env.DATA_DIR = previousDataDir;
         }
@@ -5958,7 +11198,7 @@ describe('PodManager', () => {
         ).toBe('# Parent handover\n');
       } finally {
         if (previousDataDir === undefined) {
-          process.env.DATA_DIR = undefined;
+          Reflect.deleteProperty(process.env, 'DATA_DIR');
         } else {
           process.env.DATA_DIR = previousDataDir;
         }
@@ -6005,7 +11245,7 @@ describe('PodManager', () => {
         );
       } finally {
         if (previousDataDir === undefined) {
-          process.env.DATA_DIR = undefined;
+          Reflect.deleteProperty(process.env, 'DATA_DIR');
         } else {
           process.env.DATA_DIR = previousDataDir;
         }
@@ -6051,7 +11291,7 @@ describe('PodManager', () => {
           ).toBe(false);
         } finally {
           if (previousDataDir === undefined) {
-            process.env.DATA_DIR = undefined;
+            Reflect.deleteProperty(process.env, 'DATA_DIR');
           } else {
             process.env.DATA_DIR = previousDataDir;
           }
@@ -6529,6 +11769,12 @@ describe('PodManager', () => {
       it('runs validation after fresh-container validation-only recovery', async () => {
         const ctx = createTestContext({ overall: 'pass' });
         setupExecFileMock();
+        const originalExec = ctx.containerManager.execInContainer;
+        ctx.containerManager.execInContainer = vi.fn(async (id, command, options) => {
+          if (command[0] === 'claude' && command[1] === '--version')
+            return { exitCode: 127, stdout: '', stderr: 'worker CLI unavailable' };
+          return originalExec(id, command, options);
+        });
         vi.mocked(ctx.worktreeManager.getDiffStats).mockResolvedValue({
           filesChanged: 0,
           linesAdded: 0,
@@ -6555,6 +11801,13 @@ describe('PodManager', () => {
         expect(updated.lastValidationResult?.overall).toBe('pass');
         expect(updated.status).toBe('validated');
         expect(updated.prUrl).toBe('https://github.com/org/repo/pull/42');
+        const receipt = ctx.podRepo.executionProvenance?.latest(pod.id);
+        expect(receipt).toMatchObject({
+          purpose: 'validation',
+          status: 'checked',
+          cliVersion: null,
+        });
+        expect(receipt?.diagnostics.map((item) => item.code)).toContain('WORKER_CLI_NOT_REQUIRED');
       });
 
       it('auto-recovers validation-only provisioning infrastructure without treating prior agent evidence as ambiguous', async () => {
@@ -6653,7 +11906,7 @@ describe('PodManager', () => {
           status: 'queued',
           recoveryWorktreePath: '/tmp/worktree/existing',
           skipAgent: true,
-          infrastructureRecoveryCount: 0,
+          infrastructureRecoveryCount: 1,
         });
         expect(ctx.enqueuedSessions).toContain(pod.id);
       });
@@ -6805,6 +12058,98 @@ describe('PodManager', () => {
         expect(task).toContain('RECOVERY CONTEXT');
         expect(task).toContain('def5678 Half-done work');
       });
+
+      it.each(['claude', 'codex', 'copilot'] as const)(
+        'replays the saved human decision after a %s reply-resume failure instead of reusing older completion',
+        async (runtimeType) => {
+          const ctx = createTestContext();
+          setupExecFileMock({ bareRepoPath: '/tmp/bare/recovered.git' });
+          const manager = createPodManager(ctx.deps);
+          const pod = manager.createSession(
+            {
+              profileName: 'test-profile',
+              task: 'Review then repair',
+              runtime: runtimeType,
+              skipValidation: true,
+            },
+            'user-1',
+          );
+          const question: EscalationRequest = {
+            id: 'durable-reply-recovery',
+            podId: pod.id,
+            type: 'ask_human',
+            timestamp: '2026-01-01T00:00:00.000Z',
+            payload: { question: 'Which finding?' },
+            response: null,
+          };
+          ctx.escalationRepo.insert(question);
+          ctx.podRepo.update(pod.id, {
+            status: 'awaiting_input',
+            pendingEscalation: question,
+            containerId: 'container-123',
+            worktreePath: '/tmp/worktree/existing',
+            ...(runtimeType === 'codex' ? { codexSessionId: 'saved-session' } : {}),
+          });
+          ctx.eventBus.emit({
+            type: 'pod.agent_activity',
+            podId: pod.id,
+            timestamp: '2026-01-01T00:00:01.000Z',
+            event: {
+              type: 'complete',
+              timestamp: '2026-01-01T00:00:01.000Z',
+              result: 'Report collected',
+            },
+          });
+          const continuation = async function* (): AsyncIterable<AgentEvent> {
+            yield {
+              type: 'complete',
+              timestamp: new Date().toISOString(),
+              result: 'Selected repair completed',
+            };
+          };
+          vi.mocked(ctx.runtime.spawn).mockImplementation(continuation);
+          vi.mocked(ctx.runtime.resume).mockImplementation(continuation);
+          vi.mocked(ctx.runtime.resume).mockImplementationOnce(() => {
+            throw new Error('crash after reply commit');
+          });
+          await expect(
+            manager.sendMessage(pod.id, 'Repair finding A only', {
+              type: 'human',
+              userId: 'reviewer',
+            }),
+          ).rejects.toThrow('crash after reply commit');
+          expect(ctx.db.prepare('SELECT response FROM completion_decisions').get()).toEqual({
+            response: 'Repair finding A only',
+          });
+          vi.mocked(ctx.runtime.resume).mockClear();
+          ctx.podRepo.update(pod.id, {
+            status: 'queued',
+            recoveryWorktreePath: '/tmp/worktree/existing',
+          });
+          const restarted = createPodManager(ctx.deps);
+          await restarted.processPod(pod.id);
+          const delivered =
+            runtimeType === 'codex'
+              ? vi.mocked(ctx.runtime.resume).mock.calls[0]?.[1]
+              : vi.mocked(ctx.runtime.spawn).mock.calls[0]?.[0].task;
+          expect(delivered).toContain('Repair finding A only');
+          expect(delivered).toContain(question.id);
+          expect(delivered).toContain('Which finding?');
+          expect(restarted.getSession(pod.id).status).toBe('validated');
+          const continuationCount =
+            vi.mocked(ctx.runtime.resume).mock.calls.length +
+            vi.mocked(ctx.runtime.spawn).mock.calls.length;
+          ctx.podRepo.update(pod.id, {
+            status: 'queued',
+            recoveryWorktreePath: '/tmp/worktree/existing',
+          });
+          await createPodManager(ctx.deps).processPod(pod.id);
+          expect(
+            vi.mocked(ctx.runtime.resume).mock.calls.length +
+              vi.mocked(ctx.runtime.spawn).mock.calls.length,
+          ).toBe(continuationCount);
+        },
+      );
 
       it('skips agent spawn during recovery when the prior run already emitted complete', async () => {
         const ctx = createTestContext();
@@ -8162,6 +13507,173 @@ describe('PodManager', () => {
       });
     });
 
+    it.each([
+      ['trigger', false],
+      ['trigger', true],
+      ['revalidate', false],
+      ['revalidate', true],
+    ] as const)(
+      '%s retains late advisory history without publishing or stopping a replacement (reject=%s)',
+      async (entry, rejectAdvisory) => {
+        const ctx = createTestContext();
+        const emit = vi.spyOn(ctx.eventBus, 'emit');
+        const manager = createPodManager(ctx.deps);
+        const advisory = ctx.validationEngine.runAdvisoryBrowserQa;
+        if (!advisory) throw new Error('Missing advisory fixture');
+        const pod = manager.createSession(
+          {
+            profileName: 'test-profile',
+            task: 'Retain owned QA',
+            options: { advisoryBrowserQaEnabled: true },
+          },
+          'user-1',
+        );
+        ctx.podRepo.update(pod.id, {
+          status: entry === 'trigger' ? 'running' : 'failed',
+          containerId: 'ctr-1',
+          worktreePath: '/tmp/wt',
+        });
+        const replacement = makeValidationResult({ podId: pod.id, attempt: 1 });
+        const replacementReadiness = makeReadinessReview('ready', 'Replacement readiness');
+        const advisoryResult = {
+          status: 'pass' as const,
+          reasoning: 'Old execution finished',
+          observations: [],
+          screenshots: [],
+          durationMs: 10,
+          tokenUsage: { inputTokens: 30, outputTokens: 4, costUsd: 0.01 },
+        };
+        vi.mocked(advisory).mockImplementation(
+          async (_config, _result, onProgress, _signal, callbacks) => {
+            ctx.podRepo.incrementLifecycleGeneration(pod.id);
+            ctx.podRepo.update(pod.id, {
+              status: 'running',
+              containerId: 'replacement-container',
+              lastValidationResult: replacement,
+              readinessReview: replacementReadiness,
+              failureReason: 'replacement-owned-reason',
+            });
+            emit.mockClear();
+            if (rejectAdvisory) throw new Error('Superseded advisory failed');
+            onProgress?.('Old advisory progress');
+            callbacks?.onPhaseStarted?.('advisory');
+            callbacks?.onPhaseCompleted?.('advisory', 'pass', advisoryResult);
+            return advisoryResult;
+          },
+        );
+        if (entry === 'trigger') await manager.triggerValidation(pod.id);
+        else await manager.revalidateSession(pod.id, { force: true });
+        expect(manager.getSession(pod.id)).toMatchObject({
+          status: 'running',
+          containerId: 'replacement-container',
+          lastValidationResult: replacement,
+          readinessReview: replacementReadiness,
+          failureReason: 'replacement-owned-reason',
+        });
+        expect(ctx.validationRepo.getLatest(pod.id)?.result.advisoryBrowserQa).toEqual(
+          rejectAdvisory ? undefined : advisoryResult,
+        );
+        // Cumulative known spend belongs to the same immutable pod/task, even after a new lifecycle.
+        expect(manager.getSession(pod.id).phaseTokenUsage?.advisory).toEqual(
+          rejectAdvisory ? undefined : advisoryResult.tokenUsage,
+        );
+        expect(emit).not.toHaveBeenCalled();
+        expect(ctx.containerManager.stop).not.toHaveBeenCalled();
+        expect(ctx.containerManager.kill).not.toHaveBeenCalled();
+        expect(ctx.runtime.resume).not.toHaveBeenCalled();
+      },
+    );
+
+    it('does not launch an advisory run superseded while waiting for the shared QA slot', async () => {
+      const ctx = createTestContext();
+      const manager = createPodManager(ctx.deps);
+      const advisory = ctx.validationEngine.runAdvisoryBrowserQa;
+      if (!advisory) throw new Error('Missing advisory fixture');
+      const slot = deferred<NonNullable<ValidationResult['advisoryBrowserQa']>>();
+      vi.mocked(advisory).mockImplementation(() => slot.promise);
+      const create = (task: string, containerId: string) => {
+        const pod = manager.createSession(
+          { profileName: 'test-profile', task, options: { advisoryBrowserQaEnabled: true } },
+          'user-1',
+        );
+        ctx.podRepo.update(pod.id, { status: 'running', containerId, worktreePath: '/tmp/wt' });
+        return pod;
+      };
+      const first = create('Hold advisory slot', 'first-container');
+      const second = create('Fence queued advisory', 'second-container');
+      const firstRun = manager.triggerValidation(first.id);
+      await waitForAssertion(() => expect(advisory).toHaveBeenCalledTimes(1));
+      const secondRun = manager.triggerValidation(second.id);
+      await waitForAssertion(() => expect(manager.getSession(second.id).status).toBe('validated'));
+      ctx.podRepo.incrementLifecycleGeneration(second.id);
+      ctx.podRepo.update(second.id, {
+        status: 'running',
+        containerId: 'replacement-container',
+        failureReason: 'replacement-owned-reason',
+      });
+      slot.resolve({
+        status: 'pass',
+        reasoning: 'First run finished',
+        observations: [],
+        screenshots: [],
+        durationMs: 10,
+      });
+      await Promise.all([firstRun, secondRun]);
+      expect(advisory).toHaveBeenCalledTimes(1);
+      expect(manager.getSession(second.id)).toMatchObject({
+        status: 'running',
+        containerId: 'replacement-container',
+        failureReason: 'replacement-owned-reason',
+      });
+      expect(ctx.containerManager.stop).not.toHaveBeenCalledWith('replacement-container');
+      expect(ctx.validationRepo.getLatest(second.id)?.result.advisoryBrowserQa).toBeUndefined();
+    });
+
+    it('advisory completion preserves validation evidence attached while QA is running', async () => {
+      const ctx = createTestContext();
+      const manager = createPodManager(ctx.deps);
+      const advisory = ctx.validationEngine.runAdvisoryBrowserQa;
+      if (!advisory) throw new Error('Missing advisory fixture');
+      const pod = manager.createSession(
+        {
+          profileName: 'test-profile',
+          task: 'Preserve late evidence',
+          options: { advisoryBrowserQaEnabled: true },
+        },
+        'user-1',
+      );
+      ctx.podRepo.update(pod.id, {
+        status: 'running',
+        containerId: 'ctr-1',
+        worktreePath: '/tmp/wt',
+      });
+      const advisoryResult = {
+        status: 'pass' as const,
+        reasoning: 'QA finished',
+        observations: [],
+        screenshots: [],
+        durationMs: 10,
+      };
+      let retained: ValidationResult | undefined;
+      vi.mocked(advisory).mockImplementation(
+        async (_config, _blockingResult, _progress, _signal, callbacks) => {
+          const row = ctx.validationRepo.getLatest(pod.id);
+          if (!row) throw new Error('Missing original validation');
+          retained = { ...row.result, reviewSkipReason: 'Retained independent evidence marker' };
+          ctx.validationRepo.updateResult(row.id, retained);
+          callbacks?.onPhaseCompleted?.('advisory', 'pass', advisoryResult);
+          return advisoryResult;
+        },
+      );
+      await manager.triggerValidation(pod.id);
+      expect(retained).toBeDefined();
+      expect(ctx.validationRepo.getLatest(pod.id)?.result).toEqual({
+        ...retained,
+        advisoryBrowserQa: advisoryResult,
+      });
+      expect(ctx.validationRepo.getForSession(pod.id)).toHaveLength(1);
+    });
+
     it('readiness refresh updates after deferred advisory finishes', async () => {
       const ctx = createTestContext({ overall: 'pass' });
       const manager = createPodManager(ctx.deps);
@@ -8597,8 +14109,9 @@ describe('PodManager', () => {
 
     it('recovers from live container when workspace sync fails before validation', async () => {
       const ctx = createTestContext({ overall: 'pass' });
-      (ctx.containerManager.execInContainer as ReturnType<typeof vi.fn>).mockImplementation(
-        async (_containerId, command: string[]) => {
+      const originalExec = ctx.containerManager.execInContainer;
+      ctx.containerManager.execInContainer = vi.fn(
+        async (_containerId, command: string[], options) => {
           if (
             command[0] === 'sh' &&
             command[1] === '-c' &&
@@ -8606,7 +14119,7 @@ describe('PodManager', () => {
           ) {
             throw new Error('docker exec failed');
           }
-          return { stdout: '', stderr: '', exitCode: 0 };
+          return originalExec(_containerId, command, options);
         },
       );
       (
@@ -8709,7 +14222,8 @@ describe('PodManager', () => {
       });
 
       const ctx = createTestContext({ overall: 'pass' });
-      ctx.containerManager.execInContainer = vi.fn(async (_containerId, command) => {
+      const originalExec = ctx.containerManager.execInContainer;
+      ctx.containerManager.execInContainer = vi.fn(async (_containerId, command, options) => {
         if (command[0] === 'git' && command[3] === 'rev-parse') {
           return { stdout: `${containerHead}\n`, stderr: '', exitCode: 0 };
         }
@@ -8723,7 +14237,7 @@ describe('PodManager', () => {
             exitCode: command[5] === containerHead && command[6] === hostHead ? 0 : 1,
           };
         }
-        return { stdout: '', stderr: '', exitCode: 0 };
+        return originalExec(_containerId, command, options);
       });
       const manager = createPodManager(ctx.deps);
 
@@ -9317,7 +14831,10 @@ describe('PodManager', () => {
 
     it('retries retryable infrastructure validation after a non-zero backoff', async () => {
       const ctx = createTestContext();
-      ctx.deps.validationInfrastructureRetryBackoffMs = [1];
+      ctx.deps.validationInfrastructureRetryBackoffMs = [50];
+      vi.mocked(sleep).mockImplementationOnce(
+        (delay) => new Promise((resolve) => setTimeout(resolve, delay)),
+      );
       vi.mocked(ctx.validationEngine.validate)
         .mockResolvedValueOnce(validationInfrastructureFailureResult())
         .mockResolvedValueOnce(makeValidationResult());
@@ -9336,7 +14853,51 @@ describe('PodManager', () => {
       await manager.triggerValidation(pod.id);
 
       expect(ctx.validationEngine.validate).toHaveBeenCalledTimes(2);
-      expect(vi.mocked(sleep)).toHaveBeenCalledWith(1);
+      expect(
+        vi
+          .mocked(sleep)
+          .mock.calls.some(([delay]) => typeof delay === 'number' && delay > 0 && delay <= 50),
+      ).toBe(true);
+      expect(manager.getSession(pod.id).status).toBe('validated');
+    });
+
+    it('retries retryable infrastructure validation when a timer wakes one millisecond before the persisted backoff', async () => {
+      const ctx = createTestContext();
+      ctx.deps.validationInfrastructureRetryBackoffMs = [50];
+      vi.useFakeTimers({ toFake: ['Date'] });
+      let wakes = 0;
+      vi.mocked(sleep).mockImplementation(async (delay) => {
+        vi.setSystemTime(Date.now() + delay - (wakes++ === 0 ? 1 : 0));
+      });
+      vi.mocked(ctx.validationEngine.validate)
+        .mockResolvedValueOnce(validationInfrastructureFailureResult())
+        .mockResolvedValueOnce(makeValidationResult());
+      const manager = createPodManager(ctx.deps);
+
+      const pod = manager.createSession(
+        { profileName: 'test-profile', task: 'Add feature' },
+        'user-1',
+      );
+      ctx.podRepo.update(pod.id, {
+        status: 'running',
+        containerId: 'ctr-1',
+        validationAttempts: 0,
+      });
+
+      try {
+        await manager.triggerValidation(pod.id);
+      } finally {
+        vi.useRealTimers();
+        vi.mocked(sleep).mockImplementation(() => Promise.resolve());
+      }
+
+      expect(ctx.validationEngine.validate).toHaveBeenCalledTimes(2);
+      expect(
+        vi
+          .mocked(sleep)
+          .mock.calls.some(([delay]) => typeof delay === 'number' && delay > 0 && delay <= 50),
+      ).toBe(true);
+      expect(wakes).toBe(2);
       expect(manager.getSession(pod.id).status).toBe('validated');
     });
 
@@ -9370,6 +14931,161 @@ describe('PodManager', () => {
       expect(manager.getSession(pod.id).lastValidationResult?.infrastructureFailure?.code).toBe(
         'SANDBOX_STATUS_UNAVAILABLE',
       );
+    });
+
+    it('does not renew an exhausted task-wide transient validation budget through Resume and manager restart', async () => {
+      const ctx = createTestContext();
+      ctx.deps.validationInfrastructureRetryBackoffMs = [0, 0];
+      vi.mocked(ctx.validationEngine.validate).mockResolvedValue(
+        validationInfrastructureFailureResult(),
+      );
+      let manager = createPodManager(ctx.deps);
+      const pod = manager.createSession(
+        { profileName: 'test-profile', task: 'Bound transient retries' },
+        'user-1',
+      );
+      ctx.podRepo.update(pod.id, {
+        status: 'running',
+        containerId: 'ctr-1',
+        worktreePath: '/tmp/wt',
+        validationAttempts: 0,
+      });
+      await manager.triggerValidation(pod.id);
+      expect(ctx.validationEngine.validate).toHaveBeenCalledTimes(3);
+      manager = createPodManager(ctx.deps);
+      const revalidate = vi.spyOn(manager, 'revalidateSession');
+      await manager.resumePod(pod.id);
+      await revalidate.mock.results[0]?.value;
+      expect(ctx.validationEngine.validate).toHaveBeenCalledTimes(3);
+      expect(manager.getSession(pod.id).status).toBe('review_required');
+      expect(manager.getSession(pod.id).failureReason).toContain('retry budget');
+      expect(ctx.runtime.resume).not.toHaveBeenCalled();
+    });
+
+    it('retains an executed transient result when its authorized retry cannot admit another automatic retry', async () => {
+      const ctx = createTestContext();
+      vi.mocked(ctx.validationEngine.validate).mockResolvedValue(
+        validationInfrastructureFailureResult(),
+      );
+      const manager = createPodManager(ctx.deps);
+      const pod = manager.createSession(
+        { profileName: 'test-profile', task: 'Persist authorized execution evidence' },
+        'user-1',
+      );
+      ctx.podRepo.update(pod.id, {
+        status: 'running',
+        containerId: 'ctr-1',
+        worktreePath: '/tmp/wt',
+      });
+      await manager.triggerValidation(pod.id);
+      const before = ctx.validationRepo.getForSession(pod.id).length;
+      ctx.podRepo.taskRetries?.authorize(pod.id, 'one-extra', 'External service repaired', {
+        type: 'human',
+        userId: 'operator',
+      });
+      await manager.revalidateSession(pod.id, { force: true });
+      expect(ctx.validationEngine.validate).toHaveBeenCalledTimes(4);
+      expect(ctx.validationRepo.getForSession(pod.id)).toHaveLength(before + 1);
+      expect(manager.getSession(pod.id)).toMatchObject({
+        status: 'review_required',
+        lastValidationResult: { overall: 'fail', infrastructureFailure: { retryable: true } },
+      });
+      expect(ctx.podRepo.taskRetries?.state(pod.id)).toMatchObject({
+        executedCount: 4,
+        latest: { outcome: 'transient', retryKind: 'override' },
+      });
+    });
+
+    it('requires an authenticated one-use reason before repeating unchanged nonretryable validation through the real API', async () => {
+      const ctx = createTestContext();
+      vi.mocked(ctx.validationEngine.validate).mockResolvedValue(
+        makeValidationResult({ overall: 'fail' }),
+      );
+      const manager = createPodManager(ctx.deps);
+      const pod = manager.createSession(
+        { profileName: 'test-profile', task: 'Unchanged failure' },
+        'user-1',
+      );
+      ctx.podRepo.update(pod.id, {
+        status: 'running',
+        containerId: 'ctr-1',
+        worktreePath: '/tmp/wt',
+        maxValidationAttempts: 1,
+      });
+      await manager.triggerValidation(pod.id);
+      expect(ctx.validationEngine.validate).toHaveBeenCalledTimes(1);
+      await manager.revalidateSession(pod.id, { force: true });
+      expect(ctx.validationEngine.validate).toHaveBeenCalledTimes(1);
+      expect(manager.getSession(pod.id).failureReason).toContain('Unchanged');
+      const app = Fastify();
+      app.setErrorHandler(errorHandler);
+      authPlugin(app, {
+        validateToken: async (token: string) => {
+          if (token !== 'operator-fixture')
+            throw new AutopodError('Invalid token', 'AUTH_ERROR', 401);
+          return { oid: 'human-reviewer', name: 'Reviewer' };
+        },
+      } as never);
+      podRoutes(app, manager, ctx.eventRepo, undefined, ctx.podRepo);
+      const url = `/pods/${pod.id}/retry-authorizations`;
+      const headers = { authorization: 'Bearer operator-fixture' };
+      const payload = {
+        requestKey: 'lost-retry-response',
+        reason: 'Inspected the external prerequisite',
+      };
+      try {
+        expect((await app.inject({ method: 'POST', url, payload })).statusCode).toBe(401);
+        expect(
+          (
+            await app.inject({
+              method: 'POST',
+              url,
+              headers: { authorization: 'Bearer pod-token' },
+              payload,
+            })
+          ).statusCode,
+        ).toBe(401);
+        expect(
+          (
+            await app.inject({
+              method: 'POST',
+              url,
+              headers,
+              payload: { ...payload, actor: { type: 'human', userId: 'forged' } },
+            })
+          ).statusCode,
+        ).toBe(400);
+        const first = await app.inject({ method: 'POST', url, headers, payload });
+        expect(first.statusCode, first.body).toBe(201);
+        expect(first.json().actor.userId).toBe('human-reviewer');
+        const repeated = await app.inject({ method: 'POST', url, headers, payload });
+        expect(repeated.json().id).toBe(first.json().id);
+        expect(ctx.validationEngine.validate).toHaveBeenCalledTimes(1);
+        const resumed = await app.inject({
+          method: 'POST',
+          url: `/pods/${pod.id}/resume`,
+          headers,
+        });
+        expect(resumed.statusCode).toBe(200);
+        expect(ctx.validationEngine.validate).toHaveBeenCalledTimes(2);
+        await app.inject({ method: 'POST', url: `/pods/${pod.id}/resume`, headers });
+        expect(ctx.validationEngine.validate).toHaveBeenCalledTimes(2);
+        const state = await app.inject({
+          method: 'GET',
+          url: `/pods/${pod.id}/retry-state`,
+          headers,
+        });
+        expect(state.statusCode).toBe(200);
+        expect(state.json()).toMatchObject({
+          executedCount: 2,
+          admissionCount: 2,
+          latest: { outcome: 'nonretryable' },
+        });
+        expect(state.json().authorizations[0].usedByAttemptId).toBeTruthy();
+        expect(ctx.runtime.resume).not.toHaveBeenCalled();
+      } finally {
+        await app.close();
+      }
     });
 
     it('persistent validation infrastructure failure parks once', async () => {
@@ -9846,91 +15562,138 @@ describe('PodManager', () => {
       },
     );
 
-    it('records a pending fact waiver during agent rework for the next validation', async () => {
-      const ctx = createTestContext();
-      const manager = createPodManager(ctx.deps);
+    it.each(
+      (['running', 'failed', 'review_required'] as const).flatMap((status) =>
+        (['guidance', 'termination'] as const).map((blocker) => ({ status, blocker })),
+      ),
+    )(
+      'records a separate fact waiver while $blocker remains unresolved in $status',
+      async ({ status, blocker }) => {
+        const ctx = createTestContext();
+        const manager = createPodManager(ctx.deps);
 
-      const pod = manager.createSession(
-        { profileName: 'test-profile', task: 'Add feature' },
-        'user-1',
-      );
-      const pendingReasoning =
-        'Fact fact-swift-only needs human decision: required fact command `swift` is unavailable in the validation container.';
-      ctx.podRepo.update(pod.id, {
-        status: 'running',
-        containerId: 'ctr-1',
-        taskSummary: {
-          actualSummary: 'Updated the Swift helper.',
-          deviations: [],
-          factDeviations: [
-            {
-              factId: 'fact-swift-only',
-              action: 'waive',
-              reason: 'Swift is unavailable in the validation image',
-              whyImpossible: pendingReasoning,
-            },
-          ],
-        },
-        lastValidationResult: {
-          podId: pod.id,
-          attempt: 1,
-          timestamp: new Date().toISOString(),
-          smoke: {
-            status: 'pass',
-            build: { status: 'pass', output: '', duration: 100 },
-            health: {
-              status: 'pass',
-              url: 'http://localhost:3000',
-              responseCode: 200,
-              duration: 50,
-            },
-            pages: [],
-          },
-          taskReview: null,
-          overall: 'fail',
-          duration: 5000,
-          factValidation: {
-            status: 'pending_human',
-            results: [
+        const pod = manager.createSession(
+          { profileName: 'test-profile', task: 'Add feature' },
+          'user-1',
+        );
+        const pendingReasoning =
+          'Fact fact-swift-only needs human decision: required fact command `swift` is unavailable in the validation container.';
+        ctx.podRepo.update(pod.id, {
+          status,
+          containerId: 'ctr-1',
+          taskSummary: {
+            actualSummary: 'Updated the Swift helper.',
+            deviations: [],
+            factDeviations: [
               {
                 factId: 'fact-swift-only',
-                proves: ['swift-helper-readable'],
-                kind: 'unit-test',
-                artifactPath:
-                  'packages/desktop/Tests/AutopodUITests/ThroughputTimeInStatusDisplayTests.swift',
-                command: 'swift test --filter ThroughputTimeInStatusDisplayTests',
-                passed: false,
-                status: 'pending_human',
-                exitCode: 127,
-                reasoning: pendingReasoning,
+                action: 'waive',
+                reason: 'Swift is unavailable in the validation image',
+                whyImpossible: pendingReasoning,
               },
             ],
           },
-        },
-      });
+          lastValidationResult: {
+            podId: pod.id,
+            attempt: 1,
+            timestamp: new Date().toISOString(),
+            smoke: {
+              status: 'pass',
+              build: { status: 'pass', output: '', duration: 100 },
+              health: {
+                status: 'pass',
+                url: 'http://localhost:3000',
+                responseCode: 200,
+                duration: 50,
+              },
+              pages: [],
+            },
+            taskReview: null,
+            overall: 'fail',
+            duration: 5000,
+            factValidation: {
+              status: 'pending_human',
+              results: [
+                {
+                  factId: 'fact-swift-only',
+                  proves: ['swift-helper-readable'],
+                  kind: 'unit-test',
+                  artifactPath:
+                    'packages/desktop/Tests/AutopodUITests/ThroughputTimeInStatusDisplayTests.swift',
+                  command: 'swift test --filter ThroughputTimeInStatusDisplayTests',
+                  passed: false,
+                  status: 'pending_human',
+                  exitCode: 127,
+                  reasoning: pendingReasoning,
+                },
+              ],
+            },
+          },
+        });
 
-      const result = await manager.approveFactWaiver(
-        pod.id,
-        'fact-swift-only',
-        'Swift is unavailable here',
-        { type: 'human', userId: 'user-1' },
-      );
-
-      expect(result).toEqual({ newCommits: false, result: 'fail' });
-      expect(ctx.validationEngine.validate).not.toHaveBeenCalled();
-      const updated = manager.getSession(pod.id);
-      expect(updated.status).toBe('running');
-      expect(updated.taskSummary?.factDeviations).toEqual([
-        {
-          factId: 'fact-swift-only',
-          action: 'waive',
-          decision: 'approved_waive',
-          actor: { type: 'human', userId: 'user-1' },
-          reason: 'Swift is unavailable here',
-          whyImpossible: pendingReasoning,
-        },
-      ]);
-    });
+        if (blocker === 'guidance')
+          ctx.deps.nudgeRepo.queue(pod.id, 'Keep the existing public behavior');
+        else {
+          ctx.podRepo.update(pod.id, { tokenBudget: null });
+          const ledger = ctx.podRepo.taskExecutions;
+          if (!ledger) throw new Error('Missing ledger');
+          const run = ledger.beginRun(pod.id, 1, 1, {
+            runtime: pod.runtime,
+            model: pod.model,
+            providerAccountId: null,
+          });
+          ledger.retainUnverifiedRun(run);
+        }
+        const app = Fastify();
+        app.setErrorHandler(errorHandler);
+        authPlugin(app, {
+          validateToken: async (token: string) => {
+            if (token !== 'operator-fixture')
+              throw new AutopodError('Invalid token', 'AUTH_ERROR', 401);
+            return { oid: 'user-1' };
+          },
+        } as never);
+        podRoutes(app, manager, ctx.eventRepo, undefined, ctx.podRepo);
+        const url = `/pods/${pod.id}/facts/fact-swift-only/approve-waiver`;
+        const payload = { reason: 'Swift is unavailable here' };
+        try {
+          expect((await app.inject({ method: 'POST', url, payload })).statusCode).toBe(401);
+          for (let attempt = 0; attempt < 2; attempt++) {
+            const response = await app.inject({
+              method: 'POST',
+              url,
+              payload,
+              headers: { authorization: 'Bearer operator-fixture' },
+            });
+            expect(response.statusCode).toBe(200);
+            expect(response.json()).toEqual({ ok: true, newCommits: false, result: 'fail' });
+          }
+        } finally {
+          await app.close();
+        }
+        expect(ctx.validationEngine.validate).not.toHaveBeenCalled();
+        const updated = manager.getSession(pod.id);
+        expect(updated.status).toBe(status);
+        expect(ctx.deps.nudgeRepo.listPending(pod.id).map((entry) => entry.message)).toEqual(
+          blocker === 'guidance' ? ['Keep the existing public behavior'] : [],
+        );
+        if (blocker === 'termination')
+          expect(ctx.podRepo.taskExecutions?.hasUnverifiedTermination(pod.id)).toBe(true);
+        expect(updated.lastValidationResult?.overall).toBe('fail');
+        expect(ctx.runtime.spawn).not.toHaveBeenCalled();
+        expect(ctx.runtime.resume).not.toHaveBeenCalled();
+        expect(updated.taskSummary?.factDeviations).toEqual([
+          {
+            factId: 'fact-swift-only',
+            action: 'waive',
+            decision: 'approved_waive',
+            actor: { type: 'human', userId: 'user-1' },
+            reason: 'Swift is unavailable here',
+            whyImpossible: pendingReasoning,
+          },
+        ]);
+      },
+    );
 
     it('retries with correction feedback until max attempts exhausted', async () => {
       // With always-failing validation, the retry loop exhausts all attempts
@@ -9961,112 +15724,613 @@ describe('PodManager', () => {
       expect(result.validationAttempts).toBe(3);
     });
 
-    it('runs recurring-finding auto-hoist without the prior review ledger', async () => {
-      const ctx = createTestContext();
-      const manager = createPodManager(ctx.deps);
-      const pod = manager.createSession(
-        { profileName: 'test-profile', task: 'Fix stale review feedback' },
-        'user-1',
-      );
-      const finding = {
-        id: 'initial-stale-finding',
-        source: 'initial-review' as const,
-        issue: 'A stale finding',
-      };
-      const reviewBatch = (id: string, reviewedHead: string, currentSourceIds: string[]) => ({
-        id,
-        diffHash: `${id}-diff`,
-        reviewedHead,
-        promptVersion: 'review-council-v1',
-        schemaVersion: 'structured-finding-v2',
-        model: 'reviewer',
-        axes: [],
-        candidates: [finding],
-        initialFindings: [finding],
-        accepted: [finding],
-        rejected: [],
-        merged: [],
-        synthesis: 'model' as const,
-        durationMs: 1,
-        quality: 'healthy' as const,
-        ledger: [
-          {
-            semanticId: 'review:stale-finding',
-            finding,
-            state: 'open' as const,
-            priorSourceIds: ['initial-stale-finding'],
-            currentSourceIds,
+    it.each(['result', 'rejection'] as const)(
+      'retains the original validation record when a superseded council returns %s',
+      async (ending) => {
+        const ctx = createTestContext();
+        const emit = vi.spyOn(ctx.eventBus, 'emit');
+        const manager = createPodManager(ctx.deps);
+        const pod = manager.createSession(
+          { profileName: 'test-profile', task: 'Fence independent council' },
+          'user-1',
+        );
+        const issue = 'A recurring review finding';
+        const semanticId = 'review:council-ownership';
+        const original = makeCouncilReviewFailure(
+          pod.id,
+          2,
+          'current-batch',
+          issue,
+          semanticId,
+          false,
+        );
+        ctx.validationRepo.insert(
+          pod.id,
+          1,
+          makeCouncilReviewFailure(pod.id, 1, 'prior-batch', issue, semanticId, true),
+        );
+        ctx.podRepo.update(pod.id, {
+          status: 'running',
+          containerId: 'ctr-1',
+          worktreePath: '/tmp/worktree/abc',
+          validationAttempts: 1,
+        });
+        const replacementResult = makeValidationResult({ podId: pod.id, attempt: 9 });
+        if (!original.taskReview) throw new Error('Missing council fixture');
+        const originalTaskReview = original.taskReview;
+        vi.mocked(ctx.validationEngine.validate).mockImplementation(
+          async (config, onProgress, _signal, callbacks) => {
+            if (!config.reviewOnly) return original;
+            ctx.podRepo.incrementLifecycleGeneration(pod.id);
+            ctx.podRepo.update(pod.id, {
+              status: 'running',
+              containerId: 'replacement-container',
+              failureReason: 'replacement-owned-reason',
+              lastValidationResult: replacementResult,
+            });
+            emit.mockClear();
+            onProgress?.('superseded council progress');
+            callbacks?.onPhaseStarted?.('review');
+            callbacks?.onPhaseCompleted?.('review', 'pass', { status: 'pass' });
+            if (ending === 'rejection') throw new Error('Superseded council failed');
+            return makeValidationResult({
+              podId: pod.id,
+              attempt: 2,
+              taskReview: { ...originalTaskReview, status: 'pass', issues: [] },
+            });
           },
-        ],
-      });
-      const failedReview = (attempt: number, batchId: string, currentSourceIds: string[]) =>
-        makeValidationResult({
+        );
+        await manager.triggerValidation(pod.id);
+        expect(ctx.validationEngine.validate).toHaveBeenCalledTimes(2);
+        expect(manager.getSession(pod.id)).toMatchObject({
+          status: 'running',
+          containerId: 'replacement-container',
+          failureReason: 'replacement-owned-reason',
+          lastValidationResult: replacementResult,
+        });
+        expect(ctx.validationRepo.getLatest(pod.id)?.result).toEqual(original);
+        expect(emit).not.toHaveBeenCalled();
+        expect(ctx.containerManager.stop).not.toHaveBeenCalled();
+        expect(ctx.runtime.resume).not.toHaveBeenCalled();
+      },
+    );
+
+    it.each([false, true])(
+      'records the independent reviewer identity and blocks missing reviewer CLI=%s',
+      async (missing) => {
+        const ctx = createTestContext(undefined, {
+          defaultRuntime: 'codex',
+        });
+        ctx.db
+          .prepare("UPDATE profiles SET reviewer_model = ? WHERE name = 'test-profile'")
+          .run('claude-reviewer-fixture');
+        const manager = createPodManager(ctx.deps);
+        const pod = manager.createSession(
+          { profileName: 'test-profile', task: 'Attribute independent review' },
+          'operator',
+        );
+        const original = makeCouncilReviewFailure(
+          pod.id,
+          2,
+          'current-batch',
+          'Recurring issue',
+          'review:identity',
+          false,
+        );
+        const batch = original.taskReview?.reviewBatch;
+        if (!original.taskReview || !batch) throw new Error('Missing review fixture');
+        const cleared = makeValidationResult({
           podId: pod.id,
-          attempt,
-          overall: 'fail',
+          attempt: 2,
           taskReview: {
-            status: 'fail',
-            reasoning: 'Historical ledger entry remains open',
-            issues: ['A stale finding'],
-            model: 'reviewer',
-            screenshots: [],
-            diff: '+change',
-            reviewBatch: reviewBatch(batchId, `${attempt}`.repeat(40), currentSourceIds),
+            ...original.taskReview,
+            status: 'pass',
+            issues: [],
+            reviewBatch: { ...batch, accepted: [], ledger: [] },
           },
         });
+        ctx.validationRepo.insert(
+          pod.id,
+          1,
+          makeCouncilReviewFailure(
+            pod.id,
+            1,
+            'prior-batch',
+            'Recurring issue',
+            'review:identity',
+            true,
+          ),
+        );
+        ctx.podRepo.update(pod.id, {
+          status: 'running',
+          containerId: 'ctr-1',
+          worktreePath: '/tmp/worktree/abc',
+          validationAttempts: 1,
+        });
+        const exec = vi.mocked(ctx.containerManager.execInContainer).getMockImplementation();
+        if (!exec) throw new Error('Missing exec fixture');
+        vi.mocked(ctx.containerManager.execInContainer).mockImplementation(
+          async (containerId, command, options) => {
+            if (missing && command.join(' ').includes('command -v claude'))
+              return { stdout: '', stderr: 'claude missing', exitCode: 1 };
+            return exec(containerId, command, options);
+          },
+        );
+        vi.mocked(ctx.validationEngine.validate).mockImplementation(async (config) =>
+          config.reviewOnly ? cleared : original,
+        );
+        await manager.triggerValidation(pod.id);
+        expect(ctx.podRepo.executionProvenance?.latest(pod.id)).toMatchObject({
+          purpose: 'review',
+          subject: 'reviewer',
+          runtime: 'claude',
+          model: 'claude-reviewer-fixture',
+          providerId: 'anthropic',
+          providerAccountId: null,
+          status: missing ? 'blocked' : 'checked',
+          cliVersion: missing ? null : '1.0.0',
+        });
+        expect(ctx.validationEngine.validate).toHaveBeenCalledTimes(missing ? 1 : 2);
+        expect(ctx.runtime.resume).not.toHaveBeenCalled();
+        if (missing) {
+          expect(manager.getSession(pod.id).status).toBe('review_required');
+          expect(ctx.validationRepo.getLatest(pod.id)?.result).toEqual(original);
+        }
+      },
+    );
 
-      ctx.validationRepo.insert(pod.id, 1, failedReview(1, 'attempt-1', ['initial-stale-finding']));
+    it('records versioned selected API dispatch and rejects stale or mismatched launches', async () => {
+      const ctx = createTestContext();
+      ctx.db
+        .prepare("UPDATE profiles SET reviewer_model = ? WHERE name = 'test-profile'")
+        .run('review-model');
+      const manager = createPodManager(ctx.deps);
+      const pod = manager.createSession(
+        { profileName: 'test-profile', task: 'Record API review' },
+        'operator',
+      );
       ctx.podRepo.update(pod.id, {
         status: 'running',
         containerId: 'ctr-1',
         worktreePath: '/tmp/worktree/abc',
-        validationAttempts: 1,
       });
+      let record: ((model: string) => void) | undefined;
+      let proved = false;
       vi.mocked(ctx.validationEngine.validate).mockImplementation(async (config) => {
-        if (!config.reviewOnly) return failedReview(2, 'attempt-2', []);
-        if (config.priorReviewBatch) return failedReview(2, 'deep-contaminated', []);
-        return makeValidationResult({
-          podId: pod.id,
-          attempt: 2,
-          overall: 'pass',
-          taskReview: {
-            status: 'pass',
-            reasoning: 'Independent deep review found no issue',
-            issues: [],
-            model: 'reviewer',
-            screenshots: [],
-            diff: '+change',
-            reviewBatch: {
-              ...reviewBatch('deep-independent', '2'.repeat(40), []),
-              candidates: [],
-              initialFindings: [],
-              accepted: [],
-              ledger: [],
-            },
-          },
+        record = config.recordReviewerApiDispatch;
+        expect(record).toBeTypeOf('function');
+        expect(() => record?.('different-model')).toThrow(/identity/i);
+        record?.('review-model');
+        expect(ctx.podRepo.executionProvenance?.latest(pod.id)).toMatchObject({
+          version: 2,
+          surface: 'provider-api',
+          subject: 'reviewer',
+          purpose: 'review',
+          runtime: null,
+          model: 'review-model',
+          dispatchModel: 'review-model',
+          cliVersion: null,
+          imageDigest: null,
         });
+        proved = true;
+        ctx.podRepo.update(pod.id, { status: 'running', containerId: 'replacement-container' });
+        return makeValidationResult({ podId: pod.id, attempt: 1 });
       });
-
       await manager.triggerValidation(pod.id);
-
-      const deepConfig = vi.mocked(ctx.validationEngine.validate).mock.calls[1]?.[0];
-      expect(deepConfig).toMatchObject({
-        reviewOnly: true,
-        reviewDepth: 'deep',
-        councilOnly: true,
-      });
-      expect(deepConfig?.priorReviewBatch).toBeUndefined();
-      expect(manager.getSession(pod.id).status).toBe('validated');
-      expect(manager.getSession(pod.id).pendingEscalation).toBeNull();
-      expect(
-        manager.getSession(pod.id).lastValidationResult?.taskReview?.reviewBatch?.adjudication,
-      ).toEqual({
-        kind: 'recurrence-hoist',
-        originalReviewBatchId: 'attempt-2',
-        candidateFindingIds: ['review:stale-finding'],
-        confirmedFindingIds: [],
-      });
+      expect(proved).toBe(true);
+      expect(record).toBeTypeOf('function');
+      expect(() => record?.('review-model')).toThrow(/superseded/i);
+      expect(ctx.runtime.resume).not.toHaveBeenCalled();
     });
+
+    it('records legacy API provenance before real SDK HTTP dispatch and fences stale replay', async () => {
+      const ctx = createTestContext();
+      ctx.db
+        .prepare("UPDATE profiles SET reviewer_model = ? WHERE name = 'test-profile'")
+        .run('sonnet');
+      const manager = createPodManager(ctx.deps);
+      const pod = manager.createSession(
+        { profileName: 'test-profile', task: 'Legacy API receipt' },
+        'operator',
+      );
+      ctx.podRepo.update(pod.id, {
+        status: 'running',
+        containerId: 'ctr-1',
+        worktreePath: '/tmp/worktree/abc',
+      });
+      const observed: unknown[] = [];
+      const server = createServer((_request, response) => {
+        observed.push(ctx.podRepo.executionProvenance?.latest(pod.id));
+        response.setHeader('content-type', 'application/json');
+        response.end(
+          JSON.stringify({
+            id: 'local-message',
+            type: 'message',
+            role: 'assistant',
+            model: 'claude-sonnet-4-6',
+            content: [{ type: 'text', text: 'local fixture verdict' }],
+            stop_reason: 'end_turn',
+            stop_sequence: null,
+            usage: { input_tokens: 3, output_tokens: 2 },
+          }),
+        );
+      });
+      await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+      const address = server.address();
+      if (!address || typeof address === 'string') throw new Error('No fixture port');
+      const prior = process.env.ANTHROPIC_BASE_URL;
+      process.env.ANTHROPIC_BASE_URL = `http://127.0.0.1:${address.port}`;
+      let replay: (() => Promise<unknown>) | undefined;
+      let proved = false;
+      try {
+        vi.mocked(ctx.validationEngine.validate).mockImplementation(async (config) => {
+          expect(config.recordLegacyReviewerApiDispatch).toBeTypeOf('function');
+          expect(() => config.recordLegacyReviewerApiDispatch?.('different-model')).toThrow(
+            /identity/i,
+          );
+          replay = () =>
+            runToolUseReview({
+              model: 'sonnet',
+              prompt: 'Local fixture only',
+              worktreePath: '/tmp',
+              timeout: 2000,
+              apiKey: 'synthetic-local-key',
+              beforeRequest: config.assertReviewerCurrent,
+              onDispatch: config.recordLegacyReviewerApiDispatch,
+            });
+          const result = await replay();
+          expect(result).toMatchObject({
+            stdout: 'local fixture verdict',
+            tokenUsage: { inputTokens: 3, outputTokens: 2 },
+          });
+          expect(observed).toHaveLength(1);
+          expect(observed[0]).toMatchObject({
+            version: 2,
+            surface: 'provider-api',
+            subject: 'reviewer',
+            purpose: 'review',
+            runtime: null,
+            model: 'sonnet',
+            dispatchModel: 'claude-sonnet-4-6',
+            providerId: null,
+            providerAccountId: null,
+            cliVersion: null,
+            imageDigest: null,
+            diagnostics: [{ code: 'REVIEWER_LEGACY_API_DISPATCH_PREFLIGHT' }],
+          });
+          proved = true;
+          ctx.podRepo.update(pod.id, { status: 'running', containerId: 'replacement-container' });
+          return makeValidationResult({ podId: pod.id, attempt: 1 });
+        });
+        await manager.triggerValidation(pod.id);
+        await expect(
+          vi.mocked(ctx.validationEngine.validate).mock.results[0]?.value,
+        ).resolves.toBeDefined();
+        expect(proved).toBe(true);
+        await expect(replay?.()).rejects.toThrow(/superseded/i);
+        expect(observed).toHaveLength(1);
+        expect(ctx.runtime.resume).not.toHaveBeenCalled();
+      } finally {
+        if (prior === undefined) Reflect.deleteProperty(process.env, 'ANTHROPIC_BASE_URL');
+        else process.env.ANTHROPIC_BASE_URL = prior;
+        await new Promise<void>((resolve) => server.close(() => resolve()));
+      }
+    });
+
+    it('binds non-container reviewer launch ownership to the actual validation invocation', async () => {
+      const ctx = createTestContext();
+      const manager = createPodManager(ctx.deps);
+      const pod = manager.createSession(
+        { profileName: 'test-profile', task: 'Fence host and API review' },
+        'operator',
+      );
+      ctx.podRepo.update(pod.id, {
+        status: 'running',
+        containerId: 'ctr-1',
+        worktreePath: '/tmp/worktree/abc',
+      });
+      let guard: (() => void) | undefined;
+      vi.mocked(ctx.validationEngine.validate).mockImplementation(async (config) => {
+        guard = config.assertReviewerCurrent;
+        guard?.();
+        ctx.podRepo.update(pod.id, { status: 'running', containerId: 'replacement-container' });
+        return makeValidationResult({ podId: pod.id, attempt: 1 });
+      });
+      await manager.triggerValidation(pod.id);
+      expect(guard).toBeTypeOf('function');
+      expect(guard).toThrow(/superseded/i);
+      expect(manager.getSession(pod.id)).toMatchObject({
+        status: 'running',
+        containerId: 'replacement-container',
+      });
+      expect(ctx.containerManager.stop).not.toHaveBeenCalled();
+      expect(ctx.runtime.resume).not.toHaveBeenCalled();
+    });
+
+    it.each([undefined, 'model', 'runtime'] as const)(
+      'binds actual reviewer launch preflight and rejects changed %s',
+      async (changed) => {
+        const ctx = createTestContext(undefined, { defaultRuntime: 'codex' });
+        ctx.db
+          .prepare("UPDATE profiles SET reviewer_model = ? WHERE name = 'test-profile'")
+          .run('review-model');
+        const manager = createPodManager(ctx.deps);
+        const pod = manager.createSession(
+          { profileName: 'test-profile', task: 'Fence reviewer launch' },
+          'operator',
+        );
+        ctx.podRepo.update(pod.id, {
+          status: 'running',
+          containerId: 'ctr-1',
+          worktreePath: '/tmp/worktree/abc',
+        });
+        let launchGuard: (() => void) | undefined;
+        let launchError: unknown;
+        vi.mocked(ctx.validationEngine.validate).mockImplementation(async (config) => {
+          launchGuard = await config
+            .beforeReviewerLaunch?.({
+              podId: pod.id,
+              containerId: 'ctr-1',
+              runtime: changed === 'runtime' ? 'codex' : 'claude',
+              model: changed === 'model' ? 'other-model' : 'review-model',
+            })
+            .catch((error) => {
+              launchError = error;
+              return undefined;
+            });
+          ctx.podRepo.update(pod.id, { status: 'running', containerId: 'replacement-container' });
+          return makeValidationResult({ podId: pod.id, attempt: 1 });
+        });
+        await manager.triggerValidation(pod.id);
+        if (changed) {
+          expect(launchError).toMatchObject({
+            message: 'Reviewer launch identity differs from the frozen validation configuration.',
+          });
+          expect(launchGuard).toBeUndefined();
+          expect(ctx.podRepo.executionProvenance?.latest(pod.id)?.subject).toBe('worker');
+        } else {
+          expect(launchGuard).toBeTypeOf('function');
+          expect(launchGuard).toThrow(/superseded/i);
+          expect(ctx.podRepo.executionProvenance?.latest(pod.id)).toMatchObject({
+            subject: 'reviewer',
+            purpose: 'review',
+            runtime: 'claude',
+            model: 'review-model',
+          });
+        }
+        expect(manager.getSession(pod.id)).toMatchObject({
+          status: 'running',
+          containerId: 'replacement-container',
+        });
+        expect(ctx.containerManager.stop).not.toHaveBeenCalled();
+        expect(ctx.runtime.resume).not.toHaveBeenCalled();
+      },
+    );
+
+    it.each(['preflight', 'kill'] as const)(
+      'fences independent council at the %s boundary',
+      async (boundary) => {
+        const ctx = createTestContext();
+        const manager = createPodManager(ctx.deps);
+        const pod = manager.createSession(
+          { profileName: 'test-profile', task: 'Fence council boundary' },
+          'user-1',
+        );
+        const issue = 'A recurring review finding';
+        const semanticId = 'review:council-boundary';
+        const original = makeCouncilReviewFailure(
+          pod.id,
+          2,
+          'current-batch',
+          issue,
+          semanticId,
+          false,
+        );
+        ctx.validationRepo.insert(
+          pod.id,
+          1,
+          makeCouncilReviewFailure(pod.id, 1, 'prior-batch', issue, semanticId, true),
+        );
+        ctx.podRepo.update(pod.id, {
+          status: 'running',
+          containerId: 'ctr-1',
+          worktreePath: '/tmp/worktree/abc',
+          validationAttempts: 1,
+        });
+        let initialExecuted = false;
+        let boundaryObserved = false;
+        ctx.containerManager.getExecutionMetadata = vi.fn(async () => {
+          if (initialExecuted && boundary === 'preflight') {
+            boundaryObserved = true;
+            ctx.podRepo.update(pod.id, {
+              status: 'running',
+              containerId: 'replacement-container',
+              failureReason: 'replacement-owned-reason',
+            });
+          }
+          return { imageDigest: null, memoryLimitBytes: null, cpuLimit: null, networkMode: null };
+        });
+        vi.mocked(ctx.validationEngine.validate).mockImplementation(
+          async (config, _onProgress, signal) => {
+            if (!config.reviewOnly) {
+              initialExecuted = true;
+              return original;
+            }
+            if (boundary === 'kill') {
+              await manager.killSession(pod.id);
+              boundaryObserved = signal?.aborted === true;
+              throw new Error('Council stopped after kill');
+            }
+            throw new Error('A replaced preflight must not execute a council');
+          },
+        );
+        await manager.triggerValidation(pod.id);
+        expect(boundaryObserved).toBe(true);
+        expect(ctx.validationEngine.validate).toHaveBeenCalledTimes(
+          boundary === 'preflight' ? 1 : 2,
+        );
+        if (boundary === 'preflight') {
+          expect(manager.getSession(pod.id)).toMatchObject({
+            status: 'running',
+            containerId: 'replacement-container',
+            failureReason: 'replacement-owned-reason',
+          });
+          expect(ctx.containerManager.stop).not.toHaveBeenCalled();
+          expect(ctx.containerManager.kill).not.toHaveBeenCalled();
+        } else expect(manager.getSession(pod.id).status).toBe('killed');
+        expect(ctx.validationRepo.getLatest(pod.id)?.result).toEqual(original);
+        expect(ctx.runtime.resume).not.toHaveBeenCalled();
+      },
+    );
+
+    it.each([false, true])(
+      'runs recurring-finding auto-hoist without the prior review ledger (advisory=%s)',
+      async (advisoryEnabled) => {
+        const ctx = createTestContext();
+        const manager = createPodManager(ctx.deps);
+        const pod = manager.createSession(
+          {
+            profileName: 'test-profile',
+            task: 'Fix stale review feedback',
+            options: { advisoryBrowserQaEnabled: advisoryEnabled },
+          },
+          'user-1',
+        );
+        const finding = {
+          id: 'initial-stale-finding',
+          source: 'initial-review' as const,
+          issue: 'A stale finding',
+        };
+        const reviewBatch = (id: string, reviewedHead: string, currentSourceIds: string[]) => ({
+          id,
+          diffHash: `${id}-diff`,
+          reviewedHead,
+          promptVersion: 'review-council-v1',
+          schemaVersion: 'structured-finding-v2',
+          model: 'reviewer',
+          axes: [],
+          candidates: [finding],
+          initialFindings: [finding],
+          accepted: [finding],
+          rejected: [],
+          merged: [],
+          synthesis: 'model' as const,
+          durationMs: 1,
+          quality: 'healthy' as const,
+          ledger: [
+            {
+              semanticId: 'review:stale-finding',
+              finding,
+              state: 'open' as const,
+              priorSourceIds: ['initial-stale-finding'],
+              currentSourceIds,
+            },
+          ],
+        });
+        const failedReview = (attempt: number, batchId: string, currentSourceIds: string[]) =>
+          makeValidationResult({
+            podId: pod.id,
+            attempt,
+            overall: 'fail',
+            taskReview: {
+              status: 'fail',
+              reasoning: 'Historical ledger entry remains open',
+              issues: ['A stale finding'],
+              model: 'reviewer',
+              screenshots: [],
+              diff: '+change',
+              reviewBatch: reviewBatch(batchId, `${attempt}`.repeat(40), currentSourceIds),
+            },
+          });
+
+        ctx.validationRepo.insert(
+          pod.id,
+          1,
+          failedReview(1, 'attempt-1', ['initial-stale-finding']),
+        );
+        ctx.podRepo.update(pod.id, {
+          status: 'running',
+          containerId: 'ctr-1',
+          worktreePath: '/tmp/worktree/abc',
+          validationAttempts: 1,
+        });
+        vi.mocked(ctx.validationEngine.validate).mockImplementation(async (config) => {
+          if (!config.reviewOnly) return failedReview(2, 'attempt-2', []);
+          if (config.priorReviewBatch) return failedReview(2, 'deep-contaminated', []);
+          return makeValidationResult({
+            podId: pod.id,
+            attempt: 2,
+            overall: 'pass',
+            taskReview: {
+              status: 'pass',
+              reasoning: 'Independent deep review found no issue',
+              issues: [],
+              model: 'reviewer',
+              screenshots: [],
+              diff: '+change',
+              reviewBatch: {
+                ...reviewBatch('deep-independent', '2'.repeat(40), []),
+                candidates: [],
+                initialFindings: [],
+                accepted: [],
+                ledger: [],
+              },
+            },
+          });
+        });
+
+        const advisory = ctx.validationEngine.runAdvisoryBrowserQa;
+        if (!advisory) throw new Error('Missing advisory fixture');
+        const advisoryResult = {
+          status: 'pass' as const,
+          reasoning: 'Reviewed accepted result',
+          observations: [],
+          screenshots: [],
+          durationMs: 10,
+        };
+        vi.mocked(advisory).mockImplementation(async (config, blockingResult) =>
+          config.advisoryBrowserQaEnabled && blockingResult.overall === 'pass'
+            ? advisoryResult
+            : null,
+        );
+        await manager.triggerValidation(pod.id);
+
+        const deepConfig = vi.mocked(ctx.validationEngine.validate).mock.calls[1]?.[0];
+        expect(deepConfig).toMatchObject({
+          reviewOnly: true,
+          reviewDepth: 'deep',
+          councilOnly: true,
+        });
+        expect(deepConfig?.priorReviewBatch).toBeUndefined();
+        expect(manager.getSession(pod.id).status).toBe('validated');
+        expect(manager.getSession(pod.id).pendingEscalation).toBeNull();
+        if (advisoryEnabled) {
+          expect(advisory).toHaveBeenCalledWith(
+            expect.any(Object),
+            expect.objectContaining({ overall: 'pass' }),
+            expect.any(Function),
+            undefined,
+            expect.any(Object),
+          );
+          expect(manager.getSession(pod.id).lastValidationResult?.advisoryBrowserQa).toEqual(
+            advisoryResult,
+          );
+          expect(ctx.validationRepo.getLatest(pod.id)?.result).toMatchObject({
+            overall: 'pass',
+            advisoryBrowserQa: advisoryResult,
+            taskReview: { reviewBatch: { adjudication: { kind: 'recurrence-hoist' } } },
+          });
+        }
+        expect(
+          manager.getSession(pod.id).lastValidationResult?.taskReview?.reviewBatch?.adjudication,
+        ).toEqual({
+          kind: 'recurrence-hoist',
+          originalReviewBatchId: 'attempt-2',
+          candidateFindingIds: ['review:stale-finding'],
+          confirmedFindingIds: [],
+        });
+      },
+    );
 
     it('escalates only recurring findings independently confirmed by deep review', async () => {
       const ctx = createTestContext();
@@ -10375,7 +16639,75 @@ describe('PodManager', () => {
       expect(ctx.runtime.resume).not.toHaveBeenCalled();
     });
 
-    it('retries a transient sandbox timeout before abandoning validation-feedback resume', async () => {
+    it.each(['before-event', 'after-event'] as const)(
+      'does not replay an uncertain validation-feedback turn after timeout %s',
+      async (timing) => {
+        const ctx = createTestContext(
+          { overall: 'fail' },
+          { executionTarget: 'sandbox', warmImageTag: 'example.azurecr.io/autopod/test:immutable' },
+        );
+        ctx.db
+          .prepare('UPDATE profiles SET max_validation_attempts = 2 WHERE name = ?')
+          .run('test-profile');
+        ctx.runtime.resume = vi
+          .fn()
+          .mockImplementationOnce(async function* (): AsyncIterable<AgentEvent> {
+            if (timing === 'after-event')
+              yield {
+                type: 'status',
+                timestamp: new Date().toISOString(),
+                message: 'Worker accepted feedback',
+              };
+            throw new AutopodError('sandbox transport timed out', 'AZURE_SANDBOX_TIMEOUT', 504);
+          })
+          .mockImplementationOnce(async function* (): AsyncIterable<AgentEvent> {
+            yield {
+              type: 'complete',
+              timestamp: new Date().toISOString(),
+              result: 'An unwanted repeated turn',
+            };
+          });
+        const attempts = createProviderAttemptRepository(ctx.db);
+        ctx.deps.providerAttemptRepo = attempts;
+        const manager = createPodManager(ctx.deps);
+        const pod = manager.createSession(
+          { profileName: 'test-profile', task: 'Retain uncertain turn' },
+          'operator',
+        );
+        ctx.podRepo.update(pod.id, {
+          status: 'running',
+          containerId: 'ctr-1',
+          worktreePath: '/tmp/worktree/abc',
+          startCommitSha: 'abc1234567890abcdef1234567890abcdef1234',
+        });
+        await manager.triggerValidation(pod.id);
+        expect(ctx.runtime.resume).toHaveBeenCalledTimes(1);
+        expect(attempts.list(pod.id)).toHaveLength(1);
+        expect(attempts.list(pod.id)[0]?.classification).toMatchObject({
+          category: 'unknown',
+          definitive: false,
+        });
+        expect(ctx.podRepo.taskExecutions?.snapshot(pod.id)).toMatchObject({
+          agentRunCount: 1,
+          failedRunCount: 1,
+          providerAttemptCount: 1,
+        });
+        expect(ctx.runtime.spawn).not.toHaveBeenCalled();
+        expect(ctx.containerManager.kill).not.toHaveBeenCalled();
+        expect(ctx.validationRepo.getForSession(pod.id)).toHaveLength(1);
+        expect(ctx.podRepo.getOrThrow(pod.id)).toMatchObject({
+          status: 'failed',
+          containerId: 'ctr-1',
+          worktreePath: '/tmp/worktree/abc',
+          failureReason: expect.stringContaining('unverified execution outcome'),
+        });
+        expect(activityMessages(ctx, pod.id)).not.toContain(
+          'Sandbox resume transport timed out — retrying agent feedback…',
+        );
+      },
+    );
+
+    it('retains an unobserved sandbox continuation when its iterator times out', async () => {
       const ctx = createTestContext(
         { overall: 'fail' },
         {
@@ -10421,9 +16753,10 @@ describe('PodManager', () => {
 
       await manager.triggerValidation(pod.id);
 
-      expect(ctx.runtime.resume).toHaveBeenCalledTimes(2);
-      expect(manager.getSession(pod.id).status).toBe('review_required');
-      expect(activityMessages(ctx, pod.id)).toContain(
+      expect(ctx.runtime.resume).toHaveBeenCalledTimes(1);
+      expect(manager.getSession(pod.id).status).toBe('failed');
+      expect(manager.getSession(pod.id).failureReason).toContain('unverified execution outcome');
+      expect(activityMessages(ctx, pod.id)).not.toContain(
         'Sandbox resume transport timed out — retrying agent feedback…',
       );
     });
@@ -11249,6 +17582,168 @@ describe('PodManager', () => {
   });
 
   describe('sendMessage', () => {
+    it('retains the durable human reply when resumed worker preflight fails', async () => {
+      const ctx = createTestContext();
+      const manager = createPodManager(ctx.deps);
+      const pod = manager.createSession(
+        { profileName: 'test-profile', task: 'Preserve reply before resume' },
+        'operator',
+      );
+      const question: EscalationRequest = {
+        id: 'resume-preflight-question',
+        podId: pod.id,
+        type: 'ask_human',
+        timestamp: new Date().toISOString(),
+        payload: { question: 'Select repair' },
+        response: null,
+      };
+      ctx.escalationRepo.insert(question);
+      ctx.podRepo.update(pod.id, {
+        status: 'awaiting_input',
+        containerId: 'ctr-1',
+        pendingEscalation: question,
+      });
+      const exec = vi.mocked(ctx.containerManager.execInContainer).getMockImplementation();
+      if (!exec) throw new Error('Missing container fixture');
+      vi.mocked(ctx.containerManager.execInContainer).mockImplementation(
+        async (id, cmd, options) =>
+          cmd.join(' ') === 'claude --version'
+            ? { exitCode: 1, stdout: '', stderr: 'unavailable' }
+            : exec(id, cmd, options),
+      );
+      await expect(
+        manager.sendMessage(pod.id, 'Repair finding A', { type: 'human', userId: 'reviewer' }),
+      ).rejects.toThrow();
+      expect(ctx.escalationRepo.getOrThrow(question.id).response).toMatchObject({
+        response: 'Repair finding A',
+        actor: { type: 'human', userId: 'reviewer' },
+      });
+      expect(ctx.runtime.resume).not.toHaveBeenCalled();
+      expect(ctx.containerManager.kill).not.toHaveBeenCalled();
+      expect(ctx.podRepo.getOrThrow(pod.id)).toMatchObject({
+        status: 'failed',
+        containerId: 'ctr-1',
+        pendingEscalation: null,
+      });
+      expect(ctx.podRepo.executionProvenance?.latest(pod.id)).toMatchObject({
+        purpose: 'coding',
+        status: 'blocked',
+      });
+    });
+
+    it('rolls back escalation creation and defers operator publication when pending-state persistence fails', () => {
+      const ctx = createTestContext();
+      const manager = createPodManager(ctx.deps);
+      const pod = manager.createSession(
+        { profileName: 'test-profile', task: 'Ask atomically' },
+        'user-1',
+      );
+      ctx.podRepo.update(pod.id, { status: 'running' });
+      const published: string[] = [];
+      ctx.eventBus.subscribe((event) => {
+        if (event.type === 'pod.status_changed') published.push(event.newStatus);
+      });
+      const originalNotify = manager.notifyEscalation;
+      manager.notifyEscalation = (id, request) => {
+        originalNotify(id, request);
+        throw new Error('injected crash before escalation commit');
+      };
+      const bridge = createSessionBridge({
+        ...ctx.deps,
+        podManager: manager,
+        pendingRequestsByPod: new Map(),
+      });
+      expect(() =>
+        bridge.createEscalation({
+          id: 'atomic-question',
+          podId: pod.id,
+          type: 'ask_human',
+          timestamp: new Date().toISOString(),
+          payload: { question: 'Select repair' },
+          response: null,
+        }),
+      ).toThrow('injected crash');
+      expect(ctx.escalationRepo.listBySession(pod.id)).toEqual([]);
+      expect(ctx.podRepo.getOrThrow(pod.id).status).toBe('running');
+      expect(published).not.toContain('awaiting_input');
+    });
+
+    it('keeps one actionable question and treats its duplicate creation as the same decision', () => {
+      const ctx = createTestContext();
+      const manager = createPodManager(ctx.deps);
+      const pod = manager.createSession(
+        { profileName: 'test-profile', task: 'Retain one question' },
+        'user-1',
+      );
+      ctx.podRepo.update(pod.id, { status: 'running' });
+      const bridge = createSessionBridge({
+        ...ctx.deps,
+        podManager: manager,
+        pendingRequestsByPod: new Map(),
+      });
+      const question: EscalationRequest = {
+        id: 'one-question',
+        podId: pod.id,
+        type: 'ask_human',
+        timestamp: new Date().toISOString(),
+        payload: { question: 'Select a repair' },
+        response: null,
+      };
+      bridge.createEscalation(question);
+      expect(() => bridge.createEscalation({ ...question, id: 'second-question' })).toThrow(
+        'already has an unanswered decision',
+      );
+      expect(() => bridge.createEscalation(question)).not.toThrow();
+      expect(() =>
+        bridge.createEscalation({ ...question, payload: { question: 'Different authority' } }),
+      ).toThrow('different content');
+      expect(ctx.escalationRepo.listBySession(pod.id)).toHaveLength(1);
+      expect(ctx.podRepo.getOrThrow(pod.id)).toMatchObject({
+        status: 'awaiting_input',
+        pendingEscalation: { id: 'one-question' },
+        escalationCount: 1,
+      });
+    });
+
+    it('rolls back a durable reply when its pending-state transition fails', async () => {
+      const ctx = createTestContext();
+      const manager = createPodManager(ctx.deps);
+      const pod = manager.createSession(
+        { profileName: 'test-profile', task: 'Reply atomically' },
+        'user-1',
+      );
+      const question: EscalationRequest = {
+        id: 'atomic-reply',
+        podId: pod.id,
+        type: 'ask_human',
+        timestamp: new Date().toISOString(),
+        payload: { question: 'Select repair' },
+        response: null,
+      };
+      ctx.escalationRepo.insert(question);
+      ctx.podRepo.update(pod.id, { status: 'awaiting_input', pendingEscalation: question });
+      ctx.podRepo.completionJournal?.settle(ctx.podRepo.getOrThrow(pod.id), 'Preserved summary');
+      const originalUpdate = ctx.podRepo.update;
+      ctx.podRepo.update = (id, changes) => {
+        originalUpdate(id, changes);
+        if (changes.status === 'running' && changes.pendingEscalation === null)
+          throw new Error('injected crash before reply commit');
+      };
+      await expect(
+        manager.sendMessage(pod.id, 'Repair finding A', { type: 'human', userId: 'reviewer' }),
+      ).rejects.toThrow('injected crash');
+      expect(ctx.escalationRepo.getOrThrow(question.id).response).toBeNull();
+      expect(ctx.db.prepare('SELECT count(*) AS count FROM completion_decisions').get()).toEqual({
+        count: 0,
+      });
+      expect(ctx.podRepo.getOrThrow(pod.id)).toMatchObject({
+        status: 'awaiting_input',
+        pendingEscalation: { id: question.id },
+        finalization: { phase: 'awaiting_human', result: 'Preserved summary' },
+      });
+      expect(ctx.runtime.resume).not.toHaveBeenCalled();
+    });
+
     it('throws if pod is not awaiting_input', async () => {
       const ctx = createTestContext();
       const manager = createPodManager(ctx.deps);
@@ -11675,6 +18170,221 @@ describe('PodManager', () => {
     });
 
     describe('completeSession', () => {
+      let completionDataDir: string;
+      let previousCompletionDataDir: string | undefined;
+      beforeEach(() => {
+        previousCompletionDataDir = process.env.DATA_DIR;
+        completionDataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'autopod-completion-'));
+        process.env.DATA_DIR = completionDataDir;
+      });
+      afterEach(() => {
+        if (previousCompletionDataDir === undefined)
+          Reflect.deleteProperty(process.env, 'DATA_DIR');
+        else process.env.DATA_DIR = previousCompletionDataDir;
+        fs.rmSync(completionDataDir, { recursive: true, force: true });
+      });
+
+      it.each(['branch', 'artifact'] as const)(
+        'coalesces concurrent interactive %s completion requests',
+        async (output) => {
+          const ctx = createTestContext();
+          const manager = createPodManager(ctx.deps);
+          const pod = manager.createSession(
+            {
+              profileName: 'test-profile',
+              task: 'Complete once',
+              options: { agentMode: 'interactive', output, validate: false, promotable: true },
+            },
+            'user-1',
+          );
+          ctx.podRepo.update(pod.id, {
+            status: 'running',
+            containerId: output === 'artifact' ? 'ctr-artifact' : null,
+            worktreePath: '/tmp/worktree/abc',
+          });
+          const gate = deferred<void>();
+          const operation =
+            output === 'artifact'
+              ? vi.mocked(ctx.containerManager.extractDirectoryFromContainer)
+              : vi.mocked(ctx.worktreeManager.mergeBranch);
+          operation.mockImplementation(async () => {
+            await gate.promise;
+          });
+          const first = manager.completeSession(pod.id);
+          await waitForAssertion(() => expect(operation).toHaveBeenCalledOnce());
+          const results = Promise.allSettled([first, manager.completeSession(pod.id)]);
+          gate.resolve();
+          expect((await results).map((result) => result.status)).toEqual([
+            'fulfilled',
+            'fulfilled',
+          ]);
+          expect(operation).toHaveBeenCalledOnce();
+          expect(manager.getSession(pod.id).status).toBe('complete');
+        },
+      );
+
+      it('rejects a different promotion while interactive completion is already pending', async () => {
+        const ctx = createTestContext();
+        const manager = createPodManager(ctx.deps);
+        const pod = manager.createSession(
+          { profileName: 'test-profile', task: 'Complete once', outputMode: 'workspace' },
+          'user-1',
+        );
+        ctx.podRepo.update(pod.id, { status: 'running', worktreePath: '/tmp/worktree/abc' });
+        const gate = deferred<void>();
+        vi.mocked(ctx.worktreeManager.mergeBranch).mockImplementation(async () => {
+          await gate.promise;
+        });
+        const first = manager.completeSession(pod.id);
+        await waitForAssertion(() =>
+          expect(ctx.worktreeManager.mergeBranch).toHaveBeenCalledOnce(),
+        );
+        try {
+          await expect(manager.completeSession(pod.id, { promoteTo: 'pr' })).rejects.toMatchObject({
+            code: 'COMPLETION_IN_PROGRESS',
+          });
+        } finally {
+          gate.resolve();
+          await first.catch(() => {});
+        }
+        expect(manager.getSession(pod.id).options.agentMode).toBe('interactive');
+        expect(ctx.runtime.spawn).not.toHaveBeenCalled();
+      });
+
+      it('retains unanswered input before interactive completion can push or clean up', async () => {
+        const ctx = createTestContext();
+        const manager = createPodManager(ctx.deps);
+        const pod = manager.createSession(
+          { profileName: 'test-profile', task: 'Wait for decision', outputMode: 'workspace' },
+          'user-1',
+        );
+        ctx.podRepo.update(pod.id, {
+          status: 'running',
+          worktreePath: '/tmp/worktree/abc',
+          pendingEscalation: { id: 'pending', question: 'Keep this work?' },
+        });
+        await expect(manager.completeSession(pod.id)).rejects.toMatchObject({
+          code: 'HUMAN_DECISION_PENDING',
+        });
+        expect(ctx.worktreeManager.mergeBranch).not.toHaveBeenCalled();
+        expect(ctx.worktreeManager.cleanup).not.toHaveBeenCalled();
+        expect(manager.getSession(pod.id).pendingEscalation?.id).toBe('pending');
+      });
+
+      it('does not clean a replacement lifecycle after an interactive push returns', async () => {
+        const ctx = createTestContext();
+        const manager = createPodManager(ctx.deps);
+        const pod = manager.createSession(
+          { profileName: 'test-profile', task: 'Finish old lifecycle', outputMode: 'workspace' },
+          'user-1',
+        );
+        ctx.podRepo.update(pod.id, { status: 'running', worktreePath: '/tmp/worktree/abc' });
+        vi.mocked(ctx.worktreeManager.mergeBranch).mockImplementation(async () => {
+          ctx.podRepo.incrementLifecycleGeneration(pod.id);
+          ctx.podRepo.update(pod.id, {
+            status: 'running',
+            containerId: 'replacement-container',
+            worktreePath: '/replacement/worktree',
+          });
+        });
+        await expect(manager.completeSession(pod.id)).rejects.toMatchObject({
+          code: 'STALE_WORKSPACE_COMPLETION',
+        });
+        expect(ctx.worktreeManager.cleanup).not.toHaveBeenCalled();
+        expect(ctx.containerManager.kill).not.toHaveBeenCalled();
+        expect(manager.getSession(pod.id)).toMatchObject({
+          status: 'running',
+          containerId: 'replacement-container',
+          worktreePath: '/replacement/worktree',
+        });
+      });
+
+      it('keeps an older unanswered journal cycle from being hidden by interactive completion', async () => {
+        const ctx = createTestContext();
+        const manager = createPodManager(ctx.deps);
+        const pod = manager.createSession(
+          { profileName: 'test-profile', task: 'Keep decision', outputMode: 'workspace' },
+          'user-1',
+        );
+        ctx.podRepo.update(pod.id, { status: 'running', worktreePath: '/tmp/worktree/abc' });
+        ctx.db
+          .prepare(`INSERT INTO pod_finalizations
+          (pod_id, generation, cycle, phase, pending_decision_id, updated_at)
+          VALUES (?, 1, 1, 'awaiting_human', 'older-question', datetime('now')),
+                 (?, 1, 2, 'running', NULL, datetime('now'))`)
+          .run(pod.id, pod.id);
+        await expect(manager.completeSession(pod.id)).rejects.toMatchObject({
+          code: 'HUMAN_DECISION_PENDING',
+        });
+        expect(ctx.worktreeManager.mergeBranch).not.toHaveBeenCalled();
+        expect(
+          ctx.db
+            .prepare(
+              'SELECT pending_decision_id FROM pod_finalizations WHERE pod_id = ? AND cycle = 1',
+            )
+            .get(pod.id),
+        ).toEqual({ pending_decision_id: 'older-question' });
+      });
+
+      it('retains the container when a question arrives during interactive pre-cleanup work', async () => {
+        const ctx = createTestContext();
+        const manager = createPodManager(ctx.deps);
+        const pod = manager.createSession(
+          { profileName: 'test-profile', task: 'Keep decision', outputMode: 'workspace' },
+          'user-1',
+        );
+        ctx.podRepo.update(pod.id, {
+          status: 'running',
+          containerId: 'ctr-source',
+          worktreePath: '/tmp/worktree/abc',
+        });
+        ctx.deps.beforeContainerCleanup = async () => {
+          ctx.podRepo.update(pod.id, {
+            pendingEscalation: { id: 'late-question', question: 'Preserve this source?' },
+          });
+        };
+        await expect(manager.completeSession(pod.id)).rejects.toMatchObject({
+          code: 'HUMAN_DECISION_PENDING',
+        });
+        expect(ctx.containerManager.kill).not.toHaveBeenCalled();
+        expect(manager.getSession(pod.id)).toMatchObject({
+          status: 'running',
+          containerId: 'ctr-source',
+          pendingEscalation: { id: 'late-question' },
+        });
+      });
+
+      it('does not complete a new generation when interactive container cleanup returns late', async () => {
+        const ctx = createTestContext();
+        const manager = createPodManager(ctx.deps);
+        const pod = manager.createSession(
+          { profileName: 'test-profile', task: 'Keep current lifecycle', outputMode: 'workspace' },
+          'user-1',
+        );
+        ctx.podRepo.update(pod.id, {
+          status: 'running',
+          containerId: 'ctr-old',
+          worktreePath: '/tmp/worktree/abc',
+        });
+        vi.mocked(ctx.containerManager.kill).mockImplementation(async () => {
+          ctx.podRepo.incrementLifecycleGeneration(pod.id);
+          ctx.podRepo.update(pod.id, {
+            status: 'running',
+            containerId: 'ctr-new',
+            worktreePath: '/new/worktree',
+          });
+        });
+        await expect(manager.completeSession(pod.id)).rejects.toMatchObject({
+          code: 'STALE_WORKSPACE_COMPLETION',
+        });
+        expect(ctx.containerManager.kill).toHaveBeenCalledExactlyOnceWith('ctr-old');
+        expect(manager.getSession(pod.id)).toMatchObject({
+          status: 'running',
+          containerId: 'ctr-new',
+          worktreePath: '/new/worktree',
+        });
+      });
+
       it('pushes branch and transitions running → complete', async () => {
         const ctx = createTestContext();
         const manager = createPodManager(ctx.deps);
@@ -11708,6 +18418,78 @@ describe('PodManager', () => {
         const completed = manager.getSession(pod.id);
         expect(completed.status).toBe('complete');
         expect(completed.completedAt).not.toBeNull();
+      });
+
+      it('retains the interactive source and retries completion when workspace synchronization failed', async () => {
+        const ctx = createTestContext();
+        const manager = createPodManager(ctx.deps);
+        const pod = manager.createSession(
+          { profileName: 'test-profile', task: 'Preserve workspace', outputMode: 'workspace' },
+          'user-1',
+        );
+        ctx.podRepo.update(pod.id, {
+          status: 'running',
+          containerId: 'ctr-source',
+          worktreePath: '/tmp/worktree/abc',
+        });
+        vi.mocked(ctx.containerManager.execInContainer).mockRejectedValue(new Error('Sync failed'));
+        vi.mocked(ctx.containerManager.extractDirectoryFromContainer).mockRejectedValue(
+          new Error('Archive failed'),
+        );
+        await expect(manager.completeSession(pod.id)).rejects.toMatchObject({
+          code: 'WORKSPACE_PRESERVATION_FAILED',
+        });
+        expect(manager.getSession(pod.id)).toMatchObject({
+          status: 'running',
+          containerId: 'ctr-source',
+          worktreePath: '/tmp/worktree/abc',
+          failureReason: expect.stringContaining('Workspace preservation failed.'),
+        });
+        expect(ctx.worktreeManager.mergeBranch).not.toHaveBeenCalled();
+        expect(ctx.worktreeManager.cleanup).not.toHaveBeenCalled();
+        expect(ctx.containerManager.kill).not.toHaveBeenCalled();
+        expect(ctx.containerManager.stop).not.toHaveBeenCalled();
+        expect(
+          ctx.eventRepo
+            .getForSession(pod.id)
+            .some((event) => event.payload.type === 'pod.completed'),
+        ).toBe(false);
+
+        vi.mocked(ctx.containerManager.execInContainer).mockResolvedValue({
+          stdout: '',
+          stderr: '',
+          exitCode: 0,
+        });
+        await manager.completeSession(pod.id);
+        expect(manager.getSession(pod.id).status).toBe('complete');
+        expect(manager.getSession(pod.id).failureReason).toBeNull();
+        expect(ctx.worktreeManager.mergeBranch).toHaveBeenCalledOnce();
+        expect(ctx.runtime.spawn).not.toHaveBeenCalled();
+        expect(ctx.runtime.resume).not.toHaveBeenCalled();
+      });
+
+      it('does not discard an interactive branch container when its host worktree is unavailable', async () => {
+        const ctx = createTestContext();
+        const manager = createPodManager(ctx.deps);
+        const pod = manager.createSession(
+          { profileName: 'test-profile', task: 'Preserve workspace', outputMode: 'workspace' },
+          'user-1',
+        );
+        ctx.podRepo.update(pod.id, {
+          status: 'running',
+          containerId: 'ctr-source',
+          worktreePath: null,
+        });
+        await expect(manager.completeSession(pod.id)).rejects.toMatchObject({
+          code: 'WORKSPACE_PRESERVATION_FAILED',
+        });
+        expect(manager.getSession(pod.id)).toMatchObject({
+          status: 'running',
+          containerId: 'ctr-source',
+        });
+        expect(ctx.containerManager.kill).not.toHaveBeenCalled();
+        expect(ctx.containerManager.stop).not.toHaveBeenCalled();
+        expect(ctx.worktreeManager.mergeBranch).not.toHaveBeenCalled();
       });
 
       it('emits pod.completed event', async () => {
@@ -11847,7 +18629,168 @@ describe('PodManager', () => {
         expect(completed.artifactsPath).toContain(`artifacts/${pod.id}`);
       });
 
-      it('completes interactive-artifact pod even when extraction fails', async () => {
+      it('does not publish artifacts or complete a lifecycle cancelled during extraction', async () => {
+        const ctx = createTestContext();
+        const manager = createPodManager(ctx.deps);
+        const pod = manager.createSession(
+          {
+            profileName: 'test-profile',
+            task: 'Collect report',
+            options: { agentMode: 'auto', output: 'artifact', validate: false, promotable: false },
+          },
+          'user-1',
+        );
+        ctx.podRepo.update(pod.id, { status: 'running', containerId: 'container-abc' });
+        vi.mocked(ctx.containerManager.extractDirectoryFromContainer).mockImplementation(
+          async () => {
+            ctx.podRepo.update(pod.id, { status: 'killed' });
+          },
+        );
+        await manager.handleCompletion(pod.id);
+        expect(manager.getSession(pod.id)).toMatchObject({ status: 'killed', artifactsPath: null });
+        expect(ctx.containerManager.kill).not.toHaveBeenCalled();
+      });
+
+      it('coalesces duplicate artifact completion events into one collection and cleanup', async () => {
+        const ctx = createTestContext();
+        const manager = createPodManager(ctx.deps);
+        const pod = manager.createSession(
+          {
+            profileName: 'test-profile',
+            task: 'Collect report',
+            options: { agentMode: 'auto', output: 'artifact', validate: false, promotable: false },
+          },
+          'user-1',
+        );
+        ctx.podRepo.update(pod.id, { status: 'running', containerId: 'container-abc' });
+        ctx.podRepo.completionJournal?.settle(ctx.podRepo.getOrThrow(pod.id), 'Report complete');
+        await Promise.all([manager.handleCompletion(pod.id), manager.handleCompletion(pod.id)]);
+        expect(ctx.podRepo.getOrThrow(pod.id).status).toBe('complete');
+        expect(ctx.containerManager.extractDirectoryFromContainer).toHaveBeenCalledTimes(1);
+        expect(ctx.containerManager.kill).toHaveBeenCalledTimes(1);
+      });
+
+      it('resumes finalization from a verified snapshot after restart without a source container', async () => {
+        const ctx = createTestContext();
+        const manager = createPodManager(ctx.deps);
+        const pod = manager.createSession(
+          {
+            profileName: 'test-profile',
+            task: 'Collect report',
+            options: { agentMode: 'auto', output: 'artifact', validate: false, promotable: false },
+          },
+          'user-1',
+        );
+        ctx.podRepo.update(pod.id, { status: 'running', containerId: 'container-abc' });
+        ctx.podRepo.completionJournal?.settle(ctx.podRepo.getOrThrow(pod.id), 'Report complete');
+        vi.mocked(ctx.containerManager.extractDirectoryFromContainer).mockImplementationOnce(
+          async (_id, _source, target) => {
+            fs.writeFileSync(path.join(target, 'report.md'), 'saved report');
+          },
+        );
+        await manager.handleCompletion(pod.id);
+        const saved = ctx.podRepo.getOrThrow(pod.id);
+        expect(saved.artifactsPath).not.toBeNull();
+        // Reproduce the durable state at a crash after source publication and
+        // container removal but before the final status commit.
+        ctx.podRepo.completionJournal?.mark(saved, 'preserving', true);
+        ctx.podRepo.update(pod.id, { status: 'failed', containerId: null, worktreePath: null });
+        vi.mocked(ctx.containerManager.extractDirectoryFromContainer).mockClear();
+        vi.mocked(ctx.containerManager.kill).mockClear();
+        const restarted = createPodManager(ctx.deps);
+        const reportPath = path.join(saved.artifactsPath as string, 'report.md');
+        fs.writeFileSync(reportPath, 'corrupt report');
+        await expect(restarted.resumePod(pod.id)).rejects.toMatchObject({
+          code: 'ARTIFACT_SNAPSHOT_UNVERIFIED',
+        });
+        expect(ctx.podRepo.getOrThrow(pod.id).status).toBe('failed');
+        expect(ctx.runtime.spawn).not.toHaveBeenCalled();
+        fs.writeFileSync(reportPath, 'saved report');
+        expect(
+          await Promise.all([restarted.resumePod(pod.id), restarted.resumePod(pod.id)]),
+        ).toEqual([{ action: 'collect-artifacts' }, { action: 'collect-artifacts' }]);
+        expect(ctx.podRepo.getOrThrow(pod.id)).toMatchObject({
+          status: 'complete',
+          artifactsPath: saved.artifactsPath,
+        });
+        expect(fs.readFileSync(path.join(saved.artifactsPath as string, 'report.md'), 'utf8')).toBe(
+          'saved report',
+        );
+        expect(ctx.containerManager.extractDirectoryFromContainer).not.toHaveBeenCalled();
+        expect(ctx.containerManager.kill).not.toHaveBeenCalled();
+        expect(ctx.runtime.spawn).not.toHaveBeenCalled();
+        expect(ctx.runtime.resume).not.toHaveBeenCalled();
+      });
+
+      it('retries failed artifact collection through Resume without a worktree or another worker', async () => {
+        const ctx = createTestContext();
+        const manager = createPodManager(ctx.deps);
+        const pod = manager.createSession(
+          {
+            profileName: 'test-profile',
+            task: 'Collect report',
+            options: { agentMode: 'auto', output: 'artifact', validate: false, promotable: false },
+          },
+          'user-1',
+        );
+        ctx.podRepo.update(pod.id, {
+          status: 'running',
+          containerId: 'container-abc',
+          worktreePath: null,
+        });
+        ctx.podRepo.completionJournal?.settle(ctx.podRepo.getOrThrow(pod.id), 'Report complete');
+        vi.mocked(ctx.containerManager.extractDirectoryFromContainer)
+          .mockRejectedValueOnce(new Error('disk full'))
+          .mockRejectedValueOnce(new Error('disk still full'));
+        await manager.handleCompletion(pod.id);
+        expect(manager.getSession(pod.id).status).toBe('failed');
+        await expect(manager.resumePod(pod.id)).rejects.toMatchObject({
+          code: 'ARTIFACT_PRESERVATION_FAILED',
+          statusCode: 502,
+        });
+        expect(manager.getSession(pod.id)).toMatchObject({
+          status: 'failed',
+          containerId: 'container-abc',
+          artifactsPath: null,
+        });
+        expect(ctx.containerManager.kill).not.toHaveBeenCalled();
+        const results = await Promise.all([manager.resumePod(pod.id), manager.resumePod(pod.id)]);
+        expect(results).toEqual([{ action: 'collect-artifacts' }, { action: 'collect-artifacts' }]);
+        expect(manager.getSession(pod.id).status).toBe('complete');
+        expect(ctx.containerManager.extractDirectoryFromContainer).toHaveBeenCalledTimes(3);
+        expect(ctx.runtime.spawn).not.toHaveBeenCalled();
+        expect(ctx.runtime.resume).not.toHaveBeenCalled();
+      });
+
+      it('keeps automatic artifact completion unresolved when extraction fails', async () => {
+        const ctx = createTestContext();
+        const manager = createPodManager(ctx.deps);
+        const pod = manager.createSession(
+          {
+            profileName: 'test-profile',
+            task: 'Collect report',
+            options: { agentMode: 'auto', output: 'artifact', validate: false, promotable: false },
+          },
+          'user-1',
+        );
+        ctx.podRepo.update(pod.id, { status: 'running', containerId: 'container-abc' });
+        vi.mocked(ctx.containerManager.extractDirectoryFromContainer).mockRejectedValue(
+          new Error('disk full'),
+        );
+        await manager.handleCompletion(pod.id);
+        expect(manager.getSession(pod.id)).toMatchObject({
+          status: 'failed',
+          artifactsPath: null,
+          containerId: 'container-abc',
+        });
+        expect(ctx.containerManager.kill).not.toHaveBeenCalled();
+        expect(ctx.worktreeManager.pushBranch).not.toHaveBeenCalled();
+        expect(
+          ctx.eventRepo.getForSession(pod.id).some((e) => e.payload.type === 'pod.completed'),
+        ).toBe(false);
+      });
+
+      it('retains interactive artifacts and the container when extraction fails', async () => {
         const ctx = createTestContext();
         (
           ctx.containerManager.extractDirectoryFromContainer as ReturnType<typeof vi.fn>
@@ -11874,12 +18817,15 @@ describe('PodManager', () => {
           startedAt: new Date().toISOString(),
         });
 
-        await manager.completeSession(pod.id);
-
-        const completed = manager.getSession(pod.id);
-        expect(completed.status).toBe('complete');
-        // artifactsPath is still set — the dir was created even if extraction failed
-        expect(completed.artifactsPath).toContain(`artifacts/${pod.id}`);
+        await expect(manager.completeSession(pod.id)).rejects.toThrow(
+          'Artifact preservation failed',
+        );
+        const retained = manager.getSession(pod.id);
+        expect(retained.status).toBe('running');
+        expect(retained.artifactsPath).toBeNull();
+        expect(retained.containerId).toBe('container-abc');
+        expect(ctx.containerManager.kill).not.toHaveBeenCalled();
+        expect(ctx.containerManager.stop).not.toHaveBeenCalled();
       });
     });
   });
@@ -11911,6 +18857,35 @@ describe('PodManager', () => {
       }
       return { manager, pod };
     }
+
+    it('reconciles a PR created before an ambiguous response across manager restart without another create', async () => {
+      const ctx = createTestContext();
+      const { manager, pod } = await setupCompletePodForRetry(ctx);
+      const url = 'https://github.com/org/repo/pull/42';
+      const lookup = vi
+        .fn()
+        .mockResolvedValueOnce(null)
+        .mockResolvedValue({ url, disposition: 'open' });
+      Object.assign(ctx.prManager, { findPr: lookup });
+      vi.mocked(ctx.prManager.createPr).mockRejectedValueOnce(
+        new Error('connection lost after provider accepted create'),
+      );
+      await expect(manager.retryCreatePr(pod.id)).rejects.toThrow();
+      const restarted = createPodManager(ctx.deps);
+      await restarted.retryCreatePr(pod.id);
+      expect(ctx.prManager.createPr).toHaveBeenCalledTimes(1);
+      expect(restarted.getSession(pod.id).prUrl).toBe(url);
+    });
+
+    it('does not repeat an ambiguous PR create when provider lookup cannot confirm a result', async () => {
+      const ctx = createTestContext();
+      const { manager, pod } = await setupCompletePodForRetry(ctx);
+      Object.assign(ctx.prManager, { findPr: vi.fn(async () => null) });
+      vi.mocked(ctx.prManager.createPr).mockRejectedValueOnce(new Error('response lost'));
+      await expect(manager.retryCreatePr(pod.id)).rejects.toThrow();
+      await expect(createPodManager(ctx.deps).retryCreatePr(pod.id)).rejects.toThrow(/reconcil/i);
+      expect(ctx.prManager.createPr).toHaveBeenCalledTimes(1);
+    });
 
     it('retry PR preserves an affected materialized sandbox branch without claiming validation', async () => {
       const ctx = createTestContext();
@@ -13237,12 +20212,15 @@ describe('PodManager', () => {
         worktreePath: '/tmp/worktree/parent',
       });
       const fix = manager.createSession(
-        { profileName: 'test-profile', task: '[PR FIX] Address review feedback' },
+        {
+          profileName: 'test-profile',
+          task: '[PR FIX] Address review feedback',
+          linkedPodId: parent.id,
+        },
         'user-1',
       );
       ctx.podRepo.update(fix.id, {
         status,
-        linkedPodId: parent.id,
         branch: parent.branch,
         prUrl: parent.prUrl,
         worktreePath: '/tmp/worktree/fix',
@@ -15002,6 +21980,151 @@ describe('PodManager', () => {
       expect(result.phaseTokenUsage?.agent_rework_1).toBeUndefined();
     });
   });
+  describe('validation admission lifecycle ownership', () => {
+    it.each(['trigger', 'revalidate'] as const)(
+      '%s cancels an admitted retry when its container changes during backoff',
+      async (entry) => {
+        const ctx = createTestContext();
+        ctx.deps.validationInfrastructureRetryBackoffMs = [10000];
+        const manager = createPodManager(ctx.deps);
+        const pod = manager.createSession(
+          { profileName: 'test-profile', task: 'Fence persisted retry delay' },
+          'user-1',
+        );
+        ctx.podRepo.update(pod.id, {
+          status: entry === 'trigger' ? 'running' : 'failed',
+          containerId: 'ctr-1',
+          worktreePath: '/tmp/wt',
+        });
+        vi.mocked(ctx.validationEngine.validate)
+          .mockResolvedValueOnce(validationInfrastructureFailureResult())
+          .mockResolvedValueOnce(makeValidationResult());
+        let waited = false;
+        vi.mocked(sleep).mockImplementation(async (delay) => {
+          if (typeof delay === 'number' && delay > 9000) {
+            waited = true;
+            ctx.podRepo.update(pod.id, {
+              status: 'running',
+              containerId: 'replacement-container',
+              failureReason: 'replacement-owned-reason',
+            });
+          }
+        });
+        try {
+          if (entry === 'trigger') await manager.triggerValidation(pod.id);
+          else await manager.revalidateSession(pod.id, { force: true });
+          expect(waited).toBe(true);
+          expect(ctx.validationEngine.validate).toHaveBeenCalledTimes(1);
+          expect(ctx.podRepo.taskRetries?.state(pod.id)).toMatchObject({
+            admissionCount: 2,
+            executedCount: 1,
+            latest: { outcome: 'cancelled', startedAt: null, measuredDurationMs: null },
+          });
+          expect(manager.getSession(pod.id)).toMatchObject({
+            status: 'running',
+            containerId: 'replacement-container',
+            failureReason: 'replacement-owned-reason',
+          });
+          expect(ctx.containerManager.stop).not.toHaveBeenCalled();
+        } finally {
+          vi.mocked(sleep).mockImplementation(() => Promise.resolve());
+        }
+      },
+    );
+    it.each([
+      ['trigger', false],
+      ['trigger', true],
+      ['revalidate', false],
+      ['revalidate', true],
+    ] as const)(
+      '%s does not start checks after replacement during retry identity capture (reject=%s)',
+      async (entry, rejectCapture) => {
+        const ctx = createTestContext();
+        const capture = ctx.deps.captureRetryIdentity;
+        if (!capture) throw new Error('Missing retry identity fixture');
+        vi.spyOn(ctx.eventBus, 'emit');
+        const manager = createPodManager(ctx.deps);
+        const pod = manager.createSession(
+          { profileName: 'test-profile', task: 'Fence validation admission' },
+          'user-1',
+        );
+        ctx.podRepo.update(pod.id, {
+          status: entry === 'trigger' ? 'running' : 'failed',
+          containerId: 'ctr-1',
+          worktreePath: '/tmp/wt',
+        });
+        ctx.deps.captureRetryIdentity = async (config) => {
+          const identity = await capture(config);
+          ctx.podRepo.update(pod.id, {
+            status: 'running',
+            containerId: 'replacement-container',
+            failureReason: 'replacement-owned-reason',
+          });
+          if (rejectCapture) throw new Error('superseded identity probe failed');
+          return identity;
+        };
+        if (entry === 'trigger') await manager.triggerValidation(pod.id);
+        else await manager.revalidateSession(pod.id, { force: true });
+        expect(ctx.validationEngine.validate).not.toHaveBeenCalled();
+        expect(ctx.podRepo.taskRetries?.state(pod.id).admissionCount).toBe(0);
+        expect(manager.getSession(pod.id)).toMatchObject({
+          status: 'running',
+          containerId: 'replacement-container',
+          failureReason: 'replacement-owned-reason',
+        });
+        expect(ctx.validationRepo.getForSession(pod.id)).toHaveLength(0);
+        expect(ctx.containerManager.stop).not.toHaveBeenCalled();
+        expect(ctx.containerManager.kill).not.toHaveBeenCalled();
+      },
+    );
+
+    it.each(['trigger', 'revalidate'] as const)(
+      '%s retains the old executed outcome without publishing into a replacement',
+      async (entry) => {
+        const ctx = createTestContext();
+        vi.spyOn(ctx.eventBus, 'emit');
+        const manager = createPodManager(ctx.deps);
+        const pod = manager.createSession(
+          { profileName: 'test-profile', task: 'Fence late validation result' },
+          'user-1',
+        );
+        ctx.podRepo.update(pod.id, {
+          status: entry === 'trigger' ? 'running' : 'failed',
+          containerId: 'ctr-1',
+          worktreePath: '/tmp/wt',
+        });
+        vi.mocked(ctx.validationEngine.validate).mockImplementationOnce(
+          async (_config, onProgress, _signal, callbacks) => {
+            ctx.podRepo.incrementLifecycleGeneration(pod.id);
+            ctx.podRepo.update(pod.id, {
+              status: 'running',
+              containerId: 'replacement-container',
+              failureReason: 'replacement-owned-reason',
+            });
+            vi.mocked(ctx.eventBus.emit).mockClear();
+            onProgress?.('superseded progress');
+            callbacks?.onPhaseStarted?.('test');
+            callbacks?.onPhaseCompleted?.('test', 'pass', { status: 'pass', duration: 1 });
+            return makeValidationResult();
+          },
+        );
+        if (entry === 'trigger') await manager.triggerValidation(pod.id);
+        else await manager.revalidateSession(pod.id, { force: true });
+        expect(manager.getSession(pod.id)).toMatchObject({
+          status: 'running',
+          containerId: 'replacement-container',
+          failureReason: 'replacement-owned-reason',
+        });
+        expect(ctx.podRepo.taskRetries?.state(pod.id)).toMatchObject({
+          executedCount: 1,
+          latest: { outcome: 'pass' },
+        });
+        expect(ctx.validationRepo.getForSession(pod.id)).toHaveLength(0);
+        expect(ctx.eventBus.emit).not.toHaveBeenCalled();
+        expect(ctx.containerManager.stop).not.toHaveBeenCalled();
+      },
+    );
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -15309,8 +22432,10 @@ describe('worker startup diagnostics', () => {
       modelProvider: 'openai',
     });
     ctx.deps.runtimeRegistry = createMockRuntimeRegistry(runtime);
+    const originalExec = vi.mocked(ctx.containerManager.execInContainer).getMockImplementation();
+    if (!originalExec) throw new Error('No container fixture');
     vi.mocked(ctx.containerManager.execInContainer).mockImplementation(
-      async (_containerId, command) => {
+      async (containerId, command, options) => {
         const rendered = command.join(' ');
         if (rendered.includes('command -v codex')) {
           return { stdout: '/usr/local/bin/codex\n', stderr: '', exitCode: 0 };
@@ -15318,7 +22443,7 @@ describe('worker startup diagnostics', () => {
         if (rendered === 'codex --version') {
           return { stdout: 'codex-cli 0.144.4\n', stderr: '', exitCode: 0 };
         }
-        return { stdout: '', stderr: '', exitCode: 0 };
+        return originalExec(containerId, command, options);
       },
     );
 

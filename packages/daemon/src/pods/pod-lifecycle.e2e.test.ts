@@ -35,6 +35,7 @@ import {
   createTestContext,
   escalationEvent,
   insertTestProfile,
+  mockPrMerge,
   statusEvent,
 } from '../test-utils/mock-helpers.js';
 import { type PodManager, createPodManager } from './pod-manager.js';
@@ -43,14 +44,15 @@ import { type PodManager, createPodManager } from './pod-manager.js';
 
 function createMockPrManager(): PrManager {
   return {
+    findPr: vi.fn(async () => null),
     createPr: vi.fn(async () => ({
       url: 'https://github.com/org/repo/pull/42',
       usedFallback: false,
     })),
-    mergePr: vi.fn(async () => ({ merged: true, autoMergeScheduled: false })),
+    mergePr: vi.fn(mockPrMerge),
     getPrStatus: vi.fn(async () => ({
-      merged: true,
-      open: false,
+      merged: false,
+      open: true,
       blockReason: null,
       ciFailures: [],
       reviewComments: [],
@@ -122,6 +124,13 @@ describe('Pod Lifecycle E2E', () => {
 
       // 4. Verify PR was merged
       expect(prManager.mergePr).toHaveBeenCalledWith({
+        onPrepared: expect.any(Function),
+        expectedHeadSha: 'a'.repeat(40),
+        expectedTarget: {
+          repository: 'https://github.com/org/repo',
+          branch: pod.branch,
+          baseBranch: 'main',
+        },
         worktreePath: '/tmp/worktree/abc',
         prUrl: 'https://github.com/org/repo/pull/42',
         squash: undefined,
@@ -150,6 +159,7 @@ describe('Pod Lifecycle E2E', () => {
     it('retries on validation failure and succeeds on second attempt', async () => {
       let attempt = 0;
       const ctx = createTestContext({
+        simulatedReworkChangesSource: true,
         validationResultFactory: (config) => {
           attempt++;
           // Fail first attempt, pass second
@@ -183,6 +193,7 @@ describe('Pod Lifecycle E2E', () => {
 
     it('exhausts all validation attempts and transitions to review_required', async () => {
       const ctx = createTestContext({
+        simulatedReworkChangesSource: true,
         validationResultFactory: (config) =>
           createFailingValidationResult(config.podId, config.attempt),
       });
@@ -224,19 +235,60 @@ describe('Pod Lifecycle E2E', () => {
   });
 
   describe('Escalation flow: agent → awaiting_input → human responds → agent continues', () => {
+    it('keeps an unanswered decision actionable after agent settlement and duplicate finalization', async () => {
+      const runtime = createMockRuntime({
+        spawn: vi.fn(async function* () {
+          yield escalationEvent('placeholder', 'Select findings to repair');
+          yield completeEvent('Scan report collected; awaiting human selection');
+        } as () => AsyncIterable<AgentEvent>),
+      });
+      const ctx = createTestContext({ runtime });
+      const manager = createPodManager(ctx.deps);
+      const events = collectEvents(ctx);
+      const pod = manager.createSession(
+        { profileName: 'test-profile', task: 'Collect scan report', skipValidation: false },
+        'user-1',
+      );
+      await expect(manager.processPod(pod.id)).resolves.toBeUndefined();
+      await expect(manager.handleCompletion(pod.id)).resolves.toBeUndefined();
+      expect(manager.getSession(pod.id).status).toBe('awaiting_input');
+      expect(manager.getSession(pod.id).pendingEscalation).not.toBeNull();
+      expect(events.some((e) => e.type === 'pod.completed')).toBe(false);
+      expect(ctx.worktreeManager.pushBranch).not.toHaveBeenCalled();
+      const settled = manager.getSession(pod.id).finalization;
+      expect(settled).toMatchObject({ phase: 'awaiting_human', cycle: 1 });
+      expect(settled?.agentSettledAt).not.toBeNull();
+      const restarted = createPodManager(ctx.deps);
+      await restarted.handleCompletion(pod.id);
+      expect(restarted.getSession(pod.id).finalization).toEqual(settled);
+      await restarted.sendMessage(pod.id, 'Repair only finding A', {
+        type: 'human',
+        id: 'reviewer',
+      });
+      expect(
+        ctx.db.prepare('SELECT response FROM completion_decisions WHERE pod_id = ?').get(pod.id),
+      ).toEqual({ response: 'Repair only finding A' });
+      expect(runtime.resume).toHaveBeenCalledTimes(1);
+      expect(restarted.getSession(pod.id).pendingEscalation).toBeNull();
+      ctx.db.close();
+    });
+
     it('transitions to awaiting_input when agent escalates', async () => {
       // In reality, the runtime stream blocks when the agent escalates.
       // processPod's consumeAgentEvents loop hangs until the stream ends.
       // We simulate this by having spawn block on a never-resolving promise.
 
-      const neverResolves = new Promise<void>(() => {});
+      let releaseStream!: () => void;
+      const streamWait = new Promise<void>((resolve) => {
+        releaseStream = resolve;
+      });
 
       const runtime = createMockRuntime({
         spawn: vi.fn(async function* () {
           yield statusEvent('Analyzing codebase...');
           yield escalationEvent('sess-placeholder', 'Which database should I use?');
           // Block forever — simulates the real runtime waiting for human response
-          await neverResolves;
+          await streamWait;
         } as () => AsyncIterable<AgentEvent>),
       });
 
@@ -252,16 +304,20 @@ describe('Pod Lifecycle E2E', () => {
       // We don't await it — it'll be cleaned up when the test ends
       const processPromise = manager.processPod(pod.id);
 
-      // Wait a tick for events to be consumed up to the escalation
-      await new Promise((r) => setTimeout(r, 50));
+      // Wait for the observable transition, independent of machine load.
+      await vi.waitFor(() => expect(manager.getSession(pod.id).status).toBe('awaiting_input'), {
+        timeout: 5000,
+      });
 
       const escalated = manager.getSession(pod.id);
       expect(escalated.status).toBe('awaiting_input');
       expect(escalated.pendingEscalation).not.toBeNull();
       expect(escalated.escalationCount).toBe(1);
 
-      // Note: the sendMessage→resume→completion flow is tested separately
-      // in the existing pod-manager.test.ts sendMessage tests
+      releaseStream();
+      await processPromise;
+      expect(manager.getSession(pod.id).status).toBe('awaiting_input');
+      ctx.db.close();
     });
 
     it('human response via sendMessage resumes agent and completes', async () => {
@@ -304,49 +360,65 @@ describe('Pod Lifecycle E2E', () => {
       );
     });
 
-    it('queues and resumes with a fallback when an MCP response stream detached', async () => {
-      const pendingRequests = new PendingRequests();
-      const responsePromise = pendingRequests.waitForResponse('esc-1', 5000);
-      pendingRequests.markDetached('esc-1', 'mcp_response_stream_closed');
+    it.each([true, false])(
+      'reconciles detached MCP fallback with collection=%s',
+      async (collectReply) => {
+        const pendingRequests = new PendingRequests();
+        const responsePromise = pendingRequests.waitForResponse('esc-1', 5000);
+        pendingRequests.markDetached('esc-1', 'mcp_response_stream_closed');
 
-      const runtime = createMockRuntime({
-        resume: vi.fn(async function* () {
-          yield completeEvent('Resumed after detached MCP reply');
-        } as () => AsyncIterable<AgentEvent>),
-      });
+        const runtime = createMockRuntime({
+          resume: vi.fn(async function* () {
+            if (collectReply) {
+              const delivery = ctx.nudgeRepo.readPending(pod.id);
+              if (!delivery) throw new Error('Missing guidance delivery');
+              expect(delivery.messages.join('\n')).toContain('Use PostgreSQL');
+              expect(delivery.messages.join('\n')).toContain('original MCP response stream closed');
+              ctx.nudgeRepo.acknowledgeDelivery(pod.id, delivery.deliveryId);
+            }
+            yield completeEvent('Resumed after detached MCP reply');
+          } as () => AsyncIterable<AgentEvent>),
+        });
 
-      const ctx = createTestContext({ runtime });
-      const pendingRequestsByPod = new Map<string, PendingRequests>();
-      ctx.deps.pendingRequestsByPod = pendingRequestsByPod;
-      const manager = createPodManager(ctx.deps);
+        const ctx = createTestContext({ runtime });
+        const pendingRequestsByPod = new Map<string, PendingRequests>();
+        ctx.deps.pendingRequestsByPod = pendingRequestsByPod;
+        const manager = createPodManager(ctx.deps);
 
-      const pod = manager.createSession(
-        { profileName: 'test-profile', task: 'Add database support', skipValidation: true },
-        'user-1',
-      );
-      pendingRequestsByPod.set(pod.id, pendingRequests);
+        const pod = manager.createSession(
+          { profileName: 'test-profile', task: 'Add database support', skipValidation: true },
+          'user-1',
+        );
+        pendingRequestsByPod.set(pod.id, pendingRequests);
 
-      ctx.podRepo.update(pod.id, {
-        status: 'awaiting_input',
-        containerId: 'ctr-1',
-        pendingEscalation: { id: 'esc-1', type: 'ask_human', question: 'Which DB?' },
-      });
+        ctx.podRepo.update(pod.id, {
+          status: 'awaiting_input',
+          containerId: 'ctr-1',
+          pendingEscalation: { id: 'esc-1', type: 'ask_human', question: 'Which DB?' },
+        });
 
-      await manager.sendMessage(pod.id, 'Use PostgreSQL');
+        await manager.sendMessage(pod.id, 'Use PostgreSQL');
 
-      await expect(responsePromise).resolves.toBe('Use PostgreSQL');
-      expect(runtime.resume).toHaveBeenCalledTimes(1);
-      const resumeMessage = vi.mocked(runtime.resume).mock.calls[0]?.[1] as string;
-      expect(resumeMessage).toContain('Fallback response for the previous ask_human MCP call');
-      expect(resumeMessage).toContain('Use PostgreSQL');
+        await expect(responsePromise).resolves.toBe('Use PostgreSQL');
+        expect(runtime.resume).toHaveBeenCalledTimes(1);
+        const resumeMessage = vi.mocked(runtime.resume).mock.calls[0]?.[1] as string;
+        expect(resumeMessage).toContain('Fallback response for the previous ask_human MCP call');
+        expect(resumeMessage).toContain('Use PostgreSQL');
 
-      const queued = ctx.nudgeRepo.listPending(pod.id);
-      expect(queued).toHaveLength(1);
-      expect(queued[0]?.message).toContain('Fallback response for the previous ask_human MCP call');
-      expect(queued[0]?.message).toContain('Use PostgreSQL');
-      expect(queued[0]?.message).toContain('original MCP response stream closed');
-      expect(manager.getSession(pod.id).status).toBe('validated');
-    });
+        const queued = ctx.nudgeRepo.listPending(pod.id);
+        expect(queued).toHaveLength(collectReply ? 0 : 1);
+        if (!collectReply) {
+          expect(queued[0]?.message).toContain(
+            'Fallback response for the previous ask_human MCP call',
+          );
+          expect(queued[0]?.message).toContain('Use PostgreSQL');
+          expect(queued[0]?.message).toContain('original MCP response stream closed');
+          expect(manager.getSession(pod.id).failureReason).toContain('uncollected human guidance');
+          expect(manager.getSession(pod.id).finalization?.sourcePreservedAt).toBeNull();
+        }
+        expect(manager.getSession(pod.id).status).toBe(collectReply ? 'validated' : 'failed');
+      },
+    );
 
     it('fails the pod when the worker crashes while awaiting human input', async () => {
       const runtime = createMockRuntime({

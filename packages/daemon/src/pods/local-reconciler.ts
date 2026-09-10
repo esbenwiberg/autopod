@@ -2,8 +2,13 @@ import { access } from 'node:fs/promises';
 import type { Pod, PodStatus } from '@autopod/shared';
 import type { Logger } from 'pino';
 import type { ContainerManager } from '../interfaces/container-manager.js';
+import {
+  ARTIFACT_RESTART_REASON,
+  hasInterruptedArtifactCollection,
+} from './artifact-finalization-recovery.js';
 import type { EventBus } from './event-bus.js';
 import type { PodRepository } from './pod-repository.js';
+import { retainUnresolvedReconciliation } from './reconciliation-ownership.js';
 import type { ValidationRepository } from './validation-repository.js';
 
 export type ReconcileTrigger = 'restart' | 'wake';
@@ -60,13 +65,22 @@ export async function reconcileLocalSessions(
     'handoff',
   ] as const;
 
+  const visited = new Set<string>();
   for (const status of orphanStatuses) {
     const pods = podRepo.list({ status });
     const localSessions = pods.filter((s) => s.executionTarget === 'local');
 
     for (const pod of localSessions) {
+      if (visited.has(pod.id)) continue;
+      visited.add(pod.id);
+      if (retainUnresolvedReconciliation(pod.id, podRepo, deps.trigger)) {
+        result.skipped.push(pod.id);
+        continue;
+      }
       try {
-        await reconcileSession(pod, deps, result);
+        const current = podRepo.getOrThrow(pod.id);
+        if (current.status !== status || current.executionTarget !== 'local') continue;
+        await reconcileSession(current, deps, result);
       } catch (err) {
         logger.error({ err, podId: pod.id }, 'Failed to reconcile local pod');
         markSessionKilled(pod, deps);
@@ -84,6 +98,30 @@ async function reconcileSession(
   result: ReconcileResult,
 ): Promise<void> {
   const { podRepo, eventBus, containerManager, enqueueSession, logger } = deps;
+
+  // A daemon restart is not an answer to a human decision. Retain its identity
+  // and resources; a later explicit reply drives recovery rather than auto-dispatch.
+  if (pod.status === 'awaiting_input' || pod.pendingEscalation) {
+    podRepo.update(pod.id, {
+      lastRecoveryTrigger: 'restart',
+      lastCorrectionMessage:
+        'Human decision remains pending after daemon restart. Review the pending question; preserved worker state may require recovery before continuation.',
+    });
+    result.skipped.push(pod.id);
+    return;
+  }
+
+  if (hasInterruptedArtifactCollection(pod)) {
+    podRepo.update(pod.id, {
+      status: 'failed',
+      failureReason: ARTIFACT_RESTART_REASON,
+      lastRecoveryTrigger: deps.trigger ?? 'restart',
+      lastCorrectionMessage: ARTIFACT_RESTART_REASON,
+    });
+    emitStatusChanged(pod.id, pod.status, 'failed', eventBus);
+    result.skipped.push(pod.id);
+    return;
+  }
 
   // 0. Workspace pods whose container is still alive — restore running status in-place.
   //    Docker containers are independent processes and survive daemon restarts, so there

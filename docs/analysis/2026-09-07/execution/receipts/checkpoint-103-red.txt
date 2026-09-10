@@ -1,0 +1,35 @@
+
+ RUN  v4.1.11 /private/tmp/autopod-durable-execution/packages/daemon
+
+ ❯ src/pods/deletion-ownership.test.ts (1 test | 1 failed) 184ms
+   × rejects a second controller cleanup while the original deletion request remains unresolved 183ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/pods/deletion-ownership.test.ts > rejects a second controller cleanup while the original deletion request remains unresolved
+AssertionError: expected null to match object { Object (code) }
+
+- Expected:
+{
+  "code": "POD_DELETE_CLEANUP_UNVERIFIED",
+}
+
++ Received:
+null
+
+ ❯ src/pods/deletion-ownership.test.ts:19:20
+     17|     await vi.waitFor(() => expect(ctx.containerManager.kill).toHaveBee…
+     18|     const second = await secondManager.deleteSession(pod.id).then(() =…
+     19|     expect(second).toMatchObject({ code:'POD_DELETE_CLEANUP_UNVERIFIED…
+       |                    ^
+     20|     expect(ctx.containerManager.kill).toHaveBeenCalledOnce();
+     21|     expect(ctx.worktreeManager.cleanup).not.toHaveBeenCalled();
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed (1)
+   Start at  22:13:43
+   Duration  2.42s (transform 1.19s, setup 0ms, import 2.10s, tests 184ms, environment 0ms)
+

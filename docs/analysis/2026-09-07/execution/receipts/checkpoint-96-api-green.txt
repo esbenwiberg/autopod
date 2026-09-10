@@ -1,0 +1,33 @@
+
+ RUN  v4.1.11 /private/tmp/autopod-durable-execution/packages/daemon
+
+ ❯ src/pods/pod-manager.test.ts (624 tests | 1 failed | 623 skipped) 129ms
+     × rejects unauthorized worker Rework before HTTP acceptance or resource teardown 128ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/pods/pod-manager.test.ts > PodManager > rejects unauthorized worker Rework before HTTP acceptance or resource teardown
+AssertionError: expected undefined to be 'TASK_RETRY_RECONCILIATION_REQUIRED' // Object.is equality
+
+- Expected:
+"TASK_RETRY_RECONCILIATION_REQUIRED"
+
++ Received:
+undefined
+
+ ❯ src/pods/pod-manager.test.ts:1337:36
+    1335|       });
+    1336|       expect(response.statusCode, response.body).toBe(409);
+    1337|       expect(response.json().code).toBe('TASK_RETRY_RECONCILIATION_REQ…
+       |                                    ^
+    1338|       expect(ctx.podRepo.getOrThrow(pod.id)).toMatchObject({
+    1339|         lifecycleGeneration: before.lifecycleGeneration,
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 623 skipped (624)
+   Start at  19:52:34
+   Duration  1.55s (transform 917ms, setup 0ms, import 1.30s, tests 129ms, environment 0ms)
+

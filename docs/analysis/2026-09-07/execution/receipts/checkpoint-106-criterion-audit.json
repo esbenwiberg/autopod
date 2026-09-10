@@ -1,0 +1,436 @@
+{
+  "observedAtUTC": "2026-09-08T21:23:26.450005+00:00",
+  "candidate": "90a61141a6a8ed6205aae144bbb99f8c9f0f9ec5",
+  "criterionCount": 43,
+  "missingReferences": [],
+  "uniqueActiveMigrationPrefixes": true,
+  "maxActiveMigrationPrefix": 182,
+  "clientsUnchangedSinceCheckpoint105": true,
+  "applicationSourceUnchangedSinceCandidate": true,
+  "rows": [
+    {
+      "id": "W1.1",
+      "status": "partial",
+      "implementationReferences": 43,
+      "testReferences": 28,
+      "evidenceReferences": 70,
+      "prerequisites": [
+        "Visible native decision/guidance interaction remains unverified; final-source manager/MCP fault regressions passed."
+      ]
+    },
+    {
+      "id": "W1.2",
+      "status": "partial",
+      "implementationReferences": 36,
+      "testReferences": 25,
+      "evidenceReferences": 51,
+      "prerequisites": [
+        "Verify intended live source/resource identity. Releasing any particular abandoned execution/cleanup claim requires trustworthy original identity and observed termination; restart or elapsed time is not proof."
+      ]
+    },
+    {
+      "id": "W1.3",
+      "status": "partial",
+      "implementationReferences": 38,
+      "testReferences": 16,
+      "evidenceReferences": 87,
+      "prerequisites": [
+        "Verify intended live ownership before releasing unresolved claims. Final-source durable finalization/duplicate/ambiguous-delivery regressions passed; no provider side effect is inferred from an absent response."
+      ]
+    },
+    {
+      "id": "W1.4",
+      "status": "partial",
+      "implementationReferences": 12,
+      "testReferences": 9,
+      "evidenceReferences": 24,
+      "prerequisites": [
+        "Visible native settlement/source/validation/delivery/disposition interaction remains unverified."
+      ]
+    },
+    {
+      "id": "W1.5",
+      "status": "partial",
+      "implementationReferences": 24,
+      "testReferences": 13,
+      "evidenceReferences": 36,
+      "prerequisites": [
+        "Current deployed module/byte identity remains unverified under the live provenance gate; local cohesion and final-source regression audit are recorded in the closure report."
+      ]
+    },
+    {
+      "id": "W2.1",
+      "status": "partial",
+      "implementationReferences": 35,
+      "testReferences": 22,
+      "evidenceReferences": 71,
+      "prerequisites": [
+        "Visible native retry/Rework interaction and deployed provenance remain unverified. Task identity, cumulative allowance and reconstruction/linked-pod checks passed at final source."
+      ]
+    },
+    {
+      "id": "W2.2",
+      "status": "partial",
+      "implementationReferences": 19,
+      "testReferences": 7,
+      "evidenceReferences": 35,
+      "prerequisites": [
+        "Visible native retry authorization/binding interaction remains unverified. Final-source unchanged-failure and changed-condition/override regressions passed."
+      ]
+    },
+    {
+      "id": "W2.3",
+      "status": "partial",
+      "implementationReferences": 25,
+      "testReferences": 8,
+      "evidenceReferences": 30,
+      "prerequisites": [
+        "Visible native recovery interaction and actual deployed provider identity remain unverified. Fixed bounded backoff and observed retry deadlines passed final-source checks; missing historical deadlines remain unavailable."
+      ]
+    },
+    {
+      "id": "W2.4",
+      "status": "partial",
+      "implementationReferences": 32,
+      "testReferences": 15,
+      "evidenceReferences": 53,
+      "prerequisites": [
+        "Visible native cost/duration interaction remains unverified. No billing-backed infrastructure measurement is available; stored subtotals and non-additive duration completeness remain labelled. No additional billing collection requirement is inferred."
+      ]
+    },
+    {
+      "id": "W2.5",
+      "status": "verified",
+      "implementationReferences": 8,
+      "testReferences": 6,
+      "evidenceReferences": 10,
+      "prerequisites": []
+    },
+    {
+      "id": "W2.6",
+      "status": "partial",
+      "implementationReferences": 5,
+      "testReferences": 5,
+      "evidenceReferences": 10,
+      "prerequisites": [
+        "Visible native historical finding/waiver/outcome interaction remains unverified; final-source frozen finding and closure regressions passed."
+      ]
+    },
+    {
+      "id": "W2.7",
+      "status": "verified",
+      "implementationReferences": 2,
+      "testReferences": 2,
+      "evidenceReferences": 11,
+      "prerequisites": []
+    },
+    {
+      "id": "W3.1",
+      "status": "partial",
+      "implementationReferences": 10,
+      "testReferences": 7,
+      "evidenceReferences": 14,
+      "prerequisites": [
+        "Verify deployed strict-fetch bytes under the current live provenance gate; final-source actual-base declaration regressions passed."
+      ]
+    },
+    {
+      "id": "W3.2",
+      "status": "partial",
+      "implementationReferences": 10,
+      "testReferences": 6,
+      "evidenceReferences": 16,
+      "prerequisites": [
+        "Visible native intentional-rerun interaction remains unverified. Final-source equivalent-work and distinct-identity regressions passed; asynchronous ownership/preflight boundaries are summarized in closure."
+      ]
+    },
+    {
+      "id": "W3.3",
+      "status": "partial",
+      "implementationReferences": 14,
+      "testReferences": 12,
+      "evidenceReferences": 23,
+      "prerequisites": [
+        "Actual-image capability acceptance remains gated by W3.6. Final-source required-command/resource/provider and continuation admission checks passed."
+      ]
+    },
+    {
+      "id": "W3.4",
+      "status": "partial",
+      "implementationReferences": 2,
+      "testReferences": 2,
+      "evidenceReferences": 8,
+      "prerequisites": [
+        "Run the required actual-image capability canary after exact target/configuration/spend discovery and explicit authorization; local semantics and denied-capability checks passed."
+      ]
+    },
+    {
+      "id": "W3.5",
+      "status": "partial",
+      "implementationReferences": 14,
+      "testReferences": 5,
+      "evidenceReferences": 14,
+      "prerequisites": [
+        "Verify current deployed provider identity and visible native reconciliation errors; final-source mutable-profile rejection and frozen-binding checks passed."
+      ]
+    },
+    {
+      "id": "W3.6",
+      "status": "unverified",
+      "implementationReferences": 0,
+      "testReferences": 0,
+      "evidenceReferences": 4,
+      "prerequisites": [
+        "Discover exact image/group/tier/registry configuration and price; fill the bounded canary section in release-and-acceptance-packet.md, obtain explicit approval, then run and record the actual result."
+      ]
+    },
+    {
+      "id": "W4.1",
+      "status": "partial",
+      "implementationReferences": 22,
+      "testReferences": 12,
+      "evidenceReferences": 29,
+      "prerequisites": [
+        "Current hosted/root-cause and visible native units/disposition acceptance remain unverified. Final-source retained accounting/export cohorts passed."
+      ]
+    },
+    {
+      "id": "W4.2",
+      "status": "partial",
+      "implementationReferences": 13,
+      "testReferences": 3,
+      "evidenceReferences": 15,
+      "prerequisites": [
+        "Visible native outcome interaction remains unverified. Final-source skipped/unavailable/waived/no-change/cancelled/external/unresolved distinctions passed."
+      ]
+    },
+    {
+      "id": "W4.3",
+      "status": "partial",
+      "implementationReferences": 9,
+      "testReferences": 5,
+      "evidenceReferences": 10,
+      "prerequisites": [
+        "Visible native denominator/delivery interaction and current deployed bytes remain unverified. Final-source distinct logical delivery and retained cohorts passed."
+      ]
+    },
+    {
+      "id": "W4.4",
+      "status": "partial",
+      "implementationReferences": 19,
+      "testReferences": 18,
+      "evidenceReferences": 32,
+      "prerequisites": [
+        "Visible native history/waiver/delivery interaction remains unverified. Final-source immutable history and malformed/retained export checks passed."
+      ]
+    },
+    {
+      "id": "W4.5",
+      "status": "unverified",
+      "implementationReferences": 1,
+      "testReferences": 1,
+      "evidenceReferences": 9,
+      "prerequisites": [
+        "Payload-specific production metadata egress approval remains pending; revised bounded payload and target are prepared in release-and-acceptance-packet.md. No bypass/retry occurred. Prove or disprove the hosted failure cause from current evidence before claiming repair."
+      ]
+    },
+    {
+      "id": "W4.6",
+      "status": "partial",
+      "implementationReferences": 32,
+      "testReferences": 14,
+      "evidenceReferences": 22,
+      "prerequisites": [
+        "Inspect actual production failure evidence under W4.5 before claiming hosted repair. Final-source realistic-size malformed-row, bounded-projection and snapshot-export checks passed."
+      ]
+    },
+    {
+      "id": "W4.7",
+      "status": "partial",
+      "implementationReferences": 22,
+      "testReferences": 9,
+      "evidenceReferences": 34,
+      "prerequisites": [
+        "Visible native cost/phase interaction remains unverified. Final-source task/phase/attempt/fleet accounting checks passed; billing and unavailable infrastructure cost remain explicitly unverified rather than invented."
+      ]
+    },
+    {
+      "id": "W4.8",
+      "status": "partial",
+      "implementationReferences": 37,
+      "testReferences": 14,
+      "evidenceReferences": 69,
+      "prerequisites": [
+        "Visible native interaction remains unverified; supported native control or a user-performed walkthrough is needed. Final CLI and built-mobile evidence is retained. No separate physical-device criterion is added."
+      ]
+    },
+    {
+      "id": "W5.1",
+      "status": "partial",
+      "implementationReferences": 6,
+      "testReferences": 3,
+      "evidenceReferences": 13,
+      "prerequisites": [
+        "Visible native scan/report/triage interaction remains unverified. Final-source actual scheduling, deterministic collection, exact delta, incomplete-run, durable finding and human-selected repair regressions passed. A live schedule conversion or paid judgment cohort is not added as a prerequisite; any future such action needs its own authorization."
+      ]
+    },
+    {
+      "id": "W5.2",
+      "status": "partial",
+      "implementationReferences": 2,
+      "testReferences": 2,
+      "evidenceReferences": 14,
+      "prerequisites": [
+        "Visible native scan/report/triage interaction remains unverified. Final-source actual scheduling, deterministic collection, exact delta, incomplete-run, durable finding and human-selected repair regressions passed. A live schedule conversion or paid judgment cohort is not added as a prerequisite; any future such action needs its own authorization."
+      ]
+    },
+    {
+      "id": "W5.3",
+      "status": "partial",
+      "implementationReferences": 6,
+      "testReferences": 3,
+      "evidenceReferences": 16,
+      "prerequisites": [
+        "Visible native scan/report/triage interaction remains unverified. Final-source actual scheduling, deterministic collection, exact delta, incomplete-run, durable finding and human-selected repair regressions passed. A live schedule conversion or paid judgment cohort is not added as a prerequisite; any future such action needs its own authorization."
+      ]
+    },
+    {
+      "id": "W5.4",
+      "status": "partial",
+      "implementationReferences": 6,
+      "testReferences": 2,
+      "evidenceReferences": 15,
+      "prerequisites": [
+        "Visible native scan/report/triage interaction remains unverified. Final-source actual scheduling, deterministic collection, exact delta, incomplete-run, durable finding and human-selected repair regressions passed. A live schedule conversion or paid judgment cohort is not added as a prerequisite; any future such action needs its own authorization."
+      ]
+    },
+    {
+      "id": "W5.5",
+      "status": "partial",
+      "implementationReferences": 8,
+      "testReferences": 3,
+      "evidenceReferences": 15,
+      "prerequisites": [
+        "Visible native scan/report/triage interaction remains unverified. Final-source actual scheduling, deterministic collection, exact delta, incomplete-run, durable finding and human-selected repair regressions passed. A live schedule conversion or paid judgment cohort is not added as a prerequisite; any future such action needs its own authorization."
+      ]
+    },
+    {
+      "id": "W5.6",
+      "status": "partial",
+      "implementationReferences": 11,
+      "testReferences": 4,
+      "evidenceReferences": 15,
+      "prerequisites": [
+        "Visible native scan/report/triage interaction remains unverified. Final-source actual scheduling, deterministic collection, exact delta, incomplete-run, durable finding and human-selected repair regressions passed. A live schedule conversion or paid judgment cohort is not added as a prerequisite; any future such action needs its own authorization."
+      ]
+    },
+    {
+      "id": "W6.1",
+      "status": "partial",
+      "implementationReferences": 28,
+      "testReferences": 17,
+      "evidenceReferences": 35,
+      "prerequisites": [
+        "Current daemon/image/CLI/capability identities require approved inspection and the required actual-image canary. Local fixtures do not prove deployed values."
+      ]
+    },
+    {
+      "id": "W6.2",
+      "status": "partial",
+      "implementationReferences": 5,
+      "testReferences": 2,
+      "evidenceReferences": 10,
+      "prerequisites": [
+        "Current public health is 200 but queried release/image/readiness fields are absent. Verify intended deployed identity and visible native readiness interaction."
+      ]
+    },
+    {
+      "id": "W6.3",
+      "status": "unverified",
+      "implementationReferences": 2,
+      "testReferences": 1,
+      "evidenceReferences": 7,
+      "prerequisites": [
+        "Approve the prepared metadata payload; establish intended active DB and backup scope/freshness. File inventory alone is not data freshness proof and missing one directory does not mean all backups are missing."
+      ]
+    },
+    {
+      "id": "W6.4",
+      "status": "partial",
+      "implementationReferences": 5,
+      "testReferences": 3,
+      "evidenceReferences": 8,
+      "prerequisites": [
+        "Verify current intended-database backup freshness and actual target headroom under approved inspection; final-source WAL-safe backup tests passed."
+      ]
+    },
+    {
+      "id": "W6.5",
+      "status": "partial",
+      "implementationReferences": 5,
+      "testReferences": 3,
+      "evidenceReferences": 8,
+      "prerequisites": [
+        "After active DB identity discovery, select an actual scoped backup and approve the bounded on-VM isolated restore/data-handling plan. Record integrity, scope and freshness; local synthetic restoration already passed."
+      ]
+    },
+    {
+      "id": "G.1",
+      "status": "partial",
+      "implementationReferences": 9,
+      "testReferences": 12,
+      "evidenceReferences": 14,
+      "prerequisites": [
+        "Verify exact current deployed safeguard bytes under approved provenance inspection. Final candidate includes main c0e5a5b4 and preserves historical regression coverage."
+      ]
+    },
+    {
+      "id": "G.2",
+      "status": "partial",
+      "implementationReferences": 9,
+      "testReferences": 7,
+      "evidenceReferences": 20,
+      "prerequisites": [
+        "Current-target database lineage/compatibility remains unverified. Final candidate retains unique migration prefixes through 182; all 173 inspected remote heads have prefixes through 152 and available objects. Refresh again before publication."
+      ]
+    },
+    {
+      "id": "G.3",
+      "status": "verified",
+      "implementationReferences": 12,
+      "testReferences": 6,
+      "evidenceReferences": 66,
+      "prerequisites": []
+    },
+    {
+      "id": "G.4",
+      "status": "partial",
+      "implementationReferences": 19,
+      "testReferences": 6,
+      "evidenceReferences": 48,
+      "prerequisites": [
+        "Visible native workflow interaction remains unverified; compilation and decoding are not substitutes. CLI HTTP and selected built-mobile interactions have recorded proof."
+      ]
+    },
+    {
+      "id": "G.5",
+      "status": "partial",
+      "implementationReferences": 0,
+      "testReferences": 0,
+      "evidenceReferences": 4,
+      "prerequisites": [
+        "The candidate diff, verified Azure VM target, staged release/rollback safeguards and minimum canary scope are prepared. Current guest release/DB/rollback SHA and sandbox image/tier/pricing remain unknown; discover them before requesting deploy/canary authority. Only the first bounded metadata payload is approval-ready."
+      ]
+    },
+    {
+      "id": "G.6",
+      "status": "partial",
+      "implementationReferences": 0,
+      "testReferences": 0,
+      "evidenceReferences": 5,
+      "prerequisites": [
+        "The closure report and all 43 criterion mappings are prepared. Required native/live/canary/real-backup acceptance remains outstanding, so this is partial closure and the goal is not complete."
+      ]
+    }
+  ]
+}

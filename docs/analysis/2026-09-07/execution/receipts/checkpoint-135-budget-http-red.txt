@@ -1,0 +1,43 @@
+
+ RUN  v4.1.11 /private/tmp/autopod-durable-execution/packages/daemon
+
+(node:63437) [FSTDEP023] FastifyDeprecation: disableRequestLogging option is deprecated. Use the logController option with disableRequestLogging or isLogDisabled override instead. The disableRequestLogging top-level option will be removed in `fastify@6`.
+(Use `node --trace-warnings ...` to show where the warning was created)
+{"level":30,"time":1789032390077,"pid":63437,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"test-app","msg":"Profile created"}
+{"level":30,"time":1789032390080,"pid":63437,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"test-app","fields":["tokenBudget"],"msg":"Profile updated"}
+(node:63437) [FSTDEP023] FastifyDeprecation: disableRequestLogging option is deprecated. Use the logController option with disableRequestLogging or isLogDisabled override instead. The disableRequestLogging top-level option will be removed in `fastify@6`.
+{"level":30,"time":1789032390138,"pid":63437,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"test-app","msg":"Profile created"}
+{"level":30,"time":1789032390139,"pid":63437,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"test-app","fields":["tokenBudget"],"msg":"Profile updated"}
+(node:63437) [FSTDEP023] FastifyDeprecation: disableRequestLogging option is deprecated. Use the logController option with disableRequestLogging or isLogDisabled override instead. The disableRequestLogging top-level option will be removed in `fastify@6`.
+{"level":30,"time":1789032390189,"pid":63437,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"test-app","msg":"Profile created"}
+{"level":30,"time":1789032390190,"pid":63437,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"test-app","fields":["tokenBudget"],"msg":"Profile updated"}
+ ❯ src/integration.test.ts (59 tests | 1 failed | 56 skipped) 203ms
+       × POST /pods retains token budget 32000 in durable task accounting 99ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/integration.test.ts > Integration > Sessions > POST /pods retains token budget 32000 in durable task accounting
+AssertionError: expected 48000 to be 32000 // Object.is equality
+
+- Expected
++ Received
+
+- 32000
++ 48000
+
+ ❯ src/integration.test.ts:670:42
+    668|       expect(created.statusCode).toBe(201);
+    669|       const expected = tokenBudget ?? 48000;
+    670|       expect(created.json().tokenBudget).toBe(expected);
+       |                                          ^
+    671|       expect(createPodRepository(db).getOrThrow(created.json().id).tok…
+    672|       const accounting = await app.inject({
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 2 passed | 56 skipped (59)
+   Start at  11:26:28
+   Duration  1.41s (transform 623ms, setup 0ms, import 1.11s, tests 203ms, environment 0ms)
+

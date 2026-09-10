@@ -1,0 +1,73 @@
+{
+  "observedAt": "2026-09-10T07:37:49.224644+00:00",
+  "pid": 125941,
+  "serviceCwd": "/opt/autopod/releases/ca92847a/packages/daemon",
+  "loadedBytesAttested": false,
+  "currentMatchesService": true,
+  "serviceStartedAt": "Wed 2026-09-09 15:35:44 UTC",
+  "checkoutSha": "ca92847a64aa11d58b5a43ca29659262fe85ada9",
+  "checkoutDirty": false,
+  "entryBundles": [
+    {
+      "name": "index.js",
+      "bytes": 2266521,
+      "sha256": "db9c40282f89e6518eb321750eb40ee28245f4460ea8a42b693c7d924dc854e8",
+      "mtimeNs": 1788959634634818885
+    },
+    {
+      "name": "managed.js",
+      "bytes": 2950,
+      "sha256": "6c7ade53f60c7a458e360465f232a68ac46a26ee57cf0c614a0c8a3dbc5173ef",
+      "mtimeNs": 1788959634627818986
+    }
+  ],
+  "activeDatabase": {
+    "device": 2049,
+    "inode": 13107203,
+    "serviceFdMatched": true,
+    "bytes": 877150208
+  },
+  "schemaMaximum": 153,
+  "restartBlockingCounts": {
+    "provisioning": 0,
+    "running": 0,
+    "awaiting_input": 0,
+    "paused": 0,
+    "validating": 0,
+    "validated": 0,
+    "review_required": 0,
+    "approved": 0,
+    "merging": 0,
+    "merge_pending": 0,
+    "killing": 0
+  },
+  "queuedCount": 0,
+  "freeBytes": 139107713024,
+  "preReportJournal": {
+    "exit": 0,
+    "incomplete": null,
+    "bytes": 0,
+    "journalEntries": 0,
+    "parsedApplicationEntries": 0,
+    "firstMicros": null,
+    "lastMicros": null,
+    "routeStatuses": {},
+    "directRouteErrorClasses": {},
+    "windowEndUTC": "2026-09-07T08:27:28Z"
+  },
+  "reportDayCoverage": {
+    "exit": 0,
+    "incomplete": null,
+    "bytes": 1219012,
+    "journalEntries": 703,
+    "parsedApplicationEntries": 687,
+    "firstMicros": 1788781795948521,
+    "lastMicros": 1788825299569492,
+    "routeStatuses": {
+      "/pods:200": 3,
+      "/pods/analytics/cost:200": 1
+    },
+    "directRouteErrorClasses": {}
+  },
+  "serviceStableAtEnd": true
+}

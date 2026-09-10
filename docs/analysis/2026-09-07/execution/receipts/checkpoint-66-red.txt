@@ -1,0 +1,101 @@
+
+ RUN  v4.1.11 /private/tmp/autopod-durable-execution/packages/daemon
+
+ ❯ src/validation/review-tool-runner.test.ts (23 tests | 6 failed | 17 skipped) 13ms
+     × allows one final request without tools and stops if the model requests more tools 11ms
+     × retains known usage when a later API request fails and disables implicit SDK retry 1ms
+     × rejects invalid tool budgets before dispatch: -1 1ms
+     × rejects invalid tool budgets before dispatch: 1.5 0ms
+     × rejects invalid tool budgets before dispatch: NaN 0ms
+     × rejects invalid tool budgets before dispatch: Infinity 0ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 6 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/validation/review-tool-runner.test.ts > review tool runner - Anthropic request shape > allows one final request without tools and stops if the model requests more tools
+AssertionError: expected { stdout: '{"status":"pass"}', …(1) } to match object { kind: 'budget-exhausted', …(1) }
+(1 matching property omitted from actual)
+
+- Expected
++ Received
+
+  {
+-   "kind": "budget-exhausted",
+    "tokenUsage": {
+-     "inputTokens": 20,
+-     "outputTokens": 4,
++     "inputTokens": 30,
++     "outputTokens": 6,
+    },
+  }
+
+ ❯ src/validation/review-tool-runner.test.ts:159:20
+    157|       maxToolCalls: 1, providerClient: { model: 'selected', client: { …
+    158|     }).catch((error: unknown) => error);
+    159|     expect(result).toMatchObject({ kind: 'budget-exhausted', tokenUsag…
+       |                    ^
+    160|     expect(create).toHaveBeenCalledTimes(2);
+    161|     expect(create.mock.calls[1]?.[0].tools).toBeUndefined();
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/6]⎯
+
+ FAIL  src/validation/review-tool-runner.test.ts > review tool runner - Anthropic request shape > retains known usage when a later API request fails and disables implicit SDK retry
+AssertionError: expected Error: second request transport failed to match object { kind: 'provider-error', …(1) }
+
+- Expected
++ Received
+
+- {
+-   "kind": "provider-error",
+-   "tokenUsage": {
+-     "inputTokens": 12,
+-     "outputTokens": 3,
+-   },
++ Error {
++   "message": "second request transport failed",
+  }
+
+ ❯ src/validation/review-tool-runner.test.ts:177:20
+    175|       providerClient: { model: 'selected', client: { messages: { creat…
+    176|     }).catch((error: unknown) => error);
+    177|     expect(result).toMatchObject({ kind: 'provider-error', tokenUsage:…
+       |                    ^
+    178|     expect(create).toHaveBeenCalledTimes(2);
+    179|     for (const [, options] of create.mock.calls) expect(options).toMat…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/6]⎯
+
+ FAIL  src/validation/review-tool-runner.test.ts > review tool runner - Anthropic request shape > rejects invalid tool budgets before dispatch: -1
+ FAIL  src/validation/review-tool-runner.test.ts > review tool runner - Anthropic request shape > rejects invalid tool budgets before dispatch: 1.5
+ FAIL  src/validation/review-tool-runner.test.ts > review tool runner - Anthropic request shape > rejects invalid tool budgets before dispatch: NaN
+ FAIL  src/validation/review-tool-runner.test.ts > review tool runner - Anthropic request shape > rejects invalid tool budgets before dispatch: Infinity
+AssertionError: expected { stdout: '{}', tokenUsage: { …(2) } } to match object { message: StringMatching{…} }
+(4 matching properties omitted from actual)
+
+- Expected
++ Received
+
+  {
+-   "message": StringMatching /tool budget/i,
++   "stdout": "{}",
++   "tokenUsage": {
++     "inputTokens": 0,
++     "outputTokens": 0,
++   },
+  }
+
+ ❯ src/validation/review-tool-runner.test.ts:188:20
+    186|       providerClient: { model: 'selected', client: { messages: { creat…
+    187|     }).catch((error: unknown) => error);
+    188|     expect(result).toMatchObject({ message: expect.stringMatching(/too…
+       |                    ^
+    189|     expect(create).not.toHaveBeenCalled();
+    190|   });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/6]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  6 failed | 17 skipped (23)
+   Start at  11:59:56
+   Duration  144ms (transform 28ms, setup 0ms, import 31ms, tests 13ms, environment 0ms)
+

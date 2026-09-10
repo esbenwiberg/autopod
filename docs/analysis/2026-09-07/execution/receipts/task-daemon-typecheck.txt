@@ -1,0 +1,12 @@
+
+> @autopod/daemon@0.0.1 typecheck /private/tmp/autopod-durable-execution/packages/daemon
+> AUTOPOD_TYPECHECK=1 tsup --dts-only --out-dir .turbo/typecheck
+
+CLI Building entry: src/index.ts, src/db/verify-backup-cli.ts
+CLI Using tsconfig: tsconfig.json
+CLI tsup v8.5.1
+CLI Using tsup config: /private/tmp/autopod-durable-execution/packages/daemon/tsup.config.ts
+DTS Build start
+DTS ⚡️ Build success in 5920ms
+DTS .turbo/typecheck/index.d.ts                13.00 B
+DTS .turbo/typecheck/db/verify-backup-cli.d.ts 13.00 B

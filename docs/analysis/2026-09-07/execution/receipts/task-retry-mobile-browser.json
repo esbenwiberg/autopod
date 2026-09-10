@@ -1,0 +1,28 @@
+{
+  "scope": "built mobile UI with synthetic loopback fixture; no real worker or provider call",
+  "observations": [
+    "awaiting_input showed retry actions before guard correction",
+    "rebuilt awaiting_input retained accounting and suppressed retry actions",
+    "review_required displayed 3 executed / 4 admitted and interrupted duration unknown",
+    "human reason recorded one authorization without executing",
+    "reload retained available authorization",
+    "separate Resume consumed authorization and displayed 4 executed / 5 admitted",
+    "phone screenshot exposed short native-style controls; dedicated retry panel CSS added full-width input and minimum 44px buttons",
+    "rebuilt screenshot showed readable wrapped accounting and full-width actions"
+  ],
+  "requestedViewport": {
+    "width": 390,
+    "height": 844
+  },
+  "measuredDOM": {
+    "width": 375,
+    "contentWidth": 375
+  },
+  "fixtureLimit": "The initial retry-mode fixture retained an unrelated stale finalization pending-decision pointer; corrected fixture source clears it. The synthetic Resume endpoint is not lifecycle proof. Actual API/SQLite tests separately verify no execution through unanswered decisions.",
+  "cleanup": {
+    "viewportReset": true,
+    "tabClosed": true,
+    "serverStopped": true
+  },
+  "nativeInteraction": "unverified; native CUA surfaces unavailable"
+}

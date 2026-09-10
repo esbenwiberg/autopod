@@ -1,0 +1,1066 @@
+{
+  "head": "638f9144017ee59cdb04e4fa927e42e62c4fbe1b",
+  "originMain": "13af0be4efbfd040a9972f8546d485dbf13c2e1b",
+  "maxLocalPrefix": 178,
+  "refs": [
+    {
+      "ref": "refs/heads/advisory-browser-qa-spec",
+      "maxPrefix": 104
+    },
+    {
+      "ref": "refs/heads/agent/classify-sandbox-oom",
+      "maxPrefix": 139
+    },
+    {
+      "ref": "refs/heads/agent/desktop-event-resync",
+      "maxPrefix": 123
+    },
+    {
+      "ref": "refs/heads/agent/fix-codex-event-ordering",
+      "maxPrefix": 120
+    },
+    {
+      "ref": "refs/heads/agent/fix-codex-reviewer-version",
+      "maxPrefix": 120
+    },
+    {
+      "ref": "refs/heads/agent/fix-force-hosted-deploy",
+      "maxPrefix": 139
+    },
+    {
+      "ref": "refs/heads/agent/fix-hosted-health-retry",
+      "maxPrefix": 139
+    },
+    {
+      "ref": "refs/heads/agent/fix-pod-memory-review",
+      "maxPrefix": 120
+    },
+    {
+      "ref": "refs/heads/agent/fix-review-checkpoint-closure",
+      "maxPrefix": 139
+    },
+    {
+      "ref": "refs/heads/agent/fix-review-checkpoint-closure-main",
+      "maxPrefix": 140
+    },
+    {
+      "ref": "refs/heads/agent/fix-review-council-schemas",
+      "maxPrefix": 137
+    },
+    {
+      "ref": "refs/heads/agent/fix-validation-recurrence",
+      "maxPrefix": 138
+    },
+    {
+      "ref": "refs/heads/agent/fix-validation-review-cycle-continuity",
+      "maxPrefix": 139
+    },
+    {
+      "ref": "refs/heads/agent/memory-provenance-labels",
+      "maxPrefix": 122
+    },
+    {
+      "ref": "refs/heads/agent/recover-codex-sandbox-stream",
+      "maxPrefix": 120
+    },
+    {
+      "ref": "refs/heads/agent/surface-codex-pod-failures",
+      "maxPrefix": 121
+    },
+    {
+      "ref": "refs/heads/agent/surface-prepush-security-findings",
+      "maxPrefix": 120
+    },
+    {
+      "ref": "refs/heads/autopod/boiling-chicken",
+      "maxPrefix": 137
+    },
+    {
+      "ref": "refs/heads/autopod/lucky-kiwi",
+      "maxPrefix": 123
+    },
+    {
+      "ref": "refs/heads/backup/main-before-github-rebase-20260626100538",
+      "maxPrefix": 119
+    },
+    {
+      "ref": "refs/heads/claude/research-ai-coding-agents-C37wX",
+      "maxPrefix": 37
+    },
+    {
+      "ref": "refs/heads/codex/action-security-http-resilience",
+      "maxPrefix": 152
+    },
+    {
+      "ref": "refs/heads/codex/advisory-qa-capture-readiness",
+      "maxPrefix": 118
+    },
+    {
+      "ref": "refs/heads/codex/cli-dev-token-local-only",
+      "maxPrefix": 119
+    },
+    {
+      "ref": "refs/heads/codex/dispatcher-managed-v1",
+      "maxPrefix": 152
+    },
+    {
+      "ref": "refs/heads/codex/docs-readme-refresh",
+      "maxPrefix": 117
+    },
+    {
+      "ref": "refs/heads/codex/durable-execution-contract",
+      "maxPrefix": 178
+    },
+    {
+      "ref": "refs/heads/codex/evidence-yaml-facts",
+      "maxPrefix": 101
+    },
+    {
+      "ref": "refs/heads/codex/fix-codex-sandbox-completion",
+      "maxPrefix": 120
+    },
+    {
+      "ref": "refs/heads/codex/fix-sandbox-validation-permissions",
+      "maxPrefix": 120
+    },
+    {
+      "ref": "refs/heads/codex/fix-series-contract-copy",
+      "maxPrefix": 101
+    },
+    {
+      "ref": "refs/heads/codex/full-pod-id-instructions",
+      "maxPrefix": 118
+    },
+    {
+      "ref": "refs/heads/codex/haproxy-stream-timeout",
+      "maxPrefix": 117
+    },
+    {
+      "ref": "refs/heads/codex/luumi-deno-image",
+      "maxPrefix": 138
+    },
+    {
+      "ref": "refs/heads/codex/podsitter-skill-routing",
+      "maxPrefix": 118
+    },
+    {
+      "ref": "refs/heads/codex/pre-pull-latest-backup-20260529",
+      "maxPrefix": 109
+    },
+    {
+      "ref": "refs/heads/codex/pre-pull-wip-20260529",
+      "maxPrefix": 109
+    },
+    {
+      "ref": "refs/heads/codex/safety-security-stats",
+      "maxPrefix": 118
+    },
+    {
+      "ref": "refs/heads/comparable-sparrow-snipe",
+      "maxPrefix": 109
+    },
+    {
+      "ref": "refs/heads/dependabot/npm_and_yarn/multi-c336f0d9c2",
+      "maxPrefix": 118
+    },
+    {
+      "ref": "refs/heads/dependabot/npm_and_yarn/npm-minor-and-patch-937d5e1b9f",
+      "maxPrefix": 120
+    },
+    {
+      "ref": "refs/heads/dependabot/npm_and_yarn/npm-minor-and-patch-b2c8a09620",
+      "maxPrefix": 120
+    },
+    {
+      "ref": "refs/heads/dependabot/npm_and_yarn/open-11.0.0",
+      "maxPrefix": 120
+    },
+    {
+      "ref": "refs/heads/feat/detached-mcp-fallback",
+      "maxPrefix": 120
+    },
+    {
+      "ref": "refs/heads/feat/sandbox-interactive-shell",
+      "maxPrefix": 120
+    },
+    {
+      "ref": "refs/heads/fix/cap-container-cpu",
+      "maxPrefix": 118
+    },
+    {
+      "ref": "refs/heads/fix/codex-sandbox-completion",
+      "maxPrefix": 120
+    },
+    {
+      "ref": "refs/heads/fix/daemon-native-podsitter-stabilization",
+      "maxPrefix": 133
+    },
+    {
+      "ref": "refs/heads/fix/detached-mcp-human-reply",
+      "maxPrefix": 123
+    },
+    {
+      "ref": "refs/heads/fix/force-revalidate-review-required",
+      "maxPrefix": 140
+    },
+    {
+      "ref": "refs/heads/fix/issue-139-canonical-pricing",
+      "maxPrefix": 123
+    },
+    {
+      "ref": "refs/heads/fix/openai-review-container-auth",
+      "maxPrefix": 120
+    },
+    {
+      "ref": "refs/heads/fix/pilot-tmux-3.7",
+      "maxPrefix": 137
+    },
+    {
+      "ref": "refs/heads/fix/pod-completion-ghost",
+      "maxPrefix": 140
+    },
+    {
+      "ref": "refs/heads/fix/podsitter-acceptance-gaps",
+      "maxPrefix": 133
+    },
+    {
+      "ref": "refs/heads/fix/quality-partial-inspection-telemetry",
+      "maxPrefix": 140
+    },
+    {
+      "ref": "refs/heads/fix/readiness-validation-rework-scope",
+      "maxPrefix": 121
+    },
+    {
+      "ref": "refs/heads/fix/recover-worktree-controller-observe",
+      "maxPrefix": 140
+    },
+    {
+      "ref": "refs/heads/fix/review-closure-infrastructure",
+      "maxPrefix": 140
+    },
+    {
+      "ref": "refs/heads/fix/sandbox-bulk-volume-upload",
+      "maxPrefix": 120
+    },
+    {
+      "ref": "refs/heads/fix/sandbox-checkpoint-races",
+      "maxPrefix": 137
+    },
+    {
+      "ref": "refs/heads/fix/sandbox-exec-stream-and-terminal",
+      "maxPrefix": 120
+    },
+    {
+      "ref": "refs/heads/fix/sandbox-memory-ceiling",
+      "maxPrefix": 136
+    },
+    {
+      "ref": "refs/heads/fix/sandbox-native-memory",
+      "maxPrefix": 140
+    },
+    {
+      "ref": "refs/heads/fix/sandbox-reaper-clears-recovery",
+      "maxPrefix": 137
+    },
+    {
+      "ref": "refs/heads/fix/sandbox-recovery-history-rewrite",
+      "maxPrefix": 140
+    },
+    {
+      "ref": "refs/heads/fix/validation-history-identity",
+      "maxPrefix": 140
+    },
+    {
+      "ref": "refs/heads/fix/validation-only-retry",
+      "maxPrefix": 140
+    },
+    {
+      "ref": "refs/heads/fix/validation-start-env",
+      "maxPrefix": 139
+    },
+    {
+      "ref": "refs/heads/hotfix/checkpoint-named-ref",
+      "maxPrefix": 137
+    },
+    {
+      "ref": "refs/heads/hotfix/compact-cursor-sqlite-timestamp",
+      "maxPrefix": 127
+    },
+    {
+      "ref": "refs/heads/main",
+      "maxPrefix": 141
+    },
+    {
+      "ref": "refs/heads/operator/pr230-format",
+      "maxPrefix": 124
+    },
+    {
+      "ref": "refs/heads/operator/pr231-delivery",
+      "maxPrefix": 124
+    },
+    {
+      "ref": "refs/heads/operator/pr231-exact",
+      "maxPrefix": 127
+    },
+    {
+      "ref": "refs/heads/operator/pr231-tree",
+      "maxPrefix": 127
+    },
+    {
+      "ref": "refs/heads/provider-accounts",
+      "maxPrefix": 120
+    },
+    {
+      "ref": "refs/heads/repair/architectural-wombat-sync-artifact",
+      "maxPrefix": 121
+    },
+    {
+      "ref": "refs/heads/rescue/pr237",
+      "maxPrefix": 128
+    },
+    {
+      "ref": "refs/remotes/origin/HEAD",
+      "maxPrefix": 152
+    },
+    {
+      "ref": "refs/remotes/origin/advisory-browser-qa-spec",
+      "maxPrefix": 104
+    },
+    {
+      "ref": "refs/remotes/origin/agent/classify-sandbox-oom",
+      "maxPrefix": 139
+    },
+    {
+      "ref": "refs/remotes/origin/agent/desktop-event-resync",
+      "maxPrefix": 123
+    },
+    {
+      "ref": "refs/remotes/origin/agent/fix-codex-event-ordering",
+      "maxPrefix": 120
+    },
+    {
+      "ref": "refs/remotes/origin/agent/fix-codex-reviewer-version",
+      "maxPrefix": 120
+    },
+    {
+      "ref": "refs/remotes/origin/agent/fix-force-hosted-deploy",
+      "maxPrefix": 139
+    },
+    {
+      "ref": "refs/remotes/origin/agent/fix-hosted-health-retry",
+      "maxPrefix": 139
+    },
+    {
+      "ref": "refs/remotes/origin/agent/fix-pod-memory-review",
+      "maxPrefix": 120
+    },
+    {
+      "ref": "refs/remotes/origin/agent/fix-review-checkpoint-closure",
+      "maxPrefix": 139
+    },
+    {
+      "ref": "refs/remotes/origin/agent/fix-review-checkpoint-closure-main",
+      "maxPrefix": 140
+    },
+    {
+      "ref": "refs/remotes/origin/agent/fix-review-council-schemas",
+      "maxPrefix": 137
+    },
+    {
+      "ref": "refs/remotes/origin/agent/fix-validation-recurrence",
+      "maxPrefix": 138
+    },
+    {
+      "ref": "refs/remotes/origin/agent/fix-validation-review-cycle-continuity",
+      "maxPrefix": 139
+    },
+    {
+      "ref": "refs/remotes/origin/agent/memory-provenance-labels",
+      "maxPrefix": 122
+    },
+    {
+      "ref": "refs/remotes/origin/agent/recover-codex-sandbox-stream",
+      "maxPrefix": 120
+    },
+    {
+      "ref": "refs/remotes/origin/agent/revalidate-start-env",
+      "maxPrefix": 140
+    },
+    {
+      "ref": "refs/remotes/origin/agent/surface-codex-pod-failures",
+      "maxPrefix": 121
+    },
+    {
+      "ref": "refs/remotes/origin/agent/surface-prepush-security-findings",
+      "maxPrefix": 120
+    },
+    {
+      "ref": "refs/remotes/origin/autopod/CyKwMbik",
+      "maxPrefix": 9
+    },
+    {
+      "ref": "refs/remotes/origin/autopod/XZ3srdmY",
+      "maxPrefix": 9
+    },
+    {
+      "ref": "refs/remotes/origin/autopod/absolute-jay",
+      "maxPrefix": 25
+    },
+    {
+      "ref": "refs/remotes/origin/autopod/automatic-ferret",
+      "maxPrefix": 25
+    },
+    {
+      "ref": "refs/remotes/origin/autopod/blind-thrush",
+      "maxPrefix": 23
+    },
+    {
+      "ref": "refs/remotes/origin/autopod/boiling-chicken",
+      "maxPrefix": 137
+    },
+    {
+      "ref": "refs/remotes/origin/autopod/classic-sole",
+      "maxPrefix": 123
+    },
+    {
+      "ref": "refs/remotes/origin/autopod/colorful-boar",
+      "maxPrefix": 124
+    },
+    {
+      "ref": "refs/remotes/origin/autopod/convenient-vulture",
+      "maxPrefix": 24
+    },
+    {
+      "ref": "refs/remotes/origin/autopod/easy-aardvark",
+      "maxPrefix": 25
+    },
+    {
+      "ref": "refs/remotes/origin/autopod/encouraging-tahr",
+      "maxPrefix": 124
+    },
+    {
+      "ref": "refs/remotes/origin/autopod/equivalent-pigeon",
+      "maxPrefix": 24
+    },
+    {
+      "ref": "refs/remotes/origin/autopod/financial-crow",
+      "maxPrefix": 23
+    },
+    {
+      "ref": "refs/remotes/origin/autopod/gothic-cobra",
+      "maxPrefix": 123
+    },
+    {
+      "ref": "refs/remotes/origin/autopod/happy-parakeet",
+      "maxPrefix": 127
+    },
+    {
+      "ref": "refs/remotes/origin/autopod/harsh-wildcat",
+      "maxPrefix": 25
+    },
+    {
+      "ref": "refs/remotes/origin/autopod/inner-turtle",
+      "maxPrefix": 104
+    },
+    {
+      "ref": "refs/remotes/origin/autopod/interior-aardwolf",
+      "maxPrefix": 39
+    },
+    {
+      "ref": "refs/remotes/origin/autopod/lPHn0U8K",
+      "maxPrefix": 9
+    },
+    {
+      "ref": "refs/remotes/origin/autopod/latin-flamingo",
+      "maxPrefix": 112
+    },
+    {
+      "ref": "refs/remotes/origin/autopod/like-horse",
+      "maxPrefix": 127
+    },
+    {
+      "ref": "refs/remotes/origin/autopod/little-clownfish",
+      "maxPrefix": 132
+    },
+    {
+      "ref": "refs/remotes/origin/autopod/monthly-tarantula",
+      "maxPrefix": 24
+    },
+    {
+      "ref": "refs/remotes/origin/autopod/muddy-prawn",
+      "maxPrefix": 128
+    },
+    {
+      "ref": "refs/remotes/origin/autopod/outside-locust",
+      "maxPrefix": 25
+    },
+    {
+      "ref": "refs/remotes/origin/autopod/passing-koi",
+      "maxPrefix": 130
+    },
+    {
+      "ref": "refs/remotes/origin/autopod/prior-butterfly",
+      "maxPrefix": 25
+    },
+    {
+      "ref": "refs/remotes/origin/autopod/pure-kiwi",
+      "maxPrefix": 109
+    },
+    {
+      "ref": "refs/remotes/origin/autopod/quick-aardwolf",
+      "maxPrefix": 26
+    },
+    {
+      "ref": "refs/remotes/origin/autopod/rolling-leopard",
+      "maxPrefix": 137
+    },
+    {
+      "ref": "refs/remotes/origin/autopod/rubber-rhinoceros",
+      "maxPrefix": 25
+    },
+    {
+      "ref": "refs/remotes/origin/autopod/screenshots/amateur-perch",
+      "maxPrefix": 0
+    },
+    {
+      "ref": "refs/remotes/origin/autopod/screenshots/costly-grouse",
+      "maxPrefix": 0
+    },
+    {
+      "ref": "refs/remotes/origin/autopod/screenshots/everyday-rattlesnake",
+      "maxPrefix": 0
+    },
+    {
+      "ref": "refs/remotes/origin/autopod/screenshots/mammoth-sparrow",
+      "maxPrefix": 0
+    },
+    {
+      "ref": "refs/remotes/origin/autopod/screenshots/mass-bison",
+      "maxPrefix": 0
+    },
+    {
+      "ref": "refs/remotes/origin/autopod/screenshots/thoughtless-parakeet",
+      "maxPrefix": 0
+    },
+    {
+      "ref": "refs/remotes/origin/autopod/secret-urial",
+      "maxPrefix": 112
+    },
+    {
+      "ref": "refs/remotes/origin/autopod/shallow-koala",
+      "maxPrefix": 23
+    },
+    {
+      "ref": "refs/remotes/origin/autopod/slim-whale",
+      "maxPrefix": 25
+    },
+    {
+      "ref": "refs/remotes/origin/autopod/soviet-owl",
+      "maxPrefix": 106
+    },
+    {
+      "ref": "refs/remotes/origin/autopod/spatial-cockroach",
+      "maxPrefix": 25
+    },
+    {
+      "ref": "refs/remotes/origin/autopod/striking-constrictor",
+      "maxPrefix": 25
+    },
+    {
+      "ref": "refs/remotes/origin/autopod/strong-leopon",
+      "maxPrefix": 109
+    },
+    {
+      "ref": "refs/remotes/origin/autopod/unnecessary-pony",
+      "maxPrefix": 24
+    },
+    {
+      "ref": "refs/remotes/origin/claude/acp-approval-restrictions-A4cyh",
+      "maxPrefix": 25
+    },
+    {
+      "ref": "refs/remotes/origin/claude/add-autopod-skills-SMveM",
+      "maxPrefix": 89
+    },
+    {
+      "ref": "refs/remotes/origin/claude/add-claude-documentation-HS5SL",
+      "maxPrefix": 21
+    },
+    {
+      "ref": "refs/remotes/origin/claude/add-question-ui-V7OUI",
+      "maxPrefix": 23
+    },
+    {
+      "ref": "refs/remotes/origin/claude/add-screenshots-health-data-ukpKn",
+      "maxPrefix": 65
+    },
+    {
+      "ref": "refs/remotes/origin/claude/add-session-token-budgeting-ztUMs",
+      "maxPrefix": 37
+    },
+    {
+      "ref": "refs/remotes/origin/claude/agent-context-persistence-IaxQW",
+      "maxPrefix": 108
+    },
+    {
+      "ref": "refs/remotes/origin/claude/analyze-test-coverage-FMlZC",
+      "maxPrefix": 21
+    },
+    {
+      "ref": "refs/remotes/origin/claude/audit-pod-security-Miqay",
+      "maxPrefix": 62
+    },
+    {
+      "ref": "refs/remotes/origin/claude/autopod-dev-mode-testing-dsHcI",
+      "maxPrefix": 22
+    },
+    {
+      "ref": "refs/remotes/origin/claude/autopod-feature-overview-BGINd",
+      "maxPrefix": 22
+    },
+    {
+      "ref": "refs/remotes/origin/claude/autopod-mobile-support-KyeHS",
+      "maxPrefix": 18
+    },
+    {
+      "ref": "refs/remotes/origin/claude/azure-foundry-integration-WzowL",
+      "maxPrefix": 65
+    },
+    {
+      "ref": "refs/remotes/origin/claude/azure-sandboxes-autopod-eal6aq",
+      "maxPrefix": 118
+    },
+    {
+      "ref": "refs/remotes/origin/claude/azure-sandboxes-shell-transport-8q4841",
+      "maxPrefix": 120
+    },
+    {
+      "ref": "refs/remotes/origin/claude/compare-advisor-mode-GIjOt",
+      "maxPrefix": 37
+    },
+    {
+      "ref": "refs/remotes/origin/claude/compare-implementations-6np9A",
+      "maxPrefix": 100
+    },
+    {
+      "ref": "refs/remotes/origin/claude/compare-managed-agents-autopod-zYykC",
+      "maxPrefix": 35
+    },
+    {
+      "ref": "refs/remotes/origin/claude/compare-tools-autopod-Bl1SL",
+      "maxPrefix": 62
+    },
+    {
+      "ref": "refs/remotes/origin/claude/debug-pod-validation-TbEDT",
+      "maxPrefix": 21
+    },
+    {
+      "ref": "refs/remotes/origin/claude/evaluate-codegraph-integration-ZmQXR",
+      "maxPrefix": 66
+    },
+    {
+      "ref": "refs/remotes/origin/claude/fix-ap-attach-terminal-6JBbE",
+      "maxPrefix": 44
+    },
+    {
+      "ref": "refs/remotes/origin/claude/fix-doc-site-logo-GrV9Y",
+      "maxPrefix": 35
+    },
+    {
+      "ref": "refs/remotes/origin/claude/fix-notification-styling-BXg9i",
+      "maxPrefix": 25
+    },
+    {
+      "ref": "refs/remotes/origin/claude/general-session-dWyFi",
+      "maxPrefix": 16
+    },
+    {
+      "ref": "refs/remotes/origin/claude/html-plan-feature-output-BukdP",
+      "maxPrefix": 96
+    },
+    {
+      "ref": "refs/remotes/origin/claude/hybrid-worker-pod-design-63XSd",
+      "maxPrefix": 100
+    },
+    {
+      "ref": "refs/remotes/origin/claude/investigate-code-review-73QYX",
+      "maxPrefix": 25
+    },
+    {
+      "ref": "refs/remotes/origin/claude/investigate-devops-github-diff-f6pT2",
+      "maxPrefix": 25
+    },
+    {
+      "ref": "refs/remotes/origin/claude/llm-generated-commit-messages-fUslf",
+      "maxPrefix": 74
+    },
+    {
+      "ref": "refs/remotes/origin/claude/local-aci-sessions-ICG7Q",
+      "maxPrefix": 18
+    },
+    {
+      "ref": "refs/remotes/origin/claude/memory-context-bloat-yAzvp",
+      "maxPrefix": 36
+    },
+    {
+      "ref": "refs/remotes/origin/claude/mobile-autopod-control-Qj39k",
+      "maxPrefix": 104
+    },
+    {
+      "ref": "refs/remotes/origin/claude/mobile-autopod-research-Q6xbO",
+      "maxPrefix": 38
+    },
+    {
+      "ref": "refs/remotes/origin/claude/pim-groups-workspace-pods-JB51H",
+      "maxPrefix": 30
+    },
+    {
+      "ref": "refs/remotes/origin/claude/pod-logs-history-MSb2C",
+      "maxPrefix": 28
+    },
+    {
+      "ref": "refs/remotes/origin/claude/qa-persistence-discussion-2tLnH",
+      "maxPrefix": 89
+    },
+    {
+      "ref": "refs/remotes/origin/claude/quick-task-ryP75",
+      "maxPrefix": 22
+    },
+    {
+      "ref": "refs/remotes/origin/claude/quick-task-tKkwG",
+      "maxPrefix": 22
+    },
+    {
+      "ref": "refs/remotes/origin/claude/redesign-detail-pane-Zsyjg",
+      "maxPrefix": 65
+    },
+    {
+      "ref": "refs/remotes/origin/claude/redesign-pod-types-CmmMe",
+      "maxPrefix": 45
+    },
+    {
+      "ref": "refs/remotes/origin/claude/reduce-agent-merge-conflicts-7Cmfu",
+      "maxPrefix": 85
+    },
+    {
+      "ref": "refs/remotes/origin/claude/remove-tui-c06Nw",
+      "maxPrefix": 25
+    },
+    {
+      "ref": "refs/remotes/origin/claude/remove-tui-docs-eqvcn",
+      "maxPrefix": 35
+    },
+    {
+      "ref": "refs/remotes/origin/claude/reorganize-overview-tabs-QsWKu",
+      "maxPrefix": 25
+    },
+    {
+      "ref": "refs/remotes/origin/claude/research-ai-coding-agents-C37wX",
+      "maxPrefix": 37
+    },
+    {
+      "ref": "refs/remotes/origin/claude/research-feature-splitting-v0tcq",
+      "maxPrefix": 47
+    },
+    {
+      "ref": "refs/remotes/origin/claude/research-openai-agents-KIb2H",
+      "maxPrefix": 99
+    },
+    {
+      "ref": "refs/remotes/origin/claude/review-plan-feature-docs-EizVb",
+      "maxPrefix": 68
+    },
+    {
+      "ref": "refs/remotes/origin/claude/secure-local-daemon-api-185nB",
+      "maxPrefix": 21
+    },
+    {
+      "ref": "refs/remotes/origin/claude/security-remediation-plan-LYRzz",
+      "maxPrefix": 62
+    },
+    {
+      "ref": "refs/remotes/origin/claude/security-remediation-plan-UrEj3",
+      "maxPrefix": 65
+    },
+    {
+      "ref": "refs/remotes/origin/claude/security-remediation-plan-mBjoI",
+      "maxPrefix": 62
+    },
+    {
+      "ref": "refs/remotes/origin/claude/security-remediation-plan-nxwjI",
+      "maxPrefix": 62
+    },
+    {
+      "ref": "refs/remotes/origin/claude/security-remediation-wave-7-9NjyL",
+      "maxPrefix": 65
+    },
+    {
+      "ref": "refs/remotes/origin/claude/security-scan-vulnerabilities-6UBkT",
+      "maxPrefix": 21
+    },
+    {
+      "ref": "refs/remotes/origin/claude/squid-proxy-setup-ZkDMq",
+      "maxPrefix": 99
+    },
+    {
+      "ref": "refs/remotes/origin/claude/standardize-pod-naming-7Z7E9",
+      "maxPrefix": 46
+    },
+    {
+      "ref": "refs/remotes/origin/claude/streamline-review-process-FKoi1",
+      "maxPrefix": 77
+    },
+    {
+      "ref": "refs/remotes/origin/claude/surface-validation-feedback-xTWTX",
+      "maxPrefix": 26
+    },
+    {
+      "ref": "refs/remotes/origin/claude/surface-validation-results-UoeqC",
+      "maxPrefix": 23
+    },
+    {
+      "ref": "refs/remotes/origin/claude/task-summary-deviations-K934H",
+      "maxPrefix": 24
+    },
+    {
+      "ref": "refs/remotes/origin/claude/test-action-control-plane-9Xvzj",
+      "maxPrefix": 21
+    },
+    {
+      "ref": "refs/remotes/origin/claude/update-desktop-docs-sruBA",
+      "maxPrefix": 99
+    },
+    {
+      "ref": "refs/remotes/origin/claude/update-docs-interactive-guide-bHLEF",
+      "maxPrefix": 32
+    },
+    {
+      "ref": "refs/remotes/origin/claude/update-readme-docs-YVj1J",
+      "maxPrefix": 21
+    },
+    {
+      "ref": "refs/remotes/origin/codex/advisory-qa-capture-readiness",
+      "maxPrefix": 118
+    },
+    {
+      "ref": "refs/remotes/origin/codex/cli-dev-token-local-only",
+      "maxPrefix": 119
+    },
+    {
+      "ref": "refs/remotes/origin/codex/docs-readme-refresh",
+      "maxPrefix": 117
+    },
+    {
+      "ref": "refs/remotes/origin/codex/enhance-deviation-functionality-for-agents",
+      "maxPrefix": 104
+    },
+    {
+      "ref": "refs/remotes/origin/codex/evidence-yaml-facts",
+      "maxPrefix": 101
+    },
+    {
+      "ref": "refs/remotes/origin/codex/fix-codex-sandbox-completion",
+      "maxPrefix": 120
+    },
+    {
+      "ref": "refs/remotes/origin/codex/fix-sandbox-validation-permissions",
+      "maxPrefix": 120
+    },
+    {
+      "ref": "refs/remotes/origin/codex/fix-series-contract-copy",
+      "maxPrefix": 101
+    },
+    {
+      "ref": "refs/remotes/origin/codex/full-pod-id-instructions",
+      "maxPrefix": 118
+    },
+    {
+      "ref": "refs/remotes/origin/codex/haproxy-stream-timeout",
+      "maxPrefix": 117
+    },
+    {
+      "ref": "refs/remotes/origin/codex/luumi-deno-image",
+      "maxPrefix": 138
+    },
+    {
+      "ref": "refs/remotes/origin/codex/podsitter-skill-routing",
+      "maxPrefix": 118
+    },
+    {
+      "ref": "refs/remotes/origin/codex/safety-security-stats",
+      "maxPrefix": 118
+    },
+    {
+      "ref": "refs/remotes/origin/codex/update-ask_human-timeout-setting",
+      "maxPrefix": 104
+    },
+    {
+      "ref": "refs/remotes/origin/comparable-sparrow-snipe",
+      "maxPrefix": 109
+    },
+    {
+      "ref": "refs/remotes/origin/dependabot/npm_and_yarn/biomejs/biome-2.5.3",
+      "maxPrefix": 120
+    },
+    {
+      "ref": "refs/remotes/origin/dependabot/npm_and_yarn/fastify/static-10.1.0",
+      "maxPrefix": 120
+    },
+    {
+      "ref": "refs/remotes/origin/dependabot/npm_and_yarn/npm-minor-and-patch-0dfcff53f1",
+      "maxPrefix": 152
+    },
+    {
+      "ref": "refs/remotes/origin/dependabot/npm_and_yarn/npm-minor-and-patch-e5b299afcd",
+      "maxPrefix": 140
+    },
+    {
+      "ref": "refs/remotes/origin/dependabot/npm_and_yarn/npm-minor-and-patch-f5bf913f21",
+      "maxPrefix": 136
+    },
+    {
+      "ref": "refs/remotes/origin/dependabot/npm_and_yarn/npm-minor-and-patch-fee072abac",
+      "maxPrefix": 140
+    },
+    {
+      "ref": "refs/remotes/origin/dependabot/npm_and_yarn/vite-8.1.4",
+      "maxPrefix": 123
+    },
+    {
+      "ref": "refs/remotes/origin/dependabot/npm_and_yarn/vitejs/plugin-react-6.0.3",
+      "maxPrefix": 120
+    },
+    {
+      "ref": "refs/remotes/origin/detail-pane-redesign",
+      "maxPrefix": 101
+    },
+    {
+      "ref": "refs/remotes/origin/feat/detached-mcp-fallback",
+      "maxPrefix": 120
+    },
+    {
+      "ref": "refs/remotes/origin/feat/sandbox-interactive-shell",
+      "maxPrefix": 120
+    },
+    {
+      "ref": "refs/remotes/origin/feature/jolly-otter",
+      "maxPrefix": 3
+    },
+    {
+      "ref": "refs/remotes/origin/feature/lazy-condor",
+      "maxPrefix": 10
+    },
+    {
+      "ref": "refs/remotes/origin/feature/nutty-stork-2",
+      "maxPrefix": 12
+    },
+    {
+      "ref": "refs/remotes/origin/feature/proud-puma",
+      "maxPrefix": 2
+    },
+    {
+      "ref": "refs/remotes/origin/feature/quiet-crow",
+      "maxPrefix": 8
+    },
+    {
+      "ref": "refs/remotes/origin/feature/rusty-condor",
+      "maxPrefix": 15
+    },
+    {
+      "ref": "refs/remotes/origin/feature/spicy-sloth",
+      "maxPrefix": 6
+    },
+    {
+      "ref": "refs/remotes/origin/feature/witty-sphinx",
+      "maxPrefix": 7
+    },
+    {
+      "ref": "refs/remotes/origin/fix/cap-container-cpu",
+      "maxPrefix": 118
+    },
+    {
+      "ref": "refs/remotes/origin/fix/chromium-google-egress-noise",
+      "maxPrefix": 117
+    },
+    {
+      "ref": "refs/remotes/origin/fix/codex-sandbox-completion",
+      "maxPrefix": 120
+    },
+    {
+      "ref": "refs/remotes/origin/fix/daemon-native-podsitter-stabilization",
+      "maxPrefix": 133
+    },
+    {
+      "ref": "refs/remotes/origin/fix/detached-mcp-human-reply",
+      "maxPrefix": 123
+    },
+    {
+      "ref": "refs/remotes/origin/fix/force-revalidate-review-required",
+      "maxPrefix": 140
+    },
+    {
+      "ref": "refs/remotes/origin/fix/pilot-tmux-3.7",
+      "maxPrefix": 137
+    },
+    {
+      "ref": "refs/remotes/origin/fix/readiness-validation-rework-scope",
+      "maxPrefix": 121
+    },
+    {
+      "ref": "refs/remotes/origin/fix/recover-worktree-controller-observe",
+      "maxPrefix": 140
+    },
+    {
+      "ref": "refs/remotes/origin/fix/review-closure-infrastructure",
+      "maxPrefix": 140
+    },
+    {
+      "ref": "refs/remotes/origin/fix/sandbox-bulk-volume-upload",
+      "maxPrefix": 120
+    },
+    {
+      "ref": "refs/remotes/origin/fix/sandbox-checkpoint-races",
+      "maxPrefix": 137
+    },
+    {
+      "ref": "refs/remotes/origin/fix/sandbox-exec-stream-and-terminal",
+      "maxPrefix": 120
+    },
+    {
+      "ref": "refs/remotes/origin/fix/sandbox-memory-ceiling",
+      "maxPrefix": 136
+    },
+    {
+      "ref": "refs/remotes/origin/fix/sandbox-reaper-clears-recovery",
+      "maxPrefix": 137
+    },
+    {
+      "ref": "refs/remotes/origin/fix/sandbox-recovery-history-rewrite",
+      "maxPrefix": 140
+    },
+    {
+      "ref": "refs/remotes/origin/fix/validation-start-env",
+      "maxPrefix": 139
+    },
+    {
+      "ref": "refs/remotes/origin/hotfix/checkpoint-named-ref",
+      "maxPrefix": 137
+    },
+    {
+      "ref": "refs/remotes/origin/hotfix/compact-cursor-sqlite-timestamp",
+      "maxPrefix": 127
+    },
+    {
+      "ref": "refs/remotes/origin/main",
+      "maxPrefix": 152
+    },
+    {
+      "ref": "refs/remotes/origin/operator/pr231-completion",
+      "maxPrefix": 127
+    }
+  ],
+  "remoteHeadCount": 173,
+  "maxRemotePrefix": 152,
+  "missingRemoteObjects": []
+}

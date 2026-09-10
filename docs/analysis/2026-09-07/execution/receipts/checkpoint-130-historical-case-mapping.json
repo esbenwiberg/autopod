@@ -1,0 +1,19 @@
+{
+  "source": "../../evidence.json",
+  "cases": [
+    {
+      "id": "sharp-swordtail",
+      "profileName": "teamplanner-pr-read"
+    },
+    {
+      "id": "electoral-weasel",
+      "profileName": "luumi"
+    },
+    {
+      "id": "abstract-quokka",
+      "profileName": "dataverse-harness"
+    }
+  ],
+  "currentImage": "autopod/dataverse-harness",
+  "scopeCorrection": "NuGet case belongs to teamplanner-pr-read; aggregate failure does not identify which command was missing."
+}

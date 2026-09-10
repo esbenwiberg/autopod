@@ -1,0 +1,18 @@
+{
+  "date": "2026-09-07",
+  "scope": "built mobile app with local synthetic validation receipt",
+  "viewport": {
+    "innerWidth": 390,
+    "documentWidth": 375,
+    "height": 844
+  },
+  "observed": [
+    "validation preflight blocked",
+    "Configured worker label distinguishes configured runtime from invoked validation",
+    "Missing launcher message says before validation",
+    "Unknown release, image, implementation and resources remain unverified",
+    "Long hash wraps without horizontal overflow"
+  ],
+  "cleanup": "preview tab closed, viewport reset, fixture server stopped",
+  "nativeInteraction": "unverified"
+}

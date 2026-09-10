@@ -1,0 +1,37 @@
+
+ RUN  v4.1.11 /private/tmp/autopod-durable-execution/packages/daemon
+
+ ❯ src/pods/pod-manager.test.ts (426 tests | 1 failed | 425 skipped) 74ms
+         × does not publish artifacts or complete a lifecycle cancelled during extraction 73ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/pods/pod-manager.test.ts > PodManager > workspace pods > completeSession > does not publish artifacts or complete a lifecycle cancelled during extraction
+AssertionError: expected { id: 'gentle-meadowlark', …(113) } to match object { status: 'killed', …(1) }
+(118 matching properties omitted from actual)
+
+- Expected
++ Received
+
+  {
+-   "artifactsPath": null,
+-   "status": "killed",
++   "artifactsPath": "/private/tmp/autopod-durable-execution/packages/daemon/.autopod-data/artifacts/gentle-meadowlark/generation-1-fbf4280d-e218-4691-a5bf-14174db06233",
++   "status": "complete",
+  }
+
+ ❯ src/pods/pod-manager.test.ts:12887:44
+    12885|         });
+    12886|         await manager.handleCompletion(pod.id);
+    12887|         expect(manager.getSession(pod.id)).toMatchObject({ status: 'ki…
+       |                                            ^
+    12888|         expect(ctx.containerManager.kill).not.toHaveBeenCalled();
+    12889|       });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 425 skipped (426)
+   Start at  17:58:28
+   Duration  1.24s (transform 732ms, setup 0ms, import 1.06s, tests 74ms, environment 0ms)

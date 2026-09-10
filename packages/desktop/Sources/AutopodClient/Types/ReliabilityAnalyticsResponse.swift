@@ -63,6 +63,7 @@ public struct DropEntry: Decodable, Equatable, Identifiable, Sendable {
 }
 
 public struct DropPodEntry: Decodable, Equatable, Sendable {
+    public let historyArchived: Bool?
     public let podId: String
     public let profile: String
     public let finalStatus: FinalStatus

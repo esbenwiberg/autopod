@@ -1,0 +1,6 @@
+{
+  "status": "inspected",
+  "enabledSchedules": 1,
+  "enabledWatchers": 1,
+  "podsitterEnabled": true
+}

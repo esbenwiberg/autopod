@@ -127,6 +127,490 @@ describe('GET /pods/:podId provider-attempt projection', () => {
     db.close();
   });
 
+  it('requires explicit version 2 before returning API provenance to clients', async () => {
+    const repo = createPodRepository(db);
+    repo.insert({
+      id: 'api-review',
+      profileName: 'test-profile',
+      task: 'API provenance',
+      status: 'running',
+      model: 'worker',
+      runtime: 'codex',
+      executionTarget: 'local',
+      branch: 'api-review',
+      userId: 'operator',
+      maxValidationAttempts: 3,
+      skipValidation: false,
+      outputMode: 'pr',
+    });
+    const { reviewerApiProvenance } = await import('../../pods/reviewer-api-provenance.js');
+    const receipt = repo.executionProvenance?.record(
+      'api-review',
+      1,
+      reviewerApiProvenance(
+        {
+          reviewerModel: 'alias',
+          reviewerProvider: 'foundry',
+          reviewerProviderAccountId: 'frozen-account',
+        } as import('../../interfaces/validation-engine.js').ValidationEngineConfig,
+        'resolved',
+      ),
+    );
+    for (const suffix of ['', '?schemaVersion=1']) {
+      const response = await app.inject({
+        method: 'GET',
+        url: `/pods/api-review/execution-provenance${suffix}`,
+      });
+      expect(response.statusCode).toBe(200);
+      expect(response.json()).toEqual({ latest: null, requiresSchemaVersion: 2 });
+    }
+    const response = await app.inject({
+      method: 'GET',
+      url: '/pods/api-review/execution-provenance?schemaVersion=2',
+    });
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toEqual({ latest: receipt });
+    expect(
+      (
+        await app.inject({
+          method: 'GET',
+          url: '/pods/api-review/execution-provenance?schemaVersion=3',
+        })
+      ).statusCode,
+    ).toBe(400);
+  });
+
+  it('reconciles corrected provider usage in task, pod and fleet cost APIs without rewriting legacy rows', async () => {
+    const repo = createPodRepository(db);
+    for (const [id, correctedCost] of [
+      ['corrected-cost', 0.5],
+      ['recorded-zero', 0],
+    ] as const) {
+      repo.insert({
+        id,
+        profileName: 'test-profile',
+        task: 'Reconcile recorded usage',
+        status: 'complete',
+        model: 'gpt-5',
+        runtime: 'codex',
+        executionTarget: 'local',
+        branch: id,
+        userId: 'user',
+        maxValidationAttempts: 3,
+        skipValidation: false,
+        outputMode: 'pr',
+      });
+      repo.update(id, {
+        completedAt: new Date().toISOString(),
+        inputTokens: 50,
+        outputTokens: 10,
+        costUsd: 1,
+        phaseTokenUsage: { agent_initial: { inputTokens: 50, outputTokens: 10, costUsd: 1 } },
+      });
+      db.prepare(`INSERT INTO provider_attempts (pod_id, ordinal, provider, runtime, model, profile_reference, profile_snapshot,
+        started_at, ended_at, outcome, input_tokens, output_tokens, cost_usd)
+        VALUES (?, 1, 'openai', 'codex', 'gpt-5', 'pod:test@profile-snapshot#abcdef1', '{}',
+          '2026-09-07T00:00:00Z', '2026-09-07T00:01:00Z', 'completed', 50, 10, 1)`).run(id);
+      db.prepare(`INSERT INTO provider_attempt_telemetry_corrections
+        (pod_id, ordinal, input_tokens, output_tokens, cost_usd, source, reason, corrected_at)
+        VALUES (?, 1, 20, 5, ?, 'codex_rollout', 'duplicate aggregate repaired', '2026-09-07T00:02:00Z')`).run(
+        id,
+        correctedCost,
+      );
+      const response = await app.inject({ method: 'GET', url: `/pods/${id}/cost` });
+      expect(response.statusCode, response.body).toBe(200);
+      expect(response.json()).toMatchObject({
+        totalCostUsd: correctedCost,
+        costEvidence: {
+          billingVerified: false,
+          knownEstimatedCostUsd: correctedCost,
+          conflictingPodCount: 1,
+        },
+        inputTokens: 20,
+        outputTokens: 5,
+        taskExecution: {
+          recordedCostUsd: correctedCost,
+          costEvidence: {
+            billingVerified: false,
+            knownEstimatedCostUsd: correctedCost,
+            conflictingPodCount: 1,
+          },
+          recordedInputTokens: 20,
+          recordedOutputTokens: 5,
+        },
+      });
+      expect(
+        response
+          .json()
+          .segments.reduce((sum: number, segment: { costUsd: number }) => sum + segment.costUsd, 0),
+      ).toBe(correctedCost);
+      expect(
+        response.json().segments.find((segment: { bucket: string }) => segment.bucket === 'work'),
+      ).toMatchObject({ costUsd: 0, storedCostUsd: 1, attribution: 'unavailable' });
+      expect(repo.getOrThrow(id)).toMatchObject({ costUsd: 1, inputTokens: 50, outputTokens: 10 });
+    }
+    const fleet = await app.inject({ method: 'GET', url: '/pods/analytics/cost?days=1' });
+    expect(fleet.statusCode, fleet.body).toBe(200);
+    expect(fleet.json().total).toBe(0.5);
+    expect(fleet.json().costEvidence).toMatchObject({
+      billingVerified: false,
+      knownEstimatedCostUsd: 0.5,
+      conflictingPodCount: 2,
+    });
+    expect(
+      fleet.json().top10.reduce((sum: number, pod: { costUsd: number }) => sum + pod.costUsd, 0),
+    ).toBe(0.5);
+  });
+
+  it.each(['cost', 'task-execution', 'fleet'] as const)(
+    'bounds %s phase reads before JSON parsing and preserves unrelated legacy evidence',
+    async (view) => {
+      insertPod(db, { id: 'bounded-cost', status: 'complete' });
+      createPodRepository(db).taskExecutions?.register('bounded-cost');
+      const large = JSON.stringify({
+        review: {
+          inputTokens: 5,
+          outputTokens: 2,
+          costUsd: 0.25,
+          legacyOutput: 'large-private-fixture '.repeat(100_000),
+        },
+      });
+      db.prepare(
+        "UPDATE pods SET completed_at=?, contract='malformed-unrelated-contract', task_summary='malformed-unrelated-summary', spec_files=?, phase_token_usage=?, cost_usd=1, input_tokens=10, token_telemetry_accuracy='complete', token_budget=100 WHERE id='bounded-cost'",
+      ).run(new Date().toISOString(), large, large);
+      const parse = JSON.parse;
+      const parser = vi.spyOn(JSON, 'parse').mockImplementation((...args) => {
+        if (args[0].length > 64 * 1024)
+          throw new Error('Unbounded phase payload reached JSON parser');
+        return parse(...args);
+      });
+      try {
+        const url = view === 'fleet' ? '/pods/analytics/cost?days=1' : `/pods/bounded-cost/${view}`;
+        const response = await app.inject({ method: 'GET', url });
+        expect(response.statusCode, response.body.slice(0, 500)).toBe(200);
+        expect(Buffer.byteLength(response.body)).toBeLessThan(16 * 1024);
+        expect(parser.mock.calls.every((args) => args[0].length <= 64 * 1024)).toBe(true);
+        const body = response.json();
+        expect(body.total ?? body.totalCostUsd ?? body.recordedCostUsd).toBe(1);
+        expect(body.costEvidence.diagnostics).toContainEqual(
+          expect.objectContaining({ podId: 'bounded-cost', code: 'PHASE_PAYLOAD_LIMIT' }),
+        );
+        if (view === 'task-execution') expect(body.budgetCheck.status).toBe('unavailable');
+      } finally {
+        parser.mockRestore();
+      }
+      expect(
+        db
+          .prepare(
+            "SELECT contract, length(CAST(phase_token_usage AS BLOB)) AS bytes FROM pods WHERE id='bounded-cost'",
+          )
+          .get(),
+      ).toEqual({ contract: 'malformed-unrelated-contract', bytes: Buffer.byteLength(large) });
+    },
+  );
+
+  it('serves healthy per-pod cost without parsing malformed unrelated control-plane evidence', async () => {
+    insertPod(db, { id: 'healthy-cost', status: 'complete' });
+    db.prepare(
+      "UPDATE pods SET contract='malformed-unrelated-contract', cost_usd=1, phase_token_usage=? WHERE id='healthy-cost'",
+    ).run(JSON.stringify({ review: { inputTokens: 5, outputTokens: 2, costUsd: 0.25 } }));
+    const response = await app.inject({ method: 'GET', url: '/pods/healthy-cost/cost' });
+    expect(response.statusCode, response.body.slice(0, 500)).toBe(200);
+    expect(response.json().totalCostUsd).toBe(1.25);
+    expect(db.prepare("SELECT contract FROM pods WHERE id='healthy-cost'").get()).toEqual({
+      contract: 'malformed-unrelated-contract',
+    });
+  });
+
+  it('keeps malformed legacy list evidence visible without hiding healthy records or breaking projected costs', async () => {
+    for (const id of ['healthy', 'malformed'])
+      db.prepare(`INSERT INTO pods
+      (id, profile_name, task, status, model, runtime, branch, user_id, output_mode, agent_mode, output_target, validate, promotable, completed_at, cost_usd)
+      VALUES (?, 'test-profile', ?, 'complete', 'gpt-5.6-sol', 'codex', 'branch', 'test-user-1', 'pr', 'auto', 'pr', 1, 0, ?, 2)`).run(
+        id,
+        'Large task description '.repeat(5000),
+        new Date().toISOString(),
+      );
+    db.prepare("UPDATE pods SET task_summary = 'not-json' WHERE id = 'malformed'").run();
+    const list = await app.inject({ method: 'GET', url: '/pods?compact=true&page=true&limit=10' });
+    expect(list.statusCode).toBe(200);
+    expect(
+      list
+        .json()
+        .pods.map((pod: { id: string }) => pod.id)
+        .sort(),
+    ).toEqual(['healthy', 'malformed']);
+    expect(
+      list.json().pods.find((pod: { id: string }) => pod.id === 'malformed').recordDiagnostics,
+    ).toEqual([{ field: 'task_summary', code: 'invalid_json' }]);
+    const cost = await app.inject({ method: 'GET', url: '/pods/analytics/cost?days=30' });
+    expect(cost.statusCode).toBe(200);
+    expect(cost.json().total).toBe(4);
+  });
+
+  it('projects compact history without parsing large unrelated evidence or returning settled output', async () => {
+    insertPod(db, { id: 'bounded-list', status: 'complete' });
+    const large = 'large-evidence-marker '.repeat(100_000);
+    db.prepare(`UPDATE pods SET task = ?, contract = ?, last_validation_result = ?,
+      spec_files = ?, task_summary = ? WHERE id = 'bounded-list'`).run(
+      large,
+      JSON.stringify({ purpose: large }),
+      JSON.stringify({ output: large }),
+      JSON.stringify([{ path: 'huge.md', content: large }]),
+      JSON.stringify({ actualSummary: 'Preserved summary' }),
+    );
+    db.prepare(`INSERT INTO pod_finalizations
+      (pod_id, generation, cycle, phase, agent_settled_at, result, updated_at)
+      VALUES ('bounded-list', 1, 1, 'preserving', datetime('now'), ?, datetime('now'))`).run(large);
+    const parse = JSON.parse;
+    const parser = vi.spyOn(JSON, 'parse').mockImplementation((...args) => {
+      if (args[0].length > 256 * 1024) throw new Error('Unbounded evidence reached JSON parser');
+      return parse(...args);
+    });
+    try {
+      const response = await app.inject({
+        method: 'GET',
+        url: '/pods?compact=true&page=true&limit=10',
+      });
+      expect(response.statusCode, response.body.slice(0, 500)).toBe(200);
+      expect(Buffer.byteLength(response.body)).toBeLessThan(16 * 1024);
+      expect(response.json().pods[0]).toMatchObject({
+        id: 'bounded-list',
+        taskSummary: 'Preserved summary',
+        finalization: { phase: 'preserving', resultTruncated: true },
+      });
+      expect(response.json().pods[0].taskExcerpt).toHaveLength(2_000);
+      expect(response.json().pods[0].finalization.result).toHaveLength(500);
+      expect(parser.mock.calls.every(([text]) => text.length <= 256 * 1024)).toBe(true);
+    } finally {
+      parser.mockRestore();
+    }
+    expect(
+      db
+        .prepare(
+          "SELECT length(result) AS size FROM pod_finalizations WHERE pod_id = 'bounded-list'",
+        )
+        .get(),
+    ).toEqual({ size: large.length });
+  });
+
+  it('reports oversized compact evidence and malformed display fields without dropping records', async () => {
+    insertPod(db, { id: 'oversized-list', status: 'running', completedAt: undefined });
+    insertPod(db, { id: 'healthy-list', status: 'complete' });
+    db.prepare(`UPDATE pods SET task_summary = ?, pending_escalation = ?, progress = ?
+      WHERE id = 'oversized-list'`).run(
+      JSON.stringify({ actualSummary: 'x'.repeat(100_000) }),
+      JSON.stringify({ question: { invalid: true } }),
+      JSON.stringify({ phase: ['invalid'], description: 'Progress' }),
+    );
+    const response = await app.inject({
+      method: 'GET',
+      url: '/pods?compact=true&page=true&limit=10',
+    });
+    expect(response.statusCode).toBe(200);
+    const pods = response.json().pods;
+    expect(pods).toHaveLength(2);
+    expect(pods.find((pod: { id: string }) => pod.id === 'oversized-list')).toMatchObject({
+      taskSummary: null,
+      pendingEscalationSummary: null,
+      progressSummary: null,
+      recordDiagnostics: expect.arrayContaining([
+        { field: 'task_summary', code: 'size_limit' },
+        { field: 'pending_escalation', code: 'invalid_shape' },
+        { field: 'progress', code: 'invalid_shape' },
+      ]),
+    });
+  });
+
+  it('exposes last-recorded PR disposition in task and cost routes without parsing receipt bodies', async () => {
+    insertPod(db, { id: 'task-disposition', status: 'running', completedAt: undefined });
+    const repo = createPodRepository(db);
+    repo.taskExecutions?.register('task-disposition');
+    const task = repo.taskExecutions?.snapshot('task-disposition');
+    if (!task || !repo.deliveryLedger) throw new Error('Missing durable task fixture');
+    db.prepare(
+      "INSERT INTO delivery_intents(id,identity,pod_id,task_id,generation,repository,branch,base_branch,state,created_at,updated_at) VALUES ('intent','intent','task-disposition',?,1,'github.com/org/repo','feature','main','delivered',?,?)",
+    ).run(task.taskId, '2026-09-07T00:00:00Z', '2026-09-07T00:00:00Z');
+    db.prepare(
+      "INSERT INTO delivery_receipts(id,intent_id,pr_url,evidence,disposition,result,recorded_at) VALUES ('receipt','intent',?,'create_response','open',?,?)",
+    ).run(
+      'https://github.com/org/repo/pull/1',
+      'malformed legacy receipt body',
+      '2026-09-07T00:00:00Z',
+    );
+    repo.deliveryLedger.observe('https://github.com/org/repo/pull/1', 'merged');
+    const response = await app.inject({
+      method: 'GET',
+      url: '/pods/task-disposition/task-execution',
+    });
+    expect(response.statusCode, response.body).toBe(200);
+    expect(response.json().delivery).toEqual({
+      intentCount: 1,
+      receiptCount: 1,
+      unresolvedCount: 0,
+      scope: 'durable-receipts-only',
+      disposition: {
+        openCount: 0,
+        mergedCount: 1,
+        closedCount: 0,
+        unavailableCount: 0,
+        basis: 'last-recorded',
+        liveVerified: false,
+      },
+    });
+    const cost = await app.inject({ method: 'GET', url: '/pods/task-disposition/cost' });
+    expect(cost.statusCode, cost.body).toBe(200);
+    expect(cost.json().taskExecution.delivery).toEqual(response.json().delivery);
+    expect(response.body).not.toContain('malformed legacy receipt body');
+    expect(response.body.length).toBeLessThan(16_384);
+    expect(db.prepare('SELECT disposition FROM delivery_receipts').get()).toEqual({
+      disposition: 'open',
+    });
+  });
+
+  it('keeps task and cost APIs available with explicit unknown merge identity diagnostics', async () => {
+    insertPod(db, { id: 'unknown-merge', status: 'running' });
+    const repo = createPodRepository(db);
+    repo.taskExecutions?.register('unknown-merge');
+    const task = repo.taskExecutions?.snapshot('unknown-merge');
+    if (!task) throw new Error('Missing task identity');
+    // Simulate retained legacy rows, including bodies that must not be parsed by these projections.
+    db.prepare(
+      `INSERT INTO source_publication_intents VALUES ('source','source','unknown-merge',?,0,'invalid legacy body','2026-09-08')`,
+    ).run(task.taskId);
+    db.prepare(
+      "INSERT INTO source_publication_receipts VALUES ('source','invalid legacy body','2026-09-08')",
+    ).run();
+    db.prepare(
+      `INSERT INTO merge_intents VALUES ('merge','merge','source','unknown-merge',?,0,?,'invalid legacy body','2026-09-08')`,
+    ).run(task.taskId, 'x'.repeat(1024 * 1024));
+    for (const route of ['task-execution', 'cost']) {
+      const response = await app.inject({ method: 'GET', url: `/pods/unknown-merge/${route}` });
+      expect(response.statusCode, response.body).toBe(200);
+      const summary = route === 'cost' ? response.json().taskExecution : response.json();
+      expect(summary.merge).toBeUndefined();
+      expect(summary.diagnostics).toContain(
+        'Merge identity unavailable; reconcile retained journal records',
+      );
+      expect(response.body.length).toBeLessThan(16384);
+      expect(response.body).not.toContain('invalid legacy body');
+    }
+    expect(db.prepare('SELECT length(pr_identity) AS n FROM merge_intents').get()).toEqual({
+      n: 1024 * 1024,
+    });
+  });
+
+  it('exposes bounded task accounting even when unrelated large pod evidence is malformed', async () => {
+    insertPod(db, { id: 'task-accounting', status: 'running', completedAt: undefined });
+    createPodRepository(db).taskExecutions?.register('task-accounting');
+    const retainedBinding = `unreadable historical binding${'x'.repeat(32768)}`;
+    db.prepare(
+      "INSERT INTO task_agent_runs(id,pod_id,generation,cycle,binding,started_at) VALUES ('historical-run','task-accounting',1,1,?,'2026-09-07')",
+    ).run(retainedBinding);
+
+    db.prepare(
+      "UPDATE pods SET task_summary = 'broken', input_tokens = 9, output_tokens = 1 WHERE id = 'task-accounting'",
+    ).run();
+    const response = await app.inject({
+      method: 'GET',
+      url: '/pods/task-accounting/task-execution',
+    });
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toMatchObject({
+      rootPodId: 'task-accounting',
+      delivery: {
+        intentCount: 0,
+        receiptCount: 0,
+        unresolvedCount: 0,
+        scope: 'durable-receipts-only',
+        disposition: {
+          openCount: 0,
+          mergedCount: 0,
+          closedCount: 0,
+          unavailableCount: 0,
+          basis: 'last-recorded',
+          liveVerified: false,
+        },
+      },
+      podCount: 1,
+      recordedInputTokens: 9,
+      recordedOutputTokens: 1,
+      telemetry: 'partial',
+    });
+    expect(JSON.stringify(response.json())).not.toContain('broken');
+    expect(response.json().diagnostics).toContain(
+      '1 unsettled worker run blocks another task run; live execution state unverified.',
+    );
+    expect(response.json().diagnostics).toContain(
+      'Oldest unsettled run resource ownership unavailable; current pod resource is not historical evidence.',
+    );
+    expect(response.body.length).toBeLessThan(16384);
+    expect(
+      db.prepare("SELECT binding FROM task_agent_runs WHERE id = 'historical-run'").get(),
+    ).toEqual({ binding: retainedBinding });
+  });
+
+  it('keeps deleted cost details and task evidence available without restoring a live pod', async () => {
+    insertPod(db, { id: 'deleted-cost', status: 'complete' });
+    const repo = createPodRepository(db);
+    repo.taskExecutions?.register('deleted-cost');
+    db.prepare(
+      "UPDATE pods SET cost_usd = 2, phase_token_usage = '{}' WHERE id = 'deleted-cost'",
+    ).run();
+    repo.delete('deleted-cost');
+    const response = await app.inject({ method: 'GET', url: '/pods/deleted-cost/cost' });
+    expect(response.statusCode, response.body).toBe(200);
+    expect(response.json()).toMatchObject({
+      totalCostUsd: 2,
+      taskExecution: { recordedCostUsd: 2, podCount: 1 },
+    });
+    expect(response.json().costEvidence.diagnostics).toContainEqual({
+      podId: 'deleted-cost',
+      code: 'RETAINED_DELETED_POD',
+      message: 'Deleted pod retained in recorded cost totals.',
+    });
+    const fleet = await app.inject({ method: 'GET', url: '/pods/analytics/cost?days=1' });
+    expect(fleet.statusCode).toBe(200);
+    expect(fleet.json()).toMatchObject({
+      total: 2,
+      top10: [{ podId: 'deleted-cost', historyArchived: true, costUsd: 2 }],
+    });
+    expect(() => repo.getOrThrow('deleted-cost')).toThrow();
+    expect((await app.inject({ method: 'GET', url: '/pods/never-existed/cost' })).statusCode).toBe(
+      404,
+    );
+  });
+
+  it('exposes deleted root accounting through the surviving child task endpoint', async () => {
+    insertPod(db, { id: 'history-root', status: 'complete' });
+    insertPod(db, { id: 'history-fix', status: 'failed' });
+    db.prepare("UPDATE pods SET linked_pod_id = 'history-root' WHERE id = 'history-fix'").run();
+    db.prepare(
+      "UPDATE pods SET input_tokens = 90, output_tokens = 10, cost_usd = 2, token_budget = 100, token_telemetry_accuracy = 'complete', phase_token_usage = '{}' WHERE id = 'history-root'",
+    ).run();
+    const repo = createPodRepository(db);
+    repo.taskExecutions?.register('history-fix');
+    const before = await app.inject({ method: 'GET', url: '/pods/history-fix/task-execution' });
+    repo.delete('history-root');
+    const after = await app.inject({ method: 'GET', url: '/pods/history-fix/task-execution' });
+    expect(before.statusCode).toBe(200);
+    expect(after.statusCode).toBe(200);
+    expect(after.json()).toMatchObject({
+      taskId: before.json().taskId,
+      rootPodId: 'history-root',
+      podCount: 2,
+      recordedInputTokens: 90,
+      recordedOutputTokens: 10,
+      recordedCostUsd: 2,
+      tokenBudget: 100,
+      budgetCheck: { status: 'exhausted' },
+    });
+    expect(after.json().diagnostics).toContain(
+      '1 deleted pod record retains task accounting and execution evidence.',
+    );
+    expect(after.body.length).toBeLessThan(16384);
+  });
+
   it('provider-attempt returns ordered redacted attempts and ledger projections', async () => {
     insertPod(db, { id: 'provider-attempt-pod', status: 'running', completedAt: undefined });
     db.prepare(`
@@ -809,7 +1293,7 @@ describe('GET /pods/analytics/reliability', () => {
     expect(res.statusCode).toBe(200);
     const body = res.json();
     expect(body.summary.totalPodsInWindow).toBe(1);
-    expect(body.firstPassRate).toBe(1);
+    expect(body.firstPassRate).toBe(0); // No executed validation receipt in this fixture.
   });
 
   it('readiness exposes null and object snapshots in pod API responses', async () => {
@@ -1280,6 +1764,7 @@ describe('GET /pods/analytics/memory', () => {
       sendMessage: vi.fn(),
       getValidationHistory: vi.fn().mockReturnValue([]),
       triggerValidation: vi.fn(),
+      assertCanRework: vi.fn(),
       revalidateSession: vi.fn(),
       extendAttempts: vi.fn(),
       extendPrAttempts: vi.fn(),
@@ -2848,6 +3333,7 @@ describe('POST /pods/:podId/spawn-fix', () => {
     app = await createServer({
       authModule,
       podManager,
+      podRepo,
       profileStore,
       eventBus,
       eventRepo,
@@ -2886,6 +3372,112 @@ describe('POST /pods/:podId/spawn-fix', () => {
     );
     return podId;
   }
+
+  it('returns a readable 409 and retains evidence on repeated deletion of an unsettled task', async () => {
+    const podId = insertMergePendingPod();
+    const repo = createPodRepository(db);
+    repo.update(podId, { status: 'failed', tokenBudget: null });
+    repo.taskExecutions?.register(podId);
+    const pod = repo.getOrThrow(podId);
+    repo.taskExecutions?.beginRun(podId, pod.lifecycleGeneration, 1, {
+      runtime: pod.runtime,
+      model: pod.model,
+      providerAccountId: null,
+    });
+    const unauthenticated = await app.inject({ method: 'DELETE', url: `/pods/${podId}` });
+    expect(unauthenticated.statusCode).toBe(401);
+    for (let repeat = 0; repeat < 2; repeat++) {
+      const res = await app.inject({
+        method: 'DELETE',
+        url: `/pods/${podId}`,
+        headers: authHeaders,
+      });
+      expect(res.statusCode).toBe(409);
+      expect(res.json()).toMatchObject({
+        error: 'TASK_EXECUTION_UNSETTLED',
+        message: expect.stringContaining('unsettled worker execution'),
+      });
+      expect(repo.getOrThrow(podId)).toMatchObject({ status: 'failed', worktreePath: '/tmp/wt/x' });
+      expect(repo.taskExecutions?.hasActiveRun(podId)).toBe(true);
+    }
+  });
+
+  it('retains the pod and returns a readable cleanup rejection when its sidecar manager is unavailable', async () => {
+    const podId = insertMergePendingPod();
+    const repo = createPodRepository(db);
+    repo.update(podId, { status: 'failed', sidecarContainerIds: { database: 'owned-sidecar' } });
+    repo.taskExecutions?.register(podId);
+    const response = await app.inject({
+      method: 'DELETE',
+      url: `/pods/${podId}`,
+      headers: authHeaders,
+    });
+    expect(response.statusCode).toBe(409);
+    expect(response.json()).toMatchObject({
+      error: 'POD_DELETE_CLEANUP_UNVERIFIED',
+      message: expect.stringContaining('sidecars'),
+    });
+    expect(repo.getOrThrow(podId).sidecarContainerIds).toEqual({ database: 'owned-sidecar' });
+  });
+
+  it('reads retained retry duration coverage after pod deletion without allowing new admission', async () => {
+    const podId = insertMergePendingPod();
+    const repo = createPodRepository(db);
+    repo.taskExecutions?.register(podId);
+    db.prepare(`INSERT INTO task_retry_attempts(id,task_id,pod_id,execution_id,generation,stage,identity,binding_hash,admitted_at,not_before,started_at,ended_at,outcome)
+      SELECT 'legacy-duration',task_id,pod_id,execution_id,1,'validation','{}','binding','2026-09-08','2026-09-08','2026-09-08','2026-09-08','pass' FROM task_executions WHERE pod_id=?`).run(
+      podId,
+    );
+    repo.delete(podId);
+    const response = await app.inject({
+      method: 'GET',
+      url: `/pods/${podId}/retry-state`,
+      headers: authHeaders,
+    });
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toMatchObject({
+      measuredDurationMs: 0,
+      durationEvidence: {
+        measuredRecordCount: 0,
+        unavailableRecordCount: 1,
+        pendingRecordCount: 0,
+        additiveAcrossStages: false,
+      },
+    });
+    expect(() =>
+      repo.taskRetries?.admit(
+        podId,
+        1,
+        { source: null, contract: null, commands: null, environment: null, implementation: null },
+        'a'.repeat(64),
+        [],
+      ),
+    ).toThrow('identity unavailable');
+  });
+
+  it('rejects Delete and Rework through HTTP while a durable deletion attempt is unresolved', async () => {
+    const podId = insertMergePendingPod();
+    const repo = createPodRepository(db);
+    repo.update(podId, { status: 'failed' });
+    repo.taskExecutions?.register(podId);
+    repo.deletionOwnership?.acquire(podId, 'saved-configuration');
+    const before = db.prepare('SELECT * FROM pods WHERE id=?').get(podId);
+    for (const [method, url] of [
+      ['DELETE', `/pods/${podId}`],
+      ['POST', `/pods/${podId}/validate`],
+    ] as const) {
+      const response = await app.inject({ method, url, headers: authHeaders });
+      expect(response.statusCode).toBe(409);
+      expect(response.json()).toMatchObject({
+        error: 'POD_DELETE_CLEANUP_UNVERIFIED',
+        message: expect.stringContaining('cleanup ownership is unresolved'),
+      });
+      expect(db.prepare('SELECT * FROM pods WHERE id=?').get(podId)).toEqual(before);
+    }
+    expect(
+      db.prepare('SELECT count(*) AS count FROM task_agent_runs WHERE pod_id=?').get(podId),
+    ).toEqual({ count: 0 });
+  });
 
   it('queues three back-to-back messages onto one canonical fix pod', async () => {
     const podId = insertMergePendingPod();
@@ -3378,6 +3970,9 @@ describe('POST /pods/:podId/continue-provider', () => {
     vi.clearAllMocks();
     db = createTestDb();
     app = Fastify({ logger: false });
+    app.addHook('preHandler', async (request) => {
+      request.user = { oid: 'fixture-operator', name: 'Operator' };
+    });
     const podRepo = createPodRepository(db);
     const eventRepo = createEventRepository(db);
     const escalationRepo = createEscalationRepository(db);
@@ -3411,7 +4006,11 @@ describe('POST /pods/:podId/continue-provider', () => {
 
     expect(response.statusCode).toBe(200);
     expect(response.json()).toEqual({ ok: true, action: 'primary-provider' });
-    expect(continueProvider).toHaveBeenCalledWith('failed-pod', 'profile-primary');
+    expect(continueProvider).toHaveBeenCalledWith('failed-pod', 'profile-primary', {
+      type: 'human',
+      userId: 'fixture-operator',
+      displayName: 'Operator',
+    });
   });
 
   it('preserves explicit-target paused continuation', async () => {
@@ -3425,7 +4024,11 @@ describe('POST /pods/:podId/continue-provider', () => {
     });
 
     expect(response.statusCode).toBe(200);
-    expect(continueProvider).toHaveBeenCalledWith('paused-pod', target);
+    expect(continueProvider).toHaveBeenCalledWith('paused-pod', target, {
+      type: 'human',
+      userId: 'fixture-operator',
+      displayName: 'Operator',
+    });
   });
 
   it('rejects ambiguous primary and explicit target requests', async () => {

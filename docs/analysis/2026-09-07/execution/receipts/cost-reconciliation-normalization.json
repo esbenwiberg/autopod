@@ -1,0 +1,30 @@
+{
+  "normalization": "Trailing whitespace and final blank lines only; raw files retained under /private/tmp/autopod-cost-reconciliation-*",
+  "receipts": [
+    {
+      "receipt": "cost-reconciliation-red.txt",
+      "rawSha256": "22a47abd22f62d6020021524904d8b251a334523f1232a2fe121fa2237fbe7f7",
+      "normalizedSha256": "e5e358caed514d9a4ad9e24340f3f94a5e2076020b47c856df45fbbfc04b4c5f"
+    },
+    {
+      "receipt": "cost-reconciliation-first-green.txt",
+      "rawSha256": "e203551f51d94091eaee9a223ae8d7fc253eb38c35f3d04aad114ba8c12776c7",
+      "normalizedSha256": "87f7d6ec7da36208f92f396e42d82cf136fdf60ecba2ffcd4d4c1422417711de"
+    },
+    {
+      "receipt": "cost-reconciliation-api.txt",
+      "rawSha256": "a77877c32d87a8fe9eeb1a35d17b22b722ce5fc4aecaf84a70301eae854893da",
+      "normalizedSha256": "30c82f6023970dcee8084f13b5284e234ecab1d5be0358391bdad126d331a9e3"
+    },
+    {
+      "receipt": "cost-reconciliation-affected.txt",
+      "rawSha256": "fc4a11b251f9ea1ceb063e2ec4a2cea626ba3d143657cbbb69823ce5a856428f",
+      "normalizedSha256": "ddad69713fd1a46e2dfa7cedc2dc345f7215b6a649e16312a730ee576ac5b4d2"
+    },
+    {
+      "receipt": "cost-reconciliation-build.txt",
+      "rawSha256": "1d770f850288b65259479c7b885836a73af6f292d2bef43cbcbd453c20803d8f",
+      "normalizedSha256": "d24d8bc3c46fd5dc2312e5404a72359c402cba5261bef786a24cf7e9a8788408"
+    }
+  ]
+}

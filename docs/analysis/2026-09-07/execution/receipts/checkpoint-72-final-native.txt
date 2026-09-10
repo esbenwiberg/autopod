@@ -1,0 +1,28 @@
+warning: '--skip-update' option is deprecated and will be removed in a future release
+[1/1] Compiling plugin GenerateManual
+[2/2] Compiling plugin GenerateDoccReference
+Building for debugging...
+[2/7] Write sources
+[3/7] Write swift-version--58304C5D6DBC2206.txt
+[5/9] Compiling AutopodUI TaskRetryCard.swift
+[6/9] Emitting module AutopodUI
+[6/11] Write Objects.LinkFileList
+[8/11] Linking AutopodDesktopExe
+[9/11] Linking AutopodDesktopPackageTests
+[10/11] Applying AutopodDesktopExe
+Build complete! (9.67s)
+Test Suite 'Selected tests' started at 2026-09-08 13:30:44.843.
+Test Suite 'AutopodDesktopPackageTests.xctest' started at 2026-09-08 13:30:44.851.
+Test Suite 'AutopodDesktopPackageTests.xctest' passed at 2026-09-08 13:30:44.851.
+	 Executed 0 tests, with 0 failures (0 unexpected) in 0.000 (0.000) seconds
+Test Suite 'Selected tests' passed at 2026-09-08 13:30:44.851.
+	 Executed 0 tests, with 0 failures (0 unexpected) in 0.000 (0.008) seconds
+◇ Test run started.
+↳ Testing Library Version: 1902
+↳ Target Platform: arm64e-apple-macos14.0
+◇ Test retryClientPreservesUnknownExecutionAndSeparateAuthorization(stage:) started.
+◇ Test case passing 1 argument stage → "codex_interruption" to retryClientPreservesUnknownExecutionAndSeparateAuthorization(stage:) started.
+◇ Test case passing 1 argument stage → "sandbox_startup" to retryClientPreservesUnknownExecutionAndSeparateAuthorization(stage:) started.
+◇ Test case passing 1 argument stage → "validation" to retryClientPreservesUnknownExecutionAndSeparateAuthorization(stage:) started.
+✔ Test retryClientPreservesUnknownExecutionAndSeparateAuthorization(stage:) with 3 test cases passed after 0.014 seconds.
+✔ Test run with 1 test in 0 suites passed after 0.014 seconds.

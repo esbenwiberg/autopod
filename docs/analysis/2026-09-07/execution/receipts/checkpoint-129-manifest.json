@@ -1,0 +1,26 @@
+{
+  "checkpoint": 129,
+  "candidate": "4e73cd8ce88e44cdb5c2d8d0a89447b819fa5a39",
+  "originMainObserved": "b75fbf0b7e2c4ea455838a6e4df6537665a7a8cc",
+  "approvedContractSHA256": "e0b142993993cb700fecefda5c1d64f94145558941c3a0ce22807bf86a6aec0c",
+  "approvedRunnerSHA256": "748164f6a6425b4c0ff6baf21a6f8aa095cddd92e151e2c61ff590a376f84b11",
+  "bundleSHA256": "159ffce46631ab9f3f0b58641f04ea67f5736cdeaf5d756ec98cd28f26ecb3dc",
+  "imageImportVerified": true,
+  "sandboxCreateHTTPStatus": 400,
+  "capabilityChecksExecuted": 0,
+  "ownedImageRemovedHTTPStatus": 404,
+  "observedSandboxesAfterCleanup": 0,
+  "newAttemptAuthorization": "pending",
+  "precise400CauseConfirmed": false,
+  "files": {
+    "fixtures/canary-129-contract.json": "de789a82f29feb13ca22bd8b4f521f8dd6a792bd6b98860055f48ed799163a43",
+    "fixtures/run-canary-129-new-attempt.mjs": "d6af39b9ec03631ef5fe097c8d7868e69ad3e89c90a263500583c54afd7c2783",
+    "fixtures/test-canary-129-new-attempt.mjs": "e94820b96c527a7bcfc6fedea0b88a7eb35a257dcc334b357e90b109c387f521",
+    "fixtures/cleanup-canary-128.py": "85c07a2ffd5687a697173f7072e58ff6f79f564c2ae62f96ba0612874ada33ae",
+    "receipts/checkpoint-129-live-attempt.json": "4644d345a615849773aca60f9271abce68165a39510fae4504721fa40e3122c6",
+    "receipts/checkpoint-129-cleanup.json": "fd7abe61f10874af5fc4d1801590b5ac10d2d642a73870989989bf60c9fce739",
+    "receipts/checkpoint-129-label-regression.json": "025c3912e91e960baa2af40c277b1a899d4691b2e745fedac8752d5699027ca9",
+    "receipts/checkpoint-129-installed-cli-schema.json": "aa760f3af4678e8386fe9f4039fc2e9e4756061b3557275b45b9ca2447b492d4"
+  },
+  "applicationCodeUnchanged": true
+}

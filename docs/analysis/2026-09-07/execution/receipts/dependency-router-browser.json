@@ -1,0 +1,15 @@
+{
+  "timestamp": "2026-09-07T15:42:56.004331+00:00",
+  "environment": "local fixture; no provider, repair, or production mutation",
+  "router": "7.18.3 or compatible resolved 7.x; exact lockfile authoritative",
+  "browser": "Codex in-app browser tab 9, closed afterward",
+  "origin": "http://127.0.0.1:50092/mobile/",
+  "checks": [
+    "Home -> pod detail retained pending human question, blocked preflight and validation history",
+    "Detail reload retained exact pod route and unresolved decision",
+    "Back link returned home",
+    "Scan inbox -> report retained incomplete scanner status and unchecked triage with actions disabled"
+  ],
+  "result": "pass",
+  "limits": "Navigation interaction only. No physical device, native desktop, or provider acceptance."
+}

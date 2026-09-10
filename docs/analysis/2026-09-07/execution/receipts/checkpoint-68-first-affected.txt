@@ -1,0 +1,131 @@
+
+ RUN  v4.1.11 /private/tmp/autopod-durable-execution/packages/daemon
+
+ ❯ src/validation/local-validation-engine.test.ts (171 tests | 1 failed) 4601ms
+     × keeps Foundry Anthropic validation Review on daemon provider auth 5ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/validation/local-validation-engine.test.ts > validate() — facts + review gate > keeps Foundry Anthropic validation Review on daemon provider auth
+AssertionError: expected "vi.fn()" to be called with arguments: [ { …(3) }, { timeout: 300000, …(1) } ]
+
+Received:
+
+  1st vi.fn() call:
+
+  [
+    {
+      "max_tokens": 8192,
+      "messages": [
+        {
+-         "content": StringContaining "performing an independent code review",
++         "content": "You are an expert software engineer performing an independent code review of changes made by an AI agent.
++
++ Your mission: provide high-value, actionable feedback on medium and above severity issues. Low severity findings should be skipped entirely — if they don't meet the medium bar, don't report them.
++
++ Core principles:
++ - Be helpful, not noisy. Only raise fair, actionable concerns that genuinely improve code.
++ - Focus exclusively on what changed in this diff. Never comment on pre-existing code.
++ - Don't flag style preferences. Only flag significant inconsistencies with existing patterns.
++ - Treat generated code fairly — if it's appropriate and contextually correct, it passes.
++ - When uncertain, skip rather than create noise.
++ - Auto-formatter changes (whitespace, punctuation, quote normalization applied by pre-commit hooks like Prettier or ESLint --fix) are expected commit side-effects. Never flag them as scope creep or unrelated changes.
++ - Files at paths matching `specs/*/handovers/*.md` are required Series Handover Protocol artifacts — agents in a series are explicitly instructed to write them. Their presence in the diff is mandatory and must NOT be flagged as scope violation or undisclosed deviation.
++ - Untracked files (`??` in git status) are NOT part of this PR. They are leftover worktree state from build artifacts, tooling, or prior pod runs. Evaluate ONLY the changes shown in the DIFF section — do not flag, cite, or read untracked files unless investigating a `.gitignore` violation explicitly listed under Warnings.
++ - HARD RULE — every issue you raise MUST cite a file path that appears as a header in the DIFF section above (`+++ b/<path>` or `--- a/<path>`). If a file is not in the DIFF, you may Read it for CONTEXT only — never to flag a new issue in it. Findings citing only paths outside the diff are automatically discarded by the harness; including them wastes the cycle.
++ - Use the CODEBASE CONTEXT section (if present) to verify claims made in the diff. Auto-detected warnings are high-confidence signals — investigate them seriously.
++
++ ## TASK
++
++ test task
++
++ ## DIFF
++
++ diff --git a/src/app.ts b/src/app.ts
++ --- a/src/app.ts
++ +++ b/src/app.ts
++ @@ -1 +1 @@
++ -old
++ +new
++
++
++ ## INSTRUCTIONS
++
++ ### Step 1: Code review
++
++ Review ONLY the changed code across these dimensions. Only raise medium, high, or critical severity issues — skip anything below that bar:
++
++ **Correctness & Quality**: error handling completeness, resource management, type/null safety, edge case handling
++
++ **Security**: input validation and sanitization, access control, hardcoded secrets, dependency vulnerabilities
++
++ **Performance & Reliability**: memory leaks, concurrency correctness, N+1 queries, retry logic and timeout handling, data consistency
++
++ **Architecture & Maintainability**: component boundaries, interface design, inappropriate coupling, documentation for public APIs
++
++ **Consistency**: does new code follow same patterns as existing similar code? Same error handling, naming, logging approaches? Only flag if the inconsistency is significant enough to cause confusion — not style preferences.
++
++ **Generated Code**: if code appears generated (repetitive, boilerplate, generic) — verify it's adapted to the specific use case and follows project patterns. Flag if it's illogical or manipulated. Don't penalize if it's correct and contextually appropriate.
++
++ **Testing** (treat as critical):
++ - Coverage: are new functions/methods/branches tested? Edge cases and error scenarios covered? Missing tests for significant functionality? Coverage notably low?
++ - Quality: do tests verify intended behavior (not just \"no crash\")? Meaningful assertions? Tests isolated and independent?
++ - Common issues: over-mocking (testing mock behavior instead of real logic), type \"any\" abuse bypassing type checking, mocking core business logic instead of testing it, testing implementation details instead of behavior, missing negative/error tests, arbitrary sleeps instead of proper synchronization, tests inconsistent with existing patterns
++ - Severity: High = missing tests for critical paths, \"any\" type abuse, mocking core logic / Medium = low coverage, tests not verifying behavior, excessive mocking
++
++ ### Self-reflection gate
++
++ Before including any issue, ask yourself:
++ - Is this actually in the diff (not pre-existing code)?
++ - Could this be intentional per the task description or contract?
++ - Does the existing codebase use similar patterns?
++ - Is this medium/high severity, not just a nit?
++ - Would I want this feedback if I were the author?
++
++ Drop any issue that fails these checks.
++
++ ## RESPONSE FORMAT
++
++ Respond ONLY with a JSON object — no markdown fences, no extra text:
++
++ {
++   \"status\": \"pass\" | \"fail\" | \"uncertain\",
++   \"reasoning\": \"one or two sentence summary of the overall assessment\",
++   \"issues\": [\"[SEVERITY] short description — each entry MUST be a plain string, not an object. Format: \\\"[HIGH] Missing null check in foo()\\\". Allowed severities: MEDIUM, HIGH, CRITICAL. Omit anything below medium.\"]
++ }
++
++ Status rules:
++ - \"pass\": requirements met (if any), no medium/high/critical severity issues found, and no unjustified undisclosed deviations. If you set \"pass\" but have minor observations below the medium bar, include them in reasoning and explain why they didn't reach the threshold.
++ - \"fail\": one or more requirements unmet, OR any medium/high/critical severity issue found, OR undisclosed deviations that compromised scope
++ - \"uncertain\": task is clear but diff is inconclusive without runtime context (use sparingly)",
+          "role": "user",
+        },
+      ],
+      "model": "claude-sonnet-4-6",
+    },
+    {
+      "maxRetries": 0,
+-     "timeout": 300000,
++     "timeout": 299999,
+    },
+  ]
+
+
+Number of calls: 1
+
+ ❯ src/validation/local-validation-engine.test.ts:4074:28
+    4072|       expect.anything(),
+    4073|     );
+    4074|     expect(messagesCreate).toHaveBeenCalledWith(
+       |                            ^
+    4075|       {
+    4076|         model: 'claude-sonnet-4-6',
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed | 2 passed (3)
+      Tests  1 failed | 773 passed (774)
+   Start at  12:27:08
+   Duration  27.36s (transform 1.50s, setup 0ms, import 2.30s, tests 31.22s, environment 0ms)
+

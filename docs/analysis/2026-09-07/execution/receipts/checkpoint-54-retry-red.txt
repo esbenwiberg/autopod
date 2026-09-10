@@ -1,0 +1,28 @@
+
+ RUN  v4.1.11 /private/tmp/autopod-durable-execution/packages/daemon
+
+ ❯ src/pods/pod-manager.test.ts (544 tests | 2 failed | 542 skipped) 230ms
+       × does not replay an uncertain validation-feedback turn after timeout before-event 159ms
+       × does not replay an uncertain validation-feedback turn after timeout after-event 70ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 2 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/pods/pod-manager.test.ts > PodManager > triggerValidation > does not replay an uncertain validation-feedback turn after timeout before-event
+ FAIL  src/pods/pod-manager.test.ts > PodManager > triggerValidation > does not replay an uncertain validation-feedback turn after timeout after-event
+AssertionError: expected "vi.fn()" to be called 1 times, but got 2 times
+ ❯ src/pods/pod-manager.test.ts:14014:36
+    14012|         });
+    14013|         await manager.triggerValidation(pod.id);
+    14014|         expect(ctx.runtime.resume).toHaveBeenCalledTimes(1);
+       |                                    ^
+    14015|         expect(ctx.runtime.spawn).not.toHaveBeenCalled();
+    14016|         expect(ctx.containerManager.kill).not.toHaveBeenCalled();
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/2]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  2 failed | 542 skipped (544)
+   Start at  09:07:48
+   Duration  2.55s (transform 1.53s, setup 0ms, import 2.17s, tests 230ms, environment 0ms)
+

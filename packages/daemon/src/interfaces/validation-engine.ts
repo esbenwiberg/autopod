@@ -13,8 +13,25 @@ import type {
   ValidationResult,
   ValidationSuite,
 } from '@autopod/shared';
+import type { BeforeReviewerLaunch } from './reviewer-launch.js';
 
 export interface ValidationEngineConfig {
+  /** Trusted per-invocation preflight and ownership fence for actual container reviewer launches. */
+  beforeReviewerLaunch?: BeforeReviewerLaunch;
+  /** Trusted synchronous ownership fence for host/API reviewer dispatch and tool turns. */
+  assertReviewerCurrent?: () => void;
+  /** Trusted receipt writer for the selected profile API client, before each request. */
+  recordReviewerApiDispatch?: (dispatchModel: string) => void;
+  /** Legacy daemon API-key path; provider/account identity is not established. */
+  recordLegacyReviewerApiDispatch?: (dispatchModel: string) => void;
+  /** Host CLI receipt after its version probe and immediately before dispatch. */
+  recordHostReviewerDispatch?: (
+    evidence: import('../runtimes/host-cli-provenance.js').HostCliDispatchEvidence,
+  ) => void;
+  /** Trusted collector, not a client-provided hash. Missing identity always executes checks. */
+  captureEvidenceIdentity?: () => Promise<
+    import('@autopod/shared').ValidationInputIdentity | undefined
+  >;
   podId: string;
   containerId: string;
   /** Execution backend used to distinguish sandbox resource ceilings from local runner failures. */
@@ -43,6 +60,8 @@ export interface ValidationEngineConfig {
   reviewerModel?: string;
   /** Model provider that owns the reviewer model/auth. Defaults to Anthropic for legacy profiles. */
   reviewerProvider?: ModelProvider | null;
+  /** Account captured with the resolved reviewer configuration, never inferred from mutable defaults. */
+  reviewerProviderAccountId?: string | null;
   /** Provider credentials from the resolved profile, used to select provider protocol/surface. */
   reviewerProviderCredentials?: ProviderCredentials | null;
   /** Anthropic API key for Tier 2 tool-use review. Defaults to ANTHROPIC_API_KEY env var. */

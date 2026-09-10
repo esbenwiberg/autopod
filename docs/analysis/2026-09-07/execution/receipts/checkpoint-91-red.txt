@@ -1,0 +1,63 @@
+
+ RUN  v4.1.11 /private/tmp/autopod-durable-execution/packages/daemon
+
+ ❯ src/pods/task-execution-ledger.test.ts (29 tests | 2 failed | 27 skipped) 112ms
+     × retains settled linked run accounting and spent budget after deleting the fix pod 69ms
+     × retains the deleted task root budget and original membership of its surviving child 42ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 2 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/pods/task-execution-ledger.test.ts > task-wide execution accounting > retains settled linked run accounting and spent budget after deleting the fix pod
+AssertionError: expected { …(20) } to match object { …(9) }
+(33 matching properties omitted from actual)
+
+- Expected
++ Received
+
+  {
+-   "agentRunCount": 1,
++   "agentRunCount": 0,
+    "budgetCheck": {
+-     "status": "exhausted",
++     "status": "below_recorded_limit",
+    },
+-   "failedRunCount": 1,
+-   "podCount": 2,
+-   "recordedCostUsd": 2,
+-   "recordedInputTokens": 90,
+-   "recordedOutputTokens": 10,
++   "failedRunCount": 0,
++   "podCount": 1,
++   "recordedCostUsd": 0,
++   "recordedInputTokens": 0,
++   "recordedOutputTokens": 0,
+    "taskId": "task:ecd42fa4-a960-4a40-86e0-b3eaa82dd169",
+-   "validationExecutionCount": 1,
++   "validationExecutionCount": 0,
+  }
+
+ ❯ src/pods/task-execution-ledger.test.ts:393:21
+
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/2]⎯
+
+ FAIL  src/pods/task-execution-ledger.test.ts > task-wide execution accounting > retains the deleted task root budget and original membership of its surviving child
+SqliteError: task membership is immutable; create a distinct execution
+ ❯ Object.<anonymous> src/pods/pod-repository.ts:1322:82
+    1320|       // These were added without ON DELETE SET NULL (SQLite can't ALT…
+    1321|       // so we nullify them at the application level.
+    1322|       db.prepare('UPDATE pods SET linked_pod_id = NULL WHERE linked_po…
+       |                                                                                  ^
+    1323|       db.prepare('UPDATE pods SET fix_pod_id = NULL WHERE fix_pod_id =…
+    1324|       db.prepare('UPDATE pods SET depends_on_pod_id = NULL WHERE depen…
+ ❯ Object.sqliteTransaction [as delete] ../../node_modules/.pnpm/better-sqlite3@11.10.0/node_modules/better-sqlite3/lib/methods/transaction.js:65:24
+ ❯ src/pods/task-execution-ledger.test.ts:403:12
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/2]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  2 failed | 27 skipped (29)
+   Start at  18:29:49
+   Duration  441ms (transform 141ms, setup 0ms, import 218ms, tests 112ms, environment 0ms)
+

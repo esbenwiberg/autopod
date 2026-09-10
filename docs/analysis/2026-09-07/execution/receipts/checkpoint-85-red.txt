@@ -1,0 +1,79 @@
+
+ RUN  v4.1.11 /private/tmp/autopod-durable-execution/packages/daemon
+
+ ❯ src/runtimes/finite-runtime-exit.test.ts (7 tests | 7 failed) 31ms
+     × retains output but rejects unverified 'claude-spawn' exit (rejected: false) 16ms
+     × retains output but rejects unverified 'claude-spawn' exit (rejected: true) 2ms
+     × retains output but rejects unverified 'claude-resume' exit (rejected: false) 0ms
+     × retains output but rejects unverified 'claude-resume' exit (rejected: true) 0ms
+     × retains output but rejects unverified 'copilot' exit (rejected: false) 11ms
+     × retains output but rejects unverified 'copilot' exit (rejected: true) 0ms
+     × does not authorize missing-session fallback before observing Claude Resume exit 1ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 7 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/runtimes/finite-runtime-exit.test.ts > finite CLI exit evidence > retains output but rejects unverified 'claude-spawn' exit (rejected: false)
+ FAIL  src/runtimes/finite-runtime-exit.test.ts > finite CLI exit evidence > retains output but rejects unverified 'claude-resume' exit (rejected: false)
+ FAIL  src/runtimes/finite-runtime-exit.test.ts > finite CLI exit evidence > retains output but rejects unverified 'claude-resume' exit (rejected: true)
+ FAIL  src/runtimes/finite-runtime-exit.test.ts > finite CLI exit evidence > retains output but rejects unverified 'copilot' exit (rejected: false)
+AssertionError: promise resolved "undefined" instead of rejecting
+
+- Expected:
+Error {
+  "message": "rejected promise",
+}
+
++ Received:
+undefined
+
+ ❯ src/runtimes/finite-runtime-exit.test.ts:69:27
+     67|       );
+     68|       stderr.end();
+     69|       await expect(consume).rejects.toMatchObject({ code: 'EXEC_EXIT_U…
+       |                           ^
+     70|       expect(JSON.stringify(retained)).toContain('Retain this output');
+     71|       if (kind === 'copilot')
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/7]⎯
+
+ FAIL  src/runtimes/finite-runtime-exit.test.ts > finite CLI exit evidence > retains output but rejects unverified 'claude-spawn' exit (rejected: true)
+ FAIL  src/runtimes/finite-runtime-exit.test.ts > finite CLI exit evidence > retains output but rejects unverified 'copilot' exit (rejected: true)
+AssertionError: expected Error: Transport ended without exit to match object { code: 'EXEC_EXIT_UNVERIFIED' }
+
+- Expected
++ Received
+
+- {
+-   "code": "EXEC_EXIT_UNVERIFIED",
++ Error {
++   "message": "Transport ended without exit",
+  }
+
+ ❯ src/runtimes/finite-runtime-exit.test.ts:69:27
+     67|       );
+     68|       stderr.end();
+     69|       await expect(consume).rejects.toMatchObject({ code: 'EXEC_EXIT_U…
+       |                           ^
+     70|       expect(JSON.stringify(retained)).toContain('Retain this output');
+     71|       if (kind === 'copilot')
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/7]⎯
+
+ FAIL  src/runtimes/finite-runtime-exit.test.ts > finite CLI exit evidence > does not authorize missing-session fallback before observing Claude Resume exit
+AssertionError: expected ResumeSessionNotFoundError: Claude --resu… { …(2) } to be an instance of AutopodError
+ ❯ src/runtimes/finite-runtime-exit.test.ts:89:25
+     87|     stderr.end('No conversation found with session ID: retained-sessio…
+     88|     stdout.end();
+     89|     await expect(consume).rejects.toBeInstanceOf(AutopodError);
+       |                         ^
+     90|     await expect(consume).rejects.toMatchObject({ code: 'EXEC_EXIT_UNV…
+     91|     expect(runtime.getClaudeSessionId('pod')).toBe('retained-session');
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/7]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  7 failed (7)
+   Start at  17:14:49
+   Duration  285ms (transform 90ms, setup 0ms, import 149ms, tests 31ms, environment 0ms)
+

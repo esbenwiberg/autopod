@@ -22,11 +22,12 @@ import type {
   Profile,
   ReviewFeedbackResponseItem,
 } from '@autopod/shared';
-import { MAX_DIFF_LENGTH, generateId } from '@autopod/shared';
+import { AutopodError, MAX_DIFF_LENGTH, generateId } from '@autopod/shared';
 import type { Logger } from 'pino';
 import type { ActionEngine } from '../actions/action-engine.js';
 import { resolveEffectiveActionPolicy } from '../actions/policy-resolver.js';
 import { isPrivateIp } from '../api/ssrf-guard.js';
+import { atomicPodChange } from '../db/unit-of-work.js';
 import type { ContainerManager } from '../interfaces/container-manager.js';
 import type { WorktreeManager } from '../interfaces/worktree-manager.js';
 import type { ProfileStore } from '../profiles/index.js';
@@ -38,6 +39,7 @@ import {
   runPreSubmitReview,
 } from '../validation/pre-submit-review.js';
 import { runCodexReview } from '../validation/review-codex-runner.js';
+import { persistEscalation } from './escalation-coordinator.js';
 import type { EscalationRepository } from './escalation-repository.js';
 import type { EventBus } from './event-bus.js';
 import type { MemoryRepository } from './memory-repository.js';
@@ -100,7 +102,11 @@ export function createSessionBridge(deps: SessionBridgeDependencies): PodBridge 
 
   function assertAgentWriteAllowed(podId: string, toolName: string): void {
     const pod = podRepo.getOrThrow(podId);
-    if (pod.status === 'running') return;
+    if (
+      pod.status === 'running' ||
+      (pod.status === 'awaiting_input' && toolName === 'report_task_summary')
+    )
+      return;
 
     logger.warn(
       { podId, status: pod.status, toolName },
@@ -124,24 +130,41 @@ export function createSessionBridge(deps: SessionBridgeDependencies): PodBridge 
   return {
     createEscalation(escalation: EscalationRequest): void {
       podManager.touchHeartbeat(escalation.podId);
-      escalationRepo.insert(escalation);
-      logger.info(
-        { escalationId: escalation.id, podId: escalation.podId, type: escalation.type },
-        'Escalation created',
-      );
-      // Transition pod to awaiting_input so the TUI shows the pending question/approval
-      if (
-        escalation.type === 'ask_human' ||
-        escalation.type === 'report_blocker' ||
-        escalation.type === 'action_approval' ||
-        escalation.type === 'request_credential'
-      ) {
-        podManager.notifyEscalation(escalation.podId, escalation);
-      }
+      persistEscalation(podRepo, escalationRepo, escalation, () => {
+        logger.info(
+          { escalationId: escalation.id, podId: escalation.podId, type: escalation.type },
+          'Escalation created',
+        );
+        // Transition pod to awaiting_input so the TUI shows the pending question/approval
+        if (
+          escalation.type === 'ask_human' ||
+          escalation.type === 'report_blocker' ||
+          escalation.type === 'action_approval' ||
+          escalation.type === 'request_credential'
+        ) {
+          podManager.notifyEscalation(escalation.podId, escalation);
+        }
+      });
     },
 
     resolveEscalation(escalationId: string, response: EscalationResponse): void {
-      escalationRepo.update(escalationId, response);
+      atomicPodChange(podRepo, () => {
+        const recorded = escalationRepo.getOrThrow(escalationId).response;
+        if (recorded) {
+          if (
+            recorded.response !== response.response ||
+            recorded.respondedBy !== response.respondedBy
+          )
+            throw new AutopodError(
+              'This escalation already has a different recorded response.',
+              'ESCALATION_RESPONSE_CONFLICT',
+              409,
+            );
+          // The waiter finishing is not a second decision or a new responder.
+          return;
+        }
+        escalationRepo.update(escalationId, response);
+      });
       logger.info({ escalationId }, 'Escalation resolved');
     },
 
@@ -459,14 +482,14 @@ export function createSessionBridge(deps: SessionBridgeDependencies): PodBridge 
       });
     },
 
-    consumeMessages(podId: string): { hasMessage: boolean; message?: string } {
+    readOperatorGuidance(podId: string) {
       podManager.touchHeartbeat(podId);
-      return nudgeRepo.consumeNext(podId);
+      return nudgeRepo.readPending(podId);
     },
 
-    consumeMessageBatch(podId: string): string[] {
+    acknowledgeOperatorGuidance(podId: string, deliveryId: string) {
       podManager.touchHeartbeat(podId);
-      return nudgeRepo.consumePending(podId);
+      nudgeRepo.acknowledgeDelivery(podId, deliveryId);
     },
 
     actionRequiresApproval(podId: string, actionName: string): boolean {

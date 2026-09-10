@@ -1,0 +1,8 @@
+- generic [ref=e28] [box=16,2087,343,488]:
+  - heading "Worker execution" [level=2] [ref=e29] [box=33,2104,309,28]
+  - paragraph [ref=e107] [box=33,2144,309,38]: 1 executed / 1 admitted worker runs across this task.
+  - paragraph [ref=e108] [box=33,2194,309,57]: 0 / 1 transient retry admissions · 150 ms measured · 0 interrupted with unknown duration.
+  - paragraph [ref=e109] [box=33,2263,309,133]: Repeated worker authentication failures require a recorded human authorization. Classified throttling and provider outages use the persisted task allowance and cooldown. Worker elapsed time overlaps phase measurements; usage is not counted again.
+  - paragraph [ref=e110] [box=33,2408,309,38]: "Latest outcome: transient · partial telemetry."
+  - button "Resume worker" [ref=e111] [box=33,2458,309,44]
+  - button "Refresh retry accounting" [ref=e30] [box=33,2514,309,44]

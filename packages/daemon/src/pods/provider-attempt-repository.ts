@@ -1,3 +1,4 @@
+import { AutopodError } from '@autopod/shared';
 import type {
   ProviderAccountProvider,
   ProviderAttempt,
@@ -20,6 +21,8 @@ export interface OpenProviderAttempt {
 }
 
 export interface CloseProviderAttempt {
+  /** Fence mutations to the captured durable segment when supplied. */
+  expectedOrdinal?: number;
   nativeSessionId: string | null;
   endedAt?: string;
   outcome: ProviderAttemptOutcome;
@@ -37,6 +40,8 @@ export interface ProviderAttemptTotals {
 }
 
 export interface UpdateActiveProviderAttempt {
+  /** Fence mutations to the captured durable segment when supplied. */
+  expectedOrdinal?: number;
   nativeSessionId?: string | null;
   inputTokens: number;
   outputTokens: number;
@@ -67,6 +72,23 @@ export interface ProviderAttemptRepository {
   getActiveProfileSnapshot(podId: string): Record<string, unknown> | null;
   totals(podId: string): ProviderAttemptTotals;
   reservePreSubmitReview(podId: string): boolean;
+}
+
+export class ProviderAttemptSupersededError extends AutopodError {
+  constructor() {
+    super(
+      'Provider attempt was superseded; replacement evidence is retained.',
+      'STALE_PROVIDER_ATTEMPT',
+      409,
+    );
+  }
+}
+
+function checkedOrdinal(ordinal: number | undefined): number | null {
+  if (ordinal === undefined) return null;
+  if (!Number.isSafeInteger(ordinal) || ordinal < 1)
+    throw new Error('expectedOrdinal must be a positive safe integer');
+  return ordinal;
 }
 
 export const MAX_PRE_SUBMIT_REVIEWS_PER_ATTEMPT = 2;
@@ -202,6 +224,7 @@ export function createProviderAttemptRepository(db: Database.Database): Provider
       classification_retry_after = @classificationRetryAfter,
       handoff_reference = @handoffReference
     WHERE pod_id = @podId AND ended_at IS NULL
+      AND (@expectedOrdinal IS NULL OR ordinal = @expectedOrdinal)
   `);
   const updateActive = db.prepare(`
     UPDATE provider_attempts SET
@@ -210,6 +233,7 @@ export function createProviderAttemptRepository(db: Database.Database): Provider
       output_tokens = @outputTokens,
       cost_usd = @costUsd
     WHERE pod_id = @podId AND ended_at IS NULL
+      AND (@expectedOrdinal IS NULL OR ordinal = @expectedOrdinal)
   `);
   const upsertTelemetryCorrection = db.prepare(`
     INSERT INTO provider_attempt_telemetry_corrections (
@@ -250,24 +274,29 @@ export function createProviderAttemptRepository(db: Database.Database): Provider
     },
 
     updateActive(podId, input) {
-      const result = updateActive.run({
-        podId,
-        nativeSessionId: input.nativeSessionId ?? null,
-        inputTokens: input.inputTokens,
-        outputTokens: input.outputTokens,
-        costUsd: input.costUsd,
-      });
-      if (result.changes !== 1) {
-        throw new Error(`No active provider attempt exists for pod ${podId}`);
-      }
-      const active = repository.getActive(podId);
-      if (!active) throw new Error(`Provider attempt disappeared for pod ${podId}`);
-      return active;
+      return db.transaction(() => {
+        const result = updateActive.run({
+          podId,
+          expectedOrdinal: checkedOrdinal(input.expectedOrdinal),
+          nativeSessionId: input.nativeSessionId ?? null,
+          inputTokens: input.inputTokens,
+          outputTokens: input.outputTokens,
+          costUsd: input.costUsd,
+        });
+        if (result.changes !== 1) {
+          if (input.expectedOrdinal !== undefined) throw new ProviderAttemptSupersededError();
+          throw new Error(`No active provider attempt exists for pod ${podId}`);
+        }
+        const active = repository.getActive(podId);
+        if (!active) throw new Error(`Provider attempt disappeared for pod ${podId}`);
+        return active;
+      })();
     },
 
     close(podId, input) {
       return db.transaction(() => {
         repository.updateActive(podId, {
+          expectedOrdinal: input.expectedOrdinal,
           nativeSessionId: input.nativeSessionId,
           inputTokens: input.inputTokens,
           outputTokens: input.outputTokens,
@@ -285,6 +314,7 @@ export function createProviderAttemptRepository(db: Database.Database): Provider
             : null);
         const result = closeActive.run({
           podId,
+          expectedOrdinal: checkedOrdinal(input.expectedOrdinal),
           nativeSessionId: input.nativeSessionId,
           endedAt: input.endedAt ?? new Date().toISOString(),
           outcome: input.outcome,
@@ -295,6 +325,7 @@ export function createProviderAttemptRepository(db: Database.Database): Provider
           handoffReference: input.handoffReference ?? null,
         });
         if (result.changes !== 1) {
+          if (input.expectedOrdinal !== undefined) throw new ProviderAttemptSupersededError();
           throw new Error(`No active provider attempt exists for pod ${podId}`);
         }
         const attempts = repository.list(podId);

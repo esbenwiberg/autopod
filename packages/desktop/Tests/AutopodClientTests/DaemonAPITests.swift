@@ -868,3 +868,12 @@ private func decodeProfileWithAdvisoryBrowserQa(
   #expect(dict["branch"] == nil)
   #expect(dict["runtime"] == nil)
 }
+
+@Test func daemonHealthPreservesUnknownAndStaleEvidence() throws {
+  let legacy = try JSONDecoder().decode(DaemonHealthSnapshot.self, from: Data(#"{"status":"ok"}"#.utf8))
+  #expect(legacy.releaseSummary == "Release identity unavailable")
+  #expect(legacy.backupSummary.contains("freshness unverified"))
+  let current = try JSONDecoder().decode(DaemonHealthSnapshot.self, from: Data(#"{"status":"ok","release":{"commitSha":"abc","dirty":true},"backup":{"state":"stale","lastCompletedAt":"2026-09-01T00:00:00Z"}}"#.utf8))
+  #expect(current.releaseSummary == "abc · modified source")
+  #expect(current.backupSummary.contains("stale"))
+}

@@ -1,0 +1,487 @@
+{
+  "actions": [
+    {
+      "action": "update",
+      "resolves": [
+        {
+          "id": 1120680,
+          "path": ".>vitest>vite>esbuild",
+          "dev": false,
+          "optional": false,
+          "bundled": false
+        }
+      ],
+      "module": "vite",
+      "target": "8.2.2",
+      "depth": 3
+    },
+    {
+      "action": "review",
+      "module": "@fastify/static",
+      "resolves": [
+        {
+          "id": 1116758,
+          "path": "packages__daemon>@fastify/static",
+          "dev": false,
+          "optional": false,
+          "bundled": false
+        },
+        {
+          "id": 1116759,
+          "path": "packages__daemon>@fastify/static",
+          "dev": false,
+          "optional": false,
+          "bundled": false
+        },
+        {
+          "id": 1124285,
+          "path": "packages__daemon>@fastify/static",
+          "dev": false,
+          "optional": false,
+          "bundled": false
+        },
+        {
+          "id": 1124286,
+          "path": "packages__daemon>@fastify/static",
+          "dev": false,
+          "optional": false,
+          "bundled": false
+        }
+      ]
+    },
+    {
+      "action": "review",
+      "module": "uuid",
+      "resolves": [
+        {
+          "id": 1119441,
+          "path": "packages__cli>@azure/msal-node>uuid",
+          "dev": false,
+          "optional": false,
+          "bundled": false
+        }
+      ]
+    },
+    {
+      "action": "review",
+      "module": "adm-zip",
+      "resolves": [
+        {
+          "id": 1123686,
+          "path": "packages__daemon>@huggingface/transformers>onnxruntime-node>adm-zip",
+          "dev": false,
+          "optional": false,
+          "bundled": false
+        }
+      ]
+    },
+    {
+      "action": "review",
+      "module": "sharp",
+      "resolves": [
+        {
+          "id": 1124066,
+          "path": "packages__daemon>@huggingface/transformers>sharp",
+          "dev": false,
+          "optional": false,
+          "bundled": false
+        }
+      ]
+    },
+    {
+      "action": "review",
+      "module": "react-router",
+      "resolves": [
+        {
+          "id": 1124268,
+          "path": "packages__mobile-web>react-router-dom>react-router",
+          "dev": false,
+          "optional": false,
+          "bundled": false
+        },
+        {
+          "id": 1124272,
+          "path": "packages__mobile-web>react-router-dom>react-router",
+          "dev": false,
+          "optional": false,
+          "bundled": false
+        }
+      ]
+    }
+  ],
+  "advisories": {
+    "1116758": {
+      "findings": [
+        {
+          "version": "8.3.0",
+          "paths": ["packages/daemon > @fastify/static@8.3.0"]
+        }
+      ],
+      "found_by": null,
+      "deleted": null,
+      "references": "- https://github.com/fastify/fastify-static/security/advisories/GHSA-pr96-94w5-mx2h\n- https://nvd.nist.gov/vuln/detail/CVE-2026-6410\n- https://cna.openjsf.org/security-advisories.html\n- https://github.com/advisories/GHSA-pr96-94w5-mx2h",
+      "created": "2026-04-16T22:34:30.000Z",
+      "id": 1116758,
+      "npm_advisory_id": null,
+      "overview": "### Impact\n\n`@fastify/static` v9.1.0 and earlier serves directory listings outside the configured static root when the `list` option is enabled. A request such as `/public/../outside/` causes `dirList.path()` to resolve a directory outside the root via `path.join()` without a containment check.\n\nA remote unauthenticated attacker can obtain directory listings for arbitrary directories accessible to the Node.js process, disclosing directory names and filenames that should not be exposed. File contents are not disclosed.\n\n### Patches\n\nUpgrade to `@fastify/static` >= 9.1.1.\n\n### Workarounds\n\nDisable directory listing by removing the `list` option from the plugin configuration.",
+      "reported_by": null,
+      "title": "@fastify/static vulnerable to path traversal in directory listing",
+      "metadata": null,
+      "cves": ["CVE-2026-6410"],
+      "access": "public",
+      "severity": "moderate",
+      "module_name": "@fastify/static",
+      "vulnerable_versions": ">=8.0.0 <=9.1.0",
+      "github_advisory_id": "GHSA-pr96-94w5-mx2h",
+      "recommendation": "Upgrade to version 9.1.1 or later",
+      "patched_versions": ">=9.1.1",
+      "updated": "2026-04-16T22:34:31.000Z",
+      "cvss": {
+        "score": 5.3,
+        "vectorString": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:L/I:N/A:N"
+      },
+      "cwe": ["CWE-22"],
+      "url": "https://github.com/advisories/GHSA-pr96-94w5-mx2h"
+    },
+    "1116759": {
+      "findings": [
+        {
+          "version": "8.3.0",
+          "paths": ["packages/daemon > @fastify/static@8.3.0"]
+        }
+      ],
+      "found_by": null,
+      "deleted": null,
+      "references": "- https://github.com/fastify/fastify-static/security/advisories/GHSA-x428-ghpx-8j92\n- https://github.com/fastify/middie/security/advisories/GHSA-cxrg-g7r8-w69p\n- https://github.com/honojs/hono/security/advisories/GHSA-q5qw-h33p-qvwr\n- https://nvd.nist.gov/vuln/detail/CVE-2026-6414\n- https://cna.openjsf.org/security-advisories.html\n- https://github.com/advisories/GHSA-x428-ghpx-8j92",
+      "created": "2026-04-16T22:34:03.000Z",
+      "id": 1116759,
+      "npm_advisory_id": null,
+      "overview": "### Impact\n\n`@fastify/static` v9.1.0 and earlier decodes percent-encoded path separators (`%2F`) before filesystem resolution, but Fastify's router treats them as literal characters. This creates a routing mismatch: route guards on `/admin/*` do not match `/admin%2Fsecret.html`, but @fastify/static decodes it to `/admin/secret.html` and serves the file.\n\nApplications that rely on route-based middleware or guards to protect files served by @fastify/static can be bypassed with encoded path separators.\n\n### Patches\n\nUpgrade to `@fastify/static` >= 9.1.1.\n\n### Workarounds\n\nNone. Upgrade to the patched version.",
+      "reported_by": null,
+      "title": "@fastify/static vulnerable to route guard bypass via encoded path separators",
+      "metadata": null,
+      "cves": ["CVE-2026-6414"],
+      "access": "public",
+      "severity": "moderate",
+      "module_name": "@fastify/static",
+      "vulnerable_versions": ">=8.0.0 <=9.1.0",
+      "github_advisory_id": "GHSA-x428-ghpx-8j92",
+      "recommendation": "Upgrade to version 9.1.1 or later",
+      "patched_versions": ">=9.1.1",
+      "updated": "2026-04-16T22:34:03.000Z",
+      "cvss": {
+        "score": 5.9,
+        "vectorString": "CVSS:3.1/AV:N/AC:H/PR:N/UI:N/S:U/C:H/I:N/A:N"
+      },
+      "cwe": ["CWE-177"],
+      "url": "https://github.com/advisories/GHSA-x428-ghpx-8j92"
+    },
+    "1119441": {
+      "findings": [
+        {
+          "version": "8.3.2",
+          "paths": ["packages/cli > @azure/msal-node@2.16.3 > uuid@8.3.2"]
+        }
+      ],
+      "found_by": null,
+      "deleted": null,
+      "references": "- https://github.com/uuidjs/uuid/security/advisories/GHSA-w5hq-g745-h8pq\n- https://github.com/uuidjs/uuid/commit/3d2c5b0342f0fcb52a5ac681c3d47c13e7444b34\n- https://github.com/uuidjs/uuid/releases/tag/v14.0.0\n- https://nvd.nist.gov/vuln/detail/CVE-2026-41907\n- https://github.com/uuidjs/uuid/commit/32389c887c9e75f90442ee4cc95bbab0c4e8346e\n- https://github.com/uuidjs/uuid/commit/3d61d6ac1f782cf6b1dd8661c60f11722cd49a0d\n- https://github.com/uuidjs/uuid/commit/9d27ddf7046ce496ef39569ff84d948eeff9cb2a\n- https://github.com/uuidjs/uuid/releases/tag/v11.1.1\n- https://github.com/uuidjs/uuid/releases/tag/v12.0.1\n- https://github.com/uuidjs/uuid/releases/tag/v13.0.1\n- https://github.com/advisories/GHSA-w5hq-g745-h8pq",
+      "created": "2026-04-22T20:53:24.000Z",
+      "id": 1119441,
+      "npm_advisory_id": null,
+      "overview": "### Summary\n\nThe `v3()`, `v5()`, and `v6()` [API methods](https://github.com/uuidjs/uuid#api-summary) (not `uuid` release versions) accept external output buffers but do not reject out-of-range writes (small `buf` or large `offset`).  \nBy contrast, `v4()`, `v1()`, and `v7()` API methods explicitly throw `RangeError` on invalid bounds.\n\nThis inconsistency allows **silent partial writes** into caller-provided buffers.\n\n\n### Affected code\n\n- `src/v35.ts` (`v3()`/`v5()` path) writes `buf[offset + i]` without bounds validation.\n- `src/v6.ts` writes `buf[offset + i]` without bounds validation.\n\n### Reproducible PoC\n\n```bash\ncd /home/StrawHat/uuid\nnpm ci\nnpm run build\n\nnode --input-type=module -e \"\nimport {v4,v5,v6} from './dist-node/index.js';\nconst ns='6ba7b810-9dad-11d1-80b4-00c04fd430c8';\nfor (const [name,fn] of [\n  ['v4()',()=>v4({},new Uint8Array(8),4)],\n  ['v5()',()=>v5('x',ns,new Uint8Array(8),4)],\n  ['v6()',()=>v6({},new Uint8Array(8),4)],\n]) {\n  try { fn(); console.log(name,'NO_THROW'); }\n  catch(e){ console.log(name,'THREW',e.name); }\n}\"\n```\n\nObserved:\n\n- `v4() THREW RangeError`\n- `v5() NO_THROW`\n- `v6() NO_THROW`\n\nExample partial overwrite evidence captured during audit:\n\n```text\nsame true buf [\n  170, 170, 170, 170,\n   75, 224, 100,  63\n]\nv6 [\n  187, 187, 187, 187,\n   31,  19, 185,  64\n]\n```\n\n### Security impact\n\n- **Primary**: integrity/robustness issue (silent partial output).\n- If an application assumes full UUID writes into preallocated buffers, this can produce malformed/truncated/partially stale identifiers without error.\n- In systems where caller-controlled offsets/buffer sizes are exposed indirectly, this may become a security-relevant logic flaw.\n\n### Suggested fix\n\nAdd the same guard used by `v4()`/`v1()`/`v7()`:\n\n```ts\nif (offset < 0 || offset + 16 > buf.length) {\n  throw new RangeError(`UUID byte range ${offset}:${offset + 15} is out of buffer bounds`);\n}\n```\n\nApply to:\n\n- `src/v35.ts` (covers `v3()` and `v5()`)\n- `src/v6.ts`",
+      "reported_by": null,
+      "title": "uuid: Missing buffer bounds check in v3/v5/v6 when buf is provided",
+      "metadata": null,
+      "cves": ["CVE-2026-41907"],
+      "access": "public",
+      "severity": "moderate",
+      "module_name": "uuid",
+      "vulnerable_versions": "<11.1.1",
+      "github_advisory_id": "GHSA-w5hq-g745-h8pq",
+      "recommendation": "Upgrade to version 11.1.1 or later",
+      "patched_versions": ">=11.1.1",
+      "updated": "2026-05-21T18:25:57.000Z",
+      "cvss": {
+        "score": 7.5,
+        "vectorString": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:H/A:N"
+      },
+      "cwe": ["CWE-787", "CWE-1285"],
+      "url": "https://github.com/advisories/GHSA-w5hq-g745-h8pq"
+    },
+    "1120680": {
+      "findings": [
+        {
+          "version": "0.27.7",
+          "paths": [
+            ". > vitest@4.1.11 > @vitest/mocker@4.1.11 > vite@8.0.16 > esbuild@0.27.7",
+            ". > vitest@4.1.11 > vite@8.0.16 > esbuild@0.27.7",
+            "packages/cli > tsup@8.5.1 > bundle-require@5.1.0 > esbuild@0.27.7",
+            "packages/cli > tsup@8.5.1 > esbuild@0.27.7",
+            "packages/cli > vitest@4.1.11 > @vitest/mocker@4.1.11 > vite@8.0.16 > esbuild@0.27.7",
+            "packages/cli > vitest@4.1.11 > vite@8.0.16 > esbuild@0.27.7",
+            "packages/daemon > tsup@8.5.1 > bundle-require@5.1.0 > esbuild@0.27.7",
+            "packages/daemon > tsup@8.5.1 > esbuild@0.27.7",
+            "packages/daemon > vitest@4.1.11 > @vitest/mocker@4.1.11 > vite@8.0.16 > esbuild@0.27.7",
+            "packages/daemon > vitest@4.1.11 > vite@8.0.16 > esbuild@0.27.7",
+            "packages/escalation-mcp > tsup@8.5.1 > bundle-require@5.1.0 > esbuild@0.27.7",
+            "packages/escalation-mcp > tsup@8.5.1 > esbuild@0.27.7",
+            "packages/escalation-mcp > vitest@4.1.11 > @vitest/mocker@4.1.11 > vite@8.0.16 > esbuild@0.27.7",
+            "packages/escalation-mcp > vitest@4.1.11 > vite@8.0.16 > esbuild@0.27.7",
+            "packages/pi-worker > tsup@8.5.1 > bundle-require@5.1.0 > esbuild@0.27.7",
+            "packages/pi-worker > tsup@8.5.1 > esbuild@0.27.7",
+            "packages/pi-worker > vitest@4.1.11 > @vitest/mocker@4.1.11 > vite@8.0.16 > esbuild@0.27.7",
+            "packages/pi-worker > vitest@4.1.11 > vite@8.0.16 > esbuild@0.27.7",
+            "packages/shared > tsup@8.5.1 > bundle-require@5.1.0 > esbuild@0.27.7",
+            "packages/shared > tsup@8.5.1 > esbuild@0.27.7",
+            "packages/shared > vitest@4.1.11 > @vitest/mocker@4.1.11 > vite@8.0.16 > esbuild@0.27.7",
+            "packages/shared > vitest@4.1.11 > vite@8.0.16 > esbuild@0.27.7",
+            "packages/validator > tsup@8.5.1 > bundle-require@5.1.0 > esbuild@0.27.7",
+            "packages/validator > tsup@8.5.1 > esbuild@0.27.7",
+            "packages/validator > vitest@4.1.11 > @vitest/mocker@4.1.11 > vite@8.0.16 > esbuild@0.27.7",
+            "packages/validator > vitest@4.1.11 > vite@8.0.16 > esbuild@0.27.7"
+          ]
+        }
+      ],
+      "found_by": null,
+      "deleted": null,
+      "references": "- https://github.com/evanw/esbuild/security/advisories/GHSA-g7r4-m6w7-qqqr\n- https://github.com/evanw/esbuild/releases/tag/v0.28.1\n- https://github.com/advisories/GHSA-g7r4-m6w7-qqqr",
+      "created": "2026-06-12T20:08:53.000Z",
+      "id": 1120680,
+      "npm_advisory_id": null,
+      "overview": "### Summary\n\nThe development server contains a path traversal vulnerability on Windows when serving files from `servedir`.\n\nDue to the use of `path.Clean()` (which only normalizes forward-slash `/` separators) instead of a Windows-aware path normalization function, it is possible to craft requests using backslashes (`\\`) that bypass the intended directory containment logic. An attacker can escape the configured `servedir` root and access arbitrary files on the filesystem.\nThis issue affects Windows environments only.\n\n### Details\n\nThe request path is sanitized using:\n```go\n// https://github.com/evanw/esbuild/blob/v0.27.3/pkg/api/serve_other.go#L165\nqueryPath := path.Clean(req.URL.Path)[1:]\n```\n\n\nHowever:\n- `path.Clean()` is POSIX-style and only understands `/` (docs: `https://pkg.go.dev/path#Clean`)\n- On Windows, `\\` is a valid path separator\n- `path.Clean()` does not treat `\\` as a separator\n\nLater, the server constructs the absolute path:\n```go\n// https://github.com/evanw/esbuild/blob/v0.27.3/pkg/api/serve_other.go#L221\nabsPath := h.fs.Join(h.servedir, queryPath)\n```\n\nIf `queryPath` contains sequences such as:\n```\n..\\..\\..\\..\\..\\..\\..\\Windows\\system.ini\n```\n\n`path.Clean()` will not normalize them, but the Windows filesystem will interpret `\\` as directory separators when resolving `absPath`.\nBecause the implementation does not verify that the final resolved path remains within `servedir`, it allows directory traversal outside the intended root directory.\n### Vulnerable Code\n\n```go\n// https://github.com/evanw/esbuild/blob/v0.27.3/pkg/api/serve_other.go#L165\n\tqueryPath := path.Clean(req.URL.Path)[1:]\n\t....\n\t// Check for a file in the \"servedir\" directory\n\tif h.servedir != \"\" && kind != fs.FileEntry {\n\t\tabsPath := h.fs.Join(h.servedir, queryPath)\n\t\tif absDir := h.fs.Dir(absPath); absDir != absPath {\n\t\t\tif entries, err, _ := h.fs.ReadDirectory(absDir); err == nil {\n\t\t\t\tif entry, _ := entries.Get(h.fs.Base(absPath)); entry != nil && entry.Kind(h.fs) == fs.FileEntry {\n\t....\t\t\t\t\n```\n\n\n### Steps to reproduce\n\n```\nnpm install --save-exact --save-dev esbuild\n\necho \"console.log(1)\" > app.js\n\n.\\node_modules\\.bin\\esbuild --version\n0.27.3\n\n.\\node_modules\\.bin\\esbuild app.js --bundle --outdir=www --servedir=www --watch\n\ncurl -i --path-as-is \"http://localhost:8000/..\\..\\..\\..\\..\\..\\..\\Windows\\system.ini\"\n<content of Windows\\system.ini>\n```\n\n\n### Impact\n\n- Arbitrary file read on Windows\n- Exposure of sensitive files",
+      "reported_by": null,
+      "title": "esbuild allows arbitrary file read when running the development server on Windows",
+      "metadata": null,
+      "cves": [],
+      "access": "public",
+      "severity": "low",
+      "module_name": "esbuild",
+      "vulnerable_versions": ">=0.27.3 <0.28.1",
+      "github_advisory_id": "GHSA-g7r4-m6w7-qqqr",
+      "recommendation": "Upgrade to version 0.28.1 or later",
+      "patched_versions": ">=0.28.1",
+      "updated": "2026-06-12T20:08:54.000Z",
+      "cvss": {
+        "score": 2.5,
+        "vectorString": "CVSS:3.1/AV:L/AC:H/PR:L/UI:N/S:U/C:N/I:L/A:N"
+      },
+      "cwe": ["CWE-22"],
+      "url": "https://github.com/advisories/GHSA-g7r4-m6w7-qqqr"
+    },
+    "1123686": {
+      "findings": [
+        {
+          "version": "0.5.18",
+          "paths": [
+            "packages/daemon > @huggingface/transformers@4.2.0 > onnxruntime-node@1.24.3 > adm-zip@0.5.18"
+          ]
+        }
+      ],
+      "found_by": null,
+      "deleted": null,
+      "references": "- https://nvd.nist.gov/vuln/detail/CVE-2026-39244\n- https://github.com/cthackers/adm-zip/issues/568\n- https://github.com/cthackers/adm-zip/commit/2450dcf417aa29df49270237d18c5245794da3e2\n- https://github.com/cthackers/adm-zip/releases\n- https://github.com/advisories/GHSA-xcpc-8h2w-3j85",
+      "created": "2026-07-10T18:32:19.000Z",
+      "id": 1123686,
+      "npm_advisory_id": null,
+      "overview": "adm-zip before 0.5.18 is vulnerable to denial of service via a crafted ZIP file with a manipulated uncompressed size header field. In zipEntry.js line 103, Buffer.alloc(_centralHeader.size) allocates memory based on the declared uncompressed size from the ZIP central directory header without validating it against the actual compressed data size or imposing any upper bound. The size value is read directly from the binary header at entryHeader.js line 266 with no bounds check. An attacker can craft a ~120-byte ZIP file that declares ~4GB uncompressed size, causing a memory allocation amplification ratio of over 33 million to 1. The allocation occurs before CRC validation, so the malicious payload cannot be rejected early. All extraction and read methods are affected: readFile(), readAsText(), extractEntryTo(), extractAllTo(), extractAllToAsync(), test(), and entry.getData(). Any application accepting untrusted ZIP files via adm-zip is vulnerable to immediate process crash.",
+      "reported_by": null,
+      "title": "adm-zip: Crafted ZIP file triggers 4GB memory allocation",
+      "metadata": null,
+      "cves": ["CVE-2026-39244"],
+      "access": "public",
+      "severity": "high",
+      "module_name": "adm-zip",
+      "vulnerable_versions": "<0.6.0",
+      "github_advisory_id": "GHSA-xcpc-8h2w-3j85",
+      "recommendation": "Upgrade to version 0.6.0 or later",
+      "patched_versions": ">=0.6.0",
+      "updated": "2026-07-17T21:50:10.000Z",
+      "cvss": {
+        "score": 7.5,
+        "vectorString": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:H"
+      },
+      "cwe": ["CWE-400", "CWE-789"],
+      "url": "https://github.com/advisories/GHSA-xcpc-8h2w-3j85"
+    },
+    "1124066": {
+      "findings": [
+        {
+          "version": "0.34.5",
+          "paths": ["packages/daemon > @huggingface/transformers@4.2.0 > sharp@0.34.5"]
+        }
+      ],
+      "found_by": null,
+      "deleted": null,
+      "references": "- https://github.com/libvips/libvips/security/advisories/GHSA-2fcj-gj27-279x\n- https://github.com/libvips/libvips/security/advisories/GHSA-523x-vhfw-6r76\n- https://github.com/libvips/libvips/security/advisories/GHSA-jmwm-wc68-mhwm\n- https://github.com/libvips/libvips/security/advisories/GHSA-r98w-4fp7-m9c7\n- https://github.com/lovell/sharp/security/advisories/GHSA-f88m-g3jw-g9cj\n- https://github.com/advisories/GHSA-f88m-g3jw-g9cj",
+      "created": "2026-07-21T22:07:17.000Z",
+      "id": 1124066,
+      "npm_advisory_id": null,
+      "overview": "### Impact\n\nA number of vulnerabilities, two rated as \"High\" severity using CVSSv4, have been discovered and fixed in the upstream libvips dependency.\n\nThose processing untrusted input with versions of sharp prior to 0.35.0 are affected.\n\n### Patches\n\n#### Using prebuilt binaries provided by sharp?\n\nMost people rely on the prebuilt binaries provided by sharp.\n\nPlease upgrade sharp to the latest version, currently 0.35.3, which provides libvips 8.18.3.\n\n#### Using a globally-installed libvips?\n\nPlease ensure you are using the latest libvips 8.18.3.\n\n### Workarounds\nAdd the following to your code to prevent sharp from decoding GIF, TIFF and VIPS images.\n```js\nsharp.block({ operation: [\"VipsForeignLoadNsgif\", \"VipsForeignLoadTiff\", \"VipsForeignLoadVips\"] });\n```",
+      "reported_by": null,
+      "title": "sharp inherited vulnerabilities in libvips: CVE-2026-33327, CVE-2026-33328, CVE-2026-35590, CVE-2026-35591",
+      "metadata": null,
+      "cves": [],
+      "access": "public",
+      "severity": "high",
+      "module_name": "sharp",
+      "vulnerable_versions": "<0.35.0",
+      "github_advisory_id": "GHSA-f88m-g3jw-g9cj",
+      "recommendation": "Upgrade to version 0.35.0 or later",
+      "patched_versions": ">=0.35.0",
+      "updated": "2026-07-21T22:07:18.000Z",
+      "cvss": {
+        "score": 0,
+        "vectorString": null
+      },
+      "cwe": ["CWE-1395"],
+      "url": "https://github.com/advisories/GHSA-f88m-g3jw-g9cj"
+    },
+    "1124268": {
+      "findings": [
+        {
+          "version": "6.30.6",
+          "paths": ["packages/mobile-web > react-router-dom@6.30.6 > react-router@6.30.6"]
+        }
+      ],
+      "found_by": null,
+      "deleted": null,
+      "references": "- https://github.com/remix-run/react-router/security/advisories/GHSA-wrjc-x8rr-h8h6\n- https://github.com/remix-run/react-router/pull/15176\n- https://github.com/remix-run/react-router/blob/main/CHANGELOG.md#v7180\n- https://github.com/remix-run/react-router/releases/tag/react-router@7.18.0\n- http://github.com/remix-run/react-router/pull/15176\n- https://github.com/advisories/GHSA-wrjc-x8rr-h8h6",
+      "created": "2026-07-23T19:38:28.000Z",
+      "id": 1124268,
+      "npm_advisory_id": null,
+      "overview": "This is a follow up to [CVE-2025-68470](https://github.com/remix-run/react-router/security/advisories/GHSA-9jcx-v3wj-wh4m).  React Router was alerted to certain scenarios in which the fix there was incomplete so there still existed some scenarios where attacker supplied paths passed to navigation mechanisms could result in unexpected external navigations.",
+      "reported_by": null,
+      "title": "React Router: Open redirect via backslash in <Link> and useNavigate (CVE-2025-68470 bypass)",
+      "metadata": null,
+      "cves": ["CVE-2026-53669"],
+      "access": "public",
+      "severity": "moderate",
+      "module_name": "react-router",
+      "vulnerable_versions": ">=6.0.0 <7.18.0",
+      "github_advisory_id": "GHSA-wrjc-x8rr-h8h6",
+      "recommendation": "Upgrade to version 7.18.0 or later",
+      "patched_versions": ">=7.18.0",
+      "updated": "2026-07-23T19:38:29.000Z",
+      "cvss": {
+        "score": 0,
+        "vectorString": null
+      },
+      "cwe": ["CWE-601"],
+      "url": "https://github.com/advisories/GHSA-wrjc-x8rr-h8h6"
+    },
+    "1124272": {
+      "findings": [
+        {
+          "version": "6.30.6",
+          "paths": ["packages/mobile-web > react-router-dom@6.30.6 > react-router@6.30.6"]
+        }
+      ],
+      "found_by": null,
+      "deleted": null,
+      "references": "- https://github.com/remix-run/react-router/security/advisories/GHSA-337j-9hxr-rhxg\n- https://github.com/remix-run/react-router/pull/15175\n- https://github.com/remix-run/react-router/commit/9d22943fd46c8ae4b08236425fa3549e10e9ad1a\n- https://github.com/remix-run/react-router/blob/main/CHANGELOG.md#v7180\n- https://github.com/remix-run/react-router/releases/tag/react-router@7.18.0\n- https://github.com/advisories/GHSA-337j-9hxr-rhxg",
+      "created": "2026-07-23T19:34:14.000Z",
+      "id": 1124272,
+      "npm_advisory_id": null,
+      "overview": "If application code allows attacker supplied input to overwrite certain aspects of errors caught by the SSR process, then it was possible for attacker to trigger unexpected constructor execution on the client which would trigger outbound network traffic.  This is only possible with very specific (and unlikely) application layer code.\n\n> [!NOTE]\n> This does not impact your application if you are using Declarative Mode.  This only impacts Framework Mode and Data Mode applications doing manual SSR/hydration",
+      "reported_by": null,
+      "title": "React Router: Arbitrary Constructor Injection via deserializeErrors() in React Router SSR Hydration",
+      "metadata": null,
+      "cves": ["CVE-2026-53666"],
+      "access": "public",
+      "severity": "moderate",
+      "module_name": "react-router",
+      "vulnerable_versions": ">=6.4.0 <7.18.0",
+      "github_advisory_id": "GHSA-337j-9hxr-rhxg",
+      "recommendation": "Upgrade to version 7.18.0 or later",
+      "patched_versions": ">=7.18.0",
+      "updated": "2026-07-23T19:34:16.000Z",
+      "cvss": {
+        "score": 6.1,
+        "vectorString": "CVSS:3.1/AV:N/AC:L/PR:N/UI:R/S:C/C:L/I:L/A:N"
+      },
+      "cwe": ["CWE-470"],
+      "url": "https://github.com/advisories/GHSA-337j-9hxr-rhxg"
+    },
+    "1124285": {
+      "findings": [
+        {
+          "version": "8.3.0",
+          "paths": ["packages/daemon > @fastify/static@8.3.0"]
+        }
+      ],
+      "found_by": null,
+      "deleted": null,
+      "references": "- https://github.com/fastify/fastify-static/security/advisories/GHSA-8pvw-jcv7-9cmj\n- https://nvd.nist.gov/vuln/detail/CVE-2026-7120\n- https://github.com/fastify/fastify-static/commit/878c72e920fabacf7e37739bf78057044717bf63\n- https://cna.openjsf.org/security-advisories.html\n- https://github.com/fastify/fastify-static/releases/tag/v10.1.2\n- https://github.com/advisories/GHSA-8pvw-jcv7-9cmj",
+      "created": "2026-07-24T16:43:44.000Z",
+      "id": 1124285,
+      "npm_advisory_id": null,
+      "overview": "### Impact\n\n`@fastify/static` evaluates the `allowedPath` callback before normalizing dot segments and duplicate slashes in the pathname used for file resolution. Non-canonical pathnames such as `//file`, `/./file`, or `/public/../private/file` bypass `allowedPath` filtering while resolving to the intended file on disk.\n\nApplications that use `allowedPath` as a security boundary to restrict access to specific static files or path subtrees may unintentionally expose files that were intended to be denied.\n\n### Patches\n\nUpgrade to `@fastify/static` >= 10.1.2.\n\n### Workarounds\n\nNone. Upgrade to the patched version.",
+      "reported_by": null,
+      "title": "@fastify/static vulnerable to Authorization Bypass via Non-Canonical URL Paths",
+      "metadata": null,
+      "cves": ["CVE-2026-7120"],
+      "access": "public",
+      "severity": "moderate",
+      "module_name": "@fastify/static",
+      "vulnerable_versions": "<=10.1.1",
+      "github_advisory_id": "GHSA-8pvw-jcv7-9cmj",
+      "recommendation": "Upgrade to version 10.1.2 or later",
+      "patched_versions": ">=10.1.2",
+      "updated": "2026-07-24T16:43:46.000Z",
+      "cvss": {
+        "score": 5.3,
+        "vectorString": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:L/I:N/A:N"
+      },
+      "cwe": ["CWE-180"],
+      "url": "https://github.com/advisories/GHSA-8pvw-jcv7-9cmj"
+    },
+    "1124286": {
+      "findings": [
+        {
+          "version": "8.3.0",
+          "paths": ["packages/daemon > @fastify/static@8.3.0"]
+        }
+      ],
+      "found_by": null,
+      "deleted": null,
+      "references": "- https://github.com/fastify/fastify-static/security/advisories/GHSA-83w8-p2f5-377r\n- https://nvd.nist.gov/vuln/detail/CVE-2026-15074\n- https://github.com/fastify/fastify-static/commit/db4276f846ba56b21f93768cd6636ee5e2fc58b1\n- https://cna.openjsf.org/security-advisories.html\n- https://github.com/fastify/fastify-static/releases/tag/v10.1.1\n- https://github.com/advisories/GHSA-83w8-p2f5-377r",
+      "created": "2026-07-24T16:43:21.000Z",
+      "id": 1124286,
+      "npm_advisory_id": null,
+      "overview": "### Impact\n\n`@fastify/static` is vulnerable to a bypass of route-based middleware and guards via non-leading `..` and `%2E%2E` path segments. `find-my-way` does not normalize `..` when matching routes, so a request such as `/foo/../deep/secret.txt` matches the static plugin's catch-all instead of the guarded `/deep/*`. The `getPathnameForSend` helper introduced by the fix for [GHSA-x428-ghpx-8j92](https://github.com/fastify/fastify-static/security/advisories/GHSA-x428-ghpx-8j92) only guards against the `%2F` variant; `..` and `%2E%2E` survive the `decodeURI` + `encodeURI` round-trip and are then collapsed away by `@fastify/send`'s `path.normalize` before its own traversal guard runs.\n\nApplications that rely on route-based middleware or guards to protect files served by `@fastify/static` can be bypassed with non-leading dot-dot path segments.\n\n### Patches\n\nUpgrade to `@fastify/static` 10.1.1.\n\n### Workarounds\n\nDo not use route-based middlewares or guards to protect files served by `@fastify/static`.",
+      "reported_by": null,
+      "title": "@fastify/static vulnerable to route guard bypass via path traversal",
+      "metadata": null,
+      "cves": ["CVE-2026-15074"],
+      "access": "public",
+      "severity": "high",
+      "module_name": "@fastify/static",
+      "vulnerable_versions": "<=10.1.0",
+      "github_advisory_id": "GHSA-83w8-p2f5-377r",
+      "recommendation": "Upgrade to version 10.1.1 or later",
+      "patched_versions": ">=10.1.1",
+      "updated": "2026-07-24T16:43:21.000Z",
+      "cvss": {
+        "score": 7.5,
+        "vectorString": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:N/A:N"
+      },
+      "cwe": ["CWE-22"],
+      "url": "https://github.com/advisories/GHSA-83w8-p2f5-377r"
+    }
+  },
+  "muted": [],
+  "metadata": {
+    "vulnerabilities": {
+      "info": 0,
+      "low": 1,
+      "moderate": 6,
+      "high": 3,
+      "critical": 0
+    },
+    "dependencies": 815,
+    "devDependencies": 0,
+    "optionalDependencies": 0,
+    "totalDependencies": 815
+  }
+}

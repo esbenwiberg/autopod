@@ -3,6 +3,7 @@ import {
   existsSync,
   lstatSync,
   mkdirSync,
+  mkdtempSync,
   readdirSync,
   readlinkSync,
   rmSync,
@@ -12,13 +13,15 @@ import { readFile } from 'node:fs/promises';
 import { dirname, join, posix } from 'node:path';
 import { Readable, Writable } from 'node:stream';
 import { createGzip } from 'node:zlib';
-import type { ArtifactOutput } from '@autopod/shared';
+import { type ArtifactOutput, AutopodError } from '@autopod/shared';
 import type Database from 'better-sqlite3';
 import type { Logger } from 'pino';
 import { type Pack as TarPack, pack as tarPack } from 'tar-stream';
 import type {
+  ContainerExecutionMetadata,
   ContainerManager,
   ContainerSpawnConfig,
+  DirectoryExtractionOptions,
   ExecOptions,
   ExecResult,
   ExposePortOptions,
@@ -32,6 +35,12 @@ import {
   extractManagedSandboxOutput,
 } from '../managed/output-extraction.js';
 import { AzureSandboxApiClient } from './azure-sandbox-api-client.js';
+import {
+  CGROUP_EXECUTION_METADATA_PROBE,
+  parseCgroupExecutionMetadata,
+} from './cgroup-execution-metadata.js';
+import { assertDirectoryExtractionCurrent } from './directory-extraction-ownership.js';
+import { isObservedExitCode, unverifiedExecExit } from './exec-exit-evidence.js';
 import type { SandboxPortAuth } from './sandbox-api-client.js';
 import {
   SANDBOX_TIER_MEMORY_BYTES,
@@ -157,23 +166,50 @@ export class SandboxContainerManager implements ContainerManager {
     });
   }
 
+  async getExecutionMetadata(containerId: string): Promise<ContainerExecutionMetadata> {
+    const [kernel, allocation, image] = await Promise.allSettled([
+      this.execInContainer(containerId, ['node', '-e', CGROUP_EXECUTION_METADATA_PROBE], {
+        timeout: 10000,
+      }),
+      this.client.getResourceAllocation?.(containerId) ?? Promise.resolve(null),
+      this.client.getImageDigest?.(containerId) ?? Promise.resolve(null),
+    ]);
+    const metadata = parseCgroupExecutionMetadata(
+      kernel.status === 'fulfilled' ? kernel.value : { exitCode: 1, stdout: '', stderr: '' },
+    );
+    if (image.status === 'fulfilled' && image.value && /^sha256:[a-f0-9]{64}$/.test(image.value)) {
+      metadata.imageDigest = image.value;
+    }
+    // Sandboxes may enforce allocation at the VM boundary without cgroup mounts.
+    // Merge fresh provider evidence, retaining any stricter observed guest limit.
+    if (allocation.status === 'fulfilled' && allocation.value) {
+      for (const key of ['memoryLimitBytes', 'cpuLimit'] as const) {
+        const value = allocation.value[key];
+        if (
+          typeof value !== 'number' ||
+          !Number.isFinite(value) ||
+          value <= 0 ||
+          (key === 'memoryLimitBytes' && !Number.isSafeInteger(value))
+        )
+          continue;
+        metadata[key] = metadata[key] === null ? value : Math.min(metadata[key], value);
+      }
+    }
+    return metadata;
+  }
+
   async spawn(config: ContainerSpawnConfig): Promise<string> {
     assertRegistryQualifiedImage(config.image);
 
     const tier = pickSandboxTier(config.memoryBytes, this.defaultTier);
     const grantedMemoryBytes = SANDBOX_TIER_MEMORY_BYTES[tier];
-    // The platform's largest tier is 4 GB, so any bigger request is silently
-    // downgraded. Say so out loud — a clamped ceiling shows up much later as an
-    // allocation failure inside the agent's toolchain, and looks like a code bug.
+    // Refuse an impossible request before allocating a sandbox. The adapter's
+    // supported capacity is a bound, never permission to silently reduce it.
     if (config.memoryBytes && config.memoryBytes > grantedMemoryBytes) {
-      this.logger.warn(
-        {
-          podId: config.podId,
-          requestedMemoryGb: config.memoryBytes / 1024 ** 3,
-          grantedMemoryGb: grantedMemoryBytes / 1024 ** 3,
-          tier,
-        },
-        'Requested container memory exceeds the largest sandbox tier — clamped. Memory-hungry tooling may fail; use the docker execution target if it needs more.',
+      throw new AutopodError(
+        `Sandbox resource preflight failed: requested ${config.memoryBytes / 1024 ** 3} GiB, but the supported ${tier} tier provides ${grantedMemoryBytes / 1024 ** 3} GiB. Explicitly choose a smaller requirement or a compatible execution target.`,
+        'PREFLIGHT_INSUFFICIENT_MEMORY',
+        409,
       );
     }
     const egressPolicy = egressPolicyForMode(config.networkPolicyMode, config.allowedHosts ?? []);
@@ -380,18 +416,25 @@ for root in sys.argv[1:]:
     containerPath: string,
     hostPath: string,
     excludes?: string[],
+    options?: DirectoryExtractionOptions,
   ): Promise<void> {
+    assertDirectoryExtractionCurrent(options);
     mkdirSync(hostPath, { recursive: true });
-    removeStaleSyncStagingDirs(hostPath);
+    if (!options) removeStaleSyncStagingDirs(hostPath);
 
     const rootPath = normalizeSandboxPath(containerPath);
     const stagingBase = `.autopod-extract-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-    const stagingPath = join(hostPath, stagingBase);
+    // A late collector must never write into the current recovery directory,
+    // or remove staging that belongs to another in-flight extraction.
+    const stagingPath = options
+      ? mkdtempSync(join(dirname(hostPath), '.autopod-owned-extract-'))
+      : join(hostPath, stagingBase);
     mkdirSync(stagingPath, { recursive: true });
 
     try {
       await this.extractSandboxPath(containerId, rootPath, rootPath, stagingPath, excludes);
-      mirrorStagedDirectory(stagingPath, hostPath, excludes, stagingBase);
+      assertDirectoryExtractionCurrent(options);
+      mirrorStagedDirectory(stagingPath, hostPath, excludes, options ? undefined : stagingBase);
     } finally {
       rmSync(stagingPath, { recursive: true, force: true });
     }
@@ -541,14 +584,14 @@ for root in sys.argv[1:]:
     };
 
     const exitCode = (async () => {
-      let code = 0;
+      let code: number | undefined;
       try {
         // biome-ignore lint/style/noNonNullAssertion: guarded by caller (execStream defined)
         for await (const chunk of this.client.execStream!(containerId, command, streamOptions)) {
+          if (isObservedExitCode(chunk.exitCode)) code = chunk.exitCode;
           if (cancelled) break;
           if (chunk.stdout) stdout.push(chunk.stdout);
           if (chunk.stderr) stderr.push(chunk.stderr);
-          if (chunk.exitCode != null) code = chunk.exitCode;
         }
       } catch (err) {
         // kill() may already have finalized the public streams while remote
@@ -558,12 +601,15 @@ for root in sys.argv[1:]:
         if (!streamsFinalized && !stderr.destroyed && !stderr.readableEnded) {
           stderr.push(String(err instanceof Error ? err.message : err));
         }
-        code = 1;
+        if (code === undefined) throw unverifiedExecExit();
       } finally {
         finalizeStreams();
       }
+      if (code === undefined) throw unverifiedExecExit();
       return code;
     })();
+
+    void exitCode.catch(() => {});
 
     return {
       stdout,

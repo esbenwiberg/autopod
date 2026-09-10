@@ -176,8 +176,8 @@ public struct AnalyticsView: View {
         let mttmPart = formatMttmSeconds(t.summary.mttmSeconds)
         let backlogPart = t.summary.backlog > 0 ? "\(t.summary.backlog) in queue" : nil
         switch (mttmPart, backlogPart) {
-        case let (m?, b?): return "MTTM \(m) \u{00B7} \(b)"
-        case let (m?, nil): return "MTTM \(m)"
+        case let (m?, b?): return "Completed pod time \(m) \u{00B7} \(b)"
+        case let (m?, nil): return "Completed pod time \(m)"
         case let (nil, b?): return b
         case (nil, nil): return nil
         }
@@ -335,7 +335,7 @@ public struct AnalyticsView: View {
                                 direction: AnalyticsCardDelta.Direction($0.firstPassRateDelta.direction)
                             )
                         },
-                        subline: reliabilityDataIfPopulated == nil ? nil : "first-pass completion",
+                        subline: reliabilityDataIfPopulated == nil ? nil : "first validation passed; no rework",
                         isSelected: selectedCard == .reliability,
                         onClick: { selectedCard = selectedCard == .reliability ? nil : .reliability }
                     )
@@ -618,7 +618,7 @@ extension AnalyticsCardDelta.Direction {
     }
 }
 
-// MARK: - MTTM formatter (shared by AnalyticsView and ThroughputDrillView)
+// MARK: - Completed pod time formatter (shared by AnalyticsView and ThroughputDrillView)
 
 /// Formats a seconds value as "Xh Ym", "Ym", or "Ns". Returns nil for 0.
 func formatMttmSeconds(_ seconds: Double) -> String? {

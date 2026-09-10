@@ -1,0 +1,26 @@
+{
+  "checkpoint-131-resource-green.txt": {
+    "rawArchive": "checkpoint-131-resource-green.raw.txt.gz",
+    "rawSHA256": "9195c5aa9620a2a9e9e6187fbfd18874bb26cc1490e2892477418b2b768deba1",
+    "normalizedSHA256": "209ff9445c98f263fb315cca2d80d2b08da3fecf2bc9c156c665ac0e5ac657c6",
+    "normalization": "trailing whitespace and terminal blank lines only"
+  },
+  "checkpoint-131-resource-red-direct.txt": {
+    "rawArchive": "checkpoint-131-resource-red-direct.raw.txt.gz",
+    "rawSHA256": "51009ed868cad21ea5b3de1a0287739aa6e72038746d94866c5c37e9ad0b23f5",
+    "normalizedSHA256": "19ddeab58f987b5456567ee91d2bee58786aa461683ed73c83ab0faf5d8e95a1",
+    "normalization": "trailing whitespace and terminal blank lines only"
+  },
+  "checkpoint-131-full-validation-final.txt": {
+    "rawArchive": "checkpoint-131-full-validation-final.raw.txt.gz",
+    "rawSHA256": "01e162d996461bd473517779f538624d2cf84b9b4c077b1e588e5dd1d60984ea",
+    "normalizedSHA256": "000d9f6fcb40c9454d7bf430a573046f1214db9537ca8515ac554906185d15a2",
+    "normalization": "trailing whitespace and terminal blank lines only"
+  },
+  "checkpoint-131-full-validation.txt": {
+    "rawArchive": "checkpoint-131-full-validation.raw.txt.gz",
+    "rawSHA256": "90eb82717f62523e58c1daf343bef655d4b11073f05bb27f8b437fd8bdec1b3a",
+    "normalizedSHA256": "50bc194add401682f4df3c97e3198c4d22ac863d963f25cae3aa7b6fb3b734d8",
+    "normalization": "trailing whitespace and terminal blank lines only"
+  }
+}

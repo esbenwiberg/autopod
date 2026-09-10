@@ -1,0 +1,35 @@
+
+ RUN  v4.1.11 /private/tmp/autopod-durable-execution/packages/daemon
+
+ ❯ src/validation/local-validation-engine.test.ts (161 tests | 2 failed | 158 skipped) 85ms
+     × keeps deep Foundry review bound when tool review is uncertain 26ms
+     × keeps deep Foundry review bound when tool review is unavailable 29ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 2 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/validation/local-validation-engine.test.ts > validate() — facts + review gate > keeps deep Foundry review bound when tool review is uncertain
+ FAIL  src/validation/local-validation-engine.test.ts > validate() — facts + review gate > keeps deep Foundry review bound when tool review is unavailable
+AssertionError: expected undefined to be 'review-failed' // Object.is equality
+
+- Expected:
+"review-failed"
+
++ Received:
+undefined
+
+ ❯ src/validation/local-validation-engine.test.ts:3707:41
+    3705|           expect(result.taskReview?.status).toBe('fail');
+    3706|           expect(result.taskReview?.reasoning).toMatch(/Foundry.*(?:un…
+    3707|           expect(result.reviewSkipKind).toBe('review-failed');
+       |                                         ^
+    3708|           expect(result.reviewSkipReason).toMatch(/Foundry.*(?:unavail…
+    3709|           expect(result.reviewTokenUsage).toMatchObject({
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/2]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  2 failed | 1 passed | 158 skipped (161)
+   Start at  11:40:32
+   Duration  594ms (transform 292ms, setup 0ms, import 419ms, tests 85ms, environment 0ms)
+

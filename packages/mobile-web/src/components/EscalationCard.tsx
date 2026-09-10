@@ -2,6 +2,7 @@ import type {
   ActionApprovalPayload,
   AskHumanPayload,
   EscalationRequest,
+  Pod,
   ReportBlockerPayload,
   RequestCredentialPayload,
   ValidationOverridePayload,
@@ -9,6 +10,7 @@ import type {
 import type { JSX } from 'react';
 import { useState } from 'react';
 import { ApiError, AuthRequiredError, apiFetch } from '../lib/api.js';
+import { usePodsStore } from '../store/pods.js';
 
 interface Props {
   podId: string;
@@ -187,9 +189,29 @@ export function EscalationCard({ podId, escalation }: Props): JSX.Element {
   const [value, setValue] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [acceptedId, setAcceptedId] = useState<string | null>(null);
+  const accepted = acceptedId === escalation.id;
+  const upsertPod = usePodsStore((s) => s.upsertPod);
   const model = escalationViewModel(escalation);
 
+  async function refreshState(): Promise<void> {
+    setBusy(true);
+    try {
+      const pod = await apiFetch<Pod>(`/pods/${podId}`);
+      if (!pod || pod.id !== podId) throw new Error('Pod state unavailable');
+      upsertPod(pod);
+      setError(null);
+    } catch {
+      setError(
+        'Reply accepted; current pod state is unavailable. Refresh state to check continuation.',
+      );
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function answer(message: string): Promise<void> {
+    if (busy || accepted) return;
     setBusy(true);
     setError(null);
     try {
@@ -198,6 +220,8 @@ export function EscalationCard({ podId, escalation }: Props): JSX.Element {
         body: JSON.stringify({ message }),
       });
       setValue('');
+      setAcceptedId(escalation.id);
+      await refreshState();
     } catch (err) {
       if (err instanceof AuthRequiredError) return;
       if (err instanceof ApiError) setError(err.message);
@@ -223,7 +247,7 @@ export function EscalationCard({ podId, escalation }: Props): JSX.Element {
               key={option}
               type="button"
               className="action-btn action-primary"
-              disabled={busy}
+              disabled={busy || accepted}
               onClick={() => void answer(option)}
             >
               {option}
@@ -239,7 +263,7 @@ export function EscalationCard({ podId, escalation }: Props): JSX.Element {
               key={button.message}
               type="button"
               className={`action-btn action-${button.tone === 'danger' ? 'danger' : 'primary'}`}
-              disabled={busy}
+              disabled={busy || accepted}
               onClick={() => void answer(button.message)}
             >
               {button.label}
@@ -261,7 +285,7 @@ export function EscalationCard({ podId, escalation }: Props): JSX.Element {
             <button
               type="button"
               className="action-btn action-primary"
-              disabled={busy || value.trim().length === 0}
+              disabled={busy || accepted || value.trim().length === 0}
               onClick={() => void answer(value.trim())}
             >
               {busy ? 'Sending…' : 'Send'}
@@ -270,6 +294,14 @@ export function EscalationCard({ podId, escalation }: Props): JSX.Element {
         </>
       ) : null}
 
+      {accepted ? (
+        <output>
+          Reply accepted.{' '}
+          <button type="button" disabled={busy} onClick={() => void refreshState()}>
+            Refresh state
+          </button>
+        </output>
+      ) : null}
       {error ? <div className="error">{error}</div> : null}
     </section>
   );

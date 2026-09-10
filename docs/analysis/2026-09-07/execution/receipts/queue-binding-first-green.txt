@@ -1,0 +1,29 @@
+
+ RUN  v4.1.10 /private/tmp/autopod-durable-execution
+
+ ❯ packages/daemon/src/pods/pod-manager.test.ts (400 tests | 1 failed | 399 skipped) 113ms
+       × keeps the authorized queued account after the mutable profile selects another account 111ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  packages/daemon/src/pods/pod-manager.test.ts > PodManager > processPod > keeps the authorized queued account after the mutable profile selects another account
+AssertionError: expected 'failed' to be 'validated' // Object.is equality
+
+Expected: "validated"
+Received: "failed"
+
+ ❯ packages/daemon/src/pods/pod-manager.test.ts:5292:49
+    5290|       await manager.processPod(pod.id);
+    5291|
+    5292|       expect(manager.getSession(pod.id).status).toBe('validated');
+       |                                                 ^
+    5293|       expect(manager.getSession(pod.id).providerAccountIdSnapshot).toB…
+    5294|       expect(ctx.containerManager.spawn).toHaveBeenCalled();
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 399 skipped (400)
+   Start at  11:09:18
+   Duration  2.12s (transform 1.16s, setup 0ms, import 1.74s, tests 113ms, environment 0ms)

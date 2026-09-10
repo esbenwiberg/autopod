@@ -1,0 +1,45 @@
+
+ RUN  v4.1.11 /private/tmp/autopod-durable-execution/packages/daemon
+
+ ❯ src/api/routes/files.test.ts (20 tests | 2 failed | 18 skipped) 55ms
+     × serves the published artifact snapshot instead of a surviving container or stale worktree 49ms
+     × refuses an artifact symlink that points outside the published snapshot 6ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 2 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/api/routes/files.test.ts > filesRoutes > serves the published artifact snapshot instead of a surviving container or stale worktree
+TypeError: Cannot read properties of undefined (reading 'map')
+ ❯ src/api/routes/files.test.ts:96:26
+     94|     try {
+     95|       const list = await server.inject('/pods/abc/files');
+     96|       expect(list.json().files.map((file: FileEntry) => file.path)).to…
+       |                          ^
+     97|       const content = await server.inject('/pods/abc/files/content?pat…
+     98|       expect(content.json().content).toBe('published report');
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/2]⎯
+
+ FAIL  src/api/routes/files.test.ts > filesRoutes > refuses an artifact symlink that points outside the published snapshot
+AssertionError: expected 200 to be 403 // Object.is equality
+
+- Expected
++ Received
+
+- 403
++ 200
+
+ ❯ src/api/routes/files.test.ts:111:34
+    109|     try {
+    110|       const content = await server.inject('/pods/abc/files/content?pat…
+    111|       expect(content.statusCode).toBe(403);
+       |                                  ^
+    112|       expect(content.body).not.toContain('# readme');
+    113|     } finally { await server.close(); }
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/2]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  2 failed | 18 skipped (20)
+   Start at  18:01:02
+   Duration  222ms (transform 22ms, setup 0ms, import 77ms, tests 55ms, environment 0ms)

@@ -17,7 +17,9 @@ import type Database from 'better-sqlite3';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import type { ActionAuditRepository } from '../../actions/audit-repository.js';
+import type { CompactPodSource } from '../../pods/compact-pod-projection.js';
 import { aggregateCost, parseDays } from '../../pods/cost-aggregation.js';
+import { dispatchRerunRequest } from '../../pods/dispatch-rerun-request.js';
 import type { EscalationRepository } from '../../pods/escalation-repository.js';
 import {
   type EscalationsAnalyticsScope,
@@ -41,6 +43,7 @@ import {
   computeSafetyAnalytics,
   runAndPersistAuditChainVerification,
 } from '../../pods/safety-aggregator.js';
+import { assertTaskExecutionTerminationVerified } from '../../pods/task-execution-ledger.js';
 import { computeThroughputAnalytics } from '../../pods/throughput-aggregator.js';
 import type { ValidationRepository } from '../../pods/validation-repository.js';
 import type { SafetyEventsRepository } from '../../safety/safety-events-repository.js';
@@ -135,7 +138,7 @@ function compactText(value: string | null | undefined, maxChars = COMPACT_SUMMAR
 }
 
 function compactPod(
-  pod: ReturnType<PodManager['getSession']>,
+  pod: CompactPodSource,
   request: FastifyRequest,
   eventRepo?: EventRepository,
 ): CompactPod {
@@ -146,6 +149,8 @@ function compactPod(
   ) as string;
   return {
     id: pod.id,
+    recordDiagnostics: pod.recordDiagnostics,
+    finalization: pod.finalization,
     title,
     taskExcerpt: pod.task.slice(0, COMPACT_TASK_MAX_CHARS),
     taskSummary: compactText(pod.taskSummary?.actualSummary),
@@ -172,6 +177,7 @@ function compactPod(
     failureReason: compactText(pod.failureReason),
     mergeBlockReason: compactText(pod.mergeBlockReason),
     lastCorrectionMessage: compactText(pod.lastCorrectionMessage),
+    lastRecoveryTrigger: pod.lastRecoveryTrigger,
     pendingEscalationSummary: compactText(pod.pendingEscalation?.question),
     progressSummary: reviewProgress
       ? reviewProgressSummary(reviewProgress)
@@ -235,7 +241,7 @@ function serializePodForRequest(
 }
 
 function latestActiveReviewProgress(
-  pod: ReturnType<PodManager['getSession']>,
+  pod: Pick<CompactPodSource, 'id' | 'status' | 'validationAttempts'>,
   eventRepo?: EventRepository,
 ): ReviewProgressSnapshot | null {
   if (!eventRepo || pod.status !== 'validating') return null;
@@ -579,10 +585,15 @@ export function podRoutes(
     }
 
     try {
-      const pod = podManager.createSession(sanitized, request.user.oid, {
-        email: request.user.preferred_username,
-        name: request.user.name,
-      });
+      const pod = podManager.createSession(
+        sanitized,
+        request.user.oid,
+        {
+          email: request.user.preferred_username,
+          name: request.user.name,
+        },
+        humanActor(request),
+      );
       reply.status(201);
       return serializePodForRequest(pod, request, providerAttemptRepo, eventRepo);
     } catch (err) {
@@ -646,15 +657,18 @@ export function podRoutes(
     }
     const statuses = rawStatuses as PodStatus[] | undefined;
     const paginatedLimit = limit ?? MAX_POD_LIST_LIMIT;
-    const pods = podManager.listSessions({
+    const readPods =
+      podRepo?.listForDisplay?.bind(podRepo) ?? podManager.listSessions.bind(podManager);
+    const filters = {
       profileName: query.profileName ?? query.profile,
       status: statuses,
       userId: query.userId,
       limit: paginated ? paginatedLimit + 1 : limit,
       since,
       before: cursor ?? undefined,
-    });
+    };
     if (query.compact === 'true') {
+      const pods = podRepo?.listCompactForDisplay?.(filters) ?? readPods(filters);
       if (!paginated) return pods.map((pod) => compactPod(pod, request, eventRepo));
       const hasMore = pods.length > paginatedLimit;
       const records = hasMore ? pods.slice(0, paginatedLimit) : pods;
@@ -666,6 +680,7 @@ export function podRoutes(
       };
       return response;
     }
+    const pods = readPods(filters);
     return pods.map((pod) => serializePodForRequest(pod, request, providerAttemptRepo, eventRepo));
   });
 
@@ -686,6 +701,95 @@ export function podRoutes(
       providerAttemptRepo,
       eventRepo,
     );
+  });
+
+  // Task projection deliberately avoids deserializing the pod's contract/validation JSON.
+  app.get('/pods/:podId/task-execution', async (request) => {
+    const { podId } = request.params as { podId: string };
+    if (!podRepo?.taskExecutions)
+      throw new AutopodError('Task accounting unavailable', 'TASK_IDENTITY_UNAVAILABLE', 503);
+    return podRepo.taskExecutions.snapshot(podId);
+  });
+
+  app.get('/pods/:podId/execution-provenance', async (request) => {
+    const { podId } = request.params as { podId: string };
+    podRepo.getOrThrow(podId);
+    if (!podRepo.executionProvenance)
+      throw new AutopodError('Execution provenance unavailable', 'PROVENANCE_UNAVAILABLE', 503);
+    const { schemaVersion } = request.query as { schemaVersion?: string };
+    if (schemaVersion !== undefined && schemaVersion !== '1' && schemaVersion !== '2')
+      throw new AutopodError(
+        'Unsupported provenance schema version',
+        'PROVENANCE_SCHEMA_UNSUPPORTED',
+        400,
+      );
+    const latest = podRepo.executionProvenance.latest(podId);
+    if (latest?.version === 2 && schemaVersion !== '2')
+      return { latest: null, requiresSchemaVersion: 2 };
+    return { latest };
+  });
+
+  app.get('/pods/:podId/rerun-template', async (request) => {
+    const { podId } = request.params as { podId: string };
+    return dispatchRerunRequest(podRepo.getOrThrow(podId));
+  });
+
+  app.get('/pods/:podId/dispatch-preflight', async (request) => {
+    if (!podRepo?.dispatchPreflight)
+      throw new AutopodError('Dispatch evidence unavailable', 'DISPATCH_IDENTITY_UNAVAILABLE', 503);
+    return {
+      latest: podRepo.dispatchPreflight.latest((request.params as { podId: string }).podId),
+    };
+  });
+  app.get('/pods/:podId/retry-state', async (request) => {
+    const stage = z
+      .enum(['validation', 'sandbox_startup', 'codex_interruption', 'worker'])
+      .default('validation')
+      .parse((request.query as { stage?: string }).stage);
+    const ledger =
+      stage === 'validation'
+        ? podRepo?.taskRetries
+        : stage === 'sandbox_startup'
+          ? podRepo?.sandboxStartupRetries
+          : stage === 'worker'
+            ? podRepo?.workerRetries
+            : podRepo?.codexInterruptionRetries;
+    if (!ledger)
+      throw new AutopodError('Task retry accounting unavailable', 'TASK_IDENTITY_UNAVAILABLE', 503);
+    return ledger.state((request.params as { podId: string }).podId);
+  });
+  // Default authenticated user route: never trust an actor supplied in the body.
+  app.post('/pods/:podId/retry-authorizations', async (request, reply) => {
+    if (!request.user?.oid)
+      throw new AutopodError('Authenticated human identity required', 'UNAUTHORIZED', 401);
+    const input = z
+      .object({
+        requestKey: z.string().min(1).max(200),
+        reason: z.string().trim().min(1).max(4000),
+        stage: z
+          .enum(['validation', 'sandbox_startup', 'codex_interruption', 'worker'])
+          .default('validation'),
+      })
+      .strict()
+      .parse(request.body);
+    const ledger =
+      input.stage === 'validation'
+        ? podRepo?.taskRetries
+        : input.stage === 'sandbox_startup'
+          ? podRepo?.sandboxStartupRetries
+          : input.stage === 'worker'
+            ? podRepo?.workerRetries
+            : podRepo?.codexInterruptionRetries;
+    if (!ledger)
+      throw new AutopodError('Task retry accounting unavailable', 'TASK_IDENTITY_UNAVAILABLE', 503);
+    const result = ledger.authorize(
+      (request.params as { podId: string }).podId,
+      input.requestKey,
+      input.reason,
+      humanActor(request),
+    );
+    reply.code(201);
+    return result;
   });
 
   // POST /pods/:podId/message — send message
@@ -859,7 +963,15 @@ export function podRoutes(
   // GET /pods/:podId/cost — per-pod cost grouped into operator-facing buckets
   app.get('/pods/:podId/cost', async (request) => {
     const { podId } = request.params as { podId: string };
-    return computePodCostBreakdown(podManager.getSession(podId));
+    const breakdown = computePodCostBreakdown(
+      podRepo?.getCostRecord?.(podId) ?? podManager.getSession(podId),
+      podRepo?.getProviderUsage?.(podId),
+    );
+    try {
+      return { ...breakdown, taskExecution: podRepo?.taskExecutions?.snapshot(podId) ?? null };
+    } catch {
+      return { ...breakdown, taskExecution: null };
+    }
   });
 
   // GET /pods/quality/trends — daily average process-health scores (legacy route name)
@@ -1028,6 +1140,8 @@ export function podRoutes(
   // POST /pods/:podId/validate — trigger validation (agent rework on failure)
   app.post('/pods/:podId/validate', async (request, reply) => {
     const { podId } = request.params as { podId: string };
+    podRepo?.deletionOwnership?.assertTaskAvailable(podId);
+    assertTaskExecutionTerminationVerified(podRepo?.taskExecutions, podId);
     const pod = podManager.getSession(podId);
     const isTerminalRework = ['failed', 'review_required', 'killed', 'validated'].includes(
       pod.status,
@@ -1036,6 +1150,7 @@ export function podRoutes(
       await podManager.triggerValidation(podId, { force: true });
       return { ok: true };
     }
+    podManager.assertCanRework(podId);
     if (!reworkRuns.has(podId)) {
       const run = podManager
         .triggerValidation(podId, { force: true })
@@ -1135,6 +1250,7 @@ export function podRoutes(
       const result = await podManager.continueProvider(
         podId,
         body.primary ? 'profile-primary' : body.target,
+        humanActor(request),
       );
       return { ok: true, action: result.action };
     } catch (err) {

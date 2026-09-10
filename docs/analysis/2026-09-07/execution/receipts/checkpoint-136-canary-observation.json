@@ -1,0 +1,81 @@
+{
+  "observedAt": "2026-09-10T10:11:21.222735+00:00",
+  "id": "pregnant-hyena",
+  "status": "killed",
+  "tokenBudget": 32000,
+  "infrastructureRecoveryCount": 0,
+  "error": null,
+  "summaryMarkerPresent": true,
+  "summaryKeys": ["actualSummary", "how", "deviations"],
+  "taskAccounting": {
+    "tokenBudget": 32000,
+    "budgetCheck": {
+      "status": "exhausted",
+      "reason": "Recorded task tokens have reached the configured limit."
+    },
+    "agentRunCount": 1,
+    "providerAttemptCount": 1,
+    "recordedInputTokens": 46152,
+    "recordedOutputTokens": 161,
+    "recordedCostUsd": 0.063942,
+    "delivery": {
+      "intentCount": 0,
+      "receiptCount": 0,
+      "unresolvedCount": 0,
+      "scope": "durable-receipts-only",
+      "disposition": {
+        "openCount": 0,
+        "mergedCount": 0,
+        "closedCount": 0,
+        "unavailableCount": 0,
+        "basis": "last-recorded",
+        "liveVerified": false
+      }
+    },
+    "telemetry": "partial"
+  },
+  "provenance": {
+    "latest": {
+      "version": 1,
+      "purpose": "coding",
+      "subject": "worker",
+      "status": "checked",
+      "runtime": "codex",
+      "model": "gpt-5.6-sol",
+      "providerId": "openai",
+      "providerAccountId": "openai-private",
+      "release": {
+        "validationImplementationHash": "5ae52d1edc946a2a740fb4bd9b4bf8106936aa4ba4ff35a004e366497a6da956",
+        "commitSha": "425ff91cd5e6347b32d21b69804ea4c02008bc8e",
+        "dirty": false,
+        "builtAt": "2026-09-10T09:39:59.545Z",
+        "source": "build"
+      },
+      "cliPath": "/usr/local/bin/codex",
+      "cliVersion": "0.144.4",
+      "imageDigest": "sha256:4b836cdabc71ffd40aef564b65b6b16564c5312770130bc59251a732078c9d77",
+      "contractHash": "74234e98afe7498fb5daf1f36ac2d78acc339464f950703b8c019892f982b90b",
+      "validationImplementationHash": "5ae52d1edc946a2a740fb4bd9b4bf8106936aa4ba4ff35a004e366497a6da956",
+      "capabilities": {
+        "streamingExec": "supported",
+        "memoryLimitBytes": 4294967296,
+        "cpuLimit": 2,
+        "networkMode": null
+      },
+      "commands": {
+        "requirements": [],
+        "unresolvedSources": [],
+        "deferredArtifacts": [],
+        "explicitDependencies": false
+      },
+      "diagnostics": [],
+      "id": "55839453-c5c8-461b-88e0-7635bfe01030",
+      "podId": "pregnant-hyena",
+      "taskId": "task:c4d2485a-d64d-4a6d-b947-94541908e502",
+      "executionId": "execution:f7a34336-6d5e-4ee9-aad1-7e86b16d7521",
+      "generation": 1,
+      "checkedAt": "2026-09-10T10:07:30.362Z"
+    }
+  },
+  "containerId": null
+}

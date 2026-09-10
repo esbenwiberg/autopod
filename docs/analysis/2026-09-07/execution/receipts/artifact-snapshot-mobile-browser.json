@@ -1,0 +1,20 @@
+{
+  "scope": "Local synthetic saved-snapshot API fixture and built mobile client; no provider or production actions",
+  "baseCommit": "6789690c5718d4b487417758bde9e079b3fd7532",
+  "source": "Checkpoint 16 implementation, uncommitted at interaction time",
+  "surface": "Codex in-app browser tab 11, closed after verification",
+  "url": "http://127.0.0.1:52215/mobile/#/pod/local-fixture",
+  "observed": [
+    "Failed pod with a source-preservation timestamp still exposed Resume artifact finalization.",
+    "First POST returned HTTP 409 ARTIFACT_SNAPSHOT_UNVERIFIED; the readable restoration instruction appeared, status stayed failed and Resume remained available.",
+    "Second synthetic POST returned success; fresh GET updated status to complete, phase to finished and removed Resume/Kill without WebSocket delivery.",
+    "Server recorded two requests with zero synthetic worker starts; actual manager tests independently cover tampered snapshot rejection, restored snapshot reuse and duplicate Resume."
+  ],
+  "completionTimestamp": "2026-09-07T16:39:54.881Z",
+  "limitations": [
+    "Synthetic HTTP behavior is not live infrastructure acceptance.",
+    "Existing historical accounting/preflight data in the fixture is unrelated to snapshot recovery.",
+    "Native desktop interaction and physical device acceptance remain unverified."
+  ],
+  "cleanup": "Browser closed; fixture process interrupted."
+}

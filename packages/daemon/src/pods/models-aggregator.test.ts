@@ -26,6 +26,7 @@ interface InsertPodOpts {
   costUsd?: number;
   inputTokens?: number;
   outputTokens?: number;
+  prUrl?: string | null;
 }
 
 function insertPod(db: Database.Database, opts: InsertPodOpts = {}): string {
@@ -59,6 +60,11 @@ function insertPod(db: Database.Database, opts: InsertPodOpts = {}): string {
     outputTokens: opts.outputTokens ?? 0,
     costUsd: opts.costUsd ?? 0,
   });
+  // Existing cost fixtures represent recorded PR deliveries; callers can explicitly omit the receipt.
+  db.prepare('UPDATE pods SET pr_url = ? WHERE id = ?').run(
+    opts.prUrl === undefined ? `https://example.test/pr/${id}` : opts.prUrl,
+    id,
+  );
   return id;
 }
 
@@ -398,7 +404,7 @@ describe('computeModelsAnalytics', () => {
 
   // ── Cost waste in totalCostUsd ───────────────────────────────────────────
 
-  it('cost waste — totalCostUsd includes killed pods, dollarPerPr divides by completeCount', () => {
+  it('cost waste — totalCostUsd includes killed pods, dollarPerPr divides by recorded deliveries', () => {
     insertPod(db, { model: 'claude-opus-4-7', status: 'complete', costUsd: 5 });
     insertPod(db, { model: 'claude-opus-4-7', status: 'killed', costUsd: 3 });
 
@@ -656,8 +662,11 @@ describe('computeModelsAnalytics', () => {
     expect(result.summary.cohortSize).toBe(1);
     expect(claude).toMatchObject({
       podCount: 1,
-      failedCount: 1,
-      completeCount: 0,
+      failedCount: 0,
+      completeCount: 1,
+      providerAttemptCount: 1,
+      completedAttemptCount: 0,
+      deliveredPrCount: 0,
       totalCostUsd: 1.25,
     });
     expect(codex).toMatchObject({
@@ -670,6 +679,88 @@ describe('computeModelsAnalytics', () => {
     expect(
       result.byRuntime.reduce((total, runtime) => total + runtime.totalCostUsd, 0),
     ).toBeCloseTo(2);
+  });
+
+  it('does not call completed attempts delivered PRs and deduplicates same-model retries', () => {
+    const podId = insertPod(db, { status: 'killed', prUrl: null });
+    for (const ordinal of [1, 2])
+      insertProviderAttempt(db, {
+        podId,
+        ordinal,
+        runtime: 'claude',
+        model: 'claude-opus-4-7',
+        outcome: 'completed',
+        inputTokens: 10,
+        outputTokens: 10,
+        costUsd: 1,
+      });
+    const result = computeModelsAnalytics(db, 30);
+    expect(result.byModel[0]).toMatchObject({
+      podCount: 1,
+      killedCount: 1,
+      completeCount: 0,
+      providerAttemptCount: 2,
+      completedAttemptCount: 2,
+      deliveredPrCount: 0,
+      dollarPerPr: null,
+      totalCostUsd: 2,
+    });
+    expect(result.summary.mostUsedDailySparkline.reduce((sum, day) => sum + day.count, 0)).toBe(1);
+  });
+
+  it('requires a recorded PR even when a pod is complete', () => {
+    insertPod(db, { prUrl: null, costUsd: 2 });
+    expect(computeModelsAnalytics(db, 30).byModel[0]).toMatchObject({
+      completeCount: 1,
+      deliveredPrCount: 0,
+      dollarPerPr: null,
+    });
+  });
+
+  it('counts a linked PR URL once across completed pods', () => {
+    for (const id of ['initial', 'repair'])
+      insertPod(db, { id, prUrl: 'https://example.test/pr/one', costUsd: 1 });
+    expect(computeModelsAnalytics(db, 30).byModel[0]).toMatchObject({
+      podCount: 2,
+      completeCount: 2,
+      deliveredPrCount: 1,
+      dollarPerPr: 2,
+    });
+  });
+
+  it('attributes a shared PR delivery once across different model and runtime fix pods', () => {
+    insertPod(db, {
+      id: 'first',
+      model: 'claude-opus-4-7',
+      runtime: 'claude',
+      completedAt: hoursAgo(2),
+      prUrl: 'https://example.test/pr/shared',
+    });
+    insertPod(db, {
+      id: 'fix',
+      model: 'gpt-5.6-terra',
+      runtime: 'codex',
+      completedAt: hoursAgo(1),
+      prUrl: 'https://example.test/pr/shared',
+    });
+    const actual = computeModelsAnalytics(db, 30);
+    expect(actual.byModel.reduce((n, r) => n + (r.deliveredPrCount ?? 0), 0)).toBe(1);
+    expect(actual.byRuntime.reduce((n, r) => n + (r.deliveredPrCount ?? 0), 0)).toBe(1);
+  });
+
+  it('does not count repair of an older delivered PR as a new delivery in this window', () => {
+    insertPod(db, {
+      id: 'older-delivery',
+      completedAt: daysAgo(50),
+      prUrl: 'https://example.test/pr/older',
+    });
+    insertPod(db, { id: 'recent-fix', prUrl: 'https://example.test/pr/older', costUsd: 1 });
+    expect(computeModelsAnalytics(db, 30).byModel[0]).toMatchObject({
+      podCount: 1,
+      completeCount: 1,
+      deliveredPrCount: 0,
+      dollarPerPr: null,
+    });
   });
 
   it('model-process-attribution-is-homogeneous', () => {

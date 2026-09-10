@@ -1,0 +1,36 @@
+
+ RUN  v4.1.11 /private/tmp/autopod-durable-execution/packages/daemon
+
+ ❯ src/worktrees/durable-pr-manager.test.ts (10 tests | 1 failed) 625ms
+     × does not create while an unanswered earlier decision is hidden by legacy pointer drift 67ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/worktrees/durable-pr-manager.test.ts > durable PR delivery boundary > does not create while an unanswered earlier decision is hidden by legacy pointer drift
+AssertionError: promise resolved "{ …(2) }" instead of rejecting
+
+- Expected
++ Received
+
+- Error {
+-   "message": "rejected promise",
++ {
++   "url": "https://github.com/org/repo/pull/1",
++   "usedFallback": false,
+  }
+
+ ❯ src/worktrees/durable-pr-manager.test.ts:75:48
+     73|         return null;
+     74|       });
+     75|       await expect(f.manager.createPr(f.config)).rejects.toThrow(/reco…
+       |                                                ^
+     76|       expect(f.provider.createPr).not.toHaveBeenCalled();
+     77|       expect(f.db.prepare('SELECT state FROM delivery_intents').get())…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed | 2 passed (3)
+      Tests  1 failed | 27 passed (28)
+   Start at  22:32:08
+   Duration  962ms (transform 302ms, setup 0ms, import 625ms, tests 1.67s, environment 0ms)

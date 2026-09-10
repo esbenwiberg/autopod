@@ -1,0 +1,59 @@
+
+ RUN  v4.1.11 /private/tmp/autopod-durable-execution/packages/daemon
+
+ ❯ src/containers/azure-sandbox-api-client.test.ts (62 tests | 1 failed | 61 skipped) 8ms
+   × pins the imported image to the digest resolved before creation 7ms
+ ❯ src/containers/sandbox-container-manager.test.ts (56 tests | 1 failed | 49 skipped) 7ms
+   × records only provider-linked immutable image identity: pinned 5ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 2 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/containers/azure-sandbox-api-client.test.ts > pins the imported image to the digest resolved before creation
+AssertionError: expected { …(3) } to match object { Object (image) }
+(8 matching properties omitted from actual)
+
+- Expected
++ Received
+
+  {
+    "image": {
+-     "base": "registry.test:5000/team/image@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
++     "base": "registry.test:5000/team/image:latest",
+    },
+  }
+
+ ❯ src/containers/azure-sandbox-api-client.test.ts:1320:50
+    1318|   ], { assumeGroupExists: true, registryCredentials: { username: 'fixt…
+    1319|   await client.createSandbox({ image: 'registry.test:5000/team/image:l…
+    1320|   expect(jsonBody(requests[1] ?? failRequest())).toMatchObject({ image…
+       |                                                  ^
+    1321| });
+    1322|
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/2]⎯
+
+ FAIL  src/containers/sandbox-container-manager.test.ts > records only provider-linked immutable image identity: pinned
+AssertionError: expected null to be 'sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaa…' // Object.is equality
+
+- Expected:
+"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+
++ Received:
+null
+
+ ❯ src/containers/sandbox-container-manager.test.ts:1277:80
+    1275|     }, logger);
+    1276|     const manager = new SandboxContainerManager(client, logger);
+    1277|     expect((await manager.getExecutionMetadata('actual-sandbox')).imag…
+       |                                                                                ^
+    1278|   },
+    1279| );
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/2]⎯
+
+
+ Test Files  2 failed (2)
+      Tests  2 failed | 6 passed | 110 skipped (118)
+   Start at  11:29:29
+   Duration  398ms (transform 185ms, setup 0ms, import 577ms, tests 15ms, environment 0ms)
+

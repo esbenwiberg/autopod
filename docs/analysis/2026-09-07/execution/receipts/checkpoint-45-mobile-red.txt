@@ -1,0 +1,46 @@
+
+ RUN  v4.1.11 /private/tmp/autopod-durable-execution/packages/mobile-web
+
+ ❯ src/screens/PodDetail.test.tsx (2 tests | 2 failed) 28ms
+   × shows retained delivery recovery and waits for explicit action (failed) 23ms
+   × shows retained delivery recovery and waits for explicit action (merge_pending) 5ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 2 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/screens/PodDetail.test.tsx > shows retained delivery recovery and waits for explicit action (failed)
+AssertionError: expected '← BackrecoveryfailedRecover deliveryf…' to contain 'Delivery history is unavailable. Orig…'
+
+Expected: "Delivery history is unavailable. Original resources retained. Use Resume to revalidate the retained source before approving delivery."
+Received: "← BackrecoveryfailedRecover deliveryfixture · codex · fixtureDispatch preflightFixture metadata unavailableNo dispatch receipt available for this execution.Execution environmentExecution environment evidence unavailable.To intentionally repeat this request, provide a reason. This creates a distinct task and may run a coding agent. Fresh contract, provider, and environment checks still apply.Reason for intentional rerunCreate intentional rerunValidation retry budgetRetry accounting unavailable.Refresh retry accountingTask accountingTask accounting unavailable.Refresh task accountingResumeRebase + revalidateExtend PR fixes (+3)Spawn fixForce completeKillTaskTaskRecover deliveryRecent activityNo activity yet."
+
+ ❯ src/screens/PodDetail.test.tsx:67:37
+     65|         );
+     66|       });
+     67|       expect(container.textContent).toContain(reason);
+       |                                     ^
+     68|       expect(mutations).toEqual([]);
+     69|       if (status === 'failed') {
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/2]⎯
+
+ FAIL  src/screens/PodDetail.test.tsx > shows retained delivery recovery and waits for explicit action (merge_pending)
+AssertionError: expected '← Backrecoverymerge pendingRecover de…' to contain 'Merge reconciliation required. Origin…'
+
+Expected: "Merge reconciliation required. Original resources retained."
+Received: "← Backrecoverymerge pendingRecover deliveryfixture · codex · fixtureDispatch preflightFixture metadata unavailableNo dispatch receipt available for this execution.Execution environmentExecution environment evidence unavailable.To intentionally repeat this request, provide a reason. This creates a distinct task and may run a coding agent. Fresh contract, provider, and environment checks still apply.Reason for intentional rerunCreate intentional rerunValidation retry budgetRetry accounting unavailable.Refresh retry accountingTask accountingTask accounting unavailable.Refresh task accountingTaskTaskRecover deliveryRecent activityNo activity yet."
+
+ ❯ src/screens/PodDetail.test.tsx:67:37
+     65|         );
+     66|       });
+     67|       expect(container.textContent).toContain(reason);
+       |                                     ^
+     68|       expect(mutations).toEqual([]);
+     69|       if (status === 'failed') {
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/2]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  2 failed (2)
+   Start at  01:51:49
+   Duration  485ms (transform 68ms, setup 12ms, import 100ms, tests 28ms, environment 255ms)

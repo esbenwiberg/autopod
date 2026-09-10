@@ -1,0 +1,74 @@
+
+ RUN  v4.1.11 /private/tmp/autopod-durable-execution/packages/daemon
+
+ ❯ src/runtimes/copilot-stderr.test.ts (2 tests | 2 failed) 1515ms
+   × finishes after observed exit when stderr never closes, with incomplete diagnostics explicit 1510ms
+   × does not treat truncated stderr as definitive provider failure evidence 4ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 2 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/runtimes/copilot-stderr.test.ts > finishes after observed exit when stderr never closes, with incomplete diagnostics explicit
+AssertionError: expected false to be true // Object.is equality
+
+- Expected
++ Received
+
+- true
++ false
+
+ ❯ src/runtimes/copilot-stderr.test.ts:53:23
+     51|       }),
+     52|     ]);
+     53|     expect(completed).toBe(true);
+       |                       ^
+     54|     expect(events).toEqual(
+     55|       expect.arrayContaining([
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/2]⎯
+
+ FAIL  src/runtimes/copilot-stderr.test.ts > does not treat truncated stderr as definitive provider failure evidence
+AssertionError: expected [ { type: 'status', …(2) }, …(1) ] to deeply equal ArrayContaining{…}
+
+- Expected
++ Received
+
+- ArrayContaining [
+-   ObjectContaining {
+-     "fatal": false,
+-     "message": StringContaining "stderr diagnostics incomplete",
++ [
++   {
++     "message": "Retain output",
++     "timestamp": "2026-09-08T15:25:20.331Z",
++     "type": "status",
++   },
++   {
++     "classification": {
++       "category": "unknown",
++       "definitive": false,
++       "retryAfter": null,
++       "sanitizedMessage": "You have exceeded your premium request quota.",
++     },
++     "fatal": true,
++     "message": "Copilot process exited with code 1: You have exceeded your premium request quota.",
++     "timestamp": "2026-09-08T15:25:20.332Z",
+      "type": "error",
+    },
+  ]
+
+ ❯ src/runtimes/copilot-stderr.test.ts:78:18
+     76|   stdout.end('Retain output\n');
+     77|   await consume;
+     78|   expect(events).toEqual(
+       |                  ^
+     79|     expect.arrayContaining([
+     80|       expect.objectContaining({
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/2]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  2 failed (2)
+   Start at  17:25:18
+   Duration  2.02s (transform 209ms, setup 0ms, import 321ms, tests 1.52s, environment 0ms)
+

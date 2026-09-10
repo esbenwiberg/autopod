@@ -1,0 +1,29 @@
+
+ RUN  v4.1.10 /private/tmp/autopod-durable-execution
+
+ ❯ packages/daemon/src/pods/task-execution-ledger.test.ts (8 tests | 3 failed) 433ms
+     × upgrades schema 139 with existing linked work and unresolved legacy lineage 81ms
+     × upgrades schema 141 with existing linked work and unresolved legacy lineage 63ms
+     × upgrades schema 142 with existing linked work and unresolved legacy lineage 63ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 3 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  packages/daemon/src/pods/task-execution-ledger.test.ts > task-wide execution accounting > upgrades schema 139 with existing linked work and unresolved legacy lineage
+ FAIL  packages/daemon/src/pods/task-execution-ledger.test.ts > task-wide execution accounting > upgrades schema 141 with existing linked work and unresolved legacy lineage
+ FAIL  packages/daemon/src/pods/task-execution-ledger.test.ts > task-wide execution accounting > upgrades schema 142 with existing linked work and unresolved legacy lineage
+SqliteError: FOREIGN KEY constraint failed
+ ❯ packages/daemon/src/pods/task-execution-ledger.test.ts:138:105
+    136|         ] as const) {
+    137|           db.prepare(`INSERT INTO pods (id, profile_name, task, status…
+    138|           VALUES (?, 'test-profile', 'original', 'failed', 'model', 'c…
+       |                                                                                                         ^
+    139|             id,
+    140|             parent,
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/3]⎯
+
+
+ Test Files  1 failed | 3 passed (4)
+      Tests  3 failed | 467 passed (470)
+   Start at  12:00:55
+   Duration  18.47s (transform 1.47s, setup 0ms, import 2.28s, tests 20.01s, environment 0ms)

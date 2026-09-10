@@ -1,0 +1,28 @@
+
+ RUN  v4.1.11 /private/tmp/autopod-durable-execution/packages/daemon
+
+ ❯ src/pods/pod-manager.test.ts (589 tests | 2 failed | 586 skipped) 193ms
+     × reconciles the authorized account after sandbox startup cooldown: deleted 53ms
+     × reconciles the authorized account after sandbox startup cooldown: provider-changed 51ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 2 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/pods/pod-manager.test.ts > PodManager > reconciles the authorized account after sandbox startup cooldown: deleted
+ FAIL  src/pods/pod-manager.test.ts > PodManager > reconciles the authorized account after sandbox startup cooldown: provider-changed
+AssertionError: expected "vi.fn()" to be called 1 times, but got 2 times
+ ❯ src/pods/pod-manager.test.ts:1466:44
+    1464|         await manager.processPod(pod.id);
+    1465|         expect(ctx.deps.sandboxInfrastructureRecoveryDelay).toHaveBeen…
+    1466|         expect(ctx.containerManager.spawn).toHaveBeenCalledTimes(accou…
+       |                                            ^
+    1467|         expect(ctx.runtime.spawn).not.toHaveBeenCalled();
+    1468|         expect(ctx.podRepo.getOrThrow(pod.id).providerAccountIdSnapsho…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/2]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  2 failed | 1 passed | 586 skipped (589)
+   Start at  15:18:56
+   Duration  1.80s (transform 1.09s, setup 0ms, import 1.50s, tests 193ms, environment 0ms)
+

@@ -1,0 +1,8 @@
+[
+  {
+    "principalId": "c3003025-3baf-4222-b35f-d82f9eaef56c",
+    "role": "AcrPull",
+    "roleDefinitionId": "/subscriptions/06bb959b-9458-41a6-bdf5-77cc12feaab9/providers/Microsoft.Authorization/roleDefinitions/7f951dda-4ed3-4680-a7ca-43fe172d538d",
+    "scope": "/subscriptions/06bb959b-9458-41a6-bdf5-77cc12feaab9/resourceGroups/ewi-sandboxes/providers/Microsoft.ContainerRegistry/registries/ewiautopodacr"
+  }
+]

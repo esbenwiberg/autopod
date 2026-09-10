@@ -1,0 +1,141 @@
+
+ RUN  v4.1.11 /private/tmp/autopod-durable-execution/packages/daemon
+
+ ❯ src/validation/container-reviewer-runner.test.ts (17 tests | 1 failed | 16 skipped) 7ms
+     × bounds a stalled remote kill request without claiming termination 6ms
+ ❯ src/runtimes/run-claude-cli.test.ts (12 tests | 3 failed | 9 skipped) 10ms
+     × waits for observed exit after timeout cancellation 7ms
+     × waits for observed exit after maxbuffer cancellation 1ms
+     × reports unconfirmed termination after bounded signal escalation 1ms
+ ❯ src/validation/review-agentic-runner.test.ts (2 tests | 1 failed | 1 skipped) 6ms
+     × waits for observed exit after timeout without launching a provider 5ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 5 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/runtimes/run-claude-cli.test.ts > runClaudeCli > waits for observed exit after timeout cancellation
+AssertionError: expected ClaudeCliError: claude -p --model fake-mo… { …(7) } to be undefined
+
+- Expected:
+undefined
+
++ Received:
+ClaudeCliError {
+  "message": "claude -p --model fake-model timed out after 100ms",
+  "kind": "timeout",
+  "model": "fake-model",
+  "exitCode": null,
+  "signal": "SIGTERM",
+  "stderr": "",
+  "stdoutPreview": "",
+  "durationMs": 100,
+  "name": "ClaudeCliError",
+}
+
+ ❯ src/runtimes/run-claude-cli.test.ts:26:22
+     24|       await Promise.resolve();
+     25|       expect(kill).toHaveBeenCalledWith('SIGTERM');
+     26|       expect(result).toBeUndefined();
+       |                      ^
+     27|       child.emit('exit', null, 'SIGTERM');
+     28|       child.emit('close', null, 'SIGTERM');
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/5]⎯
+
+ FAIL  src/runtimes/run-claude-cli.test.ts > runClaudeCli > waits for observed exit after maxbuffer cancellation
+AssertionError: expected ClaudeCliError: claude -p --model fake-mo… { …(7) } to be undefined
+
+- Expected:
+undefined
+
++ Received:
+ClaudeCliError {
+  "message": "claude -p --model fake-model stdout exceeded maxBuffer — output truncated after 0ms",
+  "kind": "maxbuffer",
+  "model": "fake-model",
+  "exitCode": null,
+  "signal": "SIGTERM",
+  "stderr": "",
+  "stdoutPreview": "",
+  "durationMs": 0,
+  "name": "ClaudeCliError",
+}
+
+ ❯ src/runtimes/run-claude-cli.test.ts:26:22
+     24|       await Promise.resolve();
+     25|       expect(kill).toHaveBeenCalledWith('SIGTERM');
+     26|       expect(result).toBeUndefined();
+       |                      ^
+     27|       child.emit('exit', null, 'SIGTERM');
+     28|       child.emit('close', null, 'SIGTERM');
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/5]⎯
+
+ FAIL  src/runtimes/run-claude-cli.test.ts > runClaudeCli > reports unconfirmed termination after bounded signal escalation
+AssertionError: expected [ 'SIGTERM' ] to deeply equal [ 'SIGTERM', 'SIGKILL' ]
+
+- Expected
++ Received
+
+  [
+    "SIGTERM",
+-   "SIGKILL",
+  ]
+
+ ❯ src/runtimes/run-claude-cli.test.ts:42:57
+     40|         spawnImpl: () => child }).catch((error: unknown) => { result =…
+     41|       await vi.advanceTimersByTimeAsync(10100);
+     42|       expect(kill.mock.calls.map(([signal]) => signal)).toEqual(['SIGT…
+       |                                                         ^
+     43|       expect(result).toMatchObject({ kind: 'termination-failed' });
+     44|       await pending;
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/5]⎯
+
+ FAIL  src/validation/container-reviewer-runner.test.ts > reviewer launch ownership > bounds a stalled remote kill request without claiming termination
+AssertionError: expected undefined to match object { kind: 'termination-failed' }
+
+- Expected:
+{
+  "kind": "termination-failed",
+}
+
++ Received:
+undefined
+
+ ❯ src/validation/container-reviewer-runner.test.ts:110:22
+    108|       await vi.advanceTimersByTimeAsync(10100);
+    109|       expect(kill).toHaveBeenCalledOnce();
+    110|       expect(result).toMatchObject({ kind: 'termination-failed' });
+       |                      ^
+    111|       await pending;
+    112|     } finally { vi.useRealTimers(); }
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[4/5]⎯
+
+ FAIL  src/validation/review-agentic-runner.test.ts > agentic reviewer cancellation > waits for observed exit after timeout without launching a provider
+AssertionError: expected Error: Tier 3 agentic review timed out af… to be undefined
+
+- Expected:
+undefined
+
++ Received:
+Error {
+  "message": "Tier 3 agentic review timed out after 100ms",
+}
+
+ ❯ src/validation/review-agentic-runner.test.ts:49:22
+     47|       await vi.advanceTimersByTimeAsync(100);
+     48|       expect(kill).toHaveBeenCalledWith('SIGTERM');
+     49|       expect(result).toBeUndefined();
+       |                      ^
+     50|       child.emit('exit', null, 'SIGTERM');
+     51|       child.emit('close', null, 'SIGTERM');
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[5/5]⎯
+
+
+ Test Files  3 failed (3)
+      Tests  5 failed | 26 skipped (31)
+   Start at  11:24:36
+   Duration  525ms (transform 506ms, setup 0ms, import 788ms, tests 24ms, environment 0ms)
+

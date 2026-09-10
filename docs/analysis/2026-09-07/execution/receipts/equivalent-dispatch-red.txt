@@ -1,0 +1,25 @@
+
+ RUN  v4.1.10 /private/tmp/autopod-durable-execution/packages/daemon
+
+ ❯ src/pods/pod-manager.test.ts (413 tests | 1 failed | 412 skipped) 78ms
+       × reviews equivalent active work after fresh fetch before starting another coding agent 78ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/pods/pod-manager.test.ts > PodManager > processPod > reviews equivalent active work after fresh fetch before starting another coding agent
+AssertionError: expected "vi.fn()" to be called 1 times, but got 2 times
+ ❯ src/pods/pod-manager.test.ts:5541:33
+    5539|       await manager.processPod(second.id);
+    5540|       expect(ctx.worktreeManager.create).toHaveBeenCalledTimes(2);
+    5541|       expect(ctx.runtime.spawn).toHaveBeenCalledTimes(1);
+       |                                 ^
+    5542|       expect(manager.getSession(second.id).status).toBe('failed');
+    5543|       expect(manager.getSession(second.id).failureReason).toContain('E…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 412 skipped (413)
+   Start at  15:26:06
+   Duration  1.12s (transform 608ms, setup 0ms, import 943ms, tests 78ms, environment 0ms)

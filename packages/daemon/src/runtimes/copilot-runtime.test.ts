@@ -390,7 +390,7 @@ describe('CopilotRuntime', () => {
       expect(error?.classification?.sanitizedMessage).not.toContain('copilot-secret');
     });
 
-    it('preserves completion when stdout closes but exit-code resolution times out', async () => {
+    it('retains output without fabricating completion when exit-code resolution times out', async () => {
       process.env.AUTOPOD_EXIT_CODE_TIMEOUT_MS = '50';
       try {
         const handle = createMockHandle();
@@ -403,29 +403,23 @@ describe('CopilotRuntime', () => {
         }, 10);
 
         const events: AgentEvent[] = [];
-        for await (const event of runtime.spawn({
-          podId: 'copilot-delayed-exit',
-          task: 'finish normally',
-          model: 'sonnet',
-          reasoningEffort: 'auto',
-          workDir: '/workspace',
-          containerId: 'container-123',
-          env: {},
-        })) {
-          events.push(event);
-        }
+        const consumed = (async () => {
+          for await (const event of runtime.spawn({
+            podId: 'copilot-delayed-exit',
+            task: 'finish normally',
+            model: 'sonnet',
+            reasoningEffort: 'auto',
+            workDir: '/workspace',
+            containerId: 'container-123',
+            env: {},
+          })) {
+            events.push(event);
+          }
+        })();
+        await expect(consumed).rejects.toMatchObject({ code: 'EXEC_EXIT_UNVERIFIED' });
 
-        expect(events).toEqual(
-          expect.arrayContaining([
-            expect.objectContaining({
-              type: 'error',
-              fatal: false,
-              message: expect.stringContaining('exit code did not resolve'),
-            }),
-            expect.objectContaining({ type: 'complete', result: 'Copilot agent completed' }),
-          ]),
-        );
-        expect(events.some((event) => event.type === 'error' && event.fatal)).toBe(false);
+        expect(events.some((event) => event.type === 'complete')).toBe(false);
+        expect(JSON.stringify(events)).toContain('Done.');
       } finally {
         // biome-ignore lint/performance/noDelete: must actually unset, `= undefined` stringifies to "undefined"
         delete process.env.AUTOPOD_EXIT_CODE_TIMEOUT_MS;
@@ -455,17 +449,20 @@ describe('CopilotRuntime', () => {
 
         const events: AgentEvent[] = [];
         const start = Date.now();
-        for await (const event of runtime.spawn({
-          podId: 'wedged-copilot',
-          task: 'Task',
-          model: 'sonnet',
-          reasoningEffort: 'auto',
-          workDir: '/workspace',
-          containerId: 'container-123',
-          env: {},
-        })) {
-          events.push(event);
-        }
+        const consumed = (async () => {
+          for await (const event of runtime.spawn({
+            podId: 'wedged-copilot',
+            task: 'Task',
+            model: 'sonnet',
+            reasoningEffort: 'auto',
+            workDir: '/workspace',
+            containerId: 'container-123',
+            env: {},
+          })) {
+            events.push(event);
+          }
+        })();
+        await expect(consumed).rejects.toMatchObject({ code: 'EXEC_EXIT_UNVERIFIED' });
         const elapsed = Date.now() - start;
 
         expect(elapsed).toBeLessThan(800);

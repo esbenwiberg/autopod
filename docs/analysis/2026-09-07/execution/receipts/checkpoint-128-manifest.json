@@ -1,0 +1,39 @@
+{
+  "checkpoint": 128,
+  "applicationCandidate": "4e73cd8ce88e44cdb5c2d8d0a89447b819fa5a39",
+  "approvedContractSHA256": "c503745f8b7fb8864493399aff22a89615ee6425320ed6a9f696ff8736a7d6d0",
+  "liveRunnerSHA256": "dd091bb2e2f5e24dd67dd1d1215fd735f37d365b4bf0816324a87aeb8035ee59",
+  "bundleSHA256": "159ffce46631ab9f3f0b58641f04ea67f5736cdeaf5d756ec98cd28f26ecb3dc",
+  "recoveryRunnerExecuted": false,
+  "fullImportWindowRunnerExecuted": false,
+  "localVerification": {
+    "recoverySuccessAndFailure": true,
+    "recoveryAdditionalImageCreates": 0,
+    "recoveryAdditionalTokenExchanges": 0,
+    "originalImportWindowRegression": "red",
+    "correctedImportWindowRegression": "green",
+    "mockedNetworkOnly": true
+  },
+  "files": {
+    "fixtures/resume-canary-127-reconciled.mjs": "8cd75264960a858537c8b23938f066f4b78c7785989500465223f22128c2857f",
+    "fixtures/run-canary-127-full-import-window.mjs": "954a19ce4cd059353ad64b529e8943223ac9d41828c2a52c2a80ae7b88d21a2a",
+    "fixtures/test-canary-import-window.mjs": "aa804537dd8a56023993a9c2b4bb78252f836b1d0f4bbebe1915b8aa4b5a993b",
+    "fixtures/test-canary-127-recovery.mjs": "bc32fc713ddca35ec1dbc442ed4216f41ad310ec7052273b16dacbb9dfc1f6e0",
+    "receipts/checkpoint-128-live-attempt.json": "a31a1f38439885fd84840f7de21baa3ac7b3c251622c893e7507ad5d29cd7d0f",
+    "fixtures/canary-128-contract.json": "e0b142993993cb700fecefda5c1d64f94145558941c3a0ce22807bf86a6aec0c",
+    "fixtures/run-canary-128-new-attempt.mjs": "748164f6a6425b4c0ff6baf21a6f8aa095cddd92e151e2c61ff590a376f84b11",
+    "fixtures/test-canary-128-new-attempt.mjs": "4a213cbeb9485e3df83c5c9b2a8b393387aec91846837486fa639c11024a3281",
+    "receipts/checkpoint-128-reconciliation.json": "cca269843f2c4004e1459bb43a97527a5526f35140bdc7c4a7e14e1b7d201299",
+    "receipts/checkpoint-128-final-reconciliation.json": "4223cc05defba12358508664343f424cc2392ab7898da482cc4c8dfefa098c1b"
+  },
+  "liveTokenExchanges": 1,
+  "liveTokenExchangeHTTPStatus": 200,
+  "liveImageImportAttempts": 1,
+  "liveSandboxCreateAttempts": 0,
+  "providerCalls": 0,
+  "reconciliationObservations": 48,
+  "observedTaskResources": 0,
+  "azureCancellationConfirmed": false,
+  "newAttemptAuthorization": "pending",
+  "applicationSourceUnchanged": true
+}

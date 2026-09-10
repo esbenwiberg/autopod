@@ -1,0 +1,97 @@
+
+ RUN  v4.1.11 /private/tmp/autopod-durable-execution/packages/daemon
+
+ ❯ src/pods/pod-manager.test.ts (517 tests | 3 failed | 514 skipped) 171ms
+       × retains legacy pending delivery for explicit validation recovery (open) 79ms
+       × retains legacy pending delivery for explicit validation recovery (merged) 46ms
+       × retains legacy pending delivery for explicit validation recovery (unavailable) 45ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 3 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/pods/pod-manager.test.ts > PodManager > merge poll lifecycle > retains legacy pending delivery for explicit validation recovery (open)
+AssertionError: expected { id: 'pretty-alpaca', …(113) } to match object { status: 'failed', …(4) }
+(122 matching properties omitted from actual)
+
+- Expected
++ Received
+
+  {
+    "completedAt": null,
+    "containerId": "legacy-source",
+-   "failureReason": StringContaining "Resume",
+-   "status": "failed",
++   "failureReason": null,
++   "status": "merge_pending",
+    "worktreePath": "/tmp/legacy-delivery",
+  }
+
+ ❯ src/pods/pod-manager.test.ts:4554:46
+    4552|           createPodManager(ctx.deps);
+    4553|           await vi.advanceTimersByTimeAsync(120_000);
+    4554|           expect(manager.getSession(pod.id)).toMatchObject({
+       |                                              ^
+    4555|             status: 'failed',
+    4556|             worktreePath: '/tmp/legacy-delivery',
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/3]⎯
+
+ FAIL  src/pods/pod-manager.test.ts > PodManager > merge poll lifecycle > retains legacy pending delivery for explicit validation recovery (merged)
+AssertionError: expected { id: 'useless-ant', …(113) } to match object { status: 'failed', …(4) }
+(122 matching properties omitted from actual)
+
+- Expected
++ Received
+
+  {
+-   "completedAt": null,
++   "completedAt": "2026-09-07T23:43:52.337Z",
+    "containerId": "legacy-source",
+-   "failureReason": StringContaining "Resume",
+-   "status": "failed",
++   "failureReason": null,
++   "status": "complete",
+    "worktreePath": "/tmp/legacy-delivery",
+  }
+
+ ❯ src/pods/pod-manager.test.ts:4554:46
+    4552|           createPodManager(ctx.deps);
+    4553|           await vi.advanceTimersByTimeAsync(120_000);
+    4554|           expect(manager.getSession(pod.id)).toMatchObject({
+       |                                              ^
+    4555|             status: 'failed',
+    4556|             worktreePath: '/tmp/legacy-delivery',
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/3]⎯
+
+ FAIL  src/pods/pod-manager.test.ts > PodManager > merge poll lifecycle > retains legacy pending delivery for explicit validation recovery (unavailable)
+AssertionError: expected { id: 'incredible-wolf', …(113) } to match object { status: 'failed', …(4) }
+(122 matching properties omitted from actual)
+
+- Expected
++ Received
+
+  {
+    "completedAt": null,
+    "containerId": "legacy-source",
+-   "failureReason": StringContaining "Resume",
+-   "status": "failed",
++   "failureReason": null,
++   "status": "merge_pending",
+    "worktreePath": "/tmp/legacy-delivery",
+  }
+
+ ❯ src/pods/pod-manager.test.ts:4554:46
+    4552|           createPodManager(ctx.deps);
+    4553|           await vi.advanceTimersByTimeAsync(120_000);
+    4554|           expect(manager.getSession(pod.id)).toMatchObject({
+       |                                              ^
+    4555|             status: 'failed',
+    4556|             worktreePath: '/tmp/legacy-delivery',
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/3]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  3 failed | 514 skipped (517)
+   Start at  01:43:51
+   Duration  1.42s (transform 778ms, setup 0ms, import 1.14s, tests 171ms, environment 0ms)

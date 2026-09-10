@@ -1,0 +1,11 @@
+{
+  "scope": "Local required validation pipeline; no live acceptance",
+  "command": "./scripts/validate.sh",
+  "sourceCommit": "523c1cd5c01c2754939fc5d1d8da35dacaae4ba4",
+  "beforeStatus": "",
+  "startedAt": "2026-09-08T06:41:05.869160+00:00",
+  "exitCode": 1,
+  "endedAt": "2026-09-08T06:43:42.709150+00:00",
+  "afterHead": "523c1cd5c01c2754939fc5d1d8da35dacaae4ba4",
+  "afterStatus": ""
+}

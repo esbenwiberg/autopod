@@ -1,0 +1,299 @@
+
+ RUN  v4.1.11 /private/tmp/autopod-durable-execution/packages/daemon
+
+ ❯ src/pods/pod-manager.test.ts (548 tests | 4 failed | 544 skipped) 613ms
+       × trigger does not start checks after replacement during retry identity capture 221ms
+       × revalidate does not start checks after replacement during retry identity capture 159ms
+       × trigger retains the old executed outcome without publishing into a replacement 128ms
+       × revalidate retains the old executed outcome without publishing into a replacement 104ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 4 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/pods/pod-manager.test.ts > PodManager > validation admission lifecycle ownership > trigger does not start checks after replacement during retry identity capture
+AssertionError: expected "vi.fn()" to not be called at all, but actually been called 1 times
+
+Received:
+
+  1st vi.fn() call:
+
+    Array [
+      Object {
+        "advisoryBrowserQaEnabled": false,
+        "attempt": 1,
+        "briefDoesNotTouch": undefined,
+        "briefTouches": undefined,
+        "buildCommand": "npm run build",
+        "buildTimeout": 300000,
+        "buildWorkDir": undefined,
+        "captureEvidenceIdentity": [Function anonymous],
+        "codeReviewSkill": undefined,
+        "commitLog": "abc1234 feat: implement feature
+    def5678 fix: edge case",
+        "containerBaseUrl": "http://127.0.0.1:3000",
+        "containerId": "ctr-1",
+        "contract": undefined,
+        "diff": "diff --git a/file.ts b/file.ts
+    +added line",
+        "executionTarget": "local",
+        "extraExecEnv": Object {
+          "AUTOPOD_BASE_BRANCH": "main",
+          "AUTOPOD_HEAD_BRANCH": "autopod/blank-porpoise",
+          "AUTOPOD_POD_ID": "blank-porpoise",
+          "AUTOPOD_PR_BASE_REF": "origin/main",
+          "AUTOPOD_VALIDATION_BASE_REF": "origin/main",
+          "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1",
+          "DISABLE_ERROR_REPORTING": "1",
+          "DISABLE_TELEMETRY": "1",
+          "DO_NOT_TRACK": "1",
+          "NEXT_TELEMETRY_DISABLED": "1",
+          "VERCEL_TELEMETRY_DISABLED": "1",
+        },
+        "hasWebUi": true,
+        "healthPath": "/health",
+        "healthTimeout": 120,
+        "lintCommand": undefined,
+        "lintTimeout": 120000,
+        "overrides": undefined,
+        "plan": undefined,
+        "podId": "blank-porpoise",
+        "preSubmitReview": undefined,
+        "previewUrl": "http://127.0.0.1:3000",
+        "priorReviewBatch": undefined,
+        "reviewerApiKey": undefined,
+        "reviewerModel": "opus",
+        "reviewerProvider": "anthropic",
+        "reviewerProviderCredentials": null,
+        "sastCommand": undefined,
+        "sastTimeout": 300000,
+        "skipPhases": Array [],
+        "smokePages": Array [],
+        "startCommand": "npm start",
+        "startCommitSha": undefined,
+        "task": "Fence validation admission",
+        "taskSummary": undefined,
+        "testCommand": null,
+        "testTimeout": 600000,
+        "validationSetupCommand": undefined,
+        "validationSuite": "full",
+        "webProbeMode": "host",
+        "worktreePath": "/tmp/wt",
+      },
+      [Function anonymous],
+      AbortSignal {
+        Symbol(kEvents): Map {},
+        Symbol(events.maxEventTargetListeners): 0,
+        Symbol(events.maxEventTargetListenersWarned): false,
+        Symbol(kHandlers): Map {},
+        Symbol(kAborted): false,
+        Symbol(kReason): undefined,
+        Symbol(kComposite): false,
+      },
+      Object {
+        "onPhaseCompleted": [Function onPhaseCompleted],
+        "onPhaseStarted": [Function onPhaseStarted],
+        "onReviewProgress": [Function onReviewProgress],
+      },
+    ]
+
+
+Number of calls: 1
+
+ ❯ src/pods/pod-manager.test.ts:19343:49
+    19341|       if (entry === 'trigger') await manager.triggerValidation(pod.id);
+    19342|       else await manager.revalidateSession(pod.id, { force: true });
+    19343|       expect(ctx.validationEngine.validate).not.toHaveBeenCalled();
+       |                                                 ^
+    19344|       expect(ctx.podRepo.taskRetries?.state(pod.id).admissionCount).to…
+    19345|       expect(manager.getSession(pod.id)).toMatchObject({
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/4]⎯
+
+ FAIL  src/pods/pod-manager.test.ts > PodManager > validation admission lifecycle ownership > revalidate does not start checks after replacement during retry identity capture
+AssertionError: expected "vi.fn()" to not be called at all, but actually been called 1 times
+
+Received:
+
+  1st vi.fn() call:
+
+    Array [
+      Object {
+        "advisoryBrowserQaEnabled": false,
+        "attempt": 1,
+        "buildCommand": "npm run build",
+        "buildTimeout": 300000,
+        "buildWorkDir": undefined,
+        "captureEvidenceIdentity": [Function anonymous],
+        "codeReviewSkill": undefined,
+        "commitLog": "abc1234 feat: implement feature
+    def5678 fix: edge case",
+        "containerBaseUrl": "http://127.0.0.1:3000",
+        "containerId": "ctr-1",
+        "contract": undefined,
+        "diff": "diff --git a/file.ts b/file.ts
+    +added line",
+        "executionTarget": "local",
+        "extraExecEnv": Object {
+          "AUTOPOD_BASE_BRANCH": "main",
+          "AUTOPOD_HEAD_BRANCH": "autopod/isolated-herring",
+          "AUTOPOD_POD_ID": "isolated-herring",
+          "AUTOPOD_PR_BASE_REF": "origin/main",
+          "AUTOPOD_VALIDATION_BASE_REF": "origin/main",
+          "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1",
+          "DISABLE_ERROR_REPORTING": "1",
+          "DISABLE_TELEMETRY": "1",
+          "DO_NOT_TRACK": "1",
+          "NEXT_TELEMETRY_DISABLED": "1",
+          "VERCEL_TELEMETRY_DISABLED": "1",
+        },
+        "hasWebUi": true,
+        "healthPath": "/health",
+        "healthTimeout": 120,
+        "lintCommand": undefined,
+        "lintTimeout": 120000,
+        "plan": undefined,
+        "podId": "isolated-herring",
+        "preSubmitReview": undefined,
+        "previewUrl": "http://127.0.0.1:3000",
+        "priorReviewBatch": undefined,
+        "reviewerModel": "opus",
+        "reviewerProvider": "anthropic",
+        "reviewerProviderCredentials": null,
+        "sastCommand": undefined,
+        "sastTimeout": 300000,
+        "skipPhases": Array [],
+        "smokePages": Array [],
+        "startCommand": "npm start",
+        "startCommitSha": undefined,
+        "task": "Fence validation admission",
+        "taskSummary": undefined,
+        "testCommand": null,
+        "testTimeout": 600000,
+        "validationSetupCommand": undefined,
+        "validationSuite": "full",
+        "webProbeMode": "host",
+        "worktreePath": "/tmp/wt",
+      },
+      [Function anonymous],
+      AbortSignal {
+        Symbol(kEvents): Map {},
+        Symbol(events.maxEventTargetListeners): 0,
+        Symbol(events.maxEventTargetListenersWarned): false,
+        Symbol(kHandlers): Map {},
+        Symbol(kAborted): false,
+        Symbol(kReason): undefined,
+        Symbol(kComposite): false,
+      },
+      Object {
+        "onPhaseCompleted": [Function onPhaseCompleted],
+        "onPhaseStarted": [Function onPhaseStarted],
+        "onReviewProgress": [Function onReviewProgress],
+      },
+    ]
+
+
+Number of calls: 1
+
+ ❯ src/pods/pod-manager.test.ts:19343:49
+    19341|       if (entry === 'trigger') await manager.triggerValidation(pod.id);
+    19342|       else await manager.revalidateSession(pod.id, { force: true });
+    19343|       expect(ctx.validationEngine.validate).not.toHaveBeenCalled();
+       |                                                 ^
+    19344|       expect(ctx.podRepo.taskRetries?.state(pod.id).admissionCount).to…
+    19345|       expect(manager.getSession(pod.id)).toMatchObject({
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/4]⎯
+
+ FAIL  src/pods/pod-manager.test.ts > PodManager > validation admission lifecycle ownership > trigger retains the old executed outcome without publishing into a replacement
+AssertionError: expected "emit" to not be called at all, but actually been called 3 times
+
+Received:
+
+  1st emit call:
+
+    Array [
+      Object {
+        "_eventId": 7,
+        "event": Object {
+          "message": "superseded progress",
+          "timestamp": "2026-09-08T07:26:54.232Z",
+          "type": "status",
+        },
+        "podId": "concerned-tapir",
+        "timestamp": "2026-09-08T07:26:54.232Z",
+        "type": "pod.agent_activity",
+      },
+    ]
+
+  2nd emit call:
+
+    Array [
+      Object {
+        "_eventId": 8,
+        "phase": "test",
+        "podId": "concerned-tapir",
+        "timestamp": "2026-09-08T07:26:54.232Z",
+        "type": "pod.validation_phase_started",
+      },
+    ]
+
+  3rd emit call:
+
+    Array [
+      Object {
+        "_eventId": 9,
+        "phase": "test",
+        "phaseStatus": "pass",
+        "podId": "concerned-tapir",
+        "testResult": Object {
+          "duration": 1,
+          "status": "pass",
+        },
+        "timestamp": "2026-09-08T07:26:54.232Z",
+        "type": "pod.validation_phase_completed",
+      },
+    ]
+
+
+Number of calls: 3
+
+ ❯ src/pods/pod-manager.test.ts:19398:37
+    19396|       });
+    19397|       expect(ctx.validationRepo.getForSession(pod.id)).toHaveLength(0);
+    19398|       expect(ctx.eventBus.emit).not.toHaveBeenCalled();
+       |                                     ^
+    19399|       expect(ctx.containerManager.stop).not.toHaveBeenCalled();
+    19400|     },
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/4]⎯
+
+ FAIL  src/pods/pod-manager.test.ts > PodManager > validation admission lifecycle ownership > revalidate retains the old executed outcome without publishing into a replacement
+AssertionError: expected { id: 'civil-dog', …(113) } to match object { status: 'running', …(2) }
+(131 matching properties omitted from actual)
+
+- Expected
++ Received
+
+  {
+    "containerId": "replacement-container",
+-   "failureReason": "replacement-owned-reason",
+-   "status": "running",
++   "failureReason": "Validation failed before checks could complete: Cannot transition pod civil-dog from running to validated",
++   "status": "failed",
+  }
+
+ ❯ src/pods/pod-manager.test.ts:19388:42
+    19386|       if (entry === 'trigger') await manager.triggerValidation(pod.id);
+    19387|       else await manager.revalidateSession(pod.id, { force: true });
+    19388|       expect(manager.getSession(pod.id)).toMatchObject({
+       |                                          ^
+    19389|         status: 'running',
+    19390|         containerId: 'replacement-container',
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[4/4]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  4 failed | 544 skipped (548)
+   Start at  09:26:51
+   Duration  3.27s (transform 1.63s, setup 0ms, import 2.43s, tests 613ms, environment 0ms)
+

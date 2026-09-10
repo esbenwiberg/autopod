@@ -324,59 +324,95 @@ export async function validateRegistryFiles(
       // Quick check: npm config parse
       const result = await containerManager.execInContainer(
         containerId,
-        ['sh', '-c', 'npm config list --location=project 2>&1'],
+        ['npm', 'config', 'list', '--location=project'],
         { cwd: '/workspace', timeout: 15_000, ...envOption },
       );
       if (result.exitCode !== 0) {
         throw new Error(
-          `Registry check failed: .npmrc is invalid — npm config list exited ${result.exitCode}: ${result.stderr.slice(0, 500)}`,
+          `Registry check failed: .npmrc is invalid — npm config list exited ${result.exitCode}`,
         );
       }
     }
 
     if (file.path.toLowerCase().endsWith('nuget.config')) {
-      // Check 1: XML is parseable (dotnet nuget list source reads the config)
+      const options = { cwd: '/workspace', timeout: 30_000, ...envOption };
       const result = await containerManager.execInContainer(
         containerId,
-        ['sh', '-c', `dotnet nuget list source --configfile ${file.path} 2>&1`],
-        { cwd: '/workspace', timeout: 30_000, ...envOption },
+        ['dotnet', 'nuget', 'list', 'source', '--configfile', file.path],
+        options,
       );
       if (result.exitCode !== 0) {
-        const output = `${result.stdout}\n${result.stderr}`.trim();
         throw new Error(
-          `Registry check failed: ${file.path} is invalid — dotnet nuget list source exited ${result.exitCode}: ${output.slice(0, 500)}`,
+          `Registry check failed: ${file.path} is invalid — dotnet nuget list source exited ${result.exitCode}`,
         );
       }
 
-      // Check 2: Credential provider can authenticate against each NuGet feed.
-      // Runs `dotnet nuget list source --format short` to get source URLs, then
-      // hits the service index of each private feed. Catches stale PATs, missing
-      // credential provider, and endpoint URL mismatches early.
+      // package search is supported starting with SDK 8.0.2xx. Check the actual
+      // image capability, without relying on a mutable image tag or version guess.
+      const capability = await containerManager.execInContainer(
+        containerId,
+        ['dotnet', 'package', 'search', '--help'],
+        options,
+      );
+      if (
+        capability.exitCode !== 0 ||
+        !['--configfile', '--take', '--format'].every((flag) => capability.stdout.includes(flag))
+      ) {
+        throw new Error(
+          'Registry capability unavailable: dotnet package search requires SDK 8.0.2xx or later with --configfile, --take and --format support. Update the execution image before dispatch.',
+        );
+      }
       const authCheck = await containerManager.execInContainer(
         containerId,
         [
-          'sh',
-          '-c',
-          // curl the NuGet v3 service index — 200 means auth is good, 401/403 means bad creds.
-          // Use --fail so non-2xx exits with code 22. The credential provider injects auth via
-          // the env var, but curl won't use it — so we call `dotnet nuget list package` with a
-          // dummy package name. If the source is reachable and auth works, exit code is 0 (no match)
-          // or 0 (empty result). If auth fails, dotnet prints NU1301 and exits non-zero.
-          `dotnet nuget search "__autopod_auth_probe__" --configfile ${file.path} --take 1 2>&1`,
+          'dotnet',
+          'package',
+          'search',
+          '__autopod_auth_probe__',
+          '--configfile',
+          file.path,
+          '--take',
+          '1',
+          '--format',
+          'json',
         ],
-        { cwd: '/workspace', timeout: 60_000, ...envOption },
+        { ...options, timeout: 60_000 },
       );
-      // NU1301 = "Unable to load the service index" (auth failure or unreachable)
-      if (authCheck.stdout.includes('NU1301') || authCheck.stderr.includes('NU1301')) {
-        const output = `${authCheck.stdout}\n${authCheck.stderr}`.trim();
+      const output = `${authCheck.stdout}\n${authCheck.stderr}`;
+      // Do not persist raw tool output: sources and credential providers may echo
+      // secret material. NU1301 alone proves unavailability, not rejected credentials.
+      if (/\b(?:401|403)\b/.test(output)) {
         throw new Error(
-          `Registry auth failed: NuGet feed returned 401/403. Check that the PAT is valid and has Packaging (Read) scope. Output: ${output.slice(0, 800)}`,
+          'Registry auth failed: NuGet feed rejected credentials (401/403). Check the PAT and Packaging (Read) permission.',
+        );
+      }
+      if (output.includes('NU1301')) {
+        throw new Error(
+          'Registry feed unavailable: NuGet could not load a configured source; authentication is unconfirmed. Check connectivity, source configuration and credential-provider health.',
         );
       }
       if (authCheck.exitCode !== 0) {
-        const output = `${authCheck.stdout}\n${authCheck.stderr}`.trim();
         throw new Error(
-          `Registry auth probe failed: dotnet nuget search exited ${authCheck.exitCode}: ${output.slice(0, 800)}`,
+          `Registry auth probe failed: dotnet package search exited ${authCheck.exitCode}; inspect the execution environment without exposing credentials.`,
+        );
+      }
+      let report: unknown;
+      try {
+        report = JSON.parse(authCheck.stdout);
+      } catch {
+        throw new Error('Registry probe incomplete: search did not return valid JSON evidence.');
+      }
+      if (
+        !report ||
+        typeof report !== 'object' ||
+        !('problems' in report) ||
+        !Array.isArray(report.problems) ||
+        report.problems.length > 0 ||
+        !('searchResult' in report) ||
+        !Array.isArray(report.searchResult)
+      ) {
+        throw new Error(
+          'Registry probe incomplete: one or more configured sources lack successful search evidence.',
         );
       }
     }

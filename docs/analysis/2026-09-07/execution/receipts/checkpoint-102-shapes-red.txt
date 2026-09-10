@@ -1,0 +1,44 @@
+
+ RUN  v4.1.11 /private/tmp/autopod-durable-execution/packages/daemon
+
+ ❯ src/pods/retained-analytics.test.ts (7 tests | 3 failed) 378ms
+   × exports healthy evidence with diagnostics for retained legacy JSON null 53ms
+   × exports healthy evidence with diagnostics for retained legacy JSON [] 48ms
+   × exports healthy evidence with diagnostics for retained legacy JSON {} 45ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 3 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/pods/retained-analytics.test.ts > exports healthy evidence with diagnostics for retained legacy JSON null
+TypeError: Cannot read properties of null (reading 'smoke')
+ ❯ extractFailedPhases src/history/history-exporter.ts:110:14
+    108| function extractFailedPhases(result: ValidationResult): string[] {
+    109|   const phases: string[] = [];
+    110|   if (result.smoke.build.status === 'fail') phases.push('build');
+       |              ^
+    111|   if (result.smoke.health.status === 'fail') phases.push('health');
+    112|   for (const page of result.smoke.pages) {
+ ❯ Object.export src/history/history-exporter.ts:241:32
+ ❯ src/pods/retained-analytics.test.ts:132:35
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/3]⎯
+
+ FAIL  src/pods/retained-analytics.test.ts > exports healthy evidence with diagnostics for retained legacy JSON []
+ FAIL  src/pods/retained-analytics.test.ts > exports healthy evidence with diagnostics for retained legacy JSON {}
+TypeError: Cannot read properties of undefined (reading 'build')
+ ❯ extractFailedPhases src/history/history-exporter.ts:110:20
+    108| function extractFailedPhases(result: ValidationResult): string[] {
+    109|   const phases: string[] = [];
+    110|   if (result.smoke.build.status === 'fail') phases.push('build');
+       |                    ^
+    111|   if (result.smoke.health.status === 'fail') phases.push('health');
+    112|   for (const page of result.smoke.pages) {
+ ❯ Object.export src/history/history-exporter.ts:241:32
+ ❯ src/pods/retained-analytics.test.ts:132:35
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/3]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  3 failed | 4 passed (7)
+   Start at  21:53:37
+   Duration  801ms (transform 187ms, setup 0ms, import 282ms, tests 378ms, environment 0ms)

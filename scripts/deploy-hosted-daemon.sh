@@ -27,6 +27,9 @@
 #                        reuse). Auto-selected when deps changed or live sha is
 #                        not present locally.
 #   --keep N             Releases to retain when pruning (default: 5).
+#   --stage-only         Build and prewarm without activation, restart or release pruning.
+#   --verify-release     Require exact clean build identity before releasing maintenance.
+#                        A failed post-swap check retains the existing expiring drain.
 #   --verify-string STR  Extra gate: grep the flattened built bundle for STR
 #                        before swapping (catches "built the wrong thing").
 #   --skip-playwright-prewarm
@@ -73,6 +76,10 @@ FORCE=0
 FULL=0
 KEEP=5
 VERIFY_STRING=""
+STAGE_ONLY=0
+VERIFY_RELEASE=0
+SWAP_ATTEMPTED=0
+DEPLOY_VERIFIED=0
 ROLLBACK_SHA=""
 PREWARM_PLAYWRIGHT=1
 
@@ -86,6 +93,8 @@ while [ $# -gt 0 ]; do
     --force) FORCE=1; shift;;
     --full) FULL=1; shift;;
     --keep) KEEP="${2:-}"; shift 2;;
+    --stage-only) STAGE_ONLY=1; shift;;
+    --verify-release) VERIFY_RELEASE=1; shift;;
     --verify-string) VERIFY_STRING="${2:-}"; shift 2;;
     --skip-playwright-prewarm) PREWARM_PLAYWRIGHT=0; shift;;
     --rollback) ROLLBACK_SHA="${2:-}"; shift 2;;
@@ -248,6 +257,10 @@ fi
 DEPLOY_DRAIN_ACTIVE=0
 release_hosted_deploy_drain() {
   if [ "$DEPLOY_DRAIN_ACTIVE" -eq 1 ]; then
+    if [ "$VERIFY_RELEASE" -eq 1 ] && [ "$SWAP_ATTEMPTED" -eq 1 ] && [ "$DEPLOY_VERIFIED" -ne 1 ]; then
+      note "release unverified: retaining the existing maintenance drain until its expiry; inspect and renew maintenance before recovery"
+      return
+    fi
     curl -sS --max-time 10 -X DELETE "$DAEMON/maintenance/hosted-deploy-drain" \
       -H "Authorization: Bearer $TOKEN" >/dev/null 2>&1 || true
     DEPLOY_DRAIN_ACTIVE=0
@@ -502,6 +515,13 @@ if tr '\n' ' ' < \"\$NEW\" | grep -qF -- '$VERIFY_STRING'; then echo VERIFY_OK; 
   note "bundle verify OK"
 fi
 
+if [ "$STAGE_ONLY" -eq 1 ]; then
+  release_hosted_deploy_drain
+  trap - EXIT
+  note "STAGED $TARGET_SHA ($TARGET_SHA_FULL); current release unchanged"
+  exit 0
+fi
+
 # ---- final restart-blocking-pod gate + atomic swap ------------------------
 # The drain blocks new admission for ordinary deployments. The forced bootstrap
 # path still gets this last check, but cannot provide the same admission guarantee.
@@ -509,6 +529,7 @@ fi
 # expired during build/prewarm. The assertion and restart deliberately share
 # one remote shell so forced bootstrap has no admission window between them.
 note "swapping symlink + restarting $SERVICE"
+SWAP_ATTEMPTED=1
 if ! SWAP_OUT="$(remote "
 set -eu
 cd $CURRENT_LINK/packages/daemon
@@ -563,6 +584,30 @@ note "checking external HTTPS health"
 HTTP_CODE="$(curl -sS -o /dev/null -w '%{http_code}' --max-time 12 "$HEALTH_URL" || echo 000)"
 [ "$HTTP_CODE" = "200" ] || die "external health returned $HTTP_CODE — investigate (Caddy?). ROLL BACK: scripts/deploy-hosted-daemon.sh --rollback $LIVE_SHA"
 note "external HTTPS health 200 OK"
+if [ "$VERIFY_RELEASE" -eq 1 ]; then
+  if ! curl -fsS --max-time 12 "$HEALTH_URL" | EXPECTED_RELEASE_SHA="$TARGET_SHA_FULL" python3 -c '
+import json, os, re, sys
+try:
+    raw = sys.stdin.buffer.read(65537)
+    if len(raw) > 65536:
+        raise ValueError("response bound")
+    release = json.loads(raw).get("release")
+    valid = (isinstance(release, dict)
+        and release.get("commitSha") == os.environ["EXPECTED_RELEASE_SHA"]
+        and release.get("dirty") is False
+        and release.get("source") == "build"
+        and isinstance(release.get("validationImplementationHash"), str)
+        and re.fullmatch(r"[a-f0-9]{64}", release["validationImplementationHash"]) is not None)
+    if not valid:
+        raise ValueError("identity mismatch")
+except (ValueError, TypeError, AttributeError):
+    sys.exit(1)
+print("RELEASE_IDENTITY_OK")
+'; then
+    die "release identity was not verified; preserve the database and inspect the staged release before recovery"
+  fi
+fi
+DEPLOY_VERIFIED=1
 release_hosted_deploy_drain
 trap - EXIT
 

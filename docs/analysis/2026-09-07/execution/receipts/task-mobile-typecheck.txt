@@ -1,0 +1,3 @@
+
+> @autopod/mobile-web@0.0.1 typecheck /private/tmp/autopod-durable-execution/packages/mobile-web
+> tsc --noEmit --project tsconfig.typecheck.json

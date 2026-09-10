@@ -1,0 +1,33 @@
+
+ RUN  v4.1.11 /private/tmp/autopod-durable-execution/packages/daemon
+
+ ❯ src/pods/pod-manager.test.ts (576 tests | 1 failed | 575 skipped) 175ms
+       × dispatches exactly one actual pod through authenticated report triage after a lost response 174ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/pods/pod-manager.test.ts > PodManager > createSession > dispatches exactly one actual pod through authenticated report triage after a lost response
+AssertionError: expected 409 to be 200 // Object.is equality
+
+- Expected
++ Received
+
+- 200
++ 409
+
+ ❯ src/pods/pod-manager.test.ts:4409:37
+    4407|           headers,
+    4408|         });
+    4409|         expect(retained.statusCode).toBe(200);
+       |                                     ^
+    4410|         expect(retained.json().decisions[0].repairPodId).toBe(pod.id);
+    4411|         expect(retained.json().unresolved).toHaveLength(2);
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed | 1 passed (2)
+      Tests  1 failed | 2 passed | 582 skipped (585)
+   Start at  12:53:10
+   Duration  1.50s (transform 1.22s, setup 0ms, import 1.74s, tests 352ms, environment 0ms)
+

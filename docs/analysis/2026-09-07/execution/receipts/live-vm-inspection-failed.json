@@ -1,0 +1,20 @@
+{
+  "operation": "read-only az vm run-command invoke",
+  "target": {
+    "resourceGroup": "ewi-sandboxes",
+    "vm": "autopod-daemon"
+  },
+  "localSession": 29869,
+  "result": "failed before requested script evidence was returned",
+  "code": "VMExtensionProvisioningTimeout",
+  "extension": "RunCommandLinux",
+  "reportedError": "Failed to update settings file; [Errno 28] No space left on device",
+  "proves": "VM extension reported insufficient device space for settings update",
+  "doesNotProve": [
+    "application history/cost error root cause",
+    "active daemon SHA",
+    "active database backup freshness",
+    "which filesystem is full"
+  ],
+  "authority": "No cleanup, restart, deployment or second Run Command performed"
+}

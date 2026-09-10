@@ -1,0 +1,33 @@
+
+ RUN  v4.1.10 /private/tmp/autopod-durable-execution/packages/daemon
+
+ ❯ src/pods/pod-manager.test.ts (421 tests | 1 failed | 420 skipped) 68ms
+       × keeps one actionable question and treats its duplicate creation as the same decision 67ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/pods/pod-manager.test.ts > PodManager > sendMessage > keeps one actionable question and treats its duplicate creation as the same decision
+AssertionError: expected [Function] to throw an error
+
+- Expected:
+null
+
++ Received:
+undefined
+
+ ❯ src/pods/pod-manager.test.ts:12132:85
+    12130|       };
+    12131|       bridge.createEscalation(question);
+    12132|       expect(() => bridge.createEscalation({ ...question, id: 'second-…
+       |                                                                                     ^
+    12133|         'already has an unanswered decision',
+    12134|       );
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 420 skipped (421)
+   Start at  17:12:49
+   Duration  1.26s (transform 739ms, setup 0ms, import 1.09s, tests 68ms, environment 0ms)
+

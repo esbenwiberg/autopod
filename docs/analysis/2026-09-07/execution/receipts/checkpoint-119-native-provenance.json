@@ -1,0 +1,20 @@
+{
+  "applicationCandidate": "15900d9e08a7e4ca786a6ad11ff81820fda14de4",
+  "method": "Direct CUA actual native app; synthetic loopback host-reviewer-provenance fixture",
+  "result": "pass within scope",
+  "observed": [
+    "Work > Task displays review preflight checked, generation and recorded timestamp",
+    "Host claude CLI 2.9.1 and executable /fixture/claude displayed",
+    "Provider unverified and account not recorded remain explicit",
+    "Daemon unverified; image not applicable; validation implementation unverified",
+    "Contract hash displayed; memory/CPU remain unverified",
+    "Diagnostic explicitly says remote model, review completion and billing are not proven"
+  ],
+  "screenshots": "Task conversation contains two task-owned app-window screenshots; second scroll shows provenance missingness",
+  "limits": [
+    "Synthetic recorded host CLI data, not live executable or loaded-source attestation",
+    "Known daemon SHA and image digest populated states remain unverified",
+    "Narrow panel wrapping is not a layout-audit pass"
+  ],
+  "remainingNativeStatus": "Mac locked again during next-case app reset; no new worker/waiver/empty-delta interaction has executed"
+}

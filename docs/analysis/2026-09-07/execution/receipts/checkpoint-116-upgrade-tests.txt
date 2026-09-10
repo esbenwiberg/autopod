@@ -1,0 +1,16 @@
+✔ actual candidate upgrades a managed-152 copy and preserves original data (251.065917ms)
+✔ wrong snapshot hash refuses before migration and retains source (102.405167ms)
+✔ wrong migration identity refuses before migration (103.523917ms)
+✔ WAL sidecar refuses a non-standalone snapshot (97.972167ms)
+✔ seeded migration that changes original retained content is detected and isolated copy removed (119.556708ms)
+✔ migration exceptions export no raw private error text (96.296792ms)
+✔ packaged CLI verifies a synthetic copy with a bounded JSON verdict (181.801083ms)
+✔ packaged CLI refuses missing arguments without raw exception output (52.828458ms)
+ℹ tests 8
+ℹ suites 0
+ℹ pass 8
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 1078.282458

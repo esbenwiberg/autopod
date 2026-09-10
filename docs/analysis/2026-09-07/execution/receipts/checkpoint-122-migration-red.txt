@@ -1,0 +1,34 @@
+
+ RUN  v4.1.11 /private/tmp/autopod-durable-execution/packages/daemon
+
+ ❯ src/db/managed-migration-compatibility.test.ts (4 tests | 1 failed | 3 skipped) 250ms
+   × upgrades the prior native 182 candidate without silently skipping managed GitHub-read migration 153 250ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/db/managed-migration-compatibility.test.ts > upgrades the prior native 182 candidate without silently skipping managed GitHub-read migration 153
+AssertionError: expected undefined to deeply equal { name: 'managed_github_reads' }
+
+- Expected:
+{
+  "name": "managed_github_reads",
+}
+
++ Received:
+undefined
+
+ ❯ src/db/managed-migration-compatibility.test.ts:141:7
+    139|     expect(
+    140|       db.prepare("SELECT name FROM sqlite_master WHERE name='managed_g…
+    141|     ).toEqual({ name: 'managed_github_reads' });
+       |       ^
+    142|     expect(db.prepare('SELECT version FROM schema_version WHERE versio…
+    143|       version: 153,
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 3 skipped (4)
+   Start at  21:20:37
+   Duration  614ms (transform 184ms, setup 0ms, import 266ms, tests 250ms, environment 0ms)

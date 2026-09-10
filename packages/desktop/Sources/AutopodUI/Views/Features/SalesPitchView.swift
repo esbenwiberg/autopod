@@ -362,7 +362,7 @@ public struct SalesPitchView: View {
                 icon: "chart.bar.xaxis",
                 color: .indigo,
                 title: "Fleet Visibility",
-                body: "Seven analytics dashboards — cost by phase and model, outcome quality and first-pass completion, throughput MTTM, safety events, process health, escalation patterns, and model performance. Know what your agents are doing.",
+                body: "Seven analytics dashboards — cost by phase and model, outcome quality and first-pass completion, throughput completed pod time, safety events, process health, escalation patterns, and model performance. Know what your agents are doing.",
                 tags: ["Cost", "Outcomes", "Process", "Safety", "Models"]
             ),
         ]

@@ -1,5 +1,8 @@
+import { ChildProcess } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
+import { PassThrough } from 'node:stream';
 import type {
   AgentEscalationEvent,
   AgentEvent,
@@ -20,6 +23,11 @@ import type {
   ValidationEngine,
   WorktreeManager,
 } from '../interfaces/index.js';
+import type {
+  BranchPublicationOptions,
+  BranchPublicationReceipt,
+  MergeBranchConfig,
+} from '../interfaces/worktree-manager.js';
 import { createEscalationRepository } from '../pods/escalation-repository.js';
 import type { EscalationRepository } from '../pods/escalation-repository.js';
 import { createEventBus } from '../pods/event-bus.js';
@@ -35,6 +43,55 @@ import type { PodRepository } from '../pods/pod-repository.js';
 import type { ProfileStore } from '../profiles/index.js';
 import { createScheduledJobRepository } from '../scheduled-jobs/scheduled-job-repository.js';
 import { createScheduledJobTemplateRepository } from '../scheduled-jobs/scheduled-job-template-repository.js';
+
+/** Synthetic transport evidence for lifecycle tests; real Git coverage is separate. */
+/** Synthetic provider evidence for local lifecycle fixtures, never live provider proof. */
+export async function mockPrMerge(
+  config: import('../interfaces/pr-manager.js').MergePrConfig,
+): Promise<import('../interfaces/pr-manager.js').MergePrResult> {
+  config.onPrepared?.();
+  return {
+    merged: true,
+    autoMergeScheduled: false,
+    ...(config.expectedHeadSha && config.expectedTarget
+      ? {
+          source: {
+            headSha: config.expectedHeadSha,
+            target: { ...config.expectedTarget },
+            observedAt: new Date().toISOString(),
+          },
+        }
+      : {}),
+  };
+}
+export async function mockSourceSnapshot(_worktreePath: string, branch: string) {
+  return { branch, commitSha: 'a'.repeat(40), treeSha: 'b'.repeat(40), worktreeClean: true };
+}
+
+export async function mockBranchPublication(
+  _worktreePath: string,
+  branch: string,
+  options?: BranchPublicationOptions,
+): Promise<BranchPublicationReceipt> {
+  const receipt: BranchPublicationReceipt = {
+    branch,
+    repository: options?.expectedRepository?.replace(/\.git$/, '') ?? 'https://github.com/org/repo',
+    commitSha: 'a'.repeat(40),
+    treeSha: 'b'.repeat(40),
+    remoteRef: `refs/heads/${branch}`,
+    observedRemoteCommitSha: 'a'.repeat(40),
+    worktreeClean: true,
+    observedAt: '2026-09-07T12:00:00Z',
+  };
+  options?.onPrepared?.(receipt);
+  return receipt;
+}
+
+export async function mockCommittedPublication(
+  config: MergeBranchConfig,
+): Promise<BranchPublicationReceipt> {
+  return mockBranchPublication(config.worktreePath, config.targetBranch, config);
+}
 
 export const logger = pino({ level: 'silent' });
 
@@ -149,8 +206,19 @@ export function createMockContainerManager(): ContainerManager {
     extractDirectoryFromContainer: vi.fn(async () => {}),
     getStatus: vi.fn(async () => 'running' as const),
     execInContainer: vi.fn(async (_containerId, command) => {
+      if (command[2]?.includes('autopod-command-preflight-v1')) {
+        const names = JSON.parse(command[3] ?? '[]') as string[];
+        return {
+          stdout: JSON.stringify(names.map((executable) => ({ executable, available: true }))),
+          stderr: '',
+          exitCode: 0,
+        };
+      }
       if (command.join(' ') === 'codex --version') {
         return { stdout: 'codex-cli 0.144.4\n', stderr: '', exitCode: 0 };
+      }
+      if (['claude --version', 'copilot --version', 'pi --version'].includes(command.join(' '))) {
+        return { stdout: `${command[0]} 1.0.0\n`, stderr: '', exitCode: 0 };
       }
       return { stdout: '', stderr: '', exitCode: 0 };
     }),
@@ -168,6 +236,14 @@ export function createMockContainerManager(): ContainerManager {
 
 export function createMockWorktreeManager(): WorktreeManager {
   return {
+    inspectSource: vi.fn(mockSourceSnapshot),
+    inspectContractBase: vi.fn(async (_worktreePath, _baseBranch, facts) => ({
+      baseCommitSha: 'a'.repeat(40),
+      artifacts: facts.map((f) => ({
+        path: f.artifact.path,
+        exists: f.artifact.change !== 'create',
+      })),
+    })),
     create: vi.fn(async () => ({
       worktreePath: '/tmp/worktree/abc',
       bareRepoPath: '/tmp/bare/abc.git',
@@ -186,12 +262,12 @@ export function createMockWorktreeManager(): WorktreeManager {
     hasChangesAgainstBase: vi.fn(async () => true),
     getChangedPathsAgainstBase: vi.fn(async () => ['file.ts']),
     getDiff: vi.fn(async () => 'diff --git a/file.ts b/file.ts\n+added line'),
-    mergeBranch: vi.fn(async () => {}),
+    mergeBranch: vi.fn(mockCommittedPublication),
     commitFiles: vi.fn(async () => {}),
     pushArtifactBranch: vi.fn(async () => true),
     commitPendingChanges: vi.fn(async () => false),
     commitPendingChangesWithGeneratedMessage: vi.fn(async () => false),
-    pushBranch: vi.fn(async () => {}),
+    pushBranch: vi.fn(mockBranchPublication),
     ensureRemoteBranch: vi.fn(async ({ branch }) => ({ branch, created: false })),
     pullBranch: vi.fn(async () => ({ newCommits: false })),
     rebaseOntoBase: vi.fn(async () => ({ alreadyUpToDate: false, rebased: true, conflicts: [] })),
@@ -476,6 +552,8 @@ export function createTestContext(opts?: {
   validationResultFactory?: (config: { podId: string; attempt: number }) => ValidationResult;
   runtime?: Runtime;
   maxValidationAttempts?: number;
+  /** Explicit fake-infrastructure premise: each mocked rework produces changed source. */
+  simulatedReworkChangesSource?: boolean;
 }): TestContext {
   const db = createTestDb();
   insertTestProfile(db, { maxValidationAttempts: opts?.maxValidationAttempts });
@@ -497,6 +575,19 @@ export function createTestContext(opts?: {
   const enqueuedSessions: string[] = [];
 
   const deps: PodManagerDependencies = {
+    ...(opts?.simulatedReworkChangesSource
+      ? {
+          captureRetryIdentity: async () => ({
+            source: createHash('sha256')
+              .update(String(vi.mocked(runtime.resume).mock.calls.length))
+              .digest('hex'),
+            contract: null,
+            commands: null,
+            environment: null,
+            implementation: null,
+          }),
+        }
+      : {}),
     podRepo,
     escalationRepo,
     nudgeRepo,
@@ -530,4 +621,15 @@ export function createTestContext(opts?: {
     enqueuedSessions,
     deps,
   };
+}
+
+/** A process handle with explicit test-controlled exit; never spawns a provider. */
+export function createMockChildProcess() {
+  const child = new ChildProcess();
+  child.stdin = new PassThrough();
+  child.stdout = new PassThrough();
+  child.stderr = new PassThrough();
+  const kill = vi.fn((_signal?: NodeJS.Signals | number) => true);
+  child.kill = kill;
+  return { child, kill };
 }

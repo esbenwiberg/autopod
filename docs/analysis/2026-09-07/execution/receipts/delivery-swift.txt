@@ -1,0 +1,179 @@
+[1/1] Compiling plugin GenerateManual
+[2/2] Compiling plugin GenerateDoccReference
+Building for debugging...
+[2/8] Write sources
+[4/8] Write swift-version--58304C5D6DBC2206.txt
+error: emit-module command failed with exit code 1 (use -v to see invocation)
+[6/10] Emitting module AutopodClient
+/private/tmp/autopod-durable-execution/packages/desktop/Sources/AutopodClient/Types/PodCostBreakdownResponse.swift:60:15: error: type 'TaskExecutionSummary' does not conform to protocol 'Equatable'
+58 | }
+59 |
+60 | public struct TaskExecutionSummary: Codable, Equatable, Sendable {
+   |               |- error: type 'TaskExecutionSummary' does not conform to protocol 'Equatable'
+   |               `- note: add stubs for conformance
+61 |   public let taskId: String
+62 |   public let executionId: String
+   :
+68 |   public let providerAttemptCount: Int
+69 |   public let validationExecutionCount: Int
+70 |   public let delivery: TaskDeliverySummaryResponse?
+   |              `- note: stored property type 'TaskDeliverySummaryResponse?' does not conform to protocol 'Equatable', preventing synthesized conformance of 'TaskExecutionSummary' to 'Equatable'
+71 |   public let tokenBudget: Int?
+72 |   public let recordedInputTokens: Int
+
+Swift.==:1:24: note: candidate would match if 'TaskExecutionSummary' conformed to 'RawRepresentable'
+1 | @inlinable public func == <T>(lhs: T, rhs: T) -> Bool where T : RawRepresentable, T.RawValue : Equatable
+  |                        `- note: candidate would match if 'TaskExecutionSummary' conformed to 'RawRepresentable'
+
+Swift.FloatingPoint.==:2:20: note: candidate would match if 'TaskExecutionSummary' conformed to 'FloatingPoint'
+1 | protocol FloatingPoint {
+2 | public static func == (lhs: Self, rhs: Self) -> Bool}
+  |                    `- note: candidate would match if 'TaskExecutionSummary' conformed to 'FloatingPoint'
+3 |
+
+Swift.BinaryInteger.==:2:20: note: candidate would match if 'TaskExecutionSummary' conformed to 'BinaryInteger'
+1 | protocol BinaryInteger {
+2 | public static func == <Other>(lhs: Self, rhs: Other) -> Bool where Other : BinaryInteger}
+  |                    `- note: candidate would match if 'TaskExecutionSummary' conformed to 'BinaryInteger'
+3 |
+
+Swift._Pointer.==:2:20: note: candidate would match if 'TaskExecutionSummary' conformed to '_Pointer'
+1 | protocol _Pointer {
+2 | public static func == (lhs: Self, rhs: Self) -> Bool}
+  |                    `- note: candidate would match if 'TaskExecutionSummary' conformed to '_Pointer'
+3 |
+
+Swift._Pointer.==:2:31: note: candidate would match if 'TaskExecutionSummary' conformed to '_Pointer'
+1 | protocol _Pointer {
+2 | @inlinable public static func == <Other>(lhs: Self, rhs: Other) -> Bool where Other : _Pointer}
+  |                               `- note: candidate would match if 'TaskExecutionSummary' conformed to '_Pointer'
+3 |
+
+Swift.Strideable.==:2:31: note: candidate would match if 'TaskExecutionSummary' conformed to 'Strideable'
+1 | protocol Strideable {
+2 | @inlinable public static func == (x: Self, y: Self) -> Bool}
+  |                               `- note: candidate would match if 'TaskExecutionSummary' conformed to 'Strideable'
+3 |
+
+Swift.StringProtocol.==:2:31: note: candidate would match if 'TaskExecutionSummary' conformed to 'StringProtocol'
+1 | protocol StringProtocol {
+2 | @inlinable public static func == <RHS>(lhs: Self, rhs: RHS) -> Bool where RHS : StringProtocol}
+  |                               `- note: candidate would match if 'TaskExecutionSummary' conformed to 'StringProtocol'
+3 |
+
+Swift.SIMD.==:2:20: note: candidate would match if 'TaskExecutionSummary' conformed to 'SIMD'
+1 | protocol SIMD {
+2 | public static func == (a: Self, b: Self) -> Bool}
+  |                    `- note: candidate would match if 'TaskExecutionSummary' conformed to 'SIMD'
+3 |
+
+Foundation.AttributedStringProtocol.==:2:20: note: candidate would match if 'TaskExecutionSummary' conformed to 'AttributedStringProtocol'
+1 | protocol AttributedStringProtocol {
+2 | public static func == <RHS>(lhs: Self, rhs: RHS) -> Bool where RHS : AttributedStringProtocol}
+  |                    `- note: candidate would match if 'TaskExecutionSummary' conformed to 'AttributedStringProtocol'
+3 |
+
+Foundation._BridgedStoredNSError.==:2:20: note: candidate would match if 'TaskExecutionSummary' conformed to '_BridgedStoredNSError'
+1 | protocol _BridgedStoredNSError {
+2 | public static func == (lhs: Self, rhs: Self) -> Bool}
+  |                    `- note: candidate would match if 'TaskExecutionSummary' conformed to '_BridgedStoredNSError'
+3 |
+
+CoreFoundation._CFObject.==:2:20: note: candidate would match if 'TaskExecutionSummary' conformed to '_CFObject'
+1 | protocol _CFObject {
+2 | public static func == (left: Self, right: Self) -> Bool}
+  |                    `- note: candidate would match if 'TaskExecutionSummary' conformed to '_CFObject'
+3 |
+
+Swift.Equatable.==:2:13: note: protocol requires function '==' with type '(TaskExecutionSummary, TaskExecutionSummary) -> Bool'
+1 | protocol Equatable {
+2 | static func == (lhs: Self, rhs: Self) -> Bool}
+  |             `- note: protocol requires function '==' with type '(TaskExecutionSummary, TaskExecutionSummary) -> Bool'
+3 |
+[7/10] Compiling AutopodClient PodCostBreakdownResponse.swift
+/private/tmp/autopod-durable-execution/packages/desktop/Sources/AutopodClient/Types/PodCostBreakdownResponse.swift:60:15: error: type 'TaskExecutionSummary' does not conform to protocol 'Equatable'
+58 | }
+59 |
+60 | public struct TaskExecutionSummary: Codable, Equatable, Sendable {
+   |               |- error: type 'TaskExecutionSummary' does not conform to protocol 'Equatable'
+   |               `- note: add stubs for conformance
+61 |   public let taskId: String
+62 |   public let executionId: String
+   :
+68 |   public let providerAttemptCount: Int
+69 |   public let validationExecutionCount: Int
+70 |   public let delivery: TaskDeliverySummaryResponse?
+   |              `- note: stored property type 'TaskDeliverySummaryResponse?' does not conform to protocol 'Equatable', preventing synthesized conformance of 'TaskExecutionSummary' to 'Equatable'
+71 |   public let tokenBudget: Int?
+72 |   public let recordedInputTokens: Int
+
+Swift.==:1:24: note: candidate would match if 'TaskExecutionSummary' conformed to 'RawRepresentable'
+1 | @inlinable public func == <T>(lhs: T, rhs: T) -> Bool where T : RawRepresentable, T.RawValue : Equatable
+  |                        `- note: candidate would match if 'TaskExecutionSummary' conformed to 'RawRepresentable'
+
+Swift.FloatingPoint.==:2:20: note: candidate would match if 'TaskExecutionSummary' conformed to 'FloatingPoint'
+1 | protocol FloatingPoint {
+2 | public static func == (lhs: Self, rhs: Self) -> Bool}
+  |                    `- note: candidate would match if 'TaskExecutionSummary' conformed to 'FloatingPoint'
+3 |
+
+Swift.BinaryInteger.==:2:20: note: candidate would match if 'TaskExecutionSummary' conformed to 'BinaryInteger'
+1 | protocol BinaryInteger {
+2 | public static func == <Other>(lhs: Self, rhs: Other) -> Bool where Other : BinaryInteger}
+  |                    `- note: candidate would match if 'TaskExecutionSummary' conformed to 'BinaryInteger'
+3 |
+
+Swift._Pointer.==:2:20: note: candidate would match if 'TaskExecutionSummary' conformed to '_Pointer'
+1 | protocol _Pointer {
+2 | public static func == (lhs: Self, rhs: Self) -> Bool}
+  |                    `- note: candidate would match if 'TaskExecutionSummary' conformed to '_Pointer'
+3 |
+
+Swift._Pointer.==:2:31: note: candidate would match if 'TaskExecutionSummary' conformed to '_Pointer'
+1 | protocol _Pointer {
+2 | @inlinable public static func == <Other>(lhs: Self, rhs: Other) -> Bool where Other : _Pointer}
+  |                               `- note: candidate would match if 'TaskExecutionSummary' conformed to '_Pointer'
+3 |
+
+Swift.Strideable.==:2:31: note: candidate would match if 'TaskExecutionSummary' conformed to 'Strideable'
+1 | protocol Strideable {
+2 | @inlinable public static func == (x: Self, y: Self) -> Bool}
+  |                               `- note: candidate would match if 'TaskExecutionSummary' conformed to 'Strideable'
+3 |
+
+Swift.StringProtocol.==:2:31: note: candidate would match if 'TaskExecutionSummary' conformed to 'StringProtocol'
+1 | protocol StringProtocol {
+2 | @inlinable public static func == <RHS>(lhs: Self, rhs: RHS) -> Bool where RHS : StringProtocol}
+  |                               `- note: candidate would match if 'TaskExecutionSummary' conformed to 'StringProtocol'
+3 |
+
+Swift.SIMD.==:2:20: note: candidate would match if 'TaskExecutionSummary' conformed to 'SIMD'
+1 | protocol SIMD {
+2 | public static func == (a: Self, b: Self) -> Bool}
+  |                    `- note: candidate would match if 'TaskExecutionSummary' conformed to 'SIMD'
+3 |
+
+Foundation.AttributedStringProtocol.==:2:20: note: candidate would match if 'TaskExecutionSummary' conformed to 'AttributedStringProtocol'
+1 | protocol AttributedStringProtocol {
+2 | public static func == <RHS>(lhs: Self, rhs: RHS) -> Bool where RHS : AttributedStringProtocol}
+  |                    `- note: candidate would match if 'TaskExecutionSummary' conformed to 'AttributedStringProtocol'
+3 |
+
+Foundation._BridgedStoredNSError.==:2:20: note: candidate would match if 'TaskExecutionSummary' conformed to '_BridgedStoredNSError'
+1 | protocol _BridgedStoredNSError {
+2 | public static func == (lhs: Self, rhs: Self) -> Bool}
+  |                    `- note: candidate would match if 'TaskExecutionSummary' conformed to '_BridgedStoredNSError'
+3 |
+
+CoreFoundation._CFObject.==:2:20: note: candidate would match if 'TaskExecutionSummary' conformed to '_CFObject'
+1 | protocol _CFObject {
+2 | public static func == (left: Self, right: Self) -> Bool}
+  |                    `- note: candidate would match if 'TaskExecutionSummary' conformed to '_CFObject'
+3 |
+
+Swift.Equatable.==:2:13: note: protocol requires function '==' with type '(TaskExecutionSummary, TaskExecutionSummary) -> Bool'
+1 | protocol Equatable {
+2 | static func == (lhs: Self, rhs: Self) -> Bool}
+  |             `- note: protocol requires function '==' with type '(TaskExecutionSummary, TaskExecutionSummary) -> Bool'
+3 |
+error: fatalError

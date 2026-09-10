@@ -1,4 +1,4 @@
-export type FactArtifactChange = 'create' | 'update' | 'touch';
+export type FactArtifactChange = 'create' | 'update' | 'delete' | 'touch';
 export type FactKind =
   | 'unit-test'
   | 'integration-test'
@@ -34,7 +34,26 @@ export interface HumanReviewItem {
   reason: string;
 }
 
+/** Explicit input manifest for deterministic checks. Unversioned external state is ineligible. */
+export interface ValidationEvidenceManifest {
+  version: 1;
+  hermetic: true;
+  toolchainFiles: string[];
+  dependencyPaths: string[];
+  environmentFiles: string[];
+  environmentRevision: string;
+}
+
+export interface ExecutionRequirements {
+  version: 1;
+  /** Explicit launcher dependencies for dynamic shell commands. */
+  executables: string[];
+  minimumMemoryBytes?: number;
+  minimumCpu?: number;
+}
 export interface SpecContract {
+  executionRequirements?: ExecutionRequirements;
+  validationEvidence?: ValidationEvidenceManifest;
   contractVersion: 1;
   title: string;
   dependsOn: string[];

@@ -950,7 +950,17 @@ public struct SessionCardFinal: View {
                         .font(.caption2)
                         .foregroundStyle(.secondary)
                 }
-                if pod.isFixDeliveryFailure {
+                if pod.artifactCollectionPending {
+                    Button {
+                        Task { await actions.resume(pod.id) }
+                    } label: {
+                        Label("Resume artifact finalization", systemImage: "arrow.down.doc")
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .controlSize(.small)
+                    .help("Verify or collect the settled worker's files without starting another worker.")
+                } else if pod.isFixDeliveryFailure {
                     Text("Validated fix could not be pushed")
                         .font(.caption)
                         .foregroundStyle(.secondary)
@@ -1196,7 +1206,7 @@ public struct SessionCardFinal: View {
         VStack(alignment: .leading, spacing: 16) {
             Text("Nudge agent")
                 .font(.headline)
-            Text("Send a message to redirect the agent. Leave blank for a default nudge.")
+            Text("Send guidance to the agent. It remains pending until the worker acknowledges receipt. Leave blank for a default nudge.")
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
             TextEditor(text: $nudgeInputText)

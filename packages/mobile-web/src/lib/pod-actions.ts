@@ -11,6 +11,8 @@ import { apiFetch } from './api.js';
 export type ActionKind =
   | 'pause'
   | 'resume'
+  | 'retry'
+  | 'rework'
   | 'kill'
   | 'nudge'
   | 'approve'
@@ -66,7 +68,8 @@ const APPROVE: ActionDef = {
   kind: 'approve',
   label: 'Approve',
   tone: 'neutral',
-  optimistic: { status: 'approved' },
+  // Approval can fail after remote work; status comes from daemon evidence.
+  optimistic: null,
   promptsForText: false,
 };
 const REJECT: ActionDef = {
@@ -114,10 +117,18 @@ const FORCE_COMPLETE: ActionDef = {
   promptsForText: true,
 };
 const RESUME_FAILED: ActionDef = {
-  kind: 'resume',
+  kind: 'retry',
   label: 'Resume',
   tone: 'neutral',
   optimistic: null, // Server picks the recovery path; status follows.
+  promptsForText: false,
+};
+
+const REWORK: ActionDef = {
+  kind: 'rework',
+  label: 'Rework',
+  tone: 'warn',
+  optimistic: null,
   promptsForText: false,
 };
 
@@ -131,10 +142,29 @@ const ACTIONS_BY_STATUS: Partial<Record<PodStatus, ActionDef[]>> = {
   validating: [KILL],
   validated: [APPROVE, REJECT, KILL],
   review_required: [APPROVE, REJECT, EXTEND_ATTEMPTS, SPAWN_FIX, KILL],
-  failed: [RESUME_FAILED, UPDATE_FROM_BASE, EXTEND_PR_ATTEMPTS, SPAWN_FIX, FORCE_COMPLETE, KILL],
+  failed: [
+    RESUME_FAILED,
+    REWORK,
+    UPDATE_FROM_BASE,
+    EXTEND_PR_ATTEMPTS,
+    SPAWN_FIX,
+    FORCE_COMPLETE,
+    KILL,
+  ],
 };
 
-export function availableActions(status: PodStatus): ActionDef[] {
+export function availableActions(
+  status: PodStatus,
+  pod?: Pick<Pod, 'options' | 'finalization' | 'pendingEscalation'>,
+): ActionDef[] {
+  if (
+    status === 'failed' &&
+    pod?.options.output === 'artifact' &&
+    pod.finalization?.phase === 'preserving' &&
+    pod.finalization.agentSettledAt &&
+    !pod.pendingEscalation
+  )
+    return [{ ...RESUME_FAILED, label: 'Resume artifact finalization' }, KILL];
   return ACTIONS_BY_STATUS[status] ?? [];
 }
 
@@ -149,6 +179,12 @@ export async function runAction(podId: string, kind: ActionKind, message?: strin
       return;
     case 'kill':
       await apiFetch(`/pods/${podId}/kill`, { method: 'POST' });
+      return;
+    case 'rework':
+      await apiFetch(`/pods/${podId}/validate`, { method: 'POST' });
+      return;
+    case 'retry':
+      await apiFetch(`/pods/${podId}/resume`, { method: 'POST' });
       return;
     case 'resume':
       // No dedicated unpause endpoint — a nudge releases the paused pod.

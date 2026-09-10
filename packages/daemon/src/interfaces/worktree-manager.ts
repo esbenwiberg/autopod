@@ -1,3 +1,32 @@
+import type { RequiredFact } from '@autopod/shared';
+export interface ContractBaseEvidence {
+  baseCommitSha: string;
+  artifacts: Array<{ path: string; exists: boolean }>;
+}
+/** Evidence for one observed publication of committed source; not a PR merge receipt. */
+export interface BranchPublicationReceipt {
+  branch: string;
+  repository: string;
+  commitSha: string;
+  treeSha: string;
+  remoteRef: string;
+  observedRemoteCommitSha: string;
+  worktreeClean: true;
+  observedAt: string;
+}
+
+export type BranchPublicationSource = Omit<
+  BranchPublicationReceipt,
+  'observedAt' | 'observedRemoteCommitSha'
+>;
+export interface BranchPublicationOptions {
+  expectedRepository?: string;
+  force?: boolean;
+  pat?: string;
+  /** Synchronous durable admission; throwing prevents the external push. */
+  onPrepared?: (source: BranchPublicationSource) => void;
+}
+
 export interface WorktreeCreateConfig {
   repoUrl: string;
   branch: string;
@@ -10,7 +39,8 @@ export interface WorktreeCreateConfig {
   sessionId?: string;
 }
 
-export interface MergeBranchConfig {
+export interface MergeBranchConfig
+  extends Pick<BranchPublicationOptions, 'expectedRepository' | 'onPrepared'> {
   worktreePath: string;
   targetBranch: string;
   /** PAT to use for the push — overrides the in-memory cache. Required when the cache may be cold (e.g. after a daemon restart). */
@@ -172,6 +202,22 @@ export interface PushArtifactBranchConfig {
 }
 
 export interface WorktreeManager {
+  /** Read-only local source identity for recovery; unavailable adapters cannot authorize cleanup. */
+  inspectSource?(
+    worktreePath: string,
+    expectedBranch: string,
+  ): Promise<{
+    branch: string;
+    commitSha: string;
+    treeSha: string;
+    worktreeClean: boolean;
+  }>;
+
+  inspectContractBase(
+    worktreePath: string,
+    baseBranch: string,
+    facts: RequiredFact[],
+  ): Promise<ContractBaseEvidence>;
   create(config: WorktreeCreateConfig): Promise<WorktreeResult>;
   /** Install daemon-managed commit exclusions. Throws when protection cannot be proven. */
   ensureExcludes?(worktreePath: string, entries: string[]): Promise<void>;
@@ -198,7 +244,7 @@ export interface WorktreeManager {
    * This is strict because safety gates must not treat an unresolved base as an empty change set.
    */
   getChangedPathsAgainstBase?(worktreePath: string, baseBranch: string): Promise<string[]>;
-  mergeBranch(config: MergeBranchConfig): Promise<void>;
+  mergeBranch(config: MergeBranchConfig): Promise<BranchPublicationReceipt> | Promise<void>;
   /** Get raw diff between current HEAD and a base branch (or a specific commit). */
   getDiff(
     worktreePath: string,
@@ -239,12 +285,12 @@ export interface WorktreeManager {
     podModel: string,
     options?: CommitPendingChangesOptions,
   ): Promise<boolean>;
-  /** Push the current branch to origin. Verifies HEAD is on `expectedBranch` before pushing. */
+  /** Publish a captured commit and verify unchanged clean source and exact remote ref. Legacy adapters return no receipt. */
   pushBranch(
     worktreePath: string,
     expectedBranch: string,
-    options?: { force?: boolean; pat?: string },
-  ): Promise<void>;
+    options?: BranchPublicationOptions,
+  ): Promise<BranchPublicationReceipt> | Promise<void>;
   /**
    * Ensure origin has `branch`, publishing an existing local ref when it does not.
    * Unlike `pushBranch`, this does not require the worktree HEAD to be on that branch.

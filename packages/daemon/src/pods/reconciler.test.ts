@@ -5,6 +5,7 @@ import type { Pod } from '@autopod/shared';
 import pino from 'pino';
 import { describe, expect, it, vi } from 'vitest';
 import type { SandboxContainerManager } from '../containers/sandbox-container-manager.js';
+import { createTestContext } from '../test-utils/mock-helpers.js';
 import type { EventBus } from './event-bus.js';
 import type { PodRepository } from './pod-repository.js';
 import { reconcileSandboxSessions } from './reconciler.js';
@@ -35,6 +36,9 @@ function buildDeps(
   const pod = makePod(overrides);
   const updates: Array<Partial<Pod>> = [];
   const podRepo = {
+    taskExecutions: { assertCanDelete: vi.fn() },
+    deletionOwnership: { assertTaskAvailable: vi.fn() },
+    getOrThrow: vi.fn(() => pod),
     list: vi.fn(({ status }: { status: Pod['status'] }) => (pod.status === status ? [pod] : [])),
     update: vi.fn((_podId: string, changes: Partial<Pod>) => {
       updates.push(changes);
@@ -67,6 +71,100 @@ function buildDeps(
 }
 
 describe('reconcileSandboxSessions', () => {
+  it('retains a durable worker claim before inspecting or mutating its sandbox after restart', async () => {
+    const ctx = createTestContext();
+    const deps = buildDeps('running');
+    try {
+      ctx.podRepo.insert({
+        id: 'pod-1',
+        profileName: 'test-profile',
+        task: 'Preserve unresolved sandbox worker',
+        status: 'running',
+        model: 'model',
+        runtime: 'copilot',
+        executionTarget: 'sandbox',
+        branch: 'retained',
+        userId: 'operator',
+        maxValidationAttempts: 3,
+        skipValidation: false,
+        outputMode: 'pr',
+      });
+      ctx.podRepo.update('pod-1', {
+        containerId: 'original-sandbox',
+        worktreePath: '/tmp/retained',
+      });
+      ctx.podRepo.taskExecutions?.beginRun('pod-1', 1, 1, {
+        runtime: 'copilot',
+        model: 'model',
+        providerAccountId: null,
+      });
+      await reconcileSandboxSessions({ ...deps, podRepo: ctx.podRepo, logger });
+      expect(deps.sandboxContainerManager.getStatus).not.toHaveBeenCalled();
+      expect(deps.preserveWorkspace).not.toHaveBeenCalled();
+      expect(deps.quiesceSandboxAgent).not.toHaveBeenCalled();
+      expect(deps.suspendSandbox).not.toHaveBeenCalled();
+      expect(deps.enqueueSession).not.toHaveBeenCalled();
+      expect(ctx.podRepo.getOrThrow('pod-1')).toMatchObject({
+        status: 'running',
+        containerId: 'original-sandbox',
+        worktreePath: '/tmp/retained',
+        lastCorrectionMessage: expect.stringContaining('ownership remains unresolved'),
+      });
+    } finally {
+      ctx.db.close();
+    }
+  });
+
+  it.each([false, true])(
+    'retains interrupted artifact collection without resuming the sandbox (published=%s)',
+    async (published) => {
+      const deps = buildDeps('running', {
+        lifecycleGeneration: 1,
+        options: { agentMode: 'auto', output: 'artifact', validate: false },
+        containerId: published ? null : 'sandbox-1',
+        worktreePath: null,
+        artifactsPath: published ? '/saved/artifact-snapshot' : null,
+        finalization: {
+          generation: 1,
+          cycle: 1,
+          phase: 'preserving',
+          agentSettledAt: '2026-09-07T10:00:00Z',
+          result: 'Report complete',
+          pendingDecisionId: null,
+          sourcePreservedAt: published ? '2026-09-07T10:01:00Z' : null,
+        },
+      });
+      await reconcileSandboxSessions({ ...deps, logger });
+      expect(deps.pod.status).toBe('failed');
+      expect(deps.pod.containerId).toBe(published ? null : 'sandbox-1');
+      expect(deps.pod.artifactsPath).toBe(published ? '/saved/artifact-snapshot' : null);
+      expect(deps.preserveWorkspace).not.toHaveBeenCalled();
+      expect(deps.quiesceSandboxAgent).not.toHaveBeenCalled();
+      expect(deps.suspendSandbox).not.toHaveBeenCalled();
+      expect(deps.enqueueSession).not.toHaveBeenCalled();
+      expect(deps.sandboxContainerManager.start).not.toHaveBeenCalled();
+    },
+  );
+  it.each(['running', 'stopped', 'unknown', 'deleted'] as const)(
+    'retains unanswered triage when sandbox status is %s after restart',
+    async (status) => {
+      const deps = buildDeps(status, {
+        status: 'awaiting_input',
+        pendingEscalation: {
+          id: 'selection',
+          podId: 'pod-1',
+          type: 'ask_human',
+          timestamp: new Date().toISOString(),
+          payload: { question: 'Select repairs' },
+          response: null,
+        },
+      });
+      await reconcileSandboxSessions({ ...deps, logger });
+      expect(deps.pod.status).toBe('awaiting_input');
+      expect(deps.pod.pendingEscalation?.id).toBe('selection');
+      expect(deps.enqueueSession).not.toHaveBeenCalled();
+    },
+  );
   it('re-queues interrupted provisioning once with its surviving worktree', async () => {
     const worktreePath = await mkdtemp(path.join(tmpdir(), 'autopod-reconcile-'));
     const deps = buildDeps('unknown', {

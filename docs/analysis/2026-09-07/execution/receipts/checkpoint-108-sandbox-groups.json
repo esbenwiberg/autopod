@@ -1,0 +1,17 @@
+[
+  {
+    "id": "/subscriptions/06bb959b-9458-41a6-bdf5-77cc12feaab9/resourceGroups/ewi-sandboxes/providers/Microsoft.App/sandboxGroups/sandbox-group-ewi1",
+    "location": "swedencentral",
+    "name": "sandbox-group-ewi1"
+  },
+  {
+    "id": "/subscriptions/06bb959b-9458-41a6-bdf5-77cc12feaab9/resourceGroups/ewi-sandboxes/providers/Microsoft.App/sandboxGroups/autopod-spike",
+    "location": "swedencentral",
+    "name": "autopod-spike"
+  },
+  {
+    "id": "/subscriptions/06bb959b-9458-41a6-bdf5-77cc12feaab9/resourceGroups/ewi-sandboxes/providers/Microsoft.App/sandboxGroups/autopod-spike-neu",
+    "location": "northeurope",
+    "name": "autopod-spike-neu"
+  }
+]

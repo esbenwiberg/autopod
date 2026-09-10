@@ -128,3 +128,15 @@ private let _fixedDate: Date = {
     c.year = 2026; c.month = 4; c.day = 5
     return Calendar(identifier: .gregorian).date(from: c)!
 }()
+
+@Test func retainedCostRowsDoNotOfferLivePodNavigation() throws {
+    let source = #"{"podId":"deleted","profile":"original","model":null,"finalStatus":"failed","costUsd":2,"completedAt":"2026-09-08","historyArchived":true}"#.data(using: .utf8)!
+    let archived = try JSONDecoder().decode(TopPodEntry.self, from: source)
+    #expect(archived.historyArchived == true)
+    #expect(!archived.canOpenLivePod)
+    var old = try #require(JSONSerialization.jsonObject(with: source) as? [String: Any])
+    old.removeValue(forKey: "historyArchived")
+    let legacy = try JSONDecoder().decode(TopPodEntry.self, from: JSONSerialization.data(withJSONObject: old))
+    #expect(legacy.historyArchived == nil)
+    #expect(legacy.canOpenLivePod)
+}

@@ -1,0 +1,33 @@
+
+SOURCE /private/tmp/autopod-native-acceptance-110/matrix-cost3.log
+Test Case '-[NativeInteractionTests.MatrixTests testCostTree]' failed (21.316 seconds).
+** TEST FAILED **
+
+SOURCE /private/tmp/autopod-native-acceptance-110/matrix-three-green.log
+Test Case '-[NativeInteractionTests.MatrixTests testCostTree]' passed (11.324 seconds).
+Test Case '-[NativeInteractionTests.MatrixTests testDetailGuidanceDisclosure]' failed (10.956 seconds).
+Test Case '-[NativeInteractionTests.MatrixTests testIntentionalRerunRetainsRequest]' failed (40.633 seconds).
+** TEST FAILED **
+
+SOURCE /private/tmp/autopod-native-acceptance-110/matrix-five2.log
+Test Case '-[NativeInteractionTests.MatrixTests testCostTree]' passed (12.479 seconds).
+Test Case '-[NativeInteractionTests.MatrixTests testDetailGuidanceDisclosure]' passed (10.909 seconds).
+Test Case '-[NativeInteractionTests.MatrixTests testIntentionalRerunRetainsRequest]' failed (25.391 seconds).
+Test Case '-[NativeInteractionTests.MatrixTests testScanSelectionBoundary]' passed (12.362 seconds).
+Test Case '-[NativeInteractionTests.MatrixTests testValidationRetryAuthorization]' failed (43.819 seconds).
+** TEST FAILED **
+
+SOURCE /private/tmp/autopod-native-acceptance-110/matrix-actions3.log
+Test Case '-[NativeInteractionTests.MatrixTests testIntentionalRerunRetainsRequest]' failed (77.031 seconds).
+Test Case '-[NativeInteractionTests.MatrixTests testScanSelectionBoundary]' failed (36.326 seconds).
+Test Case '-[NativeInteractionTests.MatrixTests testValidationRetryAuthorization]' passed (15.637 seconds).
+** TEST FAILED **
+
+SOURCE /private/tmp/autopod-native-acceptance-110/matrix-actions5.log
+Test Case '-[NativeInteractionTests.MatrixTests testIntentionalRerunRetainsRequest]' passed (17.983 seconds).
+Test Case '-[NativeInteractionTests.MatrixTests testScanSelectionBoundary]' failed (42.294 seconds).
+** TEST FAILED **
+
+SOURCE /private/tmp/autopod-native-acceptance-110/native112-sheet-focus.log
+Test Case '-[NativeInteractionTests.MatrixTests testScanSelectionBoundary]' failed (33.863 seconds).
+** TEST FAILED **

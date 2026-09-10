@@ -1,0 +1,125 @@
+- main [ref=f1e3]:
+  - link "← Back" [ref=f1e4] [cursor=pointer]:
+    - /url: "#/"
+  - generic [ref=f1e5]:
+    - generic [ref=f1e6]: local-fixture
+    - generic [ref=f1e7]: failed
+  - heading "[Local fixture] Inspect task-wide Codex interruption allowance" [level=1] [ref=f1e8]
+  - paragraph [ref=f1e9]: local-fixture · codex · fixture-model
+  - region "Recovery details" [ref=f1e10]:
+    - heading "Recovery details" [level=2] [ref=f1e11]
+    - paragraph [ref=f1e12]: Automatic task-wide Codex interruption recovery allowance consumed; inspect retained session/results before another inner recovery.
+  - generic [ref=f1e13]:
+    - heading "Dispatch preflight" [level=2] [ref=f1e14]
+    - paragraph [ref=f1e15]: review_required · 2026-09-07T15:00:00Z
+    - paragraph [ref=f1e16]: github.com/example/repo · main
+    - paragraph [ref=f1e17]:
+      - text: "Fresh base:"
+      - code [ref=f1e18]: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+    - paragraph [ref=f1e19]:
+      - text: "Equivalent work:"
+      - link "prior-fixture" [ref=f1e20] [cursor=pointer]:
+        - /url: "#/pod/prior-fixture"
+      - text: · validated · dispatch_receipt
+    - heading "Execution environment" [level=3] [ref=f1e21]
+    - paragraph [ref=f1e22]: validation preflight blocked · generation 1 · 2026-09-07T16:30:00Z
+    - paragraph [ref=f1e23]: "Configured worker: codex CLI 0.144.4 · fixture-model"
+    - paragraph [ref=f1e24]: "Provider: fixture-provider · account: not recorded"
+    - paragraph [ref=f1e25]: "Daemon: unverified"
+    - paragraph [ref=f1e26]:
+      - text: "Image:"
+      - code [ref=f1e27]: unverified
+    - paragraph [ref=f1e28]:
+      - text: "Validation implementation:"
+      - code [ref=f1e29]: unverified
+    - paragraph [ref=f1e30]:
+      - text: "Contract:"
+      - code [ref=f1e31]: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+    - paragraph [ref=f1e32]: "Memory: unverified bytes · CPU: unverified"
+    - paragraph [ref=f1e33]: "fact:compile: dotnet · missing"
+    - paragraph [ref=f1e34]: Required launcher dotnet is missing. Reconcile the image or declared command before validation.
+    - paragraph [ref=f1e35]: Actual image digest is unverified.
+    - paragraph [ref=f1e36]: Effective memory capacity is unverified.
+    - paragraph [ref=f1e37]: To intentionally repeat this request, provide a reason. This creates a distinct task and may run a coding agent. Fresh contract, provider, and environment checks still apply.
+    - generic [ref=f1e38]:
+      - text: Reason for intentional rerun
+      - textbox "Reason for intentional rerun" [ref=f1e39]
+    - button "Create intentional rerun" [disabled] [ref=f1e40]
+  - generic [ref=f1e41]:
+    - heading "Validation retry budget" [level=2] [ref=f1e42]
+    - paragraph [ref=f1e43]: 0 executed / 0 admitted validations across this task.
+    - paragraph [ref=f1e44]: 0 / 0 automatic transient retries · 0 ms measured · 0 interrupted with unknown duration.
+    - paragraph [ref=f1e45]: "Latest outcome: none · partial telemetry."
+    - button "Refresh retry accounting" [ref=f1e46]
+  - generic [ref=f1e47]:
+    - heading "Codex recovery allowance" [level=2] [ref=f1e48]
+    - paragraph [ref=f1e49]: 1 executed / 1 admitted Codex interruption recoveries across this task.
+    - paragraph [ref=f1e50]: 1875 ms measured · 0 interrupted with unknown duration.
+    - paragraph [ref=f1e51]: One automatic inner recovery per logical task; further recoveries require recorded human authorization. Duration overlaps the enclosing agent run; usage is not counted again.
+    - paragraph [ref=f1e52]: "Latest outcome: pass · partial telemetry."
+    - paragraph [ref=f1e53]: "Available for latest recovery: Synthetic local check: inspected prior session and results before one additional inner recovery."
+    - generic [ref=f1e54]:
+      - text: Reason for one extra retry
+      - textbox "Reason for one extra retry" [ref=f1e55]
+    - button "Record one retry authorization" [disabled] [ref=f1e56]
+    - button "Resume task" [ref=f1e57]
+    - button "Refresh retry accounting" [ref=f1e58]
+  - generic [ref=f1e59]:
+    - heading "Task accounting" [level=2] [ref=f1e60]
+    - paragraph [ref=f1e61]: "Logical task: task:local-original"
+    - paragraph [ref=f1e62]: "Execution: execution:local-fixture"
+    - paragraph [ref=f1e63]: 2 pods · 3 recorded agent runs · 4 provider attempts · 5 validations
+    - paragraph [ref=f1e64]: 1 PR receipts · 1 unresolved of 2 intents
+    - paragraph [ref=f1e65]: Durable ledger only; historical PR URLs are not reconstructed receipts.
+    - paragraph [ref=f1e66]: PR disposition observations unavailable.
+    - paragraph [ref=f1e67]: Source-bound merge evidence unavailable.
+    - paragraph [ref=f1e68]: Current provider status unverified.
+    - paragraph [ref=f1e69]: "Recorded tokens: 100 / 100"
+    - paragraph [ref=f1e70]: "Stored task cost subtotal: $1.2500 · partial telemetry"
+    - paragraph [ref=f1e71]: Billing unverified; stored amounts can include estimates.
+    - paragraph [ref=f1e72]: "Known estimates: $0.5000 · 1 identified phases with unavailable cost · 1 pods with conflicting attribution"
+    - paragraph [ref=f1e73]: "local-original: Stored phase costs conflict; no proportional allocation applied."
+    - paragraph [ref=f1e74]: 2 additional cost diagnostics omitted.
+    - paragraph [ref=f1e75]: Recorded task tokens have reached the configured limit.
+    - paragraph [ref=f1e76]: Infrastructure cost unavailable
+    - button "Refresh task accounting" [ref=f1e77]
+  - generic [ref=f1e78]:
+    - heading "Validation results" [level=2] [ref=f1e79]
+    - article [ref=f1e81]:
+      - generic [ref=f1e82]:
+        - generic [ref=f1e83]:
+          - generic [ref=f1e84]: "Validation #12"
+          - generic [ref=f1e85]: Sep 7, 12:10 PM · 100 ms · Attempt 1, cycle 2
+        - generic [ref=f1e86]: pass
+      - list [ref=f1e87]:
+        - listitem [ref=f1e88]:
+          - generic [ref=f1e89]: build
+          - generic [ref=f1e90]: pass
+        - listitem [ref=f1e91]:
+          - generic [ref=f1e92]: health
+          - generic [ref=f1e93]: skip
+        - listitem [ref=f1e94]:
+          - generic [ref=f1e95]: test
+          - generic [ref=f1e96]: pass
+          - generic [ref=f1e97]: Reused local-evidence-1; executed 2026-09-07T09:00:00Z
+        - listitem [ref=f1e98]:
+          - generic [ref=f1e99]: pages (0)
+          - generic [ref=f1e100]: skip
+          - generic [ref=f1e101]: No page checks executed
+    - button "Show previous 1 attempt" [ref=f1e102] [cursor=pointer]
+  - generic [ref=f1e103]:
+    - button "Resume" [ref=f1e104] [cursor=pointer]
+    - button "Rebase + revalidate" [ref=f1e105] [cursor=pointer]
+    - button "Extend PR fixes (+3)" [ref=f1e106] [cursor=pointer]
+    - button "Spawn fix" [ref=f1e107] [cursor=pointer]
+    - button "Force complete" [ref=f1e108] [cursor=pointer]
+    - button "Kill" [ref=f1e109] [cursor=pointer]
+  - region "Task details" [ref=f1e110]:
+    - article [ref=f1e111]:
+      - generic [ref=f1e113]:
+        - generic [ref=f1e114]: Task
+        - heading "Task" [level=2] [ref=f1e115]
+        - paragraph [ref=f1e117]: "[Local fixture] Inspect task-wide Codex interruption allowance"
+  - generic [ref=f1e118]:
+    - heading "Recent activity" [level=2] [ref=f1e119]
+    - paragraph [ref=f1e120]: No activity yet.

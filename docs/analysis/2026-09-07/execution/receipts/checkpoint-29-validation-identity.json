@@ -1,0 +1,13 @@
+{
+  "head": "c1792f2fb8a824bee0476f06648919f2f2ff25ab",
+  "originMain": "2d5456edac542a99d27f12eb1dbd16e5ad8c2c2a",
+  "status": "",
+  "startedAt": "2026-09-07T19:50:25.804078+00:00",
+  "completedAt": "2026-09-07T19:52:58.965393+00:00",
+  "result": "passed",
+  "daemonTestsPassed": 4501,
+  "daemonTestsSkipped": 1,
+  "rawReceiptPath": "/private/tmp/autopod-checkpoint-29-full-validation.txt",
+  "rawReceiptSha256": "f6e45c4f38db3db379b8405c9defe0a10efbcfd5360c57767b3a8f2b25877271",
+  "normalization": "trailing whitespace and final blank lines only"
+}

@@ -1,0 +1,79 @@
+{
+  "observedAt": "2026-09-10T09:33:59.754357+00:00",
+  "id": "crooked-spider",
+  "status": "killed",
+  "error": null,
+  "summaryMarkerPresent": false,
+  "summaryKeys": [],
+  "taskAccounting": {
+    "agentRunCount": 2,
+    "providerAttemptCount": 2,
+    "recordedInputTokens": 0,
+    "recordedOutputTokens": 0,
+    "recordedCostUsd": 0,
+    "delivery": {
+      "intentCount": 0,
+      "receiptCount": 0,
+      "unresolvedCount": 0,
+      "scope": "durable-receipts-only",
+      "disposition": {
+        "openCount": 0,
+        "mergedCount": 0,
+        "closedCount": 0,
+        "unavailableCount": 0,
+        "basis": "last-recorded",
+        "liveVerified": false
+      }
+    },
+    "telemetry": "partial"
+  },
+  "provenance": {
+    "latest": {
+      "version": 1,
+      "purpose": "coding",
+      "subject": "worker",
+      "status": "checked",
+      "runtime": "codex",
+      "model": "gpt-5.6-sol",
+      "providerId": "openai",
+      "providerAccountId": "openai-private",
+      "release": {
+        "validationImplementationHash": "bf48e54c580a7774d64fdb5801536cb499766007da0fd53d6db2571e2a12b2a3",
+        "commitSha": "089442b63e5827894da40c91c764b47ff4562073",
+        "dirty": false,
+        "builtAt": "2026-09-10T08:53:21.494Z",
+        "source": "build"
+      },
+      "cliPath": "/usr/local/bin/codex",
+      "cliVersion": "0.144.4",
+      "imageDigest": null,
+      "contractHash": "74234e98afe7498fb5daf1f36ac2d78acc339464f950703b8c019892f982b90b",
+      "validationImplementationHash": "bf48e54c580a7774d64fdb5801536cb499766007da0fd53d6db2571e2a12b2a3",
+      "capabilities": {
+        "streamingExec": "supported",
+        "memoryLimitBytes": 4294967296,
+        "cpuLimit": 2,
+        "networkMode": null
+      },
+      "commands": {
+        "requirements": [],
+        "unresolvedSources": [],
+        "deferredArtifacts": [],
+        "explicitDependencies": false
+      },
+      "diagnostics": [
+        {
+          "code": "IMAGE_IDENTITY_UNAVAILABLE",
+          "detail": "Actual image digest is unverified."
+        }
+      ],
+      "id": "b2163410-35e4-44d7-8b92-5d73b89a9450",
+      "podId": "crooked-spider",
+      "taskId": "task:56fed4eb-455b-4a62-a262-0b3f70e177c7",
+      "executionId": "execution:184f5655-33b3-4741-bb0b-098b8fa10e49",
+      "generation": 2,
+      "checkedAt": "2026-09-10T09:23:02.953Z"
+    }
+  },
+  "containerId": null
+}

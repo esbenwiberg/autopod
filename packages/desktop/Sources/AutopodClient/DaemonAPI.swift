@@ -44,6 +44,10 @@ public actor DaemonAPI {
     return true
   }
 
+  public func healthSnapshot() async throws -> DaemonHealthSnapshot {
+    try await request("GET", "/health")
+  }
+
   public func version() async throws -> String {
     let res: VersionResponse = try await request("GET", "/version")
     return res.version
@@ -254,6 +258,25 @@ public actor DaemonAPI {
   /// Operator escape hatch for `failed` pods — picks the cheapest recovery path
   /// (push + open PR if validation already passed, otherwise re-run validation).
   /// Returns the action the daemon took, so the UI can confirm what happened.
+  public func getExecutionProvenance(_ id: String) async throws -> ExecutionProvenanceResponse {
+    try await request("GET", "/pods/\(id)/execution-provenance", query: ["schemaVersion": "2"])
+  }
+  public func getDispatchPreflight(_ id: String) async throws -> DispatchPreflightResponse {
+    try await request("GET", "/pods/\(id)/dispatch-preflight")
+  }
+  public func createIntentionalRerun(_ body: IntentionalRerunDraft) async throws -> SessionResponse {
+    try await request("POST", "/pods", body: encode(body))
+  }
+  public func getRerunTemplate(_ id: String) async throws -> IntentionalRerunDraft {
+    try await request("GET", "/pods/\(id)/rerun-template")
+  }
+  public func getRetryState(_ id: String, stage: String = "validation") async throws -> TaskRetryState {
+    try await request("GET", "/pods/\(id)/retry-state", query: ["stage": stage])
+  }
+  public func authorizeRetry(_ id: String, request input: TaskRetryAuthorizationRequest) async throws -> TaskRetryAuthorization {
+    try await request("POST", "/pods/\(id)/retry-authorizations", body: encode(input))
+  }
+
   public func resumePod(_ id: String) async throws -> ResumeResponse {
     try await request("POST", "/pods/\(id)/resume")
   }
@@ -827,6 +850,31 @@ public actor DaemonAPI {
     let _: EmptyResponse = try await request("DELETE", "/scheduled-job-templates/\(id)")
   }
 
+  public func listScanReportPage(_ jobId: String, before: String? = nil) async throws -> ScanReportPage {
+    return try await request("GET", "/scheduled-jobs/\(jobId)/report-page", query: before.map { ["before": $0] } ?? [:])
+  }
+  public func listScanReports(_ jobId: String) async throws -> [ScheduledScanReport] {
+    try await request("GET", "/scheduled-jobs/\(jobId)/reports")
+  }
+  public func getScanReportReview(_ id: String) async throws -> ScanReportDetail {
+    try await request("GET", "/scan-reports/\(id)/review")
+  }
+  public func getScanFindings(_ id: String, after: String? = nil) async throws -> ScanFindingPage {
+    try await request("GET", "/scan-reports/\(id)/findings", query: after.map { ["after": $0] } ?? [:])
+  }
+  public func getScanDecisions(_ id: String, before: String? = nil) async throws -> ScanDecisionPage {
+    try await request("GET", "/scan-reports/\(id)/decisions", query: before.map { ["before": $0] } ?? [:])
+  }
+  public func getScanReport(_ id: String) async throws -> ScanReportDetail {
+    try await request("GET", "/scan-reports/\(id)")
+  }
+  public func triageScanReport(_ id: String, _ body: ScanTriageRequest) async throws -> ScanTriageDecision {
+    try await request("POST", "/scan-reports/\(id)/triage", body: try encode(body))
+  }
+  public func launchScanRepair(_ reportId: String, selectionId: String) async throws -> ScanRepairDispatch {
+    try await request("POST", "/scan-reports/\(reportId)/repairs", body: try encode(["selectionId": selectionId]))
+  }
+
   public func listScheduledJobs() async throws -> [ScheduledJob] {
     try await request("GET", "/scheduled-jobs")
   }
@@ -835,7 +883,7 @@ public actor DaemonAPI {
     try await request("GET", "/scheduled-jobs/\(id)")
   }
 
-  public func runScheduledJobCatchup(_ id: String) async throws -> SessionResponse {
+  public func runScheduledJobCatchup(_ id: String) async throws -> ScheduledRunResponse {
     try await request("POST", "/scheduled-jobs/\(id)/catchup")
   }
 
@@ -855,7 +903,7 @@ public actor DaemonAPI {
     let _: EmptyResponse = try await request("DELETE", "/scheduled-jobs/\(id)")
   }
 
-  public func triggerScheduledJob(_ id: String) async throws -> SessionResponse {
+  public func triggerScheduledJob(_ id: String) async throws -> ScheduledRunResponse {
     try await request("POST", "/scheduled-jobs/\(id)/trigger")
   }
 
@@ -1181,7 +1229,8 @@ struct ForceCompleteBody: Codable {
 public struct ResumeResponse: Codable, Sendable {
   public let ok: Bool?
   /// "retry-pr" (push + open PR), "revalidate" (validation only), or
-  /// "retry-fix-delivery" (push an already-validated fix pod).
+  /// "retry-fix-delivery" (push an already-validated fix pod), or
+  /// "collect-artifacts" (copy the settled worker output without starting a worker).
   public let action: String?
 }
 

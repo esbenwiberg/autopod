@@ -4,10 +4,13 @@ import { useEffect, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { ActionBar } from '../components/ActionBar.js';
 import { ActivityList } from '../components/ActivityList.js';
+import { DispatchPreflightPanel } from '../components/DispatchPreflightPanel.js';
 import { EscalationCard } from '../components/EscalationCard.js';
 import { SkipValidationToggle } from '../components/SkipValidationToggle.js';
 import { StatusChip } from '../components/StatusChip.js';
+import { TaskExecutionPanel } from '../components/TaskExecutionPanel.js';
 import { TaskMarkdownCards } from '../components/TaskMarkdownCards.js';
+import { TaskRetryPanel } from '../components/TaskRetryPanel.js';
 import { type StoredValidation, ValidationSummary } from '../components/ValidationSummary.js';
 import { ApiError, AuthRequiredError, apiFetch } from '../lib/api.js';
 import { progressDetail, progressLabel, taskTitle } from '../lib/pod-display.js';
@@ -92,6 +95,13 @@ export function PodDetail(): JSX.Element {
   }
 
   const data = pod;
+  const recoveryNote = data.lastRecoveryTrigger ? data.lastCorrectionMessage : null;
+  const recoveryReason =
+    data.status === 'merge_pending'
+      ? data.mergeBlockReason
+      : ['failed', 'validated', 'review_required'].includes(data.status)
+        ? (data.failureReason ?? data.mergeBlockReason)
+        : null;
 
   return (
     <main>
@@ -105,10 +115,69 @@ export function PodDetail(): JSX.Element {
         {data.profileName} · {data.runtime} · {data.model}
       </p>
 
+      {recoveryReason || recoveryNote ? (
+        <section className="info-panel" aria-label="Recovery details">
+          <h2>Recovery details</h2>
+          {recoveryReason && <p>{recoveryReason}</p>}
+          {recoveryNote && recoveryNote !== recoveryReason && <p>{recoveryNote}</p>}
+        </section>
+      ) : null}
+      {data.recordDiagnostics?.length ? (
+        <section role="alert" className="error">
+          Saved evidence unavailable:{' '}
+          {data.recordDiagnostics.map((d) => `${d.field} (${d.code})`).join(', ')}. Resolve the
+          record before relying on it for an action.
+        </section>
+      ) : null}
+      {data.finalization?.agentSettledAt ? (
+        <section className="info-panel">
+          <h2>Worker settlement</h2>
+          <p>
+            Agent settled at {data.finalization.agentSettledAt}. Source preservation:{' '}
+            {data.finalization.sourcePreservedAt ?? 'not verified'}.
+          </p>
+          {data.finalization.pendingDecisionId ? (
+            <p>
+              Human decision remains unanswered. Reply to the pending question before continuation.
+            </p>
+          ) : (
+            <p>Next stage: {data.finalization.phase}.</p>
+          )}
+        </section>
+      ) : null}
+      <DispatchPreflightPanel pod={pod} />
+      {pod.options.output !== 'artifact' ? (
+        <TaskRetryPanel podId={pod.id} revision={pod.updatedAt} status={pod.status} />
+      ) : null}
+      {pod.executionTarget === 'sandbox' && (
+        <TaskRetryPanel
+          podId={pod.id}
+          revision={pod.updatedAt}
+          status={pod.status}
+          stage="sandbox_startup"
+        />
+      )}
+      {pod.runtime === 'codex' && (
+        <TaskRetryPanel
+          podId={pod.id}
+          revision={pod.updatedAt}
+          status={pod.status}
+          stage="codex_interruption"
+        />
+      )}
+      <TaskRetryPanel podId={pod.id} revision={pod.updatedAt} status={pod.status} stage="worker" />
+      <TaskExecutionPanel
+        podId={data.id}
+        revision={`${data.status}:${data.inputTokens}:${data.outputTokens}:${data.validationAttempts}`}
+      />
       <ProgressPlan pod={data} />
 
       {data.pendingEscalation ? (
-        <EscalationCard podId={data.id} escalation={data.pendingEscalation} />
+        <EscalationCard
+          key={data.pendingEscalation.id}
+          podId={data.id}
+          escalation={data.pendingEscalation}
+        />
       ) : null}
 
       <ValidationSummary result={data.lastValidationResult} history={validationHistory} />

@@ -1,0 +1,142 @@
+{
+  "scope": "Committed Git objects and local files only; no live remote or deployed-byte verification",
+  "previousNativeCommit": "0ff3d83db5e136a9450a584e6db2c772aecefe8c",
+  "trackingMainAtInspection": "cba763ba0bb3d65cb4c055e00033016ba1d5c646",
+  "native": [
+    {
+      "previous": "151_completion_journal.sql",
+      "current": "164_completion_journal.sql",
+      "sha256": "44d076ef08cc57afcef021dbe37c430fe8c8f626499e5c8b3300f8f0b4efeaf6",
+      "unchangedBytes": true
+    },
+    {
+      "previous": "152_task_executions.sql",
+      "current": "165_task_executions.sql",
+      "sha256": "c3066c398d17248565d7f7e05949eb874e27610873a8732f99f252a6401bdc62",
+      "unchangedBytes": true
+    },
+    {
+      "previous": "153_validation_phase_evidence.sql",
+      "current": "166_validation_phase_evidence.sql",
+      "sha256": "df900a78d896c5f0b7773a852528c515514df8e20d35d0822c8fd3e2efa9f978",
+      "unchangedBytes": true
+    },
+    {
+      "previous": "154_delivery_intents.sql",
+      "current": "167_delivery_intents.sql",
+      "sha256": "b9cc40fcafd675b7d3e207c6522840eaa24321062fe03de749aece31a8f22549",
+      "unchangedBytes": true
+    },
+    {
+      "previous": "155_scheduled_scan_reports.sql",
+      "current": "168_scheduled_scan_reports.sql",
+      "sha256": "f67fe636e40ca4650130f79fc2566d83748a3a8f52c81734709c311ff3fb32df",
+      "unchangedBytes": true
+    },
+    {
+      "previous": "156_task_retry_admission.sql",
+      "current": "169_task_retry_admission.sql",
+      "sha256": "9ac67324ccd7b36291305dc4db5eef2406a766224b075de9707434400518d88f",
+      "unchangedBytes": true
+    },
+    {
+      "previous": "157_dispatch_preflight.sql",
+      "current": "170_dispatch_preflight.sql",
+      "sha256": "81f306f26f6673e52484cdf6da8ebfe919a768fc8c0d42a451ec417670c35239",
+      "unchangedBytes": true
+    },
+    {
+      "previous": "158_execution_provenance.sql",
+      "current": "171_execution_provenance.sql",
+      "sha256": "5204f91c5bed4a13a377100dd9f0181b3ed514b10659846c92547933280adf21",
+      "unchangedBytes": true
+    },
+    {
+      "previous": "159_decision_recovery.sql",
+      "current": "172_decision_recovery.sql",
+      "sha256": "fd6ec563e16c9c1705154d60b7e523f2e7b53cfafef16dffd106b43da07645c8",
+      "unchangedBytes": true
+    },
+    {
+      "previous": "160_source_publications.sql",
+      "current": "173_source_publications.sql",
+      "sha256": "c5d33c3fd4d42a1b783fb9999c2aefe80887864fb411a6c8f7420ada9cb3f09e",
+      "unchangedBytes": true
+    },
+    {
+      "previous": "161_merge_journal.sql",
+      "current": "174_merge_journal.sql",
+      "sha256": "b4dccfffc704c18779397b65967ec6c0338a353c8a5163a61843257ae2d7aa8e",
+      "unchangedBytes": true
+    },
+    {
+      "previous": "162_merge_disposition.sql",
+      "current": "175_merge_disposition.sql",
+      "sha256": "1fc54e35c6158d5e9140a3561600ddb2e0435d523caa9ad43eaf6105db3ea009",
+      "unchangedBytes": true
+    },
+    {
+      "previous": "163_merge_status_observations.sql",
+      "current": "176_merge_status_observations.sql",
+      "sha256": "6a6029334359cb5322348a17ba8e4379a4f1fe7dcf39c1f98a05966a8ea6eb06",
+      "unchangedBytes": true
+    }
+  ],
+  "managed": [
+    {
+      "file": "142_managed_artifact_exports.sql",
+      "sha256": "6ecb43078581d2e80f01b70c48d964a6e6e98cfd49613d5994daab999a273173",
+      "unchangedBytes": true
+    },
+    {
+      "file": "143_managed_pods.sql",
+      "sha256": "66645b2c981bf98af521895edd0723a6a754566837691bd2966956b51a14d949",
+      "unchangedBytes": true
+    },
+    {
+      "file": "144_managed_provider_allowances.sql",
+      "sha256": "57e8beee61e866ba573c19d3eda71dabec389a69f7376d4d171edf6717cb2db5",
+      "unchangedBytes": true
+    },
+    {
+      "file": "145_managed_events_controls.sql",
+      "sha256": "a4bc512abdf8ba501a7bb94b8e9dbbc192e07dde30e1b4955fcb24d0a61955c2",
+      "unchangedBytes": true
+    },
+    {
+      "file": "146_managed_results.sql",
+      "sha256": "43d58deb44e4908d27a5409ad2b0e2bb52607903bf1280e5be2e1bfb01164c7e",
+      "unchangedBytes": true
+    },
+    {
+      "file": "147_managed_inputs.sql",
+      "sha256": "5382b47c53c10261aad10e8d739623554ebc89a9fd6d12fa173be0ae09829a78",
+      "unchangedBytes": true
+    },
+    {
+      "file": "148_managed_source.sql",
+      "sha256": "5b42b890005c1189dc1afb99fe179b6d83ad4a1b2e933a595dd8ad07285d359e",
+      "unchangedBytes": true
+    },
+    {
+      "file": "149_managed_sandbox_allocations.sql",
+      "sha256": "20a6c8fccfff200c1d7637e159407992863afd5f9720bed2fe2874fd9e87c49c",
+      "unchangedBytes": true
+    },
+    {
+      "file": "150_managed_workspaces.sql",
+      "sha256": "b337ca08c4a99ddb9b5045a3881d32e69adb1802412421e558f93f19fd6c280a",
+      "unchangedBytes": true
+    },
+    {
+      "file": "151_managed_provider_requests.sql",
+      "sha256": "733bcc0e3436e32424130e4cbecbbc58c484cb93461eee8ab60786b9159cf8dc",
+      "unchangedBytes": true
+    },
+    {
+      "file": "152_managed_request_usage.sql",
+      "sha256": "3088facee7ec5f0c06796a26ab0f5c2c2da00df5e9b1ac141200e18686c48094",
+      "unchangedBytes": true
+    }
+  ]
+}

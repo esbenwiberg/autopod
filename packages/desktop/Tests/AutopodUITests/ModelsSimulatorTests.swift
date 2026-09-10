@@ -22,6 +22,9 @@ private func makeModel(
     PerModelAggregate(
         model: name,
         podCount: podCount,
+        providerAttemptCount: nil,
+        completedAttemptCount: nil,
+        deliveredPrCount: completeCount,
         completeCount: completeCount,
         killedCount: 0,
         failedCount: 0,

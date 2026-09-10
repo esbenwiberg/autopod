@@ -1,0 +1,130 @@
+- main [ref=e3]:
+  - link "← Back" [ref=e4] [cursor=pointer]:
+    - /url: "#/"
+  - generic [ref=e5]:
+    - generic [ref=e6]: local-fixture
+    - generic [ref=e7]: failed
+  - heading "[Local fixture] Retained completion with unverified termination" [level=1] [ref=e8]
+  - paragraph [ref=e9]: local-fixture · codex · fixture-model
+  - region "Recovery details" [ref=e10]:
+    - heading "Recovery details" [level=2] [ref=e11]
+    - paragraph [ref=e12]: Codex execution termination is unverified; retain completion and source, and reconcile before validation or another execution.
+  - alert [ref=e13]: "Saved evidence unavailable: lastValidationResult (invalid_json). Resolve the record before relying on it for an action."
+  - generic [ref=e14]:
+    - heading "Dispatch preflight" [level=2] [ref=e15]
+    - paragraph [ref=e51]: review_required · 2026-09-07T15:00:00Z
+    - paragraph [ref=e52]: github.com/example/repo · main
+    - paragraph [ref=e53]:
+      - text: "Fresh base:"
+      - code [ref=e54]: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+    - paragraph [ref=e55]:
+      - text: "Equivalent work:"
+      - link "prior-fixture" [ref=e56] [cursor=pointer]:
+        - /url: "#/pod/prior-fixture"
+      - text: · validated · dispatch_receipt
+    - heading "Execution environment" [level=3] [ref=e17]
+    - paragraph [ref=e57]: validation preflight blocked · generation 1 · 2026-09-07T16:30:00Z
+    - paragraph [ref=e58]: "Configured worker: codex CLI 0.144.4 · fixture-model"
+    - paragraph [ref=e59]: "Provider: fixture-provider · account: not recorded"
+    - paragraph [ref=e60]: "Daemon: unverified"
+    - paragraph [ref=e61]:
+      - text: "Image:"
+      - code [ref=e62]: unverified
+    - paragraph [ref=e63]:
+      - text: "Validation implementation:"
+      - code [ref=e64]: unverified
+    - paragraph [ref=e65]:
+      - text: "Contract:"
+      - code [ref=e66]: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+    - paragraph [ref=e67]: "Memory: unverified bytes · CPU: unverified"
+    - paragraph [ref=e68]: "fact:compile: dotnet · missing"
+    - paragraph [ref=e69]: Required launcher dotnet is missing. Reconcile the image or declared command before validation.
+    - paragraph [ref=e70]: Actual image digest is unverified.
+    - paragraph [ref=e71]: Effective memory capacity is unverified.
+    - paragraph [ref=e19]: To intentionally repeat this request, provide a reason. This creates a distinct task and may run a coding agent. Fresh contract, provider, and environment checks still apply.
+    - generic [ref=e20]:
+      - text: Reason for intentional rerun
+      - textbox "Reason for intentional rerun" [ref=e21]
+    - button "Create intentional rerun" [disabled] [ref=e22]
+  - generic [ref=e23]:
+    - heading "Validation retry budget" [level=2] [ref=e24]
+    - paragraph [ref=e72]: 3 executed / 4 admitted validations across this task.
+    - paragraph [ref=e73]: 2 / 2 automatic transient retries · 1875 ms measured · 1 interrupted with unknown duration.
+    - paragraph [ref=e74]: "Latest outcome: unknown · partial telemetry."
+    - generic [ref=e75]:
+      - text: Reason for one extra retry
+      - textbox "Reason for one extra retry" [ref=e76]
+    - button "Record one retry authorization" [disabled] [ref=e77]
+    - button "Resume validation" [ref=e78]
+    - button "Refresh retry accounting" [ref=e25]
+  - generic [ref=e26]:
+    - heading "Codex recovery allowance" [level=2] [ref=e27]
+    - paragraph [ref=e79]: 3 executed / 4 admitted Codex interruption recoveries across this task.
+    - paragraph [ref=e80]: 1875 ms measured · 1 interrupted with unknown duration.
+    - paragraph [ref=e81]: One automatic inner recovery per logical task; further recoveries require recorded human authorization. Duration overlaps the enclosing agent run; usage is not counted again.
+    - paragraph [ref=e82]: "Latest outcome: unknown · partial telemetry."
+    - generic [ref=e83]:
+      - text: Reason for one extra retry
+      - textbox "Reason for one extra retry" [ref=e84]
+    - button "Record one retry authorization" [disabled] [ref=e85]
+    - button "Resume task" [ref=e86]
+    - button "Refresh retry accounting" [ref=e28]
+  - generic [ref=e29]:
+    - heading "Task accounting" [level=2] [ref=e30]
+    - paragraph [ref=e87]: "Logical task: task:local-original"
+    - paragraph [ref=e88]: "Execution: execution:local-fixture"
+    - paragraph [ref=e89]: 2 pods · 3 recorded agent runs · 4 provider attempts · 5 validations
+    - paragraph [ref=e90]: 1 PR receipts · 1 unresolved of 2 intents
+    - paragraph [ref=e91]: Durable ledger only; historical PR URLs are not reconstructed receipts.
+    - paragraph [ref=e92]: PR disposition observations unavailable.
+    - paragraph [ref=e93]: Source-bound merge evidence unavailable.
+    - paragraph [ref=e94]: Current provider status unverified.
+    - paragraph [ref=e95]: "Recorded tokens: 100 / 100"
+    - paragraph [ref=e96]: "Stored task cost subtotal: $1.2500 · partial telemetry"
+    - paragraph [ref=e97]: Billing unverified; stored amounts can include estimates.
+    - paragraph [ref=e98]: "Known estimates: $0.5000 · 1 identified phases with unavailable cost · 1 pods with conflicting attribution"
+    - paragraph [ref=e99]: "local-original: Stored phase costs conflict; no proportional allocation applied."
+    - paragraph [ref=e100]: 2 additional cost diagnostics omitted.
+    - paragraph [ref=e101]: Recorded task tokens have reached the configured limit.
+    - paragraph [ref=e102]: Infrastructure cost unavailable
+    - button "Refresh task accounting" [ref=e32]
+  - generic [ref=e103]:
+    - heading "Validation results" [level=2] [ref=e104]
+    - article [ref=e106]:
+      - generic [ref=e107]:
+        - generic [ref=e108]:
+          - generic [ref=e109]: "Validation #12"
+          - generic [ref=e110]: Sep 7, 12:10 PM · 100 ms · Attempt 1, cycle 2
+        - generic [ref=e111]: pass
+      - list [ref=e112]:
+        - listitem [ref=e113]:
+          - generic [ref=e114]: build
+          - generic [ref=e115]: pass
+        - listitem [ref=e116]:
+          - generic [ref=e117]: health
+          - generic [ref=e118]: skip
+        - listitem [ref=e119]:
+          - generic [ref=e120]: test
+          - generic [ref=e121]: pass
+          - generic [ref=e122]: Reused local-evidence-1; executed 2026-09-07T09:00:00Z
+        - listitem [ref=e123]:
+          - generic [ref=e124]: pages (0)
+          - generic [ref=e125]: skip
+          - generic [ref=e126]: No page checks executed
+    - button "Show previous 1 attempt" [ref=e127] [cursor=pointer]
+  - generic [ref=e33]:
+    - button "Resume" [ref=e34] [cursor=pointer]
+    - button "Rebase + revalidate" [ref=e35] [cursor=pointer]
+    - button "Extend PR fixes (+3)" [ref=e36] [cursor=pointer]
+    - button "Spawn fix" [ref=e37] [cursor=pointer]
+    - button "Force complete" [ref=e38] [cursor=pointer]
+    - button "Kill" [ref=e39] [cursor=pointer]
+  - region "Task details" [ref=e40]:
+    - article [ref=e41]:
+      - generic [ref=e43]:
+        - generic [ref=e44]: Task
+        - heading "Task" [level=2] [ref=e45]
+        - paragraph [ref=e47]: "[Local fixture] Retained completion with unverified termination"
+  - generic [ref=e48]:
+    - heading "Recent activity" [level=2] [ref=e49]
+    - paragraph [ref=e50]: No activity yet.

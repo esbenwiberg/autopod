@@ -1,5 +1,10 @@
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import Database from 'better-sqlite3';
 import { describe, expect, it } from 'vitest';
 import { createTestDb, insertTestProfile } from '../test-utils/mock-helpers.js';
+import { createPodRepository } from './pod-repository.js';
 import { createProviderAttemptRepository } from './provider-attempt-repository.js';
 
 function seedPod(db: ReturnType<typeof createTestDb>, id = 'attempt-pod'): void {
@@ -17,6 +22,102 @@ function seedPod(db: ReturnType<typeof createTestDb>, id = 'attempt-pod'): void 
 }
 
 describe('provider attempt repository', () => {
+  it.each(['update', 'close'] as const)(
+    'rejects stale ordinal %s without changing a replacement attempt',
+    (operation) => {
+      const seed = createTestDb();
+      seedPod(seed);
+      const directory = mkdtempSync(join(tmpdir(), 'provider-ownership-'));
+      const filename = join(directory, 'state.db');
+      writeFileSync(filename, seed.serialize());
+      seed.close();
+      const db = new Database(filename);
+      const secondConnection = new Database(filename);
+      try {
+        const repository = createProviderAttemptRepository(db);
+        const input = {
+          podId: 'attempt-pod',
+          provider: 'max' as const,
+          providerAccountId: 'claude-max',
+          runtime: 'claude' as const,
+          model: 'opus',
+          profileReference: 'pod:attempt-pod@profile-snapshot#abcdef1',
+          profileSnapshot: { name: 'test-profile' },
+        };
+        const first = repository.open(input);
+        repository.close(input.podId, {
+          nativeSessionId: null,
+          outcome: 'aborted',
+          inputTokens: 2,
+          outputTokens: 1,
+          costUsd: 0.1,
+        });
+        const replacementRepository = createProviderAttemptRepository(secondConnection);
+        const replacement = replacementRepository.open(input);
+        const before = replacementRepository.listRaw(input.podId);
+        const stale = {
+          expectedOrdinal: first.ordinal,
+          nativeSessionId: 'stale-session',
+          inputTokens: 100,
+          outputTokens: 50,
+          costUsd: 2,
+        };
+        expect(() =>
+          operation === 'update'
+            ? repository.updateActive(input.podId, stale)
+            : repository.close(input.podId, { ...stale, outcome: 'completed' }),
+        ).toThrow(/superseded/i);
+        expect(replacementRepository.listRaw(input.podId)).toEqual(before);
+        expect(replacementRepository.getActive(input.podId)).toEqual(replacement);
+        expect(
+          repository.updateActive(input.podId, { ...stale, expectedOrdinal: replacement.ordinal }),
+        ).toMatchObject({ ordinal: replacement.ordinal, inputTokens: 100, costUsd: 2 });
+        expect(
+          repository.close(input.podId, {
+            ...stale,
+            expectedOrdinal: replacement.ordinal,
+            outcome: 'completed',
+          }),
+        ).toMatchObject({ ordinal: replacement.ordinal, outcome: 'completed' });
+      } finally {
+        db.close();
+        secondConnection.close();
+        rmSync(directory, { recursive: true, force: true });
+      }
+    },
+  );
+
+  it.each([0, -1, 1.5, Number.NaN, Number.POSITIVE_INFINITY, Number.MAX_SAFE_INTEGER + 1])(
+    'rejects invalid expected ordinal %s before mutating evidence',
+    (expectedOrdinal) => {
+      const db = createTestDb();
+      seedPod(db);
+      const repository = createProviderAttemptRepository(db);
+      const before = repository.open({
+        podId: 'attempt-pod',
+        provider: 'max',
+        providerAccountId: null,
+        runtime: 'claude',
+        model: 'opus',
+        profileReference: 'pod:attempt-pod@profile-snapshot#abcdef1',
+        profileSnapshot: {},
+      });
+      const update = {
+        expectedOrdinal,
+        nativeSessionId: null,
+        inputTokens: 1,
+        outputTokens: 2,
+        costUsd: 0.1,
+      };
+      expect(() => repository.updateActive('attempt-pod', update)).toThrow(/positive safe integer/);
+      expect(() => repository.close('attempt-pod', { ...update, outcome: 'completed' })).toThrow(
+        /positive safe integer/,
+      );
+      expect(repository.getActive('attempt-pod')).toEqual(before);
+      db.close();
+    },
+  );
+
   it('opens and closes an attempt with immutable identity, session, and accounting', () => {
     const db = createTestDb();
     seedPod(db);
@@ -211,7 +312,7 @@ describe('provider attempt repository', () => {
     expect(() =>
       db.prepare("DELETE FROM provider_attempts WHERE pod_id = 'attempt-pod'").run(),
     ).toThrow(/cannot be deleted directly/);
-    expect(() => db.prepare("DELETE FROM pods WHERE id = 'attempt-pod'").run()).not.toThrow();
+    expect(() => createPodRepository(db).delete('attempt-pod')).not.toThrow();
     expect(repository.list('attempt-pod')).toEqual([]);
   });
 

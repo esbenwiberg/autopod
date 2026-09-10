@@ -1,5 +1,9 @@
 import { generatePodId } from '@autopod/shared';
 import type Database from 'better-sqlite3';
+import {
+  type HistoryDiagnosticSink,
+  readRetainedHistory,
+} from '../history/retained-history-read.js';
 
 export interface ProgressEventRecord {
   id: string;
@@ -19,7 +23,11 @@ export interface ProgressEventRepository {
     currentPhase: number,
     totalPhases: number,
   ): void;
-  listBySession(podId: string): ProgressEventRecord[];
+  listBySession(
+    podId: string,
+    includeRetained?: boolean,
+    diagnostic?: HistoryDiagnosticSink,
+  ): ProgressEventRecord[];
 }
 
 export function createProgressEventRepository(db: Database.Database): ProgressEventRepository {
@@ -31,9 +39,26 @@ export function createProgressEventRepository(db: Database.Database): ProgressEv
       `).run({ id: generatePodId(), podId, phase, description, currentPhase, totalPhases });
     },
 
-    listBySession(podId): ProgressEventRecord[] {
+    listBySession(
+      podId,
+      includeRetained = false,
+      diagnostic?: HistoryDiagnosticSink,
+    ): ProgressEventRecord[] {
+      const decode = (row: Record<string, unknown>): ProgressEventRecord => ({
+        id: row.id as string,
+        podId: row.pod_id as string,
+        phase: row.phase as string,
+        description: row.description as string,
+        currentPhase: row.current_phase as number,
+        totalPhases: row.total_phases as number,
+        createdAt: row.created_at as string,
+      });
+      if (includeRetained && diagnostic)
+        return readRetainedHistory(db, 'session_progress_events', podId, decode, diagnostic);
       const rows = db
-        .prepare('SELECT * FROM session_progress_events WHERE pod_id = ? ORDER BY created_at ASC')
+        .prepare(
+          `SELECT * FROM ${includeRetained ? 'retained_session_progress_events' : 'session_progress_events'} WHERE pod_id = ? ORDER BY created_at ASC`,
+        )
         .all(podId) as Record<string, unknown>[];
       return rows.map((row) => ({
         id: row.id as string,

@@ -1,0 +1,28 @@
+
+ RUN  v4.1.11 /private/tmp/autopod-durable-execution/packages/daemon
+
+ ❯ src/pods/retained-analytics.test.ts (4 tests | 1 failed) 219ms
+   × exports healthy evidence with per-record diagnostics when retained legacy JSON is malformed or oversized 49ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/pods/retained-analytics.test.ts > exports healthy evidence with per-record diagnostics when retained legacy JSON is malformed or oversized
+SyntaxError: Expected property name or '}' in JSON at position 1 (line 1 column 2)
+ ❯ rowToStoredValidation src/pods/validation-repository.ts:39:18
+     37|     sequence: row.sequence as number,
+     38|     cycle: row.cycle as number,
+     39|     result: JSON.parse(row.result as string) as ValidationResult,
+       |                  ^
+     40|     createdAt: row.created_at as string,
+     41|   };
+ ❯ Object.getForSession src/pods/validation-repository.ts:111:19
+ ❯ Object.export src/history/history-exporter.ts:233:49
+ ❯ src/pods/retained-analytics.test.ts:130:33
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 3 passed (4)
+   Start at  21:51:03
+   Duration  662ms (transform 216ms, setup 0ms, import 336ms, tests 219ms, environment 0ms)

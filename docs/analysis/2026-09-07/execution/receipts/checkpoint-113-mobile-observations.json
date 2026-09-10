@@ -1,0 +1,62 @@
+{
+  "sourceCommit": "3aa939d5fc97cb94ea1da78e5c531a8785d91631",
+  "surface": "Built mobile PWA in Codex in-app browser via CUA; local synthetic fixture only; no phone hardware or fresh narrow viewport claim",
+  "url": "http://127.0.0.1:31995/mobile/#/pod/local-fixture",
+  "method": "Manually recorded from returned CUA accessibility trees and action results; not a raw screenshot or automated test-runner report",
+  "cases": [
+    {
+      "mode": "retry",
+      "result": "pass",
+      "steps": [
+        "Blank reason disables authorization",
+        "Resume validation displays Task-wide retry budget exhausted; record an authorized retry with a reason.",
+        "Record reason: One retry authorization recorded. Resume is a separate action.",
+        "Separate Resume: 4 executed / 5 admitted; Consumed reason; latest outcome nonretryable"
+      ],
+      "log": "receipts/checkpoint-113-mobile-acceptance.txt"
+    },
+    {
+      "mode": "dispatch",
+      "result": "pass",
+      "steps": [
+        "Blank reason disables intentional rerun",
+        "First request displays lost-response error and disables retained reason",
+        "Retry same request displays distinct same-fixture-rerun link and removes error/form"
+      ],
+      "sameRequestKeyOnBothPosts": true,
+      "log": "receipts/checkpoint-113-mobile-dispatch.txt"
+    },
+    {
+      "mode": "approval-preservation",
+      "result": "pass",
+      "steps": [
+        "Approve displays Branch preservation failed. Original resources retained; repair the branch or remote access and retry approval.",
+        "Pod remains validated and Approve remains actionable",
+        "Second Approve removes error; explicit page refresh reads complete and removes approval controls"
+      ],
+      "limit": "The fixture does not simulate a websocket; immediate live event propagation was not verified.",
+      "log": "receipts/checkpoint-113-mobile-approval.txt"
+    },
+    {
+      "mode": "unverified-termination",
+      "result": "pass",
+      "steps": [
+        "Recovery note retains source/resources until verified process termination",
+        "Resume displays refusal; failed state and unresolved worker count stay present"
+      ],
+      "log": "receipts/checkpoint-113-mobile-termination.txt"
+    },
+    {
+      "mode": "worker-deadline",
+      "result": "pass",
+      "steps": [
+        "Worker shows 1 executed / 1 admitted, 0 / 1 transient admissions and future provider deadline",
+        "Rework worker returns cooldown refusal; no permission or retry allowance consumed; counters unchanged"
+      ],
+      "limit": "This tests provider cooldown, not total task deadline expiry.",
+      "log": "receipts/checkpoint-113-mobile-deadline.txt"
+    }
+  ],
+  "fixtureIntegrityReceipt": "receipts/checkpoint-112-fixture-integrity.txt",
+  "setupFailure": "Native JSON adapter on port 31994 returned HTTP 500 for /mobile/ (it does not serve static HTML); browser navigation failed. Correct mobile static server on original port 31995 returned 200 text/html. No browser security setting was changed."
+}

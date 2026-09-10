@@ -1,0 +1,84 @@
+{
+  "applicationSource": "f93dd4d9a66bcf0a4ad174d0efc378d931239faf",
+  "headDuringExecution": "ec791bac20b5ecf0a723eeae62215bc072e560d4",
+  "applicationChangedSinceFullValidation": false,
+  "fixtureScope": "Actual native app with synthetic HTTP state and actions; no production or provider mutation",
+  "resultBundle": "/private/tmp/autopod-native-acceptance-115/final-matrix.xcresult",
+  "result": "passed",
+  "exitCode": 0,
+  "caseCount": 12,
+  "tests": [
+    {
+      "name": "testCostTree",
+      "status": "passed",
+      "seconds": 14.291
+    },
+    {
+      "name": "testDetailGuidanceDisclosure",
+      "status": "passed",
+      "seconds": 12.078
+    },
+    {
+      "name": "testFailedReplyStillRetainsDecision",
+      "status": "passed",
+      "seconds": 12.169
+    },
+    {
+      "name": "testGuidanceSendDoesNotClaimAcknowledgement",
+      "status": "passed",
+      "seconds": 15.16
+    },
+    {
+      "name": "testHistoricalDeliveryDisposition",
+      "status": "passed",
+      "seconds": 16.61
+    },
+    {
+      "name": "testIntentionalRerunRetainsRequest",
+      "status": "passed",
+      "seconds": 18.008
+    },
+    {
+      "name": "testReadinessUnavailableDoesNotApprove",
+      "status": "passed",
+      "seconds": 9.851
+    },
+    {
+      "name": "testRetainedTaskAccounting",
+      "status": "passed",
+      "seconds": 12.753
+    },
+    {
+      "name": "testScanSelectionBoundary",
+      "status": "passed",
+      "seconds": 22.349
+    },
+    {
+      "name": "testUnverifiedTerminationRefusesResume",
+      "status": "passed",
+      "seconds": 15.029
+    },
+    {
+      "name": "testValidationHistoryKeepsEarlierFailure",
+      "status": "passed",
+      "seconds": 22.547
+    },
+    {
+      "name": "testValidationRetryAuthorization",
+      "status": "passed",
+      "seconds": 20.205
+    }
+  ],
+  "testSourceSha256": "22804de7c3b952641727999f2432660f43bada8cd22981c709b6ac73b85a59e2",
+  "proxyTemplateSha256": "6f08e550226014c4630ca8a83387c44c301d309227bedd4a44d27dcd0ece8d8f",
+  "mobileFixtureSha256": "b6aac6b5260187eb25a7e6090efb70776ec9aaddc3bfd3276743116e03874536",
+  "rawLogSha256": "1d4b5022ebb90afb8902a6037490811fa82f53d13b97b57ff2a1d3c7a6153b64",
+  "limits": [
+    "Own-window screenshots do not constitute a responsive-layout audit; some long content requires scrolling.",
+    "Guidance save is not worker acknowledgement.",
+    "Unavailable delivery disposition is not current provider verification.",
+    "History fixture proves failed/pass/failed display, not historical human waiver display.",
+    "Additional complement run was interrupted and is not included."
+  ],
+  "goalComplete": false
+}

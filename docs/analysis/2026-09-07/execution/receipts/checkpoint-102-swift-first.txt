@@ -1,0 +1,87 @@
+[1/1] Compiling plugin GenerateManual
+[2/2] Compiling plugin GenerateDoccReference
+Building for debugging...
+[2/8] Write sources
+[4/8] Write swift-version--58304C5D6DBC2206.txt
+[6/11] Compiling AutopodClient ThroughputAnalyticsResponse.swift
+[7/11] Compiling AutopodClient ReliabilityAnalyticsResponse.swift
+[8/11] Emitting module AutopodClient
+[9/12] Compiling AutopodClient DaemonAPI.swift
+[10/51] Compiling AutopodUI ProfileListView.swift
+[11/51] Compiling AutopodUI CreateScheduledJobSheet.swift
+[12/51] Compiling AutopodUI EditScheduledJobSheet.swift
+[13/51] Compiling AutopodUI ScheduledJobRow.swift
+[14/51] Compiling AutopodUI ArtifactsTab.swift
+[15/51] Compiling AutopodUI DetailPanelView.swift
+[16/51] Compiling AutopodUI DiffTab.swift
+[17/51] Compiling AutopodUI EvidenceTab.swift
+[18/51] Compiling AutopodUI ScheduledJobTemplateSheet.swift
+[19/51] Compiling AutopodUI ScheduledJobsView.swift
+[20/51] Compiling AutopodUI ActivityFeedList.swift
+[21/51] Compiling AutopodUI SessionCostCard.swift
+[22/55] Emitting module AutopodUI
+[23/55] Compiling AutopodUI StatTile.swift
+[24/55] Compiling AutopodUI StatusDot.swift
+[25/55] Compiling AutopodUI MainView.swift
+[26/55] Compiling AutopodUI SidebarView.swift
+[27/55] Compiling AutopodUI TerminalTab.swift
+[28/55] Compiling AutopodUI ValidationTab.swift
+[29/55] Compiling AutopodUI FeatureDetailPanelView.swift
+[30/55] Compiling AutopodUI FeatureOverviewView.swift
+[31/55] Compiling AutopodUI AnalyticsCard.swift
+[32/55] Compiling AutopodUI AnalyticsRightPaneView.swift
+[33/55] Compiling AutopodUI AnalyticsView.swift
+[34/55] Compiling AutopodUI EscalationsDrillView.swift
+[35/55] Compiling AutopodUI SafetyDrillView.swift
+[36/55] Compiling AutopodUI ThroughputDrillView.swift
+[37/55] Compiling AutopodUI PodCardFinal.swift
+[38/55] Compiling AutopodUI CreatePodSheet.swift
+[39/55] Compiling AutopodUI HistoryView.swift
+[40/55] Compiling AutopodUI ModelsDrillView.swift
+[41/55] Compiling AutopodUI QualityDrillView.swift
+[42/55] Compiling AutopodUI ReliabilityDrillView.swift
+[43/55] Compiling AutopodUI MarkdownTab.swift
+[44/55] Compiling AutopodUI OverviewTab.swift
+[45/55] Compiling AutopodUI SummaryTab.swift
+[46/55] Compiling AutopodUI TaskStructuredView.swift
+[47/55] Compiling AutopodUI SalesPitchView.swift
+[48/55] Compiling AutopodUI LogPopover.swift
+[49/55] Compiling AutopodUI LogStreamView.swift
+[50/55] Compiling AutopodUI ProfileEditorView.swift
+[51/57] Emitting module AutopodUITests
+[52/57] Emitting module AutopodDesktop
+[52/57] Write Objects.LinkFileList
+[54/60] Compiling AutopodClientTests ThroughputAnalyticsResponseTests.swift
+[55/60] Compiling AutopodClientTests ReliabilityAnalyticsResponseTests.swift
+[56/60] Emitting module AutopodClientTests
+[56/60] Write Objects.LinkFileList
+[57/60] Linking AutopodDesktopExe
+[58/60] Applying AutopodDesktopExe
+[59/60] Linking AutopodDesktopPackageTests
+Build complete! (44.13s)
+Test Suite 'Selected tests' started at 2026-09-08 21:51:17.637.
+Test Suite 'AutopodDesktopPackageTests.xctest' started at 2026-09-08 21:51:17.643.
+Test Suite 'AutopodDesktopPackageTests.xctest' passed at 2026-09-08 21:51:17.643.
+	 Executed 0 tests, with 0 failures (0 unexpected) in 0.000 (0.000) seconds
+Test Suite 'Selected tests' passed at 2026-09-08 21:51:17.643.
+	 Executed 0 tests, with 0 failures (0 unexpected) in 0.000 (0.006) seconds
+◇ Test run started.
+↳ Testing Library Version: 1902
+↳ Target Platform: arm64e-apple-macos14.0
+◇ Test heatmapBucketingHandlesDST() started.
+◇ Test throughputDeltaDirectionDecodesAllCases() started.
+◇ Test throughputPodStatusDecodesAllCases() started.
+◇ Test throughputAnalyticsResponseDecodesMinimalPayload() started.
+◇ Test loadBearingStatusDecodesAllCases() started.
+◇ Test throughputAnalyticsResponseDecodesTruncatedCohort() started.
+◇ Test throughputAnalyticsResponseDecodesRoundTrip() started.
+◇ Test loadBearingStatusRejectsUnknownString() started.
+✔ Test throughputPodStatusDecodesAllCases() passed after 0.001 seconds.
+✔ Test loadBearingStatusDecodesAllCases() passed after 0.001 seconds.
+✔ Test throughputDeltaDirectionDecodesAllCases() passed after 0.001 seconds.
+✔ Test loadBearingStatusRejectsUnknownString() passed after 0.002 seconds.
+✔ Test heatmapBucketingHandlesDST() passed after 0.003 seconds.
+✔ Test throughputAnalyticsResponseDecodesMinimalPayload() passed after 0.003 seconds.
+✔ Test throughputAnalyticsResponseDecodesRoundTrip() passed after 0.003 seconds.
+✔ Test throughputAnalyticsResponseDecodesTruncatedCohort() passed after 0.011 seconds.
+✔ Test run with 8 tests in 0 suites passed after 0.011 seconds.

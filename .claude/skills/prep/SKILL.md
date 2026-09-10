@@ -273,7 +273,7 @@ human_review: []
 
 Allowed `kind` values: `unit-test`, `integration-test`, `contract-test`,
 `browser-test`, `typecheck`, `lint-rule`, `smoke-script`, `custom-command`.
-Allowed `artifact.change` values: `create`, `update`, `touch`. Use only those
+Allowed `artifact.change` values: `create`, `update`, `delete`, `touch`. Use only those
 exact values; never use `edit`, `modify`, or `write`.
 For web-visible behavior, prefer `browser-test` with a durable Playwright or
 equivalent browser test artifact. The worker creates/updates the proof artifact;

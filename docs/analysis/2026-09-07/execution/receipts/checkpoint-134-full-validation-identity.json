@@ -1,0 +1,14 @@
+{
+  "candidate": "089442b63e5827894da40c91c764b47ff4562073",
+  "pipelineExitCode": 0,
+  "packageTestsPassed": 6376,
+  "packageTestsSkipped": 1,
+  "standaloneNodeTestsPassed": 11,
+  "testTurboTasks": 15,
+  "testTurboCached": 13,
+  "moderateDependencyAdvisories": 1,
+  "sourceStateAtPipelineStart": "Committed product source; pending CP133 documentation only",
+  "rawLogSHA256": "aebf5f02998615855ec657a2e239d6e006d7bd6abbb54f9067c45844e3d000a7",
+  "logSHA256": "084281c7cccf1236ac8eb37034d862ca53a9cc2d4b35102df46f46feb649ec63",
+  "rawLogArchive": "checkpoint-133-full-validation-receiver.raw.txt.gz"
+}

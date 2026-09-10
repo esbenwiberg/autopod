@@ -1,0 +1,18 @@
+{
+  "scope": "Built mobile app and local synthetic read-only task-accounting responses; no provider or production execution",
+  "baseCommit": "ce7f8b9495c2630d658a36f76954c595a722bd0d",
+  "source": "Checkpoint 17 implementation, uncommitted at interaction time",
+  "url": "http://127.0.0.1:56624/mobile/#/pod/local-fixture",
+  "surface": "Codex in-app browser tab 12",
+  "observed": [
+    "Recorded tokens 15 / 100 appeared with partial telemetry and the reason that prior execution/phase accounting must be reconciled before more budgeted work.",
+    "Clicking Refresh task accounting reloaded the same subtotal and admission reason.",
+    "The pending human decision remained unanswered and its controls remained intact. No runtime or recovery action was invoked."
+  ],
+  "limitations": [
+    "The displayed fixture also contains unrelated historical validation/preflight/delivery examples.",
+    "Actual admission is proven separately by the manager and SQLite tests, not this synthetic browser flow.",
+    "Native desktop interaction and physical device acceptance remain unverified."
+  ],
+  "cleanup": "Browser closed; loopback fixture interrupted."
+}

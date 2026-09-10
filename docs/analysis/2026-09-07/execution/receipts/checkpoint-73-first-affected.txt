@@ -1,0 +1,66 @@
+
+ RUN  v4.1.11 /private/tmp/autopod-durable-execution/packages/daemon
+
+ ❯ src/runtimes/codex-runtime.test.ts (81 tests | 1 failed) 1340ms
+       × recovers live progress and proceeds to validation when the sandbox exec never exits 77ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/runtimes/codex-runtime.test.ts > CodexRuntime > resume > recovers live progress and proceeds to validation when the sandbox exec never exits
+AssertionError: expected [ { type: 'status', …(3) }, …(4) ] to deeply equal ArrayContaining{…}
+
+- Expected
++ Received
+
+- ArrayContaining [
+-   ObjectContaining {
++ [
++   {
++     "message": "Codex session ready",
++     "sessionId": "sandbox-session",
++     "timestamp": "2026-09-08T11:51:01.424Z",
++     "type": "status",
++   },
++   {
++     "message": "Codex turn started",
++     "timestamp": "2026-09-08T11:51:01.424Z",
++     "type": "status",
++   },
++   {
+      "action": "modify",
+      "path": "lib/control-plane.ts",
++     "timestamp": "2026-09-08T11:51:01.445Z",
+      "type": "file_change",
+    },
+-   ObjectContaining {
++   {
+      "result": "Recovered terminal completion.",
++     "timestamp": "2026-09-08T11:51:01.467Z",
+      "type": "complete",
+    },
+-   ObjectContaining {
++   {
+      "fatal": false,
+-     "message": StringContaining "proceeding to validation",
++     "message": "Codex exit code did not resolve; process-group termination verified. Retained completion can proceed to validation.",
++     "timestamp": "2026-09-08T11:51:01.488Z",
+      "type": "error",
+    },
+  ]
+
+ ❯ src/runtimes/codex-runtime.test.ts:2567:22
+    2565|       expect(cm.extractDirectoryFromContainer).toHaveBeenCalledTimes(3…
+    2566|       expect(handle.kill).toHaveBeenCalledOnce();
+    2567|       expect(events).toEqual(
+       |                      ^
+    2568|         expect.arrayContaining([
+    2569|           expect.objectContaining({
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed | 7 passed (8)
+      Tests  1 failed | 927 passed | 1 skipped (929)
+   Start at  13:50:59
+   Duration  32.93s (transform 3.12s, setup 0ms, import 5.25s, tests 35.26s, environment 1ms)
+

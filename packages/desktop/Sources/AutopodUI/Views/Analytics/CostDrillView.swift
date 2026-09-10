@@ -42,6 +42,13 @@ struct CostDrillView: View {
                 }
 
                 if let data = costData {
+                    Text("Cost telemetry: \(data.telemetry?.completeness ?? "unavailable"). Infrastructure cost: \(data.telemetry?.infrastructureCost ?? "unavailable").")
+                        .font(.caption).foregroundStyle(.secondary)
+                    if let diagnostics = data.telemetry?.diagnostics, !diagnostics.isEmpty {
+                        Text("Unreadable cost records: " + diagnostics.map { "\($0.podId): \($0.field)" }.joined(separator: ", "))
+                            .font(.caption).foregroundStyle(.orange)
+                    }
+                    CostEvidenceView(evidence: data.costEvidence)
                     CostPhaseBarSectionView(byPhase: data.byPhase)
                     Divider()
                     CostProfileModelSectionView(byProfileModel: data.byProfileModel)
@@ -154,7 +161,7 @@ private struct CostPhaseBarSectionView: View {
         let segments = displaySegments
         let total = segments.reduce(0.0) { $0 + $1.costUsd }
         VStack(alignment: .leading, spacing: 12) {
-            Text("Cost by Phase")
+            Text("Attributed Cost Subtotal by Phase")
                 .font(.headline)
 
             if total > 0 {
@@ -299,11 +306,12 @@ private struct CostTop10SectionView: View {
                 VStack(spacing: 0) {
                     ForEach(top10, id: \.podId) { entry in
                         Button {
-                            onSelectPod?(entry.podId)
+                            if entry.canOpenLivePod { onSelectPod?(entry.podId) }
                         } label: {
                             podRow(entry)
                         }
                         .buttonStyle(.plain)
+                        .disabled(!entry.canOpenLivePod)
 
                         if entry.podId != top10.last?.podId {
                             Divider().padding(.leading, 12)
@@ -337,7 +345,7 @@ private struct CostTop10SectionView: View {
 
             Spacer()
 
-            Text(entry.finalStatus)
+            Text(entry.historyArchived == true ? "Deleted · \(entry.finalStatus)" : entry.finalStatus)
                 .font(.system(.caption2).weight(.medium))
                 .padding(.horizontal, 5)
                 .padding(.vertical, 2)

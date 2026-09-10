@@ -1,0 +1,33 @@
+
+ RUN  v4.1.11 /private/tmp/autopod-durable-execution/packages/daemon
+
+ ❯ src/pods/completion-journal.test.ts (4 tests | 1 failed | 3 skipped) 65ms
+     × refuses escaped decision context larger than its bound without discarding the stored reply 64ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/pods/completion-journal.test.ts > durable completion journal > refuses escaped decision context larger than its bound without discarding the stored reply
+AssertionError: expected [Function] to throw an error
+
+- Expected:
+null
+
++ Received:
+undefined
+
+ ❯ src/pods/completion-journal.test.ts:89:66
+     87|       const response = '\u0000'.repeat(20_000);
+     88|       repo.completionJournal?.recordReply(pod, response, { type: 'huma…
+     89|       expect(() => repo.completionJournal?.recoveryContext(pod)).toThr…
+       |                                                                  ^
+     90|       expect(db.prepare('SELECT response FROM completion_decisions').g…
+     91|     } finally { db.close(); }
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 3 skipped (4)
+   Start at  17:49:33
+   Duration  312ms (transform 93ms, setup 0ms, import 155ms, tests 65ms, environment 0ms)
+

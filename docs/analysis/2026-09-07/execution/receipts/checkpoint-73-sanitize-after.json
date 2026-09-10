@@ -1,0 +1,10 @@
+{
+  "inputs": 29,
+  "timesMs": [1.5389169999999979, 0.18829200000000412, 0.18345899999999915],
+  "outputHashes": [
+    "a0c02a82a8c72f1cb9f60a1e86680045dfde2c5a058515e7e2b4f90651dd3895",
+    "a0c02a82a8c72f1cb9f60a1e86680045dfde2c5a058515e7e2b4f90651dd3895",
+    "a0c02a82a8c72f1cb9f60a1e86680045dfde2c5a058515e7e2b4f90651dd3895"
+  ],
+  "note": "Local sanitizer microbenchmark; identical inputs, configuration and output digest. Not validation-reuse or live-workload evidence."
+}

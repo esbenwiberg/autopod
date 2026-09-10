@@ -1,0 +1,53 @@
+{
+  "nonce": "autopod-cp127-20260910-1be967ac",
+  "mutations": false,
+  "observations": [
+    {
+      "at": "2026-09-10T05:51:58.500010+00:00",
+      "diskimages": {
+        "httpStatus": 200,
+        "total": 16,
+        "nonceMatches": 0,
+        "matchingIds": []
+      },
+      "sandboxes": {
+        "httpStatus": 200,
+        "total": 0,
+        "nonceMatches": 0,
+        "matchingIds": []
+      }
+    },
+    {
+      "at": "2026-09-10T05:52:08.785661+00:00",
+      "diskimages": {
+        "httpStatus": 200,
+        "total": 16,
+        "nonceMatches": 0,
+        "matchingIds": []
+      },
+      "sandboxes": {
+        "httpStatus": 200,
+        "total": 0,
+        "nonceMatches": 0,
+        "matchingIds": []
+      }
+    },
+    {
+      "at": "2026-09-10T05:52:19.071756+00:00",
+      "diskimages": {
+        "httpStatus": 200,
+        "total": 16,
+        "nonceMatches": 0,
+        "matchingIds": []
+      },
+      "sandboxes": {
+        "httpStatus": 200,
+        "total": 0,
+        "nonceMatches": 0,
+        "matchingIds": []
+      }
+    }
+  ],
+  "nonceAbsentAllObservations": true,
+  "result": "import_window_elapsed_no_task_resource_observed"
+}

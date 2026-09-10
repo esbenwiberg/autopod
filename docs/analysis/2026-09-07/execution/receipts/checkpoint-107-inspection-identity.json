@@ -1,0 +1,15 @@
+{
+  "authorizedBy": "User Approved after checkpoint 106 metadata proposal",
+  "startedAtUTC": "2026-09-09T04:53:56.492531+00:00",
+  "target": {
+    "id": "/subscriptions/06bb959b-9458-41a6-bdf5-77cc12feaab9/resourceGroups/ewi-sandboxes/providers/Microsoft.Compute/virtualMachines/autopod-daemon",
+    "location": "swedencentral",
+    "vmId": "3addc9bc-4812-4892-98d6-c40d5ab893c0"
+  },
+  "payloadSha256": "9667ba6c73e2c43c00906bb8fd4240720dbeeee17d29ede69cef58f0ab2cfe3a",
+  "transportScriptSha256": "9eb0a583d7110ba21c1fb5380ccb693d6911b922252c4f9ea455cb6856dbcc3b",
+  "transportOutputLimitBytes": 3500,
+  "attempt": 1,
+  "endedAtUTC": "2026-09-09T04:54:28.784372+00:00",
+  "cliExitCode": 0
+}

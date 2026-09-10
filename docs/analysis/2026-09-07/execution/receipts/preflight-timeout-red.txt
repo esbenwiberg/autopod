@@ -1,0 +1,33 @@
+
+ RUN  v4.1.10 /private/tmp/autopod-durable-execution/packages/daemon
+
+ ❯ src/pods/execution-preflight.test.ts (4 tests | 1 failed) 6ms
+   × bounds an unavailable metadata backend and preserves unknown values 3ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/pods/execution-preflight.test.ts > bounds an unavailable metadata backend and preserves unknown values
+AssertionError: expected false to be true // Object.is equality
+
+- Expected
++ Received
+
+- true
++ false
+
+ ❯ src/pods/execution-preflight.test.ts:54:21
+     52|   });
+     53|   await vi.advanceTimersByTimeAsync(15001);
+     54|   expect(completed).toBe(true);
+       |                     ^
+     55|   const result = await pending;
+     56|   expect(result.capabilities.memoryLimitBytes).toBeNull();
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 3 passed (4)
+   Start at  16:44:32
+   Duration  320ms (transform 127ms, setup 0ms, import 204ms, tests 6ms, environment 0ms)
+

@@ -1,0 +1,39 @@
+
+ RUN  v4.1.11 /private/tmp/autopod-durable-execution/packages/daemon
+
+ ❯ src/scheduled-jobs/scan-report-repository.test.ts (7 tests | 2 failed | 5 skipped) 102ms
+     × pages beyond 100 reports with stable ties and excludes newer insertions from continuation 62ms
+     × projects malformed report summaries without exporting payloads or manufacturing zero findings 39ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 2 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/scheduled-jobs/scan-report-repository.test.ts > scheduled scan reports independent of worker lifetime > pages beyond 100 reports with stable ties and excludes newer insertions from continuation
+TypeError: repo.page is not a function
+ ❯ src/scheduled-jobs/scan-report-repository.test.ts:47:23
+     45|       const ids = Array.from({ length: 121 }, (_, i) => repo.begin('jo…
+     46|       db.prepare("UPDATE scheduled_scan_reports SET created_at = '2026…
+     47|       let page = repo.page('job');
+       |                       ^
+     48|       expect(page.items).toHaveLength(20);
+     49|       expect(page.items[0]).not.toHaveProperty('collection');
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/2]⎯
+
+ FAIL  src/scheduled-jobs/scan-report-repository.test.ts > scheduled scan reports independent of worker lifetime > projects malformed report summaries without exporting payloads or manufacturing zero findings
+TypeError: repo.page is not a function
+ ❯ src/scheduled-jobs/scan-report-repository.test.ts:70:25
+     68|       const report = repo.begin('job', 'malformed-summary', policy);
+     69|       db.prepare("UPDATE scheduled_scan_reports SET collection = ?, ju…
+     70|       const page = repo.page('job');
+       |                         ^
+     71|       expect(page.items[0]).toMatchObject({ id: report.id, findingCoun…
+     72|       expect(page.items[0]?.diagnostics).toHaveLength(2);
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/2]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  2 failed | 5 skipped (7)
+   Start at  12:32:46
+   Duration  415ms (transform 138ms, setup 0ms, import 217ms, tests 102ms, environment 0ms)
+

@@ -1,0 +1,16 @@
+{
+  "reason": "Independent deployed managed schema occupies 142-150; unpublished goal migrations moved after it.",
+  "mapping": {
+    "142_completion_journal.sql": "151_completion_journal.sql",
+    "143_task_executions.sql": "152_task_executions.sql",
+    "144_validation_phase_evidence.sql": "153_validation_phase_evidence.sql",
+    "145_delivery_intents.sql": "154_delivery_intents.sql",
+    "146_scheduled_scan_reports.sql": "155_scheduled_scan_reports.sql",
+    "147_task_retry_admission.sql": "156_task_retry_admission.sql",
+    "148_dispatch_preflight.sql": "157_dispatch_preflight.sql",
+    "149_execution_provenance.sql": "158_execution_provenance.sql"
+  },
+  "managedDefinitions": "Copied byte-for-byte from the locally preserved producer schema fixture; execution code and enablement are not imported.",
+  "remoteByteVerification": "pending approved SSH inspection",
+  "experimentalDatabases": "Pre-renumbering temporary databases from this unpublished branch must be recreated; no live database from this branch was deployed."
+}

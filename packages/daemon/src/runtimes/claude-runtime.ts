@@ -5,11 +5,8 @@ import { CLAUDE_DEFAULT_MODEL, CLAUDE_REVIEWER_MODEL } from '@autopod/shared';
 import type { Logger } from 'pino';
 import type { ContainerManager, StreamingExecResult } from '../interfaces/container-manager.js';
 import { ClaudeStreamParser } from './claude-stream-parser.js';
-import {
-  awaitExitCodeBounded,
-  withIdleLivenessProbe,
-  withPostCompleteGrace,
-} from './stream-grace.js';
+import { withObservedRuntimeExit } from './observed-runtime-exit.js';
+import { withIdleLivenessProbe, withPostCompleteGrace } from './stream-grace.js';
 
 /** Path inside the container where the MCP config JSON is written. */
 const MCP_CONFIG_PATH = '/home/autopod/.autopod/mcp-config.json';
@@ -134,47 +131,35 @@ export class ClaudeRuntime implements Runtime {
     })();
 
     try {
-      yield* withPostCompleteGrace(
-        withIdleLivenessProbe(enriched, {
-          streams: [handle.stdout, handle.stderr],
-          runtimeName: 'claude-runtime',
-          podId: config.podId,
-          logger: this.logger,
-          containerManager: this.containerManager,
-          containerId: config.containerId,
-        }),
-        {
-          streams: [handle.stdout, handle.stderr],
-          runtimeName: 'claude-runtime',
-          podId: config.podId,
-          logger: this.logger,
-        },
+      const exitCode = yield* withObservedRuntimeExit(
+        withPostCompleteGrace(
+          withIdleLivenessProbe(enriched, {
+            streams: [handle.stdout, handle.stderr],
+            runtimeName: 'claude-runtime',
+            podId: config.podId,
+            logger: this.logger,
+            containerManager: this.containerManager,
+            containerId: config.containerId,
+          }),
+          {
+            streams: [handle.stdout, handle.stderr],
+            runtimeName: 'claude-runtime',
+            podId: config.podId,
+            logger: this.logger,
+          },
+        ),
+        handle.exitCode,
+        { runtimeName: 'claude-runtime', podId: config.podId, logger: this.logger },
       );
+      if (exitCode !== 0)
+        yield {
+          type: 'error',
+          timestamp: new Date().toISOString(),
+          message: `Claude process exited with code ${exitCode}`,
+          fatal: true,
+        };
     } finally {
-      this.handles.delete(config.podId);
-    }
-
-    // Bounded exit-code wait — wedged dockerd would otherwise hang us here
-    // even after the stream-grace timer destroyed stdout.
-    const exitResult = await awaitExitCodeBounded(handle.exitCode, {
-      runtimeName: 'claude-runtime',
-      podId: config.podId,
-      logger: this.logger,
-    });
-    if (exitResult.timedOut) {
-      yield {
-        type: 'error',
-        timestamp: new Date().toISOString(),
-        message: 'Claude exit code did not resolve — container may be unresponsive',
-        fatal: false,
-      };
-    } else if (exitResult.code !== 0) {
-      yield {
-        type: 'error',
-        timestamp: new Date().toISOString(),
-        message: `Claude process exited with code ${exitResult.code}`,
-        fatal: true,
-      };
+      if (this.handles.get(config.podId) === handle) this.handles.delete(config.podId);
     }
   }
 
@@ -255,36 +240,42 @@ export class ClaudeRuntime implements Runtime {
         yield event;
       }
       for (const e of stderrEvents.splice(0)) yield e;
-      if (resumeFailure.sessionNotFound) {
-        // Claude printed "No conversation found with session ID: …" and exited.
-        // Drop the stale ID from the in-memory map so any retry (or follow-up
-        // resume call before pod-manager clears the DB) doesn't reuse it, then
-        // throw so pod-manager's recovery branch falls through to a fresh
-        // spawn instead of silently completing with no work done.
-        claudeSessionIds.delete(podId);
-        throw new ResumeSessionNotFoundError(podId, claudeSessionId);
-      }
     })();
 
     try {
-      yield* withPostCompleteGrace(
-        withIdleLivenessProbe(enriched, {
-          streams: [handle.stdout, handle.stderr],
-          runtimeName: 'claude-runtime',
-          podId,
-          logger: this.logger,
-          containerManager: this.containerManager,
-          containerId,
-        }),
-        {
-          streams: [handle.stdout, handle.stderr],
-          runtimeName: 'claude-runtime',
-          podId,
-          logger: this.logger,
-        },
+      const exitCode = yield* withObservedRuntimeExit(
+        withPostCompleteGrace(
+          withIdleLivenessProbe(enriched, {
+            streams: [handle.stdout, handle.stderr],
+            runtimeName: 'claude-runtime',
+            podId,
+            logger: this.logger,
+            containerManager: this.containerManager,
+            containerId,
+          }),
+          {
+            streams: [handle.stdout, handle.stderr],
+            runtimeName: 'claude-runtime',
+            podId,
+            logger: this.logger,
+          },
+        ),
+        handle.exitCode,
+        { runtimeName: 'claude-runtime', podId: podId, logger: this.logger },
       );
+      if (resumeFailure.sessionNotFound) {
+        this.claudeSessionIds.delete(podId);
+        throw new ResumeSessionNotFoundError(podId, claudeSessionId);
+      }
+      if (exitCode !== 0)
+        yield {
+          type: 'error',
+          timestamp: new Date().toISOString(),
+          message: `Claude process exited with code ${exitCode}`,
+          fatal: true,
+        };
     } finally {
-      this.handles.delete(podId);
+      if (this.handles.get(podId) === handle) this.handles.delete(podId);
     }
   }
 

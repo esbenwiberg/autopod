@@ -1,0 +1,44 @@
+- main [ref=e3]:
+  - link "← Scan reports" [ref=e4] [cursor=pointer]:
+    - /url: "#/scan-reports"
+  - heading "Report review" [level=1] [ref=e6]
+  - generic [ref=e7]:
+    - heading "incomplete" [level=2] [ref=e8]
+    - paragraph [ref=e9]: 2026-09-07T10:00:00Z · Report completion is separate from patch delivery.
+    - paragraph [ref=e10]: main → work
+    - group [ref=e11]:
+      - generic "Exact source and files" [ref=e12]
+    - paragraph [ref=e13]: "secrets: failed · Unknown findings · Synthetic scanner failure; no clean result available."
+    - paragraph [ref=e14]: "dependencies: completed · 1 findings"
+    - paragraph [ref=e15]: "Judgment: not_requested"
+  - generic [ref=e16]:
+    - heading "Unresolved findings (2 loaded)" [level=2] [ref=e35]
+    - paragraph [ref=e18]: Includes earlier findings still awaiting resolution. Selecting a repair does not mark it fixed.
+    - generic [ref=e19]:
+      - checkbox "high · packages/example/package-lock.json Synthetic dependency finding for local interaction proof. unresolved · fixture-finding-stable-identity" [ref=e20]
+      - generic [ref=e21]:
+        - strong [ref=e22]: high · packages/example/package-lock.json
+        - text: Synthetic dependency finding for local interaction proof.
+        - generic [ref=e23]: unresolved · fixture-finding-stable-identity
+    - generic [ref=e36]:
+      - checkbox "high · packages/older/package-lock.json Earlier unresolved fixture finding, still available for human review. unresolved · later-finding-fixture" [checked] [active] [ref=e37]
+      - generic [ref=e38]:
+        - strong [ref=e39]: high · packages/older/package-lock.json
+        - text: Earlier unresolved fixture finding, still available for human review.
+        - generic [ref=e40]: unresolved · later-finding-fixture
+    - paragraph [ref=e25]: 1 / 100 findings selected. Select up to 100 findings per decision.
+    - generic [ref=e26]:
+      - text: Reason
+      - textbox "Reason" [ref=e27]
+    - generic [ref=e28]:
+      - button "Defer" [disabled] [ref=e29]
+      - button "Record resolution" [disabled] [ref=e30]
+      - button "Record repair selection" [disabled] [ref=e31]
+  - generic [ref=e32]:
+    - heading "Recorded decisions" [level=2] [ref=e33]
+    - article [ref=e41]:
+      - strong [ref=e42]: defer
+      - paragraph [ref=e43]: Earlier human decision remains recorded.
+      - paragraph [ref=e44]: 1 selected · 2026-09-06T10:00:00Z
+      - list [ref=e45]:
+        - listitem [ref=e46]: packages/older/package-lock.json

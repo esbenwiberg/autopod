@@ -18,7 +18,7 @@ public struct ThroughputSummary: Decodable, Equatable, Sendable {
     /// One entry per day in window; length always equals `days`.
     public let podsPerDaySparkline: [ThroughputSparklinePoint]
     public let podsPerDayDelta: ThroughputDelta
-    /// Mean time-to-merge in seconds, complete pods only. 0 when none in window.
+    /// Legacy wire name: mean created-to-completed elapsed seconds for complete pods, not merge timing.
     public let mttmSeconds: Double
     /// Live point-in-time count: pods with status IN ('queued','provisioning').
     public let backlog: Int
@@ -43,6 +43,7 @@ public struct ThroughputDelta: Decodable, Equatable, Sendable {
 // MARK: - Cohort
 
 public struct ThroughputCohortPod: Decodable, Equatable, Sendable {
+    public let historyArchived: Bool?
     public let podId: String
     public let profile: String
     public let status: ThroughputPodStatus

@@ -1,0 +1,22 @@
+{
+  "applicationCandidate": "4e73cd8ce88e44cdb5c2d8d0a89447b819fa5a39",
+  "localEvidenceHead": "8d9f4f5fe809df69efcf142026d3a8ff4226de7e",
+  "authorization": "User explicitly approved the checkpoint-123 replacement hosted-copy packet in this session.",
+  "packet": "checkpoint-123-transport-manifest.json",
+  "vmResourceId": "/subscriptions/06bb959b-9458-41a6-bdf5-77cc12feaab9/resourceGroups/ewi-sandboxes/providers/Microsoft.Compute/virtualMachines/autopod-daemon",
+  "vmId": "3addc9bc-4812-4892-98d6-c40d5ab893c0",
+  "serviceCwd": "/opt/autopod/releases/ca92847a/packages/daemon",
+  "snapshot": "/data/autopod/backups/1788982545717.db",
+  "snapshotBytes": 877150208,
+  "snapshotSha256": "126489a4fdc690888999dd487677774e000be00ba878b93e087d9e36c8fb28fc",
+  "scriptSha256": "0dd19a717659507fe274a508a9759adb0008cbf481b09b5d95feb0919028622a",
+  "invocationCount": 1,
+  "azureExitCode": 0,
+  "stderrBytes": 0,
+  "responseCapturedAtUTC": "2026-09-09T19:58:26.506627+00:00",
+  "responseSha256": "9f55f6d40c1016d913f6d393712de7bcc18e9e6d6eddfafd0329b6b918d0c210",
+  "acceptance": "verified_for_exact_snapshot_and_candidate",
+  "cleanup": "both isolated database and outer private package directories reported removed after owned process exit",
+  "limits": "Historical snapshot compatibility only; no active migration, deployment, fresh cutover backup, loaded-byte attestation, provider or actual-image canary claim.",
+  "goalComplete": false
+}

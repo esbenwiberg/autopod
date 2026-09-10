@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import { AutopodError, generateId } from '@autopod/shared';
 import type {
   CreateScheduledJobRequest,
@@ -5,6 +6,7 @@ import type {
   Pod,
   ScheduledJob,
   ScheduledJobTemplate,
+  ScheduledScanReport,
   UpdateScheduledJobRequest,
   UpdateScheduledJobTemplateRequest,
 } from '@autopod/shared';
@@ -34,6 +36,7 @@ export interface ScheduledJobManagerDeps {
   podManager: PodManager;
   eventBus: EventBus;
   logger: Logger;
+  scanCoordinator?: { collect(job: ScheduledJob, runKey?: string): Promise<ScheduledScanReport> };
 }
 
 export interface ScheduledJobManager {
@@ -47,9 +50,9 @@ export interface ScheduledJobManager {
   get(id: string): ScheduledJob;
   update(id: string, req: UpdateScheduledJobRequest): ScheduledJob;
   delete(id: string): void;
-  runCatchup(id: string): Promise<Pod>;
+  runCatchup(id: string): Promise<Pod | ScheduledScanReport>;
   skipCatchup(id: string): void;
-  trigger(id: string): Promise<Pod>;
+  trigger(id: string): Promise<Pod | ScheduledScanReport>;
   reconcileMissedJobs(): void;
   tick(): Promise<void>;
 }
@@ -70,7 +73,16 @@ function validateCronExpression(cronExpression: string): void {
 export function createScheduledJobManager(deps: ScheduledJobManagerDeps): ScheduledJobManager {
   const { scheduledJobRepo, scheduledJobTemplateRepo, podManager, eventBus, logger } = deps;
 
-  async function fireJob(job: ScheduledJob): Promise<Pod> {
+  async function fireJob(job: ScheduledJob, runKey: string): Promise<Pod | ScheduledScanReport> {
+    if (job.scan) {
+      if (!deps.scanCoordinator)
+        throw new AutopodError(
+          'Scheduled scan collection unavailable; no coding worker was started',
+          'SCAN_UNAVAILABLE',
+          503,
+        );
+      return deps.scanCoordinator.collect(job, runKey);
+    }
     const template = scheduledJobTemplateRepo.getOrThrow(job.templateId);
     const task = renderScheduledJobPrompt(template.prompt, template.fields, job.fieldValues);
     return podManager.createSession(
@@ -137,6 +149,7 @@ export function createScheduledJobManager(deps: ScheduledJobManagerDeps): Schedu
         profileName: req.profileName,
         task: template.prompt,
         fieldValues,
+        scan: req.scan,
         cronExpression: req.cronExpression,
         enabled: req.enabled ?? true,
         nextRunAt,
@@ -157,6 +170,7 @@ export function createScheduledJobManager(deps: ScheduledJobManagerDeps): Schedu
     update(id: string, req: UpdateScheduledJobRequest): ScheduledJob {
       const job = scheduledJobRepo.getOrThrow(id);
       const changes: Partial<ScheduledJob> = {};
+      if (req.scan !== undefined) changes.scan = req.scan;
       let template =
         req.templateId !== undefined
           ? scheduledJobTemplateRepo.getOrThrow(req.templateId)
@@ -210,7 +224,7 @@ export function createScheduledJobManager(deps: ScheduledJobManagerDeps): Schedu
       scheduledJobRepo.delete(id);
     },
 
-    async runCatchup(id: string): Promise<Pod> {
+    async runCatchup(id: string): Promise<Pod | ScheduledScanReport> {
       const job = scheduledJobRepo.getOrThrow(id);
 
       if (!job.catchupPending) {
@@ -226,13 +240,14 @@ export function createScheduledJobManager(deps: ScheduledJobManagerDeps): Schedu
         );
       }
 
-      const pod = await fireJob(job);
+      const pod = await fireJob(job, `catchup:${job.id}:${job.nextRunAt}`);
       const now = new Date().toISOString();
 
       scheduledJobRepo.update(id, {
         catchupPending: false,
         lastRunAt: now,
-        lastPodId: pod.id,
+        lastPodId: 'kind' in pod ? null : pod.id,
+        lastReportId: 'kind' in pod ? pod.id : null,
         nextRunAt: computeNextRunAt(job.cronExpression),
       });
 
@@ -252,7 +267,7 @@ export function createScheduledJobManager(deps: ScheduledJobManagerDeps): Schedu
       });
     },
 
-    async trigger(id: string): Promise<Pod> {
+    async trigger(id: string): Promise<Pod | ScheduledScanReport> {
       const job = scheduledJobRepo.getOrThrow(id);
 
       const activeCount = scheduledJobRepo.countActiveSessionsForJob(id);
@@ -264,12 +279,13 @@ export function createScheduledJobManager(deps: ScheduledJobManagerDeps): Schedu
         );
       }
 
-      const pod = await fireJob(job);
+      const pod = await fireJob(job, `manual:${job.id}:${randomUUID()}`);
       const now = new Date().toISOString();
 
       scheduledJobRepo.update(id, {
         lastRunAt: now,
-        lastPodId: pod.id,
+        lastPodId: 'kind' in pod ? null : pod.id,
+        lastReportId: 'kind' in pod ? pod.id : null,
         nextRunAt: computeNextRunAt(job.cronExpression),
       });
 
@@ -278,7 +294,8 @@ export function createScheduledJobManager(deps: ScheduledJobManagerDeps): Schedu
         timestamp: now,
         jobId: job.id,
         jobName: job.name,
-        podId: pod.id,
+        podId: 'kind' in pod ? null : pod.id,
+        ...('kind' in pod ? { reportId: pod.id } : {}),
       });
 
       return pod;
@@ -320,12 +337,13 @@ export function createScheduledJobManager(deps: ScheduledJobManagerDeps): Schedu
             continue;
           }
 
-          const pod = await fireJob(job);
+          const pod = await fireJob(job, `scheduled:${job.id}:${job.nextRunAt}`);
           const now = new Date().toISOString();
 
           scheduledJobRepo.update(job.id, {
             lastRunAt: now,
-            lastPodId: pod.id,
+            lastPodId: 'kind' in pod ? null : pod.id,
+            lastReportId: 'kind' in pod ? pod.id : null,
             nextRunAt: computeNextRunAt(job.cronExpression),
           });
 
@@ -334,10 +352,14 @@ export function createScheduledJobManager(deps: ScheduledJobManagerDeps): Schedu
             timestamp: now,
             jobId: job.id,
             jobName: job.name,
-            podId: pod.id,
+            podId: 'kind' in pod ? null : pod.id,
+            ...('kind' in pod ? { reportId: pod.id } : {}),
           });
 
-          logger.info({ jobId: job.id, podId: pod.id }, 'Scheduled job fired');
+          logger.info(
+            { jobId: job.id, ...('kind' in pod ? { reportId: pod.id } : { podId: pod.id }) },
+            'Scheduled job fired',
+          );
         } catch (err) {
           logger.error({ err, jobId: job.id }, 'Scheduled job tick error — continuing');
         }

@@ -1,0 +1,14 @@
+{
+  "date": "2026-09-07",
+  "action": "existing SSH plus sudo read-only guest metadata inspection",
+  "status": "not-executed-auto-review-rejected",
+  "reason": "Production database, backup, filesystem and sanitized log metadata export requires payload-specific egress authorization.",
+  "reviewableScript": "fixtures/read-only-guest-inspection.py",
+  "userApproval": "pending",
+  "alternativesUsed": [
+    "public authenticated read-only API refresh",
+    "fresh origin/main fetch",
+    "existing local Dispatcher deployment evidence"
+  ],
+  "nextLocalWork": "reconcile migration collision 142-150"
+}

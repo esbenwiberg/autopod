@@ -1,6 +1,8 @@
 // Types
 export type {
   ContractScenario,
+  ExecutionRequirements,
+  ValidationEvidenceManifest,
   FactArtifactChange,
   FactEvidence,
   HumanReviewItem,
@@ -28,6 +30,7 @@ export type {
   PodCostBreakdownResponse,
   PodCostBucket,
   PodCostSegment,
+  CostEvidence,
   ProviderAttempt,
   ProviderAttemptOutcome,
   PodStatus,
@@ -600,5 +603,53 @@ export type {
   MemoryAnalyticsResponse,
 } from './types/analytics.js';
 
+export type { BackupHealth, DaemonHealthSummary, DaemonReleaseInfo } from './types/release.js';
+
+export type { TaskExecutionSummary } from './types/task-execution.js';
+
+export type {
+  ReusedValidationEvidence,
+  ValidationInputIdentity,
+} from './types/validation-evidence.js';
+
+export { scheduledScanPolicySchema } from './types/scheduled-scan.js';
+export type {
+  ScheduledScanPolicy,
+  ScheduledScanReport,
+  ScheduledScanCollection,
+  ScheduledScanFinding,
+  ScheduledScannerResult,
+} from './types/scheduled-scan.js';
+
+export type {
+  ScanTriageDecision,
+  ScanReportDetail,
+  ScanReportView,
+  ScanRecordDiagnostic,
+  ScanReportSummary,
+  ScanReportPage,
+  ScanFindingPage,
+  ScanDecisionPage,
+  ScanTriageRequest,
+  ScanRepairDispatch,
+} from './types/scheduled-scan.js';
+
+export type {
+  TaskRetryIdentity,
+  TaskRetryOutcome,
+  TaskRetryAttempt,
+  TaskRetryAuthorization,
+  TaskRetryState,
+  TaskRetryStage,
+} from './types/task-retry.js';
+
+export type { IntentionalRerun, DispatchPreflightEvidence } from './types/dispatch-preflight.js';
+
+export type {
+  ExecutionProvenance,
+  ExecutionProvenanceInput,
+} from './types/execution-provenance.js';
 export * from './types/managed-pod.js';
 export * from './managed-protocol.js';
+
+export type { OperatorGuidanceDelivery } from './types/operator-guidance.js';

@@ -1,0 +1,280 @@
+
+ RUN  v4.1.11 /private/tmp/autopod-durable-execution/packages/daemon
+
+ ❯ src/db/reconcile-native-checkpoint.test.ts (3 tests | 3 failed) 5390ms
+   × reconciles exact checkpoint 151 only in a new verified copy 1439ms
+   × reconciles exact checkpoint 158 only in a new verified copy 1901ms
+   × reconciles exact checkpoint 163 only in a new verified copy 2049ms
+ ❯ src/pods/pod-manager.test.ts (638 tests | 11 failed) 65782ms
+     × retains source and stops later Delete steps after container cleanup superseded 133ms
+     × retains source and stops later Delete steps after container cleanup task-admitted 158ms
+     × ledgers runtime segments and persists cache-aware agent usage 96ms
+       × transitions pod through killing to killed 54ms
+       × emits pod.completed event with killed status 56ms
+       × calls container kill and worktree cleanup when present 53ms
+       × keeps queued dependents in queued state when parent is killed 141ms
+       × emits status_changed events on transitions 79ms
+       × records legacy API provenance before real SDK HTTP dispatch and fences stale replay 5005ms
+       × fences independent council at the kill boundary 63ms
+       × starts a daemon host-port preview proxy for sandbox pods 90ms
+
+⎯⎯⎯⎯⎯⎯ Failed Tests 14 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/db/reconcile-native-checkpoint.test.ts > reconciles exact checkpoint 151 only in a new verified copy
+AssertionError: expected { status: 'verified-copy', …(8) } to match object { status: 'verified-copy', …(4) }
+(4 matching properties omitted from actual)
+
+- Expected
++ Received
+
+  {
+    "activated": false,
+    "fromVersion": 151,
+    "retainedRowsVerified": true,
+    "status": "verified-copy",
+-   "toVersion": 182,
++   "toVersion": 181,
+  }
+
+ ❯ src/db/reconcile-native-checkpoint.test.ts:88:26
+     86|       );
+     87|       expect(statSync(cliOutput).mode & 0o777).toBe(0o600);
+     88|       expect(cliReceipt).toMatchObject({
+       |                          ^
+     89|         status: 'verified-copy',
+     90|         fromVersion: version,
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/14]⎯
+
+ FAIL  src/db/reconcile-native-checkpoint.test.ts > reconciles exact checkpoint 158 only in a new verified copy
+AssertionError: expected { status: 'verified-copy', …(8) } to match object { status: 'verified-copy', …(4) }
+(4 matching properties omitted from actual)
+
+- Expected
++ Received
+
+  {
+    "activated": false,
+    "fromVersion": 158,
+    "retainedRowsVerified": true,
+    "status": "verified-copy",
+-   "toVersion": 182,
++   "toVersion": 181,
+  }
+
+ ❯ src/db/reconcile-native-checkpoint.test.ts:88:26
+     86|       );
+     87|       expect(statSync(cliOutput).mode & 0o777).toBe(0o600);
+     88|       expect(cliReceipt).toMatchObject({
+       |                          ^
+     89|         status: 'verified-copy',
+     90|         fromVersion: version,
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/14]⎯
+
+ FAIL  src/db/reconcile-native-checkpoint.test.ts > reconciles exact checkpoint 163 only in a new verified copy
+AssertionError: expected { status: 'verified-copy', …(8) } to match object { status: 'verified-copy', …(4) }
+(4 matching properties omitted from actual)
+
+- Expected
++ Received
+
+  {
+    "activated": false,
+    "fromVersion": 163,
+    "retainedRowsVerified": true,
+    "status": "verified-copy",
+-   "toVersion": 182,
++   "toVersion": 181,
+  }
+
+ ❯ src/db/reconcile-native-checkpoint.test.ts:88:26
+     86|       );
+     87|       expect(statSync(cliOutput).mode & 0o777).toBe(0o600);
+     88|       expect(cliReceipt).toMatchObject({
+       |                          ^
+     89|         status: 'verified-copy',
+     90|         fromVersion: version,
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/14]⎯
+
+ FAIL  src/pods/pod-manager.test.ts > PodManager > retains source and stops later Delete steps after container cleanup superseded
+SqliteError: pod deletion cleanup ownership is unresolved
+ ❯ Object.incrementLifecycleGeneration src/pods/pod-repository.ts:1264:10
+    1262|     incrementLifecycleGeneration(id: string): number {
+    1263|       deletionOwnership.assertTaskAvailable(id);
+    1264|       const result = db
+       |          ^
+    1265|         .prepare(
+    1266|           'UPDATE pods SET lifecycle_generation = lifecycle_generation…
+ ❯ src/pods/pod-manager.test.ts:2241:49
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[4/14]⎯
+
+ FAIL  src/pods/pod-manager.test.ts > PodManager > retains source and stops later Delete steps after container cleanup task-admitted
+SqliteError: task deletion cleanup ownership is unresolved
+ ❯ Object.<anonymous> src/pods/task-execution-ledger.ts:565:9
+    563|         throw new AutopodError(task.budgetCheck.reason, 'TASK_BUDGET_U…
+    564|       const id = randomUUID();
+    565|       db.prepare(
+       |         ^
+    566|         'INSERT INTO task_agent_runs (id, pod_id, generation, cycle, b…
+    567|       ).run(id, podId, generation, cycle, encoded, new Date().toISOStr…
+ ❯ Object.sqliteTransaction [as beginRun] ../../node_modules/.pnpm/better-sqlite3@11.10.0/node_modules/better-sqlite3/lib/methods/transaction.js:65:24
+ ❯ src/pods/pod-manager.test.ts:2243:39
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[5/14]⎯
+
+ FAIL  src/pods/pod-manager.test.ts > PodManager > ledgers runtime segments and persists cache-aware agent usage
+SqliteError: pod deletion cleanup ownership is unresolved
+ ❯ Object.update src/pods/pod-repository.ts:1254:10
+    1253|       params.updatedAt = new Date().toISOString();
+    1254|
+    1255|       const result = db
+       |         ^
+    1256|         .prepare(`UPDATE pods SET ${setClauses.join(', ')} WHERE id = …
+    1257|         .run(params);
+ ❯ transition src/pods/pod-manager.ts:7223:13
+ ❯ Object.killSession src/pods/pod-manager.ts:13356:7
+ ❯ src/pods/pod-manager.test.ts:4086:5
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[6/14]⎯
+
+ FAIL  src/pods/pod-manager.test.ts > PodManager > killSession > transitions pod through killing to killed
+SqliteError: pod deletion cleanup ownership is unresolved
+ ❯ Object.update src/pods/pod-repository.ts:1254:10
+    1253|       params.updatedAt = new Date().toISOString();
+    1254|
+    1255|       const result = db
+       |         ^
+    1256|         .prepare(`UPDATE pods SET ${setClauses.join(', ')} WHERE id = …
+    1257|         .run(params);
+ ❯ transition src/pods/pod-manager.ts:7223:13
+ ❯ Object.killSession src/pods/pod-manager.ts:13356:7
+ ❯ src/pods/pod-manager.test.ts:6707:7
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[7/14]⎯
+
+ FAIL  src/pods/pod-manager.test.ts > PodManager > killSession > emits pod.completed event with killed status
+SqliteError: pod deletion cleanup ownership is unresolved
+ ❯ Object.update src/pods/pod-repository.ts:1254:10
+    1253|       params.updatedAt = new Date().toISOString();
+    1254|
+    1255|       const result = db
+       |         ^
+    1256|         .prepare(`UPDATE pods SET ${setClauses.join(', ')} WHERE id = …
+    1257|         .run(params);
+ ❯ transition src/pods/pod-manager.ts:7223:13
+ ❯ Object.killSession src/pods/pod-manager.ts:13356:7
+ ❯ src/pods/pod-manager.test.ts:6726:7
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[8/14]⎯
+
+ FAIL  src/pods/pod-manager.test.ts > PodManager > killSession > calls container kill and worktree cleanup when present
+SqliteError: pod deletion cleanup ownership is unresolved
+ ❯ Object.update src/pods/pod-repository.ts:1254:10
+    1253|       params.updatedAt = new Date().toISOString();
+    1254|
+    1255|       const result = db
+       |         ^
+    1256|         .prepare(`UPDATE pods SET ${setClauses.join(', ')} WHERE id = …
+    1257|         .run(params);
+ ❯ transition src/pods/pod-manager.ts:7223:13
+ ❯ Object.killSession src/pods/pod-manager.ts:13356:7
+ ❯ src/pods/pod-manager.test.ts:6749:7
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[9/14]⎯
+
+ FAIL  src/pods/pod-manager.test.ts > PodManager > killSession > keeps queued dependents in queued state when parent is killed
+SqliteError: pod deletion cleanup ownership is unresolved
+ ❯ Object.update src/pods/pod-repository.ts:1254:10
+    1253|       params.updatedAt = new Date().toISOString();
+    1254|
+    1255|       const result = db
+       |         ^
+    1256|         .prepare(`UPDATE pods SET ${setClauses.join(', ')} WHERE id = …
+    1257|         .run(params);
+ ❯ transition src/pods/pod-manager.ts:7223:13
+ ❯ Object.killSession src/pods/pod-manager.ts:13356:7
+ ❯ src/pods/pod-manager.test.ts:6787:7
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[10/14]⎯
+
+ FAIL  src/pods/pod-manager.test.ts > PodManager > state transitions > emits status_changed events on transitions
+SqliteError: pod deletion cleanup ownership is unresolved
+ ❯ Object.update src/pods/pod-repository.ts:1254:10
+    1253|       params.updatedAt = new Date().toISOString();
+    1254|
+    1255|       const result = db
+       |         ^
+    1256|         .prepare(`UPDATE pods SET ${setClauses.join(', ')} WHERE id = …
+    1257|         .run(params);
+ ❯ transition src/pods/pod-manager.ts:7223:13
+ ❯ Object.killSession src/pods/pod-manager.ts:13356:7
+ ❯ src/pods/pod-manager.test.ts:9933:7
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[11/14]⎯
+
+ FAIL  src/pods/pod-manager.test.ts > PodManager > triggerValidation > records legacy API provenance before real SDK HTTP dispatch and fences stale replay
+Error: Test timed out in 5000ms.
+If this is a long-running test, pass a timeout value as the last argument or configure it globally with "testTimeout".
+ ❯ src/pods/pod-manager.test.ts:15919:5
+    15917|     });
+    15918|
+    15919|     it('records legacy API provenance before real SDK HTTP dispatch an…
+       |     ^
+    15920|       const ctx = createTestContext();
+    15921|       ctx.db
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[12/14]⎯
+
+ FAIL  src/pods/pod-manager.test.ts > PodManager > triggerValidation > fences independent council at the kill boundary
+AssertionError: expected false to be true // Object.is equality
+
+- Expected
++ Received
+
+- true
++ false
+
+ ❯ src/pods/pod-manager.test.ts:16161:34
+    16159|         );
+    16160|         await manager.triggerValidation(pod.id);
+    16161|         expect(boundaryObserved).toBe(true);
+       |                                  ^
+    16162|         expect(ctx.validationEngine.validate).toHaveBeenCalledTimes(
+    16163|           boundary === 'preflight' ? 1 : 2,
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[13/14]⎯
+
+ FAIL  src/pods/pod-manager.test.ts > PodManager > triggerValidation — loud-fail on push > starts a daemon host-port preview proxy for sandbox pods
+Error: listen EPERM: operation not permitted 0.0.0.0:13802
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[14/14]⎯
+
+⎯⎯⎯⎯⎯⎯ Unhandled Errors ⎯⎯⎯⎯⎯⎯
+
+Vitest caught 1 unhandled error during the test run.
+This might cause false positive tests. Resolve unhandled errors to make sure your tests are not affected.
+
+⎯⎯⎯⎯⎯ Uncaught Exception ⎯⎯⎯⎯⎯
+Error: listen EPERM: operation not permitted 127.0.0.1
+ ❯ Server.setupListenHandle [as _listen2] node:net:1987:21
+ ❯ listenInCluster node:net:2066:12
+ ❯ node:net:2275:7
+ ❯ processTicksAndRejections node:internal/process/task_queues:90:21
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯
+Serialized Error: { code: 'EPERM', errno: -1, syscall: 'listen', address: '127.0.0.1' }
+This error originated in "src/pods/pod-manager.test.ts" test file. It doesn't mean the error was thrown inside the file itself, but while it was running.
+The latest test that might've caused the error is "records legacy API provenance before real SDK HTTP dispatch and fences stale replay". It might mean one of the following:
+- The error was thrown, while Vitest was running this test.
+- If the error occurred after the test had been completed, this was the last documented test before it was thrown.
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯
+
+
+ Test Files  2 failed | 2 passed (4)
+      Tests  14 failed | 631 passed (645)
+     Errors  1 error
+   Start at  22:16:42
+   Duration  67.61s (transform 2.75s, setup 0ms, import 4.38s, tests 71.50s, environment 0ms)
+

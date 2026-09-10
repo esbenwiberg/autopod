@@ -1,0 +1,32 @@
+{
+  "observedAt": "2026-09-10T07:41:00.403358+00:00",
+  "windowStartUTC": "2026-09-07T00:00:00Z",
+  "windowEndUTC": "2026-09-07T08:27:28Z",
+  "files": [
+    {
+      "name": "syslog",
+      "exists": true,
+      "storedBytes": 22907336,
+      "linesRead": 87773,
+      "matchedEntries": 0,
+      "incomplete": null
+    },
+    {
+      "name": "syslog.1",
+      "exists": false
+    },
+    {
+      "name": "syslog.2.gz",
+      "exists": true,
+      "storedBytes": 30561972,
+      "linesRead": 38172,
+      "matchedEntries": 0,
+      "incomplete": "total_byte_bound"
+    }
+  ],
+  "decompressedBytesRead": 33554433,
+  "routeStatuses": {},
+  "sameRequest500ErrorClasses": {},
+  "correlatedErrorEntries": 0,
+  "rawLogsExported": false
+}

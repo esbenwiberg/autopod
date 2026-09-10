@@ -1,0 +1,31 @@
+
+> @autopod/daemon@0.0.1 typecheck /private/tmp/autopod-durable-execution/packages/daemon
+> AUTOPOD_TYPECHECK=1 tsup --dts-only --out-dir .turbo/typecheck
+
+CLI Building entry: src/index.ts
+CLI Using tsconfig: tsconfig.json
+CLI tsup v8.5.1
+CLI Using tsup config: /private/tmp/autopod-durable-execution/packages/daemon/tsup.config.ts
+DTS Build start
+src/index.ts(6,38): error TS2307: Cannot find module '@autopod/escalation-mcp' or its corresponding type declarations.
+
+Error: error occurred in dts build
+    at Worker.<anonymous> (/private/tmp/autopod-durable-execution/node_modules/.pnpm/tsup@8.5.1_jiti@2.7.0_postcss@8.5.18_typescript@5.9.3_yaml@2.9.0/node_modules/tsup/dist/index.js:1545:26)
+    at Worker.emit (node:events:509:28)
+    at MessagePort.<anonymous> (node:internal/worker:350:14)
+    at [nodejs.internal.kHybridDispatch] (node:internal/event_target:843:20)
+    at MessagePort.<anonymous> (node:internal/per_context/messageport:23:28)
+DTS Build error
+RollupError: [plugin dts] src/index.ts: Failed to compile. Check the logs above.
+    at getRollupError (/private/tmp/autopod-durable-execution/node_modules/.pnpm/rollup@4.59.0/node_modules/rollup/dist/shared/parseAst.js:287:41)
+    at Object.error (/private/tmp/autopod-durable-execution/node_modules/.pnpm/rollup@4.59.0/node_modules/rollup/dist/shared/parseAst.js:283:42)
+    at Object.error (/private/tmp/autopod-durable-execution/node_modules/.pnpm/rollup@4.59.0/node_modules/rollup/dist/shared/rollup.js:913:32)
+    at Object.error (/private/tmp/autopod-durable-execution/node_modules/.pnpm/rollup@4.59.0/node_modules/rollup/dist/shared/rollup.js:22527:42)
+    at generateDtsFromTs (/private/tmp/autopod-durable-execution/node_modules/.pnpm/tsup@8.5.1_jiti@2.7.0_postcss@8.5.18_typescript@5.9.3_yaml@2.9.0/node_modules/tsup/dist/rollup.js:6429:22)
+    at /private/tmp/autopod-durable-execution/node_modules/.pnpm/tsup@8.5.1_jiti@2.7.0_postcss@8.5.18_typescript@5.9.3_yaml@2.9.0/node_modules/tsup/dist/rollup.js:6436:59
+    at _nullishCoalesce (/private/tmp/autopod-durable-execution/node_modules/.pnpm/tsup@8.5.1_jiti@2.7.0_postcss@8.5.18_typescript@5.9.3_yaml@2.9.0/node_modules/tsup/dist/rollup.js:1:472)
+    at Object.transform (/private/tmp/autopod-durable-execution/node_modules/.pnpm/tsup@8.5.1_jiti@2.7.0_postcss@8.5.18_typescript@5.9.3_yaml@2.9.0/node_modules/tsup/dist/rollup.js:6436:18)
+    at /private/tmp/autopod-durable-execution/node_modules/.pnpm/rollup@4.59.0/node_modules/rollup/dist/shared/rollup.js:3392:40
+/private/tmp/autopod-durable-execution/packages/daemon:
+ ERR_PNPM_RECURSIVE_RUN_FIRST_FAIL  @autopod/daemon@0.0.1 typecheck: `AUTOPOD_TYPECHECK=1 tsup --dts-only --out-dir .turbo/typecheck`
+Exit status 1

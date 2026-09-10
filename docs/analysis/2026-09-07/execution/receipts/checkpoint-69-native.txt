@@ -1,0 +1,28 @@
+[1/1] Compiling plugin GenerateManual
+[2/2] Compiling plugin GenerateDoccReference
+Building for debugging...
+[2/7] Write sources
+[3/7] Write swift-version--58304C5D6DBC2206.txt
+[5/9] Compiling AutopodClient DaemonAPI.swift
+[6/9] Emitting module AutopodClient
+[6/11] Write Objects.LinkFileList
+[8/11] Linking AutopodDesktopExe
+[9/11] Linking AutopodDesktopPackageTests
+[10/11] Applying AutopodDesktopExe
+Build complete! (3.96s)
+Test Suite 'Selected tests' started at 2026-09-08 12:40:37.987.
+Test Suite 'AutopodDesktopPackageTests.xctest' started at 2026-09-08 12:40:37.994.
+Test Suite 'AutopodDesktopPackageTests.xctest' passed at 2026-09-08 12:40:37.994.
+	 Executed 0 tests, with 0 failures (0 unexpected) in 0.000 (0.000) seconds
+Test Suite 'Selected tests' passed at 2026-09-08 12:40:37.994.
+	 Executed 0 tests, with 0 failures (0 unexpected) in 0.000 (0.007) seconds
+◇ Test run started.
+↳ Testing Library Version: 1902
+↳ Target Platform: arm64e-apple-macos14.0
+◇ Test scanHistoryClientFollowsExplicitPageCursor() started.
+◇ Test apiProvenanceClientSendsVersionAsQueryParameter() started.
+◇ Test scheduledScanClientPreservesIncompleteStatusAndExplicitHumanSelection() started.
+✔ Test apiProvenanceClientSendsVersionAsQueryParameter() passed after 0.008 seconds.
+✔ Test scanHistoryClientFollowsExplicitPageCursor() passed after 0.008 seconds.
+✔ Test scheduledScanClientPreservesIncompleteStatusAndExplicitHumanSelection() passed after 0.009 seconds.
+✔ Test run with 3 tests in 0 suites passed after 0.009 seconds.

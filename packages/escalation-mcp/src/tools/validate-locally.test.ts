@@ -19,7 +19,7 @@ function makeBridge(stubs: Partial<Record<ValidationPhaseName, PhaseStub>>) {
         output: stub.output ?? '',
       };
     });
-  return { runValidationPhase };
+  return { runValidationPhase, readOperatorGuidance: vi.fn().mockReturnValue(null) };
 }
 
 describe('validateLocally', () => {
@@ -33,14 +33,17 @@ describe('validateLocally', () => {
       durationMs: 1,
       output: `${phase} passed`,
     }));
-    const consumeMessageBatch = vi
+    const readOperatorGuidance = vi
       .fn()
-      .mockReturnValueOnce([])
-      .mockReturnValueOnce(['change course'])
-      .mockReturnValue([]);
+      .mockReturnValueOnce(null)
+      .mockReturnValueOnce({
+        deliveryId: '00000000-0000-4000-8000-000000000001',
+        messages: ['change course'],
+      })
+      .mockReturnValue(null);
     const raw = await validateLocally('pod-1', { phases: ['lint', 'build'] }, {
       runValidationPhase,
-      consumeMessageBatch,
+      readOperatorGuidance,
     } as never);
 
     expect(JSON.parse(raw)).toMatchObject({

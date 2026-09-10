@@ -1,0 +1,166 @@
+
+> autopod@ build /private/tmp/autopod-durable-execution
+> turbo run build
+
+• turbo 2.10.4
+
+   • Packages in scope: @autopod/cli, @autopod/daemon, @autopod/e2e, @autopod/escalation-mcp, @autopod/mobile-web, @autopod/pi-worker, @autopod/shared, @autopod/validator
+   • Running build in 8 packages
+   • Remote caching disabled, using shared worktree cache
+
+@autopod/shared:build: cache hit, replaying logs 41a10312a5166547
+@autopod/shared:build:
+@autopod/shared:build: > @autopod/shared@0.0.1 build /private/tmp/autopod-durable-execution/packages/shared
+@autopod/shared:build: > tsup
+@autopod/shared:build:
+@autopod/shared:build: CLI Building entry: src/index.ts
+@autopod/shared:build: CLI Using tsconfig: tsconfig.json
+@autopod/shared:build: CLI tsup v8.5.1
+@autopod/shared:build: CLI Using tsup config: /private/tmp/autopod-durable-execution/packages/shared/tsup.config.ts
+@autopod/shared:build: CLI Target: es2022
+@autopod/shared:build: ESM Build start
+@autopod/shared:build: ESM dist/index.js     113.37 KB
+@autopod/shared:build: ESM dist/index.js.map 235.27 KB
+@autopod/shared:build: ESM ⚡️ Build success in 78ms
+@autopod/shared:build: DTS Build start
+@autopod/shared:build: DTS ⚡️ Build success in 2417ms
+@autopod/shared:build: DTS dist/index.d.ts 763.85 KB
+@autopod/mobile-web:build: cache hit, replaying logs a1400f6491e10f00
+@autopod/pi-worker:build: cache hit, replaying logs 0226b42f5501413f
+@autopod/mobile-web:build:
+@autopod/mobile-web:build: > @autopod/mobile-web@0.0.1 build /private/tmp/autopod-durable-execution/packages/mobile-web
+@autopod/mobile-web:build: > vite build
+@autopod/mobile-web:build:
+@autopod/mobile-web:build: vite v6.4.3 building for production...
+@autopod/mobile-web:build: transforming...
+@autopod/mobile-web:build: ✓ 64 modules transformed.
+@autopod/mobile-web:build: rendering chunks...
+@autopod/mobile-web:build: computing gzip size...
+@autopod/mobile-web:build: dist/index.html                   0.93 kB │ gzip:  0.42 kB
+@autopod/mobile-web:build: dist/assets/index-DcKgCAYr.css   12.59 kB │ gzip:  2.93 kB
+@autopod/mobile-web:build: dist/assets/index-DNz5LSGI.js   274.34 kB │ gzip: 85.84 kB │ map: 1,462.72 kB
+@autopod/mobile-web:build: ✓ built in 2.49s
+@autopod/pi-worker:build:
+@autopod/cli:build: cache hit, replaying logs c1c227d38e82339c
+@autopod/pi-worker:build: > @autopod/pi-worker@0.0.1 build /Users/ewi/repos/autopod/packages/pi-worker
+@autopod/pi-worker:build: > tsup src/index.ts --format esm --dts
+@autopod/pi-worker:build:
+@autopod/pi-worker:build: CLI Building entry: src/index.ts
+@autopod/pi-worker:build: CLI Using tsconfig: tsconfig.json
+@autopod/pi-worker:build: CLI tsup v8.5.1
+@autopod/pi-worker:build: CLI Target: es2022
+@autopod/pi-worker:build: ESM Build start
+@autopod/pi-worker:build: ESM dist/index.js 15.17 KB
+@autopod/pi-worker:build: ESM ⚡️ Build success in 119ms
+@autopod/pi-worker:build: DTS Build start
+@autopod/pi-worker:build: DTS ⚡️ Build success in 2163ms
+@autopod/pi-worker:build: DTS dist/index.d.ts 5.25 KB
+@autopod/escalation-mcp:build: cache hit, replaying logs 4c45ef165505add4
+@autopod/cli:build:
+@autopod/cli:build: > @autopod/cli@0.0.1 build /private/tmp/autopod-durable-execution/packages/cli
+@autopod/cli:build: > tsup
+@autopod/cli:build:
+@autopod/cli:build: CLI Building entry: src/index.ts
+@autopod/cli:build: CLI Using tsconfig: tsconfig.json
+@autopod/cli:build: CLI tsup v8.5.1
+@autopod/cli:build: CLI Using tsup config: /private/tmp/autopod-durable-execution/packages/cli/tsup.config.ts
+@autopod/cli:build: CLI Target: es2022
+@autopod/cli:build: CLI Cleaning output folder
+@autopod/cli:build: ESM Build start
+@autopod/cli:build: ESM dist/index.js     238.68 KB
+@autopod/cli:build: ESM dist/index.js.map 465.35 KB
+@autopod/cli:build: ESM ⚡️ Build success in 81ms
+@autopod/escalation-mcp:build:
+@autopod/escalation-mcp:build: > @autopod/escalation-mcp@0.0.1 build /private/tmp/autopod-durable-execution/packages/escalation-mcp
+@autopod/escalation-mcp:build: > tsup
+@autopod/validator:build: cache hit, replaying logs 4a87462a3fe0c4a5
+@autopod/escalation-mcp:build:
+@autopod/escalation-mcp:build: CLI Building entry: src/index.ts
+@autopod/escalation-mcp:build: CLI Using tsconfig: tsconfig.json
+@autopod/escalation-mcp:build: CLI tsup v8.5.1
+@autopod/escalation-mcp:build: CLI Using tsup config: /private/tmp/autopod-durable-execution/packages/escalation-mcp/tsup.config.ts
+@autopod/escalation-mcp:build: CLI Target: es2022
+@autopod/escalation-mcp:build: ESM Build start
+@autopod/escalation-mcp:build: ESM dist/index.js     41.67 KB
+@autopod/escalation-mcp:build: ESM dist/index.js.map 82.30 KB
+@autopod/escalation-mcp:build: ESM ⚡️ Build success in 115ms
+@autopod/escalation-mcp:build: DTS Build start
+@autopod/escalation-mcp:build: DTS ⚡️ Build success in 3370ms
+@autopod/escalation-mcp:build: DTS dist/index.d.ts 15.12 KB
+@autopod/validator:build:
+@autopod/validator:build: > @autopod/validator@0.0.1 build /private/tmp/autopod-durable-execution/packages/validator
+@autopod/validator:build: > tsup
+@autopod/validator:build:
+@autopod/validator:build: CLI Building entry: src/index.ts
+@autopod/validator:build: CLI Using tsconfig: tsconfig.json
+@autopod/validator:build: CLI tsup v8.5.1
+@autopod/validator:build: CLI Using tsup config: /private/tmp/autopod-durable-execution/packages/validator/tsup.config.ts
+@autopod/validator:build: CLI Target: es2022
+@autopod/validator:build: CLI Cleaning output folder
+@autopod/validator:build: ESM Build start
+@autopod/validator:build: ESM dist/index.js     9.58 KB
+@autopod/validator:build: ESM dist/index.js.map 13.63 KB
+@autopod/validator:build: ESM ⚡️ Build success in 29ms
+@autopod/validator:build: DTS Build start
+@autopod/validator:build: DTS ⚡️ Build success in 1180ms
+@autopod/validator:build: DTS dist/index.d.ts 1.04 KB
+@autopod/daemon:build: cache bypass, force executing 435a9ee877ce43a9
+@autopod/daemon:build:
+@autopod/daemon:build: > @autopod/daemon@0.0.1 build /private/tmp/autopod-durable-execution/packages/daemon
+@autopod/daemon:build: > tsup
+@autopod/daemon:build:
+@autopod/daemon:build: CLI Building entry: src/index.ts, src/db/verify-backup-cli.ts
+@autopod/daemon:build: CLI Using tsconfig: tsconfig.json
+@autopod/daemon:build: CLI tsup v8.5.1
+@autopod/daemon:build: CLI Using tsup config: /private/tmp/autopod-durable-execution/packages/daemon/tsup.config.ts
+@autopod/daemon:build: CLI Target: es2022
+@autopod/daemon:build: CLI Cleaning output folder
+@autopod/daemon:build: ESM Build start
+@autopod/daemon:build: ESM dist/warm-image-maintenance-YCQAAWWS.js        3.68 KB
+@autopod/daemon:build: ESM dist/sleep-detector-GPPRVJCQ.js                5.00 KB
+@autopod/daemon:build: ESM dist/chunk-HGDG2PZU.js                         4.03 KB
+@autopod/daemon:build: ESM dist/azure-pim-handler-OXVK2VC3.js             221.00 B
+@autopod/daemon:build: ESM dist/chunk-DJ4KDQP3.js                         17.99 KB
+@autopod/daemon:build: ESM dist/sandbox-container-manager-32QKOWP6.js     257.00 B
+@autopod/daemon:build: ESM dist/reconciler-O7RWKPYQ.js                    7.24 KB
+@autopod/daemon:build: ESM dist/chunk-X6XXXSQW.js                         9.64 KB
+@autopod/daemon:build: ESM dist/chunk-3UJEBFWN.js                         64.57 KB
+@autopod/daemon:build: ESM dist/local-reconciler-TJIQJWU7.js              184.00 B
+@autopod/daemon:build: ESM dist/db/verify-backup-cli.js                   1.08 KB
+@autopod/daemon:build: ESM dist/mock-container-manager-6BFNTIYC.js        1.01 KB
+@autopod/daemon:build: ESM dist/chunk-A6RL22VU.js                         381.00 B
+@autopod/daemon:build: ESM dist/chunk-XI7TSX2Y.js                         24.07 KB
+@autopod/daemon:build: ESM dist/image-builder-AQFDI7AT.js                 4.79 KB
+@autopod/daemon:build: ESM dist/acr-client-AASTYGPF.js                    6.81 KB
+@autopod/daemon:build: ESM dist/warm-image-maintenance-YCQAAWWS.js.map    7.64 KB
+@autopod/daemon:build: ESM dist/sleep-detector-GPPRVJCQ.js.map            10.08 KB
+@autopod/daemon:build: ESM dist/chunk-DJ4KDQP3.js.map                     38.50 KB
+@autopod/daemon:build: ESM dist/reconciler-O7RWKPYQ.js.map                14.01 KB
+@autopod/daemon:build: ESM dist/azure-pim-handler-OXVK2VC3.js.map         71.00 B
+@autopod/daemon:build: ESM dist/chunk-X6XXXSQW.js.map                     21.88 KB
+@autopod/daemon:build: ESM dist/chunk-HGDG2PZU.js.map                     7.82 KB
+@autopod/daemon:build: ESM dist/local-reconciler-TJIQJWU7.js.map          71.00 B
+@autopod/daemon:build: ESM dist/index.js                                  2.30 MB
+@autopod/daemon:build: ESM dist/chunk-A6RL22VU.js.map                     412.00 B
+@autopod/daemon:build: ESM dist/sandbox-container-manager-32QKOWP6.js.map 71.00 B
+@autopod/daemon:build: ESM dist/chunk-3UJEBFWN.js.map                     139.29 KB
+@autopod/daemon:build: ESM dist/db/verify-backup-cli.js.map               1.77 KB
+@autopod/daemon:build: ESM dist/mock-container-manager-6BFNTIYC.js.map    1.86 KB
+@autopod/daemon:build: ESM dist/image-builder-AQFDI7AT.js.map             10.20 KB
+@autopod/daemon:build: ESM dist/acr-client-AASTYGPF.js.map                12.27 KB
+@autopod/daemon:build: ESM dist/chunk-XI7TSX2Y.js.map                     52.29 KB
+@autopod/daemon:build: ESM dist/index.js.map                              4.51 MB
+@autopod/daemon:build: ESM ⚡️ Build success in 133ms
+@autopod/daemon:build: DTS Build start
+@autopod/daemon:build: DTS ⚡️ Build success in 3069ms
+@autopod/daemon:build: DTS dist/index.d.ts                13.00 B
+@autopod/daemon:build: DTS dist/db/verify-backup-cli.d.ts 13.00 B
+@autopod/daemon:build:
+@autopod/daemon:build: > @autopod/daemon@0.0.1 postbuild /private/tmp/autopod-durable-execution/packages/daemon
+@autopod/daemon:build: > mkdir -p dist/db dist/actions && cp -R src/db/migrations dist/db/ && cp -R src/actions/defaults dist/actions/
+@autopod/daemon:build:
+
+ Tasks:    7 successful, 7 total
+Cached:    6 cached, 7 total
+  Time:    4.066s
+

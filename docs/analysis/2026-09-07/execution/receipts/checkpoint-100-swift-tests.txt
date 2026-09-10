@@ -1,0 +1,83 @@
+[1/1] Compiling plugin GenerateManual
+[2/2] Compiling plugin GenerateDoccReference
+Building for debugging...
+[2/7] Write sources
+[3/7] Write swift-version--58304C5D6DBC2206.txt
+[5/11] Compiling AutopodUI AgentEvent.swift
+[6/11] Compiling AutopodUI FeatureOverviewView.swift
+[7/45] Compiling AutopodUI MockEvents.swift
+[8/45] Compiling AutopodUI AnalyticsCard.swift
+[9/45] Compiling AutopodUI AnalyticsRightPaneView.swift
+[10/45] Compiling AutopodUI AnalyticsView.swift
+[11/45] Compiling AutopodUI EscalationsDrillView.swift
+[12/49] Compiling AutopodUI FeatureDetailPanelView.swift
+[13/49] Compiling AutopodUI SalesPitchView.swift
+[14/49] Compiling AutopodUI LogPopover.swift
+[15/49] Compiling AutopodUI LogStreamView.swift
+[16/53] Compiling AutopodUI HistoryView.swift
+[17/53] Compiling AutopodUI ModelsDrillView.swift
+[18/53] Compiling AutopodUI QualityDrillView.swift
+[19/53] Compiling AutopodUI SafetyDrillView.swift
+[20/53] Compiling AutopodUI ThroughputDrillView.swift
+[21/53] Compiling AutopodUI SeriesListView.swift
+[22/53] Compiling AutopodUI SeriesPipelineView.swift
+[23/53] Compiling AutopodUI ActivityFeedList.swift
+[24/53] Compiling AutopodUI SessionCostCard.swift
+[25/53] Emitting module AutopodUI
+[26/53] Compiling AutopodUI PodCardFinal.swift
+[27/53] Compiling AutopodUI EvidenceTab.swift
+[28/53] Compiling AutopodUI MarkdownTab.swift
+[29/53] Compiling AutopodUI OverviewTab.swift
+[30/53] Compiling AutopodUI RelatedEventsDebugSheet.swift
+[31/53] Compiling AutopodUI StatTile.swift
+[32/53] Compiling AutopodUI StatusDot.swift
+[33/53] Compiling AutopodUI MainView.swift
+[34/53] Compiling AutopodUI SidebarView.swift
+[35/53] Compiling AutopodUI CreatePodSheet.swift
+[36/53] Compiling AutopodUI ArtifactsTab.swift
+[37/53] Compiling AutopodUI DetailPanelView.swift
+[38/53] Compiling AutopodUI DiffTab.swift
+[39/53] Compiling AutopodUI SummaryTab.swift
+[40/53] Compiling AutopodUI TaskStructuredView.swift
+[41/53] Compiling AutopodUI TerminalTab.swift
+[42/53] Compiling AutopodUI ValidationTab.swift
+[43/53] Compiling AutopodUI ProfileEditorView.swift
+[44/53] Compiling AutopodUI ProfileListView.swift
+[45/53] Compiling AutopodUI CreateScheduledJobSheet.swift
+[46/53] Compiling AutopodUI EditScheduledJobSheet.swift
+[47/53] Compiling AutopodUI ScheduledJobRow.swift
+[48/53] Compiling AutopodUI ScheduledJobTemplateSheet.swift
+[49/53] Compiling AutopodUI ScheduledJobsView.swift
+[50/53] Compiling AutopodUI PodActivityPanel.swift
+[51/60] Compiling AutopodDesktop AppRootView.swift
+[52/60] Compiling AutopodDesktop EventStream.swift
+[53/60] Emitting module AutopodDesktop
+[54/65] Emitting module AutopodDesktopExe
+[55/65] Compiling AutopodDesktopExe AutopodApp.swift
+[56/65] Compiling AutopodUITests ReviewCouncilTests.swift
+[57/65] Emitting module AutopodUITests
+[57/65] Write Objects.LinkFileList
+[59/65] Compiling AutopodClientTests EventStreamResyncTests.swift
+[60/65] Compiling AutopodClientTests EventStreamDedupeTests.swift
+[61/65] Emitting module AutopodClientTests
+[61/65] Write Objects.LinkFileList
+[62/65] Linking AutopodDesktopExe
+[63/65] Applying AutopodDesktopExe
+[64/65] Linking AutopodDesktopPackageTests
+Build complete! (35.03s)
+Test Suite 'Selected tests' started at 2026-09-08 21:19:12.107.
+Test Suite 'AutopodDesktopPackageTests.xctest' started at 2026-09-08 21:19:12.117.
+Test Suite 'AutopodDesktopPackageTests.xctest' passed at 2026-09-08 21:19:12.117.
+	 Executed 0 tests, with 0 failures (0 unexpected) in 0.000 (0.000) seconds
+Test Suite 'Selected tests' passed at 2026-09-08 21:19:12.117.
+	 Executed 0 tests, with 0 failures (0 unexpected) in 0.000 (0.010) seconds
+◇ Test run started.
+↳ Testing Library Version: 1902
+↳ Target Platform: arm64e-apple-macos14.0
+◇ Test retryClientPreservesUnknownExecutionAndSeparateAuthorization(stage:) started.
+◇ Test case passing 1 argument stage → "codex_interruption" to retryClientPreservesUnknownExecutionAndSeparateAuthorization(stage:) started.
+◇ Test case passing 1 argument stage → "validation" to retryClientPreservesUnknownExecutionAndSeparateAuthorization(stage:) started.
+◇ Test case passing 1 argument stage → "sandbox_startup" to retryClientPreservesUnknownExecutionAndSeparateAuthorization(stage:) started.
+◇ Test case passing 1 argument stage → "worker" to retryClientPreservesUnknownExecutionAndSeparateAuthorization(stage:) started.
+✔ Test retryClientPreservesUnknownExecutionAndSeparateAuthorization(stage:) with 4 test cases passed after 0.015 seconds.
+✔ Test run with 1 test in 0 suites passed after 0.015 seconds.

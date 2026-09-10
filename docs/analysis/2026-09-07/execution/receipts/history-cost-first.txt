@@ -1,0 +1,24 @@
+
+ RUN  v4.1.10 /private/tmp/autopod-durable-execution
+
+ ❯ packages/daemon/src/api/routes/pods.test.ts (0 test)
+
+⎯⎯⎯⎯⎯⎯ Failed Suites 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  packages/daemon/src/api/routes/pods.test.ts [ packages/daemon/src/api/routes/pods.test.ts ]
+Error: Failed to resolve entry for package "@autopod/escalation-mcp". The package may have incorrect main/module/exports specified in its package.json.
+ ❯ packages/daemon/src/api/mcp-handler.ts:2:1
+      1| import type { PodBridge } from '@autopod/escalation-mcp';
+      2| import { type PendingRequests, createEscalationMcpServer } from '@auto…
+       | ^
+      3| import { StreamableHTTPServerTransport } from '@modelcontextprotocol/s…
+      4| import type { FastifyInstance } from 'fastify';
+ ❯ packages/daemon/src/api/server.ts:45:1
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed | 3 passed (4)
+      Tests  101 passed (101)
+   Start at  10:42:15
+   Duration  6.48s (transform 1.36s, setup 0ms, import 1.80s, tests 9.76s, environment 3ms)

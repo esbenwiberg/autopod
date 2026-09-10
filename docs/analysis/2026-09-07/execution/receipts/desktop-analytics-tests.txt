@@ -1,0 +1,91 @@
+[0/1] Planning build
+[1/1] Compiling plugin GenerateManual
+[2/2] Compiling plugin GenerateDoccReference
+Building for debugging...
+[2/9] Write sources
+[4/9] Write swift-version--58304C5D6DBC2206.txt
+[6/11] Emitting module AutopodClient
+[7/11] Compiling AutopodClient ModelsAnalyticsResponse.swift
+[8/12] Compiling AutopodClient DaemonAPI.swift
+[8/17] Write Objects.LinkFileList
+[10/19] Compiling AutopodUITests PatExpiryStatusTests.swift
+[11/19] Emitting module AutopodUITests
+[12/19] Compiling AutopodUITests MemoryWorkbenchTests.swift
+[13/19] Compiling AutopodUITests ModelsSimulatorTests.swift
+[14/19] Emitting module AutopodClientTests
+[14/19] Linking AutopodDesktopExe
+[16/19] Compiling AutopodClientTests ModelsAnalyticsResponseTests.swift
+[16/19] Applying AutopodDesktopExe
+[18/21] Compiling AutopodDesktopPackageTests runner.swift
+[19/21] Emitting module AutopodDesktopPackageTests
+[19/21] Write Objects.LinkFileList
+[20/21] Linking AutopodDesktopPackageTests
+Build complete! (17.93s)
+Test Suite 'Selected tests' started at 2026-09-07 10:43:54.151.
+Test Suite 'AutopodDesktopPackageTests.xctest' started at 2026-09-07 10:43:54.163.
+Test Suite 'AutopodDesktopPackageTests.xctest' passed at 2026-09-07 10:43:54.163.
+	 Executed 0 tests, with 0 failures (0 unexpected) in 0.000 (0.000) seconds
+Test Suite 'Selected tests' passed at 2026-09-07 10:43:54.163.
+	 Executed 0 tests, with 0 failures (0 unexpected) in 0.000 (0.012) seconds
+◇ Test run started.
+↳ Testing Library Version: 1902
+↳ Target Platform: arm64e-apple-macos14.0
+◇ Test modelsAnalyticsResponseDecodesNullQualityAndTtm() started.
+◇ Test reliabilityAnalyticsResponseDecodesRoundTrip() started.
+◇ Test finalStatusRejectsUnknownString() started.
+◇ Test modelsAnalyticsResponseDecodesMinimalPayload() started.
+◇ Test modelsDollarDeltaDirectionDecodesAllCases() started.
+◇ Test modelsAnalyticsResponseDecodesNullCostFields() started.
+◇ Test topFailureStageTestStringDecodesToTest() started.
+◇ Test dropEntryWithOverflowDecodes() started.
+◇ Test modelsRuntimeKindDecodesAllCases() started.
+◇ Test finalStatusDecodesAllCases() started.
+◇ Test topFailureStageEmptyStringDecodesToNil() started.
+◇ Test validationStageRejectsUnknownString() started.
+◇ Test modelsAnalyticsResponseDecodesUnknownModelRow() started.
+◇ Test threeModelFleetHaikuUnchanged() started.
+◇ Test modelsFailureStageCellStageLabelsDecodeCorrectly() started.
+◇ Test escalationRateWeightedByPodCount() started.
+◇ Test ttmNullOnTargetContributesNothing() started.
+◇ Test successRateWeightedByPodCount() started.
+◇ Test unknownModelExcludedFromBaseline() started.
+◇ Test zeroRedirectIdentity() started.
+◇ Test fullRedirectDollarPerPr() started.
+◇ Test qualityNullOnTargetYieldsNilProjected() started.
+◇ Test modelsAnalyticsResponseDecodesRoundTrip() started.
+◇ Test partialRedirectDollarPerPr() started.
+◇ Test modelsAnalyticsResponseUsesDefaultKeyStrategy() started.
+◇ Test funnelBandRejectsUnknownString() started.
+◇ Test funnelBandDecodesAllCases() started.
+◇ Test reliabilitySparklineDecodes30Elements() started.
+◇ Test validationStageDecodesAllCases() started.
+✔ Test dropEntryWithOverflowDecodes() passed after 0.001 seconds.
+✔ Test topFailureStageTestStringDecodesToTest() passed after 0.001 seconds.
+✔ Test modelsAnalyticsResponseDecodesNullCostFields() passed after 0.001 seconds.
+✔ Test modelsDollarDeltaDirectionDecodesAllCases() passed after 0.001 seconds.
+✔ Test finalStatusDecodesAllCases() passed after 0.001 seconds.
+✔ Test modelsAnalyticsResponseDecodesUnknownModelRow() passed after 0.001 seconds.
+✔ Test modelsAnalyticsResponseDecodesNullQualityAndTtm() passed after 0.001 seconds.
+✔ Test topFailureStageEmptyStringDecodesToNil() passed after 0.001 seconds.
+✔ Test ttmNullOnTargetContributesNothing() passed after 0.001 seconds.
+✔ Test threeModelFleetHaikuUnchanged() passed after 0.001 seconds.
+✔ Test unknownModelExcludedFromBaseline() passed after 0.001 seconds.
+✔ Test fullRedirectDollarPerPr() passed after 0.001 seconds.
+✔ Test zeroRedirectIdentity() passed after 0.001 seconds.
+✔ Test qualityNullOnTargetYieldsNilProjected() passed after 0.001 seconds.
+✔ Test partialRedirectDollarPerPr() passed after 0.001 seconds.
+✔ Test modelsFailureStageCellStageLabelsDecodeCorrectly() passed after 0.001 seconds.
+✔ Test escalationRateWeightedByPodCount() passed after 0.001 seconds.
+✔ Test successRateWeightedByPodCount() passed after 0.001 seconds.
+✔ Test funnelBandDecodesAllCases() passed after 0.001 seconds.
+✔ Test modelsAnalyticsResponseUsesDefaultKeyStrategy() passed after 0.001 seconds.
+✔ Test validationStageDecodesAllCases() passed after 0.001 seconds.
+✔ Test validationStageRejectsUnknownString() passed after 0.002 seconds.
+✔ Test finalStatusRejectsUnknownString() passed after 0.002 seconds.
+✔ Test funnelBandRejectsUnknownString() passed after 0.001 seconds.
+✔ Test modelsAnalyticsResponseDecodesMinimalPayload() passed after 0.007 seconds.
+✔ Test reliabilitySparklineDecodes30Elements() passed after 0.006 seconds.
+✔ Test reliabilityAnalyticsResponseDecodesRoundTrip() passed after 0.007 seconds.
+✔ Test modelsRuntimeKindDecodesAllCases() passed after 0.007 seconds.
+✔ Test modelsAnalyticsResponseDecodesRoundTrip() passed after 0.007 seconds.
+✔ Test run with 29 tests in 0 suites passed after 0.008 seconds.

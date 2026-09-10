@@ -1,0 +1,27 @@
+[1/1] Compiling plugin GenerateManual
+[2/2] Compiling plugin GenerateDoccReference
+Building for debugging...
+[2/7] Write sources
+[3/7] Write swift-version--58304C5D6DBC2206.txt
+[5/7] Emitting module AutopodClientTests
+[6/7] Compiling AutopodClientTests UnverifiedTerminationActionTests.swift
+[6/8] Write Objects.LinkFileList
+[7/8] Linking AutopodDesktopPackageTests
+Build complete! (3.21s)
+Test Suite 'Selected tests' started at 2026-09-08 17:55:52.666.
+Test Suite 'AutopodDesktopPackageTests.xctest' started at 2026-09-08 17:55:52.673.
+Test Suite 'AutopodDesktopPackageTests.xctest' passed at 2026-09-08 17:55:52.674.
+	 Executed 0 tests, with 0 failures (0 unexpected) in 0.000 (0.000) seconds
+Test Suite 'Selected tests' passed at 2026-09-08 17:55:52.674.
+	 Executed 0 tests, with 0 failures (0 unexpected) in 0.000 (0.007) seconds
+◇ Test run started.
+↳ Testing Library Version: 1902
+↳ Target Platform: arm64e-apple-macos14.0
+◇ Test unverifiedTerminationActionsRetainFailedState(action:) started.
+◇ Test case passing 1 argument action → "resume" to unverifiedTerminationActionsRetainFailedState(action:) started.
+◇ Test case passing 1 argument action → "validate" to unverifiedTerminationActionsRetainFailedState(action:) started.
+◇ Test case passing 1 argument action → "revalidate" to unverifiedTerminationActionsRetainFailedState(action:) started.
+◇ Test case passing 1 argument action → "delete" to unverifiedTerminationActionsRetainFailedState(action:) started.
+◇ Test case passing 1 argument action → "delete-cleanup" to unverifiedTerminationActionsRetainFailedState(action:) started.
+✔ Test unverifiedTerminationActionsRetainFailedState(action:) with 5 test cases passed after 0.018 seconds.
+✔ Test run with 1 test in 0 suites passed after 0.018 seconds.

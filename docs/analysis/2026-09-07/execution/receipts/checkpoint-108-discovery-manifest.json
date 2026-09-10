@@ -1,0 +1,8 @@
+{
+  "executed": false,
+  "payload": "fixtures/inspect-runtime-and-canary-metadata.py",
+  "sha256": "3de783887d6572dab162a19513baacbf47e2c85f7c231e96d86e00d620cc22bd",
+  "approval": "pending",
+  "guestTimeLimitSeconds": 60,
+  "outputLimitBytes": 3500
+}

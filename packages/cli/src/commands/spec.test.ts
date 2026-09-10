@@ -121,7 +121,7 @@ required_facts:
   - id: invalid-change
     proves: []
     kind: unit-test
-    artifact: { path: test.ts, change: delete }
+    artifact: { path: test.ts, change: unsupported }
     command: npx pnpm test -- test.ts
   - id: long-reference
     proves: [${'x'.repeat(129)}]

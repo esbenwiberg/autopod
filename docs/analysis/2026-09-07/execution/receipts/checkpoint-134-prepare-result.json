@@ -1,0 +1,10 @@
+{
+  "value": [
+    {
+      "code": "ProvisioningState/succeeded",
+      "displayStatus": "Provisioning succeeded",
+      "level": "Info",
+      "message": "Enable succeeded: \n[stdout]\n/data/autopod/rollout-134/cutover-library.mjs: OK\n/data/autopod/rollout-134/backup.mjs: OK\n/data/autopod/rollout-134/cutover.py: OK\nCUTOVER_HELPERS_PREPARED\n{\"sha\":\"089442b63e5827894da40c91c764b47ff4562073\",\"identities\":[{\"name\":\"chunk-7WQJR6MP.js\",\"release\":{\"validationImplementationHash\":\"bf48e54c580a7774d64fdb5801536cb499766007da0fd53d6db2571e2a12b2a3\",\"commitSha\":\"089442b63e5827894da40c91c764b47ff4562073\",\"dirty\":false,\"builtAt\":\"2026-09-10T08:53:21.494Z\",\"source\":\"build\"}}],\"resourceMethodChunks\":[\"chunk-YXCZIAJ5.js\"],\"checkoutClean\":true,\"statusPaths\":[],\"entryHash\":\"5e94042ef2f81c86b92cee55631b77409fc0b8d86f328dc0cae031bdc39b1aff\"}\n\n[stderr]\n"
+    }
+  ]
+}

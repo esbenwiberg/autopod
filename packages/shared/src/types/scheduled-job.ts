@@ -1,3 +1,4 @@
+import type { ScheduledScanPolicy } from './scheduled-scan.js';
 export interface ScheduledJobTemplateField {
   key: string;
   label: string;
@@ -27,6 +28,8 @@ export interface UpdateScheduledJobTemplateRequest {
 }
 
 export interface ScheduledJob {
+  scan?: ScheduledScanPolicy | null;
+  lastReportId?: string | null;
   id: string;
   name: string;
   templateId: string;
@@ -45,6 +48,7 @@ export interface ScheduledJob {
 }
 
 export interface CreateScheduledJobRequest {
+  scan?: ScheduledScanPolicy | null;
   templateId?: string;
   name?: string; // legacy: creates a template when templateId is omitted
   profileName: string;
@@ -55,6 +59,7 @@ export interface CreateScheduledJobRequest {
 }
 
 export interface UpdateScheduledJobRequest {
+  scan?: ScheduledScanPolicy | null;
   templateId?: string;
   name?: string;
   task?: string;

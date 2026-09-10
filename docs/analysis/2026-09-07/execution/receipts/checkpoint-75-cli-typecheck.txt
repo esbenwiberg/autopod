@@ -1,0 +1,4 @@
+
+> @autopod/cli@0.0.1 typecheck /private/tmp/autopod-durable-execution/packages/cli
+> tsc --noEmit --project tsconfig.typecheck.json
+

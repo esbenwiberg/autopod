@@ -81,6 +81,14 @@ export const specContractSchema = specContractV1Schema.superRefine((contract, ct
 
 export const createPodRequestSchema = z
   .object({
+    intentionalRerun: z
+      .object({
+        ofPodId: z.string().min(1).max(64),
+        requestKey: z.string().min(1).max(128),
+        reason: z.string().trim().min(1).max(4000),
+      })
+      .strict()
+      .optional(),
     profileName: z.string().min(1).max(64),
     task: z.string().max(50_000),
     model: canonicalModelIdSchema.optional(),
@@ -95,6 +103,7 @@ export const createPodRequestSchema = z
       .refine((s) => !s.includes('..'), 'Branch prefix cannot contain ".."')
       .optional(),
     skipValidation: z.boolean().optional(),
+    tokenBudget: z.number().int().safe().min(1000).nullable().optional(),
     contract: specContractSchema.optional(),
     options: partialPodOptionsSchema.optional(),
     outputMode: z.enum(['pr', 'artifact', 'workspace']).optional(),

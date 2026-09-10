@@ -1,0 +1,683 @@
+{
+  "nonce": "autopod-cp127-20260910-1be967ac",
+  "mutations": false,
+  "observations": [
+    {
+      "at": "2026-09-10T05:43:51.383218+00:00",
+      "diskimages": {
+        "httpStatus": 200,
+        "total": 16,
+        "nonceMatches": 0,
+        "matchingIds": []
+      },
+      "sandboxes": {
+        "httpStatus": 200,
+        "total": 0,
+        "nonceMatches": 0,
+        "matchingIds": []
+      }
+    },
+    {
+      "at": "2026-09-10T05:44:01.688029+00:00",
+      "diskimages": {
+        "httpStatus": 200,
+        "total": 16,
+        "nonceMatches": 0,
+        "matchingIds": []
+      },
+      "sandboxes": {
+        "httpStatus": 200,
+        "total": 0,
+        "nonceMatches": 0,
+        "matchingIds": []
+      }
+    },
+    {
+      "at": "2026-09-10T05:44:11.972305+00:00",
+      "diskimages": {
+        "httpStatus": 200,
+        "total": 16,
+        "nonceMatches": 0,
+        "matchingIds": []
+      },
+      "sandboxes": {
+        "httpStatus": 200,
+        "total": 0,
+        "nonceMatches": 0,
+        "matchingIds": []
+      }
+    },
+    {
+      "at": "2026-09-10T05:44:22.275126+00:00",
+      "diskimages": {
+        "httpStatus": 200,
+        "total": 16,
+        "nonceMatches": 0,
+        "matchingIds": []
+      },
+      "sandboxes": {
+        "httpStatus": 200,
+        "total": 0,
+        "nonceMatches": 0,
+        "matchingIds": []
+      }
+    },
+    {
+      "at": "2026-09-10T05:44:32.569865+00:00",
+      "diskimages": {
+        "httpStatus": 200,
+        "total": 16,
+        "nonceMatches": 0,
+        "matchingIds": []
+      },
+      "sandboxes": {
+        "httpStatus": 200,
+        "total": 0,
+        "nonceMatches": 0,
+        "matchingIds": []
+      }
+    },
+    {
+      "at": "2026-09-10T05:44:42.858057+00:00",
+      "diskimages": {
+        "httpStatus": 200,
+        "total": 16,
+        "nonceMatches": 0,
+        "matchingIds": []
+      },
+      "sandboxes": {
+        "httpStatus": 200,
+        "total": 0,
+        "nonceMatches": 0,
+        "matchingIds": []
+      }
+    },
+    {
+      "at": "2026-09-10T05:44:53.153796+00:00",
+      "diskimages": {
+        "httpStatus": 200,
+        "total": 16,
+        "nonceMatches": 0,
+        "matchingIds": []
+      },
+      "sandboxes": {
+        "httpStatus": 200,
+        "total": 0,
+        "nonceMatches": 0,
+        "matchingIds": []
+      }
+    },
+    {
+      "at": "2026-09-10T05:45:03.457983+00:00",
+      "diskimages": {
+        "httpStatus": 200,
+        "total": 16,
+        "nonceMatches": 0,
+        "matchingIds": []
+      },
+      "sandboxes": {
+        "httpStatus": 200,
+        "total": 0,
+        "nonceMatches": 0,
+        "matchingIds": []
+      }
+    },
+    {
+      "at": "2026-09-10T05:45:13.757801+00:00",
+      "diskimages": {
+        "httpStatus": 200,
+        "total": 16,
+        "nonceMatches": 0,
+        "matchingIds": []
+      },
+      "sandboxes": {
+        "httpStatus": 200,
+        "total": 0,
+        "nonceMatches": 0,
+        "matchingIds": []
+      }
+    },
+    {
+      "at": "2026-09-10T05:45:24.048921+00:00",
+      "diskimages": {
+        "httpStatus": 200,
+        "total": 16,
+        "nonceMatches": 0,
+        "matchingIds": []
+      },
+      "sandboxes": {
+        "httpStatus": 200,
+        "total": 0,
+        "nonceMatches": 0,
+        "matchingIds": []
+      }
+    },
+    {
+      "at": "2026-09-10T05:45:34.350705+00:00",
+      "diskimages": {
+        "httpStatus": 200,
+        "total": 16,
+        "nonceMatches": 0,
+        "matchingIds": []
+      },
+      "sandboxes": {
+        "httpStatus": 200,
+        "total": 0,
+        "nonceMatches": 0,
+        "matchingIds": []
+      }
+    },
+    {
+      "at": "2026-09-10T05:45:44.638290+00:00",
+      "diskimages": {
+        "httpStatus": 200,
+        "total": 16,
+        "nonceMatches": 0,
+        "matchingIds": []
+      },
+      "sandboxes": {
+        "httpStatus": 200,
+        "total": 0,
+        "nonceMatches": 0,
+        "matchingIds": []
+      }
+    },
+    {
+      "at": "2026-09-10T05:45:54.923428+00:00",
+      "diskimages": {
+        "httpStatus": 200,
+        "total": 16,
+        "nonceMatches": 0,
+        "matchingIds": []
+      },
+      "sandboxes": {
+        "httpStatus": 200,
+        "total": 0,
+        "nonceMatches": 0,
+        "matchingIds": []
+      }
+    },
+    {
+      "at": "2026-09-10T05:46:05.225054+00:00",
+      "diskimages": {
+        "httpStatus": 200,
+        "total": 16,
+        "nonceMatches": 0,
+        "matchingIds": []
+      },
+      "sandboxes": {
+        "httpStatus": 200,
+        "total": 0,
+        "nonceMatches": 0,
+        "matchingIds": []
+      }
+    },
+    {
+      "at": "2026-09-10T05:46:15.496668+00:00",
+      "diskimages": {
+        "httpStatus": 200,
+        "total": 16,
+        "nonceMatches": 0,
+        "matchingIds": []
+      },
+      "sandboxes": {
+        "httpStatus": 200,
+        "total": 0,
+        "nonceMatches": 0,
+        "matchingIds": []
+      }
+    },
+    {
+      "at": "2026-09-10T05:46:25.788543+00:00",
+      "diskimages": {
+        "httpStatus": 200,
+        "total": 16,
+        "nonceMatches": 0,
+        "matchingIds": []
+      },
+      "sandboxes": {
+        "httpStatus": 200,
+        "total": 0,
+        "nonceMatches": 0,
+        "matchingIds": []
+      }
+    },
+    {
+      "at": "2026-09-10T05:46:36.105469+00:00",
+      "diskimages": {
+        "httpStatus": 200,
+        "total": 16,
+        "nonceMatches": 0,
+        "matchingIds": []
+      },
+      "sandboxes": {
+        "httpStatus": 200,
+        "total": 0,
+        "nonceMatches": 0,
+        "matchingIds": []
+      }
+    },
+    {
+      "at": "2026-09-10T05:46:46.383348+00:00",
+      "diskimages": {
+        "httpStatus": 200,
+        "total": 16,
+        "nonceMatches": 0,
+        "matchingIds": []
+      },
+      "sandboxes": {
+        "httpStatus": 200,
+        "total": 0,
+        "nonceMatches": 0,
+        "matchingIds": []
+      }
+    },
+    {
+      "at": "2026-09-10T05:46:56.682562+00:00",
+      "diskimages": {
+        "httpStatus": 200,
+        "total": 16,
+        "nonceMatches": 0,
+        "matchingIds": []
+      },
+      "sandboxes": {
+        "httpStatus": 200,
+        "total": 0,
+        "nonceMatches": 0,
+        "matchingIds": []
+      }
+    },
+    {
+      "at": "2026-09-10T05:47:06.963473+00:00",
+      "diskimages": {
+        "httpStatus": 200,
+        "total": 16,
+        "nonceMatches": 0,
+        "matchingIds": []
+      },
+      "sandboxes": {
+        "httpStatus": 200,
+        "total": 0,
+        "nonceMatches": 0,
+        "matchingIds": []
+      }
+    },
+    {
+      "at": "2026-09-10T05:47:17.253590+00:00",
+      "diskimages": {
+        "httpStatus": 200,
+        "total": 16,
+        "nonceMatches": 0,
+        "matchingIds": []
+      },
+      "sandboxes": {
+        "httpStatus": 200,
+        "total": 0,
+        "nonceMatches": 0,
+        "matchingIds": []
+      }
+    },
+    {
+      "at": "2026-09-10T05:47:27.524918+00:00",
+      "diskimages": {
+        "httpStatus": 200,
+        "total": 16,
+        "nonceMatches": 0,
+        "matchingIds": []
+      },
+      "sandboxes": {
+        "httpStatus": 200,
+        "total": 0,
+        "nonceMatches": 0,
+        "matchingIds": []
+      }
+    },
+    {
+      "at": "2026-09-10T05:47:37.805385+00:00",
+      "diskimages": {
+        "httpStatus": 200,
+        "total": 16,
+        "nonceMatches": 0,
+        "matchingIds": []
+      },
+      "sandboxes": {
+        "httpStatus": 200,
+        "total": 0,
+        "nonceMatches": 0,
+        "matchingIds": []
+      }
+    },
+    {
+      "at": "2026-09-10T05:47:48.120094+00:00",
+      "diskimages": {
+        "httpStatus": 200,
+        "total": 16,
+        "nonceMatches": 0,
+        "matchingIds": []
+      },
+      "sandboxes": {
+        "httpStatus": 200,
+        "total": 0,
+        "nonceMatches": 0,
+        "matchingIds": []
+      }
+    },
+    {
+      "at": "2026-09-10T05:47:58.422545+00:00",
+      "diskimages": {
+        "httpStatus": 200,
+        "total": 16,
+        "nonceMatches": 0,
+        "matchingIds": []
+      },
+      "sandboxes": {
+        "httpStatus": 200,
+        "total": 0,
+        "nonceMatches": 0,
+        "matchingIds": []
+      }
+    },
+    {
+      "at": "2026-09-10T05:48:08.710206+00:00",
+      "diskimages": {
+        "httpStatus": 200,
+        "total": 16,
+        "nonceMatches": 0,
+        "matchingIds": []
+      },
+      "sandboxes": {
+        "httpStatus": 200,
+        "total": 0,
+        "nonceMatches": 0,
+        "matchingIds": []
+      }
+    },
+    {
+      "at": "2026-09-10T05:48:18.991161+00:00",
+      "diskimages": {
+        "httpStatus": 200,
+        "total": 16,
+        "nonceMatches": 0,
+        "matchingIds": []
+      },
+      "sandboxes": {
+        "httpStatus": 200,
+        "total": 0,
+        "nonceMatches": 0,
+        "matchingIds": []
+      }
+    },
+    {
+      "at": "2026-09-10T05:48:29.292442+00:00",
+      "diskimages": {
+        "httpStatus": 200,
+        "total": 16,
+        "nonceMatches": 0,
+        "matchingIds": []
+      },
+      "sandboxes": {
+        "httpStatus": 200,
+        "total": 0,
+        "nonceMatches": 0,
+        "matchingIds": []
+      }
+    },
+    {
+      "at": "2026-09-10T05:48:39.574818+00:00",
+      "diskimages": {
+        "httpStatus": 200,
+        "total": 16,
+        "nonceMatches": 0,
+        "matchingIds": []
+      },
+      "sandboxes": {
+        "httpStatus": 200,
+        "total": 0,
+        "nonceMatches": 0,
+        "matchingIds": []
+      }
+    },
+    {
+      "at": "2026-09-10T05:48:49.873316+00:00",
+      "diskimages": {
+        "httpStatus": 200,
+        "total": 16,
+        "nonceMatches": 0,
+        "matchingIds": []
+      },
+      "sandboxes": {
+        "httpStatus": 200,
+        "total": 0,
+        "nonceMatches": 0,
+        "matchingIds": []
+      }
+    },
+    {
+      "at": "2026-09-10T05:49:00.196803+00:00",
+      "diskimages": {
+        "httpStatus": 200,
+        "total": 16,
+        "nonceMatches": 0,
+        "matchingIds": []
+      },
+      "sandboxes": {
+        "httpStatus": 200,
+        "total": 0,
+        "nonceMatches": 0,
+        "matchingIds": []
+      }
+    },
+    {
+      "at": "2026-09-10T05:49:10.495683+00:00",
+      "diskimages": {
+        "httpStatus": 200,
+        "total": 16,
+        "nonceMatches": 0,
+        "matchingIds": []
+      },
+      "sandboxes": {
+        "httpStatus": 200,
+        "total": 0,
+        "nonceMatches": 0,
+        "matchingIds": []
+      }
+    },
+    {
+      "at": "2026-09-10T05:49:20.781704+00:00",
+      "diskimages": {
+        "httpStatus": 200,
+        "total": 16,
+        "nonceMatches": 0,
+        "matchingIds": []
+      },
+      "sandboxes": {
+        "httpStatus": 200,
+        "total": 0,
+        "nonceMatches": 0,
+        "matchingIds": []
+      }
+    },
+    {
+      "at": "2026-09-10T05:49:31.065538+00:00",
+      "diskimages": {
+        "httpStatus": 200,
+        "total": 16,
+        "nonceMatches": 0,
+        "matchingIds": []
+      },
+      "sandboxes": {
+        "httpStatus": 200,
+        "total": 0,
+        "nonceMatches": 0,
+        "matchingIds": []
+      }
+    },
+    {
+      "at": "2026-09-10T05:49:41.366122+00:00",
+      "diskimages": {
+        "httpStatus": 200,
+        "total": 16,
+        "nonceMatches": 0,
+        "matchingIds": []
+      },
+      "sandboxes": {
+        "httpStatus": 200,
+        "total": 0,
+        "nonceMatches": 0,
+        "matchingIds": []
+      }
+    },
+    {
+      "at": "2026-09-10T05:49:51.666163+00:00",
+      "diskimages": {
+        "httpStatus": 200,
+        "total": 16,
+        "nonceMatches": 0,
+        "matchingIds": []
+      },
+      "sandboxes": {
+        "httpStatus": 200,
+        "total": 0,
+        "nonceMatches": 0,
+        "matchingIds": []
+      }
+    },
+    {
+      "at": "2026-09-10T05:50:01.975203+00:00",
+      "diskimages": {
+        "httpStatus": 200,
+        "total": 16,
+        "nonceMatches": 0,
+        "matchingIds": []
+      },
+      "sandboxes": {
+        "httpStatus": 200,
+        "total": 0,
+        "nonceMatches": 0,
+        "matchingIds": []
+      }
+    },
+    {
+      "at": "2026-09-10T05:50:12.270395+00:00",
+      "diskimages": {
+        "httpStatus": 200,
+        "total": 16,
+        "nonceMatches": 0,
+        "matchingIds": []
+      },
+      "sandboxes": {
+        "httpStatus": 200,
+        "total": 0,
+        "nonceMatches": 0,
+        "matchingIds": []
+      }
+    },
+    {
+      "at": "2026-09-10T05:50:22.562448+00:00",
+      "diskimages": {
+        "httpStatus": 200,
+        "total": 16,
+        "nonceMatches": 0,
+        "matchingIds": []
+      },
+      "sandboxes": {
+        "httpStatus": 200,
+        "total": 0,
+        "nonceMatches": 0,
+        "matchingIds": []
+      }
+    },
+    {
+      "at": "2026-09-10T05:50:32.849424+00:00",
+      "diskimages": {
+        "httpStatus": 200,
+        "total": 16,
+        "nonceMatches": 0,
+        "matchingIds": []
+      },
+      "sandboxes": {
+        "httpStatus": 200,
+        "total": 0,
+        "nonceMatches": 0,
+        "matchingIds": []
+      }
+    },
+    {
+      "at": "2026-09-10T05:50:43.132892+00:00",
+      "diskimages": {
+        "httpStatus": 200,
+        "total": 16,
+        "nonceMatches": 0,
+        "matchingIds": []
+      },
+      "sandboxes": {
+        "httpStatus": 200,
+        "total": 0,
+        "nonceMatches": 0,
+        "matchingIds": []
+      }
+    },
+    {
+      "at": "2026-09-10T05:50:53.431779+00:00",
+      "diskimages": {
+        "httpStatus": 200,
+        "total": 16,
+        "nonceMatches": 0,
+        "matchingIds": []
+      },
+      "sandboxes": {
+        "httpStatus": 200,
+        "total": 0,
+        "nonceMatches": 0,
+        "matchingIds": []
+      }
+    },
+    {
+      "at": "2026-09-10T05:51:03.718585+00:00",
+      "diskimages": {
+        "httpStatus": 200,
+        "total": 16,
+        "nonceMatches": 0,
+        "matchingIds": []
+      },
+      "sandboxes": {
+        "httpStatus": 200,
+        "total": 0,
+        "nonceMatches": 0,
+        "matchingIds": []
+      }
+    },
+    {
+      "at": "2026-09-10T05:51:14.046249+00:00",
+      "diskimages": {
+        "httpStatus": 200,
+        "total": 16,
+        "nonceMatches": 0,
+        "matchingIds": []
+      },
+      "sandboxes": {
+        "httpStatus": 200,
+        "total": 0,
+        "nonceMatches": 0,
+        "matchingIds": []
+      }
+    },
+    {
+      "at": "2026-09-10T05:51:24.339982+00:00",
+      "diskimages": {
+        "httpStatus": 200,
+        "total": 16,
+        "nonceMatches": 0,
+        "matchingIds": []
+      },
+      "sandboxes": {
+        "httpStatus": 200,
+        "total": 0,
+        "nonceMatches": 0,
+        "matchingIds": []
+      }
+    }
+  ],
+  "nonceAbsentAllObservations": true,
+  "result": "timed_out_import_no_task_resource_observed"
+}

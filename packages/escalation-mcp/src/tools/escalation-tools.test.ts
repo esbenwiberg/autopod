@@ -28,7 +28,8 @@ function makeBridge(overrides: Partial<PodBridge> = {}): PodBridge {
     isAskHumanDisabled: vi.fn().mockReturnValue(false),
     reportPlan: vi.fn(),
     reportProgress: vi.fn(),
-    consumeMessages: vi.fn().mockReturnValue({ hasMessage: false }),
+    readOperatorGuidance: vi.fn().mockReturnValue(null),
+    acknowledgeOperatorGuidance: vi.fn(),
     executeAction: vi.fn(),
     getAvailableActions: vi.fn().mockReturnValue([]),
     writeFileInContainer: vi.fn(),
@@ -445,7 +446,8 @@ describe('reportProgress', () => {
 describe('checkMessages', () => {
   it('returns JSON with hasMessage false when no message queued', async () => {
     const bridge = makeBridge({
-      consumeMessages: vi.fn().mockReturnValue({ hasMessage: false }),
+      readOperatorGuidance: vi.fn().mockReturnValue(null),
+      acknowledgeOperatorGuidance: vi.fn(),
     });
 
     const result = await checkMessages('sess-1', bridge);
@@ -457,7 +459,10 @@ describe('checkMessages', () => {
 
   it('returns JSON with hasMessage true and message content when queued', async () => {
     const bridge = makeBridge({
-      consumeMessages: vi.fn().mockReturnValue({ hasMessage: true, message: 'please stop' }),
+      readOperatorGuidance: vi.fn().mockReturnValue({
+        deliveryId: '00000000-0000-4000-8000-000000000001',
+        messages: ['please stop'],
+      }),
     });
 
     const result = await checkMessages('sess-1', bridge);
@@ -467,11 +472,11 @@ describe('checkMessages', () => {
     expect(parsed.message).toBe('please stop');
   });
 
-  it('calls consumeMessages with the pod ID', async () => {
+  it('calls readOperatorGuidance with the pod ID', async () => {
     const bridge = makeBridge();
 
     await checkMessages('my-pod', bridge);
 
-    expect(bridge.consumeMessages).toHaveBeenCalledWith('my-pod');
+    expect(bridge.readOperatorGuidance).toHaveBeenCalledWith('my-pod');
   });
 });

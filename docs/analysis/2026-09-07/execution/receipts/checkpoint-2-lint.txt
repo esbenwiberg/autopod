@@ -1,0 +1,195 @@
+./docs/analysis/2026-09-07/execution/receipts/health-cli-interaction.json format ━━━━━━━━━━━━━━━━━━━
+
+  × Formatter would have printed the following content:
+
+    1   │ - {"scope":"local·HTTP·fixture;·actual·built·CLI·process","requests":2,"machineReadable":"passed","operatorText":"passed","output":"Daemon·v0.0.1:·ok\nRelease:·fixture-release·(modified·source)\nBackup:·stale;·latest·2026-09-01T00:00:00Z\n"}
+      1 │ + {
+      2 │ + ··"scope":·"local·HTTP·fixture;·actual·built·CLI·process",
+      3 │ + ··"requests":·2,
+      4 │ + ··"machineReadable":·"passed",
+      5 │ + ··"operatorText":·"passed",
+      6 │ + ··"output":·"Daemon·v0.0.1:·ok\nRelease:·fixture-release·(modified·source)\nBackup:·stale;·latest·2026-09-01T00:00:00Z\n"
+      7 │ + }
+    2 8 │
+
+
+./docs/analysis/2026-09-07/execution/receipts/dependency-audit-before.json format ━━━━━━━━━━━━━━━━━━
+
+  × Formatter would have printed the following content:
+
+     634  634 │         "title": "@hono/node-server: Middleware bypass via repeated slashes in serveStatic",
+     635  635 │         "metadata": null,
+     636      │ - ······"cves":·[
+     637      │ - ········"CVE-2026-39406"
+     638      │ - ······],
+          636 │ + ······"cves":·["CVE-2026-39406"],
+     639  637 │         "access": "public",
+     640  638 │         "severity": "moderate",
+    ········· │
+     649  647 │           "vectorString": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:L/I:N/A:N"
+     650  648 │         },
+     651      │ - ······"cwe":·[
+     652      │ - ········"CWE-22"
+     653      │ - ······],
+          649 │ + ······"cwe":·["CWE-22"],
+     654  650 │         "url": "https://github.com/advisories/GHSA-92pp-h63x-v22m"
+     655  651 │       },
+    ········· │
+     658  654 │           {
+     659  655 │             "version": "8.3.0",
+     660      │ - ··········"paths":·[
+     661      │ - ············"packages/daemon·>·@fastify/static@8.3.0"
+     662      │ - ··········]
+          656 │ + ··········"paths":·["packages/daemon·>·@fastify/static@8.3.0"]
+     663  657 │           }
+     664  658 │         ],
+    ········· │
+     673  667 │         "title": "@fastify/static vulnerable to path traversal in directory listing",
+     674  668 │         "metadata": null,
+     675      │ - ······"cves":·[
+     676      │ - ········"CVE-2026-6410"
+     677      │ - ······],
+          669 │ + ······"cves":·["CVE-2026-6410"],
+     678  670 │         "access": "public",
+     679  671 │         "severity": "moderate",
+    ········· │
+     688  680 │           "vectorString": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:L/I:N/A:N"
+     689  681 │         },
+     690      │ - ······"cwe":·[
+     691      │ - ········"CWE-22"
+     692      │ - ······],
+          682 │ + ······"cwe":·["CWE-22"],
+     693  683 │         "url": "https://github.com/advisories/GHSA-pr96-94w5-mx2h"
+     694  684 │       },
+    ········· │
+     697  687 │           {
+     698  688 │             "version": "8.3.0",
+     699      │ - ··········"paths":·[
+     700      │ - ············"packages/daemon·>·@fastify/static@8.3.0"
+     701      │ - ··········]
+          689 │ + ··········"paths":·["packages/daemon·>·@fastify/static@8.3.0"]
+     702  690 │           }
+     703  691 │         ],
+    ········· │
+     712  700 │         "title": "@fastify/static vulnerable to route guard bypass via encoded path separators",
+     713  701 │         "metadata": null,
+     714      │ - ······"cves":·[
+     715      │ - ········"CVE-2026-6414"
+     716      │ - ······],
+          702 │ + ······"cves":·["CVE-2026-6414"],
+     717  703 │         "access": "public",
+     718  704 │         "severity": "moderate",
+    ········· │
+     727  713 │           "vectorString": "CVSS:3.1/AV:N/AC:H/PR:N/UI:N/S:U/C:H/I:N/A:N"
+     728  714 │         },
+     729      │ - ······"cwe":·[
+     730      │ - ········"CWE-177"
+     731      │ - ······],
+          715 │ + ······"cwe":·["CWE-177"],
+     732  716 │         "url": "https://github.com/advisories/GHSA-x428-ghpx-8j92"
+     733  717 │       },
+    ········· │
+     753  737 │         "title": "ip-address has XSS in Address6 HTML-emitting methods",
+     754  738 │         "metadata": null,
+     755      │ - ······"cves":·[
+     756      │ - ········"CVE-2026-42338"
+     757      │ - ······],
+          739 │ + ······"cves":·["CVE-2026-42338"],
+     758  740 │         "access": "public",
+     759  741 │         "severity": "moderate",
+    ········· │
+     768  750 │           "vectorString": null
+     769  751 │         },
+     770      │ - ······"cwe":·[
+     771      │ - ········"CWE-79"
+     772      │ - ······],
+          752 │ + ······"cwe":·["CWE-79"],
+     773  753 │         "url": "https://github.com/advisories/GHSA-v2v4-37r5-5v8g"
+     774  754 │       },
+    ········· │
+     777  757 │           {
+     778  758 │             "version": "8.3.2",
+     779      │ - ··········"paths":·[
+     780      │ - ············"packages/cli·>·@azure/msal-node@2.16.3·>·uuid@8.3.2"
+     781      │ - ··········]
+          759 │ + ··········"paths":·["packages/cli·>·@azure/msal-node@2.16.3·>·uuid@8.3.2"]
+     782  760 │           }
+     783  761 │         ],
+    ········· │
+     792  770 │         "title": "uuid: Missing buffer bounds check in v3/v5/v6 when buf is provided",
+     793  771 │         "metadata": null,
+     794      │ - ······"cves":·[
+     795      │ - ········"CVE-2026-41907"
+     796      │ - ······],
+          772 │ + ······"cves":·["CVE-2026-41907"],
+     797  773 │         "access": "public",
+     798  774 │         "severity": "moderate",
+    ········· │
+     807  783 │           "vectorString": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:H/A:N"
+     808  784 │         },
+     809      │ - ······"cwe":·[
+     810      │ - ········"CWE-787",
+     811      │ - ········"CWE-1285"
+     812      │ - ······],
+          785 │ + ······"cwe":·["CWE-787",·"CWE-1285"],
+     813  786 │         "url": "https://github.com/advisories/GHSA-w5hq-g745-h8pq"
+     814  787 │       },
+    ········· │
+     843  816 │         "title": "qs has a remotely triggerable DoS: qs.stringify crashes with TypeError on null/undefined entries in comma-format arrays when encodeValuesOnly is set",
+     844  817 │         "metadata": null,
+     845      │ - ······"cves":·[
+     846      │ - ········"CVE-2026-8723"
+     847      │ - ······],
+          818 │ + ······"cves":·["CVE-2026-8723"],
+     848  819 │         "access": "public",
+     849  820 │         "severity": "moderate",
+    ········· │
+     858  829 │           "vectorString": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:L"
+     859  830 │         },
+     860      │ - ······"cwe":·[
+     861      │ - ········"CWE-476"
+     862      │ - ······],
+          831 │ + ······"cwe":·["CWE-476"],
+     863  832 │         "url": "https://github.com/advisories/GHSA-q8mj-m7cp-5q26"
+     864  833 │       },
+    ········· │
+     920  889 │           "vectorString": "CVSS:3.1/AV:L/AC:H/PR:L/UI:N/S:U/C:N/I:L/A:N"
+     921  890 │         },
+     922      │ - ······"cwe":·[
+     923      │ - ········"CWE-22"
+     924      │ - ······],
+          891 │ + ······"cwe":·["CWE-22"],
+     925  892 │         "url": "https://github.com/advisories/GHSA-g7r4-m6w7-qqqr"
+     926  893 │       },
+    ········· │
+     944  911 │         "title": "adm-zip: Crafted ZIP file triggers 4GB memory allocation",
+     945  912 │         "metadata": null,
+     946      │ - ······"cves":·[
+     947      │ - ········"CVE-2026-39244"
+     948      │ - ······],
+          913 │ + ······"cves":·["CVE-2026-39244"],
+     949  914 │         "access": "public",
+     950  915 │         "severity": "high",
+    ········· │
+     959  924 │           "vectorString": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:H"
+     960  925 │         },
+     961      │ - ······"cwe":·[
+     962      │ - ········"CWE-400",
+     963      │ - ········"CWE-789"
+     964      │ - ······],
+          926 │ + ······"cwe":·["CWE-400",·"CWE-789"],
+     965  927 │         "url": "https://github.com/advisories/GHSA-xcpc-8h2w-3j85"
+     966  928 │       },
+    ········· │
+     984  946 │         "title": "brace-expansion: DoS via exponential-time expansion of consecutive non-expanding {} groups",
+     985  947 │         "metadata": null,
+     986      │ - ······"cves":·[
+     987      │ - ········"CVE-2026-13149"
+  899 more lines truncated
+
+
+Checked 789 files in 407ms. No fixes applied.
+Found 2 errors.
+check ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  × Some errors were emitted while running checks.

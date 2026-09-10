@@ -1,0 +1,6 @@
+{
+  "status": "incomplete",
+  "phase": "service_identity",
+  "activeDatabaseOpened": false,
+  "failureCode": "required_path_missing"
+}

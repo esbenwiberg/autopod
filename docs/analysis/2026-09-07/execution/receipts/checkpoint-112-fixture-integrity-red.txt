@@ -1,0 +1,21 @@
+node:internal/modules/run_main:107
+    triggerUncaughtException(
+    ^
+
+AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+
+200 !== 409
+
+    at file:///private/tmp/autopod-fixture-integrity-red-112/verify-mobile-fixture.mjs:52:10
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async withFixture (file:///private/tmp/autopod-fixture-integrity-red-112/verify-mobile-fixture.mjs:41:5)
+    at async file:///private/tmp/autopod-fixture-integrity-red-112/verify-mobile-fixture.mjs:50:1 {
+  generatedMessage: true,
+  code: 'ERR_ASSERTION',
+  actual: 200,
+  expected: 409,
+  operator: 'strictEqual',
+  diff: 'simple'
+}
+
+Node.js v24.18.0
