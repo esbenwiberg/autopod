@@ -448,7 +448,10 @@
     "limitations": [],
     "revoked": false,
     "observedExit": false,
-    "cleanup": "not-requested"
+    "cleanup": "not-requested",
+    "providerRequests": 0,
+    "consumedTokens": 0,
+    "tokenUsageKnown": false
   },
   "ManagedPodError": {
     "schemaVersion": 1,
@@ -535,6 +538,7 @@
     "mode": "request-time",
     "expiresAt": 2000000000,
     "maxProviderRequests": 1,
+    "maxObservedTokens": 10000,
     "maxDurationSeconds": 180
   }
 }

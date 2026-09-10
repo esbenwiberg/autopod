@@ -52,6 +52,7 @@ export interface ManagedPodRow {
   grant_revision: number;
   grant_id: string;
   consumed_tokens: number;
+  exit_code: number | null;
   created_at: number;
 }
 
@@ -86,6 +87,7 @@ export class ManagedPodService {
         ...(this.artifactPipeline ? ['artifact-export-v1'] : []),
         'effective-grant-v1',
         'request-time-budget-v1',
+        'request-time-observed-token-stop-v1',
         'autonomous-expiry-v1',
         'managed-controls-v1',
         'managed-events-v1',
@@ -321,8 +323,10 @@ export class ManagedPodService {
           this.db
             .transaction(() => {
               this.db
-                .prepare('UPDATE managed_pods SET observed_exit=1,state=? WHERE pod_id=?')
-                .run(state, row.pod_id);
+                .prepare(
+                  'UPDATE managed_pods SET observed_exit=1,state=?,exit_code=? WHERE pod_id=?',
+                )
+                .run(state, observed.exitCode ?? null, row.pod_id);
               this.onTransition?.(row, 'runtime-stopped', state);
             })
             .immediate();

@@ -15,7 +15,7 @@ it('upgrades legacy rows without changing historical artifacts and reopens idemp
   expect(new Set(files.map((name) => name.split('_')[0])).size).toBe(files.length);
   runMigrations(db, directory, pino({ level: 'silent' }));
   const version = db.prepare('SELECT max(version) AS version FROM schema_version').get();
-  expect(version).toEqual({ version: 184 });
+  expect(version).toEqual({ version: 185 });
   expect(
     (db.prepare('PRAGMA table_info(pods)').all() as { name: string }[]).some(
       (row) => row.name === 'artifacts_path',
@@ -28,7 +28,7 @@ it('upgrades legacy rows without changing historical artifacts and reopens idemp
   expect(sql).not.toMatch(/UPDATE\s+pods|DROP\s+TABLE/i);
   db.close();
 });
-it('managed and native migrations preserve rows on a real 150 upgrade through 184 and replay', () => {
+it('managed and native migrations preserve rows on a real 150 upgrade through 185 and replay', () => {
   const root = mkdtempSync(path.join(tmpdir(), 'managed-upgrade-'));
   const db = new Database(':memory:');
   const logger = pino({ level: 'silent' });
@@ -49,7 +49,7 @@ it('managed and native migrations preserve rows on a real 150 upgrade through 18
     const profiles = db.prepare('SELECT * FROM profiles').all();
     const tables = db
       .prepare(
-        "SELECT name,sql FROM sqlite_master WHERE type='table' AND name LIKE 'managed_%' ORDER BY name",
+        "SELECT name,sql FROM sqlite_master WHERE type='table' AND name LIKE 'managed_%' AND name != 'managed_pods' ORDER BY name",
       )
       .all();
     runMigrations(db, source, logger);
@@ -59,15 +59,20 @@ it('managed and native migrations preserve rows on a real 150 upgrade through 18
     expect(
       db
         .prepare(
-          "SELECT name,sql FROM sqlite_master WHERE type='table' AND name LIKE 'managed_%' AND name NOT IN ('managed_provider_requests','managed_github_reads') ORDER BY name",
+          "SELECT name,sql FROM sqlite_master WHERE type='table' AND name LIKE 'managed_%' AND name NOT IN ('managed_pods','managed_provider_requests','managed_github_reads') ORDER BY name",
         )
         .all(),
     ).toEqual(tables);
+    expect(
+      (db.prepare('PRAGMA table_info(managed_pods)').all() as { name: string }[]).some(
+        (row) => row.name === 'exit_code',
+      ),
+    ).toBe(true);
     expect(db.prepare('SELECT * FROM managed_provider_requests').all()).toEqual([]);
     expect(db.prepare('SELECT * FROM managed_github_reads').all()).toEqual([]);
     expect(db.pragma('quick_check')).toEqual([{ quick_check: 'ok' }]);
     expect(db.prepare('SELECT max(version) AS version FROM schema_version').get()).toEqual({
-      version: 184,
+      version: 185,
     });
   } finally {
     db.close();

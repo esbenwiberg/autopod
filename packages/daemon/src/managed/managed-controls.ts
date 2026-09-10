@@ -80,6 +80,17 @@ export class ManagedControls {
         `provider-${providerFailure.failure_phase}-${providerFailure.failure_reason}-${status}`,
       );
     }
+    const usage = this.service.db
+      .prepare(`SELECT count(*) AS requests,count(actual_tokens) AS known
+        FROM managed_provider_requests WHERE pod_id=?`)
+      .get(podId) as { requests: number; known: number };
+    const budget = (JSON.parse(row.request_json) as ManagedPodRequest).effectiveGrant.budget;
+    if (
+      'mode' in budget &&
+      budget.maxObservedTokens !== undefined &&
+      row.consumed_tokens >= budget.maxObservedTokens
+    )
+      limitations.push('observed-token-budget-reached');
     const result: ManagedPodResult = {
       schemaVersion: 1,
       handle: JSON.parse(row.handle_json) as ManagedPodHandle,
@@ -92,6 +103,12 @@ export class ManagedControls {
       revoked: Boolean(row.revoked),
       observedExit: Boolean(row.observed_exit),
       cleanup: row.cleanup as ManagedPodResult['cleanup'],
+      providerRequests: usage.requests,
+      consumedTokens: row.consumed_tokens,
+      ...('mode' in budget
+        ? { tokenUsageKnown: usage.requests > 0 && usage.known === usage.requests }
+        : {}),
+      ...(row.observed_exit && row.exit_code !== null ? { exitCode: row.exit_code } : {}),
     };
     return { schemaVersion: 1, cursor: parsed.at(-1)?.cursor ?? cursor, events: parsed, result };
   }

@@ -11,8 +11,8 @@ afterEach(() => {
   for (const g of gateways.splice(0)) g.close();
   f?.close();
 });
-async function setup() {
-  f = requestTimeFixture();
+async function setup(maximumRequests = 1, maxObservedTokens = 10000) {
+  f = requestTimeFixture(maximumRequests, maxObservedTokens);
   const service = f.service();
   const handle = await service.start('installation', f.request);
   const transport: BoundedProviderTransport = {
@@ -21,7 +21,7 @@ async function setup() {
     preflight: vi.fn(),
     generate: vi.fn(async () => ({ value: 'report', consumedTokens: 6000 })),
   };
-  const gateway = new ManagedProviderGateway(service, transport);
+  const gateway = new ManagedProviderGateway(service, transport, maximumRequests);
   gateways.push(gateway);
   const call = (key = 'one') => gateway.invoke('installation', handle.podId, 1, key, 'report', 0);
   return { service, handle, transport, gateway, call };
@@ -47,6 +47,33 @@ it('observes usage above the old cap without inventing a token reservation, then
     'request-limit',
   );
   expect(x.transport.generate).toHaveBeenCalledTimes(1);
+});
+it('delivers the crossing response, then stops before another provider request', async () => {
+  const x = await setup(2, 5000);
+  expect(await x.call()).toEqual({ state: 'observed', value: 'report' });
+  x.gateway.close();
+  f.restart();
+  const restarted = new ManagedProviderGateway(f.service(), x.transport, 2);
+  gateways.push(restarted);
+  expect(await restarted.invoke('installation', x.handle.podId, 1, 'one', 'report', 0)).toEqual({
+    state: 'observed',
+    value: 'report',
+  });
+  await expect(
+    restarted.invoke('installation', x.handle.podId, 1, 'two', 'report', 0),
+  ).rejects.toThrow('observed-token-stop');
+  expect(x.transport.generate).toHaveBeenCalledTimes(1);
+  const result = new ManagedControls(f.service()).observe(
+    'installation',
+    x.handle.podId,
+    '0',
+  ).result;
+  expect(result).toMatchObject({
+    providerRequests: 1,
+    consumedTokens: 6000,
+    tokenUsageKnown: true,
+  });
+  expect(result.limitations).toContain('observed-token-budget-reached');
 });
 it('claims one concurrent operation and preserves unknown usage after failure and restart', async () => {
   const x = await setup();

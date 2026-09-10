@@ -67,6 +67,11 @@ Stop acceptance, observed worker exit and observed cleanup are distinct facts.
 Cleanup waits for required artifact exports and any promised source candidate to
 be frozen. If the runtime exits nonzero before any artifact can exist, the bounded
 `agent-runtime-failed` result permits cleanup while preserving that failure truth.
+Request-time budgets may add `maxObservedTokens`. AutoPod delivers the response
+that crosses this measured threshold and denies the next new provider request,
+so one in-flight request can overshoot it. `ManagedPodResult` may report the
+durable request count, measured tokens, usage completeness, and terminal exit
+code without exposing provider content or worker logs.
 Source delivery can then recover without the worker or its workspace.
 An uncertain Sandbox create never allocates a replacement. Suspension is not exit.
 A missing authoritative PR result never authorizes creating another PR.

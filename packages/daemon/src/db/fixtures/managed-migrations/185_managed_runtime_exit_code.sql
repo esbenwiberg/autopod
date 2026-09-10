@@ -1,0 +1,2 @@
+ALTER TABLE managed_pods ADD COLUMN exit_code INTEGER
+    CHECK(exit_code IS NULL OR exit_code BETWEEN -2147483648 AND 2147483647);
