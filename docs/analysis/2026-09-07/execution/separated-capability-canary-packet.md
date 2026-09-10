@@ -1,5 +1,7 @@
 # Named Codex capability checks: additional attempt proposal
 
+**Current CP131 disposition:** the user authorized all remaining goal-scoped canaries. Required Codex ownership/config/streaming, Teamplanner actual-image NuGet semantics and the corrected resource adapter are now verified, with exact cleanup after every run. See [checkpoint 131](checkpoint-131.md) and [continuing authority](canary-authorization.md). All earlier one-attempt/pending-canary approval statements below are dated history and superseded. Application source is now `9abf64b1d199f71f79190b6fc667d899fdc1559e`; prior client/migration and registry-validator proofs retain their unchanged-file scope. Hosted source/deployment and historical API causal evidence remain separate.
+
 **Prepared, not approved or executed.** CP130 proved successful image import and sandbox creation on the exact affected digest. Azure reported Running and 2 vCPU / 4 GiB memory / 40 GiB disk. The first aggregate identity command exited 127 with a command-not-found diagnostic. Config installation and streaming did not run. Sandbox and image deletion were both verified by GET 404; the complete creation-through-cleanup interval was 19.433 seconds. [Attempt and cleanup](receipts/checkpoint-130-live-attempt.json).
 
 ## Correct the case mapping and preserve diagnostic evidence

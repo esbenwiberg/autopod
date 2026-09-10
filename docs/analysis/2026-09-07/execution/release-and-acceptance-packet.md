@@ -1,22 +1,15 @@
 # Release and remaining acceptance packet
 
-**CP130 update:** this approval was used; sandbox creation succeeded and resources matched, but the aggregate runtime check exited127. Both resources were deleted and absence verified. The [separated capability packet](separated-capability-canary-packet.md) supersedes the consumed request; local NuGet command evidence is distinct from image acceptance.
-
-**CP129 update:** the approved full-window import succeeded. Sandbox creation returned 400; the task-owned image was deleted and absence verified. No runtime checks ran. The [label-safe additional-attempt proposal](label-safe-image-canary-packet.md) supersedes the consumed request; exact rejection cause remains unconfirmed.
-
-**CP128 update:** the corrected request was approved and used once. ACR exchange succeeded; the image PUT hit an erroneous local 60-second timeout. No task resource was observed in repeated inventories through/past the ten-minute window. The [full-window proposal](full-window-image-canary-packet.md) replaces this consumed request; hidden conversion remains uncertain and no retry is authorized.
-
-**CP127 update:** approved CP126 import returned HTTP 401; no sandbox ran and repeated inventories found no task resources. The [corrected additional-attempt packet](corrected-image-canary-packet.md) adds the documented transient ACR token exchange and requires separate approval. Earlier statements that execution was unapproved are dated CP126 history.
-
-Updated September 10, checkpoint 126. This packet supersedes the dated approval requests in checkpoints 106–123. Their raw receipts remain retained. It is a local review artifact; it does not authorize publication, deployment, restart, cloud access changes or a paid canary. The goal remains incomplete.
+Current at checkpoint 131. Required canaries and operator/backup compatibility checks are verified within recorded scope. Continuing canary authority is explicit; publication, production deployment/restart, existing-resource mutation, role changes and external messages remain separately gated. The goal is incomplete. [Current ledger](acceptance.json), [prior packet history](receipts/checkpoint-131-prior-release-packet.md).
 
 ## Current tested candidate
 
-- Application source: `4e73cd8ce88e44cdb5c2d8d0a89447b819fa5a39`, isolated branch `codex/durable-execution-contract` at `/private/tmp/autopod-durable-execution`.
-- [Current non-documentation patch](receipts/checkpoint-122-candidate-code.diff) and [base/candidate blob manifest](receipts/checkpoint-122-candidate-manifest.json) compare against freshly fetched main `b75fbf0b7e2c4ea455838a6e4df6537665a7a8cc`, integrated locally. The patch uses `--binary --unified=0`; applying it requires the exact base and `git apply --unidiff-zero`. Recheck main before publication.
-- Governing contract SHA-256: `3dc5e753db8ec664ea8ed1a93b1150c936ea53cbc8e9f8a0def05113dfd1e481`; unchanged from the original checkout. Unrelated original checkout changes remain excluded.
-- [Clean full pipeline](receipts/checkpoint-122-full-validation-identity.json) passed on `4e73cd8c`: 6,363 package tests, one existing platform skip, 11 standalone Node tests, required shell checks, install/lint/build/configured type checks/audit/secret scan. Thirteen of fifteen Turbo results were cached. One moderate dependency advisory remains. The 357 Swift tests in eight suites and mapped native/mobile/CLI interactions retain their exact earlier source scope: all three client directories are unchanged from `15900d9e`, as [verified here](receipts/checkpoint-122-source-identity.json).
-- [Fresh matched replay](receipts/checkpoint-122-validation-replay.json): 613.435166 ms baseline versus 1,764.543375 ms reuse, zero escaped seeded defects, unchanged coverage and oracle. The 25% speed target remains unsupported on this local fixture. No live speed claim.
+- Application source: `9abf64b1d199f71f79190b6fc667d899fdc1559e`, isolated branch `codex/durable-execution-contract` at `/private/tmp/autopod-durable-execution`.
+- [Current non-documentation patch](receipts/checkpoint-131-candidate-code.diff) and [base/candidate blob manifest](receipts/checkpoint-131-candidate-manifest.json) compare against remote main `b75fbf0b7e2c4ea455838a6e4df6537665a7a8cc`, integrated locally and refreshed by ls-remote at CP131. Recheck immediately before publication.
+- Governing contract SHA-256: `3dc5e753db8ec664ea8ed1a93b1150c936ea53cbc8e9f8a0def05113dfd1e481`; unrelated original checkout changes remain excluded.
+- [Final full pipeline](receipts/checkpoint-131-full-validation-identity.json) passed: 6,375 package tests, one existing platform skip, 11 standalone Node tests and required shell/install/lint/build/typecheck/audit/secret checks. Fourteen of fifteen test Turbo tasks were cached; one moderate dependency advisory remains. Exact historical canary inputs were archived before maintained-copy formatting; validation rules stayed unchanged.
+- Prior 357 Swift tests, mapped native/mobile/CLI interactions, actual snapshot migration/backup checks and registry validator proof retain their source scope through [byte-identical comparisons](receipts/checkpoint-131-source-identity.json).
+- The matched local replay remains 613.435166 ms baseline versus 1,764.543375 ms reuse, zero escaped seeded defects and unchanged coverage. The 25% target is unsupported; no live speed claim.
 
 ## Completed inspections; do not request them again
 
@@ -46,15 +39,11 @@ Checkpoint 119 verifies native reviewer CLI/contract presentation with explicit 
 
 Checkpoint 121 verifies the remaining listed native cases: retained deleted fleet navigation, guidance receipt history and populated execution release/image/resource fields. [App/fixture-bound receipt](receipts/checkpoint-121-native-direct.json). Native interaction prerequisites are closed within recorded scope; synthetic receipts never attest hosted source or provider execution. The Mac relocked during cleanup after all checks passed and is no longer blocking these criteria. The approved checkpoint-122 hosted-copy attempt refused before copy at checkpoint 123. The current service cwd is ca92847a and the old snapshot has been removed. The replacement checkpoint-123 packet was explicitly approved and passed at checkpoint 124; no copy-upgrade approval remains pending.
 
-## Remaining sandbox access and paid-canary gate
+## Required capability canaries verified
 
-The actual affected `dataverse-harness` image is `ewiautopodacr.azurecr.io/autopod/dataverse-harness:latest`, resolved during checkpoint 110 to `sha256:4b836cdabc71ffd40aef564b65b6b16564c5312770130bc59251a732078c9d77`. Do not substitute the unrelated autopod-self image.
+The user explicitly authorized all required canaries. [CP131](checkpoint-131.md) records successful pinned dataverse-harness ownership/config/streaming, pinned Teamplanner NuGet command semantics and the actual resource-adapter correction. Four created sandbox/image pairs were deleted and GET404 verified. No model calls, package installation, role change or existing-pod mutation occurred. Known compute/transfer estimates total about $0.26; actual billing and ancillary charges remain unavailable. No more canary approval is pending.
 
-PIM restored reads on `autopod-spike-neu` in North Europe (CP126 HTTP 200). The only same-repository ready disk carries an older digest. Existing managed identity AcrPull is verified; no role changes are needed. The [exact image import/canary packet](exact-image-canary-packet.md) now pins request bodies, commands/oracles, cleanup and known-component cost with ancillary-cost uncertainty. It supersedes the historical access request. Paid execution remains unapproved.
-
-Once read access is supplied, resolve an existing matching ready disk-image identity. If import is necessary, price and request that explicitly. The proposed canary remains one disposable sandbox, one creation attempt, no model calls, explicit 2 vCPU / 4 GiB / 40 GiB, at most five minutes through cleanup, subject to verifying the affected profile's requirements. A lost creation response requires reconciliation rather than a second creation. Verify removal of the exact created resource.
-
-The historical estimate is $0.018 compute for five minutes; it is **not a total quote or a billing cap**. Refresh applicable pricing and resolve image/storage/transfer/cleanup costs before asking for spend approval. Final commands must pin runtime CLI path/version, effective exec/upload user, resource limits, stream chunks/exit and a nonsecret sentinel through the actual upload plus atomic `runtimeConfigInstallCommand`. Do not alter ownership privileges to force success. The relevant .NET check must use supported NuGet list/help/package-search semantics and separately identified feed/auth scope. Local command-construction tests do not satisfy actual-image acceptance.
+Actual CLI/UID/image/resource facts are recorded in the live receipts. Root-owned upload was copied atomically into autopod-owned config by the candidate; streaming UID, stdout/stderr/content/exit all passed. The old cgroup probe returned unknown and the corrected adapter observed 2 CPUs/4 GiB on the same sandbox. Teamplanner validation used an explicit public feed; no private-feed authentication is claimed. Those facts resolve required capability acceptance, not loaded hosted source or historical API causality.
 
 ## Actual database compatibility and rollout preparation
 
@@ -68,7 +57,7 @@ Before a publication/deployment request:
 4. Produce a fresh WAL-aware cutover backup and verify intended scope/freshness, isolated restoration and headroom (two copies plus reserve). Keep sampled historical restore acceptance distinct from this fresh cutover gate.
 5. After explicit publication authority, publish only the approved source. After explicit deployment/restart authority, use the hosted deployment skill and verified target layout, a full build when provenance is ambiguous, mandatory browser prewarm, bounded health and post-start source/migration evidence. Do not use `--force` without authority naming affected work.
 
-No executable deployment command is presented as ready while these requirements remain open. The previous command naming `90a61141` is superseded; the current candidate is not deployed or published.
+No executable deployment command is presented as ready while these requirements remain open. The previous command naming `90a61141` is superseded; the current candidate `9abf64b1` is not deployed or published.
 
 ## Rollback and stop rules
 

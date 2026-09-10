@@ -1,0 +1,535 @@
+{
+  "startedAt": "2026-09-10T07:13:43.608Z",
+  "contractSHA256": "1277ffb2821d26a26e161ec33f6dee2640f3f42f837a76a3ac82e4020590e5df",
+  "candidate": "9abf64b1d199f71f79190b6fc667d899fdc1559e",
+  "nonce": "autopod-resource131-20260910-2fc785e4",
+  "runnerSHA256": "5ab848875c3e27f5101eeb623ffbb717b1305291d0eb06b39e9cfe2cbfaace8a",
+  "bundleSHA256": "05b2383b93a8433c60f6e12785d3b0af2e42f0554de4f1a6286882a31ae53b9d",
+  "status": "verified",
+  "events": [
+    {
+      "at": "2026-09-10T07:13:47.331Z",
+      "kind": "preflight_passed"
+    },
+    {
+      "at": "2026-09-10T07:13:47.552Z",
+      "kind": "acr_exchange_intent"
+    },
+    {
+      "at": "2026-09-10T07:13:47.650Z",
+      "kind": "acr_exchange_response",
+      "httpStatus": 200
+    },
+    {
+      "at": "2026-09-10T07:13:47.651Z",
+      "kind": "disk_create_intent"
+    },
+    {
+      "at": "2026-09-10T07:15:58.510Z",
+      "kind": "disk_create_response",
+      "httpStatus": 200
+    },
+    {
+      "at": "2026-09-10T07:15:58.512Z",
+      "kind": "disk_identified",
+      "id": "b61e4f39-4ce7-4fba-bfb3-b3835498b909"
+    },
+    {
+      "at": "2026-09-10T07:15:58.622Z",
+      "kind": "disk_state",
+      "state": "Ready"
+    },
+    {
+      "at": "2026-09-10T07:15:58.623Z",
+      "kind": "sandbox_create_intent"
+    },
+    {
+      "at": "2026-09-10T07:16:00.305Z",
+      "kind": "sandbox_create_response",
+      "httpStatus": 200
+    },
+    {
+      "at": "2026-09-10T07:16:00.307Z",
+      "kind": "sandbox_identified",
+      "id": "5e6ca6f8-1d1f-40b2-b77f-7fc5bacde29d"
+    },
+    {
+      "at": "2026-09-10T07:16:00.357Z",
+      "kind": "sandbox_state",
+      "state": "Running"
+    },
+    {
+      "at": "2026-09-10T07:16:00.359Z",
+      "kind": "check_started",
+      "check": "identityUid"
+    },
+    {
+      "at": "2026-09-10T07:16:00.476Z",
+      "kind": "check_finished",
+      "check": "identityUid",
+      "passed": true,
+      "exitCode": 0
+    },
+    {
+      "at": "2026-09-10T07:16:00.477Z",
+      "kind": "check_started",
+      "check": "identityGid"
+    },
+    {
+      "at": "2026-09-10T07:16:00.557Z",
+      "kind": "check_finished",
+      "check": "identityGid",
+      "passed": true,
+      "exitCode": 0
+    },
+    {
+      "at": "2026-09-10T07:16:00.558Z",
+      "kind": "check_started",
+      "check": "autopodUid"
+    },
+    {
+      "at": "2026-09-10T07:16:00.635Z",
+      "kind": "check_finished",
+      "check": "autopodUid",
+      "passed": true,
+      "exitCode": 0
+    },
+    {
+      "at": "2026-09-10T07:16:00.636Z",
+      "kind": "check_started",
+      "check": "codexPath"
+    },
+    {
+      "at": "2026-09-10T07:16:00.706Z",
+      "kind": "check_finished",
+      "check": "codexPath",
+      "passed": true,
+      "exitCode": 0
+    },
+    {
+      "at": "2026-09-10T07:16:00.707Z",
+      "kind": "check_started",
+      "check": "codexVersion"
+    },
+    {
+      "at": "2026-09-10T07:16:00.884Z",
+      "kind": "check_finished",
+      "check": "codexVersion",
+      "passed": true,
+      "exitCode": 0
+    },
+    {
+      "at": "2026-09-10T07:16:00.885Z",
+      "kind": "check_started",
+      "check": "nodeVersion"
+    },
+    {
+      "at": "2026-09-10T07:16:00.960Z",
+      "kind": "check_finished",
+      "check": "nodeVersion",
+      "passed": true,
+      "exitCode": 0
+    },
+    {
+      "at": "2026-09-10T07:16:00.961Z",
+      "kind": "check_started",
+      "check": "resourceFacts"
+    },
+    {
+      "at": "2026-09-10T07:16:01.058Z",
+      "kind": "check_finished",
+      "check": "resourceFacts",
+      "passed": true,
+      "exitCode": 0
+    },
+    {
+      "at": "2026-09-10T07:16:01.159Z",
+      "kind": "original_metadata_observed",
+      "memoryLimitBytes": null,
+      "cpuLimit": null
+    },
+    {
+      "at": "2026-09-10T07:16:01.273Z",
+      "kind": "check_finished",
+      "check": "actualResourceAdapter",
+      "passed": true
+    },
+    {
+      "at": "2026-09-10T07:16:01.274Z",
+      "kind": "check_started",
+      "check": "prepare"
+    },
+    {
+      "at": "2026-09-10T07:16:01.358Z",
+      "kind": "check_finished",
+      "check": "prepare",
+      "passed": true,
+      "exitCode": 0
+    },
+    {
+      "at": "2026-09-10T07:16:01.414Z",
+      "kind": "check_started",
+      "check": "uploadedIdentity"
+    },
+    {
+      "at": "2026-09-10T07:16:01.491Z",
+      "kind": "check_finished",
+      "check": "uploadedIdentity",
+      "passed": true,
+      "exitCode": 0
+    },
+    {
+      "at": "2026-09-10T07:16:01.492Z",
+      "kind": "check_started",
+      "check": "configInstallA"
+    },
+    {
+      "at": "2026-09-10T07:16:01.577Z",
+      "kind": "check_finished",
+      "check": "configInstallA",
+      "passed": true,
+      "exitCode": 0
+    },
+    {
+      "at": "2026-09-10T07:16:01.578Z",
+      "kind": "check_started",
+      "check": "configContentA"
+    },
+    {
+      "at": "2026-09-10T07:16:01.655Z",
+      "kind": "check_finished",
+      "check": "configContentA",
+      "passed": true,
+      "exitCode": 0
+    },
+    {
+      "at": "2026-09-10T07:16:01.656Z",
+      "kind": "check_started",
+      "check": "targetIdentityA"
+    },
+    {
+      "at": "2026-09-10T07:16:01.726Z",
+      "kind": "check_finished",
+      "check": "targetIdentityA",
+      "passed": true,
+      "exitCode": 0
+    },
+    {
+      "at": "2026-09-10T07:16:01.778Z",
+      "kind": "check_started",
+      "check": "configInstallB"
+    },
+    {
+      "at": "2026-09-10T07:16:01.855Z",
+      "kind": "check_finished",
+      "check": "configInstallB",
+      "passed": true,
+      "exitCode": 0
+    },
+    {
+      "at": "2026-09-10T07:16:01.856Z",
+      "kind": "check_started",
+      "check": "configContentB"
+    },
+    {
+      "at": "2026-09-10T07:16:01.946Z",
+      "kind": "check_finished",
+      "check": "configContentB",
+      "passed": true,
+      "exitCode": 0
+    },
+    {
+      "at": "2026-09-10T07:16:01.947Z",
+      "kind": "check_started",
+      "check": "targetIdentityB"
+    },
+    {
+      "at": "2026-09-10T07:16:02.045Z",
+      "kind": "check_finished",
+      "check": "targetIdentityB",
+      "passed": true,
+      "exitCode": 0
+    },
+    {
+      "at": "2026-09-10T07:16:02.046Z",
+      "kind": "check_started",
+      "check": "stream"
+    },
+    {
+      "at": "2026-09-10T07:16:03.184Z",
+      "kind": "check_finished",
+      "check": "stream",
+      "passed": true
+    },
+    {
+      "at": "2026-09-10T07:16:03.184Z",
+      "kind": "capability_verified"
+    },
+    {
+      "at": "2026-09-10T07:16:03.287Z",
+      "kind": "sandbox_delete_intent",
+      "id": "5e6ca6f8-1d1f-40b2-b77f-7fc5bacde29d"
+    },
+    {
+      "at": "2026-09-10T07:16:10.147Z",
+      "kind": "sandbox_delete_response",
+      "httpStatus": 200
+    },
+    {
+      "at": "2026-09-10T07:16:15.250Z",
+      "kind": "http_refusal",
+      "httpStatus": 404,
+      "registryMention": false,
+      "authenticationMention": false,
+      "permissionMention": false,
+      "labelMention": false,
+      "formatOrLengthMention": false,
+      "resourceMention": false,
+      "egressMention": false,
+      "errorValueShape": "undefined"
+    },
+    {
+      "at": "2026-09-10T07:16:15.252Z",
+      "kind": "sandbox_removed",
+      "id": "5e6ca6f8-1d1f-40b2-b77f-7fc5bacde29d"
+    },
+    {
+      "at": "2026-09-10T07:16:15.349Z",
+      "kind": "disk_delete_intent",
+      "id": "b61e4f39-4ce7-4fba-bfb3-b3835498b909"
+    },
+    {
+      "at": "2026-09-10T07:16:15.444Z",
+      "kind": "disk_delete_response",
+      "httpStatus": 202
+    },
+    {
+      "at": "2026-09-10T07:16:20.548Z",
+      "kind": "http_refusal",
+      "httpStatus": 404,
+      "registryMention": false,
+      "authenticationMention": false,
+      "permissionMention": false,
+      "labelMention": false,
+      "formatOrLengthMention": false,
+      "resourceMention": true,
+      "egressMention": false,
+      "errorValueShape": "undefined"
+    },
+    {
+      "at": "2026-09-10T07:16:20.550Z",
+      "kind": "disk_removed",
+      "id": "b61e4f39-4ce7-4fba-bfb3-b3835498b909"
+    }
+  ],
+  "checks": {
+    "identityUid": {
+      "passed": true,
+      "exitCode": 0,
+      "diagnostics": {
+        "permissionDenied": false,
+        "commandNotFound": false,
+        "missingPath": false
+      }
+    },
+    "identityGid": {
+      "passed": true,
+      "exitCode": 0,
+      "diagnostics": {
+        "permissionDenied": false,
+        "commandNotFound": false,
+        "missingPath": false
+      }
+    },
+    "autopodUid": {
+      "passed": true,
+      "exitCode": 0,
+      "diagnostics": {
+        "permissionDenied": false,
+        "commandNotFound": false,
+        "missingPath": false
+      }
+    },
+    "codexPath": {
+      "passed": true,
+      "exitCode": 0,
+      "diagnostics": {
+        "permissionDenied": false,
+        "commandNotFound": false,
+        "missingPath": false
+      }
+    },
+    "codexVersion": {
+      "passed": true,
+      "exitCode": 0,
+      "diagnostics": {
+        "permissionDenied": false,
+        "commandNotFound": false,
+        "missingPath": false
+      }
+    },
+    "nodeVersion": {
+      "passed": true,
+      "exitCode": 0,
+      "diagnostics": {
+        "permissionDenied": false,
+        "commandNotFound": false,
+        "missingPath": false
+      }
+    },
+    "resourceFacts": {
+      "passed": true,
+      "exitCode": 0,
+      "diagnostics": {
+        "permissionDenied": false,
+        "commandNotFound": false,
+        "missingPath": false
+      }
+    },
+    "actualResourceAdapter": {
+      "passed": true
+    },
+    "prepare": {
+      "passed": true,
+      "exitCode": 0,
+      "diagnostics": {
+        "permissionDenied": false,
+        "commandNotFound": false,
+        "missingPath": false
+      }
+    },
+    "uploadedIdentity": {
+      "passed": true,
+      "exitCode": 0,
+      "diagnostics": {
+        "permissionDenied": false,
+        "commandNotFound": false,
+        "missingPath": false
+      }
+    },
+    "configInstallA": {
+      "passed": true,
+      "exitCode": 0,
+      "diagnostics": {
+        "permissionDenied": false,
+        "commandNotFound": false,
+        "missingPath": false
+      }
+    },
+    "configContentA": {
+      "passed": true,
+      "exitCode": 0,
+      "diagnostics": {
+        "permissionDenied": false,
+        "commandNotFound": false,
+        "missingPath": false
+      }
+    },
+    "targetIdentityA": {
+      "passed": true,
+      "exitCode": 0,
+      "diagnostics": {
+        "permissionDenied": false,
+        "commandNotFound": false,
+        "missingPath": false
+      }
+    },
+    "configInstallB": {
+      "passed": true,
+      "exitCode": 0,
+      "diagnostics": {
+        "permissionDenied": false,
+        "commandNotFound": false,
+        "missingPath": false
+      }
+    },
+    "configContentB": {
+      "passed": true,
+      "exitCode": 0,
+      "diagnostics": {
+        "permissionDenied": false,
+        "commandNotFound": false,
+        "missingPath": false
+      }
+    },
+    "targetIdentityB": {
+      "passed": true,
+      "exitCode": 0,
+      "diagnostics": {
+        "permissionDenied": false,
+        "commandNotFound": false,
+        "missingPath": false
+      }
+    },
+    "stream": {
+      "passed": true,
+      "stdoutMatched": true,
+      "stderrMatched": true,
+      "exitCode": 0
+    }
+  },
+  "providerCalls": 0,
+  "preflight": {
+    "sourceUnchanged": true,
+    "principalMatched": true,
+    "groupMatched": true,
+    "pullIdentityMatched": true,
+    "sourceDigestMatched": true,
+    "nonceAbsent": true,
+    "diskCount": 16,
+    "sandboxCount": 0
+  },
+  "diskCreateIntent": true,
+  "diskId": "b61e4f39-4ce7-4fba-bfb3-b3835498b909",
+  "sandboxCreateIntent": true,
+  "sandboxCreateStarted": 1789024558623,
+  "sandboxId": "5e6ca6f8-1d1f-40b2-b77f-7fc5bacde29d",
+  "resourceMetadata": {
+    "cpu": "2000m",
+    "memory": "4096Mi",
+    "disk": "40960Mi"
+  },
+  "runtime": {
+    "execUid": "1000",
+    "execGid": "1000",
+    "autopodUid": "1000",
+    "codexPath": "/usr/local/bin/codex",
+    "codexVersion": "codex-cli 0.144.4",
+    "nodeVersion": "v22.23.2"
+  },
+  "resourceFacts": {
+    "/sys/fs/cgroup/cpu.max": "unavailable",
+    "/sys/fs/cgroup/memory.max": "unavailable",
+    "/sys/fs/cgroup/cpu/cpu.cfs_quota_us": "unavailable",
+    "/sys/fs/cgroup/cpu/cpu.cfs_period_us": "unavailable",
+    "/sys/fs/cgroup/memory/memory.limit_in_bytes": "unavailable",
+    "onlineCPUs": "2",
+    "memoryKiB": "4263288",
+    "filesystemBytes": "41957097472"
+  },
+  "originalCgroupOnlyMetadata": {
+    "imageDigest": null,
+    "memoryLimitBytes": null,
+    "cpuLimit": null,
+    "networkMode": null
+  },
+  "correctedExecutionMetadata": {
+    "imageDigest": null,
+    "memoryLimitBytes": 4294967296,
+    "cpuLimit": 2,
+    "networkMode": null
+  },
+  "uploadIdentity": "0:0:644",
+  "configIdentityA": "1000:1000:644:262165",
+  "configIdentityB": "1000:1000:644:262166",
+  "resourceEvidence": {
+    "allocationMetadataMatched": true,
+    "effectiveValuesObserved": true,
+    "cgroupV2Available": false
+  },
+  "sandboxRemoved": true,
+  "diskRemoved": true,
+  "finishedAt": "2026-09-10T07:16:20.552Z",
+  "allCreatedResourcesRemoved": true,
+  "sandboxAllocationThroughCleanupMs": 21929
+}

@@ -1323,7 +1323,8 @@
         "receipts/recovery-provenance-swift-reviewed.txt",
         "checkpoint-93.md",
         "checkpoint-106.md",
-        "closure-report.md"
+        "closure-report.md",
+        "checkpoint-131.md"
       ],
       "prerequisites": [
         "Actual-image capability acceptance remains gated by W3.6. Final-source required-command/resource/provider and continuation admission checks passed."
@@ -1335,7 +1336,7 @@
     {
       "id": "W3.4",
       "requirement": "Supported capability probe resolves sandbox config ownership and registry execution semantics",
-      "status": "partial",
+      "status": "verified",
       "implementation": [
         "packages/daemon/src/runtimes/runtime-config-capability.ts",
         "packages/daemon/src/pods/registry-injector.ts"
@@ -1368,14 +1369,14 @@
         "checkpoint-129.md",
         "label-safe-image-canary-packet.md",
         "checkpoint-130.md",
-        "separated-capability-canary-packet.md"
+        "separated-capability-canary-packet.md",
+        "checkpoint-131.md"
       ],
-      "prerequisites": [
-        "CP130 exact sandbox reached Running and API allocation matched 2vCPU/4GiB/40GiB; first aggregate identity command exited127/command-not-found. Specific command unrecorded. Both resources GET404 cleanup verified. Historical mapping separates dataverse Codex ownership from teamplanner NuGet. Supported NuGet commands pass on local SDK10/public feed only; actual teamplanner image/private feed unverified. Named-gate Codex-only canary prepared with deny-all egress; additional attempt requires approval."
-      ],
-      "finalSourceEvidence": "90a61141a6a8ed6205aae144bbb99f8c9f0f9ec5; see checkpoint-106.md for executed checks, carried forward surface proof and limits.",
-      "remaining": "CP130 exact sandbox reached Running and API allocation matched 2vCPU/4GiB/40GiB; first aggregate identity command exited127/command-not-found. Specific command unrecorded. Both resources GET404 cleanup verified. Historical mapping separates dataverse Codex ownership from teamplanner NuGet. Supported NuGet commands pass on local SDK10/public feed only; actual teamplanner image/private feed unverified. Named-gate Codex-only canary prepared with deny-all egress; additional attempt requires approval.",
-      "historicalProgressNotes": "Actual affected dataverse-harness image is pinned in CP110, but the required capability canary remains unrun. Obtain intended-group data-plane access and finish the ready-disk-image identity, total spend and command/oracle packet before paid-canary authorization."
+      "prerequisites": [],
+      "finalSourceEvidence": "9abf64b1d199f71f79190b6fc667d899fdc1559e; actual API/manager resource and Codex canary. Registry validator unchanged from 4e73cd8c actual Teamplanner canary. CP131 receipts and exact executed-input archive.",
+      "remaining": "",
+      "historicalProgressNotes": "Actual affected dataverse-harness image is pinned in CP110, but the required capability canary remains unrun. Obtain intended-group data-plane access and finish the ready-disk-image identity, total spend and command/oracle packet before paid-canary authorization.",
+      "verificationScope": "Actual pinned dataverse-harness Codex upload/ownership/atomic config/stream plus resource adapter on 9abf64b1; actual pinned teamplanner image and candidate NuGet list/help/public-search semantics. No private-feed authentication, provider/model invocation or hosted deployment claim."
     },
     {
       "id": "W3.5",
@@ -1434,7 +1435,7 @@
     {
       "id": "W3.6",
       "requirement": "Live actual-image capability canary verified under explicit authority",
-      "status": "unverified",
+      "status": "verified",
       "implementation": [],
       "tests": [],
       "evidence": [
@@ -1456,13 +1457,13 @@
         "checkpoint-129.md",
         "label-safe-image-canary-packet.md",
         "checkpoint-130.md",
-        "separated-capability-canary-packet.md"
+        "separated-capability-canary-packet.md",
+        "checkpoint-131.md"
       ],
-      "prerequisites": [
-        "CP130 exact sandbox reached Running and API allocation matched 2vCPU/4GiB/40GiB; first aggregate identity command exited127/command-not-found. Specific command unrecorded. Both resources GET404 cleanup verified. Historical mapping separates dataverse Codex ownership from teamplanner NuGet. Supported NuGet commands pass on local SDK10/public feed only; actual teamplanner image/private feed unverified. Named-gate Codex-only canary prepared with deny-all egress; additional attempt requires approval."
-      ],
-      "finalSourceEvidence": "90a61141a6a8ed6205aae144bbb99f8c9f0f9ec5; see checkpoint-106.md for executed checks, carried forward surface proof and limits.",
-      "remaining": "CP130 exact sandbox reached Running and API allocation matched 2vCPU/4GiB/40GiB; first aggregate identity command exited127/command-not-found. Specific command unrecorded. Both resources GET404 cleanup verified. Historical mapping separates dataverse Codex ownership from teamplanner NuGet. Supported NuGet commands pass on local SDK10/public feed only; actual teamplanner image/private feed unverified. Named-gate Codex-only canary prepared with deny-all egress; additional attempt requires approval."
+      "prerequisites": [],
+      "finalSourceEvidence": "9abf64b1d199f71f79190b6fc667d899fdc1559e; actual API/manager resource and Codex canary. Registry validator unchanged from 4e73cd8c actual Teamplanner canary. CP131 receipts and exact executed-input archive.",
+      "remaining": "",
+      "verificationScope": "Actual pinned dataverse-harness Codex upload/ownership/atomic config/stream plus resource adapter on 9abf64b1; actual pinned teamplanner image and candidate NuGet list/help/public-search semantics. No private-feed authentication, provider/model invocation or hosted deployment claim."
     },
     {
       "id": "W4.1",
@@ -2422,12 +2423,13 @@
         "checkpoint-121.md",
         "checkpoint-123.md",
         "checkpoint-124.md",
-        "checkpoint-125.md"
+        "checkpoint-125.md",
+        "checkpoint-131.md"
       ],
       "prerequisites": [
-        "CP124 service/active identity remained stable during the successful copy check. Current public health returned 200 without a release field; directory ca92847a and compatible Node/SQLite are not loaded-bundle attestation. Actual sandbox CLI/image capabilities and loaded/rollback source remain unverified."
+        "CP131 actual image/CLI/identity/resource/config/stream capability is verified. Public health again returned 200 without release metadata. Current hosted loaded/rollback source and future deployment provenance remain unverified."
       ],
-      "remaining": "CP124 service/active identity remained stable during the successful copy check. Current public health returned 200 without a release field; directory ca92847a and compatible Node/SQLite are not loaded-bundle attestation. Actual sandbox CLI/image capabilities and loaded/rollback source remain unverified.",
+      "remaining": "CP131 actual image/CLI/identity/resource/config/stream capability is verified. Public health again returned 200 without release metadata. Current hosted loaded/rollback source and future deployment provenance remain unverified.",
       "finalSourceEvidence": "90a61141a6a8ed6205aae144bbb99f8c9f0f9ec5; see checkpoint-106.md for executed checks, carried forward surface proof and limits.",
       "historicalProgressNotes": "Coding, validation/retry, review-only and completion recovery provenance are locally implemented. Sandbox effective cgroup resources are read without substituting requests; image and network identity remain unavailable. Checkpoint 51 adds preflight to direct agent Resume and missing-session fallback paths. Side effects after execution begins, actual reviewer CLI identity, complete receipt history/operator coverage, native interaction and live acceptance remain outstanding. Checkpoint 76 adds legacy Tier 2 API preparation with explicitly unverified provider/account and actual-adapter model resolution; host CLI credentials/remote model identity, SDK identity and gated native/live acceptance remain outstanding. Checkpoint 82 records observed host CLI path/version at dispatch with explicit unknown credentials/model resolution; hung filesystem metadata, binary/transitive identity, live rollout and native interaction remain unverified."
     },
@@ -2466,12 +2468,13 @@
         "checkpoint-122.md",
         "checkpoint-123.md",
         "checkpoint-124.md",
-        "checkpoint-125.md"
+        "checkpoint-125.md",
+        "checkpoint-131.md"
       ],
       "prerequisites": [
-        "CP124 service/active identity remained stable during the successful copy check. Current public health returned 200 without a release field; directory ca92847a and compatible Node/SQLite are not loaded-bundle attestation. Actual sandbox CLI/image capabilities and loaded/rollback source remain unverified."
+        "CP131 actual image/CLI/identity/resource/config/stream capability is verified. Public health again returned 200 without release metadata. Current hosted loaded/rollback source and future deployment provenance remain unverified."
       ],
-      "remaining": "CP124 service/active identity remained stable during the successful copy check. Current public health returned 200 without a release field; directory ca92847a and compatible Node/SQLite are not loaded-bundle attestation. Actual sandbox CLI/image capabilities and loaded/rollback source remain unverified.",
+      "remaining": "CP131 actual image/CLI/identity/resource/config/stream capability is verified. Public health again returned 200 without release metadata. Current hosted loaded/rollback source and future deployment provenance remain unverified.",
       "finalSourceEvidence": "15900d9e08a7e4ca786a6ad11ff81820fda14de4; clean full pipeline and 357 Swift tests; direct native case/source boundaries in checkpoint-117 receipt.",
       "historicalProgressNotes": "Checkpoint 48 verifies managed 150/152 upgrades and copy-only conversion of exact unpublished native checkpoint schemas 151/158/163. Live backup scope/freshness, deployed bytes and activation remain unverified; checkpoint 49 integrates and fully validates main f646cfcc locally; current deployed-source verification remains outstanding."
     },
@@ -2781,11 +2784,12 @@
         "checkpoint-113.md",
         "checkpoint-114.md",
         "checkpoint-117.md",
-        "checkpoint-122.md"
+        "checkpoint-122.md",
+        "checkpoint-131.md"
       ],
       "prerequisites": [],
       "verificationScope": "Local exact-source acceptance only; does not promote live, native, canary or whole-goal status.",
-      "finalSourceEvidence": "4e73cd8ce88e44cdb5c2d8d0a89447b819fa5a39; clean full pipeline passed, 6363 package tests and 11 standalone Node tests; 357 prior Swift tests retained on unchanged desktop source; see source identity receipt."
+      "finalSourceEvidence": "9abf64b1d199f71f79190b6fc667d899fdc1559e; full pipeline passed: 6375 package tests, one existing platform skip, 11 standalone Node tests. Prior 357 Swift tests and operator interactions retained on byte-identical clients."
     },
     {
       "id": "G.4",
@@ -2918,13 +2922,14 @@
         "checkpoint-129.md",
         "label-safe-image-canary-packet.md",
         "checkpoint-130.md",
-        "separated-capability-canary-packet.md"
+        "separated-capability-canary-packet.md",
+        "checkpoint-131.md"
       ],
       "prerequisites": [
-        "CP129 approval consumed; sandbox created, runtime probe failed, exact cleanup verified. CP130 corrected case mapping and named-gate Codex capability packet prepared; unchanged resource/cost envelope, deny-all egress, explicit approval pending. Local public NuGet semantics verified separately; image/private-feed and deployment/rollback prerequisites retained."
+        "Continuing canary authority is explicit and required capability runs passed with verified cleanup. Production publication/deployment and compatible rollback/cutover procedure remain separately gated."
       ],
       "finalSourceEvidence": "15900d9e08a7e4ca786a6ad11ff81820fda14de4; clean full pipeline and 357 Swift tests; direct native case/source boundaries in checkpoint-117 receipt.",
-      "remaining": "CP129 approval consumed; sandbox created, runtime probe failed, exact cleanup verified. CP130 corrected case mapping and named-gate Codex capability packet prepared; unchanged resource/cost envelope, deny-all egress, explicit approval pending. Local public NuGet semantics verified separately; image/private-feed and deployment/rollback prerequisites retained."
+      "remaining": "Continuing canary authority is explicit and required capability runs passed with verified cleanup. Production publication/deployment and compatible rollback/cutover procedure remain separately gated."
     },
     {
       "id": "G.6",
@@ -2955,19 +2960,21 @@
         "checkpoint-122.md",
         "checkpoint-123.md",
         "checkpoint-124.md",
-        "checkpoint-125.md"
+        "checkpoint-125.md",
+        "checkpoint-131.md"
       ],
       "prerequisites": [
-        "All 43 criteria remain mapped. W5, mapped operator interactions and exact hosted snapshot compatibility are verified. Loaded-source identity, historical API causality and actual-image capability remain outstanding; whole-goal completion is not claimed."
+        "All 43 criteria remain mapped. Required actual-image capabilities, W5, operator interactions and hosted snapshot compatibility are verified. Hosted loaded/rollback identity and historical API causality remain outstanding."
       ],
       "finalSourceEvidence": "15900d9e08a7e4ca786a6ad11ff81820fda14de4; clean full pipeline and 357 Swift tests; direct native case/source boundaries in checkpoint-117 receipt.",
-      "remaining": "All 43 criteria remain mapped. W5, mapped operator interactions and exact hosted snapshot compatibility are verified. Loaded-source identity, historical API causality and actual-image capability remain outstanding; whole-goal completion is not claimed."
+      "remaining": "All 43 criteria remain mapped. Required actual-image capabilities, W5, operator interactions and hosted snapshot compatibility are verified. Hosted loaded/rollback identity and historical API causality remain outstanding."
     }
   ],
-  "lastCheckpoint": "checkpoint-130.md",
+  "lastCheckpoint": "checkpoint-131.md",
   "migrationLineage": {
     "managedBaseline": "142-153; authoritative managed migration 153 preserved from main b75fbf0b7e2c4ea455838a6e4df6537665a7a8cc",
     "nativeCurrent": "164-183; prior native 182 upgraded by idempotent managed GitHub reads bridge 183; representative managed 150/152/153 and copy-only native lineage verified",
     "previousNative": "Historical receipts retain their original commit-specific numbering; conversion is copy-only and never activates an output."
-  }
+  },
+  "currentApplicationCandidate": "9abf64b1d199f71f79190b6fc667d899fdc1559e"
 }

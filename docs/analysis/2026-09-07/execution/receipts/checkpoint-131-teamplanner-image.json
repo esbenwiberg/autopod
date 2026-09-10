@@ -1,0 +1,17 @@
+{
+  "observedAt": "2026-09-10T07:03:12.482785+00:00",
+  "manifestDigest": "sha256:96c67cb1ca0aa2a23851a4178a31743b61398167dad1e28f0c538f519a795d7c",
+  "registryMutations": false,
+  "sandboxOperations": false,
+  "compressedLayerBytes": 4198808809,
+  "configDigest": "sha256:f1bc83414460d864b12c9aaba4e45f06a2950136f1809261cc3d6008c68c3632",
+  "configHashVerified": true,
+  "User": "autopod",
+  "WorkingDir": "/workspace",
+  "PATH": "/home/autopod/.dotnet/tools:/home/autopod/.local/bin:/usr/local/go/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
+  "architecture": "amd64",
+  "historyEntryCount": 83,
+  "historyMentionsNodeInstall": true,
+  "historyMentionsDotnet": true,
+  "status": "allowlisted_config_observed"
+}

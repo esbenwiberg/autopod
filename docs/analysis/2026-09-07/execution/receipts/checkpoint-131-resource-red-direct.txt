@@ -1,0 +1,38 @@
+
+ RUN  v4.1.11 /private/tmp/autopod-durable-execution/packages/daemon
+
+ ❯ src/containers/sandbox-container-manager.test.ts (47 tests | 1 failed | 46 skipped) 6ms
+   × reads the observed sandbox allocation after restart when the VM has no cgroup limits 6ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/containers/sandbox-container-manager.test.ts > reads the observed sandbox allocation after restart when the VM has no cgroup limits
+AssertionError: expected { imageDigest: null, …(3) } to deeply equal { imageDigest: null, …(3) }
+
+- Expected
++ Received
+
+  {
+-   "cpuLimit": 2,
++   "cpuLimit": null,
+    "imageDigest": null,
+-   "memoryLimitBytes": 4294967296,
++   "memoryLimitBytes": null,
+    "networkMode": null,
+  }
+
+ ❯ src/containers/sandbox-container-manager.test.ts:1205:66
+    1203|   );
+    1204|   const manager = new SandboxContainerManager(client, logger);
+    1205|   expect(await manager.getExecutionMetadata('sandbox-observed')).toEqu…
+       |                                                                  ^
+    1206|     imageDigest: null,
+    1207|     memoryLimitBytes: 4294967296,
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 46 skipped (47)
+   Start at  09:09:08
+   Duration  424ms (transform 122ms, setup 0ms, import 318ms, tests 6ms, environment 0ms)

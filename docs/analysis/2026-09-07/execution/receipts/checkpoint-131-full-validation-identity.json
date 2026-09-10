@@ -1,0 +1,17 @@
+{
+  "candidate": "9abf64b1d199f71f79190b6fc667d899fdc1559e",
+  "pipelineExitCode": 0,
+  "applicationSourceUnchangedAfterCommit": true,
+  "documentationState": "evidence and maintained fixture formatting updated; exact executed inputs preserved separately",
+  "packageTestsPassed": 6375,
+  "packageTestsSkipped": 1,
+  "standaloneNodeTestsPassed": 11,
+  "testTurboTasks": 15,
+  "testTurboCached": 14,
+  "moderateDependencyAdvisories": 1,
+  "logSHA256": "000d9f6fcb40c9454d7bf430a573046f1214db9537ca8515ac554906185d15a2",
+  "sourceIdentityReceipt": "checkpoint-131-source-identity.json",
+  "liveAfterFix": "checkpoint-131-resource-capability.json",
+  "rawLogSHA256": "01e162d996461bd473517779f538624d2cf84b9b4c077b1e588e5dd1d60984ea",
+  "rawLogArchive": "checkpoint-131-full-validation-final.raw.txt.gz"
+}

@@ -1,0 +1,143 @@
+{
+  "status": "prepared_not_authorized_not_executed",
+  "candidate": "4e73cd8ce88e44cdb5c2d8d0a89447b819fa5a39",
+  "nonce": "autopod-cp126-20260910-6d48b2c9",
+  "endpoint": "https://management.northeurope.azuredevcompute.io",
+  "groupPath": "/subscriptions/06bb959b-9458-41a6-bdf5-77cc12feaab9/resourceGroups/ewi-sandboxes/sandboxGroups/autopod-spike-neu",
+  "apiVersion": "2026-02-01-preview",
+  "principalId": "cef0aeed-b5d3-442e-b5d7-85e0526bd5e7",
+  "importBody": {
+    "image": {
+      "base": "ewiautopodacr.azurecr.io/autopod/dataverse-harness@sha256:4b836cdabc71ffd40aef564b65b6b16564c5312770130bc59251a732078c9d77"
+    },
+    "managedIdentityResourceId": "/subscriptions/06bb959b-9458-41a6-bdf5-77cc12feaab9/resourcegroups/ewi-sandboxes/providers/Microsoft.ManagedIdentity/userAssignedIdentities/autopod-sandbox-acr-pull",
+    "labels": {
+      "managedBy": "codex-acceptance",
+      "acceptanceRun": "autopod-cp126-20260910-6d48b2c9",
+      "sourceDigest": "sha256:4b836cdabc71ffd40aef564b65b6b16564c5312770130bc59251a732078c9d77",
+      "sourceImageHash": "5870153ff7a06654"
+    }
+  },
+  "sandboxBodyTemplate": {
+    "sourcesRef": {
+      "diskImage": {
+        "id": "REPLACE_ONLY_WITH_VERIFIED_OWNED_READY_DISK_ID"
+      }
+    },
+    "resources": {
+      "cpu": "2000m",
+      "memory": "4096Mi",
+      "disk": "40Gi"
+    },
+    "lifecycle": {
+      "autoSuspendPolicy": {
+        "enabled": true,
+        "interval": 900,
+        "mode": "Memory"
+      }
+    },
+    "environment": {
+      "DOTNET_CLI_TELEMETRY_OPTOUT": "1",
+      "DOTNET_SKIP_FIRST_TIME_EXPERIENCE": "1"
+    },
+    "egressPolicy": {
+      "defaultAction": "Deny",
+      "hostRules": [
+        {
+          "pattern": "api.nuget.org",
+          "action": "Allow"
+        },
+        {
+          "pattern": "azuresearch-usnc.nuget.org",
+          "action": "Allow"
+        },
+        {
+          "pattern": "azuresearch-ussc.nuget.org",
+          "action": "Allow"
+        }
+      ]
+    },
+    "labels": {
+      "managedBy": "codex-acceptance",
+      "acceptanceRun": "autopod-cp126-20260910-6d48b2c9",
+      "sourceDigest": "sha256:4b836cdabc71ffd40aef564b65b6b16564c5312770130bc59251a732078c9d77",
+      "sourceImageHash": "5870153ff7a06654"
+    }
+  },
+  "limits": {
+    "imageCreateAttempts": 1,
+    "sandboxCreateAttempts": 1,
+    "imageReadyDeadlineSeconds": 600,
+    "sandboxAllocationThroughCleanupTargetSeconds": 300,
+    "workCutoffSecondsAfterCreate": 210,
+    "providerCalls": 0,
+    "commandOutputBytes": 16384,
+    "receiptBytes": 32768,
+    "mutationRetries": 0
+  },
+  "commands": {
+    "identity": [
+      "sh",
+      "-c",
+      "set -eu; id -u; id -g; id -u autopod; command -v codex; codex --version; node --version; dotnet --version; for p in /sys/fs/cgroup/cpu.max /sys/fs/cgroup/memory.max; do test -r \"$p\"; cat \"$p\"; done; df -B1 /workspace"
+    ],
+    "prepare": [
+      "sh",
+      "-c",
+      "set -eu; test ! -e \"$1\"; mkdir -m 0755 \"$1\"; test -d /home/autopod/.codex; test ! -L /home/autopod/.codex",
+      "canary",
+      "/tmp/autopod-cp126-20260910-6d48b2c9"
+    ],
+    "uploadedIdentity": [
+      "stat",
+      "-c",
+      "%u:%g:%a",
+      "/tmp/autopod-cp126-20260910-6d48b2c9/config.upload"
+    ],
+    "targetIdentity": ["stat", "-c", "%u:%g:%a:%i", "/home/autopod/.codex/config.toml"],
+    "stream": [
+      "sh",
+      "-c",
+      "set -eu; test \"$(id -u)\" = \"$(id -u autopod)\"; test \"$(cat /home/autopod/.codex/config.toml)\" = \"# autopod cp126 sentinel B\"; printf \"cp126-stream-out\\n\"; printf \"cp126-stream-err\\n\" >&2; exit 0"
+    ],
+    "nugetList": [
+      "dotnet",
+      "nuget",
+      "list",
+      "source",
+      "--configfile",
+      "/tmp/autopod-cp126-20260910-6d48b2c9/NuGet.Config"
+    ],
+    "nugetHelp": ["dotnet", "package", "search", "--help"],
+    "nugetSearch": [
+      "dotnet",
+      "package",
+      "search",
+      "__autopod_auth_probe__",
+      "--configfile",
+      "/tmp/autopod-cp126-20260910-6d48b2c9/NuGet.Config",
+      "--take",
+      "1",
+      "--format",
+      "json"
+    ]
+  },
+  "uploads": {
+    "/tmp/autopod-cp126-20260910-6d48b2c9/config.upload": "# autopod cp126 sentinel A\n",
+    "/tmp/autopod-cp126-20260910-6d48b2c9/NuGet.Config": "<?xml version=\"1.0\" encoding=\"utf-8\"?><configuration><packageSources><clear/><add key=\"nuget.org\" value=\"https://api.nuget.org/v3/index.json\"/></packageSources></configuration>\n"
+  },
+  "configInstall": {
+    "implementation": "packages/daemon/src/runtimes/runtime-config-capability.ts#runtimeConfigInstallCommand",
+    "source": "/tmp/autopod-cp126-20260910-6d48b2c9/config.upload",
+    "target": "/home/autopod/.codex/config.toml",
+    "secondUpload": "# autopod cp126 sentinel B\n"
+  },
+  "knownEstimatedUSD": 0.05245566562000001,
+  "unpriced": [
+    "image conversion",
+    "temporary disk-image storage",
+    "service retries",
+    "cleanup overrun"
+  ],
+  "billingHardCap": false
+}

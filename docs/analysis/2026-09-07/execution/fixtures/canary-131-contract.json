@@ -1,0 +1,141 @@
+{
+  "status": "authorized_by_continuing_canary_approval",
+  "candidate": "4e73cd8ce88e44cdb5c2d8d0a89447b819fa5a39",
+  "nonce": "autopod-cp131-20260910-8b46c7e2",
+  "endpoint": "https://management.northeurope.azuredevcompute.io",
+  "groupPath": "/subscriptions/06bb959b-9458-41a6-bdf5-77cc12feaab9/resourceGroups/ewi-sandboxes/sandboxGroups/autopod-spike-neu",
+  "apiVersion": "2026-02-01-preview",
+  "principalId": "cef0aeed-b5d3-442e-b5d7-85e0526bd5e7",
+  "importBody": {
+    "image": {
+      "base": "ewiautopodacr.azurecr.io/autopod/dataverse-harness@sha256:4b836cdabc71ffd40aef564b65b6b16564c5312770130bc59251a732078c9d77"
+    },
+    "managedIdentityResourceId": "/subscriptions/06bb959b-9458-41a6-bdf5-77cc12feaab9/resourcegroups/ewi-sandboxes/providers/Microsoft.ManagedIdentity/userAssignedIdentities/autopod-sandbox-acr-pull",
+    "labels": {
+      "managedBy": "codex-acceptance",
+      "acceptanceRun": "autopod-cp131-20260910-8b46c7e2",
+      "sourceDigest": "sha256:4b836cdabc71ffd40aef564b65b6b16564c5312770130bc59251a732078c9d77",
+      "sourceImageHash": "5870153ff7a06654"
+    },
+    "registryCredentials": {
+      "username": "00000000-0000-0000-0000-000000000000",
+      "token": "IN_MEMORY_ACR_EXCHANGE_RESULT_ONLY"
+    }
+  },
+  "sandboxBodyTemplate": {
+    "sourcesRef": {
+      "diskImage": {
+        "id": "REPLACE_ONLY_WITH_VERIFIED_OWNED_READY_DISK_ID"
+      }
+    },
+    "resources": {
+      "cpu": "2000m",
+      "memory": "4096Mi",
+      "disk": "40Gi"
+    },
+    "lifecycle": {
+      "autoSuspendPolicy": {
+        "enabled": true,
+        "interval": 900,
+        "mode": "Memory"
+      }
+    },
+    "environment": {
+      "DOTNET_CLI_TELEMETRY_OPTOUT": "1",
+      "DOTNET_SKIP_FIRST_TIME_EXPERIENCE": "1"
+    },
+    "egressPolicy": {
+      "defaultAction": "Deny"
+    },
+    "labels": {
+      "managedBy": "codex-acceptance",
+      "acceptanceRun": "autopod-cp131-20260910-8b46c7e2",
+      "sourceDigest": "sS4Ns2rxx_9QK71ZLZbaxZWTFMSdwEwvFklGnMgeMnXcs",
+      "sourceImageHash": "5870153ff7a06654"
+    }
+  },
+  "limits": {
+    "imageCreateAttempts": 1,
+    "sandboxCreateAttempts": 1,
+    "imageReadyDeadlineSeconds": 600,
+    "sandboxAllocationThroughCleanupTargetSeconds": 300,
+    "workCutoffSecondsAfterCreate": 210,
+    "providerCalls": 0,
+    "commandOutputBytes": 16384,
+    "receiptBytes": 32768,
+    "mutationRetries": 0
+  },
+  "commands": {
+    "prepare": [
+      "sh",
+      "-c",
+      "set -eu; test ! -e \"$1\"; mkdir -m 0755 \"$1\"; test -d /home/autopod/.codex; test ! -L /home/autopod/.codex",
+      "canary",
+      "/tmp/autopod-cp131-20260910-8b46c7e2"
+    ],
+    "uploadedIdentity": [
+      "stat",
+      "-c",
+      "%u:%g:%a",
+      "/tmp/autopod-cp131-20260910-8b46c7e2/config.upload"
+    ],
+    "targetIdentity": ["stat", "-c", "%u:%g:%a:%i", "/home/autopod/.codex/config.toml"],
+    "stream": [
+      "sh",
+      "-c",
+      "set -eu; test \"$(id -u)\" = \"$(id -u autopod)\"; test \"$(cat /home/autopod/.codex/config.toml)\" = \"# autopod cp126 sentinel B\"; printf \"cp126-stream-out\\n\"; printf \"cp126-stream-err\\n\" >&2; exit 0"
+    ],
+    "identityUid": ["id", "-u"],
+    "identityGid": ["id", "-g"],
+    "autopodUid": ["id", "-u", "autopod"],
+    "codexPath": ["sh", "-c", "command -v codex"],
+    "codexVersion": ["codex", "--version"],
+    "nodeVersion": ["node", "--version"],
+    "resourceProbe": [
+      "sh",
+      "-c",
+      "set -eu; cat /sys/fs/cgroup/cpu.max; cat /sys/fs/cgroup/memory.max; df -B1 /workspace"
+    ],
+    "resourceFacts": [
+      "sh",
+      "-c",
+      "for f in /sys/fs/cgroup/cpu.max /sys/fs/cgroup/memory.max /sys/fs/cgroup/cpu/cpu.cfs_quota_us /sys/fs/cgroup/cpu/cpu.cfs_period_us /sys/fs/cgroup/memory/memory.limit_in_bytes; do if test -r \"$f\"; then printf \"%s=\" \"$f\"; cat \"$f\"; else printf \"%s=unavailable\\n\" \"$f\"; fi; done; printf \"onlineCPUs=\"; getconf _NPROCESSORS_ONLN; awk '/^MemTotal:/ {print \"memoryKiB=\" $2}' /proc/meminfo; df -B1 --output=size /workspace | tail -n 1 | sed \"s/^ */filesystemBytes=/\""
+    ]
+  },
+  "uploads": {
+    "/tmp/autopod-cp131-20260910-8b46c7e2/config.upload": "# autopod cp126 sentinel A\n"
+  },
+  "configInstall": {
+    "implementation": "packages/daemon/src/runtimes/runtime-config-capability.ts#runtimeConfigInstallCommand",
+    "source": "/tmp/autopod-cp131-20260910-8b46c7e2/config.upload",
+    "target": "/home/autopod/.codex/config.toml",
+    "secondUpload": "# autopod cp126 sentinel B\n"
+  },
+  "knownEstimatedUSD": 0.05245566562000001,
+  "unpriced": [
+    "image conversion",
+    "temporary disk-image storage",
+    "service retries",
+    "cleanup overrun"
+  ],
+  "billingHardCap": false,
+  "priorAttempt": "CP131: actual UID1000 Codex0.144.4 Node22.23.2 verified; aggregate resource check failed missing-path. Both resources deleted.",
+  "registryAuth": {
+    "implementation": "packages/daemon/src/containers/azure-sandbox-api-client.ts#resolveAcrRegistryCredentials",
+    "azureResource": "https://containerregistry.azure.net/",
+    "exchangeEndpoint": "https://ewiautopodacr.azurecr.io/oauth2/exchange",
+    "principalId": "cef0aeed-b5d3-442e-b5d7-85e0526bd5e7",
+    "exchanges": 1,
+    "tokenPersistence": false,
+    "credentialFallback": false
+  },
+  "importRequestTimeoutMs": 600000,
+  "sandboxDigestEncoding": {
+    "reference": "packages/daemon/src/containers/azure-sandbox-api-client.ts#managedDigestLabel",
+    "encoding": "s + base64url(sha256 bytes) + s",
+    "length": 45,
+    "lossless": true
+  },
+  "scope": "dataverse-harness Codex ownership/config/streaming capability; teamplanner NuGet is a separate case",
+  "resourceScope": "Retain actual resource facts from cgroup v1/v2 and VM proc interfaces. Missing controls remain unavailable. Config/stream checks are independent of resource observation; no model workload runs."
+}

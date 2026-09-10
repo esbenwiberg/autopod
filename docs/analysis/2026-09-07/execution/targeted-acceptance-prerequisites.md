@@ -1,5 +1,7 @@
 # Targeted remaining acceptance prerequisites
 
+**Current CP131 disposition:** the user authorized all remaining goal-scoped canaries. Required Codex ownership/config/streaming, Teamplanner actual-image NuGet semantics and the corrected resource adapter are now verified, with exact cleanup after every run. See [checkpoint 131](checkpoint-131.md) and [continuing authority](canary-authorization.md). All earlier one-attempt/pending-canary approval statements below are dated history and superseded. Application source is now `9abf64b1d199f71f79190b6fc667d899fdc1559e`; prior client/migration and registry-validator proofs retain their unchanged-file scope. Hosted source/deployment and historical API causal evidence remain separate.
+
 **CP130 update:** this approval was used; sandbox creation succeeded and resources matched, but the aggregate runtime check exited127. Both resources were deleted and absence verified. The [separated capability packet](separated-capability-canary-packet.md) supersedes the consumed request; local NuGet command evidence is distinct from image acceptance.
 
 **CP129 update:** the approved full-window import succeeded. Sandbox creation returned 400; the task-owned image was deleted and absence verified. No runtime checks ran. The [label-safe additional-attempt proposal](label-safe-image-canary-packet.md) supersedes the consumed request; exact rejection cause remains unconfirmed.

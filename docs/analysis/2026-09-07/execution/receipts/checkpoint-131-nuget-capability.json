@@ -1,0 +1,270 @@
+{
+  "startedAt": "2026-09-10T07:05:37.563Z",
+  "contractSHA256": "c75dd9dcc3bdb2db1dcbddd2abb34f68c89faac1aa0c550c7fd562fff73cdaa7",
+  "candidate": "4e73cd8ce88e44cdb5c2d8d0a89447b819fa5a39",
+  "nonce": "autopod-nuget131-20260910-41c95e6a",
+  "runnerSHA256": "04df6d3c459507dc75f1bf0946cc5f79e38c49ebef8f9d76019c98f8c5163eee",
+  "bundleSHA256": "c143eb7e90dbeda7e2bcdefcdb53bfe3f463d04eff3b535db0a9d0702c64ed2f",
+  "status": "verified",
+  "events": [
+    {
+      "at": "2026-09-10T07:05:41.217Z",
+      "kind": "preflight_passed"
+    },
+    {
+      "at": "2026-09-10T07:05:41.408Z",
+      "kind": "acr_exchange_intent"
+    },
+    {
+      "at": "2026-09-10T07:05:41.503Z",
+      "kind": "acr_exchange_response",
+      "httpStatus": 200
+    },
+    {
+      "at": "2026-09-10T07:05:41.504Z",
+      "kind": "disk_create_intent"
+    },
+    {
+      "at": "2026-09-10T07:09:45.153Z",
+      "kind": "disk_create_response",
+      "httpStatus": 200
+    },
+    {
+      "at": "2026-09-10T07:09:45.155Z",
+      "kind": "disk_identified",
+      "id": "7fb6a8a7-899d-448a-8782-2d624e8f9fd5"
+    },
+    {
+      "at": "2026-09-10T07:09:45.261Z",
+      "kind": "disk_state",
+      "state": "Ready"
+    },
+    {
+      "at": "2026-09-10T07:09:45.261Z",
+      "kind": "sandbox_create_intent"
+    },
+    {
+      "at": "2026-09-10T07:09:46.453Z",
+      "kind": "sandbox_create_response",
+      "httpStatus": 200
+    },
+    {
+      "at": "2026-09-10T07:09:46.455Z",
+      "kind": "sandbox_identified",
+      "id": "650489e6-24b3-421f-8eb3-a6eba94824c7"
+    },
+    {
+      "at": "2026-09-10T07:09:46.500Z",
+      "kind": "sandbox_state",
+      "state": "Running"
+    },
+    {
+      "at": "2026-09-10T07:09:46.502Z",
+      "kind": "check_started",
+      "check": "identityUid"
+    },
+    {
+      "at": "2026-09-10T07:09:46.589Z",
+      "kind": "check_finished",
+      "check": "identityUid",
+      "passed": true,
+      "exitCode": 0
+    },
+    {
+      "at": "2026-09-10T07:09:46.590Z",
+      "kind": "check_started",
+      "check": "dotnetVersion"
+    },
+    {
+      "at": "2026-09-10T07:09:46.874Z",
+      "kind": "check_finished",
+      "check": "dotnetVersion",
+      "passed": true,
+      "exitCode": 0
+    },
+    {
+      "at": "2026-09-10T07:09:46.875Z",
+      "kind": "check_started",
+      "check": "prepare"
+    },
+    {
+      "at": "2026-09-10T07:09:46.950Z",
+      "kind": "check_finished",
+      "check": "prepare",
+      "passed": true,
+      "exitCode": 0
+    },
+    {
+      "at": "2026-09-10T07:09:47.020Z",
+      "kind": "check_started",
+      "check": "nugetList"
+    },
+    {
+      "at": "2026-09-10T07:09:47.325Z",
+      "kind": "check_finished",
+      "check": "nugetList",
+      "exitCode": 0
+    },
+    {
+      "at": "2026-09-10T07:09:47.326Z",
+      "kind": "check_started",
+      "check": "nugetHelp"
+    },
+    {
+      "at": "2026-09-10T07:09:47.599Z",
+      "kind": "check_finished",
+      "check": "nugetHelp",
+      "exitCode": 0
+    },
+    {
+      "at": "2026-09-10T07:09:47.600Z",
+      "kind": "check_started",
+      "check": "nugetSearch"
+    },
+    {
+      "at": "2026-09-10T07:09:48.667Z",
+      "kind": "check_finished",
+      "check": "nugetSearch",
+      "exitCode": 0
+    },
+    {
+      "at": "2026-09-10T07:09:48.668Z",
+      "kind": "capability_verified"
+    },
+    {
+      "at": "2026-09-10T07:09:48.708Z",
+      "kind": "sandbox_delete_intent",
+      "id": "650489e6-24b3-421f-8eb3-a6eba94824c7"
+    },
+    {
+      "at": "2026-09-10T07:09:55.289Z",
+      "kind": "sandbox_delete_response",
+      "httpStatus": 200
+    },
+    {
+      "at": "2026-09-10T07:10:00.408Z",
+      "kind": "http_refusal",
+      "httpStatus": 404,
+      "registryMention": false,
+      "authenticationMention": false,
+      "permissionMention": false,
+      "labelMention": false,
+      "formatOrLengthMention": false,
+      "resourceMention": false,
+      "egressMention": false,
+      "errorValueShape": "undefined"
+    },
+    {
+      "at": "2026-09-10T07:10:00.409Z",
+      "kind": "sandbox_removed",
+      "id": "650489e6-24b3-421f-8eb3-a6eba94824c7"
+    },
+    {
+      "at": "2026-09-10T07:10:00.513Z",
+      "kind": "disk_delete_intent",
+      "id": "7fb6a8a7-899d-448a-8782-2d624e8f9fd5"
+    },
+    {
+      "at": "2026-09-10T07:10:00.627Z",
+      "kind": "disk_delete_response",
+      "httpStatus": 202
+    },
+    {
+      "at": "2026-09-10T07:10:05.733Z",
+      "kind": "http_refusal",
+      "httpStatus": 404,
+      "registryMention": false,
+      "authenticationMention": false,
+      "permissionMention": false,
+      "labelMention": false,
+      "formatOrLengthMention": false,
+      "resourceMention": true,
+      "egressMention": false,
+      "errorValueShape": "undefined"
+    },
+    {
+      "at": "2026-09-10T07:10:05.735Z",
+      "kind": "disk_removed",
+      "id": "7fb6a8a7-899d-448a-8782-2d624e8f9fd5"
+    }
+  ],
+  "checks": {
+    "identityUid": {
+      "passed": true,
+      "exitCode": 0,
+      "diagnostics": {
+        "permissionDenied": false,
+        "commandNotFound": false,
+        "missingPath": false
+      }
+    },
+    "dotnetVersion": {
+      "passed": true,
+      "exitCode": 0,
+      "diagnostics": {
+        "permissionDenied": false,
+        "commandNotFound": false,
+        "missingPath": false
+      }
+    },
+    "prepare": {
+      "passed": true,
+      "exitCode": 0,
+      "diagnostics": {
+        "permissionDenied": false,
+        "commandNotFound": false,
+        "missingPath": false
+      }
+    },
+    "nugetList": {
+      "exitCode": 0,
+      "unauthorized": false,
+      "feedUnavailable": false
+    },
+    "nugetHelp": {
+      "exitCode": 0,
+      "unauthorized": false,
+      "feedUnavailable": false
+    },
+    "nugetSearch": {
+      "exitCode": 0,
+      "unauthorized": false,
+      "feedUnavailable": false
+    },
+    "actualCandidateRegistry": {
+      "passed": true,
+      "configuredFeed": "public_nuget_org",
+      "privateCredentialsUsed": false
+    }
+  },
+  "providerCalls": 0,
+  "preflight": {
+    "sourceUnchanged": true,
+    "principalMatched": true,
+    "groupMatched": true,
+    "pullIdentityMatched": true,
+    "sourceDigestMatched": true,
+    "nonceAbsent": true,
+    "diskCount": 16,
+    "sandboxCount": 0
+  },
+  "diskCreateIntent": true,
+  "diskId": "7fb6a8a7-899d-448a-8782-2d624e8f9fd5",
+  "sandboxCreateIntent": true,
+  "sandboxCreateStarted": 1789024185261,
+  "sandboxId": "650489e6-24b3-421f-8eb3-a6eba94824c7",
+  "resourceMetadata": {
+    "cpu": "2000m",
+    "memory": "4096Mi",
+    "disk": "40960Mi"
+  },
+  "runtime": {
+    "execUid": "1000",
+    "dotnetVersion": "10.0.302"
+  },
+  "sandboxRemoved": true,
+  "diskRemoved": true,
+  "finishedAt": "2026-09-10T07:10:05.735Z",
+  "allCreatedResourcesRemoved": true,
+  "sandboxAllocationThroughCleanupMs": 20474
+}
