@@ -121,22 +121,33 @@ export async function inspectExecutionPreflight(
   if (purpose !== 'completion' && purpose !== 'review')
     result.commands = await inspectRequiredCommands(cm, containerId, pod, profile);
   for (const requirement of result.commands.requirements) {
-    if (requirement.available !== true) {
+    // Only a proven-missing launcher blocks. An unverified result is unknown,
+    // not unsafe: the probe needs `node` in the image and can time out, so
+    // treating null as missing turns image shape and flake into pod failures.
+    if (requirement.available === false) {
       result.status = 'blocked';
       result.diagnostics.push({
         code: 'PREFLIGHT_COMMAND_UNAVAILABLE',
-        detail: `Required launcher ${requirement.executable} (${requirement.source}) is ${requirement.available === false ? 'missing' : 'unverified'}. Reconcile the image or declared command before ${purpose}.`,
+        detail: `Required launcher ${requirement.executable} (${requirement.source}) is missing. Reconcile the image or declared command before ${purpose}.`,
+      });
+    } else if (requirement.available === null) {
+      result.diagnostics.push({
+        code: 'COMMAND_AVAILABILITY_UNVERIFIED',
+        detail: `Launcher ${requirement.executable} (${requirement.source}) is unverified; the read-only probe returned no usable result. Execution remains a validation gate.`,
       });
     }
   }
   if (result.commands.unresolvedSources.length) {
-    if (!result.commands.explicitDependencies) result.status = 'blocked';
+    // Static discovery bails on ordinary shell structure (`cd`, `$VAR`, `if`,
+    // redirects). That proves nothing about availability, so it stays advisory
+    // evidence and never blocks startup.
     result.diagnostics.push({
       code: result.commands.explicitDependencies
         ? 'COMMAND_DISCOVERY_PARTIAL'
-        : 'PREFLIGHT_COMMAND_DECLARATION_REQUIRED',
-      detail:
-        'Dynamic shell commands require explicit executionRequirements.executables in the contract. Only launcher availability is verified; actual script execution remains a validation gate.',
+        : 'COMMAND_DECLARATION_RECOMMENDED',
+      detail: `Static launcher discovery could not resolve ${formatUnresolvedSources(
+        result.commands.unresolvedSources,
+      )}. Declare contract.executionRequirements.executables to verify those launchers. Launcher availability is advisory; actual script execution remains a validation gate.`,
     });
   }
   const declared = purpose === 'completion' ? undefined : pod.contract?.executionRequirements;
@@ -175,6 +186,13 @@ export async function inspectExecutionPreflight(
       detail: 'Build release or validation implementation identity is unavailable.',
     });
   return result;
+}
+
+/** Bounded operator-facing list of the sources static discovery could not resolve. */
+function formatUnresolvedSources(sources: string[]): string {
+  const shown = sources.slice(0, 8).map((source) => source.replace(/\s+/g, ' ').slice(0, 64));
+  const omitted = sources.length - shown.length;
+  return omitted > 0 ? `${shown.join(', ')} (+${omitted} more)` : shown.join(', ');
 }
 
 async function boundedMetadata(
