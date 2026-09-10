@@ -1,5 +1,7 @@
 # Targeted remaining acceptance prerequisites
 
+**CP127 update:** data reads work. Approved CP126 import was refused with HTTP 401. The [corrected additional-attempt request](corrected-image-canary-packet.md) replaces its missing-token request; no new role grant is established as necessary.
+
 **Current CP126 update:** PIM restored data-plane reads. The ready same-repository image has an older digest. The [exact image packet](exact-image-canary-packet.md) supersedes the historical access/canary prerequisites below; its paid execution remains unapproved.
 
 **Current status (checkpoint 125): Section A was approved and completed in checkpoint 110. It is retained below as a historical payload description, not a new approval request.** The affected image is now pinned to dataverse-harness digest `sha256:4b836cdabc71ffd40aef564b65b6b16564c5312770130bc59251a732078c9d77`. Sections B/C still require access and a finalized separately approved canary. The September 10 checkpoint-125 fresh data-plane GET still returned 403. The current principal cannot grant roles; see the [exact administrator handoff](sandbox-access-handoff.md). Actual hosted snapshot/candidate upgrade passed; no copy-execution approval remains pending. The current [release packet](release-and-acceptance-packet.md) supersedes stale source and prerequisite statements below.

@@ -1,10 +1,10 @@
 # Partial closure report
 
-Current checkpoint: [126](checkpoint-126.md). All six workstreams have local implementation and regression evidence. Required native/CLI/mobile interactions are verified within their recorded scope. The goal remains incomplete because loaded-source identity, historical API causality and actual-image capability evidence remain outstanding.
+Current checkpoint: [127](checkpoint-127.md). All six workstreams have local implementation and regression evidence. Required native/CLI/mobile interactions are verified within their recorded scope. The goal remains incomplete because loaded-source identity, historical API causality and actual-image capability evidence remain outstanding.
 
 The explicitly approved replacement hosted-copy check passed at checkpoint 124: the actual pinned snapshot migrated privately from schema 153 to 183 with original rows/columns preserved, integrity/FK/backfill/write checks passing, unchanged input, stable service identity and both private directories removed. [Result](receipts/checkpoint-124-hosted-result.json). The earlier changed-input refusal is retained separately. No active database migration or service restart occurred, and no copy-execution approval remains pending.
 
-PIM restored sandbox reads at checkpoint 126 (HTTP 200). The existing ready disk has an older digest; the intended exact image requires import. The [one-import/one-canary packet](exact-image-canary-packet.md) pins requests, checks, cleanup and an approximately $0.053 known-component estimate with ancillary-cost uncertainty. Paid execution remains unapproved. No role change or allocation occurred. Health remains HTTP 200 without release identity.
+PIM restored sandbox reads. The user-approved CP126 exact-image import was attempted once and returned HTTP 401; no sandbox or capability checks started. Three complete follow-up inventories found no task resources. The packet omitted the preview's documented transient ACR credentials. The [corrected additional-attempt packet](corrected-image-canary-packet.md) is locally verified and awaits approval; the original attempt is consumed. No role change, deployment or existing-resource deletion occurred.
 
 ## Exact candidate and verification
 

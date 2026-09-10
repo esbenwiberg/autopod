@@ -1360,13 +1360,15 @@
         "checkpoint-124.md",
         "checkpoint-125.md",
         "checkpoint-126.md",
-        "exact-image-canary-packet.md"
+        "exact-image-canary-packet.md",
+        "checkpoint-127.md",
+        "corrected-image-canary-packet.md"
       ],
       "prerequisites": [
-        "CP126 PIM restored intended-group disk-image read access (HTTP 200). The only ready same-repository disk has an older digest; exact affected digest requires the prepared one-import/one-canary packet. Existing managed identity has AcrPull. Paid import/canary authorization including disclosed ancillary-cost uncertainty remains pending; no resources created."
+        "CP127 approved CP126 image import attempted once and returned HTTP 401; no sandbox create or capability check ran. Three complete read-only inventories found no task nonce resources. Packet omitted documented transient ACR credentials; corrected same-principal token-exchange packet prepared. Explicit approval for the additional one-import/one-canary attempt remains pending. Access reads work; no new role grant is required by current evidence."
       ],
       "finalSourceEvidence": "90a61141a6a8ed6205aae144bbb99f8c9f0f9ec5; see checkpoint-106.md for executed checks, carried forward surface proof and limits.",
-      "remaining": "CP126 PIM restored intended-group disk-image read access (HTTP 200). The only ready same-repository disk has an older digest; exact affected digest requires the prepared one-import/one-canary packet. Existing managed identity has AcrPull. Paid import/canary authorization including disclosed ancillary-cost uncertainty remains pending; no resources created.",
+      "remaining": "CP127 approved CP126 image import attempted once and returned HTTP 401; no sandbox create or capability check ran. Three complete read-only inventories found no task nonce resources. Packet omitted documented transient ACR credentials; corrected same-principal token-exchange packet prepared. Explicit approval for the additional one-import/one-canary attempt remains pending. Access reads work; no new role grant is required by current evidence.",
       "historicalProgressNotes": "Actual affected dataverse-harness image is pinned in CP110, but the required capability canary remains unrun. Obtain intended-group data-plane access and finish the ready-disk-image identity, total spend and command/oracle packet before paid-canary authorization."
     },
     {
@@ -1440,13 +1442,15 @@
         "checkpoint-124.md",
         "checkpoint-125.md",
         "checkpoint-126.md",
-        "exact-image-canary-packet.md"
+        "exact-image-canary-packet.md",
+        "checkpoint-127.md",
+        "corrected-image-canary-packet.md"
       ],
       "prerequisites": [
-        "CP126 PIM restored intended-group disk-image read access (HTTP 200). The only ready same-repository disk has an older digest; exact affected digest requires the prepared one-import/one-canary packet. Existing managed identity has AcrPull. Paid import/canary authorization including disclosed ancillary-cost uncertainty remains pending; no resources created."
+        "CP127 approved CP126 image import attempted once and returned HTTP 401; no sandbox create or capability check ran. Three complete read-only inventories found no task nonce resources. Packet omitted documented transient ACR credentials; corrected same-principal token-exchange packet prepared. Explicit approval for the additional one-import/one-canary attempt remains pending. Access reads work; no new role grant is required by current evidence."
       ],
       "finalSourceEvidence": "90a61141a6a8ed6205aae144bbb99f8c9f0f9ec5; see checkpoint-106.md for executed checks, carried forward surface proof and limits.",
-      "remaining": "CP126 PIM restored intended-group disk-image read access (HTTP 200). The only ready same-repository disk has an older digest; exact affected digest requires the prepared one-import/one-canary packet. Existing managed identity has AcrPull. Paid import/canary authorization including disclosed ancillary-cost uncertainty remains pending; no resources created."
+      "remaining": "CP127 approved CP126 image import attempted once and returned HTTP 401; no sandbox create or capability check ran. Three complete read-only inventories found no task nonce resources. Packet omitted documented transient ACR credentials; corrected same-principal token-exchange packet prepared. Explicit approval for the additional one-import/one-canary attempt remains pending. Access reads work; no new role grant is required by current evidence."
     },
     {
       "id": "W4.1",
@@ -2894,13 +2898,15 @@
         "checkpoint-123.md",
         "checkpoint-124.md",
         "checkpoint-125.md",
-        "exact-image-canary-packet.md"
+        "exact-image-canary-packet.md",
+        "checkpoint-127.md",
+        "corrected-image-canary-packet.md"
       ],
       "prerequisites": [
-        "CP124 hosted-copy approval fulfilled. CP126 exact image import/canary bodies, commands, oracles, cleanup and known-component spend estimate prepared; ancillary costs explicitly unpriced. Separate approval pending. Loaded/rollback identity and fresh cutover/drain safeguards remain required before deployment."
+        "CP126 one-attempt approval consumed by refused image import. CP127 corrected packet includes documented ephemeral ACR token exchange, exact identities, commands/oracles, cleanup, same spend uncertainty and new nonce. Additional attempt requires approval. Separate deployment/rollback identity and cutover safeguards remain required."
       ],
       "finalSourceEvidence": "15900d9e08a7e4ca786a6ad11ff81820fda14de4; clean full pipeline and 357 Swift tests; direct native case/source boundaries in checkpoint-117 receipt.",
-      "remaining": "CP124 hosted-copy approval fulfilled. CP126 exact image import/canary bodies, commands, oracles, cleanup and known-component spend estimate prepared; ancillary costs explicitly unpriced. Separate approval pending. Loaded/rollback identity and fresh cutover/drain safeguards remain required before deployment."
+      "remaining": "CP126 one-attempt approval consumed by refused image import. CP127 corrected packet includes documented ephemeral ACR token exchange, exact identities, commands/oracles, cleanup, same spend uncertainty and new nonce. Additional attempt requires approval. Separate deployment/rollback identity and cutover safeguards remain required."
     },
     {
       "id": "G.6",
@@ -2940,7 +2946,7 @@
       "remaining": "All 43 criteria remain mapped. W5, mapped operator interactions and exact hosted snapshot compatibility are verified. Loaded-source identity, historical API causality and actual-image capability remain outstanding; whole-goal completion is not claimed."
     }
   ],
-  "lastCheckpoint": "checkpoint-126.md",
+  "lastCheckpoint": "checkpoint-127.md",
   "migrationLineage": {
     "managedBaseline": "142-153; authoritative managed migration 153 preserved from main b75fbf0b7e2c4ea455838a6e4df6537665a7a8cc",
     "nativeCurrent": "164-183; prior native 182 upgraded by idempotent managed GitHub reads bridge 183; representative managed 150/152/153 and copy-only native lineage verified",

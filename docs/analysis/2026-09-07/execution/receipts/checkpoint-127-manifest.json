@@ -1,0 +1,19 @@
+{
+  "checkpoint": 127,
+  "applicationCandidate": "4e73cd8ce88e44cdb5c2d8d0a89447b819fa5a39",
+  "approvedAttempt": "CP126 single import refused HTTP 401",
+  "replacementAuthorization": "pending",
+  "liveSandboxCreates": 0,
+  "liveProviderCalls": 0,
+  "files": {
+    "fixtures/canary-127-contract.json": "c503745f8b7fb8864493399aff22a89615ee6425320ed6a9f696ff8736a7d6d0",
+    "fixtures/run-canary-127-replacement.mjs": "dd091bb2e2f5e24dd67dd1d1215fd735f37d365b4bf0816324a87aeb8035ee59",
+    "fixtures/run-canary-126-approved.mjs": "259a146982f2e8d18f1b2e1c7c82804c6efabd43715146275292fbcc8857ea86",
+    "fixtures/canary-127-entry.ts": "ebc50bf7f193a70e4b61ef4bedc247845e14986fff1a75bfcc5a196a0c14a5f0",
+    "fixtures/test-canary-127-replacement.mjs": "a566a6e08e168f5c0f5db1711952a929b627b17ebfc9cb7c5f46dd9d459460b0",
+    "receipts/checkpoint-127-live-attempt.json": "16e144772ba83aed074e3f6ead57efc88a9a54931a9be022a9f7dfebbe369d91",
+    "receipts/checkpoint-127-reconciliation.json": "d54e89ac77f04ec7c2d33006d5b7cce98d4e650355c206a77ba33925c1c4c619"
+  },
+  "bundleSHA256": "159ffce46631ab9f3f0b58641f04ea67f5736cdeaf5d756ec98cd28f26ecb3dc",
+  "applicationSourceUnchanged": true
+}

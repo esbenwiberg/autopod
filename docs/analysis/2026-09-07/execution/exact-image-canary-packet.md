@@ -1,5 +1,7 @@
 # Exact image import and capability canary
 
+**CP127 disposition:** this request was approved and its single import attempted; Azure returned HTTP 401. No sandbox was started and repeated complete inventories found no task resources. The managed-identity-only import assumption below was incorrect: the preview also requires transient ACR credentials. The [corrected request](corrected-image-canary-packet.md) supersedes this consumed approval. Original scope is retained below.
+
 Prepared at checkpoint 126; **not authorized or executed**. The [machine-readable contract](fixtures/canary-126-contract.json) fixes the request bodies, commands, labels, paths and resource limits. Application source is `4e73cd8ce88e44cdb5c2d8d0a89447b819fa5a39`; its complete diff and validation are in the [candidate manifest](receipts/checkpoint-122-candidate-manifest.json). This request covers one image import and one disposable capability canary, including cleanup. It does not cover deployment, publication, model execution or existing pod changes.
 
 ## Resolved prerequisite and exact target

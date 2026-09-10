@@ -1,5 +1,7 @@
 # Release and remaining acceptance packet
 
+**CP127 update:** approved CP126 import returned HTTP 401; no sandbox ran and repeated inventories found no task resources. The [corrected additional-attempt packet](corrected-image-canary-packet.md) adds the documented transient ACR token exchange and requires separate approval. Earlier statements that execution was unapproved are dated CP126 history.
+
 Updated September 10, checkpoint 126. This packet supersedes the dated approval requests in checkpoints 106–123. Their raw receipts remain retained. It is a local review artifact; it does not authorize publication, deployment, restart, cloud access changes or a paid canary. The goal remains incomplete.
 
 ## Current tested candidate

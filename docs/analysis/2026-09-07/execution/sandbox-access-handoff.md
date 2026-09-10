@@ -1,5 +1,7 @@
 # Sandbox access prerequisite: historical administrator handoff
 
+**CP127 update:** read access still works. The image import request was refused and is addressed by the [corrected token-exchange packet](corrected-image-canary-packet.md), not by executing this historical role-assignment proposal.
+
 **Resolved at checkpoint 126:** after the user enabled PIM, the intended disk-image GET returned 200. Do not execute this old grant/revocation proposal. No assignment was created by this task; preserve independently supplied access. The remaining request is the [exact image import/canary](exact-image-canary-packet.md). The dated CP125 evidence below is retained.
 
 The September 10 read-only check still returns HTTP 403 for disk-image metadata on `autopod-spike-neu`. The current user is `d-ewi@contextand.com`, object ID `cef0aeed-b5d3-442e-b5d7-85e0526bd5e7`. Direct/inherited/group assignment discovery returned Contributor and Session Executor access; the effective permissions endpoint excludes `Microsoft.Authorization/*/Write` and `/Delete`. This account cannot apply or revoke the missing role assignment itself. No grant was attempted.
