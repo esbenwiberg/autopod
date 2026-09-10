@@ -7,6 +7,7 @@ tmp="$(mktemp -d)"
 trap 'rm -rf "$tmp"' EXIT
 mkdir -p "$tmp/bin" "$tmp/home/.autopod"
 mkdir -p "$tmp/releases/deadbeef/packages/daemon"
+mkdir -p "$tmp/releases/cafebabe/packages/daemon/dist"
 ln -s "$tmp/releases/deadbeef" "$tmp/current"
 printf 'daemon: https://daemon.example\n' >"$tmp/home/.autopod/config.yaml"
 
@@ -64,8 +65,16 @@ done
 [ -n "${remote_script:-}" ] || { echo 'missing remote script' >&2; exit 1; }
 case "$remote_script" in
   *'echo live:'*) printf 'live:deadbeef\nactive\n' ;;
-  *'BUILD DONE'*) echo 'BUILD DONE' ;;
+  *'BUILD DONE'*)
+    if [[ "$remote_script" == *'copy current release'* ]]; then
+      [[ "$remote_script" == *'bind target Git identity'* ]]
+      [[ "$remote_script" == *'rm -rf "$NEW/.git"'* ]]
+      [[ "$remote_script" == *'mv "$TMP/.git" "$NEW/.git"'* ]]
+    fi
+    echo 'BUILD DONE'
+    ;;
   *'REVIEWER_CLI_PREWARM_OK'*) echo 'REVIEWER_CLI_PREWARM_OK' ;;
+  *'VERIFY_MARKER='*) sh -c "$remote_script" ;;
   *'FINAL_ACTIVE='*)
     if [ "${DEPLOY_TEST_TRUNCATE_REMOTE:-0}" = 1 ]; then
       sh -c "$remote_script" | tail -c 512
@@ -172,6 +181,24 @@ if ! DEPLOY_TEST_HEALTH_FAILURES=2 run_deploy >"$tmp/health-retry-out" 2>&1; the
 fi
 [ "$(cat "$tmp/health-count")" = 3 ]
 grep -qF 'DEPLOYED deadbeef -> cafebabe' "$tmp/health-retry-out"
+
+# Semantic verification must inspect emitted chunks and copied runtime helpers,
+# while source maps alone cannot satisfy the deployed-code gate.
+reset_fixture
+printf 'const marker = "chunk-only-marker";\n' >"$tmp/releases/cafebabe/packages/daemon/dist/chunk-ABC.js"
+printf 'source map mentions map-only-marker\n' >"$tmp/releases/cafebabe/packages/daemon/dist/index.js.map"
+if ! run_deploy --verify-string chunk-only-marker >"$tmp/chunk-verify-out" 2>&1; then
+  cat "$tmp/chunk-verify-out" >&2
+  exit 1
+fi
+grep -qF 'bundle verify OK' "$tmp/chunk-verify-out"
+reset_fixture
+if run_deploy --verify-string map-only-marker >"$tmp/map-verify-out" 2>&1; then
+  echo 'deployment incorrectly accepted a marker found only in a source map' >&2
+  exit 1
+fi
+grep -qF 'expected string NOT in built bundle' "$tmp/map-verify-out"
+[ ! -e "$tmp/restarted" ]
 
 # Azure Run Command returns only a bounded output tail. Long journal lines must
 # not push the authoritative service/health sentinels out of the returned text.

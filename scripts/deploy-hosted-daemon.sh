@@ -396,6 +396,9 @@ while IFS= read -r f; do
 done <<'DELETED_EOF'
 $DELETED_FILES
 DELETED_EOF
+echo '=== bind target Git identity ==='
+rm -rf \"\$NEW/.git\"
+mv \"\$TMP/.git\" \"\$NEW/.git\"
 chown -R ewi:ewi \"\$NEW\"
 echo '=== rebuild (turbo rebuilds only changed packages) ==='
 run_and_tail /tmp/autopod-build-$TARGET_SHA.log 24 sudo -u ewi -H bash -lc \"cd \$NEW && npx --yes pnpm build\"
@@ -507,9 +510,11 @@ fi
 # ---- verify built bundle (optional semantic gate) -------------------------
 if [ -n "$VERIFY_STRING" ]; then
   note "verifying built bundle contains: $VERIFY_STRING"
+  VERIFY_STRING_B64="$(printf '%s' "$VERIFY_STRING" | base64 | tr -d '\n')"
   VOUT="$(remote "
-NEW=$NEW/packages/daemon/dist/index.js
-if tr '\n' ' ' < \"\$NEW\" | grep -qF -- '$VERIFY_STRING'; then echo VERIFY_OK; else echo VERIFY_MISSING; fi
+DIST=$NEW/packages/daemon/dist
+VERIFY_MARKER=\$(printf '%s' '$VERIFY_STRING_B64' | base64 -d)
+if grep -R -qF --include='*.js' --include='*.py' --exclude='*.map' -- \"\$VERIFY_MARKER\" \"\$DIST\"; then echo VERIFY_OK; else echo VERIFY_MISSING; fi
 ")"
   echo "$VOUT" | grep -q VERIFY_OK || die "expected string NOT in built bundle — refusing swap. Rollback unaffected (current still $LIVE_SHA)."
   note "bundle verify OK"
