@@ -1262,3 +1262,46 @@ it.each([
     client.updateEgress('one', { defaultAction: 'Deny', hostRules: [], trafficInspection: 'Full' }),
   ).rejects.toThrow('egress-unconfirmed');
 });
+
+describe('observed sandbox allocation', () => {
+  it.each([
+    ['2000m', '4096Mi', 2, 4294967296],
+    ['0.5', '4Gi', 0.5, 4294967296],
+    ['0', '0Gi', null, null],
+    ['Infinity', '9007199254740992Gi', null, null],
+    ['-2', '4GB', null, null],
+  ])(
+    'decodes provider quantities %s / %s without guessing',
+    async (cpu, memory, cpuLimit, memoryLimitBytes) => {
+      const { client, requests } = makeClient([
+        {
+          status: 200,
+          body: {
+            id: 'observed',
+            state: 'Running',
+            resources: { cpu, memory },
+          },
+        },
+      ]);
+      expect(await client.getResourceAllocation('observed')).toEqual({
+        cpuLimit,
+        memoryLimitBytes,
+      });
+      expect(requests).toHaveLength(1);
+      expect(requests[0]?.init?.method).toBe('GET');
+    },
+  );
+
+  it.each([
+    { id: 'other', state: 'Running', resources: { cpu: '2', memory: '4Gi' } },
+    { id: 'observed', state: 'Suspended', resources: { cpu: '2', memory: '4Gi' } },
+    { id: 'observed', resources: { cpu: '2', memory: '4Gi' } },
+    { id: 'observed', state: 'Running' },
+  ])('does not invent allocation from missing or mismatched live identity', async (body) => {
+    const { client } = makeClient([{ status: 200, body }]);
+    expect(await client.getResourceAllocation('observed')).toEqual({
+      cpuLimit: null,
+      memoryLimitBytes: null,
+    });
+  });
+});

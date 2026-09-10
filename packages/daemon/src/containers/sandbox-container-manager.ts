@@ -167,16 +167,31 @@ export class SandboxContainerManager implements ContainerManager {
   }
 
   async getExecutionMetadata(containerId: string): Promise<ContainerExecutionMetadata> {
-    try {
-      const result = await this.execInContainer(
-        containerId,
-        ['node', '-e', CGROUP_EXECUTION_METADATA_PROBE],
-        { timeout: 10000 },
-      );
-      return parseCgroupExecutionMetadata(result);
-    } catch {
-      return { imageDigest: null, memoryLimitBytes: null, cpuLimit: null, networkMode: null };
+    const [kernel, allocation] = await Promise.allSettled([
+      this.execInContainer(containerId, ['node', '-e', CGROUP_EXECUTION_METADATA_PROBE], {
+        timeout: 10000,
+      }),
+      this.client.getResourceAllocation?.(containerId) ?? Promise.resolve(null),
+    ]);
+    const metadata = parseCgroupExecutionMetadata(
+      kernel.status === 'fulfilled' ? kernel.value : { exitCode: 1, stdout: '', stderr: '' },
+    );
+    // Sandboxes may enforce allocation at the VM boundary without cgroup mounts.
+    // Merge fresh provider evidence, retaining any stricter observed guest limit.
+    if (allocation.status === 'fulfilled' && allocation.value) {
+      for (const key of ['memoryLimitBytes', 'cpuLimit'] as const) {
+        const value = allocation.value[key];
+        if (
+          typeof value !== 'number' ||
+          !Number.isFinite(value) ||
+          value <= 0 ||
+          (key === 'memoryLimitBytes' && !Number.isSafeInteger(value))
+        )
+          continue;
+        metadata[key] = metadata[key] === null ? value : Math.min(metadata[key], value);
+      }
     }
+    return metadata;
   }
 
   async spawn(config: ContainerSpawnConfig): Promise<string> {

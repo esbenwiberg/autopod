@@ -1179,3 +1179,74 @@ it('captures actual sandbox cgroup limits without substituting spawn hints or in
   });
   expect(client.execCalls.at(-1)?.command.slice(0, 2)).toEqual(['node', '-e']);
 });
+
+it('reads the observed sandbox allocation after restart when the VM has no cgroup limits', async () => {
+  const requests: string[] = [];
+  const client = new AzureSandboxApiClient(
+    {
+      subscriptionId: 'sub-1',
+      resourceGroup: 'rg-1',
+      location: 'northeurope',
+      sandboxGroup: 'group-1',
+      assumeGroupExists: true,
+      credential: {
+        async getToken() {
+          return { token: 'fixture-token' };
+        },
+      },
+      retry: { maxAttempts: 1 },
+      fetch: async (input, init) => {
+        requests.push(`${init?.method} ${new URL(input).pathname}`);
+        const body =
+          init?.method === 'GET'
+            ? {
+                id: 'sandbox-observed',
+                state: 'Running',
+                resources: { cpu: '2000m', memory: '4096Mi', disk: '40960Mi' },
+              }
+            : { exitCode: 0, stdout: '{"memoryLimitBytes":null,"cpuLimit":null}', stderr: '' };
+        return new Response(JSON.stringify(body), { status: 200 });
+      },
+    },
+    logger,
+  );
+  const manager = new SandboxContainerManager(client, logger);
+  expect(await manager.getExecutionMetadata('sandbox-observed')).toEqual({
+    imageDigest: null,
+    memoryLimitBytes: 4294967296,
+    cpuLimit: 2,
+    networkMode: null,
+  });
+  expect(requests.some((request) => request.endsWith('/sandboxes/sandbox-observed'))).toBe(true);
+});
+
+it.each([false, true])(
+  'retains stricter cgroup limits when allocation lookup fails=%s',
+  async (fails) => {
+    const client = Object.assign(
+      new FakeSandboxApiClient(() => ({
+        exitCode: 0,
+        stdout: '{"memoryLimitBytes":2147483648,"cpuLimit":0.5}',
+        stderr: '',
+      })),
+      {
+        getResourceAllocation: async () => {
+          if (fails) throw new Error('provider unavailable');
+          return { memoryLimitBytes: 4294967296, cpuLimit: 2 };
+        },
+      },
+    );
+    const manager = new SandboxContainerManager(client, logger);
+    const id = await manager.spawn({
+      image: 'example.azurecr.io/test:latest',
+      podId: 'strict-limits',
+      env: {},
+    });
+    expect(await manager.getExecutionMetadata(id)).toEqual({
+      imageDigest: null,
+      memoryLimitBytes: 2147483648,
+      cpuLimit: 0.5,
+      networkMode: null,
+    });
+  },
+);

@@ -15,6 +15,7 @@ import type {
   SandboxFileInfo,
   SandboxPortAuth,
   SandboxRegistryCredentials,
+  SandboxResourceAllocation,
   SandboxSnapshot,
   SandboxStatus,
   SandboxTerminalOptions,
@@ -118,6 +119,7 @@ interface DiskImageKey {
 }
 
 interface SandboxResponse {
+  resources?: { cpu?: string; memory?: string };
   egressPolicy?: SandboxEgressPolicy & { rules?: unknown[] };
   labels?: Record<string, string>;
   id?: string;
@@ -315,6 +317,27 @@ export class AzureSandboxApiClient implements SandboxApiClient {
     await this.requestData('DELETE', `${this.groupPath()}/snapshots/${seg(snapshotId)}`, {
       okStatuses: [200, 202, 204, 404],
     });
+  }
+
+  async getResourceAllocation(sandboxId: string): Promise<SandboxResourceAllocation> {
+    const unknown = { memoryLimitBytes: null, cpuLimit: null };
+    const observed = await this.requestData<SandboxResponse>('GET', this.sandboxPath(sandboxId), {
+      timeoutMs: 5000,
+    });
+    if (observed.id !== sandboxId || observed.state !== 'Running') return unknown;
+    const memory = /^(\d+)(Mi|Gi)$/.exec(String(observed.resources?.memory));
+    const memoryBytes = memory
+      ? Number(memory[1]) * (memory[2] === 'Gi' ? 2 ** 30 : 2 ** 20)
+      : Number.NaN;
+    const cpu = /^(\d+(?:\.\d+)?)(m?)$/.exec(String(observed.resources?.cpu));
+    const cpuCount = cpu ? Number(cpu[1]) / (cpu[2] === 'm' ? 1000 : 1) : Number.NaN;
+    return {
+      memoryLimitBytes: Number.isSafeInteger(memoryBytes) && memoryBytes > 0 ? memoryBytes : null,
+      cpuLimit:
+        Number.isFinite(cpuCount) && cpuCount > 0 && cpuCount <= Number.MAX_SAFE_INTEGER
+          ? cpuCount
+          : null,
+    };
   }
 
   async exec(
