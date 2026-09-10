@@ -178,3 +178,44 @@ it('cleanup requires observed exit and committed required artifacts, then retrie
     f.close();
   }
 });
+it('cleanup releases a terminal runtime after required artifact export failed irrecoverably', async () => {
+  const f = fixture();
+  try {
+    const service = f.service();
+    const controls = new ManagedControls(service);
+    const handle = await service.start('installation-one', f.request);
+    const request = {
+      schemaVersion: 1,
+      dispatcherAttemptId: f.request.dispatcherAttemptId,
+      grantId: f.request.effectiveGrant.grantId,
+      grantRevision: 1,
+      operation: 'cleanup',
+    };
+    f.runtime.cleanup = async () => true;
+    await controls.control(
+      'installation-one',
+      handle.podId,
+      { ...request, operation: 'stop' },
+      'stop',
+    );
+    await service.enforceExpiry();
+    service.db
+      .prepare(`INSERT INTO managed_results (pod_id,limitations_json) VALUES (?,?)
+      ON CONFLICT(pod_id) DO UPDATE SET limitations_json=excluded.limitations_json`)
+      .run(handle.podId, '["artifact-export-incomplete"]');
+
+    const result = await controls.control(
+      'installation-one',
+      handle.podId,
+      request,
+      'cleanup-after-export-failure',
+    );
+
+    expect(result.cleanup).toBe('observed');
+    expect(
+      service.db.prepare('SELECT 1 FROM artifact_exports WHERE pod_id=?').get(handle.podId),
+    ).toBeUndefined();
+  } finally {
+    f.close();
+  }
+});
