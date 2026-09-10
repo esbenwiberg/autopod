@@ -1,5 +1,7 @@
 # Release and remaining acceptance packet
 
+**CP128 update:** the corrected request was approved and used once. ACR exchange succeeded; the image PUT hit an erroneous local 60-second timeout. No task resource was observed in repeated inventories through/past the ten-minute window. The [full-window proposal](full-window-image-canary-packet.md) replaces this consumed request; hidden conversion remains uncertain and no retry is authorized.
+
 **CP127 update:** approved CP126 import returned HTTP 401; no sandbox ran and repeated inventories found no task resources. The [corrected additional-attempt packet](corrected-image-canary-packet.md) adds the documented transient ACR token exchange and requires separate approval. Earlier statements that execution was unapproved are dated CP126 history.
 
 Updated September 10, checkpoint 126. This packet supersedes the dated approval requests in checkpoints 106–123. Their raw receipts remain retained. It is a local review artifact; it does not authorize publication, deployment, restart, cloud access changes or a paid canary. The goal remains incomplete.

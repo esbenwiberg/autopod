@@ -1,0 +1,63 @@
+{
+  "startedAt": "2026-09-10T05:41:54.048Z",
+  "contractSHA256": "c503745f8b7fb8864493399aff22a89615ee6425320ed6a9f696ff8736a7d6d0",
+  "candidate": "4e73cd8ce88e44cdb5c2d8d0a89447b819fa5a39",
+  "nonce": "autopod-cp127-20260910-1be967ac",
+  "runnerSHA256": "dd091bb2e2f5e24dd67dd1d1215fd735f37d365b4bf0816324a87aeb8035ee59",
+  "bundleSHA256": "159ffce46631ab9f3f0b58641f04ea67f5736cdeaf5d756ec98cd28f26ecb3dc",
+  "status": "failed",
+  "events": [
+    {
+      "at": "2026-09-10T05:41:57.601Z",
+      "kind": "preflight_passed"
+    },
+    {
+      "at": "2026-09-10T05:41:58.053Z",
+      "kind": "acr_exchange_intent"
+    },
+    {
+      "at": "2026-09-10T05:41:58.150Z",
+      "kind": "acr_exchange_response",
+      "httpStatus": 200
+    },
+    {
+      "at": "2026-09-10T05:41:58.151Z",
+      "kind": "disk_create_intent"
+    },
+    {
+      "at": "2026-09-10T05:42:58.159Z",
+      "kind": "disk_reconcile"
+    },
+    {
+      "at": "2026-09-10T05:42:58.292Z",
+      "kind": "execution_stopped",
+      "stage": "image_import",
+      "code": "create_reconciliation_unresolved"
+    },
+    {
+      "at": "2026-09-10T05:42:58.293Z",
+      "kind": "disk_cleanup_unresolved"
+    }
+  ],
+  "checks": {},
+  "providerCalls": 0,
+  "preflight": {
+    "sourceUnchanged": true,
+    "principalMatched": true,
+    "groupMatched": true,
+    "pullIdentityMatched": true,
+    "sourceDigestMatched": true,
+    "nonceAbsent": true,
+    "diskCount": 16,
+    "sandboxCount": 0
+  },
+  "diskCreateIntent": true,
+  "diskCreateUncertain": true,
+  "failure": {
+    "stage": "image_import",
+    "code": "create_reconciliation_unresolved"
+  },
+  "diskCleanupError": "unresolved_creation_identity",
+  "finishedAt": "2026-09-10T05:42:58.293Z",
+  "allCreatedResourcesRemoved": false
+}

@@ -1,10 +1,10 @@
 # Partial closure report
 
-Current checkpoint: [127](checkpoint-127.md). All six workstreams have local implementation and regression evidence. Required native/CLI/mobile interactions are verified within their recorded scope. The goal remains incomplete because loaded-source identity, historical API causality and actual-image capability evidence remain outstanding.
+Current checkpoint: [128](checkpoint-128.md). All six workstreams have local implementation and regression evidence. Required native/CLI/mobile interactions are verified within their recorded scope. The goal remains incomplete because loaded-source identity, historical API causality and actual-image capability evidence remain outstanding.
 
 The explicitly approved replacement hosted-copy check passed at checkpoint 124: the actual pinned snapshot migrated privately from schema 153 to 183 with original rows/columns preserved, integrity/FK/backfill/write checks passing, unchanged input, stable service identity and both private directories removed. [Result](receipts/checkpoint-124-hosted-result.json). The earlier changed-input refusal is retained separately. No active database migration or service restart occurred, and no copy-execution approval remains pending.
 
-PIM restored sandbox reads. The user-approved CP126 exact-image import was attempted once and returned HTTP 401; no sandbox or capability checks started. Three complete follow-up inventories found no task resources. The packet omitted the preview's documented transient ACR credentials. The [corrected additional-attempt packet](corrected-image-canary-packet.md) is locally verified and awaits approval; the original attempt is consumed. No role change, deployment or existing-resource deletion occurred.
+PIM reads work and the corrected ACR exchange succeeded (CP128 HTTP 200). The one approved import was locally aborted after 60 seconds by a runner defect; no sandbox started. Forty-eight complete inventories through/past the ten-minute window found no task resources, but Azure cancellation/hidden conversion is unconfirmed. The timeout fix passes local regression checks. The [full-window additional-attempt proposal](full-window-image-canary-packet.md) discloses that uncertainty and awaits approval; no automatic retry occurred.
 
 ## Exact candidate and verification
 
