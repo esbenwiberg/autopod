@@ -216,6 +216,11 @@ describe('required fact execution', () => {
     setupWorktree?: (worktreePath: string) => Promise<void>;
   }) {
     const worktreePath = await fs.mkdtemp(path.join(os.tmpdir(), 'autopod-fact-host-'));
+    // These real npm fixtures use only local packages; registry/audit latency is not under test.
+    await fs.writeFile(
+      path.join(worktreePath, '.npmrc'),
+      'offline=true\naudit=false\nfund=false\nupdate-notifier=false\n',
+    );
     await options.setupWorktree?.(worktreePath);
     const execCommands: string[] = [];
     const containerManager = {
@@ -359,7 +364,7 @@ human_review: []
 
     expect(result.factValidation?.status).toBe('pass');
     expect(result.factValidation?.results[0]?.stdout).toBe('host-fact');
-  });
+  }, 30_000);
 
   it('installs host dependencies when node_modules exists but is incomplete', async () => {
     const hostBrowserRunner: HostBrowserRunner = {

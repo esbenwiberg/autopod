@@ -273,6 +273,7 @@ describe('durable PR delivery boundary', () => {
     }
   });
 
+  // Full on-disk schema replay includes fsyncs; these are functional, not latency tests.
   it.each([139, 153])(
     'upgrades schema %s and reconciles in-flight delivery after actual close/reopen',
     async (version) => {
@@ -312,5 +313,6 @@ describe('durable PR delivery boundary', () => {
         rmSync(dir, { recursive: true, force: true });
       }
     },
+    30_000,
   );
 });

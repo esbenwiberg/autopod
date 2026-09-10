@@ -143,6 +143,7 @@ it.each([undefined, 'worker', 'reviewer', 'api', 'legacy-api', 'host'] as const)
     }
   },
 );
+// Full on-disk schema replay includes fsyncs; these are functional, not latency tests.
 it.each([139, 157])(
   'upgrades schema %s without manufacturing missing historical provenance',
   (version) => {
@@ -171,4 +172,5 @@ it.each([139, 157])(
       rmSync(dir, { recursive: true, force: true });
     }
   },
+  30_000,
 );

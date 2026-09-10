@@ -479,6 +479,7 @@ describe('scheduled scan reports independent of worker lifetime', () => {
     }
   });
 
+  // Full on-disk schema replay includes fsyncs; these are functional, not latency tests.
   it.each([139, 154])(
     'upgrades existing schema %s while preserving legacy records and durable report recovery',
     async (version) => {
@@ -520,6 +521,7 @@ describe('scheduled scan reports independent of worker lifetime', () => {
         rmSync(directory, { recursive: true, force: true });
       }
     },
+    30_000,
   );
 
   it('retains one unresolved identity across changed line locations, empty delta and interrupted collection', () => {

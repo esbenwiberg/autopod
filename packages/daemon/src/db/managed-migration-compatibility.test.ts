@@ -6,6 +6,7 @@ import { expect, it } from 'vitest';
 import { insertTestProfile, logger } from '../test-utils/mock-helpers.js';
 import { runMigrations } from './migrate.js';
 
+// Full on-disk schema replay includes fsyncs; these are functional, not latency tests.
 it.each([150, 152, 153])(
   'upgrades managed schema %s without skipping native reliability tables or changing managed data',
   (baseline) => {
@@ -88,6 +89,7 @@ it.each([150, 152, 153])(
       rmSync(root, { recursive: true, force: true });
     }
   },
+  30_000,
 );
 
 it('refuses an unpublished native checkpoint lineage before changing any migration records or retained rows', () => {
@@ -163,4 +165,4 @@ it('upgrades the prior native 182 candidate without silently skipping managed Gi
     db.close();
     rmSync(root, { recursive: true, force: true });
   }
-});
+}, 30_000);

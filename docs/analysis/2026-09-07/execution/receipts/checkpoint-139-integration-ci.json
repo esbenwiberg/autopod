@@ -1,0 +1,33 @@
+{
+  "pr": "https://github.com/esbenwiberg/autopod/pull/333",
+  "sourceBeforeCorrection": "324dc43e69491fb83db6295711daace8dd2ed5aa",
+  "failureEvidence": [
+    {
+      "job": "https://github.com/esbenwiberg/autopod/actions/runs/34472176004/job/102854390674",
+      "failedTests": 9,
+      "failureClass": "default five-second Vitest timeout; eight migration/reopen cases and one host dependency-install case"
+    },
+    {
+      "job": "https://github.com/esbenwiberg/autopod/actions/runs/34472176004/job/102856093438",
+      "failedTests": 1,
+      "failureClass": "same real npm-install fixture exceeded five seconds; migration cases passed on the single rerun"
+    }
+  ],
+  "correction": {
+    "fixtureNpmConfig": "offline=true; audit=false; fund=false; update-notifier=false; applies only to temporary local-package browser-fact fixtures",
+    "integrationTimeoutMs": 30000,
+    "scope": "Only the reported on-disk schema replay/reopen cases and the real host dependency-install test",
+    "assertionsAndCaseCountsUnchanged": true,
+    "productionTimeoutsUnchanged": true,
+    "benchmarkUnchanged": true
+  },
+  "localVerification": {
+    "command": "vitest run six affected integration files --maxWorkers=4",
+    "testFilesPassed": 6,
+    "testsPassed": 224,
+    "exitCode": 0,
+    "rawLogSHA256": "918807a443e50f2c4611e8f53046d5ac8cc995294dcc353ec7d30f3fb8b0e763",
+    "repositoryLintExitCode": 0
+  },
+  "previousFinalSourceProof": "Full local pipeline passed 6400 package tests plus one existing skip and 11 standalone Node tests before this test-only correction. Final-head GitHub CI must pass before merge."
+}

@@ -7,6 +7,7 @@ import { runMigrations } from '../db/migrate.js';
 import { insertTestProfile, logger } from '../test-utils/mock-helpers.js';
 import { createPodRepository } from './pod-repository.js';
 
+// Full on-disk schema replay includes fsyncs; these are functional, not latency tests.
 it('upgrades schema 180, blocks old destructive deletion, and retains event/progress rows through reopen', () => {
   const dir = mkdtempSync(join(tmpdir(), 'retained-history-upgrade-'));
   const migrations = resolve(import.meta.dirname, '../db/migrations');
@@ -61,4 +62,4 @@ it('upgrades schema 180, blocks old destructive deletion, and retains event/prog
     db.close();
     rmSync(dir, { recursive: true, force: true });
   }
-});
+}, 30_000);
