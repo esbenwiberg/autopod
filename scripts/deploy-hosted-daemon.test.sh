@@ -207,3 +207,14 @@ reset_fixture
 if DEPLOY_TEST_PODS_JSON='[{"status":"running"}]' run_deploy --verify-release >"$tmp/release-blocked-out" 2>&1; then exit 1; fi
 [ ! -e "$tmp/restarted" ]
 echo 'Hosted deployment release verification tests passed.'
+
+# Staging performs build/readiness gates without activating or pruning a release.
+reset_fixture
+if ! run_deploy --stage-only >"$tmp/stage-only-out" 2>&1; then
+  cat "$tmp/stage-only-out" >&2
+  exit 1
+fi
+grep -qF 'STAGED cafebabe' "$tmp/stage-only-out"
+[ ! -e "$tmp/restarted" ]
+[ "$(readlink "$tmp/current")" = "$tmp/releases/deadbeef" ]
+[ -e "$tmp/drain-removed" ]

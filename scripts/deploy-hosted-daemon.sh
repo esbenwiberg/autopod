@@ -27,6 +27,7 @@
 #                        reuse). Auto-selected when deps changed or live sha is
 #                        not present locally.
 #   --keep N             Releases to retain when pruning (default: 5).
+#   --stage-only         Build and prewarm without activation, restart or release pruning.
 #   --verify-release     Require exact clean build identity before releasing maintenance.
 #                        A failed post-swap check retains the existing expiring drain.
 #   --verify-string STR  Extra gate: grep the flattened built bundle for STR
@@ -75,6 +76,7 @@ FORCE=0
 FULL=0
 KEEP=5
 VERIFY_STRING=""
+STAGE_ONLY=0
 VERIFY_RELEASE=0
 SWAP_ATTEMPTED=0
 DEPLOY_VERIFIED=0
@@ -91,6 +93,7 @@ while [ $# -gt 0 ]; do
     --force) FORCE=1; shift;;
     --full) FULL=1; shift;;
     --keep) KEEP="${2:-}"; shift 2;;
+    --stage-only) STAGE_ONLY=1; shift;;
     --verify-release) VERIFY_RELEASE=1; shift;;
     --verify-string) VERIFY_STRING="${2:-}"; shift 2;;
     --skip-playwright-prewarm) PREWARM_PLAYWRIGHT=0; shift;;
@@ -510,6 +513,13 @@ if tr '\n' ' ' < \"\$NEW\" | grep -qF -- '$VERIFY_STRING'; then echo VERIFY_OK; 
 ")"
   echo "$VOUT" | grep -q VERIFY_OK || die "expected string NOT in built bundle — refusing swap. Rollback unaffected (current still $LIVE_SHA)."
   note "bundle verify OK"
+fi
+
+if [ "$STAGE_ONLY" -eq 1 ]; then
+  release_hosted_deploy_drain
+  trap - EXIT
+  note "STAGED $TARGET_SHA ($TARGET_SHA_FULL); current release unchanged"
+  exit 0
 fi
 
 # ---- final restart-blocking-pod gate + atomic swap ------------------------
