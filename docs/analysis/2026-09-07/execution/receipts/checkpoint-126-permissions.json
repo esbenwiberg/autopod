@@ -1,0 +1,39 @@
+[
+  {
+    "actions": [
+      "Microsoft.Authorization/*/read",
+      "Microsoft.Insights/alertRules/*",
+      "Microsoft.App/sessionPools/*/read",
+      "Microsoft.App/sessionPools/sessions/generatesessions/action",
+      "Microsoft.App/sessionPools/fetchMcpServerCredentials/action",
+      "Microsoft.App/sessionPools/rotateMcpServerCredentials/action"
+    ],
+    "dataActions": [
+      "Microsoft.App/sessionPools/*/read",
+      "Microsoft.App/sessionPools/interpreters/execute/action",
+      "Microsoft.App/sessionPools/interpreters/read",
+      "Microsoft.App/sessionPools/executions/*",
+      "Microsoft.App/sessionPools/files/*"
+    ],
+    "notActions": [],
+    "notDataActions": []
+  },
+  {
+    "actions": ["*"],
+    "dataActions": [],
+    "notActions": [
+      "Microsoft.Authorization/*/Delete",
+      "Microsoft.Authorization/*/Write",
+      "Microsoft.Authorization/elevateAccess/Action",
+      "Microsoft.Blueprint/blueprintAssignments/write",
+      "Microsoft.Blueprint/blueprintAssignments/delete",
+      "Microsoft.Compute/galleries/share/action",
+      "Microsoft.Purview/consents/write",
+      "Microsoft.Purview/consents/delete",
+      "Microsoft.Resources/deploymentStacks/manageDenySetting/action",
+      "Microsoft.Subscription/cancel/action",
+      "Microsoft.Subscription/enable/action"
+    ],
+    "notDataActions": []
+  }
+]

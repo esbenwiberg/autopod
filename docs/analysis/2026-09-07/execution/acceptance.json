@@ -1358,13 +1358,15 @@
         "checkpoint-120.md",
         "checkpoint-121.md",
         "checkpoint-124.md",
-        "checkpoint-125.md"
+        "checkpoint-125.md",
+        "checkpoint-126.md",
+        "exact-image-canary-packet.md"
       ],
       "prerequisites": [
-        "CP125 fresh intended-group GET still returns 403. Current principal cef0aeed-b5d3-442e-b5d7-85e0526bd5e7 lacks sandbox data actions and role-assignment write permission. An authorized administrator must provide group-scoped SandboxGroup Data Owner access (exact handoff prepared); then resolve the matching ready disk image and finalize separate canary command/oracle/spend approval. No grant or allocation performed."
+        "CP126 PIM restored intended-group disk-image read access (HTTP 200). The only ready same-repository disk has an older digest; exact affected digest requires the prepared one-import/one-canary packet. Existing managed identity has AcrPull. Paid import/canary authorization including disclosed ancillary-cost uncertainty remains pending; no resources created."
       ],
       "finalSourceEvidence": "90a61141a6a8ed6205aae144bbb99f8c9f0f9ec5; see checkpoint-106.md for executed checks, carried forward surface proof and limits.",
-      "remaining": "CP125 fresh intended-group GET still returns 403. Current principal cef0aeed-b5d3-442e-b5d7-85e0526bd5e7 lacks sandbox data actions and role-assignment write permission. An authorized administrator must provide group-scoped SandboxGroup Data Owner access (exact handoff prepared); then resolve the matching ready disk image and finalize separate canary command/oracle/spend approval. No grant or allocation performed.",
+      "remaining": "CP126 PIM restored intended-group disk-image read access (HTTP 200). The only ready same-repository disk has an older digest; exact affected digest requires the prepared one-import/one-canary packet. Existing managed identity has AcrPull. Paid import/canary authorization including disclosed ancillary-cost uncertainty remains pending; no resources created.",
       "historicalProgressNotes": "Actual affected dataverse-harness image is pinned in CP110, but the required capability canary remains unrun. Obtain intended-group data-plane access and finish the ready-disk-image identity, total spend and command/oracle packet before paid-canary authorization."
     },
     {
@@ -1436,13 +1438,15 @@
         "checkpoint-109.md",
         "checkpoint-110.md",
         "checkpoint-124.md",
-        "checkpoint-125.md"
+        "checkpoint-125.md",
+        "checkpoint-126.md",
+        "exact-image-canary-packet.md"
       ],
       "prerequisites": [
-        "CP125 fresh intended-group GET still returns 403. Current principal cef0aeed-b5d3-442e-b5d7-85e0526bd5e7 lacks sandbox data actions and role-assignment write permission. An authorized administrator must provide group-scoped SandboxGroup Data Owner access (exact handoff prepared); then resolve the matching ready disk image and finalize separate canary command/oracle/spend approval. No grant or allocation performed."
+        "CP126 PIM restored intended-group disk-image read access (HTTP 200). The only ready same-repository disk has an older digest; exact affected digest requires the prepared one-import/one-canary packet. Existing managed identity has AcrPull. Paid import/canary authorization including disclosed ancillary-cost uncertainty remains pending; no resources created."
       ],
       "finalSourceEvidence": "90a61141a6a8ed6205aae144bbb99f8c9f0f9ec5; see checkpoint-106.md for executed checks, carried forward surface proof and limits.",
-      "remaining": "CP125 fresh intended-group GET still returns 403. Current principal cef0aeed-b5d3-442e-b5d7-85e0526bd5e7 lacks sandbox data actions and role-assignment write permission. An authorized administrator must provide group-scoped SandboxGroup Data Owner access (exact handoff prepared); then resolve the matching ready disk image and finalize separate canary command/oracle/spend approval. No grant or allocation performed."
+      "remaining": "CP126 PIM restored intended-group disk-image read access (HTTP 200). The only ready same-repository disk has an older digest; exact affected digest requires the prepared one-import/one-canary packet. Existing managed identity has AcrPull. Paid import/canary authorization including disclosed ancillary-cost uncertainty remains pending; no resources created."
     },
     {
       "id": "W4.1",
@@ -2889,13 +2893,14 @@
         "checkpoint-122.md",
         "checkpoint-123.md",
         "checkpoint-124.md",
-        "checkpoint-125.md"
+        "checkpoint-125.md",
+        "exact-image-canary-packet.md"
       ],
       "prerequisites": [
-        "CP124 completed the explicitly approved CP123 hosted-copy verification and cleanup. No further snapshot approval is pending. Deployment/rollback loaded-source identities, fresh cutover/drain safeguards and intended-image sandbox access/canary scope/spend remain required before separate deployment or paid-canary approval."
+        "CP124 hosted-copy approval fulfilled. CP126 exact image import/canary bodies, commands, oracles, cleanup and known-component spend estimate prepared; ancillary costs explicitly unpriced. Separate approval pending. Loaded/rollback identity and fresh cutover/drain safeguards remain required before deployment."
       ],
       "finalSourceEvidence": "15900d9e08a7e4ca786a6ad11ff81820fda14de4; clean full pipeline and 357 Swift tests; direct native case/source boundaries in checkpoint-117 receipt.",
-      "remaining": "CP124 completed the explicitly approved CP123 hosted-copy verification and cleanup. No further snapshot approval is pending. Deployment/rollback loaded-source identities, fresh cutover/drain safeguards and intended-image sandbox access/canary scope/spend remain required before separate deployment or paid-canary approval."
+      "remaining": "CP124 hosted-copy approval fulfilled. CP126 exact image import/canary bodies, commands, oracles, cleanup and known-component spend estimate prepared; ancillary costs explicitly unpriced. Separate approval pending. Loaded/rollback identity and fresh cutover/drain safeguards remain required before deployment."
     },
     {
       "id": "G.6",
@@ -2935,7 +2940,7 @@
       "remaining": "All 43 criteria remain mapped. W5, mapped operator interactions and exact hosted snapshot compatibility are verified. Loaded-source identity, historical API causality and actual-image capability remain outstanding; whole-goal completion is not claimed."
     }
   ],
-  "lastCheckpoint": "checkpoint-125.md",
+  "lastCheckpoint": "checkpoint-126.md",
   "migrationLineage": {
     "managedBaseline": "142-153; authoritative managed migration 153 preserved from main b75fbf0b7e2c4ea455838a6e4df6537665a7a8cc",
     "nativeCurrent": "164-183; prior native 182 upgraded by idempotent managed GitHub reads bridge 183; representative managed 150/152/153 and copy-only native lineage verified",

@@ -1,0 +1,7 @@
+{
+  "architecture": "amd64",
+  "digest": "sha256:5048481ae49a653586f000ea6366df5a6f5bb7d4ecd13bbfaf02dbd2be9ba661",
+  "lastUpdateTime": "2026-08-23T12:45:33.6126568Z",
+  "mediaType": "application/vnd.docker.distribution.manifest.v2+json",
+  "os": "linux"
+}

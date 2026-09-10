@@ -1,0 +1,166 @@
+{
+  "url": "https://prices.azure.com/api/retail/prices?%24filter=serviceName+eq+%27Azure+Container+Apps%27+and+armRegionName+eq+%27northeurope%27+and+priceType+eq+%27Consumption%27",
+  "nextPageLinkPresent": false,
+  "items": [
+    {
+      "productName": "Azure Container Apps",
+      "skuName": "Standard",
+      "meterName": "Standard vCPU Active Usage",
+      "unitOfMeasure": "1 Second",
+      "retailPrice": 2.4e-5,
+      "currencyCode": "USD",
+      "effectiveStartDate": "2022-06-01T00:00:00Z",
+      "tierMinimumUnits": 0.0
+    },
+    {
+      "productName": "Azure Container Apps",
+      "skuName": "Environment",
+      "meterName": "Environment Private Endpoint",
+      "unitOfMeasure": "1 Hour",
+      "retailPrice": 0.143,
+      "currencyCode": "USD",
+      "effectiveStartDate": "2026-09-01T00:00:00Z",
+      "tierMinimumUnits": 0.0
+    },
+    {
+      "productName": "Azure Container Apps",
+      "skuName": "Dedicated",
+      "meterName": "Dedicated vCPU Usage",
+      "unitOfMeasure": "1 Hour",
+      "retailPrice": 0.057077,
+      "currencyCode": "USD",
+      "effectiveStartDate": "2023-08-01T00:00:00Z",
+      "tierMinimumUnits": 0.0
+    },
+    {
+      "productName": "Azure Container Apps",
+      "skuName": "Hybrid",
+      "meterName": "Hybrid vCPU Usage",
+      "unitOfMeasure": "1 Hour",
+      "retailPrice": 0.216,
+      "currencyCode": "USD",
+      "effectiveStartDate": "2024-12-01T00:00:00Z",
+      "tierMinimumUnits": 0.0
+    },
+    {
+      "productName": "Azure Container Apps",
+      "skuName": "Standard",
+      "meterName": "Standard NC T4 v3 GPU Usage",
+      "unitOfMeasure": "1 Second",
+      "retailPrice": 8.8e-5,
+      "currencyCode": "USD",
+      "effectiveStartDate": "2026-04-01T00:00:00Z",
+      "tierMinimumUnits": 0.0
+    },
+    {
+      "productName": "Azure Container Apps",
+      "skuName": "Standard",
+      "meterName": "Standard vCPU Idle Usage",
+      "unitOfMeasure": "1 Second",
+      "retailPrice": 3e-6,
+      "currencyCode": "USD",
+      "effectiveStartDate": "2022-06-01T00:00:00Z",
+      "tierMinimumUnits": 0.0
+    },
+    {
+      "productName": "Azure Container Apps",
+      "skuName": "Environment",
+      "meterName": "Environment Management Hour",
+      "unitOfMeasure": "1 Hour",
+      "retailPrice": 0.143,
+      "currencyCode": "USD",
+      "effectiveStartDate": "2026-09-01T00:00:00Z",
+      "tierMinimumUnits": 0.0
+    },
+    {
+      "productName": "Azure Container Apps",
+      "skuName": "Dedicated",
+      "meterName": "Dedicated Plan Management",
+      "unitOfMeasure": "1 Hour",
+      "retailPrice": 0.1,
+      "currencyCode": "USD",
+      "effectiveStartDate": "2023-08-01T00:00:00Z",
+      "tierMinimumUnits": 0.0
+    },
+    {
+      "productName": "Azure Container Apps",
+      "skuName": "Standard",
+      "meterName": "Standard NC A100 v4 GPU Usage",
+      "unitOfMeasure": "1 Second",
+      "retailPrice": 0.000635,
+      "currencyCode": "USD",
+      "effectiveStartDate": "2026-04-01T00:00:00Z",
+      "tierMinimumUnits": 0.0
+    },
+    {
+      "productName": "Azure Container Apps",
+      "skuName": "Standard",
+      "meterName": "Standard Requests",
+      "unitOfMeasure": "1M",
+      "retailPrice": 0.4,
+      "currencyCode": "USD",
+      "effectiveStartDate": "2022-06-01T00:00:00Z",
+      "tierMinimumUnits": 0.0
+    },
+    {
+      "productName": "Azure Container Apps",
+      "skuName": "Standard",
+      "meterName": "Standard Memory Active Usage",
+      "unitOfMeasure": "1 GiB Second",
+      "retailPrice": 3e-6,
+      "currencyCode": "USD",
+      "effectiveStartDate": "2022-06-01T00:00:00Z",
+      "tierMinimumUnits": 0.0
+    },
+    {
+      "productName": "Azure Container Apps",
+      "skuName": "Environment",
+      "meterName": "Environment Planned Maintenance Hour",
+      "unitOfMeasure": "1 Hour",
+      "retailPrice": 0.143,
+      "currencyCode": "USD",
+      "effectiveStartDate": "2026-09-01T00:00:00Z",
+      "tierMinimumUnits": 0.0
+    },
+    {
+      "productName": "Azure Container Apps",
+      "skuName": "Dedicated",
+      "meterName": "Dedicated GPU Usage",
+      "unitOfMeasure": "1 Hour",
+      "retailPrice": 5.2891,
+      "currencyCode": "USD",
+      "effectiveStartDate": "2026-04-01T00:00:00Z",
+      "tierMinimumUnits": 0.0
+    },
+    {
+      "productName": "Azure Container Apps",
+      "skuName": "Standard",
+      "meterName": "Standard Memory Idle Usage",
+      "unitOfMeasure": "1 GiB Second",
+      "retailPrice": 3e-6,
+      "currencyCode": "USD",
+      "effectiveStartDate": "2022-06-01T00:00:00Z",
+      "tierMinimumUnits": 0.0
+    },
+    {
+      "productName": "Azure Container Apps",
+      "skuName": "Dedicated",
+      "meterName": "Dedicated Memory Usage",
+      "unitOfMeasure": "1 Hour",
+      "retailPrice": 0.004978,
+      "currencyCode": "USD",
+      "effectiveStartDate": "2023-08-01T00:00:00Z",
+      "tierMinimumUnits": 0.0
+    },
+    {
+      "productName": "Azure Container Apps",
+      "skuName": "Dynamic Sessions",
+      "meterName": "Dynamic Sessions",
+      "unitOfMeasure": "1 Hour",
+      "retailPrice": 0.03,
+      "currencyCode": "USD",
+      "effectiveStartDate": "2026-04-01T00:00:00Z",
+      "tierMinimumUnits": 0.0
+    }
+  ]
+}

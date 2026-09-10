@@ -1,6 +1,6 @@
 # Release and remaining acceptance packet
 
-Updated September 10, checkpoint 125. This packet supersedes the dated approval requests in checkpoints 106–123. Their raw receipts remain retained. It is a local review artifact; it does not authorize publication, deployment, restart, cloud access changes or a paid canary. The goal remains incomplete.
+Updated September 10, checkpoint 126. This packet supersedes the dated approval requests in checkpoints 106–123. Their raw receipts remain retained. It is a local review artifact; it does not authorize publication, deployment, restart, cloud access changes or a paid canary. The goal remains incomplete.
 
 ## Current tested candidate
 
@@ -42,7 +42,7 @@ Checkpoint 121 verifies the remaining listed native cases: retained deleted flee
 
 The actual affected `dataverse-harness` image is `ewiautopodacr.azurecr.io/autopod/dataverse-harness:latest`, resolved during checkpoint 110 to `sha256:4b836cdabc71ffd40aef564b65b6b16564c5312770130bc59251a732078c9d77`. Do not substitute the unrelated autopod-self image.
 
-The configured group is `autopod-spike-neu`, North Europe, under resource group `ewi-sandboxes`. Its disk-image data-plane GET returned 403 again in the checkpoint-124 read-only refresh. No role assignment or paid canary has been authorized. The September 10 CP125 refresh confirms the same 403 and that the current account cannot write role assignments. An administrator must supply suitable access at the intended group scope; the [exact principal/role/grant/revocation handoff](sandbox-access-handoff.md) is prepared. See [targeted prerequisites](targeted-acceptance-prerequisites.md) and the retained role/read receipts. Do not switch credentials or create/garbage-collect disk images to bypass the refusal.
+PIM restored reads on `autopod-spike-neu` in North Europe (CP126 HTTP 200). The only same-repository ready disk carries an older digest. Existing managed identity AcrPull is verified; no role changes are needed. The [exact image import/canary packet](exact-image-canary-packet.md) now pins request bodies, commands/oracles, cleanup and known-component cost with ancillary-cost uncertainty. It supersedes the historical access request. Paid execution remains unapproved.
 
 Once read access is supplied, resolve an existing matching ready disk-image identity. If import is necessary, price and request that explicitly. The proposed canary remains one disposable sandbox, one creation attempt, no model calls, explicit 2 vCPU / 4 GiB / 40 GiB, at most five minutes through cleanup, subject to verifying the affected profile's requirements. A lost creation response requires reconciliation rather than a second creation. Verify removal of the exact created resource.
 
