@@ -231,3 +231,28 @@ it('revocation and a newer revision invalidate the captured channel authority', 
   expect(x.channel.attach).toHaveBeenCalledTimes(1);
   expect(x.fetcher).not.toHaveBeenCalled();
 });
+
+it('requires terminal revoked state and no uncertain sandbox allocation before discarding a workspace', async () => {
+  const x = setup('sandbox');
+  const c = x.create(true);
+  await expect(c.service.start('installation', x.request, 'after-reservation')).rejects.toThrow();
+  const row = c.service.lookup('installation', x.request.startKey);
+  if (!row) throw new Error('fixture reservation missing');
+  await c.workspaces.prepare(row.pod_id, x.request);
+  expect(await c.runtime.cleanupUnallocated?.(row.pod_id, x.request)).toBe(false);
+  f.db
+    .prepare("UPDATE managed_pods SET state='killed',revoked=1,observed_exit=1 WHERE pod_id=?")
+    .run(row.pod_id);
+  f.db
+    .prepare(
+      "INSERT INTO managed_sandbox_allocations(pod_id,spec_digest,phase) VALUES (?,?,'creating')",
+    )
+    .run(row.pod_id, x.request.executionSpecDigest);
+  expect(await c.runtime.cleanupUnallocated?.(row.pod_id, x.request)).toBe(false);
+  f.db.prepare('DELETE FROM managed_sandbox_allocations WHERE pod_id=?').run(row.pod_id);
+  expect(await c.runtime.cleanupUnallocated?.(row.pod_id, x.request)).toBe(true);
+  expect(await c.runtime.cleanupUnallocated?.(row.pod_id, x.request)).toBe(true);
+  expect(readFileSync(path.join(x.mirror, 'README.md'), 'utf8')).toBe('A frozen fact.\n');
+  expect(x.ensure).not.toHaveBeenCalled();
+  expect(x.credential).not.toHaveBeenCalled();
+});

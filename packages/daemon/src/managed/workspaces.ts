@@ -1,5 +1,15 @@
 import { randomUUID } from 'node:crypto';
-import { lstat, mkdir, readlink, rename, rm, symlink } from 'node:fs/promises';
+import {
+  appendFile,
+  lstat,
+  mkdir,
+  readFile,
+  readlink,
+  realpath,
+  rename,
+  rm,
+  symlink,
+} from 'node:fs/promises';
 import path from 'node:path';
 import type { ManagedPodRequest } from '@autopod/shared';
 import type Database from 'better-sqlite3';
@@ -114,6 +124,15 @@ export class ManagedWorkspaces {
             )
               throw new Error('managed-workspace-dependency-cache-conflict');
           }
+          // Directory-only ignores do not match our runtime-owned symlink.
+          // Keep this exclusion in the isolated Git metadata, never in source or the mirror.
+          const exclude = path.join(destination, '.git', 'info', 'exclude');
+          const rule = '/node_modules';
+          const existing = await readFile(exclude, 'utf8').catch((error: NodeJS.ErrnoException) => {
+            if (error.code !== 'ENOENT') throw error;
+            return '';
+          });
+          if (!existing.split('\n').includes(rule)) await appendFile(exclude, `\n${rule}\n`);
           if ((await managedGit(destination, ['check-ignore', 'node_modules'])) !== 'node_modules')
             throw new Error('managed-workspace-dependency-cache-not-ignored');
         }
@@ -143,6 +162,22 @@ export class ManagedWorkspaces {
       volumes.push({ host: output, container: '/output', readOnly: false });
     }
     return volumes;
+  }
+  async discardUnallocated(podId: string): Promise<boolean> {
+    if (!/^managed-[A-Za-z0-9-]+$/.test(podId)) throw new Error('managed-workspace-pod-invalid');
+    const directory = path.join(this.root, podId);
+    try {
+      if (
+        (await lstat(directory)).isSymbolicLink() ||
+        (await realpath(directory)) !== path.join(await realpath(this.root), podId)
+      )
+        throw new Error('managed-workspace-unverified');
+      await rm(directory, { recursive: true, force: true });
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+    }
+    this.db.prepare('DELETE FROM managed_workspaces WHERE pod_id=?').run(podId);
+    return true;
   }
   path(podId: string, repositoryId: string): string {
     const row = this.db

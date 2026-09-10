@@ -94,6 +94,8 @@ it('expiry closes a reservation that failed before runtime allocation', async ()
       stop_requested: 1,
       observed_exit: 1,
     });
+    const recovered = await restarted.reconcileStart('installation-one', f.request);
+    expect(recovered?.podId).toBe(row?.pod_id);
     expect(f.launches()).toBe(0);
   } finally {
     f.close();
@@ -172,3 +174,27 @@ it('conflicting initial requests racing through separate services reserve one po
     f.close();
   }
 });
+
+it.each(['managed-git-operation-failed', 'Bearer reusable-secret'])(
+  'persists only safe launch failure categories for %s',
+  async (message) => {
+    const f = fixture();
+    try {
+      f.runtime.ensure = async () => {
+        throw new Error(message);
+      };
+      const service = f.service();
+      await expect(service.start('installation-one', f.request)).rejects.toThrow();
+      const row = service.lookup('installation-one', f.request.startKey);
+      const result = f.db
+        .prepare('SELECT limitations_json FROM managed_results WHERE pod_id=?')
+        .get(row?.pod_id) as { limitations_json: string };
+      expect(JSON.parse(result.limitations_json)).toEqual([
+        message === 'managed-git-operation-failed' ? message : 'managed-launch-unconfirmed',
+      ]);
+      expect(result.limitations_json).not.toContain('reusable-secret');
+    } finally {
+      f.close();
+    }
+  },
+);

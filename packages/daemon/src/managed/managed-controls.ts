@@ -144,9 +144,15 @@ export class ManagedControls {
           return { prior: this.result(row), row };
         if (request.operation === 'cleanup') {
           if (!row.observed_exit) throw new Error('managed-cleanup-before-exit');
-          if (!this.service.runtime.cleanup) throw new Error('managed-cleanup-unavailable');
+          if (
+            row.runtime_ref
+              ? !this.service.runtime.cleanup
+              : !this.service.runtime.cleanupUnallocated
+          )
+            throw new Error('managed-cleanup-unavailable');
           const spec = JSON.parse(row.request_json) as ManagedPodRequest;
           if (
+            row.runtime_ref &&
             spec.outputs.artifacts.mode === 'required' &&
             !this.service.db
               .prepare("SELECT 1 FROM artifact_exports WHERE pod_id=? AND status='committed'")
@@ -154,7 +160,7 @@ export class ManagedControls {
           ) {
             throw new Error('managed-artifact-export-pending');
           }
-          if (spec.outputs.source.mode !== 'none') {
+          if (row.runtime_ref && spec.outputs.source.mode !== 'none') {
             if (!this.service.source) throw new Error('managed-source-candidate-pending');
             this.service.source.candidate(installation, podId);
           }
@@ -204,6 +210,16 @@ export class ManagedControls {
         // Failure does not undo a durable revocation. The independent watchdog retries.
         await this.service.runtime.stop(row.runtime_ref).catch(() => {});
       }
+    }
+    if (!row.runtime_ref && row.observed_exit && request.operation === 'cleanup') {
+      const removed = await this.service.runtime.cleanupUnallocated?.(
+        podId,
+        JSON.parse(row.request_json) as ManagedPodRequest,
+      );
+      if (removed)
+        this.service.db
+          .prepare("UPDATE managed_pods SET cleanup='observed' WHERE pod_id=?")
+          .run(podId);
     }
     return this.result(this.service.row(installation, podId));
   }

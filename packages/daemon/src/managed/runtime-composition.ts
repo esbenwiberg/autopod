@@ -196,6 +196,25 @@ export function composeManagedRuntime(config: ManagedRuntimeCompositionConfig) {
         : null;
     },
   );
+  runtime.cleanupUnallocated = async (podId, request) => {
+    // Sandbox allocation is durably reserved before any remote create. Missing
+    // runtime_ref alone is insufficient; reject even uncertain allocation rows.
+    if (request.route.executionTarget !== 'sandbox') return false;
+    const row = config.db
+      .prepare('SELECT runtime_ref,observed_exit,revoked FROM managed_pods WHERE pod_id=?')
+      .get(podId) as
+      | { runtime_ref: string | null; observed_exit: number; revoked: number }
+      | undefined;
+    if (
+      !row ||
+      row.runtime_ref ||
+      !row.observed_exit ||
+      !row.revoked ||
+      config.db.prepare('SELECT 1 FROM managed_sandbox_allocations WHERE pod_id=?').get(podId)
+    )
+      return false;
+    return workspaces.discardUnallocated(podId);
+  };
   const components = managedComponents({ ...config, runtime });
   const gateways = bindings.map(
     (binding) =>
