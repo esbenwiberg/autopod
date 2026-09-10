@@ -1,45 +1,15 @@
 # Release and remaining acceptance packet
 
-Current at checkpoint 132. Required canaries and operator/backup compatibility checks are verified within recorded scope. Continuing canary authority is explicit; publication, production deployment/restart, existing-resource mutation, role changes and external messages remain separately gated. The goal is incomplete. [Current ledger](acceptance.json), [prior packet history](receipts/checkpoint-131-prior-release-packet.md).
+Current at checkpoint 131. Required canaries and operator/backup compatibility checks are verified within recorded scope. Continuing canary authority is explicit; publication, production deployment/restart, existing-resource mutation, role changes and external messages remain separately gated. The goal is incomplete. [Current ledger](acceptance.json), [prior packet history](receipts/checkpoint-131-prior-release-packet.md).
 
 ## Current tested candidate
 
-- Release candidate: `feeb55d6d9bed010b23a37cf18d2c597da2df408`; application packages byte-identical to canary source `9abf64b1d199f71f79190b6fc667d899fdc1559e`, isolated branch `codex/durable-execution-contract` at `/private/tmp/autopod-durable-execution`.
+- Application source: `9abf64b1d199f71f79190b6fc667d899fdc1559e`, isolated branch `codex/durable-execution-contract` at `/private/tmp/autopod-durable-execution`.
 - [Current non-documentation patch](receipts/checkpoint-131-candidate-code.diff) and [base/candidate blob manifest](receipts/checkpoint-131-candidate-manifest.json) compare against remote main `b75fbf0b7e2c4ea455838a6e4df6537665a7a8cc`, integrated locally and refreshed by ls-remote at CP131. Recheck immediately before publication.
 - Governing contract SHA-256: `3dc5e753db8ec664ea8ed1a93b1150c936ea53cbc8e9f8a0def05113dfd1e481`; unrelated original checkout changes remain excluded.
 - [Final full pipeline](receipts/checkpoint-131-full-validation-identity.json) passed: 6,375 package tests, one existing platform skip, 11 standalone Node tests and required shell/install/lint/build/typecheck/audit/secret checks. Fourteen of fifteen test Turbo tasks were cached; one moderate dependency advisory remains. Exact historical canary inputs were archived before maintained-copy formatting; validation rules stayed unchanged.
 - Prior 357 Swift tests, mapped native/mobile/CLI interactions, actual snapshot migration/backup checks and registry validator proof retain their source scope through [byte-identical comparisons](receipts/checkpoint-131-source-identity.json).
 - The matched local replay remains 613.435166 ms baseline versus 1,764.543375 ms reuse, zero escaped seeded defects and unchanged coverage. The 25% target is unsupported; no live speed claim.
-
-## Concrete next authorization: branch publication only
-
-Publish this isolated branch and its evidence to `esbenwiberg/autopod`, remote branch `codex/durable-execution-contract`. Main remains integrated `b75fbf0b7e2c4ea455838a6e4df6537665a7a8cc`; the remote candidate branch was absent at CP132. The exact non-documentation source is candidate `feeb55d6d9bed010b23a37cf18d2c597da2df408`, with [396-path base/candidate manifest](receipts/checkpoint-132-candidate-manifest.json). The CP131 full patch plus [CP132 two-file patch](receipts/checkpoint-132-deployment-guard.diff) reconstruct it. The final local evidence commit adds CP132 documentation and receipts only.
-
-After explicit publication authority, capture the clean branch's full HEAD, fetch `+refs/heads/main:refs/remotes/origin/main`, verify main and the manifest still match, and push that captured SHA to `refs/heads/codex/durable-execution-contract` without force. If main has changed, integrate and validate the changed source before pushing. Verify the remote branch resolves to the captured SHA. Do not push main, merge, create a PR, restart production or send messages under this branch-only approval. The original goal explicitly gates pushes; the broad later canary approval does not cover this action.
-
-This publication needs no model or sandbox calls and creates no cloud resources. No incremental provider spend is requested; any repository automation charge is unmeasured. Before publication, cancellation simply leaves the local branch intact. No production rollback is involved in publishing a branch.
-
-## Prepared production procedure; activation prerequisites remain open
-
-Target VM: subscription `06bb959b-9458-41a6-bdf5-77cc12feaab9`, resource group `ewi-sandboxes`, VM `autopod-daemon`, immutable VM ID `3addc9bc-4812-4892-98d6-c40d5ab893c0`. Service `autopod-daemon`, current link `/opt/autopod/current`, release root `/opt/autopod/releases`, intended database `/data/autopod/autopod.db`.
-
-CP132 observed service PID 125941 at clean on-disk commit `ca92847a64aa11d58b5a43ca29659262fe85ada9`, schema 153, the same service-held database inode, zero restart-blocking and queued pods and 139 GB free. The authenticated drain GET succeeded and reported inactive. These are dated readiness observations, not a loaded-source or cutover guarantee. [Receipt](receipts/checkpoint-132-release-readiness.json).
-
-The future full-build command, **not authorized or ready to execute yet**, is:
-
-```bash
-scripts/deploy-hosted-daemon.sh --target feeb55d6d9bed010b23a37cf18d2c597da2df408 --full --verify-release --yes
-```
-
-It retains mandatory browser prewarm, the default five-release retention policy, API/database admission checks and exact release verification. Do not add `--force` or skip prewarm. This is a full build because copied Git metadata cannot establish provenance. The candidate must first be reachable on GitHub. The script has no stage-only mode; running it activates the release and must not be used merely to stage a build.
-
-Before activation, establish an approved effective worker admission/settlement procedure, inspect scheduler/queue ownership and refresh the zero-work counts. The existing expiring drain protects API pod creation only; it is not a proven fence for internal scheduled dispatch. Produce a fresh WAL-aware backup, verify scope/headroom and isolated restore using the existing backup verifier, and retain old source and the fresh backup on the VM. Reconfirm schema lineage and candidate compatibility; the CP124 historical snapshot upgrade remains evidence, not a fresh cutover backup.
-
-After activation require exact clean build SHA, validation implementation hash, migration 183, intended database identity, bounded successful history/cost projections and task/readiness/ownership consistency. A successful new response does not prove the old API failure cause. No new paid workload is needed for these read-only acceptance checks; VM build/storage/network costs are not measured and need a bounded activation packet before authority is requested.
-
-On post-swap failure the opt-in guard retains the current expiring drain, which an operator must inspect and renew. Preserve the post-cutover database/WAL and release; prefer forward repair. Do not execute the script's generic `--rollback ca92847a` suggestion: older writers have not been proven compatible with newly persisted durable records. A downgrade requires a separately proven compatible release/database pair and reconciliation of post-cutover work. The publication request does not bypass these activation/recovery prerequisites.
-
-The missing historical failing request trace remains a separate external prerequisite. CP132 examined retained journal/current syslog and bounded older archive coverage without finding it. No retrospective cause is manufactured from current success or the malformed-JSON fixture.
 
 ## Completed inspections; do not request them again
 
@@ -87,7 +57,7 @@ Before a publication/deployment request:
 4. Produce a fresh WAL-aware cutover backup and verify intended scope/freshness, isolated restoration and headroom (two copies plus reserve). Keep sampled historical restore acceptance distinct from this fresh cutover gate.
 5. After explicit publication authority, publish only the approved source. After explicit deployment/restart authority, use the hosted deployment skill and verified target layout, a full build when provenance is ambiguous, mandatory browser prewarm, bounded health and post-start source/migration evidence. Do not use `--force` without authority naming affected work.
 
-No executable deployment command is presented as ready while these requirements remain open. The previous command naming `90a61141` is superseded; the current release candidate `feeb55d6` is not deployed or published.
+No executable deployment command is presented as ready while these requirements remain open. The previous command naming `90a61141` is superseded; the current candidate `9abf64b1` is not deployed or published.
 
 ## Rollback and stop rules
 

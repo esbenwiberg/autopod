@@ -1,0 +1,98 @@
+diff --git a/scripts/deploy-hosted-daemon.sh b/scripts/deploy-hosted-daemon.sh
+index fed3b73b..9dce34d5 100755
+--- a/scripts/deploy-hosted-daemon.sh
++++ b/scripts/deploy-hosted-daemon.sh
+@@ -29,0 +30,2 @@
++#   --verify-release     Require exact clean build identity before releasing maintenance.
++#                        A failed post-swap check retains the existing expiring drain.
+@@ -75,0 +78,3 @@ VERIFY_STRING=""
++VERIFY_RELEASE=0
++SWAP_ATTEMPTED=0
++DEPLOY_VERIFIED=0
+@@ -88,0 +94 @@ while [ $# -gt 0 ]; do
++    --verify-release) VERIFY_RELEASE=1; shift;;
+@@ -250,0 +257,4 @@ release_hosted_deploy_drain() {
++    if [ "$VERIFY_RELEASE" -eq 1 ] && [ "$SWAP_ATTEMPTED" -eq 1 ] && [ "$DEPLOY_VERIFIED" -ne 1 ]; then
++      note "release unverified: retaining the existing maintenance drain until its expiry; inspect and renew maintenance before recovery"
++      return
++    fi
+@@ -511,0 +522 @@ note "swapping symlink + restarting $SERVICE"
++SWAP_ATTEMPTED=1
+@@ -565,0 +577,24 @@ note "external HTTPS health 200 OK"
++if [ "$VERIFY_RELEASE" -eq 1 ]; then
++  if ! curl -fsS --max-time 12 "$HEALTH_URL" | EXPECTED_RELEASE_SHA="$TARGET_SHA_FULL" python3 -c '
++import json, os, re, sys
++try:
++    raw = sys.stdin.buffer.read(65537)
++    if len(raw) > 65536:
++        raise ValueError("response bound")
++    release = json.loads(raw).get("release")
++    valid = (isinstance(release, dict)
++        and release.get("commitSha") == os.environ["EXPECTED_RELEASE_SHA"]
++        and release.get("dirty") is False
++        and release.get("source") == "build"
++        and isinstance(release.get("validationImplementationHash"), str)
++        and re.fullmatch(r"[a-f0-9]{64}", release["validationImplementationHash"]) is not None)
++    if not valid:
++        raise ValueError("identity mismatch")
++except (ValueError, TypeError, AttributeError):
++    sys.exit(1)
++print("RELEASE_IDENTITY_OK")
++'; then
++    die "release identity was not verified; preserve the database and inspect the staged release before recovery"
++  fi
++fi
++DEPLOY_VERIFIED=1
+diff --git a/scripts/deploy-hosted-daemon.test.sh b/scripts/deploy-hosted-daemon.test.sh
+index 1fafb5a8..43f65f4a 100755
+--- a/scripts/deploy-hosted-daemon.test.sh
++++ b/scripts/deploy-hosted-daemon.test.sh
+@@ -30 +30,3 @@ case "$*" in
+-  *'hosted-deploy-drain'*) echo '{"active":{"expiresAt":"2099-01-01T00:00:00.000Z"}}' ;;
++  *'hosted-deploy-drain'*)
++    if [[ "$*" == *'-X DELETE'* ]]; then echo removed >"$DEPLOY_TEST_DRAIN_REMOVED"; fi
++    echo '{"active":{"expiresAt":"2099-01-01T00:00:00.000Z"}}' ;;
+@@ -36,0 +39,12 @@ case "$*" in
++  *'/health'*)
++    if [[ "$*" == *'%{http_code}'* ]]; then echo 200; exit 0; fi
++    python3 - <<'PYRELEASE'
++import json,os
++mode=os.environ.get('DEPLOY_TEST_RELEASE_MODE','valid')
++r={'commitSha':'cafebabecafebabecafebabecafebabecafebabe','dirty':False,'source':'build','validationImplementationHash':'a'*64}
++if mode=='wrong':r['commitSha']='b'*40
++if mode=='dirty':r['dirty']=True
++if mode=='unavailable':r['validationImplementationHash']=None
++print(json.dumps({'status':'ok',**({'release':r} if mode!='missing' else {})}))
++PYRELEASE
++    ;;
+@@ -105,0 +120,2 @@ run_deploy() {
++    DEPLOY_TEST_RELEASE_MODE="${DEPLOY_TEST_RELEASE_MODE:-valid}" \
++    DEPLOY_TEST_DRAIN_REMOVED="$tmp/drain-removed" \
+@@ -111 +127 @@ reset_fixture() {
+-  rm -f "$tmp/restarted" "$tmp/az-count" "$tmp/health-count"
++  rm -f "$tmp/restarted" "$tmp/az-count" "$tmp/health-count" "$tmp/drain-removed"
+@@ -169,0 +186,24 @@ grep -qF 'DEPLOYED deadbeef -> cafebabe' "$tmp/truncated-out"
++
++# Source identity must be verified before releasing maintenance admission.
++reset_fixture
++if ! run_deploy --verify-release >"$tmp/release-valid-out" 2>&1; then
++  cat "$tmp/release-valid-out" >&2
++  exit 1
++fi
++grep -qF RELEASE_IDENTITY_OK "$tmp/release-valid-out"
++[ -e "$tmp/drain-removed" ]
++for mode in wrong dirty missing unavailable; do
++  reset_fixture
++  if DEPLOY_TEST_RELEASE_MODE="$mode" run_deploy --verify-release >"$tmp/release-$mode-out" 2>&1; then
++    echo "deployment incorrectly accepted $mode release identity" >&2
++    exit 1
++  fi
++  grep -qF 'release identity was not verified' "$tmp/release-$mode-out"
++  [ -e "$tmp/restarted" ]
++  [ ! -e "$tmp/drain-removed" ]
++done
++# A known pre-swap refusal can release the drain without opening a failed release.
++reset_fixture
++if DEPLOY_TEST_PODS_JSON='[{"status":"running"}]' run_deploy --verify-release >"$tmp/release-blocked-out" 2>&1; then exit 1; fi
++[ ! -e "$tmp/restarted" ]
++echo 'Hosted deployment release verification tests passed.'

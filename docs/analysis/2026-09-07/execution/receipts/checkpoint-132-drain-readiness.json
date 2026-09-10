@@ -1,0 +1,9 @@
+{
+  "observedAt": "2026-09-10T07:43:58.549675+00:00",
+  "method": "GET",
+  "path": "/maintenance/hosted-deploy-drain",
+  "mutations": false,
+  "httpStatus": 200,
+  "shapeMatched": true,
+  "drainActive": false
+}

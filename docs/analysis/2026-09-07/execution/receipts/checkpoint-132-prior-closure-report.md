@@ -1,16 +1,14 @@
 # Partial closure report
 
-Current checkpoint: [132](checkpoint-132.md). All six workstreams have local implementation and regression evidence. Required native/CLI/mobile interactions, hosted snapshot upgrade compatibility and actual-image capability canaries are verified within their recorded scopes. The goal remains incomplete: hosted loaded/rollback source, deployment acceptance and the actual historical API failure cause remain outstanding.
+Current checkpoint: [131](checkpoint-131.md). All six workstreams have local implementation and regression evidence. Required native/CLI/mobile interactions, hosted snapshot upgrade compatibility and actual-image capability canaries are verified within their recorded scopes. The goal remains incomplete: hosted loaded/rollback source, deployment acceptance and the actual historical API failure cause remain outstanding.
 
 ## Current candidate
 
-Release candidate is `feeb55d6d9bed010b23a37cf18d2c597da2df408`; application packages are byte-identical to canary source `9abf64b1d199f71f79190b6fc667d899fdc1559e`, on isolated branch `codex/durable-execution-contract`. Current remote main remains integrated `b75fbf0b7e2c4ea455838a6e4df6537665a7a8cc`. The [394-path code patch](receipts/checkpoint-131-candidate-code.diff) and [blob manifest](receipts/checkpoint-131-candidate-manifest.json) cover all changed non-documentation paths. Nothing was published or deployed by this goal execution.
+Application source is `9abf64b1d199f71f79190b6fc667d899fdc1559e`, on isolated branch `codex/durable-execution-contract`. Current remote main remains integrated `b75fbf0b7e2c4ea455838a6e4df6537665a7a8cc`. The [394-path code patch](receipts/checkpoint-131-candidate-code.diff) and [blob manifest](receipts/checkpoint-131-candidate-manifest.json) cover all changed non-documentation paths. Nothing was published or deployed by this goal execution.
 
 The latest correction makes sandbox resource metadata work when the VM has no cgroup limits. It reads a fresh, ID-matched Running sandbox allocation and retains any stricter guest limit. The desired-behavior test failed before the fix; 117 affected tests passed afterward. The final actual-image canary observed old null limits and corrected 2 CPUs / 4 GiB on the same sandbox. [Live before/after](receipts/checkpoint-131-resource-capability.json).
 
 The prior 357 Swift tests, native/CLI/mobile interactions, actual snapshot 153→183 upgrade and NuGet-validator proof remain tied to their exact earlier sources: [unchanged-source comparison](receipts/checkpoint-131-source-identity.json). The [final full pipeline](receipts/checkpoint-131-full-validation-identity.json) passes: 6,375 package tests, one existing platform skip, 11 standalone Node tests and all required build/type/lint/audit/secret checks. The first run failed fixture lint only; exact executed inputs were preserved before formatting maintained copies, without changing validation rules.
-
-CP132 adds an opt-in exact release identity gate to deployment. Its regression suite and the [full required pipeline](receipts/checkpoint-132-full-validation-identity.json) pass on the clean candidate. The [updated 396-path manifest](receipts/checkpoint-132-candidate-manifest.json) binds the prior full patch plus the two-file deployment guard diff. Hosted inspection now establishes clean on-disk `ca92847a`, matching service/current directory, schema 153 and zero active/queued pods at observation time; loaded bytes remain unattested.
 
 ## Required capability canaries
 
@@ -37,7 +35,7 @@ The matched local benchmark remains 613.435166 ms baseline versus 1,764.543375 m
 
 Public health again returned 200 without release metadata at CP131. Service directory and on-disk Git metadata do not attest loaded JavaScript. The existing hosted snapshot upgrade proof remains valid on unchanged migration/backup source; it does not replace a fresh future cutover backup.
 
-The bounded historical journal read found disk-full and other errors without correlation to the original failed history/cost requests. CP132 additionally found no retained pre-report journal and no failing HTTP trace in the current syslog; the completely read older archive ends August 23. A separately retained request-correlated trace is needed for that causal claim. No additional canary can reconstruct absent historical causality.
+The bounded historical journal read found disk-full and other errors without correlation to the original failed history/cost requests. A request-correlated archived trace is needed for that causal claim. No additional canary can reconstruct absent historical causality.
 
 Publication/deployment/restart authority is separate from canary authority. The [release packet](release-and-acceptance-packet.md) retains pinned VM/database, drain, immutable full-build, backup/headroom and forward-recovery/rollback constraints; it must not be treated as an executable cutover until source and rollback prerequisites are satisfied. The source is local only.
 

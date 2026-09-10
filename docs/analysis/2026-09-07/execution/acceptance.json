@@ -1752,12 +1752,13 @@
         "checkpoint-107.md",
         "checkpoint-108.md",
         "checkpoint-109.md",
-        "checkpoint-110.md"
+        "checkpoint-110.md",
+        "checkpoint-132.md"
       ],
       "prerequisites": [
-        "The approved targeted journal read completed without transport omissions: 47 disk-full and 369 other errors, none attributable to the failing routes; only 200 statuses were classified. Current ten-row/cost availability is recorded but historical broad-list/cost cause is still unproven. An archived error/request trace from the actual failing requests is the missing evidence; do not infer a cause from subsequent disk expansion/migration/recovery."
+        "Retained pre-report journal is empty; current syslog has 406 Node JSON records but no failing request/error trace, and the fully read older archive ends August 23. A separately retained request-correlated trace is required; historical cause remains unknown."
       ],
-      "remaining": "The approved targeted journal read completed without transport omissions: 47 disk-full and 369 other errors, none attributable to the failing routes; only 200 statuses were classified. Current ten-row/cost availability is recorded but historical broad-list/cost cause is still unproven. An archived error/request trace from the actual failing requests is the missing evidence; do not infer a cause from subsequent disk expansion/migration/recovery.",
+      "remaining": "Retained pre-report journal is empty; current syslog has 406 Node JSON records but no failing request/error trace, and the fully read older archive ends August 23. A separately retained request-correlated trace is required; historical cause remains unknown.",
       "finalSourceEvidence": "90a61141a6a8ed6205aae144bbb99f8c9f0f9ec5; see checkpoint-106.md for executed checks, carried forward surface proof and limits.",
       "historicalProgressNotes": "Cost and compact-history APIs now return 200 after independently authorized maintenance. Actual historical failure cause is not established. Bounded read-only SSH metadata/log inspection awaits explicit payload-egress approval after auto-review rejection."
     },
@@ -2424,7 +2425,8 @@
         "checkpoint-123.md",
         "checkpoint-124.md",
         "checkpoint-125.md",
-        "checkpoint-131.md"
+        "checkpoint-131.md",
+        "checkpoint-132.md"
       ],
       "prerequisites": [
         "CP131 actual image/CLI/identity/resource/config/stream capability is verified. Public health again returned 200 without release metadata. Current hosted loaded/rollback source and future deployment provenance remain unverified."
@@ -2469,7 +2471,8 @@
         "checkpoint-123.md",
         "checkpoint-124.md",
         "checkpoint-125.md",
-        "checkpoint-131.md"
+        "checkpoint-131.md",
+        "checkpoint-132.md"
       ],
       "prerequisites": [
         "CP131 actual image/CLI/identity/resource/config/stream capability is verified. Public health again returned 200 without release metadata. Current hosted loaded/rollback source and future deployment provenance remain unverified."
@@ -2532,7 +2535,8 @@
         "checkpoint-106.md",
         "closure-report.md",
         "checkpoint-107.md",
-        "checkpoint-108.md"
+        "checkpoint-108.md",
+        "checkpoint-132.md"
       ],
       "prerequisites": [],
       "remaining": "",
@@ -2621,7 +2625,8 @@
         "checkpoint-107.md",
         "checkpoint-123.md",
         "checkpoint-124.md",
-        "checkpoint-125.md"
+        "checkpoint-125.md",
+        "checkpoint-132.md"
       ],
       "prerequisites": [
         "CP124 service/active identity remained stable during the successful copy check. Current public health returned 200 without a release field; directory ca92847a and compatible Node/SQLite are not loaded-bundle attestation. Actual sandbox CLI/image capabilities and loaded/rollback source remain unverified."
@@ -2785,11 +2790,12 @@
         "checkpoint-114.md",
         "checkpoint-117.md",
         "checkpoint-122.md",
-        "checkpoint-131.md"
+        "checkpoint-131.md",
+        "checkpoint-132.md"
       ],
       "prerequisites": [],
       "verificationScope": "Local exact-source acceptance only; does not promote live, native, canary or whole-goal status.",
-      "finalSourceEvidence": "9abf64b1d199f71f79190b6fc667d899fdc1559e; full pipeline passed: 6375 package tests, one existing platform skip, 11 standalone Node tests. Prior 357 Swift tests and operator interactions retained on byte-identical clients."
+      "finalSourceEvidence": "feeb55d6d9bed010b23a37cf18d2c597da2df408 clean full pipeline passed; 6375 package tests, 1 existing platform skip, 11 standalone Node tests and shell checks. Application packages byte-identical to CP131; earlier 357 Swift tests and supported interactions retain their recorded scope."
     },
     {
       "id": "G.4",
@@ -2923,13 +2929,14 @@
         "label-safe-image-canary-packet.md",
         "checkpoint-130.md",
         "separated-capability-canary-packet.md",
-        "checkpoint-131.md"
+        "checkpoint-131.md",
+        "checkpoint-132.md"
       ],
       "prerequisites": [
-        "Continuing canary authority is explicit and required capability runs passed with verified cleanup. Production publication/deployment and compatible rollback/cutover procedure remain separately gated."
+        "Branch publication awaits explicit authority under the original goal. Current exact release identity guard and hosted idle/drain metadata are verified within scope; fresh cutover backup, worker admission/ownership and compatible recovery remain required before production activation."
       ],
       "finalSourceEvidence": "15900d9e08a7e4ca786a6ad11ff81820fda14de4; clean full pipeline and 357 Swift tests; direct native case/source boundaries in checkpoint-117 receipt.",
-      "remaining": "Continuing canary authority is explicit and required capability runs passed with verified cleanup. Production publication/deployment and compatible rollback/cutover procedure remain separately gated."
+      "remaining": "Branch publication awaits explicit authority under the original goal. Current exact release identity guard and hosted idle/drain metadata are verified within scope; fresh cutover backup, worker admission/ownership and compatible recovery remain required before production activation."
     },
     {
       "id": "G.6",
@@ -2961,7 +2968,8 @@
         "checkpoint-123.md",
         "checkpoint-124.md",
         "checkpoint-125.md",
-        "checkpoint-131.md"
+        "checkpoint-131.md",
+        "checkpoint-132.md"
       ],
       "prerequisites": [
         "All 43 criteria remain mapped. Required actual-image capabilities, W5, operator interactions and hosted snapshot compatibility are verified. Hosted loaded/rollback identity and historical API causality remain outstanding."
@@ -2970,11 +2978,12 @@
       "remaining": "All 43 criteria remain mapped. Required actual-image capabilities, W5, operator interactions and hosted snapshot compatibility are verified. Hosted loaded/rollback identity and historical API causality remain outstanding."
     }
   ],
-  "lastCheckpoint": "checkpoint-131.md",
+  "lastCheckpoint": "checkpoint-132.md",
   "migrationLineage": {
     "managedBaseline": "142-153; authoritative managed migration 153 preserved from main b75fbf0b7e2c4ea455838a6e4df6537665a7a8cc",
     "nativeCurrent": "164-183; prior native 182 upgraded by idempotent managed GitHub reads bridge 183; representative managed 150/152/153 and copy-only native lineage verified",
     "previousNative": "Historical receipts retain their original commit-specific numbering; conversion is copy-only and never activates an output."
   },
-  "currentApplicationCandidate": "9abf64b1d199f71f79190b6fc667d899fdc1559e"
+  "currentApplicationCandidate": "9abf64b1d199f71f79190b6fc667d899fdc1559e",
+  "currentReleaseCandidate": "feeb55d6d9bed010b23a37cf18d2c597da2df408"
 }

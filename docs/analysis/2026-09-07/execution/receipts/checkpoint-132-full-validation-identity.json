@@ -1,0 +1,16 @@
+{
+  "candidate": "feeb55d6d9bed010b23a37cf18d2c597da2df408",
+  "pipelineExitCode": 0,
+  "packageTestsPassed": 6375,
+  "packageTestsSkipped": 1,
+  "standaloneNodeTestsPassed": 11,
+  "testTurboTasks": 15,
+  "testTurboCached": 14,
+  "moderateDependencyAdvisories": 1,
+  "logSHA256": "9c1911dc49efff392925a5551efe65bd5c6cb60baaf7024c4f609fbc8cf66391",
+  "rawLogSHA256": "6e0fe42e012e693cc7893b997fdd78c7add0b98edf6e623a95ae54fc84162132",
+  "rawLogArchive": "checkpoint-132-full-validation.raw.txt.gz",
+  "sourceStateAtPipelineStart": "clean committed tree",
+  "remainingUncommittedChanges": "CP132 evidence only after pipeline",
+  "affectedShellTests": "release identity matches, wrong, dirty, missing, unavailable; existing deployment and cleanup safeguards"
+}

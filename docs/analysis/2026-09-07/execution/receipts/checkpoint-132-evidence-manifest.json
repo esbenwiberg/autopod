@@ -1,0 +1,97 @@
+{
+  "candidate": "feeb55d6d9bed010b23a37cf18d2c597da2df408",
+  "files": [
+    {
+      "path": "checkpoint-132.md",
+      "sha256": "4630cd445a24a222cbe2111c08b34dc03680c1dd4dd69a27719c6da67a693ccc"
+    },
+    {
+      "path": "fixtures/checkpoint-132-drain-readiness.py",
+      "sha256": "546a94548d888245e270312eab283bf6dda387f99f5c967bfa53fadc840784a8"
+    },
+    {
+      "path": "fixtures/checkpoint-132-log-archive.py",
+      "sha256": "2a3879de9cb1b202caee14004b00e9fdba23c3ac8f55e04c9f63d7db57fe0417"
+    },
+    {
+      "path": "fixtures/checkpoint-132-log-archive.sh",
+      "sha256": "8c4f955cac8ff873c28a81da8b20283656e50a62b8cddbcda19da6073de6b619"
+    },
+    {
+      "path": "fixtures/checkpoint-132-log-ranges.sh",
+      "sha256": "5bbde2134e9902a658b3b6fd465ebf883c6e8132310b071ec7f81e7bfd9e15ff"
+    },
+    {
+      "path": "fixtures/checkpoint-132-release-readiness.py",
+      "sha256": "b4282a7799aea047d190fd8a76cba07df8ed7e5e231b21dea13a026ce8c21f41"
+    },
+    {
+      "path": "fixtures/checkpoint-132-release-readiness.sh",
+      "sha256": "476dc79277d07bcf66e825a57bc7b7ce9ea4b0a87a9dd7b0930cce519fa5801e"
+    },
+    {
+      "path": "fixtures/checkpoint-132-syslog-window.sh",
+      "sha256": "36264ec2f409c4d56afbe95f18666cd23e8b4018e02c12d6d3965362792cedf5"
+    },
+    {
+      "path": "receipts/checkpoint-132-candidate-manifest.json",
+      "sha256": "88b266834c00e5666bbe8f98e46ebbdc2e64021ad8deecf1b4156d263f5fd5a3"
+    },
+    {
+      "path": "receipts/checkpoint-132-deployment-guard.diff",
+      "sha256": "b4ebf00cdbe5656004b595f1e683dbd6fd67e4f923ec541cc9bd53aea9f7a975"
+    },
+    {
+      "path": "receipts/checkpoint-132-drain-readiness.json",
+      "sha256": "531a12053a3ce9ed6e5849bb062bee759b7e9efcdcd1b1111616f2cd5a63ef08"
+    },
+    {
+      "path": "receipts/checkpoint-132-full-validation-identity.json",
+      "sha256": "77f761d6ab9036f8df28c6a52e446f82809006da73bf829e216ab5667b2d063f"
+    },
+    {
+      "path": "receipts/checkpoint-132-full-validation.raw.txt.gz",
+      "sha256": "a4971cebd695bf100231ae28e9e00536becda6fcb08f52b37c5e23daa4838347"
+    },
+    {
+      "path": "receipts/checkpoint-132-full-validation.txt",
+      "sha256": "9c1911dc49efff392925a5551efe65bd5c6cb60baaf7024c4f609fbc8cf66391"
+    },
+    {
+      "path": "receipts/checkpoint-132-log-archive.json",
+      "sha256": "f8558c5c9aea80f1a66ef3a700318d773212542d29880aaeeed589a5413208c6"
+    },
+    {
+      "path": "receipts/checkpoint-132-log-ranges.json",
+      "sha256": "89cae2e392f8b0d2e55e601dd9e1f9948b931477216792333f87aae2c26ed8ec"
+    },
+    {
+      "path": "receipts/checkpoint-132-prior-closure-report.md",
+      "sha256": "cd6ad873fb147f7af976ea64faa08b95fd3886bacd67688591042ed921046c31"
+    },
+    {
+      "path": "receipts/checkpoint-132-prior-release-and-acceptance-packet.md",
+      "sha256": "cca93ad3c81540be8cbdf94b10c5e89e87d04f4593e3f5ca7a093cd502532f07"
+    },
+    {
+      "path": "receipts/checkpoint-132-release-guard-green.txt",
+      "sha256": "3f1a122d3486d4366bde2b55b63eb50fa1e7933912b7f5f4ec88a283181bb580"
+    },
+    {
+      "path": "receipts/checkpoint-132-release-guard-red.txt",
+      "sha256": "5c439ead8a8b9cd674707d47e45f4314184b36e61b5f25db18820fd072d5203b"
+    },
+    {
+      "path": "receipts/checkpoint-132-release-readiness.json",
+      "sha256": "b7d4da7f1287b6966434d9810546b6b0b4d106d44c168db3edbd3f8f0b9e296c"
+    },
+    {
+      "path": "receipts/checkpoint-132-source-identity.json",
+      "sha256": "453d5d7419a5904598ce1f58c26976e04bc16c0d0bf150d5400fcc53e45cd842"
+    },
+    {
+      "path": "receipts/checkpoint-132-syslog-window.json",
+      "sha256": "dbcb9920413d7414d287bf3edc994d98e6a73fe6dd2fb038493f5457b8c34e69"
+    }
+  ]
+}

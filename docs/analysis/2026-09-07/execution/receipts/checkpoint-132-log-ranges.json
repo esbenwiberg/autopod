@@ -1,0 +1,37 @@
+[
+  {
+    "name": "syslog",
+    "exists": true,
+    "storedBytes": 22922747,
+    "prefixFirstTimestamp": "2026-08-30T00:00:14.161831+00:00",
+    "prefixLastTimestamp": "2026-08-30T00:12:32.651565+00:00"
+  },
+  {
+    "name": "syslog.1",
+    "exists": false
+  },
+  {
+    "name": "syslog.2.gz",
+    "exists": true,
+    "storedBytes": 30561972,
+    "gzipISizeModulo4GiB": 442710951,
+    "prefixFirstTimestamp": "2026-08-16T00:00:03.254705+00:00",
+    "prefixLastTimestamp": "2026-08-16T00:00:11.087294+00:00"
+  },
+  {
+    "name": "syslog.3.gz",
+    "exists": true,
+    "storedBytes": 52668371,
+    "gzipISizeModulo4GiB": 834712512,
+    "prefixFirstTimestamp": "2026-08-09T00:00:02.010365+00:00",
+    "prefixLastTimestamp": "2026-08-09T00:00:07.111991+00:00"
+  },
+  {
+    "name": "daemon.log",
+    "exists": false
+  },
+  {
+    "name": "daemon.log.1",
+    "exists": false
+  }
+]

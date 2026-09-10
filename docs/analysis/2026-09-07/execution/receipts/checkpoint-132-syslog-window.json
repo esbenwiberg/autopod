@@ -1,0 +1,20 @@
+{
+  "syslogFirst": "2026-08-30T00:00:14.161831+00:00",
+  "syslogLast": "2026-09-10T07:45:21.135298+00:00",
+  "preReportWindow": {
+    "windowLines": 1877,
+    "nodeLines": 406,
+    "jsonObjects": 406,
+    "jsonParseFailures": 0,
+    "requestCompletedMentions": 0,
+    "unhandledErrorMentions": 0,
+    "podsRouteMentions": 0
+  },
+  "applicationTimeShapes": {
+    "int": 406
+  },
+  "olderArchive": "syslog.2.gz",
+  "olderArchiveBytes": 442710951,
+  "olderArchiveLastTimestamp": "2026-08-23T00:00:32.091103+00:00",
+  "rawLogsExported": false
+}

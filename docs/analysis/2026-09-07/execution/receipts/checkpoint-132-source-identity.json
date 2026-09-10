@@ -1,0 +1,14 @@
+{
+  "candidate": "feeb55d6d9bed010b23a37cf18d2c597da2df408",
+  "applicationProofSource": "9abf64b1d199f71f79190b6fc667d899fdc1559e",
+  "changedNonDocumentationPathsSinceApplicationProof": [
+    "scripts/deploy-hosted-daemon.sh",
+    "scripts/deploy-hosted-daemon.test.sh"
+  ],
+  "applicationPackagesByteIdentical": true,
+  "retainedEvidence": "checkpoint-131-source-identity.json and all CP131 live canary receipts",
+  "remoteMainObserved": "b75fbf0b7e2c4ea455838a6e4df6537665a7a8cc",
+  "remoteCandidateBranchObserved": "absent",
+  "publicationPerformed": false,
+  "productionDeploymentPerformed": false
+}
