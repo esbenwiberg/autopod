@@ -1,0 +1,26 @@
+{
+  "out": [
+    {
+      "method": "initialize",
+      "status": 200,
+      "bodyLength": 196,
+      "registered": false,
+      "rpcError": false
+    },
+    {
+      "method": "tools/list",
+      "status": 200,
+      "bodyLength": 15719,
+      "registered": false,
+      "rpcError": false
+    },
+    {
+      "method": "tools/call",
+      "status": 200,
+      "bodyLength": 195,
+      "registered": true,
+      "rpcError": false
+    }
+  ],
+  "reports": [["local-only", "LOCAL_ONLY_MCP_PROBE", [], null, null, null, null, null]]
+}

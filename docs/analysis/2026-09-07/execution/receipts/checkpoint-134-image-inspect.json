@@ -1,0 +1,10 @@
+{
+  "value": [
+    {
+      "code": "ProvisioningState/succeeded",
+      "displayStatus": "Provisioning succeeded",
+      "level": "Info",
+      "message": "Enable succeeded: \n[stdout]\n{\"at\":\"2026-09-10T09:22:45.020Z\",\"region\":\"northeurope\",\"group\":\"autopod-spike-neu\",\"id\":\"c6919935-56af-404a-8a91-0aab9ea4fe10\",\"status\":200,\"keys\":[\"id\",\"labels\",\"image\",\"status\",\"sizeInMB\"],\"image\":{\"base\":\"ewiautopodacr.azurecr.io/autopod/dataverse-harness:latest\"},\"labels\":{\"managedBy\":\"autopod\",\"name\":\"autopod-5870153ff7a06654-464dd8b03726\",\"sourceImageHash\":\"5870153ff7a06654\",\"sourceDigest\":\"sha256:4b836cdabc71ffd40aef564b65b6b16564c5312770130bc59251a732078c9d77\"},\"diskState\":{\"state\":\"Ready\",\"errorMessage\":\"\",\"createdAt\":\"2026-09-10T08:41:43.2224316+00:00\",\"updatedAt\":\"2026-09-10T08:41:51.039966+00:00\"}}\n\n{\"exitCode\": 0, \"stderrPresent\": false}\n\n[stderr]\n"
+    }
+  ]
+}

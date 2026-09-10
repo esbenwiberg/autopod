@@ -1,0 +1,10 @@
+{
+  "value": [
+    {
+      "code": "ProvisioningState/succeeded",
+      "displayStatus": "Provisioning succeeded",
+      "level": "Info",
+      "message": "Enable succeeded: \n[stdout]\n{\"unstructuredExitTrace\": [\"file:///opt/autopod/releases/988d7c9d/packages/daemon/dist/chunk-YXCZIAJ5.js:1689\", \"  return new AutopodError2(\", \"         ^\", \"AutopodError: Streaming exec exit was not observed; verify termination before another execution.\", \"    at unverifiedExecExit (file:///opt/autopod/releases/988d7c9d/packages/daemon/dist/chunk-YXCZIAJ5.js:1689:10)\", \"    at file:///opt/autopod/releases/988d7c9d/packages/daemon/dist/chunk-YXCZIAJ5.js:2077:36\", \"    at process.processTicksAndRejections (node:internal/process/task_queues:103:5) {\", \"  code: 'EXEC_EXIT_UNVERIFIED',\", \"  statusCode: 409\", \"}\", \"Node.js v22.23.1\", \"autopod-daemon.service: Main process exited, code=exited, status=1/FAILURE\", \"autopod-daemon.service: Failed with result 'exit-code'.\", \"autopod-daemon.service: Consumed 27.669s CPU time, 685.4M memory peak, 0B memory swap peak.\", \"autopod-daemon.service: Scheduled restart job, restart counter is at 1.\", \"Started autopod-daemon.service - Autopod daemon.\"]}\n\n[stderr]\n"
+    }
+  ]
+}

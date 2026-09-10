@@ -1,0 +1,10 @@
+{
+  "id": "6f6f4df6-dbc0-46ef-a36f-c546776e0916",
+  "observedAt": "2026-09-10T08:51:05.923927+00:00",
+  "initialStatus": 200,
+  "scope": "exact sandbox only; shared image retained",
+  "ownershipMatched": true,
+  "deleteStatus": 200,
+  "finalStatus": 404,
+  "status": "deletion_verified"
+}

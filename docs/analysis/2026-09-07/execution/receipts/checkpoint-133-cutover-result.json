@@ -1,0 +1,10 @@
+{
+  "value": [
+    {
+      "code": "ProvisioningState/succeeded",
+      "displayStatus": "Provisioning succeeded",
+      "level": "Info",
+      "message": "Enable succeeded: \n[stdout]\n{\"admissionCounts\": {\"pods\": 0, \"managed\": 0, \"systemRuns\": 0, \"schedules\": 0, \"watchers\": 0, \"podsitter\": 0}}\n{\"admissionCounts\": {\"pods\": 0, \"managed\": 0, \"systemRuns\": 0, \"schedules\": 0, \"watchers\": 0, \"podsitter\": 0}}\n{\"admissionCounts\": {\"pods\": 0, \"managed\": 0, \"systemRuns\": 0, \"schedules\": 0, \"watchers\": 0, \"podsitter\": 0}}\n{\"status\": \"activated\", \"release\": {\"validationImplementationHash\": \"4cf84eaedeccff9e613f09ed86bc29a819f2301a91321b021b52bdfc854c78a6\", \"commitSha\": \"988d7c9dc425587e31f2f600a0ce97090e00df0f\", \"dirty\": false, \"builtAt\": \"2026-09-10T08:29:22.552Z\", \"source\": \"build\"}, \"schemaMaximum\": 183, \"pid\": 133591, \"oldPidObservedExited\": true, \"backup\": \"/data/autopod/backups/2026-09-10T08-33-36-306Z-3b27bb8f-878d-430e-933b-0393b6439680-goal-133-cutover.db\", \"at\": \"2026-09-10T08:34:16.050768+00:00\"}\n\n[stderr]\n"
+    }
+  ]
+}

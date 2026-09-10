@@ -1,0 +1,89 @@
+// packages/daemon/src/api/mcp-handler.ts
+import { createEscalationMcpServer } from "@autopod/escalation-mcp";
+import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
+function mcpHandler(app, bridge, pendingRequestsByPod, logger, sessionTokenIssuer) {
+  const pendingRequestsPerSession = /* @__PURE__ */ new Map();
+  function getOrCreatePendingRequests(podId) {
+    let pendingRequests = pendingRequestsPerSession.get(podId);
+    if (pendingRequests) return pendingRequests;
+    const { pendingRequests: created } = createEscalationMcpServer({
+      podId,
+      bridge,
+      availableActions: bridge.getAvailableActions(podId)
+    });
+    pendingRequests = created;
+    pendingRequestsPerSession.set(podId, pendingRequests);
+    pendingRequestsByPod.set(podId, pendingRequests);
+    return pendingRequests;
+  }
+  if (!sessionTokenIssuer) {
+    logger.warn(
+      "mcpHandler: sessionTokenIssuer not configured \u2014 /mcp/:podId will only accept user tokens"
+    );
+  }
+  app.all("/mcp/:podId", { config: { auth: "pod-token" } }, async (request, reply) => {
+    const { podId } = request.params;
+    let pendingRequests;
+    try {
+      pendingRequests = getOrCreatePendingRequests(podId);
+    } catch (err) {
+      logger.error({ err, podId }, "Failed to create MCP pod");
+      reply.status(500).send({ error: "MCP_SESSION_ERROR", message: String(err) });
+      return;
+    }
+    const availableActions = bridge.getAvailableActions(podId);
+    const { server } = createEscalationMcpServer({
+      podId,
+      bridge,
+      availableActions,
+      pendingRequests
+    });
+    const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: void 0 });
+    try {
+      await server.connect(transport);
+    } catch (err) {
+      logger.error({ err, podId }, "Failed to connect MCP transport");
+      reply.status(500).send({ error: "MCP_CONNECT_ERROR", message: String(err) });
+      return;
+    }
+    let responseFinished = false;
+    reply.raw.once("finish", () => {
+      responseFinished = true;
+    });
+    reply.raw.once("close", () => {
+      if (responseFinished) return;
+      const detachedCount = pendingRequests.markAllDetached("mcp_response_stream_closed");
+      if (detachedCount > 0) {
+        logger.warn(
+          { podId, detachedCount },
+          "MCP response stream closed before pending request delivery"
+        );
+      }
+    });
+    try {
+      reply.hijack();
+      request.raw.setTimeout(0);
+      reply.raw.setTimeout?.(0);
+      await transport.handleRequest(request.raw, reply.raw, request.body);
+    } catch (err) {
+      logger.error({ err, podId }, "MCP handleRequest error");
+    } finally {
+      await transport.close().catch((err) => {
+        logger.debug({ err, podId }, "MCP transport close error (non-fatal)");
+      });
+    }
+  });
+  app.addHook("onClose", async () => {
+    for (const [, pendingRequests] of pendingRequestsPerSession) {
+      pendingRequests.cancelAll();
+    }
+    pendingRequestsPerSession.clear();
+  });
+}
+
+// ../autopod-rollout-134/mcp-local-entry.ts
+import { default as default2 } from "fastify";
+export {
+  default2 as Fastify,
+  mcpHandler
+};

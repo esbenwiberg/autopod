@@ -1,0 +1,10 @@
+{
+  "value": [
+    {
+      "code": "ProvisioningState/succeeded",
+      "displayStatus": "Provisioning succeeded",
+      "level": "Info",
+      "message": "Enable succeeded: \n[stdout]\n{\"startedAt\":\"2026-09-10T09:19:52.123Z\",\"sourceSandbox\":\"12b21a50-930d-4a0c-8e3a-d99f872e73b4\",\"diskImageId\":\"c6919935-56af-404a-8a91-0aab9ea4fe10\",\"pod\":\"goal-134-network-20260910\",\"providerCalls\":0,\"elapsedCapSeconds\":240,\"estimatedSpend\":\"One existing disk-image sandbox, at most four minutes of 2 CPU / 4 GiB allocation; no model calls. Exact infrastructure billing unavailable.\",\"checks\":[{\"status\":200,\"result\":{\"exitCode\":0,\"stdout\":\"http=200 version=1.1\\nhttp=200 version=1.1\\nhttp=200 version=2\\nhttp=200 version=2\\n\",\"stderr\":\"\",\"executionTimeMs\":410}}],\"diskLabels\":{\"managedBy\":\"autopod\",\"name\":\"autopod-5870153ff7a06654-464dd8b03726\",\"sourceImageHash\":\"5870153ff7a06654\",\"sourceDigest\":\"sha256:4b836cdabc71ffd40aef564b65b6b16564c5312770130bc59251a732078c9d77\"},\"status\":\"probe_executed\",\"createStatus\":200,\"id\":\"d0fedcd9-8d76-4538-9d87-4b335d24f4be\",\"observedEgress\":{\"http\":{\"defaultAction\":\"Deny\",\"hostRules\":[{\"pattern\":\"autopod-daemon-ewi.swedencentral.cloudapp.azure.com\",\"action\":\"Allow\"}],\"trafficInspection\":\"Full\",\"enforcementMode\":\"Enforced\"},\"defaultAction\":\"Deny\",\"hostRules\":[{\"pattern\":\"autopod-daemon-ewi.swedencentral.cloudapp.azure.com\",\"action\":\"Allow\"}],\"trafficInspection\":\"Full\",\"enforcementMode\":\"Enforced\"},\"deleteStatus\":200,\"finalStatus\":404,\"finishedAt\":\"2026-09-10T09:20:00.594Z\"}\n\n{\"exitCode\": 0, \"stderrPresent\": false}\n\n[stderr]\n"
+    }
+  ]
+}

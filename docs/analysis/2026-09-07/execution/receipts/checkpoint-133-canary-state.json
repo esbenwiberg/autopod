@@ -1,0 +1,23 @@
+{
+  "candidate": "988d7c9dc425587e31f2f600a0ce97090e00df0f",
+  "intentAt": "2026-09-10T08:39:47.920950+00:00",
+  "binding": {
+    "defaultRuntime": "codex",
+    "defaultModel": "gpt-5.6-sol",
+    "providerAccountId": "openai-private",
+    "executionTarget": "sandbox"
+  },
+  "tokenBudget": 32000,
+  "elapsedCapSeconds": 600,
+  "estimatedSpend": "One existing-profile sandbox and a small subscription-bound Codex turn; exact provider and infrastructure billing unavailable. Token budget is admission accounting, not a hard dollar cap.",
+  "payloadSHA256": "70e71259a261a12f23688be4fb009e1ac0fae2444648fc8866d5ecd36d86867b",
+  "marker": "AUTOPOD_GOAL_133_MCP_SMOKE_20260910",
+  "status": "failed",
+  "id": "useful-dormouse",
+  "createReconciliation": "Unique exact task marker after response ID-shape assertion; no second POST.",
+  "failedBeforeAgent": true,
+  "observedFailure": "Unchanged or unverified nonretryable sandbox startup inputs after daemon restart",
+  "daemonExit": "Unhandled EXEC_EXIT_UNVERIFIED in detached HAProxy deny receiver",
+  "originalSandboxId": "6f6f4df6-dbc0-46ef-a36f-c546776e0916",
+  "originalSandboxDeletionVerified": true
+}

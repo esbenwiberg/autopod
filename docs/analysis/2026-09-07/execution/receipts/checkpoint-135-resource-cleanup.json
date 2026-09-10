@@ -1,0 +1,10 @@
+{
+  "value": [
+    {
+      "code": "ProvisioningState/succeeded",
+      "displayStatus": "Provisioning succeeded",
+      "level": "Info",
+      "message": "Enable succeeded: \n[stdout]\n{\"at\":\"2026-09-10T09:25:35.872Z\",\"region\":\"northeurope\",\"group\":\"autopod-spike-neu\",\"id\":\"e8fab542-2e8b-4365-a9a1-5f009133c420\",\"initialStatus\":404,\"status\":\"absence_verified\"}\n{\"at\":\"2026-09-10T09:25:35.939Z\",\"region\":\"northeurope\",\"group\":\"autopod-spike-neu\",\"id\":\"b66a53ac-4b46-4b43-9169-57ddae354aa9\",\"initialStatus\":404,\"status\":\"absence_verified\"}\n\n{\"exitCode\": 0, \"stderrPresent\": false}\n\n[stderr]\n"
+    }
+  ]
+}

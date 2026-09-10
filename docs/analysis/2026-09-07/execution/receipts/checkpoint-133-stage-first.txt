@@ -1,0 +1,103 @@
+==> fetching origin
+==> discovering live release on VM
+==> live=ca92847a  target=622fcbb5 (622fcbb59964dce80211c545662a59430595f5c0)
+==> package.json / pnpm-lock.yaml changed between live and target — forcing --full install
+==> full mode: clean clone of 622fcbb5 + pnpm install on the VM
+==> checking for restart-blocking pods
+==> active (restart-blocking) pods: 0
+==> hosted deployment drain active
+
+  DEPLOY PLAN
+  VM:        ewi-sandboxes/autopod-daemon
+  live:      ca92847a
+  target:    622fcbb5  (622fcbb59964dce80211c545662a59430595f5c0)
+  mode:      FULL (clone + install)
+  browser:   prewarm + launch-check daemon Playwright Chromium
+  reviewer:  ensure claude + codex CLIs for hosted review paths
+  rollback:  scripts/deploy-hosted-daemon.sh --rollback ca92847a
+
+==> building release 622fcbb5 on the VM (this can take a while)
+Enable succeeded:
+[stdout]
+=== clean clone of target ===
+Cloning into '/tmp/autopod-deploy-622fcbb5'...
+ * branch              622fcbb59964dce80211c545662a59430595f5c0 -> FETCH_HEAD
+checked out: 622fcbb59964dce80211c545662a59430595f5c0
+=== install + build (all packages) ===
+@autopod/daemon:build: ESM dist/canonical-Y3CDX6CJ.js.map                 71.00 B
+@autopod/daemon:build: ESM dist/chunk-VCNT47XU.js.map                     49.97 KB
+@autopod/daemon:build: ESM dist/chunk-MNADSJV4.js.map                     23.33 KB
+@autopod/daemon:build: ESM dist/chunk-4USRIP3T.js.map                     412.00 B
+@autopod/daemon:build: ESM dist/chunk-GEKK6SCY.js.map                     2.69 KB
+@autopod/daemon:build: ESM dist/chunk-JHSRDCMZ.js.map                     1.59 KB
+@autopod/daemon:build: ESM dist/index.js                                  2.51 MB
+@autopod/daemon:build: ESM dist/chunk-YXCZIAJ5.js.map                     182.57 KB
+@autopod/daemon:build: ESM dist/index.js.map                              4.89 MB
+@autopod/daemon:build: ESM ⚡️ Build success in 413ms
+@autopod/daemon:build: DTS ⚡️ Build success in 12319ms
+@autopod/daemon:build: DTS dist/db/reconcile-native-checkpoint-cli.d.ts 13.00 B
+@autopod/daemon:build: DTS dist/managed.d.ts                            80.27 KB
+@autopod/daemon:build: DTS dist/db/verify-backup-cli.d.ts               13.00 B
+@autopod/daemon:build: DTS dist/index.d.ts                              13.00 B
+@autopod/daemon:build:
+@autopod/daemon:build: > @autopod/daemon@0.0.1 postbuild /tmp/autopod-deploy-622fcbb5/packages/daemon
+@autopod/daemon:build: > mkdir -p dist/db dist/actions && cp -R src/db/migrations dist/db/ && cp -R src/actions/defaults dist/actions/
+@autopod/daemon:build:
+
+ Tasks:    7 successful, 7 total
+Cached:    0 cached, 7 total
+  Time:    23.125s
+
+=== stage as new release ===
+-rw-rw-r-- 1 ewi ewi 2630860 Sep 10 08:20 /opt/autopod/releases/622fcbb5/packages/daemon/dist/index.js
+=== BUILD DONE (symlink NOT swapped) ===
+
+[stderr]
+==> ensuring hosted reviewer CLIs are installed on the VM
+Enable succeeded:
+[stdout]
+claude: /usr/bin/claude
+2.1.195 (Claude Code)
+codex: /usr/bin/codex
+codex-cli 0.142.3
+=== OpenRouter support ===
+OPENROUTER_API_KEY not found in the service environment; per-profile OpenRouter credentials still work
+REVIEWER_CLI_PREWARM_OK
+
+[stderr]
+==> prewarming daemon Playwright Chromium on the VM
+Enable succeeded:
+[stdout]
+=== install Playwright Linux dependencies ===
+libnspr4 is already the newest version (2:4.35-1.1build1).
+libnss3 is already the newest version (2:3.98-1ubuntu0.2).
+libpango-1.0-0 is already the newest version (1.52.1+ds-1build1).
+libx11-6 is already the newest version (2:1.8.7-1build1).
+libxcb1 is already the newest version (1.15-1ubuntu2).
+libxcomposite1 is already the newest version (1:0.4.5-1build3).
+libxdamage1 is already the newest version (1:1.1.6-1build1).
+libxext6 is already the newest version (2:1.3.4-1build2).
+libxfixes3 is already the newest version (1:6.0.0-2build1).
+libxkbcommon0 is already the newest version (1.6.0-1build1).
+libxrandr2 is already the newest version (2:1.5.2-2build1).
+xvfb is already the newest version (2:21.1.12-1ubuntu1.6).
+fonts-noto-color-emoji is already the newest version (2.047-0ubuntu0.24.04.1).
+fonts-unifont is already the newest version (1:15.1.01-1build1).
+libfontconfig1 is already the newest version (2.15.0-1.1ubuntu2).
+libfreetype6 is already the newest version (2.13.2+dfsg-1ubuntu0.1).
+xfonts-cyrillic is already the newest version (1:1.0.5+nmu1).
+xfonts-scalable is already the newest version (1:1.0.3-1.3).
+fonts-liberation is already the newest version (1:2.1.5-3).
+fonts-ipafont-gothic is already the newest version (00303-21ubuntu1).
+fonts-wqy-zenhei is already the newest version (0.9.45-8).
+fonts-tlwg-loma-otf is already the newest version (1:0.7.3-1).
+fonts-freefont-ttf is already the newest version (20211204+svn4273-2).
+0 upgraded, 0 newly installed, 0 to remove and 46 not upgraded.
+=== install daemon Chromium into ewi cache ===
+=== launch-check daemon Chromium as ewi ===
+chromium=/home/ewi/.cache/ms-playwright/chromium-1243/chrome-linux64/chrome
+PLAYWRIGHT_PREWARM_OK
+
+[stderr]
+==> verifying built bundle contains: getResourceAllocation
+ERROR: expected string NOT in built bundle — refusing swap. Rollback unaffected (current still ca92847a).

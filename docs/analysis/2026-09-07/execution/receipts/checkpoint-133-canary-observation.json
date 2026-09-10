@@ -1,0 +1,34 @@
+{
+  "observedAt": "2026-09-10T08:41:37.453367+00:00",
+  "id": "useful-dormouse",
+  "status": "provisioning",
+  "error": null,
+  "summaryMarkerPresent": false,
+  "summaryKeys": [],
+  "taskAccounting": {
+    "agentRunCount": 0,
+    "providerAttemptCount": 0,
+    "recordedInputTokens": 0,
+    "recordedOutputTokens": 0,
+    "recordedCostUsd": 0,
+    "delivery": {
+      "intentCount": 0,
+      "receiptCount": 0,
+      "unresolvedCount": 0,
+      "scope": "durable-receipts-only",
+      "disposition": {
+        "openCount": 0,
+        "mergedCount": 0,
+        "closedCount": 0,
+        "unavailableCount": 0,
+        "basis": "last-recorded",
+        "liveVerified": false
+      }
+    },
+    "telemetry": "partial"
+  },
+  "provenance": {
+    "latest": null
+  },
+  "containerId": null
+}

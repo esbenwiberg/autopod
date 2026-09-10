@@ -7,7 +7,7 @@
     {
       "id": "W1.1",
       "requirement": "Settlement and unresolved human input are reconciled without weakening transitions",
-      "status": "partial",
+      "status": "verified",
       "implementation": [
         "packages/daemon/src/pods/pod-manager.ts",
         "packages/daemon/src/pods/pod-bridge-impl.ts",
@@ -162,14 +162,16 @@
         "checkpoint-115.md",
         "checkpoint-117.md",
         "checkpoint-121.md",
-        "checkpoint-120.md"
+        "checkpoint-120.md",
+        "checkpoint-134.md",
+        "receipts/checkpoint-134-post-inspect.json",
+        "receipts/checkpoint-134-acceptance-result.json"
       ],
-      "prerequisites": [
-        "Mapped native failed-reply retention, pending and acknowledged guidance, late/retained decisions and approval recovery are verified through CP115/117/120/121. Current loaded hosted source remains unverified under W6.1."
-      ],
-      "finalSourceEvidence": "15900d9e08a7e4ca786a6ad11ff81820fda14de4; clean full pipeline and 357 Swift tests; direct native case/source boundaries in checkpoint-117 receipt.",
+      "prerequisites": [],
+      "finalSourceEvidence": "CP134 clean deployed089442b6 plus existing mapped regressions/interactions; current candidate425ff91c passes full validation. Budget and immutable-image additions remain separately pending live acceptance.",
       "historicalProgressNotes": "Normal replies are atomic, retained in bounded recovery context, and fence older completion events. New unanswered decisions remain actionable. Attached MCP delivery acknowledgment, delayed concurrent stream ordering, other response boundaries, historical orphan questions and broader finalization side effects remain. New worker/cycle and validation admission now preserve pending decisions, including older unresolved cycles in the current generation. Historical missing payload recovery and stream/MCP delivery acknowledgment remain. Codex now observes summary events before Spawn/Resume launch and disposes each invocation listener. This closes the local launch/stream attachment race, not durable delivery acknowledgment across all runtimes or daemon restart. Concurrent interactive completions now coalesce in process, conflicting promotion/generation requests fail closed, and current source/lifecycle/decision ownership is checked across push and container release boundaries. This is not durable cross-process idempotency, cancellation of already-dispatched external operations, or complete post-completion side-effect accounting.\nMapped native failed-reply retention, pending and acknowledged guidance, late/retained decisions and approval recovery are verified through CP115/117/120/121. Current loaded hosted source remains unverified under W6.1.",
-      "remaining": "Mapped native failed-reply retention, pending and acknowledged guidance, late/retained decisions and approval recovery are verified through CP115/117/120/121. Current loaded hosted source remains unverified under W6.1."
+      "remaining": "",
+      "verificationScope": "Retained criterion-specific manager/fault/API and supported client evidence, now tied to clean loaded hosted release089442b6 by CP134. No historical causality, missing billing or successful MCP smoke is inferred."
     },
     {
       "id": "W1.2",
@@ -294,19 +296,22 @@
         "closure-report.md",
         "checkpoint-110.md",
         "checkpoint-117.md",
-        "checkpoint-121.md"
+        "checkpoint-121.md",
+        "checkpoint-134.md",
+        "checkpoint-135.md",
+        "receipts/checkpoint-135-full-validation-identity.json"
       ],
       "prerequisites": [
-        "Verify intended live source/resource identity. Releasing any particular abandoned execution/cleanup claim requires trustworthy original identity and observed termination; restart or elapsed time is not proof."
+        "Required hosted sandbox MCP smoke is still unverified: CP134 summary call failed transport; CP135 retry stopped after Azure startup403 and bounded recovery. Existing local disconnect/restart/durability and supported operator tests remain valid."
       ],
-      "remaining": "Verify intended live source/resource identity. Releasing any particular abandoned execution/cleanup claim requires trustworthy original identity and observed termination; restart or elapsed time is not proof.",
+      "remaining": "Required hosted sandbox MCP smoke is still unverified: CP134 summary call failed transport; CP135 retry stopped after Azure startup403 and bounded recovery. Existing local disconnect/restart/durability and supported operator tests remain valid.",
       "finalSourceEvidence": "15900d9e08a7e4ca786a6ad11ff81820fda14de4; clean full pipeline and 357 Swift tests; direct native case/source boundaries in checkpoint-117 receipt.",
       "historicalProgressNotes": "Entered artifact collection survives restart with sources retained; generation/cycle-bound integrity receipts and in-process duplicate coordination are implemented. Independent source inventory, fsync/power-loss proof, orphan snapshot/DB-path reconciliation, interactive duplicates, other reply boundaries and broader durable finalization side effects remain. New worker/cycle and validation admission now preserve pending decisions, including older unresolved cycles in the current generation. Historical missing payload recovery and stream/MCP delivery acknowledgment remain. Codex now observes summary events before Spawn/Resume launch and disposes each invocation listener. This closes the local launch/stream attachment race, not durable delivery acknowledgment across all runtimes or daemon restart. Concurrent interactive completions now coalesce in process, conflicting promotion/generation requests fail closed, and current source/lifecycle/decision ownership is checked across push and container release boundaries. This is not durable cross-process idempotency, cancellation of already-dispatched external operations, or complete post-completion side-effect accounting."
     },
     {
       "id": "W1.3",
       "requirement": "Finalization decisions and generations are durable with idempotent side effects",
-      "status": "partial",
+      "status": "verified",
       "implementation": [
         "packages/daemon/src/db/migrations/164_completion_journal.sql",
         "packages/daemon/src/pods/completion-journal.ts",
@@ -452,19 +457,21 @@
         "checkpoint-103.md",
         "checkpoint-105.md",
         "checkpoint-106.md",
-        "closure-report.md"
+        "closure-report.md",
+        "checkpoint-134.md",
+        "receipts/checkpoint-134-post-inspect.json",
+        "receipts/checkpoint-134-acceptance-result.json"
       ],
-      "prerequisites": [
-        "Verify intended live ownership before releasing unresolved claims. Final-source durable finalization/duplicate/ambiguous-delivery regressions passed; no provider side effect is inferred from an absent response."
-      ],
-      "remaining": "Verify intended live ownership before releasing unresolved claims. Final-source durable finalization/duplicate/ambiguous-delivery regressions passed; no provider side effect is inferred from an absent response.",
-      "finalSourceEvidence": "90a61141a6a8ed6205aae144bbb99f8c9f0f9ec5; see checkpoint-106.md for executed checks, carried forward surface proof and limits.",
-      "historicalProgressNotes": "Entered artifact collection survives restart with sources retained; generation/cycle-bound integrity receipts and in-process duplicate coordination are implemented. Independent source inventory, fsync/power-loss proof, orphan snapshot/DB-path reconciliation, interactive duplicates, other reply boundaries and broader durable finalization side effects remain. Interactive completion now stops before push/cleanup when sync and archive fallback fail or a branch container lacks its host worktree; the source remains retryable. Duplicate concurrent interactive requests, cancellation fences, restart/durable side-effect receipts and complete source-inventory proof remain. Concurrent interactive completions now coalesce in process, conflicting promotion/generation requests fail closed, and current source/lifecycle/decision ownership is checked across push and container release boundaries. This is not durable cross-process idempotency, cancellation of already-dispatched external operations, or complete post-completion side-effect accounting. Checkpoint 46 verifies planned merged disposition and separate request/PR counts locally. Legacy missing source history, closed disposition, broader durable cleanup and native/live interaction remain outstanding. Checkpoint 47 verifies source-bound closure, reopening and planned/acknowledged recovery locally; ambiguous prior requests, legacy unbound evidence, durable cleanup and native/live interaction remain outstanding. Checkpoint 48 verifies managed 150/152 upgrades and copy-only conversion of exact unpublished native checkpoint schemas 151/158/163. Live backup scope/freshness, deployed bytes and activation remain unverified; checkpoint 49 integrates and fully validates main f646cfcc locally; current deployed-source verification remains outstanding."
+      "prerequisites": [],
+      "remaining": "",
+      "finalSourceEvidence": "CP134 clean deployed089442b6 plus existing mapped regressions/interactions; current candidate425ff91c passes full validation. Budget and immutable-image additions remain separately pending live acceptance.",
+      "historicalProgressNotes": "Entered artifact collection survives restart with sources retained; generation/cycle-bound integrity receipts and in-process duplicate coordination are implemented. Independent source inventory, fsync/power-loss proof, orphan snapshot/DB-path reconciliation, interactive duplicates, other reply boundaries and broader durable finalization side effects remain. Interactive completion now stops before push/cleanup when sync and archive fallback fail or a branch container lacks its host worktree; the source remains retryable. Duplicate concurrent interactive requests, cancellation fences, restart/durable side-effect receipts and complete source-inventory proof remain. Concurrent interactive completions now coalesce in process, conflicting promotion/generation requests fail closed, and current source/lifecycle/decision ownership is checked across push and container release boundaries. This is not durable cross-process idempotency, cancellation of already-dispatched external operations, or complete post-completion side-effect accounting. Checkpoint 46 verifies planned merged disposition and separate request/PR counts locally. Legacy missing source history, closed disposition, broader durable cleanup and native/live interaction remain outstanding. Checkpoint 47 verifies source-bound closure, reopening and planned/acknowledged recovery locally; ambiguous prior requests, legacy unbound evidence, durable cleanup and native/live interaction remain outstanding. Checkpoint 48 verifies managed 150/152 upgrades and copy-only conversion of exact unpublished native checkpoint schemas 151/158/163. Live backup scope/freshness, deployed bytes and activation remain unverified; checkpoint 49 integrates and fully validates main f646cfcc locally; current deployed-source verification remains outstanding.",
+      "verificationScope": "Retained criterion-specific manager/fault/API and supported client evidence, now tied to clean loaded hosted release089442b6 by CP134. No historical causality, missing billing or successful MCP smoke is inferred."
     },
     {
       "id": "W1.4",
       "requirement": "Agent settlement, source preservation, validation, delivery and external disposition are separate",
-      "status": "partial",
+      "status": "verified",
       "implementation": [
         "packages/daemon/src/pods/artifact-preservation.ts",
         "packages/daemon/src/pods/pod-manager.ts",
@@ -519,19 +526,21 @@
         "checkpoint-115.md",
         "checkpoint-117.md",
         "checkpoint-120.md",
-        "checkpoint-121.md"
+        "checkpoint-121.md",
+        "checkpoint-134.md",
+        "receipts/checkpoint-134-post-inspect.json",
+        "receipts/checkpoint-134-acceptance-result.json"
       ],
-      "prerequisites": [
-        "Mapped native validation history, recorded merged/closed disposition and approval recovery pass through CP115/117/120. Provider status remains explicitly unverified where there is no current provider observation; current loaded hosted source remains unverified under W6.1."
-      ],
-      "finalSourceEvidence": "15900d9e08a7e4ca786a6ad11ff81820fda14de4; clean full pipeline and 357 Swift tests; direct native case/source boundaries in checkpoint-117 receipt.",
+      "prerequisites": [],
+      "finalSourceEvidence": "CP134 clean deployed089442b6 plus existing mapped regressions/interactions; current candidate425ff91c passes full validation. Budget and immutable-image additions remain separately pending live acceptance.",
       "historicalProgressNotes": "Entered artifact collection survives restart with sources retained; generation/cycle-bound integrity receipts and in-process duplicate coordination are implemented. Independent source inventory, fsync/power-loss proof, orphan snapshot/DB-path reconciliation, interactive duplicates, other reply boundaries and broader durable finalization side effects remain. Interactive completion now stops before push/cleanup when sync and archive fallback fail or a branch container lacks its host worktree; the source remains retryable. Duplicate concurrent interactive requests, cancellation fences, restart/durable side-effect receipts and complete source-inventory proof remain. Concurrent interactive completions now coalesce in process, conflicting promotion/generation requests fail closed, and current source/lifecycle/decision ownership is checked across push and container release boundaries. This is not durable cross-process idempotency, cancellation of already-dispatched external operations, or complete post-completion side-effect accounting.\nMapped native validation history, recorded merged/closed disposition and approval recovery pass through CP115/117/120. Provider status remains explicitly unverified where there is no current provider observation; current loaded hosted source remains unverified under W6.1.",
-      "remaining": "Mapped native validation history, recorded merged/closed disposition and approval recovery pass through CP115/117/120. Provider status remains explicitly unverified where there is no current provider observation; current loaded hosted source remains unverified under W6.1."
+      "remaining": "",
+      "verificationScope": "Retained criterion-specific manager/fault/API and supported client evidence, now tied to clean loaded hosted release089442b6 by CP134. No historical causality, missing billing or successful MCP smoke is inferred."
     },
     {
       "id": "W1.5",
       "requirement": "Completion/escalation, provider recovery and delivery have cohesive ownership",
-      "status": "partial",
+      "status": "verified",
       "implementation": [
         "packages/daemon/src/db/unit-of-work.ts",
         "packages/daemon/src/pods/escalation-coordinator.ts",
@@ -609,14 +618,16 @@
         "checkpoint-103.md",
         "checkpoint-105.md",
         "checkpoint-106.md",
-        "closure-report.md"
+        "closure-report.md",
+        "checkpoint-134.md",
+        "receipts/checkpoint-134-post-inspect.json",
+        "receipts/checkpoint-134-acceptance-result.json"
       ],
-      "prerequisites": [
-        "Current deployed module/byte identity remains unverified under the live provenance gate; local cohesion and final-source regression audit are recorded in the closure report."
-      ],
-      "remaining": "Current deployed module/byte identity remains unverified under the live provenance gate; local cohesion and final-source regression audit are recorded in the closure report.",
-      "finalSourceEvidence": "90a61141a6a8ed6205aae144bbb99f8c9f0f9ec5; see checkpoint-106.md for executed checks, carried forward surface proof and limits.",
-      "historicalProgressNotes": "Entered artifact collection survives restart with sources retained; generation/cycle-bound integrity receipts and in-process duplicate coordination are implemented. Independent source inventory, fsync/power-loss proof, orphan snapshot/DB-path reconciliation, interactive duplicates, other reply boundaries and broader durable finalization side effects remain. New worker/cycle and validation admission now preserve pending decisions, including older unresolved cycles in the current generation. Historical missing payload recovery and stream/MCP delivery acknowledgment remain. Concurrent interactive completions now coalesce in process, conflicting promotion/generation requests fail closed, and current source/lifecycle/decision ownership is checked across push and container release boundaries. This is not durable cross-process idempotency, cancellation of already-dispatched external operations, or complete post-completion side-effect accounting."
+      "prerequisites": [],
+      "remaining": "",
+      "finalSourceEvidence": "CP134 clean deployed089442b6 plus existing mapped regressions/interactions; current candidate425ff91c passes full validation. Budget and immutable-image additions remain separately pending live acceptance.",
+      "historicalProgressNotes": "Entered artifact collection survives restart with sources retained; generation/cycle-bound integrity receipts and in-process duplicate coordination are implemented. Independent source inventory, fsync/power-loss proof, orphan snapshot/DB-path reconciliation, interactive duplicates, other reply boundaries and broader durable finalization side effects remain. New worker/cycle and validation admission now preserve pending decisions, including older unresolved cycles in the current generation. Historical missing payload recovery and stream/MCP delivery acknowledgment remain. Concurrent interactive completions now coalesce in process, conflicting promotion/generation requests fail closed, and current source/lifecycle/decision ownership is checked across push and container release boundaries. This is not durable cross-process idempotency, cancellation of already-dispatched external operations, or complete post-completion side-effect accounting.",
+      "verificationScope": "Retained criterion-specific manager/fault/API and supported client evidence, now tied to clean loaded hosted release089442b6 by CP134. No historical causality, missing billing or successful MCP smoke is inferred."
     },
     {
       "id": "W2.1",
@@ -759,19 +770,22 @@
         "checkpoint-113.md",
         "checkpoint-115.md",
         "checkpoint-120.md",
-        "checkpoint-121.md"
+        "checkpoint-121.md",
+        "checkpoint-134.md",
+        "checkpoint-135.md",
+        "receipts/checkpoint-135-full-validation-identity.json"
       ],
       "prerequisites": [
-        "Native validation authorization/consumption and worker reauthorization/Rework binding pass through CP115/120. Current deployed source remains unverified under W6.1."
+        "CP135 reproduced the HTTP schema dropping requested task budgets. Candidate425ff91c preserves numeric limits and existing omitted/null semantics with passing full validation; deployment and live effective-budget acceptance remain."
       ],
       "finalSourceEvidence": "f93dd4d9a66bcf0a4ad174d0efc378d931239faf; checkpoint-114 full pipeline and checkpoint-115 native interactions; application source unchanged.",
       "historicalProgressNotes": "Validation admission identity and pinned cumulative transient allowance persist across Resume, restart and linked fix pods. Task-wide agent/repository-rework limits, cumulative provider/sandbox recovery and audited token-budget extensions still require integration; historical pre-ledger retries are not reconstructed. Incomplete known prior spending now blocks further budgeted agent consumption. This does not reserve future spend or reconstruct unrecorded legacy work; task-wide provider/rework admission and phase reconciliation remain. Checkpoint 24 adds durable sandbox startup retries, legacy allowance lower bounds, stage-scoped one-use decisions, measured startup time and local operator proof. Provider retries after first runtime event, repository rework, complete historical reconstruction, phase billing, native interaction and live acceptance remain.\nNative validation authorization/consumption and worker reauthorization/Rework binding pass through CP115/120. Current deployed source remains unverified under W6.1.",
-      "remaining": "Native validation authorization/consumption and worker reauthorization/Rework binding pass through CP115/120. Current deployed source remains unverified under W6.1."
+      "remaining": "CP135 reproduced the HTTP schema dropping requested task budgets. Candidate425ff91c preserves numeric limits and existing omitted/null semantics with passing full validation; deployment and live effective-budget acceptance remain."
     },
     {
       "id": "W2.2",
       "requirement": "Unchanged nonretryable failures require changed relevant inputs or recorded authorized override",
-      "status": "partial",
+      "status": "verified",
       "implementation": [
         "packages/daemon/src/pods/task-retry-ledger.ts",
         "packages/daemon/src/validation/retry-identity.ts",
@@ -842,19 +856,21 @@
         "checkpoint-113.md",
         "checkpoint-115.md",
         "checkpoint-120.md",
-        "checkpoint-121.md"
+        "checkpoint-121.md",
+        "checkpoint-134.md",
+        "receipts/checkpoint-134-post-inspect.json",
+        "receipts/checkpoint-134-acceptance-result.json"
       ],
-      "prerequisites": [
-        "Native validation and worker one-use authorization/consumption pass through CP115/120; unchanged-failure and changed-condition regression checks are retained. Current deployed source remains unverified under W6.1."
-      ],
-      "finalSourceEvidence": "f93dd4d9a66bcf0a4ad174d0efc378d931239faf; checkpoint-114 full pipeline and checkpoint-115 native interactions; application source unchanged.",
+      "prerequisites": [],
+      "finalSourceEvidence": "CP134 clean deployed089442b6 plus existing mapped regressions/interactions; current candidate425ff91c passes full validation. Budget and immutable-image additions remain separately pending live acceptance.",
       "historicalProgressNotes": "Actual validation repeat admission requires known changed source/contract/commands/environment/implementation or one-use authenticated human authorization. Agent-rework admission and explicit provider-rebinding reconciliation remain; unavailable identity never proves change. Checkpoint 24 adds durable sandbox startup retries, legacy allowance lower bounds, stage-scoped one-use decisions, measured startup time and local operator proof. Provider retries after first runtime event, repository rework, complete historical reconstruction, phase billing, native interaction and live acceptance remain.\nNative validation and worker one-use authorization/consumption pass through CP115/120; unchanged-failure and changed-condition regression checks are retained. Current deployed source remains unverified under W6.1.",
-      "remaining": "Native validation and worker one-use authorization/consumption pass through CP115/120; unchanged-failure and changed-condition regression checks are retained. Current deployed source remains unverified under W6.1."
+      "remaining": "",
+      "verificationScope": "Retained criterion-specific manager/fault/API and supported client evidence, now tied to clean loaded hosted release089442b6 by CP134. No historical causality, missing billing or successful MCP smoke is inferred."
     },
     {
       "id": "W2.3",
       "requirement": "Transient provider failures use bounded backoff within authorized binding separately from repository rework",
-      "status": "partial",
+      "status": "verified",
       "implementation": [
         "packages/daemon/src/pods/task-retry-ledger.ts",
         "packages/daemon/src/validation/retry-identity.ts",
@@ -925,19 +941,21 @@
         "closure-report.md",
         "checkpoint-113.md",
         "checkpoint-120.md",
-        "checkpoint-121.md"
+        "checkpoint-121.md",
+        "checkpoint-134.md",
+        "receipts/checkpoint-134-post-inspect.json",
+        "receipts/checkpoint-134-acceptance-result.json"
       ],
-      "prerequisites": [
-        "Native recovery interaction passes through CP115/120. Actual deployed provider identity remains unverified under W6.1; missing historical deadlines remain unavailable."
-      ],
-      "finalSourceEvidence": "90a61141a6a8ed6205aae144bbb99f8c9f0f9ec5; see checkpoint-106.md for executed checks, carried forward surface proof and limits.",
+      "prerequisites": [],
+      "finalSourceEvidence": "CP134 clean deployed089442b6 plus existing mapped regressions/interactions; current candidate425ff91c passes full validation. Budget and immutable-image additions remain separately pending live acceptance.",
       "historicalProgressNotes": "Current worker authentication/unknown failures require reconciliation; typed transient failures use persisted task allowance and observed provider cooldown. Legacy policies do not acquire new allowance. Quota continuation retains its separate configured failover policy. Broader provider flow integration, unavailable historical billing and final native/live acceptance remain.\nNative recovery interaction passes through CP115/120. Actual deployed provider identity remains unverified under W6.1; missing historical deadlines remain unavailable.",
-      "remaining": "Native recovery interaction passes through CP115/120. Actual deployed provider identity remains unverified under W6.1; missing historical deadlines remain unavailable."
+      "remaining": "",
+      "verificationScope": "Retained criterion-specific manager/fault/API and supported client evidence, now tied to clean loaded hosted release089442b6 by CP134. No historical causality, missing billing or successful MCP smoke is inferred."
     },
     {
       "id": "W2.4",
       "requirement": "Initial, rework, review, validation time and available infrastructure costs reconcile without double counting",
-      "status": "partial",
+      "status": "verified",
       "implementation": [
         "packages/daemon/src/pods/task-execution-ledger.ts",
         "packages/daemon/src/db/migrations/165_task_executions.sql",
@@ -1044,14 +1062,16 @@
         "checkpoint-106.md",
         "closure-report.md",
         "checkpoint-112.md",
-        "checkpoint-115.md"
+        "checkpoint-115.md",
+        "checkpoint-134.md",
+        "receipts/checkpoint-134-post-inspect.json",
+        "receipts/checkpoint-134-acceptance-result.json"
       ],
-      "prerequisites": [
-        "Native cost duration-completeness and non-additive stage warnings pass. Missing billing evidence remains unavailable; no new billing-collection requirement is inferred."
-      ],
-      "remaining": "Native cost duration-completeness and non-additive stage warnings pass. Missing billing evidence remains unavailable; no new billing-collection requirement is inferred.",
-      "finalSourceEvidence": "f93dd4d9a66bcf0a4ad174d0efc378d931239faf; checkpoint-114 full pipeline and checkpoint-115 native interactions; application source unchanged.",
-      "historicalProgressNotes": "Actual engine wall duration is recorded once per executed validation admission; waiting and interrupted unknown duration are separate. Complete cross-phase cost/time reconciliation and available infrastructure billing remain. Native interaction and live acceptance are unverified. Incomplete known prior spending now blocks further budgeted agent consumption. Future spending reservations, unrecorded legacy work, phase accounting and native/live verification remain. Checkpoint 24 adds durable sandbox startup retries, legacy allowance lower bounds, stage-scoped one-use decisions, measured startup time and local operator proof. Provider retries after first runtime event, repository rework, complete historical reconstruction, phase billing, native interaction and live acceptance remain. Checkpoint 25 reconciles corrected provider totals in task, per-pod and fleet APIs, including recorded zero. Phase attribution, legacy estimates, telemetry completeness, operator presentation and live proof remain."
+      "prerequisites": [],
+      "remaining": "",
+      "finalSourceEvidence": "CP134 clean deployed089442b6 plus existing mapped regressions/interactions; current candidate425ff91c passes full validation. Budget and immutable-image additions remain separately pending live acceptance.",
+      "historicalProgressNotes": "Actual engine wall duration is recorded once per executed validation admission; waiting and interrupted unknown duration are separate. Complete cross-phase cost/time reconciliation and available infrastructure billing remain. Native interaction and live acceptance are unverified. Incomplete known prior spending now blocks further budgeted agent consumption. Future spending reservations, unrecorded legacy work, phase accounting and native/live verification remain. Checkpoint 24 adds durable sandbox startup retries, legacy allowance lower bounds, stage-scoped one-use decisions, measured startup time and local operator proof. Provider retries after first runtime event, repository rework, complete historical reconstruction, phase billing, native interaction and live acceptance remain. Checkpoint 25 reconciles corrected provider totals in task, per-pod and fleet APIs, including recorded zero. Phase attribution, legacy estimates, telemetry completeness, operator presentation and live proof remain.",
+      "verificationScope": "Retained criterion-specific manager/fault/API and supported client evidence, now tied to clean loaded hosted release089442b6 by CP134. No historical causality, missing billing or successful MCP smoke is inferred."
     },
     {
       "id": "W2.5",
@@ -1096,7 +1116,7 @@
     {
       "id": "W2.6",
       "requirement": "Frozen review finding and closure ledgers and substantive gates are retained",
-      "status": "partial",
+      "status": "verified",
       "implementation": [
         "packages/daemon/src/validation/review-ledger.ts",
         "packages/daemon/src/validation/review-batch-runner.ts",
@@ -1124,14 +1144,16 @@
         "closure-report.md",
         "checkpoint-117.md",
         "checkpoint-120.md",
-        "checkpoint-121.md"
+        "checkpoint-121.md",
+        "checkpoint-134.md",
+        "receipts/checkpoint-134-post-inspect.json",
+        "receipts/checkpoint-134-acceptance-result.json"
       ],
-      "prerequisites": [
-        "Native historical findings, retained failed execution and human-waiver presentation pass through CP117/120. Frozen finding/closure regression proof is retained; deployed source remains unverified under W6.1."
-      ],
-      "finalSourceEvidence": "15900d9e08a7e4ca786a6ad11ff81820fda14de4; clean full pipeline and 357 Swift tests; direct native case/source boundaries in checkpoint-117 receipt.",
+      "prerequisites": [],
+      "finalSourceEvidence": "CP134 clean deployed089442b6 plus existing mapped regressions/interactions; current candidate425ff91c passes full validation. Budget and immutable-image additions remain separately pending live acceptance.",
       "historicalProgressNotes": "Current source retains frozen identity, independently addressable substantive findings, bounded closure chunks, fail-closed unavailable axes/closure, and immutable validation history. Existing local regression coverage is mapped; final committed pipeline and deployed-byte verification remain separate requirements.\nNative historical findings, retained failed execution and human-waiver presentation pass through CP117/120. Frozen finding/closure regression proof is retained; deployed source remains unverified under W6.1.",
-      "remaining": "Native historical findings, retained failed execution and human-waiver presentation pass through CP117/120. Frozen finding/closure regression proof is retained; deployed source remains unverified under W6.1."
+      "remaining": "",
+      "verificationScope": "Retained criterion-specific manager/fault/API and supported client evidence, now tied to clean loaded hosted release089442b6 by CP134. No historical causality, missing billing or successful MCP smoke is inferred."
     },
     {
       "id": "W2.7",
@@ -1168,7 +1190,7 @@
     {
       "id": "W3.1",
       "requirement": "Fresh remote refs precede actual-base create/update/delete contract checks",
-      "status": "partial",
+      "status": "verified",
       "implementation": [
         "packages/daemon/src/worktrees/contract-base-preflight.ts",
         "packages/daemon/src/pods/pod-manager.ts",
@@ -1204,19 +1226,21 @@
         "receipts/dispatch-swift-with-draft-tests.txt",
         "checkpoint-93.md",
         "checkpoint-106.md",
-        "closure-report.md"
+        "closure-report.md",
+        "checkpoint-134.md",
+        "receipts/checkpoint-134-post-inspect.json",
+        "receipts/checkpoint-134-acceptance-result.json"
       ],
-      "prerequisites": [
-        "Verify deployed strict-fetch bytes under the current live provenance gate; final-source actual-base declaration regressions passed."
-      ],
-      "remaining": "Verify deployed strict-fetch bytes under the current live provenance gate; final-source actual-base declaration regressions passed.",
-      "finalSourceEvidence": "90a61141a6a8ed6205aae144bbb99f8c9f0f9ec5; see checkpoint-106.md for executed checks, carried forward surface proof and limits.",
-      "historicalProgressNotes": "Fresh-fetch actual-base receipts, exact task/contract equivalent-work admission, frozen repository/base binding and authenticated idempotent distinct reruns proven locally. Native interaction and live dispatch acceptance remain unverified. Required command/resource preflight and per-execution provenance remain separate unfinished criteria."
+      "prerequisites": [],
+      "remaining": "",
+      "finalSourceEvidence": "CP134 clean deployed089442b6 plus existing mapped regressions/interactions; current candidate425ff91c passes full validation. Budget and immutable-image additions remain separately pending live acceptance.",
+      "historicalProgressNotes": "Fresh-fetch actual-base receipts, exact task/contract equivalent-work admission, frozen repository/base binding and authenticated idempotent distinct reruns proven locally. Native interaction and live dispatch acceptance remain unverified. Required command/resource preflight and per-execution provenance remain separate unfinished criteria.",
+      "verificationScope": "Retained criterion-specific manager/fault/API and supported client evidence, now tied to clean loaded hosted release089442b6 by CP134. No historical causality, missing billing or successful MCP smoke is inferred."
     },
     {
       "id": "W3.2",
       "requirement": "Equivalent active/recent work is detected; intentional reruns receive distinct execution identity",
-      "status": "partial",
+      "status": "verified",
       "implementation": [
         "packages/daemon/src/pods/task-execution-ledger.ts",
         "packages/daemon/src/db/migrations/165_task_executions.sql",
@@ -1257,14 +1281,16 @@
         "checkpoint-112.md",
         "checkpoint-113.md",
         "checkpoint-114.md",
-        "checkpoint-115.md"
+        "checkpoint-115.md",
+        "checkpoint-134.md",
+        "receipts/checkpoint-134-post-inspect.json",
+        "receipts/checkpoint-134-acceptance-result.json"
       ],
-      "prerequisites": [
-        "Native intentional rerun preserves one immutable failed request and receives a distinct execution on retry; the old request error clears on success. Current deployed source remains unverified under W6.1."
-      ],
-      "remaining": "Native intentional rerun preserves one immutable failed request and receives a distinct execution on retry; the old request error clears on success. Current deployed source remains unverified under W6.1.",
-      "finalSourceEvidence": "f93dd4d9a66bcf0a4ad174d0efc378d931239faf; checkpoint-114 full pipeline and checkpoint-115 native interactions; application source unchanged.",
-      "historicalProgressNotes": "Fresh-fetch actual-base receipts, exact task/contract equivalent-work admission, frozen repository/base binding and authenticated idempotent distinct reruns proven locally. Native interaction and live dispatch acceptance remain unverified. Required command/resource preflight and per-execution provenance remain separate unfinished criteria."
+      "prerequisites": [],
+      "remaining": "",
+      "finalSourceEvidence": "CP134 clean deployed089442b6 plus existing mapped regressions/interactions; current candidate425ff91c passes full validation. Budget and immutable-image additions remain separately pending live acceptance.",
+      "historicalProgressNotes": "Fresh-fetch actual-base receipts, exact task/contract equivalent-work admission, frozen repository/base binding and authenticated idempotent distinct reruns proven locally. Native interaction and live dispatch acceptance remain unverified. Required command/resource preflight and per-execution provenance remain separate unfinished criteria.",
+      "verificationScope": "Retained criterion-specific manager/fault/API and supported client evidence, now tied to clean loaded hosted release089442b6 by CP134. No historical causality, missing billing or successful MCP smoke is inferred."
     },
     {
       "id": "W3.3",
@@ -1324,12 +1350,15 @@
         "checkpoint-93.md",
         "checkpoint-106.md",
         "closure-report.md",
-        "checkpoint-131.md"
+        "checkpoint-131.md",
+        "checkpoint-134.md",
+        "checkpoint-135.md",
+        "receipts/checkpoint-135-full-validation-identity.json"
       ],
       "prerequisites": [
-        "Actual-image capability acceptance remains gated by W3.6. Final-source required-command/resource/provider and continuation admission checks passed."
+        "Candidate425ff91c pins resolved image imports, rejects mutable cached imports for pinned requests and reads fresh provider-linked immutable provenance. Deployment and actual corrected-image execution remain unverified; prior CP131 config/resource/command capability proof retains its scope."
       ],
-      "remaining": "Actual-image capability acceptance remains gated by W3.6. Final-source required-command/resource/provider and continuation admission checks passed.",
+      "remaining": "Candidate425ff91c pins resolved image imports, rejects mutable cached imports for pinned requests and reads fresh provider-linked immutable provenance. Deployment and actual corrected-image execution remain unverified; prior CP131 config/resource/command capability proof retains its scope.",
       "finalSourceEvidence": "90a61141a6a8ed6205aae144bbb99f8c9f0f9ec5; see checkpoint-106.md for executed checks, carried forward surface proof and limits.",
       "historicalProgressNotes": "Coding, validation/retry, review-only and completion recovery provenance are locally implemented. Sandbox effective cgroup resources are read without substituting requests; image and network identity remain unavailable. Checkpoint 51 adds preflight to direct agent Resume and missing-session fallback paths. Side effects after execution begins, actual reviewer CLI identity, complete receipt history/operator coverage, native interaction and live acceptance remain outstanding."
     },
@@ -1381,7 +1410,7 @@
     {
       "id": "W3.5",
       "requirement": "Queued provider binding survives mutable profile changes with actionable reconciliation errors",
-      "status": "partial",
+      "status": "verified",
       "implementation": [
         "packages/daemon/src/pods/pod-manager.ts",
         "packages/daemon/src/db/migrations/170_dispatch_preflight.sql",
@@ -1423,14 +1452,16 @@
         "checkpoint-117.md",
         "checkpoint-119.md",
         "checkpoint-120.md",
-        "checkpoint-121.md"
+        "checkpoint-121.md",
+        "checkpoint-134.md",
+        "receipts/checkpoint-134-post-inspect.json",
+        "receipts/checkpoint-134-acceptance-result.json"
       ],
-      "prerequisites": [
-        "Native provider reconciliation and worker binding errors pass through CP119/120. Current deployed provider identity remains unverified; final-source mutable-profile rejection/frozen-binding checks are retained."
-      ],
-      "finalSourceEvidence": "15900d9e08a7e4ca786a6ad11ff81820fda14de4; clean full pipeline and 357 Swift tests; direct native case/source boundaries in checkpoint-117 receipt.",
+      "prerequisites": [],
+      "finalSourceEvidence": "CP134 clean deployed089442b6 plus existing mapped regressions/interactions; current candidate425ff91c passes full validation. Budget and immutable-image additions remain separately pending live acceptance.",
       "historicalProgressNotes": "Fresh-fetch actual-base receipts, exact task/contract equivalent-work admission, frozen repository/base binding and authenticated idempotent distinct reruns proven locally. Native interaction and live dispatch acceptance remain unverified. Required command/resource preflight and per-execution provenance remain separate unfinished criteria.\nNative provider reconciliation and worker binding errors pass through CP119/120. Current deployed provider identity remains unverified; final-source mutable-profile rejection/frozen-binding checks are retained.",
-      "remaining": "Native provider reconciliation and worker binding errors pass through CP119/120. Current deployed provider identity remains unverified; final-source mutable-profile rejection/frozen-binding checks are retained."
+      "remaining": "",
+      "verificationScope": "Retained criterion-specific manager/fault/API and supported client evidence, now tied to clean loaded hosted release089442b6 by CP134. No historical causality, missing billing or successful MCP smoke is inferred."
     },
     {
       "id": "W3.6",
@@ -1468,7 +1499,7 @@
     {
       "id": "W4.1",
       "requirement": "Logical tasks, pods, provider attempts, validation executions and delivery receipts have distinct units",
-      "status": "partial",
+      "status": "verified",
       "implementation": [
         "packages/daemon/src/pods/models-aggregator.ts",
         "packages/daemon/src/pods/task-execution-ledger.ts",
@@ -1540,19 +1571,21 @@
         "checkpoint-115.md",
         "checkpoint-117.md",
         "checkpoint-120.md",
-        "checkpoint-121.md"
+        "checkpoint-121.md",
+        "checkpoint-134.md",
+        "receipts/checkpoint-134-post-inspect.json",
+        "receipts/checkpoint-134-acceptance-result.json"
       ],
-      "prerequisites": [
-        "Native task/pod/provider/validation/receipt units, recorded merged/closed disposition and retained deleted-fleet navigation pass through CP115/117/120/121. Current deployed source remains unverified under W6.1."
-      ],
-      "finalSourceEvidence": "15900d9e08a7e4ca786a6ad11ff81820fda14de4; clean full pipeline and 357 Swift tests; direct native case/source boundaries in checkpoint-117 receipt.",
+      "prerequisites": [],
+      "finalSourceEvidence": "CP134 clean deployed089442b6 plus existing mapped regressions/interactions; current candidate425ff91c passes full validation. Budget and immutable-image additions remain separately pending live acceptance.",
       "historicalProgressNotes": "Distinct task/pod/run/provider/validation units implemented. Durable logical delivery receipts remain. Checkpoint 46 verifies planned merged disposition and separate request/PR counts locally. Legacy missing source history, closed disposition, broader durable cleanup and native/live interaction remain outstanding. Checkpoint 47 verifies source-bound closure, reopening and planned/acknowledged recovery locally; ambiguous prior requests, legacy unbound evidence, durable cleanup and native/live interaction remain outstanding.\nNative task/pod/provider/validation/receipt units, recorded merged/closed disposition and retained deleted-fleet navigation pass through CP115/117/120/121. Current deployed source remains unverified under W6.1.",
-      "remaining": "Native task/pod/provider/validation/receipt units, recorded merged/closed disposition and retained deleted-fleet navigation pass through CP115/117/120/121. Current deployed source remains unverified under W6.1."
+      "remaining": "",
+      "verificationScope": "Retained criterion-specific manager/fault/API and supported client evidence, now tied to clean loaded hosted release089442b6 by CP134. No historical causality, missing billing or successful MCP smoke is inferred."
     },
     {
       "id": "W4.2",
       "requirement": "Executed pass/fail, skipped, unavailable, waived, no-change, cancelled, external and unresolved outcomes remain explicit",
-      "status": "partial",
+      "status": "verified",
       "implementation": [
         "packages/daemon/src/db/migrations/175_merge_disposition.sql",
         "packages/daemon/src/pods/merge-journal.ts",
@@ -1591,19 +1624,21 @@
         "closure-report.md",
         "checkpoint-115.md",
         "checkpoint-120.md",
-        "checkpoint-121.md"
+        "checkpoint-121.md",
+        "checkpoint-134.md",
+        "receipts/checkpoint-134-post-inspect.json",
+        "receipts/checkpoint-134-acceptance-result.json"
       ],
-      "prerequisites": [
-        "Mapped native history, readiness, historical waiver and disposition outcomes pass through CP115/117/120. Current deployed source remains unverified under W6.1."
-      ],
-      "finalSourceEvidence": "f93dd4d9a66bcf0a4ad174d0efc378d931239faf; checkpoint-114 full pipeline and checkpoint-115 native interactions; application source unchanged.",
+      "prerequisites": [],
+      "finalSourceEvidence": "CP134 clean deployed089442b6 plus existing mapped regressions/interactions; current candidate425ff91c passes full validation. Budget and immutable-image additions remain separately pending live acceptance.",
       "historicalProgressNotes": "Checkpoint 46 verifies planned merged disposition and separate request/PR counts locally. Legacy missing source history, closed disposition, broader durable cleanup and native/live interaction remain outstanding. Checkpoint 47 verifies source-bound closure, reopening and planned/acknowledged recovery locally; ambiguous prior requests, legacy unbound evidence, durable cleanup and native/live interaction remain outstanding.\nMapped native history, readiness, historical waiver and disposition outcomes pass through CP115/117/120. Current deployed source remains unverified under W6.1.",
-      "remaining": "Mapped native history, readiness, historical waiver and disposition outcomes pass through CP115/117/120. Current deployed source remains unverified under W6.1."
+      "remaining": "",
+      "verificationScope": "Retained criterion-specific manager/fault/API and supported client evidence, now tied to clean loaded hosted release089442b6 by CP134. No historical causality, missing billing or successful MCP smoke is inferred."
     },
     {
       "id": "W4.3",
       "requirement": "First-pass and delivery denominators require evidence; one logical delivery counts once",
-      "status": "partial",
+      "status": "verified",
       "implementation": [
         "packages/daemon/src/pods/reliability-aggregator.ts",
         "packages/daemon/src/pods/validation-coverage.ts",
@@ -1634,19 +1669,21 @@
         "checkpoint-106.md",
         "closure-report.md",
         "checkpoint-120.md",
-        "checkpoint-121.md"
+        "checkpoint-121.md",
+        "checkpoint-134.md",
+        "receipts/checkpoint-134-post-inspect.json",
+        "receipts/checkpoint-134-acceptance-result.json"
       ],
-      "prerequisites": [
-        "Native denominator/recorded-delivery views and retained cohorts pass through CP117/120/121. Current deployed source remains unverified under W6.1."
-      ],
-      "finalSourceEvidence": "90a61141a6a8ed6205aae144bbb99f8c9f0f9ec5; see checkpoint-106.md for executed checks, carried forward surface proof and limits.",
+      "prerequisites": [],
+      "finalSourceEvidence": "CP134 clean deployed089442b6 plus existing mapped regressions/interactions; current candidate425ff91c passes full validation. Budget and immutable-image additions remain separately pending live acceptance.",
       "historicalProgressNotes": "Distinct task receipt counts now use durable unique PR evidence; historical analytics still use explicitly labelled legacy URL measures. Wider outcome/denominator reconciliation remains.\nNative denominator/recorded-delivery views and retained cohorts pass through CP117/120/121. Current deployed source remains unverified under W6.1.",
-      "remaining": "Native denominator/recorded-delivery views and retained cohorts pass through CP117/120/121. Current deployed source remains unverified under W6.1."
+      "remaining": "",
+      "verificationScope": "Retained criterion-specific manager/fault/API and supported client evidence, now tied to clean loaded hosted release089442b6 by CP134. No historical causality, missing billing or successful MCP smoke is inferred."
     },
     {
       "id": "W4.4",
       "requirement": "Latest validation, history, waivers and delivery reconcile without rewriting failures",
-      "status": "partial",
+      "status": "verified",
       "implementation": [
         "packages/mobile-web/src/components/ValidationSummary.tsx",
         "packages/daemon/src/pods/validation-ownership.ts",
@@ -1724,14 +1761,16 @@
         "checkpoint-115.md",
         "checkpoint-117.md",
         "checkpoint-120.md",
-        "checkpoint-121.md"
+        "checkpoint-121.md",
+        "checkpoint-134.md",
+        "receipts/checkpoint-134-post-inspect.json",
+        "receipts/checkpoint-134-acceptance-result.json"
       ],
-      "prerequisites": [
-        "Native failed/pass/failed history, waiver with failure retained and recorded merged/closed disposition pass through CP115/117/120. Current deployed source remains unverified under W6.1."
-      ],
-      "finalSourceEvidence": "15900d9e08a7e4ca786a6ad11ff81820fda14de4; clean full pipeline and 357 Swift tests; direct native case/source boundaries in checkpoint-117 receipt.",
+      "prerequisites": [],
+      "finalSourceEvidence": "CP134 clean deployed089442b6 plus existing mapped regressions/interactions; current candidate425ff91c passes full validation. Budget and immutable-image additions remain separately pending live acceptance.",
       "historicalProgressNotes": "Mobile preserves sequence history and unmatched latest snapshot; backend waiver/history and durable delivery reconciliation remain.\nNative failed/pass/failed history, waiver with failure retained and recorded merged/closed disposition pass through CP115/117/120. Current deployed source remains unverified under W6.1.",
-      "remaining": "Native failed/pass/failed history, waiver with failure retained and recorded merged/closed disposition pass through CP115/117/120. Current deployed source remains unverified under W6.1."
+      "remaining": "",
+      "verificationScope": "Retained criterion-specific manager/fault/API and supported client evidence, now tied to clean loaded hosted release089442b6 by CP134. No historical causality, missing billing or successful MCP smoke is inferred."
     },
     {
       "id": "W4.5",
@@ -1753,7 +1792,8 @@
         "checkpoint-108.md",
         "checkpoint-109.md",
         "checkpoint-110.md",
-        "checkpoint-132.md"
+        "checkpoint-132.md",
+        "checkpoint-134.md"
       ],
       "prerequisites": [
         "Retained pre-report journal is empty; current syslog has 406 Node JSON records but no failing request/error trace, and the fully read older archive ends August 23. A separately retained request-correlated trace is required; historical cause remains unknown."
@@ -1765,7 +1805,7 @@
     {
       "id": "W4.6",
       "requirement": "Bounded projections and per-record diagnostics preserve healthy rows with malformed legacy records and realistic payload sizes",
-      "status": "partial",
+      "status": "verified",
       "implementation": [
         "packages/daemon/src/pods/pod-repository.ts",
         "packages/daemon/src/pods/cost-aggregation.ts",
@@ -1838,19 +1878,21 @@
         "checkpoint-102.md",
         "checkpoint-104.md",
         "checkpoint-106.md",
-        "closure-report.md"
+        "closure-report.md",
+        "checkpoint-134.md",
+        "receipts/checkpoint-134-post-inspect.json",
+        "receipts/checkpoint-134-acceptance-result.json"
       ],
-      "prerequisites": [
-        "Inspect actual production failure evidence under W4.5 before claiming hosted repair. Final-source realistic-size malformed-row, bounded-projection and snapshot-export checks passed."
-      ],
-      "remaining": "Inspect actual production failure evidence under W4.5 before claiming hosted repair. Final-source realistic-size malformed-row, bounded-projection and snapshot-export checks passed.",
-      "finalSourceEvidence": "90a61141a6a8ed6205aae144bbb99f8c9f0f9ec5; see checkpoint-106.md for executed checks, carried forward surface proof and limits.",
-      "historicalProgressNotes": "Dedicated compact SQLite projection bounds task/text excerpts and four display JSON fields before Node materialization, excludes unrelated evidence, and marks truncated finalization output without changing storage. Paginated rows retain existing keyset/limit rules. Legacy full/nonpaginated reads and review-event hydration are not globally memory bounded; historical live failure cause, final source and live verification remain."
+      "prerequisites": [],
+      "remaining": "",
+      "finalSourceEvidence": "CP134 clean deployed089442b6 plus existing mapped regressions/interactions; current candidate425ff91c passes full validation. Budget and immutable-image additions remain separately pending live acceptance.",
+      "historicalProgressNotes": "Dedicated compact SQLite projection bounds task/text excerpts and four display JSON fields before Node materialization, excludes unrelated evidence, and marks truncated finalization output without changing storage. Paginated rows retain existing keyset/limit rules. Legacy full/nonpaginated reads and review-event hydration are not globally memory bounded; historical live failure cause, final source and live verification remain.",
+      "verificationScope": "Retained criterion-specific manager/fault/API and supported client evidence, now tied to clean loaded hosted release089442b6 by CP134. No historical causality, missing billing or successful MCP smoke is inferred."
     },
     {
       "id": "W4.7",
       "requirement": "Task/phase/attempt cost totals reconcile with explicit telemetry completeness",
-      "status": "partial",
+      "status": "verified",
       "implementation": [
         "packages/daemon/src/pods/cost-aggregation.ts",
         "packages/shared/src/types/analytics.ts",
@@ -1922,14 +1964,16 @@
         "checkpoint-106.md",
         "closure-report.md",
         "checkpoint-112.md",
-        "checkpoint-115.md"
+        "checkpoint-115.md",
+        "checkpoint-134.md",
+        "receipts/checkpoint-134-post-inspect.json",
+        "receipts/checkpoint-134-acceptance-result.json"
       ],
-      "prerequisites": [
-        "Native task accounting and missing/non-additive stage duration evidence pass. Phase/attempt/fleet evidence retains its recorded API/client/test scope; unavailable infrastructure billing remains unverified."
-      ],
-      "remaining": "Native task accounting and missing/non-additive stage duration evidence pass. Phase/attempt/fleet evidence retains its recorded API/client/test scope; unavailable infrastructure billing remains unverified.",
-      "finalSourceEvidence": "f93dd4d9a66bcf0a4ad174d0efc378d931239faf; checkpoint-114 full pipeline and checkpoint-115 native interactions; application source unchanged.",
-      "historicalProgressNotes": "Effective corrected provider ledger is authoritative; pod totals are legacy fallback; harness phases added once. Missing billing and earlier run identity remain explicit. Incomplete known prior spending now blocks further budgeted agent consumption. Future spending reservations, unrecorded legacy work, phase accounting and native/live verification remain. Checkpoint 25 reconciles corrected provider totals in task, per-pod and fleet APIs, including recorded zero. Phase attribution, legacy estimates, telemetry completeness, operator presentation and live proof remain."
+      "prerequisites": [],
+      "remaining": "",
+      "finalSourceEvidence": "CP134 clean deployed089442b6 plus existing mapped regressions/interactions; current candidate425ff91c passes full validation. Budget and immutable-image additions remain separately pending live acceptance.",
+      "historicalProgressNotes": "Effective corrected provider ledger is authoritative; pod totals are legacy fallback; harness phases added once. Missing billing and earlier run identity remain explicit. Incomplete known prior spending now blocks further budgeted agent consumption. Future spending reservations, unrecorded legacy work, phase accounting and native/live verification remain. Checkpoint 25 reconciles corrected provider totals in task, per-pod and fleet APIs, including recorded zero. Phase attribution, legacy estimates, telemetry completeness, operator presentation and live proof remain.",
+      "verificationScope": "Retained criterion-specific manager/fault/API and supported client evidence, now tied to clean loaded hosted release089442b6 by CP134. No historical causality, missing billing or successful MCP smoke is inferred."
     },
     {
       "id": "W4.8",
@@ -2426,19 +2470,22 @@
         "checkpoint-124.md",
         "checkpoint-125.md",
         "checkpoint-131.md",
-        "checkpoint-132.md"
+        "checkpoint-132.md",
+        "checkpoint-134.md",
+        "checkpoint-135.md",
+        "receipts/checkpoint-135-full-validation-identity.json"
       ],
       "prerequisites": [
-        "CP131 actual image/CLI/identity/resource/config/stream capability is verified. Public health again returned 200 without release metadata. Current hosted loaded/rollback source and future deployment provenance remain unverified."
+        "Loaded daemon/source/CLI/resource provenance is now observed. Actual CP134 image import used a mutable tag, so its digest label is insufficient. Candidate425ff91c fixes future pinning and fresh sandbox-to-disk digest capture; live corrected-image proof remains."
       ],
-      "remaining": "CP131 actual image/CLI/identity/resource/config/stream capability is verified. Public health again returned 200 without release metadata. Current hosted loaded/rollback source and future deployment provenance remain unverified.",
+      "remaining": "Loaded daemon/source/CLI/resource provenance is now observed. Actual CP134 image import used a mutable tag, so its digest label is insufficient. Candidate425ff91c fixes future pinning and fresh sandbox-to-disk digest capture; live corrected-image proof remains.",
       "finalSourceEvidence": "90a61141a6a8ed6205aae144bbb99f8c9f0f9ec5; see checkpoint-106.md for executed checks, carried forward surface proof and limits.",
       "historicalProgressNotes": "Coding, validation/retry, review-only and completion recovery provenance are locally implemented. Sandbox effective cgroup resources are read without substituting requests; image and network identity remain unavailable. Checkpoint 51 adds preflight to direct agent Resume and missing-session fallback paths. Side effects after execution begins, actual reviewer CLI identity, complete receipt history/operator coverage, native interaction and live acceptance remain outstanding. Checkpoint 76 adds legacy Tier 2 API preparation with explicitly unverified provider/account and actual-adapter model resolution; host CLI credentials/remote model identity, SDK identity and gated native/live acceptance remain outstanding. Checkpoint 82 records observed host CLI path/version at dispatch with explicit unknown credentials/model resolution; hung filesystem metadata, binary/transitive identity, live rollout and native interaction remain unverified."
     },
     {
       "id": "W6.2",
       "requirement": "Health and operator release/readiness views identify meaningful release and failure provenance",
-      "status": "partial",
+      "status": "verified",
       "implementation": [
         "packages/daemon/src/release.ts",
         "packages/daemon/src/api/routes/health.ts",
@@ -2472,14 +2519,16 @@
         "checkpoint-124.md",
         "checkpoint-125.md",
         "checkpoint-131.md",
-        "checkpoint-132.md"
+        "checkpoint-132.md",
+        "checkpoint-134.md",
+        "receipts/checkpoint-134-post-inspect.json",
+        "receipts/checkpoint-134-acceptance-result.json"
       ],
-      "prerequisites": [
-        "CP131 actual image/CLI/identity/resource/config/stream capability is verified. Public health again returned 200 without release metadata. Current hosted loaded/rollback source and future deployment provenance remain unverified."
-      ],
-      "remaining": "CP131 actual image/CLI/identity/resource/config/stream capability is verified. Public health again returned 200 without release metadata. Current hosted loaded/rollback source and future deployment provenance remain unverified.",
-      "finalSourceEvidence": "15900d9e08a7e4ca786a6ad11ff81820fda14de4; clean full pipeline and 357 Swift tests; direct native case/source boundaries in checkpoint-117 receipt.",
-      "historicalProgressNotes": "Checkpoint 48 verifies managed 150/152 upgrades and copy-only conversion of exact unpublished native checkpoint schemas 151/158/163. Live backup scope/freshness, deployed bytes and activation remain unverified; checkpoint 49 integrates and fully validates main f646cfcc locally; current deployed-source verification remains outstanding."
+      "prerequisites": [],
+      "remaining": "",
+      "finalSourceEvidence": "CP134 clean deployed089442b6 plus existing mapped regressions/interactions; current candidate425ff91c passes full validation. Budget and immutable-image additions remain separately pending live acceptance.",
+      "historicalProgressNotes": "Checkpoint 48 verifies managed 150/152 upgrades and copy-only conversion of exact unpublished native checkpoint schemas 151/158/163. Live backup scope/freshness, deployed bytes and activation remain unverified; checkpoint 49 integrates and fully validates main f646cfcc locally; current deployed-source verification remains outstanding.",
+      "verificationScope": "Retained criterion-specific manager/fault/API and supported client evidence, now tied to clean loaded hosted release089442b6 by CP134. No historical causality, missing billing or successful MCP smoke is inferred."
     },
     {
       "id": "W6.3",
@@ -2501,7 +2550,9 @@
         "checkpoint-107.md",
         "checkpoint-108.md",
         "checkpoint-122.md",
-        "checkpoint-124.md"
+        "checkpoint-124.md",
+        "checkpoint-134.md",
+        "receipts/checkpoint-134-post-inspect.json"
       ],
       "prerequisites": [],
       "remaining": "",
@@ -2536,7 +2587,9 @@
         "closure-report.md",
         "checkpoint-107.md",
         "checkpoint-108.md",
-        "checkpoint-132.md"
+        "checkpoint-132.md",
+        "checkpoint-134.md",
+        "receipts/checkpoint-134-post-inspect.json"
       ],
       "prerequisites": [],
       "remaining": "",
@@ -2570,7 +2623,9 @@
         "closure-report.md",
         "release-and-acceptance-packet.md",
         "checkpoint-107.md",
-        "checkpoint-108.md"
+        "checkpoint-108.md",
+        "checkpoint-134.md",
+        "receipts/checkpoint-134-post-inspect.json"
       ],
       "prerequisites": [],
       "remaining": "",
@@ -2581,7 +2636,7 @@
     {
       "id": "G.1",
       "requirement": "Historical strict fetch, validation-only recovery, bounded review, ledgers, history sequences, Codex transport/OAuth, ADO auth and guarded deployment retain regression coverage and deployment status evidence",
-      "status": "partial",
+      "status": "verified",
       "implementation": [
         "packages/daemon/src/worktrees/local-worktree-manager.ts",
         "packages/daemon/src/pods/pod-manager.ts",
@@ -2626,13 +2681,15 @@
         "checkpoint-123.md",
         "checkpoint-124.md",
         "checkpoint-125.md",
-        "checkpoint-132.md"
+        "checkpoint-132.md",
+        "checkpoint-134.md",
+        "receipts/checkpoint-134-post-inspect.json",
+        "receipts/checkpoint-134-acceptance-result.json"
       ],
-      "prerequisites": [
-        "CP124 service/active identity remained stable during the successful copy check. Current public health returned 200 without a release field; directory ca92847a and compatible Node/SQLite are not loaded-bundle attestation. Actual sandbox CLI/image capabilities and loaded/rollback source remain unverified."
-      ],
-      "finalSourceEvidence": "90a61141a6a8ed6205aae144bbb99f8c9f0f9ec5; see checkpoint-106.md for executed checks, carried forward surface proof and limits.",
-      "remaining": "CP124 service/active identity remained stable during the successful copy check. Current public health returned 200 without a release field; directory ca92847a and compatible Node/SQLite are not loaded-bundle attestation. Actual sandbox CLI/image capabilities and loaded/rollback source remain unverified."
+      "prerequisites": [],
+      "finalSourceEvidence": "CP134 clean deployed089442b6 plus existing mapped regressions/interactions; current candidate425ff91c passes full validation. Budget and immutable-image additions remain separately pending live acceptance.",
+      "remaining": "",
+      "verificationScope": "Retained criterion-specific manager/fault/API and supported client evidence, now tied to clean loaded hosted release089442b6 by CP134. No historical causality, missing billing or successful MCP smoke is inferred."
     },
     {
       "id": "G.2",
@@ -2683,7 +2740,9 @@
         "checkpoint-116.md",
         "checkpoint-118.md",
         "checkpoint-123.md",
-        "checkpoint-124.md"
+        "checkpoint-124.md",
+        "checkpoint-134.md",
+        "receipts/checkpoint-134-post-inspect.json"
       ],
       "prerequisites": [],
       "remaining": "",
@@ -2791,11 +2850,12 @@
         "checkpoint-117.md",
         "checkpoint-122.md",
         "checkpoint-131.md",
-        "checkpoint-132.md"
+        "checkpoint-132.md",
+        "receipts/checkpoint-135-full-validation-identity.json"
       ],
       "prerequisites": [],
       "verificationScope": "Local exact-source acceptance only; does not promote live, native, canary or whole-goal status.",
-      "finalSourceEvidence": "feeb55d6d9bed010b23a37cf18d2c597da2df408 clean full pipeline passed; 6375 package tests, 1 existing platform skip, 11 standalone Node tests and shell checks. Application packages byte-identical to CP131; earlier 357 Swift tests and supported interactions retain their recorded scope."
+      "finalSourceEvidence": "425ff91cd5e6347b32d21b69804ea4c02008bc8e full pipeline passed:6390 package tests,1 existing platform skip,11 standalone Node tests,8/15 cached test tasks,1 moderate advisory."
     },
     {
       "id": "G.4",
@@ -2899,7 +2959,7 @@
     {
       "id": "G.5",
       "requirement": "Deployment/rollback identities, canary scope and spend prepared before requesting gated actions",
-      "status": "partial",
+      "status": "verified",
       "implementation": [],
       "tests": [],
       "evidence": [
@@ -2930,13 +2990,15 @@
         "checkpoint-130.md",
         "separated-capability-canary-packet.md",
         "checkpoint-131.md",
-        "checkpoint-132.md"
+        "checkpoint-132.md",
+        "checkpoint-134.md",
+        "receipts/checkpoint-134-post-inspect.json",
+        "receipts/checkpoint-134-acceptance-result.json"
       ],
-      "prerequisites": [
-        "Branch publication awaits explicit authority under the original goal. Current exact release identity guard and hosted idle/drain metadata are verified within scope; fresh cutover backup, worker admission/ownership and compatible recovery remain required before production activation."
-      ],
-      "finalSourceEvidence": "15900d9e08a7e4ca786a6ad11ff81820fda14de4; clean full pipeline and 357 Swift tests; direct native case/source boundaries in checkpoint-117 receipt.",
-      "remaining": "Branch publication awaits explicit authority under the original goal. Current exact release identity guard and hosted idle/drain metadata are verified within scope; fresh cutover backup, worker admission/ownership and compatible recovery remain required before production activation."
+      "prerequisites": [],
+      "finalSourceEvidence": "CP134 clean deployed089442b6 plus existing mapped regressions/interactions; current candidate425ff91c passes full validation. Budget and immutable-image additions remain separately pending live acceptance.",
+      "remaining": "",
+      "verificationScope": "Retained criterion-specific manager/fault/API and supported client evidence, now tied to clean loaded hosted release089442b6 by CP134. No historical causality, missing billing or successful MCP smoke is inferred."
     },
     {
       "id": "G.6",
@@ -2969,21 +3031,25 @@
         "checkpoint-124.md",
         "checkpoint-125.md",
         "checkpoint-131.md",
-        "checkpoint-132.md"
+        "checkpoint-132.md",
+        "checkpoint-134.md",
+        "checkpoint-135.md",
+        "receipts/checkpoint-135-full-validation-identity.json"
       ],
       "prerequisites": [
-        "All 43 criteria remain mapped. Required actual-image capabilities, W5, operator interactions and hosted snapshot compatibility are verified. Hosted loaded/rollback identity and historical API causality remain outstanding."
+        "All43 criteria stay mapped. Outstanding: corrected budget/image release deployment and live acceptance, successful sandbox MCP smoke, and separately retained historical failing API trace or explicit scope amendment accepting the cause as unknown."
       ],
       "finalSourceEvidence": "15900d9e08a7e4ca786a6ad11ff81820fda14de4; clean full pipeline and 357 Swift tests; direct native case/source boundaries in checkpoint-117 receipt.",
-      "remaining": "All 43 criteria remain mapped. Required actual-image capabilities, W5, operator interactions and hosted snapshot compatibility are verified. Hosted loaded/rollback identity and historical API causality remain outstanding."
+      "remaining": "All43 criteria stay mapped. Outstanding: corrected budget/image release deployment and live acceptance, successful sandbox MCP smoke, and separately retained historical failing API trace or explicit scope amendment accepting the cause as unknown."
     }
   ],
-  "lastCheckpoint": "checkpoint-132.md",
+  "lastCheckpoint": "checkpoint-135.md",
   "migrationLineage": {
     "managedBaseline": "142-153; authoritative managed migration 153 preserved from main b75fbf0b7e2c4ea455838a6e4df6537665a7a8cc",
     "nativeCurrent": "164-183; prior native 182 upgraded by idempotent managed GitHub reads bridge 183; representative managed 150/152/153 and copy-only native lineage verified",
     "previousNative": "Historical receipts retain their original commit-specific numbering; conversion is copy-only and never activates an output."
   },
-  "currentApplicationCandidate": "9abf64b1d199f71f79190b6fc667d899fdc1559e",
-  "currentReleaseCandidate": "feeb55d6d9bed010b23a37cf18d2c597da2df408"
+  "currentApplicationCandidate": "425ff91cd5e6347b32d21b69804ea4c02008bc8e",
+  "currentReleaseCandidate": "425ff91cd5e6347b32d21b69804ea4c02008bc8e",
+  "currentDeployedRelease": "089442b63e5827894da40c91c764b47ff4562073"
 }

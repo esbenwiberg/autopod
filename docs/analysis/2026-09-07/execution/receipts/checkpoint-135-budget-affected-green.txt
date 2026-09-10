@@ -1,0 +1,174 @@
+
+ RUN  v4.1.11 /private/tmp/autopod-durable-execution/packages/daemon
+
+(node:68684) [FSTDEP023] FastifyDeprecation: disableRequestLogging option is deprecated. Use the logController option with disableRequestLogging or isLogDisabled override instead. The disableRequestLogging top-level option will be removed in `fastify@6`.
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:68684) [FSTDEP023] FastifyDeprecation: disableRequestLogging option is deprecated. Use the logController option with disableRequestLogging or isLogDisabled override instead. The disableRequestLogging top-level option will be removed in `fastify@6`.
+(node:68684) [FSTDEP023] FastifyDeprecation: disableRequestLogging option is deprecated. Use the logController option with disableRequestLogging or isLogDisabled override instead. The disableRequestLogging top-level option will be removed in `fastify@6`.
+{"level":30,"time":1789032467878,"pid":68684,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"test-app","msg":"Profile created"}
+(node:68684) [FSTDEP023] FastifyDeprecation: disableRequestLogging option is deprecated. Use the logController option with disableRequestLogging or isLogDisabled override instead. The disableRequestLogging top-level option will be removed in `fastify@6`.
+{"level":30,"time":1789032467924,"pid":68684,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"test-app","msg":"Profile created"}
+{"level":30,"time":1789032467926,"pid":68684,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"test-app","fields":["buildCommand"],"msg":"Profile updated"}
+(node:68684) [FSTDEP023] FastifyDeprecation: disableRequestLogging option is deprecated. Use the logController option with disableRequestLogging or isLogDisabled override instead. The disableRequestLogging top-level option will be removed in `fastify@6`.
+{"level":30,"time":1789032467971,"pid":68684,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"test-app","msg":"Profile created"}
+{"level":30,"time":1789032467972,"pid":68684,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"test-app-derived","msg":"Profile created"}
+(node:68684) [FSTDEP023] FastifyDeprecation: disableRequestLogging option is deprecated. Use the logController option with disableRequestLogging or isLogDisabled override instead. The disableRequestLogging top-level option will be removed in `fastify@6`.
+{"level":30,"time":1789032468017,"pid":68684,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"test-app","msg":"Profile created"}
+{"level":30,"time":1789032468017,"pid":68684,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"test-app","fields":["buildCommand"],"msg":"Profile updated"}
+(node:68684) [FSTDEP023] FastifyDeprecation: disableRequestLogging option is deprecated. Use the logController option with disableRequestLogging or isLogDisabled override instead. The disableRequestLogging top-level option will be removed in `fastify@6`.
+{"level":30,"time":1789032468059,"pid":68684,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"test-app","msg":"Profile created"}
+(node:68684) [FSTDEP023] FastifyDeprecation: disableRequestLogging option is deprecated. Use the logController option with disableRequestLogging or isLogDisabled override instead. The disableRequestLogging top-level option will be removed in `fastify@6`.
+{"level":30,"time":1789032468106,"pid":68684,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"test-app","msg":"Profile created"}
+(node:68684) [FSTDEP023] FastifyDeprecation: disableRequestLogging option is deprecated. Use the logController option with disableRequestLogging or isLogDisabled override instead. The disableRequestLogging top-level option will be removed in `fastify@6`.
+{"level":30,"time":1789032468152,"pid":68684,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"test-app","msg":"Profile created"}
+{"level":30,"time":1789032468152,"pid":68684,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"test-app","fields":["buildCommand"],"msg":"Profile updated"}
+(node:68684) [FSTDEP023] FastifyDeprecation: disableRequestLogging option is deprecated. Use the logController option with disableRequestLogging or isLogDisabled override instead. The disableRequestLogging top-level option will be removed in `fastify@6`.
+{"level":30,"time":1789032468236,"pid":68684,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"test-app","msg":"Profile created"}
+(node:68684) [FSTDEP023] FastifyDeprecation: disableRequestLogging option is deprecated. Use the logController option with disableRequestLogging or isLogDisabled override instead. The disableRequestLogging top-level option will be removed in `fastify@6`.
+{"level":30,"time":1789032468237,"pid":68684,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"test-app","msg":"Profile deleted"}
+(node:68684) [FSTDEP023] FastifyDeprecation: disableRequestLogging option is deprecated. Use the logController option with disableRequestLogging or isLogDisabled override instead. The disableRequestLogging top-level option will be removed in `fastify@6`.
+{"level":30,"time":1789032468295,"pid":68684,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"test-app","msg":"Profile created"}
+{"level":30,"time":1789032468360,"pid":68684,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"auth-base","msg":"Profile created"}
+(node:68684) [FSTDEP023] FastifyDeprecation: disableRequestLogging option is deprecated. Use the logController option with disableRequestLogging or isLogDisabled override instead. The disableRequestLogging top-level option will be removed in `fastify@6`.
+{"level":30,"time":1789032468360,"pid":68684,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"auth-derived","msg":"Profile created"}
+{"level":30,"time":1789032468408,"pid":68684,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"test-app","msg":"Profile created"}
+(node:68684) [FSTDEP023] FastifyDeprecation: disableRequestLogging option is deprecated. Use the logController option with disableRequestLogging or isLogDisabled override instead. The disableRequestLogging top-level option will be removed in `fastify@6`.
+{"level":30,"time":1789032468408,"pid":68684,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"test-app-derived","msg":"Profile created"}
+{"level":30,"time":1789032468453,"pid":68684,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"test-app","msg":"Profile created"}
+{"level":30,"time":1789032468453,"pid":68684,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"test-app-derived","msg":"Profile created"}
+(node:68684) [FSTDEP023] FastifyDeprecation: disableRequestLogging option is deprecated. Use the logController option with disableRequestLogging or isLogDisabled override instead. The disableRequestLogging top-level option will be removed in `fastify@6`.
+{"level":30,"time":1789032468453,"pid":68684,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"test-app-derived","fields":["buildCommand"],"msg":"Profile updated"}
+{"level":30,"time":1789032468501,"pid":68684,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"test-app","msg":"Profile created"}
+(node:68684) [FSTDEP023] FastifyDeprecation: disableRequestLogging option is deprecated. Use the logController option with disableRequestLogging or isLogDisabled override instead. The disableRequestLogging top-level option will be removed in `fastify@6`.
+{"level":30,"time":1789032468544,"pid":68684,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"test-app","msg":"Profile created"}
+(node:68684) [FSTDEP023] FastifyDeprecation: disableRequestLogging option is deprecated. Use the logController option with disableRequestLogging or isLogDisabled override instead. The disableRequestLogging top-level option will be removed in `fastify@6`.
+{"level":30,"time":1789032468586,"pid":68684,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"test-app","msg":"Profile created"}
+(node:68684) [FSTDEP023] FastifyDeprecation: disableRequestLogging option is deprecated. Use the logController option with disableRequestLogging or isLogDisabled override instead. The disableRequestLogging top-level option will be removed in `fastify@6`.
+{"level":30,"time":1789032468634,"pid":68684,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"test-app","msg":"Profile created"}
+{"level":30,"time":1789032468635,"pid":68684,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"test-app","fields":["tokenBudget"],"msg":"Profile updated"}
+(node:68684) [FSTDEP023] FastifyDeprecation: disableRequestLogging option is deprecated. Use the logController option with disableRequestLogging or isLogDisabled override instead. The disableRequestLogging top-level option will be removed in `fastify@6`.
+{"level":30,"time":1789032468681,"pid":68684,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"test-app","msg":"Profile created"}
+{"level":30,"time":1789032468681,"pid":68684,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"test-app","fields":["tokenBudget"],"msg":"Profile updated"}
+(node:68684) [FSTDEP023] FastifyDeprecation: disableRequestLogging option is deprecated. Use the logController option with disableRequestLogging or isLogDisabled override instead. The disableRequestLogging top-level option will be removed in `fastify@6`.
+{"level":30,"time":1789032468725,"pid":68684,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"test-app","msg":"Profile created"}
+{"level":30,"time":1789032468726,"pid":68684,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"test-app","fields":["tokenBudget"],"msg":"Profile updated"}
+(node:68684) [FSTDEP023] FastifyDeprecation: disableRequestLogging option is deprecated. Use the logController option with disableRequestLogging or isLogDisabled override instead. The disableRequestLogging top-level option will be removed in `fastify@6`.
+{"level":30,"time":1789032468770,"pid":68684,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"test-app","msg":"Profile created"}
+(node:68684) [FSTDEP023] FastifyDeprecation: disableRequestLogging option is deprecated. Use the logController option with disableRequestLogging or isLogDisabled override instead. The disableRequestLogging top-level option will be removed in `fastify@6`.
+{"level":30,"time":1789032468814,"pid":68684,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"test-app","msg":"Profile created"}
+(node:68684) [FSTDEP023] FastifyDeprecation: disableRequestLogging option is deprecated. Use the logController option with disableRequestLogging or isLogDisabled override instead. The disableRequestLogging top-level option will be removed in `fastify@6`.
+{"level":30,"time":1789032468859,"pid":68684,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"test-app","msg":"Profile created"}
+(node:68684) [FSTDEP023] FastifyDeprecation: disableRequestLogging option is deprecated. Use the logController option with disableRequestLogging or isLogDisabled override instead. The disableRequestLogging top-level option will be removed in `fastify@6`.
+{"level":30,"time":1789032468908,"pid":68684,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"test-app","msg":"Profile created"}
+(node:68684) [FSTDEP023] FastifyDeprecation: disableRequestLogging option is deprecated. Use the logController option with disableRequestLogging or isLogDisabled override instead. The disableRequestLogging top-level option will be removed in `fastify@6`.
+{"level":30,"time":1789032468953,"pid":68684,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"test-app","msg":"Profile created"}
+(node:68684) [FSTDEP023] FastifyDeprecation: disableRequestLogging option is deprecated. Use the logController option with disableRequestLogging or isLogDisabled override instead. The disableRequestLogging top-level option will be removed in `fastify@6`.
+{"level":30,"time":1789032468998,"pid":68684,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"test-app","msg":"Profile created"}
+(node:68684) [FSTDEP023] FastifyDeprecation: disableRequestLogging option is deprecated. Use the logController option with disableRequestLogging or isLogDisabled override instead. The disableRequestLogging top-level option will be removed in `fastify@6`.
+{"level":30,"time":1789032469098,"pid":68684,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"test-app","msg":"Profile created"}
+(node:68684) [FSTDEP023] FastifyDeprecation: disableRequestLogging option is deprecated. Use the logController option with disableRequestLogging or isLogDisabled override instead. The disableRequestLogging top-level option will be removed in `fastify@6`.
+{"level":30,"time":1789032469143,"pid":68684,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"test-app","msg":"Profile created"}
+(node:68684) [FSTDEP023] FastifyDeprecation: disableRequestLogging option is deprecated. Use the logController option with disableRequestLogging or isLogDisabled override instead. The disableRequestLogging top-level option will be removed in `fastify@6`.
+{"level":30,"time":1789032469186,"pid":68684,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"test-app","msg":"Profile created"}
+(node:68684) [FSTDEP023] FastifyDeprecation: disableRequestLogging option is deprecated. Use the logController option with disableRequestLogging or isLogDisabled override instead. The disableRequestLogging top-level option will be removed in `fastify@6`.
+(node:68684) [FSTDEP023] FastifyDeprecation: disableRequestLogging option is deprecated. Use the logController option with disableRequestLogging or isLogDisabled override instead. The disableRequestLogging top-level option will be removed in `fastify@6`.
+(node:68684) [FSTDEP023] FastifyDeprecation: disableRequestLogging option is deprecated. Use the logController option with disableRequestLogging or isLogDisabled override instead. The disableRequestLogging top-level option will be removed in `fastify@6`.
+{"level":30,"time":1789032469313,"pid":68684,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"test-app","msg":"Profile created"}
+(node:68684) [FSTDEP023] FastifyDeprecation: disableRequestLogging option is deprecated. Use the logController option with disableRequestLogging or isLogDisabled override instead. The disableRequestLogging top-level option will be removed in `fastify@6`.
+{"level":30,"time":1789032469359,"pid":68684,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"test-app","msg":"Profile created"}
+(node:68684) [FSTDEP023] FastifyDeprecation: disableRequestLogging option is deprecated. Use the logController option with disableRequestLogging or isLogDisabled override instead. The disableRequestLogging top-level option will be removed in `fastify@6`.
+{"level":30,"time":1789032469403,"pid":68684,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"test-app","msg":"Profile created"}
+(node:68684) [FSTDEP023] FastifyDeprecation: disableRequestLogging option is deprecated. Use the logController option with disableRequestLogging or isLogDisabled override instead. The disableRequestLogging top-level option will be removed in `fastify@6`.
+{"level":30,"time":1789032469444,"pid":68684,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"deny-all-profile","msg":"Profile created"}
+(node:68684) [FSTDEP023] FastifyDeprecation: disableRequestLogging option is deprecated. Use the logController option with disableRequestLogging or isLogDisabled override instead. The disableRequestLogging top-level option will be removed in `fastify@6`.
+{"level":30,"time":1789032469485,"pid":68684,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"deny-all-workspace","msg":"Profile created"}
+(node:68684) [FSTDEP023] FastifyDeprecation: disableRequestLogging option is deprecated. Use the logController option with disableRequestLogging or isLogDisabled override instead. The disableRequestLogging top-level option will be removed in `fastify@6`.
+{"level":30,"time":1789032469528,"pid":68684,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"test-app","msg":"Profile created"}
+(node:68684) [FSTDEP023] FastifyDeprecation: disableRequestLogging option is deprecated. Use the logController option with disableRequestLogging or isLogDisabled override instead. The disableRequestLogging top-level option will be removed in `fastify@6`.
+{"level":30,"time":1789032469572,"pid":68684,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"test-app","msg":"Profile created"}
+(node:68684) [FSTDEP023] FastifyDeprecation: disableRequestLogging option is deprecated. Use the logController option with disableRequestLogging or isLogDisabled override instead. The disableRequestLogging top-level option will be removed in `fastify@6`.
+{"level":30,"time":1789032469616,"pid":68684,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"test-app","msg":"Profile created"}
+(node:68684) [FSTDEP023] FastifyDeprecation: disableRequestLogging option is deprecated. Use the logController option with disableRequestLogging or isLogDisabled override instead. The disableRequestLogging top-level option will be removed in `fastify@6`.
+{"level":30,"time":1789032469658,"pid":68684,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"test-app","msg":"Profile created"}
+(node:68684) [FSTDEP023] FastifyDeprecation: disableRequestLogging option is deprecated. Use the logController option with disableRequestLogging or isLogDisabled override instead. The disableRequestLogging top-level option will be removed in `fastify@6`.
+{"level":30,"time":1789032469703,"pid":68684,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"test-app","msg":"Profile created"}
+(node:68684) [FSTDEP023] FastifyDeprecation: disableRequestLogging option is deprecated. Use the logController option with disableRequestLogging or isLogDisabled override instead. The disableRequestLogging top-level option will be removed in `fastify@6`.
+{"level":30,"time":1789032469749,"pid":68684,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"test-app","msg":"Profile created"}
+(node:68684) [FSTDEP023] FastifyDeprecation: disableRequestLogging option is deprecated. Use the logController option with disableRequestLogging or isLogDisabled override instead. The disableRequestLogging top-level option will be removed in `fastify@6`.
+{"level":30,"time":1789032469794,"pid":68684,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"test-app","msg":"Profile created"}
+(node:68684) [FSTDEP023] FastifyDeprecation: disableRequestLogging option is deprecated. Use the logController option with disableRequestLogging or isLogDisabled override instead. The disableRequestLogging top-level option will be removed in `fastify@6`.
+{"level":30,"time":1789032469838,"pid":68684,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"test-app","msg":"Profile created"}
+(node:68684) [FSTDEP023] FastifyDeprecation: disableRequestLogging option is deprecated. Use the logController option with disableRequestLogging or isLogDisabled override instead. The disableRequestLogging top-level option will be removed in `fastify@6`.
+{"level":30,"time":1789032469879,"pid":68684,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"test-app","msg":"Profile created"}
+(node:68684) [FSTDEP023] FastifyDeprecation: disableRequestLogging option is deprecated. Use the logController option with disableRequestLogging or isLogDisabled override instead. The disableRequestLogging top-level option will be removed in `fastify@6`.
+{"level":30,"time":1789032469923,"pid":68684,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"test-app","msg":"Profile created"}
+(node:68684) [FSTDEP023] FastifyDeprecation: disableRequestLogging option is deprecated. Use the logController option with disableRequestLogging or isLogDisabled override instead. The disableRequestLogging top-level option will be removed in `fastify@6`.
+{"level":30,"time":1789032469968,"pid":68684,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"test-app","msg":"Profile created"}
+(node:68684) [FSTDEP023] FastifyDeprecation: disableRequestLogging option is deprecated. Use the logController option with disableRequestLogging or isLogDisabled override instead. The disableRequestLogging top-level option will be removed in `fastify@6`.
+{"level":30,"time":1789032470012,"pid":68684,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"test-app","msg":"Profile created"}
+(node:68684) [FSTDEP023] FastifyDeprecation: disableRequestLogging option is deprecated. Use the logController option with disableRequestLogging or isLogDisabled override instead. The disableRequestLogging top-level option will be removed in `fastify@6`.
+{"level":30,"time":1789032470054,"pid":68684,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"test-app","msg":"Profile created"}
+(node:68684) [FSTDEP023] FastifyDeprecation: disableRequestLogging option is deprecated. Use the logController option with disableRequestLogging or isLogDisabled override instead. The disableRequestLogging top-level option will be removed in `fastify@6`.
+{"level":30,"time":1789032470096,"pid":68684,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"test-app","msg":"Profile created"}
+(node:68684) [FSTDEP023] FastifyDeprecation: disableRequestLogging option is deprecated. Use the logController option with disableRequestLogging or isLogDisabled override instead. The disableRequestLogging top-level option will be removed in `fastify@6`.
+{"level":30,"time":1789032470143,"pid":68684,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"test-app","msg":"Profile created"}
+(node:68684) [FSTDEP023] FastifyDeprecation: disableRequestLogging option is deprecated. Use the logController option with disableRequestLogging or isLogDisabled override instead. The disableRequestLogging top-level option will be removed in `fastify@6`.
+{"level":30,"time":1789032470188,"pid":68684,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"test-app","msg":"Profile created"}
+{"level":30,"time":1789032470188,"pid":68684,"hostname":"Esbens-MBP.localdomain","name":"autopod","component":"profiles","name":"workspace-default","msg":"Profile created"}
+(node:68684) [FSTDEP023] FastifyDeprecation: disableRequestLogging option is deprecated. Use the logController option with disableRequestLogging or isLogDisabled override instead. The disableRequestLogging top-level option will be removed in `fastify@6`.
+(node:68684) [FSTDEP023] FastifyDeprecation: disableRequestLogging option is deprecated. Use the logController option with disableRequestLogging or isLogDisabled override instead. The disableRequestLogging top-level option will be removed in `fastify@6`.
+(node:68684) [FSTDEP023] FastifyDeprecation: disableRequestLogging option is deprecated. Use the logController option with disableRequestLogging or isLogDisabled override instead. The disableRequestLogging top-level option will be removed in `fastify@6`.
+(node:68684) [FSTDEP023] FastifyDeprecation: disableRequestLogging option is deprecated. Use the logController option with disableRequestLogging or isLogDisabled override instead. The disableRequestLogging top-level option will be removed in `fastify@6`.
+(node:68684) [FSTDEP023] FastifyDeprecation: disableRequestLogging option is deprecated. Use the logController option with disableRequestLogging or isLogDisabled override instead. The disableRequestLogging top-level option will be removed in `fastify@6`.
+(node:68684) [FSTDEP023] FastifyDeprecation: disableRequestLogging option is deprecated. Use the logController option with disableRequestLogging or isLogDisabled override instead. The disableRequestLogging top-level option will be removed in `fastify@6`.
+(node:68684) [FSTDEP023] FastifyDeprecation: disableRequestLogging option is deprecated. Use the logController option with disableRequestLogging or isLogDisabled override instead. The disableRequestLogging top-level option will be removed in `fastify@6`.
+ ❯ src/pods/pod-manager.test.ts (638 tests | 2 failed) 37652ms
+       × records legacy API provenance before real SDK HTTP dispatch and fences stale replay 5024ms
+       × starts a daemon host-port preview proxy for sandbox pods 44ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 2 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/pods/pod-manager.test.ts > PodManager > triggerValidation > records legacy API provenance before real SDK HTTP dispatch and fences stale replay
+Error: Test timed out in 5000ms.
+If this is a long-running test, pass a timeout value as the last argument or configure it globally with "testTimeout".
+ ❯ src/pods/pod-manager.test.ts:15926:5
+    15924|     });
+    15925|
+    15926|     it('records legacy API provenance before real SDK HTTP dispatch an…
+       |     ^
+    15927|       const ctx = createTestContext();
+    15928|       ctx.db
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/2]⎯
+
+ FAIL  src/pods/pod-manager.test.ts > PodManager > triggerValidation — loud-fail on push > starts a daemon host-port preview proxy for sandbox pods
+Error: listen EPERM: operation not permitted 0.0.0.0:11043
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/2]⎯
+
+⎯⎯⎯⎯⎯⎯ Unhandled Errors ⎯⎯⎯⎯⎯⎯
+
+Vitest caught 1 unhandled error during the test run.
+This might cause false positive tests. Resolve unhandled errors to make sure your tests are not affected.
+
+⎯⎯⎯⎯⎯ Uncaught Exception ⎯⎯⎯⎯⎯
+Error: listen EPERM: operation not permitted 127.0.0.1
+ ❯ Server.setupListenHandle [as _listen2] node:net:1987:21
+ ❯ listenInCluster node:net:2066:12
+ ❯ node:net:2275:7
+ ❯ processTicksAndRejections node:internal/process/task_queues:90:21
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯
+Serialized Error: { code: 'EPERM', errno: -1, syscall: 'listen', address: '127.0.0.1' }
+This error originated in "src/pods/pod-manager.test.ts" test file. It doesn't mean the error was thrown inside the file itself, but while it was running.
+The latest test that might've caused the error is "records legacy API provenance before real SDK HTTP dispatch and fences stale replay". It might mean one of the following:
+- The error was thrown, while Vitest was running this test.
+- If the error occurred after the test had been completed, this was the last documented test before it was thrown.
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯
+
+
+ Test Files  1 failed | 2 passed (3)
+      Tests  2 failed | 729 passed (731)
+     Errors  1 error
+   Start at  11:27:46
+   Duration  39.04s (transform 1.96s, setup 0ms, import 3.13s, tests 42.26s, environment 0ms)
+

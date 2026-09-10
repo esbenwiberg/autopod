@@ -1,0 +1,37 @@
+
+ RUN  v4.1.11 /private/tmp/autopod-durable-execution/packages/shared
+
+ ❯ src/schemas/pod.schema.test.ts (16 tests | 1 failed) 7ms
+     × retains an explicit token budget and rejects invalid limits 4ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/schemas/pod.schema.test.ts > createPodRequestSchema > retains an explicit token budget and rejects invalid limits
+AssertionError: expected { profileName: 'primary', …(1) } to match object { tokenBudget: 32000 }
+(2 matching properties omitted from actual)
+
+- Expected
++ Received
+
+  {
+-   "tokenBudget": 32000,
++   "profileName": "primary",
++   "task": "bounded task",
+  }
+
+ ❯ src/schemas/pod.schema.test.ts:8:78
+      6|   it('retains an explicit token budget and rejects invalid limits', ()…
+      7|     const request = { profileName: 'primary', task: 'bounded task' };
+      8|     expect(createPodRequestSchema.parse({ ...request, tokenBudget: 320…
+       |                                                                              ^
+      9|       tokenBudget: 32000,
+     10|     });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 15 passed (16)
+   Start at  11:26:28
+   Duration  165ms (transform 33ms, setup 0ms, import 65ms, tests 7ms, environment 0ms)
+

@@ -1,0 +1,19 @@
+{
+  "base": "feeb55d6d9bed010b23a37cf18d2c597da2df408",
+  "candidate": "089442b63e5827894da40c91c764b47ff4562073",
+  "comparisons": {
+    "packages/desktop": true,
+    "packages/cli": true,
+    "packages/mobile-web": true,
+    "packages/shared": true,
+    "packages/escalation-mcp": true,
+    "packages/daemon/src/db/migrations": true
+  },
+  "changedNonDocumentationSinceBase": [
+    ".gitignore",
+    "packages/daemon/src/containers/haproxy-deny-stream.test.ts",
+    "packages/daemon/src/containers/haproxy-deny-stream.ts",
+    "scripts/deploy-hosted-daemon.sh",
+    "scripts/deploy-hosted-daemon.test.sh"
+  ]
+}

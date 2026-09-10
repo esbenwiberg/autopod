@@ -1,0 +1,145 @@
+{
+  "status": "verified",
+  "candidate": "089442b63e5827894da40c91c764b47ff4562073",
+  "observedAt": "2026-09-10T09:02:34.524165+00:00",
+  "checks": [
+    {
+      "check": "full-health",
+      "path": "/health?detail=full",
+      "status": "verified",
+      "elapsedMs": 419,
+      "projection": {
+        "release": {
+          "validationImplementationHash": "bf48e54c580a7774d64fdb5801536cb499766007da0fd53d6db2571e2a12b2a3",
+          "commitSha": "089442b63e5827894da40c91c764b47ff4562073",
+          "dirty": false,
+          "builtAt": "2026-09-10T08:53:21.494Z",
+          "source": "build"
+        },
+        "databaseConnected": true,
+        "queue": {
+          "active_sessions": 0,
+          "queued_sessions": 0,
+          "max_concurrency": 5
+        },
+        "healthStatus": "ok",
+        "backup": {
+          "state": "fresh",
+          "sourceIdentity": "b83381edf3ef5680b72552b656f77f927605a1568be55f2177d8946cd99deade",
+          "ageMs": 34204,
+          "lastCompletedAt": "2026-09-10T09:01:58.605Z",
+          "availableBytes": 133181464576,
+          "requiredBytes": 1888518144,
+          "snapshotIntegrity": "verified"
+        },
+        "securityMl": {
+          "enabled": false
+        }
+      }
+    },
+    {
+      "check": "bounded-history",
+      "path": "/pods?limit=10",
+      "status": "verified",
+      "elapsedMs": 463,
+      "projection": {
+        "rows": 10,
+        "diagnosticRows": 0
+      }
+    },
+    {
+      "check": "compact-page",
+      "path": "/pods?compact=true&page=true&limit=10",
+      "status": "verified",
+      "elapsedMs": 191,
+      "projection": {
+        "rows": 10,
+        "hasNext": true
+      }
+    },
+    {
+      "check": "cost-telemetry",
+      "path": "/pods/analytics/cost?days=30",
+      "status": "verified",
+      "elapsedMs": 200,
+      "projection": {
+        "total": 1173.87435165,
+        "phaseTotal": 1173.8743516499999,
+        "phaseSumMatches": true,
+        "telemetryCompleteness": "partial",
+        "infrastructureCost": "unavailable",
+        "diagnosticCount": 0
+      }
+    },
+    {
+      "check": "task-accounting",
+      "path": "/pods/<sample>/task-execution",
+      "status": "verified",
+      "elapsedMs": 140,
+      "projection": {
+        "telemetry": "partial",
+        "deliveryScope": "durable-receipts-only",
+        "recordedDeliveryReceipts": 0,
+        "providerDispositionLiveVerified": false
+      }
+    },
+    {
+      "check": "execution-provenance",
+      "path": "/pods/<sample>/execution-provenance?schemaVersion=2",
+      "status": "verified",
+      "elapsedMs": 128,
+      "projection": {
+        "legacyLatestUnavailable": true
+      }
+    },
+    {
+      "check": "validation-history",
+      "path": "/pods/<sample>/validations",
+      "status": "verified",
+      "elapsedMs": 129,
+      "projection": {
+        "rows": 0
+      }
+    },
+    {
+      "check": "task-accounting",
+      "path": "/pods/<sample>/task-execution",
+      "status": "verified",
+      "elapsedMs": 140,
+      "projection": {
+        "telemetry": "partial",
+        "deliveryScope": "durable-receipts-only",
+        "recordedDeliveryReceipts": 0,
+        "providerDispositionLiveVerified": false
+      }
+    },
+    {
+      "check": "execution-provenance",
+      "path": "/pods/<sample>/execution-provenance?schemaVersion=2",
+      "status": "verified",
+      "elapsedMs": 129,
+      "projection": {
+        "legacyLatestUnavailable": true
+      }
+    },
+    {
+      "check": "validation-history",
+      "path": "/pods/<sample>/validations",
+      "status": "verified",
+      "elapsedMs": 135,
+      "projection": {
+        "rows": 0
+      }
+    },
+    {
+      "check": "scheduled-report-list",
+      "path": "/scheduled-jobs/4AbxtWzo/reports",
+      "status": "verified",
+      "elapsedMs": 133,
+      "projection": {
+        "rows": 0
+      }
+    }
+  ],
+  "historicalFailureCause": "unknown; these current checks are not retrospective diagnosis"
+}

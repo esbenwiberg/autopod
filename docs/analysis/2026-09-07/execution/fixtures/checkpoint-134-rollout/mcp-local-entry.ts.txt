@@ -1,0 +1,2 @@
+export { mcpHandler } from '/private/tmp/autopod-durable-execution/packages/daemon/src/api/mcp-handler.ts';
+export { default as Fastify } from 'fastify';

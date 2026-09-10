@@ -1,0 +1,17 @@
+{
+  "candidate": "089442b63e5827894da40c91c764b47ff4562073",
+  "intentAt": "2026-09-10T09:05:15.734283+00:00",
+  "binding": {
+    "defaultRuntime": "codex",
+    "defaultModel": "gpt-5.6-sol",
+    "providerAccountId": "openai-private",
+    "executionTarget": "sandbox"
+  },
+  "tokenBudget": 32000,
+  "elapsedCapSeconds": 600,
+  "estimatedSpend": "One existing-profile sandbox and a small subscription-bound Codex turn; exact provider and infrastructure billing unavailable. Token budget is admission accounting, not a hard dollar cap.",
+  "payloadSHA256": "7a7ac8d44c0a43cc6e56ec10f12db60139d055436e19aa0a19715bb617420833",
+  "marker": "AUTOPOD_GOAL_133_MCP_SMOKE_20260910",
+  "status": "queued",
+  "id": "middle-tahr"
+}

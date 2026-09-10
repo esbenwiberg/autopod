@@ -1,77 +1,63 @@
 # Partial closure report
 
-Current checkpoint: [132](checkpoint-132.md). All six workstreams have local implementation and regression evidence. Required native/CLI/mobile interactions, hosted snapshot upgrade compatibility and actual-image capability canaries are verified within their recorded scopes. The goal remains incomplete: hosted loaded/rollback source, deployment acceptance and the actual historical API failure cause remain outstanding.
+Current checkpoint: [135](checkpoint-135.md). All six workstreams have implementation and mapped evidence. The ledger now has 37 verified criteria and six partial criteria. Whole-goal completion is not claimed.
 
-## Current candidate
+Production runs clean release `089442b63e5827894da40c91c764b47ff4562073`, PID 136112, schema 183. Exact loaded health identity, service cwd/current link, fresh all-table backup/isolated restore and database integrity/FKs are verified. The receiver crash fix survived its real failure condition with zero daemon restarts. [Hosted deployment and acceptance](checkpoint-134.md).
 
-Release candidate is `feeb55d6d9bed010b23a37cf18d2c597da2df408`; application packages are byte-identical to canary source `9abf64b1d199f71f79190b6fc667d899fdc1559e`, on isolated branch `codex/durable-execution-contract`. Current remote main remains integrated `b75fbf0b7e2c4ea455838a6e4df6537665a7a8cc`. The [394-path code patch](receipts/checkpoint-131-candidate-code.diff) and [blob manifest](receipts/checkpoint-131-candidate-manifest.json) cover all changed non-documentation paths. Nothing was published or deployed by this goal execution.
+The next published candidate is `425ff91cd5e6347b32d21b69804ea4c02008bc8e` on `codex/durable-execution-contract`. Main remains integrated and unchanged at `b75fbf0b7e2c4ea455838a6e4df6537665a7a8cc`. Full validation passes: 6,390 package tests, one existing platform skip,11 standalone Node tests and required shell/install/build/type/lint/audit/secret checks;8/15 test tasks cached and one moderate advisory. [Exact validation receipt](receipts/checkpoint-135-full-validation-identity.json). Staging of this candidate is in progress; it is not the current deployed release.
 
-The latest correction makes sandbox resource metadata work when the VM has no cgroup limits. It reads a fresh, ID-matched Running sandbox allocation and retains any stricter guest limit. The desired-behavior test failed before the fix; 117 affected tests passed afterward. The final actual-image canary observed old null limits and corrected 2 CPUs / 4 GiB on the same sandbox. [Live before/after](receipts/checkpoint-131-resource-capability.json).
+CP135 fixes two live-discovered gaps. The create schema discarded numeric tokenBudget, so earlier canary requests were effectively unlimited despite their recorded requested 32,000. The corrected schema retains validated numeric limits and preserves established omission/profile inheritance and explicit-null/unlimited behavior. Sandbox imports now use the resolved immutable digest and execution provenance verifies the fresh sandbox-to-disk link, immutable source and managed digest label. Existing mutable imports retain unavailable provenance; historical labels are not turned into proof.
 
-The prior 357 Swift tests, native/CLI/mobile interactions, actual snapshot 153→183 upgrade and NuGet-validator proof remain tied to their exact earlier sources: [unchanged-source comparison](receipts/checkpoint-131-source-identity.json). The [final full pipeline](receipts/checkpoint-131-full-validation-identity.json) passes: 6,375 package tests, one existing platform skip, 11 standalone Node tests and all required build/type/lint/audit/secret checks. The first run failed fixture lint only; exact executed inputs were preserved before formatting maintained copies, without changing validation rules.
+The MCP smoke is still open. `middle-tahr` made one real summary call which failed HTTP transport; its failure and no-change checkpoint are retained. Recorded model cost is $0.068994, with infrastructure and actual billing unavailable. A same-image non-model network probe passed HTTP/1.1 and HTTP/2 and was deleted. The explicit retry `crooked-spider` encountered Azure empty403 before CLI readiness, used bounded infrastructure cooldown, and was stopped; both of its sandboxes are confirmed absent. Zero recorded retry tokens/cost is not verified zero billing. [Retry and fixes](checkpoint-135.md).
 
-CP132 adds an opt-in exact release identity gate to deployment. Its regression suite and the [full required pipeline](receipts/checkpoint-132-full-validation-identity.json) pass on the clean candidate. The [updated 396-path manifest](receipts/checkpoint-132-candidate-manifest.json) binds the prior full patch plus the two-file deployment guard diff. Hosted inspection now establishes clean on-disk `ca92847a`, matching service/current directory, schema 153 and zero active/queued pods at observation time; loaded bytes remain unattested.
+All original automatic dispatch settings are restored with pendingOperations=0, including the overdue schedule's existing catch-up decision and unchanged Podsitter provider authorization. All named canary sandboxes in CP133–135 are confirmed absent; shared production disk images were retained. One CP133 cleanup exceeded its ten-minute resource target and remains recorded as such. CP134 and 135 cleanup occurred within their bounds.
 
-## Required capability canaries
-
-The user supplied [continuing authorization](canary-authorization.md). Codex upload ownership was root `0:0:644`; actual exec and installed configs were UID/GID 1000. Sentinel A→B atomic replacements produced distinct inodes and exact content. The actual streaming implementation verified UID, latest content, separate stdout/stderr and exit 0. Codex CLI is 0.144.4 and Node v22.23.2 on the pinned dataverse-harness digest.
-
-The separate pinned Teamplanner image passed the actual candidate registry validator: supported source-list, help and public-feed package-search with successful JSON validation. [NuGet evidence](receipts/checkpoint-131-nuget-capability.json). This proves command semantics on the real image; it does not claim historical private-feed authentication or a change to the profile's execution target.
-
-Every created sandbox and image in these four CP131 runs was deleted and GET404 verified. No model/provider calls, package installation, role change, existing-pod mutation or deployment ran. The known compute-plus-transfer estimates sum to about $0.26; actual billing and ancillary conversion/storage/retry costs remain unavailable. Earlier failed/timed-out attempts retain their original boundaries.
-
-## Six-workstream disposition
-
-| Workstream | Verified implementation and evidence | Outstanding acceptance |
+| Workstream | Verified evidence | Outstanding acceptance |
 |---|---|---|
-| 1. Completion, decisions and delivery | Durable completion/guidance/source/delivery/ownership paths; actual manager/MCP restart/duplicate/disconnect faults; native decision and recovery flows. | Current hosted loaded source; trustworthy original identity/observed exit for any specific live unresolved claim. |
-| 2. Task retries, accounting and evidence reuse | Persistent budgets and binding; complete-input evidence reuse; frozen reviews; cost missingness; native retries and waivers. | Deployed provenance. Historical missing billing stays unavailable. |
-| 3. Dispatch and environment | Fresh refs/base declarations, equivalent-work/rerun identity, provider/resource/command admission, actual Codex ownership/config/streaming, Teamplanner NuGet semantics and live resource-adapter correction. | Hosted provenance for deployment of the implemented dispatch paths. Required capability canaries are complete. |
-| 4. Metrics, history and views | Distinct units/denominators, retained histories and waivers, bounded malformed-row projections, telemetry and supported operator interactions. | Actual historical failing history/cost request trace and cause; current successful responses do not establish that cause. |
-| 5. Scheduled collection and triage | Actual scheduler exact-window collection, empty/incomplete distinctions, durable findings/reports, human-selected repairs and native policy/triage. | None within required recorded local/supported-surface scope. |
-| 6. Release and backup provenance | Per-execution/readiness fields, actual runtime capabilities, freshness/headroom/restore tooling, representative upgrades, actual hosted snapshot candidate upgrade and native provenance views. | Hosted loaded/rollback source and deployment acceptance; fresh cutover backup if deployment is authorized. |
+| 1. Completion, decisions, delivery | Durable manager/MCP fault regressions, native decision/recovery flows, deployed source and live crash containment. | Successful hosted sandbox MCP summary smoke. |
+| 2. Retries, budgets, evidence reuse | Durable retry identity/cooldown/binding, exact evidence reuse, frozen reviews, truthful cost completeness and supported client interactions. | Deploy numeric create-budget correction and verify effective served/task limit. |
+| 3. Dispatch and environment | Fresh refs/base checks, explicit distinct reruns, frozen provider identity, CP131 actual image config/registry/resource/streaming capabilities. | Deploy and verify corrected immutable-image admission/provenance. |
+| 4. Metrics, history, views | Bounded live history, cost/phase reconciliation, distinct units and recorded delivery, retained failures/waivers, mapped native/CLI/mobile interactions. | Actual September 7 historical failure cause remains unknown; a separately retained request-correlated trace is required. |
+| 5. Scheduled scans and triage | Exact-window collection, empty/incomplete distinction, durable reports/findings and human-selected repair paths, supported interactions. | None within recorded required scope. |
+| 6. Release and backups | Exact clean loaded source, actual fresh stopped-source backup/isolated restore, schema 153→183 upgrade and unchanged183 lineage, integrity/FKs, readiness views. | Actual corrected immutable-image execution provenance. |
 
-The matched local benchmark remains 613.435166 ms baseline versus 1,764.543375 ms reuse, with zero escaped seeded defects and unchanged coverage. The 25% target is unsupported on this fixture; no live speed gain is claimed.
+Prior 357 Swift tests and mapped native/mobile/CLI interactions retain their exact source boundaries. CP135 changes shared request parsing and a type comment, not client UI implementation. The matched local benchmark remains613.435166ms baseline versus1764.543375ms reuse, with zero escaped seeded defects and unchanged coverage. The 25% target is unsupported; no live speed gain is claimed.
 
-## Remaining boundaries
+The historical failure trace is separate from all new incidents. Retained pre-report journal is empty; current syslog did not contain the failing requests and the fully read older archive ends August 23. Neither a malformed-JSON fixture nor current HTTP200 establishes the old cause. The original contract remains unchanged.
 
-Public health again returned 200 without release metadata at CP131. Service directory and on-disk Git metadata do not attest loaded JavaScript. The existing hosted snapshot upgrade proof remains valid on unchanged migration/backup source; it does not replace a fresh future cutover backup.
+The user's continuing authorization covers publication, controlled deployment/restart, dispatch pause/restore, fresh backup verification and necessary canaries. There is no routine approval pending. The [release procedure](release-and-acceptance-packet.md) preserves post-cutover DB/WAL, requires zero active work and a fresh restore-verified snapshot, and uses forward recovery. A bare downgrade to the schema 153 writer is not a safe rollback.
 
-The bounded historical journal read found disk-full and other errors without correlation to the original failed history/cost requests. CP132 additionally found no retained pre-report journal and no failing HTTP trace in the current syslog; the completely read older archive ends August 23. A separately retained request-correlated trace is needed for that causal claim. No additional canary can reconstruct absent historical causality.
-
-Publication/deployment/restart authority is separate from canary authority. The [release packet](release-and-acceptance-packet.md) retains pinned VM/database, drain, immutable full-build, backup/headroom and forward-recovery/rollback constraints; it must not be treated as an executable cutover until source and rollback prerequisites are satisfied. The source is local only.
-
-The [acceptance ledger](acceptance.json) maps all 43 criteria. Earlier closure narrative is retained as [dated history](receipts/checkpoint-131-prior-closure-report.md). Raw executed canary inputs and replay instructions are preserved in the [immutable input archive](receipts/checkpoint-131-executed-inputs/README.md); historical runner/contract hashes resolve to those exact bytes, not subsequently formatted maintained copies.
+The [ledger](acceptance.json) maps all 43 criteria and retains earlier implementation/test evidence. [Dated prior closure](receipts/checkpoint-134-prior-closure-report.md) preserves the earlier unpublished/unattested state; its old gate wording is historical.
 
 ## Criterion status
 
 | Criterion | Requirement | Status |
 |---|---|---|
-| W1.1 | Settlement and unresolved human input are reconciled without weakening transitions | partial |
+| W1.1 | Settlement and unresolved human input are reconciled without weakening transitions | verified |
 | W1.2 | Summaries and work survive disconnect, expiry, late replies, duplicate completion and restart | partial |
-| W1.3 | Finalization decisions and generations are durable with idempotent side effects | partial |
-| W1.4 | Agent settlement, source preservation, validation, delivery and external disposition are separate | partial |
-| W1.5 | Completion/escalation, provider recovery and delivery have cohesive ownership | partial |
+| W1.3 | Finalization decisions and generations are durable with idempotent side effects | verified |
+| W1.4 | Agent settlement, source preservation, validation, delivery and external disposition are separate | verified |
+| W1.5 | Completion/escalation, provider recovery and delivery have cohesive ownership | verified |
 | W2.1 | Task retry identity and cumulative budget survive Resume, restart and linked fix pods | partial |
-| W2.2 | Unchanged nonretryable failures require changed relevant inputs or recorded authorized override | partial |
-| W2.3 | Transient provider failures use bounded backoff within authorized binding separately from repository rework | partial |
-| W2.4 | Initial, rework, review, validation time and available infrastructure costs reconcile without double counting | partial |
+| W2.2 | Unchanged nonretryable failures require changed relevant inputs or recorded authorized override | verified |
+| W2.3 | Transient provider failures use bounded backoff within authorized binding separately from repository rework | verified |
+| W2.4 | Initial, rework, review, validation time and available infrastructure costs reconcile without double counting | verified |
 | W2.5 | Validation reuse requires complete matching tree, contract, toolchain, commands, dependencies, environment and implementation identity | verified |
-| W2.6 | Frozen review finding and closure ledgers and substantive gates are retained | partial |
+| W2.6 | Frozen review finding and closure ledgers and substantive gates are retained | verified |
 | W2.7 | Matched reproducible benchmark measures 25 percent target and seeded defect escape with fixed coverage; local and live separated | verified |
-| W3.1 | Fresh remote refs precede actual-base create/update/delete contract checks | partial |
-| W3.2 | Equivalent active/recent work is detected; intentional reruns receive distinct execution identity | partial |
+| W3.1 | Fresh remote refs precede actual-base create/update/delete contract checks | verified |
+| W3.2 | Equivalent active/recent work is detected; intentional reruns receive distinct execution identity | verified |
 | W3.3 | Required commands, resources and provider binding checked before coding agent spawn | partial |
 | W3.4 | Supported capability probe resolves sandbox config ownership and registry execution semantics | verified |
-| W3.5 | Queued provider binding survives mutable profile changes with actionable reconciliation errors | partial |
+| W3.5 | Queued provider binding survives mutable profile changes with actionable reconciliation errors | verified |
 | W3.6 | Live actual-image capability canary verified under explicit authority | verified |
-| W4.1 | Logical tasks, pods, provider attempts, validation executions and delivery receipts have distinct units | partial |
-| W4.2 | Executed pass/fail, skipped, unavailable, waived, no-change, cancelled, external and unresolved outcomes remain explicit | partial |
-| W4.3 | First-pass and delivery denominators require evidence; one logical delivery counts once | partial |
-| W4.4 | Latest validation, history, waivers and delivery reconcile without rewriting failures | partial |
+| W4.1 | Logical tasks, pods, provider attempts, validation executions and delivery receipts have distinct units | verified |
+| W4.2 | Executed pass/fail, skipped, unavailable, waived, no-change, cancelled, external and unresolved outcomes remain explicit | verified |
+| W4.3 | First-pass and delivery denominators require evidence; one logical delivery counts once | verified |
+| W4.4 | Latest validation, history, waivers and delivery reconcile without rewriting failures | verified |
 | W4.5 | Live broad history/cost API root cause proven before claiming production repair | partial |
-| W4.6 | Bounded projections and per-record diagnostics preserve healthy rows with malformed legacy records and realistic payload sizes | partial |
-| W4.7 | Task/phase/attempt cost totals reconcile with explicit telemetry completeness | partial |
+| W4.6 | Bounded projections and per-record diagnostics preserve healthy rows with malformed legacy records and realistic payload sizes | verified |
+| W4.7 | Task/phase/attempt cost totals reconcile with explicit telemetry completeness | verified |
 | W4.8 | Affected APIs, shared contracts, CLI, desktop and mobile updated and interactions verified | verified |
 | W5.1 | Versioned deterministic stack/delta/scanner collection precedes bounded agent judgment in actual scheduling path | verified |
 | W5.2 | Exact delta preserved and empty delta never widened | verified |
@@ -80,13 +66,13 @@ The [acceptance ledger](acceptance.json) maps all 43 criteria. Earlier closure n
 | W5.5 | Reports and triage survive worker lifetime and disconnected human wait | verified |
 | W5.6 | Repairs launch only after required human selection; report-only completion differs from patch delivery | verified |
 | W6.1 | Execution records contain daemon SHA, CLI version, image digest, contract/validation identity and capabilities | partial |
-| W6.2 | Health and operator release/readiness views identify meaningful release and failure provenance | partial |
+| W6.2 | Health and operator release/readiness views identify meaningful release and failure provenance | verified |
 | W6.3 | Active hosted database and backup scope verified without inferring all hosted backups missing | verified |
 | W6.4 | Freshness and disk headroom checks added while preserving cleanup/deployment safeguards | verified |
 | W6.5 | Sampled backup restores in isolation with freshness and integrity verification | verified |
-| G.1 | Historical strict fetch, validation-only recovery, bounded review, ledgers, history sequences, Codex transport/OAuth, ADO auth and guarded deployment retain regression coverage and deployment status evidence | partial |
+| G.1 | Historical strict fetch, validation-only recovery, bounded review, ledgers, history sequences, Codex transport/OAuth, ADO auth and guarded deployment retain regression coverage and deployment status evidence | verified |
 | G.2 | Migration numbering checked against current branches and representative prior database upgrades verified | verified |
 | G.3 | All affected suites and full repository validation pipeline pass on exact recorded commits | verified |
 | G.4 | Desktop/mobile/CLI supported-surface interactions verified; compilation alone is insufficient | verified |
-| G.5 | Deployment/rollback identities, canary scope and spend prepared before requesting gated actions | partial |
+| G.5 | Deployment/rollback identities, canary scope and spend prepared before requesting gated actions | verified |
 | G.6 | Final closure maps every recommendation to implementation/tests/evidence/prerequisites; no unverified acceptance treated as PASS | partial |

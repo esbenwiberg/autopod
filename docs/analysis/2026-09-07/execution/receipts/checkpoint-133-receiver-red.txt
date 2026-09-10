@@ -1,0 +1,55 @@
+
+ RUN  v4.1.11 /private/tmp/autopod-durable-execution
+
+ ❯ packages/daemon/src/containers/haproxy-deny-stream.test.ts (6 tests | 1 failed) 14ms
+     × contains an unverified exit rejection without claiming a successful receiver exit 7ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  packages/daemon/src/containers/haproxy-deny-stream.test.ts > streamHaproxyDenials > contains an unverified exit rejection without claiming a successful receiver exit
+AssertionError: expected "noop" to be called with arguments: [ { …(2) }, StringContaining{…} ]
+
+Number of calls: 0
+
+ ❯ packages/daemon/src/containers/haproxy-deny-stream.test.ts:164:18
+    162|     rejectExit(error);
+    163|     await new Promise((resolve) => setImmediate(resolve));
+    164|     expect(warn).toHaveBeenCalledWith(
+       |                  ^
+    165|       { err: error, containerId: 'c1' },
+    166|       expect.stringContaining('denial visibility lost'),
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+⎯⎯⎯⎯⎯⎯ Unhandled Errors ⎯⎯⎯⎯⎯⎯
+
+Vitest caught 1 unhandled error during the test run.
+This might cause false positive tests. Resolve unhandled errors to make sure your tests are not affected.
+
+⎯⎯⎯⎯ Unhandled Rejection ⎯⎯⎯⎯⎯
+AutopodError: Streaming exec exit was not observed; verify termination before another execution.
+ ❯ unverifiedExecExit packages/daemon/src/containers/exec-exit-evidence.ts:5:10
+      3| /** A transport failure is not an observed process exit, including non…
+      4| export function unverifiedExecExit(): AutopodError {
+      5|   return new AutopodError(
+       |          ^
+      6|     'Streaming exec exit was not observed; verify termination before a…
+      7|     'EXEC_EXIT_UNVERIFIED',
+ ❯ packages/daemon/src/containers/haproxy-deny-stream.test.ts:158:19
+ ❯ node_modules/.pnpm/@vitest+runner@4.1.11/node_modules/@vitest/runner/dist/chunk-artifact.js:1903:20
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯
+Serialized Error: { code: 'EXEC_EXIT_UNVERIFIED', statusCode: 409 }
+This error originated in "packages/daemon/src/containers/haproxy-deny-stream.test.ts" test file. It doesn't mean the error was thrown inside the file itself, but while it was running.
+The latest test that might've caused the error is "contains an unverified exit rejection without claiming a successful receiver exit". It might mean one of the following:
+- The error was thrown, while Vitest was running this test.
+- If the error occurred after the test had been completed, this was the last documented test before it was thrown.
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 5 passed (6)
+     Errors  1 error
+   Start at  10:46:36
+   Duration  547ms (transform 181ms, setup 0ms, import 334ms, tests 14ms, environment 0ms)
+
