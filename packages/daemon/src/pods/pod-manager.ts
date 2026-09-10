@@ -8116,10 +8116,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
               return groupActivations.length > 0 ? groupActivations : null;
             })(),
             prUrl: request.prUrl ?? null,
-            tokenBudget:
-              request.tokenBudget !== undefined
-                ? request.tokenBudget
-                : (profile.tokenBudget ?? null),
+            tokenBudget: request.tokenBudget ?? profile.tokenBudget ?? null,
             referenceRepos: derivedReferenceRepos.length > 0 ? derivedReferenceRepos : null,
             scheduledJobId: request.scheduledJobId ?? null,
             dependsOnPodIds: normalizedDependsOnPodIds,

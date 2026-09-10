@@ -3,6 +3,26 @@ import { MAX_HANDOFF_INSTRUCTIONS_LENGTH } from '../constants.js';
 import { createPodRequestSchema, podResponseSchema } from './pod.schema.js';
 
 describe('createPodRequestSchema', () => {
+  it('retains an explicit token budget and rejects invalid limits', () => {
+    const request = { profileName: 'primary', task: 'bounded task' };
+    expect(createPodRequestSchema.parse({ ...request, tokenBudget: 32000 })).toMatchObject({
+      tokenBudget: 32000,
+    });
+    expect(createPodRequestSchema.parse({ ...request, tokenBudget: null })).toMatchObject({
+      tokenBudget: null,
+    });
+    for (const tokenBudget of [
+      0,
+      -1,
+      999,
+      32000.5,
+      Number.NaN,
+      Number.POSITIVE_INFINITY,
+      '32000',
+    ]) {
+      expect(createPodRequestSchema.safeParse({ ...request, tokenBudget }).success).toBe(false);
+    }
+  });
   it('uses canonical semantic contract validation while preserving v1 empty scenarios', () => {
     const valid = {
       contractVersion: 1 as const,

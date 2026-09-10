@@ -1250,3 +1250,64 @@ it.each([false, true])(
     });
   },
 );
+
+it.each([
+  'pinned',
+  'tag',
+  'wrong-sandbox',
+  'wrong-disk',
+  'wrong-digest',
+  'not-ready',
+  'missing-reference',
+])('records only provider-linked immutable image identity: %s', async (scenario) => {
+  const digest = `sha256:${'a'.repeat(64)}`;
+  const client = new AzureSandboxApiClient(
+    {
+      subscriptionId: 'sub',
+      resourceGroup: 'rg',
+      location: 'northeurope',
+      assumeGroupExists: true,
+      credential: {
+        async getToken() {
+          return { token: 'fixture' };
+        },
+      },
+      retry: { maxAttempts: 1 },
+      fetch: async (input, init) => {
+        const isDisk = new URL(input).pathname.includes('/diskimages/');
+        const body =
+          init?.method === 'POST'
+            ? { exitCode: 0, stdout: '{}', stderr: '' }
+            : isDisk
+              ? {
+                  id: scenario === 'wrong-disk' ? 'different-disk' : 'actual-disk',
+                  status: { state: scenario === 'not-ready' ? 'Creating' : 'Ready' },
+                  image: {
+                    base:
+                      scenario === 'tag'
+                        ? 'registry.test/image:latest'
+                        : `registry.test/image@${digest}`,
+                  },
+                  labels: {
+                    managedBy: 'autopod',
+                    sourceDigest: scenario === 'wrong-digest' ? `sha256:${'b'.repeat(64)}` : digest,
+                  },
+                }
+              : {
+                  id: scenario === 'wrong-sandbox' ? 'different-sandbox' : 'actual-sandbox',
+                  state: 'Running',
+                  resources: { cpu: '2000m', memory: '4096Mi' },
+                  ...(scenario === 'missing-reference'
+                    ? {}
+                    : { sourcesRef: { diskImage: { id: 'actual-disk' } } }),
+                };
+        return new Response(JSON.stringify(body), { status: 200 });
+      },
+    },
+    logger,
+  );
+  const manager = new SandboxContainerManager(client, logger);
+  expect((await manager.getExecutionMetadata('actual-sandbox')).imageDigest).toBe(
+    scenario === 'pinned' ? digest : null,
+  );
+});

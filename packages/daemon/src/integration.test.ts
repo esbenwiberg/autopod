@@ -654,6 +654,38 @@ describe('Integration', () => {
       expect(res.json().status).toBe('queued');
     });
 
+    it.each([32000, null, undefined])(
+      'POST /pods retains token budget %s in durable task accounting',
+      async (tokenBudget) => {
+        const headers = { authorization: 'Bearer test-token' };
+        const profile = await app.inject({
+          method: 'PATCH',
+          url: '/profiles/test-app',
+          headers,
+          payload: { tokenBudget: 48000 },
+        });
+        expect(profile.statusCode).toBe(200);
+        const created = await app.inject({
+          method: 'POST',
+          url: '/pods',
+          headers,
+          payload: { profileName: 'test-app', task: 'Bounded task', tokenBudget },
+        });
+        expect(created.statusCode).toBe(201);
+        const expected = tokenBudget ?? 48000;
+        expect(created.json().tokenBudget).toBe(expected);
+        expect(createPodRepository(db).getOrThrow(created.json().id).tokenBudget).toBe(expected);
+        const accounting = await app.inject({
+          method: 'GET',
+          url: `/pods/${created.json().id}/task-execution`,
+          headers,
+        });
+        expect(accounting.statusCode).toBe(200);
+        expect(accounting.json().tokenBudget).toBe(expected);
+        expect(accounting.json().budgetCheck.status).not.toBe('unlimited');
+      },
+    );
+
     it('blocks pod admission while a hosted deployment drain is active', async () => {
       const drain = await app.inject({
         method: 'POST',

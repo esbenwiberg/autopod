@@ -323,9 +323,10 @@ describe('AzureSandboxApiClient', () => {
 
   it('reuses a ready persistent disk image after sandbox deletion', async () => {
     const image = 'ewiacr.azurecr.io/autopod/test-app:latest';
-    const sourceDigest = 'sha256:digest1';
+    const sourceDigest = `sha256:${'1'.repeat(64)}`;
     const diskImage = {
       id: 'disk-digest1',
+      image: { base: `ewiacr.azurecr.io/autopod/test-app@${sourceDigest}` },
       status: { state: 'Ready' },
       labels: diskImageLabelsFor(image, sourceDigest),
     };
@@ -386,12 +387,12 @@ describe('AzureSandboxApiClient', () => {
     const oldDiskImage = {
       id: 'disk-old',
       status: { state: 'Ready' },
-      labels: diskImageLabelsFor(image, 'sha256:old'),
+      labels: diskImageLabelsFor(image, `sha256:${'2'.repeat(64)}`),
     };
     const newDiskImage = {
       id: 'disk-new',
       status: { state: 'Ready' },
-      labels: diskImageLabelsFor(image, 'sha256:new'),
+      labels: diskImageLabelsFor(image, `sha256:${'3'.repeat(64)}`),
     };
     const { client, requests } = makeClient(
       [
@@ -406,7 +407,7 @@ describe('AzureSandboxApiClient', () => {
       {
         assumeGroupExists: true,
         registryCredentials: { username: 'token-user', token: 'secret-token' },
-        resolveImageDigest: async () => 'sha256:new',
+        resolveImageDigest: async () => `sha256:${'3'.repeat(64)}`,
       },
     );
 
@@ -423,7 +424,7 @@ describe('AzureSandboxApiClient', () => {
     );
     expect(staleDeletes).toHaveLength(1);
     expect(jsonBody(requests[1] ?? failRequest())).toMatchObject({
-      labels: diskImageLabelsFor(image, 'sha256:new'),
+      labels: diskImageLabelsFor(image, `sha256:${'3'.repeat(64)}`),
     });
   });
 
@@ -1304,4 +1305,85 @@ describe('observed sandbox allocation', () => {
       memoryLimitBytes: null,
     });
   });
+});
+
+it('pins the imported image to the digest resolved before creation', async () => {
+  const digest = `sha256:${'a'.repeat(64)}`;
+  const { client, requests } = makeClient(
+    [
+      { status: 200, body: { value: [] } },
+      { status: 200, body: { id: 'disk-pinned', status: { state: 'Ready' } } },
+      { status: 200, body: { id: 'disk-pinned', status: { state: 'Ready' } } },
+      { status: 200, body: { id: 'sandbox-pinned', state: 'Running' } },
+      { status: 200, body: { id: 'sandbox-pinned', state: 'Running' } },
+    ],
+    {
+      assumeGroupExists: true,
+      registryCredentials: { username: 'fixture', token: 'fixture' },
+      resolveImageDigest: async () => digest,
+    },
+  );
+  await client.createSandbox({
+    image: 'registry.test:5000/team/image:latest',
+    tier: 'L',
+    env: {},
+    egressPolicy: { defaultAction: 'Deny', hostRules: [] },
+  });
+  expect(jsonBody(requests[1] ?? failRequest())).toMatchObject({
+    image: { base: `registry.test:5000/team/image@${digest}` },
+  });
+});
+
+it('does not reuse a mutable import carrying a resolved digest label', async () => {
+  const image = 'registry.test/team/image:latest';
+  const digest = `sha256:${'a'.repeat(64)}`;
+  const old = {
+    id: 'mutable-import',
+    image: { base: image },
+    labels: diskImageLabelsFor(image, digest),
+    status: { state: 'Ready' },
+  };
+  const { client, requests } = makeClient(
+    [
+      { status: 200, body: { value: [old] } },
+      { status: 200, body: { id: 'pinned-import', status: { state: 'Ready' } } },
+      { status: 200, body: { id: 'pinned-import', status: { state: 'Ready' } } },
+      { status: 200, body: { id: 'sandbox', state: 'Running' } },
+      { status: 200, body: { id: 'sandbox', state: 'Running' } },
+    ],
+    {
+      assumeGroupExists: true,
+      registryCredentials: { username: 'fixture', token: 'fixture' },
+      resolveImageDigest: async () => digest,
+    },
+  );
+  await client.createSandbox({
+    image,
+    tier: 'L',
+    env: {},
+    egressPolicy: { defaultAction: 'Deny', hostRules: [] },
+  });
+  expect(jsonBody(requests[1] ?? failRequest())).toMatchObject({
+    image: { base: `registry.test/team/image@${digest}` },
+  });
+  expect(jsonBody(requests[3] ?? failRequest())).toMatchObject({
+    sourcesRef: { diskImage: { id: 'pinned-import' } },
+  });
+  expect(requests.some((request) => request.init?.method === 'DELETE')).toBe(false);
+});
+
+it('rejects a malformed resolved digest before creating any resource', async () => {
+  const { client, requests } = makeClient([], {
+    resolveImageDigest: async () => 'sha256:invalid',
+    assumeGroupExists: true,
+  });
+  await expect(
+    client.createSandbox({
+      image: 'registry.test/image:latest',
+      tier: 'L',
+      env: {},
+      egressPolicy: { defaultAction: 'Deny', hostRules: [] },
+    }),
+  ).rejects.toMatchObject({ code: 'AZURE_SANDBOX_IMAGE_DIGEST' });
+  expect(requests).toHaveLength(0);
 });

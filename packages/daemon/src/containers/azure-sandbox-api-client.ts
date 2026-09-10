@@ -95,6 +95,7 @@ export interface AzureSandboxApiClientConfig {
 }
 
 interface DiskImageResponse {
+  image?: { base?: string };
   id?: string;
   name?: string;
   labels?: Record<string, string>;
@@ -112,6 +113,7 @@ interface DiskImageListResponse {
 }
 
 interface DiskImageKey {
+  sourceReference: string;
   name: string;
   sourceImageHash: string;
   sourceDigest: string;
@@ -338,6 +340,25 @@ export class AzureSandboxApiClient implements SandboxApiClient {
           ? cpuCount
           : null,
     };
+  }
+
+  async getImageDigest(sandboxId: string): Promise<string | null> {
+    const sandbox = await this.requestData<SandboxResponse>('GET', this.sandboxPath(sandboxId), {
+      timeoutMs: 5000,
+    });
+    const diskId = sandbox.sourcesRef?.diskImage?.id;
+    if (sandbox.id !== sandboxId || sandbox.state !== 'Running' || !diskId) return null;
+    const disk = await this.requestData<DiskImageResponse>(
+      'GET',
+      `${this.groupPath()}/diskimages/${seg(diskId)}`,
+      { timeoutMs: 5000 },
+    );
+    if (disk.id !== diskId || !readyStates.has(diskImageState(disk))) return null;
+    const digest = disk.image?.base?.match(/@(?<digest>sha256:[a-f0-9]{64})$/)?.groups?.digest;
+    const labels = diskImageLabels(disk);
+    // A digest label on an import of a mutable tag is not proof of what was imported.
+    if (!digest || labels.managedBy !== 'autopod' || labels.sourceDigest !== digest) return null;
+    return digest;
   }
 
   async exec(
@@ -888,7 +909,7 @@ export class AzureSandboxApiClient implements SandboxApiClient {
       return reusable;
     }
 
-    const created = await this.createDiskImage(baseImage, key);
+    const created = await this.createDiskImage(key.sourceReference, key);
     await this.gcStaleDiskImages(key, existingImages);
     return created;
   }
@@ -902,7 +923,7 @@ export class AzureSandboxApiClient implements SandboxApiClient {
         : undefined;
     const sourceDigest =
       digestFromReference ?? resolvedDigest ?? `tag:${stableHash(baseImage, 32)}`;
-    if (!sourceDigest) {
+    if ((digestFromReference || resolvedDigest) && !/^sha256:[a-f0-9]{64}$/.test(sourceDigest)) {
       throw new AutopodError(
         `Could not resolve image digest for ${baseImage}`,
         'AZURE_SANDBOX_IMAGE_DIGEST',
@@ -913,6 +934,9 @@ export class AzureSandboxApiClient implements SandboxApiClient {
     const digestHash = stableHash(sourceDigest, 12);
     const name = `autopod-${sourceImageHash}-${digestHash}`;
     return {
+      sourceReference: sourceDigest.startsWith('sha256:')
+        ? `${baseImage.replace(/@.*$/, '').replace(/:[^/]+$/, '')}@${sourceDigest}`
+        : baseImage,
       name,
       sourceImageHash,
       sourceDigest,
@@ -934,7 +958,8 @@ export class AzureSandboxApiClient implements SandboxApiClient {
       if (
         labels.managedBy !== 'autopod' ||
         labels.sourceImageHash !== key.sourceImageHash ||
-        labels.sourceDigest !== key.sourceDigest
+        labels.sourceDigest !== key.sourceDigest ||
+        (key.sourceDigest.startsWith('sha256:') && image.image?.base !== key.sourceReference)
       ) {
         continue;
       }

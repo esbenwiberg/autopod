@@ -103,6 +103,7 @@ export const createPodRequestSchema = z
       .refine((s) => !s.includes('..'), 'Branch prefix cannot contain ".."')
       .optional(),
     skipValidation: z.boolean().optional(),
+    tokenBudget: z.number().int().safe().min(1000).nullable().optional(),
     contract: specContractSchema.optional(),
     options: partialPodOptionsSchema.optional(),
     outputMode: z.enum(['pr', 'artifact', 'workspace']).optional(),

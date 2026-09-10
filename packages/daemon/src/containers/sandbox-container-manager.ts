@@ -167,15 +167,19 @@ export class SandboxContainerManager implements ContainerManager {
   }
 
   async getExecutionMetadata(containerId: string): Promise<ContainerExecutionMetadata> {
-    const [kernel, allocation] = await Promise.allSettled([
+    const [kernel, allocation, image] = await Promise.allSettled([
       this.execInContainer(containerId, ['node', '-e', CGROUP_EXECUTION_METADATA_PROBE], {
         timeout: 10000,
       }),
       this.client.getResourceAllocation?.(containerId) ?? Promise.resolve(null),
+      this.client.getImageDigest?.(containerId) ?? Promise.resolve(null),
     ]);
     const metadata = parseCgroupExecutionMetadata(
       kernel.status === 'fulfilled' ? kernel.value : { exitCode: 1, stdout: '', stderr: '' },
     );
+    if (image.status === 'fulfilled' && image.value && /^sha256:[a-f0-9]{64}$/.test(image.value)) {
+      metadata.imageDigest = image.value;
+    }
     // Sandboxes may enforce allocation at the VM boundary without cgroup mounts.
     // Merge fresh provider evidence, retaining any stricter observed guest limit.
     if (allocation.status === 'fulfilled' && allocation.value) {

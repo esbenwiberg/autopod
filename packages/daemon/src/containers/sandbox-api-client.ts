@@ -171,6 +171,8 @@ export interface SandboxResourceAllocation {
 }
 
 export interface SandboxApiClient {
+  /** Fresh sandbox-to-disk link and immutable provider image source; null when unverified. */
+  getImageDigest?(sandboxId: string): Promise<string | null>;
   /** Fresh provider-observed allocation, never cached spawn requests or tier guesses. */
   getResourceAllocation?(sandboxId: string): Promise<SandboxResourceAllocation>;
   /** Exact label discovery. Missing support fails closed for managed starts. */
