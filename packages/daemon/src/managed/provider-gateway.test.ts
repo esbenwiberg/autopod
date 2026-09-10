@@ -1,7 +1,8 @@
+import { readFileSync } from 'node:fs';
 import Database from 'better-sqlite3';
 import { afterEach, expect, it, vi } from 'vitest';
 import { type ManagedFixture, fixture } from '../test-utils/managed-fixture.js';
-import type { BoundedProviderTransport } from './bounded-provider.js';
+import { type BoundedProviderTransport, ManagedProviderFailure } from './bounded-provider.js';
 import { ManagedPodService } from './managed-service.js';
 import { ManagedProviderGateway } from './provider-gateway.js';
 import { ManagedQuotaBroker } from './quota-broker.js';
@@ -74,6 +75,34 @@ it('uncertainty stays reserved after restart and cannot use a second key', async
   ).rejects.toThrow('request-limit');
   expect(f.service().row('installation', x.handle.podId).consumed_tokens).toBe(100);
   expect(x.generate).toHaveBeenCalledTimes(1);
+  expect(
+    f.db
+      .prepare(
+        'SELECT failure_phase,failure_reason,failure_http_status FROM managed_provider_requests',
+      )
+      .get(),
+  ).toEqual({ failure_phase: null, failure_reason: null, failure_http_status: null });
+});
+it('persists only schema-bounded provider failure diagnostics on an uncertain request', async () => {
+  const x = await setup();
+  x.generate.mockRejectedValue(
+    new ManagedProviderFailure({ phase: 'http', reason: 'http', httpStatus: 429 }),
+  );
+  await expect(x.call()).rejects.toThrow(/^managed-provider-attempt-unavailable$/);
+  expect(
+    f.db
+      .prepare(
+        'SELECT state,response_json,actual_tokens,failure_phase,failure_reason,failure_http_status FROM managed_provider_requests',
+      )
+      .get(),
+  ).toEqual({
+    state: 'reserved',
+    response_json: null,
+    actual_tokens: null,
+    failure_phase: 'http',
+    failure_reason: 'http',
+    failure_http_status: 429,
+  });
 });
 it('rejects changed prompt, transport or request limit on replay and new keys', async () => {
   const x = await setup();
@@ -235,6 +264,27 @@ it('an unmigrated 150 database cannot construct an executable gateway', async ()
   f.db.exec('DROP TABLE managed_provider_requests');
   expect(() => new ManagedProviderGateway(x.service, x.transport)).toThrow(
     'journal-migration-required',
+  );
+  expect(x.generate).not.toHaveBeenCalled();
+});
+it('a pre-184 provider journal cannot construct an executable gateway', async () => {
+  const x = await setup();
+  x.gateway.close();
+  f.db.exec('DROP TABLE managed_provider_requests');
+  f.db.exec(
+    readFileSync(
+      new URL('../db/migrations/151_managed_provider_requests.sql', import.meta.url),
+      'utf8',
+    ),
+  );
+  f.db.exec(
+    readFileSync(
+      new URL('../db/migrations/152_managed_request_usage.sql', import.meta.url),
+      'utf8',
+    ),
+  );
+  expect(() => new ManagedProviderGateway(x.service, x.transport)).toThrow(
+    'diagnostic-migration-required',
   );
   expect(x.generate).not.toHaveBeenCalled();
 });

@@ -17,6 +17,39 @@ export interface BoundedProviderTransport {
     assertActive: () => void,
   ): Promise<{ value: string; consumedTokens: number }>;
 }
+export interface ManagedProviderFailureDiagnostic {
+  phase:
+    | 'request'
+    | 'credential'
+    | 'http'
+    | 'stream'
+    | 'response-schema'
+    | 'model'
+    | 'usage'
+    | 'artifact'
+    | 'wire-response';
+  reason:
+    | 'account'
+    | 'http'
+    | 'incomplete'
+    | 'duplicate-completion'
+    | 'response-limit'
+    | 'usage'
+    | 'artifact-size'
+    | 'output-size'
+    | 'unclassified';
+  httpStatus: number | null;
+}
+
+/** Carries only schema-bounded diagnostics. Provider bodies, prompts and credentials are excluded. */
+export class ManagedProviderFailure extends Error {
+  constructor(
+    readonly diagnostic: ManagedProviderFailureDiagnostic,
+    message = 'managed-provider-request-unavailable',
+  ) {
+    super(message);
+  }
+}
 export interface ProviderCredential {
   accountId: string;
   mode: 'api-key' | 'chatgpt';

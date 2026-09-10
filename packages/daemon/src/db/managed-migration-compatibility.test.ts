@@ -40,7 +40,13 @@ it.each([150, 152, 153])(
       ('managed','measured-zero','digest2','transport',1,'observed','{"preserve":true}',0);`);
       const requests =
         baseline >= 152
-          ? db.prepare('SELECT * FROM managed_provider_requests ORDER BY operation_key').all()
+          ? db
+              .prepare(
+                `SELECT pod_id,operation_key,request_digest,transport_digest,grant_revision,
+                        state,response_json,actual_tokens
+                 FROM managed_provider_requests ORDER BY operation_key`,
+              )
+              .all()
           : [];
       if (baseline === 153)
         db.exec(`INSERT INTO managed_github_reads(pod_id,operation_key,request_digest,grant_revision,response_json)
@@ -54,8 +60,26 @@ it.each([150, 152, 153])(
         expect(readFileSync(join(migrations, file))).toEqual(readFileSync(join(managed, file)));
       if (baseline >= 152)
         expect(
-          db.prepare('SELECT * FROM managed_provider_requests ORDER BY operation_key').all(),
+          db
+            .prepare(
+              `SELECT pod_id,operation_key,request_digest,transport_digest,grant_revision,
+                      state,response_json,actual_tokens
+               FROM managed_provider_requests ORDER BY operation_key`,
+            )
+            .all(),
         ).toEqual(requests);
+      if (baseline >= 152)
+        expect(
+          db
+            .prepare(
+              `SELECT failure_phase,failure_reason,failure_http_status
+               FROM managed_provider_requests ORDER BY operation_key`,
+            )
+            .all(),
+        ).toEqual([
+          { failure_phase: null, failure_reason: null, failure_http_status: null },
+          { failure_phase: null, failure_reason: null, failure_http_status: null },
+        ]);
       for (const table of [
         'pod_finalizations',
         'logical_tasks',

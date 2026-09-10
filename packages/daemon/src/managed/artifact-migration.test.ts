@@ -15,7 +15,7 @@ it('upgrades legacy rows without changing historical artifacts and reopens idemp
   expect(new Set(files.map((name) => name.split('_')[0])).size).toBe(files.length);
   runMigrations(db, directory, pino({ level: 'silent' }));
   const version = db.prepare('SELECT max(version) AS version FROM schema_version').get();
-  expect(version).toEqual({ version: 183 });
+  expect(version).toEqual({ version: 184 });
   expect(
     (db.prepare('PRAGMA table_info(pods)').all() as { name: string }[]).some(
       (row) => row.name === 'artifacts_path',
@@ -28,7 +28,7 @@ it('upgrades legacy rows without changing historical artifacts and reopens idemp
   expect(sql).not.toMatch(/UPDATE\s+pods|DROP\s+TABLE/i);
   db.close();
 });
-it('managed and native migrations preserve rows on a real 150 upgrade through 183 and replay', () => {
+it('managed and native migrations preserve rows on a real 150 upgrade through 184 and replay', () => {
   const root = mkdtempSync(path.join(tmpdir(), 'managed-upgrade-'));
   const db = new Database(':memory:');
   const logger = pino({ level: 'silent' });
@@ -67,11 +67,60 @@ it('managed and native migrations preserve rows on a real 150 upgrade through 18
     expect(db.prepare('SELECT * FROM managed_github_reads').all()).toEqual([]);
     expect(db.pragma('quick_check')).toEqual([{ quick_check: 'ok' }]);
     expect(db.prepare('SELECT max(version) AS version FROM schema_version').get()).toEqual({
-      version: 183,
+      version: 184,
     });
   } finally {
     db.close();
     rmSync(root, { recursive: true, force: true });
+  }
+});
+
+it('184 preserves observed and uncertain request journals with unknown historical diagnostics', () => {
+  const db = new Database(':memory:');
+  const source = path.resolve(import.meta.dirname, '../db/migrations');
+  try {
+    db.exec(
+      "CREATE TABLE managed_pods(pod_id TEXT PRIMARY KEY); INSERT INTO managed_pods VALUES ('pod');",
+    );
+    db.exec(readFileSync(path.join(source, '151_managed_provider_requests.sql'), 'utf8'));
+    db.exec(readFileSync(path.join(source, '152_managed_request_usage.sql'), 'utf8'));
+    db.prepare(
+      `INSERT INTO managed_provider_requests
+       (pod_id,operation_key,request_digest,transport_digest,grant_revision,state,response_json,actual_tokens)
+       VALUES ('pod','one','request','transport',1,'observed','"report"',7),
+              ('pod','two','request2','transport',1,'reserved',NULL,NULL)`,
+    ).run();
+    db.exec(
+      readFileSync(path.join(source, '184_managed_provider_failure_diagnostics.sql'), 'utf8'),
+    );
+    expect(
+      db
+        .prepare(
+          'SELECT operation_key,state,response_json,actual_tokens,failure_phase,failure_reason,failure_http_status FROM managed_provider_requests ORDER BY operation_key',
+        )
+        .all(),
+    ).toEqual([
+      {
+        operation_key: 'one',
+        state: 'observed',
+        response_json: '"report"',
+        actual_tokens: 7,
+        failure_phase: null,
+        failure_reason: null,
+        failure_http_status: null,
+      },
+      {
+        operation_key: 'two',
+        state: 'reserved',
+        response_json: null,
+        actual_tokens: null,
+        failure_phase: null,
+        failure_reason: null,
+        failure_http_status: null,
+      },
+    ]);
+  } finally {
+    db.close();
   }
 });
 
