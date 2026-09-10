@@ -126,6 +126,14 @@ export class ManagedControls {
       cleanup: row.cleanup as ControlResult['cleanup'],
     };
   }
+  private artifactExportFailed(podId: string): boolean {
+    const stored = this.service.db
+      .prepare('SELECT limitations_json FROM managed_results WHERE pod_id=?')
+      .get(podId) as { limitations_json: string } | undefined;
+    if (!stored) return false;
+    const limitations = JSON.parse(stored.limitations_json) as unknown;
+    return Array.isArray(limitations) && limitations.includes('artifact-export-incomplete');
+  }
   async control(
     installation: string,
     podId: string,
@@ -154,6 +162,7 @@ export class ManagedControls {
           if (
             row.runtime_ref &&
             spec.outputs.artifacts.mode === 'required' &&
+            !this.artifactExportFailed(podId) &&
             !this.service.db
               .prepare("SELECT 1 FROM artifact_exports WHERE pod_id=? AND status='committed'")
               .get(podId)
