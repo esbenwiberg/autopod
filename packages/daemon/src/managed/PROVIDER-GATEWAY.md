@@ -113,6 +113,17 @@ gets only its attempt workspace. Dispatcher remains responsible for sequencing
 research, plan, implementation, verification, artifact lineage, completion,
 notifications, and the final source-delivery decision.
 
+Managed follow-ups use the existing bound `send` operation. The host writes the
+validated envelope to the attempt's private root spool under its idempotency key;
+the unprivileged agent reads only the message over loopback, resumes the same
+temporary Codex session, and acknowledges the key only after that turn succeeds.
+The final artifact is published from the last completed turn. Follow-ups do not
+carry credentials, select a provider, widen the grant, or create another pod.
+Terminal provider diagnostics expose only the allowlisted phase, reason, and HTTP
+status through result limitations; provider bodies and credential details remain
+excluded. A nonzero agent exit cannot produce a required artifact, so cleanup may
+release that terminal runtime while retaining `agent-runtime-failed`.
+
 An optional GitHub issue-read binding installs a credential-free `gh` subset in
 the worker. It supports issue view, issue search, and issue-comment reads for one
 exact `owner/repo`. Requests cross a separate loopback spool into a durable host

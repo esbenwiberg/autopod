@@ -52,8 +52,13 @@ it('rejects an incompatible immutable-image Codex CLI before installing helpers'
       invoke: vi.fn(),
     }),
   ).rejects.toThrow('cli-incompatible');
-  expect(exec).toHaveBeenCalledTimes(1);
+  expect(exec).toHaveBeenCalledTimes(2);
   expect(exec.mock.calls[0]).toEqual(['ref', ['codex', 'exec', '--help'], { user: 'root' }]);
+  expect(exec.mock.calls[1]).toEqual([
+    'ref',
+    ['codex', 'exec', 'resume', '--help'],
+    { user: 'root' },
+  ]);
 });
 
 it('admits a longer source-producing agent only through its explicit reviewed mode', async () => {
@@ -97,7 +102,11 @@ it('installs an agent helper that routes final output through the reviewed Codex
   };
   exec.mockImplementation(async (_ref, argv) => {
     if (argv[0] === 'codex')
-      return { exitCode: 0, stdout: '--ephemeral --output-last-message --sandbox', stderr: '' };
+      return {
+        exitCode: 0,
+        stdout: '--ephemeral --output-last-message --sandbox --last',
+        stderr: '',
+      };
     if ((argv[2] ?? '').includes('urllib.request'))
       return { exitCode: 0, stdout: '204', stderr: '' };
     return { exitCode: 0, stdout: '', stderr: '' };
@@ -118,9 +127,41 @@ it('installs an agent helper that routes final output through the reviewed Codex
     const install = exec.mock.calls.find((call) => (call[1][2] ?? '').includes('immutable-worker'));
     expect(install?.[1][6]).toContain('Return the complete work product as your final response');
     expect(install?.[1][6]).toContain('Do not edit that output path directly');
+    expect(install?.[1][6]).toContain("'codex', 'exec', 'resume', '--last'");
+    expect(install?.[1][6]).not.toContain("'codex', 'exec', '--ephemeral'");
   } finally {
     close();
   }
+});
+
+it('queues an idempotent follow-up in the root-owned runtime spool', async () => {
+  const { channel, exec } = setup();
+  const message = {
+    schemaVersion: 1 as const,
+    dispatcherAttemptId: 'attempt-one',
+    grantId: 'grant-one',
+    grantRevision: 1,
+    message: 'Include falsifying evidence.',
+  };
+  await channel.send('runtime-one', '/run/dispatcher-managed-one', message, 'follow-one');
+  expect(exec).toHaveBeenCalledWith(
+    'runtime-one',
+    expect.arrayContaining([
+      '/run/dispatcher-managed-one',
+      'follow-one',
+      JSON.stringify({
+        dispatcherAttemptId: 'attempt-one',
+        grantId: 'grant-one',
+        grantRevision: 1,
+        message: 'Include falsifying evidence.',
+        schemaVersion: 1,
+      }),
+    ]),
+    { user: 'root' },
+  );
+  await expect(channel.send('runtime-one', '/tmp/unbound', message, 'follow-one')).rejects.toThrow(
+    'follow-up-binding',
+  );
 });
 
 it.each([false, true])('polls one digest-bound request; tampered=%s', async (tampered) => {
@@ -137,7 +178,11 @@ it.each([false, true])('polls one digest-bound request; tampered=%s', async (tam
   let read = false;
   exec.mockImplementation(async (_ref, argv) => {
     if (argv[0] === 'codex')
-      return { exitCode: 0, stdout: '--ephemeral --output-last-message --sandbox', stderr: '' };
+      return {
+        exitCode: 0,
+        stdout: '--ephemeral --output-last-message --sandbox --last',
+        stderr: '',
+      };
     const code = argv[2] ?? '';
     if (code.includes('urllib.request')) return { exitCode: 0, stdout: '204', stderr: '' };
     if (code.includes('p.stat().st_size')) {
@@ -216,7 +261,11 @@ it('routes sequential agent requests and an independently bound GitHub read', as
   const writes: string[][] = [];
   exec.mockImplementation(async (_ref, argv) => {
     if (argv[0] === 'codex')
-      return { exitCode: 0, stdout: '--ephemeral --output-last-message --sandbox', stderr: '' };
+      return {
+        exitCode: 0,
+        stdout: '--ephemeral --output-last-message --sandbox --last',
+        stderr: '',
+      };
     const code = argv[2] ?? '';
     if (code.includes('urllib.request')) return { exitCode: 0, stdout: '204', stderr: '' };
     if (code.includes('p.stat().st_size')) {
@@ -308,6 +357,38 @@ it('the Python loopback channel carries agent SSE above 64 KiB within its hard c
     const response = await pending;
     expect(response.status).toBe(200);
     expect(await response.text()).toBe(body);
+  } finally {
+    child.kill('SIGTERM');
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+it('the Python loopback channel delivers and acknowledges a queued follow-up', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'autopod-codex-followup-'));
+  chmodSync(root, 0o700);
+  const script = fileURLToPath(new URL('./runtime/codex_channel.py', import.meta.url));
+  const child = spawn('python3', [script, root, '0', '10'], { stdio: 'pipe' });
+  try {
+    const ready = await waitForJson(join(root, 'channel-ready.json'));
+    writeFileSync(
+      join(root, 'followup-follow-one.json'),
+      JSON.stringify({
+        schemaVersion: 1,
+        dispatcherAttemptId: 'attempt-one',
+        grantId: 'grant-one',
+        grantRevision: 1,
+        message: 'Include falsifying evidence.',
+      }),
+    );
+    const endpoint = `http://127.0.0.1:${ready.port as number}`;
+    const delivered = await fetch(`${endpoint}/followups`);
+    expect(delivered.status).toBe(200);
+    expect(await delivered.json()).toEqual({
+      key: 'follow-one',
+      message: 'Include falsifying evidence.',
+    });
+    expect((await fetch(`${endpoint}/followups/follow-one`, { method: 'POST' })).status).toBe(204);
+    expect((await fetch(`${endpoint}/followups`)).status).toBe(204);
   } finally {
     child.kill('SIGTERM');
     rmSync(root, { recursive: true, force: true });

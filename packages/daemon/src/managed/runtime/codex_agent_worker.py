@@ -6,6 +6,9 @@ from pathlib import Path
 import re
 import subprocess
 import tempfile
+import time
+import urllib.error
+import urllib.request
 from urllib.parse import urlparse
 
 parser = argparse.ArgumentParser()
@@ -66,12 +69,49 @@ with tempfile.TemporaryDirectory(prefix='managed-codex-') as temporary:
         'web_search': 'disabled', 'otel.exporter': 'none',
         'otel.metrics_exporter': 'none', 'otel.trace_exporter': 'none',
     }
-    command = ['codex', 'exec', '--ephemeral', '--json', '--sandbox', args.sandbox,
-               '-m', args.model, '-C', str(repository), '--output-last-message', str(output)]
+    captured = Path(temporary) / 'last-message.md'
+    command = ['codex', 'exec', '--json', '--sandbox', args.sandbox,
+               '-m', args.model, '-C', str(repository), '--output-last-message', str(captured)]
     for key, value in config.items(): command.extend(['-c', key + '=' + json.dumps(value)])
     command.extend(['--', '-'])
     prompt = ' '.join(args.objective)
     if inputs: prompt += '\n\nVerified Dispatcher input artifacts:\n' + '\n\n---\n\n'.join(inputs)
     env = {'HOME': str(home), 'PATH': '/opt/dispatcher:' + os.environ.get('PATH', '/usr/local/bin:/usr/bin:/bin'), 'TMPDIR': temporary}
-    result = subprocess.run(command, input=prompt, text=True, env=env)
-    raise SystemExit(result.returncode)
+    result = subprocess.run(command, input=prompt, text=True, env=env, cwd=repository)
+    if result.returncode:
+        raise SystemExit(result.returncode)
+    empty_polls = 0
+    handled = 0
+    while handled < 16 and empty_polls < 4:
+        try:
+            with urllib.request.urlopen(args.endpoint.removesuffix('/v1') + '/followups', timeout=1) as response:
+                if response.status == 204:
+                    empty_polls += 1
+                    time.sleep(0.25)
+                    continue
+                followup = json.loads(response.read())
+        except urllib.error.HTTPError:
+            raise
+        empty_polls = 0
+        key = followup.get('key')
+        message = followup.get('message')
+        if not isinstance(key, str) or not re.fullmatch(r'[A-Za-z0-9_-]{1,200}', key) or not isinstance(message, str) or not 0 < len(message.encode()) <= 4096:
+            raise RuntimeError('followup-invalid')
+        resume = ['codex', 'exec', 'resume', '--last', '--json', '-m', args.model,
+                  '--output-last-message', str(captured), '--', message]
+        result = subprocess.run(resume, text=True, env=env, cwd=repository)
+        if result.returncode:
+            raise SystemExit(result.returncode)
+        acknowledgement = urllib.request.Request(
+            args.endpoint.removesuffix('/v1') + '/followups/' + key,
+            data=b'', method='POST', headers={'Content-Length': '0'},
+        )
+        with urllib.request.urlopen(acknowledgement, timeout=1) as response:
+            if response.status != 204:
+                raise RuntimeError('followup-ack-failed')
+        handled += 1
+    if not captured.is_file() or captured.is_symlink() or captured.stat().st_size > 1024 * 1024:
+        raise RuntimeError('agent-output-invalid')
+    temporary_output = output.with_suffix(output.suffix + '.tmp')
+    temporary_output.write_bytes(captured.read_bytes())
+    os.replace(temporary_output, output)
