@@ -60,6 +60,7 @@ for root in sys.argv[1:]:
 
 /** Concrete mechanics reuse AutoPod container managers, with a trusted detached guard. */
 export class ManagedContainerRuntime implements ManagedRuntimePort {
+  cleanupUnallocated?: (podId: string, request: ManagedPodRequest) => Promise<boolean>;
   private readonly known = new Map<string, ReviewedContainerBoundary>();
   constructor(
     private readonly boundaries: readonly ReviewedContainerBoundary[],

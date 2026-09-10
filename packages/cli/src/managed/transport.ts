@@ -1,3 +1,24 @@
+export class ManagedTransportError extends Error {
+  constructor(readonly code: string) {
+    super('managed-request-unavailable');
+  }
+}
+export function managedErrorCode(error: unknown): string {
+  if (error instanceof ManagedTransportError) return error.code;
+  if (
+    error instanceof Error &&
+    [
+      'managed-login-required',
+      'managed-connection-mismatch',
+      'managed-call-invalid',
+      'managed-call-too-large',
+      'managed-response-too-large',
+    ].includes(error.message)
+  )
+    return error.message;
+  return 'managed-request-unavailable';
+}
+
 export interface ManagedConnection {
   endpoint: string;
   issuer: string;
@@ -75,7 +96,22 @@ export async function managedRequest(
       ...(body === undefined ? {} : { 'Content-Type': 'application/json' }),
     },
   });
-  if (!response.ok || !response.body) throw new Error('managed-request-unavailable');
+  if (!response.ok) {
+    await response.body?.cancel();
+    throw new ManagedTransportError(
+      (
+        {
+          401: 'managed-http-unauthorized',
+          403: 'managed-http-forbidden',
+          404: 'managed-http-not-found',
+          409: 'managed-http-conflict',
+          429: 'managed-http-rate-limited',
+        } as Record<number, string>
+      )[response.status] ??
+        (response.status >= 500 ? 'managed-http-server-error' : 'managed-http-rejected'),
+    );
+  }
+  if (!response.body) throw new ManagedTransportError('managed-response-empty');
   const reader = response.body.getReader();
   const chunks: Uint8Array[] = [];
   let size = 0;
@@ -91,7 +127,11 @@ export async function managedRequest(
     await reader.cancel();
   }
   const bytes = Buffer.concat(chunks);
-  return call.binary
-    ? { base64: bytes.toString('base64') }
-    : { body: JSON.parse(bytes.toString('utf8')) };
+  if (call.binary) return { base64: bytes.toString('base64') };
+  if (!bytes.length) throw new ManagedTransportError('managed-response-empty');
+  try {
+    return { body: JSON.parse(bytes.toString('utf8')) };
+  } catch {
+    throw new ManagedTransportError('managed-response-invalid');
+  }
 }
