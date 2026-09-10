@@ -1,0 +1,26 @@
+{
+  "at": "2026-09-10T09:50:20.406300+00:00",
+  "operations": [
+    "drain",
+    "podsitter",
+    "watcher:teamplanner-agent",
+    "job:4AbxtWzo"
+  ],
+  "jobs": [
+    {
+      "id": "4AbxtWzo",
+      "enabled": false,
+      "nextRunAt": "2026-09-11T09:00:00.000Z",
+      "expectedNextRunAt": "2026-09-04T09:00:00.000Z",
+      "catchupPending": false,
+      "expectedCatchupPending": true
+    }
+  ],
+  "podsitter": {
+    "enabled": false,
+    "generation": 20,
+    "expectedGeneration": 20,
+    "sameSettings": true
+  },
+  "drain": true
+}

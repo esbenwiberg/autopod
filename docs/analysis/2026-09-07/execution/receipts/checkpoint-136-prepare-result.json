@@ -1,0 +1,10 @@
+{
+  "value": [
+    {
+      "code": "ProvisioningState/succeeded",
+      "displayStatus": "Provisioning succeeded",
+      "level": "Info",
+      "message": "Enable succeeded: \n[stdout]\n/data/autopod/rollout-136/cutover-library.mjs: OK\n/data/autopod/rollout-136/backup.mjs: OK\n/data/autopod/rollout-136/cutover.py: OK\n/data/autopod/rollout-136/semantic-gate.mjs: OK\n{\"status\":\"staged_semantics_verified\",\"sha\":\"425ff91cd5e6347b32d21b69804ea4c02008bc8e\",\"identities\":[{\"name\":\"chunk-MGSNJ6CM.js\",\"release\":{\"validationImplementationHash\":\"5ae52d1edc946a2a740fb4bd9b4bf8106936aa4ba4ff35a004e366497a6da956\",\"commitSha\":\"425ff91cd5e6347b32d21b69804ea4c02008bc8e\",\"dirty\":false,\"builtAt\":\"2026-09-10T09:39:59.545Z\",\"source\":\"build\"}}],\"checkoutClean\":true,\"entryHash\":\"3ba0d5f051b1e5737b6a995c2ebd68afb54efa3c559d19bc70e06e6a6ac3dcd1\",\"sandboxModule\":\"chunk-WX4Z5QAE.js\",\"sandboxModuleHash\":\"43ef3f6c5c663e18953d3d59aefb31f6813c2fd2817e184f33a34d917c7229e6\",\"schemaBudgetRetention\":true,\"omittedAndNullPreserved\":true,\"invalidBudgetRejected\":true,\"providerLinkedPinnedDigestVerified\":true,\"mutableImportDigestUnavailable\":true,\"scope\":\"Actual staged modules with local fake provider; not live image or MCP acceptance\"}\nCUTOVER_HELPERS_PREPARED\n\n[stderr]\n"
+    }
+  ]
+}

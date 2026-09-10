@@ -1,44 +1,42 @@
 # Partial closure report
 
-Current checkpoint: [135](checkpoint-135.md). All six workstreams have implementation and mapped evidence. The ledger now has 37 verified criteria and six partial criteria. Whole-goal completion is not claimed.
+Current checkpoint: [136](checkpoint-136.md). All six workstreams have implementation and mapped evidence. The ledger has 41 verified criteria and two partial entries: historical API causality (W4.5), and whole-goal closure dependent on it (G.6). Whole-goal completion is not claimed.
 
-Production runs clean release `089442b63e5827894da40c91c764b47ff4562073`, PID 136112, schema 183. Exact loaded health identity, service cwd/current link, fresh all-table backup/isolated restore and database integrity/FKs are verified. The receiver crash fix survived its real failure condition with zero daemon restarts. [Hosted deployment and acceptance](checkpoint-134.md).
+Production runs clean release `425ff91cd5e6347b32d21b69804ea4c02008bc8e`, PID 157498, schema 183. Exact loaded health identity, process cwd/current link, fresh all-table backup and isolated restore, database integrity/FKs and zero service restarts through the smoke are verified. [Hosted rollout and final acceptance](checkpoint-136.md), [final process/database](receipts/checkpoint-136-final-post-inspect.json).
 
-The next published candidate is `425ff91cd5e6347b32d21b69804ea4c02008bc8e` on `codex/durable-execution-contract`. Main remains integrated and unchanged at `b75fbf0b7e2c4ea455838a6e4df6537665a7a8cc`. Full validation passes: 6,390 package tests, one existing platform skip,11 standalone Node tests and required shell/install/build/type/lint/audit/secret checks;8/15 test tasks cached and one moderate advisory. [Exact validation receipt](receipts/checkpoint-135-full-validation-identity.json). Staging of this candidate is in progress; it is not the current deployed release.
+The required pipeline passed on that exact product source: 6,390 package tests, one existing platform skip, 11 standalone Node tests and required shell/install/build/type/lint/audit/secret checks; 8/15 test tasks were cached and one moderate dependency advisory remains. Full staging passed mandatory reviewer/browser prewarm and actual built-module semantic checks. The implementation branch is `codex/durable-execution-contract`; main remains integrated at `b75fbf0b7e2c4ea455838a6e4df6537665a7a8cc`, with no main merge performed. [Validation identity](receipts/checkpoint-135-full-validation-identity.json), [stage evidence](receipts/checkpoint-136-stage.txt).
 
-CP135 fixes two live-discovered gaps. The create schema discarded numeric tokenBudget, so earlier canary requests were effectively unlimited despite their recorded requested 32,000. The corrected schema retains validated numeric limits and preserves established omission/profile inheritance and explicit-null/unlimited behavior. Sandbox imports now use the resolved immutable digest and execution provenance verifies the fresh sandbox-to-disk link, immutable source and managed digest label. Existing mutable imports retain unavailable provenance; historical labels are not turned into proof.
+The corrected create API retains numeric budgets and preserves omitted/profile-inherited and explicit-null/unlimited behavior. The hosted smoke confirmed 32,000 tokens in both the served pod and durable task ledger. Its one agent/provider attempt reported 46,313 tokens; the daemon paused with budgetCheck=exhausted and no further turn ran. This is accounting-boundary enforcement, not a hard in-flight token or dollar ceiling. Earlier canary budgets that the old schema discarded remain recorded as ineffective requests.
 
-The MCP smoke is still open. `middle-tahr` made one real summary call which failed HTTP transport; its failure and no-change checkpoint are retained. Recorded model cost is $0.068994, with infrastructure and actual billing unavailable. A same-image non-model network probe passed HTTP/1.1 and HTTP/2 and was deleted. The explicit retry `crooked-spider` encountered Azure empty403 before CLI readiness, used bounded infrastructure cooldown, and was stopped; both of its sandboxes are confirmed absent. Zero recorded retry tokens/cost is not verified zero billing. [Retry and fixes](checkpoint-135.md).
+The same smoke durably registered its exact summary through MCP, preserved it after cleanup and recorded the deployed SHA, validation hash, Codex 0.144.4, immutable image digest, contract identity and actual 2 CPU / 4 GiB allocation. A separate non-model canary verified actual immutable image import and fresh sandbox-to-disk identity in 119,139 ms. Recorded smoke model cost is $0.063942; exact provider and infrastructure billing remain unavailable. No implementation, validation or delivery is claimed for this operational smoke. [MCP receipt and budget pause](receipts/checkpoint-136-canary-events.json), [durable summary/accounting](receipts/checkpoint-136-canary-observation.json), [image probe](receipts/checkpoint-136-image-probe-result.json).
 
-All original automatic dispatch settings are restored with pendingOperations=0, including the overdue schedule's existing catch-up decision and unchanged Podsitter provider authorization. All named canary sandboxes in CP133–135 are confirmed absent; shared production disk images were retained. One CP133 cleanup exceeded its ten-minute resource target and remains recorded as such. CP134 and 135 cleanup occurred within their bounds.
+Both CP136 canary sandboxes have provider GET404 proof within the ten-minute target. Two unrelated queued Dispatcher reservations were allowed to expire through their own watchdog and were observed terminal before restart; no operator kill was issued to them. All original automatic dispatch settings are restored with pendingOperations=0, preserving the concurrent advance to the future September 11 schedule and unchanged provider authorization. Shared production images and historical failed-canary records are retained. CP133's eleven-minute cleanup remains a recorded elapsed-bound failure. [Dispatch restoration](receipts/checkpoint-136-dispatch-retry-restore.json), [smoke cleanup](receipts/checkpoint-136-resource-cleanup.json).
 
 | Workstream | Verified evidence | Outstanding acceptance |
 |---|---|---|
-| 1. Completion, decisions, delivery | Durable manager/MCP fault regressions, native decision/recovery flows, deployed source and live crash containment. | Successful hosted sandbox MCP summary smoke. |
-| 2. Retries, budgets, evidence reuse | Durable retry identity/cooldown/binding, exact evidence reuse, frozen reviews, truthful cost completeness and supported client interactions. | Deploy numeric create-budget correction and verify effective served/task limit. |
-| 3. Dispatch and environment | Fresh refs/base checks, explicit distinct reruns, frozen provider identity, CP131 actual image config/registry/resource/streaming capabilities. | Deploy and verify corrected immutable-image admission/provenance. |
-| 4. Metrics, history, views | Bounded live history, cost/phase reconciliation, distinct units and recorded delivery, retained failures/waivers, mapped native/CLI/mobile interactions. | Actual September 7 historical failure cause remains unknown; a separately retained request-correlated trace is required. |
-| 5. Scheduled scans and triage | Exact-window collection, empty/incomplete distinction, durable reports/findings and human-selected repair paths, supported interactions. | None within recorded required scope. |
-| 6. Release and backups | Exact clean loaded source, actual fresh stopped-source backup/isolated restore, schema 153→183 upgrade and unchanged183 lineage, integrity/FKs, readiness views. | Actual corrected immutable-image execution provenance. |
+| 1. Completion, decisions, delivery | Durable manager/MCP fault regressions, native decision/recovery flows, hosted summary persistence and crash containment. | None within recorded required scope. |
+| 2. Retries, budgets, evidence reuse | Durable retry identity/cooldown/binding, exact evidence reuse, frozen reviews, current budget retention and pause, cost completeness and supported client interactions. | None within recorded required scope. |
+| 3. Dispatch and environment | Fresh refs/base checks, explicit reruns, frozen binding, actual image configuration/registry/resource/streaming capabilities and immutable import. | None within recorded required scope. |
+| 4. Metrics, history, views | Bounded hosted history, cost/phase reconciliation, distinct units/delivery, retained failures/waivers, native/CLI/mobile interactions. | Actual September 7 historical failure cause remains unknown. |
+| 5. Scheduled scans and triage | Exact-window collection, empty/incomplete distinction, durable reports/findings, human-selected repair paths and supported interactions. | None within recorded required scope. |
+| 6. Release and backups | Exact clean loaded source and image/CLI provenance, fresh backup/isolated restore, prior schema 153-to-183 upgrade and current unchanged-183 lineage, integrity/FKs and readiness views. | None within recorded required scope. |
 
-Prior 357 Swift tests and mapped native/mobile/CLI interactions retain their exact source boundaries. CP135 changes shared request parsing and a type comment, not client UI implementation. The matched local benchmark remains613.435166ms baseline versus1764.543375ms reuse, with zero escaped seeded defects and unchanged coverage. The 25% target is unsupported; no live speed gain is claimed.
+Prior 357 Swift tests and mapped native/mobile/CLI interactions retain their exact source boundaries. CP135 changed shared request parsing and a type comment, not the client UI implementation. The matched local benchmark remains 613.435166 ms baseline versus 1764.543375 ms reuse, with zero escaped seeded defects and unchanged coverage. The 25% target is unsupported; no live speed gain is claimed. [Complete criterion evidence](acceptance.json).
 
-The historical failure trace is separate from all new incidents. Retained pre-report journal is empty; current syslog did not contain the failing requests and the fully read older archive ends August 23. Neither a malformed-JSON fixture nor current HTTP200 establishes the old cause. The original contract remains unchanged.
+The remaining historical requirement cannot be established from the available retained sources: pre-report journal is empty, inspected current syslog did not contain the failing requests, and the fully read older archive ends August 23. Neither the malformed-JSON fixture nor current healthy APIs proves that cause. Closure needs a separately retained request-correlated causal trace, or an explicit amendment accepting the historical cause as unknown. No further rollout or canary approval is pending, and another canary cannot reconstruct this missing history.
 
-The user's continuing authorization covers publication, controlled deployment/restart, dispatch pause/restore, fresh backup verification and necessary canaries. There is no routine approval pending. The [release procedure](release-and-acceptance-packet.md) preserves post-cutover DB/WAL, requires zero active work and a fresh restore-verified snapshot, and uses forward recovery. A bare downgrade to the schema 153 writer is not a safe rollback.
-
-The [ledger](acceptance.json) maps all 43 criteria and retains earlier implementation/test evidence. [Dated prior closure](receipts/checkpoint-134-prior-closure-report.md) preserves the earlier unpublished/unattested state; its old gate wording is historical.
+The [release packet](release-and-acceptance-packet.md) records current identities, completed acceptance and forward-recovery safeguards. Preserve post-cutover database/WAL and new records; a bare downgrade to the old schema-153 writer is unsafe. Previous failed MCP transport and Azure403 receipts remain failures, with no claim that this successful rerun explains their causes. [Dated prior closure](receipts/checkpoint-136-prior-closure-report.md).
 
 ## Criterion status
 
 | Criterion | Requirement | Status |
 |---|---|---|
 | W1.1 | Settlement and unresolved human input are reconciled without weakening transitions | verified |
-| W1.2 | Summaries and work survive disconnect, expiry, late replies, duplicate completion and restart | partial |
+| W1.2 | Summaries and work survive disconnect, expiry, late replies, duplicate completion and restart | verified |
 | W1.3 | Finalization decisions and generations are durable with idempotent side effects | verified |
 | W1.4 | Agent settlement, source preservation, validation, delivery and external disposition are separate | verified |
 | W1.5 | Completion/escalation, provider recovery and delivery have cohesive ownership | verified |
-| W2.1 | Task retry identity and cumulative budget survive Resume, restart and linked fix pods | partial |
+| W2.1 | Task retry identity and cumulative budget survive Resume, restart and linked fix pods | verified |
 | W2.2 | Unchanged nonretryable failures require changed relevant inputs or recorded authorized override | verified |
 | W2.3 | Transient provider failures use bounded backoff within authorized binding separately from repository rework | verified |
 | W2.4 | Initial, rework, review, validation time and available infrastructure costs reconcile without double counting | verified |
@@ -47,7 +45,7 @@ The [ledger](acceptance.json) maps all 43 criteria and retains earlier implement
 | W2.7 | Matched reproducible benchmark measures 25 percent target and seeded defect escape with fixed coverage; local and live separated | verified |
 | W3.1 | Fresh remote refs precede actual-base create/update/delete contract checks | verified |
 | W3.2 | Equivalent active/recent work is detected; intentional reruns receive distinct execution identity | verified |
-| W3.3 | Required commands, resources and provider binding checked before coding agent spawn | partial |
+| W3.3 | Required commands, resources and provider binding checked before coding agent spawn | verified |
 | W3.4 | Supported capability probe resolves sandbox config ownership and registry execution semantics | verified |
 | W3.5 | Queued provider binding survives mutable profile changes with actionable reconciliation errors | verified |
 | W3.6 | Live actual-image capability canary verified under explicit authority | verified |
@@ -65,7 +63,7 @@ The [ledger](acceptance.json) maps all 43 criteria and retains earlier implement
 | W5.4 | Stable finding identities preserve unresolved findings across runs without duplicate prompts | verified |
 | W5.5 | Reports and triage survive worker lifetime and disconnected human wait | verified |
 | W5.6 | Repairs launch only after required human selection; report-only completion differs from patch delivery | verified |
-| W6.1 | Execution records contain daemon SHA, CLI version, image digest, contract/validation identity and capabilities | partial |
+| W6.1 | Execution records contain daemon SHA, CLI version, image digest, contract/validation identity and capabilities | verified |
 | W6.2 | Health and operator release/readiness views identify meaningful release and failure provenance | verified |
 | W6.3 | Active hosted database and backup scope verified without inferring all hosted backups missing | verified |
 | W6.4 | Freshness and disk headroom checks added while preserving cleanup/deployment safeguards | verified |

@@ -1,0 +1,10 @@
+{
+  "value": [
+    {
+      "code": "ProvisioningState/succeeded",
+      "displayStatus": "Provisioning succeeded",
+      "level": "Info",
+      "message": "Enable succeeded: \n[stdout]\n/data/autopod/rollout-136/image-probe.mjs: OK\n{\"candidate\":\"425ff91cd5e6347b32d21b69804ea4c02008bc8e\",\"startedAt\":\"2026-09-10T10:01:23.071Z\",\"pod\":\"goal-136-image-20260910\",\"selectedSource\":\"ewiautopodacr.azurecr.io/autopod/dataverse-harness:latest\",\"frozenDigest\":\"sha256:4b836cdabc71ffd40aef564b65b6b16564c5312770130bc59251a732078c9d77\",\"digestSelection\":\"Explicit frozen canary digest from CP134; no claim about the current mutable tag.\",\"providerCalls\":0,\"workDeadlineSeconds\":480,\"resourceTargetSeconds\":600,\"estimatedSpend\":\"One pinned disk conversion and at most ten minutes of 2 CPU / 4 GiB sandbox allocation, no model. Exact conversion/storage and compute billing unavailable.\",\"events\":[{\"at\":\"2026-09-10T10:03:13.876Z\",\"msg\":\"Azure sandbox disk image accepted\",\"diskImageId\":\"9ec74887-e5fd-436c-a6de-d6fc80aee529\"},{\"at\":\"2026-09-10T10:03:15.140Z\",\"msg\":\"Azure sandbox create accepted\",\"diskImageId\":\"9ec74887-e5fd-436c-a6de-d6fc80aee529\",\"sandboxId\":\"758715c0-d8ed-487c-af0e-ce60b0fc7e26\"}],\"status\":\"live_staged_image_provenance_verified\",\"id\":\"758715c0-d8ed-487c-af0e-ce60b0fc7e26\",\"image\":{\"diskId\":\"9ec74887-e5fd-436c-a6de-d6fc80aee529\",\"base\":\"ewiautopodacr.azurecr.io/autopod/dataverse-harness@sha256:4b836cdabc71ffd40aef564b65b6b16564c5312770130bc59251a732078c9d77\",\"digest\":\"sha256:4b836cdabc71ffd40aef564b65b6b16564c5312770130bc59251a732078c9d77\"},\"metadata\":{\"imageDigest\":\"sha256:4b836cdabc71ffd40aef564b65b6b16564c5312770130bc59251a732078c9d77\",\"memoryLimitBytes\":4294967296,\"cpuLimit\":2,\"networkMode\":null},\"ownerMatched\":true,\"finalSandboxStatus\":404,\"finishedAt\":\"2026-09-10T10:03:22.210Z\",\"elapsedMs\":119139,\"resourceTargetMet\":true,\"imageRetention\":\"Pinned production cache retained; existing mutable cache and unrelated sandboxes untouched\"}\n\n{\"exitCode\": 0, \"stderrPresent\": false}\n\n[stderr]\n"
+    }
+  ]
+}

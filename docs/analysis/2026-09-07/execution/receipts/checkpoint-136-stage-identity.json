@@ -1,0 +1,8 @@
+{
+  "candidate": "425ff91cd5e6347b32d21b69804ea4c02008bc8e",
+  "rawLogSHA256": "50a27c6b4084d2e921db530b1a6efbb49c48c85ba3e301289d6fc7e8f96e85ef",
+  "rawArchive": "checkpoint-136-stage.raw.txt.gz",
+  "readableLogSHA256": "2655dc75bb97ba615a22db43efa43d6078d52b6b891157578823440c9bcfb036",
+  "readableNormalization": "Trailing whitespace removed; raw bytes preserved separately",
+  "scope": "Full build, reviewer/browser prewarm and stage only; later cutover receipt proves activation"
+}

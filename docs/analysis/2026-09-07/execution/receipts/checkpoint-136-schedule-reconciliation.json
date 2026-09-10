@@ -1,0 +1,13 @@
+{
+  "at": "2026-09-10T09:51:39.627376+00:00",
+  "status": "preserve_newer_schedule_window",
+  "old": {
+    "nextRunAt": "2026-09-04T09:00:00.000Z",
+    "catchupPending": true
+  },
+  "new": {
+    "nextRunAt": "2026-09-11T09:00:00.000Z",
+    "catchupPending": false
+  },
+  "reason": "Schedule catch-up changed while maintenance was paused. Preserve the observed future window and restore only the original enabled setting; do not restore the old overdue decision."
+}

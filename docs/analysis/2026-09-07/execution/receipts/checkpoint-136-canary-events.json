@@ -1,0 +1,132 @@
+[
+  {
+    "eventId": 554167,
+    "type": "status",
+    "timestamp": "2026-09-10T10:07:22.291Z",
+    "message": "Creating worktree\u2026"
+  },
+  {
+    "eventId": 554168,
+    "type": "status",
+    "timestamp": "2026-09-10T10:07:24.062Z",
+    "message": "Checking contract declarations against fetched base\u2026"
+  },
+  {
+    "eventId": 554170,
+    "type": "status",
+    "timestamp": "2026-09-10T10:07:24.077Z",
+    "message": "Running security scan\u2026"
+  },
+  {
+    "eventId": 554171,
+    "type": "status",
+    "timestamp": "2026-09-10T10:07:24.303Z",
+    "message": "Creating sandbox (node22-pw)\u2026"
+  },
+  {
+    "eventId": 554172,
+    "type": "status",
+    "timestamp": "2026-09-10T10:07:25.714Z",
+    "message": "Uploading workspace to sandbox\u2026"
+  },
+  {
+    "eventId": 554173,
+    "type": "status",
+    "timestamp": "2026-09-10T10:07:26.684Z",
+    "message": "Populating workspace\u2026"
+  },
+  {
+    "eventId": 554175,
+    "type": "status",
+    "timestamp": "2026-09-10T10:07:29.101Z",
+    "message": "Building provider credentials\u2026"
+  },
+  {
+    "eventId": 554176,
+    "type": "status",
+    "timestamp": "2026-09-10T10:07:29.685Z",
+    "message": "Writing system instructions to container\u2026"
+  },
+  {
+    "eventId": 554177,
+    "type": "status",
+    "timestamp": "2026-09-10T10:07:29.837Z",
+    "message": "Starting worker: provider=openai, runtime=codex, model=gpt-5.6-sol"
+  },
+  {
+    "eventId": 554178,
+    "type": "status",
+    "timestamp": "2026-09-10T10:07:30.362Z",
+    "message": "Spawning agent\u2026"
+  },
+  {
+    "eventId": 554179,
+    "type": "status",
+    "timestamp": "2026-09-10T10:07:34.766Z",
+    "message": "Codex session ready"
+  },
+  {
+    "eventId": 554180,
+    "type": "status",
+    "timestamp": "2026-09-10T10:07:34.787Z",
+    "message": "Codex turn started"
+  },
+  {
+    "eventId": 554181,
+    "type": "tool_use",
+    "timestamp": "2026-09-10T10:07:45.120Z",
+    "tool": "mcp__escalation__report_task_summary",
+    "input": {
+      "call_id": "item_0",
+      "server": "escalation",
+      "actualSummary": "AUTOPOD_GOAL_133_MCP_SMOKE_20260910",
+      "how": "Operational smoke only; no repository changes or delivery.",
+      "deviations": []
+    }
+  },
+  {
+    "eventId": 554182,
+    "type": "task_summary",
+    "timestamp": "2026-09-10T10:07:45.140Z",
+    "actualSummary": "AUTOPOD_GOAL_133_MCP_SMOKE_20260910",
+    "how": "Operational smoke only; no repository changes or delivery.",
+    "deviations": []
+  },
+  {
+    "eventId": 554183,
+    "type": "tool_use",
+    "timestamp": "2026-09-10T10:07:45.173Z",
+    "tool": "mcp__escalation__report_task_summary",
+    "input": {
+      "call_id": "item_0",
+      "server": "escalation",
+      "actualSummary": "AUTOPOD_GOAL_133_MCP_SMOKE_20260910",
+      "how": "Operational smoke only; no repository changes or delivery.",
+      "deviations": []
+    },
+    "output": "{\"content\":[{\"type\":\"text\",\"text\":\"Task summary registered. No deviations from plan reported. The reviewer will assess any deviations.\"}],\"structured_content\":null}"
+  },
+  {
+    "eventId": 554184,
+    "type": "reasoning",
+    "timestamp": "2026-09-10T10:07:47.572Z"
+  },
+  {
+    "eventId": 554185,
+    "type": "complete",
+    "timestamp": "2026-09-10T10:07:47.614Z",
+    "costUsd": 0.063942
+  },
+  {
+    "eventId": 554186,
+    "type": "status",
+    "timestamp": "2026-09-10T10:07:47.621Z",
+    "message": "Token budget exceeded (46313/32000 tokens used). Waiting for user approval to continue."
+  },
+  {
+    "eventId": 554189,
+    "type": "status",
+    "timestamp": "2026-09-10T10:08:54.953Z",
+    "message": "Killing pod\u2026"
+  }
+]
