@@ -11,3 +11,7 @@ An unallocated sandbox reservation can be cleaned only after observed exit and r
 Local regressions cover the directory-only ignore, unchanged mirror, restart, expired lookup, installation isolation, safe errors, and refusal to clean uncertain allocations. No migration or global profile enablement is introduced. The paired Dispatcher fix reports admission/attention truthfully and uses managed retry/stop instead of the native kernel.
 
 Deployment must preserve the already deployed `425ff91c` release lineage from the parallel task. After paired deployment, recover and clean the two September 10 failed portfolio reservations before a fresh bounded research attempt. Local tests do not establish paid provider, Azure execution, artifact delivery, or Voice-device acceptance.
+
+## Clean deployment rebuild
+
+The first overlay activation preserved old Git metadata: health reported commit 425ff91c with dirty=true despite the new reachable managed bundle. The strict release gate rejected that deployment and retained maintenance. Rebuild this candidate with the standard script's --full mode and --verify-release; do not bypass the identity gate or claim health 200 as provenance.
