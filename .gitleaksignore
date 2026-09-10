@@ -8,3 +8,13 @@ fe619fa27b3e7742229e9c81041ef1c5d7684526:docs/analysis/2026-09-07/execution/rece
 638f9144017ee59cdb04e4fa927e42e62c4fbe1b:docs/analysis/2026-09-07/execution/receipts/checkpoint-98-browser-server.txt:generic-api-key:2
 2f3549e5dbc818c7624fd09e19cbd00f915b68b9:docs/analysis/2026-09-07/execution/receipts/checkpoint-95-browser-fixture.txt:generic-api-key:3
 67b14113ceb1afc7ccdafa246beaebf28bfc15a4:docs/analysis/2026-09-07/execution/receipts/checkpoint-94-browser-fixture.txt:generic-api-key:2
+
+# Same verified fixture UUIDs reidentified by the PR #333 squash commit.
+6db2b82db9781a26f3dbc10e9bdd20ff24ab3d4c:docs/analysis/2026-09-07/execution/receipts/checkpoint-113-mobile-acceptance.txt:generic-api-key:2
+6db2b82db9781a26f3dbc10e9bdd20ff24ab3d4c:docs/analysis/2026-09-07/execution/receipts/checkpoint-113-mobile-dispatch.txt:generic-api-key:2
+6db2b82db9781a26f3dbc10e9bdd20ff24ab3d4c:docs/analysis/2026-09-07/execution/receipts/checkpoint-113-mobile-dispatch.txt:generic-api-key:3
+6db2b82db9781a26f3dbc10e9bdd20ff24ab3d4c:docs/analysis/2026-09-07/execution/receipts/checkpoint-120-native-direct.json:generic-api-key:65
+6db2b82db9781a26f3dbc10e9bdd20ff24ab3d4c:docs/analysis/2026-09-07/execution/receipts/checkpoint-94-browser-fixture.txt:generic-api-key:2
+6db2b82db9781a26f3dbc10e9bdd20ff24ab3d4c:docs/analysis/2026-09-07/execution/receipts/checkpoint-95-browser-fixture.txt:generic-api-key:3
+6db2b82db9781a26f3dbc10e9bdd20ff24ab3d4c:docs/analysis/2026-09-07/execution/receipts/checkpoint-98-browser-server.txt:generic-api-key:2
+6db2b82db9781a26f3dbc10e9bdd20ff24ab3d4c:docs/analysis/2026-09-07/execution/receipts/sandbox-startup-browser-server.txt:generic-api-key:2
