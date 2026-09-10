@@ -1,0 +1,99 @@
+{
+  "startedAt": "2026-09-10T06:03:09.828Z",
+  "contractSHA256": "e0b142993993cb700fecefda5c1d64f94145558941c3a0ce22807bf86a6aec0c",
+  "candidate": "4e73cd8ce88e44cdb5c2d8d0a89447b819fa5a39",
+  "nonce": "autopod-cp128-20260910-7c3a829e",
+  "runnerSHA256": "748164f6a6425b4c0ff6baf21a6f8aa095cddd92e151e2c61ff590a376f84b11",
+  "bundleSHA256": "159ffce46631ab9f3f0b58641f04ea67f5736cdeaf5d756ec98cd28f26ecb3dc",
+  "status": "failed",
+  "events": [
+    {
+      "at": "2026-09-10T06:03:13.211Z",
+      "kind": "preflight_passed"
+    },
+    {
+      "at": "2026-09-10T06:03:13.404Z",
+      "kind": "acr_exchange_intent"
+    },
+    {
+      "at": "2026-09-10T06:03:13.510Z",
+      "kind": "acr_exchange_response",
+      "httpStatus": 200
+    },
+    {
+      "at": "2026-09-10T06:03:13.510Z",
+      "kind": "disk_create_intent"
+    },
+    {
+      "at": "2026-09-10T06:04:59.793Z",
+      "kind": "disk_create_response",
+      "httpStatus": 200
+    },
+    {
+      "at": "2026-09-10T06:04:59.795Z",
+      "kind": "disk_identified",
+      "id": "2e5553f6-139b-4684-a2dd-2e18b1068164"
+    },
+    {
+      "at": "2026-09-10T06:04:59.907Z",
+      "kind": "disk_state",
+      "state": "Ready"
+    },
+    {
+      "at": "2026-09-10T06:04:59.908Z",
+      "kind": "sandbox_create_intent"
+    },
+    {
+      "at": "2026-09-10T06:04:59.948Z",
+      "kind": "http_refusal",
+      "httpStatus": 400,
+      "registryMention": false,
+      "authenticationMention": false,
+      "permissionMention": false
+    },
+    {
+      "at": "2026-09-10T06:04:59.948Z",
+      "kind": "sandbox_create_response",
+      "httpStatus": 400
+    },
+    {
+      "at": "2026-09-10T06:04:59.949Z",
+      "kind": "sandbox_reconcile"
+    },
+    {
+      "at": "2026-09-10T06:04:59.995Z",
+      "kind": "execution_stopped",
+      "stage": "sandbox_create",
+      "code": "create_reconciliation_unresolved"
+    },
+    {
+      "at": "2026-09-10T06:04:59.996Z",
+      "kind": "sandbox_cleanup_unresolved"
+    }
+  ],
+  "checks": {},
+  "providerCalls": 0,
+  "preflight": {
+    "sourceUnchanged": true,
+    "principalMatched": true,
+    "groupMatched": true,
+    "pullIdentityMatched": true,
+    "sourceDigestMatched": true,
+    "nonceAbsent": true,
+    "diskCount": 16,
+    "sandboxCount": 0
+  },
+  "diskCreateIntent": true,
+  "diskId": "2e5553f6-139b-4684-a2dd-2e18b1068164",
+  "sandboxCreateIntent": true,
+  "sandboxCreateStarted": 1789020299908,
+  "sandboxCreateUncertain": true,
+  "failure": {
+    "stage": "sandbox_create",
+    "code": "create_reconciliation_unresolved"
+  },
+  "sandboxCleanupError": "unresolved_creation_identity",
+  "finishedAt": "2026-09-10T06:04:59.997Z",
+  "allCreatedResourcesRemoved": false,
+  "sandboxAllocationThroughCleanupMs": 89
+}

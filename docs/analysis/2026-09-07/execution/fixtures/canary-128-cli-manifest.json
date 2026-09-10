@@ -1,0 +1,42 @@
+{
+  "resources": {
+    "cpu": "2000m",
+    "memory": "4096Mi",
+    "disk": "40Gi"
+  },
+  "lifecycle": {
+    "autoSuspendPolicy": {
+      "enabled": true,
+      "interval": 900,
+      "mode": "Memory"
+    }
+  },
+  "environment": {
+    "DOTNET_CLI_TELEMETRY_OPTOUT": "1",
+    "DOTNET_SKIP_FIRST_TIME_EXPERIENCE": "1"
+  },
+  "egressPolicy": {
+    "defaultAction": "Deny",
+    "hostRules": [
+      {
+        "pattern": "api.nuget.org",
+        "action": "Allow"
+      },
+      {
+        "pattern": "azuresearch-usnc.nuget.org",
+        "action": "Allow"
+      },
+      {
+        "pattern": "azuresearch-ussc.nuget.org",
+        "action": "Allow"
+      }
+    ]
+  },
+  "labels": {
+    "managedBy": "codex-acceptance",
+    "acceptanceRun": "autopod-cp128-20260910-7c3a829e",
+    "sourceDigest": "sha256:4b836cdabc71ffd40aef564b65b6b16564c5312770130bc59251a732078c9d77",
+    "sourceImageHash": "5870153ff7a06654"
+  },
+  "diskId": "2e5553f6-139b-4684-a2dd-2e18b1068164"
+}

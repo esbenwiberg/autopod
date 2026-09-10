@@ -1,10 +1,10 @@
 # Partial closure report
 
-Current checkpoint: [128](checkpoint-128.md). All six workstreams have local implementation and regression evidence. Required native/CLI/mobile interactions are verified within their recorded scope. The goal remains incomplete because loaded-source identity, historical API causality and actual-image capability evidence remain outstanding.
+Current checkpoint: [129](checkpoint-129.md). All six workstreams have local implementation and regression evidence. Required native/CLI/mobile interactions are verified within their recorded scope. The goal remains incomplete because loaded-source identity, historical API causality and actual-image capability evidence remain outstanding.
 
 The explicitly approved replacement hosted-copy check passed at checkpoint 124: the actual pinned snapshot migrated privately from schema 153 to 183 with original rows/columns preserved, integrity/FK/backfill/write checks passing, unchanged input, stable service identity and both private directories removed. [Result](receipts/checkpoint-124-hosted-result.json). The earlier changed-input refusal is retained separately. No active database migration or service restart occurred, and no copy-execution approval remains pending.
 
-PIM reads work and the corrected ACR exchange succeeded (CP128 HTTP 200). The one approved import was locally aborted after 60 seconds by a runner defect; no sandbox started. Forty-eight complete inventories through/past the ten-minute window found no task resources, but Azure cancellation/hidden conversion is unconfirmed. The timeout fix passes local regression checks. The [full-window additional-attempt proposal](full-window-image-canary-packet.md) discloses that uncertainty and awaits approval; no automatic retry occurred.
+CP129 proved the exact image import (HTTP 200, Ready after 106.283 seconds), but Azure rejected the sandbox create with HTTP 400. No capability commands ran. Repeated empty sandbox inventories and exact owned-image DELETE/GET404 verified cleanup. The [additional-attempt packet](label-safe-image-canary-packet.md) corrects a raw-digest sandbox label to the candidate's lossless safe encoding and improves redacted diagnostics; the exact 400 cause remains unconfirmed. No live retry occurred and further paid execution awaits approval.
 
 ## Exact candidate and verification
 

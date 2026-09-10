@@ -1,5 +1,7 @@
 # Release and remaining acceptance packet
 
+**CP129 update:** the approved full-window import succeeded. Sandbox creation returned 400; the task-owned image was deleted and absence verified. No runtime checks ran. The [label-safe additional-attempt proposal](label-safe-image-canary-packet.md) supersedes the consumed request; exact rejection cause remains unconfirmed.
+
 **CP128 update:** the corrected request was approved and used once. ACR exchange succeeded; the image PUT hit an erroneous local 60-second timeout. No task resource was observed in repeated inventories through/past the ten-minute window. The [full-window proposal](full-window-image-canary-packet.md) replaces this consumed request; hidden conversion remains uncertain and no retry is authorized.
 
 **CP127 update:** approved CP126 import returned HTTP 401; no sandbox ran and repeated inventories found no task resources. The [corrected additional-attempt packet](corrected-image-canary-packet.md) adds the documented transient ACR token exchange and requires separate approval. Earlier statements that execution was unapproved are dated CP126 history.

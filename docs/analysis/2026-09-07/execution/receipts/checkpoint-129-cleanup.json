@@ -1,0 +1,48 @@
+{
+  "nonce": "autopod-cp128-20260910-7c3a829e",
+  "diskId": "2e5553f6-139b-4684-a2dd-2e18b1068164",
+  "events": [
+    {
+      "at": "2026-09-10T06:06:20.624174+00:00",
+      "kind": "sandbox_nonce_absent",
+      "inventoryCount": 0
+    },
+    {
+      "at": "2026-09-10T06:06:30.777924+00:00",
+      "kind": "sandbox_nonce_absent",
+      "inventoryCount": 0
+    },
+    {
+      "at": "2026-09-10T06:06:40.931782+00:00",
+      "kind": "sandbox_nonce_absent",
+      "inventoryCount": 0
+    },
+    {
+      "at": "2026-09-10T06:06:41.063901+00:00",
+      "kind": "disk_owned_identity_verified"
+    },
+    {
+      "at": "2026-09-10T06:06:41.064207+00:00",
+      "kind": "disk_delete_intent"
+    },
+    {
+      "at": "2026-09-10T06:06:41.281579+00:00",
+      "kind": "disk_delete_response",
+      "httpStatus": 202
+    },
+    {
+      "at": "2026-09-10T06:06:41.412454+00:00",
+      "kind": "disk_absent_verified",
+      "httpStatus": 404
+    },
+    {
+      "at": "2026-09-10T06:06:41.699093+00:00",
+      "kind": "final_inventory",
+      "diskCount": 16,
+      "sandboxCount": 0
+    }
+  ],
+  "sandboxRefusalReconciled": true,
+  "diskRemoved": true,
+  "result": "owned_disk_removed_sandbox_refused_no_resource_observed"
+}

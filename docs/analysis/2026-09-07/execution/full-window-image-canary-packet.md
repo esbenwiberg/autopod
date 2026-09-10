@@ -1,5 +1,7 @@
 # Full-window import request: additional attempt proposal
 
+**CP129 update:** the approved full-window import succeeded. Sandbox creation returned 400; the task-owned image was deleted and absence verified. No runtime checks ran. The [label-safe additional-attempt proposal](label-safe-image-canary-packet.md) supersedes the consumed request; exact rejection cause remains unconfirmed.
+
 **Prepared, not authorized or executed.** The CP127 approval was used for one successful transient ACR exchange and one image-import PUT. The local runner aborted that PUT after 60 seconds instead of allowing the approved ten-minute import window. No sandbox create was attempted. The [live receipt](receipts/checkpoint-128-live-attempt.json) retains that exact outcome. Continuing read-only reconciliation is recorded in checkpoint 128; inventory absence does not prove that Azure cancelled an unreturned request.
 
 The timeout defect is reproduced locally: the original runner fails a check requiring the import request signal to use the contract's full window; the corrected runner passes. Success and runtime-failure cases preserve single creation and exact-resource cleanup, with mocked network only. [RED](receipts/checkpoint-128-import-window-red.txt), [GREEN](receipts/checkpoint-128-import-window-green.txt). No application source change is involved.

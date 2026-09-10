@@ -1364,13 +1364,15 @@
         "checkpoint-127.md",
         "corrected-image-canary-packet.md",
         "checkpoint-128.md",
-        "full-window-image-canary-packet.md"
+        "full-window-image-canary-packet.md",
+        "checkpoint-129.md",
+        "label-safe-image-canary-packet.md"
       ],
       "prerequisites": [
-        "CP128 approved CP127 ACR exchange succeeded (200); one image import was locally aborted after 60 seconds due to a runner timeout defect. No sandbox or capability checks ran. Forty-eight complete inventories through/past the ten-minute window found zero task resources. Azure cancellation/hidden conversion remains unconfirmed. Full-window runner fixed and locally regression-tested; additional-attempt packet pending explicit approval, with fresh prior-nonce reconciliation required. No retry, role grant or existing-resource deletion occurred."
+        "CP129 exact image import succeeded (200, Ready, 106.283 seconds). One sandbox create returned 400; no capability checks ran. Three complete empty sandbox inventories and exact owned-image DELETE/GET404 verified cleanup. Raw digest sandbox label mismatch with candidate safe encoding corrected locally; precise Azure 400 cause remains unconfirmed. Additional label-safe attempt requires explicit approval; no known task resource remains."
       ],
       "finalSourceEvidence": "90a61141a6a8ed6205aae144bbb99f8c9f0f9ec5; see checkpoint-106.md for executed checks, carried forward surface proof and limits.",
-      "remaining": "CP128 approved CP127 ACR exchange succeeded (200); one image import was locally aborted after 60 seconds due to a runner timeout defect. No sandbox or capability checks ran. Forty-eight complete inventories through/past the ten-minute window found zero task resources. Azure cancellation/hidden conversion remains unconfirmed. Full-window runner fixed and locally regression-tested; additional-attempt packet pending explicit approval, with fresh prior-nonce reconciliation required. No retry, role grant or existing-resource deletion occurred.",
+      "remaining": "CP129 exact image import succeeded (200, Ready, 106.283 seconds). One sandbox create returned 400; no capability checks ran. Three complete empty sandbox inventories and exact owned-image DELETE/GET404 verified cleanup. Raw digest sandbox label mismatch with candidate safe encoding corrected locally; precise Azure 400 cause remains unconfirmed. Additional label-safe attempt requires explicit approval; no known task resource remains.",
       "historicalProgressNotes": "Actual affected dataverse-harness image is pinned in CP110, but the required capability canary remains unrun. Obtain intended-group data-plane access and finish the ready-disk-image identity, total spend and command/oracle packet before paid-canary authorization."
     },
     {
@@ -1448,13 +1450,15 @@
         "checkpoint-127.md",
         "corrected-image-canary-packet.md",
         "checkpoint-128.md",
-        "full-window-image-canary-packet.md"
+        "full-window-image-canary-packet.md",
+        "checkpoint-129.md",
+        "label-safe-image-canary-packet.md"
       ],
       "prerequisites": [
-        "CP128 approved CP127 ACR exchange succeeded (200); one image import was locally aborted after 60 seconds due to a runner timeout defect. No sandbox or capability checks ran. Forty-eight complete inventories through/past the ten-minute window found zero task resources. Azure cancellation/hidden conversion remains unconfirmed. Full-window runner fixed and locally regression-tested; additional-attempt packet pending explicit approval, with fresh prior-nonce reconciliation required. No retry, role grant or existing-resource deletion occurred."
+        "CP129 exact image import succeeded (200, Ready, 106.283 seconds). One sandbox create returned 400; no capability checks ran. Three complete empty sandbox inventories and exact owned-image DELETE/GET404 verified cleanup. Raw digest sandbox label mismatch with candidate safe encoding corrected locally; precise Azure 400 cause remains unconfirmed. Additional label-safe attempt requires explicit approval; no known task resource remains."
       ],
       "finalSourceEvidence": "90a61141a6a8ed6205aae144bbb99f8c9f0f9ec5; see checkpoint-106.md for executed checks, carried forward surface proof and limits.",
-      "remaining": "CP128 approved CP127 ACR exchange succeeded (200); one image import was locally aborted after 60 seconds due to a runner timeout defect. No sandbox or capability checks ran. Forty-eight complete inventories through/past the ten-minute window found zero task resources. Azure cancellation/hidden conversion remains unconfirmed. Full-window runner fixed and locally regression-tested; additional-attempt packet pending explicit approval, with fresh prior-nonce reconciliation required. No retry, role grant or existing-resource deletion occurred."
+      "remaining": "CP129 exact image import succeeded (200, Ready, 106.283 seconds). One sandbox create returned 400; no capability checks ran. Three complete empty sandbox inventories and exact owned-image DELETE/GET404 verified cleanup. Raw digest sandbox label mismatch with candidate safe encoding corrected locally; precise Azure 400 cause remains unconfirmed. Additional label-safe attempt requires explicit approval; no known task resource remains."
     },
     {
       "id": "W4.1",
@@ -2906,13 +2910,15 @@
         "checkpoint-127.md",
         "corrected-image-canary-packet.md",
         "checkpoint-128.md",
-        "full-window-image-canary-packet.md"
+        "full-window-image-canary-packet.md",
+        "checkpoint-129.md",
+        "label-safe-image-canary-packet.md"
       ],
       "prerequisites": [
-        "CP127 approval consumed by one successful ACR exchange and one unreturned import; CP128 discloses runner timeout defect, negative post-window inventory and unresolved Azure operation/billing. Full-window additional-attempt packet prepared with new nonce, unchanged resource/command/cleanup scope and explicit uncertainty. Separate deployment/rollback/cutover prerequisites remain."
+        "CP128 approval consumed: image imported and removed after sandbox400; no runtime checks ran. CP129 same-scope additional attempt prepared with lossless sandbox digest label, fresh nonce, redacted diagnostics, cleanup proof and unchanged cost uncertainty. Explicit approval pending; separate release/rollback and cutover requirements retained."
       ],
       "finalSourceEvidence": "15900d9e08a7e4ca786a6ad11ff81820fda14de4; clean full pipeline and 357 Swift tests; direct native case/source boundaries in checkpoint-117 receipt.",
-      "remaining": "CP127 approval consumed by one successful ACR exchange and one unreturned import; CP128 discloses runner timeout defect, negative post-window inventory and unresolved Azure operation/billing. Full-window additional-attempt packet prepared with new nonce, unchanged resource/command/cleanup scope and explicit uncertainty. Separate deployment/rollback/cutover prerequisites remain."
+      "remaining": "CP128 approval consumed: image imported and removed after sandbox400; no runtime checks ran. CP129 same-scope additional attempt prepared with lossless sandbox digest label, fresh nonce, redacted diagnostics, cleanup proof and unchanged cost uncertainty. Explicit approval pending; separate release/rollback and cutover requirements retained."
     },
     {
       "id": "G.6",
@@ -2952,7 +2958,7 @@
       "remaining": "All 43 criteria remain mapped. W5, mapped operator interactions and exact hosted snapshot compatibility are verified. Loaded-source identity, historical API causality and actual-image capability remain outstanding; whole-goal completion is not claimed."
     }
   ],
-  "lastCheckpoint": "checkpoint-128.md",
+  "lastCheckpoint": "checkpoint-129.md",
   "migrationLineage": {
     "managedBaseline": "142-153; authoritative managed migration 153 preserved from main b75fbf0b7e2c4ea455838a6e4df6537665a7a8cc",
     "nativeCurrent": "164-183; prior native 182 upgraded by idempotent managed GitHub reads bridge 183; representative managed 150/152/153 and copy-only native lineage verified",
