@@ -9,6 +9,7 @@ import { ManagedQuotaBroker } from './quota-broker.js';
 export class ManagedProviderGateway {
   private closed = false;
   private readonly maximumPromptBytes: number;
+  private readonly maximumResponseBytes: number;
   private readonly active = new Set<AbortController>();
   constructor(
     readonly service: ManagedPodService,
@@ -16,12 +17,19 @@ export class ManagedProviderGateway {
     readonly maximumRequests = 1,
   ) {
     this.maximumPromptBytes = transport.maximumPromptBytes ?? 16384;
+    this.maximumResponseBytes = transport.maximumResponseBytes ?? 64 * 1024;
     if (
       !Number.isSafeInteger(this.maximumPromptBytes) ||
       this.maximumPromptBytes < 1 ||
       this.maximumPromptBytes > 128 * 1024
     )
       throw new Error('managed-provider-input-limit-invalid');
+    if (
+      !Number.isSafeInteger(this.maximumResponseBytes) ||
+      this.maximumResponseBytes < 1 ||
+      this.maximumResponseBytes > 1024 * 1024
+    )
+      throw new Error('managed-provider-output-limit-invalid');
     if (!Number.isSafeInteger(maximumRequests) || maximumRequests < 1 || maximumRequests > 100)
       throw new Error('managed-provider-request-limit-invalid');
     if (
@@ -97,6 +105,7 @@ export class ManagedProviderGateway {
       transport: this.transport.bindingDigest,
       maximumRequests: this.maximumRequests,
       maximumPromptBytes: this.maximumPromptBytes,
+      maximumResponseBytes: this.maximumResponseBytes,
     });
     const requestDigest = digest({ prompt, maximumTokens, route: request.route });
     const prior = this.service.db
@@ -157,7 +166,11 @@ export class ManagedProviderGateway {
     if (prior) {
       if (prior.state !== 'observed') return { state: 'reserved' };
       const value: unknown = JSON.parse(prior.response_json ?? 'null');
-      if (typeof value !== 'string' || !value || Buffer.byteLength(value) > 65536)
+      if (
+        typeof value !== 'string' ||
+        !value ||
+        Buffer.byteLength(value) > this.maximumResponseBytes
+      )
         throw new Error('managed-provider-cache-invalid');
       return { state: 'observed', value };
     }
@@ -225,7 +238,7 @@ export class ManagedProviderGateway {
         if (
           typeof result.value !== 'string' ||
           !result.value ||
-          Buffer.byteLength(result.value) > 65536
+          Buffer.byteLength(result.value) > this.maximumResponseBytes
         )
           throw new Error('managed-provider-output-invalid');
         this.service.db

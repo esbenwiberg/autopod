@@ -14,7 +14,10 @@ import time
 import uuid
 
 MAX_REQUEST = 128 * 1024
-MAX_RESPONSE = 65536
+# A validated agent-mode SSE transcript includes reasoning and tool events in
+# addition to the final artifact. The host gateway remains the authority for the
+# exact per-transport bound and never writes more than this hard channel ceiling.
+MAX_RESPONSE = 1024 * 1024
 
 
 def atomic(file, data):
