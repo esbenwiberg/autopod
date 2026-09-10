@@ -34,6 +34,21 @@ export function managedPodRoutes(app: FastifyInstance, deps: ManagedPodApiDeps):
       return reply.code(401).send({ code: 'managed-auth-required' });
     return deps.service.health();
   });
+  app.get<{ Params: { attemptId: string } }>(
+    '/managed/attempts/:attemptId',
+    async (request, reply) => {
+      const installation = await deps.authenticate(request);
+      if (!installation) return reply.code(401).send({ code: 'managed-auth-required' });
+      if (!/^[A-Za-z0-9][A-Za-z0-9_-]{0,199}$/.test(request.params.attemptId))
+        return reply.code(400).send({ code: 'managed-attempt-id-invalid' });
+      const row = deps.service.db
+        .prepare(
+          'SELECT handle_json FROM managed_pods WHERE dispatcher_installation_id=? AND dispatcher_attempt_id=?',
+        )
+        .get(installation, request.params.attemptId) as { handle_json: string } | undefined;
+      return row ? JSON.parse(row.handle_json) : null;
+    },
+  );
   for (const operation of ['preflight', 'pods', 'reconcile-start'] as const) {
     app.post(`/managed/${operation}`, { bodyLimit: 1024 * 1024 }, async (request, reply) => {
       const installation = await deps.authenticate(request);
