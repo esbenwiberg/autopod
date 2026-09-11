@@ -221,3 +221,36 @@ it('projects only an allowlisted unsupported auto-compaction diagnostic after ex
     limitation: 'agent-auto-compaction-unsupported',
   });
 });
+
+it.each([
+  ['context-window-exceeded', 'agent-context-window-exceeded'],
+  ['tool-permission-denied', 'agent-tool-permission-denied'],
+  ['channel-unavailable', 'agent-channel-unavailable'],
+  ['cli-exit', 'agent-cli-exit'],
+] as const)('projects allowlisted agent failure %s after exit', async (reason, limitation) => {
+  const f = fixture();
+  await f.runtime.ensure('pod-one', f.request, () => {});
+  f.exec.mockResolvedValueOnce({
+    exitCode: 0,
+    stdout: JSON.stringify({
+      observedExit: true,
+      state: 'exited',
+      consumedTokens: 12,
+      specDigest: f.request.executionSpecDigest,
+      exitCode: 1,
+    }),
+    stderr: '',
+  });
+  f.exec.mockResolvedValueOnce({
+    exitCode: 0,
+    stdout: JSON.stringify({ phase: 'agent', reason, exitCode: 1, privatePayload: 'ignored' }),
+    stderr: '',
+  });
+
+  await expect(f.runtime.observe('container-one')).resolves.toEqual({
+    state: 'stopped',
+    consumedTokens: 12,
+    exitCode: 1,
+    limitation,
+  });
+});

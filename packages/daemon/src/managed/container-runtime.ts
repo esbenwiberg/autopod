@@ -255,7 +255,13 @@ if not stat.S_ISDIR(actual.st_mode) or actual.st_uid!=0 or actual.st_mode & 0o02
     state: 'running' | 'stopped' | 'unknown';
     consumedTokens: number;
     exitCode?: number;
-    limitation?: 'agent-request-limit-reached' | 'agent-auto-compaction-unsupported';
+    limitation?:
+      | 'agent-request-limit-reached'
+      | 'agent-auto-compaction-unsupported'
+      | 'agent-context-window-exceeded'
+      | 'agent-tool-permission-denied'
+      | 'agent-channel-unavailable'
+      | 'agent-cli-exit';
   }> {
     const { boundary, podId } = this.resolve(ref);
     const result = await boundary.manager.execInContainer(
@@ -296,6 +302,10 @@ if not stat.S_ISDIR(actual.st_mode) or actual.st_uid!=0 or actual.st_mode & 0o02
       let limitation:
         | 'agent-request-limit-reached'
         | 'agent-auto-compaction-unsupported'
+        | 'agent-context-window-exceeded'
+        | 'agent-tool-permission-denied'
+        | 'agent-channel-unavailable'
+        | 'agent-cli-exit'
         | undefined;
       if (receipt.observedExit) {
         const diagnostic = await boundary.manager.execInContainer(
@@ -324,6 +334,23 @@ if not stat.S_ISDIR(actual.st_mode) or actual.st_uid!=0 or actual.st_mode & 0o02
               failure.reason === 'unsupported-auto-compaction'
             )
               limitation = 'agent-auto-compaction-unsupported';
+            else if (
+              failure.phase === 'agent' &&
+              Number.isSafeInteger(failure.exitCode) &&
+              Number(failure.exitCode) >= 1 &&
+              Number(failure.exitCode) <= 255 &&
+              [
+                'context-window-exceeded',
+                'tool-permission-denied',
+                'channel-unavailable',
+                'cli-exit',
+              ].includes(String(failure.reason))
+            )
+              limitation = `agent-${String(failure.reason)}` as
+                | 'agent-context-window-exceeded'
+                | 'agent-tool-permission-denied'
+                | 'agent-channel-unavailable'
+                | 'agent-cli-exit';
           } catch {
             /* Untrusted runtime diagnostics are ignored unless fully allowlisted. */
           }

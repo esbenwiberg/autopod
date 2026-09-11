@@ -129,6 +129,10 @@ it('installs an agent helper that routes final output through the reviewed Codex
     expect(install?.[1][6]).toContain('Do not edit that output path directly');
     expect(install?.[1][6]).toContain("'features.auto_compaction': False");
     expect(install?.[1][6]).toContain("'codex', 'exec', 'resume', '--last'");
+    expect(install?.[1][6]).toContain(
+      "for key, value in config.items(): resume.extend(['-c', key + '=' + json.dumps(value)])",
+    );
+    expect(install?.[1][6]).toContain('report_failure(args.endpoint, log, result.returncode)');
     expect(install?.[1][6]).not.toContain("'codex', 'exec', '--ephemeral'");
   } finally {
     close();
@@ -440,6 +444,43 @@ it('the Python loopback channel records an unsupported compaction request withou
     expect(await waitForJson(join(root, 'channel-failure.json'))).toEqual({
       phase: 'request',
       reason: 'unsupported-auto-compaction',
+    });
+  } finally {
+    child.kill('SIGTERM');
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+it('the Python loopback channel accepts only bounded allowlisted agent failure metadata', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'autopod-codex-failure-'));
+  chmodSync(root, 0o700);
+  const script = fileURLToPath(new URL('./runtime/codex_channel.py', import.meta.url));
+  const child = spawn('python3', [script, root, '0', '10', String(1024 * 1024)], {
+    stdio: 'pipe',
+  });
+  try {
+    const ready = await waitForJson(join(root, 'channel-ready.json'));
+    const endpoint = `http://127.0.0.1:${ready.port as number}/failure`;
+    const rejected = await fetch(endpoint, {
+      method: 'POST',
+      body: JSON.stringify({
+        phase: 'agent',
+        reason: 'private-runtime-detail',
+        exitCode: 1,
+      }),
+      headers: { 'Content-Type': 'application/json' },
+    });
+    expect(rejected.status).toBe(400);
+    const accepted = await fetch(endpoint, {
+      method: 'POST',
+      body: JSON.stringify({ phase: 'agent', reason: 'context-window-exceeded', exitCode: 1 }),
+      headers: { 'Content-Type': 'application/json' },
+    });
+    expect(accepted.status).toBe(204);
+    expect(await waitForJson(join(root, 'channel-failure.json'))).toEqual({
+      phase: 'agent',
+      reason: 'context-window-exceeded',
+      exitCode: 1,
     });
   } finally {
     child.kill('SIGTERM');

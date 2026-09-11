@@ -101,7 +101,14 @@ it('expiry closes a reservation that failed before runtime allocation', async ()
     f.close();
   }
 });
-it.each(['agent-request-limit-reached', 'agent-auto-compaction-unsupported'] as const)(
+it.each([
+  'agent-request-limit-reached',
+  'agent-auto-compaction-unsupported',
+  'agent-context-window-exceeded',
+  'agent-tool-permission-denied',
+  'agent-channel-unavailable',
+  'agent-cli-exit',
+] as const)(
   'persists allowlisted runtime limitation %s before later cleanup',
   async (limitation) => {
     const f = fixture();

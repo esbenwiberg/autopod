@@ -14,6 +14,13 @@ import threading
 import time
 import uuid
 
+AGENT_FAILURE_REASONS = {
+    'context-window-exceeded',
+    'tool-permission-denied',
+    'channel-unavailable',
+    'cli-exit',
+}
+
 REPORT_MAX_REQUEST = 128 * 1024
 AGENT_MAX_REQUEST = 1024 * 1024
 # A validated agent-mode SSE transcript includes reasoning and tool events in
@@ -101,6 +108,28 @@ def serve(root, port, lifetime, maximum_request=REPORT_MAX_REQUEST):
                     return
                 atomic(root / ('followup-' + key + '.ack'), {'observed': True})
                 self.reply(204)
+                return
+            if self.path == '/failure':
+                try:
+                    if self.headers.get('Authorization') or self.headers.get('Transfer-Encoding'):
+                        raise ValueError('headers')
+                    length = int(self.headers.get('Content-Length', '0'))
+                    if not 1 <= length <= 1024:
+                        raise ValueError('size')
+                    value = json.loads(self.rfile.read(length))
+                    if (
+                        not isinstance(value, dict)
+                        or set(value) != {'phase', 'reason', 'exitCode'}
+                        or value.get('phase') != 'agent'
+                        or value.get('reason') not in AGENT_FAILURE_REASONS
+                        or not isinstance(value.get('exitCode'), int)
+                        or not 1 <= value['exitCode'] <= 255
+                    ):
+                        raise ValueError('failure')
+                    atomic(root / 'channel-failure.json', value)
+                    self.reply(204)
+                except (OSError, ValueError, KeyError):
+                    self.reply(400)
                 return
             if self.path == '/v1/responses/compact':
                 atomic(root / 'channel-failure.json', {

@@ -11,6 +11,42 @@ import urllib.error
 import urllib.request
 from urllib.parse import urlparse
 
+FAILURE_REASONS = {
+    'context-window-exceeded',
+    'tool-permission-denied',
+    'channel-unavailable',
+    'cli-exit',
+}
+
+
+def report_failure(endpoint, log, exit_code):
+    try:
+        with log.open('rb') as stream:
+            stream.seek(0, os.SEEK_END)
+            size = stream.tell()
+            stream.seek(max(0, size - 256 * 1024))
+            tail = stream.read().decode('utf8', errors='replace').lower()
+        if any(value in tail for value in ('context_length_exceeded', 'context window', 'prompt is too long')):
+            reason = 'context-window-exceeded'
+        elif any(value in tail for value in ('approval required', 'permission denied', 'operation not permitted')):
+            reason = 'tool-permission-denied'
+        elif any(value in tail for value in ('connection refused', 'error sending request', 'channel closed')):
+            reason = 'channel-unavailable'
+        else:
+            reason = 'cli-exit'
+        if reason not in FAILURE_REASONS:
+            reason = 'cli-exit'
+        payload = json.dumps({'phase': 'agent', 'reason': reason, 'exitCode': exit_code}, separators=(',', ':')).encode()
+        request = urllib.request.Request(
+            endpoint.removesuffix('/v1') + '/failure', data=payload, method='POST',
+            headers={'Content-Type': 'application/json', 'Content-Length': str(len(payload))},
+        )
+        with urllib.request.urlopen(request, timeout=1) as response:
+            if response.status != 204:
+                raise RuntimeError('failure-report-rejected')
+    except (OSError, RuntimeError, ValueError, urllib.error.URLError):
+        pass
+
 parser = argparse.ArgumentParser()
 parser.add_argument('--model', required=True)
 parser.add_argument('--reasoning', required=True)
@@ -81,8 +117,14 @@ with tempfile.TemporaryDirectory(prefix='managed-codex-') as temporary:
     prompt = ' '.join(args.objective)
     if inputs: prompt += '\n\nVerified Dispatcher input artifacts:\n' + '\n\n---\n\n'.join(inputs)
     env = {'HOME': str(home), 'PATH': '/opt/dispatcher:' + os.environ.get('PATH', '/usr/local/bin:/usr/bin:/bin'), 'TMPDIR': temporary}
-    result = subprocess.run(command, input=prompt, text=True, env=env, cwd=repository)
+    log = Path(temporary) / 'codex.jsonl'
+    with log.open('w') as stream:
+        result = subprocess.run(
+            command, input=prompt, text=True, env=env, cwd=repository,
+            stdout=stream, stderr=subprocess.STDOUT,
+        )
     if result.returncode:
+        report_failure(args.endpoint, log, result.returncode)
         raise SystemExit(result.returncode)
     empty_polls = 0
     handled = 0
@@ -102,9 +144,16 @@ with tempfile.TemporaryDirectory(prefix='managed-codex-') as temporary:
         if not isinstance(key, str) or not re.fullmatch(r'[A-Za-z0-9_-]{1,200}', key) or not isinstance(message, str) or not 0 < len(message.encode()) <= 4096:
             raise RuntimeError('followup-invalid')
         resume = ['codex', 'exec', 'resume', '--last', '--json', '-m', args.model,
-                  '--output-last-message', str(captured), '--', message]
-        result = subprocess.run(resume, text=True, env=env, cwd=repository)
+                  '--output-last-message', str(captured)]
+        for key, value in config.items(): resume.extend(['-c', key + '=' + json.dumps(value)])
+        resume.extend(['--', message])
+        with log.open('w') as stream:
+            result = subprocess.run(
+                resume, text=True, env=env, cwd=repository,
+                stdout=stream, stderr=subprocess.STDOUT,
+            )
         if result.returncode:
+            report_failure(args.endpoint, log, result.returncode)
             raise SystemExit(result.returncode)
         acknowledgement = urllib.request.Request(
             args.endpoint.removesuffix('/v1') + '/followups/' + key,
