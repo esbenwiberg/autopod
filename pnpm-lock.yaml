@@ -96,8 +96,8 @@ importers:
   packages/daemon:
     dependencies:
       '@anthropic-ai/sdk':
-        specifier: ^0.111.0
-        version: 0.111.0(zod@3.25.76)
+        specifier: ^0.124.0
+        version: 0.124.0(zod@3.25.76)
       '@autopod/escalation-mcp':
         specifier: workspace:^
         version: link:../escalation-mcp
@@ -332,8 +332,8 @@ importers:
 
 packages:
 
-  '@anthropic-ai/sdk@0.111.0':
-    resolution: {integrity: sha512-1hUqKi+uJQoS5X90+InwHbFAXMvgq0DnsC5hVLEeSRaODiU5WvmqDAcVCmGS2wC0pN9Z8jtWCbWw7JLzeDdm/Q==}
+  '@anthropic-ai/sdk@0.124.0':
+    resolution: {integrity: sha512-cN5O8i9UVxHeOQAzj/XjshWXG8KiibJDw9OGpH2Z/eR3n/RBxdoLxDJOcfqAJWvjaMDFfHTBADU04hWRJVkDyA==}
     hasBin: true
     peerDependencies:
       zod: ^3.25.0 || ^4.0.0
@@ -3899,7 +3899,7 @@ packages:
 
 snapshots:
 
-  '@anthropic-ai/sdk@0.111.0(zod@3.25.76)':
+  '@anthropic-ai/sdk@0.124.0(zod@3.25.76)':
     dependencies:
       json-schema-to-ts: 3.1.1
       standardwebhooks: 1.1.1
