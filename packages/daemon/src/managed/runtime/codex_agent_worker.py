@@ -179,6 +179,17 @@ with tempfile.TemporaryDirectory(prefix='managed-codex-') as temporary:
         if not isinstance(followup_key, str) or not re.fullmatch(r'[A-Za-z0-9_-]{1,200}', followup_key) or not isinstance(message, str) or not 0 < len(message.encode()) <= 4096:
             send_failure(args.endpoint, 'followup-channel-failed')
             raise RuntimeError('followup-invalid')
+        acknowledgement = urllib.request.Request(
+            args.endpoint.removesuffix('/v1') + '/followups/' + followup_key,
+            data=b'', method='POST', headers={'Content-Length': '0'},
+        )
+        try:
+            with urllib.request.urlopen(acknowledgement, timeout=1) as response:
+                if response.status != 204:
+                    raise RuntimeError('followup-ack-rejected')
+        except (OSError, RuntimeError, urllib.error.URLError):
+            send_failure(args.endpoint, 'followup-channel-failed')
+            raise RuntimeError('followup-ack-failed')
         resume = ['codex', 'exec', 'resume', '--last', '--json', '-m', args.model,
                   '--output-last-message', str(captured)]
         for config_key, value in config.items(): resume.extend(['-c', config_key + '=' + json.dumps(value)])
@@ -191,14 +202,6 @@ with tempfile.TemporaryDirectory(prefix='managed-codex-') as temporary:
         if result.returncode:
             report_failure(args.endpoint, log, result.returncode)
             raise SystemExit(result.returncode)
-        acknowledgement = urllib.request.Request(
-            args.endpoint.removesuffix('/v1') + '/followups/' + followup_key,
-            data=b'', method='POST', headers={'Content-Length': '0'},
-        )
-        with urllib.request.urlopen(acknowledgement, timeout=1) as response:
-            if response.status != 204:
-                send_failure(args.endpoint, 'followup-channel-failed')
-                raise RuntimeError('followup-ack-failed')
         handled += 1
     if not captured.is_file() or captured.is_symlink() or captured.stat().st_size > 1024 * 1024:
         send_failure(args.endpoint, 'output-invalid')
