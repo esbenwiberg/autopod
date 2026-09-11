@@ -275,6 +275,34 @@ it('falls back to root exec when a routing manager has no file control capabilit
   expect(exec).toHaveBeenCalledTimes(1);
 });
 
+it('fails a sandbox follow-up with a bounded category when its routed files capability is missing', async () => {
+  const { request } = setup();
+  request.route.executionTarget = 'sandbox';
+  const writeManagedControl = vi
+    .fn<NonNullable<ContainerManager['writeManagedControl']>>()
+    .mockRejectedValue(new Error('managed-control-file-channel-unavailable'));
+  const channel = new ContainerCodexChannel(
+    { execInContainer: vi.fn(), writeManagedControl } as unknown as ContainerManager,
+    request.route,
+    4095,
+  );
+
+  await expect(
+    channel.send(
+      'runtime-one',
+      '/run/dispatcher-managed-one',
+      {
+        schemaVersion: 1,
+        dispatcherAttemptId: 'attempt-one',
+        grantId: 'grant-one',
+        grantRevision: 1,
+        message: 'Keep the scope narrow.',
+      },
+      'follow-one',
+    ),
+  ).rejects.toThrow('managed-codex-follow-up-file-capability-missing');
+});
+
 it('retains only a bounded files-channel status across retries', async () => {
   const { request } = setup();
   const writeManagedControl = vi

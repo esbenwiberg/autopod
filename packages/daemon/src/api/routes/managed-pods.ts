@@ -27,7 +27,10 @@ function controlFailure(error: unknown): string {
       message,
     ) ||
     /^managed-codex-follow-up-file-(binding|key|size)-invalid$/.test(message) ||
-    message === 'managed-codex-follow-up-file-capability-missing'
+    [
+      'managed-codex-follow-up-file-capability-missing',
+      'managed-codex-follow-up-file-unknown',
+    ].includes(message)
     ? message
     : 'managed-control-failure';
 }

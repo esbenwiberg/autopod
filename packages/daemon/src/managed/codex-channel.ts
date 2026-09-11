@@ -157,10 +157,12 @@ export class ContainerCodexChannel implements ManagedWorkerProviderChannel {
             return;
           } catch (error) {
             if (
-              !(error instanceof Error) ||
-              error.message !== 'managed-control-file-channel-unavailable'
-            )
-              throw error;
+              error instanceof Error &&
+              error.message === 'managed-control-file-channel-unavailable'
+            ) {
+              if (this.route.executionTarget === 'sandbox')
+                throw new Error('managed-codex-follow-up-file-capability-missing');
+            } else throw error;
           }
         } else if (this.route.executionTarget === 'sandbox') {
           throw new Error('managed-codex-follow-up-file-capability-missing');
@@ -184,9 +186,13 @@ export class ContainerCodexChannel implements ManagedWorkerProviderChannel {
             message,
           ) ||
           /^managed-codex-follow-up-file-(binding|key|size)-invalid$/.test(message) ||
-          message === 'managed-codex-follow-up-file-capability-missing'
+          message === 'managed-codex-follow-up-file-capability-missing' ||
+          (this.route.executionTarget === 'sandbox' &&
+            message === 'managed-codex-follow-up-file-unknown')
             ? message
-            : 'managed-codex-follow-up-transport-error';
+            : this.route.executionTarget === 'sandbox'
+              ? 'managed-codex-follow-up-file-unknown'
+              : 'managed-codex-follow-up-transport-error';
       }
       if (attempt < 4) await new Promise((resolve) => setTimeout(resolve, 100 * (attempt + 1)));
     }
