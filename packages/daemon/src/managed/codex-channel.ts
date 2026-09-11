@@ -152,8 +152,16 @@ export class ContainerCodexChannel implements ManagedWorkerProviderChannel {
     for (let attempt = 0; attempt < 5; attempt++) {
       try {
         if (this.manager.writeManagedControl) {
-          await this.manager.writeManagedControl(runtimeRef, stateRoot, key, canonical(message));
-          return;
+          try {
+            await this.manager.writeManagedControl(runtimeRef, stateRoot, key, canonical(message));
+            return;
+          } catch (error) {
+            if (
+              !(error instanceof Error) ||
+              error.message !== 'managed-control-file-channel-unavailable'
+            )
+              throw error;
+          }
         }
         const result = await this.execBound(
           runtimeRef,

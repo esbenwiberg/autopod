@@ -22,10 +22,22 @@ describe('RoutingContainerManager', () => {
     await router.execInContainer('local-1', ['echo', 'local']);
     await router.execStreaming('sandbox-1', ['claude']);
     await router.writeFile('sandbox-1', '/tmp/file', 'content');
+    await router.writeManagedControl(
+      'sandbox-1',
+      '/run/dispatcher-managed-one',
+      'request-one',
+      '{}',
+    );
 
     expect(local.execInContainer).toHaveBeenCalledWith('local-1', ['echo', 'local'], undefined);
     expect(sandbox.execStreaming).toHaveBeenCalledWith('sandbox-1', ['claude'], undefined);
     expect(sandbox.writeFile).toHaveBeenCalledWith('sandbox-1', '/tmp/file', 'content');
+    expect(sandbox.writeManagedControl).toHaveBeenCalledWith(
+      'sandbox-1',
+      '/run/dispatcher-managed-one',
+      'request-one',
+      '{}',
+    );
     expect(local.execStreaming).not.toHaveBeenCalled();
   });
 
@@ -98,6 +110,9 @@ function fakeContainerManager(id: string): ContainerManager {
     stop: vi.fn(async (_containerId: string) => {}),
     start: vi.fn(async (_containerId: string) => {}),
     writeFile: vi.fn(async (_containerId: string, _path: string, _content: string | Buffer) => {}),
+    writeManagedControl: vi.fn(
+      async (_containerId: string, _stateRoot: string, _key: string, _content: string) => {},
+    ),
     readFile: vi.fn(async (_containerId: string, _path: string) => ''),
     readFileBinary: vi.fn(async (_containerId: string, _path: string) => Buffer.from('')),
     extractDirectoryFromContainer: vi.fn(

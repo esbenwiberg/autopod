@@ -244,6 +244,37 @@ it('uses the authenticated files data plane when the manager exposes managed con
   expect(exec).not.toHaveBeenCalled();
 });
 
+it('falls back to root exec when a routing manager has no file control capability', async () => {
+  const { request } = setup();
+  const exec = vi
+    .fn<ContainerManager['execInContainer']>()
+    .mockResolvedValue({ exitCode: 0, stdout: '', stderr: '' });
+  const writeManagedControl = vi
+    .fn<NonNullable<ContainerManager['writeManagedControl']>>()
+    .mockRejectedValue(new Error('managed-control-file-channel-unavailable'));
+  const channel = new ContainerCodexChannel(
+    { execInContainer: exec, writeManagedControl } as unknown as ContainerManager,
+    request.route,
+    4095,
+  );
+
+  await channel.send(
+    'runtime-one',
+    '/run/dispatcher-managed-one',
+    {
+      schemaVersion: 1,
+      dispatcherAttemptId: 'attempt-one',
+      grantId: 'grant-one',
+      grantRevision: 1,
+      message: 'Keep the scope narrow.',
+    },
+    'follow-one',
+  );
+
+  expect(writeManagedControl).toHaveBeenCalledTimes(1);
+  expect(exec).toHaveBeenCalledTimes(1);
+});
+
 it('reports only an allowlisted follow-up command failure class', async () => {
   const { request } = setup();
   const exec = vi.fn<ContainerManager['execInContainer']>().mockResolvedValue({
