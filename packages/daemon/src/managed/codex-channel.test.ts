@@ -141,6 +141,10 @@ it('installs an agent helper that routes final output through the reviewed Codex
     expect(install?.[1][6]).toContain(
       "for config_key, value in config.items(): resume.extend(['-c', config_key + '=' + json.dumps(value)])",
     );
+    expect(install?.[1][6]).toContain(
+      "followup_home = Path(temporary) / ('followup-home-' + str(handled))",
+    );
+    expect(install?.[1][6]).toContain("followup_env = {**env, 'HOME': str(followup_home)}");
     expect(install?.[1][6]).toContain("'/followups/' + followup_key");
     expect(install?.[1][6]).not.toContain("'/followups/' + key");
     expect(install?.[1][6].indexOf("'/followups/' + followup_key")).toBeLessThan(

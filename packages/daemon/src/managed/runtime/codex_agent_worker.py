@@ -207,9 +207,12 @@ with tempfile.TemporaryDirectory(prefix='managed-codex-') as temporary:
                   '--output-last-message', str(captured)]
         for config_key, value in config.items(): resume.extend(['-c', config_key + '=' + json.dumps(value)])
         resume.extend(['--', '-'])
+        followup_home = Path(temporary) / ('followup-home-' + str(handled))
+        followup_home.mkdir()
+        followup_env = {**env, 'HOME': str(followup_home)}
         with log.open('w') as stream:
             result = subprocess.run(
-                resume, input=continuation, text=True, env=env, cwd=repository,
+                resume, input=continuation, text=True, env=followup_env, cwd=repository,
                 stdout=stream, stderr=subprocess.STDOUT,
             )
         if result.returncode:
