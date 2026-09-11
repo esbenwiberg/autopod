@@ -74,6 +74,18 @@ it('rejects a transport response bound above the one MiB channel ceiling', async
     'managed-provider-output-limit-invalid',
   );
 });
+it('admits an explicitly bounded one MiB agent request', async () => {
+  const x = await setup();
+  x.gateway.close();
+  const transport = { ...x.transport, maximumPromptBytes: 1024 * 1024 };
+  const gateway = new ManagedProviderGateway(x.service, transport);
+  gateways.push(gateway);
+  const prompt = 'x'.repeat(140 * 1024);
+  await expect(
+    gateway.invoke('installation', x.handle.podId, 1, 'large-agent-request', prompt, 100),
+  ).resolves.toEqual({ state: 'observed', value: 'facts' });
+  expect(x.generate.mock.calls[0]?.[1]).toBe(prompt);
+});
 it('concurrent duplicate calls reserve once', async () => {
   const x = await setup();
   let finish!: (v: { value: string; consumedTokens: number }) => void;

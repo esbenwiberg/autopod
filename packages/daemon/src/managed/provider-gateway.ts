@@ -21,7 +21,7 @@ export class ManagedProviderGateway {
     if (
       !Number.isSafeInteger(this.maximumPromptBytes) ||
       this.maximumPromptBytes < 1 ||
-      this.maximumPromptBytes > 128 * 1024
+      this.maximumPromptBytes > 1024 * 1024
     )
       throw new Error('managed-provider-input-limit-invalid');
     if (

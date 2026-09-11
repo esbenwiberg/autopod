@@ -47,7 +47,7 @@ const AGENT_MAXIMUM_RESPONSE_BYTES = 1024 * 1024;
 /** One host request under an explicit request/time grant; never a hard token/cost cap. */
 export class ChatGptReportTransport implements BoundedProviderTransport {
   readonly budgetMode = 'request-time' as const;
-  readonly maximumPromptBytes = 128 * 1024;
+  readonly maximumPromptBytes: number;
   readonly maximumResponseBytes: number;
   readonly bindingDigest: string;
   private readonly route: Route;
@@ -62,6 +62,7 @@ export class ChatGptReportTransport implements BoundedProviderTransport {
     if (!/^[A-Za-z0-9_-]{1,200}$/.test(chatgptAccountId))
       throw new Error('managed-account-binding-invalid');
     this.route = structuredClone(route);
+    this.maximumPromptBytes = mode === 'agent' ? 1024 * 1024 : 128 * 1024;
     this.maximumResponseBytes =
       mode === 'agent' ? AGENT_MAXIMUM_RESPONSE_BYTES : REPORT_MAXIMUM_RESPONSE_BYTES;
     this.bindingDigest = digest({

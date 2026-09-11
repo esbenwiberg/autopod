@@ -18,12 +18,12 @@ worker.write_text(sys.argv[4]);os.chmod(worker,0o555)
 if len(sys.argv)>5 and sys.argv[5]:
  gh=worker_root/'gh';gh.write_text(sys.argv[5]);os.chmod(gh,0o555);(root/'github-enabled').touch()
 (root/'channel-closed').unlink(missing_ok=True)
-with open(os.devnull,'wb') as sink: subprocess.Popen(['python3',str(file),str(root),'4187',sys.argv[3]],stdin=subprocess.DEVNULL,stdout=sink,stderr=sink,start_new_session=True)
+with open(os.devnull,'wb') as sink: subprocess.Popen(['python3',str(file),str(root),'4187',sys.argv[3],sys.argv[6]],stdin=subprocess.DEVNULL,stdout=sink,stderr=sink,start_new_session=True)
 `;
 const READ = `import json,pathlib,sys
 root=pathlib.Path(sys.argv[1]);prefix=sys.argv[2];p=root/(prefix+'request.json');response=root/(prefix+'response.json')
 if p.exists():
- if p.stat().st_size>270000: raise RuntimeError('size')
+ if p.stat().st_size>int(sys.argv[3])*6+2048: raise RuntimeError('size')
  request=json.loads(p.read_text())
  if not response.exists() or json.loads(response.read_text()).get('ticket')!=request['ticket']:print(p.read_text())
 `;
@@ -58,6 +58,7 @@ export class ContainerCodexChannel implements ManagedWorkerProviderChannel {
   private readonly source: string;
   private readonly worker: string;
   private readonly githubCli: string;
+  private readonly maximumRequestBytes: number;
   constructor(
     private readonly manager: ContainerManager,
     route: Route,
@@ -69,6 +70,7 @@ export class ContainerCodexChannel implements ManagedWorkerProviderChannel {
     } = {},
   ) {
     this.route = structuredClone(route);
+    this.maximumRequestBytes = options.mode === 'agent' ? 1024 * 1024 : 128 * 1024;
     this.source = readFileSync(new URL('./runtime/codex_channel.py', import.meta.url), 'utf8');
     this.worker = readFileSync(
       new URL(
@@ -160,6 +162,7 @@ export class ContainerCodexChannel implements ManagedWorkerProviderChannel {
       String(this.options.mode === 'agent' ? (this.options.maximumDurationSeconds ?? 3600) : 180),
       this.worker,
       this.githubCli,
+      String(this.maximumRequestBytes),
     );
     for (let attempt = 0; attempt < 30; attempt++) {
       const ready = await exec(
@@ -176,14 +179,14 @@ export class ContainerCodexChannel implements ManagedWorkerProviderChannel {
       if (stopped || activeProvider) return;
       activeProvider = true;
       try {
-        const raw = await exec(READ, 'channel-');
+        const raw = await exec(READ, 'channel-', String(this.maximumRequestBytes));
         if (!raw.trim() || stopped) return;
         const request = JSON.parse(raw) as { digest: string; body: string; ticket: string };
         if (
           typeof request.ticket !== 'string' ||
           !/^[a-f0-9-]{36}$/.test(request.ticket) ||
           typeof request.body !== 'string' ||
-          Buffer.byteLength(request.body) > 128 * 1024 ||
+          Buffer.byteLength(request.body) > this.maximumRequestBytes ||
           request.digest !== sha256(request.body).slice(7)
         )
           throw new Error('managed-codex-request-invalid');
@@ -215,7 +218,7 @@ export class ContainerCodexChannel implements ManagedWorkerProviderChannel {
       if (stopped || activeGitHub || !this.options.githubRead || !binding.invokeGitHub) return;
       activeGitHub = true;
       try {
-        const raw = await exec(READ, 'github-');
+        const raw = await exec(READ, 'github-', String(this.maximumRequestBytes));
         if (!raw.trim() || stopped) return;
         const request = JSON.parse(raw) as { digest: string; body: string; ticket: string };
         if (request.digest !== sha256(request.body).slice(7))

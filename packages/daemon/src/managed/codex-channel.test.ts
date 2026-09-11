@@ -363,6 +363,64 @@ it('the Python loopback channel carries agent SSE above 64 KiB within its hard c
   }
 });
 
+it('the Python loopback channel carries an explicitly bounded agent request above 128 KiB', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'autopod-codex-large-request-'));
+  chmodSync(root, 0o700);
+  const script = fileURLToPath(new URL('./runtime/codex_channel.py', import.meta.url));
+  const child = spawn('python3', [script, root, '0', '10', String(1024 * 1024)], {
+    stdio: 'pipe',
+  });
+  try {
+    const ready = await waitForJson(join(root, 'channel-ready.json'));
+    const body = 'x'.repeat(140 * 1024);
+    const pending = fetch(`http://127.0.0.1:${ready.port as number}/v1/responses`, {
+      method: 'POST',
+      body,
+      headers: { 'Content-Type': 'application/json' },
+    });
+    const request = await waitForJson(join(root, 'channel-request.json'));
+    expect(request.body).toBe(body);
+    const responsePath = join(root, 'channel-response.json');
+    const temporary = `${responsePath}.fixture`;
+    writeFileSync(
+      temporary,
+      JSON.stringify({ ticket: request.ticket, digest: request.digest, body: 'ok', ok: true }),
+    );
+    renameSync(temporary, responsePath);
+    const response = await pending;
+    expect(response.status).toBe(200);
+    expect(await response.text()).toBe('ok');
+  } finally {
+    child.kill('SIGTERM');
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+it('the Python loopback channel records only bounded metadata when a request exceeds its ceiling', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'autopod-codex-request-limit-'));
+  chmodSync(root, 0o700);
+  const script = fileURLToPath(new URL('./runtime/codex_channel.py', import.meta.url));
+  const child = spawn('python3', [script, root, '0', '10'], { stdio: 'pipe' });
+  try {
+    const ready = await waitForJson(join(root, 'channel-ready.json'));
+    const response = await fetch(`http://127.0.0.1:${ready.port as number}/v1/responses`, {
+      method: 'POST',
+      body: 'private'.repeat(22 * 1024),
+      headers: { 'Content-Type': 'application/json' },
+    });
+    expect(response.status).toBe(413);
+    expect(await waitForJson(join(root, 'channel-failure.json'))).toEqual({
+      phase: 'request',
+      reason: 'request-limit',
+      actualBytes: Buffer.byteLength('private'.repeat(22 * 1024)),
+      maximumBytes: 128 * 1024,
+    });
+  } finally {
+    child.kill('SIGTERM');
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 it('the Python loopback channel delivers and acknowledges a queued follow-up', async () => {
   const root = mkdtempSync(join(tmpdir(), 'autopod-codex-followup-'));
   chmodSync(root, 0o700);
