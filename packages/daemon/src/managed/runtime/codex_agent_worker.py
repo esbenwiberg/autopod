@@ -174,14 +174,14 @@ with tempfile.TemporaryDirectory(prefix='managed-codex-') as temporary:
             send_failure(args.endpoint, 'followup-channel-failed')
             raise
         empty_polls = 0
-        key = followup.get('key')
+        followup_key = followup.get('key')
         message = followup.get('message')
-        if not isinstance(key, str) or not re.fullmatch(r'[A-Za-z0-9_-]{1,200}', key) or not isinstance(message, str) or not 0 < len(message.encode()) <= 4096:
+        if not isinstance(followup_key, str) or not re.fullmatch(r'[A-Za-z0-9_-]{1,200}', followup_key) or not isinstance(message, str) or not 0 < len(message.encode()) <= 4096:
             send_failure(args.endpoint, 'followup-channel-failed')
             raise RuntimeError('followup-invalid')
         resume = ['codex', 'exec', 'resume', '--last', '--json', '-m', args.model,
                   '--output-last-message', str(captured)]
-        for key, value in config.items(): resume.extend(['-c', key + '=' + json.dumps(value)])
+        for config_key, value in config.items(): resume.extend(['-c', config_key + '=' + json.dumps(value)])
         resume.extend(['--', message])
         with log.open('w') as stream:
             result = subprocess.run(
@@ -192,7 +192,7 @@ with tempfile.TemporaryDirectory(prefix='managed-codex-') as temporary:
             report_failure(args.endpoint, log, result.returncode)
             raise SystemExit(result.returncode)
         acknowledgement = urllib.request.Request(
-            args.endpoint.removesuffix('/v1') + '/followups/' + key,
+            args.endpoint.removesuffix('/v1') + '/followups/' + followup_key,
             data=b'', method='POST', headers={'Content-Length': '0'},
         )
         with urllib.request.urlopen(acknowledgement, timeout=1) as response:

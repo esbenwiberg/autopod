@@ -137,8 +137,10 @@ it('installs an agent helper that routes final output through the reviewed Codex
     );
     expect(install?.[1][6]).toContain("'codex', 'exec', 'resume', '--last'");
     expect(install?.[1][6]).toContain(
-      "for key, value in config.items(): resume.extend(['-c', key + '=' + json.dumps(value)])",
+      "for config_key, value in config.items(): resume.extend(['-c', config_key + '=' + json.dumps(value)])",
     );
+    expect(install?.[1][6]).toContain("'/followups/' + followup_key");
+    expect(install?.[1][6]).not.toContain("'/followups/' + key");
     expect(install?.[1][6]).toContain('report_failure(args.endpoint, log, result.returncode)');
     expect(install?.[1][6]).toContain("event.get('type') not in ('turn.failed', 'error')");
     expect(install?.[1][6]).toContain('empty_polls < 120');
