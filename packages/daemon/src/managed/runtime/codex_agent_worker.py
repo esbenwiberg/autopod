@@ -64,6 +64,10 @@ with tempfile.TemporaryDirectory(prefix='managed-codex-') as temporary:
         'model_providers.dispatcher-channel.supports_websockets': False,
         'model_providers.dispatcher-channel.request_max_retries': 0,
         'model_providers.dispatcher-channel.stream_max_retries': 0,
+        # The bounded managed loopback deliberately exposes only /v1/responses.
+        # Codex auto-compaction uses /v1/responses/compact, so disable it here
+        # and let the reviewed model context window remain the only context cap.
+        'features.auto_compaction': False,
         'model_instructions_file': str(instructions),
         'model_reasoning_effort': args.reasoning,
         'web_search': 'disabled', 'otel.exporter': 'none',

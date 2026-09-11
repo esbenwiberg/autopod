@@ -255,7 +255,7 @@ if not stat.S_ISDIR(actual.st_mode) or actual.st_uid!=0 or actual.st_mode & 0o02
     state: 'running' | 'stopped' | 'unknown';
     consumedTokens: number;
     exitCode?: number;
-    limitation?: 'agent-request-limit-reached';
+    limitation?: 'agent-request-limit-reached' | 'agent-auto-compaction-unsupported';
   }> {
     const { boundary, podId } = this.resolve(ref);
     const result = await boundary.manager.execInContainer(
@@ -293,7 +293,10 @@ if not stat.S_ISDIR(actual.st_mode) or actual.st_uid!=0 or actual.st_mode & 0o02
         (receipt.exitCode !== undefined && !Number.isSafeInteger(receipt.exitCode))
       )
         throw new Error('binding');
-      let limitation: 'agent-request-limit-reached' | undefined;
+      let limitation:
+        | 'agent-request-limit-reached'
+        | 'agent-auto-compaction-unsupported'
+        | undefined;
       if (receipt.observedExit) {
         const diagnostic = await boundary.manager.execInContainer(
           ref,
@@ -316,6 +319,11 @@ if not stat.S_ISDIR(actual.st_mode) or actual.st_uid!=0 or actual.st_mode & 0o02
               Number(failure.actualBytes) > Number(failure.maximumBytes)
             )
               limitation = 'agent-request-limit-reached';
+            else if (
+              failure.phase === 'request' &&
+              failure.reason === 'unsupported-auto-compaction'
+            )
+              limitation = 'agent-auto-compaction-unsupported';
           } catch {
             /* Untrusted runtime diagnostics are ignored unless fully allowlisted. */
           }

@@ -29,7 +29,7 @@ export interface ManagedRuntimePort {
     state: 'running' | 'stopped' | 'unknown';
     consumedTokens: number;
     exitCode?: number;
-    limitation?: 'agent-request-limit-reached';
+    limitation?: 'agent-request-limit-reached' | 'agent-auto-compaction-unsupported';
   }>;
   stop(runtimeRef: string): Promise<void>;
   send?(runtimeRef: string, message: FollowUpEnvelope, key: string): Promise<void>;

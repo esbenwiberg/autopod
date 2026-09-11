@@ -102,6 +102,13 @@ def serve(root, port, lifetime, maximum_request=REPORT_MAX_REQUEST):
                 atomic(root / ('followup-' + key + '.ack'), {'observed': True})
                 self.reply(204)
                 return
+            if self.path == '/v1/responses/compact':
+                atomic(root / 'channel-failure.json', {
+                    'phase': 'request',
+                    'reason': 'unsupported-auto-compaction',
+                })
+                self.reply(501)
+                return
             github = self.path == '/github'
             if self.path not in ('/v1/responses', '/github') or self.headers.get('Authorization') or self.headers.get('Transfer-Encoding'):
                 self.reply(403)

@@ -189,3 +189,35 @@ it('projects only an allowlisted channel request-limit diagnostic after exit', a
     limitation: 'agent-request-limit-reached',
   });
 });
+
+it('projects only an allowlisted unsupported auto-compaction diagnostic after exit', async () => {
+  const f = fixture();
+  await f.runtime.ensure('pod-one', f.request, () => {});
+  f.exec.mockResolvedValueOnce({
+    exitCode: 0,
+    stdout: JSON.stringify({
+      observedExit: true,
+      state: 'exited',
+      consumedTokens: 12,
+      specDigest: f.request.executionSpecDigest,
+      exitCode: 1,
+    }),
+    stderr: '',
+  });
+  f.exec.mockResolvedValueOnce({
+    exitCode: 0,
+    stdout: JSON.stringify({
+      phase: 'request',
+      reason: 'unsupported-auto-compaction',
+      privatePayload: 'must-not-be-projected',
+    }),
+    stderr: '',
+  });
+
+  await expect(f.runtime.observe('container-one')).resolves.toEqual({
+    state: 'stopped',
+    consumedTokens: 12,
+    exitCode: 1,
+    limitation: 'agent-auto-compaction-unsupported',
+  });
+});
