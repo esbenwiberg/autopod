@@ -54,12 +54,15 @@ function setup(target: 'local' | 'sandbox' = 'local', mode: 'api-key' | 'chatgpt
   let attached: Parameters<ManagedWorkerProviderChannel['attach']>[0] | undefined;
   const channel = {
     preflight: vi.fn(async () => {}),
-    send: vi.fn(async () => {}),
+    send: vi.fn(),
     attach: vi.fn(async (binding: Parameters<ManagedWorkerProviderChannel['attach']>[0]) => {
       attached = binding;
       return vi.fn();
     }),
   };
+  channel.send.mockImplementation(async function (this: unknown) {
+    if (this !== channel) throw new Error('channel-send-unbound');
+  });
   const ensure = vi.fn(async (config: ContainerSpawnConfig) => {
     config.onCreated?.('runtime-one');
     return 'runtime-one';
