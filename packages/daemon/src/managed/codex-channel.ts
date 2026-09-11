@@ -220,16 +220,9 @@ export class ContainerCodexChannel implements ManagedWorkerProviderChannel {
       ['codex', 'exec', '--help'],
       { user: 'root' },
     );
-    const resumeCapability = await this.manager.execInContainer(
-      binding.runtimeRef,
-      ['codex', 'exec', 'resume', '--help'],
-      { user: 'root' },
-    );
     if (
       capability.exitCode !== 0 ||
-      !['--output-last-message', '--sandbox'].every((flag) => capability.stdout.includes(flag)) ||
-      resumeCapability.exitCode !== 0 ||
-      !['--last', '--output-last-message'].every((flag) => resumeCapability.stdout.includes(flag))
+      !['--output-last-message', '--sandbox'].every((flag) => capability.stdout.includes(flag))
     )
       throw new Error('managed-codex-cli-incompatible');
     await exec(
