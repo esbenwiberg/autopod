@@ -148,6 +148,17 @@ export interface ContainerManager {
   /** Start a previously stopped container. Idempotent — swallows "already running". */
   start(containerId: string): Promise<void>;
   writeFile(containerId: string, path: string, content: string | Buffer): Promise<void>;
+  /**
+   * Publish one authenticated managed-worker control message without opening a
+   * second exec session. Sandboxes use their daemon-authenticated files data
+   * plane because Azure rejects concurrent buffered exec beside agent streaming.
+   */
+  writeManagedControl?(
+    containerId: string,
+    stateRoot: string,
+    key: string,
+    content: string,
+  ): Promise<void>;
   readFile(containerId: string, path: string): Promise<string>;
   /** Read raw bytes from a container path. Same semantics as `readFile` but
    *  returns the file as a Buffer — required for binary files (PNG, PDF, etc.)

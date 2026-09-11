@@ -73,11 +73,15 @@ def serve(root, port, lifetime, maximum_request=REPORT_MAX_REQUEST):
                 self.reply(404)
                 return
             try:
-                for item in sorted(root.glob('followup-*.json')):
-                    key = item.name[len('followup-'):-len('.json')]
+                for ready in sorted(root.glob('followup-*.ready')):
+                    key = ready.name[len('followup-'):-len('.ready')]
                     if not re.fullmatch(r'[A-Za-z0-9_-]{1,200}', key) or (root / ('followup-' + key + '.ack')).exists():
                         continue
-                    value = json.loads(item.read_text())
+                    item = root / ('followup-' + key + '.json')
+                    raw = item.read_bytes()
+                    if ready.read_text() != hashlib.sha256(raw).hexdigest():
+                        raise ValueError('followup-digest')
+                    value = json.loads(raw)
                     message = value.get('message')
                     if not isinstance(message, str) or not 0 < len(message.encode()) <= 4096:
                         raise ValueError('followup')

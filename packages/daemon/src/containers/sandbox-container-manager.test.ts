@@ -1,4 +1,4 @@
-import { randomBytes } from 'node:crypto';
+import { createHash, randomBytes } from 'node:crypto';
 import {
   chmodSync,
   existsSync,
@@ -796,6 +796,27 @@ describe('SandboxContainerManager', () => {
       const bytes = Buffer.from([0x00, 0xff, 0x10]);
       await mgr.writeFile(id, '/work/blob.bin', bytes);
       expect(await mgr.readFileBinary(id, '/work/blob.bin')).toEqual(bytes);
+    });
+
+    it('publishes managed controls through the files data plane with a digest-last marker', async () => {
+      const client = new FakeSandboxApiClient();
+      const mgr = new SandboxContainerManager(client, logger);
+      const id = await mgr.spawn(baseConfig);
+      const content = '{"message":"continue"}';
+
+      await mgr.writeManagedControl(id, '/run/dispatcher-managed-one', 'request-one', content);
+
+      expect(await mgr.readFile(id, '/run/dispatcher-managed-one/followup-request-one.json')).toBe(
+        content,
+      );
+      expect(await mgr.readFile(id, '/run/dispatcher-managed-one/followup-request-one.ready')).toBe(
+        createHash('sha256').update(content).digest('hex'),
+      );
+      expect(client.execCalls).toHaveLength(0);
+      expect(client.writeFileCalls.slice(-2).map((call) => call.path)).toEqual([
+        '/run/dispatcher-managed-one/followup-request-one.json',
+        '/run/dispatcher-managed-one/followup-request-one.ready',
+      ]);
     });
   });
 

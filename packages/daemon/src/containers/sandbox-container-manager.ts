@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import {
   cpSync,
   existsSync,
@@ -372,6 +373,31 @@ for root in sys.argv[1:]:
   async writeFile(containerId: string, path: string, content: string | Buffer): Promise<void> {
     const buf = typeof content === 'string' ? Buffer.from(content, 'utf-8') : content;
     await this.client.writeFile(containerId, path, buf);
+  }
+
+  async writeManagedControl(
+    containerId: string,
+    stateRoot: string,
+    key: string,
+    content: string,
+  ): Promise<void> {
+    if (
+      !/^\/run\/dispatcher-managed-[A-Za-z0-9-]+$/.test(stateRoot) ||
+      !/^[A-Za-z0-9_-]{1,200}$/.test(key) ||
+      Buffer.byteLength(content) > 16 * 1024
+    )
+      throw new Error('managed-control-write-invalid');
+    const payload = Buffer.from(content, 'utf8');
+    const prefix = `${stateRoot}/followup-${key}`;
+    // Azure's files endpoint writes as root. The root-owned 0700 state directory
+    // therefore remains inaccessible to the untrusted workspace process. Publish
+    // the digest marker last so the loopback server never observes a partial body.
+    await this.client.writeFile(containerId, `${prefix}.json`, payload);
+    await this.client.writeFile(
+      containerId,
+      `${prefix}.ready`,
+      Buffer.from(createHash('sha256').update(payload).digest('hex'), 'ascii'),
+    );
   }
 
   async readFile(containerId: string, path: string): Promise<string> {

@@ -1,4 +1,5 @@
 import { spawn } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import {
   chmodSync,
   existsSync,
@@ -207,6 +208,40 @@ it('retries an idempotent follow-up after transient sandbox exec rejection', asy
   );
 
   expect(exec).toHaveBeenCalledTimes(3);
+});
+
+it('uses the authenticated files data plane when the manager exposes managed controls', async () => {
+  const { request } = setup();
+  const exec = vi.fn<ContainerManager['execInContainer']>();
+  const writeManagedControl = vi.fn<NonNullable<ContainerManager['writeManagedControl']>>();
+  const channel = new ContainerCodexChannel(
+    { execInContainer: exec, writeManagedControl } as unknown as ContainerManager,
+    request.route,
+    4095,
+  );
+  const message = {
+    schemaVersion: 1 as const,
+    dispatcherAttemptId: 'attempt-one',
+    grantId: 'grant-one',
+    grantRevision: 1,
+    message: 'Keep the scope narrow.',
+  };
+
+  await channel.send('runtime-one', '/run/dispatcher-managed-one', message, 'follow-one');
+
+  expect(writeManagedControl).toHaveBeenCalledWith(
+    'runtime-one',
+    '/run/dispatcher-managed-one',
+    'follow-one',
+    JSON.stringify({
+      dispatcherAttemptId: 'attempt-one',
+      grantId: 'grant-one',
+      grantRevision: 1,
+      message: 'Keep the scope narrow.',
+      schemaVersion: 1,
+    }),
+  );
+  expect(exec).not.toHaveBeenCalled();
 });
 
 it('reports only an allowlisted follow-up command failure class', async () => {
@@ -594,15 +629,17 @@ it('the Python loopback channel delivers and acknowledges a queued follow-up', a
   const child = spawn('python3', [script, root, '0', '10'], { stdio: 'pipe' });
   try {
     const ready = await waitForJson(join(root, 'channel-ready.json'));
+    const payload = JSON.stringify({
+      schemaVersion: 1,
+      dispatcherAttemptId: 'attempt-one',
+      grantId: 'grant-one',
+      grantRevision: 1,
+      message: 'Include falsifying evidence.',
+    });
+    writeFileSync(join(root, 'followup-follow-one.json'), payload);
     writeFileSync(
-      join(root, 'followup-follow-one.json'),
-      JSON.stringify({
-        schemaVersion: 1,
-        dispatcherAttemptId: 'attempt-one',
-        grantId: 'grant-one',
-        grantRevision: 1,
-        message: 'Include falsifying evidence.',
-      }),
+      join(root, 'followup-follow-one.ready'),
+      createHash('sha256').update(payload).digest('hex'),
     );
     const endpoint = `http://127.0.0.1:${ready.port as number}`;
     const delivered = await fetch(`${endpoint}/followups`);

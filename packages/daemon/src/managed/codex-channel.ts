@@ -38,17 +38,21 @@ else:
  with temp.open('w') as f:json.dump(value,f,ensure_ascii=False);f.flush();os.fsync(f.fileno())
  os.replace(temp,p)
 `;
-const SEND = `import json,os,pathlib,re,sys
+const SEND = `import hashlib,json,os,pathlib,re,sys
 root=pathlib.Path(sys.argv[1]);key=sys.argv[2];raw=sys.argv[3]
 if not re.fullmatch(r'[A-Za-z0-9_-]{1,200}',key):raise RuntimeError('key')
 value=json.loads(raw)
 if not isinstance(value,dict) or set(value)!=set(['schemaVersion','dispatcherAttemptId','grantId','grantRevision','message']):raise RuntimeError('envelope')
-p=root/('followup-'+key+'.json');temp=root/('followup-'+key+'.tmp')
+p=root/('followup-'+key+'.json');temp=root/('followup-'+key+'.tmp');ready=root/('followup-'+key+'.ready');ready_temp=root/('followup-'+key+'.ready.tmp')
 if p.exists():
  if json.loads(p.read_text())!=value:raise RuntimeError('replay-conflict')
 else:
  with temp.open('w') as f:json.dump(value,f,ensure_ascii=False,separators=(',',':'));f.flush();os.fsync(f.fileno())
  os.replace(temp,p)
+digest=hashlib.sha256(p.read_bytes()).hexdigest()
+if not ready.exists() or ready.read_text()!=digest:
+ with ready_temp.open('w') as f:f.write(digest);f.flush();os.fsync(f.fileno())
+ os.replace(ready_temp,ready)
 `;
 const FOLLOW_UP_FAILURES = [
   ['permission denied', 'managed-codex-follow-up-permission'],
@@ -147,6 +151,10 @@ export class ContainerCodexChannel implements ManagedWorkerProviderChannel {
     let failure = 'managed-codex-follow-up-transport-error';
     for (let attempt = 0; attempt < 5; attempt++) {
       try {
+        if (this.manager.writeManagedControl) {
+          await this.manager.writeManagedControl(runtimeRef, stateRoot, key, canonical(message));
+          return;
+        }
         const result = await this.execBound(
           runtimeRef,
           ['python3', '-c', SEND, stateRoot, key, canonical(message)],
