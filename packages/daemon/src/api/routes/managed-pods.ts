@@ -22,7 +22,12 @@ const CONTROL_FAILURES = new Set([
 
 function controlFailure(error: unknown): string {
   const message = error instanceof Error ? error.message : '';
-  return CONTROL_FAILURES.has(message) ? message : 'managed-control-failure';
+  return CONTROL_FAILURES.has(message) ||
+    /^managed-codex-follow-up-file-(payload|ready)-(http-(400|401|403|404|409|429|500|502|503|504)|other)$/.test(
+      message,
+    )
+    ? message
+    : 'managed-control-failure';
 }
 
 export interface ManagedPodApiDeps {

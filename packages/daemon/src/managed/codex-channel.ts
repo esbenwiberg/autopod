@@ -173,10 +173,16 @@ export class ContainerCodexChannel implements ManagedWorkerProviderChannel {
         failure =
           FOLLOW_UP_FAILURES.find(([pattern]) => stderr.includes(pattern))?.[1] ??
           'managed-codex-follow-up-command-exit';
-      } catch {
+      } catch (error) {
         // The sandbox data plane can transiently reject a short control exec
         // while another bounded observer exec completes. SEND is key-idempotent.
-        failure = 'managed-codex-follow-up-transport-error';
+        const message = error instanceof Error ? error.message : '';
+        failure =
+          /^managed-codex-follow-up-file-(payload|ready)-(http-(400|401|403|404|409|429|500|502|503|504)|other)$/.test(
+            message,
+          )
+            ? message
+            : 'managed-codex-follow-up-transport-error';
       }
       if (attempt < 4) await new Promise((resolve) => setTimeout(resolve, 100 * (attempt + 1)));
     }

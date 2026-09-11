@@ -14,6 +14,7 @@ import { tmpdir } from 'node:os';
 import { basename, dirname, join, posix } from 'node:path';
 import type { Readable } from 'node:stream';
 import { gunzipSync } from 'node:zlib';
+import { AutopodError } from '@autopod/shared';
 import pino from 'pino';
 import { extract as tarExtract } from 'tar-stream';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -817,6 +818,25 @@ describe('SandboxContainerManager', () => {
         '/run/dispatcher-managed-one/followup-request-one.json',
         '/run/dispatcher-managed-one/followup-request-one.ready',
       ]);
+    });
+
+    it('reports only the managed-control phase and allowlisted HTTP status', async () => {
+      class RejectedFileClient extends FakeSandboxApiClient {
+        override async writeFile(): Promise<void> {
+          throw new AutopodError('private provider response', 'AZURE_SANDBOX_HTTP_ERROR', 409);
+        }
+      }
+      const mgr = new SandboxContainerManager(new RejectedFileClient(), logger);
+      const id = await mgr.spawn(baseConfig);
+
+      await expect(
+        mgr.writeManagedControl(
+          id,
+          '/run/dispatcher-managed-one',
+          'request-one',
+          '{"message":"continue"}',
+        ),
+      ).rejects.toThrow('managed-codex-follow-up-file-payload-http-409');
     });
   });
 

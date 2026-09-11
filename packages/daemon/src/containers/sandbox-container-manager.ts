@@ -392,12 +392,20 @@ for root in sys.argv[1:]:
     // Azure's files endpoint writes as root. The root-owned 0700 state directory
     // therefore remains inaccessible to the untrusted workspace process. Publish
     // the digest marker last so the loopback server never observes a partial body.
-    await this.client.writeFile(containerId, `${prefix}.json`, payload);
-    await this.client.writeFile(
-      containerId,
-      `${prefix}.ready`,
-      Buffer.from(createHash('sha256').update(payload).digest('hex'), 'ascii'),
-    );
+    try {
+      await this.client.writeFile(containerId, `${prefix}.json`, payload);
+    } catch (error) {
+      throw managedControlFileError('payload', error);
+    }
+    try {
+      await this.client.writeFile(
+        containerId,
+        `${prefix}.ready`,
+        Buffer.from(createHash('sha256').update(payload).digest('hex'), 'ascii'),
+      );
+    } catch (error) {
+      throw managedControlFileError('ready', error);
+    }
   }
 
   async readFile(containerId: string, path: string): Promise<string> {
@@ -959,6 +967,15 @@ function isSandboxNotFound(error: unknown): boolean {
     candidate.code === 'NotFound' ||
     candidate.code === 'ResourceNotFound'
   );
+}
+
+function managedControlFileError(phase: 'payload' | 'ready', error: unknown): Error {
+  const status = error instanceof AutopodError ? error.statusCode : null;
+  const category =
+    status !== null && [400, 401, 403, 404, 409, 429, 500, 502, 503, 504].includes(status)
+      ? `http-${status}`
+      : 'other';
+  return new Error(`managed-codex-follow-up-file-${phase}-${category}`);
 }
 
 function normalizeExtractPath(pathname: string): string {

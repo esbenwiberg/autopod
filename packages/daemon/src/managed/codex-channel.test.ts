@@ -275,6 +275,34 @@ it('falls back to root exec when a routing manager has no file control capabilit
   expect(exec).toHaveBeenCalledTimes(1);
 });
 
+it('retains only a bounded files-channel status across retries', async () => {
+  const { request } = setup();
+  const writeManagedControl = vi
+    .fn<NonNullable<ContainerManager['writeManagedControl']>>()
+    .mockRejectedValue(new Error('managed-codex-follow-up-file-payload-http-409'));
+  const channel = new ContainerCodexChannel(
+    { execInContainer: vi.fn(), writeManagedControl } as unknown as ContainerManager,
+    request.route,
+    4095,
+  );
+
+  await expect(
+    channel.send(
+      'runtime-one',
+      '/run/dispatcher-managed-one',
+      {
+        schemaVersion: 1,
+        dispatcherAttemptId: 'attempt-one',
+        grantId: 'grant-one',
+        grantRevision: 1,
+        message: 'Keep the scope narrow.',
+      },
+      'follow-one',
+    ),
+  ).rejects.toThrow('managed-codex-follow-up-file-payload-http-409');
+  expect(writeManagedControl).toHaveBeenCalledTimes(5);
+});
+
 it('reports only an allowlisted follow-up command failure class', async () => {
   const { request } = setup();
   const exec = vi.fn<ContainerManager['execInContainer']>().mockResolvedValue({
