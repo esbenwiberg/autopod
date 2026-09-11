@@ -25,7 +25,9 @@ function controlFailure(error: unknown): string {
   return CONTROL_FAILURES.has(message) ||
     /^managed-codex-follow-up-file-(payload|ready)-(http-(400|401|403|404|409|429|500|502|503|504)|other)$/.test(
       message,
-    )
+    ) ||
+    /^managed-codex-follow-up-file-(binding|key|size)-invalid$/.test(message) ||
+    message === 'managed-codex-follow-up-file-capability-missing'
     ? message
     : 'managed-control-failure';
 }

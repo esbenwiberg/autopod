@@ -381,12 +381,12 @@ for root in sys.argv[1:]:
     key: string,
     content: string,
   ): Promise<void> {
-    if (
-      !/^\/run\/dispatcher-managed-[A-Za-z0-9-]+$/.test(stateRoot) ||
-      !/^[A-Za-z0-9_-]{1,200}$/.test(key) ||
-      Buffer.byteLength(content) > 16 * 1024
-    )
-      throw new Error('managed-control-write-invalid');
+    if (!/^\/run\/dispatcher-managed-[A-Za-z0-9-]+$/.test(stateRoot))
+      throw new Error('managed-codex-follow-up-file-binding-invalid');
+    if (!/^[A-Za-z0-9_-]{1,200}$/.test(key))
+      throw new Error('managed-codex-follow-up-file-key-invalid');
+    if (Buffer.byteLength(content) > 16 * 1024)
+      throw new Error('managed-codex-follow-up-file-size-invalid');
     const payload = Buffer.from(content, 'utf8');
     const prefix = `${stateRoot}/followup-${key}`;
     // Azure's files endpoint writes as root. The root-owned 0700 state directory
