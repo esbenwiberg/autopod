@@ -209,6 +209,35 @@ it('retries an idempotent follow-up after transient sandbox exec rejection', asy
   expect(exec).toHaveBeenCalledTimes(3);
 });
 
+it('reports only an allowlisted follow-up command failure class', async () => {
+  const { request } = setup();
+  const exec = vi.fn<ContainerManager['execInContainer']>().mockResolvedValue({
+    exitCode: 1,
+    stdout: 'private output is not returned',
+    stderr: 'Traceback: RuntimeError: envelope',
+  });
+  const channel = new ContainerCodexChannel(
+    { execInContainer: exec } as unknown as ContainerManager,
+    request.route,
+    4095,
+  );
+
+  await expect(
+    channel.send(
+      'runtime-one',
+      '/run/dispatcher-managed-one',
+      {
+        schemaVersion: 1,
+        dispatcherAttemptId: 'attempt-one',
+        grantId: 'grant-one',
+        grantRevision: 1,
+        message: 'Keep the scope narrow.',
+      },
+      'follow-one',
+    ),
+  ).rejects.toThrow('managed-codex-follow-up-envelope-invalid');
+});
+
 it('queues an idempotent follow-up in the root-owned runtime spool', async () => {
   const { channel, exec } = setup();
   const message = {

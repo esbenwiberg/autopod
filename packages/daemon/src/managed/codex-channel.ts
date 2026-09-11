@@ -50,6 +50,14 @@ else:
  with temp.open('w') as f:json.dump(value,f,ensure_ascii=False,separators=(',',':'));f.flush();os.fsync(f.fileno())
  os.replace(temp,p)
 `;
+const FOLLOW_UP_FAILURES = [
+  ['permission denied', 'managed-codex-follow-up-permission'],
+  ['operation not permitted', 'managed-codex-follow-up-permission'],
+  ['no such file or directory', 'managed-codex-follow-up-state-missing'],
+  ['runtimeerror: key', 'managed-codex-follow-up-key-invalid'],
+  ['runtimeerror: envelope', 'managed-codex-follow-up-envelope-invalid'],
+  ['runtimeerror: replay-conflict', 'managed-codex-follow-up-replay-conflict'],
+] as const;
 /** Concrete container loopback -> root spool -> trusted exec -> attempt gateway channel.
  * Container egress must be denied; it carries no worker-held auth secret.
  */
@@ -136,6 +144,7 @@ export class ContainerCodexChannel implements ManagedWorkerProviderChannel {
   async send(runtimeRef: string, stateRoot: string, message: FollowUpEnvelope, key: string) {
     if (!/^\/run\/dispatcher-managed-[A-Za-z0-9-]+$/.test(stateRoot))
       throw new Error('managed-codex-follow-up-binding');
+    let failure = 'managed-codex-follow-up-transport-error';
     for (let attempt = 0; attempt < 5; attempt++) {
       try {
         const result = await this.execBound(
@@ -144,13 +153,18 @@ export class ContainerCodexChannel implements ManagedWorkerProviderChannel {
           { user: 'root' },
         );
         if (result.exitCode === 0) return;
+        const stderr = result.stderr.toLowerCase();
+        failure =
+          FOLLOW_UP_FAILURES.find(([pattern]) => stderr.includes(pattern))?.[1] ??
+          'managed-codex-follow-up-command-exit';
       } catch {
         // The sandbox data plane can transiently reject a short control exec
         // while another bounded observer exec completes. SEND is key-idempotent.
+        failure = 'managed-codex-follow-up-transport-error';
       }
       if (attempt < 4) await new Promise((resolve) => setTimeout(resolve, 100 * (attempt + 1)));
     }
-    throw new Error('managed-codex-follow-up-unavailable');
+    throw new Error(failure);
   }
   async attach(
     binding: Parameters<ManagedWorkerProviderChannel['attach']>[0],
