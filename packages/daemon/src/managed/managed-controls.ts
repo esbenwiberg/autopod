@@ -285,13 +285,39 @@ export class ManagedControls {
       .immediate();
     if (prior) return prior;
     // The gateway also uses key; a crash after delivery but before this commit cannot redeliver.
-    await this.service.runtime.send(row.runtime_ref, message, key);
-    this.service.requireActive(this.service.row(installation, podId));
-    const result = this.result(row);
-    this.service.db
-      .prepare('UPDATE managed_controls SET result_json=? WHERE pod_id=? AND operation_key=?')
-      .run(canonical(result), podId, key);
-    this.event(row, `message-${key}`, 'follow-up');
+    try {
+      await this.service.runtime.send(row.runtime_ref, message, key);
+    } catch (error) {
+      const code = error instanceof Error ? error.message : '';
+      if (
+        code.startsWith('managed-codex-follow-up-') ||
+        code === 'managed-channel-binding' ||
+        code === 'managed-follow-up-unavailable'
+      )
+        throw error;
+      throw new Error('managed-follow-up-delivery-failed');
+    }
+    let current: ManagedPodRow;
+    try {
+      current = this.service.row(installation, podId);
+      this.service.requireActive(current);
+    } catch (error) {
+      if (error instanceof Error && error.message === 'grant-inactive') throw error;
+      throw new Error('managed-follow-up-refresh-failed');
+    }
+    const result = this.result(current);
+    try {
+      this.service.db
+        .prepare('UPDATE managed_controls SET result_json=? WHERE pod_id=? AND operation_key=?')
+        .run(canonical(result), podId, key);
+    } catch {
+      throw new Error('managed-follow-up-result-commit-failed');
+    }
+    try {
+      this.event(current, `message-${key}`, 'follow-up');
+    } catch {
+      throw new Error('managed-follow-up-event-commit-failed');
+    }
     return result;
   }
   updateGrant(installation: string, podId: string, raw: unknown): void {

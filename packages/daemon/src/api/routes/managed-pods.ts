@@ -16,6 +16,10 @@ const CONTROL_FAILURES = new Set([
   'managed-codex-follow-up-transport-error',
   'managed-codex-follow-up-unavailable',
   'managed-control-conflict',
+  'managed-follow-up-delivery-failed',
+  'managed-follow-up-event-commit-failed',
+  'managed-follow-up-refresh-failed',
+  'managed-follow-up-result-commit-failed',
   'managed-follow-up-unavailable',
   'managed-stale-grant',
 ]);
