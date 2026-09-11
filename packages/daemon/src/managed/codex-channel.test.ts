@@ -599,7 +599,7 @@ it('the Python loopback channel carries an explicitly bounded agent request abov
   const root = mkdtempSync(join(tmpdir(), 'autopod-codex-large-request-'));
   chmodSync(root, 0o700);
   const script = fileURLToPath(new URL('./runtime/codex_channel.py', import.meta.url));
-  const child = spawn('python3', [script, root, '0', '10', String(1024 * 1024)], {
+  const child = spawn('python3', [script, root, '0', '10', String(8 * 1024 * 1024)], {
     stdio: 'pipe',
   });
   try {
@@ -647,6 +647,18 @@ it('the Python loopback channel records only bounded metadata when a request exc
       actualBytes: Buffer.byteLength('private'.repeat(22 * 1024)),
       maximumBytes: 128 * 1024,
     });
+    const reported = await fetch(`http://127.0.0.1:${ready.port as number}/failure`, {
+      method: 'POST',
+      body: JSON.stringify({ phase: 'agent', reason: 'cli-exit', exitCode: 1 }),
+      headers: { 'Content-Type': 'application/json' },
+    });
+    expect(reported.status).toBe(204);
+    expect(await waitForJson(join(root, 'channel-failure.json'))).toEqual({
+      phase: 'request',
+      reason: 'request-limit',
+      actualBytes: Buffer.byteLength('private'.repeat(22 * 1024)),
+      maximumBytes: 128 * 1024,
+    });
   } finally {
     child.kill('SIGTERM');
     rmSync(root, { recursive: true, force: true });
@@ -657,7 +669,7 @@ it('the Python loopback channel records an unsupported compaction request withou
   const root = mkdtempSync(join(tmpdir(), 'autopod-codex-compaction-'));
   chmodSync(root, 0o700);
   const script = fileURLToPath(new URL('./runtime/codex_channel.py', import.meta.url));
-  const child = spawn('python3', [script, root, '0', '10', String(1024 * 1024)], {
+  const child = spawn('python3', [script, root, '0', '10', String(8 * 1024 * 1024)], {
     stdio: 'pipe',
   });
   try {
@@ -682,7 +694,7 @@ it('the Python loopback channel accepts only bounded allowlisted agent failure m
   const root = mkdtempSync(join(tmpdir(), 'autopod-codex-failure-'));
   chmodSync(root, 0o700);
   const script = fileURLToPath(new URL('./runtime/codex_channel.py', import.meta.url));
-  const child = spawn('python3', [script, root, '0', '10', String(1024 * 1024)], {
+  const child = spawn('python3', [script, root, '0', '10', String(8 * 1024 * 1024)], {
     stdio: 'pipe',
   });
   try {

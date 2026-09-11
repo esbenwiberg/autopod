@@ -83,7 +83,7 @@ export class ContainerCodexChannel implements ManagedWorkerProviderChannel {
     } = {},
   ) {
     this.route = structuredClone(route);
-    this.maximumRequestBytes = options.mode === 'agent' ? 1024 * 1024 : 128 * 1024;
+    this.maximumRequestBytes = options.mode === 'agent' ? 8 * 1024 * 1024 : 128 * 1024;
     this.source = readFileSync(new URL('./runtime/codex_channel.py', import.meta.url), 'utf8');
     this.worker = readFileSync(
       new URL(

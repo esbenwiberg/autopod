@@ -24,7 +24,7 @@ const toolsSchema = z
 const requestSchema = z
   .object({
     model: z.string(),
-    input: z.array(z.record(z.string(), z.unknown())).min(1).max(512),
+    input: z.array(z.record(z.string(), z.unknown())).min(1).max(4096),
     instructions: z.string().optional(),
     reasoning: z
       .object({

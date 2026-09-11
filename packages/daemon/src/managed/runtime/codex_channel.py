@@ -24,7 +24,7 @@ AGENT_FAILURE_REASONS = {
 }
 
 REPORT_MAX_REQUEST = 128 * 1024
-AGENT_MAX_REQUEST = 1024 * 1024
+AGENT_MAX_REQUEST = 8 * 1024 * 1024
 # A validated agent-mode SSE transcript includes reasoning and tool events in
 # addition to the final artifact. The host gateway remains the authority for the
 # exact per-transport bound and never writes more than this hard channel ceiling.
@@ -132,7 +132,15 @@ def serve(root, port, lifetime, maximum_request=REPORT_MAX_REQUEST):
                         or not 1 <= value['exitCode'] <= 255
                     ):
                         raise ValueError('failure')
-                    atomic(root / 'channel-failure.json', value)
+                    failure_file = root / 'channel-failure.json'
+                    preserve = False
+                    if failure_file.exists():
+                        prior = json.loads(failure_file.read_text())
+                        preserve = prior.get('phase') == 'request' and prior.get('reason') in {
+                            'request-limit', 'unsupported-auto-compaction'
+                        }
+                    if not preserve:
+                        atomic(failure_file, value)
                     self.reply(204)
                 except (OSError, ValueError, KeyError):
                     self.reply(400)
