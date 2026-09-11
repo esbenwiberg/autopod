@@ -128,15 +128,54 @@ it('installs an agent helper that routes final output through the reviewed Codex
     expect(install?.[1][6]).toContain('Return the complete work product as your final response');
     expect(install?.[1][6]).toContain('Do not edit that output path directly');
     expect(install?.[1][6]).toContain("'features.auto_compaction': False");
+    expect(install?.[1][6]).toContain(
+      "'sandbox_workspace_write.network_access': bool(args.github_repository)",
+    );
+    expect(install?.[1][6]).toContain(
+      "codex_sandbox = 'workspace-write' if args.github_repository else args.sandbox",
+    );
     expect(install?.[1][6]).toContain("'codex', 'exec', 'resume', '--last'");
     expect(install?.[1][6]).toContain(
       "for key, value in config.items(): resume.extend(['-c', key + '=' + json.dumps(value)])",
     );
     expect(install?.[1][6]).toContain('report_failure(args.endpoint, log, result.returncode)');
+    expect(install?.[1][6]).toContain("event.get('type') not in ('turn.failed', 'error')");
     expect(install?.[1][6]).not.toContain("'codex', 'exec', '--ephemeral'");
   } finally {
     close();
   }
+});
+
+it('serializes root spool writes for the same managed runtime', async () => {
+  let active = 0;
+  let maximumActive = 0;
+  const exec = vi.fn<ContainerManager['execInContainer']>(async () => {
+    active += 1;
+    maximumActive = Math.max(maximumActive, active);
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    active -= 1;
+    return { exitCode: 0, stdout: '', stderr: '' };
+  });
+  const { request } = setup();
+  const channel = new ContainerCodexChannel(
+    { execInContainer: exec } as unknown as ContainerManager,
+    request.route,
+    4095,
+  );
+  const message = {
+    schemaVersion: 1 as const,
+    dispatcherAttemptId: 'attempt-one',
+    grantId: 'grant-one',
+    grantRevision: 1,
+    message: 'Keep the scope narrow.',
+  };
+
+  await Promise.all([
+    channel.send('runtime-one', '/run/dispatcher-managed-one', message, 'follow-one'),
+    channel.send('runtime-one', '/run/dispatcher-managed-one', message, 'follow-two'),
+  ]);
+
+  expect(maximumActive).toBe(1);
 });
 
 it('queues an idempotent follow-up in the root-owned runtime spool', async () => {

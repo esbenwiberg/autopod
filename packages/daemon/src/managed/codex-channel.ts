@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs';
 import type { FollowUpEnvelope, ManagedPodRequest, Route } from '@autopod/shared';
-import type { ContainerManager } from '../interfaces/container-manager.js';
+import type { ContainerManager, ExecOptions, ExecResult } from '../interfaces/container-manager.js';
 import { canonical, sha256 } from './canonical.js';
 import { codexInput } from './codex-wire.js';
 import type { ManagedWorkerProviderChannel } from './runtime-composition.js';
@@ -59,6 +59,7 @@ export class ContainerCodexChannel implements ManagedWorkerProviderChannel {
   private readonly worker: string;
   private readonly githubCli: string;
   private readonly maximumRequestBytes: number;
+  private readonly execTails = new Map<string, Promise<void>>();
   constructor(
     private readonly manager: ContainerManager,
     route: Route,
@@ -84,6 +85,26 @@ export class ContainerCodexChannel implements ManagedWorkerProviderChannel {
       : '';
     if (!Number.isSafeInteger(maximumTokens) || (maximumTokens !== 0 && maximumTokens < 2))
       throw new Error('managed-codex-budget-invalid');
+  }
+  private async execBound(
+    runtimeRef: string,
+    command: string[],
+    options?: ExecOptions,
+  ): Promise<ExecResult> {
+    const prior = this.execTails.get(runtimeRef) ?? Promise.resolve();
+    let release = () => {};
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const tail = prior.catch(() => {}).then(() => gate);
+    this.execTails.set(runtimeRef, tail);
+    await prior.catch(() => {});
+    try {
+      return await this.manager.execInContainer(runtimeRef, command, options);
+    } finally {
+      release();
+      if (this.execTails.get(runtimeRef) === tail) this.execTails.delete(runtimeRef);
+    }
   }
   async preflight(request: ManagedPodRequest) {
     if (canonical(this.route) !== canonical(request.route) || request.route.runtime !== 'codex')
@@ -115,7 +136,7 @@ export class ContainerCodexChannel implements ManagedWorkerProviderChannel {
   async send(runtimeRef: string, stateRoot: string, message: FollowUpEnvelope, key: string) {
     if (!/^\/run\/dispatcher-managed-[A-Za-z0-9-]+$/.test(stateRoot))
       throw new Error('managed-codex-follow-up-binding');
-    const result = await this.manager.execInContainer(
+    const result = await this.execBound(
       runtimeRef,
       ['python3', '-c', SEND, stateRoot, key, canonical(message)],
       { user: 'root' },
@@ -131,7 +152,7 @@ export class ContainerCodexChannel implements ManagedWorkerProviderChannel {
     )
       throw new Error('managed-codex-channel-binding');
     const exec = async (code: string, ...args: string[]) => {
-      const result = await this.manager.execInContainer(
+      const result = await this.execBound(
         binding.runtimeRef,
         ['python3', '-c', code, binding.stateRoot, ...args],
         { user: 'root' },

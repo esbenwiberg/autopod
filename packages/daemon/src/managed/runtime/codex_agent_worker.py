@@ -25,10 +25,28 @@ def report_failure(endpoint, log, exit_code):
             stream.seek(0, os.SEEK_END)
             size = stream.tell()
             stream.seek(max(0, size - 256 * 1024))
-            tail = stream.read().decode('utf8', errors='replace').lower()
+            raw_tail = stream.read().decode('utf8', errors='replace')
+        fatal = []
+        for line in raw_tail.splitlines():
+            try:
+                event = json.loads(line)
+            except (TypeError, ValueError):
+                if line.lstrip().lower().startswith(('error:', 'fatal:')):
+                    fatal.append(line)
+                continue
+            if not isinstance(event, dict) or event.get('type') not in ('turn.failed', 'error'):
+                continue
+            error = event.get('error')
+            if isinstance(error, dict) and isinstance(error.get('message'), str):
+                fatal.append(error['message'])
+            elif isinstance(error, str):
+                fatal.append(error)
+            elif isinstance(event.get('message'), str):
+                fatal.append(event['message'])
+        tail = '\n'.join(fatal).lower()
         if any(value in tail for value in ('context_length_exceeded', 'context window', 'prompt is too long')):
             reason = 'context-window-exceeded'
-        elif any(value in tail for value in ('approval required', 'permission denied', 'operation not permitted')):
+        elif any(value in tail for value in ('approval required', 'approval is not supported', 'permission denied', 'operation not permitted')):
             reason = 'tool-permission-denied'
         elif any(value in tail for value in ('connection refused', 'error sending request', 'channel closed')):
             reason = 'channel-unavailable'
@@ -104,13 +122,18 @@ with tempfile.TemporaryDirectory(prefix='managed-codex-') as temporary:
         # Codex auto-compaction uses /v1/responses/compact, so disable it here
         # and let the reviewed model context window remain the only context cap.
         'features.auto_compaction': False,
+        # The outer reviewed container envelope still denies external egress.
+        # This only lets the nested Codex sandbox reach the credential-free
+        # loopback GitHub broker when that exact identity is present.
+        'sandbox_workspace_write.network_access': bool(args.github_repository),
         'model_instructions_file': str(instructions),
         'model_reasoning_effort': args.reasoning,
         'web_search': 'disabled', 'otel.exporter': 'none',
         'otel.metrics_exporter': 'none', 'otel.trace_exporter': 'none',
     }
     captured = Path(temporary) / 'last-message.md'
-    command = ['codex', 'exec', '--json', '--sandbox', args.sandbox,
+    codex_sandbox = 'workspace-write' if args.github_repository else args.sandbox
+    command = ['codex', 'exec', '--json', '--sandbox', codex_sandbox,
                '-m', args.model, '-C', str(repository), '--output-last-message', str(captured)]
     for key, value in config.items(): command.extend(['-c', key + '=' + json.dumps(value)])
     command.extend(['--', '-'])
