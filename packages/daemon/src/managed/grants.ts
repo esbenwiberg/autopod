@@ -109,7 +109,12 @@ export function admitManagedRequest(
   for (const [key, value] of Object.entries(grant.budget)) {
     if (key === 'mode') continue;
     const ceiling = (profile.budget as unknown as Record<string, number>)[key];
-    if (typeof value !== 'number' || ceiling === undefined || value > ceiling || value <= 0)
+    const isDerivedObservedStop = key === 'maxObservedTokens' && ceiling === undefined;
+    if (
+      typeof value !== 'number' ||
+      (!isDerivedObservedStop && (ceiling === undefined || value > ceiling)) ||
+      value <= 0
+    )
       throw new Error('grant-budget-outside-ceiling');
   }
   if (grant.budget.expiresAt <= now) throw new Error('grant-expired');
