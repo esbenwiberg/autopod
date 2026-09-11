@@ -261,6 +261,8 @@ if not stat.S_ISDIR(actual.st_mode) or actual.st_uid!=0 or actual.st_mode & 0o02
       | 'agent-context-window-exceeded'
       | 'agent-tool-permission-denied'
       | 'agent-channel-unavailable'
+      | 'agent-followup-channel-failed'
+      | 'agent-output-invalid'
       | 'agent-cli-exit';
   }> {
     const { boundary, podId } = this.resolve(ref);
@@ -305,6 +307,8 @@ if not stat.S_ISDIR(actual.st_mode) or actual.st_uid!=0 or actual.st_mode & 0o02
         | 'agent-context-window-exceeded'
         | 'agent-tool-permission-denied'
         | 'agent-channel-unavailable'
+        | 'agent-followup-channel-failed'
+        | 'agent-output-invalid'
         | 'agent-cli-exit'
         | undefined;
       if (receipt.observedExit) {
@@ -343,6 +347,8 @@ if not stat.S_ISDIR(actual.st_mode) or actual.st_uid!=0 or actual.st_mode & 0o02
                 'context-window-exceeded',
                 'tool-permission-denied',
                 'channel-unavailable',
+                'followup-channel-failed',
+                'output-invalid',
                 'cli-exit',
               ].includes(String(failure.reason))
             )
@@ -350,6 +356,8 @@ if not stat.S_ISDIR(actual.st_mode) or actual.st_uid!=0 or actual.st_mode & 0o02
                 | 'agent-context-window-exceeded'
                 | 'agent-tool-permission-denied'
                 | 'agent-channel-unavailable'
+                | 'agent-followup-channel-failed'
+                | 'agent-output-invalid'
                 | 'agent-cli-exit';
           } catch {
             /* Untrusted runtime diagnostics are ignored unless fully allowlisted. */

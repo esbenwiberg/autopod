@@ -140,6 +140,8 @@ it('installs an agent helper that routes final output through the reviewed Codex
     );
     expect(install?.[1][6]).toContain('report_failure(args.endpoint, log, result.returncode)');
     expect(install?.[1][6]).toContain("event.get('type') not in ('turn.failed', 'error')");
+    expect(install?.[1][6]).toContain('empty_polls < 120');
+    expect(install?.[1][6]).toContain("send_failure(args.endpoint, 'output-invalid')");
     expect(install?.[1][6]).not.toContain("'codex', 'exec', '--ephemeral'");
   } finally {
     close();
@@ -176,6 +178,35 @@ it('serializes root spool writes for the same managed runtime', async () => {
   ]);
 
   expect(maximumActive).toBe(1);
+});
+
+it('retries an idempotent follow-up after transient sandbox exec rejection', async () => {
+  const { request } = setup();
+  const exec = vi
+    .fn<ContainerManager['execInContainer']>()
+    .mockRejectedValueOnce(new Error('sandbox-busy'))
+    .mockResolvedValueOnce({ exitCode: 1, stdout: '', stderr: '' })
+    .mockResolvedValueOnce({ exitCode: 0, stdout: '', stderr: '' });
+  const channel = new ContainerCodexChannel(
+    { execInContainer: exec } as unknown as ContainerManager,
+    request.route,
+    4095,
+  );
+
+  await channel.send(
+    'runtime-one',
+    '/run/dispatcher-managed-one',
+    {
+      schemaVersion: 1,
+      dispatcherAttemptId: 'attempt-one',
+      grantId: 'grant-one',
+      grantRevision: 1,
+      message: 'Keep the scope narrow.',
+    },
+    'follow-one',
+  );
+
+  expect(exec).toHaveBeenCalledTimes(3);
 });
 
 it('queues an idempotent follow-up in the root-owned runtime spool', async () => {

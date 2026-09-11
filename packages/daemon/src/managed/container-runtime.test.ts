@@ -226,6 +226,8 @@ it.each([
   ['context-window-exceeded', 'agent-context-window-exceeded'],
   ['tool-permission-denied', 'agent-tool-permission-denied'],
   ['channel-unavailable', 'agent-channel-unavailable'],
+  ['followup-channel-failed', 'agent-followup-channel-failed'],
+  ['output-invalid', 'agent-output-invalid'],
   ['cli-exit', 'agent-cli-exit'],
 ] as const)('projects allowlisted agent failure %s after exit', async (reason, limitation) => {
   const f = fixture();

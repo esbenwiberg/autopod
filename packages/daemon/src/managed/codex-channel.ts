@@ -136,12 +136,21 @@ export class ContainerCodexChannel implements ManagedWorkerProviderChannel {
   async send(runtimeRef: string, stateRoot: string, message: FollowUpEnvelope, key: string) {
     if (!/^\/run\/dispatcher-managed-[A-Za-z0-9-]+$/.test(stateRoot))
       throw new Error('managed-codex-follow-up-binding');
-    const result = await this.execBound(
-      runtimeRef,
-      ['python3', '-c', SEND, stateRoot, key, canonical(message)],
-      { user: 'root' },
-    );
-    if (result.exitCode !== 0) throw new Error('managed-codex-follow-up-unavailable');
+    for (let attempt = 0; attempt < 5; attempt++) {
+      try {
+        const result = await this.execBound(
+          runtimeRef,
+          ['python3', '-c', SEND, stateRoot, key, canonical(message)],
+          { user: 'root' },
+        );
+        if (result.exitCode === 0) return;
+      } catch {
+        // The sandbox data plane can transiently reject a short control exec
+        // while another bounded observer exec completes. SEND is key-idempotent.
+      }
+      if (attempt < 4) await new Promise((resolve) => setTimeout(resolve, 100 * (attempt + 1)));
+    }
+    throw new Error('managed-codex-follow-up-unavailable');
   }
   async attach(
     binding: Parameters<ManagedWorkerProviderChannel['attach']>[0],

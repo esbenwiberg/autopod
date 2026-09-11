@@ -35,6 +35,8 @@ export interface ManagedRuntimePort {
       | 'agent-context-window-exceeded'
       | 'agent-tool-permission-denied'
       | 'agent-channel-unavailable'
+      | 'agent-followup-channel-failed'
+      | 'agent-output-invalid'
       | 'agent-cli-exit';
   }>;
   stop(runtimeRef: string): Promise<void>;

@@ -18,6 +18,8 @@ AGENT_FAILURE_REASONS = {
     'context-window-exceeded',
     'tool-permission-denied',
     'channel-unavailable',
+    'followup-channel-failed',
+    'output-invalid',
     'cli-exit',
 }
 

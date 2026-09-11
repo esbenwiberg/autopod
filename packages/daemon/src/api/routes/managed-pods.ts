@@ -2,6 +2,22 @@ import type { FastifyInstance, FastifyRequest } from 'fastify';
 import { ManagedControls } from '../../managed/managed-controls.js';
 import type { ManagedPodService } from '../../managed/managed-service.js';
 
+const CONTROL_FAILURES = new Set([
+  'grant-inactive',
+  'invalid-control-key',
+  'managed-channel-binding',
+  'managed-codex-follow-up-binding',
+  'managed-codex-follow-up-unavailable',
+  'managed-control-conflict',
+  'managed-follow-up-unavailable',
+  'managed-stale-grant',
+]);
+
+function controlFailure(error: unknown): string {
+  const message = error instanceof Error ? error.message : '';
+  return CONTROL_FAILURES.has(message) ? message : 'managed-control-failure';
+}
+
 export interface ManagedPodApiDeps {
   service: ManagedPodService;
   finishOutputs?: () => Promise<void>;
@@ -140,7 +156,8 @@ export function managedPodRoutes(app: FastifyInstance, deps: ManagedPodApiDeps):
             request.body,
             request.params.key,
           );
-        } catch {
+        } catch (error) {
+          app.log.warn({ operation, reason: controlFailure(error) }, 'managed control rejected');
           return reply.code(409).send({
             schemaVersion: 1,
             code: 'managed-control-rejected',

@@ -15,8 +15,26 @@ FAILURE_REASONS = {
     'context-window-exceeded',
     'tool-permission-denied',
     'channel-unavailable',
+    'followup-channel-failed',
+    'output-invalid',
     'cli-exit',
 }
+
+
+def send_failure(endpoint, reason, exit_code=1):
+    try:
+        if reason not in FAILURE_REASONS:
+            reason = 'cli-exit'
+        payload = json.dumps({'phase': 'agent', 'reason': reason, 'exitCode': exit_code}, separators=(',', ':')).encode()
+        request = urllib.request.Request(
+            endpoint.removesuffix('/v1') + '/failure', data=payload, method='POST',
+            headers={'Content-Type': 'application/json', 'Content-Length': str(len(payload))},
+        )
+        with urllib.request.urlopen(request, timeout=1) as response:
+            if response.status != 204:
+                raise RuntimeError('failure-report-rejected')
+    except (OSError, RuntimeError, ValueError, urllib.error.URLError):
+        pass
 
 
 def report_failure(endpoint, log, exit_code):
@@ -52,16 +70,7 @@ def report_failure(endpoint, log, exit_code):
             reason = 'channel-unavailable'
         else:
             reason = 'cli-exit'
-        if reason not in FAILURE_REASONS:
-            reason = 'cli-exit'
-        payload = json.dumps({'phase': 'agent', 'reason': reason, 'exitCode': exit_code}, separators=(',', ':')).encode()
-        request = urllib.request.Request(
-            endpoint.removesuffix('/v1') + '/failure', data=payload, method='POST',
-            headers={'Content-Type': 'application/json', 'Content-Length': str(len(payload))},
-        )
-        with urllib.request.urlopen(request, timeout=1) as response:
-            if response.status != 204:
-                raise RuntimeError('failure-report-rejected')
+        send_failure(endpoint, reason, exit_code)
     except (OSError, RuntimeError, ValueError, urllib.error.URLError):
         pass
 
@@ -151,7 +160,9 @@ with tempfile.TemporaryDirectory(prefix='managed-codex-') as temporary:
         raise SystemExit(result.returncode)
     empty_polls = 0
     handled = 0
-    while handled < 16 and empty_polls < 4:
+    # Keep the same worker steerable across an ordinary Voice status/follow-up
+    # round trip. One second made a completed initial turn race every caller.
+    while handled < 16 and empty_polls < 120:
         try:
             with urllib.request.urlopen(args.endpoint.removesuffix('/v1') + '/followups', timeout=1) as response:
                 if response.status == 204:
@@ -159,12 +170,14 @@ with tempfile.TemporaryDirectory(prefix='managed-codex-') as temporary:
                     time.sleep(0.25)
                     continue
                 followup = json.loads(response.read())
-        except urllib.error.HTTPError:
+        except (urllib.error.HTTPError, urllib.error.URLError, TimeoutError):
+            send_failure(args.endpoint, 'followup-channel-failed')
             raise
         empty_polls = 0
         key = followup.get('key')
         message = followup.get('message')
         if not isinstance(key, str) or not re.fullmatch(r'[A-Za-z0-9_-]{1,200}', key) or not isinstance(message, str) or not 0 < len(message.encode()) <= 4096:
+            send_failure(args.endpoint, 'followup-channel-failed')
             raise RuntimeError('followup-invalid')
         resume = ['codex', 'exec', 'resume', '--last', '--json', '-m', args.model,
                   '--output-last-message', str(captured)]
@@ -184,9 +197,11 @@ with tempfile.TemporaryDirectory(prefix='managed-codex-') as temporary:
         )
         with urllib.request.urlopen(acknowledgement, timeout=1) as response:
             if response.status != 204:
+                send_failure(args.endpoint, 'followup-channel-failed')
                 raise RuntimeError('followup-ack-failed')
         handled += 1
     if not captured.is_file() or captured.is_symlink() or captured.stat().st_size > 1024 * 1024:
+        send_failure(args.endpoint, 'output-invalid')
         raise RuntimeError('agent-output-invalid')
     temporary_output = output.with_suffix(output.suffix + '.tmp')
     temporary_output.write_bytes(captured.read_bytes())
