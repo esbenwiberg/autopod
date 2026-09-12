@@ -289,6 +289,53 @@ it('accepts case-insensitive SSE media type with parameters', async () => {
   expect((await x.call()).consumedTokens).toBe(5010);
 });
 
+it('accepts a completed response split across standards-valid multiline SSE data fields', async () => {
+  const x = setup();
+  const event = JSON.stringify({ type: 'response.completed', response: x.response });
+  const splitAt = event.indexOf('"response"');
+  expect(splitAt).toBeGreaterThan(0);
+  const body = `data: ${event.slice(0, splitAt)}\ndata: ${event.slice(splitAt)}\n\n`;
+  x.fetcher.mockResolvedValue(
+    new Response(body, { headers: { 'content-type': 'text/event-stream' } }),
+  );
+  const agent = new ChatGptReportTransport(
+    x.route,
+    'account-one',
+    x.credential,
+    x.fetcher,
+    x.diagnostic,
+    'agent',
+  );
+
+  const result = await agent.generate(x.route, x.raw, 0, new AbortController().signal, () => {});
+
+  expect(result.value).toBe(body);
+  expect(result.consumedTokens).toBe(5010);
+  expect(x.diagnostic).not.toHaveBeenCalled();
+});
+
+it('does not let reader cancellation overwrite a fully consumed valid response', async () => {
+  const x = setup();
+  const body = `data: ${JSON.stringify({ type: 'response.completed', response: x.response })}\n\n`;
+  const reader = {
+    read: vi
+      .fn()
+      .mockResolvedValueOnce({ done: false, value: new TextEncoder().encode(body) })
+      .mockResolvedValueOnce({ done: true, value: undefined }),
+    cancel: vi.fn().mockRejectedValue(new Error('late transport cancellation failure')),
+  };
+  x.fetcher.mockResolvedValue({
+    ok: true,
+    status: 200,
+    headers: new Headers({ 'content-type': 'text/event-stream' }),
+    body: { getReader: () => reader },
+  } as unknown as Response);
+
+  await expect(x.call()).resolves.toMatchObject({ consumedTokens: 5010 });
+  expect(reader.cancel).toHaveBeenCalledTimes(1);
+  expect(x.diagnostic).not.toHaveBeenCalled();
+});
+
 function streamedOutput(x: ReturnType<typeof setup>, events: unknown[]) {
   x.fetcher.mockImplementation(
     async () =>
