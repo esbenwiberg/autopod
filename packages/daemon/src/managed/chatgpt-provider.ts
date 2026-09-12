@@ -156,11 +156,10 @@ export class ChatGptReportTransport implements BoundedProviderTransport {
       const completedItems: z.infer<typeof responseSchema>['output'] = [];
       const completedItemIds = new Set<string>();
       const orderedItemIds: string[] = [];
-      const consume = (line: string) => {
-        if (!line.startsWith('data:')) return;
-        const raw = line.slice(5).trim();
-        if (!raw || raw === '[DONE]') return;
-        const event = JSON.parse(raw);
+      const consumeEvent = (raw: string) => {
+        const data = raw.trim();
+        if (!data || data === '[DONE]') return;
+        const event = JSON.parse(data);
         if (
           event.type === 'response.failed' ||
           event.type === 'error' ||
@@ -197,6 +196,26 @@ export class ChatGptReportTransport implements BoundedProviderTransport {
           completed = event.response;
         }
       };
+      let dataLines: string[] = [];
+      const flushEvent = () => {
+        if (!dataLines.length) return;
+        const raw = dataLines.join('\n');
+        dataLines = [];
+        consumeEvent(raw);
+      };
+      const consumeLine = (line: string) => {
+        if (!line) {
+          flushEvent();
+          return;
+        }
+        if (line.startsWith(':')) return;
+        const separator = line.indexOf(':');
+        const field = separator < 0 ? line : line.slice(0, separator);
+        if (field !== 'data') return;
+        let value = separator < 0 ? '' : line.slice(separator + 1);
+        if (value.startsWith(' ')) value = value.slice(1);
+        dataLines.push(value);
+      };
       try {
         while (true) {
           signal.throwIfAborted();
@@ -209,15 +228,18 @@ export class ChatGptReportTransport implements BoundedProviderTransport {
           buffer += decoder.decode(part.value, { stream: true });
           let newline = buffer.indexOf('\n');
           while (newline >= 0) {
-            consume(buffer.slice(0, newline).replace(/\r$/, ''));
+            consumeLine(buffer.slice(0, newline).replace(/\r$/, ''));
             buffer = buffer.slice(newline + 1);
             newline = buffer.indexOf('\n');
           }
         }
         buffer += decoder.decode();
-        if (buffer.trim()) consume(buffer);
+        if (buffer) consumeLine(buffer.replace(/\r$/, ''));
+        flushEvent();
       } finally {
-        await reader.cancel();
+        // The full response has already been consumed or a primary stream error
+        // is already in flight. A late cancellation failure must not replace it.
+        await reader.cancel().catch(() => {});
       }
       signal.throwIfAborted();
       assertActive();
