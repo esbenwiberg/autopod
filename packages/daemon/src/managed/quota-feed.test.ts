@@ -91,3 +91,50 @@ it('retries a transient sandbox control rejection instead of abandoning the quot
     f.close();
   }
 });
+
+it('keeps the sandbox quota feed alive after one refresh cycle exhausts its retries', async () => {
+  const f = fixture();
+  vi.useFakeTimers();
+  f.request.route.executionTarget = 'sandbox';
+  f.request.profileSnapshot.route = structuredClone(f.request.route);
+  f.request.effectiveGrant.route = structuredClone(f.request.route);
+  f.request.profileSnapshot.snapshotDigest = digest(
+    Object.fromEntries(
+      Object.entries(f.request.profileSnapshot).filter(([key]) => key !== 'snapshotDigest'),
+    ),
+  );
+  f.request.effectiveGrant.profileSnapshotDigest = f.request.profileSnapshot.snapshotDigest;
+  resign(f.request);
+  f.admission.profiles = new Map([
+    [f.request.profileSnapshot.snapshotDigest, f.request.profileSnapshot],
+  ]);
+  f.admission.targets = ['sandbox'];
+  const writeFile = vi
+    .fn<ContainerManager['writeFile']>()
+    .mockResolvedValueOnce()
+    .mockRejectedValueOnce(new Error('sandbox-busy'))
+    .mockRejectedValueOnce(new Error('sandbox-busy'))
+    .mockRejectedValueOnce(new Error('sandbox-busy'))
+    .mockRejectedValueOnce(new Error('sandbox-busy'))
+    .mockRejectedValueOnce(new Error('sandbox-busy'))
+    .mockResolvedValue();
+  const feed = new ManagedQuotaFeed(f.service(), {
+    execInContainer: vi.fn<ContainerManager['execInContainer']>(),
+    writeFile,
+  } as unknown as ContainerManager);
+  try {
+    const handle = await f.service().start('installation-one', f.request);
+    await feed.attach(
+      'installation-one',
+      handle.podId,
+      handle.podId,
+      `/run/dispatcher-${handle.podId}`,
+    );
+    await vi.advanceTimersByTimeAsync(3_500);
+    expect(writeFile).toHaveBeenCalledTimes(7);
+  } finally {
+    feed.close();
+    vi.useRealTimers();
+    f.close();
+  }
+});

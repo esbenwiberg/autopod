@@ -67,8 +67,9 @@ os.replace(temporary,p)
       active = true;
       void write()
         .catch(() => {
-          clearInterval(timer);
-          this.feeds.delete(podId);
+          // Keep the lease refresher alive after a transient Sandbox data-plane
+          // outage. The supervisor remains fail-closed if the feed stays stale,
+          // while a later interval can recover before that deadline.
         })
         .finally(() => {
           active = false;
