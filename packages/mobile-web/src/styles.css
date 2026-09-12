@@ -129,6 +129,10 @@ code {
 }
 
 .app-footer {
+  display: flex;
+  justify-content: center;
+  gap: 1rem;
+  flex-wrap: wrap;
   text-align: center;
   margin-top: 2rem;
   padding: 0.5rem 0;
@@ -137,6 +141,139 @@ code {
 
 .footer-link {
   text-decoration: none;
+}
+
+.managed-subtitle {
+  font-size: 0.82rem;
+  margin: 0.2rem 0 0;
+}
+
+.managed-card {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.managed-card .pod-card-row {
+  gap: 0.75rem;
+  margin-bottom: 0;
+}
+
+.managed-card-id,
+.managed-detail-id,
+.managed-code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  overflow-wrap: anywhere;
+}
+
+.managed-card-id {
+  color: var(--muted);
+  font-size: 0.78rem;
+  min-width: 0;
+}
+
+.managed-card-route {
+  display: flex;
+  flex-direction: column;
+  gap: 0.12rem;
+  font-size: 0.9rem;
+}
+
+.managed-card-route span,
+.managed-card-metrics {
+  color: var(--muted);
+  font-size: 0.78rem;
+}
+
+.managed-card-metrics {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
+
+.managed-detail-id {
+  color: var(--muted);
+  font-size: 0.82rem;
+  min-width: 0;
+}
+
+.managed-section {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 0.75rem;
+  margin: 0 0 0.75rem;
+  padding: 0.8rem 0.9rem;
+}
+
+.managed-section-danger {
+  border-color: rgba(248, 113, 113, 0.5);
+}
+
+.managed-section-warn {
+  border-color: rgba(251, 191, 36, 0.5);
+}
+
+.managed-section h2 {
+  color: var(--muted);
+  font-size: 0.74rem;
+  letter-spacing: 0.04em;
+  margin: 0 0 0.65rem;
+  text-transform: uppercase;
+}
+
+.managed-detail-row {
+  display: grid;
+  gap: 0.15rem;
+  padding: 0.35rem 0;
+}
+
+.managed-detail-row + .managed-detail-row {
+  border-top: 1px solid var(--border);
+}
+
+.managed-detail-label {
+  color: var(--muted);
+  font-size: 0.72rem;
+}
+
+.managed-detail-value {
+  font-size: 0.88rem;
+  overflow-wrap: anywhere;
+}
+
+.managed-list {
+  font-size: 0.84rem;
+  line-height: 1.4;
+  margin: 0;
+  padding-left: 1.15rem;
+}
+
+.managed-list li + li {
+  margin-top: 0.35rem;
+}
+
+.managed-artifacts {
+  display: flex;
+  flex-direction: column;
+  gap: 0.65rem;
+}
+
+.managed-artifact {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+}
+
+.managed-artifact code {
+  align-self: flex-start;
+  overflow-wrap: anywhere;
+}
+
+.managed-artifact span,
+.managed-empty-copy {
+  font-size: 0.78rem;
+  margin: 0;
 }
 
 .about-list {
@@ -216,6 +353,7 @@ code {
   align-items: center;
   justify-content: center;
   gap: 0.4rem;
+  text-decoration: none;
 }
 
 .tab-active {

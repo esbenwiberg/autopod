@@ -6,6 +6,8 @@ import { WsClient } from './lib/ws-client.js';
 import { About } from './screens/About.js';
 import { Create } from './screens/Create.js';
 import { Landing } from './screens/Landing.js';
+import { ManagedPodDetail } from './screens/ManagedPodDetail.js';
+import { ManagedPods } from './screens/ManagedPods.js';
 import { PodDetail } from './screens/PodDetail.js';
 import { ScanAgain } from './screens/ScanAgain.js';
 import { ScanReport } from './screens/ScanReport.js';
@@ -37,6 +39,8 @@ export function App(): JSX.Element {
         <Route path="/" element={<Landing />} />
         <Route path="/create" element={<Create />} />
         <Route path="/pod/:id" element={<PodDetail />} />
+        <Route path="/managed-pods" element={<ManagedPods />} />
+        <Route path="/managed-pod/:id" element={<ManagedPodDetail />} />
         <Route path="/scan-reports" element={<ScanReports />} />
         <Route path="/scan-report/:id" element={<ScanReport />} />
         <Route path="/about" element={<About />} />

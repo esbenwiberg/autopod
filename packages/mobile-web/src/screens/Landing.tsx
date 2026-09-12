@@ -74,6 +74,9 @@ export function Landing(): JSX.Element {
         >
           Active
         </button>
+        <Link to="/managed-pods" className="tab">
+          Managed
+        </Link>
       </nav>
 
       {error ? <div className="error">{error}</div> : null}
