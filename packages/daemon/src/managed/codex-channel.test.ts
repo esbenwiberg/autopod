@@ -626,11 +626,6 @@ it('retries a transient sandbox control exec instead of closing the live channel
   vi.useFakeTimers();
   const { request, exec } = setup();
   request.route.executionTarget = 'sandbox';
-  const channel = new ContainerCodexChannel(
-    { execInContainer: exec } as unknown as ContainerManager,
-    request.route,
-    4095,
-  );
   const raw = JSON.stringify({
     model: request.route.model,
     input: [{ role: 'user', content: 'Fact.' }],
@@ -640,6 +635,7 @@ it('retries a transient sandbox control exec instead of closing the live channel
   });
   let reads = 0;
   let writes = 0;
+  const writeFile = vi.fn<ContainerManager['writeFile']>().mockResolvedValue();
   exec.mockImplementation(async (_ref, argv) => {
     if (argv[0] === 'codex')
       return {
@@ -667,9 +663,11 @@ it('retries a transient sandbox control exec instead of closing the live channel
     return { exitCode: 0, stdout: '', stderr: '' };
   });
   const invoke = vi.fn(async () => ({ state: 'observed' as const, value: 'data: ok\n\n' }));
+  const manager = { execInContainer: exec, writeFile } as unknown as ContainerManager;
+  const sandboxChannel = new ContainerCodexChannel(manager, request.route, 4095);
   let close: (() => void) | undefined;
   try {
-    close = await channel.attach({
+    close = await sandboxChannel.attach({
       podId: 'managed-one',
       runtimeRef: 'ref',
       stateRoot: '/run/dispatcher-managed-one',
@@ -678,6 +676,76 @@ it('retries a transient sandbox control exec instead of closing the live channel
     await vi.advanceTimersByTimeAsync(2_500);
     expect(invoke).toHaveBeenCalledTimes(1);
     expect(writes).toBe(1);
+    expect(writeFile).toHaveBeenCalledTimes(1);
+  } finally {
+    close?.();
+    vi.useRealTimers();
+  }
+});
+
+it('publishes a large sandbox response through the files data plane instead of argv', async () => {
+  vi.useFakeTimers();
+  const { request, exec } = setup();
+  request.route.executionTarget = 'sandbox';
+  const raw = JSON.stringify({
+    model: request.route.model,
+    input: [{ role: 'user', content: 'Fact.' }],
+    reasoning: { effort: request.route.reasoning },
+    stream: true,
+    store: false,
+  });
+  let read = false;
+  exec.mockImplementation(async (_ref, argv) => {
+    if (argv[0] === 'codex')
+      return {
+        exitCode: 0,
+        stdout: '--ephemeral --output-last-message --sandbox --last',
+        stderr: '',
+      };
+    const code = argv[2] ?? '';
+    if (code.includes('urllib.request')) return { exitCode: 0, stdout: '204', stderr: '' };
+    if (code.includes('p.stat().st_size')) {
+      if (read) return { exitCode: 0, stdout: '', stderr: '' };
+      read = true;
+      return {
+        exitCode: 0,
+        stdout: JSON.stringify({
+          body: raw,
+          digest: sha256(raw).slice(7),
+          ticket: 'a'.repeat(36),
+        }),
+        stderr: '',
+      };
+    }
+    return { exitCode: 0, stdout: '', stderr: '' };
+  });
+  const writeFile = vi.fn<ContainerManager['writeFile']>().mockResolvedValue();
+  const response = `data: ${'x'.repeat(400 * 1024)}\n\n`;
+  const channel = new ContainerCodexChannel(
+    { execInContainer: exec, writeFile } as unknown as ContainerManager,
+    request.route,
+    4095,
+  );
+  let close: (() => void) | undefined;
+  try {
+    close = await channel.attach({
+      podId: 'managed-one',
+      runtimeRef: 'ref',
+      stateRoot: '/run/dispatcher-managed-one',
+      invoke: vi.fn(async () => ({ state: 'observed' as const, value: response })),
+    });
+    await vi.advanceTimersByTimeAsync(2_500);
+    expect(writeFile).toHaveBeenCalledTimes(1);
+    expect(writeFile.mock.calls[0]?.slice(0, 2)).toEqual([
+      'ref',
+      '/run/dispatcher-managed-one/channel-response.tmp',
+    ]);
+    expect(JSON.parse(String(writeFile.mock.calls[0]?.[2]))).toMatchObject({ body: response });
+    const publication = exec.mock.calls.find((call) =>
+      String(call[1][2] ?? '').includes('staged-response'),
+    );
+    expect(publication?.[1]).not.toContain(response);
+    expect(publication?.[1].at(-1)).toBe('a'.repeat(36));
   } finally {
     close?.();
     vi.useRealTimers();
