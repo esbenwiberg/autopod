@@ -166,6 +166,8 @@ export function composeManagedRuntime(config: ManagedRuntimeCompositionConfig) {
       image: binding.image,
       command: binding.command,
       dependencyCache: binding.dependencyCache,
+      sourceWorkspace: (podId: string, repositoryId: string) =>
+        workspaces.path(podId, repositoryId),
       quotaReady: async (request) => {
         if (closed) throw new Error('managed-composition-closed');
         gateways[index]!.preflight(request);

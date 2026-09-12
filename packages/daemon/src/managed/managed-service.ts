@@ -44,6 +44,8 @@ export interface ManagedRuntimePort {
   cleanup?(runtimeRef: string): Promise<boolean>;
   cleanupUnallocated?(podId: string, request: ManagedPodRequest): Promise<boolean>;
   extractOutput?(runtimeRef: string, staging: string, output: ArtifactOutput): Promise<void>;
+  /** Sync a stopped sandbox repository back to its trusted host workspace before freezing source. */
+  extractSource?(runtimeRef: string, repositoryId: string): Promise<void>;
 }
 export interface ManagedPodRow {
   pod_id: string;

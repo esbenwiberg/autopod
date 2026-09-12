@@ -19,6 +19,7 @@ function fixture() {
   const manager = {
     ensureManagedContainer: ensure,
     extractManagedOutput: vi.fn(),
+    extractDirectoryFromContainer: vi.fn(async () => {}),
     execInContainer: exec,
   } as unknown as ContainerManager;
   const config: ContainerSpawnConfig = {
@@ -40,6 +41,7 @@ function fixture() {
     manager,
     image: config.image,
     command: ['fixture-agent', '--model', request.route.model],
+    sourceWorkspace: () => '/fixture/repo',
     prepare: async () => config,
     quotaReady: async () => true,
     attachQuota: vi.fn(async () => {}),
@@ -154,6 +156,47 @@ it('does not export artifacts after a nonzero managed agent exit', async () => {
     f.runtime.extractOutput('container-one', '/staging', f.request.outputs.artifacts),
   ).rejects.toThrow('managed-agent-exit-failed');
   expect(f.binding.manager.extractManagedOutput).not.toHaveBeenCalled();
+});
+
+it('syncs a stopped sandbox source workspace back before source freezing', async () => {
+  const f = fixture();
+  f.request.route.executionTarget = 'sandbox';
+  f.request.profileSnapshot.route.executionTarget = 'sandbox';
+  f.request.effectiveGrant.route.executionTarget = 'sandbox';
+  const repository = f.request.effectiveGrant.scope.repositories[0];
+  const volume = f.config.volumes?.[0];
+  if (!repository || !volume) throw new Error('fixture-source-binding-missing');
+  repository.access = 'write';
+  f.request.outputs.source = {
+    mode: 'draft-pr',
+    repository: 'fixture-repo',
+    remote: 'fixture-remote',
+    head: 'worker/fixture',
+    base: 'main',
+  };
+  volume.readOnly = false;
+  await f.runtime.ensure('pod-one', f.request, () => {});
+  f.exec.mockResolvedValueOnce({
+    exitCode: 0,
+    stdout: JSON.stringify({
+      observedExit: true,
+      state: 'exited',
+      consumedTokens: 12,
+      specDigest: f.request.executionSpecDigest,
+      exitCode: 0,
+    }),
+    stderr: '',
+  });
+
+  await f.runtime.extractSource('container-one', 'fixture-repo');
+
+  expect(f.binding.manager.extractDirectoryFromContainer).toHaveBeenCalledWith(
+    'container-one',
+    '/repositories/fixture-repo',
+    '/fixture/repo',
+    ['node_modules'],
+    expect.objectContaining({ assertCurrent: expect.any(Function) }),
+  );
 });
 
 it('projects only an allowlisted channel request-limit diagnostic after exit', async () => {
