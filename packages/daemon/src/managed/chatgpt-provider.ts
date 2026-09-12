@@ -35,6 +35,7 @@ const completedItemSchema = z.object({
 const failureReasons = new Set([
   'account',
   'http',
+  'stream-read',
   'incomplete',
   'duplicate-completion',
   'response-limit',
@@ -220,7 +221,15 @@ export class ChatGptReportTransport implements BoundedProviderTransport {
         while (true) {
           signal.throwIfAborted();
           assertActive();
-          const part = await reader.read();
+          let part: Awaited<ReturnType<typeof reader.read>>;
+          try {
+            part = await reader.read();
+          } catch (error) {
+            // A validated terminal event is authoritative even when the HTTP
+            // transport reports a late reset instead of a clean EOF.
+            if (completionSeen) break;
+            throw new Error('stream-read', { cause: error });
+          }
           if (part.done) break;
           bytes += part.value.byteLength;
           if (bytes > AGENT_MAXIMUM_RESPONSE_BYTES) throw new Error('response-limit');

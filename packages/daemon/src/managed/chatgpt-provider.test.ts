@@ -336,6 +336,73 @@ it('does not let reader cancellation overwrite a fully consumed valid response',
   expect(x.diagnostic).not.toHaveBeenCalled();
 });
 
+it('accepts a terminal response when the transport rejects only the read after completion', async () => {
+  const x = setup();
+  const body = `data: ${JSON.stringify({ type: 'response.completed', response: x.response })}\n\n`;
+  const reader = {
+    read: vi
+      .fn()
+      .mockResolvedValueOnce({ done: false, value: new TextEncoder().encode(body) })
+      .mockRejectedValueOnce(new TypeError('terminated')),
+    cancel: vi.fn().mockResolvedValue(undefined),
+  };
+  x.fetcher.mockResolvedValue({
+    ok: true,
+    status: 200,
+    headers: new Headers({ 'content-type': 'text/event-stream' }),
+    body: { getReader: () => reader },
+  } as unknown as Response);
+  const agent = new ChatGptReportTransport(
+    x.route,
+    'account-one',
+    x.credential,
+    x.fetcher,
+    x.diagnostic,
+    'agent',
+  );
+
+  await expect(
+    agent.generate(x.route, x.raw, 0, new AbortController().signal, () => {}),
+  ).resolves.toMatchObject({ consumedTokens: 5010 });
+  expect(reader.read).toHaveBeenCalledTimes(2);
+  expect(reader.cancel).toHaveBeenCalledTimes(1);
+  expect(x.diagnostic).not.toHaveBeenCalled();
+});
+
+it('fails closed and classifies a stream read error before completion', async () => {
+  const x = setup();
+  const reader = {
+    read: vi.fn().mockRejectedValue(new TypeError('fixture-secret-terminated')),
+    cancel: vi.fn().mockResolvedValue(undefined),
+  };
+  x.fetcher.mockResolvedValue({
+    ok: true,
+    status: 200,
+    headers: new Headers({ 'content-type': 'text/event-stream' }),
+    body: { getReader: () => reader },
+  } as unknown as Response);
+  const agent = new ChatGptReportTransport(
+    x.route,
+    'account-one',
+    x.credential,
+    x.fetcher,
+    x.diagnostic,
+    'agent',
+  );
+
+  await expect(
+    agent.generate(x.route, x.raw, 0, new AbortController().signal, () => {}),
+  ).rejects.toThrow('managed-chatgpt-request-unavailable');
+  expect(reader.read).toHaveBeenCalledTimes(1);
+  expect(reader.cancel).toHaveBeenCalledTimes(1);
+  expect(x.diagnostic).toHaveBeenCalledExactlyOnceWith({
+    phase: 'stream',
+    reason: 'stream-read',
+    httpStatus: 200,
+  });
+  expect(JSON.stringify(x.diagnostic.mock.calls)).not.toContain('fixture-secret-terminated');
+});
+
 function streamedOutput(x: ReturnType<typeof setup>, events: unknown[]) {
   x.fetcher.mockImplementation(
     async () =>
