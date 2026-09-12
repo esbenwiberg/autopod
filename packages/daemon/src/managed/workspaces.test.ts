@@ -42,7 +42,7 @@ it.each(['node_modules', 'node_modules/'])(
       ).ManagedPodRequest as ManagedPodRequest;
       const scope = request.effectiveGrant.scope.repositories[0]!;
       scope.baseRevision = base;
-      scope.access = 'write';
+      scope.access = 'read';
       const mirrors = [
         {
           enrollmentId: scope.enrollmentId,
@@ -55,12 +55,16 @@ it.each(['node_modules', 'node_modules/'])(
       const manager = () => new ManagedWorkspaces(db, path.join(root, 'attempts'), mirrors);
       const volumes = await manager().prepare('managed-one', request);
       const work = volumes[0]!.host;
+      expect(volumes[0]?.readOnly).toBe(true);
       expect(lstatSync(path.join(work, '.git')).isDirectory()).toBe(true);
+      expect(lstatSync(path.join(work, '.agents')).isDirectory()).toBe(true);
+      expect(lstatSync(path.join(work, '.codex')).isDirectory()).toBe(true);
       expect(lstatSync(path.join(work, 'node_modules')).isSymbolicLink()).toBe(true);
       expect(readlinkSync(path.join(work, 'node_modules'))).toBe(
         '/opt/autopod-managed/fixture/node_modules',
       );
       expect(git(work, 'remote')).toBe('');
+      expect(git(work, 'status', '--porcelain')).toBe('');
       writeFileSync(path.join(work, 'answer.txt'), 'changed\n');
       expect(await manager().prepare('managed-one', request)).toEqual(volumes);
       expect(readFileSync(path.join(work, 'answer.txt'), 'utf8')).toBe('changed\n');

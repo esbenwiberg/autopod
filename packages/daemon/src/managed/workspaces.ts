@@ -25,6 +25,20 @@ export interface ManagedRepositoryMirror {
   dependencyCachePath?: string;
 }
 
+const CODEX_SANDBOX_MOUNT_POINTS = ['.agents', '.codex'] as const;
+
+async function ensureCodexSandboxMountPoints(destination: string): Promise<void> {
+  for (const name of CODEX_SANDBOX_MOUNT_POINTS) {
+    const mountPoint = path.join(destination, name);
+    await mkdir(mountPoint, { mode: 0o700 }).catch((error: NodeJS.ErrnoException) => {
+      if (error.code !== 'EEXIST') throw error;
+    });
+    const entry = await lstat(mountPoint);
+    if (entry.isSymbolicLink() || !entry.isDirectory())
+      throw new Error('managed-workspace-codex-mount-invalid');
+  }
+}
+
 /** Independent Git copies: no shared .git file, hardlinks, credentials, or user-checkout writes. */
 export class ManagedWorkspaces {
   constructor(
@@ -140,6 +154,10 @@ export class ManagedWorkspaces {
           .prepare("UPDATE managed_workspaces SET state='ready' WHERE pod_id=? AND repository_id=?")
           .run(podId, repository.enrollmentId);
       }
+      // Codex's nested Bubblewrap policy bind-mounts these repository-local
+      // metadata roots. Materialize only empty directories before a read-only
+      // repository is uploaded so sandbox setup never needs to mutate it.
+      await ensureCodexSandboxMountPoints(destination);
       if (mirror.dependencyCachePath) {
         const link = path.join(destination, 'node_modules');
         if (
