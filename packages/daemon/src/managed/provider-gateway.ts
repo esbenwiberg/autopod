@@ -6,6 +6,7 @@ import type { ManagedPodService } from './managed-service.js';
 import { ManagedQuotaBroker } from './quota-broker.js';
 
 const MAXIMUM_PROVIDER_PROMPT_BYTES = 8 * 1024 * 1024;
+const MAXIMUM_PROVIDER_RESPONSE_BYTES = 8 * 1024 * 1024;
 
 /** Trusted host-side entrypoint, never an unscoped public provider proxy. */
 export class ManagedProviderGateway {
@@ -29,7 +30,7 @@ export class ManagedProviderGateway {
     if (
       !Number.isSafeInteger(this.maximumResponseBytes) ||
       this.maximumResponseBytes < 1 ||
-      this.maximumResponseBytes > 1024 * 1024
+      this.maximumResponseBytes > MAXIMUM_PROVIDER_RESPONSE_BYTES
     )
       throw new Error('managed-provider-output-limit-invalid');
     if (!Number.isSafeInteger(maximumRequests) || maximumRequests < 1 || maximumRequests > 100)
