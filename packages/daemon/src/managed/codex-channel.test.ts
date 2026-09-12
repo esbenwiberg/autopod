@@ -197,6 +197,31 @@ it('retries a bounded agent failure receipt when the channel is still serializin
   }
 });
 
+it('publishes agent output without requiring sandbox rename support', async () => {
+  const worker = readFileSync(
+    fileURLToPath(new URL('./runtime/codex_agent_worker.py', import.meta.url)),
+    'utf8',
+  );
+  const start = worker.indexOf('def publish_output');
+  const end = worker.indexOf('\n\nparser =', start);
+  expect(start).toBeGreaterThanOrEqual(0);
+  expect(end).toBeGreaterThan(start);
+  const publishOutput = worker.slice(start, end);
+  const root = mkdtempSync(join(tmpdir(), 'managed-output-publish-'));
+  try {
+    const captured = join(root, 'captured.md');
+    const output = join(root, 'investigation.md');
+    writeFileSync(captured, 'verified artifact');
+    await exec('python3', [
+      '-c',
+      `import os\nfrom pathlib import Path\ndef send_failure(*args): raise AssertionError('unexpected failure')\n${publishOutput}\ndef unsupported(*args): raise OSError('rename unsupported')\nos.replace=unsupported\npublish_output('http://127.0.0.1:1/v1',Path(${JSON.stringify(captured)}),Path(${JSON.stringify(output)}))`,
+    ]);
+    expect(readFileSync(output, 'utf8')).toBe('verified artifact');
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 it('serializes root spool writes for the same managed runtime', async () => {
   let active = 0;
   let maximumActive = 0;
