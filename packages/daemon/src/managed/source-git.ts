@@ -8,6 +8,11 @@ import type { FinalizeSourceDeliveryRequest, SourceCandidateReceipt } from '@aut
 const exec = promisify(execFile);
 export const ZERO_COMMIT = '0'.repeat(40);
 export const MAX_CANDIDATE_BYTES = 64 * 1024 * 1024;
+const MANAGED_RECOVERY_COMMIT_MESSAGE = 'chore: capture managed worker changes';
+const MANAGED_RECOVERY_COMMIT_IDENTITY = {
+  name: 'Autopod',
+  email: 'autopod@autopod.local',
+} as const;
 export type ManagedGitCredentialMode = 'bearer' | 'github-basic';
 export interface ManagedGitCredential {
   url: string;
@@ -233,7 +238,27 @@ export class ManagedGitBroker {
       /^\s*(worktree|fsmonitor|sshCommand|gitProxy)\s*=/im.test(config)
     )
       throw new Error('source-git-config-untrusted');
-    if (await managedGit(cwd, ['status', '--porcelain'])) throw new Error('source-candidate-dirty');
+    // The worker is asked to commit its own changes, but a successful agent process can
+    // omit that final mechanical step. Capture the isolated workspace deterministically
+    // before freezing so validated work is not discarded merely because `git commit`
+    // was skipped. Hooks, ambient config/credentials and commit signing stay disabled.
+    if (await managedGit(cwd, ['status', '--porcelain', '--untracked-files=all'])) {
+      await managedGit(cwd, ['add', '--all', '--', '.']);
+      await managedGit(cwd, [
+        '-c',
+        `user.name=${MANAGED_RECOVERY_COMMIT_IDENTITY.name}`,
+        '-c',
+        `user.email=${MANAGED_RECOVERY_COMMIT_IDENTITY.email}`,
+        '-c',
+        'commit.gpgSign=false',
+        'commit',
+        '--no-verify',
+        '-m',
+        MANAGED_RECOVERY_COMMIT_MESSAGE,
+      ]);
+      if (await managedGit(cwd, ['status', '--porcelain', '--untracked-files=all']))
+        throw new Error('source-candidate-dirty');
+    }
     const newCommit = await managedGit(cwd, ['rev-parse', '--verify', 'HEAD^{commit}']);
     await managedGit(cwd, ['merge-base', '--is-ancestor', binding.baseCommit, newCommit]);
     if ((await this.remoteHead(binding, binding.base)) !== binding.baseCommit)
