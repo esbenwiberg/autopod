@@ -62,6 +62,30 @@ it('read-only/no-web mounts and exact routes reach the trusted guard with no wor
   expect(f.binding.attachQuota).toHaveBeenCalledTimes(1);
   expect(f.exec).toHaveBeenCalledTimes(4);
 });
+
+it('does not bind request-time workers to the token quota receipt feed', async () => {
+  const f = fixture();
+  const requestTimeBudget = {
+    mode: 'request-time' as const,
+    maxProviderRequests: 100,
+    maxDurationSeconds: 1800,
+    expiresAt: 4102444800,
+  };
+  f.request.profileSnapshot.budget = requestTimeBudget;
+  f.request.effectiveGrant.budget = requestTimeBudget;
+
+  await f.runtime.ensure('pod-one', f.request, () => {});
+
+  expect(f.binding.quotaReady).toBeDefined();
+  expect(f.binding.attachQuota).not.toHaveBeenCalled();
+  const launchCall = f.exec.mock.calls[2] as unknown as [string, string[]];
+  expect(JSON.parse(launchCall[1][4] ?? '{}')).toMatchObject({
+    budgetMode: 'request-time',
+    requireQuotaReceipt: false,
+    expiresAt: 1900,
+    maxDurationSeconds: 1800,
+  });
+});
 it('the objective cannot override reviewed model or runtime arguments', async () => {
   const f = fixture();
   f.request.task.objective = '--model=unreviewed-model';
