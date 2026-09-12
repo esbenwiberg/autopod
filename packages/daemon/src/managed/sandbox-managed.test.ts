@@ -100,7 +100,7 @@ it('a suspended Sandbox is not observed exit, and an unavailable sandbox route n
     command: ['worker', request.route.model],
     prepare: local,
     quotaReady: async () => true,
-    attachQuota: async () => {},
+    attachProviderChannel: async () => {},
   };
   const runtime = new ManagedContainerRuntime(
     [boundary],
