@@ -360,3 +360,89 @@ it('cleanup cannot discard an unfrozen source candidate, and frozen source can d
     f.close();
   }
 });
+
+it('cleanup releases a failed source runtime when its managed workspace is unchanged', async () => {
+  const f = await sourceFixture('draft-pr');
+  let cleanups = 0;
+  try {
+    const enrollment = f.request.profileSnapshot.scope.repositories[0];
+    expect(enrollment).toBeDefined();
+    if (!enrollment) throw new Error('test-enrollment-missing');
+    const base = enrollment.baseRevision;
+    f.git(f.repo, 'reset', '--hard', base);
+    f.f.db.prepare('DELETE FROM managed_source_candidates WHERE pod_id=?').run(f.handle.podId);
+    f.f.db
+      .prepare(`INSERT INTO managed_results (pod_id,limitations_json,candidates_json)
+        VALUES (?, '["agent-runtime-failed"]', '[]')
+        ON CONFLICT(pod_id) DO UPDATE SET
+          limitations_json=excluded.limitations_json,
+          candidates_json=excluded.candidates_json`)
+      .run(f.handle.podId);
+    f.f.runtime.cleanup = async () => {
+      cleanups++;
+      return true;
+    };
+    const request = {
+      schemaVersion: 1 as const,
+      dispatcherAttemptId: f.request.dispatcherAttemptId,
+      grantId: f.handle.grantId,
+      grantRevision: f.handle.grantRevision,
+      operation: 'cleanup' as const,
+    };
+
+    const result = await new ManagedControls(f.service).control(
+      'installation-one',
+      f.handle.podId,
+      request,
+      'cleanup-unchanged-failed-source',
+    );
+
+    expect(result.cleanup).toBe('observed');
+    expect(cleanups).toBe(1);
+  } finally {
+    f.close();
+  }
+});
+
+it('cleanup retains a failed source runtime when its managed workspace has changes', async () => {
+  const f = await sourceFixture('draft-pr');
+  let cleanups = 0;
+  try {
+    const enrollment = f.request.profileSnapshot.scope.repositories[0];
+    expect(enrollment).toBeDefined();
+    if (!enrollment) throw new Error('test-enrollment-missing');
+    f.git(f.repo, 'reset', '--hard', enrollment.baseRevision);
+    writeFileSync(path.join(f.repo, 'answer.txt'), 'unfrozen change\n');
+    f.f.db.prepare('DELETE FROM managed_source_candidates WHERE pod_id=?').run(f.handle.podId);
+    f.f.db
+      .prepare(`INSERT INTO managed_results (pod_id,limitations_json,candidates_json)
+        VALUES (?, '["agent-runtime-failed"]', '[]')
+        ON CONFLICT(pod_id) DO UPDATE SET
+          limitations_json=excluded.limitations_json,
+          candidates_json=excluded.candidates_json`)
+      .run(f.handle.podId);
+    f.f.runtime.cleanup = async () => {
+      cleanups++;
+      return true;
+    };
+    const request = {
+      schemaVersion: 1 as const,
+      dispatcherAttemptId: f.request.dispatcherAttemptId,
+      grantId: f.handle.grantId,
+      grantRevision: f.handle.grantRevision,
+      operation: 'cleanup' as const,
+    };
+
+    await expect(
+      new ManagedControls(f.service).control(
+        'installation-one',
+        f.handle.podId,
+        request,
+        'cleanup-changed-failed-source',
+      ),
+    ).rejects.toThrow('source-candidate-unavailable');
+    expect(cleanups).toBe(0);
+  } finally {
+    f.close();
+  }
+});
