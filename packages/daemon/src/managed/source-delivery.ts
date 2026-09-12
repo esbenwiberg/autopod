@@ -67,6 +67,11 @@ export class ManagedSourceDelivery {
       this.service.db.prepare('SELECT 1 FROM managed_source_candidates WHERE pod_id=?').get(podId)
     )
       return this.candidate(installation, podId).receipt;
+    if (spec.route.executionTarget === 'sandbox') {
+      if (!row.runtime_ref || !this.service.runtime.extractSource)
+        throw new Error('source-sync-unavailable');
+      await this.service.runtime.extractSource(row.runtime_ref, spec.outputs.source.repository);
+    }
     const frozen = await this.git.freeze(podId, spec.outputs.source);
     const value = {
       schemaVersion: 1 as const,

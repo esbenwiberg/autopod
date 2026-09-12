@@ -15,6 +15,8 @@ export interface ReviewedContainerBoundary {
   command: readonly string[];
   /** Exact dependency cache expected behind the repository's node_modules link. */
   dependencyCache?: { enrollmentId: string; path: string };
+  /** Resolve the daemon-owned host workspace for an enrolled repository. */
+  sourceWorkspace?(podId: string, repositoryId: string): string;
   /** Trusted worktree provisioning and scope-derived network enforcement. */
   prepare(podId: string, request: ManagedPodRequest): Promise<ContainerSpawnConfig>;
   /** Account-bound provider gateway checks quota before each request and persists trusted usage. */
@@ -388,6 +390,40 @@ if not stat.S_ISDIR(actual.st_mode) or actual.st_uid!=0 or actual.st_mode & 0o02
       throw new Error('managed-agent-exit-failed');
     if (!boundary.manager.extractManagedOutput) throw new Error('managed-output-unavailable');
     await boundary.manager.extractManagedOutput(ref, staging, output);
+  }
+  async extractSource(ref: string, repositoryId: string): Promise<void> {
+    const { boundary, podId, request } = this.resolve(ref);
+    const repository = request.effectiveGrant.scope.repositories.find(
+      (item) => item.enrollmentId === repositoryId,
+    );
+    if (
+      request.route.executionTarget !== 'sandbox' ||
+      request.outputs.source.mode === 'none' ||
+      request.outputs.source.repository !== repositoryId ||
+      repository?.access !== 'write'
+    )
+      throw new Error('managed-source-sync-scope-mismatch');
+    const observed = await this.observe(ref);
+    if (observed.state !== 'stopped') throw new Error('source-writer-still-active');
+    if (observed.exitCode !== undefined && observed.exitCode !== 0)
+      throw new Error('managed-agent-exit-failed');
+    const destination = boundary.sourceWorkspace?.(podId, repositoryId);
+    if (!destination) throw new Error('managed-source-workspace-unavailable');
+    const assertCurrent = () => {
+      const current = this.resolve(ref);
+      if (
+        current.podId !== podId ||
+        current.request.executionSpecDigest !== request.executionSpecDigest
+      )
+        throw new Error('managed-source-sync-stale');
+    };
+    await boundary.manager.extractDirectoryFromContainer(
+      ref,
+      `/repositories/${repositoryId}`,
+      destination,
+      ['node_modules'],
+      { assertCurrent },
+    );
   }
   async send(ref: string, message: FollowUpEnvelope, key: string): Promise<void> {
     const { boundary } = this.resolve(ref);

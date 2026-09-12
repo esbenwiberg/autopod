@@ -3,14 +3,17 @@ import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import type { FinalizeSourceDeliveryRequest, SourceCandidateReceipt } from '@autopod/shared';
-import { expect, it } from 'vitest';
+import { expect, it, vi } from 'vitest';
 import { fixture, resign } from '../test-utils/managed-fixture.js';
 import { digest, sha256 } from './canonical.js';
 import { ManagedControls } from './managed-controls.js';
 import { ManagedSourceDelivery } from './source-delivery.js';
 import { type DraftRecord, ManagedGitBroker, ZERO_COMMIT } from './source-git.js';
 
-async function sourceFixture(mode: 'branch' | 'draft-pr' = 'draft-pr') {
+async function sourceFixture(
+  mode: 'branch' | 'draft-pr' = 'draft-pr',
+  target: 'local' | 'sandbox' = 'local',
+) {
   const f = fixture();
   const root = mkdtempSync(path.join(tmpdir(), 'managed-source-'));
   const repo = path.join(root, 'work');
@@ -34,6 +37,9 @@ async function sourceFixture(mode: 'branch' | 'draft-pr' = 'draft-pr') {
   git(repo, 'commit', '-am', 'candidate');
   const request = f.request;
   request.task.kind = 'implementation';
+  request.route.executionTarget = target;
+  request.profileSnapshot.route.executionTarget = target;
+  request.effectiveGrant.route.executionTarget = target;
   request.outputs.source = {
     mode,
     repository: 'fixture-repo',
@@ -70,6 +76,9 @@ async function sourceFixture(mode: 'branch' | 'draft-pr' = 'draft-pr') {
   f.admission.profiles = new Map([
     [request.profileSnapshot.snapshotDigest, request.profileSnapshot],
   ]);
+  f.admission.targets = [target];
+  const extractSource = vi.fn(async () => {});
+  f.runtime.extractSource = extractSource;
   let pr: DraftRecord | null = null;
   let creates = 0;
   let updates = 0;
@@ -171,6 +180,7 @@ async function sourceFixture(mode: 'branch' | 'draft-pr' = 'draft-pr') {
     },
     creates: () => creates,
     updates: () => updates,
+    extractSource,
     setPr: (value: DraftRecord | null) => {
       pr = value;
     },
@@ -192,6 +202,16 @@ async function sourceFixture(mode: 'branch' | 'draft-pr' = 'draft-pr') {
     },
   };
 }
+
+it('syncs a sandbox repository before freezing its source candidate', async () => {
+  const f = await sourceFixture('branch', 'sandbox');
+  try {
+    expect(f.extractSource).toHaveBeenCalledWith(f.handle.podId, 'fixture-repo');
+    expect(f.candidate.newCommit).not.toBe(f.broker.binding(f.candidate).baseCommit);
+  } finally {
+    f.close();
+  }
+});
 
 it.each(['verification', 'remote', 'base', 'branch', 'candidate', 'stale', 'revoked', 'expired'])(
   'rejects %s before any source effect',
