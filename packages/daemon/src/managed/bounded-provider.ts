@@ -33,6 +33,7 @@ export interface ManagedProviderFailureDiagnostic {
   reason:
     | 'account'
     | 'http'
+    | 'stream-read'
     | 'incomplete'
     | 'duplicate-completion'
     | 'response-limit'
