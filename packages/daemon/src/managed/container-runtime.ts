@@ -259,6 +259,7 @@ if not stat.S_ISDIR(actual.st_mode) or actual.st_uid!=0 or actual.st_mode & 0o02
     exitCode?: number;
     limitation?:
       | 'agent-request-limit-reached'
+      | 'agent-quota-feed-unavailable'
       | 'agent-auto-compaction-unsupported'
       | 'agent-context-window-exceeded'
       | 'agent-tool-permission-denied'
@@ -305,6 +306,7 @@ if not stat.S_ISDIR(actual.st_mode) or actual.st_uid!=0 or actual.st_mode & 0o02
         throw new Error('binding');
       let limitation:
         | 'agent-request-limit-reached'
+        | 'agent-quota-feed-unavailable'
         | 'agent-auto-compaction-unsupported'
         | 'agent-context-window-exceeded'
         | 'agent-tool-permission-denied'
@@ -314,6 +316,7 @@ if not stat.S_ISDIR(actual.st_mode) or actual.st_uid!=0 or actual.st_mode & 0o02
         | 'agent-cli-exit'
         | undefined;
       if (receipt.observedExit) {
+        if (receipt.state === 'quota-unavailable') limitation = 'agent-quota-feed-unavailable';
         const diagnostic = await boundary.manager.execInContainer(
           ref,
           [

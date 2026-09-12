@@ -13,6 +13,7 @@ import type {
   SandboxExecResult,
   SandboxExposedPort,
   SandboxFileInfo,
+  SandboxFileWriteOptions,
   SandboxPortAuth,
   SandboxRegistryCredentials,
   SandboxResourceAllocation,
@@ -717,12 +718,18 @@ export class AzureSandboxApiClient implements SandboxApiClient {
     };
   }
 
-  async writeFile(sandboxId: string, path: string, content: Buffer): Promise<void> {
+  async writeFile(
+    sandboxId: string,
+    path: string,
+    content: Buffer,
+    options?: SandboxFileWriteOptions,
+  ): Promise<void> {
     await this.requestData('PUT', `${this.sandboxPath(sandboxId)}/files`, {
       body: content,
       headers: { 'Content-Type': 'application/octet-stream' },
       params: { path, createDirs: 'true' },
       okStatuses: [200, 201, 204],
+      timeoutMs: options?.timeoutMs,
     });
   }
 

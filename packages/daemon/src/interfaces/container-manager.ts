@@ -64,6 +64,11 @@ export interface ExecResult {
   exitCode: number;
 }
 
+export interface FileWriteOptions {
+  /** Bound remote file publication so control-plane refreshers can recover. */
+  timeoutMs?: number;
+}
+
 export interface ExecOptions {
   cwd?: string;
   timeout?: number;
@@ -147,7 +152,12 @@ export interface ContainerManager {
   stop(containerId: string): Promise<void>;
   /** Start a previously stopped container. Idempotent — swallows "already running". */
   start(containerId: string): Promise<void>;
-  writeFile(containerId: string, path: string, content: string | Buffer): Promise<void>;
+  writeFile(
+    containerId: string,
+    path: string,
+    content: string | Buffer,
+    options?: FileWriteOptions,
+  ): Promise<void>;
   /**
    * Publish one authenticated managed-worker control message without opening a
    * second exec session. Sandboxes use their daemon-authenticated files data

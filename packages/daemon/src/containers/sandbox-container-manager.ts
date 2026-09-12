@@ -27,6 +27,7 @@ import type {
   ExecResult,
   ExposePortOptions,
   ExposedPort,
+  FileWriteOptions,
   StreamingExecResult,
   TerminalSession,
   TerminalSessionOptions,
@@ -370,9 +371,14 @@ for root in sys.argv[1:]:
     await this.client.resume(containerId);
   }
 
-  async writeFile(containerId: string, path: string, content: string | Buffer): Promise<void> {
+  async writeFile(
+    containerId: string,
+    path: string,
+    content: string | Buffer,
+    options?: FileWriteOptions,
+  ): Promise<void> {
     const buf = typeof content === 'string' ? Buffer.from(content, 'utf-8') : content;
-    await this.client.writeFile(containerId, path, buf);
+    await this.client.writeFile(containerId, path, buf, options);
   }
 
   async writeManagedControl(
