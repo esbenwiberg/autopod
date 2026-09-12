@@ -19,10 +19,10 @@ export interface ReviewedContainerBoundary {
   sourceWorkspace?(podId: string, repositoryId: string): string;
   /** Trusted worktree provisioning and scope-derived network enforcement. */
   prepare(podId: string, request: ManagedPodRequest): Promise<ContainerSpawnConfig>;
-  /** Account-bound provider gateway checks quota before each request and persists trusted usage. */
+  /** Attach the account-bound provider channel; hard-token routes may also attach a quota feed. */
   sendMessage?(runtimeRef: string, message: FollowUpEnvelope, key: string): Promise<void>;
   quotaReady(request: ManagedPodRequest): Promise<boolean>;
-  attachQuota(
+  attachProviderChannel(
     podId: string,
     runtimeRef: string,
     stateRoot: string,
@@ -239,7 +239,7 @@ if not stat.S_ISDIR(actual.st_mode) or actual.st_uid!=0 or actual.st_mode & 0o02
         argv: [...boundary.command, '--', request.task.objective],
       }),
     );
-    if (requiresQuotaReceipt) await boundary.attachQuota(podId, runtimeRef, root, request);
+    await boundary.attachProviderChannel(podId, runtimeRef, root, request);
     const result = await boundary.manager.execInContainer(
       runtimeRef,
       ['python3', `${root}/supervisor.py`, root, '--detach'],

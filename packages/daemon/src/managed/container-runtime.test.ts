@@ -44,7 +44,7 @@ function fixture() {
     sourceWorkspace: () => '/fixture/repo',
     prepare: async () => config,
     quotaReady: async () => true,
-    attachQuota: vi.fn(async () => {}),
+    attachProviderChannel: vi.fn(async () => {}),
   };
   const runtime = new ManagedContainerRuntime(
     [binding],
@@ -59,11 +59,11 @@ it('read-only/no-web mounts and exact routes reach the trusted guard with no wor
   expect(f.ensure).toHaveBeenCalledTimes(1);
   expect(f.ensure.mock.calls[0]?.[0].volumes?.[0]?.readOnly).toBe(true);
   expect(f.ensure.mock.calls[0]?.[0].networkPolicyMode).toBe('deny-all');
-  expect(f.binding.attachQuota).toHaveBeenCalledTimes(1);
+  expect(f.binding.attachProviderChannel).toHaveBeenCalledTimes(1);
   expect(f.exec).toHaveBeenCalledTimes(4);
 });
 
-it('does not bind request-time workers to the token quota receipt feed', async () => {
+it('attaches the provider channel without requiring a token quota receipt', async () => {
   const f = fixture();
   const requestTimeBudget = {
     mode: 'request-time' as const,
@@ -77,7 +77,7 @@ it('does not bind request-time workers to the token quota receipt feed', async (
   await f.runtime.ensure('pod-one', f.request, () => {});
 
   expect(f.binding.quotaReady).toBeDefined();
-  expect(f.binding.attachQuota).not.toHaveBeenCalled();
+  expect(f.binding.attachProviderChannel).toHaveBeenCalledTimes(1);
   const launchCall = f.exec.mock.calls[2] as unknown as [string, string[]];
   expect(JSON.parse(launchCall[1][4] ?? '{}')).toMatchObject({
     budgetMode: 'request-time',
@@ -128,7 +128,7 @@ it('writable preparation failure prevents worker and channel startup', async () 
     'managed-writable-mount-unavailable',
   );
   expect(f.exec).toHaveBeenCalledTimes(1);
-  expect(f.binding.attachQuota).not.toHaveBeenCalled();
+  expect(f.binding.attachProviderChannel).not.toHaveBeenCalled();
 });
 
 it('verifies the reviewed image dependency cache before starting the worker', async () => {
@@ -144,7 +144,7 @@ it('verifies the reviewed image dependency cache before starting the worker', as
     '/opt/autopod-managed/fixture/node_modules',
   ]);
   expect(cacheCall[2]).toEqual({ user: 'root' });
-  expect(f.binding.attachQuota).toHaveBeenCalledTimes(1);
+  expect(f.binding.attachProviderChannel).toHaveBeenCalledTimes(1);
 });
 
 it('does not start a worker when the reviewed dependency cache is absent or mutable', async () => {
@@ -158,7 +158,7 @@ it('does not start a worker when the reviewed dependency cache is absent or muta
   await expect(f.runtime.ensure('pod-one', f.request, () => {})).rejects.toThrow(
     'managed-dependency-cache-unavailable',
   );
-  expect(f.binding.attachQuota).not.toHaveBeenCalled();
+  expect(f.binding.attachProviderChannel).not.toHaveBeenCalled();
 });
 
 it('does not export artifacts after a nonzero managed agent exit', async () => {

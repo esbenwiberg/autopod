@@ -135,7 +135,8 @@ export function composeManagedRuntime(config: ManagedRuntimeCompositionConfig) {
         components.service.requireActive(
           components.service.row(row.dispatcher_installation_id, podId),
         );
-        await feeds[index]!.attach(row.dispatcher_installation_id, podId, ref, root);
+        if ('maxTokens' in request.effectiveGrant.budget)
+          await feeds[index]!.attach(row.dispatcher_installation_id, podId, ref, root);
         if (closed) throw new Error('managed-composition-closed');
         channels.set(podId, stop);
       } catch (error) {
@@ -192,7 +193,7 @@ export function composeManagedRuntime(config: ManagedRuntimeCompositionConfig) {
           workingDir: request.outputs.artifacts.mode === 'none' ? '/tmp' : '/output',
         };
       },
-      attachQuota: (podId, ref, root) => attach(index, podId, ref, root),
+      attachProviderChannel: (podId, ref, root) => attach(index, podId, ref, root),
       ...(binding.channel.send
         ? {
             sendMessage: (ref: string, message: FollowUpEnvelope, key: string) => {

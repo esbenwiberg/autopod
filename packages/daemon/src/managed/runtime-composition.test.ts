@@ -4,9 +4,14 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, expect, it, vi } from 'vitest';
 import type { ContainerManager, ContainerSpawnConfig } from '../interfaces/container-manager.js';
-import { type ManagedFixture, fixture, resign } from '../test-utils/managed-fixture.js';
+import {
+  type ManagedFixture,
+  fixture,
+  requestTimeFixture,
+  resign,
+} from '../test-utils/managed-fixture.js';
 import { MemoryArtifactStore } from './artifact-store.js';
-import { BoundedResponsesTransport } from './bounded-provider.js';
+import { type BoundedProviderTransport, BoundedResponsesTransport } from './bounded-provider.js';
 import { digest } from './canonical.js';
 import {
   type ManagedRuntimeCompositionConfig,
@@ -21,8 +26,12 @@ afterEach(() => {
   f?.close();
   if (root) rmSync(root, { recursive: true, force: true });
 });
-function setup(target: 'local' | 'sandbox' = 'local', mode: 'api-key' | 'chatgpt' = 'api-key') {
-  f = fixture();
+function setup(
+  target: 'local' | 'sandbox' = 'local',
+  mode: 'api-key' | 'chatgpt' = 'api-key',
+  budget: 'hard-token' | 'request-time' = 'hard-token',
+) {
+  f = budget === 'request-time' ? requestTimeFixture(100) : fixture();
   root = mkdtempSync(path.join(tmpdir(), 'managed-composition-'));
   const mirror = path.join(root, 'mirror');
   const git = (cwd: string, ...args: string[]) =>
@@ -44,6 +53,10 @@ function setup(target: 'local' | 'sandbox' = 'local', mode: 'api-key' | 'chatgpt
   request.route.executionTarget = target;
   request.profileSnapshot.route.executionTarget = target;
   request.effectiveGrant.route.executionTarget = target;
+  if (budget === 'request-time') {
+    request.profileSnapshot.budget.expiresAt = 4102444800;
+    request.effectiveGrant.budget.expiresAt = 4102444800;
+  }
   request.profileSnapshot.snapshotDigest = digest(
     Object.fromEntries(
       Object.entries(request.profileSnapshot).filter(([k]) => k !== 'snapshotDigest'),
@@ -100,12 +113,21 @@ function setup(target: 'local' | 'sandbox' = 'local', mode: 'api-key' | 'chatgpt
     mode,
     token: 'fixture-secret',
   }));
+  const transport: BoundedProviderTransport =
+    budget === 'request-time'
+      ? {
+          budgetMode: 'request-time',
+          bindingDigest: 'request-time-fixture',
+          preflight: vi.fn(),
+          generate: vi.fn(async () => ({ value: 'A frozen fact.', consumedTokens: 30 })),
+        }
+      : new BoundedResponsesTransport(request.route, mode, credential, fetcher);
   const binding = {
     route: request.route,
     manager,
     image: `fixture@sha256:${'a'.repeat(64)}`,
     command: ['fixture-codex-channel', '--model', request.route.model],
-    transport: new BoundedResponsesTransport(request.route, mode, credential, fetcher),
+    transport,
     channel,
     network: () => ({ firewallScript: 'fixture-deny-all', networkName: 'fixture-network' }),
   };
@@ -199,6 +221,21 @@ it.each(['local', 'sandbox'] as const)(
     expect(readFileSync(path.join(x.mirror, 'README.md'), 'utf8')).toBe('A frozen fact.\n');
   },
 );
+it('keeps the provider channel and skips the quota file for request-time workers', async () => {
+  const x = setup('sandbox', 'chatgpt', 'request-time');
+  const c = x.create(true);
+  await c.service.start('installation', x.request);
+
+  expect(x.channel.attach).toHaveBeenCalledTimes(1);
+  expect(await x.attached().invoke('one', 'Read README', 0)).toEqual({
+    state: 'observed',
+    value: 'A frozen fact.',
+  });
+  expect(x.writeFile.mock.calls.some((call) => call[1].endsWith('/quota.json'))).toBe(false);
+  expect(x.exec.mock.calls.some((call) => call[1].some((arg) => arg.endsWith('/quota.json')))).toBe(
+    false,
+  );
+});
 it('ChatGPT preflight fails before workspace, pod, channel, credential or network effects', async () => {
   const x = setup('sandbox', 'chatgpt');
   const c = x.create(true);
