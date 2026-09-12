@@ -44,7 +44,10 @@ const failureReasons = new Set([
   'output-size',
 ]);
 const REPORT_MAXIMUM_RESPONSE_BYTES = 64 * 1024;
-const AGENT_MAXIMUM_RESPONSE_BYTES = 1024 * 1024;
+// Agent SSE includes tool results and provider-managed reasoning state. Keep it
+// bounded for gateway memory safety, but large enough for a legitimate Codex
+// turn to carry the same envelope size accepted on the next request.
+const AGENT_MAXIMUM_RESPONSE_BYTES = 8 * 1024 * 1024;
 const AGENT_MAXIMUM_PROMPT_BYTES = 8 * 1024 * 1024;
 /** One host request under an explicit request/time grant; never a hard token/cost cap. */
 export class ChatGptReportTransport implements BoundedProviderTransport {

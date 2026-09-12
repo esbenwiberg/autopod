@@ -122,12 +122,37 @@ it('returns a validated agent SSE transcript larger than the report wire bound',
   const result = await agent.generate(x.route, x.raw, 0, new AbortController().signal, () => {});
   expect(Buffer.byteLength(result.value)).toBeGreaterThan(64 * 1024);
   expect(result.value).toBe(body);
-  expect(agent.maximumResponseBytes).toBe(1024 * 1024);
+  expect(agent.maximumResponseBytes).toBe(8 * 1024 * 1024);
 });
-it('rejects an agent SSE transcript above the one MiB hard ceiling', async () => {
+it('returns a validated agent SSE transcript larger than one MiB', async () => {
+  const x = setup();
+  const delta = {
+    type: 'response.output_text.delta',
+    item_id: 'message-one',
+    output_index: 0,
+    content_index: 0,
+    delta: 'x'.repeat(1024 * 1024),
+  };
+  const body = `data: ${JSON.stringify(delta)}\n\ndata: ${JSON.stringify({ type: 'response.completed', response: x.response })}\n\n`;
+  x.fetcher.mockResolvedValue(
+    new Response(body, { headers: { 'content-type': 'text/event-stream' } }),
+  );
+  const agent = new ChatGptReportTransport(
+    x.route,
+    'account-one',
+    x.credential,
+    x.fetcher,
+    x.diagnostic,
+    'agent',
+  );
+  const result = await agent.generate(x.route, x.raw, 0, new AbortController().signal, () => {});
+  expect(result.value).toBe(body);
+  expect(agent.maximumResponseBytes).toBe(8 * 1024 * 1024);
+});
+it('rejects an agent SSE transcript above the eight MiB hard ceiling', async () => {
   const x = setup();
   x.fetcher.mockResolvedValue(
-    new Response(`data: ${'x'.repeat(1024 * 1024)}\n\n`, {
+    new Response(`data: ${'x'.repeat(8 * 1024 * 1024)}\n\n`, {
       headers: { 'content-type': 'text/event-stream' },
     }),
   );
