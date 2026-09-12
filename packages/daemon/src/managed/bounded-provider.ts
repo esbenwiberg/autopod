@@ -10,6 +10,8 @@ export interface BoundedProviderTransport {
   readonly maximumPromptBytes?: number;
   /** Maximum validated wire response persisted and returned by the trusted gateway. */
   readonly maximumResponseBytes?: number;
+  /** Reviewed wall-clock ceiling for one provider request. */
+  readonly maximumRequestDurationMs?: number;
   preflight(route: Route): void;
   generate(
     route: Route,
@@ -40,9 +42,14 @@ export interface ManagedProviderFailureDiagnostic {
     | 'usage'
     | 'artifact-size'
     | 'output-size'
+    | 'timeout'
+    | 'authority'
     | 'unclassified';
   httpStatus: number | null;
 }
+
+export const MANAGED_PROVIDER_ABORT_TIMEOUT = 'managed-provider-timeout';
+export const MANAGED_PROVIDER_ABORT_AUTHORITY = 'managed-provider-authority-inactive';
 
 /** Carries only schema-bounded diagnostics. Provider bodies, prompts and credentials are excluded. */
 export class ManagedProviderFailure extends Error {

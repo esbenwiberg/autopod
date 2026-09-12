@@ -1,6 +1,10 @@
 import type { ManagedPodRequest } from '@autopod/shared';
 import type { BoundedProviderTransport } from './bounded-provider.js';
-import { ManagedProviderFailure } from './bounded-provider.js';
+import {
+  MANAGED_PROVIDER_ABORT_AUTHORITY,
+  MANAGED_PROVIDER_ABORT_TIMEOUT,
+  ManagedProviderFailure,
+} from './bounded-provider.js';
 import { digest } from './canonical.js';
 import type { ManagedPodService } from './managed-service.js';
 import { ManagedQuotaBroker } from './quota-broker.js';
@@ -13,6 +17,7 @@ export class ManagedProviderGateway {
   private closed = false;
   private readonly maximumPromptBytes: number;
   private readonly maximumResponseBytes: number;
+  private readonly maximumRequestDurationMs: number;
   private readonly active = new Set<AbortController>();
   constructor(
     readonly service: ManagedPodService,
@@ -21,6 +26,7 @@ export class ManagedProviderGateway {
   ) {
     this.maximumPromptBytes = transport.maximumPromptBytes ?? 16384;
     this.maximumResponseBytes = transport.maximumResponseBytes ?? 64 * 1024;
+    this.maximumRequestDurationMs = transport.maximumRequestDurationMs ?? 60000;
     if (
       !Number.isSafeInteger(this.maximumPromptBytes) ||
       this.maximumPromptBytes < 1 ||
@@ -33,6 +39,12 @@ export class ManagedProviderGateway {
       this.maximumResponseBytes > MAXIMUM_PROVIDER_RESPONSE_BYTES
     )
       throw new Error('managed-provider-output-limit-invalid');
+    if (
+      !Number.isSafeInteger(this.maximumRequestDurationMs) ||
+      this.maximumRequestDurationMs < 1 ||
+      this.maximumRequestDurationMs > 30 * 60 * 1000
+    )
+      throw new Error('managed-provider-duration-limit-invalid');
     if (!Number.isSafeInteger(maximumRequests) || maximumRequests < 1 || maximumRequests > 100)
       throw new Error('managed-provider-request-limit-invalid');
     if (
@@ -189,16 +201,16 @@ export class ManagedProviderGateway {
       try {
         assertActive();
       } catch {
-        controller.abort();
+        controller.abort(MANAGED_PROVIDER_ABORT_AUTHORITY);
       }
     }, 50);
     watch.unref();
     const timeout = setTimeout(
-      () => controller.abort(),
+      () => controller.abort(MANAGED_PROVIDER_ABORT_TIMEOUT),
       Math.max(
         1,
         Math.min(
-          requestTime ? 180000 : 60000,
+          this.maximumRequestDurationMs,
           (Math.min(budget.expiresAt, row.created_at + budget.maxDurationSeconds) -
             this.service.now()) *
             1000,
@@ -282,7 +294,7 @@ export class ManagedProviderGateway {
   }
   close(): void {
     this.closed = true;
-    for (const controller of this.active) controller.abort();
+    for (const controller of this.active) controller.abort(MANAGED_PROVIDER_ABORT_AUTHORITY);
     this.active.clear();
   }
 }

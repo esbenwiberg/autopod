@@ -1,5 +1,6 @@
 import { expect, it, vi } from 'vitest';
 import { fixture } from '../test-utils/managed-fixture.js';
+import { MANAGED_PROVIDER_ABORT_TIMEOUT } from './bounded-provider.js';
 import { type ChatGptFailureDiagnostic, ChatGptReportTransport } from './chatgpt-provider.js';
 function setup() {
   const f = fixture();
@@ -45,6 +46,7 @@ function setup() {
 }
 it('uses exactly one pinned ChatGPT request and reports real returned usage without a hard cap', async () => {
   const x = setup();
+  expect(x.transport.maximumRequestDurationMs).toBe(3 * 60 * 1000);
   expect((await x.call()).consumedTokens).toBe(5010);
   expect(x.fetcher).toHaveBeenCalledTimes(1);
   const [url, init] = x.fetcher.mock.calls[0] ?? [];
@@ -54,6 +56,35 @@ it('uses exactly one pinned ChatGPT request and reports real returned usage with
   expect(body.max_output_tokens).toBeUndefined();
   expect(body.tools).toEqual([]);
   expect(body.store).toBe(false);
+});
+
+it('gives agent tool turns a longer provider deadline and classifies its bounded timeout', async () => {
+  const x = setup();
+  const controller = new AbortController();
+  x.fetcher.mockImplementation(async () => {
+    controller.abort(MANAGED_PROVIDER_ABORT_TIMEOUT);
+    return new Response('data: {}\n\n', {
+      headers: { 'content-type': 'text/event-stream' },
+    });
+  });
+  const agent = new ChatGptReportTransport(
+    x.route,
+    'account-one',
+    x.credential,
+    x.fetcher,
+    x.diagnostic,
+    'agent',
+  );
+
+  expect(agent.maximumRequestDurationMs).toBe(15 * 60 * 1000);
+  await expect(agent.generate(x.route, x.raw, 0, controller.signal, () => {})).rejects.toThrow(
+    'managed-chatgpt-request-unavailable',
+  );
+  expect(x.diagnostic).toHaveBeenCalledExactlyOnceWith({
+    phase: 'stream',
+    reason: 'timeout',
+    httpStatus: 200,
+  });
 });
 
 it('returns validated tool-call SSE unchanged for the explicit agent transport', async () => {
