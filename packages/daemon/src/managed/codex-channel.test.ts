@@ -597,6 +597,68 @@ it('routes sequential agent requests and an independently bound GitHub read', as
   }
 });
 
+it('retries a transient sandbox control exec instead of closing the live channel', async () => {
+  vi.useFakeTimers();
+  const { request, exec } = setup();
+  request.route.executionTarget = 'sandbox';
+  const channel = new ContainerCodexChannel(
+    { execInContainer: exec } as unknown as ContainerManager,
+    request.route,
+    4095,
+  );
+  const raw = JSON.stringify({
+    model: request.route.model,
+    input: [{ role: 'user', content: 'Fact.' }],
+    reasoning: { effort: request.route.reasoning },
+    stream: true,
+    store: false,
+  });
+  let reads = 0;
+  let writes = 0;
+  exec.mockImplementation(async (_ref, argv) => {
+    if (argv[0] === 'codex')
+      return {
+        exitCode: 0,
+        stdout: '--ephemeral --output-last-message --sandbox --last',
+        stderr: '',
+      };
+    const code = argv[2] ?? '';
+    if (code.includes('urllib.request')) return { exitCode: 0, stdout: '204', stderr: '' };
+    if (code.includes('p.stat().st_size')) {
+      reads += 1;
+      if (reads === 1) throw new Error('sandbox-busy');
+      if (reads > 2) return { exitCode: 0, stdout: '', stderr: '' };
+      return {
+        exitCode: 0,
+        stdout: JSON.stringify({
+          body: raw,
+          digest: sha256(raw).slice(7),
+          ticket: 'a'.repeat(36),
+        }),
+        stderr: '',
+      };
+    }
+    if (code.includes('delivery-binding')) writes += 1;
+    return { exitCode: 0, stdout: '', stderr: '' };
+  });
+  const invoke = vi.fn(async () => ({ state: 'observed' as const, value: 'data: ok\n\n' }));
+  let close: (() => void) | undefined;
+  try {
+    close = await channel.attach({
+      podId: 'managed-one',
+      runtimeRef: 'ref',
+      stateRoot: '/run/dispatcher-managed-one',
+      invoke,
+    });
+    await vi.advanceTimersByTimeAsync(2_500);
+    expect(invoke).toHaveBeenCalledTimes(1);
+    expect(writes).toBe(1);
+  } finally {
+    close?.();
+    vi.useRealTimers();
+  }
+});
+
 async function waitForJson(path: string): Promise<Record<string, unknown>> {
   const deadline = Date.now() + 5_000;
   while (Date.now() < deadline) {

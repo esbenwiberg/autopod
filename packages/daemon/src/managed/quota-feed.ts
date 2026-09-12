@@ -21,23 +21,33 @@ export class ManagedQuotaFeed {
       throw new Error('managed-quota-feed-binding');
     const write = async () => {
       const snapshot = new ManagedQuotaBroker(this.service).snapshot(installation, podId);
-      const result = await this.manager.execInContainer(
-        runtimeRef,
-        [
-          'python3',
-          '-c',
-          `import os,sys
+      let failure: unknown = new Error('managed-quota-feed-unavailable');
+      for (let attempt = 0; attempt < 5; attempt++) {
+        try {
+          const result = await this.manager.execInContainer(
+            runtimeRef,
+            [
+              'python3',
+              '-c',
+              `import os,sys
 p=sys.argv[1];temporary=p+'.feed-tmp'
 fd=os.open(temporary,os.O_WRONLY|os.O_CREAT|os.O_TRUNC,0o600)
 with os.fdopen(fd,'w') as f:f.write(sys.argv[2]);f.flush();os.fsync(f.fileno())
 os.replace(temporary,p)
 `,
-          `${stateRoot}/quota.json`,
-          canonical(snapshot),
-        ],
-        { user: 'root' },
-      );
-      if (result.exitCode !== 0) throw new Error('managed-quota-feed-unavailable');
+              `${stateRoot}/quota.json`,
+              canonical(snapshot),
+            ],
+            { user: 'root' },
+          );
+          if (result.exitCode === 0) return;
+          failure = new Error('managed-quota-feed-unavailable');
+        } catch (error) {
+          failure = error;
+        }
+        if (attempt < 4) await new Promise((resolve) => setTimeout(resolve, 100 * (attempt + 1)));
+      }
+      throw failure;
     };
     await write();
     if (this.feeds.has(podId)) return;

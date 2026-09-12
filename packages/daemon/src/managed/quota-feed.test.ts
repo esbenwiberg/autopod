@@ -41,3 +41,32 @@ it('publishes root-only bound quota snapshots, then stops refreshing after daemo
     f.close();
   }
 });
+
+it('retries a transient sandbox control rejection instead of abandoning the quota feed', async () => {
+  const f = fixture();
+  vi.useFakeTimers();
+  let calls = 0;
+  const exec = vi.fn(async () => {
+    calls += 1;
+    if (calls === 2) throw new Error('sandbox-busy');
+    return { exitCode: 0, stdout: '', stderr: '' };
+  });
+  const feed = new ManagedQuotaFeed(f.service(), {
+    execInContainer: exec,
+  } as unknown as ContainerManager);
+  try {
+    const handle = await f.service().start('installation-one', f.request);
+    await feed.attach(
+      'installation-one',
+      handle.podId,
+      handle.podId,
+      `/run/dispatcher-${handle.podId}`,
+    );
+    await vi.advanceTimersByTimeAsync(1_500);
+    expect(exec).toHaveBeenCalledTimes(3);
+  } finally {
+    feed.close();
+    vi.useRealTimers();
+    f.close();
+  }
+});

@@ -118,6 +118,24 @@ export class ContainerCodexChannel implements ManagedWorkerProviderChannel {
       if (this.execTails.get(runtimeRef) === tail) this.execTails.delete(runtimeRef);
     }
   }
+  private async execControl(
+    runtimeRef: string,
+    command: string[],
+    options?: ExecOptions,
+  ): Promise<ExecResult> {
+    const attempts = this.route.executionTarget === 'sandbox' ? 5 : 1;
+    let failure: unknown = new Error('managed-codex-channel-unavailable');
+    for (let attempt = 0; attempt < attempts; attempt++) {
+      try {
+        return await this.execBound(runtimeRef, command, options);
+      } catch (error) {
+        failure = error;
+      }
+      if (attempt < attempts - 1)
+        await new Promise((resolve) => setTimeout(resolve, 100 * (attempt + 1)));
+    }
+    throw failure;
+  }
   async preflight(request: ManagedPodRequest) {
     if (canonical(this.route) !== canonical(request.route) || request.route.runtime !== 'codex')
       throw new Error('managed-codex-route-mismatch');
@@ -207,7 +225,7 @@ export class ContainerCodexChannel implements ManagedWorkerProviderChannel {
     )
       throw new Error('managed-codex-channel-binding');
     const exec = async (code: string, ...args: string[]) => {
-      const result = await this.execBound(
+      const result = await this.execControl(
         binding.runtimeRef,
         ['python3', '-c', code, binding.stateRoot, ...args],
         { user: 'root' },
@@ -215,11 +233,9 @@ export class ContainerCodexChannel implements ManagedWorkerProviderChannel {
       if (result.exitCode !== 0) throw new Error('managed-codex-channel-unavailable');
       return result.stdout;
     };
-    const capability = await this.manager.execInContainer(
-      binding.runtimeRef,
-      ['codex', 'exec', '--help'],
-      { user: 'root' },
-    );
+    const capability = await this.execControl(binding.runtimeRef, ['codex', 'exec', '--help'], {
+      user: 'root',
+    });
     if (
       capability.exitCode !== 0 ||
       !['--output-last-message', '--sandbox'].every((flag) => capability.stdout.includes(flag))
