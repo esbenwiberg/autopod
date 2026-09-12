@@ -11,6 +11,7 @@ public struct SidebarView: View {
     public var pendingMemoryCount: Int
     public var scheduledJobCount: Int
     public var catchupPendingCount: Int
+    public var managedPodCount: Int
     public var onShowSettings: (() -> Void)?
 
     public init(
@@ -23,6 +24,7 @@ public struct SidebarView: View {
         pendingMemoryCount: Int = 0,
         scheduledJobCount: Int = 0,
         catchupPendingCount: Int = 0,
+        managedPodCount: Int = 0,
         onShowSettings: (() -> Void)? = nil
     ) {
         self.pods = pods
@@ -34,6 +36,7 @@ public struct SidebarView: View {
         self.pendingMemoryCount = pendingMemoryCount
         self.scheduledJobCount = scheduledJobCount
         self.catchupPendingCount = catchupPendingCount
+        self.managedPodCount = managedPodCount
         self.onShowSettings = onShowSettings
     }
 
@@ -99,6 +102,10 @@ public struct SidebarView: View {
                     sidebarRow(.history, icon: "clock.arrow.circlepath", color: .secondary, badge: 0)
                     sidebarRow(.memory, icon: "brain", color: .purple, badge: pendingMemoryCount)
                     sidebarRow(.scheduledJobs, icon: "clock.badge.checkmark", color: catchupPendingCount > 0 ? .orange : .secondary, badge: catchupPendingCount > 0 ? catchupPendingCount : scheduledJobCount)
+                }
+
+                Section("Managed") {
+                    sidebarRow(.managedPods, icon: "shippingbox.fill", color: .indigo, badge: managedPodCount)
                 }
 
                 Section("Analytics") {
@@ -239,6 +246,7 @@ public enum SidebarItem: Hashable {
     case seriesAll
     case completed
     case all
+    case managedPods
     case analytics
     case history
     case memory
@@ -259,6 +267,7 @@ public enum SidebarItem: Hashable {
         case .seriesAll: "Series"
         case .completed: "Completed"
         case .all: "Browse"
+        case .managedPods: "Managed Pods"
         case .analytics: "Analytics"
         case .history: "History"
         case .memory: "Memory"

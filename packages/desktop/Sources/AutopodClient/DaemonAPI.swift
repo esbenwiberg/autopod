@@ -93,6 +93,30 @@ public actor DaemonAPI {
     return pods
   }
 
+  public func listManagedPodPage(
+    cursor: String? = nil,
+    limit: Int = 100
+  ) async throws -> ManagedPodPageResponse {
+    var query = ["limit": String(limit)]
+    if let cursor { query["cursor"] = cursor }
+    return try await request("GET", "/managed/pods", query: query)
+  }
+
+  public func listAllManagedPods(limit: Int = 100) async throws -> [ManagedPodSummary] {
+    var pods: [ManagedPodSummary] = []
+    var cursor: String?
+    var seenCursors = Set<String>()
+    repeat {
+      let page = try await listManagedPodPage(cursor: cursor, limit: limit)
+      pods.append(contentsOf: page.pods)
+      cursor = page.nextCursor
+      if let cursor, !seenCursors.insert(cursor).inserted {
+        throw URLError(.cannotParseResponse)
+      }
+    } while cursor != nil
+    return pods
+  }
+
   public func getSessionStats(profileName: String? = nil) async throws -> [String: Int] {
     var query: [String: String] = [:]
     if let p = profileName { query["profile"] = p }

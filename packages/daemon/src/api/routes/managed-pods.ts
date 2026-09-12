@@ -1,3 +1,4 @@
+import type { ManagedPodRequest } from '@autopod/shared';
 import type { FastifyInstance, FastifyRequest } from 'fastify';
 import { ManagedControls } from '../../managed/managed-controls.js';
 import type { ManagedPodService } from '../../managed/managed-service.js';
@@ -39,6 +40,31 @@ function controlFailure(error: unknown): string {
     : 'managed-control-failure';
 }
 
+const DEFAULT_LIST_LIMIT = 100;
+const MAX_LIST_LIMIT = 200;
+
+function listLimit(raw: string | undefined): number {
+  if (raw === undefined) return DEFAULT_LIST_LIMIT;
+  if (!/^[1-9][0-9]{0,2}$/.test(raw)) throw new Error('managed-list-limit-invalid');
+  const value = Number(raw);
+  if (value > MAX_LIST_LIMIT) throw new Error('managed-list-limit-invalid');
+  return value;
+}
+
+function listCursor(raw: string | undefined): { createdAt: number; podId: string } | undefined {
+  if (raw === undefined) return undefined;
+  const separator = raw.indexOf(':');
+  const createdAt = raw.slice(0, separator);
+  const podId = raw.slice(separator + 1);
+  if (
+    separator < 1 ||
+    !/^(0|[1-9][0-9]{0,15})$/.test(createdAt) ||
+    !/^[A-Za-z0-9][A-Za-z0-9._/-]{0,199}$/.test(podId)
+  )
+    throw new Error('managed-list-cursor-invalid');
+  return { createdAt: Number(createdAt), podId };
+}
+
 export interface ManagedPodApiDeps {
   service: ManagedPodService;
   finishOutputs?: () => Promise<void>;
@@ -71,6 +97,115 @@ export function managedPodRoutes(app: FastifyInstance, deps: ManagedPodApiDeps):
       return reply.code(401).send({ code: 'managed-auth-required' });
     return deps.service.health();
   });
+  app.get<{ Querystring: { cursor?: string; limit?: string } }>(
+    '/managed/pods',
+    async (request, reply) => {
+      const installation = await deps.authenticate(request);
+      if (!installation) return reply.code(401).send({ code: 'managed-auth-required' });
+      let limit: number;
+      let cursor: { createdAt: number; podId: string } | undefined;
+      try {
+        limit = listLimit(request.query.limit);
+        cursor = listCursor(request.query.cursor);
+      } catch {
+        return reply.code(400).send({ code: 'managed-list-invalid' });
+      }
+      const usageStatement = deps.service.db.prepare(
+        'SELECT count(*) AS requests,count(actual_tokens) AS known FROM managed_provider_requests WHERE pod_id=?',
+      );
+      const failureStatement = deps.service.db.prepare(
+        `SELECT failure_phase AS phase,failure_reason AS reason,failure_http_status AS httpStatus
+         FROM managed_provider_requests
+         WHERE pod_id=? AND failure_phase IS NOT NULL
+         ORDER BY rowid DESC LIMIT 1`,
+      );
+      const artifactsStatement = deps.service.db.prepare(
+        `SELECT artifact_id AS artifactId,status,file_count AS fileCount,total_bytes AS totalBytes,
+                committed_at AS committedAt
+         FROM artifact_exports WHERE pod_id=? ORDER BY created_at`,
+      );
+      const resultStatement = deps.service.db.prepare(
+        'SELECT limitations_json FROM managed_results WHERE pod_id=?',
+      );
+      const lastEventStatement = deps.service.db.prepare(
+        'SELECT event_json FROM managed_events WHERE pod_id=? ORDER BY sequence DESC LIMIT 1',
+      );
+      const rows = deps.service.db
+        .prepare(
+          `SELECT * FROM managed_pods
+             WHERE dispatcher_installation_id=?
+               AND (? IS NULL OR created_at < ? OR (created_at = ? AND pod_id < ?))
+             ORDER BY created_at DESC, pod_id DESC
+             LIMIT ?`,
+        )
+        .all(
+          installation,
+          cursor?.createdAt ?? null,
+          cursor?.createdAt ?? null,
+          cursor?.createdAt ?? null,
+          cursor?.podId ?? null,
+          limit + 1,
+        ) as Array<{
+        pod_id: string;
+        dispatcher_attempt_id: string;
+        request_json: string;
+        state: string;
+        revoked: number;
+        stop_requested: number;
+        observed_exit: number;
+        cleanup: string;
+        consumed_tokens: number;
+        exit_code: number | null;
+        created_at: number;
+      }>;
+      const pageRows = rows.slice(0, limit);
+      const pods = pageRows.map((row) => {
+        const request = JSON.parse(row.request_json) as ManagedPodRequest;
+        const usage = usageStatement.get(row.pod_id) as { requests: number; known: number };
+        const failure = failureStatement.get(row.pod_id) as
+          | { phase: string; reason: string; httpStatus: number | null }
+          | undefined;
+        const artifacts = artifactsStatement.all(row.pod_id);
+        const stored = resultStatement.get(row.pod_id) as { limitations_json: string } | undefined;
+        const lastEvent = lastEventStatement.get(row.pod_id) as { event_json: string } | undefined;
+        const lastEventAt = lastEvent
+          ? ((JSON.parse(lastEvent.event_json) as { createdAt?: number }).createdAt ??
+            row.created_at)
+          : row.created_at;
+        return {
+          podId: row.pod_id,
+          dispatcherAttemptId: row.dispatcher_attempt_id,
+          state: row.state,
+          providerAccountId: request.route.providerAccountId,
+          model: request.route.model,
+          runtime: request.route.runtime,
+          executionTarget: request.route.executionTarget,
+          reasoning: request.route.reasoning,
+          profileId: request.profileSnapshot.profileId,
+          profileVersion: request.profileSnapshot.profileVersion,
+          providerRequests: usage.requests,
+          consumedTokens: row.consumed_tokens,
+          tokenUsageKnown: usage.known === usage.requests,
+          failure: failure ?? null,
+          limitations: stored ? JSON.parse(stored.limitations_json) : [],
+          artifacts,
+          revoked: Boolean(row.revoked),
+          stopRequested: Boolean(row.stop_requested),
+          observedExit: Boolean(row.observed_exit),
+          cleanup: row.cleanup,
+          exitCode: row.exit_code,
+          createdAt: row.created_at,
+          lastEventAt,
+        };
+      });
+      const last = pageRows.at(-1);
+      return {
+        schemaVersion: 1,
+        pods,
+        nextCursor: rows.length > limit && last ? `${last.created_at}:${last.pod_id}` : null,
+      };
+    },
+  );
   app.get<{ Params: { attemptId: string } }>(
     '/managed/attempts/:attemptId',
     async (request, reply) => {

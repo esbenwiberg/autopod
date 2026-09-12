@@ -4,6 +4,11 @@ import SwiftUI
 /// Root view — three-column layout: Sidebar | Fleet/List | Detail
 public struct MainView: View {
     public var pods: [Pod]
+    public var managedPods: [ManagedPodSummary]
+    @Binding public var selectedManagedPodId: String?
+    public var managedPodsLoading: Bool
+    public var managedPodsError: String?
+    public var onRefreshManagedPods: (() async -> Void)?
     public var scheduledJobs: [ScheduledJob]
     public var scheduledJobTemplates: [ScheduledJobTemplate]
     public var isConnected: Bool
@@ -109,6 +114,11 @@ public struct MainView: View {
 
     public init(
         pods: [Pod] = MockData.all,
+        managedPods: [ManagedPodSummary] = [],
+        selectedManagedPodId: Binding<String?> = .constant(nil),
+        managedPodsLoading: Bool = false,
+        managedPodsError: String? = nil,
+        onRefreshManagedPods: (() async -> Void)? = nil,
         scheduledJobs: [ScheduledJob] = [],
         scheduledJobTemplates: [ScheduledJobTemplate] = [],
         selectedSessionId: Binding<String?> = .constant(nil),
@@ -198,6 +208,11 @@ public struct MainView: View {
         onLoadMemories: (() async -> Void)? = nil
     ) {
         self.pods = pods
+        self.managedPods = managedPods
+        self._selectedManagedPodId = selectedManagedPodId
+        self.managedPodsLoading = managedPodsLoading
+        self.managedPodsError = managedPodsError
+        self.onRefreshManagedPods = onRefreshManagedPods
         self.scheduledJobs = scheduledJobs
         self.scheduledJobTemplates = scheduledJobTemplates
         self._selectedSessionId = selectedSessionId
@@ -437,6 +452,7 @@ public struct MainView: View {
         case .workspaces:            pods.filter { $0.isWorkspace }
         case .completed:             pods.filter { [.complete, .killed].contains($0.status) && !$0.isWorkspace }
         case .all:                   pods
+        case .managedPods:           []
         case .analytics:             []
         case .history:               []
         case .memory:                []
@@ -471,10 +487,20 @@ public struct MainView: View {
                 pendingMemoryCount: pendingMemoryCount,
                 scheduledJobCount: scheduledJobs.count,
                 catchupPendingCount: scheduledJobs.filter { $0.catchupPending }.count,
+                managedPodCount: managedPods.count,
                 onShowSettings: onShowSettings
             )
         } content: {
-            if sidebarSelection == .analytics {
+            if sidebarSelection == .managedPods {
+                ManagedPodsView(
+                    pods: managedPods,
+                    selection: $selectedManagedPodId,
+                    isLoading: managedPodsLoading,
+                    error: managedPodsError,
+                    onRefresh: { await onRefreshManagedPods?() }
+                )
+                .frame(minWidth: 600)
+            } else if sidebarSelection == .analytics {
                 AnalyticsView(
                     pods: pods,
                     loadScores: loadQualityScores,
@@ -587,7 +613,21 @@ public struct MainView: View {
                 .frame(minWidth: 500)
             }
         } detail: {
-            if sidebarSelection == .analytics {
+            if sidebarSelection == .managedPods {
+                if let pod = managedPods.first(where: { $0.id == selectedManagedPodId }) {
+                    ManagedPodDetailView(pod: pod)
+                } else {
+                    VStack(spacing: 10) {
+                        Image(systemName: "shippingbox")
+                            .font(.system(size: 36))
+                            .foregroundStyle(.tertiary)
+                        Text("Select a managed pod")
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                    }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                }
+            } else if sidebarSelection == .analytics {
                 AnalyticsRightPaneView(
                     card: selectedAnalyticsCard,
                     pods: pods,

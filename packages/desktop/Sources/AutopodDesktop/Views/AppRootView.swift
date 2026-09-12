@@ -6,6 +6,7 @@ import AutopodClient
 public struct AppRootView: View {
   public let connectionManager: ConnectionManager
   public let podStore: PodStore
+  public let managedPodStore: ManagedPodStore
   public let profileStore: ProfileStore
   public let memoryStore: MemoryStore
   public let scheduledJobStore: ScheduledJobStore
@@ -17,6 +18,7 @@ public struct AppRootView: View {
   public init(
     connectionManager: ConnectionManager,
     podStore: PodStore,
+    managedPodStore: ManagedPodStore,
     profileStore: ProfileStore,
     memoryStore: MemoryStore,
     scheduledJobStore: ScheduledJobStore,
@@ -27,6 +29,7 @@ public struct AppRootView: View {
   ) {
     self.connectionManager = connectionManager
     self.podStore = podStore
+    self.managedPodStore = managedPodStore
     self.profileStore = profileStore
     self.memoryStore = memoryStore
     self.scheduledJobStore = scheduledJobStore
@@ -72,6 +75,14 @@ public struct AppRootView: View {
   public var body: some View {
     MainView(
       pods: podStore.pods,
+      managedPods: managedPodStore.pods,
+      selectedManagedPodId: Binding(
+        get: { managedPodStore.selectedPodId },
+        set: { managedPodStore.selectedPodId = $0 }
+      ),
+      managedPodsLoading: managedPodStore.isLoading,
+      managedPodsError: managedPodStore.error,
+      onRefreshManagedPods: { await managedPodStore.refresh() },
       scheduledJobs: scheduledJobStore.jobs,
       scheduledJobTemplates: scheduledJobStore.templates,
       selectedSessionId: Binding(

@@ -11,6 +11,7 @@ struct AutopodApp: App {
 
   @State private var connectionManager = ConnectionManager()
   @State private var podStore = PodStore()
+  @State private var managedPodStore = ManagedPodStore()
   @State private var profileStore = ProfileStore()
   @State private var memoryStore = MemoryStore()
   @State private var scheduledJobStore = ScheduledJobStore()
@@ -24,6 +25,7 @@ struct AutopodApp: App {
       AppRootView(
         connectionManager: connectionManager,
         podStore: podStore,
+        managedPodStore: managedPodStore,
         profileStore: profileStore,
         memoryStore: memoryStore,
         scheduledJobStore: scheduledJobStore,
@@ -87,6 +89,7 @@ struct AutopodApp: App {
           let conn = connectionManager.connection else { return }
 
     podStore.configure(api: api)
+    managedPodStore.configure(api: api)
     profileStore.configure(api: api)
     memoryStore.configure(api: api)
     scheduledJobStore.configure(api: api)
