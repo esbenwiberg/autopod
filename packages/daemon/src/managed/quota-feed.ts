@@ -19,25 +19,45 @@ export class ManagedQuotaFeed {
     const row = this.service.row(installation, podId);
     if (row.runtime_ref !== runtimeRef || stateRoot !== `/run/dispatcher-${podId}`)
       throw new Error('managed-quota-feed-binding');
+    const request = JSON.parse(row.request_json) as {
+      route?: { executionTarget?: string };
+    };
     const write = async () => {
       const snapshot = new ManagedQuotaBroker(this.service).snapshot(installation, podId);
-      const result = await this.manager.execInContainer(
-        runtimeRef,
-        [
-          'python3',
-          '-c',
-          `import os,sys
+      const payload = canonical(snapshot);
+      let failure: unknown = new Error('managed-quota-feed-unavailable');
+      for (let attempt = 0; attempt < 5; attempt++) {
+        try {
+          if (request.route?.executionTarget === 'sandbox') {
+            // Azure rejects overlapping buffered exec operations. Keep the
+            // supervisor lease independent of the channel's control-exec lane.
+            await this.manager.writeFile(runtimeRef, `${stateRoot}/quota.json`, payload);
+            return;
+          }
+          const result = await this.manager.execInContainer(
+            runtimeRef,
+            [
+              'python3',
+              '-c',
+              `import os,sys
 p=sys.argv[1];temporary=p+'.feed-tmp'
 fd=os.open(temporary,os.O_WRONLY|os.O_CREAT|os.O_TRUNC,0o600)
 with os.fdopen(fd,'w') as f:f.write(sys.argv[2]);f.flush();os.fsync(f.fileno())
 os.replace(temporary,p)
 `,
-          `${stateRoot}/quota.json`,
-          canonical(snapshot),
-        ],
-        { user: 'root' },
-      );
-      if (result.exitCode !== 0) throw new Error('managed-quota-feed-unavailable');
+              `${stateRoot}/quota.json`,
+              payload,
+            ],
+            { user: 'root' },
+          );
+          if (result.exitCode === 0) return;
+          failure = new Error('managed-quota-feed-unavailable');
+        } catch (error) {
+          failure = error;
+        }
+        if (attempt < 4) await new Promise((resolve) => setTimeout(resolve, 100 * (attempt + 1)));
+      }
+      throw failure;
     };
     await write();
     if (this.feeds.has(podId)) return;

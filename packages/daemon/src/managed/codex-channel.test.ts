@@ -1,4 +1,4 @@
-import { spawn } from 'node:child_process';
+import { execFile, spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import {
   chmodSync,
@@ -9,14 +9,17 @@ import {
   rmSync,
   writeFileSync,
 } from 'node:fs';
+import { createServer } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { promisify } from 'node:util';
 import { expect, it, vi } from 'vitest';
 import type { ContainerManager } from '../interfaces/container-manager.js';
 import { fixture } from '../test-utils/managed-fixture.js';
 import { sha256 } from './canonical.js';
 import { ContainerCodexChannel, codexAgentCommand, codexReportCommand } from './codex-channel.js';
+const exec = promisify(execFile);
 function setup() {
   const f = fixture();
   const request = structuredClone(f.request);
@@ -158,6 +161,64 @@ it('installs an agent helper that routes final output through the reviewed Codex
     expect(install?.[1][6]).not.toContain("'codex', 'exec', '--ephemeral'");
   } finally {
     close();
+  }
+});
+
+it('retries a bounded agent failure receipt when the channel is still serializing', async () => {
+  const worker = readFileSync(
+    fileURLToPath(new URL('./runtime/codex_agent_worker.py', import.meta.url)),
+    'utf8',
+  );
+  const start = worker.indexOf('def send_failure');
+  const end = worker.indexOf('\n\ndef report_failure', start);
+  expect(start).toBeGreaterThanOrEqual(0);
+  expect(end).toBeGreaterThan(start);
+  const sendFailure = worker.slice(start, end);
+  let calls = 0;
+  const server = createServer((request, response) => {
+    request.resume();
+    calls += 1;
+    response.statusCode = calls === 1 ? 409 : 204;
+    response.end();
+  });
+  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+  try {
+    const address = server.address();
+    if (!address || typeof address === 'string') throw new Error('fixture-listener-unavailable');
+    await exec('python3', [
+      '-c',
+      `import json,time,urllib.error,urllib.request\nFAILURE_REASONS={'cli-exit'}\n${sendFailure}\nsend_failure('http://127.0.0.1:${address.port}/v1','cli-exit',1)`,
+    ]);
+    expect(calls).toBe(2);
+  } finally {
+    await new Promise<void>((resolve, reject) =>
+      server.close((error) => (error ? reject(error) : resolve())),
+    );
+  }
+});
+
+it('publishes agent output without requiring sandbox rename support', async () => {
+  const worker = readFileSync(
+    fileURLToPath(new URL('./runtime/codex_agent_worker.py', import.meta.url)),
+    'utf8',
+  );
+  const start = worker.indexOf('def publish_output');
+  const end = worker.indexOf('\n\nparser =', start);
+  expect(start).toBeGreaterThanOrEqual(0);
+  expect(end).toBeGreaterThan(start);
+  const publishOutput = worker.slice(start, end);
+  const root = mkdtempSync(join(tmpdir(), 'managed-output-publish-'));
+  try {
+    const captured = join(root, 'captured.md');
+    const output = join(root, 'investigation.md');
+    writeFileSync(captured, 'verified artifact');
+    await exec('python3', [
+      '-c',
+      `import os\nfrom pathlib import Path\ndef send_failure(*args): raise AssertionError('unexpected failure')\n${publishOutput}\ndef unsupported(*args): raise OSError('rename unsupported')\nos.replace=unsupported\npublish_output('http://127.0.0.1:1/v1',Path(${JSON.stringify(captured)}),Path(${JSON.stringify(output)}))`,
+    ]);
+    expect(readFileSync(output, 'utf8')).toBe('verified artifact');
+  } finally {
+    rmSync(root, { recursive: true, force: true });
   }
 });
 
@@ -555,6 +616,136 @@ it('routes sequential agent requests and an independently bound GitHub read', as
       '{"operation":"issue-view"}',
     );
     expect(writes.some((argv) => argv[4] === 'github-')).toBe(true);
+  } finally {
+    close?.();
+    vi.useRealTimers();
+  }
+});
+
+it('retries a transient sandbox control exec instead of closing the live channel', async () => {
+  vi.useFakeTimers();
+  const { request, exec } = setup();
+  request.route.executionTarget = 'sandbox';
+  const raw = JSON.stringify({
+    model: request.route.model,
+    input: [{ role: 'user', content: 'Fact.' }],
+    reasoning: { effort: request.route.reasoning },
+    stream: true,
+    store: false,
+  });
+  let reads = 0;
+  let writes = 0;
+  const writeFile = vi.fn<ContainerManager['writeFile']>().mockResolvedValue();
+  exec.mockImplementation(async (_ref, argv) => {
+    if (argv[0] === 'codex')
+      return {
+        exitCode: 0,
+        stdout: '--ephemeral --output-last-message --sandbox --last',
+        stderr: '',
+      };
+    const code = argv[2] ?? '';
+    if (code.includes('urllib.request')) return { exitCode: 0, stdout: '204', stderr: '' };
+    if (code.includes('p.stat().st_size')) {
+      reads += 1;
+      if (reads === 1) throw new Error('sandbox-busy');
+      if (reads > 2) return { exitCode: 0, stdout: '', stderr: '' };
+      return {
+        exitCode: 0,
+        stdout: JSON.stringify({
+          body: raw,
+          digest: sha256(raw).slice(7),
+          ticket: 'a'.repeat(36),
+        }),
+        stderr: '',
+      };
+    }
+    if (code.includes('delivery-binding')) writes += 1;
+    return { exitCode: 0, stdout: '', stderr: '' };
+  });
+  const invoke = vi.fn(async () => ({ state: 'observed' as const, value: 'data: ok\n\n' }));
+  const manager = { execInContainer: exec, writeFile } as unknown as ContainerManager;
+  const sandboxChannel = new ContainerCodexChannel(manager, request.route, 4095);
+  let close: (() => void) | undefined;
+  try {
+    close = await sandboxChannel.attach({
+      podId: 'managed-one',
+      runtimeRef: 'ref',
+      stateRoot: '/run/dispatcher-managed-one',
+      invoke,
+    });
+    await vi.advanceTimersByTimeAsync(2_500);
+    expect(invoke).toHaveBeenCalledTimes(1);
+    expect(writes).toBe(1);
+    expect(writeFile).toHaveBeenCalledTimes(1);
+  } finally {
+    close?.();
+    vi.useRealTimers();
+  }
+});
+
+it('publishes a large sandbox response through the files data plane instead of argv', async () => {
+  vi.useFakeTimers();
+  const { request, exec } = setup();
+  request.route.executionTarget = 'sandbox';
+  const raw = JSON.stringify({
+    model: request.route.model,
+    input: [{ role: 'user', content: 'Fact.' }],
+    reasoning: { effort: request.route.reasoning },
+    stream: true,
+    store: false,
+  });
+  let read = false;
+  exec.mockImplementation(async (_ref, argv) => {
+    if (argv[0] === 'codex')
+      return {
+        exitCode: 0,
+        stdout: '--ephemeral --output-last-message --sandbox --last',
+        stderr: '',
+      };
+    const code = argv[2] ?? '';
+    if (code.includes('urllib.request')) return { exitCode: 0, stdout: '204', stderr: '' };
+    if (code.includes('p.stat().st_size')) {
+      if (read) return { exitCode: 0, stdout: '', stderr: '' };
+      read = true;
+      return {
+        exitCode: 0,
+        stdout: JSON.stringify({
+          body: raw,
+          digest: sha256(raw).slice(7),
+          ticket: 'a'.repeat(36),
+        }),
+        stderr: '',
+      };
+    }
+    return { exitCode: 0, stdout: '', stderr: '' };
+  });
+  const writeFile = vi.fn<ContainerManager['writeFile']>().mockResolvedValue();
+  const response = `data: ${'x'.repeat(400 * 1024)}\n\n`;
+  const channel = new ContainerCodexChannel(
+    { execInContainer: exec, writeFile } as unknown as ContainerManager,
+    request.route,
+    4095,
+  );
+  let close: (() => void) | undefined;
+  try {
+    close = await channel.attach({
+      podId: 'managed-one',
+      runtimeRef: 'ref',
+      stateRoot: '/run/dispatcher-managed-one',
+      invoke: vi.fn(async () => ({ state: 'observed' as const, value: response })),
+    });
+    await vi.advanceTimersByTimeAsync(2_500);
+    expect(writeFile).toHaveBeenCalledTimes(1);
+    expect(writeFile.mock.calls[0]?.slice(0, 2)).toEqual([
+      'ref',
+      '/run/dispatcher-managed-one/channel-response.tmp',
+    ]);
+    expect(JSON.parse(String(writeFile.mock.calls[0]?.[2]))).toMatchObject({ body: response });
+    const publication = exec.mock.calls.find((call) =>
+      String(call[1][2] ?? '').includes('staged-response'),
+    );
+    expect(publication?.[1]).not.toContain(response);
+    expect(publication?.[1].at(-1)).toBe('a'.repeat(36));
   } finally {
     close?.();
     vi.useRealTimers();

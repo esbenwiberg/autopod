@@ -38,6 +38,17 @@ else:
  with temp.open('w') as f:json.dump(value,f,ensure_ascii=False);f.flush();os.fsync(f.fileno())
  os.replace(temp,p)
 `;
+const PUBLISH_STAGED = `import json,os,pathlib,sys
+root=pathlib.Path(sys.argv[1]);prefix=sys.argv[2];p=root/(prefix+'response.json');temp=root/(prefix+'response.tmp')
+value=json.loads(temp.read_text());request=json.loads((root/(prefix+'request.json')).read_text())
+if not isinstance(value,dict) or set(value)!=set(['digest','ok','body','ticket']):raise RuntimeError('staged-response')
+if value['digest']!=sys.argv[3] or value['ok']!=(sys.argv[4]=='true') or value['ticket']!=sys.argv[5] or not isinstance(value['body'],str):raise RuntimeError('staged-response')
+if request['ticket']!=value['ticket'] or request['digest']!=value['digest']:raise RuntimeError('delivery-binding')
+if p.exists() and json.loads(p.read_text()).get('ticket')==value['ticket']:
+ if json.loads(p.read_text())!=value:raise RuntimeError('replay-conflict')
+ temp.unlink(missing_ok=True)
+else:os.replace(temp,p)
+`;
 const SEND = `import hashlib,json,os,pathlib,re,sys
 root=pathlib.Path(sys.argv[1]);key=sys.argv[2];raw=sys.argv[3]
 if not re.fullmatch(r'[A-Za-z0-9_-]{1,200}',key):raise RuntimeError('key')
@@ -117,6 +128,60 @@ export class ContainerCodexChannel implements ManagedWorkerProviderChannel {
       release();
       if (this.execTails.get(runtimeRef) === tail) this.execTails.delete(runtimeRef);
     }
+  }
+  private async execControl(
+    runtimeRef: string,
+    command: string[],
+    options?: ExecOptions,
+  ): Promise<ExecResult> {
+    const attempts = this.route.executionTarget === 'sandbox' ? 5 : 1;
+    let failure: unknown = new Error('managed-codex-channel-unavailable');
+    for (let attempt = 0; attempt < attempts; attempt++) {
+      try {
+        return await this.execBound(runtimeRef, command, options);
+      } catch (error) {
+        failure = error;
+      }
+      if (attempt < attempts - 1)
+        await new Promise((resolve) => setTimeout(resolve, 100 * (attempt + 1)));
+    }
+    throw failure;
+  }
+  private async publishResponse(
+    runtimeRef: string,
+    stateRoot: string,
+    prefix: 'channel-' | 'github-',
+    digest: string,
+    ok: boolean,
+    body: string,
+    ticket: string,
+  ) {
+    if (this.route.executionTarget !== 'sandbox') {
+      await this.execControl(
+        runtimeRef,
+        ['python3', '-c', WRITE, stateRoot, prefix, digest, String(ok), body, ticket],
+        { user: 'root' },
+      );
+      return;
+    }
+    const payload = canonical({ digest, ok, body, ticket });
+    let failure: unknown = new Error('managed-codex-response-unavailable');
+    for (let attempt = 0; attempt < 5; attempt++) {
+      try {
+        await this.manager.writeFile(runtimeRef, `${stateRoot}/${prefix}response.tmp`, payload);
+        const result = await this.execControl(
+          runtimeRef,
+          ['python3', '-c', PUBLISH_STAGED, stateRoot, prefix, digest, String(ok), ticket],
+          { user: 'root' },
+        );
+        if (result.exitCode !== 0) throw new Error('managed-codex-response-publish-failed');
+        return;
+      } catch (error) {
+        failure = error;
+      }
+      if (attempt < 4) await new Promise((resolve) => setTimeout(resolve, 100 * (attempt + 1)));
+    }
+    throw failure;
   }
   async preflight(request: ManagedPodRequest) {
     if (canonical(this.route) !== canonical(request.route) || request.route.runtime !== 'codex')
@@ -207,7 +272,7 @@ export class ContainerCodexChannel implements ManagedWorkerProviderChannel {
     )
       throw new Error('managed-codex-channel-binding');
     const exec = async (code: string, ...args: string[]) => {
-      const result = await this.execBound(
+      const result = await this.execControl(
         binding.runtimeRef,
         ['python3', '-c', code, binding.stateRoot, ...args],
         { user: 'root' },
@@ -215,11 +280,9 @@ export class ContainerCodexChannel implements ManagedWorkerProviderChannel {
       if (result.exitCode !== 0) throw new Error('managed-codex-channel-unavailable');
       return result.stdout;
     };
-    const capability = await this.manager.execInContainer(
-      binding.runtimeRef,
-      ['codex', 'exec', '--help'],
-      { user: 'root' },
-    );
+    const capability = await this.execControl(binding.runtimeRef, ['codex', 'exec', '--help'], {
+      user: 'root',
+    });
     if (
       capability.exitCode !== 0 ||
       !['--output-last-message', '--sandbox'].every((flag) => capability.stdout.includes(flag))
@@ -264,11 +327,12 @@ export class ContainerCodexChannel implements ManagedWorkerProviderChannel {
           this.options.mode === 'agent' ? `codex-${request.digest}` : 'codex-report-one';
         const response = await binding.invoke(operation, request.body, this.maximumTokens);
         if (stopped) return;
-        await exec(
-          WRITE,
+        await this.publishResponse(
+          binding.runtimeRef,
+          binding.stateRoot,
           'channel-',
           request.digest,
-          String(response.state === 'observed'),
+          response.state === 'observed',
           response.state === 'observed' ? response.value : '',
           request.ticket,
         );
@@ -293,7 +357,15 @@ export class ContainerCodexChannel implements ManagedWorkerProviderChannel {
         if (request.digest !== sha256(request.body).slice(7))
           throw new Error('managed-github-request-invalid');
         const value = await binding.invokeGitHub(`github-${request.digest}`, request.body);
-        await exec(WRITE, 'github-', request.digest, 'true', value, request.ticket);
+        await this.publishResponse(
+          binding.runtimeRef,
+          binding.stateRoot,
+          'github-',
+          request.digest,
+          true,
+          value,
+          request.ticket,
+        );
       } catch {
         stopped = true;
         clearInterval(timer);

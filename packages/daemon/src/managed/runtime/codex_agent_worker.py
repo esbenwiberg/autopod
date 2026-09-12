@@ -30,11 +30,23 @@ def send_failure(endpoint, reason, exit_code=1):
             endpoint.removesuffix('/v1') + '/failure', data=payload, method='POST',
             headers={'Content-Type': 'application/json', 'Content-Length': str(len(payload))},
         )
-        with urllib.request.urlopen(request, timeout=1) as response:
-            if response.status != 204:
-                raise RuntimeError('failure-report-rejected')
-    except (OSError, RuntimeError, ValueError, urllib.error.URLError):
-        pass
+    except (TypeError, ValueError):
+        return
+    # The agent can fail while the final provider POST still owns the channel's
+    # serialization lock. Preserve the bounded diagnostic after that brief race.
+    for attempt in range(5):
+        try:
+            with urllib.request.urlopen(request, timeout=1) as response:
+                if response.status == 204:
+                    return
+                return
+        except urllib.error.HTTPError as error:
+            if error.code != 409:
+                return
+        except (OSError, urllib.error.URLError):
+            pass
+        if attempt < 4:
+            time.sleep(0.05)
 
 
 def report_failure(endpoint, log, exit_code):
@@ -73,6 +85,27 @@ def report_failure(endpoint, log, exit_code):
         send_failure(endpoint, reason, exit_code)
     except (OSError, RuntimeError, ValueError, urllib.error.URLError):
         pass
+
+
+def publish_output(endpoint, captured, output):
+    """Publish only after the agent exits successfully.
+
+    Managed sandbox directories are uploaded filesystems rather than host bind
+    mounts.  Some implementations do not support an atomic rename even though
+    ordinary file writes work.  The dispatcher cannot inspect /output until
+    after this worker exits zero, so a flushed direct write preserves the same
+    all-or-nothing artifact contract at the observable boundary.
+    """
+    try:
+        content = captured.read_bytes()
+        with output.open('wb') as stream:
+            stream.write(content)
+            stream.flush()
+            os.fsync(stream.fileno())
+    except (OSError, ValueError):
+        send_failure(endpoint, 'output-invalid')
+        raise RuntimeError('agent-output-invalid') from None
+
 
 parser = argparse.ArgumentParser()
 parser.add_argument('--model', required=True)
@@ -222,6 +255,4 @@ with tempfile.TemporaryDirectory(prefix='managed-codex-') as temporary:
     if not captured.is_file() or captured.is_symlink() or captured.stat().st_size > 1024 * 1024:
         send_failure(args.endpoint, 'output-invalid')
         raise RuntimeError('agent-output-invalid')
-    temporary_output = output.with_suffix(output.suffix + '.tmp')
-    temporary_output.write_bytes(captured.read_bytes())
-    os.replace(temporary_output, output)
+    publish_output(args.endpoint, captured, output)

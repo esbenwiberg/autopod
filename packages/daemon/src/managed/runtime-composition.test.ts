@@ -72,10 +72,12 @@ function setup(target: 'local' | 'sandbox' = 'local', mode: 'api-key' | 'chatgpt
     stdout: '',
     stderr: '',
   }));
+  const writeFile = vi.fn<ContainerManager['writeFile']>().mockResolvedValue();
   const manager = {
     ensureManagedContainer: ensure,
     extractManagedOutput: vi.fn(),
     execInContainer: exec,
+    writeFile,
   } as unknown as ContainerManager;
   const fetcher = vi.fn<typeof fetch>().mockImplementation(async (url) =>
     String(url).endsWith('input_tokens')
@@ -131,6 +133,7 @@ function setup(target: 'local' | 'sandbox' = 'local', mode: 'api-key' | 'chatgpt
     channel,
     ensure,
     exec,
+    writeFile,
     fetcher,
     credential,
     config,
@@ -168,9 +171,17 @@ it.each(['local', 'sandbox'] as const)(
       value: 'A frozen fact.',
     });
     expect(c.service.row('installation', handle.podId).consumed_tokens).toBe(30);
-    expect(
-      x.exec.mock.calls.some((call) => call[1].some((arg) => arg.endsWith('/quota.json'))),
-    ).toBe(true);
+    if (target === 'sandbox') {
+      expect(x.writeFile.mock.calls.some((call) => call[1].endsWith('/quota.json'))).toBe(true);
+      expect(
+        x.exec.mock.calls.some((call) => call[1].some((arg) => arg.endsWith('/quota.json'))),
+      ).toBe(false);
+    } else {
+      expect(
+        x.exec.mock.calls.some((call) => call[1].some((arg) => arg.endsWith('/quota.json'))),
+      ).toBe(true);
+      expect(x.writeFile).not.toHaveBeenCalled();
+    }
     expect(JSON.stringify(x.exec.mock.calls)).not.toContain('fixture-secret');
     expect(JSON.stringify(x.ensure.mock.calls)).not.toContain('fixture-secret');
     c.close();
