@@ -30,11 +30,23 @@ def send_failure(endpoint, reason, exit_code=1):
             endpoint.removesuffix('/v1') + '/failure', data=payload, method='POST',
             headers={'Content-Type': 'application/json', 'Content-Length': str(len(payload))},
         )
-        with urllib.request.urlopen(request, timeout=1) as response:
-            if response.status != 204:
-                raise RuntimeError('failure-report-rejected')
-    except (OSError, RuntimeError, ValueError, urllib.error.URLError):
-        pass
+    except (TypeError, ValueError):
+        return
+    # The agent can fail while the final provider POST still owns the channel's
+    # serialization lock. Preserve the bounded diagnostic after that brief race.
+    for attempt in range(5):
+        try:
+            with urllib.request.urlopen(request, timeout=1) as response:
+                if response.status == 204:
+                    return
+                return
+        except urllib.error.HTTPError as error:
+            if error.code != 409:
+                return
+        except (OSError, urllib.error.URLError):
+            pass
+        if attempt < 4:
+            time.sleep(0.05)
 
 
 def report_failure(endpoint, log, exit_code):

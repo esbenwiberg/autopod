@@ -1,4 +1,4 @@
-import { spawn } from 'node:child_process';
+import { execFile, spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import {
   chmodSync,
@@ -9,14 +9,17 @@ import {
   rmSync,
   writeFileSync,
 } from 'node:fs';
+import { createServer } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { promisify } from 'node:util';
 import { expect, it, vi } from 'vitest';
 import type { ContainerManager } from '../interfaces/container-manager.js';
 import { fixture } from '../test-utils/managed-fixture.js';
 import { sha256 } from './canonical.js';
 import { ContainerCodexChannel, codexAgentCommand, codexReportCommand } from './codex-channel.js';
+const exec = promisify(execFile);
 function setup() {
   const f = fixture();
   const request = structuredClone(f.request);
@@ -158,6 +161,39 @@ it('installs an agent helper that routes final output through the reviewed Codex
     expect(install?.[1][6]).not.toContain("'codex', 'exec', '--ephemeral'");
   } finally {
     close();
+  }
+});
+
+it('retries a bounded agent failure receipt when the channel is still serializing', async () => {
+  const worker = readFileSync(
+    fileURLToPath(new URL('./runtime/codex_agent_worker.py', import.meta.url)),
+    'utf8',
+  );
+  const start = worker.indexOf('def send_failure');
+  const end = worker.indexOf('\n\ndef report_failure', start);
+  expect(start).toBeGreaterThanOrEqual(0);
+  expect(end).toBeGreaterThan(start);
+  const sendFailure = worker.slice(start, end);
+  let calls = 0;
+  const server = createServer((request, response) => {
+    request.resume();
+    calls += 1;
+    response.statusCode = calls === 1 ? 409 : 204;
+    response.end();
+  });
+  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+  try {
+    const address = server.address();
+    if (!address || typeof address === 'string') throw new Error('fixture-listener-unavailable');
+    await exec('python3', [
+      '-c',
+      `import json,time,urllib.error,urllib.request\nFAILURE_REASONS={'cli-exit'}\n${sendFailure}\nsend_failure('http://127.0.0.1:${address.port}/v1','cli-exit',1)`,
+    ]);
+    expect(calls).toBe(2);
+  } finally {
+    await new Promise<void>((resolve, reject) =>
+      server.close((error) => (error ? reject(error) : resolve())),
+    );
   }
 });
 
