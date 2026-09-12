@@ -179,6 +179,23 @@ export class ManagedControls {
     const request: ControlRequest = parseManagedRecord('ControlRequestSchema', raw);
     if (!['revoke', 'stop', 'cleanup'].includes(request.operation))
       throw new Error('managed-control-unavailable');
+    let unchangedFailedSource = false;
+    if (request.operation === 'cleanup') {
+      const row = this.service.row(installation, podId);
+      const spec = JSON.parse(row.request_json) as ManagedPodRequest;
+      const hasCandidate = this.service.db
+        .prepare('SELECT 1 FROM managed_source_candidates WHERE pod_id=?')
+        .get(podId);
+      if (
+        row.runtime_ref &&
+        spec.outputs.source.mode !== 'none' &&
+        !hasCandidate &&
+        this.artifactExportImpossible(podId) &&
+        this.service.source
+      ) {
+        unchangedFailedSource = await this.service.source.unchanged(installation, podId);
+      }
+    }
     const admitted = this.service.db
       .transaction(() => {
         const row = this.service.row(installation, podId);
@@ -207,7 +224,16 @@ export class ManagedControls {
           }
           if (row.runtime_ref && spec.outputs.source.mode !== 'none') {
             if (!this.service.source) throw new Error('managed-source-candidate-pending');
-            this.service.source.candidate(installation, podId);
+            try {
+              this.service.source.candidate(installation, podId);
+            } catch (error) {
+              if (
+                !unchangedFailedSource ||
+                !(error instanceof Error) ||
+                error.message !== 'source-candidate-unavailable'
+              )
+                throw error;
+            }
           }
           this.service.db
             .prepare("UPDATE managed_pods SET cleanup='requested' WHERE pod_id=?")

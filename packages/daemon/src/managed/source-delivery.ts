@@ -48,6 +48,12 @@ export class ManagedSourceDelivery {
       throw new Error('source-candidate-integrity');
     return { receipt, bundle: row.bundle };
   }
+  async unchanged(installation: string, podId: string): Promise<boolean> {
+    const row = this.service.row(installation, podId);
+    const spec = JSON.parse(row.request_json) as ManagedPodRequest;
+    if (!row.observed_exit || spec.outputs.source.mode === 'none') return false;
+    return this.git.unchanged(podId, spec.outputs.source);
+  }
   async freeze(installation: string, podId: string): Promise<SourceCandidateReceipt> {
     const row = this.service.row(installation, podId);
     const spec = JSON.parse(row.request_json) as ManagedPodRequest;

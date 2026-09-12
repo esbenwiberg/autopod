@@ -252,6 +252,17 @@ export class ManagedGitBroker {
       await rm(directory, { recursive: true, force: true });
     }
   }
+  async unchanged(
+    podId: string,
+    source: { repository: string; remote: string; head: string; base: string },
+  ): Promise<boolean> {
+    const binding = this.binding(source);
+    const cwd = binding.workspace(podId);
+    if (await managedGit(cwd, ['status', '--porcelain', '--untracked-files=all'])) return false;
+    return (
+      (await managedGit(cwd, ['rev-parse', '--verify', 'HEAD^{commit}'])) === binding.baseCommit
+    );
+  }
   async branchMatches(candidate: SourceCandidateReceipt): Promise<boolean> {
     return (await this.remoteHead(this.binding(candidate), candidate.head)) === candidate.newCommit;
   }
