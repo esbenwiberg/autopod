@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process';
-import { access, mkdir, mkdtemp, realpath, rm, writeFile } from 'node:fs/promises';
+import { access, chmod, mkdir, mkdtemp, realpath, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { expect, it } from 'vitest';
@@ -118,6 +118,74 @@ it('exact-checkout trust keeps worker-controlled Git hooks disabled', async () =
     await expect(
       managedGit(root, ['config', '--local', '--get', 'safe.directory']),
     ).rejects.toThrow();
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+it('deterministically commits a successful worker dirty tree before freezing', async () => {
+  const root = await mkdtemp(path.join(tmpdir(), 'managed git recovery '));
+  const remote = path.join(root, 'remote.git');
+  const workspace = path.join(root, 'workspace');
+  try {
+    await managedGit(root, ['init', '--bare', remote]);
+    await managedGit(root, ['init', '-b', 'main', workspace]);
+    await writeFile(path.join(workspace, 'tracked.txt'), 'base\n');
+    await managedGit(workspace, ['add', '.']);
+    await managedGit(workspace, [
+      '-c',
+      'user.name=Fixture',
+      '-c',
+      'user.email=fixture@invalid',
+      'commit',
+      '-m',
+      'base',
+    ]);
+    const base = await managedGit(workspace, ['rev-parse', 'HEAD']);
+    await managedGit(workspace, ['push', remote, 'main']);
+
+    await writeFile(path.join(workspace, 'tracked.txt'), 'changed\n');
+    await writeFile(path.join(workspace, 'new.txt'), 'new\n');
+    await chmod(path.join(workspace, 'tracked.txt'), 0o755);
+    await mkdir(path.join(workspace, '.git', 'hooks'), { recursive: true });
+    await writeFile(
+      path.join(workspace, '.git', 'hooks', 'pre-commit'),
+      '#!/bin/sh\ntouch hook-ran\nexit 1\n',
+      { mode: 0o755 },
+    );
+    await managedGit(workspace, ['config', '--local', 'commit.gpgSign', 'true']);
+
+    const broker = new ManagedGitBroker([
+      {
+        repository: 'fixture',
+        remote: 'origin',
+        remoteUrl: remote,
+        base: 'main',
+        baseCommit: base,
+        branchNamespace: 'worker/',
+        workspace: () => workspace,
+      },
+    ]);
+    const frozen = await broker.freeze('managed-fixture', {
+      repository: 'fixture',
+      remote: 'origin',
+      head: 'worker/recovered',
+      base: 'main',
+    });
+
+    expect(frozen.newCommit).not.toBe(base);
+    expect(frozen.expectedOldCommit).toBe('0'.repeat(40));
+    expect(frozen.bundle.length).toBeGreaterThan(0);
+    expect(await managedGit(workspace, ['status', '--porcelain', '--untracked-files=all'])).toBe(
+      '',
+    );
+    expect(await managedGit(workspace, ['show', '-s', '--format=%an <%ae>%n%s', 'HEAD'])).toBe(
+      'Autopod <autopod@autopod.local>\nchore: capture managed worker changes',
+    );
+    expect(await managedGit(workspace, ['show', '--format=', '--name-only', 'HEAD'])).toContain(
+      'new.txt',
+    );
+    await expect(access(path.join(workspace, 'hook-ran'))).rejects.toThrow();
   } finally {
     await rm(root, { recursive: true, force: true });
   }
