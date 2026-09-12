@@ -145,6 +145,8 @@ Configure these rules on the target repositories that Autopod will open PRs agai
   - Public client flows enabled for device-code CLI login
   - Native/mobile desktop redirect URI registered for the macOS app:
     `msauth.com.autopod.desktop://auth`
+  - Hosted CLI broker redirect URI registered for every daemon origin:
+    `https://<daemon-host>/auth/cli/callback`
 - [ ] CLI operators export:
   ```bash
   AUTOPOD_CLIENT_ID=<ENTRA_CLIENT_ID>

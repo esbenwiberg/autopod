@@ -3,11 +3,13 @@ import {
   type AccountInfo,
   type AuthenticationResult,
   type Configuration,
+  CryptoProvider,
   type DeviceCodeRequest,
   PublicClientApplication,
   type SilentFlowRequest,
 } from '@azure/msal-node';
 import open from 'open';
+import { CliAuthBrokerClient } from './auth-broker-client.js';
 import { MsalFileCachePlugin } from './msal-cache.js';
 
 const DEFAULT_SCOPES = ['api://autopod/.default'];
@@ -62,19 +64,42 @@ export class MsalClient {
     return this.mapResult(result);
   }
 
+  async acquireTokenBrokered(daemonUrl: string): Promise<AuthToken> {
+    const broker = new CliAuthBrokerClient(daemonUrl);
+    const { verifier, challenge } = await new CryptoProvider().generatePkceCodes();
+    const requestedState = new CryptoProvider().createNewGuid();
+    const authCodeUrl = await this.pca.getAuthCodeUrl({
+      scopes: this.scopes,
+      redirectUri: broker.callbackUrl,
+      responseMode: 'query',
+      codeChallenge: challenge,
+      codeChallengeMethod: 'S256',
+      state: requestedState,
+    });
+    const expectedState = new URL(authCodeUrl).searchParams.get('state');
+    if (!expectedState) throw new Error('Authentication URL did not contain state');
+
+    const response = await broker.waitForAuthorization(expectedState, async () => {
+      await open(authCodeUrl);
+    });
+    const result = await this.pca.acquireTokenByCode({
+      code: response.code as string,
+      scopes: this.scopes,
+      redirectUri: broker.callbackUrl,
+      codeVerifier: verifier,
+    });
+    return this.mapResult(result);
+  }
+
   async refreshToken(account: AccountInfo): Promise<AuthToken | null> {
     const request: SilentFlowRequest = {
       scopes: this.scopes,
       account,
     };
 
-    try {
-      const result = await this.pca.acquireTokenSilent(request);
-      if (!result) return null;
-      return this.mapResult(result);
-    } catch {
-      return null;
-    }
+    const result = await this.pca.acquireTokenSilent(request);
+    if (!result) return null;
+    return this.mapResult(result);
   }
 
   async getAccounts(): Promise<AccountInfo[]> {

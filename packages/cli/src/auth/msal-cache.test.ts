@@ -57,6 +57,49 @@ describe('MsalFileCachePlugin', () => {
     expect(deserialize).toHaveBeenCalledWith('{"account":"cached"}');
   });
 
+  it('falls back to a private ephemeral cache when the durable cache is read-only', async () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'autopod-msal-readonly-'));
+    temporaryDirectories.push(root);
+    const readOnlyDir = path.join(root, 'readonly');
+    const fallbackPath = path.join(root, 'fallback', 'msal-cache.json');
+    fs.mkdirSync(readOnlyDir);
+    fs.chmodSync(readOnlyDir, 0o500);
+
+    try {
+      const plugin = new MsalFileCachePlugin(
+        path.join(readOnlyDir, 'msal-cache.json'),
+        fallbackPath,
+      );
+      await plugin.afterCacheAccess(
+        cacheContext({ changed: true, serialized: '{"refresh":"rotated"}' }),
+      );
+
+      expect(fs.readFileSync(fallbackPath, 'utf-8')).toBe('{"refresh":"rotated"}');
+      expect(fs.statSync(path.dirname(fallbackPath)).mode & 0o777).toBe(0o700);
+      expect(fs.statSync(fallbackPath).mode & 0o777).toBe(0o600);
+    } finally {
+      fs.chmodSync(readOnlyDir, 0o700);
+    }
+  });
+
+  it('loads the newest cache copy after an ephemeral refresh', async () => {
+    const primaryPath = temporaryCachePath();
+    const fallbackPath = temporaryCachePath();
+    fs.mkdirSync(path.dirname(primaryPath), { recursive: true });
+    fs.mkdirSync(path.dirname(fallbackPath), { recursive: true });
+    fs.writeFileSync(primaryPath, '{"refresh":"old"}');
+    fs.writeFileSync(fallbackPath, '{"refresh":"new"}');
+    const later = new Date(Date.now() + 1_000);
+    fs.utimesSync(fallbackPath, later, later);
+    const deserialize = vi.fn();
+
+    await new MsalFileCachePlugin(primaryPath, fallbackPath).beforeCacheAccess(
+      cacheContext({ deserialize }),
+    );
+
+    expect(deserialize).toHaveBeenCalledWith('{"refresh":"new"}');
+  });
+
   it('does not rewrite unchanged state', async () => {
     const cachePath = temporaryCachePath();
 
@@ -67,11 +110,15 @@ describe('MsalFileCachePlugin', () => {
 
   it('deletes persisted refresh state on logout', () => {
     const cachePath = temporaryCachePath();
+    const fallbackPath = temporaryCachePath();
     fs.mkdirSync(path.dirname(cachePath), { recursive: true });
+    fs.mkdirSync(path.dirname(fallbackPath), { recursive: true });
     fs.writeFileSync(cachePath, 'cached');
+    fs.writeFileSync(fallbackPath, 'fallback');
 
-    deleteMsalCache(cachePath);
+    deleteMsalCache(cachePath, fallbackPath);
 
     expect(fs.existsSync(cachePath)).toBe(false);
+    expect(fs.existsSync(fallbackPath)).toBe(false);
   });
 });

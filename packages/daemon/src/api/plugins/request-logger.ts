@@ -12,7 +12,9 @@ function isSensitiveQueryParam(name: string): boolean {
     normalized.includes('authorization') ||
     normalized.includes('bearer') ||
     normalized === 'auth' ||
+    normalized === 'code' ||
     normalized === 'pat' ||
+    normalized === 'state' ||
     normalized.endsWith('apikey') ||
     normalized === 'key'
   );

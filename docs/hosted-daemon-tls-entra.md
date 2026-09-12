@@ -13,6 +13,8 @@ https://autopod-daemon-ewi.swedencentral.cloudapp.azure.com
   `127.0.0.1:3100`.
 - Desktop clients use native Microsoft Entra sign-in and send Entra access
   tokens to the daemon.
+- Non-interactive CLI processes use the daemon's one-time PKCE callback broker
+  instead of opening a loopback listener inside their sandbox.
 - Sandbox MCP traffic uses
   `AUTOPOD_MCP_BASE_URL=https://autopod-daemon-ewi.swedencentral.cloudapp.azure.com`.
 - Docker/local execution preview links returned to desktop clients use the daemon
@@ -38,6 +40,7 @@ Client ID: 3ccd604d-3887-4309-9988-739358fb5811
 Application ID URI: api://3ccd604d-3887-4309-9988-739358fb5811
 Delegated scope: access_as_user
 Native redirect URI: msauth.com.autopod.desktop://auth
+CLI broker redirect URI: https://autopod-daemon-ewi.swedencentral.cloudapp.azure.com/auth/cli/callback
 ```
 
 Azure CLI:
@@ -47,7 +50,8 @@ az ad app update \
   --id 3ccd604d-3887-4309-9988-739358fb5811 \
   --public-client-redirect-uris \
     http://localhost \
-    msauth.com.autopod.desktop://auth
+    msauth.com.autopod.desktop://auth \
+    https://autopod-daemon-ewi.swedencentral.cloudapp.azure.com/auth/cli/callback
 ```
 
 Portal path: Entra ID -> App registrations -> `ewi` -> Authentication ->

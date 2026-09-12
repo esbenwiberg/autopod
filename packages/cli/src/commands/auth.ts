@@ -8,6 +8,7 @@ import { writeCredentials } from '../config/credential-store.js';
 import { withSpinner } from '../output/spinner.js';
 
 interface LoginOptions {
+  browser?: boolean;
   device?: boolean;
   clientId?: string;
   tenantId?: string;
@@ -19,6 +20,7 @@ export function registerAuthCommands(program: Command): void {
     .command('login')
     .description('Authenticate with Azure Entra ID')
     .option('--device', 'Use device code flow (for headless/SSH environments)')
+    .option('--browser', 'Force the local browser callback flow')
     .option('--client-id <id>', 'Persist the Entra application/client ID for future logins')
     .option('--tenant-id <id>', 'Persist the Entra tenant ID for future logins')
     .option(
@@ -29,8 +31,26 @@ export function registerAuthCommands(program: Command): void {
     )
     .action(async (opts: LoginOptions) => {
       configureMsalFromLoginOptions(opts);
-      const msal = getMsalClient();
 
+      const configurationChanged = Boolean(
+        opts.clientId || opts.tenantId || (opts.scope && opts.scope.length > 0),
+      );
+      if (!opts.device && !opts.browser && !configurationChanged) {
+        try {
+          await getToken();
+          const current = getCurrentUser();
+          if (current) {
+            console.log(
+              chalk.green(`Already logged in as ${current.displayName} (${current.email})`),
+            );
+            return;
+          }
+        } catch {
+          // Continue to browser SSO when no refreshable session is available.
+        }
+      }
+
+      const msal = getMsalClient();
       if (opts.device) {
         console.log(chalk.dim('Starting device code flow...'));
         const token = await msal.acquireTokenByDeviceCode((msg) => {
@@ -40,6 +60,13 @@ export function registerAuthCommands(program: Command): void {
         console.log(chalk.green(`Logged in as ${token.displayName} (${token.email})`));
       } else {
         const token = await withSpinner('Opening browser for authentication...', async () => {
+          const daemonUrl = configStore.get('daemon');
+          if (
+            shouldUseBrokeredLogin(opts, process.env, process.stdin.isTTY, process.stdout.isTTY)
+          ) {
+            if (!daemonUrl) throw new Error('No daemon configured for brokered authentication');
+            return msal.acquireTokenBrokered(daemonUrl);
+          }
           return msal.acquireTokenInteractive();
         });
         writeCredentials(token);
@@ -88,12 +115,13 @@ export function registerAuthCommands(program: Command): void {
     .command('whoami')
     .description('Show current authenticated user')
     .action(async () => {
+      let accessError: Error | null = null;
       try {
         await getToken();
-      } catch {
-        // Fall through to the existing signed-out response.
+      } catch (error) {
+        accessError = error instanceof Error ? error : new Error(String(error));
       }
-      const user = getCurrentUser();
+      const user = getCurrentUser({ allowExpired: accessError !== null });
       if (!user) {
         console.log(chalk.dim('Not logged in. Run: ap login'));
         process.exit(2);
@@ -102,8 +130,22 @@ export function registerAuthCommands(program: Command): void {
       console.log(`${chalk.bold('User:')}  ${user.displayName}`);
       console.log(`${chalk.bold('Email:')} ${user.email}`);
       console.log(`${chalk.bold('Roles:')} ${user.roles.join(', ') || 'none'}`);
+      if (accessError) {
+        console.log(`${chalk.bold('Access:')} unavailable (${accessError.message})`);
+        process.exit(2);
+      }
       console.log(`${chalk.bold('Expires:')} ${new Date(user.expiresAt).toLocaleString()}`);
     });
+}
+
+export function shouldUseBrokeredLogin(
+  opts: Pick<LoginOptions, 'browser'>,
+  env: NodeJS.ProcessEnv = process.env,
+  stdinIsTty = process.stdin.isTTY,
+  stdoutIsTty = process.stdout.isTTY,
+): boolean {
+  if (opts.browser) return false;
+  return env.CODEX_SANDBOX !== undefined || stdinIsTty !== true || stdoutIsTty !== true;
 }
 
 function configureMsalFromLoginOptions(opts: LoginOptions): void {

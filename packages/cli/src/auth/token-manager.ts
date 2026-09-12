@@ -22,6 +22,7 @@ function readDevToken(): string | null {
 }
 
 let msalClient: MsalClient | null = null;
+let lastRefreshError: Error | null = null;
 
 export function initMsal(clientId: string, tenantId: string, scopes?: string[]): void {
   msalClient = new MsalClient(clientId, tenantId, scopes);
@@ -42,6 +43,8 @@ export async function getToken(): Promise<string> {
 
   const creds = readCredentials({ allowExpired: true });
   if (!creds) {
+    const recovered = await refresh();
+    if (recovered) return recovered.accessToken;
     throw new AuthError('Not authenticated. Run: ap login');
   }
 
@@ -66,7 +69,8 @@ export async function getToken(): Promise<string> {
     return creds.accessToken;
   }
 
-  throw new AuthError('Token expired and refresh failed. Run: ap login');
+  const detail = lastRefreshError ? ` (${safeFailureCategory(lastRefreshError)})` : '';
+  throw new AuthError(`Token expired and refresh failed${detail}. Run: ap login`);
 }
 
 export function shouldUseCachedTokenAfterRefreshFailure(
@@ -89,6 +93,7 @@ export function shouldUseDevTokenForDaemonUrl(daemonUrl: string | undefined): bo
 export async function refresh(): Promise<AuthToken | null> {
   if (!msalClient) return null;
 
+  lastRefreshError = null;
   try {
     const accounts = await msalClient.getAccounts();
     const account = accounts[0];
@@ -99,8 +104,8 @@ export async function refresh(): Promise<AuthToken | null> {
       writeCredentials(token);
       return token;
     }
-  } catch {
-    // Silent refresh failed
+  } catch (error) {
+    lastRefreshError = error instanceof Error ? error : new Error(String(error));
   }
 
   return null;
@@ -111,6 +116,14 @@ export function clear(): void {
   deleteMsalCache();
 }
 
-export function getCurrentUser(): AuthToken | null {
-  return readCredentials();
+export function getCurrentUser(options: { allowExpired?: boolean } = {}): AuthToken | null {
+  return readCredentials(options);
+}
+
+function safeFailureCategory(error: Error): string {
+  const code = (error as NodeJS.ErrnoException).code;
+  if (code === 'EACCES' || code === 'EPERM' || code === 'EROFS') {
+    return 'credential persistence unavailable';
+  }
+  return 'silent authentication unavailable';
 }

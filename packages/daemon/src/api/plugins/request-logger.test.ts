@@ -6,8 +6,8 @@ describe('sanitizeRequestUrl', () => {
     expect(sanitizeRequestUrl('/events?token=eyJ.secret&lastEventId=42')).toBe(
       '/events?token=[REDACTED]&lastEventId=42',
     );
-    expect(sanitizeRequestUrl('/callback?access_token=abc&apiKey=def&state=ok')).toBe(
-      '/callback?access_token=[REDACTED]&apiKey=[REDACTED]&state=ok',
+    expect(sanitizeRequestUrl('/callback?access_token=abc&apiKey=def&code=ghi&state=ok')).toBe(
+      '/callback?access_token=[REDACTED]&apiKey=[REDACTED]&code=[REDACTED]&state=[REDACTED]',
     );
   });
 

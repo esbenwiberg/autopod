@@ -391,16 +391,21 @@ ap reject a1b2c3d4 "The form needs client-side validation"
 ### Authentication
 
 ```bash
-ap login                     # Interactive login (Entra ID)
+ap login                     # Reuse/refresh the session; browser SSO only when required
+ap login --browser           # Force the legacy local browser callback
 ap login --device            # Device code flow (headless/SSH)
 ap logout                    # Clear credentials
 ap whoami                    # Current user + daemon status
 ```
 
-Successful login persists MSAL refresh state with owner-only permissions so the
-CLI can renew hourly access tokens across invocations. `ap logout` clears both
-the access credentials and persisted refresh state. Entra policy or account
-revocation can still require a new interactive or device login.
+`ap login` first renews an existing MSAL session without opening a browser. If
+interaction is required from an agent or other non-TTY process, the CLI opens
+the same browser SSO page but receives its one-time PKCE callback through the
+configured HTTPS daemon instead of waiting on a sandbox-inaccessible loopback
+port. Successful login persists MSAL refresh state with owner-only permissions;
+when the home directory is read-only, it uses an owner-only per-user runtime
+cache. `ap logout` clears both copies. Entra policy or account revocation can
+still require a new interactive or device login.
 
 ### Daemon
 
@@ -1274,11 +1279,13 @@ autopod uses Azure Entra ID for authentication.
 3. Under **Authentication**, add Mobile and desktop redirect URIs:
    - `http://localhost` (CLI PKCE/device-code compatibility)
    - `msauth.com.autopod.desktop://auth` (macOS desktop native sign-in)
-4. Enable **"Allow public client flows"** (for device code flow on headless machines)
-5. Under **Expose an API**, set the Application ID URI to `api://<application-client-id>`
-6. Add a delegated scope named `access_as_user`
-7. Note the **Application (client) ID** and **Directory (tenant) ID**
-8. Add them to your daemon `.env`:
+4. Add the CLI broker callback for each hosted daemon as an HTTPS redirect URI:
+   - `https://<daemon-host>/auth/cli/callback`
+5. Enable **"Allow public client flows"** (for CLI and device-code login)
+6. Under **Expose an API**, set the Application ID URI to `api://<application-client-id>`
+7. Add a delegated scope named `access_as_user`
+8. Note the **Application (client) ID** and **Directory (tenant) ID**
+9. Add them to your daemon `.env`:
 
 ```bash
 ENTRA_CLIENT_ID=<application-client-id>
@@ -1292,7 +1299,7 @@ For the CLI, use the same tenant/client and scope:
 export AUTOPOD_CLIENT_ID=<application-client-id>
 export AUTOPOD_TENANT_ID=<directory-tenant-id>
 export AUTOPOD_AUTH_SCOPE=api://<application-client-id>/access_as_user
-ap auth login
+ap login
 ```
 
 For the hosted desktop daemon flow, see `docs/hosted-daemon-tls-entra.md`.

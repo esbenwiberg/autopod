@@ -58,6 +58,7 @@ import { mobileStaticPlugin } from './plugins/mobile-static.js';
 import { rateLimitPlugin } from './plugins/rate-limit.js';
 import { requestLoggerPlugin } from './plugins/request-logger.js';
 import { actionRoutes } from './routes/actions.js';
+import { cliAuthBrokerRoutes } from './routes/cli-auth-broker.js';
 import { diffRoutes } from './routes/diff.js';
 import { filesRoutes } from './routes/files.js';
 import { healthRoutes } from './routes/health.js';
@@ -199,6 +200,7 @@ export async function createServer(deps: ServerDependencies): Promise<FastifyIns
     securityMlEnabled: deps.securityMlEnabled,
     backupManager: deps.backupManager,
   });
+  cliAuthBrokerRoutes(app);
   podRoutes(
     app,
     deps.podManager,

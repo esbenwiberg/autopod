@@ -20,7 +20,7 @@ vi.mock('chalk', () => {
   return { default: stub };
 });
 
-const { registerAuthCommands } = await import('./auth.js');
+const { registerAuthCommands, shouldUseBrokeredLogin } = await import('./auth.js');
 
 function captureOutput(): {
   stdout: string[];
@@ -111,7 +111,39 @@ describe('auth commands', () => {
   });
 
   afterEach(() => {
+    vi.restoreAllMocks();
     fs.rmSync(tmpHome, { recursive: true, force: true });
+  });
+
+  describe('ap login', () => {
+    it('completes silently from an existing session before opening a browser', async () => {
+      writeCredentials('access-token-123');
+
+      const cap = await runAuth(['login']);
+
+      expect(cap.exitCode).toBeUndefined();
+      expect(cap.logs.join('\n')).toContain('Already logged in as Test User (test@example.com)');
+      expect(cap.logs.join('\n')).not.toContain('Opening browser');
+    });
+
+    it('uses the broker for agent terminals while retaining an explicit local callback', () => {
+      expect(shouldUseBrokeredLogin({}, { CODEX_SANDBOX: 'seatbelt' }, true, true)).toBe(true);
+      expect(shouldUseBrokeredLogin({}, {}, undefined, undefined)).toBe(true);
+      expect(shouldUseBrokeredLogin({ browser: true }, { CODEX_SANDBOX: 'seatbelt' })).toBe(false);
+    });
+  });
+
+  describe('ap whoami', () => {
+    it('reports the known identity separately when access refresh is unavailable', async () => {
+      writeCredentials('expired-token', '2000-01-01T00:00:00.000Z');
+
+      const cap = await runAuth(['whoami']);
+
+      expect(cap.exitCode).toBe(2);
+      expect(cap.logs.join('\n')).toContain('User:  Test User');
+      expect(cap.logs.join('\n')).toContain('Access: unavailable');
+      expect(cap.logs.join('\n')).not.toContain('Not logged in');
+    });
   });
 
   describe('ap token', () => {

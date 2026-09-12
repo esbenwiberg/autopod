@@ -40,7 +40,6 @@ public final class ConnectionManager {
 
   private var healthTask: Task<Void, Never>?
   private var authenticationRecoveryTask: Task<Bool, Never>?
-  private var cliLoginTask: Task<String, Error>?
   private let entraAuthService = EntraDesktopAuthService()
 
   public private(set) var isRecoveringAuthentication = false
@@ -415,8 +414,7 @@ public final class ConnectionManager {
     }
   }
 
-  /// Repair an expired/revoked daemon auth token. For hosted Entra connections this
-  /// runs `ap login` in the background, rereads the CLI credentials, and reconnects.
+  /// Repair an expired/revoked daemon auth token using the native Entra session.
   @discardableResult
   public func recoverAuthentication() async -> Bool {
     if let task = authenticationRecoveryTask {
@@ -626,32 +624,13 @@ public final class ConnectionManager {
       return normalized
     }
 
-    do {
-      let cliToken = try await runCliLoginAndReadToken()
-      applyActiveToken(cliToken, for: applyConnection, persistToKeychain: false)
-      return cliToken
-    } catch {
-      if !forceLogin, let fallbackToken = Self.normalizeOptionalToken(fallbackToken) {
-        return fallbackToken
-      }
-      let token = try await entraAuthService.signIn()
-      let normalized = Self.normalizeToken(token)
-      applyActiveToken(normalized, for: applyConnection, persistToKeychain: true)
-      return normalized
+    if !forceLogin, let fallbackToken = Self.normalizeOptionalToken(fallbackToken) {
+      return fallbackToken
     }
-  }
-
-  private func runCliLoginAndReadToken() async throws -> String {
-    if let task = cliLoginTask {
-      return try await task.value
-    }
-
-    let task = Task {
-      try await Self.runApLoginAndReadToken()
-    }
-    cliLoginTask = task
-    defer { cliLoginTask = nil }
-    return try await task.value
+    let token = try await entraAuthService.signIn()
+    let normalized = Self.normalizeToken(token)
+    applyActiveToken(normalized, for: applyConnection, persistToKeychain: true)
+    return normalized
   }
 
   private func applyActiveToken(
@@ -694,74 +673,4 @@ public final class ConnectionManager {
     }
   }
 
-  nonisolated private static func runApLoginAndReadToken() async throws -> String {
-    let apURL = try findExecutable("ap")
-    try await runApLogin(apURL)
-    guard let token = cliEntraAccessToken() else {
-      throw DaemonError.unauthorized("ap login finished but did not write a valid access token")
-    }
-    return token
-  }
-
-  nonisolated private static func findExecutable(_ name: String) throws -> URL {
-    if let path = resolveViaLoginShell(name) {
-      return URL(fileURLWithPath: path)
-    }
-
-    let home = FileManager.default.homeDirectoryForCurrentUser.path
-    let candidates = [
-      "/opt/homebrew/bin/\(name)",
-      "/usr/local/bin/\(name)",
-      "\(home)/.local/bin/\(name)",
-      "\(home)/.npm/bin/\(name)",
-    ]
-    for path in candidates where FileManager.default.isExecutableFile(atPath: path) {
-      return URL(fileURLWithPath: path)
-    }
-
-    throw DaemonError.networkError("\(name) CLI not found. Install it or add it to your login shell PATH.")
-  }
-
-  nonisolated private static func resolveViaLoginShell(_ name: String) -> String? {
-    let shell = ProcessInfo.processInfo.environment["SHELL"] ?? "/bin/zsh"
-    let proc = Process()
-    proc.executableURL = URL(fileURLWithPath: shell)
-    proc.arguments = ["-l", "-c", "command -v \(name)"]
-    let pipe = Pipe()
-    proc.standardOutput = pipe
-    proc.standardError = FileHandle.nullDevice
-    try? proc.run()
-    proc.waitUntilExit()
-
-    guard proc.terminationStatus == 0 else { return nil }
-    let output = String(data: pipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8)?
-      .trimmingCharacters(in: .whitespacesAndNewlines)
-    return (output?.isEmpty == false) ? output : nil
-  }
-
-  nonisolated private static func runApLogin(_ apURL: URL) async throws {
-    try await Task.detached(priority: .userInitiated) {
-      let proc = Process()
-      proc.executableURL = apURL
-      proc.arguments = ["login"]
-
-      let output = Pipe()
-      let error = Pipe()
-      proc.standardOutput = output
-      proc.standardError = error
-
-      try proc.run()
-      proc.waitUntilExit()
-
-      guard proc.terminationStatus == 0 else {
-        let stdout = String(data: output.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
-        let stderr = String(data: error.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
-        let message = [stderr, stdout]
-          .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
-          .first(where: { !$0.isEmpty })
-          ?? "ap login exited with code \(proc.terminationStatus)"
-        throw DaemonError.unauthorized(message)
-      }
-    }.value
-  }
 }
