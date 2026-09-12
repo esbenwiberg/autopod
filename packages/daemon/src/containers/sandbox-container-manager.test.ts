@@ -1,4 +1,4 @@
-import { randomBytes } from 'node:crypto';
+import { createHash, randomBytes } from 'node:crypto';
 import {
   chmodSync,
   existsSync,
@@ -14,6 +14,7 @@ import { tmpdir } from 'node:os';
 import { basename, dirname, join, posix } from 'node:path';
 import type { Readable } from 'node:stream';
 import { gunzipSync } from 'node:zlib';
+import { AutopodError } from '@autopod/shared';
 import pino from 'pino';
 import { extract as tarExtract } from 'tar-stream';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -796,6 +797,46 @@ describe('SandboxContainerManager', () => {
       const bytes = Buffer.from([0x00, 0xff, 0x10]);
       await mgr.writeFile(id, '/work/blob.bin', bytes);
       expect(await mgr.readFileBinary(id, '/work/blob.bin')).toEqual(bytes);
+    });
+
+    it('publishes managed controls through the files data plane with a digest-last marker', async () => {
+      const client = new FakeSandboxApiClient();
+      const mgr = new SandboxContainerManager(client, logger);
+      const id = await mgr.spawn(baseConfig);
+      const content = '{"message":"continue"}';
+
+      await mgr.writeManagedControl(id, '/run/dispatcher-managed-one', 'request-one', content);
+
+      expect(await mgr.readFile(id, '/run/dispatcher-managed-one/followup-request-one.json')).toBe(
+        content,
+      );
+      expect(await mgr.readFile(id, '/run/dispatcher-managed-one/followup-request-one.ready')).toBe(
+        createHash('sha256').update(content).digest('hex'),
+      );
+      expect(client.execCalls).toHaveLength(0);
+      expect(client.writeFileCalls.slice(-2).map((call) => call.path)).toEqual([
+        '/run/dispatcher-managed-one/followup-request-one.json',
+        '/run/dispatcher-managed-one/followup-request-one.ready',
+      ]);
+    });
+
+    it('reports only the managed-control phase and allowlisted HTTP status', async () => {
+      class RejectedFileClient extends FakeSandboxApiClient {
+        override async writeFile(): Promise<void> {
+          throw new AutopodError('private provider response', 'AZURE_SANDBOX_HTTP_ERROR', 409);
+        }
+      }
+      const mgr = new SandboxContainerManager(new RejectedFileClient(), logger);
+      const id = await mgr.spawn(baseConfig);
+
+      await expect(
+        mgr.writeManagedControl(
+          id,
+          '/run/dispatcher-managed-one',
+          'request-one',
+          '{"message":"continue"}',
+        ),
+      ).rejects.toThrow('managed-codex-follow-up-file-payload-http-409');
     });
   });
 

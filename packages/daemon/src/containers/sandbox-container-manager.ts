@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import {
   cpSync,
   existsSync,
@@ -372,6 +373,39 @@ for root in sys.argv[1:]:
   async writeFile(containerId: string, path: string, content: string | Buffer): Promise<void> {
     const buf = typeof content === 'string' ? Buffer.from(content, 'utf-8') : content;
     await this.client.writeFile(containerId, path, buf);
+  }
+
+  async writeManagedControl(
+    containerId: string,
+    stateRoot: string,
+    key: string,
+    content: string,
+  ): Promise<void> {
+    if (!/^\/run\/dispatcher-managed-[A-Za-z0-9-]+$/.test(stateRoot))
+      throw new Error('managed-codex-follow-up-file-binding-invalid');
+    if (!/^[A-Za-z0-9_-]{1,200}$/.test(key))
+      throw new Error('managed-codex-follow-up-file-key-invalid');
+    if (Buffer.byteLength(content) > 16 * 1024)
+      throw new Error('managed-codex-follow-up-file-size-invalid');
+    const payload = Buffer.from(content, 'utf8');
+    const prefix = `${stateRoot}/followup-${key}`;
+    // Azure's files endpoint writes as root. The root-owned 0700 state directory
+    // therefore remains inaccessible to the untrusted workspace process. Publish
+    // the digest marker last so the loopback server never observes a partial body.
+    try {
+      await this.client.writeFile(containerId, `${prefix}.json`, payload);
+    } catch (error) {
+      throw managedControlFileError('payload', error);
+    }
+    try {
+      await this.client.writeFile(
+        containerId,
+        `${prefix}.ready`,
+        Buffer.from(createHash('sha256').update(payload).digest('hex'), 'ascii'),
+      );
+    } catch (error) {
+      throw managedControlFileError('ready', error);
+    }
   }
 
   async readFile(containerId: string, path: string): Promise<string> {
@@ -933,6 +967,15 @@ function isSandboxNotFound(error: unknown): boolean {
     candidate.code === 'NotFound' ||
     candidate.code === 'ResourceNotFound'
   );
+}
+
+function managedControlFileError(phase: 'payload' | 'ready', error: unknown): Error {
+  const status = error instanceof AutopodError ? error.statusCode : null;
+  const category =
+    status !== null && [400, 401, 403, 404, 409, 429, 500, 502, 503, 504].includes(status)
+      ? `http-${status}`
+      : 'other';
+  return new Error(`managed-codex-follow-up-file-${phase}-${category}`);
 }
 
 function normalizeExtractPath(pathname: string): string {

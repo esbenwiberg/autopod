@@ -196,9 +196,8 @@ export function composeManagedRuntime(config: ManagedRuntimeCompositionConfig) {
             sendMessage: (ref: string, message: FollowUpEnvelope, key: string) => {
               const row = rowFor(ref);
               if (!row) throw new Error('managed-channel-binding');
-              const send = binding.channel.send;
-              if (!send) throw new Error('managed-follow-up-unavailable');
-              return send(ref, `/run/dispatcher-${row.pod_id}`, message, key);
+              if (!binding.channel.send) throw new Error('managed-follow-up-unavailable');
+              return binding.channel.send(ref, `/run/dispatcher-${row.pod_id}`, message, key);
             },
           }
         : {}),

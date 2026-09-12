@@ -2,6 +2,43 @@ import type { FastifyInstance, FastifyRequest } from 'fastify';
 import { ManagedControls } from '../../managed/managed-controls.js';
 import type { ManagedPodService } from '../../managed/managed-service.js';
 
+const CONTROL_FAILURES = new Set([
+  'grant-inactive',
+  'invalid-control-key',
+  'managed-channel-binding',
+  'managed-codex-follow-up-binding',
+  'managed-codex-follow-up-command-exit',
+  'managed-codex-follow-up-envelope-invalid',
+  'managed-codex-follow-up-key-invalid',
+  'managed-codex-follow-up-permission',
+  'managed-codex-follow-up-replay-conflict',
+  'managed-codex-follow-up-state-missing',
+  'managed-codex-follow-up-transport-error',
+  'managed-codex-follow-up-unavailable',
+  'managed-control-conflict',
+  'managed-follow-up-delivery-failed',
+  'managed-follow-up-event-commit-failed',
+  'managed-follow-up-refresh-failed',
+  'managed-follow-up-result-commit-failed',
+  'managed-follow-up-unavailable',
+  'managed-stale-grant',
+]);
+
+function controlFailure(error: unknown): string {
+  const message = error instanceof Error ? error.message : '';
+  return CONTROL_FAILURES.has(message) ||
+    /^managed-codex-follow-up-file-(payload|ready)-(http-(400|401|403|404|409|429|500|502|503|504)|other)$/.test(
+      message,
+    ) ||
+    /^managed-codex-follow-up-file-(binding|key|size)-invalid$/.test(message) ||
+    [
+      'managed-codex-follow-up-file-capability-missing',
+      'managed-codex-follow-up-file-unknown',
+    ].includes(message)
+    ? message
+    : 'managed-control-failure';
+}
+
 export interface ManagedPodApiDeps {
   service: ManagedPodService;
   finishOutputs?: () => Promise<void>;
@@ -140,7 +177,8 @@ export function managedPodRoutes(app: FastifyInstance, deps: ManagedPodApiDeps):
             request.body,
             request.params.key,
           );
-        } catch {
+        } catch (error) {
+          app.log.warn({ operation, reason: controlFailure(error) }, 'managed control rejected');
           return reply.code(409).send({
             schemaVersion: 1,
             code: 'managed-control-rejected',

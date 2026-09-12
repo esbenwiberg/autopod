@@ -129,6 +129,38 @@ it('follow-ups deduplicate and stale revisions fail before the gateway', async (
     f.close();
   }
 });
+it('reports a bounded phase when follow-up delivery fails unexpectedly', async () => {
+  const f = fixture();
+  try {
+    const service = f.service();
+    const controls = new ManagedControls(service);
+    const handle = await service.start('installation-one', f.request);
+    f.runtime.send = async () => {
+      throw new Error('private runtime detail');
+    };
+    await expect(
+      controls.send(
+        'installation-one',
+        handle.podId,
+        {
+          schemaVersion: 1,
+          dispatcherAttemptId: f.request.dispatcherAttemptId,
+          grantId: f.request.effectiveGrant.grantId,
+          grantRevision: 1,
+          message: 'continue within scope',
+        },
+        'follow-failed',
+      ),
+    ).rejects.toThrow('managed-follow-up-delivery-failed');
+    expect(
+      service.db
+        .prepare('SELECT result_json FROM managed_controls WHERE pod_id=? AND operation_key=?')
+        .get(handle.podId, 'follow-failed'),
+    ).toEqual({ result_json: null });
+  } finally {
+    f.close();
+  }
+});
 it('cleanup requires observed exit and committed required artifacts, then retries only cleanup', async () => {
   const f = fixture();
   try {

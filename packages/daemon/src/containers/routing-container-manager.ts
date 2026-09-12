@@ -48,6 +48,18 @@ export class RoutingContainerManager implements ContainerManager {
     return this.delegate(containerId).writeFile(containerId, path, content);
   }
 
+  writeManagedControl(
+    containerId: string,
+    stateRoot: string,
+    key: string,
+    content: string,
+  ): Promise<void> {
+    const manager = this.delegate(containerId);
+    if (!manager.writeManagedControl)
+      return Promise.reject(new Error('managed-control-file-channel-unavailable'));
+    return manager.writeManagedControl(containerId, stateRoot, key, content);
+  }
+
   readFile(containerId: string, path: string): Promise<string> {
     return this.delegate(containerId).readFile(containerId, path);
   }

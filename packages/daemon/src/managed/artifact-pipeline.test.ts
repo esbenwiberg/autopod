@@ -95,11 +95,14 @@ it('reports a nonzero managed agent exit separately from artifact export failure
     const handle = await service.start('installation-one', f.request);
     await f.runtime.stop(handle.podId);
     await service.enforceExpiry();
+    f.db
+      .prepare('INSERT INTO managed_results (pod_id,limitations_json) VALUES (?,?)')
+      .run(handle.podId, '["agent-request-limit-reached"]');
     await pipeline.tick();
 
     const result = controls.observe('installation-one', handle.podId, '0').result;
     expect(result.state).toBe('review_required');
-    expect(result.limitations).toEqual(['agent-runtime-failed']);
+    expect(result.limitations).toEqual(['agent-request-limit-reached', 'agent-runtime-failed']);
     expect(result.artifacts).toEqual([]);
     expect(f.launches()).toBe(1);
   } finally {

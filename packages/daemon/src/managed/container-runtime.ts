@@ -255,6 +255,15 @@ if not stat.S_ISDIR(actual.st_mode) or actual.st_uid!=0 or actual.st_mode & 0o02
     state: 'running' | 'stopped' | 'unknown';
     consumedTokens: number;
     exitCode?: number;
+    limitation?:
+      | 'agent-request-limit-reached'
+      | 'agent-auto-compaction-unsupported'
+      | 'agent-context-window-exceeded'
+      | 'agent-tool-permission-denied'
+      | 'agent-channel-unavailable'
+      | 'agent-followup-channel-failed'
+      | 'agent-output-invalid'
+      | 'agent-cli-exit';
   }> {
     const { boundary, podId } = this.resolve(ref);
     const result = await boundary.manager.execInContainer(
@@ -292,6 +301,69 @@ if not stat.S_ISDIR(actual.st_mode) or actual.st_uid!=0 or actual.st_mode & 0o02
         (receipt.exitCode !== undefined && !Number.isSafeInteger(receipt.exitCode))
       )
         throw new Error('binding');
+      let limitation:
+        | 'agent-request-limit-reached'
+        | 'agent-auto-compaction-unsupported'
+        | 'agent-context-window-exceeded'
+        | 'agent-tool-permission-denied'
+        | 'agent-channel-unavailable'
+        | 'agent-followup-channel-failed'
+        | 'agent-output-invalid'
+        | 'agent-cli-exit'
+        | undefined;
+      if (receipt.observedExit) {
+        const diagnostic = await boundary.manager.execInContainer(
+          ref,
+          [
+            'python3',
+            '-c',
+            'import pathlib,sys; print(pathlib.Path(sys.argv[1]).read_text())',
+            `/run/dispatcher-${podId}/channel-failure.json`,
+          ],
+          { user: 'root' },
+        );
+        if (diagnostic.exitCode === 0) {
+          try {
+            const failure = JSON.parse(diagnostic.stdout) as Record<string, unknown>;
+            if (
+              failure.phase === 'request' &&
+              failure.reason === 'request-limit' &&
+              Number.isSafeInteger(failure.actualBytes) &&
+              Number.isSafeInteger(failure.maximumBytes) &&
+              Number(failure.actualBytes) > Number(failure.maximumBytes)
+            )
+              limitation = 'agent-request-limit-reached';
+            else if (
+              failure.phase === 'request' &&
+              failure.reason === 'unsupported-auto-compaction'
+            )
+              limitation = 'agent-auto-compaction-unsupported';
+            else if (
+              failure.phase === 'agent' &&
+              Number.isSafeInteger(failure.exitCode) &&
+              Number(failure.exitCode) >= 1 &&
+              Number(failure.exitCode) <= 255 &&
+              [
+                'context-window-exceeded',
+                'tool-permission-denied',
+                'channel-unavailable',
+                'followup-channel-failed',
+                'output-invalid',
+                'cli-exit',
+              ].includes(String(failure.reason))
+            )
+              limitation = `agent-${String(failure.reason)}` as
+                | 'agent-context-window-exceeded'
+                | 'agent-tool-permission-denied'
+                | 'agent-channel-unavailable'
+                | 'agent-followup-channel-failed'
+                | 'agent-output-invalid'
+                | 'agent-cli-exit';
+          } catch {
+            /* Untrusted runtime diagnostics are ignored unless fully allowlisted. */
+          }
+        }
+      }
       return {
         state: receipt.observedExit
           ? 'stopped'
@@ -302,6 +374,7 @@ if not stat.S_ISDIR(actual.st_mode) or actual.st_uid!=0 or actual.st_mode & 0o02
         ...(receipt.observedExit && receipt.exitCode !== undefined
           ? { exitCode: receipt.exitCode }
           : {}),
+        ...(limitation ? { limitation } : {}),
       };
     } catch {
       throw new Error('managed-runtime-receipt-invalid');

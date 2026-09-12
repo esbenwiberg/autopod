@@ -29,6 +29,15 @@ export interface ManagedRuntimePort {
     state: 'running' | 'stopped' | 'unknown';
     consumedTokens: number;
     exitCode?: number;
+    limitation?:
+      | 'agent-request-limit-reached'
+      | 'agent-auto-compaction-unsupported'
+      | 'agent-context-window-exceeded'
+      | 'agent-tool-permission-denied'
+      | 'agent-channel-unavailable'
+      | 'agent-followup-channel-failed'
+      | 'agent-output-invalid'
+      | 'agent-cli-exit';
   }>;
   stop(runtimeRef: string): Promise<void>;
   send?(runtimeRef: string, message: FollowUpEnvelope, key: string): Promise<void>;
@@ -322,6 +331,16 @@ export class ManagedPodService {
             row.revoked || row.stop_requested || this.expired(row) ? 'killed' : 'validating';
           this.db
             .transaction(() => {
+              if (observed.limitation) {
+                const stored = this.db
+                  .prepare('SELECT limitations_json FROM managed_results WHERE pod_id=?')
+                  .get(row.pod_id) as { limitations_json: string } | undefined;
+                const limitations = stored ? (JSON.parse(stored.limitations_json) as string[]) : [];
+                this.db
+                  .prepare(`INSERT INTO managed_results (pod_id,limitations_json) VALUES (?,?)
+                  ON CONFLICT(pod_id) DO UPDATE SET limitations_json=excluded.limitations_json`)
+                  .run(row.pod_id, canonical([...new Set([...limitations, observed.limitation])]));
+              }
               this.db
                 .prepare(
                   'UPDATE managed_pods SET observed_exit=1,state=?,exit_code=? WHERE pod_id=?',

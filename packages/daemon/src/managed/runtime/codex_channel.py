@@ -14,7 +14,17 @@ import threading
 import time
 import uuid
 
-MAX_REQUEST = 128 * 1024
+AGENT_FAILURE_REASONS = {
+    'context-window-exceeded',
+    'tool-permission-denied',
+    'channel-unavailable',
+    'followup-channel-failed',
+    'output-invalid',
+    'cli-exit',
+}
+
+REPORT_MAX_REQUEST = 128 * 1024
+AGENT_MAX_REQUEST = 8 * 1024 * 1024
 # A validated agent-mode SSE transcript includes reasoning and tool events in
 # addition to the final artifact. The host gateway remains the authority for the
 # exact per-transport bound and never writes more than this hard channel ceiling.
@@ -30,7 +40,9 @@ def atomic(file, data):
     os.replace(temporary, file)
 
 
-def serve(root, port, lifetime):
+def serve(root, port, lifetime, maximum_request=REPORT_MAX_REQUEST):
+    if maximum_request not in (REPORT_MAX_REQUEST, AGENT_MAX_REQUEST):
+        raise RuntimeError('request-limit-invalid')
     lock = (root / 'channel.lock').open('a')
     try:
         fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
@@ -61,11 +73,15 @@ def serve(root, port, lifetime):
                 self.reply(404)
                 return
             try:
-                for item in sorted(root.glob('followup-*.json')):
-                    key = item.name[len('followup-'):-len('.json')]
+                for ready in sorted(root.glob('followup-*.ready')):
+                    key = ready.name[len('followup-'):-len('.ready')]
                     if not re.fullmatch(r'[A-Za-z0-9_-]{1,200}', key) or (root / ('followup-' + key + '.ack')).exists():
                         continue
-                    value = json.loads(item.read_text())
+                    item = root / ('followup-' + key + '.json')
+                    raw = item.read_bytes()
+                    if ready.read_text() != hashlib.sha256(raw).hexdigest():
+                        raise ValueError('followup-digest')
+                    value = json.loads(raw)
                     message = value.get('message')
                     if not isinstance(message, str) or not 0 < len(message.encode()) <= 4096:
                         raise ValueError('followup')
@@ -99,13 +115,59 @@ def serve(root, port, lifetime):
                 atomic(root / ('followup-' + key + '.ack'), {'observed': True})
                 self.reply(204)
                 return
+            if self.path == '/failure':
+                try:
+                    if self.headers.get('Authorization') or self.headers.get('Transfer-Encoding'):
+                        raise ValueError('headers')
+                    length = int(self.headers.get('Content-Length', '0'))
+                    if not 1 <= length <= 1024:
+                        raise ValueError('size')
+                    value = json.loads(self.rfile.read(length))
+                    if (
+                        not isinstance(value, dict)
+                        or set(value) != {'phase', 'reason', 'exitCode'}
+                        or value.get('phase') != 'agent'
+                        or value.get('reason') not in AGENT_FAILURE_REASONS
+                        or not isinstance(value.get('exitCode'), int)
+                        or not 1 <= value['exitCode'] <= 255
+                    ):
+                        raise ValueError('failure')
+                    failure_file = root / 'channel-failure.json'
+                    preserve = False
+                    if failure_file.exists():
+                        prior = json.loads(failure_file.read_text())
+                        preserve = prior.get('phase') == 'request' and prior.get('reason') in {
+                            'request-limit', 'unsupported-auto-compaction'
+                        }
+                    if not preserve:
+                        atomic(failure_file, value)
+                    self.reply(204)
+                except (OSError, ValueError, KeyError):
+                    self.reply(400)
+                return
+            if self.path == '/v1/responses/compact':
+                atomic(root / 'channel-failure.json', {
+                    'phase': 'request',
+                    'reason': 'unsupported-auto-compaction',
+                })
+                self.reply(501)
+                return
             github = self.path == '/github'
             if self.path not in ('/v1/responses', '/github') or self.headers.get('Authorization') or self.headers.get('Transfer-Encoding'):
                 self.reply(403)
                 return
             try:
                 length = int(self.headers.get('Content-Length', '0'))
-                if not 0 < length <= MAX_REQUEST:
+                if length > maximum_request:
+                    atomic(root / 'channel-failure.json', {
+                        'phase': 'request',
+                        'reason': 'request-limit',
+                        'actualBytes': length,
+                        'maximumBytes': maximum_request,
+                    })
+                    self.reply(413)
+                    return
+                if length < 1:
                     raise ValueError('size')
                 data = self.rfile.read(length)
                 if len(data) != length:
@@ -116,6 +178,7 @@ def serve(root, port, lifetime):
                     self.reply(403)
                     return
                 request = {'digest': hashlib.sha256(data).hexdigest(), 'body': raw, 'ticket': str(uuid.uuid4())}
+                (root / 'channel-failure.json').unlink(missing_ok=True)
                 # Each HTTP delivery needs a fresh host authority check. Only provider
                 # execution is replayed from the durable gateway journal.
                 atomic(root / (prefix + 'request.json'), request)
@@ -159,4 +222,5 @@ if __name__ == '__main__':
     if root.is_symlink() or not root.is_dir() or root.stat().st_uid != os.getuid() or root.stat().st_mode & 0o077:
         raise RuntimeError('channel-root-not-private')
     os.umask(0o077)
-    serve(root, int(sys.argv[2]), min(3600, max(1, int(sys.argv[3]))))
+    maximum_request = int(sys.argv[4]) if len(sys.argv) > 4 else REPORT_MAX_REQUEST
+    serve(root, int(sys.argv[2]), min(3600, max(1, int(sys.argv[3]))), maximum_request)

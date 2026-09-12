@@ -101,6 +101,39 @@ it('expiry closes a reservation that failed before runtime allocation', async ()
     f.close();
   }
 });
+it.each([
+  'agent-request-limit-reached',
+  'agent-auto-compaction-unsupported',
+  'agent-context-window-exceeded',
+  'agent-tool-permission-denied',
+  'agent-channel-unavailable',
+  'agent-followup-channel-failed',
+  'agent-output-invalid',
+  'agent-cli-exit',
+] as const)(
+  'persists allowlisted runtime limitation %s before later cleanup',
+  async (limitation) => {
+    const f = fixture();
+    try {
+      const service = f.service();
+      const handle = await service.start('installation-one', f.request);
+      f.runtime.observe = async () => ({
+        state: 'stopped',
+        consumedTokens: 42,
+        exitCode: 1,
+        limitation,
+      });
+      await service.enforceExpiry();
+      expect(
+        f.db
+          .prepare('SELECT limitations_json FROM managed_results WHERE pod_id=?')
+          .get(handle.podId),
+      ).toEqual({ limitations_json: JSON.stringify([limitation]) });
+    } finally {
+      f.close();
+    }
+  },
+);
 it('dark mode and unenforceable scope cause no effects', async () => {
   const f = fixture();
   try {

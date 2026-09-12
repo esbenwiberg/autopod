@@ -87,10 +87,14 @@ export class ManagedArtifactPipeline {
         error instanceof Error && error.message === 'managed-agent-exit-failed'
           ? 'agent-runtime-failed'
           : `${stage}-incomplete`;
+      const stored = this.service.db
+        .prepare('SELECT limitations_json FROM managed_results WHERE pod_id=?')
+        .get(podId) as { limitations_json: string } | undefined;
+      const limitations = stored ? (JSON.parse(stored.limitations_json) as string[]) : [];
       this.service.db
         .prepare(`INSERT INTO managed_results (pod_id,limitations_json) VALUES (?,?)
         ON CONFLICT(pod_id) DO UPDATE SET limitations_json=excluded.limitations_json`)
-        .run(podId, canonical([limitation]));
+        .run(podId, canonical([...new Set([...limitations, limitation])]));
       this.service.db
         .prepare("UPDATE managed_pods SET state='review_required' WHERE pod_id=?")
         .run(podId);

@@ -95,6 +95,8 @@ it('returns validated tool-call SSE unchanged for the explicit agent transport',
   );
   expect(result.value).toBe(body);
   expect(result.consumedTokens).toBe(5010);
+  expect(agent.maximumPromptBytes).toBe(8 * 1024 * 1024);
+  expect(x.transport.maximumPromptBytes).toBe(128 * 1024);
 });
 it('returns a validated agent SSE transcript larger than the report wire bound', async () => {
   const x = setup();

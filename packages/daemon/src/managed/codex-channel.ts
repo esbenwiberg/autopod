@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs';
 import type { FollowUpEnvelope, ManagedPodRequest, Route } from '@autopod/shared';
-import type { ContainerManager } from '../interfaces/container-manager.js';
+import type { ContainerManager, ExecOptions, ExecResult } from '../interfaces/container-manager.js';
 import { canonical, sha256 } from './canonical.js';
 import { codexInput } from './codex-wire.js';
 import type { ManagedWorkerProviderChannel } from './runtime-composition.js';
@@ -18,12 +18,12 @@ worker.write_text(sys.argv[4]);os.chmod(worker,0o555)
 if len(sys.argv)>5 and sys.argv[5]:
  gh=worker_root/'gh';gh.write_text(sys.argv[5]);os.chmod(gh,0o555);(root/'github-enabled').touch()
 (root/'channel-closed').unlink(missing_ok=True)
-with open(os.devnull,'wb') as sink: subprocess.Popen(['python3',str(file),str(root),'4187',sys.argv[3]],stdin=subprocess.DEVNULL,stdout=sink,stderr=sink,start_new_session=True)
+with open(os.devnull,'wb') as sink: subprocess.Popen(['python3',str(file),str(root),'4187',sys.argv[3],sys.argv[6]],stdin=subprocess.DEVNULL,stdout=sink,stderr=sink,start_new_session=True)
 `;
 const READ = `import json,pathlib,sys
 root=pathlib.Path(sys.argv[1]);prefix=sys.argv[2];p=root/(prefix+'request.json');response=root/(prefix+'response.json')
 if p.exists():
- if p.stat().st_size>270000: raise RuntimeError('size')
+ if p.stat().st_size>int(sys.argv[3])*6+2048: raise RuntimeError('size')
  request=json.loads(p.read_text())
  if not response.exists() or json.loads(response.read_text()).get('ticket')!=request['ticket']:print(p.read_text())
 `;
@@ -38,18 +38,30 @@ else:
  with temp.open('w') as f:json.dump(value,f,ensure_ascii=False);f.flush();os.fsync(f.fileno())
  os.replace(temp,p)
 `;
-const SEND = `import json,os,pathlib,re,sys
+const SEND = `import hashlib,json,os,pathlib,re,sys
 root=pathlib.Path(sys.argv[1]);key=sys.argv[2];raw=sys.argv[3]
 if not re.fullmatch(r'[A-Za-z0-9_-]{1,200}',key):raise RuntimeError('key')
 value=json.loads(raw)
 if not isinstance(value,dict) or set(value)!=set(['schemaVersion','dispatcherAttemptId','grantId','grantRevision','message']):raise RuntimeError('envelope')
-p=root/('followup-'+key+'.json');temp=root/('followup-'+key+'.tmp')
+p=root/('followup-'+key+'.json');temp=root/('followup-'+key+'.tmp');ready=root/('followup-'+key+'.ready');ready_temp=root/('followup-'+key+'.ready.tmp')
 if p.exists():
  if json.loads(p.read_text())!=value:raise RuntimeError('replay-conflict')
 else:
  with temp.open('w') as f:json.dump(value,f,ensure_ascii=False,separators=(',',':'));f.flush();os.fsync(f.fileno())
  os.replace(temp,p)
+digest=hashlib.sha256(p.read_bytes()).hexdigest()
+if not ready.exists() or ready.read_text()!=digest:
+ with ready_temp.open('w') as f:f.write(digest);f.flush();os.fsync(f.fileno())
+ os.replace(ready_temp,ready)
 `;
+const FOLLOW_UP_FAILURES = [
+  ['permission denied', 'managed-codex-follow-up-permission'],
+  ['operation not permitted', 'managed-codex-follow-up-permission'],
+  ['no such file or directory', 'managed-codex-follow-up-state-missing'],
+  ['runtimeerror: key', 'managed-codex-follow-up-key-invalid'],
+  ['runtimeerror: envelope', 'managed-codex-follow-up-envelope-invalid'],
+  ['runtimeerror: replay-conflict', 'managed-codex-follow-up-replay-conflict'],
+] as const;
 /** Concrete container loopback -> root spool -> trusted exec -> attempt gateway channel.
  * Container egress must be denied; it carries no worker-held auth secret.
  */
@@ -58,6 +70,8 @@ export class ContainerCodexChannel implements ManagedWorkerProviderChannel {
   private readonly source: string;
   private readonly worker: string;
   private readonly githubCli: string;
+  private readonly maximumRequestBytes: number;
+  private readonly execTails = new Map<string, Promise<void>>();
   constructor(
     private readonly manager: ContainerManager,
     route: Route,
@@ -69,6 +83,7 @@ export class ContainerCodexChannel implements ManagedWorkerProviderChannel {
     } = {},
   ) {
     this.route = structuredClone(route);
+    this.maximumRequestBytes = options.mode === 'agent' ? 8 * 1024 * 1024 : 128 * 1024;
     this.source = readFileSync(new URL('./runtime/codex_channel.py', import.meta.url), 'utf8');
     this.worker = readFileSync(
       new URL(
@@ -82,6 +97,26 @@ export class ContainerCodexChannel implements ManagedWorkerProviderChannel {
       : '';
     if (!Number.isSafeInteger(maximumTokens) || (maximumTokens !== 0 && maximumTokens < 2))
       throw new Error('managed-codex-budget-invalid');
+  }
+  private async execBound(
+    runtimeRef: string,
+    command: string[],
+    options?: ExecOptions,
+  ): Promise<ExecResult> {
+    const prior = this.execTails.get(runtimeRef) ?? Promise.resolve();
+    let release = () => {};
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const tail = prior.catch(() => {}).then(() => gate);
+    this.execTails.set(runtimeRef, tail);
+    await prior.catch(() => {});
+    try {
+      return await this.manager.execInContainer(runtimeRef, command, options);
+    } finally {
+      release();
+      if (this.execTails.get(runtimeRef) === tail) this.execTails.delete(runtimeRef);
+    }
   }
   async preflight(request: ManagedPodRequest) {
     if (canonical(this.route) !== canonical(request.route) || request.route.runtime !== 'codex')
@@ -113,12 +148,55 @@ export class ContainerCodexChannel implements ManagedWorkerProviderChannel {
   async send(runtimeRef: string, stateRoot: string, message: FollowUpEnvelope, key: string) {
     if (!/^\/run\/dispatcher-managed-[A-Za-z0-9-]+$/.test(stateRoot))
       throw new Error('managed-codex-follow-up-binding');
-    const result = await this.manager.execInContainer(
-      runtimeRef,
-      ['python3', '-c', SEND, stateRoot, key, canonical(message)],
-      { user: 'root' },
-    );
-    if (result.exitCode !== 0) throw new Error('managed-codex-follow-up-unavailable');
+    let failure = 'managed-codex-follow-up-transport-error';
+    for (let attempt = 0; attempt < 5; attempt++) {
+      try {
+        if (this.manager.writeManagedControl) {
+          try {
+            await this.manager.writeManagedControl(runtimeRef, stateRoot, key, canonical(message));
+            return;
+          } catch (error) {
+            if (
+              error instanceof Error &&
+              error.message === 'managed-control-file-channel-unavailable'
+            ) {
+              if (this.route.executionTarget === 'sandbox')
+                throw new Error('managed-codex-follow-up-file-capability-missing');
+            } else throw error;
+          }
+        } else if (this.route.executionTarget === 'sandbox') {
+          throw new Error('managed-codex-follow-up-file-capability-missing');
+        }
+        const result = await this.execBound(
+          runtimeRef,
+          ['python3', '-c', SEND, stateRoot, key, canonical(message)],
+          { user: 'root' },
+        );
+        if (result.exitCode === 0) return;
+        const stderr = result.stderr.toLowerCase();
+        failure =
+          FOLLOW_UP_FAILURES.find(([pattern]) => stderr.includes(pattern))?.[1] ??
+          'managed-codex-follow-up-command-exit';
+      } catch (error) {
+        // The sandbox data plane can transiently reject a short control exec
+        // while another bounded observer exec completes. SEND is key-idempotent.
+        const message = error instanceof Error ? error.message : '';
+        failure =
+          /^managed-codex-follow-up-file-(payload|ready)-(http-(400|401|403|404|409|429|500|502|503|504)|other)$/.test(
+            message,
+          ) ||
+          /^managed-codex-follow-up-file-(binding|key|size)-invalid$/.test(message) ||
+          message === 'managed-codex-follow-up-file-capability-missing' ||
+          (this.route.executionTarget === 'sandbox' &&
+            message === 'managed-codex-follow-up-file-unknown')
+            ? message
+            : this.route.executionTarget === 'sandbox'
+              ? 'managed-codex-follow-up-file-unknown'
+              : 'managed-codex-follow-up-transport-error';
+      }
+      if (attempt < 4) await new Promise((resolve) => setTimeout(resolve, 100 * (attempt + 1)));
+    }
+    throw new Error(failure);
   }
   async attach(
     binding: Parameters<ManagedWorkerProviderChannel['attach']>[0],
@@ -129,7 +207,7 @@ export class ContainerCodexChannel implements ManagedWorkerProviderChannel {
     )
       throw new Error('managed-codex-channel-binding');
     const exec = async (code: string, ...args: string[]) => {
-      const result = await this.manager.execInContainer(
+      const result = await this.execBound(
         binding.runtimeRef,
         ['python3', '-c', code, binding.stateRoot, ...args],
         { user: 'root' },
@@ -142,16 +220,9 @@ export class ContainerCodexChannel implements ManagedWorkerProviderChannel {
       ['codex', 'exec', '--help'],
       { user: 'root' },
     );
-    const resumeCapability = await this.manager.execInContainer(
-      binding.runtimeRef,
-      ['codex', 'exec', 'resume', '--help'],
-      { user: 'root' },
-    );
     if (
       capability.exitCode !== 0 ||
-      !['--output-last-message', '--sandbox'].every((flag) => capability.stdout.includes(flag)) ||
-      resumeCapability.exitCode !== 0 ||
-      !['--last', '--output-last-message'].every((flag) => resumeCapability.stdout.includes(flag))
+      !['--output-last-message', '--sandbox'].every((flag) => capability.stdout.includes(flag))
     )
       throw new Error('managed-codex-cli-incompatible');
     await exec(
@@ -160,6 +231,7 @@ export class ContainerCodexChannel implements ManagedWorkerProviderChannel {
       String(this.options.mode === 'agent' ? (this.options.maximumDurationSeconds ?? 3600) : 180),
       this.worker,
       this.githubCli,
+      String(this.maximumRequestBytes),
     );
     for (let attempt = 0; attempt < 30; attempt++) {
       const ready = await exec(
@@ -176,14 +248,14 @@ export class ContainerCodexChannel implements ManagedWorkerProviderChannel {
       if (stopped || activeProvider) return;
       activeProvider = true;
       try {
-        const raw = await exec(READ, 'channel-');
+        const raw = await exec(READ, 'channel-', String(this.maximumRequestBytes));
         if (!raw.trim() || stopped) return;
         const request = JSON.parse(raw) as { digest: string; body: string; ticket: string };
         if (
           typeof request.ticket !== 'string' ||
           !/^[a-f0-9-]{36}$/.test(request.ticket) ||
           typeof request.body !== 'string' ||
-          Buffer.byteLength(request.body) > 128 * 1024 ||
+          Buffer.byteLength(request.body) > this.maximumRequestBytes ||
           request.digest !== sha256(request.body).slice(7)
         )
           throw new Error('managed-codex-request-invalid');
@@ -215,7 +287,7 @@ export class ContainerCodexChannel implements ManagedWorkerProviderChannel {
       if (stopped || activeGitHub || !this.options.githubRead || !binding.invokeGitHub) return;
       activeGitHub = true;
       try {
-        const raw = await exec(READ, 'github-');
+        const raw = await exec(READ, 'github-', String(this.maximumRequestBytes));
         if (!raw.trim() || stopped) return;
         const request = JSON.parse(raw) as { digest: string; body: string; ticket: string };
         if (request.digest !== sha256(request.body).slice(7))

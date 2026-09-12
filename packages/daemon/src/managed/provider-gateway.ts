@@ -5,6 +5,8 @@ import { digest } from './canonical.js';
 import type { ManagedPodService } from './managed-service.js';
 import { ManagedQuotaBroker } from './quota-broker.js';
 
+const MAXIMUM_PROVIDER_PROMPT_BYTES = 8 * 1024 * 1024;
+
 /** Trusted host-side entrypoint, never an unscoped public provider proxy. */
 export class ManagedProviderGateway {
   private closed = false;
@@ -21,7 +23,7 @@ export class ManagedProviderGateway {
     if (
       !Number.isSafeInteger(this.maximumPromptBytes) ||
       this.maximumPromptBytes < 1 ||
-      this.maximumPromptBytes > 128 * 1024
+      this.maximumPromptBytes > MAXIMUM_PROVIDER_PROMPT_BYTES
     )
       throw new Error('managed-provider-input-limit-invalid');
     if (
