@@ -217,6 +217,7 @@ if not stat.S_ISDIR(actual.st_mode) or actual.st_uid!=0 or actual.st_mode & 0o02
       if (result.exitCode !== 0) throw new Error('managed-supervisor-provisioning-failed');
     };
     const grant = request.effectiveGrant;
+    const requiresQuotaReceipt = 'maxTokens' in grant.budget;
     await write('supervisor.py', this.supervisorSource);
     await write(
       'launch.json',
@@ -230,7 +231,7 @@ if not stat.S_ISDIR(actual.st_mode) or actual.st_uid!=0 or actual.st_mode & 0o02
         ...('maxTokens' in grant.budget
           ? { maxTokens: grant.budget.maxTokens }
           : { budgetMode: 'request-time' }),
-        requireQuotaReceipt: true,
+        requireQuotaReceipt: requiresQuotaReceipt,
         workerUid: 1000,
         workerGid: 1000,
         environment: { PATH: '/usr/local/bin:/usr/bin:/bin', HOME: '/tmp', TMPDIR: '/tmp' },
@@ -238,7 +239,7 @@ if not stat.S_ISDIR(actual.st_mode) or actual.st_uid!=0 or actual.st_mode & 0o02
         argv: [...boundary.command, '--', request.task.objective],
       }),
     );
-    await boundary.attachQuota(podId, runtimeRef, root, request);
+    if (requiresQuotaReceipt) await boundary.attachQuota(podId, runtimeRef, root, request);
     const result = await boundary.manager.execInContainer(
       runtimeRef,
       ['python3', `${root}/supervisor.py`, root, '--detach'],
