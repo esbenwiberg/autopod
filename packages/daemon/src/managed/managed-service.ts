@@ -31,6 +31,7 @@ export interface ManagedRuntimePort {
     exitCode?: number;
     limitation?:
       | 'agent-request-limit-reached'
+      | 'agent-quota-feed-unavailable'
       | 'agent-auto-compaction-unsupported'
       | 'agent-context-window-exceeded'
       | 'agent-tool-permission-denied'

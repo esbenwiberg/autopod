@@ -13,6 +13,9 @@ import subprocess
 import sys
 import time
 
+QUOTA_LEASE_SECONDS = 30
+QUOTA_FUTURE_SKEW_SECONDS = 5
+
 
 def atomic(path, value):
     temporary = path.with_suffix('.tmp')
@@ -59,10 +62,13 @@ def supervise(root, clock=time.time):
                                stdout=stdout, stderr=stderr, preexec_fn=isolate)
     state.update(state='running', pid=process.pid)
     atomic(receipt, state)
+    quota_grace_started_at = clock()
+    last_valid_quota_at = None
     reason = 'exited'
     while process.poll() is None:
         reason = None
-        if clock() >= deadline:
+        now = clock()
+        if now >= deadline:
             reason = 'expired'
         if (root / 'revoked').exists():
             reason = 'revoked'
@@ -70,14 +76,29 @@ def supervise(root, clock=time.time):
         if spec['requireQuotaReceipt']:
             try:
                 quota = json.loads((root / 'quota.json').read_text())
-                if quota['specDigest'] != spec['specDigest'] or clock() - quota['observedAt'] > 5:
+                if quota['specDigest'] != spec['specDigest']:
                     reason = 'quota-unavailable'
-                if quota.get('revoked'):
-                    reason = 'revoked'
-                state['consumedTokens'] = max(state['consumedTokens'], quota['consumedTokens'])
-                if spec.get('budgetMode') != 'request-time' and state['consumedTokens'] >= spec['maxTokens']:
-                    reason = 'budget-exhausted'
-            except (OSError, ValueError, KeyError):
+                else:
+                    observed_at = quota['observedAt']
+                    consumed_tokens = quota['consumedTokens']
+                    if (not isinstance(observed_at, (int, float)) or isinstance(observed_at, bool) or
+                            observed_at < 0 or observed_at > now + QUOTA_FUTURE_SKEW_SECONDS or
+                            not isinstance(consumed_tokens, int) or isinstance(consumed_tokens, bool) or
+                            consumed_tokens < 0):
+                        raise ValueError('invalid quota receipt')
+                    last_valid_quota_at = max(last_valid_quota_at or observed_at, observed_at)
+                    state['consumedTokens'] = max(state['consumedTokens'], consumed_tokens)
+                    if quota.get('revoked'):
+                        reason = 'revoked'
+                    if (spec.get('budgetMode') != 'request-time' and
+                            state['consumedTokens'] >= spec['maxTokens']):
+                        reason = 'budget-exhausted'
+            except (OSError, TypeError, ValueError, KeyError):
+                # File publication is remote for sandbox workers. Keep the last
+                # trusted lease through a bounded transient read/write failure.
+                pass
+            lease_at = last_valid_quota_at if last_valid_quota_at is not None else quota_grace_started_at
+            if reason is None and now - lease_at > QUOTA_LEASE_SECONDS:
                 reason = 'quota-unavailable'
         if reason:
             try:

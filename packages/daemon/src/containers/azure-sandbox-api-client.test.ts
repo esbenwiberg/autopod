@@ -842,6 +842,43 @@ describe('AzureSandboxApiClient', () => {
     expect(requests.every((request) => request.url.includes('/sandboxes/sbx-1/files'))).toBe(true);
   });
 
+  it('aborts a bounded file write when the data plane stops responding', async () => {
+    vi.useFakeTimers();
+    try {
+      const fetch = vi.fn((_input: string | URL, init?: RequestInit) => {
+        return new Promise<Response>((_resolve, reject) => {
+          init?.signal?.addEventListener(
+            'abort',
+            () => reject(new DOMException('aborted', 'AbortError')),
+            { once: true },
+          );
+        });
+      });
+      const client = new AzureSandboxApiClient(
+        {
+          subscriptionId: 'sub-1',
+          resourceGroup: 'rg-1',
+          location: 'swedencentral',
+          sandboxGroup: 'autopod-spike',
+          credential,
+          fetch,
+          assumeGroupExists: true,
+        },
+        logger,
+      );
+
+      const write = client.writeFile('sbx-1', '/run/dispatcher-pod/quota.json', Buffer.from('{}'), {
+        timeoutMs: 3_000,
+      });
+      const rejection = expect(write).rejects.toThrow('timed out after 3000ms');
+      await vi.advanceTimersByTimeAsync(3_000);
+      await rejection;
+      expect(fetch).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('does not retry a non-empty data-plane 403', async () => {
     const { client, requests } = makeClient([{ status: 403, body: { error: 'RBAC denied' } }], {
       retry: { maxDelayMs: 0 },

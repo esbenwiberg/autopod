@@ -84,6 +84,9 @@ it('retries a transient sandbox control rejection instead of abandoning the quot
       handle.podId,
       `/run/dispatcher-${handle.podId}/quota.json`,
     ]);
+    expect((writeFile.mock.calls[0] as unknown as [string, string, Buffer, unknown])[3]).toEqual({
+      timeoutMs: 3_000,
+    });
     expect(exec).not.toHaveBeenCalled();
   } finally {
     feed.close();

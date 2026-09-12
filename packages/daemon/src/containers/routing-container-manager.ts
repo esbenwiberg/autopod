@@ -5,6 +5,7 @@ import type {
   ContainerSpawnConfig,
   DirectoryExtractionOptions,
   ExecOptions,
+  FileWriteOptions,
 } from '../interfaces/container-manager.js';
 
 export interface RoutingContainerManagerOptions {
@@ -44,8 +45,16 @@ export class RoutingContainerManager implements ContainerManager {
     return this.delegate(containerId).start(containerId);
   }
 
-  writeFile(containerId: string, path: string, content: string | Buffer): Promise<void> {
-    return this.delegate(containerId).writeFile(containerId, path, content);
+  writeFile(
+    containerId: string,
+    path: string,
+    content: string | Buffer,
+    options?: FileWriteOptions,
+  ): Promise<void> {
+    const manager = this.delegate(containerId);
+    return options
+      ? manager.writeFile(containerId, path, content, options)
+      : manager.writeFile(containerId, path, content);
   }
 
   writeManagedControl(

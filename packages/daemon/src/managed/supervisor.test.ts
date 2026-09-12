@@ -4,7 +4,14 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { expect, it } from 'vitest';
 
-it.each(['expired', 'revoked', 'budget-exhausted', 'request-time-expired', 'request-time-stale'])(
+it.each([
+  'expired',
+  'revoked',
+  'budget-exhausted',
+  'request-time-expired',
+  'request-time-transient',
+  'request-time-stale',
+])(
   'supervisor enforces %s after its caller exits, with no duplicate launch',
   async (reason) => {
     const root = await realpath(await mkdtemp(path.join(tmpdir(), 'managed-supervisor-')));
@@ -18,9 +25,8 @@ it.each(['expired', 'revoked', 'budget-exhausted', 'request-time-expired', 'requ
     };
     const now = 100;
     const spec = {
-      // Isolate expiry while the original five-second quota observation is fresh.
-      expiresAt: now + (reason === 'request-time-expired' ? 3 : 30),
-      maxDurationSeconds: 30,
+      expiresAt: now + (reason === 'request-time-expired' ? 3 : 60),
+      maxDurationSeconds: 60,
       specDigest: 'fixture-digest',
       ...(reason.startsWith('request-time') ? { budgetMode: 'request-time' } : { maxTokens: 10 }),
       requireQuotaReceipt: reason === 'budget-exhausted' || reason.startsWith('request-time'),
@@ -67,9 +73,30 @@ r=pathlib.Path(sys.argv[2]);runpy.run_path(sys.argv[1])['supervise'](r,lambda:fl
         expect(
           JSON.parse(await readFile(path.join(root, 'execution.json'), 'utf8')).observedExit,
         ).toBe(false);
-        await replaceFixtureFile('clock', String(now + (reason === 'request-time-stale' ? 6 : 4)));
+        if (reason === 'request-time-transient') {
+          await replaceFixtureFile('quota.json', '{');
+          await replaceFixtureFile('clock', String(now + 6));
+          await new Promise((resolve) => setTimeout(resolve, 150));
+          expect(
+            JSON.parse(await readFile(path.join(root, 'execution.json'), 'utf8')).observedExit,
+          ).toBe(false);
+          await replaceFixtureFile(
+            'quota.json',
+            JSON.stringify({
+              specDigest: spec.specDigest,
+              consumedTokens: 6000,
+              observedAt: now + 6,
+            }),
+          );
+          await writeFile(path.join(root, 'revoked'), 'true');
+        } else {
+          await replaceFixtureFile(
+            'clock',
+            String(now + (reason === 'request-time-stale' ? 31 : 4)),
+          );
+        }
       }
-      if (reason === 'expired') await replaceFixtureFile('clock', String(now + 31));
+      if (reason === 'expired') await replaceFixtureFile('clock', String(now + 61));
       if (reason === 'revoked') await writeFile(path.join(root, 'revoked'), 'true');
       if (reason === 'budget-exhausted')
         await replaceFixtureFile(
@@ -87,9 +114,11 @@ r=pathlib.Path(sys.argv[2]);runpy.run_path(sys.argv[1])['supervise'](r,lambda:fl
         state:
           reason === 'request-time-stale'
             ? 'quota-unavailable'
-            : reason === 'request-time-expired'
-              ? 'expired'
-              : reason,
+            : reason === 'request-time-transient'
+              ? 'revoked'
+              : reason === 'request-time-expired'
+                ? 'expired'
+                : reason,
       });
       expect(await readFile(path.join(root, 'count'), 'utf8')).toBe('1');
     } finally {

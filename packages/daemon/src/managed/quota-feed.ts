@@ -31,7 +31,9 @@ export class ManagedQuotaFeed {
           if (request.route?.executionTarget === 'sandbox') {
             // Azure rejects overlapping buffered exec operations. Keep the
             // supervisor lease independent of the channel's control-exec lane.
-            await this.manager.writeFile(runtimeRef, `${stateRoot}/quota.json`, payload);
+            await this.manager.writeFile(runtimeRef, `${stateRoot}/quota.json`, payload, {
+              timeoutMs: 3_000,
+            });
             return;
           }
           const result = await this.manager.execInContainer(

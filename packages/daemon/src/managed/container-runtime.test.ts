@@ -265,6 +265,30 @@ it('projects only an allowlisted unsupported auto-compaction diagnostic after ex
   });
 });
 
+it('projects a trusted quota-feed lease failure after the supervisor stops the worker', async () => {
+  const f = fixture();
+  await f.runtime.ensure('pod-one', f.request, () => {});
+  f.exec.mockResolvedValueOnce({
+    exitCode: 0,
+    stdout: JSON.stringify({
+      observedExit: true,
+      state: 'quota-unavailable',
+      consumedTokens: 12,
+      specDigest: f.request.executionSpecDigest,
+      exitCode: -15,
+    }),
+    stderr: '',
+  });
+  f.exec.mockResolvedValueOnce({ exitCode: 1, stdout: '', stderr: '' });
+
+  await expect(f.runtime.observe('container-one')).resolves.toEqual({
+    state: 'stopped',
+    consumedTokens: 12,
+    exitCode: -15,
+    limitation: 'agent-quota-feed-unavailable',
+  });
+});
+
 it.each([
   ['context-window-exceeded', 'agent-context-window-exceeded'],
   ['tool-permission-denied', 'agent-tool-permission-denied'],

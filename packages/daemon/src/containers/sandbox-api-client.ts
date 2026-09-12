@@ -88,6 +88,10 @@ export interface SandboxFileInfo {
   mode?: string;
 }
 
+export interface SandboxFileWriteOptions {
+  timeoutMs?: number;
+}
+
 export interface SandboxDirListing {
   path: string;
   entries: SandboxFileInfo[];
@@ -205,7 +209,12 @@ export interface SandboxApiClient {
     sandboxId: string,
     options: SandboxTerminalOptions,
   ): Promise<SandboxTerminalSession>;
-  writeFile(sandboxId: string, path: string, content: Buffer): Promise<void>;
+  writeFile(
+    sandboxId: string,
+    path: string,
+    content: Buffer,
+    options?: SandboxFileWriteOptions,
+  ): Promise<void>;
   readFile(sandboxId: string, path: string): Promise<Buffer>;
   listFiles(sandboxId: string, path: string): Promise<SandboxDirListing>;
   statFile?(sandboxId: string, path: string): Promise<SandboxFileInfo>;
