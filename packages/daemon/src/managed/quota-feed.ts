@@ -19,11 +19,21 @@ export class ManagedQuotaFeed {
     const row = this.service.row(installation, podId);
     if (row.runtime_ref !== runtimeRef || stateRoot !== `/run/dispatcher-${podId}`)
       throw new Error('managed-quota-feed-binding');
+    const request = JSON.parse(row.request_json) as {
+      route?: { executionTarget?: string };
+    };
     const write = async () => {
       const snapshot = new ManagedQuotaBroker(this.service).snapshot(installation, podId);
+      const payload = canonical(snapshot);
       let failure: unknown = new Error('managed-quota-feed-unavailable');
       for (let attempt = 0; attempt < 5; attempt++) {
         try {
+          if (request.route?.executionTarget === 'sandbox') {
+            // Azure rejects overlapping buffered exec operations. Keep the
+            // supervisor lease independent of the channel's control-exec lane.
+            await this.manager.writeFile(runtimeRef, `${stateRoot}/quota.json`, payload);
+            return;
+          }
           const result = await this.manager.execInContainer(
             runtimeRef,
             [
@@ -36,7 +46,7 @@ with os.fdopen(fd,'w') as f:f.write(sys.argv[2]);f.flush();os.fsync(f.fileno())
 os.replace(temporary,p)
 `,
               `${stateRoot}/quota.json`,
-              canonical(snapshot),
+              payload,
             ],
             { user: 'root' },
           );
