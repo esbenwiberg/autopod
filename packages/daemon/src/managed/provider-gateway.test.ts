@@ -74,6 +74,46 @@ it('rejects a transport response bound above the eight MiB channel ceiling', asy
     'managed-provider-output-limit-invalid',
   );
 });
+it('enforces a transport-declared provider request deadline with a bounded abort reason', async () => {
+  const x = await setup();
+  x.gateway.close();
+  let reason: unknown;
+  const transport: BoundedProviderTransport = {
+    ...x.transport,
+    maximumRequestDurationMs: 10,
+    generate: vi.fn(async (_route, _prompt, _tokens, signal) => {
+      await new Promise<void>((_resolve, reject) => {
+        signal.addEventListener(
+          'abort',
+          () => {
+            reason = signal.reason;
+            reject(new Error('aborted'));
+          },
+          { once: true },
+        );
+      });
+      throw new Error('unreachable');
+    }),
+  };
+  const gateway = new ManagedProviderGateway(x.service, transport);
+  gateways.push(gateway);
+
+  await expect(
+    gateway.invoke('installation', x.handle.podId, 1, 'deadline', 'Read README', 100),
+  ).rejects.toThrow('managed-provider-attempt-unavailable');
+  expect(reason).toBe('managed-provider-timeout');
+});
+it('rejects an unbounded transport-declared provider request deadline', async () => {
+  const x = await setup();
+  x.gateway.close();
+  expect(
+    () =>
+      new ManagedProviderGateway(x.service, {
+        ...x.transport,
+        maximumRequestDurationMs: 30 * 60 * 1000 + 1,
+      }),
+  ).toThrow('managed-provider-duration-limit-invalid');
+});
 it('admits an explicitly bounded agent request above the old one MiB ceiling', async () => {
   const x = await setup();
   x.gateway.close();

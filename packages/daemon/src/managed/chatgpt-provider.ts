@@ -5,7 +5,12 @@ import type {
   ManagedProviderFailureDiagnostic,
   ProviderCredential,
 } from './bounded-provider.js';
-import { ManagedProviderFailure, responseSchema } from './bounded-provider.js';
+import {
+  MANAGED_PROVIDER_ABORT_AUTHORITY,
+  MANAGED_PROVIDER_ABORT_TIMEOUT,
+  ManagedProviderFailure,
+  responseSchema,
+} from './bounded-provider.js';
 import { canonical, digest } from './canonical.js';
 import { codexInput, codexSse } from './codex-wire.js';
 
@@ -42,6 +47,8 @@ const failureReasons = new Set([
   'usage',
   'artifact-size',
   'output-size',
+  'timeout',
+  'authority',
 ]);
 const REPORT_MAXIMUM_RESPONSE_BYTES = 64 * 1024;
 // Agent SSE includes tool results and provider-managed reasoning state. Keep it
@@ -54,6 +61,7 @@ export class ChatGptReportTransport implements BoundedProviderTransport {
   readonly budgetMode = 'request-time' as const;
   readonly maximumPromptBytes: number;
   readonly maximumResponseBytes: number;
+  readonly maximumRequestDurationMs: number;
   readonly bindingDigest: string;
   private readonly route: Route;
   constructor(
@@ -70,12 +78,16 @@ export class ChatGptReportTransport implements BoundedProviderTransport {
     this.maximumPromptBytes = mode === 'agent' ? AGENT_MAXIMUM_PROMPT_BYTES : 128 * 1024;
     this.maximumResponseBytes =
       mode === 'agent' ? AGENT_MAXIMUM_RESPONSE_BYTES : REPORT_MAXIMUM_RESPONSE_BYTES;
+    // Agent turns can include several tool calls before the provider completes.
+    // The enclosing grant still supplies the stricter remaining-attempt deadline.
+    this.maximumRequestDurationMs = mode === 'agent' ? 15 * 60 * 1000 : 3 * 60 * 1000;
     this.bindingDigest = digest({
       route,
       chatgptAccountId,
       endpoint: 'https://chatgpt.com/backend-api/codex/responses',
       protocol: mode === 'agent' ? 'codex-agent-request-time-v2' : 'codex-report-request-time-v1',
       maximumResponseBytes: this.maximumResponseBytes,
+      maximumRequestDurationMs: this.maximumRequestDurationMs,
     });
   }
   preflight(route: Route) {
@@ -312,10 +324,18 @@ export class ChatGptReportTransport implements BoundedProviderTransport {
       return { value, consumedTokens: result.usage.total_tokens };
     } catch (error) {
       // Never publish payloads, tokens, provider messages or schema issue values.
+      const abortReason = signal.aborted
+        ? signal.reason === MANAGED_PROVIDER_ABORT_TIMEOUT
+          ? 'timeout'
+          : signal.reason === MANAGED_PROVIDER_ABORT_AUTHORITY
+            ? 'authority'
+            : undefined
+        : undefined;
       const reason =
-        error instanceof Error && failureReasons.has(error.message)
+        abortReason ??
+        (error instanceof Error && failureReasons.has(error.message)
           ? (error.message as ChatGptFailureDiagnostic['reason'])
-          : 'unclassified';
+          : 'unclassified');
       const diagnostic = { phase, reason, httpStatus };
       try {
         this.onFailure?.(diagnostic);
