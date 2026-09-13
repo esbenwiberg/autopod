@@ -1449,7 +1449,7 @@ export const ManagedPodResultSchema = z
     revoked: z.boolean(),
     observedExit: z.boolean(),
     cleanup: z.enum(['not-requested', 'requested', 'observed']),
-    providerRequests: z.number().int().min(0).max(100).optional(),
+    providerRequests: z.number().int().min(0).max(500).optional(),
     consumedTokens: z.number().int().min(0).max(9007199254740991).optional(),
     tokenUsageKnown: z.boolean().optional(),
     exitCode: z.number().int().min(-2147483648).max(2147483647).optional(),

@@ -1679,7 +1679,7 @@
         "providerRequests": {
           "type": "integer",
           "minimum": 0,
-          "maximum": 100
+          "maximum": 500
         },
         "consumedTokens": {
           "type": "integer",

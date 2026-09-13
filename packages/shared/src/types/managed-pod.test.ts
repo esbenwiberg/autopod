@@ -51,4 +51,12 @@ describe('managed pod v1 producer contract', () => {
     grant.budget = structuredClone(profile.budget);
     expect(protocol.ManagedPodRequestSchema.safeParse(request).success).toBe(true);
   });
+  it('accepts result telemetry above the old 100-request ceiling', () => {
+    const example = examples.ManagedObservation;
+    expect(example).toBeDefined();
+    if (!example) throw new Error('missing-managed-observation-example');
+    const observation = structuredClone(example);
+    (observation.result as Record<string, unknown>).providerRequests = 500;
+    expect(protocol.ManagedObservationSchema.safeParse(observation).success).toBe(true);
+  });
 });
