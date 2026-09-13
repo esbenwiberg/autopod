@@ -242,8 +242,17 @@ export class ManagedGitBroker {
     // omit that final mechanical step. Capture the isolated workspace deterministically
     // before freezing so validated work is not discarded merely because `git commit`
     // was skipped. Hooks, ambient config/credentials and commit signing stay disabled.
-    if (await managedGit(cwd, ['status', '--porcelain', '--untracked-files=all'])) {
-      await managedGit(cwd, ['add', '--all', '--', '.']);
+    // Azure Sandbox file extraction does not preserve executable bits. Ignore
+    // that transport-only drift while retaining the base commit's file modes.
+    const statusArgs = [
+      '-c',
+      'core.filemode=false',
+      'status',
+      '--porcelain',
+      '--untracked-files=all',
+    ];
+    if (await managedGit(cwd, statusArgs)) {
+      await managedGit(cwd, ['-c', 'core.filemode=false', 'add', '--all', '--', '.']);
       await managedGit(cwd, [
         '-c',
         `user.name=${MANAGED_RECOVERY_COMMIT_IDENTITY.name}`,
@@ -256,8 +265,7 @@ export class ManagedGitBroker {
         '-m',
         MANAGED_RECOVERY_COMMIT_MESSAGE,
       ]);
-      if (await managedGit(cwd, ['status', '--porcelain', '--untracked-files=all']))
-        throw new Error('source-candidate-dirty');
+      if (await managedGit(cwd, statusArgs)) throw new Error('source-candidate-dirty');
     }
     const newCommit = await managedGit(cwd, ['rev-parse', '--verify', 'HEAD^{commit}']);
     await managedGit(cwd, ['merge-base', '--is-ancestor', binding.baseCommit, newCommit]);

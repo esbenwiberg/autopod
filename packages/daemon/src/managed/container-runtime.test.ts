@@ -218,7 +218,7 @@ it('syncs a stopped sandbox source workspace back before source freezing', async
     'container-one',
     '/repositories/fixture-repo',
     '/fixture/repo',
-    ['node_modules'],
+    ['.git', 'node_modules'],
     expect.objectContaining({ assertCurrent: expect.any(Function) }),
   );
 });
