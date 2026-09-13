@@ -176,9 +176,16 @@ it('deterministically commits a successful worker dirty tree before freezing', a
     expect(frozen.newCommit).not.toBe(base);
     expect(frozen.expectedOldCommit).toBe('0'.repeat(40));
     expect(frozen.bundle.length).toBeGreaterThan(0);
-    expect(await managedGit(workspace, ['status', '--porcelain', '--untracked-files=all'])).toBe(
-      '',
-    );
+    expect(
+      await managedGit(workspace, [
+        '-c',
+        'core.filemode=false',
+        'status',
+        '--porcelain',
+        '--untracked-files=all',
+      ]),
+    ).toBe('');
+    expect(await managedGit(workspace, ['ls-tree', 'HEAD', 'tracked.txt'])).toContain('100644');
     expect(await managedGit(workspace, ['show', '-s', '--format=%an <%ae>%n%s', 'HEAD'])).toBe(
       'Autopod <autopod@autopod.local>\nchore: capture managed worker changes',
     );

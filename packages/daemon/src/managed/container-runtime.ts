@@ -425,7 +425,10 @@ if not stat.S_ISDIR(actual.st_mode) or actual.st_uid!=0 or actual.st_mode & 0o02
       ref,
       `/repositories/${repositoryId}`,
       destination,
-      ['node_modules'],
+      // The sandbox receives a copy of the repository, but the trusted host
+      // remains the sole owner of Git metadata and dependency caches. Mirroring
+      // either back can corrupt candidate creation or stage runtime-only files.
+      ['.git', 'node_modules'],
       { assertCurrent },
     );
   }
