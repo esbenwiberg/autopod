@@ -764,7 +764,7 @@ async function waitForJson(path: string): Promise<Record<string, unknown>> {
   throw new Error(`timed out waiting for ${path}`);
 }
 
-it('the Python loopback channel carries agent SSE above 64 KiB within its hard ceiling', async () => {
+it('the Python loopback channel carries agent SSE above one MiB within its hard ceiling', async () => {
   const root = mkdtempSync(join(tmpdir(), 'autopod-codex-channel-'));
   chmodSync(root, 0o700);
   const script = fileURLToPath(new URL('./runtime/codex_channel.py', import.meta.url));
@@ -778,7 +778,7 @@ it('the Python loopback channel carries agent SSE above 64 KiB within its hard c
       headers: { 'Content-Type': 'application/json' },
     });
     const request = await waitForJson(join(root, 'channel-request.json'));
-    const body = 'x'.repeat(70 * 1024);
+    const body = 'x'.repeat(1024 * 1024 + 1);
     const responsePath = join(root, 'channel-response.json');
     const temporary = `${responsePath}.fixture`;
     writeFileSync(
