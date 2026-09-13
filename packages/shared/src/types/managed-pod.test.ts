@@ -19,17 +19,36 @@ describe('managed pod v1 producer contract', () => {
     });
   }
   it('rejects credential values in allowed text fields', () => {
+    const example = examples.ManagedPodRequest;
+    expect(example).toBeDefined();
+    if (!example) throw new Error('missing-managed-pod-request-example');
     for (const objective of [
       'Bearer synthetic-token',
       'ghp_synthetic0000',
       'https://user:password@example.test/repo',
     ]) {
-      const request = structuredClone(examples.ManagedPodRequest!);
+      const request = structuredClone(example);
       (request.task as Record<string, unknown>).objective = objective;
       expect(protocol.ManagedPodRequestSchema.safeParse(request).success).toBe(false);
       expect(() => parseManagedRecord('ManagedPodRequestSchema', request)).toThrow(
         'invalid-managed-contract',
       );
     }
+  });
+  it('accepts a duration-bounded agent grant above the old 100-request ceiling', () => {
+    const example = examples.ManagedPodRequest;
+    expect(example).toBeDefined();
+    if (!example) throw new Error('missing-managed-pod-request-example');
+    const request = structuredClone(example);
+    const profile = request.profileSnapshot as Record<string, unknown>;
+    const grant = request.effectiveGrant as Record<string, unknown>;
+    profile.budget = {
+      mode: 'request-time',
+      expiresAt: 4102444800,
+      maxProviderRequests: 500,
+      maxDurationSeconds: 1800,
+    };
+    grant.budget = structuredClone(profile.budget);
+    expect(protocol.ManagedPodRequestSchema.safeParse(request).success).toBe(true);
   });
 });
