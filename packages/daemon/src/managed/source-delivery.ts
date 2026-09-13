@@ -1,6 +1,7 @@
 import {
   type FinalizeSourceDeliveryRequest,
   type FinalizeSourceDeliveryResponse,
+  type ManagedPodEvent,
   type ManagedPodRequest,
   type SourceCandidateReceipt,
   type SourceDeliveryReceipt,
@@ -13,6 +14,7 @@ import type { DraftBroker, DraftRecord, ManagedGitBroker } from './source-git.js
 
 const without = (value: object, key: string) =>
   Object.fromEntries(Object.entries(value).filter(([field]) => field !== key));
+const SOURCE_FINALIZATION_GRACE_SECONDS = 15 * 60;
 interface Operation {
   request_digest: string;
   phase: string;
@@ -117,10 +119,28 @@ export class ManagedSourceDelivery {
     request: FinalizeSourceDeliveryRequest,
   ): void {
     const row = this.service.row(installation, podId);
+    const grant = (JSON.parse(row.request_json) as ManagedPodRequest).effectiveGrant;
+    const deadline = Math.min(
+      grant.budget.expiresAt,
+      row.created_at + grant.budget.maxDurationSeconds,
+    );
+    const frozen = this.service.db
+      .prepare('SELECT event_json FROM managed_events WHERE pod_id=? AND event_key=?')
+      .get(podId, 'candidate-frozen') as { event_json: string } | undefined;
+    const frozenAt = frozen
+      ? (JSON.parse(frozen.event_json) as ManagedPodEvent).createdAt
+      : Number.POSITIVE_INFINITY;
+    const hardTokenLimitReached =
+      'maxTokens' in grant.budget && row.consumed_tokens >= grant.budget.maxTokens;
+    const verifiedFinalizeGrace =
+      row.observed_exit === 1 &&
+      !hardTokenLimitReached &&
+      frozenAt <= deadline &&
+      this.service.now() <= deadline + SOURCE_FINALIZATION_GRACE_SECONDS;
     if (
       row.revoked ||
       row.stop_requested ||
-      this.service.expired(row) ||
+      (this.service.expired(row) && !verifiedFinalizeGrace) ||
       row.grant_id !== request.grantId ||
       row.grant_revision !== request.grantRevision
     )

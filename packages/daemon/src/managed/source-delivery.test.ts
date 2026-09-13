@@ -13,6 +13,7 @@ import { type DraftRecord, ManagedGitBroker, ZERO_COMMIT } from './source-git.js
 async function sourceFixture(
   mode: 'branch' | 'draft-pr' = 'draft-pr',
   target: 'local' | 'sandbox' = 'local',
+  expiresAt = 4102444800,
 ) {
   const f = fixture();
   const root = mkdtempSync(path.join(tmpdir(), 'managed-source-'));
@@ -40,6 +41,8 @@ async function sourceFixture(
   request.route.executionTarget = target;
   request.profileSnapshot.route.executionTarget = target;
   request.effectiveGrant.route.executionTarget = target;
+  request.profileSnapshot.budget.expiresAt = expiresAt;
+  request.effectiveGrant.budget.expiresAt = expiresAt;
   request.outputs.source = {
     mode,
     repository: 'fixture-repo',
@@ -228,6 +231,50 @@ it.each(['verification', 'remote', 'base', 'branch', 'candidate', 'stale', 'revo
       if (kind === 'revoked') f.f.db.prepare('UPDATE managed_pods SET revoked=1').run();
       if (kind === 'expired') f.f.advance(4102444801);
       await expect(f.delivery.finalize('installation-one', f.handle.podId, r)).rejects.toThrow();
+      expect(await f.broker.remoteHead(f.broker.binding(f.candidate), f.candidate.head)).toBe(
+        ZERO_COMMIT,
+      );
+      expect(f.creates()).toBe(0);
+    } finally {
+      f.close();
+    }
+  },
+);
+it('allows a verified frozen candidate to finalize during the bounded post-expiry grace', async () => {
+  const f = await sourceFixture('draft-pr', 'local', 110);
+  try {
+    f.f.advance(111);
+    const result = await f.delivery.finalize('installation-one', f.handle.podId, f.finalize);
+    expect(result.status).toBe('delivered');
+    expect(f.creates()).toBe(1);
+    expect(await f.broker.remoteHead(f.broker.binding(f.candidate), f.candidate.head)).toBe(
+      f.candidate.newCommit,
+    );
+  } finally {
+    f.close();
+  }
+});
+it.each(['candidate-frozen-after-expiry', 'hard-token-limit-reached'])(
+  'does not extend source authority when %s',
+  async (kind) => {
+    const f = await sourceFixture('draft-pr', 'local', 110);
+    try {
+      if (kind === 'candidate-frozen-after-expiry') {
+        const stored = f.f.db
+          .prepare("SELECT event_json FROM managed_events WHERE event_key='candidate-frozen'")
+          .get() as { event_json: string };
+        const event = JSON.parse(stored.event_json) as { createdAt: number };
+        event.createdAt = 111;
+        f.f.db
+          .prepare("UPDATE managed_events SET event_json=? WHERE event_key='candidate-frozen'")
+          .run(JSON.stringify(event));
+      } else {
+        f.f.db.prepare('UPDATE managed_pods SET consumed_tokens=50000').run();
+      }
+      f.f.advance(111);
+      await expect(
+        f.delivery.finalize('installation-one', f.handle.podId, f.finalize),
+      ).rejects.toThrow('grant-inactive');
       expect(await f.broker.remoteHead(f.broker.binding(f.candidate), f.candidate.head)).toBe(
         ZERO_COMMIT,
       );
