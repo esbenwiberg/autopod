@@ -45,7 +45,7 @@ export class ManagedProviderGateway {
       this.maximumRequestDurationMs > 30 * 60 * 1000
     )
       throw new Error('managed-provider-duration-limit-invalid');
-    if (!Number.isSafeInteger(maximumRequests) || maximumRequests < 1 || maximumRequests > 100)
+    if (!Number.isSafeInteger(maximumRequests) || maximumRequests < 1 || maximumRequests > 500)
       throw new Error('managed-provider-request-limit-invalid');
     if (
       !service.db

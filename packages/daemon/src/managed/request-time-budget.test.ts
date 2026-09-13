@@ -48,6 +48,10 @@ it('observes usage above the old cap without inventing a token reservation, then
   );
   expect(x.transport.generate).toHaveBeenCalledTimes(1);
 });
+it('allows a duration-bounded agent gateway above the old 100-request ceiling', async () => {
+  const x = await setup(500);
+  expect(x.gateway.maximumRequests).toBe(500);
+});
 it('delivers the crossing response, then stops before another provider request', async () => {
   const x = await setup(2, 5000);
   expect(await x.call()).toEqual({ state: 'observed', value: 'report' });

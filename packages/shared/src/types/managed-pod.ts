@@ -111,7 +111,7 @@ export const RequestTimeBudgetSchema = z
   .object({
     mode: z.literal('request-time'),
     expiresAt: z.number().int().min(0).max(9007199254740991),
-    maxProviderRequests: z.number().int().min(1).max(100),
+    maxProviderRequests: z.number().int().min(1).max(500),
     maxObservedTokens: z.number().int().min(1).max(9007199254740991).optional(),
     maxDurationSeconds: z.number().int().min(1).max(3600),
   })
