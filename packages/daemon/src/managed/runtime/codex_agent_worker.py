@@ -146,6 +146,8 @@ with tempfile.TemporaryDirectory(prefix='managed-codex-') as temporary:
         'Do not use network access. Do not push, merge, publish, deploy, or access credentials. '
         f'Return the complete work product as your final response; the reviewed Codex launcher '
         f'captures that response at {output}. Do not edit that output path directly. '
+        'Keep every individual tool call input below 6 KiB. Split large patches and commands '
+        'into smaller calls before invoking tools. '
         + (f'For GitHub issue reads only, use the credential-free gh helper with --repo {args.github_repository}. '
            if args.github_repository else '')
         + ('Commit only the files you intentionally changed after required checks pass. '
