@@ -254,6 +254,35 @@ it('allows a verified frozen candidate to finalize during the bounded post-expir
     f.close();
   }
 });
+it('keeps an immutable verified candidate finalizable during a two-hour recovery window', async () => {
+  const f = await sourceFixture('draft-pr', 'local', 110);
+  try {
+    f.f.advance(110 + 60 * 60);
+    const result = await f.delivery.finalize('installation-one', f.handle.podId, f.finalize);
+    expect(result.status).toBe('delivered');
+    expect(f.creates()).toBe(1);
+    expect(await f.broker.remoteHead(f.broker.binding(f.candidate), f.candidate.head)).toBe(
+      f.candidate.newCommit,
+    );
+  } finally {
+    f.close();
+  }
+});
+it('rejects source finalization after the two-hour recovery window', async () => {
+  const f = await sourceFixture('draft-pr', 'local', 110);
+  try {
+    f.f.advance(110 + 2 * 60 * 60 + 1);
+    await expect(
+      f.delivery.finalize('installation-one', f.handle.podId, f.finalize),
+    ).rejects.toThrow('grant-inactive');
+    expect(f.creates()).toBe(0);
+    expect(await f.broker.remoteHead(f.broker.binding(f.candidate), f.candidate.head)).toBe(
+      ZERO_COMMIT,
+    );
+  } finally {
+    f.close();
+  }
+});
 it.each(['candidate-frozen-after-expiry', 'hard-token-limit-reached'])(
   'does not extend source authority when %s',
   async (kind) => {

@@ -14,7 +14,10 @@ import type { DraftBroker, DraftRecord, ManagedGitBroker } from './source-git.js
 
 const without = (value: object, key: string) =>
   Object.fromEntries(Object.entries(value).filter(([field]) => field !== key));
-const SOURCE_FINALIZATION_GRACE_SECONDS = 15 * 60;
+// A frozen candidate is immutable and still requires a current reviewed verifier,
+// matching grant binding, and no stop/revocation. Keep enough time for a full
+// independent suite plus bounded operational recovery without rerunning the agent.
+const SOURCE_FINALIZATION_GRACE_SECONDS = 2 * 60 * 60;
 interface Operation {
   request_digest: string;
   phase: string;
