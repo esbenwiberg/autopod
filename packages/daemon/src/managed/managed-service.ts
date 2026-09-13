@@ -14,6 +14,7 @@ import type { ManagedArtifactPipeline } from './artifact-pipeline.js';
 import { canonical } from './canonical.js';
 import { type ManagedAdmission, admitManagedRequest, validateManagedRequest } from './grants.js';
 import type { ManagedSourceDelivery } from './source-delivery.js';
+import type { ManagedValidationRunner } from './validation.js';
 
 export interface ManagedRuntimePort {
   /** Must test concrete OS/proxy enforcement, not merely prompt or profile fields. */
@@ -73,6 +74,7 @@ export class ManagedPodService {
   artifactPipeline?: ManagedArtifactPipeline;
   inputs?: ManagedArtifactInputs;
   source?: ManagedSourceDelivery;
+  validation?: ManagedValidationRunner;
   onTransition?: (row: ManagedPodRow, key: string, kind: ManagedPodEvent['kind']) => void;
   private readonly starts = new Map<string, Promise<ManagedPodHandle>>();
   constructor(
@@ -103,6 +105,8 @@ export class ManagedPodService {
         'autonomous-expiry-v1',
         'managed-controls-v1',
         'managed-events-v1',
+        ...(this.validation ? ['managed-validation-choice-v1'] : []),
+        ...(this.validation?.port ? ['managed-validation-v1'] : []),
         ...(this.inputs ? ['artifact-input-v1'] : []),
         ...(this.source
           ? ['source-finalize-v1', ...(this.source.drafts ? ['source-draft-pr-v1'] : [])]
@@ -117,6 +121,9 @@ export class ManagedPodService {
     if (!this.enabled) throw new Error('managed-lane-disabled');
     const request = validateManagedRequest(raw);
     admitManagedRequest(request, this.admission, this.now());
+    if (request.validation.autopod && !this.validation)
+      throw new Error('managed-validation-unavailable');
+    this.validation?.preflight(request);
     if (request.inputArtifacts.length) {
       if (!this.inputs || !installation) throw new Error('artifact-input-unavailable');
       await this.inputs.check(installation, request);

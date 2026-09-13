@@ -56,6 +56,7 @@ export function fixture(): ManagedFixture {
     '153_managed_github_reads.sql',
     '184_managed_provider_failure_diagnostics.sql',
     '185_managed_runtime_exit_code.sql',
+    '197_managed_validations.sql',
   ]) {
     db.exec(readFileSync(new URL(`../db/migrations/${migration}`, import.meta.url), 'utf8'));
   }

@@ -13,6 +13,7 @@ import { ManagedControls } from './managed-controls.js';
 import { ManagedPodService, type ManagedRuntimePort } from './managed-service.js';
 import { ManagedSourceDelivery } from './source-delivery.js';
 import type { DraftBroker, ManagedGitBroker } from './source-git.js';
+import { type ManagedValidationPort, ManagedValidationRunner } from './validation.js';
 
 export interface ManagedComponentsConfig {
   db: Database.Database;
@@ -20,6 +21,7 @@ export interface ManagedComponentsConfig {
   runtime: ManagedRuntimePort;
   store: ArtifactStore;
   stateRoot: string;
+  validation?: ManagedValidationPort;
   /** Explicit reviewed enablement; omitting it always keeps starts dark. */
   enabled?: boolean;
   /** Capabilities proven by the selected reviewed runtime composition. */
@@ -40,6 +42,7 @@ export function managedComponents(config: ManagedComponentsConfig) {
     config.runtimeCapabilities ?? [],
   );
   const controls = new ManagedControls(service);
+  service.validation = new ManagedValidationRunner(service, config.validation);
   const exports = new ArtifactExports(config.db, config.store);
   service.inputs = new ManagedArtifactInputs(
     config.db,

@@ -68,6 +68,13 @@ function ManagedPodCard({ pod }: { pod: ManagedPodSummary }): JSX.Element {
         <span>{pod.providerAccountId}</span>
       </div>
       <div className="managed-card-metrics">
+        <span>
+          Validation:{' '}
+          {pod.validationStatus === 'disabled'
+            ? 'Disabled by configuration'
+            : (pod.validationStatus ?? 'not-requested').replaceAll('-', ' ')}
+        </span>
+        <span>{pod.artifacts.length} artifacts</span>
         <span>{pod.providerRequests.toLocaleString()} requests</span>
         <span>
           {pod.consumedTokens.toLocaleString()} observed tokens

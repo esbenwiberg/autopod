@@ -1,17 +1,73 @@
-import type { JSX, ReactNode } from 'react';
+import type {
+  ArtifactManifest,
+  ManagedPodEvent,
+  ManagedValidationReceipt,
+  SourceCandidateReceipt,
+  SourceDeliveryReceipt,
+  VerificationReceipt,
+} from '@autopod/shared';
+import { type JSX, type ReactNode, useEffect, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
+import { apiFetch, apiResponse } from '../lib/api.js';
+import type { ManagedArtifactSummary, ManagedPodSummary } from '../store/managed-pods.js';
 import { useManagedPodsStore } from '../store/managed-pods.js';
-import { ManagedStateChip, formatBytes, formatDate, useManagedPodPolling } from './ManagedPods.js';
+import { ManagedStateChip, formatBytes, formatDate } from './ManagedPods.js';
+
+interface Detail {
+  pod: ManagedPodSummary;
+  validations: ManagedValidationReceipt[];
+  candidates: SourceCandidateReceipt[];
+  source: SourceDeliveryReceipt[];
+  verification: VerificationReceipt | null;
+  events: ManagedPodEvent[];
+}
+
+export function validationStatusLabel(status?: string): string {
+  return status === 'disabled'
+    ? 'Disabled by configuration'
+    : status === 'not-requested' || !status
+      ? 'Not requested'
+      : status.replaceAll('-', ' ');
+}
 
 export function ManagedPodDetail(): JSX.Element {
   const { id = '' } = useParams<{ id: string }>();
-  const pod = useManagedPodsStore((state) => state.pods.find((item) => item.podId === id));
-  const loading = useManagedPodsStore((state) => state.loading);
-  const loaded = useManagedPodsStore((state) => state.loaded);
-  const error = useManagedPodsStore((state) => state.error);
-  const refresh = useManagedPodsStore((state) => state.refresh);
-
-  useManagedPodPolling(refresh);
+  const fallback = useManagedPodsStore((state) => state.pods.find((item) => item.podId === id));
+  const [fetchedDetail, setDetail] = useState<Detail | null>(null);
+  const detail = fetchedDetail?.pod.podId === id ? fetchedDetail : null;
+  const [loaded, setLoaded] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const pod = detail?.pod.podId === id ? detail.pod : fallback;
+  const loading = !loaded;
+  useEffect(() => {
+    let disposed = false;
+    let busy = false;
+    setDetail(null);
+    setLoaded(false);
+    setError(null);
+    const refresh = async () => {
+      if (busy || document.hidden) return;
+      busy = true;
+      try {
+        const result = await apiFetch<Detail>(`/managed/pods/${encodeURIComponent(id)}`);
+        if (!disposed) {
+          setDetail(result);
+          setError(null);
+        }
+      } catch (error) {
+        if (!disposed) setError((error as Error).message);
+      } finally {
+        busy = false;
+        if (!disposed) setLoaded(true);
+      }
+    };
+    void refresh();
+    const timer = setInterval(() => void refresh(), 5000);
+    return () => {
+      disposed = true;
+      clearInterval(timer);
+    };
+  }, [id]);
 
   if (error && !pod) {
     return (
@@ -54,6 +110,48 @@ export function ManagedPodDetail(): JSX.Element {
         <ManagedDetailRow label="Dispatcher attempt" value={pod.dispatcherAttemptId} code />
         <ManagedDetailRow label="Profile" value={`${pod.profileId} v${pod.profileVersion}`} />
         <ManagedDetailRow label="Created" value={formatDate(pod.createdAt)} />
+      </ManagedSection>
+
+      <ManagedSection title="AutoPod validation">
+        <p>{validationStatusLabel(pod.validationStatus)}</p>
+        {detail?.validations.map((run) => (
+          <div key={run.validationId}>
+            <ManagedDetailRow label="Mode" value={run.mode} />
+            <ManagedDetailRow label="Checked commit" value={run.newCommit} code />
+            {run.reason && <p className="muted">{run.reason}</p>}
+            <ul className="managed-list">
+              {run.phases.map((phase) => (
+                <li key={phase.phase}>
+                  {phase.phase}: {phase.status} · {(phase.durationMs / 1000).toFixed(1)}s
+                </li>
+              ))}
+            </ul>
+          </div>
+        ))}
+      </ManagedSection>
+
+      <ManagedSection title="Source delivery">
+        <ManagedDetailRow
+          label="Dispatcher verification"
+          value={detail?.verification?.status ?? 'Not received'}
+        />
+        {detail?.candidates.map((candidate) => (
+          <ManagedDetailRow
+            key={candidate.candidateId}
+            label="Candidate commit"
+            value={candidate.newCommit}
+            code
+          />
+        ))}
+        {detail?.source.map((receipt) => (
+          <div key={receipt.operationKey}>
+            <ManagedDetailRow label={receipt.operation} value={receipt.status} />
+            <ManagedDetailRow label="Branch" value={receipt.head} code />
+            {receipt.pullRequestId ? (
+              <ManagedDetailRow label="Draft PR" value={`#${receipt.pullRequestId}`} />
+            ) : null}
+          </div>
+        ))}
       </ManagedSection>
 
       <ManagedSection title="Route">
@@ -99,20 +197,83 @@ export function ManagedPodDetail(): JSX.Element {
         {pod.artifacts.length ? (
           <div className="managed-artifacts">
             {pod.artifacts.map((artifact) => (
-              <div className="managed-artifact" key={artifact.artifactId}>
-                <code>{artifact.artifactId}</code>
-                <span>
-                  {artifact.status} · {artifact.fileCount} files ·{' '}
-                  {formatBytes(artifact.totalBytes)}
-                </span>
-              </div>
+              <ArtifactCard key={artifact.artifactId} artifact={artifact} />
             ))}
           </div>
         ) : (
           <p className="muted managed-empty-copy">No committed or pending artifacts.</p>
         )}
       </ManagedSection>
+      <ManagedSection title="Timeline">
+        <ul className="managed-list">
+          {detail?.events.map((event) => (
+            <li key={event.eventId}>
+              {formatDate(event.createdAt)} · {event.kind.replaceAll('_', ' ')}
+            </li>
+          ))}
+        </ul>
+      </ManagedSection>
     </main>
+  );
+}
+
+function ArtifactCard({ artifact }: { artifact: ManagedArtifactSummary }): JSX.Element {
+  const [manifest, setManifest] = useState<ArtifactManifest | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const base = `/artifacts/${encodeURIComponent(artifact.artifactId)}`;
+  const act = async (download: boolean) => {
+    setBusy(true);
+    setError(null);
+    try {
+      if (!download) setManifest(await apiFetch<ArtifactManifest>(`${base}/manifest`));
+      else {
+        const response = await apiResponse(`${base}/download`, { method: 'POST' });
+        const url = URL.createObjectURL(await response.blob());
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = `${artifact.artifactId}.tar.gz`;
+        link.click();
+        setTimeout(() => URL.revokeObjectURL(url), 1000);
+      }
+    } catch (error) {
+      setError((error as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <div className="managed-artifact">
+      <code>{artifact.artifactId}</code>
+      <span>
+        {artifact.status} · {artifact.fileCount} files · {formatBytes(artifact.totalBytes)}
+      </span>
+      {artifact.status === 'committed' && (
+        <div>
+          <button type="button" disabled={busy} onClick={() => void act(false)}>
+            View manifest
+          </button>{' '}
+          <button type="button" disabled={busy} onClick={() => void act(true)}>
+            Download
+          </button>
+        </div>
+      )}
+      {error && <p role="alert">{error}</p>}
+      {manifest && (
+        <div style={{ overflowWrap: 'anywhere' }}>
+          <p>
+            Bundle digest: <code>{manifest.bundle.sha256}</code>
+          </p>
+          <ul>
+            {manifest.files.map((file) => (
+              <li key={file.path}>
+                {file.path} · {formatBytes(file.size)}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+    </div>
   );
 }
 

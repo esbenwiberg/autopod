@@ -5,6 +5,24 @@ import Testing
 
 @Suite(.serialized)
 struct ManagedPodClientTests {
+  @Test func detailFetchDoesNotLoadTheFleetAndDecodesDisabledValidation() async throws {
+    let configuration = URLSessionConfiguration.ephemeral
+    configuration.protocolClasses = [ManagedPodsURLProtocol.self]
+    ManagedPodsURLProtocol.handler = { request in
+      #expect(request.url?.path == "/managed/pods/managed-one")
+      #expect(request.value(forHTTPHeaderField: "Authorization") == "Bearer token")
+      let page = try JSONSerialization.jsonObject(with: Data(Self.page(id: "managed-one", nextCursor: "null").utf8)) as! [String: Any]
+      var pod = (page["pods"] as! [[String: Any]])[0]
+      pod["validationStatus"] = "disabled"
+      let value: [String: Any] = ["schemaVersion": 1, "pod": pod, "validations": [], "candidates": [], "source": [], "verification": NSNull(), "events": []]
+      return Self.response(String(data: try JSONSerialization.data(withJSONObject: value), encoding: .utf8)!, for: request)
+    }
+    defer { ManagedPodsURLProtocol.handler = nil }
+    let detail = try await Self.api(configuration: configuration).getManagedPod("managed-one")
+    #expect(detail.pod.validationStatus == "disabled")
+    #expect(detail.verification == nil)
+  }
+
   @Test func apiTraversesManagedPodPages() async throws {
     let configuration = URLSessionConfiguration.ephemeral
     configuration.protocolClasses = [ManagedPodsURLProtocol.self]

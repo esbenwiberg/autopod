@@ -77,6 +77,7 @@ public struct AppRootView: View {
     MainView(
       pods: podStore.pods,
       managedPods: managedPodStore.pods,
+      managedPodAPI: managedPodStore.api,
       selectedManagedPodId: Binding(
         get: { managedPodStore.selectedPodId },
         set: { managedPodStore.selectedPodId = $0 }

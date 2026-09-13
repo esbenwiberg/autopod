@@ -19,6 +19,7 @@ export interface ManagedPodSummary {
   podId: string;
   dispatcherAttemptId: string;
   state: string;
+  validationStatus?: string;
   providerAccountId: string;
   model: string;
   runtime: string;

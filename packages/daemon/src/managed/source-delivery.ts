@@ -11,6 +11,7 @@ import { canonical, digest, sha256 } from './canonical.js';
 import { ManagedControls } from './managed-controls.js';
 import type { ManagedPodService } from './managed-service.js';
 import type { DraftBroker, DraftRecord, ManagedGitBroker } from './source-git.js';
+import { requireValidation } from './validation.js';
 
 const without = (value: object, key: string) =>
   Object.fromEntries(Object.entries(value).filter(([field]) => field !== key));
@@ -108,10 +109,9 @@ export class ManagedSourceDelivery {
             'INSERT INTO managed_results(pod_id,candidates_json) VALUES (?,?) ON CONFLICT(pod_id) DO UPDATE SET candidates_json=excluded.candidates_json',
           )
           .run(podId, canonical([receipt]));
-        this.service.db
-          .prepare("UPDATE managed_pods SET state='validated' WHERE pod_id=?")
-          .run(podId);
-        new ManagedControls(this.service).event(row, 'candidate-frozen', 'validated');
+        const state = spec.validation.autopod ? 'validating' : 'validated';
+        this.service.db.prepare('UPDATE managed_pods SET state=? WHERE pod_id=?').run(state, podId);
+        new ManagedControls(this.service).event(row, 'candidate-frozen', state);
       })
       .immediate();
     return receipt;
@@ -158,6 +158,7 @@ export class ManagedSourceDelivery {
     const spec = JSON.parse(row.request_json) as ManagedPodRequest;
     const candidate = this.candidate(installation, podId).receipt;
     const verification = request.verificationReceipt;
+    requireValidation(this.service, spec, candidate);
     if (
       installation !== request.dispatcherInstallationId ||
       request.operation !== spec.outputs.source.mode ||
