@@ -126,6 +126,9 @@ it('installs an agent helper that routes final output through the reviewed Codex
     const install = exec.mock.calls.find((call) => (call[1][2] ?? '').includes('immutable-worker'));
     expect(install?.[1][6]).toContain('Return the complete work product as your final response');
     expect(install?.[1][6]).toContain('Do not edit that output path directly');
+    expect(install?.[1][6]).toContain('Keep every individual tool call input below 6 KiB');
+    expect(install?.[1][6]).toContain('Split large patches and commands');
+    expect(install?.[1][6]).toContain('into smaller calls before invoking tools');
     expect(install?.[1][6]).toContain("'features.auto_compaction': False");
     expect(install?.[1][6]).toContain(
       "'sandbox_workspace_write.network_access': bool(args.github_repository)",
