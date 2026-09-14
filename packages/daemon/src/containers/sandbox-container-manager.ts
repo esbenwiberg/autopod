@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto';
 import {
+  chmodSync,
   cpSync,
   existsSync,
   lstatSync,
@@ -806,11 +807,15 @@ for root in sys.argv[1:]:
       if (entry.isDirectory) {
         mkdirSync(target, { recursive: true });
         await this.extractSandboxPath(sandboxId, rootPath, entryPath, stagingPath, excludes);
+        const mode = sandboxFileMode(entry.mode);
+        if (mode !== undefined) chmodSync(target, mode);
         continue;
       }
 
       mkdirSync(dirname(target), { recursive: true });
       writeFileSync(target, await this.client.readFile(sandboxId, entryPath));
+      const mode = sandboxFileMode(entry.mode);
+      if (mode !== undefined) chmodSync(target, mode);
     }
   }
 }
@@ -993,6 +998,12 @@ function normalizeExtractPath(pathname: string): string {
 function normalizeSandboxPath(pathname: string): string {
   const normalized = pathname.split('/').filter(Boolean).join('/');
   return normalized ? `/${normalized}` : '/';
+}
+
+function sandboxFileMode(value: string | undefined): number | undefined {
+  if (value === undefined || !/^\d{1,3}$/.test(value)) return undefined;
+  const mode = Number(value);
+  return Number.isSafeInteger(mode) && mode >= 0 && mode <= 0o777 ? mode : undefined;
 }
 
 function isExcludedPath(relPath: string, excludes?: string[]): boolean {
