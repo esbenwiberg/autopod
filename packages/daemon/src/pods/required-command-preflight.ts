@@ -1,5 +1,6 @@
-import type { Pod, Profile } from '@autopod/shared';
+import type { Pod } from '@autopod/shared';
 import type { ContainerManager } from '../interfaces/container-manager.js';
+import type { PodExecutionSettings } from '../interfaces/pod-execution-settings.js';
 
 export interface CommandRequirement {
   source: string;
@@ -110,7 +111,7 @@ export async function inspectRequiredCommands(
   cm: ContainerManager,
   containerId: string,
   pod: Pod,
-  profile: Profile,
+  profile: PodExecutionSettings,
 ): Promise<CommandPreflight> {
   const validationCommands: Array<[string, string | null | undefined]> =
     pod.options?.validate && !pod.skipValidation

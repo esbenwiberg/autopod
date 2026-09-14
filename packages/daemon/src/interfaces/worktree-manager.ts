@@ -1,4 +1,5 @@
 import type { RequiredFact } from '@autopod/shared';
+import type { PodExecutionSettings } from './pod-execution-settings.js';
 export interface ContractBaseEvidence {
   baseCommitSha: string;
   artifacts: Array<{ path: string; exists: boolean }>;
@@ -63,7 +64,7 @@ export interface MergeBranchConfig
    */
   podTask?: string;
   /** Pod's profile — drives daemon-side LLM auth for the auto-commit message. */
-  profile?: import('@autopod/shared').Profile;
+  profile?: PodExecutionSettings;
   /** Pod's model id (e.g. 'haiku', 'sonnet', 'opus'). */
   podModel?: string;
 }
@@ -202,6 +203,8 @@ export interface PushArtifactBranchConfig {
 }
 
 export interface WorktreeManager {
+  /** Daemon-authenticated source-only tarball at an exact commit; no Git metadata or credentials. */
+  readSnapshotArchive?(params: { repoUrl: string; revision: string }): Promise<Buffer>;
   /** Read-only local source identity for recovery; unavailable adapters cannot authorize cleanup. */
   inspectSource?(
     worktreePath: string,
@@ -281,7 +284,7 @@ export interface WorktreeManager {
   commitPendingChangesWithGeneratedMessage(
     worktreePath: string,
     podTask: string | undefined,
-    profile: import('@autopod/shared').Profile,
+    profile: PodExecutionSettings,
     podModel: string,
     options?: CommitPendingChangesOptions,
   ): Promise<boolean>;

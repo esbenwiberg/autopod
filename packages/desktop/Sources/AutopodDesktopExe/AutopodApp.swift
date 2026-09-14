@@ -129,7 +129,6 @@ struct AutopodApp: App {
         if !podStore.pods.isEmpty { break }
         if attempt < 3 { try? await Task.sleep(for: .seconds(1)) }
       }
-      await profileStore.loadProfiles()
       await scheduledJobStore.load()
       await memoryStore.loadMemories()
     }

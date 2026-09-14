@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import {
   cpSync,
   linkSync,
@@ -13,7 +14,7 @@ import {
 import { basename, dirname, join } from 'node:path';
 import { PassThrough, Writable } from 'node:stream';
 import { fileURLToPath } from 'node:url';
-import type { ArtifactOutput } from '@autopod/shared';
+import type { ArtifactOutput, NativeGoalProcessIdentity } from '@autopod/shared';
 import Dockerode from 'dockerode';
 import type { Logger } from 'pino';
 import tar from 'tar-stream';
@@ -200,7 +201,7 @@ export class DockerContainerManager implements ContainerManager {
   private docker: Dockerode;
   private logger: Logger;
   private imagePuller: ImagePuller | null;
-  private streamingExecSeq = 0;
+  readonly supportsExecRecovery = true;
 
   constructor({ docker, logger, imagePuller }: DockerContainerManagerOptions) {
     this.docker = docker ?? new Dockerode();
@@ -975,7 +976,7 @@ export class DockerContainerManager implements ContainerManager {
       ? Object.entries(options.env).map(([k, v]) => `${k}=${v}`)
       : undefined;
 
-    const pidPath = `/tmp/.autopod-stream-exec-${process.pid}-${this.streamingExecSeq++}.pid`;
+    const pidPath = `/tmp/.autopod-stream-exec-${randomUUID()}.pid`;
     const wrappedCommand = [
       'setsid',
       '-w',
@@ -1002,6 +1003,10 @@ export class DockerContainerManager implements ContainerManager {
       },
     );
 
+    if (options?.onProcessCreated) {
+      if (!exec.id) throw new Error('Docker did not return a recoverable exec identity');
+      options.onProcessCreated({ backend: 'docker', containerId, execId: exec.id, pidPath });
+    }
     const attachStdin = options?.stdin === true;
     const muxStream = await boundedDockerCall(exec.start({ hijack: true, stdin: attachStdin }), {
       label: 'exec.start (execStreaming)',
@@ -1009,6 +1014,22 @@ export class DockerContainerManager implements ContainerManager {
       logger: this.logger,
       containerId,
     });
+
+    try {
+      options?.onProcessStarted?.({ backend: 'docker', containerId, execId: exec.id, pidPath });
+    } catch (error) {
+      try {
+        await this.terminateRecordedExec({
+          backend: 'docker',
+          containerId,
+          execId: exec.id,
+          pidPath,
+        });
+      } finally {
+        muxStream.destroy();
+      }
+      throw error;
+    }
 
     const stdoutStream = new PassThrough();
     const stderrStream = new PassThrough();
@@ -1111,6 +1132,41 @@ export class DockerContainerManager implements ContainerManager {
       exitCode,
       kill,
     };
+  }
+
+  async terminateRecordedExec(identity: NativeGoalProcessIdentity): Promise<number> {
+    if (
+      identity.backend !== 'docker' ||
+      !/^[a-f0-9]{64}$/.test(identity.execId) ||
+      !/^[a-f0-9]{12,64}$/.test(identity.containerId) ||
+      !/^\/tmp\/\.autopod-stream-exec-[a-f0-9-]{36}\.pid$/.test(identity.pidPath)
+    )
+      throw new Error('Invalid recorded Docker exec identity');
+    const exec = this.docker.getExec(identity.execId);
+    const inspect = async () => {
+      const result = await boundedDockerCall(exec.inspect(), {
+        label: 'exec.inspect (recovery)',
+        timeoutMs: DOCKER_CALL_TIMEOUTS.execInspect,
+        logger: this.logger,
+        containerId: identity.containerId,
+      });
+      if (result.ContainerID !== identity.containerId || result.ID !== identity.execId)
+        throw new Error('Recorded Docker exec ownership changed');
+      return result;
+    };
+    let current = await inspect();
+    if (current.Running === true) {
+      const result = await this.execInContainer(
+        identity.containerId,
+        ['sh', '-c', terminateStreamingProcessGroupScript(identity.pidPath)],
+        { timeout: 5000 },
+      );
+      if (result.exitCode !== 0) throw unverifiedExecExit();
+      current = await inspect();
+    }
+    if (current.Running !== false || !isObservedExitCode(current.ExitCode))
+      throw unverifiedExecExit();
+    return current.ExitCode;
   }
 
   async refreshFirewall(containerId: string, script: string): Promise<void> {

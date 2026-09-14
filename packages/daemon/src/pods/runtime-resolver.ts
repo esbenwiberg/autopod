@@ -1,12 +1,12 @@
 import {
   type ModelProvider,
   type Pod,
-  type Profile,
   type RuntimeType,
   CLAUDE_DEFAULT_MODEL as SHARED_CLAUDE_DEFAULT_MODEL,
   CLAUDE_REVIEWER_MODEL as SHARED_CLAUDE_REVIEWER_MODEL,
 } from '@autopod/shared';
 import type { Logger } from 'pino';
+import type { PodExecutionSettings } from '../interfaces/pod-execution-settings.js';
 
 export const CODEX_DEFAULT_MODEL = 'auto';
 export const CLAUDE_DEFAULT_MODEL = SHARED_CLAUDE_DEFAULT_MODEL;
@@ -14,7 +14,7 @@ export const CLAUDE_REVIEWER_MODEL = SHARED_CLAUDE_REVIEWER_MODEL;
 
 const CLAUDE_MODEL_ALIASES = new Set(['opus', 'sonnet', 'haiku']);
 
-export function usesOpenAiSurface(profile: Profile): boolean {
+export function usesOpenAiSurface(profile: PodExecutionSettings): boolean {
   if (profile.modelProvider === 'openai') return true;
   if (profile.modelProvider === 'openrouter') return true;
   if (profile.modelProvider !== 'foundry') return false;
@@ -23,12 +23,12 @@ export function usesOpenAiSurface(profile: Profile): boolean {
   return creds?.provider === 'foundry' && (creds.apiSurface ?? 'anthropic') === 'openai';
 }
 
-function usesChatGptAuth(profile: Profile): boolean {
+function usesChatGptAuth(profile: PodExecutionSettings): boolean {
   const creds = profile.providerCredentials;
   return creds?.provider === 'openai' && creds.authMode === 'chatgpt';
 }
 
-function assertPiProviderCompatible(profile: Profile): void {
+function assertPiProviderCompatible(profile: PodExecutionSettings): void {
   if (usesChatGptAuth(profile)) {
     throw new Error(
       'Pi runtime cannot use Codex ChatGPT credentials; authenticate this profile with auth-pi',
@@ -51,7 +51,7 @@ function isClaudeModel(model: string): boolean {
 }
 
 export function resolvePodRuntime(
-  profile: Profile,
+  profile: PodExecutionSettings,
   requestedRuntime: RuntimeType | undefined,
   logger?: Logger,
 ): RuntimeType {
@@ -74,7 +74,7 @@ export function resolvePodRuntime(
 }
 
 export function resolvePodModel(
-  profile: Profile,
+  profile: PodExecutionSettings,
   requestedModel: string | undefined,
   runtime: RuntimeType,
   logger?: Logger,
@@ -99,14 +99,14 @@ export function resolvePodModel(
   return model;
 }
 
-export function resolveReviewerProvider(profile: Profile): ModelProvider {
+export function resolveReviewerProvider(profile: PodExecutionSettings): ModelProvider {
   return profile.modelProvider ?? 'anthropic';
 }
 
 export function resolveEffectiveReviewerProfile(
   pod: Pick<Pod, 'profileSnapshot'>,
-  storedProfile: Profile,
-): Profile {
+  storedProfile: PodExecutionSettings,
+): PodExecutionSettings {
   const snapshot = pod.profileSnapshot;
   if (!snapshot) return storedProfile;
   return {
@@ -119,7 +119,7 @@ export function resolveEffectiveReviewerProfile(
   };
 }
 
-export function resolveReviewerModel(profile: Profile, logger?: Logger): string {
+export function resolveReviewerModel(profile: PodExecutionSettings, logger?: Logger): string {
   const reviewerRuntime = resolvePodRuntime(profile, profile.defaultRuntime ?? undefined, logger);
   const requestedModel = profile.reviewerModel || profile.defaultModel || undefined;
 

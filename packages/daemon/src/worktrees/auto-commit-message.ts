@@ -1,7 +1,8 @@
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import type { ContentBlock } from '@anthropic-ai/sdk/resources/messages.js';
-import type { Profile } from '@autopod/shared';
+import type { PodExecutionSettings } from '../interfaces/pod-execution-settings.js';
+
 import type { Logger } from 'pino';
 import {
   type ProfileLlmClientDeps,
@@ -17,7 +18,7 @@ const API_TIMEOUT_MS = 10_000;
 const MAX_MESSAGE_LENGTH = 100;
 const DEFAULT_MODEL = 'claude-haiku-4-5';
 
-function pickModel(profile: Profile, podModel: string): string {
+function pickModel(profile: PodExecutionSettings, podModel: string): string {
   return profile.reviewerModel || profile.defaultModel || podModel || DEFAULT_MODEL;
 }
 
@@ -32,7 +33,7 @@ export interface AutoCommitMessageInput {
   worktreePath: string;
   podTask?: string;
   /** Profile that owns the pod — drives daemon-side LLM auth. */
-  profile: Profile;
+  profile: PodExecutionSettings;
   /** Pod's model id (e.g. 'haiku', 'sonnet', 'opus', or full id). */
   podModel: string;
   /**

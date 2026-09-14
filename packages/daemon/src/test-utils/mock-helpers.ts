@@ -17,6 +17,11 @@ import type {
 import Database from 'better-sqlite3';
 import pino from 'pino';
 import { vi } from 'vitest';
+import {
+  detachLegacyPodProfile,
+  detachLegacyScheduledProfile,
+  detachLegacyWatchedProfile,
+} from '../db/detach-legacy-profile.js';
 import type {
   ContainerManager,
   RuntimeRegistry,
@@ -110,6 +115,28 @@ export function createTestDb(): Database.Database {
     .sort();
   for (const file of files) {
     const sql = fs.readFileSync(path.join(migrationsDir, file), 'utf-8');
+    if (
+      file === '194_detach_legacy_pod_profile.sql' ||
+      file === '198_scheduled_launch_selection.sql' ||
+      file === '200_issue_watcher_bindings.sql'
+    ) {
+      db.pragma('foreign_keys = OFF');
+      try {
+        db.transaction(() => {
+          if (file === '194_detach_legacy_pod_profile.sql') detachLegacyPodProfile(db);
+          else if (file === '200_issue_watcher_bindings.sql') {
+            detachLegacyWatchedProfile(db);
+            db.exec(sql);
+          } else {
+            detachLegacyScheduledProfile(db);
+            db.exec(sql);
+          }
+        })();
+      } finally {
+        db.pragma('foreign_keys = ON');
+      }
+      continue;
+    }
     if (/--\s*@execute-whole/i.test(sql)) {
       db.exec(sql);
       continue;

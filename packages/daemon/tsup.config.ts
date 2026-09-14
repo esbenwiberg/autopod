@@ -42,6 +42,8 @@ export default defineConfig({
     'src/managed.ts',
     'src/db/verify-backup-cli.ts',
     'src/db/reconcile-native-checkpoint-cli.ts',
+    'src/configuration/conversion-cli.ts',
+    'src/configuration/cutover-cli.ts',
   ],
   format: ['esm'],
   dts: true,

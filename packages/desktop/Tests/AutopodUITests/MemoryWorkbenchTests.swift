@@ -26,9 +26,10 @@ import Testing
 @MainActor @Test func memoryWorkbenchFormatsScopeProvenanceLabels() {
     #expect(
         MemoryManagementView.scopeLabel(scope: .profile, scopeId: "resource-planner")
-            == "profile resource-planner"
+            == "legacy profile resource-planner"
     )
-    #expect(MemoryManagementView.scopeLabel(scope: .profile, scopeId: nil) == "profile unknown")
+    #expect(MemoryManagementView.scopeLabel(scope: .profile, scopeId: nil) == "legacy profile unknown")
+    #expect(MemoryManagementView.scopeLabel(scope: .repository, scopeId: "repo-a") == "repository repo-a")
     #expect(MemoryManagementView.scopeLabel(scope: .global, scopeId: nil) == "global")
     #expect(MemoryManagementView.scopeLabel(scope: .pod, scopeId: "pod-source-1234") == "pod pod-sour")
 }

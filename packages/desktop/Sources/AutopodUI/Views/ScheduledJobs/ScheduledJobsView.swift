@@ -6,6 +6,7 @@ public struct ScheduledJobsView: View {
   public let jobs: [ScheduledJob]
   public let templates: [ScheduledJobTemplate]
   public var profileNames: [String]
+  public var configurationActions: LaunchConfigurationActions?
   public var onRunCatchup: ((ScheduledJob) -> Void)?
   public var onSkipCatchup: ((ScheduledJob) -> Void)?
   public var onOpenScanReports: ((ScheduledJob) -> Void)?
@@ -27,12 +28,13 @@ public struct ScheduledJobsView: View {
   @State private var selectedProfileFilter = "__all"
 
   private static let allProfiles = "__all"
-  private static let allProfilesLabel = "All Profiles"
+  private static let allProfilesLabel = "All Configurations"
 
   public init(
     jobs: [ScheduledJob],
     templates: [ScheduledJobTemplate] = [],
     profileNames: [String] = [],
+    configurationActions: LaunchConfigurationActions? = nil,
     onRunCatchup: ((ScheduledJob) -> Void)? = nil,
     onSkipCatchup: ((ScheduledJob) -> Void)? = nil,
     onOpenScanReports: ((ScheduledJob) -> Void)? = nil,
@@ -47,6 +49,7 @@ public struct ScheduledJobsView: View {
     self.jobs = jobs
     self.templates = templates
     self.profileNames = profileNames
+    self.configurationActions = configurationActions
     self.onRunCatchup = onRunCatchup
     self.onSkipCatchup = onSkipCatchup
     self.onOpenScanReports = onOpenScanReports
@@ -59,11 +62,11 @@ public struct ScheduledJobsView: View {
     self.onDeleteTemplate = onDeleteTemplate
   }
 
-  private var profiles: [String] { profileNames.sorted() }
+  private var profiles: [String] { Array(Set(jobs.map { $0.launchLabel })).sorted() }
 
   private var profileFilteredJobs: [ScheduledJob] {
     if selectedProfileFilter == Self.allProfiles { return jobs }
-    return jobs.filter { $0.profileName == selectedProfileFilter }
+    return jobs.filter { $0.launchLabel == selectedProfileFilter }
   }
 
   private var filteredJobs: [ScheduledJob] {
@@ -72,7 +75,7 @@ public struct ScheduledJobsView: View {
     return profileFilteredJobs.filter { job in
       job.name.lowercased().contains(q)
         || job.templateName.lowercased().contains(q)
-        || job.profileName.lowercased().contains(q)
+        || job.launchLabel.lowercased().contains(q)
         || job.cronExpression.lowercased().contains(q)
     }
   }
@@ -116,6 +119,7 @@ public struct ScheduledJobsView: View {
         isPresented: $showCreateSheet,
         templates: templates,
         profileNames: profileNames,
+        configurationActions: configurationActions,
         onCreateJob: onCreateJob
       )
     }
@@ -134,6 +138,7 @@ public struct ScheduledJobsView: View {
         job: job,
         templates: templates,
         profileNames: profileNames,
+        configurationActions: configurationActions,
         onEditJob: onEditJob
       )
     }

@@ -6,6 +6,8 @@ import { parseGitHubRepoUrl } from '../worktrees/pr-manager.js';
 import { AdoIssueClient } from './ado-issue-client.js';
 import { GitHubIssueClient } from './github-issue-client.js';
 
+export type IssueRepositorySource = Pick<Profile, 'name' | 'repoUrl' | 'prProvider'>;
+
 export interface WatchedIssueCandidate {
   id: string;
   title: string;
@@ -24,7 +26,7 @@ export interface IssueClient {
 }
 
 export async function createIssueClient(
-  profile: Profile,
+  profile: IssueRepositorySource,
   githubAuth?: DaemonGitHubAuth,
   azureDevOpsAuth?: AzureDevOpsAuth,
 ): Promise<IssueClient> {

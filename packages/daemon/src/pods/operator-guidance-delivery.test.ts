@@ -6,7 +6,7 @@ import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
 import Database from 'better-sqlite3';
 import { expect, it, vi } from 'vitest';
-import { runMigrations } from '../db/migrate.js';
+import { runMigrations, runMigrationsWithBackups } from '../db/migrate.js';
 import { createTestDb, insertTestProfile, logger } from '../test-utils/mock-helpers.js';
 import { createNudgeRepository } from './nudge-repository.js';
 import { type SessionBridgeDependencies, createSessionBridge } from './pod-bridge-impl.js';
@@ -309,7 +309,7 @@ it('bounds UTF-8 payloads without discarding an oversized legacy message', () =>
   }
 });
 
-it('upgrades schema 179 without inventing acknowledgment of consumed legacy rows', () => {
+it('upgrades schema 179 without inventing acknowledgment of consumed legacy rows', async () => {
   const dir = mkdtempSync(join(tmpdir(), 'guidance-upgrade-'));
   const migrations = resolve(import.meta.dirname, '../db/migrations');
   for (const file of readdirSync(migrations))
@@ -328,7 +328,7 @@ it('upgrades schema 179 without inventing acknowledgment of consumed legacy rows
       "INSERT INTO nudge_messages(pod_id,message,consumed,created_at,consumed_at) VALUES ('worker','Legacy consumed without receipt',1,'2026-09-07T00:00:00Z','2026-09-07T01:00:00Z')",
     ).run();
     const before = db.prepare('SELECT * FROM nudge_messages ORDER BY id').all();
-    runMigrations(db, migrations, logger);
+    await runMigrationsWithBackups(db, migrations, logger);
     expect(db.prepare('SELECT * FROM nudge_messages ORDER BY id').all()).toEqual(before);
     expect(
       db.prepare('SELECT COUNT(*) AS count FROM operator_guidance_acknowledgments').get(),

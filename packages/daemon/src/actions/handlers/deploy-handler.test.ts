@@ -61,6 +61,16 @@ function makeHandler(overrides: Partial<Parameters<typeof createDeployHandler>[0
 }
 
 describe('deploy handler — execute', () => {
+  it('refuses composable execution before reading a host script or daemon account', async () => {
+    const { handler, podRepo, profileStore, runner } = makeHandler();
+    podRepo.getOrThrow.mockReturnValue({ ...mockPod(), launchConfigDigest: 'a'.repeat(64) });
+    await expect(
+      handler.execute({} as ActionDefinition, { script_path: 'deploy.sh' }, { podId: 'pod-1' }),
+    ).rejects.toThrow('isolated runner');
+    expect(profileStore.get).not.toHaveBeenCalled();
+    expect(runner.readScript).not.toHaveBeenCalled();
+    expect(runner.runScript).not.toHaveBeenCalled();
+  });
   it('runs script with resolved env vars on the daemon host', async () => {
     const { handler, runner, profileStore } = makeHandler();
     profileStore.get.mockReturnValue(

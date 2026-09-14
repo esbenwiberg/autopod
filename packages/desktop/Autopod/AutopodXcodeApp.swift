@@ -123,7 +123,6 @@ struct AutopodXcodeApp: App {
 
     Task {
       await podStore.loadSessions()
-      await profileStore.loadProfiles()
       await scheduledJobStore.load()
     }
   }

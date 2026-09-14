@@ -187,6 +187,7 @@ export interface AdvisoryBrowserQaRunnerOptions {
   containerManager?: ContainerManager;
   containerId?: string;
   reviewerExecEnv?: Record<string, string>;
+  reviewerExecutor?: import('../interfaces/reviewer-executor.js').ReviewerExecutor;
   timeoutMs?: number;
   hostBrowserRunner?: HostBrowserRunner;
   screenshotStore?: ScreenshotStore;
@@ -297,6 +298,7 @@ export async function runAdvisoryBrowserQa(
         containerManager: options.containerManager,
         containerId: options.containerId,
         reviewerExecEnv: options.reviewerExecEnv,
+        reviewerExecutor: options.reviewerExecutor,
         logger: log,
         rateLimitDeadlineMs: deadline,
         rateLimitBaseDelayMs: pacing.rateLimitBaseDelayMs,
@@ -1629,6 +1631,7 @@ function createProviderAwareAdvisoryReviewer(input: {
   containerManager?: ContainerManager;
   containerId?: string;
   reviewerExecEnv?: Record<string, string>;
+  reviewerExecutor?: import('../interfaces/reviewer-executor.js').ReviewerExecutor;
   logger?: Logger;
   rateLimitDeadlineMs?: number;
   rateLimitBaseDelayMs?: number;
@@ -1649,20 +1652,29 @@ function createProviderAwareAdvisoryReviewer(input: {
       try {
         let stdout: string;
         try {
-          const containerResult = await callContainerReviewer({
-            podId: input.podId,
-            containerManager: input.containerManager,
-            containerId: input.containerId,
-            env: input.reviewerExecEnv,
-            model: input.model,
-            provider: input.provider,
-            credentials: input.credentials,
-            prompt,
-            timeoutMs: ADVISORY_BROWSER_QA_ACTION_PLANNER_BUDGET_MS,
-          });
+          const containerResult = input.reviewerExecutor
+            ? await input.reviewerExecutor({
+                prompt,
+                timeout: ADVISORY_BROWSER_QA_ACTION_PLANNER_BUDGET_MS,
+              })
+            : await callContainerReviewer({
+                podId: input.podId,
+                containerManager: input.containerManager,
+                containerId: input.containerId,
+                env: input.reviewerExecEnv,
+                model: input.model,
+                provider: input.provider,
+                credentials: input.credentials,
+                prompt,
+                timeoutMs: ADVISORY_BROWSER_QA_ACTION_PLANNER_BUDGET_MS,
+              });
           stdout = containerResult.stdout;
         } catch (err) {
-          if (!shouldFallbackToDirectReviewer(input.provider, input.credentials)) throw err;
+          if (
+            input.reviewerExecutor ||
+            !shouldFallbackToDirectReviewer(input.provider, input.credentials)
+          )
+            throw err;
           input.logger?.warn(
             { err, provider: input.provider },
             'advisory browser QA container action planner failed; falling back to direct reviewer',
@@ -1732,21 +1744,30 @@ function createProviderAwareAdvisoryReviewer(input: {
         let stdout: string;
         let tokenUsage: AiTokenUsage | undefined;
         try {
-          const containerResult = await callContainerReviewer({
-            podId: input.podId,
-            containerManager: input.containerManager,
-            containerId: input.containerId,
-            env: input.reviewerExecEnv,
-            model: input.model,
-            provider: input.provider,
-            credentials: input.credentials,
-            prompt: structuredEvidencePrompt,
-            timeoutMs: input.provider === 'openai' ? 120_000 : 180_000,
-          });
+          const containerResult = input.reviewerExecutor
+            ? await input.reviewerExecutor({
+                prompt: structuredEvidencePrompt,
+                timeout: Math.max(1, reviewDeadlineMs - Date.now()),
+              })
+            : await callContainerReviewer({
+                podId: input.podId,
+                containerManager: input.containerManager,
+                containerId: input.containerId,
+                env: input.reviewerExecEnv,
+                model: input.model,
+                provider: input.provider,
+                credentials: input.credentials,
+                prompt: structuredEvidencePrompt,
+                timeoutMs: input.provider === 'openai' ? 120_000 : 180_000,
+              });
           stdout = containerResult.stdout;
           tokenUsage = containerResult.tokenUsage;
         } catch (err) {
-          if (!shouldFallbackToDirectReviewer(input.provider, input.credentials)) throw err;
+          if (
+            input.reviewerExecutor ||
+            !shouldFallbackToDirectReviewer(input.provider, input.credentials)
+          )
+            throw err;
           input.logger?.warn(
             { err, provider: input.provider },
             'advisory browser QA container reviewer failed; falling back to direct reviewer',

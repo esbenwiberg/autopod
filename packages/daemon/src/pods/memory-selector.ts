@@ -1,9 +1,11 @@
-import type { MemoryEntry, Pod, Profile } from '@autopod/shared';
+import type { MemoryEntry, Pod } from '@autopod/shared';
 import { generateId, processContent } from '@autopod/shared';
 import type { Logger } from 'pino';
+import type { PodExecutionSettings } from '../interfaces/pod-execution-settings.js';
 import type { MemoryReviewer } from '../providers/memory-reviewer.js';
 import type { MemoryRepository } from './memory-repository.js';
 import type { MemoryUsageRepository } from './memory-usage-repository.js';
+import { type ProjectMemoryScope, memoryMatchesProjectSetup } from './project-memory-scope.js';
 
 export const MAX_RELEVANT_MEMORY_ENTRIES = 5;
 const PREFILTER_LIMIT = 20;
@@ -51,12 +53,13 @@ export interface MemorySelectorDeps {
   reviewer?: MemoryReviewer;
   reviewerModel?: string;
   reviewerUnavailableReason?: string;
+  projectScope?: ProjectMemoryScope;
   logger: Logger;
 }
 
 export async function selectRelevantMemories(opts: {
   pod: Pod;
-  profile: Profile;
+  profile: PodExecutionSettings;
   deps: MemorySelectorDeps;
 }): Promise<MemorySelectionResult> {
   const { pod, deps } = opts;
@@ -69,7 +72,13 @@ export async function selectRelevantMemories(opts: {
     pod,
     memories: [
       ...podMemoryScopeIds(pod).flatMap((podId) => deps.memoryRepo.list('pod', podId, true)),
-      ...deps.memoryRepo.list('profile', pod.profileName, true),
+      ...(deps.projectScope
+        ? deps.memoryRepo
+            .list(deps.projectScope.scope, deps.projectScope.id, true)
+            .filter((entry) => memoryMatchesProjectSetup(entry, deps.projectScope ?? null))
+        : deps.projectScope === undefined && !pod.launchConfigDigest
+          ? deps.memoryRepo.list('profile', pod.profileName, true)
+          : []),
       ...deps.memoryRepo.list('global', null, true),
     ],
   });
@@ -287,7 +296,7 @@ function recordUsage(
 
 function scopeRank(scope: MemoryEntry['scope']): number {
   if (scope === 'pod') return 0;
-  if (scope === 'profile') return 1;
+  if (scope === 'profile' || scope === 'repository') return 1;
   return 2;
 }
 

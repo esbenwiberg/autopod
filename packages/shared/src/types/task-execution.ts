@@ -50,6 +50,10 @@ export interface TaskExecutionSummary {
   };
   recordedInputTokens: number;
   recordedOutputTokens: number;
+  /** Native Goal counters include evaluation; the provider does not expose an input/output split. */
+  recordedUnclassifiedTokens?: number;
+  /** Canonical total, including native aggregate usage. Optional for older daemon responses. */
+  recordedTotalTokens?: number;
   recordedCostUsd: number;
   costEvidence?: CostEvidence;
   infrastructureCostUsd: number | null;

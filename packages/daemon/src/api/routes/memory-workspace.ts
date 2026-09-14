@@ -2,9 +2,19 @@ import { AutopodError } from '@autopod/shared';
 import type { FastifyInstance } from 'fastify';
 import type { PodManager } from '../../pods/index.js';
 
-export function memoryWorkspaceRoutes(app: FastifyInstance, podManager: PodManager): void {
+export function memoryWorkspaceRoutes(
+  app: FastifyInstance,
+  podManager: PodManager,
+  composable = false,
+): void {
   // POST /pods/memory-workspace — create a workspace pod pre-loaded with all approved memories
   app.post('/pods/memory-workspace', async (request, reply) => {
+    if (composable)
+      return reply.status(410).send({
+        code: 'CONFIG_API_VERSION_UNSUPPORTED',
+        error:
+          'Use POST /pods with a repository/profile selection and work.analysis.kind="memory".',
+      });
     const body = request.body as { profileName?: string };
 
     if (!body.profileName) {

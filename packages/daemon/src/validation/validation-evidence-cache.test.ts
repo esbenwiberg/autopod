@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import Database from 'better-sqlite3';
 import { describe, expect, it } from 'vitest';
-import { runMigrations } from '../db/migrate.js';
+import { runMigrations, runMigrationsWithBackups } from '../db/migrate.js';
 import { logger } from '../test-utils/mock-helpers.js';
 import { createTestDb, insertTestProfile } from '../test-utils/mock-helpers.js';
 import {
@@ -33,7 +33,7 @@ function fixture() {
 describe('exact-input validation evidence', () => {
   it.each([139, 152])(
     'upgrades schema %s and reuses immutable evidence after a real database close/reopen',
-    (version) => {
+    async (version) => {
       const dir = mkdtempSync(join(tmpdir(), 'evidence-upgrade-'));
       const migrations = new URL('../db/migrations', import.meta.url).pathname;
       for (const file of readdirSync(migrations))
@@ -45,14 +45,14 @@ describe('exact-input validation evidence', () => {
         insertTestProfile(db);
         db.prepare(`INSERT INTO pods (id, profile_name, task, status, model, runtime, branch, user_id)
         VALUES ('original', 'test-profile', 'validate', 'validating', 'model', 'codex', 'branch', 'user')`).run();
-        runMigrations(db, migrations, logger);
+        await runMigrationsWithBackups(db, migrations, logger);
         const receipt = createValidationEvidenceCache(db).record('original', 'test', identity, {
           status: 'pass',
           duration: 100,
         });
         db.close();
         db = new Database(join(dir, 'test.db'));
-        runMigrations(db, migrations, logger);
+        await runMigrationsWithBackups(db, migrations, logger);
         expect(
           createValidationEvidenceCache(db).get('test', identity)?.reusedEvidence.receiptId,
         ).toBe(receipt);

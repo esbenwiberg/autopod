@@ -43,6 +43,7 @@ export interface ScanReportRepository {
     reportId: string,
   ): Array<ScheduledScanFinding & { disposition: 'unresolved' | 'deferred' }>;
   triage(input: Omit<ScanTriageDecision, 'id' | 'createdAt'>): ScanTriageDecision;
+  getRepairPodId(selectionId: string): string | null;
   launchRepair(selectionId: string, create: (decision: ScanTriageDecision) => string): string;
 }
 
@@ -507,6 +508,15 @@ export function createScanReportRepository(db: Database.Database): ScanReportRep
           );
       return record;
     }),
+    getRepairPodId(selectionId) {
+      return (
+        (
+          db
+            .prepare('SELECT pod_id FROM scheduled_scan_repairs WHERE selection_id=?')
+            .get(selectionId) as { pod_id: string } | undefined
+        )?.pod_id ?? null
+      );
+    },
     launchRepair: db.transaction(
       (selectionId: string, create: (decision: ScanTriageDecision) => string) => {
         const row = db

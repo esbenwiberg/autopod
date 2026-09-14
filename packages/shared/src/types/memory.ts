@@ -1,4 +1,4 @@
-export type MemoryScope = 'global' | 'profile' | 'pod';
+export type MemoryScope = 'global' | 'repository' | 'profile' | 'pod';
 
 export type MemoryKind =
   | 'convention'
@@ -19,8 +19,10 @@ export interface MemorySourceEvidence {
 export interface MemoryEntry {
   id: string;
   scope: MemoryScope;
-  /** null = global, profileName = profile, podId = pod */
+  /** null = global, repository ID = repository, legacy profile name = profile, pod ID = pod */
   scopeId: string | null;
+  /** Optional project setup affinity within repository scope. */
+  repositorySetupId?: string | null;
   /** Path-like key, e.g. "/conventions/commits.md" */
   path: string;
   content: string;
@@ -50,8 +52,9 @@ export interface MemoryCandidate {
   action: MemoryCandidateAction;
   /** Set when action === 'update'. */
   targetMemoryId: string | null;
-  scope: 'profile';
+  scope: 'repository' | 'profile';
   scopeId: string;
+  repositorySetupId?: string | null;
   path: string;
   content: string;
   rationale: string;

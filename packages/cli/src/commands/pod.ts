@@ -1,31 +1,24 @@
-import { existsSync, lstatSync, readFileSync, readdirSync, realpathSync } from 'node:fs';
-import { basename, isAbsolute, join, relative, resolve } from 'node:path';
 import type {
   AgentActivityEvent,
   CompactPod,
-  ExecutionTarget,
   FirewallDeniedEvent,
   Pod,
   PodStatus,
-  SpecFile,
   SystemEvent,
-  ValidationSuite,
 } from '@autopod/shared';
-import {
-  VALIDATION_SUITES,
-  isValidationSuite,
-  parseBriefs,
-  podStatusSchema,
-} from '@autopod/shared';
+import { podStatusSchema } from '@autopod/shared';
 import chalk from 'chalk';
 import type { Command } from 'commander';
 import type { AutopodClient } from '../api/client.js';
+import { saveLaunchReceipt } from '../config/launch-store.js';
 import { formatDurationFromDates, formatStatus } from '../output/colors.js';
 import { withJsonOutput } from '../output/json.js';
 import { withSpinner } from '../output/spinner.js';
 import { type ColumnDef, renderTable } from '../output/table.js';
 import { formatToolUse } from '../utils/formatToolUse.js';
 import { resolvePodId } from '../utils/id-resolver.js';
+import { registerGoalCommands } from './goal.js';
+import { registerLaunchCommand } from './launch.js';
 
 const podColumns: ColumnDef<Pod>[] = [
   { header: 'ID', formatter: (s) => s.id.slice(0, 8), width: 10 },
@@ -52,9 +45,6 @@ const compactPodColumns: ColumnDef<CompactPod>[] = [
     width: 10,
   },
 ];
-
-const validationSuiteHelp = `Autopod validation suite: ${VALIDATION_SUITES.join('|')}`;
-const executionTargetHelp = 'Execution target: local | sandbox';
 
 function truncate(str: string, max: number): string {
   if (str.length <= max) return str;
@@ -110,39 +100,6 @@ function validatePodStatuses(status?: string): void {
   }
 }
 
-function parseValidationSuite(value: string | undefined): ValidationSuite | undefined {
-  if (value === undefined) return undefined;
-  if (isValidationSuite(value)) return value;
-  console.error(chalk.red(`--validation-suite must be one of: ${VALIDATION_SUITES.join(', ')}`));
-  process.exit(1);
-}
-
-function parseExecutionTarget(value: string | undefined): ExecutionTarget | undefined {
-  if (value === undefined) return undefined;
-  if (value === 'local' || value === 'sandbox') return value;
-  console.error(chalk.red('--execution-target must be one of: local, sandbox'));
-  process.exit(1);
-}
-
-function assertValidationFlags(opts: {
-  validate?: boolean;
-  skipValidation?: boolean;
-  validationSuite?: ValidationSuite;
-}): void {
-  if (opts.skipValidation && opts.validationSuite && opts.validationSuite !== 'off') {
-    console.error(chalk.red('--skip-validation cannot be combined with a non-off suite'));
-    process.exit(1);
-  }
-  if (opts.validate === false && opts.validationSuite && opts.validationSuite !== 'off') {
-    console.error(chalk.red('--no-validate cannot be combined with a non-off suite'));
-    process.exit(1);
-  }
-  if (opts.validate === true && opts.validationSuite === 'off') {
-    console.error(chalk.red('--validate cannot be combined with --validation-suite off'));
-    process.exit(1);
-  }
-}
-
 function formatReadinessLine(pod: Pod): string {
   if (!pod.readinessReview) {
     return 'Readiness: pending/unavailable';
@@ -175,61 +132,8 @@ function printApproveAllResult(result: {
   }
 }
 
-// Commander collector for repeatable `--sidecar <name>` flags.
-function collectRepeatable(value: string, previous: string[]): string[] {
-  return previous.concat(value);
-}
-
-const pathSeparatorRegex = /[/\\]+/g;
-
-function collectSpecFiles(specRoot: string): SpecFile[] {
-  const root = realpathSync(resolve(specRoot));
-  const outputRoot = `specs/${basename(root) || 'spec'}`;
-  const files: SpecFile[] = [];
-
-  function walk(dir: string): void {
-    for (const entry of readdirSync(dir).sort()) {
-      const full = join(dir, entry);
-      const stat = lstatSync(full);
-      if (stat.isSymbolicLink()) {
-        throw new Error(`spec file symlink not allowed: ${full}`);
-      }
-      if (stat.isDirectory()) {
-        walk(full);
-        continue;
-      }
-      if (!stat.isFile()) continue;
-      const real = realpathSync(full);
-      const rel = relative(root, real);
-      if (rel.startsWith('..') || isAbsolute(rel)) {
-        throw new Error(`spec file outside root: ${full}`);
-      }
-      const outputPath = rel.split(pathSeparatorRegex).join('/');
-      files.push({
-        path: `${outputRoot}/${outputPath}`,
-        content: readFileSync(real, 'utf-8'),
-      });
-    }
-  }
-
-  walk(root);
-  return files;
-}
-
-function resolveContractPath(specRoot: string): string {
-  const yamlPath = join(specRoot, 'contract.yaml');
-  const ymlPath = join(specRoot, 'contract.yml');
-  const hasYaml = existsSync(yamlPath);
-  const hasYml = existsSync(ymlPath);
-  if (hasYaml && hasYml) {
-    throw new Error(`both contract.yaml and contract.yml found in ${specRoot}`);
-  }
-  if (hasYaml) return yamlPath;
-  if (hasYml) return ymlPath;
-  throw new Error(`contract not found: ${yamlPath} or ${ymlPath}`);
-}
-
 export function registerPodCommands(program: Command, getClient: () => AutopodClient): void {
+  registerGoalCommands(program, getClient);
   program
     .command('execution-provenance <id>')
     .description('Inspect recorded runtime, image, build, resource and command preflight evidence')
@@ -282,15 +186,24 @@ export function registerPodCommands(program: Command, getClient: () => AutopodCl
       const client = getClient();
       const source = await resolvePodId(client, id);
       if (!opts.reason.trim()) throw new Error('Intentional rerun requires a human reason');
-      const request = await client.getRerunTemplate(source);
-      const pod = await client.createSession({
-        ...request,
-        intentionalRerun: {
-          ofPodId: source,
-          reason: opts.reason.trim(),
-          requestKey: opts.requestKey,
+      const template = await client.getRerunTemplate(source);
+      const request = {
+        ...template,
+        requestId: opts.requestKey,
+        work: {
+          ...template.work,
+          intentionalRerun: {
+            ofPodId: source,
+            reason: opts.reason.trim(),
+            requestKey: opts.requestKey,
+          },
         },
-      });
+      };
+      const receipt = saveLaunchReceipt(request);
+      console.error(
+        `Rerun request saved: ${receipt}. Retry with ap run --config ${JSON.stringify(receipt)}`,
+      );
+      const pod = await client.launchPod(request);
       withJsonOutput(opts, pod, (value) =>
         console.log(
           `Distinct task ${value.id}: ${value.status}. Inspect dispatch-preflight and status for the outcome.`,
@@ -438,231 +351,9 @@ export function registerPodCommands(program: Command, getClient: () => AutopodCl
         ),
       );
     });
-  // ap run
-  program
-    .command('run <profile> <task>')
-    .description('Start a new coding pod')
-    .option('-m, --model <model>', 'AI model to use')
-    .option('-r, --runtime <runtime>', 'Runtime (claude, codex, copilot, or pi)')
-    .option('--execution-target <target>', executionTargetHelp)
-    .option('-b, --branch <branch>', 'Target branch name')
-    .option('--branch-prefix <prefix>', 'Override branch prefix (e.g. hotfix/)')
-    .option('--start-branch <branch>', 'Branch/ref to start from while targeting --base-branch')
-    .option('--rerun-of <id>', 'Explicitly repeat this prior pod as a distinct task')
-    .option('--rerun-reason <reason>', 'Human reason for intentionally repeating equivalent work')
-    .option('--rerun-request-key <key>', 'Stable decision key; reuse it after a lost response')
-    .option('--base-branch <branch>', 'Branch from a specific base (e.g. workspace output)')
-    .option('--skip-validation', 'Skip validation phase')
-    .option('--validation-suite <suite>', validationSuiteHelp)
-    .option(
-      '-s, --sidecar <name>',
-      'Companion sidecar to spawn (e.g. "dagger"). Repeatable. Requires the profile to have sidecars.<name> enabled; privileged sidecars also require trustedSource.',
-      collectRepeatable,
-      [] as string[],
-    )
-    .action(
-      async (
-        profile: string,
-        task: string,
-        opts: {
-          model?: string;
-          runtime?: string;
-          executionTarget?: string;
-          branch?: string;
-          branchPrefix?: string;
-          startBranch?: string;
-          baseBranch?: string;
-          rerunOf?: string;
-          rerunReason?: string;
-          rerunRequestKey?: string;
-          skipValidation?: boolean;
-          validationSuite?: string;
-          sidecar: string[];
-        },
-      ) => {
-        const client = getClient();
-        const validationSuite = parseValidationSuite(opts.validationSuite);
-        const executionTarget = parseExecutionTarget(opts.executionTarget);
-        assertValidationFlags({ skipValidation: opts.skipValidation, validationSuite });
-        const pod = await withSpinner('Starting pod...', () =>
-          client.createSession({
-            profileName: profile,
-            task,
-            model: opts.model,
-            runtime: opts.runtime as 'claude' | 'codex' | 'copilot' | 'pi' | undefined,
-            executionTarget,
-            branch: opts.branch,
-            branchPrefix: opts.branchPrefix,
-            startBranch: opts.startBranch,
-            baseBranch: opts.baseBranch,
-            intentionalRerun: parseIntentionalRerun(opts),
-            skipValidation: opts.skipValidation,
-            options: validationSuite ? { validationSuite } : undefined,
-            requireSidecars: opts.sidecar.length > 0 ? opts.sidecar : undefined,
-          }),
-        );
+  registerLaunchCommand(program, getClient);
 
-        console.log(chalk.green(`Pod ${chalk.bold(pod.id)} created.`));
-        console.log(`${chalk.bold('Profile:')}  ${pod.profileName}`);
-        console.log(`${chalk.bold('Status:')}   ${formatStatus(pod.status)}`);
-        console.log(`${chalk.bold('Branch:')}   ${pod.branch}`);
-        console.log(`${chalk.bold('Target:')}   ${pod.executionTarget}`);
-        console.log(`${chalk.bold('Suite:')}    ${pod.options?.validationSuite ?? 'full'}`);
-        console.log(chalk.dim(`Track progress: ap status ${pod.id.slice(0, 8)}`));
-      },
-    );
-
-  // ap start
-  //
-  // The unified pod primitive. Replaces the (still-present) ap run / ap
-  // workspace / ap research trio. Flags let you pick any combination of the
-  // two orthogonal axes: who drives (agent vs human) and where output goes.
-  program
-    .command('start <profile> [task]')
-    .description('Start a pod (unified). Flags pick the pod config.')
-    .option('--agent <mode>', 'Who drives the pod: auto (default, runs the agent) or interactive')
-    .option('--output <target>', 'Where output goes: pr | branch | artifact | none')
-    .option('--validate', 'Run full validation pipeline before completing')
-    .option('--no-validate', 'Skip validation')
-    .option('--validation-suite <suite>', validationSuiteHelp)
-    .option('-m, --model <model>', 'AI model to use')
-    .option('-r, --runtime <runtime>', 'Runtime (claude, codex, copilot, or pi)')
-    .option('--execution-target <target>', executionTargetHelp)
-    .option('-b, --branch <branch>', 'Target branch name')
-    .option('--branch-prefix <prefix>', 'Override branch prefix (e.g. hotfix/)')
-    .option('--start-branch <branch>', 'Branch/ref to start from while targeting --base-branch')
-    .option('--rerun-of <id>', 'Explicitly repeat this prior pod as a distinct task')
-    .option('--rerun-reason <reason>', 'Human reason for intentionally repeating equivalent work')
-    .option('--rerun-request-key <key>', 'Stable decision key; reuse it after a lost response')
-    .option('--base-branch <branch>', 'Branch from a specific base')
-    .option(
-      '-s, --sidecar <name>',
-      'Companion sidecar to spawn (e.g. "dagger"). Repeatable. Requires the profile to have sidecars.<name> enabled; privileged sidecars also require trustedSource.',
-      collectRepeatable,
-      [] as string[],
-    )
-    .option(
-      '--ref-repo <url>',
-      'Read-only reference repo cloned at /repos/<name>/. Repeatable. Cloned unauthenticated — use --ref-from-profile for private repos.',
-      collectRepeatable,
-      [] as string[],
-    )
-    .option(
-      '--ref-from-profile <name>',
-      "Reference repo from a profile (uses that profile's PAT). Repeatable.",
-      collectRepeatable,
-      [] as string[],
-    )
-    .action(
-      async (
-        profile: string,
-        task: string | undefined,
-        opts: {
-          agent?: string;
-          output?: string;
-          validate?: boolean;
-          validationSuite?: string;
-          model?: string;
-          runtime?: string;
-          executionTarget?: string;
-          branch?: string;
-          branchPrefix?: string;
-          startBranch?: string;
-          baseBranch?: string;
-          rerunOf?: string;
-          rerunReason?: string;
-          rerunRequestKey?: string;
-          sidecar: string[];
-          refRepo: string[];
-          refFromProfile: string[];
-        },
-      ) => {
-        const client = getClient();
-        const agent = opts.agent as 'auto' | 'interactive' | undefined;
-        const output = opts.output as 'pr' | 'branch' | 'artifact' | 'none' | undefined;
-        const validationSuite = parseValidationSuite(opts.validationSuite);
-        const executionTarget = parseExecutionTarget(opts.executionTarget);
-        assertValidationFlags({ validate: opts.validate, validationSuite });
-
-        if (agent && agent !== 'auto' && agent !== 'interactive') {
-          console.error(chalk.red(`--agent must be 'auto' or 'interactive'`));
-          process.exit(1);
-        }
-        if (output && !['pr', 'branch', 'artifact', 'none'].includes(output)) {
-          console.error(chalk.red('--output must be one of pr|branch|artifact|none'));
-          process.exit(1);
-        }
-
-        const podOptions =
-          agent || output || opts.validate !== undefined || validationSuite !== undefined
-            ? {
-                ...(agent ? { agentMode: agent } : {}),
-                ...(output ? { output } : {}),
-                ...(opts.validate !== undefined ? { validate: opts.validate } : {}),
-                ...(validationSuite ? { validationSuite } : {}),
-              }
-            : undefined;
-
-        const isInteractive = agent === 'interactive';
-        if (!task && !isInteractive) {
-          console.error(chalk.red('task is required unless --agent interactive'));
-          process.exit(1);
-        }
-
-        const refRepoEntries: { url: string; sourceProfile?: string }[] = opts.refRepo.map(
-          (url) => ({ url }),
-        );
-        for (const profileName of opts.refFromProfile) {
-          const refProfile = await client.getProfile(profileName).catch(() => null);
-          if (!refProfile?.repoUrl) {
-            console.error(
-              chalk.red(`--ref-from-profile ${profileName}: profile not found or has no repoUrl`),
-            );
-            process.exit(1);
-          }
-          refRepoEntries.push({ url: refProfile.repoUrl, sourceProfile: profileName });
-        }
-        const referenceRepos = refRepoEntries.length ? refRepoEntries : undefined;
-
-        const pod = await withSpinner('Starting pod…', () =>
-          client.createSession({
-            profileName: profile,
-            task: task ?? '',
-            model: opts.model,
-            runtime: opts.runtime as 'claude' | 'codex' | 'copilot' | 'pi' | undefined,
-            executionTarget,
-            branch: opts.branch,
-            branchPrefix: opts.branchPrefix,
-            startBranch: opts.startBranch,
-            baseBranch: opts.baseBranch,
-            intentionalRerun: parseIntentionalRerun(opts),
-            options: podOptions,
-            requireSidecars: opts.sidecar.length > 0 ? opts.sidecar : undefined,
-            referenceRepos,
-          }),
-        );
-
-        console.log(chalk.green(`Pod ${chalk.bold(pod.id)} created.`));
-        console.log(`${chalk.bold('Profile:')}  ${pod.profileName}`);
-        console.log(`${chalk.bold('Status:')}   ${formatStatus(pod.status)}`);
-        console.log(`${chalk.bold('Branch:')}   ${pod.branch}`);
-        console.log(`${chalk.bold('Target:')}   ${pod.executionTarget}`);
-        console.log(
-          `${chalk.bold('Pod:')}      ${pod.options?.agentMode ?? 'auto'} → ${pod.options?.output ?? 'pr'}`,
-        );
-        console.log(`${chalk.bold('Suite:')}    ${pod.options?.validationSuite ?? 'full'}`);
-        if (pod.referenceRepos?.length) {
-          console.log(
-            `${chalk.bold('Refs:')}     ${pod.referenceRepos.map((r) => `/repos/${r.mountPath}`).join(', ')}`,
-          );
-        }
-        if (pod.options?.agentMode === 'interactive') {
-          console.log(chalk.dim(`Attach: ap attach ${pod.id.slice(0, 8)}`));
-        } else {
-          console.log(chalk.dim(`Track progress: ap status ${pod.id.slice(0, 8)}`));
-        }
-      },
-    );
+  registerLaunchCommand(program, getClient, undefined, { name: 'start' });
 
   // ap stats
   program
@@ -827,7 +518,7 @@ export function registerPodCommands(program: Command, getClient: () => AutopodCl
         } else console.log('Source-bound merge evidence unavailable.');
         console.log('Current provider status unverified.');
         console.log(
-          `${chalk.bold('Task tokens:')} ${task.recordedInputTokens + task.recordedOutputTokens}/${task.tokenBudget ?? 'no configured limit'}`,
+          `${chalk.bold('Task tokens:')} ${task.recordedTotalTokens ?? task.recordedInputTokens + task.recordedOutputTokens}/${task.tokenBudget ?? 'no configured limit'}`,
         );
         console.log(
           `${chalk.bold('Stored task cost subtotal:')} $${task.recordedCostUsd.toFixed(4)} (${task.telemetry} telemetry)`,
@@ -1272,142 +963,7 @@ export function registerPodCommands(program: Command, getClient: () => AutopodCl
     .action(statusAction);
   podGroup.command('kill <id>').description('Kill a running pod').action(killAction);
 
-  // ap pod create
-  podGroup
-    .command('create <profile> [task]')
-    .description('Create a new pod (task inline or via --file)')
-    .option('-f, --file <path>', 'read task from a file (mutually exclusive with inline task arg)')
-    .option('--spec <folder>', 'read contract-based spec folder (brief.md + contract.yaml)')
-    .option(
-      '--include-specs',
-      'commit --spec folder files onto the pod branch before the agent starts',
-    )
-    .option('--no-spec-context', 'do not expose --spec folder files as runtime-only context')
-    .option('-m, --model <model>', 'AI model to use')
-    .option('-r, --runtime <runtime>', 'runtime (claude | codex | copilot | pi)')
-    .option('-b, --branch <branch>', 'target branch name')
-    .option('--branch-prefix <prefix>', 'override branch prefix (e.g. hotfix/)')
-    .option('--start-branch <branch>', 'branch/ref to start from while targeting --base-branch')
-    .option('--rerun-of <id>', 'Explicitly repeat this prior pod as a distinct task')
-    .option('--rerun-reason <reason>', 'Human reason for intentionally repeating equivalent work')
-    .option('--rerun-request-key <key>', 'Stable decision key; reuse it after a lost response')
-    .option('--base-branch <branch>', 'branch from a specific base')
-    .option('--skip-validation', 'skip validation phase')
-    .option('--validation-suite <suite>', validationSuiteHelp)
-    .option(
-      '-s, --sidecar <name>',
-      'companion sidecar (repeatable)',
-      collectRepeatable,
-      [] as string[],
-    )
-    .option('--execution-target <target>', executionTargetHelp)
-    .action(
-      async (
-        profile: string,
-        task: string | undefined,
-        opts: {
-          file?: string;
-          spec?: string;
-          includeSpecs?: boolean;
-          specContext?: boolean;
-          model?: string;
-          runtime?: string;
-          branch?: string;
-          branchPrefix?: string;
-          startBranch?: string;
-          baseBranch?: string;
-          rerunOf?: string;
-          rerunReason?: string;
-          rerunRequestKey?: string;
-          skipValidation?: boolean;
-          validationSuite?: string;
-          sidecar: string[];
-          executionTarget?: string;
-        },
-      ) => {
-        if ([opts.file, opts.spec, task].filter(Boolean).length > 1) {
-          podGroup.error('provide only one of [task], --file, or --spec');
-        }
-        if (opts.includeSpecs && !opts.spec) {
-          podGroup.error('--include-specs requires --spec');
-        }
-
-        let resolvedTask: string;
-        let contract: import('@autopod/shared').SpecContract | undefined;
-        let specFiles: SpecFile[] | undefined;
-        let specContextFiles: SpecFile[] | undefined;
-        if (opts.spec) {
-          const specRoot = resolve(opts.spec);
-          const briefPath = join(specRoot, 'brief.md');
-          if (!existsSync(briefPath)) podGroup.error(`brief not found: ${briefPath}`);
-          let contractPath: string;
-          try {
-            contractPath = resolveContractPath(specRoot);
-          } catch (err) {
-            podGroup.error(err instanceof Error ? err.message : String(err));
-            return;
-          }
-          const [brief] = parseBriefs([
-            {
-              filename: basename(specRoot),
-              content: readFileSync(briefPath, 'utf8'),
-              contractContent: readFileSync(contractPath, 'utf8'),
-            },
-          ]);
-          if (!brief?.contract) {
-            podGroup.error(`contract could not be parsed: ${contractPath}`);
-            return;
-          }
-          resolvedTask = brief.task;
-          contract = brief.contract;
-          const collectedSpecFiles = collectSpecFiles(specRoot);
-          specFiles = opts.includeSpecs ? collectedSpecFiles : undefined;
-          specContextFiles = opts.specContext === false ? undefined : collectedSpecFiles;
-        } else if (opts.file) {
-          if (!existsSync(opts.file)) podGroup.error(`file not found: ${opts.file}`);
-          resolvedTask = readFileSync(opts.file, 'utf8').trim();
-          if (!resolvedTask) podGroup.error('file is empty');
-        } else if (task) {
-          resolvedTask = task;
-        } else {
-          podGroup.error('task is required — pass it inline or via --file <path>');
-          return;
-        }
-
-        const client = getClient();
-        const validationSuite = parseValidationSuite(opts.validationSuite);
-        const executionTarget = parseExecutionTarget(opts.executionTarget);
-        assertValidationFlags({ skipValidation: opts.skipValidation, validationSuite });
-        const pod = await withSpinner('Starting pod...', () =>
-          client.createSession({
-            profileName: profile,
-            task: resolvedTask,
-            contract,
-            model: opts.model,
-            runtime: opts.runtime as 'claude' | 'codex' | 'copilot' | 'pi' | undefined,
-            executionTarget,
-            branch: opts.branch,
-            branchPrefix: opts.branchPrefix,
-            startBranch: opts.startBranch,
-            baseBranch: opts.baseBranch,
-            intentionalRerun: parseIntentionalRerun(opts),
-            specFiles,
-            specContextFiles,
-            skipValidation: opts.skipValidation,
-            options: validationSuite ? { validationSuite } : undefined,
-            requireSidecars: opts.sidecar.length > 0 ? opts.sidecar : undefined,
-          }),
-        );
-
-        console.log(chalk.green(`Pod ${chalk.bold(pod.id)} created.`));
-        console.log(`${chalk.bold('Profile:')}  ${pod.profileName}`);
-        console.log(`${chalk.bold('Status:')}   ${formatStatus(pod.status)}`);
-        console.log(`${chalk.bold('Branch:')}   ${pod.branch}`);
-        console.log(`${chalk.bold('Target:')}   ${pod.executionTarget}`);
-        console.log(`${chalk.bold('Suite:')}    ${pod.options?.validationSuite ?? 'full'}`);
-        console.log(chalk.dim(`Track progress: ap status ${pod.id.slice(0, 8)}`));
-      },
-    );
+  registerLaunchCommand(podGroup, getClient, undefined, { name: 'create' });
 }
 
 function formatTimestamp(ts: string): string {
@@ -1553,21 +1109,4 @@ function formatLogEvent(
     default:
       console.log(`${ts} ${chalk.dim(JSON.stringify(event))}`);
   }
-}
-
-function parseIntentionalRerun(opts: {
-  rerunOf?: string;
-  rerunReason?: string;
-  rerunRequestKey?: string;
-}) {
-  if (!opts.rerunOf && !opts.rerunReason && !opts.rerunRequestKey) return undefined;
-  if (!opts.rerunOf || !opts.rerunReason?.trim() || !opts.rerunRequestKey)
-    throw new Error(
-      'Intentional rerun requires --rerun-of, --rerun-reason, and --rerun-request-key. Reuse the same key after a lost response.',
-    );
-  return {
-    ofPodId: opts.rerunOf,
-    reason: opts.rerunReason.trim(),
-    requestKey: opts.rerunRequestKey,
-  };
 }

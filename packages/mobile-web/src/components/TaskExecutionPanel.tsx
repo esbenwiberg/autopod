@@ -68,7 +68,8 @@ export function TaskExecutionPanel({ podId, revision }: { podId: string; revisio
           )}
           <p className="muted">Current provider status unverified.</p>
           <p>
-            Recorded tokens: {data.recordedInputTokens + data.recordedOutputTokens} /{' '}
+            Recorded tokens:{' '}
+            {data.recordedTotalTokens ?? data.recordedInputTokens + data.recordedOutputTokens} /{' '}
             {data.tokenBudget ?? 'no configured limit'}
           </p>
           <p>

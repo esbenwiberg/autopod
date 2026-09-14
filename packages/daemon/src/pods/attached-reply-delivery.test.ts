@@ -17,7 +17,7 @@ import { createSessionBridge } from './pod-bridge-impl.js';
 import { createPodManager } from './pod-manager.js';
 
 it.each(
-  (['ask_human', 'report_blocker', 'request_credential'] as const).flatMap((tool) =>
+  (['ask_human', 'report_blocker'] as const).flatMap((tool) =>
     (['dropped', 'received', 'storage-failure'] as const).map((mode) => ({ tool, mode })),
   ),
 )('retains the actual attached $tool reply with $mode delivery', async ({ tool, mode }) => {
@@ -79,9 +79,7 @@ it.each(
           arguments:
             tool === 'ask_human'
               ? { question: 'Keep the existing source?' }
-              : tool === 'report_blocker'
-                ? { description: 'Need source decision', attempted: [], needs: 'Direction' }
-                : { service: 'github', reason: 'Read repository' },
+              : { description: 'Need source decision', attempted: [], needs: 'Direction' },
         },
         undefined,
         { timeout: 1000 },
@@ -96,11 +94,10 @@ it.each(
     expect(pending.hasPending(decisionId)).toBe(true);
     expect(pending.isDetached(decisionId)).toBe(false);
     const send = () =>
-      manager.sendMessage(
-        pod.id,
-        tool === 'request_credential' ? 'approved' : 'Keep existing source',
-        { type: 'human', id: 'fixture-operator' },
-      );
+      manager.sendMessage(pod.id, 'Keep existing source', {
+        type: 'human',
+        id: 'fixture-operator',
+      });
     if (mode === 'storage-failure') {
       ctx.db.exec(
         "CREATE TRIGGER fixture_reply_fault BEFORE INSERT ON nudge_messages BEGIN SELECT RAISE(ABORT, 'fixture reply storage failed'); END",
@@ -128,9 +125,7 @@ it.each(
         .listPending(pod.id)
         .map((row) => row.message)
         .join('\n'),
-    ).toContain(
-      tool === 'request_credential' ? 'Authenticated to github.com' : 'Keep existing source',
-    );
+    ).toContain('Keep existing source');
     expect(
       ctx.nudgeRepo
         .listPending(pod.id)
@@ -170,7 +165,7 @@ it.each(
           )
           .get(pod.id, decisionId);
         expect(decision).toEqual({
-          response: tool === 'request_credential' ? 'approved' : 'Keep existing source',
+          response: 'Keep existing source',
           actor: JSON.stringify({ type: 'human', id: 'fixture-operator' }),
         });
         expect(reopened.pragma('integrity_check', { simple: true })).toBe('ok');

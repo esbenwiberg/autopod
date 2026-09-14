@@ -3,12 +3,12 @@ import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import Database from 'better-sqlite3';
 import { expect, it } from 'vitest';
-import { runMigrations } from '../db/migrate.js';
+import { runMigrations, runMigrationsWithBackups } from '../db/migrate.js';
 import { insertTestProfile, logger } from '../test-utils/mock-helpers.js';
 import { createPodRepository } from './pod-repository.js';
 
 // Full on-disk schema replay includes fsyncs; these are functional, not latency tests.
-it('upgrades schema 180, blocks old destructive deletion, and retains event/progress rows through reopen', () => {
+it('upgrades schema 180, blocks old destructive deletion, and retains event/progress rows through reopen', async () => {
   const dir = mkdtempSync(join(tmpdir(), 'retained-history-upgrade-'));
   const migrations = resolve(import.meta.dirname, '../db/migrations');
   for (const file of readdirSync(migrations))
@@ -29,7 +29,7 @@ it('upgrades schema 180, blocks old destructive deletion, and retains event/prog
     ).run();
     const events = db.prepare('SELECT * FROM events').all();
     const progress = db.prepare('SELECT * FROM session_progress_events').all();
-    runMigrations(db, migrations, logger);
+    await runMigrationsWithBackups(db, migrations, logger);
     expect(db.prepare('SELECT * FROM retained_events').all()).toEqual(events);
     expect(db.prepare('SELECT * FROM retained_session_progress_events').all()).toEqual(progress);
     expect(() =>

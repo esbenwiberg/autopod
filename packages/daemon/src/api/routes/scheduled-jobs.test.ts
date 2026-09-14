@@ -75,6 +75,10 @@ describe('scheduled-jobs routes', () => {
   beforeEach(async () => {
     manager = createMockScheduledJobManager();
     app = Fastify();
+    app.decorateRequest('user', null);
+    app.addHook('onRequest', async (request) => {
+      request.user = { oid: 'operator', roles: [] };
+    });
     app.setErrorHandler(errorHandler);
     scheduledJobRoutes(app, manager);
     await app.ready();
@@ -85,6 +89,28 @@ describe('scheduled-jobs routes', () => {
   });
 
   describe('POST /scheduled-jobs', () => {
+    it('binds the authenticated owner and rejects owner or run-identity injection', async () => {
+      const payload = {
+        templateId: 'template',
+        launch: { repositoryId: 'repo', selections: { githubAccessId: null } },
+        cronExpression: '0 9 * * *',
+      };
+      expect(
+        (await app.inject({ method: 'POST', url: '/scheduled-jobs', payload })).statusCode,
+      ).toBe(201);
+      expect(manager.create).toHaveBeenCalledWith(
+        { ...payload, launch: { ...payload.launch, referenceRepositories: [] } },
+        'operator',
+      );
+      for (const forged of [
+        { ...payload, ownerUserId: 'someone-else' },
+        { ...payload, launch: { ...payload.launch, requestId: 'reuse-another-request' } },
+      ])
+        expect(
+          (await app.inject({ method: 'POST', url: '/scheduled-jobs', payload: forged }))
+            .statusCode,
+        ).toBe(400);
+    });
     it('returns 201 with created job', async () => {
       const res = await app.inject({
         method: 'POST',

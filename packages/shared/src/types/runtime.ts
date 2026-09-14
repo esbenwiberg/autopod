@@ -1,4 +1,5 @@
 import type { FactEvidence } from './contract.js';
+import type { NativeGoalProcessHooks, NativeGoalSession } from './goal.js';
 import type { ExecutionTarget, ReasoningEffort } from './profile.js';
 import type { MemoryOutcomeItem, ReviewFeedbackResponseItem } from './task-summary.js';
 
@@ -21,6 +22,8 @@ export interface ProviderFailureClassification {
 
 export interface Runtime {
   type: RuntimeType;
+  /** Creates a lazy native adapter. Execution starts only after the daemon admits a Goal attempt. */
+  nativeGoalSession?(config: SpawnConfig, hooks?: NativeGoalProcessHooks): NativeGoalSession;
   spawn(config: SpawnConfig): AsyncIterable<AgentEvent>;
   resume(
     podId: string,

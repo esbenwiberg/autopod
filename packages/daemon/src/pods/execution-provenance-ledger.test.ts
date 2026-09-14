@@ -4,7 +4,7 @@ import { join, resolve } from 'node:path';
 import type { ExecutionProvenanceInput } from '@autopod/shared';
 import Database from 'better-sqlite3';
 import { expect, it } from 'vitest';
-import { runMigrations } from '../db/migrate.js';
+import { runMigrations, runMigrationsWithBackups } from '../db/migrate.js';
 import { createTestDb, insertTestProfile, logger } from '../test-utils/mock-helpers.js';
 import { createPodRepository } from './pod-repository.js';
 
@@ -146,7 +146,7 @@ it.each([undefined, 'worker', 'reviewer', 'api', 'legacy-api', 'host'] as const)
 // Full on-disk schema replay includes fsyncs; these are functional, not latency tests.
 it.each([139, 157])(
   'upgrades schema %s without manufacturing missing historical provenance',
-  (version) => {
+  async (version) => {
     const dir = mkdtempSync(join(tmpdir(), 'provenance-upgrade-'));
     const migrations = resolve(import.meta.dirname, '../db/migrations');
     for (const file of readdirSync(migrations))
@@ -160,7 +160,7 @@ it.each([139, 157])(
       db.prepare(
         "INSERT INTO pods (id,profile_name,task,status,model,runtime,branch,user_id,task_summary) VALUES ('old','test-profile','old','failed','model','codex','branch','operator','malformed-preserve')",
       ).run();
-      runMigrations(db, migrations, logger);
+      await runMigrationsWithBackups(db, migrations, logger);
       expect(createPodRepository(db).executionProvenance?.latest('old')).toBeNull();
       expect(db.prepare("SELECT task_summary FROM pods WHERE id='old'").get()).toEqual({
         task_summary: 'malformed-preserve',

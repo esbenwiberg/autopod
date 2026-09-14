@@ -2,9 +2,19 @@ import { AutopodError, type HistoryQuery } from '@autopod/shared';
 import type { FastifyInstance } from 'fastify';
 import type { PodManager } from '../../pods/index.js';
 
-export function historyRoutes(app: FastifyInstance, podManager: PodManager): void {
+export function historyRoutes(
+  app: FastifyInstance,
+  podManager: PodManager,
+  composable = false,
+): void {
   // POST /pods/history-workspace — create a workspace pod with history data
   app.post('/pods/history-workspace', async (request, reply) => {
+    if (composable)
+      return reply.status(410).send({
+        code: 'CONFIG_API_VERSION_UNSUPPORTED',
+        error:
+          'Use POST /pods with a repository/profile selection and work.analysis.kind="history".',
+      });
     const body = request.body as {
       profileName?: string;
       since?: string;

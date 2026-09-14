@@ -4,11 +4,11 @@ import type {
   MaxRefreshCredentials,
   MaxSetupTokenCredentials,
   ModelProvider,
-  Profile,
   ProviderCredentials,
 } from '@autopod/shared';
 import { CLAUDE_DEFAULT_MODEL, CLAUDE_REVIEWER_MODEL } from '@autopod/shared';
 import type { Logger } from 'pino';
+import type { PodExecutionSettings } from '../interfaces/pod-execution-settings.js';
 import type { ProfileStore } from '../profiles/index.js';
 import type { ProviderAccountStore } from '../provider-accounts/index.js';
 import { type CredentialOwner, resolveProviderAuth } from './auth-resolution.js';
@@ -222,7 +222,7 @@ export async function createProviderAnthropicClient(
  * back to template output and propagate the reason to the user.
  */
 export async function createProfileAnthropicClient(
-  profile: Profile,
+  profile: PodExecutionSettings,
   podModel: string,
   logger: Logger,
   deps: ProfileLlmClientDeps = {},

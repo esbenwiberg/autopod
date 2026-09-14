@@ -463,6 +463,7 @@ export function podRoutes(
   db?: Database.Database,
   safetyEventsRepo?: SafetyEventsRepository,
   actionAuditRepo?: ActionAuditRepository,
+  configuration?: import('./configuration.js').ConfigurationRouteDependencies,
 ): void {
   const providerAttemptRepo = db ? createProviderAttemptRepository(db) : undefined;
   // Rework can include a full sandbox filesystem sync. Keep it detached from the
@@ -526,6 +527,28 @@ export function podRoutes(
         code: 'HOSTED_DEPLOY_DRAIN',
         retryAfterSeconds,
       };
+    }
+    if (configuration) {
+      if (!configuration.admit)
+        throw new AutopodError(
+          'Composable pod creation is not enabled until execution cutover is complete',
+          'CONFIG_EXECUTION_UNAVAILABLE',
+          503,
+        );
+      if (request.body && typeof request.body === 'object' && 'profileName' in request.body)
+        throw new AutopodError(
+          'This daemon uses repository and profile selections. Upgrade the client and use LaunchRequest.',
+          'CONFIG_API_VERSION_UNSUPPORTED',
+          409,
+        );
+      const pod = await configuration.admit(request.body, {
+        userId: request.user.oid,
+        email: request.user.preferred_username,
+        name: request.user.name,
+        actor: humanActor(request),
+      });
+      reply.status(201);
+      return serializePodForRequest(pod, request, providerAttemptRepo, eventRepo);
     }
     const body = createPodRequestSchema.parse(request.body);
 
@@ -731,6 +754,33 @@ export function podRoutes(
 
   app.get('/pods/:podId/rerun-template', async (request) => {
     const { podId } = request.params as { podId: string };
+    if (configuration) {
+      const source = configuration.resolution.readLaunch?.(podId);
+      if (!source)
+        throw new AutopodError(
+          'This historical pod has no composable snapshot. Select its repository and profile for a new launch.',
+          'CONFIG_SOURCE_MISSING',
+          409,
+        );
+      return {
+        ...(source.repository
+          ? { repositoryId: source.repository.id, repositorySetupId: source.repository.setup.id }
+          : { emptyWorkspace: true }),
+        profileId: source.profileId,
+        task: source.task,
+        source: { podId, digest: source.digest, configuration: 'original' },
+        work: {
+          contract: source.work.contract,
+          handoffInstructions: source.work.handoffInstructions,
+          specFiles: source.work.specFiles,
+          specContextFiles: source.work.specContextFiles,
+          baseBranch: source.work.baseBranch,
+          startBranch: source.work.startBranch,
+          touches: source.work.touches,
+          doesNotTouch: source.work.doesNotTouch,
+        },
+      };
+    }
     return dispatchRerunRequest(podRepo.getOrThrow(podId));
   });
 
@@ -1336,7 +1386,7 @@ export function podRoutes(
   // POST /pods/:podId/fix-manually — create linked workspace for human fixes
   app.post('/pods/:podId/fix-manually', async (request, reply) => {
     const { podId } = request.params as { podId: string };
-    const workspace = podManager.fixManually(podId, humanActor(request), {
+    const workspace = await podManager.fixManually(podId, humanActor(request), {
       email: request.user.preferred_username,
       name: request.user.name,
     });

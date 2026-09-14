@@ -59,6 +59,10 @@ import { rateLimitPlugin } from './plugins/rate-limit.js';
 import { requestLoggerPlugin } from './plugins/request-logger.js';
 import { actionRoutes } from './routes/actions.js';
 import { cliAuthBrokerRoutes } from './routes/cli-auth-broker.js';
+import {
+  type ConfigurationRouteDependencies,
+  configurationRoutes,
+} from './routes/configuration.js';
 import { diffRoutes } from './routes/diff.js';
 import { filesRoutes } from './routes/files.js';
 import { healthRoutes } from './routes/health.js';
@@ -67,6 +71,7 @@ import { issueWatcherRoutes } from './routes/issue-watcher.js';
 import { memoryWorkspaceRoutes } from './routes/memory-workspace.js';
 import { memoryRoutes } from './routes/memory.js';
 import { modelProviderRoutes } from './routes/model-providers.js';
+import { type PimRouteDependencies, pimRoutes } from './routes/pim.js';
 import { podRoutes } from './routes/pods.js';
 import { podsitterRoutes } from './routes/podsitter.js';
 import { profileRoutes } from './routes/profiles.js';
@@ -93,6 +98,9 @@ export interface ServerDependencies {
       };
   podManager: PodManager;
   profileStore: ProfileStore;
+  /** Internal opt-in during cutover; absent in the deployed composition until acceptance. */
+  configuration?: ConfigurationRouteDependencies;
+  pim?: PimRouteDependencies;
   providerAccountStore?: ProviderAccountStore;
   podsitterRepository?: PodsitterRepository;
   podsitterService?: PodsitterService;
@@ -213,35 +221,53 @@ export async function createServer(deps: ServerDependencies): Promise<FastifyIns
     deps.db,
     deps.safetyEventsRepo,
     deps.actionAuditRepo,
+    deps.configuration,
   );
   if (deps.worktreeManager) {
-    seriesRoutes(app, deps.podManager, deps.profileStore, deps.worktreeManager);
+    seriesRoutes(app, deps.podManager, deps.profileStore, deps.worktreeManager, deps.configuration);
   } else {
     // Preview-branch endpoint is unavailable without a WorktreeManager (e.g.
     // in tests that don't exercise it). Existing series endpoints still work.
-    seriesRoutes(app, deps.podManager, deps.profileStore, {
-      readBranchFolder: async () => {
-        throw new Error('WorktreeManager not configured — preview-branch unavailable');
-      },
-    } as unknown as WorktreeManager);
+    seriesRoutes(
+      app,
+      deps.podManager,
+      deps.profileStore,
+      {
+        readBranchFolder: async () => {
+          throw new Error('WorktreeManager not configured — preview-branch unavailable');
+        },
+      } as unknown as WorktreeManager,
+      deps.configuration,
+    );
   }
-  historyRoutes(app, deps.podManager);
+  historyRoutes(app, deps.podManager, Boolean(deps.configuration));
   if (deps.tokenTelemetryRepair) {
     tokenTelemetryRoutes(app, deps.tokenTelemetryRepair);
   }
-  memoryWorkspaceRoutes(app, deps.podManager);
+  memoryWorkspaceRoutes(app, deps.podManager, Boolean(deps.configuration));
   modelProviderRoutes(app);
-  profileRoutes(
-    app,
-    deps.profileStore,
-    (profileName) => deps.podManager.refreshNetworkPolicy(profileName),
-    deps.imageBuilder,
-    deps.providerAccountStore,
-    deps.githubAuth,
-    deps.azureDevOpsAuth,
-  );
+  if (deps.configuration) {
+    configurationRoutes(app, deps.configuration);
+    if (deps.pim) pimRoutes(app, deps.pim);
+  } else {
+    profileRoutes(
+      app,
+      deps.profileStore,
+      (profileName) => deps.podManager.refreshNetworkPolicy(profileName),
+      deps.imageBuilder,
+      deps.providerAccountStore,
+      deps.githubAuth,
+      deps.azureDevOpsAuth,
+    );
+  }
   if (deps.providerAccountStore) {
-    providerAccountRoutes(app, deps.providerAccountStore, deps.profileStore);
+    providerAccountRoutes(
+      app,
+      deps.providerAccountStore,
+      deps.profileStore,
+      undefined,
+      Boolean(deps.configuration),
+    );
   }
   if (deps.providerAccountStore && deps.podsitterRepository && deps.podsitterService) {
     podsitterRoutes(app, {
@@ -330,6 +356,12 @@ export async function createServer(deps: ServerDependencies): Promise<FastifyIns
   // Auth is enforced at the route level (pod-token, matches path podId).
   mcpProxyHandler(app, {
     getServersForPod: (podId) => deps.podManager.getInjectedMcpServers(podId),
+    ...(deps.podManager.getInjectedMcpServer
+      ? {
+          getServerForPod: (podId: string, name: string) =>
+            deps.podManager.getInjectedMcpServer!(podId, name),
+        }
+      : {}),
     safetyEventsRepo: deps.safetyEventsRepo,
     logger: app.log as unknown as import('pino').Logger,
   });

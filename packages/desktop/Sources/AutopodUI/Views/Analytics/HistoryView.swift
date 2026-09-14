@@ -5,16 +5,15 @@ public struct HistoryView: View {
     public let pods: [Pod]
     public let actions: PodActions
     public let profileNames: [String]
+    public var configurationActions: LaunchConfigurationActions?
 
-    public init(pods: [Pod], actions: PodActions, profileNames: [String]) {
+    public init(pods: [Pod], actions: PodActions, profileNames: [String], configurationActions: LaunchConfigurationActions? = nil) {
         self.pods = pods
         self.actions = actions
         self.profileNames = profileNames
+        self.configurationActions = configurationActions
     }
 
-    @State private var selectedProfile: String?
-    @State private var isCreatingWorkspace = false
-    @State private var sessionLimit = 100
 
     // MARK: - Computed stats
 
@@ -279,54 +278,13 @@ public struct HistoryView: View {
 
     private var workspaceLauncher: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("Deep Investigation")
-                .font(.subheadline.weight(.semibold))
-
-            VStack(alignment: .leading, spacing: 12) {
-                Text("Launch an interactive workspace pod pre-loaded with a SQLite database of your pod history. Use Claude Code or sqlite3 to investigate patterns.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-
-                HStack(spacing: 12) {
-                    Picker("Profile", selection: $selectedProfile) {
-                        Text("Select a profile…").tag(nil as String?)
-                        ForEach(profileNames, id: \.self) { name in
-                            Text(name).tag(name as String?)
-                        }
-                    }
-                    .frame(width: 180)
-
-                    Picker("Pods", selection: $sessionLimit) {
-                        Text("Last 50").tag(50)
-                        Text("Last 100").tag(100)
-                        Text("Last 200").tag(200)
-                    }
-                    .frame(width: 120)
-
-                    Button {
-                        Task {
-                            isCreatingWorkspace = true
-                            await actions.createHistoryWorkspace(selectedProfile, sessionLimit)
-                            isCreatingWorkspace = false
-                        }
-                    } label: {
-                        if isCreatingWorkspace {
-                            ProgressView()
-                                .controlSize(.small)
-                                .padding(.horizontal, 4)
-                        } else {
-                            Label("Open History Workspace", systemImage: "terminal.fill")
-                        }
-                    }
-                    .buttonStyle(.borderedProminent)
-                    .disabled(isCreatingWorkspace || selectedProfile == nil)
-                }
-            }
-            .padding(16)
-            .background(Color(nsColor: .controlBackgroundColor))
-            .clipShape(RoundedRectangle(cornerRadius: 10))
+            Text("Deep Investigation").font(.subheadline.weight(.semibold))
+            Text("Explore pod history in an interactive workspace with a SQLite export.")
+                .foregroundStyle(.secondary)
+            AnalysisWorkspaceLauncher(kind: "history", actions: configurationActions)
         }
     }
+
 }
 
 // MARK: - Supporting types

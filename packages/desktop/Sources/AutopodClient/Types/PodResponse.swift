@@ -643,6 +643,8 @@ public struct TokenUsageSummary: Codable, Sendable {
   public let inputTokens: Int
   public let outputTokens: Int
   public let costUsd: Double
+  public let unclassifiedTokens: Int?
+  public let totalTokens: Int?
 }
 
 public struct SeriesResponse: Codable, Sendable {
@@ -713,42 +715,26 @@ public struct SeriesPreviewResponse: Codable, Sendable {
 }
 
 public struct CreateSeriesRequest: Codable, Sendable {
+  public var requestId: String
   public var seriesName: String
   public var briefs: [ParsedBriefResponse]
-  public var profile: String
+  public var launch: [String: ConfigurationJSON]
   public var startBranch: String?
   public var baseBranch: String?
   public var specFiles: [SpecFilePayload]?
-  public var prMode: String?   // "single" | "stacked" | "none"
-  public var autoApprove: Bool?
-  public var disableAskHuman: Bool?
+  public var specContextFiles: [SpecFilePayload]?
+  public var prMode: String?
   public var seriesDescription: String?
   public var seriesDesign: String?
 
-  public init(
-    seriesName: String,
-    briefs: [ParsedBriefResponse],
-    profile: String,
-    startBranch: String? = nil,
-    baseBranch: String? = nil,
-    specFiles: [SpecFilePayload]? = nil,
-    prMode: String? = nil,
-    autoApprove: Bool? = nil,
-    disableAskHuman: Bool? = nil,
-    seriesDescription: String? = nil,
-    seriesDesign: String? = nil
-  ) {
-    self.seriesName = seriesName
-    self.briefs = briefs
-    self.profile = profile
-    self.startBranch = startBranch
-    self.baseBranch = baseBranch
-    self.specFiles = specFiles
-    self.prMode = prMode
-    self.autoApprove = autoApprove
-    self.disableAskHuman = disableAskHuman
-    self.seriesDescription = seriesDescription
-    self.seriesDesign = seriesDesign
+  public init(requestId: String, seriesName: String, briefs: [ParsedBriefResponse],
+    launch: [String: ConfigurationJSON], startBranch: String? = nil, baseBranch: String? = nil,
+    specFiles: [SpecFilePayload]? = nil, specContextFiles: [SpecFilePayload]? = nil,
+    prMode: String? = nil, seriesDescription: String? = nil, seriesDesign: String? = nil) {
+    self.requestId = requestId; self.seriesName = seriesName; self.briefs = briefs; self.launch = launch
+    self.startBranch = startBranch; self.baseBranch = baseBranch
+    self.specFiles = specFiles; self.specContextFiles = specContextFiles; self.prMode = prMode
+    self.seriesDescription = seriesDescription; self.seriesDesign = seriesDesign
   }
 }
 

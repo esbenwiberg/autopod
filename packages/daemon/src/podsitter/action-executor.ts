@@ -351,14 +351,11 @@ export class PodsitterActionExecutor {
         await this.podManager.updateFromBase(podId);
         return;
       case 'inject_credential':
-        if (
-          decision.arguments.credentialId !== 'github' &&
-          decision.arguments.credentialId !== 'ado'
-        ) {
-          throw new AutopodError('Unsupported credential id', 'INVALID_ARGUMENTS', 400);
-        }
-        await this.podManager.injectCredential(podId, decision.arguments.credentialId);
-        return;
+        throw new AutopodError(
+          'Source credentials stay with the daemon; credential injection is unavailable.',
+          'SOURCE_CREDENTIAL_INJECTION_DISABLED',
+          410,
+        );
       case 'install_tool':
         if (decision.arguments.toolName !== 'gh' && decision.arguments.toolName !== 'az') {
           throw new AutopodError('Unsupported tool name', 'INVALID_ARGUMENTS', 400);
@@ -378,7 +375,7 @@ export class PodsitterActionExecutor {
         await this.podManager.forceComplete(podId, decision.reason, actor);
         return;
       case 'fix_manually':
-        this.podManager.fixManually(podId, actor, undefined, decision.arguments.instructions);
+        await this.podManager.fixManually(podId, actor, undefined, decision.arguments.instructions);
         return;
     }
   }

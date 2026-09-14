@@ -3,6 +3,7 @@ export { PendingRequests } from './pending-requests.js';
 export type {
   MemoryPlanIntentItem,
   PodBridge,
+  ScopedPodTools,
   ValidationPhaseName,
   ValidationPhaseResult,
   PreSubmitReviewInput,

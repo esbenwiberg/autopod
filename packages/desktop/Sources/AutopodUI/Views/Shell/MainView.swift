@@ -20,6 +20,7 @@ public struct MainView: View {
     /// Full profile objects. Optional — used by the create-pod sheet to drive
     /// per-profile UI (e.g. the Dagger sidecar toggle). Empty = name-only fallback.
     public var profileDetails: [Profile]
+    public var configurationActions: LaunchConfigurationActions?
     public var selectedSessionEvents: [AgentEvent]
     /// Returns the cached event stream for any pod id — used by the Series tab
     /// slide-in panel so it can show events for sibling pods without making the
@@ -129,6 +130,7 @@ public struct MainView: View {
         actions: PodActions = .preview,
         profileNames: [String] = ["my-app", "webapp", "backend"],
         profileDetails: [Profile] = [],
+        configurationActions: LaunchConfigurationActions? = nil,
         selectedSessionEvents: [AgentEvent] = [],
         eventsForPod: ((String) -> [AgentEvent])? = nil,
         loadEventsForPod: ((String) -> Void)? = nil,
@@ -223,6 +225,7 @@ public struct MainView: View {
         self.actions = actions
         self.profileNames = profileNames
         self.profileDetails = profileDetails
+        self.configurationActions = configurationActions
         self.selectedSessionEvents = selectedSessionEvents
         self.eventsForPod = eventsForPod
         self.loadEventsForPod = loadEventsForPod
@@ -516,7 +519,7 @@ public struct MainView: View {
                 )
                 .frame(minWidth: 600)
             } else if sidebarSelection == .history {
-                HistoryView(pods: pods, actions: wiredActions, profileNames: profileNames)
+                HistoryView(pods: pods, actions: wiredActions, profileNames: profileNames, configurationActions: configurationActions)
                     .frame(minWidth: 600)
             } else if sidebarSelection == .memory {
                 MemoryManagementView(
@@ -554,6 +557,8 @@ public struct MainView: View {
                                 .map(String.init)?
                                 .trimmingCharacters(in: .whitespaces) ?? ""
                             return firstLine.isEmpty ? s.branch : firstLine
+                        case .repository:
+                            return configurationActions?.documents.first(where: { $0.kind == .repository && $0.id == id })?.name ?? id
                         case .profile:
                             return id
                         case .global:
@@ -563,9 +568,7 @@ public struct MainView: View {
                         }
                     },
                     profileNames: profileNames,
-                    onScanMemories: { profile in
-                        Task { await wiredActions.createMemoryWorkspace(profile) }
-                    }
+                    configurationActions: configurationActions
                 )
                 .frame(minWidth: 600)
                 .task { await onLoadMemories?() }
@@ -574,6 +577,7 @@ public struct MainView: View {
                     jobs: scheduledJobs,
                     templates: scheduledJobTemplates,
                     profileNames: profileNames,
+                    configurationActions: configurationActions,
                     onRunCatchup: onRunCatchup,
                     onSkipCatchup: onSkipCatchup,
                     onOpenScanReports: onOpenScanReports,
@@ -752,18 +756,23 @@ public struct MainView: View {
         }
         .navigationSplitViewStyle(.balanced)
         .sheet(isPresented: $showCreateSheet) {
+            if let configurationActions {
+                ComposableCreatePodSheet(isPresented: $showCreateSheet, actions: configurationActions)
+            } else {
             CreateSessionSheet(
                 isPresented: $showCreateSheet,
                 actions: actions,
                 profileNames: profileNames,
                 profileDetails: profileDetails
             )
+            }
         }
         .sheet(isPresented: $showCreateSeriesSheet) {
             CreateSeriesSheet(
                 isPresented: $showCreateSeriesSheet,
                 actions: actions,
                 profileNames: profileNames,
+                configurationActions: configurationActions,
                 onSeriesCreated: { seriesId in
                     sidebarSelection = .series(seriesId)
                 }
@@ -777,6 +786,7 @@ public struct MainView: View {
                 ),
                 actions: actions,
                 profileNames: profileNames,
+                configurationActions: configurationActions,
                 initialBaseBranch: initiator.branch,
                 initialTargetBranch: initiator.baseBranch,
                 initialProfile: initiator.profileName,
@@ -797,6 +807,7 @@ public struct MainView: View {
                 candidatePods: pods,
                 actions: actions,
                 profileNames: profileNames,
+                configurationActions: configurationActions,
                 onPodCreated: { newId in
                     selectedSessionId = newId
                 }

@@ -1,9 +1,14 @@
-import type { Profile, ScheduledScanReport } from '@autopod/shared';
+import Anthropic from '@anthropic-ai/sdk';
+import type { EffectiveLaunchConfig, Profile, ScheduledScanReport } from '@autopod/shared';
 import type { Logger } from 'pino';
-import { resolveProviderAuth } from '../providers/auth-resolution.js';
+import { assertLaunchAgentAccount } from '../configuration/agent-route-resolution.js';
+import type { ProviderAccountStore } from '../provider-accounts/index.js';
+import { resolveProviderAccountAuth, resolveProviderAuth } from '../providers/auth-resolution.js';
 import {
   type ProfileLlmClientDeps,
+  type ProfileLlmClientResult,
   createProviderAnthropicClient,
+  resolveAnthropicModelId,
 } from '../providers/llm-client.js';
 import { ReviewerApiDeadlineError, reviewerApiBudget } from '../validation/reviewer-api-budget.js';
 
@@ -21,25 +26,113 @@ export function createBoundedScanJudge(
   } catch {
     /* Missing binding stays unavailable. */
   }
+  return boundedJudge({ model, profileName, binding, logger });
+}
+
+export function createFrozenScanJudge(
+  config: EffectiveLaunchConfig,
+  accounts: ProviderAccountStore,
+  logger: Logger,
+  assertAllowed: () => Promise<void>,
+) {
+  const route =
+    config.ai.reviewer.mode === 'independent' ? config.ai.reviewer.route : config.ai.main;
+  assertLaunchAgentAccount(route, config.agentAccounts[route.providerAccountId], accounts);
+  const binding = structuredClone(
+    resolveProviderAccountAuth(route.providerAccountId, { providerAccountStore: accounts }),
+  );
+  const model = resolveAnthropicModelId(route.model);
+  return boundedJudge({
+    model,
+    profileName: config.profileId,
+    binding,
+    logger,
+    assertAllowed: async () => {
+      await assertAllowed();
+      assertLaunchAgentAccount(route, config.agentAccounts[route.providerAccountId], accounts);
+    },
+    makeClient: async () => {
+      const credentials = binding.credentials;
+      if (credentials?.provider === 'anthropic' && credentials.apiKey)
+        return {
+          ok: true,
+          model,
+          client: new Anthropic({
+            apiKey: credentials.apiKey,
+            authToken: null,
+            baseURL: 'https://api.anthropic.com',
+          }),
+        };
+      if (credentials?.provider === 'max') {
+        const token =
+          'oauthToken' in credentials
+            ? credentials.oauthToken
+            : Date.parse(credentials.expiresAt) > Date.now() + 15_000
+              ? credentials.accessToken
+              : null;
+        if (token)
+          return {
+            ok: true,
+            model,
+            client: new Anthropic({
+              apiKey: null,
+              authToken: token,
+              baseURL: 'https://api.anthropic.com',
+              defaultHeaders: { 'anthropic-beta': 'oauth-2025-04-20' },
+            }),
+          };
+      }
+      if (
+        credentials?.provider === 'foundry' &&
+        credentials.apiKey &&
+        (credentials.apiSurface ?? 'anthropic') === 'anthropic'
+      )
+        return {
+          ok: true,
+          model,
+          client: new Anthropic({
+            apiKey: credentials.apiKey,
+            authToken: null,
+            baseURL: credentials.endpoint,
+          }),
+        };
+      // No ambient Azure/Anthropic credentials, provider switching, or unpersisted refresh-token rotation.
+      return { ok: false, reason: 'provider_not_callable' };
+    },
+  });
+}
+
+function boundedJudge(input: {
+  model: string;
+  profileName: string;
+  binding: ReturnType<typeof resolveProviderAuth> | undefined;
+  logger: Logger;
+  makeClient?(): Promise<ProfileLlmClientResult>;
+  assertAllowed?(): Promise<void>;
+}) {
+  const { model, profileName, binding, logger } = input;
   return async (packet: string): Promise<ScheduledScanReport['judgment']> => {
     if (!binding?.provider || !model || packet.length > 60000)
       throw new Error('Explicit judgment binding unavailable');
     // The Anthropic-env adapter has no named-account contract. Do not silently
     // replace a named account with a daemon environment key.
-    if (binding.provider === 'anthropic' && binding.account)
+    if (!input.makeClient && binding.provider === 'anthropic' && binding.account)
       throw new Error('Named Anthropic account unsupported by judgment adapter');
     const started = performance.now();
     const budget = reviewerApiBudget(15000);
-    const llm = await budget.acquire(() =>
-      createProviderAnthropicClient(
-        {
-          provider: binding.provider,
-          credentials: binding.credentials,
-          model,
-          profileName,
-        },
-        logger,
-      ),
+    if (input.assertAllowed) await budget.acquire(input.assertAllowed);
+    const llm = await budget.acquire(
+      input.makeClient ??
+        (() =>
+          createProviderAnthropicClient(
+            {
+              provider: binding.provider,
+              credentials: binding.credentials,
+              model,
+              profileName,
+            },
+            logger,
+          )),
     );
     if (!llm.ok) throw new Error('Configured judgment provider is not callable');
     const remaining = budget.remaining();

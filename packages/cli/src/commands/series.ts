@@ -1,11 +1,19 @@
+import { randomUUID } from 'node:crypto';
 import { lstatSync, readFileSync, readdirSync, realpathSync } from 'node:fs';
 import { basename, isAbsolute, join, relative, resolve } from 'node:path';
-import { type SpecFile, parseBriefs } from '@autopod/shared';
+import {
+  type SeriesLaunchRequest,
+  type SpecFile,
+  parseBriefs,
+  seriesLaunchRequestSchema,
+} from '@autopod/shared';
 import chalk from 'chalk';
 import type { Command } from 'commander';
 import type { AutopodClient } from '../api/client.js';
+import { saveSeriesReceipt } from '../config/launch-store.js';
 import { formatStatus } from '../output/colors.js';
 import { withSpinner } from '../output/spinner.js';
+import { type LaunchFlags, buildLaunchRequest } from './launch-request.js';
 import { preflightSeriesFolder } from './spec-preflight.js';
 
 /** Infer series name from a spec root folder path. */
@@ -68,7 +76,17 @@ export function registerSeriesCommands(program: Command, getClient: () => Autopo
     .description(
       'Create a series of pods from a spec folder (containing purpose.md, design.md, and briefs/).',
     )
-    .requiredOption('-p, --profile <name>', 'Profile to use for all pods')
+    .requiredOption('--repo <name-or-id>', 'Enrolled repository')
+    .option('-p, --profile <name-or-id>', 'Profile (default: repository usual profile)')
+    .option('--repository-setup <id>', 'Repository setup')
+    .option('--environment <name-or-id>', 'Environment preset')
+    .option('--ai <name-or-id>', 'AI preset')
+    .option('--workflow <name-or-id>', 'Workflow preset')
+    .option('--github-access <name-or-id>', 'GitHub access preset')
+    .option('--execution <target>', 'local or sandbox')
+    .option('--memory-gb <number>', 'Main container memory', Number)
+    .option('--cpus <number>', 'Main container CPU allocation', Number)
+    .option('--request-id <id>', 'Stable admission request ID')
     .option(
       '--start-branch <branch>',
       'Branch/ref to start root pods from while targeting --base-branch',
@@ -89,8 +107,7 @@ export function registerSeriesCommands(program: Command, getClient: () => Autopo
     .action(
       async (
         folder: string,
-        opts: {
-          profile: string;
+        opts: LaunchFlags & {
           startBranch?: string;
           baseBranch?: string;
           prMode: string;
@@ -135,26 +152,45 @@ export function registerSeriesCommands(program: Command, getClient: () => Autopo
           chalk.cyan(`\nCreating series "${seriesName}" with ${briefs.length} pods...\n`),
         );
 
-        const result = await withSpinner('Creating series...', () =>
-          client.createSeries({
-            seriesName,
-            briefs,
-            profile: opts.profile,
-            startBranch: opts.startBranch,
-            baseBranch: opts.baseBranch,
-            specFiles,
-            specContextFiles,
-            prMode,
-            autoApprove: opts.autoApprove ?? false,
-            seriesDescription: seriesDescription || undefined,
-            seriesDesign: seriesDesign || undefined,
-          }),
+        const resolvedRequest = await buildLaunchRequest({ ...opts, task: seriesName }, (kind) =>
+          client.listConfigurations(kind),
         );
+        const {
+          task: _task,
+          work: _work,
+          requestId: _id,
+          expectedDigest: _digest,
+          ...launch
+        } = resolvedRequest;
+        if (opts.autoApprove) {
+          launch.overrides = {
+            ...launch.overrides,
+            workflow: { ...launch.overrides?.workflow, completion: 'merge' },
+          };
+        }
+        const request: SeriesLaunchRequest = seriesLaunchRequestSchema.parse({
+          requestId: opts.requestId ?? randomUUID(),
+          seriesName,
+          briefs,
+          launch,
+          startBranch: opts.startBranch,
+          baseBranch: opts.baseBranch,
+          specFiles,
+          specContextFiles,
+          prMode,
+          seriesDescription: seriesDescription || undefined,
+          seriesDesign: seriesDesign || undefined,
+        });
+        const receipt = saveSeriesReceipt(request);
+        console.log(`Saved request: ${receipt}\nRetry a lost response: ap series retry ${receipt}`);
+        const result = await withSpinner('Creating series...', () => client.createSeries(request));
 
         console.log(chalk.green(`\nSeries created: ${result.seriesId}\n`));
         console.log(`  Name:    ${result.seriesName}`);
         console.log(`  PR mode: ${prMode}`);
-        console.log(`  Auto-approve: ${opts.autoApprove ? 'yes' : 'no'}`);
+        console.log(
+          `  Approval: ${opts.autoApprove ? 'automatic merge requested' : 'selected workflow'}`,
+        );
         console.log('  Pods:\n');
 
         for (const pod of result.pods) {
@@ -165,6 +201,15 @@ export function registerSeriesCommands(program: Command, getClient: () => Autopo
         console.log(`\nTrack progress: ap series status ${result.seriesId}\n`);
       },
     );
+
+  series
+    .command('retry <receipt>')
+    .description('Retry the exact saved series request after a lost response')
+    .action(async (receipt: string) => {
+      const request = seriesLaunchRequestSchema.parse(JSON.parse(readFileSync(receipt, 'utf8')));
+      const result = await getClient().createSeries(request);
+      console.log(`Series: ${result.seriesId} (${result.pods.length} pods)`);
+    });
 
   // ap series status <series-id>
   series
@@ -193,9 +238,15 @@ export function registerSeriesCommands(program: Command, getClient: () => Autopo
         }
       }
 
-      const { costUsd, inputTokens, outputTokens } = result.tokenUsageSummary;
+      const {
+        costUsd,
+        inputTokens,
+        outputTokens,
+        unclassifiedTokens = 0,
+        totalTokens,
+      } = result.tokenUsageSummary;
       console.log(
-        `\nTotal cost: $${costUsd.toFixed(4)}  (${inputTokens.toLocaleString()} in / ${outputTokens.toLocaleString()} out tokens)\n`,
+        `\nTotal cost: $${costUsd.toFixed(4)}  (${(totalTokens ?? inputTokens + outputTokens + unclassifiedTokens).toLocaleString()} total tokens: ${inputTokens.toLocaleString()} in / ${outputTokens.toLocaleString()} out / ${unclassifiedTokens.toLocaleString()} unsplit)\n`,
       );
     });
 }

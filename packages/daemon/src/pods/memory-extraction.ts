@@ -158,6 +158,7 @@ function sanitize(text: string): string {
  */
 export async function extractCandidate(opts: {
   pod: Pod;
+  projectScope?: Exclude<import('./project-memory-scope.js').ProjectMemoryScope, null>;
   lessonSignals: string[];
   evidence: ExtractionEvidence;
   existingMemories: MemoryEntry[];
@@ -166,6 +167,8 @@ export async function extractCandidate(opts: {
   logger: Logger;
 }): Promise<ExtractionResult> {
   const { pod, lessonSignals, evidence, existingMemories, reviewer, reviewerModel, logger } = opts;
+  if (pod.launchConfigDigest && !opts.projectScope)
+    throw new Error('Repository memory scope is required');
 
   const sanitizedTask = sanitize(pod.task.slice(0, 500));
   const sanitizedSummary = evidence.taskSummary
@@ -279,7 +282,11 @@ export async function extractCandidate(opts: {
   let action: 'create' | 'update' = 'create';
   let targetMemoryId: string | null = null;
   if (parsed.updateTargetPath) {
-    const target = existingMemories.find((m) => m.path === parsed.updateTargetPath);
+    const target = existingMemories.find(
+      (m) =>
+        m.path === parsed.updateTargetPath &&
+        (m.repositorySetupId ?? null) === (opts.projectScope?.setupId ?? null),
+    );
     if (target) {
       action = 'update';
       targetMemoryId = target.id;
@@ -311,8 +318,11 @@ export async function extractCandidate(opts: {
       id: generateId(8),
       action,
       targetMemoryId,
-      scope: 'profile',
-      scopeId: pod.profileName,
+      scope: opts.projectScope?.scope ?? 'profile',
+      scopeId: opts.projectScope?.id ?? pod.profileName,
+      ...(opts.projectScope?.scope === 'repository' && opts.projectScope.setupId
+        ? { repositorySetupId: opts.projectScope.setupId }
+        : {}),
       path: parsed.path,
       content,
       rationale,

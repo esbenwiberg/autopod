@@ -4,11 +4,20 @@ import path from 'node:path';
 import type Database from 'better-sqlite3';
 import type { Logger } from 'pino';
 import { assertActiveDatabasePath, snapshotBeforeCutover } from './cutover-backup.js';
+import {
+  detachLegacyPodProfile,
+  detachLegacyScheduledProfile,
+  detachLegacyWatchedProfile,
+} from './detach-legacy-profile.js';
 
 /** Destructive cutovers require a verified pre-migration online backup. */
 const CUTOVER_MIGRATIONS: Record<number, string> = {
   91: 'pre-screenshot-cutover',
   99: 'pre-single-fix-pod',
+  193: 'pre-repository-memory-scope',
+  194: 'pre-pod-configuration-identity',
+  198: 'pre-scheduled-launch-selection',
+  200: 'pre-issue-watcher-bindings',
 };
 
 function inspectMigrations(db: Database.Database, migrationsDir: string) {
@@ -176,7 +185,15 @@ function applyMigrations(db: Database.Database, plan: MigrationPlan, logger: Log
     const allowDuplicateColumns = /--\s*@allow-duplicate-columns/i.test(sql);
 
     const migrate = db.transaction(() => {
-      if (allowDuplicateColumns) {
+      if (version === 194 && /--\s*@detach-legacy-pod-profile/.test(sql)) {
+        detachLegacyPodProfile(db);
+      } else if (version === 198 && /--\s*@detach-legacy-scheduled-profile/.test(sql)) {
+        detachLegacyScheduledProfile(db);
+        db.exec(sql);
+      } else if (version === 200 && /--\s*@detach-legacy-watched-profile/.test(sql)) {
+        detachLegacyWatchedProfile(db);
+        db.exec(sql);
+      } else if (allowDuplicateColumns) {
         const statements = sql
           .split(';')
           .map((s) => s.trim())

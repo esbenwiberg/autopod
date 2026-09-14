@@ -1,4 +1,4 @@
-import { scheduledScanPolicySchema } from '@autopod/shared';
+import { savedLaunchSelectionSchema, scheduledScanPolicySchema } from '@autopod/shared';
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import type { ScheduledJobManager } from '../../scheduled-jobs/scheduled-job-manager.js';
@@ -12,27 +12,38 @@ const templateFieldSchema = z.object({
 
 const fieldValuesSchema = z.record(z.string());
 
-const createSchema = z.object({
-  templateId: z.string().min(1).optional(),
-  name: z.string().min(1).optional(),
-  profileName: z.string().min(1),
-  task: z.string().min(1).optional(),
-  fieldValues: fieldValuesSchema.optional(),
-  cronExpression: z.string().min(1),
-  enabled: z.boolean().optional(),
-  scan: scheduledScanPolicySchema.nullable().optional(),
-});
+const createSchema = z
+  .object({
+    templateId: z.string().min(1).optional(),
+    name: z.string().min(1).optional(),
+    profileName: z.string().min(1).optional(),
+    launch: savedLaunchSelectionSchema.optional(),
+    task: z.string().min(1).optional(),
+    fieldValues: fieldValuesSchema.optional(),
+    cronExpression: z.string().min(1),
+    enabled: z.boolean().optional(),
+    scan: scheduledScanPolicySchema.nullable().optional(),
+  })
+  .strict()
+  .refine(
+    (input) => !!input.profileName !== !!input.launch,
+    'Select exactly one launch configuration',
+  );
 
-const updateSchema = z.object({
-  templateId: z.string().min(1).optional(),
-  name: z.string().min(1).optional(),
-  task: z.string().min(1).optional(),
-  fieldValues: fieldValuesSchema.optional(),
-  profileName: z.string().min(1).optional(),
-  cronExpression: z.string().min(1).optional(),
-  enabled: z.boolean().optional(),
-  scan: scheduledScanPolicySchema.nullable().optional(),
-});
+const updateSchema = z
+  .object({
+    templateId: z.string().min(1).optional(),
+    name: z.string().min(1).optional(),
+    task: z.string().min(1).optional(),
+    fieldValues: fieldValuesSchema.optional(),
+    profileName: z.string().min(1).optional(),
+    launch: savedLaunchSelectionSchema.optional(),
+    cronExpression: z.string().min(1).optional(),
+    enabled: z.boolean().optional(),
+    scan: scheduledScanPolicySchema.nullable().optional(),
+  })
+  .strict()
+  .refine((input) => !(input.profileName && input.launch), 'Select one launch configuration');
 
 const createTemplateSchema = z.object({
   name: z.string().min(1),
@@ -86,7 +97,7 @@ export function scheduledJobRoutes(
   // POST /scheduled-jobs — create a scheduled job
   app.post('/scheduled-jobs', async (request, reply) => {
     const body = createSchema.parse(request.body);
-    const job = scheduledJobManager.create(body);
+    const job = scheduledJobManager.create(body, request.user.oid);
     reply.status(201);
     return job;
   });
@@ -106,7 +117,7 @@ export function scheduledJobRoutes(
   app.put('/scheduled-jobs/:id', async (request) => {
     const { id } = request.params as { id: string };
     const body = updateSchema.parse(request.body);
-    return scheduledJobManager.update(id, body);
+    return scheduledJobManager.update(id, body, request.user.oid);
   });
 
   // DELETE /scheduled-jobs/:id — delete a scheduled job

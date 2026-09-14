@@ -172,6 +172,8 @@ async function resolveOne(
 
   try {
     switch (source.type) {
+      case 'inline':
+        return { name: skill.name, description: skill.description, content: source.content };
       case 'local':
         return await resolveLocal(skill, source.path, logger, podId, safetyEventsRepo);
       case 'builtin':

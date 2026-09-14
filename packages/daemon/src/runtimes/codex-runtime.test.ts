@@ -172,6 +172,86 @@ describe('CodexRuntime', () => {
     vi.restoreAllMocks();
   });
 
+  it('opens a lazy native Goal process with persisted SQLite state and never falls back to exec', async () => {
+    const handle = createMockHandle();
+    const stdin = new PassThrough();
+    handle.stdin = stdin;
+    const requests: Array<{ id?: number; method: string; params?: unknown }> = [];
+    stdin.on('data', (chunk) => {
+      const request = JSON.parse(chunk.toString()) as {
+        id?: number;
+        method: string;
+        params?: unknown;
+      };
+      requests.push(request);
+      if (!request.id) return;
+      const result =
+        request.method === 'initialize'
+          ? {}
+          : request.method === 'thread/start'
+            ? { thread: { id: 'native-thread' } }
+            : { goal: null };
+      (handle.stdout as PassThrough).write(`${JSON.stringify({ id: request.id, result })}\n`);
+    });
+    const cm = createMockContainerManager(handle);
+    const repo = createMockPodRepo(null, {
+      lifecycleGeneration: 1,
+      launchConfigDigest: 'a'.repeat(64),
+    });
+    const runtime = new CodexRuntime(logger, cm, repo);
+    const config: SpawnConfig = {
+      podId: 'pod',
+      containerId: 'container-123',
+      task: 'Objective',
+      model: 'gpt-5.5',
+      reasoningEffort: 'high',
+      workDir: '/workspace',
+      env: {},
+      customInstructions: 'Daemon instructions',
+      mcpServers: [{ name: 'escalation', url: 'http://daemon/mcp' }],
+    };
+    config.executionTarget = 'local';
+    Object.assign(cm, { supportsExecRecovery: true });
+    const hooks = { processCreated: vi.fn(), processStarted: vi.fn() };
+    const session = runtime.nativeGoalSession(config, hooks);
+    expect(cm.execStreaming).not.toHaveBeenCalled();
+    expect(await session.open(null)).toBe('native-thread');
+    expect(cm.execStreaming).toHaveBeenCalledWith(
+      'container-123',
+      [
+        'sh',
+        '/run/autopod/agent-shim.sh',
+        'codex',
+        '-c',
+        'sqlite_home="/home/autopod/.codex/sessions/.autopod-goal-state"',
+        'app-server',
+      ],
+      {
+        cwd: '/workspace',
+        env: {},
+        stdin: true,
+        onProcessCreated: expect.any(Function),
+        onProcessStarted: expect.any(Function),
+      },
+    );
+    expect(repo.update).toHaveBeenCalledWith('pod', { codexSessionId: 'native-thread' });
+    expect(requests.map((request) => request.method)).toEqual([
+      'initialize',
+      'initialized',
+      'thread/start',
+    ]);
+    const other = runtime.nativeGoalSession(config, hooks);
+    await expect(other.open(null)).rejects.toThrow('active process');
+    await other.stop();
+    await expect(runtime.spawn(config)[Symbol.asyncIterator]().next()).rejects.toThrow(
+      'native Goal',
+    );
+    expect(await session.get()).toBeNull();
+    await session.stop();
+    expect(handle.kill).toHaveBeenCalledTimes(1);
+    expect(cm.execStreaming).toHaveBeenCalledTimes(1);
+  });
+
   describe('buildSpawnArgs', () => {
     it('builds correct args from config', () => {
       const handle = createMockHandle();

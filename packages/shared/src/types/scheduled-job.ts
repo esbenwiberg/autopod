@@ -1,3 +1,4 @@
+import type { SavedLaunchSelection } from './launch-config.js';
 import type { ScheduledScanPolicy } from './scheduled-scan.js';
 export interface ScheduledJobTemplateField {
   key: string;
@@ -34,7 +35,9 @@ export interface ScheduledJob {
   name: string;
   templateId: string;
   templateName: string;
-  profileName: string;
+  profileName: string | null;
+  launch?: SavedLaunchSelection | null;
+  ownerUserId?: string | null;
   task: string;
   fieldValues: Record<string, string>;
   cronExpression: string;
@@ -51,7 +54,8 @@ export interface CreateScheduledJobRequest {
   scan?: ScheduledScanPolicy | null;
   templateId?: string;
   name?: string; // legacy: creates a template when templateId is omitted
-  profileName: string;
+  profileName?: string;
+  launch?: SavedLaunchSelection;
   task?: string; // legacy: creates a template when templateId is omitted
   fieldValues?: Record<string, string>;
   cronExpression: string; // 5-field standard cron: "0 9 * * 1"
@@ -65,6 +69,7 @@ export interface UpdateScheduledJobRequest {
   task?: string;
   fieldValues?: Record<string, string>;
   profileName?: string;
+  launch?: SavedLaunchSelection;
   cronExpression?: string;
   enabled?: boolean;
 }

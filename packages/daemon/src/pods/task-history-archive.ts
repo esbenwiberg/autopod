@@ -15,6 +15,9 @@ const TABLES = [
   'nudge_messages',
   'events',
   'session_progress_events',
+  'pod_launch_snapshots',
+  'github_operations',
+  'pod_goals',
 ] as const;
 
 /** Prepared at startup so a future schema/mirror mismatch fails before destructive cleanup. */

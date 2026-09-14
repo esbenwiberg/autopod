@@ -288,6 +288,27 @@ describe('ScheduledJobManager', () => {
   });
 
   describe('update', () => {
+    it('rolls back template edits when the schedule update fails', () => {
+      const manager = createScheduledJobManager(makeDeps(db));
+      const job = insertTestScheduledJob(db);
+      const before = manager.getTemplate(job.templateId);
+      expect(() =>
+        manager.update(job.id, {
+          task: 'This must not survive a rejected update',
+          cronExpression: 'bad-cron',
+        }),
+      ).toThrow(AutopodError);
+      expect(manager.getTemplate(job.templateId)).toEqual(before);
+      db.exec(
+        "CREATE TRIGGER reject_schedule_update BEFORE UPDATE ON scheduled_jobs BEGIN SELECT RAISE(ABORT, 'fixture rejection'); END",
+      );
+      expect(() =>
+        manager.update(job.id, { task: 'Must roll back on database failure too' }),
+      ).toThrow('fixture rejection');
+      expect(manager.getTemplate(job.templateId)).toEqual(before);
+      expect(manager.get(job.id)).toEqual(job);
+    });
+
     it('updates name and task', () => {
       const deps = makeDeps(db);
       const manager = createScheduledJobManager(deps);

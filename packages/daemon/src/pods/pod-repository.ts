@@ -133,6 +133,7 @@ export interface NewPod {
 }
 
 export interface PodFilters {
+  repositoryId?: string;
   profileName?: string;
   status?: PodStatus | PodStatus[];
   userId?: string;
@@ -153,6 +154,8 @@ export interface PodUpdates {
   task?: string;
   model?: string;
   runtime?: string;
+  executionTarget?: ExecutionTarget;
+  requireSidecars?: string[];
   providerAccountIdSnapshot?: string | null;
   providerIdSnapshot?: string | null;
   containerId?: string | null;
@@ -271,6 +274,8 @@ export interface PodRepository extends Partial<UnitOfWork> {
   hasUnansweredDecision?(podId: string): boolean;
   insert(pod: NewPod): void;
   getOrThrow(id: string): Pod;
+  /** Read one live or archived pod without admitting further execution. */
+  getForHistory?(id: string): Pod;
   update(id: string, changes: PodUpdates): void;
   incrementLifecycleGeneration(id: string): number;
   delete(id: string): void;
@@ -387,6 +392,7 @@ function rowToSession(row: Record<string, unknown>): Pod {
   return {
     id: row.id as string,
     profileName: row.profile_name as string,
+    launchConfigDigest: (row.launch_config_digest as string | null | undefined) ?? null,
     task: Buffer.isBuffer(row.task) ? (row.task as Buffer).toString('utf8') : (row.task as string),
     status: row.status as PodStatus,
     model: row.model as string,
@@ -678,6 +684,11 @@ export function createPodRepository(db: Database.Database): PodRepository {
     const whereClauses: string[] = [];
     const params: Record<string, unknown> = {};
 
+    if (filters?.repositoryId !== undefined) {
+      whereClauses.push(`EXISTS (SELECT 1 FROM retained_pod_launch_snapshots launch
+        WHERE launch.pod_id = ${table}.id AND json_extract(launch.payload, '$.repository.id') = @repositoryId)`);
+      params.repositoryId = filters.repositoryId;
+    }
     if (filters?.profileName !== undefined) {
       whereClauses.push('profile_name = @profileName');
       params.profileName = filters.profileName;
@@ -858,6 +869,23 @@ export function createPodRepository(db: Database.Database): PodRepository {
       return { ...pod, finalization: completionJournal.get(pod.id, pod.lifecycleGeneration) };
     },
 
+    getForHistory(id: string): Pod {
+      const live = db.prepare('SELECT * FROM pods WHERE id=?').get(id) as
+        | Record<string, unknown>
+        | undefined;
+      if (live) return rowToSession(live);
+      const row = db
+        .prepare(
+          `SELECT ${HISTORY_POD_COLUMNS},series_id,series_name,brief_title,pr_mode,base_branch,launch_config_digest FROM retained_pods WHERE id=?`,
+        )
+        .get(id) as Record<string, unknown> | undefined;
+      if (!row) throw new PodNotFoundError(id);
+      const pod = rowToDisplaySession(row);
+      for (const field of HISTORY_JSON_FIELDS)
+        if (row[`${field}_oversized`]) pod.recordDiagnostics?.push({ field, code: 'size_limit' });
+      return pod;
+    },
+
     update(id: string, changes: PodUpdates): void {
       if (
         [
@@ -902,6 +930,19 @@ export function createPodRepository(db: Database.Database): PodRepository {
       if (changes.containerId !== undefined) {
         setClauses.push('container_id = @containerId');
         params.containerId = changes.containerId;
+      }
+      if (changes.executionTarget !== undefined) {
+        const existing = db.prepare('SELECT container_id FROM pods WHERE id=?').get(id) as
+          | { container_id: string | null }
+          | undefined;
+        if (existing?.container_id)
+          throw new Error('Cannot change execution target while a container is attached');
+        setClauses.push('execution_target = @executionTarget');
+        params.executionTarget = changes.executionTarget;
+      }
+      if (changes.requireSidecars !== undefined) {
+        setClauses.push('require_sidecars = @requireSidecars');
+        params.requireSidecars = JSON.stringify(changes.requireSidecars);
       }
       if (changes.worktreePath !== undefined) {
         setClauses.push('worktree_path = @worktreePath');

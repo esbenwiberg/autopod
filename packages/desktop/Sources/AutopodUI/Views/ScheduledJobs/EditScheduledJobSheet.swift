@@ -7,6 +7,7 @@ public struct EditScheduledJobSheet: View {
   public let job: ScheduledJob
   public var templates: [ScheduledJobTemplate]
   public var profileNames: [String]
+  public var configurationActions: LaunchConfigurationActions?
   public var onEditJob: ((String, UpdateScheduledJobRequest) -> Void)?
 
   public init(
@@ -14,15 +15,18 @@ public struct EditScheduledJobSheet: View {
     job: ScheduledJob,
     templates: [ScheduledJobTemplate] = [],
     profileNames: [String] = [],
+    configurationActions: LaunchConfigurationActions? = nil,
     onEditJob: ((String, UpdateScheduledJobRequest) -> Void)? = nil
   ) {
     self._isPresented = isPresented
     self.job = job
     self.templates = templates
     self.profileNames = profileNames
+    self.configurationActions = configurationActions
     self.onEditJob = onEditJob
     self._selectedTemplateId = State(initialValue: job.templateId)
-    self._selectedProfile = State(initialValue: job.profileName)
+    self._launchSelection = State(initialValue: job.launch ?? [:])
+    self._selectedProfile = State(initialValue: job.profileName ?? "")
     self._cronExpression = State(initialValue: job.cronExpression)
     self._enabled = State(initialValue: job.enabled)
     self._fieldValues = State(initialValue: job.fieldValues)
@@ -36,11 +40,12 @@ public struct EditScheduledJobSheet: View {
     selectedTemplate?.fields ?? []
   }
   private var profiles: [String] {
-    let all = Set(profileNames + [job.profileName])
+    let all = Set(profileNames + [job.profileName].compactMap { $0 })
     return all.sorted()
   }
 
   @State private var selectedTemplateId: String
+  @State private var launchSelection: [String: ConfigurationJSON]
   @State private var selectedProfile: String
   @State private var cronExpression: String
   @State private var enabled: Bool
@@ -48,7 +53,7 @@ public struct EditScheduledJobSheet: View {
 
   private var canSave: Bool {
     !selectedTemplateId.isEmpty
-      && !selectedProfile.isEmpty
+      && (configurationActions != nil ? (launchSelection["repositoryId"]?.string != nil || (launchSelection["emptyWorkspace"]?.bool == true && launchSelection["profileId"]?.string != nil)) : !selectedProfile.isEmpty)
       && isValidCron(cronExpression)
       && hasRequiredFieldValues
   }
@@ -69,6 +74,9 @@ public struct EditScheduledJobSheet: View {
             .labelsHidden()
           }
 
+          if let configurationActions {
+            ScheduledLaunchSelectionEditor(actions: configurationActions, selection: $launchSelection, task: selectedTemplate?.prompt ?? "")
+          } else {
           formSection("Profile") {
             Picker("", selection: $selectedProfile) {
               ForEach(profiles, id: \.self) { profile in
@@ -76,6 +84,7 @@ public struct EditScheduledJobSheet: View {
               }
             }
             .labelsHidden()
+          }
           }
 
           formSection("Schedule (cron)") {
@@ -164,7 +173,8 @@ public struct EditScheduledJobSheet: View {
         let req = UpdateScheduledJobRequest(
           templateId: selectedTemplateId,
           fieldValues: selectedFields.isEmpty ? [:] : fieldValuesForSubmit(),
-          profileName: selectedProfile,
+          profileName: configurationActions == nil ? selectedProfile : nil,
+          launch: configurationActions == nil ? nil : launchSelection,
           cronExpression: cronExpression.trimmingCharacters(in: .whitespacesAndNewlines),
           enabled: enabled
         )

@@ -15,6 +15,7 @@ public struct SpawnDependentSheet: View {
     public let candidatePods: [Pod]
     public let actions: PodActions
     public let profileNames: [String]
+    public var configurationActions: LaunchConfigurationActions?
     public var onPodCreated: ((String) -> Void)?
 
     public init(
@@ -23,6 +24,7 @@ public struct SpawnDependentSheet: View {
         candidatePods: [Pod],
         actions: PodActions,
         profileNames: [String],
+        configurationActions: LaunchConfigurationActions? = nil,
         onPodCreated: ((String) -> Void)? = nil
     ) {
         self._isPresented = isPresented
@@ -30,11 +32,16 @@ public struct SpawnDependentSheet: View {
         self.candidatePods = candidatePods
         self.actions = actions
         self.profileNames = profileNames
+        self.configurationActions = configurationActions
         self.onPodCreated = onPodCreated
     }
 
     @State private var task: String = ""
-    @State private var selectedProfile: String = ""
+    @State private var source: EffectiveLaunchPreview?
+    @State private var launchSelection: [String: ConfigurationJSON] = [:]
+    @State private var useOriginal = true
+    @State private var pendingRequest: ComposableLaunchRequest?
+    @State private var newSeriesId = "series-\(UUID().uuidString)"
     @State private var baseBranch: String = ""
     @State private var selectedParentIds: Set<String> = []
     @State private var seriesMode: SeriesMode = .inherit
@@ -49,6 +56,7 @@ public struct SpawnDependentSheet: View {
     }
 
     public var body: some View {
+        ScrollView {
         VStack(alignment: .leading, spacing: 14) {
             Text("Spawn follow-up pod")
                 .font(.title2.weight(.semibold))
@@ -58,7 +66,7 @@ public struct SpawnDependentSheet: View {
 
             taskField
             parentList
-            profilePicker
+            configurationPicker
             seriesPicker
             baseBranchField
 
@@ -82,26 +90,22 @@ public struct SpawnDependentSheet: View {
             }
         }
         .padding(20)
-        .frame(width: 560, height: 640)
+        }
+        .frame(width: 640, height: 740)
         .onAppear { setupDefaults() }
+        .task { await loadSource() }
     }
 
     private var submitDisabled: Bool {
         isSubmitting
             || task.trimmingCharacters(in: .whitespaces).isEmpty
             || selectedParentIds.isEmpty
-            || selectedProfile.isEmpty
+            || source == nil
+            || configurationActions?.capabilities["launchAvailable"]?.bool != true
     }
 
     private func setupDefaults() {
         selectedParentIds = [initiator.id]
-        if selectedProfile.isEmpty {
-            let workerProfile = actions.workerProfileForProfile(initiator.profileName)
-            selectedProfile = workerProfile ?? initiator.profileName
-            if !profileNames.contains(selectedProfile), let first = profileNames.first {
-                selectedProfile = first
-            }
-        }
         if initiator.seriesId == nil {
             seriesMode = .standalone
         }
@@ -197,16 +201,31 @@ public struct SpawnDependentSheet: View {
         }
     }
 
-    private var profilePicker: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text("Profile")
-                .font(.subheadline.weight(.semibold))
-            Picker("", selection: $selectedProfile) {
-                ForEach(profileNames, id: \.self) { Text($0).tag($0) }
-            }
-            .pickerStyle(.menu)
-            .labelsHidden()
+    @ViewBuilder
+    private var configurationPicker: some View {
+        Toggle("Use the parent's original configuration", isOn: $useOriginal)
+        if useOriginal, let source {
+            Text("\(source.mainModel) · \(source.fields["execution"]?["target"]?.string ?? "") · \(source.fields["workflow"]?["output"]?.string ?? "") output")
+                .font(.caption).foregroundStyle(.secondary)
+            Text("Preset edits do not change these settings.").font(.caption)
+        } else if let configurationActions, source != nil {
+            ScheduledLaunchSelectionEditor(actions: configurationActions, selection: $launchSelection,
+                task: task, repositoryLocked: true)
+                .frame(maxHeight: 240)
         }
+    }
+    private func loadSource() async {
+        guard let configurationActions else { errorMessage = "Connect to a daemon with composable configuration."; return }
+        do {
+            let loaded = try await configurationActions.readLaunch(initiator.id)
+            var selection: [String: ConfigurationJSON] = [:]
+            if let repository = loaded.fields["repository"]?.object {
+                selection["repositoryId"] = repository["id"]
+                selection["repositorySetupId"] = repository["setup"]?["id"]
+            } else { selection["emptyWorkspace"] = .bool(true) }
+            selection["profileId"] = loaded.fields["profileId"]
+            source = loaded; launchSelection = selection
+        } catch { errorMessage = error.localizedDescription }
     }
 
     private var seriesPicker: some View {
@@ -244,34 +263,55 @@ public struct SpawnDependentSheet: View {
         isSubmitting = true
         defer { isSubmitting = false }
 
-        let parentIds = Array(selectedParentIds)
+        let parentIds = selectedParentIds.sorted()
         let (seriesId, seriesName): (String?, String?) = {
             switch seriesMode {
             case .inherit:
                 return (initiator.seriesId, initiator.seriesName)
             case .startNew:
-                // Use the initiator id as a convenient unique series id; the
-                // name is user-supplied (falls back to initiator's id prefix).
+                // Keep this form's new series identity stable across retries.
                 let name = newSeriesName.isEmpty ? "series-\(initiator.id.prefix(8))" : newSeriesName
-                return ("series-\(initiator.id)", name)
+                return (newSeriesId, name)
             case .standalone:
                 return (nil, nil)
             }
         }()
 
-        let id = await actions.spawnDependent(
-            selectedProfile,
-            task,
-            parentIds,
-            seriesId,
-            seriesName,
-            baseBranch.isEmpty ? nil : baseBranch
-        )
-        if let id {
-            onPodCreated?(id)
-            isPresented = false
-        } else {
-            errorMessage = "Spawn failed — check the daemon log."
-        }
+        guard let source, let configurationActions else { return }
+        do {
+            var fields = launchSelection
+            if useOriginal {
+                fields = ["profileId": source.fields["profileId"] ?? .string(initiator.profileName)]
+                if let repository = source.fields["repository"]?.object {
+                    fields["repositoryId"] = repository["id"]
+                    fields["repositorySetupId"] = repository["setup"]?["id"]
+                } else { fields["emptyWorkspace"] = .bool(true) }
+            }
+            fields["task"] = .string(task)
+            var work: [String: ConfigurationJSON] = ["dependsOnPodIds": .array(parentIds.map(ConfigurationJSON.string))]
+            if let seriesId { work["seriesId"] = .string(seriesId) }
+            if let seriesName { work["seriesName"] = .string(seriesName) }
+            if seriesMode == .inherit {
+                work["prMode"] = source.fields["work"]?["prMode"]
+                if source.fields["work"]?["prMode"]?.string == "single" { work["branch"] = .string(initiator.branch) }
+            }
+            if !baseBranch.isEmpty { work["baseBranch"] = .string(baseBranch) }
+            fields["work"] = .object(work)
+            var request = try ComposableLaunchRequest.decodeJSON(JSONEncoder().encode(fields))
+            request.source = LaunchSource(podId: initiator.id, digest: source.digest,
+                configuration: useOriginal ? "original" : "current")
+            request.requestId = pendingRequest?.requestId ?? UUID().uuidString
+            var previous = pendingRequest; previous?.expectedDigest = nil
+            if previous == request, let pendingRequest { request = pendingRequest }
+            else {
+                request.requestId = UUID().uuidString
+                let preview = try await configurationActions.resolve(request)
+                request.expectedDigest = preview.digest
+            }
+            pendingRequest = request
+            let id = try await configurationActions.launch(request)
+            onPodCreated?(id); isPresented = false
+        } catch { errorMessage = error.localizedDescription }
+
     }
 }

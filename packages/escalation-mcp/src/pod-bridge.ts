@@ -4,13 +4,18 @@ import type {
   EscalationRequest,
   EscalationResponse,
   FactEvidence,
+  GitHubMutation,
+  GitHubReadRequest,
   MemoryEntry,
   MemoryOutcomeItem,
   MemoryScope,
   OperatorGuidanceDelivery,
+  PimSelection,
   ReviewFeedbackResponseItem,
   ScreenshotRef,
   ScreenshotSource,
+  ServiceAccessRule,
+  ServiceReadRequest,
 } from '@autopod/shared';
 
 export interface MemoryPlanIntentItem {
@@ -18,7 +23,23 @@ export interface MemoryPlanIntentItem {
   reason: string;
 }
 
+export interface ScopedPodTools {
+  deploymentPrepare?(request: import('@autopod/shared').DeploymentRequest): Promise<unknown>;
+  deploymentStatus?(runId: string): Promise<unknown>;
+  serviceRules?(): Promise<ServiceAccessRule[]>;
+  serviceRead?(request: ServiceReadRequest): Promise<unknown>;
+  githubRead?(request: GitHubReadRequest): Promise<unknown>;
+  githubMutate?(request: GitHubMutation): Promise<unknown>;
+  pimSelections?(): Promise<PimSelection[]>;
+  pimActivate?(
+    type: PimSelection['type'],
+    eligibilityId: string,
+    requestId: string,
+  ): Promise<unknown>;
+}
+
 export interface PodBridge {
+  getScopedTools?(podId: string): ScopedPodTools | undefined;
   createEscalation(escalation: EscalationRequest): void;
   resolveEscalation(escalationId: string, response: EscalationResponse): void;
   getAiEscalationCount(podId: string): number;

@@ -48,6 +48,9 @@ function rowToMemoryEntry(row: Record<string, unknown>): MemoryEntry {
     id: row.id as string,
     scope: row.scope as MemoryScope,
     scopeId: (row.scope_id as string) ?? null,
+    ...(typeof row.repository_setup_id === 'string'
+      ? { repositorySetupId: row.repository_setup_id }
+      : {}),
     path: row.path as string,
     content: row.content as string,
     contentSha256: row.content_sha256 as string,
@@ -105,21 +108,24 @@ export function createMemoryRepository(db: Database.Database): MemoryRepository 
     insert(
       entry: Omit<MemoryEntry, 'version' | 'contentSha256' | 'createdAt' | 'updatedAt'>,
     ): MemoryEntry {
+      if (entry.repositorySetupId && entry.scope !== 'repository')
+        throw new Error('Setup affinity requires repository memory scope');
       const now = new Date().toISOString();
       const contentSha256 = sha256(entry.content);
       db.prepare(
         `INSERT INTO memory_entries
-         (id, scope, scope_id, path, content, content_sha256, rationale,
+         (id, scope, scope_id, repository_setup_id, path, content, content_sha256, rationale,
           kind, tags, applies_when, avoid_when, confidence, source_evidence, impact_summary,
           version, approved, created_by_pod_id, created_at, updated_at)
          VALUES
-         (@id, @scope, @scopeId, @path, @content, @contentSha256, @rationale,
+         (@id, @scope, @scopeId, @repositorySetupId, @path, @content, @contentSha256, @rationale,
           @kind, @tags, @appliesWhen, @avoidWhen, @confidence, @sourceEvidence, @impactSummary,
           1, @approved, @createdByPodId, @now, @now)`,
       ).run({
         id: entry.id,
         scope: entry.scope,
         scopeId: entry.scopeId,
+        repositorySetupId: entry.scope === 'repository' ? (entry.repositorySetupId ?? null) : null,
         path: entry.path,
         content: entry.content,
         contentSha256,

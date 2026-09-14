@@ -39,6 +39,7 @@ public struct AppRootView: View {
     self._showSetup = showSetup
   }
 
+  @State private var launchConfiguration = LaunchConfigurationStore()
   @State private var scanJob: ScheduledJob?
   @State private var showError = false
   @State private var showAuthRecoveryFailure = false
@@ -96,6 +97,9 @@ public struct AppRootView: View {
       actions: actionHandler?.actions ?? .preview,
       profileNames: profileStore.profileNames,
       profileDetails: profileStore.profiles,
+      configurationActions: launchConfiguration.actions(onCreated: { id in
+        await podStore.loadSessions(); podStore.selectedSessionId = id
+      }),
       selectedSessionEvents: selectedSessionEvents,
       eventsForPod: { [eventStream] id in
         eventStream?.sessionEvents[id] ?? []
@@ -138,7 +142,7 @@ public struct AppRootView: View {
       loadError: podStore.error,
       onRefresh: {
         await podStore.loadSessions()
-        await profileStore.loadProfiles()
+        await launchConfiguration.load()
       },
       onSelectSession: { podId in
         if let prev = podStore.selectedSessionId {
@@ -279,11 +283,9 @@ public struct AppRootView: View {
         Task { await memoryStore.create(scope: scope, scopeId: scopeId, path: path, content: content) }
       },
       onLoadMemories: {
-        if profileStore.profiles.isEmpty {
-          await profileStore.loadProfiles()
-        }
         await memoryStore.loadMemories()
-        await memoryStore.loadPendingCandidates(scopeIds: profileStore.profileNames)
+        let repositoryIds = launchConfiguration.documents.filter { $0.kind == .repository }.map(\.id)
+        await memoryStore.loadPendingCandidates(scopeIds: profileStore.profileNames + repositoryIds)
         await memoryStore.loadExtractionAttempts(profileNames: profileStore.profileNames)
         await memoryStore.loadAnalytics()
       }
@@ -338,6 +340,10 @@ public struct AppRootView: View {
     } message: {
       Text(scheduledJobStore.error ?? "Unknown error")
     }
+    .task(id: "\(connectionManager.isConnected)-\(connectionManager.connectionLabel)") {
+      if let api = connectionManager.api, connectionManager.isConnected { launchConfiguration.configure(api: api); await launchConfiguration.load() }
+      else { launchConfiguration.disconnect() }
+    }
     .sheet(item: $scanJob) { job in
       if let api = connectionManager.api { ScanInboxView(job: job, api: api) }
       else { Text("Connect to the daemon to review scan reports.").padding() }
@@ -352,6 +358,9 @@ public struct AppRootView: View {
       SettingsView(
         connectionManager: connectionManager,
         profiles: profileStore.profiles,
+        configurationActions: launchConfiguration.actions(onCreated: { id in
+          await podStore.loadSessions(); podStore.selectedSessionId = id
+        }),
         actionCatalog: profileStore.actionCatalog,
         builtinSkills: profileStore.builtinSkills,
         profileError: profileStore.error,
@@ -393,7 +402,7 @@ public struct AppRootView: View {
                 return
               }
               print("[AppRootView] \(msg)")
-              await profileStore.loadProfiles()
+              await launchConfiguration.load()
               await MainActor.run { completion(nil) }
             } catch {
               print("[AppRootView] Auth failed: \(error)")
@@ -425,8 +434,8 @@ public struct AppRootView: View {
         onDeleteProfile: { [profileStore] name in
           try await profileStore.deleteProfile(name)
         },
-        onReloadProfiles: { [profileStore] in
-          await profileStore.loadProfiles()
+        onReloadProfiles: {
+          await launchConfiguration.load()
         },
         deepLinkedProfileName: $settingsProfileToEdit,
         isPresented: $showSettings
@@ -434,7 +443,7 @@ public struct AppRootView: View {
     }
     .onChange(of: showSettings) { _, isShowing in
       if isShowing {
-        Task { await profileStore.loadProfiles() }
+        Task { await launchConfiguration.load() }
       }
     }
   }
@@ -452,9 +461,10 @@ public struct AppRootView: View {
         profileStore.configure(api: api)
         memoryStore.configure(api: api)
         scheduledJobStore.configure(api: api)
+        launchConfiguration.configure(api: api)
       }
       await podStore.loadSessions()
-      await profileStore.loadProfiles()
+      await launchConfiguration.load()
       await scheduledJobStore.load()
       return
     }

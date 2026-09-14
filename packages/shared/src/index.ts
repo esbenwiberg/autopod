@@ -1,4 +1,6 @@
 // Types
+export { deploymentRequestSchema } from './schemas/deployment.schema.js';
+export type { DeploymentRequest } from './schemas/deployment.schema.js';
 export type {
   ContractScenario,
   ExecutionRequirements,
@@ -653,3 +655,17 @@ export * from './types/managed-pod.js';
 export * from './managed-protocol.js';
 
 export type { OperatorGuidanceDelivery } from './types/operator-guidance.js';
+
+// Composable configuration contracts (the legacy launch path remains until cutover).
+export * from './types/launch-config.js';
+export * from './types/github-access.js';
+export * from './schemas/github-operation.schema.js';
+export * from './schemas/launch-config.schema.js';
+export * from './schemas/service-access.schema.js';
+export * from './types/goal.js';
+export * from './types/pim.js';
+export * from './schemas/issue-watcher-binding.schema.js';
+export * from './schemas/launch-work.schema.js';
+export * from './types/configuration-credential.js';
+export * from './schemas/github-read.schema.js';
+export * from './schemas/series-launch.schema.js';

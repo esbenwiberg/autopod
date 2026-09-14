@@ -1,11 +1,11 @@
 import type {
   CompiledProvider,
   CompiledProviderManifest,
-  Profile,
   ProviderAccount,
   RuntimeType,
 } from '@autopod/shared';
 import { AutopodError, PROVIDER_CATALOG } from '@autopod/shared';
+import type { PodExecutionSettings } from '../interfaces/pod-execution-settings.js';
 import type { ProfileStore } from '../profiles/index.js';
 import type { ProviderAccountStore } from '../provider-accounts/index.js';
 import { resolveProviderAuth } from '../providers/auth-resolution.js';
@@ -38,7 +38,7 @@ function reject(message: string, code: string): never {
  * continue through their existing resolver and credential adapter unchanged.
  */
 export function resolveProviderPreflight(
-  profile: Profile,
+  profile: PodExecutionSettings,
   requestedRuntime: RuntimeType | undefined,
   requestedModel: string | undefined,
   options: ProviderPreflightOptions = {},

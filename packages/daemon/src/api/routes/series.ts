@@ -2,6 +2,7 @@ import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
 import { basename, extname, isAbsolute, join, resolve } from 'node:path';
 import {
   AutopodError,
+  type Pod,
   type SpecContract,
   type SpecFile,
   generateId,
@@ -12,10 +13,13 @@ import {
   parseBriefs,
 } from '@autopod/shared';
 import type { FastifyInstance } from 'fastify';
+import { configurationError } from '../../configuration/configuration-store.js';
 import type { WorktreeManager } from '../../interfaces/worktree-manager.js';
 import type { PodManager } from '../../pods/index.js';
+import { createTaskExecutionLedger } from '../../pods/task-execution-ledger.js';
 import type { ProfileStore } from '../../profiles/profile-store.js';
 import { serializePodForWire } from '../wire-serializers.js';
+import type { ConfigurationRouteDependencies } from './configuration.js';
 
 interface ParsedBrief {
   title: string;
@@ -60,7 +64,8 @@ interface PreviewSeriesFolderRequest {
 }
 
 interface PreviewSeriesOnBranchRequest {
-  profileName: string;
+  profileName?: string;
+  repositoryId?: string;
   branch: string;
   /** Relative path in the repo, e.g. `specs/my-feature` or `specs/my-feature/briefs`. */
   path: string;
@@ -71,7 +76,8 @@ interface PreviewBriefFolderRequest {
 }
 
 interface PreviewBriefOnBranchRequest {
-  profileName: string;
+  profileName?: string;
+  repositoryId?: string;
   branch: string;
   /** Relative path in the repo, e.g. `specs/my-feature/briefs/01-ui`. */
   path: string;
@@ -277,9 +283,86 @@ export function seriesRoutes(
   podManager: PodManager,
   profileStore: ProfileStore,
   worktreeManager: WorktreeManager,
+  configuration?: ConfigurationRouteDependencies,
 ): void {
+  function usageSummary(pods: Pod[]) {
+    const totals = {
+      inputTokens: 0,
+      outputTokens: 0,
+      unclassifiedTokens: 0,
+      totalTokens: 0,
+      costUsd: 0,
+    };
+    const seen = new Set<string>();
+    const ledger = configuration ? createTaskExecutionLedger(configuration.db) : undefined;
+    for (const pod of pods) {
+      if (ledger) {
+        const usage = ledger.snapshot(pod.id);
+        if (seen.has(usage.executionId)) continue;
+        seen.add(usage.executionId);
+        totals.inputTokens += usage.recordedInputTokens;
+        totals.outputTokens += usage.recordedOutputTokens;
+        totals.unclassifiedTokens += usage.recordedUnclassifiedTokens ?? 0;
+        totals.costUsd += usage.recordedCostUsd;
+      } else {
+        totals.inputTokens += pod.inputTokens;
+        totals.outputTokens += pod.outputTokens;
+        totals.costUsd += pod.costUsd;
+      }
+    }
+    totals.totalTokens = totals.inputTokens + totals.outputTokens + totals.unclassifiedTokens;
+    totals.costUsd = Number(totals.costUsd.toFixed(4));
+    return totals;
+  }
+  function branchRepository(body: PreviewSeriesOnBranchRequest): string {
+    if (configuration) {
+      if (body.profileName)
+        configurationError(
+          'Branch previews now require repositoryId',
+          'CONFIG_API_VERSION_UNSUPPORTED',
+          410,
+        );
+      if (!body.repositoryId)
+        configurationError('Select a repository for branch preview', 'CONFIG_SOURCE_MISSING');
+      const repository = configuration.resolution.store.get('repository', body.repositoryId);
+      if (repository.archived)
+        configurationError('Repository is archived', 'CONFIG_SOURCE_MISSING', 404);
+      return repository.payload.remote;
+    }
+    if (!body.profileName) configurationError('Profile is required', 'CONFIG_SOURCE_MISSING');
+    const profile = profileStore.get(body.profileName);
+    if (!profile.repoUrl) configurationError('Profile has no repository', 'CONFIG_SOURCE_MISSING');
+    return profile.repoUrl;
+  }
   // POST /pods/series — create a series of pods from parsed briefs
   app.post('/pods/series', async (request, reply) => {
+    if (configuration) {
+      if (request.body && typeof request.body === 'object' && 'profile' in request.body)
+        configurationError(
+          'Series now require launch selections and a requestId; upgrade this client',
+          'CONFIG_API_VERSION_UNSUPPORTED',
+          410,
+        );
+      if (!configuration.series)
+        configurationError(
+          'Composable series admission is unavailable',
+          'CONFIG_EXECUTION_UNAVAILABLE',
+          503,
+        );
+      const result = await configuration.series.create(request.body, request.user.oid);
+      const pods = result.pods.map(({ title, pod }) => ({ title, ...serializePodForWire(pod) }));
+      const statusCounts: Record<string, number> = {};
+      for (const { pod } of result.pods)
+        statusCounts[pod.status] = (statusCounts[pod.status] ?? 0) + 1;
+      reply.status(201);
+      return {
+        seriesId: result.seriesId,
+        seriesName: result.seriesName,
+        pods,
+        statusCounts,
+        tokenUsageSummary: usageSummary(result.pods.map(({ pod }) => pod)),
+      };
+    }
     const body = request.body as CreateSeriesRequest;
 
     if (!body.seriesName || !body.briefs || body.briefs.length === 0 || !body.profile) {
@@ -571,27 +654,16 @@ export function seriesRoutes(
   // from a git branch, without creating a checkout.
   app.post('/pods/brief/preview-branch', async (request, reply) => {
     const body = request.body as PreviewBriefOnBranchRequest;
-    if (!body?.profileName || !body?.branch || !body?.path) {
+    if (!body?.branch || !body?.path) {
       reply.status(400);
-      return { error: 'profileName, branch, and path are required' };
+      return { error: 'Repository, branch, and path are required' };
     }
 
-    let profile: ReturnType<ProfileStore['get']>;
-    try {
-      profile = profileStore.get(body.profileName);
-    } catch {
-      reply.status(404);
-      return { error: `Profile not found: ${body.profileName}` };
-    }
-
-    if (!profile.repoUrl) {
-      reply.status(400);
-      return { error: 'Profile has no repoUrl — cannot read branch contents' };
-    }
+    const repoUrl = branchRepository(body);
 
     try {
       const contents = await worktreeManager.readBranchFolder({
-        repoUrl: profile.repoUrl,
+        repoUrl,
         branch: body.branch,
         relPath: body.path,
       });
@@ -615,27 +687,16 @@ export function seriesRoutes(
   // (e.g. an interactive pod's worktree).
   app.post('/pods/series/preview-branch', async (request, reply) => {
     const body = request.body as PreviewSeriesOnBranchRequest;
-    if (!body?.profileName || !body?.branch || !body?.path) {
+    if (!body?.branch || !body?.path) {
       reply.status(400);
-      return { error: 'profileName, branch, and path are required' };
+      return { error: 'Repository, branch, and path are required' };
     }
 
-    let profile: ReturnType<ProfileStore['get']>;
-    try {
-      profile = profileStore.get(body.profileName);
-    } catch {
-      reply.status(404);
-      return { error: `Profile not found: ${body.profileName}` };
-    }
-
-    if (!profile.repoUrl) {
-      reply.status(400);
-      return { error: 'Profile has no repoUrl — cannot read branch contents' };
-    }
+    const repoUrl = branchRepository(body);
 
     try {
       const contents = await worktreeManager.readBranchFolder({
-        repoUrl: profile.repoUrl,
+        repoUrl,
         branch: body.branch,
         relPath: body.path,
       });
@@ -684,11 +745,7 @@ export function seriesRoutes(
       return { error: 'Series not found' };
     }
 
-    const tokenUsageSummary = {
-      inputTokens: pods.reduce((sum, p) => sum + p.inputTokens, 0),
-      outputTokens: pods.reduce((sum, p) => sum + p.outputTokens, 0),
-      costUsd: Number(pods.reduce((sum, p) => sum + p.costUsd, 0).toFixed(4)),
-    };
+    const tokenUsageSummary = usageSummary(pods);
 
     const statusCounts = pods.reduce(
       (acc, p) => {

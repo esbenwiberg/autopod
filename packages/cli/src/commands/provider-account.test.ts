@@ -153,7 +153,7 @@ describe('provider-account commands', () => {
     expect(logSpy).toHaveBeenCalled();
   });
 
-  it('creates a provider account and links requested profiles', async () => {
+  it('creates a provider account without modifying shared AI presets', async () => {
     await program.parseAsync([
       'node',
       'ap',
@@ -164,19 +164,13 @@ describe('provider-account commands', () => {
       'openai',
       '--id',
       'team-openai',
-      '--link-profile',
-      'my-app',
     ]);
-
     expect(mockClient.createProviderAccount).toHaveBeenCalledWith({
       name: 'Team OpenAI',
       id: 'team-openai',
       provider: 'openai',
     });
-    // No flag → undefined → daemon default clears the linked profile's inline creds.
-    expect(mockClient.linkProviderAccount).toHaveBeenCalledWith('team-openai', 'my-app', {
-      clearLegacyCredentials: undefined,
-    });
+    expect(mockClient.linkProviderAccount).not.toHaveBeenCalled();
   });
 
   it('creates and replaces ordered failover policies', async () => {
@@ -248,50 +242,36 @@ describe('provider-account commands', () => {
     });
   });
 
-  it('keeps linked profile credentials when --keep-legacy-credentials is passed', async () => {
-    await program.parseAsync([
-      'node',
-      'ap',
-      'provider-account',
-      'create',
-      'Team OpenAI',
-      '--provider',
-      'openai',
-      '--id',
-      'team-openai',
-      '--link-profile',
-      'my-app',
-      '--keep-legacy-credentials',
-    ]);
-
-    expect(mockClient.linkProviderAccount).toHaveBeenCalledWith('team-openai', 'my-app', {
-      clearLegacyCredentials: false,
-    });
+  it('rejects removed profile-link flags before creating an account', async () => {
+    await expect(
+      program.parseAsync([
+        'node',
+        'ap',
+        'provider-account',
+        'create',
+        'Team OpenAI',
+        '--provider',
+        'openai',
+        '--link-profile',
+        'my-app',
+        '--keep-legacy-credentials',
+      ]),
+    ).rejects.toThrow('AI presets');
+    expect(mockClient.createProviderAccount).not.toHaveBeenCalled();
+    expect(mockClient.linkProviderAccount).not.toHaveBeenCalled();
   });
 
-  it('imports legacy profile credentials into a provider account', async () => {
-    await program.parseAsync([
-      'node',
-      'ap',
-      'provider-account',
-      'import',
-      'legacy-profile',
-      '--name',
-      'Team OpenAI',
-      '--link-profile',
-      'my-app',
-      '--link-profile',
-      'worker',
-    ]);
-
-    expect(mockClient.importProviderAccountFromProfile).toHaveBeenCalledWith({
-      profileName: 'legacy-profile',
-      accountId: undefined,
-      accountName: 'Team OpenAI',
-      linkProfileNames: ['my-app', 'worker'],
-      // No flag → undefined → daemon default clears the owner's imported creds.
-      clearLegacyCredentials: undefined,
-    });
+  it.each([
+    ['link', 'account', 'profile'],
+    ['unlink', 'profile'],
+    ['import', 'legacy-profile', '--name', 'Team OpenAI', '--link-profile', 'worker'],
+  ])('rejects retired credential operation %j before any write', async (...args) => {
+    await expect(program.parseAsync(['node', 'ap', 'provider-account', ...args])).rejects.toThrow(
+      'Profile credential links are retired',
+    );
+    expect(mockClient.linkProviderAccount).not.toHaveBeenCalled();
+    expect(mockClient.unlinkProfileProviderAccount).not.toHaveBeenCalled();
+    expect(mockClient.importProviderAccountFromProfile).not.toHaveBeenCalled();
   });
 
   it('authenticates a max provider account from an env setup token', async () => {

@@ -249,6 +249,10 @@ export function registerProviderAccountCommands(
           json?: boolean;
         },
       ) => {
+        if (opts.linkProfile.length || opts.keepLegacyCredentials)
+          throw new Error(
+            'Provider accounts are selected in AI presets. Create the account without profile-link flags, then update the AI preset route.',
+          );
         const client = getClient();
         const catalogProvider = await requireCatalogProvider(client, opts.provider);
         const provider = catalogProvider.id;
@@ -272,14 +276,6 @@ export function registerProviderAccountCommands(
             ...(failoverPolicy === undefined ? {} : { failoverPolicy }),
           }),
         );
-
-        for (const profileName of opts.linkProfile) {
-          await withSpinner(`Linking ${profileName}...`, () =>
-            client.linkProviderAccount(account.id, profileName, {
-              clearLegacyCredentials: opts.keepLegacyCredentials ? false : undefined,
-            }),
-          );
-        }
 
         withJsonOutput(opts, account, (data) => {
           console.log(chalk.green(`Provider account "${data.name}" created (${data.id}).`));
@@ -378,86 +374,29 @@ export function registerProviderAccountCommands(
       console.log(chalk.green(`Provider account "${id}" deleted.`));
     });
 
+  const retiredProfileCredentials = () => {
+    throw new Error(
+      'Profile credential links are retired. Select providerAccountId in an AI preset using `ap preset ai update <id>`. Migrate existing inline credentials with the offline configuration conversion command.',
+    );
+  };
   accounts
     .command('link <id> <profile>')
-    .description('Link a profile to a provider account')
-    .option(
-      '--keep-legacy-credentials',
-      'Keep the profile’s inline credentials (default: clear them on link)',
-    )
-    .action(async (id: string, profileName: string, opts: { keepLegacyCredentials?: boolean }) => {
-      const client = getClient();
-      await withSpinner('Linking provider account...', () =>
-        client.linkProviderAccount(id, profileName, {
-          clearLegacyCredentials: opts.keepLegacyCredentials ? false : undefined,
-        }),
-      );
-      console.log(chalk.green(`Profile "${profileName}" now uses provider account "${id}".`));
-    });
-
+    .description('Retired: select the account in an AI preset')
+    .option('--keep-legacy-credentials')
+    .action(retiredProfileCredentials);
   accounts
     .command('unlink <profile>')
-    .description('Remove a profile provider-account link')
-    .action(async (profileName: string) => {
-      const client = getClient();
-      await withSpinner('Unlinking provider account...', () =>
-        client.unlinkProfileProviderAccount(profileName),
-      );
-      console.log(chalk.green(`Profile "${profileName}" no longer uses a provider account.`));
-    });
-
+    .description('Retired: edit the account selection in an AI preset')
+    .action(retiredProfileCredentials);
   accounts
     .command('import <profile>')
-    .description('Import legacy profile credentials into a provider account')
-    .option('--id <id>', 'Existing or stable new account id')
-    .option('--name <name>', 'Name for a new provider account')
-    .option(
-      '--link-profile <profile>',
-      'Profile to link; repeat for multiple profiles. Defaults to the source profile.',
-      collectOption,
-      [] as string[],
-    )
-    .option(
-      '--keep-legacy-credentials',
-      'Keep the imported credentials on the owner profile (default: clear them)',
-    )
-    .option('--json', 'Output as JSON')
-    .action(
-      async (
-        profileName: string,
-        opts: {
-          id?: string;
-          name?: string;
-          linkProfile: string[];
-          keepLegacyCredentials?: boolean;
-          json?: boolean;
-        },
-      ) => {
-        const client = getClient();
-        const result = await withSpinner('Importing provider credentials...', () =>
-          client.importProviderAccountFromProfile({
-            profileName,
-            accountId: opts.id,
-            accountName: opts.name,
-            linkProfileNames: opts.linkProfile,
-            clearLegacyCredentials: opts.keepLegacyCredentials ? false : undefined,
-          }),
-        );
-        withJsonOutput(opts, result, (data) => {
-          console.log(
-            chalk.green(
-              `Imported credentials into provider account "${data.account.name}" (${data.account.id}).`,
-            ),
-          );
-          console.log(
-            chalk.dim(`Linked profiles: ${data.linkedProfiles.map((p) => p.name).join(', ')}`),
-          );
-          if (data.legacyCredentialsCleared) {
-            console.log(chalk.dim('Legacy profile credentials cleared.'));
-          }
-        });
-      },
-    );
+    .description('Retired: use offline configuration conversion')
+    .option('--id <id>')
+    .option('--name <name>')
+    .option('--link-profile <profile>', 'Retired profile link', collectOption, [] as string[])
+    .option('--keep-legacy-credentials')
+    .option('--json')
+    .action(retiredProfileCredentials);
 
   accounts
     .command('auth-api-key <id>')

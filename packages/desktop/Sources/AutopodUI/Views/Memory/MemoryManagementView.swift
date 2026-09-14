@@ -36,6 +36,7 @@ public struct MemoryManagementView: View {
     public var scopeNameLookup: ((MemoryScope, String) -> String?)?
     public var profileNames: [String]
     public var onScanMemories: ((String) -> Void)?
+    public var configurationActions: LaunchConfigurationActions?
 
     @State private var selectedScope: MemoryScope = .global
     @State private var searchText = ""
@@ -45,8 +46,6 @@ public struct MemoryManagementView: View {
     @State private var editingCandidate: MemoryCandidate?
     @State private var viewingEntry: MemoryEntry?
     @State private var copiedId: String?
-    @State private var scanProfile: String?
-    @State private var isLaunchingScan = false
 
     public init(
         entries: [MemoryEntry],
@@ -75,7 +74,8 @@ public struct MemoryManagementView: View {
         onCreateMemory: ((MemoryScope, String?, String, String) -> Void)? = nil,
         scopeNameLookup: ((MemoryScope, String) -> String?)? = nil,
         profileNames: [String] = [],
-        onScanMemories: ((String) -> Void)? = nil
+        onScanMemories: ((String) -> Void)? = nil,
+        configurationActions: LaunchConfigurationActions? = nil
     ) {
         self.entries = entries
         self.activeMemories = activeMemories
@@ -104,6 +104,7 @@ public struct MemoryManagementView: View {
         self.scopeNameLookup = scopeNameLookup
         self.profileNames = profileNames
         self.onScanMemories = onScanMemories
+        self.configurationActions = configurationActions
     }
 
     private var displayedScope: MemoryScope {
@@ -290,7 +291,7 @@ public struct MemoryManagementView: View {
                         if !approved.isEmpty {
                             approvedSection
                         }
-                        if onScanMemories != nil && scopeFilter == nil && !profileNames.isEmpty {
+                        if configurationActions != nil && scopeFilter == nil {
                             scanSection
                         }
                     }
@@ -465,7 +466,7 @@ public struct MemoryManagementView: View {
             detailHeader(
                 title: candidate.path,
                 subtitle: [
-                    Self.scopeLabel(scope: candidate.scope, scopeId: candidate.scopeId),
+                    Self.scopeLabel(scope: candidate.scope, scopeId: candidate.scopeId, repositorySetupId: candidate.repositorySetupId),
                     candidate.createdByPodId.map { "source pod \(Self.shortId($0))" },
                     "\(candidate.action.rawValue) candidate",
                     candidate.kind.rawValue,
@@ -514,7 +515,7 @@ public struct MemoryManagementView: View {
             detailHeader(
                 title: memory.path,
                 subtitle: [
-                    Self.scopeLabel(scope: memory.scope, scopeId: memory.scopeId),
+                    Self.scopeLabel(scope: memory.scope, scopeId: memory.scopeId, repositorySetupId: memory.repositorySetupId),
                     sourcePodId.map { "source pod \(Self.shortId($0))" },
                     "active memory",
                     "v\(memory.version)",
@@ -591,49 +592,12 @@ public struct MemoryManagementView: View {
 
     private var scanSection: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("Analyze & Fix")
-                .font(.subheadline.weight(.semibold))
-
-            VStack(alignment: .leading, spacing: 12) {
-                Text("Launch a workspace pod that reviews all memories and drafts a fix plan for gotchas and issues in your repos.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-
-                HStack(spacing: 12) {
-                    Picker("Profile", selection: $scanProfile) {
-                        Text("Select a profile…").tag(nil as String?)
-                        ForEach(profileNames, id: \.self) { name in
-                            Text(name).tag(name as String?)
-                        }
-                    }
-                    .frame(width: 180)
-
-                    Button {
-                        guard let profile = scanProfile else { return }
-                        isLaunchingScan = true
-                        onScanMemories?(profile)
-                        isLaunchingScan = false
-                    } label: {
-                        if isLaunchingScan {
-                            ProgressView()
-                                .controlSize(.small)
-                                .padding(.horizontal, 4)
-                        } else {
-                            Label("Open Memory Workspace", systemImage: "brain")
-                        }
-                    }
-                    .buttonStyle(.borderedProminent)
-                    .tint(.purple)
-                    .disabled(isLaunchingScan || scanProfile == nil)
-                }
-            }
-            .padding(16)
-            .background(Color(nsColor: .controlBackgroundColor))
-            .clipShape(RoundedRectangle(cornerRadius: 10))
+            Text("Analyze & Fix").font(.subheadline.weight(.semibold))
+            Text("Review project memories and draft a fix plan in an interactive workspace.")
+                .foregroundStyle(.secondary)
+            AnalysisWorkspaceLauncher(kind: "memory", actions: configurationActions)
         }
     }
-
-    // MARK: - Candidate card
 
     private func candidateCard(_ candidate: MemoryCandidate) -> some View {
         Button { selectedItem = .candidate(candidate.id) } label: {
@@ -655,12 +619,12 @@ public struct MemoryManagementView: View {
                 }
                 if let podId = candidate.createdByPodId {
                     provenanceRow(
-                        primary: Self.scopeLabel(scope: candidate.scope, scopeId: candidate.scopeId),
+                        primary: Self.scopeLabel(scope: candidate.scope, scopeId: candidate.scopeId, repositorySetupId: candidate.repositorySetupId),
                         secondary: "source pod \(Self.shortId(podId))"
                     )
                 } else {
                     provenanceRow(
-                        primary: Self.scopeLabel(scope: candidate.scope, scopeId: candidate.scopeId),
+                        primary: Self.scopeLabel(scope: candidate.scope, scopeId: candidate.scopeId, repositorySetupId: candidate.repositorySetupId),
                         secondary: nil
                     )
                 }
@@ -871,8 +835,8 @@ public struct MemoryManagementView: View {
         }
         let displayName = scopeNameLookup?(entry.scope, scopeId)
         switch entry.scope {
-        case .profile:
-            return "profile \(displayName ?? scopeId)"
+        case .repository, .profile:
+            return Self.scopeLabel(scope: entry.scope, scopeId: displayName ?? scopeId, repositorySetupId: entry.repositorySetupId)
         case .pod:
             return "pod \(displayName ?? Self.shortId(scopeId))"
         case .unknown(let value):
@@ -1292,13 +1256,13 @@ public struct MemoryManagementView: View {
         return value == "Manual" ? nil : value
     }
 
-    static func scopeLabel(scope: MemoryScope, scopeId: String?) -> String {
+    static func scopeLabel(scope: MemoryScope, scopeId: String?, repositorySetupId: String? = nil) -> String {
         switch scope {
         case .global:
             return "global"
-        case .profile:
-            guard let scopeId, !scopeId.isEmpty else { return "profile unknown" }
-            return "profile \(scopeId)"
+        case .repository, .profile:
+            guard let scopeId, !scopeId.isEmpty else { return "\(scope.label.lowercased()) unknown" }
+            return "\(scope.label.lowercased()) \(scopeId)" + (repositorySetupId.map { " · setup \($0)" } ?? "")
         case .pod:
             guard let scopeId, !scopeId.isEmpty else { return "pod unknown" }
             return "pod \(shortId(scopeId))"
@@ -1460,10 +1424,10 @@ struct CreateMemorySheet: View {
                     // Scope ID (hidden for global)
                     if scope != .global {
                         VStack(alignment: .leading, spacing: 6) {
-                            Text(scope == .profile ? "Profile name" : "Pod ID")
+                            Text(scope == .repository ? "Repository ID" : scope == .profile ? "Legacy profile name" : "Pod ID")
                                 .font(.caption.weight(.semibold))
                                 .foregroundStyle(.secondary)
-                            TextField(scope == .profile ? "my-app" : "abc12345", text: $scopeId)
+                            TextField((scope == .profile || scope == .repository) ? "my-app" : "abc12345", text: $scopeId)
                                 .textFieldStyle(.roundedBorder)
                                 .font(.system(.caption, design: .monospaced))
                         }

@@ -1429,9 +1429,6 @@ public struct DetailPanelView: View {
         .frame(minWidth: 480)
     }
 
-    private var singleSpecWorkerProfile: String {
-        actions.workerProfileForProfile(pod.profileName) ?? pod.profileName
-    }
 
     private var canLaunchSingleSpec: Bool {
         !isSingleSpecSyncing && !isSingleSpecSubmitting && singleSpecPreview != nil
@@ -1459,7 +1456,7 @@ public struct DetailPanelView: View {
                     Text("Worker profile")
                         .font(.caption)
                         .foregroundStyle(.secondary)
-                    Text(singleSpecWorkerProfile)
+                    Text("Frozen worker configuration")
                         .font(.system(.caption, design: .monospaced))
                         .lineLimit(1)
                 }
@@ -1621,7 +1618,7 @@ public struct DetailPanelView: View {
         isSingleSpecPreviewing = true
         defer { isSingleSpecPreviewing = false }
 
-        guard let preview = await actions.previewBriefOnBranch(pod.profileName, pod.branch, path) else {
+        guard let preview = await actions.previewBriefOnBranch(pod.id, pod.branch, path) else {
             singleSpecErrorMessage = actions.lastPreviewError() ?? "Could not parse that spec."
             return
         }
@@ -1641,25 +1638,7 @@ public struct DetailPanelView: View {
             doesNotTouch: brief.doesNotTouch,
             startBranch: pod.branch
         )
-        let id = await actions.createPod(
-            singleSpecWorkerProfile,
-            brief.task,
-            nil,
-            PodConfigRequest(
-                agentMode: "auto",
-                output: "pr",
-                validate: true,
-                validationSuite: "full",
-                promotable: false
-            ),
-            nil,
-            pod.baseBranch,
-            nil,
-            nil,
-            brief.requireSidecars,
-            nil,
-            metadata
-        )
+        let id = await actions.launchWorker(pod.id, brief.task, metadata, brief.requireSidecars)
 
         if let id {
             resetSingleSpecHandoff()

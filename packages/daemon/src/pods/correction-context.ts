@@ -1,6 +1,7 @@
-import type { Pod, Profile, ValidationResult } from '@autopod/shared';
+import type { Pod, ValidationResult } from '@autopod/shared';
 import { MAX_DIFF_LENGTH } from '@autopod/shared';
 import type { ContainerManager } from '../interfaces/index.js';
+import type { PodExecutionSettings } from '../interfaces/pod-execution-settings.js';
 import { formatFeedback } from './feedback-formatter.js';
 
 export interface CorrectionContext {
@@ -25,7 +26,7 @@ export interface CorrectionContext {
 
 export async function buildCorrectionContext(
   pod: Pod,
-  profile: Profile,
+  profile: PodExecutionSettings,
   validationResult: ValidationResult,
   containerManager: ContainerManager,
 ): Promise<CorrectionContext> {
@@ -137,7 +138,7 @@ export function truncateDiff(diff: string, maxLength: number): string {
 
 export async function buildCorrectionMessage(
   pod: Pod,
-  profile: Profile,
+  profile: PodExecutionSettings,
   validationResult: ValidationResult,
   containerManager: ContainerManager,
 ): Promise<string> {

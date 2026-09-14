@@ -49,7 +49,7 @@ export async function snapshotBeforeCutover(
   dbPath: string,
   logger: Logger,
   suffix: string,
-): Promise<void> {
+): Promise<{ path: string; receipt: BackupReceipt } | undefined> {
   assertActiveDatabasePath(db, dbPath);
   if (db.memory) return;
   if (db.inTransaction) throw new Error('Cutover backup requires a database outside a transaction');
@@ -117,6 +117,7 @@ export async function snapshotBeforeCutover(
       { file, sourceIdentity: receipt.sourceIdentity, suffix },
       'Cutover DB backup verified',
     );
+    return { path: path.join(dir, file), receipt };
   } finally {
     fs.rmSync(staging, { recursive: true, force: true });
   }

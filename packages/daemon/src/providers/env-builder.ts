@@ -6,12 +6,12 @@ import type {
   MaxRefreshCredentials,
   MaxSetupTokenCredentials,
   PiOAuthCredentials,
-  Profile,
   ProviderAccount,
   PublicProviderCatalog,
   RuntimeType,
 } from '@autopod/shared';
 import type { Logger } from 'pino';
+import type { PodExecutionSettings } from '../interfaces/pod-execution-settings.js';
 import type { ProfileStore } from '../profiles/index.js';
 import type { ProviderAccountStore } from '../provider-accounts/index.js';
 import { RUNTIME_TELEMETRY_OPT_OUT_ENV, withRuntimeTelemetryOptOutEnv } from '../runtime-env.js';
@@ -51,7 +51,10 @@ export interface BuildProviderAccountEnvOptions {
   providerCatalog?: PublicProviderCatalog;
 }
 
-type ProviderEnvSubject = Pick<Profile, 'name' | 'modelProvider' | 'openrouterApiKey'>;
+type ProviderEnvSubject = Pick<PodExecutionSettings, 'name' | 'modelProvider'> & {
+  /** Only retained legacy auth callers can supply this; composed execution uses an account. */
+  openrouterApiKey?: string | null;
+};
 
 /**
  * Returns the Claude Code config files to inject into every container:
@@ -104,7 +107,7 @@ export function buildClaudeConfigFiles(): ContainerFile[] {
  * credential persistence is needed (for MAX/PRO token rotation).
  */
 export async function buildProviderEnv(
-  profile: Profile,
+  profile: PodExecutionSettings,
   _sessionId: string,
   logger: Logger,
   options: BuildProviderEnvOptions = {},
@@ -291,7 +294,10 @@ function assertAccountRuntimeCompatible(
   }
 }
 
-function assertPiEnvironmentCompatible(profile: Profile, auth: ProviderAuthResolution): void {
+function assertPiEnvironmentCompatible(
+  profile: PodExecutionSettings,
+  auth: ProviderAuthResolution,
+): void {
   if (
     profile.modelProvider === 'max' ||
     profile.modelProvider === 'copilot' ||

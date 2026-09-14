@@ -53,7 +53,72 @@ public actor DaemonAPI {
     return res.version
   }
 
+  // MARK: - Composable configuration
+  public func listDeployments() async throws -> [ConfigurationJSON] {
+    try await request("GET", "/deployments")
+  }
+  public func reviewDeployment(_ id: String) async throws -> ConfigurationJSON {
+    try await request("GET", "/deployments/\(id)/review")
+  }
+  public func decideDeployment(_ id: String, body: ConfigurationJSON) async throws -> ConfigurationJSON {
+    try await request("POST", "/deployments/\(id)/decision", body: encode(body))
+  }
+  public func reconcileDeployment(_ id: String, body: ConfigurationJSON) async throws -> ConfigurationJSON {
+    try await request("POST", "/deployments/\(id)/reconcile", body: encode(body))
+  }
+
+  public func configurationCapabilities() async throws -> ConfigurationJSON {
+    try await request("GET", "/configuration/capabilities")
+  }
+  public func listWatcherBindings() async throws -> [WatcherBindingResponse] {
+    try await request("GET", "/configuration/watchers")
+  }
+  public func writeWatcherBinding(_ body: WatcherBindingWrite) async throws -> WatcherBindingResponse {
+    try await request("POST", "/configuration/watchers", body: encode(body))
+  }
+  public func listConfigurations(_ kind: ConfigurationKind) async throws -> [ConfigurationDocument] {
+    try await request("GET", kind.endpoint)
+  }
+  public func writeConfiguration(_ kind: ConfigurationKind, body: ConfigurationWriteRequest) async throws -> ConfigurationDocument {
+    if body.expectedRevision != nil {
+      guard let id = body.id, !id.isEmpty else { throw DaemonError.badRequest("Configuration ID is required for an update") }
+      return try await request("PUT", "\(kind.endpoint)/\(id)", body: encode(body))
+    }
+    return try await request("POST", kind.endpoint, body: encode(body))
+  }
+  public func archiveConfiguration(_ kind: ConfigurationKind, id: String, expectedRevision: Int) async throws {
+    let _: EmptyResponse = try await request("DELETE", "\(kind.endpoint)/\(id)", body: encode(["expectedRevision": expectedRevision]))
+  }
+  public func resolveLaunch(_ body: ComposableLaunchRequest) async throws -> EffectiveLaunchPreview {
+    try await request("POST", "/launch/resolve", body: encode(body))
+  }
+  public func getLaunchConfiguration(_ podId: String) async throws -> EffectiveLaunchPreview {
+    try await request("GET", "/pods/\(podId)/configuration")
+  }
+  public func launchPod(_ body: ComposableLaunchRequest) async throws -> SessionResponse {
+    try await request("POST", "/pods", body: encode(body))
+  }
+  public func discoverGitHubRepositories() async throws -> [ConfigurationJSON] {
+    try await request("GET", "/configuration/github/repositories")
+  }
+  public func discoverGitHubWorkflows(repositoryId: String) async throws -> [ConfigurationJSON] {
+    try await request("GET", "/configuration/github/repositories/\(repositoryId)/workflows")
+  }
+
+  public func discoverPimEligibility() async throws -> ConfigurationJSON {
+    try await request("GET", "/pim/eligibility")
+  }
+  public func saveProfileFromLaunch(_ body: ConfigurationJSON) async throws -> ConfigurationJSON {
+    try await request("POST", "/profiles/from-launch", body: encode(body))
+  }
+
   // MARK: - Pods
+  public func getGoal(_ id: String) async throws -> PodGoalResponse {
+    try await request("GET", "/pods/\(id)/goal")
+  }
+  public func controlGoal(_ id: String, body: PodGoalControlRequest) async throws -> PodGoalResponse {
+    try await request("POST", "/pods/\(id)/goal/control", body: encode(body))
+  }
 
   public func listPods(
     profileName: String? = nil,
@@ -492,12 +557,12 @@ public actor DaemonAPI {
   /// `/plan-feature` or an interactive pod). Reads the files directly from the
   /// profile's bare repo.
   public func previewSeriesOnBranch(
-    profileName: String,
+    repositoryId: String,
     branch: String,
     path: String
   ) async throws -> SeriesPreviewResponse {
     let body = try JSONSerialization.data(withJSONObject: [
-      "profileName": profileName,
+      "repositoryId": repositoryId,
       "branch": branch,
       "path": path,
     ])
@@ -513,12 +578,12 @@ public actor DaemonAPI {
 
   /// Parse one `/prep` folder living on a git branch.
   public func previewBriefOnBranch(
-    profileName: String,
+    repositoryId: String,
     branch: String,
     path: String
   ) async throws -> ParsedBriefResponse {
     let body = try JSONSerialization.data(withJSONObject: [
-      "profileName": profileName,
+      "repositoryId": repositoryId,
       "branch": branch,
       "path": path,
     ])
@@ -696,27 +761,6 @@ public actor DaemonAPI {
     return try await request("GET", "/podsitter/decisions", query: query)
   }
 
-  // MARK: - History
-
-  public func createHistoryWorkspace(
-    profileName: String?,
-    limit: Int? = nil,
-    since: String? = nil,
-    failuresOnly: Bool? = nil
-  ) async throws -> SessionResponse {
-    try await request(
-      "POST", "/pods/history-workspace",
-      body: try encode(
-        HistoryWorkspaceBody(
-          profileName: profileName,
-          limit: limit,
-          since: since,
-          failuresOnly: failuresOnly
-        )
-      )
-    )
-  }
-
   // MARK: - Actions
 
   public func fetchActionCatalog() async throws -> [ActionCatalogEntry] {
@@ -736,11 +780,6 @@ public actor DaemonAPI {
   }
 
   // MARK: - Memory
-
-  public func createMemoryWorkspace(profileName: String) async throws -> SessionResponse {
-    let body = try JSONSerialization.data(withJSONObject: ["profileName": profileName])
-    return try await request("POST", "/pods/memory-workspace", body: body)
-  }
 
   public func listMemories(
     scope: String,

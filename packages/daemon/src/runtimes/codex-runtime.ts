@@ -7,6 +7,8 @@ import { AutopodError, CONTAINER_HOME_DIR, CONTAINER_USER } from '@autopod/share
 import type {
   AgentEvent,
   ExecutionTarget,
+  NativeGoalProcessHooks,
+  NativeGoalSession,
   Pod,
   ReasoningEffort,
   Runtime,
@@ -17,6 +19,7 @@ import type { Logger } from 'pino';
 import type { ContainerManager, StreamingExecResult } from '../interfaces/container-manager.js';
 import type { EventBus } from '../pods/event-bus.js';
 import type { PodRepository } from '../pods/pod-repository.js';
+import { CodexGoalRuntimeSession } from './codex-goal-runtime-session.js';
 import { admitCodexRecovery } from './codex-recovery-admission.js';
 import { codexStateDirForPod } from './codex-state-store.js';
 import {
@@ -126,6 +129,7 @@ export class CodexRuntime implements Runtime {
   readonly type = 'codex' as const;
 
   private handles = new Map<string, StreamingExecResult>();
+  private goalReservations = new Map<string, symbol>();
   private intentionalTerminations = new WeakSet<StreamingExecResult>();
   private suspensionSignals = new Map<string, () => void>();
   /** Maps autopod podId → Codex session ID for in-memory resume shortcut. */
@@ -155,7 +159,107 @@ export class CodexRuntime implements Runtime {
     this.eventBus = eventBus;
   }
 
+  nativeGoalSession(input: SpawnConfig, hooks?: NativeGoalProcessHooks): NativeGoalSession {
+    const config = structuredClone(input);
+    const reservation = Symbol('native-goal');
+    let ownedHandle: StreamingExecResult | undefined;
+    const owner = structuredClone(this.podRepo.getOrThrow(config.podId));
+    const assertOwner = () => {
+      const current = this.podRepo.getOrThrow(config.podId);
+      if (
+        !owner.launchConfigDigest ||
+        current.runtime !== 'codex' ||
+        current.lifecycleGeneration !== owner.lifecycleGeneration ||
+        current.containerId !== config.containerId ||
+        current.launchConfigDigest !== owner.launchConfigDigest ||
+        current.status !== 'running'
+      )
+        throw new AutopodError(
+          'Native Goal no longer owns this pod execution',
+          'GOAL_SUPERSEDED',
+          409,
+        );
+    };
+    return new CodexGoalRuntimeSession({
+      config: {
+        model: config.model,
+        cwd: config.workDir,
+        developerInstructions: config.customInstructions ?? '',
+      },
+      prepare: async () => {
+        assertOwner();
+        if (
+          !hooks ||
+          config.executionTarget !== 'local' ||
+          !this.containerManager.supportsExecRecovery
+        )
+          throw new AutopodError(
+            'Recoverable native Goal execution is unavailable',
+            'GOAL_UNAVAILABLE',
+            409,
+          );
+        if (this.handles.has(config.podId) || this.goalReservations.has(config.podId))
+          throw new AutopodError(
+            'Codex already has an active process',
+            'GOAL_ALREADY_RUNNING',
+            409,
+          );
+        this.goalReservations.set(config.podId, reservation);
+        await this.writeMcpConfig(
+          config.containerId,
+          config.mcpServers,
+          config.executionTarget,
+          config.reasoningEffort,
+          config.env,
+        );
+        assertOwner();
+      },
+      spawn: async () => {
+        assertOwner();
+        const handle = await this.containerManager.execStreaming(
+          config.containerId,
+          [
+            'sh',
+            '/run/autopod/agent-shim.sh',
+            'codex',
+            '-c',
+            `sqlite_home="${CONTAINER_HOME_DIR}/.codex/sessions/.autopod-goal-state"`,
+            'app-server',
+          ],
+          {
+            cwd: config.workDir,
+            env: config.env,
+            stdin: true,
+            onProcessCreated: (identity) => {
+              assertOwner();
+              hooks?.processCreated(identity);
+            },
+            onProcessStarted: (identity) => {
+              assertOwner();
+              hooks?.processStarted(identity);
+            },
+          },
+        );
+        this.handles.set(config.podId, handle);
+        ownedHandle = handle;
+        return handle;
+      },
+      sessionOpened: (id) => {
+        assertOwner();
+        this.codexSessionIds.set(config.podId, id);
+        this.podRepo.update(config.podId, { codexSessionId: id });
+      },
+      stopped: () => {
+        if (this.handles.get(config.podId) === ownedHandle) this.handles.delete(config.podId);
+        if (this.goalReservations.get(config.podId) === reservation)
+          this.goalReservations.delete(config.podId);
+      },
+    });
+  }
+
   async *spawn(config: SpawnConfig): AsyncIterable<AgentEvent> {
+    if (this.goalReservations.has(config.podId))
+      throw new AutopodError('A native Goal owns this pod', 'GOAL_ALREADY_RUNNING', 409);
     const recoveryOwner = structuredClone(this.podRepo.getOrThrow(config.podId));
     // A fresh spawn must not inherit the prior turn's durable rollout selector.
     // The new thread.started event will repopulate this map before live rollout
@@ -233,6 +337,8 @@ export class CodexRuntime implements Runtime {
     allowInterruptedRecovery = true,
     beforeRecoveryLaunch?: () => void,
   ): AsyncIterable<AgentEvent> {
+    if (this.goalReservations.has(podId))
+      throw new AutopodError('A native Goal owns this pod', 'GOAL_ALREADY_RUNNING', 409);
     // Prefer in-memory shortcut; fall back to durable DB source across daemon restarts.
     const pod = structuredClone(this.podRepo.getOrThrow(podId));
 

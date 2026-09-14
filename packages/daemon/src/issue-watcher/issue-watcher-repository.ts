@@ -15,6 +15,7 @@ export interface IssueWatcherRepository {
 
 function rowToWatchedIssue(row: Record<string, unknown>): WatchedIssue {
   return {
+    watcherId: (row.watcher_id as string | null) ?? null,
     id: row.id as number,
     profileName: row.profile_name as string,
     provider: row.provider as 'github' | 'ado',
@@ -37,10 +38,10 @@ export function createIssueWatcherRepository(db: Database.Database): IssueWatche
         .prepare(
           `INSERT INTO watched_issues (
             profile_name, provider, issue_id, issue_url, issue_title,
-            status, pod_id, phase, trigger_label
+            status, pod_id, phase, trigger_label, watcher_id
           ) VALUES (
             @profileName, @provider, @issueId, @issueUrl, @issueTitle,
-            @status, @podId, @phase, @triggerLabel
+            @status, @podId, @phase, @triggerLabel, @watcherId
           )`,
         )
         .run({
@@ -53,6 +54,7 @@ export function createIssueWatcherRepository(db: Database.Database): IssueWatche
           podId: issue.podId,
           phase: issue.phase ?? 'working',
           triggerLabel: issue.triggerLabel,
+          watcherId: issue.watcherId ?? null,
         });
 
       const row = db

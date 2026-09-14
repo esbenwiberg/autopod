@@ -203,28 +203,9 @@ public struct SessionCardFinal: View {
             TextField("What should the worker do?", text: $launchWorkerTask)
             Button("Launch") {
                 let task = launchWorkerTask
-                let workerProfile = actions.workerProfileForProfile(pod.profileName) ?? pod.profileName
                 launchWorkerTask = ""
                 Task {
-                    let id = await actions.createPod(
-                        workerProfile,
-                        task,
-                        nil,
-                        PodConfigRequest(
-                            agentMode: "auto",
-                            output: "pr",
-                            validate: true,
-                            validationSuite: "full",
-                            promotable: false
-                        ),
-                        nil,
-                        pod.branch,
-                        nil,
-                        nil,
-                        nil,
-                        nil,
-                        nil
-                    )
+                    let id = await actions.launchWorker(pod.id, task, nil, nil)
                     if id == nil {
                         launchWorkerError = actions.lastCreatePodError() ?? "Pod creation failed."
                     }

@@ -1,8 +1,9 @@
 import { randomUUID } from 'node:crypto';
 import type { Readable } from 'node:stream';
-import type { ModelProvider, Profile } from '@autopod/shared';
+import type { ModelProvider } from '@autopod/shared';
 import type { Logger } from 'pino';
 import type { ContainerManager } from '../interfaces/container-manager.js';
+import type { PodExecutionSettings } from '../interfaces/pod-execution-settings.js';
 import type { BeforeReviewerLaunch } from '../interfaces/reviewer-launch.js';
 import { parseClaudeCliStdout } from '../runtimes/run-claude-cli.js';
 import { type CodexReviewTokenUsage, runCodexReview } from './review-codex-runner.js';
@@ -19,6 +20,7 @@ export class ContainerReviewerUnavailableError extends Error {
     | 'provider-unavailable'
     | 'exec-error';
   readonly stderr: string;
+  readonly tokenUsage?: CodexReviewTokenUsage;
 
   constructor(
     message: string,
@@ -33,21 +35,24 @@ export class ContainerReviewerUnavailableError extends Error {
         | 'provider-unavailable'
         | 'exec-error';
       stderr?: string;
+      tokenUsage?: CodexReviewTokenUsage;
     },
   ) {
     super(message, options);
     this.name = 'ContainerReviewerUnavailableError';
     this.kind = options?.kind ?? 'exec-error';
     this.stderr = options?.stderr ?? '';
+    this.tokenUsage = options?.tokenUsage;
   }
 }
 
 export interface ContainerReviewerRunnerConfig {
+  executor?: import('../interfaces/reviewer-executor.js').ReviewerExecutor;
   beforeLaunch?: BeforeReviewerLaunch;
   podId: string;
   containerId: string | null | undefined;
   containerManager: ContainerManager;
-  profile: Pick<Profile, 'modelProvider' | 'providerCredentials'>;
+  profile: Pick<PodExecutionSettings, 'modelProvider' | 'providerCredentials'>;
   model: string;
   prompt: string;
   env?: Record<string, string>;
@@ -55,6 +60,9 @@ export interface ContainerReviewerRunnerConfig {
   logger?: Logger;
   /** Optional provider-native JSON Schema contract; callers still validate output locally. */
   outputContract?: ReviewerOutputContract;
+  /** Fresh daemon-owned reviewer container; disable ambient instructions and tool discovery. */
+  isolated?: boolean;
+  reasoningEffort?: string | null;
 }
 
 const SHIM_PATH = '/run/autopod/agent-shim.sh';
@@ -65,6 +73,12 @@ const TERMINATION_CONFIRM_TIMEOUT_MS = 5_000;
 export async function runContainerReviewer(
   config: ContainerReviewerRunnerConfig,
 ): Promise<{ stdout: string; tokenUsage?: CodexReviewTokenUsage }> {
+  if (config.executor)
+    return config.executor({
+      prompt: config.prompt,
+      timeout: config.timeout,
+      outputContract: config.outputContract,
+    });
   if (!config.containerId) {
     throw new ContainerReviewerUnavailableError(
       'Container reviewer unavailable: pod has no live container',
@@ -73,7 +87,11 @@ export async function runContainerReviewer(
   const containerId = config.containerId;
 
   const containerStatus = await config.containerManager.getStatus(containerId);
-  if (containerStatus === 'stopped') {
+  if (
+    containerStatus === 'stopped' ||
+    containerStatus === 'deleted' ||
+    (config.isolated && containerStatus !== 'running')
+  ) {
     throw new ContainerReviewerUnavailableError(
       'Container reviewer unavailable: container is stopped (not running)',
     );
@@ -97,6 +115,8 @@ export async function runContainerReviewer(
       timeout: config.timeout,
       outputContract: config.outputContract,
       logger: config.logger,
+      isolated: config.isolated,
+      reasoningEffort: config.reasoningEffort,
     });
   }
 
@@ -110,7 +130,7 @@ export async function runContainerReviewer(
 }
 
 export function resolveContainerReviewer(
-  profile: Pick<Profile, 'modelProvider' | 'providerCredentials'>,
+  profile: Pick<PodExecutionSettings, 'modelProvider' | 'providerCredentials'>,
 ): 'claude' | 'codex' | { provider: ModelProvider } {
   if (usesOpenAiSurface(profile)) return 'codex';
   if (
@@ -126,7 +146,7 @@ export function resolveContainerReviewer(
 
 async function runClaudeContainerReview(
   config: ContainerReviewerRunnerConfig & { containerId: string },
-): Promise<{ stdout: string }> {
+): Promise<{ stdout: string; tokenUsage?: CodexReviewTokenUsage }> {
   const suffix = `${safePathPart(config.podId)}-${Date.now()}-${randomUUID()}`;
   const promptPath = `/tmp/autopod-claude-review-${suffix}.prompt`;
   const outputPath = `/tmp/autopod-claude-review-${suffix}.out`;
@@ -142,6 +162,10 @@ async function runClaudeContainerReview(
     '--disable-slash-commands',
     '--no-session-persistence',
     '--output-format json',
+    ...(config.isolated ? ['--strict-mcp-config', '--mcp-config', '\'{"mcpServers":{}}\''] : []),
+    ...(config.reasoningEffort && config.reasoningEffort !== 'auto'
+      ? [`--effort ${shellQuote(config.reasoningEffort)}`]
+      : []),
     ...(config.outputContract
       ? [`--json-schema ${shellQuote(config.outputContract.jsonSchema)}`]
       : []),
@@ -223,6 +247,7 @@ async function runClaudeContainerReview(
                 ? 'provider-unavailable'
                 : 'non-zero-exit',
           stderr: result.stderr,
+          tokenUsage: parseClaudeCliStdout(result.stdout, 'json').tokenUsage,
         },
       );
     }
@@ -380,7 +405,7 @@ function appendBounded(current: string, chunk: string, limit = MAX_DIAGNOSTIC_BY
 }
 
 function usesOpenAiSurface(
-  profile: Pick<Profile, 'modelProvider' | 'providerCredentials'>,
+  profile: Pick<PodExecutionSettings, 'modelProvider' | 'providerCredentials'>,
 ): boolean {
   if (profile.modelProvider === 'openai') return true;
   if (profile.modelProvider !== 'foundry') return false;

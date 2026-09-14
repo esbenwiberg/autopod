@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import Database from 'better-sqlite3';
 import { expect, it, vi } from 'vitest';
-import { runMigrations } from '../db/migrate.js';
+import { runMigrations, runMigrationsWithBackups } from '../db/migrate.js';
 import { createTestContext, insertTestProfile, logger } from '../test-utils/mock-helpers.js';
 import { createPodManager } from './pod-manager.js';
 import { createPodRepository } from './pod-repository.js';
@@ -173,7 +173,7 @@ it.each(['worktree', 'archive'] as const)(
   },
 );
 
-it('upgrades schema 181 and keeps abandoned ownership fenced across disk reopen and elapsed time', () => {
+it('upgrades schema 181 and keeps abandoned ownership fenced across disk reopen and elapsed time', async () => {
   const dir = mkdtempSync(join(tmpdir(), 'deletion-upgrade-'));
   const migrations = resolve(import.meta.dirname, '../db/migrations');
   const file = join(dir, 'state.db');
@@ -187,8 +187,8 @@ it('upgrades schema 181 and keeps abandoned ownership fenced across disk reopen 
       "INSERT INTO pods(id,profile_name,task,status,model,runtime,branch,user_id) VALUES ('old','test-profile','Retain abandoned cleanup','failed','model','copilot','old','operator')",
     ).run();
     const before = db.prepare("SELECT * FROM pods WHERE id='old'").get();
-    runMigrations(db, migrations, logger);
-    expect(db.prepare("SELECT * FROM pods WHERE id='old'").get()).toEqual(before);
+    await runMigrationsWithBackups(db, migrations, logger);
+    expect(db.prepare("SELECT * FROM pods WHERE id='old'").get()).toMatchObject(before);
     const repo = createPodRepository(db);
     repo.taskExecutions?.register('old');
     repo.deletionOwnership?.acquire('old', 'null');

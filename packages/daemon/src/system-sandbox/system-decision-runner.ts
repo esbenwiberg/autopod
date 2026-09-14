@@ -796,7 +796,7 @@ async function withinTimeout<T>(
   }
 }
 
-function providerRequiredHosts(
+export function providerRequiredHosts(
   account: ReturnType<ProviderAccountStore['get']>,
   catalogHosts: string[],
 ): string[] {

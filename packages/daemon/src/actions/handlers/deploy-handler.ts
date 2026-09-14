@@ -186,8 +186,11 @@ export function createDeployHandler(deps: DeployHandlerDeps) {
       const pod = podRepo.getOrThrow(podId);
       if (!pod.worktreePath) throw new Error(`Pod ${podId} has no worktree`);
 
-      const profile = profileStore.get(pod.profileName);
-      const deployConfig = profile.deployment;
+      if (pod.launchConfigDigest)
+        throw new Error(
+          'Composable deployment requires an isolated runner; legacy host execution is disabled',
+        );
+      const deployConfig = profileStore.get(pod.profileName).deployment;
       if (!deployConfig?.enabled) {
         throw new Error('Deployment is not enabled for this profile');
       }
@@ -237,7 +240,7 @@ export function createDeployHandler(deps: DeployHandlerDeps) {
       // Resolve env vars — expand $DAEMON: refs server-side
       const resolvedEnv: Record<string, string> = {};
       for (const [key, value] of Object.entries(deployConfig.env)) {
-        resolvedEnv[key] = resolveEnvValue(key, value, daemonEnv);
+        resolvedEnv[key] = pod.launchConfigDigest ? value : resolveEnvValue(key, value, daemonEnv);
       }
 
       // Parse optional args string into array

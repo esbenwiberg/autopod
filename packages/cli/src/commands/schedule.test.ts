@@ -22,6 +22,55 @@ describe('schedule command', () => {
     vi.restoreAllMocks();
   });
 
+  it('saves repository and preset choices with explicit clears without launching a pod', async () => {
+    vi.spyOn(console, 'log').mockImplementation(() => {});
+    const createScheduledJob = vi.fn(async () => ({ id: 'schedule', nextRunAt: '2026-09-14' }));
+    const createPod = vi.fn();
+    const client = {
+      listConfigurations: vi.fn(async (kind: string) => [
+        {
+          id: kind === 'repository' ? 'repo-id' : 'ai-id',
+          kind,
+          name: kind === 'repository' ? 'Project' : 'Special AI',
+          archived: false,
+        },
+      ]),
+      listScheduledJobTemplates: vi.fn(async () => [{ id: 'template-id', name: 'Daily work' }]),
+      createScheduledJob,
+      createPod,
+    } as unknown as Partial<AutopodClient>;
+    await createProgram(client).parseAsync([
+      'node',
+      'ap',
+      'schedule',
+      'create-launch',
+      '0 9 * * *',
+      '--repo',
+      'Project',
+      '--template',
+      'Daily work',
+      '--ai',
+      'Special AI',
+      '--no-github-access',
+      '--no-sidecars',
+      '--no-tool-packs',
+      '--disabled',
+    ]);
+    expect(createScheduledJob).toHaveBeenCalledWith({
+      templateId: 'template-id',
+      cronExpression: '0 9 * * *',
+      enabled: false,
+      fieldValues: undefined,
+      launch: {
+        repositoryId: 'repo-id',
+        referenceRepositories: [],
+        requiredSidecarIds: [],
+        selections: { aiId: 'ai-id', githubAccessId: null, toolPackIds: [] },
+      },
+    });
+    expect(createPod).not.toHaveBeenCalled();
+  });
+
   it('reads report history pages over HTTP and forwards the explicit continuation cursor', async () => {
     const requests: string[] = [];
     const server = createServer((req, res) => {
@@ -179,7 +228,7 @@ describe('schedule command', () => {
         name: 'Branch review',
         templateId: req.templateId ?? 'tmpl-123',
         templateName: 'Branch review',
-        profileName: req.profileName,
+        profileName: req.profileName ?? null,
         task: 'Review main',
         fieldValues: req.fieldValues ?? {},
         cronExpression: req.cronExpression,
@@ -192,7 +241,13 @@ describe('schedule command', () => {
         updatedAt: '2026-01-01T00:00:00.000Z',
       }),
     );
-    const program = createProgram({ listScheduledJobTemplates, createScheduledJob });
+    const program = createProgram({
+      listScheduledJobTemplates,
+      createScheduledJob,
+      listConfigurations: vi.fn(async () => [
+        { id: 'repo-id', kind: 'repository', name: 'Project', archived: false },
+      ]) as unknown as AutopodClient['listConfigurations'],
+    });
     vi.spyOn(console, 'log').mockImplementation(() => {});
 
     await program.parseAsync([
@@ -200,8 +255,9 @@ describe('schedule command', () => {
       'ap',
       'schedule',
       'create',
-      'test-profile',
       '0 9 * * 1',
+      '--repo',
+      'Project',
       '--template',
       'Branch review',
       '--set',
@@ -209,7 +265,7 @@ describe('schedule command', () => {
     ]);
 
     expect(createScheduledJob).toHaveBeenCalledWith({
-      profileName: 'test-profile',
+      launch: { repositoryId: 'repo-id', referenceRepositories: [] },
       templateId: 'tmpl-123',
       fieldValues: { branch: 'main' },
       cronExpression: '0 9 * * 1',
@@ -232,7 +288,11 @@ it('runs scan create, report review, human triage and explicit repair through th
     const parsed = body ? JSON.parse(body) : {};
     requests.push({ method: req.method ?? '', path: req.url ?? '', body: parsed });
     res.setHeader('content-type', 'application/json');
-    if (req.url === '/scheduled-jobs')
+    if (req.url === '/repositories')
+      res.end(
+        JSON.stringify([{ id: 'repo-id', kind: 'repository', name: 'Project', archived: false }]),
+      );
+    else if (req.url === '/scheduled-jobs')
       res.end(JSON.stringify({ id: 'job-fixture', enabled: false }));
     else if (req.url?.endsWith('/trigger')) res.end(JSON.stringify(report));
     else if (req.url?.endsWith('/triage'))
@@ -264,7 +324,7 @@ it('runs scan create, report review, human triage and explicit repair through th
   try {
     await run([
       'scan-create',
-      'profile',
+      'Project',
       'Report fixture',
       '0 8 * * *',
       '--base',
@@ -273,7 +333,11 @@ it('runs scan create, report review, human triage and explicit repair through th
       'work',
       '--disabled',
     ]);
-    expect(requests[0]?.body).toMatchObject({
+    expect(
+      requests.find((request) => request.method === 'POST' && request.path === '/scheduled-jobs')
+        ?.body,
+    ).toMatchObject({
+      launch: { repositoryId: 'repo-id' },
       enabled: false,
       scan: {
         version: 1,

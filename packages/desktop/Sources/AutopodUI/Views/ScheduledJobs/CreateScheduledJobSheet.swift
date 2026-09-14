@@ -6,17 +6,20 @@ public struct CreateScheduledJobSheet: View {
   @Binding public var isPresented: Bool
   public var templates: [ScheduledJobTemplate]
   public var profileNames: [String]
+  public var configurationActions: LaunchConfigurationActions?
   public var onCreateJob: ((CreateScheduledJobRequest) -> Void)?
 
   public init(
     isPresented: Binding<Bool>,
     templates: [ScheduledJobTemplate] = [],
     profileNames: [String] = ["my-app"],
+    configurationActions: LaunchConfigurationActions? = nil,
     onCreateJob: ((CreateScheduledJobRequest) -> Void)? = nil
   ) {
     self._isPresented = isPresented
     self.templates = templates
     self.profileNames = profileNames
+    self.configurationActions = configurationActions
     self.onCreateJob = onCreateJob
   }
 
@@ -30,6 +33,7 @@ public struct CreateScheduledJobSheet: View {
   }
 
   @State private var selectedTemplateId = ""
+  @State private var launchSelection: [String: ConfigurationJSON] = [:]
   @State private var selectedProfile = ""
   @State private var cronExpression = ""
   @State private var enabled = true
@@ -37,7 +41,7 @@ public struct CreateScheduledJobSheet: View {
 
   private var canCreate: Bool {
     !selectedTemplateId.isEmpty
-      && !selectedProfile.isEmpty
+      && (configurationActions != nil ? (launchSelection["repositoryId"]?.string != nil || (launchSelection["emptyWorkspace"]?.bool == true && launchSelection["profileId"]?.string != nil)) : !selectedProfile.isEmpty)
       && isValidCron(cronExpression)
       && hasRequiredFieldValues
   }
@@ -58,6 +62,9 @@ public struct CreateScheduledJobSheet: View {
             .labelsHidden()
           }
 
+          if let configurationActions {
+            ScheduledLaunchSelectionEditor(actions: configurationActions, selection: $launchSelection, task: selectedTemplate?.prompt ?? "")
+          } else {
           formSection("Profile") {
             Picker("", selection: $selectedProfile) {
               ForEach(profiles, id: \.self) { profile in
@@ -65,6 +72,7 @@ public struct CreateScheduledJobSheet: View {
               }
             }
             .labelsHidden()
+          }
           }
 
           formSection("Schedule (cron)") {
@@ -158,7 +166,8 @@ public struct CreateScheduledJobSheet: View {
       Button("Create Job") {
         let req = CreateScheduledJobRequest(
           templateId: selectedTemplateId,
-          profileName: selectedProfile,
+          profileName: configurationActions == nil ? selectedProfile : nil,
+          launch: configurationActions == nil ? nil : launchSelection,
           fieldValues: selectedFields.isEmpty ? nil : fieldValuesForSubmit(),
           cronExpression: cronExpression.trimmingCharacters(in: .whitespacesAndNewlines),
           enabled: enabled

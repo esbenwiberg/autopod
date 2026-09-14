@@ -4,12 +4,12 @@ import { join, resolve } from 'node:path';
 import Database from 'better-sqlite3';
 import { expect, it } from 'vitest';
 import { insertTestProfile, logger } from '../test-utils/mock-helpers.js';
-import { runMigrations } from './migrate.js';
+import { runMigrations, runMigrationsWithBackups } from './migrate.js';
 
 // Full on-disk schema replay includes fsyncs; these are functional, not latency tests.
 it.each([150, 152, 153])(
   'upgrades managed schema %s without skipping native reliability tables or changing managed data',
-  (baseline) => {
+  async (baseline) => {
     const root = mkdtempSync(join(tmpdir(), 'managed-schema-upgrade-'));
     const migrations = resolve(import.meta.dirname, 'migrations');
     const managed = resolve(import.meta.dirname, 'fixtures/managed-migrations');
@@ -55,7 +55,7 @@ it.each([150, 152, 153])(
         baseline === 153 ? db.prepare('SELECT * FROM managed_github_reads').all() : [];
       const before = db.prepare('SELECT * FROM managed_workspaces').all();
       const source = db.prepare('SELECT * FROM managed_source_candidates').all();
-      runMigrations(db, migrations, logger);
+      await runMigrationsWithBackups(db, migrations, logger);
       for (const file of readdirSync(managed))
         expect(readFileSync(join(migrations, file))).toEqual(readFileSync(join(managed, file)));
       if (baseline >= 152)
@@ -150,7 +150,7 @@ it('refuses an unpublished native checkpoint lineage before changing any migrati
   }
 });
 
-it('upgrades the prior native 182 candidate without silently skipping managed GitHub-read migration 153', () => {
+it('upgrades the prior native 182 candidate without silently skipping managed GitHub-read migration 153', async () => {
   const root = mkdtempSync(join(tmpdir(), 'native-182-upgrade-'));
   const migrations = resolve(import.meta.dirname, 'migrations');
   const db = new Database(join(root, 'existing.db'));
@@ -167,7 +167,7 @@ it('upgrades the prior native 182 candidate without silently skipping managed Gi
     const beforePod = db.prepare('SELECT * FROM pods').all();
     const beforeGuidance = db.prepare('SELECT * FROM nudge_messages').all();
     expect(db.prepare('SELECT MAX(version) AS v FROM schema_version').get()).toEqual({ v: 182 });
-    runMigrations(db, migrations, logger);
+    await runMigrationsWithBackups(db, migrations, logger);
     expect(
       db.prepare("SELECT name FROM sqlite_master WHERE name='managed_github_reads'").get(),
     ).toEqual({ name: 'managed_github_reads' });
@@ -176,8 +176,8 @@ it('upgrades the prior native 182 candidate without silently skipping managed Gi
     });
     const schema = db.prepare('SELECT type,name,sql FROM sqlite_master ORDER BY type,name').all();
     const versions = db.prepare('SELECT * FROM schema_version ORDER BY version').all();
-    runMigrations(db, migrations, logger);
-    expect(db.prepare('SELECT * FROM pods').all()).toEqual(beforePod);
+    await runMigrationsWithBackups(db, migrations, logger);
+    expect(db.prepare('SELECT * FROM pods').all()).toMatchObject(beforePod);
     expect(db.prepare('SELECT * FROM nudge_messages').all()).toEqual(beforeGuidance);
     expect(db.prepare('SELECT type,name,sql FROM sqlite_master ORDER BY type,name').all()).toEqual(
       schema,

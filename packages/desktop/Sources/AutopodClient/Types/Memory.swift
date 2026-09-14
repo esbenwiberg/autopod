@@ -4,18 +4,20 @@ import Foundation
 
 public enum MemoryScope: Hashable, Sendable, Codable, CaseIterable {
   case global
+  case repository
   case profile
   case pod
   case unknown(String)
 
   public static var allCases: [MemoryScope] {
-    [.global, .profile, .pod]
+    [.global, .repository, .profile, .pod]
   }
 
   public init(from decoder: any Decoder) throws {
     let value = try decoder.singleValueContainer().decode(String.self)
     switch value {
     case "global": self = .global
+    case "repository": self = .repository
     case "profile": self = .profile
     case "pod": self = .pod
     default: self = .unknown(value)
@@ -30,6 +32,7 @@ public enum MemoryScope: Hashable, Sendable, Codable, CaseIterable {
   public var rawValue: String {
     switch self {
     case .global: "global"
+    case .repository: "repository"
     case .profile: "profile"
     case .pod: "pod"
     case .unknown(let value): value
@@ -39,7 +42,8 @@ public enum MemoryScope: Hashable, Sendable, Codable, CaseIterable {
   public var label: String {
     switch self {
     case .global: "Global"
-    case .profile: "Profile"
+    case .repository: "Repository"
+    case .profile: "Legacy profile"
     case .pod: "Pod"
     case .unknown(let value): value
     }
@@ -159,6 +163,7 @@ public struct MemoryEntry: Identifiable, Sendable, Codable {
   public let id: String
   public let scope: MemoryScope
   public let scopeId: String?
+  public let repositorySetupId: String?
   public let path: String
   public let content: String
   public let contentSha256: String
@@ -181,6 +186,7 @@ public struct MemoryEntry: Identifiable, Sendable, Codable {
     id: String,
     scope: MemoryScope,
     scopeId: String? = nil,
+    repositorySetupId: String? = nil,
     path: String,
     content: String,
     contentSha256: String = "",
@@ -202,6 +208,7 @@ public struct MemoryEntry: Identifiable, Sendable, Codable {
     self.id = id
     self.scope = scope
     self.scopeId = scopeId
+    self.repositorySetupId = repositorySetupId
     self.path = path
     self.content = content
     self.contentSha256 = contentSha256
@@ -222,7 +229,7 @@ public struct MemoryEntry: Identifiable, Sendable, Codable {
   }
 
   private enum CodingKeys: String, CodingKey {
-    case id, scope, scopeId, path, content, contentSha256, rationale
+    case id, scope, scopeId, repositorySetupId, path, content, contentSha256, rationale
     case kind, tags, appliesWhen, avoidWhen, confidence, sourceEvidence, impactSummary
     case version, approved, createdByPodId, createdBySessionId, createdAt, updatedAt
   }
@@ -232,6 +239,7 @@ public struct MemoryEntry: Identifiable, Sendable, Codable {
     id = try container.decode(String.self, forKey: .id)
     scope = try container.decode(MemoryScope.self, forKey: .scope)
     scopeId = try container.decodeIfPresent(String.self, forKey: .scopeId)
+    repositorySetupId = try container.decodeIfPresent(String.self, forKey: .repositorySetupId)
     path = try container.decode(String.self, forKey: .path)
     content = try container.decode(String.self, forKey: .content)
     contentSha256 = try container.decodeIfPresent(String.self, forKey: .contentSha256) ?? ""
@@ -321,6 +329,7 @@ public struct MemoryCandidate: Identifiable, Equatable, Sendable, Codable {
   public let targetMemoryId: String?
   public let scope: MemoryScope
   public let scopeId: String
+  public let repositorySetupId: String?
   public let path: String
   public let content: String
   public let rationale: String?
@@ -343,6 +352,7 @@ public struct MemoryCandidate: Identifiable, Equatable, Sendable, Codable {
     targetMemoryId: String?,
     scope: MemoryScope,
     scopeId: String,
+    repositorySetupId: String? = nil,
     path: String,
     content: String,
     rationale: String?,
@@ -364,6 +374,7 @@ public struct MemoryCandidate: Identifiable, Equatable, Sendable, Codable {
     self.targetMemoryId = targetMemoryId
     self.scope = scope
     self.scopeId = scopeId
+    self.repositorySetupId = repositorySetupId
     self.path = path
     self.content = content
     self.rationale = rationale
@@ -382,7 +393,7 @@ public struct MemoryCandidate: Identifiable, Equatable, Sendable, Codable {
   }
 
   private enum CodingKeys: String, CodingKey {
-    case id, action, targetMemoryId, scope, scopeId, path, content, rationale
+    case id, action, targetMemoryId, scope, scopeId, repositorySetupId, path, content, rationale
     case kind, tags, appliesWhen, avoidWhen, confidence, sourceEvidence, impactSummary
     case status, createdByPodId, fallbackReason, createdAt, updatedAt
   }
@@ -394,6 +405,7 @@ public struct MemoryCandidate: Identifiable, Equatable, Sendable, Codable {
     targetMemoryId = try container.decodeIfPresent(String.self, forKey: .targetMemoryId)
     scope = try container.decodeIfPresent(MemoryScope.self, forKey: .scope) ?? .profile
     scopeId = try container.decodeIfPresent(String.self, forKey: .scopeId) ?? ""
+    repositorySetupId = try container.decodeIfPresent(String.self, forKey: .repositorySetupId)
     path = try container.decodeIfPresent(String.self, forKey: .path) ?? ""
     content = try container.decodeIfPresent(String.self, forKey: .content) ?? ""
     rationale = try container.decodeIfPresent(String.self, forKey: .rationale)

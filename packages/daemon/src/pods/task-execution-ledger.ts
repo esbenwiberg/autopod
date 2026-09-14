@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { AutopodError, type ExecutionTarget, type TaskExecutionSummary } from '@autopod/shared';
 import type Database from 'better-sqlite3';
+import { readComposableUsage } from './composable-usage.js';
 import { COST_PHASE_COLUMNS } from './cost-pod-projection.js';
 import {
   appendCostEvidence,
@@ -45,6 +46,7 @@ export interface TaskExecutionLedger {
   beginRun(podId: string, generation: number, cycle: number, binding: ExecutionBinding): string;
   /** Record failed execution evidence without releasing its unresolved process claim. */
   retainUnverifiedRun(id: string): void;
+  reconcileNativeGoalRun(id: string): void;
   finishRun(
     id: string,
     outcome: 'completed' | 'failed' | 'paused' | 'stopped',
@@ -125,15 +127,23 @@ export function createTaskExecutionLedger(db: Database.Database): TaskExecutionL
     const diagnostics: string[] = [];
     let recordedInputTokens = 0;
     let recordedOutputTokens = 0;
+    let recordedUnclassifiedTokens = 0;
     let recordedCostUsd = 0;
     const costEvidence = emptyCostEvidence();
     let incompleteSpending = false;
+    // Conversion/restore rehearsal reads the old schema before applying additive migrations.
+    const launchColumn = db
+      .prepare("SELECT 1 FROM pragma_table_info('retained_pods') WHERE name='launch_config_digest'")
+      .get()
+      ? 'p.launch_config_digest'
+      : 'NULL AS launch_config_digest';
     const rows = db
-      .prepare(`SELECT p.id, p.input_tokens, p.output_tokens, p.cost_usd,
+      .prepare(`SELECT p.id, p.input_tokens, p.output_tokens, p.cost_usd, ${launchColumn},
       ${COST_PHASE_COLUMNS}, p.token_telemetry_accuracy, p.history_archived FROM retained_task_executions e JOIN retained_pods p ON p.id = e.pod_id
       WHERE e.task_id = ?`)
       .all(identity.taskId) as Array<{
       id: string;
+      launch_config_digest: string | null;
       input_tokens: number;
       output_tokens: number;
       cost_usd: number;
@@ -149,6 +159,18 @@ export function createTaskExecutionLedger(db: Database.Database): TaskExecutionL
       return 0;
     };
     for (const row of rows) {
+      const composable = row.launch_config_digest ? readComposableUsage(db, row.id) : null;
+      if (composable) {
+        recordedInputTokens += number(composable.reviewerInputTokens, row.id);
+        recordedOutputTokens += number(composable.reviewerOutputTokens, row.id);
+        recordedUnclassifiedTokens += number(composable.goalTokens, row.id);
+        if (composable.reviewerPending || composable.goalUncertain) {
+          incompleteSpending = true;
+          diagnostics.push(
+            `${row.id}: native Goal or isolated reviewer usage requires reconciliation`,
+          );
+        }
+      }
       const attempts = readProviderUsage(db, row.id, true);
       // The corrected append-only provider ledger is authoritative when present.
       // The pod row is a legacy fallback, never an additional bucket of provider spend.
@@ -214,11 +236,15 @@ export function createTaskExecutionLedger(db: Database.Database): TaskExecutionL
         );
       if (
         row.token_telemetry_accuracy !== 'complete' &&
-        row.token_telemetry_accuracy !== 'repaired'
+        row.token_telemetry_accuracy !== 'repaired' &&
+        !composable?.goalObserved
       ) {
         diagnostics.push(`${row.id}: agent telemetry incomplete`);
         if (priorWork) incompleteSpending = true;
       }
+      // New configuration records all reviewer calls in their own durable ledger. Phase totals
+      // are UI attribution of those same calls, and must not be added a second time.
+      if (composable) continue;
       if (row.phase_token_usage_oversized) {
         diagnostics.push(
           `${row.id}: phase telemetry exceeds the 64 KiB read limit; stored source preserved`,
@@ -379,7 +405,7 @@ export function createTaskExecutionLedger(db: Database.Database): TaskExecutionL
       ? { status: 'unavailable', reason: 'Task budget source unavailable.' }
       : root.budget === null || root.budget <= 0
         ? { status: 'unlimited', reason: 'No task token limit configured.' }
-        : recordedInputTokens + recordedOutputTokens >= root.budget
+        : recordedInputTokens + recordedOutputTokens + recordedUnclassifiedTokens >= root.budget
           ? {
               status: 'exhausted',
               reason: 'Recorded task tokens have reached the configured limit.',
@@ -430,6 +456,8 @@ export function createTaskExecutionLedger(db: Database.Database): TaskExecutionL
           }),
       recordedInputTokens,
       recordedOutputTokens,
+      recordedUnclassifiedTokens,
+      recordedTotalTokens: recordedInputTokens + recordedOutputTokens + recordedUnclassifiedTokens,
       recordedCostUsd,
       costEvidence,
       infrastructureCostUsd: null,
@@ -552,7 +580,8 @@ export function createTaskExecutionLedger(db: Database.Database): TaskExecutionL
       if (
         task.tokenBudget !== null &&
         task.tokenBudget > 0 &&
-        task.recordedInputTokens + task.recordedOutputTokens >= task.tokenBudget
+        (task.recordedTotalTokens ?? task.recordedInputTokens + task.recordedOutputTokens) >=
+          task.tokenBudget
       )
         throw new AutopodError(
           `Task token budget exhausted across ${task.podCount} pods; reconcile or extend the task budget before agent execution`,
@@ -576,6 +605,35 @@ export function createTaskExecutionLedger(db: Database.Database): TaskExecutionL
       db.prepare(
         "UPDATE task_agent_runs SET outcome = 'failed', failure_category = 'execution_termination_unverified' WHERE id = ? AND ended_at IS NULL",
       ).run(id);
+    }),
+    reconcileNativeGoalRun: db.transaction((id) => {
+      const proof = db
+        .prepare(`SELECT g.state FROM pod_goals g JOIN task_agent_runs r
+        ON r.id=g.attempt_id AND r.pod_id=g.pod_id AND r.generation=g.generation
+        JOIN pods p ON p.id=g.pod_id AND p.lifecycle_generation=g.generation
+        WHERE r.id=? AND r.ended_at IS NULL AND g.execution_stopped=1 AND g.control_intent IS NULL
+        AND g.state IN ('paused','cancelled','achieved','blocked','budget-exhausted','failed')
+        AND NOT EXISTS(SELECT 1 FROM pod_goal_processes x WHERE x.pod_id=g.pod_id AND x.attempt_id=r.id
+          AND (x.stopped_at IS NULL OR x.configuration_digest IS NOT p.launch_config_digest
+            OR x.account_id IS NOT p.provider_account_id_snapshot OR x.container_id IS NOT p.container_id))`)
+        .get(id) as { state: string } | undefined;
+      if (!proof)
+        throw new AutopodError(
+          'Native Goal recovery evidence is incomplete',
+          'TASK_AGENT_RUN_ACTIVE',
+          409,
+        );
+      db.prepare(
+        `UPDATE task_agent_runs SET ended_at=?,outcome=?,failure_category='native_goal_recovered' WHERE id=? AND ended_at IS NULL`,
+      ).run(
+        new Date().toISOString(),
+        proof.state === 'achieved'
+          ? 'completed'
+          : proof.state === 'cancelled'
+            ? 'stopped'
+            : 'paused',
+        id,
+      );
     }),
     finishRun: db.transaction((id, outcome, category) => {
       const prior = db

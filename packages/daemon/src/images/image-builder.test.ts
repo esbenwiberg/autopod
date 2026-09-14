@@ -1,8 +1,9 @@
-import type { Profile } from '@autopod/shared';
+import { type Profile, environmentPresetSchema } from '@autopod/shared';
 import { extract as tarExtract } from 'tar-stream';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ProfileStore } from '../profiles/index.js';
 import type { AcrClient } from './acr-client.js';
+import { environmentImageKey } from './environment-image-key.js';
 import { ImageBuilder } from './image-builder.js';
 
 function mockProfile(overrides: Partial<Profile> = {}): Profile {
@@ -106,8 +107,76 @@ function createMockDeps() {
 }
 
 describe('ImageBuilder', () => {
+  it('resolves software-only preview inputs without pulling, building or publishing', async () => {
+    const deps = createMockDeps();
+    const inspect = vi.mocked(deps.mockDocker.getImage('base').inspect);
+    inspect.mockResolvedValue({
+      Id: `sha256:${'a'.repeat(64)}`,
+      Os: 'linux',
+      Architecture: 'arm64',
+    } as unknown as import('dockerode').ImageInspectInfo);
+    const builder = new ImageBuilder({
+      docker: deps.mockDocker,
+      acr: null,
+      profileStore: deps.mockProfileStore,
+    });
+    const environment = environmentPresetSchema.parse({
+      template: 'node22',
+      tools: [{ name: 'pnpm', version: '9.15.0' }],
+    });
+    const first = await builder.resolveEnvironment(environment, 'local');
+    expect(first.platform).toBe('linux/arm64');
+    inspect.mockResolvedValue({
+      Id: `sha256:${'b'.repeat(64)}`,
+      Os: 'linux',
+      Architecture: 'arm64',
+    } as unknown as import('dockerode').ImageInspectInfo);
+    const next = await builder.resolveEnvironment(environment, 'local');
+    expect(next.imageKey).not.toBe(first.imageKey);
+    expect(first.pinnedBase).toBe(`sha256:${'a'.repeat(64)}`);
+    expect(deps.mockDocker.buildImage).not.toHaveBeenCalled();
+    expect(deps.mockAcr.pull).not.toHaveBeenCalled();
+    expect(deps.mockAcr.push).not.toHaveBeenCalled();
+    expect(deps.mockProfileStore.setWarmImage).not.toHaveBeenCalled();
+  });
   beforeEach(() => {
     vi.restoreAllMocks();
+  });
+
+  it('builds software once with no repository credentials and returns immutable identity', async () => {
+    const { mockDocker, mockProfileStore, dockerfiles } = createMockDeps();
+    const input = {
+      environment: environmentPresetSchema.parse({ template: 'node22' }),
+      pinnedBase: `base@sha256:${'a'.repeat(64)}`,
+      platform: 'linux/amd64' as const,
+      agentToolingDigest: 'b'.repeat(64),
+      toolInstallCommands: ['echo ready'],
+    };
+    const digest = `sha256:${'c'.repeat(64)}`;
+    vi.mocked(mockDocker.getImage('image').inspect)
+      .mockRejectedValueOnce({ statusCode: 404 })
+      .mockResolvedValue({
+        Id: digest,
+        Size: 1,
+        Config: { Labels: { 'com.autopod.environment-key': environmentImageKey(input) } },
+      } as unknown as Awaited<ReturnType<import('dockerode').Image['inspect']>>);
+    const builder = new ImageBuilder({
+      docker: mockDocker,
+      acr: null,
+      profileStore: mockProfileStore,
+    });
+    expect((await builder.buildEnvironmentImage(input)).tag).toBe(digest);
+    expect((await builder.buildEnvironmentImage(input)).tag).toBe(digest);
+    expect(mockDocker.buildImage).toHaveBeenCalledTimes(1);
+    expect(mockDocker.buildImage).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ buildargs: undefined, platform: 'linux/amd64' }),
+    );
+    expect(dockerfiles[0]).not.toMatch(/git clone|COPY |ARG /);
+    expect(mockProfileStore.get).not.toHaveBeenCalled();
+    expect(mockProfileStore.setWarmImage).not.toHaveBeenCalled();
+    await expect(builder.buildEnvironmentImage(input, { publish: true })).rejects.toThrow('ACR');
+    expect(mockDocker.buildImage).toHaveBeenCalledTimes(1);
   });
 
   it('builds and pushes warm image', async () => {

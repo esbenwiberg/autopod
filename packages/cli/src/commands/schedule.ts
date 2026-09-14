@@ -1,5 +1,6 @@
+import { readFile } from 'node:fs/promises';
 import { createInterface } from 'node:readline';
-import { scheduledScanPolicySchema } from '@autopod/shared';
+import { savedLaunchSelectionSchema, scheduledScanPolicySchema } from '@autopod/shared';
 import type { Pod, ScanTriageRequest, ScheduledScanReport } from '@autopod/shared';
 import type {
   ScheduledJob,
@@ -11,6 +12,8 @@ import type { Command } from 'commander';
 import type { AutopodClient } from '../api/client.js';
 import { withJsonOutput } from '../output/json.js';
 import { type ColumnDef, renderTable } from '../output/table.js';
+import { type LaunchFlags, buildLaunchRequest } from './launch-request.js';
+import { addLaunchPresetOptions } from './launch.js';
 
 function printRun(result: Pod | ScheduledScanReport): void {
   if ('kind' in result && result.kind === 'scan_report') {
@@ -64,7 +67,16 @@ const jobColumns: ColumnDef<ScheduledJob>[] = [
   { header: 'ID', formatter: (j) => j.id.slice(0, 10), width: 12 },
   { header: 'NAME', key: 'name', width: 22 },
   { header: 'TEMPLATE', key: 'templateName', width: 22 },
-  { header: 'PROFILE', key: 'profileName', width: 14 },
+  {
+    header: 'REPOSITORY',
+    formatter: (j) =>
+      j.launch && 'repositoryId' in j.launch
+        ? j.launch.repositoryId
+        : j.launch
+          ? 'Empty workspace'
+          : (j.profileName ?? 'Unavailable'),
+    width: 20,
+  },
   { header: 'CRON', key: 'cronExpression', width: 14 },
   { header: 'ENABLED', formatter: (j) => (j.enabled ? 'yes' : 'no'), width: 9 },
   { header: 'NEXT RUN', formatter: (j) => formatNextRun(j.nextRunAt), width: 12 },
@@ -145,6 +157,19 @@ async function resolveTemplateId(client: AutopodClient, value: string): Promise<
   throw new Error(`Scheduled job template not found: ${value}`);
 }
 
+async function scheduleSelection(client: AutopodClient, opts: LaunchFlags & { config?: string }) {
+  const file = opts.config
+    ? savedLaunchSelectionSchema.parse(JSON.parse(await readFile(opts.config, 'utf8')))
+    : undefined;
+  const request = await buildLaunchRequest(
+    { ...opts, task: 'Scheduled task', overrideConfig: true },
+    (kind) => client.listConfigurations(kind),
+    file ? { ...file, task: 'Scheduled task' } : undefined,
+  );
+  const { task: _, ...selection } = request;
+  return savedLaunchSelectionSchema.parse(selection);
+}
+
 export function registerScheduleCommands(program: Command, getClient: () => AutopodClient): void {
   const schedule = program
     .command('schedule')
@@ -179,20 +204,25 @@ export function registerScheduleCommands(program: Command, getClient: () => Auto
       judgment: opts.judgment,
       ...(opts.windowHours ? { windowHours: Number(opts.windowHours) } : {}),
     });
-  scanPolicyOptions(
-    schedule
-      .command('scan-create <profile> <name> <cron>')
-      .description('Create a deterministic report schedule'),
+  addLaunchPresetOptions(
+    scanPolicyOptions(
+      schedule
+        .command('scan-create <repository> <name> <cron>')
+        .description('Create a deterministic report schedule with frozen repair choices'),
+    ),
   )
+    .option('--profile <profile>', 'Saved profile ID or name')
+    .option('--repository-setup <setup>', 'Repository setup ID or name')
+    .option('--config <file>', 'Saved selection JSON; explicit flags override it')
     .option('--disabled', 'Create disabled')
-    .action(async (profile: string, name: string, cron: string, opts) => {
-      const scan = parseScan(opts);
-      const job = await getClient().createScheduledJob({
-        profileName: profile,
+    .action(async (repository: string, name: string, cron: string, opts) => {
+      const client = getClient();
+      const job = await client.createScheduledJob({
+        launch: await scheduleSelection(client, { ...opts, repo: repository }),
         name,
         cronExpression: cron,
         task: 'Deterministic scan report. Repairs require a recorded human selection.',
-        scan,
+        scan: parseScan(opts),
         enabled: !opts.disabled,
       });
       console.log(`Report schedule ${job.id} created (${job.enabled ? 'enabled' : 'disabled'}).`);
@@ -281,59 +311,54 @@ export function registerScheduleCommands(program: Command, getClient: () => Auto
       );
     });
 
-  // ap schedule create <profile> <cron> --template <id-or-name>
-  // Legacy form remains supported: ap schedule create <profile> <name> <cron> <task>
-  schedule
-    .command('create <profile> [args...]')
-    .description('Create a scheduled job')
-    .option('-t, --template <idOrName>', 'Template ID or name to use')
-    .option('--set <keyValue>', 'Template override value (repeatable key=value)', collect, [])
-    .option('--disabled', 'Create the scheduled job disabled')
+  addLaunchPresetOptions(
+    schedule
+      .command('create <cron>')
+      .alias('create-launch')
+      .description('Schedule a repository and preset selection'),
+  )
+    .option('-t, --template <idOrName>', 'Reusable prompt template')
+    .option('--name <name>', 'Name for an inline scheduled task')
+    .option('--task <text>', 'Inline task; mutually exclusive with --template')
+    .option('--repo <repository>', 'Repository ID or name')
+    .option('--empty-workspace', 'Run without a repository')
+    .option('--repository-setup <setup>', 'Repository setup ID or name')
+    .option('--profile <profile>', 'Saved profile ID or name')
+    .option('--config <file>', 'Saved selection JSON; explicit flags override it')
+    .option('--set <keyValue>', 'Template field value, repeatable', collect, [])
+    .option('--disabled', 'Create disabled')
     .action(
       async (
-        profile: string,
-        args: string[],
-        opts: { template?: string; set?: string[]; disabled?: boolean },
+        cron: string,
+        opts: LaunchFlags & {
+          template?: string;
+          name?: string;
+          task?: string;
+          config?: string;
+          set?: string[];
+          disabled?: boolean;
+        },
       ) => {
-        const client = getClient();
-        let job: ScheduledJob;
+        if (
+          opts.template
+            ? opts.task !== undefined || opts.name !== undefined
+            : !opts.task?.trim() || !opts.name?.trim()
+        )
+          throw new Error('Choose --template, or provide both --name and --task');
         const fieldValues = parseFieldValues(opts.set);
-
-        if (opts.template) {
-          const [cron] = args;
-          if (!cron) {
-            throw new Error('Usage: ap schedule create <profile> <cron> --template <id-or-name>');
-          }
-          const templateId = await resolveTemplateId(client, opts.template);
-          job = await client.createScheduledJob({
-            profileName: profile,
-            templateId,
-            fieldValues,
-            cronExpression: cron,
-            enabled: !opts.disabled,
-          });
-        } else {
-          if (fieldValues) {
-            throw new Error('Template override values require --template');
-          }
-          const [name, cron, task] = args;
-          if (!name || !cron || !task) {
-            throw new Error('Usage: ap schedule create <profile> <name> <cron> <task>');
-          }
-          job = await client.createScheduledJob({
-            profileName: profile,
-            name,
-            cronExpression: cron,
-            task,
-            enabled: !opts.disabled,
-          });
-        }
-
-        console.log(chalk.green(`Schedule ${chalk.bold(job.id.slice(0, 10))} created.`));
-        console.log(`${chalk.bold('Template:')} ${job.templateName}`);
-        console.log(
-          `${chalk.bold('Next run:')} ${formatNextRun(job.nextRunAt)} (${job.nextRunAt})`,
-        );
+        if (fieldValues && !opts.template)
+          throw new Error('Template field values require --template');
+        const client = getClient();
+        const launch = await scheduleSelection(client, opts);
+        const job = await client.createScheduledJob({
+          ...(opts.template
+            ? { templateId: await resolveTemplateId(client, opts.template), fieldValues }
+            : { name: opts.name, task: opts.task }),
+          launch,
+          cronExpression: cron,
+          enabled: !opts.disabled,
+        });
+        console.log(`Schedule ${job.id} created. Next run: ${job.nextRunAt}`);
       },
     );
 
@@ -431,7 +456,19 @@ export function registerScheduleCommands(program: Command, getClient: () => Auto
           console.log('No scheduled jobs. Use: ap schedule create <profile> <name> <cron> <task>');
           return;
         }
-        console.log(renderTable(data, jobColumns));
+        console.log(
+          renderTable(
+            data.map((job) => ({
+              ...job,
+              profileName: job.launch
+                ? 'repositoryId' in job.launch
+                  ? job.launch.repositoryId
+                  : 'Empty workspace'
+                : job.profileName,
+            })),
+            jobColumns,
+          ),
+        );
       });
     });
 
@@ -445,7 +482,9 @@ export function registerScheduleCommands(program: Command, getClient: () => Auto
       console.log(`${chalk.bold('ID:')}           ${job.id}`);
       console.log(`${chalk.bold('Name:')}         ${job.name}`);
       console.log(`${chalk.bold('Template:')}     ${job.templateName} (${job.templateId})`);
-      console.log(`${chalk.bold('Profile:')}      ${job.profileName}`);
+      if (job.launch)
+        console.log(`${chalk.bold('Launch:')} ${JSON.stringify(job.launch, null, 2)}`);
+      else console.log(`${chalk.bold('Legacy profile:')} ${job.profileName}`);
       console.log(`${chalk.bold('Cron:')}         ${job.cronExpression}`);
       console.log(`${chalk.bold('Enabled:')}      ${job.enabled ? 'yes' : 'no'}`);
       console.log(
@@ -471,6 +510,7 @@ export function registerScheduleCommands(program: Command, getClient: () => Auto
     .description('Edit a scheduled job')
     .option('-t, --template <idOrName>', 'Template ID or name to use')
     .option('--profile <profile>', 'Profile name')
+    .option('--launch-config <file>', 'Replace the repository and preset selection from JSON')
     .option('--cron <cron>', 'Cron expression')
     .option('--set <keyValue>', 'Template override value (repeatable key=value)', collect, [])
     .option('--enabled', 'Enable the scheduled job')
@@ -481,6 +521,7 @@ export function registerScheduleCommands(program: Command, getClient: () => Auto
         opts: {
           template?: string;
           profile?: string;
+          launchConfig?: string;
           cron?: string;
           set?: string[];
           enabled?: boolean;
@@ -492,6 +533,11 @@ export function registerScheduleCommands(program: Command, getClient: () => Auto
         }
 
         const client = getClient();
+        if (opts.profile && opts.launchConfig)
+          throw new Error('Choose --profile or --launch-config');
+        const launch = opts.launchConfig
+          ? savedLaunchSelectionSchema.parse(JSON.parse(await readFile(opts.launchConfig, 'utf8')))
+          : undefined;
         const templateId = opts.template
           ? await resolveTemplateId(client, opts.template)
           : undefined;
@@ -499,6 +545,7 @@ export function registerScheduleCommands(program: Command, getClient: () => Auto
         if (
           templateId === undefined &&
           opts.profile === undefined &&
+          launch === undefined &&
           opts.cron === undefined &&
           fieldValues === undefined &&
           opts.enabled === undefined &&
@@ -509,6 +556,7 @@ export function registerScheduleCommands(program: Command, getClient: () => Auto
         const job = await client.updateScheduledJob(id, {
           templateId,
           profileName: opts.profile,
+          launch,
           cronExpression: opts.cron,
           fieldValues,
           enabled: opts.enabled ? true : opts.disabled ? false : undefined,

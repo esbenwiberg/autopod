@@ -29,17 +29,23 @@ function fakeGitHubAuth(token = 'daemon-gh-token'): DaemonGitHubAuth {
 // Hoist mock fns so they're available inside vi.mock factories
 // ---------------------------------------------------------------------------
 
-const { execFileMock, fsMkdirMock, fsMkdtempMock, fsRmMock, fsReadFileMock, fsWriteFileMock } =
-  vi.hoisted(() => ({
-    execFileMock: vi.fn(),
-    fsMkdirMock: vi.fn().mockResolvedValue(undefined),
-    fsMkdtempMock: vi.fn().mockResolvedValue('/tmp/autopod-artifact-xyz'),
-    fsRmMock: vi.fn().mockResolvedValue(undefined),
-    fsReadFileMock: vi
-      .fn()
-      .mockRejectedValue(Object.assign(new Error('ENOENT'), { code: 'ENOENT' })),
-    fsWriteFileMock: vi.fn().mockResolvedValue(undefined),
-  }));
+const {
+  execFileMock,
+  fsMkdirMock,
+  fsMkdtempMock,
+  fsRmMock,
+  fsReadFileMock,
+  fsWriteFileMock,
+  fsStatMock,
+} = vi.hoisted(() => ({
+  execFileMock: vi.fn(),
+  fsMkdirMock: vi.fn().mockResolvedValue(undefined),
+  fsMkdtempMock: vi.fn().mockResolvedValue('/tmp/autopod-artifact-xyz'),
+  fsRmMock: vi.fn().mockResolvedValue(undefined),
+  fsReadFileMock: vi.fn().mockRejectedValue(Object.assign(new Error('ENOENT'), { code: 'ENOENT' })),
+  fsWriteFileMock: vi.fn().mockResolvedValue(undefined),
+  fsStatMock: vi.fn().mockResolvedValue({ size: 1024 }),
+}));
 
 vi.mock('node:child_process', async () => {
   const actual = await vi.importActual<typeof import('node:child_process')>('node:child_process');
@@ -55,6 +61,7 @@ vi.mock('node:fs/promises', async () => {
       access: vi.fn().mockResolvedValue(undefined),
       readFile: fsReadFileMock,
       writeFile: fsWriteFileMock,
+      stat: fsStatMock,
     },
     mkdir: fsMkdirMock,
     mkdtemp: fsMkdtempMock,
@@ -62,6 +69,7 @@ vi.mock('node:fs/promises', async () => {
     access: vi.fn().mockResolvedValue(undefined),
     readFile: fsReadFileMock,
     writeFile: fsWriteFileMock,
+    stat: fsStatMock,
   };
 });
 
@@ -116,6 +124,59 @@ describe('LocalWorktreeManager', () => {
   const cacheDir = '/tmp/test-cache';
   const worktreeDir = '/tmp/test-worktrees';
 
+  it('fetches an exact source commit with daemon-only authentication and removes temporary Git metadata', async () => {
+    const revision = 'a'.repeat(40);
+    setupExecFileMock({
+      'rev-parse FETCH_HEAD': { stdout: revision },
+      'ls-tree': { stdout: `100644 blob ${'b'.repeat(40)} 7\tfile.txt\0` },
+    });
+    fsReadFileMock.mockResolvedValue(Buffer.from('archive'));
+    expect(
+      await manager.readSnapshotArchive({ repoUrl: 'https://github.com/org/repo', revision }),
+    ).toEqual(Buffer.from('archive'));
+    const fetch = execFileMock.mock.calls.find((call) => call[1][0] === 'fetch');
+    expect(fetch?.[1]).toEqual([
+      'fetch',
+      '--depth=1',
+      '--no-tags',
+      'https://github.com/org/repo',
+      revision,
+    ]);
+    expect(fetch?.[2].env.GIT_CONFIG_VALUE_6).toMatch(/^Authorization: Basic /);
+    expect(JSON.stringify(execFileMock.mock.calls.map((call) => call[1]))).not.toContain(
+      'daemon-gh-token',
+    );
+    expect(fsRmMock).toHaveBeenCalledWith('/tmp/autopod-artifact-xyz', {
+      recursive: true,
+      force: true,
+    });
+  });
+  it('refuses a changed reference commit and never archives it', async () => {
+    setupExecFileMock({ 'rev-parse FETCH_HEAD': { stdout: 'b'.repeat(40) } });
+    await expect(
+      manager.readSnapshotArchive({
+        repoUrl: 'https://github.com/org/repo',
+        revision: 'a'.repeat(40),
+      }),
+    ).rejects.toMatchObject({ code: 'REFERENCE_REVISION_CHANGED' });
+    expect(execFileMock.mock.calls.some((call) => call[1][0] === 'archive')).toBe(false);
+    expect(fsRmMock).toHaveBeenCalled();
+  });
+  it('bounds expanded reference source before archiving and hides provider diagnostics', async () => {
+    const revision = 'a'.repeat(40);
+    setupExecFileMock({
+      'rev-parse FETCH_HEAD': { stdout: revision },
+      'ls-tree': { stdout: `100644 blob ${'b'.repeat(40)} 999999999\tlarge.bin\0` },
+    });
+    await expect(
+      manager.readSnapshotArchive({ repoUrl: 'https://github.com/org/repo', revision }),
+    ).rejects.toMatchObject({ code: 'REFERENCE_TOO_LARGE' });
+    setupExecFileMock({ fetch: { error: new Error('Authorization: sensitive fixture text') } });
+    await expect(
+      manager.readSnapshotArchive({ repoUrl: 'https://github.com/org/repo', revision }),
+    ).rejects.toMatchObject({ code: 'REFERENCE_FETCH_FAILED' });
+  });
+
   beforeEach(() => {
     vi.clearAllMocks();
     // Re-apply default implementations after clear
@@ -123,6 +184,7 @@ describe('LocalWorktreeManager', () => {
     fsRmMock.mockResolvedValue(undefined);
     fsReadFileMock.mockRejectedValue(Object.assign(new Error('ENOENT'), { code: 'ENOENT' }));
     fsWriteFileMock.mockResolvedValue(undefined);
+    fsStatMock.mockResolvedValue({ size: 1024 });
     manager = new LocalWorktreeManager({
       cacheDir,
       worktreeDir,
@@ -1626,7 +1688,7 @@ describe('LocalWorktreeManager', () => {
           const cmd = args.join(' ');
           if (cmd.includes('diff --cached --quiet')) {
             // Exit 1 = there are staged changes
-            cb(new Error('exit 1'), '', '');
+            cb(Object.assign(new Error('exit 1'), { code: 1 }), '', '');
           } else {
             cb(null, '', '');
           }
@@ -1917,8 +1979,8 @@ describe('LocalWorktreeManager', () => {
       execFileMock.mockImplementation(
         (_file: string, args: string[], arg3: unknown, arg4?: unknown) => {
           const options = arg3 as { env?: Record<string, string> };
-          if (args[0] === 'clone' && options.env?.GIT_CONFIG_VALUE_2) {
-            authorizationHeaders.push(options.env.GIT_CONFIG_VALUE_2);
+          if (args[0] === 'clone' && options.env?.GIT_CONFIG_VALUE_6) {
+            authorizationHeaders.push(options.env.GIT_CONFIG_VALUE_6);
           }
           const cb = resolveCallback(arg3, arg4);
           if (args.join(' ').includes('rev-parse --git-dir')) {
@@ -2038,8 +2100,8 @@ describe('LocalWorktreeManager', () => {
       expect(cloneCall?.[2]).toEqual(
         expect.objectContaining({
           env: expect.objectContaining({
-            GIT_CONFIG_KEY_2: 'http.https://github.com/.extraheader',
-            GIT_CONFIG_VALUE_2: expect.stringMatching(/^Authorization: Basic /),
+            GIT_CONFIG_KEY_6: 'http.https://github.com/.extraheader',
+            GIT_CONFIG_VALUE_6: expect.stringMatching(/^Authorization: Basic /),
           }),
         }),
       );
@@ -2349,6 +2411,7 @@ describe('LocalWorktreeManager.rebaseOntoBase', () => {
     fsRmMock.mockResolvedValue(undefined);
     fsReadFileMock.mockRejectedValue(Object.assign(new Error('ENOENT'), { code: 'ENOENT' }));
     fsWriteFileMock.mockResolvedValue(undefined);
+    fsStatMock.mockResolvedValue({ size: 1024 });
     manager = new LocalWorktreeManager({
       cacheDir: '/tmp/test-cache',
       worktreeDir: '/tmp/test-worktrees',

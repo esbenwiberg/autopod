@@ -1,0 +1,191 @@
+{
+  "profileId": "fixture-profile",
+  "task": "Verify configuration parity",
+  "work": {
+    "baseBranch": "main",
+    "handoffInstructions": "Preserve the reviewed contract and inspect the failing workflow.",
+    "specFiles": [],
+    "specContextFiles": [{ "path": "brief.md", "content": "Investigate the fixture failure." }],
+    "dependsOnPodIds": [],
+    "briefTitle": null,
+    "touches": ["src"],
+    "doesNotTouch": [],
+    "waitForMerge": false
+  },
+  "intent": "task",
+  "requiredSidecarIds": [],
+  "selections": {
+    "environmentId": "fixture-environment",
+    "aiId": "fixture-ai",
+    "workflowId": "fixture-workflow",
+    "githubAccessId": null,
+    "toolPackIds": []
+  },
+  "overrides": {
+    "repositorySetup": {
+      "defaultBranch": "main",
+      "buildCommand": null,
+      "startCommand": null,
+      "buildWorkDir": null,
+      "testCommand": null,
+      "validationSetupCommand": null,
+      "lintCommand": null,
+      "sastCommand": null,
+      "prepareCommand": null,
+      "healthPath": null,
+      "healthTimeout": 120,
+      "smokePages": [],
+      "buildEnv": {
+        "SERVICE_KEY": {
+          "secretId": "fixture-service"
+        }
+      },
+      "buildTimeout": 300,
+      "testTimeout": 600,
+      "lintTimeout": 120,
+      "sastTimeout": 300,
+      "hasWebUi": false
+    },
+    "environment": {
+      "template": "node22",
+      "baseImage": null,
+      "tools": [],
+      "prepareCommands": [],
+      "capabilities": [],
+      "sidecars": []
+    },
+    "ai": {
+      "main": {
+        "providerAccountId": "fixture-main",
+        "runtime": "claude",
+        "model": "claude-sonnet-4-6",
+        "reasoningEffort": "auto",
+        "failover": [],
+        "maxHops": 0
+      },
+      "reviewer": {
+        "mode": "independent",
+        "route": {
+          "providerAccountId": "fixture-reviewer",
+          "runtime": "codex",
+          "model": "gpt-5.5",
+          "reasoningEffort": "auto",
+          "failover": [],
+          "maxHops": 0
+        }
+      }
+    },
+    "workflow": {
+      "agentMode": "auto",
+      "intent": "task",
+      "output": "branch",
+      "validationPhases": [],
+      "advisoryBrowserQaEnabled": false,
+      "promotable": false,
+      "completion": "deliver",
+      "maxValidationAttempts": 3,
+      "mergePollIntervalSec": 60,
+      "preflightConflictPolicy": "warn",
+      "branchPrefix": "autopod/",
+      "tokenBudget": 12345,
+      "reviewerTokenBudget": 2000,
+      "tokenBudgetWarnAt": 0.8,
+      "tokenBudgetPolicy": "hard",
+      "maxBudgetExtensions": 0,
+      "escalation": null,
+      "agentDonePrompt": null,
+      "securityScan": null
+    },
+    "githubAccess": {
+      "rules": [
+        {
+          "id": "fixture-rule",
+          "repositories": {
+            "mode": "owner",
+            "ownerId": "123",
+            "ownerLogin": "context-and",
+            "selection": {
+              "mode": "all"
+            }
+          },
+          "operations": ["actions.read", "prs.comment", "workflows.dispatch"],
+          "workflows": {
+            "mode": "all"
+          },
+          "branches": {
+            "mode": "selected",
+            "names": ["main"]
+          }
+        }
+      ]
+    },
+    "execution": {
+      "target": "local",
+      "main": {
+        "memoryGb": 4,
+        "cpus": 2,
+        "storageGb": null
+      },
+      "sidecars": {},
+      "networkPolicy": null
+    },
+    "pim": [
+      {
+        "type": "azure-role",
+        "tenantId": "fixture-tenant",
+        "principalId": "fixture-principal",
+        "eligibilityId": "fixture-eligibility",
+        "roleId": "fixture-role",
+        "scope": "/subscriptions/fixture-subscription/resourceGroups/fixture-group",
+        "displayName": "Reader",
+        "timing": "when-needed",
+        "duration": "PT1H",
+        "justification": "Configuration fixture"
+      }
+    ],
+    "toolPacks": [
+      {
+        "instructions": [
+          {
+            "heading": "Testing",
+            "content": "Run focused tests."
+          }
+        ],
+        "skills": [
+          {
+            "name": "test",
+            "source": {
+              "type": "inline",
+              "content": "# Test"
+            }
+          }
+        ],
+        "mcpServers": [
+          {
+            "name": "example",
+            "transport": {
+              "type": "http",
+              "url": "https://mcp.example.com",
+              "headers": {
+                "Authorization": {
+                  "secretId": "fixture-mcp"
+                }
+              }
+            }
+          }
+        ],
+        "requiredCapabilities": []
+      }
+    ]
+  },
+  "referenceRepositories": [
+    {
+      "repositoryId": "fixture-reference",
+      "ref": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "access": "read"
+    }
+  ],
+  "requestId": "fixture-request",
+  "repositoryId": "fixture-repository",
+  "repositorySetupId": "web"
+}

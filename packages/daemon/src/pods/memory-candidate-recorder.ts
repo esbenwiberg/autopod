@@ -5,12 +5,12 @@ import type {
   PodCompletedEvent,
   PodStatus,
   PodStatusChangedEvent,
-  Profile,
   QualitySignals,
   SystemEvent,
 } from '@autopod/shared';
 import type { Logger } from 'pino';
 import type { ContainerManager } from '../interfaces/container-manager.js';
+import type { PodExecutionSettings } from '../interfaces/pod-execution-settings.js';
 import type { ProfileStore } from '../profiles/index.js';
 import { createProfileMemoryReviewer } from '../providers/memory-reviewer.js';
 import type { EscalationRepository } from './escalation-repository.js';
@@ -25,6 +25,7 @@ import {
 } from './memory-extraction.js';
 import type { MemoryRepository } from './memory-repository.js';
 import type { PodRepository } from './pod-repository.js';
+import { memoryMatchesProjectSetup } from './project-memory-scope.js';
 import type { ProviderAttemptRepository } from './provider-attempt-repository.js';
 import { computeQualitySignals } from './quality-signals.js';
 import { resolveReviewerModel } from './runtime-resolver.js';
@@ -53,6 +54,7 @@ export interface MemoryCandidateRecorderDeps {
   providerAttemptRepo?: ProviderAttemptRepository;
   containerManagerFactory?: MemoryRecorderContainerManagerFactory;
   logger: Logger;
+  launchContext?: import('./pod-manager.js').PodManager['getLaunchMemoryContext'];
 }
 
 const EXTRACTION_STATUSES: PodStatus[] = ['failed', 'review_required'];
@@ -154,9 +156,17 @@ export function createMemoryCandidateRecorder(
       return 'ignored';
     }
 
-    let profile: Profile;
+    let profile: PodExecutionSettings;
+    let launchContext:
+      | ReturnType<NonNullable<MemoryCandidateRecorderDeps['launchContext']>>
+      | undefined;
     try {
-      profile = profileStore.get(pod.profileName);
+      if (pod.launchConfigDigest) {
+        if (!deps.launchContext) throw new Error('Repository memory context unavailable');
+        launchContext = deps.launchContext(pod);
+        if (!launchContext.projectScope) return 'ignored';
+        profile = launchContext.profile;
+      } else profile = profileStore.get(pod.profileName);
     } catch {
       logger.warn(
         { podId, profileName: pod.profileName },
@@ -199,25 +209,34 @@ export function createMemoryCandidateRecorder(
     // Build evidence from stored events and escalations.
     const evidence = buildEvidence(podId, { eventRepo, escalationRepo, validationRepo });
 
-    const existingMemories = memoryRepo.list('profile', pod.profileName, true);
+    const scope = launchContext?.projectScope ?? { scope: 'profile' as const, id: pod.profileName };
+    const existingMemories = memoryRepo
+      .list(scope.scope, scope.id, true)
+      .filter((entry) => memoryMatchesProjectSetup(entry, scope));
 
     const reviewerSlotResult = await withReviewerSlot(async () => {
       const reviewerModelId = resolveReviewerModel(profile, logger);
-      const reviewerResult = await createProfileMemoryReviewer(
-        profile,
-        reviewerModelId,
-        logger,
-        containerManagerFactory && pod.containerId
-          ? {
-              container: {
-                podId,
-                containerId: pod.containerId,
-                containerManager: containerManagerFactory.get(pod.executionTarget),
-                timeoutMs: 20_000,
-              },
-            }
-          : {},
-      );
+      const reviewerResult = launchContext
+        ? {
+            ok: true as const,
+            reviewer: launchContext.reviewer,
+            model: launchContext.reviewer.model,
+          }
+        : await createProfileMemoryReviewer(
+            profile,
+            reviewerModelId,
+            logger,
+            containerManagerFactory && pod.containerId
+              ? {
+                  container: {
+                    podId,
+                    containerId: pod.containerId,
+                    containerManager: containerManagerFactory.get(pod.executionTarget),
+                    timeoutMs: 20_000,
+                  },
+                }
+              : {},
+          );
       if (!reviewerResult.ok) {
         return {
           kind: 'reviewer_unavailable' as const,
@@ -229,6 +248,7 @@ export function createMemoryCandidateRecorder(
         kind: 'extraction_result' as const,
         result: await extractCandidate({
           pod,
+          projectScope: scope,
           lessonSignals,
           evidence,
           existingMemories,

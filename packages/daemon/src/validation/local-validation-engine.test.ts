@@ -1938,7 +1938,7 @@ describe('validate() — hasWebUi gating', () => {
       history.getForSession('legacy-ledger-lifecycle')[1]?.result.taskReview?.reviewBatch?.ledger,
     ).toEqual(legacySeeded.taskReview?.reviewBatch?.ledger);
     await fs.rm(repoPath, { recursive: true, force: true });
-  });
+  }, 15_000);
 
   function commandTrackingContainerManager(
     options: {

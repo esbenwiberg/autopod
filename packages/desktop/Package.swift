@@ -14,6 +14,11 @@ let package = Package(
         .package(url: "https://github.com/gonzalezreal/swift-markdown-ui", from: "2.4.1"),
     ],
     targets: [
+        .executableTarget(
+            name: "ConfigurationPreview",
+            dependencies: ["AutopodUI", "AutopodClient"],
+            path: "Tools/ConfigurationPreview"
+        ),
         .target(
             name: "AutopodUI",
             dependencies: [

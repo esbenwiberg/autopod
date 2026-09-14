@@ -6,35 +6,36 @@ import { withSpinner } from '../output/spinner.js';
 export function registerWatchCommands(program: Command, getClient: () => AutopodClient): void {
   const watch = program.command('watch').description('Issue/work-item watcher management');
 
-  // ap watch enable <profile>
-  watch
-    .command('enable <profile>')
-    .description('Enable issue watching for a profile')
-    .option('--label-prefix <prefix>', 'Label prefix to watch for', 'autopod')
-    .action(async (profileName: string, opts: { labelPrefix: string }) => {
-      const client = getClient();
-      await withSpinner('Enabling issue watcher...', () =>
-        client.updateProfile(profileName, {
-          issueWatcherEnabled: true,
-          issueWatcherLabelPrefix: opts.labelPrefix,
-        }),
-      );
-      console.log(
-        chalk.green(`Issue watcher enabled for "${profileName}" (prefix: ${opts.labelPrefix})`),
-      );
-    });
-
-  // ap watch disable <profile>
-  watch
-    .command('disable <profile>')
-    .description('Disable issue watching for a profile')
-    .action(async (profileName: string) => {
-      const client = getClient();
-      await withSpinner('Disabling issue watcher...', () =>
-        client.updateProfile(profileName, { issueWatcherEnabled: false }),
-      );
-      console.log(chalk.green(`Issue watcher disabled for "${profileName}".`));
-    });
+  for (const enabled of [true, false]) {
+    watch
+      .command(`${enabled ? 'enable' : 'disable'} <watcher>`)
+      .description(`${enabled ? 'Enable' : 'Pause'} a configured repository watcher`)
+      .option('--label-prefix <prefix>', 'Explicitly change the watched label prefix')
+      .action(async (name: string, opts: { labelPrefix?: string }) => {
+        const client = getClient();
+        const bindings = await client.listWatcherBindings();
+        const matches = bindings.filter(
+          (entry) => entry.id === name || entry.payload.name === name,
+        );
+        if (matches.length !== 1 || !matches[0])
+          throw new Error('Select a unique watcher ID or name from ap watcher list.');
+        const current = matches[0];
+        await withSpinner('Updating repository watcher...', () =>
+          client.writeWatcherBinding({
+            id: current.id,
+            expectedRevision: current.revision,
+            payload: {
+              ...current.payload,
+              enabled,
+              ...(opts.labelPrefix ? { labelPrefix: opts.labelPrefix } : {}),
+            },
+          }),
+        );
+        console.log(
+          chalk.green(`Watcher "${current.payload.name}" ${enabled ? 'enabled' : 'paused'}.`),
+        );
+      });
+  }
 
   // ap watch issues
   watch

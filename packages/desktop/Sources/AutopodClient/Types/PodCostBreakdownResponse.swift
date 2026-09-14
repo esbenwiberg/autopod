@@ -82,6 +82,11 @@ public struct TaskExecutionSummary: Codable, Equatable, Sendable {
   public let budgetCheck: TaskBudgetCheckResponse?
   public let recordedInputTokens: Int
   public let recordedOutputTokens: Int
+  public let recordedUnclassifiedTokens: Int?
+  public let recordedTotalTokens: Int?
+  public var totalRecordedTokens: Int {
+    recordedTotalTokens ?? (recordedInputTokens + recordedOutputTokens + (recordedUnclassifiedTokens ?? 0))
+  }
   public let recordedCostUsd: Double
   public let costEvidence: CostEvidence?
   public let infrastructureCostUsd: Double?

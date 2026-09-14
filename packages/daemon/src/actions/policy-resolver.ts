@@ -1,4 +1,5 @@
-import type { ActionPolicy, Profile } from '@autopod/shared';
+import type { ActionPolicy } from '@autopod/shared';
+import type { PodExecutionSettings } from '../interfaces/pod-execution-settings.js';
 
 /**
  * Resolve the effective action policy for a profile.
@@ -13,7 +14,7 @@ import type { ActionPolicy, Profile } from '@autopod/shared';
  * If the profile has no action policy at all but deployment is enabled, a
  * minimal policy is synthesized so the deploy action still surfaces.
  */
-export function resolveEffectiveActionPolicy(profile: Profile): ActionPolicy | null {
+export function resolveEffectiveActionPolicy(profile: PodExecutionSettings): ActionPolicy | null {
   const deployEnabled = profile.deployment?.enabled === true;
 
   if (!profile.actionPolicy) {

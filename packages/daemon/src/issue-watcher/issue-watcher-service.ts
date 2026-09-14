@@ -31,7 +31,27 @@ export interface IssueWatcherService {
   stop(): void;
 }
 
+export type IssueWatcherSource = Pick<
+  Profile,
+  'name' | 'repoUrl' | 'prProvider' | 'issueWatcherEnabled' | 'issueWatcherLabelPrefix'
+>;
+export interface IssueWatcherLaunches {
+  list(): IssueWatcherSource[];
+  target(
+    source: IssueWatcherSource,
+    triggerLabel: string,
+  ): { profileName: string; output: 'artifact' | 'planner' } | null;
+  readSource(podId: string): IssueWatcherSource;
+  create(
+    request: CreatePodRequest,
+    source: IssueWatcherSource,
+    candidate: WatchedIssueCandidate,
+  ): Promise<Pod>;
+  createWorker(request: CreatePodRequest, parent: Pod): Promise<Pod>;
+}
+
 export interface IssueWatcherServiceDependencies {
+  launches?: IssueWatcherLaunches;
   profileStore: ProfileStore;
   podManager: PodManager;
   eventBus: EventBus;
@@ -41,7 +61,7 @@ export interface IssueWatcherServiceDependencies {
   pollIntervalMs?: number;
   /** Override for testing — inject a mock client factory */
   issueClientFactory?: (
-    profile: Profile,
+    profile: IssueWatcherSource,
     githubAuth?: DaemonGitHubAuth,
     azureDevOpsAuth?: AzureDevOpsAuth,
   ) => IssueClient | Promise<IssueClient>;
@@ -155,8 +175,9 @@ export function createIssueWatcherService(
   function resolveTargetProfile(
     triggerLabel: string,
     labelPrefix: string,
-    currentProfile: Profile,
+    currentProfile: IssueWatcherSource,
   ): { profileName: string; output: 'artifact' | 'planner' } | null {
+    if (deps.launches) return deps.launches.target(currentProfile, triggerLabel);
     // Bare label → use current profile
     if (triggerLabel === labelPrefix) {
       return { profileName: currentProfile.name, output: 'planner' };
@@ -339,7 +360,7 @@ ${input.body}${requirementsSection}
 
   async function processCandidate(
     candidate: WatchedIssueCandidate,
-    profile: Profile,
+    profile: IssueWatcherSource,
     client: IssueClient,
   ): Promise<void> {
     const provider = profile.prProvider === 'ado' ? 'ado' : 'github';
@@ -492,7 +513,9 @@ ${input.body}${requirementsSection}
 
     let pod: Pod;
     try {
-      pod = podManager.createSession(request, ISSUE_WATCHER_USER_ID);
+      pod = deps.launches
+        ? await deps.launches.create(request, profile, candidate)
+        : podManager.createSession(request, ISSUE_WATCHER_USER_ID);
     } catch (err) {
       logger.error(
         { err, issueId: candidate.id, profile: target.profileName },
@@ -517,6 +540,7 @@ ${input.body}${requirementsSection}
 
     // Track the issue
     issueWatcherRepo.create({
+      watcherId: deps.launches ? profile.name : null,
       profileName: target.profileName,
       provider,
       issueId: candidate.id,
@@ -570,7 +594,7 @@ ${input.body}${requirementsSection}
     );
   }
 
-  async function pollProfile(profile: Profile): Promise<void> {
+  async function pollProfile(profile: IssueWatcherSource): Promise<void> {
     let client: IssueClient;
     try {
       client = await issueClientFactory(profile, deps.githubAuth, deps.azureDevOpsAuth);
@@ -633,7 +657,9 @@ ${input.body}${requirementsSection}
     polling = true;
 
     try {
-      const profiles = profileStore.list().filter((p) => p.issueWatcherEnabled);
+      const profiles = (deps.launches ? deps.launches.list() : profileStore.list()).filter(
+        (p) => p.issueWatcherEnabled,
+      );
 
       if (profiles.length === 0) return;
 
@@ -663,7 +689,10 @@ ${input.body}${requirementsSection}
     // Fire-and-forget label + comment updates
     void (async () => {
       try {
-        const profile = profileStore.get(tracked.profileName);
+        const profile =
+          tracked.watcherId && deps.launches
+            ? deps.launches.readSource(podId)
+            : profileStore.get(tracked.profileName);
         const client = await issueClientFactory(profile, deps.githubAuth, deps.azureDevOpsAuth);
         const prefix = profile.issueWatcherLabelPrefix;
 
@@ -676,27 +705,28 @@ ${input.body}${requirementsSection}
             const planned = readPlannerBrief(plannerPod, tracked.issueId);
             specSlug = planned.specSlug;
             const { brief } = planned;
-            worker = podManager.createSession(
-              {
-                profileName: tracked.profileName,
-                task: brief.task,
-                contract: brief.contract,
-                branch: plannerPod.branch,
-                baseBranch: plannerPod.baseBranch ?? undefined,
-                branchPrefix: `issue-${tracked.issueId}/`,
-                seriesId: plannerPod.seriesId,
-                seriesName: plannerPod.seriesName,
-                seriesDescription: plannerPod.seriesDescription,
-                seriesDesign: plannerPod.seriesDesign,
-                briefTitle: brief.title,
-                touches: brief.touches,
-                doesNotTouch: brief.doesNotTouch,
-                requireSidecars: brief.requireSidecars,
-                prMode: 'single',
-                options: { agentMode: 'auto', output: 'pr', validate: true },
-              },
-              ISSUE_WATCHER_USER_ID,
-            );
+            const workerRequest: CreatePodRequest = {
+              profileName: tracked.profileName,
+              task: brief.task,
+              contract: brief.contract,
+              branch: plannerPod.branch,
+              baseBranch: plannerPod.baseBranch ?? undefined,
+              branchPrefix: `issue-${tracked.issueId}/`,
+              seriesId: plannerPod.seriesId,
+              seriesName: plannerPod.seriesName,
+              seriesDescription: plannerPod.seriesDescription,
+              seriesDesign: plannerPod.seriesDesign,
+              briefTitle: brief.title,
+              touches: brief.touches,
+              doesNotTouch: brief.doesNotTouch,
+              requireSidecars: brief.requireSidecars,
+              prMode: 'single',
+              options: { agentMode: 'auto', output: 'pr', validate: true },
+            };
+            worker =
+              tracked.watcherId && deps.launches
+                ? await deps.launches.createWorker(workerRequest, plannerPod)
+                : podManager.createSession(workerRequest, ISSUE_WATCHER_USER_ID);
           } catch (err) {
             const message = err instanceof Error ? err.message : String(err);
             logger.error(
@@ -766,7 +796,10 @@ ${input.body}${requirementsSection}
 
     void (async () => {
       try {
-        const profile = profileStore.get(tracked.profileName);
+        const profile =
+          tracked.watcherId && deps.launches
+            ? deps.launches.readSource(event.podId)
+            : profileStore.get(tracked.profileName);
         const client = await issueClientFactory(profile, deps.githubAuth, deps.azureDevOpsAuth);
         const payload = event.escalation.payload as { question?: string };
         const question = payload.question ?? 'Pod needs human input.';

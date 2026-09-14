@@ -82,6 +82,7 @@ export type SpawnImpl = (
 ) => ChildProcess;
 
 export interface ClaudeCliTokenUsage {
+  complete?: boolean;
   inputTokens: number;
   outputTokens: number;
   cachedInputTokens?: number;
@@ -325,6 +326,9 @@ export function parseClaudeCliStdout(
       ? {
           inputTokens: inputTokens ?? 0,
           outputTokens: outputTokens ?? 0,
+          ...(directInputTokens === undefined || outputTokens === undefined
+            ? { complete: false }
+            : {}),
           ...(cacheReadTokens !== undefined && { cachedInputTokens: cacheReadTokens }),
           ...(cacheCreationTokens !== undefined && {
             cacheCreationInputTokens: cacheCreationTokens,

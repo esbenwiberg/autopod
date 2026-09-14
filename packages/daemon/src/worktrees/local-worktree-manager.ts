@@ -6,6 +6,7 @@ import { promisify } from 'node:util';
 import { AutopodError, type RequiredFact } from '@autopod/shared';
 import type { Logger } from 'pino';
 import { type DaemonGitHubAuth, DaemonGitHubAuthError } from '../github/daemon-github-auth.js';
+import type { PodExecutionSettings } from '../interfaces/pod-execution-settings.js';
 import type {
   BranchDiffConfig,
   BranchFolderContents,
@@ -30,6 +31,7 @@ import { agentToolingCachePaths } from '../pods/agent-tooling-cache-paths.js';
 import type { AzureDevOpsAuth } from '../providers/azure-devops-auth.js';
 import type { ProfileLlmClientDeps } from '../providers/llm-client.js';
 import { KeyedPromiseQueue } from '../util/keyed-promise-queue.js';
+import { authenticatedGitEnvironment } from './authenticated-git-environment.js';
 import { generateAutoCommitMessage } from './auto-commit-message.js';
 import { inspectContractBase } from './contract-base-preflight.js';
 import {
@@ -108,11 +110,14 @@ const GIT_ENV: Record<string, string> = {
  * prefix. Git applies these as ad-hoc config for the single invocation.
  */
 const GIT_NO_AMBIENT_CREDS_ENV: Record<string, string> = {
-  GIT_CONFIG_COUNT: '2',
+  GIT_CONFIG_COUNT: '3',
   GIT_CONFIG_KEY_0: 'credential.helper',
   GIT_CONFIG_VALUE_0: '',
   GIT_CONFIG_KEY_1: 'core.askPass',
   GIT_CONFIG_VALUE_1: '',
+  // Repository-controlled hooks must not execute with daemon authority.
+  GIT_CONFIG_KEY_2: 'core.hooksPath',
+  GIT_CONFIG_VALUE_2: '/dev/null',
 };
 
 /** Wrapper so every git call in this file gets GIT_ENV — no env-less calls allowed. */
@@ -133,25 +138,20 @@ function git(
   } = {},
 ) {
   const { credential, credentialUrl, env: extraEnv, ...execOptions } = options;
-  let credentialEnv: Record<string, string> = {};
+  let env: NodeJS.ProcessEnv = { ...GIT_ENV, ...extraEnv, ...GIT_NO_AMBIENT_CREDS_ENV };
   if (credential) {
     if (!credentialUrl) {
       throw new Error('A credential URL is required for an explicit git credential');
     }
-    const url = new URL(credentialUrl);
     const authorization =
       credential.kind === 'bearer'
         ? `Bearer ${credential.token}`
         : `Basic ${Buffer.from(`${credential.username}:${credential.password}`).toString('base64')}`;
-    credentialEnv = {
-      GIT_CONFIG_COUNT: '3',
-      GIT_CONFIG_KEY_2: `http.${url.origin}/.extraheader`,
-      GIT_CONFIG_VALUE_2: `Authorization: ${authorization}`,
-    };
+    env = { ...extraEnv, ...authenticatedGitEnvironment(credentialUrl, authorization) };
   }
   return execFileAsync('git', args, {
     ...execOptions,
-    env: { ...GIT_ENV, ...extraEnv, ...GIT_NO_AMBIENT_CREDS_ENV, ...credentialEnv },
+    env,
   });
 }
 
@@ -429,6 +429,75 @@ export class LocalWorktreeManager implements WorktreeManager {
         409,
       );
     return { branch, commitSha, treeSha, worktreeClean: status.stdout.length === 0 };
+  }
+
+  async readSnapshotArchive(params: { repoUrl: string; revision: string }): Promise<Buffer> {
+    if (!/^[a-f0-9]{40}$/.test(params.revision))
+      throw new AutopodError(
+        'Reference repository requires an exact commit',
+        'REFERENCE_REVISION_INVALID',
+        400,
+      );
+    const remote = await this.getAuthenticatedRemoteForRepo(params.repoUrl);
+    const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'autopod-reference-'));
+    try {
+      const bare = path.join(directory, 'source.git');
+      const archive = path.join(directory, 'source.tar.gz');
+      await git(['init', '--bare', bare], { timeout: 30_000 });
+      await git(['fetch', '--depth=1', '--no-tags', remote.url, params.revision], {
+        cwd: bare,
+        credential: remote.credential,
+        credentialUrl: remote.url,
+        timeout: 180_000,
+      });
+      const observed = await git(['rev-parse', 'FETCH_HEAD^{commit}'], {
+        cwd: bare,
+        timeout: 30_000,
+      });
+      if (observed.stdout.trim() !== params.revision)
+        throw new AutopodError(
+          'Reference commit did not match the admitted snapshot',
+          'REFERENCE_REVISION_CHANGED',
+          409,
+        );
+      const tree = await git(['ls-tree', '-r', '-l', '-z', params.revision], {
+        cwd: bare,
+        timeout: 30_000,
+        maxBuffer: 16 * 1024 * 1024,
+      });
+      let expandedBytes = 0;
+      for (const entry of tree.stdout.split('\0').filter(Boolean)) {
+        const header = entry.slice(0, entry.indexOf('\t')).trim().split(/\s+/);
+        if (header[1] === 'commit') continue;
+        const size = Number(header[3]);
+        if (!Number.isSafeInteger(size) || size < 0)
+          throw new AutopodError('Reference tree size is unavailable', 'REFERENCE_INVALID', 409);
+        expandedBytes += size;
+      }
+      if (expandedBytes > 512 * 1024 * 1024)
+        throw new AutopodError(
+          'Expanded reference source exceeds 512 MiB',
+          'REFERENCE_TOO_LARGE',
+          400,
+        );
+      await git(['archive', '--format=tar.gz', `--output=${archive}`, params.revision], {
+        cwd: bare,
+        timeout: 60_000,
+      });
+      if ((await fs.stat(archive)).size > 128 * 1024 * 1024)
+        throw new AutopodError('Reference archive exceeds 128 MiB', 'REFERENCE_TOO_LARGE', 400);
+      return await fs.readFile(archive);
+    } catch (error) {
+      // Keep provider diagnostics and possible trace headers inside the daemon process.
+      if (error instanceof AutopodError) throw error;
+      throw new AutopodError(
+        'Could not fetch the frozen reference commit',
+        'REFERENCE_FETCH_FAILED',
+        409,
+      );
+    } finally {
+      await fs.rm(directory, { recursive: true, force: true });
+    }
   }
 
   async inspectContractBase(worktreePath: string, baseBranch: string, facts: RequiredFact[]) {
@@ -1014,21 +1083,26 @@ export class LocalWorktreeManager implements WorktreeManager {
 
     try {
       // Stage the specific paths
-      await git(['add', ...paths], { cwd: worktreePath });
+      await git(['--literal-pathspecs', 'add', '--', ...paths], { cwd: worktreePath });
 
       // Check if there's anything staged
       try {
-        await git(['diff', '--cached', '--quiet'], { cwd: worktreePath });
+        await git(['--literal-pathspecs', 'diff', '--cached', '--quiet', '--', ...paths], {
+          cwd: worktreePath,
+        });
         // Exit 0 means nothing staged — skip commit
         return;
-      } catch {
-        // Exit non-zero means there ARE staged changes — commit them
+      } catch (error) {
+        if ((error as { code?: unknown }).code !== 1) throw error;
       }
 
-      await git(['commit', '-m', message], { cwd: worktreePath });
+      await git(['--literal-pathspecs', 'commit', '--only', '-m', message, '--', ...paths], {
+        cwd: worktreePath,
+      });
       this.logger.info({ worktreePath, fileCount: paths.length }, 'Committed files');
     } catch (err) {
       this.logger.warn({ err, worktreePath }, 'Failed to commit files');
+      throw err;
     }
   }
 
@@ -1114,7 +1188,7 @@ export class LocalWorktreeManager implements WorktreeManager {
   async commitPendingChangesWithGeneratedMessage(
     worktreePath: string,
     podTask: string | undefined,
-    profile: import('@autopod/shared').Profile,
+    profile: PodExecutionSettings,
     podModel: string,
     options?: CommitPendingChangesOptions,
   ): Promise<boolean> {

@@ -55,10 +55,11 @@ public final class MemoryStore {
             let scopeStr = scope?.rawValue ?? "global"
             let fetched = try await api.listMemories(scope: scopeStr, scopeId: scopeId, approvedOnly: false)
             if scope == nil {
-                // Load all three scopes and merge
+                // Include repository notes and retained legacy profile notes.
                 let profile = try await api.listMemories(scope: "profile", scopeId: scopeId, approvedOnly: false)
                 let pod = try await api.listMemories(scope: "pod", scopeId: scopeId, approvedOnly: false)
-                entries = fetched + profile + pod
+                let repository = try await api.listMemories(scope: "repository", scopeId: scopeId, approvedOnly: false)
+                entries = fetched + repository + profile + pod
             } else {
                 entries = fetched
             }

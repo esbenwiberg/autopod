@@ -207,6 +207,8 @@ export interface ValidationWaiver {
 }
 
 export interface Pod {
+  /** Present for composable launches; a missing/corrupt snapshot must never fall back to a live profile. */
+  launchConfigDigest?: string | null;
   /** Durable worker settlement; this never grants validation or delivery authority. */
   finalization?: {
     generation: number;

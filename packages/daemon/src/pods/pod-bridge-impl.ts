@@ -2,6 +2,7 @@ import type {
   PodBridge,
   PreSubmitReviewInput,
   PreSubmitReviewToolResult,
+  ScopedPodTools,
   ValidationPhaseName,
   ValidationPhaseResult,
 } from '@autopod/escalation-mcp';
@@ -9,6 +10,7 @@ import type { PendingRequests } from '@autopod/escalation-mcp';
 import type {
   ActionDefinition,
   ActionResponse,
+  EffectiveLaunchConfig,
   EscalationRequest,
   EscalationResponse,
   FactEvidence,
@@ -19,7 +21,7 @@ import type {
   MemoryUsageKind,
   MemoryUsageOutcome,
   PimActivationConfig,
-  Profile,
+  Pod,
   ReviewFeedbackResponseItem,
 } from '@autopod/shared';
 import { AutopodError, MAX_DIFF_LENGTH, generateId } from '@autopod/shared';
@@ -29,6 +31,7 @@ import { resolveEffectiveActionPolicy } from '../actions/policy-resolver.js';
 import { isPrivateIp } from '../api/ssrf-guard.js';
 import { atomicPodChange } from '../db/unit-of-work.js';
 import type { ContainerManager } from '../interfaces/container-manager.js';
+import type { PodExecutionSettings } from '../interfaces/pod-execution-settings.js';
 import type { WorktreeManager } from '../interfaces/worktree-manager.js';
 import type { ProfileStore } from '../profiles/index.js';
 import { runContainerReviewer } from '../validation/container-reviewer-runner.js';
@@ -38,7 +41,6 @@ import {
   hashDiff,
   runPreSubmitReview,
 } from '../validation/pre-submit-review.js';
-import { runCodexReview } from '../validation/review-codex-runner.js';
 import { persistEscalation } from './escalation-coordinator.js';
 import type { EscalationRepository } from './escalation-repository.js';
 import type { EventBus } from './event-bus.js';
@@ -49,6 +51,11 @@ import { computePodDiff, summarizeDiff } from './pod-diff-fetcher.js';
 import type { ContainerManagerFactory, PodManager } from './pod-manager.js';
 import type { PodRepository } from './pod-repository.js';
 import type { ProgressEventRepository } from './progress-event-repository.js';
+import {
+  memoryMatchesProjectSetup,
+  memoryScopeId,
+  projectMemoryScope,
+} from './project-memory-scope.js';
 import type { ProviderAttemptRepository } from './provider-attempt-repository.js';
 import { buildValidationExecEnv, wrapValidationExecCommand } from './registry-injector.js';
 import {
@@ -59,6 +66,7 @@ import {
 
 export interface SessionBridgeDependencies {
   podManager: PodManager;
+  scopedTools?: (podId: string) => ScopedPodTools | undefined;
   podRepo: PodRepository;
   eventBus: EventBus;
   progressEventRepo?: ProgressEventRepository;
@@ -68,7 +76,7 @@ export interface SessionBridgeDependencies {
   profileStore: ProfileStore;
   memoryRepo?: MemoryRepository;
   memoryUsageRepo?: MemoryUsageRepository;
-  makeActionEngine?: (profile: Profile) => ActionEngine;
+  makeActionEngine?: (profile: PodExecutionSettings) => ActionEngine;
   containerManagerFactory: ContainerManagerFactory;
   pendingRequestsByPod: Map<string, PendingRequests>;
   logger: Logger;
@@ -100,6 +108,38 @@ export function createSessionBridge(deps: SessionBridgeDependencies): PodBridge 
     screenshotStore,
   } = deps;
 
+  function launchForPod(pod: Pod): EffectiveLaunchConfig | null {
+    if (pod.launchConfigDigest) {
+      const launch = podManager.getLaunchConfiguration?.(pod.id);
+      if (!launch || launch.digest !== pod.launchConfigDigest)
+        throw new AutopodError(
+          'Frozen pod configuration is unavailable',
+          'CONFIG_SNAPSHOT_UNAVAILABLE',
+          503,
+        );
+      return launch;
+    }
+    return null;
+  }
+  function legacyProfileForPod(pod: Pod): PodExecutionSettings {
+    if (pod.launchConfigDigest)
+      throw new AutopodError(
+        'A composed pod cannot read legacy configuration',
+        'CONFIG_API_VERSION_UNSUPPORTED',
+        410,
+      );
+    return profileStore.get(pod.profileName);
+  }
+  function escalationForPod(pod: Pod) {
+    const launch = launchForPod(pod);
+    return launch ? launch.workflow.escalation : legacyProfileForPod(pod).escalation;
+  }
+  function reviewerProfileForPod(pod: Pod): PodExecutionSettings {
+    return pod.launchConfigDigest
+      ? podManager.getReviewerConfig(pod).profile
+      : resolveEffectiveReviewerProfile(pod, legacyProfileForPod(pod));
+  }
+
   function assertAgentWriteAllowed(podId: string, toolName: string): void {
     const pod = podRepo.getOrThrow(podId);
     if (
@@ -128,6 +168,11 @@ export function createSessionBridge(deps: SessionBridgeDependencies): PodBridge 
   }
 
   return {
+    getScopedTools(podId: string) {
+      const pod = podRepo.getOrThrow(podId);
+      if (!pod.launchConfigDigest) return undefined;
+      return deps.scopedTools?.(podId);
+    },
     createEscalation(escalation: EscalationRequest): void {
       podManager.touchHeartbeat(escalation.podId);
       persistEscalation(podRepo, escalationRepo, escalation, () => {
@@ -174,26 +219,22 @@ export function createSessionBridge(deps: SessionBridgeDependencies): PodBridge 
 
     getMaxAiCalls(podId: string): number {
       const pod = podManager.getSession(podId);
-      const profile = profileStore.get(pod.profileName);
-      return profile.escalation?.askAi.maxCalls ?? 5;
+      return escalationForPod(pod)?.askAi.maxCalls ?? 5;
     },
 
     getAutoPauseThreshold(podId: string): number {
       const pod = podManager.getSession(podId);
-      const profile = profileStore.get(pod.profileName);
-      return profile.escalation?.autoPauseAfter ?? 3;
+      return escalationForPod(pod)?.autoPauseAfter ?? 3;
     },
 
     getHumanResponseTimeout(podId: string): number {
       const pod = podManager.getSession(podId);
-      const profile = profileStore.get(pod.profileName);
-      return profile.escalation?.humanResponseTimeout ?? 3600;
+      return escalationForPod(pod)?.humanResponseTimeout ?? 3600;
     },
 
     getHumanResponseOnTimeout(podId: string): 'continue' | 'ask_ai' {
       const pod = podManager.getSession(podId);
-      const profile = profileStore.get(pod.profileName);
-      return profile.escalation?.askHumanOnTimeout ?? 'continue';
+      return escalationForPod(pod)?.askHumanOnTimeout ?? 'continue';
     },
 
     logEscalationAnswer(podId: string, who: 'human' | 'ai', answer: string): void {
@@ -202,13 +243,13 @@ export function createSessionBridge(deps: SessionBridgeDependencies): PodBridge 
 
     getReviewerModel(podId: string): string {
       const pod = podManager.getSession(podId);
-      const profile = resolveEffectiveReviewerProfile(pod, profileStore.get(pod.profileName));
+      const profile = reviewerProfileForPod(pod);
       return resolveReviewerModel(profile, logger);
     },
 
     async callReviewerModel(podId: string, question: string, context?: string): Promise<string> {
       const pod = podManager.getSession(podId);
-      const profile = resolveEffectiveReviewerProfile(pod, profileStore.get(pod.profileName));
+      const profile = reviewerProfileForPod(pod);
       const model = resolveReviewerModel(profile, logger);
 
       // Enrich the prompt with pod state so the reviewer has full context
@@ -264,6 +305,7 @@ export function createSessionBridge(deps: SessionBridgeDependencies): PodBridge 
         }
         const reviewerExecEnv = await podManager.getReviewerExecEnv(pod);
         const { stdout } = await runContainerReviewer({
+          executor: pod.launchConfigDigest ? podManager.getReviewerExecutor(pod) : undefined,
           podId,
           containerId: pod.containerId,
           containerManager: withReviewerExecEnv(cm, reviewerExecEnv),
@@ -283,13 +325,14 @@ export function createSessionBridge(deps: SessionBridgeDependencies): PodBridge 
 
     async generateBrowserValidationScript(podId: string, prompt: string): Promise<string> {
       const pod = podManager.getSession(podId);
-      const profile = resolveEffectiveReviewerProfile(pod, profileStore.get(pod.profileName));
+      const profile = reviewerProfileForPod(pod);
       const model = resolveReviewerModel(profile, logger);
       const cm = containerManagerFactory.get(pod.executionTarget);
 
       try {
         const reviewerExecEnv = await podManager.getReviewerExecEnv(pod);
         const { stdout } = await runContainerReviewer({
+          executor: pod.launchConfigDigest ? podManager.getReviewerExecutor(pod) : undefined,
           podId,
           containerId: pod.containerId,
           containerManager: withReviewerExecEnv(cm, reviewerExecEnv),
@@ -494,7 +537,8 @@ export function createSessionBridge(deps: SessionBridgeDependencies): PodBridge 
 
     actionRequiresApproval(podId: string, actionName: string): boolean {
       const pod = podManager.getSession(podId);
-      const profile = profileStore.get(pod.profileName);
+      if (pod.launchConfigDigest) return false;
+      const profile = legacyProfileForPod(pod);
       if (!profile.actionPolicy) return false;
       const override = (profile.actionPolicy.actionOverrides ?? []).find(
         (o) => o.action === actionName && !o.disabled,
@@ -512,7 +556,15 @@ export function createSessionBridge(deps: SessionBridgeDependencies): PodBridge 
       },
     ): Promise<ActionResponse> {
       const pod = podManager.getSession(podId);
-      const profile = profileStore.get(pod.profileName);
+      if (pod.launchConfigDigest)
+        return {
+          success: false,
+          error:
+            'Legacy generic actions are unavailable for this launch. Use its scoped GitHub and PIM tools.',
+          sanitized: false,
+          quarantined: false,
+        };
+      const profile = legacyProfileForPod(pod);
 
       if (!makeActionEngine) {
         return {
@@ -623,7 +675,8 @@ export function createSessionBridge(deps: SessionBridgeDependencies): PodBridge 
       if (actionName !== 'run_deploy_script') return undefined;
 
       const pod = podManager.getSession(podId);
-      const profile = profileStore.get(pod.profileName);
+      if (pod.launchConfigDigest) return undefined;
+      const profile = legacyProfileForPod(pod);
       if (!profile.deployment?.enabled) return undefined;
       if (!pod.containerId) return undefined;
 
@@ -654,7 +707,8 @@ export function createSessionBridge(deps: SessionBridgeDependencies): PodBridge 
       if (!makeActionEngine) return [];
 
       const pod = podManager.getSession(podId);
-      const profile = profileStore.get(pod.profileName);
+      if (pod.launchConfigDigest) return [];
+      const profile = legacyProfileForPod(pod);
 
       const effectivePolicy = resolveEffectiveActionPolicy(profile);
       if (!effectivePolicy) return [];
@@ -745,8 +799,17 @@ export function createSessionBridge(deps: SessionBridgeDependencies): PodBridge 
     listMemories(podId: string, scope: MemoryScope): MemoryEntry[] {
       if (!memoryRepo) return [];
       const pod = podManager.getSession(podId);
-      const scopeId = scope === 'global' ? null : scope === 'profile' ? pod.profileName : podId;
-      return memoryRepo.list(scope, scopeId, true);
+      const project = pod.launchConfigDigest
+        ? podManager.getProjectMemoryScope(pod)
+        : projectMemoryScope(pod);
+      const scopeId = memoryScopeId(
+        pod,
+        scope,
+        pod.launchConfigDigest ? podManager.getProjectMemoryScope(pod) : projectMemoryScope(pod),
+      );
+      return memoryRepo
+        .list(scope, scopeId, true)
+        .filter((entry) => memoryMatchesProjectSetup(entry, project));
     },
 
     readMemory(podId: string, id: string): MemoryEntry {
@@ -756,9 +819,15 @@ export function createSessionBridge(deps: SessionBridgeDependencies): PodBridge 
       // Without this check, a pod could read any memory by ID, including another
       // pod's private pod-scoped entries or unapproved pending suggestions.
       const pod = podManager.getSession(podId);
-      const expectedScopeId =
-        entry.scope === 'global' ? null : entry.scope === 'profile' ? pod.profileName : podId;
-      if (entry.scopeId !== expectedScopeId) {
+      const expectedScopeId = memoryScopeId(
+        pod,
+        entry.scope,
+        pod.launchConfigDigest ? podManager.getProjectMemoryScope(pod) : projectMemoryScope(pod),
+      );
+      const project = pod.launchConfigDigest
+        ? podManager.getProjectMemoryScope(pod)
+        : projectMemoryScope(pod);
+      if (entry.scopeId !== expectedScopeId || !memoryMatchesProjectSetup(entry, project)) {
         throw new Error(`Memory ${id} is not readable from this pod`);
       }
       // Unapproved entries are only readable by the pod that suggested them.
@@ -772,8 +841,21 @@ export function createSessionBridge(deps: SessionBridgeDependencies): PodBridge 
     searchMemories(podId: string, scope: MemoryScope, query: string): MemoryEntry[] {
       if (!memoryRepo) return [];
       const pod = podManager.getSession(podId);
-      const scopeId = scope === 'global' ? null : scope === 'profile' ? pod.profileName : podId;
-      const results = memoryRepo.search(query, scope, scopeId);
+      const project = pod.launchConfigDigest
+        ? podManager.getProjectMemoryScope(pod)
+        : projectMemoryScope(pod);
+      const scopeId = memoryScopeId(
+        pod,
+        scope,
+        pod.launchConfigDigest ? podManager.getProjectMemoryScope(pod) : projectMemoryScope(pod),
+      );
+      const results = memoryRepo
+        .search(query, scope, scopeId)
+        .filter(
+          (entry) =>
+            (entry.approved || entry.createdByPodId === podId) &&
+            memoryMatchesProjectSetup(entry, project),
+        );
       for (const entry of results) {
         recordMemoryUsage(memoryUsageRepo, podId, entry.id, 'searched', {
           reason: `Matched memory_search query: ${query.slice(0, 200)}`,
@@ -807,18 +889,35 @@ export function createSessionBridge(deps: SessionBridgeDependencies): PodBridge 
         }
       }
       const pod = podManager.getSession(podId);
-      const scopeId = scope === 'global' ? null : scope === 'profile' ? pod.profileName : podId;
+      const scopeId = memoryScopeId(
+        pod,
+        scope,
+        pod.launchConfigDigest ? podManager.getProjectMemoryScope(pod) : projectMemoryScope(pod),
+      );
       const id = generateId(8);
       // Pod-scoped memories are ephemeral working notes — auto-approve to avoid
       // interrupting users for things that only affect a single pod run.
       const approved = scope === 'pod';
+      const project = pod.launchConfigDigest
+        ? podManager.getProjectMemoryScope(pod)
+        : projectMemoryScope(pod);
       const entry = memoryRepo.insert({
         id,
         scope,
         scopeId,
+        ...(scope === 'repository' && project?.setupId
+          ? { repositorySetupId: project.setupId }
+          : {}),
         path,
         content,
         rationale: trimmedRationale,
+        kind: null,
+        tags: [],
+        appliesWhen: null,
+        avoidWhen: null,
+        confidence: null,
+        sourceEvidence: [],
+        impactSummary: null,
         approved,
         createdByPodId: podId,
       });
@@ -847,7 +946,11 @@ export function createSessionBridge(deps: SessionBridgeDependencies): PodBridge 
         podManager.getReviewerConfig(pod);
       const reviewerModel = resolveReviewerModel(profile, logger);
       const reviewerProvider = resolveReviewerProvider(profile);
-      const defaultBranch = profile.defaultBranch ?? 'main';
+      const launch = launchForPod(pod);
+      const defaultBranch =
+        pod.baseBranch ??
+        (launch ? launch.repository?.setup.defaultBranch : profile.defaultBranch) ??
+        'main';
 
       // Read the diff from inside the live container when possible — the
       // host worktree is only synced at validation/handoff checkpoints, so
@@ -990,6 +1093,9 @@ export function createSessionBridge(deps: SessionBridgeDependencies): PodBridge 
           podId,
           containerId: pod.containerId,
           containerManager: reviewerContainerManager,
+          reviewerExecutor: pod.launchConfigDigest
+            ? podManager.getReviewerExecutor(pod)
+            : undefined,
           plannedSummary: input.plannedSummary,
           plannedDeviations: input.plannedDeviations,
         },
@@ -1066,9 +1172,13 @@ export function createSessionBridge(deps: SessionBridgeDependencies): PodBridge 
       if (!pod.containerId) {
         throw new Error(`Pod ${podId} has no container`);
       }
-      const profile = profileStore.get(pod.profileName);
-
-      const phaseConfig = resolveValidationPhase(phase, profile);
+      const launch = launchForPod(pod);
+      const legacy = launch ? null : legacyProfileForPod(pod);
+      const commands = launch ? (launch.repository?.setup ?? null) : legacy;
+      const skipSetup = launch
+        ? !launch.workflow.validationPhases.includes('setup')
+        : !!legacy?.skipValidationPhases?.includes('setup');
+      const phaseConfig = resolveValidationPhase(phase, commands, skipSetup);
       if (!phaseConfig.command) {
         return {
           phase,
@@ -1081,12 +1191,20 @@ export function createSessionBridge(deps: SessionBridgeDependencies): PodBridge 
         };
       }
 
-      const cwd = profile.buildWorkDir ? `/workspace/${profile.buildWorkDir}` : '/workspace';
-      const env = buildValidationExecEnv(
-        profile.privateRegistries,
-        profile.registryPat ?? null,
-        profile.buildEnv,
-      );
+      const cwd = commands?.buildWorkDir ? `/workspace/${commands.buildWorkDir}` : '/workspace';
+      if (launch && !podManager.getValidationEnvironment)
+        throw new AutopodError(
+          'Scoped validation environment is unavailable',
+          'SECRET_EXECUTION_ADAPTER_REQUIRED',
+          503,
+        );
+      const env = launch
+        ? await podManager.getValidationEnvironment?.(podId)
+        : buildValidationExecEnv(
+            legacy?.privateRegistries ?? [],
+            legacy?.registryPat ?? null,
+            legacy?.buildEnv ?? null,
+          );
       const cm = containerManagerFactory.get(pod.executionTarget);
 
       const startedAt = Date.now();
@@ -1424,13 +1542,26 @@ interface ResolvedPhase {
   timeoutMs: number;
 }
 
-function resolveValidationPhase(phase: ValidationPhaseName, profile: Profile): ResolvedPhase {
+interface ValidationCommandSettings {
+  validationSetupCommand?: string | null;
+  lintCommand?: string | null;
+  buildCommand?: string | null;
+  testCommand?: string | null;
+  buildTimeout?: number | null;
+  lintTimeout?: number | null;
+  testTimeout?: number | null;
+}
+
+function resolveValidationPhase(
+  phase: ValidationPhaseName,
+  settings: ValidationCommandSettings | null,
+  skipSetup: boolean,
+): ResolvedPhase {
+  const profile = settings ?? {};
   switch (phase) {
     case 'setup':
       return {
-        command: profile.skipValidationPhases?.includes('setup')
-          ? null
-          : (profile.validationSetupCommand?.trim() ?? null),
+        command: skipSetup ? null : (profile.validationSetupCommand?.trim() ?? null),
         timeoutMs: (profile.buildTimeout ?? 300) * 1_000,
       };
     case 'lint':

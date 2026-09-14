@@ -1,9 +1,12 @@
 import Fastify, { type FastifyInstance } from 'fastify';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { resolveLaunch } from '../../configuration/launch-resolver.js';
 import type { ContainerManager } from '../../interfaces/container-manager.js';
 import type { WorktreeManager } from '../../interfaces/worktree-manager.js';
 import type { ContainerManagerFactory, PodManager } from '../../pods/pod-manager.js';
 import type { ProfileStore } from '../../profiles/index.js';
+import { createTestConfiguration } from '../../test-utils/configuration-helpers.js';
+import { createTestDb } from '../../test-utils/mock-helpers.js';
 import { errorHandler } from '../error-handler.js';
 import { diffRoutes } from './diff.js';
 
@@ -42,6 +45,45 @@ describe('diff route', () => {
 
   afterEach(async () => {
     await app.close();
+  });
+
+  it('reads completed composed branch diffs from frozen repository identity', async () => {
+    const db = createTestDb();
+    try {
+      const { services } = createTestConfiguration(db);
+      const config = await resolveLaunch({ repositoryId: 'repo-b', task: 'Change' }, services);
+      const manager = makePodManager({
+        launchConfigDigest: config.digest,
+        containerId: null,
+        worktreePath: null,
+        branch: 'autopod/saved',
+        status: 'complete',
+      });
+      manager.getLaunchConfiguration = () => config;
+      const store = makeProfileStore();
+      vi.mocked(store.get).mockImplementation(() => {
+        throw new Error('Legacy profile must not be read');
+      });
+      const worktrees = {
+        getBranchDiff: vi.fn(
+          async () =>
+            'diff --git a/a.ts b/a.ts\n--- a/a.ts\n+++ b/a.ts\n@@ -1 +1 @@\n-before\n+after\n',
+        ),
+      } as unknown as WorktreeManager;
+      diffRoutes(app, manager, makeContainerFactory({} as ContainerManager), store, worktrees);
+      const response = await app.inject({ method: 'GET', url: '/pods/pod-1/diff' });
+      expect(response.statusCode).toBe(200);
+      expect(response.json().files).toHaveLength(1);
+      expect(worktrees.getBranchDiff).toHaveBeenCalledWith(
+        expect.objectContaining({
+          repoUrl: 'https://github.com/org/repo-b',
+          branch: 'autopod/saved',
+        }),
+      );
+      expect(store.get).not.toHaveBeenCalled();
+    } finally {
+      db.close();
+    }
   });
 
   it('returns parsed files + stats from the container diff', async () => {

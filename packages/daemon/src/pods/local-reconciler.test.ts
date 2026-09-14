@@ -1,4 +1,4 @@
-import type { Pod, PodStatus, ValidationResult } from '@autopod/shared';
+import type { Pod, PodGoal, PodStatus, ValidationResult } from '@autopod/shared';
 import { describe, expect, it, vi } from 'vitest';
 import type { ContainerManager } from '../interfaces/container-manager.js';
 import {
@@ -134,6 +134,55 @@ function makeFailingValidationResult(podId: string, attempt = 1): ValidationResu
 }
 
 describe('reconcileLocalSessions', () => {
+  it.each(['paused', 'achieved'] as const)(
+    'recovers native %s without restarting the agent',
+    async (state) => {
+      const { deps, podRepo, enqueuedSessions, containerManager } = createReconcilerDeps();
+      podRepo.insert({
+        id: 'goal',
+        profileName: 'test-profile',
+        task: 'Goal',
+        status: 'running',
+        runtime: 'codex',
+        model: 'model',
+        executionTarget: 'local',
+        branch: 'goal',
+        userId: 'operator',
+        maxValidationAttempts: 3,
+        skipValidation: false,
+        outputMode: 'pr',
+      });
+      podRepo.update('goal', { containerId: 'retained', worktreePath: '/tmp/worktree/goal' });
+      const goal: PodGoal = {
+        podId: 'goal',
+        objective: 'Goal',
+        state,
+        revision: 2,
+        runtime: 'codex',
+        fence: { generation: 1, attemptId: 'attempt' },
+        nativeSessionId: 'native',
+        nativeStatus: state === 'achieved' ? 'complete' : 'paused',
+        executionStopped: true,
+        controlIntent: null,
+        observedTokens: 5,
+        observedSeconds: 1,
+        reason: null,
+        createdAt: 'now',
+        updatedAt: 'now',
+      };
+      deps.readNativeGoal = () => goal;
+      mockedAccess.mockResolvedValue(undefined);
+      await reconcileLocalSessions(deps);
+      if (state === 'paused') {
+        expect(podRepo.getOrThrow('goal').status).toBe('paused');
+        expect(enqueuedSessions).toEqual([]);
+        expect(containerManager.kill).not.toHaveBeenCalled();
+      } else {
+        expect(podRepo.getOrThrow('goal')).toMatchObject({ status: 'queued', skipAgent: true });
+        expect(enqueuedSessions).toEqual(['goal']);
+      }
+    },
+  );
   it.each(['worker', 'deletion'] as const)(
     'retains unresolved %s ownership during actual restart reconciliation',
     async (kind) => {

@@ -21,6 +21,11 @@ it.each([151, 158, 163])(
   async (version) => {
     const dir = mkdtempSync(join(tmpdir(), 'native-reconcile-'));
     const migrationsDir = resolve(import.meta.dirname, 'migrations');
+    const latestVersion = Math.max(
+      ...readdirSync(migrationsDir)
+        .filter((name) => name.endsWith('.sql'))
+        .map((name) => Number.parseInt(name, 10)),
+    );
     const legacyDir = resolve(import.meta.dirname, 'fixtures/native-reliability-151-163');
     const input = join(dir, 'input.db');
     const output = join(dir, 'output.db');
@@ -48,7 +53,7 @@ it.each([151, 158, 163])(
       expect(readFileSync(input)).toEqual(bytes);
       expect(receipt).toMatchObject({
         fromVersion: version,
-        toVersion: 185,
+        toVersion: latestVersion,
         retainedRowsVerified: true,
         inputFreshness: 'unverified',
       });
@@ -88,7 +93,7 @@ it.each([151, 158, 163])(
       expect(cliReceipt).toMatchObject({
         status: 'verified-copy',
         fromVersion: version,
-        toVersion: 185,
+        toVersion: latestVersion,
         retainedRowsVerified: true,
         activated: false,
       });

@@ -1,5 +1,6 @@
-import { AutopodError, type Pod, type Profile } from '@autopod/shared';
+import { AutopodError, type Pod } from '@autopod/shared';
 import type { ContainerManager } from '../interfaces/container-manager.js';
+import type { PodExecutionSettings } from '../interfaces/pod-execution-settings.js';
 import { inspectExecutionPreflight } from './execution-preflight.js';
 import type { ExecutionProvenanceLedger } from './execution-provenance-ledger.js';
 
@@ -19,7 +20,7 @@ export async function preflightAgentContinuation(
     containerManager: ContainerManager;
     readCurrent(): Pod;
     hasPendingDecision(): boolean;
-    resolveProfile(pod: Pod): Profile;
+    resolveProfile(pod: Pod): PodExecutionSettings;
     provenance?: ExecutionProvenanceLedger;
   },
 ): Promise<void> {

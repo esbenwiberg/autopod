@@ -5,11 +5,10 @@
  * on the pod's isolated Docker network (e.g. a Dagger engine, an ephemeral
  * Postgres for integration tests, Azurite for Azure-storage emulation).
  *
- * v1 only implements `dagger-engine`. New types are added by extending the
- * union and wiring a handler in the daemon's SidecarManager.
+ * Types use daemon-owned connection and readiness protocols.
  */
 
-export type SidecarType = 'dagger-engine';
+export type SidecarType = 'dagger-engine' | 'postgres' | 'redis';
 
 export interface SidecarHealthCheck {
   /** TCP port exposed by the sidecar to the pod's network. */
@@ -20,6 +19,8 @@ export interface SidecarHealthCheck {
   timeoutMs: number;
   /** Probe interval. */
   intervalMs: number;
+  /** Daemon-selected application readiness probe, executed inside the sidecar. */
+  command?: string[];
 }
 
 export interface SidecarResources {

@@ -932,6 +932,7 @@ export function createLocalValidationEngine(
               },
               execute: async (prompt, _label, timeoutMs, outputContract) =>
                 runContainerReviewer({
+                  executor: config.reviewerExecutor,
                   beforeLaunch: config.beforeReviewerLaunch,
                   podId: config.podId,
                   containerId: config.containerId,
@@ -949,6 +950,7 @@ export function createLocalValidationEngine(
                 }),
               synthesize: async (prompt, _label, timeoutMs, outputContract) =>
                 runContainerReviewer({
+                  executor: config.reviewerExecutor,
                   beforeLaunch: config.beforeReviewerLaunch,
                   podId: config.podId,
                   containerId: config.containerId,
@@ -1000,6 +1002,7 @@ export function createLocalValidationEngine(
                         );
                       }
                       const response = await runContainerReviewer({
+                        executor: config.reviewerExecutor,
                         beforeLaunch: config.beforeReviewerLaunch,
                         podId: config.podId,
                         containerId: config.containerId,
@@ -1289,6 +1292,7 @@ export function createLocalValidationEngine(
           containerManager,
           containerId: config.containerId,
           ...(config.reviewerExecEnv ? { reviewerExecEnv: config.reviewerExecEnv } : {}),
+          reviewerExecutor: config.reviewerExecutor,
           hostBrowserRunner,
           screenshotStore,
           logger: log,
@@ -3643,7 +3647,7 @@ async function runTaskReview(
   const reviewTimeout = config.reviewTimeout ?? 300_000;
   const apiBudget = reviewerApiBudget(reviewTimeout);
   const reviewDepth = config.reviewDepth ?? 'auto';
-  const reviewRunner = resolveReviewRunner(config);
+  const reviewRunner = config.reviewerExecutor ? 'container-claude' : resolveReviewRunner(config);
   let boundProvider:
     | Extract<Awaited<ReturnType<typeof createProviderAnthropicClient>>, { ok: true }>
     | undefined;
@@ -3716,7 +3720,8 @@ async function runTaskReview(
       // Reuse the agent's pre-submit verdict when it applies to the same diff
       // bytes and was a clean pass. Saves ~30s–5min of Tier 1 work on diffs
       // the reviewer model already opined on.
-      const canReuseCachedPreSubmit = canReuseCachedPreSubmitForTier1(config, reviewRunner);
+      const canReuseCachedPreSubmit =
+        !config.reviewerExecutor && canReuseCachedPreSubmitForTier1(config, reviewRunner);
       const cached = canReuseCachedPreSubmit ? pickCachedPreSubmit(config) : null;
       if (cached) {
         tier1Parsed = cached;
@@ -3750,6 +3755,7 @@ async function runTaskReview(
           tier1TokenUsage = codexReview.tokenUsage;
         } else if (reviewRunner === 'container-claude') {
           const containerReview = await runContainerReviewer({
+            executor: config.reviewerExecutor,
             beforeLaunch: config.beforeReviewerLaunch,
             podId: config.podId,
             containerId: config.containerId,
@@ -3881,6 +3887,13 @@ async function runTaskReview(
         skipReason: 'Diff is truncated and no worktree available for tool-use review',
       };
     }
+
+    if (config.reviewerExecutor)
+      return {
+        result: null,
+        skipReason: 'Isolated reviewer did not return a conclusive verdict',
+        tokenUsage: tier1TokenUsage,
+      };
 
     // At this point, worktreePath is defined
     const worktreePath = config.worktreePath;

@@ -453,21 +453,5 @@ public final class PodStore {
     pods[index].tokenTelemetryAccuracy = .complete
   }
 
-  // MARK: - History workspace
 
-  public func createHistoryWorkspace(profileName: String?, limit: Int) async {
-    guard let api else { return }
-    do {
-      let response = try await api.createHistoryWorkspace(
-        profileName: profileName,
-        limit: limit
-      )
-      let pod = PodMapper.map(response)
-      upsertSession(pod)
-      selectedSessionId = pod.id
-    } catch {
-      print("[PodStore] Failed to create history workspace: \(error)")
-      self.error = error.localizedDescription
-    }
-  }
 }

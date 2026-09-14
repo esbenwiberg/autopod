@@ -6,6 +6,7 @@ import type { Logger } from 'pino';
 import type { PodRepository } from '../../pods/pod-repository.js';
 import type { ProfileStore } from '../../profiles/index.js';
 import { parseAdoRepoUrl } from '../../worktrees/ado-pr-manager.js';
+import { authenticatedGitEnvironment } from '../../worktrees/authenticated-git-environment.js';
 import { ActionHttpError } from '../action-diagnostics.js';
 import {
   type ActionHandler,
@@ -56,6 +57,12 @@ export function createTestPipelineHandler(config: TestPipelineHandlerConfig): Ac
         );
       }
       const pod = podRepo.getOrThrow(context.podId);
+      if (pod.launchConfigDigest)
+        throw new AutopodError(
+          'Composable test pipelines require a scoped daemon adapter',
+          'TEST_PIPELINE_ADAPTER_UNAVAILABLE',
+          409,
+        );
       const profile = profileStore.get(pod.profileName);
       const cfg = profile.testPipeline;
       if (!cfg || !cfg.enabled) {
@@ -135,7 +142,6 @@ export function createTestPipelineHandler(config: TestPipelineHandlerConfig): Ac
     const branchPrefix = cfg.branchPrefix ?? DEFAULT_BRANCH_PREFIX;
     const testBranch = `${branchPrefix}${podId}/${now}`;
     const token = await getAzureDevOpsToken();
-    const origin = new URL(cfg.testRepo).origin;
     args.logger.info(
       { podId, testBranch, testRepo: cfg.testRepo },
       'Pushing pod branch to test repo',
@@ -146,13 +152,7 @@ export function createTestPipelineHandler(config: TestPipelineHandlerConfig): Ac
         ['-C', worktreePath, 'push', '--force', cfg.testRepo, `HEAD:refs/heads/${testBranch}`],
         {
           timeout: 60_000,
-          env: {
-            ...process.env,
-            GIT_TERMINAL_PROMPT: '0',
-            GIT_CONFIG_COUNT: '1',
-            GIT_CONFIG_KEY_0: `http.${origin}/.extraheader`,
-            GIT_CONFIG_VALUE_0: `Authorization: Bearer ${token}`,
-          },
+          env: authenticatedGitEnvironment(cfg.testRepo, `Bearer ${token}`),
         },
       );
     } catch (err) {

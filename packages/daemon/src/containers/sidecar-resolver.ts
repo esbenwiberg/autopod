@@ -2,9 +2,9 @@ import {
   DAGGER_RUNNER_HOST_ENV,
   DEFAULT_DAGGER_ENGINE_PORT,
   type DaggerSidecarConfig,
-  type Profile,
   type SidecarSpec,
 } from '@autopod/shared';
+import type { PodExecutionSettings } from '../interfaces/pod-execution-settings.js';
 
 /**
  * Resolve a per-pod sidecar name (e.g. `'dagger'`) into a concrete
@@ -15,7 +15,10 @@ import {
  * New sidecar types (postgres, redis, ...) are added by extending this
  * function — the SidecarManager orchestration layer stays generic.
  */
-export function resolveSidecarSpec(profile: Profile, name: string): SidecarSpec | null {
+export function resolveSidecarSpec(
+  profile: PodExecutionSettings,
+  name: string,
+): SidecarSpec | null {
   if (name === 'dagger') {
     const cfg = profile.sidecars?.dagger;
     if (!cfg || !cfg.enabled) return null;
@@ -45,7 +48,7 @@ const AUTO_ATTACH_SIDECAR_NAMES: readonly string[] = ['dagger'];
  * inheritance override) or `trustedSource: false` (kills privileged
  * auto-attach for the whole profile).
  */
-export function getAutoAttachedSidecars(profile: Profile): string[] {
+export function getAutoAttachedSidecars(profile: PodExecutionSettings): string[] {
   const names: string[] = [];
   for (const name of AUTO_ATTACH_SIDECAR_NAMES) {
     const spec = resolveSidecarSpec(profile, name);

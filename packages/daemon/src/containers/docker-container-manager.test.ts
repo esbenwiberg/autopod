@@ -134,6 +134,67 @@ describe('DockerContainerManager', () => {
 
   // ─── spawn() ────────────────────────────────────────────
 
+  it('records the backend identity before starting and refuses start when persistence fails', async () => {
+    const exec = { id: 'e'.repeat(64), start: vi.fn().mockResolvedValue(new PassThrough()) };
+    container.exec.mockResolvedValue(exec);
+    const record = vi.fn(() => {
+      expect(exec.start).not.toHaveBeenCalled();
+      throw new Error('Database unavailable');
+    });
+    await expect(
+      manager.execStreaming('c'.repeat(64), ['codex'], { onProcessCreated: record }),
+    ).rejects.toThrow('Database unavailable');
+    expect(record).toHaveBeenCalledWith(
+      expect.objectContaining({ backend: 'docker', containerId: 'c'.repeat(64), execId: exec.id }),
+    );
+    expect(exec.start).not.toHaveBeenCalled();
+  });
+
+  it('requires exact backend ownership and an observed exit after terminating a recorded process', async () => {
+    const identity = {
+      backend: 'docker' as const,
+      containerId: 'c'.repeat(64),
+      execId: 'e'.repeat(64),
+      pidPath: '/tmp/.autopod-stream-exec-11111111-1111-1111-1111-111111111111.pid',
+    };
+    const inspect = vi
+      .fn()
+      .mockResolvedValueOnce({
+        ID: identity.execId,
+        ContainerID: identity.containerId,
+        Running: true,
+      })
+      .mockResolvedValueOnce({
+        ID: identity.execId,
+        ContainerID: identity.containerId,
+        Running: false,
+        ExitCode: 137,
+      });
+    docker.getExec = vi.fn().mockReturnValue({ inspect });
+    const terminate = vi
+      .spyOn(manager, 'execInContainer')
+      .mockResolvedValue({ exitCode: 0, stdout: '', stderr: '' });
+    expect(await manager.terminateRecordedExec(identity)).toBe(137);
+    expect(terminate).toHaveBeenCalledOnce();
+    inspect.mockResolvedValue({
+      ID: identity.execId,
+      ContainerID: identity.containerId,
+      Running: true,
+    });
+    await expect(manager.terminateRecordedExec(identity)).rejects.toThrow();
+    terminate.mockClear();
+    inspect.mockResolvedValue({
+      ID: identity.execId,
+      ContainerID: 'another',
+      Running: false,
+      ExitCode: 0,
+    });
+    await expect(manager.terminateRecordedExec(identity)).rejects.toThrow('ownership');
+    expect(terminate).not.toHaveBeenCalled();
+    inspect.mockRejectedValue(new Error('Not found'));
+    await expect(manager.terminateRecordedExec(identity)).rejects.toThrow('Not found');
+  });
+
   describe('spawn()', () => {
     const baseConfig = {
       image: 'node:22-alpine',
@@ -1143,7 +1204,7 @@ describe('DockerContainerManager', () => {
       await result.kill();
 
       const terminateCommand = vi.mocked(terminate).mock.calls[0]?.[1][2] ?? '';
-      expect(terminateCommand).toMatch(/\.autopod-stream-exec-\d+-\d+\.pid/);
+      expect(terminateCommand).toMatch(/\.autopod-stream-exec-[a-f0-9-]{36}\.pid/);
       expect(terminateCommand).toContain('kill -TERM -"$pid"');
       expect(terminateCommand).toContain('kill -KILL -"$pid"');
       expect(terminateCommand).toContain('IFS= read -r stat');

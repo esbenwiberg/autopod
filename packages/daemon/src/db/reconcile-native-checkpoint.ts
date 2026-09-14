@@ -16,7 +16,7 @@ import { dirname, join, resolve } from 'node:path';
 import Database from 'better-sqlite3';
 import type { Logger } from 'pino';
 import { assertBackupIntegrity, fileChecksum } from './backup-verification.js';
-import { runMigrations } from './migrate.js';
+import { runMigrations, runMigrationsWithBackups } from './migrate.js';
 
 interface Options {
   migrationsDir: string;
@@ -176,7 +176,7 @@ export async function reconcileNativeCheckpoint(input: string, output: string, o
         }
       })
       .immediate();
-    runMigrations(target, options.migrationsDir, options.logger);
+    await runMigrationsWithBackups(target, options.migrationsDir, options.logger);
     assertBackupIntegrity(target);
     const expectedCurrent = expectedSchema(options);
     try {

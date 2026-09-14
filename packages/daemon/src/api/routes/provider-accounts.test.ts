@@ -1,5 +1,5 @@
 import Fastify from 'fastify';
-import { beforeEach, describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { type ProfileStore, createProfileStore } from '../../profiles/index.js';
 import { createProviderAccountStore } from '../../provider-accounts/index.js';
 import type { ProviderAccountStore } from '../../provider-accounts/index.js';
@@ -604,4 +604,39 @@ describe('provider account routes', () => {
     expect(invalidParentUpdate.statusCode).toBe(400);
     expect(profileStore.getRaw('family-root').providerFailover).toBeNull();
   });
+});
+
+it('rejects legacy profile credential mutations before reading stores on a composable daemon', async () => {
+  const app = Fastify();
+  const profiles = { get: vi.fn(), update: vi.fn(), resolveCredentialOwner: vi.fn() };
+  const accounts = { get: vi.fn() };
+  providerAccountRoutes(
+    app,
+    accounts as unknown as ProviderAccountStore,
+    profiles as unknown as ProfileStore,
+    undefined,
+    true,
+  );
+  try {
+    for (const [method, url] of [
+      ['POST', '/provider-accounts/account/link-profile'],
+      ['POST', '/profiles/old/provider-account'],
+      ['DELETE', '/profiles/old/provider-account'],
+      ['POST', '/provider-accounts/import-from-profile'],
+    ] as const) {
+      const response = await app.inject({
+        method,
+        url,
+        ...(method === 'POST' ? { payload: {} } : {}),
+      });
+      expect(response.statusCode).toBe(410);
+      expect(response.json().code).toBe('CONFIG_API_VERSION_UNSUPPORTED');
+    }
+    expect(profiles.get).not.toHaveBeenCalled();
+    expect(profiles.update).not.toHaveBeenCalled();
+    expect(profiles.resolveCredentialOwner).not.toHaveBeenCalled();
+    expect(accounts.get).not.toHaveBeenCalled();
+  } finally {
+    await app.close();
+  }
 });

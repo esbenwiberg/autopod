@@ -1,4 +1,15 @@
-import type { DispatchPreflightEvidence, ExecutionProvenance } from '@autopod/shared';
+import type {
+  ConfigurationEntity,
+  ConfigurationKind,
+  DispatchPreflightEvidence,
+  EffectiveLaunchConfig,
+  ExecutionProvenance,
+  IssueWatcherBinding,
+  IssueWatcherBindingPayload,
+  LaunchRequest,
+  PimDiscovery,
+  PodGoal,
+} from '@autopod/shared';
 import type {
   ScanDecisionPage,
   ScanFindingPage,
@@ -46,8 +57,6 @@ import type {
   ReadinessStatus,
   ScheduledJob,
   ScheduledJobTemplate,
-  SpecContract,
-  SpecFile,
   TaskExecutionSummary,
   TaskRetryAuthorization,
   TaskRetryStage,
@@ -59,39 +68,19 @@ import type {
   WatchedIssue,
 } from '@autopod/shared';
 
-export interface CreateSeriesRequest {
-  seriesName: string;
-  briefs: Array<{
-    title: string;
-    task: string;
-    dependsOn: string[];
-    contract?: SpecContract;
-    /** Per-brief advisory list of files this pod expects to modify. */
-    touches?: string[];
-    /** Per-brief advisory list of files this pod should not modify. */
-    doesNotTouch?: string[];
-    /** Per-brief sidecar requests (e.g. `['dagger']`). */
-    requireSidecars?: string[];
-  }>;
-  profile: string;
-  startBranch?: string;
-  baseBranch?: string;
-  specFiles?: SpecFile[];
-  specContextFiles?: SpecFile[];
-  prMode?: 'single' | 'stacked' | 'none';
-  /** Auto-approve each pod once it reaches `validated` — no human gate. */
-  autoApprove?: boolean;
-  /** Series purpose (from `purpose.md`) — PR "Why" + `## Purpose` in CLAUDE.md. */
-  seriesDescription?: string;
-  /** Series design (from `design.md`) — `## Design` in CLAUDE.md. */
-  seriesDesign?: string;
-}
+export type CreateSeriesRequest = import('@autopod/shared').SeriesLaunchRequest;
 
 export interface SeriesResponse {
   seriesId: string;
   seriesName: string;
   pods: Pod[];
-  tokenUsageSummary: { inputTokens: number; outputTokens: number; costUsd: number };
+  tokenUsageSummary: {
+    inputTokens: number;
+    outputTokens: number;
+    costUsd: number;
+    unclassifiedTokens?: number;
+    totalTokens?: number;
+  };
   statusCounts: Record<string, number>;
 }
 
@@ -168,6 +157,46 @@ export interface TokenTelemetryRepairReport {
 }
 
 export class AutopodClient {
+  async listDeployments(): Promise<unknown[]> {
+    return this.request('GET', '/deployments');
+  }
+  async reconcileDeployment(
+    runId: string,
+    digest: string,
+    externalOutcome: 'deployed' | 'not-deployed',
+    note: string,
+  ): Promise<unknown> {
+    return this.request('POST', `/deployments/${encodeURIComponent(runId)}/reconcile`, {
+      digest,
+      externalOutcome,
+      note,
+    });
+  }
+  async requestDeployment(
+    podId: string,
+    request: import('@autopod/shared').DeploymentRequest,
+  ): Promise<unknown> {
+    return this.request('POST', `/pods/${encodeURIComponent(podId)}/deployments`, request);
+  }
+  async getDeployment(runId: string, review = false): Promise<unknown> {
+    return this.request(
+      'GET',
+      `/deployments/${encodeURIComponent(runId)}${review ? '/review' : ''}`,
+    );
+  }
+  async decideDeployment(
+    runId: string,
+    digest: string,
+    decision: 'approve' | 'deny',
+  ): Promise<unknown> {
+    return this.request('POST', `/deployments/${encodeURIComponent(runId)}/decision`, {
+      digest,
+      decision,
+    });
+  }
+  async getPodLaunchConfiguration(id: string): Promise<EffectiveLaunchConfig> {
+    return this.request('GET', `/pods/${encodeURIComponent(id)}/configuration`);
+  }
   private baseUrl: string;
   private getToken: () => Promise<string>;
 
@@ -177,6 +206,79 @@ export class AutopodClient {
   }
 
   // Sessions
+  async getGoal(podId: string): Promise<PodGoal> {
+    return this.request('GET', `/pods/${encodeURIComponent(podId)}/goal`);
+  }
+
+  async controlGoal(
+    podId: string,
+    revision: number,
+    intent: 'pause' | 'resume' | 'cancel',
+  ): Promise<PodGoal> {
+    return this.request('POST', `/pods/${encodeURIComponent(podId)}/goal/control`, {
+      revision,
+      intent,
+    });
+  }
+
+  async resolveLaunch(request: LaunchRequest): Promise<EffectiveLaunchConfig> {
+    return this.request('POST', '/launch/resolve', request);
+  }
+
+  async launchPod(request: LaunchRequest): Promise<Pod> {
+    return this.request('POST', '/pods', request);
+  }
+
+  async listWatcherBindings(): Promise<IssueWatcherBinding[]> {
+    return this.request('GET', '/configuration/watchers');
+  }
+  async writeWatcherBinding(input: {
+    id?: string;
+    expectedRevision?: number;
+    payload: IssueWatcherBindingPayload;
+  }): Promise<IssueWatcherBinding> {
+    return this.request('POST', '/configuration/watchers', input);
+  }
+  async listConfigurations<K extends ConfigurationKind>(
+    kind: K,
+  ): Promise<ConfigurationEntity<K>[]> {
+    return this.request('GET', configurationPath(kind));
+  }
+
+  async getConfiguration<K extends ConfigurationKind>(
+    kind: K,
+    id: string,
+  ): Promise<ConfigurationEntity<K>> {
+    return this.request('GET', `${configurationPath(kind)}/${encodeURIComponent(id)}`);
+  }
+
+  async writeConfiguration(
+    kind: ConfigurationKind,
+    input: { id?: string; name: string; payload: unknown; expectedRevision?: number },
+  ): Promise<ConfigurationEntity> {
+    if (input.expectedRevision !== undefined && !input.id)
+      throw new Error('Updating configuration requires its ID.');
+    return this.request(
+      input.expectedRevision === undefined ? 'POST' : 'PUT',
+      `${configurationPath(kind)}${input.expectedRevision === undefined ? '' : `/${encodeURIComponent(input.id ?? '')}`}`,
+      input,
+    );
+  }
+
+  async archiveConfiguration(
+    kind: ConfigurationKind,
+    id: string,
+    expectedRevision: number,
+  ): Promise<void> {
+    return this.request('DELETE', `${configurationPath(kind)}/${encodeURIComponent(id)}`, {
+      expectedRevision,
+    });
+  }
+
+  async pimEligibility(): Promise<PimDiscovery> {
+    return this.request('GET', '/pim/eligibility');
+  }
+
   async createSession(req: CreatePodRequest): Promise<Pod> {
     return this.request<Pod>('POST', '/pods', req);
   }
@@ -246,7 +348,7 @@ export class AutopodClient {
     return this.request('GET', `/pods/${id}/execution-provenance?schemaVersion=2`);
   }
 
-  async getRerunTemplate(id: string): Promise<CreatePodRequest> {
+  async getRerunTemplate(id: string): Promise<LaunchRequest> {
     return this.request('GET', `/pods/${id}/rerun-template`);
   }
 
@@ -879,7 +981,7 @@ export class AutopodClient {
       case 401:
         throw new AuthError(message);
       case 403:
-        throw new AutopodError(message, 'FORBIDDEN', 403);
+        throw new AutopodError(message, errorBody.code ?? 'FORBIDDEN', 403);
       case 404: {
         if (path.includes('/profiles/')) {
           const name = path.split('/profiles/')[1]?.split('/')[0] ?? 'unknown';
@@ -896,7 +998,7 @@ export class AutopodClient {
           const id = path.split('/pods/')[1]?.split('/')[0] ?? 'unknown';
           throw new InvalidStateTransitionError(id, errorBody.from, errorBody.to);
         }
-        throw new AutopodError(message, 'CONFLICT', 409);
+        throw new AutopodError(message, errorBody.code ?? 'CONFLICT', 409);
       }
       case 422:
         throw new ValidationError(message);
@@ -904,4 +1006,12 @@ export class AutopodClient {
         throw new AutopodError(message, errorBody.code ?? 'UNKNOWN', response.status);
     }
   }
+}
+
+function configurationPath(kind: ConfigurationKind): string {
+  return kind === 'repository'
+    ? '/repositories'
+    : kind === 'profile'
+      ? '/profiles'
+      : `/presets/${kind}`;
 }

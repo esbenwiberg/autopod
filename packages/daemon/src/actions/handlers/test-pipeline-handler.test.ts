@@ -80,6 +80,7 @@ describe('test-pipeline handler', () => {
   });
 
   it('rejects when the profile has no testPipeline enabled', async () => {
+    // Legacy fixture behavior remains available only outside composed launches.
     const handler = createTestPipelineHandler({
       logger,
       getAzureDevOpsToken: async () => 'daemon-entra-token',
@@ -89,6 +90,24 @@ describe('test-pipeline handler', () => {
     await expect(handler.execute(runAction, {}, { podId: 'pod-1' })).rejects.toThrow(
       /testPipeline/,
     );
+  });
+
+  it('rejects composed callers before reading legacy settings or obtaining publication credentials', async () => {
+    const profileStore = makeProfileStore();
+    const getAzureDevOpsToken = vi.fn(async () => 'fixture-token');
+    const handler = createTestPipelineHandler({
+      logger,
+      profileStore,
+      getAzureDevOpsToken,
+      podRepo: makePodRepo({ launchConfigDigest: 'a'.repeat(64) }),
+    });
+    await expect(handler.execute(runAction, {}, { podId: 'pod-1' })).rejects.toMatchObject({
+      code: 'TEST_PIPELINE_ADAPTER_UNAVAILABLE',
+    });
+    expect(profileStore.get).not.toHaveBeenCalled();
+    expect(getAzureDevOpsToken).not.toHaveBeenCalled();
+    expect(mockExecFile).not.toHaveBeenCalled();
+    expect(fetch).not.toHaveBeenCalled();
   });
 
   it('rejects when podId context is missing', async () => {
@@ -151,7 +170,9 @@ describe('test-pipeline handler', () => {
     expect(args[3]).toBe('--force');
     expect(args[4]).toBe('https://dev.azure.com/myorg/myproject/_git/test-repo');
     const execOptions = mockExecFile.mock.calls[0]?.[2] as { env: Record<string, string> };
-    expect(execOptions.env.GIT_CONFIG_VALUE_0).toBe('Authorization: Bearer daemon-entra-token');
+    expect(execOptions.env.GIT_CONFIG_VALUE_6).toBe('Authorization: Bearer daemon-entra-token');
+    expect(execOptions.env.GIT_CONFIG_VALUE_2).toBe('/dev/null');
+    expect(execOptions.env.HOME).toBe('/nonexistent');
     // testBranch is recorded on the pod for cleanup later
     expect(podRepo.update).toHaveBeenCalledWith(
       'pod-1',

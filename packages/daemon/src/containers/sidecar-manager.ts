@@ -199,7 +199,7 @@ export class DockerSidecarManager implements SidecarManager {
       // engine hitting EBUSY in its cgroup setup) forces the caller to wait
       // out the full 90s timeout before surfacing the failure. Grab the
       // crash state + last logs and throw early with actionable context.
-      const crashInfo = await this.containerCrashDetails(handle);
+      const crashInfo = await this.containerCrashDetails(handle, spec);
       if (crashInfo) {
         this.logger.error(
           {
@@ -217,7 +217,7 @@ export class DockerSidecarManager implements SidecarManager {
       await sleep(interval);
     }
 
-    const crashInfo = await this.containerCrashDetails(handle);
+    const crashInfo = await this.containerCrashDetails(handle, spec);
     if (crashInfo) {
       this.logger.error(
         {
@@ -238,6 +238,7 @@ export class DockerSidecarManager implements SidecarManager {
    */
   private async containerCrashDetails(
     handle: SidecarHandle,
+    spec: SidecarSpec,
   ): Promise<{ exitCode: number; startedAt: string; finishedAt: string; logs: string } | null> {
     try {
       const container = this.docker.getContainer(handle.containerId);
@@ -248,7 +249,7 @@ export class DockerSidecarManager implements SidecarManager {
         containerId: handle.containerId,
       });
       if (info.State.Running) return null;
-      const logs = (
+      let logs = (
         await boundedDockerCall(container.logs({ stdout: true, stderr: true, tail: 40 }), {
           label: 'sidecar.logs',
           timeoutMs: DOCKER_CALL_TIMEOUTS.inspect,
@@ -256,6 +257,9 @@ export class DockerSidecarManager implements SidecarManager {
           containerId: handle.containerId,
         })
       ).toString();
+      for (const value of Object.values(spec.env ?? {})) {
+        if (value) logs = logs.replaceAll(value, '[redacted]');
+      }
       return {
         exitCode: info.State.ExitCode ?? -1,
         startedAt: info.State.StartedAt ?? '',
@@ -425,7 +429,9 @@ export class DockerSidecarManager implements SidecarManager {
       if (!info.State.Running) return false;
       if (info.State.ExitCode && info.State.ExitCode !== 0) return false;
 
-      return await this.probeTcpListening(container, spec.healthCheck.port);
+      return spec.healthCheck.command
+        ? await this.probeCommand(container, spec.healthCheck.command)
+        : await this.probeTcpListening(container, spec.healthCheck.port);
     } catch {
       return false;
     }
@@ -443,6 +449,10 @@ export class DockerSidecarManager implements SidecarManager {
     // awk: if local_address ends with ":HEXPORT" and state is 0A (LISTEN), exit 0.
     const script = `awk 'NR>1 { split($2, a, ":"); if (toupper(a[2]) == "${hexPort}" && $4 == "0A") { found=1 } } END { exit (found ? 0 : 1) }' /proc/net/tcp /proc/net/tcp6 2>/dev/null`;
 
+    return this.probeCommand(container, ['sh', '-c', script]);
+  }
+
+  private async probeCommand(container: Dockerode.Container, command: string[]): Promise<boolean> {
     // AttachStdout/Stderr must both be true. With them false, Dockerode's
     // exec.start() stream emits 'end' immediately (nothing attached = nothing
     // to stream), and a subsequent inspect() returns Running:true ExitCode:null
@@ -451,7 +461,7 @@ export class DockerSidecarManager implements SidecarManager {
     // Attaching ties stream-end to process-exit, so the drain below is correct.
     const exec = await boundedDockerCall(
       container.exec({
-        Cmd: ['sh', '-c', script],
+        Cmd: command,
         AttachStdout: true,
         AttachStderr: true,
       }),
@@ -466,11 +476,18 @@ export class DockerSidecarManager implements SidecarManager {
       timeoutMs: DOCKER_CALL_TIMEOUTS.execStart,
       logger: this.logger,
     });
-    await new Promise<void>((resolve) => {
-      stream.on('end', () => resolve());
-      stream.on('error', () => resolve());
-      stream.resume();
-    });
+    try {
+      await boundedDockerCall(
+        new Promise<void>((resolve, reject) => {
+          stream.once('end', resolve);
+          stream.once('error', reject);
+          stream.resume();
+        }),
+        { label: 'sidecar.probeDrain', timeoutMs: 5_000, logger: this.logger },
+      );
+    } finally {
+      stream.destroy();
+    }
     // Belt-and-braces: poll inspect a few times in case stream-end races the
     // ExitCode field being populated on Docker's side.
     for (let i = 0; i < 10; i++) {
@@ -509,9 +526,10 @@ export class DockerSidecarManager implements SidecarManager {
 }
 
 export class SidecarHealthTimeoutError extends Error {
+  readonly spec: Omit<SidecarSpec, 'env'>;
   constructor(
     public handle: SidecarHandle,
-    public spec: SidecarSpec,
+    spec: SidecarSpec,
     public crashInfo?: { exitCode: number; logs: string; finishedAt: string },
   ) {
     const base = crashInfo
@@ -519,6 +537,8 @@ export class SidecarHealthTimeoutError extends Error {
       : `Sidecar ${handle.name} (type=${spec.type}) did not become healthy within ${spec.healthCheck.timeoutMs}ms`;
     const tail = crashInfo ? `\nLast container logs:\n${crashInfo.logs}` : '';
     super(base + tail);
+    const { env: _, ...safeSpec } = spec;
+    this.spec = safeSpec;
     this.name = 'SidecarHealthTimeoutError';
   }
 }

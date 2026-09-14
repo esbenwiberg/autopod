@@ -1,11 +1,11 @@
 import type {
   InjectedClaudeMdSection,
-  Profile,
   ScanCheckpoint,
   ScanDecision,
   ScanFinding,
 } from '@autopod/shared';
 import type { Logger } from 'pino';
+import type { PodExecutionSettings } from '../interfaces/pod-execution-settings.js';
 import type { Detector } from './detectors/detector.js';
 import { createInjectionDetector } from './detectors/injection-detector.js';
 import { createPiiDetector } from './detectors/pii-detector.js';
@@ -31,7 +31,7 @@ export interface ScanContext {
   podId: string;
   workdir: string;
   baseRef?: string;
-  profile: Pick<Profile, 'securityScan'>;
+  profile: Pick<PodExecutionSettings, 'securityScan'>;
   isWorkspacePod?: boolean;
 }
 

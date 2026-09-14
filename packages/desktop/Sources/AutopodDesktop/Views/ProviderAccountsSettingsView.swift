@@ -26,6 +26,7 @@ struct ProviderAccountsSettingsView: View {
   let api: DaemonAPI?
   let profiles: [Profile]
   let onProfilesChanged: (() async -> Void)?
+  var onConfigurePresets: (() -> Void)? = nil
 
   @State private var accounts: [PublicProviderAccountResponse] = []
   @State private var providerCatalog: ProviderCatalogResponse?
@@ -56,6 +57,16 @@ struct ProviderAccountsSettingsView: View {
   var body: some View {
     VStack(alignment: .leading, spacing: 12) {
       header
+
+      if let onConfigurePresets {
+        HStack {
+          Text("Select accounts and fallback routes in AI setups. Each launch can choose a different setup.")
+            .font(.callout)
+            .foregroundStyle(.secondary)
+          Spacer()
+          Button("Open AI setups", action: onConfigurePresets)
+        }
+      }
 
       if let errorMessage {
         errorBanner(errorMessage)
@@ -165,15 +176,17 @@ struct ProviderAccountsSettingsView: View {
       .disabled(api == nil || isLoading)
       .help("Refresh provider accounts")
 
-      Button {
-        showImportSheet = true
-      } label: {
-        Label("Import", systemImage: "square.and.arrow.down")
+      if onConfigurePresets == nil {
+        Button {
+          showImportSheet = true
+        } label: {
+          Label("Import", systemImage: "square.and.arrow.down")
+        }
+        .buttonStyle(.bordered)
+        .controlSize(.small)
+        .disabled(api == nil || profilesWithLegacyCredentials.isEmpty)
+        .help("Import credentials from a profile")
       }
-      .buttonStyle(.bordered)
-      .controlSize(.small)
-      .disabled(api == nil || profilesWithLegacyCredentials.isEmpty)
-      .help("Import credentials from a profile")
 
       Button {
         showCreateSheet = true
@@ -283,31 +296,33 @@ struct ProviderAccountsSettingsView: View {
 
         authControl(account)
 
-        Button {
-          toggleFailoverEditor(account)
-        } label: {
-          Image(systemName: "arrow.triangle.branch")
-        }
-        .buttonStyle(.borderless)
-        .disabled(isAccountBusy(account.id))
-        .help("Edit default failover chain")
+        if onConfigurePresets == nil {
+          Button {
+            toggleFailoverEditor(account)
+          } label: {
+            Image(systemName: "arrow.triangle.branch")
+          }
+          .buttonStyle(.borderless)
+          .disabled(isAccountBusy(account.id))
+          .help("Edit default failover chain")
 
-        Menu {
-          if linkableProfiles.isEmpty {
-            Text("No matching profiles")
-          } else {
-            ForEach(linkableProfiles) { profile in
-              Button(profile.name) {
-                Task { await link(account, profileName: profile.name) }
+          Menu {
+            if linkableProfiles.isEmpty {
+              Text("No matching profiles")
+            } else {
+              ForEach(linkableProfiles) { profile in
+                Button(profile.name) {
+                  Task { await link(account, profileName: profile.name) }
+                }
               }
             }
+          } label: {
+            Image(systemName: "link")
           }
-        } label: {
-          Image(systemName: "link")
+          .menuStyle(.borderlessButton)
+          .disabled(isAccountBusy(account.id) || linkableProfiles.isEmpty)
+          .help("Link profile")
         }
-        .menuStyle(.borderlessButton)
-        .disabled(isAccountBusy(account.id) || linkableProfiles.isEmpty)
-        .help("Link profile")
 
         Button {
           deleteTarget = account
@@ -320,7 +335,7 @@ struct ProviderAccountsSettingsView: View {
         .help(linkedProfiles.isEmpty ? "Delete provider account" : "Unlink profiles before deleting")
       }
 
-      if !linkedProfiles.isEmpty {
+      if onConfigurePresets == nil && !linkedProfiles.isEmpty {
         linkedProfilesRow(linkedProfiles)
       }
 
@@ -343,7 +358,7 @@ struct ProviderAccountsSettingsView: View {
 
       metadataRow(account)
 
-      if expandedFailoverAccounts.contains(account.id) {
+      if onConfigurePresets == nil && expandedFailoverAccounts.contains(account.id) {
         Divider()
         defaultFailoverEditor(account)
       }

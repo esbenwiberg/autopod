@@ -1,3 +1,6 @@
+vi.mock('../config/launch-store.js', () => ({
+  saveLaunchReceipt: vi.fn(() => '/tmp/fixture-launch.json'),
+}));
 import { createServer } from 'node:http';
 import { AutopodError } from '@autopod/shared';
 import { Command } from 'commander';
@@ -757,9 +760,10 @@ it('sends the same explicit rerun decision through the actual CLI HTTP client an
     } else if (request.url?.endsWith('rerun-template'))
       response.end(
         JSON.stringify({
-          profileName: 'profile',
+          repositoryId: 'repo',
+          profileId: 'profile',
           task: 'Exact original task',
-          contract: { contractVersion: 1 },
+          source: { podId: 'abcd1234', digest: 'a'.repeat(64), configuration: 'original' },
         }),
       );
     else if (request.url?.endsWith('dispatch-preflight'))
@@ -807,10 +811,13 @@ it('sends the same explicit rerun decision through the actual CLI HTTP client an
     expect(requests).toHaveLength(2);
     expect(requests[0]).toEqual(requests[1]);
     expect(requests[0]).toMatchObject({
-      intentionalRerun: {
-        ofPodId: 'abcd1234',
-        reason: 'Reviewed independent repeat',
-        requestKey: 'same-key',
+      requestId: 'same-key',
+      work: {
+        intentionalRerun: {
+          ofPodId: 'abcd1234',
+          reason: 'Reviewed independent repeat',
+          requestKey: 'same-key',
+        },
       },
     });
     await command().parseAsync(['node', 'ap', 'dispatch-preflight', 'abcd1234']);

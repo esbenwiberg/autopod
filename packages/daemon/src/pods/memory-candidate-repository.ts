@@ -47,8 +47,11 @@ function rowToCandidate(row: Record<string, unknown>): MemoryCandidate {
     id: row.id as string,
     action: row.action as MemoryCandidateAction,
     targetMemoryId: (row.target_memory_id as string) ?? null,
-    scope: (row.scope as 'profile') ?? 'profile',
+    scope: (row.scope as MemoryCandidate['scope']) ?? 'profile',
     scopeId: row.scope_id as string,
+    ...(typeof row.repository_setup_id === 'string'
+      ? { repositorySetupId: row.repository_setup_id }
+      : {}),
     path: row.path as string,
     content: row.content as string,
     rationale: row.rationale as string,
@@ -80,14 +83,16 @@ export function createMemoryCandidateRepository(db: Database.Database): MemoryCa
     insert(
       candidate: Omit<MemoryCandidate, 'status' | 'createdAt' | 'updatedAt'>,
     ): MemoryCandidate {
+      if (candidate.repositorySetupId && candidate.scope !== 'repository')
+        throw new Error('Setup affinity requires repository memory scope');
       const now = new Date().toISOString();
       db.prepare(
         `INSERT INTO memory_candidates
-         (id, action, target_memory_id, scope, scope_id, path, content, rationale,
+         (id, action, target_memory_id, scope, scope_id, repository_setup_id, path, content, rationale,
           kind, tags, applies_when, avoid_when, confidence, source_evidence, impact_summary,
           status, created_by_pod_id, fallback_reason, created_at, updated_at)
          VALUES
-         (@id, @action, @targetMemoryId, @scope, @scopeId, @path, @content, @rationale,
+         (@id, @action, @targetMemoryId, @scope, @scopeId, @repositorySetupId, @path, @content, @rationale,
           @kind, @tags, @appliesWhen, @avoidWhen, @confidence, @sourceEvidence, @impactSummary,
           'pending', @createdByPodId, @fallbackReason, @now, @now)`,
       ).run({
@@ -96,6 +101,8 @@ export function createMemoryCandidateRepository(db: Database.Database): MemoryCa
         targetMemoryId: candidate.targetMemoryId ?? null,
         scope: candidate.scope,
         scopeId: candidate.scopeId,
+        repositorySetupId:
+          candidate.scope === 'repository' ? (candidate.repositorySetupId ?? null) : null,
         path: candidate.path,
         content: candidate.content,
         rationale: candidate.rationale,
@@ -209,7 +216,13 @@ export function createMemoryCandidateRepository(db: Database.Database): MemoryCa
           if (!candidate.targetMemoryId) {
             throw new Error(`Candidate ${id} is an update but its target memory no longer exists`);
           }
-          memoryRepo.getOrThrow(candidate.targetMemoryId);
+          const target = memoryRepo.getOrThrow(candidate.targetMemoryId);
+          if (
+            target.scope !== candidate.scope ||
+            target.scopeId !== candidate.scopeId ||
+            (target.repositorySetupId ?? null) !== (candidate.repositorySetupId ?? null)
+          )
+            throw new Error('Memory candidate cannot update a different repository or scope');
           memoryRepo.updateMetadata(candidate.targetMemoryId, candidate.content, {
             kind: candidate.kind,
             tags: candidate.tags,
@@ -224,8 +237,11 @@ export function createMemoryCandidateRepository(db: Database.Database): MemoryCa
           // the candidate itself retains the originating pod ID for provenance.
           memoryRepo.insert({
             id: generateId(8),
-            scope: 'profile',
+            scope: candidate.scope,
             scopeId: candidate.scopeId,
+            ...(candidate.repositorySetupId
+              ? { repositorySetupId: candidate.repositorySetupId }
+              : {}),
             path: candidate.path,
             content: candidate.content,
             rationale: candidate.rationale,

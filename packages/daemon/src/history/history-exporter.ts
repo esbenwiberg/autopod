@@ -150,6 +150,7 @@ export function createHistoryExporter(deps: ExporterDeps) {
         const list =
           deps.podRepo.listForHistory?.bind(deps.podRepo) ?? deps.podRepo.list.bind(deps.podRepo);
         const pods = list({
+          repositoryId: query.repositoryId,
           profileName: query.profileName,
           status: query.failuresOnly ? ['failed', 'killed', 'review_required'] : undefined,
           since: query.since,

@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import Database from 'better-sqlite3';
 import { describe, expect, it } from 'vitest';
-import { runMigrations } from '../db/migrate.js';
+import { runMigrations, runMigrationsWithBackups } from '../db/migrate.js';
 import { createTestDb, insertTestProfile, logger } from '../test-utils/mock-helpers.js';
 import { createPodRepository } from './pod-repository.js';
 
@@ -128,7 +128,7 @@ describe('durable completion journal', () => {
     }
   });
 
-  it('upgrades legacy decision history with a conservative event-order fence and retains it across reopen', () => {
+  it('upgrades legacy decision history with a conservative event-order fence and retains it across reopen', async () => {
     const dir = mkdtempSync(path.join(tmpdir(), 'decision-upgrade-'));
     const migrations = path.resolve(import.meta.dirname, '../db/migrations');
     for (const file of readdirSync(migrations)) {
@@ -144,7 +144,7 @@ describe('durable completion journal', () => {
         VALUES ('settled','old-answer','Keep report only','{"type":"human","userId":"reviewer"}','2026-01-01');
         INSERT INTO events(pod_id,type,payload) VALUES ('settled','pod.agent_activity','{}');`);
       const watermark = (db.prepare('SELECT MAX(id) AS id FROM events').get() as { id: number }).id;
-      runMigrations(db, migrations, logger);
+      await runMigrationsWithBackups(db, migrations, logger);
       db.close();
       db = new Database(filename);
       const repo = createPodRepository(db);
@@ -165,7 +165,7 @@ describe('durable completion journal', () => {
 
   it.each([139, 141])(
     'upgrades an existing schema %s database without losing its unanswered decision',
-    (version) => {
+    async (version) => {
       const dir = mkdtempSync(path.join(tmpdir(), 'completion-upgrade-'));
       const migrations = path.resolve(import.meta.dirname, '../db/migrations');
       for (const file of readdirSync(migrations)) {
@@ -176,7 +176,7 @@ describe('durable completion journal', () => {
       try {
         runMigrations(db, dir, logger);
         insertPod(db);
-        runMigrations(db, migrations, logger);
+        await runMigrationsWithBackups(db, migrations, logger);
         const repo = createPodRepository(db);
         const pod = repo.getOrThrow('settled');
         expect(pod.pendingEscalation?.id).toBe('decision');

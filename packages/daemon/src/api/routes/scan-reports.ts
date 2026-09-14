@@ -59,7 +59,7 @@ export function scanReportRoutes(app: FastifyInstance, scans: ScanOperatorServic
       .object({ selectionId: z.string().uuid() })
       .strict()
       .parse(request.body);
-    const result = scans.launch((request.params as { id: string }).id, selectionId);
+    const result = await scans.launch((request.params as { id: string }).id, selectionId);
     reply.code(201);
     return result;
   });

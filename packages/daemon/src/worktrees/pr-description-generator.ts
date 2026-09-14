@@ -1,8 +1,9 @@
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import type { ContentBlock } from '@anthropic-ai/sdk/resources/messages.js';
-import type { Profile, TaskSummary } from '@autopod/shared';
+import type { TaskSummary } from '@autopod/shared';
 import type { Logger } from 'pino';
+import type { PodExecutionSettings } from '../interfaces/pod-execution-settings.js';
 import {
   type ProfileLlmClientDeps,
   type ProfileLlmClientUnavailableReason,
@@ -17,7 +18,7 @@ const API_TIMEOUT_MS = 15_000;
 const MAX_TITLE_LENGTH = 72;
 const DEFAULT_DESCRIPTION_MODEL = 'claude-haiku-4-5';
 
-function pickDescriptionModel(profile: Profile, podModel: string): string {
+function pickDescriptionModel(profile: PodExecutionSettings, podModel: string): string {
   return profile.reviewerModel || profile.defaultModel || podModel || DEFAULT_DESCRIPTION_MODEL;
 }
 
@@ -95,7 +96,7 @@ export interface PrDescriptionInput {
    * Profile that owns this pod. Drives daemon-side LLM auth via the same
    * provider/credentials the agent uses.
    */
-  profile: Profile;
+  profile: PodExecutionSettings;
   /** Pod's model id (e.g. 'haiku', 'sonnet', 'opus', or full id). */
   podModel: string;
   /**

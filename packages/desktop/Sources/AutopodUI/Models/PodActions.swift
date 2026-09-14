@@ -43,12 +43,8 @@ public struct PodActions: Sendable {
   public var fork: @MainActor @Sendable (String) async -> String?
   public var delete: @MainActor @Sendable (String) async -> Void
   public var deleteSeries: @MainActor @Sendable (String) async -> Void
-  public var createHistoryWorkspace: @MainActor @Sendable (String?, Int) async -> Void
-  public var createMemoryWorkspace: @MainActor @Sendable (String) async -> Void
   /// Start/restart the preview container and open the app URL
   public var openLiveApp: @MainActor @Sendable (String) async -> Void
-  /// Look up the workerProfile for a given profile name (returns nil if not set)
-  public var workerProfileForProfile: @MainActor @Sendable (String) -> String?
   /// Abort the currently running validation for the pod (no-op if not validating)
   public var interruptValidation: @MainActor @Sendable (String) async -> Void
   /// Toggle skip-validation at runtime. True = bypass next result; false = run normally.
@@ -68,6 +64,8 @@ public struct PodActions: Sendable {
   /// Token-free recovery for a `failed` pod — pushes + opens PR if validation already passed,
   /// otherwise re-runs validation only (no agent rework). Cheapest possible path forward.
   public var retryDraftScope: String
+  public var loadGoal: @MainActor @Sendable (String) async throws -> PodGoalResponse?
+  public var controlGoal: @MainActor @Sendable (String, PodGoalControlRequest) async throws -> PodGoalResponse
   public var loadExecutionProvenance: @MainActor @Sendable (String) async throws -> ExecutionProvenanceResponse
   public var loadDispatchPreflight: @MainActor @Sendable (String) async throws -> DispatchPreflightResponse
   public var loadRerunTemplate: @MainActor @Sendable (String) async throws -> IntentionalRerunDraft
@@ -108,18 +106,9 @@ public struct PodActions: Sendable {
   /// Most recent error from a create-pod call. Sheets use this to keep submit
   /// failures inline instead of routing them through the app-wide error alert.
   public var lastCreatePodError: @MainActor @Sendable () -> String?
+  public var launchWorker: @MainActor @Sendable (String, String, BriefPodMetadata?, [String]?) async -> String?
   /// Launch a pod series. Returns the seriesId on success.
   public var createSeries: @MainActor @Sendable (CreateSeriesRequest) async -> String?
-  /// Spawn a new pod that depends on the given parent pod IDs, optionally
-  /// attaching it to an existing series. Returns the new pod id.
-  public var spawnDependent: @MainActor @Sendable (
-    _ profileName: String,
-    _ task: String,
-    _ dependsOnPodIds: [String],
-    _ seriesId: String?,
-    _ seriesName: String?,
-    _ baseBranch: String?
-  ) async -> String?
   /// Commit + push a workspace pod's branch without changing pod state.
   /// Used right before opening the Create Series sheet so "Path on branch"
   /// preview can read briefs the user just authored. Returns the daemon
@@ -150,10 +139,7 @@ public struct PodActions: Sendable {
     fork: @escaping @MainActor @Sendable (String) async -> String? = { _ in nil },
     delete: @escaping @MainActor @Sendable (String) async -> Void = { _ in },
     deleteSeries: @escaping @MainActor @Sendable (String) async -> Void = { _ in },
-    createHistoryWorkspace: @escaping @MainActor @Sendable (String?, Int) async -> Void = { _, _ in },
-    createMemoryWorkspace: @escaping @MainActor @Sendable (String) async -> Void = { _ in },
     openLiveApp: @escaping @MainActor @Sendable (String) async -> Void = { _ in },
-    workerProfileForProfile: @escaping @MainActor @Sendable (String) -> String? = { _ in nil },
     interruptValidation: @escaping @MainActor @Sendable (String) async -> Void = { _ in },
     setSkipValidation: @escaping @MainActor @Sendable (String, Bool) async -> Void = { _, _ in },
     addValidationOverride: @escaping @MainActor @Sendable (String, String, String, String, String?, String?) async -> Void = { _, _, _, _, _, _ in },
@@ -162,6 +148,8 @@ public struct PodActions: Sendable {
     spawnFix: @escaping @MainActor @Sendable (String, String?) async -> SpawnFixResponse? = { _, _ in nil },
     retryCreatePr: @escaping @MainActor @Sendable (String) async -> Void = { _ in },
     retryDraftScope: String = "preview",
+    loadGoal: @escaping @MainActor @Sendable (String) async throws -> PodGoalResponse? = { _ in nil },
+    controlGoal: @escaping @MainActor @Sendable (String, PodGoalControlRequest) async throws -> PodGoalResponse = { _, _ in throw URLError(.unsupportedURL) },
     loadExecutionProvenance: @escaping @MainActor @Sendable (String) async throws -> ExecutionProvenanceResponse = { _ in throw URLError(.unsupportedURL) },
     loadDispatchPreflight: @escaping @MainActor @Sendable (String) async throws -> DispatchPreflightResponse = { _ in throw URLError(.unsupportedURL) },
     loadRerunTemplate: @escaping @MainActor @Sendable (String) async throws -> IntentionalRerunDraft = { _ in throw URLError(.unsupportedURL) },
@@ -181,7 +169,7 @@ public struct PodActions: Sendable {
     lastPreviewError: @escaping @MainActor @Sendable () -> String? = { nil },
     lastCreatePodError: @escaping @MainActor @Sendable () -> String? = { nil },
     createSeries: @escaping @MainActor @Sendable (CreateSeriesRequest) async -> String? = { _ in nil },
-    spawnDependent: @escaping @MainActor @Sendable (String, String, [String], String?, String?, String?) async -> String? = { _, _, _, _, _, _ in nil },
+    launchWorker: @escaping @MainActor @Sendable (String, String, BriefPodMetadata?, [String]?) async -> String? = { _, _, _, _ in nil },
     syncWorkspaceBranch: @escaping @MainActor @Sendable (String) async -> SyncBranchResponse? = { _ in nil },
     updateFromBase: @escaping @MainActor @Sendable (String) async -> UpdateFromBaseResponse? = { _ in nil }
   ) {
@@ -205,10 +193,7 @@ public struct PodActions: Sendable {
     self.fork = fork
     self.delete = delete
     self.deleteSeries = deleteSeries
-    self.createHistoryWorkspace = createHistoryWorkspace
-    self.createMemoryWorkspace = createMemoryWorkspace
     self.openLiveApp = openLiveApp
-    self.workerProfileForProfile = workerProfileForProfile
     self.interruptValidation = interruptValidation
     self.setSkipValidation = setSkipValidation
     self.addValidationOverride = addValidationOverride
@@ -218,6 +203,8 @@ public struct PodActions: Sendable {
     self.retryCreatePr = retryCreatePr
     self.retryDraftScope = retryDraftScope
     self.loadExecutionProvenance = loadExecutionProvenance
+    self.loadGoal = loadGoal
+    self.controlGoal = controlGoal
     self.loadDispatchPreflight = loadDispatchPreflight
     self.loadRerunTemplate = loadRerunTemplate
     self.createIntentionalRerun = createIntentionalRerun
@@ -236,7 +223,7 @@ public struct PodActions: Sendable {
     self.lastPreviewError = lastPreviewError
     self.lastCreatePodError = lastCreatePodError
     self.createSeries = createSeries
-    self.spawnDependent = spawnDependent
+    self.launchWorker = launchWorker
     self.syncWorkspaceBranch = syncWorkspaceBranch
     self.updateFromBase = updateFromBase
   }

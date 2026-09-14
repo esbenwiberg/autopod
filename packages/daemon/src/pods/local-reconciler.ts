@@ -1,5 +1,5 @@
 import { access } from 'node:fs/promises';
-import type { Pod, PodStatus } from '@autopod/shared';
+import type { Pod, PodGoal, PodStatus } from '@autopod/shared';
 import type { Logger } from 'pino';
 import type { ContainerManager } from '../interfaces/container-manager.js';
 import {
@@ -24,6 +24,8 @@ export interface LocalReconcilerDependencies {
   logger: Logger;
   /** What caused this reconcile pass. Defaults to 'restart' for backwards compat. */
   trigger?: ReconcileTrigger;
+  readNativeGoal?(podId: string): PodGoal | null;
+  finishCancelledGoal?(podId: string): Promise<void>;
 }
 
 export interface ReconcileResult {
@@ -98,6 +100,36 @@ async function reconcileSession(
   result: ReconcileResult,
 ): Promise<void> {
   const { podRepo, eventBus, containerManager, enqueueSession, logger } = deps;
+
+  const nativeGoal = deps.readNativeGoal?.(pod.id);
+  if (
+    nativeGoal?.fence &&
+    pod.status !== 'awaiting_input' &&
+    !pod.pendingEscalation &&
+    !hasInterruptedArtifactCollection(pod) &&
+    !(pod.status === 'queued' && nativeGoal.controlIntent === 'resume')
+  ) {
+    if (!nativeGoal.executionStopped) {
+      result.skipped.push(pod.id);
+      return;
+    }
+    if (nativeGoal.state === 'achieved') {
+      podRepo.update(pod.id, { skipAgent: true });
+    } else if (nativeGoal.state === 'cancelled' && deps.finishCancelledGoal) {
+      await deps.finishCancelledGoal(pod.id);
+      result.killed.push(pod.id);
+      return;
+    } else {
+      podRepo.update(pod.id, {
+        status: 'paused',
+        lastRecoveryTrigger: deps.trigger ?? 'restart',
+        pauseReason: 'Native Goal was recovered. Resume explicitly when ready.',
+      });
+      if (pod.status !== 'paused') emitStatusChanged(pod.id, pod.status, 'paused', eventBus);
+      result.skipped.push(pod.id);
+      return;
+    }
+  }
 
   // A daemon restart is not an answer to a human decision. Retain its identity
   // and resources; a later explicit reply drives recovery rather than auto-dispatch.

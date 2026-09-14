@@ -62,7 +62,7 @@ export interface InjectedSkill {
   /** Unique name — used as the skill directory name, slash-command name, and merge key */
   name: string;
   /** Where to source the skill content from */
-  source: LocalSkillSource | GithubSkillSource | BuiltinSkillSource;
+  source: LocalSkillSource | GithubSkillSource | BuiltinSkillSource | InlineSkillSource;
   /** Human-readable description (shown in CLAUDE.md) */
   description?: string;
 }
@@ -71,6 +71,12 @@ export interface LocalSkillSource {
   type: 'local';
   /** Absolute path on daemon host to the skill .md file */
   path: string;
+}
+
+/** Immutable content already resolved in the daemon's launch snapshot. */
+export interface InlineSkillSource {
+  type: 'inline';
+  content: string;
 }
 
 export interface GithubSkillSource {

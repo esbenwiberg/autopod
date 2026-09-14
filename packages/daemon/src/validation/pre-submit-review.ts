@@ -14,6 +14,7 @@ import {
 export type PreSubmitSkipReason = 'no-diff' | 'no-task' | 'parse-failure' | 'cli-error';
 
 export interface PreSubmitReviewOpts {
+  reviewerExecutor?: import('../interfaces/reviewer-executor.js').ReviewerExecutor;
   task: string;
   diff: string;
   reviewerModel: string;
@@ -113,7 +114,10 @@ export async function runPreSubmitReview(
   try {
     let stdout: string;
     let tokenUsage: CodexReviewTokenUsage | undefined;
-    if (reviewerRunner === 'codex') {
+    if (opts.reviewerExecutor) {
+      runner = reviewerRunner === 'codex' ? 'codex' : 'container-claude';
+      ({ stdout, tokenUsage } = await opts.reviewerExecutor({ prompt, timeout: timeoutMs }));
+    } else if (reviewerRunner === 'codex') {
       if (!opts.containerId || !opts.containerManager) {
         return skipped('cli-error', 'Codex pre-submit reviewer requires a live pod container.');
       }

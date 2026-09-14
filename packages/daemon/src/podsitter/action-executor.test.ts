@@ -92,7 +92,7 @@ const operationByAction: Record<PodsitterAction, string | null> = {
   spawn_fix: 'spawnFixSession',
   retry_pr: 'retryCreatePr',
   update_from_base: 'updateFromBase',
-  inject_credential: 'injectCredential',
+  inject_credential: null,
   install_tool: 'installCliTool',
   recover_worktree: 'recoverWorktree',
   force_approve: 'forceApprove',
@@ -329,9 +329,13 @@ describe('PodsitterActionExecutor', () => {
         windowId: 'always:7',
       });
 
-      expect(result.outcome, action).toBe('executed');
+      expect(result.outcome, action).toBe(
+        action === 'inject_credential' ? 'not_executed' : 'executed',
+      );
       expect(h.calls, action).toEqual(
-        operationByAction[action] === null ? [] : [operationByAction[action]],
+        action === 'inject_credential' || operationByAction[action] === null
+          ? []
+          : [operationByAction[action]],
       );
       expect(h.repository.reserveAction, action).toHaveBeenCalledOnce();
       expect(h.repository.completeAction, action).toHaveBeenCalledOnce();

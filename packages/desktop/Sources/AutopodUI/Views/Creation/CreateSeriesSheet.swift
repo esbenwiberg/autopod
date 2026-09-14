@@ -9,6 +9,7 @@ public struct CreateSeriesSheet: View {
     @Binding public var isPresented: Bool
     public let actions: PodActions
     public let profileNames: [String]
+    public var configurationActions: LaunchConfigurationActions?
     /// Pre-fill the base branch (e.g. when launching a series from an
     /// interactive pod's branch so the chain stacks on the user's work).
     public let initialBaseBranch: String?
@@ -26,6 +27,7 @@ public struct CreateSeriesSheet: View {
         isPresented: Binding<Bool>,
         actions: PodActions,
         profileNames: [String],
+        configurationActions: LaunchConfigurationActions? = nil,
         initialBaseBranch: String? = nil,
         initialTargetBranch: String? = nil,
         initialProfile: String? = nil,
@@ -35,6 +37,7 @@ public struct CreateSeriesSheet: View {
         self._isPresented = isPresented
         self.actions = actions
         self.profileNames = profileNames
+        self.configurationActions = configurationActions
         self.initialBaseBranch = initialBaseBranch
         self.initialTargetBranch = initialTargetBranch
         self.initialProfile = initialProfile
@@ -59,12 +62,11 @@ public struct CreateSeriesSheet: View {
     @State private var branchPath: String = ""    // relative path on the branch
     @State private var seriesName: String = ""
     @State private var preview: SeriesPreviewResponse?
-    @State private var selectedProfile: String = ""
+    @State private var launchSelection: [String: ConfigurationJSON] = [:]
+    @State private var pendingRequest: CreateSeriesRequest?
     @State private var sourceBranch: String = ""
     @State private var baseBranch: String = ""
     @State private var prMode: String = "single"
-    @State private var autoApprove: Bool = false
-    @State private var disableAskHuman: Bool = false
     @State private var includeSpecFiles: Bool = false
     @State private var isInitialSyncing = false
     @State private var initialSyncWarning: String?
@@ -89,7 +91,7 @@ public struct CreateSeriesSheet: View {
                         previewSection(preview)
                     }
                     prModePicker
-                    unattendedSection
+                    Text("The selected workflow controls approval, merge and agent questions.").font(.caption).foregroundStyle(.secondary)
 
                     if let err = errorMessage {
                         Text(err)
@@ -108,6 +110,7 @@ public struct CreateSeriesSheet: View {
             Divider()
 
             HStack {
+                Button("Retry saved request…") { retrySavedRequest() }.disabled(isSubmitting)
                 Spacer()
                 Button("Cancel") { isPresented = false }
                     .keyboardShortcut(.cancelAction)
@@ -121,10 +124,9 @@ public struct CreateSeriesSheet: View {
         }
         .frame(width: 640, height: 700)
         .onAppear {
-            if selectedProfile.isEmpty {
-                selectedProfile = initialProfile
-                    ?? profileNames.first
-                    ?? ""
+            if launchSelection["profileId"] == nil, let initialProfile,
+               configurationActions?.list(.profile).contains(where: { $0.id == initialProfile }) == true {
+                launchSelection["profileId"] = .string(initialProfile)
             }
             if baseBranch.isEmpty, let target = initialTargetBranch {
                 baseBranch = target
@@ -145,7 +147,8 @@ public struct CreateSeriesSheet: View {
         isSubmitting
             || isInitialSyncing
             || preview == nil
-            || selectedProfile.isEmpty
+            || launchSelection["repositoryId"]?.string == nil
+            || configurationActions?.capabilities["launchAvailable"]?.bool != true
             || seriesName.trimmingCharacters(in: .whitespaces).isEmpty
     }
 
@@ -222,7 +225,7 @@ public struct CreateSeriesSheet: View {
                     .onChange(of: branchPath) { _, _ in preview = nil }
             }
 
-            if !sourceBranch.isEmpty && !branchPath.isEmpty && !selectedProfile.isEmpty {
+            if !sourceBranch.isEmpty && !branchPath.isEmpty && launchSelection["repositoryId"]?.string != nil {
                 Button(isPreviewing ? "Parsing…" : "Preview series") {
                     Task { await runPreview() }
                 }
@@ -292,7 +295,7 @@ public struct CreateSeriesSheet: View {
             case .localFolder:
                 return await actions.previewSeriesFolder(folderPath)
             case .onBranch:
-                return await actions.previewSeriesOnBranch(selectedProfile, sourceBranch, branchPath)
+                return await actions.previewSeriesOnBranch(launchSelection["repositoryId"]?.string ?? "", sourceBranch, branchPath)
             }
         }()
         guard let response else {
@@ -465,15 +468,14 @@ public struct CreateSeriesSheet: View {
 
     // MARK: - Other fields
 
+    @ViewBuilder
     private var profilePicker: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text("Profile")
-                .font(.subheadline.weight(.semibold))
-            Picker("", selection: $selectedProfile) {
-                ForEach(profileNames, id: \.self) { Text($0).tag($0) }
-            }
-            .pickerStyle(.menu)
-            .labelsHidden()
+        if let configurationActions {
+            ScheduledLaunchSelectionEditor(actions: configurationActions, selection: $launchSelection,
+                task: seriesName.isEmpty ? "Series configuration" : seriesName)
+                .onChange(of: launchSelection["repositoryId"]) { _, _ in preview = nil }
+        } else {
+            Text("Connect to a daemon with composable configuration to create a series.").foregroundStyle(.secondary)
         }
     }
 
@@ -490,33 +492,6 @@ public struct CreateSeriesSheet: View {
         }
     }
 
-    private var unattendedSection: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text("Unattended run")
-                .font(.subheadline.weight(.semibold))
-            Toggle(isOn: $autoApprove) {
-                VStack(alignment: .leading, spacing: 1) {
-                    Text("Auto-approve on validate")
-                        .font(.body)
-                    Text("Skip the human approval gate — pods merge automatically once validation passes.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-            }
-            .disabled(isSubmitting)
-            Toggle(isOn: $disableAskHuman) {
-                VStack(alignment: .leading, spacing: 1) {
-                    Text("Replace ask_human with AI")
-                        .font(.body)
-                    Text("Agent questions are answered by the reviewer model instead of blocking for a human.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-            }
-            .disabled(isSubmitting)
-        }
-    }
-
     private var baseBranchField: some View {
         VStack(alignment: .leading, spacing: 4) {
             Text(briefSource == .onBranch ? "Target branch (optional)" : "Base branch (optional)")
@@ -524,7 +499,7 @@ public struct CreateSeriesSheet: View {
             TextField("main", text: $baseBranch)
                 .textFieldStyle(.roundedBorder)
             if briefSource == .onBranch {
-                Text("The implementation PR targets this branch. Leave empty to use the profile default.")
+                Text("The implementation PR targets this branch. Leave empty to use the repository default.")
                     .font(.caption2)
                     .foregroundStyle(.tertiary)
             }
@@ -533,32 +508,57 @@ public struct CreateSeriesSheet: View {
 
     // MARK: - Submit
 
+    private func retrySavedRequest() {
+        let panel = NSOpenPanel()
+        panel.canChooseFiles = true; panel.canChooseDirectories = false; panel.allowsMultipleSelection = false
+        panel.directoryURL = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".autopod/series-launches")
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        do {
+            let data = try Data(contentsOf: url)
+            let request = try JSONDecoder().decode(CreateSeriesRequest.self, from: data)
+            let original = try JSONDecoder().decode(ConfigurationJSON.self, from: data)
+            let roundtrip = try JSONDecoder().decode(ConfigurationJSON.self, from: JSONEncoder().encode(request))
+            guard original == roundtrip else { throw LaunchJSONError.invalid("This desktop cannot preserve every field in the saved series. Retry it with the CLI.") }
+            isSubmitting = true
+            Task {
+                defer { isSubmitting = false }
+                if let id = await actions.createSeries(request) { onSeriesCreated?(id); isPresented = false }
+                else { errorMessage = actions.lastCreatePodError() ?? "Series retry was not confirmed. The saved request is unchanged." }
+            }
+        } catch { errorMessage = error.localizedDescription }
+    }
+
     private func submit() async {
         guard let preview else { return }
         errorMessage = nil
         isSubmitting = true
         defer { isSubmitting = false }
 
-        let request = CreateSeriesRequest(
+        var request = CreateSeriesRequest(
+            requestId: pendingRequest?.requestId ?? UUID().uuidString,
             seriesName: seriesName,
             briefs: preview.briefs,
-            profile: selectedProfile,
+            launch: launchSelection,
             startBranch: briefSource == .onBranch && includeSpecFiles && !sourceBranch.isEmpty
                 ? sourceBranch
                 : nil,
             baseBranch: baseBranch.isEmpty ? nil : baseBranch,
             specFiles: includeSpecFiles ? preview.specFiles : nil,
+            specContextFiles: preview.specFiles,
             prMode: prMode,
-            autoApprove: autoApprove ? true : nil,
-            disableAskHuman: disableAskHuman ? true : nil,
             seriesDescription: preview.seriesDescription,
             seriesDesign: preview.seriesDesign
         )
+        let encoder = JSONEncoder(); encoder.outputFormatting = [.sortedKeys]
+        if let previous = pendingRequest, (try? encoder.encode(previous)) != (try? encoder.encode(request)) {
+            request.requestId = UUID().uuidString
+        }
+        pendingRequest = request
         if let id = await actions.createSeries(request) {
             onSeriesCreated?(id)
             isPresented = false
         } else {
-            errorMessage = "Series creation failed — check the daemon log."
+            errorMessage = "\(actions.lastCreatePodError() ?? "Series creation was not confirmed.") Retry without editing to reuse this request. Saved at ~/.autopod/series-launches/\(request.requestId).json"
         }
     }
 }

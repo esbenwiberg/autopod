@@ -1,5 +1,5 @@
 import type { Readable, Writable } from 'node:stream';
-import type { ArtifactOutput } from '@autopod/shared';
+import type { ArtifactOutput, NativeGoalProcessIdentity } from '@autopod/shared';
 
 /** Guard publication of a collected directory after asynchronous extraction. */
 export interface DirectoryExtractionOptions {
@@ -83,6 +83,9 @@ export interface ExecOptions {
   env?: Record<string, string>;
   /** Attach writable stdin for long-lived RPC subprocesses. Default false. */
   stdin?: boolean;
+  /** Persist a backend identity before start. Unsupported adapters must refuse this option. */
+  onProcessCreated?: (identity: NativeGoalProcessIdentity) => void;
+  onProcessStarted?: (identity: NativeGoalProcessIdentity) => void;
 }
 
 export interface StreamingExecResult {
@@ -130,6 +133,10 @@ export interface ContainerExecutionMetadata {
 }
 
 export interface ContainerManager {
+  /** Available only when an exec can be recorded before start and inspected after daemon restart. */
+  readonly supportsExecRecovery?: boolean;
+  /** Verifies backend identity and observed exit; never treats a lost transport or PID file as exit. */
+  terminateRecordedExec?(identity: NativeGoalProcessIdentity): Promise<number>;
   /** Read actual backend identity; unsupported metadata remains unavailable. */
   getExecutionMetadata?(containerId: string): Promise<ContainerExecutionMetadata>;
   ensureManagedContainer?(config: ContainerSpawnConfig): Promise<string>;

@@ -19,6 +19,8 @@ public final class ActionHandler {
   public private(set) var lastCreatePodError: String?
 
   private let api: DaemonAPI
+  private var pendingForkRequests: [String: ComposableLaunchRequest] = [:]
+  private var pendingWorkerRequests: [String: (draft: Data, request: ComposableLaunchRequest)] = [:]
   private let podStore: PodStore
   private let profileStore: ProfileStore
 
@@ -68,16 +70,7 @@ public final class ActionHandler {
       fork: { [weak self] id in await self?.forkSession(id) },
       delete: { [weak self] id in await self?.deletePod(id) },
       deleteSeries: { [weak self] id in await self?.deleteSeries(id) },
-      createHistoryWorkspace: { [weak self] profile, limit in
-        await self?.createHistoryWorkspace(profileName: profile, limit: limit)
-      },
-      createMemoryWorkspace: { [weak self] profile in
-        await self?.createMemoryWorkspace(profileName: profile)
-      },
       openLiveApp: { [weak self] id in await self?.openLiveApp(id) },
-      workerProfileForProfile: { [weak self] name in
-        self?.profileStore.profiles.first(where: { $0.name == name })?.workerProfile
-      },
       interruptValidation: { [weak self] id in await self?.interruptValidation(id) },
       setSkipValidation: { [weak self] id, skip in await self?.setSkipValidation(id, skip: skip) },
       addValidationOverride: { [weak self] id, fid, desc, action, reason, guidance in
@@ -90,6 +83,15 @@ public final class ActionHandler {
       spawnFix: { [weak self] id, message in await self?.spawnFixSession(id, userMessage: message) ?? nil },
       retryCreatePr: { [weak self] id in await self?.retryCreatePr(id) },
       retryDraftScope: api.baseURL.absoluteString,
+      loadGoal: { [weak self] id in
+        guard let self else { throw URLError(.notConnectedToInternet) }
+        do { return try await self.api.getGoal(id) }
+        catch DaemonError.notFound { return nil }
+      },
+      controlGoal: { [weak self] id, request in
+        guard let self else { throw URLError(.notConnectedToInternet) }
+        return try await self.api.controlGoal(id, body: request)
+      },
       loadExecutionProvenance: { [weak self] id in
         guard let self else { throw URLError(.notConnectedToInternet) }
         return try await self.api.getExecutionProvenance(id)
@@ -140,22 +142,15 @@ public final class ActionHandler {
         await self?.previewBriefFolder(path: path) ?? nil
       },
       previewBriefOnBranch: { [weak self] profile, branch, path in
-        await self?.previewBriefOnBranch(profileName: profile, branch: branch, path: path) ?? nil
+        await self?.previewBriefOnBranch(sourcePodId: profile, branch: branch, path: path) ?? nil
       },
       lastPreviewError: { [weak self] in self?.lastPreviewError },
       lastCreatePodError: { [weak self] in self?.lastCreatePodError },
       createSeries: { [weak self] request in
         await self?.createSeries(request) ?? nil
       },
-      spawnDependent: { [weak self] profile, task, parents, seriesId, seriesName, base in
-        await self?.spawnDependent(
-          profileName: profile,
-          task: task,
-          dependsOnPodIds: parents,
-          seriesId: seriesId,
-          seriesName: seriesName,
-          baseBranch: base
-        ) ?? nil
+      launchWorker: { [weak self] podId, task, brief, sidecars in
+        await self?.launchWorker(podId, task: task, brief: brief, sidecars: sidecars)
       },
       syncWorkspaceBranch: { [weak self] id in
         await self?.syncWorkspaceBranch(id) ?? nil
@@ -478,31 +473,36 @@ public final class ActionHandler {
 
   public func forkSession(_ podId: String) async -> String? {
     pendingAction = "fork-\(podId)"
-    guard let source = podStore.pods.first(where: { $0.id == podId }) else {
-      lastError = "Pod \(podId) not found"
-      pendingAction = nil
-      return nil
-    }
-    // Create a new pod with the same config, using the source branch as baseBranch
-    let result = await createPod(
-      profileName: source.profileName,
-      task: source.task,
-      model: source.model,
-      pod: PodConfigRequest(
-        agentMode: source.pod.agentMode.rawValue,
-        output: source.pod.output.rawValue,
-        validate: source.pod.validate,
-        validationSuite: source.pod.validationSuite,
-        advisoryBrowserQaEnabled: source.pod.advisoryBrowserQaEnabled,
-        promotable: source.pod.promotable
-      ),
-      baseBranch: source.branch
-    )
-    if result == nil {
-      lastError = lastCreatePodError
-    }
-    pendingAction = nil
-    return result
+    defer { pendingAction = nil }
+    do {
+      var request: ComposableLaunchRequest
+      if let pending = pendingForkRequests[podId] { request = pending }
+      else {
+        guard let source = podStore.pods.first(where: { $0.id == podId }) else {
+          throw DaemonError.networkError("Source pod is unavailable")
+        }
+        let frozen = try await api.getLaunchConfiguration(podId)
+        request = ComposableLaunchRequest(
+          repositoryId: frozen.fields["repository"]?["id"]?.string,
+          profileId: frozen.fields["profileId"]?.string, task: source.task)
+        request.repositorySetupId = frozen.fields["repository"]?["setup"]?["id"]?.string
+        if request.repositoryId == nil { request.emptyWorkspace = true }
+        request.source = LaunchSource(podId: podId, digest: frozen.digest, configuration: "original")
+        if request.repositoryId != nil {
+          request.work = ["startBranch": .string(source.branch)]
+          if let base = source.baseBranch { request.work?["baseBranch"] = .string(base) }
+        }
+        request.requestId = UUID().uuidString
+        request.expectedDigest = try await api.resolveLaunch(request).digest
+        pendingForkRequests[podId] = request
+      }
+      _ = try LaunchRequestJournal.save(request)
+      let response = try await api.launchPod(request)
+      podStore.upsertSession(PodMapper.map(response))
+      pendingForkRequests.removeValue(forKey: podId)
+      lastError = nil
+      return response.id
+    } catch { lastError = error.localizedDescription; return nil }
   }
 
   public func deletePod(_ podId: String) async {
@@ -521,35 +521,6 @@ public final class ActionHandler {
     do {
       try await api.deleteSeries(seriesId)
       podStore.removeSeriesPods(seriesId)
-    } catch {
-      lastError = error.localizedDescription
-    }
-    pendingAction = nil
-  }
-
-  public func createMemoryWorkspace(profileName: String) async {
-    pendingAction = "memory-workspace"
-    do {
-      let response = try await api.createMemoryWorkspace(profileName: profileName)
-      let pod = PodMapper.map(response)
-      podStore.upsertSession(pod)
-      podStore.selectedSessionId = pod.id
-    } catch {
-      lastError = error.localizedDescription
-    }
-    pendingAction = nil
-  }
-
-  public func createHistoryWorkspace(profileName: String?, limit: Int) async {
-    pendingAction = "history-workspace"
-    do {
-      let response = try await api.createHistoryWorkspace(
-        profileName: profileName,
-        limit: limit
-      )
-      let pod = PodMapper.map(response)
-      podStore.upsertSession(pod)
-      podStore.selectedSessionId = pod.id
     } catch {
       lastError = error.localizedDescription
     }
@@ -645,7 +616,7 @@ public final class ActionHandler {
     lastPreviewError = nil
     do {
       return try await api.previewSeriesOnBranch(
-        profileName: profileName, branch: branch, path: path
+        repositoryId: profileName, branch: branch, path: path
       )
     } catch {
       lastPreviewError = error.localizedDescription
@@ -664,30 +635,31 @@ public final class ActionHandler {
   }
 
   public func previewBriefOnBranch(
-    profileName: String, branch: String, path: String
+    sourcePodId: String, branch: String, path: String
   ) async -> ParsedBriefResponse? {
     lastPreviewError = nil
     do {
-      return try await api.previewBriefOnBranch(
-        profileName: profileName, branch: branch, path: path
-      )
-    } catch {
-      lastPreviewError = error.localizedDescription
-      return nil
-    }
+      let source = try await api.getLaunchConfiguration(sourcePodId)
+      guard let repositoryId = source.fields["repository"]?["id"]?.string else {
+        throw DaemonError.networkError("The source workspace has no repository")
+      }
+      return try await api.previewBriefOnBranch(repositoryId: repositoryId, branch: branch, path: path)
+    } catch { lastPreviewError = error.localizedDescription; return nil }
   }
 
   public func createSeries(_ request: CreateSeriesRequest) async -> String? {
     pendingAction = "create-series"
+    lastCreatePodError = nil
     defer { pendingAction = nil }
     do {
+      _ = try LaunchRequestJournal.saveSeries(request)
       let response = try await api.createSeries(request)
       for pod in PodMapper.map(response.pods) {
         podStore.upsertSession(pod)
       }
       return response.seriesId
     } catch {
-      lastError = error.localizedDescription
+      lastCreatePodError = error.localizedDescription
       return nil
     }
   }
@@ -718,39 +690,53 @@ public final class ActionHandler {
     }
   }
 
-  public func spawnDependent(
-    profileName: String,
-    task: String,
-    dependsOnPodIds: [String],
-    seriesId: String?,
-    seriesName: String?,
-    baseBranch: String?
-  ) async -> String? {
-    pendingAction = "spawn-dependent"
+  public func launchWorker(_ sourcePodId: String, task: String, brief: BriefPodMetadata?, sidecars: [String]?) async -> String? {
+    pendingAction = "launch-worker"; lastCreatePodError = nil
     defer { pendingAction = nil }
-    let req = CreateSessionRequest(
-      profileName: profileName,
-      task: task,
-      pod: PodConfigRequest(
-        agentMode: "auto",
-        output: "pr",
-        validate: true,
-        validationSuite: "full",
-        promotable: false
-      ),
-      baseBranch: baseBranch?.isEmpty == true ? nil : baseBranch,
-      dependsOnPodIds: dependsOnPodIds,
-      seriesId: seriesId,
-      seriesName: seriesName
-    )
     do {
-      let response = try await api.createPod(req)
-      let pod = PodMapper.map(response)
-      podStore.upsertSession(pod)
+      guard let pod = podStore.pods.first(where: { $0.id == sourcePodId }) else {
+        throw DaemonError.networkError("Source workspace is unavailable")
+      }
+      var work: [String: ConfigurationJSON] = ["startBranch": .string(pod.branch)]
+      if let base = pod.baseBranch { work["baseBranch"] = .string(base) }
+      if let brief {
+        if let contract = brief.contract { work["contract"] = try JSONDecoder().decode(ConfigurationJSON.self, from: JSONEncoder().encode(contract)) }
+        if let title = brief.briefTitle { work["briefTitle"] = .string(title) }
+        if let touches = brief.touches { work["touches"] = .array(touches.map(ConfigurationJSON.string)) }
+        if let untouched = brief.doesNotTouch { work["doesNotTouch"] = .array(untouched.map(ConfigurationJSON.string)) }
+        if let files = brief.specFiles { work["specFiles"] = try JSONDecoder().decode(ConfigurationJSON.self, from: JSONEncoder().encode(files)) }
+      }
+      let draft = ConfigurationJSON.object(["task": .string(task), "work": .object(work),
+        "sidecars": .array((sidecars ?? []).sorted().map(ConfigurationJSON.string))])
+      let encoder = JSONEncoder(); encoder.outputFormatting = [.sortedKeys]
+      let bytes = try encoder.encode(draft)
+      var request: ComposableLaunchRequest
+      if let saved = pendingWorkerRequests[sourcePodId], saved.draft == bytes { request = saved.request }
+      else {
+        let source = try await api.getLaunchConfiguration(sourcePodId)
+        if source.fields["repository"]?["id"]?.string != nil {
+          let synchronization = try await api.syncWorkspaceBranch(sourcePodId)
+          guard synchronization.ok == true, synchronization.pushed == true else {
+            throw DaemonError.networkError(synchronization.error ?? "The workspace branch could not be published for the worker. Retry after synchronization succeeds.")
+          }
+        }
+        request = ComposableLaunchRequest(repositoryId: source.fields["repository"]?["id"]?.string,
+          profileId: source.fields["profileId"]?.string, task: task)
+        request.repositorySetupId = source.fields["repository"]?["setup"]?["id"]?.string
+        if request.repositoryId == nil { request.emptyWorkspace = true; work.removeValue(forKey: "startBranch"); work.removeValue(forKey: "baseBranch") }
+        request.source = LaunchSource(podId: sourcePodId, digest: source.digest, configuration: "worker")
+        request.work = work; request.requiredSidecarIds = sidecars
+        request.requestId = UUID().uuidString
+        request.expectedDigest = try await api.resolveLaunch(request).digest
+        pendingWorkerRequests[sourcePodId] = (bytes, request)
+      }
+      _ = try LaunchRequestJournal.save(request)
+      let response = try await api.launchPod(request)
+      podStore.upsertSession(PodMapper.map(response))
+      pendingWorkerRequests.removeValue(forKey: sourcePodId)
       return response.id
-    } catch {
-      lastError = error.localizedDescription
-      return nil
-    }
+    } catch { lastCreatePodError = error.localizedDescription; return nil }
   }
+
+
 }

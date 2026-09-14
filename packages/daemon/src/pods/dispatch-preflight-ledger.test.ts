@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import Database from 'better-sqlite3';
 import { describe, expect, it } from 'vitest';
-import { runMigrations } from '../db/migrate.js';
+import { runMigrations, runMigrationsWithBackups } from '../db/migrate.js';
 import { createTestDb, insertTestProfile, logger } from '../test-utils/mock-helpers.js';
 import { type NewPod, createPodRepository } from './pod-repository.js';
 
@@ -178,7 +178,7 @@ describe('dispatch admission against immutable execution evidence', () => {
   });
 });
 
-it.each([139, 156])('upgrades schema %s and preserves unknown legacy evidence', (version) => {
+it.each([139, 156])('upgrades schema %s and preserves unknown legacy evidence', async (version) => {
   const dir = mkdtempSync(join(tmpdir(), 'dispatch-upgrade-'));
   const migrations = resolve(import.meta.dirname, '../db/migrations');
   for (const file of readdirSync(migrations))
@@ -191,7 +191,7 @@ it.each([139, 156])('upgrades schema %s and preserves unknown legacy evidence', 
     db.prepare(
       "INSERT INTO pods (id,profile_name,task,status,model,runtime,branch,user_id,task_summary) VALUES ('old','test-profile','old','failed','model','codex','branch','operator','malformed-preserve')",
     ).run();
-    runMigrations(db, migrations, logger);
+    await runMigrationsWithBackups(db, migrations, logger);
     expect(createPodRepository(db).dispatchPreflight?.latest('old')).toBeNull();
     expect(db.prepare("SELECT task_summary FROM pods WHERE id = 'old'").get()).toEqual({
       task_summary: 'malformed-preserve',

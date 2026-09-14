@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import type { ScheduledScanCollection, ScheduledScanPolicy } from '@autopod/shared';
 import Database from 'better-sqlite3';
 import { describe, expect, it, vi } from 'vitest';
-import { runMigrations } from '../db/migrate.js';
+import { runMigrations, runMigrationsWithBackups } from '../db/migrate.js';
 import { createTestDb, insertTestProfile, logger } from '../test-utils/mock-helpers.js';
 import { createScanOperatorService } from './scan-operator-service.js';
 import { createScanReportRepository } from './scan-report-repository.js';
@@ -495,7 +495,7 @@ describe('scheduled scan reports independent of worker lifetime', () => {
         db.prepare(
           "INSERT INTO pods (id, profile_name, task, status, model, runtime, branch, user_id, last_validation_result) VALUES ('legacy', 'test-profile', 'Historical worker', 'complete', 'fixture', 'codex', 'legacy-branch', 'operator', '{malformed legacy json')",
         ).run();
-        runMigrations(db, migrations, logger);
+        await runMigrationsWithBackups(db, migrations, logger);
         let repo = createScanReportRepository(db);
         const report = repo.begin('legacy-job', 'fixed-run', policy);
         repo.finish(report.id, collection);
@@ -514,7 +514,7 @@ describe('scheduled scan reports independent of worker lifetime', () => {
         ).toEqual({ last_validation_result: '{malformed legacy json' });
         expect(db.pragma('integrity_check', { simple: true })).toBe('ok');
         expect(db.pragma('foreign_key_check')).toEqual([]);
-        runMigrations(db, migrations, logger);
+        await runMigrationsWithBackups(db, migrations, logger);
         expect(repo.get(report.id).collection).toEqual(collection);
       } finally {
         db.close();

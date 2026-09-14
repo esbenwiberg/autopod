@@ -1,18 +1,22 @@
 import { spawn } from 'node:child_process';
+import { randomUUID } from 'node:crypto';
 import { readFile, stat, unlink } from 'node:fs/promises';
 import { extname } from 'node:path';
 import { createInterface } from 'node:readline/promises';
 import { MAX_HANDOFF_INSTRUCTIONS_LENGTH } from '@autopod/shared';
-import type { Pod, PodStatus, PublicProfile } from '@autopod/shared';
+import type { Pod, PodStatus } from '@autopod/shared';
 import chalk from 'chalk';
 import type { Command } from 'commander';
 import type { IPty } from 'node-pty';
 import type { AutopodClient } from '../api/client.js';
+import { saveLaunchReceipt } from '../config/launch-store.js';
 import { formatStatus } from '../output/colors.js';
 import { withSpinner } from '../output/spinner.js';
 import { saveClipboardImage } from '../utils/clipboard.js';
 import { resolvePodId } from '../utils/id-resolver.js';
 import { runRemoteTerminalSession } from '../utils/remote-terminal.js';
+import { type LaunchFlags, buildLaunchRequest } from './launch-request.js';
+import { addLaunchPresetOptions } from './launch.js';
 
 const IMAGE_EXTENSIONS = new Set([
   '.png',
@@ -32,14 +36,14 @@ const TERMINAL_STATUSES = new Set<PodStatus>(['complete', 'killed', 'failed']);
 
 type AttachSessionRunner = (containerName: string) => Promise<number>;
 type TerminalSessionRunner = (client: AutopodClient, podId: string) => Promise<number>;
-type ProfilePicker = (client: AutopodClient) => Promise<string>;
+type RepositoryPicker = (client: AutopodClient) => Promise<string>;
 type SleepFn = (ms: number) => Promise<void>;
 type NowFn = () => number;
 
 interface WorkspaceCommandDeps {
   runAttachSession?: AttachSessionRunner;
   runTerminalSession?: TerminalSessionRunner;
-  pickProfile?: ProfilePicker;
+  pickRepository?: RepositoryPicker;
   sleep?: SleepFn;
   now?: NowFn;
 }
@@ -47,12 +51,12 @@ interface WorkspaceCommandDeps {
 interface ResolvedWorkspaceCommandDeps {
   attachSession: AttachSessionRunner;
   terminalSession: TerminalSessionRunner;
-  pickProfile: ProfilePicker;
+  pickRepository: RepositoryPicker;
   sleep: SleepFn;
   now: NowFn;
 }
 
-interface WorkspaceCreateOptions {
+interface WorkspaceCreateOptions extends LaunchFlags {
   attach?: boolean;
   branch?: string;
   baseBranch?: string;
@@ -60,7 +64,7 @@ interface WorkspaceCreateOptions {
   instructions?: string;
   instructionsFile?: string;
   label?: string;
-  pimGroup?: string[];
+  preview?: boolean;
   timeout?: number;
 }
 
@@ -77,44 +81,44 @@ export function registerWorkspaceCommands(
 ): void {
   const attachSession = deps.runAttachSession ?? runAttachSession;
   const terminalSession = deps.runTerminalSession ?? runRemoteTerminalSession;
-  const pickProfile = deps.pickProfile ?? pickProfileInteractively;
+  const pickRepository = deps.pickRepository ?? pickRepositoryInteractively;
   const sleep =
     deps.sleep ?? ((ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)));
   const now = deps.now ?? (() => Date.now());
 
-  // ap workspace <profile> [label]
+  // ap workspace <repository> [label]
   addWorkspaceOptions(
     program
-      .command('workspace <profile> [label]')
+      .command('workspace <repository> [label]')
       .description('Create a workspace pod — an interactive container with no agent'),
   )
     .option('--attach', 'Wait for the container and attach as soon as it is running')
-    .action(async (profile: string, label: string | undefined, opts: WorkspaceCreateOptions) => {
+    .action(async (repository: string, label: string | undefined, opts: WorkspaceCreateOptions) => {
       const client = getClient();
-      await createWorkspacePod(client, profile, label, opts, {
+      await createWorkspacePod(client, repository, label, opts, {
         attachSession,
         terminalSession,
-        pickProfile,
+        pickRepository,
         sleep,
         now,
       });
     });
 
-  // ap shell [profile]
+  // ap shell [repository]
   addWorkspaceOptions(
-    program.command('shell [profile]').description('Create an interactive pod and attach to it'),
-  ).action(async (profile: string | undefined, opts: WorkspaceCreateOptions) => {
+    program.command('shell [repository]').description('Create an interactive pod and attach to it'),
+  ).action(async (repository: string | undefined, opts: WorkspaceCreateOptions) => {
     const client = getClient();
-    const selectedProfile = profile ?? (await pickProfile(client));
+    const selectedRepository = repository ?? (await pickRepository(client));
     await createWorkspacePod(
       client,
-      selectedProfile,
+      selectedRepository,
       undefined,
       { ...opts, attach: true },
       {
         attachSession,
         terminalSession,
-        pickProfile,
+        pickRepository,
         sleep,
         now,
       },
@@ -262,56 +266,13 @@ export function registerWorkspaceCommands(
       },
     );
 
-  // ap inject <id> github|ado
+  // Keep a clear upgrade error for old scripts without contacting a running pod.
   program
     .command('inject <id> <service>')
-    .description('Inject provider credentials into a running container (github or ado)')
-    .action(async (id: string, service: string) => {
-      if (service !== 'github' && service !== 'ado') {
-        console.error(chalk.red('service must be "github" or "ado"'));
-        process.exit(1);
-      }
-
-      const client = getClient();
-      const resolvedId = await resolvePodId(client, id);
-
-      // Wait up to 60s for the container to reach 'running' before injecting
-      const WAIT_TIMEOUT_MS = 60_000;
-      const POLL_INTERVAL_MS = 1_500;
-      const deadline = Date.now() + WAIT_TIMEOUT_MS;
-
-      await withSpinner(`Injecting ${service} credentials…`, async () => {
-        while (true) {
-          const pod = await client.getSession(resolvedId);
-          if (pod.status === 'running') break;
-
-          const terminalStates = ['complete', 'killed', 'failed'];
-          if (terminalStates.includes(pod.status)) {
-            const err = new Error(
-              `Pod ${resolvedId.slice(0, 8)} is ${pod.status} — cannot inject credentials.`,
-            );
-            throw err;
-          }
-
-          if (Date.now() >= deadline) {
-            throw new Error(
-              `Pod ${resolvedId.slice(0, 8)} is still ${pod.status} after ${WAIT_TIMEOUT_MS / 1000}s — container may have failed to start.`,
-            );
-          }
-
-          await new Promise((r) => setTimeout(r, POLL_INTERVAL_MS));
-        }
-
-        await client.injectCredential(resolvedId, service as 'github' | 'ado');
-      });
-
-      console.log(
-        chalk.green(`Done. ${service} credentials injected into pod ${resolvedId.slice(0, 8)}.`),
-      );
-      console.log(
-        chalk.dim(
-          'git and CLI tools are now authenticated. Credentials are gone when the container stops.',
-        ),
+    .description('Removed: source credentials remain with the daemon')
+    .action(() => {
+      throw new Error(
+        'ap inject was removed. Configure GitHub access rules for agent operations; the daemon handles push and PR delivery.',
       );
     });
 
@@ -361,15 +322,19 @@ export function registerWorkspaceCommands(
 }
 
 function addWorkspaceOptions(command: Command): Command {
-  return command
+  return addLaunchPresetOptions(command)
+    .option('--profile <name-or-id>', 'Profile; otherwise use the repository usual profile')
+    .option('--repository-setup <name-or-id>', 'Named project setup')
+    .option('--request-id <id>', 'Stable request identity')
+    .option('--preview', 'Show the resolved configuration without creating or attaching')
     .option('-b, --branch <name>', 'Name for the new working branch (defaults to autopod/<id>).')
     .option(
       '--base-branch <ref>',
-      'Remote ref to start the workspace from AND target as the merge base (must exist on the remote; no fallback to the profile default).',
+      'Remote ref to start the workspace from AND target as the merge base (must exist on the remote; no fallback to the repository default).',
     )
     .option(
       '--start-branch <ref>',
-      'Remote ref to start the workspace from while the eventual PR still targets the profile default (use instead of --base-branch to keep the merge base as main).',
+      'Remote ref to start the workspace from while the eventual PR still targets the repository default (use instead of --base-branch to keep the merge base as main).',
     )
     .option(
       '-i, --instructions <text>',
@@ -378,12 +343,6 @@ function addWorkspaceOptions(command: Command): Command {
     .option(
       '--instructions-file <path>',
       'Read durable handoff instructions from a local file (mutually exclusive with --instructions).',
-    )
-    .option(
-      '--pim-group <spec>',
-      'PIM group to activate: <groupId> or <groupId:displayName> (repeatable)',
-      collectRepeatable,
-      [] as string[],
     )
     .option('--label <text>', 'Label shown in pod lists and status output')
     .option(
@@ -394,33 +353,12 @@ function addWorkspaceOptions(command: Command): Command {
     );
 }
 
-function collectRepeatable(value: string, previous: string[]): string[] {
-  return previous.concat(value);
-}
-
 function parseTimeoutSeconds(value: string): number {
   const parsed = Number(value);
   if (!Number.isInteger(parsed) || parsed <= 0) {
     throw new Error('--timeout must be a positive whole number of seconds');
   }
   return parsed * 1000;
-}
-
-function parsePimGroups(specs: string[] | undefined):
-  | {
-      groupId: string;
-      displayName?: string;
-    }[]
-  | undefined {
-  if (!specs?.length) return undefined;
-  return specs.map((spec) => {
-    const colonIdx = spec.indexOf(':');
-    if (colonIdx === -1) return { groupId: spec };
-    return {
-      groupId: spec.slice(0, colonIdx),
-      displayName: spec.slice(colonIdx + 1),
-    };
-  });
 }
 
 /**
@@ -469,67 +407,39 @@ export async function resolveHandoffInstructions(opts: {
   return trimmed;
 }
 
-async function pickProfileInteractively(client: AutopodClient): Promise<string> {
-  if (!process.stdin.isTTY || !process.stdout.isTTY) {
-    throw new Error('Profile is required when stdin is not interactive. Try: ap shell <profile>');
-  }
-
-  const profiles = await withSpinner('Fetching profiles...', () => client.listProfiles());
-  if (profiles.length === 0) {
-    throw new Error('No profiles found. Create one with: ap profile create');
-  }
-
-  const sortedProfiles = [...profiles].sort((a, b) => a.name.localeCompare(b.name));
-  if (sortedProfiles.length === 1) {
-    const profile = sortedProfiles[0];
-    if (!profile) throw new Error('Profile list unexpectedly became empty.');
-    console.log(chalk.dim(`Using only profile: ${profile.name}`));
-    return profile.name;
-  }
-
-  console.log(chalk.bold('Select profile:'));
-  sortedProfiles.forEach((profile, index) => {
-    console.log(
-      `  ${chalk.cyan(String(index + 1).padStart(2, ' '))}. ${formatProfileChoice(profile)}`,
+async function pickRepositoryInteractively(client: AutopodClient): Promise<string> {
+  if (!process.stdin.isTTY || !process.stdout.isTTY)
+    throw new Error(
+      'Repository is required when stdin is not interactive. Try: ap shell <repository>',
     );
-  });
-
+  const repositories = (
+    await withSpinner('Fetching repositories...', () => client.listConfigurations('repository'))
+  )
+    .filter((item) => !item.archived)
+    .sort((a, b) => a.name.localeCompare(b.name));
+  if (!repositories.length)
+    throw new Error('No enrolled repositories. Add one with ap repository create.');
+  if (repositories.length === 1 && repositories[0]) return repositories[0].id;
+  console.log(chalk.bold('Select repository:'));
+  repositories.forEach((item, index) => console.log(`  ${index + 1}. ${item.name} (${item.id})`));
   const rl = createInterface({ input: process.stdin, output: process.stdout });
   try {
     while (true) {
-      const answer = (await rl.question(chalk.cyan('Profile: '))).trim();
-      if (!answer) continue;
-
-      if (/^\d+$/.test(answer)) {
-        const profile = sortedProfiles[Number.parseInt(answer, 10) - 1];
-        if (profile) return profile.name;
-      }
-
-      const exactMatch = sortedProfiles.find((profile) => profile.name === answer);
-      if (exactMatch) return exactMatch.name;
-
-      console.log(
-        chalk.yellow(`Choose 1-${sortedProfiles.length} or enter an exact profile name.`),
-      );
+      const answer = (await rl.question('Repository number or ID: ')).trim();
+      const selected = /^\d+$/.test(answer)
+        ? repositories[Number(answer) - 1]
+        : repositories.find((item) => item.id === answer);
+      if (selected) return selected.id;
+      console.log(chalk.yellow(`Choose 1-${repositories.length} or enter a repository ID.`));
     }
   } finally {
     rl.close();
   }
 }
 
-function formatProfileChoice(profile: PublicProfile): string {
-  const details = [
-    profile.extends ? `extends ${profile.extends}` : profile.template,
-    profile.repoUrl?.replace(/^https?:\/\//, ''),
-  ].filter(Boolean);
-  return details.length
-    ? `${chalk.bold(profile.name)} ${chalk.dim(`(${details.join(', ')})`)}`
-    : chalk.bold(profile.name);
-}
-
 async function createWorkspacePod(
   client: AutopodClient,
-  profile: string,
+  repository: string,
   positionalLabel: string | undefined,
   opts: WorkspaceCreateOptions,
   deps: ResolvedWorkspaceCommandDeps,
@@ -539,22 +449,42 @@ async function createWorkspacePod(
   // unreadable, or oversized file fails fast with an actionable message and
   // never mints a pod. Never logs the body.
   const handoffInstructions = await resolveHandoffInstructions(opts);
-  const pod = await withSpinner('Creating workspace pod...', () =>
-    client.createSession({
-      profileName: profile,
-      task: label,
-      outputMode: 'workspace',
-      branch: opts.branch,
-      // --base-branch → both start point and merge base; --start-branch → start
-      // point only (PR still targets the profile default). Passed straight
-      // through to the same fields worker pods use; the daemon resolves and the
-      // worktree layer fails closed if a requested ref can't be fetched.
-      baseBranch: opts.baseBranch,
-      startBranch: opts.startBranch,
-      handoffInstructions,
-      pimGroups: parsePimGroups(opts.pimGroup),
-    }),
+  const request = await buildLaunchRequest(
+    { ...opts, repo: repository, task: label, intent: 'task' },
+    (kind) => client.listConfigurations(kind),
   );
+  request.work = {
+    branch: opts.branch,
+    baseBranch: opts.baseBranch,
+    startBranch: opts.startBranch,
+    handoffInstructions,
+  };
+  request.overrides = {
+    ...request.overrides,
+    workflow: {
+      agentMode: 'interactive',
+      promotable: true,
+      output: 'branch',
+      completion: 'approval',
+      validationPhases: [],
+      advisoryBrowserQaEnabled: false,
+    },
+  };
+  const effective = await client.resolveLaunch(request);
+  if (opts.preview) {
+    console.log(JSON.stringify(effective, null, 2));
+    return;
+  }
+  const admitted = {
+    ...request,
+    expectedDigest: effective.digest,
+    requestId: opts.requestId ?? randomUUID(),
+  };
+  const receipt = saveLaunchReceipt(admitted);
+  console.error(
+    `Launch request saved: ${receipt}\nRetry with: ap run --config ${JSON.stringify(receipt)}`,
+  );
+  const pod = await withSpinner('Creating workspace pod...', () => client.launchPod(admitted));
 
   printWorkspaceSummary(pod);
 
@@ -562,7 +492,9 @@ async function createWorkspacePod(
     console.log();
     console.log(chalk.dim(`Enter the container:  ap attach ${pod.id.slice(0, 8)}`));
     console.log(
-      chalk.dim(`Hand off to worker:   ap run ${profile} <task> --base-branch ${pod.branch}`),
+      chalk.dim(
+        `Hand off to worker:   ap complete ${pod.id.slice(0, 8)} --pr --instructions "Task"`,
+      ),
     );
     return;
   }

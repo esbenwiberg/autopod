@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import Database from 'better-sqlite3';
 import { describe, expect, it, vi } from 'vitest';
-import { runMigrations } from '../db/migrate.js';
+import { runMigrations, runMigrationsWithBackups } from '../db/migrate.js';
 import type { CreatePrConfig, PrManager } from '../interfaces/pr-manager.js';
 import { createDeliveryLedger } from '../pods/delivery-ledger.js';
 import { createPodRepository } from '../pods/pod-repository.js';
@@ -285,7 +285,7 @@ describe('durable PR delivery boundary', () => {
       let db = new Database(join(dir, 'test.db'));
       try {
         runMigrations(db, dir, logger);
-        runMigrations(db, migrations, logger);
+        await runMigrationsWithBackups(db, migrations, logger);
         const f = fixture(db);
         const intent = f.ledger.reserve(f.config);
         expect(f.ledger.claim(intent)).toBe(true);

@@ -10107,6 +10107,12 @@ describe('PodManager', () => {
       expect(pod.providerAccountIdSnapshot).toBe(accountId);
       expect(pod.providerIdSnapshot).toBe('openai');
 
+      // The admitted account owns runtime refreshes even after the old profile
+      // link is unavailable (as it is after composed configuration cutover).
+      vi.mocked(ctx.profileStore.resolveProviderAccountId).mockImplementation(() => {
+        throw new Error('Legacy profile account lookup is unavailable');
+      });
+
       await manager.processPod(pod.id);
 
       expect(manager.getSession(pod.id).status).toBe('validated');

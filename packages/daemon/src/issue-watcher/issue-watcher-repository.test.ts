@@ -153,7 +153,7 @@ describe('IssueWatcherRepository', () => {
     expect(repo.list({ profileName: 'other' })).toHaveLength(0);
   });
 
-  it('cascading delete when profile is deleted', () => {
+  it('retains issue history when the legacy profile is deleted', () => {
     repo.create({
       profileName: 'test-profile',
       provider: 'github',
@@ -167,6 +167,6 @@ describe('IssueWatcherRepository', () => {
 
     expect(repo.list()).toHaveLength(1);
     db.prepare('DELETE FROM profiles WHERE name = ?').run('test-profile');
-    expect(repo.list()).toHaveLength(0);
+    expect(repo.list()).toHaveLength(1);
   });
 });

@@ -76,6 +76,70 @@ function getTool(name: string): ToolRegistration {
 }
 
 describe('createEscalationMcpServer memory reporting schema', () => {
+  it('offers deployment request and status without any pod approval or execution tool', async () => {
+    const { createEscalationMcpServer } = await import('./server.js');
+    const prepare = vi.fn(async () => ({ id: 'run', state: 'awaiting_approval' }));
+    createEscalationMcpServer({
+      podId: 'pod',
+      bridge: makeBridge({
+        getScopedTools: () => ({ deploymentPrepare: prepare, deploymentStatus: vi.fn() }),
+      }),
+    });
+    const tool = getTool('deployment_request');
+    const input = z
+      .object(tool.schema)
+      .parse({ request: { operationKey: 'once', scriptPath: 'deploy.sh' } });
+    await tool.handler(input);
+    expect(prepare).toHaveBeenCalledExactlyOnceWith({
+      operationKey: 'once',
+      scriptPath: 'deploy.sh',
+      args: [],
+    });
+    expect(() =>
+      z.object(tool.schema).parse({ request: { ...input.request, source: 'pod', approved: true } }),
+    ).toThrow();
+    expect(
+      toolRegistrations
+        .filter((tool) => tool.name.startsWith('deployment_'))
+        .map((tool) => tool.name)
+        .sort(),
+    ).toEqual(['deployment_request', 'deployment_status']);
+  });
+  it('exposes only scoped brokers and rejects delivery mutations in the request schema', async () => {
+    const { createEscalationMcpServer } = await import('./server.js');
+    const read = vi.fn(async () => ({ data: 'logs' }));
+    const mutate = vi.fn(async () => ({ state: 'uncertain' }));
+    const activate = vi.fn(async () => ({ status: 'pending' }));
+    createEscalationMcpServer({
+      podId: 'pod',
+      bridge: makeBridge({
+        getScopedTools: () => ({ githubRead: read, githubMutate: mutate, pimActivate: activate }),
+      }),
+    });
+    const input = z
+      .object(getTool('github_read').schema)
+      .parse({ request: { repositoryId: '1', resource: 'actions.jobLogs', jobId: 2 } });
+    await getTool('github_read').handler(input);
+    expect(read).toHaveBeenCalledWith({ repositoryId: '1', resource: 'actions.jobLogs', jobId: 2 });
+    expect(() =>
+      z.object(getTool('github_mutate').schema).parse({
+        request: { repositoryId: '1', operation: 'prs.merge', operationKey: 'operation' },
+      }),
+    ).toThrow();
+    expect(() =>
+      z
+        .object(getTool('pim_activate_selected').schema)
+        .strict()
+        .parse({ type: 'group', eligibilityId: 'id', requestId: 'request', principalId: 'other' }),
+    ).toThrow();
+    expect(mutate).not.toHaveBeenCalled();
+    expect(activate).not.toHaveBeenCalled();
+  });
+  it('does not expose source credential injection to pod agents', async () => {
+    const { createEscalationMcpServer } = await import('./server.js');
+    createEscalationMcpServer({ podId: 'sess-1', bridge: makeBridge() });
+    expect(toolRegistrations.map((tool) => tool.name)).not.toContain('request_credential');
+  });
   beforeEach(() => {
     toolRegistrations.length = 0;
   });

@@ -28,7 +28,7 @@ public struct ScheduledJobRow: View {
       }
 
       HStack(spacing: 6) {
-        Text(job.profileName)
+        Text(job.launchLabel)
           .font(.caption)
           .foregroundStyle(.secondary)
         Text("·")

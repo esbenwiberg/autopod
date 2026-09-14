@@ -40,6 +40,53 @@ function fixture() {
 const binding = { runtime: 'codex', model: 'model', providerAccountId: 'account' };
 
 describe('task-wide execution accounting', () => {
+  it('counts native aggregate and isolated reviewer usage once across linked pods', () => {
+    const { db, repo } = fixture();
+    try {
+      db.prepare(
+        "UPDATE pods SET launch_config_digest=?, input_tokens=10, output_tokens=5, phase_token_usage=?, token_telemetry_accuracy='complete' WHERE id='root'",
+      ).run('a'.repeat(64), JSON.stringify({ review: { inputTokens: 20, outputTokens: 5 } }));
+      db.prepare(`INSERT INTO isolated_reviewer_runs(id,pod_id,lifecycle_generation,configuration_digest,account_id,runtime,model,execution_target,state,cleanup,input_tokens,output_tokens,created_at,updated_at)
+        VALUES('review','root',0,?,'account','codex','model','local','completed','clean',20,5,'now','now')`).run(
+        'a'.repeat(64),
+      );
+      db.exec(`INSERT INTO pod_goals(pod_id,objective,state,runtime,execution_stopped,native_session_id,last_sequence,observed_tokens,created_at,updated_at)
+        VALUES('root','Objective','achieved','codex',1,'session',2,60,'now','now')`);
+      const usage = repo.taskExecutions?.snapshot('fix');
+      expect(usage).toMatchObject({
+        recordedInputTokens: 30,
+        recordedOutputTokens: 10,
+        recordedUnclassifiedTokens: 60,
+        recordedTotalTokens: 100,
+        budgetCheck: { status: 'exhausted' },
+      });
+      expect(() => repo.taskExecutions?.beginRun('fix', 1, 1, binding)).toThrow(
+        /budget exhausted/i,
+      );
+      // The independent task does not acquire this task's Goal or reviewer usage.
+      expect(repo.taskExecutions?.snapshot('rerun').recordedTotalTokens).toBe(0);
+    } finally {
+      db.close();
+    }
+  });
+
+  it('blocks budgeted continuation when isolated review usage is uncertain', () => {
+    const { db, repo } = fixture();
+    try {
+      db.prepare("UPDATE pods SET launch_config_digest=? WHERE id='root'").run('a'.repeat(64));
+      db.prepare(`INSERT INTO isolated_reviewer_runs(id,pod_id,lifecycle_generation,configuration_digest,account_id,runtime,model,execution_target,state,cleanup,created_at,updated_at)
+        VALUES('review','root',0,?,'account','codex','model','local','uncertain','clean','now','now')`).run(
+        'a'.repeat(64),
+      );
+      expect(repo.taskExecutions?.snapshot('fix').budgetCheck?.status).toBe('unavailable');
+      expect(() => repo.taskExecutions?.beginRun('fix', 1, 1, binding)).toThrow(
+        /accounting incomplete/i,
+      );
+    } finally {
+      db.close();
+    }
+  });
+
   it('records immutable container ownership instead of inferring it from the current pod', () => {
     const { db, repo } = fixture();
     try {

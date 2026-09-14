@@ -1,11 +1,11 @@
 import type {
   ModelProvider,
-  Profile,
   ProviderAccount,
   ProviderCredentials,
   PublicProviderCatalog,
 } from '@autopod/shared';
 import { AutopodError, PROVIDER_CATALOG } from '@autopod/shared';
+import type { PodExecutionSettings } from '../interfaces/pod-execution-settings.js';
 import type { ProfileStore } from '../profiles/index.js';
 import type { ProviderAccountStore } from '../provider-accounts/index.js';
 
@@ -25,7 +25,7 @@ export function credentialOwnerKey(owner: CredentialOwner): string {
 }
 
 export function resolveProviderAuth(
-  profile: Profile,
+  profile: PodExecutionSettings,
   options: {
     profileStore?: ProfileStore;
     providerAccountStore?: ProviderAccountStore;

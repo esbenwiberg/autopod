@@ -4,12 +4,12 @@ import {
   DEFAULT_CONTAINER_MEMORY_GB,
   type ExecutionProvenanceInput,
   type Pod,
-  type Profile,
 } from '@autopod/shared';
 import type {
   ContainerExecutionMetadata,
   ContainerManager,
 } from '../interfaces/container-manager.js';
+import type { PodExecutionSettings } from '../interfaces/pod-execution-settings.js';
 import { daemonRelease } from '../release.js';
 import { verifyAgentCli } from '../runtimes/agent-cli-preflight.js';
 import { inspectRequiredCommands } from './required-command-preflight.js';
@@ -19,7 +19,7 @@ export async function inspectExecutionPreflight(
   cm: ContainerManager,
   containerId: string,
   pod: Pod,
-  profile: Profile,
+  profile: PodExecutionSettings,
   purpose: NonNullable<ExecutionProvenanceInput['purpose']> = 'coding',
   subject: NonNullable<ExecutionProvenanceInput['subject']> = 'worker',
 ): Promise<ExecutionProvenanceInput> {

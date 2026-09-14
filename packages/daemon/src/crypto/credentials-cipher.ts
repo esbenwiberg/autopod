@@ -1,5 +1,13 @@
 import { createCipheriv, createDecipheriv, randomBytes } from 'node:crypto';
-import { mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
+import {
+  closeSync,
+  fstatSync,
+  mkdirSync,
+  openSync,
+  readFileSync,
+  statSync,
+  writeFileSync,
+} from 'node:fs';
 import { dirname } from 'node:path';
 
 const ALGORITHM = 'aes-256-gcm';
@@ -9,6 +17,21 @@ const IV_LENGTH = 12; // 96 bits — recommended for GCM
 export interface CredentialsCipher {
   encrypt(plaintext: string): string;
   decrypt(ciphertext: string): string;
+}
+
+/** Conversion must use the original key. It must never silently create a replacement. */
+export function loadExistingKey(keyPath: string): CredentialsCipher {
+  const fd = openSync(keyPath, 'r');
+  try {
+    const stat = fstatSync(fd);
+    if (!stat.isFile() || (stat.mode & 0o777) !== 0o600)
+      throw new Error('Existing secrets key must be a regular file with permissions 0600');
+    const key = readFileSync(fd);
+    if (key.length !== KEY_LENGTH) throw new Error('Existing secrets key must contain 32 bytes');
+    return createCipher(key);
+  } finally {
+    closeSync(fd);
+  }
 }
 
 /**

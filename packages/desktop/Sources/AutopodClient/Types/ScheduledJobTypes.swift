@@ -91,7 +91,8 @@ public struct UpdateScheduledJobTemplateRequest: Codable, Sendable {
 public struct CreateScheduledJobRequest: Codable, Sendable {
   public let templateId: String?
   public let name: String?
-  public let profileName: String
+  public let profileName: String?
+  public let launch: [String: ConfigurationJSON]?
   public let task: String?
   public let fieldValues: [String: String]?
   public let cronExpression: String
@@ -100,7 +101,8 @@ public struct CreateScheduledJobRequest: Codable, Sendable {
   public init(
     templateId: String? = nil,
     name: String? = nil,
-    profileName: String,
+    profileName: String? = nil,
+    launch: [String: ConfigurationJSON]? = nil,
     task: String? = nil,
     fieldValues: [String: String]? = nil,
     cronExpression: String,
@@ -109,6 +111,7 @@ public struct CreateScheduledJobRequest: Codable, Sendable {
     self.templateId = templateId
     self.name = name
     self.profileName = profileName
+    self.launch = launch
     self.task = task
     self.fieldValues = fieldValues
     self.cronExpression = cronExpression
@@ -124,6 +127,7 @@ public struct UpdateScheduledJobRequest: Codable, Sendable {
   public let task: String?
   public let fieldValues: [String: String]?
   public let profileName: String?
+  public let launch: [String: ConfigurationJSON]?
   public let cronExpression: String?
   public let scan: ScheduledScanPolicy?
   public let enabled: Bool?
@@ -134,6 +138,7 @@ public struct UpdateScheduledJobRequest: Codable, Sendable {
     task: String? = nil,
     fieldValues: [String: String]? = nil,
     profileName: String? = nil,
+    launch: [String: ConfigurationJSON]? = nil,
     cronExpression: String? = nil,
     enabled: Bool? = nil,
     scan: ScheduledScanPolicy? = nil
@@ -143,6 +148,7 @@ public struct UpdateScheduledJobRequest: Codable, Sendable {
     self.task = task
     self.fieldValues = fieldValues
     self.profileName = profileName
+    self.launch = launch
     self.cronExpression = cronExpression
     self.enabled = enabled
     self.scan = scan
@@ -156,7 +162,8 @@ public struct ScheduledJob: Codable, Identifiable, Sendable, Hashable {
   public let name: String
   public let templateId: String
   public let templateName: String
-  public let profileName: String
+  public let profileName: String?
+  public let launch: [String: ConfigurationJSON]?
   public let task: String
   public let fieldValues: [String: String]
   public let cronExpression: String
@@ -175,7 +182,8 @@ public struct ScheduledJob: Codable, Identifiable, Sendable, Hashable {
     name: String,
     templateId: String,
     templateName: String,
-    profileName: String,
+    profileName: String? = nil,
+    launch: [String: ConfigurationJSON]? = nil,
     task: String,
     fieldValues: [String: String] = [:],
     cronExpression: String,
@@ -194,6 +202,7 @@ public struct ScheduledJob: Codable, Identifiable, Sendable, Hashable {
     self.templateId = templateId
     self.templateName = templateName
     self.profileName = profileName
+    self.launch = launch
     self.task = task
     self.fieldValues = fieldValues
     self.cronExpression = cronExpression
@@ -208,8 +217,13 @@ public struct ScheduledJob: Codable, Identifiable, Sendable, Hashable {
     self.lastReportId = lastReportId
   }
 
+  public var launchLabel: String {
+    if let launch { return launch["repositoryId"]?.string ?? "Empty workspace" }
+    return profileName ?? "Configuration required"
+  }
+
   private enum CodingKeys: String, CodingKey {
-    case id, name, templateId, templateName, profileName, task, fieldValues, cronExpression
+    case id, name, templateId, templateName, profileName, launch, task, fieldValues, cronExpression
     case scan, lastReportId
     case enabled, nextRunAt, lastRunAt, lastPodId, catchupPending, createdAt, updatedAt
   }
@@ -220,7 +234,8 @@ public struct ScheduledJob: Codable, Identifiable, Sendable, Hashable {
     name = try c.decode(String.self, forKey: .name)
     templateId = try c.decode(String.self, forKey: .templateId)
     templateName = try c.decode(String.self, forKey: .templateName)
-    profileName = try c.decode(String.self, forKey: .profileName)
+    profileName = try c.decodeIfPresent(String.self, forKey: .profileName)
+    launch = try c.decodeIfPresent([String: ConfigurationJSON].self, forKey: .launch)
     task = try c.decode(String.self, forKey: .task)
     fieldValues = try c.decodeIfPresent([String: String].self, forKey: .fieldValues) ?? [:]
     cronExpression = try c.decode(String.self, forKey: .cronExpression)

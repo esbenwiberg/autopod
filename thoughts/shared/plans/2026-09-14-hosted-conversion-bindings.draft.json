@@ -1,0 +1,274 @@
+{
+  "accountByProfile": {
+    "contextand-ctx": "anth-pro",
+    "guardian": "anth-pro",
+    "just-my-tools": "anth-pro",
+    "redteam-escape": "anth-pro",
+    "repofit": "anth-pro",
+    "teamplanner-pipelines": "anth-pro"
+  },
+  "accountFailover": {
+    "anth-ent": null,
+    "anth-pro": null,
+    "openai-private": null
+  },
+  "remoteByProfile": {
+    "teamplanner-pipelines": "https://dev.azure.com/365projectum/TeamPlanner%20-%20V3/_git/teamplanner-pipelines"
+  },
+  "codeIntelligenceVersions": {
+    "serena": "1.7.0",
+    "roslynCodeLens": "2.18.0"
+  },
+  "githubAccessByProfile": {
+    "autoreeve": {
+      "rules": [
+        {
+          "id": "current-repository",
+          "repositories": { "mode": "current" },
+          "operations": [
+            "issues.read",
+            "issues.create",
+            "issues.edit",
+            "issues.close",
+            "issues.labels",
+            "issues.comment",
+            "prs.read",
+            "prs.comment"
+          ],
+          "workflows": { "mode": "selected", "files": [] },
+          "branches": { "mode": "selected", "names": ["main"] }
+        }
+      ]
+    },
+    "dataverse-harness": {
+      "rules": [
+        {
+          "id": "current-repository",
+          "repositories": { "mode": "current" },
+          "operations": [
+            "issues.read",
+            "issues.create",
+            "issues.edit",
+            "issues.close",
+            "issues.labels",
+            "issues.comment",
+            "prs.read",
+            "prs.comment"
+          ],
+          "workflows": { "mode": "selected", "files": [] },
+          "branches": { "mode": "selected", "names": ["main"] }
+        }
+      ]
+    },
+    "load-balancer": {
+      "rules": [
+        {
+          "id": "current-repository",
+          "repositories": { "mode": "current" },
+          "operations": [
+            "issues.read",
+            "issues.create",
+            "issues.edit",
+            "issues.close",
+            "issues.labels",
+            "issues.comment",
+            "prs.read",
+            "prs.comment"
+          ],
+          "workflows": { "mode": "selected", "files": [] },
+          "branches": { "mode": "selected", "names": ["main"] }
+        }
+      ]
+    },
+    "luumi": {
+      "rules": [
+        {
+          "id": "current-repository",
+          "repositories": { "mode": "current" },
+          "operations": [
+            "issues.read",
+            "issues.create",
+            "issues.edit",
+            "issues.close",
+            "issues.labels",
+            "issues.comment",
+            "prs.read",
+            "prs.comment"
+          ],
+          "workflows": { "mode": "selected", "files": [] },
+          "branches": { "mode": "selected", "names": ["main"] }
+        }
+      ]
+    },
+    "mint": {
+      "rules": [
+        {
+          "id": "current-repository",
+          "repositories": { "mode": "current" },
+          "operations": [
+            "issues.read",
+            "issues.create",
+            "issues.edit",
+            "issues.close",
+            "issues.labels",
+            "issues.comment",
+            "prs.read",
+            "prs.comment"
+          ],
+          "workflows": { "mode": "selected", "files": [] },
+          "branches": { "mode": "selected", "names": ["main"] }
+        }
+      ]
+    },
+    "portfolio-simulation-github": {
+      "rules": [
+        {
+          "id": "current-repository",
+          "repositories": { "mode": "current" },
+          "operations": [
+            "code.read",
+            "issues.read",
+            "issues.create",
+            "issues.edit",
+            "issues.close",
+            "issues.labels",
+            "issues.comment",
+            "prs.read",
+            "prs.comment"
+          ],
+          "workflows": { "mode": "selected", "files": [] },
+          "branches": { "mode": "selected", "names": ["main"] }
+        }
+      ]
+    },
+    "portfolio-simulation-teamplanner-connector": {
+      "rules": [
+        {
+          "id": "current-repository",
+          "repositories": { "mode": "current" },
+          "operations": [
+            "issues.read",
+            "issues.create",
+            "issues.edit",
+            "issues.close",
+            "issues.labels",
+            "issues.comment",
+            "prs.read",
+            "prs.comment"
+          ],
+          "workflows": { "mode": "selected", "files": [] },
+          "branches": { "mode": "selected", "names": ["main"] }
+        }
+      ]
+    },
+    "repofit": {
+      "rules": [
+        {
+          "id": "current-repository",
+          "repositories": { "mode": "current" },
+          "operations": [
+            "issues.read",
+            "issues.create",
+            "issues.edit",
+            "issues.close",
+            "issues.labels",
+            "issues.comment",
+            "prs.read",
+            "prs.comment"
+          ],
+          "workflows": { "mode": "selected", "files": [] },
+          "branches": { "mode": "selected", "names": ["main"] }
+        }
+      ]
+    }
+  },
+  "serviceAccessByProfile": {
+    "contextand-ctx": [],
+    "teamplanner-logs": [
+      {
+        "id": "teamplanner-production-logs",
+        "service": "azure-logs",
+        "workspaceId": "42e48009-9e8f-4046-ae42-cb62b20d0909",
+        "tables": ["AppTraces", "AppExceptions", "AppRequests"]
+      }
+    ],
+    "teamplanner-agent": [
+      {
+        "id": "teamplanner-pipelines-code",
+        "service": "ado",
+        "organization": "365projectum",
+        "project": "TeamPlanner - V3",
+        "repository": "teamplanner-pipelines",
+        "operations": ["code.file", "code.search"]
+      },
+      {
+        "id": "product-suite-pipelines-code",
+        "service": "ado",
+        "organization": "365projectum",
+        "project": "Product Suite Manager",
+        "repository": "pipelines",
+        "operations": ["code.file", "code.search"]
+      }
+    ],
+    "teamplanner-pr-read": [
+      {
+        "id": "teamplanner-prs",
+        "service": "ado",
+        "organization": "365projectum",
+        "project": "TeamPlanner - V3",
+        "repository": "TeamPlanner",
+        "operations": ["pr.read", "pr.threads", "pr.changes"]
+      }
+    ],
+    "teamplanner-workspace": [
+      {
+        "id": "teamplanner-workspace",
+        "service": "ado",
+        "organization": "365projectum",
+        "project": "TeamPlanner - V3",
+        "repository": "TeamPlanner",
+        "operations": [
+          "code.file",
+          "code.search",
+          "pr.read",
+          "pr.threads",
+          "pr.changes",
+          "workitem.read",
+          "workitem.search"
+        ]
+      }
+    ]
+  },
+  "pimByProfile": {
+    "teamplanner-logs": [
+      {
+        "type": "azure-role",
+        "tenantId": "0d3aa8f9-8168-4bc2-bda1-c3972e6d9352",
+        "principalId": "cef0aeed-b5d3-442e-b5d7-85e0526bd5e7",
+        "eligibilityId": "29b0315f-baca-4873-9c31-9bf7bd226ad2",
+        "roleId": "73c42c96-874c-492b-b04d-ab87d138a893",
+        "scope": "/subscriptions/4a39f368-f3f1-40e4-9b7d-b531238d11e1/resourceGroups/DG-ProjectumTeamplanner-Prod",
+        "displayName": "Log Analytics Reader — DG-ProjectumTeamplanner-Prod",
+        "timing": "when-needed",
+        "duration": "PT1H",
+        "justification": "Read TeamPlanner production logs for the selected AutoPod task"
+      }
+    ]
+  },
+  "deploymentByProfile": {
+    "guardian-deploy": {
+      "source": "published-default",
+      "targetId": "pr-guardian-production",
+      "allowedScripts": ["infra/azure/acr-deploy.sh"]
+    }
+  },
+  "profileReplacementByProfile": {
+    "guardian-deploy": "guardian"
+  },
+  "usualProfileByRemote": {
+    "https://github.com/esbenwiberg/autopod": "autopod-self",
+    "https://github.com/esbenwiberg/pr-guardian": "guardian",
+    "https://github.com/context-and/portfolio-simulation": "portfolio-simulation",
+    "https://dev.azure.com/365projectum/TeamPlanner%20-%20V3/_git/TeamPlanner": "teamplanner-base"
+  }
+}

@@ -1,12 +1,18 @@
 import type { ScheduledJob, ScheduledJobTemplateField } from '@autopod/shared';
-import { AutopodError, scheduledScanPolicySchema } from '@autopod/shared';
+import {
+  AutopodError,
+  savedLaunchSelectionSchema,
+  scheduledScanPolicySchema,
+} from '@autopod/shared';
 import type Database from 'better-sqlite3';
 import { renderScheduledJobPrompt } from './scheduled-job-renderer.js';
 
 export interface ScheduledJobInsert {
   id: string;
   templateId: string;
-  profileName: string;
+  profileName: string | null;
+  launch?: ScheduledJob['launch'];
+  ownerUserId?: string | null;
   cronExpression: string;
   enabled: boolean;
   nextRunAt: string;
@@ -20,6 +26,8 @@ export interface ScheduledJobInsert {
 }
 
 export interface ScheduledJobRepository {
+  /** Templates and their schedule binding share this database transaction. */
+  atomically?<T>(work: () => T): T;
   insert(job: ScheduledJobInsert): ScheduledJob;
   getOrThrow(id: string): ScheduledJob;
   list(): ScheduledJob[];
@@ -54,7 +62,11 @@ function mapRow(row: Record<string, unknown>): ScheduledJob {
     name: templateName,
     templateId: row.template_id as string,
     templateName,
-    profileName: row.profile_name as string,
+    profileName: (row.profile_name as string) ?? null,
+    launch: row.launch_selection
+      ? savedLaunchSelectionSchema.parse(JSON.parse(row.launch_selection as string))
+      : null,
+    ownerUserId: (row.owner_user_id as string) ?? null,
     task,
     fieldValues,
     scan: row.scan_policy
@@ -91,6 +103,29 @@ function parseJsonArray(value: unknown): ScheduledJobTemplateField[] {
   }
 }
 
+function assertBinding(
+  job: Pick<ScheduledJobInsert, 'profileName' | 'launch' | 'ownerUserId' | 'scan'>,
+) {
+  if (!!job.profileName === !!job.launch)
+    throw new AutopodError(
+      'Select exactly one launch configuration',
+      'SCHEDULE_LAUNCH_REQUIRED',
+      400,
+    );
+  if (job.launch && !job.ownerUserId)
+    throw new AutopodError(
+      'Scheduled launch requires its authenticated owner',
+      'SCHEDULE_OWNER_REQUIRED',
+      400,
+    );
+  if (job.launch && job.scan && !('repositoryId' in job.launch))
+    throw new AutopodError(
+      'A scan requires an enrolled repository',
+      'SCAN_CONFIGURATION_UNAVAILABLE',
+      409,
+    );
+}
+
 function parseStringRecord(value: unknown): Record<string, string> {
   if (typeof value !== 'string') return {};
   try {
@@ -118,20 +153,26 @@ export function createScheduledJobRepository(db: Database.Database): ScheduledJo
   `;
 
   return {
+    atomically<T>(work: () => T): T {
+      return db.transaction(work)();
+    },
     insert(job: ScheduledJobInsert): ScheduledJob {
+      assertBinding(job);
       db.prepare(`
         INSERT INTO scheduled_jobs (
           id, name, template_id, profile_name, task, cron_expression, enabled,
-          next_run_at, last_run_at, last_pod_id, catchup_pending, field_values, scan_policy
+          next_run_at, last_run_at, last_pod_id, catchup_pending, field_values, scan_policy, launch_selection, owner_user_id
         ) VALUES (
           @id, @name, @templateId, @profileName, @task, @cronExpression, @enabled,
-          @nextRunAt, @lastRunAt, @lastPodId, @catchupPending, @fieldValues, @scanPolicy
+          @nextRunAt, @lastRunAt, @lastPodId, @catchupPending, @fieldValues, @scanPolicy, @launch, @ownerUserId
         )
       `).run({
         id: job.id,
         name: job.name,
         templateId: job.templateId,
         profileName: job.profileName,
+        launch: job.launch ? JSON.stringify(savedLaunchSelectionSchema.parse(job.launch)) : null,
+        ownerUserId: job.ownerUserId ?? null,
         task: job.task,
         cronExpression: job.cronExpression,
         enabled: job.enabled ? 1 : 0,
@@ -165,7 +206,8 @@ export function createScheduledJobRepository(db: Database.Database): ScheduledJo
 
     update(id: string, changes: Partial<ScheduledJob>): ScheduledJob {
       // Ensure job exists
-      this.getOrThrow(id);
+      const previous = this.getOrThrow(id);
+      assertBinding({ ...previous, ...changes });
 
       const setClauses: string[] = ["updated_at = datetime('now')"];
       const params: Record<string, unknown> = { id };
@@ -191,6 +233,16 @@ export function createScheduledJobRepository(db: Database.Database): ScheduledJo
       if (changes.profileName !== undefined) {
         setClauses.push('profile_name = @profileName');
         params.profileName = changes.profileName;
+      }
+      if (changes.launch !== undefined) {
+        setClauses.push('launch_selection = @launch');
+        params.launch = changes.launch
+          ? JSON.stringify(savedLaunchSelectionSchema.parse(changes.launch))
+          : null;
+      }
+      if (changes.ownerUserId !== undefined) {
+        setClauses.push('owner_user_id = @ownerUserId');
+        params.ownerUserId = changes.ownerUserId;
       }
       if (changes.task !== undefined) {
         setClauses.push('task = @task');

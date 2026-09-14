@@ -6,6 +6,7 @@ import type { EscalationRepository } from '../pods/escalation-repository.js';
 import type { EventRepository } from '../pods/event-repository.js';
 import { computePodDiff, computePodUntrackedPreview } from '../pods/pod-diff-fetcher.js';
 import type { ContainerManagerFactory, PodManager } from '../pods/pod-manager.js';
+import { podSourceContext } from '../pods/pod-source-context.js';
 import type { ProviderAttemptRepository } from '../pods/provider-attempt-repository.js';
 import type { ProfileStore } from '../profiles/index.js';
 import { buildPodsitterEvidence, podsitterAttentionSignature } from './evidence-builder.js';
@@ -121,13 +122,9 @@ export function createDaemonPodsitterEvidenceProvider(deps: {
   }
 
   async function readDiff(pod: Pod, cycle: EvidenceCycle): Promise<DiffEvidence> {
-    const profile = (() => {
-      try {
-        return deps.profileStore.get(pod.profileName);
-      } catch {
-        return null;
-      }
-    })();
+    const profile = podSourceContext(pod, deps.podManager.getLaunchConfiguration, (name) =>
+      deps.profileStore.get(name),
+    );
     const defaultBranch = pod.baseBranch ?? profile?.defaultBranch ?? 'main';
     const cacheKey = diffCacheKey(pod, defaultBranch);
     const cached = diffCache.get(pod.id);

@@ -1,11 +1,16 @@
-import type { Profile } from '@autopod/shared';
+import type { EnvironmentPreset, Profile, ResolvedEnvironment } from '@autopod/shared';
 import type Dockerode from 'dockerode';
 import pino from 'pino';
 import { pack as tarPack } from 'tar-stream';
+import { configurationDigest } from '../configuration/configuration-digest.js';
+import { boundedDockerCall } from '../containers/docker-bounds.js';
 import { buildNuGetCredentialEnv } from '../pods/registry-injector.js';
 import type { ProfileStore } from '../profiles/index.js';
 import type { AcrClient } from './acr-client.js';
 import { generateDockerfile, getConfiguredBaseImage } from './dockerfile-generator.js';
+import { generateEnvironmentDockerfile } from './environment-dockerfile.js';
+import { type EnvironmentBuildInputs, environmentImageKey } from './environment-image-key.js';
+import { softwareToolInstallCommands } from './software-tools.js';
 
 const logger = pino({ name: 'autopod' }).child({ component: 'image-builder' });
 
@@ -39,6 +44,44 @@ export class ImageBuilder {
     this.docker = deps.docker;
     this.acr = deps.acr;
     this.profileStore = deps.profileStore;
+  }
+
+  /** Read-only preview: resolves the base identity without pulling, building or publishing. */
+  async resolveEnvironment(
+    environment: EnvironmentPreset,
+    target: 'local' | 'sandbox',
+  ): Promise<ResolvedEnvironment> {
+    const base = environment.baseImage ?? getConfiguredBaseImage(environment.template);
+    let pinnedBase: string;
+    let platform: ResolvedEnvironment['platform'];
+    if (target === 'sandbox') {
+      if (!this.acr) throw new Error('Hosted environment images require the configured registry');
+      const qualified = this.acr.resolveTag(base);
+      const digest = qualified.includes('@sha256:')
+        ? qualified.slice(qualified.lastIndexOf('@') + 1)
+        : await boundedDockerCall(this.acr.resolveDigest(qualified), {
+            label: 'environment-registry-inspect',
+            timeoutMs: 15_000,
+          });
+      const repository = qualified.split('@')[0] ?? '';
+      const tagSeparator = repository.lastIndexOf(':');
+      pinnedBase = `${tagSeparator > repository.lastIndexOf('/') ? repository.slice(0, tagSeparator) : repository}@${digest}`;
+      platform = 'linux/amd64';
+    } else {
+      const info = await boundedDockerCall(this.docker.getImage(base).inspect(), {
+        label: 'environment-base-inspect',
+        timeoutMs: 5_000,
+      });
+      if (info.Os !== 'linux' || !['amd64', 'arm64'].includes(info.Architecture))
+        throw new Error('The environment base must be a supported Linux image');
+      pinnedBase = info.Id;
+      platform = `linux/${info.Architecture}` as ResolvedEnvironment['platform'];
+    }
+    const toolInstallCommands = softwareToolInstallCommands(environment.tools);
+    // Agent binaries and bundled extensions are part of the immutable base layer.
+    const agentToolingDigest = configurationDigest({ pinnedBase, toolInstallCommands });
+    const binding = { pinnedBase, platform, toolInstallCommands, agentToolingDigest };
+    return { ...binding, imageKey: environmentImageKey({ environment, ...binding }) };
   }
 
   /** Build a warm image for a profile and push it to ACR. */
@@ -130,6 +173,53 @@ export class ImageBuilder {
     );
 
     return { tag: publishedTag, digest, size, buildDuration };
+  }
+
+  /** Build reusable software without reading or updating any repository/profile. */
+  async buildEnvironmentImage(
+    inputs: EnvironmentBuildInputs,
+    options: { publish?: boolean } = {},
+  ): Promise<ImageBuildResult> {
+    if (options.publish && !this.acr) throw new Error('Environment image publication needs ACR');
+    const key = environmentImageKey(inputs);
+    const localTag = `autopod/environment:${key}`;
+    const started = Date.now();
+    let cached = false;
+    try {
+      const info = await this.docker.getImage(localTag).inspect();
+      cached = info.Config?.Labels?.['com.autopod.environment-key'] === key;
+    } catch (error) {
+      if ((error as { statusCode?: number }).statusCode !== 404) throw error;
+    }
+    if (!cached) {
+      await this.buildFromDockerfile(
+        generateEnvironmentDockerfile(inputs),
+        localTag,
+        {},
+        {
+          platform: inputs.platform,
+        },
+      );
+    }
+    const info = await this.docker.getImage(localTag).inspect();
+    if (info.Config?.Labels?.['com.autopod.environment-key'] !== key) {
+      throw new Error('Built environment image identity does not match its build inputs');
+    }
+    const published = options.publish && this.acr ? await this.acr.push(localTag) : null;
+    const digest = published ?? info.Id;
+    if (!/^sha256:[a-f0-9]{64}$/.test(digest)) {
+      throw new Error('Environment image did not resolve to an immutable digest');
+    }
+    const registryTag = this.acr?.resolveTag(localTag);
+    return {
+      tag:
+        published && registryTag
+          ? `${registryTag.slice(0, registryTag.lastIndexOf(':'))}@${digest}`
+          : digest,
+      digest,
+      size: info.Size ?? 0,
+      buildDuration: (Date.now() - started) / 1000,
+    };
   }
 
   private async resolveBaseImage(profile: Profile): Promise<string | undefined> {

@@ -1,6 +1,9 @@
 import { PassThrough } from 'node:stream';
 import type { PodBridge } from '@autopod/escalation-mcp';
+import type { EffectiveLaunchConfig } from '@autopod/shared';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { resolveLaunch } from '../configuration/launch-resolver.js';
+import { createTestConfiguration } from '../test-utils/configuration-helpers.js';
 import { createTestDb, insertTestProfile, logger } from '../test-utils/mock-helpers.js';
 import { type SessionBridgeDependencies, createSessionBridge } from './pod-bridge-impl.js';
 
@@ -29,6 +32,7 @@ const mockCreateProfileAnthropicClient = vi.mocked(createProfileAnthropicClient)
 type Deps = SessionBridgeDependencies;
 
 interface BuildOpts {
+  launch?: EffectiveLaunchConfig;
   profileOverrides?: Parameters<typeof insertTestProfile>[1];
   containerId?: string | null;
   containerStatus?: 'running' | 'stopped' | 'deleted' | 'unknown';
@@ -47,6 +51,7 @@ function buildBridge(opts: BuildOpts = {}): {
   podId: string;
   eventEmit: ReturnType<typeof vi.fn>;
   touchHeartbeat: ReturnType<typeof vi.fn>;
+  profileRead: Deps['profileStore']['get'];
 } {
   const db = createTestDb();
   const podId = 'sess-1';
@@ -85,10 +90,13 @@ function buildBridge(opts: BuildOpts = {}): {
     getSession: vi.fn(() => ({
       id: podId,
       profileName: 'proj',
+      launchConfigDigest: opts.launch?.digest,
       containerId,
       executionTarget: opts.executionTarget ?? 'local',
     })),
     touchHeartbeat,
+    getLaunchConfiguration: vi.fn(() => opts.launch ?? null),
+    getValidationEnvironment: vi.fn(async () => ({ SCOPED_VALUE: 'selected' })),
     getReviewerConfig: vi.fn().mockReturnValue({
       profile: reviewerProfile,
       credentials: reviewerProfile.providerCredentials ?? null,
@@ -134,7 +142,7 @@ function buildBridge(opts: BuildOpts = {}): {
     logger,
   });
 
-  return { bridge, execMock, podId, eventEmit, touchHeartbeat };
+  return { bridge, execMock, podId, eventEmit, touchHeartbeat, profileRead: profileStore.get };
 }
 
 function validationActivityMessages(eventEmit: ReturnType<typeof vi.fn>): string[] {
@@ -152,6 +160,34 @@ function validationActivityMessages(eventEmit: ReturnType<typeof vi.fn>): string
 }
 
 describe('PodBridge.runValidationPhase', () => {
+  it('uses frozen workflow/setup and scoped validation credentials without a legacy profile read', async () => {
+    const db = createTestDb();
+    try {
+      const { services } = createTestConfiguration(db);
+      const launch = await resolveLaunch({ repositoryId: 'repo-a', task: 'Check' }, services);
+      const { bridge, execMock, podId, profileRead } = buildBridge({
+        launch,
+        profileOverrides: { buildCommand: 'wrong-live-command' },
+      });
+      vi.mocked(profileRead)
+        .mockClear()
+        .mockImplementation(() => {
+          throw new Error('Legacy profile read');
+        });
+      expect(bridge.getMaxAiCalls(podId)).toBe(launch.workflow.escalation?.askAi.maxCalls ?? 5);
+      const result = await bridge.runValidationPhase(podId, 'build');
+      expect(result.command).toBe('npm run build');
+      expect(result.passed).toBe(true);
+      expect(execMock).toHaveBeenCalledWith(
+        'container-abc',
+        ['sh', '-c', 'npm run build'],
+        expect.objectContaining({ env: { SCOPED_VALUE: 'selected' } }),
+      );
+      expect(profileRead).not.toHaveBeenCalled();
+    } finally {
+      db.close();
+    }
+  });
   it('returns configured=false when the profile has no command for the phase', async () => {
     const { bridge, execMock, podId } = buildBridge({
       profileOverrides: { lintCommand: null },

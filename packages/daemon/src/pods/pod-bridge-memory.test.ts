@@ -10,7 +10,14 @@ import {
   createSessionBridge,
 } from './pod-bridge-impl.js';
 
-type StubSession = { id: string; profileName: string; status?: PodStatus };
+type StubSession = {
+  id: string;
+  profileName: string;
+  status?: PodStatus;
+  launchConfigDigest?: string;
+  repositoryId?: string;
+  setupId?: string;
+};
 type Deps = SessionBridgeDependencies;
 
 function buildBridgeWithMemory(pods: StubSession[]): {
@@ -37,6 +44,11 @@ function buildBridgeWithMemory(pods: StubSession[]): {
   }
 
   const podManager = {
+    getProjectMemoryScope: (pod: StubSession) => ({
+      scope: 'repository',
+      id: pod.repositoryId,
+      setupId: pod.setupId,
+    }),
     getSession: vi.fn((id: string) => {
       const pod = pods.find((s) => s.id === id);
       if (!pod) throw new Error(`unknown pod: ${id}`);
@@ -140,6 +152,55 @@ function markSelected(
 }
 
 describe('pod bridge — memory scope enforcement (F2a)', () => {
+  it('keeps setup-affine memory bounded across list, search, direct reads and suggestions', () => {
+    const { bridge, memoryRepo } = buildBridgeWithMemory([
+      {
+        id: 'p',
+        profileName: 'shared',
+        launchConfigDigest: 'frozen',
+        repositoryId: 'repo',
+        setupId: 'web',
+      },
+    ]);
+    insertApprovedMemory(memoryRepo, 'base');
+    const template = memoryRepo.getOrThrow('base');
+    for (const [id, setup] of [
+      ['web', 'web'],
+      ['api', 'api'],
+      ['general', null],
+    ] as const)
+      memoryRepo.insert({
+        ...template,
+        id,
+        scope: 'repository',
+        scopeId: 'repo',
+        repositorySetupId: setup,
+        path: `/${id}.md`,
+        content: 'Searchable convention',
+      });
+    expect(
+      bridge
+        .listMemories('p', 'repository')
+        .map((entry) => entry.id)
+        .sort(),
+    ).toEqual(['general', 'web']);
+    expect(
+      bridge
+        .searchMemories('p', 'repository', 'Searchable')
+        .map((entry) => entry.id)
+        .sort(),
+    ).toEqual(['general', 'web']);
+    expect(bridge.readMemory('p', 'web').repositorySetupId).toBe('web');
+    expect(() => bridge.readMemory('p', 'api')).toThrow('not readable');
+    const suggested = bridge.suggestMemory(
+      'p',
+      'repository',
+      '/next.md',
+      'Use the web setup',
+      'Helps future web setup work',
+    );
+    expect(memoryRepo.getOrThrow(suggested).repositorySetupId).toBe('web');
+  });
   beforeEach(() => {
     __resetSuggestBudgetForTests();
   });

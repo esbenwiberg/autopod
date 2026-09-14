@@ -51,7 +51,7 @@ public struct SessionCostCard: View {
                     Text("Current provider status unverified.").font(.caption).foregroundStyle(.secondary)
                     Text("Stored task cost subtotal: \(formatCost(task.recordedCostUsd)) · \(task.telemetry) telemetry")
                     CostEvidenceView(evidence: task.costEvidence)
-                    Text("Task tokens: \(task.recordedInputTokens + task.recordedOutputTokens) / \(task.tokenBudget.map(String.init) ?? "no configured limit")")
+                    Text("Task tokens: \(task.totalRecordedTokens) / \(task.tokenBudget.map(String.init) ?? "no configured limit")")
                     Text(task.budgetCheck?.reason ?? "Task budget admission evidence unavailable.")
                     ForEach(task.diagnostics, id: \.self) { Text($0).font(.caption).foregroundStyle(.secondary) }
                 }

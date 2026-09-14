@@ -24,6 +24,7 @@ export class CodexReviewError extends Error {
   readonly kind: CodexReviewErrorKind;
   readonly exitCode: number | null;
   readonly stderr: string;
+  readonly tokenUsage?: CodexReviewTokenUsage;
 
   constructor(fields: {
     kind: CodexReviewErrorKind;
@@ -31,12 +32,14 @@ export class CodexReviewError extends Error {
     exitCode?: number | null;
     stderr?: string;
     cause?: unknown;
+    tokenUsage?: CodexReviewTokenUsage;
   }) {
     super(fields.message, { cause: fields.cause });
     this.name = 'CodexReviewError';
     this.kind = fields.kind;
     this.exitCode = fields.exitCode ?? null;
     this.stderr = fields.stderr ?? '';
+    this.tokenUsage = fields.tokenUsage;
   }
 }
 
@@ -52,6 +55,8 @@ export interface CodexReviewConfig {
   timeout: number;
   outputContract?: ReviewerOutputContract;
   logger?: Logger;
+  isolated?: boolean;
+  reasoningEffort?: string | null;
 }
 
 export interface CodexReviewTokenUsage {
@@ -59,6 +64,8 @@ export interface CodexReviewTokenUsage {
   outputTokens: number;
   cachedInputTokens?: number;
   costUsd?: number;
+  /** False when the source supplied only partial counters. Such usage cannot admit failover. */
+  complete?: boolean;
 }
 
 const SHIM_PATH = '/run/autopod/agent-shim.sh';
@@ -95,6 +102,26 @@ export async function runCodexReview(
       '--sandbox read-only',
       '--skip-git-repo-check',
       '--json',
+      ...(config.isolated
+        ? [
+            '--ephemeral',
+            '--ignore-user-config',
+            '--ignore-rules',
+            '--disable shell_tool',
+            '--disable unified_exec',
+            '--disable web_search_request',
+            '--disable image_generation',
+            '--disable browser_use',
+            '--disable computer_use',
+            '--disable apps',
+            '--disable enable_mcp_apps',
+            '--disable multi_agent',
+            '--disable plugins',
+          ]
+        : []),
+      ...(config.reasoningEffort && config.reasoningEffort !== 'auto'
+        ? [`-c ${shellQuote(`model_reasoning_effort=${JSON.stringify(config.reasoningEffort)}`)}`]
+        : []),
       '--output-last-message',
       shellQuote(outputPath),
       ...(config.outputContract ? [`--output-schema ${shellQuote(schemaPath)}`] : []),
@@ -175,6 +202,11 @@ export async function runCodexReview(
             : `codex review failed (exit=${result.exitCode}): ${output}`,
         exitCode: result.exitCode,
         stderr: result.stderr,
+        tokenUsage: await readCodexReviewTokenUsage(
+          config.containerManager,
+          config.containerId,
+          logPath,
+        ),
       });
     }
 
@@ -370,13 +402,16 @@ function parseCodexReviewTokenUsage(log: string): CodexReviewTokenUsage | undefi
 
   if (!latestUsage) return undefined;
 
-  const inputTokens = numberField(latestUsage.input_tokens) ?? 0;
-  const outputTokens = numberField(latestUsage.output_tokens) ?? 0;
+  const input = numberField(latestUsage.input_tokens);
+  const output = numberField(latestUsage.output_tokens);
+  const inputTokens = input ?? 0;
+  const outputTokens = output ?? 0;
   const cachedInputTokens = numberField(latestUsage.cached_input_tokens);
 
   return {
     inputTokens,
     outputTokens,
+    ...(input === undefined || output === undefined ? { complete: false } : {}),
     ...(cachedInputTokens !== undefined && { cachedInputTokens }),
   };
 }

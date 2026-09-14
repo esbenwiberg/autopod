@@ -2,6 +2,7 @@ export type WatchedIssueStatus = 'in_progress' | 'done' | 'failed';
 export type WatchedIssuePhase = 'planning' | 'working';
 
 export interface WatchedIssue {
+  watcherId?: string | null;
   id: number;
   profileName: string;
   provider: 'github' | 'ado';

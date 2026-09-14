@@ -1,5 +1,4 @@
 import type {
-  Profile,
   ReviewFeedbackResponseItem,
   ScanFinding,
   ScreenshotRef,
@@ -7,6 +6,7 @@ import type {
   ValidationResult,
   ValidationWaiver,
 } from '@autopod/shared';
+import type { PodExecutionSettings } from './pod-execution-settings.js';
 
 export interface CreatePrConfig {
   /** Worktree path to run `gh` from (inherits git remote context) */
@@ -24,7 +24,7 @@ export interface CreatePrConfig {
   /** Profile name */
   profileName: string;
   /** Resolved profile — drives daemon-side LLM auth for title/narrative generation. */
-  profile: Profile;
+  profile: PodExecutionSettings;
   /** Pod's model id (e.g. 'haiku', 'sonnet', 'opus'). */
   podModel: string;
   /** Validation result to include in PR body */

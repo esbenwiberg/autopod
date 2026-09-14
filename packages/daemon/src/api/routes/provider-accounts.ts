@@ -70,7 +70,16 @@ export function providerAccountRoutes(
   providerAccountStore: ProviderAccountStore,
   profileStore: ProfileStore,
   catalog: PublicProviderCatalog = PROVIDER_CATALOG,
+  composable = false,
 ): void {
+  const assertLegacy = () => {
+    if (composable)
+      throw new AutopodError(
+        'Provider accounts are selected by AI presets. Update the preset route; legacy profile links and credential import are disabled after configuration cutover.',
+        'CONFIG_API_VERSION_UNSUPPORTED',
+        410,
+      );
+  };
   const { providerAccountProviderSchema: catalogProviderSchema } =
     createProviderAccountSchemas(catalog);
   app.get('/provider-accounts', async (request) => {
@@ -108,6 +117,7 @@ export function providerAccountRoutes(
   });
 
   app.post('/provider-accounts/:id/link-profile', async (request) => {
+    assertLegacy();
     const { id } = request.params as { id: string };
     const body = linkProviderProfileSchema.parse(request.body ?? {});
     const account = providerAccountStore.get(id);
@@ -127,6 +137,7 @@ export function providerAccountRoutes(
   });
 
   app.post('/profiles/:name/provider-account', async (request) => {
+    assertLegacy();
     const { name } = request.params as { name: string };
     const body = profileProviderAccountPatchSchema.parse(request.body ?? {});
     if (body.accountId === null) {
@@ -153,12 +164,14 @@ export function providerAccountRoutes(
   });
 
   app.delete('/profiles/:name/provider-account', async (request, reply) => {
+    assertLegacy();
     const { name } = request.params as { name: string };
     profileStore.update(name, { providerAccountId: null });
     reply.status(204);
   });
 
   app.post('/provider-accounts/import-from-profile', async (request) => {
+    assertLegacy();
     const body = importProviderAccountFromProfileSchema.parse(request.body ?? {});
     const ownerName = profileStore.resolveCredentialOwner(body.profileName) ?? body.profileName;
     const ownerProfile = profileStore.getRaw(ownerName);

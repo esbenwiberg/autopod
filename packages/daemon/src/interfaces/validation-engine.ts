@@ -72,6 +72,7 @@ export interface ValidationEngineConfig {
    * pointers, `POD_ID`, Foundry endpoint vars) without exposing raw secrets.
    */
   reviewerExecEnv?: Record<string, string>;
+  reviewerExecutor?: import('./reviewer-executor.js').ReviewerExecutor;
   testCommand?: string | null;
   /** Subdirectory relative to /workspace where build/test/start commands execute. */
   buildWorkDir?: string | null;

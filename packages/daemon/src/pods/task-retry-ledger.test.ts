@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import Database from 'better-sqlite3';
 import { describe, expect, it } from 'vitest';
-import { runMigrations } from '../db/migrate.js';
+import { runMigrations, runMigrationsWithBackups } from '../db/migrate.js';
 import { createTestDb, insertTestProfile, logger } from '../test-utils/mock-helpers.js';
 import { createPodRepository } from './pod-repository.js';
 import { createTaskExecutionLedger } from './task-execution-ledger.js';
@@ -186,7 +186,7 @@ describe('durable task validation retry admission', () => {
 
 it.each([139, 155])(
   'upgrades schema %s on disk without changing legacy evidence and retains retry settlement through reopen',
-  (version) => {
+  async (version) => {
     const dir = mkdtempSync(join(tmpdir(), 'retry-upgrade-'));
     const migrations = resolve(import.meta.dirname, '../db/migrations');
     for (const file of readdirSync(migrations))
@@ -201,7 +201,7 @@ it.each([139, 155])(
       db.prepare(
         `INSERT INTO pods (id,profile_name,task,status,model,runtime,branch,user_id,task_summary) VALUES ('old','test-profile','old','failed','model','codex','branch','operator','malformed-preserve')`,
       ).run();
-      runMigrations(db, migrations, logger);
+      await runMigrationsWithBackups(db, migrations, logger);
       const repo = createPodRepository(db);
       repo.taskExecutions?.register('old');
       const admission = repo.taskRetries?.admit('old', 1, identity, binding, [0]);
@@ -741,7 +741,7 @@ it('scopes worker provider reconciliation to its exact target and preserves it a
   }
 });
 
-it('upgrades schema 177 without broadening an existing worker permission', () => {
+it('upgrades schema 177 without broadening an existing worker permission', async () => {
   const dir = mkdtempSync(join(tmpdir(), 'worker-binding-upgrade-'));
   const migrations = resolve(import.meta.dirname, '../db/migrations');
   for (const file of readdirSync(migrations))
@@ -783,7 +783,7 @@ it('upgrades schema 177 without broadening an existing worker permission', () =>
     const failures = db.prepare('SELECT * FROM task_retry_attempts').all() as Array<
       Record<string, unknown>
     >;
-    runMigrations(db, migrations, logger);
+    await runMigrationsWithBackups(db, migrations, logger);
     expect(db.prepare('SELECT * FROM task_retry_authorizations').get()).toEqual({
       ...(before as object),
       target_binding_hash: null,
@@ -887,7 +887,7 @@ it('retains provider cooldowns through deletion and disk reopen without consumin
   }
 });
 
-it('upgrades schema 178 without inventing provider deadlines for older worker evidence', () => {
+it('upgrades schema 178 without inventing provider deadlines for older worker evidence', async () => {
   const dir = mkdtempSync(join(tmpdir(), 'worker-deadline-upgrade-'));
   const migrations = resolve(import.meta.dirname, '../db/migrations');
   for (const file of readdirSync(migrations))
@@ -914,7 +914,7 @@ it('upgrades schema 178 without inventing provider deadlines for older worker ev
       string,
       unknown
     >;
-    runMigrations(db, migrations, logger);
+    await runMigrationsWithBackups(db, migrations, logger);
     expect(db.prepare('SELECT * FROM task_retry_attempts WHERE id=?').get(run)).toEqual({
       ...before,
       provider_retry_not_before: null,

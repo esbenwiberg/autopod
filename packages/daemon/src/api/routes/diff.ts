@@ -7,6 +7,7 @@ import {
   computePodUntrackedPreview,
 } from '../../pods/pod-diff-fetcher.js';
 import type { ContainerManagerFactory, PodManager } from '../../pods/pod-manager.js';
+import { podSourceContext } from '../../pods/pod-source-context.js';
 import type { ProfileStore } from '../../profiles/index.js';
 
 interface DiffFile {
@@ -57,8 +58,10 @@ export function diffRoutes(
     const { podId } = request.params as { podId: string };
     const pod = podManager.getSession(podId);
 
-    const profile = getProfile(profileStore, pod.profileName);
-    const baseBranch = pod.baseBranch ?? profile?.defaultBranch ?? 'main';
+    const source = podSourceContext(pod, podManager.getLaunchConfiguration, (name) =>
+      profileStore.get(name),
+    );
+    const baseBranch = pod.baseBranch ?? source.defaultBranch ?? 'main';
     const containerManager = pod.containerId
       ? containerManagerFactory.get(pod.executionTarget)
       : undefined;
@@ -105,9 +108,9 @@ export function diffRoutes(
     ]);
     let canonical = canonicalResult;
 
-    if (!canonical.diff.trim() && profile?.repoUrl && worktreeManager?.getBranchDiff) {
+    if (!canonical.diff.trim() && source.repoUrl && worktreeManager?.getBranchDiff) {
       const branchDiff = await worktreeManager.getBranchDiff({
-        repoUrl: profile.repoUrl,
+        repoUrl: source.repoUrl,
         branch: pod.branch,
         baseBranch,
         startCommitSha: pod.startCommitSha,
@@ -149,14 +152,6 @@ export function diffRoutes(
 }
 
 // MARK: - Helpers
-
-function getProfile(profileStore: ProfileStore, profileName: string) {
-  try {
-    return profileStore.get(profileName);
-  } catch {
-    return null;
-  }
-}
 
 function parseDiff(raw: string): DiffFile[] {
   const files: DiffFile[] = [];

@@ -28,7 +28,7 @@ async function findEligibilitySchedule(
   fullRoleDefId: string,
   normScope: string, // no leading slash — used for matching only, not in the URL
   log: Logger,
-): Promise<{ eligibilityScheduleId: string; scope: string }> {
+): Promise<{ eligibilityScheduleId: string; scope: string; principalId: string }> {
   // Tenant-root URL + asTarget() — no scope prefix, no principalId filter needed.
   // asTarget() already scopes to the calling identity; adding a scope prefix causes 400/403.
   const url = `${ARM_API}/providers/Microsoft.Authorization/roleEligibilityScheduleInstances?$filter=asTarget()&api-version=${ARM_RBAC_API_VERSION}`;
@@ -57,9 +57,10 @@ async function findEligibilitySchedule(
   const candidates = (data.value ?? []).filter(
     (s) => norm(s.properties.roleDefinitionId) === norm(fullRoleDefId),
   );
-  // Prefer exact scope match, fall back to any candidate with the right role
-  const exact = candidates.find((s) => norm(s.properties.scope ?? '') === norm(`/${normScope}`));
-  const match = exact ?? candidates[0];
+  const exact = candidates.filter((s) => norm(s.properties.scope ?? '') === norm(`/${normScope}`));
+  if (exact.length > 1)
+    throw new Error('Multiple eligible PIM assignments match; select an exact eligibility ID');
+  const match = exact[0];
   if (!match) {
     throw new Error(
       `No eligible PIM role assignment found for role '${fullRoleDefId}' at scope '/${normScope}'. Ensure this account has an eligible assignment in Azure PIM.`,
@@ -117,8 +118,12 @@ async function findActiveAssignment(
       norm(s.properties.roleDefinitionId) === norm(fullRoleDefId) &&
       s.properties.assignmentType === 'Activated',
   );
-  const exact = candidates.find((s) => norm(s.properties.scope ?? '') === norm(`/${normScope}`));
-  const match = exact ?? candidates[0];
+  const exact = candidates.filter((s) => norm(s.properties.scope ?? '') === norm(`/${normScope}`));
+  if (exact.length > 1)
+    throw new Error(
+      'Multiple active PIM assignments match; exact activation ownership is required',
+    );
+  const match = exact[0];
   if (!match) return null;
   log.debug(
     {

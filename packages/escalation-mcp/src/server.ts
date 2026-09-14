@@ -1,4 +1,10 @@
-import type { ActionDefinition } from '@autopod/shared';
+import {
+  type ActionDefinition,
+  deploymentRequestSchema,
+  githubMutationSchema,
+  githubReadSchema,
+  serviceReadSchema,
+} from '@autopod/shared';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
 import { PendingRequests } from './pending-requests.js';
@@ -20,7 +26,6 @@ import { reportBlocker } from './tools/report-blocker.js';
 import { reportPlan } from './tools/report-plan.js';
 import { reportProgress } from './tools/report-progress.js';
 import { reportTaskSummary } from './tools/report-task-summary.js';
-import { requestCredential } from './tools/request-credential.js';
 import { validateInBrowser } from './tools/validate-in-browser.js';
 import { validateLocally } from './tools/validate-locally.js';
 
@@ -288,23 +293,6 @@ export function createEscalationMcpServer(deps: EscalationMcpDeps): {
   );
 
   server.tool(
-    'request_credential',
-    'Request credentials for GitHub or Azure DevOps. Blocks until a human approves — the daemon injects the credential directly into the container, you will never see the token value. Call this when you need to authenticate to push code, create PRs, or access private resources.',
-    {
-      service: z
-        .enum(['github', 'ado'])
-        .describe('Which service to authenticate against: "github" or "ado" (Azure DevOps)'),
-      reason: z
-        .string()
-        .describe('Why you need these credentials — shown to the human for approval'),
-    },
-    async (input) => {
-      const response = await requestCredential(podId, input, bridge, pendingRequests);
-      return responseWithGuidance(response, 'request_credential');
-    },
-  );
-
-  server.tool(
     'acknowledge_messages',
     'Acknowledge receipt of a complete operator guidance delivery returned by check_messages or an interrupted tool. Apply the guidance before continuing. This does not approve decisions or resume work. Repeat the same deliveryId if the acknowledgment response was lost.',
     { deliveryId: z.string().uuid() },
@@ -413,8 +401,10 @@ export function createEscalationMcpServer(deps: EscalationMcpDeps): {
     'List approved memories for a scope. Use this to check existing knowledge before starting work.',
     {
       scope: z
-        .enum(['global', 'profile', 'pod'])
-        .describe('global = cross-project, profile = this repo, pod = this pod only'),
+        .enum(['global', 'repository', 'profile', 'pod'])
+        .describe(
+          'global = cross-project, repository = this repository, profile = legacy profile only, pod = this pod only',
+        ),
     },
     async (input) => {
       const response = await memoryList(podId, input, bridge);
@@ -439,7 +429,7 @@ export function createEscalationMcpServer(deps: EscalationMcpDeps): {
     'Search memories by keyword within a scope.',
     {
       query: z.string().describe('Search text to match against path or content'),
-      scope: z.enum(['global', 'profile', 'pod']).describe('Scope to search within'),
+      scope: z.enum(['global', 'repository', 'profile', 'pod']).describe('Scope to search within'),
     },
     async (input) => {
       const response = await memorySearch(podId, input, bridge);
@@ -449,11 +439,13 @@ export function createEscalationMcpServer(deps: EscalationMcpDeps): {
 
   server.tool(
     'memory_suggest',
-    'Suggest a memory for human approval. **Default is to skip.** Only suggest if you can name a specific future pod, on this profile, doing a different task, that would waste >5 minutes without this exact note. If you cannot picture the stuck moment concretely, do not call this tool. Filler is worse than nothing — an approval queue full of trivia gets ignored. Rationale is required and must name the future-pod scenario.',
+    'Suggest a memory for human approval. **Default is to skip.** Only suggest if you can name a specific future pod, on this repository, doing a different task, that would waste >5 minutes without this exact note. If you cannot picture the stuck moment concretely, do not call this tool. Filler is worse than nothing — an approval queue full of trivia gets ignored. Rationale is required and must name the future-pod scenario.',
     {
       scope: z
-        .enum(['global', 'profile', 'pod'])
-        .describe('global = applies everywhere, profile = this repo, pod = this pod only'),
+        .enum(['global', 'repository', 'profile', 'pod'])
+        .describe(
+          'global = applies everywhere, repository = this repository, profile = legacy profile only, pod = this pod only',
+        ),
       path: z
         .string()
         .describe(
@@ -493,6 +485,97 @@ export function createEscalationMcpServer(deps: EscalationMcpDeps): {
         }
         return { content: [{ type: 'text' as const, text }] };
       },
+    );
+  }
+
+  const scoped = bridge.getScopedTools?.(podId);
+  if (scoped?.deploymentPrepare && scoped.deploymentStatus) {
+    const prepare = scoped.deploymentPrepare;
+    const status = scoped.deploymentStatus;
+    server.tool(
+      'deployment_request',
+      'Request deployment of the latest published default branch. This pins its exact commit and waits for operator approval. Reuse operationKey on retries. Pod changes are not deployed; the pod cannot approve or execute deployment.',
+      { request: deploymentRequestSchema },
+      async ({ request }) => ({
+        content: [{ type: 'text' as const, text: JSON.stringify(await prepare(request)) }],
+      }),
+    );
+    server.tool(
+      'deployment_status',
+      'Read the durable deployment decision and exit receipt. An uncertain outcome must be reconciled by the operator; do not submit another request.',
+      { runId: z.string().uuid() },
+      async ({ runId }) => ({
+        content: [{ type: 'text' as const, text: JSON.stringify(await status(runId)) }],
+      }),
+    );
+  }
+  if (scoped?.serviceRules && scoped.serviceRead) {
+    const list = scoped.serviceRules;
+    const read = scoped.serviceRead;
+    server.tool(
+      'service_access_list',
+      'List selected ADO read and Azure log rules. Listing does not activate PIM.',
+      {},
+      async () => ({ content: [{ type: 'text' as const, text: JSON.stringify(await list()) }] }),
+    );
+    server.tool(
+      'service_read',
+      'Read ADO code, PRs or work items, or selected Azure log tables through the daemon. Choose one rule from service_access_list. Log contains is literal text; arbitrary queries, writes and publication are unavailable.',
+      { request: serviceReadSchema },
+      async ({ request }) => ({
+        content: [{ type: 'text' as const, text: JSON.stringify(await read(request)) }],
+      }),
+    );
+  }
+  if (scoped?.githubRead) {
+    const read = scoped.githubRead;
+    server.tool(
+      'github_read',
+      'Read permitted repository code, issues, PRs, workflow runs, jobs, logs and artifacts through AutoPod.',
+      { request: githubReadSchema },
+      async ({ request }) => ({
+        content: [{ type: 'text' as const, text: JSON.stringify(await read(request)) }],
+      }),
+    );
+  }
+  if (scoped?.githubMutate) {
+    const mutate = scoped.githubMutate;
+    server.tool(
+      'github_mutate',
+      'Request a permitted issue change, issue/PR comment or workflow operation. Reuse operationKey to inspect a prior request; never resend an uncertain write with a new key. Push, PR creation/editing and merge belong to daemon delivery.',
+      { request: githubMutationSchema },
+      async ({ request }) => ({
+        content: [{ type: 'text' as const, text: JSON.stringify(await mutate(request)) }],
+      }),
+    );
+  }
+  if (scoped?.pimSelections) {
+    const list = scoped.pimSelections;
+    server.tool(
+      'pim_list_selected',
+      'List this pod’s selected PIM assignments. This does not activate access.',
+      {},
+      async () => ({ content: [{ type: 'text' as const, text: JSON.stringify(await list()) }] }),
+    );
+  }
+  if (scoped?.pimActivate) {
+    const activate = scoped.pimActivate;
+    server.tool(
+      'pim_activate_selected',
+      'Request activation of an assignment already selected for this pod. Pending approval is not active access. Use the same requestId to check an existing request.',
+      {
+        type: z.enum(['group', 'azure-role', 'directory-role']),
+        eligibilityId: z.string().min(1),
+        requestId: z.string().min(1).max(128),
+      },
+      async ({ type, eligibilityId, requestId }) => ({
+        content: [
+          {
+            type: 'text' as const,
+            text: JSON.stringify(await activate(type, eligibilityId, requestId)),
+          },
+        ],
+      }),
     );
   }
 

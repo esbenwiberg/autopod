@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Command } from 'commander';
@@ -18,6 +18,10 @@ vi.mock('ora', () => ({
 
 function createMockClient() {
   return {
+    listConfigurations: vi
+      .fn()
+      .mockResolvedValue([{ id: 'repo', name: 'Repo', kind: 'repository', archived: false }]),
+    resolveLaunch: vi.fn().mockResolvedValue({ digest: 'a'.repeat(64) }),
     createSession: vi.fn().mockResolvedValue({
       id: 'abcd1234',
       profileName: 'test',
@@ -139,29 +143,36 @@ describe('pod commands', () => {
     }
   });
 
-  it('registers run command that calls createSession', async () => {
-    await program.parseAsync(['node', 'ap', 'run', 'test-profile', 'build the thing']);
-    expect(mockClient.createSession).toHaveBeenCalledWith(
-      expect.objectContaining({
-        profileName: 'test-profile',
-        task: 'build the thing',
-      }),
-    );
+  it('rejects removed profile-first run syntax with an actionable replacement', async () => {
+    await expect(
+      program.parseAsync(['node', 'ap', 'run', 'test-profile', 'build the thing']),
+    ).rejects.toThrow('ap run --repo');
+    expect(mockClient.createSession).not.toHaveBeenCalled();
   });
 
-  it('passes --sidecar flags as requireSidecars on run', async () => {
-    await program.parseAsync([
-      'node',
-      'ap',
-      'run',
-      'test-profile',
-      'build the thing',
-      '--sidecar',
-      'dagger',
-    ]);
-    expect(mockClient.createSession).toHaveBeenCalledWith(
-      expect.objectContaining({ requireSidecars: ['dagger'] }),
-    );
+  it('passes --sidecar instance IDs through the shared launch preview', async () => {
+    const output = vi.spyOn(console, 'log').mockImplementation(() => {});
+    try {
+      await program.parseAsync([
+        'node',
+        'ap',
+        'run',
+        '--repo',
+        'repo',
+        '--task',
+        'Build',
+        '--sidecar',
+        'dagger',
+        '--preview',
+        '--json',
+      ]);
+      expect(mockClient.resolveLaunch).toHaveBeenCalledWith(
+        expect.objectContaining({ requiredSidecarIds: ['dagger'] }),
+      );
+      expect(mockClient.createSession).not.toHaveBeenCalled();
+    } finally {
+      output.mockRestore();
+    }
   });
 
   it('accepts multiple --sidecar flags on start', async () => {
@@ -169,66 +180,92 @@ describe('pod commands', () => {
       'node',
       'ap',
       'start',
-      'test-profile',
-      'do it',
-      '-s',
+      '--repo',
+      'repo',
+      '--task',
+      'Do it',
+      '--sidecar',
       'dagger',
-      '-s',
+      '--sidecar',
       'postgres',
+      '--preview',
+      '--json',
     ]);
-    expect(mockClient.createSession).toHaveBeenCalledWith(
-      expect.objectContaining({ requireSidecars: ['dagger', 'postgres'] }),
+    expect(mockClient.resolveLaunch).toHaveBeenCalledWith(
+      expect.objectContaining({ requiredSidecarIds: ['dagger', 'postgres'] }),
     );
+    expect(mockClient.createSession).not.toHaveBeenCalled();
   });
 
-  it('omits requireSidecars when no --sidecar flags are passed', async () => {
-    await program.parseAsync(['node', 'ap', 'run', 'test-profile', 'do it']);
-    const call = (mockClient.createSession as unknown as { mock: { calls: [unknown][] } }).mock
-      .calls[0][0] as Record<string, unknown>;
-    expect(call.requireSidecars).toBeUndefined();
+  it('preserves profile sidecar defaults when none are specified', async () => {
+    const output = vi.spyOn(console, 'log').mockImplementation(() => {});
+    try {
+      await program.parseAsync([
+        'node',
+        'ap',
+        'run',
+        '--repo',
+        'repo',
+        '--task',
+        'Build',
+        '--preview',
+        '--json',
+      ]);
+      expect(mockClient.resolveLaunch).toHaveBeenCalledOnce();
+      expect(mockClient.resolveLaunch.mock.calls[0]?.[0]).not.toHaveProperty('requiredSidecarIds');
+    } finally {
+      output.mockRestore();
+    }
   });
 
-  it('passes --ref-repo and --ref-from-profile flags as referenceRepos on start', async () => {
+  it('selects enrolled read-only reference snapshots on start', async () => {
     await program.parseAsync([
       'node',
       'ap',
       'start',
-      'test-profile',
-      'audit',
-      '--ref-repo',
-      'https://github.com/org/docs-gen',
-      '--ref-repo',
-      'https://github.com/org/pipelines.git',
-      '--ref-from-profile',
-      'duck',
+      '--repo',
+      'repo',
+      '--task',
+      'Audit',
+      '--reference',
+      'Repo=main',
+      '--preview',
+      '--json',
     ]);
-    expect(mockClient.createSession).toHaveBeenCalledWith(
+    expect(mockClient.resolveLaunch).toHaveBeenCalledWith(
       expect.objectContaining({
-        referenceRepos: [
-          { url: 'https://github.com/org/docs-gen' },
-          { url: 'https://github.com/org/pipelines.git' },
-          { url: 'https://github.com/org/duck', sourceProfile: 'duck' },
-        ],
+        referenceRepositories: [{ repositoryId: 'repo', ref: 'main', access: 'read' }],
       }),
     );
-    const call = (mockClient.createSession as unknown as { mock: { calls: [unknown][] } }).mock
-      .calls[0][0] as Record<string, unknown>;
-    expect(call).not.toHaveProperty('referenceRepoPat');
+    expect(mockClient.createSession).not.toHaveBeenCalled();
   });
 
   it('exposes local spec files as runtime context for --spec pod creation by default', async () => {
     const specRoot = createSpecFolder();
     createdDirs.push(specRoot);
 
-    await program.parseAsync(['node', 'ap', 'pod', 'create', 'test-profile', '--spec', specRoot]);
+    await program.parseAsync([
+      'node',
+      'ap',
+      'pod',
+      'create',
+      '--repo',
+      'Repo',
+      '--preview',
+      '--json',
+      '--spec',
+      specRoot,
+    ]);
 
-    const call = (mockClient.createSession as unknown as { mock: { calls: [unknown][] } }).mock
+    const call = (mockClient.resolveLaunch as unknown as { mock: { calls: [unknown][] } }).mock
       .calls[0][0] as Record<string, unknown>;
     expect(call.task).toBe('## Task\nBuild from the spec.');
-    expect(call.contract).toEqual(expect.objectContaining({ title: 'Brief contract' }));
-    expect(call.specFiles).toBeUndefined();
+    expect((call.work as Record<string, unknown>).contract).toEqual(
+      expect.objectContaining({ title: 'Brief contract' }),
+    );
+    expect((call.work as Record<string, unknown>).specFiles).toBeUndefined();
     const outputRoot = `specs/${specRoot.split('/').at(-1)}`;
-    expect(call.specContextFiles).toEqual([
+    expect((call.work as Record<string, unknown>).specContextFiles).toEqual([
       { path: `${outputRoot}/brief.md`, content: '## Task\nBuild from the spec.\n' },
       { path: `${outputRoot}/contract.yaml`, content: contractYaml },
       { path: `${outputRoot}/notes.md`, content: 'Planning context.\n' },
@@ -243,7 +280,18 @@ describe('pod commands', () => {
     symlinkSync(join(outside, 'secret.txt'), join(specRoot, 'leak.txt'));
 
     await expect(
-      program.parseAsync(['node', 'ap', 'pod', 'create', 'test-profile', '--spec', specRoot]),
+      program.parseAsync([
+        'node',
+        'ap',
+        'pod',
+        'create',
+        '--repo',
+        'Repo',
+        '--preview',
+        '--json',
+        '--spec',
+        specRoot,
+      ]),
     ).rejects.toThrow('spec file symlink not allowed');
     expect(mockClient.createSession).not.toHaveBeenCalled();
   });
@@ -252,11 +300,24 @@ describe('pod commands', () => {
     const specRoot = createSpecFolder('contract.yml');
     createdDirs.push(specRoot);
 
-    await program.parseAsync(['node', 'ap', 'pod', 'create', 'test-profile', '--spec', specRoot]);
+    await program.parseAsync([
+      'node',
+      'ap',
+      'pod',
+      'create',
+      '--repo',
+      'Repo',
+      '--preview',
+      '--json',
+      '--spec',
+      specRoot,
+    ]);
 
-    const call = (mockClient.createSession as unknown as { mock: { calls: [unknown][] } }).mock
+    const call = (mockClient.resolveLaunch as unknown as { mock: { calls: [unknown][] } }).mock
       .calls[0][0] as Record<string, unknown>;
-    expect(call.contract).toEqual(expect.objectContaining({ title: 'Brief contract' }));
+    expect((call.work as Record<string, unknown>).contract).toEqual(
+      expect.objectContaining({ title: 'Brief contract' }),
+    );
   });
 
   it('includes local spec files for --spec pod creation when opted in', async () => {
@@ -268,21 +329,26 @@ describe('pod commands', () => {
       'ap',
       'pod',
       'create',
-      'test-profile',
+      '--repo',
+      'Repo',
+      '--preview',
+      '--json',
       '--spec',
       specRoot,
       '--include-specs',
     ]);
 
-    const call = (mockClient.createSession as unknown as { mock: { calls: [unknown][] } }).mock
+    const call = (mockClient.resolveLaunch as unknown as { mock: { calls: [unknown][] } }).mock
       .calls[0][0] as Record<string, unknown>;
     const outputRoot = `specs/${specRoot.split('/').at(-1)}`;
-    expect(call.specFiles).toEqual([
+    expect((call.work as Record<string, unknown>).specFiles).toEqual([
       { path: `${outputRoot}/brief.md`, content: '## Task\nBuild from the spec.\n' },
       { path: `${outputRoot}/contract.yaml`, content: contractYaml },
       { path: `${outputRoot}/notes.md`, content: 'Planning context.\n' },
     ]);
-    expect(call.specContextFiles).toEqual(call.specFiles);
+    expect((call.work as Record<string, unknown>).specContextFiles).toEqual(
+      (call.work as Record<string, unknown>).specFiles,
+    );
   });
 
   it('can disable runtime spec context for --spec pod creation', async () => {
@@ -294,23 +360,36 @@ describe('pod commands', () => {
       'ap',
       'pod',
       'create',
-      'test-profile',
+      '--repo',
+      'Repo',
+      '--preview',
+      '--json',
       '--spec',
       specRoot,
       '--no-spec-context',
     ]);
 
-    const call = (mockClient.createSession as unknown as { mock: { calls: [unknown][] } }).mock
+    const call = (mockClient.resolveLaunch as unknown as { mock: { calls: [unknown][] } }).mock
       .calls[0][0] as Record<string, unknown>;
-    expect(call.specFiles).toBeUndefined();
-    expect(call.specContextFiles).toBeUndefined();
+    expect((call.work as Record<string, unknown>).specFiles).toBeUndefined();
+    expect((call.work as Record<string, unknown>).specContextFiles).toBeUndefined();
   });
 
   it('omits referenceRepos when no ref flags are passed', async () => {
-    await program.parseAsync(['node', 'ap', 'start', 'test-profile', 'do it']);
-    const call = (mockClient.createSession as unknown as { mock: { calls: [unknown][] } }).mock
+    await program.parseAsync([
+      'node',
+      'ap',
+      'start',
+      '--repo',
+      'Repo',
+      '--task',
+      'do it',
+      '--preview',
+      '--json',
+    ]);
+    const call = (mockClient.resolveLaunch as unknown as { mock: { calls: [unknown][] } }).mock
       .calls[0][0] as Record<string, unknown>;
-    expect(call.referenceRepos).toBeUndefined();
+    expect(call.referenceRepositories).toEqual([]);
     expect(call).not.toHaveProperty('referenceRepoPat');
   });
 

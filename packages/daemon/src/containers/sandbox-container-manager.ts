@@ -503,6 +503,8 @@ for root in sys.argv[1:]:
     command: string[],
     options?: ExecOptions,
   ): Promise<StreamingExecResult> {
+    if (options?.onProcessCreated)
+      throw new Error('Recoverable native Goal processes are unavailable on this backend');
     const sandboxOptions = toSandboxExecOptions(options);
 
     if (this.client.execStream) {

@@ -460,7 +460,8 @@ private final class RecordingURLProtocol: URLProtocol, @unchecked Sendable {
       return
     }
 
-    Task {
+    let request = self.request
+    Task { @Sendable [self, request, handler] in
       do {
         let (response, data) = try await handler(request)
         client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)

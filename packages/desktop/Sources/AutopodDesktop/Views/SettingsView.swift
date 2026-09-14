@@ -44,6 +44,7 @@ enum SettingsSection: Hashable {
 public struct SettingsView: View {
     public let connectionManager: ConnectionManager
     public let profiles: [Profile]
+    public var configurationActions: LaunchConfigurationActions?
     public let actionCatalog: [ActionCatalogItem]
     public let builtinSkills: [BuiltinSkillEntry]
     public let profileError: String?
@@ -63,6 +64,7 @@ public struct SettingsView: View {
     @Binding public var isPresented: Bool
 
     public init(connectionManager: ConnectionManager, profiles: [Profile],
+                configurationActions: LaunchConfigurationActions? = nil,
                 actionCatalog: [ActionCatalogItem] = [],
                 builtinSkills: [BuiltinSkillEntry] = [],
                 profileError: String? = nil,
@@ -81,6 +83,7 @@ public struct SettingsView: View {
                 isPresented: Binding<Bool>) {
         self.connectionManager = connectionManager
         self.profiles = profiles
+        self.configurationActions = configurationActions
         self.actionCatalog = actionCatalog
         self.builtinSkills = builtinSkills
         self.profileError = profileError
@@ -97,6 +100,7 @@ public struct SettingsView: View {
     }
 
     @State private var selectedSection: SettingsSection = .profiles
+    @State private var configurationKind: ConfigurationKind = .profile
     @State private var daemonHealth: DaemonHealthSnapshot?
     @State private var healthError: String?
     @State private var showAddConnection = false
@@ -203,8 +207,12 @@ public struct SettingsView: View {
         case .providerAccounts:
             ProviderAccountsSettingsView(
                 api: connectionManager.api,
-                profiles: profiles,
-                onProfilesChanged: onReloadProfiles
+                profiles: configurationActions == nil ? profiles : [],
+                onProfilesChanged: onReloadProfiles,
+                onConfigurePresets: configurationActions == nil ? nil : {
+                    configurationKind = .ai
+                    selectedSection = .profiles
+                }
             )
         case .podsitter:
             if let api = connectionManager.api {
@@ -386,7 +394,14 @@ public struct SettingsView: View {
 
     // MARK: - Profiles
 
-    private var profilesContent: some View {
+    @ViewBuilder private var profilesContent: some View {
+        if let configurationActions {
+            ConfigurationLibraryView(actions: configurationActions, initialKind: configurationKind)
+        }
+        else { legacyProfilesContent }
+    }
+
+    private var legacyProfilesContent: some View {
         VStack(spacing: 0) {
             if let profileError {
                 HStack(spacing: 6) {

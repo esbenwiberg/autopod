@@ -1,11 +1,12 @@
-import type { CompiledProvider, NetworkPolicy, Profile, RuntimeType } from '@autopod/shared';
+import type { CompiledProvider, NetworkPolicy, RuntimeType } from '@autopod/shared';
+import type { PodExecutionSettings } from '../interfaces/pod-execution-settings.js';
 import { usesOpenAiSurface } from './runtime-resolver.js';
 
 const CODEX_PROVIDER_REQUIRED_HOSTS = ['chatgpt.com', '*.chatgpt.com', 'auth.openai.com'];
 
 export function addRuntimeNetworkDefaults(
   policy: NetworkPolicy | null,
-  profile: Profile,
+  profile: PodExecutionSettings,
   runtime: RuntimeType,
   manifestProvider?: CompiledProvider | null,
 ): NetworkPolicy | null {

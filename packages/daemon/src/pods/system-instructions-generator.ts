@@ -4,10 +4,10 @@ import type {
   InjectedMcpServer,
   InjectedSkill,
   Pod,
-  Profile,
 } from '@autopod/shared';
 import { PROVIDER_FAILOVER_HANDOFF_CONTAINER_PATH } from '@autopod/shared';
 import { resolveContainerMemory } from '../containers/container-memory.js';
+import type { PodExecutionSettings } from '../interfaces/pod-execution-settings.js';
 import type { RelevantMemory } from './memory-selector.js';
 import { hasPendingProviderContinuation } from './recovery-context.js';
 import type { ResolvedSection } from './section-resolver.js';
@@ -28,7 +28,7 @@ export interface SystemInstructionsOptions {
 }
 
 export function generateSystemInstructions(
-  profile: Profile,
+  profile: PodExecutionSettings,
   pod: Pod,
   mcpServerUrl: string,
   options?: SystemInstructionsOptions,
@@ -769,7 +769,7 @@ export function generateSystemInstructions(
  */
 function generateOperatingEnvironment(
   lines: string[],
-  profile: Profile,
+  profile: PodExecutionSettings,
   availableActions: ActionDefinition[],
   executionTarget: ExecutionTarget,
 ): void {

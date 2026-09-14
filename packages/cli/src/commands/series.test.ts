@@ -4,7 +4,11 @@ import { join } from 'node:path';
 import { Command } from 'commander';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AutopodClient } from '../api/client.js';
+import { saveSeriesReceipt } from '../config/launch-store.js';
 import { registerSeriesCommands } from './series.js';
+vi.mock('../config/launch-store.js', () => ({
+  saveSeriesReceipt: vi.fn(() => '/tmp/series-receipt.json'),
+}));
 
 vi.mock('ora', () => ({
   default: () => ({
@@ -51,6 +55,14 @@ function createSeriesSpecFolder(contractName = 'contract.yaml'): string {
 
 function createMockClient() {
   return {
+    listConfigurations: vi.fn(async (kind: string) => [
+      {
+        id: kind === 'repository' ? 'repo' : 'test',
+        name: kind === 'repository' ? 'repo' : 'test',
+        kind,
+        archived: false,
+      },
+    ]),
     createSeries: vi.fn().mockResolvedValue({
       seriesId: 'series-1',
       seriesName: 'feature',
@@ -92,11 +104,25 @@ describe('series commands', () => {
     const specRoot = createSeriesSpecFolder();
     createdDirs.push(specRoot);
 
-    await program.parseAsync(['node', 'ap', 'series', 'create', specRoot, '--profile', 'test']);
+    await program.parseAsync([
+      'node',
+      'ap',
+      'series',
+      'create',
+      specRoot,
+      '--repo',
+      'repo',
+      '--profile',
+      'test',
+    ]);
 
     const call = (mockClient.createSeries as unknown as { mock: { calls: [unknown][] } }).mock
       .calls[0][0] as Record<string, unknown>;
     expect(call.briefs).toHaveLength(1);
+    expect(call.launch).toMatchObject({ repositoryId: 'repo', profileId: 'test' });
+    expect(call.requestId).toEqual(expect.any(String));
+    expect(call).not.toHaveProperty('profile');
+    expect(saveSeriesReceipt).toHaveBeenCalledWith(call);
     expect(call.specFiles).toBeUndefined();
     const outputRoot = `specs/${specRoot.split('/').at(-1)}`;
     expect(call.specContextFiles).toEqual([
@@ -118,7 +144,17 @@ describe('series commands', () => {
     symlinkSync(join(outside, 'secret.txt'), join(specRoot, 'leak.txt'));
 
     await expect(
-      program.parseAsync(['node', 'ap', 'series', 'create', specRoot, '--profile', 'test']),
+      program.parseAsync([
+        'node',
+        'ap',
+        'series',
+        'create',
+        specRoot,
+        '--repo',
+        'repo',
+        '--profile',
+        'test',
+      ]),
     ).rejects.toThrow('spec file symlink not allowed');
     expect(mockClient.createSeries).not.toHaveBeenCalled();
   });
@@ -127,11 +163,25 @@ describe('series commands', () => {
     const specRoot = createSeriesSpecFolder('contract.yml');
     createdDirs.push(specRoot);
 
-    await program.parseAsync(['node', 'ap', 'series', 'create', specRoot, '--profile', 'test']);
+    await program.parseAsync([
+      'node',
+      'ap',
+      'series',
+      'create',
+      specRoot,
+      '--repo',
+      'repo',
+      '--profile',
+      'test',
+    ]);
 
     const call = (mockClient.createSeries as unknown as { mock: { calls: [unknown][] } }).mock
       .calls[0][0] as Record<string, unknown>;
     expect(call.briefs).toHaveLength(1);
+    expect(call.launch).toMatchObject({ repositoryId: 'repo', profileId: 'test' });
+    expect(call.requestId).toEqual(expect.any(String));
+    expect(call).not.toHaveProperty('profile');
+    expect(saveSeriesReceipt).toHaveBeenCalledWith(call);
   });
 
   it('includes local spec files for series creation when opted in', async () => {
@@ -144,6 +194,8 @@ describe('series commands', () => {
       'series',
       'create',
       specRoot,
+      '--repo',
+      'repo',
       '--profile',
       'test',
       '--include-specs',
@@ -174,6 +226,8 @@ describe('series commands', () => {
       'series',
       'create',
       specRoot,
+      '--repo',
+      'repo',
       '--profile',
       'test',
       '--no-spec-context',
@@ -198,7 +252,17 @@ describe('series commands', () => {
     }) as never);
 
     await expect(
-      program.parseAsync(['node', 'ap', 'series', 'create', specRoot, '--profile', 'test']),
+      program.parseAsync([
+        'node',
+        'ap',
+        'series',
+        'create',
+        specRoot,
+        '--repo',
+        'repo',
+        '--profile',
+        'test',
+      ]),
     ).rejects.toThrow('process.exit(1)');
     expect(getClient).not.toHaveBeenCalled();
     expect(mockClient.createSeries).not.toHaveBeenCalled();

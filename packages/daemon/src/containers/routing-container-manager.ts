@@ -1,4 +1,4 @@
-import type { ArtifactOutput } from '@autopod/shared';
+import type { ArtifactOutput, NativeGoalProcessIdentity } from '@autopod/shared';
 import type { ExecutionTarget } from '@autopod/shared';
 import type {
   ContainerManager,
@@ -23,6 +23,10 @@ export class RoutingContainerManager implements ContainerManager {
     this.local = options.local;
     this.sandbox = options.sandbox;
     this.resolveTarget = options.resolveTarget;
+  }
+
+  get supportsExecRecovery(): boolean {
+    return this.local.supportsExecRecovery === true;
   }
 
   spawn(config: ContainerSpawnConfig): Promise<string> {
@@ -125,6 +129,13 @@ export class RoutingContainerManager implements ContainerManager {
 
   execStreaming(containerId: string, command: string[], options?: ExecOptions) {
     return this.delegate(containerId).execStreaming(containerId, command, options);
+  }
+
+  terminateRecordedExec(identity: NativeGoalProcessIdentity): Promise<number> {
+    const manager = this.delegate(identity.containerId);
+    if (!manager.terminateRecordedExec)
+      return Promise.reject(new Error('Recorded exec recovery is unavailable on this backend'));
+    return manager.terminateRecordedExec(identity);
   }
 
   private delegate(containerId: string): ContainerManager {

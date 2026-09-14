@@ -15,6 +15,11 @@ import {
 import { createServer } from './api/server.js';
 import { createDevAuthModule } from './auth/dev-auth-module.js';
 import { createEntraAuthModule, defaultEntraAudiences } from './auth/entra-auth-module.js';
+import { configurationCutoverReadiness } from './configuration/cutover-readiness.js';
+import {
+  createHostConfigurationComponents,
+  hostConfigurationSettingsSchema,
+} from './configuration/host-components.js';
 import { DockerContainerManager } from './containers/docker-container-manager.js';
 import { DockerNetworkManager } from './containers/docker-network-manager.js';
 import { RoutingContainerManager } from './containers/routing-container-manager.js';
@@ -25,12 +30,9 @@ import { createDbBackupManager } from './db/backup.js';
 import { createDatabase } from './db/connection.js';
 import { runMigrationsWithBackups } from './db/migrate.js';
 import { GhCliDaemonGitHubAuth } from './github/daemon-github-auth.js';
-import type {
-  WarmImageMaintenanceJob,
-  WarmImageMaintenanceScope,
-} from './images/warm-image-maintenance.js';
 import type { AuthModule } from './interfaces/index.js';
 import type { ContainerManager } from './interfaces/index.js';
+import type { PodExecutionSettings } from './interfaces/pod-execution-settings.js';
 import {
   composeManagedAcceptance,
   parseManagedAcceptanceConfig,
@@ -92,7 +94,7 @@ import {
 import { createSafetyEventsRepository } from './safety/safety-events-repository.js';
 import { auditNpmLockfile } from './scheduled-jobs/npm-lock-audit.js';
 import { createScanCoordinator } from './scheduled-jobs/scan-coordinator.js';
-import { createBoundedScanJudge } from './scheduled-jobs/scan-judge.js';
+import { createFrozenScanJudge } from './scheduled-jobs/scan-judge.js';
 import { createScanOperatorService } from './scheduled-jobs/scan-operator-service.js';
 import { createScanReportRepository } from './scheduled-jobs/scan-report-repository.js';
 import { createScheduledJobManager } from './scheduled-jobs/scheduled-job-manager.js';
@@ -379,30 +381,6 @@ function parseEnvList(value: string | undefined): string[] {
     .filter(Boolean);
 }
 
-function parseBooleanEnv(name: string, fallback: boolean): boolean {
-  const value = process.env[name]?.trim().toLowerCase();
-  if (!value) return fallback;
-  if (value === '1' || value === 'true' || value === 'yes' || value === 'on') return true;
-  if (value === '0' || value === 'false' || value === 'no' || value === 'off') return false;
-  throw new Error(`${name} must be a boolean: true/false or 1/0`);
-}
-
-function parsePositiveIntegerEnv(name: string, fallback: number): number {
-  const raw = process.env[name]?.trim();
-  if (!raw) return fallback;
-  const parsed = Number.parseInt(raw, 10);
-  if (!Number.isFinite(parsed) || parsed <= 0 || parsed.toString() !== raw) {
-    throw new Error(`${name} must be a positive integer`);
-  }
-  return parsed;
-}
-
-function parseWarmImageMaintenanceScope(value: string | undefined): WarmImageMaintenanceScope {
-  if (!value) return 'sandbox';
-  if (value === 'sandbox' || value === 'all') return value;
-  throw new Error('AUTOPOD_WARM_IMAGE_MAINTENANCE_SCOPE must be "sandbox" or "all"');
-}
-
 const authModule: AuthModule = createConfiguredAuthModule();
 
 const worktreeManager = new LocalWorktreeManager({
@@ -529,39 +507,16 @@ if (docker) {
   imageBuilder = new ImageBuilder({ docker, acr, profileStore });
   logger.info(
     { acrRegistry: ACR_REGISTRY_URL ?? null, mode: acr ? 'acr-push' : 'local-only' },
-    'Image warming enabled',
+    'Environment image preparation enabled',
   );
 }
 
-let warmImageMaintenanceJob: WarmImageMaintenanceJob | undefined;
-const warmImageMaintenanceEnabled = parseBooleanEnv(
-  'AUTOPOD_WARM_IMAGE_MAINTENANCE',
-  Boolean(ACR_REGISTRY_URL),
-);
-if (warmImageMaintenanceEnabled) {
-  if (!imageBuilder) {
-    logger.warn(
-      'Warm-image maintenance requested but image warming is not configured. Start with Docker enabled to run the maintenance scheduler.',
-    );
-  } else {
-    const { DEFAULT_WARM_IMAGE_MAINTENANCE_INTERVAL_MS, createWarmImageMaintenanceJob } =
-      await import('./images/warm-image-maintenance.js');
-    const intervalMs = parsePositiveIntegerEnv(
-      'AUTOPOD_WARM_IMAGE_MAINTENANCE_INTERVAL_MS',
-      DEFAULT_WARM_IMAGE_MAINTENANCE_INTERVAL_MS,
-    );
-    const scope = parseWarmImageMaintenanceScope(process.env.AUTOPOD_WARM_IMAGE_MAINTENANCE_SCOPE);
-    warmImageMaintenanceJob = createWarmImageMaintenanceJob({
-      profileStore,
-      imageBuilder,
-      logger: logger.child({ component: 'warm-image-maintenance' }),
-      intervalMs,
-      scope,
-      githubAuth,
-      azureDevOpsAuth,
-    });
-    logger.info({ intervalMs, scope }, 'Warm-image maintenance configured');
-  }
+// Software is pinned by environment revision and prepared on demand. The old
+// profile scheduler rebuilt repository-containing images with source credentials.
+if (process.env.AUTOPOD_WARM_IMAGE_MAINTENANCE) {
+  logger.warn(
+    'AUTOPOD_WARM_IMAGE_MAINTENANCE is retired. Composable environments prepare software images on demand.',
+  );
 }
 
 const hostBrowserRunner = createHostBrowserRunner(logger);
@@ -649,7 +604,7 @@ if (SANDBOX_SUBSCRIPTION_ID && SANDBOX_RESOURCE_GROUP) {
   );
   if (!ACR_REGISTRY_URL) {
     logger.warn(
-      'Sandbox execution target enabled without ACR_REGISTRY_URL. Warm-image builds will store local Docker tags, and sandbox pods require an ACR-qualified profile.warmImageTag.',
+      'Sandbox execution target enabled without ACR_REGISTRY_URL. Sandbox launch requires a prepared environment image accessible to the backend.',
     );
   }
 }
@@ -725,7 +680,7 @@ const runtimeRegistry = createRuntimeRegistry([
 const ghPrManager = new GhPrManager({ logger, llmDeps, githubAuth });
 
 function prManagerFactory(
-  profile: import('@autopod/shared').Profile,
+  profile: PodExecutionSettings,
 ): import('./interfaces/pr-manager.js').PrManager | null {
   if (profile.prProvider === 'ado') {
     if (!profile.repoUrl) {
@@ -795,7 +750,39 @@ const workspaceCheckpointController = new WorkspaceCheckpointController({
     logger.error({ podId, ageMs }, 'Sandbox durability degraded'),
 });
 
+const configurationHostPath =
+  process.env.AUTOPOD_CONFIGURATION_HOST_FILE ??
+  path.join(os.homedir(), '.autopod', 'configuration-host.json');
+const configuration = createHostConfigurationComponents({
+  db,
+  logger,
+  pods: podRepo,
+  accounts: providerAccountStore,
+  audit: actionAuditRepo,
+  cipher: credentialsCipher,
+  githubAuth,
+  azureDevOpsAuth,
+  images: imageBuilder,
+  reviewerManager: (target) => containerManagerFactory.get(target),
+  readSnapshotArchive: (input) => worktreeManager.readSnapshotArchive(input),
+  network: networkManager,
+  docker,
+  sandboxEnabled: !!sandboxContainerManager,
+  sandboxDefaultTier: SANDBOX_TIER ?? 'L',
+  settings: hostConfigurationSettingsSchema.parse(
+    fs.existsSync(configurationHostPath)
+      ? JSON.parse(fs.readFileSync(configurationHostPath, 'utf8'))
+      : {},
+  ),
+  podManager: () => podManager,
+  // Source release gate: do not offer new admission until remaining callers and the cutover
+  // entry point are implemented. A configuration file cannot bypass this incomplete cutover.
+  admissionReady: () => configurationCutoverReadiness(db, false),
+});
+await configuration.recover();
+
 podManager = createPodManager({
+  launchConfiguration: configuration.launchConfiguration,
   podRepo,
   providerAttemptRepo,
   escalationRepo,
@@ -845,7 +832,7 @@ podManager = createPodManager({
   logger,
 });
 
-function makeActionEngine(_profile: import('@autopod/shared').Profile) {
+function makeActionEngine(_profile: PodExecutionSettings) {
   return createActionEngine({
     registry: actionRegistry,
     auditRepo: actionAuditRepo,
@@ -869,25 +856,30 @@ const scanCoordinator = createScanCoordinator({
   collector: { auditLockfile: auditNpmLockfile },
   logger,
   async prepare(job, reportId) {
-    const profile = profileStore.get(job.profileName);
-    if (!profile.repoUrl || !job.scan) throw new Error('Scan repository or policy unavailable');
-    const repository = new URL(profile.repoUrl);
+    const config = await configuration.scanLaunches.prepare(job, reportId);
+    const source = config.repository?.config;
+    if (!source || !job.scan) throw new Error('Scan repository or policy unavailable');
+    const repository = new URL(source.remote);
     repository.username = '';
     repository.password = '';
     repository.search = '';
     repository.hash = '';
-    if (profile.prProvider !== 'ado' && repository.hostname !== 'github.com')
+    if (source.provider === 'github' && repository.hostname !== 'github.com')
       throw new Error('Scan repository host does not match GitHub credential authority');
     const judge =
       job.scan.judgment === 'bounded'
-        ? createBoundedScanJudge(profile, llmDeps, logger)
+        ? createFrozenScanJudge(config, providerAccountStore, logger, () =>
+            configuration.resolution.assertCapabilities(config),
+          )
         : undefined;
     const pat =
-      profile.prProvider === 'ado'
+      source.provider === 'ado'
         ? await azureDevOpsAuth.getToken()
-        : (await githubAuth.resolveCredential()).token;
+        : source.provider === 'github'
+          ? (await githubAuth.resolveCredential()).token
+          : undefined;
     const workdir = await worktreeManager.create({
-      repoUrl: profile.repoUrl,
+      repoUrl: source.remote,
       branch: `autopod/scan-${reportId}`,
       baseBranch: job.scan.baseRef,
       startBranch: job.scan.headRef,
@@ -903,6 +895,7 @@ const scanCoordinator = createScanCoordinator({
   },
 });
 const scheduledJobManager = createScheduledJobManager({
+  launch: configuration.launchScheduled,
   scheduledJobRepo,
   scheduledJobTemplateRepo,
   scanCoordinator,
@@ -914,6 +907,7 @@ const scheduledJobScheduler = createScheduledJobScheduler(scheduledJobManager, l
 
 // Pod bridge for MCP escalation
 const podBridge = createSessionBridge({
+  scopedTools: configuration.scopedTools.get,
   podManager,
   podRepo,
   eventBus,
@@ -988,6 +982,7 @@ qualityScoreRecorder.start();
 // Memory candidate recorder: background LLM extraction of durable lessons from
 // agent pod outcomes. Fail-soft — never affects pod lifecycle.
 const memoryCandidateRecorder = createMemoryCandidateRecorder({
+  launchContext: (pod) => podManager.getLaunchMemoryContext(pod),
   eventBus,
   podRepo,
   profileStore,
@@ -1014,6 +1009,7 @@ const ISSUE_WATCHER_POLL_INTERVAL = Number.parseInt(
   10,
 );
 const issueWatcherService = createIssueWatcherService({
+  launches: configuration.watcherLaunches,
   profileStore,
   podManager,
   eventBus,
@@ -1103,6 +1099,8 @@ if (managedRuntime) await managedRuntime.resume();
 
 // Server
 const app = await createServer({
+  configuration: configuration.routes,
+  pim: configuration.scopedTools.pimRoutes,
   authModule,
   managed: managedRuntime ?? composeDarkManagedCli(managedCliConfig, db, DB_PATH),
   podManager,
@@ -1139,6 +1137,7 @@ const app = await createServer({
   pendingOverrideRepo,
   scheduledJobManager,
   scanOperatorService: createScanOperatorService({
+    configuration: configuration.scanLaunches,
     reports: scanReportRepo,
     jobs: scheduledJobRepo,
     profiles: profileStore,
@@ -1209,7 +1208,6 @@ screenshotRetention.start();
 
 // Start scheduled job scheduler AFTER server is listening
 scheduledJobScheduler.start();
-warmImageMaintenanceJob?.start();
 
 // Reconcile sandbox pods after startup (non-blocking — errors are logged, not fatal)
 if (sandboxContainerManager) {
@@ -1242,6 +1240,8 @@ try {
   const { reconcileLocalSessions } = await import('./pods/local-reconciler.js');
   const result = await reconcileLocalSessions({
     podRepo,
+    readNativeGoal: configuration.launchConfiguration.goals?.get,
+    finishCancelledGoal: (id) => podManager.killSession(id),
     eventBus,
     containerManager,
     enqueueSession: (id) => podQueue.enqueue(id),
@@ -1316,7 +1316,6 @@ async function shutdown(signal: string) {
 
   // Stop scheduled job scheduler
   scheduledJobScheduler.stop();
-  warmImageMaintenanceJob?.stop();
 
   // Stop perf-mark cleaner
   clearInterval(perfClearTimer);

@@ -1,6 +1,7 @@
-import type { Profile, ProviderCredentials } from '@autopod/shared';
+import type { ProviderCredentials } from '@autopod/shared';
 import type { Logger } from 'pino';
 import type { ContainerManager } from '../interfaces/container-manager.js';
+import type { PodExecutionSettings } from '../interfaces/pod-execution-settings.js';
 import {
   ContainerReviewerUnavailableError,
   resolveContainerReviewer,
@@ -151,13 +152,13 @@ function isOpenAiSurface(creds: ProviderCredentials | null | undefined): boolean
  * model as 'auto' so the container Codex runner omits `--model` and lets the CLI
  * pick the account's supported default instead of forcing an unsupported one.
  */
-function usesChatGptReviewerAuth(profile: Profile): boolean {
+function usesChatGptReviewerAuth(profile: PodExecutionSettings): boolean {
   const creds = profile.providerCredentials;
   return creds?.provider === 'openai' && creds.authMode === 'chatgpt';
 }
 
 export async function createProfileMemoryReviewer(
-  profile: Profile,
+  profile: PodExecutionSettings,
   reviewerModel: string,
   logger: Logger,
   options: { container?: ContainerMemoryReviewerOptions } = {},
@@ -175,7 +176,7 @@ export async function createProfileMemoryReviewer(
 }
 
 async function createContainerFirstMemoryReviewer(
-  profile: Profile,
+  profile: PodExecutionSettings,
   reviewerModel: string,
   logger: Logger,
   container: ContainerMemoryReviewerOptions,
@@ -268,7 +269,7 @@ async function createContainerFirstMemoryReviewer(
 }
 
 async function safeCreateDaemonMemoryReviewer(
-  profile: Profile,
+  profile: PodExecutionSettings,
   reviewerModel: string,
   logger: Logger,
 ): Promise<MemoryReviewerResult> {
@@ -283,7 +284,7 @@ async function safeCreateDaemonMemoryReviewer(
 }
 
 async function createDaemonMemoryReviewer(
-  profile: Profile,
+  profile: PodExecutionSettings,
   reviewerModel: string,
   logger: Logger,
 ): Promise<MemoryReviewerResult> {

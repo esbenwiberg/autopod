@@ -1,4 +1,5 @@
 export interface HistoryQuery {
+  repositoryId?: string;
   profileName?: string;
   since?: string;
   limit?: number;

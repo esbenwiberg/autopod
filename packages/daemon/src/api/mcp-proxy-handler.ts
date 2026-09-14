@@ -8,6 +8,8 @@ import { isPrivateUrl } from './ssrf-guard.js';
 export interface McpProxyConfig {
   /** Map of podId → injected MCP servers for that pod */
   getServersForPod: (podId: string) => InjectedMcpServer[];
+  /** Resolves only the requested server's current scoped credentials. */
+  getServerForPod?: (podId: string, name: string) => Promise<InjectedMcpServer | undefined>;
   /** Content processing config (PII + quarantine) */
   contentProcessing?: ProcessContentConfig;
   safetyEventsRepo?: SafetyEventsRepository;
@@ -40,10 +42,11 @@ export function mcpProxyHandler(app: FastifyInstance, config: McpProxyConfig): v
       const { serverName, podId } = request.params as { serverName: string; podId: string };
 
       // Find the injected server for this pod
-      const servers = getServersForPod(podId);
-      const server = servers.find((s) => s.name === serverName);
+      const server = config.getServerForPod
+        ? await config.getServerForPod(podId, serverName)
+        : getServersForPod(podId).find((s) => s.name === serverName);
 
-      if (!server) {
+      if (!server || server.type === 'stdio') {
         log.warn({ podId, serverName }, 'MCP proxy: server not found');
         return reply.status(404).send({ error: `MCP server '${serverName}' not found for pod` });
       }
@@ -87,12 +90,27 @@ export function mcpProxyHandler(app: FastifyInstance, config: McpProxyConfig): v
                 ? JSON.stringify(request.body)
                 : undefined,
             signal: controller.signal,
+            redirect: 'error',
           });
 
-          clearTimeout(timeout);
-
-          // Read the response
-          const responseText = await response.text();
+          // Keep the deadline active while reading; a provider cannot grow an unbounded body.
+          const chunks: Uint8Array[] = [];
+          let size = 0;
+          const reader = response.body?.getReader();
+          if (reader) {
+            try {
+              while (true) {
+                const chunk = await reader.read();
+                if (chunk.done) break;
+                size += chunk.value.byteLength;
+                if (size > 8 * 1024 * 1024) throw new Error('MCP response exceeds 8 MiB');
+                chunks.push(chunk.value);
+              }
+            } finally {
+              await reader.cancel().catch(() => {});
+            }
+          }
+          const responseText = Buffer.concat(chunks).toString('utf8');
 
           // Apply content processing (PII + quarantine) to the response
           let processedText = responseText;
@@ -142,9 +160,11 @@ export function mcpProxyHandler(app: FastifyInstance, config: McpProxyConfig): v
           clearTimeout(timeout);
         }
       } catch (err) {
-        const message = err instanceof Error ? err.message : String(err);
-        log.error({ err, podId, serverName }, 'MCP proxy: request failed');
-        return reply.status(502).send({ error: `MCP proxy error: ${message}` });
+        log.error(
+          { podId, serverName, errorType: err instanceof Error ? err.name : 'unknown' },
+          'MCP proxy: request failed',
+        );
+        return reply.status(502).send({ error: 'MCP provider request failed' });
       }
     },
   );

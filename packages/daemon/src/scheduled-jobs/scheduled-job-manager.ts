@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { AutopodError, generateId } from '@autopod/shared';
+import { AutopodError, generateId, savedLaunchSelectionSchema } from '@autopod/shared';
 import type {
   CreateScheduledJobRequest,
   CreateScheduledJobTemplateRequest,
@@ -12,6 +12,7 @@ import type {
 } from '@autopod/shared';
 import cronParser from 'cron-parser';
 import type { Logger } from 'pino';
+import { atomicPodChange } from '../db/unit-of-work.js';
 import type { EventBus } from '../pods/event-bus.js';
 import type { PodManager } from '../pods/pod-manager.js';
 import {
@@ -37,6 +38,7 @@ export interface ScheduledJobManagerDeps {
   eventBus: EventBus;
   logger: Logger;
   scanCoordinator?: { collect(job: ScheduledJob, runKey?: string): Promise<ScheduledScanReport> };
+  launch?: (job: ScheduledJob, task: string, runKey: string) => Promise<Pod>;
 }
 
 export interface ScheduledJobManager {
@@ -45,10 +47,10 @@ export interface ScheduledJobManager {
   getTemplate(id: string): ScheduledJobTemplate;
   updateTemplate(id: string, req: UpdateScheduledJobTemplateRequest): ScheduledJobTemplate;
   deleteTemplate(id: string): void;
-  create(req: CreateScheduledJobRequest): ScheduledJob;
+  create(req: CreateScheduledJobRequest, ownerUserId?: string): ScheduledJob;
   list(): ScheduledJob[];
   get(id: string): ScheduledJob;
-  update(id: string, req: UpdateScheduledJobRequest): ScheduledJob;
+  update(id: string, req: UpdateScheduledJobRequest, ownerUserId?: string): ScheduledJob;
   delete(id: string): void;
   runCatchup(id: string): Promise<Pod | ScheduledScanReport>;
   skipCatchup(id: string): void;
@@ -85,6 +87,21 @@ export function createScheduledJobManager(deps: ScheduledJobManagerDeps): Schedu
     }
     const template = scheduledJobTemplateRepo.getOrThrow(job.templateId);
     const task = renderScheduledJobPrompt(template.prompt, template.fields, job.fieldValues);
+    if (job.launch) {
+      if (!deps.launch || !job.ownerUserId)
+        throw new AutopodError(
+          'Composable scheduled launch is unavailable',
+          'CONFIG_EXECUTION_UNAVAILABLE',
+          503,
+        );
+      return deps.launch(job, task, runKey);
+    }
+    if (deps.launch || !job.profileName)
+      throw new AutopodError(
+        'Convert the scheduled repository and preset selection before launching',
+        'SCHEDULE_CONVERSION_REQUIRED',
+        409,
+      );
     return podManager.createSession(
       {
         profileName: job.profileName,
@@ -131,31 +148,36 @@ export function createScheduledJobManager(deps: ScheduledJobManagerDeps): Schedu
       scheduledJobTemplateRepo.delete(id);
     },
 
-    create(req: CreateScheduledJobRequest): ScheduledJob {
-      validateCronExpression(req.cronExpression);
-      const nextRunAt = computeNextRunAt(req.cronExpression);
-      const id = generateId();
-      const template =
-        req.templateId !== undefined
-          ? scheduledJobTemplateRepo.getOrThrow(req.templateId)
-          : createLegacyTemplate(req);
-      const fieldValues = normalizeFieldValues(req.fieldValues);
-      validateFieldValuesForTemplate(template.fields, fieldValues);
+    create(req: CreateScheduledJobRequest, ownerUserId?: string): ScheduledJob {
+      return atomicPodChange(scheduledJobRepo, () => {
+        validateLaunch(req, ownerUserId);
+        validateCronExpression(req.cronExpression);
+        const nextRunAt = computeNextRunAt(req.cronExpression);
+        const id = generateId();
+        const template =
+          req.templateId !== undefined
+            ? scheduledJobTemplateRepo.getOrThrow(req.templateId)
+            : createLegacyTemplate(req);
+        const fieldValues = normalizeFieldValues(req.fieldValues);
+        validateFieldValuesForTemplate(template.fields, fieldValues);
 
-      return scheduledJobRepo.insert({
-        id,
-        name: template.name,
-        templateId: template.id,
-        profileName: req.profileName,
-        task: template.prompt,
-        fieldValues,
-        scan: req.scan,
-        cronExpression: req.cronExpression,
-        enabled: req.enabled ?? true,
-        nextRunAt,
-        lastRunAt: null,
-        lastPodId: null,
-        catchupPending: false,
+        return scheduledJobRepo.insert({
+          id,
+          name: template.name,
+          templateId: template.id,
+          profileName: req.profileName ?? null,
+          launch: req.launch,
+          ownerUserId: req.launch ? ownerUserId : null,
+          task: template.prompt,
+          fieldValues,
+          scan: req.scan,
+          cronExpression: req.cronExpression,
+          enabled: req.enabled ?? true,
+          nextRunAt,
+          lastRunAt: null,
+          lastPodId: null,
+          catchupPending: false,
+        });
       });
     },
 
@@ -167,56 +189,77 @@ export function createScheduledJobManager(deps: ScheduledJobManagerDeps): Schedu
       return scheduledJobRepo.getOrThrow(id);
     },
 
-    update(id: string, req: UpdateScheduledJobRequest): ScheduledJob {
-      const job = scheduledJobRepo.getOrThrow(id);
-      const changes: Partial<ScheduledJob> = {};
-      if (req.scan !== undefined) changes.scan = req.scan;
-      let template =
-        req.templateId !== undefined
-          ? scheduledJobTemplateRepo.getOrThrow(req.templateId)
-          : scheduledJobTemplateRepo.getOrThrow(job.templateId);
-
-      if (req.name !== undefined || req.task !== undefined) {
-        const fields = template.fields;
-        validateTemplatePrompt(req.task ?? template.prompt, fields);
-        template = scheduledJobTemplateRepo.update(template.id, {
-          name: req.name,
-          prompt: req.task,
-        });
-      }
-
-      if (req.templateId !== undefined) {
-        changes.templateId = template.id;
-        changes.name = template.name;
-        changes.task = template.prompt;
-      } else if (req.name !== undefined || req.task !== undefined) {
-        changes.name = template.name;
-        changes.task = template.prompt;
-      }
-
-      if (req.fieldValues !== undefined) {
-        const fieldValues = normalizeFieldValues(req.fieldValues);
-        validateFieldValuesForTemplate(template.fields, fieldValues);
-        changes.fieldValues = fieldValues;
-      } else if (req.templateId !== undefined) {
-        const fieldValues = filterFieldValuesForTemplate(template.fields, job.fieldValues);
-        validateFieldValuesForTemplate(template.fields, fieldValues);
-        changes.fieldValues = fieldValues;
-      }
-
-      if (req.profileName !== undefined) changes.profileName = req.profileName;
-      if (req.enabled !== undefined) changes.enabled = req.enabled;
-
-      if (req.cronExpression !== undefined) {
-        validateCronExpression(req.cronExpression);
-        changes.cronExpression = req.cronExpression;
-        // Only recompute nextRunAt if cron changed
-        if (req.cronExpression !== job.cronExpression) {
-          changes.nextRunAt = computeNextRunAt(req.cronExpression);
+    update(id: string, req: UpdateScheduledJobRequest, ownerUserId?: string): ScheduledJob {
+      return atomicPodChange(scheduledJobRepo, () => {
+        const job = scheduledJobRepo.getOrThrow(id);
+        if (req.launch || req.profileName) validateLaunch(req, job.ownerUserId ?? ownerUserId);
+        if (req.scan !== undefined)
+          validateLaunch(
+            {
+              launch: req.launch ?? (req.profileName ? null : job.launch),
+              profileName: req.profileName ?? (req.launch ? null : job.profileName),
+              scan: req.scan,
+            },
+            job.ownerUserId ?? ownerUserId,
+          );
+        const changes: Partial<ScheduledJob> = {};
+        if (req.launch) {
+          changes.launch = savedLaunchSelectionSchema.parse(req.launch);
+          changes.profileName = null;
+          changes.ownerUserId = job.ownerUserId ?? ownerUserId;
         }
-      }
+        if (req.profileName) {
+          changes.launch = null;
+          changes.ownerUserId = null;
+        }
+        if (req.scan !== undefined) changes.scan = req.scan;
+        let template =
+          req.templateId !== undefined
+            ? scheduledJobTemplateRepo.getOrThrow(req.templateId)
+            : scheduledJobTemplateRepo.getOrThrow(job.templateId);
 
-      return scheduledJobRepo.update(id, changes);
+        if (req.name !== undefined || req.task !== undefined) {
+          const fields = template.fields;
+          validateTemplatePrompt(req.task ?? template.prompt, fields);
+          template = scheduledJobTemplateRepo.update(template.id, {
+            name: req.name,
+            prompt: req.task,
+          });
+        }
+
+        if (req.templateId !== undefined) {
+          changes.templateId = template.id;
+          changes.name = template.name;
+          changes.task = template.prompt;
+        } else if (req.name !== undefined || req.task !== undefined) {
+          changes.name = template.name;
+          changes.task = template.prompt;
+        }
+
+        if (req.fieldValues !== undefined) {
+          const fieldValues = normalizeFieldValues(req.fieldValues);
+          validateFieldValuesForTemplate(template.fields, fieldValues);
+          changes.fieldValues = fieldValues;
+        } else if (req.templateId !== undefined) {
+          const fieldValues = filterFieldValuesForTemplate(template.fields, job.fieldValues);
+          validateFieldValuesForTemplate(template.fields, fieldValues);
+          changes.fieldValues = fieldValues;
+        }
+
+        if (req.profileName !== undefined) changes.profileName = req.profileName;
+        if (req.enabled !== undefined) changes.enabled = req.enabled;
+
+        if (req.cronExpression !== undefined) {
+          validateCronExpression(req.cronExpression);
+          changes.cronExpression = req.cronExpression;
+          // Only recompute nextRunAt if cron changed
+          if (req.cronExpression !== job.cronExpression) {
+            changes.nextRunAt = computeNextRunAt(req.cronExpression);
+          }
+        }
+
+        return scheduledJobRepo.update(id, changes);
+      });
     },
 
     delete(id: string): void {
@@ -366,6 +409,45 @@ export function createScheduledJobManager(deps: ScheduledJobManagerDeps): Schedu
       }
     },
   };
+
+  function validateLaunch(
+    req: Pick<CreateScheduledJobRequest, 'profileName' | 'launch' | 'scan'>,
+    ownerUserId?: string,
+  ) {
+    if (!!req.profileName === !!req.launch)
+      throw new AutopodError(
+        'Select exactly one launch configuration',
+        'SCHEDULE_LAUNCH_REQUIRED',
+        400,
+      );
+    if (req.launch) {
+      savedLaunchSelectionSchema.parse(req.launch);
+      if (!ownerUserId)
+        throw new AutopodError(
+          'Authenticated schedule owner is required',
+          'SCHEDULE_OWNER_REQUIRED',
+          400,
+        );
+      if (!deps.launch)
+        throw new AutopodError(
+          'Composable scheduled launch is unavailable',
+          'CONFIG_EXECUTION_UNAVAILABLE',
+          503,
+        );
+      if (req.scan && (!deps.scanCoordinator || !('repositoryId' in req.launch)))
+        throw new AutopodError(
+          'Scans require an enrolled repository and a configured collector',
+          'SCAN_CONFIGURATION_UNAVAILABLE',
+          409,
+        );
+    } else if (deps.launch) {
+      throw new AutopodError(
+        'Select a repository and presets for this schedule',
+        'SCHEDULE_CONVERSION_REQUIRED',
+        409,
+      );
+    }
+  }
 
   function createLegacyTemplate(req: CreateScheduledJobRequest): ScheduledJobTemplate {
     if (!req.name || !req.task) {

@@ -218,6 +218,27 @@ describe('DockerSidecarManager', () => {
   });
 
   describe('waitHealthy()', () => {
+    it('waits for application readiness even when the container and port are available', async () => {
+      let probe = 0;
+      container.exec = vi.fn().mockImplementation(() =>
+        Promise.resolve({
+          start: vi.fn().mockResolvedValue(Readable.from([])),
+          inspect: vi.fn().mockResolvedValue({ ExitCode: probe++ === 0 ? 1 : 0 }),
+        }),
+      );
+      const spec: SidecarSpec = {
+        ...daggerSpec,
+        type: 'postgres',
+        name: 'db',
+        privileged: false,
+        healthCheck: { ...daggerSpec.healthCheck, command: ['pg_isready', '-t', '2'] },
+      };
+      await manager.waitHealthy({ containerId: 'x', name: 'db' }, spec);
+      expect(container.exec).toHaveBeenCalledTimes(2);
+      expect(container.exec).toHaveBeenLastCalledWith(
+        expect.objectContaining({ Cmd: ['pg_isready', '-t', '2'] }),
+      );
+    });
     it('returns once the container reports Running AND the TCP port is listening', async () => {
       container.inspect = vi.fn().mockResolvedValue({ State: { Running: true, ExitCode: 0 } });
       container.exec = mockExec(0);
