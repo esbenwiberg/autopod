@@ -95,6 +95,25 @@ it('the objective cannot override reviewed model or runtime arguments', async ()
   expect(launch.argv.slice(-2)).toEqual(['--', '--model=unreviewed-model']);
   expect(launch.argv.slice(0, -2)).toEqual(f.binding.command);
 });
+it('enables the nested worker network only when the effective grant has destinations', async () => {
+  const f = fixture();
+  f.request.profileSnapshot.scope.network = {
+    profileId: 'fixture-package-registry',
+    destinations: ['registry.npmjs.org'],
+  };
+  f.request.effectiveGrant.scope.network = {
+    profileId: 'fixture-package-registry',
+    destinations: ['registry.npmjs.org'],
+  };
+  f.config.allowedHosts = ['registry.npmjs.org'];
+  f.config.networkPolicyMode = 'restricted';
+
+  await f.runtime.ensure('pod-one', f.request, () => {});
+
+  const launchCall = f.exec.mock.calls[2] as unknown as [string, string[]];
+  const launch = JSON.parse(launchCall[1][4]!);
+  expect(launch.argv.slice(-3)).toEqual(['--network-enabled', '--', f.request.task.objective]);
+});
 it.each(['write', 'host', 'network', 'route', 'quota'] as const)(
   'rejects %s expansion before allocation',
   async (kind) => {

@@ -26,9 +26,9 @@ AGENT_FAILURE_REASONS = {
 REPORT_MAX_REQUEST = 128 * 1024
 AGENT_MAX_REQUEST = 8 * 1024 * 1024
 # A validated agent-mode SSE transcript includes reasoning and tool events in
-# addition to the final artifact. The host gateway remains the authority for the
-# exact per-transport bound and never writes more than this hard channel ceiling.
-MAX_RESPONSE = 1024 * 1024
+# addition to the final artifact. Keep this ceiling aligned with the host
+# gateway's AGENT_MAXIMUM_RESPONSE_BYTES bound.
+MAX_RESPONSE = 8 * 1024 * 1024
 
 
 def atomic(file, data):

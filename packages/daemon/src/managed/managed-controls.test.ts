@@ -254,6 +254,40 @@ it.each(['artifact-export-incomplete', 'agent-runtime-failed'])(
     }
   },
 );
+it('cleanup releases an expired nonzero-exit runtime without waiting for impossible output', async () => {
+  const f = fixture();
+  try {
+    const service = f.service();
+    const controls = new ManagedControls(service);
+    const handle = await service.start('installation-one', f.request);
+    service.db
+      .prepare(
+        "UPDATE managed_pods SET observed_exit=1,state='killed',exit_code=-15 WHERE pod_id=?",
+      )
+      .run(handle.podId);
+    f.runtime.cleanup = async () => true;
+
+    const result = await controls.control(
+      'installation-one',
+      handle.podId,
+      {
+        schemaVersion: 1,
+        dispatcherAttemptId: f.request.dispatcherAttemptId,
+        grantId: f.request.effectiveGrant.grantId,
+        grantRevision: 1,
+        operation: 'cleanup',
+      },
+      'cleanup-expired-nonzero-exit',
+    );
+
+    expect(result.cleanup).toBe('observed');
+    expect(
+      service.db.prepare('SELECT 1 FROM artifact_exports WHERE pod_id=?').get(handle.podId),
+    ).toBeUndefined();
+  } finally {
+    f.close();
+  }
+});
 
 it('projects only bounded provider failure diagnostics into ordinary status', async () => {
   const f = fixture();

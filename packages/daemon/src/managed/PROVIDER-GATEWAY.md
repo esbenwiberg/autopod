@@ -113,10 +113,11 @@ validation command projection. The request must then make an explicit per-attemp
 `off` or `deterministic` choice and bind the exact projection digest. `off` executes
 no validation commands; a missing projection preserves the legacy no-AutoPod-validation
 behavior. Validation projections on read-only or non-implementation stages are rejected.
-Startup rejects duplicate profile IDs or digests, mutable images, relative
-mirrors, route or revision drift, network destinations, widened identity bindings,
-and source stages without the reviewed source broker. No profile is inferred from
-model, account, runtime, target, or repository values.
+Startup rejects duplicate profile IDs or digests, mutable images, relative mirrors,
+route or revision drift, widened identity bindings, and source stages without the
+reviewed source broker. Network destinations are bound to each digest-pinned profile
+snapshot and enforced as a sandbox allowlist; all other egress remains denied. No
+profile is inferred from model, account, runtime, target, or repository values.
 
 The agent channel admits request/time profiles only. It preserves the Codex
 Responses tool protocol across several bounded provider requests while continuing

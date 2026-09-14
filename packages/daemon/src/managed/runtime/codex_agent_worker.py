@@ -116,6 +116,7 @@ parser.add_argument('--sandbox', choices=('read-only', 'workspace-write'), requi
 parser.add_argument('--endpoint', default='http://127.0.0.1:4187/v1')
 parser.add_argument('--input-root', action='append', default=[])
 parser.add_argument('--github-repository')
+parser.add_argument('--network-enabled', action='store_true')
 parser.add_argument('objective', nargs='*')
 args = parser.parse_args()
 endpoint = urlparse(args.endpoint)
@@ -143,7 +144,9 @@ with tempfile.TemporaryDirectory(prefix='managed-codex-') as temporary:
     instructions = Path(temporary) / 'instructions.md'
     instructions.write_text(
         'Work only in the supplied repository and output directory. Follow repository instructions. '
-        'Do not use network access. Do not push, merge, publish, deploy, or access credentials. '
+        + ('Network access is restricted to the reviewed outer allowlist. Do not attempt other destinations. '
+           if args.network_enabled else 'Do not use network access. ')
+        + 'Do not push, merge, publish, deploy, or access credentials. '
         f'Return the complete work product as your final response; the reviewed Codex launcher '
         f'captures that response at {output}. Do not edit that output path directly. '
         'Keep every individual tool call input below 6 KiB. Split large patches and commands '
@@ -169,14 +172,14 @@ with tempfile.TemporaryDirectory(prefix='managed-codex-') as temporary:
         # The outer reviewed container envelope still denies external egress.
         # This only lets the nested Codex sandbox reach the credential-free
         # loopback GitHub broker when that exact identity is present.
-        'sandbox_workspace_write.network_access': bool(args.github_repository),
+        'sandbox_workspace_write.network_access': args.network_enabled or bool(args.github_repository),
         'model_instructions_file': str(instructions),
         'model_reasoning_effort': args.reasoning,
         'web_search': 'disabled', 'otel.exporter': 'none',
         'otel.metrics_exporter': 'none', 'otel.trace_exporter': 'none',
     }
     captured = Path(temporary) / 'last-message.md'
-    codex_sandbox = 'workspace-write' if args.github_repository else args.sandbox
+    codex_sandbox = 'workspace-write' if args.network_enabled or args.github_repository else args.sandbox
     command = ['codex', 'exec', '--json', '--sandbox', codex_sandbox,
                '-m', args.model, '-C', str(repository), '--output-last-message', str(captured)]
     for key, value in config.items(): command.extend(['-c', key + '=' + json.dumps(value)])

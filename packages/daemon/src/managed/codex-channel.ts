@@ -187,7 +187,8 @@ export class ContainerCodexChannel implements ManagedWorkerProviderChannel {
     if (canonical(this.route) !== canonical(request.route) || request.route.runtime !== 'codex')
       throw new Error('managed-codex-route-mismatch');
     if (
-      request.effectiveGrant.scope.network.destinations.length ||
+      (request.effectiveGrant.scope.network.destinations.length > 0 &&
+        this.options.mode !== 'agent') ||
       ('maxTokens' in request.effectiveGrant.budget
         ? this.maximumTokens < 2 || this.maximumTokens >= request.effectiveGrant.budget.maxTokens
         : this.maximumTokens !== 0)

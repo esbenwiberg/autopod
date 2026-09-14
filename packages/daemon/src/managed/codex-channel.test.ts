@@ -69,6 +69,10 @@ it('admits a longer source-producing agent only through its explicit reviewed mo
     maxDurationSeconds: 900,
   };
   request.outputs.source.mode = 'draft-pr';
+  request.effectiveGrant.scope.network = {
+    profileId: 'autopod-package-registry',
+    destinations: ['registry.npmjs.org'],
+  };
   // Use the actual manager-shaped fixture rather than exposing provider credentials.
   const manager = { execInContainer: exec } as unknown as ContainerManager;
   const reviewed = new ContainerCodexChannel(manager, request.route, 0, {
@@ -130,11 +134,12 @@ it('installs an agent helper that routes final output through the reviewed Codex
     expect(install?.[1][6]).toContain('Split large patches and commands');
     expect(install?.[1][6]).toContain('into smaller calls before invoking tools');
     expect(install?.[1][6]).toContain("'features.auto_compaction': False");
+    expect(install?.[1][6]).toContain("parser.add_argument('--network-enabled'");
     expect(install?.[1][6]).toContain(
-      "'sandbox_workspace_write.network_access': bool(args.github_repository)",
+      "'sandbox_workspace_write.network_access': args.network_enabled or bool(args.github_repository)",
     );
     expect(install?.[1][6]).toContain(
-      "codex_sandbox = 'workspace-write' if args.github_repository else args.sandbox",
+      "codex_sandbox = 'workspace-write' if args.network_enabled or args.github_repository else args.sandbox",
     );
     expect(install?.[1][6]).toContain(
       "'Continue the same assigned work inside the same managed worker. '",
@@ -764,7 +769,7 @@ async function waitForJson(path: string): Promise<Record<string, unknown>> {
   throw new Error(`timed out waiting for ${path}`);
 }
 
-it('the Python loopback channel carries agent SSE above 64 KiB within its hard ceiling', async () => {
+it('the Python loopback channel carries agent SSE above one MiB within its hard ceiling', async () => {
   const root = mkdtempSync(join(tmpdir(), 'autopod-codex-channel-'));
   chmodSync(root, 0o700);
   const script = fileURLToPath(new URL('./runtime/codex_channel.py', import.meta.url));
@@ -778,7 +783,7 @@ it('the Python loopback channel carries agent SSE above 64 KiB within its hard c
       headers: { 'Content-Type': 'application/json' },
     });
     const request = await waitForJson(join(root, 'channel-request.json'));
-    const body = 'x'.repeat(70 * 1024);
+    const body = 'x'.repeat(1024 * 1024 + 1);
     const responsePath = join(root, 'channel-response.json');
     const temporary = `${responsePath}.fixture`;
     writeFileSync(
