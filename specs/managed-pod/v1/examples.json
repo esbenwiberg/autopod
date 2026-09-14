@@ -1,4 +1,25 @@
 {
+  "ManagedValidationChoice": {
+    "mode": "off",
+    "configurationDigest": "sha256:1111111111111111111111111111111111111111111111111111111111111111"
+  },
+  "ManagedValidationReceipt": {
+    "schemaVersion": 1,
+    "validationId": "validation-fixture",
+    "podId": "fixture",
+    "dispatcherAttemptId": "attempt-research",
+    "executionSpecDigest": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+    "configurationDigest": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+    "mode": "off",
+    "status": "disabled",
+    "candidateDigest": "sha256:2222222222222222222222222222222222222222222222222222222222222222",
+    "newCommit": "3333333333333333333333333333333333333333",
+    "startedAt": 1,
+    "completedAt": 1,
+    "phases": [],
+    "reason": "disabled-by-request",
+    "receiptDigest": "sha256:6f094e2f618c17a68db9326aaae1bd531a1064d6f211eb15e9db4efd844e8c0f"
+  },
   "Route": {
     "providerAccountId": "fixture",
     "model": "fixture",
