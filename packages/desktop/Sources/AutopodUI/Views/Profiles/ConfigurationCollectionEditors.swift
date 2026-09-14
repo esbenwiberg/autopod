@@ -1,6 +1,43 @@
 import AutopodClient
 import SwiftUI
 
+struct ConfigurationSoftwarePackageEditor: View {
+  @Binding var fields: [String: ConfigurationJSON]
+  private var packageType: String {
+    let name = fields["name"]?.string ?? ""
+    if name == "pnpm" || name == "playwright" { return name }
+    return ["npm", "pip", "dotnet"].first { name.hasPrefix("\($0):") } ?? "custom"
+  }
+  var body: some View {
+    VStack(alignment: .leading, spacing: 8) {
+      Picker("Package type", selection: Binding(get: { packageType }, set: { type in
+        fields["name"] = .string(["pnpm", "playwright"].contains(type) ? type : type == "custom" ? "" : "\(type):")
+      })) {
+        Text("pnpm").tag("pnpm")
+        Text("Playwright + Chromium").tag("playwright")
+        Text("npm package").tag("npm")
+        Text("Python package (pip)").tag("pip")
+        Text(".NET tool").tag("dotnet")
+        Text("Custom / existing value").tag("custom")
+      }
+      HStack(alignment: .top) {
+        if !["pnpm", "playwright"].contains(packageType) {
+          VStack(alignment: .leading, spacing: 4) {
+            Text("Package name").font(.caption).foregroundStyle(.secondary)
+            TextField("Package name", text: Binding(get: {
+              let name = fields["name"]?.string ?? ""
+              return packageType == "custom" ? name : String(name.dropFirst(packageType.count + 1))
+            }, set: { name in
+              fields["name"] = .string(packageType == "custom" ? name : "\(packageType):\(name)")
+            }))
+          }
+        }
+        ConfigurationTextValue(title: "Exact version", fields: $fields, key: "version")
+      }
+    }
+  }
+}
+
 struct ConfigurationStringListEditor: View {
   let title: String
   @Binding var values: [ConfigurationJSON]
@@ -55,7 +92,12 @@ struct ConfigurationTextValue: View {
   var body: some View {
     if multiline {
       VStack(alignment: .leading) { Text(title).font(.caption); TextEditor(text: text).font(.system(.body, design: .monospaced)).frame(minHeight: 80) }
-    } else { TextField(title, text: text).textFieldStyle(.roundedBorder) }
+    } else {
+      VStack(alignment: .leading, spacing: 4) {
+        Text(title).font(.caption).foregroundStyle(.secondary)
+        TextField(title, text: text).textFieldStyle(.roundedBorder)
+      }
+    }
   }
 }
 
@@ -104,6 +146,7 @@ struct ProfileExecutionDefaultsEditor: View {
 
 struct RepositorySetupEditor: View {
   @Binding var fields: [String: ConfigurationJSON]
+  @State private var section = "Commands"
   private var deployment: Binding<[String: ConfigurationJSON]> {
     Binding(get: { fields["integrations"]?["deployment"]?.object ?? ["enabled": .bool(false), "source": .string("published-default"), "env": .object([:]), "allowedScripts": .array([])] }, set: { value in
       var integrations = fields["integrations"]?.object ?? [:]; integrations["deployment"] = .object(value); fields["integrations"] = .object(integrations)
@@ -118,17 +161,24 @@ struct RepositorySetupEditor: View {
   }
   var body: some View {
     VStack(alignment: .leading, spacing: 10) {
-      HStack { ConfigurationTextValue(title: "Setup ID", fields: $fields, key: "id"); ConfigurationTextValue(title: "Name", fields: $fields, key: "name") }
+      Picker("Setup settings", selection: $section) {
+        ForEach(["Commands", "Services", "Deployment", "Advanced"], id: \.self) { Text($0).tag($0) }
+      }.pickerStyle(.segmented)
+      if section == "Commands" {
+      ConfigurationTextValue(title: "Setup name", fields: $fields, key: "name")
       ConfigurationTextValue(title: "Default branch", fields: $fields, key: "defaultBranch", optional: true)
       ConfigurationTextValue(title: "Working directory", fields: $fields, key: "buildWorkDir", optional: true)
       ForEach([("validationSetupCommand", "Setup command"), ("buildCommand", "Build command"), ("testCommand", "Test command"), ("lintCommand", "Lint command"), ("startCommand", "Start command")], id: \.0) { key, title in
         ConfigurationTextValue(title: title, fields: $fields, key: key, optional: true)
       }
+      }
+      if section == "Services" {
       ConfigurationObjectListEditor(title: "ADO and Azure log access", values: serviceRules, initial: {
         ["id": .string("access-\(UUID().uuidString.prefix(8).lowercased())"), "service": .string("ado"), "organization": .string(""), "project": .string(""), "repository": .string(""), "operations": .array([.string("code.file")])]
       }) { ServiceAccessRuleEditor(fields: $0) }
-      DisclosureGroup("Deployment") { RepositoryDeploymentEditor(fields: deployment) }
-      DisclosureGroup("Timeouts, paths and integrations") { ConfigurationFieldsEditor(fields: $fields, excluded: ["id", "name", "defaultBranch", "buildWorkDir", "validationSetupCommand", "buildCommand", "testCommand", "lintCommand", "startCommand"]) }
+      }
+      if section == "Deployment" { RepositoryDeploymentEditor(fields: deployment) }
+      if section == "Advanced" { ConfigurationFieldsEditor(fields: $fields, excluded: ["id", "name", "defaultBranch", "buildWorkDir", "validationSetupCommand", "buildCommand", "testCommand", "lintCommand", "startCommand", "integrations"]) }
     }
   }
 }

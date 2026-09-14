@@ -29,9 +29,13 @@ public struct ConfigurationLibraryView: View {
         HStack { Text(kind.label).font(.title2.bold()); Spacer(); Button("New") { editor = EditorTarget(kind: kind, document: nil) }; Button("Refresh") { Task { await actions.reload() } } }
         TextField("Search", text: $search).textFieldStyle(.roundedBorder)
         if let message = error ?? actions.loadError { Text(message).foregroundStyle(.red) }
-        List(actions.list(kind).filter { search.isEmpty || $0.name.localizedCaseInsensitiveContains(search) }) { document in
+        List(actions.list(kind).filter { search.isEmpty || $0.name.localizedCaseInsensitiveContains(search) || $0.libraryTitle.localizedCaseInsensitiveContains(search) }) { document in
           HStack {
-            VStack(alignment: .leading) { Text(document.name).font(.headline); Text("Revision \(document.revision) · \(usageCount(document.id)) references").font(.caption).foregroundStyle(.secondary) }
+            VStack(alignment: .leading, spacing: 4) {
+              Text(document.libraryTitle).font(.headline)
+              if document.kind == .repository { Text(document.payload["remote"]?.string ?? document.name).font(.caption).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle) }
+              Text("Revision \(document.revision) · Used by \(usageCount(document.id)) configurations").font(.caption).foregroundStyle(.secondary)
+            }
             Spacer()
             Button("Edit") { editor = EditorTarget(kind: kind, document: document) }
             Button("Archive") { Task { do { try await actions.archive(document) } catch { self.error = error.localizedDescription } } }.disabled(usageCount(document.id) > 0)
@@ -63,6 +67,10 @@ struct ConfigurationEditorSheet: View {
   @State private var showJSON = false
   @State private var showPim = false
   @State private var accounts: [PublicProviderAccountResponse] = []
+  @State private var selectedSetup = ""
+  @State private var repositoryTab = "Overview"
+  @State private var repositoryChoices: [ConfigurationJSON] = []
+  @State private var discoveringRepositories = false
   init(kind: ConfigurationKind, document: ConfigurationDocument?, actions: LaunchConfigurationActions) {
     self.kind = kind; self.document = document; self.actions = actions
     self._name = State(initialValue: document?.name ?? "")
@@ -70,8 +78,11 @@ struct ConfigurationEditorSheet: View {
   }
   var body: some View {
     VStack(alignment: .leading, spacing: 12) {
-      Text(document == nil ? "New \(kind.label)" : "Edit \(document?.name ?? "")").font(.title2.bold())
-      TextField("Name", text: $name).textFieldStyle(.roundedBorder)
+      Text(document == nil ? "New \(kind.label)" : "Edit \(document?.libraryTitle ?? "")").font(.title2.bold()).lineLimit(1).truncationMode(.middle)
+      TextField(kind == .repository ? "Repository display name" : "Preset name", text: $name).textFieldStyle(.roundedBorder)
+      if kind == .repository, name.contains("://"), let document {
+        Button("Use short name: \(document.libraryTitle)") { name = document.libraryTitle }.font(.caption)
+      }
       if let document { Text("Editing revision \(document.revision). Changes apply to future launches.").font(.caption).foregroundStyle(.secondary) }
       ScrollView {
         VStack(alignment: .leading, spacing: 16) {
@@ -93,30 +104,32 @@ struct ConfigurationEditorSheet: View {
       }
       if let error { Text(error).foregroundStyle(.red).textSelection(.enabled) }
       HStack { Button("Cancel") { dismiss() }; Spacer(); if busy { ProgressView().controlSize(.small) }; Button("Save") { Task { await save() } }.buttonStyle(.borderedProminent).disabled(busy || name.trimmingCharacters(in: .whitespaces).isEmpty) }
-    }.padding(24).frame(width: 760, height: 740).disabled(busy)
+    }.padding(24).frame(width: 760, height: 740).background(Color(nsColor: .windowBackgroundColor)).textFieldStyle(.roundedBorder).disabled(busy)
     .sheet(isPresented: $showPim) { PimSelectionSheet(selected: payload["pim"]?.array?.compactMap(\.object) ?? [], discover: actions.discoverPim) { payload["pim"] = .array($0.map(ConfigurationJSON.object)) } }
     .task { if kind == .ai { do { accounts = try await actions.loadProviderAccounts() } catch { self.error = error.localizedDescription } } }
   }
   private var profileForm: some View {
     VStack(alignment: .leading, spacing: 12) {
-      referencePicker(.environment, key: "environmentId")
-      referencePicker(.ai, key: "aiId")
-      referencePicker(.workflow, key: "workflowId")
-      referencePicker(.githubAccess, key: "githubAccessId", optional: true)
+      ConfigurationSection(title: "Build your profile", subtitle: "Choose reusable presets. A repository selects this profile as its default; you can choose another at launch.") {
+        referencePicker(.environment, key: "environmentId")
+        referencePicker(.ai, key: "aiId")
+        referencePicker(.workflow, key: "workflowId")
+        referencePicker(.githubAccess, key: "githubAccessId", optional: true)
+      }
       GroupBox("Tool packs") { VStack(alignment: .leading) { ForEach(actions.list(.toolPack)) { pack in
         Toggle(pack.name, isOn: Binding(get: { payload["toolPackIds"]?.array?.contains(.string(pack.id)) ?? false }, set: { enabled in
           var values = payload["toolPackIds"]?.array ?? []; values.removeAll { $0 == .string(pack.id) }; if enabled { values.append(.string(pack.id)) }; payload["toolPackIds"] = .array(values)
         }))
       } } }
-      DisclosureGroup("Execution defaults") { ProfileExecutionDefaultsEditor(fields: objectBinding("execution"), capabilities: actions.capabilities) }
+      ConfigurationSection(title: "Execution defaults") { ProfileExecutionDefaultsEditor(fields: objectBinding("execution"), capabilities: actions.capabilities) }
       Button("Choose PIM access · \(payload["pim"]?.array?.count ?? 0) selected") { showPim = true }
       referencePicker(.profile, key: "workerProfileId", optional: true)
     }
   }
   private func referencePicker(_ type: ConfigurationKind, key: String, optional: Bool = false) -> some View {
-    Picker(key == "workerProfileId" ? "Workspace worker profile" : type.label, selection: Binding(get: { payload[key]?.string ?? "" }, set: { payload[key] = $0.isEmpty && optional ? .null : .string($0) })) {
+    Picker(key == "workerProfileId" ? "Workspace worker profile" : key == "usualProfileId" ? "Default profile" : type.label, selection: Binding(get: { payload[key]?.string ?? "" }, set: { payload[key] = $0.isEmpty && optional ? .null : .string($0) })) {
       Text(optional ? "None" : "Choose preset").tag("")
-      ForEach(actions.list(type).filter { $0.id != document?.id }) { Text($0.name).tag($0.id) }
+      ForEach(actions.list(type).filter { $0.id != document?.id }) { Text($0.libraryTitle).tag($0.id) }
     }
   }
   private var aiForm: some View {
@@ -132,15 +145,13 @@ struct ConfigurationEditorSheet: View {
     }
   }
   private func routeEditor(_ route: Binding<[String: ConfigurationJSON]>) -> some View {
-    VStack(alignment: .leading) {
-      Picker("Account", selection: Binding(get: { route.wrappedValue["providerAccountId"]?.string ?? "" }, set: { route.wrappedValue["providerAccountId"] = .string($0) })) {
-        Text("Choose account").tag(""); ForEach(accounts, id: \.id) { Text($0.name).tag($0.id) }
-      }
-      Picker("Runtime", selection: Binding(get: { route.wrappedValue["runtime"]?.string ?? "claude" }, set: { route.wrappedValue["runtime"] = .string($0) })) {
-        Text("Claude").tag("claude"); Text("Codex").tag("codex"); Text("Pi").tag("pi"); Text("Copilot").tag("copilot")
-      }
-      TextField("Model", text: Binding(get: { route.wrappedValue["model"]?.string ?? "" }, set: { route.wrappedValue["model"] = .string($0) }))
-      DisclosureGroup("Reasoning and failover") { ConfigurationFieldsEditor(fields: route, excluded: ["providerAccountId", "runtime", "model"]) }
+    VStack(alignment: .leading, spacing: 14) {
+      ConfigurationAgentTargetEditor(fields: route, accounts: accounts)
+      Stepper("Maximum failover switches: \(Int(route.wrappedValue["maxHops"]?.number ?? 0))", value: Binding(get: { Int(route.wrappedValue["maxHops"]?.number ?? 0) }, set: { route.wrappedValue["maxHops"] = .number(Double($0)) }), in: 0...16)
+      Text("Fallbacks are tried in order. Zero switches disables failover.").font(.caption).foregroundStyle(.secondary)
+      ConfigurationObjectListEditor(title: "Fallback models", values: Binding(get: { route.wrappedValue["failover"]?.array ?? [] }, set: { route.wrappedValue["failover"] = .array($0) }), initial: {
+        Self.initialRoute.filter { !["failover", "maxHops"].contains($0.key) }
+      }) { ConfigurationAgentTargetEditor(fields: $0, accounts: accounts) }
     }.padding(6)
   }
   private var workflowForm: some View {
@@ -149,27 +160,100 @@ struct ConfigurationEditorSheet: View {
       stringPicker("Default intent", key: "intent", values: ["task", "goal"])
       stringPicker("Output", key: "output", values: ["pr", "branch", "artifact", "none"])
       stringPicker("Daemon delivery", key: "completion", values: ["approval", "deliver", "merge"])
-      GroupBox("Validation") { VStack(alignment: .leading) { ForEach(["setup", "lint", "sast", "build", "test", "health", "pages", "facts", "review", "advisory"], id: \.self) { phase in
+      ConfigurationSection(title: "Validation checks") { LazyVGrid(columns: [GridItem(.flexible(), alignment: .leading), GridItem(.flexible(), alignment: .leading)], alignment: .leading, spacing: 10) { ForEach(["setup", "lint", "sast", "build", "test", "health", "pages", "facts", "review", "advisory"], id: \.self) { phase in
         Toggle(phase.capitalized, isOn: Binding(get: { payload["validationPhases"]?.array?.contains(.string(phase)) ?? false }, set: { enabled in var values = payload["validationPhases"]?.array ?? []; values.removeAll { $0 == .string(phase) }; if enabled { values.append(.string(phase)) }; payload["validationPhases"] = .array(values) }))
       } } }
       ConfigurationNumberValue(title: "Whole-pod token limit", fields: $payload, key: "tokenBudget", fallback: 100000, unsetLabel: "No token limit")
       ConfigurationNumberValue(title: "Reviewer token limit", fields: $payload, key: "reviewerTokenBudget", fallback: 10000, unsetLabel: "No separate limit")
-      ConfigurationFieldsEditor(fields: $payload, excluded: ["agentMode", "intent", "output", "completion", "validationPhases", "tokenBudget", "reviewerTokenBudget"])
+      ConfigurationSection(title: "Budgets and delivery") {
+        stringPicker("Budget policy", key: "tokenBudgetPolicy", values: ["soft", "hard"])
+        ConfigurationNumberValue(title: "Budget extensions", fields: $payload, key: "maxBudgetExtensions", fallback: 0, unsetLabel: "Default policy")
+        ConfigurationTextValue(title: "Branch prefix", fields: $payload, key: "branchPrefix")
+        stringPicker("Equivalent work", key: "preflightConflictPolicy", values: ["warn", "block"])
+      }
+      ConfigurationSection(title: "Completion instructions", subtitle: "Optional instructions for the agent when it finishes.") {
+        ConfigurationTextValue(title: "Instructions", fields: $payload, key: "agentDonePrompt", optional: true, multiline: true)
+      }
+      ConfigurationSection(title: "Additional workflow settings") {
+        ConfigurationFieldsEditor(fields: $payload, excluded: ["agentMode", "intent", "output", "completion", "validationPhases", "tokenBudget", "reviewerTokenBudget", "tokenBudgetPolicy", "maxBudgetExtensions", "branchPrefix", "preflightConflictPolicy", "agentDonePrompt"])
+      }
     }
   }
   private var repositoryForm: some View {
     VStack(alignment: .leading, spacing: 12) {
+      Picker("Repository settings", selection: $repositoryTab) {
+        ForEach(["Overview", "Project setups", "Advanced"], id: \.self) { Text($0).tag($0) }
+      }.pickerStyle(.segmented)
+      if repositoryTab == "Overview" {
+      ConfigurationSection(title: "Repository", subtitle: "Repository identity and the shared profile used for new launches.") {
       stringPicker("Source provider", key: "provider", values: ["github", "ado", "git"])
-      TextField("Repository HTTPS URL", text: stringBinding("remote"))
+      if document == nil, payload["provider"]?.string == "github" {
+        RepositoryMultiSelect(repositories: repositoryChoices, selectedIDs: Binding(get: {
+          payload["providerRepositoryId"]?.string.map { [$0] } ?? []
+        }, set: { ids in
+          guard let id = ids.first, let repo = repositoryChoices.first(where: { $0["id"]?.string == id }),
+                let owner = repo["ownerLogin"]?.string, let shortName = repo["name"]?.string else { return }
+          payload["providerRepositoryId"] = .string(id)
+          payload["remote"] = .string("https://github.com/\(owner)/\(shortName).git")
+          name = shortName
+          var setups = payload["setups"]?.array ?? []
+          if setups.count == 1, var setup = setups[0].object {
+            setup["defaultBranch"] = repo["defaultBranch"] ?? .string("main")
+            setups[0] = .object(setup); payload["setups"] = .array(setups)
+          }
+        }), loading: discoveringRepositories, refresh: { Task { await discoverRepositories() } }, singleSelection: true)
+        .task { if repositoryChoices.isEmpty { await discoverRepositories() } }
+      }
+      ConfigurationTextValue(title: "Repository HTTPS URL", fields: $payload, key: "remote")
       referencePicker(.profile, key: "usualProfileId", optional: true)
-      Text("Named project setups contain commands, working directory, branches, paths and registry references.").font(.caption).foregroundStyle(.secondary)
+      }
+      if let profile = actions.list(.profile).first(where: { $0.id == payload["usualProfileId"]?.string }) {
+        ConfigurationSection(title: "Presets from \(profile.name)", subtitle: "This repository uses the selected profile's presets. Edit the profile to change the shared combination.") {
+          ForEach([("environmentId", "Environment"), ("aiId", "AI setup"), ("workflowId", "Workflow"), ("githubAccessId", "GitHub access")], id: \.0) { key, label in
+            LabeledContent(label, value: actions.documents.first(where: { $0.id == profile.payload[key]?.string })?.libraryTitle ?? "None")
+          }
+        }
+      }
+      if payload["usualProfileId"]?.string == nil || payload["usualProfileId"]?.string == "" {
+        Text("Choose a profile to reuse its environment, AI, workflow and access presets. You can choose a different profile at launch.").font(.callout).foregroundStyle(.secondary)
+      }
+      }
+      if repositoryTab == "Project setups" {
+      Text("Project setups hold repository-specific commands and paths. Select one setup to edit.").font(.callout).foregroundStyle(.secondary)
       Picker("Default setup", selection: stringBinding("defaultSetupId")) {
         ForEach(payload["setups"]?.array?.compactMap(\.object) ?? [], id: \.["id"]) { setup in
           Text(setup["name"]?.string ?? "Unnamed setup").tag(setup["id"]?.string ?? "")
         }
       }
-      ConfigurationObjectListEditor(title: "Project setups", values: arrayBinding("setups"), initial: { ["id": .string("setup-\(UUID().uuidString.prefix(8).lowercased())"), "name": .string("New setup"), "defaultBranch": .string("main")] }) { RepositorySetupEditor(fields: $0) }
-      DisclosureGroup("Repository identity and trust") { ConfigurationFieldsEditor(fields: $payload, excluded: ["provider", "remote", "usualProfileId", "setups", "defaultSetupId"]) }
+      repositorySetups
+      }
+      if repositoryTab == "Advanced" {
+        ConfigurationSection(title: "Provider identity", subtitle: "AutoPod records this when a GitHub repository is selected. It prevents a renamed URL from silently pointing at a different repository.") {
+          if payload["provider"]?.string == "github", let id = payload["providerRepositoryId"]?.string {
+            LabeledContent("GitHub repository ID", value: id)
+          } else {
+            Text("This repository uses its HTTPS URL as its identity. No separate provider ID is needed.")
+              .font(.callout).foregroundStyle(.secondary)
+          }
+        }
+        ConfigurationSection(title: "Trusted project setups", subtitle: "Trust permits privileged sidecars such as Dagger when the execution backend supports them. Only trust reviewed setup definitions.") {
+          let setups = payload["setups"]?.array?.compactMap(\.object) ?? []
+          if setups.isEmpty { Text("No project setups available.").foregroundStyle(.secondary) }
+          ForEach(setups, id: \.["id"]) { setup in
+            let id = setup["id"]?.string ?? ""
+            Toggle(setup["name"]?.string ?? id, isOn: Binding(get: {
+              payload["trustedSetupIds"]?.array?.contains(.string(id)) ?? false
+            }, set: { enabled in
+              var ids = payload["trustedSetupIds"]?.array ?? []
+              ids.removeAll { $0 == .string(id) }
+              if enabled { ids.append(.string(id)) }
+              payload["trustedSetupIds"] = .array(ids)
+            }))
+          }
+          Label("Leave all setups untrusted unless one genuinely needs a privileged sidecar.", systemImage: "shield.lefthalf.filled")
+            .font(.caption).foregroundStyle(.secondary)
+        }
+      }
     }
   }
   private var environmentForm: some View {
@@ -177,13 +261,25 @@ struct ConfigurationEditorSheet: View {
       stringPicker("Template", key: "template", values: ["node22", "node22-pw", "node22-pw-pg", "node24", "node24-pw", "dotnet9", "dotnet10", "dotnet10-go", "python312", "python-node", "python-node-pg", "go124", "go124-pw", "custom"])
       Text("Software and sidecar definitions belong here. Docker/sandbox and resource sizes are chosen by the profile or at launch.").font(.caption).foregroundStyle(.secondary)
       ConfigurationTextValue(title: "Base image (optional)", fields: $payload, key: "baseImage", optional: true)
-      ConfigurationObjectListEditor(title: "Tools", values: arrayBinding("tools"), initial: { ["name": .string(""), "version": .string("")] }) { fields in
-        HStack { ConfigurationTextValue(title: "Tool", fields: fields, key: "name"); ConfigurationTextValue(title: "Version", fields: fields, key: "version") }
+      Text("Additional software").font(.headline)
+      HStack(alignment: .top, spacing: 10) {
+        Image(systemName: "info.circle").foregroundStyle(Color.accentColor)
+        VStack(alignment: .leading, spacing: 6) {
+          Text("Install extra packages in the pod environment").font(.callout.weight(.semibold))
+          Text("Choose a package type, then enter its name and version. pnpm and Playwright only need a version; npm, Python and .NET packages also need a name.")
+          Text("Example: choose npm package, enter typescript, then version 5.7.3. Prefixes are added automatically. Use an exact published version, not latest or a range such as ^5.7.")
+          Text("Leave this list empty if the template already includes what you need. Remove unused rows with the minus button. Agent skills and MCP connections belong in Tool packs.")
+        }.font(.callout).fixedSize(horizontal: false, vertical: true)
       }
-      Text("Use pnpm, playwright, npm:package or pip:package, with an exact version.").font(.caption).foregroundStyle(.secondary)
+      .padding(12)
+      .frame(maxWidth: .infinity, alignment: .leading)
+      .background(Color.accentColor.opacity(0.08), in: RoundedRectangle(cornerRadius: 8))
+      ConfigurationObjectListEditor(title: "Packages", values: arrayBinding("tools"), initial: { ["name": .string("pnpm"), "version": .string("")] }) { fields in
+        ConfigurationSoftwarePackageEditor(fields: fields)
+      }
       ConfigurationStringListEditor(title: "Image preparation commands", values: arrayBinding("prepareCommands"))
       ConfigurationObjectListEditor(title: "Sidecars", values: arrayBinding("sidecars"), initial: { ["id": .string("service-\(UUID().uuidString.prefix(8).lowercased())"), "type": .string("postgres"), "image": .string(""), "version": .string(""), "startup": .string("on-demand"), "port": .number(5432)] }) { EnvironmentSidecarEditor(fields: $0) }
-      ConfigurationStringListEditor(title: "Provided capabilities", values: arrayBinding("capabilities"))
+      ConfigurationCapabilitiesEditor(values: arrayBinding("capabilities"))
     }
   }
   private var toolPackForm: some View {
@@ -198,9 +294,51 @@ struct ConfigurationEditorSheet: View {
     }
   }
   private func arrayBinding(_ key: String) -> Binding<[ConfigurationJSON]> { Binding(get: { payload[key]?.array ?? [] }, set: { payload[key] = .array($0) }) }
+  private var repositorySetups: some View {
+    let setups = payload["setups"]?.array ?? []
+    let selected = setups.firstIndex { $0["id"]?.string == selectedSetup } ?? 0
+    return ConfigurationSection(title: "Project setups") {
+      HStack {
+        Picker("Editing", selection: Binding(get: { setups.indices.contains(selected) ? setups[selected]["id"]?.string ?? "" : "" }, set: { selectedSetup = $0 })) {
+          ForEach(setups.compactMap(\.object), id: \.["id"]) { setup in Text(setup["name"]?.string ?? "Unnamed").tag(setup["id"]?.string ?? "") }
+        }
+        Button("Add setup", systemImage: "plus") {
+          let id = "setup-\(UUID().uuidString.prefix(8).lowercased())"
+          payload["setups"] = .array(setups + [.object(["id": .string(id), "name": .string("New setup"), "defaultBranch": .string("main")])])
+          selectedSetup = id
+        }
+      }
+      if setups.indices.contains(selected) {
+        RepositorySetupEditor(fields: Binding(get: { payload["setups"]?.array?.first { $0["id"] == setups[selected]["id"] }?.object ?? [:] }, set: { fields in
+          var current = payload["setups"]?.array ?? []
+          guard let index = current.firstIndex(where: { $0["id"] == setups[selected]["id"] }) else { return }
+          current[index] = .object(fields); payload["setups"] = .array(current)
+        })).id(setups[selected]["id"])
+        Button("Remove this setup", role: .destructive) {
+          var current = payload["setups"]?.array ?? []
+          current.removeAll { $0["id"] == setups[selected]["id"] }
+          payload["setups"] = .array(current)
+          selectedSetup = payload["defaultSetupId"]?.string ?? ""
+        }
+        .disabled(setups.count <= 1 || setups[selected]["id"] == payload["defaultSetupId"] || (payload["trustedSetupIds"]?.array?.contains(setups[selected]["id"] ?? .null) ?? false))
+        .help("Default and trusted setups must remain available. Change their selections before removing them.")
+      }
+    }
+  }
+  private func discoverRepositories() async {
+    guard !discoveringRepositories else { return }
+    discoveringRepositories = true
+    defer { discoveringRepositories = false }
+    do { repositoryChoices = try await actions.discoverGitHubRepositories() }
+    catch { self.error = error.localizedDescription }
+  }
   private func objectBinding(_ key: String) -> Binding<[String: ConfigurationJSON]> { Binding(get: { payload[key]?.object ?? [:] }, set: { payload[key] = .object($0) }) }
   private func stringBinding(_ key: String) -> Binding<String> { Binding(get: { payload[key]?.string ?? "" }, set: { payload[key] = .string($0) }) }
-  private func stringPicker(_ title: String, key: String, values: [String]) -> some View { Picker(title, selection: stringBinding(key)) { ForEach(values, id: \.self) { Text($0.capitalized).tag($0) } } }
+  private func stringPicker(_ title: String, key: String, values: [String]) -> some View {
+    Picker(title, selection: Binding(get: { payload[key]?.string ?? values.first ?? "" }, set: { payload[key] = .string($0) })) {
+      ForEach(values, id: \.self) { Text($0 == "pr" ? "Pull request" : $0.capitalized).tag($0) }
+    }
+  }
   private func applyJSON() { do { guard let fields = try JSONDecoder().decode(ConfigurationJSON.self, from: Data(rawJSON.utf8)).object else { throw LaunchJSONError.invalid("Preset payload must be an object") }; payload = fields; error = nil } catch { self.error = error.localizedDescription } }
   private func save() async { busy = true; defer { busy = false }; do { _ = try await actions.save(kind, ConfigurationWriteRequest(id: document?.id, name: name, payload: payload, expectedRevision: document?.revision)); dismiss() } catch { self.error = error.localizedDescription } }
   private static var initialRoute: [String: ConfigurationJSON] { ["providerAccountId": .string(""), "runtime": .string("claude"), "model": .string(""), "reasoningEffort": .string("auto"), "failover": .array([]), "maxHops": .number(0)] }
@@ -232,8 +370,9 @@ struct ConfigurationFieldsEditor: View {
     let title = key.replacingOccurrences(of: "([a-z])([A-Z])", with: "$1 $2", options: .regularExpression).capitalized
     switch value {
     case .bool: return AnyView(Toggle(title, isOn: Binding(get: { fields[key]?.bool ?? false }, set: { fields[key] = .bool($0) })))
-    case .string: return AnyView(TextField(title, text: Binding(get: { fields[key]?.string ?? "" }, set: { fields[key] = .string($0) })))
-    case .object: return AnyView(DisclosureGroup(title) { ConfigurationFieldsEditor(fields: Binding(get: { fields[key]?.object ?? [:] }, set: { fields[key] = .object($0) })) })
+    case .string: return AnyView(ConfigurationTextValue(title: title, fields: $fields, key: key))
+    case .number: return AnyView(LabeledContent(title) { TextField(title, value: Binding(get: { fields[key]?.number ?? 0 }, set: { fields[key] = .number($0) }), format: .number).frame(width: 120) })
+    case .object: return AnyView(ConfigurationSection(title: title) { ConfigurationFieldsEditor(fields: Binding(get: { fields[key]?.object ?? [:] }, set: { fields[key] = .object($0) })) })
     default: return AnyView(ConfigurationJSONField(title: title, value: Binding(get: { fields[key] ?? .null }, set: { fields[key] = $0 })))
     }
   }
