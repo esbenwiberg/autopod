@@ -236,7 +236,12 @@ if not stat.S_ISDIR(actual.st_mode) or actual.st_uid!=0 or actual.st_mode & 0o02
         workerGid: 1000,
         environment: { PATH: '/usr/local/bin:/usr/bin:/bin', HOME: '/tmp', TMPDIR: '/tmp' },
         cwd: config.workingDir ?? '/output',
-        argv: [...boundary.command, '--', request.task.objective],
+        argv: [
+          ...boundary.command,
+          ...(grant.scope.network.destinations.length > 0 ? ['--network-enabled'] : []),
+          '--',
+          request.task.objective,
+        ],
       }),
     );
     await boundary.attachProviderChannel(podId, runtimeRef, root, request);

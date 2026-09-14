@@ -161,13 +161,21 @@ export class ManagedControls {
     const stored = this.service.db
       .prepare('SELECT limitations_json FROM managed_results WHERE pod_id=?')
       .get(podId) as { limitations_json: string } | undefined;
-    if (!stored) return false;
-    const limitations = JSON.parse(stored.limitations_json) as unknown;
-    return (
-      Array.isArray(limitations) &&
-      limitations.some((value) =>
-        ['artifact-export-incomplete', 'agent-runtime-failed'].includes(String(value)),
+    if (stored) {
+      const limitations = JSON.parse(stored.limitations_json) as unknown;
+      if (
+        Array.isArray(limitations) &&
+        limitations.some((value) =>
+          ['artifact-export-incomplete', 'agent-runtime-failed'].includes(String(value)),
+        )
       )
+        return true;
+    }
+    const pod = this.service.db
+      .prepare('SELECT observed_exit,state,exit_code FROM managed_pods WHERE pod_id=?')
+      .get(podId) as { observed_exit: number; state: string; exit_code: number | null } | undefined;
+    return Boolean(
+      pod?.observed_exit && pod.state === 'killed' && pod.exit_code !== null && pod.exit_code !== 0,
     );
   }
   async control(

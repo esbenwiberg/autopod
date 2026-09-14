@@ -134,11 +134,12 @@ it('installs an agent helper that routes final output through the reviewed Codex
     expect(install?.[1][6]).toContain('Split large patches and commands');
     expect(install?.[1][6]).toContain('into smaller calls before invoking tools');
     expect(install?.[1][6]).toContain("'features.auto_compaction': False");
+    expect(install?.[1][6]).toContain("parser.add_argument('--network-enabled'");
     expect(install?.[1][6]).toContain(
-      "'sandbox_workspace_write.network_access': bool(args.github_repository)",
+      "'sandbox_workspace_write.network_access': args.network_enabled or bool(args.github_repository)",
     );
     expect(install?.[1][6]).toContain(
-      "codex_sandbox = 'workspace-write' if args.github_repository else args.sandbox",
+      "codex_sandbox = 'workspace-write' if args.network_enabled or args.github_repository else args.sandbox",
     );
     expect(install?.[1][6]).toContain(
       "'Continue the same assigned work inside the same managed worker. '",
