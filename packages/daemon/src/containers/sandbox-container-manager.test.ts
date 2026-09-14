@@ -7,6 +7,7 @@ import {
   readFileSync,
   readdirSync,
   rmSync,
+  statSync,
   symlinkSync,
   writeFileSync,
 } from 'node:fs';
@@ -174,6 +175,7 @@ class FakeSandboxApiClient implements SandboxApiClient {
         path: candidate,
         size: content.byteLength,
         isDirectory: false,
+        ...(sandbox.modes.has(candidate) ? { mode: String(sandbox.modes.get(candidate)) } : {}),
       });
     }
 
@@ -215,10 +217,12 @@ class FakeSandboxApiClient implements SandboxApiClient {
     return this.sandboxes.get(sandboxId)?.status ?? 'deleted';
   }
 
-  seedFile(sandboxId: string, path: string, content: Buffer): void {
+  seedFile(sandboxId: string, path: string, content: Buffer, mode?: number): void {
     const sandbox = this.sandbox(sandboxId);
     this.ensureDir(sandbox, dirname(path));
-    sandbox.files.set(normalizeSandboxPath(path), content);
+    const normalized = normalizeSandboxPath(path);
+    sandbox.files.set(normalized, content);
+    if (mode !== undefined) sandbox.modes.set(normalized, mode);
   }
 
   private sandbox(id: string): FakeSandbox {
@@ -1130,6 +1134,23 @@ describe('SandboxContainerManager', () => {
         expect(readFileSync(join(hostDir, 'node_modules', 'local-cache.txt'), 'utf-8')).toBe(
           'keep excluded',
         );
+      } finally {
+        rmSync(hostDir, { recursive: true, force: true });
+      }
+    });
+
+    it('preserves executable modes reported by the sandbox file API', async () => {
+      const hostDir = mkdtempSync(join(tmpdir(), 'sandbox-extract-mode-'));
+      const client = new FakeSandboxApiClient();
+      const mgr = new SandboxContainerManager(client, logger);
+      const id = await mgr.spawn(baseConfig);
+
+      try {
+        client.seedFile(id, '/mnt/worktree/run.sh', Buffer.from('#!/bin/sh\n'), 0o755);
+
+        await mgr.extractDirectoryFromContainer(id, '/mnt/worktree', hostDir);
+
+        expect(statSync(join(hostDir, 'run.sh')).mode & 0o777).toBe(0o755);
       } finally {
         rmSync(hostDir, { recursive: true, force: true });
       }
