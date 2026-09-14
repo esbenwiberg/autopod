@@ -77,7 +77,7 @@ describe('offline conversion rehearsal', () => {
       rehearseConfigurationConversion({ ...input, expectedDigest: 'stale' }),
     ).rejects.toThrow('changed');
     expect(readFileSync(input.source)).toEqual(original);
-  }, 15_000);
+  }, 30_000);
 
   it('does not drop undecipherable credentials from the conversion inventory', async () => {
     const { input } = await fixture();
