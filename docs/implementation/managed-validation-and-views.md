@@ -44,7 +44,7 @@ Build a narrow validation configuration adapter from the resolved snapshot. It m
 
 The redesign also edits `interfaces/validation-engine.ts` and `validation/local-validation-engine.ts` to inject an isolated reviewer executor. Preserve that integration when adding workspace support. Develop managed persistence, receipts and detail views independently; integrate the production configuration adapter after the redesign lands and is verified. Rebase before edits to shared composition and reviewer paths. Do not copy the other thread's uncommitted changes into this branch.
 
-Migration numbers must be allocated from the combined current migration inventory at integration time. The other working tree currently has uncommitted migrations through 196. This checkpoint provisionally uses `197_managed_validations.sql`. Recheck and renumber on integration. The migration runner uses a high-water mark: deploying 197 ahead of the missing 186–196 series would cause those migrations to be skipped later. This branch must not be deployed independently of the profile migration series.
+Migration numbers must be allocated from the combined current migration inventory at integration time. The other working tree currently has uncommitted migrations through 204. This checkpoint provisionally uses `205_managed_validations.sql`. Recheck and renumber on integration. The migration runner uses a high-water mark: deploying 205 ahead of the missing 186–204 series would cause those migrations to be skipped later. This branch must not be deployed independently of the profile migration series.
 
 ## Delivery sequence
 

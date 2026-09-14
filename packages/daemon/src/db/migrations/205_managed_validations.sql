@@ -1,4 +1,4 @@
--- Integrate after the composable-profile migration series through 196.
+-- Integrate after the composable-profile migration series through 204.
 -- Do not deploy this migration ahead of that series: schema_version uses a high-water mark.
 CREATE TABLE managed_validations (
   pod_id TEXT PRIMARY KEY REFERENCES managed_pods(pod_id),
