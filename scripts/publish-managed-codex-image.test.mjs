@@ -19,6 +19,7 @@ test('managed portfolio image is Codex-only and bakes the exact dependency tree'
     path.join(root, 'templates/managed/Dockerfile.codex-portfolio'),
     'utf8',
   );
+  assert.match(dockerfile, /FROM node:24\.18\.0-slim/);
   assert.match(dockerfile, /@openai\/codex@\$\{CODEX_VERSION\}/);
   assert.match(dockerfile, /ADD source.tar/);
   assert.doesNotMatch(dockerfile, /git fetch/);
