@@ -293,15 +293,21 @@ export class ManagedValidationRunner {
           : result.overall === 'pass' && receipt.status !== 'passed'
             ? 'validation-required-phases-incomplete'
             : (result.reason ?? '');
-    } catch {
-      // A rejected/failed port call is not termination evidence. Keep the durable run open so a
-      // later daemon can reconcile the same idempotent supervisor instead of replaying commands.
-      receipt.status = 'running';
-      receipt.reason = controller.signal.aborted
-        ? 'validation-stop-unreconciled'
-        : 'validation-execution-unreconciled';
-      this.save(receipt);
-      throw new Error('managed-validation-execution-unreconciled');
+    } catch (error) {
+      if (error instanceof Error && error.message === 'managed-validation-source-mismatch') {
+        receipt.status = 'failed';
+        receipt.reason = 'source-mutated';
+        receipt.completedAt = this.service.now();
+      } else {
+        // A rejected/failed port call is not termination evidence. Keep the durable run open so a
+        // later daemon can reconcile the same idempotent supervisor instead of replaying commands.
+        receipt.status = 'running';
+        receipt.reason = controller.signal.aborted
+          ? 'validation-stop-unreconciled'
+          : 'validation-execution-unreconciled';
+        this.save(receipt);
+        throw new Error('managed-validation-execution-unreconciled');
+      }
     } finally {
       clearInterval(timer);
     }

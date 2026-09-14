@@ -34,7 +34,13 @@ export const managedValidationConfigSchema = z
       .max(512)
       .regex(/^(?!\/)(?!.*(?:^|\/)\.\.(?:\/|$))[A-Za-z0-9_./-]*$/),
   })
-  .strict();
+  .strict()
+  .superRefine((configuration, context) => {
+    const phases = configuration.phases.map(({ phase }) => phase);
+    if (new Set(phases).size !== phases.length) {
+      context.addIssue({ code: 'custom', message: 'Managed validation phases must be unique' });
+    }
+  });
 
 export interface ManagedValidationBoundary {
   route: ManagedPodRequest['route'];

@@ -186,3 +186,19 @@ it('rejects a stale configuration digest before allocation', async () => {
     await rm(x.root, { recursive: true, force: true });
   }
 });
+
+it('rejects duplicate configured phases before allocation', async () => {
+  const x = await setup();
+  try {
+    x.configuration.phases.push({
+      phase: 'build',
+      command: 'npm run build-again',
+      timeoutMs: 30000,
+    });
+    expect(() => x.port.preflight(x.request)).toThrow('managed-validation-configuration-invalid');
+    expect(x.ensure).not.toHaveBeenCalled();
+  } finally {
+    x.f.close();
+    await rm(x.root, { recursive: true, force: true });
+  }
+});

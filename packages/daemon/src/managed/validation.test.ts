@@ -380,6 +380,26 @@ it('an observation gap keeps the run open and reconciles without premature clean
   }
 });
 
+it('records a source mutation before command start as a terminal validation failure', async () => {
+  const { f, service, candidate, port, runner } = await setup('deterministic');
+  port.run = vi.fn(async () => {
+    throw new Error('managed-validation-source-mismatch');
+  });
+  try {
+    await expect(runner.finish('installation-one', candidate.podId, candidate)).rejects.toThrow(
+      'managed-validation-required',
+    );
+    expect(validationReceipt(service, candidate.podId)).toMatchObject({
+      status: 'failed',
+      reason: 'source-mutated',
+      completedAt: expect.any(Number),
+    });
+    expect(port.cleanup).not.toHaveBeenCalled();
+  } finally {
+    f.close();
+  }
+});
+
 it.each(['stop_requested', 'revoked'])('does not launch after %s', async (flag) => {
   const { f, candidate, port, runner } = await setup('deterministic');
   try {

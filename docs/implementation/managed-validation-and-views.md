@@ -101,18 +101,19 @@ Not implemented / not accepted yet:
 - Container-backend integration and live canary proof for local Docker and hosted Sandbox/ACI. Unit tests prove the supervisor and composition contracts, but live firewall enforcement, UID availability, dependency image contents and remote cleanup still require environment evidence.
 - Native browser/health/pages/facts phases and AI review. The supervised initial backend intentionally accepts only setup/lint/SAST/build/test; requesting unsupported phases fails preflight rather than silently skipping them.
 - Durable phase-output attachments and diagnostic logs. Current views expose safe phase status, duration, internal reason codes and limitations, not raw command output.
-- Visual rendering/device acceptance, CI, full validation pipeline and reviewed live sandbox canary. AI review remains outside this increment.
+- Visual rendering/device acceptance, CI and reviewed live sandbox canary. AI review remains outside this increment.
 
 Local evidence:
 
-- Managed/native validation regression sweep: 525 tests, 37 files.
-- Supervised runner/runtime focused suite: 23 tests, including one-start execution, caller loss, restart reconciliation, stop/revocation/expiry, source mutation, stale configuration, dependency-cache trust, observed cleanup and no-rerun recovery.
-- Shared managed protocol: 37 tests passed.
-- Mobile managed detail/store: 5 tests passed, including direct navigation, explicit off, and manifest inspection.
+- Managed/native validation regression sweep: 529 tests, 37 files.
+- Supervised runner/runtime focused suite covers one-start execution, caller loss, restart reconciliation, stop/revocation/expiry, pre-start and in-command source mutation, stale/duplicate configuration, dependency-cache trust, observed cleanup and no-rerun recovery.
+- Full daemon suite: 5,841 passed and 6 skipped across 380 files. The complete repository build and typecheck pass, including daemon declaration generation and byte-for-byte packaging of `validation-supervisor.py` into `dist/runtime`.
+- Shared managed protocol: 37 focused tests passed; the full shared suite passed 409 tests.
+- Mobile managed detail/store focused suite passed, including direct navigation, explicit off, and manifest inspection; the full mobile suite passed 151 tests and its production build passed.
 - Desktop `swift test --filter ManagedPod`: app compiled; 4 tests passed, including authenticated direct detail decoding.
-- Dispatcher targeted driver/coordinator/source/protocol/validation suite: 72 tests passed. A broader run including copied `test_grants_v2.py` has a stale test expecting the previous request/time schema ceilings; that test was not weakened or modified.
-- Shared package build passes. Daemon ESM packaging passes and copies `validation-supervisor.py` byte-for-byte into `dist/runtime`. The declaration build stops at unchanged `src/runtimes/run-claude-cli.ts:153` (`SpawnOptions | undefined` overload); complete daemon diagnostics contain no errors on this feature's changed managed production paths. Mobile full typecheck reports errors in unchanged `DispatchPreflightPanel.test.tsx:106` and `ValidationSummary.test.tsx:173`. Neither package-wide typecheck is claimed green.
+- Dispatcher targeted driver/coordinator/source/protocol/validation suite: 73 tests passed. Its parsed protocol schema is structurally identical to AutoPod's schema. A broader run including copied `test_grants_v2.py` has a stale test expecting the previous request/time schema ceilings; that test was not weakened or modified.
+- Repository lint, dependency audit gate and secret scan pass. The audit reports one existing moderate dependency advisory below the configured blocking threshold.
 
-Dispatcher isolation: `/private/tmp/dispatcher-managed-validation-views`, branch `codex/managed-validation-views`, base `0c8c6cacb9b47e3a2a3ad33f744d4d9857eee510`. Its existing managed implementation is untracked in the original repository. Relevant baseline modules/tests/protocol were copied to this isolated worktree for compatibility checks. They are NOT all new work authored by this feature and must not be blindly staged/published. New feature work there is the validation gate/helper/tests, capability preflight additions, optional-field generator fix, and protocol regeneration. The original Dispatcher checkout is unchanged.
+Dispatcher isolation: `/private/tmp/dispatcher-managed-validation-views`, branch `codex/managed-validation-views`, base `0c8c6cacb9b47e3a2a3ad33f744d4d9857eee510`. Its existing managed implementation is untracked in the original repository. Relevant baseline modules/tests/protocol were copied to this isolated worktree for compatibility checks. They are NOT all new work authored by this feature and must not be blindly staged/published. New feature work there is the validation gate/helper/tests, capability preflight additions, optional-field generator fix, protocol regeneration, and rejection of any nonpassing phase in a claimed-pass receipt. The original Dispatcher checkout is unchanged.
 
 Next integration order: land/review the Dispatcher managed baseline; generate the reviewed validation projection and explicit attempt choice from Dispatcher configuration; complete container/UI/live acceptance; only then enable deterministic validation for reviewed attempts. No additional product decision is needed for the on/off requirement.
