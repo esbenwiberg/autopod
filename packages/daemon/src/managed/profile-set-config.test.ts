@@ -1,7 +1,11 @@
 import { expect, it } from 'vitest';
 import { requestTimeFixture, resign } from '../test-utils/managed-fixture.js';
 import { digest } from './canonical.js';
-import { parseManagedProfileSetConfig, profileSetRequestPolicy } from './profile-set-config.js';
+import {
+  parseManagedProfileSetConfig,
+  profileSetRequestPolicy,
+  unionScope,
+} from './profile-set-config.js';
 
 function input() {
   const f = requestTimeFixture();
@@ -80,6 +84,59 @@ it('accepts a secretless exact profile set and enforces stage inputs and outputs
     ]) {
       expect(() => policy({ ...request, ...changed })).toThrow('managed-profile-stage-mismatch');
     }
+  } finally {
+    f.close();
+  }
+});
+
+it('accepts an exact digest-pinned package registry allowlist', () => {
+  const { f, request, value } = input();
+  try {
+    request.profileSnapshot.scope.network = {
+      profileId: 'autopod-package-registry',
+      destinations: ['registry.npmjs.org'],
+    };
+    request.effectiveGrant.scope.network = structuredClone(request.profileSnapshot.scope.network);
+    request.profileSnapshot.snapshotDigest = digest(
+      Object.fromEntries(
+        Object.entries(request.profileSnapshot).filter(([key]) => key !== 'snapshotDigest'),
+      ),
+    );
+    request.effectiveGrant.profileSnapshotDigest = request.profileSnapshot.snapshotDigest;
+    resign(request);
+
+    const parsed = parseManagedProfileSetConfig(JSON.stringify(value));
+    if (!parsed) throw new Error('expected-config');
+    expect(parsed.profiles[0]?.profileSnapshot.scope.network).toEqual({
+      profileId: 'autopod-package-registry',
+      destinations: ['registry.npmjs.org'],
+    });
+    expect(() => profileSetRequestPolicy(parsed)(request)).not.toThrow();
+  } finally {
+    f.close();
+  }
+});
+
+it('includes every reviewed stage destination in the profile-set ceiling', () => {
+  const { f, value } = input();
+  try {
+    const registryStage = structuredClone(value.profiles[0]);
+    if (!registryStage) throw new Error('expected-profile');
+    registryStage.profileSnapshot.profileId = 'implementation-with-packages';
+    registryStage.profileSnapshot.scope.network = {
+      profileId: 'autopod-package-registry',
+      destinations: ['registry.npmjs.org'],
+    };
+    registryStage.profileSnapshot.snapshotDigest = digest(
+      Object.fromEntries(
+        Object.entries(registryStage.profileSnapshot).filter(([key]) => key !== 'snapshotDigest'),
+      ),
+    );
+    value.profiles.push(registryStage);
+
+    const parsed = parseManagedProfileSetConfig(JSON.stringify(value));
+    if (!parsed) throw new Error('expected-config');
+    expect(unionScope(parsed.profiles).network.destinations).toEqual(['registry.npmjs.org']);
   } finally {
     f.close();
   }

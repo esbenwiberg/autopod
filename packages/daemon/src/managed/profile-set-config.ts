@@ -122,7 +122,6 @@ export function parseManagedProfileSetConfig(
         repository.enrollmentId !== parsed.mirror.enrollmentId ||
         repository.remote !== parsed.mirror.remote ||
         repository.baseRevision !== parsed.mirror.baseRevision ||
-        scope.network.destinations.length !== 0 ||
         !scope.allowedEffects.includes('repository.read') ||
         !scope.allowedEffects.includes('artifact.write') ||
         scope.allowedEffects.includes('github.issue.read') !==
@@ -165,7 +164,7 @@ export function parseManagedProfileSetConfig(
   }
 }
 
-function unionScope(profiles: readonly ManagedProfileStage[]): Scope {
+export function unionScope(profiles: readonly ManagedProfileStage[]): Scope {
   const scopes = profiles.map((item) => item.profileSnapshot.scope);
   const first = scopes[0];
   if (!first) throw new Error('managed-profile-set-empty');
@@ -177,7 +176,10 @@ function unionScope(profiles: readonly ManagedProfileStage[]): Scope {
   }
   return {
     repositories: [...repositories.values()],
-    network: first.network,
+    network: {
+      profileId: first.network.profileId,
+      destinations: [...new Set(scopes.flatMap((scope) => scope.network.destinations))],
+    },
     identityBindings: [
       ...new Map(
         scopes

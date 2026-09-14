@@ -109,9 +109,11 @@ alongside Dispatcher's Voice configuration. It binds one installation, one exact
 mirror revision, one digest-pinned worker image, and up to eight profile snapshots.
 Each stage fixes its task kind, sole artifact path, ordered input names, and source
 mode. Startup rejects duplicate profile IDs or digests, mutable images, relative
-mirrors, route or revision drift, network destinations, widened identity bindings,
-and source stages without the reviewed source broker. No profile is inferred from
-model, account, runtime, target, or repository values.
+mirrors, route or revision drift, widened identity bindings, and source stages
+without the reviewed source broker. Network destinations are bound to each
+digest-pinned profile snapshot and enforced as a sandbox allowlist; all other
+egress remains denied. No profile is inferred from model, account, runtime,
+target, or repository values.
 
 The agent channel admits request/time profiles only. It preserves the Codex
 Responses tool protocol across several bounded provider requests while continuing
