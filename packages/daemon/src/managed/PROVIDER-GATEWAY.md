@@ -108,7 +108,12 @@ proves remote generation ceased. An uncertain request is never retried or replac
 alongside Dispatcher's Voice configuration. It binds one installation, one exact
 mirror revision, one digest-pinned worker image, and up to eight profile snapshots.
 Each stage fixes its task kind, sole artifact path, ordered input names, and source
-mode. Startup rejects duplicate profile IDs or digests, mutable images, relative
+mode. An implementation source stage may additionally carry a reviewed deterministic
+validation command projection. The request must then make an explicit per-attempt
+`off` or `deterministic` choice and bind the exact projection digest. `off` executes
+no validation commands; a missing projection preserves the legacy no-AutoPod-validation
+behavior. Validation projections on read-only or non-implementation stages are rejected.
+Startup rejects duplicate profile IDs or digests, mutable images, relative
 mirrors, route or revision drift, network destinations, widened identity bindings,
 and source stages without the reviewed source broker. No profile is inferred from
 model, account, runtime, target, or repository values.
@@ -145,10 +150,11 @@ responses are returned only under still-active authority.
 Source delivery keeps the existing freeze, independent verification, and
 idempotent finalization path. The worker can create a local commit in its isolated
 attempt workspace but receives no GitHub credential and cannot push. AutoPod
-freezes the candidate; Dispatcher verifies it with its configured verifier and
-requests finalization using the digest of one reviewed draft body. The host broker
-then rechecks the candidate and grant before the exact worker branch and draft are
-created.
+freezes the candidate and, when deterministic validation was selected, validates a
+disposable copy before delivery becomes eligible. Dispatcher still verifies the
+candidate with its configured independent verifier and requests finalization using
+the digest of one reviewed draft body. The host broker then rechecks the candidate,
+validation receipt, and grant before the exact worker branch and draft are created.
 
 ## Deployment boundary
 

@@ -12,7 +12,7 @@ import {
 } from './acceptance-config.js';
 import { AzureBlobArtifactStore, ManagedIdentityBlobTransport } from './artifact-store.js';
 import type { ManagedComponentsConfig } from './bootstrap.js';
-import { canonical } from './canonical.js';
+import { canonical, digest } from './canonical.js';
 import { ChatGptReportTransport } from './chatgpt-provider.js';
 import type { ManagedCliConfig } from './cli-config.js';
 import { ContainerCodexChannel, codexAgentCommand } from './codex-channel.js';
@@ -21,6 +21,7 @@ import { REQUIRED_ENFORCEMENT } from './grants.js';
 import { composeManagedRuntime } from './runtime-composition.js';
 import { ManagedGitBroker } from './source-git.js';
 import { GitHubDraftBroker } from './source-github.js';
+import { managedValidationConfigSchema } from './validation-runtime.js';
 
 const id = z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._/-]{0,199}$/);
 const stageSchema = z
@@ -38,6 +39,10 @@ const stageSchema = z
     artifactPath: z.string().regex(/^[A-Za-z][A-Za-z0-9_.-]{0,127}$/),
     inputNames: z.array(z.string().regex(/^[A-Za-z][A-Za-z0-9_-]{0,63}$/)).max(8),
     sourceMode: z.enum(['none', 'commit', 'branch', 'draft-pr']),
+    /** Reviewed command projection for an implementation stage. Presence requires an explicit
+     * per-attempt on/off choice carrying this configuration's digest.
+     */
+    validation: managedValidationConfigSchema.optional(),
   })
   .strict();
 const mirrorSchema = z
@@ -129,6 +134,10 @@ export function parseManagedProfileSetConfig(
           (scope.identityBindings.length === 1) ||
         (stage.sourceMode === 'none') !== (repository.access === 'read') ||
         (stage.sourceMode !== 'none' && !parsed.source) ||
+        (stage.validation !== undefined &&
+          (stage.taskKind !== 'implementation' ||
+            stage.sourceMode === 'none' ||
+            !scope.allowedEffects.includes('test.run'))) ||
         !path.isAbsolute(parsed.mirror.path) ||
         (scope.identityBindings.length > 0 &&
           (!parsed.githubRead ||
@@ -198,6 +207,7 @@ export function profileSetRequestPolicy(
     );
     const stage = stages[0];
     const names = request.inputArtifacts.map((input) => input.name);
+    const validation = request.validation.autopod;
     if (
       !stage ||
       stages.length !== 1 ||
@@ -211,7 +221,9 @@ export function profileSetRequestPolicy(
           request.validation.verifierPolicy !== config.source.verifierPolicy)) ||
       canonical(request.outputs.artifacts.requiredPaths) !== canonical([stage.artifactPath]) ||
       canonical(request.outputs.artifacts.include) !== canonical([stage.artifactPath]) ||
-      canonical(names) !== canonical(stage.inputNames)
+      canonical(names) !== canonical(stage.inputNames) ||
+      Boolean(validation) !== Boolean(stage.validation) ||
+      (stage.validation && validation?.configurationDigest !== digest(stage.validation))
     )
       throw new Error('managed-profile-stage-mismatch');
   };
@@ -339,6 +351,9 @@ export function composeManagedProfileSet(
                 path: config.mirror.dependencyCachePath,
               },
             }
+          : {}),
+        ...(stage.validation
+          ? { validation: { configuration: structuredClone(stage.validation) } }
           : {}),
         transport: new ChatGptReportTransport(
           route,

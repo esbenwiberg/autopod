@@ -45,6 +45,67 @@ function input() {
   return { f, request, value };
 }
 
+function implementationInput() {
+  const base = input();
+  const request = base.request;
+  const profileSnapshot = structuredClone(request.profileSnapshot);
+  const repository = profileSnapshot.scope.repositories[0];
+  const grantedRepository = request.effectiveGrant.scope.repositories[0];
+  if (!repository || !grantedRepository) throw new Error('expected-repository');
+  repository.access = 'write';
+  grantedRepository.access = 'write';
+  profileSnapshot.scope.allowedEffects.push('test.run');
+  request.effectiveGrant.scope.allowedEffects.push('test.run');
+  profileSnapshot.snapshotDigest = digest(
+    Object.fromEntries(Object.entries(profileSnapshot).filter(([key]) => key !== 'snapshotDigest')),
+  );
+  request.profileSnapshot = profileSnapshot;
+  request.effectiveGrant.profileSnapshotDigest = profileSnapshot.snapshotDigest;
+  request.task.kind = 'implementation';
+  request.outputs.source = {
+    mode: 'branch',
+    repository: repository.enrollmentId,
+    remote: repository.remote,
+    head: 'dispatcher/workers/fixture',
+    base: 'main',
+  };
+  const validation = {
+    phases: [{ phase: 'build' as const, command: 'npm run build', timeoutMs: 300_000 }],
+    workingDirectory: '',
+  };
+  request.validation.autopod = {
+    mode: 'deterministic',
+    configurationDigest: digest(validation),
+  };
+  resign(request);
+  const value = {
+    ...base.value,
+    profiles: [
+      {
+        profileSnapshot,
+        taskKind: 'implementation',
+        artifactPath: 'research.md',
+        inputNames: [] as string[],
+        sourceMode: 'branch',
+        validation,
+      },
+    ],
+    source: {
+      repository: repository.enrollmentId,
+      remote: repository.remote,
+      remoteUrl: 'https://github.com/example/fixture',
+      base: 'main',
+      baseCommit: repository.baseRevision,
+      branchNamespace: repository.branchNamespace,
+      verifierPolicy: request.validation.verifierPolicy,
+      verifierIdentity: 'dispatcher-verifier',
+      githubRepository: 'example/fixture',
+      draftBody: 'Managed implementation fixture',
+    },
+  };
+  return { ...base, request, value, validation };
+}
+
 it('accepts a secretless exact profile set and enforces stage inputs and outputs', () => {
   const { f, request, value } = input();
   try {
@@ -123,6 +184,56 @@ it('rejects widened, ambiguous, or incomplete profile-set bindings', () => {
         'managed-profile-set-config-invalid',
       );
     }
+  } finally {
+    f.close();
+  }
+});
+
+it('binds an implementation validation plan while preserving the per-attempt on/off choice', () => {
+  const { f, request, value, validation } = implementationInput();
+  try {
+    const parsed = parseManagedProfileSetConfig(JSON.stringify(value));
+    if (!parsed) throw new Error('expected-config');
+    const policy = profileSetRequestPolicy(parsed);
+    expect(() => policy(request)).not.toThrow();
+    request.validation.autopod = {
+      mode: 'off',
+      configurationDigest: digest(validation),
+    };
+    expect(() => policy(request)).not.toThrow();
+    request.validation.autopod = {
+      mode: 'deterministic',
+      configurationDigest: digest({ ...validation, workingDirectory: 'changed' }),
+    };
+    expect(() => policy(request)).toThrow('managed-profile-stage-mismatch');
+    request.validation.autopod = undefined;
+    expect(() => policy(request)).toThrow('managed-profile-stage-mismatch');
+  } finally {
+    f.close();
+  }
+});
+
+it('rejects validation configuration outside an authorized implementation source stage', () => {
+  const { f, value } = input();
+  try {
+    const stage = value.profiles[0];
+    if (!stage) throw new Error('expected-profile');
+    expect(() =>
+      parseManagedProfileSetConfig(
+        JSON.stringify({
+          ...value,
+          profiles: [
+            {
+              ...stage,
+              validation: {
+                phases: [{ phase: 'build', command: 'npm run build', timeoutMs: 300_000 }],
+                workingDirectory: '',
+              },
+            },
+          ],
+        }),
+      ),
+    ).toThrow('managed-profile-set-config-invalid');
   } finally {
     f.close();
   }

@@ -44,7 +44,7 @@ Build a narrow validation configuration adapter from the resolved snapshot. It m
 
 The redesign also edits `interfaces/validation-engine.ts` and `validation/local-validation-engine.ts` to inject an isolated reviewer executor. Preserve that integration when adding workspace support. Develop managed persistence, receipts and detail views independently; integrate the production configuration adapter after the redesign lands and is verified. Rebase before edits to shared composition and reviewer paths. Do not copy the other thread's uncommitted changes into this branch.
 
-Migration numbers must be allocated from the combined current migration inventory at integration time. The other working tree currently has uncommitted migrations through 204. This checkpoint provisionally uses `205_managed_validations.sql`. Recheck and renumber on integration. The migration runner uses a high-water mark: deploying 205 ahead of the missing 186–204 series would cause those migrations to be skipped later. This branch must not be deployed independently of the profile migration series.
+The composable-profile redesign is now on `main` through migration 205. Managed validation uses the next unique prefix, `206_managed_validations.sql`; recheck the combined migration inventory immediately before merge.
 
 ## Delivery sequence
 
@@ -89,15 +89,15 @@ Implemented:
 - An injected validation port must report exact selected phases. An overall pass without every selected phase passing is rejected. Explicit off records disabled and runs no validator.
 - A concrete supervised port now provisions a dedicated digest-bound managed resource with the same pinned image, repository enrollment, network ceiling and attempt deadline. It mounts the frozen candidate read-only, copies it to disposable `/workspace`, runs only configured setup/lint/SAST/build/test commands as UID/GID 1000 with no-new-privileges, and emits bounded phase status/duration receipts.
 - The validation supervisor is root-owned, detached and one-start. Its durable receipt binds the execution spec, configuration, candidate and commit. Stop/revocation/expiry terminate the child process group; daemon restart reconciles the same resource rather than replaying commands. Source mutation, command failure and infrastructure unavailability remain distinct.
-- Validation cleanup must be observed before source delivery. A transient cleanup failure blocks delivery but restart retries cleanup without rerunning a passed validation. Production profile-set composition still supplies no validation configuration, so deterministic admission remains dark until the profile adapter lands.
+- Validation cleanup must be observed before source delivery. A transient cleanup failure blocks delivery but restart retries cleanup without rerunning a passed validation.
+- The reviewed profile-set startup contract now accepts a deterministic command projection only for an implementation source stage with `test.run`. Each request must explicitly select `off` or `deterministic` and carry the exact projection digest. The composition binds that projection to the supervised validation port; no configured projection preserves legacy behavior.
 - Worker artifacts remain inspectable if subsequent validation fails. Artifact evidence and prior limitations are retained.
 - Passive installation-scoped detail/receipt endpoints; desktop and mobile validation summaries/phases, source and independent verifier evidence, artifact manifests and authenticated downloads, and a bounded recent timeline. Direct detail fetches do not load the fleet. Arbitrary artifact files are not rendered as active HTML.
 - Dispatcher verifies receipt integrity and exact attempt, configuration, candidate and commit bindings in both modes, before invoking its existing independent source finalizer.
 
 Not implemented / not accepted yet:
 
-- The landed `EffectiveLaunchConfig` projection, inherited workflow default and per-attempt launch selector. Raw protocol on/off selection is implemented; user-facing launch integration is not.
-- The landed `EffectiveLaunchConfig` adapter and a reviewed production binding. No shadow profile fields were added; without an explicit binding, capability discovery does not advertise deterministic validation.
+- Automated generation of the reviewed managed command projection from a native `EffectiveLaunchConfig`, plus its user-facing launch selector. The contracts remain deliberately separate: Dispatcher owns the reviewed `ProfileSnapshot` envelope and must generate the projection explicitly rather than name-map native profiles.
 - Container-backend integration and live canary proof for local Docker and hosted Sandbox/ACI. Unit tests prove the supervisor and composition contracts, but live firewall enforcement, UID availability, dependency image contents and remote cleanup still require environment evidence.
 - Native browser/health/pages/facts phases and AI review. The supervised initial backend intentionally accepts only setup/lint/SAST/build/test; requesting unsupported phases fails preflight rather than silently skipping them.
 - Durable phase-output attachments and diagnostic logs. Current views expose safe phase status, duration, internal reason codes and limitations, not raw command output.
@@ -115,4 +115,4 @@ Local evidence:
 
 Dispatcher isolation: `/private/tmp/dispatcher-managed-validation-views`, branch `codex/managed-validation-views`, base `0c8c6cacb9b47e3a2a3ad33f744d4d9857eee510`. Its existing managed implementation is untracked in the original repository. Relevant baseline modules/tests/protocol were copied to this isolated worktree for compatibility checks. They are NOT all new work authored by this feature and must not be blindly staged/published. New feature work there is the validation gate/helper/tests, capability preflight additions, optional-field generator fix, and protocol regeneration. The original Dispatcher checkout is unchanged.
 
-Next integration order: land/review the profile redesign and Dispatcher managed baseline; rebase and allocate a non-conflicting migration; connect the frozen configuration/launch choice to the supervised port; complete container/UI/live acceptance; only then enable deterministic validation for reviewed attempts. No additional product decision is needed for the on/off requirement.
+Next integration order: land/review the Dispatcher managed baseline; generate the reviewed validation projection and explicit attempt choice from Dispatcher configuration; complete container/UI/live acceptance; only then enable deterministic validation for reviewed attempts. No additional product decision is needed for the on/off requirement.
