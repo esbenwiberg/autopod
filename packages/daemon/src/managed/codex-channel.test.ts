@@ -69,6 +69,10 @@ it('admits a longer source-producing agent only through its explicit reviewed mo
     maxDurationSeconds: 900,
   };
   request.outputs.source.mode = 'draft-pr';
+  request.effectiveGrant.scope.network = {
+    profileId: 'autopod-package-registry',
+    destinations: ['registry.npmjs.org'],
+  };
   // Use the actual manager-shaped fixture rather than exposing provider credentials.
   const manager = { execInContainer: exec } as unknown as ContainerManager;
   const reviewed = new ContainerCodexChannel(manager, request.route, 0, {
