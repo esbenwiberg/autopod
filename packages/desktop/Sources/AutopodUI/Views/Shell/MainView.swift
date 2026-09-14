@@ -5,6 +5,7 @@ import SwiftUI
 public struct MainView: View {
     public var pods: [Pod]
     public var managedPods: [ManagedPodSummary]
+    public var managedPodAPI: DaemonAPI?
     @Binding public var selectedManagedPodId: String?
     public var managedPodsLoading: Bool
     public var managedPodsError: String?
@@ -116,6 +117,7 @@ public struct MainView: View {
     public init(
         pods: [Pod] = MockData.all,
         managedPods: [ManagedPodSummary] = [],
+        managedPodAPI: DaemonAPI? = nil,
         selectedManagedPodId: Binding<String?> = .constant(nil),
         managedPodsLoading: Bool = false,
         managedPodsError: String? = nil,
@@ -211,6 +213,7 @@ public struct MainView: View {
     ) {
         self.pods = pods
         self.managedPods = managedPods
+        self.managedPodAPI = managedPodAPI
         self._selectedManagedPodId = selectedManagedPodId
         self.managedPodsLoading = managedPodsLoading
         self.managedPodsError = managedPodsError
@@ -619,7 +622,7 @@ public struct MainView: View {
         } detail: {
             if sidebarSelection == .managedPods {
                 if let pod = managedPods.first(where: { $0.id == selectedManagedPodId }) {
-                    ManagedPodDetailView(pod: pod)
+                    ManagedPodDetailView(pod: pod, api: managedPodAPI)
                 } else {
                     VStack(spacing: 10) {
                         Image(systemName: "shippingbox")

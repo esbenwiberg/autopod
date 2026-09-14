@@ -1,7 +1,9 @@
 import type { ManagedPodRequest } from '@autopod/shared';
 import type { FastifyInstance, FastifyRequest } from 'fastify';
+import { managedDetail } from '../../managed/detail.js';
 import { ManagedControls } from '../../managed/managed-controls.js';
 import type { ManagedPodService } from '../../managed/managed-service.js';
+import { validationReceipt } from '../../managed/validation.js';
 
 const CONTROL_FAILURES = new Set([
   'grant-inactive',
@@ -176,6 +178,13 @@ export function managedPodRoutes(app: FastifyInstance, deps: ManagedPodApiDeps):
           podId: row.pod_id,
           dispatcherAttemptId: row.dispatcher_attempt_id,
           state: row.state,
+          validationStatus:
+            validationReceipt(deps.service, row.pod_id)?.status ??
+            (request.validation.autopod?.mode === 'off'
+              ? 'disabled'
+              : request.validation.autopod
+                ? 'not-run'
+                : 'not-requested'),
           providerAccountId: request.route.providerAccountId,
           model: request.route.model,
           runtime: request.route.runtime,
@@ -219,6 +228,38 @@ export function managedPodRoutes(app: FastifyInstance, deps: ManagedPodApiDeps):
         )
         .get(installation, request.params.attemptId) as { handle_json: string } | undefined;
       return row ? JSON.parse(row.handle_json) : null;
+    },
+  );
+  for (const suffix of ['', '/validations'] as const) {
+    app.get<{ Params: { podId: string } }>(
+      `/managed/pods/:podId${suffix}`,
+      async (request, reply) => {
+        const installation = await deps.authenticate(request);
+        if (!installation) return reply.code(401).send({ code: 'managed-auth-required' });
+        try {
+          const detail = managedDetail(deps.service, controls, installation, request.params.podId);
+          return suffix ? { schemaVersion: 1, validations: detail.validations } : detail;
+        } catch {
+          return reply.code(404).send({ code: 'managed-detail-unavailable' });
+        }
+      },
+    );
+  }
+  app.get<{ Params: { validationId: string } }>(
+    '/managed/validations/:validationId',
+    async (request, reply) => {
+      const installation = await deps.authenticate(request);
+      if (!installation) return reply.code(401).send({ code: 'managed-auth-required' });
+      try {
+        const row = deps.service.db
+          .prepare(`SELECT pod_id FROM managed_validations JOIN managed_pods USING(pod_id)
+        WHERE validation_id=? AND dispatcher_installation_id=?`)
+          .get(request.params.validationId, installation) as { pod_id: string } | undefined;
+        if (!row) return reply.code(404).send({ code: 'managed-validation-unavailable' });
+        return validationReceipt(deps.service, row.pod_id);
+      } catch {
+        return reply.code(404).send({ code: 'managed-validation-unavailable' });
+      }
     },
   );
   for (const operation of ['preflight', 'pods', 'reconcile-start'] as const) {

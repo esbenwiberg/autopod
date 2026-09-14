@@ -25,7 +25,7 @@ export class ApiError extends Error {
  *  - Throws `ApiError` for other non-2xx responses
  *  - Returns the parsed JSON body for 2xx
  */
-export async function apiFetch<T>(path: string, init: RequestInit = {}): Promise<T> {
+export async function apiResponse(path: string, init: RequestInit = {}): Promise<Response> {
   const token = readStoredToken();
   const headers = new Headers(init.headers);
   if (token) headers.set('Authorization', `Bearer ${token}`);
@@ -71,7 +71,11 @@ export async function apiFetch<T>(path: string, init: RequestInit = {}): Promise
     throw new ApiError(res.status, message);
   }
 
-  // 204 No Content
+  return res;
+}
+
+export async function apiFetch<T>(path: string, init: RequestInit = {}): Promise<T> {
+  const res = await apiResponse(path, init);
   if (res.status === 204) return undefined as T;
   return (await res.json()) as T;
 }

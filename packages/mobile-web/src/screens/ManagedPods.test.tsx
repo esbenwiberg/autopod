@@ -2,10 +2,18 @@ import { act } from 'react';
 import { type Root, createRoot } from 'react-dom/client';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
+import { apiFetch } from '../lib/api.js';
 import type { ManagedPodSummary } from '../store/managed-pods.js';
 import { useManagedPodsStore } from '../store/managed-pods.js';
 import { ManagedPodDetail } from './ManagedPodDetail.js';
 import { ManagedPods } from './ManagedPods.js';
+
+vi.mock('../lib/api.js', () => ({
+  apiFetch: vi.fn(async () => {
+    throw new Error('offline');
+  }),
+  apiResponse: vi.fn(),
+}));
 
 let root: Root;
 let container: HTMLDivElement;
@@ -28,6 +36,7 @@ afterEach(() => {
   act(() => root.unmount());
   container.remove();
   useManagedPodsStore.setState(originalState, true);
+  vi.clearAllMocks();
 });
 
 it('renders a separate read-only managed pod inventory', async () => {
@@ -64,6 +73,43 @@ it('renders managed runtime, failure, limitation and artifact evidence', async (
   expect(container.textContent).toContain('billing attribution unavailable');
   expect(container.textContent).toContain('artifact-one');
   expect(container.textContent).toContain('2 files');
+});
+
+it('loads a direct detail URL without fetching the fleet and displays explicit off', async () => {
+  useManagedPodsStore.setState({ pods: [], loaded: false });
+  vi.mocked(apiFetch).mockResolvedValueOnce({
+    pod: { ...fixture(), validationStatus: 'disabled' },
+    validations: [],
+    candidates: [],
+    source: [],
+    verification: null,
+    events: [],
+  });
+  await act(async () => {
+    root.render(
+      <MemoryRouter initialEntries={['/managed-pod/managed-one']}>
+        <Routes>
+          <Route path="/managed-pod/:id" element={<ManagedPodDetail />} />
+        </Routes>
+      </MemoryRouter>,
+    );
+  });
+  expect(apiFetch).toHaveBeenCalledWith('/managed/pods/managed-one');
+  expect(useManagedPodsStore.getState().refresh).not.toHaveBeenCalled();
+  expect(container.textContent).toContain('Disabled by configuration');
+  expect(container.textContent).toContain('Not received');
+  vi.mocked(apiFetch).mockResolvedValueOnce({
+    bundle: { sha256: 'sha256:fixture' },
+    files: [{ path: 'report.md', size: 42 }],
+  });
+  await act(async () => {
+    const button = [...container.querySelectorAll('button')].find(
+      (b) => b.textContent === 'View manifest',
+    );
+    button?.click();
+  });
+  expect(apiFetch).toHaveBeenLastCalledWith('/artifacts/artifact-one/manifest');
+  expect(container.textContent).toContain('report.md');
 });
 
 function fixture(): ManagedPodSummary {

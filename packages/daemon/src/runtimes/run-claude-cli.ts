@@ -130,7 +130,9 @@ export function runClaudeCli(
 ): Promise<{ stdout: string; tokenUsage?: ClaudeCliTokenUsage }> {
   if (opts.recordHostDispatch) return runWithHostCliProvenance(opts, runClaudeCli);
   const maxBuf = opts.maxBuffer ?? 2 * 1024 * 1024;
-  const spawnFn = opts.spawnImpl ?? spawn;
+  const spawnFn: SpawnImpl =
+    opts.spawnImpl ??
+    ((command, args, options) => (options ? spawn(command, args, options) : spawn(command, args)));
   const command = opts.command ?? 'claude';
   const outputFormat = opts.outputFormat ?? 'text';
   const args = opts.args ?? ['-p', '--model', opts.model, '--output-format', outputFormat];

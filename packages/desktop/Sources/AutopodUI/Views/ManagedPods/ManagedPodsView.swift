@@ -1,6 +1,7 @@
 import AutopodClient
 import Foundation
 import SwiftUI
+import AppKit
 
 public struct ManagedPodsView: View {
   public let pods: [ManagedPodSummary]
@@ -76,6 +77,11 @@ public struct ManagedPodsView: View {
           }
           .width(min: 170, ideal: 230)
 
+          TableColumn("Validation") { pod in
+            Text(managedValidationLabel(pod.validationStatus))
+              .font(.caption)
+          }.width(min: 100, ideal: 140)
+
           TableColumn("Model") { pod in
             VStack(alignment: .leading, spacing: 1) {
               Text(pod.model).lineLimit(1)
@@ -128,10 +134,15 @@ public struct ManagedPodsView: View {
 }
 
 public struct ManagedPodDetailView: View {
-  public let pod: ManagedPodSummary
+  private let initialPod: ManagedPodSummary
+  public var pod: ManagedPodSummary { detail?.pod.podId == initialPod.podId ? detail!.pod : initialPod }
+  public let api: DaemonAPI?
+  @State private var detail: ManagedPodDetailResponse?
+  @State private var detailError: String?
 
-  public init(pod: ManagedPodSummary) {
-    self.pod = pod
+  public init(pod: ManagedPodSummary, api: DaemonAPI? = nil) {
+    self.initialPod = pod
+    self.api = api
   }
 
   public var body: some View {
@@ -158,6 +169,36 @@ public struct ManagedPodDetailView: View {
           detailRow("Target", pod.executionTarget)
           detailRow("Reasoning", pod.reasoning)
         }
+
+        detailSection("AutoPod validation") {
+          Text(managedValidationLabel(detail?.pod.validationStatus ?? pod.validationStatus))
+          ForEach(detail?.validations ?? []) { run in
+            detailRow("Mode", run.mode)
+            detailRow("Checked commit", run.newCommit, monospaced: true)
+            if !run.reason.isEmpty { Text(run.reason).font(.caption).foregroundStyle(.secondary) }
+            ForEach(run.phases) { phase in
+              HStack {
+                Text(phase.phase.capitalized)
+                Spacer()
+                Text(phase.status)
+                Text(String(format: "%.1fs", Double(phase.durationMs) / 1000))
+              }.font(.caption)
+            }
+          }
+        }
+
+        detailSection("Source delivery") {
+          detailRow("Dispatcher verification", detail?.verification?.status ?? "Not received")
+          ForEach(detail?.candidates ?? []) { candidate in
+            detailRow("Candidate commit", candidate.newCommit, monospaced: true)
+          }
+          ForEach(detail?.source ?? []) { receipt in
+            detailRow(receipt.operation, receipt.status)
+            detailRow("Branch", receipt.head, monospaced: true)
+            if receipt.pullRequestId > 0 { detailRow("Draft PR", "#\(receipt.pullRequestId)") }
+          }
+        }
+        if let detailError { Text(detailError).font(.caption).foregroundStyle(.orange) }
 
         detailSection("Runtime evidence") {
           detailRow("Provider requests", pod.providerRequests.formatted())
@@ -197,7 +238,7 @@ public struct ManagedPodDetailView: View {
               .font(.caption)
               .foregroundStyle(.secondary)
           } else {
-            ForEach(pod.artifacts) { artifact in
+            ForEach(detail?.pod.artifacts ?? pod.artifacts) { artifact in
               VStack(alignment: .leading, spacing: 3) {
                 Text(artifact.artifactId)
                   .font(.system(.caption, design: .monospaced))
@@ -205,12 +246,37 @@ public struct ManagedPodDetailView: View {
                 Text("\(artifact.status) · \(artifact.fileCount) files · \(ByteCountFormatter.string(fromByteCount: Int64(artifact.totalBytes), countStyle: .file))")
                   .font(.caption2)
                   .foregroundStyle(.secondary)
+                if artifact.status == "committed", let api {
+                  ManagedArtifactInspector(artifact: artifact, api: api)
+                }
               }
             }
           }
         }
+        detailSection("Timeline") {
+          ForEach(detail?.events ?? []) { event in
+            HStack {
+              Text(Date(timeIntervalSince1970: TimeInterval(event.createdAt)), style: .time)
+              Text(event.kind.replacingOccurrences(of: "_", with: " "))
+            }.font(.caption)
+          }
+        }
       }
       .padding(18)
+    }
+    .task(id: pod.podId) {
+      detail = nil
+      detailError = nil
+      guard let api else { return }
+      while !Task.isCancelled {
+        do {
+          let fetched = try await api.getManagedPod(pod.podId)
+          guard !Task.isCancelled else { return }
+          detail = fetched
+          detailError = nil
+        } catch { if !Task.isCancelled { detailError = error.localizedDescription } }
+        do { try await Task.sleep(for: .seconds(5)) } catch { return }
+      }
     }
   }
 
@@ -235,6 +301,53 @@ public struct ManagedPodDetailView: View {
       Text(value)
         .font(monospaced ? .system(.caption, design: .monospaced) : .caption)
         .textSelection(.enabled)
+    }
+  }
+}
+
+private func managedValidationLabel(_ status: String?) -> String {
+  if status == "disabled" { return "Disabled by configuration" }
+  return (status ?? "not requested").replacingOccurrences(of: "-", with: " ").capitalized
+}
+
+private struct ManagedArtifactInspector: View {
+  let artifact: ManagedArtifactSummary
+  let api: DaemonAPI
+  @State private var manifest: ManagedArtifactManifest?
+  @State private var error: String?
+  @State private var busy = false
+
+  var body: some View {
+    VStack(alignment: .leading, spacing: 6) {
+      HStack {
+        Button("View manifest") {
+          Task { @MainActor in
+            busy = true
+            defer { busy = false }
+            do { manifest = try await api.getManagedArtifactManifest(artifact.artifactId); error = nil }
+            catch { self.error = error.localizedDescription }
+          }
+        }
+        Button("Download") {
+          Task { @MainActor in
+            let panel = NSSavePanel()
+            panel.nameFieldStringValue = "\(artifact.artifactId).tar.gz"
+            guard await panel.begin() == .OK, let url = panel.url else { return }
+            busy = true
+            defer { busy = false }
+            do { let data = try await api.downloadManagedArtifact(artifact.artifactId); try data.write(to: url, options: .atomic); error = nil }
+            catch { self.error = error.localizedDescription }
+          }
+        }
+      }.disabled(busy)
+      if let error { Text(error).font(.caption).foregroundStyle(.orange) }
+      if let manifest {
+        Text(manifest.bundle.sha256).font(.system(.caption2, design: .monospaced)).textSelection(.enabled)
+        ForEach(manifest.files) { file in
+          Text("\(file.path) · \(ByteCountFormatter.string(fromByteCount: Int64(file.size), countStyle: .file))")
+            .font(.caption).textSelection(.enabled)
+        }
+      }
     }
   }
 }

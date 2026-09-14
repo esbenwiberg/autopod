@@ -8,6 +8,7 @@ import type { ManagedPodService } from './managed-service.js';
 
 /** Attempt completion packages intentional output only after observed writer exit. */
 export class ManagedArtifactPipeline {
+  private readonly running = new Map<string, Promise<void>>();
   constructor(
     readonly service: ManagedPodService,
     readonly exports: ArtifactExports,
@@ -17,6 +18,14 @@ export class ManagedArtifactPipeline {
     service.artifactPipeline = this;
   }
   async finish(installation: string, podId: string): Promise<void> {
+    this.service.row(installation, podId);
+    const prior = this.running.get(podId);
+    if (prior) return prior;
+    const run = this.execute(installation, podId).finally(() => this.running.delete(podId));
+    this.running.set(podId, run);
+    return run;
+  }
+  private async execute(installation: string, podId: string): Promise<void> {
     const row = this.service.row(installation, podId);
     if (!row.observed_exit || !row.runtime_ref)
       throw new Error('artifact-writer-not-observed-exited');
@@ -44,6 +53,16 @@ export class ManagedArtifactPipeline {
         spec.outputs.artifacts,
         true,
       );
+      // Preserve intentional worker artifacts even when validation subsequently fails.
+      // Committed artifacts alone never establish acceptance or source-delivery authority.
+      if (spec.validation.autopod) {
+        stage = 'validation';
+        if (!this.service.source || !this.service.validation)
+          throw new Error('managed-validation-unavailable');
+        const candidate = await this.service.source.freeze(installation, podId);
+        await this.service.validation.finish(installation, podId, candidate);
+        this.service.validation.assertActive(installation, podId);
+      }
       const evidence: ValidationEvidence[] = receipt
         ? [
             {
@@ -59,10 +78,19 @@ export class ManagedArtifactPipeline {
         : [];
       this.service.db
         .transaction(() => {
+          const prior = this.service.db
+            .prepare('SELECT evidence_json FROM managed_results WHERE pod_id=?')
+            .get(podId) as { evidence_json: string } | undefined;
+          const combined = new Map<string, ValidationEvidence>();
+          for (const item of [
+            ...(prior ? (JSON.parse(prior.evidence_json) as ValidationEvidence[]) : []),
+            ...evidence,
+          ])
+            combined.set(item.evidenceId, item);
           this.service.db
             .prepare(`INSERT INTO managed_results (pod_id,evidence_json) VALUES (?,?)
-          ON CONFLICT(pod_id) DO UPDATE SET evidence_json=excluded.evidence_json,limitations_json='[]'`)
-            .run(podId, canonical(evidence));
+          ON CONFLICT(pod_id) DO UPDATE SET evidence_json=excluded.evidence_json`)
+            .run(podId, canonical([...combined.values()]));
           const state = spec.outputs.source.mode === 'none' ? 'complete' : 'validated';
           this.service.db
             .prepare('UPDATE managed_pods SET state=? WHERE pod_id=?')
@@ -76,11 +104,17 @@ export class ManagedArtifactPipeline {
         await this.service.source.freeze(installation, podId);
       }
       await rm(staging, { recursive: true, force: true }).catch(() => {
+        const stored = this.service.db
+          .prepare('SELECT limitations_json FROM managed_results WHERE pod_id=?')
+          .get(podId) as { limitations_json: string };
         this.service.db
-          .prepare(
-            'UPDATE managed_results SET limitations_json=\'["staging-cleanup-pending"]\' WHERE pod_id=?',
-          )
-          .run(podId);
+          .prepare('UPDATE managed_results SET limitations_json=? WHERE pod_id=?')
+          .run(
+            canonical([
+              ...new Set([...JSON.parse(stored.limitations_json), 'staging-cleanup-pending']),
+            ]),
+            podId,
+          );
       });
     } catch (error) {
       const limitation =
@@ -108,7 +142,12 @@ export class ManagedArtifactPipeline {
   async tick(): Promise<void> {
     const rows = this.service.db
       .prepare(
-        "SELECT pod_id,dispatcher_installation_id FROM managed_pods WHERE observed_exit=1 AND (state IN ('validating','validated') OR (state='review_required' AND EXISTS (SELECT 1 FROM artifact_exports WHERE artifact_exports.pod_id=managed_pods.pod_id AND error_code='artifact-export-retryable')))",
+        `SELECT pod_id,dispatcher_installation_id FROM managed_pods WHERE observed_exit=1 AND
+          (state IN ('validating','validated') OR (state='review_required' AND
+            (EXISTS (SELECT 1 FROM artifact_exports WHERE artifact_exports.pod_id=managed_pods.pod_id AND error_code='artifact-export-retryable') OR
+             EXISTS (SELECT 1 FROM managed_validations WHERE managed_validations.pod_id=managed_pods.pod_id AND
+               json_extract(receipt_json,'$.mode')='deterministic' AND
+               (json_extract(receipt_json,'$.status')='running' OR cleanup<>'observed')))))`,
       )
       .all() as { pod_id: string; dispatcher_installation_id: string }[];
     for (const row of rows)

@@ -1,5 +1,42 @@
 // Generated from specs/managed-pod/v1/protocol.schema.json. Do not edit.
 import { z } from 'zod';
+export const ManagedValidationChoiceSchema = z
+  .object({
+    mode: z.enum(['off', 'deterministic']),
+    configurationDigest: z.string().regex(/^sha256:[a-f0-9]{64}$/),
+  })
+  .strict();
+export type ManagedValidationChoice = z.infer<typeof ManagedValidationChoiceSchema>;
+export const ManagedValidationReceiptSchema = z
+  .object({
+    schemaVersion: z.literal(1),
+    validationId: z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._-]{0,199}$/),
+    podId: z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._-]{0,199}$/),
+    dispatcherAttemptId: z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._-]{0,199}$/),
+    executionSpecDigest: z.string().regex(/^sha256:[a-f0-9]{64}$/),
+    configurationDigest: z.string().regex(/^sha256:[a-f0-9]{64}$/),
+    mode: z.enum(['off', 'deterministic']),
+    status: z.enum(['disabled', 'running', 'passed', 'failed', 'unavailable']),
+    candidateDigest: z.string().regex(/^sha256:[a-f0-9]{64}$/),
+    newCommit: z.string().regex(/^[a-f0-9]{40}$/),
+    startedAt: z.number().int().min(0).max(9007199254740991),
+    completedAt: z.number().int().min(0).max(9007199254740991),
+    phases: z
+      .array(
+        z
+          .object({
+            phase: z.enum(['setup', 'lint', 'sast', 'build', 'test', 'health', 'pages', 'facts']),
+            status: z.enum(['not-run', 'running', 'passed', 'failed', 'skipped', 'pending-human']),
+            durationMs: z.number().int().min(0).max(9007199254740991),
+          })
+          .strict(),
+      )
+      .max(8),
+    reason: z.string().max(200),
+    receiptDigest: z.string().regex(/^sha256:[a-f0-9]{64}$/),
+  })
+  .strict();
+export type ManagedValidationReceipt = z.infer<typeof ManagedValidationReceiptSchema>;
 export const RouteSchema = z
   .object({
     providerAccountId: z
@@ -509,6 +546,7 @@ export const ManagedPodRequestSchema = z
               ),
             'secret-material-forbidden',
           ),
+        autopod: ManagedValidationChoiceSchema.optional(),
       })
       .strict(),
   })

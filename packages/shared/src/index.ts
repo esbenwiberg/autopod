@@ -250,6 +250,7 @@ export type {
 } from './types/runtime.js';
 
 export type {
+  ValidationInfrastructureFailure,
   ValidationResult,
   SmokeResult,
   BuildResult,
@@ -267,6 +268,7 @@ export type {
   ReviewFailure,
   ReviewFailureKind,
   ReviewBatchResult,
+  ReviewProgressSnapshot,
   ReviewAdjudication,
   ReviewFindingLedgerEntry,
   ReviewRepairDelta,

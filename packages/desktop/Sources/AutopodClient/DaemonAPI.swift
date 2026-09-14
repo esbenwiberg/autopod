@@ -167,6 +167,28 @@ public actor DaemonAPI {
     return try await request("GET", "/managed/pods", query: query)
   }
 
+  public func getManagedPod(_ id: String) async throws -> ManagedPodDetailResponse {
+    try await request("GET", "/managed/pods/\(id)")
+  }
+
+  public func getManagedArtifactManifest(_ id: String) async throws -> ManagedArtifactManifest {
+    try await request("GET", "/artifacts/\(id)/manifest")
+  }
+
+  public func downloadManagedArtifact(_ id: String) async throws -> Data {
+    var req = URLRequest(url: try makeRequestURL("/artifacts/\(id)/download"))
+    req.httpMethod = "POST"
+    req.setValue(try await authorizationHeader(), forHTTPHeaderField: "Authorization")
+    req.timeoutInterval = 60
+    let (data, response) = try await pod.data(for: req)
+    guard let http = response as? HTTPURLResponse else { throw URLError(.badServerResponse) }
+    guard http.statusCode == 200 else {
+      if http.statusCode == 401 { throw DaemonError.unauthorized(nil) }
+      throw DaemonError.serverError(http.statusCode, "Artifact unavailable")
+    }
+    return data
+  }
+
   public func listAllManagedPods(limit: Int = 100) async throws -> [ManagedPodSummary] {
     var pods: [ManagedPodSummary] = []
     var cursor: String?

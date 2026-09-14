@@ -8,6 +8,20 @@ const examples = JSON.parse(
 ) as Record<string, Record<string, unknown>>;
 
 describe('managed pod v1 producer contract', () => {
+  it.each(['off', 'deterministic'])(
+    'preserves explicit %s without changing independent verifier policy',
+    (mode) => {
+      const example = examples.ManagedPodRequest;
+      if (!example) throw new Error('missing-test-request');
+      const request = structuredClone(example);
+      const validation = request.validation as Record<string, unknown>;
+      const independentPolicy = validation.verifierPolicy;
+      validation.autopod = { mode, configurationDigest: `sha256:${'a'.repeat(64)}` };
+      const parsed = protocol.ManagedPodRequestSchema.parse(request);
+      expect(parsed.validation.autopod?.mode).toBe(mode);
+      expect(parsed.validation.verifierPolicy).toBe(independentPolicy);
+    },
+  );
   for (const [name, value] of Object.entries(examples)) {
     const schema = protocol[`${name}Schema` as keyof typeof protocol];
     it(`${name} validates and rejects unknown fields and versions`, () => {

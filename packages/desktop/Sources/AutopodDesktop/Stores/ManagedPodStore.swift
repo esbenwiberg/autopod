@@ -10,7 +10,7 @@ public final class ManagedPodStore {
   public private(set) var isLoading = false
   public private(set) var error: String?
 
-  private var api: DaemonAPI?
+  public private(set) var api: DaemonAPI?
 
   public init() {}
 

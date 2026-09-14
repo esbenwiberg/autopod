@@ -2,6 +2,126 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://dispatcher.internal/contracts/managed-pod/v1",
   "$defs": {
+    "ManagedValidationChoice": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "mode": {
+          "type": "string",
+          "enum": ["off", "deterministic"]
+        },
+        "configurationDigest": {
+          "type": "string",
+          "pattern": "^sha256:[a-f0-9]{64}$"
+        }
+      },
+      "required": ["mode", "configurationDigest"]
+    },
+    "ManagedValidationReceipt": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "schemaVersion": {
+          "type": "integer",
+          "const": 1
+        },
+        "validationId": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,199}$"
+        },
+        "podId": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,199}$"
+        },
+        "dispatcherAttemptId": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,199}$"
+        },
+        "executionSpecDigest": {
+          "type": "string",
+          "pattern": "^sha256:[a-f0-9]{64}$"
+        },
+        "configurationDigest": {
+          "type": "string",
+          "pattern": "^sha256:[a-f0-9]{64}$"
+        },
+        "mode": {
+          "type": "string",
+          "enum": ["off", "deterministic"]
+        },
+        "status": {
+          "type": "string",
+          "enum": ["disabled", "running", "passed", "failed", "unavailable"]
+        },
+        "candidateDigest": {
+          "type": "string",
+          "pattern": "^sha256:[a-f0-9]{64}$"
+        },
+        "newCommit": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{40}$"
+        },
+        "startedAt": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "completedAt": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "phases": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "phase": {
+                "type": "string",
+                "enum": ["setup", "lint", "sast", "build", "test", "health", "pages", "facts"]
+              },
+              "status": {
+                "type": "string",
+                "enum": ["not-run", "running", "passed", "failed", "skipped", "pending-human"]
+              },
+              "durationMs": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991
+              }
+            },
+            "required": ["phase", "status", "durationMs"]
+          },
+          "maxItems": 8
+        },
+        "reason": {
+          "type": "string",
+          "maxLength": 200
+        },
+        "receiptDigest": {
+          "type": "string",
+          "pattern": "^sha256:[a-f0-9]{64}$"
+        }
+      },
+      "required": [
+        "schemaVersion",
+        "validationId",
+        "podId",
+        "dispatcherAttemptId",
+        "executionSpecDigest",
+        "configurationDigest",
+        "mode",
+        "status",
+        "candidateDigest",
+        "newCommit",
+        "startedAt",
+        "completedAt",
+        "phases",
+        "reason",
+        "receiptDigest"
+      ]
+    },
     "Route": {
       "type": "object",
       "additionalProperties": false,
@@ -626,6 +746,9 @@
               "not": {
                 "pattern": "(Bearer\\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?://[^/\\s]+:[^/\\s]+@|[?&](?:sig|token|access_token)=)"
               }
+            },
+            "autopod": {
+              "$ref": "#/$defs/ManagedValidationChoice"
             }
           },
           "required": ["suite", "verifierPolicy"]

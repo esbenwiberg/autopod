@@ -177,6 +177,23 @@ it('defaults disabled without attaching channels or calling providers', async ()
   expect(x.channel.attach).not.toHaveBeenCalled();
   expect(x.credential).not.toHaveBeenCalled();
 });
+
+it('advertises deterministic validation only for an explicitly reviewed binding', () => {
+  const x = setup('sandbox');
+  const validation = {
+    configuration: {
+      phases: [{ phase: 'build' as const, command: 'npm run build', timeoutMs: 30000 }],
+      workingDirectory: '',
+    },
+  };
+  const result = composeManagedRuntime({
+    ...x.config,
+    enabled: true,
+    bindings: x.config.bindings.map((binding) => ({ ...binding, validation })),
+  });
+  instances.push(result);
+  expect(result.service.health().capabilities).toContain('managed-validation-v1');
+});
 it.each(['local', 'sandbox'] as const)(
   'wires %s workspaces, bounded requests and quota; restart never reallocates',
   async (target) => {

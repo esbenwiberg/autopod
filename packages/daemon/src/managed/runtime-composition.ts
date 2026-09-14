@@ -10,6 +10,8 @@ import { type ManagedGitHubReadConfig, ManagedGitHubReadGateway } from './github
 import type { ManagedPodRow } from './managed-service.js';
 import { ManagedProviderGateway } from './provider-gateway.js';
 import { ManagedQuotaFeed } from './quota-feed.js';
+import { ManagedSupervisedValidation } from './validation-runtime.js';
+import type { ManagedValidationConfig } from './validation.js';
 import { type ManagedRepositoryMirror, ManagedWorkspaces } from './workspaces.js';
 
 export interface ManagedWorkerProviderChannel {
@@ -44,6 +46,8 @@ export interface ManagedRuntimeBinding {
   command: readonly string[];
   /** Image-internal immutable dependency tree linked from the reviewed repository checkout. */
   dependencyCache?: { enrollmentId: string; path: string };
+  /** Frozen projection of AutoPod deterministic validation; omission keeps validation dark. */
+  validation?: { configuration: ManagedValidationConfig };
   transport: BoundedProviderTransport;
   channel: ManagedWorkerProviderChannel;
   maximumRequests?: number;
@@ -75,6 +79,9 @@ export function composeManagedRuntime(config: ManagedRuntimeCompositionConfig) {
     ...binding,
     route: structuredClone(binding.route),
     command: [...binding.command],
+    ...(binding.validation
+      ? { validation: { configuration: structuredClone(binding.validation.configuration) } }
+      : {}),
   }));
   let closed = false;
   const channels = new Map<string, () => void>();
@@ -235,7 +242,34 @@ export function composeManagedRuntime(config: ManagedRuntimeCompositionConfig) {
       return false;
     return workspaces.discardUnallocated(podId);
   };
-  const components = managedComponents({ ...config, runtime });
+  const validationBoundaries = bindings.flatMap((binding) =>
+    binding.validation
+      ? [
+          {
+            route: binding.route,
+            profileId: binding.profileId,
+            manager: binding.manager,
+            image: binding.image,
+            configuration: binding.validation.configuration,
+            dependencyCache: binding.dependencyCache,
+            sourceWorkspace: (podId: string, repositoryId: string) =>
+              workspaces.path(podId, repositoryId),
+            network: binding.network,
+          },
+        ]
+      : [],
+  );
+  if (config.validation && validationBoundaries.length)
+    throw new Error('managed-validation-composition-ambiguous');
+  const components = managedComponents({
+    ...config,
+    runtime,
+    validation:
+      config.validation ??
+      (validationBoundaries.length
+        ? new ManagedSupervisedValidation(validationBoundaries)
+        : undefined),
+  });
   const gateways = bindings.map(
     (binding) =>
       new ManagedProviderGateway(components.service, binding.transport, binding.maximumRequests),
