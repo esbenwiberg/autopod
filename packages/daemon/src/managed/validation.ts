@@ -2,14 +2,11 @@ import {
   type ManagedPodRequest,
   type ManagedValidationReceipt,
   type SourceCandidateReceipt,
+  type ValidationInfrastructureFailure,
   type ValidationPhase,
-  type ValidationResult,
   parseManagedRecord,
 } from '@autopod/shared';
-import type {
-  ValidationEngineConfig,
-  ValidationPhaseCallbacks,
-} from '../interfaces/validation-engine.js';
+import type { ValidationPhaseCallbacks } from '../interfaces/validation-engine.js';
 import { canonical, digest } from './canonical.js';
 import type { ManagedPodService } from './managed-service.js';
 
@@ -22,34 +19,29 @@ export interface ManagedValidationPort {
   run(
     request: ManagedPodRequest,
     candidate: SourceCandidateReceipt,
+    deadline: number,
     callbacks: ValidationPhaseCallbacks,
     signal: AbortSignal,
     checkpoint: (containerId: string) => void,
-  ): Promise<ValidationResult>;
-  cleanup(containerId: string): Promise<void>;
+  ): Promise<ManagedValidationRunResult>;
+  cleanup(request: ManagedPodRequest, containerId: string): Promise<void>;
 }
 
-export type ManagedValidationConfig = Pick<
-  ValidationEngineConfig,
-  | 'buildCommand'
-  | 'testCommand'
-  | 'lintCommand'
-  | 'sastCommand'
-  | 'validationSetupCommand'
-  | 'startCommand'
-  | 'healthPath'
-  | 'healthTimeout'
-  | 'smokePages'
-  | 'buildWorkDir'
-  | 'buildTimeout'
-  | 'testTimeout'
-  | 'lintTimeout'
-  | 'sastTimeout'
-  | 'hasWebUi'
-  | 'contract'
-> & {
-  phases: Exclude<ValidationPhase, 'review' | 'advisory'>[];
-};
+export interface ManagedValidationRunResult {
+  overall: 'pass' | 'fail';
+  reason?: string;
+  infrastructureFailure?: ValidationInfrastructureFailure;
+}
+
+/** Frozen, normalized projection of AutoPod's deterministic command phases. */
+export interface ManagedValidationConfig {
+  phases: Array<{
+    phase: Extract<ValidationPhase, 'setup' | 'lint' | 'sast' | 'build' | 'test'>;
+    command: string;
+    timeoutMs: number;
+  }>;
+  workingDirectory: string;
+}
 
 export function validationReceipt(
   service: ManagedPodService,
@@ -77,6 +69,9 @@ export function requireValidation(
   const choice = request.validation.autopod;
   if (!choice) return; // Historical requests never claimed AutoPod validation.
   const receipt = validationReceipt(service, candidate.podId);
+  const allocation = service.db
+    .prepare('SELECT cleanup FROM managed_validations WHERE pod_id=?')
+    .get(candidate.podId) as { cleanup: string } | undefined;
   if (
     !receipt ||
     receipt.mode !== choice.mode ||
@@ -85,7 +80,8 @@ export function requireValidation(
     receipt.dispatcherAttemptId !== request.dispatcherAttemptId ||
     receipt.newCommit !== candidate.newCommit ||
     receipt.candidateDigest !== candidate.candidateDigest ||
-    receipt.status !== (choice.mode === 'off' ? 'disabled' : 'passed')
+    receipt.status !== (choice.mode === 'off' ? 'disabled' : 'passed') ||
+    (choice.mode === 'deterministic' && allocation?.cleanup !== 'observed')
   ) {
     throw new Error('managed-validation-required');
   }
@@ -148,16 +144,29 @@ export class ManagedValidationRunner {
       throw new Error('managed-validation-candidate-binding');
     const previous = validationReceipt(this.service, podId);
     if (previous && previous.status !== 'running') {
+      if (previous.mode === 'deterministic') {
+        const allocation = this.service.db
+          .prepare('SELECT container_id,cleanup FROM managed_validations WHERE pod_id=?')
+          .get(podId) as { container_id: string | null; cleanup: string };
+        if (allocation.cleanup !== 'observed') {
+          if (!allocation.container_id || !this.port)
+            throw new Error('managed-validation-cleanup-unreconciled');
+          await this.port.cleanup(request, allocation.container_id);
+          this.service.db
+            .prepare("UPDATE managed_validations SET cleanup='observed' WHERE pod_id=?")
+            .run(podId);
+          if (previous.reason === 'validation-cleanup-unobserved') {
+            previous.reason = '';
+            this.save(previous);
+          }
+        }
+      }
       requireValidation(this.service, request, candidate);
       return;
     }
-    // A durable running record with no local owner represents uncertain execution after restart.
-    // Never replay repository commands automatically.
-    if (previous) {
-      throw new Error('managed-validation-execution-unreconciled');
-    }
     this.assertActive(installation, podId);
-    const receipt: ManagedValidationReceipt = {
+    this.preflight(request);
+    const receipt: ManagedValidationReceipt = previous ?? {
       schemaVersion: 1,
       validationId: `validation-${podId}`,
       podId,
@@ -174,13 +183,16 @@ export class ManagedValidationRunner {
       reason: choice.mode === 'off' ? 'disabled-by-configuration' : '',
       receiptDigest: digest({}),
     };
-    // Claim once across simultaneous service instances.
-    const claim = this.service.db
-      .prepare(
-        'INSERT OR IGNORE INTO managed_validations(pod_id,validation_id,receipt_json) VALUES (?,?,?)',
-      )
-      .run(podId, receipt.validationId, this.serialize(receipt));
-    if (!claim.changes) throw new Error('managed-validation-owned');
+    if (!previous) {
+      // Claim once across simultaneous service instances. The concrete port must also use an
+      // idempotent resource identity because another daemon may reconcile this durable claim.
+      const claim = this.service.db
+        .prepare(
+          'INSERT OR IGNORE INTO managed_validations(pod_id,validation_id,receipt_json) VALUES (?,?,?)',
+        )
+        .run(podId, receipt.validationId, this.serialize(receipt));
+      if (!claim.changes) throw new Error('managed-validation-owned');
+    }
     if (choice.mode === 'off') {
       receipt.completedAt = this.service.now();
       this.save(receipt);
@@ -224,13 +236,16 @@ export class ManagedValidationRunner {
       this.service.onTransition?.(row, `validation-${phase}-${status}`, 'validating');
     };
     try {
-      this.preflight(request);
       const port = this.port;
       if (!port) throw new Error('managed-validation-unavailable');
       const requiredPhases = port.preflight(request);
       const result = await port.run(
         request,
         candidate,
+        Math.min(
+          request.effectiveGrant.budget.expiresAt,
+          row.created_at + request.effectiveGrant.budget.maxDurationSeconds,
+        ),
         {
           onPhaseStarted: (phase) => update(phase, 'running'),
           onPhaseCompleted: (phase, status, result) =>
@@ -249,50 +264,63 @@ export class ManagedValidationRunner {
         },
         controller.signal,
         (containerId) => {
+          // Persist identity only. The port owns the stop fence around supervisor launch; throwing
+          // from an allocation callback can strand a remotely-created resource before reconciliation.
           this.service.db
             .prepare('UPDATE managed_validations SET container_id=? WHERE pod_id=?')
             .run(containerId, podId);
-          assertCurrent();
         },
       );
-      assertCurrent();
-      receipt.status = result.infrastructureFailure
-        ? 'unavailable'
-        : result.overall === 'pass' &&
-            requiredPhases.every((phase) =>
-              receipt.phases.some((p) => p.phase === phase && p.status === 'passed'),
-            )
-          ? 'passed'
-          : 'failed';
-      receipt.reason = result.infrastructureFailure
-        ? 'validation-infrastructure-unavailable'
-        : result.overall === 'pass' && receipt.status !== 'passed'
-          ? 'validation-required-phases-incomplete'
-          : '';
+      let current = true;
+      try {
+        assertCurrent();
+      } catch {
+        current = false;
+      }
+      receipt.status =
+        result.infrastructureFailure || !current
+          ? 'unavailable'
+          : current &&
+              result.overall === 'pass' &&
+              requiredPhases.every((phase) =>
+                receipt.phases.some((p) => p.phase === phase && p.status === 'passed'),
+              )
+            ? 'passed'
+            : 'failed';
+      receipt.reason =
+        result.infrastructureFailure || !current
+          ? (result.reason ?? 'validation-interrupted')
+          : result.overall === 'pass' && receipt.status !== 'passed'
+            ? 'validation-required-phases-incomplete'
+            : (result.reason ?? '');
     } catch {
-      receipt.status = 'unavailable';
+      // A rejected/failed port call is not termination evidence. Keep the durable run open so a
+      // later daemon can reconcile the same idempotent supervisor instead of replaying commands.
+      receipt.status = 'running';
       receipt.reason = controller.signal.aborted
-        ? 'validation-interrupted'
-        : 'validation-run-unavailable';
+        ? 'validation-stop-unreconciled'
+        : 'validation-execution-unreconciled';
+      this.save(receipt);
+      throw new Error('managed-validation-execution-unreconciled');
     } finally {
       clearInterval(timer);
-      const allocation = this.service.db
-        .prepare('SELECT container_id FROM managed_validations WHERE pod_id=?')
-        .get(podId) as { container_id: string | null };
-      if (allocation.container_id && this.port) {
-        try {
-          await this.port.cleanup(allocation.container_id);
-          this.service.db
-            .prepare("UPDATE managed_validations SET cleanup='observed' WHERE pod_id=?")
-            .run(podId);
-        } catch {
-          receipt.status = 'unavailable';
-          receipt.reason = 'validation-cleanup-unobserved';
-        }
-      }
-      receipt.completedAt = this.service.now();
-      this.save(receipt);
     }
+    const allocation = this.service.db
+      .prepare('SELECT container_id FROM managed_validations WHERE pod_id=?')
+      .get(podId) as { container_id: string | null };
+    receipt.completedAt = this.service.now();
+    this.save(receipt);
+    if (allocation.container_id && this.port) {
+      try {
+        await this.port.cleanup(request, allocation.container_id);
+        this.service.db
+          .prepare("UPDATE managed_validations SET cleanup='observed' WHERE pod_id=?")
+          .run(podId);
+      } catch {
+        receipt.reason = 'validation-cleanup-unobserved';
+      }
+    }
+    this.save(receipt);
     requireValidation(this.service, request, candidate);
   }
 

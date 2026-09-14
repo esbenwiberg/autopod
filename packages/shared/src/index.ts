@@ -250,6 +250,7 @@ export type {
 } from './types/runtime.js';
 
 export type {
+  ValidationInfrastructureFailure,
   ValidationResult,
   SmokeResult,
   BuildResult,

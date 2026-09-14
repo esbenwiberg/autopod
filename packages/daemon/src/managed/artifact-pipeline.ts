@@ -142,7 +142,12 @@ export class ManagedArtifactPipeline {
   async tick(): Promise<void> {
     const rows = this.service.db
       .prepare(
-        "SELECT pod_id,dispatcher_installation_id FROM managed_pods WHERE observed_exit=1 AND (state IN ('validating','validated') OR (state='review_required' AND EXISTS (SELECT 1 FROM artifact_exports WHERE artifact_exports.pod_id=managed_pods.pod_id AND error_code='artifact-export-retryable')))",
+        `SELECT pod_id,dispatcher_installation_id FROM managed_pods WHERE observed_exit=1 AND
+          (state IN ('validating','validated') OR (state='review_required' AND
+            (EXISTS (SELECT 1 FROM artifact_exports WHERE artifact_exports.pod_id=managed_pods.pod_id AND error_code='artifact-export-retryable') OR
+             EXISTS (SELECT 1 FROM managed_validations WHERE managed_validations.pod_id=managed_pods.pod_id AND
+               json_extract(receipt_json,'$.mode')='deterministic' AND
+               (json_extract(receipt_json,'$.status')='running' OR cleanup<>'observed')))))`,
       )
       .all() as { pod_id: string; dispatcher_installation_id: string }[];
     for (const row of rows)

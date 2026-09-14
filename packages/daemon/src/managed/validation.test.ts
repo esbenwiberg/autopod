@@ -52,7 +52,8 @@ async function setup(mode: 'off' | 'deterministic', outcome: 'pass' | 'fail' = '
   const port: ManagedValidationPort = {
     preflight: vi.fn(() => ['build'] as const),
     cleanup: vi.fn(async () => {}),
-    run: vi.fn(async (_request, _candidate, callbacks) => {
+    run: vi.fn(async (_request, _candidate, _deadline, callbacks, _signal, checkpoint) => {
+      checkpoint('validation-ref');
       callbacks.onPhaseStarted?.('build');
       callbacks.onPhaseCompleted?.('build', outcome, { duration: 12 });
       return { overall: outcome } as ValidationResult;
@@ -237,7 +238,7 @@ it('retains committed artifacts and validation evidence when validation fails', 
   }
 });
 
-it('a durable uncertain run blocks restart without replay or killing another owner', async () => {
+it('a durable running receipt reconciles through the idempotent port after restart', async () => {
   const { f, service, candidate, port, runner } = await setup('deterministic');
   try {
     await runner.finish('installation-one', candidate.podId, candidate);
@@ -251,15 +252,129 @@ it('a durable uncertain run blocks restart without replay or killing another own
     f.db
       .prepare('UPDATE managed_validations SET receipt_json=? WHERE pod_id=?')
       .run(canonical(receipt), candidate.podId);
-    await expect(
-      new ManagedValidationRunner(service, port).finish(
-        'installation-one',
-        candidate.podId,
-        candidate,
-      ),
-    ).rejects.toThrow('managed-validation-execution-unreconciled');
+    await new ManagedValidationRunner(service, port).finish(
+      'installation-one',
+      candidate.podId,
+      candidate,
+    );
+    expect(port.run).toHaveBeenCalledTimes(2);
+    expect(port.cleanup).toHaveBeenCalledTimes(2);
+  } finally {
+    f.close();
+  }
+});
+
+it('a terminal pass with pending cleanup is not deliverable and cleanup resumes after restart', async () => {
+  const { f, service, spec, candidate, port, runner } = await setup('deterministic');
+  try {
+    await runner.finish('installation-one', candidate.podId, candidate);
+    f.db
+      .prepare("UPDATE managed_validations SET cleanup='not-requested' WHERE pod_id=?")
+      .run(candidate.podId);
+    expect(() => requireValidation(service, spec, candidate)).toThrow(
+      'managed-validation-required',
+    );
+    await new ManagedValidationRunner(service, port).finish(
+      'installation-one',
+      candidate.podId,
+      candidate,
+    );
     expect(port.run).toHaveBeenCalledOnce();
+    expect(port.cleanup).toHaveBeenCalledTimes(2);
+    expect(() => requireValidation(service, spec, candidate)).not.toThrow();
+  } finally {
+    f.close();
+  }
+});
+
+it('recovers a passed receipt after transient cleanup failure without rerunning validation', async () => {
+  const { f, service, spec, candidate, port, runner } = await setup('deterministic');
+  vi.mocked(port.cleanup).mockRejectedValueOnce(new Error('cleanup-transport-unavailable'));
+  try {
+    await expect(runner.finish('installation-one', candidate.podId, candidate)).rejects.toThrow(
+      'managed-validation-required',
+    );
+    expect(validationReceipt(service, candidate.podId)).toMatchObject({
+      status: 'passed',
+      reason: 'validation-cleanup-unobserved',
+    });
+    await new ManagedValidationRunner(service, port).finish(
+      'installation-one',
+      candidate.podId,
+      candidate,
+    );
+    expect(port.run).toHaveBeenCalledOnce();
+    expect(port.cleanup).toHaveBeenCalledTimes(2);
+    expect(validationReceipt(service, candidate.podId)).toMatchObject({
+      status: 'passed',
+      reason: '',
+    });
+    expect(() => requireValidation(service, spec, candidate)).not.toThrow();
+  } finally {
+    f.close();
+  }
+});
+
+it('the artifact reconciler resumes pending validation cleanup without rerunning commands', async () => {
+  const { f, service, candidate, port } = await setup('deterministic');
+  const root = await realpath(await mkdtemp(path.join(tmpdir(), 'managed-validation-cleanup-')));
+  vi.mocked(port.cleanup).mockRejectedValueOnce(new Error('cleanup-transport-unavailable'));
+  try {
+    service.source = { freeze: vi.fn(async () => candidate) } as unknown as ManagedSourceDelivery;
+    f.runtime.extractOutput = async (_ref, destination) => {
+      await mkdir(destination);
+      await writeFile(path.join(destination, 'research.md'), 'Fixture artifact');
+    };
+    const controls = new ManagedControls(service);
+    const pipeline = new ManagedArtifactPipeline(
+      service,
+      new ArtifactExports(f.db, new MemoryArtifactStore()),
+      root,
+      controls,
+    );
+    await expect(pipeline.finish('installation-one', candidate.podId)).rejects.toThrow(
+      'managed-validation-incomplete',
+    );
+    expect(controls.observe('installation-one', candidate.podId, '0').result.state).toBe(
+      'review_required',
+    );
+    await pipeline.tick();
+    expect(port.run).toHaveBeenCalledOnce();
+    expect(port.cleanup).toHaveBeenCalledTimes(2);
+    expect(controls.observe('installation-one', candidate.podId, '0').result.state).toBe(
+      'validated',
+    );
+  } finally {
+    f.close();
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+it('an observation gap keeps the run open and reconciles without premature cleanup', async () => {
+  const { f, service, spec, candidate, port, runner } = await setup('deterministic');
+  const successful = port.run;
+  port.run = vi.fn(async (_request, _candidate, _deadline, _callbacks, _signal, checkpoint) => {
+    checkpoint('validation-ref');
+    throw new Error('transport-unavailable');
+  });
+  try {
+    await expect(runner.finish('installation-one', candidate.podId, candidate)).rejects.toThrow(
+      'managed-validation-execution-unreconciled',
+    );
+    expect(validationReceipt(service, candidate.podId)).toMatchObject({
+      status: 'running',
+      reason: 'validation-execution-unreconciled',
+      completedAt: 0,
+    });
     expect(port.cleanup).not.toHaveBeenCalled();
+    port.run = successful;
+    await new ManagedValidationRunner(service, port).finish(
+      'installation-one',
+      candidate.podId,
+      candidate,
+    );
+    expect(port.cleanup).toHaveBeenCalledOnce();
+    expect(() => requireValidation(service, spec, candidate)).not.toThrow();
   } finally {
     f.close();
   }
