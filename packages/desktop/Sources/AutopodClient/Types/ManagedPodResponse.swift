@@ -106,7 +106,11 @@ public struct ManagedArtifactFile: Codable, Sendable, Identifiable {
   public var id: String { path }
   public let path: String
   public let size: Int
+  public let sha256: String
+  public let mediaType: String
 }
 public struct ManagedArtifactBundle: Codable, Sendable {
+  public let format: String
+  public let size: Int
   public let sha256: String
 }

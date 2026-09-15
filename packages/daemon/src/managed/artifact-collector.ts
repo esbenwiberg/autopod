@@ -12,6 +12,39 @@ export interface CollectedOutput {
   totalBytes: number;
 }
 
+function mediaTypeFor(name: string): string {
+  const extension = path.extname(name).slice(1).toLowerCase();
+  switch (extension) {
+    case 'md':
+    case 'markdown':
+      return 'text/markdown';
+    case 'html':
+    case 'htm':
+      return 'text/html';
+    case 'json':
+      return 'application/json';
+    case 'yaml':
+    case 'yml':
+      return 'application/yaml';
+    case 'csv':
+      return 'text/csv';
+    case 'txt':
+    case 'log':
+      return 'text/plain';
+    case 'png':
+      return 'image/png';
+    case 'jpg':
+    case 'jpeg':
+      return 'image/jpeg';
+    case 'gif':
+      return 'image/gif';
+    case 'pdf':
+      return 'application/pdf';
+    default:
+      return 'application/octet-stream';
+  }
+}
+
 export function safeRelative(name: string): boolean {
   return (
     /^[A-Za-z0-9][A-Za-z0-9._/-]{0,199}$/.test(name) &&
@@ -168,7 +201,7 @@ export async function collectOutput(
       path: entry.path,
       size: entry.bytes.length,
       sha256: sha256(entry.bytes),
-      mediaType: entry.path.endsWith('.md') ? 'text/markdown' : 'application/octet-stream',
+      mediaType: mediaTypeFor(entry.path),
     })),
     bundle,
     totalBytes,

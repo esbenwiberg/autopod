@@ -236,7 +236,7 @@ describe('managed artifacts', () => {
     await expect(verifyBundle(changed, bundle)).rejects.toThrow('artifact-invalid-manifest');
     expect(digest(manifest)).toBe(receipt.manifestSha256);
   });
-  it('authenticates metadata, manifest and streaming download without exposing storage credentials', async () => {
+  it('authenticates metadata, manifest, file previews and streaming download without exposing storage credentials', async () => {
     const { directory, db } = await setup();
     const store = new MemoryArtifactStore();
     const exports = new ArtifactExports(db, store);
@@ -259,6 +259,34 @@ describe('managed artifacts', () => {
       expect(result.statusCode).toBe(200);
       if (suffix !== '/download') expect(result.body).not.toContain(directory);
     }
+    const contentUrl = `/artifacts/${receipt.artifactId}/files/content?path=research.md`;
+    expect((await app.inject({ method: 'GET', url: contentUrl })).statusCode).toBe(404);
+    const content = await app.inject({
+      method: 'GET',
+      url: contentUrl,
+      headers: { 'x-fixture-identity': 'installation-one' },
+    });
+    expect(content.statusCode).toBe(200);
+    expect(content.rawPayload.toString('utf8')).toBe('# Research\n');
+    expect(content.headers['content-type']).toContain('application/octet-stream');
+    expect(
+      (
+        await app.inject({
+          method: 'GET',
+          url: `/artifacts/${receipt.artifactId}/files/content?path=../research.md`,
+          headers: { 'x-fixture-identity': 'installation-one' },
+        })
+      ).statusCode,
+    ).toBe(400);
+    expect(
+      (
+        await app.inject({
+          method: 'GET',
+          url: `/artifacts/${receipt.artifactId}/files/content?path=missing.md`,
+          headers: { 'x-fixture-identity': 'installation-one' },
+        })
+      ).statusCode,
+    ).toBe(404);
     await app.close();
     expect(
       () => new ManagedIdentityBlobTransport('https://example.test/private?sig=synthetic'),

@@ -46,6 +46,41 @@ struct ManagedPodClientTests {
     #expect(pods.first?.consumedTokens == 42)
   }
 
+  @Test func artifactFileFetchUsesTheBoundedContentEndpoint() async throws {
+    let configuration = URLSessionConfiguration.ephemeral
+    configuration.protocolClasses = [ManagedPodsURLProtocol.self]
+    ManagedPodsURLProtocol.handler = { request in
+      #expect(request.url?.path == "/artifacts/art-one/files/content")
+      #expect(
+        URLComponents(url: request.url!, resolvingAgainstBaseURL: false)?
+          .queryItems?.first(where: { $0.name == "path" })?.value == "reports/research.md"
+      )
+      #expect(request.value(forHTTPHeaderField: "Authorization") == "Bearer token")
+      let response = HTTPURLResponse(
+        url: request.url!, statusCode: 200, httpVersion: nil,
+        headerFields: ["Content-Type": "application/octet-stream"]
+      )!
+      return (response, Data("# Research\n".utf8))
+    }
+    defer { ManagedPodsURLProtocol.handler = nil }
+
+    let file = try JSONDecoder().decode(
+      ManagedArtifactFile.self,
+      from: Data(
+        #"{"path":"reports/research.md","size":11,"sha256":"sha256:eb390bca77822856a7c589bb7f713ffb915d1a8f6b5ddce91e5cf84189792f7a","mediaType":"text/markdown"}"#.utf8
+      )
+    )
+    let bundle = try JSONDecoder().decode(
+      ManagedArtifactBundle.self,
+      from: Data(
+        #"{"format":"tar.gz","size":1,"sha256":"sha256:synthetic"}"#.utf8
+      )
+    )
+    let data = try await Self.api(configuration: configuration)
+      .getManagedArtifactFile("art-one", file: file, bundle: bundle)
+    #expect(String(data: data, encoding: .utf8) == "# Research\n")
+  }
+
   @MainActor
   @Test func storeKeepsTheLastInventoryWhenRefreshFails() async throws {
     let configuration = URLSessionConfiguration.ephemeral
