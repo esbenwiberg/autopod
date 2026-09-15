@@ -350,6 +350,58 @@ it('the artifact reconciler resumes pending validation cleanup without rerunning
   }
 });
 
+it.each([
+  ['current source-freeze limitation', false],
+  ['legacy validation limitation without a receipt', true],
+] as const)('the artifact reconciler retries %s and clears it', async (_case, legacy) => {
+  const { f, service, candidate, port } = await setup('deterministic');
+  const root = await realpath(await mkdtemp(path.join(tmpdir(), 'managed-source-recovery-')));
+  const freeze = vi
+    .fn<() => Promise<SourceCandidateReceipt>>()
+    .mockRejectedValueOnce(new Error('source-sync-unavailable'))
+    .mockResolvedValue(candidate);
+  try {
+    service.source = { freeze } as unknown as ManagedSourceDelivery;
+    f.runtime.extractOutput = async (_ref, destination) => {
+      await mkdir(destination);
+      await writeFile(path.join(destination, 'research.md'), 'Fixture artifact');
+    };
+    const controls = new ManagedControls(service);
+    const pipeline = new ManagedArtifactPipeline(
+      service,
+      new ArtifactExports(f.db, new MemoryArtifactStore()),
+      root,
+      controls,
+    );
+
+    await expect(pipeline.finish('installation-one', candidate.podId)).rejects.toThrow(
+      'managed-source-candidate-incomplete',
+    );
+    expect(controls.observe('installation-one', candidate.podId, '0').result).toMatchObject({
+      state: 'review_required',
+      limitations: ['source-candidate-incomplete'],
+    });
+    if (legacy) {
+      f.db
+        .prepare('UPDATE managed_results SET limitations_json=? WHERE pod_id=?')
+        .run(canonical(['validation-incomplete']), candidate.podId);
+    }
+
+    await pipeline.tick();
+
+    // One failed capture, one recovery capture, then the existing idempotent delivery replay.
+    expect(freeze).toHaveBeenCalledTimes(3);
+    expect(port.run).toHaveBeenCalledOnce();
+    expect(controls.observe('installation-one', candidate.podId, '0').result).toMatchObject({
+      state: 'validated',
+      limitations: [],
+    });
+  } finally {
+    f.close();
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 it('an observation gap keeps the run open and reconciles without premature cleanup', async () => {
   const { f, service, spec, candidate, port, runner } = await setup('deterministic');
   const successful = port.run;

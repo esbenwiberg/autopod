@@ -31,6 +31,26 @@ export class ManagedArtifactPipeline {
       throw new Error('artifact-writer-not-observed-exited');
     if (!['validating', 'validated', 'review_required'].includes(row.state)) return;
     const spec = JSON.parse(row.request_json) as ManagedPodRequest;
+    const storedLimitations = this.service.db
+      .prepare('SELECT limitations_json FROM managed_results WHERE pod_id=?')
+      .get(podId) as { limitations_json: string } | undefined;
+    const limitations = storedLimitations
+      ? (JSON.parse(storedLimitations.limitations_json) as string[])
+      : [];
+    const legacySourceFreezeFailure =
+      limitations.includes('validation-incomplete') &&
+      !this.service.db
+        .prepare('SELECT 1 FROM managed_source_candidates WHERE pod_id=?')
+        .get(podId) &&
+      !this.service.db.prepare('SELECT 1 FROM managed_validations WHERE pod_id=?').get(podId);
+    if (
+      row.state === 'review_required' &&
+      (limitations.includes('source-candidate-incomplete') || legacySourceFreezeFailure)
+    ) {
+      this.service.db
+        .prepare("UPDATE managed_pods SET state='validating' WHERE pod_id=?")
+        .run(podId);
+    }
     const staging = path.join(this.stagingRoot, podId);
     const frozen = this.service.db
       .prepare('SELECT artifact_id FROM artifact_exports WHERE pod_id=?')
@@ -56,10 +76,25 @@ export class ManagedArtifactPipeline {
       // Preserve intentional worker artifacts even when validation subsequently fails.
       // Committed artifacts alone never establish acceptance or source-delivery authority.
       if (spec.validation.autopod) {
-        stage = 'validation';
+        stage = 'source-candidate';
         if (!this.service.source || !this.service.validation)
           throw new Error('managed-validation-unavailable');
         const candidate = await this.service.source.freeze(installation, podId);
+        if (limitations.includes('source-candidate-incomplete') || legacySourceFreezeFailure) {
+          this.service.db
+            .prepare('UPDATE managed_results SET limitations_json=? WHERE pod_id=?')
+            .run(
+              canonical(
+                limitations.filter(
+                  (item) =>
+                    item !== 'source-candidate-incomplete' &&
+                    !(legacySourceFreezeFailure && item === 'validation-incomplete'),
+                ),
+              ),
+              podId,
+            );
+        }
+        stage = 'validation';
         await this.service.validation.finish(installation, podId, candidate);
         this.service.validation.assertActive(installation, podId);
       }
@@ -147,7 +182,13 @@ export class ManagedArtifactPipeline {
             (EXISTS (SELECT 1 FROM artifact_exports WHERE artifact_exports.pod_id=managed_pods.pod_id AND error_code='artifact-export-retryable') OR
              EXISTS (SELECT 1 FROM managed_validations WHERE managed_validations.pod_id=managed_pods.pod_id AND
                json_extract(receipt_json,'$.mode')='deterministic' AND
-               (json_extract(receipt_json,'$.status')='running' OR cleanup<>'observed')))))`,
+               (json_extract(receipt_json,'$.status')='running' OR cleanup<>'observed')) OR
+             EXISTS (SELECT 1 FROM managed_results,json_each(managed_results.limitations_json)
+               WHERE managed_results.pod_id=managed_pods.pod_id AND json_each.value='source-candidate-incomplete') OR
+             (NOT EXISTS (SELECT 1 FROM managed_source_candidates WHERE managed_source_candidates.pod_id=managed_pods.pod_id) AND
+              NOT EXISTS (SELECT 1 FROM managed_validations WHERE managed_validations.pod_id=managed_pods.pod_id) AND
+              EXISTS (SELECT 1 FROM managed_results,json_each(managed_results.limitations_json)
+                WHERE managed_results.pod_id=managed_pods.pod_id AND json_each.value='validation-incomplete')))))`,
       )
       .all() as { pod_id: string; dispatcher_installation_id: string }[];
     for (const row of rows)
