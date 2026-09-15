@@ -5,6 +5,7 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import re
 import shutil
 import signal
 import stat
@@ -44,7 +45,74 @@ def tree_manifest(root):
     return values
 
 
-def prepare_workspace(source, workspace, dependency_cache, worker_uid, worker_gid):
+def prepare_git_metadata(source, target_git, expected_commit):
+    supervisor_uid = os.getuid()
+    supervisor_gid = os.getgid()
+    if not isinstance(expected_commit, str) or not re.fullmatch(r'[a-f0-9]{40}', expected_commit):
+        raise RuntimeError('source-git-metadata-untrusted')
+    source_git = source / '.git'
+    source_git_item = os.lstat(source_git)
+    if not stat.S_ISDIR(source_git_item.st_mode):
+        raise RuntimeError('source-git-metadata-untrusted')
+    for directory, dirs, files in os.walk(source_git, topdown=True, followlinks=False):
+        for name in dirs:
+            item = os.lstat(Path(directory) / name)
+            if not stat.S_ISDIR(item.st_mode):
+                raise RuntimeError('source-git-metadata-untrusted')
+        for name in files:
+            item = os.lstat(Path(directory) / name)
+            if not stat.S_ISREG(item.st_mode) or item.st_nlink != 1:
+                raise RuntimeError('source-git-metadata-untrusted')
+    if (source_git / 'objects/info/alternates').exists():
+        raise RuntimeError('source-git-metadata-untrusted')
+    head = source_git / 'HEAD'
+    index = source_git / 'index'
+    objects = source_git / 'objects'
+    if (
+        not head.is_file()
+        or head.read_text().strip() != expected_commit
+        or not index.is_file()
+        or not objects.is_dir()
+    ):
+        raise RuntimeError('source-git-metadata-untrusted')
+
+    target_git.mkdir(mode=0o755)
+    (target_git / 'refs/heads').mkdir(parents=True)
+    (target_git / 'refs/tags').mkdir(parents=True)
+    shutil.copyfile(head, target_git / 'HEAD')
+    shutil.copyfile(index, target_git / 'index')
+    shutil.copytree(objects, target_git / 'objects', copy_function=shutil.copyfile)
+    shallow = source_git / 'shallow'
+    if shallow.exists():
+        shutil.copyfile(shallow, target_git / 'shallow')
+    (target_git / 'config').write_text(
+        '[core]\n'
+        '\trepositoryformatversion = 0\n'
+        '\tfilemode = true\n'
+        '\tbare = false\n'
+        '\tlogallrefupdates = false\n'
+        '\thooksPath = /dev/null\n'
+        '\tfsmonitor = false\n'
+        '[credential]\n'
+        '\thelper =\n'
+        '[protocol "ext"]\n'
+        '\tallow = never\n'
+        '[http]\n'
+        '\tfollowRedirects = false\n',
+    )
+    for directory, dirs, files in os.walk(target_git, topdown=False, followlinks=False):
+        for name in files:
+            os.chown(Path(directory) / name, supervisor_uid, supervisor_gid)
+            os.chmod(Path(directory) / name, 0o444)
+        for name in dirs:
+            os.chown(Path(directory) / name, supervisor_uid, supervisor_gid)
+            os.chmod(Path(directory) / name, 0o555)
+    os.chown(target_git, supervisor_uid, supervisor_gid)
+    os.chmod(target_git, 0o555)
+
+
+def prepare_workspace(source, workspace, git_metadata, dependency_cache, worker_uid, worker_gid,
+                      expected_commit):
     if workspace.exists():
         shutil.rmtree(workspace)
     shutil.copytree(
@@ -64,6 +132,7 @@ def prepare_workspace(source, workspace, dependency_cache, worker_uid, worker_gi
             else:
                 os.chown(path, worker_uid, worker_gid)
                 os.chmod(path, 0o700 if stat.S_ISDIR(item.st_mode) or item.st_mode & 0o111 else 0o600)
+    prepare_git_metadata(source, git_metadata, expected_commit)
     if dependency_cache:
         target = Path(dependency_cache)
         item = target.stat()
@@ -116,9 +185,12 @@ def supervise(root, clock=time.time, monotonic=time.monotonic):
     atomic(receipt, state)
     source = Path(spec['source']).resolve()
     workspace = Path(spec['workspace']).resolve()
+    git_metadata = root / 'git'
     try:
         expected = tree_manifest(source)
-        prepare_workspace(source, workspace, spec.get('dependencyCache'), spec['workerUid'], spec['workerGid'])
+        prepare_workspace(source, workspace, git_metadata, spec.get('dependencyCache'),
+                          spec['workerUid'], spec['workerGid'], spec['newCommit'])
+        os.chmod(root, 0o711)
     except (OSError, RuntimeError, ValueError) as error:
         preparation_reason = ('dependency-cache-untrusted'
                               if str(error) == 'dependency-cache-untrusted'
@@ -157,7 +229,21 @@ def supervise(root, clock=time.time, monotonic=time.monotonic):
         try:
             process = subprocess.Popen(
                 ['/bin/sh', '-c', phase['command']], cwd=phase['cwd'],
-                env={'PATH': '/usr/local/bin:/usr/bin:/bin', 'HOME': '/tmp', 'TMPDIR': '/tmp'},
+                env={
+                    'PATH': '/usr/local/bin:/usr/bin:/bin',
+                    'HOME': '/tmp',
+                    'TMPDIR': '/tmp',
+                    'GIT_CONFIG_NOSYSTEM': '1',
+                    'GIT_CONFIG_GLOBAL': '/dev/null',
+                    'GIT_CONFIG_COUNT': '1',
+                    'GIT_CONFIG_KEY_0': 'safe.directory',
+                    'GIT_CONFIG_VALUE_0': str(workspace),
+                    'GIT_DIR': str(git_metadata),
+                    'GIT_TERMINAL_PROMPT': '0',
+                    'GIT_NO_REPLACE_OBJECTS': '1',
+                    'GIT_OPTIONAL_LOCKS': '0',
+                    'GIT_WORK_TREE': str(workspace),
+                },
                 stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
                 preexec_fn=isolate,
             )
