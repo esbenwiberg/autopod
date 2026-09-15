@@ -2,6 +2,7 @@ import { expect, it, vi } from 'vitest';
 import { fixture } from '../test-utils/managed-fixture.js';
 import { digest } from './canonical.js';
 import { ManagedControls } from './managed-controls.js';
+import type { ManagedSourceDelivery } from './source-delivery.js';
 
 it('status is passive, events retain IDs across restart, and stop is not observed termination', async () => {
   const f = fixture();
@@ -284,6 +285,56 @@ it('cleanup releases an expired nonzero-exit runtime without waiting for impossi
     expect(
       service.db.prepare('SELECT 1 FROM artifact_exports WHERE pod_id=?').get(handle.podId),
     ).toBeUndefined();
+  } finally {
+    f.close();
+  }
+});
+
+it('cleanup releases a failed runtime after source capture becomes impossible', async () => {
+  const f = fixture();
+  try {
+    const service = f.service();
+    const controls = new ManagedControls(service);
+    const handle = await service.start('installation-one', f.request);
+    const spec = structuredClone(f.request);
+    spec.outputs.artifacts = { mode: 'none' };
+    spec.outputs.source = {
+      mode: 'branch',
+      repository: 'repo',
+      remote: 'origin',
+      head: 'worker/one',
+      base: 'main',
+    };
+    f.db
+      .prepare(
+        "UPDATE managed_pods SET request_json=?,observed_exit=1,state='review_required',exit_code=0 WHERE pod_id=?",
+      )
+      .run(JSON.stringify(spec), handle.podId);
+    f.db
+      .prepare('INSERT INTO managed_results (pod_id,limitations_json) VALUES (?,?)')
+      .run(handle.podId, JSON.stringify(['source-candidate-incomplete']));
+    service.source = {
+      candidate: vi.fn(() => {
+        throw new Error('source-candidate-unavailable');
+      }),
+      unchanged: vi.fn(async () => false),
+    } as unknown as ManagedSourceDelivery;
+    f.runtime.cleanup = async () => true;
+
+    const result = await controls.control(
+      'installation-one',
+      handle.podId,
+      {
+        schemaVersion: 1,
+        dispatcherAttemptId: f.request.dispatcherAttemptId,
+        grantId: f.request.effectiveGrant.grantId,
+        grantRevision: 1,
+        operation: 'cleanup',
+      },
+      'cleanup-source-capture-failed',
+    );
+
+    expect(result.cleanup).toBe('observed');
   } finally {
     f.close();
   }

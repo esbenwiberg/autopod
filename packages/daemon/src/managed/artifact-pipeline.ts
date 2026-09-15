@@ -177,7 +177,7 @@ export class ManagedArtifactPipeline {
   async tick(): Promise<void> {
     const rows = this.service.db
       .prepare(
-        `SELECT pod_id,dispatcher_installation_id FROM managed_pods WHERE observed_exit=1 AND
+        `SELECT pod_id,dispatcher_installation_id FROM managed_pods WHERE observed_exit=1 AND cleanup='not-requested' AND
           (state IN ('validating','validated') OR (state='review_required' AND
             (EXISTS (SELECT 1 FROM artifact_exports WHERE artifact_exports.pod_id=managed_pods.pod_id AND error_code='artifact-export-retryable') OR
              EXISTS (SELECT 1 FROM managed_validations WHERE managed_validations.pod_id=managed_pods.pod_id AND
