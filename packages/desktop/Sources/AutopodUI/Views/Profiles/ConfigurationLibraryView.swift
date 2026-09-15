@@ -77,7 +77,12 @@ public struct ConfigurationLibraryView: View {
         actions: actions
       )
     }
-    .onChange(of: page) { _, _ in search = "" }
+    .onChange(of: page) { _, newPage in
+      search = ""
+      if newPage == .buildingBlocks, !buildingBlockKinds.contains(kind) {
+        kind = .environment
+      }
+    }
   }
 
   private var libraryNavigation: some View {
