@@ -1,3 +1,4 @@
+import CryptoKit
 import Foundation
 
 /// Async REST client for the Autopod daemon API.
@@ -187,6 +188,32 @@ public actor DaemonAPI {
       throw DaemonError.serverError(http.statusCode, "Artifact unavailable")
     }
     return data
+  }
+
+  public func getManagedArtifactFile(
+    _ id: String,
+    file: ManagedArtifactFile,
+    bundle: ManagedArtifactBundle
+  ) async throws -> Data {
+    guard file.size <= 5 * 1024 * 1024 else {
+      throw DaemonError.badRequest("Artifact file is too large to preview")
+    }
+
+    do {
+      let data = try await managedArtifactFileData(id, path: file.path)
+      try Self.verifyManagedArtifactBytes(data, file: file)
+      return data
+    } catch DaemonError.notFound {
+      // Older daemons only expose the signed bundle. Read the selected member without
+      // materializing the archive so the desktop viewer works during rolling upgrades.
+      let archive = try await downloadManagedArtifact(id)
+      guard Self.sha256(archive) == bundle.sha256 else {
+        throw DaemonError.serverError(409, "Artifact bundle failed its integrity check")
+      }
+      let data = try Self.readManagedArtifactFile(file.path, from: archive)
+      try Self.verifyManagedArtifactBytes(data, file: file)
+      return data
+    }
   }
 
   public func listAllManagedPods(limit: Int = 100) async throws -> [ManagedPodSummary] {
@@ -1131,6 +1158,70 @@ public actor DaemonAPI {
       let msg = decodeErrorMessage(data) ?? "Unknown error"
       throw DaemonError.serverError(http.statusCode, msg)
     }
+  }
+
+  private func managedArtifactFileData(_ id: String, path: String) async throws -> Data {
+    let endpoint = "/artifacts/\(id)/files/content"
+    var req = URLRequest(url: try makeRequestURL(endpoint, query: ["path": path]))
+    req.httpMethod = "GET"
+    req.setValue(try await authorizationHeader(), forHTTPHeaderField: "Authorization")
+    req.setValue("application/octet-stream", forHTTPHeaderField: "Accept")
+    req.timeoutInterval = 60
+    let (data, response) = try await pod.data(for: req)
+    guard let http = response as? HTTPURLResponse else { throw URLError(.badServerResponse) }
+    switch http.statusCode {
+    case 200:
+      return data
+    case 401:
+      throw DaemonError.unauthorized(decodeErrorMessage(data))
+    case 404:
+      throw DaemonError.notFound(endpoint)
+    case 400:
+      throw DaemonError.badRequest(decodeErrorMessage(data) ?? "Invalid artifact file")
+    default:
+      throw DaemonError.serverError(
+        http.statusCode,
+        decodeErrorMessage(data) ?? "Artifact file unavailable"
+      )
+    }
+  }
+
+  private nonisolated static func readManagedArtifactFile(
+    _ path: String,
+    from archive: Data
+  ) throws -> Data {
+    let archiveURL = FileManager.default.temporaryDirectory
+      .appendingPathComponent("autopod-artifact-\(UUID().uuidString).tar.gz")
+    try archive.write(to: archiveURL, options: .atomic)
+    defer { try? FileManager.default.removeItem(at: archiveURL) }
+
+    let process = Process()
+    let output = Pipe()
+    process.executableURL = URL(fileURLWithPath: "/usr/bin/tar")
+    process.arguments = ["-xOf", archiveURL.path, path]
+    process.standardOutput = output
+    process.standardError = FileHandle.nullDevice
+    try process.run()
+    let data = output.fileHandleForReading.readDataToEndOfFile()
+    process.waitUntilExit()
+    guard process.terminationStatus == 0 else {
+      throw DaemonError.serverError(409, "Artifact file could not be read from its bundle")
+    }
+    return data
+  }
+
+  private nonisolated static func verifyManagedArtifactBytes(
+    _ data: Data,
+    file: ManagedArtifactFile
+  ) throws {
+    guard data.count == file.size, sha256(data) == file.sha256 else {
+      throw DaemonError.serverError(409, "Artifact file failed its integrity check")
+    }
+  }
+
+  private nonisolated static func sha256(_ data: Data) -> String {
+    let digest = SHA256.hash(data: data)
+    return "sha256:" + digest.map { String(format: "%02x", $0) }.joined()
   }
 
   nonisolated func makeRequestURL(_ path: String, query: [String: String] = [:]) throws -> URL {
