@@ -1,10 +1,12 @@
 import { execFileSync } from 'node:child_process';
-import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { chmod, mkdir, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { expect, it } from 'vitest';
 
 const script = path.resolve(import.meta.dirname, 'runtime/validation-supervisor.py');
+const git =
+  process.platform === 'darwin' ? '/Library/Developer/CommandLineTools/usr/bin/git' : 'git';
 
 async function setup(command: string, expiresAt = Math.floor(Date.now() / 1000) + 30) {
   const root = await mkdtemp(path.join(tmpdir(), 'managed-validation-supervisor-'));
@@ -12,13 +14,27 @@ async function setup(command: string, expiresAt = Math.floor(Date.now() / 1000) 
   const workspace = path.join(root, 'workspace');
   await mkdir(source);
   await writeFile(path.join(source, 'README.md'), 'frozen source\n');
+  execFileSync('git', ['init', '--quiet'], { cwd: source });
+  execFileSync('git', ['config', 'user.email', 'validation-supervisor@autopod.invalid'], {
+    cwd: source,
+  });
+  execFileSync('git', ['config', 'user.name', 'AutoPod Validation Supervisor'], {
+    cwd: source,
+  });
+  execFileSync('git', ['add', 'README.md'], { cwd: source });
+  execFileSync('git', ['commit', '--quiet', '-m', 'frozen source'], { cwd: source });
+  execFileSync('git', ['checkout', '--detach', '--quiet'], { cwd: source });
+  const newCommit = execFileSync('git', ['rev-parse', 'HEAD'], {
+    cwd: source,
+    encoding: 'utf8',
+  }).trim();
   await writeFile(
     path.join(root, 'launch.json'),
     JSON.stringify({
       specDigest: 'spec',
       configurationDigest: 'configuration',
       candidateDigest: 'candidate',
-      newCommit: 'a'.repeat(40),
+      newCommit,
       expiresAt,
       workerUid: process.getuid?.(),
       workerGid: process.getgid?.(),
@@ -27,11 +43,43 @@ async function setup(command: string, expiresAt = Math.floor(Date.now() / 1000) 
       phases: [{ phase: 'build', command, timeoutMs: 5000, cwd: workspace }],
     }),
   );
-  return { root, source, workspace };
+  return { root, source, workspace, newCommit };
 }
+
+async function cleanup(fixture: Awaited<ReturnType<typeof setup>>) {
+  try {
+    execFileSync('chmod', ['-R', 'u+w', fixture.root]);
+  } catch {}
+  await rm(fixture.root, { recursive: true, force: true });
+}
+
+it('provides locked-down Git metadata for source-aware validation commands', async () => {
+  const fixture = await setup(
+    `${git} rev-parse --verify HEAD >/dev/null && ${git} ls-files --error-unmatch README.md >/dev/null`,
+  );
+  try {
+    execFileSync('/usr/bin/python3', [script, fixture.root]);
+    expect(await receipt(fixture.root)).toMatchObject({
+      observedExit: true,
+      result: 'passed',
+      phases: [{ phase: 'build', status: 'passed' }],
+    });
+    const metadata = path.join(fixture.root, 'git');
+    expect(await readFile(path.join(metadata, 'HEAD'), 'utf8')).toBe(`${fixture.newCommit}\n`);
+    expect((await stat(metadata)).mode & 0o222).toBe(0);
+    expect((await stat(path.join(metadata, 'config'))).mode & 0o222).toBe(0);
+    await expect(stat(path.join(fixture.workspace, '.git'))).rejects.toThrow();
+    const config = await readFile(path.join(metadata, 'config'), 'utf8');
+    expect(config).toContain('hooksPath = /dev/null');
+    expect(config).not.toContain('[remote');
+  } finally {
+    await cleanup(fixture);
+  }
+});
 
 async function receipt(root: string) {
   return JSON.parse(await readFile(path.join(root, 'execution.json'), 'utf8')) as {
+    state: string;
     observedExit: boolean;
     result: string;
     reason: string;
@@ -68,7 +116,7 @@ it('runs an exact plan once and preserves frozen source files', async () => {
     });
     expect(await readFile(path.join(fixture.workspace, 'count'), 'utf8')).toBe('1');
   } finally {
-    await rm(fixture.root, { recursive: true, force: true });
+    await cleanup(fixture);
   }
 });
 
@@ -85,7 +133,7 @@ it.each([
     execFileSync('/usr/bin/python3', [script, fixture.root]);
     expect(await receipt(fixture.root)).toMatchObject({ observedExit: true, result, reason });
   } finally {
-    await rm(fixture.root, { recursive: true, force: true });
+    await cleanup(fixture);
   }
 });
 
@@ -105,7 +153,7 @@ it('rejects a writable dependency cache as unavailable infrastructure', async ()
       reason: 'dependency-cache-untrusted',
     });
   } finally {
-    await rm(fixture.root, { recursive: true, force: true });
+    await cleanup(fixture);
   }
 });
 
@@ -113,7 +161,7 @@ it('survives its caller and observes revocation before reporting terminal state'
   const fixture = await setup('python3 -c "import time; time.sleep(20)"');
   try {
     execFileSync('/usr/bin/python3', [script, fixture.root, '--detach']);
-    await waitFor(fixture.root, (value) => !value.observedExit);
+    await waitFor(fixture.root, (value) => value.state === 'running');
     await writeFile(path.join(fixture.root, 'revoked'), 'true');
     expect(await waitFor(fixture.root, (value) => value.observedExit)).toMatchObject({
       result: 'unavailable',
@@ -122,6 +170,6 @@ it('survives its caller and observes revocation before reporting terminal state'
     });
   } finally {
     await writeFile(path.join(fixture.root, 'revoked'), 'true').catch(() => {});
-    await rm(fixture.root, { recursive: true, force: true });
+    await cleanup(fixture);
   }
 });
