@@ -95,17 +95,34 @@ struct ConfigurationEditorSheet: View {
           case .environment: environmentForm
           case .toolPack: toolPackForm
           }
-          DisclosureGroup("Complete JSON", isExpanded: $showJSON) {
-            TextEditor(text: $rawJSON).font(.system(.caption, design: .monospaced)).frame(minHeight: 220)
-            HStack { Button("Load current values") { rawJSON = ConfigurationJSON.object(payload).formatted() }; Button("Apply JSON") { applyJSON() } }
-            Text("All schema fields are supported. Secret values belong in credential references.").font(.caption).foregroundStyle(.secondary)
-          }.onChange(of: showJSON) { _, visible in if visible { rawJSON = ConfigurationJSON.object(payload).formatted() } }
+          Button("Edit complete JSON…", systemImage: "curlybraces") {
+            rawJSON = ConfigurationJSON.object(payload).formatted()
+            showJSON = true
+          }
+          .buttonStyle(.link)
+          .help("Advanced escape hatch for schema fields that do not have a dedicated control.")
         }.padding(4)
       }
       if let error { Text(error).foregroundStyle(.red).textSelection(.enabled) }
       HStack { Button("Cancel") { dismiss() }; Spacer(); if busy { ProgressView().controlSize(.small) }; Button("Save") { Task { await save() } }.buttonStyle(.borderedProminent).disabled(busy || name.trimmingCharacters(in: .whitespaces).isEmpty) }
     }.padding(24).frame(width: 760, height: 740).background(Color(nsColor: .windowBackgroundColor)).textFieldStyle(.roundedBorder).disabled(busy)
     .sheet(isPresented: $showPim) { PimSelectionSheet(selected: payload["pim"]?.array?.compactMap(\.object) ?? [], discover: actions.discoverPim) { payload["pim"] = .array($0.map(ConfigurationJSON.object)) } }
+    .sheet(isPresented: $showJSON) {
+      VStack(alignment: .leading, spacing: 12) {
+        Text("Complete JSON").font(.title2.bold())
+        Text("Advanced escape hatch. Secret values belong in credential references.").font(.callout).foregroundStyle(.secondary)
+        TextEditor(text: $rawJSON).font(.system(.caption, design: .monospaced)).frame(minHeight: 360)
+        if let error { Text(error).foregroundStyle(.red).textSelection(.enabled) }
+        HStack {
+          Button("Cancel") { showJSON = false }
+          Spacer()
+          Button("Apply") {
+            applyJSON()
+            if error == nil { showJSON = false }
+          }.buttonStyle(.borderedProminent)
+        }
+      }.padding(24).frame(width: 680, height: 520)
+    }
     .task { if kind == .ai { do { accounts = try await actions.loadProviderAccounts() } catch { self.error = error.localizedDescription } } }
   }
   private var profileForm: some View {
@@ -154,28 +171,54 @@ struct ConfigurationEditorSheet: View {
       }) { ConfigurationAgentTargetEditor(fields: $0, accounts: accounts) }
     }.padding(6)
   }
-  private var workflowForm: some View {
+  @ViewBuilder private var workflowForm: some View {
+    let escalation = objectBinding("escalation")
     VStack(alignment: .leading, spacing: 12) {
-      stringPicker("Agent mode", key: "agentMode", values: ["auto", "interactive"])
-      stringPicker("Default intent", key: "intent", values: ["task", "goal"])
-      stringPicker("Output", key: "output", values: ["pr", "branch", "artifact", "none"])
-      stringPicker("Daemon delivery", key: "completion", values: ["approval", "deliver", "merge"])
+      ConfigurationSection(title: "How work runs", subtitle: "Choose the agent style and what the daemon should deliver.") {
+        stringPicker("Agent mode", key: "agentMode", values: ["auto", "interactive"])
+        stringPicker("Default intent", key: "intent", values: ["task", "goal"])
+        stringPicker("Output", key: "output", values: ["pr", "branch", "artifact", "none"])
+        stringPicker("Daemon delivery", key: "completion", values: ["approval", "deliver", "merge"])
+        Toggle("Can be promoted from interactive to automatic", isOn: boolBinding("promotable"))
+      }
       ConfigurationSection(title: "Validation checks") { LazyVGrid(columns: [GridItem(.flexible(), alignment: .leading), GridItem(.flexible(), alignment: .leading)], alignment: .leading, spacing: 10) { ForEach(["setup", "lint", "sast", "build", "test", "health", "pages", "facts", "review", "advisory"], id: \.self) { phase in
         Toggle(phase.capitalized, isOn: Binding(get: { payload["validationPhases"]?.array?.contains(.string(phase)) ?? false }, set: { enabled in var values = payload["validationPhases"]?.array ?? []; values.removeAll { $0 == .string(phase) }; if enabled { values.append(.string(phase)) }; payload["validationPhases"] = .array(values) }))
-      } } }
-      ConfigurationNumberValue(title: "Whole-pod token limit", fields: $payload, key: "tokenBudget", fallback: 100000, unsetLabel: "No token limit")
-      ConfigurationNumberValue(title: "Reviewer token limit", fields: $payload, key: "reviewerTokenBudget", fallback: 10000, unsetLabel: "No separate limit")
-      ConfigurationSection(title: "Budgets and delivery") {
+      } }
+        Toggle("Advisory browser QA", isOn: boolBinding("advisoryBrowserQaEnabled"))
+        Stepper("Validation attempts: \(workflowInteger("maxValidationAttempts", fallback: 3))", value: integerBinding("maxValidationAttempts", fallback: 3), in: 1...10)
+      }
+      ConfigurationSection(title: "Budgets", subtitle: "Leave token limits off to use the selected model's normal limits.") {
+        ConfigurationNumberValue(title: "Whole-pod token limit", fields: $payload, key: "tokenBudget", fallback: 100000, unsetLabel: "No token limit")
+        ConfigurationNumberValue(title: "Reviewer token limit", fields: $payload, key: "reviewerTokenBudget", fallback: 10000, unsetLabel: "No separate limit")
         stringPicker("Budget policy", key: "tokenBudgetPolicy", values: ["soft", "hard"])
         ConfigurationNumberValue(title: "Budget extensions", fields: $payload, key: "maxBudgetExtensions", fallback: 0, unsetLabel: "Default policy")
+      }
+      ConfigurationSection(title: "Escalation", subtitle: "AI consultation uses the reviewer selected by the AI setup. Workflow presets only limit how often it may be used.") {
+        Stepper("AI consultation limit: \(nestedInteger(escalation, group: "askAi", key: "maxCalls", fallback: 5))", value: nestedIntegerBinding(escalation, group: "askAi", key: "maxCalls", fallback: 5), in: 0...20)
+        Toggle("Proactive AI advisor", isOn: nestedBoolBinding(escalation, group: "advisor", key: "enabled"))
+        Stepper("Pause after \(workflowInteger(escalation, "autoPauseAfter", fallback: 3)) blockers", value: integerBinding(escalation, "autoPauseAfter", fallback: 3), in: 1...20)
+        Picker("Wait for human", selection: integerBinding(escalation, "humanResponseTimeout", fallback: 3600)) {
+          Text("15 minutes").tag(900)
+          Text("1 hour").tag(3600)
+          Text("2 hours").tag(7200)
+          Text("6 hours").tag(21600)
+          Text("24 hours").tag(86400)
+        }
+        Picker("If nobody responds", selection: stringBinding(escalation, "askHumanOnTimeout", fallback: "continue")) {
+          Text("Continue with best judgement").tag("continue")
+          Text("Ask the AI reviewer").tag("ask_ai")
+        }
+      }
+      ConfigurationSection(title: "Delivery details") {
         ConfigurationTextValue(title: "Branch prefix", fields: $payload, key: "branchPrefix")
         stringPicker("Equivalent work", key: "preflightConflictPolicy", values: ["warn", "block"])
+        LabeledContent("Merge status interval") {
+          TextField("Seconds", value: numberBinding("mergePollIntervalSec", fallback: 60), format: .number).frame(width: 100)
+          Text("seconds").foregroundStyle(.secondary)
+        }
       }
       ConfigurationSection(title: "Completion instructions", subtitle: "Optional instructions for the agent when it finishes.") {
         ConfigurationTextValue(title: "Instructions", fields: $payload, key: "agentDonePrompt", optional: true, multiline: true)
-      }
-      ConfigurationSection(title: "Additional workflow settings") {
-        ConfigurationFieldsEditor(fields: $payload, excluded: ["agentMode", "intent", "output", "completion", "validationPhases", "tokenBudget", "reviewerTokenBudget", "tokenBudgetPolicy", "maxBudgetExtensions", "branchPrefix", "preflightConflictPolicy", "agentDonePrompt"])
       }
     }
   }
@@ -334,6 +377,16 @@ struct ConfigurationEditorSheet: View {
   }
   private func objectBinding(_ key: String) -> Binding<[String: ConfigurationJSON]> { Binding(get: { payload[key]?.object ?? [:] }, set: { payload[key] = .object($0) }) }
   private func stringBinding(_ key: String) -> Binding<String> { Binding(get: { payload[key]?.string ?? "" }, set: { payload[key] = .string($0) }) }
+  private func boolBinding(_ key: String, fallback: Bool = false) -> Binding<Bool> { Binding(get: { payload[key]?.bool ?? fallback }, set: { payload[key] = .bool($0) }) }
+  private func numberBinding(_ key: String, fallback: Double) -> Binding<Double> { Binding(get: { payload[key]?.number ?? fallback }, set: { payload[key] = .number($0) }) }
+  private func integerBinding(_ key: String, fallback: Int) -> Binding<Int> { Binding(get: { workflowInteger(key, fallback: fallback) }, set: { payload[key] = .number(Double($0)) }) }
+  private func workflowInteger(_ key: String, fallback: Int) -> Int { Int(payload[key]?.number ?? Double(fallback)) }
+  private func workflowInteger(_ fields: Binding<[String: ConfigurationJSON]>, _ key: String, fallback: Int) -> Int { Int(fields.wrappedValue[key]?.number ?? Double(fallback)) }
+  private func integerBinding(_ fields: Binding<[String: ConfigurationJSON]>, _ key: String, fallback: Int) -> Binding<Int> { Binding(get: { workflowInteger(fields, key, fallback: fallback) }, set: { fields.wrappedValue[key] = .number(Double($0)) }) }
+  private func stringBinding(_ fields: Binding<[String: ConfigurationJSON]>, _ key: String, fallback: String) -> Binding<String> { Binding(get: { fields.wrappedValue[key]?.string ?? fallback }, set: { fields.wrappedValue[key] = .string($0) }) }
+  private func nestedInteger(_ fields: Binding<[String: ConfigurationJSON]>, group: String, key: String, fallback: Int) -> Int { Int(fields.wrappedValue[group]?[key]?.number ?? Double(fallback)) }
+  private func nestedIntegerBinding(_ fields: Binding<[String: ConfigurationJSON]>, group: String, key: String, fallback: Int) -> Binding<Int> { Binding(get: { nestedInteger(fields, group: group, key: key, fallback: fallback) }, set: { var nested = fields.wrappedValue[group]?.object ?? [:]; nested[key] = .number(Double($0)); fields.wrappedValue[group] = .object(nested) }) }
+  private func nestedBoolBinding(_ fields: Binding<[String: ConfigurationJSON]>, group: String, key: String) -> Binding<Bool> { Binding(get: { fields.wrappedValue[group]?[key]?.bool ?? false }, set: { var nested = fields.wrappedValue[group]?.object ?? [:]; nested[key] = .bool($0); fields.wrappedValue[group] = .object(nested) }) }
   private func stringPicker(_ title: String, key: String, values: [String]) -> some View {
     Picker(title, selection: Binding(get: { payload[key]?.string ?? values.first ?? "" }, set: { payload[key] = .string($0) })) {
       ForEach(values, id: \.self) { Text($0 == "pr" ? "Pull request" : $0.capitalized).tag($0) }
