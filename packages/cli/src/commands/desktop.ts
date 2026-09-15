@@ -31,9 +31,8 @@ export function buildConnectDeepLink(opts: {
   return `autopod://connect?${params.toString()}`;
 }
 
-/** Walk up from this module to locate scripts/install-desktop.sh in the repo. */
-function findInstallScript(): string | null {
-  let dir = dirname(fileURLToPath(import.meta.url));
+function findInstallScriptFrom(startDir: string): string | null {
+  let dir = startDir;
   for (let i = 0; i < 12; i++) {
     const candidate = join(dir, 'scripts', 'install-desktop.sh');
     if (existsSync(candidate)) return candidate;
@@ -42,6 +41,14 @@ function findInstallScript(): string | null {
     dir = parent;
   }
   return null;
+}
+
+/** Prefer the checkout the user invoked `ap desktop` from, then fall back to the CLI repo. */
+export function findInstallScript(): string | null {
+  return (
+    findInstallScriptFrom(process.cwd()) ??
+    findInstallScriptFrom(dirname(fileURLToPath(import.meta.url)))
+  );
 }
 
 /** Run the install script with inherited stdio so xcodebuild output streams. */
@@ -291,6 +298,7 @@ export function registerDesktopCommands(program: Command): void {
             installed ? 'Rebuilding desktop app…' : 'Desktop app not installed — building…',
           ),
         );
+        console.log(chalk.dim(`Desktop source: ${dirname(dirname(script))}`));
         try {
           await runInstallScript(script);
         } catch (err) {

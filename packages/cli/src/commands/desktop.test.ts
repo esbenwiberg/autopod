@@ -1,3 +1,4 @@
+import { join } from 'node:path';
 import { Command } from 'commander';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
@@ -56,10 +57,17 @@ vi.mock('chalk', () => {
 
 const {
   buildConnectDeepLink,
+  findInstallScript,
   findStoppedDesktopProcessIds,
   launchDesktopApp,
   registerDesktopCommands,
 } = await import('./desktop.js');
+
+describe('findInstallScript', () => {
+  it('prefers the repository containing the current working directory', () => {
+    expect(findInstallScript()).toBe(join(process.cwd(), '..', '..', 'scripts/install-desktop.sh'));
+  });
+});
 
 describe('buildConnectDeepLink', () => {
   it('encodes the daemon URL into the query', () => {

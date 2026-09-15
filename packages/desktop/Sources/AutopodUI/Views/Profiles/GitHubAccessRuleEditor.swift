@@ -1,13 +1,99 @@
 import AutopodClient
 import SwiftUI
 
+struct RepositoryMultiSelect: View {
+  let repositories: [ConfigurationJSON]
+  @Binding var selectedIDs: [String]
+  let loading: Bool
+  let refresh: () -> Void
+  var singleSelection = false
+  @State private var expanded = false
+  @State private var search = ""
+  @State private var selectedOnly = false
+  @FocusState private var searchFocused: Bool
+
+  private var choices: [(id: String, name: String)] {
+    let known = repositories.compactMap { repo -> (id: String, name: String)? in
+      guard let id = repo["id"]?.string, !id.isEmpty else { return nil }
+      return (id, "\(repo["ownerLogin"]?.string ?? "")/\(repo["name"]?.string ?? id)")
+    }
+    let knownIDs = Set(known.map(\.id))
+    return (known + selectedIDs.filter { !knownIDs.contains($0) }.map { ($0, "Unavailable repository (\($0))") })
+      .filter { (!selectedOnly || selectedIDs.contains($0.id)) && (search.isEmpty || $0.name.localizedCaseInsensitiveContains(search)) }
+      .sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
+  }
+
+  var body: some View {
+    Button {
+      search = ""; selectedOnly = false; expanded = true
+    } label: {
+      HStack {
+        Image(systemName: "folder")
+        Text(singleSelection ? (choices.first(where: { selectedIDs.contains($0.id) })?.name ?? "Choose repository…") : selectedIDs.isEmpty ? "Choose repositories…" : "\(selectedIDs.count) repositories selected")
+          .lineLimit(1).truncationMode(.middle)
+        Spacer()
+        Image(systemName: "chevron.down").foregroundStyle(.secondary)
+      }.padding(8).contentShape(Rectangle())
+    }
+    .buttonStyle(.plain)
+    .background(.background, in: RoundedRectangle(cornerRadius: 8))
+    .overlay(RoundedRectangle(cornerRadius: 8).stroke(.quaternary))
+    .popover(isPresented: $expanded, arrowEdge: .bottom) {
+      VStack(alignment: .leading, spacing: 12) {
+        TextField("Search repositories…", text: $search).textFieldStyle(.roundedBorder).focused($searchFocused)
+        HStack {
+          Picker("Show", selection: $selectedOnly) {
+            Text("All repositories").tag(false)
+            Text("Selected (\(selectedIDs.count))").tag(true)
+          }.pickerStyle(.segmented).labelsHidden()
+          Button(action: refresh) { Image(systemName: "arrow.clockwise") }
+            .help("Refresh repositories").disabled(loading)
+        }
+        ScrollView {
+          LazyVStack(alignment: .leading, spacing: 2) {
+            if loading { ProgressView("Loading repositories…") }
+            if choices.isEmpty && !loading {
+              Text(search.isEmpty ? "No repositories available in this view." : "No repositories match your search.")
+                .foregroundStyle(.secondary).padding(8)
+            }
+            ForEach(choices, id: \.id) { choice in
+              Button {
+                if singleSelection { selectedIDs = [choice.id]; expanded = false }
+                else if selectedIDs.contains(choice.id) { selectedIDs.removeAll { $0 == choice.id } }
+                else { selectedIDs.append(choice.id) }
+              } label: {
+                HStack {
+                  Text(choice.name).lineLimit(1).truncationMode(.middle)
+                  Spacer()
+                  Image(systemName: selectedIDs.contains(choice.id) ? "checkmark" : "plus")
+                    .foregroundStyle(selectedIDs.contains(choice.id) ? Color.accentColor : Color.secondary)
+                }.padding(8).contentShape(Rectangle())
+              }.buttonStyle(.plain)
+                .help(choice.name)
+                .accessibilityLabel(choice.name)
+                .accessibilityValue(selectedIDs.contains(choice.id) ? "Selected" : "Not selected")
+            }
+          }
+        }.frame(height: 260)
+        Divider()
+        HStack {
+          Text("\(selectedIDs.count) selected").font(.caption).foregroundStyle(.secondary)
+          Spacer()
+          Button("Done") { expanded = false }.keyboardShortcut(.defaultAction)
+        }
+      }.padding(16).frame(width: 420)
+        .onAppear { searchFocused = true }
+        .onExitCommand { expanded = false }
+    }
+  }
+}
+
 struct GitHubAccessRuleEditor: View {
   @Binding var payload: [String: ConfigurationJSON]
   let actions: LaunchConfigurationActions
   @State private var repositories: [ConfigurationJSON] = []
   @State private var workflows: [String: [ConfigurationJSON]] = [:]
   @State private var error: String?
-  @State private var search = ""
   @State private var loading = false
   private var rules: [ConfigurationJSON] { payload["rules"]?.array ?? [] }
   private let permissions: [(String, [(String, String)])] = [
@@ -21,15 +107,14 @@ struct GitHubAccessRuleEditor: View {
       Text("Each rule combines repository scope and operations. Workflow and branch restrictions apply to Actions writes.").font(.callout).foregroundStyle(.secondary)
       Text("Only the daemon can push, publish branches, create or edit PRs, and merge.").font(.callout)
       if let error { Text(error).foregroundStyle(.red) }
-      HStack { TextField("Filter repository choices", text: $search); Button("Refresh repositories") { Task { await loadRepositories() } }.disabled(loading); if loading { ProgressView().controlSize(.small) } }
       ForEach(Array(rules.enumerated()), id: \.offset) { index, rule in
         GroupBox {
           VStack(alignment: .leading, spacing: 12) {
             HStack { Text("Access rule \(index + 1)").font(.headline); Spacer(); Button("Remove") { var updated = rules; updated.remove(at: index); payload["rules"] = .array(updated) } }
             scopeEditor(index, rule)
             ForEach(permissions, id: \.0) { group, items in
-              DisclosureGroup(group) {
-                VStack(alignment: .leading) {
+              ConfigurationSection(title: group) {
+                LazyVGrid(columns: [GridItem(.flexible(), alignment: .leading), GridItem(.flexible(), alignment: .leading)], alignment: .leading, spacing: 10) {
                   ForEach(items, id: \.0) { operation, label in
                     Toggle(label, isOn: Binding(get: { rule["operations"]?.array?.contains(.string(operation)) ?? false }, set: { enabled in
                       var operations = rules[index]["operations"]?.array ?? []; operations.removeAll { $0 == .string(operation) }; if enabled { operations.append(.string(operation)) }; set(index, "operations", .array(operations))
@@ -77,16 +162,18 @@ struct GitHubAccessRuleEditor: View {
       Text("The repository list is frozen at launch. New repositories are included on future launches.").font(.caption).foregroundStyle(.secondary)
     }
     if scope["mode"]?.string == "selected" || scope["selection"]?["mode"]?.string == "selected" {
-      ForEach(Array(repositories.filter { repo in
-        (scope["mode"]?.string != "owner" || repo["ownerId"] == scope["ownerId"]) && (search.isEmpty || repoName(repo).localizedCaseInsensitiveContains(search))
-      }.enumerated()), id: \.offset) { _, repo in
-        let id = repo["id"]?.string ?? ""
-        Toggle(repoName(repo), isOn: Binding(get: { (scope["mode"]?.string == "owner" ? scope["selection"]?["repositoryIds"] : scope["repositoryIds"])?.array?.contains(.string(id)) ?? false }, set: { enabled in
-          var value = scope.object ?? [:]; var selected = scope["mode"]?.string == "owner" ? scope["selection"]?.object ?? [:] : value
-          var ids = selected["repositoryIds"]?.array ?? []; ids.removeAll { $0 == .string(id) }; if enabled { ids.append(.string(id)) }; selected["repositoryIds"] = .array(ids)
-          if scope["mode"]?.string == "owner" { value["selection"] = .object(selected) } else { value = selected }; set(index, "repositories", .object(value))
-        }))
-      }
+      let selectedIDs = (scope["mode"]?.string == "owner" ? scope["selection"]?["repositoryIds"] : scope["repositoryIds"])?.array?.compactMap(\.string) ?? []
+      RepositoryMultiSelect(repositories: repositories.filter {
+        scope["mode"]?.string != "owner" || $0["ownerId"] == scope["ownerId"]
+      }, selectedIDs: Binding(get: { selectedIDs }, set: { ids in
+        var value = scope.object ?? [:]
+        if scope["mode"]?.string == "owner" {
+          var selection = scope["selection"]?.object ?? [:]
+          selection["repositoryIds"] = .array(ids.map(ConfigurationJSON.string))
+          value["selection"] = .object(selection)
+        } else { value["repositoryIds"] = .array(ids.map(ConfigurationJSON.string)) }
+        set(index, "repositories", .object(value))
+      }), loading: loading, refresh: { Task { await loadRepositories() } })
     }
   }
   @ViewBuilder private func workflowEditor(_ index: Int, _ rule: ConfigurationJSON) -> some View {
