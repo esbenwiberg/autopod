@@ -135,7 +135,7 @@ public struct SettingsView: View {
                 settingsContent
             }
         }
-        .frame(width: 720, height: 500)
+        .frame(width: 1040, height: 720)
         .background(Color(nsColor: .windowBackgroundColor))
         .onAppear {
             if deepLinkedProfileName != nil {

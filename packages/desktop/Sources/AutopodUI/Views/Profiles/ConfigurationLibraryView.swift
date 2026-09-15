@@ -1,51 +1,500 @@
 import AutopodClient
 import SwiftUI
 
+private enum ConfigurationLibraryPage: String {
+  case profiles, buildingBlocks, repositories, watchers, deployments
+}
+
+private enum ProfileLibrarySort: String, CaseIterable, Identifiable {
+  case recentlyEdited, name, repository, mostUsed
+  var id: String { rawValue }
+  var label: String {
+    switch self {
+    case .recentlyEdited: "Recently edited"
+    case .name: "Name"
+    case .repository: "Repository"
+    case .mostUsed: "Most used"
+    }
+  }
+}
+
+private extension ConfigurationKind {
+  var editorLabel: String {
+    switch self {
+    case .repository: "Repository"
+    case .environment: "Environment"
+    case .ai: "AI setup"
+    case .workflow: "Workflow"
+    case .githubAccess: "GitHub access"
+    case .toolPack: "Tool pack"
+    case .profile: "Profile"
+    }
+  }
+}
+
 public struct ConfigurationLibraryView: View {
   public var actions: LaunchConfigurationActions
   @State private var kind: ConfigurationKind = .profile
-  @State private var showWatchers = false
-  @State private var showDeployments = false
+  @State private var page: ConfigurationLibraryPage = .profiles
   @State private var editor: EditorTarget?
   @State private var search = ""
+  @State private var selectedRepositoryID: String?
+  @State private var profileSort: ProfileLibrarySort = .recentlyEdited
   @State private var error: String?
-  private struct EditorTarget: Identifiable { let id = UUID(); let kind: ConfigurationKind; let document: ConfigurationDocument? }
+  private struct EditorTarget: Identifiable {
+    let id = UUID()
+    let kind: ConfigurationKind
+    let document: ConfigurationDocument?
+    let draft: ConfigurationDocument?
+  }
   public init(actions: LaunchConfigurationActions, initialKind: ConfigurationKind = .profile) {
     self.actions = actions
     self._kind = State(initialValue: initialKind)
+    let initialPage: ConfigurationLibraryPage = switch initialKind {
+    case .profile: .profiles
+    case .repository: .repositories
+    default: .buildingBlocks
+    }
+    self._page = State(initialValue: initialPage)
   }
   public var body: some View {
-    HStack(spacing: 0) {
-      VStack {
-        List { ForEach(ConfigurationKind.allCases) { item in
-          Button { kind = item; showWatchers = false; showDeployments = false } label: { Text(item.label).frame(maxWidth: .infinity, alignment: .leading).foregroundStyle(!showWatchers && !showDeployments && kind == item ? Color.accentColor : Color.primary) }.buttonStyle(.plain)
-        } }
-        Button("Issue watchers") { showWatchers = true; showDeployments = false }.padding()
-        Button("Deployments") { showDeployments = true; showWatchers = false }.padding()
-      }.frame(width: 150)
+    VStack(spacing: 0) {
+      libraryNavigation
       Divider()
-      if showDeployments { DeploymentLibraryView(actions: actions) } else if showWatchers { WatcherLibraryView(actions: actions) } else {
-      VStack(alignment: .leading, spacing: 12) {
-        HStack { Text(kind.label).font(.title2.bold()); Spacer(); Button("New") { editor = EditorTarget(kind: kind, document: nil) }; Button("Refresh") { Task { await actions.reload() } } }
-        TextField("Search", text: $search).textFieldStyle(.roundedBorder)
-        if let message = error ?? actions.loadError { Text(message).foregroundStyle(.red) }
-        List(actions.list(kind).filter { search.isEmpty || $0.name.localizedCaseInsensitiveContains(search) || $0.libraryTitle.localizedCaseInsensitiveContains(search) }) { document in
-          HStack {
-            VStack(alignment: .leading, spacing: 4) {
-              Text(document.libraryTitle).font(.headline)
-              if document.kind == .repository { Text(document.payload["remote"]?.string ?? document.name).font(.caption).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle) }
-              Text("Revision \(document.revision) · Used by \(usageCount(document.id)) configurations").font(.caption).foregroundStyle(.secondary)
+      switch page {
+      case .profiles: profileLibrary
+      case .buildingBlocks: buildingBlockLibrary
+      case .repositories: repositoryLibrary
+      case .watchers: WatcherLibraryView(actions: actions)
+      case .deployments: DeploymentLibraryView(actions: actions)
+      }
+    }
+    .sheet(item: $editor) { target in
+      ConfigurationEditorSheet(
+        kind: target.kind,
+        document: target.document,
+        draft: target.draft,
+        actions: actions
+      )
+    }
+    .onChange(of: page) { _, _ in search = "" }
+  }
+
+  private var libraryNavigation: some View {
+    HStack(spacing: 8) {
+      HStack(spacing: 2) {
+        primaryNavigationButton(
+          "Profiles",
+          count: actions.list(.profile).count,
+          target: .profiles
+        )
+        primaryNavigationButton(
+          "Building blocks",
+          count: buildingBlockCount,
+          target: .buildingBlocks
+        )
+      }
+      .padding(3)
+      .background(Color(nsColor: .controlBackgroundColor), in: RoundedRectangle(cornerRadius: 8))
+      Spacer()
+      Menu {
+        Button("Repositories", systemImage: "shippingbox") { page = .repositories }
+        Divider()
+        Button("Issue watchers", systemImage: "eye") { page = .watchers }
+        Button("Deployments", systemImage: "externaldrive.badge.timemachine") { page = .deployments }
+      } label: {
+        Label(secondaryPageLabel, systemImage: "ellipsis.circle")
+      }
+      .menuStyle(.borderlessButton)
+      Button("Refresh", systemImage: "arrow.clockwise") { Task { await actions.reload() } }
+        .labelStyle(.iconOnly)
+        .buttonStyle(.borderless)
+        .help("Refresh configuration")
+    }
+    .padding(.horizontal, 20)
+    .padding(.vertical, 12)
+    .background(Color(nsColor: .controlBackgroundColor).opacity(0.35))
+  }
+
+  private func primaryNavigationButton(
+    _ title: String,
+    count: Int,
+    target: ConfigurationLibraryPage
+  ) -> some View {
+    Button { page = target } label: {
+      HStack(spacing: 7) {
+        Text(title)
+        Text("\(count)").font(.caption2).foregroundStyle(.secondary)
+      }
+      .padding(.horizontal, 12)
+      .frame(height: 28)
+      .background(
+        RoundedRectangle(cornerRadius: 6)
+          .fill(page == target ? Color(nsColor: .selectedControlColor) : .clear)
+      )
+      .contentShape(Rectangle())
+    }
+    .buttonStyle(.plain)
+    .accessibilityAddTraits(page == target ? .isSelected : [])
+  }
+
+  private var secondaryPageLabel: String {
+    switch page {
+    case .repositories: "Repositories"
+    case .watchers: "Issue watchers"
+    case .deployments: "Deployments"
+    default: "More"
+    }
+  }
+
+  private var profileLibrary: some View {
+    VStack(alignment: .leading, spacing: 16) {
+      libraryHeader(
+        title: "Profiles",
+        subtitle: "Complete, launch-ready configurations for your repositories.",
+        actionTitle: "New profile",
+        kind: .profile
+      )
+      HStack(spacing: 10) {
+        configurationSearch(placeholder: "Search profiles")
+        RepositoryFilterMenu(
+          repositories: actions.list(.repository),
+          selectedID: $selectedRepositoryID
+        )
+        Picker("Sort profiles", selection: $profileSort) {
+          ForEach(ProfileLibrarySort.allCases) { Text($0.label).tag($0) }
+        }
+        .labelsHidden()
+        .frame(width: 155)
+      }
+      errorBanner
+      ScrollView {
+        LazyVGrid(
+          columns: [GridItem(.flexible(), spacing: 14), GridItem(.flexible(), spacing: 14)],
+          alignment: .leading,
+          spacing: 14
+        ) {
+          if filteredProfiles.isEmpty {
+            ContentUnavailableView(
+              "No profiles found",
+              systemImage: "person.crop.rectangle.stack",
+              description: Text("Try another search or repository filter.")
+            )
+            .frame(maxWidth: .infinity, minHeight: 260)
+            .gridCellColumns(2)
+          } else {
+            ForEach(filteredProfiles) { profile in
+              ProfileLibraryCard(
+                profile: profile,
+                repositoryLabel: repositoryLabel(for: profile),
+                rows: profileRows(for: profile),
+                usageCount: usageCount(profile.id),
+                onEdit: { edit(profile) },
+                onDuplicate: { duplicate(profile) },
+                onArchive: { archive(profile) }
+              )
+            }
+          }
+        }
+        .padding(.bottom, 4)
+      }
+    }
+    .padding(20)
+  }
+
+  private var buildingBlockLibrary: some View {
+    VStack(alignment: .leading, spacing: 16) {
+      libraryHeader(
+        title: "Building blocks",
+        subtitle: "Reusable pieces shared by profiles. Editing one updates future launches.",
+        actionTitle: "New building block",
+        kind: kind
+      )
+      errorBanner
+      HStack(alignment: .top, spacing: 0) {
+        VStack(spacing: 4) {
+          ForEach(buildingBlockKinds) { item in
+            Button {
+              kind = item
+              search = ""
+            } label: {
+              HStack(spacing: 10) {
+                Image(systemName: icon(for: item)).frame(width: 18)
+                VStack(alignment: .leading, spacing: 2) {
+                  Text(item.label).font(.callout.weight(.medium))
+                  Text(kindDescription(item)).font(.caption2).foregroundStyle(.secondary)
+                }
+                Spacer()
+                Text("\(actions.list(item).count)").font(.caption2).foregroundStyle(.secondary)
+              }
+              .padding(.horizontal, 10)
+              .padding(.vertical, 9)
+              .background(
+                RoundedRectangle(cornerRadius: 8)
+                  .fill(kind == item ? Color.accentColor.opacity(0.16) : .clear)
+              )
+              .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+          }
+          Spacer()
+        }
+        .padding(10)
+        .frame(width: 230)
+        .frame(minHeight: 470)
+        .background(Color(nsColor: .controlBackgroundColor).opacity(0.45))
+        Divider()
+        VStack(alignment: .leading, spacing: 12) {
+          HStack(alignment: .center) {
+            VStack(alignment: .leading, spacing: 2) {
+              Text(kind.label).font(.title3.weight(.semibold))
+              Text(kindLongDescription(kind)).font(.caption).foregroundStyle(.secondary)
             }
             Spacer()
-            Button("Edit") { editor = EditorTarget(kind: kind, document: document) }
-            Button("Archive") { Task { do { try await actions.archive(document) } catch { self.error = error.localizedDescription } } }.disabled(usageCount(document.id) > 0)
-          }.padding(.vertical, 4)
+            configurationSearch(placeholder: "Search \(kind.label.lowercased())")
+              .frame(width: 245)
+          }
+          ScrollView {
+            LazyVStack(spacing: 9) {
+              if filteredDocuments(kind).isEmpty {
+                ContentUnavailableView.search(text: search)
+                  .frame(maxWidth: .infinity, minHeight: 280)
+              } else {
+                ForEach(filteredDocuments(kind)) { document in
+                  BuildingBlockRow(
+                    document: document,
+                    summary: buildingBlockSummary(document),
+                    usageCount: usageCount(document.id),
+                    onEdit: { edit(document) },
+                    onDuplicate: { duplicate(document) },
+                    onArchive: { archive(document) }
+                  )
+                }
+              }
+            }
+          }
         }
-        Text("Profiles combine reusable parts. Editing a shared preset changes future launches; existing pods keep their saved configuration.").font(.caption).foregroundStyle(.secondary)
-      }.padding()
+        .padding(16)
       }
-    }.sheet(item: $editor) { target in ConfigurationEditorSheet(kind: target.kind, document: target.document, actions: actions) }
+      .background(.background, in: RoundedRectangle(cornerRadius: 12))
+      .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(.quaternary))
+    }
+    .padding(20)
   }
+
+  private var repositoryLibrary: some View {
+    VStack(alignment: .leading, spacing: 16) {
+      libraryHeader(
+        title: "Repositories",
+        subtitle: "Repository identities, project setups, and their default profiles.",
+        actionTitle: "New repository",
+        kind: .repository
+      )
+      configurationSearch(placeholder: "Search repositories")
+      errorBanner
+      ScrollView {
+        LazyVStack(spacing: 9) {
+          ForEach(filteredDocuments(.repository)) { document in
+            RepositoryLibraryRow(
+              document: document,
+              defaultProfile: referencedTitle(document.payload["usualProfileId"]?.string),
+              usageCount: usageCount(document.id),
+              onEdit: { edit(document) },
+              onDuplicate: { duplicate(document) },
+              onArchive: { archive(document) }
+            )
+          }
+        }
+      }
+    }
+    .padding(20)
+  }
+
+  private func libraryHeader(
+    title: String,
+    subtitle: String,
+    actionTitle: String,
+    kind: ConfigurationKind
+  ) -> some View {
+    HStack(alignment: .top) {
+      VStack(alignment: .leading, spacing: 4) {
+        Text(title).font(.title2.weight(.semibold))
+        Text(subtitle).font(.callout).foregroundStyle(.secondary)
+      }
+      Spacer()
+      Button(actionTitle, systemImage: "plus") { create(kind) }
+        .buttonStyle(.borderedProminent)
+        .controlSize(.regular)
+    }
+  }
+
+  private func configurationSearch(placeholder: String) -> some View {
+    HStack(spacing: 8) {
+      Image(systemName: "magnifyingglass").font(.caption).foregroundStyle(.secondary)
+      TextField(placeholder, text: $search).textFieldStyle(.plain)
+      if !search.isEmpty {
+        Button { search = "" } label: { Image(systemName: "xmark.circle.fill") }
+          .buttonStyle(.plain).foregroundStyle(.tertiary)
+      }
+    }
+    .padding(.horizontal, 10)
+    .frame(height: 34)
+    .background(Color(nsColor: .controlBackgroundColor), in: RoundedRectangle(cornerRadius: 7))
+    .overlay(RoundedRectangle(cornerRadius: 7).strokeBorder(.quaternary))
+  }
+
+  @ViewBuilder private var errorBanner: some View {
+    if let message = error ?? actions.loadError {
+      Label(message, systemImage: "exclamationmark.triangle.fill")
+        .font(.caption).foregroundStyle(.red).textSelection(.enabled)
+    }
+  }
+
+  private var buildingBlockKinds: [ConfigurationKind] {
+    [.environment, .ai, .workflow, .githubAccess, .toolPack]
+  }
+  private var buildingBlockCount: Int {
+    buildingBlockKinds.reduce(0) { $0 + actions.list($1).count }
+  }
+
+  private var filteredProfiles: [ConfigurationDocument] {
+    var profiles = actions.list(.profile).filter { profile in
+      let repositories = repositories(for: profile)
+      let matchesRepository = selectedRepositoryID == nil
+        || repositories.contains(where: { $0.id == selectedRepositoryID })
+      let searchable = ([profile.name] + repositories.map(\.libraryTitle)
+        + profileRows(for: profile).map(\.value)).joined(separator: " ")
+      return matchesRepository && (search.isEmpty || searchable.localizedCaseInsensitiveContains(search))
+    }
+    switch profileSort {
+    case .recentlyEdited: profiles.sort { $0.updatedAt > $1.updatedAt }
+    case .name: profiles.sort { $0.libraryTitle.localizedStandardCompare($1.libraryTitle) == .orderedAscending }
+    case .repository: profiles.sort { repositoryLabel(for: $0).localizedStandardCompare(repositoryLabel(for: $1)) == .orderedAscending }
+    case .mostUsed: profiles.sort { usageCount($0.id) > usageCount($1.id) }
+    }
+    return profiles
+  }
+
+  private func filteredDocuments(_ targetKind: ConfigurationKind) -> [ConfigurationDocument] {
+    actions.list(targetKind).filter {
+      search.isEmpty || $0.name.localizedCaseInsensitiveContains(search)
+        || $0.libraryTitle.localizedCaseInsensitiveContains(search)
+        || buildingBlockSummary($0).localizedCaseInsensitiveContains(search)
+    }
+  }
+
+  private func repositories(for profile: ConfigurationDocument) -> [ConfigurationDocument] {
+    actions.list(.repository).filter { $0.payload["usualProfileId"]?.string == profile.id }
+  }
+
+  private func repositoryLabel(for profile: ConfigurationDocument) -> String {
+    let matches = repositories(for: profile)
+    if matches.isEmpty { return "No default repository" }
+    if matches.count == 1 { return matches[0].libraryTitle }
+    return "\(matches.count) repositories"
+  }
+
+  private func profileRows(for profile: ConfigurationDocument) -> [ProfileLibraryCard.Row] {
+    let packs = profile.payload["toolPackIds"]?.array?.compactMap(\.string).map(referencedTitle) ?? []
+    return [
+      .init(icon: "shippingbox", label: "Environment", value: referencedTitle(profile.payload["environmentId"]?.string)),
+      .init(icon: "sparkles", label: "AI setup", value: referencedTitle(profile.payload["aiId"]?.string)),
+      .init(icon: "arrow.triangle.pull", label: "Workflow", value: referencedTitle(profile.payload["workflowId"]?.string)),
+      .init(icon: "key", label: "Access", value: referencedTitle(profile.payload["githubAccessId"]?.string)),
+      .init(icon: "wrench.and.screwdriver", label: "Tools", value: packs.isEmpty ? "None" : packs.joined(separator: ", ")),
+    ]
+  }
+
+  private func referencedTitle(_ id: String?) -> String {
+    guard let id, !id.isEmpty else { return "None" }
+    return actions.documents.first(where: { $0.id == id })?.libraryTitle ?? "Unavailable"
+  }
+
+  private func buildingBlockSummary(_ document: ConfigurationDocument) -> String {
+    switch document.kind {
+    case .environment:
+      return [document.payload["template"]?.string, document.payload["baseImage"]?.string]
+        .compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: " · ")
+    case .ai:
+      let route = document.payload["main"]?.object
+      let target = [route?["runtime"]?.string?.capitalized, route?["model"]?.string]
+        .compactMap { $0 }.joined(separator: " · ")
+      let reviewer = document.payload["reviewer"]?["mode"]?.string == "independent"
+        ? "Independent review" : "Reviewer follows main"
+      return [target, reviewer].filter { !$0.isEmpty }.joined(separator: " · ")
+    case .workflow:
+      let phases = document.payload["validationPhases"]?.array?.count ?? 0
+      return [
+        document.payload["agentMode"]?.string?.capitalized,
+        document.payload["output"]?.string?.uppercased(),
+        phases > 0 ? "\(phases) validation checks" : nil,
+      ].compactMap { $0 }.joined(separator: " · ")
+    case .githubAccess:
+      let rules = document.payload["rules"]?.array?.count ?? 0
+      return "\(rules) access \(rules == 1 ? "rule" : "rules")"
+    case .toolPack:
+      let capabilities = document.payload["requiredCapabilities"]?.array?.compactMap(\.string) ?? []
+      return capabilities.isEmpty ? "Agent capabilities and integrations" : capabilities.joined(separator: " · ")
+    case .repository:
+      return document.payload["remote"]?.string ?? document.name
+    case .profile:
+      return profileRows(for: document).map(\.value).joined(separator: " · ")
+    }
+  }
+
+  private func icon(for targetKind: ConfigurationKind) -> String {
+    switch targetKind {
+    case .repository: "shippingbox"
+    case .environment: "shippingbox"
+    case .ai: "sparkles"
+    case .workflow: "arrow.triangle.pull"
+    case .githubAccess: "key"
+    case .toolPack: "wrench.and.screwdriver"
+    case .profile: "person.crop.rectangle.stack"
+    }
+  }
+
+  private func kindDescription(_ targetKind: ConfigurationKind) -> String {
+    switch targetKind {
+    case .environment: "Runtime and software"
+    case .ai: "Models and review"
+    case .workflow: "Validation and delivery"
+    case .githubAccess: "Scoped permissions"
+    case .toolPack: "Agent capabilities"
+    default: ""
+    }
+  }
+
+  private func kindLongDescription(_ targetKind: ConfigurationKind) -> String {
+    switch targetKind {
+    case .environment: "Runtime, software, and sidecar definitions."
+    case .ai: "Models, reasoning, failover, and review behavior."
+    case .workflow: "Validation, review, and daemon-owned delivery behavior."
+    case .githubAccess: "Reusable repository permission scopes."
+    case .toolPack: "Named skills and capabilities available to the agent."
+    default: ""
+    }
+  }
+
+  private func create(_ targetKind: ConfigurationKind) {
+    editor = EditorTarget(kind: targetKind, document: nil, draft: nil)
+  }
+
+  private func edit(_ document: ConfigurationDocument) {
+    editor = EditorTarget(kind: document.kind, document: document, draft: nil)
+  }
+
+  private func duplicate(_ document: ConfigurationDocument) {
+    editor = EditorTarget(kind: document.kind, document: nil, draft: document)
+  }
+
+  private func archive(_ document: ConfigurationDocument) {
+    Task {
+      do { try await actions.archive(document) }
+      catch { self.error = error.localizedDescription }
+    }
+  }
+
   private func usageCount(_ id: String) -> Int {
     func references(_ value: ConfigurationJSON) -> Bool {
       switch value { case .string(let text): text == id; case .array(let values): values.contains(where: references); case .object(let fields): fields.values.contains(where: references); default: false }
@@ -54,10 +503,218 @@ public struct ConfigurationLibraryView: View {
   }
 }
 
+private struct RepositoryFilterMenu: View {
+  let repositories: [ConfigurationDocument]
+  @Binding var selectedID: String?
+  @State private var presented = false
+  @State private var search = ""
+
+  var body: some View {
+    Button { presented.toggle() } label: {
+      HStack(spacing: 7) {
+        Image(systemName: "shippingbox").foregroundStyle(.secondary)
+        Text(selectionLabel).lineLimit(1)
+        Spacer(minLength: 4)
+        Image(systemName: "chevron.up.chevron.down").font(.caption2).foregroundStyle(.secondary)
+      }
+      .padding(.horizontal, 10)
+      .frame(width: 190, height: 34)
+      .background(Color(nsColor: .controlBackgroundColor), in: RoundedRectangle(cornerRadius: 7))
+      .overlay(RoundedRectangle(cornerRadius: 7).strokeBorder(.quaternary))
+    }
+    .buttonStyle(.plain)
+    .popover(isPresented: $presented, arrowEdge: .bottom) {
+      VStack(spacing: 8) {
+        TextField("Search repositories", text: $search).textFieldStyle(.roundedBorder)
+        ScrollView {
+          LazyVStack(spacing: 2) {
+            repositoryButton(nil, title: "All repositories")
+            ForEach(filteredRepositories) { repository in
+              repositoryButton(repository.id, title: repository.libraryTitle)
+            }
+          }
+        }
+      }
+      .padding(10)
+      .frame(width: 300, height: 320)
+    }
+  }
+
+  private var selectionLabel: String {
+    guard let selectedID else { return "All repositories" }
+    return repositories.first(where: { $0.id == selectedID })?.libraryTitle ?? "Repository"
+  }
+
+  private var filteredRepositories: [ConfigurationDocument] {
+    repositories.filter { search.isEmpty || $0.libraryTitle.localizedCaseInsensitiveContains(search) }
+  }
+
+  private func repositoryButton(_ id: String?, title: String) -> some View {
+    Button {
+      selectedID = id
+      presented = false
+    } label: {
+      HStack {
+        Image(systemName: selectedID == id ? "checkmark.circle.fill" : "circle")
+          .foregroundStyle(
+            selectedID == id ? Color.accentColor : Color(nsColor: .tertiaryLabelColor)
+          )
+        Text(title).lineLimit(1)
+        Spacer()
+      }
+      .padding(.horizontal, 8)
+      .padding(.vertical, 6)
+      .contentShape(Rectangle())
+    }
+    .buttonStyle(.plain)
+  }
+}
+
+private struct ProfileLibraryCard: View {
+  struct Row: Identifiable {
+    let icon: String
+    let label: String
+    let value: String
+    var id: String { label }
+  }
+  let profile: ConfigurationDocument
+  let repositoryLabel: String
+  let rows: [Row]
+  let usageCount: Int
+  let onEdit: () -> Void
+  let onDuplicate: () -> Void
+  let onArchive: () -> Void
+
+  var body: some View {
+    VStack(spacing: 0) {
+      HStack(spacing: 10) {
+        RoundedRectangle(cornerRadius: 8)
+          .fill(Color.accentColor.opacity(0.18))
+          .frame(width: 36, height: 36)
+          .overlay(Text(profile.libraryTitle.prefix(1).uppercased()).font(.callout.bold()).foregroundStyle(Color.accentColor))
+        VStack(alignment: .leading, spacing: 2) {
+          Text(profile.libraryTitle).font(.headline).lineLimit(1)
+          Text(repositoryLabel).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+        }
+        Spacer()
+        Menu {
+          Button("Edit", systemImage: "pencil", action: onEdit)
+          Button("Duplicate", systemImage: "plus.square.on.square", action: onDuplicate)
+          Divider()
+          Button("Archive", systemImage: "archivebox", role: .destructive, action: onArchive)
+            .disabled(usageCount > 0)
+        } label: { Image(systemName: "ellipsis") }
+        .menuStyle(.borderlessButton)
+        .fixedSize()
+      }
+      .padding(14)
+      Divider()
+      VStack(spacing: 0) {
+        ForEach(rows) { row in
+          HStack(spacing: 8) {
+            Label(row.label, systemImage: row.icon)
+              .font(.caption).foregroundStyle(.secondary).frame(width: 112, alignment: .leading)
+            Text(row.value).font(.callout.weight(.medium)).lineLimit(1).truncationMode(.tail)
+            Spacer(minLength: 0)
+          }
+          .padding(.vertical, 8)
+          if row.id != rows.last?.id { Divider() }
+        }
+      }
+      .padding(.horizontal, 14)
+      Divider()
+      HStack {
+        Label(usageLabel, systemImage: "arrow.triangle.branch")
+          .font(.caption).foregroundStyle(.secondary)
+        Spacer()
+        Button("Duplicate", action: onDuplicate).buttonStyle(.bordered).controlSize(.small)
+        Button("Edit", action: onEdit).buttonStyle(.borderedProminent).controlSize(.small)
+      }
+      .padding(10)
+      .background(Color(nsColor: .controlBackgroundColor).opacity(0.45))
+    }
+    .background(.background, in: RoundedRectangle(cornerRadius: 12))
+    .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(.quaternary))
+  }
+
+  private var usageLabel: String {
+    "Used by \(usageCount) \(usageCount == 1 ? "configuration" : "configurations")"
+  }
+}
+
+private struct BuildingBlockRow: View {
+  let document: ConfigurationDocument
+  let summary: String
+  let usageCount: Int
+  let onEdit: () -> Void
+  let onDuplicate: () -> Void
+  let onArchive: () -> Void
+  var body: some View {
+    HStack(spacing: 12) {
+      Image(systemName: "square.stack.3d.up")
+        .foregroundStyle(.secondary)
+        .frame(width: 34, height: 34)
+        .background(Color(nsColor: .controlBackgroundColor), in: RoundedRectangle(cornerRadius: 8))
+      VStack(alignment: .leading, spacing: 3) {
+        Text(document.libraryTitle).font(.headline).lineLimit(1)
+        Text(summary.isEmpty ? "Reusable configuration" : summary).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+        Text("Used by \(usageCount) \(usageCount == 1 ? "configuration" : "configurations")")
+          .font(.caption2).foregroundStyle(Color.accentColor)
+      }
+      Spacer()
+      Button("Duplicate", action: onDuplicate).buttonStyle(.bordered).controlSize(.small)
+      Button("Edit", action: onEdit).buttonStyle(.borderedProminent).controlSize(.small)
+      Menu {
+        Button("Archive", systemImage: "archivebox", role: .destructive, action: onArchive)
+          .disabled(usageCount > 0)
+      } label: { Image(systemName: "ellipsis") }
+      .menuStyle(.borderlessButton).fixedSize()
+    }
+    .padding(12)
+    .background(Color(nsColor: .controlBackgroundColor).opacity(0.38), in: RoundedRectangle(cornerRadius: 9))
+    .overlay(RoundedRectangle(cornerRadius: 9).strokeBorder(.quaternary))
+  }
+}
+
+private struct RepositoryLibraryRow: View {
+  let document: ConfigurationDocument
+  let defaultProfile: String
+  let usageCount: Int
+  let onEdit: () -> Void
+  let onDuplicate: () -> Void
+  let onArchive: () -> Void
+  var body: some View {
+    HStack(spacing: 12) {
+      Image(systemName: "shippingbox").font(.title3).foregroundStyle(Color.accentColor).frame(width: 36)
+      VStack(alignment: .leading, spacing: 3) {
+        Text(document.libraryTitle).font(.headline)
+        Text(document.payload["remote"]?.string ?? document.name).font(.caption).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)
+      }
+      Spacer()
+      VStack(alignment: .trailing, spacing: 2) {
+        Text("Default profile").font(.caption2).foregroundStyle(.secondary)
+        Text(defaultProfile).font(.caption.weight(.medium)).lineLimit(1)
+      }
+      .frame(width: 150, alignment: .trailing)
+      Button("Duplicate", action: onDuplicate).buttonStyle(.bordered).controlSize(.small)
+      Button("Edit", action: onEdit).buttonStyle(.borderedProminent).controlSize(.small)
+      Menu {
+        Button("Archive", systemImage: "archivebox", role: .destructive, action: onArchive)
+          .disabled(usageCount > 0)
+      } label: { Image(systemName: "ellipsis") }
+      .menuStyle(.borderlessButton).fixedSize()
+    }
+    .padding(12)
+    .background(.background, in: RoundedRectangle(cornerRadius: 9))
+    .overlay(RoundedRectangle(cornerRadius: 9).strokeBorder(.quaternary))
+  }
+}
+
 struct ConfigurationEditorSheet: View {
   @Environment(\.dismiss) private var dismiss
   let kind: ConfigurationKind
   let document: ConfigurationDocument?
+  let draft: ConfigurationDocument?
   let actions: LaunchConfigurationActions
   @State private var name: String
   @State private var payload: [String: ConfigurationJSON]
@@ -71,15 +728,20 @@ struct ConfigurationEditorSheet: View {
   @State private var repositoryTab = "Overview"
   @State private var repositoryChoices: [ConfigurationJSON] = []
   @State private var discoveringRepositories = false
-  init(kind: ConfigurationKind, document: ConfigurationDocument?, actions: LaunchConfigurationActions) {
-    self.kind = kind; self.document = document; self.actions = actions
-    self._name = State(initialValue: document?.name ?? "")
-    self._payload = State(initialValue: document?.payload ?? Self.initial(kind))
+  init(
+    kind: ConfigurationKind,
+    document: ConfigurationDocument?,
+    draft: ConfigurationDocument? = nil,
+    actions: LaunchConfigurationActions
+  ) {
+    self.kind = kind; self.document = document; self.draft = draft; self.actions = actions
+    self._name = State(initialValue: document?.name ?? draft.map { "\($0.libraryTitle) copy" } ?? "")
+    self._payload = State(initialValue: document?.payload ?? draft?.payload ?? Self.initial(kind))
   }
   var body: some View {
     VStack(alignment: .leading, spacing: 12) {
-      Text(document == nil ? "New \(kind.label)" : "Edit \(document?.libraryTitle ?? "")").font(.title2.bold()).lineLimit(1).truncationMode(.middle)
-      TextField(kind == .repository ? "Repository display name" : "Preset name", text: $name).textFieldStyle(.roundedBorder)
+      Text(document == nil ? (draft == nil ? "New \(kind.editorLabel)" : "Duplicate \(draft?.libraryTitle ?? "")") : "Edit \(document?.libraryTitle ?? "")").font(.title2.bold()).lineLimit(1).truncationMode(.middle)
+      TextField(kind == .repository ? "Repository display name" : "\(kind.editorLabel) name", text: $name).textFieldStyle(.roundedBorder)
       if kind == .repository, name.contains("://"), let document {
         Button("Use short name: \(document.libraryTitle)") { name = document.libraryTitle }.font(.caption)
       }
