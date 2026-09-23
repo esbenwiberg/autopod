@@ -39,6 +39,8 @@ export interface ScheduledJobManagerDeps {
   logger: Logger;
   scanCoordinator?: { collect(job: ScheduledJob, runKey?: string): Promise<ScheduledScanReport> };
   launch?: (job: ScheduledJob, task: string, runKey: string) => Promise<Pod>;
+  /** Composable admission gate. While closed, legacy profile jobs keep running. Defaults to open. */
+  launchAdmissionReady?: () => boolean;
 }
 
 export interface ScheduledJobManager {
@@ -74,6 +76,7 @@ function validateCronExpression(cronExpression: string): void {
 
 export function createScheduledJobManager(deps: ScheduledJobManagerDeps): ScheduledJobManager {
   const { scheduledJobRepo, scheduledJobTemplateRepo, podManager, eventBus, logger } = deps;
+  const composableRequired = () => !!deps.launch && (deps.launchAdmissionReady?.() ?? true);
 
   async function fireJob(job: ScheduledJob, runKey: string): Promise<Pod | ScheduledScanReport> {
     if (job.scan) {
@@ -96,7 +99,7 @@ export function createScheduledJobManager(deps: ScheduledJobManagerDeps): Schedu
         );
       return deps.launch(job, task, runKey);
     }
-    if (deps.launch || !job.profileName)
+    if (composableRequired() || !job.profileName)
       throw new AutopodError(
         'Convert the scheduled repository and preset selection before launching',
         'SCHEDULE_CONVERSION_REQUIRED',
@@ -440,7 +443,7 @@ export function createScheduledJobManager(deps: ScheduledJobManagerDeps): Schedu
           'SCAN_CONFIGURATION_UNAVAILABLE',
           409,
         );
-    } else if (deps.launch) {
+    } else if (composableRequired()) {
       throw new AutopodError(
         'Select a repository and presets for this schedule',
         'SCHEDULE_CONVERSION_REQUIRED',

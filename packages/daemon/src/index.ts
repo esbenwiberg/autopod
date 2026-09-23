@@ -753,6 +753,9 @@ const workspaceCheckpointController = new WorkspaceCheckpointController({
 const configurationHostPath =
   process.env.AUTOPOD_CONFIGURATION_HOST_FILE ??
   path.join(os.homedir(), '.autopod', 'configuration-host.json');
+// Source release gate: do not offer new admission until remaining callers and the cutover
+// entry point are implemented. A configuration file cannot bypass this incomplete cutover.
+const configurationAdmissionReady = () => configurationCutoverReadiness(db, false);
 const configuration = createHostConfigurationComponents({
   db,
   logger,
@@ -775,9 +778,7 @@ const configuration = createHostConfigurationComponents({
       : {},
   ),
   podManager: () => podManager,
-  // Source release gate: do not offer new admission until remaining callers and the cutover
-  // entry point are implemented. A configuration file cannot bypass this incomplete cutover.
-  admissionReady: () => configurationCutoverReadiness(db, false),
+  admissionReady: configurationAdmissionReady,
 });
 await configuration.recover();
 
@@ -896,6 +897,8 @@ const scanCoordinator = createScanCoordinator({
 });
 const scheduledJobManager = createScheduledJobManager({
   launch: configuration.launchScheduled,
+  // Until composable admission opens, profile-bound jobs are the only schedules that can run.
+  launchAdmissionReady: () => configurationAdmissionReady().ready,
   scheduledJobRepo,
   scheduledJobTemplateRepo,
   scanCoordinator,

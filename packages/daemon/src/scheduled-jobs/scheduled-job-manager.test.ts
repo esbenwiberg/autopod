@@ -574,4 +574,103 @@ describe('ScheduledJobManager', () => {
       void job2;
     });
   });
+
+  describe('composable admission gate', () => {
+    function gatedDeps(ready: boolean) {
+      const launch = vi.fn(async () => makeSession('composable-pod'));
+      const deps: ScheduledJobManagerDeps = {
+        ...makeDeps(db),
+        launch,
+        launchAdmissionReady: () => ready,
+      };
+      return { deps, launch };
+    }
+
+    it('creates and runs profile-bound jobs while admission is closed', async () => {
+      const { deps, launch } = gatedDeps(false);
+      const manager = createScheduledJobManager(deps);
+      const job = manager.create({
+        name: 'Legacy',
+        profileName: 'test-profile',
+        task: 'Do the thing',
+        cronExpression: '0 9 * * *',
+      });
+
+      const pod = await manager.trigger(job.id);
+
+      expect(pod.id).toBe('sess-abc');
+      expect(deps.podManager.createSession).toHaveBeenCalledWith(
+        expect.objectContaining({ profileName: 'test-profile', scheduledJobId: job.id }),
+        SCHEDULER_USER_ID,
+      );
+      expect(launch).not.toHaveBeenCalled();
+    });
+
+    it('allows converting a composable job back to a profile while admission is closed', () => {
+      const { deps } = gatedDeps(false);
+      const manager = createScheduledJobManager(deps);
+      const job = manager.create(
+        {
+          name: 'Composable',
+          launch: { repositoryId: 'repo-a' },
+          task: 'Do the thing',
+          cronExpression: '0 9 * * *',
+        },
+        'owner-1',
+      );
+
+      const updated = manager.update(job.id, { profileName: 'test-profile' });
+
+      expect(updated.profileName).toBe('test-profile');
+      expect(updated.launch).toBeNull();
+      expect(updated.ownerUserId).toBeNull();
+    });
+
+    it('still routes composable jobs through the gated launcher while admission is closed', async () => {
+      const { deps, launch } = gatedDeps(false);
+      launch.mockRejectedValueOnce(
+        new AutopodError('Configuration cutover is incomplete', 'CONFIG_CUTOVER_REQUIRED', 409),
+      );
+      const manager = createScheduledJobManager(deps);
+      const job = manager.create(
+        {
+          name: 'Composable',
+          launch: { repositoryId: 'repo-a' },
+          task: 'Do the thing',
+          cronExpression: '0 9 * * *',
+        },
+        'owner-1',
+      );
+
+      await expect(manager.trigger(job.id)).rejects.toMatchObject({
+        code: 'CONFIG_CUTOVER_REQUIRED',
+      });
+      expect(deps.podManager.createSession).not.toHaveBeenCalled();
+    });
+
+    it.each([
+      ['admission is open', (deps: ScheduledJobManagerDeps) => deps],
+      [
+        'no gate is wired',
+        (deps: ScheduledJobManagerDeps) => ({ ...deps, launchAdmissionReady: undefined }),
+      ],
+    ])('requires composable launches when %s', async (_label, configure) => {
+      const { deps } = gatedDeps(true);
+      const manager = createScheduledJobManager(configure(deps));
+      const legacy = insertTestScheduledJob(db, { profileName: 'test-profile' });
+
+      expect(() =>
+        manager.create({
+          name: 'Legacy',
+          profileName: 'test-profile',
+          task: 'Do the thing',
+          cronExpression: '0 9 * * *',
+        }),
+      ).toThrow(expect.objectContaining({ code: 'SCHEDULE_CONVERSION_REQUIRED' }));
+      await expect(manager.trigger(legacy.id)).rejects.toMatchObject({
+        code: 'SCHEDULE_CONVERSION_REQUIRED',
+      });
+      expect(deps.podManager.createSession).not.toHaveBeenCalled();
+    });
+  });
 });
