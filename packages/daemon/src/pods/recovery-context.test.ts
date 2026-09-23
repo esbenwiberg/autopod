@@ -261,7 +261,8 @@ describe('buildProviderFailoverHandoff', () => {
     expect(handoff).toContain('## Terminal reason');
     expect(handoff).toContain('## Recent commits');
     expect(handoff).not.toContain('dev@example.com');
-  });
+    // Sanitizing a 40k-char task is CPU-bound; the default 5s times out under full-suite load.
+  }, 20_000);
 });
 
 describe('buildRecoveryTask', () => {

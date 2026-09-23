@@ -753,9 +753,9 @@ const workspaceCheckpointController = new WorkspaceCheckpointController({
 const configurationHostPath =
   process.env.AUTOPOD_CONFIGURATION_HOST_FILE ??
   path.join(os.homedir(), '.autopod', 'configuration-host.json');
-// Source release gate: do not offer new admission until remaining callers and the cutover
-// entry point are implemented. A configuration file cannot bypass this incomplete cutover.
-const configurationAdmissionReady = () => configurationCutoverReadiness(db, false);
+// Source release gate: composable admission is released. Admission still requires the offline
+// cutover receipt, so an unconverted database stays closed. Legacy callers remain retired (410).
+const configurationAdmissionReady = () => configurationCutoverReadiness(db, true);
 const configuration = createHostConfigurationComponents({
   db,
   logger,
