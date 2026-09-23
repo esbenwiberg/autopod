@@ -740,6 +740,29 @@ describe('DockerContainerManager', () => {
         spy.mockRestore();
       }
     });
+    it('lands a protected file with its mode and owner from the archive, without exec', async () => {
+      // CapDrop=ALL leaves root without CAP_CHOWN/CAP_FOWNER, so ownership and mode must come from
+      // the extraction itself rather than a follow-up chown/chmod.
+      await manager.writeFile('abc123', '/run/autopod/nuget-endpoints', 'secret', { mode: 0o400 });
+
+      const [tarBuffer] = container.putArchive.mock.calls[0] ?? [];
+      const headers = await readTarHeaders(tarBuffer as Buffer);
+      expect(headers.find((h) => h.name === 'run/autopod/nuget-endpoints')).toMatchObject({
+        mode: 0o400,
+        uid: 1000,
+        gid: 1000,
+      });
+      expect(container.exec).not.toHaveBeenCalled();
+    });
+
+    it('defaults unprotected files to 0644', async () => {
+      await manager.writeFile('abc123', '/workspace/notes.md', 'x');
+
+      const [tarBuffer] = container.putArchive.mock.calls[0] ?? [];
+      const headers = await readTarHeaders(tarBuffer as Buffer);
+      expect(headers.find((h) => h.name === 'workspace/notes.md')?.mode).toBe(0o644);
+    });
+
     it('puts a tar archive to the container root', async () => {
       await manager.writeFile('abc123', '/workspace/CLAUDE.md', '# Hello');
 
@@ -1583,6 +1606,31 @@ async function readTarEntries(
       body.on('end', next);
     });
     ext.on('finish', () => resolve(entries));
+    ext.on('error', reject);
+    stream.pipe(ext);
+    stream.end(buffer);
+  });
+}
+
+async function readTarHeaders(
+  buffer: Buffer,
+): Promise<Array<{ name: string; mode: number; uid: number; gid: number }>> {
+  const { extract } = await import('tar-stream');
+  const headers: Array<{ name: string; mode: number; uid: number; gid: number }> = [];
+  const ext = extract();
+  const stream = new PassThrough();
+  return new Promise((resolve, reject) => {
+    ext.on('entry', (header, body, next) => {
+      headers.push({
+        name: header.name,
+        mode: (header.mode ?? 0) & 0o7777,
+        uid: header.uid ?? -1,
+        gid: header.gid ?? -1,
+      });
+      body.resume();
+      body.on('end', next);
+    });
+    ext.on('finish', () => resolve(headers));
     ext.on('error', reject);
     stream.pipe(ext);
     stream.end(buffer);

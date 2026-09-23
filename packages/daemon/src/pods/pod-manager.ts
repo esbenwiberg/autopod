@@ -2019,21 +2019,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         ...registry.files,
         ...(registry.nugetSecret ? [registry.nugetSecret] : []),
       ]) {
-        await cm.writeFile(pod.containerId, file.path, file.content);
-        const owner = await cm.execInContainer(pod.containerId, ['chown', '1000:1000', file.path], {
-          user: 'root',
-          timeout: 5000,
-        });
-        const secured = await cm.execInContainer(pod.containerId, ['chmod', '0600', file.path], {
-          user: 'root',
-          timeout: 5000,
-        });
-        if (owner.exitCode !== 0 || secured.exitCode !== 0)
-          throw new AutopodError(
-            'Cannot protect registry credential file',
-            'SECRET_FILE_PERMISSIONS',
-            503,
-          );
+        await cm.writeFile(pod.containerId, file.path, file.content, { mode: 0o600 });
       }
     }
     await deps.launchConfiguration?.assertCurrentCapabilities(launch);
@@ -5242,50 +5228,20 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
     if (pod.containerId) {
       const cm = containerManagerFactory.get(pod.executionTarget);
       for (const file of result.containerFiles) {
-        await cm.writeFile(pod.containerId, file.path, file.content);
-        if (launch) {
-          const owned = await cm.execInContainer(
-            pod.containerId,
-            ['chown', '1000:1000', file.path],
-            { user: 'root', timeout: 5000 },
-          );
-          const restricted = await cm.execInContainer(
-            pod.containerId,
-            ['chmod', '0600', file.path],
-            { user: 'root', timeout: 5000 },
-          );
-          if (owned.exitCode !== 0 || restricted.exitCode !== 0)
-            throw new AutopodError(
-              'Cannot protect refreshed account configuration',
-              'SECRET_FILE_PERMISSIONS',
-              503,
-            );
-        }
+        await cm.writeFile(
+          pod.containerId,
+          file.path,
+          file.content,
+          launch ? { mode: 0o600 } : undefined,
+        );
       }
       for (const sf of result.secretFiles) {
-        await cm.writeFile(pod.containerId, sf.path, sf.content);
         if (launch) {
-          const owned = await cm.execInContainer(pod.containerId, ['chown', '1000:1000', sf.path], {
-            user: 'root',
-            timeout: 5000,
-          });
-          if (owned.exitCode !== 0)
-            throw new AutopodError(
-              'Cannot assign refreshed credential ownership',
-              'SECRET_FILE_PERMISSIONS',
-              503,
-            );
+          await cm.writeFile(pod.containerId, sf.path, sf.content, { mode: 0o400 });
+          continue;
         }
-        const restricted = await cm.execInContainer(pod.containerId, ['chmod', '0400', sf.path], {
-          ...(launch ? { user: 'root' } : {}),
-          timeout: 5_000,
-        });
-        if (launch && restricted.exitCode !== 0)
-          throw new AutopodError(
-            'Cannot protect refreshed credential',
-            'SECRET_FILE_PERMISSIONS',
-            503,
-          );
+        await cm.writeFile(pod.containerId, sf.path, sf.content);
+        await cm.execInContainer(pod.containerId, ['chmod', '0400', sf.path], { timeout: 5_000 });
       }
     }
     if (launch) await deps.launchConfiguration?.assertCurrentCapabilities(launch);

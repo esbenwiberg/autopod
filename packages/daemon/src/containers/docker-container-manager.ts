@@ -25,6 +25,7 @@ import type {
   DirectoryExtractionOptions,
   ExecOptions,
   ExecResult,
+  FileWriteOptions,
   StreamingExecResult,
 } from '../interfaces/container-manager.js';
 import { extractManagedDockerOutput } from '../managed/output-extraction.js';
@@ -634,7 +635,12 @@ export class DockerContainerManager implements ContainerManager {
     }
   }
 
-  async writeFile(containerId: string, filePath: string, content: string | Buffer): Promise<void> {
+  async writeFile(
+    containerId: string,
+    filePath: string,
+    content: string | Buffer,
+    options?: FileWriteOptions,
+  ): Promise<void> {
     const container = this.docker.getContainer(containerId);
 
     // Build a tar archive with the single file, including parent directory entries.
@@ -658,7 +664,11 @@ export class DockerContainerManager implements ContainerManager {
       const dirPath = parts.slice(0, i).join('/');
       pack.entry({ name: dirPath, type: 'directory', uid: 1000, gid: 1000, mode: 0o755 });
     }
-    pack.entry({ name: normalizedPath, type: 'file', uid: 1000, gid: 1000, mode: 0o644 }, content);
+    // The mode is set by the extraction itself, so a protected file is never briefly readable.
+    pack.entry(
+      { name: normalizedPath, type: 'file', uid: 1000, gid: 1000, mode: options?.mode ?? 0o644 },
+      content,
+    );
     pack.finalize();
 
     // Collect tar into a Buffer — dockerode putArchive expects a stream or buffer

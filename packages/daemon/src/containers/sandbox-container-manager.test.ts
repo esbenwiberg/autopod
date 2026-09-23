@@ -794,6 +794,31 @@ describe('SandboxContainerManager', () => {
       expect(await mgr.readFile(id, '/work/hello.txt')).toBe('hi there');
     });
 
+    it('hands a protected file to the container user as root after the root-owned upload', async () => {
+      const client = new FakeSandboxApiClient();
+      const mgr = new SandboxContainerManager(client, logger);
+      const id = await mgr.spawn(baseConfig);
+      const before = client.execCalls.length;
+      await mgr.writeFile(id, '/run/autopod/token', 'secret', { mode: 0o400 });
+      expect(client.execCalls.slice(before).map((c) => [c.command, c.options?.user])).toEqual([
+        [['chown', '1000:1000', '/run/autopod/token'], 'root'],
+        [['chmod', '0400', '/run/autopod/token'], 'root'],
+      ]);
+    });
+
+    it('refuses to report a protected write it could not secure', async () => {
+      const client = new FakeSandboxApiClient(async (_id, command) =>
+        command[0] === 'chmod'
+          ? { stdout: '', stderr: 'denied', exitCode: 1 }
+          : { stdout: '', stderr: '', exitCode: 0 },
+      );
+      const mgr = new SandboxContainerManager(client, logger);
+      const id = await mgr.spawn(baseConfig);
+      await expect(
+        mgr.writeFile(id, '/run/autopod/token', 'secret', { mode: 0o600 }),
+      ).rejects.toMatchObject({ code: 'SECRET_FILE_PERMISSIONS', statusCode: 503 });
+    });
+
     it('readFileBinary returns raw bytes', async () => {
       const client = new FakeSandboxApiClient();
       const mgr = new SandboxContainerManager(client, logger);
