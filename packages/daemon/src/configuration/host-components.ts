@@ -1,5 +1,6 @@
 import type { EffectiveLaunchConfig } from '@autopod/shared';
 import type Dockerode from 'dockerode';
+import type { Logger } from 'pino';
 import { z } from 'zod';
 import { createDeploymentHostAdapter } from '../actions/deployment-host-adapter.js';
 import { deploymentTargetSchema } from '../actions/deployment-service.js';
@@ -24,6 +25,9 @@ import { configurationError, createConfigurationStore } from './configuration-st
 import { createConfigurationCredentialStore } from './credential-store.js';
 import { createServiceCredentialBoundary } from './service-credential-boundary.js';
 import { createConfigurationSourceReaders } from './source-readers.js';
+
+const PINNED_REVIEWER_IMAGE = /@sha256:[a-f0-9]{64}$/;
+const REVIEWER_IMAGE_CACHE_MS = 10 * 60_000;
 
 export const hostConfigurationSettingsSchema = z
   .object({
@@ -67,6 +71,45 @@ export const hostConfigurationSettingsSchema = z
   })
   .strict();
 
+type ReviewerTarget = 'local' | 'sandbox';
+
+/**
+ * Configured images win. Otherwise a registry fallback is resolved and re-resolved periodically so a
+ * republished image is picked up; failures are not cached, so a registry outage only affects the
+ * launches that hit it.
+ */
+export function createReviewerImageSelector(input: {
+  configured: Partial<Record<ReviewerTarget, string>>;
+  fallback?: ((target: ReviewerTarget) => Promise<string>) | undefined;
+  logger: Pick<Logger, 'warn'>;
+  now?: () => number;
+}) {
+  const now = input.now ?? Date.now;
+  const cache = new Map<ReviewerTarget, { image: string; expiresAt: number }>();
+  return async (target: ReviewerTarget): Promise<string> => {
+    const configured = input.configured[target];
+    if (configured) return configured;
+    const cached = cache.get(target);
+    if (cached && cached.expiresAt > now()) return cached.image;
+    let resolved: string | null = null;
+    if (input.fallback) {
+      try {
+        resolved = await input.fallback(target);
+      } catch (err) {
+        input.logger.warn({ err, target }, 'Default reviewer image resolution failed');
+      }
+    }
+    if (!resolved || !PINNED_REVIEWER_IMAGE.test(resolved))
+      configurationError(
+        'Configure a pinned isolated reviewer image for this backend',
+        'REVIEWER_IMAGE_UNAVAILABLE',
+        503,
+      );
+    cache.set(target, { image: resolved, expiresAt: now() + REVIEWER_IMAGE_CACHE_MS });
+    return resolved;
+  };
+}
+
 /** Real host composition. Library editing is available while execution remains cutover-gated. */
 export function createHostConfigurationComponents(
   options: Pick<
@@ -84,6 +127,8 @@ export function createHostConfigurationComponents(
     sandboxEnabled: boolean;
     sandboxDefaultTier: 'XS' | 'S' | 'M' | 'L';
     settings: z.infer<typeof hostConfigurationSettingsSchema>;
+    /** Registry-pinned fallback used when settings name no reviewer image for a target. */
+    defaultReviewerImage?: (target: 'local' | 'sandbox') => Promise<string>;
   },
 ) {
   const { settings, readSnapshotArchive } = options;
@@ -115,16 +160,11 @@ export function createHostConfigurationComponents(
       return protectedValues;
     }),
   );
-  const image = (target: 'local' | 'sandbox') => {
-    const selected = settings.reviewerImages[target];
-    if (!selected)
-      configurationError(
-        'Configure a pinned isolated reviewer image for this backend',
-        'REVIEWER_IMAGE_UNAVAILABLE',
-        503,
-      );
-    return selected;
-  };
+  const image = createReviewerImageSelector({
+    configured: settings.reviewerImages,
+    fallback: options.defaultReviewerImage,
+    logger: options.logger,
+  });
   const requireImages = () => {
     if (!options.images)
       configurationError(
@@ -207,7 +247,7 @@ export function createHostConfigurationComponents(
           config.workflow.validationPhases.includes('review') ||
           config.workflow.advisoryBrowserQaEnabled
         )
-          image(config.execution.target);
+          await image(config.execution.target);
       },
     },
   });

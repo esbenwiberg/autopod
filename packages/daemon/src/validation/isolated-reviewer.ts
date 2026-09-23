@@ -30,7 +30,7 @@ export interface IsolatedReviewerOptions {
   logger: Logger;
   manager(target: 'local' | 'sandbox'): ContainerManager;
   /** Trusted daemon-owned image containing only runtime CLIs; never a repository/environment image. */
-  image(target: 'local' | 'sandbox'): string;
+  image(target: 'local' | 'sandbox'): string | Promise<string>;
   network?: Pick<DockerNetworkManager, 'buildNetworkConfig' | 'removeNetworkForPod'>;
   readPod(podId: string): Pod;
   assertAllowed(config: EffectiveLaunchConfig): Promise<void>;
@@ -117,7 +117,7 @@ export class IsolatedReviewer {
         configurationError('Reviewer input exceeds the execution bounds', 'REVIEWER_INPUT_INVALID');
       const id = `review-${randomUUID()}`;
       const manager = deps.manager(config.execution.target);
-      const image = deps.image(config.execution.target);
+      const image = await deps.image(config.execution.target);
       if (!/@sha256:[a-f0-9]{64}$/.test(image))
         configurationError(
           'The isolated reviewer image must be pinned by digest',

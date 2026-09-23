@@ -91,14 +91,18 @@ export class AcrClient {
     logger.info({ tag: acrTag }, 'Pulled image from ACR');
   }
 
-  /** Resolve a tag to its digest, then authenticated-pull that exact immutable reference. */
-  async pullPinned(tag: string): Promise<string> {
+  /** Resolve a tag to its registry-qualified digest reference without pulling it. */
+  async pinnedReference(tag: string): Promise<string> {
     const qualified = this.resolveTag(tag);
     const reference = parseImageReference(this.stripRegistryPrefix(qualified));
-    const pinned =
-      reference.kind === 'digest'
-        ? qualified
-        : `${this.config.registryUrl}/${reference.repo}@${await this.resolveDigest(qualified)}`;
+    return reference.kind === 'digest'
+      ? qualified
+      : `${this.config.registryUrl}/${reference.repo}@${await this.resolveDigest(qualified)}`;
+  }
+
+  /** Resolve a tag to its digest, then authenticated-pull that exact immutable reference. */
+  async pullPinned(tag: string): Promise<string> {
+    const pinned = await this.pinnedReference(tag);
     await this.pull(pinned);
     return pinned;
   }
