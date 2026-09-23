@@ -67,6 +67,12 @@ export interface ExecResult {
 export interface FileWriteOptions {
   /** Bound remote file publication so control-plane refreshers can recover. */
   timeoutMs?: number;
+  /**
+   * Land the file owned by the container user (1000:1000) with exactly this mode, or throw.
+   * Backends apply it natively: Docker pods drop every capability, so root inside them cannot
+   * chown or chmod the container user's files after the fact.
+   */
+  mode?: number;
 }
 
 export interface ExecOptions {

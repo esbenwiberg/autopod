@@ -135,7 +135,14 @@ describe('composable daemon services', () => {
         'pod-container',
         expect.stringContaining('npmrc'),
         expect.stringContaining('rotated-fixture-value'),
+        { mode: 0o600 },
       );
+      // Docker pods drop CAP_CHOWN/CAP_FOWNER; protection must not depend on root exec.
+      expect(
+        vi
+          .mocked(ctx.containerManager.execInContainer)
+          .mock.calls.filter(([, command]) => ['chown', 'chmod'].includes(command[0] ?? '')),
+      ).toEqual([]);
       expect(components.snapshots.get(pod.id)?.digest).toBe(saved.digest);
       const environment = components.store.get('environment', 'env');
       components.store.write({

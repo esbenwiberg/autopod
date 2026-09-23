@@ -379,7 +379,30 @@ for root in sys.argv[1:]:
     options?: FileWriteOptions,
   ): Promise<void> {
     const buf = typeof content === 'string' ? Buffer.from(content, 'utf-8') : content;
-    await this.client.writeFile(containerId, path, buf, options);
+    await this.client.writeFile(
+      containerId,
+      path,
+      buf,
+      options?.timeoutMs !== undefined ? { timeoutMs: options.timeoutMs } : undefined,
+    );
+    if (options?.mode === undefined) return;
+    // The files endpoint writes as root; hand the file to the container user before narrowing it.
+    const mode = options.mode.toString(8).padStart(4, '0');
+    for (const command of [
+      ['chown', '1000:1000', path],
+      ['chmod', mode, path],
+    ]) {
+      const result = await this.execInContainer(containerId, command, {
+        user: 'root',
+        timeout: 5_000,
+      });
+      if (result.exitCode !== 0)
+        throw new AutopodError(
+          `Cannot protect container file ${path}`,
+          'SECRET_FILE_PERMISSIONS',
+          503,
+        );
+    }
   }
 
   async writeManagedControl(

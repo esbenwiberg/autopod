@@ -293,27 +293,11 @@ export class IsolatedReviewer {
           ...auth.containerFiles,
           ...auth.secretFiles,
         ]) {
-          await bounded(manager.writeFile(allocatedContainer, file.path, file.content));
-          const owner = await bounded(
-            manager.execInContainer(allocatedContainer, ['chown', '1000:1000', file.path], {
-              user: 'root',
-              timeout: 5_000,
+          await bounded(
+            manager.writeFile(allocatedContainer, file.path, file.content, {
+              mode: file.path.endsWith('agent-shim.sh') ? 0o500 : 0o600,
             }),
           );
-          if (owner.exitCode !== 0)
-            throw new Error('Reviewer credential ownership could not be enforced');
-          const mode = await bounded(
-            manager.execInContainer(
-              allocatedContainer,
-              ['chmod', file.path.endsWith('agent-shim.sh') ? '0500' : '0600', file.path],
-              {
-                user: 'root',
-                timeout: 5_000,
-              },
-            ),
-          );
-          if (mode.exitCode !== 0)
-            throw new Error('Reviewer credential permissions could not be enforced');
           guard();
         }
         const reviewerContainer = allocatedContainer;
