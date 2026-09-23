@@ -6,6 +6,7 @@ import { createTestConfiguration } from '../test-utils/configuration-helpers.js'
 import { createTestContext } from '../test-utils/mock-helpers.js';
 import {
   createHostConfigurationComponents,
+  createReviewerImageSelector,
   hostConfigurationSettingsSchema,
 } from './host-components.js';
 import { resolveLaunch } from './launch-resolver.js';
@@ -96,5 +97,59 @@ describe('configuration host composition', () => {
     } finally {
       ctx.db.close();
     }
+  });
+});
+
+describe('reviewer image selection', () => {
+  const pinned = (c: string) => `registry.test/autopod-node22@sha256:${c.repeat(64)}`;
+  const logger = { warn: vi.fn() };
+
+  it('prefers the configured image over the registry fallback', async () => {
+    const fallback = vi.fn(async () => pinned('b'));
+    const select = createReviewerImageSelector({
+      configured: { local: pinned('a') },
+      fallback,
+      logger,
+    });
+    await expect(select('local')).resolves.toBe(pinned('a'));
+    expect(fallback).not.toHaveBeenCalled();
+  });
+
+  it('caches a resolved fallback and re-resolves after it expires', async () => {
+    let clock = 0;
+    const fallback = vi.fn(async () => pinned('b')).mockResolvedValueOnce(pinned('c'));
+    const select = createReviewerImageSelector({
+      configured: {},
+      fallback,
+      logger,
+      now: () => clock,
+    });
+    await expect(select('local')).resolves.toBe(pinned('c'));
+    await expect(select('local')).resolves.toBe(pinned('c'));
+    expect(fallback).toHaveBeenCalledTimes(1);
+    clock += 11 * 60_000;
+    await expect(select('local')).resolves.toBe(pinned('b'));
+    expect(fallback).toHaveBeenCalledTimes(2);
+  });
+
+  it.each([
+    ['no fallback is wired', undefined],
+    ['the registry fails', vi.fn(async () => Promise.reject(new Error('registry down')))],
+    ['the fallback is not digest-pinned', vi.fn(async () => 'registry.test/autopod-node22:latest')],
+  ])('reports the reviewer image unavailable when %s', async (_case, fallback) => {
+    const select = createReviewerImageSelector({ configured: {}, fallback, logger });
+    await expect(select('sandbox')).rejects.toMatchObject({
+      code: 'REVIEWER_IMAGE_UNAVAILABLE',
+      statusCode: 503,
+    });
+  });
+
+  it('does not cache failures', async () => {
+    const fallback = vi
+      .fn(async () => pinned('b'))
+      .mockRejectedValueOnce(new Error('registry down'));
+    const select = createReviewerImageSelector({ configured: {}, fallback, logger });
+    await expect(select('local')).rejects.toMatchObject({ code: 'REVIEWER_IMAGE_UNAVAILABLE' });
+    await expect(select('local')).resolves.toBe(pinned('b'));
   });
 });

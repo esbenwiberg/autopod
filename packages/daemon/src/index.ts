@@ -20,6 +20,7 @@ import {
   createHostConfigurationComponents,
   hostConfigurationSettingsSchema,
 } from './configuration/host-components.js';
+import { boundedDockerCall } from './containers/docker-bounds.js';
 import { DockerContainerManager } from './containers/docker-container-manager.js';
 import { DockerNetworkManager } from './containers/docker-network-manager.js';
 import { RoutingContainerManager } from './containers/routing-container-manager.js';
@@ -30,6 +31,7 @@ import { createDbBackupManager } from './db/backup.js';
 import { createDatabase } from './db/connection.js';
 import { runMigrationsWithBackups } from './db/migrate.js';
 import { GhCliDaemonGitHubAuth } from './github/daemon-github-auth.js';
+import { getConfiguredBaseImage } from './images/dockerfile-generator.js';
 import type { AuthModule } from './interfaces/index.js';
 import type { ContainerManager } from './interfaces/index.js';
 import type { PodExecutionSettings } from './interfaces/pod-execution-settings.js';
@@ -756,6 +758,7 @@ const configurationHostPath =
 // Source release gate: composable admission is released. Admission still requires the offline
 // cutover receipt, so an unconverted database stays closed. Legacy callers remain retired (410).
 const configurationAdmissionReady = () => configurationCutoverReadiness(db, true);
+const reviewerRegistry = acr;
 const configuration = createHostConfigurationComponents({
   db,
   logger,
@@ -772,6 +775,17 @@ const configuration = createHostConfigurationComponents({
   docker,
   sandboxEnabled: !!sandboxContainerManager,
   sandboxDefaultTier: SANDBOX_TIER ?? 'L',
+  // The node22 base carries the runtime CLIs and no repository content, so it doubles as the
+  // isolated reviewer image when the host file names none. Pinned to its digest per resolution.
+  ...(reviewerRegistry
+    ? {
+        defaultReviewerImage: () =>
+          boundedDockerCall(reviewerRegistry.pinnedReference(getConfiguredBaseImage('node22')), {
+            label: 'reviewer-image-resolve',
+            timeoutMs: 15_000,
+          }),
+      }
+    : {}),
   settings: hostConfigurationSettingsSchema.parse(
     fs.existsSync(configurationHostPath)
       ? JSON.parse(fs.readFileSync(configurationHostPath, 'utf8'))
