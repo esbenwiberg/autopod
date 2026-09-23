@@ -1,4 +1,9 @@
-import type { EnvironmentPreset, Profile, ResolvedEnvironment } from '@autopod/shared';
+import {
+  AutopodError,
+  type EnvironmentPreset,
+  type Profile,
+  type ResolvedEnvironment,
+} from '@autopod/shared';
 import type Dockerode from 'dockerode';
 import pino from 'pino';
 import { pack as tarPack } from 'tar-stream';
@@ -68,10 +73,7 @@ export class ImageBuilder {
       pinnedBase = `${tagSeparator > repository.lastIndexOf('/') ? repository.slice(0, tagSeparator) : repository}@${digest}`;
       platform = 'linux/amd64';
     } else {
-      const info = await boundedDockerCall(this.docker.getImage(base).inspect(), {
-        label: 'environment-base-inspect',
-        timeoutMs: 5_000,
-      });
+      const info = await this.inspectLocalBase(base, environment.template);
       if (info.Os !== 'linux' || !['amd64', 'arm64'].includes(info.Architecture))
         throw new Error('The environment base must be a supported Linux image');
       pinnedBase = info.Id;
@@ -82,6 +84,50 @@ export class ImageBuilder {
     const agentToolingDigest = configurationDigest({ pinnedBase, toolInstallCommands });
     const binding = { pinnedBase, platform, toolInstallCommands, agentToolingDigest };
     return { ...binding, imageKey: environmentImageKey({ environment, ...binding }) };
+  }
+
+  /**
+   * Inspect the local base, pulling the registry's pinned digest on a miss. A pull only fills the
+   * local image cache — nothing is built or published — so preview stays free of launch effects.
+   */
+  private async inspectLocalBase(
+    base: string,
+    template: string,
+  ): Promise<Dockerode.ImageInspectInfo> {
+    const inspect = (reference: string) =>
+      boundedDockerCall(this.docker.getImage(reference).inspect(), {
+        label: 'environment-base-inspect',
+        timeoutMs: 5_000,
+      });
+    try {
+      return await inspect(base);
+    } catch (error) {
+      if ((error as { statusCode?: number }).statusCode !== 404) throw error;
+    }
+    if (!this.acr) {
+      throw new AutopodError(
+        `Environment base image "${base}" for template "${template}" is not present locally; build or pull it, or configure ACR`,
+        'ENVIRONMENT_BASE_UNAVAILABLE',
+        424,
+      );
+    }
+    let pinned: string;
+    try {
+      pinned = await boundedDockerCall(this.acr.pullPinned(base), {
+        label: 'environment-base-pull',
+        timeoutMs: 600_000,
+      });
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : String(error);
+      logger.warn({ base, template, reason }, 'Environment base pull failed');
+      throw new AutopodError(
+        `Environment base image "${base}" for template "${template}" could not be pulled from the registry: ${reason}`,
+        'ENVIRONMENT_BASE_UNAVAILABLE',
+        424,
+      );
+    }
+    logger.info({ base, pinned }, 'Pulled environment base from registry');
+    return inspect(pinned);
   }
 
   /** Build a warm image for a profile and push it to ACR. */

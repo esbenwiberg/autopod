@@ -139,6 +139,65 @@ describe('ImageBuilder', () => {
     expect(deps.mockAcr.push).not.toHaveBeenCalled();
     expect(deps.mockProfileStore.setWarmImage).not.toHaveBeenCalled();
   });
+  it('pulls the pinned registry base when the local environment base is missing', async () => {
+    const deps = createMockDeps();
+    const inspect = vi.mocked(deps.mockDocker.getImage('base').inspect);
+    inspect.mockRejectedValueOnce({ statusCode: 404 }).mockResolvedValue({
+      Id: `sha256:${'d'.repeat(64)}`,
+      Os: 'linux',
+      Architecture: 'amd64',
+    } as unknown as import('dockerode').ImageInspectInfo);
+    const builder = new ImageBuilder({
+      docker: deps.mockDocker,
+      acr: deps.mockAcr,
+      profileStore: deps.mockProfileStore,
+    });
+    const resolved = await builder.resolveEnvironment(
+      environmentPresetSchema.parse({ template: 'dotnet10-go' }),
+      'local',
+    );
+    expect(deps.mockAcr.pullPinned).toHaveBeenCalledWith('autopod-dotnet10-go:latest');
+    expect(deps.mockDocker.getImage).toHaveBeenLastCalledWith(
+      'ewiacr.azurecr.io/autopod-dotnet10-go@sha256:base-digest',
+    );
+    expect(resolved.pinnedBase).toBe(`sha256:${'d'.repeat(64)}`);
+    expect(resolved.platform).toBe('linux/amd64');
+    expect(deps.mockDocker.buildImage).not.toHaveBeenCalled();
+    expect(deps.mockAcr.push).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['no registry is configured', false],
+    ['the registry pull fails', true],
+  ])('reports an unavailable environment base when %s', async (_case, withAcr) => {
+    const deps = createMockDeps();
+    vi.mocked(deps.mockDocker.getImage('base').inspect).mockRejectedValue({ statusCode: 404 });
+    vi.mocked(deps.mockAcr.pullPinned).mockRejectedValue(new Error('unauthorized'));
+    const builder = new ImageBuilder({
+      docker: deps.mockDocker,
+      acr: withAcr ? deps.mockAcr : null,
+      profileStore: deps.mockProfileStore,
+    });
+    await expect(
+      builder.resolveEnvironment(environmentPresetSchema.parse({ template: 'node22' }), 'local'),
+    ).rejects.toMatchObject({ code: 'ENVIRONMENT_BASE_UNAVAILABLE', statusCode: 424 });
+  });
+
+  it('does not mask non-missing local inspect failures', async () => {
+    const deps = createMockDeps();
+    vi.mocked(deps.mockDocker.getImage('base').inspect).mockRejectedValue(
+      Object.assign(new Error('daemon down'), { statusCode: 500 }),
+    );
+    const builder = new ImageBuilder({
+      docker: deps.mockDocker,
+      acr: deps.mockAcr,
+      profileStore: deps.mockProfileStore,
+    });
+    await expect(
+      builder.resolveEnvironment(environmentPresetSchema.parse({ template: 'node22' }), 'local'),
+    ).rejects.toThrow('daemon down');
+    expect(deps.mockAcr.pullPinned).not.toHaveBeenCalled();
+  });
   beforeEach(() => {
     vi.restoreAllMocks();
   });
