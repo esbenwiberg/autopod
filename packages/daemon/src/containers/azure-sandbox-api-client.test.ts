@@ -1103,7 +1103,9 @@ describe('AzureSandboxApiClient', () => {
     expect(putReq.url).toContain('/sandboxGroups/autopod-spike/sandboxes');
     expect(jsonBody(putReq)).toEqual({
       sourcesRef: { snapshot: { id: 'snap-1' } },
-      labels: { purpose: 'autopod-sandbox' },
+      // managedBy is the ownership mark the orphan reaper gates on — a
+      // snapshot-warm-started sandbox without it can never be reaped.
+      labels: { purpose: 'autopod-sandbox', managedBy: 'autopod' },
     });
   });
 
@@ -1423,4 +1425,66 @@ it('rejects a malformed resolved digest before creating any resource', async () 
     }),
   ).rejects.toMatchObject({ code: 'AZURE_SANDBOX_IMAGE_DIGEST' });
   expect(requests).toHaveLength(0);
+});
+
+describe('listSandboxes', () => {
+  it('lists the group and normalizes labels, state and creation time', async () => {
+    const { client, requests } = makeClient([
+      {
+        status: 200,
+        body: [
+          {
+            id: 'sandbox-a',
+            state: 'Running',
+            createdAt: '2026-09-01T10:00:00Z',
+            labels: { managedBy: 'autopod', podId: 'pod-a' },
+          },
+          {
+            id: 'sandbox-b',
+            properties: {
+              state: 'Stopped',
+              createdAt: '2026-08-20T09:00:00Z',
+              labels: { phase5Role: 'broker' },
+            },
+          },
+        ],
+      },
+    ]);
+
+    const sandboxes = await client.listSandboxes();
+
+    expect(requests[0]?.init?.method).toBe('GET');
+    expect(requests[0]?.url).toContain(
+      '/subscriptions/sub-1/resourceGroups/rg-1/sandboxGroups/autopod-spike/sandboxes',
+    );
+    expect(sandboxes).toEqual([
+      {
+        id: 'sandbox-a',
+        state: 'Running',
+        createdAt: '2026-09-01T10:00:00Z',
+        labels: { managedBy: 'autopod', podId: 'pod-a' },
+      },
+      {
+        id: 'sandbox-b',
+        state: 'Stopped',
+        createdAt: '2026-08-20T09:00:00Z',
+        labels: { phase5Role: 'broker' },
+      },
+    ]);
+  });
+
+  it('accepts an envelope shape and drops entries without an id', async () => {
+    const { client } = makeClient([
+      {
+        status: 200,
+        body: { value: [{ id: 'sandbox-a', labels: {} }, { state: 'Running' }, { id: '' }] },
+      },
+    ]);
+    expect(await client.listSandboxes()).toEqual([{ id: 'sandbox-a', labels: {} }]);
+  });
+
+  it('returns an empty list for a missing group rather than throwing', async () => {
+    const { client } = makeClient([{ status: 404 }]);
+    expect(await client.listSandboxes()).toEqual([]);
+  });
 });

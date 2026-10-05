@@ -756,6 +756,40 @@ describe('PodRepository', () => {
     });
   });
 
+  describe('listReferencedContainerIds', () => {
+    it('returns container IDs from every status and ignores rows without one', () => {
+      // The claim set for platform-side orphan detection must include terminal
+      // pods: a complete pod that still holds a sandbox belongs to the terminal
+      // reaper, not the orphan reaper.
+      repo.insert({ ...validSession, id: 'running-pod', status: 'running' });
+      repo.insert({ ...validSession, id: 'complete-pod', status: 'complete' });
+      repo.insert({ ...validSession, id: 'no-container', status: 'queued' });
+      repo.update('running-pod', { containerId: 'sandbox-live' });
+      repo.update('complete-pod', { containerId: 'sandbox-terminal' });
+
+      expect(repo.listReferencedContainerIds().sort()).toEqual([
+        'sandbox-live',
+        'sandbox-terminal',
+      ]);
+    });
+
+    it('retains managed allocation claims even without a pod container reference', () => {
+      db.prepare(
+        "INSERT INTO managed_sandbox_allocations(pod_id,spec_digest,sandbox_id,phase) VALUES (?,? ,?,'ready')",
+      ).run('managed-only', 'digest', 'sandbox-managed');
+      db.prepare(
+        "INSERT INTO managed_sandbox_allocations(pod_id,spec_digest,phase) VALUES (?,?,'creating')",
+      ).run('pending-only', 'digest');
+      expect(repo.listReferencedContainerIds()).toEqual(['sandbox-managed']);
+    });
+
+    it('ignores empty-string container IDs', () => {
+      repo.insert({ ...validSession, id: 'blank', status: 'running' });
+      db.prepare("UPDATE pods SET container_id = '' WHERE id = 'blank'").run();
+      expect(repo.listReferencedContainerIds()).toEqual([]);
+    });
+  });
+
   describe('countByStatusAndProfile', () => {
     it('should count matching pods', () => {
       repo.insert(validSession);

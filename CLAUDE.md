@@ -298,6 +298,9 @@ Each runtime (`claude-runtime.ts`, `codex-runtime.ts`, `copilot-runtime.ts`) has
 | `AZURE_LOCATION` | `westeurope` | no | Region for Sandbox placement |
 | `AUTOPOD_CONTAINER_HOST` | — | no | Override host for MCP base URL inside containers |
 | `AUTOPOD_MOBILE_DIST` | — | no | Override mobile PWA dist dir (default: `packages/mobile-web/dist`). See `docs/mobile.md`. |
+| `SANDBOX_TERMINAL_REAPER_INTERVAL_MS` | `300000` | no | How often the DB-driven terminal sandbox reaper sweeps. Clamped to 1 s–24 h. |
+| `SANDBOX_ORPHAN_REAPER_INTERVAL_MS` | `1800000` | no | How often the platform-driven orphan sandbox reaper sweeps. Clamped to 1 s–24 h. |
+| `SANDBOX_ORPHAN_REAPER_MIN_AGE_MS` | `3600000` | no | Grace period before an unreferenced `managedBy: autopod` sandbox is eligible for deletion. Must exceed worst-case provisioning time. See `docs/azure-container-apps-sandboxes.md`. |
 | `AUTOPOD_SANDBOX_NATIVE_PREVIEW_EMAILS` | — | no | Comma/space-separated Entra emails. When set, sandbox pod previews use the platform's native public URL (Entra-gated to these addresses) instead of the daemon exec proxy. Falls back to the proxy if unset or on failure. See `docs/azure-container-apps-sandboxes.md`. |
 
 ## Environment Gotchas

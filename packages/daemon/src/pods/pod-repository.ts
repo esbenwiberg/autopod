@@ -298,6 +298,12 @@ export interface PodRepository extends Partial<UnitOfWork> {
   getPodsBySeries(seriesId: string): Pod[];
   listNonTerminalPodIds(): string[];
   /**
+   * Every container/sandbox ID referenced by any pod row, in any status. This is
+   * the authoritative "claimed" set for platform-side orphan detection: an
+   * infrastructure object not in here is referenced by nothing the daemon knows.
+   */
+  listReferencedContainerIds(): string[];
+  /**
    * Pods in terminal states (`complete`, `killed`, `failed`) whose `completed_at`
    * is before or equal to `cutoffIso`. Used by the screenshot retention sweeper.
    */
@@ -1375,6 +1381,18 @@ export function createPodRepository(db: Database.Database): PodRepository {
         ORDER BY completed_at, id`)
         .iterate(completedSince) as Iterable<Record<string, unknown>>;
       return Array.from(rows, rowToCostSource);
+    },
+
+    listReferencedContainerIds(): string[] {
+      const rows = db
+        .prepare(
+          `SELECT container_id FROM pods WHERE container_id IS NOT NULL AND container_id != ''
+           UNION
+           SELECT sandbox_id AS container_id FROM managed_sandbox_allocations
+           WHERE sandbox_id IS NOT NULL AND sandbox_id != ''`,
+        )
+        .all() as { container_id: string }[];
+      return rows.map((r) => r.container_id);
     },
 
     listNonTerminalPodIds(): string[] {

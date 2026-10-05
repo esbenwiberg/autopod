@@ -437,9 +437,44 @@ a waiver. These are post-merge operator actions, in order:
 > `start.command` is `execve`d literally, so `execStream()` now stages an executable wrapper
 > script instead of sending a shell string (see "Exec Streaming Transport" above).
 
-## Cleanup Checks
+## Cleanup and Reaping
 
-The manager deletes the sandbox first and then deletes the disk image it created. On daemon startup, running sandbox pods are reconciled by status and reconnected or marked killed.
+Three layers, because a leaked sandbox bills cold storage indefinitely — unlike a stopped
+Docker container, which is free:
+
+1. **Inline teardown.** Every terminal transition in `pod-manager.ts` is preceded by
+   `cleanupContainer(pod, label, 'kill')`, which kills the sandbox and, for
+   `executionTarget: 'sandbox'`, clears `container_id` on the pod row. This is the normal path.
+2. **`SandboxTerminalReaper`** (`pods/sandbox-terminal-reaper.ts`, every
+   `SANDBOX_TERMINAL_REAPER_INTERVAL_MS`, default 5 min). Backstop for an inline kill that
+   failed or timed out. Walks *from the DB*: terminal pods (`complete`/`killed`/`failed`) that
+   still hold a `container_id`. Preserves the workspace before deleting a `failed` pod's sandbox.
+3. **`SandboxOrphanReaper`** (`pods/sandbox-orphan-reaper.ts`, every
+   `SANDBOX_ORPHAN_REAPER_INTERVAL_MS`, default 30 min). Walks *from the platform listing*
+   (`GET {group}/sandboxes`), which is the only view of objects the DB has forgotten. Deletes
+   sandboxes that **no pod row references at all** — pod row deleted by history retention or an
+   operator, `container_id` cleared while the delete actually failed asynchronously on the
+   platform side, or an id that was never persisted (daemon crash between create and the
+   `container_id` write).
+
+   Two hard guards:
+   - **Ownership** — only `labels.managedBy === 'autopod'` is ever considered. A sandbox group is
+     shared infrastructure; in September 2026 `autopod-spike` held 22 `dataverse-harness`
+     sandboxes owned by another workload, and an unguarded reaper would have destroyed them.
+   - **Attribution** — a sandbox is deleted only if it is older than
+     `SANDBOX_ORPHAN_REAPER_MIN_AGE_MS` (default 60 min, comfortably past worst-case
+     disk-image-pull + poll-to-`Running`), *and* only if its age is actually known. A sandbox with
+     a missing, unparseable, or future `createdAt` is logged at `warn` and **retained** — failing
+     closed leaks money, failing open deletes a sandbox out from under a provisioning pod.
+
+   The sweep reads the platform listing **before** the DB claim set, so a `container_id` written
+   between the two reads makes the sandbox look claimed rather than orphaned. Deletes are capped
+   per sweep (20) and each delete races a 15 s deadline; anything not deleted is retried next sweep.
+
+Anything the orphan reaper reports but will not delete (`ageUnknown`) needs an operator, as do
+objects it structurally cannot own: **disk images**, **snapshots**, and **volumes** have no reaper
+at all. Disk images are GC'd only opportunistically, when `ensureDiskImage` runs for the same
+`sourceImageHash` with a newer digest.
 
 To manually check for leaks:
 
@@ -450,3 +485,14 @@ API="api-version=2026-02-01-preview"
 az rest --resource https://dynamicsessions.io --method get --url "$BASE/sandboxes?$API"
 az rest --resource https://dynamicsessions.io --method get --url "$BASE/diskimages?$API"
 ```
+
+Every object kind, including the ones no reaper touches:
+
+```bash
+for kind in sandboxes diskimages snapshots volumes; do
+  echo "== $kind"
+  az rest --resource https://dynamicsessions.io --method get --url "$BASE/$kind?$API"
+done
+```
+
+Managed sandbox allocation records also count as ownership claims during orphan detection. A sandbox retained in `managed_sandbox_allocations` is not eligible for the orphan reaper even if no pod row currently contains its ID.

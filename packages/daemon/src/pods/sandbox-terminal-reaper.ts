@@ -12,9 +12,14 @@ export interface SandboxTerminalReaperDependencies {
 }
 
 /**
- * Converges terminal DB-referenced Azure Sandboxes. It deliberately cannot
- * discover Azure-only resources: the preview list contract is not evidenced
- * here, while a pod row gives us both ownership and recovery context.
+ * Converges terminal DB-referenced Azure Sandboxes: the backstop for an inline
+ * `cleanupContainer` kill that failed or timed out. Walking from the pod row is
+ * what gives us recovery context — notably the chance to preserve a `failed`
+ * pod's workspace before its sandbox is destroyed.
+ *
+ * By construction it cannot see a sandbox the DB no longer references (deleted
+ * pod row, cleared `container_id`, id never persisted). That blind spot belongs
+ * to {@link SandboxOrphanReaper}, which walks the platform listing instead.
  */
 export class SandboxTerminalReaper {
   private running = false;

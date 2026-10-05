@@ -150,6 +150,22 @@ export interface SandboxSnapshot {
 export type SandboxStatus = 'running' | 'stopped' | 'deleted' | 'unknown';
 
 /**
+ * A sandbox as returned by a group-wide listing. This is the only view that can
+ * see Azure-side objects the daemon's DB has lost track of, so it deliberately
+ * carries the ownership labels and the creation timestamp — a reaper needs both
+ * to decide whether an unreferenced sandbox is ours and old enough to delete.
+ */
+export interface SandboxDescriptor {
+  id: string;
+  /** Labels set at create time. `managedBy`/`podId` are autopod's ownership marks. */
+  labels: Record<string, string>;
+  /** ISO timestamp, when the platform reports one. */
+  createdAt?: string;
+  /** Raw platform state string (e.g. `Running`, `Stopped`). */
+  state?: string;
+}
+
+/**
  * A sandbox data-plane failure that is safe to recover by starting a fresh
  * sandbox. This deliberately carries only allowlisted response diagnostics.
  */
@@ -242,6 +258,12 @@ export interface SandboxApiClient {
   createFromSnapshot?(snapshotId: string): Promise<string>;
   /** Delete a snapshot. Idempotent — a missing snapshot is a no-op. */
   deleteSnapshot?(snapshotId: string): Promise<void>;
+  /**
+   * Enumerate every sandbox in the configured group. Optional — omitted by
+   * clients that cannot list, in which case orphan reaping is disabled rather
+   * than silently skipped.
+   */
+  listSandboxes?(): Promise<SandboxDescriptor[]>;
   /** Snapshot-suspend the sandbox (maps to ContainerManager.stop). */
   suspend(sandboxId: string, mode?: 'memory' | 'disk'): Promise<void>;
   /** Resume a suspended sandbox (maps to ContainerManager.start). */

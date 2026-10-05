@@ -48,6 +48,7 @@ import type { SandboxPortAuth } from './sandbox-api-client.js';
 import {
   SANDBOX_TIER_MEMORY_BYTES,
   type SandboxApiClient,
+  type SandboxDescriptor,
   type SandboxExecOptions,
   type SandboxRegistryCredentials,
   type SandboxResourceTier,
@@ -334,6 +335,17 @@ for root in sys.argv[1:]:
       config.podId,
     );
     return id;
+  }
+
+  /**
+   * Enumerate every sandbox in the configured group, or `undefined` when the
+   * underlying client cannot list. Not part of the `ContainerManager` contract —
+   * Docker has no equivalent need, because a stopped local container costs
+   * nothing while an orphaned sandbox bills cold storage forever.
+   */
+  async listSandboxes(): Promise<SandboxDescriptor[] | undefined> {
+    if (!this.client.listSandboxes) return undefined;
+    return this.client.listSandboxes();
   }
 
   async kill(containerId: string): Promise<void> {

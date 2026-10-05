@@ -6,6 +6,7 @@ import { SandboxInfrastructureError } from './sandbox-api-client.js';
 import type {
   CreateSandboxOptions,
   SandboxApiClient,
+  SandboxDescriptor,
   SandboxDirListing,
   SandboxEgressPolicy,
   SandboxExecChunk,
@@ -127,8 +128,16 @@ interface SandboxResponse {
   labels?: Record<string, string>;
   id?: string;
   state?: string;
+  createdAt?: string;
+  properties?: { labels?: Record<string, string>; createdAt?: string; state?: string };
   sourcesRef?: { diskImage?: { id?: string } };
   ports?: WireSandboxPort[];
+}
+
+interface SandboxListResponse {
+  value?: SandboxResponse[];
+  items?: SandboxResponse[];
+  sandboxes?: SandboxResponse[];
 }
 
 interface ExecResponse {
@@ -269,6 +278,44 @@ export class AzureSandboxApiClient implements SandboxApiClient {
     return matches[0] ? requiredId(matches[0], 'sandbox') : null;
   }
 
+  /**
+   * Group-wide sandbox listing. This is the only way to see sandboxes the
+   * daemon's DB no longer references (deleted pod row, cleared `container_id`,
+   * or a create whose id was never persisted) — every DB-driven sweep is blind
+   * to those, and a leaked sandbox bills cold storage indefinitely.
+   *
+   * Labels are returned verbatim; callers must gate on `managedBy` themselves,
+   * because a sandbox group can legitimately hold objects autopod does not own.
+   */
+  async listSandboxes(): Promise<SandboxDescriptor[]> {
+    const response = await this.requestData<SandboxListResponse | SandboxResponse[]>(
+      'GET',
+      `${this.groupPath()}/sandboxes`,
+      { okStatuses: [200, 404] },
+    );
+    const items = Array.isArray(response)
+      ? response
+      : (response.value ?? response.items ?? response.sandboxes ?? []);
+    const sandboxes: SandboxDescriptor[] = [];
+    for (const item of items) {
+      // An entry without an id is unaddressable — we could neither delete nor
+      // attribute it, so drop it rather than surface a half-formed record.
+      if (typeof item?.id !== 'string' || item.id.length === 0) {
+        this.logger.warn('Skipping listed sandbox without an id');
+        continue;
+      }
+      const createdAt = item.createdAt ?? item.properties?.createdAt;
+      const state = item.state ?? item.properties?.state;
+      sandboxes.push({
+        id: item.id,
+        labels: item.labels ?? item.properties?.labels ?? {},
+        ...(typeof createdAt === 'string' ? { createdAt } : {}),
+        ...(typeof state === 'string' ? { state } : {}),
+      });
+    }
+    return sandboxes;
+  }
+
   async destroy(sandboxId: string): Promise<void> {
     await this.requestData('DELETE', `${this.sandboxPath(sandboxId)}`, {
       okStatuses: [200, 202, 204, 404],
@@ -300,7 +347,7 @@ export class AzureSandboxApiClient implements SandboxApiClient {
       {
         json: {
           sourcesRef: { snapshot: { id: snapshotId } },
-          labels: { purpose: 'autopod-sandbox' },
+          labels: { purpose: 'autopod-sandbox', managedBy: 'autopod' },
         },
         timeoutMs: CREATE_REQUEST_TIMEOUT_MS,
       },

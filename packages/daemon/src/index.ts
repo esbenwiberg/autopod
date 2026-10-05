@@ -73,6 +73,7 @@ import {
   createValidationRepository,
 } from './pods/index.js';
 import { createSessionBridge } from './pods/pod-bridge-impl.js';
+import { SandboxOrphanReaper } from './pods/sandbox-orphan-reaper.js';
 import { SandboxTerminalReaper } from './pods/sandbox-terminal-reaper.js';
 import { ScreenshotRetention } from './pods/screenshot-retention.js';
 import { createScreenshotStore, resolveDataDir } from './pods/screenshot-store.js';
@@ -139,6 +140,14 @@ const MAX_CONCURRENCY = Number.parseInt(process.env.MAX_CONCURRENCY ?? '3', 10);
 const SANDBOX_TERMINAL_REAPER_INTERVAL_MS = parsePositiveInterval(
   process.env.SANDBOX_TERMINAL_REAPER_INTERVAL_MS,
   5 * 60 * 1000,
+);
+const SANDBOX_ORPHAN_REAPER_INTERVAL_MS = parsePositiveInterval(
+  process.env.SANDBOX_ORPHAN_REAPER_INTERVAL_MS,
+  30 * 60 * 1000,
+);
+const SANDBOX_ORPHAN_REAPER_MIN_AGE_MS = parsePositiveInterval(
+  process.env.SANDBOX_ORPHAN_REAPER_MIN_AGE_MS,
+  60 * 60 * 1000,
 );
 const TEAMS_WEBHOOK_URL = process.env.TEAMS_WEBHOOK_URL;
 const ACR_REGISTRY_URL = process.env.ACR_REGISTRY_URL;
@@ -1189,6 +1198,27 @@ const sandboxTerminalReaperTimer = sandboxTerminalReaper
   : null;
 sandboxTerminalReaperTimer?.unref();
 
+// Platform-side counterpart: deletes autopod sandboxes that no pod row
+// references at all. The terminal reaper walks from the DB and so cannot see a
+// sandbox whose pod row is gone, whose container_id was cleared, or that was
+// never recorded — and an unreferenced sandbox bills cold storage forever.
+const sandboxOrphanReaper = sandboxContainerManager
+  ? new SandboxOrphanReaper({
+      podRepo,
+      sandboxContainerManager,
+      minAgeMs: SANDBOX_ORPHAN_REAPER_MIN_AGE_MS,
+      logger: logger.child({ component: 'sandbox-orphan-reaper' }),
+    })
+  : null;
+const sandboxOrphanReaperTimer = sandboxOrphanReaper
+  ? setInterval(() => {
+      void sandboxOrphanReaper.runSweep().catch((err) => {
+        logger.error({ err }, 'Periodic orphaned sandbox reaping failed');
+      });
+    }, SANDBOX_ORPHAN_REAPER_INTERVAL_MS)
+  : null;
+sandboxOrphanReaperTimer?.unref();
+
 // Start listening
 try {
   await app.listen({ port: PORT, host: HOST });
@@ -1244,6 +1274,9 @@ if (sandboxContainerManager) {
   });
   void sandboxTerminalReaper?.runSweep().catch((err) => {
     logger.error({ err }, 'Startup terminal sandbox reaping failed');
+  });
+  void sandboxOrphanReaper?.runSweep().catch((err) => {
+    logger.error({ err }, 'Startup orphaned sandbox reaping failed');
   });
 }
 
@@ -1338,6 +1371,7 @@ async function shutdown(signal: string) {
   clearInterval(perfClearTimer);
   clearInterval(systemSandboxReaper);
   if (sandboxTerminalReaperTimer) clearInterval(sandboxTerminalReaperTimer);
+  if (sandboxOrphanReaperTimer) clearInterval(sandboxOrphanReaperTimer);
 
   // Stop the stuck-pod watchdog and sleep detector
   podManager.stopStuckPodWatchdog();

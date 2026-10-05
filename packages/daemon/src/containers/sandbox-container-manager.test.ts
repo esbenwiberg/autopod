@@ -24,6 +24,7 @@ import { AzureSandboxApiClient } from './azure-sandbox-api-client.js';
 import type {
   CreateSandboxOptions,
   SandboxApiClient,
+  SandboxDescriptor,
   SandboxDirListing,
   SandboxEgressPolicy,
   SandboxExecChunk,
@@ -702,6 +703,25 @@ describe('SandboxContainerManager', () => {
       expect(await mgr.getStatus(id)).toBe('stopped');
       await mgr.start(id);
       expect(await mgr.getStatus(id)).toBe('running');
+    });
+
+    it('listSandboxes passes the group listing through', async () => {
+      class ListingClient extends FakeSandboxApiClient {
+        async listSandboxes(): Promise<SandboxDescriptor[]> {
+          return [{ id: 'sbx-1', labels: { managedBy: 'autopod' }, state: 'Stopped' }];
+        }
+      }
+      const mgr = new SandboxContainerManager(new ListingClient(), logger);
+      await expect(mgr.listSandboxes()).resolves.toEqual([
+        { id: 'sbx-1', labels: { managedBy: 'autopod' }, state: 'Stopped' },
+      ]);
+    });
+
+    it('listSandboxes reports undefined when the client cannot list', async () => {
+      // Distinguishable from "the group is empty" so orphan reaping can disable
+      // itself loudly instead of silently concluding there is nothing to clean.
+      const mgr = new SandboxContainerManager(new FakeSandboxApiClient(), logger);
+      await expect(mgr.listSandboxes()).resolves.toBeUndefined();
     });
 
     it('getStatus returns deleted for a missing sandbox', async () => {

@@ -219,6 +219,26 @@ Current preview caveats:
   `host.docker.internal` outside Docker; use a Tailscale/private/public route and make sure
   restricted network policy allowlists the derived MCP host.
 
+### Sandbox reaping (`src/pods/sandbox-terminal-reaper.ts`, `src/pods/sandbox-orphan-reaper.ts`)
+
+A stopped Docker container is free; an orphaned sandbox bills cold storage forever. Three layers:
+
+1. Inline — every terminal transition in `pod-manager.ts` is preceded by
+   `cleanupContainer(pod, label, 'kill')`, which also clears `container_id` for sandbox pods.
+2. `SandboxTerminalReaper` — DB-driven backstop for a failed/timed-out inline kill. Sweeps
+   terminal pods that still hold a `container_id`; preserves the workspace before deleting a
+   `failed` pod's sandbox.
+3. `SandboxOrphanReaper` — platform-driven. Lists the sandbox group and deletes sandboxes that
+   **no pod row references at all** (the only leak shape a DB-driven sweep cannot see). Gated on
+   `labels.managedBy === 'autopod'` — the group is shared infrastructure — and on a known age
+   older than `SANDBOX_ORPHAN_REAPER_MIN_AGE_MS`; a sandbox with an unknown `createdAt` is
+   reported, never deleted. Lists **before** reading the DB claim set so a concurrent spawn reads
+   as claimed. Requires `SandboxApiClient.listSandboxes` — absent it, reaping disables itself
+   with a warning rather than silently no-opping.
+
+Disk images, snapshots and volumes have **no** reaper. Disk images are GC'd only when
+`ensureDiskImage` runs for the same `sourceImageHash` at a newer digest.
+
 Operator setup and smoke commands live in `docs/azure-container-apps-sandboxes.md`.
 
 ## Runtimes
