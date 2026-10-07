@@ -14015,15 +14015,20 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
       // Run cleanup with a timeout so a hung Docker stop or git cleanup
       // can never leave the pod stuck in 'killing' forever.
       const KILL_TIMEOUT_MS = 30_000;
+      const ownsKillLifecycle = () =>
+        podRepo.getOrThrow(podId).lifecycleGeneration === pod.lifecycleGeneration;
       const cleanup = async () => {
         if (deps.launchConfiguration?.read(podId)?.intent === 'goal') {
           if (!deps.launchConfiguration.goals)
             throw new AutopodError('Native Goal controls are unavailable', 'GOAL_UNAVAILABLE', 503);
           await deps.launchConfiguration.goals.control(podId, 'cancel');
+          if (!ownsKillLifecycle()) return;
         }
         // Kill sidecars before the main container so they can't outlive their pod.
         await killSidecarsForPod(podId);
+        if (!ownsKillLifecycle()) return;
         await cleanupTestRunBranches(podId);
+        if (!ownsKillLifecycle()) return;
         // Kill container
         if (pod.containerId) {
           const cm = containerManagerFactory.get(pod.executionTarget);
@@ -14032,15 +14037,21 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
             podId,
             'Failed to persist rotated credentials during kill — proceeding',
           );
+          if (!ownsKillLifecycle()) return;
           try {
             await cm.kill(pod.containerId);
+            if (ownsLifecycle(podId, pod.lifecycleGeneration, pod.containerId)) {
+              podRepo.update(podId, { containerId: null });
+            }
           } catch (err) {
             logger.warn({ err, podId }, 'Failed to kill container');
           }
         }
+        if (!ownsKillLifecycle()) return;
         // Remove the per-pod bridge network. Safe now that both the pod and
         // its sidecars are dead; Docker would otherwise refuse the remove.
         await destroyPodNetwork(podId);
+        if (!ownsKillLifecycle()) return;
 
         // Abort runtime
         try {
@@ -14050,6 +14061,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           logger.warn({ err, podId }, 'Failed to abort runtime');
         }
 
+        if (!ownsKillLifecycle()) return;
         // Cleanup worktree — always clear the DB path even if cleanup throws,
         // so a subsequent rework doesn't attempt recovery on a stale directory.
         if (pod.worktreePath) {
@@ -14058,6 +14070,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           } catch (err) {
             logger.warn({ err, podId }, 'Failed to cleanup worktree');
           }
+          if (!ownsKillLifecycle()) return;
           podRepo.update(podId, { worktreePath: null });
         }
 
@@ -14072,15 +14085,22 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         });
       };
 
-      await Promise.race([
-        cleanup(),
-        new Promise<void>((resolve) =>
-          setTimeout(() => {
-            logger.warn({ podId }, 'Kill cleanup timed out — forcing killed');
-            resolve();
-          }, KILL_TIMEOUT_MS),
-        ),
-      ]);
+      let killTimer: ReturnType<typeof setTimeout> | undefined;
+      try {
+        await Promise.race([
+          cleanup(),
+          new Promise<void>((resolve) => {
+            killTimer = setTimeout(() => {
+              logger.warn({ podId }, 'Kill cleanup timed out — forcing killed');
+              resolve();
+            }, KILL_TIMEOUT_MS);
+          }),
+        ]);
+      } finally {
+        if (killTimer) clearTimeout(killTimer);
+      }
+
+      if (!ownsKillLifecycle()) return;
 
       const activeAttempt = deps.providerAttemptRepo?.getActive(podId);
       if (activeAttempt) {

@@ -6759,6 +6759,106 @@ describe('PodManager', () => {
       expect(ctx.worktreeManager.cleanup).toHaveBeenCalledWith('/tmp/wt');
     });
 
+    it.each(['local', 'sandbox'] as const)(
+      'clears a confirmed killed %s container',
+      async (executionTarget) => {
+        const ctx = createTestContext();
+        const manager = createPodManager(ctx.deps);
+        const pod = manager.createSession(
+          { profileName: 'test-profile', task: 'Clean up' },
+          'user-1',
+        );
+        ctx.podRepo.update(pod.id, { containerId: 'ctr-1', executionTarget });
+        await manager.killSession(pod.id);
+        expect(manager.getSession(pod.id).containerId).toBeNull();
+      },
+    );
+
+    it('retains container ownership when deletion fails', async () => {
+      const ctx = createTestContext();
+      const manager = createPodManager(ctx.deps);
+      const pod = manager.createSession(
+        { profileName: 'test-profile', task: 'Clean up' },
+        'user-1',
+      );
+      ctx.podRepo.update(pod.id, { containerId: 'ctr-1' });
+      ctx.containerManager.kill.mockRejectedValueOnce(new Error('delete unavailable'));
+      await manager.killSession(pod.id);
+      expect(manager.getSession(pod.id).containerId).toBe('ctr-1');
+    });
+
+    it('does not erase a replacement container after late deletion', async () => {
+      const ctx = createTestContext();
+      const manager = createPodManager(ctx.deps);
+      const pod = manager.createSession(
+        { profileName: 'test-profile', task: 'Clean up' },
+        'user-1',
+      );
+      ctx.podRepo.update(pod.id, { containerId: 'ctr-1' });
+      ctx.containerManager.kill.mockImplementationOnce(async () => {
+        ctx.podRepo.incrementLifecycleGeneration(pod.id);
+        ctx.podRepo.update(pod.id, { containerId: 'ctr-2' });
+      });
+      await manager.killSession(pod.id);
+      expect(manager.getSession(pod.id).containerId).toBe('ctr-2');
+    });
+
+    it('retains timed-out deletion and fences late cleanup from a replacement lifecycle', async () => {
+      vi.useFakeTimers();
+      const deletion = deferred<void>();
+      try {
+        const ctx = createTestContext();
+        const manager = createPodManager(ctx.deps);
+        const pod = manager.createSession(
+          { profileName: 'test-profile', task: 'Clean up' },
+          'user-1',
+        );
+        ctx.podRepo.update(pod.id, { containerId: 'ctr-1', worktreePath: '/tmp/old' });
+        ctx.containerManager.kill.mockReturnValueOnce(deletion.promise);
+        const killing = manager.killSession(pod.id);
+        await vi.advanceTimersByTimeAsync(30_000);
+        await killing;
+        expect(manager.getSession(pod.id)).toMatchObject({
+          status: 'killed',
+          containerId: 'ctr-1',
+        });
+        ctx.podRepo.incrementLifecycleGeneration(pod.id);
+        ctx.podRepo.update(pod.id, {
+          status: 'running',
+          containerId: 'ctr-2',
+          worktreePath: '/tmp/new',
+        });
+        deletion.resolve();
+        await vi.advanceTimersByTimeAsync(0);
+        expect(ctx.worktreeManager.cleanup).not.toHaveBeenCalled();
+        expect(manager.getSession(pod.id)).toMatchObject({
+          status: 'running',
+          containerId: 'ctr-2',
+          worktreePath: '/tmp/new',
+        });
+      } finally {
+        deletion.resolve();
+        vi.useRealTimers();
+      }
+    });
+
+    it('clears the kill timeout when cleanup completes', async () => {
+      vi.useFakeTimers();
+      try {
+        const ctx = createTestContext();
+        const manager = createPodManager(ctx.deps);
+        const pod = manager.createSession(
+          { profileName: 'test-profile', task: 'Clean up' },
+          'user-1',
+        );
+        const before = vi.getTimerCount();
+        await manager.killSession(pod.id);
+        expect(vi.getTimerCount()).toBe(before);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
     it('throws for pods that cannot be killed', async () => {
       const ctx = createTestContext();
       const manager = createPodManager(ctx.deps);
