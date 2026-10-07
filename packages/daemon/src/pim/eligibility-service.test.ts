@@ -122,6 +122,7 @@ describe('PIM discovery', () => {
     expect(
       result.families.every((family) => !family.available && family.assignments.length === 0),
     ).toBe(true);
+    expect(result.families[0]?.reason).toContain('(PIM_DISCOVERY_INCOMPLETE)');
   });
   it('follows complete pagination and rejects loops or cross-origin links', async () => {
     const f = fixture();
@@ -148,7 +149,10 @@ describe('PIM discovery', () => {
     await client.get('graph', '/v1.0/me');
     expect(fetcher).toHaveBeenCalledWith(
       expect.any(URL),
-      expect.objectContaining({ redirect: 'error' }),
+      expect.objectContaining({
+        redirect: 'error',
+        headers: expect.objectContaining({ 'Accept-Language': 'en-US' }),
+      }),
     );
   });
   it('uses the end-user activation policy, not the admin eligibility duration', () => {
