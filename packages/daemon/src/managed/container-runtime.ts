@@ -37,6 +37,35 @@ fd=os.open(p,os.O_WRONLY|os.O_CREAT|os.O_TRUNC,0o600)
 with os.fdopen(fd,'w') as f: f.write(sys.argv[2]); f.flush(); os.fsync(f.fileno())
 `;
 
+// Share the supervisor's one-start lock so cancellation before provisioning
+// cannot race a delayed launch into creating a worker after authority withdrawal.
+export const STOP_SUPERVISOR = `import fcntl,json,os,pathlib,sys,time
+root=pathlib.Path(sys.argv[1]);root.mkdir(mode=0o700,parents=True,exist_ok=True)
+(root / 'revoked').write_text('true')
+lock=(root / 'launch.lock').open('a')
+try:
+ fcntl.flock(lock.fileno(),fcntl.LOCK_EX|fcntl.LOCK_NB)
+except BlockingIOError: pass
+else:
+ receipt=root / 'execution.json'
+ if not receipt.exists():
+  temporary=root / 'execution.tmp'
+  with temporary.open('w') as stream:
+   json.dump({'state':'cancelled-before-start','specDigest':sys.argv[2],
+              'consumedTokens':0,'observedExit':True},stream)
+   stream.flush();os.fsync(stream.fileno())
+  os.replace(temporary,receipt)
+ fcntl.flock(lock.fileno(),fcntl.LOCK_UN)
+p=root / 'execution.json';deadline=time.monotonic()+3
+while time.monotonic()<deadline:
+ try:
+  value=json.loads(p.read_text())
+  if value.get('specDigest')==sys.argv[2] and value.get('observedExit'):sys.exit(0)
+ except (OSError,ValueError):pass
+ time.sleep(0.05)
+sys.exit(1)
+`;
+
 export const WORKER_WRITABLE = `import os,stat,sys
 def prepare(fd):
  for name in os.listdir(fd):
@@ -279,20 +308,25 @@ if not stat.S_ISDIR(actual.st_mode) or actual.st_uid!=0 or actual.st_mode & 0o02
       | 'agent-channel-unavailable'
       | 'agent-followup-channel-failed'
       | 'agent-output-invalid'
-      | 'agent-cli-exit';
+      | 'agent-cli-exit'
+      | 'managed-worker-never-started';
   }> {
     const { boundary, podId } = this.resolve(ref);
-    const result = await boundary.manager.execInContainer(
-      ref,
-      [
-        'python3',
-        '-c',
-        'import pathlib,sys; print(pathlib.Path(sys.argv[1]).read_text())',
-        `/run/dispatcher-${podId}/execution.json`,
-      ],
-      { user: 'root' },
-    );
-    if (result.exitCode !== 0) {
+    // An exec against a deleted sandbox throws rather than returning an exit
+    // code. Only the manager's explicit deleted/stopped state confirms exit.
+    const result = await boundary.manager
+      .execInContainer(
+        ref,
+        [
+          'python3',
+          '-c',
+          'import pathlib,sys; print(pathlib.Path(sys.argv[1]).read_text())',
+          `/run/dispatcher-${podId}/execution.json`,
+        ],
+        { user: 'root' },
+      )
+      .catch(() => null);
+    if (!result || result.exitCode !== 0) {
       const state = await boundary.manager.getStatus(ref);
       return {
         state:
@@ -327,7 +361,15 @@ if not stat.S_ISDIR(actual.st_mode) or actual.st_uid!=0 or actual.st_mode & 0o02
         | 'agent-followup-channel-failed'
         | 'agent-output-invalid'
         | 'agent-cli-exit'
+        | 'managed-worker-never-started'
         | undefined;
+      if (receipt.observedExit && receipt.state === 'cancelled-before-start') {
+        return {
+          state: 'stopped',
+          consumedTokens: receipt.consumedTokens,
+          limitation: 'managed-worker-never-started',
+        };
+      }
       if (receipt.observedExit) {
         if (receipt.state === 'quota-unavailable') limitation = 'agent-quota-feed-unavailable';
         const diagnostic = await boundary.manager.execInContainer(
@@ -463,28 +505,11 @@ if not stat.S_ISDIR(actual.st_mode) or actual.st_uid!=0 or actual.st_mode & 0o02
     return true;
   }
   async stop(ref: string): Promise<void> {
-    const { boundary, podId } = this.resolve(ref);
-    await boundary.manager.execInContainer(
-      ref,
-      ['python3', '-c', ROOT_WRITE, `/run/dispatcher-${podId}/revoked`, 'true'],
-      { user: 'root' },
-    );
+    const { boundary, podId, request, observedExit } = this.resolve(ref);
+    if (observedExit) return;
     const observed = await boundary.manager.execInContainer(
       ref,
-      [
-        'python3',
-        '-c',
-        `import json,pathlib,sys,time
-p=pathlib.Path(sys.argv[1]);deadline=time.monotonic()+3
-while time.monotonic()<deadline:
- try:
-  if json.loads(p.read_text()).get('observedExit'):sys.exit(0)
- except (OSError,ValueError):pass
- time.sleep(0.05)
-sys.exit(1)
-`,
-        `/run/dispatcher-${podId}/execution.json`,
-      ],
+      ['python3', '-c', STOP_SUPERVISOR, `/run/dispatcher-${podId}`, request.executionSpecDigest],
       { user: 'root' },
     );
     if (observed.exitCode !== 0) throw new Error('managed-stop-not-yet-observed');

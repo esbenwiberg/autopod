@@ -157,7 +157,20 @@ export class ManagedControls {
       cleanup: row.cleanup as ControlResult['cleanup'],
     };
   }
+  private workerNeverStarted(podId: string): boolean {
+    const row = this.service.db
+      .prepare(
+        `SELECT p.observed_exit,r.limitations_json FROM managed_pods p
+       JOIN managed_results r ON r.pod_id=p.pod_id WHERE p.pod_id=?`,
+      )
+      .get(podId) as { observed_exit: number; limitations_json: string } | undefined;
+    return Boolean(
+      row?.observed_exit &&
+        (JSON.parse(row.limitations_json) as string[]).includes('managed-worker-never-started'),
+    );
+  }
   private artifactExportImpossible(podId: string): boolean {
+    if (this.workerNeverStarted(podId)) return true;
     const stored = this.service.db
       .prepare('SELECT limitations_json FROM managed_results WHERE pod_id=?')
       .get(podId) as { limitations_json: string } | undefined;
@@ -206,6 +219,7 @@ export class ManagedControls {
       );
       if (
         row.runtime_ref &&
+        !this.workerNeverStarted(podId) &&
         spec.outputs.source.mode !== 'none' &&
         !hasCandidate &&
         this.artifactExportImpossible(podId) &&
@@ -240,7 +254,11 @@ export class ManagedControls {
           ) {
             throw new Error('managed-artifact-export-pending');
           }
-          if (row.runtime_ref && spec.outputs.source.mode !== 'none') {
+          if (
+            row.runtime_ref &&
+            !this.workerNeverStarted(podId) &&
+            spec.outputs.source.mode !== 'none'
+          ) {
             if (!this.service.source) throw new Error('managed-source-candidate-pending');
             try {
               this.service.source.candidate(installation, podId);

@@ -5,7 +5,7 @@ import path from 'node:path';
 import Docker from 'dockerode';
 import Fastify from 'fastify';
 import pino from 'pino';
-import { expect, it } from 'vitest';
+import { expect, it, vi } from 'vitest';
 import { DockerContainerManager } from '../containers/docker-container-manager.js';
 import { DockerNetworkManager } from '../containers/docker-network-manager.js';
 import { requestTimeFixture, resign } from '../test-utils/managed-fixture.js';
@@ -14,10 +14,11 @@ import { digest } from './canonical.js';
 import { createManagedArtifactStore } from './cli-config.js';
 import { ContainerCodexChannel, codexReportCommand } from './codex-channel.js';
 import { codexSse } from './codex-wire.js';
+import { WORKER_WRITABLE } from './container-runtime.js';
 import { composeManagedRuntime } from './runtime-composition.js';
 
 const image = process.env.AUTOPOD_MANAGED_DOCKER_IMAGE;
-it.skipIf(!image).each(['complete', 'cancel'] as const)(
+it.skipIf(!image).each(['complete', 'cancel', 'prestart-failure'] as const)(
   'runs an HTTP managed job in Docker: %s, restart and cleanup',
   async (mode) => {
     const root = realpathSync(mkdtempSync(path.join(tmpdir(), 'autopod-managed-docker-')));
@@ -26,6 +27,18 @@ it.skipIf(!image).each(['complete', 'cancel'] as const)(
     const logger = pino({ level: 'silent' });
     const manager = new DockerContainerManager({ docker, logger });
     const network = new DockerNetworkManager({ docker, logger });
+    const execute = manager.execInContainer.bind(manager);
+    if (mode === 'prestart-failure') {
+      vi.spyOn(manager, 'execInContainer').mockImplementation((ref, command, options) =>
+        execute(
+          ref,
+          command[2] === WORKER_WRITABLE
+            ? ['python3', '-c', "raise RuntimeError('controlled-preparation-failure')"]
+            : command,
+          options,
+        ),
+      );
+    }
     const request = f.request;
     const mirror = path.join(root, 'mirror');
     const git = (cwd: string, ...args: string[]) =>
@@ -148,6 +161,18 @@ it.skipIf(!image).each(['complete', 'cancel'] as const)(
     let url = await mount();
     let podId: string | undefined;
     const headers = { 'content-type': 'application/json', authorization: 'Bearer fixture-only' };
+    const control = async (operation: string) =>
+      fetch(`${url}/managed/pods/${podId}/control/${operation}-once`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({
+          schemaVersion: 1,
+          dispatcherAttemptId: request.dispatcherAttemptId,
+          grantId: request.effectiveGrant.grantId,
+          grantRevision: 1,
+          operation,
+        }),
+      });
     try {
       expect((await fetch(`${url}/managed/health`)).status).toBe(401);
       const started = await fetch(`${url}/managed/pods`, {
@@ -155,6 +180,32 @@ it.skipIf(!image).each(['complete', 'cancel'] as const)(
         headers,
         body: JSON.stringify(request),
       });
+      if (mode === 'prestart-failure') {
+        expect(started.status).not.toBe(200);
+        const allocation = components.service.lookup('installation', request.startKey);
+        expect(allocation?.runtime_ref).toBeTruthy();
+        podId = allocation!.pod_id;
+        const ref = allocation!.runtime_ref!;
+        expect(calls).toBe(0);
+        expect((await control('revoke')).status).toBe(200);
+        await expect
+          .poll(() => components.service.row('installation', podId!).observed_exit, {
+            timeout: 10000,
+          })
+          .toBe(1);
+        expect(
+          components.controls.observe('installation', podId, '0').result.limitations,
+        ).toContain('managed-worker-never-started');
+        const cleaned = await control('cleanup');
+        expect(cleaned.status, await cleaned.clone().text()).toBe(200);
+        expect(((await cleaned.json()) as { cleanup: string }).cleanup).toBe('observed');
+        await expect(docker.getContainer(ref).inspect()).rejects.toMatchObject({ statusCode: 404 });
+        await expect(docker.getNetwork(`autopod-${podId}`).inspect()).rejects.toMatchObject({
+          statusCode: 404,
+        });
+        expect(calls).toBe(0);
+        return;
+      }
       expect(started.status, await started.clone().text()).toBe(200);
       const handle = (await started.json()) as { podId: string };
       podId = handle.podId;
@@ -178,18 +229,6 @@ it.skipIf(!image).each(['complete', 'cancel'] as const)(
         body: JSON.stringify(request),
       });
       expect(((await duplicate.json()) as { podId: string }).podId).toBe(podId);
-      const control = async (operation: string) =>
-        fetch(`${url}/managed/pods/${podId}/control/${operation}-once`, {
-          method: 'POST',
-          headers,
-          body: JSON.stringify({
-            schemaVersion: 1,
-            dispatcherAttemptId: request.dispatcherAttemptId,
-            grantId: request.effectiveGrant.grantId,
-            grantRevision: 1,
-            operation,
-          }),
-        });
       // Capabilities granted to trusted root setup must not reach the worker uid.
       const denied = await manager.execInContainer(row.runtime_ref!, [
         'python3',

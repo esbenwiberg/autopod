@@ -123,3 +123,24 @@ cleanup passed. A handoff marker supplied only to research survived both hashed
 artifact inputs. Earlier failed attempts remain failures (inner sandbox startup,
 large response transfer, and fixture teardown); the final run proves the repaired
 local component path under the explicit evidence boundaries above.
+
+## Cancellation before supervisor startup
+
+A failed allocation can leave a container before the supervisor exists (for
+example, an unavailable image dependency cache). Stop now uses the same launch
+lock as the supervisor to persist a bound cancellation receipt when no execution
+has been claimed. A delayed/replayed supervisor sees that receipt and never
+starts a worker. A held launch lock is not treated as proof of termination.
+
+Only the trusted never-started observation permits cleanup without required
+outputs or source that the worker could not have produced. Existing output
+preservation checks remain for started workers; no process exit code is invented.
+An exec failure also consults authoritative container status: deleted is terminal,
+whereas running/unknown remain unconfirmed. Once exit is observed the watchdog
+avoids issuing another stop to an already removed runtime.
+
+The opt-in Docker suite covers completion, running cancellation, and preparation
+failure before startup. For the last case it verifies zero provider requests,
+normal revoke/observe/cleanup, and actual Docker 404 for container and network.
+This is executed local Docker evidence; hosted Azure acceptance of this repair
+still requires deploying the new release and rerunning the failed-allocation case.
