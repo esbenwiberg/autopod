@@ -773,7 +773,7 @@ struct ConfigurationEditorSheet: View {
       if let error { Text(error).foregroundStyle(.red).textSelection(.enabled) }
       HStack { Button("Cancel") { dismiss() }; Spacer(); if busy { ProgressView().controlSize(.small) }; Button("Save") { Task { await save() } }.buttonStyle(.borderedProminent).disabled(busy || name.trimmingCharacters(in: .whitespaces).isEmpty) }
     }.padding(24).frame(width: 760, height: 740).background(Color(nsColor: .windowBackgroundColor)).textFieldStyle(.roundedBorder).disabled(busy)
-    .sheet(isPresented: $showPim) { PimSelectionSheet(selected: payload["pim"]?.array?.compactMap(\.object) ?? [], discover: actions.discoverPim) { payload["pim"] = .array($0.map(ConfigurationJSON.object)) } }
+    .sheet(isPresented: $showPim) { PimSelectionSheet(selected: payload["pim"]?.array?.compactMap(\.object) ?? [], cached: actions.cachedPim(), discover: actions.discoverPim) { payload["pim"] = .array($0.map(ConfigurationJSON.object)) } }
     .sheet(isPresented: $showJSON) {
       VStack(alignment: .leading, spacing: 12) {
         Text("Complete JSON").font(.title2.bold())

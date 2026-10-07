@@ -128,7 +128,7 @@ public struct ComposableCreatePodSheet: View {
     .frame(minWidth: 680, idealWidth: 780, minHeight: 700, idealHeight: 850)
     .onChange(of: request) { _, _ in preview = nil; previewRequest = nil }
     .sheet(isPresented: $showPim) {
-      PimSelectionSheet(selected: effectivePim, discover: actions.discoverPim) { selections in
+      PimSelectionSheet(selected: effectivePim, cached: actions.cachedPim(), discover: actions.discoverPim) { selections in
         if request.overrides == nil { request.overrides = LaunchOverrides() }; request.overrides?.pim = selections
       }
     }
