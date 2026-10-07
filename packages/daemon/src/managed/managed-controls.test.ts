@@ -380,3 +380,52 @@ it('persists and projects a terminal runtime exit code without reading worker lo
     f.close();
   }
 });
+
+it('cleans a never-started allocation without waiting for artifacts or source that cannot exist', async () => {
+  const f = fixture();
+  try {
+    const service = f.service();
+    const controls = new ManagedControls(service);
+    const handle = await service.start('installation-one', f.request);
+    const spec = structuredClone(f.request);
+    spec.outputs.source = {
+      mode: 'branch',
+      repository: 'repo',
+      remote: 'origin',
+      head: 'worker/one',
+      base: 'main',
+    };
+    f.db
+      .prepare('UPDATE managed_pods SET request_json=? WHERE pod_id=?')
+      .run(JSON.stringify(spec), handle.podId);
+    // Runtime observation is the only source of this limitation; launch errors
+    // alone cannot bypass required artifact/source preservation.
+    f.runtime.observe = async () => ({
+      state: 'stopped',
+      consumedTokens: 0,
+      limitation: 'managed-worker-never-started',
+    });
+    f.db
+      .prepare('UPDATE managed_pods SET revoked=1,stop_requested=1 WHERE pod_id=?')
+      .run(handle.podId);
+    await service.enforceExpiry();
+    f.runtime.cleanup = vi.fn(async () => true);
+    const result = await controls.control(
+      'installation-one',
+      handle.podId,
+      {
+        schemaVersion: 1,
+        dispatcherAttemptId: f.request.dispatcherAttemptId,
+        grantId: f.request.effectiveGrant.grantId,
+        grantRevision: 1,
+        operation: 'cleanup',
+      },
+      'cleanup-never-started',
+    );
+    expect(result.cleanup).toBe('observed');
+    expect(service.row('installation-one', handle.podId).exit_code).toBeNull();
+    expect(f.runtime.cleanup).toHaveBeenCalledTimes(1);
+  } finally {
+    f.close();
+  }
+});

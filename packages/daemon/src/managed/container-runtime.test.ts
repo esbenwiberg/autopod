@@ -1,8 +1,15 @@
-import { readFileSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import type { ManagedPodRequest } from '@autopod/shared';
 import { expect, it, vi } from 'vitest';
 import type { ContainerManager, ContainerSpawnConfig } from '../interfaces/container-manager.js';
-import { ManagedContainerRuntime, type ReviewedContainerBoundary } from './container-runtime.js';
+import {
+  ManagedContainerRuntime,
+  type ReviewedContainerBoundary,
+  STOP_SUPERVISOR,
+} from './container-runtime.js';
 
 function fixture() {
   const request: ManagedPodRequest = JSON.parse(
@@ -371,5 +378,87 @@ it.each([
     consumedTokens: 12,
     exitCode: 1,
     limitation,
+  });
+});
+
+it.each(['deleted', 'running', 'unknown'] as const)(
+  'exec failure falls back to authoritative %s state without inventing success',
+  async (state) => {
+    const f = fixture();
+    f.exec.mockRejectedValueOnce(new Error('sandbox exec unavailable'));
+    f.binding.manager.getStatus = vi.fn(async () => state);
+    await expect(f.runtime.observe('container-one')).resolves.toEqual({
+      state: state === 'deleted' ? 'stopped' : 'unknown',
+      consumedTokens: 0,
+    });
+  },
+);
+
+it('pre-start cancellation creates a bound tombstone and prevents a delayed real supervisor launch', () => {
+  const root = mkdtempSync(join(tmpdir(), 'managed-stop-'));
+  try {
+    const specDigest = `sha256:${'a'.repeat(64)}`;
+    const stopped = spawnSync('python3', ['-c', STOP_SUPERVISOR, root, specDigest], {
+      encoding: 'utf8',
+    });
+    expect(stopped.status, stopped.stderr).toBe(0);
+    expect(JSON.parse(readFileSync(join(root, 'execution.json'), 'utf8'))).toEqual({
+      state: 'cancelled-before-start',
+      specDigest,
+      consumedTokens: 0,
+      observedExit: true,
+    });
+    // Replaying provisioning after stop must not start a worker, even when its
+    // grant file arrives late. A missing argv would throw if Popen were reached.
+    writeFileSync(join(root, 'launch.json'), '{}');
+    const supervisor = readFileSync(new URL('./runtime/supervisor.py', import.meta.url), 'utf8');
+    const replay = spawnSync(
+      'python3',
+      ['-c', `${supervisor}\nsupervise(Path(sys.argv[1]))`, root],
+      { encoding: 'utf8' },
+    );
+    expect(replay.status, replay.stderr).toBe(0);
+    const again = spawnSync('python3', ['-c', STOP_SUPERVISOR, root, specDigest], {
+      encoding: 'utf8',
+    });
+    expect(again.status, again.stderr).toBe(0);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+it('does not claim pre-start cancellation while the actual launch lock is held', () => {
+  const root = mkdtempSync(join(tmpdir(), 'managed-stop-lock-'));
+  try {
+    const code = `import fcntl,pathlib,subprocess,sys
+root=pathlib.Path(sys.argv[1]);lock=(root/'launch.lock').open('a')
+fcntl.flock(lock,fcntl.LOCK_EX|fcntl.LOCK_NB)
+result=subprocess.run(['python3','-c',sys.argv[2],str(root),'sha256:'+'a'*64])
+assert result.returncode==1
+assert not (root/'execution.json').exists()
+`;
+    const result = spawnSync('python3', ['-c', code, root, STOP_SUPERVISOR], { encoding: 'utf8' });
+    expect(result.status, result.stderr).toBe(0);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+it('reports the trusted never-started receipt without a fabricated process exit code', async () => {
+  const f = fixture();
+  f.exec.mockResolvedValueOnce({
+    exitCode: 0,
+    stderr: '',
+    stdout: JSON.stringify({
+      specDigest: f.request.executionSpecDigest,
+      observedExit: true,
+      state: 'cancelled-before-start',
+      consumedTokens: 0,
+    }),
+  });
+  await expect(f.runtime.observe('container-one')).resolves.toEqual({
+    state: 'stopped',
+    consumedTokens: 0,
+    limitation: 'managed-worker-never-started',
   });
 });
