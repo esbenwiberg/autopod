@@ -56,6 +56,9 @@ def serve(root, port, lifetime, maximum_request=REPORT_MAX_REQUEST):
             pass
 
         def reply(self, status, body=b''):
+            if getattr(self, 'defer_reply', False):
+                self.pending_reply = (status, body)
+                return
             try:
                 self.send_response(status)
                 self.send_header('Content-Type', 'text/event-stream' if status == 200 else 'application/json')
@@ -96,10 +99,17 @@ def serve(root, port, lifetime, maximum_request=REPORT_MAX_REQUEST):
             if not serial.acquire(blocking=False):
                 self.reply(409)
                 return
+            self.pending_reply = None
+            self.defer_reply = True
             try:
                 self.handle_post()
             finally:
+                self.defer_reply = False
                 serial.release()
+            # All spool reads and writes are complete before the response becomes
+            # visible. A client may issue its next request as soon as it sees it.
+            if self.pending_reply is not None:
+                self.reply(*self.pending_reply)
 
         def handle_post(self):
             self.connection.settimeout(5)

@@ -1,4 +1,4 @@
-import { generatePodId } from '@autopod/shared';
+import { randomUUID } from 'node:crypto';
 import type Database from 'better-sqlite3';
 import {
   type HistoryDiagnosticSink,
@@ -36,7 +36,7 @@ export function createProgressEventRepository(db: Database.Database): ProgressEv
       db.prepare(`
         INSERT INTO session_progress_events (id, pod_id, phase, description, current_phase, total_phases)
         VALUES (@id, @podId, @phase, @description, @currentPhase, @totalPhases)
-      `).run({ id: generatePodId(), podId, phase, description, currentPhase, totalPhases });
+      `).run({ id: randomUUID(), podId, phase, description, currentPhase, totalPhases });
     },
 
     listBySession(

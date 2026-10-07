@@ -494,7 +494,31 @@ if not stat.S_ISDIR(actual.st_mode) or actual.st_uid!=0 or actual.st_mode & 0o02
     await boundary.sendMessage(ref, message, key);
   }
   async cleanup(ref: string): Promise<boolean> {
-    const { boundary, podId, observedExit } = this.resolve(ref);
+    const record = this.lookup(ref);
+    if (!record) throw new Error('managed-runtime-unbound');
+    let boundary: ReviewedContainerBoundary;
+    try {
+      boundary = this.known.get(ref) ?? this.boundary(record.request);
+    } catch (error) {
+      // Retiring a model/profile must not strand an already-stopped Azure sandbox.
+      // Only teardown may use the unique configured sandbox manager; no command,
+      // provider channel, source access, or local network policy is inherited.
+      if (
+        !(error instanceof Error) ||
+        error.message !== 'managed-route-unavailable' ||
+        !record.observedExit ||
+        record.request.route.executionTarget !== 'sandbox'
+      )
+        throw error;
+      const matches = this.boundaries.filter(
+        (entry) => entry.route.executionTarget === 'sandbox' && !entry.cleanupNetwork,
+      );
+      const managers = new Set(matches.map((entry) => entry.manager));
+      if (managers.size !== 1 || !matches[0]) throw error;
+      await matches[0].manager.kill(ref);
+      return true;
+    }
+    const { podId, observedExit } = record;
     // Durable exit evidence permits a retry after container removal succeeded but
     // network cleanup failed. A Docker 404 alone never supplies exit evidence.
     if (!observedExit && (await this.observe(ref)).state !== 'stopped')

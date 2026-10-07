@@ -956,6 +956,50 @@ it('the Python loopback channel accepts only bounded allowlisted agent failure m
   }
 });
 
+it('releases the request lock before publishing an HTTP response', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'autopod-codex-response-order-'));
+  chmodSync(root, 0o700);
+  const script = fileURLToPath(new URL('./runtime/codex_channel.py', import.meta.url));
+  const wrapper = `
+import importlib.util,json,pathlib,sys,threading,time,types
+root=pathlib.Path(sys.argv[1])
+spec=importlib.util.spec_from_file_location('channel',sys.argv[2])
+module=importlib.util.module_from_spec(spec);spec.loader.exec_module(module)
+class DelayedLock:
+ def __init__(self): self.lock=threading.Lock()
+ def acquire(self,**kwargs): return self.lock.acquire(**kwargs)
+ def release(self):
+  (root/'release-ready.json').write_text(json.dumps({'ready':True}))
+  while not (root/'release-proceed').exists(): time.sleep(0.01)
+  self.lock.release()
+module.threading=types.SimpleNamespace(Lock=DelayedLock)
+module.serve(root,0,10,module.AGENT_MAX_REQUEST)
+`;
+  const child = spawn('python3', ['-B', '-c', wrapper, root, script], { stdio: 'pipe' });
+  try {
+    const ready = await waitForJson(join(root, 'channel-ready.json'));
+    const endpoint = `http://127.0.0.1:${ready.port as number}/failure`;
+    const request = {
+      method: 'POST',
+      body: JSON.stringify({ phase: 'agent', reason: 'context-window-exceeded', exitCode: 1 }),
+      headers: { 'Content-Type': 'application/json' },
+    };
+    const pending = fetch(endpoint, request);
+    await waitForJson(join(root, 'release-ready.json'));
+    const observed = await Promise.race([
+      pending.then(() => 'response'),
+      new Promise<string>((resolve) => setTimeout(() => resolve('pending'), 100)),
+    ]);
+    writeFileSync(join(root, 'release-proceed'), 'continue');
+    expect((await pending).status).toBe(204);
+    expect(observed).toBe('pending');
+    expect((await fetch(endpoint, request)).status).toBe(204);
+  } finally {
+    child.kill('SIGTERM');
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 it('the Python loopback channel delivers and acknowledges a queued follow-up', async () => {
   const root = mkdtempSync(join(tmpdir(), 'autopod-codex-followup-'));
   chmodSync(root, 0o700);
