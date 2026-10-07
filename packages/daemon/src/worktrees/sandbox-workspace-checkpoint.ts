@@ -206,7 +206,12 @@ export async function checkpointSandboxWorkspace(
           // The index is daemon-owned: this never changes the agent index or HEAD.
           'GIT_INDEX_FILE=$idx git -c core.hooksPath=/dev/null add -A -- .',
           'snapshot_tree=$(GIT_INDEX_FILE=$idx git write-tree)',
-          "snapshot=$(printf 'autopod sandbox checkpoint\\n' | GIT_AUTHOR_NAME=Autopod GIT_AUTHOR_EMAIL=autopod@localhost GIT_COMMITTER_NAME=Autopod GIT_COMMITTER_EMAIL=autopod@localhost git commit-tree $snapshot_tree -p $head)",
+          // Rework captures the stopped sandbox again before replacing it. Reuse
+          // identical source/tree snapshots: a timestamp-only sibling would rewind
+          // a branch that was already published and make its next push non-fast-forward.
+          `snapshot=$(git rev-parse --verify ${checkpointRef}^{commit} 2>/dev/null || true)`,
+          'if [ -z "$snapshot" ] || [ "$(git rev-list --parents -n 1 "$snapshot" 2>/dev/null || true)" != "$snapshot $head" ] || [ "$(git rev-parse "$snapshot^{tree}" 2>/dev/null || true)" != "$snapshot_tree" ]; then ' +
+            "snapshot=$(printf 'autopod sandbox checkpoint\\n' | GIT_AUTHOR_NAME=Autopod GIT_AUTHOR_EMAIL=autopod@localhost GIT_COMMITTER_NAME=Autopod GIT_COMMITTER_EMAIL=autopod@localhost git commit-tree $snapshot_tree -p $head); fi",
           `git update-ref ${checkpointRef} "$snapshot"`,
           // Bundles must advertise a named ref; a raw commit ID produces an empty bundle.
           `git bundle create ${remoteBundle} ${checkpointRef}`,
