@@ -10714,6 +10714,12 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           ? { ...pod, providerAttempts: deps.providerAttemptRepo.list(podId) }
           : pod;
         const systemInstructions = generateSystemInstructions(profile, instructionPod, mcpUrl, {
+          referenceRevisions: Object.fromEntries(
+            (deps.launchConfiguration?.read(podId)?.references ?? []).map((reference, index) => [
+              `${index + 1}-${reference.id}`,
+              reference.revision,
+            ]),
+          ),
           injectedSections: resolvedSections,
           injectedMcpServers: [...proxiedMcpServers, ...workingStdioServers],
           availableActions,

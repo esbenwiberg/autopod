@@ -13,6 +13,8 @@ import { hasPendingProviderContinuation } from './recovery-context.js';
 import type { ResolvedSection } from './section-resolver.js';
 
 export interface SystemInstructionsOptions {
+  /** Frozen launch revisions keyed by the supplied reference mount path. */
+  referenceRevisions?: Readonly<Record<string, string>>;
   /** Resolved (already fetched) content sections to inject */
   injectedSections?: ResolvedSection[];
   /** MCP servers beyond the built-in escalation server */
@@ -184,6 +186,7 @@ export function generateSystemInstructions(
     profile,
     options?.availableActions ?? [],
     pod.executionTarget,
+    !!pod.referenceRepos?.length,
   );
 
   // MCP Servers section
@@ -300,8 +303,15 @@ export function generateSystemInstructions(
     lines.push('## Reference Repositories');
     lines.push('The following repository snapshots are supplied read-only at:');
     for (const repo of pod.referenceRepos) {
-      lines.push(`- \`/repos/${repo.mountPath}/\` — ${repo.url}`);
+      const revision = options?.referenceRevisions?.[repo.mountPath];
+      lines.push(
+        `- \`/repos/${repo.mountPath}/\` — ${repo.url}${revision ? ` (launch-pinned revision: ${revision})` : ''}`,
+      );
     }
+    if (Object.keys(options?.referenceRevisions ?? {}).length)
+      lines.push(
+        'Snapshot identity above comes from the retained launch configuration; .git is intentionally omitted.',
+      );
     lines.push(
       'Read these supplied snapshots directly with normal read-only file or shell tools; no read_file action or additional approval is needed.',
     );
@@ -777,6 +787,7 @@ function generateOperatingEnvironment(
   profile: PodExecutionSettings,
   availableActions: ActionDefinition[],
   executionTarget: ExecutionTarget,
+  hasReferenceRepos: boolean,
 ): void {
   lines.push('## Operating Environment');
   lines.push('');
@@ -949,7 +960,7 @@ function generateOperatingEnvironment(
   lines.push('- Access external APIs directly (use the action tools on the Escalation MCP server)');
   if (profile.repoUrl) {
     lines.push(
-      pod.referenceRepos?.length
+      hasReferenceRepos
         ? '- Read repository files outside your worktree and the supplied reference paths (use an authorized read_file action instead)'
         : '- Read files from repos other than your worktree (use read_file action instead)',
     );

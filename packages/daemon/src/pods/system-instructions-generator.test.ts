@@ -91,8 +91,10 @@ describe('generateSystemInstructions', () => {
         referenceRepos: [{ url: 'https://github.com/org/reference', mountPath: '1-reference' }],
       }),
       'http://localhost:8080/mcp/abc12345',
+      { referenceRevisions: { '1-reference': 'a'.repeat(40) } },
     );
     expect(md).toContain('`/repos/1-reference/`');
+    expect(md).toContain(`launch-pinned revision: ${'a'.repeat(40)}`);
     expect(md).toContain(
       'Read these supplied snapshots directly with normal read-only file or shell tools',
     );
