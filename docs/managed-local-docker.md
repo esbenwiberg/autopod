@@ -114,3 +114,12 @@ publication. Ordinary worker-owned file upload is deliberately avoided for this
 private control directory. The Docker test carries an SSE response above one MiB
 and checks that the worker cannot read the response spool. Channel failures retain
 only a fixed phase/category, never the provider payload or credential.
+
+On 2026-10-07 the complete opt-in live RPI canary passed on Node 22/macOS with
+Codex CLI 0.160.1 and model `gpt-5.6-sol`: 17 provider requests, research and
+planning artifacts completed, implementation reached `validated`, the independent
+Git-bundle behavior oracle passed, and container deletion plus sealed-fixture
+cleanup passed. A handoff marker supplied only to research survived both hashed
+artifact inputs. Earlier failed attempts remain failures (inner sandbox startup,
+large response transfer, and fixture teardown); the final run proves the repaired
+local component path under the explicit evidence boundaries above.
