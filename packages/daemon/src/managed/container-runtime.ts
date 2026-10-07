@@ -17,6 +17,7 @@ export interface ReviewedContainerBoundary {
   dependencyCache?: { enrollmentId: string; path: string };
   /** Resolve the daemon-owned host workspace for an enrolled repository. */
   sourceWorkspace?(podId: string, repositoryId: string): string;
+  cleanupNetwork?(podId: string): Promise<void>;
   /** Trusted worktree provisioning and scope-derived network enforcement. */
   prepare(podId: string, request: ManagedPodRequest): Promise<ContainerSpawnConfig>;
   /** Attach the account-bound provider channel; hard-token routes may also attach a quota feed. */
@@ -66,9 +67,12 @@ export class ManagedContainerRuntime implements ManagedRuntimePort {
   private readonly known = new Map<string, ReviewedContainerBoundary>();
   constructor(
     private readonly boundaries: readonly ReviewedContainerBoundary[],
-    private readonly lookup: (
-      ref: string,
-    ) => { request: ManagedPodRequest; podId: string; createdAt: number } | null,
+    private readonly lookup: (ref: string) => {
+      request: ManagedPodRequest;
+      podId: string;
+      createdAt: number;
+      observedExit?: boolean;
+    } | null,
     private readonly supervisorSource = readFileSync(
       fileURLToPath(new URL('./runtime/supervisor.py', import.meta.url)),
       'utf8',
@@ -92,7 +96,10 @@ export class ManagedContainerRuntime implements ManagedRuntimePort {
       !boundary.manager.extractManagedOutput ||
       !boundary.command.includes(request.route.model) ||
       (request.route.reasoning !== 'none' && !boundary.command.includes(request.route.reasoning)) ||
-      !boundary.image.includes('@sha256:') ||
+      !(
+        /@sha256:[a-f0-9]{64}$/.test(boundary.image) ||
+        (request.route.executionTarget === 'local' && /^sha256:[a-f0-9]{64}$/.test(boundary.image))
+      ) ||
       !(await boundary.quotaReady(request)) ||
       process.env.AUTOPOD_FAIL_OPEN_FIREWALL === '1'
     ) {
@@ -406,7 +413,6 @@ if not stat.S_ISDIR(actual.st_mode) or actual.st_uid!=0 or actual.st_mode & 0o02
       (item) => item.enrollmentId === repositoryId,
     );
     if (
-      request.route.executionTarget !== 'sandbox' ||
       request.outputs.source.mode === 'none' ||
       request.outputs.source.repository !== repositoryId ||
       repository?.access !== 'write'
@@ -418,6 +424,9 @@ if not stat.S_ISDIR(actual.st_mode) or actual.st_uid!=0 or actual.st_mode & 0o02
       throw new Error('managed-agent-exit-failed');
     const destination = boundary.sourceWorkspace?.(podId, repositoryId);
     if (!destination) throw new Error('managed-source-workspace-unavailable');
+    // Local workers write the exact daemon-owned bind mount. Copying it onto itself
+    // would destroy Git metadata; source freezing still verifies the candidate below.
+    if (request.route.executionTarget === 'local') return;
     const assertCurrent = () => {
       const current = this.resolve(ref);
       if (
@@ -443,11 +452,15 @@ if not stat.S_ISDIR(actual.st_mode) or actual.st_uid!=0 or actual.st_mode & 0o02
     await boundary.sendMessage(ref, message, key);
   }
   async cleanup(ref: string): Promise<boolean> {
-    const { boundary } = this.resolve(ref);
-    if ((await this.observe(ref)).state !== 'stopped')
+    const { boundary, podId, observedExit } = this.resolve(ref);
+    // Durable exit evidence permits a retry after container removal succeeded but
+    // network cleanup failed. A Docker 404 alone never supplies exit evidence.
+    if (!observedExit && (await this.observe(ref)).state !== 'stopped')
       throw new Error('managed-cleanup-before-exit');
     await boundary.manager.kill(ref);
-    return (await boundary.manager.getStatus(ref)) === 'deleted';
+    // kill resolves after confirmed removal; Docker projects a subsequent 404 as unknown.
+    await boundary.cleanupNetwork?.(podId);
+    return true;
   }
   async stop(ref: string): Promise<void> {
     const { boundary, podId } = this.resolve(ref);

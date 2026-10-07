@@ -38,6 +38,14 @@ else:
  with temp.open('w') as f:json.dump(value,f,ensure_ascii=False);f.flush();os.fsync(f.fileno())
  os.replace(temp,p)
 `;
+const WRITE_CHUNK = `import base64,os,pathlib,sys
+root=pathlib.Path(sys.argv[1]);prefix=sys.argv[2];reset=sys.argv[3]=='true'
+if root.is_symlink() or root.stat().st_uid!=0 or root.stat().st_mode & 0o077:raise RuntimeError('private-root')
+p=root/(prefix+'response.tmp')
+flags=os.O_WRONLY|os.O_CREAT|os.O_NOFOLLOW|(os.O_TRUNC if reset else os.O_APPEND)
+with os.fdopen(os.open(p,flags,0o600),'wb') as f:
+ f.write(base64.b64decode(sys.argv[4],validate=True));f.flush();os.fsync(f.fileno())
+`;
 const PUBLISH_STAGED = `import json,os,pathlib,sys
 root=pathlib.Path(sys.argv[1]);prefix=sys.argv[2];p=root/(prefix+'response.json');temp=root/(prefix+'response.tmp')
 value=json.loads(temp.read_text());request=json.loads((root/(prefix+'request.json')).read_text())
@@ -156,7 +164,7 @@ export class ContainerCodexChannel implements ManagedWorkerProviderChannel {
     body: string,
     ticket: string,
   ) {
-    if (this.route.executionTarget !== 'sandbox') {
+    if (this.route.executionTarget !== 'sandbox' && Buffer.byteLength(body) <= 64 * 1024) {
       await this.execControl(
         runtimeRef,
         ['python3', '-c', WRITE, stateRoot, prefix, digest, String(ok), body, ticket],
@@ -168,7 +176,23 @@ export class ContainerCodexChannel implements ManagedWorkerProviderChannel {
     let failure: unknown = new Error('managed-codex-response-unavailable');
     for (let attempt = 0; attempt < 5; attempt++) {
       try {
-        await this.manager.writeFile(runtimeRef, `${stateRoot}/${prefix}response.tmp`, payload);
+        if (this.route.executionTarget === 'local') {
+          // Linux limits each exec argument to 128 KiB. Keep every chunk below
+          // that bound, and write as root without changing the private spool's
+          // ownership (the ordinary writeFile API creates worker-owned parents).
+          const bytes = Buffer.from(payload);
+          for (let offset = 0; offset < bytes.length; offset += 64 * 1024) {
+            const part = bytes.subarray(offset, offset + 64 * 1024).toString('base64');
+            const written = await this.execControl(
+              runtimeRef,
+              ['python3', '-c', WRITE_CHUNK, stateRoot, prefix, String(offset === 0), part],
+              { user: 'root' },
+            );
+            if (written.exitCode !== 0) throw new Error('managed-codex-response-stage-failed');
+          }
+        } else {
+          await this.manager.writeFile(runtimeRef, `${stateRoot}/${prefix}response.tmp`, payload);
+        }
         const result = await this.execControl(
           runtimeRef,
           ['python3', '-c', PUBLISH_STAGED, stateRoot, prefix, digest, String(ok), ticket],
@@ -311,6 +335,7 @@ export class ContainerCodexChannel implements ManagedWorkerProviderChannel {
     const poll = async () => {
       if (stopped || activeProvider) return;
       activeProvider = true;
+      let failurePhase = 'request-read';
       try {
         const raw = await exec(READ, 'channel-', String(this.maximumRequestBytes));
         if (!raw.trim() || stopped) return;
@@ -323,11 +348,14 @@ export class ContainerCodexChannel implements ManagedWorkerProviderChannel {
           request.digest !== sha256(request.body).slice(7)
         )
           throw new Error('managed-codex-request-invalid');
+        failurePhase = 'request-validation';
         codexInput(this.route, request.body, this.options.mode === 'agent');
         const operation =
           this.options.mode === 'agent' ? `codex-${request.digest}` : 'codex-report-one';
+        failurePhase = 'provider-invoke';
         const response = await binding.invoke(operation, request.body, this.maximumTokens);
         if (stopped) return;
+        failurePhase = 'response-publication';
         await this.publishResponse(
           binding.runtimeRef,
           binding.stateRoot,
@@ -342,7 +370,8 @@ export class ContainerCodexChannel implements ManagedWorkerProviderChannel {
         stopped = true;
         clearInterval(timer);
         await exec(
-          "import pathlib,sys; (pathlib.Path(sys.argv[1])/'channel-closed').touch()",
+          "import json,pathlib,sys; root=pathlib.Path(sys.argv[1]); (root/'channel-failure.json').write_text(json.dumps({'phase':'agent','reason':'channel-unavailable','exitCode':1,'channelPhase':sys.argv[2]})); (root/'channel-closed').touch()",
+          failurePhase,
         ).catch(() => {});
       } finally {
         activeProvider = false;
@@ -423,6 +452,7 @@ export function codexAgentCommand(
     '--sandbox',
     writable ? 'workspace-write' : 'read-only',
   ];
+  if (route.executionTarget === 'local') command.push('--outer-container-sandbox');
   for (const name of inputNames) command.push('--input-root', `/inputs/${name}`);
   if (githubRepository) command.push('--github-repository', githubRepository);
   return command;

@@ -45,8 +45,8 @@ export function registerDaemonCommands(program: Command): void {
 
       configStore.set('daemon', url);
 
-      // Try to reach it
-      const client = new AutopodClient({ baseUrl: url, getToken });
+      // Health is public. Missing login must not look like an unreachable daemon.
+      const client = new AutopodClient({ baseUrl: url, getToken: async () => '' });
       try {
         const health = await withSpinner('Connecting to daemon...', () => client.checkHealth());
         console.log(chalk.green(`Connected to daemon v${health.version} at ${url}`));

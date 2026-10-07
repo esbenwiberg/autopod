@@ -1116,7 +1116,11 @@ const managedRuntime = managedAcceptanceConfig
     ? composeManagedProfileSet(managedProfileSetConfig, managedCliConfig, {
         db,
         databasePath: DB_PATH,
-        manager: sandboxContainerManager,
+        manager:
+          managedProfileSetConfig.profiles[0]?.profileSnapshot.route.executionTarget === 'local'
+            ? containerManager
+            : sandboxContainerManager,
+        networkManager,
         providerAccounts: providerAccountStore,
         githubAuth,
       })
