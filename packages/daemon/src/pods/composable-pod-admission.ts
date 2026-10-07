@@ -24,6 +24,7 @@ export function admitComposablePod(input: {
   read(podId: string): EffectiveLaunchConfig | null;
   events: EventBus;
   enqueue(podId: string): void;
+  reconcileDependencies?(parentId: string): void;
 }): Pod {
   const { config, userId, pods } = input;
   const work = config.work;
@@ -187,7 +188,9 @@ export function admitComposablePod(input: {
         podId: id,
         conflicts,
       });
-    if (!parents.length) input.enqueue(id);
+    const firstParent = parents[0];
+    if (firstParent) input.reconcileDependencies?.(firstParent.id);
+    else input.enqueue(id);
   };
   if (pods.afterInsertCommitted) pods.afterInsertCommitted(id, publish);
   else publish();

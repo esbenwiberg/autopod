@@ -8048,7 +8048,10 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         : completedPod;
       const isSharedBranch = dep.branch === firstParent.branch;
       let baseBranch: string;
-      if (isSinglePrSeriesPod(dep) || isSharedBranch || dep.waitForMerge) {
+      if (dep.launchConfigDigest && dep.baseBranch) {
+        // Composed launches already froze their source binding at admission.
+        baseBranch = dep.baseBranch;
+      } else if (isSinglePrSeriesPod(dep) || isSharedBranch || dep.waitForMerge) {
         baseBranch = firstParent.baseBranch ?? 'main';
       } else {
         baseBranch = firstParent.branch;
@@ -8154,6 +8157,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         read: deps.launchConfiguration.read,
         events: eventBus,
         enqueue: enqueueSession,
+        reconcileDependencies: (parentId) => maybeTriggerDependents(podRepo.getOrThrow(parentId)),
       });
       if (config.intent === 'goal') {
         if (!deps.launchConfiguration?.goals)
@@ -17280,9 +17284,11 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         try {
           const firstParent = podRepo.getOrThrow(firstParentId);
           const baseBranch =
-            isSinglePrSeriesPod(dep) || dep.waitForMerge || dep.branch === firstParent.branch
-              ? (firstParent.baseBranch ?? 'main')
-              : firstParent.branch;
+            dep.launchConfigDigest && dep.baseBranch
+              ? dep.baseBranch
+              : isSinglePrSeriesPod(dep) || dep.waitForMerge || dep.branch === firstParent.branch
+                ? (firstParent.baseBranch ?? 'main')
+                : firstParent.branch;
           podRepo.update(dep.id, {
             baseBranch,
             dependencyStartedAt: new Date().toISOString(),
