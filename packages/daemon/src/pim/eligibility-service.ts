@@ -4,6 +4,7 @@ import type {
   PimEligibility,
   PimSelection,
 } from '@autopod/shared';
+import { AutopodError } from '@autopod/shared';
 import { z } from 'zod';
 import { configurationError } from '../configuration/configuration-store.js';
 import { type PimApiClient, pimPages } from './api-client.js';
@@ -155,12 +156,14 @@ export function createPimEligibilityService(
       }
       signal.throwIfAborted();
       return { type, available: true, assignments };
-    } catch {
+    } catch (error) {
+      // Surface only our own error code; provider bodies may carry identifiers.
+      const code = error instanceof AutopodError ? ` (${error.code})` : '';
       return {
         type,
         available: false,
         assignments: [],
-        reason: `Could not completely discover ${type} eligibility for the configured user; check provider permissions and connectivity`,
+        reason: `Could not completely discover ${type} eligibility for the configured user; check provider permissions and connectivity${code}`,
       };
     }
   }
