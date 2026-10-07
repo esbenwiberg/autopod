@@ -295,3 +295,24 @@ it('rejects validation configuration outside an authorized implementation source
     f.close();
   }
 });
+
+it('accepts immutable local Docker IDs only for local profile sets', () => {
+  const { f, value } = input();
+  try {
+    value.image = `sha256:${'a'.repeat(64)}`;
+    expect(() => parseManagedProfileSetConfig(JSON.stringify(value))).toThrow(
+      'managed-profile-set-config-invalid',
+    );
+    value.profiles[0]!.profileSnapshot.route.executionTarget = 'local';
+    expect(
+      parseManagedProfileSetConfig(JSON.stringify(value))?.profiles[0]?.profileSnapshot.route
+        .executionTarget,
+    ).toBe('local');
+    value.image = 'autopod:latest';
+    expect(() => parseManagedProfileSetConfig(JSON.stringify(value))).toThrow(
+      'managed-profile-set-config-invalid',
+    );
+  } finally {
+    f.close();
+  }
+});

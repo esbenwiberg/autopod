@@ -113,6 +113,7 @@ parser.add_argument('--reasoning', required=True)
 parser.add_argument('--repository', required=True)
 parser.add_argument('--output', required=True)
 parser.add_argument('--sandbox', choices=('read-only', 'workspace-write'), required=True)
+parser.add_argument('--outer-container-sandbox', action='store_true')
 parser.add_argument('--endpoint', default='http://127.0.0.1:4187/v1')
 parser.add_argument('--input-root', action='append', default=[])
 parser.add_argument('--github-repository')
@@ -180,6 +181,12 @@ with tempfile.TemporaryDirectory(prefix='managed-codex-') as temporary:
     }
     captured = Path(temporary) / 'last-message.md'
     codex_sandbox = 'workspace-write' if args.network_enabled or args.github_repository else args.sandbox
+    # Local Docker already enforces the reviewed filesystem mounts, denied egress,
+    # uid/capability boundary and no-new-privileges. Its seccomp policy intentionally
+    # blocks the nested mount namespaces required by Codex bubblewrap. Select this
+    # only through the trusted local route; retain all outer container restrictions.
+    if args.outer_container_sandbox:
+        codex_sandbox = 'danger-full-access'
     command = ['codex', 'exec', '--json', '--sandbox', codex_sandbox,
                '-m', args.model, '-C', str(repository), '--output-last-message', str(captured)]
     for key, value in config.items(): command.extend(['-c', key + '=' + json.dumps(value)])

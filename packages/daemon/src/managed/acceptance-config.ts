@@ -3,15 +3,11 @@ import type { ManagedPodRequest, ProviderAccount } from '@autopod/shared';
 import type Database from 'better-sqlite3';
 import { z } from 'zod';
 import type { ContainerManager } from '../interfaces/container-manager.js';
-import {
-  type ArtifactStore,
-  AzureBlobArtifactStore,
-  ManagedIdentityBlobTransport,
-} from './artifact-store.js';
+import type { ArtifactStore } from './artifact-store.js';
 import type { managedComponents } from './bootstrap.js';
 import { canonical } from './canonical.js';
 import { type ChatGptCredential, ChatGptReportTransport } from './chatgpt-provider.js';
-import type { ManagedCliConfig } from './cli-config.js';
+import { type ManagedCliConfig, createManagedArtifactStore } from './cli-config.js';
 import { ContainerCodexChannel, codexReportCommand } from './codex-channel.js';
 import { REQUIRED_ENFORCEMENT, validateManagedRequest } from './grants.js';
 import { composeManagedRuntime } from './runtime-composition.js';
@@ -208,15 +204,7 @@ export function composeManagedAcceptance(
     }
   }
 
-  const transport = new ManagedIdentityBlobTransport(cli.blobContainerUrl);
-  const store = new AzureBlobArtifactStore(transport, async (id) => {
-    const row = dependencies.db
-      .prepare('SELECT blob_manifest_name FROM artifact_exports WHERE artifact_id=?')
-      .get(id) as { blob_manifest_name: string } | undefined;
-    if (!row || !row.blob_manifest_name.endsWith('/manifest.json'))
-      throw new Error('artifact-unregistered');
-    return row.blob_manifest_name.slice(0, -'/manifest.json'.length);
-  });
+  const store = createManagedArtifactStore(cli, dependencies.db);
   const initial = chatGptCredential(
     dependencies.providerAccounts,
     config.request.route.providerAccountId,

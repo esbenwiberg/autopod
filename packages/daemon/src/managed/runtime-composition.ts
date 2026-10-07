@@ -57,7 +57,13 @@ export interface ManagedRuntimeBinding {
     transport?: typeof fetch;
   };
   /** Reviewed target networking; volumes, environment and identity are supplied below. */
-  network(request: ManagedPodRequest): Pick<ContainerSpawnConfig, 'firewallScript' | 'networkName'>;
+  network(
+    request: ManagedPodRequest,
+    podId: string,
+  ):
+    | Pick<ContainerSpawnConfig, 'firewallScript' | 'networkName'>
+    | Promise<Pick<ContainerSpawnConfig, 'firewallScript' | 'networkName'>>;
+  cleanupNetwork?(podId: string): Promise<void>;
 }
 export interface ManagedRuntimeCompositionConfig extends Omit<ManagedComponentsConfig, 'runtime'> {
   mirrors: readonly ManagedRepositoryMirror[];
@@ -174,6 +180,7 @@ export function composeManagedRuntime(config: ManagedRuntimeCompositionConfig) {
       image: binding.image,
       command: binding.command,
       dependencyCache: binding.dependencyCache,
+      cleanupNetwork: binding.cleanupNetwork,
       sourceWorkspace: (podId: string, repositoryId: string) =>
         workspaces.path(podId, repositoryId),
       quotaReady: async (request) => {
@@ -187,7 +194,7 @@ export function composeManagedRuntime(config: ManagedRuntimeCompositionConfig) {
         for (const input of components.service.inputs!.mounts(podId))
           volumes.push({ host: input.hostPath, container: input.containerPath, readOnly: true });
         return {
-          ...binding.network(request),
+          ...(await binding.network(request, podId)),
           podId,
           image: binding.image,
           env: {},
@@ -219,6 +226,7 @@ export function composeManagedRuntime(config: ManagedRuntimeCompositionConfig) {
             request: JSON.parse(row.request_json) as ManagedPodRequest,
             podId: row.pod_id,
             createdAt: row.created_at,
+            observedExit: Boolean(row.observed_exit),
           }
         : null;
     },
@@ -254,7 +262,8 @@ export function composeManagedRuntime(config: ManagedRuntimeCompositionConfig) {
             dependencyCache: binding.dependencyCache,
             sourceWorkspace: (podId: string, repositoryId: string) =>
               workspaces.path(podId, repositoryId),
-            network: binding.network,
+            network: () => ({}),
+            prepareNetwork: binding.network,
           },
         ]
       : [],

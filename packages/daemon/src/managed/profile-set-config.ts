@@ -10,11 +10,10 @@ import {
   type ManagedProviderAccountReader,
   chatGptCredential,
 } from './acceptance-config.js';
-import { AzureBlobArtifactStore, ManagedIdentityBlobTransport } from './artifact-store.js';
 import type { ManagedComponentsConfig } from './bootstrap.js';
 import { canonical, digest } from './canonical.js';
 import { ChatGptReportTransport } from './chatgpt-provider.js';
-import type { ManagedCliConfig } from './cli-config.js';
+import { type ManagedCliConfig, createManagedArtifactStore } from './cli-config.js';
 import { ContainerCodexChannel, codexAgentCommand } from './codex-channel.js';
 import type { ManagedGitHubReadConfig } from './github-read-gateway.js';
 import { REQUIRED_ENFORCEMENT } from './grants.js';
@@ -80,7 +79,7 @@ const schema = z
     image: z
       .string()
       .max(1024)
-      .regex(/^[^\s@:]+(?:[.:][^\s@:]*)*\/[^\s@]+@sha256:[a-f0-9]{64}$/),
+      .regex(/^(?:sha256:[a-f0-9]{64}|[^\s@:]+(?:[.:][^\s@:]*)*\/[^\s@]+@sha256:[a-f0-9]{64})$/),
     source: sourceSchema.optional(),
     githubRead: z
       .object({
@@ -98,6 +97,19 @@ export interface ManagedProfileStage extends Omit<z.infer<typeof stageSchema>, '
 }
 export interface ManagedProfileSetConfig extends Omit<z.infer<typeof schema>, 'profiles'> {
   profiles: ManagedProfileStage[];
+}
+
+export interface ManagedLocalNetwork {
+  ensureNetworkForPod(podId: string): Promise<string>;
+  removeNetworkForPod(podId: string): Promise<void>;
+  generateFirewallScript(
+    hosts: string[],
+    mode: 'restricted' | 'deny-all',
+    gateway?: string,
+    extraIps?: string[],
+    port?: number,
+    includeGateway?: boolean,
+  ): Promise<string>;
 }
 
 export function parseManagedProfileSetConfig(
@@ -120,7 +132,11 @@ export function parseManagedProfileSetConfig(
       const repository = scope.repositories[0];
       if (
         stage.profileSnapshot.route.runtime !== 'codex' ||
-        stage.profileSnapshot.route.executionTarget !== 'sandbox' ||
+        !['local', 'sandbox'].includes(stage.profileSnapshot.route.executionTarget) ||
+        stage.profileSnapshot.route.executionTarget !==
+          profiles[0]?.profileSnapshot.route.executionTarget ||
+        (stage.profileSnapshot.route.executionTarget !== 'local' &&
+          parsed.image.startsWith('sha256:')) ||
         !('maxProviderRequests' in stage.profileSnapshot.budget) ||
         scope.repositories.length !== 1 ||
         !repository ||
@@ -238,6 +254,7 @@ export function composeManagedProfileSet(
     db: Database.Database;
     databasePath: string;
     manager: ContainerManager | undefined;
+    networkManager?: ManagedLocalNetwork;
     providerAccounts: ManagedProviderAccountReader;
     githubAuth: DaemonGitHubAuth;
   },
@@ -249,15 +266,10 @@ export function composeManagedProfileSet(
     !cli.bindings.some((item) => item.installationId === config.installationId)
   )
     throw new Error('managed-profile-set-cli-binding-required');
-  const transport = new ManagedIdentityBlobTransport(cli.blobContainerUrl);
-  const store = new AzureBlobArtifactStore(transport, async (artifactId) => {
-    const row = dependencies.db
-      .prepare('SELECT blob_manifest_name FROM artifact_exports WHERE artifact_id=?')
-      .get(artifactId) as { blob_manifest_name: string } | undefined;
-    if (!row?.blob_manifest_name.endsWith('/manifest.json'))
-      throw new Error('artifact-unregistered');
-    return row.blob_manifest_name.slice(0, -'/manifest.json'.length);
-  });
+  const target = config.profiles[0]!.profileSnapshot.route.executionTarget;
+  const network = dependencies.networkManager;
+  if (target === 'local' && !network) throw new Error('managed-local-network-required');
+  const store = createManagedArtifactStore(cli, dependencies.db);
   const ceiling = unionScope(config.profiles);
   const requestPolicy = profileSetRequestPolicy(config);
   let source: ManagedComponentsConfig['source'];
@@ -322,7 +334,7 @@ export function composeManagedProfileSet(
       identityCeiling: ceiling,
       backendCeiling: ceiling,
       enforcement: REQUIRED_ENFORCEMENT,
-      targets: ['sandbox'],
+      targets: [target],
       requestPolicy,
     },
     bindings: config.profiles.map((stage) => {
@@ -379,7 +391,22 @@ export function composeManagedProfileSet(
             }
           : {}),
         maximumRequests: budget.maxProviderRequests,
-        network: () => ({}),
+        network: async (request: ManagedPodRequest, podId: string) => {
+          if (target !== 'local' || !network) return {};
+          const destinations = request.effectiveGrant.scope.network.destinations;
+          const firewallScript = await network.generateFirewallScript(
+            destinations,
+            destinations.length ? 'restricted' : 'deny-all',
+            undefined,
+            [],
+            3100,
+            false,
+          );
+          return { firewallScript, networkName: await network.ensureNetworkForPod(podId) };
+        },
+        ...(target === 'local' && network
+          ? { cleanupNetwork: (podId: string) => network.removeNetworkForPod(podId) }
+          : {}),
       };
     }),
   });
