@@ -17,6 +17,7 @@ import { withSpinner } from '../output/spinner.js';
 import { type ColumnDef, renderTable } from '../output/table.js';
 import { formatToolUse } from '../utils/formatToolUse.js';
 import { resolvePodId } from '../utils/id-resolver.js';
+import { registerBudgetCommand } from './budget.js';
 import { registerGoalCommands } from './goal.js';
 import { registerLaunchCommand } from './launch.js';
 
@@ -134,6 +135,7 @@ function printApproveAllResult(result: {
 
 export function registerPodCommands(program: Command, getClient: () => AutopodClient): void {
   registerGoalCommands(program, getClient);
+  registerBudgetCommand(program, getClient);
   program
     .command('execution-provenance <id>')
     .description('Inspect recorded runtime, image, build, resource and command preflight evidence')

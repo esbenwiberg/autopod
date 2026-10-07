@@ -1529,3 +1529,16 @@ MIT
 <p align="center">
   <sub>Built with mass amounts of mass-produced LLM tokens and mass-produced caffeine.</sub>
 </p>
+
+Task token limits are opt-in: workflow and profile defaults are `null` (off).
+Use `ap run --repo <repository> --task "..." --token-budget off` to override a
+preset limit, or `--token-budget 500000` to choose a limit explicitly.
+`ap budget <pod> off` removes an existing whole-task limit; a larger integer raises
+it. Linked repair pods share that change. `--resume` also resumes a stopped native
+Goal, while a running native Goal receives the new allowance without a restart.
+These changes retain original launch settings, operator identity, and measured usage.
+They do not reset counters or remove a separately configured reviewer sublimit.
+Recorded aggregate tokens include input/context usage and are not a billing estimate.
+Regular runtime limits are checked when usage is reported; they are not an exact
+per-token provider spending cap. Hard-limited reviews still require settled usage;
+with the default unlimited budget an active worker can request review normally.

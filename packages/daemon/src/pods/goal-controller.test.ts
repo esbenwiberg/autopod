@@ -56,6 +56,40 @@ function fixture() {
 }
 
 describe('native Goal controller', () => {
+  it('removes a running native limit without pausing or replacing its objective', async () => {
+    const f = fixture();
+    const native = session();
+    let finish = () => {};
+    const gate = new Promise<void>((resolve) => {
+      finish = resolve;
+    });
+    let ready = () => {};
+    const running = new Promise<void>((resolve) => {
+      ready = resolve;
+    });
+    native.observations = async function* () {
+      ready();
+      await gate;
+      yield observation(5, 'achieved');
+    };
+    native.updateBudget = vi.fn(async () => observation(4));
+    try {
+      const task = f.controller.run('pod', f.goal.revision, f.fence, native);
+      await running;
+      vi.mocked(native.get).mockResolvedValue(observation(3));
+      f.hooks.account.mockReturnValue(null);
+      await f.controller.refreshBudget('pod');
+      expect(native.updateBudget).toHaveBeenCalledExactlyOnceWith(null);
+      expect(native.pause).not.toHaveBeenCalled();
+      expect(native.resume).not.toHaveBeenCalled();
+      expect(native.start).toHaveBeenCalledTimes(1);
+      finish();
+      expect((await task).state).toBe('achieved');
+    } finally {
+      finish();
+      f.db.close();
+    }
+  });
   it('does not allocate or open a native session when the recorded budget is already exhausted', async () => {
     const f = fixture();
     const native = session();

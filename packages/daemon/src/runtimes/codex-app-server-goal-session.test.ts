@@ -49,6 +49,27 @@ function fixture() {
   return { session, client };
 }
 describe('native Codex Goal session', () => {
+  it('changes only the budget, including removing it, without resuming a paused Goal', async () => {
+    const { session, client } = fixture();
+    await session.open('native');
+    await session.get();
+    expect(await session.updateBudget(250)).toMatchObject({
+      state: 'paused',
+      cumulativeTokens: 100,
+    });
+    expect(client.request).toHaveBeenLastCalledWith('thread/goal/set', {
+      threadId: 'native',
+      tokenBudget: 350,
+    });
+    expect(await session.updateBudget(null)).toMatchObject({
+      state: 'paused',
+      cumulativeTokens: 100,
+    });
+    expect(client.request).toHaveBeenLastCalledWith('thread/goal/set', {
+      threadId: 'native',
+      tokenBudget: null,
+    });
+  });
   it('inspects and pauses stored state without loading a thread and cannot start continuation', async () => {
     const { session, client } = fixture();
     await session.openInspection('native');
