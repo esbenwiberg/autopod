@@ -298,11 +298,16 @@ export function generateSystemInstructions(
 
   if (pod.referenceRepos?.length) {
     lines.push('## Reference Repositories');
-    lines.push('The following repos are cloned read-only at:');
+    lines.push('The following repository snapshots are supplied read-only at:');
     for (const repo of pod.referenceRepos) {
       lines.push(`- \`/repos/${repo.mountPath}/\` — ${repo.url}`);
     }
-    lines.push('Do not attempt to push to these repos. They are read-only clones.');
+    lines.push(
+      'Read these supplied snapshots directly with normal read-only file or shell tools; no read_file action or additional approval is needed.',
+    );
+    lines.push(
+      'Do not modify these snapshots or change their permissions. Do not push to their source repositories.',
+    );
     lines.push('');
   }
 
@@ -943,7 +948,11 @@ function generateOperatingEnvironment(
   lines.push('### What You Cannot Do');
   lines.push('- Access external APIs directly (use the action tools on the Escalation MCP server)');
   if (profile.repoUrl) {
-    lines.push('- Read files from repos other than your worktree (use read_file action instead)');
+    lines.push(
+      pod.referenceRepos?.length
+        ? '- Read repository files outside your worktree and the supplied reference paths (use an authorized read_file action instead)'
+        : '- Read files from repos other than your worktree (use read_file action instead)',
+    );
   }
   lines.push('- See real email addresses or usernames (they are masked for privacy)');
   lines.push(
