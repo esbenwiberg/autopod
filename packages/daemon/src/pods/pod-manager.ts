@@ -7339,6 +7339,13 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
    * + returns the new PR URL on success.
    */
   async function pushAndCreatePr(pod: Pod, callerLabel: string): Promise<string> {
+    if (pod.options.output !== 'pr') {
+      throw new AutopodError(
+        'PR delivery requires explicit PR output.',
+        'INVALID_OUTPUT_MODE',
+        409,
+      );
+    }
     assertGuidanceCollected(pod.id);
     const podId = pod.id;
     if (!pod.worktreePath) {
@@ -11929,7 +11936,10 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
                   emitActivityStatus(podId, 'Token budget hard limit reached — failing pod');
                   const s = podRepo.getOrThrow(podId);
                   if (s.status === 'running') {
-                    transition(s, 'failed', { completedAt: new Date().toISOString() });
+                    transition(s, 'failed', {
+                      completedAt: new Date().toISOString(),
+                      failureReason: `Token budget exceeded (${totalUsed}/${effectiveBudget} tokens used).`,
+                    });
                   }
                   outcome = 'failed';
                   observedTerminalOutcome = 'failed';
@@ -13578,7 +13588,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         } else {
           failDelivery(outcome.reason);
         }
-      } else if (!pod.prUrl && prManager && pod.worktreePath && pod.options?.output !== 'branch') {
+      } else if (!pod.prUrl && prManager && pod.worktreePath && pod.options.output === 'pr') {
         // PR creation failed during validation — retry it now
         emitActivityStatus(podId, 'No PR found — creating PR before merging…');
         let retryPrUrl: string | null = null;
@@ -14324,7 +14334,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
 
           // Push the branch to origin before completing, then clean up the worktree.
           // Only remove the worktree if push succeeds — don't lose uncommitted work.
-          if (pod.worktreePath) {
+          if (pod.worktreePath && pod.options.output !== 'none') {
             try {
               // Pre-push security scan for workspace-pod auto-push. The engine
               // rewrites block→escalate for workspace pods at the push checkpoint
@@ -15688,7 +15698,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           // Fix pods already have prUrl set — carry it forward and skip PR creation.
           let prUrl: string | null = s2.prUrl ?? null;
           const prManager = prManagerFactory ? prManagerFactory(profile) : null;
-          if (prManager && s2.worktreePath && s2.options?.output !== 'branch') {
+          if (prManager && s2.worktreePath && s2.options.output === 'pr') {
             // Publish screenshots to their own ref so the PR body can embed them
             // without the reviewed branch carrying a file the agent never wrote.
             // ADO pods skip this entirely — they upload PR attachments instead.
@@ -16425,7 +16435,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           // Fix pods already have prUrl set — carry it forward and skip PR creation.
           let prUrl: string | null = s2.prUrl ?? null;
           const prManager = prManagerFactory ? prManagerFactory(profile) : null;
-          if (prManager && s2.worktreePath && s2.options?.output !== 'branch') {
+          if (prManager && s2.worktreePath && s2.options.output === 'pr') {
             // Same artifact ref as the validation-pass path — never the reviewed
             // branch. This path builds no PR body, so the ref is simply where a
             // reviewer can find the screenshots.

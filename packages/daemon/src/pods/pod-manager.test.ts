@@ -18176,6 +18176,24 @@ describe('PodManager', () => {
     });
 
     describe('completeSession', () => {
+      it('completes interactive none output without publishing a branch', async () => {
+        const ctx = createTestContext();
+        const manager = createPodManager(ctx.deps);
+        const pod = manager.createSession(
+          {
+            profileName: 'test-profile',
+            task: 'Disposable interactive canary',
+            options: { agentMode: 'interactive', output: 'none', validate: false },
+          },
+          'user-1',
+        );
+        ctx.podRepo.update(pod.id, { status: 'running', worktreePath: '/tmp/wt' });
+        await manager.completeSession(pod.id);
+        expect(manager.getSession(pod.id).status).toBe('complete');
+        expect(ctx.worktreeManager.mergeBranch).not.toHaveBeenCalled();
+        expect(ctx.prManager.createPr).not.toHaveBeenCalled();
+      });
+
       let completionDataDir: string;
       let previousCompletionDataDir: string | undefined;
       beforeEach(() => {
@@ -21987,6 +22005,65 @@ describe('PodManager', () => {
     });
   });
   describe('validation admission lifecycle ownership', () => {
+    it.each(['none', 'branch', 'artifact'] as const)(
+      'PR retry cannot promote %s output to a published PR',
+      async (output) => {
+        const ctx = createTestContext();
+        const manager = createPodManager(ctx.deps);
+        const pod = manager.createSession(
+          {
+            profileName: 'test-profile',
+            task: 'Retry without broadening delivery',
+            options: { agentMode: 'auto', output, validate: true },
+          },
+          'user-1',
+        );
+        ctx.podRepo.update(pod.id, validatedPodUpdates(pod.id, { worktreePath: '/tmp/wt' }));
+        await expect(manager.retryCreatePr(pod.id)).rejects.toMatchObject({
+          code: 'INVALID_OUTPUT_MODE',
+        });
+        expect(ctx.worktreeManager.mergeBranch).not.toHaveBeenCalled();
+        expect(ctx.prManager.createPr).not.toHaveBeenCalled();
+      },
+    );
+
+    it.each(
+      (['trigger', 'revalidate'] as const).flatMap((entry) =>
+        (['none', 'branch', 'artifact', 'pr'] as const).map((output) => ({ entry, output })),
+      ),
+    )('$entry publishes a PR only for explicit PR output ($output)', async ({ entry, output }) => {
+      const ctx = createTestContext();
+      const manager = createPodManager(ctx.deps);
+      const pod = manager.createSession(
+        {
+          profileName: 'test-profile',
+          task: 'Respect the requested delivery mode after validation',
+          options: { agentMode: 'auto', output, validate: true },
+        },
+        'user-1',
+      );
+      ctx.podRepo.update(pod.id, {
+        status: entry === 'trigger' ? 'running' : 'failed',
+        containerId: 'ctr-1',
+        worktreePath: '/tmp/wt',
+      });
+
+      if (entry === 'trigger') await manager.triggerValidation(pod.id);
+      else await manager.revalidateSession(pod.id, { force: true });
+
+      expect(ctx.validationEngine.validate).toHaveBeenCalledOnce();
+      expect(manager.getSession(pod.id).lastValidationResult?.overall).toBe('pass');
+      if (output === 'pr') {
+        expect(ctx.worktreeManager.mergeBranch).toHaveBeenCalledOnce();
+        expect(ctx.prManager.createPr).toHaveBeenCalledOnce();
+      } else {
+        expect(ctx.worktreeManager.mergeBranch).not.toHaveBeenCalled();
+        expect(ctx.prManager.createPr).not.toHaveBeenCalled();
+        expect(ctx.worktreeManager.pushBranch).not.toHaveBeenCalled();
+        expect(manager.getSession(pod.id).prUrl).toBeNull();
+      }
+    });
+
     it.each(['trigger', 'revalidate'] as const)(
       '%s cancels an admitted retry when its container changes during backoff',
       async (entry) => {

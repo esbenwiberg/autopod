@@ -135,7 +135,7 @@ export function admitComposablePod(input: {
         creatorName: input.creator?.name ?? null,
         maxValidationAttempts: config.workflow.maxValidationAttempts,
         skipValidation: false,
-        dispatchRepository: config.repository?.config.remote,
+        dispatchRepository: config.repository?.config.remote ?? null,
         rerunRequestHash: work.intentionalRerun ? dispatchRequestHash(request) : undefined,
         options,
         outputMode: outputModeFromPodOptions(options),
