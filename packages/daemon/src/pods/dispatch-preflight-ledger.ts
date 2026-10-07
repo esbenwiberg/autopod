@@ -8,7 +8,7 @@ import {
 import type Database from 'better-sqlite3';
 
 export interface DispatchPreflightLedger {
-  registerRequest(podId: string, repository?: string): void;
+  registerRequest(podId: string, repository?: string | null): void;
   findRerun(request: CreatePodRequest, userId: string): string | null;
   registerRerun(
     podId: string,
@@ -151,6 +151,9 @@ export function createDispatchPreflightLedger(db: Database.Database): DispatchPr
   });
   return {
     registerRequest(podId, repository) {
+      // Explicitly empty composed workspaces have no Git dispatch identity.
+      // Undefined retains legacy profile lookup and its fail-closed validation.
+      if (repository === null) return;
       const pod = get(podId);
       const profile = db
         .prepare(
@@ -287,6 +290,8 @@ export function createDispatchPreflightLedger(db: Database.Database): DispatchPr
         const legacy = db
           .prepare(`${selectRequest} WHERE p.rowid < ? AND e.task_id <> ? AND p.task = ?
         AND NOT EXISTS (SELECT 1 FROM execution_dispatch_preflights d WHERE d.execution_id = e.execution_id)
+        AND NOT EXISTS (SELECT 1 FROM pod_launch_snapshots s WHERE s.pod_id = p.id
+          AND json_type(CASE WHEN json_valid(s.payload) THEN s.payload ELSE NULL END, '$.repository') = 'null')
         AND (p.created_at >= ? OR p.status NOT IN ('complete','failed','killed','rejected')) ORDER BY p.rowid DESC LIMIT 101`)
           .all(pod.rowNumber, pod.taskId, pod.task, cutoff) as RequestRow[];
         if (legacy.length > 100)

@@ -59,7 +59,7 @@ import { type TaskRetryLedger, createTaskRetryLedger } from './task-retry-ledger
 
 export interface NewPod {
   intentionalRerun?: IntentionalRerun;
-  dispatchRepository?: string;
+  dispatchRepository?: string | null;
   rerunRequestHash?: string;
   id: string;
   profileName: string;

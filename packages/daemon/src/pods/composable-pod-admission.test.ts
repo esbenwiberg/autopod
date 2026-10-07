@@ -6,6 +6,69 @@ import { createTestContext } from '../test-utils/mock-helpers.js';
 import { admitComposablePod } from './composable-pod-admission.js';
 
 describe('direct composed pod admission', () => {
+  it('admits empty research workspaces without looking up a legacy repository profile', async () => {
+    const ctx = createTestContext();
+    try {
+      const { services, store } = createTestConfiguration(ctx.db);
+      const snapshots = createLaunchSnapshotRepository(ctx.db, store);
+      const config = await resolveLaunch(
+        {
+          emptyWorkspace: true,
+          profileId: 'profile',
+          task: 'Research web sources without a destination repository',
+          overrides: { workflow: { output: 'artifact', validationPhases: [] } },
+        },
+        services,
+      );
+      const admitted = snapshots.admit({
+        config,
+        requestDigest: config.digest,
+        createPod: () =>
+          admitComposablePod({
+            config,
+            userId: 'owner',
+            pods: ctx.podRepo,
+            read: snapshots.get,
+            events: ctx.deps.eventBus,
+            enqueue: vi.fn(),
+          }).id,
+      });
+      expect(ctx.podRepo.getOrThrow(admitted.podId).options.output).toBe('artifact');
+      expect(snapshots.get(admitted.podId)?.repository).toBeNull();
+      expect(ctx.db.prepare('SELECT * FROM execution_dispatch_bindings').all()).toHaveLength(0);
+      expect(ctx.profileStore.get).not.toHaveBeenCalled();
+      const repositoryConfig = await resolveLaunch(
+        { repositoryId: 'repo-a', task: config.task },
+        services,
+      );
+      const repositoryPod = snapshots.admit({
+        config: repositoryConfig,
+        requestDigest: repositoryConfig.digest,
+        createPod: () =>
+          admitComposablePod({
+            config: repositoryConfig,
+            userId: 'owner',
+            pods: ctx.podRepo,
+            read: snapshots.get,
+            events: ctx.deps.eventBus,
+            enqueue: vi.fn(),
+          }).id,
+      });
+      if (!repositoryConfig.repository) throw new Error('Missing repository fixture');
+      expect(
+        ctx.podRepo.dispatchPreflight?.inspect(
+          repositoryPod.podId,
+          1,
+          repositoryConfig.repository.config.remote,
+          'main',
+          'a'.repeat(40),
+        ).status,
+      ).toBe('admitted');
+    } finally {
+      ctx.db.close();
+    }
+  });
+
   it('publishes only after snapshot commit and preserves task-specific context without a legacy profile', async () => {
     const ctx = createTestContext();
     try {

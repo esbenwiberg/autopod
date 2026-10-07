@@ -196,6 +196,9 @@ describe('Token budget — consumeAgentEvents', () => {
 
     const updated = ctx.podRepo.getOrThrow(pod.id);
     expect(updated.status).toBe('failed');
+    expect(createPodManager(ctx.deps).getSession(pod.id).failureReason).toBe(
+      'Token budget exceeded (6000/5000 tokens used).',
+    );
   });
 
   it('fails pod when maxBudgetExtensions exhausted', async () => {
@@ -219,6 +222,7 @@ describe('Token budget — consumeAgentEvents', () => {
     const updated = ctx.podRepo.getOrThrow(pod.id);
     // maxBudgetExtensions=0 means no extensions allowed → hard stop
     expect(updated.status).toBe('failed');
+    expect(updated.failureReason).toBe('Token budget exceeded (6000/5000 tokens used).');
   });
 
   it('does not enforce budget when token counts are zero (no token data from runtime)', async () => {

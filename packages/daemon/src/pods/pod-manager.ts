@@ -7339,6 +7339,13 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
    * + returns the new PR URL on success.
    */
   async function pushAndCreatePr(pod: Pod, callerLabel: string): Promise<string> {
+    if (pod.options.output !== 'pr') {
+      throw new AutopodError(
+        'PR delivery requires explicit PR output.',
+        'INVALID_OUTPUT_MODE',
+        409,
+      );
+    }
     assertGuidanceCollected(pod.id);
     const podId = pod.id;
     if (!pod.worktreePath) {
@@ -8041,7 +8048,10 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         : completedPod;
       const isSharedBranch = dep.branch === firstParent.branch;
       let baseBranch: string;
-      if (isSinglePrSeriesPod(dep) || isSharedBranch || dep.waitForMerge) {
+      if (dep.launchConfigDigest && dep.baseBranch) {
+        // Composed launches already froze their source binding at admission.
+        baseBranch = dep.baseBranch;
+      } else if (isSinglePrSeriesPod(dep) || isSharedBranch || dep.waitForMerge) {
         baseBranch = firstParent.baseBranch ?? 'main';
       } else {
         baseBranch = firstParent.branch;
@@ -8147,6 +8157,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         read: deps.launchConfiguration.read,
         events: eventBus,
         enqueue: enqueueSession,
+        reconcileDependencies: (parentId) => maybeTriggerDependents(podRepo.getOrThrow(parentId)),
       });
       if (config.intent === 'goal') {
         if (!deps.launchConfiguration?.goals)
@@ -10707,6 +10718,12 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           ? { ...pod, providerAttempts: deps.providerAttemptRepo.list(podId) }
           : pod;
         const systemInstructions = generateSystemInstructions(profile, instructionPod, mcpUrl, {
+          referenceRevisions: Object.fromEntries(
+            (deps.launchConfiguration?.read(podId)?.references ?? []).map((reference, index) => [
+              `${index + 1}-${reference.id}`,
+              reference.revision,
+            ]),
+          ),
           injectedSections: resolvedSections,
           injectedMcpServers: [...proxiedMcpServers, ...workingStdioServers],
           availableActions,
@@ -11929,7 +11946,10 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
                   emitActivityStatus(podId, 'Token budget hard limit reached — failing pod');
                   const s = podRepo.getOrThrow(podId);
                   if (s.status === 'running') {
-                    transition(s, 'failed', { completedAt: new Date().toISOString() });
+                    transition(s, 'failed', {
+                      completedAt: new Date().toISOString(),
+                      failureReason: `Token budget exceeded (${totalUsed}/${effectiveBudget} tokens used).`,
+                    });
                   }
                   outcome = 'failed';
                   observedTerminalOutcome = 'failed';
@@ -13578,7 +13598,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         } else {
           failDelivery(outcome.reason);
         }
-      } else if (!pod.prUrl && prManager && pod.worktreePath && pod.options?.output !== 'branch') {
+      } else if (!pod.prUrl && prManager && pod.worktreePath && pod.options.output === 'pr') {
         // PR creation failed during validation — retry it now
         emitActivityStatus(podId, 'No PR found — creating PR before merging…');
         let retryPrUrl: string | null = null;
@@ -13995,15 +14015,20 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
       // Run cleanup with a timeout so a hung Docker stop or git cleanup
       // can never leave the pod stuck in 'killing' forever.
       const KILL_TIMEOUT_MS = 30_000;
+      const ownsKillLifecycle = () =>
+        podRepo.getOrThrow(podId).lifecycleGeneration === pod.lifecycleGeneration;
       const cleanup = async () => {
         if (deps.launchConfiguration?.read(podId)?.intent === 'goal') {
           if (!deps.launchConfiguration.goals)
             throw new AutopodError('Native Goal controls are unavailable', 'GOAL_UNAVAILABLE', 503);
           await deps.launchConfiguration.goals.control(podId, 'cancel');
+          if (!ownsKillLifecycle()) return;
         }
         // Kill sidecars before the main container so they can't outlive their pod.
         await killSidecarsForPod(podId);
+        if (!ownsKillLifecycle()) return;
         await cleanupTestRunBranches(podId);
+        if (!ownsKillLifecycle()) return;
         // Kill container
         if (pod.containerId) {
           const cm = containerManagerFactory.get(pod.executionTarget);
@@ -14012,15 +14037,21 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
             podId,
             'Failed to persist rotated credentials during kill — proceeding',
           );
+          if (!ownsKillLifecycle()) return;
           try {
             await cm.kill(pod.containerId);
+            if (ownsLifecycle(podId, pod.lifecycleGeneration, pod.containerId)) {
+              podRepo.update(podId, { containerId: null });
+            }
           } catch (err) {
             logger.warn({ err, podId }, 'Failed to kill container');
           }
         }
+        if (!ownsKillLifecycle()) return;
         // Remove the per-pod bridge network. Safe now that both the pod and
         // its sidecars are dead; Docker would otherwise refuse the remove.
         await destroyPodNetwork(podId);
+        if (!ownsKillLifecycle()) return;
 
         // Abort runtime
         try {
@@ -14030,6 +14061,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           logger.warn({ err, podId }, 'Failed to abort runtime');
         }
 
+        if (!ownsKillLifecycle()) return;
         // Cleanup worktree — always clear the DB path even if cleanup throws,
         // so a subsequent rework doesn't attempt recovery on a stale directory.
         if (pod.worktreePath) {
@@ -14038,6 +14070,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           } catch (err) {
             logger.warn({ err, podId }, 'Failed to cleanup worktree');
           }
+          if (!ownsKillLifecycle()) return;
           podRepo.update(podId, { worktreePath: null });
         }
 
@@ -14052,15 +14085,22 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         });
       };
 
-      await Promise.race([
-        cleanup(),
-        new Promise<void>((resolve) =>
-          setTimeout(() => {
-            logger.warn({ podId }, 'Kill cleanup timed out — forcing killed');
-            resolve();
-          }, KILL_TIMEOUT_MS),
-        ),
-      ]);
+      let killTimer: ReturnType<typeof setTimeout> | undefined;
+      try {
+        await Promise.race([
+          cleanup(),
+          new Promise<void>((resolve) => {
+            killTimer = setTimeout(() => {
+              logger.warn({ podId }, 'Kill cleanup timed out — forcing killed');
+              resolve();
+            }, KILL_TIMEOUT_MS);
+          }),
+        ]);
+      } finally {
+        if (killTimer) clearTimeout(killTimer);
+      }
+
+      if (!ownsKillLifecycle()) return;
 
       const activeAttempt = deps.providerAttemptRepo?.getActive(podId);
       if (activeAttempt) {
@@ -14324,7 +14364,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
 
           // Push the branch to origin before completing, then clean up the worktree.
           // Only remove the worktree if push succeeds — don't lose uncommitted work.
-          if (pod.worktreePath) {
+          if (pod.worktreePath && pod.options.output !== 'none') {
             try {
               // Pre-push security scan for workspace-pod auto-push. The engine
               // rewrites block→escalate for workspace pods at the push checkpoint
@@ -15688,7 +15728,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           // Fix pods already have prUrl set — carry it forward and skip PR creation.
           let prUrl: string | null = s2.prUrl ?? null;
           const prManager = prManagerFactory ? prManagerFactory(profile) : null;
-          if (prManager && s2.worktreePath && s2.options?.output !== 'branch') {
+          if (prManager && s2.worktreePath && s2.options.output === 'pr') {
             // Publish screenshots to their own ref so the PR body can embed them
             // without the reviewed branch carrying a file the agent never wrote.
             // ADO pods skip this entirely — they upload PR attachments instead.
@@ -16425,7 +16465,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           // Fix pods already have prUrl set — carry it forward and skip PR creation.
           let prUrl: string | null = s2.prUrl ?? null;
           const prManager = prManagerFactory ? prManagerFactory(profile) : null;
-          if (prManager && s2.worktreePath && s2.options?.output !== 'branch') {
+          if (prManager && s2.worktreePath && s2.options.output === 'pr') {
             // Same artifact ref as the validation-pass path — never the reviewed
             // branch. This path builds no PR body, so the ref is simply where a
             // reviewer can find the screenshots.
@@ -17264,9 +17304,11 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         try {
           const firstParent = podRepo.getOrThrow(firstParentId);
           const baseBranch =
-            isSinglePrSeriesPod(dep) || dep.waitForMerge || dep.branch === firstParent.branch
-              ? (firstParent.baseBranch ?? 'main')
-              : firstParent.branch;
+            dep.launchConfigDigest && dep.baseBranch
+              ? dep.baseBranch
+              : isSinglePrSeriesPod(dep) || dep.waitForMerge || dep.branch === firstParent.branch
+                ? (firstParent.baseBranch ?? 'main')
+                : firstParent.branch;
           podRepo.update(dep.id, {
             baseBranch,
             dependencyStartedAt: new Date().toISOString(),
