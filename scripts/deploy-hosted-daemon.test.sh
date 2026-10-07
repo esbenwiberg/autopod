@@ -21,6 +21,7 @@ case "$1" in
   fetch) exit 0 ;;
   rev-parse) echo cafebabecafebabecafebabecafebabecafebabe ;;
   cat-file) exit 0 ;;
+  merge-base) [ "${DEPLOY_TEST_TARGET_ANCESTOR:-0}" = 1 ] ;;
   diff) exit 0 ;;
 esac
 EOF
@@ -72,6 +73,10 @@ case "$remote_script" in
       [[ "$remote_script" == *'mv "$TMP/.git" "$NEW/.git"'* ]]
     fi
     echo 'BUILD DONE'
+    if [ "${DEPLOY_TEST_RELEASE_DRIFT:-0}" = 1 ]; then
+      mkdir -p "$AUTOPOD_DEPLOY_RELEASES/newer123/packages/daemon"
+      ln -sfn "$AUTOPOD_DEPLOY_RELEASES/newer123" "$AUTOPOD_DEPLOY_CURRENT_LINK"
+    fi
     ;;
   *'REVIEWER_CLI_PREWARM_OK'*) echo 'REVIEWER_CLI_PREWARM_OK' ;;
   *'VERIFY_MARKER='*) sh -c "$remote_script" ;;
@@ -135,6 +140,29 @@ reset_fixture() {
   ln -sfn "$tmp/releases/deadbeef" "$tmp/current"
   rm -f "$tmp/restarted" "$tmp/az-count" "$tmp/health-count" "$tmp/drain-removed"
 }
+
+# A newer deployed descendant must not be replaced by an older requested target,
+# even when --force was supplied. Refuse before build, maintenance or restart.
+reset_fixture
+if DEPLOY_TEST_TARGET_ANCESTOR=1 run_deploy --force >"$tmp/ancestor-out" 2>&1; then
+  echo 'deployment unexpectedly downgraded a newer descendant release' >&2
+  exit 1
+fi
+grep -qF 'already includes target' "$tmp/ancestor-out"
+[ "$(cat "$tmp/az-count")" = 1 ]
+[ ! -e "$tmp/restarted" ]
+[ ! -e "$tmp/drain-removed" ]
+[ "$(readlink "$tmp/current")" = "$tmp/releases/deadbeef" ]
+
+# Another deployment may finish while this one stages its build. Preserve it.
+reset_fixture
+if DEPLOY_TEST_RELEASE_DRIFT=1 run_deploy >"$tmp/drift-out" 2>&1; then
+  echo 'deployment unexpectedly replaced a concurrently deployed release' >&2
+  exit 1
+fi
+grep -qF 'live release changed during staging' "$tmp/drift-out"
+[ ! -e "$tmp/restarted" ]
+[ "$(readlink "$tmp/current")" = "$tmp/releases/newer123" ]
 
 # The first API snapshot is empty, but the atomic VM gate sees one pod just
 # before restart. The same remote script must refuse before systemctl executes.
