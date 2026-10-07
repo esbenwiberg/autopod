@@ -1,5 +1,15 @@
 import { execFileSync } from 'node:child_process';
-import { mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  readdirSync,
+  realpathSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import type { ManagedPodRequest } from '@autopod/shared';
@@ -22,6 +32,29 @@ function required<T>(value: T | null | undefined): T {
   if (value == null) throw new Error('live-rpi-required-value-missing');
   return value;
 }
+
+function removeFixture(root: string): void {
+  // Artifact inputs are deliberately sealed 0555. Only after worker teardown,
+  // restore directory write permission in this disposable tree; never follow links.
+  const writable = (directory: string) => {
+    chmodSync(directory, 0o700);
+    for (const entry of readdirSync(directory, { withFileTypes: true }))
+      if (entry.isDirectory()) writable(path.join(directory, entry.name));
+  };
+  writable(root);
+  rmSync(root, { recursive: true, force: true });
+}
+
+it('removes the sealed artifact fixture after workers have stopped', () => {
+  const root = mkdtempSync(path.join(tmpdir(), 'autopod-live-rpi-cleanup-'));
+  const inputs = path.join(root, 'inputs', 'planning');
+  mkdirSync(inputs, { recursive: true });
+  writeFileSync(path.join(inputs, 'planning.md'), 'immutable handoff', { mode: 0o444 });
+  chmodSync(inputs, 0o555);
+  chmodSync(path.dirname(inputs), 0o555);
+  removeFixture(root);
+  expect(existsSync(root)).toBe(false);
+});
 
 // Explicit paid opt-in. Credentials stay in the host transport; fixture HTTP authentication
 // deliberately does not claim Entra acceptance. No GitHub push or PR is made by this test.
@@ -199,6 +232,7 @@ it.skipIf(!image || !authFile || !repository || !model)(
     const handles: Array<{ podId: string; request: ManagedPodRequest }> = [];
     const receipts: unknown[] = [];
     let failure: string | null = null;
+    let cleanupFailure: string | null = null;
     const diagnostics: unknown[] = [];
     try {
       for (const [index, request] of requests.entries()) {
@@ -326,22 +360,46 @@ it.skipIf(!image || !authFile || !repository || !model)(
       }
       throw error;
     } finally {
+      for (const { podId } of handles) {
+        const ref = components.service.row('installation', podId).runtime_ref;
+        if (ref) await components.runtime.stop(ref).catch(() => {});
+        await docker
+          .getContainer(`autopod-${podId}`)
+          .remove({ force: true })
+          .catch((error: { statusCode?: number }) => {
+            if (error.statusCode !== 404) throw error;
+          });
+        await expect(docker.getContainer(`autopod-${podId}`).inspect()).rejects.toMatchObject({
+          statusCode: 404,
+        });
+        await network.removeNetworkForPod(podId);
+      }
+      const observations = handles.map((h) =>
+        components.controls.observe('installation', h.podId, '0'),
+      );
+      await app.close();
+      components.close();
+      f.close();
+      try {
+        removeFixture(root);
+      } catch {
+        cleanupFailure = 'fixture-cleanup-failed';
+      }
       if (process.env.AUTOPOD_MANAGED_LIVE_REPORT)
         writeFileSync(
           process.env.AUTOPOD_MANAGED_LIVE_REPORT,
           JSON.stringify(
             {
-              verdict: failure ? 'fail' : 'pass',
+              verdict: failure || cleanupFailure ? 'fail' : 'pass',
               failure,
+              cleanupFailure,
               base,
               model,
               image,
               providerRequests,
               diagnostics,
               receipts,
-              observations: handles.map((h) =>
-                components.controls.observe('installation', h.podId, '0'),
-              ),
+              observations,
               evidenceLevel:
                 'real-Docker-real-model-fixture-HTTP-auth-local-candidate-independent-oracle',
               notRun: [
@@ -356,20 +414,8 @@ it.skipIf(!image || !authFile || !repository || !model)(
             2,
           ),
         );
-      for (const { podId } of handles) {
-        const ref = components.service.row('installation', podId).runtime_ref;
-        if (ref) await components.runtime.stop(ref).catch(() => {});
-        await docker
-          .getContainer(`autopod-${podId}`)
-          .remove({ force: true })
-          .catch(() => {});
-        await network.removeNetworkForPod(podId);
-      }
-      await app.close();
-      components.close();
-      f.close();
-      rmSync(root, { recursive: true, force: true });
     }
+    if (cleanupFailure) throw new Error(cleanupFailure);
   },
   1500000,
 );
