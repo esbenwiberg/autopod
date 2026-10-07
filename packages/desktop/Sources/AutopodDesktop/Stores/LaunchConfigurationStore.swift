@@ -11,13 +11,14 @@ public final class LaunchConfigurationStore {
   public var error: String?
   private var api: DaemonAPI?
   private var generation = UUID()
+  private var pimDiscovery: ConfigurationJSON?
   public init() {}
   public func disconnect() {
-    api = nil; generation = UUID(); documents = []; capabilities = .object([:]); supported = false; loading = false
+    api = nil; generation = UUID(); pimDiscovery = nil; documents = []; capabilities = .object([:]); supported = false; loading = false
     error = "Connect to a daemon with composable configuration support."
   }
   public func configure(api: DaemonAPI) {
-    self.api = api; generation = UUID(); documents = []; capabilities = .object([:]); supported = false; loading = false; error = nil
+    self.api = api; generation = UUID(); pimDiscovery = nil; documents = []; capabilities = .object([:]); supported = false; loading = false; error = nil
   }
   public func load() async {
     guard let api else { return }
@@ -66,11 +67,18 @@ public final class LaunchConfigurationStore {
       discoverGitHubRepositories: { try await self.connectedAPI().discoverGitHubRepositories() },
       discoverGitHubWorkflows: { try await self.connectedAPI().discoverGitHubWorkflows(repositoryId: $0) },
       loadProviderAccounts: { try await self.connectedAPI().listProviderAccounts() },
-      discoverPim: { try await self.connectedAPI().discoverPimEligibility() },
+      discoverPim: { fresh in
+        let current = self.generation
+        let value = try await self.connectedAPI().discoverPimEligibility(fresh: fresh)
+        // A reply for a previous daemon connection must not seed the next one's picker.
+        if self.generation == current { self.pimDiscovery = value }
+        return value
+      },
       saveFromLaunch: { try await self.connectedAPI().saveProfileFromLaunch($0) },
       listWatchers: { try await self.connectedAPI().listWatcherBindings() },
       saveWatcher: { try await self.connectedAPI().writeWatcherBinding($0) },
       readLaunch: { try await self.connectedAPI().getLaunchConfiguration($0) })
+    actions.cachedPim = { self.pimDiscovery }
     actions.listDeployments = { try await self.connectedAPI().listDeployments() }
     actions.reviewDeployment = { try await self.connectedAPI().reviewDeployment($0) }
     actions.decideDeployment = { try await self.connectedAPI().decideDeployment($0, body: $1) }

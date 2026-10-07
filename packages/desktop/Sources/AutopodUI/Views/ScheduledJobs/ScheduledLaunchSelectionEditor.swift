@@ -121,7 +121,7 @@ struct ScheduledLaunchSelectionEditor: View {
     .onAppear { advanced = ConfigurationJSON.object(selection).formatted() }
     .onChange(of: selection) { _, value in advanced = ConfigurationJSON.object(value).formatted(); preview = nil }
     .sheet(isPresented: $showPim) {
-      PimSelectionSheet(selected: pim, discover: actions.discoverPim) { values in
+      PimSelectionSheet(selected: pim, cached: actions.cachedPim(), discover: actions.discoverPim) { values in
         var next = overrides; next["pim"] = .array(values.map(ConfigurationJSON.object)); selection["overrides"] = .object(next)
       }
     }

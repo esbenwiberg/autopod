@@ -2,11 +2,11 @@ import type { PimSelection } from '@autopod/shared';
 import { describe, expect, it, vi } from 'vitest';
 import { type PimApiClient, createPimApiClient, pimPages } from './api-client.js';
 import { createPimEligibilityService } from './eligibility-service.js';
-import { pimMaximumDuration } from './policy-reader.js';
+import { createPimPolicyReader, pimMaximumDuration } from './policy-reader.js';
 
 const account = { tenantId: 'tenant', principalId: 'user' };
 const dates = { startDateTime: '2026-01-01T00:00:00Z', endDateTime: '2027-01-01T00:00:00Z' };
-function fixture() {
+function fixture(clock = { now: Date.parse('2026-09-13T00:00:00Z') }) {
   const get = vi.fn(async (_audience: string, path: string): Promise<unknown> => {
     if (path.includes('/me?')) return { id: 'user' };
     if (path.includes('/group/'))
@@ -54,12 +54,13 @@ function fixture() {
     };
   });
   const client: PimApiClient = { account, get, mutate: vi.fn() };
-  const policy = { maximumDurationMinutes: vi.fn(async () => 60) };
+  const policy = { maximumDurationMinutes: vi.fn(async (_item?: { type: string }) => 60) };
   return {
     client,
     get,
     policy,
-    service: createPimEligibilityService(client, policy, () => Date.parse('2026-09-13T00:00:00Z')),
+    clock,
+    service: createPimEligibilityService(client, policy, () => clock.now),
   };
 }
 describe('PIM discovery', () => {
@@ -77,6 +78,122 @@ describe('PIM discovery', () => {
     expect(f.client.mutate).not.toHaveBeenCalled();
     await f.service.discover();
     expect(f.get).toHaveBeenCalledTimes(4);
+  });
+  it('caches each family on its own clock and lets fresh bypass it', async () => {
+    const f = fixture();
+    const healthy = f.get.getMockImplementation();
+    f.get.mockImplementation(async (audience, path) => {
+      if (path.includes('/group/')) throw new Error('403');
+      return healthy?.(audience, path);
+    });
+    const families = () => f.get.mock.calls.filter(([, path]) => !path.includes('/me?')).length;
+    const first = await f.service.discover();
+    expect(first.families.map((family) => family.available)).toEqual([false, true, true]);
+    expect(families()).toBe(3);
+    // A refused family must not keep the healthy ones from being served from cache.
+    await f.service.discover();
+    expect(families()).toBe(3);
+    // Past the failed-family TTL only the failed family is re-read; discoveredAt keeps the oldest.
+    f.clock.now += 61_000;
+    const second = await f.service.discover();
+    expect(families()).toBe(4);
+    expect(second.discoveredAt).toBe(first.discoveredAt);
+    await f.service.discover(true);
+    expect(families()).toBe(7);
+  });
+  it('shares one provider round between concurrent opens', async () => {
+    const f = fixture();
+    await Promise.all([f.service.discover(), f.service.discover(), f.service.discover()]);
+    expect(f.get).toHaveBeenCalledTimes(4);
+  });
+  it('reads policies in parallel but bounded', async () => {
+    const f = fixture();
+    const many = Array.from({ length: 20 }, (_, index) => ({
+      name: `azure-${index}`,
+      properties: {
+        principalId: 'user',
+        roleDefinitionId: `/providers/Microsoft.Authorization/roleDefinitions/r${index}`,
+        roleEligibilityScheduleId: 'schedule',
+        scope: '/subscriptions/sub',
+        ...dates,
+      },
+    }));
+    const healthy = f.get.getMockImplementation();
+    f.get.mockImplementation(async (audience, path) =>
+      audience === 'arm' ? { value: many } : healthy?.(audience, path),
+    );
+    let active = 0;
+    let peak = 0;
+    // The bound is per family; group and directory reads run alongside it.
+    f.policy.maximumDurationMinutes.mockImplementation(async (item) => {
+      if (item?.type !== 'azure-role') return 60;
+      active++;
+      peak = Math.max(peak, active);
+      await new Promise((resolve) => setTimeout(resolve, 1));
+      active--;
+      return 60;
+    });
+    const result = await f.service.discover();
+    expect(result.families[1]?.assignments).toHaveLength(20);
+    expect(peak).toBeGreaterThan(1);
+    expect(peak).toBeLessThanOrEqual(6);
+  });
+  it('reads each resource policy once per scope and role and never caches a failure', async () => {
+    const clock = { now: 0 };
+    const get = vi.fn(async (_audience: string, path: string): Promise<unknown> => {
+      if (path.includes('roleManagementPolicyAssignments'))
+        return {
+          value: [
+            {
+              properties: {
+                roleDefinitionId: '/providers/Microsoft.Authorization/roleDefinitions/reader',
+                policyId:
+                  '/subscriptions/sub/providers/Microsoft.Authorization/roleManagementPolicies/p',
+                scope: '/subscriptions/sub',
+              },
+            },
+          ],
+        };
+      return {
+        properties: {
+          rules: [
+            {
+              id: 'Expiration_EndUser_Assignment',
+              maximumDuration: 'PT8H',
+              target: { caller: 'EndUser', level: 'Assignment' },
+            },
+          ],
+        },
+      };
+    });
+    const reader = createPimPolicyReader({ account, get, mutate: vi.fn() }, () => clock.now);
+    const item = {
+      ...account,
+      type: 'azure-role',
+      eligibilityId: 'a',
+      roleId: 'reader',
+      scope: '/subscriptions/sub',
+      displayName: 'Reader',
+      scopeName: 'sub',
+      startsAt: dates.startDateTime,
+      expiresAt: null,
+      maximumDurationMinutes: null,
+      provider: {
+        scheduleId: 'schedule',
+        roleDefinitionId: '/providers/Microsoft.Authorization/roleDefinitions/reader',
+      },
+    } as const;
+    await expect(
+      Promise.all([
+        reader.maximumDurationMinutes(item),
+        reader.maximumDurationMinutes({ ...item, eligibilityId: 'b', scope: '/SUBSCRIPTIONS/sub' }),
+      ]),
+    ).resolves.toEqual([480, 480]);
+    expect(get).toHaveBeenCalledTimes(2);
+    clock.now += 61 * 60_000;
+    get.mockRejectedValueOnce(new Error('outage'));
+    await expect(reader.maximumDurationMinutes(item)).rejects.toThrow('outage');
+    await expect(reader.maximumDurationMinutes(item)).resolves.toBe(480);
   });
   it('requires the exact eligibility, account, role and scope at activation recheck', async () => {
     const f = fixture();

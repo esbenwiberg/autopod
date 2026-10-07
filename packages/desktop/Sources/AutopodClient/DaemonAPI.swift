@@ -106,8 +106,9 @@ public actor DaemonAPI {
     try await request("GET", "/configuration/github/repositories/\(repositoryId)/workflows")
   }
 
-  public func discoverPimEligibility() async throws -> ConfigurationJSON {
-    try await request("GET", "/pim/eligibility")
+  /// The daemon caches discovery; `fresh` bypasses that cache for an explicit user refresh.
+  public func discoverPimEligibility(fresh: Bool = false) async throws -> ConfigurationJSON {
+    try await request("GET", "/pim/eligibility", query: fresh ? ["fresh": "1"] : [:])
   }
   public func saveProfileFromLaunch(_ body: ConfigurationJSON) async throws -> ConfigurationJSON {
     try await request("POST", "/profiles/from-launch", body: encode(body))

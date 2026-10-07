@@ -3,16 +3,40 @@ import SwiftUI
 
 struct PimSelectionSheet: View {
   @Environment(\.dismiss) private var dismiss
-  let discover: () async throws -> ConfigurationJSON
+  let discover: (Bool) async throws -> ConfigurationJSON
   let onSave: ([[String: ConfigurationJSON]]) -> Void
   @State private var selections: [[String: ConfigurationJSON]]
   @State private var discovery: ConfigurationJSON?
   @State private var search = ""
-  @State private var loading = true
+  @State private var loading = false
   @State private var error: String?
-  init(selected: [[String: ConfigurationJSON]], discover: @escaping () async throws -> ConfigurationJSON,
+  /// `cached` renders immediately; the sheet still revalidates on open (stale-while-revalidate).
+  init(selected: [[String: ConfigurationJSON]], cached: ConfigurationJSON? = nil,
+       discover: @escaping (Bool) async throws -> ConfigurationJSON,
        onSave: @escaping ([[String: ConfigurationJSON]]) -> Void) {
-    self._selections = State(initialValue: selected); self.discover = discover; self.onSave = onSave
+    self._selections = State(initialValue: selected); self._discovery = State(initialValue: cached)
+    self.discover = discover; self.onSave = onSave
+  }
+  private var discoveredAt: Date? {
+    guard let raw = discovery?["discoveredAt"]?.string else { return nil }
+    let formatter = ISO8601DateFormatter()
+    formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+    if let date = formatter.date(from: raw) { return date }
+    formatter.formatOptions = [.withInternetDateTime]
+    return formatter.date(from: raw)
+  }
+  private func load(fresh: Bool) async {
+    loading = true; error = nil
+    defer { loading = false }
+    do { discovery = try await discover(fresh) } catch { self.error = error.localizedDescription }
+  }
+  /// Why a saved selection is missing from the list; nil while nothing has been discovered yet.
+  private func missingReason(_ selection: [String: ConfigurationJSON]) -> String? {
+    guard discovery != nil || (!loading && error != nil) else { return nil }
+    let familyDown = discovery == nil || families.contains {
+      $0["type"]?.string == selection["type"]?.string && $0["available"]?.bool == false
+    }
+    return familyDown ? "could not be verified" : "unavailable in current discovery"
   }
   private var families: [ConfigurationJSON] { discovery?["families"]?.array ?? [] }
   private var entries: [ConfigurationJSON] { families.flatMap { $0["assignments"]?.array ?? [] } }
@@ -37,8 +61,14 @@ struct PimSelectionSheet: View {
     VStack(alignment: .leading, spacing: 16) {
       Text("Choose eligible PIM access").font(.title2.bold())
       Text("Same configured account. Saving selections does not activate access.").foregroundStyle(.secondary)
-      TextField("Search roles and scopes", text: $search).textFieldStyle(.roundedBorder)
-      if loading { ProgressView("Loading eligible assignments…") }
+      HStack {
+        TextField("Search roles and scopes", text: $search).textFieldStyle(.roundedBorder)
+        if loading && discovery != nil { ProgressView().controlSize(.small) }
+        if let discoveredAt { Text("Updated \(Text(discoveredAt, style: .relative)) ago").font(.caption).foregroundStyle(.secondary).fixedSize() }
+        Button { Task { await load(fresh: true) } } label: { Label("Refresh", systemImage: "arrow.clockwise") }
+          .disabled(loading).help("Re-read eligibility from Entra, bypassing the daemon's cache")
+      }
+      if loading && discovery == nil { ProgressView("Loading eligible assignments…") }
       if let error { Text(error).foregroundStyle(.red) }
       ScrollView {
         VStack(alignment: .leading, spacing: 14) {
@@ -71,16 +101,16 @@ struct PimSelectionSheet: View {
             }
           }
           ForEach(Array(selections.enumerated()), id: \.offset) { index, selection in
-            if !entries.contains(where: { identity($0) == identity(.object(selection)) }) {
-              HStack { Text("\(selection["displayName"]?.string ?? "Saved assignment") · unavailable in current discovery").foregroundStyle(.orange); Spacer(); Button("Remove") { selections.remove(at: index) } }
+            if !entries.contains(where: { identity($0) == identity(.object(selection)) }), let reason = missingReason(selection) {
+              HStack { Text("\(selection["displayName"]?.string ?? "Saved assignment") · \(reason)").foregroundStyle(.orange); Spacer(); Button("Remove") { selections.remove(at: index) } }
             }
           }
         }
       }
       if let invalidSelection { Text(invalidSelection).font(.caption).foregroundStyle(.orange) }
-      HStack { Button("Cancel") { dismiss() }; Spacer(); Text("\(selections.count) selected").foregroundStyle(.secondary); Button("Use selections") { onSave(selections); dismiss() }.buttonStyle(.borderedProminent).disabled(loading || invalidSelection != nil) }
+      HStack { Button("Cancel") { dismiss() }; Spacer(); Text("\(selections.count) selected").foregroundStyle(.secondary); Button("Use selections") { onSave(selections); dismiss() }.buttonStyle(.borderedProminent).disabled((loading && discovery == nil) || invalidSelection != nil) }
     }.padding(24).frame(width: 660, height: 640)
-    .task { do { discovery = try await discover() } catch { self.error = error.localizedDescription }; loading = false }
+    .task { await load(fresh: false) }
   }
   private func stringBinding(_ index: Int, _ key: String, default fallback: String) -> Binding<String> {
     Binding(get: { selections.indices.contains(index) ? selections[index][key]?.string ?? fallback : fallback },

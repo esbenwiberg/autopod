@@ -11,7 +11,7 @@ func composableEditorFitsItsSheet(_ kind: ConfigurationKind, populated: Bool) th
     resolve: { _ in throw unavailable }, launch: { _ in throw unavailable },
     save: { _, _ in throw unavailable }, archive: { _ in throw unavailable },
     discoverGitHubRepositories: { [] }, discoverGitHubWorkflows: { _ in [] },
-    loadProviderAccounts: { [] }, discoverPim: { throw unavailable }, saveFromLaunch: { _ in throw unavailable })
+    loadProviderAccounts: { [] }, discoverPim: { _ in throw unavailable }, saveFromLaunch: { _ in throw unavailable })
   let document = populated ? try configurationEditorFixture(kind) : nil
   let view = ConfigurationEditorSheet(kind: kind, document: document, actions: actions)
   let hosting = NSHostingView(rootView: view)
@@ -156,7 +156,7 @@ private func configurationEditorFixture(_ kind: ConfigurationKind) throws -> Con
     resolve: { _ in throw unavailable }, launch: { _ in throw unavailable },
     save: { _, _ in throw unavailable }, archive: { _ in throw unavailable },
     discoverGitHubRepositories: { [] }, discoverGitHubWorkflows: { _ in [] },
-    loadProviderAccounts: { [] }, discoverPim: { throw unavailable }, saveFromLaunch: { _ in throw unavailable })
+    loadProviderAccounts: { [] }, discoverPim: { _ in throw unavailable }, saveFromLaunch: { _ in throw unavailable })
   let hosting = NSHostingView(rootView: ConfigurationLibraryView(actions: actions).frame(width: 880, height: 650))
   let window = NSWindow(
     contentRect: NSRect(x: 0, y: 0, width: 880, height: 650),

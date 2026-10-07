@@ -43,6 +43,31 @@ const armSchema = z.object({
     expandedProperties: z.object({ roleDefinition: display, scope: display }).optional(),
   }),
 });
+const FAMILIES = ['group', 'azure-role', 'directory-role'] as const;
+/** Eligibility changes rarely; activation re-reads fresh, so a few minutes of staleness is display-only. */
+const FAMILY_TTL_MS = 5 * 60_000;
+/** Short so a fixed permission or outage shows up quickly without hammering the provider. */
+const FAILED_FAMILY_TTL_MS = 60_000;
+const POLICY_CONCURRENCY = 6;
+interface FamilyCacheEntry {
+  at: number;
+  until: number;
+  value: PimDiscoveryFamily;
+}
+async function eachLimited<T>(
+  items: readonly T[],
+  limit: number,
+  run: (item: T) => Promise<void>,
+): Promise<void> {
+  let next = 0;
+  const worker = async () => {
+    while (next < items.length) {
+      const item = items[next++];
+      if (item !== undefined) await run(item);
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, worker));
+}
 export interface PimPolicyReader {
   maximumDurationMinutes(eligibility: PimEligibility, signal?: AbortSignal): Promise<number>;
 }
@@ -52,7 +77,8 @@ export function createPimEligibilityService(
   policy: PimPolicyReader,
   now: () => number = Date.now,
 ) {
-  let cached: { until: number; value: PimDiscovery } | null = null;
+  const familyCache = new Map<PimSelection['type'], FamilyCacheEntry>();
+  let refreshing: Promise<void> | null = null;
   async function family(
     type: PimSelection['type'],
     signal: AbortSignal,
@@ -144,6 +170,11 @@ export function createPimEligibilityService(
           continue;
         if (seen.has(item.eligibilityId)) throw new Error('Duplicate eligibility identity');
         seen.add(item.eligibilityId);
+        assignments.push(item);
+      }
+      // Policy reads are two provider round trips per assignment; sequential reads made discovery
+      // scale linearly (~1s per call). Bounded so a large eligibility list cannot fan out unchecked.
+      await eachLimited(assignments, POLICY_CONCURRENCY, async (item) => {
         try {
           const maximum = await policy.maximumDurationMinutes(item, signal);
           if (!Number.isFinite(maximum) || maximum <= 0) throw new Error('Invalid duration policy');
@@ -152,8 +183,7 @@ export function createPimEligibilityService(
           item.policyUnavailableReason =
             'Activation duration policy is unavailable for this assignment';
         }
-        assignments.push(item);
-      }
+      });
       signal.throwIfAborted();
       return { type, available: true, assignments };
     } catch (error) {
@@ -167,8 +197,7 @@ export function createPimEligibilityService(
       };
     }
   }
-  async function discover(fresh = false): Promise<PimDiscovery> {
-    if (!fresh && cached && cached.until > now()) return structuredClone(cached.value);
+  async function load(types: readonly PimSelection['type'][]): Promise<void> {
     const signal = AbortSignal.timeout(45_000);
     const me = z
       .object({ id: text })
@@ -179,16 +208,44 @@ export function createPimEligibilityService(
         'PIM_ACCOUNT_CHANGED',
         403,
       );
-    const families = await Promise.all(
-      (['group', 'azure-role', 'directory-role'] as const).map((type) => family(type, signal)),
-    );
-    const value = {
+    const fetched = await Promise.all(types.map((type) => family(type, signal)));
+    const at = now();
+    for (const value of fetched)
+      familyCache.set(value.type, {
+        at,
+        until: at + (value.available ? FAMILY_TTL_MS : FAILED_FAMILY_TTL_MS),
+        value,
+      });
+  }
+  /**
+   * Cached per family so a family the provider refuses (e.g. missing Graph scopes) cannot keep
+   * the healthy ones uncached. `fresh` always re-reads the provider; activation relies on that.
+   */
+  async function discover(fresh = false): Promise<PimDiscovery> {
+    if (fresh) await load(FAMILIES);
+    else
+      for (let round = 0; round < 2; round++) {
+        const stale = FAMILIES.filter((type) => !((familyCache.get(type)?.until ?? 0) > now()));
+        if (stale.length === 0) break;
+        // Concurrent opens share one provider round instead of each paying for it.
+        refreshing ??= load(stale).finally(() => {
+          refreshing = null;
+        });
+        await refreshing;
+      }
+    const entries: FamilyCacheEntry[] = [];
+    for (const type of FAMILIES) {
+      const entry = familyCache.get(type);
+      if (!entry)
+        configurationError('PIM discovery is incomplete', 'PIM_DISCOVERY_INCOMPLETE', 503);
+      entries.push(entry);
+    }
+    return structuredClone({
       account: client.account,
-      discoveredAt: new Date(now()).toISOString(),
-      families,
-    };
-    if (families.every((item) => item.available)) cached = { until: now() + 30_000, value };
-    return structuredClone(value);
+      // The oldest family bounds how stale the whole answer may be.
+      discoveredAt: new Date(Math.min(...entries.map((entry) => entry.at))).toISOString(),
+      families: entries.map((entry) => entry.value),
+    });
   }
   return {
     discover,
