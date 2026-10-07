@@ -331,8 +331,8 @@ export function registerProfileCommands(program: Command, getClient: () => Autop
         healthTimeout: 120,
         smokePages: [{ path: '/' }],
         maxValidationAttempts: 3,
-        defaultModel: 'claude-opus-5',
-        reviewerModel: 'claude-sonnet-5',
+        defaultModel: 'claude-opus-5-5',
+        reviewerModel: 'claude-sonnet-5-5',
         defaultRuntime: 'claude',
         reasoningEffort: 'auto',
         customInstructions: null,
@@ -342,7 +342,7 @@ export function registerProfileCommands(program: Command, getClient: () => Autop
           askAi: {
             enabled: false,
             // Legacy wire compatibility; ask_ai and AI review use reviewerModel.
-            model: 'claude-sonnet-5',
+            model: 'claude-sonnet-5-5',
             maxCalls: 5,
           },
           advisor: { enabled: false },

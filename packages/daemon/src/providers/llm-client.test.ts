@@ -15,8 +15,8 @@ const logger = {
 
 describe('resolveAnthropicModelId', () => {
   it('expands defensive Claude aliases to current canonical profile targets', () => {
-    expect(resolveAnthropicModelId('opus')).toBe('claude-opus-5');
-    expect(resolveAnthropicModelId('sonnet')).toBe('claude-sonnet-5');
+    expect(resolveAnthropicModelId('opus')).toBe('claude-opus-5-5');
+    expect(resolveAnthropicModelId('sonnet')).toBe('claude-sonnet-5-5');
     expect(resolveAnthropicModelId('haiku')).toBe('claude-haiku-4-5');
   });
 

@@ -6,8 +6,8 @@ export interface ModelPrice {
   outputPer1M: number;
 }
 
-export const CLAUDE_DEFAULT_MODEL = 'claude-opus-5';
-export const CLAUDE_REVIEWER_MODEL = 'claude-sonnet-5';
+export const CLAUDE_DEFAULT_MODEL = 'claude-opus-5-5';
+export const CLAUDE_REVIEWER_MODEL = 'claude-sonnet-5-5';
 export const LEGACY_CLAUDE_MODEL_ALIASES: ReadonlySet<string> = new Set([
   'fable',
   'opus',
