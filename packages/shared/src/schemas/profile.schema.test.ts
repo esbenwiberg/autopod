@@ -184,9 +184,9 @@ describe('createProfileSchema model validation', () => {
     expect(parsed.escalation?.askAi.model).toBe('claude-sonnet-4-6');
 
     const defaulted = createProfileSchema.parse({ name: 'defaulted' });
-    expect(defaulted.defaultModel).toBe('claude-opus-5');
-    expect(defaulted.reviewerModel).toBe('claude-sonnet-5');
-    expect(defaulted.escalation?.askAi.model).toBe('claude-sonnet-5');
+    expect(defaulted.defaultModel).toBe('claude-opus-5-5');
+    expect(defaulted.reviewerModel).toBe('claude-sonnet-5-5');
+    expect(defaulted.escalation?.askAi.model).toBe('claude-sonnet-5-5');
   });
 
   it('accepts OpenRouter profile credentials and API key field', () => {

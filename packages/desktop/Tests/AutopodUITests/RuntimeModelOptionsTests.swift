@@ -6,6 +6,9 @@ import Testing
 
     #expect(options == [
         "auto",
+        "gpt-6.1-sol",
+        "gpt-6-astra",
+        "gpt-6-luna",
         "gpt-5.6-sol",
         "gpt-5.6-terra",
         "gpt-5.6-luna",
@@ -23,6 +26,9 @@ import Testing
     let reviewerOptions = RuntimeModelOptions.options(for: .claude, role: .reviewerModel).map(\.value)
 
     #expect(defaultOptions == [
+        "claude-opus-5-5",
+        "claude-sonnet-5-5",
+        "claude-fable-5-1",
         "claude-opus-5",
         "claude-sonnet-5",
         "claude-fable-5",
@@ -31,6 +37,9 @@ import Testing
         "claude-haiku-4-5",
     ])
     #expect(reviewerOptions == [
+        "claude-sonnet-5-5",
+        "claude-opus-5-5",
+        "claude-fable-5-1",
         "claude-sonnet-5",
         "claude-opus-5",
         "claude-fable-5",
@@ -38,8 +47,8 @@ import Testing
         "claude-opus-4-8",
         "claude-haiku-4-5",
     ])
-    #expect(RuntimeModelOptions.fallback(for: .claude, role: .defaultModel) == "claude-opus-5")
-    #expect(RuntimeModelOptions.fallback(for: .claude, role: .reviewerModel) == "claude-sonnet-5")
+    #expect(RuntimeModelOptions.fallback(for: .claude, role: .defaultModel) == "claude-opus-5-5")
+    #expect(RuntimeModelOptions.fallback(for: .claude, role: .reviewerModel) == "claude-sonnet-5-5")
 }
 
 @Test func claude5OptionsUseExactLabelsAndStandardPrices() {
@@ -59,7 +68,32 @@ import Testing
     )
     #expect(
         RuntimeModelOptions.priceSummary(for: "claude-sonnet-5", runtime: .claude)
-            == "$3 in / $0.30 cached / $15 out per 1M"
+            == "$2 in / $0.20 cached / $10 out per 1M"
+    )
+}
+
+@Test func claude55AndGpt6OptionsUseExactLabelsAndStandardPrices() {
+    let claude = RuntimeModelOptions.options(for: .claude, role: .defaultModel)
+    let codex = RuntimeModelOptions.options(for: .codex, role: .defaultModel)
+    let labels = Dictionary(uniqueKeysWithValues: (claude + codex).map { ($0.value, $0.label) })
+
+    #expect(labels["claude-fable-5-1"] == "Fable 5.1")
+    #expect(labels["claude-opus-5-5"] == "Opus 5.5")
+    #expect(labels["claude-sonnet-5-5"] == "Sonnet 5.5")
+    #expect(labels["gpt-6-astra"] == "GPT-6 Astra")
+    #expect(labels["gpt-6.1-sol"] == "GPT-6.1 Sol")
+    #expect(labels["gpt-6-luna"] == "GPT-6 Luna")
+    #expect(
+        RuntimeModelOptions.priceSummary(for: "claude-opus-5-5", runtime: .claude)
+            == "$4 in / $0.20 cached / $20 out per 1M"
+    )
+    #expect(
+        RuntimeModelOptions.priceSummary(for: "gpt-6.1-sol", runtime: .codex)
+            == "$2 in / $0.10 cached / $10 out per 1M"
+    )
+    #expect(
+        RuntimeModelOptions.priceSummary(for: "gpt-6-astra", runtime: .codex)
+            == "$10 in / $1 cached / $50 out per 1M"
     )
 }
 
@@ -68,10 +102,10 @@ import Testing
         RuntimeModelOptions.normalized("opus", for: .codex, role: .defaultModel) == "auto"
     )
     #expect(
-        RuntimeModelOptions.normalized("gpt-5", for: .claude, role: .defaultModel) == "claude-opus-5"
+        RuntimeModelOptions.normalized("gpt-5", for: .claude, role: .defaultModel) == "claude-opus-5-5"
     )
     #expect(
-        RuntimeModelOptions.normalized("gpt-5", for: .claude, role: .reviewerModel) == "claude-sonnet-5"
+        RuntimeModelOptions.normalized("gpt-5", for: .claude, role: .reviewerModel) == "claude-sonnet-5-5"
     )
     #expect(
         RuntimeModelOptions.normalized("sonnet", for: .copilot, role: .defaultModel) == "auto"
@@ -105,6 +139,9 @@ func claudeModelOptionsPreserveExplicitCanonical4xValues(
     )
 
     #expect(options.map(\.value) == [
+        "claude-opus-5-5",
+        "claude-sonnet-5-5",
+        "claude-fable-5-1",
         "claude-opus-5",
         "claude-sonnet-5",
         "claude-fable-5",
@@ -126,6 +163,9 @@ func claudeModelOptionsPreserveExplicitCanonical4xValues(
     #expect(
         options == [
             "auto",
+            "gpt-6.1-sol",
+            "gpt-6-astra",
+            "gpt-6-luna",
             "gpt-5.6-sol",
             "gpt-5.6-terra",
             "gpt-5.6-luna",
@@ -208,7 +248,7 @@ func claudeModelOptionsPreserveExplicitCanonical4xValues(
     )
     #expect(
         RuntimeModelOptions.normalized("anthropic/claude-sonnet-4", for: .claude, role: .defaultModel)
-            == "claude-opus-5"
+            == "claude-opus-5-5"
     )
     #expect(RuntimeModelOptions.normalized("auto", for: .copilot, role: .defaultModel) == "auto")
 }

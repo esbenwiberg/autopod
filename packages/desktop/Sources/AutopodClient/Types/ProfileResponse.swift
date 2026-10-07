@@ -273,8 +273,8 @@ public struct ProfileResponse: Codable, Sendable {
   public init() {
     name = ""; repoUrl = ""; defaultBranch = "main"; template = "node22"
     buildCommand = nil; startCommand = nil; healthPath = "/"; healthTimeout = 120
-    smokePages = []; maxValidationAttempts = 3; defaultModel = "claude-opus-5"
-    reviewerModel = "claude-sonnet-5"; reasoningEffort = .auto
+    smokePages = []; maxValidationAttempts = 3; defaultModel = "claude-opus-5-5"
+    reviewerModel = "claude-sonnet-5-5"; reasoningEffort = .auto
     defaultRuntime = "claude"; executionTarget = "local"
     agentDonePrompt = nil
     escalation = .init(); mcpServers = []; claudeMdSections = []; skills = []
@@ -482,7 +482,7 @@ public struct AskAiConfigResponse: Codable, Sendable {
   public var model: String
   public var maxCalls: Int
 
-  public init() { enabled = true; model = "claude-sonnet-4-6"; maxCalls = 3 }
+  public init() { enabled = true; model = "claude-sonnet-5-5"; maxCalls = 3 }
 
   public init(from decoder: any Decoder) throws {
     let c = try decoder.container(keyedBy: CodingKeys.self)
