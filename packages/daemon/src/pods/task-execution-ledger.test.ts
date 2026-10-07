@@ -40,6 +40,39 @@ function fixture() {
 const binding = { runtime: 'codex', model: 'model', providerAccountId: 'account' };
 
 describe('task-wide execution accounting', () => {
+  it('raises or removes the shared limit without rewriting launch evidence or erasing usage', () => {
+    const { db, repo } = fixture();
+    try {
+      const ledger = repo.taskExecutions;
+      if (!ledger) throw new Error('Missing task ledger');
+      repo.update('root', { inputTokens: 150 });
+      expect(ledger.snapshot('fix').budgetCheck?.status).toBe('exhausted');
+      expect(ledger.raiseBudget('fix', 200, 100, 'operator').tokenBudget).toBe(200);
+      expect(ledger.snapshot('root').tokenBudget).toBe(200);
+      expect(ledger.snapshot('rerun').tokenBudget).toBe(100);
+      expect(() => ledger.raiseBudget('root', null, 100, 'stale')).toThrow('changed');
+      expect(() => ledger.raiseBudget('root', 199, 200, 'operator')).toThrow('raises or removes');
+      expect(ledger.raiseBudget('root', null, 200, 'operator')).toMatchObject({
+        tokenBudget: null,
+        recordedInputTokens: 150,
+        budgetCheck: { status: 'unlimited' },
+      });
+      expect(ledger.raiseBudget('root', null, null, 'operator').tokenBudget).toBeNull();
+      expect(repo.getOrThrow('root').tokenBudget).toBe(100);
+      expect(
+        db
+          .prepare(
+            'SELECT previous_budget,token_budget,actor_id FROM task_budget_changes ORDER BY sequence',
+          )
+          .all(),
+      ).toEqual([
+        { previous_budget: 100, token_budget: 200, actor_id: 'operator' },
+        { previous_budget: 200, token_budget: null, actor_id: 'operator' },
+      ]);
+    } finally {
+      db.close();
+    }
+  });
   it('counts native aggregate and isolated reviewer usage once across linked pods', () => {
     const { db, repo } = fixture();
     try {

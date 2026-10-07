@@ -22,6 +22,12 @@ import {
 import type { ConfigurationSecurityPolicyStore } from '../../configuration/security-policy.js';
 
 export interface ConfigurationRouteDependencies {
+  raiseBudget?: (
+    podId: string,
+    tokenBudget: number | null,
+    expectedBudget: number | null,
+    actorId: string,
+  ) => Promise<import('@autopod/shared').TaskExecutionSummary>;
   deployments?: import('../../actions/deployment-service.js').DeploymentService;
   series?: import('../../configuration/series-launches.js').SeriesLaunches;
   watchers?: import('../../issue-watcher/watcher-binding-repository.js').WatcherBindingRepository;
@@ -63,6 +69,18 @@ export function configurationRoutes(
   deps: ConfigurationRouteDependencies,
 ): void {
   const store = deps.resolution.store;
+  if (deps.raiseBudget) {
+    const raiseBudget = deps.raiseBudget;
+    app.post('/pods/:podId/budget', async (request) => {
+      const { podId } = z.object({ podId: configurationIdSchema }).parse(request.params);
+      const limit = z.number().int().positive().max(Number.MAX_SAFE_INTEGER).nullable();
+      const body = z
+        .object({ tokenBudget: limit, expectedBudget: limit })
+        .strict()
+        .parse(request.body);
+      return raiseBudget(podId, body.tokenBudget, body.expectedBudget, request.user.oid);
+    });
+  }
   app.get('/pods/:podId/configuration', async (request) => {
     const { podId } = request.params as { podId: string };
     const config = deps.resolution.readLaunch?.(podId);

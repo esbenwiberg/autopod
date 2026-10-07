@@ -57,3 +57,44 @@ it('keeps Goal controls revision-bound and refuses objective or budget replaceme
     db.close();
   }
 });
+
+it('accepts explicit operator budget removal and rejects malformed budget changes', async () => {
+  const db = createTestDb();
+  const app = Fastify();
+  app.setErrorHandler(errorHandler);
+  app.addHook('onRequest', async (request) => {
+    request.user = { oid: 'operator' } as typeof request.user;
+  });
+  const { services } = createTestConfiguration(db);
+  const raiseBudget = vi.fn(
+    async () => ({ tokenBudget: null }) as import('@autopod/shared').TaskExecutionSummary,
+  );
+  configurationRoutes(app, { db, resolution: services, capabilities: () => ({}), raiseBudget });
+  try {
+    for (const tokenBudget of [0, -1, 1.5, 'off', Number.MAX_SAFE_INTEGER + 1]) {
+      expect(
+        (
+          await app.inject({
+            method: 'POST',
+            url: '/pods/pod/budget',
+            payload: { tokenBudget, expectedBudget: 100 },
+          })
+        ).statusCode,
+      ).toBe(400);
+    }
+    expect(raiseBudget).not.toHaveBeenCalled();
+    expect(
+      (
+        await app.inject({
+          method: 'POST',
+          url: '/pods/pod/budget',
+          payload: { tokenBudget: null, expectedBudget: 100 },
+        })
+      ).statusCode,
+    ).toBe(200);
+    expect(raiseBudget).toHaveBeenCalledExactlyOnceWith('pod', null, 100, 'operator');
+  } finally {
+    await app.close();
+    db.close();
+  }
+});

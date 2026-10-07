@@ -59,6 +59,8 @@ export interface NativeGoalSession {
   get(): Promise<NativeGoalObservation | null>;
   start(objective: string, remainingTokens: number | null): Promise<NativeGoalObservation>;
   resume(remainingTokens: number | null): Promise<NativeGoalObservation>;
+  /** Change only the allowance; preserve objective, counters and native status. */
+  updateBudget?(remainingTokens: number | null): Promise<NativeGoalObservation>;
   pause(): Promise<NativeGoalObservation>;
   clear(): Promise<void>;
   /** Resolves only after process termination is confirmed. */

@@ -340,6 +340,14 @@ export class AutopodClient {
     return this.request('GET', `/pods/${encodeURIComponent(id)}/cost`);
   }
 
+  async raiseTaskBudget(
+    id: string,
+    tokenBudget: number | null,
+    expectedBudget: number | null,
+  ): Promise<TaskExecutionSummary> {
+    return this.request('POST', `/pods/${id}/budget`, { tokenBudget, expectedBudget });
+  }
+
   async getTaskExecution(id: string): Promise<TaskExecutionSummary> {
     return this.request('GET', `/pods/${id}/task-execution`);
   }
