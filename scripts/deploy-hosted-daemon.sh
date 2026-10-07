@@ -179,6 +179,9 @@ DEPS_CHANGED=0
 LIVE_KNOWN=0
 if git cat-file -e "${LIVE_SHA}^{commit}" 2>/dev/null; then
   LIVE_KNOWN=1
+  if [ "$LIVE_SHA" != "$TARGET_SHA" ] && git merge-base --is-ancestor "$TARGET_SHA_FULL" "$LIVE_SHA"; then
+    die "live release $LIVE_SHA already includes target $TARGET_SHA; refusing to downgrade (use explicit --rollback for intentional rollback)"
+  fi
   if ! git diff --quiet "$LIVE_SHA" "$TARGET_SHA_FULL" -- '**/package.json' 'package.json' 'pnpm-lock.yaml' 2>/dev/null; then
     DEPS_CHANGED=1
   fi
@@ -539,6 +542,10 @@ if ! SWAP_OUT="$(remote "
 set -eu
 cd $CURRENT_LINK/packages/daemon
 PREV=\$(readlink $CURRENT_LINK)
+if [ \"\$(basename \"\$PREV\")\" != '$LIVE_SHA' ]; then
+  echo 'live release changed during staging; refusing to replace another deployment'
+  exit 1
+fi
 FORCE=$FORCE
 FINAL_ACTIVE=\$(sudo -u ewi -H env RESTART_BLOCKING='$RESTART_BLOCKING' node -e \"const Database = require('better-sqlite3'); const db = new Database('/data/autopod/autopod.db', { readonly: true }); const statuses = process.env.RESTART_BLOCKING.split(/\\\\s+/).filter(Boolean); const placeholders = statuses.map(() => '?').join(','); const row = db.prepare('select count(*) as n from pods where status in (' + placeholders + ')').get(...statuses); console.log(row.n);\")
 if [ \"\$FINAL_ACTIVE\" != 0 ]; then
