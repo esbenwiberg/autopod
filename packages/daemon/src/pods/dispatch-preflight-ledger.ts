@@ -71,7 +71,20 @@ interface RequestRow {
   repository: string;
   profileSnapshot: string | null;
   frozenRepository: string | null;
+  scheduledJobId: string | null;
 }
+const FINISHED = new Set(['complete', 'failed', 'killed', 'rejected']);
+/**
+ * A recurring schedule repeats identical work by design: its finished (or deleted) runs are not
+ * duplicates of the next one. Its still-active runs are, so overlapping runs keep blocking.
+ */
+const finishedRunOfSameSchedule = (
+  current: string | null,
+  prior: { scheduledJobId: string | null; status: string | null },
+): boolean =>
+  current !== null &&
+  prior.scheduledJobId === current &&
+  (prior.status === null || FINISHED.has(prior.status));
 const hash = (row: Pick<RequestRow, 'task' | 'contract'>): string => {
   if (row.task.length > 50000 || (row.contract?.length ?? 0) > 1048576)
     throw new AutopodError(
@@ -120,7 +133,7 @@ const requestRepository = (row: RequestRow): string => {
 };
 const selectRequest = `SELECT p.id, p.rowid AS rowNumber, substr(p.task,1,50001) AS task, substr(p.contract,1,1048577) AS contract, p.status, p.linked_pod_id AS linkedPodId,
   p.lifecycle_generation AS generation, e.task_id AS taskId, e.execution_id AS executionId,
-  COALESCE(b.base_branch, p.base_branch, json_extract(CASE WHEN json_valid(p.profile_snapshot) THEN p.profile_snapshot ELSE NULL END, '$.defaultBranch')) AS baseBranch, f.repo_url AS repository, b.repository AS frozenRepository, substr(p.profile_snapshot,1,1048577) AS profileSnapshot
+  COALESCE(b.base_branch, p.base_branch, json_extract(CASE WHEN json_valid(p.profile_snapshot) THEN p.profile_snapshot ELSE NULL END, '$.defaultBranch')) AS baseBranch, f.repo_url AS repository, b.repository AS frozenRepository, substr(p.profile_snapshot,1,1048577) AS profileSnapshot, p.scheduled_job_id AS scheduledJobId
   FROM pods p JOIN task_executions e ON e.pod_id = p.id LEFT JOIN profiles f ON f.name = p.profile_name LEFT JOIN execution_dispatch_bindings b ON b.execution_id = e.execution_id`;
 export function createDispatchPreflightLedger(db: Database.Database): DispatchPreflightLedger {
   const get = (id: string): RequestRow => {
@@ -262,7 +275,9 @@ export function createDispatchPreflightLedger(db: Database.Database): DispatchPr
         const cutoff = new Date(Date.now() - 7 * 86400000).toISOString();
         const conflicts = new Map<string, DispatchPreflightEvidence['conflicts'][number]>();
         const previous = db
-          .prepare(`SELECT d.pod_id AS podId,d.execution_id AS executionId,p.status,d.checked_at AS checkedAt
+          .prepare(`SELECT d.pod_id AS podId,d.execution_id AS executionId,p.status,d.checked_at AS checkedAt,
+          (SELECT rp.scheduled_job_id FROM retained_task_executions re JOIN retained_pods rp ON rp.id = re.pod_id
+            WHERE re.execution_id = d.execution_id LIMIT 1) AS scheduledJobId
         FROM execution_dispatch_preflights d LEFT JOIN task_executions e ON e.execution_id = d.execution_id LEFT JOIN pods p ON p.id = e.pod_id
         WHERE d.repository = ? AND d.base_branch = ? AND d.work_hash = ? AND d.task_id <> ? AND d.status = 'admitted'
         AND (d.checked_at >= ? OR p.status NOT IN ('complete','failed','killed','rejected')) GROUP BY d.execution_id ORDER BY MAX(d.checked_at) DESC LIMIT 101`)
@@ -271,6 +286,7 @@ export function createDispatchPreflightLedger(db: Database.Database): DispatchPr
           executionId: string;
           status: string | null;
           checkedAt: string;
+          scheduledJobId: string | null;
         }>;
         if (previous.length > 100)
           throw new AutopodError(
@@ -278,13 +294,15 @@ export function createDispatchPreflightLedger(db: Database.Database): DispatchPr
             'DISPATCH_SCOPE_TOO_LARGE',
             409,
           );
-        for (const prior of previous)
+        for (const prior of previous) {
+          if (finishedRunOfSameSchedule(pod.scheduledJobId, prior)) continue;
           conflicts.set(prior.executionId, {
             podId: prior.podId,
             executionId: prior.executionId,
             status: prior.status ?? 'deleted',
             evidence: 'dispatch_receipt',
           });
+        }
         // Older queued/historical requests may predate this ledger. Match exact task
         // text, then canonical contract, using bounded projections; no semantic guess.
         const legacy = db
@@ -301,7 +319,12 @@ export function createDispatchPreflightLedger(db: Database.Database): DispatchPr
             409,
           );
         for (const prior of legacy) {
-          if (conflicts.has(prior.executionId) || hash(prior) !== workHash) continue;
+          if (
+            conflicts.has(prior.executionId) ||
+            finishedRunOfSameSchedule(pod.scheduledJobId, prior) ||
+            hash(prior) !== workHash
+          )
+            continue;
           if (!prior.baseBranch)
             throw new AutopodError(
               'Historical base binding unavailable; reconcile before dispatch',
@@ -339,8 +362,30 @@ export function createDispatchPreflightLedger(db: Database.Database): DispatchPr
               recordedAt: intent.recorded_at as string,
             }
           : null;
+        // The rerun may name the conflicting execution, or the blocked request the human was
+        // shown (what the desktop/CLI rerun of a failed pod sends). The latter authorizes only
+        // the conflicts that blocked request recorded; anything newer still needs review.
+        const reviewedByBlockedSource = (): boolean => {
+          const blocked = db
+            .prepare(
+              `SELECT conflicts, work_hash AS workHash FROM execution_dispatch_preflights
+              WHERE execution_id = ? AND status = 'review_required' AND repository = ? AND base_branch = ?
+              ORDER BY rowid DESC LIMIT 1`,
+            )
+            .get(intent?.source_execution_id, repository, baseBranch) as
+            | { conflicts: string; workHash: string }
+            | undefined;
+          if (!blocked || blocked.workHash !== workHash) return false;
+          const reviewed = new Set(
+            (JSON.parse(blocked.conflicts) as Array<{ executionId: string }>).map(
+              (entry) => entry.executionId,
+            ),
+          );
+          return [...conflicts.keys()].every((executionId) => reviewed.has(executionId));
+        };
         const authorized =
-          intent?.work_hash === workHash && conflicts.has(intent.source_execution_id as string);
+          intent?.work_hash === workHash &&
+          (conflicts.has(intent.source_execution_id as string) || reviewedByBlockedSource());
         const status = conflicts.size === 0 || authorized ? 'admitted' : 'review_required';
         const id = randomUUID();
         db.prepare(`INSERT INTO execution_dispatch_preflights(id,execution_id,task_id,pod_id,generation,version,repository,base_branch,base_commit_sha,work_hash,status,conflicts,rerun_intent,checked_at)
