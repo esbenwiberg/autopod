@@ -60,6 +60,59 @@ function fixture() {
   );
   return { request, config, runtime, ensure, exec, binding };
 }
+
+it('tears down an exited sandbox after its execution profile is retired without enabling its route', async () => {
+  const f = fixture();
+  f.request.route.executionTarget = 'sandbox';
+  const kill = vi.fn(async () => {});
+  f.binding.manager.kill = kill;
+  const replacement = { ...f.binding, route: { ...f.request.route, model: 'replacement' } };
+  const runtime = new ManagedContainerRuntime(
+    [replacement, { ...replacement, profileId: 'another-profile' }],
+    () => ({ request: f.request, podId: 'pod-one', createdAt: 100, observedExit: true }),
+    'fixture-supervisor',
+  );
+  await expect(runtime.preflight(f.request)).rejects.toThrow('managed-route-unavailable');
+  await expect(runtime.cleanup('owned-sandbox')).resolves.toBe(true);
+  expect(kill).toHaveBeenCalledExactlyOnceWith('owned-sandbox');
+  expect(f.exec).not.toHaveBeenCalled();
+  expect(f.ensure).not.toHaveBeenCalled();
+});
+
+it.each(['unbound', 'exit-unobserved', 'local', 'ambiguous-manager', 'network-cleanup'])(
+  'refuses retired-profile teardown when %s',
+  async (failure) => {
+    const f = fixture();
+    f.request.route.executionTarget = failure === 'local' ? 'local' : 'sandbox';
+    const kill = vi.fn(async () => {});
+    f.binding.manager.kill = kill;
+    const replacement = {
+      ...f.binding,
+      route: { ...f.request.route, model: 'replacement' },
+      ...(failure === 'network-cleanup' ? { cleanupNetwork: async () => {} } : {}),
+    };
+    const runtime = new ManagedContainerRuntime(
+      failure === 'ambiguous-manager'
+        ? [replacement, { ...replacement, manager: { ...f.binding.manager } }]
+        : [replacement],
+      () =>
+        failure === 'unbound'
+          ? null
+          : {
+              request: f.request,
+              podId: 'pod-one',
+              createdAt: 100,
+              observedExit: failure !== 'exit-unobserved',
+            },
+      'fixture-supervisor',
+    );
+    await expect(runtime.cleanup('owned-sandbox')).rejects.toThrow(
+      failure === 'unbound' ? 'managed-runtime-unbound' : 'managed-route-unavailable',
+    );
+    expect(kill).not.toHaveBeenCalled();
+    expect(f.exec).not.toHaveBeenCalled();
+  },
+);
 it('read-only/no-web mounts and exact routes reach the trusted guard with no worker credential', async () => {
   const f = fixture();
   await f.runtime.ensure('pod-one', f.request, () => {});

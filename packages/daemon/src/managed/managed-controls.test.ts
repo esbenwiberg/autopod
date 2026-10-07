@@ -4,6 +4,76 @@ import { digest } from './canonical.js';
 import { ManagedControls } from './managed-controls.js';
 import type { ManagedSourceDelivery } from './source-delivery.js';
 
+it.each([false, true])(
+  'replays admitted cleanup without reopening deleted source (initial removal=%s)',
+  async (removed) => {
+    const f = fixture();
+    try {
+      const service = f.service();
+      const controls = new ManagedControls(service);
+      const handle = await service.start('installation-one', f.request);
+      const spec = structuredClone(f.request);
+      spec.outputs.artifacts = { mode: 'none' };
+      spec.outputs.source = {
+        mode: 'branch',
+        repository: 'repo',
+        remote: 'origin',
+        head: 'worker/one',
+        base: 'main',
+      };
+      f.db
+        .prepare(
+          "UPDATE managed_pods SET request_json=?,observed_exit=1,state='killed',exit_code=-15 WHERE pod_id=?",
+        )
+        .run(JSON.stringify(spec), handle.podId);
+      const unchanged = vi.fn(async () => true);
+      service.source = {
+        candidate: () => {
+          throw new Error('source-candidate-unavailable');
+        },
+        unchanged,
+      } as unknown as ManagedSourceDelivery;
+      f.runtime.cleanup = vi.fn(async () => true).mockResolvedValueOnce(removed);
+      const request = {
+        schemaVersion: 1,
+        dispatcherAttemptId: f.request.dispatcherAttemptId,
+        grantId: f.request.effectiveGrant.grantId,
+        grantRevision: 1,
+        operation: 'cleanup',
+      };
+      await expect(
+        controls.control('installation-one', handle.podId, request, 'cleanup'),
+      ).resolves.toMatchObject({ cleanup: removed ? 'observed' : 'requested' });
+      unchanged.mockRejectedValue(new Error('workspace already removed'));
+      for (const key of ['cleanup', 'another-cleanup']) {
+        await expect(
+          controls.control('installation-one', handle.podId, request, key),
+        ).resolves.toMatchObject({ cleanup: 'observed' });
+      }
+      expect(unchanged).toHaveBeenCalledOnce();
+      expect(f.runtime.cleanup).toHaveBeenCalledTimes(removed ? 1 : 2);
+      await expect(
+        controls.control(
+          'installation-one',
+          handle.podId,
+          { ...request, grantRevision: 2 },
+          'stale',
+        ),
+      ).rejects.toThrow('managed-stale-grant');
+      await expect(
+        controls.control(
+          'installation-one',
+          handle.podId,
+          { ...request, operation: 'stop' },
+          'cleanup',
+        ),
+      ).rejects.toThrow('managed-control-conflict');
+    } finally {
+      f.close();
+    }
+  },
+);
+
 it('status is passive, events retain IDs across restart, and stop is not observed termination', async () => {
   const f = fixture();
   try {
