@@ -975,7 +975,7 @@ class DelayedLock:
 module.threading=types.SimpleNamespace(Lock=DelayedLock)
 module.serve(root,0,10,module.AGENT_MAX_REQUEST)
 `;
-  const child = spawn('python3', ['-c', wrapper, root, script], { stdio: 'pipe' });
+  const child = spawn('python3', ['-B', '-c', wrapper, root, script], { stdio: 'pipe' });
   try {
     const ready = await waitForJson(join(root, 'channel-ready.json'));
     const endpoint = `http://127.0.0.1:${ready.port as number}/failure`;
