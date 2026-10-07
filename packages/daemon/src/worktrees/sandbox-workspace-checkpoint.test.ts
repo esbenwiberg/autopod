@@ -62,13 +62,57 @@ describe('checkpointSandboxWorkspace', () => {
   });
 
   afterEach(async () => {
-    for (const sequence of [1, 2]) {
+    for (const sequence of [1, 2, 3]) {
       const checkpointPath = `/tmp/.autopod-checkpoint-${path.basename(tmpRoot)}-${sequence}.bundle`;
       await rm(checkpointPath, { force: true });
       await rm(`${checkpointPath}.meta`, { force: true });
     }
     await rm(tmpRoot, { recursive: true, force: true });
   });
+
+  it('can publish again after recapturing unchanged work and resuming in a fresh sandbox', async () => {
+    const seed = path.join(tmpRoot, 'seed');
+    const remote = path.join(tmpRoot, 'remote.git');
+    const host = path.join(tmpRoot, 'host');
+    const sandbox = path.join(tmpRoot, 'sandbox');
+    const resumed = path.join(tmpRoot, 'resumed');
+    await git(tmpRoot, ['init', '--initial-branch=main', seed]);
+    await writeFile(path.join(seed, 'tracked.txt'), 'base\n');
+    await git(seed, ['add', '.']);
+    await git(seed, ['commit', '-m', 'base']);
+    await git(tmpRoot, ['clone', '--bare', seed, remote]);
+    await git(tmpRoot, ['clone', remote, host]);
+    await git(tmpRoot, ['clone', remote, sandbox]);
+    await git(host, ['checkout', '-b', 'feature']);
+    await git(sandbox, ['checkout', '-b', 'feature']);
+    await writeFile(path.join(sandbox, 'tracked.txt'), 'first implementation\n');
+    await git(sandbox, ['commit', '-am', 'implementation']);
+    const capture = (directory: string, sequence: number) =>
+      checkpointSandboxWorkspace({
+        containerManager: createSandboxContainerManager(directory),
+        containerId: 'sandbox-1',
+        podId: path.basename(tmpRoot),
+        worktreePath: host,
+        sequence,
+      });
+    const first = await capture(sandbox, 1);
+    expect(first.materialized).toBe(true);
+    await git(host, ['push', 'origin', 'HEAD:refs/heads/feature']);
+    // Rework captures the stopped old sandbox before creating its replacement.
+    // A later wall-clock second must not invent a sibling of the published tip.
+    await new Promise((resolve) => setTimeout(resolve, 1100));
+    const repeated = await capture(sandbox, 2);
+    expect(repeated.materialized).toBe(true);
+    await git(host, ['push', 'origin', 'HEAD:refs/heads/feature']);
+    expect(repeated.snapshotCommit).toBe(first.snapshotCommit);
+    await git(tmpRoot, ['clone', '--branch', 'feature', host, resumed]);
+    await writeFile(path.join(resumed, 'tracked.txt'), 'reworked implementation\n');
+    await git(resumed, ['commit', '-am', 'rework']);
+    const third = await capture(resumed, 3);
+    expect(third.materialized).toBe(true);
+    await git(host, ['push', 'origin', 'HEAD:refs/heads/feature']);
+    await git(host, ['merge-base', '--is-ancestor', first.snapshotCommit, third.snapshotCommit]);
+  }, 15000);
 
   it('captures and materializes dirty sandbox work through a real Git bundle', async () => {
     const seed = path.join(tmpRoot, 'seed');
