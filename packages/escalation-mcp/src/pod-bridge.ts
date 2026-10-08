@@ -43,6 +43,7 @@ export interface PodBridge {
   createEscalation(escalation: EscalationRequest): void;
   resolveEscalation(escalationId: string, response: EscalationResponse): void;
   getAiEscalationCount(podId: string): number;
+  getAutoPauseCount(podId: string): number;
   getMaxAiCalls(podId: string): number;
   getAutoPauseThreshold(podId: string): number;
   getHumanResponseTimeout(podId: string): number;
