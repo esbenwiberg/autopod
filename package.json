@@ -32,7 +32,8 @@
       "@azure/msal-node@2>uuid": "11.1.1",
       "esbuild@>=0.27.3 <0.28.1": "0.28.1",
       "@grpc/grpc-js@>=1.14.0 <1.14.5": "1.14.5",
-      "brace-expansion@>=5.0.0 <5.0.12": "5.0.12"
+      "brace-expansion@>=5.0.0 <5.0.12": "5.0.12",
+      "onnxruntime-node@1.24.3>global-agent": "4.1.3"
     }
   }
 }
