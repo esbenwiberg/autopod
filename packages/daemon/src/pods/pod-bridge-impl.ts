@@ -41,7 +41,7 @@ import {
   hashDiff,
   runPreSubmitReview,
 } from '../validation/pre-submit-review.js';
-import { persistEscalation } from './escalation-coordinator.js';
+import { isBlockingEscalation, persistEscalation } from './escalation-coordinator.js';
 import type { EscalationRepository } from './escalation-repository.js';
 import type { EventBus } from './event-bus.js';
 import type { MemoryRepository } from './memory-repository.js';
@@ -181,12 +181,7 @@ export function createSessionBridge(deps: SessionBridgeDependencies): PodBridge 
           'Escalation created',
         );
         // Transition pod to awaiting_input so the TUI shows the pending question/approval
-        if (
-          escalation.type === 'ask_human' ||
-          escalation.type === 'report_blocker' ||
-          escalation.type === 'action_approval' ||
-          escalation.type === 'request_credential'
-        ) {
+        if (isBlockingEscalation(escalation)) {
           podManager.notifyEscalation(escalation.podId, escalation);
         }
       });
@@ -215,6 +210,13 @@ export function createSessionBridge(deps: SessionBridgeDependencies): PodBridge 
 
     getAiEscalationCount(podId: string): number {
       return escalationRepo.countBySessionAndType(podId, 'ask_ai');
+    },
+
+    getAutoPauseCount(podId: string): number {
+      return (
+        escalationRepo.countBySessionAndType(podId, 'ask_ai') +
+        escalationRepo.countBySessionAndType(podId, 'report_blocker')
+      );
     },
 
     getMaxAiCalls(podId: string): number {

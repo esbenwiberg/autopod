@@ -16,6 +16,7 @@ function makeBridge(overrides: Partial<PodBridge> = {}): PodBridge {
   return {
     createEscalation: vi.fn(),
     resolveEscalation: vi.fn(),
+    getAutoPauseCount: vi.fn().mockReturnValue(0),
     getAiEscalationCount: vi.fn().mockReturnValue(0),
     getMaxAiCalls: vi.fn().mockReturnValue(5),
     getAutoPauseThreshold: vi.fn().mockReturnValue(3),
@@ -306,7 +307,7 @@ describe('reportBlocker', () => {
 
   it('returns a non-blocking message when below autopause threshold', async () => {
     const bridge = makeBridge({
-      getAiEscalationCount: vi.fn().mockReturnValue(0),
+      getAutoPauseCount: vi.fn().mockReturnValue(0),
       getAutoPauseThreshold: vi.fn().mockReturnValue(3),
     });
 
@@ -323,7 +324,7 @@ describe('reportBlocker', () => {
 
   it('creates an escalation record', async () => {
     const bridge = makeBridge({
-      getAiEscalationCount: vi.fn().mockReturnValue(0),
+      getAutoPauseCount: vi.fn().mockReturnValue(0),
       getAutoPauseThreshold: vi.fn().mockReturnValue(10),
     });
 
@@ -345,7 +346,7 @@ describe('reportBlocker', () => {
 
   it('blocks and waits for human response when autopause threshold is reached', async () => {
     const bridge = makeBridge({
-      getAiEscalationCount: vi.fn().mockReturnValue(2),
+      getAutoPauseCount: vi.fn().mockReturnValue(2),
       getAutoPauseThreshold: vi.fn().mockReturnValue(3), // 2 + 1 = 3 >= threshold
       getHumanResponseTimeout: vi.fn().mockReturnValue(10),
     });
@@ -366,7 +367,7 @@ describe('reportBlocker', () => {
 
   it('returns a tool result instead of throwing when human response times out', async () => {
     const bridge = makeBridge({
-      getAiEscalationCount: vi.fn().mockReturnValue(2),
+      getAutoPauseCount: vi.fn().mockReturnValue(2),
       getAutoPauseThreshold: vi.fn().mockReturnValue(3),
       getHumanResponseTimeout: vi.fn().mockReturnValue(0.05),
     });
@@ -383,11 +384,12 @@ describe('reportBlocker', () => {
     const result = await promise;
     expect(result).toContain('no human response');
     expect(result).toContain('timeout');
+    expect(result).toContain('remains awaiting input');
   });
 
   it('increments escalation count', async () => {
     const bridge = makeBridge({
-      getAiEscalationCount: vi.fn().mockReturnValue(0),
+      getAutoPauseCount: vi.fn().mockReturnValue(0),
       getAutoPauseThreshold: vi.fn().mockReturnValue(10),
     });
 
