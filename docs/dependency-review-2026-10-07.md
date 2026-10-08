@@ -50,3 +50,11 @@ The override is restricted to ONNX 1.24.3. Remove it when Transformers adopts an
 ONNX release that directly declares global-agent 4.1.3 or later, then rerun the
 proxy test and dependency audit. This adds no voice turn, clarification, approval,
 interruption, or spoken response, and changes no worker authority.
+
+The full audit also identified development-only advisories in smol-toml 1.8.0
+([GHSA-r4xh-jqrq-34v2](https://github.com/advisories/GHSA-r4xh-jqrq-34v2))
+and source-map-js 1.2.1
+([GHSA-68fv-2mgg-jv7q](https://github.com/advisories/GHSA-68fv-2mgg-jv7q)).
+Refresh their lockfile resolutions to 1.9.0 and 1.2.2 within the consumers'
+existing version ranges. The full `npx pnpm audit --json` now also reports zero
+advisories, including development dependencies.
