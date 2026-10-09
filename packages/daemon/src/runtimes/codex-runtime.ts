@@ -19,6 +19,10 @@ import type { Logger } from 'pino';
 import type { ContainerManager, StreamingExecResult } from '../interfaces/container-manager.js';
 import type { EventBus } from '../pods/event-bus.js';
 import type { PodRepository } from '../pods/pod-repository.js';
+import {
+  CODEX_FOUNDRY_PROVIDER,
+  foundryCodexProviderSettings,
+} from '../providers/foundry-endpoint.js';
 import { CodexGoalRuntimeSession } from './codex-goal-runtime-session.js';
 import { admitCodexRecovery } from './codex-recovery-admission.js';
 import { codexStateDirForPod } from './codex-state-store.js';
@@ -1288,12 +1292,31 @@ export class CodexRuntime implements Runtime {
     env?: Record<string, string>,
   ): Promise<void> {
     const hasEffort = reasoningEffort !== undefined && reasoningEffort !== 'auto';
-    const useSandboxChatGptHttp = executionTarget === 'sandbox' && !env?.OPENAI_API_KEY?.trim();
-    if ((!mcpServers || mcpServers.length === 0) && !hasEffort && !useSandboxChatGptHttp) return;
+    const foundryProvider = foundryCodexProviderSettings(env);
+    const useSandboxChatGptHttp =
+      !foundryProvider && executionTarget === 'sandbox' && !env?.OPENAI_API_KEY?.trim();
+    if (
+      (!mcpServers || mcpServers.length === 0) &&
+      !hasEffort &&
+      !useSandboxChatGptHttp &&
+      !foundryProvider
+    )
+      return;
 
     const sections: string[] = [];
     if (hasEffort) {
       sections.push(`model_reasoning_effort = ${tomlStringVal(reasoningEffort)}`);
+    }
+    if (foundryProvider) {
+      // Codex ignores OPENAI_BASE_URL and would send the agent to api.openai.com
+      // without credentials; a custom provider routes it to the Foundry v1 API.
+      sections.push(`model_provider = ${tomlStringVal(CODEX_FOUNDRY_PROVIDER)}`);
+      sections.push(
+        [
+          `[model_providers.${CODEX_FOUNDRY_PROVIDER}]`,
+          ...foundryProvider.map(([key, value]) => `${key} = ${JSON.stringify(value)}`),
+        ].join('\n'),
+      );
     }
     if (useSandboxChatGptHttp) {
       // ACA Sandbox host allow rules are enforced by an inspecting egress proxy.

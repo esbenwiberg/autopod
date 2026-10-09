@@ -183,6 +183,16 @@ export function providerAccountRoutes(
         404,
       );
     }
+    // Keyless (Entra) Foundry only works through legacy profile credentials:
+    // importing would yield an account that can't launch and, with the default
+    // clearLegacyCredentials, wipe the profile's working setup.
+    if (credentials.provider === 'foundry' && !credentials.apiKey) {
+      throw new AutopodError(
+        `Profile "${body.profileName}" uses keyless Foundry auth, which provider accounts do not support yet`,
+        'PROVIDER_CREDENTIALS_UNSUPPORTED',
+        400,
+      );
+    }
 
     const account = body.accountId
       ? providerAccountStore.exists(body.accountId)

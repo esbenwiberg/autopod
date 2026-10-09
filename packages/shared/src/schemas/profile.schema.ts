@@ -66,7 +66,7 @@ const maxCredentialsSchema = z.union([maxRefreshCredentialsSchema, maxSetupToken
 const foundryCredentialsSchema = z.object({
   provider: z.literal('foundry'),
   endpoint: z.string().url(),
-  projectId: z.string().min(1),
+  projectId: z.string().min(1).optional(),
   apiKey: z.string().optional(),
   apiSurface: z.enum(['anthropic', 'openai']).optional(),
   apiVersion: z.string().min(1).optional(),

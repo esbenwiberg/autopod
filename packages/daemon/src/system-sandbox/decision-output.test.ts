@@ -82,6 +82,8 @@ describe('system decision output', () => {
   it('expands file-pointer credentials before each affected CLI', () => {
     for (const variable of [
       'ANTHROPIC_API_KEY',
+      'ANTHROPIC_FOUNDRY_API_KEY',
+      'ANTHROPIC_FOUNDRY_AUTH_TOKEN',
       'OPENAI_API_KEY',
       'CLAUDE_CODE_OAUTH_TOKEN',
       'COPILOT_GITHUB_TOKEN',
@@ -118,6 +120,18 @@ describe('system decision output', () => {
     } finally {
       rmSync(directory, { recursive: true, force: true });
     }
+  });
+
+  it('passes Foundry provider overrides to Codex as shell-quoted -c args', () => {
+    const command = buildSystemRuntimeInvocation({
+      runtime: 'codex',
+      model: 'gpt-5',
+      codexConfigArgs: ['-c', 'model_providers.azure-foundry.base_url="https://x/it\'s"'],
+    }).command[2];
+    expect(command).toContain('--ignore-user-config');
+    expect(command).toContain(
+      ` '-c' 'model_providers.azure-foundry.base_url="https://x/it'\\''s"' - < "$2"`,
+    );
   });
 
   it('gives Copilot no tools, built-in MCP, instructions, or remote control', () => {

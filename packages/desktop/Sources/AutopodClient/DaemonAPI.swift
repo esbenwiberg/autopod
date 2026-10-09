@@ -706,11 +706,14 @@ public actor DaemonAPI {
     name: String,
     provider: String,
     id: String? = nil,
-    apiKey: String? = nil
+    apiKey: String? = nil,
+    credentials: [String: String]? = nil
   ) async throws -> PublicProviderAccountResponse {
     var fields: [String: Any] = ["name": name, "provider": provider]
     if let id { fields["id"] = id }
-    if let apiKey {
+    if let credentials {
+      fields["credentials"] = credentials
+    } else if let apiKey {
       fields["credentials"] = [
         "provider": "api-key",
         "providerId": provider,

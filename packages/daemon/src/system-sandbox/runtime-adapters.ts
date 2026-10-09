@@ -16,6 +16,8 @@ read_secret() {
   fi
 }
 read_secret ANTHROPIC_API_KEY
+read_secret ANTHROPIC_FOUNDRY_API_KEY
+read_secret ANTHROPIC_FOUNDRY_AUTH_TOKEN
 read_secret OPENAI_API_KEY
 read_secret CLAUDE_CODE_OAUTH_TOKEN
 read_secret COPILOT_GITHUB_TOKEN
@@ -32,6 +34,8 @@ export function buildSystemRuntimeInvocation(input: {
   runtime: PodsitterRuntime;
   model: string;
   reasoningEffort?: ReasoningEffort;
+  /** Extra `-c` overrides (e.g. Foundry provider routing); Codex ignores user config here. */
+  codexConfigArgs?: string[];
 }): SystemRuntimeInvocation {
   const controlFiles = [{ path: EMPTY_MCP_PATH, content: '{"mcpServers":{}}' }];
   switch (input.runtime) {
@@ -58,7 +62,7 @@ export function buildSystemRuntimeInvocation(input: {
           '-c',
           `${SYSTEM_CREDENTIAL_SHIM_PATH} codex exec --json --sandbox read-only --skip-git-repo-check --ephemeral --ignore-user-config --ignore-rules --disable shell_tool --disable unified_exec --disable web_search_request --disable image_generation --disable browser_use --disable computer_use --disable apps --disable enable_mcp_apps --disable multi_agent --disable plugins --model "$1"${
             input.reasoningEffort ? ` -c model_reasoning_effort="${input.reasoningEffort}"` : ''
-          } - < "$2"`,
+          }${(input.codexConfigArgs ?? []).map((arg) => ` ${shellQuote(arg)}`).join('')} - < "$2"`,
           'system-decision',
           input.model,
           PROMPT_PATH,
@@ -91,4 +95,8 @@ export function buildSystemRuntimeInvocation(input: {
         ],
       };
   }
+}
+
+function shellQuote(value: string): string {
+  return `'${value.replaceAll("'", `'\\''`)}'`;
 }
