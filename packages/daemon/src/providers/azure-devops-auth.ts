@@ -1,11 +1,13 @@
 import type { Logger } from 'pino';
-import { getAzureToken } from './azure-token.js';
+import { getAzureToken, invalidateAzureToken } from './azure-token.js';
 
 /** Azure DevOps' first-party Entra application/resource ID. */
 export const AZURE_DEVOPS_SCOPE = '499b84ac-1321-427f-aa17-267ca6975798/.default';
 
 export interface AzureDevOpsAuth {
   getToken(): Promise<string>;
+  /** Forget the cached token after Azure DevOps rejected it, forcing a fresh acquisition. */
+  invalidate?(): void;
 }
 
 export interface AzureDevOpsAuthOptions {
@@ -31,6 +33,9 @@ export function createAzureDevOpsAuth(
         ? await getAzureToken(AZURE_DEVOPS_SCOPE, logger, { tenantId })
         : await getAzureToken(AZURE_DEVOPS_SCOPE, logger);
       return result.token;
+    },
+    invalidate(): void {
+      invalidateAzureToken(AZURE_DEVOPS_SCOPE, { tenantId: options.tenantId });
     },
   };
 }
