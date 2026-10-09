@@ -1,10 +1,11 @@
 import pino from 'pino';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { AZURE_DEVOPS_SCOPE, createAzureDevOpsAuth } from './azure-devops-auth.js';
-import { getAzureToken } from './azure-token.js';
+import { getAzureToken, invalidateAzureToken } from './azure-token.js';
 
 vi.mock('./azure-token.js', () => ({
   getAzureToken: vi.fn(),
+  invalidateAzureToken: vi.fn(),
 }));
 
 describe('createAzureDevOpsAuth', () => {
@@ -33,6 +34,16 @@ describe('createAzureDevOpsAuth', () => {
     }).getToken();
 
     expect(getAzureToken).toHaveBeenCalledWith(AZURE_DEVOPS_SCOPE, expect.anything(), {
+      tenantId: 'ee357b2a-1bf9-42a6-baab-9772d85b28c1',
+    });
+  });
+
+  it('invalidates the cached token for the same scope and tenant it acquires', () => {
+    createAzureDevOpsAuth(pino({ enabled: false }), {
+      tenantId: 'ee357b2a-1bf9-42a6-baab-9772d85b28c1',
+    }).invalidate?.();
+
+    expect(invalidateAzureToken).toHaveBeenCalledWith(AZURE_DEVOPS_SCOPE, {
       tenantId: 'ee357b2a-1bf9-42a6-baab-9772d85b28c1',
     });
   });
