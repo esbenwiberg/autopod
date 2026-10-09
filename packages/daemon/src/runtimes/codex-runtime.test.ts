@@ -1979,7 +1979,8 @@ describe('CodexRuntime', () => {
         const current = repo.getOrThrow('pod');
         vi.mocked(repo.getOrThrow).mockImplementation(() => current);
         let calls = 0;
-        vi.mocked(cm.execInContainer).mockImplementation(async () => {
+        // Local config preparation is the 0600 config upload; change state during the recovery's.
+        vi.mocked(cm.writeFile).mockImplementation(async () => {
           calls++;
           if (calls === 2) {
             if (change === 'generation') current.lifecycleGeneration++;
@@ -1993,7 +1994,6 @@ describe('CodexRuntime', () => {
                 }),
               } as unknown as NonNullable<PodRepository['taskExecutions']>;
           }
-          return { stdout: '', stderr: '', exitCode: 0 };
         });
         const events: AgentEvent[] = [];
         for await (const event of new CodexRuntime(logger, cm, repo).spawn({
@@ -2939,6 +2939,7 @@ describe('CodexRuntime', () => {
         'c1',
         '/home/autopod/.codex/config.toml',
         expect.any(String),
+        { mode: 0o600 },
       );
 
       const written = lastWrittenContent(cm);
@@ -2963,15 +2964,15 @@ describe('CodexRuntime', () => {
         },
       ]);
 
-      expect(cm.execInContainer).toHaveBeenCalledWith(
+      // Docker pods drop every capability: root cannot chown/chmod afterwards, so the
+      // upload itself must land the file 0600 as the container user.
+      expect(cm.writeFile).toHaveBeenCalledWith(
         'c1',
-        [
-          'sh',
-          '-c',
-          "chown autopod:autopod '/home/autopod/.codex/config.toml' && chmod 0600 '/home/autopod/.codex/config.toml'",
-        ],
-        { timeout: 5_000, user: 'root' },
+        '/home/autopod/.codex/config.toml',
+        expect.stringContaining('[mcp_servers.escalation]'),
+        { mode: 0o600 },
       );
+      expect(cm.execInContainer).not.toHaveBeenCalled();
     });
 
     it('installs sandbox config atomically with the effective user and verifies runtime readability', async () => {
@@ -3072,11 +3073,7 @@ describe('CodexRuntime', () => {
     it('fails closed when the generated config permissions cannot be secured', async () => {
       const handle = createMockHandle();
       const cm = createMockContainerManager(handle);
-      vi.mocked(cm.execInContainer).mockResolvedValueOnce({
-        stdout: '',
-        stderr: 'Operation not permitted',
-        exitCode: 1,
-      });
+      vi.mocked(cm.writeFile).mockRejectedValueOnce(new Error('archive mode rejected'));
       const runtime = new CodexRuntime(logger, cm, createMockPodRepo());
 
       await expect(
@@ -3086,7 +3083,7 @@ describe('CodexRuntime', () => {
             url: 'http://host.docker.internal:3100/mcp/abc',
           },
         ]),
-      ).rejects.toThrow('Failed to secure Codex MCP config');
+      ).rejects.toThrow('archive mode rejected');
     });
 
     it('emits stdio entries with command/args/env (not url)', async () => {
@@ -3212,11 +3209,7 @@ describe('CodexRuntime', () => {
           'c1',
           '/home/autopod/.codex/config.toml',
           `model_reasoning_effort = "${effort}"\n`,
-        );
-        expect(cm.execInContainer).toHaveBeenCalledWith(
-          'c1',
-          expect.arrayContaining(['sh', '-c', expect.stringContaining('chmod 0600')]),
-          { timeout: 5_000, user: 'root' },
+          { mode: 0o600 },
         );
       },
     );
@@ -3303,6 +3296,7 @@ describe('CodexRuntime', () => {
         'c2',
         '/home/autopod/.codex/config.toml',
         expect.stringContaining('model_reasoning_effort = "high"'),
+        { mode: 0o600 },
       );
     });
 
@@ -3325,11 +3319,7 @@ describe('CodexRuntime', () => {
         'c2',
         '/home/autopod/.codex/config.toml',
         'model_reasoning_effort = "xhigh"\n',
-      );
-      expect(cm.execInContainer).toHaveBeenCalledWith(
-        'c2',
-        expect.arrayContaining(['sh', '-c', expect.stringContaining('chmod 0600')]),
-        { timeout: 5_000, user: 'root' },
+        { mode: 0o600 },
       );
     });
   });
@@ -3368,6 +3358,7 @@ describe('CodexRuntime', () => {
         'c1',
         '/home/autopod/.codex/config.toml',
         expect.stringContaining('[mcp_servers.escalation]'),
+        { mode: 0o600 },
       );
       // biome-ignore lint/suspicious/noExplicitAny: accessing private field in test
       const stored = (runtime as any).mcpServersBySession.get('sess-1');
@@ -3400,6 +3391,7 @@ describe('CodexRuntime', () => {
         'c2',
         '/home/autopod/.codex/config.toml',
         expect.stringContaining('[mcp_servers.escalation]'),
+        { mode: 0o600 },
       );
     });
 
