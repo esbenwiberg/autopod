@@ -741,6 +741,8 @@ _read_file_var() {
   [ -n "$path" ] && [ -f "$path" ] && export "$var_name=$(cat "$path")" && unset "$file_var"
 }
 _read_file_var ANTHROPIC_API_KEY
+_read_file_var ANTHROPIC_FOUNDRY_API_KEY
+_read_file_var ANTHROPIC_FOUNDRY_AUTH_TOKEN
 _read_file_var OPENAI_API_KEY
 _read_file_var CLAUDE_CODE_OAUTH_TOKEN
 _read_file_var COPILOT_GITHUB_TOKEN
@@ -9247,6 +9249,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           profile,
           pod.runtime,
           providerPreflight.manifestProvider,
+          providerPreflight.account,
         );
         const runtimeNetworkPolicyMode = runtimeNetworkPolicy?.enabled
           ? (runtimeNetworkPolicy.mode ?? 'restricted')
@@ -17862,6 +17865,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
               profile,
               pod.runtime,
               providerPreflight.manifestProvider,
+              providerPreflight.account,
             );
             // biome-ignore lint/style/noNonNullAssertion: runningSessions always have a containerId
             const containerId = pod.containerId!;

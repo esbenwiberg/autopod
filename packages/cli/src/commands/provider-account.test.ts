@@ -1,6 +1,7 @@
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
+import type { PublicProviderAccount } from '@autopod/shared';
 import { Command } from 'commander';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AutopodClient } from '../api/client.js';
@@ -15,7 +16,7 @@ vi.mock('ora', () => ({
   }),
 }));
 
-function createAccount(overrides: Record<string, unknown> = {}) {
+function createAccount(overrides: Record<string, unknown> = {}): PublicProviderAccount {
   return {
     id: 'team-openai',
     name: 'Team OpenAI',
@@ -28,7 +29,7 @@ function createAccount(overrides: Record<string, unknown> = {}) {
     createdAt: '2026-01-01T00:00:00.000Z',
     updatedAt: '2026-01-01T00:00:00.000Z',
     ...overrides,
-  };
+  } as PublicProviderAccount;
 }
 
 function createProfile(overrides: Record<string, unknown> = {}) {
@@ -288,6 +289,113 @@ describe('provider-account commands', () => {
         authMode: 'setup-token',
         oauthToken: 'setup-token',
       },
+    });
+  });
+
+  describe('auth-foundry', () => {
+    const originalApiKey = process.env.AUTOPOD_PROVIDER_API_KEY;
+
+    beforeEach(() => {
+      process.env.AUTOPOD_PROVIDER_API_KEY = '  foundry-key  ';
+      exitSpy = vi.spyOn(process, 'exit').mockImplementation((code?: string | number | null) => {
+        throw new Error(`process.exit ${code}`);
+      });
+    });
+
+    afterEach(() => {
+      if (originalApiKey === undefined)
+        Reflect.deleteProperty(process.env, 'AUTOPOD_PROVIDER_API_KEY');
+      else process.env.AUTOPOD_PROVIDER_API_KEY = originalApiKey;
+    });
+
+    it('stores endpoint, key from env, and the default anthropic surface', async () => {
+      vi.mocked(mockClient.getProviderAccount).mockResolvedValueOnce(
+        createAccount({ id: 'team-foundry', provider: 'foundry' }),
+      );
+
+      await program.parseAsync([
+        'node',
+        'ap',
+        'provider-account',
+        'auth-foundry',
+        'team-foundry',
+        '--endpoint',
+        'https://res.services.ai.azure.com/anthropic/',
+      ]);
+
+      expect(mockClient.updateProviderAccount).toHaveBeenCalledWith('team-foundry', {
+        credentials: {
+          provider: 'foundry',
+          endpoint: 'https://res.services.ai.azure.com/anthropic',
+          apiKey: 'foundry-key',
+          apiSurface: 'anthropic',
+        },
+      });
+    });
+
+    it('passes the openai surface and api version through', async () => {
+      vi.mocked(mockClient.getProviderAccount).mockResolvedValueOnce(
+        createAccount({ id: 'team-foundry', provider: 'foundry' }),
+      );
+
+      await program.parseAsync([
+        'node',
+        'ap',
+        'provider-account',
+        'auth-foundry',
+        'team-foundry',
+        '--endpoint',
+        'https://res.openai.azure.com',
+        '--surface',
+        'openai',
+        '--api-version',
+        '2024-12-01-preview',
+      ]);
+
+      expect(mockClient.updateProviderAccount).toHaveBeenCalledWith('team-foundry', {
+        credentials: {
+          provider: 'foundry',
+          endpoint: 'https://res.openai.azure.com',
+          apiKey: 'foundry-key',
+          apiSurface: 'openai',
+          apiVersion: '2024-12-01-preview',
+        },
+      });
+    });
+
+    it.each([
+      ['plaintext endpoint', ['--endpoint', 'http://res.services.ai.azure.com']],
+      ['unknown surface', ['--endpoint', 'https://res.services.ai.azure.com', '--surface', 'x']],
+    ])('rejects %s before touching the account', async (_label, args) => {
+      await expect(
+        program.parseAsync([
+          'node',
+          'ap',
+          'provider-account',
+          'auth-foundry',
+          'team-foundry',
+          ...args,
+        ]),
+      ).rejects.toThrow('process.exit 1');
+
+      expect(mockClient.getProviderAccount).not.toHaveBeenCalled();
+      expect(mockClient.updateProviderAccount).not.toHaveBeenCalled();
+    });
+
+    it('refuses non-foundry accounts', async () => {
+      await expect(
+        program.parseAsync([
+          'node',
+          'ap',
+          'provider-account',
+          'auth-foundry',
+          'team-openai',
+          '--endpoint',
+          'https://res.services.ai.azure.com',
+        ]),
+      ).rejects.toThrow('process.exit 1');
+
+      expect(mockClient.updateProviderAccount).not.toHaveBeenCalled();
     });
   });
 

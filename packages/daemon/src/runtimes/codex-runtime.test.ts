@@ -3043,6 +3043,43 @@ describe('CodexRuntime', () => {
       expect(lastWrittenContent(cm)).not.toContain('model_provider =');
     });
 
+    it.each([undefined, 'sandbox'] as const)(
+      'routes Foundry Codex through the Azure v1 provider (target %s)',
+      async (target) => {
+        const handle = createMockHandle();
+        const cm = createMockContainerManager(handle);
+        const runtime = new CodexRuntime(logger, cm, createMockPodRepo());
+
+        await callWriteMcpConfig(runtime)('c1', [], target, undefined, {
+          AUTOPOD_CODEX_MODEL_PROVIDER: 'azure-foundry',
+          OPENAI_BASE_URL: 'https://res.services.ai.azure.com/openai/v1',
+          OPENAI_API_KEY_FILE: '/run/autopod/foundry-openai-key',
+        });
+
+        const written = lastWrittenContent(cm);
+        expect(written).toContain('model_provider = "azure-foundry"');
+        expect(written).toContain('[model_providers.azure-foundry]');
+        expect(written).toContain('base_url = "https://res.services.ai.azure.com/openai/v1"');
+        expect(written).toContain('env_key = "OPENAI_API_KEY"');
+        expect(written).toContain('wire_api = "responses"');
+        expect(written).toContain('supports_websockets = false');
+        expect(written).not.toContain('chatgpt');
+      },
+    );
+
+    it('refuses a Foundry provider marker without a base URL', async () => {
+      const handle = createMockHandle();
+      const cm = createMockContainerManager(handle);
+      const runtime = new CodexRuntime(logger, cm, createMockPodRepo());
+
+      await expect(
+        callWriteMcpConfig(runtime)('c1', [], undefined, undefined, {
+          AUTOPOD_CODEX_MODEL_PROVIDER: 'azure-foundry',
+        }),
+      ).rejects.toThrow('without OPENAI_BASE_URL');
+      expect(cm.writeFile).not.toHaveBeenCalled();
+    });
+
     it('retries an idempotent sandbox config ownership command after a transport timeout', async () => {
       const handle = createMockHandle();
       const cm = createMockContainerManager(handle);

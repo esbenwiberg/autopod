@@ -213,7 +213,7 @@ describe('ProviderAccountStore', () => {
     const originalCredentials = {
       provider: 'foundry' as const,
       endpoint: 'https://example.services.ai.azure.com',
-      projectId: 'project',
+      apiKey: 'foundry-key',
       apiSurface: 'openai' as const,
     };
     store.create({
@@ -257,7 +257,7 @@ describe('ProviderAccountStore', () => {
     const credentials = {
       provider: 'foundry' as const,
       endpoint: 'https://example.services.ai.azure.com',
-      projectId: 'project',
+      apiKey: 'foundry-key',
       apiSurface: 'openai' as const,
     };
     store.create({

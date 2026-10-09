@@ -58,12 +58,14 @@ export const COMPILED_PROVIDER_MANIFEST = {
       {
         kind: 'api-key',
         label: 'Foundry API key',
-        acquisition: 'Continue using the existing Foundry provider account flow.',
+        acquisition:
+          'Copy Key 1 and the endpoint from the Foundry resource\'s "Keys and Endpoint" page.',
       },
       {
         kind: 'managed-identity',
         label: 'Azure identity',
-        acquisition: 'Continue using the existing managed identity or Azure CLI flow.',
+        acquisition:
+          'Legacy profile credentials only (managed identity or Azure CLI); provider accounts need an API key.',
       },
     ]),
     legacy('copilot', 'GitHub Copilot', 'copilot', [

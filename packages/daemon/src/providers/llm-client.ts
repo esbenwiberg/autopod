@@ -15,6 +15,7 @@ import { type CredentialOwner, resolveProviderAuth } from './auth-resolution.js'
 import { getAzureToken } from './azure-token.js';
 import { refreshAndPersistMaxCredentials } from './credential-persistence.js';
 import { refreshOAuthToken } from './credential-refresh.js';
+import { foundryAnthropicBaseUrl } from './foundry-endpoint.js';
 
 const FOUNDRY_TOKEN_SCOPE = 'https://cognitiveservices.azure.com/.default';
 
@@ -186,9 +187,16 @@ export async function createProviderAnthropicClient(
       );
       return { ok: false, reason: 'foundry_openai_surface' };
     }
-    let apiKey: string;
+    let auth: { apiKey: string; authToken: null } | { apiKey: null; authToken: string };
     try {
-      apiKey = creds.apiKey ?? (await getAzureToken(FOUNDRY_TOKEN_SCOPE, logger)).token;
+      // Explicit nulls stop the SDK from falling back to the daemon's own
+      // ANTHROPIC_API_KEY / ANTHROPIC_AUTH_TOKEN env and leaking them to Azure.
+      auth = creds.apiKey
+        ? { apiKey: creds.apiKey, authToken: null }
+        : {
+            apiKey: null,
+            authToken: (await getAzureToken(FOUNDRY_TOKEN_SCOPE, logger)).token,
+          };
     } catch (err) {
       logger.warn(
         { profile: profileName, provider, reason: 'refresh_failed', err },
@@ -198,7 +206,7 @@ export async function createProviderAnthropicClient(
     }
     return {
       ok: true,
-      client: new Anthropic({ apiKey, baseURL: creds.endpoint }),
+      client: new Anthropic({ ...auth, baseURL: foundryAnthropicBaseUrl(creds.endpoint) }),
       model,
     };
   }
