@@ -15194,6 +15194,35 @@ describe('PodManager', () => {
       }
     });
 
+    it('parks an unverified validation exit without replay or agent correction', async () => {
+      const ctx = createTestContext();
+      ctx.deps.validationInfrastructureRetryBackoffMs = [0, 0];
+      const failure = validationInfrastructureFailureResult();
+      failure.infrastructureFailure = {
+        phase: 'test',
+        code: 'EXEC_EXIT_UNVERIFIED',
+        statusCode: 409,
+        message: 'Execution outcome needs reconciliation',
+        retryable: false,
+      };
+      vi.mocked(ctx.validationEngine.validate).mockResolvedValue(failure);
+      const manager = createPodManager(ctx.deps);
+      const pod = manager.createSession(
+        { profileName: 'test-profile', task: 'Verify retained outcome' },
+        'user-1',
+      );
+      ctx.podRepo.update(pod.id, {
+        status: 'running',
+        containerId: 'ctr-1',
+        validationAttempts: 0,
+      });
+      await manager.triggerValidation(pod.id);
+      expect(ctx.validationEngine.validate).toHaveBeenCalledTimes(1);
+      expect(ctx.runtime.resume).not.toHaveBeenCalled();
+      expect(manager.getSession(pod.id).status).toBe('review_required');
+      expect(manager.getSession(pod.id).lastCorrectionMessage).toBeNull();
+    });
+
     it('persistent validation infrastructure failure parks once', async () => {
       const ctx = createTestContext();
       ctx.deps.validationInfrastructureRetryBackoffMs = [0, 0];

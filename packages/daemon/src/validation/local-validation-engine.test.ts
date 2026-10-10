@@ -2,6 +2,7 @@ import { execFile } from 'node:child_process';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
+import { Readable } from 'node:stream';
 import { promisify } from 'node:util';
 import { AutopodError, parseSpecContract } from '@autopod/shared';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -2708,7 +2709,15 @@ describe('validate() — facts + review gate', () => {
       extractDirectoryFromContainer: fail('extractDirectoryFromContainer'),
       getStatus: fail('getStatus'),
       execInContainer,
-      execStreaming: fail('execStreaming'),
+      execStreaming: vi.fn(async function (this: ContainerManager, id, command, options) {
+        const result = await this.execInContainer(id, command, options);
+        return {
+          stdout: Readable.from([result.stdout]),
+          stderr: Readable.from([result.stderr]),
+          exitCode: Promise.resolve(result.exitCode),
+          kill: vi.fn(),
+        };
+      }),
     } as unknown as ContainerManager;
   }
 
@@ -2953,6 +2962,96 @@ human_review: []
     expect(result.infrastructureFailure).toBeUndefined();
     expect(result.lint?.status).toBe('pass');
   });
+
+  it('streams sandbox test results rather than holding one buffered request open', async () => {
+    const cm = stubContainerManager();
+    vi.mocked(cm.execInContainer).mockImplementation(async (_id, command) => {
+      if (command[2]?.includes('long-running-test')) throw new TypeError('fetch failed');
+      return { stdout: '', stderr: '', exitCode: 0 };
+    });
+    vi.mocked(cm.execStreaming).mockResolvedValue({
+      stdout: Readable.from(['progress\n', 'observed success\n']),
+      stderr: Readable.from([]),
+      exitCode: Promise.resolve(0),
+      kill: vi.fn(),
+    });
+    const result = await createLocalValidationEngine(cm).validate(
+      baseConfig({
+        executionTarget: 'sandbox',
+        testCommand: 'long-running-test',
+        startCommand: '',
+        smokePages: [],
+      }),
+    );
+    expect(result.test?.status).toBe('pass');
+    expect(result.test?.stdout).toContain('observed success');
+    expect(cm.execStreaming).toHaveBeenCalledTimes(1);
+    expect(
+      vi
+        .mocked(cm.execInContainer)
+        .mock.calls.some(([, cmd]) => cmd[2]?.includes('long-running-test')),
+    ).toBe(false);
+  });
+
+  it('retains buffered stream diagnostics when the sandbox exit is unverified', async () => {
+    const cm = stubContainerManager();
+    const exitCode = Promise.reject(
+      new AutopodError('Test process exit was not observed', 'EXEC_EXIT_UNVERIFIED', 409),
+    );
+    void exitCode.catch(() => {});
+    vi.mocked(cm.execStreaming).mockResolvedValue({
+      stdout: Readable.from(['test suite started\n', 'last test: preserves artifacts\n']),
+      stderr: Readable.from(['connection closed before exit\n']),
+      exitCode,
+      kill: vi.fn(),
+    });
+    const result = await createLocalValidationEngine(cm).validate(
+      baseConfig({
+        executionTarget: 'sandbox',
+        testCommand: 'unknown-outcome-test',
+        startCommand: '',
+        smokePages: [],
+      }),
+    );
+    expect(result.infrastructureFailure).toMatchObject({
+      phase: 'test',
+      code: 'EXEC_EXIT_UNVERIFIED',
+      retryable: false,
+    });
+    expect(result.test?.status).toBe('skip');
+    expect(result.test?.stdout).toContain('last test: preserves artifacts');
+    expect(result.test?.stdout).toContain('connection closed before exit');
+    expect(cm.execStreaming).toHaveBeenCalledTimes(1);
+  });
+
+  it.each(['EXEC_EXIT_UNVERIFIED', 'AZURE_SANDBOX_EXEC_INVALID_RESPONSE'])(
+    'blocks an unknown sandbox test outcome without replay: %s',
+    async (code) => {
+      const cm = stubContainerManager();
+      vi.mocked(cm.execInContainer).mockImplementation(async (_id, command) => {
+        if (command[2]?.includes('unknown-outcome-test')) {
+          throw new AutopodError('Test process exit was not observed', code, 502);
+        }
+        return { stdout: '', stderr: '', exitCode: 0 };
+      });
+      const result = await createLocalValidationEngine(cm).validate(
+        baseConfig({
+          executionTarget: 'sandbox',
+          testCommand: 'unknown-outcome-test',
+          startCommand: '',
+          smokePages: [],
+        }),
+      );
+      expect(result.infrastructureFailure).toMatchObject({ phase: 'test', code, retryable: false });
+      expect(result.overall).toBe('fail');
+      expect(result.test?.status).toBe('skip');
+      expect(
+        vi
+          .mocked(cm.execInContainer)
+          .mock.calls.filter(([, cmd]) => cmd[2]?.includes('unknown-outcome-test')),
+      ).toHaveLength(1);
+    },
+  );
 
   it('classifies typed sandbox transport failures by validation phase', async () => {
     const cases: Array<{
