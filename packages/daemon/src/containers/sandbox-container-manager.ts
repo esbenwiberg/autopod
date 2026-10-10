@@ -497,6 +497,10 @@ for root in sys.argv[1:]:
     options?: DirectoryExtractionOptions,
   ): Promise<void> {
     assertDirectoryExtractionCurrent(options);
+    // Azure may suspend a retained workspace while its settled worker is idle.
+    // Resume the same sandbox; do not provision or restart an agent to copy files.
+    await this.client.resume(containerId);
+    assertDirectoryExtractionCurrent(options);
     mkdirSync(hostPath, { recursive: true });
     if (!options) removeStaleSyncStagingDirs(hostPath);
 
