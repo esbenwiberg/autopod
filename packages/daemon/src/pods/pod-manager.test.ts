@@ -18775,6 +18775,38 @@ describe('PodManager', () => {
         expect(ctx.containerManager.kill).not.toHaveBeenCalled();
       });
 
+      it('does not push a native repository artifact when only artifact delivery was requested', async () => {
+        const ctx = createTestContext();
+        const manager = createPodManager(ctx.deps);
+        const pod = manager.createSession(
+          {
+            profileName: 'test-profile',
+            task: 'Research without publishing',
+            options: { agentMode: 'auto', output: 'artifact', validate: false, promotable: false },
+          },
+          'user-1',
+        );
+        const launch = {} as import('@autopod/shared').EffectiveLaunchConfig;
+        ctx.deps.launchConfiguration = {
+          read: () => launch,
+          executionSettings: () => ctx.profileStore.get('test-profile'),
+          assertCurrentCapabilities: async () => {},
+          prepareEnvironment: async () => 'fixture',
+        };
+        ctx.podRepo.update(pod.id, {
+          status: 'running',
+          containerId: 'container-abc',
+        });
+        ctx.db
+          .prepare('UPDATE pods SET launch_config_digest=? WHERE id=?')
+          .run('a'.repeat(64), pod.id);
+        ctx.podRepo.completionJournal?.settle(ctx.podRepo.getOrThrow(pod.id), 'Report complete');
+        await manager.handleCompletion(pod.id);
+        expect(manager.getSession(pod.id).status).toBe('complete');
+        expect(ctx.worktreeManager.pushBranch).not.toHaveBeenCalled();
+        expect(ctx.worktreeManager.create).not.toHaveBeenCalled();
+      });
+
       it('coalesces duplicate artifact completion events into one collection and cleanup', async () => {
         const ctx = createTestContext();
         const manager = createPodManager(ctx.deps);
