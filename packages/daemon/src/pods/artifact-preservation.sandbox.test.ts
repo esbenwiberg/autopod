@@ -28,6 +28,11 @@ it('preserves a repo-backed dependency workspace and collects native output befo
       ? path.join(workspace, name.slice('/workspace'.length))
       : name;
   const client = {
+    async resume(id: string) {
+      expect(id).toBe('isolated-local-sandbox');
+      await request();
+      // This controlled source is already running; resuming preserves its files.
+    },
     async exec(_id: string, command: string[]) {
       await request();
       try {
