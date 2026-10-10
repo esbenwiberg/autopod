@@ -5,6 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { promisify } from 'node:util';
 import type { ContainerManager } from '../interfaces/container-manager.js';
+import type { WorkspaceFingerprint } from '../pods/workspace-checkpoint-controller.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -167,6 +168,34 @@ function empty(sequence: number, message: string, phase = 'capture'): WorkspaceC
     quarantineRef: '',
     error: { phase, code: 'CHECKPOINT_FAILED', retryable: true, message },
   };
+}
+
+const WORKSPACE_FINGERPRINT_SCRIPT = [
+  'cd /workspace',
+  'git rev-parse HEAD',
+  // Hash contents, not just paths: a second edit to an already-dirty file must change the
+  // fingerprint, otherwise it is neither re-checkpointed nor reported as unprotected.
+  // Plain `git hash-object` (no -w) and `git diff` never write the object store or index.
+  '{ git status --porcelain=v1 -uall -z; git diff --binary --no-ext-diff --no-textconv HEAD --; git ls-files -z --others --exclude-standard | xargs -0 -r git hash-object --; } | git hash-object --stdin',
+  'test -n "$(git status --porcelain=v1 -uall)" && echo dirty || echo clean',
+].join('; ');
+
+/** Observe the live sandbox workspace without writing to its index or object store. */
+export async function observeSandboxWorkspace(
+  cm: ContainerManager,
+  containerId: string,
+): Promise<WorkspaceFingerprint> {
+  const output = await cm.execInContainer(
+    containerId,
+    ['sh', '-ceu', WORKSPACE_FINGERPRINT_SCRIPT],
+    {
+      timeout: 15_000,
+    },
+  );
+  if (output.exitCode !== 0)
+    throw new Error(`sandbox workspace fingerprint failed: ${output.stderr.trim()}`);
+  const [head = '', tree = '', state = 'clean'] = output.stdout.trim().split('\n');
+  return { head, tree, dirty: state === 'dirty' };
 }
 
 /**

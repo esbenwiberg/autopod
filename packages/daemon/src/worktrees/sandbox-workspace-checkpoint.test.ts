@@ -7,6 +7,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createMockContainerManager } from '../test-utils/mock-helpers.js';
 import {
   checkpointSandboxWorkspace,
+  observeSandboxWorkspace,
   resolveSandboxCheckpointSourceHead,
 } from './sandbox-workspace-checkpoint.js';
 
@@ -413,5 +414,75 @@ describe('checkpointSandboxWorkspace', () => {
       error: { code: 'LINEAGE_CONFLICT' },
     });
     await expect(readFile(path.join(host, 'tracked.txt'), 'utf8')).resolves.toBe('host change\n');
+  });
+});
+
+describe('observeSandboxWorkspace', () => {
+  let tmpRoot: string;
+  let sandbox: string;
+
+  beforeEach(async () => {
+    tmpRoot = await mkdtemp(path.join(os.tmpdir(), 'autopod-observe-test-'));
+    sandbox = path.join(tmpRoot, 'sandbox');
+    await mkdir(sandbox);
+    await git(sandbox, ['init', '-q', '-b', 'main']);
+    await writeFile(path.join(sandbox, 'tracked.txt'), 'base\n');
+    await git(sandbox, ['add', '.']);
+    await git(sandbox, ['commit', '-q', '-m', 'base']);
+  });
+
+  afterEach(async () => {
+    await rm(tmpRoot, { recursive: true, force: true });
+  });
+
+  const observe = () => observeSandboxWorkspace(createSandboxContainerManager(sandbox), 'sandbox');
+
+  it('reports a clean tree as clean', async () => {
+    const clean = await observe();
+    expect(clean.dirty).toBe(false);
+    expect(clean.head).toMatch(/^[0-9a-f]{40}$/);
+  });
+
+  it('changes the fingerprint when an already-modified tracked file is edited again', async () => {
+    await writeFile(path.join(sandbox, 'tracked.txt'), 'first edit\n');
+    const first = await observe();
+    await writeFile(path.join(sandbox, 'tracked.txt'), 'second edit\n');
+    const second = await observe();
+    expect(first.dirty).toBe(true);
+    expect(second.dirty).toBe(true);
+    expect(second.tree).not.toBe(first.tree);
+  });
+
+  it('changes the fingerprint when an untracked file is edited again', async () => {
+    await writeFile(path.join(sandbox, 'notes.md'), 'draft one\n');
+    const first = await observe();
+    await writeFile(path.join(sandbox, 'notes.md'), 'draft two\n');
+    const second = await observe();
+    expect(second.tree).not.toBe(first.tree);
+  });
+
+  it('is stable for an unchanged dirty tree and leaves the index and object store alone', async () => {
+    await writeFile(path.join(sandbox, 'tracked.txt'), 'edit\n');
+    await writeFile(path.join(sandbox, 'notes.md'), 'draft\n');
+    const objectsBefore = (
+      await execFileAsync('git', ['count-objects', '-v'], { cwd: sandbox, env: gitEnv })
+    ).stdout;
+    const first = await observe();
+    const second = await observe();
+    expect(second).toEqual(first);
+    const { stdout: staged } = await execFileAsync('git', ['diff', '--cached', '--name-only'], {
+      cwd: sandbox,
+      env: gitEnv,
+    });
+    expect(staged.trim()).toBe('');
+    const objectsAfter = (
+      await execFileAsync('git', ['count-objects', '-v'], { cwd: sandbox, env: gitEnv })
+    ).stdout;
+    expect(objectsAfter).toBe(objectsBefore);
+  });
+
+  it('throws instead of inventing a fingerprint when git fails', async () => {
+    await rm(path.join(sandbox, '.git'), { recursive: true, force: true });
+    await expect(observe()).rejects.toThrow(/fingerprint failed/);
   });
 });
