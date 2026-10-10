@@ -4591,6 +4591,92 @@ describe('validate() — pre-validation worktree reset', () => {
     expect(first.command[2]).toContain('git clean -fd');
   });
 
+  it.each([true, false])(
+    'preserves sandbox outputs and admits only its verified checkpoint (owned=%s)',
+    async (owned) => {
+      const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'autopod-checkpoint-reset-'));
+      const sandbox = path.join(tmpDir, 'sandbox');
+      const host = path.join(tmpDir, 'host');
+      const git = (...args: string[]) => execFileAsync('git', args, { cwd: sandbox });
+      try {
+        await fs.mkdir(sandbox);
+        await git('init', '--initial-branch=main');
+        await git('config', 'user.email', 'test@example.invalid');
+        await git('config', 'user.name', 'Test');
+        await git('config', 'commit.gpgsign', 'false');
+        await fs.writeFile(path.join(sandbox, 'README.md'), 'source baseline\n');
+        await git('add', '.');
+        await git('commit', '-m', 'baseline');
+        const sourceHead = (await git('rev-parse', 'HEAD')).stdout.trim();
+        await fs.mkdir(path.join(sandbox, 'dispatcher-output'));
+        await fs.writeFile(
+          path.join(sandbox, 'dispatcher-output', 'implement.md'),
+          'complete report\n',
+        );
+        await fs.writeFile(path.join(sandbox, 'proof.json'), '{"passed":true}\n');
+        await git('add', '.');
+        const tree = (await git('write-tree')).stdout.trim();
+        const snapshot = (
+          await execFileAsync(
+            'git',
+            ['commit-tree', tree, '-p', sourceHead, '-m', 'autopod sandbox checkpoint'],
+            {
+              cwd: sandbox,
+              env: {
+                ...process.env,
+                GIT_AUTHOR_NAME: 'Autopod',
+                GIT_AUTHOR_EMAIL: 'autopod@localhost',
+                GIT_COMMITTER_NAME: 'Autopod',
+                GIT_COMMITTER_EMAIL: 'autopod@localhost',
+              },
+            },
+          )
+        ).stdout.trim();
+        await git('reset', '--hard', snapshot);
+        await execFileAsync('git', ['clone', '--local', sandbox, host]);
+        await execFileAsync(
+          'git',
+          ['update-ref', `refs/autopod-quarantine/${owned ? 'pod-test' : 'other-pod'}/1`, snapshot],
+          { cwd: host },
+        );
+        // A daemon checkpoint does not advance the worker's live HEAD/index.
+        await git('reset', '--mixed', sourceHead);
+        const { cm } = recordingContainerManager();
+        vi.mocked(cm.execInContainer).mockImplementation(async (_id, command) => {
+          const result = await execFileAsync(command[0] ?? 'sh', command.slice(1), {
+            cwd: sandbox,
+          });
+          return { stdout: result.stdout, stderr: result.stderr, exitCode: 0 };
+        });
+        const validation = createLocalValidationEngine(cm).validate(
+          minimalConfig({
+            executionTarget: 'sandbox',
+            worktreePath: host,
+          }),
+        );
+        if (owned) expect((await validation).overall).toBe('pass');
+        else {
+          await expect(validation).rejects.toThrow(
+            'Verified sandbox validation checkpoint unavailable',
+          );
+          expect(cm.execInContainer).not.toHaveBeenCalled();
+        }
+        expect(
+          await fs.readFile(path.join(sandbox, 'dispatcher-output', 'implement.md'), 'utf8'),
+        ).toBe('complete report\n');
+        expect(await fs.readFile(path.join(sandbox, 'proof.json'), 'utf8')).toBe(
+          '{"passed":true}\n',
+        );
+        expect((await git('rev-parse', 'HEAD')).stdout.trim()).toBe(owned ? snapshot : sourceHead);
+        expect(
+          await fs.readFile(path.join(host, 'dispatcher-output', 'implement.md'), 'utf8'),
+        ).toBe('complete report\n');
+      } finally {
+        await fs.rm(tmpDir, { recursive: true, force: true });
+      }
+    },
+  );
+
   it('uses /workspace for cleanup even when buildWorkDir is set', async () => {
     // Cleanup is deliberately NOT scoped to buildWorkDir — we want untracked
     // files anywhere in the repo gone, not just under the build subdir.

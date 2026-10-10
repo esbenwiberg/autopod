@@ -7242,8 +7242,10 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
       return;
     }
 
-    // If profile has a destination repo: lazy-clone, copy artifacts, push branch (best-effort)
-    if (profile.repoUrl) {
+    // Legacy research profiles selected a destination repository for publication.
+    // Native artifact output only authorizes a preserved file snapshot; selecting
+    // a source repository is not authorization to push an artifact branch.
+    if (profile.repoUrl && !pod.launchConfigDigest) {
       const repoBranch = pod.branch ?? `research/${podId}`;
       try {
         emitActivityStatus(podId, 'Pushing artifact branch…');

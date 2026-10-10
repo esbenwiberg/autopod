@@ -822,6 +822,21 @@ export function registerPodCommands(program: Command, getClient: () => AutopodCl
       }
     });
 
+  program
+    .command('files <id>')
+    .description('Read preserved pod files without waking the worker')
+    .option('--path <path>', 'Read one relative file path')
+    .option('--json', 'Output full content as JSON')
+    .action(async (id: string, opts: { path?: string; json?: boolean }) => {
+      const client = getClient();
+      const result = opts.path
+        ? await client.getPodFile(id, opts.path)
+        : await client.listPodFiles(id);
+      if (opts.json) console.log(JSON.stringify(result));
+      else if ('content' in result) process.stdout.write(result.content);
+      else for (const file of result.files) console.log(file.path);
+    });
+
   // ap tell
   program
     .command('tell <id> <message>')

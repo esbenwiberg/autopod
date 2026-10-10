@@ -386,6 +386,27 @@ export class AutopodClient {
     return this.request('POST', `/pods/${id}/resume`);
   }
 
+  async getPodFile(
+    id: string,
+    filePath: string,
+  ): Promise<{
+    path: string;
+    content: string;
+    size: number;
+    encoding?: 'base64';
+  }> {
+    return this.request(
+      'GET',
+      `/pods/${encodeURIComponent(id)}/files/content?path=${encodeURIComponent(filePath)}`,
+    );
+  }
+
+  async listPodFiles(
+    id: string,
+  ): Promise<{ files: Array<{ path: string; size: number; modified: number }> }> {
+    return this.request('GET', `/pods/${encodeURIComponent(id)}/files`);
+  }
+
   async sendMessage(id: string, message: string): Promise<void> {
     await this.request<void>('POST', `/pods/${id}/message`, { message });
   }

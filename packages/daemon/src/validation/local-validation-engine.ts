@@ -304,8 +304,9 @@ interface TestRunResult extends InfrastructureAwareResult {
  * worktree to "exactly what's committed" — which is the only thing validation
  * should be evaluating.
  *
- * Cleanup is best-effort: failures are logged and swallowed. Losing cleanup is
- * degraded mode, not broken mode.
+ * Ordinary cleanup is best-effort. Sandbox validation first adopts this pod's
+ * verified host checkpoint so captured uncommitted work becomes its candidate.
+ * Failure to adopt that checkpoint blocks validation and preserves the workspace.
  */
 async function resetWorktreeToHead(
   containerManager: ContainerManager,
@@ -313,23 +314,60 @@ async function resetWorktreeToHead(
   log?: Logger,
 ): Promise<void> {
   const cmd = 'git reset --hard HEAD && git clean -fd';
+  let containerCmd = cmd;
+  if (config.executionTarget === 'sandbox' && config.worktreePath) {
+    // The live worker HEAD intentionally excludes daemon snapshot commits.
+    // Adopt only this pod's host-verified checkpoint before removing untracked
+    // files, otherwise cleanup erases deliverable work and the next checkpoint
+    // incorrectly supersedes the preserved candidate with its empty baseline.
+    const checkpoint = (
+      await execFileAsync('git', ['rev-parse', 'HEAD'], {
+        cwd: config.worktreePath,
+      })
+    ).stdout.trim();
+    const sourceHead = await resolveSandboxCheckpointSourceHead(
+      config.worktreePath,
+      config.podId,
+      checkpoint,
+    );
+    if (!sourceHead || !/^[a-f0-9]{40}$/.test(checkpoint)) {
+      throw new AutopodError(
+        'Verified sandbox validation checkpoint unavailable',
+        'SANDBOX_VALIDATION_CHECKPOINT_UNAVAILABLE',
+        503,
+      );
+    }
+    containerCmd = `git reset --hard ${checkpoint} && git clean -fd`;
+  }
 
   // Container side — feeds Lint/SAST/Build/Tests/Health/Pages/Facts.
   // Always run at /workspace (repo root) regardless of buildWorkDir, so
   // untracked files anywhere in the worktree are removed, not just the
   // build subdir.
   try {
-    const result = await containerManager.execInContainer(config.containerId, ['sh', '-c', cmd], {
-      cwd: '/workspace',
-      timeout: 30_000,
-    });
+    const result = await containerManager.execInContainer(
+      config.containerId,
+      ['sh', '-c', containerCmd],
+      {
+        cwd: '/workspace',
+        timeout: 30_000,
+      },
+    );
     if (result.exitCode !== 0) {
+      if (containerCmd !== cmd) {
+        throw new AutopodError(
+          'Sandbox could not adopt its verified validation checkpoint',
+          'SANDBOX_VALIDATION_CHECKPOINT_UNAVAILABLE',
+          503,
+        );
+      }
       log?.warn(
         { exitCode: result.exitCode, stderr: result.stderr.slice(0, 500) },
         'pre-validation worktree reset returned non-zero in container — continuing',
       );
     }
   } catch (err) {
+    if (containerCmd !== cmd) throw err;
     log?.warn({ err }, 'pre-validation worktree reset failed in container — continuing');
   }
 
