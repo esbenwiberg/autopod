@@ -4,7 +4,12 @@ import { lstat, open, readdir, readlink, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { AutopodError } from '@autopod/shared';
 
-const MAX_ENTRIES = 100_000;
+// Dependencies can contain many small files plus their directory structure.
+// Bound content entries and directories independently so directory metadata
+// does not consume the file allowance. Every entry still participates in the
+// receipt; neither dependencies nor Git metadata are omitted.
+const MAX_FILE_ENTRIES = 100_000;
+const MAX_DIRECTORY_ENTRIES = 100_000;
 const MAX_BYTES = 1_073_741_824;
 
 async function fingerprint(
@@ -12,19 +17,27 @@ async function fingerprint(
 ): Promise<{ sha256: string; entries: number; bytes: number }> {
   const digest = createHash('sha256');
   let entries = 0;
+  let fileEntries = 0;
+  let directories = 0;
   let bytes = 0;
   async function visit(relative: string): Promise<void> {
-    if (++entries > MAX_ENTRIES) throw new Error('Artifact inventory exceeds 100000 entries');
+    entries++;
     const fullPath = path.join(root, relative);
     const before = await lstat(fullPath);
     const metadata = { path: relative, mode: before.mode };
     if (before.isSymbolicLink()) {
+      if (++fileEntries > MAX_FILE_ENTRIES)
+        throw new Error('Artifact inventory exceeds 100000 file or link entries');
       if (!relative) throw new Error('Artifact snapshot root cannot be a symlink');
       digest.update(JSON.stringify({ ...metadata, link: await readlink(fullPath) }));
     } else if (before.isDirectory()) {
+      if (++directories > MAX_DIRECTORY_ENTRIES)
+        throw new Error('Artifact inventory exceeds 100000 directory entries');
       digest.update(JSON.stringify({ ...metadata, type: 'directory' }));
       for (const name of (await readdir(fullPath)).sort()) await visit(path.join(relative, name));
     } else if (before.isFile()) {
+      if (++fileEntries > MAX_FILE_ENTRIES)
+        throw new Error('Artifact inventory exceeds 100000 file or link entries');
       bytes += before.size;
       if (bytes > MAX_BYTES) throw new Error('Artifact inventory exceeds 1 GiB');
       digest.update(JSON.stringify({ ...metadata, type: 'file', size: before.size }));
