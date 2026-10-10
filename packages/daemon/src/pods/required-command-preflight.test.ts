@@ -62,3 +62,24 @@ it('keeps an unavailable probe unknown and records explicit dependencies separat
   expect(result.requirements.every((entry) => entry.available === null)).toBe(true);
   expect(result.requirements.map((entry) => entry.executable)).toEqual(['node', 'npm']);
 });
+it('records a launcher repeated across chained segments once per source', async () => {
+  const cm = createMockContainerManager();
+  vi.mocked(cm.execInContainer).mockResolvedValue({
+    exitCode: 0,
+    stdout: JSON.stringify([
+      { executable: 'npx', available: true },
+      { executable: 'tee', available: true },
+    ]),
+    stderr: '',
+  });
+  const pod = { options: { validate: true } } as Pod;
+  const result = await inspectRequiredCommands(cm, 'container', pod, {
+    buildCommand: 'npx pnpm install && npx pnpm build && npx pnpm typecheck | tee build.log',
+    testCommand: 'npx pnpm test',
+  } as Profile);
+  expect(result.requirements).toEqual([
+    { source: 'profile.build', executable: 'npx', available: true },
+    { source: 'profile.build', executable: 'tee', available: true },
+    { source: 'profile.test', executable: 'npx', available: true },
+  ]);
+});
