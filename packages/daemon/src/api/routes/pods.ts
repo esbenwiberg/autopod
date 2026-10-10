@@ -718,12 +718,15 @@ export function podRoutes(
   // GET /pods/:podId — get pod
   app.get('/pods/:podId', async (request) => {
     const { podId } = request.params as { podId: string };
-    return serializePodForRequest(
+    const wire = serializePodForRequest(
       podManager.getSession(podId),
       request,
       providerAttemptRepo,
       eventRepo,
-    );
+    ) as Record<string, unknown>;
+    if (podManager.getArtifactResumeObservation)
+      wire.artifactResumeObservation = podManager.getArtifactResumeObservation(podId);
+    return wire;
   });
 
   // Task projection deliberately avoids deserializing the pod's contract/validation JSON.

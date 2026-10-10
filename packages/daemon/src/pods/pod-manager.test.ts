@@ -1061,6 +1061,105 @@ function seedPollDelivery(ctx: TestContext, id: string, planned = false) {
 }
 
 describe('PodManager', () => {
+  describe('read-only artifact recovery observation through authenticated status', () => {
+    function retainedArtifact() {
+      const ctx = createTestContext();
+      const manager = createPodManager(ctx.deps);
+      const pod = manager.createSession(
+        {
+          profileName: 'test-profile',
+          task: 'Retain settled report',
+          options: { agentMode: 'auto', output: 'artifact', validate: false, promotable: false },
+        },
+        'operator',
+      );
+      ctx.podRepo.update(pod.id, { status: 'running', containerId: 'same-source' });
+      ctx.podRepo.completionJournal?.settle(ctx.podRepo.getOrThrow(pod.id), 'Report settled');
+      ctx.podRepo.completionJournal?.mark(ctx.podRepo.getOrThrow(pod.id), 'preserving');
+      const failure =
+        'Artifact preservation failed. Original container retained; retry collection before completing.';
+      const timestamp = new Date(Date.now() + 1000).toISOString();
+      const ids = [
+        'Resume: retrying artifact collection from the settled worker…',
+        'Collecting artifacts…',
+        failure,
+      ].map((message, index) =>
+        ctx.eventRepo.insert({
+          type: 'pod.agent_activity',
+          podId: pod.id,
+          timestamp,
+          event:
+            index === 2
+              ? { type: 'error', message, timestamp, fatal: false }
+              : { type: 'status', message, timestamp },
+        }),
+      );
+      ctx.podRepo.update(pod.id, { status: 'failed', failureReason: failure });
+      // Fixture clock advances after the durable backend failure; no live state is edited.
+      ctx.db.prepare('UPDATE pods SET updated_at=? WHERE id=?').run(timestamp, pod.id);
+      return { ctx, manager, pod, ids };
+    }
+
+    it('projects durable identity through GET without executing recovery and survives manager restart', async () => {
+      const { ctx, manager, pod, ids } = retainedArtifact();
+      const observation = manager.getArtifactResumeObservation?.(pod.id);
+      expect(observation).toMatchObject({
+        state: 'settled-failed',
+        binding: { podId: pod.id, generation: pod.lifecycleGeneration, containerId: 'same-source' },
+        operations: [{ identity: `${pod.id}:1:1:${ids[0]}:${ids[2]}`, agentRerun: false }],
+      });
+      const restarted = createPodManager(ctx.deps);
+      expect(restarted.getArtifactResumeObservation?.(pod.id)).toEqual(observation);
+      const app = Fastify();
+      app.setErrorHandler(errorHandler);
+      authPlugin(app, {
+        validateToken: async () => ({ oid: 'operator', name: 'Operator' }),
+      } as never);
+      podRoutes(app, restarted, ctx.eventRepo, undefined, ctx.podRepo);
+      try {
+        const denied = await app.inject({ method: 'GET', url: `/pods/${pod.id}` });
+        expect(denied.statusCode).toBe(401);
+        const before = ctx.podRepo.getOrThrow(pod.id);
+        const response = await app.inject({
+          method: 'GET',
+          url: `/pods/${pod.id}`,
+          headers: { authorization: 'Bearer synthetic' },
+        });
+        expect(response.statusCode, response.body).toBe(200);
+        expect(response.json().artifactResumeObservation).toEqual(observation);
+        expect(ctx.podRepo.getOrThrow(pod.id)).toEqual(before);
+        expect(ctx.containerManager.extractDirectoryFromContainer).not.toHaveBeenCalled();
+        expect(ctx.containerManager.spawn).not.toHaveBeenCalled();
+        expect(ctx.runtime.spawn).not.toHaveBeenCalled();
+        expect(ctx.runtime.resume).not.toHaveBeenCalled();
+      } finally {
+        await app.close();
+      }
+    });
+
+    it.each(['unsettled-execution', 'uncollected-guidance'] as const)(
+      'withholds settled observation when %s remains',
+      (blocker) => {
+        const { ctx, manager, pod } = retainedArtifact();
+        if (blocker === 'uncollected-guidance')
+          ctx.deps.nudgeRepo?.queue(pod.id, 'Saved correction');
+        else
+          ctx.podRepo.taskExecutions?.beginRun(pod.id, 1, 1, {
+            runtime: pod.runtime,
+            model: pod.model,
+            providerAccountId: null,
+          });
+        expect(manager.getArtifactResumeObservation?.(pod.id)).toEqual({
+          protocol: 'artifact-resume-observation-v1',
+          state: 'unavailable',
+          operations: [],
+        });
+        expect(ctx.containerManager.extractDirectoryFromContainer).not.toHaveBeenCalled();
+        expect(ctx.runtime.resume).not.toHaveBeenCalled();
+      },
+    );
+  });
+
   it('applies audited finding overrides instantly when a healthy review parked as failed', async () => {
     const ctx = createTestContext();
     const manager = createPodManager(ctx.deps);
