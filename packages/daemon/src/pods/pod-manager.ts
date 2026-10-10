@@ -201,6 +201,10 @@ import {
 import { agentToolingCachePaths } from './agent-tooling-cache-paths.js';
 import { hasInterruptedArtifactCollection } from './artifact-finalization-recovery.js';
 import { collectArtifactSnapshot } from './artifact-preservation.js';
+import {
+  type ArtifactResumeObservation,
+  observeArtifactResume,
+} from './artifact-resume-observation.js';
 import { verifyArtifactSnapshot } from './artifact-snapshot-receipt.js';
 import { admitComposablePod } from './composable-pod-admission.js';
 import {
@@ -1510,6 +1514,7 @@ export interface PodManager {
     lifecycle?: { generation: number; containerId: string | null; nativeGoal?: boolean },
   ): Promise<AgentRunOutcome>;
   handleCompletion(podId: string): Promise<void>;
+  getArtifactResumeObservation?(podId: string): ArtifactResumeObservation;
   preserveWorkspace(podId: string, reason?: string): Promise<void>;
   quiesceSandboxAgent(podId: string): Promise<void>;
   suspendSandboxForRecovery(podId: string): Promise<void>;
@@ -18088,6 +18093,30 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
       podRepo.update(podId, { prUrl: newPrUrl });
       emitActivityStatus(podId, `PR created: ${newPrUrl}`);
       logger.info({ podId, prUrl: newPrUrl }, 'PR created via retryCreatePr');
+    },
+
+    getArtifactResumeObservation(podId: string): ArtifactResumeObservation {
+      const unavailable: ArtifactResumeObservation = {
+        protocol: 'artifact-resume-observation-v1',
+        state: 'unavailable',
+        operations: [],
+      };
+      if (!deps.eventRepo) return unavailable;
+      try {
+        assertExecutionTerminationVerified(podId);
+        assertGuidanceCollected(podId);
+        if (podRepo.taskExecutions?.hasActiveRun(podId)) return unavailable;
+        const pod = podRepo.getOrThrow(podId);
+        const key = `${pod.id}:${pod.lifecycleGeneration}:${pod.finalization?.cycle ?? 0}`;
+        return observeArtifactResume(
+          pod,
+          deps.eventRepo.getForSession(podId),
+          artifactResumeRuns.has(podId) || artifactCompletionRuns.has(key),
+        );
+      } catch {
+        // Reading status must never resume a process or claim an unavailable exit.
+        return unavailable;
+      }
     },
 
     async resumePod(podId: string): Promise<{
