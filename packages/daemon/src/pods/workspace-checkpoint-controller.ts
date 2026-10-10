@@ -64,6 +64,10 @@ export interface CheckpointDecision {
   result?: WorkspaceCheckpointResult;
 }
 
+function sameFingerprint(a: WorkspaceFingerprint, b: WorkspaceFingerprint): boolean {
+  return a.head === b.head && a.tree === b.tree && a.dirty === b.dirty;
+}
+
 /**
  * Serializes Git checkpoint work outside pod-manager. It deliberately coalesces
  * duplicate requests and only retries failures explicitly marked retryable.
@@ -150,6 +154,10 @@ export class WorkspaceCheckpointController {
   ): Promise<CheckpointDecision> {
     if (!fingerprint.dirty) return { checkpointed: false, degraded: false };
     const record = await this.deps.records.latestVerified(podId);
+    // The lease measures how long work has gone unprotected. When the newest verified
+    // checkpoint already covers the live tree, nothing is unprotected however old it is.
+    if (record && sameFingerprint(record.fingerprint, fingerprint))
+      return { checkpointed: false, degraded: false };
     const age = record?.verifiedAt
       ? this.now() - new Date(record.verifiedAt).getTime()
       : Number.POSITIVE_INFINITY;
