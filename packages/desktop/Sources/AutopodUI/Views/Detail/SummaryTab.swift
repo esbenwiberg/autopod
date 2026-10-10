@@ -154,17 +154,18 @@ struct WorkTab: View {
                 emptyWorkSection("No process signals yet", icon: "gauge.with.dots.needle.67percent")
             }
         case .cost:
+            // Spend first; retry accounting is supporting evidence below it.
+            if let cost {
+                SessionCostCard(breakdown: cost)
+            } else {
+                emptyWorkSection("No cost data yet", icon: "dollarsign.circle")
+            }
             if pod.pod.output != .artifact {
                 TaskRetryCard(podId: pod.id, status: pod.status.rawValue, actions: actions)
             }
             TaskRetryCard(podId: pod.id, status: pod.status.rawValue, actions: actions, stage: "sandbox_startup")
             TaskRetryCard(podId: pod.id, status: pod.status.rawValue, actions: actions, stage: "codex_interruption")
             TaskRetryCard(podId: pod.id, status: pod.status.rawValue, actions: actions, stage: "worker")
-            if let cost {
-                SessionCostCard(breakdown: cost)
-            } else {
-                emptyWorkSection("No cost data yet", icon: "dollarsign.circle")
-            }
         }
     }
 

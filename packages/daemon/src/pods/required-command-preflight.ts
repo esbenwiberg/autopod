@@ -150,7 +150,9 @@ export async function inspectRequiredCommands(
       unresolvedSources.push(source);
       continue;
     }
-    for (const executable of executables) {
+    // `a && a && a` repeats one launcher per segment; one requirement per
+    // (source, executable) is the evidence, repeats are noise.
+    for (const executable of new Set(executables)) {
       // A declared new script need not exist before the agent creates it.
       if (
         (pod.contract?.requiredFacts ?? []).some(
@@ -159,7 +161,7 @@ export async function inspectRequiredCommands(
             executable.replace(/^\.\//, '') === fact.artifact.path,
         )
       ) {
-        deferredArtifacts.push(source);
+        if (!deferredArtifacts.includes(source)) deferredArtifacts.push(source);
         continue;
       }
       requirements.push({ source, executable, available: null });
