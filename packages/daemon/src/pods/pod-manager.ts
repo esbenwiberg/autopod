@@ -7216,6 +7216,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
       podRepo.completionJournal?.mark(pod, 'preserving', true);
       return artifactsPath;
     } catch (err) {
+      logger.error({ err, podId: pod.id }, 'Artifact preservation failed; source retained');
       if (ownsArtifactCompletion(pod)) {
         const failureReason =
           'Artifact preservation failed. Original container retained; retry collection before completing.';

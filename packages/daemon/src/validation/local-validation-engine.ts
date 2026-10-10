@@ -27,7 +27,7 @@ import {
 } from '@autopod/shared';
 import { generateValidationScript, parsePageResults } from '@autopod/validator';
 import type { Logger } from 'pino';
-import type { ContainerManager } from '../interfaces/container-manager.js';
+import type { ContainerManager, ExecOptions } from '../interfaces/container-manager.js';
 import type {
   ValidationEngine,
   ValidationEngineConfig,
@@ -1619,7 +1619,9 @@ async function runBuild(
 
   let result: { stdout: string; stderr: string; exitCode: number };
   try {
-    result = await containerManager.execInContainer(
+    result = await runValidationCommand(
+      containerManager,
+      config.executionTarget,
       config.containerId,
       wrapValidationExecCommand(config.buildCommand, config.extraExecEnv),
       {
@@ -1724,7 +1726,9 @@ async function runTests(
   const testCwd = config.buildWorkDir ? `/workspace/${config.buildWorkDir}` : '/workspace';
   let result: { stdout: string; stderr: string; exitCode: number };
   try {
-    result = await containerManager.execInContainer(
+    result = await runValidationCommand(
+      containerManager,
+      config.executionTarget,
       config.containerId,
       wrapValidationExecCommand(config.testCommand, config.extraExecEnv),
       {
@@ -1871,12 +1875,59 @@ function validationInfrastructureOutput(error: unknown, partial = ''): string {
   );
 }
 
+async function runValidationCommand(
+  containerManager: ContainerManager,
+  executionTarget: ValidationEngineConfig['executionTarget'],
+  containerId: string,
+  command: string[],
+  options: ExecOptions,
+): Promise<{ stdout: string; stderr: string; exitCode: number }> {
+  if (executionTarget !== 'sandbox') {
+    return containerManager.execInContainer(containerId, command, options);
+  }
+
+  const handle = await containerManager.execStreaming(containerId, command, options);
+  let stdout = '';
+  let stderr = '';
+  const readStdout = (async () => {
+    for await (const chunk of handle.stdout) stdout = (stdout + String(chunk)).slice(-50_000);
+  })();
+  const readStderr = (async () => {
+    for await (const chunk of handle.stderr) stderr = (stderr + String(chunk)).slice(-50_000);
+  })();
+  try {
+    const [, , exitCode] = await Promise.all([readStdout, readStderr, handle.exitCode]);
+    return { stdout, stderr, exitCode };
+  } catch (err) {
+    // Native exec finalizes both streams before settling the exit promise. Drain
+    // their buffered bytes even when Promise.all rejects on an unverified exit.
+    await Promise.allSettled([readStdout, readStderr]);
+    if (err instanceof Error) {
+      Object.assign(err, { partialOutput: `${stdout}\n${stderr}`.slice(-50_000) });
+    }
+    throw err;
+  }
+}
+
 function classifyValidationInfrastructureFailure(
   phase: ValidationInfrastructureFailure['phase'],
   error: unknown,
   executionTarget?: ValidationEngineConfig['executionTarget'],
 ): ValidationInfrastructureFailure | null {
   if (error instanceof ValidationCommandInfrastructureError) return error.failure;
+
+  if (
+    error instanceof AutopodError &&
+    (error.code === 'EXEC_EXIT_UNVERIFIED' || error.code === 'AZURE_SANDBOX_EXEC_INVALID_RESPONSE')
+  ) {
+    return {
+      phase,
+      code: error.code,
+      statusCode: error.statusCode,
+      message: error.message,
+      retryable: false,
+    };
+  }
 
   if (executionTarget === 'sandbox') {
     const message = error instanceof Error ? error.message : String(error);

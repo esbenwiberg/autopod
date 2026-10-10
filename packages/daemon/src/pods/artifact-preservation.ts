@@ -15,12 +15,15 @@ export async function collectArtifactSnapshot(options: {
   isCurrent: () => boolean;
   timeoutMs?: number;
 }): Promise<string> {
-  const failure = () =>
-    new AutopodError(
+  const failure = (cause?: unknown) => {
+    const error = new AutopodError(
       'Artifact preservation failed. The original container is retained; retry collection before completing.',
       'ARTIFACT_PRESERVATION_FAILED',
       502,
     );
+    error.cause = cause;
+    return error;
+  };
   const containerId = options.containerId;
   if (!containerId || !options.isCurrent()) throw failure();
   await mkdir(options.artifactRoot, { recursive: true });
@@ -45,7 +48,7 @@ export async function collectArtifactSnapshot(options: {
       new Promise<never>((_resolve, reject) => {
         timer = setTimeout(() => {
           expired = true;
-          reject(failure());
+          reject(new Error(`Artifact copy timed out after ${options.timeoutMs ?? 120_000}ms`));
         }, options.timeoutMs ?? 120_000);
       }),
     ]);
@@ -56,10 +59,10 @@ export async function collectArtifactSnapshot(options: {
     if (!options.isCurrent()) throw failure();
     await rename(staging, snapshot);
     return snapshot;
-  } catch {
+  } catch (cause) {
     if (snapshot) await rm(`${snapshot}.receipt.json`, { force: true }).catch(() => {});
     if (!expired) await rm(staging, { recursive: true, force: true }).catch(() => {});
-    throw failure();
+    throw failure(cause);
   } finally {
     if (timer) clearTimeout(timer);
   }

@@ -55,6 +55,7 @@ import {
   egressPolicyForMode,
   pickSandboxTier,
 } from './sandbox-api-client.js';
+import { exportSandboxWorkspace } from './sandbox-workspace-export.js';
 
 export interface SandboxContainerManagerOptions {
   /** Explicit managed-mode ledger; native spawn remains unchanged. */
@@ -103,7 +104,8 @@ export interface SandboxContainerManagerConfig {
  *     initial egress policy from `networkPolicyMode` + `allowedHosts`)
  *   - `stop()`/`start()` → snapshot suspend/resume
  *   - host bind mounts → best-effort upload at spawn (Sandboxes have no bind mounts)
- *   - `extractDirectoryFromContainer` → list/read recursively into the same
+ *   - `extractDirectoryFromContainer` → chunked archive for full workspace exports,
+ *     list/read for filtered paths, into the same
  *     staging-and-mirror sync-back strategy as Docker
  *   - `execStreaming` → native streaming when the client exposes it; otherwise
  *     rejected because buffered exec breaks long-running agent runtime semantics
@@ -508,7 +510,18 @@ for root in sys.argv[1:]:
     mkdirSync(stagingPath, { recursive: true });
 
     try {
-      await this.extractSandboxPath(containerId, rootPath, rootPath, stagingPath, excludes);
+      if (rootPath === '/workspace' && !excludes?.length) {
+        await exportSandboxWorkspace(
+          this.client,
+          containerId,
+          rootPath,
+          stagingPath,
+          options,
+          this.logger,
+        );
+      } else {
+        await this.extractSandboxPath(containerId, rootPath, rootPath, stagingPath, excludes);
+      }
       assertDirectoryExtractionCurrent(options);
       mirrorStagedDirectory(stagingPath, hostPath, excludes, options ? undefined : stagingBase);
     } finally {

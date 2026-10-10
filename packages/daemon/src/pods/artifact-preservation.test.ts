@@ -39,7 +39,10 @@ describe('artifact snapshot publication', () => {
         throw new Error('broken archive');
       },
     );
-    await expect(collectArtifactSnapshot(config)).rejects.toThrow('Artifact preservation failed');
+    await expect(collectArtifactSnapshot(config)).rejects.toMatchObject({
+      code: 'ARTIFACT_PRESERVATION_FAILED',
+      cause: new Error('broken archive'),
+    });
     expect(await readFile(path.join(published, 'report.md'), 'utf8')).toBe('complete report');
     expect((await readdir(root)).sort()).toEqual(
       [path.basename(published), `${path.basename(published)}.receipt.json`].sort(),
@@ -74,9 +77,10 @@ describe('artifact snapshot publication', () => {
         await writeFile(path.join(target, 'report.md'), 'late completion');
       },
     );
-    await expect(collectArtifactSnapshot({ ...config, timeoutMs: 10 })).rejects.toThrow(
-      'Artifact preservation failed',
-    );
+    await expect(collectArtifactSnapshot({ ...config, timeoutMs: 10 })).rejects.toMatchObject({
+      code: 'ARTIFACT_PRESERVATION_FAILED',
+      cause: new Error('Artifact copy timed out after 10ms'),
+    });
     expect((await readdir(root)).every((name) => name.startsWith('.collect-'))).toBe(true);
     finish();
     await vi.waitFor(async () => {
