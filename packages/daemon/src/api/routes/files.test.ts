@@ -82,56 +82,63 @@ describe('filesRoutes', () => {
     await rm(tmp, { recursive: true, force: true });
   });
 
-  it('serves the published artifact snapshot instead of a surviving container or stale worktree', async () => {
-    const artifact = path.join(tmp, 'snapshot');
-    await mkdir(artifact);
-    await writeFile(path.join(artifact, 'report.md'), 'published report');
-    const cm = { execInContainer: vi.fn(), readFile: vi.fn() };
-    const server = Fastify();
-    filesRoutes(
-      server,
-      podManager({
-        status: 'complete',
-        options: { output: 'artifact' },
-        worktreePath: tmp,
-        artifactsPath: artifact,
-        containerId: 'surviving-container',
-      }),
-      makeFactory(cm),
-    );
-    try {
-      const list = await server.inject('/pods/abc/files');
-      expect(list.json().files.map((file: FileEntry) => file.path)).toEqual(['report.md']);
-      const content = await server.inject('/pods/abc/files/content?path=report.md');
-      expect(content.json().content).toBe('published report');
-      expect(cm.execInContainer).not.toHaveBeenCalled();
-    } finally {
-      await server.close();
-    }
-  });
+  it.each(['artifact', 'branch', 'pr'])(
+    'serves the preserved %s snapshot instead of a surviving container or stale worktree',
+    async (output) => {
+      const artifact = path.join(tmp, 'snapshot');
+      await mkdir(artifact);
+      await writeFile(path.join(artifact, 'report.md'), 'published report');
+      const cm = { execInContainer: vi.fn(), readFile: vi.fn() };
+      const server = Fastify();
+      filesRoutes(
+        server,
+        podManager({
+          status: 'complete',
+          options: { output },
+          worktreePath: tmp,
+          artifactsPath: artifact,
+          containerId: output === 'artifact' ? 'surviving-container' : null,
+        }),
+        makeFactory(cm),
+      );
+      try {
+        const list = await server.inject('/pods/abc/files');
+        expect(list.statusCode).toBe(200);
+        expect(list.json().files.map((file: FileEntry) => file.path)).toEqual(['report.md']);
+        const content = await server.inject('/pods/abc/files/content?path=report.md');
+        expect(content.json().content).toBe('published report');
+        expect(cm.execInContainer).not.toHaveBeenCalled();
+      } finally {
+        await server.close();
+      }
+    },
+  );
 
-  it('refuses an artifact symlink that points outside the published snapshot', async () => {
-    const artifact = path.join(tmp, 'snapshot');
-    await mkdir(artifact);
-    await symlink(path.join(tmp, 'README.md'), path.join(artifact, 'outside.md'));
-    const server = Fastify();
-    filesRoutes(
-      server,
-      podManager({
-        status: 'complete',
-        options: { output: 'artifact' },
-        worktreePath: null,
-        artifactsPath: artifact,
-      }),
-    );
-    try {
-      const content = await server.inject('/pods/abc/files/content?path=outside.md');
-      expect(content.statusCode).toBe(403);
-      expect(content.body).not.toContain('# readme');
-    } finally {
-      await server.close();
-    }
-  });
+  it.each(['artifact', 'branch', 'pr'])(
+    'refuses a %s symlink that points outside the preserved snapshot',
+    async (output) => {
+      const artifact = path.join(tmp, 'snapshot');
+      await mkdir(artifact);
+      await symlink(path.join(tmp, 'README.md'), path.join(artifact, 'outside.md'));
+      const server = Fastify();
+      filesRoutes(
+        server,
+        podManager({
+          status: 'complete',
+          options: { output },
+          worktreePath: null,
+          artifactsPath: artifact,
+        }),
+      );
+      try {
+        const content = await server.inject('/pods/abc/files/content?path=outside.md');
+        expect(content.statusCode).toBe(403);
+        expect(content.body).not.toContain('# readme');
+      } finally {
+        await server.close();
+      }
+    },
+  );
 
   describe('GET /pods/:podId/files', () => {
     it('returns markdown files from root and normal subdirectories', async () => {
