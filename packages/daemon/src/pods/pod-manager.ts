@@ -13119,6 +13119,43 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         }
       }
 
+      // Git checkpoints omit ignored reports. Preserve the complete sandbox
+      // workspace before publication or either approval cleanup path removes it.
+      if (
+        pod.executionTarget === 'sandbox' &&
+        pod.containerId &&
+        (pod.options.output === 'branch' || pod.options.output === 'pr')
+      ) {
+        const dataDir = process.env.DATA_DIR ?? path.join(process.cwd(), '.autopod-data');
+        const isCurrent = () => {
+          try {
+            assertApprovalCurrent(pod);
+            return true;
+          } catch {
+            return false;
+          }
+        };
+        try {
+          const artifactsPath = await collectArtifactSnapshot({
+            containerManager: containerManagerFactory.get(pod.executionTarget),
+            containerId: pod.containerId,
+            artifactRoot: path.join(dataDir, 'artifacts', pod.id),
+            generation: pod.lifecycleGeneration,
+            cycle: pod.finalization?.cycle ?? 0,
+            isCurrent,
+          });
+          assertApprovalCurrent(pod);
+          podRepo.update(podId, { artifactsPath });
+        } catch (error) {
+          assertApprovalCurrent(pod);
+          const reason =
+            'Approval delivery failed. Workspace reports could not be preserved. Original resources retained; repair preservation and retry approval.';
+          podRepo.update(podId, { failureReason: reason });
+          emitActivityError(podId, reason, false);
+          throw error;
+        }
+      }
+
       let recoveredMerge = false;
       if (pod.prUrl && podRepo.mergeJournal) {
         try {

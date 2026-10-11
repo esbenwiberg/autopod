@@ -7450,6 +7450,128 @@ describe('PodManager', () => {
   });
 
   describe('approveSession', () => {
+    describe('approval report retention', () => {
+      let dataDir: string;
+      let previousDataDir: string | undefined;
+      beforeEach(() => {
+        previousDataDir = process.env.DATA_DIR;
+        dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'autopod-approval-reports-'));
+        process.env.DATA_DIR = dataDir;
+      });
+      afterEach(() => {
+        if (previousDataDir === undefined) Reflect.deleteProperty(process.env, 'DATA_DIR');
+        else process.env.DATA_DIR = previousDataDir;
+        fs.rmSync(dataDir, { recursive: true, force: true });
+      });
+
+      function setup() {
+        const ctx = createTestContext(undefined, {
+          executionTarget: 'sandbox',
+          warmImageTag: 'fixture.azurecr.io/autopod-warm:test',
+        });
+        const manager = createPodManager(ctx.deps);
+        const pod = manager.createSession(
+          {
+            profileName: 'test-profile',
+            task: 'Keep ignored report',
+            options: { agentMode: 'auto', output: 'branch', validate: true, promotable: false },
+          },
+          'user-1',
+        );
+        ctx.podRepo.update(
+          pod.id,
+          validatedPodUpdates(pod.id, {
+            containerId: 'approval-source',
+            worktreePath: '/tmp/wt',
+            filesChanged: 1,
+          }),
+        );
+        return { ctx, manager, pod };
+      }
+
+      it.each(['branch', 'pr', 'no-change'] as const)(
+        'keeps Git-ignored reports before %s publication and sandbox removal',
+        async (output) => {
+          const { ctx, manager, pod } = setup();
+          if (output === 'pr')
+            ctx.podRepo.update(pod.id, { options: { ...pod.options, output: 'pr' } });
+          if (output === 'no-change')
+            vi.mocked(ctx.worktreeManager.getDiffStats).mockResolvedValue({
+              filesChanged: 0,
+              linesAdded: 0,
+              linesRemoved: 0,
+            });
+          vi.mocked(ctx.containerManager.extractDirectoryFromContainer).mockImplementation(
+            async (_id, root, destination) => {
+              expect(root).toBe('/workspace');
+              expect(ctx.worktreeManager.pushBranch).not.toHaveBeenCalled();
+              expect(ctx.worktreeManager.mergeBranch).not.toHaveBeenCalled();
+              expect(ctx.containerManager.kill).not.toHaveBeenCalled();
+              fs.mkdirSync(path.join(destination, 'dispatcher-output'), { recursive: true });
+              fs.writeFileSync(path.join(destination, '.gitignore'), 'dispatcher-output/');
+              fs.writeFileSync(
+                path.join(destination, 'dispatcher-output/implement.md'),
+                'retained report',
+              );
+            },
+          );
+          await manager.approveSession(pod.id);
+          const complete = manager.getSession(pod.id);
+          expect(complete.status).toBe('complete');
+          expect(complete.containerId).toBeNull();
+          expect(ctx.containerManager.extractDirectoryFromContainer).toHaveBeenCalledOnce();
+          if (!complete.artifactsPath) throw new Error('Completed report snapshot is missing');
+          expect(
+            fs.readFileSync(
+              path.join(complete.artifactsPath, 'dispatcher-output/implement.md'),
+              'utf8',
+            ),
+          ).toBe('retained report');
+          if (output !== 'pr') {
+            expect(ctx.prManager.createPr).not.toHaveBeenCalled();
+            expect(ctx.prManager.mergePr).not.toHaveBeenCalled();
+          }
+        },
+      );
+
+      it('retains validated resources and does not publish if report copying fails', async () => {
+        const { ctx, manager, pod } = setup();
+        vi.mocked(ctx.containerManager.extractDirectoryFromContainer).mockRejectedValue(
+          new Error('archive failed'),
+        );
+        await expect(manager.approveSession(pod.id)).rejects.toMatchObject({
+          code: 'ARTIFACT_PRESERVATION_FAILED',
+        });
+        expect(manager.getSession(pod.id)).toMatchObject({
+          status: 'validated',
+          containerId: 'approval-source',
+          artifactsPath: null,
+        });
+        expect(ctx.worktreeManager.pushBranch).not.toHaveBeenCalled();
+        expect(ctx.worktreeManager.mergeBranch).not.toHaveBeenCalled();
+        expect(ctx.containerManager.kill).not.toHaveBeenCalled();
+      });
+
+      it('does not attach an older approval snapshot to a replacement lifecycle', async () => {
+        const { ctx, manager, pod } = setup();
+        vi.mocked(ctx.containerManager.extractDirectoryFromContainer).mockImplementation(
+          async () => {
+            ctx.podRepo.incrementLifecycleGeneration(pod.id);
+          },
+        );
+        await expect(manager.approveSession(pod.id)).rejects.toBeDefined();
+        expect(manager.getSession(pod.id)).toMatchObject({
+          status: 'validated',
+          containerId: 'approval-source',
+          artifactsPath: null,
+          lifecycleGeneration: pod.lifecycleGeneration + 1,
+        });
+        expect(ctx.worktreeManager.pushBranch).not.toHaveBeenCalled();
+        expect(ctx.worktreeManager.mergeBranch).not.toHaveBeenCalled();
+        expect(ctx.containerManager.kill).not.toHaveBeenCalled();
+      });
+    });
+
     it('retains validated source when approval observes a closed planned PR and offers the available approval recovery', async () => {
       const ctx = createTestContext();
       const manager = createPodManager(ctx.deps);
