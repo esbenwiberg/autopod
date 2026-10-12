@@ -14,6 +14,8 @@ export async function collectArtifactSnapshot(options: {
   cycle?: number;
   isCurrent: () => boolean;
   timeoutMs?: number;
+  /** ContainerManager exclude contract; omit to preserve the complete workspace. */
+  excludes?: string[];
 }): Promise<string> {
   const failure = (cause?: unknown) => {
     const error = new AutopodError(
@@ -32,7 +34,12 @@ export async function collectArtifactSnapshot(options: {
   let timer: ReturnType<typeof setTimeout> | undefined;
   let snapshot: string | undefined;
   const copy = Promise.resolve().then(() =>
-    options.containerManager.extractDirectoryFromContainer(containerId, '/workspace', staging),
+    options.containerManager.extractDirectoryFromContainer(
+      containerId,
+      '/workspace',
+      staging,
+      options.excludes,
+    ),
   );
   // A timeout cannot cancel the adapter's copy. Remove its staging directory only
   // after it actually settles, and never publish it or delete the source container.

@@ -7502,8 +7502,12 @@ describe('PodManager', () => {
               linesRemoved: 0,
             });
           vi.mocked(ctx.containerManager.extractDirectoryFromContainer).mockImplementation(
-            async (_id, root, destination) => {
+            async (_id, root, destination, excludes) => {
               expect(root).toBe('/workspace');
+              // Git history ships via publication; dependency caches are regenerable.
+              // Archiving them overran the approval copy budget on real sandboxes.
+              expect(excludes).toEqual(expect.arrayContaining(['.git', 'node_modules']));
+              expect(excludes).not.toContain('dispatcher-output');
               expect(ctx.worktreeManager.pushBranch).not.toHaveBeenCalled();
               expect(ctx.worktreeManager.mergeBranch).not.toHaveBeenCalled();
               expect(ctx.containerManager.kill).not.toHaveBeenCalled();
@@ -18991,10 +18995,12 @@ describe('PodManager', () => {
         const result = await manager.completeSession(pod.id);
 
         expect(result.pushError).toBeUndefined();
+        // Artifact pods deliver the workspace itself, so nothing is excluded.
         expect(ctx.containerManager.extractDirectoryFromContainer).toHaveBeenCalledWith(
           'container-abc',
           '/workspace',
           expect.stringContaining(`artifacts/${pod.id}`),
+          undefined,
         );
         expect(ctx.worktreeManager.mergeBranch).not.toHaveBeenCalled();
 

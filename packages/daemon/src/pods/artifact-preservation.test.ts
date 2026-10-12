@@ -50,6 +50,15 @@ describe('artifact snapshot publication', () => {
     expect(config.containerManager.kill).not.toHaveBeenCalled();
   });
 
+  it('forwards excludes and preserves the complete workspace by default', async () => {
+    const config = options();
+    await collectArtifactSnapshot(config);
+    await collectArtifactSnapshot({ ...config, excludes: ['.git', 'node_modules'] });
+    const calls = vi.mocked(config.containerManager.extractDirectoryFromContainer).mock.calls;
+    expect(calls[0]?.[3]).toBeUndefined();
+    expect(calls[1]?.[3]).toEqual(['.git', 'node_modules']);
+  });
+
   it('does not publish a copy after its lifecycle changed', async () => {
     const config = options();
     let current = true;

@@ -621,6 +621,21 @@ function shellQuote(s: string): string {
 
 const WORKSPACE_RUNTIME_CACHE_EXCLUDES = ['node_modules', '.serena', '.roslyn-codelens'];
 const WORKSPACE_SYNC_EXCLUDES = ['.git', ...WORKSPACE_RUNTIME_CACHE_EXCLUDES];
+// Approval snapshots exist to keep git-ignored reports after the sandbox is deleted.
+// Git history is published separately and dependency/build caches are regenerable;
+// archiving them through the sandbox data plane overran the approval copy budget.
+const APPROVAL_SNAPSHOT_EXCLUDES = [
+  ...WORKSPACE_SYNC_EXCLUDES,
+  '.pnpm-store',
+  '.turbo',
+  '.next',
+  '.nuxt',
+  '.venv',
+  '__pycache__',
+  '.pytest_cache',
+  '.mypy_cache',
+  '.gradle',
+];
 
 /** Render the in-workspace pi-handoff.md file body. A short managed-file banner
  * makes clear to the human/agent that it is Autopod-managed and git-excluded,
@@ -13143,10 +13158,15 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
             generation: pod.lifecycleGeneration,
             cycle: pod.finalization?.cycle ?? 0,
             isCurrent,
+            excludes: APPROVAL_SNAPSHOT_EXCLUDES,
           });
           assertApprovalCurrent(pod);
           podRepo.update(podId, { artifactsPath });
         } catch (error) {
+          logger.error(
+            { err: error, cause: error instanceof Error ? error.cause : undefined, podId },
+            'Approval workspace preservation failed; resources retained',
+          );
           assertApprovalCurrent(pod);
           const reason =
             'Approval delivery failed. Workspace reports could not be preserved. Original resources retained; repair preservation and retry approval.';

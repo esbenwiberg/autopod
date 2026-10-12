@@ -188,3 +188,47 @@ it('rejects zero-exit archive warnings instead of silently omitting workspace en
   expect(fake.read).not.toHaveBeenCalled();
   expect(fake.exec).toHaveBeenCalledTimes(2);
 });
+
+it('passes excludes to tar as argv and drops excluded entries the remote tar kept', async () => {
+  const fake = clientFor(
+    await archive([
+      { header: { name: './', type: 'directory', mode: 0o755 } },
+      { header: { name: './dispatcher-output/implement.md' }, content: Buffer.from('report') },
+      { header: { name: './.git/HEAD' }, content: Buffer.from('ref: refs/heads/main\n') },
+      { header: { name: './pkg/node_modules/dep/index.js' }, content: Buffer.from('dep') },
+      { header: { name: './reports/raw/big.log' }, content: Buffer.from('raw') },
+      { header: { name: './reports/summary.md' }, content: Buffer.from('summary') },
+      { header: { name: './a/reports/raw/keep.md' }, content: Buffer.from('nested') },
+    ]),
+  );
+  await exportSandboxWorkspace(fake.client, 'sandbox', '/workspace', root, undefined, undefined, [
+    '.git',
+    'node_modules',
+    'reports/raw',
+  ]);
+  const argv = fake.exec.mock.calls[0]?.[1] as string[];
+  // Excludes ride as positional argv after the fixed operands, never inside the script.
+  expect(argv.slice(-2)).toEqual(['--exclude=.git', '--exclude=node_modules']);
+  // bsdtar would also drop nested `*/reports/raw`, so slashed paths are host-filtered.
+  expect(argv.some((arg) => arg.includes('reports/raw'))).toBe(false);
+  expect(argv[2]).not.toContain('node_modules');
+  expect(await readFile(join(root, 'dispatcher-output/implement.md'), 'utf8')).toBe('report');
+  expect(await readFile(join(root, 'reports/summary.md'), 'utf8')).toBe('summary');
+  expect(await readFile(join(root, 'a/reports/raw/keep.md'), 'utf8')).toBe('nested');
+  await expect(stat(join(root, '.git'))).rejects.toThrow();
+  await expect(stat(join(root, 'pkg/node_modules'))).rejects.toThrow();
+  await expect(stat(join(root, 'reports/raw'))).rejects.toThrow();
+});
+
+it.each(['*.log', '--checkpoint-action=exec=sh', 'a/../b', 'line\nbreak', '[ab]'])(
+  'rejects exclude %j before touching the sandbox',
+  async (exclude) => {
+    const fake = clientFor(await archive([]));
+    await expect(
+      exportSandboxWorkspace(fake.client, 'sandbox', '/workspace', root, undefined, undefined, [
+        exclude,
+      ]),
+    ).rejects.toThrow('Unsupported sandbox export exclude');
+    expect(fake.exec).not.toHaveBeenCalled();
+  },
+);

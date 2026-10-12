@@ -243,6 +243,8 @@ public actor DaemonAPI {
     try await request("POST", "/pods", body: try encode(body))
   }
 
+  static let approvalTimeout: TimeInterval = 300
+
   public func approvePod(_ id: String, squash: Bool? = nil, reason: String? = nil) async throws {
     let trimmedReason = reason?.trimmingCharacters(in: .whitespacesAndNewlines)
     let body: Data? = if squash != nil || trimmedReason?.isEmpty == false {
@@ -250,7 +252,19 @@ public actor DaemonAPI {
     } else {
       nil
     }
-    let _: OkResponse = try await request("POST", "/pods/\(id)/approve", body: body)
+    // Approval runs delivery inline: it may wait for advisory QA, resume a suspended
+    // sandbox to preserve reports (bounded at 120s), then push/create the PR.
+    do {
+      let _: OkResponse = try await request(
+        "POST", "/pods/\(id)/approve", body: body, timeout: Self.approvalTimeout
+      )
+    } catch DaemonError.networkError {
+      // The daemon keeps going after the client gives up. Don't invite a blind retry.
+      throw DaemonError.networkError(
+        "Approval is still running on the daemon or the connection dropped. "
+          + "Check the pod's activity log before approving again."
+      )
+    }
   }
 
   public func rejectPod(_ id: String, feedback: String? = nil) async throws {
@@ -1108,7 +1122,8 @@ public actor DaemonAPI {
     _ method: String,
     _ path: String,
     query: [String: String] = [:],
-    body: Data? = nil
+    body: Data? = nil,
+    timeout: TimeInterval = 30
   ) async throws -> T {
     let url = try makeRequestURL(path, query: query)
 
@@ -1116,7 +1131,7 @@ public actor DaemonAPI {
     req.httpMethod = method
     req.setValue(try await authorizationHeader(), forHTTPHeaderField: "Authorization")
     req.setValue("application/json", forHTTPHeaderField: "Accept")
-    req.timeoutInterval = 30
+    req.timeoutInterval = timeout
 
     if let body {
       req.setValue("application/json", forHTTPHeaderField: "Content-Type")
