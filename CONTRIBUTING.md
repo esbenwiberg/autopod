@@ -15,7 +15,7 @@ loop CI uses:
 ./scripts/validate.sh
 ```
 
-For a faster pre-push check that skips dependency installation, run
+For a faster check that skips dependency installation, run
 `./scripts/validate.sh --quick`.
 
 For a package-scoped test run, use `npx pnpm --filter <package> test`, for
@@ -43,6 +43,6 @@ This repo ships hooks under `.githooks/`. Enable them with:
 git config core.hooksPath .githooks
 ```
 
-The `pre-push` hook runs `./scripts/validate.sh --quick`, so pushes fail locally
-before GitHub CI catches lint, build, typecheck, test, audit, or secret-scan
-regressions.
+The `pre-commit` hook runs lint, typecheck, and secret-scan; `commit-msg`
+enforces Conventional Commits. There is deliberately no `pre-push` hook: build,
+test, and audit run in CI (or locally via `./scripts/validate.sh`).

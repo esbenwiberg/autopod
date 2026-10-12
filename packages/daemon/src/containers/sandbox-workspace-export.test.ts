@@ -103,6 +103,37 @@ it('rejects symlink parent traversal without writing through the link', async ()
   );
 });
 
+it('materialises hardlinks as independent copies of already-extracted files', async () => {
+  const fake = clientFor(
+    await archive([
+      { header: { name: './bin/tool', mode: 0o755 }, content: Buffer.from('tool') },
+      { header: { name: './bin/alias', type: 'link', linkname: './bin/tool', mode: 0o755 } },
+    ]),
+  );
+  await exportSandboxWorkspace(fake.client, 'sandbox', '/workspace', root);
+  expect(await readFile(join(root, 'bin/alias'), 'utf8')).toBe('tool');
+  expect((await stat(join(root, 'bin/alias'))).mode & 0o777).toBe(0o755);
+  expect((await stat(join(root, 'bin/alias'))).nlink).toBe(1);
+  expect(fake.exec.mock.calls[0]?.[1]?.[2]).not.toContain('--hard-dereference');
+});
+
+it.each([
+  ['an unseen member', 'missing'],
+  ['a path outside staging', '../escape'],
+  ['a symlink member', 'link'],
+])('rejects a hardlink to %s', async (_label, linkname) => {
+  const fake = clientFor(
+    await archive([
+      { header: { name: 'link', type: 'symlink', linkname: tmpdir() } },
+      { header: { name: 'alias', type: 'link', linkname } },
+    ]),
+  );
+  await expect(exportSandboxWorkspace(fake.client, 'sandbox', '/workspace', root)).rejects.toThrow(
+    /hardlink to unknown file|Unsafe sandbox archive entry path/,
+  );
+  expect(fake.exec).toHaveBeenCalledTimes(2);
+});
+
 it('rejects truncated download instead of publishing a partial archive', async () => {
   const data = await archive([{ header: { name: 'report.md' }, content: Buffer.from('report') }]);
   const fake = clientFor(data.subarray(0, data.length - 8));
