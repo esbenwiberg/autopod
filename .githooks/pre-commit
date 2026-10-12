@@ -4,6 +4,6 @@ set -eu
 repo_root=$(git rev-parse --show-toplevel)
 cd "$repo_root"
 
-node scripts/run-pnpm.mjs lint
-node scripts/run-pnpm.mjs typecheck
-node scripts/run-pnpm.mjs secret-scan
+npx pnpm lint
+npx pnpm typecheck
+npx pnpm secret-scan
