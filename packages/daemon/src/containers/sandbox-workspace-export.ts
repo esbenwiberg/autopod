@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { createWriteStream } from 'node:fs';
-import { chmod, mkdir, symlink } from 'node:fs/promises';
+import { constants } from 'node:fs';
+import { chmod, copyFile, mkdir, symlink } from 'node:fs/promises';
 import { dirname, join, posix } from 'node:path';
 import { Readable } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
@@ -32,7 +33,7 @@ export async function exportSandboxWorkspace(
       [
         'sh',
         '-c',
-        'set -e; mkdir -m 700 -- "$2"; tar --hard-dereference -czf "$2/archive" -C "$1" .; split -b "$3" -d -a 8 "$2/archive" "$2/part-"; rm -- "$2/archive"',
+        'set -e; mkdir -m 700 -- "$2"; tar -czf "$2/archive" -C "$1" .; split -b "$3" -d -a 8 "$2/archive" "$2/part-"; rm -- "$2/archive"',
         'autopod-workspace-export',
         root,
         remote,
@@ -60,6 +61,7 @@ export async function exportSandboxWorkspace(
     const links: Array<{ name: string; relative: string; target: string }> = [];
     const directories: Array<{ name: string; mode: number }> = [];
     const seen = new Set<string>();
+    const files = new Set<string>();
     unpack.on('entry', (header, stream, next) => {
       void (async () => {
         assertDirectoryExtractionCurrent(options);
@@ -80,6 +82,18 @@ export async function exportSandboxWorkspace(
           await mkdir(dirname(target), { recursive: true });
           await pipeline(stream, createWriteStream(target, { flags: 'wx', mode: 0o600 }));
           await chmod(target, (header.mode ?? 0o644) & 0o777);
+          files.add(name);
+        } else if (header.type === 'link' && name && header.linkname) {
+          // Hardlinks are materialised as copies (what GNU-only `--hard-dereference`
+          // did), so bsdtar and busybox tar work too. The source must be a regular
+          // file this archive already wrote; symlinks do not exist in staging yet.
+          const source = archiveRelativePath(header.linkname);
+          if (!files.has(source)) throw new Error('Sandbox archive hardlink to unknown file');
+          await mkdir(dirname(target), { recursive: true });
+          await copyFile(join(staging, source), target, constants.COPYFILE_EXCL);
+          await chmod(target, (header.mode ?? 0o644) & 0o777);
+          files.add(name);
+          stream.resume();
         } else {
           throw new Error(`Unsupported sandbox archive entry type: ${header.type}`);
         }
