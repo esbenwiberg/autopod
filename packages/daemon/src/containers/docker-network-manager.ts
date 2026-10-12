@@ -118,22 +118,25 @@ export function computeNetworkPolicyAllowlist(
 
   // Auto-allow common package manager registries when the flag is set
   if (policy.allowPackageManagers) {
+    // Registry families whose every subdomain is registry infrastructure get apex + `*.apex`:
+    // SNI matching is exact for plain entries, and `*.foo` only matches strict subdomains, so
+    // listing individual hosts kept missing ones (www.nuget.org, index.crates.io, ...).
+    // Families with user-hosted subdomains (e.g. people.debian.org) stay exact.
     const PACKAGE_MANAGER_HOSTS = [
       'registry.npmjs.org',
-      'registry.yarnpkg.com',
-      'dl.yarnpkg.com',
+      '*.yarnpkg.com',
       'pypi.org',
       'files.pythonhosted.org',
       'crates.io',
-      'static.crates.io',
+      '*.crates.io',
       'deb.debian.org',
       'security.debian.org',
       'nuget.org',
-      'api.nuget.org',
+      '*.nuget.org',
       'proxy.golang.org',
       'sum.golang.org',
       'rubygems.org',
-      'api.rubygems.org',
+      '*.rubygems.org',
     ];
     for (const h of PACKAGE_MANAGER_HOSTS) {
       hosts.add(h);

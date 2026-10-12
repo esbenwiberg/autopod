@@ -172,6 +172,35 @@ describe('DockerNetworkManager', () => {
       const githubCount = result.filter((h) => h === 'github.com').length;
       expect(githubCount).toBe(1);
     });
+
+    it('allows registry families as apex + subdomain wildcard when allowPackageManagers is set', () => {
+      const result = manager.computeAllowlist(
+        makePolicy({ allowPackageManagers: true }),
+        [],
+        GATEWAY,
+      );
+      for (const apex of ['nuget.org', 'crates.io', 'rubygems.org']) {
+        expect(result).toContain(apex);
+        expect(result).toContain(`*.${apex}`);
+      }
+      expect(result).toContain('*.yarnpkg.com');
+    });
+
+    it('keeps families with user-hosted subdomains exact', () => {
+      const result = manager.computeAllowlist(
+        makePolicy({ allowPackageManagers: true }),
+        [],
+        GATEWAY,
+      );
+      expect(result).toContain('deb.debian.org');
+      expect(result.some((h) => h.endsWith('debian.org') && h.startsWith('*'))).toBe(false);
+    });
+
+    it('does not add registry wildcards without allowPackageManagers', () => {
+      const result = manager.computeAllowlist(makePolicy(), [], GATEWAY);
+      expect(result).not.toContain('*.nuget.org');
+      expect(result).not.toContain('*.crates.io');
+    });
   });
 
   describe('generateFirewallScript()', () => {
