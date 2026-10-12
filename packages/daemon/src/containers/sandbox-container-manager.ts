@@ -55,7 +55,7 @@ import {
   egressPolicyForMode,
   pickSandboxTier,
 } from './sandbox-api-client.js';
-import { exportSandboxWorkspace } from './sandbox-workspace-export.js';
+import { exportSandboxWorkspace, isExcludedPath } from './sandbox-workspace-export.js';
 
 export interface SandboxContainerManagerOptions {
   /** Explicit managed-mode ledger; native spawn remains unchanged. */
@@ -514,7 +514,7 @@ for root in sys.argv[1:]:
     mkdirSync(stagingPath, { recursive: true });
 
     try {
-      if (rootPath === '/workspace' && !excludes?.length) {
+      if (rootPath === '/workspace') {
         await exportSandboxWorkspace(
           this.client,
           containerId,
@@ -522,6 +522,7 @@ for root in sys.argv[1:]:
           stagingPath,
           options,
           this.logger,
+          excludes,
         );
       } else {
         await this.extractSandboxPath(containerId, rootPath, rootPath, stagingPath, excludes);
@@ -1056,20 +1057,6 @@ function sandboxFileMode(value: string | undefined): number | undefined {
   if (value === undefined || !/^\d{1,3}$/.test(value)) return undefined;
   const mode = Number(value);
   return Number.isSafeInteger(mode) && mode >= 0 && mode <= 0o777 ? mode : undefined;
-}
-
-function isExcludedPath(relPath: string, excludes?: string[]): boolean {
-  if (!excludes?.length) return false;
-  const normalizedRel = normalizeExtractPath(relPath);
-  const segments = normalizedRel.split('/');
-  return excludes.some((exclude) => {
-    const normalizedExclude = normalizeExtractPath(exclude);
-    if (!normalizedExclude) return false;
-    if (!normalizedExclude.includes('/')) {
-      return segments.includes(normalizedExclude);
-    }
-    return normalizedRel === normalizedExclude || normalizedRel.startsWith(`${normalizedExclude}/`);
-  });
 }
 
 function removeStaleSyncStagingDirs(hostPath: string): void {

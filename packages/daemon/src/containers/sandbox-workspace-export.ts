@@ -16,7 +16,11 @@ import type { SandboxApiClient } from './sandbox-api-client.js';
 // unbounded archive, or use buffered exec stdout to transport binary contents.
 const CHUNK_BYTES = 8 * 1024 * 1024;
 
-/** Full workspace export avoids one remote request per dependency/source file. */
+/**
+ * Full workspace export avoids one remote request per dependency/source file.
+ * `excludes` follow the ContainerManager contract: bare names match any path
+ * segment, slashed entries match that relative path and its descendants.
+ */
 export async function exportSandboxWorkspace(
   client: SandboxApiClient,
   sandboxId: string,
@@ -24,8 +28,10 @@ export async function exportSandboxWorkspace(
   staging: string,
   options?: DirectoryExtractionOptions,
   logger?: Pick<Logger, 'warn'>,
+  excludes?: string[],
 ): Promise<void> {
   const remote = `/tmp/.autopod-export-${randomUUID()}`;
+  const excludeArgs = tarExcludeArgs(excludes);
   try {
     assertDirectoryExtractionCurrent(options);
     const result = await client.exec(
@@ -33,11 +39,14 @@ export async function exportSandboxWorkspace(
       [
         'sh',
         '-c',
-        'set -e; mkdir -m 700 -- "$2"; tar -czf "$2/archive" -C "$1" .; split -b "$3" -d -a 8 "$2/archive" "$2/part-"; rm -- "$2/archive"',
+        // Excludes arrive as argv (never interpolated into the script) after the
+        // three fixed operands, and precede the archive members as tar requires.
+        'set -e; r="$1"; d="$2"; b="$3"; shift 3; mkdir -m 700 -- "$d"; tar -czf "$d/archive" "$@" -C "$r" .; split -b "$b" -d -a 8 "$d/archive" "$d/part-"; rm -- "$d/archive"',
         'autopod-workspace-export',
         root,
         remote,
         String(CHUNK_BYTES),
+        ...excludeArgs,
       ],
       { timeoutMs: 120_000 },
     );
@@ -67,6 +76,12 @@ export async function exportSandboxWorkspace(
         assertDirectoryExtractionCurrent(options);
         const name = archiveRelativePath(header.name);
         if (seen.has(name)) throw new Error('Duplicate sandbox archive entry');
+        // tar implementations differ in pattern matching; enforce the contract here
+        // too so an excluded subtree never reaches staging.
+        if (name && isExcludedPath(name, excludes)) {
+          stream.resume();
+          return;
+        }
         seen.add(name);
         const target = join(staging, name);
         if (header.type === 'directory') {
@@ -143,6 +158,46 @@ export async function exportSandboxWorkspace(
       logger?.warn({ err, sandboxId, remote }, 'Sandbox export temporary archive cleanup failed');
     }
   }
+}
+
+function normalizeExcludePath(pathname: string): string {
+  return pathname.split('/').filter(Boolean).join('/');
+}
+
+export function isExcludedPath(relPath: string, excludes?: string[]): boolean {
+  if (!excludes?.length) return false;
+  const normalizedRel = normalizeExcludePath(relPath);
+  const segments = normalizedRel.split('/');
+  return excludes.some((exclude) => {
+    const normalizedExclude = normalizeExcludePath(exclude);
+    if (!normalizedExclude) return false;
+    if (!normalizedExclude.includes('/')) {
+      return segments.includes(normalizedExclude);
+    }
+    return normalizedRel === normalizedExclude || normalizedRel.startsWith(`${normalizedExclude}/`);
+  });
+}
+
+function tarExcludeArgs(excludes?: string[]): string[] {
+  const args: string[] = [];
+  for (const exclude of excludes ?? []) {
+    const normalized = normalizeExcludePath(exclude);
+    // Literal paths only: tar would treat glob characters as patterns, diverging
+    // from isExcludedPath, and a leading dash or control character is never a path.
+    if (
+      !normalized ||
+      normalized.startsWith('-') ||
+      /[*?[\\\]\p{Cc}]/u.test(normalized) ||
+      normalized.split('/').includes('..')
+    ) {
+      throw new Error(`Unsupported sandbox export exclude: ${JSON.stringify(exclude)}`);
+    }
+    // Bare names match any segment in GNU tar, bsdtar and busybox alike. bsdtar
+    // does not anchor slashed patterns (`./a/b` also drops `x/a/b`), so those are
+    // filtered from the unpacked stream only: correct everywhere, just not pruned.
+    if (!normalized.includes('/')) args.push(`--exclude=${normalized}`);
+  }
+  return args;
 }
 
 function archiveRelativePath(name: string): string {
