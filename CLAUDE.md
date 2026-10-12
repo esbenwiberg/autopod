@@ -286,6 +286,7 @@ Each runtime (`claude-runtime.ts`, `codex-runtime.ts`, `copilot-runtime.ts`) has
 | `PORT` | `3100` | no | HTTP bind port |
 | `HOST` | `127.0.0.1` (daemon binary); `0.0.0.0` in `.env.example`/Compose | no | HTTP bind address. Prefer Tailscale Serve for phone exposure instead of publishing the daemon directly to the internet. |
 | `DB_PATH` | `./autopod.db` | no | SQLite file location |
+| `DATA_DIR` | `<cwd>/.autopod-data` | yes (hosted) | Artifacts, screenshots, spec context. Hosted VM pins `/data/autopod/data` via systemd drop-in — the default lives inside the pruned release dir. `pods.artifacts_path` stores absolute paths validated against it, so moving it needs a DB rewrite. |
 | `LOG_LEVEL` | `info` | no | pino log level |
 | `NODE_ENV` | — | yes (prod) | If `production`, auth is enforced |
 | `ENTRA_CLIENT_ID` | — | yes* | Azure AD app ID (*placeholders OK in dev) |
