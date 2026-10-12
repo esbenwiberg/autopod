@@ -65,12 +65,16 @@ while [ "$#" -gt 0 ]; do
 done
 [ -n "${remote_script:-}" ] || { echo 'missing remote script' >&2; exit 1; }
 case "$remote_script" in
-  *'echo live:'*) printf 'live:deadbeef\nactive\n' ;;
+  *'echo live:'*)
+    printf 'live:deadbeef\nactive\n'
+    [ -z "$DEPLOY_TEST_DATA_DIR" ] || printf 'datadir:%s\n' "$DEPLOY_TEST_DATA_DIR"
+    ;;
   *'BUILD DONE'*)
     if [[ "$remote_script" == *'copy current release'* ]]; then
       [[ "$remote_script" == *'bind target Git identity'* ]]
       [[ "$remote_script" == *'rm -rf "$NEW/.git"'* ]]
       [[ "$remote_script" == *'mv "$TMP/.git" "$NEW/.git"'* ]]
+      [[ "$remote_script" == *'rm -rf "$NEW/packages/daemon/.autopod-data"'* ]]
     fi
     echo 'BUILD DONE'
     if [ "${DEPLOY_TEST_RELEASE_DRIFT:-0}" = 1 ]; then
@@ -133,6 +137,7 @@ run_deploy() {
     DEPLOY_TEST_TRUNCATE_REMOTE="${DEPLOY_TEST_TRUNCATE_REMOTE:-0}" \
     DEPLOY_TEST_RELEASE_MODE="${DEPLOY_TEST_RELEASE_MODE:-valid}" \
     DEPLOY_TEST_DRAIN_REMOVED="$tmp/drain-removed" \
+    DEPLOY_TEST_DATA_DIR="${DEPLOY_TEST_DATA_DIR-/data/autopod/data}" \
     bash "$script" --target cafebabe --yes --skip-playwright-prewarm "$@"
 }
 
@@ -153,6 +158,19 @@ grep -qF 'already includes target' "$tmp/ancestor-out"
 [ ! -e "$tmp/restarted" ]
 [ ! -e "$tmp/drain-removed" ]
 [ "$(readlink "$tmp/current")" = "$tmp/releases/deadbeef" ]
+
+# Runtime data inside a release is deleted by pruning. Refuse before any build
+# unless the unit pins an absolute DATA_DIR outside the releases tree.
+for data_dir in '' 'relative/data' "$tmp/releases/deadbeef/packages/daemon/.autopod-data" "$tmp/current/data"; do
+  reset_fixture
+  if DEPLOY_TEST_DATA_DIR="$data_dir" run_deploy >"$tmp/data-dir-out" 2>&1; then
+    echo "deployment accepted unsafe DATA_DIR '$data_dir'" >&2
+    exit 1
+  fi
+  grep -qE 'no absolute DATA_DIR|lives inside a release' "$tmp/data-dir-out"
+  [ "$(cat "$tmp/az-count")" = 1 ]
+  [ ! -e "$tmp/restarted" ]
+done
 
 # Another deployment may finish while this one stages its build. Preserve it.
 reset_fixture

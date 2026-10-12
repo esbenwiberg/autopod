@@ -42,6 +42,9 @@
 #     `sudo -u ewi -H bash -lc` with absolute paths (run-command cwd is unstable).
 #   - node_modules reuse (cp -a current) is ONLY valid when deps are unchanged;
 #     a package.json / pnpm-lock.yaml change forces --full.
+#   - Runtime data must live in DATA_DIR (systemd drop-in 10-data-dir.conf,
+#     /data/autopod/data), never <release>/packages/daemon/.autopod-data —
+#     pruning deletes releases. Preflight refuses to deploy without it.
 #   - Verification greps the BUILT bundle (newlines flattened), never source and
 #     never a comment — comments get stripped by the bundler.
 #   - Host browser validation needs both OS libraries and an `ewi`-owned
@@ -164,9 +167,20 @@ TARGET_SHA_FULL="$(git rev-parse "$TARGET_REF" 2>/dev/null)" || die "cannot reso
 TARGET_SHA="${TARGET_SHA_FULL:0:8}"
 
 note "discovering live release on VM"
-LIVE_LINE="$(remote "echo live:\$(basename \$(readlink $CURRENT_LINK)); systemctl is-active $SERVICE")"
+LIVE_LINE="$(remote "echo live:\$(basename \$(readlink $CURRENT_LINK)); systemctl is-active $SERVICE; systemctl show $SERVICE -p Environment | tr ' ' '\n' | sed -n 's/^\(Environment=\)\{0,1\}DATA_DIR=/datadir:/p'")"
 LIVE_SHA="$(printf '%s\n' "$LIVE_LINE" | sed -n 's/^live://p' | tr -d '[:space:]')"
 [ -n "$LIVE_SHA" ] || die "could not read live release sha from VM:\n$LIVE_LINE"
+# Pod artifacts, screenshots and spec context default to <cwd>/.autopod-data,
+# i.e. inside the release dir that pruning deletes. Refuse to deploy unless the
+# unit pins DATA_DIR outside the releases tree.
+LIVE_DATA_DIR="$(printf '%s\n' "$LIVE_LINE" | sed -n 's/^datadir://p' | tail -n 1 | tr -d '[:space:]')"
+case "$LIVE_DATA_DIR" in
+  /*) ;;
+  *) die "$SERVICE has no absolute DATA_DIR — set it in a systemd drop-in before deploying" ;;
+esac
+case "$LIVE_DATA_DIR" in
+  "$RELEASES"/*|"$CURRENT_LINK"|"$CURRENT_LINK"/*) die "DATA_DIR=$LIVE_DATA_DIR lives inside a release; releases get pruned" ;;
+esac
 
 note "live=$LIVE_SHA  target=$TARGET_SHA ($TARGET_REF)"
 
@@ -378,6 +392,9 @@ run_and_tail() {
 echo '=== copy current release (reuses node_modules) ==='
 rm -rf \"\$NEW\"
 cp -a \"\$SRC\" \"\$NEW\"
+# Runtime data lives in DATA_DIR (preflight-checked); never carry a stale
+# release-local copy forward.
+rm -rf \"\$NEW/packages/daemon/.autopod-data\"
 echo '=== fetch target source ==='
 sudo -u ewi rm -rf \"\$TMP\"
 run_and_tail /tmp/autopod-clone-$TARGET_SHA.log 1 sudo -u ewi git clone --no-checkout '$REPO_URL' \"\$TMP\"
