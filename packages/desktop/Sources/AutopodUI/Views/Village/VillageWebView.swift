@@ -43,6 +43,7 @@ struct VillageWebView: NSViewRepresentable {
 
     static func dismantleNSView(_ view: WKWebView, coordinator: Coordinator) {
         coordinator.stop()
+        view.evaluateJavaScript("window.AutoPodVillageHost?.dispose(); true", completionHandler: nil)
         view.stopLoading()
         view.navigationDelegate = nil
         view.configuration.userContentController.removeScriptMessageHandler(forName: "village")
